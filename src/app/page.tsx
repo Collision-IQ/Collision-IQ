@@ -1,3 +1,4 @@
+import { ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -22,15 +23,17 @@ export default function Home() {
           </div>
 
           <h1 className="mt-5 text-4xl font-semibold leading-tight md:text-5xl">
-            Progessional, OEM-driven appraisals, vehicle valuations, 
-            diminished value claims, right to appraisal clauses, and 
-            appraisal support—built for policyholders and repair centers.
+            OEM-driven repair documentation and
+            <br />
+            appraisal support.
           </h1>
 
           <p className="mt-4 text-[color:var(--muted)]">
-            Diminished value, total loss value disputes, repair planning, and
-            Right to Appraisal guidance—delivered with clear documentation and
-            negotiation-ready reports.
+            Collision Academy supports repair centers and policyholders through
+            manufacturer repair procedures, OEM position statements, and insurance
+            policy law. Our guidance helps ensure repairs meet manufacturer standards,
+            legal obligations, and safety requirements—especially when insurer practices
+            fall short.
           </p>
 
           <div className="mt-7 flex flex-col gap-3 sm:flex-row">
