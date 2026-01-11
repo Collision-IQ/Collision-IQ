@@ -23,9 +23,11 @@ export default function Home() {
           </div>
 
           <h1 className="mt-5 text-4xl font-semibold leading-tight md:text-5xl">
-            OEM-driven repair documentation and
-            <br />
-            appraisal support.
+            Professional-grade vehicle valuations and appraisal support—built for{" "}
+            <span className="text-[color:var(--accent)] font-semibold">
+              OEM-compliant
+            </span>{" "}
+            repairs for policyholders and repair centers.
           </h1>
           <p className="mt-4 text-[color:var(--muted)]">
             Collision Academy supports repair centers and policyholders through
