@@ -75,10 +75,12 @@ export default function Home() {
               <div className="text-sm text-[color:var(--muted)]">Featured</div>
               <div className="text-xl font-semibold">Collision Academy</div>
             </div>
-            <img
-              src="/brand/logos/logo.gif"
+            <Image
+              src="/brand/logos/logo-horizontal.png"
               alt="Collision Academy"
-              className="h-12 w-12 rounded-xl"
+              width={140}
+              height={28}
+              priority
             />
           </div>
 
