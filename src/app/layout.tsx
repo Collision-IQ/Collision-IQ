@@ -1,41 +1,63 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Link from "next/link";
+import Image from "next/image";
 
 export const metadata: Metadata = {
   title: "Collision Academy",
   description:
     "Insurance-grade vehicle valuations, diminished value, repair planning, and Right to Appraisal support.",
   icons: {
-    icon: "/brand/icons/favicon.svg",
+    icon: [
+      { url: "/brand/icons/favicon.ico" },
+      { url: "/brand/icons/favicon.svg", type: "image/svg+xml" },
+    ],
+    shortcut: ["/brand/icons/favicon.ico"],
+    // Only include this if you actually add the file:
+    // public/brand/icons/apple-touch-icon.png
   },
 };
 
-function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
+function NavLink({
+  href,
+  children,
+}: {
+  href: string;
+  children: React.ReactNode;
+}) {
   return (
-    <Link
-      href={href}
-      className="text-sm text-[color:var(--muted)] hover:text-[color:var(--text)] transition"
-    >
+    <Link href={href} className="text-sm hover:text-[color:var(--accent)] transition">
       {children}
     </Link>
   );
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en" className="dark">
       <body>
         <header className="sticky top-0 z-50 border-b border-[color:var(--border)] bg-[color:var(--bg)]/80 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
             <Link href="/" className="flex items-center gap-3">
-              <img
-                src="/brand/logos/badge.png"
-                alt="Collision Academy"
-                className="h-9 w-9"
-              />
-              <div className="leading-tight">
-                <div className="font-semibold">Collision Academy</div>
+             <Image
+               src="/brand/logos/badge.png"
+               alt="Collision Academy"
+               width={36}
+               height={36}
+               priority
+             />
+               <div className="leading-tight">
+                <Image
+                  src="/brand/logos/logo-horizontal.png"
+                  alt="Collision Academy"
+                  width={210}
+                  height={42}
+                  priority
+                />
                 <div className="text-xs text-[color:var(--muted)]">
                   Policyholders • Repair Centers
                 </div>
@@ -78,23 +100,37 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 real-world claims.
               </p>
             </div>
+
             <div className="text-sm">
               <div className="font-semibold">Pages</div>
               <div className="mt-2 grid gap-2">
-                <Link href="/services" className="text-[color:var(--muted)] hover:text-[color:var(--text)]">
+                <Link
+                  href="/services"
+                  className="text-[color:var(--muted)] hover:text-[color:var(--text)]"
+                >
                   Services
                 </Link>
-                <Link href="/chatbot" className="text-[color:var(--muted)] hover:text-[color:var(--text)]">
+                <Link
+                  href="/chatbot"
+                  className="text-[color:var(--muted)] hover:text-[color:var(--text)]"
+                >
                   Chatbot
                 </Link>
-                <Link href="/upload" className="text-[color:var(--muted)] hover:text-[color:var(--text)]">
+                <Link
+                  href="/upload"
+                  className="text-[color:var(--muted)] hover:text-[color:var(--text)]"
+                >
                   Upload
                 </Link>
-                <Link href="/contact" className="text-[color:var(--muted)] hover:text-[color:var(--text)]">
+                <Link
+                  href="/contact"
+                  className="text-[color:var(--muted)] hover:text-[color:var(--text)]"
+                >
                   Contact
                 </Link>
               </div>
             </div>
+
             <div className="text-sm">
               <div className="font-semibold">Contact</div>
               <div className="mt-2 text-[color:var(--muted)]">
@@ -109,3 +145,4 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
+
