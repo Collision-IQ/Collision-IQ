@@ -13,8 +13,6 @@ export const metadata: Metadata = {
       { url: "/brand/icons/favicon.svg", type: "image/svg+xml" },
     ],
     shortcut: ["/brand/icons/favicon.ico"],
-    // If you do NOT have this file yet, either add it or remove this line.
-    apple: ["/brand/icons/apple-touch-icon.png"],
   },
 };
 
@@ -46,26 +44,14 @@ export default function RootLayout({
         <header className="sticky top-0 z-50 border-b border-[color:var(--border)] bg-[color:var(--bg)]/80 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
             <Link href="/" className="flex items-center gap-3">
-              <Image
-                src="/brand/logos/badge.png"
-                alt="Collision Academy"
-                width={36}
-                height={36}
-                priority
-              />
-              <div className="leading-tight">
-                <Image
-                  src="/brand/logos/logo-horizontal.png"
-                  alt="Collision Academy"
-                  width={200}
-                  height={40}
-                  priority
-                />
-                <div className="text-xs text-[color:var(--muted)]">
-                  Policyholders • Repair Centers
-                </div>
-              </div>
-            </Link>
+             <Image
+               src="/brand/logos/logo-horizontal.png"
+               alt="Collision Academy"
+               width={220}
+               height={44}
+               priority
+             />
+           </Link>
 
             <nav className="hidden items-center gap-6 md:flex">
               <NavLink href="/services">Services</NavLink>
