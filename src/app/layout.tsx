@@ -3,16 +3,17 @@ import "./globals.css";
 import Link from "next/link";
 import Image from "next/image";
 
-export const metadata: Metadata = {
+export const metadata = {
   title: "Collision Academy",
   description:
     "Insurance-grade vehicle valuations, diminished value, repair planning, and Right to Appraisal support.",
   icons: {
     icon: [
-      { url: "/brand/icons/favicon.ico" },
-      { url: "/brand/icons/favicon.svg", type: "image/svg+xml" },
+      { url: "/brand/logos/icons/favicon.ico" },
+      { url: "/brand/logos/icons/favicon.svg", type: "image/svg+xml" },
     ],
-    shortcut: ["/brand/icons/favicon.ico"],
+    shortcut: ["/brand/logos/icons/favicon.ico"],
+    apple: ["/brand/logos/icons/favicon.ico"],
   },
 };
 
