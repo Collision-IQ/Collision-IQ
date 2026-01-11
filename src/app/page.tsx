@@ -27,7 +27,6 @@ export default function Home() {
             <br />
             appraisal support.
           </h1>
-
           <p className="mt-4 text-[color:var(--muted)]">
             Collision Academy supports repair centers and policyholders through
             manufacturer repair procedures, OEM position statements, and insurance
