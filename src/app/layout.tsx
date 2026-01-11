@@ -13,8 +13,8 @@ export const metadata: Metadata = {
       { url: "/brand/icons/favicon.svg", type: "image/svg+xml" },
     ],
     shortcut: ["/brand/icons/favicon.ico"],
-    // Only include this if you actually add the file:
-    // public/brand/icons/apple-touch-icon.png
+    // If you do NOT have this file yet, either add it or remove this line.
+    apple: ["/brand/icons/apple-touch-icon.png"],
   },
 };
 
@@ -26,7 +26,10 @@ function NavLink({
   children: React.ReactNode;
 }) {
   return (
-    <Link href={href} className="text-sm hover:text-[color:var(--accent)] transition">
+    <Link
+      href={href}
+      className="text-sm text-[color:var(--muted)] hover:text-[color:var(--text)] transition"
+    >
       {children}
     </Link>
   );
@@ -43,19 +46,20 @@ export default function RootLayout({
         <header className="sticky top-0 z-50 border-b border-[color:var(--border)] bg-[color:var(--bg)]/80 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
             <Link href="/" className="flex items-center gap-3">
-             <Image
-               src="/brand/logos/badge.png"
-               alt="Collision Academy"
-               width={36}
-               height={36}
-               priority
-             />
-               <div className="leading-tight">
+              <Image
+                src="/brand/logos/badge.png"
+                alt="Collision Academy"
+                width={36}
+                height={36}
+                priority
+              />
+
+              <div className="leading-tight">
                 <Image
                   src="/brand/logos/logo-horizontal.png"
                   alt="Collision Academy"
-                  width={210}
-                  height={42}
+                  width={200}
+                  height={40}
                   priority
                 />
                 <div className="text-xs text-[color:var(--muted)]">
@@ -89,6 +93,7 @@ export default function RootLayout({
           </div>
         </header>
 
+        {/* Main page content */}
         {children}
 
         <footer className="mt-20 border-t border-[color:var(--border)]">
@@ -145,4 +150,3 @@ export default function RootLayout({
     </html>
   );
 }
-
