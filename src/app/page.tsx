@@ -81,7 +81,7 @@ export default function Home() {
               <div className="text-xl font-semibold">Collision Academy</div>
             </div>
             <Image
-              src="/brand/logos/logo-horizontal.png"
+              src="/brand/logos/logo-grey.png"
               alt="Collision Academy"
               width={140}
               height={28}
