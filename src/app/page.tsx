@@ -22,14 +22,15 @@ export default function Home() {
           </div>
 
           <h1 className="mt-5 text-4xl font-semibold leading-tight md:text-5xl">
-            Insurance-grade vehicle valuations and appraisal support—built for
-            policyholders and repair centers.
+            Progessional, OEM-driven appraisals, vehicle valuations, 
+            diminished value claims, right to appraisal clauses, and 
+            appraisal support—built for policyholders and repair centers.
           </h1>
 
           <p className="mt-4 text-[color:var(--muted)]">
             Diminished value, total loss value disputes, repair planning, and
             Right to Appraisal guidance—delivered with clear documentation and
-            negotiation-ready deliverables.
+            negotiation-ready reports.
           </p>
 
           <div className="mt-7 flex flex-col gap-3 sm:flex-row">
