@@ -53,7 +53,6 @@ export default function RootLayout({
                 height={36}
                 priority
               />
-
               <div className="leading-tight">
                 <Image
                   src="/brand/logos/logo-horizontal.png"
