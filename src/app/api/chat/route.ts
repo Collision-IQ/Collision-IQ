@@ -3,73 +3,84 @@ import OpenAI from "openai";
 export const runtime = "nodejs";
 
 const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
-type ChatMessage = {
+type ClientMessage = {
   role: "user" | "assistant";
   content: string;
 };
 
+function buildSystemInstructions() {
+  return `
+You are Collision-IQ, the official assistant for Collision Academy.
+
+Mission:
+- Help repair centers and policyholders demand safe, OEM-compliant repairs.
+- Provide documentation-first guidance: what to ask for, what to reference, what to do next.
+- You may discuss general insurance policy practices and repair standards.
+- You do NOT provide legal advice. Do not claim to be an attorney. Encourage consulting a qualified professional for legal counsel.
+
+Style:
+- Professional, concise, action-oriented.
+- Prefer bullet points, checklists, and clear next steps.
+- Ask 1–3 clarifying questions if missing key facts (state, carrier, vehicle, estimate, goal).
+
+Safety / Guardrails:
+- Do not instruct wrongdoing.
+- Avoid sensitive personal data; request only what’s necessary (no SSNs, etc.).
+`;
+}
+
+function toTranscript(messages: ClientMessage[]) {
+  // Keep history small (cost + speed + safety)
+  const trimmed = messages.slice(-12);
+  return trimmed
+    .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+    .join("\n\n");
+}
+
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const messages: ChatMessage[] = Array.isArray(body.messages)
-      ? body.messages
-      : [];
+    if (!process.env.OPENAI_API_KEY) {
+      return Response.json(
+        { error: "Server misconfigured: missing OPENAI_API_KEY" },
+        { status: 500 }
+      );
+    }
+
+    const body = (await req.json()) as { messages?: ClientMessage[] };
+    const messages = Array.isArray(body?.messages) ? body.messages : [];
 
     const last = messages[messages.length - 1];
     if (!last || last.role !== "user" || !last.content?.trim()) {
-      return new Response(
-        JSON.stringify({ error: "Missing user message" }),
+      return Response.json(
+        { error: "Missing user message." },
         { status: 400 }
       );
     }
 
-    const systemInstructions = `
-You are Collision-IQ, the official assistant for Collision Academy.
-
-Purpose:
-- Help repair centers and policyholders demand safe, OEM-compliant repairs.
-- Reference OEM documentation concepts and insurance policy practices.
-- Do NOT provide legal advice.
-- Provide educational guidance, checklists, and next steps.
-
-Behavior:
-- Be concise, professional, and action-oriented.
-- Ask clarifying questions when key claim info is missing.
-`;
-
-    const history = messages
-      .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
-      .join("\n");
+    const system = buildSystemInstructions();
+    const transcript = toTranscript(messages);
 
     const response = await client.responses.create({
       model: "gpt-4.1-mini",
       input: [
-        {
-          role: "system",
-          content: systemInstructions,
-        },
-        {
-          role: "user",
-          content: history,
-        },
+        { role: "system", content: system },
+        { role: "user", content: transcript },
       ],
     });
 
-    return new Response(
-      JSON.stringify({
-        reply: response.output_text,
-      }),
-      {
-        headers: { "Content-Type": "application/json" },
-      }
+    return Response.json(
+      { reply: response.output_text ?? "" },
+      { status: 200 }
     );
-  } catch (err) {
-    console.error(err);
-    return new Response(
-      JSON.stringify({ error: "Server error" }),
+  } catch (err: any) {
+    return Response.json(
+      {
+        error: "Chat request failed.",
+        detail: err?.message ?? String(err),
+      },
       { status: 500 }
     );
   }
