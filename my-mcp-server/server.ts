@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { McpServer } from "@modelcontextprotocol/sdk/server/index.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 // Simple CSV parser (v1). Later we can swap to robust csv-parse.
@@ -18,19 +18,78 @@ function parseCsv(csvText: string) {
   return { headers, rows };
 }
 
-const server = new McpServer({
-  name: "collision-iq-tools",
-  version: "0.1.0",
-});
-
-// Tool 1: Parse CSV text -> structured JSON
-server.tool(
-  "parse_csv",
+const server = new Server(
   {
-    csvText: z.string().min(1),
-    maxRows: z.number().int().min(1).max(500).default(200),
+    name: "collision-iq-tools",
+    version: "0.1.0",
   },
-  async ({ csvText, maxRows }: { csvText: string; maxRows: number }) => {
+  {
+    capabilities: {},
+  }
+);
+
+server.setRequestHandler(
+  z.object({
+    method: z.literal("tools/list"),
+  }),
+  async () => {
+    return {
+      tools: [
+        {
+          name: "parse_csv",
+          description: "Parse CSV text into structured JSON",
+          inputSchema: {
+            type: "object" as const,
+            properties: {
+              csvText: {
+                type: "string",
+                description: "CSV text to parse",
+              },
+              maxRows: {
+                type: "number",
+                description: "Maximum number of rows to return",
+              },
+            },
+            required: ["csvText"],
+          },
+        },
+        {
+          name: "document_review_checklist",
+          description: "Generate a document review checklist based on document type",
+          inputSchema: {
+            type: "object" as const,
+            properties: {
+              docType: {
+                type: "string",
+                enum: ["estimate", "supplement", "repair_procedure", "policy", "other"],
+                description: "Type of document",
+              },
+              text: {
+                type: "string",
+                description: "Document text to analyze",
+              },
+            },
+            required: ["text"],
+          },
+        },
+      ],
+    };
+  }
+);
+
+server.setRequestHandler(
+  z.object({
+    method: z.literal("tools/call"),
+    params: z.object({
+      name: z.string(),
+      arguments: z.record(z.unknown()),
+    }),
+  }),
+  async (request) => {
+    const { name, arguments: args } = request.params;
+
+  if (name === "parse_csv") {
+    const { csvText, maxRows = 200 } = args as { csvText: string; maxRows?: number };
     const { headers, rows } = parseCsv(csvText);
     const clipped = rows.slice(0, maxRows);
 
@@ -51,18 +110,9 @@ server.tool(
       ],
     };
   }
-);
 
-// Tool 2: Document checklist generator
-server.tool(
-  "document_review_checklist",
-  {
-    docType: z
-      .enum(["estimate", "supplement", "repair_procedure", "policy", "other"])
-      .default("other"),
-    text: z.string().min(1),
-  },
-  async ({ docType, text }: { docType: string; text: string }) => {
+  if (name === "document_review_checklist") {
+    const { docType = "other", text } = args as { docType?: string; text: string };
     const sample = text.slice(0, 2000);
 
     const checklistByType: Record<string, string[]> = {
@@ -114,7 +164,13 @@ server.tool(
       ],
     };
   }
-);
+
+  throw new Error(`Unknown tool: ${name}`);
+});
+
+const serverTransport = {
+  capabilities: {},
+};
 
 async function main() {
   const transport = new StdioServerTransport();
