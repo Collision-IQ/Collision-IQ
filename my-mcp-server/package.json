@@ -1,26 +1,20 @@
 {
-  "name": "Collision IQ",
+  "name": "collision-iq-mcp",
   "version": "0.1.0",
-  "description": "Collision helpers",
-  "private": true,
   "type": "module",
-  "bin": {
-    "Collision IQ": "./build/index.js"
-  },
-  "files": [
-    "build"
-  ],
+  "private": true,
   "scripts": {
-    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
-    "prepare": "npm run build",
-    "watch": "tsc --watch",
-    "inspector": "npx @modelcontextprotocol/inspector build/index.js"
+    "dev": "tsx server.ts",
+    "build": "tsc",
+    "start": "node build/server.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "0.6.0"
+    "@modelcontextprotocol/sdk": "^0.6.0",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/node": "^20.11.24",
-    "typescript": "^5.3.3"
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "@types/node": "^20.11.0"
   }
 }
