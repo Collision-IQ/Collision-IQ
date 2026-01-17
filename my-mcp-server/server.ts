@@ -18,15 +18,11 @@ function parseCsv(csvText: string) {
   return { headers, rows };
 }
 
-const server = new Server(
-  {
-    name: "collision-iq-tools",
-    version: "0.1.0",
-  },
-  {
-    capabilities: {},
-  }
-);
+const server = new Server({
+  name: "collision-iq-tools",
+  version: "0.1.0",
+  capabilities: {},
+});
 
 server.setRequestHandler(
   z.object({
