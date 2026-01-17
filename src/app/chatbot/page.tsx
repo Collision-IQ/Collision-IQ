@@ -1,67 +1,122 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
+  createdAt?: number;
+};
+
+const STARTER: ChatMessage = {
+  role: "assistant",
+  content:
+    "Hi — I’m Collision-IQ. Tell me your state, vehicle (year/make/model), and what you’re trying to solve (OEM repair plan, DV, total loss, RTA, etc.).",
+  createdAt: Date.now(),
 };
 
 export default function ChatbotPage() {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      role: "assistant",
-      content:
-        "Hi — I’m Collision-IQ. Tell me your state, vehicle (year/make/model), and what you’re trying to solve (OEM repair plan, DV, total loss, RTA, etc.).",
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([STARTER]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
+
   const listRef = useRef<HTMLDivElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const canSend = useMemo(() => input.trim().length > 0 && !sending, [input, sending]);
 
-  const scrollToBottom = () => {
+  const scrollToBottom = (smooth = true) => {
     requestAnimationFrame(() => {
-      listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
+      const el = listRef.current;
+      if (!el) return;
+      el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
     });
+  };
+
+  // Always keep chat pinned to bottom when new messages appear
+  useEffect(() => {
+    scrollToBottom(true);
+  }, [messages.length]);
+
+  // Clear transient errors after a bit (premium UX)
+  useEffect(() => {
+    if (!errorBanner) return;
+    const t = setTimeout(() => setErrorBanner(null), 6000);
+    return () => clearTimeout(t);
+  }, [errorBanner]);
+
+  const clearChat = () => {
+    // Cancel an in-flight request to avoid “ghost replies”
+    abortRef.current?.abort();
+    abortRef.current = null;
+
+    setSending(false);
+    setErrorBanner(null);
+    setMessages([STARTER]);
+    setInput("");
+    scrollToBottom(false);
   };
 
   const send = async () => {
     const text = input.trim();
     if (!text || sending) return;
 
+    setErrorBanner(null);
     setSending(true);
     setInput("");
 
-    const next = [...messages, { role: "user" as const, content: text }];
+    // Optimistic user message
+    const next: ChatMessage[] = [
+      ...messages,
+      { role: "user", content: text, createdAt: Date.now() },
+    ];
     setMessages(next);
-    scrollToBottom();
+
+    // Abort any previous call (prevents overlap on mobile)
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({ messages: next }),
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.detail || data?.error || "Request failed");
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        // Show a clean, user-safe message; keep details server-side
+        throw new Error(data?.error || data?.detail || "Request failed");
+      }
 
-      setMessages((prev) => [...prev, { role: "assistant", content: data.reply ?? "" }]);
-      scrollToBottom();
-    } catch {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: data.reply ?? "", createdAt: Date.now() },
+      ]);
+    } catch (e: any) {
+      if (e?.name === "AbortError") return;
+
+      setErrorBanner(
+        "Couldn’t send that message. Please try again. If it keeps happening, use Upload Docs and we’ll handle it offline."
+      );
+
+      // Add a calm assistant fallback message (keeps trust)
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
           content:
             "I hit an error sending that. Please try again. If it keeps happening, use Upload Docs and we’ll handle it offline.",
+          createdAt: Date.now(),
         },
       ]);
     } finally {
       setSending(false);
+      abortRef.current = null;
     }
   };
 
@@ -120,16 +175,28 @@ export default function ChatbotPage() {
                   OEM compliance • claim strategy • next steps
                 </div>
               </div>
+
               <button
                 type="button"
-                onClick={() => setMessages((prev) => prev.slice(0, 1))}
+                onClick={clearChat}
                 className="rounded-xl border border-[color:var(--border)] px-3 py-2 text-xs hover:bg-white/5 transition"
+                disabled={sending}
+                title={sending ? "Please wait…" : "Clear chat"}
               >
                 Clear
               </button>
             </div>
 
-            <div ref={listRef} className="h-[560px] overflow-auto px-5 py-4">
+            {errorBanner && (
+              <div className="border-b border-[color:var(--border)] bg-black/20 px-5 py-3 text-sm text-[color:var(--muted)]">
+                {errorBanner}
+              </div>
+            )}
+
+            <div
+              ref={listRef}
+              className="h-[560px] overflow-auto px-5 py-4"
+            >
               <div className="flex flex-col gap-3">
                 {messages.map((m, idx) => (
                   <div
@@ -145,6 +212,15 @@ export default function ChatbotPage() {
                     <div className="whitespace-pre-wrap">{m.content}</div>
                   </div>
                 ))}
+
+                {sending && (
+                  <div className="mr-auto max-w-[92%] rounded-2xl border border-[color:var(--border)] bg-black/20 px-4 py-3 text-sm">
+                    <div className="mb-1 text-[10px] uppercase tracking-wide text-[color:var(--muted)]">
+                      Collision-IQ
+                    </div>
+                    <div className="text-[color:var(--muted)]">Thinking…</div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -155,6 +231,7 @@ export default function ChatbotPage() {
                   onChange={(e) => setInput(e.target.value)}
                   placeholder="Type your question…"
                   className="min-h-[48px] flex-1 resize-none rounded-2xl border border-[color:var(--border)] bg-black/20 px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-white/10"
+                  disabled={sending}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
                       e.preventDefault();
@@ -162,6 +239,7 @@ export default function ChatbotPage() {
                     }
                   }}
                 />
+
                 <button
                   type="button"
                   onClick={send}
@@ -171,6 +249,7 @@ export default function ChatbotPage() {
                   {sending ? "Sending…" : "Send"}
                 </button>
               </div>
+
               <div className="mt-2 text-xs text-[color:var(--muted)]">
                 Enter to send • Shift+Enter for a new line
               </div>
