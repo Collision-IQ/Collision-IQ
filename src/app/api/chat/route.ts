@@ -1,80 +1,100 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { mcpCallTool } from "@/lib/mcpClient";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-type ChatMessage = {
-  role: "system" | "user" | "assistant";
-  content: string;
-};
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-function buildPrompt(messages: ChatMessage[]) {
-  const system = `
-You are Collision-IQ, a documentation-first assistant for Collision Academy.
+type ClientMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
 
-Audience: policyholders and repair centers.
-Goal: help users demand safe, OEM-compliant repairs using OEM procedures and insurance claim documentation strategy.
-Constraints:
-- Provide informational guidance and documentation strategy — NOT legal advice.
-- If key details are missing, ask concise follow-ups (state, insurer, vehicle year/make/model, claim status, estimate/supplement, shop/DRP, injuries?).
-- Be action-oriented: checklists, next steps, what to request in writing, what photos/docs to gather.
-Tone: minimal, premium, calm, professional.
+const SYSTEM_PROMPT = `
+You are Collision-IQ, the official assistant for Collision Academy.
+
+You provide documentation-first guidance for OEM-compliant repairs and claim strategy.
+You are NOT an attorney. You do NOT provide legal advice. You do not guarantee outcomes.
+Ask for missing details (state, carrier, vehicle year/make/model, goal, estimate/supplement).
+Prefer bullet points, checklists, and next steps.
 `.trim();
 
-  const history = messages
-    .filter((m) => m.role !== "system")
-    .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
-    .join("\n");
+function normalizeMessages(raw: unknown): ClientMessage[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((m: any) => m?.role && typeof m?.content === "string")
+    .map((m: any) => ({ role: m.role, content: String(m.content).trim() }))
+    .filter((m: ClientMessage) => (m.role === "user" || m.role === "assistant") && m.content.length > 0)
+    .slice(-12);
+}
 
-  return `${system}\n\nConversation:\n${history}\n\nASSISTANT:`;
+function transcript(messages: ClientMessage[]) {
+  return messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n");
+}
+
+// Very simple router: if the user pasted CSV, call MCP parse_csv.
+// Later we will upgrade to true model tool-calling.
+function looksLikeCsv(text: string) {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) return false;
+  // crude heuristic: at least one comma in first line and 2nd line
+  return lines[0].includes(",") && lines[1].includes(",");
 }
 
 export async function POST(req: Request) {
   try {
     if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        { error: "Missing OPENAI_API_KEY. Add it to your root .env and restart dev server." },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
     }
 
-    const body = (await req.json().catch(() => null)) as { messages?: ChatMessage[] } | null;
-    const messages = Array.isArray(body?.messages) ? body!.messages : [];
+    const body = await req.json().catch(() => ({}));
+    const messages = normalizeMessages((body as any).messages);
 
-    const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content?.trim();
-    if (!lastUser) {
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== "user") {
       return NextResponse.json({ error: "Missing user message." }, { status: 400 });
     }
 
-    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+    let toolContext = "";
 
-    const prompt = buildPrompt(messages);
+    // If user pasted CSV, parse with MCP tool
+    if (looksLikeCsv(last.content)) {
+      const toolResult = await mcpCallTool({
+        toolName: "parse_csv",
+        args: { csvText: last.content, maxRows: 50 },
+      });
 
-    const response = await client.responses.create({
-      model,
+      toolContext += `\n\n[MCP TOOL: parse_csv result]\n${JSON.stringify(toolResult, null, 2)}\n`;
+    }
+
+    // If user is asking for doc review but pasted plain text, we can generate checklist
+    if (last.content.length > 400 && /estimate|supplement|policy|procedure/i.test(last.content)) {
+      const toolResult = await mcpCallTool({
+        toolName: "document_review_checklist",
+        args: { docType: "other", text: last.content },
+      });
+
+      toolContext += `\n\n[MCP TOOL: document_review_checklist result]\n${JSON.stringify(toolResult, null, 2)}\n`;
+    }
+
+    const prompt = `${SYSTEM_PROMPT}\n\nConversation:\n${transcript(messages)}\n${toolContext}\n\nASSISTANT:`;
+
+    const resp = await client.responses.create({
+      model: "gpt-4o-mini",
       input: prompt,
-      // You can tune these later:
-      temperature: 0.4,
-      max_output_tokens: 700,
+      temperature: 0.2,
+      max_output_tokens: 750,
     });
 
-    return NextResponse.json({
-      text: response.output_text ?? "",
-    });
+    return NextResponse.json({ reply: resp.output_text ?? "" }, { status: 200 });
   } catch (err: any) {
-    // Log server-side for debugging
     console.error("POST /api/chat failed:", err);
-
-    const message =
-      typeof err?.message === "string" ? err.message : "Unknown error";
-
     return NextResponse.json(
-      { error: "Chat request failed.", detail: message },
+      { error: "Chat request failed.", detail: err?.message ?? String(err) },
       { status: 500 }
     );
   }
