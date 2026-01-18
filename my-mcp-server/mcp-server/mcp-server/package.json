@@ -1,9 +1,9 @@
 {
-  "name": "mcp-server",
-  "version": "1.0.0",
-  "main": "index.js",
+  "name": "my-mcp-server",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "tsx server.ts",
+    "start": "node --enable-source-maps dist/server.js"
   },
   "keywords": [],
   "author": "",
