@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import mammoth from "mammoth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,23 +6,8 @@ export const dynamic = "force-dynamic";
 const MAX_FILE_MB = 10;
 const MAX_TEXT_CHARS = 120_000;
 
-function clampText(s: string, max: number) {
-  return s.length > max ? s.slice(0, max) : s;
-}
-
-async function parsePdf(buf: Buffer): Promise<string> {
-  // pdf-parse@1.1.1 exports a callable function as default in Node
-  const mod: any = await import("pdf-parse");
-  const pdfParse: any = mod?.default ?? mod;
-
-  if (typeof pdfParse !== "function") {
-    throw new Error(
-      `pdf-parse not callable. keys=${Object.keys(mod || {}).join(",")} defaultType=${typeof mod?.default}`
-    );
-  }
-
-  const parsed = await pdfParse(buf);
-  return parsed?.text ?? "";
+function clamp(text: string, max: number) {
+  return text.length > max ? text.slice(0, max) : text;
 }
 
 export async function POST(req: Request) {
@@ -32,7 +16,10 @@ export async function POST(req: Request) {
     const file = form.get("file");
 
     if (!(file instanceof File)) {
-      return NextResponse.json({ error: "Missing file field" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing file field" },
+        { status: 400 }
+      );
     }
 
     if (file.size > MAX_FILE_MB * 1024 * 1024) {
@@ -42,46 +29,36 @@ export async function POST(req: Request) {
       );
     }
 
-    const name = file.name || "uploaded";
     const mime = file.type || "";
-    const buf = Buffer.from(await file.arrayBuffer());
+    const buffer = Buffer.from(await file.arrayBuffer());
 
     let text = "";
 
-    if (mime === "application/pdf" || name.toLowerCase().endsWith(".pdf")) {
-      text = await parsePdf(buf);
-    } else if (
-      mime ===
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      name.toLowerCase().endsWith(".docx")
-    ) {
-      const result = await mammoth.extractRawText({ buffer: buf });
-      text = result.value || "";
-    } else if (
-      mime.startsWith("text/") ||
-      name.toLowerCase().endsWith(".txt") ||
-      name.toLowerCase().endsWith(".md")
-    ) {
-      text = buf.toString("utf8");
+    if (mime === "application/pdf") {
+      // pdf-parse 1.1.1 – CommonJS safe import
+      const pdfParse = (await import("pdf-parse")).default;
+      const parsed = await pdfParse(buffer);
+      text = parsed.text || "";
     } else {
-      return NextResponse.json(
-        { error: "Unsupported file type (pdf, docx, txt, md supported)" },
-        { status: 415 }
-      );
+      // Plain text fallback
+      text = buffer.toString("utf8");
     }
 
-    text = clampText(text.trim(), MAX_TEXT_CHARS);
+    text = clamp(text, MAX_TEXT_CHARS);
 
     return NextResponse.json({
-      name,
-      mime,
+      ok: true,
+      name: file.name,
       chars: text.length,
       text,
     });
   } catch (err: any) {
     console.error("Upload failed:", err);
     return NextResponse.json(
-      { error: "Upload failed", detail: err?.message ?? String(err) },
+      {
+        error: "Upload failed",
+        detail: err?.message ?? String(err),
+      },
       { status: 500 }
     );
   }
