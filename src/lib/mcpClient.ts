@@ -1,127 +1,108 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import path from "node:path";
 
-// Minimal JSON-RPC over stdio client for MCP servers
-type JsonRpcRequest = {
-  jsonrpc: "2.0";
-  id: string;
-  method: string;
-  params?: any;
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+export type McpToolResult = unknown;
+
+export type McpBridge = {
+  client: Client;
+  proc: ChildProcessWithoutNullStreams;
+  close: () => Promise<void>;
 };
 
-type JsonRpcResponse = {
-  jsonrpc: "2.0";
-  id: string;
-  result?: any;
-  error?: any;
-};
-
-function makeId() {
-  return Math.random().toString(36).slice(2);
+function getMcpCwd() {
+  return path.join(process.cwd(), "my-mcp-server");
 }
 
+/**
+ * Starts the MCP server over stdio and returns an MCP client bridge.
+ * One bridge per request is the simplest + safest default.
+ */
+export async function createMcpBridge(): Promise<McpBridge> {
+  const cwd = getMcpCwd();
+
+  // Spawn MCP server via npx tsx for dev.
+  // IMPORTANT: no shell:true (safer, more predictable).
+  const proc = spawn("npx", ["tsx", "server.ts"], {
+    cwd,
+    stdio: "pipe",
+    env: process.env,
+  });
+
+  proc.on("exit", (code, signal) => {
+    console.log("[MCP] exited", { code, signal });
+  });
+
+  proc.stderr.on("data", (d) => {
+    // Keep server logs for debugging
+    console.error("[MCP] stderr:", d.toString());
+  });
+
+  // Depending on MCP SDK version, StdioClientTransport supports either:
+  // 1) { process: proc }  OR
+  // 2) { command, args, cwd }
+  //
+  // This form works on the commonly shipped variants:
+  const transport = new StdioClientTransport({ process: proc } as any);
+
+  const client = new Client(
+    { name: "collision-iq-nextjs", version: "0.1.0" },
+    { capabilities: {} }
+  );
+
+  await client.connect(transport);
+
+  return {
+    client,
+    proc,
+    close: async () => {
+      try {
+        await client.close();
+      } catch {
+        // ignore
+      }
+      try {
+        proc.kill();
+      } catch {
+        // ignore
+      }
+    },
+  };
+}
+
+/**
+ * Convenience helper for one-shot tool calls (spawns MCP, calls tool, closes).
+ * Use this when you only need one tool call.
+ */
 export async function mcpCallTool(opts: {
   toolName: string;
   args?: Record<string, any>;
-}) {
-  // Adjust path if your MCP server file name differs
-  const mcpServerPath = path.join(process.cwd(), "my-mcp-server", "server.ts");
+  timeoutMs?: number;
+}): Promise<McpToolResult> {
+  const timeoutMs = opts.timeoutMs ?? 12_000;
+  const mcp = await createMcpBridge();
 
-  // Use tsx to run the MCP server in dev. (In prod, you'll run build/index.js)
-  const child = spawn("npx", ["tsx", mcpServerPath], {
-    stdio: ["pipe", "pipe", "pipe"],
-    shell: true,
+  const timeout = new Promise<never>((_, reject) => {
+    const t = setTimeout(() => {
+      try {
+        mcp.proc.kill();
+      } catch {}
+      reject(new Error(`MCP tool call timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    (timeout as any).finally?.(() => clearTimeout(t));
   });
 
-  const send = (req: JsonRpcRequest) => {
-    child.stdin.write(JSON.stringify(req) + "\n");
-  };
-
-  const readJsonLines = async (): Promise<JsonRpcResponse[]> => {
-    return new Promise((resolve, reject) => {
-      const responses: JsonRpcResponse[] = [];
-      let buffer = "";
-
-      const onData = (chunk: Buffer) => {
-        buffer += chunk.toString("utf8");
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          try {
-            const parsed = JSON.parse(trimmed);
-            responses.push(parsed);
-          } catch (e) {
-            // ignore non-json lines
-          }
-        }
-      };
-
-      const timeout = setTimeout(() => {
-        cleanup();
-        reject(new Error("MCP server timed out waiting for response"));
-      }, 8000);
-
-      const cleanup = () => {
-        clearTimeout(timeout);
-        child.stdout.off("data", onData);
-        child.stderr.off("data", onErr);
-      };
-
-      const onErr = (chunk: Buffer) => {
-        // stderr is useful if MCP fails
-        // but don't reject immediately because some libs print warnings
-      };
-
-      child.stdout.on("data", onData);
-      child.stderr.on("data", onErr);
-
-      // Resolve when we receive a response for our request id
-      const poll = setInterval(() => {
-        // We'll stop after we see a "tools/call" response
-        const hasToolCallResult = responses.some((r) => r.result || r.error);
-        if (hasToolCallResult) {
-          clearInterval(poll);
-          cleanup();
-          resolve(responses);
-        }
-      }, 50);
-    });
-  };
-
-  // 1) Ask for tools/list (optional sanity)
-  const id1 = makeId();
-  send({ jsonrpc: "2.0", id: id1, method: "tools/list" });
-
-  // 2) Call tool
-  const id2 = makeId();
-  send({
-    jsonrpc: "2.0",
-    id: id2,
-    method: "tools/call",
-    params: {
+  try {
+    const call = mcp.client.callTool({
       name: opts.toolName,
       arguments: opts.args ?? {},
-    },
-  });
+    });
 
-  const responses = await readJsonLines();
-
-  // Close the child process
-  child.kill();
-
-  const toolResponse = responses.find((r) => r.id === id2);
-  if (!toolResponse) throw new Error("No MCP tool response received");
-
-  if (toolResponse.error) {
-    throw new Error(
-      typeof toolResponse.error?.message === "string"
-        ? toolResponse.error.message
-        : "MCP tool call failed"
-    );
+    return await Promise.race([call as any, timeout]);
+  } finally {
+    await mcp.close();
   }
-
-  return toolResponse.result;
 }
