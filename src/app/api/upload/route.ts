@@ -15,6 +15,7 @@ async function parsePdf(buf: Buffer): Promise<string> {
   // pdf-parse@1.1.1 exports a callable function as default in Node
   const mod: any = await import("pdf-parse");
   const pdfParse: any = mod?.default ?? mod;
+
   if (typeof pdfParse !== "function") {
     throw new Error(
       `pdf-parse not callable. keys=${Object.keys(mod || {}).join(",")} defaultType=${typeof mod?.default}`
