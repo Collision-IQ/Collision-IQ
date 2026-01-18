@@ -34,30 +34,27 @@ export async function POST(req: Request) {
     let text = "";
 
     if (mime === "application/pdf" || name.toLowerCase().endsWith(".pdf")) {
-      // Dynamic import avoids ESM/CJS export mismatch issues in Next.js
-      const mod: any = await import("pdf-parse");
-      const pdfParse = mod?.default ?? mod; // support both shapes
-      const parsed = await pdfParse(buf);
-      text = parsed?.text ?? "";
-    } else if (
-      mime ===
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      name.toLowerCase().endsWith(".docx")
-    ) {
-      const result = await mammoth.extractRawText({ buffer: buf });
-      text = result.value || "";
-    } else if (
-      mime.startsWith("text/") ||
-      name.toLowerCase().endsWith(".txt") ||
-      name.toLowerCase().endsWith(".md")
-    ) {
-      text = buf.toString("utf8");
-    } else {
-      return NextResponse.json(
-        { error: "Unsupported file type (pdf, docx, txt, md supported)" },
-        { status: 415 }
-      );
-    }
+  const mod: any = await import("pdf-parse");
+
+  // Robust export resolution across CJS/ESM/Turbopack variations
+  const pdfParse =
+    (typeof mod?.default === "function" && mod.default) ||
+    (typeof mod === "function" && mod) ||
+    (typeof mod?.pdfParse === "function" && mod.pdfParse) ||
+    (typeof mod?.PDFParse === "function" && mod.PDFParse) ||
+    (typeof mod?.default?.pdfParse === "function" && mod.default.pdfParse) ||
+    (typeof mod?.default?.PDFParse === "function" && mod.default.PDFParse);
+
+  if (!pdfParse) {
+    // Helpful error message so we can see what exports exist
+    throw new Error(
+      `pdf-parse export mismatch. keys=${Object.keys(mod || {}).join(",")} defaultKeys=${Object.keys(mod?.default || {}).join(",")}`
+    );
+  }
+
+  const parsed = await pdfParse(buf);
+  text = parsed?.text ?? "";
+}
 
     text = clampText(text.trim(), MAX_TEXT_CHARS);
 
