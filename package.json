@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
     "next": "16.1.1",
     "openai": "^6.16.0",
     "papaparse": "^5.5.3",
