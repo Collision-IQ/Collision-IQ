@@ -11,6 +11,31 @@ function clampText(s: string, max: number) {
   return s.length > max ? s.slice(0, max) : s;
 }
 
+async function parsePdf(buf: Buffer): Promise<string> {
+  const mod: any = await import("pdf-parse");
+
+  // Try the common shapes across CJS/ESM/bundlers:
+  const candidates = [
+    mod,
+    mod?.default,
+    mod?.pdfParse,
+    mod?.PDFParse,
+    mod?.default?.pdfParse,
+    mod?.default?.PDFParse,
+  ];
+
+  const fn = candidates.find((c) => typeof c === "function");
+
+  if (!fn) {
+    throw new Error(
+      `pdf-parse export mismatch. keys=${Object.keys(mod || {}).join(",")} defaultKeys=${Object.keys(mod?.default || {}).join(",")}`
+    );
+  }
+
+  const parsed = await fn(buf);
+  return parsed?.text ?? "";
+}
+
 export async function POST(req: Request) {
   try {
     const form = await req.formData();
@@ -34,27 +59,26 @@ export async function POST(req: Request) {
     let text = "";
 
     if (mime === "application/pdf" || name.toLowerCase().endsWith(".pdf")) {
-  const mod: any = await import("pdf-parse");
-
-  // Robust export resolution across CJS/ESM/Turbopack variations
-  const pdfParse =
-    (typeof mod?.default === "function" && mod.default) ||
-    (typeof mod === "function" && mod) ||
-    (typeof mod?.pdfParse === "function" && mod.pdfParse) ||
-    (typeof mod?.PDFParse === "function" && mod.PDFParse) ||
-    (typeof mod?.default?.pdfParse === "function" && mod.default.pdfParse) ||
-    (typeof mod?.default?.PDFParse === "function" && mod.default.PDFParse);
-
-  if (!pdfParse) {
-    // Helpful error message so we can see what exports exist
-    throw new Error(
-      `pdf-parse export mismatch. keys=${Object.keys(mod || {}).join(",")} defaultKeys=${Object.keys(mod?.default || {}).join(",")}`
-    );
-  }
-
-  const parsed = await pdfParse(buf);
-  text = parsed?.text ?? "";
-}
+      text = await parsePdf(buf);
+    } else if (
+      mime ===
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      name.toLowerCase().endsWith(".docx")
+    ) {
+      const result = await mammoth.extractRawText({ buffer: buf });
+      text = result.value || "";
+    } else if (
+      mime.startsWith("text/") ||
+      name.toLowerCase().endsWith(".txt") ||
+      name.toLowerCase().endsWith(".md")
+    ) {
+      text = buf.toString("utf8");
+    } else {
+      return NextResponse.json(
+        { error: "Unsupported file type (pdf, docx, txt, md supported)" },
+        { status: 415 }
+      );
+    }
 
     text = clampText(text.trim(), MAX_TEXT_CHARS);
 
