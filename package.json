@@ -10,9 +10,11 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.2",
+    "mammoth": "^1.11.0",
     "next": "16.1.1",
     "openai": "^6.16.0",
     "papaparse": "^5.5.3",
+    "pdf-parse": "^2.4.5",
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },
