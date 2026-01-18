@@ -12,27 +12,16 @@ function clampText(s: string, max: number) {
 }
 
 async function parsePdf(buf: Buffer): Promise<string> {
+  // pdf-parse@1.1.1 exports a callable function as default in Node
   const mod: any = await import("pdf-parse");
-
-  // Try the common shapes across CJS/ESM/bundlers:
-  const candidates = [
-    mod,
-    mod?.default,
-    mod?.pdfParse,
-    mod?.PDFParse,
-    mod?.default?.pdfParse,
-    mod?.default?.PDFParse,
-  ];
-
-  const fn = candidates.find((c) => typeof c === "function");
-
-  if (!fn) {
+  const pdfParse: any = mod?.default ?? mod;
+  if (typeof pdfParse !== "function") {
     throw new Error(
-      `pdf-parse export mismatch. keys=${Object.keys(mod || {}).join(",")} defaultKeys=${Object.keys(mod?.default || {}).join(",")}`
+      `pdf-parse not callable. keys=${Object.keys(mod || {}).join(",")} defaultType=${typeof mod?.default}`
     );
   }
 
-  const parsed = await fn(buf);
+  const parsed = await pdfParse(buf);
   return parsed?.text ?? "";
 }
 

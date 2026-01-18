@@ -14,7 +14,7 @@
     "next": "16.1.1",
     "openai": "^6.16.0",
     "papaparse": "^5.5.3",
-    "pdf-parse": "^2.4.5",
+    "pdf-parse": "^1.1.1",
     "react": "19.2.3",
     "react-dom": "19.2.3"
   },
