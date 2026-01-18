@@ -1,3 +1,4 @@
+const MODEL = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { createMcpBridge } from "@/lib/mcpClient";
@@ -104,7 +105,7 @@ export async function POST(req: Request) {
 
       // Initial call
       let resp = await openai.responses.create({
-        model: "gpt-4o-mini",
+        model: MODEL,
         input: input as any,
         tools: tools as any,
         temperature: 0.2,
@@ -169,7 +170,7 @@ export async function POST(req: Request) {
 
         // Continue with tool outputs
         resp = await openai.responses.create({
-          model: "gpt-4o-mini",
+          model: MODEL,
           input: [
             ...input,
             // Include tool outputs as tool messages
