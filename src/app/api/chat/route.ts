@@ -1,7 +1,8 @@
-const MODEL = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
+// src/app/api/chat/route.ts
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
-import { createMcpBridge } from "@/lib/mcpClient";
+
+const MODEL = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,10 +21,6 @@ You provide documentation-first guidance for OEM-compliant repairs and claim str
 You are NOT an attorney. You do NOT provide legal advice. You do not guarantee outcomes.
 Ask for missing details (state, carrier, vehicle year/make/model, goal, estimate/supplement).
 Prefer bullet points, checklists, and next steps.
-
-Tool use:
-- You MAY call parse_csv only when the user provides CSV text or explicitly asks for CSV parsing.
-- Do not invent CSV rows. If incomplete/malformed, ask for clarification.
 `.trim();
 
 function normalizeMessages(raw: unknown): ClientMessage[] {
@@ -40,15 +37,6 @@ function normalizeMessages(raw: unknown): ClientMessage[] {
 
 function clampText(text: string, maxChars: number) {
   return text.length > maxChars ? text.slice(0, maxChars) : text;
-}
-
-function safeJsonParse(input: unknown) {
-  if (typeof input !== "string") return null;
-  try {
-    return JSON.parse(input);
-  } catch {
-    return null;
-  }
 }
 
 export async function POST(req: Request) {
@@ -78,120 +66,26 @@ export async function POST(req: Request) {
       content: clampText(m.content, MAX_MSG_CHARS),
     }));
 
-    const mcp = await createMcpBridge();
-    try {
-      const toolsList = await mcp.client.listTools();
+    // Use Responses API (same as your original file), but WITHOUT MCP/tooling.
+    const input = [
+      { role: "system", content: [{ type: "input_text", text: SYSTEM_PROMPT }] },
+      ...boundedMessages.map((m) => ({
+        role: m.role,
+        content: [{ type: "input_text", text: m.content }],
+      })),
+    ];
 
-      // Read-only allowlist
-      const ALLOWED = new Set(["parse_csv"]);
+    const resp = await openai.responses.create({
+      model: MODEL,
+      input: input as any,
+      temperature: 0.2,
+      max_output_tokens: 750,
+    });
 
-      // Expose only allowlisted MCP tools to the model
-      const tools = (toolsList.tools ?? [])
-        .filter((t: any) => ALLOWED.has(t.name))
-        .map((t: any) => ({
-          type: "function" as const,
-          name: t.name,
-          description: t.description ?? "",
-          parameters: t.inputSchema ?? { type: "object", properties: {} },
-        }));
-
-      const input = [
-        { role: "system", content: [{ type: "input_text", text: SYSTEM_PROMPT }] },
-        ...boundedMessages.map((m) => ({
-          role: m.role,
-          content: [{ type: "input_text", text: m.content }],
-        })),
-      ];
-
-      // Initial call
-      let resp = await openai.responses.create({
-        model: MODEL,
-        input: input as any,
-        tools: tools as any,
-        temperature: 0.2,
-        max_output_tokens: 750,
-      });
-
-      // ---- Tool loop ----
-      while (true) {
-        // TS FIX: OpenAI SDK typing may not include function_call shape.
-        // We treat output as runtime objects and narrow manually.
-        const output = ((resp as any).output ?? []) as any[];
-
-        const calls = output.filter((o) => o?.type === "function_call") as any[];
-        if (calls.length === 0) break;
-
-        const toolOutputs: any[] = [];
-
-        for (const call of calls) {
-          const toolName = String(call.name ?? "");
-          const callId = String(call.call_id ?? "");
-
-          if (!ALLOWED.has(toolName)) {
-            toolOutputs.push({
-              type: "function_call_output",
-              call_id: callId,
-              output: JSON.stringify({ error: `Tool not allowed: ${toolName}` }),
-            });
-            continue;
-          }
-
-          const args =
-            typeof call.arguments === "string"
-              ? safeJsonParse(call.arguments) ?? {}
-              : (call.arguments ?? {});
-
-          // clamp CSV payloads
-          if (toolName === "parse_csv" && typeof args?.csvText === "string") {
-            args.csvText = clampText(args.csvText, 120_000);
-          }
-
-          try {
-            const result = await mcp.client.callTool({
-              name: toolName,
-              arguments: args,
-            });
-
-            toolOutputs.push({
-              type: "function_call_output",
-              call_id: callId,
-              output: JSON.stringify(result),
-            });
-          } catch (e: any) {
-            toolOutputs.push({
-              type: "function_call_output",
-              call_id: callId,
-              output: JSON.stringify({
-                error: e?.message ?? "Tool call failed",
-              }),
-            });
-          }
-        }
-
-        // Continue with tool outputs
-        resp = await openai.responses.create({
-          model: MODEL,
-          input: [
-            ...input,
-            // Include tool outputs as tool messages
-            ...toolOutputs.map((t) => ({
-              role: "tool",
-              tool_call_id: t.call_id,
-              content: [{ type: "output_text", text: t.output }],
-            })),
-          ] as any,
-          temperature: 0.2,
-          max_output_tokens: 750,
-        });
-      }
-
-            return NextResponse.json(
-        { reply: (resp as any).output_text ?? "" },
-        { status: 200 }
-      );
-    } finally {
-      await mcp.close();
-    }
+    return NextResponse.json(
+      { reply: (resp as any).output_text ?? "" },
+      { status: 200 }
+    );
   } catch (err: any) {
     console.error("POST /api/chat failed:", err);
     return NextResponse.json(
@@ -200,4 +94,3 @@ export async function POST(req: Request) {
     );
   }
 }
-
