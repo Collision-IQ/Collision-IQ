@@ -1,16 +1,27 @@
 import { NextResponse } from "next/server";
 import mammoth from "mammoth";
-import pdfParse from "pdf-parse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_FILE_MB = 10;
+const MAX_TEXT_CHARS = 120_000;
+
+function clampText(s: string, max: number) {
+  return s.length > max ? s.slice(0, max) : s;
+}
+
+async function parsePdfFromBuffer(buf: Buffer): Promise<string> {
+  // pdf-parse@1.1.1 exports a callable function (CommonJS)
+  const pdfParse = require("pdf-parse");
+  const result = await pdfParse(buf);
+  return result?.text ?? "";
+}
 
 export async function POST(req: Request) {
   try {
-    const formData = await req.formData();
-    const file = formData.get("file");
+    const form = await req.formData();
+    const file = form.get("file");
 
     if (!(file instanceof File)) {
       return NextResponse.json(
@@ -26,38 +37,53 @@ export async function POST(req: Request) {
       );
     }
 
-    const name = file.name.toLowerCase();
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const name = file.name || "uploaded";
+    const mime = file.type || "";
+    const buf = Buffer.from(await file.arrayBuffer());
 
     let text = "";
 
-    if (file.type === "application/pdf" || name.endsWith(".pdf")) {
-      const parsed = await pdfParse(buffer);
-      text = parsed.text || "";
+    // ---- PDF ----
+    if (mime === "application/pdf" || name.toLowerCase().endsWith(".pdf")) {
+      text = await parsePdfFromBuffer(buf);
+
+    // ---- DOCX ----
     } else if (
-      file.type ===
+      mime ===
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      name.endsWith(".docx")
+      name.toLowerCase().endsWith(".docx")
     ) {
-      const result = await mammoth.extractRawText({ buffer });
+      const result = await mammoth.extractRawText({ buffer: buf });
       text = result.value || "";
+
+    // ---- TEXT ----
+    } else if (
+      mime.startsWith("text/") ||
+      name.toLowerCase().endsWith(".txt") ||
+      name.toLowerCase().endsWith(".md")
+    ) {
+      text = buf.toString("utf8");
+
     } else {
       return NextResponse.json(
-        { error: "Unsupported file type" },
+        { error: "Unsupported file type (pdf, docx, txt, md supported)" },
         { status: 415 }
       );
     }
 
+    text = clampText(text.trim(), MAX_TEXT_CHARS);
+
     return NextResponse.json({
-      success: true,
-      filename: file.name,
-      characters: text.length,
-      preview: text.slice(0, 1000),
+      ok: true,
+      filename: name,
+      chars: text.length,
+      preview: text.slice(0, 500),
+      text
     });
   } catch (err: any) {
-    console.error("Upload error:", err);
+    console.error("Upload failed:", err);
     return NextResponse.json(
-      { error: "Upload failed", detail: err.message },
+      { error: "Upload failed", detail: err?.message },
       { status: 500 }
     );
   }
