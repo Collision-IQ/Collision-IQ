@@ -1,19 +1,16 @@
 import { NextResponse } from "next/server";
+import mammoth from "mammoth";
+import pdfParse from "pdf-parse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_FILE_MB = 10;
-const MAX_TEXT_CHARS = 120_000;
-
-function clamp(text: string, max: number) {
-  return text.length > max ? text.slice(0, max) : text;
-}
 
 export async function POST(req: Request) {
   try {
-    const form = await req.formData();
-    const file = form.get("file");
+    const formData = await req.formData();
+    const file = formData.get("file");
 
     if (!(file instanceof File)) {
       return NextResponse.json(
@@ -29,36 +26,38 @@ export async function POST(req: Request) {
       );
     }
 
-    const mime = file.type || "";
+    const name = file.name.toLowerCase();
     const buffer = Buffer.from(await file.arrayBuffer());
 
     let text = "";
 
-    if (mime === "application/pdf") {
-      // pdf-parse 1.1.1 – CommonJS safe import
-      const pdfParse = (await import("pdf-parse")).default;
+    if (file.type === "application/pdf" || name.endsWith(".pdf")) {
       const parsed = await pdfParse(buffer);
       text = parsed.text || "";
+    } else if (
+      file.type ===
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      name.endsWith(".docx")
+    ) {
+      const result = await mammoth.extractRawText({ buffer });
+      text = result.value || "";
     } else {
-      // Plain text fallback
-      text = buffer.toString("utf8");
+      return NextResponse.json(
+        { error: "Unsupported file type" },
+        { status: 415 }
+      );
     }
 
-    text = clamp(text, MAX_TEXT_CHARS);
-
     return NextResponse.json({
-      ok: true,
-      name: file.name,
-      chars: text.length,
-      text,
+      success: true,
+      filename: file.name,
+      characters: text.length,
+      preview: text.slice(0, 1000),
     });
   } catch (err: any) {
-    console.error("Upload failed:", err);
+    console.error("Upload error:", err);
     return NextResponse.json(
-      {
-        error: "Upload failed",
-        detail: err?.message ?? String(err),
-      },
+      { error: "Upload failed", detail: err.message },
       { status: 500 }
     );
   }
