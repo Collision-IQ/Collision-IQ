@@ -11,23 +11,13 @@ function clampText(s: string, max: number) {
   return s.length > max ? s.slice(0, max) : s;
 }
 
-async function parsePdfFromBuffer(buf: Buffer): Promise<string> {
-  // pdf-parse@1.1.1 exports a callable function (CommonJS)
-  const pdfParse = require("pdf-parse");
-  const result = await pdfParse(buf);
-  return result?.text ?? "";
-}
-
 export async function POST(req: Request) {
   try {
     const form = await req.formData();
     const file = form.get("file");
 
     if (!(file instanceof File)) {
-      return NextResponse.json(
-        { error: "Missing file field" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Missing file field" }, { status: 400 });
     }
 
     if (file.size > MAX_FILE_MB * 1024 * 1024) {
@@ -43,11 +33,11 @@ export async function POST(req: Request) {
 
     let text = "";
 
-    // ---- PDF ----
     if (mime === "application/pdf" || name.toLowerCase().endsWith(".pdf")) {
-      text = await parsePdfFromBuffer(buf);
-
-    // ---- DOCX ----
+      // pdf-parse@1.1.1
+      const pdfParse = require("pdf-parse");
+      const parsed = await pdfParse(buf);
+      text = parsed?.text ?? "";
     } else if (
       mime ===
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
@@ -55,15 +45,12 @@ export async function POST(req: Request) {
     ) {
       const result = await mammoth.extractRawText({ buffer: buf });
       text = result.value || "";
-
-    // ---- TEXT ----
     } else if (
       mime.startsWith("text/") ||
       name.toLowerCase().endsWith(".txt") ||
       name.toLowerCase().endsWith(".md")
     ) {
       text = buf.toString("utf8");
-
     } else {
       return NextResponse.json(
         { error: "Unsupported file type (pdf, docx, txt, md supported)" },
@@ -76,14 +63,14 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       filename: name,
+      mime,
       chars: text.length,
-      preview: text.slice(0, 500),
-      text
+      preview: text.slice(0, 800),
     });
   } catch (err: any) {
     console.error("Upload failed:", err);
     return NextResponse.json(
-      { error: "Upload failed", detail: err?.message },
+      { error: "Upload failed", detail: err?.message ?? String(err) },
       { status: 500 }
     );
   }
