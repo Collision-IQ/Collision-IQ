@@ -29,28 +29,36 @@ export async function POST(req: Request) {
 
     const name = file.name || "uploaded";
     const mime = file.type || "";
-    const buf = Buffer.from(await file.arrayBuffer());
+
+    // ✅ Always bytes from the uploaded file
+    const buffer = Buffer.from(await file.arrayBuffer());
+
+    // Hard guard: if this ever fails, you know you're not passing bytes
+    if (!Buffer.isBuffer(buffer)) {
+      throw new Error(`Internal error: expected Buffer, got ${typeof buffer}`);
+    }
 
     let text = "";
 
     if (mime === "application/pdf" || name.toLowerCase().endsWith(".pdf")) {
       // pdf-parse@1.1.1
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const pdfParse = require("pdf-parse");
-      const parsed = await pdfParse(buf);
+      const parsed = await pdfParse(buffer); // ✅ Buffer only
       text = parsed?.text ?? "";
     } else if (
       mime ===
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
       name.toLowerCase().endsWith(".docx")
     ) {
-      const result = await mammoth.extractRawText({ buffer: buf });
+      const result = await mammoth.extractRawText({ buffer });
       text = result.value || "";
     } else if (
       mime.startsWith("text/") ||
       name.toLowerCase().endsWith(".txt") ||
       name.toLowerCase().endsWith(".md")
     ) {
-      text = buf.toString("utf8");
+      text = buffer.toString("utf8");
     } else {
       return NextResponse.json(
         { error: "Unsupported file type (pdf, docx, txt, md supported)" },
