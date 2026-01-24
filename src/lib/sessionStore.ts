@@ -1,21 +1,25 @@
-export type Session = {
+// src/lib/sessionStore.ts
+export type SessionRecord = {
   sessionKey: string;
   threadId: string;
   vectorStoreId: string;
   createdAt: number;
 };
 
-const sessions = new Map<string, Session>();
+const sessions = new Map<string, SessionRecord>();
 
 export function getSession(sessionKey: string) {
   return sessions.get(sessionKey);
 }
 
-export function setSession(s: Session) {
-  sessions.set(s.sessionKey, s);
+export function setSession(rec: SessionRecord) {
+  sessions.set(rec.sessionKey, rec);
 }
 
-export function ensureSession(sessionKey: string) {
-  const existing = sessions.get(sessionKey);
-  return existing ?? null;
+export function requireSession(sessionKey: string) {
+  const s = sessions.get(sessionKey);
+  if (!s) {
+    throw new Error("Unknown sessionKey. Call POST /api/session first.");
+  }
+  return s;
 }

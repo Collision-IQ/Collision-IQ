@@ -2,8 +2,14 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Link from "next/link";
 import Image from "next/image";
+import dynamic from "next/dynamic";
 
-export const metadata = {
+const FloatingWidget = dynamic(() => import("@/app/components/FloatingWidget"), {
+  ssr: false,
+  loading: () => null,
+});
+
+export const metadata: Metadata = {
   title: "Collision Academy",
   description:
     "Insurance-grade vehicle valuations, diminished value, repair planning, and Right to Appraisal support.",
@@ -45,16 +51,15 @@ export default function RootLayout({
         <header className="sticky top-0 z-50 border-b border-[color:var(--border)] bg-[color:var(--bg)]/80 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
             <Link href="/" className="flex items-center gap-3">
-             <Image
-              src="/brand/logos/logo-white.png"
-              alt="Collision Academy"
-              width={120}
-              height={32}
-              className="opacity-90"
-              priority
-            />
-
-           </Link>
+              <Image
+                src="/brand/logos/logo-white.png"
+                alt="Collision Academy"
+                width={120}
+                height={32}
+                className="opacity-90"
+                priority
+              />
+            </Link>
 
             <nav className="hidden items-center gap-6 md:flex">
               <NavLink href="/services">Services</NavLink>
@@ -81,8 +86,10 @@ export default function RootLayout({
           </div>
         </header>
 
-        {/* Main page content */}
         {children}
+
+        {/* Lazy-loaded floating widget */}
+        <FloatingWidget />
 
         <footer className="mt-20 border-t border-[color:var(--border)]">
           <div className="mx-auto grid max-w-6xl gap-6 px-4 py-10 md:grid-cols-3">

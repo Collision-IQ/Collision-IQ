@@ -1,83 +1,72 @@
 import OpenAI from "openai";
-import { getSession } from "@/lib/sessionStore";
+import { requireSession } from "@/lib/sessionStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+function sse(event: string, data: any) {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
 export async function POST(req: Request) {
-  const assistantId = process.env.OPENAI_ASSISTANT_ID;
+  const encoder = new TextEncoder();
 
-  try {
-    if (!process.env.OPENAI_API_KEY) {
-      return Response.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
-    }
-    if (!assistantId) {
-      return Response.json({ error: "Missing OPENAI_ASSISTANT_ID" }, { status: 500 });
-    }
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        const body = await req.json().catch(() => ({}));
+        const sessionKey = String(body?.sessionKey ?? "").trim();
+        const message = String(body?.message ?? "").trim();
 
-    const body = await req.json().catch(() => ({}));
-    const sessionKey = String(body?.sessionKey ?? "").trim();
-    const message = String(body?.message ?? "").trim();
+        if (!sessionKey) throw new Error("Missing sessionKey");
+        if (!message) throw new Error("Missing message");
 
-    if (!sessionKey || !message) {
-      return Response.json({ error: "Missing sessionKey or message" }, { status: 400 });
-    }
+        const assistantId = process.env.OPENAI_ASSISTANT_ID;
+        if (!assistantId) throw new Error("Missing env OPENAI_ASSISTANT_ID");
 
-    const s = getSession(sessionKey);
-    if (!s) {
-      return Response.json({ error: "Unknown sessionKey. Call POST /api/session first." }, { status: 404 });
-    }
+        const session = requireSession(sessionKey);
 
-    await openai.beta.threads.messages.create(s.threadId, {
-      role: "user",
-      content: message,
-    });
+        await openai.beta.threads.messages.create(session.threadId, {
+          role: "user",
+          content: message,
+        });
 
-    const encoder = new TextEncoder();
+        controller.enqueue(encoder.encode(sse("status", { message: "running" })));
 
-    const stream = new ReadableStream({
-      async start(controller) {
-        const send = (event: string, data: any) => {
-          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-        };
+        // ✅ Stream run WITHOUT tool_resources (thread already has it)
+        const runner = openai.beta.threads.runs.stream(session.threadId, {
+          assistant_id: assistantId,
+        });
 
-        try {
-          send("meta", { sessionKey, threadId: s.threadId, vectorStoreId: s.vectorStoreId });
+        runner.on("textDelta", (delta) => {
+          const text = delta?.value ?? "";
+          if (text) controller.enqueue(encoder.encode(sse("delta", { text })));
+        });
 
-          const runStream = await openai.beta.threads.runs.stream(s.threadId, {
-            assistant_id: assistantId,
-          });
+        runner.on("error", (e: any) => {
+          controller.enqueue(
+            encoder.encode(sse("error", { message: e?.message ?? String(e) }))
+          );
+        });
 
-          for await (const event of runStream) {
-            if (event.event === "thread.message.delta") {
-              const delta = event.data.delta?.content?.[0];
-              const text = delta && "text" in delta ? (delta as any).text?.value : undefined;
-              if (text) send("delta", { text });
-            }
-
-            if (event.event === "thread.run.failed") send("error", { message: "run_failed" });
-            if (event.event === "thread.run.completed") send("done", {});
-          }
-
+        runner.on("end", () => {
+          controller.enqueue(encoder.encode(sse("done", { ok: true })));
           controller.close();
-        } catch (err: any) {
-          send("error", { message: err?.message ?? String(err) });
-          controller.close();
-        }
-      },
-    });
+        });
+      } catch (err: any) {
+        controller.enqueue(encoder.encode(sse("error", { message: err?.message ?? String(err) })));
+        controller.close();
+      }
+    },
+  });
 
-    return new Response(stream, {
-      headers: {
-        "content-type": "text/event-stream; charset=utf-8",
-        "cache-control": "no-cache, no-transform",
-        connection: "keep-alive",
-      },
-    });
-  } catch (err: any) {
-    console.error("POST /api/session/chat failed:", err);
-    return Response.json({ error: "Chat failed", detail: err?.message ?? String(err) }, { status: 500 });
-  }
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
 }
