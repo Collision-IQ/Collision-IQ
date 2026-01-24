@@ -11,6 +11,22 @@ function clampText(s: string, max: number) {
   return s.length > max ? s.slice(0, max) : s;
 }
 
+async function parsePdfFromBuffer(input: unknown): Promise<string> {
+  // Guard: if you ever pass a filename string again, we’ll see it immediately
+  if (typeof input === "string") {
+    throw new Error(`BUG: parsePdfFromBuffer received a path string: ${input}`);
+  }
+  if (!Buffer.isBuffer(input)) {
+    throw new Error(`BUG: parsePdfFromBuffer expected Buffer, got ${typeof input}`);
+  }
+
+  // pdf-parse@1.1.1
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const pdfParse = require("pdf-parse");
+  const parsed = await pdfParse(input);
+  return parsed?.text ?? "";
+}
+
 export async function POST(req: Request) {
   try {
     const form = await req.formData();
@@ -29,23 +45,12 @@ export async function POST(req: Request) {
 
     const name = file.name || "uploaded";
     const mime = file.type || "";
-
-    // ✅ Always bytes from the uploaded file
     const buffer = Buffer.from(await file.arrayBuffer());
-
-    // Hard guard: if this ever fails, you know you're not passing bytes
-    if (!Buffer.isBuffer(buffer)) {
-      throw new Error(`Internal error: expected Buffer, got ${typeof buffer}`);
-    }
 
     let text = "";
 
     if (mime === "application/pdf" || name.toLowerCase().endsWith(".pdf")) {
-      // pdf-parse@1.1.1
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const pdfParse = require("pdf-parse");
-      const parsed = await pdfParse(buffer); // ✅ Buffer only
-      text = parsed?.text ?? "";
+      text = await parsePdfFromBuffer(buffer); // ✅ ONLY buffer
     } else if (
       mime ===
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
