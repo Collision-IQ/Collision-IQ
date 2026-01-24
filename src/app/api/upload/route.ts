@@ -11,22 +11,6 @@ function clampText(s: string, max: number) {
   return s.length > max ? s.slice(0, max) : s;
 }
 
-async function parsePdfFromBuffer(input: unknown): Promise<string> {
-  // Guard: if you ever pass a filename string again, we’ll see it immediately
-  if (typeof input === "string") {
-    throw new Error(`BUG: parsePdfFromBuffer received a path string: ${input}`);
-  }
-  if (!Buffer.isBuffer(input)) {
-    throw new Error(`BUG: parsePdfFromBuffer expected Buffer, got ${typeof input}`);
-  }
-
-  // pdf-parse@1.1.1
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const pdfParse = require("pdf-parse");
-  const parsed = await pdfParse(input);
-  return parsed?.text ?? "";
-}
-
 export async function POST(req: Request) {
   try {
     const form = await req.formData();
@@ -45,15 +29,26 @@ export async function POST(req: Request) {
 
     const name = file.name || "uploaded";
     const mime = file.type || "";
+
+    // ✅ single source of truth
     const buffer = Buffer.from(await file.arrayBuffer());
 
     let text = "";
 
     if (mime === "application/pdf" || name.toLowerCase().endsWith(".pdf")) {
-      text = await parsePdfFromBuffer(buffer); // ✅ ONLY buffer
+      // pdf-parse@1.1.1
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const pdfParse = require("pdf-parse");
+
+      // ✅ debug guard: proves we're not passing undefined
+      if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+        throw new Error(`Invalid PDF buffer. isBuffer=${Buffer.isBuffer(buffer)} len=${buffer?.length}`);
+      }
+
+      const parsed = await pdfParse(buffer); // ✅ always buffer
+      text = parsed?.text ?? "";
     } else if (
-      mime ===
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
       name.toLowerCase().endsWith(".docx")
     ) {
       const result = await mammoth.extractRawText({ buffer });
