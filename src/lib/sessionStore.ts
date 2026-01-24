@@ -1,20 +1,21 @@
-// src/lib/sessionStore.ts
-export type SessionState = {
+export type Session = {
+  sessionKey: string;
   threadId: string;
   vectorStoreId: string;
   createdAt: number;
 };
 
-const store = new Map<string, SessionState>();
+const sessions = new Map<string, Session>();
 
-export function getSession(sessionKey: string): SessionState | undefined {
-  return store.get(sessionKey);
+export function getSession(sessionKey: string) {
+  return sessions.get(sessionKey);
 }
 
-export function setSession(sessionKey: string, state: SessionState) {
-  store.set(sessionKey, state);
+export function setSession(s: Session) {
+  sessions.set(s.sessionKey, s);
 }
 
-export function hasSession(sessionKey: string) {
-  return store.has(sessionKey);
+export function ensureSession(sessionKey: string) {
+  const existing = sessions.get(sessionKey);
+  return existing ?? null;
 }

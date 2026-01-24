@@ -4,6 +4,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 type Msg = { role: "user" | "assistant" | "system"; text: string };
 
+const STORAGE_KEY = "collision_sessionKey"; // stored in sessionStorage
+
 function getQueryParam(name: string) {
   if (typeof window === "undefined") return null;
   const params = new URLSearchParams(window.location.search);
@@ -11,10 +13,16 @@ function getQueryParam(name: string) {
 }
 
 function safeUUID() {
-  // crypto.randomUUID() supported in modern browsers
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
-  // fallback
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function getOrCreateSessionKey() {
+  const fromQuery = getQueryParam("session")?.trim();
+  const stored = sessionStorage.getItem(STORAGE_KEY)?.trim();
+  const sk = (fromQuery || stored || safeUUID()).toString();
+  sessionStorage.setItem(STORAGE_KEY, sk);
+  return sk;
 }
 
 export default function WidgetPage() {
@@ -31,22 +39,15 @@ export default function WidgetPage() {
 
   const effectiveSessionKey = useMemo(() => sessionKey, [sessionKey]);
 
-  // Auto-scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
 
-  // Session init:
-  // Priority:
-  // 1) ?session=claim-123
-  // 2) localStorage
-  // 3) randomUUID
+  // ✅ THIS is where the sessionKey rule goes:
+  // - generate once per browser session
+  // - store in sessionStorage (iframe-friendly)
   useEffect(() => {
-    const fromQuery = getQueryParam("session");
-    const stored = localStorage.getItem("collision_sessionKey");
-    const sk = (fromQuery?.trim() || stored?.trim() || safeUUID()).toString();
-
-    localStorage.setItem("collision_sessionKey", sk);
+    const sk = getOrCreateSessionKey();
     setSessionKey(sk);
 
     (async () => {
@@ -67,7 +68,7 @@ export default function WidgetPage() {
     })();
   }, []);
 
-  // Optional: allow parent page to override sessionKey via postMessage (advanced embedding)
+  // Optional: allow parent page to override sessionKey via postMessage
   // Parent can send: { type: "SESSION_INIT", sessionKey: "claim-123" }
   useEffect(() => {
     function onMessage(ev: MessageEvent) {
@@ -79,11 +80,10 @@ export default function WidgetPage() {
       const sk = data.sessionKey.trim();
       if (!sk) return;
 
-      localStorage.setItem("collision_sessionKey", sk);
+      sessionStorage.setItem(STORAGE_KEY, sk);
       setSessionKey(sk);
       setMessages((m) => [...m, { role: "system", text: `Session set by parent: ${sk}` }]);
 
-      // Ensure backend session exists for the new key
       fetch("/api/session", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -135,13 +135,9 @@ export default function WidgetPage() {
     setInput("");
     setBusy(true);
 
-    // add user message
     setMessages((m) => [...m, { role: "user", text }]);
-
-    // add placeholder assistant message we’ll stream into
     setMessages((m) => [...m, { role: "assistant", text: "" }]);
 
-    // Abort previous stream if any
     abortRef.current?.abort();
     const abort = new AbortController();
     abortRef.current = abort;
@@ -162,7 +158,6 @@ export default function WidgetPage() {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
 
-      // Very small SSE parser
       let sseBuffer = "";
       while (true) {
         const { done, value } = await reader.read();
@@ -179,7 +174,6 @@ export default function WidgetPage() {
 
           const event = eventLine?.slice("event:".length).trim();
           const dataStr = dataLine?.slice("data:".length).trim();
-
           if (!event || !dataStr) continue;
 
           if (event === "delta") {
@@ -190,16 +184,13 @@ export default function WidgetPage() {
 
               setMessages((m) => {
                 const copy = [...m];
-                // last message should be assistant placeholder
                 const lastIdx = copy.length - 1;
                 const last = copy[lastIdx];
                 if (!last || last.role !== "assistant") return copy;
                 copy[lastIdx] = { role: "assistant", text: (last.text || "") + deltaText };
                 return copy;
               });
-            } catch {
-              // ignore parse errors
-            }
+            } catch {}
           }
 
           if (event === "error") {
@@ -362,18 +353,19 @@ const styles: Record<string, React.CSSProperties> = {
   button: {
     padding: "10px 14px",
     borderRadius: 12,
-    border: "none",
+    border: "1px solid #1f2937",
     background: "#f97316",
     color: "#111827",
     fontWeight: 800,
     cursor: "pointer",
   },
   secondary: {
-    padding: "10px 12px",
+    padding: "10px 14px",
     borderRadius: 12,
     border: "1px solid #1f2937",
     background: "#111827",
     color: "#e7e7e7",
+    fontWeight: 700,
     cursor: "pointer",
   },
 };
