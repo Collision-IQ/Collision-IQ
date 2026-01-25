@@ -9,14 +9,6 @@ export const metadata: Metadata = {
   title: "Collision Academy",
   description:
     "Insurance-grade vehicle valuations, diminished value, repair planning, and Right to Appraisal support.",
-  icons: {
-    icon: [
-      { url: "/brand/logos/icons/favicon.ico" },
-      { url: "/brand/logos/icons/favicon.svg", type: "image/svg+xml" },
-    ],
-    shortcut: ["/brand/logos/icons/favicon.ico"],
-    apple: ["/brand/logos/icons/favicon.ico"],
-  },
 };
 
 function NavLink({
@@ -36,7 +28,11 @@ function NavLink({
   );
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en" className="dark">
       <body>
@@ -48,29 +44,27 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 alt="Collision Academy"
                 width={120}
                 height={32}
-                className="opacity-90"
                 priority
               />
             </Link>
 
-            <nav className="hidden items-center gap-6 md:flex">
+            <nav className="hidden gap-6 md:flex">
               <NavLink href="/services">Services</NavLink>
               <NavLink href="/upload">Upload</NavLink>
               <NavLink href="/chatbot">Chatbot</NavLink>
-              <NavLink href="/mission">Mission</NavLink>
               <NavLink href="/contact">Contact</NavLink>
             </nav>
 
-            <div className="flex items-center gap-2">
+            <div className="flex gap-2">
               <Link
                 href="/services"
-                className="rounded-xl border border-[color:var(--border)] px-4 py-2 text-sm hover:bg-white/5 transition"
+                className="rounded-xl border border-[color:var(--border)] px-4 py-2 text-sm hover:bg-white/5"
               >
                 View Packages
               </Link>
               <Link
                 href="/upload"
-                className="rounded-xl bg-[color:var(--accent)] px-4 py-2 text-sm font-semibold text-black hover:opacity-90 transition"
+                className="rounded-xl bg-[color:var(--accent)] px-4 py-2 text-sm font-semibold text-black"
               >
                 Start Intake
               </Link>
@@ -80,45 +74,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
         {children}
 
-        {/* GLOBAL FLOATING WIDGET */}
+        {/* ✅ GLOBAL FLOATING WIDGET */}
         <FloatingWidgetMount />
-
-        <footer className="mt-20 border-t border-[color:var(--border)]">
-          <div className="mx-auto grid max-w-6xl gap-6 px-4 py-10 md:grid-cols-3">
-            <div>
-              <div className="font-semibold">Collision Academy</div>
-              <p className="mt-2 text-sm text-[color:var(--muted)]">
-                Documentation-first valuation and appraisal support built for real-world claims.
-              </p>
-            </div>
-
-            <div className="text-sm">
-              <div className="font-semibold">Pages</div>
-              <div className="mt-2 grid gap-2">
-                <Link href="/services" className="text-[color:var(--muted)] hover:text-[color:var(--text)]">
-                  Services
-                </Link>
-                <Link href="/chatbot" className="text-[color:var(--muted)] hover:text-[color:var(--text)]">
-                  Chatbot
-                </Link>
-                <Link href="/upload" className="text-[color:var(--muted)] hover:text-[color:var(--text)]">
-                  Upload
-                </Link>
-              </div>
-            </div>
-
-            <div className="text-sm">
-              <div className="font-semibold">Contact</div>
-              <div className="mt-2 text-[color:var(--muted)]">
-                Office@collision.academy
-                <br />
-                267-983-8615
-                <br />
-                PA · NJ · DE · MD · NC
-              </div>
-            </div>
-          </div>
-        </footer>
       </body>
     </html>
   );
