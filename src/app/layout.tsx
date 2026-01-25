@@ -1,13 +1,9 @@
+// src/app/layout.tsx
 import type { Metadata } from "next";
 import "./globals.css";
 import Link from "next/link";
 import Image from "next/image";
-import dynamic from "next/dynamic";
-
-const FloatingWidget = dynamic(() => import("@/app/components/FloatingWidget"), {
-  ssr: false,
-  loading: () => null,
-});
+import FloatingWidgetMount from "@/app/components/FloatingWidgetMount";
 
 export const metadata: Metadata = {
   title: "Collision Academy",
@@ -88,8 +84,8 @@ export default function RootLayout({
 
         {children}
 
-        {/* Lazy-loaded floating widget */}
-        <FloatingWidget />
+        {/* GLOBAL FLOATING WIDGET (client mounted) */}
+        <FloatingWidgetMount />
 
         <footer className="mt-20 border-t border-[color:var(--border)]">
           <div className="mx-auto grid max-w-6xl gap-6 px-4 py-10 md:grid-cols-3">
@@ -122,21 +118,17 @@ export default function RootLayout({
                 >
                   Upload
                 </Link>
-                <Link
-                  href="/contact"
-                  className="text-[color:var(--muted)] hover:text-[color:var(--text)]"
-                >
-                  Contact
-                </Link>
               </div>
             </div>
 
             <div className="text-sm">
               <div className="font-semibold">Contact</div>
               <div className="mt-2 text-[color:var(--muted)]">
-                <div>Office@collision.academy</div>
-                <div>267-983-8615</div>
-                <div className="mt-2">PA • NJ • DE • MD • NC</div>
+                Office@collision.academy
+                <br />
+                267-983-8615
+                <br />
+                PA · NJ · DE · MD · NC
               </div>
             </div>
           </div>
