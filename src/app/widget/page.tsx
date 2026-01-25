@@ -1,371 +1,115 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-type Msg = { role: "user" | "assistant" | "system"; text: string };
-
-const STORAGE_KEY = "collision_sessionKey"; // stored in sessionStorage
-
-function getQueryParam(name: string) {
-  if (typeof window === "undefined") return null;
-  const params = new URLSearchParams(window.location.search);
-  return params.get(name);
-}
-
-function safeUUID() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function getOrCreateSessionKey() {
-  const fromQuery = getQueryParam("session")?.trim();
-  const stored = sessionStorage.getItem(STORAGE_KEY)?.trim();
-  const sk = (fromQuery || stored || safeUUID()).toString();
-  sessionStorage.setItem(STORAGE_KEY, sk);
-  return sk;
-}
+type Msg = { role: "user" | "assistant"; content: string };
 
 export default function WidgetPage() {
-  const [sessionKey, setSessionKey] = useState<string>("");
-  const [status, setStatus] = useState<string>("Initializing...");
-  const [messages, setMessages] = useState<Msg[]>([
-    { role: "system", text: "Upload docs/photos, then ask questions. I’ll reference what you uploaded." },
-  ]);
+  const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [streaming, setStreaming] = useState(false);
 
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const bufferRef = useRef("");
+  const flushTimer = useRef<number | null>(null);
+  const sourceRef = useRef<EventSource | null>(null);
 
-  const effectiveSessionKey = useMemo(() => sessionKey, [sessionKey]);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, busy]);
-
-  // ✅ THIS is where the sessionKey rule goes:
-  // - generate once per browser session
-  // - store in sessionStorage (iframe-friendly)
-  useEffect(() => {
-    const sk = getOrCreateSessionKey();
-    setSessionKey(sk);
-
-    (async () => {
-      try {
-        setStatus("Creating session...");
-        const res = await fetch("/api/session", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionKey: sk }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data?.error || `Session error (${res.status})`);
-        setStatus("Ready");
-      } catch (e: any) {
-        setStatus(`Session error: ${e?.message || String(e)}`);
-        setMessages((m) => [...m, { role: "system", text: `Session error: ${e?.message || String(e)}` }]);
+  function flushBuffer() {
+    setMessages((prev) => {
+      const copy = [...prev];
+      const last = copy[copy.length - 1];
+      if (last?.role === "assistant") {
+        last.content += bufferRef.current;
       }
-    })();
-  }, []);
+      return copy;
+    });
+    bufferRef.current = "";
+  }
 
-  // Optional: allow parent page to override sessionKey via postMessage
-  // Parent can send: { type: "SESSION_INIT", sessionKey: "claim-123" }
-  useEffect(() => {
-    function onMessage(ev: MessageEvent) {
-      const data = ev.data;
-      if (!data || typeof data !== "object") return;
-      if (data.type !== "SESSION_INIT") return;
-      if (!data.sessionKey || typeof data.sessionKey !== "string") return;
+  function handleDelta(text: string) {
+    bufferRef.current += text;
 
-      const sk = data.sessionKey.trim();
-      if (!sk) return;
-
-      sessionStorage.setItem(STORAGE_KEY, sk);
-      setSessionKey(sk);
-      setMessages((m) => [...m, { role: "system", text: `Session set by parent: ${sk}` }]);
-
-      fetch("/api/session", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionKey: sk }),
-      }).catch(() => {});
-    }
-
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, []);
-
-  async function uploadFiles(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    if (!effectiveSessionKey) return;
-
-    setBusy(true);
-    try {
-      for (const file of Array.from(files)) {
-        setMessages((m) => [...m, { role: "system", text: `Uploading: ${file.name}` }]);
-
-        const fd = new FormData();
-        fd.append("sessionKey", effectiveSessionKey);
-        fd.append("file", file);
-
-        const res = await fetch("/api/session/upload", { method: "POST", body: fd });
-        const data = await res.json().catch(() => ({}));
-
-        if (!res.ok) {
-          setMessages((m) => [
-            ...m,
-            { role: "system", text: `Upload failed for ${file.name}: ${data?.error || res.statusText}` },
-          ]);
-        } else {
-          setMessages((m) => [
-            ...m,
-            { role: "system", text: `Attached: ${data?.filename || file.name} (${data?.status || "ok"})` },
-          ]);
-        }
-      }
-    } finally {
-      setBusy(false);
+    if (!flushTimer.current) {
+      flushTimer.current = window.setTimeout(() => {
+        flushBuffer();
+        flushTimer.current = null;
+      }, 40); // ~25fps
     }
   }
 
   async function sendMessage() {
-    const text = input.trim();
-    if (!text || !effectiveSessionKey || busy) return;
+    if (!input.trim() || streaming) return;
+
+    const sessionKey =
+      sessionStorage.getItem("sessionKey") ??
+      (() => {
+        const id = crypto.randomUUID();
+        sessionStorage.setItem("sessionKey", id);
+        return id;
+      })();
+
+    setMessages((m) => [
+      ...m,
+      { role: "user", content: input },
+      { role: "assistant", content: "" },
+    ]);
 
     setInput("");
-    setBusy(true);
+    setStreaming(true);
 
-    setMessages((m) => [...m, { role: "user", text }]);
-    setMessages((m) => [...m, { role: "assistant", text: "" }]);
+    const source = new EventSource(
+      `/api/session/chat?sessionKey=${sessionKey}&message=${encodeURIComponent(
+        input
+      )}`
+    );
 
-    abortRef.current?.abort();
-    const abort = new AbortController();
-    abortRef.current = abort;
+    sourceRef.current = source;
 
-    try {
-      const res = await fetch("/api/session/chat", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sessionKey: effectiveSessionKey, message: text }),
-        signal: abort.signal,
-      });
+    source.addEventListener("delta", (e: any) => {
+      handleDelta(JSON.parse(e.data).text);
+    });
 
-      if (!res.ok || !res.body) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || `Chat error (${res.status})`);
-      }
+    source.addEventListener("done", () => {
+      flushBuffer();
+      setStreaming(false);
+      source.close();
+    });
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-
-      let sseBuffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        sseBuffer += decoder.decode(value, { stream: true });
-        const chunks = sseBuffer.split("\n\n");
-        sseBuffer = chunks.pop() || "";
-
-        for (const chunk of chunks) {
-          const lines = chunk.split("\n");
-          const eventLine = lines.find((l) => l.startsWith("event:"));
-          const dataLine = lines.find((l) => l.startsWith("data:"));
-
-          const event = eventLine?.slice("event:".length).trim();
-          const dataStr = dataLine?.slice("data:".length).trim();
-          if (!event || !dataStr) continue;
-
-          if (event === "delta") {
-            try {
-              const payload = JSON.parse(dataStr);
-              const deltaText = payload.text || "";
-              if (!deltaText) continue;
-
-              setMessages((m) => {
-                const copy = [...m];
-                const lastIdx = copy.length - 1;
-                const last = copy[lastIdx];
-                if (!last || last.role !== "assistant") return copy;
-                copy[lastIdx] = { role: "assistant", text: (last.text || "") + deltaText };
-                return copy;
-              });
-            } catch {}
-          }
-
-          if (event === "error") {
-            try {
-              const payload = JSON.parse(dataStr);
-              setMessages((m) => [...m, { role: "system", text: `Error: ${payload?.message || "Unknown"}` }]);
-            } catch {
-              setMessages((m) => [...m, { role: "system", text: "Error: Unknown" }]);
-            }
-          }
-        }
-      }
-    } catch (e: any) {
-      setMessages((m) => [...m, { role: "system", text: `Chat failed: ${e?.message || String(e)}` }]);
-    } finally {
-      setBusy(false);
-    }
+    source.addEventListener("error", () => {
+      setStreaming(false);
+      source.close();
+    });
   }
 
-  function stopStreaming() {
-    abortRef.current?.abort();
-    setBusy(false);
-  }
+  useEffect(() => {
+    return () => {
+      sourceRef.current?.close();
+    };
+  }, []);
 
   return (
-    <main style={styles.shell}>
-      <header style={styles.header}>
-        <div>
-          <div style={styles.title}>Collision IQ</div>
-          <div style={styles.subtle}>Docs & photo review assistant</div>
-        </div>
-        <div style={styles.badge}>{status}</div>
-      </header>
-
-      <section style={styles.tools}>
-        <label style={styles.upload}>
-          <input
-            type="file"
-            multiple
-            onChange={(e) => uploadFiles(e.target.files)}
-            style={{ display: "none" }}
-          />
-          <span style={styles.uploadBtn}>Upload docs/photos</span>
-        </label>
-
-        <div style={styles.session}>
-          <span style={styles.subtle}>session:</span>{" "}
-          <code style={styles.code}>{effectiveSessionKey || "…"}</code>
-        </div>
-      </section>
-
-      <section style={styles.chat}>
-        {messages.map((m, idx) => (
+    <div className="flex flex-col h-full bg-[#0b0f14] text-white">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        {messages.map((m, i) => (
           <div
-            key={idx}
-            style={{
-              ...styles.msg,
-              ...(m.role === "user" ? styles.userMsg : m.role === "assistant" ? styles.assistantMsg : styles.sysMsg),
-            }}
+            key={i}
+            className={m.role === "user" ? "text-right" : "text-left"}
           >
-            <div style={styles.msgRole}>
-              {m.role === "user" ? "You" : m.role === "assistant" ? "Collision IQ" : "System"}
-            </div>
-            <div style={styles.msgText}>{m.text}</div>
+            <span className="inline-block px-3 py-2 rounded-lg bg-[#1f2937]">
+              {m.content || (streaming && m.role === "assistant" ? "…" : "")}
+            </span>
           </div>
         ))}
-        <div ref={bottomRef} />
-      </section>
+      </div>
 
-      <footer style={styles.footer}>
+      <div className="p-3 border-t border-gray-700">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-          placeholder="Ask about the uploaded docs…"
-          style={styles.input}
-          disabled={!effectiveSessionKey}
+          placeholder="Ask something…"
+          className="w-full px-3 py-2 rounded bg-[#111827] text-white"
         />
-        <button onClick={sendMessage} style={styles.button} disabled={busy || !effectiveSessionKey}>
-          Send
-        </button>
-        <button onClick={stopStreaming} style={styles.secondary} disabled={!busy}>
-          Stop
-        </button>
-      </footer>
-    </main>
+      </div>
+    </div>
   );
 }
-
-const styles: Record<string, React.CSSProperties> = {
-  shell: {
-    maxWidth: 520,
-    margin: "0 auto",
-    padding: 14,
-    fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Arial",
-    color: "#e7e7e7",
-    background: "#0b0f14",
-    minHeight: "100vh",
-    boxSizing: "border-box",
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
-    marginBottom: 10,
-  },
-  title: { fontSize: 18, fontWeight: 700 },
-  subtle: { fontSize: 12, opacity: 0.75 },
-  badge: {
-    fontSize: 12,
-    padding: "6px 10px",
-    borderRadius: 999,
-    background: "#111827",
-    border: "1px solid #1f2937",
-    whiteSpace: "nowrap",
-  },
-  tools: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 10,
-    marginBottom: 10,
-  },
-  upload: { cursor: "pointer" },
-  uploadBtn: {
-    display: "inline-block",
-    padding: "8px 10px",
-    borderRadius: 10,
-    background: "#f97316",
-    color: "#111827",
-    fontWeight: 700,
-  },
-  session: { fontSize: 12, opacity: 0.9 },
-  code: { background: "#111827", padding: "2px 6px", borderRadius: 6, border: "1px solid #1f2937" },
-  chat: {
-    border: "1px solid #1f2937",
-    borderRadius: 14,
-    padding: 10,
-    minHeight: 520,
-    background: "#0a0e13",
-    overflowY: "auto",
-  },
-  msg: { padding: 10, borderRadius: 12, marginBottom: 10, border: "1px solid transparent" },
-  msgRole: { fontSize: 12, opacity: 0.75, marginBottom: 6 },
-  msgText: { whiteSpace: "pre-wrap", lineHeight: 1.35 },
-  userMsg: { background: "#111827", borderColor: "#1f2937" },
-  assistantMsg: { background: "#0b1220", borderColor: "#1d4ed8" },
-  sysMsg: { background: "#0f172a", borderColor: "#334155" },
-  footer: { display: "flex", gap: 8, marginTop: 10 },
-  input: {
-    flex: 1,
-    padding: "10px 12px",
-    borderRadius: 12,
-    border: "1px solid #1f2937",
-    background: "#0a0e13",
-    color: "#e7e7e7",
-    outline: "none",
-  },
-  button: {
-    padding: "10px 14px",
-    borderRadius: 12,
-    border: "1px solid #1f2937",
-    background: "#f97316",
-    color: "#111827",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-  secondary: {
-    padding: "10px 14px",
-    borderRadius: 12,
-    border: "1px solid #1f2937",
-    background: "#111827",
-    color: "#e7e7e7",
-    fontWeight: 700,
-    cursor: "pointer",
-  },
-};
