@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Link from "next/link";
 import Image from "next/image";
-import FloatingWidgetMount from "@/app/components/FloatingWidgetMount";
+import FloatingWidgetMount from "./components/FloatingWidgetMount";
 
 export const metadata: Metadata = {
   title: "Collision Academy",
@@ -36,11 +36,7 @@ function NavLink({
   );
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark">
       <body>
@@ -84,7 +80,7 @@ export default function RootLayout({
 
         {children}
 
-        {/* GLOBAL FLOATING WIDGET (client mounted) */}
+        {/* GLOBAL FLOATING WIDGET */}
         <FloatingWidgetMount />
 
         <footer className="mt-20 border-t border-[color:var(--border)]">
@@ -92,30 +88,20 @@ export default function RootLayout({
             <div>
               <div className="font-semibold">Collision Academy</div>
               <p className="mt-2 text-sm text-[color:var(--muted)]">
-                Documentation-first valuation and appraisal support built for
-                real-world claims.
+                Documentation-first valuation and appraisal support built for real-world claims.
               </p>
             </div>
 
             <div className="text-sm">
               <div className="font-semibold">Pages</div>
               <div className="mt-2 grid gap-2">
-                <Link
-                  href="/services"
-                  className="text-[color:var(--muted)] hover:text-[color:var(--text)]"
-                >
+                <Link href="/services" className="text-[color:var(--muted)] hover:text-[color:var(--text)]">
                   Services
                 </Link>
-                <Link
-                  href="/chatbot"
-                  className="text-[color:var(--muted)] hover:text-[color:var(--text)]"
-                >
+                <Link href="/chatbot" className="text-[color:var(--muted)] hover:text-[color:var(--text)]">
                   Chatbot
                 </Link>
-                <Link
-                  href="/upload"
-                  className="text-[color:var(--muted)] hover:text-[color:var(--text)]"
-                >
+                <Link href="/upload" className="text-[color:var(--muted)] hover:text-[color:var(--text)]">
                   Upload
                 </Link>
               </div>
