@@ -1,12 +1,17 @@
-"use client";
+'use client';
+import { useEffect, useState } from 'react';
 
-import dynamic from "next/dynamic";
+export default function ChatbotIframe() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) return null;
 
-const FloatingWidget = dynamic(() => import("./FloatingWidget"), {
-  ssr: false,
-  loading: () => null,
-});
-
-export default function FloatingWidgetMount() {
-  return <FloatingWidget />;
+  return (
+    <iframe
+      src="/widget"
+      className="h-full w-full"
+      style={{ border: "none" }}
+      title="Collision Academy Chat"
+    />
+  );
 }

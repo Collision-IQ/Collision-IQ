@@ -1,30 +1,18 @@
-import { NextRequest, NextResponse } from "next/server";
+// app/api/chat/route.ts
+import { streamText } from 'ai';
+import { createOpenAI } from '@ai-sdk/openai';
 
-export const runtime = "nodejs";
+const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { message } = body;
+export const runtime = 'edge';
 
-    if (!message) {
-      return NextResponse.json(
-        { error: "Missing message" },
-        { status: 400 }
-      );
-    }
+export async function POST(req: Request) {
+  const { messages } = await req.json();
 
-    // Your chat logic here
-    // (OpenAI, threads, etc.)
+  const result = await streamText({
+    model: openai('gpt-4o'),
+    messages,
+  });
 
-    return NextResponse.json({
-      ok: true,
-      text: "response goes here",
-    });
-  } catch (err: any) {
-    return NextResponse.json(
-      { error: err?.message ?? "Server error" },
-      { status: 500 }
-    );
-  }
+  return result.toTextStreamResponse();
 }

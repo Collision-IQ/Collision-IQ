@@ -1,5 +1,7 @@
+// src/app/api/assignments/[id]/chat/route.ts
+
 import { NextRequest } from "next/server";
-import { getOpenAI } from "@/lib/openai";
+import { openai } from "@/lib/openai";
 import { getAssignment } from "@/lib/assignmentStore";
 
 export const runtime = "nodejs";
@@ -37,17 +39,30 @@ export async function POST(
       );
     }
 
-    // 🧠 Optional: Add OpenAI assistant logic here
-    const openai = getOpenAI();
-    // const thread = await openai.beta.threads.create();
-    // const completion = await openai.chat.completions.create({ ... });
+    // ✅ OpenAI call using chat completions (non-streaming)
+    const client = openai;
+    const completion = await client.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a helpful assistant for Collision Academy, providing policyholder and auto repair support.",
+        },
+        {
+          role: "user",
+          content: userText,
+        },
+      ],
+    });
+
+    const reply = completion.choices[0]?.message?.content ?? "";
 
     return new Response(
       JSON.stringify({
         ok: true,
         assignmentId: id,
-        // threadId: thread.id, // ← include if you implement this
-        text: userText,
+        message: reply,
       }),
       { status: 200 }
     );
