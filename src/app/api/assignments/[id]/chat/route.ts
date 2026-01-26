@@ -1,21 +1,15 @@
 import { NextRequest } from "next/server";
+import { OpenAI } from "openai";
 import { getAssignment } from "@/lib/assignmentStore";
-import OpenAI from "openai";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: { id: string } }
 ): Promise<Response> {
-  const assignmentId = params.id;
-
-  if (!assignmentId) {
-    return new Response(JSON.stringify({ error: "Missing assignmentId" }), {
-      status: 400,
-    });
-  }
+  const { id } = context.params;
 
   if (!process.env.OPENAI_API_KEY) {
     return new Response(
@@ -28,26 +22,35 @@ export async function POST(
     apiKey: process.env.OPENAI_API_KEY,
   });
 
-  const assignment = getAssignment(assignmentId);
-
+  const assignment = getAssignment(id);
   if (!assignment) {
-    return new Response(JSON.stringify({ error: "Unknown assignmentId" }), {
-      status: 404,
-    });
+    return new Response(
+      JSON.stringify({ error: "Unknown assignmentId" }),
+      { status: 404 }
+    );
   }
 
-  const body = await req.json().catch(() => ({}));
-  const userText = String(body?.message ?? "").trim();
+  try {
+    const body = await req.json().catch(() => ({}));
+    const userText = String(body?.message ?? "").trim();
 
-  if (!userText) {
-    return new Response(JSON.stringify({ error: "Missing message" }), {
-      status: 400,
-    });
+    if (!userText) {
+      return new Response(
+        JSON.stringify({ error: "Missing message" }),
+        { status: 400 }
+      );
+    }
+
+    // Optional: Add OpenAI logic here to respond to userText
+
+    return new Response(
+      JSON.stringify({ ok: true, assignmentId: id }),
+      { status: 200 }
+    );
+  } catch (err: any) {
+    return new Response(
+      JSON.stringify({ error: err?.message ?? "Server error" }),
+      { status: 500 }
+    );
   }
-
-  // Add your assistant logic here (e.g. OpenAI thread call)
-
-  return new Response(JSON.stringify({ success: true }), {
-    status: 200,
-  });
 }
