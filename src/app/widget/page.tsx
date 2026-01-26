@@ -1,88 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { IncomingForm, Files } from 'formidable';
-import fs from 'fs';
-import { promisify } from 'util';
-import { extractTextFromFile } from '@/lib/extract-text';
-import { OpenAIEmbeddings } from '@langchain/openai';
+'use client';
 
-// Disable body parsing so Next.js doesn't consume the stream
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+import FileUpload from "@/app/components/FileUpload";
+import ChatWidget from './ChatWidget';
 
-// Helper to parse form with Promises
-const parseForm = (req: NextRequest): Promise<{ fields: any; files: Files }> => {
-  const form = new IncomingForm({
-    keepExtensions: true,
-    multiples: true,
-    uploadDir: '/tmp',
-  });
-
-  return new Promise((resolve, reject) => {
-    form.parse(req as any, (err, fields, files) => {
-      if (err) reject(err);
-      else resolve({ fields, files });
-    });
-  });
-};
-
-// Helper to chunk text
-function splitIntoChunks(text: string, maxTokens: number) {
-  const sentences = text.split(/(?<=[.?!])\s+/);
-  const chunks: string[] = [];
-  let chunk = '';
-
-  for (const sentence of sentences) {
-    if ((chunk + sentence).length < maxTokens * 4) {
-      chunk += sentence + ' ';
-    } else {
-      chunks.push(chunk.trim());
-      chunk = sentence + ' ';
-    }
-  }
-  if (chunk.trim().length) {
-    chunks.push(chunk.trim());
-  }
-
-  return chunks;
-}
-
-// Main upload handler
-export async function POST(req: NextRequest) {
-  try {
-    const { fields, files } = await parseForm(req);
-
-    if (!files || !files.file) {
-      return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
-    }
-
-    const uploaded = Array.isArray(files.file) ? files.file : [files.file];
-
-    const results: {
-      filename: string;
-      chunks: number;
-      embedded: number;
-    }[] = [];
-
-    for (const file of uploaded) {
-      const text = await extractTextFromFile(file.filepath, file.mimetype || '');
-      const chunks = splitIntoChunks(text, 1000);
-
-      // Embedding logic (placeholder)
-      const embeddings = await new OpenAIEmbeddings().embedDocuments(chunks);
-
-      results.push({
-        filename: file.originalFilename || 'unknown',
-        chunks: chunks.length,
-        embedded: embeddings.length,
-      });
-    }
-
-    return NextResponse.json({ success: true, results });
-  } catch (err: any) {
-    console.error('Upload error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
+export default function WidgetPage() {
+  return (
+    <main className="p-4 max-w-3xl mx-auto">
+      <h1 className="text-2xl font-bold mb-6">Upload Documents</h1>
+      <div className="mb-8">
+        <FileUpload />
+      </div>
+      <ChatWidget />
+    </main>
+  );
 }
