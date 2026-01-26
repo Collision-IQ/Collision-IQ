@@ -1,51 +1,59 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getOpenAI } from "@/lib/openai";
 import { getAssignment } from "@/lib/assignmentStore";
 
-// Optional: prevent static optimization for server-only logic
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
-): Promise<NextResponse> {
+): Promise<Response> {
   try {
     const { id } = await context.params;
 
-    if (!id) {
-      return NextResponse.json({ error: "Missing assignment ID" }, { status: 400 });
-    }
-
     if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
+      return new Response(
+        JSON.stringify({ error: "Missing OPENAI_API_KEY" }),
+        { status: 500 }
+      );
     }
 
     const assignment = getAssignment(id);
     if (!assignment) {
-      return NextResponse.json({ error: "Unknown assignment ID" }, { status: 404 });
+      return new Response(
+        JSON.stringify({ error: "Unknown assignmentId" }),
+        { status: 404 }
+      );
     }
 
     const body = await req.json().catch(() => ({}));
     const userText = String(body?.message ?? "").trim();
 
     if (!userText) {
-      return NextResponse.json({ error: "Missing message" }, { status: 400 });
+      return new Response(
+        JSON.stringify({ error: "Missing message" }),
+        { status: 400 }
+      );
     }
 
+    // 🧠 Optional: Add OpenAI assistant logic here
     const openai = getOpenAI();
+    // const thread = await openai.beta.threads.create();
+    // const completion = await openai.chat.completions.create({ ... });
 
-    // TODO: Add assistant logic here using `openai`
-    // e.g., call openai.chat.completions.create(...) with userText
-
-    return NextResponse.json({
-      ok: true,
-      assignmentId: id,
-      // Optionally include a threadId or response text here
-      text: userText,
-    });
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        assignmentId: id,
+        // threadId: thread.id, // ← include if you implement this
+        text: userText,
+      }),
+      { status: 200 }
+    );
   } catch (err: any) {
-    return NextResponse.json(
-      { error: err?.message ?? "Server error" },
+    return new Response(
+      JSON.stringify({ error: err?.message ?? "Server error" }),
       { status: 500 }
     );
   }
