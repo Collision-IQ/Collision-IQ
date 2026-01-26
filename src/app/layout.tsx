@@ -3,7 +3,6 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Link from "next/link";
 import Image from "next/image";
-import FloatingWidgetMount from "./components/FloatingWidgetMount";
 import FloatingWidgetGate from "./components/FloatingWidgetGate";
 
 export const metadata: Metadata = {
@@ -35,7 +34,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" className="dark" suppressHydrationWarning>
       <body>
         <header className="sticky top-0 z-50 border-b border-[color:var(--border)] bg-[color:var(--bg)]/80 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
@@ -75,9 +74,7 @@ export default function RootLayout({
 
         {children}
 
-        {/* ✅ GLOBAL FLOATING WIDGET */}
-        import FloatingWidgetGate from "./components/FloatingWidgetGate";
-        ...
+        {/* ✅ GLOBAL FLOATING WIDGET (hidden on /widget) */}
         <FloatingWidgetGate />
       </body>
     </html>

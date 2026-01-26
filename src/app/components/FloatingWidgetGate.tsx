@@ -7,10 +7,10 @@ export default function FloatingWidgetGate() {
   const pathname = usePathname();
 
   // Never show the floating launcher inside the widget iframe page.
-  if (pathname.startsWith("/widget")) return null;
+  if (pathname === "/widget" || pathname.startsWith("/widget/")) return null;
 
-  // Optional: also hide on the full-page chat view
-  // if (pathname.startsWith("/chatbot")) return null;
+  // Optional: also hide on full-page chatbot route
+  // if (pathname === "/chatbot" || pathname.startsWith("/chatbot/")) return null;
 
   return <FloatingWidgetMount />;
 }
