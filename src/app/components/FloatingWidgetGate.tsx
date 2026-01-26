@@ -5,6 +5,6 @@ import FloatingWidgetMount from "./FloatingWidgetMount";
 
 export default function FloatingWidgetGate() {
   const pathname = usePathname();
-  if (pathname === "/widget" || pathname.startsWith("/widget/")) return null;
-  return <FloatingWidgetMount />;
+  if (pathname?.startsWith("/widget")) return null;
+  return <FloatingWidgetMount />
 }
