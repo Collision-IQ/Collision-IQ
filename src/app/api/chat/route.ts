@@ -1,16 +1,8 @@
-import OpenAI from "openai";
 import { NextRequest, NextResponse } from "next/server";
+import { getOpenAI } from "@/lib/openai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-let openai: OpenAI | null = null;
-function getOpenAI() {
-  if (!openai) {
-    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  }
-  return openai;
-}
 
 // Simple in-memory mapping: assignmentId -> threadId
 // NOTE: This is fine for dev/testing. On serverless it may reset between invocations.

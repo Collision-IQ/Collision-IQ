@@ -1,17 +1,9 @@
-import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { getAssignment } from "@/lib/assignmentStore";
+import { getOpenAI } from "@/lib/openai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-let openai: OpenAI | null = null;
-function getOpenAI() {
-  if (!openai) {
-    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  }
-  return openai;
-}
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

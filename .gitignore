@@ -54,6 +54,7 @@ System Volume Information/
 .parcel-cache/
 .turbo/
 .swc/
+tsconfig.tsbuildinfo
 
 # ===============================
 # Optional: Upload temp folders (if you add them later)

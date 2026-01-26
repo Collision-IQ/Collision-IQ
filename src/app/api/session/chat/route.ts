@@ -1,16 +1,8 @@
 import { NextRequest } from "next/server";
-import OpenAI from "openai";
 import { requireSession } from "@/lib/sessionStore";
+import { getOpenAI } from "@/lib/openai";
 
 export const runtime = "nodejs";
-
-let openai: OpenAI | null = null;
-function getOpenAI() {
-  if (!openai) {
-    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  }
-  return openai;
-}
 
 function sse(event: string, data: any) {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
