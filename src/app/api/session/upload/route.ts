@@ -5,7 +5,13 @@ import { getSession } from "@/lib/sessionStore";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openai: OpenAI | null = null;
+function getOpenAI() {
+  if (!openai) {
+    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return openai;
+}
 
 export async function POST(req: Request) {
   try {
@@ -27,6 +33,8 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+
+    const openai = getOpenAI();
 
     // Upload file to OpenAI
     const uploaded = await openai.files.create({

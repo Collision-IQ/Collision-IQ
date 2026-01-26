@@ -5,7 +5,13 @@ import { getSession, setSession } from "@/lib/sessionStore";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openai: OpenAI | null = null;
+function getOpenAI() {
+  if (!openai) {
+    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return openai;
+}
 
 function mustEnv(name: string) {
   const v = process.env[name];
@@ -34,6 +40,8 @@ export async function POST(req: Request) {
         reused: true,
       });
     }
+
+    const openai = getOpenAI();
 
     // ✅ NEW: vector stores are top-level
     const vs = await openai.vectorStores.create({

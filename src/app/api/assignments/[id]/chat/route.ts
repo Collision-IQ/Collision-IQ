@@ -4,10 +4,17 @@ import { getAssignment } from "@/lib/assignmentStore";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let openai: OpenAI | null = null;
+function getOpenAI() {
+  if (!openai) {
+    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return openai;
+}
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const a = getAssignment(params.id);
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const a = getAssignment(id);
   if (!a) return new Response(JSON.stringify({ error: "Unknown assignmentId" }), { status: 404 });
 
   const body = await req.json().catch(() => ({}));
@@ -16,6 +23,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const assistantId = process.env.OPENAI_ASSISTANT_ID;
   if (!assistantId) return new Response(JSON.stringify({ error: "Missing OPENAI_ASSISTANT_ID" }), { status: 500 });
+
+  const openai = getOpenAI();
 
   // Add user message to thread
   await openai.beta.threads.messages.create(a.threadId, {
