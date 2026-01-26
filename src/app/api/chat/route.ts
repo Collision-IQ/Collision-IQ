@@ -1,114 +1,117 @@
-import { NextRequest } from "next/server";
 import OpenAI from "openai";
-import { requireSession } from "../../../lib/sessionStore";
+import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-const openai = new OpenAI();
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-function sse(event: string, data: any) {
-  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+// Simple in-memory mapping: assignmentId -> threadId
+// NOTE: This is fine for dev/testing. On serverless it may reset between invocations.
+// If you need persistence later, store this in DB/Redis keyed by assignmentId.
+const threadsByAssignment = new Map<string, string>();
+
+function mustEnv(name: string) {
+  const v = process.env[name];
+  if (!v) throw new Error(`Missing env ${name}`);
+  return v;
 }
 
-export async function POST(req: NextRequest) {
-  const encoder = new TextEncoder();
+function extractTextFromMessage(msg: any): string {
+  // OpenAI Assistants message content is typically an array of parts.
+  // We try to pull all "text" parts safely.
+  const parts = msg?.content ?? [];
+  if (!Array.isArray(parts)) return "";
+  return parts
+    .map((p) => p?.text?.value)
+    .filter(Boolean)
+    .join("\n");
+}
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      let closed = false;
-      const safeClose = () => {
-        if (!closed) {
-          closed = true;
-          controller.close();
-        }
-      };
+async function sleep(ms: number) {
+  await new Promise((r) => setTimeout(r, ms));
+}
 
-      try {
-        // 🔹 Flush headers immediately
-        controller.enqueue(
-          encoder.encode(sse("status", { ready: true }))
-        );
+export async function POST(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    mustEnv("OPENAI_API_KEY");
+    const assistantId = mustEnv("OPENAI_ASSISTANT_ID");
 
-        const { sessionKey, message } = await req.json();
+    const assignmentId = params.id;
+    if (!assignmentId) {
+      return NextResponse.json({ error: "Missing assignment id" }, { status: 400 });
+    }
 
-        if (!sessionKey || !message) {
-          controller.enqueue(
-            encoder.encode(
-              sse("error", { message: "Missing sessionKey or message" })
-            )
-          );
-          safeClose();
-          return;
-        }
+    const body = await req.json().catch(() => ({}));
+    const message = String(body?.message ?? "").trim();
 
-        // ✅ Use your existing session store
-        const session = requireSession(sessionKey);
+    if (!message) {
+      return NextResponse.json({ error: "Missing message" }, { status: 400 });
+    }
 
-        // 🔹 Attach user message
-        await openai.beta.threads.messages.create(session.threadId, {
-          role: "user",
-          content: message,
-        });
+    // Create or reuse a thread for this assignment
+    let threadId = threadsByAssignment.get(assignmentId);
+    if (!threadId) {
+      const thread = await openai.beta.threads.create();
+      threadId = thread.id;
+      threadsByAssignment.set(assignmentId, threadId);
+    }
 
-        // 🔹 Abort OpenAI run if client disconnects
-        const abortController = new AbortController();
-        req.signal.addEventListener("abort", () => {
-          abortController.abort();
-        });
+    // Add user message
+    await openai.beta.threads.messages.create(threadId, {
+      role: "user",
+      content: message,
+    });
 
-        // 🔹 Start streaming run
-        const runner = openai.beta.threads.runs.stream(
-          session.threadId,
-          {
-            assistant_id: process.env.OPENAI_ASSISTANT_ID!,
-          },
-          {
-            signal: abortController.signal,
-          }
-        );
+    // Start a run
+    const run = await openai.beta.threads.runs.create(threadId, {
+      assistant_id: assistantId,
+    });
 
-        // 🔹 Immediate heartbeat so UI feels alive
-        controller.enqueue(
-          encoder.encode(sse("delta", { text: " " }))
-        );
+    // Poll until complete (simple + reliable for production builds)
+    // You can swap this for streaming later.
+    let status = run.status;
+    let tries = 0;
 
-        runner.on("textDelta", (delta) => {
-          controller.enqueue(
-            encoder.encode(sse("delta", { text: delta.value }))
-          );
-        });
+    while (
+      status !== "completed" &&
+      status !== "failed" &&
+      status !== "cancelled" &&
+      status !== "expired" &&
+      tries < 45
+    ) {
+      tries += 1;
+      await sleep(700);
+      const latest = await openai.beta.threads.runs.retrieve(run.id, { thread_id: threadId });
+      status = latest.status;
+    }
 
-        runner.on("error", (err) => {
-          controller.enqueue(
-            encoder.encode(
-              sse("error", { message: err?.message ?? "Run failed" })
-            )
-          );
-          safeClose();
-        });
+    if (status !== "completed") {
+      return NextResponse.json(
+        { error: "Run did not complete", status },
+        { status: 500 }
+      );
+    }
 
-        runner.on("end", () => {
-          controller.enqueue(
-            encoder.encode(sse("done", { ok: true }))
-          );
-          safeClose();
-        });
-      } catch (err: any) {
-        controller.enqueue(
-          encoder.encode(
-            sse("error", { message: err?.message ?? "Server error" })
-          )
-        );
-        safeClose();
-      }
-    },
-  });
+    // Fetch latest messages and return the most recent assistant text
+    const list = await openai.beta.threads.messages.list(threadId, { limit: 10 });
+    const latestAssistant = list.data.find((m) => m.role === "assistant");
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-    },
-  });
+    const text = latestAssistant ? extractTextFromMessage(latestAssistant) : "";
+
+    return NextResponse.json({
+      ok: true,
+      assignmentId,
+      threadId,
+      text,
+    });
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err?.message ?? "Server error" },
+      { status: 500 }
+    );
+  }
 }

@@ -17,6 +17,7 @@ export default function WidgetClient() {
 
   useEffect(() => setMounted(true), []);
 
+  // create/ensure session once (client only)
   useEffect(() => {
     if (!mounted) return;
 
@@ -66,6 +67,7 @@ export default function WidgetClient() {
 
   async function sendMessage() {
     if (!mounted || streaming) return;
+
     const msg = input.trim();
     if (!msg) return;
 
