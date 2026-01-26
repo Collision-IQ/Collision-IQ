@@ -1,70 +1,133 @@
+import { NextRequest } from "next/server";
 import OpenAI from "openai";
 import { requireSession } from "@/lib/sessionStore";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI();
 
 function sse(event: string, data: any) {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
-export async function POST(req: Request) {
+function streamRun(params: {
+  sessionKey: string | null;
+  message: string | null;
+  req: NextRequest;
+}) {
+  const { sessionKey, message, req } = params;
   const encoder = new TextEncoder();
 
-  const stream = new ReadableStream<Uint8Array>({
+  return new ReadableStream({
     async start(controller) {
+      let closed = false;
+      const safeClose = () => {
+        if (!closed) {
+          closed = true;
+          controller.close();
+        }
+      };
+
       try {
-        const body = await req.json().catch(() => ({}));
-        const sessionKey = String(body?.sessionKey ?? "").trim();
-        const message = String(body?.message ?? "").trim();
+        // Flush headers / confirm connection immediately
+        controller.enqueue(encoder.encode(sse("status", { ready: true })));
 
-        if (!sessionKey) throw new Error("Missing sessionKey");
-        if (!message) throw new Error("Missing message");
+        if (!sessionKey || !message) {
+          controller.enqueue(
+            encoder.encode(sse("error", { message: "Missing sessionKey or message" }))
+          );
+          safeClose();
+          return;
+        }
 
-        const assistantId = process.env.OPENAI_ASSISTANT_ID;
-        if (!assistantId) throw new Error("Missing env OPENAI_ASSISTANT_ID");
+        let session;
+        try {
+          session = requireSession(sessionKey);
+        } catch {
+          controller.enqueue(
+            encoder.encode(
+              sse("error", {
+                message:
+                  "Session not initialized. Call POST /api/session first (from /widget/page.tsx) before chatting.",
+              })
+            )
+          );
+          safeClose();
+          return;
+        }
 
-        const session = requireSession(sessionKey);
-
+        // Attach user message to thread
         await openai.beta.threads.messages.create(session.threadId, {
           role: "user",
           content: message,
         });
 
-        controller.enqueue(encoder.encode(sse("status", { message: "running" })));
+        // Abort OpenAI run if client disconnects
+        const abortController = new AbortController();
+        req.signal.addEventListener("abort", () => abortController.abort());
 
-        // ✅ Stream run WITHOUT tool_resources (thread already has it)
-        const runner = openai.beta.threads.runs.stream(session.threadId, {
-          assistant_id: assistantId,
-        });
+        const runner = openai.beta.threads.runs.stream(
+          session.threadId,
+          { assistant_id: process.env.OPENAI_ASSISTANT_ID! },
+          { signal: abortController.signal }
+        );
+
+        // Heartbeat so UI feels alive immediately
+        controller.enqueue(encoder.encode(sse("delta", { text: " " })));
 
         runner.on("textDelta", (delta) => {
-          const text = delta?.value ?? "";
-          if (text) controller.enqueue(encoder.encode(sse("delta", { text })));
+          controller.enqueue(encoder.encode(sse("delta", { text: delta.value })));
         });
 
-        runner.on("error", (e: any) => {
+        runner.on("error", (err: any) => {
           controller.enqueue(
-            encoder.encode(sse("error", { message: e?.message ?? String(e) }))
+            encoder.encode(sse("error", { message: err?.message ?? "Run failed" }))
           );
+          safeClose();
         });
 
         runner.on("end", () => {
           controller.enqueue(encoder.encode(sse("done", { ok: true })));
-          controller.close();
+          safeClose();
         });
       } catch (err: any) {
-        controller.enqueue(encoder.encode(sse("error", { message: err?.message ?? String(err) })));
-        controller.close();
+        controller.enqueue(
+          encoder.encode(sse("error", { message: err?.message ?? "Server error" }))
+        );
+        safeClose();
       }
     },
   });
+}
+
+// ✅ SSE via GET (EventSource)
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const sessionKey = url.searchParams.get("sessionKey");
+  const message = url.searchParams.get("message");
+
+  const stream = streamRun({ sessionKey, message, req });
 
   return new Response(stream, {
     headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
+}
+
+// ✅ Keep POST for any fetch-based clients
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(() => null);
+  const sessionKey = body?.sessionKey ?? null;
+  const message = body?.message ?? null;
+
+  const stream = streamRun({ sessionKey, message, req });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
     },
