@@ -38,8 +38,10 @@ export default function ChatWidget() {
 
   // Auto scroll to bottom on new message
   useEffect(() => {
+   if (!loading) {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+   }
+ }, [messages, loading]);
 
   return (
     <div className="flex h-screen w-screen flex-col bg-black text-white">
