@@ -74,7 +74,7 @@ export default function RootLayout({
 
         {children}
 
-        {/* ✅ GLOBAL FLOATING WIDGET (hidden on /widget) */}
+        {/* ✅ Global launcher everywhere EXCEPT /widget */}
         <FloatingWidgetGate />
       </body>
     </html>

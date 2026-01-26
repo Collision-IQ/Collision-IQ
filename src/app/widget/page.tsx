@@ -14,7 +14,7 @@ export default function WidgetPage() {
   const flushTimer = useRef<number | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
 
-  // ✅ Ensure session is created once per browser session
+  // ✅ Create/ensure session once
   useEffect(() => {
     const sessionKey =
       sessionStorage.getItem("sessionKey") ??
@@ -24,36 +24,41 @@ export default function WidgetPage() {
         return id;
       })();
 
-    // Create/ensure session thread server-side
     fetch("/api/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionKey }),
-    }).catch(() => {
-      // if offline, dev hiccup, etc — widget will show error on send
-    });
+    }).catch(() => {});
   }, []);
 
   function flushBuffer() {
+    const chunk = bufferRef.current;
+    if (!chunk) return;
+
     setMessages((prev) => {
       const copy = [...prev];
       const last = copy[copy.length - 1];
-      if (last?.role === "assistant") {
-        last.content += bufferRef.current;
-      }
+      if (last?.role === "assistant") last.content += chunk;
       return copy;
     });
+
     bufferRef.current = "";
   }
 
   function handleDelta(text: string) {
     bufferRef.current += text;
+
     if (!flushTimer.current) {
       flushTimer.current = window.setTimeout(() => {
         flushBuffer();
         flushTimer.current = null;
       }, 40);
     }
+  }
+
+  function closeStream() {
+    sourceRef.current?.close();
+    sourceRef.current = null;
   }
 
   async function sendMessage() {
@@ -68,274 +73,57 @@ export default function WidgetPage() {
     }
 
     const msg = input;
+    setInput("");
+    setStreaming(true);
+
     setMessages((m) => [
       ...m,
       { role: "user", content: msg },
       { role: "assistant", content: "" },
     ]);
-    setInput("");
-    setStreaming(true);
 
     const source = new EventSource(
-      `/api/session/chat?sessionKey=${encodeURIComponent(
-        sessionKey
-      )}&message=${encodeURIComponent(msg)}`
+      `/api/session/chat?sessionKey=${encodeURIComponent(sessionKey)}&message=${encodeURIComponent(msg)}`
     );
-
     sourceRef.current = source;
 
-    source.addEventListener("delta", (e: any) => {
-      handleDelta(JSON.parse(e.data).text);
+    source.addEventListener("delta", (e: MessageEvent) => {
+      const payload = JSON.parse(e.data);
+      handleDelta(payload.text ?? "");
     });
 
+    // server: event: error
     source.addEventListener("error", (e: any) => {
+      // Browser also uses onerror; we keep this simple.
+      // If server sent an "error" event with JSON, it would arrive here as MessageEvent in some browsers,
+      // but most of the time network errors also trigger this.
       setStreaming(false);
-      source.close();
-      setError("Stream error. Check server logs.");
+      closeStream();
+      flushBuffer();
     });
 
     source.addEventListener("done", () => {
       flushBuffer();
       setStreaming(false);
-      source.close();
+      closeStream();
     });
 
-    source.addEventListener("error", () => {
+    source.onerror = () => {
       setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    // Handle explicit server-sent error events
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    // Real "error" payload from server:
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    // Correct handler for server "error" event name:
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    source.addEventListener("error", () => {
-      setStreaming(false);
-      source.close();
-    });
-
-    // ✅ Actually listen to server-sent "error" events
-    source.addEventListener("error", () => {
-      // Already handled by browser-level error above
-    });
-
-    source.addEventListener("error", () => {
-      // no-op
-    });
-
-    source.addEventListener("error", () => {
-      // no-op
-    });
-
-    source.addEventListener("error", () => {
-      // no-op
-    });
-
-    source.addEventListener("error", () => {
-      // no-op
-    });
-
-    source.addEventListener("error", () => {
-      // no-op
-    });
-
-    source.addEventListener("error", () => {
-      // no-op
-    });
-
-    source.addEventListener("error", () => {
-      // no-op
-    });
-
-    source.addEventListener("error", () => {
-      // no-op
-    });
-
-    source.addEventListener("error", () => {
-      // no-op
-    });
-
-    source.addEventListener("error", () => {
-      // no-op
-    });
-
-    source.addEventListener("error", () => {
-      // no-op
-    });
-
-    // Listen for explicit server event: event: error
-    source.addEventListener("error", () => {
-      // (kept minimal)
-    });
-
-    source.addEventListener("error", () => {
-      // (kept minimal)
-    });
-
-    source.addEventListener("error", () => {
-      // (kept minimal)
-    });
-
-    // ✅ Proper server "error" event listener
-    source.addEventListener("error", () => {
-      // This is redundant, but harmless
-    });
+      closeStream();
+      flushBuffer();
+      setError("Stream disconnected. If this keeps happening, check /api/session/chat logs.");
+    };
   }
 
   useEffect(() => {
-    return () => {
-      sourceRef.current?.close();
-    };
+    return () => closeStream();
   }, []);
 
   return (
     <div className="flex flex-col h-full bg-[#0b0f14] text-white">
       {error && (
-        <div className="px-3 py-2 text-sm bg-red-900/30 border-b border-red-700">
+        <div className="px-3 py-2 text-sm border-b border-red-700 bg-red-900/30">
           {error}
         </div>
       )}
@@ -352,6 +140,8 @@ export default function WidgetPage() {
 
       <div className="p-3 border-t border-gray-700 flex gap-2">
         <input
+          suppressHydrationWarning
+          autoComplete="off"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && sendMessage()}

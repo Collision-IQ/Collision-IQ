@@ -3,19 +3,13 @@ import OpenAI from "openai";
 import { requireSession } from "@/lib/sessionStore";
 
 export const runtime = "nodejs";
-
 const openai = new OpenAI();
 
 function sse(event: string, data: any) {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
-function streamRun(params: {
-  sessionKey: string | null;
-  message: string | null;
-  req: NextRequest;
-}) {
-  const { sessionKey, message, req } = params;
+function makeStream(req: NextRequest, sessionKey: string | null, message: string | null) {
   const encoder = new TextEncoder();
 
   return new ReadableStream({
@@ -29,13 +23,10 @@ function streamRun(params: {
       };
 
       try {
-        // Flush headers / confirm connection immediately
         controller.enqueue(encoder.encode(sse("status", { ready: true })));
 
         if (!sessionKey || !message) {
-          controller.enqueue(
-            encoder.encode(sse("error", { message: "Missing sessionKey or message" }))
-          );
+          controller.enqueue(encoder.encode(sse("error", { message: "Missing sessionKey or message" })));
           safeClose();
           return;
         }
@@ -46,23 +37,18 @@ function streamRun(params: {
         } catch {
           controller.enqueue(
             encoder.encode(
-              sse("error", {
-                message:
-                  "Session not initialized. Call POST /api/session first (from /widget/page.tsx) before chatting.",
-              })
+              sse("error", { message: "Session not initialized. Call POST /api/session first." })
             )
           );
           safeClose();
           return;
         }
 
-        // Attach user message to thread
         await openai.beta.threads.messages.create(session.threadId, {
           role: "user",
           content: message,
         });
 
-        // Abort OpenAI run if client disconnects
         const abortController = new AbortController();
         req.signal.addEventListener("abort", () => abortController.abort());
 
@@ -72,7 +58,6 @@ function streamRun(params: {
           { signal: abortController.signal }
         );
 
-        // Heartbeat so UI feels alive immediately
         controller.enqueue(encoder.encode(sse("delta", { text: " " })));
 
         runner.on("textDelta", (delta) => {
@@ -80,9 +65,7 @@ function streamRun(params: {
         });
 
         runner.on("error", (err: any) => {
-          controller.enqueue(
-            encoder.encode(sse("error", { message: err?.message ?? "Run failed" }))
-          );
+          controller.enqueue(encoder.encode(sse("error", { message: err?.message ?? "Run failed" })));
           safeClose();
         });
 
@@ -91,22 +74,19 @@ function streamRun(params: {
           safeClose();
         });
       } catch (err: any) {
-        controller.enqueue(
-          encoder.encode(sse("error", { message: err?.message ?? "Server error" }))
-        );
+        controller.enqueue(encoder.encode(sse("error", { message: err?.message ?? "Server error" })));
         safeClose();
       }
     },
   });
 }
 
-// ✅ SSE via GET (EventSource)
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const sessionKey = url.searchParams.get("sessionKey");
   const message = url.searchParams.get("message");
 
-  const stream = streamRun({ sessionKey, message, req });
+  const stream = makeStream(req, sessionKey, message);
 
   return new Response(stream, {
     headers: {
@@ -117,13 +97,12 @@ export async function GET(req: NextRequest) {
   });
 }
 
-// ✅ Keep POST for any fetch-based clients
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
   const sessionKey = body?.sessionKey ?? null;
   const message = body?.message ?? null;
 
-  const stream = streamRun({ sessionKey, message, req });
+  const stream = makeStream(req, sessionKey, message);
 
   return new Response(stream, {
     headers: {

@@ -27,39 +27,34 @@ export default function FloatingWidget() {
 
       {open && (
         <div
-          onClick={() => setOpen(false)}
           style={{
             position: "fixed",
             inset: 0,
             background: "rgba(0,0,0,.5)",
             zIndex: 9998,
           }}
+          onClick={() => setOpen(false)}
         />
       )}
 
-      <div
-        style={{
-          position: "fixed",
-          bottom: 20,
-          right: 20,
-          width: 420,
-          height: 640,
-          background: "#0b0f14",
-          borderRadius: 16,
-          overflow: "hidden",
-          zIndex: 9999,
-          boxShadow: "0 20px 60px rgba(0,0,0,.5)",
-          transform: open ? "scale(1)" : "scale(0)",
-          opacity: open ? 1 : 0,
-          transition: "all .2s ease",
-          pointerEvents: open ? "auto" : "none",
-        }}
-      >
-        <iframe
-          src="/widget"
-          style={{ width: "100%", height: "100%", border: 0 }}
-        />
-      </div>
+      {open && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 20,
+            right: 20,
+            width: 420,
+            height: 640,
+            background: "#0b0f14",
+            borderRadius: 16,
+            overflow: "hidden",
+            zIndex: 9999,
+            boxShadow: "0 20px 60px rgba(0,0,0,.5)",
+          }}
+        >
+          <iframe src="/widget" style={{ width: "100%", height: "100%", border: 0 }} />
+        </div>
+      )}
     </>
   );
 }
