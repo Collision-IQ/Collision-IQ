@@ -4,6 +4,7 @@ import "./globals.css";
 import Link from "next/link";
 import Image from "next/image";
 import FloatingWidgetMount from "./components/FloatingWidgetMount";
+import FloatingWidgetGate from "./components/FloatingWidgetGate";
 
 export const metadata: Metadata = {
   title: "Collision Academy",
@@ -75,7 +76,9 @@ export default function RootLayout({
         {children}
 
         {/* ✅ GLOBAL FLOATING WIDGET */}
-        <FloatingWidgetMount />
+        import FloatingWidgetGate from "./components/FloatingWidgetGate";
+        ...
+        <FloatingWidgetGate />
       </body>
     </html>
   );
