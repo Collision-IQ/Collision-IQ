@@ -6,11 +6,16 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest): Promise<Response> {
+  if (!process.env.OPENAI_API_KEY) {
+    return new Response(JSON.stringify({ error: "Missing OPENAI_API_KEY" }), {
+      status: 500,
+    });
+  }
+
   const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
 
-  // Now safely use it...
   try {
     const url = new URL(req.url);
     const parts = url.pathname.split("/");
@@ -38,8 +43,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       });
     }
 
-    // Optional: Stream logic or assistant calls here...
-
+    // ✅ Optional: Add assistant logic here
     return new Response(JSON.stringify({ success: true }), {
       status: 200,
     });
