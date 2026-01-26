@@ -7,13 +7,17 @@ export const dynamic = "force-dynamic";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-export async function POST(req: Request) {
+export async function GET(request: Request) {
+  // handle GET
+}
+
+export async function POST(request: Request) {
   try {
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
     }
 
-    const form = await req.formData();
+    const form = await request.formData();
     const sessionKey = String(form.get("sessionKey") ?? "").trim();
     const file = form.get("file");
 
