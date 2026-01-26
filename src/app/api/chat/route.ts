@@ -1,18 +1,29 @@
-// app/api/chat/route.ts
-import { streamText } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
+// /api/chat/route.ts
 
-const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-export const runtime = 'edge';
+import { NextResponse } from 'next/server';
 
 export async function POST(req: Request) {
-  const { messages } = await req.json();
+  try {
+    const body = await req.json();
 
-  const result = await streamText({
-    model: openai('gpt-4o'),
-    messages,
-  });
+    if (!body?.message || typeof body.message !== 'string') {
+      return NextResponse.json(
+        { error: 'Invalid request: message is required.' },
+        { status: 400 }
+      );
+    }
 
-  return result.toTextStreamResponse();
+    const userMessage = body.message.trim();
+
+    // ✅ Mock response — replace with OpenAI integration later
+    const reply = `You said: ${userMessage}`;
+
+    return NextResponse.json({ message: reply });
+  } catch (error) {
+    console.error('API Error:', error);
+    return NextResponse.json(
+      { error: 'Internal Server Error' },
+      { status: 500 }
+    );
+  }
 }

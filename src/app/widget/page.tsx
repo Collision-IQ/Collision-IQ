@@ -1,7 +1,10 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Message } from '@/lib/types'; // <-- ADD THIS
+type Message = {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+};
 
 export default function ChatWidget() {
   const [input, setInput] = useState('');
