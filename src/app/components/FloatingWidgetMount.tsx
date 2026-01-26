@@ -23,7 +23,7 @@ export default function FloatingWidgetMount() {
       {/* Modal */}
       {open && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur flex items-center justify-center">
-          <div className="relative w-[420px] h-[700px] bg-black rounded-2xl overflow-hidden border border-white/10 shadow-lg">
+          <div className="relative w-full max-w-[420px] h-[80vh] md:h-[700px] bg-black rounded-2xl overflow-hidden border border-white/10 shadow-lg">
             <iframe
               src="/chatbot"
               className="w-full h-full"

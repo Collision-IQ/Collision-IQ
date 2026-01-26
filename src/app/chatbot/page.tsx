@@ -1,16 +1,19 @@
+// src/app/chatbot/page.tsx
+
+'use client';
+
 export default function ChatbotPage() {
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10">
-      <h1 className="text-2xl font-semibold text-white">Collision-IQ Chat</h1>
-      <p className="mt-2 text-sm text-white/70">
-        Chat is loading in an embedded widget.
-      </p>
+    <div className="flex h-screen w-screen flex-col bg-black text-white">
+      <header className="p-4 border-b border-white/10">
+        <h1 className="text-xl font-semibold">Collision-IQ Chat</h1>
+        <p className="text-sm text-white/50">Chat is loading in an embedded widget.</p>
+      </header>
 
-      <div className="mt-6 h-[700px] w-full overflow-hidden rounded-2xl border border-white/10 bg-black">
+      <div className="flex-1 overflow-auto p-4">
         <iframe
           src="/widget"
-          className="h-full w-full"
-          style={{ border: "none" }}
+          className="w-full h-full border-none rounded-xl"
           title="Collision Academy Chat"
         />
       </div>
