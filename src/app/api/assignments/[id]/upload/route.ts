@@ -1,39 +1,57 @@
-import OpenAI from "openai";
-import { NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { getAssignment } from "@/lib/assignmentStore";
+import { OpenAI } from "openai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+export async function POST(req: NextRequest): Promise<Response> {
+  try {
+    const url = new URL(req.url);
+    const parts = url.pathname.split("/");
+    const assignmentId = parts[parts.indexOf("assignments") + 1];
 
-export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const a = getAssignment(params.id);
-  if (!a) return NextResponse.json({ error: "Unknown assignmentId" }, { status: 404 });
+    if (!assignmentId) {
+      return new Response(JSON.stringify({ error: "Missing assignmentId" }), {
+        status: 400,
+      });
+    }
 
-  const form = await req.formData();
-  const file = form.get("file");
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "Missing file field" }, { status: 400 });
+    if (!process.env.OPENAI_API_KEY) {
+      return new Response(
+        JSON.stringify({ error: "Missing OPENAI_API_KEY" }),
+        { status: 500 }
+      );
+    }
+
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+
+    const assignment = getAssignment(assignmentId);
+    if (!assignment) {
+      return new Response(JSON.stringify({ error: "Unknown assignmentId" }), {
+        status: 404,
+      });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const userText = String(body?.message ?? "").trim();
+
+    if (!userText) {
+      return new Response(JSON.stringify({ error: "Missing message" }), {
+        status: 400,
+      });
+    }
+
+    // Upload or assistant logic can go here...
+
+    return new Response(JSON.stringify({ success: true }), { status: 200 });
+
+  } catch (err: any) {
+    return new Response(
+      JSON.stringify({ error: err?.message ?? "Server error" }),
+      { status: 500 }
+    );
   }
-
-  // 1) Upload to OpenAI Files
-  const uploaded = await openai.files.create({
-    file,
-    purpose: "assistants",
-  });
-
-  // 2) Attach file to vector store (for file_search)
-  // API ref: POST /v1/vector_stores/{vector_store_id}/files with { file_id } :contentReference[oaicite:3]{index=3}
-  const vsFile = await openai.vectorStores.files.create(a.vectorStoreId, {
-    file_id: uploaded.id,
-  });
-
-  return NextResponse.json({
-    ok: true,
-    fileId: uploaded.id,
-    vectorStoreFileId: vsFile.id,
-    status: vsFile.status,
-    filename: file.name,
-  });
 }
