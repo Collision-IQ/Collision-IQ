@@ -1,11 +1,9 @@
-import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/sessionStore";
+import { getOpenAI } from "@/lib/openai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export async function POST(req: Request) {
   try {
@@ -29,6 +27,8 @@ export async function POST(req: Request) {
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "Missing file field" }, { status: 400 });
     }
+
+    const openai = getOpenAI();
 
     // 1) Upload file to OpenAI
     const uploaded = await openai.files.create({

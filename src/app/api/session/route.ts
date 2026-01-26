@@ -1,11 +1,9 @@
-import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { getSession, setSession } from "@/lib/sessionStore";
+import { getOpenAI } from "@/lib/openai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 function mustEnv(name: string) {
   const v = process.env[name];
@@ -34,6 +32,8 @@ export async function POST(req: Request) {
         reused: true,
       });
     }
+
+    const openai = getOpenAI();
 
     // ✅ NEW: vector stores are top-level
     const vs = await openai.vectorStores.create({

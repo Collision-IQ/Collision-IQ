@@ -1,10 +1,8 @@
-import OpenAI from "openai";
 import { NextRequest, NextResponse } from "next/server";
+import { getOpenAI } from "@/lib/openai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Simple in-memory mapping: assignmentId -> threadId
 // NOTE: This is fine for dev/testing. On serverless it may reset between invocations.
@@ -32,25 +30,24 @@ async function sleep(ms: number) {
   await new Promise((r) => setTimeout(r, ms));
 }
 
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function POST(req: NextRequest) {
   try {
     mustEnv("OPENAI_API_KEY");
     const assistantId = mustEnv("OPENAI_ASSISTANT_ID");
 
-    const assignmentId = params.id;
+    const body = await req.json().catch(() => ({}));
+    const assignmentId = String(body?.assignmentId ?? "").trim();
     if (!assignmentId) {
       return NextResponse.json({ error: "Missing assignment id" }, { status: 400 });
     }
 
-    const body = await req.json().catch(() => ({}));
     const message = String(body?.message ?? "").trim();
 
     if (!message) {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
     }
+
+    const openai = getOpenAI();
 
     // Create or reuse a thread for this assignment
     let threadId = threadsByAssignment.get(assignmentId);

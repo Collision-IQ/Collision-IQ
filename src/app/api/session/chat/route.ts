@@ -1,9 +1,8 @@
 import { NextRequest } from "next/server";
-import OpenAI from "openai";
 import { requireSession } from "@/lib/sessionStore";
+import { getOpenAI } from "@/lib/openai";
 
 export const runtime = "nodejs";
-const openai = new OpenAI();
 
 function sse(event: string, data: any) {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -43,6 +42,8 @@ function makeStream(req: NextRequest, sessionKey: string | null, message: string
           safeClose();
           return;
         }
+
+        const openai = getOpenAI();
 
         await openai.beta.threads.messages.create(session.threadId, {
           role: "user",

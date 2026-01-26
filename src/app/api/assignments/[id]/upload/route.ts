@@ -1,14 +1,13 @@
-import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { getAssignment } from "@/lib/assignmentStore";
+import { getOpenAI } from "@/lib/openai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-export async function POST(req: Request, { params }: { params: { id: string } }) {
-  const a = getAssignment(params.id);
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const a = getAssignment(id);
   if (!a) return NextResponse.json({ error: "Unknown assignmentId" }, { status: 404 });
 
   const form = await req.formData();
@@ -16,6 +15,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "Missing file field" }, { status: 400 });
   }
+
+  const openai = getOpenAI();
 
   // 1) Upload to OpenAI Files
   const uploaded = await openai.files.create({
