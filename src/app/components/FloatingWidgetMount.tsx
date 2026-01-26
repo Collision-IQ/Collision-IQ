@@ -1,13 +1,12 @@
-// src/app/components/FloatingWidgetMount.tsx
 "use client";
 
 import dynamic from "next/dynamic";
 
-const FloatingWidget = dynamic(() => import("./FloatingWidget"), {
+const WidgetClient = dynamic(() => import("./WidgetClient"), {
   ssr: false,
   loading: () => null,
 });
 
 export default function FloatingWidgetMount() {
-  return <FloatingWidget />;
+  return <WidgetClient />;
 }
