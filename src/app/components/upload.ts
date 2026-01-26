@@ -4,16 +4,17 @@ import fs from 'fs';
 import { promisify } from 'util';
 import { extractTextFromFile } from '@/lib/extract-text';
 import { OpenAIEmbeddings } from '@langchain/openai';
+import path from 'path';
 
-// Disable body parsing so Next.js doesn't consume the stream
 export const config = {
   api: {
     bodyParser: false,
   },
 };
 
-// Helper to parse form with Promises
-const parseForm = (req: NextRequest): Promise<{ fields: any; files: Files }> => {
+type ParseResult = { fields: any; files: Files };
+
+function parseForm(req: NextRequest): Promise<ParseResult> {
   const form = new IncomingForm({
     keepExtensions: true,
     multiples: true,
@@ -22,59 +23,57 @@ const parseForm = (req: NextRequest): Promise<{ fields: any; files: Files }> => 
 
   return new Promise((resolve, reject) => {
     form.parse(req as any, (err, fields, files) => {
-      if (err) reject(err);
-      else resolve({ fields, files });
+      if (err) return reject(err);
+      resolve({ fields, files });
     });
   });
-};
+}
 
-// Helper to chunk text
-function splitIntoChunks(text: string, maxTokens: number) {
+function splitIntoChunks(text: string, maxTokens = 1000): string[] {
   const sentences = text.split(/(?<=[.?!])\s+/);
   const chunks: string[] = [];
   let chunk = '';
 
   for (const sentence of sentences) {
-    if ((chunk + sentence).length < maxTokens * 4) {
-      chunk += sentence + ' ';
-    } else {
+    if ((chunk + sentence).split(' ').length > maxTokens) {
       chunks.push(chunk.trim());
-      chunk = sentence + ' ';
+      chunk = sentence;
+    } else {
+      chunk += ' ' + sentence;
     }
   }
-  if (chunk.trim().length) {
-    chunks.push(chunk.trim());
-  }
 
+  if (chunk.trim()) chunks.push(chunk.trim());
   return chunks;
 }
 
-// Main upload handler
+async function embedChunks(chunks: string[]) {
+  const embedder = new OpenAIEmbeddings();
+  return await embedder.embedDocuments(chunks);
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const { fields, files } = await parseForm(req);
+    const { files } = await parseForm(req);
 
     if (!files || !files.file) {
-      return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
+      return NextResponse.json({ error: 'No files uploaded' }, { status: 400 });
     }
 
     const uploaded = Array.isArray(files.file) ? files.file : [files.file];
-
-    const results: {
-      filename: string;
-      chunks: number;
-      embedded: number;
-    }[] = [];
+    const results: any[] = [];
 
     for (const file of uploaded) {
-      const text = await extractTextFromFile(file.filepath, file.mimetype || '');
-      const chunks = splitIntoChunks(text, 1000);
+      const filepath = (file as any).filepath || (file as any).path;
+      const mimetype = (file as any).mimetype || (file as any).type;
+      const originalFilename = (file as any).originalFilename || path.basename(filepath);
 
-      // Embedding logic (placeholder)
-      const embeddings = await new OpenAIEmbeddings().embedDocuments(chunks);
+      const text = await extractTextFromFile(filepath, mimetype);
+      const chunks = splitIntoChunks(text, 1000);
+      const embeddings = await embedChunks(chunks);
 
       results.push({
-        filename: file.originalFilename || 'unknown',
+        filename: originalFilename,
         chunks: chunks.length,
         embedded: embeddings.length,
       });
