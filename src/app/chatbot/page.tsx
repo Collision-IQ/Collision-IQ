@@ -10,10 +10,11 @@ export default function ChatbotPage() {
         <p className="text-sm text-white/50">Chat is loading in an embedded widget.</p>
       </header>
 
-      <div className="flex-1 overflow-auto p-4">
+      {/* fix: flex container w/ min-h-0 to let iframe scroll */}
+      <div className="flex flex-1 min-h-0">
         <iframe
           src="/widget"
-          className="w-full h-full border-none rounded-xl"
+          className="w-full h-full border-none"
           title="Collision Academy Chat"
         />
       </div>

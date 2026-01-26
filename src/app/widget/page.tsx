@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 type Message = {
   role: 'system' | 'user' | 'assistant';
@@ -13,6 +13,7 @@ export default function ChatWidget() {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const sendMessage = async () => {
     if (!input.trim()) return;
@@ -35,26 +36,34 @@ export default function ChatWidget() {
     setLoading(false);
   };
 
+  // Auto scroll to bottom on new message
+  useEffect(() => {
+    scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
   return (
-    <div className="flex h-full w-full flex-col bg-black text-white">
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+    <div className="flex h-screen w-screen flex-col bg-black text-white">
+      {/* Scrollable messages area */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((m, i) => (
           <div
             key={i}
-            className={`text-sm ${
+            className={`text-sm whitespace-pre-wrap ${
               m.role === 'user'
                 ? 'text-blue-400 text-right'
                 : m.role === 'assistant'
-                ? 'text-green-400'
+                ? 'text-green-400 text-left'
                 : 'text-gray-400'
             }`}
           >
             <span className="font-semibold">{m.role}:</span> {m.content}
           </div>
         ))}
+        <div ref={scrollRef} />
       </div>
 
-      <div className="border-t border-white/10 p-3">
+      {/* Input bar */}
+      <div className="border-t border-white/10 p-4">
         <div className="flex gap-2">
           <input
             value={input}
