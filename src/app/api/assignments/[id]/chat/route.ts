@@ -1,15 +1,23 @@
 import { NextRequest } from "next/server";
-import { OpenAI } from "openai";
 import { getAssignment } from "@/lib/assignmentStore";
+import OpenAI from "openai";
 
-export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function POST(
   req: NextRequest,
-  context: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ): Promise<Response> {
-  const { id } = context.params;
+  // ✅ Next.js 16: params MUST be awaited
+  const { id } = await context.params;
+
+  if (!id) {
+    return new Response(
+      JSON.stringify({ error: "Missing assignmentId" }),
+      { status: 400 }
+    );
+  }
 
   if (!process.env.OPENAI_API_KEY) {
     return new Response(
@@ -41,7 +49,7 @@ export async function POST(
       );
     }
 
-    // Optional: Add OpenAI logic here to respond to userText
+    // ✅ Assistant / OpenAI logic can go here
 
     return new Response(
       JSON.stringify({ ok: true, assignmentId: id }),
