@@ -5,6 +5,9 @@ import { useEffect, useRef, useState } from "react";
 type Msg = { role: "user" | "assistant"; content: string };
 
 export default function WidgetPage() {
+  // ✅ Prevent hydration mismatch on interactive UI
+  const [mounted, setMounted] = useState(false);
+
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -14,8 +17,15 @@ export default function WidgetPage() {
   const flushTimer = useRef<number | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
 
-  // ✅ Create/ensure session once
+  // mount guard
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // ✅ Create/ensure session once per browser session
+  useEffect(() => {
+    if (!mounted) return;
+
     const sessionKey =
       sessionStorage.getItem("sessionKey") ??
       (() => {
@@ -24,12 +34,20 @@ export default function WidgetPage() {
         return id;
       })();
 
+    // Ensure server session exists (thread created)
     fetch("/api/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionKey }),
-    }).catch(() => {});
-  }, []);
+    }).catch(() => {
+      // We'll surface errors when sending a message if needed
+    });
+  }, [mounted]);
+
+  function closeStream() {
+    sourceRef.current?.close();
+    sourceRef.current = null;
+  }
 
   function flushBuffer() {
     const chunk = bufferRef.current;
@@ -56,23 +74,20 @@ export default function WidgetPage() {
     }
   }
 
-  function closeStream() {
-    sourceRef.current?.close();
-    sourceRef.current = null;
-  }
-
   async function sendMessage() {
-    if (!input.trim() || streaming) return;
+    if (!mounted || streaming) return;
+
+    const msg = input.trim();
+    if (!msg) return;
 
     setError(null);
 
     const sessionKey = sessionStorage.getItem("sessionKey");
     if (!sessionKey) {
-      setError("Missing sessionKey. Refresh the page.");
+      setError("Missing sessionKey. Refresh /widget.");
       return;
     }
 
-    const msg = input;
     setInput("");
     setStreaming(true);
 
@@ -82,24 +97,17 @@ export default function WidgetPage() {
       { role: "assistant", content: "" },
     ]);
 
-    const source = new EventSource(
-      `/api/session/chat?sessionKey=${encodeURIComponent(sessionKey)}&message=${encodeURIComponent(msg)}`
-    );
+    // ✅ EventSource must call a GET SSE route
+    const url = `/api/session/chat?sessionKey=${encodeURIComponent(
+      sessionKey
+    )}&message=${encodeURIComponent(msg)}`;
+
+    const source = new EventSource(url);
     sourceRef.current = source;
 
     source.addEventListener("delta", (e: MessageEvent) => {
       const payload = JSON.parse(e.data);
       handleDelta(payload.text ?? "");
-    });
-
-    // server: event: error
-    source.addEventListener("error", (e: any) => {
-      // Browser also uses onerror; we keep this simple.
-      // If server sent an "error" event with JSON, it would arrive here as MessageEvent in some browsers,
-      // but most of the time network errors also trigger this.
-      setStreaming(false);
-      closeStream();
-      flushBuffer();
     });
 
     source.addEventListener("done", () => {
@@ -108,11 +116,14 @@ export default function WidgetPage() {
       closeStream();
     });
 
+    // Browser-level SSE error (disconnect, 500, etc.)
     source.onerror = () => {
+      flushBuffer();
       setStreaming(false);
       closeStream();
-      flushBuffer();
-      setError("Stream disconnected. If this keeps happening, check /api/session/chat logs.");
+      setError(
+        "Stream disconnected. Check that /api/session/chat supports GET SSE and that /api/session created a thread."
+      );
     };
   }
 
@@ -120,8 +131,10 @@ export default function WidgetPage() {
     return () => closeStream();
   }, []);
 
+  if (!mounted) return null;
+
   return (
-    <div className="flex flex-col h-full bg-[#0b0f14] text-white">
+    <div className="flex flex-col h-screen bg-[#0b0f14] text-white">
       {error && (
         <div className="px-3 py-2 text-sm border-b border-red-700 bg-red-900/30">
           {error}
