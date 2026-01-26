@@ -81,7 +81,7 @@ server.setRequestHandler(
     method: z.literal("tools/call"),
     params: z.object({
       name: z.string(),
-      arguments: z.record(z.any()).optional(),
+      arguments: z.record(z.string(), z.any()).optional(),
     }),
   }),
   async (req) => {
