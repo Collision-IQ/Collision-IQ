@@ -6,16 +6,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest): Promise<Response> {
-  if (!process.env.OPENAI_API_KEY) {
-    return new Response(JSON.stringify({ error: "Missing OPENAI_API_KEY" }), {
-      status: 500,
-    });
-  }
-
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
-
   try {
     const url = new URL(req.url);
     const parts = url.pathname.split("/");
@@ -26,6 +16,17 @@ export async function POST(req: NextRequest): Promise<Response> {
         status: 400,
       });
     }
+
+    if (!process.env.OPENAI_API_KEY) {
+      return new Response(
+        JSON.stringify({ error: "Missing OPENAI_API_KEY" }),
+        { status: 500 }
+      );
+    }
+
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
 
     const assignment = getAssignment(assignmentId);
     if (!assignment) {
@@ -43,16 +44,13 @@ export async function POST(req: NextRequest): Promise<Response> {
       });
     }
 
-    // ✅ Optional: Add assistant logic here
-    return new Response(JSON.stringify({ success: true }), {
-      status: 200,
-    });
+    // ✅ Upload logic would go here...
+    return new Response(JSON.stringify({ success: true }), { status: 200 });
+
   } catch (err: any) {
     return new Response(
       JSON.stringify({ error: err?.message ?? "Server error" }),
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }
