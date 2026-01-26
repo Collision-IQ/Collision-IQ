@@ -36,9 +36,8 @@ export default function ChatWidget() {
   };
 
   return (
-    <div className="flex h-screen flex-col bg-black text-white">
-      {/* Messages */}
-      <div className="flex-1 overflow-auto p-4 space-y-4">
+    <div className="flex h-full w-full flex-col bg-black text-white">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.map((m, i) => (
           <div
             key={i}
@@ -55,8 +54,7 @@ export default function ChatWidget() {
         ))}
       </div>
 
-      {/* Input */}
-      <div className="border-t border-white/10 p-4">
+      <div className="border-t border-white/10 p-3">
         <div className="flex gap-2">
           <input
             value={input}

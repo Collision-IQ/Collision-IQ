@@ -23,22 +23,22 @@ export default function FloatingWidgetMount() {
       {/* Modal */}
       {open && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur flex items-center justify-center">
-          <div className="relative w-full max-w-[420px] h-[80vh] md:h-[700px] bg-black rounded-2xl overflow-hidden border border-white/10 shadow-lg">
-            <iframe
-              src="/chatbot"
-              className="w-full h-full"
-              style={{ border: 'none' }}
-              title="Collision Academy Chatbot"
-            />
-            <button
-              onClick={() => setOpen(false)}
-              className="absolute top-2 right-2 text-white bg-white/10 hover:bg-white/20 rounded-full p-1"
-              aria-label="Close Chat"
-            >
-              ✕
-            </button>
-          </div>
+         <div className="relative w-full max-w-[420px] h-[80vh] bg-black rounded-2xl overflow-hidden border border-white/10 shadow-lg">
+          <iframe
+            src="/widget"
+            className="w-full h-full"
+            style={{ border: 'none' }}
+            title="Collision Academy Chat"
+          />
+          <button
+            onClick={() => setOpen(false)}
+            className="absolute top-2 right-2 text-white bg-white/10 hover:bg-white/20 rounded-full p-1"
+            aria-label="Close Chat"
+          >
+            ✕
+          </button>
         </div>
+      </div>
       )}
     </>
   );
