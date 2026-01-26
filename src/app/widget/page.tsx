@@ -1,11 +1,12 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { Message } from '@/lib/types'; // <-- ADD THIS
 
 export default function ChatWidget() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [messages, setMessages] = useState<{ role: string; content: string }[]>([
+  const [messages, setMessages] = useState<Message[]>([
     { role: 'system', content: 'How can I assist you today?' },
   ]);
 
@@ -20,51 +21,49 @@ export default function ChatWidget() {
   const sendMessage = async () => {
     if (!input.trim()) return;
 
-    const userMessage = { role: 'user', content: input };
-    setMessages((prev) => [...prev, userMessage]);
-    setLoading(true);
+    const userMessage: Message = { role: 'user', content: input };
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
     setInput('');
+    setLoading(true);
 
     try {
-      const res = await fetch('/api/assignments/dummy/chat', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({ message: input }),
+        headers: { 'Content-Type': 'application/json' },
       });
 
-      const data = await res.json();
-      const assistantMessage = { role: 'assistant', content: data.message };
-      setMessages((prev) => [...prev, assistantMessage]);
-    } catch (error) {
+      const { message: assistantReply } = await res.json();
+
+      setMessages([...newMessages, { role: 'assistant', content: assistantReply }]);
+    } catch (error: unknown) {
       console.error('Chat error:', error);
+      setMessages([...newMessages, { role: 'system', content: 'Error: failed to get response.' }]);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-black text-white">
-      {/* Scrollable message area */}
+    <div className="flex flex-col min-h-screen bg-black text-white">
+      {/* Header with logo (optional) */}
+      <div className="p-4">
+        <img
+          src="/brand/logos/Logo-white.png"
+          alt="Collision Academy"
+          className="h-10 w-auto mx-auto"
+        />
+      </div>
+
+      {/* Chat messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={`text-sm whitespace-pre-wrap ${
-              m.role === 'user'
-                ? 'text-blue-400 text-right'
-                : m.role === 'assistant'
-                ? 'text-green-400 text-left'
-                : 'text-gray-400'
-            }`}
-          >
-            <span className="font-semibold">{m.role}:</span> {m.content}
+        {messages.map((msg, i) => (
+          <div key={i} className={msg.role === 'user' ? 'text-right' : 'text-left'}>
+            <p className="text-sm font-semibold text-gray-400">{msg.role}</p>
+            <p className="text-base">{msg.content}</p>
           </div>
         ))}
-        {loading && (
-          <div className="text-white text-sm italic">Assistant is typing...</div>
-        )}
         <div ref={scrollRef} />
       </div>
 
@@ -72,18 +71,22 @@ export default function ChatWidget() {
       <div className="border-t border-white/10 p-4">
         <div className="flex gap-2">
           <input
+            type="text"
+            className="flex-1 rounded bg-gray-800 text-white p-2"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-            placeholder="Ask something..."
-            className="flex-1 px-4 py-2 bg-white/5 border border-white/20 rounded text-white"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !loading) sendMessage();
+            }}
+            placeholder="Type your message..."
+            disabled={loading}
           />
           <button
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded disabled:opacity-50"
             onClick={sendMessage}
             disabled={loading}
-            className="px-4 py-2 bg-white text-black rounded"
           >
-            Send
+            {loading ? 'Sending...' : 'Send'}
           </button>
         </div>
       </div>
