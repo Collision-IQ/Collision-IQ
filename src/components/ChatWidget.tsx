@@ -14,7 +14,7 @@ export default function ChatWidget() {
   const [error, setError] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-
+// Mount-only wrapper. Do NOT add chat logic here.
   const logoSrc = useMemo(() => {
     // Adjust paths to match your /public structure
     return theme === "light"
