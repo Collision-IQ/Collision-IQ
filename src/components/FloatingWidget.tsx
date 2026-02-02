@@ -20,7 +20,7 @@ export default function FloatingWidget() {
             src="/widget"
             title="Collision Academy Chat"
             className="w-full h-full border-none"
-            sandbox="allow-scripts allow-same-origin"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
           />
         </div>
       )}

@@ -1,7 +1,7 @@
 // src/app/api/chat/route.ts
 import { NextResponse } from "next/server";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 
 type ChatRole = "system" | "user" | "assistant";
 type ChatMessage = { role: ChatRole; content: string };
