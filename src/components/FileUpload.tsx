@@ -1,66 +1,79 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
+import { useRef, useState } from "react";
 
-export default function FileUpload() {
-  const [files, setFiles] = useState<FileList | null>(null);
+export type UploadedFileContext = {
+  filename: string;
+  type: "pdf" | "image";
+  text?: string;
+};
+
+export default function FileUpload({
+  onUploadComplete,
+}: {
+  onUploadComplete: (files: UploadedFileContext[]) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const handleUpload = async () => {
-    if (!files) return;
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
 
     setUploading(true);
     setError(null);
-    setResult(null);
 
     const formData = new FormData();
-    Array.from(files).forEach(file => {
-      formData.append('file', file);
+    Array.from(files).forEach((file) => {
+      formData.append("files", file);
     });
 
     try {
-      const res = await fetch('/api/chat/upload', {
-        method: 'POST',
+      const res = await fetch("/api/upload", {
+        method: "POST",
         body: formData,
       });
 
+      if (!res.ok) {
+        throw new Error("Upload failed");
+      }
+
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Upload failed');
-      setResult(data);
+      onUploadComplete(data.files);
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.message || "Upload failed");
     } finally {
       setUploading(false);
+      if (inputRef.current) inputRef.current.value = "";
     }
-  };
+  }
 
   return (
-    <div className="p-4 rounded-xl border border-gray-300 shadow bg-white max-w-md mx-auto mt-4">
-      <label className="block text-sm font-medium text-gray-700 mb-1">Upload PDF or DOCX</label>
+    <div className="flex items-center gap-2">
       <input
+        ref={inputRef}
         type="file"
-        accept=".pdf,.docx"
+        accept=".pdf,image/*"
         multiple
-        onChange={e => setFiles(e.target.files)}
-        className="mb-3"
+        hidden
+        onChange={(e) => handleFiles(e.target.files)}
       />
 
       <button
-        onClick={handleUpload}
-        disabled={!files || uploading}
-        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={uploading}
+        className="text-sm px-3 py-1.5 rounded bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20"
       >
-        {uploading ? 'Uploading...' : 'Upload'}
+        {uploading ? "Uploading…" : "Attach files"}
       </button>
 
-      {error && <p className="text-red-500 mt-2 text-sm">{error}</p>}
-      {result && (
-        <pre className="mt-3 bg-gray-100 p-2 text-sm rounded overflow-auto max-h-60">
-          {JSON.stringify(result, null, 2)}
-        </pre>
+      {error && (
+        <span className="text-xs text-red-600 dark:text-red-400">
+          {error}
+        </span>
       )}
     </div>
   );
 }
+

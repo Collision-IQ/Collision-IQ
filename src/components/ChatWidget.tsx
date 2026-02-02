@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "next-themes";
+import FileUpload, { UploadedFileContext } from "./FileUpload";
 
 type Role = "system" | "user" | "assistant";
 type Message = { role: Role; content: string };
@@ -12,51 +13,68 @@ export default function ChatWidget() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fileContext, setFileContext] = useState<UploadedFileContext[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-// Mount-only wrapper. Do NOT add chat logic here.
-  const logoSrc = useMemo(() => {
-    // Adjust paths to match your /public structure
-    return theme === "light"
-      ? "/brand/logos/Logo-dark.png"
-      : "/brand/logos/Logo-grey.png";
-  }, [theme]);
+
+  const logoSrc = useMemo(
+    () =>
+      theme === "light"
+        ? "/brand/logos/Logo-dark.png"
+        : "/brand/logos/Logo-grey.png",
+    [theme]
+  );
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   async function sendMessage() {
-    const text = input.trim();
-    if (!text || sending) return;
+    if (!input.trim() || sending) return;
 
-    setError(null);
     setSending(true);
-    setInput("");
+    setError(null);
+
+    const systemDocs =
+      fileContext.length > 0
+        ? [
+            {
+              role: "system" as Role,
+              content:
+                "The user uploaded the following documents for reference:\n\n" +
+                fileContext
+                  .map((f) =>
+                    f.type === "pdf"
+                      ? `--- ${f.filename} ---\n${f.text}`
+                      : `--- ${f.filename} (image uploaded)`
+                  )
+                  .join("\n\n"),
+            },
+          ]
+        : [];
 
     const nextMessages: Message[] = [
+      ...systemDocs,
       ...messages,
-      { role: "user", content: text },
-      { role: "assistant", content: "" }, // placeholder for streaming response
+      { role: "user", content: input },
+      { role: "assistant", content: "" },
     ];
 
     setMessages(nextMessages);
+    setInput("");
+    setFileContext([]);
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // Send the full conversation for better continuity
-        body: JSON.stringify({ messages: nextMessages.slice(0, -1) }),
+        body: JSON.stringify({
+          messages: nextMessages.filter((m) => m.role !== "assistant"),
+        }),
       });
 
-      if (!res.ok) {
-        const detail = await res.text().catch(() => "");
-        throw new Error(`API error (${res.status}): ${detail || "Unknown error"}`);
-      }
-
-      if (!res.body) {
-        throw new Error("No response body (stream missing).");
+      if (!res.ok || !res.body) {
+        throw new Error("Chat request failed");
       }
 
       const reader = res.body.getReader();
@@ -70,7 +88,6 @@ export default function ChatWidget() {
         assistantText += decoder.decode(value, { stream: true });
 
         setMessages((prev) => {
-          // Update the last assistant message in-place
           const updated = [...prev];
           for (let i = updated.length - 1; i >= 0; i--) {
             if (updated[i].role === "assistant") {
@@ -81,25 +98,11 @@ export default function ChatWidget() {
           return updated;
         });
       }
-    } catch (e: any) {
-      setError(e?.message || "Something went wrong.");
-      // Remove the empty assistant placeholder if we failed
-      setMessages((prev) => {
-        const updated = [...prev];
-        const last = updated[updated.length - 1];
-        if (last?.role === "assistant" && last.content === "") {
-          updated.pop();
-        }
-        return updated;
-      });
+    } catch (err: any) {
+      setError(err?.message || "Something went wrong");
     } finally {
       setSending(false);
     }
-  }
-
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    sendMessage();
   }
 
   return (
@@ -113,38 +116,30 @@ export default function ChatWidget() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.length === 0 ? (
-          <div className="opacity-70 text-sm">
-            Ask a question to get started.
+        {messages.map((m, idx) => (
+          <div
+            key={idx}
+            className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap ${
+              m.role === "user"
+                ? "ml-auto bg-orange-500 text-black"
+                : "mr-auto bg-black/5 dark:bg-white/10"
+            }`}
+          >
+            {m.content}
           </div>
-        ) : null}
-
-        {messages.map((m, idx) => {
-          const isUser = m.role === "user";
-          return (
-            <div
-              key={idx}
-              className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap ${
-                isUser
-                  ? "ml-auto bg-orange-500 text-black"
-                  : "mr-auto bg-black/5 dark:bg-white/10"
-              }`}
-            >
-              {m.content}
-            </div>
-          );
-        })}
-
+        ))}
         <div ref={messagesEndRef} />
       </div>
 
-      {error ? (
+      {error && (
         <div className="px-4 pb-2 text-sm text-red-600 dark:text-red-400">
           {error}
         </div>
-      ) : null}
+      )}
 
-      <form onSubmit={onSubmit} className="p-3 border-t border-black/10 dark:border-white/10">
+      <div className="p-3 border-t border-black/10 dark:border-white/10 space-y-2">
+        <FileUpload onUploadComplete={setFileContext} />
+
         <div className="flex gap-2">
           <input
             value={input}
@@ -153,14 +148,14 @@ export default function ChatWidget() {
             className="flex-1 rounded-xl px-3 py-2 bg-white dark:bg-[#111827] border border-black/10 dark:border-white/10 outline-none"
           />
           <button
-            type="submit"
+            onClick={sendMessage}
             disabled={sending}
             className="rounded-xl px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
           >
             Send
           </button>
         </div>
-      </form>
+      </div>
     </div>
   );
 }

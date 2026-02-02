@@ -1,64 +1,51 @@
-import OpenAI from "openai";
+// src/app/api/upload/route.ts
 import { NextResponse } from "next/server";
-import { getSession } from "@/lib/sessionStore";
+import pdfParse from "pdf-parse";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const MAX_FILE_SIZE_MB = 15;
 
-export async function GET(request: Request) {
-  // handle GET
-}
+export async function POST(req: Request) {
+  const formData = await req.formData();
+  const files = formData.getAll("files") as File[];
 
-export async function POST(request: Request) {
-  try {
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
-    }
-
-    const form = await request.formData();
-    const sessionKey = String(form.get("sessionKey") ?? "").trim();
-    const file = form.get("file");
-
-    if (!sessionKey) {
-      return NextResponse.json({ error: "Missing sessionKey" }, { status: 400 });
-    }
-
-    const s = getSession(sessionKey);
-    if (!s) {
-      return NextResponse.json({ error: "Unknown sessionKey. Call POST /api/session first." }, { status: 404 });
-    }
-
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "Missing file field" }, { status: 400 });
-    }
-
-    // 1) Upload file to OpenAI
-    const uploaded = await openai.files.create({
-      file,
-      purpose: "assistants",
-    });
-
-    // 2) Attach file to vector store (enables file_search retrieval)
-    const vsFile = await openai.vectorStores.files.create(s.vectorStoreId, {
-      file_id: uploaded.id,
-    });
-
-    return NextResponse.json({
-      ok: true,
-      sessionKey,
-      filename: file.name,
-      fileId: uploaded.id,
-      vectorStoreId: s.vectorStoreId,
-      vectorStoreFileId: vsFile.id,
-      status: vsFile.status, // often "in_progress" then "completed"
-    });
-  } catch (err: any) {
-    console.error("POST /api/session/upload failed:", err);
-    return NextResponse.json(
-      { error: "Upload failed", detail: err?.message ?? String(err) },
-      { status: 500 }
-    );
+  if (!files || files.length === 0) {
+    return NextResponse.json({ error: "No files uploaded" }, { status: 400 });
   }
+
+  const results: any[] = [];
+
+  for (const file of files) {
+    const sizeMB = file.size / (1024 * 1024);
+    if (sizeMB > MAX_FILE_SIZE_MB) {
+      return NextResponse.json(
+        { error: `File too large: ${file.name}` },
+        { status: 400 }
+      );
+    }
+
+    if (file.type === "application/pdf") {
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const parsed = await pdfParse(buffer);
+
+      results.push({
+        filename: file.name,
+        type: "pdf",
+        text: parsed.text.slice(0, 200_000), // safety cap
+      });
+    } else if (file.type.startsWith("image/")) {
+      results.push({
+        filename: file.name,
+        type: "image",
+      });
+    } else {
+      return NextResponse.json(
+        { error: `Unsupported file type: ${file.type}` },
+        { status: 400 }
+      );
+    }
+  }
+
+  return NextResponse.json({ files: results });
 }
