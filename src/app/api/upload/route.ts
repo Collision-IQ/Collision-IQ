@@ -1,51 +1,59 @@
-// src/app/api/upload/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import pdfParse from "pdf-parse";
 
 export const runtime = "nodejs";
 
-const MAX_FILE_SIZE_MB = 15;
+export async function POST(req: NextRequest) {
+  try {
+    const formData = await req.formData();
+    const files = formData.getAll("file");
 
-export async function POST(req: Request) {
-  const formData = await req.formData();
-  const files = formData.getAll("files") as File[];
-
-  if (!files || files.length === 0) {
-    return NextResponse.json({ error: "No files uploaded" }, { status: 400 });
-  }
-
-  const results: any[] = [];
-
-  for (const file of files) {
-    const sizeMB = file.size / (1024 * 1024);
-    if (sizeMB > MAX_FILE_SIZE_MB) {
+    if (!files || files.length === 0) {
       return NextResponse.json(
-        { error: `File too large: ${file.name}` },
+        { error: "No files uploaded" },
         { status: 400 }
       );
     }
 
-    if (file.type === "application/pdf") {
+    const results: {
+      filename: string;
+      text: string;
+      type: string;
+    }[] = [];
+
+    for (const file of files) {
+      if (!(file instanceof File)) continue;
+
       const buffer = Buffer.from(await file.arrayBuffer());
-      const parsed = await pdfParse(buffer);
 
-      results.push({
-        filename: file.name,
-        type: "pdf",
-        text: parsed.text.slice(0, 200_000), // safety cap
-      });
-    } else if (file.type.startsWith("image/")) {
-      results.push({
-        filename: file.name,
-        type: "image",
-      });
-    } else {
-      return NextResponse.json(
-        { error: `Unsupported file type: ${file.type}` },
-        { status: 400 }
-      );
+      // PDF parsing
+      if (file.type === "application/pdf") {
+        const parsed = await pdfParse(buffer);
+        results.push({
+          filename: file.name,
+          text: parsed.text || "",
+          type: "pdf",
+        });
+        continue;
+      }
+
+      // Images (Phase 3B: metadata only, no OCR yet)
+      if (file.type.startsWith("image/")) {
+        results.push({
+          filename: file.name,
+          text: "",
+          type: "image",
+        });
+        continue;
+      }
     }
-  }
 
-  return NextResponse.json({ files: results });
+    return NextResponse.json({ results });
+  } catch (err: any) {
+    console.error("Upload parse error:", err);
+    return NextResponse.json(
+      { error: "Failed to process upload" },
+      { status: 500 }
+    );
+  }
 }

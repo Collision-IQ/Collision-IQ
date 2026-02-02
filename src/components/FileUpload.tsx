@@ -1,79 +1,60 @@
-"use client";
+'use client';
 
-import { useRef, useState } from "react";
+import { useState } from 'react';
 
-export type UploadedFileContext = {
+export type UploadedFile = {
   filename: string;
-  type: "pdf" | "image";
-  text?: string;
+  type: string;
+  text: string;
 };
 
-export default function FileUpload({
-  onUploadComplete,
-}: {
-  onUploadComplete: (files: UploadedFileContext[]) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+type Props = {
+  onUploaded: (files: UploadedFile[]) => void;
+};
 
-  async function handleFiles(files: FileList | null) {
-    if (!files || files.length === 0) return;
+export default function FileUpload({ onUploaded }: Props) {
+  const [loading, setLoading] = useState(false);
 
-    setUploading(true);
-    setError(null);
+  async function handleFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!e.target.files?.length) return;
+
+    setLoading(true);
 
     const formData = new FormData();
-    Array.from(files).forEach((file) => {
-      formData.append("files", file);
+    Array.from(e.target.files).forEach((file) =>
+      formData.append('file', file)
+    );
+
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData,
     });
 
-    try {
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
+    const data = await res.json();
 
-      if (!res.ok) {
-        throw new Error("Upload failed");
-      }
+    const parsed: UploadedFile[] = data.results.map((r: any) => ({
+      filename: r.filename,
+      type: r.filename.split('.').pop() ?? 'unknown',
+      text: r.text,
+    }));
 
-      const data = await res.json();
-      onUploadComplete(data.files);
-    } catch (err: any) {
-      setError(err?.message || "Upload failed");
-    } finally {
-      setUploading(false);
-      if (inputRef.current) inputRef.current.value = "";
-    }
+    onUploaded(parsed);
+    setLoading(false);
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="space-y-2">
       <input
-        ref={inputRef}
         type="file"
-        accept=".pdf,image/*"
         multiple
-        hidden
-        onChange={(e) => handleFiles(e.target.files)}
+        accept=".pdf,image/*"
+        onChange={handleFiles}
       />
-
-      <button
-        type="button"
-        onClick={() => inputRef.current?.click()}
-        disabled={uploading}
-        className="text-sm px-3 py-1.5 rounded bg-black/10 dark:bg-white/10 hover:bg-black/20 dark:hover:bg-white/20"
-      >
-        {uploading ? "Uploading…" : "Attach files"}
-      </button>
-
-      {error && (
-        <span className="text-xs text-red-600 dark:text-red-400">
-          {error}
-        </span>
+      {loading && (
+        <div className="text-sm text-muted">
+          Parsing documents…
+        </div>
       )}
     </div>
   );
 }
-

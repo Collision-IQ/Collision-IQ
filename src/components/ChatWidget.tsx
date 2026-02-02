@@ -1,54 +1,56 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useTheme } from "next-themes";
-import FileUpload, { UploadedFileContext } from "./FileUpload";
+import { useEffect, useRef, useState } from 'react';
+import FileUpload, { UploadedFile } from './FileUpload';
 
-type Role = "system" | "user" | "assistant";
+type Role = 'system' | 'user' | 'assistant';
 type Message = { role: Role; content: string };
 
 export default function ChatWidget() {
-  const { theme } = useTheme();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      role: 'assistant',
+      content:
+        'Hello! I can help with OEM procedures, policy language, state regulations, and claim best practices.',
+    },
+  ]);
+  const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [fileContext, setFileContext] = useState<UploadedFileContext[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
 
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
-
-  const logoSrc = useMemo(
-    () =>
-      theme === "light"
-        ? "/brand/logos/Logo-dark.png"
-        : "/brand/logos/Logo-grey.png",
-    [theme]
-  );
+  const endRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   async function sendMessage() {
     if (!input.trim() || sending) return;
 
     setSending(true);
-    setError(null);
 
-    const systemDocs =
-      fileContext.length > 0
+    const systemDocs: Message[] =
+      uploadedFiles.length > 0
         ? [
             {
-              role: "system" as Role,
-              content:
-                "The user uploaded the following documents for reference:\n\n" +
-                fileContext
-                  .map((f) =>
-                    f.type === "pdf"
-                      ? `--- ${f.filename} ---\n${f.text}`
-                      : `--- ${f.filename} (image uploaded)`
-                  )
-                  .join("\n\n"),
+              role: 'system',
+              content: `
+The user uploaded the following documents:
+
+${uploadedFiles
+  .map(
+    (f) => `
+--- ${f.filename} (${f.type}) ---
+${f.text.slice(0, 12000)}
+`
+  )
+  .join('\n')}
+
+Rules:
+- Treat OEM procedures as manufacturer guidance, not legal advice
+- Insurance policy language varies by carrier and state
+- If pages appear missing or incomplete, ask the user
+`,
             },
           ]
         : [];
@@ -56,101 +58,61 @@ export default function ChatWidget() {
     const nextMessages: Message[] = [
       ...systemDocs,
       ...messages,
-      { role: "user", content: input },
-      { role: "assistant", content: "" },
+      { role: 'user', content: input },
     ];
 
-    setMessages(nextMessages);
-    setInput("");
-    setFileContext([]);
+    setMessages((m) => [...m, { role: 'user', content: input }]);
+    setInput('');
 
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: nextMessages.filter((m) => m.role !== "assistant"),
-        }),
-      });
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: nextMessages }),
+    });
 
-      if (!res.ok || !res.body) {
-        throw new Error("Chat request failed");
-      }
+    const data = await res.json();
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let assistantText = "";
+    setMessages((m) => [
+      ...m,
+      { role: 'assistant', content: data.content },
+    ]);
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        assistantText += decoder.decode(value, { stream: true });
-
-        setMessages((prev) => {
-          const updated = [...prev];
-          for (let i = updated.length - 1; i >= 0; i--) {
-            if (updated[i].role === "assistant") {
-              updated[i] = { role: "assistant", content: assistantText };
-              break;
-            }
-          }
-          return updated;
-        });
-      }
-    } catch (err: any) {
-      setError(err?.message || "Something went wrong");
-    } finally {
-      setSending(false);
-    }
+    setSending(false);
   }
 
   return (
-    <div className="w-full h-full flex flex-col bg-white dark:bg-[#0B1220] text-black dark:text-white">
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-black/10 dark:border-white/10">
-        <img src={logoSrc} alt="Collision Academy" className="h-7 w-auto" />
-        <div className="font-semibold">Collision IQ</div>
-        <div className="ml-auto text-xs opacity-70">
-          {sending ? "Thinking…" : "Online"}
-        </div>
-      </div>
-
+    <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.map((m, idx) => (
+        {messages.map((m, i) => (
           <div
-            key={idx}
-            className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap ${
-              m.role === "user"
-                ? "ml-auto bg-orange-500 text-black"
-                : "mr-auto bg-black/5 dark:bg-white/10"
+            key={i}
+            className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+              m.role === 'user'
+                ? 'ml-auto bg-orange-500 text-black'
+                : 'mr-auto bg-black/5 dark:bg-white/10'
             }`}
           >
             {m.content}
           </div>
         ))}
-        <div ref={messagesEndRef} />
+        <div ref={endRef} />
       </div>
 
-      {error && (
-        <div className="px-4 pb-2 text-sm text-red-600 dark:text-red-400">
-          {error}
-        </div>
-      )}
-
-      <div className="p-3 border-t border-black/10 dark:border-white/10 space-y-2">
-        <FileUpload onUploadComplete={setFileContext} />
+      <div className="border-t p-3 space-y-2">
+        <FileUpload onUploaded={setUploadedFiles} />
 
         <div className="flex gap-2">
           <input
+            className="flex-1 rounded border px-3 py-2 text-sm"
+            placeholder="Ask a question…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Type your message…"
-            className="flex-1 rounded-xl px-3 py-2 bg-white dark:bg-[#111827] border border-black/10 dark:border-white/10 outline-none"
+            onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
           />
           <button
             onClick={sendMessage}
             disabled={sending}
-            className="rounded-xl px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            className="rounded bg-blue-600 px-4 py-2 text-white text-sm disabled:opacity-50"
           >
             Send
           </button>
