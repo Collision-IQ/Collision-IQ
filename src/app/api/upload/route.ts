@@ -1,58 +1,35 @@
-import { NextRequest, NextResponse } from "next/server";
-import pdfParse from "pdf-parse";
+import { NextResponse } from 'next/server';
+import { parseForm } from '@/lib/parseForm';
+import { extractTextFromFile } from '@/lib/extractText';
 
-export const runtime = "nodejs";
-
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    const formData = await req.formData();
-    const files = formData.getAll("file");
+    const { files } = await parseForm(req);
+    const uploaded = Array.isArray(files) ? files : [files];
 
-    if (!files || files.length === 0) {
-      return NextResponse.json(
-        { error: "No files uploaded" },
-        { status: 400 }
+    const documents = [];
+
+    for (const file of uploaded) {
+      if (!file.mimetype) {
+        throw new Error(`Missing mimetype for file: ${file.originalFilename}`);
+      }
+
+      const text = await extractTextFromFile(
+        file.filepath,
+        file.mimetype
       );
+
+      documents.push({
+        filename: file.originalFilename,
+        type: file.mimetype,
+        text,
+      });
     }
 
-    const results: {
-      filename: string;
-      text: string;
-      type: string;
-    }[] = [];
-
-    for (const file of files) {
-      if (!(file instanceof File)) continue;
-
-      const buffer = Buffer.from(await file.arrayBuffer());
-
-      // PDF parsing
-      if (file.type === "application/pdf") {
-        const parsed = await pdfParse(buffer);
-        results.push({
-          filename: file.name,
-          text: parsed.text || "",
-          type: "pdf",
-        });
-        continue;
-      }
-
-      // Images (Phase 3B: metadata only, no OCR yet)
-      if (file.type.startsWith("image/")) {
-        results.push({
-          filename: file.name,
-          text: "",
-          type: "image",
-        });
-        continue;
-      }
-    }
-
-    return NextResponse.json({ results });
+    return NextResponse.json({ success: true, documents });
   } catch (err: any) {
-    console.error("Upload parse error:", err);
     return NextResponse.json(
-      { error: "Failed to process upload" },
+      { success: false, error: err.message },
       { status: 500 }
     );
   }

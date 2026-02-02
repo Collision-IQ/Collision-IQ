@@ -1,18 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-
-export type UploadedFile = {
-  filename: string;
-  type: string;
-  text: string;
-};
+import type { UploadedDocument } from '@/types/uploadedDocument';
 
 type Props = {
-  onUploaded: (files: UploadedFile[]) => void;
+  onUploadComplete: (docs: UploadedDocument[]) => void;
 };
 
-export default function FileUpload({ onUploaded }: Props) {
+export default function FileUpload({ onUploadComplete }: Props) {
   const [loading, setLoading] = useState(false);
 
   async function handleFiles(e: React.ChangeEvent<HTMLInputElement>) {
@@ -21,9 +16,7 @@ export default function FileUpload({ onUploaded }: Props) {
     setLoading(true);
 
     const formData = new FormData();
-    Array.from(e.target.files).forEach((file) =>
-      formData.append('file', file)
-    );
+    Array.from(e.target.files).forEach((f) => formData.append('files', f));
 
     const res = await fetch('/api/upload', {
       method: 'POST',
@@ -32,29 +25,23 @@ export default function FileUpload({ onUploaded }: Props) {
 
     const data = await res.json();
 
-    const parsed: UploadedFile[] = data.results.map((r: any) => ({
-      filename: r.filename,
-      type: r.filename.split('.').pop() ?? 'unknown',
-      text: r.text,
-    }));
+    if (data.success) {
+      onUploadComplete(data.documents);
+    }
 
-    onUploaded(parsed);
     setLoading(false);
   }
 
   return (
-    <div className="space-y-2">
+    <div className="text-sm">
       <input
         type="file"
         multiple
-        accept=".pdf,image/*"
+        accept=".pdf,.png,.jpg,.jpeg"
         onChange={handleFiles}
+        disabled={loading}
       />
-      {loading && (
-        <div className="text-sm text-muted">
-          Parsing documents…
-        </div>
-      )}
+      {loading && <p className="text-xs opacity-60">Parsing documents…</p>}
     </div>
   );
 }
