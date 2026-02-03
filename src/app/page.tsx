@@ -2,9 +2,8 @@ import Image from "next/image";
 import Link from "next/link";
 import AnimatedHeader from "@/components/AnimatedHeader";
 
-/* ----------------------------------------
-   Small UI helper
----------------------------------------- */
+/* ------------------ UI Helpers ------------------ */
+
 function Pill({ children }: { children: React.ReactNode }) {
   return (
     <span className="rounded-full border border-[color:var(--border)] bg-white/5 px-3 py-1 text-xs text-[color:var(--muted)]">
@@ -13,25 +12,15 @@ function Pill({ children }: { children: React.ReactNode }) {
   );
 }
 
-/* ----------------------------------------
-   Home Page
----------------------------------------- */
+/* ------------------ Page ------------------ */
+
 export default function Home() {
   return (
     <>
-      {/* ========================================
-          HERO HEADER (FIXED HEIGHT WRAPPER)
-         ======================================== */}
-      <header className="relative w-full h-[70vh] min-h-[520px] overflow-hidden">
-        <AnimatedHeader />
+      {/* HERO HEADER (must have height) */}
+      <AnimatedHeader />
 
-        {/* Optional dark overlay for contrast */}
-        <div className="pointer-events-none absolute inset-0 bg-black/40" />
-      </header>
-
-      {/* ========================================
-          MAIN CONTENT (OVERLAPS HERO)
-         ======================================== */}
+      {/* MAIN CONTENT */}
       <main className="relative z-10 mx-auto max-w-6xl px-4 py-14 -mt-40">
         <div className="grid items-center gap-10 md:grid-cols-2">
           {/* LEFT COLUMN */}
@@ -44,7 +33,8 @@ export default function Home() {
             </div>
 
             <h1 className="mt-5 text-4xl font-semibold leading-tight md:text-5xl">
-              Professional-grade vehicle valuations and appraisal support—built for{" "}
+              Professional-grade vehicle valuations and appraisal support—built
+              for{" "}
               <span className="text-[color:var(--accent)] font-semibold">
                 OEM-compliant
               </span>{" "}
@@ -53,10 +43,10 @@ export default function Home() {
 
             <p className="mt-4 text-[color:var(--muted)]">
               Collision Academy supports repair centers and policyholders through
-              manufacturer repair procedures, OEM position statements, and insurance
-              policy law. Our guidance helps ensure repairs meet manufacturer standards,
-              legal obligations, and safety requirements—especially when insurer
-              practices fall short.
+              manufacturer repair procedures, OEM position statements, and
+              insurance policy law. Our guidance helps ensure repairs meet
+              manufacturer standards, legal obligations, and safety
+              requirements—especially when insurer practices fall short.
             </p>
 
             {/* PRIMARY CTA */}
@@ -65,7 +55,7 @@ export default function Home() {
                 href="https://www.collision.academy/s/shop"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-block rounded-xl bg-[color:var(--accent)] px-6 py-3 text-center font-semibold text-black hover:opacity-90"
+                className="inline-block rounded-xl bg-[color:var(--accent)] px-6 py-3 font-semibold text-black hover:opacity-90"
               >
                 View Packages
               </a>
@@ -131,7 +121,7 @@ export default function Home() {
               ))}
             </div>
 
-            {/* SEE ALL SERVICES */}
+            {/* SERVICES HANDOFF */}
             <div className="mt-6">
               <Link
                 href="/services"
@@ -144,10 +134,8 @@ export default function Home() {
         </div>
       </main>
 
-      {/* ========================================
-          NEXT STEPS
-         ======================================== */}
-      <section className="mx-auto mt-16 max-w-6xl px-4">
+      {/* NEXT STEPS */}
+      <section className="mx-auto max-w-6xl px-4 pb-20">
         <h2 className="text-2xl font-semibold">Next steps</h2>
 
         <div className="mt-5 grid gap-4 md:grid-cols-3">
@@ -191,8 +179,8 @@ export default function Home() {
     </>
   );
 }
-// This is the main home page for Collision Academy. It features a hero header
-// with an animated background, a two-column layout highlighting services
-// and value propositions, and a "Next Steps" section with links to the chatbot
-// and social media profiles. The design is responsive and styled for clarity
-// and engagement.
+// This is the home page for Collision Academy. It features a hero header
+// with a video background, a main content section highlighting services
+// and value propositions, and a next steps section with links to the
+// chatbot and social media profiles. The layout is responsive and styled
+// for clarity and engagement.
