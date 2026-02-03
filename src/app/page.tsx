@@ -137,7 +137,7 @@ export default function Home() {
 
           {/* INSTAGRAM */}
           <a
-            href="https://www.instagram.com/collisionacademy"
+            href="https://www.instagram.com/collision_academy"
             target="_blank"
             rel="noopener noreferrer"
             className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-5 hover:bg-white/5 transition"
