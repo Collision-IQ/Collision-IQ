@@ -129,39 +129,42 @@ export default function Home() {
         <div className="mt-5 grid gap-4 md:grid-cols-3">
           {/* SERVICES */}
           <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-5">
-            <div className="font-semibold">Choose a package</div>
+            <div className="font-semibold">"Collision-IQ Chatbot", "Ask repair, OEM, and insurance questions in real time."</div>
             <div className="mt-2 text-sm text-[color:var(--muted)]">
               View professional services and documentation options.
             </div>
           </div>
 
-          {/* INSTAGRAM */}
-          <a
-            href="https://www.instagram.com/collision_academy"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-5 hover:bg-white/5 transition"
-          >
-            <div className="font-semibold">Instagram</div>
-            <div className="mt-2 text-sm text-[color:var(--muted)]">
-              Repair insights, claim tips, and real-world examples.
-            </div>
-          </a>
-
-          {/* LINKEDIN */}
-          <a
-            href="https://www.linkedin.com/in/vinny-menichetti-917097304/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-5 hover:bg-white/5 transition"
-          >
-            <div className="font-semibold">LinkedIn</div>
-            <div className="mt-2 text-sm text-[color:var(--muted)]">
-              Industry updates, standards, and professional guidance.
-            </div>
-          </a>
-        </div>
-      </section>
-    </main>
-  );
-}
+          {[
+            [
+              "Collision-IQ Chatbot",
+              "Ask repair, OEM, and insurance questions in real time.",
+              "/chatbot",
+            ],
+            [
+              "Instagram",
+              "Repair insights, claim tips, and real-world examples.",
+              "https://www.instagram.com/collision_academy/",
+            ],
+            [
+              "LinkedIn",
+              "Industry updates, standards, and professional guidance.",
+              "https://www.linkedin.com/in/vinny-menichetti-917097304/",
+            ],
+          ].map(([t, d, href]) => (
+            <a
+              key={t}
+              href={href}
+              target={href.startsWith("http") ? "_blank" : undefined}
+              rel={href.startsWith("http") ? "noopener noreferrer" : undefined}
+              className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-5 transition hover:bg-white/5"
+            >
+              <div className="font-semibold">{t}</div>
+              <div className="mt-2 text-sm text-[color:var(--muted)]">{d}</div>
+            </a>
+                    ))}
+                  </div>
+                </section>
+              </main>
+            );
+          }

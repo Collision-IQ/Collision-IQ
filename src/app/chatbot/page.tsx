@@ -1,23 +1,30 @@
-// src/app/chatbot/page.tsx
-
-'use client';
+import Image from "next/image";
+import ChatWidget from "@/components/ChatWidget";
 
 export default function ChatbotPage() {
   return (
-    <div className="flex h-screen w-screen flex-col bg-black text-white">
-      <header className="p-4 border-b border-white/10">
-        <h1 className="text-xl font-semibold">Collision-IQ Chat</h1>
-        <p className="text-sm text-white/50">Chat is loading in an embedded widget.</p>
-      </header>
-
-      {/* fix: flex container w/ min-h-0 to let iframe scroll */}
-      <div className="flex flex-1 min-h-0">
-        <iframe
-          src="/widget"
-          className="w-full h-full border-none"
-          title="Collision Academy Chat"
+    <main className="relative min-h-screen bg-black">
+      {/* Background logo */}
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-[0.04]">
+        <Image
+          src="/brand/logos/Logo-grey.png"
+          alt="Collision Academy"
+          width={600}
+          height={120}
+          priority
         />
       </div>
-    </div>
+
+      {/* Foreground chat */}
+      <div className="relative mx-auto max-w-4xl px-4 py-10">
+        <h1 className="mb-4 text-center text-2xl font-semibold">
+          Collision-IQ Chatbot
+        </h1>
+
+        <div className="h-[75vh] rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)]">
+          <ChatWidget />
+        </div>
+      </div>
+    </main>
   );
 }
