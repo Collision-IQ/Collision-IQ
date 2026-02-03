@@ -1,26 +1,31 @@
 export default function AnimatedHeader() {
   return (
-    <section className="relative w-full overflow-hidden bg-black">
-      {/* Background gradient */}
-      <div className="absolute inset-0 bg-gradient-to-b from-black via-black/90 to-transparent" />
+    <section className="relative h-[70vh] min-h-[520px] w-full overflow-hidden">
+      {/* Background video */}
+      <video
+        className="absolute inset-0 h-full w-full object-cover opacity-40"
+        src="/brand/video/logo-loop.mp4"
+        autoPlay
+        muted
+        loop
+        playsInline
+      />
 
-      {/* Logo video */}
-      <div className="relative flex h-[60vh] min-h-[420px] items-center justify-center">
-        <video
-          className="max-h-full max-w-full object-contain opacity-80"
-          src="/brand/video/logo-loop.mp4"
-          autoPlay
-          loop
-          muted
-          playsInline
-          preload="metadata"
+      {/* Dark overlay for contrast */}
+      <div className="absolute inset-0 bg-black/60" />
+
+      {/* Optional center logo watermark */}
+      <div className="relative z-10 flex h-full items-center justify-center">
+        <img
+          src="/brand/logos/Logo-grey.png"
+          alt="Collision Academy"
+          className="w-[280px] opacity-10"
         />
       </div>
     </section>
   );
 }
-// This component renders an animated header section with a looping logo video
-// and a background gradient. It is designed to be responsive and visually
-// appealing, making use of absolute positioning and opacity settings for
-// the video element. The header occupies a significant portion of the viewport
-// height to create an immersive experience.
+// This component renders an animated header section with a looping
+// background video, a dark overlay for contrast, and an optional
+// center logo watermark. It is designed to be responsive and visually
+// appealing, suitable for use as a header on web pages.
