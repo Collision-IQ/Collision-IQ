@@ -1,31 +1,37 @@
+"use client";
+
 export default function AnimatedHeader() {
   return (
-    <section className="relative h-[70vh] min-h-[520px] w-full overflow-hidden">
-      {/* Background video */}
+    <header className="relative w-full h-[80vh] min-h-[520px] overflow-hidden">
+      {/* VIDEO BACKGROUND */}
       <video
-        className="absolute inset-0 h-full w-full object-cover opacity-40"
-        src="/brand/video/logo-loop.mp4"
+        className="absolute inset-0 w-full h-full object-cover"
+        src="/brand/logos/Logo-video.mp4"
         autoPlay
-        muted
         loop
+        muted
         playsInline
       />
 
-      {/* Dark overlay for contrast */}
+      {/* DARK OVERLAY (for contrast) */}
       <div className="absolute inset-0 bg-black/60" />
 
-      {/* Optional center logo watermark */}
+      {/* OPTIONAL CENTER BRANDING */}
       <div className="relative z-10 flex h-full items-center justify-center">
-        <img
-          src="/brand/logos/Logo-grey.png"
-          alt="Collision Academy"
-          className="w-[280px] opacity-10"
-        />
+        <div className="text-center">
+          <h1 className="text-4xl md:text-6xl font-bold tracking-tight">
+            <span className="text-white">Collision</span>{" "}
+            <span className="text-[color:var(--accent)]">Academy</span>
+          </h1>
+          <p className="mt-4 text-sm md:text-base text-white/70">
+            OEM-aligned. Documentation-first. Claim-focused.
+          </p>
+        </div>
       </div>
-    </section>
+    </header>
   );
 }
-// This component renders an animated header section with a looping
-// background video, a dark overlay for contrast, and an optional
-// center logo watermark. It is designed to be responsive and visually
-// appealing, suitable for use as a header on web pages.
+// This component renders an animated header with a video background.
+// It includes a dark overlay for contrast and optional centered branding
+// with the company name and tagline. The header is responsive and fills
+// the viewport height.
