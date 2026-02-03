@@ -1,4 +1,3 @@
-import { ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -14,6 +13,7 @@ export default function Home() {
   return (
     <main className="mx-auto max-w-6xl px-4 py-14">
       <div className="grid items-center gap-10 md:grid-cols-2">
+        {/* LEFT COLUMN */}
         <div>
           <div className="flex flex-wrap gap-2">
             <Pill>Buy Now</Pill>
@@ -29,6 +29,7 @@ export default function Home() {
             </span>{" "}
             repairs for policyholders and repair centers.
           </h1>
+
           <p className="mt-4 text-[color:var(--muted)]">
             Collision Academy supports repair centers and policyholders through
             manufacturer repair procedures, OEM position statements, and insurance
@@ -37,25 +38,19 @@ export default function Home() {
             fall short.
           </p>
 
-          <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-            <Link
-              href="/services"
-              className="rounded-xl bg-[color:var(--accent)] px-5 py-3 text-center font-semibold text-black hover:opacity-90"
-            >
-              View Packages
-            </Link>
-            
+          {/* PRIMARY CTA — SINGLE BUTTON */}
+          <div className="mt-7">
             <a
               href="https://www.collision.academy/s/shop"
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-xl bg-[color:var(--accent)] px-5 py-3 text-center font-semibold text-black hover:opacity-90"
+              className="inline-block rounded-xl bg-[color:var(--accent)] px-6 py-3 text-center font-semibold text-black hover:opacity-90"
             >
               View Packages
             </a>
-
           </div>
 
+          {/* VALUE CARDS */}
           <div className="mt-8 grid grid-cols-3 gap-3 text-center">
             <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-4">
               <div className="text-xl font-semibold">OEM</div>
@@ -78,6 +73,7 @@ export default function Home() {
           </div>
         </div>
 
+        {/* RIGHT COLUMN */}
         <div className="rounded-3xl border border-[color:var(--border)] bg-[color:var(--card)] p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -114,6 +110,7 @@ export default function Home() {
             </div>
           </div>
 
+          {/* SEE ALL SERVICES → HANDOFF PAGE */}
           <div className="mt-6">
             <Link
               href="/services"
@@ -125,6 +122,7 @@ export default function Home() {
         </div>
       </div>
 
+      {/* NEXT STEPS */}
       <section className="mt-16">
         <h2 className="text-2xl font-semibold">Next steps</h2>
         <div className="mt-5 grid gap-4 md:grid-cols-3">
