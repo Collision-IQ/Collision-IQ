@@ -81,7 +81,7 @@ export default function Home() {
               <div className="text-xl font-semibold">Collision Academy</div>
             </div>
             <Image
-              src="/brand/logos/logo-grey.png"
+              src="/brand/logos/Logo-grey.png"
               alt="Collision Academy"
               width={140}
               height={32}
@@ -150,7 +150,7 @@ export default function Home() {
 
           {/* LINKEDIN */}
           <a
-            href="https://www.linkedin.com/company/collision-academy"
+            href="https://www.linkedin.com/in/vinny-menichetti-917097304/"
             target="_blank"
             rel="noopener noreferrer"
             className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-5 hover:bg-white/5 transition"
