@@ -84,7 +84,8 @@ export default function Home() {
               src="/brand/logos/logo-grey.png"
               alt="Collision Academy"
               width={140}
-              height={28}
+              height={32}
+              className="opacity-80"
               priority
             />
           </div>
@@ -126,19 +127,39 @@ export default function Home() {
       <section className="mt-16">
         <h2 className="text-2xl font-semibold">Next steps</h2>
         <div className="mt-5 grid gap-4 md:grid-cols-3">
-          {[
-            ["Choose a package", "Pick the service that fits your claim."],
-            ["Upload your docs", "Photos, estimates, supplements, reports."],
-            ["Get deliverables", "Clear documentation and next-step guidance."],
-          ].map(([t, d]) => (
-            <div
-              key={t}
-              className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-5"
-            >
-              <div className="font-semibold">{t}</div>
-              <div className="mt-2 text-sm text-[color:var(--muted)]">{d}</div>
+          {/* SERVICES */}
+          <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-5">
+            <div className="font-semibold">Choose a package</div>
+            <div className="mt-2 text-sm text-[color:var(--muted)]">
+              View professional services and documentation options.
             </div>
-          ))}
+          </div>
+
+          {/* INSTAGRAM */}
+          <a
+            href="https://www.instagram.com/collisionacademy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-5 hover:bg-white/5 transition"
+          >
+            <div className="font-semibold">Instagram</div>
+            <div className="mt-2 text-sm text-[color:var(--muted)]">
+              Repair insights, claim tips, and real-world examples.
+            </div>
+          </a>
+
+          {/* LINKEDIN */}
+          <a
+            href="https://www.linkedin.com/company/collision-academy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-5 hover:bg-white/5 transition"
+          >
+            <div className="font-semibold">LinkedIn</div>
+            <div className="mt-2 text-sm text-[color:var(--muted)]">
+              Industry updates, standards, and professional guidance.
+            </div>
+          </a>
         </div>
       </section>
     </main>
