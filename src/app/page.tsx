@@ -9,6 +9,7 @@ function Pill({ children }: { children: React.ReactNode }) {
   );
 }
 
+import AnimatedHeader from "@/components/AnimatedHeader";
 export default function Home() {
   return (
     <main className="mx-auto max-w-6xl px-4 py-14">
