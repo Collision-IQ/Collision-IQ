@@ -38,7 +38,7 @@ export default function Home() {
             fall short.
           </p>
 
-          {/* PRIMARY CTA — SINGLE BUTTON */}
+          {/* PRIMARY CTA */}
           <div className="mt-7">
             <a
               href="https://www.collision.academy/s/shop"
@@ -52,24 +52,19 @@ export default function Home() {
 
           {/* VALUE CARDS */}
           <div className="mt-8 grid grid-cols-3 gap-3 text-center">
-            <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-4">
-              <div className="text-xl font-semibold">OEM</div>
-              <div className="text-xs text-[color:var(--muted)]">
-                standards aligned
+            {[
+              ["OEM", "standards aligned"],
+              ["Clear", "negotiation support"],
+              ["Fast", "remote workflow"],
+            ].map(([title, desc]) => (
+              <div
+                key={title}
+                className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-4"
+              >
+                <div className="text-xl font-semibold">{title}</div>
+                <div className="text-xs text-[color:var(--muted)]">{desc}</div>
               </div>
-            </div>
-            <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-4">
-              <div className="text-xl font-semibold">Clear</div>
-              <div className="text-xs text-[color:var(--muted)]">
-                negotiation support
-              </div>
-            </div>
-            <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-4">
-              <div className="text-xl font-semibold">Fast</div>
-              <div className="text-xs text-[color:var(--muted)]">
-                remote workflow
-              </div>
-            </div>
+            ))}
           </div>
         </div>
 
@@ -91,24 +86,28 @@ export default function Home() {
           </div>
 
           <div className="mt-6 grid gap-3">
-            <div className="rounded-2xl border border-[color:var(--border)] bg-white/5 p-4">
-              <div className="font-semibold">Diminished Value</div>
-              <div className="text-sm text-[color:var(--muted)]">
-                Market-based DV documentation for negotiation.
+            {[
+              [
+                "Diminished Value",
+                "Market-based DV documentation for negotiation.",
+              ],
+              [
+                "Total Loss Value Dispute",
+                "Comp-driven rebuttal support and review.",
+              ],
+              [
+                "Right to Appraisal",
+                "Process guidance + documentation packet.",
+              ],
+            ].map(([title, desc]) => (
+              <div
+                key={title}
+                className="rounded-2xl border border-[color:var(--border)] bg-white/5 p-4"
+              >
+                <div className="font-semibold">{title}</div>
+                <div className="text-sm text-[color:var(--muted)]">{desc}</div>
               </div>
-            </div>
-            <div className="rounded-2xl border border-[color:var(--border)] bg-white/5 p-4">
-              <div className="font-semibold">Total Loss Value Dispute</div>
-              <div className="text-sm text-[color:var(--muted)]">
-                Comp-driven rebuttal support and review.
-              </div>
-            </div>
-            <div className="rounded-2xl border border-[color:var(--border)] bg-white/5 p-4">
-              <div className="font-semibold">Right to Appraisal</div>
-              <div className="text-sm text-[color:var(--muted)]">
-                Process guidance + documentation packet.
-              </div>
-            </div>
+            ))}
           </div>
 
           {/* SEE ALL SERVICES → HANDOFF PAGE */}
@@ -126,45 +125,48 @@ export default function Home() {
       {/* NEXT STEPS */}
       <section className="mt-16">
         <h2 className="text-2xl font-semibold">Next steps</h2>
-        <div className="mt-5 grid gap-4 md:grid-cols-3">
-          {/* SERVICES */}
-          <div className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-5">
-            <div className="font-semibold">"Collision-IQ Chatbot", "Ask repair, OEM, and insurance questions in real time."</div>
-            <div className="mt-2 text-sm text-[color:var(--muted)]">
-              View professional services and documentation options.
-            </div>
-          </div>
 
-          {[
-            [
-              "Collision-IQ Chatbot",
-              "Ask repair, OEM, and insurance questions in real time.",
-              "/chatbot",
-            ],
-            [
-              "Instagram",
-              "Repair insights, claim tips, and real-world examples.",
-              "https://www.instagram.com/collision_academy/",
-            ],
-            [
-              "LinkedIn",
-              "Industry updates, standards, and professional guidance.",
-              "https://www.linkedin.com/in/vinny-menichetti-917097304/",
-            ],
-          ].map(([t, d, href]) => (
-            <a
-              key={t}
-              href={href}
-              target={href.startsWith("http") ? "_blank" : undefined}
-              rel={href.startsWith("http") ? "noopener noreferrer" : undefined}
-              className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-5 transition hover:bg-white/5"
-            >
-              <div className="font-semibold">{t}</div>
-              <div className="mt-2 text-sm text-[color:var(--muted)]">{d}</div>
-            </a>
-                    ))}
-                  </div>
-                </section>
-              </main>
-            );
-          }
+        <div className="mt-5 grid gap-4 md:grid-cols-3">
+          {/* COLLISION-IQ CHATBOT */}
+          <a
+            href="/chatbot"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-5 transition hover:bg-white/5"
+          >
+            <div className="font-semibold">Collision-IQ Chatbot</div>
+            <div className="mt-2 text-sm text-[color:var(--muted)]">
+              Ask repair, OEM, and insurance questions in real time.
+            </div>
+          </a>
+
+          {/* INSTAGRAM */}
+          <a
+            href="https://www.instagram.com/collision_academy/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-5 transition hover:bg-white/5"
+          >
+            <div className="font-semibold">Instagram</div>
+            <div className="mt-2 text-sm text-[color:var(--muted)]">
+              Repair insights, claim tips, and real-world examples.
+            </div>
+          </a>
+
+          {/* LINKEDIN */}
+          <a
+            href="https://www.linkedin.com/in/vinny-menichetti-917097304/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-2xl border border-[color:var(--border)] bg-[color:var(--card)] p-5 transition hover:bg-white/5"
+          >
+            <div className="font-semibold">LinkedIn</div>
+            <div className="mt-2 text-sm text-[color:var(--muted)]">
+              Industry updates, standards, and professional guidance.
+            </div>
+          </a>
+        </div>
+      </section>
+    </main>
+  );
+}
