@@ -12,39 +12,32 @@ export default function FileUpload({ onUploadComplete }: Props) {
   const [loading, setLoading] = useState(false);
 
   async function handleFiles(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!e.target.files || !e.target.files.length) return;
+    if (!e.target.files?.length) return;
 
     setLoading(true);
 
     const formData = new FormData();
-    Array.from(e.target.files).forEach((file) =>
-      formData.append('files', file)
+    Array.from(e.target.files).forEach((f) =>
+      formData.append('files', f)
     );
 
-    try {
-      const res = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData,
+    });
 
-      const data = await res.json();
+    const data = await res.json();
 
-      if (data.success) {
-        onUploadComplete(data.documents);
-      } else {
-        console.error('Upload failed:', data.error);
-      }
-    } catch (err) {
-      console.error('Upload error:', err);
-    } finally {
-      setLoading(false);
-      if (inputRef.current) inputRef.current.value = '';
+    if (data.success) {
+      onUploadComplete(data.documents);
     }
+
+    setLoading(false);
+    e.target.value = '';
   }
 
   return (
-    <div className="flex items-center gap-3">
-      {/* Hidden native input */}
+    <div>
       <input
         ref={inputRef}
         type="file"
@@ -54,24 +47,19 @@ export default function FileUpload({ onUploadComplete }: Props) {
         className="hidden"
       />
 
-      {/* Button trigger */}
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={loading}
-        className="rounded px-3 py-2 text-sm font-medium
-                   bg-orange-600 text-white
-                   hover:bg-orange-700
-                   disabled:opacity-60"
+        className="w-full rounded-md bg-orange-600 px-4 py-2 text-sm text-white hover:bg-orange-700 disabled:opacity-50"
       >
         {loading ? 'Uploading…' : 'Upload documents'}
       </button>
-
-      {loading && (
-        <span className="text-xs opacity-70">
-          Parsing documents…
-        </span>
-      )}
     </div>
   );
 }
+// This component provides a file upload interface that allows users to select
+// and upload multiple documents. It handles the file selection, sends the files
+// to the server via a POST request, and invokes a callback with the uploaded
+// document metadata upon successful upload. The component also manages loading
+// state to provide user feedback during the upload process.

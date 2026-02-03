@@ -44,12 +44,16 @@ export default function Home() {
             >
               View Packages
             </Link>
-            <Link
-              href="/upload"
-              className="rounded-xl border border-[color:var(--border)] px-5 py-3 text-center hover:bg-white/5"
+            
+            <a
+              href="https://www.collision.academy/s/shop"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-xl bg-[color:var(--accent)] px-5 py-3 text-center font-semibold text-black hover:opacity-90"
             >
-              Start Intake (Upload)
-            </Link>
+              View Packages
+            </a>
+
           </div>
 
           <div className="mt-8 grid grid-cols-3 gap-3 text-center">
