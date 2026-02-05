@@ -6,7 +6,7 @@ export default function AnimatedHeader() {
       {/* VIDEO BACKGROUND */}
       <video
         className="absolute inset-0 h-full w-full object-cover"
-        src="/brand/logos/Logo video.mp4"
+        src="/brand/logos/Logo-video.mp4"
         autoPlay
         muted
         loop
