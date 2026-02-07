@@ -1,30 +1,39 @@
 "use client";
 
-import React, { useCallback, useRef } from "react";
-import type { ChatWidgetApi } from "@/components/ChatWidget";
+import React from "react";
 
-type Props = {
-  children: (setApi: (api: ChatWidgetApi) => void) => React.ReactNode;
+type ChatShellProps = {
+  left?: React.ReactNode;
+  header?: React.ReactNode;
+  center: React.ReactNode;
+  right?: React.ReactNode;
 };
 
-export default function ChatShell({ children }: Props) {
-  const apiRef = useRef<ChatWidgetApi | null>(null);
-
-  // IMPORTANT: safe ref write (happens when child calls it, not during render)
-  const setApi = useCallback((api: ChatWidgetApi) => {
-    apiRef.current = api;
-  }, []);
-
+export default function ChatShell({
+  left,
+  header,
+  center,
+  right,
+}: ChatShellProps) {
   return (
-    <div className="min-h-[100svh] w-full bg-black text-white overflow-hidden">
-      {/* soft vignette */}
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,.08),transparent_55%)]" />
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_center,_rgba(0,0,0,.65),transparent_60%)]" />
+    <div className="mx-auto grid max-w-7xl grid-cols-[260px_1fr_300px] gap-6 p-6">
+      {/* LEFT PANEL */}
+      <aside className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl">
+        {left}
+      </aside>
 
-      <div className="relative mx-auto grid h-[100svh] max-w-7xl grid-cols-1 gap-6 px-4 py-6 lg:grid-cols-[280px_1fr_320px]">
-        {/* eslint-disable-next-line react-hooks/refs */}
-        {children(setApi)}
-      </div>
+      {/* CENTER */}
+      <main className="flex min-h-[80vh] flex-col rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl">
+        {header && (
+          <div className="border-b border-white/10 p-4">{header}</div>
+        )}
+        <div className="flex min-h-0 flex-1 flex-col">{center}</div>
+      </main>
+
+      {/* RIGHT PANEL */}
+      <aside className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl">
+        {right}
+      </aside>
     </div>
   );
 }
