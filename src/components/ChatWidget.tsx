@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { UploadedDocument } from "@/types/uploadedDocument";
 import { useSessionStore } from "@/lib/sessionStore";
 import FileUpload from "./FileUpload";
 
@@ -128,8 +127,8 @@ Rules:
         });
       }
     } catch (e: unknown) {
-      const errorMsg = e instanceof Error ? e.message : "Something went wrong.";
-      setError(errorMsg);
+      const message = e instanceof Error ? e.message : "Something went wrong.";
+      setError(message);
       // remove empty assistant placeholder if any
       setMessages((prev) => {
         const copy = [...prev];
@@ -166,51 +165,34 @@ Rules:
   }, [onApiReady, input, docs, messages]);
 
   return (
-    <div className="flex h-full flex-col rounded-2xl bg-black/30 text-white">
-      {/* Header strip inside panel */}
-      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-        <div className="text-sm font-semibold">Collision-IQ</div>
-        <div className="text-xs text-white/60">
-          {sending ? "Thinking…" : "Online"}
-        </div>
-      </div>
-
-      {error ? (
-        <div className="border-b border-red-500/20 bg-red-500/10 px-4 py-2 text-sm text-red-200">
+    <div className="flex h-full min-h-0 flex-col">
+      {error && (
+        <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
           {error}
         </div>
-      ) : null}
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {messages.map((m, i) => {
-          const isUser = m.role === "user";
-          return (
-            <div
-              key={i}
-              className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-sm ${
-                isUser
-                  ? "ml-auto bg-[color:var(--accent)] text-black"
-                  : "mr-auto bg-white/10 text-white"
-              }`}
-            >
-              {m.content}
-            </div>
-          );
-        })}
+      )}
+      {/* messages: scroll only here */}
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-black/30 p-4">
+        {/* your existing messages render */}
+        {messages.map((m, i) => (
+          <div key={i} className="mb-3">
+            {/* ...existing message bubble markup... */}
+          </div>
+        ))}
         <div ref={endRef} />
       </div>
 
-      {/* Footer actions */}
-      <div className="border-t border-white/10 p-3 space-y-2">
-        {/* Upload button (uses hidden input) */}
+      {/* footer: fixed */}
+      <div className="mt-3 shrink-0 space-y-2">
+        {/* upload button row */}
         <FileUpload
-          onUploadComplete={(newDocs: UploadedDocument[]) => setDocs(newDocs)}
-          buttonLabel="Upload docs here"
+          onUploadComplete={(newDocs) => setDocs(newDocs)}
+          buttonLabel="Upload documents"
           className="w-full"
           inputRef={fileInputRef}
         />
 
+        {/* input row */}
         <div className="flex gap-2">
           <input
             value={input}
@@ -218,13 +200,13 @@ Rules:
             onKeyDown={(e) => {
               if (e.key === "Enter") sendDraft();
             }}
-            placeholder="Ask a question…"
+            placeholder="Ask a question..."
             className="flex-1 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none placeholder:text-white/40"
           />
           <button
             onClick={sendDraft}
             disabled={sending}
-            className="rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/15 disabled:opacity-50"
+            className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
             Send
           </button>

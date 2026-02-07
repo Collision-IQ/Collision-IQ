@@ -1,23 +1,21 @@
-"use client";
-
-import { useRef } from "react";
+import React from "react";
 import type { UploadedDocument } from "@/types/uploadedDocument";
 
 type Props = {
   onUploadComplete: (docs: UploadedDocument[]) => void;
-  buttonLabel?: string;
   className?: string;
-  inputRef?: React.RefObject<HTMLInputElement>;
+  buttonLabel?: string;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
 };
 
 export default function FileUpload({
   onUploadComplete,
-  buttonLabel = "Upload docs",
-  className = "",
+  className,
+  buttonLabel = "Upload documents",
   inputRef,
 }: Props) {
-  const localRef = useRef<HTMLInputElement>(null);
-  const ref = inputRef ?? localRef;
+  const innerRef = React.useRef<HTMLInputElement | null>(null);
+  const ref = inputRef ?? innerRef;
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -25,11 +23,7 @@ export default function FileUpload({
     const formData = new FormData();
     Array.from(files).forEach((f) => formData.append("files", f));
 
-    const res = await fetch("/api/upload", {
-      method: "POST",
-      body: formData,
-    });
-
+    const res = await fetch("/api/upload", { method: "POST", body: formData });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(text || `Upload failed (${res.status})`);
@@ -45,18 +39,18 @@ export default function FileUpload({
       <input
         ref={ref}
         type="file"
-        aria-label="Upload documents"
         multiple
         accept=".pdf,image/*"
         className="hidden"
+        aria-label="Upload documents"
+        title="Upload documents"
+        data-ciq-upload="true"
         onChange={(e) => {
-          // copy immediately to avoid any synthetic event weirdness
           const files = e.currentTarget.files;
-          // reset value so the same file can be re-selected
-          e.currentTarget.value = "";
+          e.currentTarget.value = ""; // allow re-selecting same file
           handleFiles(files).catch((err) => {
             console.error(err);
-            alert(err?.message ?? "Upload failed");
+            alert(err instanceof Error ? err.message : "Upload failed");
           });
         }}
       />
@@ -64,7 +58,7 @@ export default function FileUpload({
       <button
         type="button"
         onClick={() => ref.current?.click()}
-        className="rounded-xl bg-[color:var(--accent)] px-4 py-2 font-semibold text-black hover:opacity-90"
+        className="w-full rounded-xl bg-[color:var(--accent)] px-4 py-2 text-sm font-semibold text-black hover:opacity-90"
       >
         {buttonLabel}
       </button>
