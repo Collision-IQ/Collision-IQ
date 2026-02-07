@@ -1,21 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
-type Role = "system" | "user" | "assistant";
+type Role = "user" | "assistant" | "system";
 
-type Message = {
+export type ChatMessage = {
   id: string;
   role: Role;
   content: string;
 };
 
 function uid() {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+  return Math.random().toString(36).slice(2);
 }
 
 export default function ChatWidget() {
-  const [messages, setMessages] = useState<Message[]>([
+  const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: uid(),
       role: "assistant",
@@ -25,23 +25,26 @@ export default function ChatWidget() {
   ]);
 
   const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const endRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  async function sendText(text: string) {
+  /**
+   * STREAMING SEND FUNCTION
+   * Works with 2025 streaming route.ts (plain text stream)
+   */
+  const sendText = useCallback(async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed || sending) return;
+    if (!trimmed || loading) return;
 
-    setSending(true);
-    setError(null);
+    setInput("");
+    setLoading(true);
 
-    const userMsg: Message = { id: uid(), role: "user", content: trimmed };
+    const userMsg: ChatMessage = {
+      id: uid(),
+      role: "user",
+      content: trimmed,
+    };
+
     const assistantId = uid();
 
     setMessages((prev) => [
@@ -50,127 +53,106 @@ export default function ChatWidget() {
       { id: assistantId, role: "assistant", content: "" },
     ]);
 
-    setInput("");
-
     try {
+      abortRef.current?.abort();
+      abortRef.current = new AbortController();
+
       const res = await fetch("/api/chat", {
         method: "POST",
+        signal: abortRef.current.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [...messages, userMsg],
+          messages: [...messages, userMsg].map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
         }),
       });
 
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt || "Chat request failed");
+      if (!res.body) {
+        throw new Error("No stream returned from API");
       }
-
-      if (!res.body) throw new Error("No response body");
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
+      let done = false;
 
-        const chunk = decoder.decode(value, { stream: true });
+      while (!done) {
+        const { value, done: doneReading } = await reader.read();
+        done = doneReading;
 
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, content: m.content + chunk } : m
-          )
-        );
+        const chunk = decoder.decode(value || new Uint8Array());
+
+        if (chunk) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId
+                ? { ...m, content: m.content + chunk }
+                : m
+            )
+          );
+        }
       }
-    } catch (e: unknown) {
-      const msg =
-        e instanceof Error ? e.message : "Something went wrong during chat.";
-      setError(msg);
-
-      setMessages((prev) => {
-        const copy = [...prev];
-        const last = copy[copy.length - 1];
-        if (last?.role === "assistant" && last.content === "") copy.pop();
-        return copy;
-      });
+    } catch (err) {
+      console.error("Chat stream error:", err);
     } finally {
-      setSending(false);
+      setLoading(false);
     }
-  }
+  }, [loading, messages]);
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      void sendText(input);
+    },
+    [input, sendText]
+  );
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      {/* Header */}
-      <div className="shrink-0 border-b border-white/10 px-5 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-semibold">Collision-IQ</div>
-            <div className="text-xs text-white/60">
-              Workspace mode — uploads + context stay in sync.
-            </div>
-          </div>
-          <div className="flex gap-2 text-[11px] text-white/60">
-            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
-              Streaming
-            </span>
-            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">
-              OEM-aware
-            </span>
-          </div>
-        </div>
+    <div className="flex h-full min-h-0 flex-col rounded-3xl border border-white/10 bg-white/5">
+      {/* HEADER */}
+      <div className="border-b border-white/10 px-5 py-4">
+        <h2 className="text-sm font-semibold text-white">Collision-IQ</h2>
+        <p className="text-xs opacity-60">Streaming • OEM-aware</p>
       </div>
 
-      {/* Messages */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        {error && (
-          <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-            {error}
-          </div>
-        )}
-
-        <div className="space-y-3">
-          {messages.map((m) => (
-            <div
-              key={m.id}
-              className={[
-                "max-w-[92%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm",
-                m.role === "user"
-                  ? "ml-auto bg-[#ff6a1a]/90 text-black"
-                  : "mr-auto bg-white/10 text-white",
-              ].join(" ")}
-            >
-              {m.content}
-            </div>
-          ))}
-          <div ref={endRef} />
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="shrink-0 border-t border-white/10 px-5 py-4">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void sendText(input);
-          }}
-          className="flex gap-2"
-        >
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask a question..."
-            className="flex-1 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none"
-          />
-          <button
-            type="submit"
-            disabled={sending || !input.trim()}
-            className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+      {/* MESSAGES */}
+      <div className="flex-1 space-y-3 overflow-y-auto p-5">
+        {messages.map((m) => (
+          <div
+            key={m.id}
+            className={
+              m.role === "user"
+                ? "ml-auto max-w-[75%] rounded-2xl bg-orange-500 px-4 py-2 text-sm text-white"
+                : "mr-auto max-w-[75%] rounded-2xl bg-white/10 px-4 py-2 text-sm text-white"
+            }
           >
-            Send
-          </button>
-        </form>
+            {m.content || (loading && m.role === "assistant" ? "…" : "")}
+          </div>
+        ))}
       </div>
+
+      {/* INPUT */}
+      <form
+        onSubmit={handleSubmit}
+        className="flex gap-2 border-t border-white/10 p-4"
+      >
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Ask a question..."
+          className="flex-1 rounded-xl bg-black/40 px-4 py-2 text-sm text-white outline-none"
+        />
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          Send
+        </button>
+      </form>
     </div>
   );
 }
