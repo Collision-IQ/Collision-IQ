@@ -1,25 +1,15 @@
 // src/lib/sessionStore.ts
-export type SessionRecord = {
-  sessionKey: string;
-  threadId: string;
-  vectorStoreId: string;
-  createdAt: number;
+import { create } from "zustand";
+import type { UploadedDocument } from "@/types/uploadedDocument";
+
+type SessionState = {
+  documents: UploadedDocument[];
+  setDocuments: (docs: UploadedDocument[]) => void;
+  clearDocuments: () => void;
 };
 
-const sessions = new Map<string, SessionRecord>();
-
-export function getSession(sessionKey: string) {
-  return sessions.get(sessionKey);
-}
-
-export function setSession(rec: SessionRecord) {
-  sessions.set(rec.sessionKey, rec);
-}
-
-export function requireSession(sessionKey: string) {
-  const s = sessions.get(sessionKey);
-  if (!s) {
-    throw new Error("Unknown sessionKey. Call POST /api/session first.");
-  }
-  return s;
-}
+export const useSessionStore = create<SessionState>((set) => ({
+  documents: [],
+  setDocuments: (docs) => set({ documents: docs }),
+  clearDocuments: () => set({ documents: [] }),
+}));

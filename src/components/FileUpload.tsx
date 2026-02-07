@@ -1,65 +1,73 @@
-'use client';
+"use client";
 
-import { useRef, useState } from 'react';
-import type { UploadedDocument } from '@/types/uploadedDocument';
+import { useRef } from "react";
+import type { UploadedDocument } from "@/types/uploadedDocument";
 
 type Props = {
   onUploadComplete: (docs: UploadedDocument[]) => void;
+  buttonLabel?: string;
+  className?: string;
+  inputRef?: React.RefObject<HTMLInputElement>;
 };
 
-export default function FileUpload({ onUploadComplete }: Props) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [loading, setLoading] = useState(false);
+export default function FileUpload({
+  onUploadComplete,
+  buttonLabel = "Upload docs",
+  className = "",
+  inputRef,
+}: Props) {
+  const localRef = useRef<HTMLInputElement>(null);
+  const ref = inputRef ?? localRef;
 
-  async function handleFiles(e: React.ChangeEvent<HTMLInputElement>) {
-    if (!e.target.files?.length) return;
-
-    setLoading(true);
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
 
     const formData = new FormData();
-    Array.from(e.target.files).forEach((f) =>
-      formData.append('files', f)
-    );
+    Array.from(files).forEach((f) => formData.append("files", f));
 
-    const res = await fetch('/api/upload', {
-      method: 'POST',
+    const res = await fetch("/api/upload", {
+      method: "POST",
       body: formData,
     });
 
-    const data = await res.json();
-
-    if (data.success) {
-      onUploadComplete(data.documents);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(text || `Upload failed (${res.status})`);
     }
 
-    setLoading(false);
-    e.target.value = '';
+    const data = await res.json();
+    const docs: UploadedDocument[] = data?.documents ?? [];
+    onUploadComplete(docs);
   }
 
   return (
-    <div>
+    <div className={className}>
       <input
-        ref={inputRef}
+        ref={ref}
         type="file"
+        aria-label="Upload documents"
         multiple
-        accept=".pdf,.png,.jpg,.jpeg"
-        onChange={handleFiles}
+        accept=".pdf,image/*"
         className="hidden"
+        onChange={(e) => {
+          // copy immediately to avoid any synthetic event weirdness
+          const files = e.currentTarget.files;
+          // reset value so the same file can be re-selected
+          e.currentTarget.value = "";
+          handleFiles(files).catch((err) => {
+            console.error(err);
+            alert(err?.message ?? "Upload failed");
+          });
+        }}
       />
 
       <button
         type="button"
-        onClick={() => inputRef.current?.click()}
-        disabled={loading}
-        className="w-full rounded-md bg-orange-600 px-4 py-2 text-sm text-white hover:bg-orange-700 disabled:opacity-50"
+        onClick={() => ref.current?.click()}
+        className="rounded-xl bg-[color:var(--accent)] px-4 py-2 font-semibold text-black hover:opacity-90"
       >
-        {loading ? 'Uploading…' : 'Upload documents'}
+        {buttonLabel}
       </button>
     </div>
   );
 }
-// This component provides a file upload interface that allows users to select
-// and upload multiple documents. It handles the file selection, sends the files
-// to the server via a POST request, and invokes a callback with the uploaded
-// document metadata upon successful upload. The component also manages loading
-// state to provide user feedback during the upload process.
