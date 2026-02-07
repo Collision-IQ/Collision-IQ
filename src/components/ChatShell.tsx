@@ -51,7 +51,7 @@ export default function ChatShell({ title, subtitle, logo, children }: Props) {
           loop
           playsInline
           // If you renamed the file, update this path:
-          src="/brand/logos/Logo%20video.mp4"
+          src="/brand/logos/logo-video.mp4"
         />
       </div>
 
