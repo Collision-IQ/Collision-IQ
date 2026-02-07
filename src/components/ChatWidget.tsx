@@ -128,7 +128,9 @@ export default function ChatWidget({ onApiReady, documents = [], onDocumentsChan
     const assistantId = uid();
     const assistantMsg: Message = { id: assistantId, role: 'assistant', content: '' };
 
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    const nextMessages = [...messages, userMsg, assistantMsg];
+
+    setMessages(nextMessages);
     setInput('');
 
     try {
@@ -137,7 +139,7 @@ export default function ChatWidget({ onApiReady, documents = [], onDocumentsChan
         headers: { 'Content-Type': 'application/json' },
         // keep compatibility: message is always present; docs are optional
         body: JSON.stringify({
-          message: trimmed,
+          messages: nextMessages,
           documents,
         }),
       });
