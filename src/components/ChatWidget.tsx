@@ -12,6 +12,7 @@ export type ChatWidgetApi = {
   sendDraft: () => void;
   sendText: (text: string) => void;
   openUpload: () => void;
+  clearChat?: () => void;
 };
 
 type Props = {
