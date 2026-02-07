@@ -172,7 +172,7 @@ Rules:
         </div>
       )}
       {/* messages: scroll only here */}
-      <div className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-white/10 bg-black/30 p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto ...">
         {/* your existing messages render */}
         {messages.map((m, i) => (
           <div key={i} className="mb-3">
