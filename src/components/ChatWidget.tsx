@@ -1,140 +1,176 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useSessionStore } from "@/lib/sessionStore";
-import FileUpload from "./FileUpload";
+import { useEffect, useMemo, useRef, useState } from 'react';
 
-type Role = "system" | "user" | "assistant";
-type Message = { role: Role; content: string };
+type Role = 'system' | 'user' | 'assistant';
+
+type Message = {
+  id: string;
+  role: Role;
+  content: string;
+};
+
+export type UploadedDocument = {
+  id?: string;
+  filename?: string;
+  name?: string;
+  type?: string;
+  status?: string;
+  text?: string;
+};
 
 export type ChatWidgetApi = {
   setDraft: (text: string) => void;
   sendDraft: () => void;
   sendText: (text: string) => void;
   openUpload: () => void;
-  clearChat?: () => void;
+  clearChat: () => void;
 };
 
 type Props = {
   onApiReady?: (api: ChatWidgetApi) => void;
+  documents?: UploadedDocument[];
+  onDocumentsChange?: (docs: UploadedDocument[]) => void;
 };
 
-export default function ChatWidget({ onApiReady }: Props) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
+function uid() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+export default function ChatWidget({ onApiReady, documents = [], onDocumentsChange }: Props) {
+  const [messages, setMessages] = useState<Message[]>(() => [
+    {
+      id: uid(),
+      role: 'assistant',
+      content:
+        "Hello! Upload an estimate, OEM procedure, or photo and I'll provide structured analysis for supplements, missing ops, and OEM-aligned steps.",
+    },
+  ]);
+  const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // shared docs across pages/panels
-  const docs = useSessionStore((s) => s.documents);
-  const setDocs = useSessionStore((s) => s.setDocuments);
+  const endRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const endRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null!);
+  const openUpload = () => fileInputRef.current?.click();
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // system injection from uploaded docs (same behavior you already had)
-  const systemDocs = useMemo<Message[]>(() => {
-    if (!docs.length) return [];
-    const joined = docs
-      .map(
-        (d) =>
-          `--- ${d.filename} (${d.type}) ---\n${(d.text ?? "").slice(0, 12000)}`
-      )
-      .join("\n\n");
-
-    return [
-      {
-        role: "system",
-        content: `
-The user uploaded the following documents:
-
-${joined}
-
-Rules:
-- Treat OEM procedures as manufacturer guidance, not legal advice
-- Insurance policy language varies by carrier and state
-- Ask if pages appear missing or incomplete
-`.trim(),
+  const api: ChatWidgetApi = useMemo(
+    () => ({
+      setDraft: (t) => setInput(t),
+      sendDraft: () => {
+        const t = input.trim();
+        if (t) void sendText(t);
       },
-    ];
-  }, [docs]);
+      sendText: (t) => void sendText(t),
+      openUpload,
+      clearChat: () => {
+        setMessages([
+          {
+            id: uid(),
+            role: 'assistant',
+            content:
+              "Hello! Upload an estimate, OEM procedure, or photo and I'll provide structured analysis for supplements, missing ops, and OEM-aligned steps.",
+          },
+        ]);
+        setError(null);
+      },
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [input]
+  );
+
+  useEffect(() => {
+    onApiReady?.(api);
+  }, [api, onApiReady]);
+
+  async function uploadFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+
+    setError(null);
+
+    const formData = new FormData();
+    Array.from(files).forEach((f) => formData.append('files', f));
+
+    try {
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(txt || `Upload failed (${res.status})`);
+      }
+      const data = await res.json();
+
+      const newDocs: UploadedDocument[] =
+        data?.documents ??
+        data?.docs ??
+        Array.from(files).map((f) => ({ filename: f.name, type: f.type, status: 'ready' }));
+
+      onDocumentsChange?.(newDocs);
+    } catch (e: unknown) {
+      setError((e instanceof Error ? e.message : String(e)) || 'Upload failed');
+      // keep chat usable even if upload fails
+      console.error(e);
+    }
+  }
 
   async function sendText(text: string) {
-    const msg = text.trim();
-    if (!msg || sending) return;
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
 
     setError(null);
     setSending(true);
 
-    const userMsg: Message = { role: "user", content: msg };
+    const userMsg: Message = { id: uid(), role: 'user', content: trimmed };
+    const assistantId = uid();
+    const assistantMsg: Message = { id: assistantId, role: 'assistant', content: '' };
 
-    // optimistic append
-    setMessages((prev) => [...prev, userMsg, { role: "assistant", content: "" }]);
+    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    setInput('');
 
     try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // keep compatibility: message is always present; docs are optional
         body: JSON.stringify({
-          messages: [...systemDocs, ...messages, userMsg],
+          message: trimmed,
+          documents,
         }),
       });
 
       if (!res.ok) {
-        const t = await res.text().catch(() => "");
-        throw new Error(t || `Chat failed (${res.status})`);
+        const txt = await res.text().catch(() => '');
+        throw new Error(txt || `Chat request failed (${res.status})`);
       }
 
-      // If your /api/chat is streaming text/plain, read stream; else fallback json.
-      const contentType = res.headers.get("content-type") || "";
-      if (res.body && !contentType.includes("application/json")) {
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let assistantText = "";
+      if (!res.body) throw new Error('No response body (streaming unavailable).');
 
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          assistantText += decoder.decode(value, { stream: true });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
 
-          setMessages((prev) => {
-            const copy = [...prev];
-            for (let i = copy.length - 1; i >= 0; i--) {
-              if (copy[i].role === "assistant") {
-                copy[i] = { role: "assistant", content: assistantText };
-                break;
-              }
-            }
-            return copy;
-          });
-        }
-      } else {
-        const data = await res.json();
-        const textOut = data?.message ?? "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
 
-        setMessages((prev) => {
-          const copy = [...prev];
-          for (let i = copy.length - 1; i >= 0; i--) {
-            if (copy[i].role === "assistant") {
-              copy[i] = { role: "assistant", content: textOut };
-              break;
-            }
-          }
-          return copy;
-        });
+        const chunk = decoder.decode(value, { stream: true });
+
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + chunk } : m))
+        );
       }
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Something went wrong.";
-      setError(message);
-      // remove empty assistant placeholder if any
+      const msg = (e instanceof Error ? e.message : String(e)) || 'Something went wrong.';
+      setError(msg);
+
+      // remove empty assistant placeholder if nothing came back
       setMessages((prev) => {
         const copy = [...prev];
         const last = copy[copy.length - 1];
-        if (last?.role === "assistant" && !last.content) copy.pop();
+        if (last?.role === 'assistant' && last.content.trim() === '') copy.pop();
         return copy;
       });
     } finally {
@@ -142,76 +178,96 @@ Rules:
     }
   }
 
-  function sendDraft() {
-    const text = input;
-    setInput("");
-    sendText(text);
-  }
-
-  function openUpload() {
-    fileInputRef.current?.click();
-  }
-
-  // expose API to shell (Pro Level 2)
-  useEffect(() => {
-    if (!onApiReady) return;
-    const api: ChatWidgetApi = {
-      setDraft: (t) => setInput(t),
-      sendDraft,
-      sendText: (t) => sendText(t),
-      openUpload,
-    };
-    onApiReady(api);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onApiReady, input, docs, messages]);
-
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {error && (
-        <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-          {error}
-        </div>
-      )}
-      {/* messages: scroll only here */}
-      <div className="min-h-0 flex-1 overflow-y-auto ...">
-        {/* your existing messages render */}
-        {messages.map((m, i) => (
-          <div key={i} className="mb-3">
-            {/* ...existing message bubble markup... */}
+      {/* Header bar */}
+      <div className="shrink-0 border-b border-white/10 px-5 py-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-sm font-semibold">Collision-IQ</div>
+            <div className="text-xs text-white/60">Workspace mode — uploads + context stay in sync.</div>
           </div>
-        ))}
-        <div ref={endRef} />
+          <div className="flex items-center gap-2 text-[11px] text-white/60">
+            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">Streaming</span>
+            <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1">OEM-aware</span>
+          </div>
+        </div>
       </div>
 
-      {/* footer: fixed */}
-      <div className="mt-3 shrink-0 space-y-2">
-        {/* upload button row */}
-        <FileUpload
-          onUploadComplete={(newDocs) => setDocs(newDocs)}
-          buttonLabel="Upload documents"
-          className="w-full"
-          inputRef={fileInputRef}
+      {/* Message list (THIS is what must scroll; container height is fixed) */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {error && (
+          <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+            {error}
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {messages.map((m) => (
+            <div
+              key={m.id}
+              className={[
+                'max-w-[92%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-relaxed',
+                m.role === 'user'
+                  ? 'ml-auto bg-[#ff6a1a]/90 text-black'
+                  : 'mr-auto bg-white/10 text-white',
+              ].join(' ')}
+            >
+              {m.content}
+            </div>
+          ))}
+          <div ref={endRef} />
+        </div>
+      </div>
+
+      {/* Footer (fixed) */}
+      <div className="shrink-0 border-t border-white/10 px-5 py-4">
+        {/* hidden input used by BOTH center + external panels */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          multiple
+          accept=".pdf,.doc,.docx,image/*"
+          title="Upload documents"
+          onChange={(e) => {
+            const files = e.currentTarget.files;
+            // reset so same file can be selected again
+            e.currentTarget.value = '';
+            void uploadFiles(files);
+          }}
         />
 
-        {/* input row */}
-        <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={openUpload}
+          className="mb-3 w-full rounded-xl bg-[#ff6a1a] px-4 py-2.5 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-60"
+          disabled={sending}
+        >
+          Upload documents
+        </button>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void sendText(input);
+          }}
+          className="flex gap-2"
+        >
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") sendDraft();
-            }}
             placeholder="Ask a question..."
-            className="flex-1 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none placeholder:text-white/40"
+            className="flex-1 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none placeholder:text-white/40 focus:border-white/20"
           />
           <button
-            onClick={sendDraft}
-            disabled={sending}
-            className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            type="submit"
+            disabled={sending || !input.trim()}
+            className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
           >
             Send
           </button>
-        </div>
+        </form>
       </div>
     </div>
   );
