@@ -1,185 +1,240 @@
 import { NextResponse } from "next/server";
+import type { UploadedDocument } from "@/lib/sessionStore";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 
 type ChatRole = "system" | "user" | "assistant";
 type ChatMessage = { role: ChatRole; content: string };
 
-type UploadedDocument = {
-  filename: string;
-  type: string;
-  text: string;
-};
-
 type RequestBody = {
-  messages: ChatMessage[];
-  workspaceNotes?: string;
+  messages?: ChatMessage[];
   documents?: UploadedDocument[];
+  workspaceNotes?: string;
 };
 
 const SYSTEM_CONTEXT: ChatMessage = {
   role: "system",
-  content: [
-    "You are Collision IQ, a professional automotive insurance claim assistant for Collision Academy.",
-    "",
-    "You provide educational, neutral, OEM-aligned guidance on:",
-    "- Insurance claim handling best practices",
-    "- Repair planning and documentation",
-    "- Vehicle valuation concepts",
-    "- OEM procedure awareness",
-    "",
-    "You do NOT provide legal advice.",
-  ].join("\n"),
+  content: `
+You are Collision IQ, a professional automotive insurance claim assistant for Collision Academy.
+
+You provide educational, neutral, OEM-aligned guidance on:
+- Insurance claim handling best practices
+- Repair planning and documentation
+- Vehicle valuation concepts (total loss, diminished value)
+- OEM procedure awareness and safety considerations
+
+You do NOT provide legal advice.
+State laws and policy language vary.
+Ask for the user's state, insurer, and claim type when relevant.
+`.trim(),
 };
 
-function buildWorkspaceBlock(body: RequestBody): ChatMessage | null {
-  const notes = (body.workspaceNotes ?? "").trim();
-  const docs = Array.isArray(body.documents) ? body.documents : [];
+function isChatRole(x: unknown): x is ChatRole {
+  return x === "system" || x === "user" || x === "assistant";
+}
 
-  if (!notes && docs.length === 0) return null;
+function normalizeBody(x: unknown): Required<RequestBody> {
+  const out: Required<RequestBody> = {
+    messages: [],
+    documents: [],
+    workspaceNotes: "",
+  };
 
-  // Keep this short to avoid blowing token limits.
-  const docLines = docs.slice(0, 6).map((d) => {
-    const excerpt = (d.text ?? "").replace(/\s+/g, " ").slice(0, 600);
-    return `- ${d.filename}\n  Excerpt: ${excerpt}${excerpt.length === 600 ? "…" : ""}`;
-  });
+  if (!x || typeof x !== "object") return out;
+  const b = x as Record<string, unknown>;
 
-  const content = [
-    "WORKSPACE CONTEXT (use this as reference material, do not repeat verbatim unless asked):",
-    notes ? `\nNotes:\n${notes}` : "",
-    docs.length ? `\nDocuments:\n${docLines.join("\n")}` : "",
-  ].join("\n");
+  if (Array.isArray(b.messages)) {
+    out.messages = b.messages
+      .filter((m): m is Record<string, unknown> => !!m && typeof m === "object")
+      .map((m) => ({
+        role: isChatRole(m.role) ? m.role : "user",
+        content: typeof m.content === "string" ? m.content : "",
+      }))
+      .filter((m) => m.content.trim().length > 0);
+  }
+
+  if (Array.isArray(b.documents)) {
+    out.documents = b.documents
+      .filter((d): d is Record<string, unknown> => !!d && typeof d === "object")
+      .map((d) => ({
+        filename: typeof d.filename === "string" ? d.filename : "document",
+        type: typeof d.type === "string" ? d.type : "application/octet-stream",
+        text: typeof d.text === "string" ? d.text : "",
+      }));
+  }
+
+  if (typeof b.workspaceNotes === "string") {
+    out.workspaceNotes = b.workspaceNotes;
+  }
+
+  return out;
+}
+
+function buildWorkspaceBlock(
+  docs: UploadedDocument[],
+  workspaceNotes: string
+): ChatMessage | null {
+  const notes = workspaceNotes.trim();
+  const hasNotes = notes.length > 0;
+  const hasDocs = docs.length > 0;
+
+  if (!hasNotes && !hasDocs) return null;
+
+  const docLines = docs
+    .map((d, i) => {
+      const snippet = d.text.trim().slice(0, 6000); // keep it bounded
+      const hasText = snippet.length > 0;
+      return [
+        `#${i + 1}: ${d.filename} (${d.type})`,
+        hasText ? snippet : "[No extracted text — PDF parser may be missing or returned empty text]",
+      ].join("\n");
+    })
+    .join("\n\n---\n\n");
+
+  const content = `
+WORKSPACE CONTEXT (uploaded docs + notes). Use this when answering.
+
+Workspace notes:
+${hasNotes ? notes : "[none]"}
+
+Uploaded documents:
+${hasDocs ? docLines : "[none]"}
+`.trim();
 
   return { role: "system", content };
 }
 
-function normalizeMessages(body: RequestBody): ChatMessage[] {
-  if (!Array.isArray(body.messages)) return [];
-  return body.messages
-    .filter((m): m is ChatMessage => !!m && typeof m.content === "string" && typeof m.role === "string")
-    .map((m) => ({
-      role: (m.role === "assistant" || m.role === "system" ? m.role : "user") as ChatRole,
-      content: m.content,
-    }))
-    .filter((m) => m.content.trim().length > 0);
+type ResponseStreamEvent =
+  | { type: "response.output_text.delta"; delta: string }
+  | { type: "response.completed" }
+  | { type: string; [k: string]: unknown };
+
+function parseSseFrames(text: string): string[] {
+  // frames are separated by blank line
+  return text.split("\n\n").filter((x) => x.trim().length > 0);
 }
 
-// Convert OpenAI SSE -> plain text stream
-function sseToTextStream(upstream: Response): ReadableStream<Uint8Array> {
+function extractDataLine(frame: string): string | null {
+  // handle `data: {...}`
+  const lines = frame.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("data:")) return trimmed.slice(5).trim();
+  }
+  return null;
+}
+
+function safeParseEvent(jsonStr: string): ResponseStreamEvent | null {
+  try {
+    const v: unknown = JSON.parse(jsonStr);
+    if (!v || typeof v !== "object") return null;
+    return v as ResponseStreamEvent;
+  } catch {
+    return null;
+  }
+}
+
+export async function POST(req: Request) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
+  }
+
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const body = normalizeBody(raw);
+  if (body.messages.length === 0) {
+    return NextResponse.json({ error: "No messages provided" }, { status: 400 });
+  }
+
+  const workspaceBlock = buildWorkspaceBlock(body.documents, body.workspaceNotes);
+
+  const finalMessages: ChatMessage[] = [
+    SYSTEM_CONTEXT,
+    ...(workspaceBlock ? [workspaceBlock] : []),
+    ...body.messages,
+  ];
+
+  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+
+  const upstream = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      stream: true,
+      input: finalMessages.map((m) => ({
+        role: m.role,
+        content: [{ type: "input_text", text: m.content }],
+      })),
+    }),
+  });
+
+  if (!upstream.ok || !upstream.body) {
+    const txt = await upstream.text().catch(() => "");
+    return NextResponse.json(
+      { error: "OpenAI request failed", details: txt },
+      { status: 500 }
+    );
+  }
+
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
 
-  return new ReadableStream<Uint8Array>({
+  const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const reader = upstream.body?.getReader();
-      if (!reader) {
-        controller.close();
-        return;
-      }
-
+      const reader = upstream.body!.getReader();
       let buffer = "";
 
       try {
         while (true) {
-          const { done, value } = await reader.read();
+          const { value, done } = await reader.read();
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
 
-          // Split by SSE frame boundary
-          const frames = buffer.split("\n\n");
-          buffer = frames.pop() ?? "";
+          const frames = parseSseFrames(buffer);
+          // keep last partial in buffer
+          const endsWithBlank = buffer.endsWith("\n\n");
+          buffer = endsWithBlank ? "" : frames.pop() ?? "";
 
           for (const frame of frames) {
-            const lines = frame.split("\n");
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (!trimmed.startsWith("data:")) continue;
+            const data = extractDataLine(frame);
+            if (!data || data === "[DONE]") continue;
 
-              const data = trimmed.slice(5).trim();
-              if (!data || data === "[DONE]") continue;
+            const evt = safeParseEvent(data);
+            if (!evt) continue;
 
-              // Chat Completions stream payload is JSON
-              let json: unknown;
-              try {
-                json = JSON.parse(data) as unknown;
-              } catch {
-                continue;
-              }
+            if (evt.type === "response.output_text.delta" && typeof evt.delta === "string") {
+              controller.enqueue(encoder.encode(evt.delta));
+            }
 
-              const delta =
-                typeof json === "object" &&
-                json !== null &&
-                "choices" in json &&
-                Array.isArray((json as { choices?: unknown }).choices)
-                  ? ((json as { choices: Array<{ delta?: { content?: string } }> }).choices?.[0]?.delta?.content ?? "")
-                  : "";
-
-              if (delta) controller.enqueue(encoder.encode(delta));
+            if (evt.type === "response.completed") {
+              controller.close();
+              return;
             }
           }
         }
+      } catch (e) {
+        controller.error(e);
       } finally {
         controller.close();
       }
     },
   });
-}
 
-export async function POST(req: Request) {
-  try {
-    const body = (await req.json()) as RequestBody;
-
-    const userMessages = normalizeMessages(body);
-    if (userMessages.length === 0) {
-      return NextResponse.json({ error: "No messages provided" }, { status: 400 });
-    }
-
-    const workspaceBlock = buildWorkspaceBlock(body);
-
-    const finalMessages: ChatMessage[] = [
-      SYSTEM_CONTEXT,
-      ...(workspaceBlock ? [workspaceBlock] : []),
-      ...userMessages,
-    ];
-
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ error: "Missing OPENAI_API_KEY" }, { status: 500 });
-    }
-
-    // IMPORTANT: Chat Completions expects `messages`
-    const upstream = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        stream: true,
-        temperature: 0.2,
-        messages: finalMessages,
-      }),
-    });
-
-    if (!upstream.ok) {
-      const text = await upstream.text().catch(() => "");
-      return NextResponse.json(
-        { error: "Upstream error", detail: text || upstream.statusText },
-        { status: 500 }
-      );
-    }
-
-    // Return plain text stream to client
-    return new Response(sseToTextStream(upstream), {
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-      },
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-cache",
+    },
+  });
 }

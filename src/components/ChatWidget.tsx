@@ -1,14 +1,18 @@
 "use client";
 
-import * as React from "react";
-import FileUpload, { UploadedDocument } from "./FileUpload";
-import { useSessionStore } from "@/lib/sessionStore";
+import React, { useCallback, useMemo, useRef, useState } from "react";
+import FileUpload from "@/components/FileUpload";
+import { useSessionStore, type UploadedDocument } from "@/lib/sessionStore";
 
 type ChatRole = "user" | "assistant" | "system";
 type ChatMessage = { role: ChatRole; content: string };
 
+function cx(...parts: Array<string | false | null | undefined>) {
+  return parts.filter(Boolean).join(" ");
+}
+
 export default function ChatWidget() {
-  // ✅ IMPORTANT: select fields individually (prevents getServerSnapshot infinite loop)
+  // ✅ Select fields individually to avoid zustand snapshot infinite loops
   const documents = useSessionStore((s) => s.documents);
   const addDocuments = useSessionStore((s) => s.addDocuments);
   const clearDocuments = useSessionStore((s) => s.clearDocuments);
@@ -17,7 +21,7 @@ export default function ChatWidget() {
   const setWorkspaceNotes = useSessionStore((s) => s.setWorkspaceNotes);
   const clearWorkspaceNotes = useSessionStore((s) => s.clearWorkspaceNotes);
 
-  const [messages, setMessages] = React.useState<ChatMessage[]>([
+  const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
       content:
@@ -25,93 +29,166 @@ export default function ChatWidget() {
     },
   ]);
 
-  const [input, setInput] = React.useState("");
-  const [sending, setSending] = React.useState(false);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleUploadComplete = React.useCallback(
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  const hasDocs = documents.length > 0;
+
+  const docBadge = useMemo(() => {
+    if (!hasDocs) return null;
+    return (
+      <div className="text-xs opacity-70">
+        {documents.length} document{documents.length === 1 ? "" : "s"} attached
+      </div>
+    );
+  }, [documents.length, hasDocs]);
+
+  const scrollToBottom = useCallback(() => {
+    requestAnimationFrame(() => {
+      const el = listRef.current;
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+    });
+  }, []);
+
+  const handleUploadComplete = useCallback(
     (newDocs: UploadedDocument[]) => {
-      if (newDocs.length) addDocuments(newDocs);
+      addDocuments(newDocs);
+      // Optional UX message: show that docs are attached
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `Uploaded ${newDocs.length} document${
+            newDocs.length === 1 ? "" : "s"
+          }. Ask a question and I’ll use them as context.`,
+        },
+      ]);
+      scrollToBottom();
     },
-    [addDocuments]
+    [addDocuments, scrollToBottom]
   );
 
-  async function sendMessage() {
+  const clearAll = useCallback(() => {
+    clearDocuments();
+    clearWorkspaceNotes();
+    setMessages((prev) => {
+      // keep only the initial assistant message
+      const first = prev[0];
+      return first ? [first] : [];
+    });
+    setInput("");
+    setError(null);
+  }, [clearDocuments, clearWorkspaceNotes]);
+
+  const sendMessage = useCallback(async () => {
     const text = input.trim();
     if (!text || sending) return;
 
-    setInput("");
+    setError(null);
     setSending(true);
 
-    const userMsg: ChatMessage = { role: "user" as const, content: text };
+    // Build next messages with correct literal role typing
+    const next: ChatMessage[] = [
+      ...messages,
+      { role: "user" as const, content: text },
+    ];
 
-    // optimistic UI
-    setMessages((prev) => [...prev, userMsg, { role: "assistant", content: "" }]);
+    // Insert placeholder assistant message we will stream into
+    const assistantIndex = next.length;
+    const withPlaceholder: ChatMessage[] = [
+      ...next,
+      { role: "assistant" as const, content: "" },
+    ];
+
+    setMessages(withPlaceholder);
+    setInput("");
+    scrollToBottom();
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [...messages, userMsg],
+          messages: next,
           documents,
           workspaceNotes,
         }),
       });
 
       if (!res.ok) {
-        const errText = await res.text().catch(() => "");
-        throw new Error(errText || `Chat failed (${res.status})`);
+        const t = await res.text().catch(() => "");
+        throw new Error(t || `Chat failed (${res.status})`);
       }
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
+      if (!res.body) {
+        throw new Error("No response stream");
+      }
 
+      const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let acc = "";
+
+      let full = "";
 
       while (true) {
-        const { done, value } = await reader.read();
+        const { value, done } = await reader.read();
         if (done) break;
 
-        acc += decoder.decode(value, { stream: true });
+        const chunk = decoder.decode(value, { stream: true });
+        if (!chunk) continue;
 
-        // update last assistant message
+        full += chunk;
+
         setMessages((prev) => {
-          const next = [...prev];
-          const last = next[next.length - 1];
-          if (last && last.role === "assistant") {
-            next[next.length - 1] = { role: "assistant", content: acc };
-          }
-          return next;
+          // update only the placeholder assistant message
+          if (prev.length <= assistantIndex) return prev;
+          const copy = prev.slice();
+          const msg = copy[assistantIndex];
+          if (!msg || msg.role !== "assistant") return prev;
+          copy[assistantIndex] = { role: "assistant", content: full };
+          return copy;
         });
+
+        scrollToBottom();
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Unknown error";
-      setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${msg}` }]);
+      const msg = e instanceof Error ? e.message : "Chat failed";
+      setError(msg);
+
+      // Replace placeholder with an error bubble
+      setMessages((prev) => {
+        const copy = prev.slice();
+        if (copy[assistantIndex]?.role === "assistant") {
+          copy[assistantIndex] = {
+            role: "assistant",
+            content: `⚠️ ${msg}`,
+          };
+        }
+        return copy;
+      });
     } finally {
       setSending(false);
     }
-  }
-
-  function clearAll() {
-    clearDocuments();
-    clearWorkspaceNotes();
-    setMessages((prev) => prev.slice(0, 1));
-    setInput("");
-  }
+  }, [documents, input, messages, scrollToBottom, sending, workspaceNotes]);
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+      <div
+        ref={listRef}
+        className="flex-1 overflow-y-auto space-y-3 rounded-xl bg-black/20 p-3"
+      >
         {messages.map((m, i) => (
           <div
             key={i}
-            className={[
-              "max-w-[90%] rounded px-3 py-2 text-sm leading-relaxed",
+            className={cx(
+              "max-w-[92%] whitespace-pre-wrap rounded-xl px-4 py-3 text-sm",
               m.role === "user"
                 ? "ml-auto bg-orange-500 text-black"
-                : "mr-auto bg-neutral-800 text-white",
-            ].join(" ")}
+                : "bg-neutral-800 text-white"
+            )}
           >
             {m.content}
           </div>
@@ -124,27 +201,30 @@ export default function ChatWidget() {
           onUploadComplete={handleUploadComplete}
         />
 
-        <label htmlFor="workspace-notes" className="sr-only">
-          Workspace notes
+        {docBadge}
+
+        <label className="block text-xs opacity-70" htmlFor="workspace-notes">
+          Workspace notes (optional)
         </label>
         <textarea
           id="workspace-notes"
           aria-label="Workspace notes"
-          placeholder="Workspace notes (optional)"
+          className="w-full rounded-lg bg-neutral-900 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-white/20"
+          placeholder="Anything important the assistant should remember for this job…"
           value={workspaceNotes}
           onChange={(e) => setWorkspaceNotes(e.target.value)}
-          className="w-full rounded bg-neutral-900 px-3 py-2 text-sm text-white placeholder:text-neutral-500"
           rows={3}
         />
 
         <div className="flex gap-2">
-          <label htmlFor="chat-input" className="sr-only">
+          <label className="sr-only" htmlFor="chat-input">
             Chat message
           </label>
           <input
             id="chat-input"
             aria-label="Chat message input"
-            placeholder="Ask a question..."
+            className="flex-1 rounded-lg bg-neutral-900 px-3 py-2 text-sm text-white outline-none ring-1 ring-white/10 focus:ring-white/20"
+            placeholder="Ask a question…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -153,14 +233,13 @@ export default function ChatWidget() {
                 void sendMessage();
               }
             }}
-            className="flex-1 rounded bg-neutral-900 px-3 py-2 text-sm text-white placeholder:text-neutral-500"
           />
 
           <button
             type="button"
             onClick={() => void sendMessage()}
-            disabled={sending}
-            className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+            disabled={sending || input.trim().length === 0}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
           >
             {sending ? "…" : "Send"}
           </button>
@@ -168,11 +247,17 @@ export default function ChatWidget() {
           <button
             type="button"
             onClick={clearAll}
-            className="rounded bg-neutral-800 px-4 py-2 text-sm font-medium text-white"
+            className="rounded-lg bg-neutral-800 px-4 py-2 text-sm font-medium text-white"
           >
             Clear
           </button>
         </div>
+
+        {error ? (
+          <div className="rounded bg-red-500/15 px-3 py-2 text-sm text-red-200">
+            {error}
+          </div>
+        ) : null}
       </div>
     </div>
   );

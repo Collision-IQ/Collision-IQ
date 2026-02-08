@@ -1,73 +1,100 @@
 "use client";
 
-import * as React from "react";
-
-export type UploadedDocument = {
-  filename: string;
-  type: string;
-  text: string;
-};
+import React, { useRef, useState } from "react";
+import type { UploadedDocument } from "@/lib/sessionStore";
 
 type Props = {
   buttonLabel?: string;
   onUploadComplete: (newDocs: UploadedDocument[]) => void;
 };
 
-export default function FileUpload({ buttonLabel = "Upload documents", onUploadComplete }: Props) {
-  const inputRef = React.useRef<HTMLInputElement | null>(null);
-  const [uploading, setUploading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+type UploadResponse = {
+  documents?: UploadedDocument[];
+  error?: string;
+};
 
-  async function handlePick(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+function isUploadResponse(x: unknown): x is UploadResponse {
+  return !!x && typeof x === "object";
+}
 
-    setUploading(true);
+export default function FileUpload({
+  buttonLabel = "Upload documents",
+  onUploadComplete,
+}: Props) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handlePick() {
+    inputRef.current?.click();
+  }
+
+  async function handleFilesSelected(
+    e: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+
+    setBusy(true);
     setError(null);
 
     try {
       const formData = new FormData();
-      Array.from(files).forEach((f) => formData.append("files", f));
+      Array.from(fileList).forEach((f) => formData.append("files", f));
 
-      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
       if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(txt || `Upload failed (${res.status})`);
+        const t = await res.text().catch(() => "");
+        throw new Error(t || `Upload failed (${res.status})`);
       }
 
-      const json = (await res.json()) as { documents?: UploadedDocument[] };
-      const docs = Array.isArray(json.documents) ? json.documents : [];
+      const raw: unknown = await res.json().catch(() => ({}));
+      if (!isUploadResponse(raw)) throw new Error("Bad upload response");
+
+      const docs = Array.isArray(raw.documents) ? raw.documents : [];
+      if (docs.length === 0) {
+        throw new Error(raw.error || "No documents returned from upload");
+      }
+
       onUploadComplete(docs);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Upload failed");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
-      setUploading(false);
+      setBusy(false);
+      // allow re-uploading same file
       if (inputRef.current) inputRef.current.value = "";
     }
   }
 
   return (
-    <div className="space-y-2">
+    <div className="w-full">
       <input
         ref={inputRef}
         type="file"
         multiple
-        accept=".pdf,.txt,.md,.doc,.docx,image/*"
-        onChange={handlePick}
+        onChange={handleFilesSelected}
         className="hidden"
         aria-label="Upload documents"
       />
 
       <button
         type="button"
-        onClick={() => inputRef.current?.click()}
-        disabled={uploading}
-        className="w-full rounded bg-orange-500 px-3 py-2 text-sm font-medium text-black disabled:opacity-60"
+        onClick={handlePick}
+        disabled={busy}
+        className="w-full rounded bg-orange-500 px-4 py-2 font-medium text-black disabled:opacity-60"
       >
-        {uploading ? "Uploading…" : buttonLabel}
+        {busy ? "Uploading..." : buttonLabel}
       </button>
 
-      {error ? <div className="text-xs text-red-400">{error}</div> : null}
+      {error ? (
+        <div className="mt-2 rounded bg-red-500/15 px-3 py-2 text-sm text-red-200">
+          {error}
+        </div>
+      ) : null}
     </div>
   );
 }
