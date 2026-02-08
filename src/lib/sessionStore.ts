@@ -1,15 +1,27 @@
-// src/lib/sessionStore.ts
+"use client";
+
 import { create } from "zustand";
-import type { UploadedDocument } from "@/types/uploadedDocument";
+
+export type UploadedDocument = {
+  filename: string;
+  type: string;
+  text: string;
+};
 
 type SessionState = {
   documents: UploadedDocument[];
+  workspaceNotes: string;
+
   setDocuments: (docs: UploadedDocument[]) => void;
   clearDocuments: () => void;
+  setWorkspaceNotes: (notes: string) => void;
 };
 
 export const useSessionStore = create<SessionState>((set) => ({
   documents: [],
+  workspaceNotes: "",
+
   setDocuments: (docs) => set({ documents: docs }),
   clearDocuments: () => set({ documents: [] }),
+  setWorkspaceNotes: (notes) => set({ workspaceNotes: notes }),
 }));

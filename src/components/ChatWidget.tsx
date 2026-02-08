@@ -1,63 +1,44 @@
 "use client";
 
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useState } from "react";
+import { useSessionStore } from "@/lib/sessionStore";
 import FileUpload from "./FileUpload";
-import { useSessionStore } from "../lib/sessionStore";
 
-type Role = "user" | "assistant" | "system";
+/* ============================= */
+/* Types */
+/* ============================= */
 
-type ChatMessage = {
-  id: string;
-  role: Role;
+export type ChatRole = "user" | "assistant" | "system";
+
+export type ChatMessage = {
+  role: ChatRole;
   content: string;
 };
 
-type UploadedDocument = {
+export type UploadedDocument = {
   filename: string;
   type: string;
   text: string;
 };
 
-function uid() {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
-}
-
-function safeErrorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (typeof e === "string") return e;
-  return "Something went wrong.";
-}
-
-async function readStreamToText(
-  res: Response,
-  onDelta: (t: string) => void
-): Promise<void> {
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(txt || `Request failed (${res.status})`);
-  }
-  if (!res.body) throw new Error("No response stream.");
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-    const chunk = decoder.decode(value, { stream: true });
-    if (chunk) onDelta(chunk);
-  }
-}
+/* ============================= */
+/* Component */
+/* ============================= */
 
 export default function ChatWidget() {
+  /** ✅ IMPORTANT:
+   * Select fields individually from Zustand
+   * Prevents infinite render loop
+   */
   const documents = useSessionStore((s) => s.documents ?? []);
   const setDocuments = useSessionStore((s) => s.setDocuments);
   const clearDocuments = useSessionStore((s) => s.clearDocuments);
 
+  const workspaceNotes = useSessionStore((s) => s.workspaceNotes ?? "");
+  const setWorkspaceNotes = useSessionStore((s) => s.setWorkspaceNotes);
+
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
-      id: uid(),
       role: "assistant",
       content:
         "Hello! Upload an estimate, OEM procedure, or photo and I'll provide structured analysis for supplements, missing ops, and OEM-aligned steps.",
@@ -65,226 +46,143 @@ export default function ChatWidget() {
   ]);
 
   const [input, setInput] = useState("");
-  const [workspaceNotes, setWorkspaceNotes] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
-  const listRef = useRef<HTMLDivElement | null>(null);
+  /* ============================= */
+  /* Upload Handler */
+  /* ============================= */
 
-  const scrollToBottom = useCallback(() => {
-    requestAnimationFrame(() => {
-      listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
-    });
-  }, []);
-
-  const sendText = useCallback(
-    async (raw: string) => {
-      const text = raw.trim();
-      if (!text || sending) return;
-
-      setError(null);
-      setSending(true);
-
-      const userMsg: ChatMessage = { id: uid(), role: "user", content: text };
-      const assistantId = uid();
-      const assistantMsg: ChatMessage = { id: assistantId, role: "assistant", content: "" };
-
-      // Optimistic UI
-      setMessages((prev) => [...prev, userMsg, assistantMsg]);
-      setInput("");
-      scrollToBottom();
-
-      try {
-        // Only send user+assistant messages (system stays server-side)
-        const outbound = [...messages, userMsg]
-          .filter((m) => m.role === "user" || m.role === "assistant")
-          .map((m) => ({ role: m.role, content: m.content }));
-
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: outbound,
-            workspaceNotes,
-            documents,
-          }),
-        });
-
-        await readStreamToText(res, (delta) => {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantId ? { ...m, content: m.content + delta } : m
-            )
-          );
-          scrollToBottom();
-        });
-
-        // If model streamed nothing, show a fallback
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId && !m.content.trim()
-              ? { ...m, content: "I’m here — what would you like me to review?" }
-              : m
-          )
-        );
-      } catch (e: unknown) {
-        const msg = safeErrorMessage(e);
-        setError(msg);
-
-        // Put error into assistant bubble (so UI doesn’t look “dead”)
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
-              ? { ...m, content: `Error: ${msg}` }
-              : m
-          )
-        );
-      } finally {
-        setSending(false);
-      }
-    },
-    [documents, messages, scrollToBottom, sending, workspaceNotes]
-  );
-
-  const clearChat = useCallback(() => {
-    setMessages([
-      {
-        id: uid(),
-        role: "assistant",
-        content:
-          "Hello! Upload an estimate, OEM procedure, or photo and I'll provide structured analysis for supplements, missing ops, and OEM-aligned steps.",
-      },
-    ]);
-    setWorkspaceNotes("");
-    setError(null);
-    clearDocuments();
-  }, [clearDocuments]);
-
-  const onUploadComplete = useCallback(
+  const handleUploaded = useCallback(
     (newDocs: UploadedDocument[]) => {
       setDocuments([...documents, ...newDocs]);
-      // Optional: add a small assistant note that docs are available
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: uid(),
-          role: "assistant",
-          content: `Got it — I can see ${newDocs.length} uploaded document(s). Ask your question when ready.`,
-        },
-      ]);
     },
-    [setDocuments, documents]
+    [documents, setDocuments]
   );
 
-  const headerChips = useMemo(
-    () => (
-      <div className="flex items-center gap-2">
-        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
-          Streaming
-        </span>
-        <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
-          Workspace-aware
-        </span>
-      </div>
-    ),
-    []
-  );
+  /* ============================= */
+  /* Streaming Send */
+  /* ============================= */
+
+  async function sendMessage() {
+    const text = input.trim();
+    if (!text || sending) return;
+
+    setInput("");
+
+    /** ✅ FIX: role must be typed literal */
+    const next: ChatMessage[] = [
+      ...messages,
+      { role: "user" as const, content: text },
+    ];
+
+    setMessages(next);
+    setSending(true);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          messages: next,
+          documents,
+          workspaceNotes,
+        }),
+      });
+
+      if (!res.body) {
+        setSending(false);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+
+      let assistant = "";
+
+      /** placeholder assistant message */
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", content: "" },
+      ]);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        assistant += decoder.decode(value);
+
+        setMessages((m) => {
+          const copy = [...m];
+          copy[copy.length - 1] = {
+            role: "assistant",
+            content: assistant,
+          };
+          return copy;
+        });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+
+    setSending(false);
+  }
+
+  /* ============================= */
+  /* UI */
+  /* ============================= */
 
   return (
-    <div className="flex h-full min-h-0 flex-col rounded-3xl border border-white/10 bg-white/5">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3 border-b border-white/10 p-4">
-        <div>
-          <div className="text-sm font-semibold text-white">Collision-IQ</div>
-          <div className="text-xs text-white/60">Workspace mode — uploads + context stay in sync.</div>
-        </div>
-        {headerChips}
-      </div>
-
-      {/* Messages */}
-      <div ref={listRef} className="flex-1 overflow-auto p-4">
-        {error && (
-          <div className="mb-3 rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-            {error}
+    <div className="flex flex-col h-full gap-3">
+      {/* Chat */}
+      <div className="flex-1 overflow-y-auto space-y-3">
+        {messages.map((m, i) => (
+          <div
+            key={i}
+            className={
+              m.role === "user"
+                ? "bg-orange-600 text-white p-3 rounded-lg ml-auto max-w-[80%]"
+                : "bg-neutral-800 p-3 rounded-lg max-w-[80%]"
+            }
+          >
+            {m.content}
           </div>
-        )}
-
-        <div className="flex flex-col gap-3">
-          {messages.map((m) => (
-            <div
-              key={m.id}
-              className={[
-                "max-w-[90%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-relaxed",
-                m.role === "user"
-                  ? "ml-auto bg-[color:var(--accent)] text-black"
-                  : "bg-white/10 text-white",
-              ].join(" ")}
-            >
-              {m.content || (m.role === "assistant" && sending ? "…" : "")}
-            </div>
-          ))}
-        </div>
+        ))}
       </div>
 
-      {/* Workspace controls */}
-      <div className="border-t border-white/10 p-4">
-        <div className="mb-3 flex gap-2">
-          <FileUpload
-            buttonLabel="Upload documents"
-            onUploadComplete={onUploadComplete}
-          />
-          <button
-            type="button"
-            onClick={clearChat}
-            className="w-40 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white/80 hover:bg-white/10"
-          >
-            Clear
-          </button>
-        </div>
+      {/* Upload */}
+      <FileUpload onUploadComplete={handleUploaded} />
 
-        <div className="mb-3">
-          <div className="mb-1 text-xs text-white/60">Workspace notes (optional)</div>
-          <textarea
-            value={workspaceNotes}
-            onChange={(e) => setWorkspaceNotes(e.target.value)}
-            rows={3}
-            className="w-full resize-none rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/20"
-            placeholder="Add claim notes, insurer/state, repair concerns, target outcome…"
-          />
-          {documents.length > 0 && (
-            <div className="mt-2 text-xs text-white/60">
-              Attached:{" "}
-              <span className="text-white/80">
-                {documents.map((d) => d.filename).join(", ")}
-              </span>
-            </div>
-          )}
-        </div>
+      {/* Workspace Notes */}
+      <textarea
+        aria-label="Workspace notes"
+        placeholder="Workspace notes (optional)"
+        value={workspaceNotes}
+        onChange={(e) => setWorkspaceNotes(e.target.value)}
+        className="w-full rounded bg-neutral-900 p-2"
+      />
 
-        {/* Input row */}
-        <div className="flex items-center gap-2">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void sendText(input);
-              }
-            }}
-            className="h-11 flex-1 rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/20"
-            placeholder="Ask a question..."
-            aria-label="Chat input"
-          />
-          <button
-            type="button"
-            onClick={() => void sendText(input)}
-            disabled={sending || !input.trim()}
-            className="h-11 w-20 rounded-xl bg-blue-600 text-sm font-semibold text-white disabled:opacity-60"
-          >
-            Send
-          </button>
-        </div>
+      {/* Input */}
+      <div className="flex gap-2">
+        <input
+          aria-label="Chat message input"
+          className="flex-1 bg-neutral-900 p-2 rounded"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Ask a question..."
+        />
+
+        <button
+          onClick={sendMessage}
+          className="px-4 py-2 bg-blue-600 rounded"
+        >
+          Send
+        </button>
+
+        <button
+          onClick={() => clearDocuments()}
+          className="px-4 py-2 bg-neutral-700 rounded"
+        >
+          Clear
+        </button>
       </div>
     </div>
   );
