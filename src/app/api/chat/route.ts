@@ -16,9 +16,9 @@ type UploadedDocument = {
 };
 
 type RequestBody = {
-  messages?: unknown;
-  workspaceNotes?: unknown;
-  documents?: unknown;
+  messages?: ChatMessage[];
+  workspaceNotes?: string;
+  documents?: UploadedDocument[];
 };
 
 const SYSTEM_CONTEXT: ChatMessage = {
@@ -54,56 +54,6 @@ function normalizeMessages(value: unknown): ChatMessage[] {
     out.push({ role, content });
   }
   return out;
-}
-
-function normalizeDocuments(value: unknown): UploadedDocument[] {
-  if (!Array.isArray(value)) return [];
-  const out: UploadedDocument[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object") continue;
-    const filename = (item as { filename?: unknown }).filename;
-    const type = (item as { type?: unknown }).type;
-    const text = (item as { text?: unknown }).text;
-
-    if (typeof filename !== "string" || !filename.trim()) continue;
-    if (typeof type !== "string" || !type.trim()) continue;
-    if (typeof text !== "string" || !text.trim()) continue;
-
-    out.push({ filename, type, text });
-  }
-  return out;
-}
-
-function buildWorkspaceSystemMessage(
-  workspaceNotes: string,
-  documents: UploadedDocument[]
-): ChatMessage | null {
-  const notes = workspaceNotes.trim();
-  const hasNotes = notes.length > 0;
-  const hasDocs = documents.length > 0;
-
-  if (!hasNotes && !hasDocs) return null;
-
-  const docBlock = hasDocs
-    ? documents
-        .map((d, idx) => {
-          const safeText = d.text.length > 12000 ? d.text.slice(0, 12000) + "\n…(truncated)" : d.text;
-          return `--- Document ${idx + 1}: ${d.filename} (${d.type}) ---\n${safeText}`;
-        })
-        .join("\n\n")
-    : "";
-
-  const content = `
-WORKSPACE CONTEXT (use this before answering):
-${hasNotes ? `Notes:\n${notes}\n` : ""}${hasDocs ? `Documents:\n${docBlock}\n` : ""}
-
-Instructions:
-- Use provided workspace notes and documents when relevant.
-- If documents are ambiguous, ask 1–2 clarifying questions.
-- Cite which document (by filename) you relied on when you reference it.
-`.trim();
-
-  return { role: "system", content };
 }
 
 /**
@@ -172,16 +122,18 @@ function textStreamFromOpenAIResponse(upstream: Response): ReadableStream<Uint8A
 function extractDeltaText(evt: unknown): string {
   if (!evt || typeof evt !== "object") return "";
 
-  const type = (evt as { type?: unknown }).type;
-  if (type === "response.output_text.delta") {
-    const delta = (evt as { delta?: unknown }).delta;
-    return typeof delta === "string" ? delta : "";
-  }
+  type OpenAIEvent = {
+    type?: string;
+    delta?: string | { text?: string };
+  };
+
+  const parsedEvt = evt as OpenAIEvent;
+  const type = parsedEvt.type;
 
   // Some proxies/SDKs may wrap:
   // { type: "...delta", delta: { text: "..." } }
   if (type === "response.output_text.delta") {
-    const deltaObj = (evt as { delta?: unknown }).delta;
+    const deltaObj = (parsedEvt as { delta?: unknown }).delta;
     if (deltaObj && typeof deltaObj === "object") {
       const text = (deltaObj as { text?: unknown }).text;
       return typeof text === "string" ? text : "";
@@ -213,16 +165,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "No messages provided" }, { status: 400 });
   }
 
-  const workspaceNotes = typeof body.workspaceNotes === "string" ? body.workspaceNotes : "";
-  const documents = normalizeDocuments(body.documents);
+  const workspaceBlock =
+  body.workspaceNotes || body.documents?.length
+    ? {
+        role: "system" as const,
+        content: `
+WORKSPACE CONTEXT
 
-  const workspaceMsg = buildWorkspaceSystemMessage(workspaceNotes, documents);
+Notes:
+${body.workspaceNotes ?? ""}
 
-  const finalMessages: ChatMessage[] = [
-    SYSTEM_CONTEXT,
-    ...(workspaceMsg ? [workspaceMsg] : []),
-    ...userMessages,
-  ];
+Documents:
+${(body.documents ?? [])
+  .map((d) => d.filename)
+  .join("\n")}
+`.trim(),
+      }
+    : null;
+
+const finalMessages: ChatMessage[] = [
+  SYSTEM_CONTEXT,
+  ...(workspaceBlock ? [workspaceBlock] : []),
+  ...userMessages,
+];
 
   // Map to Responses API "input" format
   const input = finalMessages.map((m) => ({

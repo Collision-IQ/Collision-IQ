@@ -51,11 +51,9 @@ async function readStreamToText(
 }
 
 export default function ChatWidget() {
-  const { documents, setDocuments, clearDocuments } = useSessionStore((s) => ({
-    documents: (s.documents ?? []) as UploadedDocument[],
-    setDocuments: s.setDocuments as (docs: UploadedDocument[]) => void,
-    clearDocuments: s.clearDocuments as () => void,
-  }));
+  const documents = useSessionStore((s) => s.documents ?? []);
+  const setDocuments = useSessionStore((s) => s.setDocuments);
+  const clearDocuments = useSessionStore((s) => s.clearDocuments);
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
