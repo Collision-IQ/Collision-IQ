@@ -1,54 +1,29 @@
+// src/components/ChatShell.tsx
 "use client";
 
-import React from "react";
+import type { ReactNode } from "react";
 
-export type ChatShellProps = {
-  left?: React.ReactNode;
-  center: React.ReactNode;
-  right?: React.ReactNode;
-  className?: string;
+type Props = {
+  left?: ReactNode;
+  center: ReactNode;
+  right?: ReactNode;
 };
 
-/**
- * ChatShell
- *
- * 2025 stable layout container.
- * - NO render props
- * - NO refs
- * - NO API wiring
- * - Pure layout only
- *
- * Eliminates:
- * ❌ "Cannot access refs during render"
- * ❌ implicit any
- * ❌ children(setApiReady) issues
- * ❌ center prop errors
- */
-export default function ChatShell({
-  left,
-  center,
-  right,
-  className = "",
-}: ChatShellProps) {
+export default function ChatShell({ left, center, right }: Props) {
   return (
-    <div className="relative min-h-[100svh] w-full">
-      <div
-        className={`mx-auto grid h-[100svh] max-w-7xl grid-cols-1 gap-6 px-4 py-6 
-        lg:grid-cols-[280px_1fr_320px] ${className}`}
-      >
-        {/* LEFT PANEL */}
-        <aside className="hidden min-h-0 rounded-3xl border border-white/10 bg-white/5 p-4 lg:block">
-          {left}
+    <div className="min-h-[100svh] bg-black text-white">
+      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-6 px-4 py-6 lg:grid-cols-[280px_1fr_320px]">
+        <aside className="rounded-3xl border border-white/10 bg-white/5 p-5">
+          {left ?? <div className="text-sm opacity-70">Left panel</div>}
         </aside>
 
-        {/* CENTER CHAT */}
         <main className="min-h-0 rounded-3xl border border-white/10 bg-white/5">
-          {center}
+          {/* Ensure center can manage its own internal scrolling */}
+          <div className="h-[calc(100svh-3rem)] min-h-0">{center}</div>
         </main>
 
-        {/* RIGHT PANEL */}
-        <aside className="hidden min-h-0 rounded-3xl border border-white/10 bg-white/5 p-4 lg:block">
-          {right}
+        <aside className="rounded-3xl border border-white/10 bg-white/5 p-5">
+          {right ?? <div className="text-sm opacity-70">Workspace panel</div>}
         </aside>
       </div>
     </div>

@@ -26,10 +26,13 @@ export async function POST(req: Request) {
       });
     }
 
-    return NextResponse.json({ success: true, documents });
-  } catch (err: any) {
+    return NextResponse.json({
+  documents,
+});
+  } catch (error) {
+    console.error("Upload error:", error);
     return NextResponse.json(
-      { success: false, error: err.message },
+      { error: (error as Error).message || "Upload failed" },
       { status: 500 }
     );
   }

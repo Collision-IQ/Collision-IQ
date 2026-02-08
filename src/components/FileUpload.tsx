@@ -6,6 +6,7 @@ type Props = {
   className?: string;
   buttonLabel?: string;
   inputRef?: React.RefObject<HTMLInputElement | null>;
+  onUploaded?: (newDocs: UploadedDocument[]) => void;
 };
 
 export default function FileUpload({
@@ -13,6 +14,7 @@ export default function FileUpload({
   className,
   buttonLabel = "Upload documents",
   inputRef,
+  onUploaded,
 }: Props) {
   const innerRef = React.useRef<HTMLInputElement | null>(null);
   const ref = inputRef ?? innerRef;
@@ -32,6 +34,7 @@ export default function FileUpload({
     const data = await res.json();
     const docs: UploadedDocument[] = data?.documents ?? [];
     onUploadComplete(docs);
+    onUploaded?.(docs);
   }
 
   return (
