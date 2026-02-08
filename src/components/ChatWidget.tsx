@@ -1,43 +1,23 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import * as React from "react";
+import FileUpload, { UploadedDocument } from "./FileUpload";
 import { useSessionStore } from "@/lib/sessionStore";
-import FileUpload from "./FileUpload";
 
-/* ============================= */
-/* Types */
-/* ============================= */
-
-export type ChatRole = "user" | "assistant" | "system";
-
-export type ChatMessage = {
-  role: ChatRole;
-  content: string;
-};
-
-export type UploadedDocument = {
-  filename: string;
-  type: string;
-  text: string;
-};
-
-/* ============================= */
-/* Component */
-/* ============================= */
+type ChatRole = "user" | "assistant" | "system";
+type ChatMessage = { role: ChatRole; content: string };
 
 export default function ChatWidget() {
-  /** ✅ IMPORTANT:
-   * Select fields individually from Zustand
-   * Prevents infinite render loop
-   */
-  const documents = useSessionStore((s) => s.documents ?? []);
-  const setDocuments = useSessionStore((s) => s.setDocuments);
+  // ✅ IMPORTANT: select fields individually (prevents getServerSnapshot infinite loop)
+  const documents = useSessionStore((s) => s.documents);
+  const addDocuments = useSessionStore((s) => s.addDocuments);
   const clearDocuments = useSessionStore((s) => s.clearDocuments);
 
-  const workspaceNotes = useSessionStore((s) => s.workspaceNotes ?? "");
+  const workspaceNotes = useSessionStore((s) => s.workspaceNotes);
   const setWorkspaceNotes = useSessionStore((s) => s.setWorkspaceNotes);
+  const clearWorkspaceNotes = useSessionStore((s) => s.clearWorkspaceNotes);
 
-  const [messages, setMessages] = useState<ChatMessage[]>([
+  const [messages, setMessages] = React.useState<ChatMessage[]>([
     {
       role: "assistant",
       content:
@@ -45,144 +25,154 @@ export default function ChatWidget() {
     },
   ]);
 
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
+  const [input, setInput] = React.useState("");
+  const [sending, setSending] = React.useState(false);
 
-  /* ============================= */
-  /* Upload Handler */
-  /* ============================= */
-
-  const handleUploaded = useCallback(
+  const handleUploadComplete = React.useCallback(
     (newDocs: UploadedDocument[]) => {
-      setDocuments([...documents, ...newDocs]);
+      if (newDocs.length) addDocuments(newDocs);
     },
-    [documents, setDocuments]
+    [addDocuments]
   );
-
-  /* ============================= */
-  /* Streaming Send */
-  /* ============================= */
 
   async function sendMessage() {
     const text = input.trim();
     if (!text || sending) return;
 
     setInput("");
-
-    /** ✅ FIX: role must be typed literal */
-    const next: ChatMessage[] = [
-      ...messages,
-      { role: "user" as const, content: text },
-    ];
-
-    setMessages(next);
     setSending(true);
+
+    const userMsg: ChatMessage = { role: "user" as const, content: text };
+
+    // optimistic UI
+    setMessages((prev) => [...prev, userMsg, { role: "assistant", content: "" }]);
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: next,
+          messages: [...messages, userMsg],
           documents,
           workspaceNotes,
         }),
       });
 
-      if (!res.body) {
-        setSending(false);
-        return;
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "");
+        throw new Error(errText || `Chat failed (${res.status})`);
       }
 
-      const reader = res.body.getReader();
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
       const decoder = new TextDecoder();
-
-      let assistant = "";
-
-      /** placeholder assistant message */
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", content: "" },
-      ]);
+      let acc = "";
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        assistant += decoder.decode(value);
+        acc += decoder.decode(value, { stream: true });
 
-        setMessages((m) => {
-          const copy = [...m];
-          copy[copy.length - 1] = {
-            role: "assistant",
-            content: assistant,
-          };
-          return copy;
+        // update last assistant message
+        setMessages((prev) => {
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last && last.role === "assistant") {
+            next[next.length - 1] = { role: "assistant", content: acc };
+          }
+          return next;
         });
       }
-    } catch (err) {
-      console.error(err);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setMessages((prev) => [...prev, { role: "assistant", content: `Error: ${msg}` }]);
+    } finally {
+      setSending(false);
     }
-
-    setSending(false);
   }
 
-  /* ============================= */
-  /* UI */
-  /* ============================= */
+  function clearAll() {
+    clearDocuments();
+    clearWorkspaceNotes();
+    setMessages((prev) => prev.slice(0, 1));
+    setInput("");
+  }
 
   return (
-    <div className="flex flex-col h-full gap-3">
-      {/* Chat */}
-      <div className="flex-1 overflow-y-auto space-y-3">
+    <div className="flex h-full flex-col gap-3">
+      <div className="flex-1 overflow-y-auto space-y-3 pr-1">
         {messages.map((m, i) => (
           <div
             key={i}
-            className={
+            className={[
+              "max-w-[90%] rounded px-3 py-2 text-sm leading-relaxed",
               m.role === "user"
-                ? "bg-orange-600 text-white p-3 rounded-lg ml-auto max-w-[80%]"
-                : "bg-neutral-800 p-3 rounded-lg max-w-[80%]"
-            }
+                ? "ml-auto bg-orange-500 text-black"
+                : "mr-auto bg-neutral-800 text-white",
+            ].join(" ")}
           >
             {m.content}
           </div>
         ))}
       </div>
 
-      {/* Upload */}
-      <FileUpload onUploadComplete={handleUploaded} />
-
-      {/* Workspace Notes */}
-      <textarea
-        aria-label="Workspace notes"
-        placeholder="Workspace notes (optional)"
-        value={workspaceNotes}
-        onChange={(e) => setWorkspaceNotes(e.target.value)}
-        className="w-full rounded bg-neutral-900 p-2"
-      />
-
-      {/* Input */}
-      <div className="flex gap-2">
-        <input
-          aria-label="Chat message input"
-          className="flex-1 bg-neutral-900 p-2 rounded"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask a question..."
+      <div className="space-y-2">
+        <FileUpload
+          buttonLabel="Upload documents"
+          onUploadComplete={handleUploadComplete}
         />
 
-        <button
-          onClick={sendMessage}
-          className="px-4 py-2 bg-blue-600 rounded"
-        >
-          Send
-        </button>
+        <label htmlFor="workspace-notes" className="sr-only">
+          Workspace notes
+        </label>
+        <textarea
+          id="workspace-notes"
+          aria-label="Workspace notes"
+          placeholder="Workspace notes (optional)"
+          value={workspaceNotes}
+          onChange={(e) => setWorkspaceNotes(e.target.value)}
+          className="w-full rounded bg-neutral-900 px-3 py-2 text-sm text-white placeholder:text-neutral-500"
+          rows={3}
+        />
 
-        <button
-          onClick={() => clearDocuments()}
-          className="px-4 py-2 bg-neutral-700 rounded"
-        >
-          Clear
-        </button>
+        <div className="flex gap-2">
+          <label htmlFor="chat-input" className="sr-only">
+            Chat message
+          </label>
+          <input
+            id="chat-input"
+            aria-label="Chat message input"
+            placeholder="Ask a question..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void sendMessage();
+              }
+            }}
+            className="flex-1 rounded bg-neutral-900 px-3 py-2 text-sm text-white placeholder:text-neutral-500"
+          />
+
+          <button
+            type="button"
+            onClick={() => void sendMessage()}
+            disabled={sending}
+            className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+          >
+            {sending ? "…" : "Send"}
+          </button>
+
+          <button
+            type="button"
+            onClick={clearAll}
+            className="rounded bg-neutral-800 px-4 py-2 text-sm font-medium text-white"
+          >
+            Clear
+          </button>
+        </div>
       </div>
     </div>
   );
