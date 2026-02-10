@@ -1,43 +1,20 @@
-// src/lib/sessionStore.ts
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { UploadedDocument } from "@/types/chat";
 
-export type UploadedDocument = {
-  filename: string;
-  type: string;
-  text: string;
-};
-
-type SessionState = {
+interface SessionState {
   documents: UploadedDocument[];
   workspaceNotes: string;
 
-  addDocuments: (docs: UploadedDocument[]) => void;
+  setDocuments: (docs: UploadedDocument[]) => void;
   clearDocuments: () => void;
+  setWorkspaceNotes: (v: string) => void;
+}
 
-  setWorkspaceNotes: (notes: string) => void;
-  clearWorkspaceNotes: () => void;
+export const useSessionStore = create<SessionState>((set) => ({
+  documents: [],
+  workspaceNotes: "",
 
-  clearAll: () => void;
-};
-
-export const useSessionStore = create<SessionState>()(
-  persist(
-    (set, get) => ({
-      documents: [],
-      workspaceNotes: "",
-
-      addDocuments: (docs) =>
-        set({ documents: [...get().documents, ...docs] }),
-
-      clearDocuments: () => set({ documents: [] }),
-
-      setWorkspaceNotes: (notes) => set({ workspaceNotes: notes }),
-
-      clearWorkspaceNotes: () => set({ workspaceNotes: "" }),
-
-      clearAll: () => set({ documents: [], workspaceNotes: "" }),
-    }),
-    { name: "collision-iq-session" }
-  )
-);
+  setDocuments: (docs) => set({ documents: docs }),
+  clearDocuments: () => set({ documents: [] }),
+  setWorkspaceNotes: (v) => set({ workspaceNotes: v }),
+}));
