@@ -93,7 +93,49 @@ export default function ChatWidget() {
         const { value, done } = await reader.read();
         if (done) break;
 
-        assistantText += decoder.decode(value, { stream: true });
+        let buffer = "";
+
+while (true) {
+  const { value, done } = await reader.read();
+  if (done) break;
+
+  buffer += decoder.decode(value, { stream: true });
+
+  const lines = buffer.split("\n");
+  buffer = lines.pop() ?? "";
+
+  for (const line of lines) {
+    if (!line.startsWith("data:")) continue;
+
+    const json = line.replace("data:", "").trim();
+    if (!json || json === "[DONE]") continue;
+
+    try {
+      const parsed = JSON.parse(json);
+
+      // ✅ Only extract assistant text delta
+      if (parsed.type === "response.output_text.delta") {
+        assistantText += parsed.delta ?? "";
+      }
+
+      setMessages((prev) => {
+        const copy = [...prev];
+        const lastIndex = copy.length - 1;
+
+        if (copy[lastIndex]?.role === "assistant") {
+          copy[lastIndex] = {
+            role: "assistant",
+            content: assistantText,
+          };
+        }
+
+        return copy;
+      });
+    } catch {
+      // ignore partial JSON chunks
+    }
+  }
+}
 
         setMessages((prev) => {
           const copy = [...prev];
