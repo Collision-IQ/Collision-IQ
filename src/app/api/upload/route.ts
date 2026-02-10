@@ -1,69 +1,46 @@
+// src/app/api/upload/route.ts
 import { NextResponse } from "next/server";
-import type { UploadedDocument } from "@/lib/sessionStore";
+
+// These are the helpers you appeared to already have in your repo.
+// If your paths differ, adjust imports to match your project.
+import { parseForm } from "@/lib/parseForm";
+import { extractTextFromFile } from "@/lib/extractText";
 
 export const runtime = "nodejs";
 
-async function extractTextFromFile(file: File): Promise<string> {
-  // Text files
-  if (file.type.startsWith("text/")) {
-    return await file.text();
-  }
-
-  // PDFs
-  if (
-    file.type === "application/pdf" ||
-    file.name.toLowerCase().endsWith(".pdf")
-  ) {
-    const buf = Buffer.from(await file.arrayBuffer());
-
-    // pdf-parse (recommended)
-    try {
-      const mod: unknown = await import("pdf-parse");
-      const pdfParse = (mod as { default?: unknown }).default;
-
-      if (typeof pdfParse === "function") {
-        const res = (await (pdfParse as (b: Buffer) => Promise<{ text?: string }>)(buf));
-        return (res.text ?? "").trim();
-      }
-    } catch {
-      // fallthrough
-    }
-
-    return "";
-  }
-
-  // Unsupported types (images, etc)
-  return "";
-}
+type UploadedDocument = {
+  filename: string;
+  type: string;
+  text: string;
+};
 
 export async function POST(req: Request) {
   try {
-    const form = await req.formData();
-    const items = form.getAll("files");
+    const { files } = await parseForm(req);
 
-    const files = items.filter((x): x is File => x instanceof File);
-    if (files.length === 0) {
-      return NextResponse.json(
-        { error: "No files provided (field name must be 'files')" },
-        { status: 400 }
-      );
+    const uploaded = Array.isArray(files) ? files : files ? [files] : [];
+    if (uploaded.length === 0) {
+      return NextResponse.json({ documents: [] as UploadedDocument[] });
     }
 
     const documents: UploadedDocument[] = [];
-    for (const file of files) {
-      const text = await extractTextFromFile(file);
+
+    for (const file of uploaded) {
+      if (!file.mimetype) continue;
+
+      const text = await extractTextFromFile(file.filepath, file.mimetype);
 
       documents.push({
-        filename: file.name,
-        type: file.type || "application/octet-stream",
-        text,
+        filename: file.originalFilename ?? "uploaded-file",
+        type: file.mimetype,
+        text: String(text ?? ""),
       });
     }
 
     return NextResponse.json({ documents });
-  } catch (err) {
+  } catch (error: any) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Upload failed" },
+      { error: "Upload failed", details: String(error?.message ?? error) },
       { status: 500 }
     );
   }

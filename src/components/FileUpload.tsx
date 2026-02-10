@@ -1,71 +1,42 @@
+// src/components/FileUpload.tsx
 "use client";
 
 import React, { useRef, useState } from "react";
-import type { UploadedDocument } from "@/lib/sessionStore";
+import { useSessionStore, type UploadedDocument } from "@/lib/sessionStore";
 
 type Props = {
   buttonLabel?: string;
-  onUploadComplete: (newDocs: UploadedDocument[]) => void;
 };
 
-type UploadResponse = {
-  documents?: UploadedDocument[];
-  error?: string;
-};
-
-function isUploadResponse(x: unknown): x is UploadResponse {
-  return !!x && typeof x === "object";
-}
-
-export default function FileUpload({
-  buttonLabel = "Upload documents",
-  onUploadComplete,
-}: Props) {
+export default function FileUpload({ buttonLabel = "Upload documents" }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string>("");
 
-  async function handlePick() {
-    inputRef.current?.click();
-  }
+  const addDocuments = useSessionStore((s) => s.addDocuments);
 
-  async function handleFilesSelected(
-    e: React.ChangeEvent<HTMLInputElement>
-  ) {
-    const fileList = e.target.files;
-    if (!fileList || fileList.length === 0) return;
+  async function onPickFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
 
-    setBusy(true);
-    setError(null);
+    setStatus("Uploading…");
+
+    const formData = new FormData();
+    Array.from(files).forEach((f) => formData.append("files", f));
 
     try {
-      const formData = new FormData();
-      Array.from(fileList).forEach((f) => formData.append("files", f));
-
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-
+      const res = await fetch("/api/upload", { method: "POST", body: formData });
       if (!res.ok) {
         const t = await res.text().catch(() => "");
         throw new Error(t || `Upload failed (${res.status})`);
       }
 
-      const raw: unknown = await res.json().catch(() => ({}));
-      if (!isUploadResponse(raw)) throw new Error("Bad upload response");
+      const data = (await res.json()) as { documents: UploadedDocument[] };
+      const docs = Array.isArray(data.documents) ? data.documents : [];
 
-      const docs = Array.isArray(raw.documents) ? raw.documents : [];
-      if (docs.length === 0) {
-        throw new Error(raw.error || "No documents returned from upload");
-      }
-
-      onUploadComplete(docs);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
+      addDocuments(docs);
+      setStatus(`Uploaded ${docs.length} document(s). Ask a question and I’ll use them as context.`);
+    } catch (e: any) {
+      setStatus(`Upload error: ${String(e?.message ?? e)}`);
     } finally {
-      setBusy(false);
-      // allow re-uploading same file
       if (inputRef.current) inputRef.current.value = "";
     }
   }
@@ -75,24 +46,23 @@ export default function FileUpload({
       <input
         ref={inputRef}
         type="file"
-        multiple
-        onChange={handleFilesSelected}
         className="hidden"
-        aria-label="Upload documents"
+        multiple
+        onChange={(e) => onPickFiles(e.target.files)}
+        accept=".pdf,.png,.jpg,.jpeg,.txt"
       />
 
       <button
         type="button"
-        onClick={handlePick}
-        disabled={busy}
-        className="w-full rounded bg-orange-500 px-4 py-2 font-medium text-black disabled:opacity-60"
+        className="w-full rounded bg-orange-600 px-3 py-2 text-sm font-semibold text-white hover:bg-orange-700"
+        onClick={() => inputRef.current?.click()}
       >
-        {busy ? "Uploading..." : buttonLabel}
+        {buttonLabel}
       </button>
 
-      {error ? (
-        <div className="mt-2 rounded bg-red-500/15 px-3 py-2 text-sm text-red-200">
-          {error}
+      {status ? (
+        <div className="mt-2 rounded bg-neutral-800 p-2 text-xs text-neutral-100">
+          {status}
         </div>
       ) : null}
     </div>

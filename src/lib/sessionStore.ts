@@ -1,4 +1,6 @@
+// src/lib/sessionStore.ts
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 export type UploadedDocument = {
   filename: string;
@@ -10,7 +12,6 @@ type SessionState = {
   documents: UploadedDocument[];
   workspaceNotes: string;
 
-  setDocuments: (docs: UploadedDocument[]) => void;
   addDocuments: (docs: UploadedDocument[]) => void;
   clearDocuments: () => void;
 
@@ -20,17 +21,23 @@ type SessionState = {
   clearAll: () => void;
 };
 
-export const useSessionStore = create<SessionState>((set) => ({
-  documents: [],
-  workspaceNotes: "",
+export const useSessionStore = create<SessionState>()(
+  persist(
+    (set, get) => ({
+      documents: [],
+      workspaceNotes: "",
 
-  setDocuments: (docs) => set({ documents: docs }),
-  addDocuments: (docs) =>
-    set((s) => ({ documents: [...s.documents, ...docs] })),
-  clearDocuments: () => set({ documents: [] }),
+      addDocuments: (docs) =>
+        set({ documents: [...get().documents, ...docs] }),
 
-  setWorkspaceNotes: (notes) => set({ workspaceNotes: notes }),
-  clearWorkspaceNotes: () => set({ workspaceNotes: "" }),
+      clearDocuments: () => set({ documents: [] }),
 
-  clearAll: () => set({ documents: [], workspaceNotes: "" }),
-}));
+      setWorkspaceNotes: (notes) => set({ workspaceNotes: notes }),
+
+      clearWorkspaceNotes: () => set({ workspaceNotes: "" }),
+
+      clearAll: () => set({ documents: [], workspaceNotes: "" }),
+    }),
+    { name: "collision-iq-session" }
+  )
+);

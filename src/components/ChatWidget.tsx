@@ -1,152 +1,172 @@
+// src/components/ChatWidget.tsx
 "use client";
 
-import { useState, useCallback } from "react";
-import FileUpload from "./FileUpload";
+import React, { useCallback, useMemo, useState } from "react";
+import FileUpload from "@/components/FileUpload";
 import { useSessionStore } from "@/lib/sessionStore";
+import { shallow } from "zustand/shallow";
 
-export type ChatRole = "user" | "assistant" | "system";
-
-export type ChatMessage = {
-  role: ChatRole;
-  content: string;
-};
-
-export type UploadedDocument = {
-  filename: string;
-  type: string;
-  text: string;
-};
+type ChatRole = "user" | "assistant" | "system";
+type ChatMessage = { role: ChatRole; content: string };
 
 export default function ChatWidget() {
-  /** ✅ Level-4 safe store selection (no infinite loop) */
-  const documents = useSessionStore((s) => s.documents ?? []);
-  const setDocuments = useSessionStore((s) => s.setDocuments);
-  const clearDocuments = useSessionStore((s) => s.clearDocuments);
-  const workspaceNotes = useSessionStore((s) => s.workspaceNotes ?? "");
-  const setWorkspaceNotes = useSessionStore((s) => s.setWorkspaceNotes);
+  // ✅ HARDENED: shallow selector prevents getServerSnapshot/max depth issues
+  const { documents, workspaceNotes, setWorkspaceNotes, clearDocuments } =
+    useSessionStore(
+      (s) => ({
+        documents: s.documents,
+        workspaceNotes: s.workspaceNotes,
+        setWorkspaceNotes: s.setWorkspaceNotes,
+        clearDocuments: s.clearDocuments,
+      }),
+      shallow
+    );
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
       content:
-        "Hello! Upload an estimate, OEM procedure, or photo and I'll provide structured analysis.",
+        "Hello! Upload an estimate, OEM procedure, or photo and I'll provide structured analysis for supplements, missing ops, and OEM-aligned steps.",
     },
   ]);
 
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
 
-  /** ✅ Upload handler */
-  const handleUploaded = useCallback(
-    (newDocs: UploadedDocument[]) => {
-      setDocuments([...documents, ...newDocs]);
-    },
-    [documents, setDocuments]
-  );
+  const docCountLabel = useMemo(() => {
+    const n = documents?.length ?? 0;
+    return n === 0 ? "" : `${n} document${n === 1 ? "" : "s"} attached`;
+  }, [documents]);
 
-  /** ✅ LEVEL-4 STREAM FIX */
-  async function sendMessage() {
+  const sendMessage = useCallback(async () => {
     const text = input.trim();
     if (!text || sending) return;
 
-    const nextMessages: ChatMessage[] = [
+    const next: ChatMessage[] = [
       ...messages,
       { role: "user", content: text },
+      { role: "assistant", content: "" }, // placeholder for stream
     ];
 
-    setMessages(nextMessages);
+    setMessages(next);
     setInput("");
     setSending(true);
 
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      body: JSON.stringify({
-        messages: nextMessages,
-        documents,
-        workspaceNotes,
-      }),
-    });
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: next
+            // don't send the blank placeholder as history
+            .filter((m) => !(m.role === "assistant" && m.content === "")),
+          documents,
+          workspaceNotes,
+        }),
+      });
 
-    const reader = res.body?.getReader();
-    const decoder = new TextDecoder();
-
-    let assistantText = "";
-
-    /** add empty assistant message */
-    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
-
-    while (reader) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value);
-      const lines = chunk.split("\n");
-
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-
-        try {
-          const json = JSON.parse(line.replace("data:", "").trim());
-
-          /** ✅ ONLY capture delta text */
-          if (json.type === "response.output_text.delta") {
-            assistantText += json.delta;
-
-            setMessages((prev) => {
-              const copy = [...prev];
-              copy[copy.length - 1] = {
-                role: "assistant",
-                content: assistantText,
-              };
-              return copy;
-            });
-          }
-        } catch {}
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        throw new Error(t || `Chat failed (${res.status})`);
       }
-    }
 
-    setSending(false);
-  }
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      const decoder = new TextDecoder();
+      let assistantText = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        assistantText += decoder.decode(value, { stream: true });
+
+        // Update only last assistant message
+        setMessages((prev) => {
+          const copy = [...prev];
+          const lastIdx = copy.length - 1;
+          if (lastIdx >= 0 && copy[lastIdx].role === "assistant") {
+            copy[lastIdx] = { role: "assistant", content: assistantText };
+          }
+          return copy;
+        });
+      }
+    } catch (e: any) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `⚠️ ${String(e?.message ?? e)}` },
+      ]);
+    } finally {
+      setSending(false);
+    }
+  }, [documents, input, messages, sending, workspaceNotes]);
 
   return (
-    <div className="flex flex-col h-full gap-3">
+    <div className="flex h-full flex-col gap-3">
       <div className="flex-1 overflow-y-auto space-y-3">
         {messages.map((m, i) => (
           <div
             key={i}
-            className={`rounded p-3 ${
-              m.role === "user" ? "bg-orange-500" : "bg-neutral-800"
-            }`}
+            className={
+              m.role === "user"
+                ? "rounded bg-orange-600 px-3 py-2 text-sm text-white"
+                : "rounded bg-neutral-800 px-3 py-2 text-sm text-neutral-100"
+            }
           >
             {m.content}
           </div>
         ))}
       </div>
 
-      <FileUpload onUploadComplete={handleUploaded} />
+      <div className="space-y-2">
+        <FileUpload />
 
-      <textarea
-        aria-label="workspace notes"
-        placeholder="Workspace notes (optional)"
-        value={workspaceNotes}
-        onChange={(e) => setWorkspaceNotes(e.target.value)}
-        className="bg-neutral-900 rounded p-2"
-      />
+        {docCountLabel ? (
+          <div className="text-xs text-neutral-300">{docCountLabel}</div>
+        ) : null}
 
-      <div className="flex gap-2">
-        <input
-          aria-label="Chat message input"
-          placeholder="Ask a question..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          className="flex-1 bg-neutral-900 rounded px-3"
+        <label className="block text-xs text-neutral-300" htmlFor="workspace-notes">
+          Workspace notes (optional)
+        </label>
+        <textarea
+          id="workspace-notes"
+          className="w-full rounded bg-neutral-900 p-2 text-sm text-white outline-none"
+          placeholder="Anything important the assistant should remember for this job..."
+          value={workspaceNotes}
+          onChange={(e) => setWorkspaceNotes(e.target.value)}
+          rows={3}
         />
-        <button onClick={sendMessage} className="bg-blue-600 px-3 rounded">
-          Send
-        </button>
-        <button onClick={() => clearDocuments()} className="bg-neutral-700 px-3 rounded">
-          Clear
-        </button>
+
+        <div className="flex gap-2">
+          <label className="sr-only" htmlFor="chat-input">
+            Chat message input
+          </label>
+          <input
+            id="chat-input"
+            className="flex-1 rounded bg-neutral-900 px-3 py-2 text-sm text-white outline-none"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Ask a question..."
+            aria-label="Chat message input"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") sendMessage();
+            }}
+          />
+          <button
+            className="rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+            onClick={sendMessage}
+            disabled={sending}
+          >
+            {sending ? "Sending…" : "Send"}
+          </button>
+          <button
+            className="rounded bg-neutral-700 px-3 py-2 text-sm font-semibold text-white hover:bg-neutral-600"
+            onClick={() => clearDocuments()}
+          >
+            Clear docs
+          </button>
+        </div>
       </div>
     </div>
   );
