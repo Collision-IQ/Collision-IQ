@@ -4,23 +4,23 @@ import React, { useRef, useState } from "react";
 import type { UploadedDocument } from "@/lib/sessionStore";
 
 type Props = {
-  buttonLabel?: string;
   onUploadComplete: (docs: UploadedDocument[]) => void;
+  buttonLabel?: string;
 };
 
 export default function FileUpload({
-  buttonLabel = "Upload documents",
   onUploadComplete,
+  buttonLabel = "Upload documents",
 }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleFiles(files: FileList | null) {
+  async function uploadFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
 
+    setBusy(true);
     setError(null);
-    setUploading(true);
 
     try {
       const formData = new FormData();
@@ -32,16 +32,16 @@ export default function FileUpload({
       });
 
       if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `Upload failed (${res.status})`);
+        const txt = await res.text().catch(() => "");
+        throw new Error(txt || `Upload failed (${res.status})`);
       }
 
       const data: unknown = await res.json();
 
-      // Runtime guard (no `any`)
+      // runtime-safe parse
       if (
+        !data ||
         typeof data !== "object" ||
-        data === null ||
         !("documents" in data) ||
         !Array.isArray((data as { documents: unknown }).documents)
       ) {
@@ -49,43 +49,51 @@ export default function FileUpload({
       }
 
       const docs = (data as { documents: UploadedDocument[] }).documents;
+
+      // sanity
+      if (!docs.every((d) => typeof d?.filename === "string" && typeof d?.text === "string")) {
+        throw new Error("Upload documents have invalid shape");
+      }
+
       onUploadComplete(docs);
 
-      // Clear the input so re-uploading the same file triggers change event
+      // clear input so re-uploading same file works
       if (inputRef.current) inputRef.current.value = "";
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
-      setUploading(false);
+      setBusy(false);
     }
   }
 
   return (
-    <div className="w-full">
+    <div className="space-y-2">
+      <label className="sr-only" htmlFor="file-upload-input">
+        Upload files
+      </label>
       <input
+        id="file-upload-input"
         ref={inputRef}
         type="file"
         multiple
         className="hidden"
-        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-          handleFiles(e.target.files)
-        }
+        onChange={(e) => void uploadFiles(e.target.files)}
       />
 
       <button
         type="button"
-        className="w-full rounded bg-orange-500 px-4 py-2 font-semibold text-black disabled:opacity-60"
-        disabled={uploading}
+        className="w-full rounded bg-orange-600 px-4 py-2 font-semibold text-black disabled:opacity-60"
+        disabled={busy}
         onClick={() => inputRef.current?.click()}
       >
-        {uploading ? "Uploading..." : buttonLabel}
+        {busy ? "Uploading..." : buttonLabel}
       </button>
 
-      {error && (
-        <div className="mt-2 rounded bg-red-900/40 px-3 py-2 text-sm text-red-200">
-          {error}
+      {error ? (
+        <div className="rounded bg-red-950 px-3 py-2 text-sm text-red-200">
+          ⚠️ {error}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

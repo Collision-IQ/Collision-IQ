@@ -1,87 +1,83 @@
 import { NextResponse } from "next/server";
+import type { UploadedDocument } from "@/lib/sessionStore";
 
 export const runtime = "nodejs";
 
 type ChatRole = "user" | "assistant";
 type ChatMessage = { role: ChatRole; content: string };
 
-type UploadedDocument = {
-  filename: string;
-  type: string;
-  text: string;
-};
-
-type RequestBody = {
+type ChatRequestBody = {
   messages: ChatMessage[];
   documents?: UploadedDocument[];
   workspaceNotes?: string;
 };
 
-function buildWorkspaceContext(docs: UploadedDocument[], notes: string): string {
-  const safeNotes = notes.trim();
-  const docBlocks = docs
-    .map((d, idx) => {
-      const trimmed = (d.text ?? "").slice(0, 12000); // keep requests bounded
-      return `--- Document ${idx + 1}: ${d.filename} (${d.type}) ---\n${trimmed}`;
-    })
-    .join("\n\n");
+function buildWorkspaceContext(notes?: string, docs?: UploadedDocument[]) {
+  const safeNotes = (notes ?? "").trim();
+  const safeDocs = Array.isArray(docs) ? docs : [];
+
+  // Bound doc context to avoid massive prompts
+  const maxCharsPerDoc = 6000;
+  const maxDocs = 5;
+
+  const docBlock =
+    safeDocs.length > 0
+      ? safeDocs.slice(0, maxDocs).map((d, idx) => {
+          const excerpt = (d.text ?? "").slice(0, maxCharsPerDoc);
+          return `Document ${idx + 1}: ${d.filename}\n---\n${excerpt}\n`;
+        }).join("\n")
+      : "";
 
   const parts: string[] = [];
-  if (safeNotes) parts.push(`Workspace notes:\n${safeNotes}`);
-  if (docBlocks) parts.push(`Uploaded documents:\n${docBlocks}`);
+  if (safeNotes) parts.push(`Workspace Notes:\n${safeNotes}`);
+  if (docBlock) parts.push(`Documents:\n${docBlock}`);
 
-  if (parts.length === 0) return "";
-  return parts.join("\n\n");
-}
-
-function toResponsesInput(messages: ChatMessage[]) {
-  // Responses API expects: input: [{role, content:[{type:"input_text", text:"..."}]}]
-  return messages.map((m) => ({
-    role: m.role,
-    content: [{ type: "input_text" as const, text: m.content }],
-  }));
+  return parts.length ? parts.join("\n\n") : "";
 }
 
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as unknown;
+    const body = (await req.json()) as ChatRequestBody;
 
-    if (
-      typeof body !== "object" ||
-      body === null ||
-      !("messages" in body) ||
-      !Array.isArray((body as { messages: unknown }).messages)
-    ) {
-      return NextResponse.json(
-        { error: "Invalid request body: missing messages[]" },
-        { status: 400 }
-      );
+    if (!Array.isArray(body.messages) || body.messages.length === 0) {
+      return NextResponse.json({ error: "No messages provided" }, { status: 400 });
     }
 
-    const { messages, documents, workspaceNotes } = body as RequestBody;
+    const workspaceContext = buildWorkspaceContext(body.workspaceNotes, body.documents);
 
-    const docs = Array.isArray(documents) ? documents : [];
-    const notes = typeof workspaceNotes === "string" ? workspaceNotes : "";
+    const systemInstructions =
+      "You are Collision IQ, an OEM-aware automotive assistant. " +
+      "Use uploaded documents and workspace notes as authoritative context when available. " +
+      "If documents are missing relevant info, ask a concise follow-up question.";
 
-    const workspaceContext = buildWorkspaceContext(docs, notes);
-
-    const systemPreamble =
-      "You are Collision IQ, a professional automotive insurance claim assistant for Collision Academy.\n" +
-      "You provide educational, neutral, OEM-aligned guidance on:\n" +
-      "- Insurance claim handling best practices\n" +
-      "- Repair planning and documentation\n" +
-      "- Vehicle valuation concepts\n" +
-      "- OEM procedure awareness\n" +
-      "You do NOT provide legal advice.";
-
-    const finalMessages: ChatMessage[] = [
+    const input = [
+      // System/developer style instruction (as an input message)
       {
-        role: "assistant",
-        content:
-          systemPreamble +
-          (workspaceContext ? `\n\nWORKSPACE CONTEXT:\n${workspaceContext}` : ""),
+        role: "system",
+        content: [
+          {
+            type: "input_text" as const,
+            text: systemInstructions + (workspaceContext ? `\n\n${workspaceContext}` : ""),
+          },
+        ],
       },
-      ...messages,
+
+      // Conversation history
+      ...body.messages.map((m) => ({
+        role: m.role,
+        content: [
+          {
+            // ✅ CRITICAL FIX:
+            // user -> input_text
+            // assistant -> output_text
+            type:
+              m.role === "user"
+                ? ("input_text" as const)
+                : ("output_text" as const),
+            text: m.content,
+          },
+        ],
+      })),
     ];
 
     const upstream = await fetch("https://api.openai.com/v1/responses", {
@@ -92,93 +88,29 @@ export async function POST(req: Request) {
       },
       body: JSON.stringify({
         model: "gpt-4.1-mini",
-        input: toResponsesInput(finalMessages),
+        input,
         stream: true,
       }),
     });
 
     if (!upstream.ok || !upstream.body) {
-      const errText = await upstream.text().catch(() => "");
+      const txt = await upstream.text().catch(() => "");
       return NextResponse.json(
-        { error: "OpenAI request failed", details: errText },
+        { error: "OpenAI request failed", details: txt || upstream.statusText },
         { status: 500 }
       );
     }
 
-    // Convert OpenAI SSE -> plain text stream
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
-
-    const stream = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        const reader = upstream.body!.getReader();
-        let buffer = "";
-
-        try {
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-
-            // SSE frames separated by blank line
-            const frames = buffer.split("\n\n");
-            buffer = frames.pop() ?? "";
-
-            for (const frame of frames) {
-              const lines = frame.split("\n");
-              for (const line of lines) {
-                const trimmed = line.trim();
-                if (!trimmed.startsWith("data:")) continue;
-
-                const data = trimmed.slice(5).trim();
-                if (!data || data === "[DONE]") continue;
-
-                // Each data line is JSON
-                let evt: unknown;
-                try {
-                  evt = JSON.parse(data) as unknown;
-                } catch {
-                  continue;
-                }
-
-                if (
-                  typeof evt === "object" &&
-                  evt !== null &&
-                  "type" in evt
-                ) {
-                  const t = (evt as { type: unknown }).type;
-
-                  // Responses API streaming:
-                  // { type: "response.output_text.delta", delta: "..." }
-                  if (t === "response.output_text.delta") {
-                    const delta = (evt as { delta?: unknown }).delta;
-                    if (typeof delta === "string" && delta.length > 0) {
-                      controller.enqueue(encoder.encode(delta));
-                    }
-                  }
-                }
-              }
-            }
-          }
-        } catch (e) {
-          controller.error(e);
-        } finally {
-          controller.close();
-        }
-      },
-    });
-
-    return new Response(stream, {
+    // Pass-through SSE stream
+    return new Response(upstream.body, {
       headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
       },
     });
   } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Server error" },
-      { status: 500 }
-    );
+    const msg = e instanceof Error ? e.message : "Chat route failed";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

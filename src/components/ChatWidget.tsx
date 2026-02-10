@@ -2,30 +2,18 @@
 
 import React, { useCallback, useMemo, useState } from "react";
 import FileUpload from "@/components/FileUpload";
-import { useSessionStore, UploadedDocument } from "@/lib/sessionStore"
+import { useSessionStore, type UploadedDocument } from "@/lib/sessionStore";
 
 type ChatRole = "user" | "assistant";
 type ChatMessage = { role: ChatRole; content: string };
 
-type ChatRequestBody = {
-  messages: ChatMessage[];
-  documents: UploadedDocument[];
-  workspaceNotes: string;
-};
-
 export default function ChatWidget() {
-  // ✅ Avoid getServerSnapshot loop: use shallow selector
-  const { documents, workspaceNotes, setWorkspaceNotes, addDocuments, clearDocuments } =
-    useSessionStore(
-      (s) => ({
-        documents: s.documents,
-        workspaceNotes: s.workspaceNotes,
-        setWorkspaceNotes: s.setWorkspaceNotes,
-        addDocuments: s.addDocuments,
-        clearDocuments: s.clearDocuments,
-      }),
-      shallow
-    );
+  // ✅ Select fields individually to avoid snapshot identity churn
+  const documents = useSessionStore((s) => s.documents);
+  const workspaceNotes = useSessionStore((s) => s.workspaceNotes);
+  const setWorkspaceNotes = useSessionStore((s) => s.setWorkspaceNotes);
+  const addDocuments = useSessionStore((s) => s.addDocuments);
+  const clearDocuments = useSessionStore((s) => s.clearDocuments);
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -67,22 +55,28 @@ export default function ChatWidget() {
     setSending(true);
     setInput("");
 
-    // Add user message + placeholder assistant message
-    setMessages((prev) => [...prev, { role: "user", content: text }, { role: "assistant", content: "" }]);
+    // append user + placeholder assistant (stream target)
+    setMessages((prev) => [
+      ...prev,
+      { role: "user" as const, content: text },
+      { role: "assistant" as const, content: "" },
+    ]);
 
     try {
-      const body: ChatRequestBody = {
-        messages: [...messages, { role: "user", content: text }].filter(
-          (m) => m.role === "user" || m.role === "assistant"
-        ),
-        documents,
-        workspaceNotes,
-      };
+      // Build history based on *current* messages plus the new user turn
+      const history: ChatMessage[] = [
+        ...messages,
+        { role: "user" as const, content: text },
+      ];
 
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          messages: history,
+          documents,
+          workspaceNotes,
+        }),
       });
 
       if (!res.ok || !res.body) {
@@ -101,10 +95,8 @@ export default function ChatWidget() {
 
         assistantText += decoder.decode(value, { stream: true });
 
-        // Update the last assistant message
         setMessages((prev) => {
           const copy = [...prev];
-          // last message is our placeholder assistant
           const lastIndex = copy.length - 1;
           if (lastIndex >= 0 && copy[lastIndex]?.role === "assistant") {
             copy[lastIndex] = { role: "assistant", content: assistantText };
@@ -159,9 +151,7 @@ export default function ChatWidget() {
           className="w-full rounded bg-neutral-900 p-3 text-neutral-100"
           placeholder="Workspace notes (optional)"
           value={workspaceNotes}
-          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-            setWorkspaceNotes(e.target.value)
-          }
+          onChange={(e) => setWorkspaceNotes(e.target.value)}
           rows={3}
         />
 
@@ -174,17 +164,15 @@ export default function ChatWidget() {
             className="flex-1 rounded bg-neutral-900 px-3 py-2 text-neutral-100"
             placeholder="Ask a question..."
             value={input}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              setInput(e.target.value)
-            }
-            onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-              if (e.key === "Enter") sendMessage();
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void sendMessage();
             }}
           />
 
           <button
             type="button"
-            onClick={sendMessage}
+            onClick={() => void sendMessage()}
             disabled={sending}
             className="rounded bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-50"
           >
