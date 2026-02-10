@@ -1,20 +1,36 @@
-import { create } from "zustand";
-import { UploadedDocument } from "@/types/chat";
+import { create } from "zustand"
 
-interface SessionState {
-  documents: UploadedDocument[];
-  workspaceNotes: string;
+export type UploadedDocument = {
+  filename: string
+  type: string
+  text: string
+}
 
-  setDocuments: (docs: UploadedDocument[]) => void;
-  clearDocuments: () => void;
-  setWorkspaceNotes: (v: string) => void;
+export type SessionState = {
+  documents: UploadedDocument[]
+  workspaceNotes: string
+
+  addDocuments: (docs: UploadedDocument[]) => void
+  clearDocuments: () => void
+  setWorkspaceNotes: (notes: string) => void
 }
 
 export const useSessionStore = create<SessionState>((set) => ({
   documents: [],
   workspaceNotes: "",
 
-  setDocuments: (docs) => set({ documents: docs }),
-  clearDocuments: () => set({ documents: [] }),
-  setWorkspaceNotes: (v) => set({ workspaceNotes: v }),
-}));
+  addDocuments: (docs) =>
+    set((s) => ({
+      documents: [...s.documents, ...docs],
+    })),
+
+  clearDocuments: () =>
+    set({
+      documents: [],
+    }),
+
+  setWorkspaceNotes: (notes) =>
+    set({
+      workspaceNotes: notes,
+    }),
+}))

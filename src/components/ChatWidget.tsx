@@ -1,22 +1,27 @@
-// src/components/ChatWidget.tsx
 "use client";
 
 import React, { useCallback, useMemo, useState } from "react";
 import FileUpload from "@/components/FileUpload";
-import { useSessionStore } from "@/lib/sessionStore";
-import { shallow } from "zustand/shallow";
+import { useSessionStore, UploadedDocument } from "@/lib/sessionStore"
 
-type ChatRole = "user" | "assistant" | "system";
+type ChatRole = "user" | "assistant";
 type ChatMessage = { role: ChatRole; content: string };
 
+type ChatRequestBody = {
+  messages: ChatMessage[];
+  documents: UploadedDocument[];
+  workspaceNotes: string;
+};
+
 export default function ChatWidget() {
-  // ✅ HARDENED: shallow selector prevents getServerSnapshot/max depth issues
-  const { documents, workspaceNotes, setWorkspaceNotes, clearDocuments } =
+  // ✅ Avoid getServerSnapshot loop: use shallow selector
+  const { documents, workspaceNotes, setWorkspaceNotes, addDocuments, clearDocuments } =
     useSessionStore(
       (s) => ({
         documents: s.documents,
         workspaceNotes: s.workspaceNotes,
         setWorkspaceNotes: s.setWorkspaceNotes,
+        addDocuments: s.addDocuments,
         clearDocuments: s.clearDocuments,
       }),
       shallow
@@ -34,46 +39,60 @@ export default function ChatWidget() {
   const [sending, setSending] = useState(false);
 
   const docCountLabel = useMemo(() => {
-    const n = documents?.length ?? 0;
-    return n === 0 ? "" : `${n} document${n === 1 ? "" : "s"} attached`;
-  }, [documents]);
+    if (documents.length === 0) return "No documents attached";
+    if (documents.length === 1) return "1 document attached";
+    return `${documents.length} documents attached`;
+  }, [documents.length]);
+
+  const handleUploadComplete = useCallback(
+    (newDocs: UploadedDocument[]) => {
+      addDocuments(newDocs);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `Uploaded ${newDocs.length} document${
+            newDocs.length === 1 ? "" : "s"
+          }. Ask a question and I’ll use them as context.`,
+        },
+      ]);
+    },
+    [addDocuments]
+  );
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
     if (!text || sending) return;
 
-    const next: ChatMessage[] = [
-      ...messages,
-      { role: "user", content: text },
-      { role: "assistant", content: "" }, // placeholder for stream
-    ];
-
-    setMessages(next);
-    setInput("");
     setSending(true);
+    setInput("");
+
+    // Add user message + placeholder assistant message
+    setMessages((prev) => [...prev, { role: "user", content: text }, { role: "assistant", content: "" }]);
 
     try {
+      const body: ChatRequestBody = {
+        messages: [...messages, { role: "user", content: text }].filter(
+          (m) => m.role === "user" || m.role === "assistant"
+        ),
+        documents,
+        workspaceNotes,
+      };
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: next
-            // don't send the blank placeholder as history
-            .filter((m) => !(m.role === "assistant" && m.content === "")),
-          documents,
-          workspaceNotes,
-        }),
+        body: JSON.stringify(body),
       });
 
-      if (!res.ok) {
-        const t = await res.text().catch(() => "");
-        throw new Error(t || `Chat failed (${res.status})`);
+      if (!res.ok || !res.body) {
+        const errText = await res.text().catch(() => "");
+        throw new Error(errText || `Chat failed (${res.status})`);
       }
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
+      const reader = res.body.getReader();
       const decoder = new TextDecoder();
+
       let assistantText = "";
 
       while (true) {
@@ -82,21 +101,29 @@ export default function ChatWidget() {
 
         assistantText += decoder.decode(value, { stream: true });
 
-        // Update only last assistant message
+        // Update the last assistant message
         setMessages((prev) => {
           const copy = [...prev];
-          const lastIdx = copy.length - 1;
-          if (lastIdx >= 0 && copy[lastIdx].role === "assistant") {
-            copy[lastIdx] = { role: "assistant", content: assistantText };
+          // last message is our placeholder assistant
+          const lastIndex = copy.length - 1;
+          if (lastIndex >= 0 && copy[lastIndex]?.role === "assistant") {
+            copy[lastIndex] = { role: "assistant", content: assistantText };
           }
           return copy;
         });
       }
-    } catch (e: any) {
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: `⚠️ ${String(e?.message ?? e)}` },
-      ]);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setMessages((prev) => {
+        const copy = [...prev];
+        const lastIndex = copy.length - 1;
+        if (lastIndex >= 0 && copy[lastIndex]?.role === "assistant") {
+          copy[lastIndex] = { role: "assistant", content: `⚠️ ${msg}` };
+        } else {
+          copy.push({ role: "assistant", content: `⚠️ ${msg}` });
+        }
+        return copy;
+      });
     } finally {
       setSending(false);
     }
@@ -104,14 +131,14 @@ export default function ChatWidget() {
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <div className="flex-1 overflow-y-auto space-y-3">
+      <div className="flex-1 space-y-3 overflow-y-auto">
         {messages.map((m, i) => (
           <div
             key={i}
             className={
               m.role === "user"
-                ? "rounded bg-orange-600 px-3 py-2 text-sm text-white"
-                : "rounded bg-neutral-800 px-3 py-2 text-sm text-neutral-100"
+                ? "rounded bg-orange-600 px-4 py-3 text-black"
+                : "rounded bg-neutral-900 px-4 py-3 text-neutral-100"
             }
           >
             {m.content}
@@ -120,51 +147,62 @@ export default function ChatWidget() {
       </div>
 
       <div className="space-y-2">
-        <FileUpload />
+        <FileUpload onUploadComplete={handleUploadComplete} />
 
-        {docCountLabel ? (
-          <div className="text-xs text-neutral-300">{docCountLabel}</div>
-        ) : null}
+        <div className="text-xs text-neutral-400">{docCountLabel}</div>
 
-        <label className="block text-xs text-neutral-300" htmlFor="workspace-notes">
-          Workspace notes (optional)
+        <label className="sr-only" htmlFor="workspace-notes">
+          Workspace notes
         </label>
         <textarea
           id="workspace-notes"
-          className="w-full rounded bg-neutral-900 p-2 text-sm text-white outline-none"
-          placeholder="Anything important the assistant should remember for this job..."
+          className="w-full rounded bg-neutral-900 p-3 text-neutral-100"
+          placeholder="Workspace notes (optional)"
           value={workspaceNotes}
-          onChange={(e) => setWorkspaceNotes(e.target.value)}
+          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+            setWorkspaceNotes(e.target.value)
+          }
           rows={3}
         />
 
         <div className="flex gap-2">
           <label className="sr-only" htmlFor="chat-input">
-            Chat message input
+            Chat message
           </label>
           <input
             id="chat-input"
-            className="flex-1 rounded bg-neutral-900 px-3 py-2 text-sm text-white outline-none"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
+            className="flex-1 rounded bg-neutral-900 px-3 py-2 text-neutral-100"
             placeholder="Ask a question..."
-            aria-label="Chat message input"
-            onKeyDown={(e) => {
+            value={input}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+              setInput(e.target.value)
+            }
+            onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
               if (e.key === "Enter") sendMessage();
             }}
           />
+
           <button
-            className="rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+            type="button"
             onClick={sendMessage}
             disabled={sending}
+            className="rounded bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-50"
           >
-            {sending ? "Sending…" : "Send"}
+            Send
           </button>
+
           <button
-            className="rounded bg-neutral-700 px-3 py-2 text-sm font-semibold text-white hover:bg-neutral-600"
-            onClick={() => clearDocuments()}
+            type="button"
+            onClick={() => {
+              clearDocuments();
+              setMessages((prev) => [
+                ...prev,
+                { role: "assistant", content: "Cleared attached documents." },
+              ]);
+            }}
+            className="rounded bg-neutral-700 px-4 py-2 font-semibold text-white"
           >
-            Clear docs
+            Clear
           </button>
         </div>
       </div>

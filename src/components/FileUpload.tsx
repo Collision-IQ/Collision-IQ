@@ -1,43 +1,62 @@
-// src/components/FileUpload.tsx
 "use client";
 
 import React, { useRef, useState } from "react";
-import { useSessionStore, type UploadedDocument } from "@/lib/sessionStore";
+import type { UploadedDocument } from "@/lib/sessionStore";
 
 type Props = {
   buttonLabel?: string;
+  onUploadComplete: (docs: UploadedDocument[]) => void;
 };
 
-export default function FileUpload({ buttonLabel = "Upload documents" }: Props) {
+export default function FileUpload({
+  buttonLabel = "Upload documents",
+  onUploadComplete,
+}: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const [status, setStatus] = useState<string>("");
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const addDocuments = useSessionStore((s) => s.addDocuments);
-
-  async function onPickFiles(files: FileList | null) {
+  async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
 
-    setStatus("Uploading…");
-
-    const formData = new FormData();
-    Array.from(files).forEach((f) => formData.append("files", f));
+    setError(null);
+    setUploading(true);
 
     try {
-      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      const formData = new FormData();
+      Array.from(files).forEach((f) => formData.append("files", f));
+
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
       if (!res.ok) {
-        const t = await res.text().catch(() => "");
-        throw new Error(t || `Upload failed (${res.status})`);
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `Upload failed (${res.status})`);
       }
 
-      const data = (await res.json()) as { documents: UploadedDocument[] };
-      const docs = Array.isArray(data.documents) ? data.documents : [];
+      const data: unknown = await res.json();
 
-      addDocuments(docs);
-      setStatus(`Uploaded ${docs.length} document(s). Ask a question and I’ll use them as context.`);
-    } catch (e: any) {
-      setStatus(`Upload error: ${String(e?.message ?? e)}`);
-    } finally {
+      // Runtime guard (no `any`)
+      if (
+        typeof data !== "object" ||
+        data === null ||
+        !("documents" in data) ||
+        !Array.isArray((data as { documents: unknown }).documents)
+      ) {
+        throw new Error("Upload response missing documents[]");
+      }
+
+      const docs = (data as { documents: UploadedDocument[] }).documents;
+      onUploadComplete(docs);
+
+      // Clear the input so re-uploading the same file triggers change event
       if (inputRef.current) inputRef.current.value = "";
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -46,25 +65,27 @@ export default function FileUpload({ buttonLabel = "Upload documents" }: Props) 
       <input
         ref={inputRef}
         type="file"
-        className="hidden"
         multiple
-        onChange={(e) => onPickFiles(e.target.files)}
-        accept=".pdf,.png,.jpg,.jpeg,.txt"
+        className="hidden"
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+          handleFiles(e.target.files)
+        }
       />
 
       <button
         type="button"
-        className="w-full rounded bg-orange-600 px-3 py-2 text-sm font-semibold text-white hover:bg-orange-700"
+        className="w-full rounded bg-orange-500 px-4 py-2 font-semibold text-black disabled:opacity-60"
+        disabled={uploading}
         onClick={() => inputRef.current?.click()}
       >
-        {buttonLabel}
+        {uploading ? "Uploading..." : buttonLabel}
       </button>
 
-      {status ? (
-        <div className="mt-2 rounded bg-neutral-800 p-2 text-xs text-neutral-100">
-          {status}
+      {error && (
+        <div className="mt-2 rounded bg-red-900/40 px-3 py-2 text-sm text-red-200">
+          {error}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
