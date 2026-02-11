@@ -12,23 +12,29 @@ type ChatRequestBody = {
   workspaceNotes?: string;
 };
 
-function buildWorkspaceContext(notes?: string, docs?: UploadedDocument[]) {
+function buildWorkspaceContext(
+  notes?: string,
+  docs?: UploadedDocument[]
+) {
   const safeNotes = (notes ?? "").trim();
   const safeDocs = Array.isArray(docs) ? docs : [];
 
-  // Bound doc context to avoid massive prompts
   const maxCharsPerDoc = 6000;
   const maxDocs = 5;
 
   const docBlock =
     safeDocs.length > 0
-      ? safeDocs.slice(0, maxDocs).map((d, idx) => {
-          const excerpt = (d.text ?? "").slice(0, maxCharsPerDoc);
-          return `Document ${idx + 1}: ${d.filename}\n---\n${excerpt}\n`;
-        }).join("\n")
+      ? safeDocs
+          .slice(0, maxDocs)
+          .map((d, idx) => {
+            const excerpt = (d.text ?? "").slice(0, maxCharsPerDoc);
+            return `Document ${idx + 1}: ${d.filename}\n---\n${excerpt}\n`;
+          })
+          .join("\n")
       : "";
 
   const parts: string[] = [];
+
   if (safeNotes) parts.push(`Workspace Notes:\n${safeNotes}`);
   if (docBlock) parts.push(`Documents:\n${docBlock}`);
 
@@ -40,40 +46,57 @@ export async function POST(req: Request) {
     const body = (await req.json()) as ChatRequestBody;
 
     if (!Array.isArray(body.messages) || body.messages.length === 0) {
-      return NextResponse.json({ error: "No messages provided" }, { status: 400 });
+      return NextResponse.json(
+        { error: "No messages provided" },
+        { status: 400 }
+      );
     }
 
-    const workspaceContext = buildWorkspaceContext(body.workspaceNotes, body.documents);
+    const workspaceContext = buildWorkspaceContext(
+      body.workspaceNotes,
+      body.documents
+    );
 
-    const systemInstructions =
-      "You are Collision IQ, an OEM-aware automotive assistant. " +
-      "Use uploaded documents and workspace notes as authoritative context when available. " +
-      "If documents are missing relevant info, ask a concise follow-up question.";
+    const systemInstructions = `
+You are Collision IQ — an OEM-aware automotive repair analyst.
 
+When documents or images are provided:
+- Extract repair operations
+- Identify missing OEM procedures
+- Suggest supplement opportunities
+- Reference OEM-aligned repair strategy
+
+If an image is uploaded:
+- Analyze visible damage
+- Infer likely repair workflow
+- Suggest inspection or repair steps
+
+Always respond as a professional collision repair expert.
+`.trim();
+
+    /**
+     * 🔥 CRITICAL LEVEL-5 FIX
+     * ALL history = input_text
+     * NEVER output_text inside input[]
+     */
     const input = [
-      // System/developer style instruction (as an input message)
       {
         role: "system",
         content: [
           {
             type: "input_text" as const,
-            text: systemInstructions + (workspaceContext ? `\n\n${workspaceContext}` : ""),
+            text:
+              systemInstructions +
+              (workspaceContext ? "\n\n" + workspaceContext : ""),
           },
         ],
       },
 
-      // Conversation history
       ...body.messages.map((m) => ({
         role: m.role,
         content: [
           {
-            // ✅ CRITICAL FIX:
-            // user -> input_text
-            // assistant -> output_text
-            type:
-              m.role === "user"
-                ? ("input_text" as const)
-                : ("output_text" as const),
+            type: "input_text" as const,
             text: m.content,
           },
         ],
@@ -101,12 +124,64 @@ export async function POST(req: Request) {
       );
     }
 
-    // Pass-through SSE stream
-    return new Response(upstream.body, {
+    /**
+     * ✅ LEVEL-5 HARDENED STREAM PARSER
+     * Handles ALL text delta variants
+     */
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        const reader = upstream.body!.getReader();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+
+          for (const part of parts) {
+            const line = part.split("\n").find((l) => l.startsWith("data: "));
+            if (!line) continue;
+
+            const json = line.replace("data: ", "");
+
+            try {
+              const parsed = JSON.parse(json);
+
+              /**
+               * 🔥 PRO STREAM SUPPORT
+               */
+              if (
+                parsed.type === "response.output_text.delta" ||
+                parsed.type === "response.delta"
+              ) {
+                const text =
+                  parsed.delta ??
+                  parsed.output_text?.delta ??
+                  parsed.output?.[0]?.content?.[0]?.text ??
+                  "";
+
+                if (text) {
+                  controller.enqueue(encoder.encode(text));
+                }
+              }
+            } catch {}
+          }
+        }
+
+        controller.close();
+      },
+    });
+
+    return new Response(stream, {
       headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
+        "Content-Type": "text/plain",
       },
     });
   } catch (e) {

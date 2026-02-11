@@ -88,12 +88,40 @@ export default function ChatWidget() {
       const decoder = new TextDecoder();
 
       let assistantText = "";
+      let buffer = "";
 
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
 
-        let buffer = "";
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+
+          try {
+            const json = JSON.parse(line.replace("data:", "").trim());
+
+            if (json.type === "response.output_text.delta") {
+              assistantText += json.delta;
+
+              setMessages(prev => {
+                const copy = [...prev];
+                const last = copy.length - 1;
+                if (copy[last]?.role === "assistant") {
+                  copy[last] = {
+                    role: "assistant",
+                    content: assistantText,
+                  };
+                }
+                return copy;
+              });
+            }
+          } catch {}
+        }
 
 while (true) {
   const { value, done } = await reader.read();
