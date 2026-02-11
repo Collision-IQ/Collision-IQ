@@ -12,10 +12,7 @@ type ChatRequestBody = {
   workspaceNotes?: string;
 };
 
-function buildWorkspaceContext(
-  notes?: string,
-  docs?: UploadedDocument[]
-) {
+function buildWorkspaceContext(notes?: string, docs?: UploadedDocument[]) {
   const safeNotes = (notes ?? "").trim();
   const safeDocs = Array.isArray(docs) ? docs : [];
 
@@ -34,7 +31,6 @@ function buildWorkspaceContext(
       : "";
 
   const parts: string[] = [];
-
   if (safeNotes) parts.push(`Workspace Notes:\n${safeNotes}`);
   if (docBlock) parts.push(`Documents:\n${docBlock}`);
 
@@ -46,10 +42,7 @@ export async function POST(req: Request) {
     const body = (await req.json()) as ChatRequestBody;
 
     if (!Array.isArray(body.messages) || body.messages.length === 0) {
-      return NextResponse.json(
-        { error: "No messages provided" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "No messages provided" }, { status: 400 });
     }
 
     const workspaceContext = buildWorkspaceContext(
@@ -74,34 +67,16 @@ If an image is uploaded:
 Always respond as a professional collision repair expert.
 `.trim();
 
-    /**
-     * 🔥 CRITICAL LEVEL-5 FIX
-     * ALL history = input_text
-     * NEVER output_text inside input[]
-     */
-    const input = [
-      {
-        role: "system",
-        content: [
-          {
-            type: "input_text" as const,
-            text:
-              systemInstructions +
-              (workspaceContext ? "\n\n" + workspaceContext : ""),
-          },
-        ],
-      },
+    // ⭐ LEVEL-5 FIX:
+    // Build ONE combined text prompt instead of structured content types
+    const conversationText = body.messages
+      .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+      .join("\n");
 
-      ...body.messages.map((m) => ({
-        role: m.role,
-        content: [
-          {
-            type: "input_text" as const,
-            text: m.content,
-          },
-        ],
-      })),
-    ];
+    const fullPrompt =
+      systemInstructions +
+      (workspaceContext ? `\n\n${workspaceContext}` : "") +
+      `\n\n${conversationText}`;
 
     const upstream = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -111,7 +86,7 @@ Always respond as a professional collision repair expert.
       },
       body: JSON.stringify({
         model: "gpt-4.1-mini",
-        input,
+        input: fullPrompt,
         stream: true,
       }),
     });
@@ -124,10 +99,6 @@ Always respond as a professional collision repair expert.
       );
     }
 
-    /**
-     * ✅ LEVEL-5 HARDENED STREAM PARSER
-     * Handles ALL text delta variants
-     */
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
 
@@ -154,22 +125,8 @@ Always respond as a professional collision repair expert.
             try {
               const parsed = JSON.parse(json);
 
-              /**
-               * 🔥 PRO STREAM SUPPORT
-               */
-              if (
-                parsed.type === "response.output_text.delta" ||
-                parsed.type === "response.delta"
-              ) {
-                const text =
-                  parsed.delta ??
-                  parsed.output_text?.delta ??
-                  parsed.output?.[0]?.content?.[0]?.text ??
-                  "";
-
-                if (text) {
-                  controller.enqueue(encoder.encode(text));
-                }
+              if (parsed.type === "response.output_text.delta") {
+                controller.enqueue(encoder.encode(parsed.delta));
               }
             } catch {}
           }
