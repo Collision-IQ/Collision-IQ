@@ -1,35 +1,50 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function FloatingWidgetGate() {
   const [open, setOpen] = useState(false);
 
   return (
     <>
-      {/* Floating launcher button */}
+      {/* Launcher */}
       <button
-        onClick={() => setOpen(!open)}
-        className="fixed bottom-6 right-6 z-40 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-full shadow-lg"
+        onClick={() => setOpen((v) => !v)}
+        className="fixed bottom-6 right-6 z-[70] rounded-full bg-accent px-5 py-3 text-sm font-semibold text-black shadow-2xl hover:opacity-90"
       >
-        {open ? 'Close Chat' : 'Chat'}
+        {open ? "Close" : "Chat"}
       </button>
 
-      {/* Chat Widget */}
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            initial={{ opacity: 0, y: 20, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 50, scale: 0.95 }}
-            transition={{ duration: 0.3, ease: 'easeOut' }}
-            className="fixed bottom-20 right-6 z-50 w-full max-w-md h-[600px] rounded-xl shadow-2xl bg-black text-white border border-white/10 overflow-hidden flex flex-col"
+            exit={{ opacity: 0, y: 20, scale: 0.98 }}
+            transition={{ duration: 0.18, ease: "easeOut" }}
+            className={[
+              "fixed z-[75] overflow-hidden border border-border bg-card shadow-2xl",
+              "bottom-20 right-6",
+              "w-[92vw] max-w-[420px] h-[70vh] max-h-[640px] rounded-3xl",
+              "sm:w-[420px]",
+            ].join(" ")}
           >
+            <div className="flex items-center justify-between border-b border-border bg-black/20 px-4 py-3">
+              <div className="text-sm font-semibold text-text">Collision IQ</div>
+              <button
+                onClick={() => setOpen(false)}
+                className="rounded-lg border border-border bg-white/5 px-2 py-1 text-xs text-text hover:bg-white/10"
+              >
+                Close
+              </button>
+            </div>
+
             <iframe
               src="/widget"
-              title="Chat"
-              className="w-full h-full border-none"
+              title="Collision IQ Chat"
+              className="h-[calc(100%-52px)] w-full border-none"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
             />
           </motion.div>
         )}

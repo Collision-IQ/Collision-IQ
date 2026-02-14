@@ -1,14 +1,22 @@
 "use client";
 
-import React, { useCallback, useMemo, useState } from "react";
-import FileUpload from "@/components/FileUpload";
+import React, { useCallback, useMemo, useRef, useState } from "react";
+import FileUpload from "./FileUpload";
 import { useSessionStore, type UploadedDocument } from "@/lib/sessionStore";
 
 type ChatRole = "user" | "assistant";
 type ChatMessage = { role: ChatRole; content: string };
 
-export default function ChatWidget() {
-  // ✅ Select fields individually to avoid snapshot identity churn
+type StreamEvent = {
+  type?: string;
+  delta?: string | { text?: string };
+};
+
+type Props = {
+  mode?: "page" | "widget";
+};
+
+export default function ChatWidget({ mode = "widget" }: Props) {
   const documents = useSessionStore((s) => s.documents);
   const workspaceNotes = useSessionStore((s) => s.workspaceNotes);
   const setWorkspaceNotes = useSessionStore((s) => s.setWorkspaceNotes);
@@ -19,18 +27,25 @@ export default function ChatWidget() {
     {
       role: "assistant",
       content:
-        "Hello! Upload an estimate, OEM procedure, or photo and I'll provide structured analysis for supplements, missing ops, and OEM-aligned steps.",
+        "Hi there — upload an estimate, OEM procedure, or photo and I’ll produce a structured repair analysis (missing ops, OEM-required steps, supplement opportunities).",
     },
   ]);
 
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
 
   const docCountLabel = useMemo(() => {
     if (documents.length === 0) return "No documents attached";
     if (documents.length === 1) return "1 document attached";
     return `${documents.length} documents attached`;
   }, [documents.length]);
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, []);
 
   const handleUploadComplete = useCallback(
     (newDocs: UploadedDocument[]) => {
@@ -39,13 +54,12 @@ export default function ChatWidget() {
         ...prev,
         {
           role: "assistant",
-          content: `Uploaded ${newDocs.length} document${
-            newDocs.length === 1 ? "" : "s"
-          }. Ask a question and I’ll use them as context.`,
+          content: `Uploaded ${newDocs.length} document${newDocs.length === 1 ? "" : "s"}. Ask a question and I’ll use them as context.`,
         },
       ]);
+      setTimeout(scrollToBottom, 50);
     },
-    [addDocuments]
+    [addDocuments, scrollToBottom]
   );
 
   const sendMessage = useCallback(async () => {
@@ -55,19 +69,15 @@ export default function ChatWidget() {
     setSending(true);
     setInput("");
 
-    // append user + placeholder assistant (stream target)
+    // Add user + placeholder assistant
     setMessages((prev) => [
       ...prev,
-      { role: "user" as const, content: text },
-      { role: "assistant" as const, content: "" },
+      { role: "user", content: text },
+      { role: "assistant", content: "" },
     ]);
 
     try {
-      // Build history based on *current* messages plus the new user turn
-      const history: ChatMessage[] = [
-        ...messages,
-        { role: "user" as const, content: text },
-      ];
+      const history: ChatMessage[] = [...messages, { role: "user", content: text }];
 
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -94,93 +104,62 @@ export default function ChatWidget() {
         const { value, done } = await reader.read();
         if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
+        const chunk = decoder.decode(value, { stream: true });
 
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+        // If backend is plain text streaming, append directly.
+        // If backend is SSE ("data: ..."), parse it.
+        if (!chunk.includes("data:")) {
+          assistantText += chunk;
+          setMessages((prev) => {
+            const copy = [...prev];
+            const last = copy.length - 1;
+            if (copy[last]?.role === "assistant") {
+              copy[last] = { role: "assistant", content: assistantText };
+            }
+            return copy;
+          });
+          continue;
+        }
 
-        for (const line of lines) {
+        buffer += chunk;
+        const frames = buffer.split("\n");
+        buffer = frames.pop() ?? "";
+
+        for (const line of frames) {
           if (!line.startsWith("data:")) continue;
+          const payload = line.replace("data:", "").trim();
+          if (!payload || payload === "[DONE]") continue;
 
           try {
-            const json = JSON.parse(line.replace("data:", "").trim());
+            const evt = JSON.parse(payload) as StreamEvent;
 
-            if (json.type === "response.output_text.delta") {
-              assistantText += json.delta;
+            if (evt.type === "response.output_text.delta") {
+              const delta =
+                typeof evt.delta === "string" ? evt.delta : evt.delta?.text;
 
-              setMessages(prev => {
+              if (delta) assistantText += delta;
+
+              setMessages((prev) => {
                 const copy = [...prev];
                 const last = copy.length - 1;
                 if (copy[last]?.role === "assistant") {
-                  copy[last] = {
-                    role: "assistant",
-                    content: assistantText,
-                  };
+                  copy[last] = { role: "assistant", content: assistantText };
                 }
                 return copy;
               });
             }
-          } catch {}
-        }
-
-while (true) {
-  const { value, done } = await reader.read();
-  if (done) break;
-
-  buffer += decoder.decode(value, { stream: true });
-
-  const lines = buffer.split("\n");
-  buffer = lines.pop() ?? "";
-
-  for (const line of lines) {
-    if (!line.startsWith("data:")) continue;
-
-    const json = line.replace("data:", "").trim();
-    if (!json || json === "[DONE]") continue;
-
-    try {
-      const parsed = JSON.parse(json);
-
-      // ✅ Only extract assistant text delta
-      if (parsed.type === "response.output_text.delta") {
-        assistantText += parsed.delta ?? "";
-      }
-
-      setMessages((prev) => {
-        const copy = [...prev];
-        const lastIndex = copy.length - 1;
-
-        if (copy[lastIndex]?.role === "assistant") {
-          copy[lastIndex] = {
-            role: "assistant",
-            content: assistantText,
-          };
-        }
-
-        return copy;
-      });
-    } catch {
-      // ignore partial JSON chunks
-    }
-  }
-}
-
-        setMessages((prev) => {
-          const copy = [...prev];
-          const lastIndex = copy.length - 1;
-          if (lastIndex >= 0 && copy[lastIndex]?.role === "assistant") {
-            copy[lastIndex] = { role: "assistant", content: assistantText };
+          } catch {
+            // ignore partial JSON
           }
-          return copy;
-        });
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unknown error";
       setMessages((prev) => {
         const copy = [...prev];
-        const lastIndex = copy.length - 1;
-        if (lastIndex >= 0 && copy[lastIndex]?.role === "assistant") {
-          copy[lastIndex] = { role: "assistant", content: `⚠️ ${msg}` };
+        const last = copy.length - 1;
+        if (copy[last]?.role === "assistant") {
+          copy[last] = { role: "assistant", content: `⚠️ ${msg}` };
         } else {
           copy.push({ role: "assistant", content: `⚠️ ${msg}` });
         }
@@ -188,79 +167,76 @@ while (true) {
       });
     } finally {
       setSending(false);
+      setTimeout(scrollToBottom, 50);
     }
-  }, [documents, input, messages, sending, workspaceNotes]);
+  }, [documents, input, messages, sending, workspaceNotes, scrollToBottom]);
 
   return (
-    <div className="flex h-full flex-col gap-3">
-      <div className="flex-1 space-y-3 overflow-y-auto">
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={
-              m.role === "user"
-                ? "rounded bg-orange-600 px-4 py-3 text-black"
-                : "rounded bg-neutral-900 px-4 py-3 text-neutral-100"
-            }
-          >
-            {m.content}
-          </div>
-        ))}
+    <div className="flex h-full flex-col">
+      <div ref={scrollerRef} className="flex-1 overflow-y-auto px-5 py-5 space-y-3">
+        {messages.map((m, i) => {
+          const isUser = m.role === "user";
+          return (
+            <div key={i} className={isUser ? "flex justify-end" : "flex justify-start"}>
+              <div
+                className={[
+                  "max-w-[92%] lg:max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed",
+                  isUser
+                    ? "bg-accent text-black shadow-lg"
+                    : "bg-black/30 border border-border text-text shadow-sm",
+                ].join(" ")}
+              >
+                {m.content || (sending && !isUser && i === messages.length - 1 ? "▍" : "")}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      <div className="space-y-2">
-        <FileUpload onUploadComplete={handleUploadComplete} />
+      {mode === "widget" ? (
+        <div className="border-t border-border bg-black/20 p-4 space-y-3">
+          <FileUpload onUploadComplete={handleUploadComplete} />
 
-        <div className="text-xs text-neutral-400">{docCountLabel}</div>
+          <div className="text-xs text-muted">{docCountLabel}</div>
 
-        <label className="sr-only" htmlFor="workspace-notes">
-          Workspace notes
-        </label>
-        <textarea
-          id="workspace-notes"
-          className="w-full rounded bg-neutral-900 p-3 text-neutral-100"
-          placeholder="Workspace notes (optional)"
-          value={workspaceNotes}
-          onChange={(e) => setWorkspaceNotes(e.target.value)}
-          rows={3}
-        />
+          <textarea
+            className="w-full rounded-xl border border-border bg-black/30 p-3 text-sm text-text placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/40"
+            placeholder="Workspace notes (optional)"
+            value={workspaceNotes}
+            onChange={(e) => setWorkspaceNotes(e.target.value)}
+            rows={3}
+          />
 
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={clearDocuments}
+              className="rounded-xl border border-border bg-white/5 px-3 py-2 text-sm text-text hover:bg-white/10"
+            >
+              Clear Docs
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="sticky bottom-0 border-t border-border bg-black/30 backdrop-blur px-4 py-4">
         <div className="flex gap-2">
-          <label className="sr-only" htmlFor="chat-input">
-            Chat message
-          </label>
           <input
-            id="chat-input"
-            className="flex-1 rounded bg-neutral-900 px-3 py-2 text-neutral-100"
-            placeholder="Ask a question..."
+            className="flex-1 rounded-xl border border-border bg-black/30 px-4 py-3 text-sm text-text placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-accent/40"
+            placeholder="Ask a question…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") void sendMessage();
             }}
           />
-
           <button
             type="button"
             onClick={() => void sendMessage()}
             disabled={sending}
-            className="rounded bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-50"
+            className="rounded-xl bg-accent px-5 py-3 text-sm font-semibold text-black shadow-lg disabled:opacity-60"
           >
-            Send
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              clearDocuments();
-              setMessages((prev) => [
-                ...prev,
-                { role: "assistant", content: "Cleared attached documents." },
-              ]);
-            }}
-            className="rounded bg-neutral-700 px-4 py-2 font-semibold text-white"
-          >
-            Clear
+            {sending ? "Sending…" : "Send"}
           </button>
         </div>
       </div>

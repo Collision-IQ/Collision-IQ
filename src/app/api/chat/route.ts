@@ -12,10 +12,20 @@ type ChatRequestBody = {
   workspaceNotes?: string;
 };
 
+// --- Responses API input message shapes ---
+type InputTextPart = { type: "input_text"; text: string };
+type OutputTextPart = { type: "output_text"; text: string };
+
+type InputMessage =
+  | { role: "system"; content: InputTextPart[] }
+  | { role: "user"; content: InputTextPart[] }
+  | { role: "assistant"; content: OutputTextPart[] };
+
 function buildWorkspaceContext(notes?: string, docs?: UploadedDocument[]) {
   const safeNotes = (notes ?? "").trim();
   const safeDocs = Array.isArray(docs) ? docs : [];
 
+  // Bound doc context so prompts don’t explode
   const maxCharsPerDoc = 6000;
   const maxDocs = 5;
 
@@ -24,8 +34,9 @@ function buildWorkspaceContext(notes?: string, docs?: UploadedDocument[]) {
       ? safeDocs
           .slice(0, maxDocs)
           .map((d, idx) => {
+            const filename = d.filename ?? `Document_${idx + 1}`;
             const excerpt = (d.text ?? "").slice(0, maxCharsPerDoc);
-            return `Document ${idx + 1}: ${d.filename}\n---\n${excerpt}\n`;
+            return `Document ${idx + 1}: ${filename}\n---\n${excerpt}\n`;
           })
           .join("\n")
       : "";
@@ -37,12 +48,44 @@ function buildWorkspaceContext(notes?: string, docs?: UploadedDocument[]) {
   return parts.length ? parts.join("\n\n") : "";
 }
 
+function toInputMessage(m: ChatMessage): InputMessage {
+  if (m.role === "user") {
+    return {
+      role: "user",
+      content: [{ type: "input_text", text: m.content }],
+    };
+  }
+  // assistant history MUST be output_text in Responses API
+  return {
+    role: "assistant",
+    content: [{ type: "output_text", text: m.content }],
+  };
+}
+
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as ChatRequestBody;
+    const body = (await req.json()) as Partial<ChatRequestBody>;
 
-    if (!Array.isArray(body.messages) || body.messages.length === 0) {
-      return NextResponse.json({ error: "No messages provided" }, { status: 400 });
+    const messages = Array.isArray(body.messages) ? body.messages : [];
+    if (messages.length === 0) {
+      return NextResponse.json(
+        { error: "No messages provided" },
+        { status: 400 }
+      );
+    }
+
+    // Basic shape validation (prevents weird runtime crashes)
+    for (const m of messages) {
+      if (
+        !m ||
+        (m.role !== "user" && m.role !== "assistant") ||
+        typeof m.content !== "string"
+      ) {
+        return NextResponse.json(
+          { error: "Invalid message format" },
+          { status: 400 }
+        );
+      }
     }
 
     const workspaceContext = buildWorkspaceContext(
@@ -53,7 +96,7 @@ export async function POST(req: Request) {
     const systemInstructions = `
 You are Collision IQ — an OEM-aware automotive repair analyst.
 
-When documents or images are provided:
+When documents are provided:
 - Extract repair operations
 - Identify missing OEM procedures
 - Suggest supplement opportunities
@@ -67,16 +110,17 @@ If an image is uploaded:
 Always respond as a professional collision repair expert.
 `.trim();
 
-    // ⭐ LEVEL-5 FIX:
-    // Build ONE combined text prompt instead of structured content types
-    const conversationText = body.messages
-      .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
-      .join("\n");
-
-    const fullPrompt =
+    const systemText =
       systemInstructions +
-      (workspaceContext ? `\n\n${workspaceContext}` : "") +
-      `\n\n${conversationText}`;
+      (workspaceContext ? `\n\n${workspaceContext}` : "");
+
+    const input: InputMessage[] = [
+      {
+        role: "system",
+        content: [{ type: "input_text", text: systemText }],
+      },
+      ...messages.map(toInputMessage),
+    ];
 
     const upstream = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -85,8 +129,8 @@ Always respond as a professional collision repair expert.
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4.1-mini",
-        input: fullPrompt,
+        model: "gpt-4o",
+        input,
         stream: true,
       }),
     });
@@ -97,48 +141,68 @@ Always respond as a professional collision repair expert.
         { error: "OpenAI request failed", details: txt || upstream.statusText },
         { status: 500 }
       );
-    }
+ 
+      }
 
+    // We stream back ONLY assistant text deltas as plain text chunks
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
 
-    const stream = new ReadableStream({
+    const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         const reader = upstream.body!.getReader();
         let buffer = "";
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
 
-          buffer += decoder.decode(value, { stream: true });
+            buffer += decoder.decode(value, { stream: true });
 
-          const parts = buffer.split("\n\n");
-          buffer = parts.pop() ?? "";
+            // SSE frames are separated by blank lines
+            const frames = buffer.split("\n\n");
+            buffer = frames.pop() ?? "";
 
-          for (const part of parts) {
-            const line = part.split("\n").find((l) => l.startsWith("data: "));
-            if (!line) continue;
+            for (const frame of frames) {
+              // each frame may contain multiple lines, we want the data line
+              const dataLine = frame
+                .split("\n")
+                .find((l) => l.startsWith("data: "));
+              if (!dataLine) continue;
 
-            const json = line.replace("data: ", "");
+              const data = dataLine.slice("data: ".length).trim();
+              if (!data || data === "[DONE]") continue;
 
-            try {
-              const parsed = JSON.parse(json);
+              try {
+                const evt = JSON.parse(data);
 
-              if (parsed.type === "response.output_text.delta") {
-                controller.enqueue(encoder.encode(parsed.delta));
+                if (evt.type === "response.output_text.delta") {
+                  const text =
+                    typeof evt.delta === "string"
+                      ? evt.delta
+                      : evt.delta?.text;
+
+                  if (text) {
+                    controller.enqueue(encoder.encode(text));
+                  }
+                }
+              } catch {
+                // ignore malformed JSON chunks
               }
-            } catch {}
+            }
           }
+        } finally {
+          controller.close();
+          reader.releaseLock();
         }
-
-        controller.close();
       },
     });
 
     return new Response(stream, {
       headers: {
-        "Content-Type": "text/plain",
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
       },
     });
   } catch (e) {
