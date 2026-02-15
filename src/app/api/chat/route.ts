@@ -1,6 +1,13 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 
+export const runtime = "nodejs"; // Important for Vercel
+
+// 🔎 Environment safety check
+if (!process.env.OPENAI_API_KEY) {
+  console.error("❌ Missing OPENAI_API_KEY");
+}
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
@@ -37,7 +44,7 @@ export async function POST(req: Request) {
       }
     );
   } catch (error) {
-    console.error(error);
+    console.error("Chat route error:", error);
     return NextResponse.json({ error: "Chat failed." }, { status: 500 });
   }
 }
