@@ -15,14 +15,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className="min-h-screen text-white overflow-x-hidden bg-black"
-        style={{
-          backgroundImage: "url('/brand/logos/Background.png')",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-          backgroundAttachment: "fixed",
-          backgroundRepeat: "no-repeat",
-        }}
+        className="min-h-screen text-white overflow-x-hidden bg-black root-layout-body"
       >
         {/* Cinematic overlays (non-interactive, won’t block clicks) */}
         <div

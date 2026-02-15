@@ -1,42 +1,30 @@
 "use client";
 
-import { ReactNode } from "react";
-
 interface Props {
   variant?: "left" | "right";
-  children?: ReactNode;
 }
 
-export default function WorkspacePanel({ children }: Props) {
+export default function WorkspacePanel({ variant = "left" }: Props) {
   return (
-    <div
-      className="
-        relative
-        rounded-3xl
-        border border-white/10
-        bg-black/40
-        backdrop-blur-2xl
-        shadow-[0_30px_80px_rgba(0,0,0,0.6)]
-        transition
-        duration-300
-        hover:shadow-[0_40px_120px_rgba(0,0,0,0.75)]
-        hover:-translate-y-1
-        overflow-hidden
-      "
-    >
-      {/* Subtle glass inner glow */}
-      <div
-        className="
-          pointer-events-none
-          absolute inset-0 rounded-3xl
-          bg-gradient-to-b
-          from-white/5
-          to-transparent
-        "
-      />
+    <div className="h-full text-white">
+      <h2 className="text-lg font-semibold mb-4">
+        Analysis Panel
+      </h2>
 
-      <div className="relative p-5 space-y-5">
-        {children}
+      <div className="space-y-4 text-sm text-white/70">
+        <div className="p-4 rounded-xl bg-black/50 border border-white/10">
+          <p className="font-medium text-white mb-1">Preview</p>
+          <p>
+            Uploaded files and structured repair analysis will appear here.
+          </p>
+        </div>
+
+        <div className="p-4 rounded-xl bg-black/50 border border-white/10">
+          <p className="font-medium text-white mb-1">Repair Insights</p>
+          <p>
+            OEM procedures, damage analysis, and notes will populate in this panel.
+          </p>
+        </div>
       </div>
     </div>
   );

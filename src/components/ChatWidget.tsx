@@ -1,18 +1,16 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { Paperclip } from "lucide-react";
-import { useState } from "react";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
 }
 
-interface Props {
-  mode?: "page" | "widget";
-}
+export default function ChatWidget() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-export default function ChatWidget({ mode = "page" }: Props) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
@@ -23,6 +21,7 @@ export default function ChatWidget({ mode = "page" }: Props) {
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
 
   async function handleSend() {
     if (!input.trim() || loading) return;
@@ -43,18 +42,21 @@ export default function ChatWidget({ mode = "page" }: Props) {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ messages: updatedMessages }),
+        body: JSON.stringify({
+          messages: updatedMessages,
+        }),
       });
 
       const data = await response.json();
 
-      const assistantMessage: Message = {
-        role: "assistant",
-        content: data.reply || "No response received.",
-      };
-
-      setMessages([...updatedMessages, assistantMessage]);
-    } catch (error) {
+      setMessages([
+        ...updatedMessages,
+        {
+          role: "assistant",
+          content: data.reply || "No response received.",
+        },
+      ]);
+    } catch {
       setMessages([
         ...updatedMessages,
         {
@@ -67,34 +69,76 @@ export default function ChatWidget({ mode = "page" }: Props) {
     }
   }
 
+  async function handleFileUpload(file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      setSelectedFile(file.name);
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `File "${file.name}" uploaded successfully.`,
+        },
+      ]);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: "File upload failed.",
+        },
+      ]);
+    }
+  }
+
   return (
     <div className="flex flex-col h-full">
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {messages.map((message, index) => (
+        {messages.map((msg, index) => (
           <div
             key={index}
-            className={`max-w-[75%] rounded-2xl px-5 py-3 backdrop-blur-xl shadow-lg
-              ${
-                message.role === "user"
-                  ? "ml-auto bg-[#C65A2A] text-black"
-                  : "bg-black/40 border border-white/10 text-white"
-              }`}
+            className={`max-w-[75%] px-5 py-4 rounded-2xl backdrop-blur-xl shadow-lg ${
+              msg.role === "user"
+                ? "ml-auto bg-orange-500 text-black"
+                : "bg-black/60 border border-white/10 text-white"
+            }`}
           >
-            {message.content}
+            {msg.content}
           </div>
         ))}
       </div>
 
-      {/* Input Bar */}
+      {/* Input Area */}
       <div className="border-t border-white/10 p-4">
         <div className="flex items-center gap-3">
 
-          {/* Upload Button */}
+          {/* Hidden File Input */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files && e.target.files[0]) {
+                handleFileUpload(e.target.files[0]);
+              }
+            }}
+          />
+
+          {/* Paperclip Button */}
           <button
             type="button"
-            aria-label="Attach file"
+            onClick={() => fileInputRef.current?.click()}
+            aria-label="Upload file"
             className="text-white/50 hover:text-orange-400 transition"
           >
             <Paperclip size={18} />
@@ -104,8 +148,8 @@ export default function ChatWidget({ mode = "page" }: Props) {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask a question..."
-            className="flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-orange-500 transition"
+            placeholder="Ask about a repair, upload a file, or paste an estimate..."
+            className="flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-orange-500"
             onKeyDown={(e) => {
               if (e.key === "Enter") handleSend();
             }}
@@ -115,15 +159,18 @@ export default function ChatWidget({ mode = "page" }: Props) {
           <button
             onClick={handleSend}
             disabled={loading}
-            aria-label="Send message"
-            className="rounded-xl bg-orange-500 px-5 py-3 text-black font-semibold transition hover:bg-orange-600 disabled:opacity-50"
+            className="rounded-xl bg-orange-500 px-5 py-3 text-black font-semibold hover:bg-orange-600 disabled:opacity-50"
           >
             {loading ? "..." : "Send"}
           </button>
-
         </div>
-      </div>
 
+        {selectedFile && (
+          <div className="text-xs text-white/50 mt-2">
+            Attached: {selectedFile}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
