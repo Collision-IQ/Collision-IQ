@@ -1,42 +1,43 @@
 import { NextResponse } from "next/server";
-import type { UploadedDocument } from "@/lib/sessionStore";
 
 export const runtime = "nodejs";
 
 async function fileToText(file: File): Promise<string> {
-  // If you already have a real extractor (pdf-parse, etc.), use it here.
-  // Minimal safe fallback: read as text for text-based files.
   const type = file.type || "";
 
   if (type.includes("text")) {
     return await file.text();
   }
 
-  // For PDFs or unknown types, return a placeholder so the pipeline doesn't break.
-  // Replace this with your PDF extractor.
+  // Placeholder for PDFs/images
   return `[[No extractor configured for ${type || "unknown type"}: ${file.name}]]`;
 }
 
 export async function POST(req: Request) {
   try {
-    const form = await req.formData();
-    const file = form.get("file");
+    const formData = await req.formData();
 
-if (!(file instanceof File)) {
-  return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
-}
+    const file = formData.get("file");
 
-const text = await fileToText(file);
-
-const document: UploadedDocument = {
-  filename: file.name,
-  type: file.type || "application/octet-stream",
-  text,
-};
-
-return NextResponse.json({ document });
-    } catch (error) {
-      console.error("File upload error:", error);
-      return NextResponse.json({ error: "File upload failed." }, { status: 500 });
+    if (!file || !(file instanceof File)) {
+      return NextResponse.json(
+        { error: "No file received" },
+        { status: 400 }
+      );
     }
+
+    const text = await fileToText(file);
+
+    return NextResponse.json({
+      filename: file.name,
+      type: file.type,
+      text,
+    });
+  } catch (error) {
+    console.error("UPLOAD ERROR:", error);
+    return NextResponse.json(
+      { error: "Upload failed" },
+      { status: 500 }
+    );
   }
+}
