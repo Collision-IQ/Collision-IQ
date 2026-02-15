@@ -1,13 +1,11 @@
 "use client";
 
-import type { ReactNode } from "react";
+import ChatWidget from "./ChatWidget";
 
-export default function WidgetClient({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  // In Next.js App Router, client components render directly.
-  // No mounted-state logic needed.
-  return <>{children}</>;
+export default function WidgetClient() {
+  return (
+    <div className="w-full h-full">
+      <ChatWidget mode="widget" />
+    </div>
+  );
 }
