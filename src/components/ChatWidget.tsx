@@ -117,7 +117,7 @@ export default function ChatWidget({
 
   async function handleFileUpload(file: File) {
     const formData = new FormData();
-    formData.append("files", file);
+    formData.append("file", file);
 
     try {
       const res = await fetch("/api/upload", {
@@ -125,19 +125,23 @@ export default function ChatWidget({
         body: formData,
       });
 
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        throw new Error("Upload failed");
+      }
 
-      setSelectedFile(file.name);
-      onAttachmentChange?.(file.name);
+      const data = await res.json();
+
+      setSelectedFile(data.filename);
 
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: `File "${file.name}" uploaded successfully.`,
+          content: `File "${data.filename}" uploaded successfully.`,
         },
       ]);
-    } catch {
+    } catch (err) {
+      console.error(err);
       setMessages((prev) => [
         ...prev,
         {
