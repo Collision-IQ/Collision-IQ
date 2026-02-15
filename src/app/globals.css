@@ -2,7 +2,7 @@
 
 :root {
   --bg: #07090d;
-  --card: #0f1620;
+  --card: #0a1620;
   --border: #1b2633;
   --text: #e8eef6;
   --muted: #9fb0c3;
@@ -20,4 +20,27 @@ body {
   color: var(--text);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, Ubuntu, "Helvetica Neue", sans-serif;
+
+  /* important: ensures overlays don’t escape stacking context */
+  position: relative;
+}
+
+/* Optional vignette — SAFE version (won’t sit above your UI) */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+
+  /* heavy vignette */
+  background: radial-gradient(circle at center, transparent 35%, rgba(0, 0, 0, 0.88));
+
+  /* MUST be behind the app content */
+  z-index: 0;
+}
+
+/* Make sure app content sits above body::after */
+body > * {
+  position: relative;
+  z-index: 1;
 }

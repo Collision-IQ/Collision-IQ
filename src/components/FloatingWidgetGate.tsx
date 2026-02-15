@@ -1,46 +1,61 @@
 "use client";
 
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 
-export default function FloatingWidgetGate() {
-  const [open, setOpen] = useState(false);
+interface FloatingWidgetGateProps {
+  open: boolean;
+  setOpen: (value: boolean) => void;
+  onClose: () => void;
+}
 
+export default function FloatingWidgetGate({
+  open,
+  setOpen,
+  onClose,
+}: FloatingWidgetGateProps) {
   return (
     <>
-      <button
-        onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 bg-[#C4512D] text-white px-5 py-3 rounded-full shadow-xl hover:opacity-90 transition"
-      >
-        Chat
-      </button>
+      {/* Bubble Button (Always Visible) */}
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          className="fixed bottom-6 left-6 z-50 h-14 w-14 rounded-full bg-[#C65A2A] text-black font-bold shadow-2xl hover:scale-105 transition-all"
+        >
+          IQ
+        </button>
+      )}
 
+      {/* Panel */}
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: 20, scale: 0.98 }}
+            initial={{ opacity: 0, y: 40, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.98 }}
-            transition={{ duration: 0.18 }}
-            className="fixed bottom-20 right-6 w-[420px] h-[70vh] max-h-[640px] bg-[#0B0F14] border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+            exit={{ opacity: 0, y: 40, scale: 0.95 }}
+            transition={{ duration: 0.2 }}
+            className="fixed bottom-6 left-6 z-50 w-[380px] max-w-[90vw] rounded-3xl border border-white/10 bg-black/95 shadow-2xl"
           >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <div className="text-sm font-semibold text-white">
                 Collision IQ
               </div>
               <button
-                onClick={() => setOpen(false)}
-                className="text-xs text-white/60 hover:text-white"
+                onClick={onClose}
+                className="text-white/60 hover:text-white"
               >
-                Close
+                ✕
               </button>
             </div>
 
-            <iframe
-              src="/widget"
-              className="w-full h-[calc(100%-48px)] border-none"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-            />
+            {/* Body (iframe or chat mount) */}
+            <div className="h-[500px] w-full overflow-hidden rounded-b-3xl">
+              <iframe
+                src="/chatbot"
+                title="Collision IQ"
+                className="h-full w-full border-none"
+              />
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
