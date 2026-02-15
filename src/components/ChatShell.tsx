@@ -102,6 +102,7 @@ export default function ChatShell({ title = "Collision IQ", left, center, right 
           </div>
         </div>
       </header>
+        <div className="h-[2px] w-full bg-gradient-to-r from-transparent via-[#C65A2A]/60 to-transparent" />
 
       {/* Main grid */}
       <div className="relative z-10 mx-auto max-w-[1440px] px-4 py-4">

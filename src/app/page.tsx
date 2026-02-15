@@ -93,17 +93,18 @@ export default function HomePage() {
       {/* Dialogue overlay bar */}
       <section className="border-t border-white/10 bg-black/35 backdrop-blur-xl">
         <div className="mx-auto max-w-6xl px-5 py-5">
-          <div className="flex items-center gap-3">
-            <div className="flex-1 rounded-2xl border border-white/12 bg-black/35 px-4 py-3 text-sm text-white/60">
-              How can I help you today?
-            </div>
-            <Link
-              href="/chatbot"
-              className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black hover:opacity-90 transition"
-            >
-              Chat
-            </Link>
+        <Link
+          href="/chatbot"
+          className="flex items-center gap-3 group"
+        >
+          <div className="flex-1 rounded-2xl border border-white/12 bg-black/35 px-4 py-3 text-sm text-white/60 group-hover:border-white/30 transition">
+            How can I help you today?
           </div>
+
+          <div className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black hover:opacity-90 transition">
+            Chat
+          </div>
+          </Link>
         </div>
       </section>
 
