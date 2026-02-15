@@ -20,25 +20,23 @@ async function fileToText(file: File): Promise<string> {
 export async function POST(req: Request) {
   try {
     const form = await req.formData();
-    const files = form.getAll("files").filter((v): v is File => v instanceof File);
+    const file = form.get("file");
 
-    if (files.length === 0) {
-      return NextResponse.json({ error: "No files uploaded" }, { status: 400 });
-    }
-
-    const documents: UploadedDocument[] = [];
-    for (const file of files) {
-      const text = await fileToText(file);
-      documents.push({
-        filename: file.name,
-        type: file.type || "application/octet-stream",
-        text,
-      });
-    }
-
-    return NextResponse.json({ documents });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Upload failed";
-    return NextResponse.json({ error: msg }, { status: 500 });
-  }
+if (!(file instanceof File)) {
+  return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
 }
+
+const text = await fileToText(file);
+
+const document: UploadedDocument = {
+  filename: file.name,
+  type: file.type || "application/octet-stream",
+  text,
+};
+
+return NextResponse.json({ document });
+    } catch (error) {
+      console.error("File upload error:", error);
+      return NextResponse.json({ error: "File upload failed." }, { status: 500 });
+    }
+  }
