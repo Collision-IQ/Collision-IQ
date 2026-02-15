@@ -106,27 +106,10 @@ export default function ChatShell({ title = "Collision IQ", left, center, right 
 
       {/* Main grid */}
       <div className="relative z-10 mx-auto max-w-[1440px] px-4 py-4">
-        <div className="grid min-h-[calc(100svh-56px-32px)] grid-cols-1 gap-4 lg:grid-cols-[280px_1fr_360px]">
-          {/* Left panel (desktop) */}
-          <aside className="hidden lg:block">
-            <div className="h-full rounded-3xl border border-border bg-card/80 backdrop-blur p-5">
-              {left}
-            </div>
-          </aside>
-
-          {/* Center */}
-          <main className="min-h-0">
-            <div className="h-full min-h-[calc(100svh-56px-32px)] rounded-3xl border border-border bg-card/70 backdrop-blur">
-              <div className="h-full min-h-0">{center}</div>
-            </div>
-          </main>
-
-          {/* Right panel (desktop) */}
-          <aside className="hidden lg:block">
-            <div className="h-full rounded-3xl border border-border bg-card/80 backdrop-blur p-5">
-              {right}
-            </div>
-          </aside>
+        <div className="grid grid-cols-[1fr_1.5fr_1fr] gap-6 h-full">
+          <div>{left}</div>
+          <div>{center}</div>
+          <div>{right}</div>
         </div>
       </div>
 
