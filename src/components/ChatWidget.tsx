@@ -8,6 +8,11 @@ interface Message {
   content: string;
 }
 
+interface DocumentData {
+  filename: string;
+  text: string;
+}
+
 interface ChatWidgetProps {
   onAttachmentChange?: (filename: string | null) => void;
   onAnalysisChange?: (text: string) => void;
@@ -28,6 +33,7 @@ export default function ChatWidget({
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [documents, setDocuments] = useState<DocumentData[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -53,7 +59,10 @@ export default function ChatWidget({
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: updatedMessages }),
+        body: JSON.stringify({
+          messages: updatedMessages,
+          documents, // 🔥 critical addition
+        }),
       });
 
       if (!response.ok) {
@@ -62,7 +71,6 @@ export default function ChatWidget({
 
       const contentType = response.headers.get("content-type") || "";
 
-      // STREAM MODE
       if (contentType.includes("text/plain") && response.body) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -131,7 +139,13 @@ export default function ChatWidget({
 
       const data = await res.json();
 
+      // 🔥 Store full document text
+      if (data.documents) {
+        setDocuments(data.documents);
+      }
+
       setSelectedFile(data.filename);
+      onAttachmentChange?.(data.filename);
 
       setMessages((prev) => [
         ...prev,
@@ -154,12 +168,12 @@ export default function ChatWidget({
 
   function clearAttachment() {
     setSelectedFile(null);
+    setDocuments([]);
     onAttachmentChange?.(null);
   }
 
   return (
     <div className="flex flex-col h-full">
-      {/* Messages */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {messages.map((msg, index) => (
           <div
@@ -175,10 +189,8 @@ export default function ChatWidget({
         ))}
       </div>
 
-      {/* Input Bar */}
       <div className="border-t border-white/10 p-4">
         <div className="flex items-center gap-3">
-          {/* Hidden File Input */}
           <input
             type="file"
             ref={fileInputRef}
@@ -191,7 +203,6 @@ export default function ChatWidget({
             }}
           />
 
-          {/* Paperclip */}
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
@@ -201,7 +212,6 @@ export default function ChatWidget({
             <Paperclip size={20} />
           </button>
 
-          {/* Text Input */}
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -212,7 +222,6 @@ export default function ChatWidget({
             }}
           />
 
-          {/* Send */}
           <button
             onClick={handleSend}
             disabled={loading}
@@ -222,7 +231,6 @@ export default function ChatWidget({
           </button>
         </div>
 
-        {/* Attachment Display */}
         {selectedFile && (
           <div className="mt-3 flex items-center justify-between bg-black/40 border border-white/10 px-4 py-2 rounded-xl text-sm text-white/80">
             <span>Attached: {selectedFile}</span>
