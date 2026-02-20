@@ -2,6 +2,8 @@
 
 import { useState, useRef } from "react";
 import { Paperclip, X } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface Message {
   role: "user" | "assistant";
@@ -61,7 +63,7 @@ export default function ChatWidget({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: updatedMessages,
-          documents, // 🔥 critical addition
+          documents,
         }),
       });
 
@@ -139,7 +141,6 @@ export default function ChatWidget({
 
       const data = await res.json();
 
-      // 🔥 Store full document text
       if (data.documents) {
         setDocuments(data.documents);
       }
@@ -184,7 +185,41 @@ export default function ChatWidget({
                 : "bg-black/60 border border-white/10 text-white"
             }`}
           >
-            {msg.content}
+            {msg.role === "assistant" ? (
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  h1: ({ node, ...props }) => (
+                    <h1 className="text-2xl font-bold mb-4 mt-6" {...props} />
+                  ),
+                  h2: ({ node, ...props }) => (
+                    <h2
+                      className="text-xl font-semibold mt-6 mb-2 text-orange-400"
+                      {...props}
+                    />
+                  ),
+                  h3: ({ node, ...props }) => (
+                    <h3 className="text-lg font-semibold mt-4 mb-2" {...props} />
+                  ),
+                  p: ({ node, ...props }) => (
+                    <p className="mb-3 leading-relaxed" {...props} />
+                  ),
+                  ul: ({ node, ...props }) => (
+                    <ul className="list-disc pl-6 mb-3 space-y-1" {...props} />
+                  ),
+                  li: ({ node, ...props }) => (
+                    <li className="text-white/90" {...props} />
+                  ),
+                  strong: ({ node, ...props }) => (
+                    <strong className="text-white font-semibold" {...props} />
+                  ),
+                }}
+              >
+                {msg.content}
+              </ReactMarkdown>
+            ) : (
+              msg.content
+            )}
           </div>
         ))}
       </div>
