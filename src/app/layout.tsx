@@ -13,9 +13,24 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" className="h-full">
+      <head>
+        {/* ✅ Critical for safe-area + immersive mobile */}
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, viewport-fit=cover"
+        />
+      </head>
+
       <body
-        className="min-h-screen text-white overflow-x-hidden bg-black root-layout-body"
+        className="
+          h-full
+          bg-black
+          text-white
+          overflow-x-hidden
+          overflow-y-hidden
+          root-layout-body
+        "
       >
         {/* Cinematic overlays (non-interactive, won’t block clicks) */}
         <div
@@ -24,18 +39,31 @@ export default function RootLayout({
         >
           {/* Deep base */}
           <div className="absolute inset-0 bg-black/70" />
+
           {/* Directional lighting */}
           <div className="absolute inset-0 bg-gradient-to-tr from-black via-black/60 to-black/25" />
+
           {/* Strong vignette */}
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_35%,rgba(0,0,0,0.92))]" />
+
           {/* Orange glow accent */}
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_10%,rgba(198,90,42,0.22),transparent_45%)]" />
+
           {/* Subtle grain */}
           <div className="absolute inset-0 opacity-[0.06] mix-blend-overlay bg-[url('/brand/logos/Background.png')]" />
         </div>
 
         {/* Content layer ABOVE overlays */}
-        <div className="relative z-10 min-h-screen">
+        <div
+          className="
+            relative
+            z-10
+            h-full
+            min-h-[100dvh]
+            flex
+            flex-col
+          "
+        >
           {children}
           <FloatingWidgetMount />
         </div>
