@@ -8,7 +8,7 @@ export default function WorkspacePanel({ analysis }: Props) {
     <div className="h-full flex flex-col gap-4 text-sm text-white">
 
       <div className="p-4 rounded-xl border border-white/10 bg-black/50">
-        <h3 className="text-orange-400 font-semibold mb-2">
+        <h3 className="text-[#C65A2A] font-semibold mb-2">
           Analysis Panel
         </h3>
         <p className="text-white/60">

@@ -7,7 +7,7 @@ export default function ServicesPage() {
         Collision Academy Services
       </h1>
 
-      <p className="mt-3 text-sm text-[color:var(--muted)]">
+      <p className="mt-3 leading-[1.65] text-white/85">
         Services are securely handled through our checkout partner.
       </p>
 

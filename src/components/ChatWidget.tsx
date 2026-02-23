@@ -1,10 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Paperclip, X, Camera, ChevronDown, ChevronUp } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-// Optional: if you have remark-gfm installed, uncomment:
-// import remarkGfm from "remark-gfm";
 
 type Role = "user" | "assistant";
 
@@ -35,6 +33,21 @@ interface ChatWidgetProps {
   onAnalysisChange?: (text: string) => void;
 }
 
+/**
+ * Extract plain text from react-markdown children (which can be strings, arrays, or React elements).
+ * Must be defined OUTSIDE the component, not inside JSX.
+ */
+function extractText(node: React.ReactNode): string {
+  if (node == null) return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(extractText).join("");
+  if (React.isValidElement(node)) {
+  const el = node as React.ReactElement<{ children?: React.ReactNode }>;
+  return extractText(el.props.children);
+  }
+  return "";
+}
+
 export default function ChatWidget({
   onAttachmentChange,
   onAnalysisChange,
@@ -54,7 +67,6 @@ export default function ChatWidget({
   const [documents, setDocuments] = useState<DocumentData[]>([]);
   const [images, setImages] = useState<VisionImage[]>([]);
 
-  // Mobile-friendly: collapse attachments tray by default once there are several
   const [attachmentsOpen, setAttachmentsOpen] = useState(true);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -69,7 +81,6 @@ export default function ChatWidget({
 
   const hasAnyAttachment = useMemo(() => attachments.length > 0, [attachments]);
 
-  // If attachments become many, auto-collapse on mobile feel (still user controllable)
   useEffect(() => {
     if (attachments.length >= 3) setAttachmentsOpen(false);
     if (attachments.length === 0) setAttachmentsOpen(true);
@@ -81,7 +92,7 @@ export default function ChatWidget({
     if (!el) return;
 
     const onScroll = () => {
-      const thresholdPx = 140; // “near bottom” threshold
+      const thresholdPx = 140;
       const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
       shouldAutoScrollRef.current = distanceFromBottom < thresholdPx;
     };
@@ -92,10 +103,16 @@ export default function ChatWidget({
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Auto-scroll when new content arrives ONLY if user is near bottom
+  // Auto-scroll when assistant outputs (streaming updates messages continuously)
   useEffect(() => {
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage?.role !== "assistant") return;
     if (!shouldAutoScrollRef.current) return;
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+
+    bottomRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "end",
+    });
   }, [messages]);
 
   function buildAttachmentSummary(list: Attachment[]) {
@@ -125,8 +142,6 @@ export default function ChatWidget({
     if (!input.trim() && attachments.length === 0) return;
 
     setLoading(true);
-
-    // If user is sending, we should follow the stream
     shouldAutoScrollRef.current = true;
 
     const messageToSend = input.trim() || buildAttachmentSummary(attachments);
@@ -147,7 +162,7 @@ export default function ChatWidget({
         body: JSON.stringify({
           messages: updatedMessages,
           documents,
-          images, // ✅ true vision payload
+          images,
         }),
       });
 
@@ -155,14 +170,13 @@ export default function ChatWidget({
 
       const contentType = response.headers.get("content-type") || "";
 
-      // Streaming plain text
       if (contentType.includes("text/plain") && response.body) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
 
         let assistantText = "";
 
-        // Add assistant placeholder
+        // placeholder assistant message for streaming
         setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
         const assistantIndex = updatedMessages.length;
 
@@ -173,7 +187,6 @@ export default function ChatWidget({
           const chunk = decoder.decode(value, { stream: true });
           assistantText += chunk;
 
-          // Streaming: keep following unless user intentionally scrolled away
           setMessages((prev) => {
             const next = [...prev];
             next[assistantIndex] = { role: "assistant", content: assistantText };
@@ -183,7 +196,6 @@ export default function ChatWidget({
 
         onAnalysisChange?.(assistantText);
       } else {
-        // Non-stream fallback
         const data = await response.json();
         const reply = (data.reply as string) || "No response received.";
 
@@ -201,7 +213,6 @@ export default function ChatWidget({
     }
   }
 
-  // Upload ONE file to existing /api/upload route (supports multi-select by looping)
   async function uploadSingleFile(file: File, source: "file" | "camera") {
     const formData = new FormData();
     formData.append("file", file);
@@ -216,7 +227,6 @@ export default function ChatWidget({
 
     const isImage = isLikelyImageFile(file);
 
-    // ✅ If image: store base64 for GPT-4o vision
     if (isImage) {
       const dataUrl = await fileToDataUrl(file);
 
@@ -236,16 +246,13 @@ export default function ChatWidget({
       }
     }
 
-    // Append attachment
     setAttachments((prev) => [
       ...prev,
       { filename, documents: docs, source, isImage },
     ]);
 
-    // Merge docs for /api/chat
     if (docs.length) setDocuments((prev) => [...prev, ...docs]);
 
-    // Callback (last uploaded)
     onAttachmentChange?.(filename);
 
     setMessages((prev) => [
@@ -294,7 +301,6 @@ export default function ChatWidget({
     const remaining = attachments.filter((a) => a.filename !== filename);
     setAttachments(remaining);
 
-    // Rebuild docs/images from remaining attachments
     const nextDocs = remaining.flatMap((a) => a.documents || []);
     setDocuments(nextDocs);
 
@@ -313,177 +319,233 @@ export default function ChatWidget({
     onAttachmentChange?.(null);
   }
 
-  // Responsive bubble widths: more readable on mobile
-  const userBubble =
-    "ml-auto bg-orange-500 text-black max-w-[90%] sm:max-w-[75%]";
-  const assistantBubble =
-    "bg-black/60 border border-white/10 text-white max-w-[95%] sm:max-w-[75%]";
+  const userBubble = "ml-auto bg-orange-500 text-black max-w-[90%] sm:max-w-[75%]";
+  const assistantBubble = "max-w-[95%] sm:max-w-[75%] text-white";
 
   return (
-    // ✅ Keep chat container (NOT fixed / inset)
-    <div className="flex flex-col h-full min-h-0">
-      {/* Messages */}
+    <div className="relative flex flex-col h-full min-h-0">
+      {/* Background watermark */}
       <div
-        ref={scrollRef}
-        className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6 pt-4 sm:pt-6 pb-32 space-y-4 sm:space-y-6"
-        style={{ WebkitOverflowScrolling: "touch" }}
-      >
-        {messages.map((msg, index) => (
-          <div
-            key={index}
-            className={`px-4 sm:px-5 py-3 sm:py-4 rounded-2xl shadow-lg ${
-              msg.role === "user" ? userBubble : assistantBubble
-            }`}
-          >
-            {msg.role === "assistant" ? (
-              <div className="prose prose-invert max-w-none text-sm sm:text-base leading-relaxed">
-                <ReactMarkdown
-                  // If remark-gfm is available:
-                  // remarkPlugins={[remarkGfm]}
-                >
-                  {msg.content}
-                </ReactMarkdown>
+        className="absolute inset-0 pointer-events-none bg-no-repeat bg-center bg-contain"
+        style={{
+          backgroundImage: "url('/brand/logos/Logo-grey.png')",
+          backgroundSize: "60%",
+          opacity: 0.06,
+        }}
+      />
+      {/* Soft dark overlay */}
+      <div className="absolute inset-0 bg-black/70 pointer-events-none" />
+
+      {/* Foreground layer */}
+      <div className="relative z-10 flex flex-col flex-1 min-h-0">
+        {/* Messages (ONLY scrolling region) */}
+        <div
+          ref={scrollRef}
+          className="
+          overflow-y-auto
+          flex-1
+          px-4 sm:px-6
+          min-h-0
+          pt-4 sm:pt-6
+          pb-[240px]
+          space-y-4
+        "
+        >
+          {messages.map((msg, idx) => (
+            <div
+              key={idx}
+              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              <div
+                className={`rounded-2xl px-5 py-4 bg-transparent ${
+                  msg.role === "user" ? userBubble : assistantBubble
+                }`}
+              >
+                {msg.role === "assistant" ? (
+                  <div className="max-w-none text-white text-[15px] leading-[1.6]">
+
+                    <ReactMarkdown
+                      components={{
+                        h2: ({ children }) => (
+                          <div className="mt-6 mb-2 text-[#C65A2A] text-[16px] font-semibold">
+                            {children}
+                          </div>
+                        ),
+
+                        h3: ({ children }) => (
+                          <div className="mt-4 mb-1 text-[#C65A2A] text-[14px] font-medium">
+                            {children}
+                          </div>
+                        ),
+
+                        p: ({ children }) => (
+                          <p className="mt-2 text-white/85 leading-[1.65]">
+                          {children}
+                        </p>
+                        ),
+
+                        li: ({ children }) => (
+                          <li className="mt-1 text-white/80">
+                            {children}
+                          </li>
+                        ),
+
+                        strong: ({ children }) => (
+                          <span className="font-semibold">
+                            {children}
+                          </span>
+                        ),
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <div className="whitespace-pre-wrap text-sm sm:text-base">
+                    {msg.content}
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="whitespace-pre-wrap text-sm sm:text-base">
-                {msg.content}
+            </div>
+          ))}
+
+          <div ref={bottomRef} />
+        </div>
+
+        {/* Composer + Attachments */}
+        <div
+          className="absolute bottom-0 left-0 right-0 border-t border-white/10 bg-black/85 backdrop-blur"
+          style={{
+            paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))",
+          }}
+        >
+          <div className="p-4">
+            <div className="flex items-center gap-3">
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept=".pdf,image/*"
+                multiple
+                title="Attach files"
+                onChange={(e) => handleFilesSelected(e.target.files)}
+              />
+
+              <input
+                type="file"
+                ref={cameraInputRef}
+                className="hidden"
+                accept="image/*"
+                capture="environment"
+                title="Take photo"
+                onChange={(e) => handleCameraSelected(e.target.files)}
+              />
+
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="text-white/60 hover:text-[#C65A2A] transition"
+                aria-label="Attach files"
+              >
+                <Paperclip size={20} />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => cameraInputRef.current?.click()}
+                className="text-white/60 hover:text-[#C65A2A] transition"
+                aria-label="Take photo"
+              >
+                <Camera size={20} />
+              </button>
+
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={
+                  hasAnyAttachment
+                    ? "Ask about the attachments, or add more context..."
+                    : "Ask about a repair, upload files, or take a photo..."
+                }
+                className="flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-orange-500 transition text-sm sm:text-base"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+              />
+
+              <button
+                onClick={handleSend}
+                disabled={loading}
+                className="rounded-xl bg-[#C65A2A] px-4 sm:px-5 py-3 text-black font-semibold transition hover:bg-[#C65A2A]/90 disabled:opacity-50"
+              >
+                {loading ? "..." : "Send"}
+              </button>
+            </div>
+
+            {attachments.length > 0 && (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  className="w-full flex items-center justify-between rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80"
+                  onClick={() => setAttachmentsOpen((v) => !v)}
+                  aria-label="Toggle attachments"
+                >
+                  <span>
+                    Attachments ({attachments.length})
+                    <span className="ml-2 text-white/40">
+                      {images.length > 0 ? `• Vision: ${images.length}` : ""}
+                    </span>
+                  </span>
+                  {attachmentsOpen ? (
+                    <ChevronDown size={16} />
+                  ) : (
+                    <ChevronUp size={16} />
+                  )}
+                </button>
+
+                {attachmentsOpen && (
+                  <div className="mt-2 space-y-2">
+                    {attachments.map((a) => (
+                      <div
+                        key={a.filename}
+                        className="flex items-center justify-between bg-black/40 border border-white/10 px-4 py-2 rounded-xl text-sm text-white/80"
+                      >
+                        <span className="truncate pr-3">
+                          {a.filename}
+                          <span className="ml-2 text-white/40">
+                            ({a.source === "camera" ? "photo" : "file"}
+                            {a.isImage ? ", vision" : ""})
+                          </span>
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(a.filename)}
+                          aria-label="Remove attachment"
+                          className="shrink-0"
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    ))}
+
+                    <button
+                      type="button"
+                      onClick={clearAllAttachments}
+                      className="text-xs text-white/60 hover:text-[#C65A2A] transition"
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
-        ))}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Composer + Attachments (Immersive Mobile) */}
-      <div
-        className="sticky bottom-0 left-0 right-0 border-t border-white/10 bg-black/85 backdrop-blur"
-        style={{
-          paddingBottom: "calc(1rem + env(safe-area-inset-bottom))",
-        }}
-      >
-        <div className="p-4">
-          <div className="flex items-center gap-3">
-            <input
-              type="file"
-              ref={fileInputRef}
-              className="hidden"
-              accept=".pdf,image/*"
-              multiple
-              title="Attach files"
-              onChange={(e) => handleFilesSelected(e.target.files)}
-            />
-
-            <input
-              type="file"
-              ref={cameraInputRef}
-              className="hidden"
-              accept="image/*"
-              capture="environment"
-              title="Take photo"
-              onChange={(e) => handleCameraSelected(e.target.files)}
-            />
-
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="text-white/60 hover:text-orange-400 transition"
-              aria-label="Attach files"
-            >
-              <Paperclip size={20} />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => cameraInputRef.current?.click()}
-              className="text-white/60 hover:text-orange-400 transition"
-              aria-label="Take photo"
-            >
-              <Camera size={20} />
-            </button>
-
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder={
-                hasAnyAttachment
-                  ? "Ask about the attachments, or add more context..."
-                  : "Ask about a repair, upload files, or take a photo..."
-              }
-              className="flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-orange-500 transition text-sm sm:text-base"
-              onKeyDown={(e) => {
-                // Enter to send, Shift+Enter to newline (future-friendly)
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-            />
-
-            <button
-              onClick={handleSend}
-              disabled={loading}
-              className="rounded-xl bg-orange-500 px-4 sm:px-5 py-3 text-black font-semibold transition hover:bg-orange-600 disabled:opacity-50"
-            >
-              {loading ? "..." : "Send"}
-            </button>
-          </div>
-
-          {/* Attachments tray (collapsible, mobile-friendly) */}
-          {attachments.length > 0 && (
-            <div className="mt-3">
-              <button
-                type="button"
-                className="w-full flex items-center justify-between rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80"
-                onClick={() => setAttachmentsOpen((v) => !v)}
-                aria-label="Toggle attachments"
-              >
-                <span>
-                  Attachments ({attachments.length})
-                  <span className="ml-2 text-white/40">
-                    {images.length > 0 ? `• Vision: ${images.length}` : ""}
-                  </span>
-                </span>
-                {attachmentsOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-              </button>
-
-              {attachmentsOpen && (
-                <div className="mt-2 space-y-2">
-                  {attachments.map((a) => (
-                    <div
-                      key={a.filename}
-                      className="flex items-center justify-between bg-black/40 border border-white/10 px-4 py-2 rounded-xl text-sm text-white/80"
-                    >
-                      <span className="truncate pr-3">
-                        {a.filename}
-                        <span className="ml-2 text-white/40">
-                          ({a.source === "camera" ? "photo" : "file"}
-                          {a.isImage ? ", vision" : ""})
-                        </span>
-                      </span>
-
-                      <button
-                        type="button"
-                        onClick={() => removeAttachment(a.filename)}
-                        aria-label="Remove attachment"
-                        className="shrink-0"
-                      >
-                        <X size={16} />
-                      </button>
-                    </div>
-                  ))}
-
-                  <button
-                    type="button"
-                    onClick={clearAllAttachments}
-                    className="text-xs text-white/60 hover:text-orange-400 transition"
-                  >
-                    Clear all
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
     </div>
+  );
 }

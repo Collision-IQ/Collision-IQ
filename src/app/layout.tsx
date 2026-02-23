@@ -59,7 +59,7 @@ export default function RootLayout({
             relative
             z-10
             h-full
-            min-h-[100dvh]
+            min-h-screen
             flex
             flex-col
           "
