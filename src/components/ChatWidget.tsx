@@ -323,7 +323,7 @@ export default function ChatWidget({
   const assistantBubble = "max-w-[95%] sm:max-w-[75%] text-white";
 
   return (
-    <div className="relative flex flex-col h-full min-h-0">
+    <div className="relative flex flex-col h-full min-h-0 overflow-hidden">
       {/* Background watermark */}
       <div
         className="absolute inset-0 pointer-events-none bg-no-repeat bg-center bg-contain"
