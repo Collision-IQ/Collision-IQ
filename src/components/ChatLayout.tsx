@@ -5,7 +5,7 @@ export default function ChatbotLayout({
 }) {
   return (
     <div className="min-h-screen bg-black text-white relative">
-      <div className="mx-auto max-w-[1600px] px-6 py-8">
+      <div className="mx-auto max-w-[1600px] px-6 h-full">
         {children}
       </div>
     </div>
