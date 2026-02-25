@@ -319,7 +319,7 @@ export default function ChatWidget({
     onAttachmentChange?.(null);
   }
 
-  const userBubble = "ml-auto bg-orange-500 text-black max-w-[90%] sm:max-w-[75%]";
+  const userBubble = "bg-black/70 border border-orange-500/30 text-orange-400";
   const assistantBubble = "max-w-[95%] sm:max-w-[75%] text-white";
 
   return (

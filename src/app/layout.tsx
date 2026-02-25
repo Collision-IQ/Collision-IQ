@@ -1,6 +1,5 @@
 import "./globals.css";
 import type { Metadata } from "next";
-import FloatingWidgetMount from "@/components/FloatingWidgetMount";
 
 export const metadata: Metadata = {
   title: "Collision Academy",
@@ -65,7 +64,6 @@ export default function RootLayout({
           "
         >
           {children}
-          <FloatingWidgetMount />
         </div>
       </body>
     </html>
