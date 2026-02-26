@@ -20,6 +20,9 @@ const openai = new OpenAI({
  * - Streaming preserved
  * - GPT-4o multimodal vision enabled
  * - Robust totals extraction + numeric deltas (when confidence allows)
+ *
+ * ✅ UPDATED: Internet access enabled via Responses API web_search tool
+ * ✅ UPDATED: Streaming preserved as plain text chunks (frontend-safe)
  */
 
 // ==============================
@@ -541,10 +544,10 @@ ${safe}
 }
 
 // ==============================
-// VISION MESSAGE BUILDER
+// VISION MESSAGE BUILDER (Responses API compatible)
 // ==============================
 
-function buildVisionMessage(attachedContext: string, images: VisionImage[]) {
+function buildVisionInput(attachedContext: string, images: VisionImage[]) {
   if (!images || images.length === 0) return null;
 
   const safeImages = images
@@ -553,29 +556,23 @@ function buildVisionMessage(attachedContext: string, images: VisionImage[]) {
 
   if (!safeImages.length) return null;
 
-  return {
-    role: "user" as const,
-    content: [
-      {
-        type: "text" as const,
-        text:
-          (attachedContext ? attachedContext + "\n\n" : "") +
-          `[VISION INPUT — DATA ONLY]
+  return [
+    {
+      type: "input_text" as const,
+      text:
+        (attachedContext ? attachedContext + "\n\n" : "") +
+        `[VISION INPUT — DATA ONLY]
 You have ${safeImages.length} image(s).
 Analyze visible damage, severity, likely repair operations, and safety risks (ADAS/SRS/structure).
 If photos are unclear, state which angles/details are needed.`,
-      },
-      ...safeImages.map((img) => ({
-        type: "image_url" as const,
-        image_url: { url: img.dataUrl },
-      })),
-    ],
-  };
+    },
+    ...safeImages.map((img) => ({
+      // Responses API image item
+      type: "input_image" as const,
+      image_url: img.dataUrl,
+    })),
+  ];
 }
-
-// ==============================
-// ROUTE
-// ==============================
 
 // ==============================
 // ROUTE
@@ -585,7 +582,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    // ✅ 1. Rename to avoid redeclaration
+    // Incoming conversation messages (your widget sends strings)
     const incomingMessages = (body.messages || []) as Array<{
       role: string;
       content: any;
@@ -594,81 +591,94 @@ export async function POST(req: Request) {
     const documents = (body.documents || []) as UploadedDocument[];
     const images = (body.images || []) as VisionImage[];
 
-    // Build context + metrics
+    // Build context + metrics (unchanged behavior)
     const attachedContext = buildAttachedContext(documents);
-    const visionMessage = buildVisionMessage(attachedContext, images);
+
+    // Build Responses API "input" items
+    // 1) system prompt
+    // 2) optional: attachedContext as a user input_text (when no images)
+    // 3) optional: vision input (text + images) as user
+    // 4) conversation history
+    const input: any[] = [
+      {
+        role: "system",
+        content: [{ type: "input_text", text: SYSTEM_PROMPT }],
+      },
+    ];
+
+    const visionContent = buildVisionInput(attachedContext, images);
 
     // If no images, attach context as normal user message
-    const baseContextMessage =
-      !visionMessage && attachedContext
-        ? [
-            {
-              role: "user" as const,
-              content: attachedContext,
-            },
-          ]
-        : [];
+    if (!visionContent && attachedContext) {
+      input.push({
+        role: "user",
+        content: [{ type: "input_text", text: attachedContext }],
+      });
+    }
 
-    // ✅ 2. Narrow incoming messages safely to OpenAI type
-    const safeMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
-      incomingMessages
-        .filter(
-          (m) =>
-            m &&
-            (m.role === "user" || m.role === "assistant") &&
-            typeof m.content === "string"
-        )
-        .map((m) => ({
-          role: m.role as "user" | "assistant",
-          content: m.content,
-        }));
+    // If images exist, attach context + images as a single user turn
+    if (visionContent) {
+      input.push({
+        role: "user",
+        content: visionContent,
+      });
+    }
 
-    // ✅ 3. Build finalMessages properly
-    const finalMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
-      [
-        {
-          role: "system",
-          content: SYSTEM_PROMPT,
-        },
-        ...baseContextMessage,
-        ...(visionMessage ? [visionMessage] : []),
-        ...safeMessages,
-      ];
+    // Keep your “safeMessages” filtering logic (user/assistant only, string content only)
+    const safeMessages = incomingMessages
+      .filter(
+        (m) =>
+          m &&
+          (m.role === "user" || m.role === "assistant") &&
+          typeof m.content === "string"
+      )
+      .map((m) => ({
+        role: m.role,
+        content: [
+          {
+            type: m.role === "user" ? "input_text" : "output_text",
+            text: m.content,
+          },
+        ],
+      }));
 
-    // ✅ 4. Call OpenAI (no typing errors)
-    const stream = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: finalMessages,
-      temperature: 0.2,
-      stream: true,
-    });
+    input.push(...safeMessages);
 
-    const encoder = new TextEncoder();
+// 🌐 Use OpenAI SDK streaming (stable + no manual SSE parsing)
+const stream = await openai.responses.stream({
+  model: "gpt-4o",
+  input,
+  temperature: 0.2,
+  tools: [{ type: "web_search" }],
+});
 
-    return new Response(
-      new ReadableStream({
-        async start(controller) {
-          try {
-            for await (const chunk of stream) {
-              const delta = chunk.choices[0]?.delta?.content;
-              if (delta) {
-                controller.enqueue(encoder.encode(delta));
-              }
-            }
-          } catch (err) {
-            console.error("Streaming error:", err);
-          } finally {
-            controller.close();
+const encoder = new TextEncoder();
+
+return new Response(
+  new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const event of stream) {
+          if (event.type === "response.output_text.delta") {
+            controller.enqueue(
+              encoder.encode(event.delta || "")
+            );
           }
-        },
-      }),
-      {
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          "Cache-Control": "no-cache",
-        },
+        }
+      } catch (err) {
+        console.error("Streaming error:", err);
+      } finally {
+        controller.close();
       }
-    );
+    },
+  }),
+  {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-cache",
+    },
+  }
+);
   } catch (error) {
     console.error("Chat route error:", error);
     return NextResponse.json({ error: "Chat failed." }, { status: 500 });

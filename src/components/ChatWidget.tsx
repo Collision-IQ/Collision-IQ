@@ -42,23 +42,23 @@ function extractText(node: React.ReactNode): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(extractText).join("");
   if (React.isValidElement(node)) {
-  const el = node as React.ReactElement<{ children?: React.ReactNode }>;
-  return extractText(el.props.children);
+    const el = node as React.ReactElement<{ children?: React.ReactNode }>;
+    return extractText(el.props.children);
   }
   return "";
 }
+
+const INITIAL_MESSAGE: Message = {
+  role: "assistant",
+  content:
+    "Hi there — upload an estimate, OEM procedure, or photo and I’ll produce a structured repair analysis.",
+};
 
 export default function ChatWidget({
   onAttachmentChange,
   onAnalysisChange,
 }: ChatWidgetProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content:
-        "Hi there — upload an estimate, OEM procedure, or photo and I’ll produce a structured repair analysis.",
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -80,6 +80,12 @@ export default function ChatWidget({
   const shouldAutoScrollRef = useRef(true);
 
   const hasAnyAttachment = useMemo(() => attachments.length > 0, [attachments]);
+
+  // ✅ NEW: abort controller for in-flight streaming
+  const abortRef = useRef<AbortController | null>(null);
+
+  // ✅ NEW: "session id" to prevent stale streams updating state after End Chat
+  const sessionRef = useRef<number>(0);
 
   useEffect(() => {
     if (attachments.length >= 3) setAttachmentsOpen(false);
@@ -137,12 +143,51 @@ export default function ChatWidget({
     });
   }
 
+  // ✅ NEW: End Chat handler (hardened)
+  function handleEndChat() {
+    // Cancel any in-flight stream immediately
+    abortRef.current?.abort();
+    abortRef.current = null;
+
+    // Bump session id so stale async work can’t update state
+    sessionRef.current += 1;
+
+    // Reset UI state
+    setLoading(false);
+    setInput("");
+
+    setMessages([INITIAL_MESSAGE]);
+
+    // Clear attachments + derived context
+    setAttachments([]);
+    setDocuments([]);
+    setImages([]);
+    setAttachmentsOpen(true);
+
+    // Clear file inputs (so same file can be reselected)
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (cameraInputRef.current) cameraInputRef.current.value = "";
+
+    // Notify parent
+    onAttachmentChange?.(null);
+    onAnalysisChange?.("");
+
+    // Reset scroll behavior
+    shouldAutoScrollRef.current = true;
+    setTimeout(() => {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }, 50);
+  }
+
   async function handleSend() {
     if (loading) return;
     if (!input.trim() && attachments.length === 0) return;
 
     setLoading(true);
     shouldAutoScrollRef.current = true;
+
+    // Capture current session id for this request
+    const mySession = sessionRef.current;
 
     const messageToSend = input.trim() || buildAttachmentSummary(attachments);
 
@@ -155,10 +200,16 @@ export default function ChatWidget({
     setMessages(updatedMessages);
     setInput("");
 
+    // Abort any previous stream before starting a new one
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           messages: updatedMessages,
           documents,
@@ -181,6 +232,9 @@ export default function ChatWidget({
         const assistantIndex = updatedMessages.length;
 
         while (true) {
+          // If End Chat happened, stop updating state
+          if (sessionRef.current !== mySession) break;
+
           const { value, done } = await reader.read();
           if (done) break;
 
@@ -188,28 +242,50 @@ export default function ChatWidget({
           assistantText += chunk;
 
           setMessages((prev) => {
+            // Session check again inside state update
+            if (sessionRef.current !== mySession) return prev;
+
             const next = [...prev];
-            next[assistantIndex] = { role: "assistant", content: assistantText };
+            // Guard in case the index is out of date
+            if (assistantIndex >= 0 && assistantIndex < next.length) {
+              next[assistantIndex] = { role: "assistant", content: assistantText };
+            }
             return next;
           });
         }
 
-        onAnalysisChange?.(assistantText);
+        // Only report analysis if this session is still current
+        if (sessionRef.current === mySession) {
+          onAnalysisChange?.(assistantText);
+        }
       } else {
         const data = await response.json();
         const reply = (data.reply as string) || "No response received.";
 
-        setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
-        onAnalysisChange?.(reply);
+        if (sessionRef.current === mySession) {
+          setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+          onAnalysisChange?.(reply);
+        }
       }
-    } catch (err) {
+    } catch (err: any) {
+      // Abort is expected when Ending chat or sending a new message quickly
+      if (err?.name === "AbortError") {
+        return;
+      }
+
       console.error(err);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "Error connecting to AI." },
-      ]);
+
+      // Only update UI if this session is still current
+      if (sessionRef.current === mySession) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: "Error connecting to AI." },
+        ]);
+      }
     } finally {
-      setLoading(false);
+      if (sessionRef.current === mySession) {
+        setLoading(false);
+      }
     }
   }
 
@@ -363,7 +439,6 @@ export default function ChatWidget({
               >
                 {msg.role === "assistant" ? (
                   <div className="max-w-none text-white text-[15px] leading-[1.6]">
-
                     <ReactMarkdown
                       components={{
                         h2: ({ children }) => (
@@ -371,30 +446,16 @@ export default function ChatWidget({
                             {children}
                           </div>
                         ),
-
                         h3: ({ children }) => (
                           <div className="mt-4 mb-1 text-[#C65A2A] text-[14px] font-medium">
                             {children}
                           </div>
                         ),
-
                         p: ({ children }) => (
-                          <p className="mt-2 text-white/85 leading-[1.65]">
-                          {children}
-                        </p>
+                          <p className="mt-2 text-white/85 leading-[1.65]">{children}</p>
                         ),
-
-                        li: ({ children }) => (
-                          <li className="mt-1 text-white/80">
-                            {children}
-                          </li>
-                        ),
-
-                        strong: ({ children }) => (
-                          <span className="font-semibold">
-                            {children}
-                          </span>
-                        ),
+                        li: ({ children }) => <li className="mt-1 text-white/80">{children}</li>,
+                        strong: ({ children }) => <span className="font-semibold">{children}</span>,
                       }}
                     >
                       {msg.content}
@@ -483,6 +544,17 @@ export default function ChatWidget({
               >
                 {loading ? "..." : "Send"}
               </button>
+
+              <button
+                type="button"
+                onClick={handleEndChat}
+                className="rounded-xl border border-red-500/40 px-4 sm:px-5 py-3 text-red-400 hover:bg-red-500/10 transition font-semibold disabled:opacity-50"
+                disabled={loading && messages.length <= 1}
+                aria-label="End chat"
+                title="End chat"
+              >
+                End
+              </button>
             </div>
 
             {attachments.length > 0 && (
@@ -499,11 +571,7 @@ export default function ChatWidget({
                       {images.length > 0 ? `• Vision: ${images.length}` : ""}
                     </span>
                   </span>
-                  {attachmentsOpen ? (
-                    <ChevronDown size={16} />
-                  ) : (
-                    <ChevronUp size={16} />
-                  )}
+                  {attachmentsOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
                 </button>
 
                 {attachmentsOpen && (
