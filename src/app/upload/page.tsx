@@ -25,7 +25,9 @@ export default function UploadPage() {
     <div style={{ padding: 40 }}>
       <h1>Upload Docs</h1>
 
+      <label htmlFor="file-input">Select a file to upload:</label>
       <input
+        id="file-input"
         type="file"
         onChange={(e) => setFile(e.target.files?.[0] || null)}
       />
