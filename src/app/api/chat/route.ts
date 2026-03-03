@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { embedText } from "@/lib/rag/embed";
+import { searchSimilarChunks } from "@/lib/rag/search";
 
 export const runtime = "nodejs";
 
@@ -593,7 +595,41 @@ export async function POST(req: Request) {
 
     // Build context + metrics (unchanged behavior)
     const attachedContext = buildAttachedContext(documents);
+    
+let retrievalBlock = "";
 
+const lastUserMessage = incomingMessages
+  ?.slice()
+  .reverse()
+  .find((m) => m.role === "user" && typeof m.content === "string");
+
+if (lastUserMessage && typeof lastUserMessage.content === "string") {
+  const queryEmbedding = await embedText(lastUserMessage.content);
+
+  if (Array.isArray(queryEmbedding) && queryEmbedding.length > 0) {
+    const matches = await searchSimilarChunks(queryEmbedding, 5);
+
+    if (Array.isArray(matches) && matches.length > 0) {
+      const chunks = matches
+        .map((m: any, i: number) => {
+          const source = m?.drive_path ?? "Unknown";
+          const text = m?.text ?? "";
+          return `--- Retrieved Chunk ${i + 1} ---
+Source: ${source}
+${text}`;
+        })
+        .join("\n\n");
+
+      const rawRetrieval =
+        "[DRIVE KNOWLEDGE BASE CONTEXT]\n\n" +
+        "The following excerpts were retrieved from the Drive knowledge base.\n" +
+        "Treat them as authoritative internal documents.\n\n" +
+        chunks;
+
+      retrievalBlock = rawRetrieval.slice(0, 6000);
+    }
+  }
+}
     // Build Responses API "input" items
     // 1) system prompt
     // 2) optional: attachedContext as a user input_text (when no images)
@@ -609,22 +645,40 @@ export async function POST(req: Request) {
     const visionContent = buildVisionInput(attachedContext, images);
 
     // If no images, attach context as normal user message
-    if (!visionContent && attachedContext) {
-      input.push({
-        role: "user",
-        content: [{ type: "input_text", text: attachedContext }],
-      });
-    }
+    const combinedContext =
+      (attachedContext ? attachedContext + "\n\n" : "") +
+      (retrievalBlock ? retrievalBlock : "");
 
-    // If images exist, attach context + images as a single user turn
     if (visionContent) {
+      const visionWithRetrieval = [
+        {
+          type: "input_text",
+          text:
+            (combinedContext ? combinedContext + "\n\n" : "") +
+            `[VISION INPUT — DATA ONLY]
+    You have ${images.length} image(s).
+    Analyze visible damage, severity, likely repair operations, and safety risks`,
+        },
+        ...visionContent.slice(1),
+      ];
+
       input.push({
         role: "user",
-        content: visionContent,
+        content: visionWithRetrieval,
+      });
+    } else if (combinedContext) {
+      input.push({
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: combinedContext,
+          },
+        ],
       });
     }
 
-    // Keep your “safeMessages” filtering logic (user/assistant only, string content only)
+    // Keep your "safeMessages" filtering logic (user/assistant only, string content only)
     const safeMessages = incomingMessages
       .filter(
         (m) =>
@@ -644,41 +698,41 @@ export async function POST(req: Request) {
 
     input.push(...safeMessages);
 
-// 🌐 Use OpenAI SDK streaming (stable + no manual SSE parsing)
-const stream = await openai.responses.stream({
-  model: "gpt-4o",
-  input,
-  temperature: 0.2,
-  tools: [{ type: "web_search" }],
-});
+    // 🌐 Use OpenAI SDK streaming (stable + no manual SSE parsing)
+    const stream = await openai.responses.stream({
+      model: "gpt-4o",
+      input,
+      temperature: 0.2,
+      tools: [{ type: "web_search" }],
+    });
 
-const encoder = new TextEncoder();
+    const encoder = new TextEncoder();
 
-return new Response(
-  new ReadableStream({
-    async start(controller) {
-      try {
-        for await (const event of stream) {
-          if (event.type === "response.output_text.delta") {
-            controller.enqueue(
-              encoder.encode(event.delta || "")
-            );
+    return new Response(
+      new ReadableStream({
+        async start(controller) {
+          try {
+            for await (const event of stream) {
+              if (event.type === "response.output_text.delta") {
+                controller.enqueue(
+                  encoder.encode(event.delta || "")
+                );
+              }
+            }
+          } catch (err) {
+            console.error("Streaming error:", err);
+          } finally {
+            controller.close();
           }
-        }
-      } catch (err) {
-        console.error("Streaming error:", err);
-      } finally {
-        controller.close();
+        },
+      }),
+      {
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-cache",
+        },
       }
-    },
-  }),
-  {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache",
-    },
-  }
-);
+    );
   } catch (error) {
     console.error("Chat route error:", error);
     return NextResponse.json({ error: "Chat failed." }, { status: 500 });
