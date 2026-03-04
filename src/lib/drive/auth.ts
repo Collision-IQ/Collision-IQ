@@ -6,19 +6,25 @@ function requireEnv(name: string) {
   return v;
 }
 
-// Uses Service Account + Domain Wide Delegation impersonation
 export async function getImpersonatedAuth() {
-  const clientEmail = requireEnv("GOOGLE_SERVICE_ACCOUNT_EMAIL");
-  const privateKeyRaw = requireEnv("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY");
+  const b64 = requireEnv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64");
   const impersonationUser = requireEnv("GOOGLE_IMPERSONATION_USER");
 
-  // Handle Vercel-style newline escaping
-  const privateKey = privateKeyRaw.replace(/\\n/g, "\n");
+  // Decode JSON safely
+  const jsonStr = Buffer.from(b64, "base64").toString("utf8");
+  const creds = JSON.parse(jsonStr);
 
-  const scopes = [
-    "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/drive.readonly",
-  ];
+  const clientEmail = creds.client_email as string;
+  const privateKeyRaw = creds.private_key as string;
+
+  if (!clientEmail || !privateKeyRaw) {
+    throw new Error("Service account JSON missing client_email or private_key");
+  }
+
+  // Normalize newlines regardless of platform
+  const privateKey = privateKeyRaw.replace(/\r/g, "");
+
+  const scopes = ["https://www.googleapis.com/auth/drive"];
 
   const jwt = new google.auth.JWT({
     email: clientEmail,
