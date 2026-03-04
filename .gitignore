@@ -75,3 +75,4 @@ service-account.json
 # ===============================
 coverage/
 *.zip
+tsconfig.tsbuildinfo
