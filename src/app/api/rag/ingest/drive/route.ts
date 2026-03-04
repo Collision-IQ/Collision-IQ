@@ -33,6 +33,11 @@ export async function POST() {
 
     if (!extracted.ok) {
       skipped++;
+      console.log("Skipped:", {
+        name: f.name,
+        mimeType: f.mimeType,
+        reason: extracted.reason,
+      });
       continue;
     }
 
