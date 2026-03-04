@@ -77,6 +77,13 @@ export default function ChatShell({ title, subtitle, logo, children }: Props) {
                 ← Home
               </Link>
 
+              <Link
+                href="/procedures"
+                className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 hover:bg-white/10"
+              >
+                OE Procedures &amp; Statements
+              </Link>
+
               <a
                 href="/upload"
                 target="_blank"

@@ -138,7 +138,17 @@ export default function Home() {
       <section className="mx-auto max-w-6xl px-4 pb-20">
         <h2 className="text-2xl font-semibold">Next steps</h2>
 
-        <div className="mt-5 grid gap-4 md:grid-cols-3">
+        <div className="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <Link
+            href="/procedures"
+            className="rounded-2xl border border-[color:var(--accent)]/40 bg-[color:var(--card)] p-5 transition hover:bg-white/5"
+          >
+            <div className="font-semibold">OE Procedures &amp; Statements</div>
+            <div className="mt-2 text-sm text-[color:var(--muted)]">
+              Search manufacturer repair procedures and OEM position statements by vehicle.
+            </div>
+          </Link>
+
           <a
             href="/chatbot"
             target="_blank"
