@@ -33,8 +33,9 @@ export async function POST() {
 
     if (!extracted.ok) {
       skipped++;
-      console.log("Skipped:", {
+      console.log("Skipped file:", {
         name: f.name,
+        id: f.id,
         mimeType: f.mimeType,
         reason: extracted.reason,
       });
