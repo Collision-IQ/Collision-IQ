@@ -1,4 +1,8 @@
 import { prisma } from "@/lib/prisma";
+import { keywordSearch } from "./keywordSearch";
+import OpenAI from "openai";
+
+const openai = new OpenAI();
 
 type ChunkMatch = {
   text: string;
@@ -8,7 +12,6 @@ type ChunkMatch = {
 
 /**
  * Converts embedding array into pgvector literal: '[1,2,3]'
- * Only numbers are allowed.
  */
 function toVectorLiteral(embedding: number[]) {
   if (!Array.isArray(embedding) || embedding.length === 0) return null;
@@ -24,11 +27,10 @@ export async function searchSimilarChunks(
   embedding: number[],
   limit = 5
 ): Promise<ChunkMatch[]> {
+
   const vec = toVectorLiteral(embedding);
   if (!vec) return [];
 
-  // NOTE: Prisma doesn't natively parameterize pgvector literals well,
-  // so we keep the vector string fully numeric + server-generated.
   const rows = (await prisma.$queryRawUnsafe(`
     SELECT
       text,
@@ -41,4 +43,34 @@ export async function searchSimilarChunks(
   `)) as ChunkMatch[];
 
   return rows ?? [];
+}
+
+export async function hybridSearch(query: string) {
+
+  const embeddingResponse = await openai.embeddings.create({
+    model: "text-embedding-3-small",
+    input: query
+  });
+
+  const embedding = embeddingResponse.data[0].embedding;
+
+  const vectorResults = await searchSimilarChunks(embedding, 5);
+  const keywordResults = await keywordSearch(query, 5);
+
+  const combined: ChunkMatch[] = [
+    ...vectorResults,
+    ...keywordResults
+  ];
+
+  const unique = new Map<string, ChunkMatch>();
+
+  for (const r of combined) {
+    unique.set(r.text, r);
+  }
+
+  const candidates = [...unique.values()].slice(0, 10);
+
+  const { rerankChunks } = await import("./rerank");
+
+  return await rerankChunks(query, candidates, 3);
 }

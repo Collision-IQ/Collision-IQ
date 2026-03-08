@@ -8,6 +8,13 @@ export async function upsertChunks(params: {
 }) {
   const { driveFileId, drivePath, modifiedTime, chunks } = params;
 
+  // Remove stale chunks from previous versions of this file
+  await prisma.$executeRawUnsafe(`
+    DELETE FROM document_chunks
+    WHERE drive_file_id = '${driveFileId}'
+    AND id NOT LIKE '${driveFileId}:%:${modifiedTime}'
+  `);
+
   for (const c of chunks) {
     const id = `${driveFileId}:${c.chunkIndex}:${modifiedTime}`;
 

@@ -33,6 +33,8 @@ export async function getImpersonatedAuth() {
     subject: impersonationUser,
   });
 
-  await jwt.authorize();
-  return jwt;
+await jwt.authorize();
+return jwt;
 }
+
+export const getDriveAuth = getImpersonatedAuth;

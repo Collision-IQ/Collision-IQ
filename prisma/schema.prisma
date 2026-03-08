@@ -12,10 +12,10 @@ model SyncJob {
   id           String   @id @default(cuid())
 
   type         String   // BACKFILL | WEBHOOK
-  status       String   @default("pending") // pending | processing | complete | failed
+  status       String   @default("pending")
 
   stage        String?  // LIST | MIRROR_FOLDERS | MIRROR_FILES
-  cursor       Json?    // pagination state
+  cursor       Json?
 
   egnytePath   String?
   egnyteId     String?
@@ -40,4 +40,16 @@ model FileMap {
   tombstoned    Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+}
+
+model FileMirrorMap {
+  egnytePath   String   @id
+  egnyteFileId String?
+  driveFileId  String
+  drivePath    String?
+  modifiedTime String?
+  contentHash  String?
+  lastSyncedAt DateTime @default(now())
+
+  @@index([driveFileId])
 }
