@@ -1,22 +1,27 @@
 import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
-import { embedText } from "@/lib/rag/embed";
-import { chunkText } from "@/lib/rag/chunk";
+import { embedTexts } from "@/lib/rag/embed";
 import { upsertChunks } from "@/lib/rag/upsert";
 import { listDriveFiles } from "@/lib/drive/list";
 import { extractDriveText } from "@/lib/drive/extract";
 import { getImpersonatedAuth } from "@/lib/drive/auth";
 import { google } from "googleapis";
 
+import { procedureChunk } from "@/lib/rag/procedureChunk";
+import { extractMetadata } from "@/lib/rag/metadata";
+
 const DRIVE_ID = process.env.GOOGLE_SHARED_DRIVE_ID!;
 
 export async function POST() {
   if (!DRIVE_ID) {
-    return NextResponse.json({ error: "Missing GOOGLE_SHARED_DRIVE_ID" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Missing GOOGLE_SHARED_DRIVE_ID" },
+      { status: 500 }
+    );
   }
 
-  const auth = await getImpersonatedAuth(); // must return google auth client
+  const auth = await getImpersonatedAuth();
   const drive = google.drive({ version: "v3", auth });
 
   const files = await listDriveFiles(drive, DRIVE_ID);
@@ -25,7 +30,10 @@ export async function POST() {
   let skipped = 0;
 
   for (const f of files) {
-    if (!f.id) continue;
+    if (!f.id) {
+      skipped++;
+      continue;
+    }
 
     const extracted = await extractDriveText(drive, f);
 
@@ -35,25 +43,69 @@ export async function POST() {
     }
 
     const text = extracted.text;
-    const chunks = chunkText(text);
 
-    // embed + upsert
-    const embeddedChunks = [];
-    for (let i = 0; i < chunks.length; i++) {
-      const emb = await embedText(chunks[i]);
-      if (!emb.length) continue;
-      embeddedChunks.push({ chunkIndex: i, text: chunks[i], embedding: emb });
+    if (!text || !text.trim()) {
+      skipped++;
+      continue;
+    }
+
+    const rawChunks = procedureChunk(text);
+
+    if (!rawChunks.length) {
+      skipped++;
+      continue;
+    }
+
+    const embeddings = await embedTexts(rawChunks);
+
+    const chunks = rawChunks
+      .map((chunkText, i) => {
+        const embedding = embeddings[i];
+
+        if (!embedding?.length) return null;
+
+        const metadata = extractMetadata({
+          text: chunkText,
+          drivePath: f.name ?? null
+        });
+
+        return {
+          chunkIndex: i,
+          text: chunkText,
+          embedding,
+          ...metadata
+        };
+      })
+      .filter(
+        (c): c is {
+          chunkIndex: number
+          text: string
+          embedding: number[]
+          oem: string | null
+          system: string | null
+          component: string | null
+          procedure: string | null
+        } => Boolean(c)
+      );
+
+    if (!chunks.length) {
+      skipped++;
+      continue;
     }
 
     await upsertChunks({
       driveFileId: f.id,
-      drivePath: f.name || "",
+      drivePath: (f as any).path || f.name || "",
       modifiedTime: f.modifiedTime || "unknown",
-      chunks: embeddedChunks,
+      chunks
     });
 
     indexed++;
   }
 
-  return NextResponse.json({ indexed, skipped, total: files.length });
+  return NextResponse.json({
+    indexed,
+    skipped,
+    total: files.length
+  });
 }

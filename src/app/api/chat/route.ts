@@ -25,6 +25,9 @@ const openai = new OpenAI({
  *
  * ✅ UPDATED: Internet access enabled via Responses API web_search tool
  * ✅ UPDATED: Streaming preserved as plain text chunks (frontend-safe)
+ * ✅ UPDATED: LLM-first orchestration preserved
+ * ✅ UPDATED: Repair trigger engine added
+ * ✅ UPDATED: Drive retrieval softened and made conditional
  */
 
 // ==============================
@@ -190,6 +193,21 @@ When numeric values are available, use them.
 When referencing studies, state the known empirical finding.
 Even if totals are missing or unreliable, continue qualitative analysis.
 If numeric totals cannot be extracted reliably, say so briefly and move on to substantive scope/operation differences.
+
+=======================================
+DOCUMENT PRIORITY RULE
+=======================================
+
+When internal documents or uploaded document text are provided in the conversation context, treat them as the primary evidence source.
+
+If document text directly answers the user's question:
+- quote or clearly summarize the relevant document content
+- reference the document section or topic explicitly
+- prefer the document over general knowledge
+
+If document text conflicts with general knowledge, prioritize the document.
+
+If document text is incomplete, combine document evidence with professional industry knowledge.
 
 =======================================
 ANALYSIS MODE: OUTPUT SHAPE (GUIDED, NOT RIGID)
@@ -407,7 +425,7 @@ export function extractTotalsFromEstimate(rawText: string): ExtractedTotals {
 
     const values = moneyMatches
       .map((m) => parseMoney(m[1]))
-      .filter((v): v is number => typeof v === "number" && v > 200); // ignore small items
+      .filter((v): v is number => typeof v === "number" && v > 200);
 
     if (values.length) {
       totalCost = Math.max(...values);
@@ -420,7 +438,6 @@ export function extractTotalsFromEstimate(rawText: string): ExtractedTotals {
   // -----------------------------
   let confidence: ExtractedTotals["confidence"] = "Low";
 
-  // High only when total is label-derived (not heuristic)
   if (totalCost !== null && totalCostLabel !== "Heuristic Footer Total") {
     confidence = totalLaborHours !== null ? "High" : "Medium";
   } else if (totalCost !== null && totalCostLabel === "Heuristic Footer Total") {
@@ -546,6 +563,74 @@ ${safe}
 }
 
 // ==============================
+// REPAIR TRIGGER ENGINE
+// ==============================
+
+function detectRepairTriggers(text: string): string[] {
+  const triggers: string[] = [];
+  const lower = (text || "").toLowerCase();
+
+  const rules = [
+    {
+      keywords: ["bumper", "impact bar", "radar bracket", "grille"],
+      procedure: "Radar / forward camera calibration may be required",
+    },
+    {
+      keywords: ["windshield", "camera bracket", "mirror bracket"],
+      procedure: "Forward facing camera calibration required",
+    },
+    {
+      keywords: ["steering wheel", "steering column", "steering joint"],
+      procedure: "Steering angle sensor neutral position reset",
+    },
+    {
+      keywords: ["alignment", "toe", "four wheel alignment", "front toe"],
+      procedure: "Steering angle sensor recalibration",
+    },
+    {
+      keywords: ["passenger seat", "seat frame", "seat belt tensioner", "sws", "ods"],
+      procedure: "Seat weight sensor calibration / output check",
+    },
+    {
+      keywords: ["battery disconnect", "battery d&r", "battery r&i", "battery remove", "battery replace"],
+      procedure: "Module resets and ADAS system verification",
+    },
+    {
+      keywords: ["upper rail", "sidemember", "frame pull", "radiator support", "tie bar", "core support"],
+      procedure: "Structural geometry change may require ADAS aiming / calibration verification",
+    },
+  ];
+
+  for (const rule of rules) {
+    if (rule.keywords.some((k) => lower.includes(k))) {
+      triggers.push(rule.procedure);
+    }
+  }
+
+  return [...new Set(triggers)];
+}
+
+function buildTriggerBlock(documents: UploadedDocument[]) {
+  if (!Array.isArray(documents) || documents.length === 0) return "";
+
+  const triggerProcedures = documents
+    .map((d) => detectRepairTriggers(d.text || ""))
+    .flat();
+
+  const uniqueTriggers = [...new Set(triggerProcedures)];
+
+  if (uniqueTriggers.length === 0) return "";
+
+  return `
+[SYSTEM DETECTED REPAIR TRIGGERS]
+
+Based on detected repair operations in the attached document text, the following procedures may be required:
+
+${uniqueTriggers.map((p) => `- ${p}`).join("\n")}
+`.trim();
+}
+
+// ==============================
 // VISION MESSAGE BUILDER (Responses API compatible)
 // ==============================
 
@@ -569,7 +654,6 @@ Analyze visible damage, severity, likely repair operations, and safety risks (AD
 If photos are unclear, state which angles/details are needed.`,
     },
     ...safeImages.map((img) => ({
-      // Responses API image item
       type: "input_image" as const,
       image_url: img.dataUrl,
     })),
@@ -584,7 +668,6 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    // Incoming conversation messages (your widget sends strings)
     const incomingMessages = (body.messages || []) as Array<{
       role: string;
       content: any;
@@ -593,10 +676,36 @@ export async function POST(req: Request) {
     const documents = (body.documents || []) as UploadedDocument[];
     const images = (body.images || []) as VisionImage[];
 
-    // Build context + metrics (unchanged behavior)
     const attachedContext = buildAttachedContext(documents);
-    
+    const triggerBlock = buildTriggerBlock(documents);
+
+    // ========================================
+    // DOCUMENT PRIORITY RULE
+    // ========================================
+
+    let documentPriorityBlock = "";
+
+    if (documents.length > 0) {
+      documentPriorityBlock = `
+    [DOCUMENT PRIORITY RULE]
+
+    Internal or uploaded documents are present.
+
+    If document text directly answers the user's question:
+    • prioritize the document over general knowledge
+    • quote or summarize the document content
+    • reference the specific system, procedure, or section
+
+    Do not provide generic summaries when document procedures exist.
+    `.trim();
+    }
+
+    // ------------------------------
+// Retrieve Drive context
+// ------------------------------
+
 let retrievalBlock = "";
+let matches: any[] = [];
 
 const lastUserMessage = incomingMessages
   ?.slice()
@@ -604,81 +713,96 @@ const lastUserMessage = incomingMessages
   .find((m) => m.role === "user" && typeof m.content === "string");
 
 if (lastUserMessage && typeof lastUserMessage.content === "string") {
-  const queryEmbedding = await embedText(lastUserMessage.content);
+
+  const vehicleHint = lastUserMessage.content;
+
+  const expandedQuery = `
+${vehicleHint}
+
+BMW repair procedure
+vehicle preparation
+disconnect battery
+sleep mode
+safety procedure
+bumper removal
+bumper installation
+ADAS sensor removal
+OEM repair instructions
+vehicle repair procedures
+installation procedure
+removal procedure
+disconnect battery
+vehicle preparation
+OEM repair instructions
+ADAS procedures
+radar calibration
+sensor aiming procedure
+OEM calibration
+vehicle specific procedure
+`;
+
+  const queryEmbedding = await embedText(expandedQuery);
 
   if (Array.isArray(queryEmbedding) && queryEmbedding.length > 0) {
-    const matches = await searchSimilarChunks(queryEmbedding, 5);
 
-    if (Array.isArray(matches) && matches.length > 0) {
-      const chunks = matches
-        .map((m: any, i: number) => {
-          const source = m?.drive_path ?? "Unknown";
-          const text = m?.text ?? "";
-          return `--- Retrieved Chunk ${i + 1} ---
-Source: ${source}
-${text}`;
-        })
-        .join("\n\n");
+    const lower = lastUserMessage.content.toLowerCase();
 
-      const rawRetrieval =
-        "[DRIVE KNOWLEDGE BASE CONTEXT]\n\n" +
-        "The following excerpts were retrieved from the Drive knowledge base.\n" +
-        "Treat them as authoritative internal documents.\n\n" +
-        chunks;
+    let oem: string | null = null;
 
-      retrievalBlock = rawRetrieval.slice(0, 6000);
-    }
+    if (lower.includes("honda")) oem = "Honda";
+    if (lower.includes("toyota")) oem = "Toyota";
+    if (lower.includes("ford")) oem = "Ford";
+    if (lower.includes("subaru")) oem = "Subaru";
+    if (lower.includes("bmw")) oem = "BMW";
+
+    matches = await searchSimilarChunks(queryEmbedding, 5, oem);
+
+    console.log("RAG MATCHES:", matches.length);
   }
 }
-    // Build Responses API "input" items
-    // 1) system prompt
-    // 2) optional: attachedContext as a user input_text (when no images)
-    // 3) optional: vision input (text + images) as user
-    // 4) conversation history
-    const input: any[] = [
-      {
-        role: "system",
-        content: [{ type: "input_text", text: SYSTEM_PROMPT }],
-      },
-    ];
 
-    const visionContent = buildVisionInput(attachedContext, images);
+if (Array.isArray(matches) && matches.length > 0) {
 
-    // If no images, attach context as normal user message
+  const chunks = matches
+    .map((m: any, i: number) => {
+
+      const source = m?.drive_path ?? "Unknown";
+      const text = m?.text ?? "";
+
+      return `--- Retrieved Chunk ${i + 1} ---
+Source: ${source}
+${text}`;
+
+    })
+    .join("\n\n");
+
+  retrievalBlock = `
+[DRIVE KNOWLEDGE BASE CONTEXT]
+
+These excerpts were retrieved from the internal Drive knowledge base.
+
+Use them as supporting reference material when relevant.
+Do NOT treat them as the only source of truth.
+If an excerpt directly addresses the user's question, use it specifically.
+If the excerpts are incomplete, rely on your own professional collision repair expertise.
+
+${chunks}
+`.slice(0, 6000);
+
+}
+
     const combinedContext =
+      (documentPriorityBlock ? documentPriorityBlock + "\n\n" : "") +
+      (triggerBlock ? triggerBlock + "\n\n" : "") +
       (attachedContext ? attachedContext + "\n\n" : "") +
       (retrievalBlock ? retrievalBlock : "");
 
-    if (visionContent) {
-      const visionWithRetrieval = [
-        {
-          type: "input_text",
-          text:
-            (combinedContext ? combinedContext + "\n\n" : "") +
-            `[VISION INPUT — DATA ONLY]
-    You have ${images.length} image(s).
-    Analyze visible damage, severity, likely repair operations, and safety risks`,
-        },
-        ...visionContent.slice(1),
-      ];
+    const visionContent = buildVisionInput(attachedContext, images);
 
-      input.push({
-        role: "user",
-        content: visionWithRetrieval,
-      });
-    } else if (combinedContext) {
-      input.push({
-        role: "user",
-        content: [
-          {
-            type: "input_text",
-            text: combinedContext,
-          },
-        ],
-      });
-    }
+    // ------------------------------
+    // Build conversation history
+    // ------------------------------
 
-    // Keep your "safeMessages" filtering logic (user/assistant only, string content only)
     const safeMessages = incomingMessages
       .filter(
         (m) =>
@@ -696,9 +820,50 @@ ${text}`;
         ],
       }));
 
-    input.push(...safeMessages);
+    const input: any[] = [
+      {
+        role: "system",
+        content: [{ type: "input_text", text: SYSTEM_PROMPT }],
+      },
+      ...safeMessages,
+    ];
 
-    // 🌐 Use OpenAI SDK streaming (stable + no manual SSE parsing)
+    // Add supporting context AFTER the actual conversation
+    if (combinedContext && !visionContent) {
+      input.push({
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text: combinedContext,
+          },
+        ],
+      });
+    }
+
+    if (visionContent) {
+      const visionWithContext = [
+        {
+          type: "input_text",
+          text:
+            (combinedContext ? combinedContext + "\n\n" : "") +
+            `[VISION INPUT — DATA ONLY]
+You have ${images.length} image(s).
+Analyze visible damage, severity, likely repair operations, and safety risks.`,
+        },
+        ...visionContent.slice(1),
+      ];
+
+      input.push({
+        role: "system",
+        content: visionWithContext,
+      });
+    }
+
+    // ------------------------------
+    // Call OpenAI with streaming
+    // ------------------------------
+
     const stream = await openai.responses.stream({
       model: "gpt-4o",
       input,
@@ -714,9 +879,7 @@ ${text}`;
           try {
             for await (const event of stream) {
               if (event.type === "response.output_text.delta") {
-                controller.enqueue(
-                  encoder.encode(event.delta || "")
-                );
+                controller.enqueue(encoder.encode(event.delta || ""));
               }
             }
           } catch (err) {
@@ -735,6 +898,10 @@ ${text}`;
     );
   } catch (error) {
     console.error("Chat route error:", error);
-    return NextResponse.json({ error: "Chat failed." }, { status: 500 });
+
+    return NextResponse.json(
+      { error: "Chat failed." },
+      { status: 500 }
+    );
   }
 }
