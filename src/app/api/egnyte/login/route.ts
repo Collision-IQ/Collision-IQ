@@ -8,5 +8,5 @@ export async function GET() {
     redirectUri
   )}`
 
-  return NextResponse.redirect(url)
+  return NextResponse.redirect(new URL(url))
 }
