@@ -1,77 +1,89 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import Image from "next/image";
 import ChatWidget from "@/components/ChatWidget";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 export default function ChatbotPage() {
-  const router = useRouter();
   const isMobile = useIsMobile();
-
-  const [railOpen, setRailOpen] = useState(true);
+  const [railOpen, setRailOpen] = useState(false);
   const [attachment, setAttachment] = useState<string | null>(null);
   const [analysisText, setAnalysisText] = useState<string>("");
+
+  // Keep rail state predictable when switching viewport modes
+  useEffect(() => {
+    if (isMobile === null) return;
+    setRailOpen(false);
+  }, [isMobile]);
+
+  // Prevent background scroll when mobile rail is open
+  useEffect(() => {
+    if (!isMobile) return;
+    document.body.style.overflow = railOpen ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [isMobile, railOpen]);
 
   if (isMobile === null) return null;
 
   return (
-    <div
-      className="
-        h-screen flex flex-col text-white relative
-        bg-black
-        bg-[radial-gradient(circle_at_85%_15%,rgba(198,90,42,0.06),transparent_60%)]
-      "
-    >
-      {/* BACK */}
-      <button
-        onClick={() => router.push("/")}
-        className="absolute top-6 left-6 text-sm text-white/60 hover:text-[#C65A2A] transition"
-      >
-        ← Back
-      </button>
+    <div className="min-h-screen bg-black text-white">
+      <div className="mx-auto flex min-h-screen w-full max-w-[1400px] flex-col px-4 py-6 sm:px-6 lg:px-8">
+        <header className="mb-6 space-y-3">
+          <Image
+            src="/brand/logos/Logo-grey.png"
+            alt="Collision Academy"
+            width={160}
+            height={40}
+            className="opacity-90"
+            priority
+          />
+          <div className="space-y-1">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              Collision-IQ
+            </h1>
+            <p className="max-w-3xl text-sm text-white/70">
+              Upload an estimate, OEM procedure, or photo — get structured
+              analysis instantly.
+            </p>
+          </div>
+        </header>
 
-      {/* HEADER STRIP */}
-      <div className="pt-24 pb-8 text-center">
-        <div className="text-xs tracking-[0.35em] text-white/50 uppercase">
-          Collision IQ
+        {/* Main Content Area */}
+        <div className="relative mx-auto w-full max-w-[1000px] flex-1 min-h-0">
+          <ChatWidget
+            onAttachmentChange={setAttachment}
+            onAnalysisChange={setAnalysisText}
+          />
         </div>
-        <div className="text-[10px] tracking-[0.3em] text-white/30 uppercase mt-2">
-          AI Repair Analysis Workstation
-        </div>
-      </div>
 
-      {/* MAIN CHAT SURFACE */}
-      <div className="relative mx-auto w-full max-w-[1000px] px-6 flex-1 min-h-0">
-        <ChatWidget
-          onAttachmentChange={setAttachment}
-          onAnalysisChange={setAnalysisText}
-        />
-      </div>
-
-      {/* DESKTOP RAIL OVERLAY */}
-      {!isMobile && (
-        <>
+        {/* Desktop Rail Toggle (always reachable) */}
+        {!isMobile && (
           <button
-            onClick={() => setRailOpen(!railOpen)}
-            className="
-              fixed top-24 right-6 z-50
+            onClick={() => setRailOpen((v) => !v)}
+            aria-label={railOpen ? "Close analysis panel" : "Open analysis panel"}
+            className={`
+              fixed top-24 z-[60]
               bg-black/60 border border-white/10
-              rounded-full p-3
-              hover:bg-[#C65A2A]/20
-              transition
-            "
+              p-2 rounded-l-md text-white/60 hover:text-white
+              transition-all duration-300
+              ${railOpen ? "right-[380px]" : "right-0"}
+            `}
           >
-            {railOpen ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+            {railOpen ? "→" : "←"}
           </button>
+        )}
 
+        {/* Desktop Rail Overlay */}
+        {!isMobile && (
           <div
             className={`
               fixed top-0 right-0 h-full w-[380px]
               bg-black/80 backdrop-blur-2xl
               border-l border-white/10
-              transition-transform duration-300
+              transition-transform duration-300 z-50
               ${railOpen ? "translate-x-0" : "translate-x-full"}
             `}
           >
@@ -80,28 +92,41 @@ export default function ChatbotPage() {
               analysisText={analysisText}
             />
           </div>
-        </>
-      )}
+        )}
 
-      {/* MOBILE RAIL */}
-      {isMobile && railOpen && (
-        <div
-          className="
-            fixed inset-0 z-50
-            bg-black/70 backdrop-blur-xl
-          "
-        >
-          <RailContent
-            attachment={attachment}
-            analysisText={analysisText}
-          />
-        </div>
-      )}
+        {/* Mobile open button */}
+        {isMobile && !railOpen && (
+          <button
+            onClick={() => setRailOpen(true)}
+            aria-label="Open analysis panel"
+            className="fixed bottom-6 right-6 z-50 rounded-full bg-black/70 border border-white/20 px-4 py-2 text-white/90"
+          >
+            Insights
+          </button>
+        )}
+
+        {/* Mobile Rail Overlay */}
+        {isMobile && railOpen && (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xl">
+            <button
+              onClick={() => setRailOpen(false)}
+              className="absolute top-4 right-4 text-white text-xl"
+              aria-label="Close analysis panel"
+            >
+              ✕
+            </button>
+            <RailContent
+              attachment={attachment}
+              analysisText={analysisText}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-/* RAIL CONTENT */
+/* RAIL CONTENT - Kept from original to preserve analysis logic */
 
 function RailContent({
   attachment,

@@ -5,8 +5,10 @@ import { useMemo, useState } from "react";
 
 type Props = {
   title?: string;
+  subtitle?: string;
+  logo?: ReactNode;
   left?: ReactNode;
-  center: ReactNode;
+  center?: ReactNode;
   right?: ReactNode;
 };
 
