@@ -7,7 +7,7 @@ export default function ServicesPage() {
         Collision Academy Services
       </h1>
 
-      <p className="mt-3 text-sm text-[color:var(--muted)]">
+      <p className="mt-3 leading-[1.65] text-white/85">
         Services are securely handled through our checkout partner.
       </p>
 
@@ -16,9 +16,9 @@ export default function ServicesPage() {
           href="https://www.collision.academy/s/shop"
           target="_blank"
           rel="noopener noreferrer"
-          className="rounded-xl bg-[color:var(--accent)] px-6 py-3 font-semibold text-black hover:opacity-90"
+          className="inline-flex items-center justify-center rounded-xl bg-orange-500 px-6 py-3 text-black font-semibold hover:bg-orange-600 transition"
         >
-          Continue to Services
+          View Services
         </a>
 
         <Link

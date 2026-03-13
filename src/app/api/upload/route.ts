@@ -1,35 +1,42 @@
-import { NextResponse } from 'next/server';
-import { parseForm } from '@/lib/parseForm';
-import { extractTextFromFile } from '@/lib/extractText';
+import { NextResponse } from "next/server";
+
+export const runtime = "nodejs";
+
+async function fileToText(file: File): Promise<string> {
+  const type = file.type || "";
+
+  if (type.includes("text")) {
+    return await file.text();
+  }
+
+  // Placeholder for PDFs/images
+  return `[[No extractor configured for ${type || "unknown type"}: ${file.name}]]`;
+}
 
 export async function POST(req: Request) {
   try {
-    const { files } = await parseForm(req);
-    const uploaded = Array.isArray(files) ? files : [files];
+    const formData = await req.formData();
 
-    const documents = [];
+    const file = formData.get("file");
 
-    for (const file of uploaded) {
-      if (!file.mimetype) {
-        throw new Error(`Missing mimetype for file: ${file.originalFilename}`);
-      }
-
-      const text = await extractTextFromFile(
-        file.filepath,
-        file.mimetype
+    if (!file || !(file instanceof File)) {
+      return NextResponse.json(
+        { error: "No file received" },
+        { status: 400 }
       );
-
-      documents.push({
-        filename: file.originalFilename,
-        type: file.mimetype,
-        text,
-      });
     }
 
-    return NextResponse.json({ success: true, documents });
-  } catch (err: any) {
+    const text = await fileToText(file);
+
+    return NextResponse.json({
+      filename: file.name,
+      type: file.type,
+      text,
+    });
+  } catch (error) {
+    console.error("UPLOAD ERROR:", error);
     return NextResponse.json(
-      { success: false, error: err.message },
+      { error: "Upload failed" },
       { status: 500 }
     );
   }

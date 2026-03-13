@@ -75,3 +75,5 @@ service-account.json
 # ===============================
 coverage/
 *.zip
+
+/generated/prisma

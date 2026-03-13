@@ -1,0 +1,54 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model SyncJob {
+  id           String   @id @default(cuid())
+
+  type         String   // BACKFILL | WEBHOOK
+  status       String   @default("pending")
+
+  stage        String?  // LIST | MIRROR_FOLDERS | MIRROR_FILES
+  cursor       Json?
+
+  egnytePath   String?
+  egnyteId     String?
+
+  attempts     Int      @default(0)
+  lockedAt     DateTime?
+  lockedBy     String?
+  errorMessage String?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model FileMap {
+  id            String   @id @default(cuid())
+  egnyteId      String   @unique
+  egnytePath    String
+  driveFileId   String
+  driveParentId String?
+  lastModified  DateTime?
+  contentHash   String?
+  tombstoned    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model FileMirrorMap {
+  egnytePath   String   @id
+  egnyteFileId String?
+  driveFileId  String
+  drivePath    String?
+  modifiedTime String?
+  contentHash  String?
+  lastSyncedAt DateTime @default(now())
+
+  @@index([driveFileId])
+}

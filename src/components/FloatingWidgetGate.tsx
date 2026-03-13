@@ -1,36 +1,61 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from "framer-motion";
 
-export default function FloatingWidgetGate() {
-  const [open, setOpen] = useState(false);
+interface FloatingWidgetGateProps {
+  open: boolean;
+  setOpen: (value: boolean) => void;
+  onClose: () => void;
+}
 
+export default function FloatingWidgetGate({
+  open,
+  setOpen,
+  onClose,
+}: FloatingWidgetGateProps) {
   return (
     <>
-      {/* Floating launcher button */}
-      <button
-        onClick={() => setOpen(!open)}
-        className="fixed bottom-6 right-6 z-40 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-full shadow-lg"
-      >
-        {open ? 'Close Chat' : 'Chat'}
-      </button>
+      {/* Bubble Button (Always Visible) */}
+      {!open && (
+        <button
+          onClick={() => setOpen(true)}
+          className="fixed bottom-6 left-6 z-50 h-14 w-14 rounded-full bg-[#C65A2A] text-black font-bold shadow-2xl hover:scale-105 transition-all"
+        >
+          IQ
+        </button>
+      )}
 
-      {/* Chat Widget */}
+      {/* Panel */}
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            initial={{ opacity: 0, y: 40, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 50, scale: 0.95 }}
-            transition={{ duration: 0.3, ease: 'easeOut' }}
-            className="fixed bottom-20 right-6 z-50 w-full max-w-md h-[600px] rounded-xl shadow-2xl bg-black text-white border border-white/10 overflow-hidden flex flex-col"
+            exit={{ opacity: 0, y: 40, scale: 0.95 }}
+            transition={{ duration: 0.2 }}
+            className="fixed bottom-6 left-6 z-50 w-[380px] max-w-[90vw] rounded-3xl border border-white/10 bg-black/95 shadow-2xl"
           >
-            <iframe
-              src="/widget"
-              title="Chat"
-              className="w-full h-full border-none"
-            />
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+              <div className="text-sm font-semibold text-white">
+                Collision IQ
+              </div>
+              <button
+                onClick={onClose}
+                className="text-white/60 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body (iframe or chat mount) */}
+            <div className="h-[500px] w-full overflow-hidden rounded-b-3xl">
+              <iframe
+                src="/chatbot"
+                title="Collision IQ"
+                className="h-full w-full border-none"
+              />
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

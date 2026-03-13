@@ -1,246 +1,142 @@
-import React from "react";
-import Link from "next/link";
+"use client";
+
+import type { ReactNode } from "react";
+import { useMemo, useState } from "react";
 
 type Props = {
-  title: string;
+  title?: string;
   subtitle?: string;
-  logo?: React.ReactNode;
-  children: React.ReactNode;
+  logo?: ReactNode;
+  left?: ReactNode;
+  center?: ReactNode;
+  right?: ReactNode;
 };
 
-function Chip({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
-      {children}
-    </span>
-  );
-}
-
-function ActionButton({
+function Drawer({
+  open,
+  onClose,
+  side,
+  title,
   children,
-  variant = "ghost",
 }: {
-  children: React.ReactNode;
-  variant?: "ghost" | "solid";
+  open: boolean;
+  onClose: () => void;
+  side: "left" | "right";
+  title: string;
+  children: ReactNode;
 }) {
-  const base =
-    "rounded-lg px-3 py-2 text-sm font-semibold transition whitespace-nowrap";
-  if (variant === "solid") {
-    return (
-      <button className={`${base} bg-[color:var(--accent)] text-black hover:opacity-90`}>
-        {children}
-      </button>
-    );
-  }
+  if (!open) return null;
+
   return (
-    <button className={`${base} border border-white/10 bg-white/5 text-white/80 hover:bg-white/10`}>
-      {children}
-    </button>
+    <div className="fixed inset-0 z-[80] lg:hidden">
+      <button
+        aria-label="Close overlay"
+        className="absolute inset-0 bg-black/60"
+        onClick={onClose}
+      />
+      <div
+        className={[
+          "absolute top-0 h-full w-[88vw] max-w-sm bg-card border-border border",
+          "shadow-2xl",
+          side === "left" ? "left-0" : "right-0",
+        ].join(" ")}
+      >
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <div className="text-sm font-semibold text-text">{title}</div>
+          <button
+            onClick={onClose}
+            className="rounded-lg border border-border bg-white/5 px-2 py-1 text-xs text-text hover:bg-white/10"
+          >
+            Close
+          </button>
+        </div>
+        <div className="h-[calc(100%-52px)] overflow-y-auto p-4">{children}</div>
+      </div>
+    </div>
   );
 }
 
-export default function ChatShell({ title, subtitle, logo, children }: Props) {
+export default function ChatShell({ title = "Collision IQ", left, center, right }: Props) {
+  const [leftOpen, setLeftOpen] = useState(false);
+  const [rightOpen, setRightOpen] = useState(false);
+
+  const hasLeft = useMemo(() => Boolean(left), [left]);
+  const hasRight = useMemo(() => Boolean(right), [right]);
+
   return (
-    <div className="relative min-h-screen overflow-hidden bg-black text-white">
-      {/* Background video (optional). If you keep a space in filename, keep %20 here. */}
-      <div className="pointer-events-none absolute inset-0 opacity-[0.18]">
-        <video
-          className="h-full w-full object-cover"
-          autoPlay
-          muted
-          loop
-          playsInline
-          // If you renamed the file, update this path:
-          src="/brand/logos/Logo%20video.mp4"
-        />
+    <div className="min-h-[100svh] bg-bg text-text">
+      {/* Subtle premium background */}
+      <div className="pointer-events-none fixed inset-0 opacity-70">
+        <div className="absolute -top-40 left-1/2 h-[520px] w-[900px] -translate-x-1/2 rounded-full bg-accent/10 blur-3xl" />
+        <div className="absolute bottom-[-280px] right-[-220px] h-[520px] w-[520px] rounded-full bg-white/5 blur-3xl" />
       </div>
 
-      {/* Vignette + glow */}
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.06),rgba(0,0,0,0.85)_60%,rgba(0,0,0,1))]" />
-      <div className="pointer-events-none absolute -top-40 left-1/2 h-[480px] w-[900px] -translate-x-1/2 rounded-full bg-[color:var(--accent)] blur-[180px] opacity-[0.10]" />
-
-      {/* Layout */}
-      <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1400px] gap-6 px-4 py-6">
-        {/* LEFT SIDEBAR */}
-        <aside className="hidden w-[260px] flex-shrink-0 lg:block">
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl">
-            <div className="mb-4 flex items-center justify-between">
-              <div className="text-sm font-semibold text-white/80">Collision Academy</div>
-              <div className="h-2 w-2 rounded-full bg-emerald-400/80" />
-            </div>
-
-            <div className="space-y-2">
-              <Link
-                href="/"
-                className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 hover:bg-white/10"
-              >
-                ← Home
-              </Link>
-
-              <a
-                href="/upload"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 rounded-xl bg-[color:var(--accent)] px-3 py-2 text-sm font-semibold text-black hover:opacity-90"
-              >
-                Upload docs
-              </a>
-            </div>
-
-            <div className="mt-5 border-t border-white/10 pt-5">
-              <div className="text-xs font-semibold text-white/50">Quick prompts</div>
-              <div className="mt-3 flex flex-col gap-2 text-sm">
-                {[
-                  "Analyze this estimate for missing operations",
-                  "Explain OEM procedure implications",
-                  "Find ADAS triggers & calibration needs",
-                ].map((t) => (
-                  <button
-                    key={t}
-                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-left text-white/80 hover:bg-white/10"
-                    type="button"
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-5 border-t border-white/10 pt-5">
-              <div className="text-xs font-semibold text-white/50">Recent chats</div>
-              <div className="mt-3 space-y-2 text-sm text-white/70">
-                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-                  ADAS calibration basics
-                </div>
-                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-                  Estimate review: front-end hit
-                </div>
-                <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-                  SOP: blueprinting
-                </div>
-              </div>
+      {/* Top bar */}
+      <header className="relative z-10 border-b border-border bg-black/20 backdrop-blur">
+        <div className="mx-auto flex h-14 max-w-[1440px] items-center justify-between px-4">
+          <div className="flex items-center gap-3">
+            <div className="text-sm font-semibold tracking-wide">
+              {title}
+              <span className="ml-2 rounded-full border border-border bg-white/5 px-2 py-0.5 text-[11px] font-medium text-muted">
+                Beta
+              </span>
             </div>
           </div>
-        </aside>
 
-        {/* CENTER */}
-        <main className="flex min-w-0 flex-1 flex-col gap-4">
-          {/* TOP BAR */}
-          <header className="rounded-3xl border border-white/10 bg-white/5 px-5 py-4 backdrop-blur-xl">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="flex items-center gap-3">
-                <div className="hidden sm:block">{logo}</div>
-                <div>
-                  <div className="text-lg font-semibold leading-tight">{title}</div>
-                  {subtitle ? (
-                    <div className="text-sm text-white/60">{subtitle}</div>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <Chip>Docs</Chip>
-                <Chip>History</Chip>
-                <Chip>Workspace</Chip>
-                <ActionButton variant="ghost">New Chat</ActionButton>
-                <ActionButton variant="solid">Start</ActionButton>
-              </div>
-            </div>
-          </header>
-
-          {/* CHAT GLASS PANEL */}
-          <section className="relative min-h-[70vh] rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl">
-            {/* subtle top accent */}
-            <div className="h-1 w-full rounded-t-3xl bg-gradient-to-r from-transparent via-[color:var(--accent)] to-transparent opacity-70" />
-
-            <div className="p-4 md:p-6">
-              {/* Watermark logo behind chat area */}
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-[0.08]">
-                <div className="translate-y-6 scale-110">
-                  {logo}
-                </div>
-              </div>
-
-              <div className="relative z-10">{children}</div>
-            </div>
-          </section>
-
-          <div className="pb-6" />
-        </main>
-
-        {/* RIGHT WORKSPACE */}
-        <aside className="hidden w-[340px] flex-shrink-0 xl:block">
-          <div className="rounded-3xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl">
-            <div className="mb-4">
-              <div className="text-base font-semibold">Workspace</div>
-              <div className="text-sm text-white/60">Documents + context used in answers</div>
-            </div>
-
-            <div className="space-y-3">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-semibold">Uploaded documents</div>
-                  <span className="text-xs text-white/50">…</span>
-                </div>
-
-                <div className="mt-3 space-y-2 text-sm text-white/75">
-                  <div className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                    <span>Estimate_1248.pdf</span>
-                    <span className="rounded-full bg-emerald-400/20 px-2 py-0.5 text-xs text-emerald-200">
-                      Ready
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                    <span>OEM_Procedure_Bumper.pdf</span>
-                    <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-xs text-amber-200">
-                      Indexing
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                    <span>Shop_SOP_Blueprinting.docx</span>
-                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-white/70">
-                      Queued
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                <div className="text-sm font-semibold">Quick actions</div>
-                <div className="mt-3 space-y-2 text-sm text-white/75">
-                  <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                    <div className="font-semibold">Supplement scan</div>
-                    <div className="text-xs text-white/60">
-                      Find missing operations — likely adds.
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                    <div className="font-semibold">Risk flags</div>
-                    <div className="text-xs text-white/60">
-                      Safety, OEM, ADAS, hidden damage.
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2">
-                    <div className="font-semibold">Training outline</div>
-                    <div className="text-xs text-white/60">
-                      Turn this doc into a module.
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <a
-                href="/upload"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block rounded-xl bg-[color:var(--accent)] px-4 py-3 text-center font-semibold text-black hover:opacity-90"
+          <div className="flex items-center gap-2">
+            {hasLeft ? (
+              <button
+                onClick={() => setLeftOpen(true)}
+                className="lg:hidden rounded-lg border border-border bg-white/5 px-3 py-1.5 text-xs text-text hover:bg-white/10"
               >
-                Upload documents
-              </a>
-            </div>
+                Workspace
+              </button>
+            ) : null}
+
+            {hasRight ? (
+              <button
+                onClick={() => setRightOpen(true)}
+                className="lg:hidden rounded-lg border border-border bg-white/5 px-3 py-1.5 text-xs text-text hover:bg-white/10"
+              >
+                Inspector
+              </button>
+            ) : null}
           </div>
-        </aside>
+        </div>
+      </header>
+        <div className="h-[2px] w-full bg-gradient-to-r from-transparent via-[#C65A2A]/60 to-transparent" />
+
+      {/* Main grid */}
+      <div className="relative z-10 mx-auto max-w-[1440px] px-4 py-4">
+        <div className="grid grid-cols-[1fr_1.5fr_1fr] gap-6 h-full">
+          <div>{left}</div>
+          <div>{center}</div>
+          <div>{right}</div>
+        </div>
       </div>
+
+      {/* Mobile drawers */}
+      {hasLeft ? (
+        <Drawer
+          open={leftOpen}
+          onClose={() => setLeftOpen(false)}
+          side="left"
+          title="Workspace"
+        >
+          {left}
+        </Drawer>
+      ) : null}
+
+      {hasRight ? (
+        <Drawer
+          open={rightOpen}
+          onClose={() => setRightOpen(false)}
+          side="right"
+          title="Inspector"
+        >
+          {right}
+        </Drawer>
+      ) : null}
     </div>
   );
 }
