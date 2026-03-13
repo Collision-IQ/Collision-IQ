@@ -13,7 +13,7 @@ export function chunkText(
   const procedureChunks = procedureChunk(text, chunkSize);
 
   if (procedureChunks.length > 1) {
-    return procedureChunks;
+    return procedureChunks.map(c => c.text);
   }
 
   // --------

@@ -25,6 +25,7 @@ function detectMetadata(query: string) {
 
   return {
     oem: match([
+      "Tesla",
       "Honda",
       "Toyota",
       "Ford",
@@ -39,6 +40,20 @@ function detectMetadata(query: string) {
       "Mercedes",
       "Audi",
       "Volkswagen",
+      "Lexus",
+      "Jeep",
+      "Dodge",
+      "Ram",
+      "GMC",
+      "Cadillac",
+      "Acura",
+      "Infiniti",
+      "Lincoln",
+      "Volvo",
+      "Porsche",
+      "Jaguar",
+      "Land Rover",
+      "Mini",
     ]),
     system: match([
       "ADAS",
@@ -105,10 +120,13 @@ export async function searchSimilarChunks(
   limit = 5,
   oem?: string | null
 ): Promise<ChunkMatch[]> {
+
   const vec = toVectorLiteral(embedding);
   if (!vec) return [];
 
-  const rows = (await prisma.$queryRawUnsafe(`
+  const safeLimit = Math.max(1, Math.min(limit, 20));
+
+  const rows = await prisma.$queryRawUnsafe<ChunkMatch[]>(`
     SELECT
       text,
       drive_path,
@@ -116,16 +134,23 @@ export async function searchSimilarChunks(
       system,
       component,
       procedure,
-      1 - (embedding <=> '${vec}') AS similarity
+      (
+        (1 - (embedding <=> '${vec}'))
+        + CASE
+            WHEN $1 IS NOT NULL AND oem = $1 THEN 0.2
+            ELSE 0
+          END
+        + (authority / 100.0) * 0.2
+      ) AS similarity
     FROM document_chunks
     WHERE embedding IS NOT NULL
-    ${oem ? `AND oem = '${oem}'` : ""}
-    ORDER BY embedding <=> '${vec}'
-    LIMIT ${Math.max(1, Math.min(limit, 20))}
-  `)) as ChunkMatch[];
+    ORDER BY similarity DESC
+    LIMIT $2
+  `, oem, safeLimit);
 
   return rows ?? [];
 }
+
 
 /*
 ---------------------------------------------

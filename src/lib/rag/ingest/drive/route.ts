@@ -56,17 +56,24 @@ export async function POST() {
       continue;
     }
 
-    const embeddings = await embedTexts(rawChunks);
+    const embeddings = await embedTexts(
+      rawChunks.map(c => typeof c === "string" ? c : c.text)
+    );
 
     const chunks = rawChunks
-      .map((chunkText, i) => {
+      .map((chunk, i) => {
+
+      const chunkText =
+        typeof chunk === "string"
+          ? chunk
+          : chunk.text;
         const embedding = embeddings[i];
 
         if (!embedding?.length) return null;
 
         const metadata = extractMetadata({
           text: chunkText,
-          drivePath: f.name ?? null
+          drivePath: (f as any).path || f.name || ""
         });
 
         return {

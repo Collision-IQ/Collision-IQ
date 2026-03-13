@@ -1,108 +1,134 @@
-import { prisma } from "@/lib/prisma"
+import { prisma } from "@/lib/prisma";
 
 export async function upsertChunks(params: {
-  driveFileId: string
-  drivePath: string
-  modifiedTime: string
+  driveFileId: string;
+  drivePath: string;
+  modifiedTime: string;
   chunks: {
-    text: string
-    embedding: number[] | number[][]
-    chunkIndex: number
-    oem?: string | null
-    system?: string | null
-    component?: string | null
-    procedure?: string | null
-  }[]
+    text: string;
+    embedding: number[] | number[][];
+    chunkIndex: number;
+
+    oem?: string | null;
+    system?: string | null;
+    component?: string | null;
+    procedure?: string | null;
+
+    // new metadata
+    docType?: string | null;
+    authority?: number | null;
+  }[];
 }) {
 
-  const { driveFileId, drivePath, modifiedTime, chunks } = params
+  const { driveFileId, drivePath, modifiedTime, chunks } = params;
 
   /*
   ----------------------------------------
-  Remove stale chunks from previous version
+  Remove stale chunks
   ----------------------------------------
   */
 
   await prisma.$executeRawUnsafe(`
     DELETE FROM document_chunks
-    WHERE drive_file_id = '${driveFileId}'
-    AND id NOT LIKE '${driveFileId}:%:${modifiedTime}'
-  `)
+    WHERE drive_file_id = $1
+  `, driveFileId);
 
-  if (!chunks.length) return
+  if (!chunks.length) return;
 
   /*
   ----------------------------------------
-  Build batched VALUES list
+  Build values list
   ----------------------------------------
   */
 
-  const values = chunks.map(c => {
+  const values = chunks.map((c) => {
 
-    const id = `${driveFileId}:${c.chunkIndex}:${modifiedTime}`
+    const id = `${driveFileId}:${c.chunkIndex}:${modifiedTime}`;
 
     const embedding =
       Array.isArray(c.embedding[0])
         ? (c.embedding as number[][])[0]
-        : (c.embedding as number[])
+        : (c.embedding as number[]);
 
     const vec = `[${embedding
-      .map(n => (Number.isFinite(n) ? n : 0))
-      .join(",")}]`
+      .map((n) => (Number.isFinite(n) ? n : 0))
+      .join(",")}]`;
 
-    const oem = c.oem ? `$$${c.oem}$$` : "NULL"
-    const system = c.system ? `$$${c.system}$$` : "NULL"
-    const component = c.component ? `$$${c.component}$$` : "NULL"
-    const procedure = c.procedure ? `$$${c.procedure}$$` : "NULL"
+    const authority = c.authority ?? 50;
 
-    return `
-      (
-        '${id}',
-        'drive',
-        '${driveFileId}',
-        '${drivePath}',
-        ${c.chunkIndex},
-        $$${c.text}$$,
-        '${vec}',
-        NOW(),
-        ${oem},
-        ${system},
-        ${component},
-        ${procedure}
-      )
-    `
-  }).join(",")
+    return {
+      id,
+      source: "drive",
+      drive_file_id: driveFileId,
+      drive_path: drivePath,
+      chunk_index: c.chunkIndex,
+      text: c.text,
+      embedding: vec,
+      oem: c.oem ?? null,
+      system: c.system ?? null,
+      component: c.component ?? null,
+      procedure: c.procedure ?? null,
+      doc_type: c.docType ?? null,
+      authority,
+    };
+
+  });
 
   /*
   ----------------------------------------
-  Batched upsert
+  Insert rows
   ----------------------------------------
   */
 
-  await prisma.$queryRawUnsafe(`
-    INSERT INTO document_chunks
-    (
-      id,
-      source,
-      drive_file_id,
-      drive_path,
-      chunk_index,
-      text,
-      embedding,
-      updated_at,
-      oem,
-      system,
-      component,
-      procedure
-    )
-    VALUES ${values}
-    ON CONFLICT (id) DO UPDATE SET
-      text = EXCLUDED.text,
-      embedding = EXCLUDED.embedding,
-      updated_at = NOW(),
-      oem = EXCLUDED.oem,
-      system = EXCLUDED.system,
-      component = EXCLUDED.component,
-      procedure = EXCLUDED.procedure
-  `)
+  for (const v of values) {
+
+    await prisma.$executeRawUnsafe(`
+      INSERT INTO document_chunks
+      (
+        id,
+        source,
+        drive_file_id,
+        drive_path,
+        chunk_index,
+        text,
+        embedding,
+        updated_at,
+        oem,
+        system,
+        component,
+        procedure,
+        doc_type,
+        authority
+      )
+      VALUES
+      (
+        $1,$2,$3,$4,$5,$6,$7,NOW(),$8,$9,$10,$11,$12,$13
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        text = EXCLUDED.text,
+        embedding = EXCLUDED.embedding,
+        updated_at = NOW(),
+        oem = EXCLUDED.oem,
+        system = EXCLUDED.system,
+        component = EXCLUDED.component,
+        procedure = EXCLUDED.procedure,
+        doc_type = EXCLUDED.doc_type,
+        authority = EXCLUDED.authority
+    `,
+      v.id,
+      v.source,
+      v.drive_file_id,
+      v.drive_path,
+      v.chunk_index,
+      v.text,
+      v.embedding,
+      v.oem,
+      v.system,
+      v.component,
+      v.procedure,
+      v.doc_type,
+      v.authority
+    );
+
+  }
 }

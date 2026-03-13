@@ -1,7 +1,11 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
-import { embedText } from "@/lib/rag/embed";
-import { searchSimilarChunks } from "@/lib/rag/search";
+import { retrieveDocuments } from "@/lib/rag/retrieve";
+import {
+  type ActiveContext,
+  extractContextFromText,
+  mergeActiveContext,
+} from "@/lib/context/activeContext";
 
 export const runtime = "nodejs";
 
@@ -707,58 +711,30 @@ export async function POST(req: Request) {
 let retrievalBlock = "";
 let matches: any[] = [];
 
-const lastUserMessage = incomingMessages
-  ?.slice()
-  .reverse()
-  .find((m) => m.role === "user" && typeof m.content === "string");
+const lastUserMessage =
+  [...incomingMessages]
+    .reverse()
+    .find(
+      (m) => m?.role === "user" && typeof m?.content === "string"
+    ) ?? null;
+
+let activeContext: ActiveContext | null = body.activeContext ?? null;
 
 if (lastUserMessage && typeof lastUserMessage.content === "string") {
+  const extracted = extractContextFromText(lastUserMessage.content);
+  activeContext = mergeActiveContext(activeContext, extracted);
 
-  const vehicleHint = lastUserMessage.content;
+  matches = await retrieveDocuments({
+    query: lastUserMessage.content,
+    vehicle: activeContext?.vehicle?.make ?? null,
+    system: activeContext?.repair?.system ?? null,
+    component: activeContext?.repair?.component ?? null,
+    procedure: activeContext?.repair?.procedure ?? null,
+    limit: 5,
+  });
 
-  const expandedQuery = `
-${vehicleHint}
-
-BMW repair procedure
-vehicle preparation
-disconnect battery
-sleep mode
-safety procedure
-bumper removal
-bumper installation
-ADAS sensor removal
-OEM repair instructions
-vehicle repair procedures
-installation procedure
-removal procedure
-disconnect battery
-vehicle preparation
-OEM repair instructions
-ADAS procedures
-radar calibration
-sensor aiming procedure
-OEM calibration
-vehicle specific procedure
-`;
-
-  const queryEmbedding = await embedText(expandedQuery);
-
-  if (Array.isArray(queryEmbedding) && queryEmbedding.length > 0) {
-
-    const lower = lastUserMessage.content.toLowerCase();
-
-    let oem: string | null = null;
-
-    if (lower.includes("honda")) oem = "Honda";
-    if (lower.includes("toyota")) oem = "Toyota";
-    if (lower.includes("ford")) oem = "Ford";
-    if (lower.includes("subaru")) oem = "Subaru";
-    if (lower.includes("bmw")) oem = "BMW";
-
-    matches = await searchSimilarChunks(queryEmbedding, 5, oem);
-
-    console.log("RAG MATCHES:", matches.length);
-  }
+  console.log("ACTIVE CONTEXT:", activeContext);
+  console.log("RAG MATCHES:", matches.length);
 }
 
 if (Array.isArray(matches) && matches.length > 0) {
@@ -893,6 +869,7 @@ Analyze visible damage, severity, likely repair operations, and safety risks.`,
         headers: {
           "Content-Type": "text/plain; charset=utf-8",
           "Cache-Control": "no-cache",
+          "x-active-context": encodeURIComponent(JSON.stringify(activeContext ?? null)),
         },
       }
     );
