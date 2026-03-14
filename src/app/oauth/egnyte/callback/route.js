@@ -15,7 +15,7 @@ export async function GET(req) {
         Authorization:
           "Basic " +
           Buffer.from(
-            process.env.EGNYTE_API_KEY +
+            process.env.EGNYTE_CLIENT_ID +
             ":" +
             process.env.EGNYTE_CLIENT_SECRET
           ).toString("base64"),
@@ -24,14 +24,14 @@ export async function GET(req) {
         grant_type: "authorization_code",
         code,
         redirect_uri:
-          "https://collision-academy-new-git-cha-bfa414-collision-academy-82dbb1d7.vercel.app/oauth/egnyte/callback"
-      })
+          "https://collision-academy-new-git-cha-bfa414-collision-academy-82dbb1d7.vercel.app/oauth/egnyte/callback",
+      }),
     }
   );
 
   const data = await tokenRes.json();
 
   return new Response(JSON.stringify(data, null, 2), {
-    headers: { "Content-Type": "application/json" }
+    headers: { "Content-Type": "application/json" },
   });
 }
