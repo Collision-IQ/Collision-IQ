@@ -16,8 +16,8 @@ export async function GET(req) {
           "Basic " +
           Buffer.from(
             process.env.EGNYTE_CLIENT_ID +
-            ":" +
-            process.env.EGNYTE_CLIENT_SECRET
+              ":" +
+              process.env.EGNYTE_CLIENT_SECRET
           ).toString("base64"),
       },
       body: new URLSearchParams({
@@ -31,7 +31,5 @@ export async function GET(req) {
 
   const data = await tokenRes.json();
 
-  return new Response(JSON.stringify(data, null, 2), {
-    headers: { "Content-Type": "application/json" },
-  });
+  return Response.json(data);
 }
