@@ -137,7 +137,7 @@ export async function searchSimilarChunks(
       (
         (1 - (embedding <=> '${vec}'))
         + CASE
-            WHEN $1 IS NOT NULL AND oem = $1 THEN 0.2
+            WHEN $1::text IS NOT NULL AND oem = $1::text THEN 0.2
             ELSE 0
           END
         + (authority / 100.0) * 0.2
