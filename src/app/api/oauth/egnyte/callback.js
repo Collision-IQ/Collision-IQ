@@ -1,5 +1,6 @@
 export default async function handler(req, res) {
-  const { code } = req.query;
+  const { searchParams } = new URL(req.url);
+  const code = searchParams.get("code");
 
   const tokenResponse = await fetch(
     "https://collisionacademy.egnyte.com/puboauth/token",
