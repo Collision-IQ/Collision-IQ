@@ -77,3 +77,10 @@ body > * {
   position: relative;
   z-index: 1;
 }
+.analysis-report h2 {
+  margin-top: 22px;
+}
+
+.analysis-report ul {
+  margin-top: 6px;
+}

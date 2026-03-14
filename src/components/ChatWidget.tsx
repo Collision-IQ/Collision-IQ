@@ -396,7 +396,8 @@ export default function ChatWidget({
   }
 
   const userBubble = "bg-black/70 border border-orange-500/30 text-orange-400";
-  const assistantBubble = "max-w-[95%] sm:max-w-[75%] text-white";
+  const assistantBubble =
+    "max-w-[95%] sm:max-w-[80%] lg:max-w-[70%] text-white bg-white/5 border border-white/10 backdrop-blur-md";
 
   return (
     <div className="relative flex flex-col h-full min-h-0 overflow-hidden">
@@ -413,49 +414,61 @@ export default function ChatWidget({
       <div className="absolute inset-0 bg-black/70 pointer-events-none" />
 
       {/* Foreground layer */}
-      <div className="relative z-10 flex flex-col flex-1 min-h-0">
+      <div className="relative mx-auto w-full max-w-[900px] flex flex-col flex-1 min-h-0">
+
+        {/* Case intelligence banner */}
+        {attachments.length > 0 && (
+          <div className="px-6 py-3 border-b border-white/10 bg-white/5 text-sm text-white/70 flex gap-4 backdrop-blur">
+            <span>Attachments: {attachments.length}</span>
+            {images.length > 0 && <span>Vision Images: {images.length}</span>}
+            {documents.length > 0 && <span>Extracted Docs: {documents.length}</span>}
+          </div>
+        )}
+
         {/* Messages (ONLY scrolling region) */}
         <div
           ref={scrollRef}
           className="
-          overflow-y-auto
-          flex-1
-          px-4 sm:px-6
-          min-h-0
-          pt-4 sm:pt-6
-          pb-[240px]
-          space-y-4
-        "
-        >
-          {messages.map((msg, idx) => (
+            flex-1
+            min-h-0
+            overflow-y-auto
+            overscroll-contain
+            px-4 sm:px-6
+            pt-4 sm:pt-6
+            pb-28
+            space-y-4
+          "
+>
+{messages.map((msg, idx) => (
             <div
               key={idx}
               className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`rounded-2xl px-5 py-4 bg-transparent ${
+                className={`rounded-2xl px-6 py-5 ${
                   msg.role === "user" ? userBubble : assistantBubble
                 }`}
               >
                 {msg.role === "assistant" ? (
-                  <div className="max-w-none text-white text-[15px] leading-[1.6]">
+                  <div className="analysis-report max-w-none text-white text-[15px] leading-[1.7] space-y-1">
                     <ReactMarkdown
                       components={{
                         h2: ({ children }) => (
-                          <div className="mt-6 mb-2 text-[#C65A2A] text-[16px] font-semibold">
+                          <div className="mt-8 mb-3 text-[#C65A2A] text-[17px] font-semibold border-b border-white/10 pb-1">
                             {children}
                           </div>
                         ),
                         h3: ({ children }) => (
                           <div className="mt-4 mb-1 text-[#C65A2A] text-[14px] font-medium">
                             {children}
-                          </div>
+                        </div>
                         ),
                         p: ({ children }) => (
-                          <p className="mt-2 text-white/85 leading-[1.65]">{children}</p>
+                          <p className="mt-2 text-white/85 leading-[1.7]">{children}</p>
                         ),
-                        li: ({ children }) => <li className="mt-1 text-white/80">{children}</li>,
-                        strong: ({ children }) => <span className="font-semibold">{children}</span>,
+                        li: ({ children }) => (
+                          <li className="mt-1 text-white/80 ml-3 list-disc">{children}</li>
+                        ),
                       }}
                     >
                       {msg.content}
@@ -526,7 +539,7 @@ export default function ChatWidget({
                 placeholder={
                   hasAnyAttachment
                     ? "Ask about the attachments, or add more context..."
-                    : "Ask about a repair, upload files, or take a photo..."
+                    : "Upload an estimate, OEM procedure, or repair photo to analyze..."
                 }
                 className="flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-orange-500 transition text-sm sm:text-base"
                 onKeyDown={(e) => {
@@ -579,7 +592,7 @@ export default function ChatWidget({
                     {attachments.map((a) => (
                       <div
                         key={a.filename}
-                        className="flex items-center justify-between bg-black/40 border border-white/10 px-4 py-2 rounded-xl text-sm text-white/80"
+                        className="flex items-center justify-between bg-white/5 border border-white/10 backdrop-blur px-4 py-2 rounded-xl text-sm text-white/80"
                       >
                         <span className="truncate pr-3">
                           {a.filename}
