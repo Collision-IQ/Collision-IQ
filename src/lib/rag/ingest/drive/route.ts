@@ -12,6 +12,12 @@ import { procedureChunk } from "@/lib/rag/procedureChunk";
 import { extractMetadata } from "@/lib/rag/metadata";
 
 const DRIVE_ID = process.env.GOOGLE_SHARED_DRIVE_ID!;
+type DriveFileWithPath = {
+  id?: string | null;
+  name?: string | null;
+  modifiedTime?: string | null;
+  path?: string | null;
+};
 
 export async function POST() {
   if (!DRIVE_ID) {
@@ -73,7 +79,7 @@ export async function POST() {
 
         const metadata = extractMetadata({
           text: chunkText,
-          drivePath: (f as any).path || f.name || ""
+          drivePath: (f as DriveFileWithPath).path || f.name || ""
         });
 
         return {
@@ -102,7 +108,7 @@ export async function POST() {
 
     await upsertChunks({
       driveFileId: f.id,
-      drivePath: (f as any).path || f.name || "",
+      drivePath: (f as DriveFileWithPath).path || f.name || "",
       modifiedTime: f.modifiedTime || "unknown",
       chunks
     });

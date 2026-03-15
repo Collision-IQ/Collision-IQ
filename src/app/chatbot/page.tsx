@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import ChatWidget from "@/components/ChatWidget";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { jsPDF } from "jspdf";
 
 export default function ChatbotPage() {
   const isMobile = useIsMobile();
@@ -28,6 +29,8 @@ export default function ChatbotPage() {
 
   useEffect(() => {
     if (isMobile === null) return;
+    // Keep the mobile rail collapsed when the viewport mode changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRailOpen(false);
   }, [isMobile]);
 
@@ -181,7 +184,9 @@ function extractSummary(text: string) {
 }
 
 function RailContent({
-  attachment,
+  // Reserved for attachment-specific rail content.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  attachment: _attachment,
   analysisText,
   riskScore,
   confidenceScore,
@@ -242,25 +247,38 @@ function RailContent({
         ))}
       </section>
 
-      <button
-        onClick={() => {
-          const blob = new Blob([analysisText], { type: "text/plain" });
-          const url = URL.createObjectURL(blob);
+      {analysisText && (
+        <button
+          onClick={() => {
+            if (!analysisText) return;
 
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = "collision-iq-analysis.txt";
-          a.click();
+            const doc = new jsPDF();
 
-          URL.revokeObjectURL(url);
-        }}
-        className="mt-auto rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-sm"
-      >
-        Export Report
-      </button>
-    </div>
-  );
-}
+            let y = 20;
+
+            doc.setFont("Helvetica", "Bold");
+            doc.setFontSize(16);
+            doc.text("Collision-IQ Analysis Report", 15, y);
+
+            y += 10;
+
+            doc.setFont("Helvetica", "Normal");
+            doc.setFontSize(11);
+
+            const lines = doc.splitTextToSize(analysisText, 180);
+
+            doc.text(lines, 15, y);
+
+            doc.save("collision-iq-analysis.pdf");
+          }}
+          className="mt-4 w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
+        >
+          Export PDF Report
+        </button>
+      )}
+          </div>
+        );
+      }
 
 /* -------------------------------------------------------------------------- */
 /* SNAPSHOT CARD                                                              */

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 
 const WORKER_ID = "worker-1";
 const CHUNK_SIZE = 5;
+type SyncCursor = { processed: number };
 
 async function claimJob() {
   const job = await prisma.syncJob.findFirst({
@@ -31,7 +32,10 @@ export async function POST() {
   }
 
   try {
-    const cursor = (job.cursor as any) || { processed: 0 };
+    const cursor =
+      job.cursor && typeof job.cursor === "object" && "processed" in job.cursor
+        ? (job.cursor as SyncCursor)
+        : { processed: 0 };
 
     switch (job.stage) {
 

@@ -12,6 +12,16 @@ type ChunkMatch = {
   procedure?: string | null;
 };
 
+async function withPrismaRetry<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    console.error("RAG vector query failed, retrying once:", error);
+    await prisma.$connect();
+    return run();
+  }
+}
+
 /*
 ---------------------------------------------
 Metadata detector
@@ -126,27 +136,33 @@ export async function searchSimilarChunks(
 
   const safeLimit = Math.max(1, Math.min(limit, 20));
 
-  const rows = await prisma.$queryRawUnsafe<ChunkMatch[]>(`
-    SELECT
-      text,
-      drive_path,
+  const rows = await withPrismaRetry(() =>
+    prisma.$queryRawUnsafe<ChunkMatch[]>(
+      `
+        SELECT
+          text,
+          drive_path,
+          oem,
+          system,
+          component,
+          procedure,
+          (
+            (1 - (embedding <=> '${vec}'))
+            + CASE
+                WHEN $1::text IS NOT NULL AND oem = $1::text THEN 0.2
+                ELSE 0
+              END
+            + (authority / 100.0) * 0.2
+          ) AS similarity
+        FROM document_chunks
+        WHERE embedding IS NOT NULL
+        ORDER BY similarity DESC
+        LIMIT $2
+      `,
       oem,
-      system,
-      component,
-      procedure,
-      (
-        (1 - (embedding <=> '${vec}'))
-        + CASE
-            WHEN $1::text IS NOT NULL AND oem = $1::text THEN 0.2
-            ELSE 0
-          END
-        + (authority / 100.0) * 0.2
-      ) AS similarity
-    FROM document_chunks
-    WHERE embedding IS NOT NULL
-    ORDER BY similarity DESC
-    LIMIT $2
-  `, oem, safeLimit);
+      safeLimit
+    )
+  );
 
   return rows ?? [];
 }

@@ -37,17 +37,6 @@ interface ChatWidgetProps {
  * Extract plain text from react-markdown children (which can be strings, arrays, or React elements).
  * Must be defined OUTSIDE the component, not inside JSX.
  */
-function extractText(node: React.ReactNode): string {
-  if (node == null) return "";
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(extractText).join("");
-  if (React.isValidElement(node)) {
-    const el = node as React.ReactElement<{ children?: React.ReactNode }>;
-    return extractText(el.props.children);
-  }
-  return "";
-}
-
 const INITIAL_MESSAGE: Message = {
   role: "assistant",
   content:
@@ -267,9 +256,9 @@ export default function ChatWidget({
           onAnalysisChange?.(reply);
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Abort is expected when Ending chat or sending a new message quickly
-      if (err?.name === "AbortError") {
+      if (err instanceof DOMException && err.name === "AbortError") {
         return;
       }
 
@@ -396,19 +385,11 @@ export default function ChatWidget({
   }
 
   const userBubble = "bg-black/70 border border-orange-500/30 text-orange-400";
-  const assistantBubble = "max-w-[95%] sm:max-w-[75%] text-white";
 
   return (
     <div className="relative flex flex-col h-full min-h-0 overflow-hidden">
       {/* Background watermark */}
-      <div
-        className="absolute inset-0 pointer-events-none bg-no-repeat bg-center bg-contain"
-        style={{
-          backgroundImage: "url('/brand/logos/Logo-grey.png')",
-          backgroundSize: "60%",
-          opacity: 0.06,
-        }}
-      />
+      <div className="absolute inset-0 pointer-events-none bg-[url('/brand/logos/Logo-grey.png')] bg-no-repeat bg-center bg-[length:60%] opacity-[0.06]" />
       {/* Soft dark overlay */}
       <div className="absolute inset-0 bg-black/70 pointer-events-none" />
 
@@ -426,19 +407,55 @@ export default function ChatWidget({
           pb-[240px]
           space-y-4
         "
-        >
+        > 
+        {messages.length === 1 && messages[0].role === "assistant" && (
+          <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
+
+          <div className="text-white/60 text-sm">
+            Start a repair analysis
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl w-full">
+
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm"
+            >
+              Upload Estimate
+            </button>
+
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm"
+            >
+              Upload OEM Procedure
+            </button>
+
+            <button
+              onClick={() => cameraInputRef.current?.click()}
+              className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm"
+            >
+              Upload Photos
+            </button>
+
+          </div>
+
+          </div>
+        )}
           {messages.map((msg, idx) => (
             <div
               key={idx}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} mb-3`}
             >
               <div
-                className={`rounded-2xl px-5 py-4 bg-transparent ${
-                  msg.role === "user" ? userBubble : assistantBubble
+                className={`rounded-2xl px-5 py-4 ${
+                  msg.role === "user"
+                    ? `${userBubble} max-w-[65%]`
+                    : "max-w-[760px] bg-glass border-glass backdrop-blur-md"
                 }`}
               >
                 {msg.role === "assistant" ? (
-                  <div className="max-w-none text-white text-[15px] leading-[1.6]">
+                  <div className="analysis-report text-[15px] leading-[1.65] text-white/90">
                     <ReactMarkdown
                       components={{
                         h2: ({ children }) => (
@@ -454,15 +471,21 @@ export default function ChatWidget({
                         p: ({ children }) => (
                           <p className="mt-2 text-white/85 leading-[1.65]">{children}</p>
                         ),
-                        li: ({ children }) => <li className="mt-1 text-white/80">{children}</li>,
-                        strong: ({ children }) => <span className="font-semibold">{children}</span>,
+                        li: ({ children }) => (
+                          <li className="mt-1 text-white/80 list-disc ml-5">
+                            {children}
+                          </li>
+                        ),
+                        strong: ({ children }) => (
+                          <span className="font-semibold text-white">{children}</span>
+                        ),
                       }}
                     >
                       {msg.content}
                     </ReactMarkdown>
                   </div>
                 ) : (
-                  <div className="whitespace-pre-wrap text-sm sm:text-base">
+                  <div className="whitespace-pre-wrap text-sm sm:text-base text-current">
                     {msg.content}
                   </div>
                 )}
@@ -474,12 +497,7 @@ export default function ChatWidget({
         </div>
 
         {/* Composer + Attachments */}
-        <div
-          className="absolute bottom-0 left-0 right-0 border-t border-white/10 bg-black/85 backdrop-blur"
-          style={{
-            paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))",
-          }}
-        >
+        <div className="absolute bottom-0 left-0 right-0 border-t border-white/10 bg-black/85 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur">
           <div className="p-4">
             <div className="flex items-center gap-3">
               <input

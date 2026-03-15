@@ -1,6 +1,8 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { retrieveDocuments } from "@/lib/rag/retrieve";
+import type { RetrieveResult } from "@/lib/rag/retrieve";
+import { analyzeRepair } from "@/lib/ai/analysisEngine";
 import {
   type ActiveContext,
   extractContextFromText,
@@ -292,6 +294,18 @@ type UploadedDocument = {
 type VisionImage = {
   filename: string;
   dataUrl: string; // base64 data URL
+};
+
+type IncomingMessage = {
+  role: string;
+  content: unknown;
+};
+
+type ChatRequestBody = {
+  messages?: IncomingMessage[];
+  documents?: UploadedDocument[];
+  images?: VisionImage[];
+  activeContext?: ActiveContext | null;
 };
 
 const MAX_CONTEXT_CHARS = 22_000;
@@ -670,15 +684,14 @@ If photos are unclear, state which angles/details are needed.`,
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
+    const body = (await req.json()) as ChatRequestBody;
 
-    const incomingMessages = (body.messages || []) as Array<{
-      role: string;
-      content: any;
-    }>;
+    const incomingMessages = body.messages || [];
 
     const documents = (body.documents || []) as UploadedDocument[];
     const images = (body.images || []) as VisionImage[];
+    const estimateText = documents.map((doc) => doc.text || "").join("\n\n").trim();
+    const analysis = analyzeRepair(estimateText);
 
     const attachedContext = buildAttachedContext(documents);
     const triggerBlock = buildTriggerBlock(documents);
@@ -709,7 +722,7 @@ export async function POST(req: Request) {
 // ------------------------------
 
 let retrievalBlock = "";
-let matches: any[] = [];
+let matches: RetrieveResult[] = [];
 
 const lastUserMessage =
   [...incomingMessages]
@@ -740,7 +753,7 @@ if (lastUserMessage && typeof lastUserMessage.content === "string") {
 if (Array.isArray(matches) && matches.length > 0) {
 
   const chunks = matches
-    .map((m: any, i: number) => {
+    .map((m, i: number) => {
 
       const source = m?.drive_path ?? "Unknown";
       const text = m?.text ?? "";
@@ -781,7 +794,12 @@ ${chunks}
 
     const safeMessages = incomingMessages
       .filter(
-        (m) =>
+        (
+          m
+        ): m is IncomingMessage & {
+          role: "user" | "assistant";
+          content: string;
+        } =>
           m &&
           (m.role === "user" || m.role === "assistant") &&
           typeof m.content === "string"
@@ -796,13 +814,28 @@ ${chunks}
         ],
       }));
 
-    const input: any[] = [
+    const input = [
       {
         role: "system",
         content: [{ type: "input_text", text: SYSTEM_PROMPT }],
       },
       ...safeMessages,
     ];
+
+    if (analysis.issues.length > 0) {
+      input.push({
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text: `
+Repair Issues:
+${JSON.stringify(analysis.issues)}
+`.trim(),
+          },
+        ],
+      });
+    }
 
     // Add supporting context AFTER the actual conversation
     if (combinedContext && !visionContent) {
@@ -828,11 +861,11 @@ You have ${images.length} image(s).
 Analyze visible damage, severity, likely repair operations, and safety risks.`,
         },
         ...visionContent.slice(1),
-      ];
+      ] as unknown;
 
       input.push({
         role: "system",
-        content: visionWithContext,
+        content: visionWithContext as (typeof input)[number]["content"],
       });
     }
 
@@ -840,12 +873,14 @@ Analyze visible damage, severity, likely repair operations, and safety risks.`,
     // Call OpenAI with streaming
     // ------------------------------
 
-    const stream = await openai.responses.stream({
-      model: "gpt-4o",
-      input,
-      temperature: 0.2,
-      tools: [{ type: "web_search" }],
-    });
+    const stream = await openai.responses.stream(
+      {
+        model: "gpt-4o",
+        input,
+        temperature: 0.2,
+        tools: [{ type: "web_search" }],
+      } as Parameters<typeof openai.responses.stream>[0]
+    );
 
     const encoder = new TextEncoder();
 

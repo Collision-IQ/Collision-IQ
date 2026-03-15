@@ -6,6 +6,10 @@ type ChunkMatch = {
   text: string;
   drive_path: string | null;
   similarity: number | null;
+  oem?: string | null;
+  system?: string | null;
+  component?: string | null;
+  procedure?: string | null;
 };
 
 export async function rerankChunks(

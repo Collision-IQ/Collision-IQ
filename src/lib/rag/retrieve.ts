@@ -81,15 +81,17 @@ export async function retrieveDocuments(
   ---------------------------------------------
   */
 
-  const normalized: RetrieveResult[] = results.map((r: any) => ({
-    text: r.text ?? "",
-    drive_path: r.drive_path ?? null,
-    similarity: r.similarity ?? null,
-    oem: r.oem ?? null,
-    system: r.system ?? null,
-    component: r.component ?? null,
-    procedure: r.procedure ?? null
-  }));
+  const normalized: RetrieveResult[] = results.map(
+    (r: Awaited<ReturnType<typeof hybridSearch>>[number]) => ({
+      text: r.text ?? "",
+      drive_path: r.drive_path ?? null,
+      similarity: r.similarity ?? null,
+      oem: r.oem ?? null,
+      system: r.system ?? null,
+      component: r.component ?? null,
+      procedure: r.procedure ?? null
+    })
+  );
 
   return normalized.slice(0, limit);
 }

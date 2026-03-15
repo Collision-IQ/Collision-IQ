@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { IncomingForm, Files } from 'formidable';
-import fs from 'fs';
-import { promisify } from 'util';
+import { IncomingForm, Files, type Fields, type File } from 'formidable';
 import { extractTextFromFile } from '@/lib/extract-text';
 import { OpenAIEmbeddings } from '@langchain/openai';
 import path from 'path';
@@ -12,7 +10,16 @@ export const config = {
   },
 };
 
-type ParseResult = { fields: any; files: Files };
+type ParseResult = { fields: Fields; files: Files };
+type FormidableFile = File & {
+  path?: string;
+  type?: string;
+};
+type UploadResult = {
+  filename: string;
+  chunks: number;
+  embedded: number;
+};
 
 function parseForm(req: NextRequest): Promise<ParseResult> {
   const form = new IncomingForm({
@@ -22,7 +29,7 @@ function parseForm(req: NextRequest): Promise<ParseResult> {
   });
 
   return new Promise((resolve, reject) => {
-    form.parse(req as any, (err, fields, files) => {
+    form.parse(req as unknown as Parameters<typeof form.parse>[0], (err, fields, files) => {
       if (err) return reject(err);
       resolve({ fields, files });
     });
@@ -61,12 +68,18 @@ export async function POST(req: NextRequest) {
     }
 
     const uploaded = Array.isArray(files.file) ? files.file : [files.file];
-    const results: any[] = [];
+    const results: UploadResult[] = [];
 
     for (const file of uploaded) {
-      const filepath = (file as any).filepath || (file as any).path;
-      const mimetype = (file as any).mimetype || (file as any).type;
-      const originalFilename = (file as any).originalFilename || path.basename(filepath);
+      const currentFile = file as FormidableFile;
+      const filepath = currentFile.filepath || currentFile.path;
+      const mimetype = currentFile.mimetype || currentFile.type;
+
+      if (!filepath || !mimetype) {
+        throw new Error('Uploaded file is missing path or MIME type');
+      }
+
+      const originalFilename = currentFile.originalFilename || path.basename(filepath);
 
       const text = await extractTextFromFile(filepath, mimetype);
       const chunks = splitIntoChunks(text, 1000);
@@ -80,8 +93,14 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true, results });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Upload error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json(
+      {
+        success: false,
+        error: err instanceof Error ? err.message : 'Upload failed',
+      },
+      { status: 500 }
+    );
   }
 }

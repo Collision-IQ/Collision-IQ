@@ -39,7 +39,9 @@ export async function createMcpBridge(): Promise<McpBridge> {
 
   // SDK versions vary; this form works for many releases.
   // If your TS complains, switch to: new StdioClientTransport({ command:"npx", args:["tsx","server.ts"], cwd })
-  const transport = new StdioClientTransport({ process: proc } as any);
+  const transport = new StdioClientTransport(
+    { process: proc } as unknown as ConstructorParameters<typeof StdioClientTransport>[0]
+  );
 
   const client = new Client(
     { name: "collision-iq-nextjs", version: "0.1.0" },

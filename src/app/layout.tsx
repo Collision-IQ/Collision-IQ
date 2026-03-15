@@ -14,7 +14,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full">
       <head>
-        {/* ✅ Critical for safe-area + immersive mobile */}
+        {/* Safe-area support for mobile */}
         <meta
           name="viewport"
           content="width=device-width, initial-scale=1, viewport-fit=cover"
@@ -25,13 +25,12 @@ export default function RootLayout({
         className="
           h-full
           bg-black
-          text-white
+          text-white antialiased
           overflow-x-hidden
-          overflow-y-hidden
           root-layout-body
         "
       >
-        {/* Cinematic overlays (non-interactive, won’t block clicks) */}
+        {/* Cinematic overlays (non-interactive) */}
         <div
           aria-hidden
           className="pointer-events-none fixed inset-0 z-0"
@@ -52,12 +51,11 @@ export default function RootLayout({
           <div className="absolute inset-0 opacity-[0.06] mix-blend-overlay bg-[url('/brand/logos/Background.png')]" />
         </div>
 
-        {/* Content layer ABOVE overlays */}
+        {/* App layer */}
         <div
           className="
             relative
             z-10
-            h-full
             min-h-screen
             flex
             flex-col

@@ -29,7 +29,7 @@ export async function POST(
       );
     }
 
-    const body = await req.json().catch(() => ({}));
+    const body = (await req.json().catch(() => ({}))) as { message?: unknown };
     const userText = String(body?.message ?? "").trim();
 
     if (!userText) {
@@ -66,9 +66,11 @@ export async function POST(
       }),
       { status: 200 }
     );
-  } catch (err: any) {
+  } catch (err: unknown) {
     return new Response(
-      JSON.stringify({ error: err?.message ?? "Server error" }),
+      JSON.stringify({
+        error: err instanceof Error ? err.message : "Server error",
+      }),
       { status: 500 }
     );
   }
