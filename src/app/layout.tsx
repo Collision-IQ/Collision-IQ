@@ -1,9 +1,55 @@
 import "./globals.css";
 import type { Metadata } from "next";
 
+function getSiteUrl() {
+  const rawUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    process.env.APP_BASE_URL ??
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined) ??
+    "https://www.collision.academy";
+
+  try {
+    return new URL(rawUrl.trim());
+  } catch {
+    return new URL("https://www.collision.academy");
+  }
+}
+
+const siteUrl = getSiteUrl();
+
 export const metadata: Metadata = {
+  metadataBase: siteUrl,
   title: "Collision Academy",
   description: "Automotive Appraisal & Collision Technology Experts.",
+  alternates: {
+    canonical: "/",
+  },
+  icons: {
+    icon: "/brand/logos/icons/Favicon.svg",
+    shortcut: "/brand/logos/icons/Favicon.svg",
+    apple: "/brand/logos/icons/Favicon.svg",
+  },
+  openGraph: {
+    title: "Collision Academy",
+    description: "Automotive Appraisal & Collision Technology Experts.",
+    url: siteUrl,
+    siteName: "Collision Academy",
+    images: [
+      {
+        url: "/brand/logos/logo-horizontal.png",
+        width: 1200,
+        height: 630,
+        alt: "Collision Academy",
+      },
+    ],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Collision Academy",
+    description: "Automotive Appraisal & Collision Technology Experts.",
+    images: ["/brand/logos/logo-horizontal.png"],
+  },
 };
 
 export default function RootLayout({

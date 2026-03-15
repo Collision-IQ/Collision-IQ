@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { retrieveDocuments } from "@/lib/rag/retrieve";
 import type { RetrieveResult } from "@/lib/rag/retrieve";
 import { analyzeRepair } from "@/lib/ai/analysisEngine";
+import { buildRepairIntelligenceReport } from "@/lib/ai/reportBuilder";
+import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
 import {
   type ActiveContext,
   extractContextFromText,
@@ -303,8 +305,7 @@ type IncomingMessage = {
 
 type ChatRequestBody = {
   messages?: IncomingMessage[];
-  documents?: UploadedDocument[];
-  images?: VisionImage[];
+  attachmentIds?: string[];
   activeContext?: ActiveContext | null;
 };
 
@@ -688,10 +689,21 @@ export async function POST(req: Request) {
 
     const incomingMessages = body.messages || [];
 
-    const documents = (body.documents || []) as UploadedDocument[];
-    const images = (body.images || []) as VisionImage[];
+    const uploadedAttachments = getUploadedAttachments(body.attachmentIds || []);
+    const documents: UploadedDocument[] = uploadedAttachments.map((attachment) => ({
+      filename: attachment.filename,
+      mime: attachment.type,
+      text: attachment.text,
+    }));
+    const images: VisionImage[] = uploadedAttachments
+      .filter((attachment) => typeof attachment.imageDataUrl === "string")
+      .map((attachment) => ({
+        filename: attachment.filename,
+        dataUrl: attachment.imageDataUrl as string,
+      }));
     const estimateText = documents.map((doc) => doc.text || "").join("\n\n").trim();
     const analysis = analyzeRepair(estimateText);
+    const repairIntelligenceBlock = buildRepairIntelligenceReport(analysis);
 
     const attachedContext = buildAttachedContext(documents);
     const triggerBlock = buildTriggerBlock(documents);
@@ -781,6 +793,7 @@ ${chunks}
 }
 
     const combinedContext =
+      (repairIntelligenceBlock ? repairIntelligenceBlock + "\n\n" : "") +
       (documentPriorityBlock ? documentPriorityBlock + "\n\n" : "") +
       (triggerBlock ? triggerBlock + "\n\n" : "") +
       (attachedContext ? attachedContext + "\n\n" : "") +
@@ -822,15 +835,26 @@ ${chunks}
       ...safeMessages,
     ];
 
-    if (analysis.issues.length > 0) {
+    if (analysis.issues.length > 0 || analysis.requiredProcedures.length > 0) {
       input.push({
         role: "system",
         content: [
           {
             type: "input_text",
             text: `
-Repair Issues:
-${JSON.stringify(analysis.issues)}
+Repair Intelligence JSON:
+${JSON.stringify(
+  {
+    riskScore: analysis.riskScore,
+    confidence: analysis.confidence,
+    operations: analysis.operations,
+    requiredProcedures: analysis.requiredProcedures,
+    missingProcedures: analysis.missingProcedures,
+    issues: analysis.issues,
+  },
+  null,
+  2
+)}
 `.trim(),
           },
         ],

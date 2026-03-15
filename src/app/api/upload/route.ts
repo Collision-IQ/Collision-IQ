@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,15 @@ async function fileToText(file: File): Promise<string> {
 
   // Placeholder for PDFs/images
   return `[[No extractor configured for ${type || "unknown type"}: ${file.name}]]`;
+}
+
+async function fileToDataUrl(file: File): Promise<string | undefined> {
+  const type = file.type || "";
+
+  if (!type.startsWith("image/")) return undefined;
+
+  const bytes = Buffer.from(await file.arrayBuffer());
+  return `data:${type};base64,${bytes.toString("base64")}`;
 }
 
 export async function POST(req: Request) {
@@ -27,11 +37,19 @@ export async function POST(req: Request) {
     }
 
     const text = await fileToText(file);
-
-    return NextResponse.json({
+    const imageDataUrl = await fileToDataUrl(file);
+    const stored = saveUploadedAttachment({
       filename: file.name,
       type: file.type,
       text,
+      imageDataUrl,
+    });
+
+    return NextResponse.json({
+      attachmentId: stored.id,
+      filename: stored.filename,
+      type: stored.type,
+      hasVision: Boolean(stored.imageDataUrl),
     });
   } catch (error) {
     console.error("UPLOAD ERROR:", error);
