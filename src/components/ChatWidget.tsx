@@ -18,9 +18,21 @@ interface Attachment {
   hasVision: boolean;
 }
 
+export interface InspectorPanelData {
+  riskScore: "low" | "medium" | "high";
+  confidence: "low" | "medium" | "high";
+  criticalIssues: number;
+  evidenceQuality: "present" | "limited" | "none";
+  keyRisks: string[];
+  complianceIssues: string[];
+  supplementOpportunities: string[];
+  evidenceReferences: string[];
+}
+
 interface ChatWidgetProps {
   onAttachmentChange?: (filename: string | null) => void;
   onAnalysisChange?: (text: string) => void;
+  onIntelligenceChange?: (data: InspectorPanelData | null) => void;
 }
 
 const INITIAL_MESSAGE: Message = {
@@ -32,6 +44,7 @@ const INITIAL_MESSAGE: Message = {
 export default function ChatWidget({
   onAttachmentChange,
   onAnalysisChange,
+  onIntelligenceChange,
 }: ChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
@@ -116,6 +129,7 @@ export default function ChatWidget({
 
     onAttachmentChange?.(null);
     onAnalysisChange?.("");
+    onIntelligenceChange?.(null);
 
     shouldAutoScrollRef.current = true;
     setTimeout(() => {
@@ -159,6 +173,15 @@ export default function ChatWidget({
       if (!response.ok) throw new Error(`Chat API failed (${response.status})`);
 
       const contentType = response.headers.get("content-type") || "";
+      const repairIntelligenceHeader = response.headers.get("x-repair-intelligence");
+
+      if (repairIntelligenceHeader) {
+        onIntelligenceChange?.(
+          JSON.parse(decodeURIComponent(repairIntelligenceHeader)) as InspectorPanelData
+        );
+      } else {
+        onIntelligenceChange?.(null);
+      }
 
       if (contentType.includes("text/plain") && response.body) {
         const reader = response.body.getReader();

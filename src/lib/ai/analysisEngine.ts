@@ -1,5 +1,11 @@
-import { runRepairIntelligence } from "./intelligenceEngine"
+import { runRepairPipeline } from "./pipeline/repairPipeline"
 
 export function analyzeRepair(estimateText: string) {
-  return runRepairIntelligence(estimateText)
+  return runRepairPipeline([
+    {
+      filename: "estimate.txt",
+      mime: "text/plain",
+      text: estimateText,
+    },
+  ])
 }

@@ -2,8 +2,11 @@ import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { retrieveDocuments } from "@/lib/rag/retrieve";
 import type { RetrieveResult } from "@/lib/rag/retrieve";
-import { analyzeRepair } from "@/lib/ai/analysisEngine";
-import { buildRepairIntelligenceReport } from "@/lib/ai/reportBuilder";
+import { runRepairPipeline } from "@/lib/ai/pipeline/repairPipeline";
+import {
+  buildInspectorPanelData,
+  buildRepairIntelligenceReport,
+} from "@/lib/ai/report/intelligenceReport";
 import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
 import {
   type ActiveContext,
@@ -701,9 +704,9 @@ export async function POST(req: Request) {
         filename: attachment.filename,
         dataUrl: attachment.imageDataUrl as string,
       }));
-    const estimateText = documents.map((doc) => doc.text || "").join("\n\n").trim();
-    const analysis = analyzeRepair(estimateText);
+    const analysis = runRepairPipeline(documents);
     const repairIntelligenceBlock = buildRepairIntelligenceReport(analysis);
+    const inspectorPanelData = buildInspectorPanelData(analysis);
 
     const attachedContext = buildAttachedContext(documents);
     const triggerBlock = buildTriggerBlock(documents);
@@ -929,6 +932,9 @@ Analyze visible damage, severity, likely repair operations, and safety risks.`,
           "Content-Type": "text/plain; charset=utf-8",
           "Cache-Control": "no-cache",
           "x-active-context": encodeURIComponent(JSON.stringify(activeContext ?? null)),
+          "x-repair-intelligence": encodeURIComponent(
+            JSON.stringify(inspectorPanelData)
+          ),
         },
       }
     );
