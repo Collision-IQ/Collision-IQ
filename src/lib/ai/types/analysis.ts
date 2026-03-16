@@ -69,13 +69,15 @@ export interface AnalysisFinding {
 }
 
 export interface AnalysisSummary {
-  riskScore: "low" | "moderate" | "high";
+  riskScore: "low" | "moderate" | "high" | "unknown";
   confidence: "low" | "moderate" | "high";
   criticalIssues: number;
   evidenceQuality: "weak" | "moderate" | "strong";
 }
 
 export interface AnalysisResult {
+  mode?: "comparison" | "single-document-review" | "parser-incomplete";
+  parserStatus?: "ok" | "failed_or_incomplete";
   summary: AnalysisSummary;
   findings: AnalysisFinding[];
   supplements: AnalysisFinding[];

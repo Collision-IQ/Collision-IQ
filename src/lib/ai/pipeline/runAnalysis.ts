@@ -16,7 +16,25 @@ export function runAnalysis(
   }
 
   const pipeline = runRepairPipeline(documents);
-  return buildAnalysisResultFromPipeline(pipeline);
+  const totalTextLength = documents.reduce(
+    (sum, document) => sum + (document.text ?? "").trim().length,
+    0
+  );
+  const comparisonAvailable = Boolean(
+    findDocumentText(documents, ["shop", "body shop", "repair facility"]) &&
+      findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"])
+  );
+
+  console.log("DOC ROLE: shop", Boolean(findDocumentText(documents, ["shop", "body shop", "repair facility"])));
+  console.log("DOC ROLE: insurer", Boolean(findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"])));
+  console.log("TEXT LENGTH:", totalTextLength);
+  console.log("PARSED OPS:", pipeline.operations.length);
+  console.log("PARSED PROCEDURES:", pipeline.requiredProcedures.length);
+
+  return buildAnalysisResultFromPipeline(pipeline, {
+    comparisonAvailable,
+    totalTextLength,
+  });
 }
 
 function buildDeterministicAuditReport(documents: RepairPipelineDocument[]) {

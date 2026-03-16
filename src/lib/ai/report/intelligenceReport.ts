@@ -1,7 +1,7 @@
 import type { AnalysisResult } from "../types/analysis";
 
 export interface InspectorPanelData {
-  riskScore: "low" | "medium" | "high";
+  riskScore: "low" | "medium" | "high" | "unknown";
   confidence: "low" | "medium" | "high";
   criticalIssues: number;
   evidenceQuality: "present" | "limited" | "none";
