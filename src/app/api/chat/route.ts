@@ -1,3 +1,5 @@
+export const runtime = "nodejs";
+
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { runAnalysis } from "@/lib/ai/pipeline/runAnalysis";
@@ -10,14 +12,16 @@ import {
 import { orchestrateConversation } from "@/lib/ai/orchestrator/conversationOrchestrator";
 import { buildAuditPrompt } from "@/lib/ai/reasoning/analysisPrompt";
 import { buildRepairIntelligenceReport } from "@/lib/ai/report/intelligenceReport";
-import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
+import {
+  getUploadedAttachments,
+  saveUploadedAttachment,
+} from "@/lib/uploadedAttachmentStore";
 import {
   type ActiveContext,
   extractContextFromText,
   mergeActiveContext,
 } from "@/lib/context/activeContext";
-
-export const runtime = "nodejs";
+import type { AnalysisResult } from "@/lib/ai/types/analysis";
 
 // 🔐 Environment safety check
 if (!process.env.OPENAI_API_KEY) {
@@ -312,6 +316,12 @@ type IncomingMessage = {
 type ChatRequestBody = {
   messages?: IncomingMessage[];
   attachmentIds?: string[];
+  attachments?: Array<{
+    filename: string;
+    type: string;
+    text?: string;
+    imageDataUrl?: string;
+  }>;
   activeContext?: ActiveContext | null;
 };
 
@@ -695,7 +705,17 @@ export async function POST(req: Request) {
 
     const incomingMessages = body.messages || [];
 
-    const uploadedAttachments = getUploadedAttachments(body.attachmentIds || []);
+    const uploadedAttachments =
+      Array.isArray(body.attachments) && body.attachments.length > 0
+        ? body.attachments.map((attachment) =>
+            saveUploadedAttachment({
+              filename: attachment.filename,
+              type: attachment.type,
+              text: attachment.text ?? "",
+              imageDataUrl: attachment.imageDataUrl,
+            })
+          )
+        : getUploadedAttachments(body.attachmentIds || []);
     const documents: UploadedDocument[] = uploadedAttachments.map((attachment) => ({
       filename: attachment.filename,
       mime: attachment.type,
@@ -707,8 +727,9 @@ export async function POST(req: Request) {
         filename: attachment.filename,
         dataUrl: attachment.imageDataUrl as string,
     }));
+    const extractionFailure = buildExtractionFailureResult(documents);
     const analysis = runRepairPipeline(documents);
-    const analysisResult = runAnalysis(documents);
+    const analysisResult = extractionFailure ?? runAnalysis(documents);
     const structuredAudit = analysisResult.narrative;
     const repairIntelligenceBlock = buildRepairIntelligenceReport(analysisResult);
     const auditPromptBlock = hasComparisonDocuments(documents)
@@ -723,6 +744,13 @@ export async function POST(req: Request) {
     // ========================================
 
     let documentPriorityBlock = "";
+
+    const shopTextLength =
+      findDocumentText(documents, ["shop", "body shop", "repair facility"])?.length ?? 0;
+    const insurerTextLength =
+      findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"])?.length ?? 0;
+    console.log("SHOP TEXT LENGTH:", shopTextLength);
+    console.log("INSURER TEXT LENGTH:", insurerTextLength);
 
     if (documents.length > 0) {
       documentPriorityBlock = `
@@ -761,7 +789,7 @@ if (lastUserMessage && typeof lastUserMessage.content === "string") {
   activeContext = mergeActiveContext(activeContext, extracted);
 
   const orchestrated = await orchestrateConversation({
-    artifactIds: body.attachmentIds || [],
+    artifactIds: uploadedAttachments.map((attachment) => attachment.id),
     userMessage: lastUserMessage.content,
     conversationHistory: incomingMessages
       .filter(
@@ -1038,4 +1066,63 @@ function hasComparisonDocuments(documents: UploadedDocument[]) {
     findDocumentText(documents, ["shop", "body shop", "repair facility"]) &&
       findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"])
   );
+}
+
+function buildExtractionFailureResult(
+  documents: UploadedDocument[]
+): AnalysisResult | null {
+  if (documents.length === 0) return null;
+
+  const extractedLengths = documents.map((document) => ({
+    filename: document.filename,
+    length: (document.text ?? "").trim().length,
+    unsupported: (document.text ?? "").includes("[[Unsupported file type for text extraction:"),
+  }));
+
+  const hasLikelyFailedExtraction = extractedLengths.some(
+    (entry) => entry.unsupported || entry.length < 80
+  );
+
+  if (!hasLikelyFailedExtraction) return null;
+
+  const weakDocs = extractedLengths
+    .filter((entry) => entry.unsupported || entry.length < 80)
+    .map((entry) => `${entry.filename} (${entry.length} chars)`);
+
+  return {
+    summary: {
+      riskScore: "low",
+      confidence: "low",
+      criticalIssues: 0,
+      evidenceQuality: "weak",
+    },
+    findings: [
+      {
+        id: "extraction-failure",
+        bucket: "compliance",
+        category: "document_extraction",
+        title: "Document extraction failed or returned too little text",
+        detail: `The uploaded documents could not be reliably parsed for estimate comparison: ${weakDocs.join(", ")}.`,
+        severity: "high",
+        status: "missing",
+        evidence: documents.map((document) => ({
+          source: document.filename,
+          quote: `Extracted text length: ${(document.text ?? "").trim().length}`,
+        })),
+      },
+    ],
+    supplements: [],
+    evidence: documents.map((document) => ({
+      source: document.filename,
+      quote: `Extracted text length: ${(document.text ?? "").trim().length}`,
+    })),
+    narrative: [
+      "## EXTRACTION FAILURE",
+      "",
+      "- The uploaded documents were received, but text extraction did not produce enough usable estimate content for analysis.",
+      `- Affected files: ${weakDocs.join(", ")}.`,
+      "- The current result is not a repair-scope conclusion.",
+      "- Re-upload the PDFs after deployment and confirm the server logs show non-zero SHOP TEXT LENGTH and INSURER TEXT LENGTH values.",
+    ].join("\n"),
+  };
 }

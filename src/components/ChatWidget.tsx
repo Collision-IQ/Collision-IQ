@@ -15,6 +15,9 @@ interface Message {
 interface Attachment {
   attachmentId: string;
   filename: string;
+  mime: string;
+  text: string;
+  imageDataUrl?: string;
   source: "file" | "camera";
   hasVision: boolean;
 }
@@ -157,6 +160,12 @@ export default function ChatWidget({
         body: JSON.stringify({
           messages: updatedMessages,
           attachmentIds: attachments.map((attachment) => attachment.attachmentId),
+          attachments: attachments.map((attachment) => ({
+            filename: attachment.filename,
+            type: attachment.mime,
+            text: attachment.text,
+            imageDataUrl: attachment.imageDataUrl,
+          })),
         }),
       });
 
@@ -255,11 +264,15 @@ export default function ChatWidget({
     const data = await res.json();
     const attachmentId: string = data.attachmentId;
     const filename: string = data.filename || file.name;
+    const mime: string = data.type || file.type;
+    const text: string = data.text || "";
+    const imageDataUrl: string | undefined =
+      typeof data.imageDataUrl === "string" ? data.imageDataUrl : undefined;
     const hasVision: boolean = Boolean(data.hasVision) && isLikelyImageFile(file);
 
     setAttachments((prev) => [
       ...prev,
-      { attachmentId, filename, source, hasVision },
+      { attachmentId, filename, mime, text, imageDataUrl, source, hasVision },
     ]);
 
     onAttachmentChange?.(filename);
