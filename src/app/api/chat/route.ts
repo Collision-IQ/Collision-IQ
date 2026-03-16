@@ -1,20 +1,12 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import type { RetrieveResult } from "@/lib/rag/retrieve";
+import { runAnalysis } from "@/lib/ai/pipeline/runAnalysis";
 import { runRepairPipeline } from "@/lib/ai/pipeline/repairPipeline";
 import { orchestrateRetrieval } from "@/lib/ai/retrievalOrchestrator";
 import { orchestrateConversation } from "@/lib/ai/orchestrator/conversationOrchestrator";
-import { parseEstimate } from "@/lib/ai/extractors/estimateExtractor";
-import { extractComparisonFacts } from "@/lib/ai/extractors/comparisonExtractor";
-import { extractOemRequirements } from "@/lib/ai/extractors/oemProcedureExtractor";
-import { buildAuditFindings } from "@/lib/ai/validators/buildAuditFindings";
-import { composeAuditResponse } from "@/lib/ai/reasoning/composeAuditResponse";
 import { buildAuditPrompt } from "@/lib/ai/reasoning/analysisPrompt";
-import type { RepairAuditReport } from "@/lib/ai/types/analysis";
-import {
-  buildInspectorPanelData,
-  buildRepairIntelligenceReport,
-} from "@/lib/ai/report/intelligenceReport";
+import { buildRepairIntelligenceReport } from "@/lib/ai/report/intelligenceReport";
 import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
 import {
   type ActiveContext,
@@ -301,7 +293,7 @@ type UploadedDocument = {
   text?: string;
   name?: string;
   mime?: string;
-  filename?: string;
+  filename: string;
 };
 
 type VisionImage = {
@@ -712,16 +704,11 @@ export async function POST(req: Request) {
         filename: attachment.filename,
         dataUrl: attachment.imageDataUrl as string,
     }));
-    const auditReport = buildDeterministicAuditReport(documents);
-    const structuredAudit = auditReport
-      ? composeAuditResponse(auditReport)
-      : "";
     const analysis = runRepairPipeline(documents);
-    const repairIntelligenceBlock = buildRepairIntelligenceReport(analysis);
-    const inspectorPanelData = auditReport
-      ? buildInspectorPanelDataFromAuditReport(auditReport)
-      : buildInspectorPanelData(analysis);
-    const auditPromptBlock = auditReport
+    const analysisResult = runAnalysis(documents);
+    const structuredAudit = analysisResult.narrative;
+    const repairIntelligenceBlock = buildRepairIntelligenceReport(analysisResult);
+    const auditPromptBlock = hasComparisonDocuments(documents)
       ? buildAuditPrompt(structuredAudit)
       : "";
 
@@ -1005,7 +992,7 @@ Analyze visible damage, severity, likely repair operations, and safety risks.`,
           "Cache-Control": "no-cache",
           "x-active-context": encodeURIComponent(JSON.stringify(activeContext ?? null)),
           "x-repair-intelligence": encodeURIComponent(
-            JSON.stringify(inspectorPanelData)
+            JSON.stringify(analysisResult)
           ),
         },
       }
@@ -1022,27 +1009,6 @@ Analyze visible damage, severity, likely repair operations, and safety risks.`,
   }
 }
 
-function buildDeterministicAuditReport(
-  documents: UploadedDocument[]
-): RepairAuditReport | null {
-  const shopText =
-    findDocumentText(documents, ["shop", "body shop", "repair facility"]) ?? null;
-  const insurerText =
-    findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"]) ?? null;
-  const oemText =
-    findDocumentText(documents, ["oem", "adas", "procedure", "bmw"]) ?? null;
-
-  if (!shopText || !insurerText || !oemText) {
-    return null;
-  }
-
-  const shopParsed = parseEstimate(shopText);
-  const insurerParsed = parseEstimate(insurerText);
-  const facts = extractComparisonFacts(shopParsed, insurerParsed);
-  const oemReqs = extractOemRequirements(oemText);
-  return buildAuditFindings(facts, oemReqs);
-}
-
 function findDocumentText(
   documents: UploadedDocument[],
   keywords: string[]
@@ -1055,38 +1021,9 @@ function findDocumentText(
   return match?.text;
 }
 
-function buildInspectorPanelDataFromAuditReport(report: RepairAuditReport) {
-  const criticalMissingFindings = report.findings.filter(
-    (finding) => finding.severity === "high" && finding.status === "missing"
+function hasComparisonDocuments(documents: UploadedDocument[]) {
+  return Boolean(
+    findDocumentText(documents, ["shop", "body shop", "repair facility"]) &&
+      findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"])
   );
-  const missingFindings = report.findings.filter(
-    (finding) => finding.status === "missing"
-  );
-  const evidenceRefs = report.findings.flatMap((finding) =>
-    finding.evidence.map((evidence) =>
-      `${finding.title}: ${evidence.source}${evidence.page ? `, page ${evidence.page}` : ""}`
-    )
-  );
-
-  return {
-    riskScore:
-      criticalMissingFindings.length >= 2
-        ? "high"
-        : criticalMissingFindings.length === 1
-          ? "medium"
-          : "low",
-    confidence:
-      evidenceRefs.length >= 4 ? "high" : evidenceRefs.length >= 2 ? "medium" : "low",
-    criticalIssues: criticalMissingFindings.length,
-    evidenceQuality: evidenceRefs.length >= 4 ? "present" : evidenceRefs.length >= 1 ? "limited" : "none",
-    keyRisks: criticalMissingFindings.map((finding) => finding.title),
-    complianceIssues: missingFindings.map((finding) => finding.conclusion),
-    supplementOpportunities: missingFindings
-      .filter(
-        (finding) =>
-          finding.category === "corrosion" && finding.status === "missing"
-      )
-      .map((finding) => finding.conclusion),
-    evidenceReferences: [...new Set(evidenceRefs)],
-  };
 }

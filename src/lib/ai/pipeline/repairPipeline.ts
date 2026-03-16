@@ -54,15 +54,20 @@ export function runRepairPipeline(
     .filter((document) => document.type === "estimate" || document.type === "document")
     .map((document) => document.text ?? "")
     .join("\n\n");
+  const shopEstimateText =
+    findDocumentText(classifiedDocuments, ["shop", "body shop", "repair facility"]) ?? estimateText;
+  const insurerEstimateText =
+    findDocumentText(classifiedDocuments, ["insurer", "insurance", "carrier", "sor"]) ?? null;
 
   const adasText = classifiedDocuments
     .filter((document) => document.type === "adas_report" || document.type === "oem_procedure")
     .map((document) => document.text ?? "")
     .join("\n\n");
 
-  const operations = extractEstimateOps(estimateText);
+  const operations = extractEstimateOps(shopEstimateText);
   const requiredProcedures = detectProcedures(operations);
-  const validation = validateRepair(`${estimateText}\n\n${adasText}`, requiredProcedures);
+  const validationText = insurerEstimateText ?? `${estimateText}\n\n${adasText}`;
+  const validation = validateRepair(validationText, requiredProcedures);
   const adasFindings = extractAdasFindings(adasText);
   const evidenceReferences = buildEvidenceReferences(
     validation.missingProcedures,
@@ -82,6 +87,16 @@ export function runRepairPipeline(
     riskScore: calculateRiskScore(validation.complianceIssues),
     confidence: calculateConfidence(classifiedDocuments, operations, adasFindings),
   };
+}
+
+function findDocumentText(
+  documents: ClassifiedRepairDocument[],
+  keywords: string[]
+): string | undefined {
+  return documents.find((document) => {
+    const haystack = `${document.filename} ${document.mime ?? ""}`.toLowerCase();
+    return keywords.some((keyword) => haystack.includes(keyword));
+  })?.text;
 }
 
 function buildEvidenceReferences(

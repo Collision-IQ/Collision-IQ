@@ -1,4 +1,4 @@
-import type { RepairPipelineResult } from "../pipeline/repairPipeline";
+import type { AnalysisResult } from "../types/analysis";
 
 export interface InspectorPanelData {
   riskScore: "low" | "medium" | "high";
@@ -11,88 +11,77 @@ export interface InspectorPanelData {
   evidenceReferences: string[];
 }
 
-export function buildRepairIntelligenceReport(
-  intelligence: RepairPipelineResult
-): string {
-  if (
-    intelligence.operations.length === 0 &&
-    intelligence.complianceIssues.length === 0 &&
-    intelligence.adasFindings.length === 0
-  ) {
+export function buildRepairIntelligenceReport(result: AnalysisResult): string {
+  if (result.findings.length === 0) {
     return "";
   }
 
-  const operations = intelligence.operations.length
-    ? intelligence.operations
-        .slice(0, 10)
-        .map((operation) => `- ${operation.operation} ${operation.component}`)
-        .join("\n")
-    : "- No estimate operations detected";
+  const findingLines = result.findings
+    .slice(0, 12)
+    .map(
+      (finding) =>
+        `- [${finding.bucket}] ${finding.title} | Status: ${finding.status} | Severity: ${finding.severity}`
+    )
+    .join("\n");
 
-  const requiredProcedures = intelligence.requiredProcedures.length
-    ? intelligence.requiredProcedures
+  const evidenceLines = result.evidence.length
+    ? result.evidence
+        .slice(0, 8)
         .map(
-          (procedure) =>
-            `- ${procedure.procedure} | Trigger: ${procedure.trigger} | Evidence Basis: ${procedure.evidenceBasis}`
+          (entry) =>
+            `- ${entry.source}${entry.page ? `, page ${entry.page}` : ""}${entry.quote ? ` | ${entry.quote}` : ""}`
         )
         .join("\n")
-    : "- No required procedures detected";
-
-  const missingProcedures = intelligence.missingProcedures.length
-    ? intelligence.missingProcedures
-        .map(
-          (procedure) =>
-            `- ${procedure.procedure} | Triggered by: ${procedure.matchedOperation} | Why: ${procedure.rationale}`
-        )
-        .join("\n")
-    : "- No missing procedures detected";
-
-  const evidenceReferences = intelligence.evidenceReferences.length
-    ? intelligence.evidenceReferences.map((reference) => `- ${reference}`).join("\n")
     : "- No evidence references extracted";
 
   return `
-[REPAIR INTELLIGENCE PIPELINE]
+[ANALYSIS RESULT]
 
-Risk Score: ${intelligence.riskScore.toUpperCase()}
-Confidence: ${intelligence.confidence.toUpperCase()}
+Risk Score: ${result.summary.riskScore.toUpperCase()}
+Confidence: ${result.summary.confidence.toUpperCase()}
+Critical Issues: ${result.summary.criticalIssues}
+Evidence Quality: ${result.summary.evidenceQuality.toUpperCase()}
 
-Detected Operations:
-${operations}
+Findings:
+${findingLines}
 
-Required Procedures:
-${requiredProcedures}
-
-Missing Procedures:
-${missingProcedures}
-
-Evidence References:
-${evidenceReferences}
+Evidence:
+${evidenceLines}
 `.trim();
 }
 
-export function buildInspectorPanelData(
-  intelligence: RepairPipelineResult
-): InspectorPanelData {
+export function buildInspectorPanelData(result: AnalysisResult): InspectorPanelData {
   return {
-    riskScore: intelligence.riskScore,
-    confidence: intelligence.confidence,
-    criticalIssues: intelligence.complianceIssues.length,
-    evidenceQuality: intelligence.evidenceReferences.length
-      ? "present"
-      : intelligence.adasFindings.length
-        ? "limited"
-        : "none",
-    keyRisks: intelligence.complianceIssues
-      .filter((issue) => issue.severity === "high")
+    riskScore:
+      result.summary.riskScore === "moderate" ? "medium" : result.summary.riskScore,
+    confidence:
+      result.summary.confidence === "moderate"
+        ? "medium"
+        : result.summary.confidence,
+    criticalIssues: result.summary.criticalIssues,
+    evidenceQuality:
+      result.summary.evidenceQuality === "strong"
+        ? "present"
+        : result.summary.evidenceQuality === "moderate"
+          ? "limited"
+          : "none",
+    keyRisks: result.findings
+      .filter((finding) => finding.bucket === "critical")
       .slice(0, 4)
-      .map((issue) => issue.issue),
-    complianceIssues: intelligence.complianceIssues
+      .map((finding) => finding.title),
+    complianceIssues: result.findings
+      .filter((finding) => finding.bucket === "compliance" || finding.bucket === "quality")
       .slice(0, 4)
-      .map((issue) => issue.issue),
-    supplementOpportunities: intelligence.supplementOpportunities
+      .map((finding) => finding.title),
+    supplementOpportunities: result.findings
+      .filter((finding) => finding.bucket === "supplement")
       .slice(0, 4)
-      .map((issue) => issue.issue),
-    evidenceReferences: intelligence.evidenceReferences.slice(0, 4),
+      .map((finding) => finding.title),
+    evidenceReferences: result.evidence
+      .slice(0, 4)
+      .map(
+        (entry) =>
+          `${entry.source}${entry.page ? `, page ${entry.page}` : ""}${entry.quote ? ` | ${entry.quote}` : ""}`
+      ),
   };
 }

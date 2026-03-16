@@ -8,6 +8,8 @@ export interface ParsedEstimate {
   totalCost?: number;
   bodyHours?: number;
   paintHours?: number;
+  rawText: string;
+  allLines: string[];
   lines: EstimateLine[];
 }
 
@@ -20,7 +22,11 @@ export interface EstimateOperation {
 
 export function parseEstimate(text: string): ParsedEstimate {
   const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
-  const out: ParsedEstimate = { lines: [] };
+  const out: ParsedEstimate = {
+    rawText: text,
+    allLines: lines,
+    lines: [],
+  };
 
   for (const line of lines) {
     const opMatch = line.match(
@@ -61,7 +67,10 @@ export function parseEstimate(text: string): ParsedEstimate {
 }
 
 export function hasLine(parsed: ParsedEstimate, pattern: RegExp): boolean {
-  return parsed.lines.some((line) => pattern.test(line.raw));
+  return (
+    parsed.lines.some((line) => pattern.test(line.raw)) ||
+    parsed.allLines.some((line) => pattern.test(line))
+  );
 }
 
 export function extractEstimateOps(text: string): EstimateOperation[] {

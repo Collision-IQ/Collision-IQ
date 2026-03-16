@@ -3,7 +3,9 @@
 import { useMemo, useState } from "react";
 import Image from "next/image";
 import { jsPDF } from "jspdf";
-import ChatWidget, { type InspectorPanelData } from "@/components/ChatWidget";
+import ChatWidget from "@/components/ChatWidget";
+import { buildInspectorPanelData, type InspectorPanelData } from "@/lib/ai/report/intelligenceReport";
+import type { AnalysisResult } from "@/lib/ai/types/analysis";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
 const EMPTY_PANEL: InspectorPanelData = {
@@ -22,9 +24,12 @@ export default function ChatbotPage() {
   const [desktopRailOpen, setDesktopRailOpen] = useState(false);
   const [attachment, setAttachment] = useState<string | null>(null);
   const [analysisText, setAnalysisText] = useState("");
-  const [panelData, setPanelData] = useState<InspectorPanelData | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
 
-  const inspector = useMemo(() => panelData ?? EMPTY_PANEL, [panelData]);
+  const inspector = useMemo(
+    () => (analysisResult ? buildInspectorPanelData(analysisResult) : EMPTY_PANEL),
+    [analysisResult]
+  );
   const railOpen = isMobile ? false : desktopRailOpen;
 
   function handleRailOpenChange(next: boolean) {
@@ -66,7 +71,7 @@ export default function ChatbotPage() {
               <ChatWidget
                 onAttachmentChange={setAttachment}
                 onAnalysisChange={setAnalysisText}
-                onIntelligenceChange={setPanelData}
+                onIntelligenceChange={setAnalysisResult}
               />
             </div>
           </div>
@@ -77,6 +82,7 @@ export default function ChatbotPage() {
             <RailContent
               attachment={attachment}
               analysisText={analysisText}
+              analysisResult={analysisResult}
               panelData={inspector}
             />
           </aside>
@@ -104,6 +110,7 @@ export default function ChatbotPage() {
           <RailContent
             attachment={attachment}
             analysisText={analysisText}
+            analysisResult={analysisResult}
             panelData={inspector}
           />
         </div>
@@ -115,12 +122,35 @@ export default function ChatbotPage() {
 function RailContent({
   attachment,
   analysisText,
+  analysisResult,
   panelData,
 }: {
   attachment: string | null;
   analysisText: string;
+  analysisResult: AnalysisResult | null;
   panelData: InspectorPanelData;
 }) {
+  const exportText = analysisResult?.narrative ?? analysisText;
+  const keyRisks =
+    analysisResult?.findings
+      .filter((finding) => finding.bucket === "critical")
+      .map((finding) => finding.title) ?? panelData.keyRisks;
+  const complianceIssues =
+    analysisResult?.findings
+      .filter(
+        (finding) => finding.bucket === "compliance" || finding.bucket === "quality"
+      )
+      .map((finding) => finding.title) ?? panelData.complianceIssues;
+  const supplementOpportunities =
+    analysisResult?.findings
+      .filter((finding) => finding.bucket === "supplement")
+      .map((finding) => finding.title) ?? panelData.supplementOpportunities;
+  const evidenceReferences =
+    analysisResult?.evidence.map(
+      (entry) =>
+        `${entry.source}${entry.page ? `, page ${entry.page}` : ""}${entry.quote ? ` | ${entry.quote}` : ""}`
+    ) ?? panelData.evidenceReferences;
+
   return (
     <div className="flex flex-col h-full overflow-y-auto p-6 space-y-8">
       <div>
@@ -153,36 +183,36 @@ function RailContent({
       <section className="space-y-4">
         <PanelSection
           title="Key Risks"
-          items={panelData.keyRisks}
+          items={keyRisks}
           emptyLabel="No high-risk items detected yet."
           color="red"
         />
 
         <PanelSection
           title="Compliance Issues"
-          items={panelData.complianceIssues}
+          items={complianceIssues}
           emptyLabel="No compliance issues detected yet."
           color="yellow"
         />
 
         <PanelSection
           title="Supplement Opportunities"
-          items={panelData.supplementOpportunities}
+          items={supplementOpportunities}
           emptyLabel="No supplement opportunities detected yet."
           color="green"
         />
 
         <PanelSection
           title="Evidence References"
-          items={panelData.evidenceReferences}
+          items={evidenceReferences}
           emptyLabel="No evidence references detected yet."
           color="neutral"
         />
       </section>
 
-      {analysisText && (
+      {exportText && (
         <button
-          onClick={() => exportReport(analysisText, panelData)}
+          onClick={() => exportReport(exportText, panelData)}
           className="mt-4 w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
         >
           Export PDF Report

@@ -19,5 +19,8 @@ export async function POST() {
     WHERE id = 'drive'
   `);
 
-  return NextResponse.json({ token });
+  return NextResponse.json({
+    message: "Drive initialized",
+    token,
+  });
 }

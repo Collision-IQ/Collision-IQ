@@ -7,10 +7,22 @@ export function composeAuditResponse(report: RepairAuditReport): string {
   const missingFindings = report.findings.filter(
     (finding) => finding.status === "missing"
   );
+  const includedFindings = report.findings.filter(
+    (finding) => finding.status === "included"
+  );
+  const missingOperationFindings = missingFindings.filter(
+    (finding) => finding.category !== "parts"
+  );
+  const partsExposureFindings = missingFindings.filter(
+    (finding) => finding.category === "parts"
+  );
   const supplementFindings = report.findings.filter(
     (finding) =>
       finding.status === "missing" &&
-      (finding.category === "corrosion" || finding.category === "parts")
+      (finding.category === "corrosion" ||
+        finding.category === "refinish" ||
+        finding.category === "qc" ||
+        finding.category === "parts")
   );
 
   lines.push("## DOCUMENTATION BASIS");
@@ -26,18 +38,38 @@ export function composeAuditResponse(report: RepairAuditReport): string {
 
   lines.push("## EXECUTIVE TECHNICAL SUMMARY");
   lines.push("");
+  for (const summaryLine of report.executiveSummary) {
+    lines.push(`- ${summaryLine}`);
+  }
   lines.push(
     `- Critical issues identified: ${report.criticalIssues}.`
   );
   lines.push(`- Risk score: ${report.riskScore}.`);
   lines.push(`- Confidence: ${report.confidence}.`);
   lines.push(`- Evidence quality: ${report.evidenceQuality}.`);
-  if (missingFindings.length > 0) {
+  if (missingOperationFindings.length > 0) {
     lines.push(
-      `- Missing documented operations: ${missingFindings.map((finding) => finding.title).join(", ")}.`
+      `- Missing or reduced operations: ${missingOperationFindings.map((finding) => finding.title).join(", ")}.`
     );
-  } else {
+  }
+  if (partsExposureFindings.length > 0) {
+    lines.push(
+      `- Parts sourcing exposure: ${partsExposureFindings.map((finding) => finding.title).join(", ")}.`
+    );
+  }
+  if (missingOperationFindings.length === 0 && partsExposureFindings.length === 0) {
     lines.push("- No missing documented operations were identified in this review.");
+  }
+  lines.push("");
+
+  lines.push("## INCLUDED COVERAGE");
+  lines.push("");
+  if (includedFindings.length > 0) {
+    for (const finding of includedFindings) {
+      lines.push(`- ${finding.title}: ${finding.conclusion}`);
+    }
+  } else {
+    lines.push("- No included insurer operations were confirmed by the current comparison rules.");
   }
   lines.push("");
 
@@ -54,12 +86,23 @@ export function composeAuditResponse(report: RepairAuditReport): string {
 
   lines.push("## MISSING OPERATIONS");
   lines.push("");
-  if (missingFindings.length > 0) {
-    for (const finding of missingFindings) {
+  if (missingOperationFindings.length > 0) {
+    for (const finding of missingOperationFindings) {
       lines.push(`- ${finding.title}: ${finding.conclusion}`);
     }
   } else {
     lines.push("- No missing operations were identified in the provided documents.");
+  }
+  lines.push("");
+
+  lines.push("## PARTS SOURCING EXPOSURE");
+  lines.push("");
+  if (partsExposureFindings.length > 0) {
+    for (const finding of partsExposureFindings) {
+      lines.push(`- ${finding.title}: ${finding.conclusion}`);
+    }
+  } else {
+    lines.push("- No non-OEM or recycled parts sourcing exposure was identified in the provided documents.");
   }
   lines.push("");
 
@@ -89,7 +132,7 @@ export function composeAuditResponse(report: RepairAuditReport): string {
     );
   } else if (missingFindings.length > 0) {
     lines.push(
-      `The insurance estimate is missing ${missingFindings.length} documented operation(s) identified in this review.`
+      `The insurance estimate still carries ${missingFindings.length} documented mismatch or exposure item(s) identified in this review.`
     );
   } else {
     lines.push(

@@ -238,6 +238,9 @@ function composeAuditResponseFromReport(report: RepairIntelligenceReport): strin
   const criticalIssues = report.issues.filter(
     (issue) => issue.severity === "high"
   ).length;
+  const missingProcedureSet = new Set(
+    report.missingProcedures.map((procedure) => procedure.toLowerCase())
+  );
 
   return composeAuditResponse({
     executiveSummary: report.recommendedActions,
@@ -252,7 +255,14 @@ function composeAuditResponseFromReport(report: RepairIntelligenceReport): strin
               ? "scan"
               : "calibration",
       title: issue.title,
-      status: report.missingProcedures.includes(issue.title) ? "missing" : "included",
+      status:
+        issue.missingOperation && missingProcedureSet.has(issue.missingOperation.toLowerCase())
+          ? "missing"
+          : issue.title.toLowerCase().startsWith("missing required procedure:")
+            ? "missing"
+            : issue.category === "documentation" || issue.category === "parts"
+              ? "missing"
+              : "included",
       severity: issue.severity,
       conclusion: issue.finding,
       rationale: issue.impact,

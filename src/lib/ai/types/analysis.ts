@@ -2,6 +2,13 @@ import type { EvidenceRecord } from "./evidence";
 
 export type FindingStatus = "included" | "missing" | "not_shown";
 export type Severity = "low" | "medium" | "high";
+export type FindingBucket =
+  | "critical"
+  | "compliance"
+  | "supplement"
+  | "quality"
+  | "parts"
+  | "adas";
 
 export interface EvidenceRef {
   source: string;
@@ -49,6 +56,32 @@ export type AuditRule = {
   evaluate: (context: AuditRuleContext) => FindingStatus;
   severity: Severity;
 };
+
+export interface AnalysisFinding {
+  id: string;
+  bucket: FindingBucket;
+  category: string;
+  title: string;
+  detail: string;
+  severity: Severity;
+  status: "included" | "missing" | "reduced" | "exposure";
+  evidence: EvidenceRef[];
+}
+
+export interface AnalysisSummary {
+  riskScore: "low" | "moderate" | "high";
+  confidence: "low" | "moderate" | "high";
+  criticalIssues: number;
+  evidenceQuality: "weak" | "moderate" | "strong";
+}
+
+export interface AnalysisResult {
+  summary: AnalysisSummary;
+  findings: AnalysisFinding[];
+  supplements: AnalysisFinding[];
+  evidence: EvidenceRef[];
+  narrative: string;
+}
 
 // Legacy v2 contract still used by the current orchestrator/UI.
 // Keep it exported while the app migrates to RepairAuditReport.
