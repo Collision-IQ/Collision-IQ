@@ -1,8 +1,16 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
-import { retrieveDocuments } from "@/lib/rag/retrieve";
 import type { RetrieveResult } from "@/lib/rag/retrieve";
 import { runRepairPipeline } from "@/lib/ai/pipeline/repairPipeline";
+import { orchestrateRetrieval } from "@/lib/ai/retrievalOrchestrator";
+import { orchestrateConversation } from "@/lib/ai/orchestrator/conversationOrchestrator";
+import { parseEstimate } from "@/lib/ai/extractors/estimateExtractor";
+import { extractComparisonFacts } from "@/lib/ai/extractors/comparisonExtractor";
+import { extractOemRequirements } from "@/lib/ai/extractors/oemProcedureExtractor";
+import { buildAuditFindings } from "@/lib/ai/validators/buildAuditFindings";
+import { composeAuditResponse } from "@/lib/ai/reasoning/composeAuditResponse";
+import { buildAuditPrompt } from "@/lib/ai/reasoning/analysisPrompt";
+import type { RepairAuditReport } from "@/lib/ai/types/analysis";
 import {
   buildInspectorPanelData,
   buildRepairIntelligenceReport,
@@ -703,10 +711,19 @@ export async function POST(req: Request) {
       .map((attachment) => ({
         filename: attachment.filename,
         dataUrl: attachment.imageDataUrl as string,
-      }));
+    }));
+    const auditReport = buildDeterministicAuditReport(documents);
+    const structuredAudit = auditReport
+      ? composeAuditResponse(auditReport)
+      : "";
     const analysis = runRepairPipeline(documents);
     const repairIntelligenceBlock = buildRepairIntelligenceReport(analysis);
-    const inspectorPanelData = buildInspectorPanelData(analysis);
+    const inspectorPanelData = auditReport
+      ? buildInspectorPanelDataFromAuditReport(auditReport)
+      : buildInspectorPanelData(analysis);
+    const auditPromptBlock = auditReport
+      ? buildAuditPrompt(structuredAudit)
+      : "";
 
     const attachedContext = buildAttachedContext(documents);
     const triggerBlock = buildTriggerBlock(documents);
@@ -747,17 +764,40 @@ const lastUserMessage =
     ) ?? null;
 
 let activeContext: ActiveContext | null = body.activeContext ?? null;
+let orchestratedPrompt = "";
 
 if (lastUserMessage && typeof lastUserMessage.content === "string") {
   const extracted = extractContextFromText(lastUserMessage.content);
   activeContext = mergeActiveContext(activeContext, extracted);
 
-  matches = await retrieveDocuments({
-    query: lastUserMessage.content,
-    vehicle: activeContext?.vehicle?.make ?? null,
-    system: activeContext?.repair?.system ?? null,
-    component: activeContext?.repair?.component ?? null,
-    procedure: activeContext?.repair?.procedure ?? null,
+  const orchestrated = await orchestrateConversation({
+    artifactIds: body.attachmentIds || [],
+    userMessage: lastUserMessage.content,
+    conversationHistory: incomingMessages
+      .filter(
+        (
+          m
+        ): m is IncomingMessage & {
+          role: "user" | "assistant";
+          content: string;
+        } =>
+          m &&
+          (m.role === "user" || m.role === "assistant") &&
+          typeof m.content === "string"
+      )
+      .map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+    activeContext,
+  });
+
+  orchestratedPrompt = orchestrated.prompt;
+
+  matches = await orchestrateRetrieval({
+    userQuery: lastUserMessage.content,
+    activeContext,
+    intelligence: analysis,
     limit: 5,
   });
 
@@ -796,6 +836,7 @@ ${chunks}
 }
 
     const combinedContext =
+      (auditPromptBlock ? auditPromptBlock + "\n\n" : "") +
       (repairIntelligenceBlock ? repairIntelligenceBlock + "\n\n" : "") +
       (documentPriorityBlock ? documentPriorityBlock + "\n\n" : "") +
       (triggerBlock ? triggerBlock + "\n\n" : "") +
@@ -833,12 +874,38 @@ ${chunks}
     const input = [
       {
         role: "system",
-        content: [{ type: "input_text", text: SYSTEM_PROMPT }],
+        content: [
+          {
+            type: "input_text",
+            text: orchestratedPrompt || SYSTEM_PROMPT,
+          },
+        ],
       },
       ...safeMessages,
     ];
 
-    if (analysis.issues.length > 0 || analysis.requiredProcedures.length > 0) {
+    if (structuredAudit) {
+      input.push({
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text: `
+Technical repair audit findings generated from document extraction:
+
+${structuredAudit}
+
+Respond conversationally but do not contradict the findings.
+`.trim(),
+          },
+        ],
+      });
+    }
+
+    if (
+      analysis.complianceIssues.length > 0 ||
+      analysis.requiredProcedures.length > 0
+    ) {
       input.push({
         role: "system",
         content: [
@@ -853,7 +920,7 @@ ${JSON.stringify(
     operations: analysis.operations,
     requiredProcedures: analysis.requiredProcedures,
     missingProcedures: analysis.missingProcedures,
-    issues: analysis.issues,
+    issues: analysis.complianceIssues,
   },
   null,
   2
@@ -900,12 +967,17 @@ Analyze visible damage, severity, likely repair operations, and safety risks.`,
     // Call OpenAI with streaming
     // ------------------------------
 
+    const useWebSearch =
+      documents.length === 0 &&
+      images.length === 0 &&
+      matches.length === 0;
+
     const stream = await openai.responses.stream(
       {
         model: "gpt-4o",
         input,
         temperature: 0.2,
-        tools: [{ type: "web_search" }],
+        ...(useWebSearch ? { tools: [{ type: "web_search" as const }] } : {}),
       } as Parameters<typeof openai.responses.stream>[0]
     );
 
@@ -940,10 +1012,81 @@ Analyze visible damage, severity, likely repair operations, and safety risks.`,
     );
   } catch (error) {
     console.error("Chat route error:", error);
+    const message =
+      error instanceof Error ? error.message : "Chat failed.";
 
     return NextResponse.json(
-      { error: "Chat failed." },
+      { error: message },
       { status: 500 }
     );
   }
+}
+
+function buildDeterministicAuditReport(
+  documents: UploadedDocument[]
+): RepairAuditReport | null {
+  const shopText =
+    findDocumentText(documents, ["shop", "body shop", "repair facility"]) ?? null;
+  const insurerText =
+    findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"]) ?? null;
+  const oemText =
+    findDocumentText(documents, ["oem", "adas", "procedure", "bmw"]) ?? null;
+
+  if (!shopText || !insurerText || !oemText) {
+    return null;
+  }
+
+  const shopParsed = parseEstimate(shopText);
+  const insurerParsed = parseEstimate(insurerText);
+  const facts = extractComparisonFacts(shopParsed, insurerParsed);
+  const oemReqs = extractOemRequirements(oemText);
+  return buildAuditFindings(facts, oemReqs);
+}
+
+function findDocumentText(
+  documents: UploadedDocument[],
+  keywords: string[]
+): string | undefined {
+  const match = documents.find((document) => {
+    const haystack = `${document.filename ?? ""} ${document.name ?? ""}`.toLowerCase();
+    return keywords.some((keyword) => haystack.includes(keyword));
+  });
+
+  return match?.text;
+}
+
+function buildInspectorPanelDataFromAuditReport(report: RepairAuditReport) {
+  const criticalMissingFindings = report.findings.filter(
+    (finding) => finding.severity === "high" && finding.status === "missing"
+  );
+  const missingFindings = report.findings.filter(
+    (finding) => finding.status === "missing"
+  );
+  const evidenceRefs = report.findings.flatMap((finding) =>
+    finding.evidence.map((evidence) =>
+      `${finding.title}: ${evidence.source}${evidence.page ? `, page ${evidence.page}` : ""}`
+    )
+  );
+
+  return {
+    riskScore:
+      criticalMissingFindings.length >= 2
+        ? "high"
+        : criticalMissingFindings.length === 1
+          ? "medium"
+          : "low",
+    confidence:
+      evidenceRefs.length >= 4 ? "high" : evidenceRefs.length >= 2 ? "medium" : "low",
+    criticalIssues: criticalMissingFindings.length,
+    evidenceQuality: evidenceRefs.length >= 4 ? "present" : evidenceRefs.length >= 1 ? "limited" : "none",
+    keyRisks: criticalMissingFindings.map((finding) => finding.title),
+    complianceIssues: missingFindings.map((finding) => finding.conclusion),
+    supplementOpportunities: missingFindings
+      .filter(
+        (finding) =>
+          finding.category === "corrosion" && finding.status === "missing"
+      )
+      .map((finding) => finding.conclusion),
+    evidenceReferences: [...new Set(evidenceRefs)],
+  };
 }

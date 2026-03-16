@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Image from "next/image";
 import { jsPDF } from "jspdf";
 import ChatWidget, { type InspectorPanelData } from "@/components/ChatWidget";
@@ -19,17 +19,18 @@ const EMPTY_PANEL: InspectorPanelData = {
 
 export default function ChatbotPage() {
   const isMobile = useIsMobile();
-  const [railOpen, setRailOpen] = useState(false);
+  const [desktopRailOpen, setDesktopRailOpen] = useState(false);
   const [attachment, setAttachment] = useState<string | null>(null);
   const [analysisText, setAnalysisText] = useState("");
   const [panelData, setPanelData] = useState<InspectorPanelData | null>(null);
 
-  useEffect(() => {
-    if (isMobile === null) return;
-    setRailOpen(false);
-  }, [isMobile]);
-
   const inspector = useMemo(() => panelData ?? EMPTY_PANEL, [panelData]);
+  const railOpen = isMobile ? false : desktopRailOpen;
+
+  function handleRailOpenChange(next: boolean) {
+    if (isMobile) return;
+    setDesktopRailOpen(next);
+  }
 
   if (isMobile === null) return null;
 
@@ -84,7 +85,7 @@ export default function ChatbotPage() {
 
       {isMobile && !railOpen && (
         <button
-          onClick={() => setRailOpen(true)}
+          onClick={() => handleRailOpenChange(true)}
           className="fixed bottom-6 right-6 rounded-full bg-orange-500 hover:bg-orange-600 px-5 py-3 text-white shadow-lg z-50"
         >
           Insights
@@ -94,7 +95,7 @@ export default function ChatbotPage() {
       {isMobile && railOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-xl z-50">
           <button
-            onClick={() => setRailOpen(false)}
+            onClick={() => handleRailOpenChange(false)}
             className="absolute top-4 right-4 text-white text-xl"
           >
             X

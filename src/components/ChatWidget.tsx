@@ -170,7 +170,20 @@ export default function ChatWidget({
         }),
       });
 
-      if (!response.ok) throw new Error(`Chat API failed (${response.status})`);
+      if (!response.ok) {
+        let errorMessage = `Chat API failed (${response.status})`;
+
+        try {
+          const data = (await response.json()) as { error?: string };
+          if (data?.error) {
+            errorMessage = data.error;
+          }
+        } catch {
+          // Ignore JSON parse failures and keep the fallback message.
+        }
+
+        throw new Error(errorMessage);
+      }
 
       const contentType = response.headers.get("content-type") || "";
       const repairIntelligenceHeader = response.headers.get("x-repair-intelligence");
@@ -395,8 +408,18 @@ export default function ChatWidget({
                         p: ({ children }) => (
                           <p className="mt-2 text-white/85 leading-[1.65]">{children}</p>
                         ),
+                        ul: ({ children }) => (
+                          <ul className="mt-2 ml-5 list-disc space-y-1 text-white/80">
+                            {children}
+                          </ul>
+                        ),
+                        ol: ({ children }) => (
+                          <ol className="mt-2 ml-5 list-decimal space-y-1 text-white/80">
+                            {children}
+                          </ol>
+                        ),
                         li: ({ children }) => (
-                          <li className="mt-1 text-white/80 list-disc ml-5">
+                          <li className="text-white/80">
                             {children}
                           </li>
                         ),

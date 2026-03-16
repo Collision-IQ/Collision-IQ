@@ -1,3 +1,16 @@
+export interface EstimateLine {
+  lineNo?: number;
+  op: string;
+  raw: string;
+}
+
+export interface ParsedEstimate {
+  totalCost?: number;
+  bodyHours?: number;
+  paintHours?: number;
+  lines: EstimateLine[];
+}
+
 export interface EstimateOperation {
   operation: string;
   component: string;
@@ -5,45 +18,66 @@ export interface EstimateOperation {
   laborHours?: number;
 }
 
-export function extractEstimateOps(text: string): EstimateOperation[] {
-  const operations: EstimateOperation[] = [];
+export function parseEstimate(text: string): ParsedEstimate {
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  const out: ParsedEstimate = { lines: [] };
 
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    const match = trimmed.match(
-      /\b(R&I|R\s*&\s*I|Remove\s*&\s*Install|Remove\/Install|Repl|Replace|Rpr|Repair|Blnd|Blend|Cal(?:ibration)?|Scan)\b\s+(.+?)(?:\s+(\d+(?:\.\d+)?))?$/i
+  for (const line of lines) {
+    const opMatch = line.match(
+      /^(\d+)?\s*(R&I|Repl|Rpr|Blnd|Subl|Algn)\s+(.*)$/i
     );
 
-    if (!match) continue;
+    if (opMatch) {
+      out.lines.push({
+        lineNo: opMatch[1] ? Number(opMatch[1]) : undefined,
+        op: opMatch[2],
+        raw: opMatch[3].trim(),
+      });
+    }
 
-    operations.push({
-      operation: normalizeOperation(match[1]),
-      component: match[2].trim(),
-      rawLine: trimmed,
-      laborHours: match[3] ? Number(match[3]) : undefined,
-    });
+    if (out.totalCost === undefined) {
+      const totalMatch = line.match(/Grand Total\s+([\d,]+\.\d{2})/i);
+      if (totalMatch) {
+        out.totalCost = Number(totalMatch[1].replace(/,/g, ""));
+      }
+    }
+
+    if (out.bodyHours === undefined) {
+      const bodyMatch = line.match(/Body(?: Labor| Hrs?)?\s+([\d.]+)/i);
+      if (bodyMatch) {
+        out.bodyHours = Number(bodyMatch[1]);
+      }
+    }
+
+    if (out.paintHours === undefined) {
+      const paintMatch = line.match(/(?:Paint|Refinish)(?: Labor| Hrs?)?\s+([\d.]+)/i);
+      if (paintMatch) {
+        out.paintHours = Number(paintMatch[1]);
+      }
+    }
   }
 
-  return operations;
+  return out;
+}
+
+export function hasLine(parsed: ParsedEstimate, pattern: RegExp): boolean {
+  return parsed.lines.some((line) => pattern.test(line.raw));
+}
+
+export function extractEstimateOps(text: string): EstimateOperation[] {
+  const parsed = parseEstimate(text);
+
+  return parsed.lines.map((line) => ({
+    operation: normalizeOperation(line.op),
+    component: line.raw,
+    rawLine: line.lineNo ? `${line.lineNo} ${line.op} ${line.raw}` : `${line.op} ${line.raw}`,
+  }));
 }
 
 function normalizeOperation(operation: string): string {
   const lower = operation.toLowerCase();
 
-  if (
-    lower === "r&i" ||
-    lower === "r & i" ||
-    lower === "remove & install" ||
-    lower === "remove/install"
-  ) {
-    return "R&I";
-  }
-
-  if (lower === "replace") return "Repl";
-  if (lower === "repair") return "Rpr";
-  if (lower === "blend") return "Blnd";
-  if (lower.startsWith("cal")) return "Cal";
-  if (lower === "scan") return "Scan";
-
+  if (lower === "subl") return "Subl";
+  if (lower === "algn") return "Algn";
   return operation;
 }
