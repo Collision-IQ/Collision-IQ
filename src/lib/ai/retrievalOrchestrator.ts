@@ -1,9 +1,9 @@
 import { type ActiveContext } from "@/lib/context/activeContext";
-import {
-  retrieveDocuments,
-  type RetrieveResult,
-} from "@/lib/rag/retrieve";
 import { inferGraphRelations } from "./graph/repairKnowledgeGraph";
+import {
+  runRetrieval,
+  type RetrievalHit,
+} from "./orchestrator/retrievalOrchestrator";
 import { type RepairPipelineResult } from "./pipeline/repairPipeline";
 
 type RetrievalOrchestratorParams = {
@@ -18,7 +18,7 @@ export async function orchestrateRetrieval({
   activeContext,
   intelligence,
   limit = 5,
-}: RetrievalOrchestratorParams): Promise<RetrieveResult[]> {
+}: RetrievalOrchestratorParams): Promise<RetrievalHit[]> {
   const graphInferences = inferGraphRelations(
     intelligence.operations.map((operation) => operation.component)
   );
@@ -53,7 +53,13 @@ export async function orchestrateRetrieval({
   const settled = await Promise.all(
     queryPlans.map(async (plan) => {
       try {
-        return await retrieveDocuments(plan);
+        return await runRetrieval({
+          query: plan.query,
+          vehicle: plan.vehicle ?? undefined,
+          system: plan.system ?? undefined,
+          component: plan.component ?? undefined,
+          procedure: plan.procedure ?? undefined,
+        });
       } catch (error) {
         console.error("Retrieval plan failed:", plan, error);
         return [];
@@ -64,8 +70,8 @@ export async function orchestrateRetrieval({
   return dedupeResults(settled.flat()).slice(0, limit);
 }
 
-function dedupeResults(results: RetrieveResult[]): RetrieveResult[] {
-  const seen = new Map<string, RetrieveResult>();
+function dedupeResults(results: RetrievalHit[]): RetrievalHit[] {
+  const seen = new Map<string, RetrievalHit>();
 
   for (const result of results) {
     const key = `${result.drive_path ?? ""}:${result.text}`.trim();

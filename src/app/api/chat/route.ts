@@ -1,9 +1,12 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
-import type { RetrieveResult } from "@/lib/rag/retrieve";
 import { runAnalysis } from "@/lib/ai/pipeline/runAnalysis";
 import { runRepairPipeline } from "@/lib/ai/pipeline/repairPipeline";
-import { orchestrateRetrieval } from "@/lib/ai/retrievalOrchestrator";
+import { extractContext } from "@/lib/ai/context/extractContext";
+import {
+  runRetrieval,
+  type RetrievalHit,
+} from "@/lib/ai/orchestrator/retrievalOrchestrator";
 import { orchestrateConversation } from "@/lib/ai/orchestrator/conversationOrchestrator";
 import { buildAuditPrompt } from "@/lib/ai/reasoning/analysisPrompt";
 import { buildRepairIntelligenceReport } from "@/lib/ai/report/intelligenceReport";
@@ -741,7 +744,7 @@ export async function POST(req: Request) {
 // ------------------------------
 
 let retrievalBlock = "";
-let matches: RetrieveResult[] = [];
+let matches: RetrievalHit[] = [];
 
 const lastUserMessage =
   [...incomingMessages]
@@ -781,15 +784,24 @@ if (lastUserMessage && typeof lastUserMessage.content === "string") {
 
   orchestratedPrompt = orchestrated.prompt;
 
-  matches = await orchestrateRetrieval({
-    userQuery: lastUserMessage.content,
-    activeContext,
-    intelligence: analysis,
-    limit: 5,
+  const shopText = findDocumentText(documents, ["shop", "body shop", "repair facility"]) ?? "";
+  const insurerText =
+    findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"]) ?? "";
+  const retrievalContext = extractContext(
+    `${shopText}\n${insurerText}\n${lastUserMessage.content}`
+  );
+
+  matches = await runRetrieval({
+    query: lastUserMessage.content,
+    ...retrievalContext,
   });
 
   console.log("ACTIVE CONTEXT:", activeContext);
   console.log("RAG MATCHES:", matches.length);
+  console.log("RETRIEVAL RESULTS");
+  matches.forEach((doc, index) => {
+    console.log(index + 1, doc.source, doc.score);
+  });
 }
 
 if (Array.isArray(matches) && matches.length > 0) {
