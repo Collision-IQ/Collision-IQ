@@ -825,6 +825,7 @@ if (lastUserMessage && typeof lastUserMessage.content === "string") {
   });
 
   console.log("ACTIVE CONTEXT:", activeContext);
+  console.log("DRIVE FILES FOUND:", matches.length);
   console.log("RAG MATCHES:", matches.length);
   console.log("RETRIEVAL RESULTS");
   matches.forEach((doc, index) => {
