@@ -1,5 +1,6 @@
 import { hybridSearch } from "@/lib/rag/search";
 import type { RetrieveResult } from "@/lib/rag/retrieve";
+import type { RetrievedChunk } from "@/lib/types";
 
 export interface RetrievalContext {
   vehicle?: string;
@@ -9,7 +10,7 @@ export interface RetrievalContext {
   query: string;
 }
 
-export interface RetrievalHit extends RetrieveResult {
+export interface RetrievalHit extends RetrievedChunk {
   id: string;
   source: string;
   score: number | null;
@@ -31,16 +32,12 @@ export async function runRetrieval(
     queries.map(async (query) => {
       const hits = await hybridSearch(query);
       return hits.slice(0, 5).map((hit) => ({
-        id: `${hit.drive_path ?? "unknown"}:${hit.text.slice(0, 80)}`,
-        text: hit.text ?? "",
-        drive_path: hit.drive_path ?? null,
-        similarity: hit.similarity ?? null,
-        oem: hit.oem ?? null,
-        system: hit.system ?? null,
-        component: hit.component ?? null,
-        procedure: hit.procedure ?? null,
-        source: hit.drive_path ?? "Unknown",
-        score: hit.similarity ?? null,
+        id: `${hit.file_id ?? "unknown"}:${hit.content.slice(0, 80)}`,
+        content: hit.content ?? "",
+        file_id: hit.file_id ?? "",
+        distance: hit.distance ?? null,
+        source: hit.file_id ?? "Unknown",
+        score: hit.distance ?? null,
       }));
     })
   );

@@ -1,26 +1,9 @@
-import { prisma } from "@/lib/prisma";
 import { keywordSearch } from "./keywordSearch";
 import { embedText } from "./embed";
+import type { RetrievedChunk } from "@/lib/types";
+import { searchChunks } from "./searchChunks";
 
-type ChunkMatch = {
-  text: string;
-  drive_path: string | null;
-  similarity: number | null;
-  oem?: string | null;
-  system?: string | null;
-  component?: string | null;
-  procedure?: string | null;
-};
-
-async function withPrismaRetry<T>(run: () => Promise<T>): Promise<T> {
-  try {
-    return await run();
-  } catch (error) {
-    console.error("RAG vector query failed, retrying once:", error);
-    await prisma.$connect();
-    return run();
-  }
-}
+type ChunkMatch = RetrievedChunk;
 
 /*
 ---------------------------------------------
@@ -34,37 +17,6 @@ function detectMetadata(query: string) {
     values.find((v) => lower.includes(v.toLowerCase())) ?? null;
 
   return {
-    oem: match([
-      "Tesla",
-      "Honda",
-      "Toyota",
-      "Ford",
-      "GM",
-      "Chevrolet",
-      "Nissan",
-      "Hyundai",
-      "Kia",
-      "Subaru",
-      "Mazda",
-      "BMW",
-      "Mercedes",
-      "Audi",
-      "Volkswagen",
-      "Lexus",
-      "Jeep",
-      "Dodge",
-      "Ram",
-      "GMC",
-      "Cadillac",
-      "Acura",
-      "Infiniti",
-      "Lincoln",
-      "Volvo",
-      "Porsche",
-      "Jaguar",
-      "Land Rover",
-      "Mini",
-    ]),
     system: match([
       "ADAS",
       "SRS",
@@ -107,69 +59,6 @@ function detectMetadata(query: string) {
 
 /*
 ---------------------------------------------
-Convert embedding → pgvector literal
----------------------------------------------
-*/
-function toVectorLiteral(embedding: number[]) {
-  if (!Array.isArray(embedding) || embedding.length === 0) return null;
-
-  const safe = embedding
-    .map((n) => (Number.isFinite(n) ? n : 0))
-    .join(",");
-
-  return `[${safe}]`;
-}
-
-/*
----------------------------------------------
-Vector similarity search
----------------------------------------------
-*/
-export async function searchSimilarChunks(
-  embedding: number[],
-  limit = 5,
-  oem?: string | null
-): Promise<ChunkMatch[]> {
-
-  const vec = toVectorLiteral(embedding);
-  if (!vec) return [];
-
-  const safeLimit = Math.max(1, Math.min(limit, 20));
-
-  const rows = await withPrismaRetry(() =>
-    prisma.$queryRawUnsafe<ChunkMatch[]>(
-      `
-        SELECT
-          text,
-          drive_path,
-          oem,
-          system,
-          component,
-          procedure,
-          (
-            (1 - (embedding <=> '${vec}'))
-            + CASE
-                WHEN $1::text IS NOT NULL AND oem = $1::text THEN 0.2
-                ELSE 0
-              END
-            + (authority / 100.0) * 0.2
-          ) AS similarity
-        FROM document_chunks
-        WHERE embedding IS NOT NULL
-        ORDER BY similarity DESC
-        LIMIT $2
-      `,
-      oem,
-      safeLimit
-    )
-  );
-
-  return rows ?? [];
-}
-
-
-/*
----------------------------------------------
 Hybrid search
 ---------------------------------------------
 */
@@ -178,8 +67,12 @@ export async function hybridSearch(query: string) {
 
   const embedding = await embedText(query);
 
-  const vectorResults = await searchSimilarChunks(embedding, 5, metadata.oem);
-  const keywordResults = await keywordSearch(query, 5);
+  const vectorResults = (await searchChunks(embedding, 5)).map((chunk) => ({
+    ...chunk,
+  }));
+  const keywordResults = (await keywordSearch(query, 5)).map((chunk) => ({
+    ...chunk,
+  }));
 
   const combined: ChunkMatch[] = [...vectorResults, ...keywordResults];
 
@@ -191,28 +84,22 @@ export async function hybridSearch(query: string) {
   const unique = new Map<string, ChunkMatch>();
 
   for (const r of combined) {
-    unique.set(r.text, r);
+    unique.set(r.content, r);
   }
 
   let candidates = [...unique.values()];
 
   /*
   ---------------------------------------------
-  Metadata boost scoring
+  Distance ranking
   ---------------------------------------------
   */
   candidates = candidates
-    .map((c) => {
-      let score = c.similarity ?? 0;
-
-      if (metadata.oem && c.oem === metadata.oem) score += 0.3;
-      if (metadata.system && c.system === metadata.system) score += 0.2;
-      if (metadata.component && c.component === metadata.component) score += 0.2;
-      if (metadata.procedure && c.procedure === metadata.procedure) score += 0.2;
-
-      return { ...c, similarity: score };
-    })
-    .sort((a, b) => (b.similarity ?? 0) - (a.similarity ?? 0))
+    .sort(
+      (a, b) =>
+        (a.distance ?? Number.POSITIVE_INFINITY) -
+        (b.distance ?? Number.POSITIVE_INFINITY)
+    )
     .slice(0, 10);
 
   /*

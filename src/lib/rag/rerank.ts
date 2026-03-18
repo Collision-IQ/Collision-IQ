@@ -1,12 +1,9 @@
 import OpenAI from "openai";
+import type { RetrievedChunk } from "@/lib/types";
 
 const openai = new OpenAI();
 
-type ChunkMatch = {
-  text: string;
-  drive_path: string | null;
-  similarity: number | null;
-  oem?: string | null;
+type ChunkMatch = RetrievedChunk & {
   system?: string | null;
   component?: string | null;
   procedure?: string | null;
@@ -28,7 +25,7 @@ ${query}
 
 Passages:
 ${chunks
-  .map((c, i) => `[${i}] ${c.text.substring(0, 500)}`)
+  .map((c, i) => `[${i}] ${c.content.substring(0, 500)}`)
   .join("\n\n")}
 
 Return the numbers of the ${topK} most relevant passages in order.

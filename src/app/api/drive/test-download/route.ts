@@ -1,5 +1,18 @@
 import { google } from "googleapis";
 import { NextResponse } from "next/server";
+import OpenAI from "openai";
+import { embedTexts } from "@/lib/rag/embed";
+import { upsertChunks } from "@/lib/rag/upsert";
+
+function chunkText(text: string, size = 500) {
+  const chunks: string[] = [];
+
+  for (let i = 0; i < text.length; i += size) {
+    chunks.push(text.slice(i, i + size));
+  }
+
+  return chunks;
+}
 
 export async function GET() {
   try {
@@ -16,24 +29,78 @@ export async function GET() {
       version: "v3",
       auth: oauth2Client,
     });
+    const openai = new OpenAI();
 
-    const fileId = "1QqXq-KHPUBtcekzf2Zg-gpNrYgIufv_o";
-
-    const response = await drive.files.get({
+    const fileId = "1xoFF0VuqR_mCXgH9QkcI5xifWlTCmY7N";
+    const metadata = await drive.files.get({
       fileId,
-      alt: "media",
+      fields: "id, name, modifiedTime",
       supportsAllDrives: true,
-      acknowledgeAbuse: true,
+    });
+
+    const response = await drive.files.get(
+      {
+        fileId,
+        alt: "media",
+        supportsAllDrives: true,
+      },
+      { responseType: "arraybuffer" },
+    );
+
+    const base64 = Buffer.from(response.data as ArrayBuffer).toString("base64");
+
+    const result = await openai.responses.create({
+      model: "gpt-4.1",
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "Extract all readable text from this PDF document.",
+            },
+            {
+              type: "input_file",
+              file_data: `data:application/pdf;base64,${base64}`,
+              filename: "document.pdf",
+            },
+          ],
+        },
+      ],
+    });
+
+    const extractedText = result.output[0]?.content[0]?.text ?? "";
+    const cleanText = extractedText
+      .replace(/\n+/g, "\n")
+      .replace(/\*\*/g, "")
+      .trim();
+
+    const chunks = chunkText(cleanText);
+    const embeddings = await embedTexts(chunks);
+
+    await upsertChunks({
+      driveFileId: fileId,
+      drivePath: metadata.data.name ?? "document.pdf",
+      modifiedTime: metadata.data.modifiedTime ?? new Date().toISOString(),
+      chunks: chunks.map((chunk, index) => ({
+        text: chunk,
+        embedding: embeddings[index] ?? [],
+        chunkIndex: index,
+        docType: "oem_doc",
+      })),
     });
 
     return NextResponse.json({
       success: true,
-      contentPreview: JSON.stringify(response.data).slice(0, 500),
+      text: cleanText,
+      chunks: chunks.length,
+      embedded: embeddings.length,
+      fileId,
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("OPENAI PDF ERROR:", err);
 
-    console.error("DOWNLOAD ERROR:", err);
+    const message = err instanceof Error ? err.message : "Unknown error";
 
     return NextResponse.json(
       {

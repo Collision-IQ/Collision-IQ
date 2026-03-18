@@ -8,6 +8,7 @@ import type {
   AnalysisIssue,
   RepairIntelligenceReport,
   RequiredProcedureRecord,
+  Severity,
 } from "../types/analysis";
 import type { EvidenceRecord } from "../types/evidence";
 
@@ -69,14 +70,35 @@ export async function runRepairAnalysis({
     limit: 5,
   });
 
+  const estimateText = documents.map((document) => document.text ?? "").join("\n\n");
+  const ragProcedures = inferProceduresFromRag({
+    estimateText,
+    retrievedEvidence,
+    sessionContext,
+  });
+
   const evidence = buildEvidenceRecords(pipeline.evidenceReferences, retrievedEvidence);
-  const issues = buildIssues(pipeline, evidence);
-  const requiredProcedures = buildRequiredProcedures(pipeline);
-  const presentProcedures = pipeline.requiredProcedures
+  const issues = buildIssues(pipeline, evidence, ragProcedures);
+  const requiredProcedures = mergeRequiredProcedures(
+    buildRequiredProcedures(pipeline),
+    ragProcedures
+  );
+  const presentProcedures = dedupeStrings([
+    ...pipeline.requiredProcedures
     .map((procedure) => procedure.procedure)
-    .filter((procedure) => !pipeline.missingProcedures.some((missing) => missing.procedure === procedure));
-  const missingProcedures = pipeline.missingProcedures.map((procedure) => procedure.procedure);
-  const supplementOpportunities = pipeline.supplementOpportunities.map((issue) => issue.issue);
+    .filter((procedure) => !pipeline.missingProcedures.some((missing) => missing.procedure === procedure)),
+    ...ragProcedures.filter((procedure) => !procedure.isMissing).map((procedure) => procedure.procedure),
+  ]);
+  const missingProcedures = dedupeStrings([
+    ...pipeline.missingProcedures.map((procedure) => procedure.procedure),
+    ...ragProcedures.filter((procedure) => procedure.isMissing).map((procedure) => procedure.procedure),
+  ]);
+  const supplementOpportunities = dedupeStrings([
+    ...pipeline.supplementOpportunities.map((issue) => issue.issue),
+    ...ragProcedures
+      .filter((procedure) => procedure.isMissing && procedure.category === "supplement")
+      .map((procedure) => `Add and document ${procedure.procedure}.`),
+  ]);
 
   const highSeverityIssues = issues.filter((issue) => issue.severity === "high").length;
   const mediumSeverityIssues = issues.filter((issue) => issue.severity === "medium").length;
@@ -96,7 +118,7 @@ export async function runRepairAnalysis({
       }),
       criticalIssues: highSeverityIssues,
       evidenceQuality: computeEvidenceQuality({
-        oemEvidenceCount: evidence.filter((item) => item.authority === "oem").length,
+        oemEvidenceCount: 0,
         totalEvidenceCount: evidence.length,
       }),
     },
@@ -114,9 +136,8 @@ export async function runRepairAnalysis({
 function buildEvidenceRecords(
   pipelineReferences: string[],
   retrievalEvidence: Array<{
-    text: string;
-    drive_path?: string | null;
-    oem?: string | null;
+    content: string;
+    file_id?: string | null;
   }>
 ): EvidenceRecord[] {
   const inline = pipelineReferences.map((reference, index) => ({
@@ -129,10 +150,10 @@ function buildEvidenceRecords(
 
   const retrieved = retrievalEvidence.map((item, index) => ({
     id: `retrieved-${index + 1}`,
-    title: item.drive_path || `Retrieved Evidence ${index + 1}`,
-    snippet: item.text.slice(0, 280),
-    source: item.drive_path || "drive-knowledge-base",
-    authority: item.oem ? ("oem" as const) : ("internal" as const),
+    title: item.file_id || `Retrieved Evidence ${index + 1}`,
+    snippet: item.content.slice(0, 280),
+    source: item.file_id || "drive-knowledge-base",
+    authority: "internal" as const,
   }));
 
   return [...inline, ...retrieved].slice(0, 8);
@@ -140,9 +161,10 @@ function buildEvidenceRecords(
 
 function buildIssues(
   pipeline: ReturnType<typeof runRepairPipeline>,
-  evidence: EvidenceRecord[]
+  evidence: EvidenceRecord[],
+  ragProcedures: RAGProcedure[]
 ): AnalysisIssue[] {
-  return pipeline.complianceIssues.map((issue, index) => ({
+  const pipelineIssues = pipeline.complianceIssues.map((issue, index) => ({
     id: `issue-${index + 1}`,
     category:
       issue.category === "calibration_requirement"
@@ -161,6 +183,32 @@ function buildIssues(
     severity: issue.severity,
     evidenceIds: evidence.slice(0, 2).map((item) => item.id),
   }));
+
+  const ragIssues = ragProcedures
+    .filter((procedure) => procedure.isMissing)
+    .map((procedure, index) => ({
+      id: `rag-issue-${index + 1}`,
+      category:
+        procedure.category === "adas"
+          ? "calibration"
+          : procedure.category === "supplement"
+            ? "parts"
+            : procedure.category === "safety"
+              ? "safety"
+              : procedure.procedure.toLowerCase().includes("scan")
+                ? "scan"
+                : "documentation",
+      title: `Missing required procedure: ${procedure.procedure}`,
+      finding: `Missing required procedure: ${procedure.procedure}`,
+      impact: `${procedure.reason} OEM context: ${procedure.evidenceSnippet}`,
+      missingOperation: procedure.procedure,
+      severity: procedure.severity,
+      evidenceIds: evidence
+        .filter((item) => item.id === procedure.evidenceId)
+        .map((item) => item.id),
+    }));
+
+  return dedupeIssuesByTitle([...pipelineIssues, ...ragIssues]);
 }
 
 function buildRequiredProcedures(
@@ -188,6 +236,212 @@ function buildRecommendedActions(
   ];
 
   return [...new Set(actions)].slice(0, 6);
+}
+
+type RAGProcedure = {
+  procedure: string;
+  reason: string;
+  source: "oem_doc";
+  severity: Severity;
+  category: "adas" | "scanning" | "compliance" | "safety" | "supplement";
+  isMissing: boolean;
+  evidenceSnippet: string;
+  evidenceId: string;
+};
+
+const RAG_PROCEDURE_RULES: Array<{
+  procedure: string;
+  aliases: string[];
+  triggerKeywords: string[];
+  category: RAGProcedure["category"];
+  severity: Severity;
+  rationale: string;
+}> = [
+  {
+    procedure: "Structural measurement",
+    aliases: ["structural measurement", "measure structure", "three-dimensional measuring"],
+    triggerKeywords: ["quarter panel", "pillar", "rocker", "rail", "apron", "unibody", "sectioning"],
+    category: "safety",
+    severity: "high",
+    rationale: "Structural repairs commonly require measurement and documented dimensional verification.",
+  },
+  {
+    procedure: "Pre-repair scan",
+    aliases: ["pre-repair scan", "pre scan", "pre-scan", "diagnostic scan"],
+    triggerKeywords: ["scan", "diagnostic", "collision", "adas"],
+    category: "scanning",
+    severity: "high",
+    rationale: "Collision documentation indicates diagnostic discovery is required before repairs begin.",
+  },
+  {
+    procedure: "Post-repair scan",
+    aliases: ["post-repair scan", "post scan", "post-scan", "final scan"],
+    triggerKeywords: ["scan", "diagnostic", "collision", "adas"],
+    category: "scanning",
+    severity: "high",
+    rationale: "Repair verification documentation indicates a post-repair diagnostic confirmation is required.",
+  },
+  {
+    procedure: "Wheel alignment check",
+    aliases: ["wheel alignment", "alignment check", "four wheel alignment"],
+    triggerKeywords: ["suspension", "steering", "subframe", "quarter panel", "frame"],
+    category: "safety",
+    severity: "medium",
+    rationale: "Structural and suspension-related repairs commonly require alignment verification.",
+  },
+  {
+    procedure: "Corrosion protection materials",
+    aliases: ["corrosion protection", "cavity wax", "anti-corrosion", "rust proofing"],
+    triggerKeywords: ["quarter panel", "panel replacement", "weld", "sectioning", "pillar"],
+    category: "supplement",
+    severity: "medium",
+    rationale: "Replacement and weld operations require corrosion protection restoration.",
+  },
+  {
+    procedure: "Seam sealer application",
+    aliases: ["seam sealer", "seam sealing"],
+    triggerKeywords: ["quarter panel", "panel replacement", "weld", "sectioning", "pillar"],
+    category: "supplement",
+    severity: "medium",
+    rationale: "Panel replacement procedures commonly require seam sealer restoration.",
+  },
+];
+
+function inferProceduresFromRag(params: {
+  estimateText: string;
+  retrievedEvidence: Array<{
+    content: string;
+    file_id?: string | null;
+  }>;
+  sessionContext?: RunRepairAnalysisParams["sessionContext"];
+}): RAGProcedure[] {
+  const estimateText = params.estimateText.toLowerCase();
+  const contextText = [
+    params.sessionContext?.vehicleMake,
+    params.sessionContext?.system,
+    params.sessionContext?.component,
+    params.sessionContext?.procedure,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  const procedures: RAGProcedure[] = [];
+
+  for (const [evidenceIndex, evidence] of params.retrievedEvidence.entries()) {
+    const evidenceText = evidence.content.toLowerCase();
+    const haystack = `${evidenceText} ${evidence.file_id ?? ""} ${contextText}`.trim();
+
+    for (const rule of RAG_PROCEDURE_RULES) {
+      const mentionsProcedure =
+        haystack.includes(rule.procedure.toLowerCase()) ||
+        rule.aliases.some((alias) => haystack.includes(alias.toLowerCase()));
+      const mentionsTrigger = rule.triggerKeywords.some((keyword) => haystack.includes(keyword));
+
+      if (!mentionsProcedure && !mentionsTrigger) {
+        continue;
+      }
+
+      const matchedInEstimate = [rule.procedure, ...rule.aliases].some((alias) =>
+        estimateText.includes(alias.toLowerCase())
+      );
+
+      procedures.push({
+        procedure: rule.procedure,
+        reason: rule.rationale,
+        source: "oem_doc",
+        severity: rule.severity,
+        category: rule.category,
+        isMissing: !matchedInEstimate,
+        evidenceSnippet: evidence.content.slice(0, 220),
+        evidenceId: `retrieved-${evidenceIndex + 1}`,
+      });
+    }
+  }
+
+  const deduped = new Map<string, RAGProcedure>();
+
+  for (const procedure of procedures) {
+    const key = procedure.procedure.toLowerCase();
+    const existing = deduped.get(key);
+
+    if (!existing) {
+      deduped.set(key, procedure);
+      continue;
+    }
+
+    deduped.set(key, {
+      ...existing,
+      isMissing: existing.isMissing && procedure.isMissing,
+      severity:
+        existing.severity === "high" || procedure.severity === "high"
+          ? "high"
+          : existing.severity === "medium" || procedure.severity === "medium"
+            ? "medium"
+            : "low",
+      evidenceSnippet:
+        existing.evidenceSnippet.length >= procedure.evidenceSnippet.length
+          ? existing.evidenceSnippet
+          : procedure.evidenceSnippet,
+    });
+  }
+
+  return [...deduped.values()];
+}
+
+function mergeRequiredProcedures(
+  existing: RequiredProcedureRecord[],
+  ragProcedures: RAGProcedure[]
+): RequiredProcedureRecord[] {
+  const merged = new Map(
+    existing.map((procedure) => [procedure.procedure.toLowerCase(), procedure] as const)
+  );
+
+  for (const procedure of ragProcedures) {
+    if (merged.has(procedure.procedure.toLowerCase())) {
+      continue;
+    }
+
+    merged.set(procedure.procedure.toLowerCase(), {
+      procedure: procedure.procedure,
+      reason: procedure.reason,
+      source: "oem_doc",
+      severity: procedure.severity,
+    });
+  }
+
+  return [...merged.values()];
+}
+
+function dedupeStrings(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function dedupeIssuesByTitle(issues: AnalysisIssue[]): AnalysisIssue[] {
+  const seen = new Map<string, AnalysisIssue>();
+
+  for (const issue of issues) {
+    const key = `${issue.category}:${issue.title}`.toLowerCase();
+    const existing = seen.get(key);
+
+    if (!existing) {
+      seen.set(key, issue);
+      continue;
+    }
+
+    seen.set(key, {
+      ...existing,
+      severity:
+        existing.severity === "high" || issue.severity === "high"
+          ? "high"
+          : existing.severity === "medium" || issue.severity === "medium"
+            ? "medium"
+            : "low",
+      evidenceIds: [...new Set([...existing.evidenceIds, ...issue.evidenceIds])],
+    });
+  }
+
+  return [...seen.values()];
 }
 
 function extractMissingOperation(reference: string): string | undefined {

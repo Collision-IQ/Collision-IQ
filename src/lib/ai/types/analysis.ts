@@ -16,6 +16,25 @@ export interface EvidenceRef {
   quote?: string;
 }
 
+export type Evidence = {
+  source: string;
+  excerpt: string;
+};
+
+export type FindingCategory =
+  | "missing_operation"
+  | "compliance_risk"
+  | "best_practice";
+
+export type Finding = {
+  category: FindingCategory;
+  title: string;
+  severity: Severity;
+  explanation: string;
+  evidence: Evidence[];
+  recommendation: string;
+};
+
 export interface AuditFinding {
   id: string;
   category:

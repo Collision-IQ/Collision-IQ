@@ -74,15 +74,15 @@ function dedupeResults(results: RetrievalHit[]): RetrievalHit[] {
   const seen = new Map<string, RetrievalHit>();
 
   for (const result of results) {
-    const key = `${result.drive_path ?? ""}:${result.text}`.trim();
+    const key = `${result.file_id ?? ""}:${result.content}`.trim();
     const existing = seen.get(key);
 
-    if (!existing || (result.similarity ?? 0) > (existing.similarity ?? 0)) {
+    if (!existing || (result.distance ?? Number.POSITIVE_INFINITY) < (existing.distance ?? Number.POSITIVE_INFINITY)) {
       seen.set(key, result);
     }
   }
 
   return [...seen.values()].sort(
-    (a, b) => (b.similarity ?? 0) - (a.similarity ?? 0)
+    (a, b) => (a.distance ?? Number.POSITIVE_INFINITY) - (b.distance ?? Number.POSITIVE_INFINITY)
   );
 }

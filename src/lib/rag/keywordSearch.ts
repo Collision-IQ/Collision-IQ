@@ -1,10 +1,8 @@
 import { prisma } from "@/lib/prisma";
 
-type ChunkMatch = {
-  text: string;
-  drive_path: string | null;
-  similarity: number | null;
-};
+import type { RetrievedChunk } from "@/lib/types";
+
+type ChunkMatch = RetrievedChunk;
 
 async function withPrismaRetry<T>(run: () => Promise<T>): Promise<T> {
   try {
@@ -25,11 +23,11 @@ export async function keywordSearch(
     prisma.$queryRawUnsafe<ChunkMatch[]>(
       `
         SELECT
-          text,
-          drive_path,
-          NULL AS similarity
+          content,
+          file_id,
+          NULL AS distance
         FROM document_chunks
-        WHERE to_tsvector('english', text) @@ plainto_tsquery($1)
+        WHERE to_tsvector('english', content) @@ plainto_tsquery($1)
         LIMIT $2
       `,
       query,

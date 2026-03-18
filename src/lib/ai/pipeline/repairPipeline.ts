@@ -42,6 +42,48 @@ export interface RepairPipelineResult {
   confidence: "low" | "medium" | "high";
 }
 
+export interface ExtractedSignalsResult {
+  documents: ClassifiedRepairDocument[];
+  operations: EstimateOperation[];
+  adasFindings: AdasFinding[];
+  signalReferences: string[];
+  confidence: "low" | "medium" | "high";
+}
+
+export function extractSignals(
+  documents: RepairPipelineDocument[]
+): ExtractedSignalsResult {
+  const classifiedDocuments = documents.map((document) => ({
+    ...document,
+    type: classifyDocument(document.filename, document.mime),
+  }));
+
+  const estimateText = classifiedDocuments
+    .filter((document) => document.type === "estimate" || document.type === "document")
+    .map((document) => document.text ?? "")
+    .join("\n\n");
+
+  const adasText = classifiedDocuments
+    .filter((document) => document.type === "adas_report" || document.type === "oem_procedure")
+    .map((document) => document.text ?? "")
+    .join("\n\n");
+
+  const operations = extractEstimateOps(estimateText);
+  const adasFindings = extractAdasFindings(adasText);
+  const signalReferences = [
+    ...operations.map((operation) => operation.rawLine),
+    ...adasFindings.map((finding) => finding.finding),
+  ];
+
+  return {
+    documents: classifiedDocuments,
+    operations,
+    adasFindings,
+    signalReferences: [...new Set(signalReferences)].slice(0, 12),
+    confidence: calculateConfidence(classifiedDocuments, operations, adasFindings),
+  };
+}
+
 export function runRepairPipeline(
   documents: RepairPipelineDocument[]
 ): RepairPipelineResult {

@@ -18,7 +18,7 @@ import {
 } from "../agents/supplementAgent";
 import { composeAuditResponse } from "../reasoning/composeAuditResponse";
 import { buildAuditPrompt } from "../reasoning/analysisPrompt";
-import type { RepairIntelligenceReport } from "../types/analysis";
+import type { Evidence, Finding, RepairIntelligenceReport } from "../types/analysis";
 import type { RetrieveResult } from "@/lib/rag/retrieve";
 
 export type ConversationIntent =
@@ -100,6 +100,7 @@ export async function orchestrateConversation({
 
   const prompt = buildConversationPrompt({
     intent,
+    userMessage,
     report,
     evidence,
     specialistFindings,
@@ -186,6 +187,7 @@ async function runSpecialistAgents(params: {
 
 function buildConversationPrompt(params: {
   intent: ConversationIntent;
+  userMessage: string;
   report: RepairIntelligenceReport | null;
   evidence: RetrieveResult[];
   specialistFindings: SpecialistAgentOutputs;
@@ -211,15 +213,11 @@ function buildConversationPrompt(params: {
   sections.push(JSON.stringify(params.specialistFindings.supplementFindings, null, 2));
 
   if (params.evidence.length > 0) {
-    sections.push("Retrieved Evidence:");
-    sections.push(
-      params.evidence
-        .map(
-          (item, index) =>
-            `${index + 1}. ${item.drive_path ?? "Unknown source"}\n${item.text}`
-        )
-        .join("\n\n")
-    );
+    const retrievedEvidence = buildStructuredEvidence(params.evidence);
+
+    sections.push("Retrieved OEM Evidence:");
+    sections.push(JSON.stringify(retrievedEvidence, null, 2));
+    sections.push(buildStructuredFindingContract(params.userMessage, retrievedEvidence));
   }
 
   if (params.conversationHistory.length > 0) {
@@ -232,6 +230,58 @@ function buildConversationPrompt(params: {
   }
 
   return sections.join("\n\n");
+}
+
+function buildStructuredEvidence(evidence: RetrieveResult[]): Evidence[] {
+  return evidence.map((item) => ({
+    source: item.file_id ?? "Unknown",
+    excerpt: item.content.slice(0, 500),
+  }));
+}
+
+function buildStructuredFindingContract(
+  userMessage: string,
+  evidence: Evidence[]
+): string {
+  const exampleFinding: Finding = {
+    category: "compliance_risk",
+    title: "Improper Wet Sanding Timing",
+    severity: "high",
+    explanation:
+      "OEM specifies wet sanding and buffing only after full cure. Performing earlier may reduce clear coat thickness and cause failure.",
+    evidence: [
+      {
+        source: "1xoFF0VuqR_mCXgH9QkcI5xifWlTCmY7N",
+        excerpt: "Use wet sand and buff only after full cure...",
+      },
+    ],
+    recommendation: "Ensure full cure before any wet sanding or buffing operations.",
+  };
+
+  return `
+You are a collision repair OEM compliance engine.
+
+Given:
+1. User input
+2. Retrieved OEM procedures
+
+Your job:
+- Identify required operations
+- Detect missing or incorrect steps
+- Flag compliance risks
+- Provide structured findings
+
+User input:
+${userMessage}
+
+Retrieved OEM procedures:
+${JSON.stringify(evidence, null, 2)}
+
+Output JSON only.
+
+Return an array of objects with this exact structure:
+${JSON.stringify(exampleFinding, null, 2)}
+`.trim();
 }
 
 function composeAuditResponseFromReport(report: RepairIntelligenceReport): string {

@@ -21,8 +21,7 @@ export async function GET() {
       pageSize: 5,
       supportsAllDrives: true,
       includeItemsFromAllDrives: true,
-      corpora: "drive",
-      driveId: process.env.GOOGLE_DRIVE_FOLDER_ID,
+      fields: "files(id, name, parents, driveId, mimeType)",
     });
 
     return NextResponse.json({

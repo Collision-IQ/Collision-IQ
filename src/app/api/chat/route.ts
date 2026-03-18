@@ -2,16 +2,13 @@ export const runtime = "nodejs";
 
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
-import { runAnalysis } from "@/lib/ai/pipeline/runAnalysis";
-import { runRepairPipeline } from "@/lib/ai/pipeline/repairPipeline";
+import { extractSignals } from "@/lib/ai/pipeline/repairPipeline";
 import { extractContext } from "@/lib/ai/context/extractContext";
 import {
   runRetrieval,
   type RetrievalHit,
 } from "@/lib/ai/orchestrator/retrievalOrchestrator";
 import { orchestrateConversation } from "@/lib/ai/orchestrator/conversationOrchestrator";
-import { buildAuditPrompt } from "@/lib/ai/reasoning/analysisPrompt";
-import { buildRepairIntelligenceReport } from "@/lib/ai/report/intelligenceReport";
 import {
   getUploadedAttachments,
   saveUploadedAttachment,
@@ -184,6 +181,18 @@ Use this labeling when helpful:
 - **Inference:** (supported by logic, not explicit)
 - **Need:** (what must be provided to confirm)
 
+When OEM procedure evidence is provided in the system context:
+
+- Treat it as authoritative unless clearly incomplete
+- Extract required operations explicitly from the text
+- Compare those requirements against the user's estimate or question
+- Identify:
+  • Missing operations
+  • Incorrect sequencing
+  • Compliance risks
+
+Do not ignore provided OEM evidence.
+
 =======================================
 DOCUMENT HANDLING & SAFETY
 =======================================
@@ -291,6 +300,126 @@ Instead, produce:
 - a short list of the exact missing items needed
 - why each missing item matters
 `;
+
+const REVIEW_SYSTEM_PROMPT = `
+You are Collision IQ — a senior collision repair estimator and OEM procedure reviewer.
+
+When reviewing estimates, think like an experienced human estimator, not a form-filling audit bot.
+
+Primary task:
+- Read the estimate(s) naturally
+- Identify what is included, missing, reduced, substituted, or unsupported
+- Explain the meaningful differences in plain professional language
+- Prioritize what matters most technically, procedurally, and financially
+
+Style:
+- Write like a real review memo
+- Natural paragraphs are preferred
+- Use bullets only when they help clarity
+- Avoid numbered lists unless explicitly requested
+- Prefer flowing paragraphs
+- Do not force every answer into a fixed template
+- Do not invent categories if they are not useful
+- Do not turn the response into Q&A unless the user asked questions
+
+If two estimates are provided:
+- Compare them directly
+- Call out missing operations, reduced operations, substitutions, and documentation gaps
+- Focus on real-world repair impact
+
+If OEM evidence is provided:
+- Treat it as authoritative when applicable
+- Use it to confirm or challenge estimate line items
+- Quote or paraphrase specific requirements when useful
+
+Output preference:
+- Start with the most important differences
+- Then discuss notable omissions or reductions
+- Then explain why they matter
+- End with a bottom-line conclusion
+
+[SEMANTIC PROCEDURE INTERPRETATION — CRITICAL]
+
+You must interpret procedures by FUNCTION, not by exact wording.
+
+Collision repair estimates frequently use different terminology for the same operation depending on:
+- estimating platform (CCC, Mitchell, Audatex)
+- OEM terminology
+- shorthand or manual entries
+
+You must normalize meaning before making conclusions.
+
+Examples of equivalent procedures:
+
+- "Active Cruise Control calibration" = radar calibration
+- "Front radar calibration" = radar system calibration
+- "Lane keep assist calibration" = forward camera calibration
+- "Camera aiming / targeting" = camera calibration
+- "Final safety inspect and test drive" = road test / QC
+- "Corrosion protection" may include cavity wax depending on context
+
+RULE:
+Before calling a procedure "missing":
+1. Check if an equivalent operation exists under a different name
+2. Check if it is bundled into another procedure
+3. Confirm the FUNCTION is absent — not just the label
+
+If the function is present under another name:
+→ treat it as INCLUDED
+→ optionally explain the naming difference
+
+False positives are worse than omissions.
+Do not mark something missing unless you are certain it is not present.
+
+[PROCEDURE VALIDATION STEP]
+
+When evaluating required procedures:
+
+Step 1: Identify required FUNCTION (e.g., radar calibration)
+Step 2: Scan estimate for equivalent FUNCTION under any name
+Step 3:
+- If function exists → INCLUDED
+- If unclear → UNCERTAIN (do not flag as missing)
+- Only if absent → MISSING
+
+[HARD VERIFICATION RULE â€” CRITICAL]
+
+Before declaring ANY procedure missing:
+
+You MUST explicitly verify it is NOT present in the estimate.
+
+Process:
+1. Scan the estimate for any related or equivalent operations
+2. List what IS present
+3. Only then decide if something is missing
+
+If a related operation exists:
+â†’ Treat it as INCLUDED
+â†’ Do NOT mark as missing
+
+You are NOT allowed to assume absence based on wording differences.
+
+You must confirm absence, not infer it.
+
+If uncertain:
+â†’ say "unclear" instead of "missing"
+
+False positives are unacceptable.
+
+[RESPONSE CONSTRAINT]
+
+You may NOT say a procedure is missing unless you can state:
+
+"I checked the estimate and did not find any equivalent operation such as: ..."
+
+If you cannot do that, you must NOT mark it as missing.
+
+When making major or critical assertions, include an "Evidence Basis" when helpful.
+
+Do not force evidence labeling on every point.
+`;
+
+void SYSTEM_PROMPT;
 
 // ==============================
 // TYPES
@@ -727,17 +856,51 @@ export async function POST(req: Request) {
         filename: attachment.filename,
         dataUrl: attachment.imageDataUrl as string,
     }));
-    const extractionFailure = buildExtractionFailureResult(documents);
-    const analysis = runRepairPipeline(documents);
-    const analysisResult = extractionFailure ?? runAnalysis(documents);
-    const structuredAudit = analysisResult.narrative;
-    const repairIntelligenceBlock = buildRepairIntelligenceReport(analysisResult);
-    const auditPromptBlock = hasComparisonDocuments(documents)
-      ? buildAuditPrompt(structuredAudit)
-      : "";
+    const signals = extractSignals(documents);
+    const analysis = {
+      riskScore: "unknown",
+      confidence: "unknown",
+      operations: [],
+      requiredProcedures: [],
+      missingProcedures: [],
+      complianceIssues: [],
+    };
+    void analysis;
+    const structuredAudit = "";
+    void structuredAudit;
+    const isComparisonReview = hasComparisonDocuments(documents);
+    const repairIntelligenceBlock = "";
 
     const attachedContext = buildAttachedContext(documents);
     const triggerBlock = buildTriggerBlock(documents);
+    const comparisonReviewBlock = isComparisonReview
+      ? `
+[ESTIMATE REVIEW OBJECTIVE]
+
+Two estimates are present.
+
+Review them like a senior collision estimator performing a real estimate comparison.
+
+Do NOT:
+- force a rigid template
+- write as Q&A
+- over-structure the response
+
+Instead:
+- identify the most meaningful scope differences
+- call out what the shop included that the insurer omitted, reduced, or generalized
+- highlight substitutions and documentation gaps
+- explain why those differences matter operationally and from an OEM-compliance standpoint
+
+Style:
+- natural professional narrative
+- short paragraphs preferred
+- bullets only when helpful
+- prioritize real-world repair impact over formatting
+
+Start with the most important differences — not generic framing.
+`.trim()
+      : "";
 
     // ========================================
     // DOCUMENT PRIORITY RULE
@@ -788,29 +951,31 @@ if (lastUserMessage && typeof lastUserMessage.content === "string") {
   const extracted = extractContextFromText(lastUserMessage.content);
   activeContext = mergeActiveContext(activeContext, extracted);
 
-  const orchestrated = await orchestrateConversation({
-    artifactIds: uploadedAttachments.map((attachment) => attachment.id),
-    userMessage: lastUserMessage.content,
-    conversationHistory: incomingMessages
-      .filter(
-        (
-          m
-        ): m is IncomingMessage & {
-          role: "user" | "assistant";
-          content: string;
-        } =>
-          m &&
-          (m.role === "user" || m.role === "assistant") &&
-          typeof m.content === "string"
-      )
-      .map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
-    activeContext,
-  });
+  if (!isComparisonReview) {
+    const orchestrated = await orchestrateConversation({
+      artifactIds: uploadedAttachments.map((attachment) => attachment.id),
+      userMessage: lastUserMessage.content,
+      conversationHistory: incomingMessages
+        .filter(
+          (
+            m
+          ): m is IncomingMessage & {
+            role: "user" | "assistant";
+            content: string;
+          } =>
+            m &&
+            (m.role === "user" || m.role === "assistant") &&
+            typeof m.content === "string"
+        )
+        .map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+      activeContext,
+    });
 
-  orchestratedPrompt = orchestrated.prompt;
+    orchestratedPrompt = orchestrated.prompt;
+  }
 
   const shopText = findDocumentText(documents, ["shop", "body shop", "repair facility"]) ?? "";
   const insurerText =
@@ -835,36 +1000,49 @@ if (lastUserMessage && typeof lastUserMessage.content === "string") {
 
 if (Array.isArray(matches) && matches.length > 0) {
 
-  const chunks = matches
-    .map((m, i: number) => {
-
-      const source = m?.drive_path ?? "Unknown";
-      const text = m?.text ?? "";
-
-      return `--- Retrieved Chunk ${i + 1} ---
-Source: ${source}
-${text}`;
-
-    })
-    .join("\n\n");
+  const evidence = matches.map((m) => ({
+    source: m?.file_id ?? "Unknown",
+    excerpt: (m?.content ?? "").slice(0, 500),
+  }));
 
   retrievalBlock = `
-[DRIVE KNOWLEDGE BASE CONTEXT]
+[OEM PROCEDURE EVIDENCE — AUTHORITATIVE]
 
-These excerpts were retrieved from the internal Drive knowledge base.
+The following excerpts are retrieved from OEM procedures and technical documentation.
 
-Use them as supporting reference material when relevant.
-Do NOT treat them as the only source of truth.
-If an excerpt directly addresses the user's question, use it specifically.
-If the excerpts are incomplete, rely on your own professional collision repair expertise.
+Treat these as authoritative guidance when applicable.
 
-${chunks}
+Your job:
+- Identify required operations from this evidence
+- Determine if they are missing, incomplete, or incorrectly applied
+- Flag compliance risks
+- Support conclusions with explicit references
+
+Each item includes:
+- source: document reference
+- excerpt: relevant OEM instruction
+
+Evidence:
+${evidence
+  .map(
+    (e, i) => `
+[Source ${i + 1}]
+File: ${e.source}
+${e.excerpt}
+`
+  )
+  .join("\n")}
+
+Rules:
+- If evidence clearly defines a requirement → treat it as REQUIRED
+- If user input conflicts with evidence → flag it
+- If evidence is incomplete → infer using professional standards (label as Inference)
 `.slice(0, 6000);
 
 }
 
     const combinedContext =
-      (auditPromptBlock ? auditPromptBlock + "\n\n" : "") +
+      (comparisonReviewBlock ? comparisonReviewBlock + "\n\n" : "") +
       (repairIntelligenceBlock ? repairIntelligenceBlock + "\n\n" : "") +
       (documentPriorityBlock ? documentPriorityBlock + "\n\n" : "") +
       (triggerBlock ? triggerBlock + "\n\n" : "") +
@@ -905,25 +1083,25 @@ ${chunks}
         content: [
           {
             type: "input_text",
-            text: orchestratedPrompt || SYSTEM_PROMPT,
+            text: REVIEW_SYSTEM_PROMPT,
           },
         ],
       },
       ...safeMessages,
     ];
 
-    if (structuredAudit) {
+    if (orchestratedPrompt) {
       input.push({
         role: "system",
         content: [
           {
             type: "input_text",
             text: `
-Technical repair audit findings generated from document extraction:
+Conversation orchestration support note:
 
-${structuredAudit}
+${orchestratedPrompt}
 
-Respond conversationally but do not contradict the findings.
+Use this as low-priority support context. The primary answer should be driven by the user's request, uploaded estimate text, and retrieved OEM evidence.
 `.trim(),
           },
         ],
@@ -931,8 +1109,9 @@ Respond conversationally but do not contradict the findings.
     }
 
     if (
-      analysis.complianceIssues.length > 0 ||
-      analysis.requiredProcedures.length > 0
+      signals.operations.length > 0 ||
+      signals.adasFindings.length > 0 ||
+      signals.signalReferences.length > 0
     ) {
       input.push({
         role: "system",
@@ -940,24 +1119,77 @@ Respond conversationally but do not contradict the findings.
           {
             type: "input_text",
             text: `
-Repair Intelligence JSON:
-${JSON.stringify(
-  {
-    riskScore: analysis.riskScore,
-    confidence: analysis.confidence,
-    operations: analysis.operations,
-    requiredProcedures: analysis.requiredProcedures,
-    missingProcedures: analysis.missingProcedures,
-    issues: analysis.complianceIssues,
-  },
-  null,
-  2
-)}
+[EXTRACTED SIGNALS — NOT AUTHORITATIVE]
+
+These are raw observations from the estimate:
+- procedures detected: ${signals.adasFindings.map((item) => item.finding).join(", ") || "None detected"}
+- operations identified: ${signals.operations.map((item) => item.component).join(", ") || "None detected"}
+
+These are NOT conclusions.
+Use them only as hints.
 `.trim(),
           },
         ],
       });
     }
+
+    input.push({
+      role: "system",
+      content: [
+        {
+          type: "input_text",
+          text: `
+[THINKING DIRECTIVE — DO NOT SKIP]
+
+Before writing your response:
+
+1. Read both estimates as a whole (not line-by-line categories)
+2. Identify what actually stands out:
+   - where scope is reduced
+   - where operations are missing
+   - where substitutions occur
+3. Determine the pattern of differences (not just individual items)
+
+Before identifying missing procedures:
+
+1. Look for equivalent operations under different wording
+2. Determine if the function is covered, even if not labeled identically
+3. Only flag as missing if the FUNCTION is absent, not just the label
+
+Then write your response naturally.
+
+Do NOT:
+- start with categories
+- group into predefined sections
+- label sections unless absolutely necessary
+
+Write like a human estimator explaining what they see.
+`.trim(),
+        },
+      ],
+    });
+
+    input.push({
+      role: "system",
+      content: [
+        {
+          type: "input_text",
+          text: `
+[RESPONSE STYLE]
+
+Start your answer with a direct observation — not a heading.
+
+Example:
+"The insurer estimate is not just shorter — it is selectively reduced in key areas..."
+
+Do NOT start with:
+- numbered lists
+- section titles
+- labels like "Parts and Labor Costs"
+`.trim(),
+        },
+      ],
+    });
 
     // Add supporting context AFTER the actual conversation
     if (combinedContext && !visionContent) {
@@ -967,6 +1199,41 @@ ${JSON.stringify(
           {
             type: "input_text",
             text: combinedContext,
+          },
+        ],
+      });
+    }
+
+    if (matches.length > 0) {
+      input.push({
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text: `
+[REASONING OBJECTIVE]
+
+When OEM evidence is present:
+
+1. Extract required procedures
+2. Compare against:
+   - estimate
+   - described repair
+3. Identify:
+   - missing steps
+   - areas to review
+   - risk exposure
+
+If a required function appears to be covered under a different label:
+- treat it as included
+- optionally note the naming difference
+
+Support every major conclusion with:
+- Evidence Basis
+- Source reference
+
+Be decisive.
+`.trim(),
           },
         ],
       });
@@ -1032,9 +1299,6 @@ Analyze visible damage, severity, likely repair operations, and safety risks.`,
           "Content-Type": "text/plain; charset=utf-8",
           "Cache-Control": "no-cache",
           "x-active-context": encodeURIComponent(JSON.stringify(activeContext ?? null)),
-          "x-repair-intelligence": encodeURIComponent(
-            JSON.stringify(analysisResult)
-          ),
         },
       }
     );

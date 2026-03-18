@@ -84,7 +84,7 @@ export async function POST() {
 
         return {
           chunkIndex: i,
-          text: chunkText,
+          content: chunkText,
           embedding,
           ...metadata
         };
@@ -92,9 +92,8 @@ export async function POST() {
       .filter(
         (c): c is {
           chunkIndex: number
-          text: string
+          content: string
           embedding: number[]
-          oem: string | null
           system: string | null
           component: string | null
           procedure: string | null
