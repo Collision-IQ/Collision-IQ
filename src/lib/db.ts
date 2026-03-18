@@ -1,7 +1,7 @@
-import { Pool, type QueryResult, type QueryResultRow } from "pg";
+import { Pool } from "pg";
 
 const globalForDb = globalThis as typeof globalThis & {
-  pgPool?: Pool;
+  pgPool?: InstanceType<typeof Pool>;
 };
 
 const pool =
@@ -14,14 +14,14 @@ if (process.env.NODE_ENV !== "production") {
   globalForDb.pgPool = pool;
 }
 
-export async function sql<T extends QueryResultRow = QueryResultRow>(
+export async function sql<T = Record<string, unknown>>(
   strings: TemplateStringsArray,
   ...values: unknown[]
-): Promise<QueryResult<T>> {
+): Promise<{ rows: T[] }> {
   const text = strings.reduce((acc, part, index) => {
     const valuePlaceholder = index < values.length ? `$${index + 1}` : "";
     return `${acc}${part}${valuePlaceholder}`;
   }, "");
 
-  return pool.query<T>(text, values);
+  return pool.query(text, values) as Promise<{ rows: T[] }>;
 }

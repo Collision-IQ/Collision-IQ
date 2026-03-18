@@ -46,12 +46,12 @@ export async function POST() {
     const chunks = chunkText(text);
 
     // embed + upsert
-    const embeddedChunks = [];
-    for (let i = 0; i < chunks.length; i++) {
-      const emb = await embedText(chunks[i]);
-      if (!emb.length) continue;
-      embeddedChunks.push({ chunkIndex: i, text: chunks[i], embedding: emb });
-    }
+      const embeddedChunks = [];
+      for (let i = 0; i < chunks.length; i++) {
+        const emb = await embedText(chunks[i]);
+        if (!emb.length) continue;
+        embeddedChunks.push({ chunkIndex: i, content: chunks[i], embedding: emb });
+      }
 
     await upsertChunks({
       driveFileId: f.id,

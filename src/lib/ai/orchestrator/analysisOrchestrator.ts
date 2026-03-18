@@ -164,7 +164,7 @@ function buildIssues(
   evidence: EvidenceRecord[],
   ragProcedures: RAGProcedure[]
 ): AnalysisIssue[] {
-  const pipelineIssues = pipeline.complianceIssues.map((issue, index) => ({
+  const pipelineIssues: AnalysisIssue[] = pipeline.complianceIssues.map((issue, index) => ({
     id: `issue-${index + 1}`,
     category:
       issue.category === "calibration_requirement"
@@ -184,7 +184,7 @@ function buildIssues(
     evidenceIds: evidence.slice(0, 2).map((item) => item.id),
   }));
 
-  const ragIssues = ragProcedures
+  const ragIssues: AnalysisIssue[] = ragProcedures
     .filter((procedure) => procedure.isMissing)
     .map((procedure, index) => ({
       id: `rag-issue-${index + 1}`,

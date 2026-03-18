@@ -69,7 +69,7 @@ export async function GET() {
       ],
     });
 
-    const extractedText = result.output[0]?.content[0]?.text ?? "";
+    const extractedText = result.output_text ?? "";
     const cleanText = extractedText
       .replace(/\n+/g, "\n")
       .replace(/\*\*/g, "")
@@ -83,7 +83,7 @@ export async function GET() {
       drivePath: metadata.data.name ?? "document.pdf",
       modifiedTime: metadata.data.modifiedTime ?? new Date().toISOString(),
       chunks: chunks.map((chunk, index) => ({
-        text: chunk,
+        content: chunk,
         embedding: embeddings[index] ?? [],
         chunkIndex: index,
         docType: "oem_doc",

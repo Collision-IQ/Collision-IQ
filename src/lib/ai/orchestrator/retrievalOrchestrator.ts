@@ -35,7 +35,7 @@ export async function runRetrieval(
         id: `${hit.file_id ?? "unknown"}:${hit.content.slice(0, 80)}`,
         content: hit.content ?? "",
         file_id: hit.file_id ?? "",
-        distance: hit.distance ?? null,
+        distance: hit.distance ?? undefined,
         source: hit.file_id ?? "Unknown",
         score: hit.distance ?? null,
       }));

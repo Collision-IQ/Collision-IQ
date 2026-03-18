@@ -77,7 +77,7 @@ export async function retrieveDocuments(
     (r: Awaited<ReturnType<typeof hybridSearch>>[number]) => ({
       content: r.content ?? "",
       file_id: r.file_id ?? "",
-      distance: r.distance ?? null,
+      distance: r.distance ?? undefined,
     })
   );
 

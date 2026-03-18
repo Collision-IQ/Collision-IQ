@@ -24,7 +24,7 @@ export async function searchChunks(
     LIMIT ${safeLimit}
   `;
 
-  return result.rows.map((row) => ({
+  return result.rows.map((row: (typeof result.rows)[number]) => ({
     id: row.id,
     content: row.content,
     file_id: row.file_id,

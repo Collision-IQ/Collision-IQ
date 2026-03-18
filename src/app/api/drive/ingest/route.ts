@@ -71,7 +71,7 @@ export async function POST(req: Request) {
       ],
     });
 
-    const rawText = extraction.output[0]?.content[0]?.text ?? "";
+    const rawText = extraction.output_text ?? "";
     const cleaned = cleanText(rawText);
     const chunks = chunkText(cleaned);
 
