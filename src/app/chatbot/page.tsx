@@ -4,9 +4,19 @@ import { useMemo, useState } from "react";
 import Image from "next/image";
 import { jsPDF } from "jspdf";
 import ChatWidget from "@/components/ChatWidget";
-import { buildInspectorPanelData, type InspectorPanelData } from "@/lib/ai/report/intelligenceReport";
-import type { AnalysisResult } from "@/lib/ai/types/analysis";
+import type { ChatFinding } from "@/lib/ai/types/chatFindings";
 import { useIsMobile } from "@/hooks/useIsMobile";
+
+type InspectorPanelData = {
+  riskScore: "low" | "medium" | "high" | "unknown";
+  confidence: "low" | "medium" | "high";
+  criticalIssues: number;
+  evidenceQuality: "present" | "limited" | "none";
+  keyRisks: string[];
+  complianceIssues: string[];
+  supplementOpportunities: string[];
+  evidenceReferences: string[];
+};
 
 const EMPTY_PANEL: InspectorPanelData = {
   riskScore: "low",
@@ -24,12 +34,9 @@ export default function ChatbotPage() {
   const [desktopRailOpen, setDesktopRailOpen] = useState(false);
   const [attachment, setAttachment] = useState<string | null>(null);
   const [analysisText, setAnalysisText] = useState("");
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [findings, setFindings] = useState<ChatFinding[]>([]);
 
-  const inspector = useMemo(
-    () => (analysisResult ? buildInspectorPanelData(analysisResult) : EMPTY_PANEL),
-    [analysisResult]
-  );
+  const inspector = useMemo(() => buildInspectorPanelData(findings), [findings]);
   const railOpen = isMobile ? false : desktopRailOpen;
 
   function handleRailOpenChange(next: boolean) {
@@ -71,7 +78,7 @@ export default function ChatbotPage() {
               <ChatWidget
                 onAttachmentChange={setAttachment}
                 onAnalysisChange={setAnalysisText}
-                onIntelligenceChange={setAnalysisResult}
+                onFindingsChange={setFindings}
               />
             </div>
           </div>
@@ -82,7 +89,7 @@ export default function ChatbotPage() {
             <RailContent
               attachment={attachment}
               analysisText={analysisText}
-              analysisResult={analysisResult}
+              findings={findings}
               panelData={inspector}
             />
           </aside>
@@ -110,7 +117,7 @@ export default function ChatbotPage() {
           <RailContent
             attachment={attachment}
             analysisText={analysisText}
-            analysisResult={analysisResult}
+            findings={findings}
             panelData={inspector}
           />
         </div>
@@ -122,35 +129,14 @@ export default function ChatbotPage() {
 function RailContent({
   attachment,
   analysisText,
-  analysisResult,
+  findings,
   panelData,
 }: {
   attachment: string | null;
   analysisText: string;
-  analysisResult: AnalysisResult | null;
+  findings: ChatFinding[];
   panelData: InspectorPanelData;
 }) {
-  const exportText = analysisResult?.narrative ?? analysisText;
-  const keyRisks =
-    analysisResult?.findings
-      .filter((finding) => finding.bucket === "critical")
-      .map((finding) => finding.title) ?? panelData.keyRisks;
-  const complianceIssues =
-    analysisResult?.findings
-      .filter(
-        (finding) => finding.bucket === "compliance" || finding.bucket === "quality"
-      )
-      .map((finding) => finding.title) ?? panelData.complianceIssues;
-  const supplementOpportunities =
-    analysisResult?.findings
-      .filter((finding) => finding.bucket === "supplement")
-      .map((finding) => finding.title) ?? panelData.supplementOpportunities;
-  const evidenceReferences =
-    analysisResult?.evidence.map(
-      (entry) =>
-        `${entry.source}${entry.page ? `, page ${entry.page}` : ""}${entry.quote ? ` | ${entry.quote}` : ""}`
-    ) ?? panelData.evidenceReferences;
-
   return (
     <div className="flex flex-col h-full overflow-y-auto p-6 space-y-8">
       <div>
@@ -170,10 +156,7 @@ function RailContent({
       <div className="grid grid-cols-2 gap-3">
         <SnapshotCard label="Risk Score" value={formatLabel(panelData.riskScore)} />
         <SnapshotCard label="Confidence" value={formatLabel(panelData.confidence)} />
-        <SnapshotCard
-          label="Critical Issues"
-          value={String(panelData.criticalIssues)}
-        />
+        <SnapshotCard label="Critical Issues" value={String(panelData.criticalIssues)} />
         <SnapshotCard
           label="Evidence Quality"
           value={formatLabel(panelData.evidenceQuality)}
@@ -183,36 +166,40 @@ function RailContent({
       <section className="space-y-4">
         <PanelSection
           title="Key Risks"
-          items={keyRisks}
+          items={panelData.keyRisks}
           emptyLabel="No high-risk items detected yet."
           color="red"
         />
 
         <PanelSection
           title="Compliance Issues"
-          items={complianceIssues}
+          items={panelData.complianceIssues}
           emptyLabel="No compliance issues detected yet."
           color="yellow"
         />
 
         <PanelSection
           title="Supplement Opportunities"
-          items={supplementOpportunities}
+          items={panelData.supplementOpportunities}
           emptyLabel="No supplement opportunities detected yet."
           color="green"
         />
 
         <PanelSection
-          title="Evidence References"
-          items={evidenceReferences}
-          emptyLabel="No evidence references detected yet."
+          title="Finding Details"
+          items={panelData.evidenceReferences}
+          emptyLabel={
+            findings.length > 0
+              ? "Findings extracted without extra detail."
+              : "No findings extracted yet."
+          }
           color="neutral"
         />
       </section>
 
-      {exportText && (
+      {analysisText && (
         <button
-          onClick={() => exportReport(exportText, panelData)}
+          onClick={() => exportReport(analysisText, panelData)}
           className="mt-4 w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
         >
           Export PDF Report
@@ -274,6 +261,37 @@ function exportReport(analysisText: string, panelData: InspectorPanelData) {
 function formatLabel(value: string) {
   if (!value) return "--";
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function buildInspectorPanelData(findings: ChatFinding[]): InspectorPanelData {
+  if (findings.length === 0) {
+    return EMPTY_PANEL;
+  }
+
+  const highCount = findings.filter((finding) => finding.severity === "high").length;
+  const mediumCount = findings.filter((finding) => finding.severity === "medium").length;
+
+  return {
+    riskScore: highCount > 0 ? "high" : mediumCount > 0 ? "medium" : "low",
+    confidence: findings.length >= 4 ? "high" : findings.length >= 2 ? "medium" : "low",
+    criticalIssues: highCount,
+    evidenceQuality: findings.length > 0 ? "limited" : "none",
+    keyRisks: findings
+      .filter((finding) => finding.category === "risk" || finding.severity === "high")
+      .slice(0, 4)
+      .map((finding) => finding.title),
+    complianceIssues: findings
+      .filter((finding) => finding.category === "compliance")
+      .slice(0, 4)
+      .map((finding) => finding.title),
+    supplementOpportunities: findings
+      .filter((finding) => finding.category === "optimization")
+      .slice(0, 4)
+      .map((finding) => finding.title),
+    evidenceReferences: findings
+      .slice(0, 4)
+      .map((finding) => `${finding.title}: ${finding.explanation}`),
+  };
 }
 
 function SnapshotCard({

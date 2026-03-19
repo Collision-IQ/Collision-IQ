@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Paperclip, X, Camera, ChevronDown, ChevronUp } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import type { AnalysisResult } from "@/lib/ai/types/analysis";
+import type { ChatFinding } from "@/lib/ai/types/chatFindings";
 
 type Role = "user" | "assistant";
 
@@ -25,7 +25,7 @@ interface Attachment {
 interface ChatWidgetProps {
   onAttachmentChange?: (filename: string | null) => void;
   onAnalysisChange?: (text: string) => void;
-  onIntelligenceChange?: (data: AnalysisResult | null) => void;
+  onFindingsChange?: (data: ChatFinding[]) => void;
 }
 
 const INITIAL_MESSAGE: Message = {
@@ -37,7 +37,7 @@ const INITIAL_MESSAGE: Message = {
 export default function ChatWidget({
   onAttachmentChange,
   onAnalysisChange,
-  onIntelligenceChange,
+  onFindingsChange,
 }: ChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
@@ -62,6 +62,21 @@ export default function ChatWidget({
   useEffect(() => {
     if (attachments.length >= 3) setAttachmentsOpen(false);
     if (attachments.length === 0) setAttachmentsOpen(true);
+  }, [attachments.length]);
+
+  useEffect(() => {
+    if (attachments.length < 2) return;
+
+    setMessages((prev) => {
+      const feedback =
+        "You’ve uploaded multiple files. I’ll focus on the most relevant ones to keep performance fast.";
+
+      if (prev[prev.length - 1]?.role === "assistant" && prev[prev.length - 1]?.content === feedback) {
+        return prev;
+      }
+
+      return [...prev, { role: "assistant", content: feedback }];
+    });
   }, [attachments.length]);
 
   useEffect(() => {
@@ -122,7 +137,7 @@ export default function ChatWidget({
 
     onAttachmentChange?.(null);
     onAnalysisChange?.("");
-    onIntelligenceChange?.(null);
+    onFindingsChange?.([]);
 
     shouldAutoScrollRef.current = true;
     setTimeout(() => {
@@ -185,14 +200,14 @@ export default function ChatWidget({
       }
 
       const contentType = response.headers.get("content-type") || "";
-      const repairIntelligenceHeader = response.headers.get("x-repair-intelligence");
+      const findingsHeader = response.headers.get("x-findings");
 
-      if (repairIntelligenceHeader) {
-        onIntelligenceChange?.(
-          JSON.parse(decodeURIComponent(repairIntelligenceHeader)) as AnalysisResult
+      if (findingsHeader) {
+        onFindingsChange?.(
+          JSON.parse(decodeURIComponent(findingsHeader)) as ChatFinding[]
         );
       } else {
-        onIntelligenceChange?.(null);
+        onFindingsChange?.([]);
       }
 
       if (contentType.includes("text/plain") && response.body) {
