@@ -13,8 +13,9 @@ type InspectorPanelData = {
   criticalIssues: number;
   evidenceQuality: "present" | "limited" | "none";
   keyRisks: string[];
-  complianceIssues: string[];
-  supplementOpportunities: string[];
+  processFindings: string[];
+  gapFindings: string[];
+  optimizationFindings: string[];
   evidenceReferences: string[];
 };
 
@@ -24,8 +25,9 @@ const EMPTY_PANEL: InspectorPanelData = {
   criticalIssues: 0,
   evidenceQuality: "none",
   keyRisks: [],
-  complianceIssues: [],
-  supplementOpportunities: [],
+  processFindings: [],
+  gapFindings: [],
+  optimizationFindings: [],
   evidenceReferences: [],
 };
 
@@ -172,16 +174,23 @@ function RailContent({
         />
 
         <PanelSection
-          title="Compliance Issues"
-          items={panelData.complianceIssues}
-          emptyLabel="No compliance issues detected yet."
+          title="Process Findings"
+          items={panelData.processFindings}
+          emptyLabel="No process findings detected yet."
           color="yellow"
         />
 
         <PanelSection
-          title="Supplement Opportunities"
-          items={panelData.supplementOpportunities}
-          emptyLabel="No supplement opportunities detected yet."
+          title="Gaps"
+          items={panelData.gapFindings}
+          emptyLabel="No gaps detected yet."
+          color="yellow"
+        />
+
+        <PanelSection
+          title="Optimization Opportunities"
+          items={panelData.optimizationFindings}
+          emptyLabel="No optimization opportunities detected yet."
           color="green"
         />
 
@@ -280,11 +289,15 @@ function buildInspectorPanelData(findings: ChatFinding[]): InspectorPanelData {
       .filter((finding) => finding.category === "risk" || finding.severity === "high")
       .slice(0, 4)
       .map((finding) => finding.title),
-    complianceIssues: findings
-      .filter((finding) => finding.category === "compliance")
+    processFindings: findings
+      .filter((finding) => finding.category === "process")
       .slice(0, 4)
       .map((finding) => finding.title),
-    supplementOpportunities: findings
+    gapFindings: findings
+      .filter((finding) => finding.category === "gap")
+      .slice(0, 4)
+      .map((finding) => finding.title),
+    optimizationFindings: findings
       .filter((finding) => finding.category === "optimization")
       .slice(0, 4)
       .map((finding) => finding.title),

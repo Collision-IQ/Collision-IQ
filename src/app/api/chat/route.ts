@@ -21,6 +21,7 @@ import {
   mergeActiveContext,
 } from "@/lib/context/activeContext";
 import type { ChatFinding } from "@/lib/ai/types/chatFindings";
+import { extractSignals } from "@/lib/ai/pipeline/repairPipeline";
 
 // 🔐 Environment safety check
 if (!process.env.OPENAI_API_KEY) {
@@ -456,6 +457,27 @@ Primary task:
 - Identify what is included, missing, reduced, substituted, or unsupported
 - Explain the meaningful differences in plain professional language
 - Prioritize what matters most technically, procedurally, and financially
+
+[PRIMARY INTERPRETATION RULE - CRITICAL]
+
+You are NOT looking for missing procedures by default.
+
+You are determining:
+- what was performed
+- what functions were covered
+- how the repair was executed
+
+Only identify something as missing if:
+- the FUNCTION is clearly absent
+- AND no equivalent operation exists
+
+If a system-level calibration is present:
+-> all related sub-functions are INCLUDED
+
+Example:
+"All-around cameras calibration" = covers front, rear, and side cameras
+
+Do NOT break system-level operations into missing sub-components.
 
 Style:
 - Write like a real review memo
@@ -1207,48 +1229,6 @@ If your answer does not reference this content, it is incorrect.
 `.trim();
 }
 
-function extractRepairSignals(documents: UploadedDocument[]) {
-  const text = documents
-    .map((document) => (document.text ?? "").toLowerCase())
-    .join(" ");
-
-  const hasCameraCalibration =
-    text.includes("camera calibration") ||
-    text.includes("camera dynamic") ||
-    text.includes("rear camera") ||
-    text.includes("front camera");
-
-  const hasRadarCalibration =
-    text.includes("acc") ||
-    text.includes("adaptive cruise") ||
-    text.includes("radar");
-
-  const hasSteering = text.includes("steering angle");
-
-  const hasSeatbelt = text.includes("seat belt");
-
-  const hasPreScan = text.includes("pre-repair scan");
-
-  const hasPostScan = text.includes("post-repair scan");
-
-  const hasInProcessScan =
-    text.includes("in-proc") ||
-    text.includes("in process scan");
-
-  const hasFailedCalibration = text.includes("failed calibration");
-
-  return {
-    camera: hasCameraCalibration,
-    radar: hasRadarCalibration,
-    steering: hasSteering,
-    seatbelt: hasSeatbelt,
-    preScan: hasPreScan,
-    postScan: hasPostScan,
-    inProcessScan: hasInProcessScan,
-    failedCalibration: hasFailedCalibration,
-  };
-}
-
 function buildAttachedContext(documents: UploadedDocument[], intent: Intent) {
   if (!Array.isArray(documents) || documents.length === 0) return "";
 
@@ -1441,6 +1421,13 @@ export async function POST(req: Request) {
           ? selectDocumentsForIntent(documents.filter(isEstimateDocument), intent)
           : selectDocumentsForIntent(documents, intent);
     const docsForPrompt = useDocs.length > 0 ? useDocs : documents;
+    const pipelineSignals = extractSignals(
+      docsForPrompt.map((doc) => ({
+        filename: doc.filename,
+        mime: doc.mime,
+        text: doc.text,
+      }))
+    );
     const attachedContext = buildAttachedContext(docsForPrompt, intent);
     const triggerBlock = buildTriggerBlock(documents);
     const comparisonReviewBlock =
@@ -1494,6 +1481,21 @@ Style:
 - short paragraphs preferred
 - bullets only when helpful
 - prioritize real-world repair impact over formatting
+
+[FUNCTION EQUIVALENCE RULE - NON-NEGOTIABLE]
+
+A procedure is INCLUDED if the repair function is documented under equivalent wording.
+
+Examples:
+- "All-around cameras static calibration" covers multi-camera calibration functions
+- "Front side radar static calibration" covers side radar / lane-change-related radar calibration
+- "Seat belt dynamic function test" covers seat belt system functional verification
+
+You must evaluate repair function, not label similarity.
+
+Do NOT say a calibration is missing if:
+1. an equivalent system-level calibration is present, or
+2. the document explicitly references an ADAS report covering that operation.
 `.trim()
           : "";
 
@@ -1627,51 +1629,80 @@ Rules:
 
     const visionContent = buildVisionInput(attachedContext, images);
     const evidenceBlock = buildEvidenceBlock(docsForPrompt);
-    const signals = extractRepairSignals(docsForPrompt);
-    const signalsBlock = `
-[CONFIRMED OPERATIONS — FROM DOCUMENTS]
+    const signals = pipelineSignals.repairSignals;
+    const validationSummary = `
+[FUNCTIONAL VALIDATION - SYSTEM OUTPUT]
 
-The following operations are explicitly present:
+The system has evaluated required procedures using functional equivalence logic.
+
+Key rules applied:
+- Equivalent wording counts as INCLUDED
+- System-level calibration satisfies sub-components
+- Radar calibration covers lane-related functions
+- Dynamic seat belt test satisfies safety inspection
+
+You must NOT override this validation with label-based assumptions.
+
+Interpret based on FUNCTION, not wording.
+`.trim();
+    const enforcementBlock = `
+[GROUND TRUTH ENFORCEMENT - HIGHEST PRIORITY]
+
+The structured signals below are VERIFIED facts extracted from the documents.
+
+They OVERRIDE:
+- raw document text
+- OEM retrieval
+- assumptions
+- prior model knowledge
+
+If any contradiction exists:
+-> the structured signals are correct
+
+You MUST base your reasoning on them.
+
+Do NOT reinterpret or override them.
+
+Your job is to EXPLAIN these facts - not question them.
+`.trim();
+    const signalsBlock = `
+[CONFIRMED REPAIR EVENTS - FROM DOCUMENTS]
+
+These are verified from the uploaded documents:
 
 - Pre-repair scan: ${signals.preScan ? "YES" : "NO"}
 - In-process scan: ${signals.inProcessScan ? "YES" : "NO"}
 - Post-repair scan: ${signals.postScan ? "YES" : "NO"}
-- Front camera calibration: ${signals.camera ? "YES" : "NO"}
-- Adaptive Cruise Control alignment: ${signals.radar ? "YES" : "NO"}
-- Rear camera calibration: ${signals.camera ? "YES" : "NO"}
-- Steering angle sensor calibration: ${signals.steering ? "YES" : "NO"}
-- Seat belt system check: ${signals.seatbelt ? "YES" : "NO"}
-- Calibration failure noted: ${signals.failedCalibration ? "YES" : "NO"}
 
-These are confirmed facts from the estimate and invoice.
+- All-around / surround camera calibration: ${
+      signals.events.some((e) => e.normalizedKey === "surround_camera_calibration") ? "YES" : "NO"
+    }
+- Front camera calibration coverage: ${signals.frontCameraCalibration ? "YES" : "NO"}
+- Rear camera calibration coverage: ${signals.rearCameraCalibration ? "YES" : "NO"}
+- Front side radar / lane-change-related calibration: ${signals.laneChangeCalibration ? "YES" : "NO"}
+- ACC / radar calibration: ${signals.accCalibration ? "YES" : "NO"}
+- Seat belt system check: ${signals.seatBeltCheck ? "YES" : "NO"}
+- Wheel alignment: ${signals.wheelAlignment ? "YES" : "NO"}
+- ADAS report documented: ${signals.events.some((e) => e.normalizedKey === "adas_report") ? "YES" : "NO"}
+- Sublet involvement: ${signals.subletUsed ? "YES" : "NO"}
 
+These are grounded facts from the documents.
+Equivalent function coverage counts as INCLUDED.
 You are NOT allowed to contradict these facts.
-
-Your job is to interpret what they mean.
-
-[LOGIC CONSTRAINT]
-
-If you say:
-- "no calibrations"
-- "no scans"
-
-You are WRONG.
-
-You must use the confirmed operations above as ground truth.
 
 [TASK]
 
-Do NOT look for missing procedures.
+Explain what actually happened in this repair.
+Do NOT treat equivalent calibration wording as missing.
+Prioritize function coverage over label matching.
+`.trim();
+    const eventsBlock = `
+[RAW DETECTED EVENTS]
 
-Instead answer:
+${signals.events.slice(0, 12).map((e) => `- ${e.label}: ${e.evidence}`).join("\n")}
 
-"What actually happened during this repair?"
-
-Focus on:
-- what was performed
-- what failed
-- what required correction
-- what that implies
+These are direct extractions from the documents.
+Use them as grounding.
 `.trim();
     const intentBlock = `
 [DETECTED INTENT]
@@ -1751,7 +1782,22 @@ ${
 
     input.unshift({
       role: "system",
+      content: [{ type: "input_text", text: eventsBlock }],
+    });
+
+    input.unshift({
+      role: "system",
       content: [{ type: "input_text", text: signalsBlock }],
+    });
+
+    input.unshift({
+      role: "system",
+      content: [{ type: "input_text", text: validationSummary }],
+    });
+
+    input.unshift({
+      role: "system",
+      content: [{ type: "input_text", text: enforcementBlock }],
     });
 
     if (intent === "estimate_review" || intent === "estimate_compare") {
@@ -1921,7 +1967,7 @@ Analyze visible damage, severity, likely repair operations, and safety risks.`,
         ? response.output_text
         : "";
     const findingsPrompt = `
-Extract key findings from the analysis.
+Extract the most meaningful repair intelligence findings from the analysis.
 
 Return JSON only:
 
@@ -1929,15 +1975,18 @@ Return JSON only:
   {
     "title": "",
     "severity": "low | medium | high",
-    "category": "missing_operation | compliance | risk | optimization",
+    "category": "risk | process | gap | optimization",
     "explanation": ""
   }
 ]
 
 Rules:
-- Only include REAL issues
-- Do NOT include uncertain items
+- Focus on real repair events and their meaning
+- Prefer failure / correction / verification findings over generic omissions
 - Do NOT hallucinate missing procedures
+- Do NOT include filler
+- If scans or calibrations were performed, do not describe them as missing
+- A documented failed calibration is a process finding, not a missing-procedure finding
 `.trim();
     const findingsResponse = await openai.responses.create({
       model: "gpt-4o",

@@ -1,14 +1,12 @@
-export type ChatFindingSeverity = "low" | "medium" | "high";
+export type FindingSeverity = "low" | "medium" | "high";
 
-export type ChatFindingCategory =
-  | "missing_operation"
-  | "compliance"
-  | "risk"
-  | "optimization";
+export type FindingCategory = "risk" | "process" | "gap" | "optimization";
 
-export interface ChatFinding {
+export interface Finding {
   title: string;
-  severity: ChatFindingSeverity;
-  category: ChatFindingCategory;
+  severity: FindingSeverity;
+  category: FindingCategory;
   explanation: string;
 }
+
+export type ChatFinding = Finding;

@@ -20,6 +20,80 @@ export interface ComplianceValidationResult {
   matchedProcedures: string[];
 }
 
+const calibrationEquivalents = {
+  frontCamera: [
+    "front camera",
+    "forward camera",
+    "kafas",
+    "camera dynamic",
+    "all-around camera",
+    "all around camera",
+    "peripheral camera",
+    "surround view",
+    "360 camera",
+  ],
+  radar: [
+    "acc",
+    "radar",
+    "adaptive cruise",
+    "front radar",
+    "calibrate acc",
+    "front side radar",
+  ],
+  laneChange: [
+    "lane change calibration",
+    "blind spot",
+    "side radar",
+    "front side radar",
+    "all-around camera",
+    "peripheral camera",
+    "surround view",
+    "360 camera",
+  ],
+  seatBelt: [
+    "seat belt system operational check",
+    "inspect seat belt system",
+    "seat belt dynamic function test",
+    "seat belt function test",
+  ],
+} as const;
+
+function detectFunction(
+  text: string,
+  group: keyof typeof calibrationEquivalents
+) {
+  return calibrationEquivalents[group].some((term) => text.includes(term));
+}
+
+function matchesProcedureFunction(
+  normalizedEstimate: string,
+  procedure: RequiredProcedure
+): boolean {
+  const lowerProcedure = procedure.procedure.toLowerCase();
+
+  if (lowerProcedure.includes("kafas") || lowerProcedure.includes("camera calibration")) {
+    return detectFunction(normalizedEstimate, "frontCamera");
+  }
+
+  if (
+    lowerProcedure.includes("acc radar") ||
+    lowerProcedure.includes("radar calibration") ||
+    lowerProcedure.includes("adaptive cruise")
+  ) {
+    return detectFunction(normalizedEstimate, "radar");
+  }
+
+  if (lowerProcedure.includes("lane change")) {
+    return detectFunction(normalizedEstimate, "laneChange");
+  }
+
+  if (lowerProcedure.includes("seat belt")) {
+    return detectFunction(normalizedEstimate, "seatBelt");
+  }
+
+  return false;
+}
+
 export function validateRepair(
   estimateText: string,
   procedures: RequiredProcedure[]
@@ -34,7 +108,9 @@ export function validateRepair(
     const aliases = [procedure.procedure, ...procedure.aliases].map((alias) =>
       alias.toLowerCase()
     );
-    const found = aliases.some((alias) => normalizedEstimate.includes(alias));
+    const found =
+      aliases.some((alias) => normalizedEstimate.includes(alias)) ||
+      matchesProcedureFunction(normalizedEstimate, procedure);
 
     if (found) {
       matchedProcedures.push(procedure.procedure);
