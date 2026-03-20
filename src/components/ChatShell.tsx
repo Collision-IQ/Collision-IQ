@@ -124,13 +124,23 @@ export default function ChatShell({
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.6fr_1fr] gap-6 h-full">
 
           {/* Left panel */}
-          {hasLeft && <div className="hidden lg:block">{left}</div>}
+          {hasLeft && (
+            <div className="hidden lg:block bg-glass border-glass backdrop-blur-md rounded-xl p-4">
+              {left}
+            </div>
+          )}
 
           {/* Center panel */}
-          <div className="min-w-0">{center}</div>
+          <div className="min-w-0 rounded-xl p-4 border border-white/10 bg-white/[0.02]">
+            {center}
+          </div>
 
           {/* Right panel */}
-          {hasRight && <div className="hidden lg:block">{right}</div>}
+          {hasRight && (
+            <div className="hidden lg:block bg-glass border-glass backdrop-blur-md rounded-xl p-4">
+              {right}
+            </div>
+          )}
 
         </div>
 

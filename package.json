@@ -6,13 +6,14 @@
     "dev": "cross-env NODE_OPTIONS=--openssl-legacy-provider next dev",
     "build": "prisma generate && next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.19",
     "@capacitor/android": "^8.1.0",
     "@capacitor/cli": "^7.5.0",
     "@capacitor/core": "^8.1.0",
+    "@fontsource/inter": "^5.2.8",
     "@google-cloud/vision": "^5.3.4",
     "@langchain/core": "^1.1.17",
     "@langchain/openai": "^1.2.3",
@@ -23,6 +24,7 @@
     "formidable": "^3.5.4",
     "framer-motion": "^12.29.2",
     "googleapis": "^171.4.0",
+    "jspdf": "^4.2.0",
     "langchain": "^1.2.13",
     "lucide-react": "^0.564.0",
     "mammoth": "^1.11.0",
@@ -31,6 +33,7 @@
     "openai": "^6.16.0",
     "papaparse": "^5.5.3",
     "pdf-parse": "^1.1.4",
+    "pg": "^8.20.0",
     "prisma": "^5.22.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
@@ -48,8 +51,8 @@
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.23",
     "cross-env": "^10.1.0",
-    "eslint": "^4.1.1",
-    "eslint-config-next": "^0.2.4",
+    "eslint": "^9.38.0",
+    "eslint-config-next": "^16.1.6",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
     "typescript": "^5"

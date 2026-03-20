@@ -5,6 +5,7 @@ node_modules/
 .next/
 out/
 dist/
+*.tsbuildinfo
 
 # ===============================
 # Environment variables (NEVER COMMIT)
@@ -54,6 +55,7 @@ System Volume Information/
 .parcel-cache/
 .turbo/
 .swc/
+.eslintcache
 
 # ===============================
 # Optional: Upload temp folders (if you add them later)
@@ -77,3 +79,4 @@ coverage/
 *.zip
 
 /generated/prisma
+.vercel

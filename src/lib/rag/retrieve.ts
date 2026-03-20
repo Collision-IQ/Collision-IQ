@@ -1,4 +1,5 @@
 import { hybridSearch } from "@/lib/rag/search";
+import type { RetrievedChunk } from "@/lib/types";
 
 export type RetrieveParams = {
   query: string;
@@ -14,16 +15,7 @@ export type RetrieveParams = {
   limit?: number;
 };
 
-export type RetrieveResult = {
-  text: string;
-  drive_path?: string | null;
-  similarity?: number | null;
-
-  oem?: string | null;
-  system?: string | null;
-  component?: string | null;
-  procedure?: string | null;
-};
+export type RetrieveResult = RetrievedChunk;
 
 /*
 ---------------------------------------------
@@ -81,15 +73,13 @@ export async function retrieveDocuments(
   ---------------------------------------------
   */
 
-  const normalized: RetrieveResult[] = results.map((r: any) => ({
-    text: r.text ?? "",
-    drive_path: r.drive_path ?? null,
-    similarity: r.similarity ?? null,
-    oem: r.oem ?? null,
-    system: r.system ?? null,
-    component: r.component ?? null,
-    procedure: r.procedure ?? null
-  }));
+  const normalized: RetrieveResult[] = results.map(
+    (r: Awaited<ReturnType<typeof hybridSearch>>[number]) => ({
+      content: r.content ?? "",
+      file_id: r.file_id ?? "",
+      distance: r.distance ?? undefined,
+    })
+  );
 
   return normalized.slice(0, limit);
 }

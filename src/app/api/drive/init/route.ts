@@ -1,9 +1,11 @@
+export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
 import { google } from "googleapis";
 import { getDriveAuth } from "@/lib/drive/auth";
 import { prisma } from "@/lib/prisma";
 
-export async function POST() {
+async function initializeDrive() {
   const auth = await getDriveAuth();
   const drive = google.drive({ version: "v3", auth });
 
@@ -19,5 +21,24 @@ export async function POST() {
     WHERE id = 'drive'
   `);
 
-  return NextResponse.json({ token });
+  return NextResponse.json({
+    message: "Drive initialized",
+    token,
+  });
+}
+
+export async function POST() {
+  try {
+    return await initializeDrive();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Drive initialization failed";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    message: "Use POST to initialize the Drive start page token."
+  });
 }

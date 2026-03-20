@@ -24,6 +24,8 @@ function normalizeEgnyteEvents(body: unknown): EgnyteWebhookEvent[] {
   return [value as EgnyteWebhookEvent];
 }
 
+// Reserved for upcoming event-type-specific job routing.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function getNormalizedEventType(event: EgnyteWebhookEvent): string {
   const raw = String(event.eventType ?? "unknown").toLowerCase();
 

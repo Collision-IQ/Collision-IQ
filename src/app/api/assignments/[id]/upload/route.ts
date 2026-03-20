@@ -1,6 +1,5 @@
 import { NextRequest } from "next/server";
 import { getAssignment } from "@/lib/assignmentStore";
-import { OpenAI } from "openai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,10 +23,6 @@ export async function POST(req: NextRequest): Promise<Response> {
       );
     }
 
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-
     const assignment = getAssignment(assignmentId);
     if (!assignment) {
       return new Response(JSON.stringify({ error: "Unknown assignmentId" }), {
@@ -35,7 +30,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       });
     }
 
-    const body = await req.json().catch(() => ({}));
+    const body = (await req.json().catch(() => ({}))) as { message?: unknown };
     const userText = String(body?.message ?? "").trim();
 
     if (!userText) {
@@ -48,9 +43,11 @@ export async function POST(req: NextRequest): Promise<Response> {
 
     return new Response(JSON.stringify({ success: true }), { status: 200 });
 
-  } catch (err: any) {
+  } catch (err: unknown) {
     return new Response(
-      JSON.stringify({ error: err?.message ?? "Server error" }),
+      JSON.stringify({
+        error: err instanceof Error ? err.message : "Server error",
+      }),
       { status: 500 }
     );
   }

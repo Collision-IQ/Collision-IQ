@@ -13,8 +13,11 @@ export default function FileUpload({
   buttonLabel = "Upload documents",
 }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploaded, setUploaded] = useState<string[]>([]);
+  const [dragActive, setDragActive] = useState(false);
 
   async function uploadFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -38,7 +41,6 @@ export default function FileUpload({
 
       const data: unknown = await res.json();
 
-      // runtime-safe parse
       if (
         !data ||
         typeof data !== "object" ||
@@ -50,14 +52,18 @@ export default function FileUpload({
 
       const docs = (data as { documents: UploadedDocument[] }).documents;
 
-      // sanity
-      if (!docs.every((d) => typeof d?.filename === "string" && typeof d?.text === "string")) {
+      if (
+        !docs.every(
+          (d) => typeof d?.filename === "string" && typeof d?.text === "string"
+        )
+      ) {
         throw new Error("Upload documents have invalid shape");
       }
 
       onUploadComplete(docs);
 
-      // clear input so re-uploading same file works
+      setUploaded(docs.map((d) => d.filename));
+
       if (inputRef.current) inputRef.current.value = "";
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
@@ -66,13 +72,23 @@ export default function FileUpload({
     }
   }
 
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragActive(false);
+    uploadFiles(e.dataTransfer.files);
+  }
+
   return (
-    <div className="space-y-2">
-      <label className="sr-only" htmlFor="file-upload-input">
-        Upload files
+    <div className="space-y-3">
+
+      {/* Hidden file input */}
+
+      <label className="sr-only" htmlFor="file-upload">
+        Upload documents
       </label>
+
       <input
-        id="file-upload-input"
+        id="file-upload"
         ref={inputRef}
         type="file"
         multiple
@@ -80,20 +96,55 @@ export default function FileUpload({
         onChange={(e) => void uploadFiles(e.target.files)}
       />
 
-      <button
-        type="button"
-        className="w-full rounded bg-orange-600 px-4 py-2 font-semibold text-black disabled:opacity-60"
-        disabled={busy}
+      {/* Upload area */}
+
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragActive(true);
+        }}
+        onDragLeave={() => setDragActive(false)}
+        onDrop={handleDrop}
+        className={`border border-white/10 rounded-xl p-4 text-center cursor-pointer transition
+        ${dragActive ? "bg-white/10" : "bg-black/40"}`}
         onClick={() => inputRef.current?.click()}
       >
-        {busy ? "Uploading..." : buttonLabel}
-      </button>
 
-      {error ? (
+        <div className="text-sm text-white/70 mb-1">
+          {busy ? "Uploading…" : buttonLabel}
+        </div>
+
+        <div className="text-xs text-white/40">
+          Drag files here or click to browse
+        </div>
+
+      </div>
+
+      {/* Uploaded file chips */}
+
+      {uploaded.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+
+          {uploaded.map((name) => (
+            <div
+              key={name}
+              className="text-xs bg-glass border-glass backdrop-blur-md px-2 py-1 rounded"
+            >
+              {name}
+            </div>
+          ))}
+
+        </div>
+      )}
+
+      {/* Error */}
+
+      {error && (
         <div className="rounded bg-red-950 px-3 py-2 text-sm text-red-200">
           ⚠️ {error}
         </div>
-      ) : null}
+      )}
+
     </div>
   );
 }

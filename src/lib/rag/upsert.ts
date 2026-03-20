@@ -5,11 +5,10 @@ export async function upsertChunks(params: {
   drivePath: string;
   modifiedTime: string;
   chunks: {
-    text: string;
+    content: string;
     embedding: number[] | number[][];
     chunkIndex: number;
 
-    oem?: string | null;
     system?: string | null;
     component?: string | null;
     procedure?: string | null;
@@ -30,7 +29,7 @@ export async function upsertChunks(params: {
 
   await prisma.$executeRawUnsafe(`
     DELETE FROM document_chunks
-    WHERE drive_file_id = $1
+    WHERE file_id = $1
   `, driveFileId);
 
   if (!chunks.length) return;
@@ -59,12 +58,10 @@ export async function upsertChunks(params: {
     return {
       id,
       source: "drive",
-      drive_file_id: driveFileId,
-      drive_path: drivePath,
+      file_id: driveFileId,
       chunk_index: c.chunkIndex,
-      text: c.text,
+      content: c.content,
       embedding: vec,
-      oem: c.oem ?? null,
       system: c.system ?? null,
       component: c.component ?? null,
       procedure: c.procedure ?? null,
@@ -87,13 +84,11 @@ export async function upsertChunks(params: {
       (
         id,
         source,
-        drive_file_id,
-        drive_path,
+        file_id,
         chunk_index,
-        text,
+        content,
         embedding,
         updated_at,
-        oem,
         system,
         component,
         procedure,
@@ -102,13 +97,12 @@ export async function upsertChunks(params: {
       )
       VALUES
       (
-        $1,$2,$3,$4,$5,$6,$7,NOW(),$8,$9,$10,$11,$12,$13
+        $1,$2,$3,$4,$5,$6,NOW(),$7,$8,$9,$10,$11
       )
       ON CONFLICT (id) DO UPDATE SET
-        text = EXCLUDED.text,
+        content = EXCLUDED.content,
         embedding = EXCLUDED.embedding,
         updated_at = NOW(),
-        oem = EXCLUDED.oem,
         system = EXCLUDED.system,
         component = EXCLUDED.component,
         procedure = EXCLUDED.procedure,
@@ -117,12 +111,10 @@ export async function upsertChunks(params: {
     `,
       v.id,
       v.source,
-      v.drive_file_id,
-      v.drive_path,
+      v.file_id,
       v.chunk_index,
-      v.text,
+      v.content,
       v.embedding,
-      v.oem,
       v.system,
       v.component,
       v.procedure,

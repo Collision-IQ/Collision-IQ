@@ -1,17 +1,8 @@
 export type ChunkMetadata = {
-  oem: string | null
   system: string | null
   component: string | null
   procedure: string | null
 }
-
-const OEMS = [
-  "Honda","Toyota","Ford","GM","Chevrolet","Nissan","Hyundai","Kia",
-  "Subaru","Mazda","BMW","Mercedes","Audi","Volkswagen", "BMW", "Tesla",
-  "Lexus","Acura","Infiniti","Cadillac","GMC","Jeep","Dodge","Ram",
-  "Chrysler","Volvo","Jaguar","Land Rover","Porsche","Mitsubishi",
-  "Mini","Fiat","Alfa Romeo","Genesis","Rivian","Lucid","Polestar"
-]
 
 const SYSTEMS = [
   "ADAS","SRS","Airbag","Radar","Camera","Blind Spot",
@@ -59,7 +50,6 @@ export function extractMetadata(input: {
   const combined = `${input.drivePath ?? ""}\n${input.text}`
 
   return {
-    oem: firstMatch(combined, OEMS),
     system: firstMatch(combined, SYSTEMS),
     component: firstMatch(combined, COMPONENTS),
     procedure:

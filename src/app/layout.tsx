@@ -1,9 +1,55 @@
 import "./globals.css";
 import type { Metadata } from "next";
 
+function getSiteUrl() {
+  const rawUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    process.env.APP_BASE_URL ??
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined) ??
+    "https://www.collision.academy";
+
+  try {
+    return new URL(rawUrl.trim());
+  } catch {
+    return new URL("https://www.collision.academy");
+  }
+}
+
+const siteUrl = getSiteUrl();
+
 export const metadata: Metadata = {
+  metadataBase: siteUrl,
   title: "Collision Academy",
   description: "Automotive Appraisal & Collision Technology Experts.",
+  alternates: {
+    canonical: "/",
+  },
+  icons: {
+    icon: "/brand/logos/icons/Favicon.svg",
+    shortcut: "/brand/logos/icons/Favicon.svg",
+    apple: "/brand/logos/icons/Favicon.svg",
+  },
+  openGraph: {
+    title: "Collision Academy",
+    description: "Automotive Appraisal & Collision Technology Experts.",
+    url: siteUrl,
+    siteName: "Collision Academy",
+    images: [
+      {
+        url: "/brand/logos/logo-horizontal.png",
+        width: 1200,
+        height: 630,
+        alt: "Collision Academy",
+      },
+    ],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Collision Academy",
+    description: "Automotive Appraisal & Collision Technology Experts.",
+    images: ["/brand/logos/logo-horizontal.png"],
+  },
 };
 
 export default function RootLayout({
@@ -14,7 +60,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full">
       <head>
-        {/* ✅ Critical for safe-area + immersive mobile */}
+        {/* Safe-area support for mobile */}
         <meta
           name="viewport"
           content="width=device-width, initial-scale=1, viewport-fit=cover"
@@ -25,13 +71,12 @@ export default function RootLayout({
         className="
           h-full
           bg-black
-          text-white
+          text-white antialiased
           overflow-x-hidden
-          overflow-y-hidden
           root-layout-body
         "
       >
-        {/* Cinematic overlays (non-interactive, won’t block clicks) */}
+        {/* Cinematic overlays (non-interactive) */}
         <div
           aria-hidden
           className="pointer-events-none fixed inset-0 z-0"
@@ -52,12 +97,11 @@ export default function RootLayout({
           <div className="absolute inset-0 opacity-[0.06] mix-blend-overlay bg-[url('/brand/logos/Background.png')]" />
         </div>
 
-        {/* Content layer ABOVE overlays */}
+        {/* App layer */}
         <div
           className="
             relative
             z-10
-            h-full
             min-h-screen
             flex
             flex-col

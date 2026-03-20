@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Paperclip, X, Camera, ChevronDown, ChevronUp } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import type { ChatFinding } from "@/lib/ai/types/chatFindings";
 
 type Role = "user" | "assistant";
 
@@ -11,88 +12,73 @@ interface Message {
   content: string;
 }
 
-interface DocumentData {
-  filename: string;
-  text: string;
-}
-
-type VisionImage = {
-  filename: string;
-  dataUrl: string; // base64 data URL
-};
-
 interface Attachment {
+  attachmentId: string;
   filename: string;
-  documents: DocumentData[];
+  mime: string;
+  text: string;
+  imageDataUrl?: string;
   source: "file" | "camera";
-  isImage: boolean;
+  hasVision: boolean;
 }
 
 interface ChatWidgetProps {
   onAttachmentChange?: (filename: string | null) => void;
   onAnalysisChange?: (text: string) => void;
-}
-
-/**
- * Extract plain text from react-markdown children (which can be strings, arrays, or React elements).
- * Must be defined OUTSIDE the component, not inside JSX.
- */
-function extractText(node: React.ReactNode): string {
-  if (node == null) return "";
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(extractText).join("");
-  if (React.isValidElement(node)) {
-    const el = node as React.ReactElement<{ children?: React.ReactNode }>;
-    return extractText(el.props.children);
-  }
-  return "";
+  onFindingsChange?: (data: ChatFinding[]) => void;
 }
 
 const INITIAL_MESSAGE: Message = {
   role: "assistant",
   content:
-    "Hi there — upload an estimate, OEM procedure, or photo and I’ll produce a structured repair analysis.",
+    "Hi there - upload an estimate, OEM procedure, or photo and I'll produce a structured repair analysis.",
 };
 
 export default function ChatWidget({
   onAttachmentChange,
   onAnalysisChange,
+  onFindingsChange,
 }: ChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
-
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [documents, setDocuments] = useState<DocumentData[]>([]);
-  const [images, setImages] = useState<VisionImage[]>([]);
-
   const [attachmentsOpen, setAttachmentsOpen] = useState(true);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-
-  // Scroll container + anchor
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  // Smart auto-scroll: only follow if user is near bottom
   const shouldAutoScrollRef = useRef(true);
+  const abortRef = useRef<AbortController | null>(null);
+  const sessionRef = useRef<number>(0);
 
   const hasAnyAttachment = useMemo(() => attachments.length > 0, [attachments]);
-
-  // ✅ NEW: abort controller for in-flight streaming
-  const abortRef = useRef<AbortController | null>(null);
-
-  // ✅ NEW: "session id" to prevent stale streams updating state after End Chat
-  const sessionRef = useRef<number>(0);
+  const visionAttachmentCount = useMemo(
+    () => attachments.filter((attachment) => attachment.hasVision).length,
+    [attachments]
+  );
 
   useEffect(() => {
     if (attachments.length >= 3) setAttachmentsOpen(false);
     if (attachments.length === 0) setAttachmentsOpen(true);
   }, [attachments.length]);
 
-  // Track user scroll position so we don't "yank" them while reading
+  useEffect(() => {
+    if (attachments.length < 2) return;
+
+    setMessages((prev) => {
+      const feedback =
+        "You’ve uploaded multiple files. I’ll focus on the most relevant ones to keep performance fast.";
+
+      if (prev[prev.length - 1]?.role === "assistant" && prev[prev.length - 1]?.content === feedback) {
+        return prev;
+      }
+
+      return [...prev, { role: "assistant", content: feedback }];
+    });
+  }, [attachments.length]);
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -109,7 +95,6 @@ export default function ChatWidget({
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Auto-scroll when assistant outputs (streaming updates messages continuously)
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     if (lastMessage?.role !== "assistant") return;
@@ -123,10 +108,12 @@ export default function ChatWidget({
 
   function buildAttachmentSummary(list: Attachment[]) {
     if (!list.length) return "";
-    if (list.length === 1)
+    if (list.length === 1) {
       return `Please analyze the attached file: ${list[0].filename}`;
+    }
+
     return `Please analyze the attached files (${list.length}): ${list
-      .map((a) => a.filename)
+      .map((attachment) => attachment.filename)
       .join(", ")}`;
   }
 
@@ -134,45 +121,24 @@ export default function ChatWidget({
     return file.type.startsWith("image/");
   }
 
-  async function fileToDataUrl(file: File): Promise<string> {
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  }
-
-  // ✅ NEW: End Chat handler (hardened)
   function handleEndChat() {
-    // Cancel any in-flight stream immediately
     abortRef.current?.abort();
     abortRef.current = null;
-
-    // Bump session id so stale async work can’t update state
     sessionRef.current += 1;
 
-    // Reset UI state
     setLoading(false);
     setInput("");
-
     setMessages([INITIAL_MESSAGE]);
-
-    // Clear attachments + derived context
     setAttachments([]);
-    setDocuments([]);
-    setImages([]);
     setAttachmentsOpen(true);
 
-    // Clear file inputs (so same file can be reselected)
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (cameraInputRef.current) cameraInputRef.current.value = "";
 
-    // Notify parent
     onAttachmentChange?.(null);
     onAnalysisChange?.("");
+    onFindingsChange?.([]);
 
-    // Reset scroll behavior
     shouldAutoScrollRef.current = true;
     setTimeout(() => {
       bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -186,11 +152,8 @@ export default function ChatWidget({
     setLoading(true);
     shouldAutoScrollRef.current = true;
 
-    // Capture current session id for this request
     const mySession = sessionRef.current;
-
     const messageToSend = input.trim() || buildAttachmentSummary(attachments);
-
     const userMessage: Message = {
       role: "user",
       content: messageToSend,
@@ -200,7 +163,6 @@ export default function ChatWidget({
     setMessages(updatedMessages);
     setInput("");
 
-    // Abort any previous stream before starting a new one
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -212,41 +174,62 @@ export default function ChatWidget({
         signal: controller.signal,
         body: JSON.stringify({
           messages: updatedMessages,
-          documents,
-          images,
+          attachmentIds: attachments.map((attachment) => attachment.attachmentId),
+          attachments: attachments.map((attachment) => ({
+            filename: attachment.filename,
+            type: attachment.mime,
+            text: attachment.text,
+            imageDataUrl: attachment.imageDataUrl,
+          })),
         }),
       });
 
-      if (!response.ok) throw new Error("Chat API failed");
+      if (!response.ok) {
+        let errorMessage = `Chat API failed (${response.status})`;
+
+        try {
+          const data = (await response.json()) as { error?: string };
+          if (data?.error) {
+            errorMessage = data.error;
+          }
+        } catch {
+          // Ignore JSON parse failures and keep the fallback message.
+        }
+
+        throw new Error(errorMessage);
+      }
 
       const contentType = response.headers.get("content-type") || "";
+      const findingsHeader = response.headers.get("x-findings");
+
+      if (findingsHeader) {
+        onFindingsChange?.(
+          JSON.parse(decodeURIComponent(findingsHeader)) as ChatFinding[]
+        );
+      } else {
+        onFindingsChange?.([]);
+      }
 
       if (contentType.includes("text/plain") && response.body) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-
         let assistantText = "";
 
-        // placeholder assistant message for streaming
         setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
         const assistantIndex = updatedMessages.length;
 
         while (true) {
-          // If End Chat happened, stop updating state
           if (sessionRef.current !== mySession) break;
 
           const { value, done } = await reader.read();
           if (done) break;
 
-          const chunk = decoder.decode(value, { stream: true });
-          assistantText += chunk;
+          assistantText += decoder.decode(value, { stream: true });
 
           setMessages((prev) => {
-            // Session check again inside state update
             if (sessionRef.current !== mySession) return prev;
 
             const next = [...prev];
-            // Guard in case the index is out of date
             if (assistantIndex >= 0 && assistantIndex < next.length) {
               next[assistantIndex] = { role: "assistant", content: assistantText };
             }
@@ -254,7 +237,6 @@ export default function ChatWidget({
           });
         }
 
-        // Only report analysis if this session is still current
         if (sessionRef.current === mySession) {
           onAnalysisChange?.(assistantText);
         }
@@ -267,15 +249,13 @@ export default function ChatWidget({
           onAnalysisChange?.(reply);
         }
       }
-    } catch (err: any) {
-      // Abort is expected when Ending chat or sending a new message quickly
-      if (err?.name === "AbortError") {
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === "AbortError") {
         return;
       }
 
       console.error(err);
 
-      // Only update UI if this session is still current
       if (sessionRef.current === mySession) {
         setMessages((prev) => [
           ...prev,
@@ -297,37 +277,18 @@ export default function ChatWidget({
     if (!res.ok) throw new Error("Upload failed");
 
     const data = await res.json();
-
+    const attachmentId: string = data.attachmentId;
     const filename: string = data.filename || file.name;
-    const docs: DocumentData[] = Array.isArray(data.documents) ? data.documents : [];
-
-    const isImage = isLikelyImageFile(file);
-
-    if (isImage) {
-      const dataUrl = await fileToDataUrl(file);
-
-      const MAX_DATAURL_CHARS = 2_500_000;
-      if (dataUrl.length <= MAX_DATAURL_CHARS) {
-        setImages((prev) => [...prev, { filename, dataUrl }]);
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content:
-              `⚠️ Photo "${filename}" is very large and may not send reliably. ` +
-              `Try a lower-resolution photo or crop the image.`,
-          },
-        ]);
-      }
-    }
+    const mime: string = data.type || file.type;
+    const text: string = data.text || "";
+    const imageDataUrl: string | undefined =
+      typeof data.imageDataUrl === "string" ? data.imageDataUrl : undefined;
+    const hasVision: boolean = Boolean(data.hasVision) && isLikelyImageFile(file);
 
     setAttachments((prev) => [
       ...prev,
-      { filename, documents: docs, source, isImage },
+      { attachmentId, filename, mime, text, imageDataUrl, source, hasVision },
     ]);
-
-    if (docs.length) setDocuments((prev) => [...prev, ...docs]);
 
     onAttachmentChange?.(filename);
 
@@ -374,14 +335,8 @@ export default function ChatWidget({
   }
 
   function removeAttachment(filename: string) {
-    const remaining = attachments.filter((a) => a.filename !== filename);
+    const remaining = attachments.filter((attachment) => attachment.filename !== filename);
     setAttachments(remaining);
-
-    const nextDocs = remaining.flatMap((a) => a.documents || []);
-    setDocuments(nextDocs);
-
-    const nextImages = images.filter((img) => img.filename !== filename);
-    setImages(nextImages);
 
     onAttachmentChange?.(
       remaining.length ? remaining[remaining.length - 1].filename : null
@@ -390,31 +345,17 @@ export default function ChatWidget({
 
   function clearAllAttachments() {
     setAttachments([]);
-    setDocuments([]);
-    setImages([]);
     onAttachmentChange?.(null);
   }
 
   const userBubble = "bg-black/70 border border-orange-500/30 text-orange-400";
-  const assistantBubble = "max-w-[95%] sm:max-w-[75%] text-white";
 
   return (
     <div className="relative flex flex-col h-full min-h-0 overflow-hidden">
-      {/* Background watermark */}
-      <div
-        className="absolute inset-0 pointer-events-none bg-no-repeat bg-center bg-contain"
-        style={{
-          backgroundImage: "url('/brand/logos/Logo-grey.png')",
-          backgroundSize: "60%",
-          opacity: 0.06,
-        }}
-      />
-      {/* Soft dark overlay */}
+      <div className="absolute inset-0 pointer-events-none bg-[url('/brand/logos/Logo-grey.png')] bg-no-repeat bg-center bg-[length:60%] opacity-[0.06]" />
       <div className="absolute inset-0 bg-black/70 pointer-events-none" />
 
-      {/* Foreground layer */}
       <div className="relative z-10 flex flex-col flex-1 min-h-0">
-        {/* Messages (ONLY scrolling region) */}
         <div
           ref={scrollRef}
           className="
@@ -427,18 +368,49 @@ export default function ChatWidget({
           space-y-4
         "
         >
+          {messages.length === 1 && messages[0].role === "assistant" && (
+            <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
+              <div className="text-white/60 text-sm">Start a repair analysis</div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl w-full">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm"
+                >
+                  Upload Estimate
+                </button>
+
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm"
+                >
+                  Upload OEM Procedure
+                </button>
+
+                <button
+                  onClick={() => cameraInputRef.current?.click()}
+                  className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm"
+                >
+                  Upload Photos
+                </button>
+              </div>
+            </div>
+          )}
+
           {messages.map((msg, idx) => (
             <div
               key={idx}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} mb-3`}
             >
               <div
-                className={`rounded-2xl px-5 py-4 bg-transparent ${
-                  msg.role === "user" ? userBubble : assistantBubble
+                className={`rounded-2xl px-5 py-4 ${
+                  msg.role === "user"
+                    ? `${userBubble} max-w-[65%]`
+                    : "max-w-[760px] bg-glass border-glass backdrop-blur-md"
                 }`}
               >
                 {msg.role === "assistant" ? (
-                  <div className="max-w-none text-white text-[15px] leading-[1.6]">
+                  <div className="analysis-report text-[15px] leading-[1.65] text-white/90">
                     <ReactMarkdown
                       components={{
                         h2: ({ children }) => (
@@ -454,15 +426,31 @@ export default function ChatWidget({
                         p: ({ children }) => (
                           <p className="mt-2 text-white/85 leading-[1.65]">{children}</p>
                         ),
-                        li: ({ children }) => <li className="mt-1 text-white/80">{children}</li>,
-                        strong: ({ children }) => <span className="font-semibold">{children}</span>,
+                        ul: ({ children }) => (
+                          <ul className="mt-2 ml-5 list-disc space-y-1 text-white/80">
+                            {children}
+                          </ul>
+                        ),
+                        ol: ({ children }) => (
+                          <ol className="mt-2 ml-5 list-decimal space-y-1 text-white/80">
+                            {children}
+                          </ol>
+                        ),
+                        li: ({ children }) => (
+                          <li className="text-white/80">
+                            {children}
+                          </li>
+                        ),
+                        strong: ({ children }) => (
+                          <span className="font-semibold text-white">{children}</span>
+                        ),
                       }}
                     >
                       {msg.content}
                     </ReactMarkdown>
                   </div>
                 ) : (
-                  <div className="whitespace-pre-wrap text-sm sm:text-base">
+                  <div className="whitespace-pre-wrap text-sm sm:text-base text-current">
                     {msg.content}
                   </div>
                 )}
@@ -473,13 +461,7 @@ export default function ChatWidget({
           <div ref={bottomRef} />
         </div>
 
-        {/* Composer + Attachments */}
-        <div
-          className="absolute bottom-0 left-0 right-0 border-t border-white/10 bg-black/85 backdrop-blur"
-          style={{
-            paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))",
-          }}
-        >
+        <div className="absolute bottom-0 left-0 right-0 border-t border-white/10 bg-black/85 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur">
           <div className="p-4">
             <div className="flex items-center gap-3">
               <input
@@ -562,13 +544,15 @@ export default function ChatWidget({
                 <button
                   type="button"
                   className="w-full flex items-center justify-between rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80"
-                  onClick={() => setAttachmentsOpen((v) => !v)}
+                  onClick={() => setAttachmentsOpen((value) => !value)}
                   aria-label="Toggle attachments"
                 >
                   <span>
                     Attachments ({attachments.length})
                     <span className="ml-2 text-white/40">
-                      {images.length > 0 ? `• Vision: ${images.length}` : ""}
+                      {visionAttachmentCount > 0
+                        ? `- Vision: ${visionAttachmentCount}`
+                        : ""}
                     </span>
                   </span>
                   {attachmentsOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
@@ -576,22 +560,22 @@ export default function ChatWidget({
 
                 {attachmentsOpen && (
                   <div className="mt-2 space-y-2">
-                    {attachments.map((a) => (
+                    {attachments.map((attachment) => (
                       <div
-                        key={a.filename}
+                        key={attachment.attachmentId}
                         className="flex items-center justify-between bg-black/40 border border-white/10 px-4 py-2 rounded-xl text-sm text-white/80"
                       >
                         <span className="truncate pr-3">
-                          {a.filename}
+                          {attachment.filename}
                           <span className="ml-2 text-white/40">
-                            ({a.source === "camera" ? "photo" : "file"}
-                            {a.isImage ? ", vision" : ""})
+                            ({attachment.source === "camera" ? "photo" : "file"}
+                            {attachment.hasVision ? ", vision" : ""})
                           </span>
                         </span>
 
                         <button
                           type="button"
-                          onClick={() => removeAttachment(a.filename)}
+                          onClick={() => removeAttachment(attachment.filename)}
                           aria-label="Remove attachment"
                           className="shrink-0"
                         >
