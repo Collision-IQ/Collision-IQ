@@ -58,7 +58,7 @@ export async function upsertChunks(params: {
 
     return {
       id,
-      source_type: sourceType,
+      source: sourceType,
       file_id: driveFileId,
       chunk_index: c.chunkIndex,
       content: c.content,
@@ -84,7 +84,7 @@ export async function upsertChunks(params: {
       INSERT INTO document_chunks
       (
         id,
-        source_type,
+        source,
         file_id,
         chunk_index,
         content,
@@ -111,7 +111,7 @@ export async function upsertChunks(params: {
         authority = EXCLUDED.authority
     `,
       v.id,
-      v.source_type,
+      v.source,
       v.file_id,
       v.chunk_index,
       v.content,

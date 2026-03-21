@@ -28,7 +28,7 @@ export async function keywordSearch(
           NULL AS distance
         FROM document_chunks
         WHERE to_tsvector('english', content) @@ plainto_tsquery($1)
-          AND source_type IN ('google', 'onedrive1', 'onedrive2')
+          AND source IN ('google', 'onedrive1', 'onedrive2')
         LIMIT $2
       `,
       query,

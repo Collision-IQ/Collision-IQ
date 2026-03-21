@@ -20,7 +20,7 @@ export async function searchChunks(
       (embedding <-> ${JSON.stringify(embedding)}::vector) AS distance
     FROM document_chunks
     WHERE embedding IS NOT NULL
-      AND source_type IN ('google', 'onedrive1', 'onedrive2')
+      AND source IN ('google', 'onedrive1', 'onedrive2')
     ORDER BY distance ASC
     LIMIT ${safeLimit}
   `;
