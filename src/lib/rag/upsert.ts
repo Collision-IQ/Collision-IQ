@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 
 export async function upsertChunks(params: {
+  sourceType: "google" | "onedrive1" | "onedrive2";
   driveFileId: string;
   drivePath: string;
   modifiedTime: string;
@@ -19,7 +20,7 @@ export async function upsertChunks(params: {
   }[];
 }) {
 
-  const { driveFileId, drivePath, modifiedTime, chunks } = params;
+  const { sourceType, driveFileId, drivePath, modifiedTime, chunks } = params;
 
   /*
   ----------------------------------------
@@ -57,7 +58,7 @@ export async function upsertChunks(params: {
 
     return {
       id,
-      source: "drive",
+      source_type: sourceType,
       file_id: driveFileId,
       chunk_index: c.chunkIndex,
       content: c.content,
@@ -83,7 +84,7 @@ export async function upsertChunks(params: {
       INSERT INTO document_chunks
       (
         id,
-        source,
+        source_type,
         file_id,
         chunk_index,
         content,
@@ -110,7 +111,7 @@ export async function upsertChunks(params: {
         authority = EXCLUDED.authority
     `,
       v.id,
-      v.source,
+      v.source_type,
       v.file_id,
       v.chunk_index,
       v.content,

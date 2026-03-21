@@ -867,27 +867,14 @@ if (Array.isArray(matches) && matches.length > 0) {
   }));
 
   retrievalBlock = `
-[OEM Reference Context]
+[Reference Documents]
 
-The following excerpts are retrieved from OEM procedures and technical documentation.
+The following excerpts come from Google Drive and OneDrive sources.
 
-Use these as supporting reference material.
+Use them as supporting context.
 
-Your role:
-- Compare this information against the estimate or question
-- Determine whether it actually applies to the situation
-- Use it to confirm or challenge your reasoning
-
-Important:
-- Not all retrieved procedures apply directly
-- Do not assume a requirement without confirming relevance
-- Consider repair context, system involvement, and equivalent operations
-
-If a function appears to be covered under a different name:
--> treat it as included
--> explain the equivalence
-
-These documents support your reasoning - they do not replace it.
+Do not assume all content applies directly.
+Evaluate relevance before using.
 
 Each item includes:
 - source: document reference

@@ -54,6 +54,7 @@ export async function POST() {
       }
 
     await upsertChunks({
+      sourceType: "google",
       driveFileId: f.id,
       drivePath: f.name || "",
       modifiedTime: f.modifiedTime || "unknown",

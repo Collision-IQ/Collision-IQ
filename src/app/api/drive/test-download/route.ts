@@ -79,6 +79,7 @@ export async function GET() {
     const embeddings = await embedTexts(chunks);
 
     await upsertChunks({
+      sourceType: "google",
       driveFileId: fileId,
       drivePath: metadata.data.name ?? "document.pdf",
       modifiedTime: metadata.data.modifiedTime ?? new Date().toISOString(),
