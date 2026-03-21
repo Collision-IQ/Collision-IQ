@@ -21,7 +21,7 @@ import {
   mergeActiveContext,
 } from "@/lib/context/activeContext";
 import type { ChatFinding } from "@/lib/ai/types/chatFindings";
-import { extractSignals } from "@/lib/ai/pipeline/repairPipeline";
+import { buildRepairStory } from "@/lib/ai/builders/buildRepairStory";
 
 // Ã°Å¸â€Â Environment safety check
 if (!process.env.OPENAI_API_KEY) {
@@ -165,8 +165,36 @@ You are a thinking partner.
 Explain what matters and why.
 `;
 
-function buildSystemPrompt(intent: Intent) {
-  return SYSTEM_PROMPT;
+function buildRepairNarrative(story: ReturnType<typeof buildRepairStory>): string {
+  const parts: string[] = [];
+
+  if (story.operations.repairDominant) {
+    parts.push("This estimate is built around a repair-first approach rather than part replacement.");
+  } else {
+    parts.push("This estimate leans more toward part replacement than repair.");
+  }
+
+  if (story.zones.length > 0) {
+    parts.push(`The work is concentrated in the ${story.zones.join(", ")}.`);
+  }
+
+  if (story.panels.length >= 3) {
+    parts.push("The repair spans multiple panels, suggesting the impact carried beyond a single isolated component.");
+  }
+
+  if (story.systems.length > 0) {
+    parts.push(
+      `What adds complexity here is the involvement of ${story.systems.join(", ")}, but that's driven more by the vehicle's systems than the severity of the damage itself.`
+    );
+  }
+
+  if (story.complexityDrivers.length > 0) {
+    parts.push(`The main complexity here comes from ${story.complexityDrivers.join(", ")}.`);
+  }
+
+  parts.push(`Overall, this reads as a ${story.repairCharacter} repair.`);
+
+  return parts.join(" ");
 }
 
 // ==============================
@@ -372,60 +400,6 @@ export function extractTotalsFromEstimate(rawText: string): ExtractedTotals {
 }
 
 // ==============================
-// METRICS BLOCK (comparison only)
-// ==============================
-
-function buildMetricsBlock(documents: UploadedDocument[]) {
-  if (!Array.isArray(documents) || documents.length < 2) return "";
-
-  const a = extractTotalsFromEstimate(documents[0]?.text ?? "");
-  const b = extractTotalsFromEstimate(documents[1]?.text ?? "");
-
-  const canDelta =
-    (a.confidence === "High" || a.confidence === "Medium") &&
-    (b.confidence === "High" || b.confidence === "Medium") &&
-    typeof a.totalCost === "number" &&
-    typeof b.totalCost === "number";
-
-  const canLaborDelta =
-    (a.confidence === "High" || a.confidence === "Medium") &&
-    (b.confidence === "High" || b.confidence === "Medium") &&
-    typeof a.totalLaborHours === "number" &&
-    typeof b.totalLaborHours === "number";
-
-  const laborDelta = canLaborDelta ? a.totalLaborHours! - b.totalLaborHours! : null;
-  const costDelta = canDelta ? a.totalCost! - b.totalCost! : null;
-
-  const laborPct =
-    canLaborDelta && b.totalLaborHours! !== 0 ? (laborDelta! / b.totalLaborHours!) * 100 : null;
-  const costPct = canDelta && b.totalCost! !== 0 ? (costDelta! / b.totalCost!) * 100 : null;
-
-  return `
-[SYSTEM-GENERATED METRICS Ã¢â‚¬â€ TOTALS EXTRACTION]
-
-Document A:
-- Total Labor Hours: ${a.totalLaborHours ?? "Not found"}
-- Total Cost (${a.totalCostLabel}): ${a.totalCost ?? "Not found"}
-- Confidence: ${a.confidence}
-
-Document B:
-- Total Labor Hours: ${b.totalLaborHours ?? "Not found"}
-- Total Cost (${b.totalCostLabel}): ${b.totalCost ?? "Not found"}
-- Confidence: ${b.confidence}
-
-Deltas (A - B):
-- Labor Hours Delta: ${laborDelta !== null ? laborDelta.toFixed(2) : "Not determinable"}
-- Labor Hours % Delta vs B: ${laborPct !== null ? laborPct.toFixed(1) + "%" : "Not determinable"}
-- Cost Delta: ${costDelta !== null ? costDelta.toFixed(2) : "Not determinable"}
-- Cost % Delta vs B: ${costPct !== null ? costPct.toFixed(1) + "%" : "Not determinable"}
-
-Rules:
-- Use totals only when confidence is Medium/High.
-- If Low, state "Not determinable from totals section" and do not guess.
-`.trim();
-}
-
-// ==============================
 // DOCUMENT CONTEXT BUILDER (DATA ONLY)
 // ==============================
 
@@ -533,90 +507,12 @@ ${extractDocumentMetadata(documents)}
       ? selectDocumentsForIntent(documents.filter(isEstimateDocument), intent)
       : selectDocumentsForIntent(documents, intent);
   const documentsForContext = scopedDocuments.length > 0 ? scopedDocuments : documents;
-  const isComparison = documentsForContext.length >= 2;
-  const metricsBlock = isComparison ? buildMetricsBlock(documentsForContext) : "";
   const safe = buildSmartContext(documentsForContext);
 
   return `
-[Attached Document Context]
+[Reference Estimate Text - use only if needed]
 
-The following is extracted text from uploaded documents.
-
-Use this as reference if relevant.
-
-Do not assume all content applies directly.
-
-${metricsBlock ? metricsBlock + "\n\n" : ""}
-
-${safe}
-`.trim();
-}
-
-// ==============================
-// REPAIR TRIGGER ENGINE
-// ==============================
-
-function detectRepairTriggers(text: string): string[] {
-  const triggers: string[] = [];
-  const lower = (text || "").toLowerCase();
-
-  const rules = [
-    {
-      keywords: ["bumper", "impact bar", "radar bracket", "grille"],
-      procedure: "Radar / forward camera calibration may be required",
-    },
-    {
-      keywords: ["windshield", "camera bracket", "mirror bracket"],
-      procedure: "Forward facing camera calibration required",
-    },
-    {
-      keywords: ["steering wheel", "steering column", "steering joint"],
-      procedure: "Steering angle sensor neutral position reset",
-    },
-    {
-      keywords: ["alignment", "toe", "four wheel alignment", "front toe"],
-      procedure: "Steering angle sensor recalibration",
-    },
-    {
-      keywords: ["passenger seat", "seat frame", "seat belt tensioner", "sws", "ods"],
-      procedure: "Seat weight sensor calibration / output check",
-    },
-    {
-      keywords: ["battery disconnect", "battery d&r", "battery r&i", "battery remove", "battery replace"],
-      procedure: "Module resets and ADAS system verification",
-    },
-    {
-      keywords: ["upper rail", "sidemember", "frame pull", "radiator support", "tie bar", "core support"],
-      procedure: "Structural geometry change may require ADAS aiming / calibration verification",
-    },
-  ];
-
-  for (const rule of rules) {
-    if (rule.keywords.some((k) => lower.includes(k))) {
-      triggers.push(rule.procedure);
-    }
-  }
-
-  return [...new Set(triggers)];
-}
-
-function buildTriggerBlock(documents: UploadedDocument[]) {
-  if (!Array.isArray(documents) || documents.length === 0) return "";
-
-  const triggerProcedures = documents
-    .map((d) => detectRepairTriggers(d.text || ""))
-    .flat();
-
-  const uniqueTriggers = [...new Set(triggerProcedures)];
-
-  if (uniqueTriggers.length === 0) return "";
-
-  return `
-[SYSTEM DETECTED REPAIR TRIGGERS]
-
-Based on detected repair operations in the attached document text, the following procedures may be required:
-
-${uniqueTriggers.map((p) => `- ${p}`).join("\n")}
+${safe.slice(0, 2000)}
 `.trim();
 }
 
@@ -638,10 +534,9 @@ function buildVisionInput(attachedContext: string, images: VisionImage[]) {
       type: "input_text" as const,
       text:
         (attachedContext ? attachedContext + "\n\n" : "") +
-        `[IMAGE ATTACHMENTS Ã¢â‚¬â€ TEXT ONLY]
-You have ${safeImages.length} image attachment(s), but image binary is not being sent to the model in this request.
-Use the filenames as context only.
-If visual inspection is required, say exactly what photo views or details are needed.`,
+        `[IMAGE ATTACHMENTS - TEXT ONLY]
+You have ${safeImages.length} image attachment(s).
+Use filenames as reference only.`,
     },
     ...safeImages.map((img) => ({
       type: "input_text" as const,
@@ -699,24 +594,49 @@ export async function POST(req: Request) {
     const isComparisonReview =
       intent === "estimate_compare" || hasComparisonDocuments(documents);
 
-    const useDocs =
-      intent === "general_question"
-        ? documents
-        : intent === "estimate_review"
-          ? selectDocumentsForIntent(documents.filter(isEstimateDocument), intent)
-          : selectDocumentsForIntent(documents, intent);
-    const docsForPrompt = useDocs.length > 0 ? useDocs : documents;
-    const pipelineSignals = extractSignals(
-      docsForPrompt.map((doc) => ({
-        filename: doc.filename,
-        mime: doc.mime,
-        text: doc.text,
-      }))
-    );
-    const attachedContext = buildAttachedContext(docsForPrompt, intent);
-    const triggerBlock = buildTriggerBlock(documents);
+    const shopDoc = documents.find((document) => {
+      const filename = (document.filename ?? "").toLowerCase();
+      return ["shop", "body shop", "repair facility"].some((keyword) =>
+        filename.includes(keyword)
+      );
+    });
+    const insurerDoc = documents.find((document) => {
+      const filename = (document.filename ?? "").toLowerCase();
+      return ["insurer", "insurance", "carrier", "sor"].some((keyword) =>
+        filename.includes(keyword)
+      );
+    });
+
+    const shopText = shopDoc?.text ?? "";
+    const insurerText = insurerDoc?.text ?? "";
+    let storyBlock = "";
+
+    if (shopText && insurerText) {
+      const shopStory = buildRepairStory(shopText);
+      const shopNarrative = buildRepairNarrative(shopStory);
+      const insurerStory = buildRepairStory(insurerText);
+      const insurerNarrative = buildRepairNarrative(insurerStory);
+
+      storyBlock += `
+[Repair Understanding - Shop Estimate]
+${shopNarrative}
+`;
+
+      storyBlock += `
+[Repair Understanding - Insurer Estimate]
+${insurerNarrative}
+`;
+    } else if (shopText || insurerText) {
+      const primaryText = shopText || insurerText;
+      const narrative = buildRepairNarrative(buildRepairStory(primaryText));
+
+      storyBlock += `
+[Repair Understanding]
+${narrative}
+`;
+    }
     const comparisonReviewBlock =
-      intent === "estimate_compare"
+      isComparisonReview
         ? `
 [ESTIMATE REVIEW OBJECTIVE]
 
@@ -784,40 +704,11 @@ Do NOT say a calibration is missing if:
 `.trim()
           : "";
 
-    // ========================================
-    // DOCUMENT PRIORITY RULE
-    // ========================================
-
-    let documentPriorityBlock = "";
-
-    const shopTextLength =
-      findDocumentText(documents, ["shop", "body shop", "repair facility"])?.length ?? 0;
-    const insurerTextLength =
-      findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"])?.length ?? 0;
-    console.log("SHOP TEXT LENGTH:", shopTextLength);
-    console.log("INSURER TEXT LENGTH:", insurerTextLength);
-
-    if (documents.length > 0) {
-      documentPriorityBlock = `
-    [DOCUMENT PRIORITY RULE]
-
-    Internal or uploaded documents are present.
-
-    If document text directly answers the user's question:
-    Ã¢â‚¬Â¢ prioritize the document over general knowledge
-    Ã¢â‚¬Â¢ quote or summarize the document content
-    Ã¢â‚¬Â¢ reference the specific system, procedure, or section
-
-    Do not provide generic summaries when document procedures exist.
-    `.trim();
-    }
-
     // ------------------------------
     // ------------------------------
     // Retrieve Drive context
     // ------------------------------
 
-    let retrievalBlock = "";
     let matches: RetrievalHit[] = [];
     let activeContext: ActiveContext | null = body.activeContext ?? null;
 
@@ -825,16 +716,9 @@ Do NOT say a calibration is missing if:
       const extracted = extractContextFromText(userMessage);
       activeContext = mergeActiveContext(activeContext, extracted);
 
-      const shouldRunRetrieval =
-        intent === "estimate_review" ||
-        intent === "estimate_compare" ||
-        intent === "repair_question";
+      const shouldRunRetrieval = false;
 
       if (shouldRunRetrieval) {
-        const shopText =
-          findDocumentText(documents, ["shop", "body shop", "repair facility"]) ?? "";
-        const insurerText =
-          findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"]) ?? "";
         const retrievalContext = extractContext(
           `${shopText}\n${insurerText}\n${userMessage}`
         );
@@ -859,51 +743,8 @@ Do NOT say a calibration is missing if:
       }
     }
 
-if (Array.isArray(matches) && matches.length > 0) {
-
-  const evidence = matches.map((m) => ({
-    source: m?.file_id ?? "Unknown",
-    excerpt: (m?.content ?? "").slice(0, 500),
-  }));
-
-  retrievalBlock = `
-[Reference Documents]
-
-The following excerpts come from Google Drive and OneDrive sources.
-
-Use them as supporting context.
-
-Do not assume all content applies directly.
-Evaluate relevance before using.
-
-Each item includes:
-- source: document reference
-- excerpt: relevant OEM instruction
-
-Evidence:
-${evidence
-  .map(
-    (e, i) => `
-[Source ${i + 1}]
-File: ${e.source}
-${e.excerpt}
-`
-  )
-  .join("\n")}
-`.slice(0, 6000);
-
-}
-    const visionContent = buildVisionInput("", images);
-    const signals = pipelineSignals.repairSignals;
-    const eventsBlock = signals.events.length > 0 ? `
-[Detected Repair Signals]
-
-${signals.events.slice(0, 12).map((e) => `- ${e.label}: ${e.evidence}`).join("\n")}
-
-These are observations from the document.
-
-Use them as reference when evaluating the repair.
-`.trim() : "";
+    const attachedContext = buildAttachedContext(documents, intent);
+    const visionContent = buildVisionInput(attachedContext, images);
     const intentBlock = `
 [User Intent]
 
@@ -993,6 +834,14 @@ If appropriate, suggest:
         role: "system",
         content: [{ type: "input_text", text: intentBlock }],
       },
+      ...(comparisonReviewBlock
+        ? [
+            {
+              role: "system" as const,
+              content: [{ type: "input_text" as const, text: comparisonReviewBlock }],
+            },
+          ]
+        : []),
       ...(strategyBlock
         ? [
             {
@@ -1001,19 +850,11 @@ If appropriate, suggest:
             },
           ]
         : []),
-      ...(eventsBlock
+      ...(storyBlock
         ? [
             {
               role: "system" as const,
-              content: [{ type: "input_text" as const, text: eventsBlock }],
-            },
-          ]
-        : []),
-      ...(retrievalBlock
-        ? [
-            {
-              role: "system" as const,
-              content: [{ type: "input_text" as const, text: retrievalBlock }],
+              content: [{ type: "input_text" as const, text: storyBlock }],
             },
           ]
         : []),
@@ -1158,8 +999,3 @@ function hasComparisonDocuments(documents: UploadedDocument[]) {
       findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"])
   );
 }
-
-
-
-
-

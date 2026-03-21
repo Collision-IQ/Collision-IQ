@@ -13,12 +13,22 @@ type LaborMix = {
   procedures: number;
 };
 
+type StoryOperations = {
+  repairDominant: boolean;
+  repairedParts: string[];
+  replacedParts: string[];
+};
+
 export type RepairStory = {
+  impact: string;
   zones: string[];
   panels: string[];
   replacedPanels: string[];
   repairedPanels: string[];
+  operations: StoryOperations;
   systems: string[];
+  complexityDrivers: string[];
+  repairCharacter: string;
   structural: boolean;
   complexity: string;
   laborStructure: {
@@ -37,18 +47,33 @@ export function buildRepairStory(estimateText: string): RepairStory {
   const replacedPanels = collectPanelsByOperation(detailedEstimate.operations, ["Repl"]);
   const repairedPanels = collectPanelsByOperation(detailedEstimate.operations, ["Rpr"]);
   const systems = detectSystems(lower);
+  const operations = {
+    repairDominant: repairedPanels.length >= replacedPanels.length,
+    repairedParts: repairedPanels,
+    replacedParts: replacedPanels,
+  };
   const structural =
     lower.includes("alu") ||
     lower.includes("structural") ||
     lower.includes("door shell") ||
     includesAny(lower, ["rail", "apron", "pillar", "core support", "reinforcement"]);
+  const complexityDrivers = detectComplexityDrivers(lower, systems, structural);
+  const impact = determineImpact(lower, zones);
 
   return {
+    impact,
     zones,
     panels,
     replacedPanels,
     repairedPanels,
+    operations,
     systems,
+    complexityDrivers,
+    repairCharacter: classifyRepairCharacter({
+      structural,
+      systems,
+      operations,
+    }),
     structural,
     complexity: classifyComplexity({ zones, panels, structural }),
     laborStructure: {
@@ -57,6 +82,48 @@ export function buildRepairStory(estimateText: string): RepairStory {
       mix: buildLaborMix(detailedEstimate.operations),
     },
   };
+}
+
+export function buildRepairNarrative(story: RepairStory): string {
+  const parts: string[] = [];
+
+  if (story.operations.repairDominant) {
+    parts.push(
+      "This estimate is built around a repair-first approach rather than part replacement."
+    );
+  } else {
+    parts.push(
+      "This estimate leans more toward part replacement than repair."
+    );
+  }
+
+  if (story.zones.length > 0) {
+    parts.push(`The work is concentrated in the ${story.zones.join(", ")}.`);
+  }
+
+  if (story.panels.length >= 3) {
+    parts.push(
+      "The repair spans multiple panels, suggesting the impact carried beyond a single isolated component."
+    );
+  }
+
+  if (story.systems.length > 0) {
+    parts.push(
+      `System involvement includes ${story.systems.join(", ")}, which adds procedural complexity but doesn't necessarily reflect structural severity.`
+    );
+  }
+
+  if (story.complexityDrivers.length > 0) {
+    parts.push(
+      `The main complexity here comes from ${story.complexityDrivers.join(", ")}.`
+    );
+  }
+
+  parts.push(
+    `Overall, this reads as a ${story.repairCharacter} repair.`
+  );
+
+  return parts.join(" ");
 }
 
 function collectPanels(operations: DetailedEstimateOperation[]): string[] {
@@ -155,17 +222,100 @@ function collectZones(lower: string, panels: string[]): string[] {
 
 function detectSystems(lower: string): string[] {
   const systems: Array<[string, string[]]> = [
-    ["ADAS", ["radar", "camera", "adas", "kafas", "blind spot", "sensor"]],
+    ["ADAS sensors", ["radar", "camera", "adas", "kafas", "blind spot", "sensor"]],
     ["cooling", ["radiator", "condenser", "cooling", "fan shroud"]],
     ["lighting", ["headlamp", "headlight", "tail lamp", "lamp"]],
     ["restraint", ["airbag", "srs", "seat belt", "tensioner"]],
     ["suspension", ["suspension", "strut", "control arm", "knuckle", "subframe"]],
     ["electrical", ["module", "harness", "wiring", "electrical"]],
+    ["hybrid battery", ["hybrid", "high voltage", "battery disconnect", "disable battery"]],
   ];
 
   return systems
     .filter(([, keywords]) => keywords.some((keyword) => lower.includes(keyword)))
     .map(([label]) => label);
+}
+
+function detectComplexityDrivers(
+  lower: string,
+  systems: string[],
+  structural: boolean
+): string[] {
+  const drivers: string[] = [];
+
+  if (systems.includes("ADAS sensors")) {
+    drivers.push("sensor integration");
+  }
+
+  if (systems.includes("hybrid battery")) {
+    drivers.push("hybrid disable/enable");
+  }
+
+  if (includesAny(lower, ["harness", "module", "wiring", "electrical"])) {
+    drivers.push("electrical handling");
+  }
+
+  if (structural) {
+    drivers.push("structural support");
+  }
+
+  return [...new Set(drivers)];
+}
+
+function determineImpact(lower: string, zones: string[]): string {
+  if (
+    includesAny(lower, ["right front", "rf", "right headlamp", "right fender"]) ||
+    zones.includes("front-end")
+  ) {
+    if (includesAny(lower, ["right"])) {
+      return "right front";
+    }
+    if (includesAny(lower, ["left"])) {
+      return "left front";
+    }
+    return "front";
+  }
+
+  if (includesAny(lower, ["right rear"])) {
+    return "right rear";
+  }
+
+  if (includesAny(lower, ["left rear"])) {
+    return "left rear";
+  }
+
+  if (zones.includes("side structure")) {
+    return "side";
+  }
+
+  if (zones.includes("rear body")) {
+    return "rear";
+  }
+
+  return "general";
+}
+
+function classifyRepairCharacter(params: {
+  structural: boolean;
+  systems: string[];
+  operations: StoryOperations;
+}): string {
+  if (params.structural) {
+    return "structural + system-handling";
+  }
+
+  if (
+    params.systems.length > 0 &&
+    (params.operations.repairedParts.length > 0 || params.operations.replacedParts.length > 0)
+  ) {
+    return "cosmetic + system-handling";
+  }
+
+  if (params.operations.repairDominant) {
+    return "repair-dominant cosmetic";
+  }
+
+  return "parts replacement oriented";
 }
 
 function classifyComplexity(params: {
