@@ -1,6 +1,7 @@
 import { parseEstimate } from "../extractors/estimateExtractor";
 import { extractComparisonFacts } from "../extractors/comparisonExtractor";
 import { extractOemRequirements } from "../extractors/oemProcedureExtractor";
+import { buildComparisonAnalysis } from "../builders/comparisonEngine";
 import { buildAnalysisResultFromAuditReport, buildAnalysisResultFromPipeline } from "../builders/buildAnalysisResult";
 import type { AnalysisResult } from "../types/analysis";
 import { buildAuditFindings } from "../validators/buildAuditFindings";
@@ -9,6 +10,18 @@ import { runRepairPipeline, type RepairPipelineDocument } from "./repairPipeline
 export function runAnalysis(
   documents: RepairPipelineDocument[]
 ): AnalysisResult {
+  const shopText =
+    findDocumentText(documents, ["shop", "body shop", "repair facility"]) ?? null;
+  const insurerText =
+    findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"]) ?? null;
+
+  if (shopText && insurerText) {
+    return buildComparisonAnalysis({
+      shopEstimateText: shopText,
+      insurerEstimateText: insurerText,
+    });
+  }
+
   const auditReport = buildDeterministicAuditReport(documents);
 
   if (auditReport) {

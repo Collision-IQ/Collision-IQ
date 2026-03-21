@@ -1,4 +1,5 @@
 import type { EvidenceRecord } from "./evidence";
+import type { EstimateOperation } from "../extractors/estimateExtractor";
 
 export type FindingStatus = "included" | "missing" | "not_shown";
 export type Severity = "low" | "medium" | "high";
@@ -83,7 +84,7 @@ export interface AnalysisFinding {
   title: string;
   detail: string;
   severity: Severity;
-  status: "included" | "missing" | "reduced" | "exposure";
+  status: "present" | "unclear" | "not_detected" | "exposure";
   evidence: EvidenceRef[];
 }
 
@@ -101,6 +102,8 @@ export interface AnalysisResult {
   findings: AnalysisFinding[];
   supplements: AnalysisFinding[];
   evidence: EvidenceRef[];
+  operations?: EstimateOperation[];
+  rawEstimateText?: string;
   narrative: string;
 }
 
@@ -144,4 +147,5 @@ export type RepairIntelligenceReport = {
   supplementOpportunities: string[];
   evidence: EvidenceRecord[];
   recommendedActions: string[];
+  analysis?: AnalysisResult;
 };

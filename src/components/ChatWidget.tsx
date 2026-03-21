@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Paperclip, X, Camera, ChevronDown, ChevronUp } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import type { ChatFinding } from "@/lib/ai/types/chatFindings";
+import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 
 type Role = "user" | "assistant";
 
@@ -25,7 +25,7 @@ interface Attachment {
 interface ChatWidgetProps {
   onAttachmentChange?: (filename: string | null) => void;
   onAnalysisChange?: (text: string) => void;
-  onFindingsChange?: (data: ChatFinding[]) => void;
+  onAnalysisResultChange?: (data: RepairIntelligenceReport | null) => void;
 }
 
 const INITIAL_MESSAGE: Message = {
@@ -37,7 +37,7 @@ const INITIAL_MESSAGE: Message = {
 export default function ChatWidget({
   onAttachmentChange,
   onAnalysisChange,
-  onFindingsChange,
+  onAnalysisResultChange,
 }: ChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
@@ -137,7 +137,7 @@ export default function ChatWidget({
 
     onAttachmentChange?.(null);
     onAnalysisChange?.("");
-    onFindingsChange?.([]);
+    onAnalysisResultChange?.(null);
 
     shouldAutoScrollRef.current = true;
     setTimeout(() => {
@@ -200,14 +200,34 @@ export default function ChatWidget({
       }
 
       const contentType = response.headers.get("content-type") || "";
-      const findingsHeader = response.headers.get("x-findings");
-
-      if (findingsHeader) {
-        onFindingsChange?.(
-          JSON.parse(decodeURIComponent(findingsHeader)) as ChatFinding[]
-        );
+      if (attachments.length === 0) {
+        onAnalysisResultChange?.(null);
       } else {
-        onFindingsChange?.([]);
+        void fetch("/api/analysis", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            artifactIds: attachments.map((attachment) => attachment.attachmentId),
+            userIntent: messageToSend,
+          }),
+        })
+          .then(async (analysisResponse) => {
+            if (!analysisResponse.ok || sessionRef.current !== mySession) {
+              onAnalysisResultChange?.(null);
+              return;
+            }
+
+            const analysisData = (await analysisResponse.json()) as {
+              report?: RepairIntelligenceReport;
+            };
+            onAnalysisResultChange?.(analysisData.report ?? null);
+          })
+          .catch(() => {
+            if (sessionRef.current === mySession) {
+              onAnalysisResultChange?.(null);
+            }
+          });
       }
 
       if (contentType.includes("text/plain") && response.body) {
@@ -261,6 +281,7 @@ export default function ChatWidget({
           ...prev,
           { role: "assistant", content: "Error connecting to AI." },
         ]);
+        onAnalysisResultChange?.(null);
       }
     } finally {
       if (sessionRef.current === mySession) {
@@ -291,6 +312,7 @@ export default function ChatWidget({
     ]);
 
     onAttachmentChange?.(filename);
+    onAnalysisResultChange?.(null);
 
     setMessages((prev) => [
       ...prev,
@@ -341,11 +363,13 @@ export default function ChatWidget({
     onAttachmentChange?.(
       remaining.length ? remaining[remaining.length - 1].filename : null
     );
+    onAnalysisResultChange?.(null);
   }
 
   function clearAllAttachments() {
     setAttachments([]);
     onAttachmentChange?.(null);
+    onAnalysisResultChange?.(null);
   }
 
   const userBubble = "bg-black/70 border border-orange-500/30 text-orange-400";

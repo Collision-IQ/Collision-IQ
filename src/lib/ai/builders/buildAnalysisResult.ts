@@ -1,4 +1,5 @@
 import type { RepairPipelineResult } from "../pipeline/repairPipeline";
+import type { ComplianceIssue } from "../validators/complianceValidator";
 import type {
   AnalysisFinding,
   AnalysisResult,
@@ -14,16 +15,22 @@ export function buildAnalysisResultFromAuditReport(
 ): AnalysisResult {
   const findings = report.findings.map(mapAuditFinding);
   const summary = buildSummary(findings);
-  const narrative = buildNarrative({ findings, summary });
 
-  return {
+  const result: AnalysisResult = {
     mode: "comparison",
     parserStatus: "ok",
     summary,
     findings,
     supplements: findings.filter((finding) => finding.bucket === "supplement"),
     evidence: dedupeEvidence(findings.flatMap((finding) => finding.evidence)),
-    narrative,
+    operations: [],
+    rawEstimateText: "",
+    narrative: "",
+  };
+
+  return {
+    ...result,
+    narrative: buildNarrative(result),
   };
 }
 
@@ -35,29 +42,17 @@ export function buildAnalysisResultFromPipeline(
   }
 ): AnalysisResult {
   const findings: AnalysisFinding[] = [
-    ...pipeline.complianceIssues.map((issue, index) => {
-      const status: AnalysisFinding["status"] =
-        issue.category === "supplement_opportunity" ? "reduced" : "missing";
-
-      return {
-        id: `pipeline-issue-${index + 1}`,
-        bucket: mapComplianceBucket(issue.category),
-        category: issue.category,
-        title: issue.issue,
-        detail: issue.reference,
-        severity: issue.severity,
-        status,
-        evidence: [{ source: issue.evidenceBasis }],
-      };
-    }),
+    ...pipeline.observations.map((observation, index) =>
+      buildObservationFinding(observation, index)
+    ),
     ...pipeline.adasFindings.map((finding, index) => ({
       id: `pipeline-adas-${index + 1}`,
       bucket: "adas" as const,
-      category: finding.category,
+      category: "included",
       title: finding.finding,
-      detail: finding.evidence,
+      detail: "This function is referenced in supporting ADAS documentation.",
       severity: "low" as const,
-      status: "included" as const,
+      status: "present" as const,
       evidence: [{ source: finding.evidence }],
     })),
     ...inferProcedureFindingsFromOperations(pipeline),
@@ -65,6 +60,7 @@ export function buildAnalysisResultFromPipeline(
 
   const dedupedFindings = dedupeFindings(findings);
   const totalTextLength = options?.totalTextLength ?? 0;
+
   if (dedupedFindings.length === 0 && totalTextLength > 3000) {
     return {
       mode: "parser-incomplete",
@@ -79,57 +75,77 @@ export function buildAnalysisResultFromPipeline(
         {
           id: "parser-incomplete",
           bucket: "compliance",
-          category: "parser",
+          category: "not_detected",
           title: "Parser did not produce usable findings",
           detail:
             "The document text was extracted, but the procedural parser did not produce usable findings. No comparison conclusion should be drawn from this run.",
           severity: "high",
-          status: "missing",
-          evidence: [{ source: "repair-pipeline", quote: `Extracted text length: ${totalTextLength}` }],
+          status: "not_detected",
+          evidence: [
+            {
+              source: "repair-pipeline",
+              quote: `Extracted text length: ${totalTextLength}`,
+            },
+          ],
         },
       ],
       supplements: [],
-      evidence: [{ source: "repair-pipeline", quote: `Extracted text length: ${totalTextLength}` }],
+      evidence: [
+        {
+          source: "repair-pipeline",
+          quote: `Extracted text length: ${totalTextLength}`,
+        },
+      ],
+      operations: pipeline.operations,
+      rawEstimateText: pipeline.documents.map((document) => document.text ?? "").join("\n\n"),
       narrative:
-        "## PARSER INCOMPLETE\n\n- The document text was extracted, but the procedural parser did not produce usable findings.\n- No comparison conclusion should be drawn from this run.",
+        "The document text was extracted, but the procedural parser did not produce usable findings. No comparison conclusion should be drawn from this run.",
     };
   }
 
   const summary = buildSummary(dedupedFindings);
-  const narrative = buildNarrative({ findings: dedupedFindings, summary });
-  const mode = options?.comparisonAvailable ? "comparison" : "single-document-review";
-  const adjustedNarrative =
-    mode === "single-document-review"
-      ? `## SINGLE DOCUMENT REVIEW\n\n- Only one estimate was identified. Comparison findings were not generated.\n\n${narrative}`
-      : narrative;
 
-  return {
-    mode,
+  const result: AnalysisResult = {
+    mode: options?.comparisonAvailable ? "comparison" : "single-document-review",
     parserStatus: "ok",
     summary,
     findings: dedupedFindings,
     supplements: dedupedFindings.filter((finding) => finding.bucket === "supplement"),
     evidence: dedupeEvidence(dedupedFindings.flatMap((finding) => finding.evidence)),
-    narrative: adjustedNarrative,
+    operations: pipeline.operations,
+    rawEstimateText: pipeline.documents.map((document) => document.text ?? "").join("\n\n"),
+    narrative: "",
+  };
+
+  return {
+    ...result,
+    narrative:
+      result.mode === "single-document-review"
+        ? `This appears to be a single-document review rather than a document-to-document comparison.\n\n${buildNarrative(
+            result
+          )}`
+        : buildNarrative(result),
   };
 }
 
 function mapAuditFinding(finding: AuditFinding): AnalysisFinding {
+  const status: AnalysisFinding["status"] =
+    finding.category === "parts"
+      ? "exposure"
+      : finding.status === "included"
+        ? "present"
+        : finding.category === "refinish" || finding.category === "corrosion"
+          ? "unclear"
+          : "not_detected";
+
   return {
     id: finding.id,
     bucket: mapAuditBucket(finding),
-    category: finding.category,
+    category: mapCategoryFromStatus(status),
     title: finding.title,
     detail: finding.conclusion,
     severity: finding.severity,
-    status:
-      finding.category === "parts"
-        ? "exposure"
-        : finding.status === "included"
-          ? "included"
-          : finding.category === "refinish" || finding.category === "corrosion"
-            ? "reduced"
-            : "missing",
+    status,
     evidence: finding.evidence,
   };
 }
@@ -149,7 +165,7 @@ function mapAuditBucket(finding: AuditFinding): FindingBucket {
 }
 
 function mapComplianceBucket(
-  category: RepairPipelineResult["complianceIssues"][number]["category"]
+  category: ComplianceIssue["category"]
 ): FindingBucket {
   if (category === "calibration_requirement" || category === "safety_risk") {
     return "critical";
@@ -159,7 +175,9 @@ function mapComplianceBucket(
   return "quality";
 }
 
-function dedupeEvidence(evidence: AnalysisResult["evidence"]): AnalysisResult["evidence"] {
+function dedupeEvidence(
+  evidence: AnalysisResult["evidence"]
+): AnalysisResult["evidence"] {
   const seen = new Set<string>();
 
   return evidence.filter((entry) => {
@@ -177,21 +195,20 @@ function inferProcedureFindingsFromOperations(
     id: string;
     pattern: RegExp;
     bucket: FindingBucket;
-    category: string;
     title: string;
   }> = [
-    { id: "battery-reset", pattern: /battery isolate|reset electrical components/i, bucket: "quality", category: "electrical", title: "Battery / Electrical Reset" },
-    { id: "impact-sensor", pattern: /side impact sensor|impact sensor/i, bucket: "critical", category: "safety", title: "Impact Sensor Service" },
-    { id: "pre-scan", pattern: /pre-?repair scan/i, bucket: "adas", category: "diagnostics", title: "Pre-Repair Scan" },
-    { id: "in-process-scan", pattern: /in-?proc repair scan|in process repair scan|in-?process scan/i, bucket: "adas", category: "diagnostics", title: "In-Process Repair Scan" },
-    { id: "seat-weight", pattern: /seat weight sensor|zero point calibration/i, bucket: "adas", category: "calibration", title: "Seat Weight Sensor Zero Point Calibration" },
-    { id: "seat-belt-test", pattern: /seat belt dynamic function test/i, bucket: "critical", category: "safety", title: "Seat Belt Dynamic Function Test" },
-    { id: "post-scan", pattern: /post-?repair scan/i, bucket: "adas", category: "diagnostics", title: "Post-Repair Scan" },
-    { id: "road-test", pattern: /final road test|safety\s*&?\s*quality check/i, bucket: "quality", category: "qc", title: "Final Road Test" },
-    { id: "mask-jambs", pattern: /mask jambs/i, bucket: "quality", category: "refinish", title: "Mask Jambs" },
-    { id: "tint-color", pattern: /tint color/i, bucket: "supplement", category: "refinish", title: "Tint Color" },
-    { id: "finish-sand-polish", pattern: /finish sand.*polish/i, bucket: "supplement", category: "refinish", title: "Finish Sand and Polish" },
-    { id: "cavity-wax", pattern: /cavity wax/i, bucket: "supplement", category: "corrosion", title: "Cavity Wax" },
+    { id: "battery-reset", pattern: /battery isolate|reset electrical components/i, bucket: "quality", title: "Battery / Electrical Reset" },
+    { id: "impact-sensor", pattern: /side impact sensor|impact sensor/i, bucket: "critical", title: "Impact Sensor Service" },
+    { id: "pre-scan", pattern: /pre-?repair scan/i, bucket: "adas", title: "Pre-Repair Scan" },
+    { id: "in-process-scan", pattern: /in-?proc repair scan|in process repair scan|in-?process scan/i, bucket: "adas", title: "In-Process Repair Scan" },
+    { id: "seat-weight", pattern: /seat weight sensor|zero point calibration/i, bucket: "adas", title: "Seat Weight Sensor Zero Point Calibration" },
+    { id: "seat-belt-test", pattern: /seat belt dynamic function test/i, bucket: "critical", title: "Seat Belt Dynamic Function Test" },
+    { id: "post-scan", pattern: /post-?repair scan/i, bucket: "adas", title: "Post-Repair Scan" },
+    { id: "road-test", pattern: /final road test|safety\\s*&?\\s*quality check/i, bucket: "quality", title: "Final Road Test" },
+    { id: "mask-jambs", pattern: /mask jambs/i, bucket: "quality", title: "Mask Jambs" },
+    { id: "tint-color", pattern: /tint color/i, bucket: "supplement", title: "Tint Color" },
+    { id: "finish-sand-polish", pattern: /finish sand.*polish/i, bucket: "supplement", title: "Finish Sand and Polish" },
+    { id: "cavity-wax", pattern: /cavity wax/i, bucket: "supplement", title: "Cavity Wax" },
   ];
 
   return definitions
@@ -201,25 +218,86 @@ function inferProcedureFindingsFromOperations(
     .map((definition) => ({
       id: `operation-${definition.id}`,
       bucket: definition.bucket,
-      category: definition.category,
+      category: "included",
       title: definition.title,
-      detail: "Procedure was identified directly from the uploaded estimate text.",
+      detail:
+        "This operation appears directly in the extracted estimate text. It supports the overall picture, but does not by itself confirm complete functional coverage.",
       severity:
         definition.bucket === "critical"
           ? "high"
           : definition.bucket === "adas" || definition.bucket === "supplement"
             ? "medium"
             : "low",
-      status: "included",
+      status: "present" as const,
       evidence: [{ source: "Uploaded estimate" }],
     }));
+}
+
+function buildObservationFinding(
+  observation: ComplianceIssue,
+  index: number
+): AnalysisFinding {
+  const status = mapObservationStatus(observation);
+  const category = mapCategoryFromStatus(status);
+
+  return {
+    id: `pipeline-observation-${index + 1}`,
+    bucket: mapComplianceBucket(observation.category),
+    category,
+    title: observation.procedure ?? observation.issue,
+    detail: buildObservationDescription(observation),
+    severity:
+      status === "not_detected"
+        ? "high"
+        : status === "unclear"
+          ? "medium"
+          : "low",
+    status,
+    evidence: buildObservationEvidence(observation),
+  };
+}
+
+function buildObservationDescription(observation: ComplianceIssue): string {
+  const parts = [
+    observation.observation ?? observation.issue,
+    observation.basis,
+    observation.impact,
+  ].filter(Boolean);
+
+  return parts.join(". ");
+}
+
+function buildObservationEvidence(
+  observation: ComplianceIssue
+): AnalysisFinding["evidence"] {
+  return [
+    { source: observation.evidenceBasis },
+    ...(observation.reference
+      ? [{ source: "repair-pipeline", quote: observation.reference }]
+      : []),
+  ];
+}
+
+function mapObservationStatus(
+  observation: ComplianceIssue
+): AnalysisFinding["status"] {
+  return observation.status ?? "unclear";
+}
+
+function mapCategoryFromStatus(
+  status: AnalysisFinding["status"]
+): AnalysisFinding["category"] {
+  if (status === "present") return "included";
+  if (status === "unclear") return "unclear";
+  if (status === "not_detected") return "not_detected";
+  return "exposure";
 }
 
 function dedupeFindings(findings: AnalysisFinding[]): AnalysisFinding[] {
   const seen = new Map<string, AnalysisFinding>();
 
   for (const finding of findings) {
-    const key = `${finding.bucket}:${finding.title}`.toLowerCase();
+    const key = `${finding.bucket}:${finding.title}:${finding.category}`.toLowerCase();
     if (!seen.has(key)) {
       seen.set(key, finding);
     }

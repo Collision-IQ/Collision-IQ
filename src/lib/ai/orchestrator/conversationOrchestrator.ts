@@ -34,7 +34,7 @@ type ConversationOrchestratorParams = {
 };
 
 export type SpecialistAgentOutputs = {
-  estimateFindings: EstimateAgentFinding[];
+  estimateFindings: EstimateAgentFinding | null;
   adasFindings: ADASAgentFinding[];
   procedureFindings: ProcedureAgentFinding[];
   supplementFindings: SupplementAgentFinding[];
@@ -150,7 +150,7 @@ async function runSpecialistAgents(params: {
   const estimateFindings =
     params.shopText && params.insurerText
       ? await runEstimateAgent(params.shopText, params.insurerText)
-      : [];
+      : null;
 
   const operations = params.shopText ? runRepairPipeline([{ filename: "shop.txt", text: params.shopText }]).operations : [];
   const adasFindings = await runADASAgent(operations);
@@ -203,14 +203,23 @@ function buildConversationPrompt(params: {
     sections.push(buildAuditPrompt(composeAuditResponseFromReport(params.report)));
   }
 
-  sections.push("Estimate Findings:");
+  sections.push("Primary Estimate Story:");
   sections.push(JSON.stringify(params.specialistFindings.estimateFindings, null, 2));
-  sections.push("ADAS Findings:");
+  sections.push("Supporting ADAS Signals:");
   sections.push(JSON.stringify(params.specialistFindings.adasFindings, null, 2));
-  sections.push("Procedure Findings:");
+  sections.push("Supporting Procedure Signals:");
   sections.push(JSON.stringify(params.specialistFindings.procedureFindings, null, 2));
-  sections.push("Supplement Opportunities:");
+  sections.push("Supporting Supplement Signals:");
   sections.push(JSON.stringify(params.specialistFindings.supplementFindings, null, 2));
+
+  sections.push(`
+[DECISION PRIORITY]
+
+- Use the estimate story as the primary frame for the response
+- Treat ADAS, procedure, and supplement agents as supporting signals only
+- Do not treat agent outputs as final truth
+- Decide what matters based on the repair as a whole
+`.trim());
 
   if (params.evidence.length > 0) {
     const retrievedEvidence = buildStructuredEvidence(params.evidence);
@@ -265,11 +274,18 @@ Given:
 1. User input
 2. Retrieved OEM procedures
 
-Your job:
-- Identify required operations
-- Detect missing or incorrect steps
-- Flag compliance risks
-- Provide structured findings
+Use the retrieved OEM procedures as supporting reference material.
+
+Your role:
+- Compare the OEM information against the estimate or question
+- Decide whether it actually applies to the situation
+- Use it to confirm or challenge your reasoning
+- Provide structured findings grounded in relevance
+
+Important:
+- Not all retrieved procedures apply directly
+- Do not assume a requirement without confirming relevance
+- Consider repair context, system involvement, and equivalent operations
 
 User input:
 ${userMessage}
@@ -308,9 +324,7 @@ function composeAuditResponseFromReport(report: RepairIntelligenceReport): strin
       status:
         issue.missingOperation && missingProcedureSet.has(issue.missingOperation.toLowerCase())
           ? "missing"
-          : issue.title.toLowerCase().startsWith("missing required procedure:")
-            ? "missing"
-            : issue.category === "documentation" || issue.category === "parts"
+          : issue.category === "documentation" || issue.category === "parts" || issue.category === "scan"
               ? "missing"
               : "included",
       severity: issue.severity,

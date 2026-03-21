@@ -1,0 +1,89 @@
+import { buildSupplementLines } from "./supplementBuilder";
+import { calculateDV } from "./dvCalculator";
+import { generateNegotiationResponse } from "./negotiationEngine";
+
+export function buildCarrierReport({
+  result,
+  meta,
+}: {
+  result: any;
+  meta: {
+    vehicle?: string;
+    vin?: string;
+    repairCost?: number;
+    structural?: boolean;
+    airbag?: boolean;
+    year?: number;
+    isLuxury?: boolean;
+  };
+}) {
+  const supplements = buildSupplementLines(result);
+
+  const dv = calculateDV({
+    repairCost: meta.repairCost,
+    structural: meta.structural,
+    airbag: meta.airbag,
+    vehicleYear: meta.year,
+    isLuxury: meta.isLuxury,
+  });
+
+  const negotiation = generateNegotiationResponse(result);
+
+  return `
+COLLISION REPAIR SUPPLEMENT & EVALUATION
+
+----------------------------------------
+VEHICLE
+----------------------------------------
+Vehicle: ${meta.vehicle || "Unknown"}
+VIN: ${meta.vin || "Unknown"}
+
+----------------------------------------
+REPAIR POSITION
+----------------------------------------
+${result.narrative}
+
+----------------------------------------
+SUPPLEMENT ITEMS
+----------------------------------------
+
+${supplements
+    .map(
+      (item) => `- ${item.title}
+  Category: ${item.category}
+  Reason: ${item.rationale}`
+    )
+    .join("\n\n")}
+
+----------------------------------------
+DIMINISHED VALUE
+----------------------------------------
+
+${
+    dv
+      ? `$${dv.low} - $${dv.high}
+
+Confidence: ${dv.confidence}
+
+${dv.rationale}`
+      : "Not enough data to determine diminished value."
+  }
+
+----------------------------------------
+POSITION STATEMENT
+----------------------------------------
+
+The current estimate does not clearly support a fully verified and defensible repair process.
+
+Proper repair requires:
+- system verification
+- documented procedures
+- complete process support
+
+----------------------------------------
+REQUEST
+----------------------------------------
+
+${negotiation || "Please review and advise how the repair is being supported."}
+`.trim();
+}

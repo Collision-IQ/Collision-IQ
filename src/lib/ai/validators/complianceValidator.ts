@@ -2,6 +2,12 @@ import type { RequiredProcedure } from "../rules/procedureRules";
 
 export interface ComplianceIssue {
   issue: string;
+  procedure?: string;
+  status?: "present" | "unclear" | "not_detected";
+  observation?: string;
+  confidence?: "low" | "medium" | "high";
+  basis?: string;
+  impact?: string;
   severity: "low" | "medium" | "high";
   category:
     | "missing_procedure"
@@ -14,8 +20,7 @@ export interface ComplianceIssue {
 }
 
 export interface ComplianceValidationResult {
-  missingProcedures: RequiredProcedure[];
-  complianceIssues: ComplianceIssue[];
+  observations: ComplianceIssue[];
   supplementOpportunities: ComplianceIssue[];
   matchedProcedures: string[];
 }
@@ -99,8 +104,7 @@ export function validateRepair(
   procedures: RequiredProcedure[]
 ): ComplianceValidationResult {
   const normalizedEstimate = estimateText.toLowerCase();
-  const missingProcedures: RequiredProcedure[] = [];
-  const complianceIssues: ComplianceIssue[] = [];
+  const observations: ComplianceIssue[] = [];
   const supplementOpportunities: ComplianceIssue[] = [];
   const matchedProcedures: string[] = [];
 
@@ -114,54 +118,83 @@ export function validateRepair(
 
     if (found) {
       matchedProcedures.push(procedure.procedure);
-      continue;
     }
+    const issue = buildProcedureObservation(procedure, found);
+    observations.push(issue);
 
-    missingProcedures.push(procedure);
-
-    const issue: ComplianceIssue = {
-      issue: `Missing required procedure: ${procedure.procedure}`,
-      severity: procedure.severity,
-      category:
-        procedure.category === "supplement"
-          ? "supplement_opportunity"
-          : procedure.category === "adas"
-            ? "calibration_requirement"
-            : "missing_procedure",
-      evidenceBasis: procedure.evidenceBasis,
-      reference: `${procedure.matchedOperation} -> ${procedure.rationale}`,
-    };
-
-    complianceIssues.push(issue);
-
-    if (issue.category === "supplement_opportunity") {
+    if (issue.category === "supplement_opportunity" && issue.status !== "present") {
       supplementOpportunities.push(issue);
-    }
-
-    if (procedure.category === "adas" || procedure.category === "safety") {
-      complianceIssues.push({
-        issue: `Safety exposure created by missing ${procedure.procedure}`,
-        severity: "high",
-        category: "safety_risk",
-        evidenceBasis: procedure.evidenceBasis,
-        reference: procedure.rationale,
-      });
     }
   }
 
   return {
-    missingProcedures,
-    complianceIssues: dedupeIssues(complianceIssues),
+    observations: dedupeIssues(observations),
     supplementOpportunities: dedupeIssues(supplementOpportunities),
     matchedProcedures: [...new Set(matchedProcedures)],
   };
+}
+
+function buildProcedureObservation(
+  procedure: RequiredProcedure,
+  found: boolean
+): ComplianceIssue {
+  const category =
+    procedure.category === "supplement"
+      ? "supplement_opportunity"
+      : procedure.category === "adas"
+        ? "calibration_requirement"
+        : "missing_procedure";
+
+  const status = found ? "present" : "not_detected";
+  const observation = found
+    ? `${humanizeProcedure(procedure.procedure)} function appears represented in estimate`
+    : `${humanizeProcedure(procedure.procedure)} function not clearly represented in estimate`;
+  const basis = found
+    ? "Matching or equivalent operation detected"
+    : "No matching or equivalent operation found";
+  const impact =
+    found
+      ? "Function appears covered based on estimate wording"
+      : procedure.category === "adas"
+      ? "Potential ADAS verification gap"
+      : procedure.category === "safety"
+        ? "Potential safety verification gap"
+        : procedure.category === "supplement"
+          ? "Potential supplement or process-depth gap"
+          : "Potential repair process gap";
+
+  return {
+    issue: observation,
+    procedure: procedure.procedure,
+    status,
+    observation,
+    confidence: found ? "medium" : procedure.severity === "high" ? "medium" : "low",
+    basis,
+    impact,
+    severity: procedure.severity,
+    category,
+    evidenceBasis: procedure.evidenceBasis,
+    reference: `${basis}. ${procedure.matchedOperation} -> ${procedure.rationale}`,
+  };
+}
+
+function humanizeProcedure(procedure: string): string {
+  const lower = procedure.toLowerCase();
+
+  if (lower.includes("radar")) return "Radar calibration";
+  if (lower.includes("camera")) return "Camera calibration";
+  if (lower.includes("scan")) return "Scan";
+  if (lower.includes("alignment")) return "Alignment";
+  if (lower.includes("seat belt")) return "Seat belt system check";
+
+  return procedure;
 }
 
 function dedupeIssues(issues: ComplianceIssue[]): ComplianceIssue[] {
   const seen = new Map<string, ComplianceIssue>();
 
   for (const issue of issues) {
-    const key = `${issue.category}:${issue.issue}`.toLowerCase();
+    const key = `${issue.category}:${issue.procedure ?? issue.issue}`.toLowerCase();
     const existing = seen.get(key);
 
     if (!existing) {
@@ -181,6 +214,12 @@ function dedupeIssues(issues: ComplianceIssue[]): ComplianceIssue[] {
         existing.reference === issue.reference
           ? existing.reference
           : `${existing.reference}; ${issue.reference}`,
+      status:
+        existing.status === "present" || issue.status === "present"
+          ? "present"
+          : existing.status === "unclear" || issue.status === "unclear"
+            ? "unclear"
+            : "not_detected",
     });
   }
 

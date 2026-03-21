@@ -96,11 +96,10 @@ export interface RepairPipelineResult {
   adasFindings: AdasFinding[];
   repairStory: RepairStory;
   requiredProcedures: RequiredProcedure[];
-  missingProcedures: RequiredProcedure[];
-  complianceIssues: ComplianceIssue[];
+  matchedProcedures: string[];
+  observations: ComplianceIssue[];
   supplementOpportunities: ComplianceIssue[];
   evidenceReferences: string[];
-  riskScore: "low" | "medium" | "high";
   confidence: "low" | "medium" | "high";
 }
 
@@ -517,8 +516,7 @@ export function runRepairPipeline(
   const repairSignals = extractRepairSignalsFromText(classifiedDocuments);
   const repairStory = repairSignals.story;
   const evidenceReferences = buildEvidenceReferences(
-    validation.missingProcedures,
-    validation.complianceIssues,
+    validation.observations,
     adasFindings
   );
 
@@ -528,11 +526,10 @@ export function runRepairPipeline(
     adasFindings,
     repairStory,
     requiredProcedures,
-    missingProcedures: validation.missingProcedures,
-    complianceIssues: validation.complianceIssues,
+    matchedProcedures: validation.matchedProcedures,
+    observations: validation.observations,
     supplementOpportunities: validation.supplementOpportunities,
     evidenceReferences,
-    riskScore: calculateRiskScore(validation.complianceIssues),
     confidence: calculateConfidence(classifiedDocuments, operations, adasFindings),
   };
 }
@@ -548,18 +545,23 @@ function findDocumentText(
 }
 
 function buildEvidenceReferences(
-  missingProcedures: RequiredProcedure[],
-  complianceIssues: ComplianceIssue[],
+  observations: ComplianceIssue[],
   adasFindings: AdasFinding[]
 ): string[] {
   const references = [
-    ...missingProcedures.map(
-      (procedure) =>
-        `${procedure.procedure}: ${procedure.evidenceBasis} | Triggered by ${procedure.matchedOperation}`
-    ),
-    ...complianceIssues.map(
-      (issue) => `${issue.issue}: ${issue.evidenceBasis} | ${issue.reference}`
-    ),
+    ...observations
+      .filter((issue) => issue.status !== "present")
+      .map(
+        (issue) =>
+          `${issue.issue}: ${issue.evidenceBasis} | ${issue.reference}`
+      ),
+    ...observations
+      .filter((issue) => issue.status === "present")
+      .slice(0, 3)
+      .map(
+        (issue) =>
+          `${issue.issue}: ${issue.evidenceBasis} | ${issue.reference}`
+      ),
     ...adasFindings.map(
       (finding) => `${finding.finding}: ${finding.evidence} | ADAS report reference`
     ),
@@ -570,14 +572,6 @@ function buildEvidenceReferences(
 
 function dedupeStrings(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
-}
-
-function calculateRiskScore(
-  issues: ComplianceIssue[]
-): RepairPipelineResult["riskScore"] {
-  if (issues.some((issue) => issue.severity === "high")) return "high";
-  if (issues.some((issue) => issue.severity === "medium")) return "medium";
-  return "low";
 }
 
 function calculateConfidence(

@@ -2,9 +2,8 @@ import type { EstimateOperation } from "../extractors/estimateExtractor";
 
 export type ADASAgentFinding = {
   system: "ADAS";
-  requirement: string;
-  status: "required" | "included" | "missing";
-  detail: string;
+  signal: string;
+  implication: string;
 };
 
 export async function runADASAgent(
@@ -19,16 +18,9 @@ export async function runADASAgent(
   if (bumperRemoved) {
     findings.push({
       system: "ADAS",
-      requirement: "ACC radar calibration",
-      status: "required",
-      detail: "Front bumper operations are present in the estimate.",
-    });
-
-    findings.push({
-      system: "ADAS",
-      requirement: "KAFAS camera calibration",
-      status: "required",
-      detail: "Front bumper operations are present in the estimate.",
+      signal: "Front-end work detected",
+      implication:
+        "ADAS calibration may be relevant depending on system involvement.",
     });
   }
 

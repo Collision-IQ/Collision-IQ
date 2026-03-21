@@ -1,5 +1,6 @@
 import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
 import { orchestrateRetrieval } from "../retrievalOrchestrator";
+import { buildComparisonAnalysis } from "../builders/comparisonEngine";
 import { runRepairPipeline } from "../pipeline/repairPipeline";
 import { computeConfidenceScore } from "../scoring/confidenceScore";
 import { computeEvidenceQuality } from "../scoring/evidenceScore";
@@ -34,6 +35,61 @@ export async function runRepairAnalysis({
     mime: attachment.type,
     text: attachment.text,
   }));
+
+  const shopText =
+    findDocumentText(documents, ["shop", "body shop", "repair facility"]) ?? null;
+  const insurerText =
+    findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"]) ?? null;
+
+  if (shopText && insurerText) {
+    const analysis = buildComparisonAnalysis({
+      shopEstimateText: shopText,
+      insurerEstimateText: insurerText,
+    });
+
+    return {
+      summary: {
+        riskScore:
+          analysis.summary.riskScore === "unknown" ? "moderate" : analysis.summary.riskScore,
+        confidence:
+          analysis.summary.confidence === "moderate" ? "moderate" : analysis.summary.confidence,
+        criticalIssues: analysis.summary.criticalIssues,
+        evidenceQuality: analysis.summary.evidenceQuality,
+      },
+      vehicle: undefined,
+      issues: analysis.findings
+        .filter((finding) => finding.status !== "present")
+        .map((finding, index) => ({
+          id: finding.id || `comparison-issue-${index + 1}`,
+          category:
+            finding.category === "structural_difference"
+              ? "safety"
+              : finding.category === "scope_difference"
+                ? "documentation"
+                : "parts",
+          title: finding.title,
+          finding: finding.title,
+          impact: finding.detail,
+          severity: finding.severity,
+          evidenceIds: [],
+        })),
+      requiredProcedures: [],
+      presentProcedures: analysis.findings
+        .filter((finding) => finding.status === "present")
+        .map((finding) => finding.title),
+      missingProcedures: [],
+      supplementOpportunities: analysis.supplements.map((finding) => finding.title),
+      evidence: analysis.evidence.map((entry, index) => ({
+        id: `comparison-evidence-${index + 1}`,
+        title: entry.source,
+        snippet: entry.quote ?? "",
+        source: entry.source,
+        authority: "inferred",
+      })),
+      recommendedActions: [analysis.narrative],
+      analysis,
+    };
+  }
 
   const pipeline = runRepairPipeline(documents);
 
@@ -84,13 +140,20 @@ export async function runRepairAnalysis({
     ragProcedures
   );
   const presentProcedures = dedupeStrings([
-    ...pipeline.requiredProcedures
-    .map((procedure) => procedure.procedure)
-    .filter((procedure) => !pipeline.missingProcedures.some((missing) => missing.procedure === procedure)),
+    ...pipeline.observations
+      .filter((observation) => observation.status === "present")
+      .map((observation) => observation.procedure ?? "")
+      .filter(Boolean),
     ...ragProcedures.filter((procedure) => !procedure.isMissing).map((procedure) => procedure.procedure),
   ]);
   const missingProcedures = dedupeStrings([
-    ...pipeline.missingProcedures.map((procedure) => procedure.procedure),
+    ...pipeline.observations
+      .filter(
+        (observation) =>
+          observation.status === "unclear" || observation.status === "not_detected"
+      )
+      .map((observation) => observation.procedure ?? "")
+      .filter(Boolean),
     ...ragProcedures.filter((procedure) => procedure.isMissing).map((procedure) => procedure.procedure),
   ]);
   const supplementOpportunities = dedupeStrings([
@@ -130,7 +193,24 @@ export async function runRepairAnalysis({
     supplementOpportunities,
     evidence,
     recommendedActions: buildRecommendedActions(missingProcedures, supplementOpportunities),
+    analysis: undefined,
   };
+}
+
+function findDocumentText(
+  documents: Array<{
+    filename?: string | null;
+    mime?: string | null;
+    text?: string | null;
+  }>,
+  keywords: string[]
+): string | undefined {
+  const match = documents.find((document) => {
+    const haystack = `${document.filename ?? ""} ${document.mime ?? ""}`.toLowerCase();
+    return keywords.some((keyword) => haystack.includes(keyword));
+  });
+
+  return match?.text ?? undefined;
 }
 
 function buildEvidenceRecords(
@@ -164,7 +244,9 @@ function buildIssues(
   evidence: EvidenceRecord[],
   ragProcedures: RAGProcedure[]
 ): AnalysisIssue[] {
-  const pipelineIssues: AnalysisIssue[] = pipeline.complianceIssues.map((issue, index) => ({
+  const pipelineIssues: AnalysisIssue[] = pipeline.observations
+    .filter((issue) => issue.status !== "present")
+    .map((issue, index) => ({
     id: `issue-${index + 1}`,
     category:
       issue.category === "calibration_requirement"
@@ -179,7 +261,7 @@ function buildIssues(
     title: issue.issue,
     finding: issue.issue,
     impact: issue.reference,
-    missingOperation: extractMissingOperation(issue.reference),
+    missingOperation: issue.procedure ?? extractMissingOperation(issue.reference),
     severity: issue.severity,
     evidenceIds: evidence.slice(0, 2).map((item) => item.id),
   }));
@@ -198,8 +280,8 @@ function buildIssues(
               : procedure.procedure.toLowerCase().includes("scan")
                 ? "scan"
                 : "documentation",
-      title: `Missing required procedure: ${procedure.procedure}`,
-      finding: `Missing required procedure: ${procedure.procedure}`,
+      title: `${procedure.procedure} function not clearly represented`,
+      finding: `${procedure.procedure} function not clearly represented`,
       impact: `${procedure.reason} OEM context: ${procedure.evidenceSnippet}`,
       missingOperation: procedure.procedure,
       severity: procedure.severity,

@@ -2,33 +2,21 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
-import { jsPDF } from "jspdf";
 import ChatWidget from "@/components/ChatWidget";
-import type { ChatFinding } from "@/lib/ai/types/chatFindings";
+import { buildDecisionPanel, type DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
+import { buildCarrierReport } from "@/lib/ai/builders/carrierPdfBuilder";
+import { exportCarrierPDF } from "@/lib/ai/builders/exportPdf";
+import type {
+  AnalysisFinding,
+  AnalysisResult,
+  RepairIntelligenceReport,
+} from "@/lib/ai/types/analysis";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
-type InspectorPanelData = {
-  riskScore: "low" | "medium" | "high" | "unknown";
-  confidence: "low" | "medium" | "high";
-  criticalIssues: number;
-  evidenceQuality: "present" | "limited" | "none";
-  keyRisks: string[];
-  processFindings: string[];
-  gapFindings: string[];
-  optimizationFindings: string[];
-  evidenceReferences: string[];
-};
-
-const EMPTY_PANEL: InspectorPanelData = {
-  riskScore: "low",
-  confidence: "low",
-  criticalIssues: 0,
-  evidenceQuality: "none",
-  keyRisks: [],
-  processFindings: [],
-  gapFindings: [],
-  optimizationFindings: [],
-  evidenceReferences: [],
+const EMPTY_PANEL: DecisionPanel = {
+  narrative:
+    "Upload an estimate or supporting documents to generate a real repair intelligence read. The panel will switch from placeholder guidance to decision support once the analysis route runs.",
+  supplements: [],
 };
 
 export default function ChatbotPage() {
@@ -36,9 +24,16 @@ export default function ChatbotPage() {
   const [desktopRailOpen, setDesktopRailOpen] = useState(false);
   const [attachment, setAttachment] = useState<string | null>(null);
   const [analysisText, setAnalysisText] = useState("");
-  const [findings, setFindings] = useState<ChatFinding[]>([]);
+  const [analysisResult, setAnalysisResult] = useState<RepairIntelligenceReport | null>(null);
+  const normalizedResult = useMemo(
+    () => (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null),
+    [analysisResult]
+  );
 
-  const inspector = useMemo(() => buildInspectorPanelData(findings), [findings]);
+  const panel = useMemo(
+    () => (normalizedResult ? buildDecisionPanel(normalizedResult) : EMPTY_PANEL),
+    [normalizedResult]
+  );
   const railOpen = isMobile ? false : desktopRailOpen;
 
   function handleRailOpenChange(next: boolean) {
@@ -80,7 +75,7 @@ export default function ChatbotPage() {
               <ChatWidget
                 onAttachmentChange={setAttachment}
                 onAnalysisChange={setAnalysisText}
-                onFindingsChange={setFindings}
+                onAnalysisResultChange={setAnalysisResult}
               />
             </div>
           </div>
@@ -91,8 +86,9 @@ export default function ChatbotPage() {
             <RailContent
               attachment={attachment}
               analysisText={analysisText}
-              findings={findings}
-              panelData={inspector}
+              panel={panel}
+              normalizedResult={normalizedResult}
+              analysisResult={analysisResult}
             />
           </aside>
         )}
@@ -119,8 +115,9 @@ export default function ChatbotPage() {
           <RailContent
             attachment={attachment}
             analysisText={analysisText}
-            findings={findings}
-            panelData={inspector}
+            panel={panel}
+            normalizedResult={normalizedResult}
+            analysisResult={analysisResult}
           />
         </div>
       )}
@@ -131,19 +128,21 @@ export default function ChatbotPage() {
 function RailContent({
   attachment,
   analysisText,
-  findings,
-  panelData,
+  panel,
+  normalizedResult,
+  analysisResult,
 }: {
   attachment: string | null;
   analysisText: string;
-  findings: ChatFinding[];
-  panelData: InspectorPanelData;
+  panel: DecisionPanel;
+  normalizedResult: AnalysisResult | null;
+  analysisResult: RepairIntelligenceReport | null;
 }) {
   return (
     <div className="flex flex-col h-full overflow-y-auto p-6 space-y-8">
       <div>
         <div className="text-xs tracking-[0.3em] uppercase text-white/60">
-          Repair Intelligence
+          Decision Support
         </div>
 
         <div className="text-xl font-semibold mt-1">Analysis</div>
@@ -155,116 +154,168 @@ function RailContent({
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <SnapshotCard label="Risk Score" value={formatLabel(panelData.riskScore)} />
-        <SnapshotCard label="Confidence" value={formatLabel(panelData.confidence)} />
-        <SnapshotCard label="Critical Issues" value={String(panelData.criticalIssues)} />
-        <SnapshotCard
-          label="Evidence Quality"
-          value={formatLabel(panelData.evidenceQuality)}
-        />
-      </div>
+      <DecisionSection title="What Stands Out" body={panel.narrative} tone="neutral" />
 
-      <section className="space-y-4">
-        <PanelSection
-          title="Key Risks"
-          items={panelData.keyRisks}
-          emptyLabel="No high-risk items detected yet."
-          color="red"
-        />
-
-        <PanelSection
-          title="Process Findings"
-          items={panelData.processFindings}
-          emptyLabel="No process findings detected yet."
-          color="yellow"
-        />
-
-        <PanelSection
-          title="Gaps"
-          items={panelData.gapFindings}
-          emptyLabel="No gaps detected yet."
-          color="yellow"
-        />
-
-        <PanelSection
-          title="Optimization Opportunities"
-          items={panelData.optimizationFindings}
-          emptyLabel="No optimization opportunities detected yet."
-          color="green"
-        />
-
-        <PanelSection
-          title="Finding Details"
-          items={panelData.evidenceReferences}
-          emptyLabel={
-            findings.length > 0
-              ? "Findings extracted without extra detail."
-              : "No findings extracted yet."
-          }
-          color="neutral"
-        />
+      <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+        <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
+          Supplement Lines
+        </div>
+        {panel.supplements.length > 0 ? (
+          <div className="space-y-3">
+            {panel.supplements.map((item, index) => (
+              <div key={`${item.title}-${index}`} className="rounded-lg border border-white/10 bg-black/20 p-3">
+                <div className="text-sm font-medium text-white">
+                  {item.mappedLabel || item.title}
+                </div>
+                <div className="mt-1 text-xs text-white/60">{item.category}</div>
+                <div className="mt-2 text-sm leading-6 text-white/80">{item.rationale}</div>
+                {item.support && (
+                  <div className="mt-2 text-xs leading-5 text-white/45">{item.support}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-sm text-white/45">
+            No supplement items were generated from the current analysis yet.
+          </div>
+        )}
       </section>
 
-      {analysisText && (
+      {panel.diminishedValue && (
+        <DecisionSection
+          title="DV Value"
+          body={`$${panel.diminishedValue.low} - $${panel.diminishedValue.high}\nConfidence: ${formatLabel(
+            panel.diminishedValue.confidence
+          )}\n\nReason:\n${panel.diminishedValue.rationale}`}
+          tone="green"
+        />
+      )}
+
+      {panel.negotiationResponse && (
+        <DecisionSection
+          title="Negotiation Draft"
+          body={panel.negotiationResponse}
+          tone="neutral"
+          mono
+        />
+      )}
+
+      {panel.appraisal?.triggered && panel.appraisal.reasoning && (
+        <DecisionSection
+          title="Appraisal Signal"
+          body={panel.appraisal.reasoning}
+          tone="red"
+        />
+      )}
+
+      {panel.stateLeverage && panel.stateLeverage.length > 0 && (
+        <DecisionSection
+          title="State Leverage"
+          body={panel.stateLeverage.map((point) => `- ${point}`).join("\n")}
+          tone="yellow"
+        />
+      )}
+
+      {(analysisText || panel.narrative) && (
         <button
-          onClick={() => exportReport(analysisText, panelData)}
+          onClick={() =>
+            exportReport(normalizedResult, analysisResult, panel, analysisText)
+          }
           className="mt-4 w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
         >
-          Export PDF Report
+          Export PDF
         </button>
       )}
     </div>
   );
 }
 
-function PanelSection({
-  title,
-  items,
-  emptyLabel,
-  color,
-}: {
-  title: string;
-  items: string[];
-  emptyLabel: string;
-  color: "red" | "yellow" | "green" | "neutral";
-}) {
-  return (
-    <div className="space-y-3">
-      <div className="text-[11px] uppercase text-white/40">{title}</div>
+function exportReport(
+  normalizedResult: AnalysisResult | null,
+  analysisResult: RepairIntelligenceReport | null,
+  panel: DecisionPanel,
+  analysisText: string
+) {
+  const reportText =
+    normalizedResult && analysisResult
+      ? buildCarrierReport({
+          result: normalizedResult,
+          meta: {
+            vehicle: [
+              analysisResult.vehicle?.year,
+              analysisResult.vehicle?.make,
+              analysisResult.vehicle?.model,
+            ]
+              .filter(Boolean)
+              .join(" "),
+            vin: analysisResult.vehicle?.vin,
+            year: analysisResult.vehicle?.year,
+          },
+        })
+      : [
+          "Narrative",
+          panel.narrative,
+          panel.supplements.length > 0
+            ? `Supplement Items\n\n${panel.supplements
+                .map(
+                  (item) =>
+                    `- ${item.title}\n  Reason: ${item.rationale}${
+                      item.mappedLabel ? `\n  Mapped Line: ${item.mappedLabel}` : ""
+                    }`
+                )
+                .join("\n\n")}`
+            : "",
+          panel.diminishedValue
+            ? `Diminished Value\n\n$${panel.diminishedValue.low} - $${panel.diminishedValue.high}\nConfidence: ${formatLabel(
+                panel.diminishedValue.confidence
+              )}\n\n${panel.diminishedValue.rationale}`
+            : "",
+          panel.negotiationResponse
+            ? `Negotiation Response\n\n${panel.negotiationResponse}`
+            : "",
+          panel.appraisal?.triggered && panel.appraisal.reasoning
+            ? `Appraisal Signal\n\n${panel.appraisal.reasoning}`
+            : "",
+          panel.stateLeverage && panel.stateLeverage.length > 0
+            ? `State Leverage\n\n${panel.stateLeverage
+                .map((point) => `- ${point}`)
+                .join("\n")}`
+            : "",
+          analysisText ? `Assistant Analysis\n\n${analysisText}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n----------------------------------------\n\n");
 
-      {items.length > 0 ? (
-        items.slice(0, 4).map((item, index) => (
-          <InsightCard key={`${title}-${index}`} text={item} color={color} />
-        ))
-      ) : (
-        <div className="text-xs text-white/35">{emptyLabel}</div>
-      )}
-    </div>
-  );
+  exportCarrierPDF(reportText);
 }
 
-function exportReport(analysisText: string, panelData: InspectorPanelData) {
-  const doc = new jsPDF();
-  let y = 20;
+function DecisionSection({
+  title,
+  body,
+  tone,
+  mono = false,
+}: {
+  title: string;
+  body: string;
+  tone: "red" | "yellow" | "green" | "neutral";
+  mono?: boolean;
+}) {
+  const tones = {
+    red: "border-red-500/30 bg-red-500/5",
+    yellow: "border-yellow-500/30 bg-yellow-500/5",
+    green: "border-green-500/30 bg-green-500/5",
+    neutral: "border-white/10 bg-white/5",
+  };
 
-  doc.setFont("Helvetica", "Bold");
-  doc.setFontSize(16);
-  doc.text("Collision-IQ Analysis Report", 15, y);
-  y += 10;
-
-  doc.setFont("Helvetica", "Normal");
-  doc.setFontSize(11);
-  doc.text(`Risk Score: ${formatLabel(panelData.riskScore)}`, 15, y);
-  y += 6;
-  doc.text(`Confidence: ${formatLabel(panelData.confidence)}`, 15, y);
-  y += 6;
-  doc.text(`Critical Issues: ${panelData.criticalIssues}`, 15, y);
-  y += 10;
-
-  const lines = doc.splitTextToSize(analysisText, 180);
-  doc.text(lines, 15, y);
-  doc.save("collision-iq-analysis.pdf");
+  return (
+    <section className={`rounded-xl border p-4 space-y-3 ${tones[tone]}`}>
+      <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">{title}</div>
+      <div className={`text-sm leading-6 text-white/85 whitespace-pre-wrap ${mono ? "font-mono text-[12px]" : ""}`}>
+        {body}
+      </div>
+    </section>
+  );
 }
 
 function formatLabel(value: string) {
@@ -272,73 +323,69 @@ function formatLabel(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function buildInspectorPanelData(findings: ChatFinding[]): InspectorPanelData {
-  if (findings.length === 0) {
-    return EMPTY_PANEL;
+function normalizeReportToAnalysisResult(
+  report: RepairIntelligenceReport
+): AnalysisResult {
+  if (report.analysis) {
+    return report.analysis;
   }
 
-  const highCount = findings.filter((finding) => finding.severity === "high").length;
-  const mediumCount = findings.filter((finding) => finding.severity === "medium").length;
+  const findings: AnalysisFinding[] = [
+    ...report.issues.map((issue, index) => {
+      const bucket: AnalysisFinding["bucket"] =
+        issue.category === "parts"
+          ? "parts"
+          : issue.category === "calibration" || issue.category === "scan"
+            ? "adas"
+            : issue.category === "safety"
+              ? "critical"
+              : "compliance";
+      const status: AnalysisFinding["status"] = issue.missingOperation
+        ? "not_detected"
+        : "unclear";
+
+      return {
+        id: issue.id || `report-issue-${index + 1}`,
+        bucket,
+        category: issue.category,
+        title: issue.title,
+        detail: issue.impact || issue.finding,
+        severity: issue.severity,
+        status,
+        evidence: [],
+      };
+    }),
+    ...report.missingProcedures.map((procedure, index) => ({
+      id: `report-missing-${index + 1}`,
+      bucket: "supplement" as const,
+      category: "missing_procedure",
+      title: procedure,
+      detail: "This function is not clearly represented in the current estimate.",
+      severity: "medium" as const,
+      status: "not_detected" as const,
+      evidence: [],
+    })),
+  ];
 
   return {
-    riskScore: highCount > 0 ? "high" : mediumCount > 0 ? "medium" : "low",
-    confidence: findings.length >= 4 ? "high" : findings.length >= 2 ? "medium" : "low",
-    criticalIssues: highCount,
-    evidenceQuality: findings.length > 0 ? "limited" : "none",
-    keyRisks: findings
-      .filter((finding) => finding.category === "risk" || finding.severity === "high")
-      .slice(0, 4)
-      .map((finding) => finding.title),
-    processFindings: findings
-      .filter((finding) => finding.category === "process")
-      .slice(0, 4)
-      .map((finding) => finding.title),
-    gapFindings: findings
-      .filter((finding) => finding.category === "gap")
-      .slice(0, 4)
-      .map((finding) => finding.title),
-    optimizationFindings: findings
-      .filter((finding) => finding.category === "optimization")
-      .slice(0, 4)
-      .map((finding) => finding.title),
-    evidenceReferences: findings
-      .slice(0, 4)
-      .map((finding) => `${finding.title}: ${finding.explanation}`),
+    mode: "single-document-review",
+    parserStatus: "ok",
+    summary: {
+      riskScore: report.summary.riskScore,
+      confidence: report.summary.confidence,
+      criticalIssues: report.summary.criticalIssues,
+      evidenceQuality: report.summary.evidenceQuality,
+    },
+    findings,
+    supplements: findings.filter((finding) => finding.bucket === "supplement"),
+    evidence: report.evidence.map((entry) => ({
+      source: entry.source,
+      quote: entry.snippet,
+    })),
+    operations: [],
+    rawEstimateText: report.evidence.map((entry) => entry.snippet).join("\n"),
+    narrative:
+      report.recommendedActions[0] ||
+      "The estimate needs clearer repair support before it can be treated as fully defended.",
   };
-}
-
-function SnapshotCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-md border border-white/10 bg-white/5 p-3 backdrop-blur-md">
-      <div className="text-[10px] uppercase text-white/40">{label}</div>
-      <div className="text-lg font-semibold">{value}</div>
-    </div>
-  );
-}
-
-function InsightCard({
-  text,
-  color,
-}: {
-  text: string;
-  color: "red" | "yellow" | "green" | "neutral";
-}) {
-  const colors = {
-    red: "border-red-500/30 text-red-300",
-    yellow: "border-yellow-500/30 text-yellow-300",
-    green: "border-green-500/30 text-green-300",
-    neutral: "border-white/10 text-white/75",
-  };
-
-  return (
-    <div className={`border rounded-md p-3 text-sm ${colors[color]}`}>
-      {text}
-    </div>
-  );
 }

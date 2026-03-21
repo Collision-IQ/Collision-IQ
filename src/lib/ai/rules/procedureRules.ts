@@ -32,6 +32,15 @@ export interface RequiredProcedure {
   matchedOperation: string;
 }
 
+const SCAN_EVIDENCE_PATTERNS = [
+  /pre-?repair scan/i,
+  /pre-?scan/i,
+  /post-?repair scan/i,
+  /post-?scan/i,
+  /diagnostic scan/i,
+  /final scan/i,
+];
+
 export const procedureRules: ProcedureRule[] = [
   {
     id: "front-bumper-adas",
@@ -132,10 +141,17 @@ export function detectProcedures(
   operations: EstimateOperation[]
 ): RequiredProcedure[] {
   const requiredProcedures: RequiredProcedure[] = [];
+  const alreadyHasScanEvidence = operations.some((operation) =>
+    SCAN_EVIDENCE_PATTERNS.some((pattern) =>
+      pattern.test(operation.rawLine) ||
+      pattern.test(operation.component) ||
+      pattern.test(operation.operation)
+    )
+  );
 
   for (const rule of procedureRules) {
     if (rule.requiresAnyOperation) {
-      if (operations.length === 0) continue;
+      if (operations.length === 0 || alreadyHasScanEvidence) continue;
 
       for (const procedure of rule.procedures) {
         requiredProcedures.push({

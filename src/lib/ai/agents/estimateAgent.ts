@@ -1,53 +1,120 @@
-import { parseEstimate, type ParsedEstimate } from "../extractors/estimateExtractor";
+import {
+  extractEstimateOps,
+  parseEstimate,
+  type ParsedEstimate,
+  type EstimateOperation,
+} from "../extractors/estimateExtractor";
+
+export type EstimateAgentInsight = {
+  observation: string;
+  impact?: string;
+  comparison?: string;
+};
 
 export type EstimateAgentFinding = {
-  category: "labor" | "operation" | "cost";
-  issue: string;
-  difference?: number;
-  detail: string;
+  scope: EstimateAgentInsight;
+  labor: EstimateAgentInsight | null;
+  structure: EstimateAgentInsight;
+  cost: EstimateAgentInsight | null;
 };
 
 export async function runEstimateAgent(
   shopEstimateText: string,
   insurerEstimateText: string
-): Promise<EstimateAgentFinding[]> {
-  const shopEstimate = parseEstimate(shopEstimateText);
-  const insurerEstimate = parseEstimate(insurerEstimateText);
+): Promise<EstimateAgentFinding> {
+  const shop = parseEstimate(shopEstimateText);
+  const insurer = parseEstimate(insurerEstimateText);
+  const shopOperations = extractEstimateOps(shopEstimateText);
+  const insurerOperations = extractEstimateOps(insurerEstimateText);
 
-  return compareEstimates(shopEstimate, insurerEstimate);
+  return {
+    scope: analyzeScope(shop, insurer, shopOperations, insurerOperations),
+    labor: analyzeLabor(shop, insurer),
+    structure: analyzeStructure(shop, insurer, shopOperations, insurerOperations),
+    cost: analyzeCost(shop, insurer),
+  };
 }
 
-function compareEstimates(
-  shopEstimate: ParsedEstimate,
-  insurerEstimate: ParsedEstimate
-): EstimateAgentFinding[] {
-  const findings: EstimateAgentFinding[] = [];
+function analyzeScope(
+  shop: ParsedEstimate,
+  insurer: ParsedEstimate,
+  shopOperations: EstimateOperation[],
+  insurerOperations: EstimateOperation[]
+): EstimateAgentInsight {
+  const primaryComponents = summarizeComponents(shopOperations);
+  const scopeLabel =
+    primaryComponents.length > 0
+      ? primaryComponents.join(", ")
+      : "the visible repair operations";
 
+  return {
+    observation: `The repair scope is centered around ${scopeLabel}.`,
+    comparison:
+      shop.lines.length > insurer.lines.length || shopOperations.length > insurerOperations.length
+        ? "The insurer estimate appears reduced in scope."
+        : "Scope appears generally aligned.",
+  };
+}
+
+function analyzeLabor(
+  shop: ParsedEstimate,
+  insurer: ParsedEstimate
+): EstimateAgentInsight | null {
   if (
-    typeof shopEstimate.bodyHours === "number" &&
-    typeof insurerEstimate.bodyHours === "number" &&
-    shopEstimate.bodyHours > insurerEstimate.bodyHours
+    typeof shop.bodyHours === "number" &&
+    typeof insurer.bodyHours === "number" &&
+    shop.bodyHours > insurer.bodyHours
   ) {
-    findings.push({
-      category: "labor",
-      issue: "Reduced body labor in insurer estimate",
-      difference: shopEstimate.bodyHours - insurerEstimate.bodyHours,
-      detail: `Shop body hours: ${shopEstimate.bodyHours}. Insurer body hours: ${insurerEstimate.bodyHours}.`,
-    });
+    return {
+      observation: "Body labor appears reduced in the insurer estimate.",
+      impact: "This suggests potential underwriting rather than omission.",
+    };
   }
 
+  return null;
+}
+
+function analyzeStructure(
+  shop: ParsedEstimate,
+  insurer: ParsedEstimate,
+  shopOperations: EstimateOperation[],
+  insurerOperations: EstimateOperation[]
+): EstimateAgentInsight {
+  const compressed =
+    shopOperations.length > insurerOperations.length ||
+    shop.lines.length > insurer.lines.length;
+
+  return {
+    observation:
+      "The structure of the estimate matters more than individual line items.",
+    impact: compressed
+      ? "Compressed operations can indicate reduced repair depth even when items appear present."
+      : "The line structure appears broadly aligned, so the bigger question is whether the documented operations are supported clearly enough.",
+  };
+}
+
+function analyzeCost(
+  shop: ParsedEstimate,
+  insurer: ParsedEstimate
+): EstimateAgentInsight | null {
   if (
-    typeof shopEstimate.totalCost === "number" &&
-    typeof insurerEstimate.totalCost === "number" &&
-    shopEstimate.totalCost > insurerEstimate.totalCost
+    typeof shop.totalCost === "number" &&
+    typeof insurer.totalCost === "number" &&
+    shop.totalCost > insurer.totalCost
   ) {
-    findings.push({
-      category: "cost",
-      issue: "Lower total cost in insurer estimate",
-      difference: shopEstimate.totalCost - insurerEstimate.totalCost,
-      detail: `Shop total: ${shopEstimate.totalCost}. Insurer total: ${insurerEstimate.totalCost}.`,
-    });
+    return {
+      observation: "Total cost difference reflects reduced operations.",
+      impact: "This is likely a negotiation point rather than a documentation issue.",
+    };
   }
 
-  return findings;
+  return null;
+}
+
+function summarizeComponents(operations: EstimateOperation[]): string[] {
+  return [...new Set(
+    operations
+      .map((operation) => operation.component.trim())
+      .filter(Boolean)
+  )].slice(0, 3);
 }

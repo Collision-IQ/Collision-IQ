@@ -32,6 +32,15 @@ export interface ProcedureRequirement {
   matchedOperation: string
 }
 
+const SCAN_EVIDENCE_PATTERNS = [
+  /pre-?repair scan/i,
+  /pre-?scan/i,
+  /post-?repair scan/i,
+  /post-?scan/i,
+  /diagnostic scan/i,
+  /final scan/i,
+]
+
 export const procedureRules: ProcedureRule[] = [
   {
     id: "front-bumper-adas",
@@ -178,10 +187,11 @@ export const procedureRules: ProcedureRule[] = [
 
 export function detectProcedures(estimate: ParsedEstimate): ProcedureRequirement[] {
   const requirements: ProcedureRequirement[] = []
+  const alreadyHasScanEvidence = hasScanEvidence(estimate)
 
   for (const rule of procedureRules) {
     if (rule.requiresAnyEstimateOperation) {
-      if (estimate.operations.length === 0) continue
+      if (estimate.operations.length === 0 || alreadyHasScanEvidence) continue
 
       for (const procedure of rule.procedures) {
         requirements.push({
@@ -223,6 +233,20 @@ export function detectProcedures(estimate: ParsedEstimate): ProcedureRequirement
   }
 
   return dedupeRequirements(requirements)
+}
+
+function hasScanEvidence(estimate: ParsedEstimate): boolean {
+  if (SCAN_EVIDENCE_PATTERNS.some((pattern) => pattern.test(estimate.rawText))) {
+    return true
+  }
+
+  return estimate.operations.some((operation) =>
+    SCAN_EVIDENCE_PATTERNS.some((pattern) =>
+      pattern.test(operation.rawLine) ||
+      pattern.test(operation.component) ||
+      pattern.test(operation.operation)
+    )
+  )
 }
 
 function dedupeRequirements(

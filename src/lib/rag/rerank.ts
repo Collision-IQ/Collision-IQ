@@ -18,7 +18,7 @@ export async function rerankChunks(
   if (!chunks.length) return [];
 
   const prompt = `
-You are ranking document passages by relevance.
+You are ranking OEM procedure excerpts by practical relevance to a real collision repair scenario.
 
 Query:
 ${query}
@@ -27,6 +27,16 @@ Passages:
 ${chunks
   .map((c, i) => `[${i}] ${c.content.substring(0, 500)}`)
   .join("\n\n")}
+
+Prioritize:
+- direct applicability to repair operations
+- procedures that affect calibration, safety, or required verification
+- contextually relevant systems (ADAS, structural, restraint, alignment)
+
+Deprioritize:
+- generic or overly broad procedures
+- unrelated systems
+- redundant or duplicate content
 
 Return the numbers of the ${topK} most relevant passages in order.
 `;
