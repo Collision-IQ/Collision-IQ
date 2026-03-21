@@ -138,6 +138,8 @@ function RailContent({
   normalizedResult: AnalysisResult | null;
   analysisResult: RepairIntelligenceReport | null;
 }) {
+  const summary = extractSummary(analysisText);
+
   return (
     <div className="flex flex-col h-full overflow-y-auto p-6 space-y-8">
       <div>
