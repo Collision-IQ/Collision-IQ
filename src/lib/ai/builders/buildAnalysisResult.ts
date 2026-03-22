@@ -7,7 +7,6 @@ import type {
   FindingBucket,
   RepairAuditReport,
 } from "../types/analysis";
-import { buildNarrative } from "./buildNarrative";
 import { buildSummary } from "./buildSummary";
 
 export function buildAnalysisResultFromAuditReport(
@@ -30,7 +29,7 @@ export function buildAnalysisResultFromAuditReport(
 
   return {
     ...result,
-    narrative: buildNarrative(result),
+    narrative: "",
   };
 }
 
@@ -119,12 +118,7 @@ export function buildAnalysisResultFromPipeline(
 
   return {
     ...result,
-    narrative:
-      result.mode === "single-document-review"
-        ? `This appears to be a single-document review rather than a document-to-document comparison.\n\n${buildNarrative(
-            result
-          )}`
-        : buildNarrative(result),
+    narrative: "",
   };
 }
 

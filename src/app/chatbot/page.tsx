@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Image from "next/image";
 import ChatWidget from "@/components/ChatWidget";
-import { buildDecisionPanel, type DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
+import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import { buildCarrierReport } from "@/lib/ai/builders/carrierPdfBuilder";
 import { exportCarrierPDF } from "@/lib/ai/builders/exportPdf";
 import type {
@@ -25,15 +25,13 @@ export default function ChatbotPage() {
   const [attachment, setAttachment] = useState<string | null>(null);
   const [analysisText, setAnalysisText] = useState("");
   const [analysisResult, setAnalysisResult] = useState<RepairIntelligenceReport | null>(null);
+  const [analysisPanel, setAnalysisPanel] = useState<DecisionPanel | null>(null);
   const normalizedResult = useMemo(
     () => (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null),
     [analysisResult]
   );
 
-  const panel = useMemo(
-    () => (normalizedResult ? buildDecisionPanel(normalizedResult) : EMPTY_PANEL),
-    [normalizedResult]
-  );
+  const panel = analysisPanel ?? EMPTY_PANEL;
   const railOpen = isMobile ? false : desktopRailOpen;
 
   function handleRailOpenChange(next: boolean) {
@@ -76,6 +74,7 @@ export default function ChatbotPage() {
                 onAttachmentChange={setAttachment}
                 onAnalysisChange={setAnalysisText}
                 onAnalysisResultChange={setAnalysisResult}
+                onAnalysisPanelChange={setAnalysisPanel}
               />
             </div>
           </div>
@@ -185,7 +184,7 @@ function RailContent({
       {panel.diminishedValue && (
         <DecisionSection
           title="DV Value"
-          body={`$${panel.diminishedValue.low} - $${panel.diminishedValue.high}\nConfidence: ${formatLabel(
+          body={`${formatDVRange(panel.diminishedValue.low, panel.diminishedValue.high)}\nConfidence: ${formatLabel(
             panel.diminishedValue.confidence
           )}\n\nReason:\n${panel.diminishedValue.rationale}`}
           tone="green"
@@ -267,7 +266,7 @@ function exportReport(
                 .join("\n\n")}`
             : "",
           panel.diminishedValue
-            ? `Diminished Value\n\n$${panel.diminishedValue.low} - $${panel.diminishedValue.high}\nConfidence: ${formatLabel(
+            ? `Diminished Value\n\n${formatDVRange(panel.diminishedValue.low, panel.diminishedValue.high)}\nConfidence: ${formatLabel(
                 panel.diminishedValue.confidence
               )}\n\n${panel.diminishedValue.rationale}`
             : "",
@@ -320,7 +319,18 @@ function DecisionSection({
 
 function formatLabel(value: string) {
   if (!value) return "--";
-  return value.charAt(0).toUpperCase() + value.slice(1);
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatDVRange(low: number, high: number) {
+  if (low === 0 && high === 0) {
+    return "Not enough data to quantify a DV range yet.";
+  }
+
+  return `$${low} - $${high}`;
 }
 
 function normalizeReportToAnalysisResult(

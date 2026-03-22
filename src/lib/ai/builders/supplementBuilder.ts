@@ -18,142 +18,131 @@ export type SupplementLine = {
   amount?: string;
 };
 
+type RepairFunction = {
+  name: string;
+  signals: string[];
+};
+
+type SupplementCandidate = {
+  title: string;
+  reason: string;
+};
+
+const FUNCTIONS: RepairFunction[] = [
+  {
+    name: "pre-scan",
+    signals: ["pre-repair scan", "pre repair scan", "pre-scan"],
+  },
+  {
+    name: "post-scan",
+    signals: ["post-repair scan", "post repair scan", "post-scan", "final scan"],
+  },
+  {
+    name: "calibration",
+    signals: [
+      "calibration",
+      "adas report",
+      "blind spot",
+      "parking sensor",
+      "parking assist",
+    ],
+  },
+];
+
+export function detectFunctionPresence(text: string, signals: string[]): boolean {
+  const lower = text.toLowerCase();
+  return signals.some((signal) => lower.includes(signal));
+}
+
+export function buildFunctionMap(text: string) {
+  const map: Record<string, boolean> = {};
+
+  for (const repairFunction of FUNCTIONS) {
+    map[repairFunction.name] = detectFunctionPresence(text, repairFunction.signals);
+  }
+
+  return map;
+}
+
 export function buildSupplementLines(
   result: AnalysisResult | RepairIntelligenceReport | AnalysisFinding[]
 ): SupplementLine[] {
-  const findings = Array.isArray(result)
-    ? result
-    : "findings" in result
-      ? result.findings
-      : legacyReportToFindings(result);
+  const text = extractTextForFunctions(result);
+  if (!text) return [];
 
+  const map = buildFunctionMap(text);
   const lines: SupplementLine[] = [];
 
-  for (const finding of findings) {
-    if (finding.status === "present") continue;
-
-    const title = normalizeTitle(finding.title);
-    const lower = title.toLowerCase();
-
-    if (includesAny(lower, ["scan"])) {
-      lines.push({
-        title,
-        category: "scan",
-        rationale:
-          "Required for fault discovery, verification, and documented post-repair system status.",
-        support: finding.detail,
-      });
-      continue;
-    }
-
-    if (includesAny(lower, ["calibration", "radar", "camera", "steering angle"])) {
-      lines.push({
-        title,
-        category: "calibration",
-        rationale:
-          "Required to verify proper system function after repair and support a defensible repair process.",
-        support: finding.detail,
-      });
-      continue;
-    }
-
-    if (includesAny(lower, ["cavity wax", "corrosion", "seam sealer"])) {
-      lines.push({
-        title,
-        category: "material",
-        rationale:
-          "Required to restore corrosion protection and material integrity after repair or replacement.",
-        support: finding.detail,
-      });
-      continue;
-    }
-
-    if (includesAny(lower, ["refinish", "blend", "polish", "tint"])) {
-      lines.push({
-        title,
-        category: "refinish",
-        rationale:
-          "Required to complete finish operations to proper repair and appearance standards.",
-        support: finding.detail,
-      });
-      continue;
-    }
-
-    if (includesAny(lower, ["rail", "frame", "pillar", "apron", "structural"])) {
-      lines.push({
-        title,
-        category: "structural",
-        rationale:
-          "Required to support structural repair completeness, measurement, or verification.",
-        support: finding.detail,
-      });
-      continue;
-    }
-
+  if (!map["post-scan"]) {
     lines.push({
-      title,
-      category: "labor",
-      rationale:
-        "Not clearly represented in the estimate and should be clarified or supplemented to support repair completeness.",
-      support: finding.detail,
+      title: "Post-Repair Scan",
+      category: "scan",
+      rationale: "Not clearly represented in estimate.",
     });
   }
 
-  return dedupeLines(lines);
+  if (!map["calibration"]) {
+    lines.push({
+      title: "System Calibration",
+      category: "calibration",
+      rationale: "Not clearly represented in estimate.",
+    });
+  }
+
+  return lines;
 }
 
-function dedupeLines(lines: SupplementLine[]): SupplementLine[] {
-  const seen = new Map<string, SupplementLine>();
+function extractTextForFunctions(
+  result: AnalysisResult | RepairIntelligenceReport | AnalysisFinding[]
+): string {
+  if (Array.isArray(result)) {
+    return result.map((finding) => `${finding.title} ${finding.detail}`).join("\n");
+  }
 
-  for (const line of lines) {
-    const key = `${line.category}:${line.title}`.toLowerCase();
-    if (!seen.has(key)) {
-      seen.set(key, line);
-      continue;
+  if ("findings" in result) {
+    return result.rawEstimateText ?? "";
+  }
+
+  return result.evidence.map((entry) => entry.snippet).join("\n");
+}
+
+export function validateSupplements(
+  text: string,
+  candidates: SupplementCandidate[]
+): SupplementCandidate[] {
+  const lower = text.toLowerCase();
+
+  return candidates.filter((item) => {
+    const title = item.title.toLowerCase();
+
+    if (
+      (title.includes("calibration") && lower.includes("calibration")) ||
+      (title.includes("scan") && lower.includes("post-repair scan"))
+    ) {
+      return false;
     }
 
-    const existing = seen.get(key)!;
-    seen.set(key, {
-      ...existing,
-      support:
-        existing.support === line.support
-          ? existing.support
-          : [existing.support, line.support].filter(Boolean).join(" "),
-    });
-  }
-
-  return [...seen.values()];
+    return true;
+  });
 }
 
-function normalizeTitle(title: string): string {
-  return title.replace(/\s+/g, " ").trim();
+export function inferCategory(title: string): SupplementLine["category"] {
+  const lower = title.toLowerCase();
+
+  if (lower.includes("scan")) return "scan";
+  if (lower.includes("calibration")) return "calibration";
+  if (lower.includes("refinish")) return "refinish";
+  if (lower.includes("seam") || lower.includes("corrosion")) return "material";
+
+  return "labor";
 }
 
-function includesAny(text: string, needles: string[]): boolean {
-  return needles.some((needle) => text.includes(needle));
-}
-
-function legacyReportToFindings(report: RepairIntelligenceReport): AnalysisFinding[] {
-  return [
-    ...report.issues.map((issue, index) => ({
-      id: `legacy-issue-${index + 1}`,
-      bucket: "compliance" as const,
-      category: issue.missingOperation ? "not_detected" as const : "unclear" as const,
-      title: issue.title,
-      detail: issue.impact || issue.finding,
-      severity: issue.severity,
-      status: issue.missingOperation ? "not_detected" as const : "unclear" as const,
-      evidence: [],
-    })),
-    ...report.missingProcedures.map((procedure, index) => ({
-      id: `legacy-missing-${index + 1}`,
-      bucket: "supplement" as const,
-      category: "not_detected" as const,
-      title: procedure,
-      detail: "This operation is not clearly represented in the current estimate.",
-      severity: "medium" as const,
-      status: "not_detected" as const,
-      evidence: [],
-    })),
-  ];
+export function buildSupplementLinesHybrid(
+  validatedItems: SupplementCandidate[]
+): SupplementLine[] {
+  return validatedItems.map((item) => ({
+    title: item.title,
+    category: inferCategory(item.title),
+    rationale: item.reason,
+  }));
 }

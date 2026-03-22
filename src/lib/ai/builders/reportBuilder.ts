@@ -45,7 +45,7 @@ DIMINISHED VALUE
 ----------------------------------------
 
 ${dv
-    ? `Estimated DV: $${dv.low} - $${dv.high}
+    ? `Estimated DV: ${formatDVRange(dv.low, dv.high)}
 
 ${dv.rationale}`
     : "Not enough data to determine diminished value."}
@@ -63,4 +63,12 @@ The listed items are required to ensure:
 
 Please review and advise how these operations are being addressed.
 `.trim();
+}
+
+function formatDVRange(low: number, high: number): string {
+  if (low === 0 && high === 0) {
+    return "Not enough data to quantify a DV range yet.";
+  }
+
+  return `$${low} - $${high}`;
 }

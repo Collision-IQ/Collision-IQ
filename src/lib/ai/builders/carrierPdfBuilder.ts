@@ -61,7 +61,7 @@ DIMINISHED VALUE
 
 ${
     dv
-      ? `$${dv.low} - $${dv.high}
+      ? `${formatDVRange(dv.low, dv.high)}
 
 Confidence: ${dv.confidence}
 
@@ -86,4 +86,12 @@ REQUEST
 
 ${negotiation || "Please review and advise how the repair is being supported."}
 `.trim();
+}
+
+function formatDVRange(low: number, high: number): string {
+  if (low === 0 && high === 0) {
+    return "Not enough data to quantify a DV range yet.";
+  }
+
+  return `$${low} - $${high}`;
 }

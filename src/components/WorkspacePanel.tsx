@@ -153,76 +153,109 @@ export default function WorkspacePanel({ analysis }: Props) {
     if (!analysis) return;
 
     const doc = new jsPDF();
+    const bodyFontSize = 12;
+    const headingFontSize = 14;
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const marginX = 15;
+    const topMargin = 20;
+    const bottomMargin = 15;
+    const maxWidth = 180;
+    const lineHeight = bodyFontSize * 1.5 * 0.3528;
+    const sectionSpacing = 12 * 0.3528;
+    const headingSpacing = 16 * 0.3528;
 
-    let y = 20;
+    let y = topMargin;
+
+    const ensureSpace = (requiredHeight: number) => {
+      if (y + requiredHeight <= pageHeight - bottomMargin) return;
+      doc.addPage();
+      y = topMargin;
+    };
+
+    const writeWrappedText = (
+      text: string,
+      options?: {
+        prefix?: string;
+      }
+    ) => {
+      const value = options?.prefix ? `${options.prefix}${text}` : text;
+      const lines = doc.splitTextToSize(value, maxWidth);
+      ensureSpace(lines.length * lineHeight);
+      doc.text(lines, marginX, y);
+      y += lines.length * lineHeight;
+    };
 
     doc.setFont("Helvetica", "Bold");
     doc.setFontSize(18);
-    doc.text("Collision-IQ Analysis Report", 15, y);
+    doc.text("Collision-IQ Analysis Report", marginX, y);
 
     y += 12;
 
-    doc.setFontSize(11);
+    doc.setFontSize(bodyFontSize);
     doc.setFont("Helvetica", "Normal");
 
     const riskScore =
       issues.length > 2 ? "High" : issues.length > 0 ? "Moderate" : "Low";
     const confidence = analysis ? "Moderate" : "Low";
 
-    doc.text(`Risk Score: ${riskScore}`, 15, y);
-    y += 6;
+    ensureSpace(lineHeight);
+    doc.text(`Risk Score: ${riskScore}`, marginX, y);
+    y += lineHeight;
 
-    doc.text(`Confidence: ${confidence}`, 15, y);
-    y += 10;
+    ensureSpace(lineHeight);
+    doc.text(`Confidence: ${confidence}`, marginX, y);
+    y += headingSpacing;
 
     /* ---------------- Comparison Table ---------------- */
 
     if (comparison.length > 0) {
+      ensureSpace(headingFontSize * 0.3528 + headingSpacing);
       doc.setFont("Helvetica", "Bold");
-      doc.text("Estimate Comparison", 15, y);
-      y += 8;
+      doc.setFontSize(headingFontSize);
+      doc.text("Estimate Comparison", marginX, y);
+      y += headingSpacing;
 
       doc.setFont("Helvetica", "Normal");
+      doc.setFontSize(bodyFontSize);
 
       comparison.forEach((row) => {
         const line = `${row.category} | Shop: ${row.shop} | Insurance: ${row.insurance}`;
-        const lines = doc.splitTextToSize(line, 180);
-
-        doc.text(lines, 15, y);
-        y += lines.length * 6;
+        writeWrappedText(line);
       });
 
-      y += 6;
+      y += sectionSpacing;
     }
 
     /* ---------------- Key Issues ---------------- */
 
     if (issues.length > 0) {
+      ensureSpace(headingFontSize * 0.3528 + headingSpacing);
       doc.setFont("Helvetica", "Bold");
-      doc.text("Key Issues", 15, y);
-      y += 8;
+      doc.setFontSize(headingFontSize);
+      doc.text("Key Issues", marginX, y);
+      y += headingSpacing;
 
       doc.setFont("Helvetica", "Normal");
+      doc.setFontSize(bodyFontSize);
 
       issues.forEach((issue) => {
-        const lines = doc.splitTextToSize(`! ${issue}`, 180);
-        doc.text(lines, 15, y);
-        y += lines.length * 6;
+        writeWrappedText(issue, { prefix: "! " });
       });
 
-      y += 6;
+      y += sectionSpacing;
     }
 
     /* ---------------- Full Analysis ---------------- */
 
+    ensureSpace(headingFontSize * 0.3528 + headingSpacing);
     doc.setFont("Helvetica", "Bold");
-    doc.text("Full Analysis", 15, y);
-    y += 8;
+    doc.setFontSize(headingFontSize);
+    doc.text("Full Analysis", marginX, y);
+    y += headingSpacing;
 
     doc.setFont("Helvetica", "Normal");
-
-    const bodyLines = doc.splitTextToSize(analysis, 180);
-    doc.text(bodyLines, 15, y);
+    doc.setFontSize(bodyFontSize);
+    writeWrappedText(analysis);
 
     doc.save("collision-iq-analysis.pdf");
   }

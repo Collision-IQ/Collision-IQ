@@ -1,8 +1,15 @@
 import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
+import { buildSupplementLines } from "./supplementBuilder";
 
 export function generateNegotiationResponse(
   result: AnalysisResult | RepairIntelligenceReport
 ): string {
+  const supplements = buildSupplementLines(result);
+
+  if (supplements.length === 0) {
+    return "The estimate appears to support a complete repair process based on the documented operations.";
+  }
+
   const keyIssues = "findings" in result
     ? result.findings
         .filter((finding) => finding.severity === "high")

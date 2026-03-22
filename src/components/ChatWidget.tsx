@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Paperclip, X, Camera, ChevronDown, ChevronUp } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 
 type Role = "user" | "assistant";
@@ -26,6 +27,7 @@ interface ChatWidgetProps {
   onAttachmentChange?: (filename: string | null) => void;
   onAnalysisChange?: (text: string) => void;
   onAnalysisResultChange?: (data: RepairIntelligenceReport | null) => void;
+  onAnalysisPanelChange?: (panel: DecisionPanel | null) => void;
 }
 
 const INITIAL_MESSAGE: Message = {
@@ -38,6 +40,7 @@ export default function ChatWidget({
   onAttachmentChange,
   onAnalysisChange,
   onAnalysisResultChange,
+  onAnalysisPanelChange,
 }: ChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
@@ -138,6 +141,7 @@ export default function ChatWidget({
     onAttachmentChange?.(null);
     onAnalysisChange?.("");
     onAnalysisResultChange?.(null);
+    onAnalysisPanelChange?.(null);
 
     shouldAutoScrollRef.current = true;
     setTimeout(() => {
@@ -202,6 +206,7 @@ export default function ChatWidget({
       const contentType = response.headers.get("content-type") || "";
       if (attachments.length === 0) {
         onAnalysisResultChange?.(null);
+        onAnalysisPanelChange?.(null);
       } else {
         void fetch("/api/analysis", {
           method: "POST",
@@ -215,17 +220,21 @@ export default function ChatWidget({
           .then(async (analysisResponse) => {
             if (!analysisResponse.ok || sessionRef.current !== mySession) {
               onAnalysisResultChange?.(null);
+              onAnalysisPanelChange?.(null);
               return;
             }
 
             const analysisData = (await analysisResponse.json()) as {
               report?: RepairIntelligenceReport;
+              panel?: DecisionPanel;
             };
             onAnalysisResultChange?.(analysisData.report ?? null);
+            onAnalysisPanelChange?.(analysisData.panel ?? null);
           })
           .catch(() => {
             if (sessionRef.current === mySession) {
               onAnalysisResultChange?.(null);
+              onAnalysisPanelChange?.(null);
             }
           });
       }
@@ -282,6 +291,7 @@ export default function ChatWidget({
           { role: "assistant", content: "Error connecting to AI." },
         ]);
         onAnalysisResultChange?.(null);
+        onAnalysisPanelChange?.(null);
       }
     } finally {
       if (sessionRef.current === mySession) {
@@ -313,6 +323,7 @@ export default function ChatWidget({
 
     onAttachmentChange?.(filename);
     onAnalysisResultChange?.(null);
+    onAnalysisPanelChange?.(null);
 
     setMessages((prev) => [
       ...prev,
@@ -364,12 +375,14 @@ export default function ChatWidget({
       remaining.length ? remaining[remaining.length - 1].filename : null
     );
     onAnalysisResultChange?.(null);
+    onAnalysisPanelChange?.(null);
   }
 
   function clearAllAttachments() {
     setAttachments([]);
     onAttachmentChange?.(null);
     onAnalysisResultChange?.(null);
+    onAnalysisPanelChange?.(null);
   }
 
   const userBubble = "bg-black/70 border border-orange-500/30 text-orange-400";

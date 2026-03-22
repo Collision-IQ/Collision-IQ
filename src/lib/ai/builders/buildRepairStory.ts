@@ -26,8 +26,6 @@ export type RepairStory = {
   replacedPanels: string[];
   repairedPanels: string[];
   operations: StoryOperations;
-  systems: string[];
-  complexityDrivers: string[];
   repairCharacter: string;
   structural: boolean;
   complexity: string;
@@ -46,7 +44,6 @@ export function buildRepairStory(estimateText: string): RepairStory {
   const zones = collectZones(lower, panels);
   const replacedPanels = collectPanelsByOperation(detailedEstimate.operations, ["Repl"]);
   const repairedPanels = collectPanelsByOperation(detailedEstimate.operations, ["Rpr"]);
-  const systems = detectSystems(lower);
   const operations = {
     repairDominant: repairedPanels.length >= replacedPanels.length,
     repairedParts: repairedPanels,
@@ -57,7 +54,6 @@ export function buildRepairStory(estimateText: string): RepairStory {
     lower.includes("structural") ||
     lower.includes("door shell") ||
     includesAny(lower, ["rail", "apron", "pillar", "core support", "reinforcement"]);
-  const complexityDrivers = detectComplexityDrivers(lower, systems, structural);
   const impact = determineImpact(lower, zones);
 
   return {
@@ -67,11 +63,8 @@ export function buildRepairStory(estimateText: string): RepairStory {
     replacedPanels,
     repairedPanels,
     operations,
-    systems,
-    complexityDrivers,
     repairCharacter: classifyRepairCharacter({
       structural,
-      systems,
       operations,
     }),
     structural,
@@ -104,18 +97,6 @@ export function buildRepairNarrative(story: RepairStory): string {
   if (story.panels.length >= 3) {
     parts.push(
       "The repair spans multiple panels, suggesting the impact carried beyond a single isolated component."
-    );
-  }
-
-  if (story.systems.length > 0) {
-    parts.push(
-      `System involvement includes ${story.systems.join(", ")}, which adds procedural complexity but doesn't necessarily reflect structural severity.`
-    );
-  }
-
-  if (story.complexityDrivers.length > 0) {
-    parts.push(
-      `The main complexity here comes from ${story.complexityDrivers.join(", ")}.`
     );
   }
 
@@ -220,36 +201,11 @@ function collectZones(lower: string, panels: string[]): string[] {
   return [...zones];
 }
 
-function detectSystems(lower: string): string[] {
-  const systems: Array<[string, string[]]> = [
-    ["ADAS sensors", ["radar", "camera", "adas", "kafas", "blind spot", "sensor"]],
-    ["cooling", ["radiator", "condenser", "cooling", "fan shroud"]],
-    ["lighting", ["headlamp", "headlight", "tail lamp", "lamp"]],
-    ["restraint", ["airbag", "srs", "seat belt", "tensioner"]],
-    ["suspension", ["suspension", "strut", "control arm", "knuckle", "subframe"]],
-    ["electrical", ["module", "harness", "wiring", "electrical"]],
-    ["hybrid battery", ["hybrid", "high voltage", "battery disconnect", "disable battery"]],
-  ];
-
-  return systems
-    .filter(([, keywords]) => keywords.some((keyword) => lower.includes(keyword)))
-    .map(([label]) => label);
-}
-
 function detectComplexityDrivers(
   lower: string,
-  systems: string[],
   structural: boolean
 ): string[] {
   const drivers: string[] = [];
-
-  if (systems.includes("ADAS sensors")) {
-    drivers.push("sensor integration");
-  }
-
-  if (systems.includes("hybrid battery")) {
-    drivers.push("hybrid disable/enable");
-  }
 
   if (includesAny(lower, ["harness", "module", "wiring", "electrical"])) {
     drivers.push("electrical handling");
@@ -297,18 +253,10 @@ function determineImpact(lower: string, zones: string[]): string {
 
 function classifyRepairCharacter(params: {
   structural: boolean;
-  systems: string[];
   operations: StoryOperations;
 }): string {
   if (params.structural) {
-    return "structural + system-handling";
-  }
-
-  if (
-    params.systems.length > 0 &&
-    (params.operations.repairedParts.length > 0 || params.operations.replacedParts.length > 0)
-  ) {
-    return "cosmetic + system-handling";
+    return "structural repair";
   }
 
   if (params.operations.repairDominant) {
