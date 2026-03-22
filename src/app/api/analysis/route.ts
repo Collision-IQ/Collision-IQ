@@ -45,11 +45,17 @@ export async function POST(req: Request) {
     });
     const analysis = normalizeReportToAnalysisResult(report);
     const supplementCandidates = await generateSupplementCandidates(
-      analysis.rawEstimateText ?? ""
+      analysis.rawEstimateText ?? "",
+      report
     );
     const panel = await buildDecisionPanelHybrid({
       result: analysis,
       supplementCandidates,
+      supplementContext: {
+        requiredProcedures: report.requiredProcedures.map((entry) => entry.procedure),
+        presentProcedures: report.presentProcedures,
+        missingProcedures: report.missingProcedures,
+      },
     });
 
     const stored = saveAnalysisReport({
@@ -72,8 +78,21 @@ export async function POST(req: Request) {
   }
 }
 
-async function generateSupplementCandidates(text: string) {
+async function generateSupplementCandidates(
+  text: string,
+  report: RepairIntelligenceReport
+) {
   if (!text.trim()) return [];
+
+  const requiredProcedures = report.requiredProcedures
+    .map((entry) => `- ${entry.procedure}`)
+    .join("\n");
+  const presentProcedures = report.presentProcedures
+    .map((entry) => `- ${entry}`)
+    .join("\n");
+  const missingProcedures = report.missingProcedures
+    .map((entry) => `- ${entry}`)
+    .join("\n");
 
   const response = await openai.responses.create({
     model: "gpt-4o",
@@ -84,13 +103,44 @@ async function generateSupplementCandidates(text: string) {
         content: [
           {
             type: "input_text",
-            text: "Identify repair functions that are not clearly represented. Return JSON array.",
+            text: `You are reviewing a collision repair estimate.
+
+Use the vehicle-specific required procedure context below to decide what functions are not clearly represented.
+
+Important:
+- Do NOT assume every vehicle has the same ADAS systems
+- Do NOT suggest front camera, radar, blind spot, or other ADAS calibrations unless they are supported by the required procedure context
+- If a function is already represented in the estimate or present-procedure list, do NOT include it
+- Only flag items that are truly unclear or absent
+
+Return JSON only:
+[
+  {
+    "title": "",
+    "reason": ""
+  }
+]`,
           },
         ],
       },
       {
         role: "user",
-        content: [{ type: "input_text", text }],
+        content: [
+          {
+            type: "input_text",
+            text: `[Estimate Text]
+${text}
+
+[Vehicle-Specific Required Procedures From Drive/OEM]
+${requiredProcedures || "- None provided"}
+
+[Procedures Already Represented]
+${presentProcedures || "- None documented"}
+
+[Procedures Already Identified As Missing]
+${missingProcedures || "- None identified"}`,
+          },
+        ],
       },
     ],
   });

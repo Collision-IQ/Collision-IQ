@@ -5,6 +5,7 @@ import {
   buildSupplementLines,
   buildSupplementLinesHybrid,
   validateSupplements,
+  type SupplementValidationContext,
   type SupplementLine,
 } from "./supplementBuilder";
 import { mapSupplementLines } from "./lineMappingEngine";
@@ -61,10 +62,12 @@ export function buildDecisionPanel(result: AnalysisResult): DecisionPanel {
 export async function buildDecisionPanelHybrid(params: {
   result: AnalysisResult;
   supplementCandidates: Array<{ title: string; reason: string }>;
+  supplementContext?: SupplementValidationContext;
 }): Promise<DecisionPanel> {
   const validCandidates = validateSupplements(
     params.result.rawEstimateText ?? "",
-    params.supplementCandidates
+    params.supplementCandidates,
+    params.supplementContext
   );
   const supplements = buildSupplementLinesHybrid(validCandidates);
   const mappedLines = mapSupplementLines(supplements, "ccc");

@@ -3,6 +3,11 @@ import type {
   AnalysisResult,
   RepairIntelligenceReport,
 } from "../types/analysis";
+import {
+  CANONICAL_PROCEDURES,
+  findProcedureMatches,
+  type CanonicalProcedureKey,
+} from "../procedureEquivalence";
 
 export type SupplementLine = {
   title: string;
@@ -26,6 +31,12 @@ type RepairFunction = {
 type SupplementCandidate = {
   title: string;
   reason: string;
+};
+
+export type SupplementValidationContext = {
+  requiredProcedures?: string[];
+  presentProcedures?: string[];
+  missingProcedures?: string[];
 };
 
 const FUNCTIONS: RepairFunction[] = [
@@ -108,17 +119,49 @@ function extractTextForFunctions(
 
 export function validateSupplements(
   text: string,
-  candidates: SupplementCandidate[]
+  candidates: SupplementCandidate[],
+  context?: SupplementValidationContext
 ): SupplementCandidate[] {
-  const lower = text.toLowerCase();
+  const representedText = [
+    text,
+    ...(context?.presentProcedures ?? []),
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+  const representedMatches = findProcedureMatches(representedText);
+  const requiredProcedureMatches = findProcedureMatches(
+    [...(context?.requiredProcedures ?? []), ...(context?.missingProcedures ?? [])]
+      .filter(Boolean)
+      .join("\n")
+  );
+  const requiredProcedureText = [
+    ...(context?.requiredProcedures ?? []),
+    ...(context?.missingProcedures ?? []),
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
 
   return candidates.filter((item) => {
-    const title = item.title.toLowerCase();
+    const title = normalizeSupplementTitle(item.title).toLowerCase();
+    const canonicalKey = inferCanonicalProcedureKey(title);
+    const adasProcedure = canonicalKey
+      ? isAdasProcedure(canonicalKey)
+      : looksLikeAdasSupplementTitle(title);
+
+    if (canonicalKey && representedMatches.some((match) => match.key === canonicalKey)) {
+      return false;
+    }
 
     if (
-      (title.includes("calibration") && lower.includes("calibration")) ||
-      (title.includes("scan") && lower.includes("post-repair scan"))
+      (title.includes("calibration") && representedText.includes("calibration")) ||
+      (title.includes("scan") && representedText.includes("post-repair scan"))
     ) {
+      return false;
+    }
+
+    if (adasProcedure && !isProcedureRequired(canonicalKey, title, requiredProcedureText, requiredProcedureMatches)) {
       return false;
     }
 
@@ -127,7 +170,7 @@ export function validateSupplements(
 }
 
 export function inferCategory(title: string): SupplementLine["category"] {
-  const lower = title.toLowerCase();
+  const lower = normalizeSupplementTitle(title).toLowerCase();
 
   if (lower.includes("scan")) return "scan";
   if (lower.includes("calibration")) return "calibration";
@@ -141,8 +184,86 @@ export function buildSupplementLinesHybrid(
   validatedItems: SupplementCandidate[]
 ): SupplementLine[] {
   return validatedItems.map((item) => ({
-    title: item.title,
+    title: normalizeSupplementTitle(item.title),
     category: inferCategory(item.title),
     rationale: item.reason,
   }));
+}
+
+function normalizeSupplementTitle(title: string): string {
+  const normalized = title.replace(/\s+/g, " ").trim();
+  const lower = normalized.toLowerCase();
+
+  if (lower.includes("kafas")) {
+    return "Forward Camera Calibration";
+  }
+
+  return normalized;
+}
+
+function inferCanonicalProcedureKey(
+  title: string
+): CanonicalProcedureKey | null {
+  const normalizedTitle = title.toLowerCase();
+
+  for (const procedure of CANONICAL_PROCEDURES) {
+    if (
+      procedure.label.toLowerCase() === normalizedTitle ||
+      procedure.aliases.some((alias) => alias.toLowerCase() === normalizedTitle) ||
+      procedure.aliases.some((alias) => normalizedTitle.includes(alias.toLowerCase())) ||
+      normalizedTitle.includes(procedure.label.toLowerCase())
+    ) {
+      return procedure.key;
+    }
+  }
+
+  return null;
+}
+
+function isAdasProcedure(key: CanonicalProcedureKey): boolean {
+  return (
+    key.includes("camera") ||
+    key.includes("radar") ||
+    key === "lane_change_calibration" ||
+    key === "lane_departure_calibration" ||
+    key === "steering_angle_calibration" ||
+    key === "adas_report"
+  );
+}
+
+function looksLikeAdasSupplementTitle(title: string): boolean {
+  return (
+    title.includes("camera") ||
+    title.includes("radar") ||
+    title.includes("adas") ||
+    title.includes("blind spot") ||
+    title.includes("lane") ||
+    title.includes("steering angle") ||
+    title.includes("calibration")
+  );
+}
+
+function isProcedureRequired(
+  canonicalKey: CanonicalProcedureKey | null,
+  title: string,
+  requiredProcedureText: string,
+  requiredProcedureMatches: ReturnType<typeof findProcedureMatches>
+): boolean {
+  if (canonicalKey) {
+    return requiredProcedureMatches.some((match) => match.key === canonicalKey);
+  }
+
+  return CANONICAL_PROCEDURES.some((procedure) => {
+    if (!isAdasProcedure(procedure.key)) return false;
+
+    return (
+      requiredProcedureText.includes(procedure.label.toLowerCase()) &&
+      (title.includes(procedure.label.toLowerCase()) ||
+        procedure.aliases.some(
+          (alias) =>
+            title.includes(alias.toLowerCase()) ||
+            alias.toLowerCase().includes(title)
+        ))
+    );
+  });
 }
