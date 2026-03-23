@@ -142,6 +142,23 @@ export function validateSupplements(
     .filter(Boolean)
     .join("\n")
     .toLowerCase();
+  const functionMap: Record<string, string[]> = {
+    "post-repair scan": [
+      "post-repair scan",
+      "post repair scan",
+      "post scan",
+      "final scan",
+      "vehicle diagnostics",
+    ],
+    calibration: [
+      "calibration",
+      "adas report",
+      "blind spot",
+      "parking sensor",
+      "parking assist",
+      "radar",
+    ],
+  };
 
   return candidates.filter((item) => {
     const title = normalizeSupplementTitle(item.title).toLowerCase();
@@ -154,14 +171,16 @@ export function validateSupplements(
       return false;
     }
 
-    if (
-      (title.includes("calibration") && representedText.includes("calibration")) ||
-      (title.includes("scan") && representedText.includes("post-repair scan"))
-    ) {
-      return false;
+    for (const [functionName, keywords] of Object.entries(functionMap)) {
+      if (title.includes(functionName) && hasFunction(representedText, keywords)) {
+        return false;
+      }
     }
 
-    if (adasProcedure && !isProcedureRequired(canonicalKey, title, requiredProcedureText, requiredProcedureMatches)) {
+    if (
+      adasProcedure &&
+      !isProcedureRequired(canonicalKey, title, requiredProcedureText, requiredProcedureMatches)
+    ) {
       return false;
     }
 
@@ -199,6 +218,12 @@ function normalizeSupplementTitle(title: string): string {
   }
 
   return normalized;
+}
+
+function hasFunction(text: string, keywords: string[]): boolean {
+  const lower = text.toLowerCase();
+
+  return keywords.some((keyword) => lower.includes(keyword));
 }
 
 function inferCanonicalProcedureKey(
