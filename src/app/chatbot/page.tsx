@@ -4,6 +4,10 @@ import { useMemo, useState } from "react";
 import Image from "next/image";
 import ChatWidget from "@/components/ChatWidget";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
+import {
+  buildExportModel,
+  COLLISION_ACADEMY_HANDOFF_URL,
+} from "@/lib/ai/builders/buildExportModel";
 import { buildCarrierReport } from "@/lib/ai/builders/carrierPdfBuilder";
 import { exportCarrierPDF } from "@/lib/ai/builders/exportPdf";
 import type {
@@ -29,6 +33,16 @@ export default function ChatbotPage() {
   const normalizedResult = useMemo(
     () => (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null),
     [analysisResult]
+  );
+  const renderModel = useMemo(
+    () =>
+      buildExportModel({
+        report: analysisResult,
+        analysis: normalizedResult,
+        panel: analysisPanel,
+        assistantAnalysis: analysisText,
+      }),
+    [analysisPanel, analysisResult, analysisText, normalizedResult]
   );
 
   const panel = analysisPanel ?? EMPTY_PANEL;
@@ -86,6 +100,7 @@ export default function ChatbotPage() {
               attachment={attachment}
               analysisText={analysisText}
               panel={panel}
+              renderModel={renderModel}
               normalizedResult={normalizedResult}
               analysisResult={analysisResult}
             />
@@ -115,6 +130,7 @@ export default function ChatbotPage() {
             attachment={attachment}
             analysisText={analysisText}
             panel={panel}
+            renderModel={renderModel}
             normalizedResult={normalizedResult}
             analysisResult={analysisResult}
           />
@@ -128,12 +144,14 @@ function RailContent({
   attachment,
   analysisText,
   panel,
+  renderModel,
   normalizedResult,
   analysisResult,
 }: {
   attachment: string | null;
   analysisText: string;
   panel: DecisionPanel;
+  renderModel: ReturnType<typeof buildExportModel>;
   normalizedResult: AnalysisResult | null;
   analysisResult: RepairIntelligenceReport | null;
 }) {
@@ -153,48 +171,51 @@ function RailContent({
         )}
       </div>
 
-      <DecisionSection title="What Stands Out" body={panel.narrative} tone="neutral" />
+      <DecisionSection title="What Stands Out" body={renderModel.repairPosition} tone="neutral" />
 
       <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
         <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
           Supplement Lines
         </div>
-        {panel.supplements.length > 0 ? (
+        {renderModel.supplementItems.length > 0 ? (
           <div className="space-y-3">
-            {panel.supplements.map((item, index) => (
+            {renderModel.supplementItems.map((item, index) => (
               <div key={`${item.title}-${index}`} className="rounded-lg border border-white/10 bg-black/20 p-3">
                 <div className="text-sm font-medium text-white">
-                  {item.mappedLabel || item.title}
+                  {item.title}
                 </div>
-                <div className="mt-1 text-xs text-white/60">{item.category}</div>
+                <div className="mt-1 text-xs text-white/60">
+                  {item.category} - {formatLabel(item.kind)} - Priority {formatLabel(item.priority)}
+                </div>
                 <div className="mt-2 text-sm leading-6 text-white/80">{item.rationale}</div>
-                {item.support && (
-                  <div className="mt-2 text-xs leading-5 text-white/45">{item.support}</div>
+                {item.evidence && (
+                  <div className="mt-2 text-xs leading-5 text-white/45">Evidence: {item.evidence}</div>
+                )}
+                {item.source && (
+                  <div className="mt-1 text-[11px] leading-5 text-white/35">Source: {item.source}</div>
                 )}
               </div>
             ))}
           </div>
         ) : (
           <div className="text-sm text-white/45">
-            No supplement items were generated from the current analysis yet.
+            No supportable missing, underwritten, or disputed repair-path items were identified from the current structured analysis.
           </div>
         )}
       </section>
 
-      {panel.diminishedValue && (
+      {analysisResult && (
         <DecisionSection
-          title="DV Value"
-          body={`${formatDVRange(panel.diminishedValue.low, panel.diminishedValue.high)}\nConfidence: ${formatLabel(
-            panel.diminishedValue.confidence
-          )}\n\nReason:\n${panel.diminishedValue.rationale}`}
+          title="Valuation"
+          body={buildValuationDisplay(renderModel)}
           tone="green"
         />
       )}
 
-      {panel.negotiationResponse && (
+      {renderModel.request && (
         <DecisionSection
           title="Negotiation Draft"
-          body={panel.negotiationResponse}
+          body={renderModel.request}
           tone="neutral"
           mono
         />
@@ -239,18 +260,10 @@ function exportReport(
   const reportText =
     normalizedResult && analysisResult
       ? buildCarrierReport({
-          result: normalizedResult,
-          meta: {
-            vehicle: [
-              analysisResult.vehicle?.year,
-              analysisResult.vehicle?.make,
-              analysisResult.vehicle?.model,
-            ]
-              .filter(Boolean)
-              .join(" "),
-            vin: analysisResult.vehicle?.vin,
-            year: analysisResult.vehicle?.year,
-          },
+          report: analysisResult,
+          analysis: normalizedResult,
+          panel,
+          assistantAnalysis: analysisText,
         })
       : [
           "Narrative",
@@ -266,9 +279,12 @@ function exportReport(
                 .join("\n\n")}`
             : "",
           panel.diminishedValue
-            ? `Diminished Value\n\n${formatDVRange(panel.diminishedValue.low, panel.diminishedValue.high)}\nConfidence: ${formatLabel(
-                panel.diminishedValue.confidence
-              )}\n\n${panel.diminishedValue.rationale}`
+            ? `Diminished Value\n\nLikely diminished value preview: ${formatDVRange(
+                panel.diminishedValue.low,
+                panel.diminishedValue.high
+              )}\nConfidence: ${formatLabel(panel.diminishedValue.confidence)}\n${
+                panel.diminishedValue.rationale
+              }\nThis is a preliminary preview based on the current file set, not a formal valuation.\nFor a full valuation, continue at ${COLLISION_ACADEMY_HANDOFF_URL}`
             : "",
           panel.negotiationResponse
             ? `Negotiation Response\n\n${panel.negotiationResponse}`
@@ -331,6 +347,131 @@ function formatDVRange(low: number, high: number) {
   }
 
   return `$${low} - $${high}`;
+}
+
+function buildValuationDisplay(renderModel: ReturnType<typeof buildExportModel>): string {
+  return [
+    "ACV",
+    buildSingleValuationDisplay({
+      label: "Likely ACV preview",
+      status: renderModel.valuation.acvStatus,
+      value:
+        renderModel.valuation.acvStatus === "provided"
+          ? renderModel.valuation.acvValue
+          : undefined,
+      range:
+        renderModel.valuation.acvStatus === "estimated_range"
+          ? renderModel.valuation.acvRange
+          : undefined,
+      confidence: renderModel.valuation.acvConfidence,
+      reasoning: renderModel.valuation.acvReasoning,
+      missingInputs: renderModel.valuation.acvMissingInputs,
+      maxRange: 250000,
+    }),
+    "",
+    "DV",
+    buildSingleValuationDisplay({
+      label: "Likely diminished value preview",
+      status: renderModel.valuation.dvStatus,
+      value:
+        renderModel.valuation.dvStatus === "provided"
+          ? renderModel.valuation.dvValue
+          : undefined,
+      range:
+        renderModel.valuation.dvStatus === "estimated_range"
+          ? renderModel.valuation.dvRange
+          : undefined,
+      confidence: renderModel.valuation.dvConfidence,
+      reasoning: renderModel.valuation.dvReasoning,
+      missingInputs: renderModel.valuation.dvMissingInputs,
+      maxRange: 50000,
+    }),
+  ].join("\n");
+}
+
+function buildSingleValuationDisplay(params: {
+  label: string;
+  status: "provided" | "estimated_range" | "not_determinable";
+  value?: number;
+  range?: { low: number; high: number };
+  confidence?: "low" | "medium" | "high";
+  reasoning: string;
+  missingInputs: string[];
+  maxRange: number;
+}): string {
+  const lines: string[] = [];
+
+  if (params.status === "provided" && typeof params.value === "number") {
+    lines.push(`${params.label}: ${formatCurrency(params.value)}`);
+  } else if (params.status === "estimated_range" && hasSaneRange(params.range, params.maxRange)) {
+    lines.push(
+      `${params.label}: ${formatCurrency(params.range.low)}-${formatCurrency(params.range.high)}`
+    );
+  } else {
+    lines.push(`${params.label}: Not determinable from the current documents.`);
+  }
+
+  if (params.confidence) {
+    lines.push(`Confidence: ${formatLabel(params.confidence)}`);
+  }
+
+  const reasoning = cleanValuationReasoning(
+    params.reasoning,
+    params.status === "not_determinable"
+      ? "Not determinable from the current documents."
+      : params.label
+  );
+  if (reasoning) {
+    lines.push(reasoning);
+  }
+
+  if (params.missingInputs.length) {
+    lines.push(`Missing inputs: ${params.missingInputs.join(", ")}`);
+  }
+
+  if (params.status === "provided" || params.status === "estimated_range") {
+    lines.push("This is a preliminary preview based on the current file set, not a formal valuation.");
+  }
+
+  lines.push(`For a full valuation, continue at ${COLLISION_ACADEMY_HANDOFF_URL}`);
+
+  return lines.join("\n");
+}
+
+function formatCurrency(value: number): string {
+  return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
+function hasSaneRange(
+  range: { low: number; high: number } | undefined,
+  max: number
+): range is { low: number; high: number } {
+  if (!range) return false;
+  if (!Number.isFinite(range.low) || !Number.isFinite(range.high)) return false;
+  if (range.low <= 0 || range.high <= 0) return false;
+  if (range.high < range.low || range.high > max) return false;
+  return true;
+}
+
+function cleanValuationReasoning(reasoning: string, lead: string): string | null {
+  const cleaned = reasoning.replace(/\s+/g, " ").trim();
+  if (!cleaned) return null;
+
+  const normalizedReason = cleaned.toLowerCase().replace(/[^\w\s]/g, "");
+  const normalizedLead = lead.toLowerCase().replace(/[^\w\s]/g, "");
+
+  if (normalizedReason === normalizedLead) {
+    return null;
+  }
+
+  if (
+    normalizedLead.includes("not determinable") &&
+    normalizedReason.includes("not determinable from the current documents")
+  ) {
+    return null;
+  }
+
+  return cleaned;
 }
 
 function normalizeReportToAnalysisResult(

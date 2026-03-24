@@ -1,35 +1,24 @@
-import { buildSupplementLines } from "./supplementBuilder";
-import { calculateDV } from "./dvCalculator";
-import { generateNegotiationResponse } from "./negotiationEngine";
+import { buildExportModel, COLLISION_ACADEMY_HANDOFF_URL } from "./buildExportModel";
+import type { DecisionPanel } from "./buildDecisionPanel";
 import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
 
 export function buildCarrierReport({
-  result,
-  meta,
+  report,
+  analysis,
+  panel,
+  assistantAnalysis,
 }: {
-  result: AnalysisResult | RepairIntelligenceReport;
-  meta: {
-    vehicle?: string;
-    vin?: string;
-    repairCost?: number;
-    structural?: boolean;
-    airbag?: boolean;
-    year?: number;
-    isLuxury?: boolean;
-  };
+  report: RepairIntelligenceReport | null;
+  analysis: AnalysisResult | null;
+  panel: DecisionPanel | null;
+  assistantAnalysis?: string | null;
 }) {
-  const supplements = buildSupplementLines(result);
-  const narrative = "narrative" in result ? result.narrative : result.analysis?.narrative ?? "";
-
-  const dv = calculateDV({
-    repairCost: meta.repairCost,
-    structural: meta.structural,
-    airbag: meta.airbag,
-    vehicleYear: meta.year,
-    isLuxury: meta.isLuxury,
+  const exportModel = buildExportModel({
+    report,
+    analysis,
+    panel,
+    assistantAnalysis,
   });
-
-  const negotiation = generateNegotiationResponse(result);
 
   return `
 COLLISION REPAIR SUPPLEMENT & EVALUATION
@@ -37,56 +26,47 @@ COLLISION REPAIR SUPPLEMENT & EVALUATION
 ----------------------------------------
 VEHICLE
 ----------------------------------------
-Vehicle: ${meta.vehicle || "Unknown"}
-VIN: ${meta.vin || "Unknown"}
+Vehicle: ${exportModel.vehicle.label || "Not confidently identified from the current material."}
+VIN: ${exportModel.vehicle.vin || "Not available from structured analysis."}
 
 ----------------------------------------
 REPAIR POSITION
 ----------------------------------------
-${narrative || "No repair narrative was available from the current analysis."}
+${exportModel.repairPosition}
 
 ----------------------------------------
 SUPPLEMENT ITEMS
 ----------------------------------------
 
-${supplements
+${exportModel.supplementItems.length > 0
+    ? exportModel.supplementItems
     .map(
       (item) => `- ${item.title}
   Category: ${item.category}
-  Reason: ${item.rationale}`
+  Kind: ${item.kind}
+  Priority: ${item.priority}
+  Reason: ${item.rationale}${item.evidence ? `\n  Evidence: ${item.evidence}` : ""}${item.source ? `\n  Source: ${item.source}` : ""}`
     )
-    .join("\n\n")}
+    .join("\n\n")
+    : "- No supportable missing, underwritten, or disputed repair-path items were identified from the current structured analysis."}
 
 ----------------------------------------
-DIMINISHED VALUE
+VALUATION
 ----------------------------------------
 
-${
-    dv
-      ? `${formatDVRange(dv.low, dv.high)}
-
-Confidence: ${dv.confidence}
-
-${dv.rationale}`
-      : "Not enough data to determine diminished value."
-  }
+${buildValuationSection(exportModel)}
 
 ----------------------------------------
 POSITION STATEMENT
 ----------------------------------------
 
-The current estimate does not clearly support a fully verified and defensible repair process.
-
-Proper repair requires:
-- system verification
-- documented procedures
-- complete process support
+${exportModel.positionStatement}
 
 ----------------------------------------
 REQUEST
 ----------------------------------------
 
-${negotiation || "Please review and advise how the repair is being supported."}
+${exportModel.request}
 `.trim();
 }
 
@@ -96,4 +76,140 @@ function formatDVRange(low: number, high: number): string {
   }
 
   return `$${low} - $${high}`;
+}
+
+function buildValuationSection(
+  exportModel: ReturnType<typeof buildExportModel>
+): string {
+  const sections: string[] = [];
+
+  sections.push("ACV");
+  sections.push(renderAcv(exportModel));
+  sections.push("");
+  sections.push("DV");
+  sections.push(renderDv(exportModel));
+
+  return sections.join("\n");
+}
+
+function renderAcv(exportModel: ReturnType<typeof buildExportModel>): string {
+  const valuation = exportModel.valuation;
+  const lines: string[] = [];
+
+  if (valuation.acvStatus === "provided" && typeof valuation.acvValue === "number") {
+    lines.push(`Likely ACV preview: ${formatMoney(valuation.acvValue)}`);
+  } else if (valuation.acvStatus === "estimated_range" && hasSaneRange(valuation.acvRange, 250000)) {
+    lines.push(
+      `Likely ACV preview: ${formatMoney(valuation.acvRange.low)}-${formatMoney(
+        valuation.acvRange.high
+      )}`
+    );
+  } else {
+    lines.push("Likely ACV preview: Not determinable from the current documents.");
+  }
+
+  if (valuation.acvConfidence) {
+    lines.push(`Confidence: ${valuation.acvConfidence}`);
+  }
+
+  const reasoning = cleanValuationReasoning(
+    valuation.acvReasoning,
+    valuation.acvStatus === "not_determinable"
+      ? "Not determinable from the current documents."
+      : "Likely ACV preview"
+  );
+  if (reasoning) {
+    lines.push(reasoning);
+  }
+
+  if (valuation.acvMissingInputs.length) {
+    lines.push(`Missing inputs: ${valuation.acvMissingInputs.join(", ")}`);
+  } else if (valuation.acvStatus === "not_determinable") {
+    lines.push("Missing inputs: current documents do not contain enough market/value data.");
+  }
+
+  if (valuation.acvStatus === "provided" || valuation.acvStatus === "estimated_range") {
+    lines.push("This is a preliminary preview based on the current file set, not a formal valuation.");
+  }
+
+  lines.push(`For a full valuation, continue at ${COLLISION_ACADEMY_HANDOFF_URL}`);
+  return lines.join("\n");
+}
+
+function renderDv(exportModel: ReturnType<typeof buildExportModel>): string {
+  const valuation = exportModel.valuation;
+  const lines: string[] = [];
+
+  if (valuation.dvStatus === "provided" && typeof valuation.dvValue === "number") {
+    lines.push(`Likely diminished value preview: ${formatMoney(valuation.dvValue)}`);
+  } else if (valuation.dvStatus === "estimated_range" && hasSaneRange(valuation.dvRange, 50000)) {
+    lines.push(
+      `Likely diminished value preview: ${formatMoney(valuation.dvRange.low)}-${formatMoney(
+        valuation.dvRange.high
+      )}`
+    );
+  } else {
+    lines.push("Likely diminished value preview: Not determinable from the current documents.");
+  }
+
+  if (valuation.dvConfidence) {
+    lines.push(`Confidence: ${valuation.dvConfidence}`);
+  }
+
+  const reasoning = cleanValuationReasoning(
+    valuation.dvReasoning,
+    valuation.dvStatus === "not_determinable"
+      ? "Not determinable from the current documents."
+      : "Likely diminished value preview"
+  );
+  if (reasoning) {
+    lines.push(reasoning);
+  }
+
+  if (valuation.dvMissingInputs.length) {
+    lines.push(`Missing inputs: ${valuation.dvMissingInputs.join(", ")}`);
+  }
+
+  if (valuation.dvStatus === "provided" || valuation.dvStatus === "estimated_range") {
+    lines.push("This is a preliminary preview based on the current file set, not a formal valuation.");
+  }
+
+  lines.push(`For a full valuation, continue at ${COLLISION_ACADEMY_HANDOFF_URL}`);
+  return lines.join("\n");
+}
+
+function formatMoney(value: number): string {
+  return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
+function hasSaneRange(
+  range: { low: number; high: number } | undefined,
+  max: number
+): range is { low: number; high: number } {
+  if (!range) return false;
+  if (!Number.isFinite(range.low) || !Number.isFinite(range.high)) return false;
+  if (range.low <= 0 || range.high <= 0) return false;
+  if (range.high < range.low || range.high > max) return false;
+  return true;
+}
+
+function cleanValuationReasoning(reasoning: string, lead: string): string | null {
+  const cleaned = reasoning.replace(/\s+/g, " ").trim();
+  if (!cleaned) return null;
+
+  const normalizedReason = cleaned.toLowerCase().replace(/[^\w\s]/g, "");
+  const normalizedLead = lead.toLowerCase().replace(/[^\w\s]/g, "");
+
+  if (normalizedReason === normalizedLead) {
+    return null;
+  }
+
+  if (
+    normalizedLead.includes("not determinable") &&
+    normalizedReason.includes("not determinable from the current documents")
+  ) {
+    return null;
+  }
+
+  return cleaned;
 }
