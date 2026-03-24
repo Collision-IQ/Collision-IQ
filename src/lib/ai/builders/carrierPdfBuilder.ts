@@ -1,12 +1,13 @@
 import { buildSupplementLines } from "./supplementBuilder";
 import { calculateDV } from "./dvCalculator";
 import { generateNegotiationResponse } from "./negotiationEngine";
+import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
 
 export function buildCarrierReport({
   result,
   meta,
 }: {
-  result: any;
+  result: AnalysisResult | RepairIntelligenceReport;
   meta: {
     vehicle?: string;
     vin?: string;
@@ -18,6 +19,7 @@ export function buildCarrierReport({
   };
 }) {
   const supplements = buildSupplementLines(result);
+  const narrative = "narrative" in result ? result.narrative : result.analysis?.narrative ?? "";
 
   const dv = calculateDV({
     repairCost: meta.repairCost,
@@ -41,7 +43,7 @@ VIN: ${meta.vin || "Unknown"}
 ----------------------------------------
 REPAIR POSITION
 ----------------------------------------
-${result.narrative}
+${narrative || "No repair narrative was available from the current analysis."}
 
 ----------------------------------------
 SUPPLEMENT ITEMS

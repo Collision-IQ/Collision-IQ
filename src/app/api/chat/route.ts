@@ -2,12 +2,6 @@ export const runtime = "nodejs";
 
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
-import { extractContext } from "@/lib/ai/context/extractContext";
-import { classifyIntent } from "@/lib/ai/intent/classifyIntent";
-import {
-  runRetrieval,
-  type RetrievalHit,
-} from "@/lib/ai/orchestrator/retrievalOrchestrator";
 import {
   getUploadedAttachments,
   saveUploadedAttachment,
@@ -21,32 +15,18 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY!,
 });
 
-const SYSTEM_PROMPT = `
-You are a collision estimator.
-
-Review the estimate and explain what this repair actually is.
-
-Focus on:
-- what kind of repair this is
-- how the work is structured
-- what stands out
-
-Do not walk through every operation step-by-step.
-
-Do not explain everything.
-
-Instead:
-- summarize the repair approach
-- highlight key decisions (repair vs replace)
-- call out anything meaningful
-
-Keep it concise and natural.
-`;
+const MODEL = process.env.COLLISION_IQ_MODEL || "gpt-5.4";
 
 type UploadedDocument = {
-  text?: string;
   filename: string;
   mime?: string;
+  text?: string;
+  imageDataUrl?: string;
+};
+
+type MessageContentPart = {
+  type?: string;
+  text?: string;
 };
 
 type IncomingMessage = {
@@ -54,16 +34,94 @@ type IncomingMessage = {
   content: unknown;
 };
 
+type IncomingAttachment = {
+  filename: string;
+  type: string;
+  text?: string;
+  imageDataUrl?: string;
+};
+
 type ChatRequestBody = {
   messages?: IncomingMessage[];
   attachmentIds?: string[];
-  attachments?: Array<{
-    filename: string;
-    type: string;
-    text?: string;
-    imageDataUrl?: string;
-  }>;
+  attachments?: IncomingAttachment[];
 };
+
+const SYSTEM_INSTRUCTIONS = `
+You are Collision-IQ, a senior collision estimator and repair strategist.
+
+Think like a real estimator, not a narrator.
+
+If the user asks a direct question, answer that question directly.
+
+When estimates, repair documents, photos, scans, OEM material, or related files are attached:
+- understand the repair strategy before answering
+- focus on what materially matters, not line-by-line coverage
+- pay closest attention to labor realism, access burden, repair vs replace posture, structural or safety implications, scan and calibration relevance, and estimate completeness
+- identify what is actually driving the cost: visible damage, hidden damage potential, access, procedure, electronics, setup, teardown, or estimating style
+- make soft professional judgments when supported: light, heavy, conservative, aggressive, efficient, incomplete, access-driven, damage-driven, overbuilt, underwritten
+- infer the likely repair path behind the listed operations when reasonable
+- compare estimating posture and repair strategy when multiple estimates are present
+- when useful, say which estimate is stronger and why
+- use OEM or procedure context only when it materially changes the conclusion
+- do not paraphrase the estimate line by line
+- do not try to mention everything
+- be concise, natural, and direct
+
+When no documents are attached:
+- answer as a collision repair intelligence assistant for VIN decoding, OEM procedures, part questions, structural questions, diminished value, negotiation strategy, total loss logic, and general automotive knowledge
+
+Write in short paragraphs.
+Use bullets only when they genuinely improve comparison, negotiation, or rebuttal clarity.
+Avoid rigid templates.
+`.trim();
+
+function extractTextContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") {
+          return part;
+        }
+
+        if (part && typeof part === "object") {
+          const candidate = part as MessageContentPart;
+          return typeof candidate.text === "string" ? candidate.text : "";
+        }
+
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  return "";
+}
+
+function extractLatestUserMessage(messages: IncomingMessage[] = []): string {
+  const lastUserMessage = [...messages]
+    .reverse()
+    .find((message) => message?.role === "user");
+
+  return lastUserMessage ? extractTextContent(lastUserMessage.content).trim() : "";
+}
+
+function formatRecentConversation(messages: IncomingMessage[] = []): string {
+  return messages
+    .filter((message) => message?.role === "user" || message?.role === "assistant")
+    .slice(-8)
+    .map((message) => {
+      const content = extractTextContent(message.content).trim();
+      if (!content) return "";
+      return `${message.role.toUpperCase()}:\n${content}`;
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
 
 function extractDocuments(body: ChatRequestBody): UploadedDocument[] {
   const uploadedAttachments =
@@ -82,107 +140,76 @@ function extractDocuments(body: ChatRequestBody): UploadedDocument[] {
     filename: attachment.filename,
     mime: attachment.type,
     text: attachment.text,
+    imageDataUrl: attachment.imageDataUrl,
   }));
 }
 
-function extractFallbackUserMessage(messages: IncomingMessage[] = []): string {
-  const lastUserMessage =
-    [...messages]
-      .reverse()
-      .find((message) => message?.role === "user" && typeof message?.content === "string") ?? null;
+function formatDocuments(documents: UploadedDocument[]): string {
+  return documents
+    .map((document, index) => {
+      const label = `Attachment ${index + 1}: ${document.filename}${
+        document.mime ? ` (${document.mime})` : ""
+      }`;
 
-  return lastUserMessage && typeof lastUserMessage.content === "string"
-    ? lastUserMessage.content
-    : "";
+      const textBlock = document.text?.trim()
+        ? document.text.trim()
+        : "[No extracted text available]";
+
+      return `### ${label}\n${textBlock}`;
+    })
+    .join("\n\n---\n\n");
 }
 
-function extractTotalsLite(text: string): string {
-  const laborMatches = text.match(/(\d+\.\d+)\s*hrs/g);
-  return laborMatches ? laborMatches.slice(0, 3).join(", ") : "";
+function buildModelInput(params: {
+  userMessage: string;
+  conversationContext: string;
+  documents: UploadedDocument[];
+}): string {
+  const sections: string[] = [];
+
+  if (params.userMessage) {
+    sections.push(`User request:\n${params.userMessage}`);
+  }
+
+  if (params.conversationContext) {
+    sections.push(`Recent conversation:\n${params.conversationContext}`);
+  }
+
+  if (params.documents.length > 0) {
+    sections.push(`Attached documents:\n${formatDocuments(params.documents)}`);
+  }
+
+  if (sections.length === 0) {
+    sections.push("No user message or document text was provided.");
+  }
+
+  return sections.join("\n\n");
 }
 
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as ChatRequestBody;
+
     const documents = extractDocuments(body);
-    const attachedContext = documents
-      .map((document) => document.text || "")
-      .filter(Boolean)
-      .join("\n\n");
-    const estimateText = attachedContext;
-    const fallbackUserMessage = extractFallbackUserMessage(body.messages || []);
-    const userInput = estimateText || fallbackUserMessage;
-    const intent = classifyIntent(fallbackUserMessage, documents.length > 0);
-    const contextBlock = `
-[Context for reasoning]
-
-When relevant, consider:
-- labor hours vs repair scope (are they realistic?)
-- part types (OEM vs aftermarket) and implications
-- whether the repair approach aligns with proper procedures
-
-Do not force these - only use them if they matter.
-`.trim();
-    const totalsBlock = `
-[Estimate totals reference]
-Labor entries detected: ${extractTotalsLite(estimateText)}
-`.trim();
-
-    let matches: RetrievalHit[] = [];
-    const shouldRunRetrieval =
-      intent === "estimate_review" || intent === "estimate_compare";
-
-    if (shouldRunRetrieval && userInput) {
-      const retrievalContext = extractContext(userInput);
-      matches = await runRetrieval({
-        query: fallbackUserMessage || "estimate review",
-        ...retrievalContext,
-      });
-    }
-
-    const retrievalText = matches
-      .slice(0, 3)
-      .map((match) => match.content)
-      .join("\n\n");
-    const retrievalBlock = retrievalText
-      ? `[Relevant reference information]\n${retrievalText}`
-      : "";
+    const userMessage = extractLatestUserMessage(body.messages || []);
+    const conversationContext = formatRecentConversation(body.messages || []);
+    const input = buildModelInput({
+      userMessage,
+      conversationContext,
+      documents,
+    });
 
     const response = await openai.responses.create({
-      model: "gpt-4o",
-      temperature: 0.4,
-      input: [
-        {
-          role: "system",
-          content: [{ type: "input_text", text: SYSTEM_PROMPT }],
-        },
-        {
-          role: "system",
-          content: [{ type: "input_text", text: contextBlock }],
-        },
-        {
-          role: "system",
-          content: [{ type: "input_text", text: totalsBlock }],
-        },
-        ...(retrievalBlock
-          ? [
-              {
-                role: "system" as const,
-                content: [{ type: "input_text" as const, text: retrievalBlock }],
-              },
-            ]
-          : []),
-        {
-          role: "user",
-          content: [{ type: "input_text", text: userInput }],
-        },
-      ],
+      model: MODEL,
+      instructions: SYSTEM_INSTRUCTIONS,
+      temperature: 0.7,
+      input,
     });
 
     const outputText =
-      "output_text" in response && typeof response.output_text === "string"
-        ? response.output_text
-        : "";
+      typeof response.output_text === "string" && response.output_text.trim()
+        ? response.output_text.trim()
+        : "I reviewed the material, but I couldn't generate a usable response.";
 
     return new Response(outputText, {
       headers: {
@@ -191,11 +218,26 @@ Labor entries detected: ${extractTotalsLite(estimateText)}
     });
   } catch (error) {
     console.error("Chat route error:", error);
-    const message = error instanceof Error ? error.message : "Chat failed.";
 
-    return NextResponse.json(
-      { error: message },
-      { status: 500 }
-    );
+    const message =
+      error instanceof Error ? error.message : "Unexpected chat route failure.";
+
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+/*
+Vibe coding notes:
+- This keeps chat clean. No classifier goblin. No builder maze. No prompt lasagna.
+- The user's actual question always goes to the model, even when attachments exist.
+- Attachments stay labeled, so comparisons stop becoming document soup.
+- The model is told to evaluate repair strategy, not cosplay as a PDF narrator.
+- This is the right base before adding stage-two OEM / Drive retrieval.
+
+Best next upgrade:
+1. first pass = estimate judgment
+2. conditional retrieval = OEM / Drive / web only when needed
+3. second pass = refined answer
+
+That gives you estimator brain first, context second.
+*/
