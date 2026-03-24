@@ -1,10 +1,13 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Paperclip, X, Camera, ChevronDown, ChevronUp } from "lucide-react";
+import { Paperclip, X, Camera, ChevronDown, ChevronUp, Eye, RefreshCcw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
+import AttachmentPreviewModal, {
+  type PreviewAttachment,
+} from "@/components/AttachmentPreviewModal";
 
 type Role = "user" | "assistant";
 
@@ -19,8 +22,10 @@ interface Attachment {
   mime: string;
   text: string;
   imageDataUrl?: string;
+  previewUrl?: string;
   source: "file" | "camera";
   hasVision: boolean;
+  usedInAnalysis?: boolean;
 }
 
 interface ChatWidgetProps {
@@ -47,6 +52,8 @@ export default function ChatWidget({
   const [loading, setLoading] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentsOpen, setAttachmentsOpen] = useState(true);
+  const [previewAttachmentId, setPreviewAttachmentId] = useState<string | null>(null);
+  const [replaceAttachmentId, setReplaceAttachmentId] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -55,17 +62,36 @@ export default function ChatWidget({
   const shouldAutoScrollRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
   const sessionRef = useRef<number>(0);
+  const attachmentsRef = useRef<Attachment[]>([]);
 
   const hasAnyAttachment = useMemo(() => attachments.length > 0, [attachments]);
   const visionAttachmentCount = useMemo(
     () => attachments.filter((attachment) => attachment.hasVision).length,
     [attachments]
   );
+  const previewAttachment = useMemo(
+    () => attachments.find((attachment) => attachment.attachmentId === previewAttachmentId) ?? null,
+    [attachments, previewAttachmentId]
+  );
+
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
 
   useEffect(() => {
     if (attachments.length >= 3) setAttachmentsOpen(false);
     if (attachments.length === 0) setAttachmentsOpen(true);
   }, [attachments.length]);
+
+  useEffect(() => {
+    return () => {
+      for (const attachment of attachmentsRef.current) {
+        if (attachment.previewUrl) {
+          URL.revokeObjectURL(attachment.previewUrl);
+        }
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (attachments.length < 2) return;
@@ -131,9 +157,16 @@ export default function ChatWidget({
 
     setLoading(false);
     setInput("");
+    attachments.forEach((attachment) => {
+      if (attachment.previewUrl) {
+        URL.revokeObjectURL(attachment.previewUrl);
+      }
+    });
     setMessages([INITIAL_MESSAGE]);
     setAttachments([]);
     setAttachmentsOpen(true);
+    setPreviewAttachmentId(null);
+    setReplaceAttachmentId(null);
 
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (cameraInputRef.current) cameraInputRef.current.value = "";
@@ -230,6 +263,12 @@ export default function ChatWidget({
             };
             onAnalysisResultChange?.(analysisData.report ?? null);
             onAnalysisPanelChange?.(analysisData.panel ?? null);
+            setAttachments((prev) =>
+              prev.map((attachment) => ({
+                ...attachment,
+                usedInAnalysis: true,
+              }))
+            );
           })
           .catch(() => {
             if (sessionRef.current === mySession) {
@@ -300,7 +339,11 @@ export default function ChatWidget({
     }
   }
 
-  async function uploadSingleFile(file: File, source: "file" | "camera") {
+  async function uploadSingleFile(
+    file: File,
+    source: "file" | "camera",
+    replaceId?: string | null
+  ) {
     const formData = new FormData();
     formData.append("file", file);
 
@@ -315,19 +358,53 @@ export default function ChatWidget({
     const imageDataUrl: string | undefined =
       typeof data.imageDataUrl === "string" ? data.imageDataUrl : undefined;
     const hasVision: boolean = Boolean(data.hasVision) && isLikelyImageFile(file);
+    const previewUrl =
+      mime === "application/pdf" || isLikelyImageFile(file) ? URL.createObjectURL(file) : undefined;
 
-    setAttachments((prev) => [
-      ...prev,
-      { attachmentId, filename, mime, text, imageDataUrl, source, hasVision },
-    ]);
+    setAttachments((prev) => {
+      const nextAttachment = {
+        attachmentId,
+        filename,
+        mime,
+        text,
+        imageDataUrl,
+        previewUrl,
+        source,
+        hasVision,
+        usedInAnalysis: false,
+      };
+
+      if (!replaceId) {
+        return [...prev, nextAttachment];
+      }
+
+      return prev.map((attachment) => {
+        if (attachment.attachmentId !== replaceId) {
+          return attachment;
+        }
+
+        if (attachment.previewUrl) {
+          URL.revokeObjectURL(attachment.previewUrl);
+        }
+
+        return nextAttachment;
+      });
+    });
 
     onAttachmentChange?.(filename);
     onAnalysisResultChange?.(null);
     onAnalysisPanelChange?.(null);
+    setPreviewAttachmentId(replaceId ?? attachmentId);
+    setReplaceAttachmentId(null);
 
     setMessages((prev) => [
       ...prev,
-      { role: "assistant", content: `File "${filename}" uploaded successfully.` },
+      {
+        role: "assistant",
+        content: replaceId
+          ? `File "${filename}" replaced the previous attachment successfully.`
+          : `File "${filename}" uploaded successfully.`,
+      },
     ]);
   }
 
@@ -336,7 +413,7 @@ export default function ChatWidget({
 
     try {
       for (const file of Array.from(fileList)) {
-        await uploadSingleFile(file, "file");
+        await uploadSingleFile(file, "file", replaceAttachmentId);
       }
     } catch (err) {
       console.error(err);
@@ -354,7 +431,7 @@ export default function ChatWidget({
 
     try {
       for (const file of Array.from(fileList)) {
-        await uploadSingleFile(file, "camera");
+        await uploadSingleFile(file, "camera", replaceAttachmentId);
       }
     } catch (err) {
       console.error(err);
@@ -367,9 +444,17 @@ export default function ChatWidget({
     }
   }
 
-  function removeAttachment(filename: string) {
-    const remaining = attachments.filter((attachment) => attachment.filename !== filename);
+  function removeAttachment(attachmentId: string) {
+    const target = attachments.find((attachment) => attachment.attachmentId === attachmentId);
+    if (target?.previewUrl) {
+      URL.revokeObjectURL(target.previewUrl);
+    }
+
+    const remaining = attachments.filter((attachment) => attachment.attachmentId !== attachmentId);
     setAttachments(remaining);
+    if (previewAttachmentId === attachmentId) {
+      setPreviewAttachmentId(null);
+    }
 
     onAttachmentChange?.(
       remaining.length ? remaining[remaining.length - 1].filename : null
@@ -379,16 +464,35 @@ export default function ChatWidget({
   }
 
   function clearAllAttachments() {
+    attachments.forEach((attachment) => {
+      if (attachment.previewUrl) {
+        URL.revokeObjectURL(attachment.previewUrl);
+      }
+    });
     setAttachments([]);
+    setPreviewAttachmentId(null);
+    setReplaceAttachmentId(null);
     onAttachmentChange?.(null);
     onAnalysisResultChange?.(null);
     onAnalysisPanelChange?.(null);
+  }
+
+  function handleReplaceAttachment(attachmentId: string) {
+    setReplaceAttachmentId(attachmentId);
+    fileInputRef.current?.click();
   }
 
   const userBubble = "bg-black/70 border border-orange-500/30 text-orange-400";
 
   return (
     <div className="relative flex flex-col h-full min-h-0 overflow-hidden">
+      <AttachmentPreviewModal
+        attachment={previewAttachment as PreviewAttachment | null}
+        onClose={() => setPreviewAttachmentId(null)}
+        onRemove={(attachmentId) => removeAttachment(attachmentId)}
+        onReplace={(attachmentId) => handleReplaceAttachment(attachmentId)}
+      />
+
       <div className="absolute inset-0 pointer-events-none bg-[url('/brand/logos/Logo-grey.png')] bg-no-repeat bg-center bg-[length:60%] opacity-[0.06]" />
       <div className="absolute inset-0 bg-black/70 pointer-events-none" />
 
@@ -600,24 +704,49 @@ export default function ChatWidget({
                     {attachments.map((attachment) => (
                       <div
                         key={attachment.attachmentId}
-                        className="flex items-center justify-between bg-black/40 border border-white/10 px-4 py-2 rounded-xl text-sm text-white/80"
+                        className="flex items-center justify-between gap-3 bg-black/40 border border-white/10 px-4 py-3 rounded-xl text-sm text-white/80"
                       >
-                        <span className="truncate pr-3">
-                          {attachment.filename}
-                          <span className="ml-2 text-white/40">
-                            ({attachment.source === "camera" ? "photo" : "file"}
-                            {attachment.hasVision ? ", vision" : ""})
-                          </span>
-                        </span>
-
                         <button
                           type="button"
-                          onClick={() => removeAttachment(attachment.filename)}
-                          aria-label="Remove attachment"
-                          className="shrink-0"
+                          onClick={() => setPreviewAttachmentId(attachment.attachmentId)}
+                          className="min-w-0 flex-1 text-left"
                         >
-                          <X size={16} />
+                          <div className="truncate pr-3 font-medium text-white">
+                            {attachment.filename}
+                          </div>
+                          <div className="mt-1 text-xs text-white/45">
+                            {formatAttachmentKind(attachment)} · {attachment.source === "camera" ? "Photo" : "File"}
+                            {attachment.hasVision ? " · Vision" : ""}
+                            {attachment.usedInAnalysis ? " · Used in analysis" : ""}
+                          </div>
                         </button>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewAttachmentId(attachment.attachmentId)}
+                            aria-label="Preview attachment"
+                            className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white"
+                          >
+                            <Eye size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleReplaceAttachment(attachment.attachmentId)}
+                            aria-label="Replace attachment"
+                            className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white"
+                          >
+                            <RefreshCcw size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeAttachment(attachment.attachmentId)}
+                            aria-label="Remove attachment"
+                            className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white"
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
                       </div>
                     ))}
 
@@ -637,4 +766,11 @@ export default function ChatWidget({
       </div>
     </div>
   );
+}
+
+function formatAttachmentKind(attachment: Attachment): string {
+  if (attachment.mime === "application/pdf") return "PDF";
+  if (attachment.mime.startsWith("image/")) return "Image";
+  if (attachment.text?.trim()) return "Text";
+  return attachment.mime || "Unknown";
 }

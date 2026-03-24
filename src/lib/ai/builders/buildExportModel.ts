@@ -145,7 +145,7 @@ function inferVehicleInfo(
       : null;
   const inferredVehicle = extractVehicleFromEstimateText(estimateText);
   const vehicle = structuredVehicle ?? inferredVehicle;
-  const label = [vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(" ").trim();
+  const label = buildVehicleLabel(vehicle);
   const detailCount = [vehicle?.year, vehicle?.make, vehicle?.model, vehicle?.vin].filter(Boolean).length;
 
   return {
@@ -161,6 +161,26 @@ function inferVehicleInfo(
           ? "partial"
           : "unknown",
   };
+}
+
+function buildVehicleLabel(vehicle: {
+  year?: number;
+  make?: string;
+  model?: string;
+  vin?: string;
+} | null | undefined): string {
+  if (!vehicle) return "";
+
+  const parts = [vehicle.year, vehicle.make, vehicle.model].filter(Boolean);
+  if (parts.length > 0) {
+    return parts.join(" ").trim();
+  }
+
+  if (vehicle.make) {
+    return vehicle.make;
+  }
+
+  return "";
 }
 
 function collectVehicleInferenceText(
@@ -215,9 +235,10 @@ function buildRepairPosition(
       : "The repair path still contains supportable disputed items that are not resolved in the current carrier-facing documentation.";
 
     if (strongestNarrative) {
-      return `${lead} The clearest remaining issues are ${topTitles}. ${trimTrailingPunctuation(
-        strongestNarrative
-      )}.`;
+      const polishedNarrative = makeRepairPositionTail(strongestNarrative);
+      return polishedNarrative
+        ? `${lead} The clearest remaining issues are ${topTitles}. ${polishedNarrative}.`
+        : `${lead} The clearest remaining issues are ${topTitles}.`;
     }
 
     return `${lead} The clearest remaining issues are ${topTitles}.`;
@@ -329,8 +350,8 @@ function buildExportSupplementItems(
         item.rationale,
         "This operation appears underwritten or not fully supported in the current estimate."
       ),
-      evidence: item.support,
-      source: "Decision panel",
+      evidence: sanitizeEvidence(item.support),
+      source: polishSourceLabel("Decision panel"),
       priority: "medium",
     })) ?? [];
 
@@ -340,7 +361,7 @@ function buildExportSupplementItems(
       category: inferSupplementCategory(procedure),
       kind: "missing_operation",
       rationale: "This function is not clearly represented in the current estimate.",
-      source: "Missing procedure list",
+      source: polishSourceLabel("Missing procedure list"),
       priority: "medium",
     })) ?? [];
 
@@ -359,7 +380,7 @@ function buildExportSupplementItems(
         item.raw,
         "This supplement opportunity was identified during structured analysis."
       ),
-      source: "Supplement opportunity",
+      source: polishSourceLabel("Supplement opportunity"),
       priority: "medium",
     })) ?? [];
 
@@ -383,8 +404,8 @@ function buildExportSupplementItems(
           item.reason,
           "This operation appears underwritten or not fully supported in the current estimate."
         ),
-        evidence: item.evidence,
-        source: item.source,
+        evidence: sanitizeEvidence(item.evidence),
+        source: polishSourceLabel(item.source),
         priority: item.priority,
       }));
 
@@ -396,6 +417,8 @@ function buildExportSupplementItems(
         item.rationale,
         "This operation appears underwritten or not fully supported in the current estimate."
       ),
+      evidence: sanitizeEvidence(item.evidence),
+      source: polishSourceLabel(item.source),
     }))
     .filter((item) => isSpecificSupplementItem(item.title));
 
@@ -592,8 +615,8 @@ function buildSupplementItemFromIssue(
       issue.impact || issue.finding,
       "This operation appears underwritten or not fully supported in the current estimate."
     ),
-    evidence: buildIssueEvidence(report, issue.evidenceIds, title),
-    source: issue.title,
+    evidence: sanitizeEvidence(buildIssueEvidence(report, issue.evidenceIds, title)),
+    source: polishSourceLabel(issue.title),
     priority: issue.severity,
   };
 }
@@ -721,6 +744,25 @@ function sanitizeReason(value?: string | null, fallback?: string): string {
   return withoutEstimateGlossary || fallback || "";
 }
 
+function sanitizeEvidence(value?: string | null): string | undefined {
+  const cleaned = sanitizeReason(value, "").replace(/^evidence:\s*/i, "").trim();
+  return cleaned || undefined;
+}
+
+function polishSourceLabel(value?: string | null): string | undefined {
+  const cleaned = sanitizeReason(value, "")
+    .replace(/\bdecision panel\b/gi, "Structured analysis")
+    .replace(/\bmissing procedure list\b/gi, "Missing procedures")
+    .replace(/\bsupplement opportunity\b/gi, "Supplement analysis")
+    .replace(/\bdocumentation\b/gi, "Documentation")
+    .replace(/\bparts\b/gi, "Parts analysis")
+    .replace(/\bscan\b/gi, "Scan analysis")
+    .replace(/\bcalibration\b/gi, "Calibration analysis")
+    .trim();
+
+  return cleaned || undefined;
+}
+
 function sanitizeSupplementReason(
   title: string,
   value?: string | null,
@@ -752,7 +794,18 @@ function sanitizeSupplementReason(
 function pickPreferredDetail(left?: string, right?: string): string | undefined {
   if (!left) return right;
   if (!right) return left;
-  return right.length > left.length ? right : left;
+  return scoreDisplayDetail(right) > scoreDisplayDetail(left) ? right : left;
+}
+
+function scoreDisplayDetail(value: string): number {
+  const lower = value.toLowerCase();
+  let score = value.length;
+  if (lower.includes("pipeline evidence")) score -= 15;
+  if (lower.includes("repair-pipeline")) score -= 15;
+  if (lower.includes("structured analysis")) score += 10;
+  if (lower.includes("oem")) score += 20;
+  if (lower.includes("procedure")) score += 12;
+  return score;
 }
 
 function pickBetterNarrative(left?: string, right?: string): string | undefined {
@@ -976,8 +1029,17 @@ function buildRequestLine(item: ExportSupplementItem): string {
     case "Coolant Fill and Bleed":
       return "Please provide the support for the coolant refill, bleed, or related access burden associated with this repair path.";
     default:
-      return reason;
+      return makeRequestLineFromReason(reason);
   }
+}
+
+function makeRequestLineFromReason(reason: string): string {
+  const trimmed = trimTrailingPunctuation(reason);
+  if (!trimmed) {
+    return "Please clarify how this item is being supported.";
+  }
+
+  return `Please provide the supporting rationale or documentation for this item. ${trimmed}.`;
 }
 
 function synthesizeSupplementItemsFromNarrative(params: {
@@ -1011,7 +1073,7 @@ function synthesizeSupplementItemsFromNarrative(params: {
       category: inferSupplementCategory(title),
       kind,
       rationale,
-      source: "Narrative fallback",
+      source: "Structured narrative",
       priority,
     });
   };
@@ -1298,6 +1360,21 @@ function sanitizeNarrative(value?: string | null): string | null {
   }
 
   return cleaned;
+}
+
+function makeRepairPositionTail(value: string): string | null {
+  const cleaned = sanitizeNarrative(value);
+  if (!cleaned) return null;
+
+  const lower = cleaned.toLowerCase();
+  if (
+    lower.includes("the shop estimate appears materially more complete") ||
+    lower.includes("the carrier estimate remains materially underwritten")
+  ) {
+    return null;
+  }
+
+  return trimTrailingPunctuation(cleaned);
 }
 
 function isSpecificSupplementItem(value?: string): boolean {

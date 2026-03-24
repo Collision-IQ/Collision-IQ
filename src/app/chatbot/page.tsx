@@ -185,7 +185,7 @@ function RailContent({
                   {item.title}
                 </div>
                 <div className="mt-1 text-xs text-white/60">
-                  {item.category} - {formatLabel(item.kind)} - Priority {formatLabel(item.priority)}
+                  {formatLabel(item.category)} · {formatLabel(item.kind)} · Priority {formatLabel(item.priority)}
                 </div>
                 <div className="mt-2 text-sm leading-6 text-white/80">{item.rationale}</div>
                 {item.evidence && (

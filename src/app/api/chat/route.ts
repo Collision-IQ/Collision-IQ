@@ -6,6 +6,11 @@ import {
   getUploadedAttachments,
   saveUploadedAttachment,
 } from "@/lib/uploadedAttachmentStore";
+import {
+  buildDriveRefinementContext,
+  detectChatTaskType,
+  retrieveDriveSupport,
+} from "@/lib/ai/driveRetrievalService";
 
 if (!process.env.OPENAI_API_KEY) {
   console.error("Missing OPENAI_API_KEY");
@@ -82,6 +87,21 @@ For ACV or diminished value answers:
 Write in short paragraphs.
 Use bullets only when they genuinely improve comparison, negotiation, or rebuttal clarity.
 Avoid rigid templates.
+`.trim();
+
+const REFINEMENT_INSTRUCTIONS = `
+You are refining an existing collision-repair answer after targeted Google Drive retrieval.
+
+Rules:
+- keep the original estimator-style conclusion as the base
+- use retrieved OEM support only to reinforce or adjust repair/procedure/compliance conclusions
+- use retrieved PA law support only for rights, appraisal, aftermarket, valuation, settlement, or claim-handling questions
+- if both OEM and PA law support are present, keep them logically separate in the final answer
+- do not dump or paraphrase whole documents
+- use the retrieved support as compact supporting context, not as replacement reasoning
+- stay concise, natural, and direct
+- if the retrieved support is weak or only partially applicable, say that clearly
+- preserve the ACV/DV product rules, including the Collision Academy handoff
 `.trim();
 
 function extractTextContent(content: unknown): string {
@@ -207,17 +227,52 @@ export async function POST(req: Request) {
       documents,
     });
 
-    const response = await openai.responses.create({
+    const firstPass = await openai.responses.create({
       model: MODEL,
       instructions: SYSTEM_INSTRUCTIONS,
       temperature: 0.7,
       input,
     });
 
-    const outputText =
-      typeof response.output_text === "string" && response.output_text.trim()
-        ? response.output_text.trim()
+    const firstPassText =
+      typeof firstPass.output_text === "string" && firstPass.output_text.trim()
+        ? firstPass.output_text.trim()
         : "I reviewed the material, but I couldn't generate a usable response.";
+
+    const estimateText = documents
+      .map((document) => document.text?.trim())
+      .filter(Boolean)
+      .join("\n\n");
+
+    const retrieval = await retrieveDriveSupport({
+      taskType: detectChatTaskType({
+        userQuery: userMessage,
+        hasDocuments: documents.length > 0,
+      }),
+      userQuery: userMessage,
+      estimateText,
+      firstPassAnswer: firstPassText,
+      maxResults: 5,
+      maxExcerptChars: 500,
+    }).catch((error) => {
+      console.error("Drive retrieval refinement skipped:", error);
+      return null;
+    });
+
+    const retrievalContext =
+      retrieval && retrieval.results.length > 0
+        ? buildDriveRefinementContext(retrieval)
+        : "";
+
+    const outputText =
+      retrievalContext
+        ? await refineAnswerWithDriveSupport({
+            userMessage,
+            conversationContext,
+            firstPassAnswer: firstPassText,
+            retrievalContext,
+          })
+        : firstPassText;
 
     return new Response(outputText, {
       headers: {
@@ -232,6 +287,33 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+async function refineAnswerWithDriveSupport(params: {
+  userMessage: string;
+  conversationContext: string;
+  firstPassAnswer: string;
+  retrievalContext: string;
+}): Promise<string> {
+  const refinementInput = [
+    params.userMessage ? `User request:\n${params.userMessage}` : "",
+    params.conversationContext ? `Recent conversation:\n${params.conversationContext}` : "",
+    `Initial estimate judgment:\n${params.firstPassAnswer}`,
+    `Retrieved Drive support:\n${params.retrievalContext}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const refined = await openai.responses.create({
+    model: MODEL,
+    instructions: `${SYSTEM_INSTRUCTIONS}\n\n${REFINEMENT_INSTRUCTIONS}`,
+    temperature: 0.7,
+    input: refinementInput,
+  });
+
+  return typeof refined.output_text === "string" && refined.output_text.trim()
+    ? refined.output_text.trim()
+    : params.firstPassAnswer;
 }
 
 /*

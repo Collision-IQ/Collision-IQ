@@ -27,7 +27,7 @@ COLLISION REPAIR SUPPLEMENT & EVALUATION
 VEHICLE
 ----------------------------------------
 Vehicle: ${exportModel.vehicle.label || "Not confidently identified from the current material."}
-VIN: ${exportModel.vehicle.vin || "Not available from structured analysis."}
+VIN: ${exportModel.vehicle.vin || "Not available from the current material."}
 
 ----------------------------------------
 REPAIR POSITION
@@ -109,7 +109,7 @@ function renderAcv(exportModel: ReturnType<typeof buildExportModel>): string {
   }
 
   if (valuation.acvConfidence) {
-    lines.push(`Confidence: ${valuation.acvConfidence}`);
+    lines.push(`Confidence: ${formatConfidenceLabel(valuation.acvConfidence)}`);
   }
 
   const reasoning = cleanValuationReasoning(
@@ -153,7 +153,7 @@ function renderDv(exportModel: ReturnType<typeof buildExportModel>): string {
   }
 
   if (valuation.dvConfidence) {
-    lines.push(`Confidence: ${valuation.dvConfidence}`);
+    lines.push(`Confidence: ${formatConfidenceLabel(valuation.dvConfidence)}`);
   }
 
   const reasoning = cleanValuationReasoning(
@@ -212,4 +212,8 @@ function cleanValuationReasoning(reasoning: string, lead: string): string | null
   }
 
   return cleaned;
+}
+
+function formatConfidenceLabel(value: "low" | "medium" | "high"): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
