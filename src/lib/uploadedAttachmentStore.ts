@@ -4,6 +4,7 @@ export type StoredAttachment = {
   type: string
   text: string
   imageDataUrl?: string
+  pageCount?: number
 }
 
 const attachmentStore = new Map<string, StoredAttachment>()

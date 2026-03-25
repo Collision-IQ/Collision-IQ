@@ -23,6 +23,7 @@ interface Attachment {
   text: string;
   imageDataUrl?: string;
   previewUrl?: string;
+  pageCount?: number;
   source: "file" | "camera";
   hasVision: boolean;
   usedInAnalysis?: boolean;
@@ -357,6 +358,8 @@ export default function ChatWidget({
     const text: string = data.text || "";
     const imageDataUrl: string | undefined =
       typeof data.imageDataUrl === "string" ? data.imageDataUrl : undefined;
+    const pageCount: number | undefined =
+      typeof data.pageCount === "number" ? data.pageCount : undefined;
     const hasVision: boolean = Boolean(data.hasVision) && isLikelyImageFile(file);
     const previewUrl =
       mime === "application/pdf" || isLikelyImageFile(file) ? URL.createObjectURL(file) : undefined;
@@ -369,6 +372,7 @@ export default function ChatWidget({
         text,
         imageDataUrl,
         previewUrl,
+        pageCount,
         source,
         hasVision,
         usedInAnalysis: false,
@@ -769,7 +773,11 @@ export default function ChatWidget({
 }
 
 function formatAttachmentKind(attachment: Attachment): string {
-  if (attachment.mime === "application/pdf") return "PDF";
+  if (attachment.mime === "application/pdf") {
+    return attachment.pageCount
+      ? `PDF (${attachment.pageCount} page${attachment.pageCount === 1 ? "" : "s"})`
+      : "PDF";
+  }
   if (attachment.mime.startsWith("image/")) return "Image";
   if (attachment.text?.trim()) return "Text";
   return attachment.mime || "Unknown";

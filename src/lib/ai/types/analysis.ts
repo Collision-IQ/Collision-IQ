@@ -95,6 +95,30 @@ export interface AnalysisSummary {
   evidenceQuality: "weak" | "moderate" | "strong";
 }
 
+export type VehicleIdentity = {
+  year?: number;
+  make?: string;
+  model?: string;
+  vin?: string;
+  trim?: string;
+  manufacturer?: string;
+  bodyStyle?: string;
+  series?: string;
+  confidence?: number;
+  source?:
+    | "vin_decoded"
+    | "attachment"
+    | "user"
+    | "inferred"
+    | "session"
+    | "unknown";
+  fieldSources?: Partial<Record<
+    "year" | "make" | "model" | "vin" | "trim" | "manufacturer" | "bodyStyle" | "series",
+    "vin_decoded" | "attachment" | "user" | "inferred" | "session" | "unknown"
+  >>;
+  mismatches?: string[];
+};
+
 export interface AnalysisResult {
   mode?: "comparison" | "single-document-review" | "parser-incomplete";
   parserStatus?: "ok" | "failed_or_incomplete";
@@ -105,6 +129,7 @@ export interface AnalysisResult {
   operations?: EstimateOperation[];
   rawEstimateText?: string;
   narrative: string;
+  vehicle?: VehicleIdentity;
 }
 
 // Legacy v2 contract still used by the current orchestrator/UI.
@@ -134,12 +159,7 @@ export type RepairIntelligenceReport = {
     criticalIssues: number;
     evidenceQuality: "weak" | "moderate" | "strong";
   };
-  vehicle?: {
-    year?: number;
-    make?: string;
-    model?: string;
-    vin?: string;
-  };
+  vehicle?: VehicleIdentity;
   issues: AnalysisIssue[];
   requiredProcedures: RequiredProcedureRecord[];
   presentProcedures: string[];

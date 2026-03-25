@@ -1,4 +1,9 @@
 import type { ChatAnalysisOutput, ChatbotTaskType } from "./chatAnalysisSchema";
+import {
+  extractVehicleIdentityFromText,
+  mergeVehicleIdentity,
+  normalizeVehicleIdentity,
+} from "../vehicleContext";
 
 export const DRIVE_RETRIEVAL_TOPICS = [
   "adas_calibration",
@@ -76,8 +81,11 @@ export type DriveVehicleContext = {
   model?: string;
   vin?: string;
   trim?: string;
+  manufacturer?: string;
   confidence: DriveInferenceConfidence;
   sources: DriveVehicleInferenceSource[];
+  fieldSources?: Partial<Record<"year" | "make" | "model" | "vin" | "trim" | "manufacturer", string>>;
+  mismatches?: string[];
 };
 
 export type DriveTopicInference = {
@@ -167,6 +175,7 @@ export type DriveRetrievalResult = {
   sourceBucket: DriveSourceBucket;
   relevanceScore: number;
   confidence: DriveInferenceConfidence;
+  matchReason: string;
   excerpt: DriveResultExcerpt;
   metadata: DriveResultMetadata;
   relevanceReasons: DriveRelevanceReason[];
@@ -396,31 +405,37 @@ const CLAIM_MODE_KEYWORDS = [
 export function inferDriveVehicleContext(params: {
   estimateText?: string;
   userQuery?: string;
-  analysisVehicle?: (ChatAnalysisOutput["vehicleIdentification"] & { trim?: string }) | null;
+  analysisVehicle?: (ChatAnalysisOutput["vehicleIdentification"] & { trim?: string; manufacturer?: string }) | null;
 }): DriveVehicleContext {
-  const analysisVehicle = params.analysisVehicle;
-  const combinedText = [params.estimateText, params.userQuery].filter(Boolean).join(" ");
-
-  const year = analysisVehicle?.year ?? extractYear(combinedText);
-  const make = analysisVehicle?.make ?? extractMake(combinedText);
-  const model = analysisVehicle?.model ?? extractModel(combinedText, make);
-  const vin = analysisVehicle?.vin ?? extractVin(combinedText);
-  const trim = extractTrim(combinedText);
+  const analysisVehicle = normalizeVehicleIdentity(params.analysisVehicle ?? undefined);
+  const attachmentVehicle = extractVehicleIdentityFromText(params.estimateText ?? "", "attachment");
+  const userVehicle = extractVehicleIdentityFromText(params.userQuery ?? "", "user");
+  const resolved = mergeVehicleIdentity(analysisVehicle, attachmentVehicle, userVehicle);
 
   const sources = new Set<DriveVehicleInferenceSource>();
   if (analysisVehicle?.year || analysisVehicle?.make || analysisVehicle?.model || analysisVehicle?.vin) {
     sources.add("analysis_output");
   }
-  if (params.estimateText && (year || make || model || vin || trim)) {
+  if (params.estimateText && (attachmentVehicle?.year || attachmentVehicle?.make || attachmentVehicle?.model || attachmentVehicle?.vin || attachmentVehicle?.trim)) {
     sources.add("estimate_text");
   }
-  if (params.userQuery && (year || make || model || vin || trim)) {
+  if (params.userQuery && (userVehicle?.year || userVehicle?.make || userVehicle?.model || userVehicle?.vin || userVehicle?.trim)) {
     sources.add("user_query");
   }
+  if (resolved?.fieldSources && Object.values(resolved.fieldSources).includes("vin_decoded")) {
+    sources.add("vin_decode_hint");
+  }
 
-  const populatedFields = [year, make, model, vin, trim].filter(Boolean).length;
+  const populatedFields = [
+    resolved?.year,
+    resolved?.make,
+    resolved?.model,
+    resolved?.vin,
+    resolved?.trim,
+    resolved?.manufacturer,
+  ].filter(Boolean).length;
   const confidence: DriveInferenceConfidence =
-    populatedFields >= 4 || Boolean(vin)
+    populatedFields >= 4 || Boolean(resolved?.vin)
       ? "high"
       : populatedFields >= 2
         ? "medium"
@@ -429,13 +444,16 @@ export function inferDriveVehicleContext(params: {
           : "low";
 
   return {
-    year,
-    make,
-    model,
-    vin,
-    trim,
+    year: resolved?.year,
+    make: resolved?.make,
+    model: resolved?.model,
+    vin: resolved?.vin,
+    trim: resolved?.trim,
+    manufacturer: resolved?.manufacturer,
     confidence,
     sources: [...sources].length > 0 ? [...sources] : ["unknown"],
+    fieldSources: resolved?.fieldSources,
+    mismatches: resolved?.mismatches,
   };
 }
 
@@ -571,17 +589,25 @@ export function buildDriveRetrievalRequest(
       : null,
   });
 
-  if (topics.length === 0) {
+  const fallbackTopics = topics.length === 0
+    ? inferFallbackTopics({
+        userQuery: params.userQuery,
+        taskType: params.taskType,
+      })
+    : [];
+  const resolvedTopics = topics.length > 0 ? topics : fallbackTopics;
+
+  if (resolvedTopics.length === 0) {
     return null;
   }
 
   const retrievalMode = inferDriveRetrievalMode({
     userQuery: params.userQuery,
     taskType: params.taskType,
-    topics,
+    topics: resolvedTopics,
   });
   const lanePlans = buildDriveRetrievalLanePlans({
-    topics,
+    topics: resolvedTopics,
     retrievalMode,
   });
 
@@ -596,20 +622,20 @@ export function buildDriveRetrievalRequest(
       stage: "retrieval_request_ready",
       estimateReviewed: true,
       vehicleInferenceReady: Boolean(vehicle.make || vehicle.model || vehicle.vin || vehicle.year),
-      topicInferenceReady: topics.length > 0,
+      topicInferenceReady: resolvedTopics.length > 0,
       modeInferenceReady: true,
     },
     taskType: params.taskType,
     userQuery: params.userQuery,
     estimateFirstSummary,
     vehicle,
-    topics,
+    topics: resolvedTopics,
     retrievalMode,
     targetLanes: lanePlans.map((plan) => plan.lane),
     lanePlans,
     queryHints: buildQueryHints({
       vehicle,
-      topics,
+      topics: resolvedTopics,
       keyDrivers: params.analysis?.keyDrivers ?? [],
       missingOperations:
         params.analysis?.missingOperations?.map((item) => item.operation) ?? [],
@@ -623,6 +649,43 @@ export function buildDriveRetrievalRequest(
     maxResults: params.maxResults ?? 5,
     maxExcerptChars: params.maxExcerptChars ?? 500,
   };
+}
+
+function inferFallbackTopics(params: {
+  userQuery: string;
+  taskType: ChatbotTaskType;
+}): DriveTopicInference[] {
+  const lower = params.userQuery.toLowerCase();
+
+  if (
+    params.taskType === "oem_procedure_insight" ||
+    params.taskType === "estimate_review" ||
+    /\b(repair|procedure|oem|compliance|calibration|scan|structural)\b/.test(lower)
+  ) {
+    return [
+      {
+        topic: "replace_vs_repair",
+        confidence: "low",
+        triggers: ["general repair/procedure context"],
+        rationale: "The request is repair- or OEM-procedure-oriented, so OEM support may refine the answer.",
+      },
+    ];
+  }
+
+  if (
+    /\b(rebuttal|negotiation|appraisal|aftermarket|consumer rights|settlement|claim handling|acv|dv|diminished value|total loss)\b/.test(lower)
+  ) {
+    return [
+      {
+        topic: "claim_handling_policy_dispute",
+        confidence: "low",
+        triggers: ["general claim/legal context"],
+        rationale: "The request is claim-handling- or rights-oriented, so PA law support may refine the answer.",
+      },
+    ];
+  }
+
+  return [];
 }
 
 function summarizeEstimateForRetrieval(
@@ -647,6 +710,7 @@ function buildQueryHints(params: {
   return [
     params.vehicle.year ? String(params.vehicle.year) : "",
     params.vehicle.make ?? "",
+    params.vehicle.manufacturer ?? "",
     params.vehicle.model ?? "",
     params.vehicle.trim ?? "",
     params.vehicle.vin ?? "",
@@ -714,13 +778,6 @@ function inferRequestedDocumentClassesForLane(
         ].includes(topic.topic)
       ) {
         docTypes.add("state_law_pa");
-        docTypes.add("general_reference");
-      }
-
-      if (
-        ["claim_handling_policy_dispute", "labor_rate_reimbursement"].includes(topic.topic)
-      ) {
-        docTypes.add("insurer_guideline");
       }
     }
   }
@@ -793,20 +850,10 @@ function inferSourceBucketsForLane(
     ) {
       buckets.add("pa_law");
     }
-
-    if (
-      lane === "pa_law_lane" &&
-      [
-        "claim_handling_policy_dispute",
-        "labor_rate_reimbursement",
-      ].includes(topic.topic)
-    ) {
-      buckets.add("insurer_guidelines");
-    }
   }
 
   if (buckets.size === 0) {
-    buckets.add("general_reference");
+    buckets.add(lane === "pa_law_lane" ? "pa_law" : "oem_procedures");
   }
 
   return [...buckets];

@@ -75,7 +75,7 @@ export async function retrieveDriveSupport(params: {
   }
 
   const files = await getDriveIndex();
-  const resultsById = new Map<string, DriveRetrievalResult>();
+  const laneResults = new Map<string, Map<string, DriveRetrievalResult>>();
 
   for (const lanePlan of request.lanePlans) {
     const candidateFiles = selectFilesForLane(files, lanePlan.sourceBuckets);
@@ -88,6 +88,8 @@ export async function retrieveDriveSupport(params: {
       limit: Math.max(4, request.maxResults),
     });
 
+    const laneMap = laneResults.get(lanePlan.lane) ?? new Map<string, DriveRetrievalResult>();
+
     for (const row of laneRows) {
       const file = candidateFiles.find((candidate) => candidate.id === row.file_id);
       if (!file) continue;
@@ -98,19 +100,28 @@ export async function retrieveDriveSupport(params: {
         row,
         file,
         request,
+        lane: lanePlan.lane,
         laneTopics: lanePlan.topics,
         sourceBucket: inferredBucket,
         documentClass: inferredClass,
       });
 
-      const existing = resultsById.get(result.id);
+      const existing = laneMap.get(result.id);
       if (!existing || result.relevanceScore > existing.relevanceScore) {
-        resultsById.set(result.id, result);
+        laneMap.set(result.id, result);
       }
     }
+
+    laneResults.set(lanePlan.lane, laneMap);
   }
 
-  const results = [...resultsById.values()]
+  const perLaneLimit = Math.max(1, Math.ceil(request.maxResults / Math.max(request.lanePlans.length, 1)));
+  const results = request.lanePlans
+    .flatMap((lanePlan) =>
+      [...(laneResults.get(lanePlan.lane)?.values() ?? [])]
+        .sort((left, right) => right.relevanceScore - left.relevanceScore)
+        .slice(0, perLaneLimit)
+    )
     .sort((left, right) => right.relevanceScore - left.relevanceScore)
     .slice(0, request.maxResults);
 
@@ -160,11 +171,9 @@ function selectFilesForLane(
   files: DriveIndexFile[],
   sourceBuckets: DriveSourceBucket[]
 ): DriveIndexFile[] {
-  const matched = files.filter((file) =>
+  return files.filter((file) =>
     sourceBuckets.some((bucket) => matchesBucketPath(file.path, bucket))
   );
-
-  return matched.length > 0 ? matched : files;
 }
 
 function matchesBucketPath(path: string, bucket: DriveSourceBucket): boolean {
@@ -293,6 +302,7 @@ function buildRetrievalResult(params: {
   row: DriveChunkRow;
   file: DriveIndexFile;
   request: DriveRetrievalRequest;
+  lane: "oem_lane" | "pa_law_lane";
   laneTopics: DriveTopicInference[];
   sourceBucket: DriveSourceBucket;
   documentClass: DriveDocumentType;
@@ -317,12 +327,17 @@ function buildRetrievalResult(params: {
     score >= 0.82 ? "high" : score >= 0.62 ? "medium" : "low";
 
   return {
-    id: `${params.row.file_id}:${params.sourceBucket}:${params.documentClass}`,
+    id: `${params.lane}:${params.row.file_id}:${params.sourceBucket}:${params.documentClass}`,
     filename: params.file.name,
     documentClass: params.documentClass,
     sourceBucket: params.sourceBucket,
     relevanceScore: score,
     confidence,
+    matchReason:
+      relevanceReasons[0]?.reason ??
+      vehicleRelevance ??
+      jurisdictionRelevance ??
+      "Matched the requested lane, source bucket, and query context.",
     excerpt: {
       excerpt: params.row.content.slice(0, params.request.maxExcerptChars),
       charCount: Math.min(params.row.content.length, params.request.maxExcerptChars),
@@ -334,12 +349,14 @@ function buildRetrievalResult(params: {
       sourceLane: params.sourceBucket === "pa_law" || params.sourceBucket === "insurer_guidelines"
         ? "pa_law_lane"
         : "oem_lane",
+      trim: params.request.vehicle.trim,
       make: params.request.vehicle.make,
       model: params.request.vehicle.model,
       yearStart: params.request.vehicle.year,
       topicTags: params.laneTopics.map((topic) => topic.topic),
       procedure: params.laneTopics[0]?.topic.replace(/_/g, " "),
       source: params.file.path,
+      system: params.file.path,
       vehicleRelevance,
       jurisdictionRelevance,
     },
@@ -385,6 +402,9 @@ function buildVehicleRelevance(
   }
   if (request.vehicle.model && lower.includes(request.vehicle.model.toLowerCase())) {
     matched.push(request.vehicle.model);
+  }
+  if (request.vehicle.trim && lower.includes(request.vehicle.trim.toLowerCase())) {
+    matched.push(request.vehicle.trim);
   }
   if (request.vehicle.year && lower.includes(String(request.vehicle.year))) {
     matched.push(String(request.vehicle.year));
@@ -487,7 +507,7 @@ export function buildDriveRefinementContext(response: DriveRetrievalResponse): s
 
     if (laneResults.length === 0) return "";
 
-    const laneLabel = lanePlan.lane === "oem_lane" ? "OEM Support" : "PA Law Support";
+  const laneLabel = lanePlan.lane === "oem_lane" ? "OEM Support" : "PA Law Support";
     return [
       `${laneLabel}:`,
       ...laneResults.map((result) => {
@@ -495,7 +515,7 @@ export function buildDriveRefinementContext(response: DriveRetrievalResponse): s
         const vehicle = result.metadata.vehicleRelevance ? ` | ${result.metadata.vehicleRelevance}` : "";
         const jurisdiction = result.metadata.jurisdictionRelevance ? ` | ${result.metadata.jurisdictionRelevance}` : "";
         return `- [${result.documentClass}] ${result.filename} | bucket=${result.sourceBucket} | score=${result.relevanceScore}${vehicle}${jurisdiction}
-  reason: ${reasons}
+  reason: ${result.matchReason}${reasons ? ` | ${reasons}` : ""}
   excerpt: ${result.excerpt.excerpt}`;
       }),
     ].join("\n");

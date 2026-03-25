@@ -87,8 +87,10 @@ export type ChatAnalysisOutput = {
     year?: number;
     make?: string;
     model?: string;
+    trim?: string;
+    manufacturer?: string;
     vin?: string;
-    source: "attachment" | "user" | "inferred" | "unknown";
+    source: "attachment" | "user" | "inferred" | "vin_decoded" | "unknown";
     confidence: number;
   };
   evidenceMapping: EvidenceMapEntry[];
@@ -268,10 +270,12 @@ export const chatAnalysisOutputJsonSchema = {
           year: { type: "number" },
           make: { type: "string" },
           model: { type: "string" },
+          trim: { type: "string" },
+          manufacturer: { type: "string" },
           vin: { type: "string" },
           source: {
             type: "string",
-            enum: ["attachment", "user", "inferred", "unknown"],
+            enum: ["attachment", "user", "inferred", "vin_decoded", "unknown"],
           },
           confidence: {
             type: "number",

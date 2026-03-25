@@ -10,6 +10,7 @@ export type PreviewAttachment = {
   text: string;
   imageDataUrl?: string;
   previewUrl?: string;
+  pageCount?: number;
   source: "file" | "camera";
   hasVision: boolean;
   usedInAnalysis?: boolean;
@@ -28,11 +29,10 @@ export default function AttachmentPreviewModal({
   onRemove,
   onReplace,
 }: AttachmentPreviewModalProps) {
-  const [zoom, setZoom] = useState(1);
-
-  useEffect(() => {
-    setZoom(1);
-  }, [attachment?.attachmentId]);
+  const [zoomState, setZoomState] = useState<{ attachmentId: string | null; zoom: number }>({
+    attachmentId: null,
+    zoom: 1,
+  });
 
   useEffect(() => {
     if (!attachment) return;
@@ -67,6 +67,24 @@ export default function AttachmentPreviewModal({
 
   if (!attachment) return null;
 
+  const zoom =
+    zoomState.attachmentId === attachment.attachmentId ? zoomState.zoom : 1;
+  const setZoom = (updater: number | ((value: number) => number)) => {
+    setZoomState((current) => {
+      const currentZoom =
+        current.attachmentId === attachment.attachmentId ? current.zoom : 1;
+      const nextZoom =
+        typeof updater === "function"
+          ? updater(currentZoom)
+          : updater;
+
+      return {
+        attachmentId: attachment.attachmentId,
+        zoom: nextZoom,
+      };
+    });
+  };
+
   const canZoom = previewKind === "image";
   const hasTextPreview = structuredTextPreview.length > 0;
 
@@ -79,6 +97,9 @@ export default function AttachmentPreviewModal({
               <div className="truncate text-base font-semibold text-white">{attachment.filename}</div>
               <div className="mt-1 text-xs uppercase tracking-[0.18em] text-white/45">
                 {formatMimeLabel(attachment.mime)}
+                {attachment.mime === "application/pdf" && attachment.pageCount
+                  ? ` - ${attachment.pageCount} page${attachment.pageCount === 1 ? "" : "s"}`
+                  : ""}
                 {attachment.usedInAnalysis ? " - Used in analysis" : " - Uploaded"}
               </div>
             </div>
@@ -170,6 +191,11 @@ export default function AttachmentPreviewModal({
                   <div className="rounded-xl border border-white/10 bg-black/25 p-4 text-sm text-white/80">
                     <div className="truncate">{attachment.filename}</div>
                     <div className="mt-2 text-xs text-white/45">{formatMimeLabel(attachment.mime)}</div>
+                    {attachment.mime === "application/pdf" && attachment.pageCount ? (
+                      <div className="mt-1 text-xs text-white/45">
+                        Pages: {attachment.pageCount}
+                      </div>
+                    ) : null}
                     <div className="mt-1 text-xs text-white/45">
                       Source: {attachment.source === "camera" ? "Camera" : "Upload"}
                     </div>

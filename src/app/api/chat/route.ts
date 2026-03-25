@@ -11,6 +11,11 @@ import {
   detectChatTaskType,
   retrieveDriveSupport,
 } from "@/lib/ai/driveRetrievalService";
+import type { ChatAnalysisOutput } from "@/lib/ai/contracts/chatAnalysisSchema";
+import {
+  inferDriveRetrievalTopics,
+  inferDriveVehicleContext,
+} from "@/lib/ai/contracts/driveRetrievalContract";
 
 if (!process.env.OPENAI_API_KEY) {
   console.error("Missing OPENAI_API_KEY");
@@ -27,6 +32,7 @@ type UploadedDocument = {
   mime?: string;
   text?: string;
   imageDataUrl?: string;
+  pageCount?: number;
 };
 
 type MessageContentPart = {
@@ -44,6 +50,7 @@ type IncomingAttachment = {
   type: string;
   text?: string;
   imageDataUrl?: string;
+  pageCount?: number;
 };
 
 type ChatRequestBody = {
@@ -160,6 +167,7 @@ function extractDocuments(body: ChatRequestBody): UploadedDocument[] {
             type: attachment.type,
             text: attachment.text ?? "",
             imageDataUrl: attachment.imageDataUrl,
+            pageCount: attachment.pageCount,
           })
         )
       : getUploadedAttachments(body.attachmentIds || []);
@@ -169,6 +177,7 @@ function extractDocuments(body: ChatRequestBody): UploadedDocument[] {
     mime: attachment.type,
     text: attachment.text,
     imageDataUrl: attachment.imageDataUrl,
+    pageCount: attachment.pageCount,
   }));
 }
 
@@ -243,15 +252,22 @@ export async function POST(req: Request) {
       .map((document) => document.text?.trim())
       .filter(Boolean)
       .join("\n\n");
-
-    const retrieval = await retrieveDriveSupport({
+    const retrievalAnalysis = buildRetrievalAnalysisSnapshot({
       taskType: detectChatTaskType({
         userQuery: userMessage,
         hasDocuments: documents.length > 0,
       }),
+      userMessage,
+      estimateText,
+      firstPassAnswer: firstPassText,
+    });
+
+    const retrieval = await retrieveDriveSupport({
+      taskType: retrievalAnalysis.taskType,
       userQuery: userMessage,
       estimateText,
       firstPassAnswer: firstPassText,
+      analysis: retrievalAnalysis,
       maxResults: 5,
       maxExcerptChars: 500,
     }).catch((error) => {
@@ -287,6 +303,78 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+function buildRetrievalAnalysisSnapshot(params: {
+  taskType: ChatAnalysisOutput["taskType"];
+  userMessage: string;
+  estimateText: string;
+  firstPassAnswer: string;
+}): Pick<
+  ChatAnalysisOutput,
+  "taskType" | "summary" | "repairStrategy" | "keyDrivers" | "missingOperations" | "vehicleIdentification"
+> {
+  const vehicle = inferDriveVehicleContext({
+    estimateText: params.estimateText,
+    userQuery: params.userMessage,
+  });
+  const inferredTopics = inferDriveRetrievalTopics({
+    estimateText: params.estimateText,
+    userQuery: params.userMessage,
+    analysis: {
+      summary: {
+        headline: "",
+        overview: params.firstPassAnswer,
+      },
+      repairStrategy: {
+        overallAssessment: params.firstPassAnswer,
+        repairVsReplace: [],
+        structuralImplications: [],
+        calibrationImplications: [],
+      },
+      keyDrivers: [],
+      missingOperations: [],
+    },
+  });
+
+  return {
+    taskType: params.taskType,
+    summary: {
+      headline: params.firstPassAnswer.slice(0, 120),
+      overview: params.firstPassAnswer,
+    },
+    repairStrategy: {
+      overallAssessment: params.firstPassAnswer,
+      repairVsReplace: [],
+      structuralImplications: [],
+      calibrationImplications: [],
+    },
+    keyDrivers: inferredTopics.map((topic) => topic.topic.replace(/_/g, " ")).slice(0, 6),
+    missingOperations: [],
+    vehicleIdentification: {
+      year: vehicle.year,
+      make: vehicle.make,
+      model: vehicle.model,
+      trim: vehicle.trim,
+      manufacturer: vehicle.manufacturer,
+      vin: vehicle.vin,
+      source: vehicle.sources.includes("vin_decode_hint")
+        ? "vin_decoded"
+        : vehicle.sources.includes("estimate_text")
+          ? "attachment"
+          : vehicle.sources.includes("user_query")
+            ? "user"
+            : vehicle.sources.includes("analysis_output")
+              ? "attachment"
+              : "unknown",
+      confidence:
+        vehicle.confidence === "high"
+          ? 0.9
+          : vehicle.confidence === "medium"
+            ? 0.7
+            : 0.45,
+    },
+  };
 }
 
 async function refineAnswerWithDriveSupport(params: {

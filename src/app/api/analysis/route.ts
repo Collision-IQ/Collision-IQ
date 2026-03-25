@@ -2,10 +2,9 @@ import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { saveAnalysisReport } from "@/lib/analysisReportStore";
 import { buildDecisionPanelHybrid } from "@/lib/ai/builders/buildDecisionPanel";
+import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import { runRepairAnalysis } from "@/lib/ai/orchestrator/analysisOrchestrator";
 import type {
-  AnalysisFinding,
-  AnalysisResult,
   RepairIntelligenceReport,
 } from "@/lib/ai/types/analysis";
 
@@ -154,71 +153,4 @@ ${missingProcedures || "- None identified"}`,
   } catch {
     return [];
   }
-}
-
-function normalizeReportToAnalysisResult(
-  report: RepairIntelligenceReport
-): AnalysisResult {
-  if (report.analysis) {
-    return report.analysis;
-  }
-
-  const findings: AnalysisFinding[] = [
-    ...report.issues.map((issue, index) => {
-      const bucket: AnalysisFinding["bucket"] =
-        issue.category === "parts"
-          ? "parts"
-          : issue.category === "calibration" || issue.category === "scan"
-            ? "adas"
-            : issue.category === "safety"
-              ? "critical"
-              : "compliance";
-      const status: AnalysisFinding["status"] = issue.missingOperation
-        ? "not_detected"
-        : "unclear";
-
-      return {
-        id: issue.id || `report-issue-${index + 1}`,
-        bucket,
-        category: issue.category,
-        title: issue.title,
-        detail: issue.impact || issue.finding,
-        severity: issue.severity,
-        status,
-        evidence: [],
-      };
-    }),
-    ...report.missingProcedures.map((procedure, index) => ({
-      id: `report-missing-${index + 1}`,
-      bucket: "supplement" as const,
-      category: "missing_procedure",
-      title: procedure,
-      detail: "This function is not clearly represented in the current estimate.",
-      severity: "medium" as const,
-      status: "not_detected" as const,
-      evidence: [],
-    })),
-  ];
-
-  return {
-    mode: "single-document-review",
-    parserStatus: "ok",
-    summary: {
-      riskScore: report.summary.riskScore,
-      confidence: report.summary.confidence,
-      criticalIssues: report.summary.criticalIssues,
-      evidenceQuality: report.summary.evidenceQuality,
-    },
-    findings,
-    supplements: findings.filter((finding) => finding.bucket === "supplement"),
-    evidence: report.evidence.map((entry) => ({
-      source: entry.source,
-      quote: entry.snippet,
-    })),
-    operations: [],
-    rawEstimateText: report.evidence.map((entry) => entry.snippet).join("\n"),
-    narrative:
-      report.recommendedActions[0] ||
-      "The estimate needs clearer repair support before it can be treated as fully defended.",
-  };
 }

@@ -5,22 +5,31 @@ import { saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
 
 export const runtime = "nodejs";
 
-async function extractPDF(buffer: Buffer): Promise<string> {
+async function extractPDF(buffer: Buffer): Promise<{
+  text: string;
+  pageCount?: number;
+}> {
   const result = await pdfParse(buffer);
   const text = result.text || "";
 
   console.log("PDF TEXT LENGTH:", text.length);
 
-  return text;
+  return {
+    text,
+    pageCount: typeof result.numpages === "number" ? result.numpages : undefined,
+  };
 }
 
-async function fileToText(file: File): Promise<string> {
+async function extractFilePreviewData(file: File): Promise<{
+  text: string;
+  pageCount?: number;
+}> {
   const type = file.type || "";
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
 
   if (type.includes("text")) {
-    return buffer.toString("utf8");
+    return { text: buffer.toString("utf8") };
   }
 
   if (type === "application/pdf") {
@@ -32,10 +41,12 @@ async function fileToText(file: File): Promise<string> {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
   ) {
     const result = await mammoth.extractRawText({ buffer });
-    return result.value || "";
+    return { text: result.value || "" };
   }
 
-  return `[[Unsupported file type for text extraction: ${type || "unknown type"}: ${file.name}]]`;
+  return {
+    text: `[[Unsupported file type for text extraction: ${type || "unknown type"}: ${file.name}]]`,
+  };
 }
 
 async function fileToDataUrl(file: File): Promise<string | undefined> {
@@ -60,13 +71,14 @@ export async function POST(req: Request) {
       );
     }
 
-    const text = await fileToText(file);
+    const previewData = await extractFilePreviewData(file);
     const imageDataUrl = await fileToDataUrl(file);
     const stored = saveUploadedAttachment({
       filename: file.name,
       type: file.type,
-      text,
+      text: previewData.text,
       imageDataUrl,
+      pageCount: previewData.pageCount,
     });
 
     return NextResponse.json({
@@ -75,6 +87,7 @@ export async function POST(req: Request) {
       type: stored.type,
       text: stored.text,
       imageDataUrl: stored.imageDataUrl,
+      pageCount: stored.pageCount,
       hasVision: Boolean(stored.imageDataUrl),
     });
   } catch (error) {

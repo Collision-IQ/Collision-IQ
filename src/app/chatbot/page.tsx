@@ -10,8 +10,8 @@ import {
 } from "@/lib/ai/builders/buildExportModel";
 import { buildCarrierReport } from "@/lib/ai/builders/carrierPdfBuilder";
 import { exportCarrierPDF } from "@/lib/ai/builders/exportPdf";
+import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import type {
-  AnalysisFinding,
   AnalysisResult,
   RepairIntelligenceReport,
 } from "@/lib/ai/types/analysis";
@@ -175,6 +175,24 @@ function RailContent({
 
       <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
         <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
+          Vehicle Context
+        </div>
+        <div className="space-y-1 text-sm text-white/80">
+          <div>{renderModel.vehicle.label || "Vehicle details are still limited in the current material."}</div>
+          {renderModel.vehicle.trim && (
+            <div className="text-white/55">Trim: {renderModel.vehicle.trim}</div>
+          )}
+          <div className="text-white/55">
+            VIN: {renderModel.vehicle.vin || "Not clearly supported in the current material."}
+          </div>
+          <div className="text-white/45">
+            Confidence: {formatVehicleConfidence(renderModel.vehicle)}
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+        <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
           Supplement Lines
         </div>
         {renderModel.supplementItems.length > 0 ? (
@@ -199,7 +217,7 @@ function RailContent({
           </div>
         ) : (
           <div className="text-sm text-white/45">
-            No supportable missing, underwritten, or disputed repair-path items were identified from the current structured analysis.
+            No clear supportable missing, underwritten, or disputed repair-path items were identified from the current structured analysis.
           </div>
         )}
       </section>
@@ -257,52 +275,17 @@ function exportReport(
   panel: DecisionPanel,
   analysisText: string
 ) {
-  const reportText =
-    normalizedResult && analysisResult
-      ? buildCarrierReport({
-          report: analysisResult,
-          analysis: normalizedResult,
-          panel,
-          assistantAnalysis: analysisText,
-        })
-      : [
-          "Narrative",
-          panel.narrative,
-          panel.supplements.length > 0
-            ? `Supplement Items\n\n${panel.supplements
-                .map(
-                  (item) =>
-                    `- ${item.title}\n  Reason: ${item.rationale}${
-                      item.mappedLabel ? `\n  Mapped Line: ${item.mappedLabel}` : ""
-                    }`
-                )
-                .join("\n\n")}`
-            : "",
-          panel.diminishedValue
-            ? `Diminished Value\n\nLikely diminished value preview: ${formatDVRange(
-                panel.diminishedValue.low,
-                panel.diminishedValue.high
-              )}\nConfidence: ${formatLabel(panel.diminishedValue.confidence)}\n${
-                panel.diminishedValue.rationale
-              }\nThis is a preliminary preview based on the current file set, not a formal valuation.\nFor a full valuation, continue at ${COLLISION_ACADEMY_HANDOFF_URL}`
-            : "",
-          panel.negotiationResponse
-            ? `Negotiation Response\n\n${panel.negotiationResponse}`
-            : "",
-          panel.appraisal?.triggered && panel.appraisal.reasoning
-            ? `Appraisal Signal\n\n${panel.appraisal.reasoning}`
-            : "",
-          panel.stateLeverage && panel.stateLeverage.length > 0
-            ? `State Leverage\n\n${panel.stateLeverage
-                .map((point) => `- ${point}`)
-                .join("\n")}`
-            : "",
-          analysisText ? `Assistant Analysis\n\n${analysisText}` : "",
-        ]
-          .filter(Boolean)
-          .join("\n\n----------------------------------------\n\n");
+  const resolvedAnalysis =
+    normalizedResult ?? (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null);
 
-  exportCarrierPDF(reportText);
+  const reportDocument = buildCarrierReport({
+    report: analysisResult,
+    analysis: resolvedAnalysis,
+    panel,
+    assistantAnalysis: analysisText,
+  });
+
+  void exportCarrierPDF(reportDocument);
 }
 
 function DecisionSection({
@@ -353,7 +336,7 @@ function buildValuationDisplay(renderModel: ReturnType<typeof buildExportModel>)
   return [
     "ACV",
     buildSingleValuationDisplay({
-      label: "Likely ACV preview",
+      label: "Preliminary ACV preview",
       status: renderModel.valuation.acvStatus,
       value:
         renderModel.valuation.acvStatus === "provided"
@@ -371,7 +354,7 @@ function buildValuationDisplay(renderModel: ReturnType<typeof buildExportModel>)
     "",
     "DV",
     buildSingleValuationDisplay({
-      label: "Likely diminished value preview",
+      label: "Preliminary diminished value preview",
       status: renderModel.valuation.dvStatus,
       value:
         renderModel.valuation.dvStatus === "provided"
@@ -430,7 +413,7 @@ function buildSingleValuationDisplay(params: {
   }
 
   if (params.status === "provided" || params.status === "estimated_range") {
-    lines.push("This is a preliminary preview based on the current file set, not a formal valuation.");
+    lines.push("This is a preliminary preview based on the current file set, not a formal appraisal or binding valuation.");
   }
 
   lines.push(`For a full valuation, continue at ${COLLISION_ACADEMY_HANDOFF_URL}`);
@@ -474,69 +457,13 @@ function cleanValuationReasoning(reasoning: string, lead: string): string | null
   return cleaned;
 }
 
-function normalizeReportToAnalysisResult(
-  report: RepairIntelligenceReport
-): AnalysisResult {
-  if (report.analysis) {
-    return report.analysis;
+function formatVehicleConfidence(
+  vehicle: ReturnType<typeof buildExportModel>["vehicle"]
+): string {
+  const label = formatLabel(vehicle.confidence);
+  if (typeof vehicle.sourceConfidence !== "number") {
+    return label;
   }
 
-  const findings: AnalysisFinding[] = [
-    ...report.issues.map((issue, index) => {
-      const bucket: AnalysisFinding["bucket"] =
-        issue.category === "parts"
-          ? "parts"
-          : issue.category === "calibration" || issue.category === "scan"
-            ? "adas"
-            : issue.category === "safety"
-              ? "critical"
-              : "compliance";
-      const status: AnalysisFinding["status"] = issue.missingOperation
-        ? "not_detected"
-        : "unclear";
-
-      return {
-        id: issue.id || `report-issue-${index + 1}`,
-        bucket,
-        category: issue.category,
-        title: issue.title,
-        detail: issue.impact || issue.finding,
-        severity: issue.severity,
-        status,
-        evidence: [],
-      };
-    }),
-    ...report.missingProcedures.map((procedure, index) => ({
-      id: `report-missing-${index + 1}`,
-      bucket: "supplement" as const,
-      category: "missing_procedure",
-      title: procedure,
-      detail: "This function is not clearly represented in the current estimate.",
-      severity: "medium" as const,
-      status: "not_detected" as const,
-      evidence: [],
-    })),
-  ];
-
-  return {
-    mode: "single-document-review",
-    parserStatus: "ok",
-    summary: {
-      riskScore: report.summary.riskScore,
-      confidence: report.summary.confidence,
-      criticalIssues: report.summary.criticalIssues,
-      evidenceQuality: report.summary.evidenceQuality,
-    },
-    findings,
-    supplements: findings.filter((finding) => finding.bucket === "supplement"),
-    evidence: report.evidence.map((entry) => ({
-      source: entry.source,
-      quote: entry.snippet,
-    })),
-    operations: [],
-    rawEstimateText: report.evidence.map((entry) => entry.snippet).join("\n"),
-    narrative:
-      report.recommendedActions[0] ||
-      "The estimate needs clearer repair support before it can be treated as fully defended.",
-  };
+  return `${label} (${vehicle.sourceConfidence.toFixed(2)})`;
 }

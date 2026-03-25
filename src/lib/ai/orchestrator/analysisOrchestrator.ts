@@ -5,6 +5,10 @@ import { runRepairPipeline } from "../pipeline/repairPipeline";
 import { computeConfidenceScore } from "../scoring/confidenceScore";
 import { computeEvidenceQuality } from "../scoring/evidenceScore";
 import { computeRiskScore } from "../scoring/riskScore";
+import {
+  extractVehicleIdentityFromText,
+  mergeVehicleIdentity,
+} from "../vehicleContext";
 import type {
   AnalysisIssue,
   RepairIntelligenceReport,
@@ -92,6 +96,20 @@ export async function runRepairAnalysis({
   }
 
   const pipeline = runRepairPipeline(documents);
+  const estimateText = documents.map((document) => document.text ?? "").join("\n\n");
+  const inferredVehicle = mergeVehicleIdentity(
+    sessionContext?.vehicleMake
+      ? {
+          make: sessionContext.vehicleMake,
+          confidence: 0.6,
+          source: "session",
+        }
+      : null,
+    ...documents.map((document) =>
+      extractVehicleIdentityFromText(document.text ?? "", "attachment")
+    ),
+    extractVehicleIdentityFromText(userIntent ?? "", "user")
+  );
 
   const retrievedEvidence = await orchestrateRetrieval({
     userQuery: userIntent || "repair analysis",
@@ -126,7 +144,6 @@ export async function runRepairAnalysis({
     limit: 5,
   });
 
-  const estimateText = documents.map((document) => document.text ?? "").join("\n\n");
   const ragProcedures = inferProceduresFromRag({
     estimateText,
     retrievedEvidence,
@@ -185,7 +202,7 @@ export async function runRepairAnalysis({
         totalEvidenceCount: evidence.length,
       }),
     },
-    vehicle: undefined,
+    vehicle: inferredVehicle,
     issues,
     requiredProcedures,
     presentProcedures,
