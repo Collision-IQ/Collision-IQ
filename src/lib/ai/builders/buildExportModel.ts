@@ -73,8 +73,7 @@ export function buildExportModel(params: {
   const chatInsights = deriveRenderInsightsFromChat(params.assistantAnalysis ?? "");
   const vehicle = inferVehicleInfo(
     params.report,
-    params.analysis,
-    params.assistantAnalysis ?? null
+    params.analysis
   );
   const supplementItems = buildExportSupplementItems(
     params.report,
@@ -106,20 +105,30 @@ export function buildExportModel(params: {
 
 function inferVehicleInfo(
   report: RepairIntelligenceReport | null,
-  analysis: AnalysisResult | null,
-  assistantAnalysis: string | null
+  analysis: AnalysisResult | null
 ): ExportVehicleInfo {
-  const estimateText = collectVehicleInferenceText(report, analysis, assistantAnalysis);
+  const documentVehicleText = collectVehicleDocumentText(report, analysis);
   const structuredVehicle = mergeVehicleIdentity(
     normalizeVehicleIdentity(report?.vehicle),
     normalizeVehicleIdentity(report?.analysis?.vehicle),
     normalizeVehicleIdentity(analysis?.vehicle)
   );
-  const inferredVehicle = extractVehicleIdentityFromText(estimateText, "inferred");
+  const inferredVehicle = extractVehicleIdentityFromText(documentVehicleText, "attachment");
   const vehicle = mergeVehicleIdentity(structuredVehicle, inferredVehicle);
-  const resolvedVin = vehicle?.vin ?? structuredVehicle?.vin ?? extractVinFromText(estimateText);
+  const resolvedVin =
+    structuredVehicle?.vin ??
+    inferredVehicle?.vin ??
+    extractVinFromText(documentVehicleText);
   const label = buildVehicleLabel(vehicle);
   const detailCount = [vehicle?.year, vehicle?.make, vehicle?.model, vehicle?.vin, vehicle?.trim].filter(Boolean).length;
+
+  console.info("[vehicle-reconciliation:report]", {
+    structuredVehicle: structuredVehicle ?? null,
+    inferredVehicle: inferredVehicle ?? null,
+    resolvedVehicle: vehicle ?? null,
+    resolvedVin: resolvedVin ?? null,
+    hasDocumentVehicleText: Boolean(documentVehicleText.trim()),
+  });
 
   return {
     label: label || undefined,
@@ -141,19 +150,16 @@ function inferVehicleInfo(
   };
 }
 
-function collectVehicleInferenceText(
+function collectVehicleDocumentText(
   report: RepairIntelligenceReport | null,
-  analysis: AnalysisResult | null,
-  assistantAnalysis: string | null
+  analysis: AnalysisResult | null
 ): string {
   return [
-    assistantAnalysis,
-    analysis?.rawEstimateText,
     report?.analysis?.rawEstimateText,
+    analysis?.rawEstimateText,
     report?.vehicle?.vin,
     report?.analysis?.vehicle?.vin,
     analysis?.vehicle?.vin,
-    report?.recommendedActions?.join("\n"),
     report?.evidence
       .map((entry) => `${entry.title ?? ""}\n${entry.snippet ?? ""}`)
       .join("\n"),

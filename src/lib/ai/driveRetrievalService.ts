@@ -141,14 +141,42 @@ async function getDriveIndex(): Promise<DriveIndexFile[]> {
     return driveIndexCache.files;
   }
 
-  const driveId = process.env.GOOGLE_SHARED_DRIVE_ID || process.env.GOOGLE_DRIVE_FOLDER_ID;
+  const driveId = process.env.GOOGLE_SHARED_DRIVE_ID?.trim();
   if (!driveId) {
-    throw new Error("Missing GOOGLE_SHARED_DRIVE_ID or GOOGLE_DRIVE_FOLDER_ID");
+    throw new Error("Missing GOOGLE_SHARED_DRIVE_ID");
+  }
+
+  const labeledRootFolders = [
+    {
+      label: "GOOGLE_OEM_PROCEDURES_FOLDER_ID",
+      id: process.env.GOOGLE_OEM_PROCEDURES_FOLDER_ID?.trim(),
+    },
+    {
+      label: "GOOGLE_OEM_POSITION_STATEMENTS_FOLDER_ID",
+      id: process.env.GOOGLE_OEM_POSITION_STATEMENTS_FOLDER_ID?.trim(),
+    },
+    {
+      label: "GOOGLE_PA_LAW_FOLDER_ID",
+      id: process.env.GOOGLE_PA_LAW_FOLDER_ID?.trim(),
+    },
+  ].filter((value): value is { label: string; id: string } => Boolean(value.id));
+
+  if (labeledRootFolders.length === 0) {
+    throw new Error(
+      "Missing root folder env vars: GOOGLE_OEM_PROCEDURES_FOLDER_ID, GOOGLE_OEM_POSITION_STATEMENTS_FOLDER_ID, GOOGLE_PA_LAW_FOLDER_ID"
+    );
   }
 
   const auth = await getDriveAuth();
   const drive = google.drive({ version: "v3", auth });
-  const listed = await listDriveFiles(drive, driveId);
+  console.log({
+    driveId: process.env.GOOGLE_SHARED_DRIVE_ID,
+    rootFolderIds: labeledRootFolders,
+  });
+  const listed = await listDriveFiles(drive, {
+    driveId,
+    rootFolderIds: labeledRootFolders,
+  });
   const files = listed
     .filter((file): file is drive_v3.Schema$File & { path?: string } => Boolean(file.id && file.name))
     .filter((file) => file.mimeType !== "application/vnd.google-apps.folder")

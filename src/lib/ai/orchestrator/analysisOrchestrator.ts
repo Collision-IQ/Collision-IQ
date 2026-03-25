@@ -111,6 +111,12 @@ export async function runRepairAnalysis({
     extractVehicleIdentityFromText(userIntent ?? "", "user")
   );
 
+  console.info("[vehicle-reconciliation:analysis]", {
+    documentCount: documents.length,
+    sessionVehicleMake: sessionContext?.vehicleMake ?? null,
+    extractedVehicle: inferredVehicle ?? null,
+  });
+
   const retrievedEvidence = await orchestrateRetrieval({
     userQuery: userIntent || "repair analysis",
     activeContext: sessionContext
@@ -247,13 +253,23 @@ function buildEvidenceRecords(
 
   const retrieved = retrievalEvidence.map((item, index) => ({
     id: `retrieved-${index + 1}`,
-    title: item.file_id || `Retrieved Evidence ${index + 1}`,
+    title: toHumanReadableRetrievedSource(item.file_id) || `Retrieved Evidence ${index + 1}`,
     snippet: item.content.slice(0, 280),
-    source: item.file_id || "drive-knowledge-base",
+    source: toHumanReadableRetrievedSource(item.file_id) || "Drive knowledge base",
     authority: "internal" as const,
   }));
 
   return [...inline, ...retrieved].slice(0, 8);
+}
+
+function toHumanReadableRetrievedSource(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (/^[A-Za-z0-9_-]{16,}$/.test(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
 }
 
 function buildIssues(

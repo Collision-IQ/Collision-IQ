@@ -1,9 +1,11 @@
 import { google } from "googleapis";
+import {
+  getDriveImpersonationSubject,
+  getDriveServiceAccountCredentials,
+} from "@/lib/drive/auth";
 
 function getServiceAccount() {
-  const raw = process.env.GOOGLE_SA_JSON;
-  if (!raw) throw new Error("Missing GOOGLE_SA_JSON");
-  return JSON.parse(raw);
+  return getDriveServiceAccountCredentials();
 }
 
 export function getDriveClient() {
@@ -16,7 +18,7 @@ export function getDriveClient() {
       "https://www.googleapis.com/auth/drive",
       "https://www.googleapis.com/auth/drive.file",
     ],
-    subject: process.env.GOOGLE_IMPERSONATE_SUBJECT,
+    subject: getDriveImpersonationSubject(),
   });
 
   return google.drive({ version: "v3", auth });

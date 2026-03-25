@@ -129,23 +129,24 @@ export function extractVehicleIdentityFromText(
 
   const normalized = text.replace(/\r/g, "");
   const vin =
-    normalizeVin(extractLabeledValue(normalized, ["vin", "vehicle identification number"])) ??
+    extractVinFromTextBlock(normalized) ??
+    normalizeVin(extractLabeledValue(normalized, ["vin", "vin#", "vehicle identification number"])) ??
     normalizeVin(normalized.match(/\b[A-HJ-NPR-Z0-9]{17}\b/)?.[0]);
 
   const vehicleLine =
-    extractLabeledValue(normalized, ["vehicle", "vehicle info", "vehicle information"]) ??
+    extractLabeledValue(normalized, ["vehicle", "vehicle info", "vehicle information", "vehicle description"]) ??
     extractVehicleLikeLine(normalized);
   const parsedVehicleLine = vehicleLine ? parseVehicleLine(vehicleLine) : null;
 
   const year =
     parsedVehicleLine?.year ??
-    normalizeYear(extractLabeledValue(normalized, ["year"]));
+    normalizeYear(extractLabeledValue(normalized, ["year", "yr", "model year"]));
   const make =
     parsedVehicleLine?.make ??
-    cleanVehicleToken(extractLabeledValue(normalized, ["make"]));
+    cleanVehicleToken(extractLabeledValue(normalized, ["make", "mk"]));
   const model =
     parsedVehicleLine?.model ??
-    cleanVehicleToken(extractLabeledValue(normalized, ["model"]));
+    cleanVehicleToken(extractLabeledValue(normalized, ["model", "mdl"]));
   const trim =
     parsedVehicleLine?.trim ??
     cleanVehicleToken(extractLabeledValue(normalized, ["trim", "series", "package"]));
@@ -459,7 +460,19 @@ function parseVehicleLine(line: string): {
 
 function normalizeVin(value?: string): string | undefined {
   if (!value) return undefined;
-  return value.toUpperCase().match(/[A-HJ-NPR-Z0-9]{17}/)?.[0];
+  const compact = value.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, "");
+  return compact.match(/^[A-HJ-NPR-Z0-9]{17}$/)?.[0] ?? compact.match(/[A-HJ-NPR-Z0-9]{17}/)?.[0];
+}
+
+function extractVinFromTextBlock(text: string): string | undefined {
+  const labeledVin = extractLabeledValue(text, ["vin", "vin#", "vehicle identification number"]);
+  const normalizedLabelVin = normalizeVin(labeledVin);
+  if (normalizedLabelVin) {
+    return normalizedLabelVin;
+  }
+
+  const looseVinMatch = text.match(/(?:^|[^A-Z0-9])((?:[A-HJ-NPR-Z0-9][\s:-]*){17})(?=[^A-Z0-9]|$)/i)?.[1];
+  return normalizeVin(looseVinMatch);
 }
 
 export function decodeVinVehicleIdentity(vin: string): VehicleIdentity | undefined {

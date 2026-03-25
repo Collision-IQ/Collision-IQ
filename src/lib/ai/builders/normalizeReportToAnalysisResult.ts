@@ -12,9 +12,10 @@ import {
 export function normalizeReportToAnalysisResult(
   report: RepairIntelligenceReport
 ): AnalysisResult {
+  const estimateEvidenceText = extractEstimateEvidenceText(report.evidence);
   const inferredVehicle = extractVehicleIdentityFromText(
     [
-      report.evidence.map((entry) => `${entry.title ?? ""}\n${entry.snippet ?? ""}`).join("\n"),
+      estimateEvidenceText,
       report.recommendedActions.join("\n"),
       report.vehicle?.vin,
       report.analysis?.vehicle?.vin,
@@ -84,10 +85,18 @@ export function normalizeReportToAnalysisResult(
       quote: entry.snippet,
     })),
     operations: [],
-    rawEstimateText: report.evidence.map((entry) => entry.snippet).join("\n"),
+    rawEstimateText: estimateEvidenceText,
     narrative:
       report.recommendedActions[0] ||
       "The estimate needs clearer repair support before it can be treated as fully defended.",
     vehicle: mergeVehicleIdentity(normalizeVehicleIdentity(report.vehicle), inferredVehicle),
   };
+}
+
+function extractEstimateEvidenceText(evidence: RepairIntelligenceReport["evidence"]): string {
+  return evidence
+    .filter((entry) => entry.authority !== "oem")
+    .filter((entry) => !/^(OEM Procedures|OEM Position Statements|PA Law)\s*\//i.test(entry.source))
+    .map((entry) => `${entry.title ?? ""}\n${entry.snippet ?? ""}`)
+    .join("\n");
 }
