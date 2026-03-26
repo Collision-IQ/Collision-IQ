@@ -5,6 +5,10 @@ import { Paperclip, X, Camera, ChevronDown, ChevronUp, Eye, RefreshCcw } from "l
 import ReactMarkdown from "react-markdown";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
+import {
+  cleanPresentationMarkdown,
+  cleanPresentationText,
+} from "@/lib/ui/presentationText";
 import AttachmentPreviewModal, {
   type PreviewAttachment,
 } from "@/components/AttachmentPreviewModal";
@@ -34,6 +38,7 @@ interface ChatWidgetProps {
   onAnalysisChange?: (text: string) => void;
   onAnalysisResultChange?: (data: RepairIntelligenceReport | null) => void;
   onAnalysisPanelChange?: (panel: DecisionPanel | null) => void;
+  analysisPanel?: DecisionPanel | null;
 }
 
 const INITIAL_MESSAGE: Message = {
@@ -47,6 +52,7 @@ export default function ChatWidget({
   onAnalysisChange,
   onAnalysisResultChange,
   onAnalysisPanelChange,
+  analysisPanel,
 }: ChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
@@ -74,6 +80,7 @@ export default function ChatWidget({
     () => attachments.find((attachment) => attachment.attachmentId === previewAttachmentId) ?? null,
     [attachments, previewAttachmentId]
   );
+  const atAGlance = useMemo(() => buildAtAGlanceSummary(analysisPanel), [analysisPanel]);
 
   useEffect(() => {
     attachmentsRef.current = attachments;
@@ -556,6 +563,27 @@ export default function ChatWidget({
               >
                 {msg.role === "assistant" ? (
                   <div className="analysis-report text-[15px] leading-[1.65] text-white/90">
+                    {atAGlance && idx === messages.length - 1 && msg.content.trim() !== INITIAL_MESSAGE.content && (
+                      <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.04] p-4">
+                        <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
+                          At a glance
+                        </div>
+                        <div className="mt-3 space-y-2 text-sm leading-6 text-white/82">
+                          <p>
+                            <span className="font-semibold text-white">Best overall conclusion:</span>{" "}
+                            {cleanPresentationText(atAGlance.conclusion)}
+                          </p>
+                          <p>
+                            <span className="font-semibold text-white">Top dispute areas:</span>{" "}
+                            {cleanPresentationText(atAGlance.disputes)}
+                          </p>
+                          <p>
+                            <span className="font-semibold text-white">Next recommended action:</span>{" "}
+                            {cleanPresentationText(atAGlance.nextAction)}
+                          </p>
+                        </div>
+                      </div>
+                    )}
                     <ReactMarkdown
                       components={{
                         h2: ({ children }) => (
@@ -591,7 +619,7 @@ export default function ChatWidget({
                         ),
                       }}
                     >
-                      {msg.content}
+                      {cleanPresentationMarkdown(msg.content)}
                     </ReactMarkdown>
                   </div>
                 ) : (
@@ -781,4 +809,37 @@ function formatAttachmentKind(attachment: Attachment): string {
   if (attachment.mime.startsWith("image/")) return "Image";
   if (attachment.text?.trim()) return "Text";
   return attachment.mime || "Unknown";
+}
+
+function buildAtAGlanceSummary(panel?: DecisionPanel | null): {
+  conclusion: string;
+  disputes: string;
+  nextAction: string;
+} | null {
+  if (!panel) return null;
+
+  const conclusion = cleanPresentationText(panel.narrative?.trim());
+  if (!conclusion) return null;
+
+  const disputeTitles = panel.supplements
+    .map((item) => cleanPresentationText(item.title?.trim()))
+    .filter(Boolean)
+    .slice(0, 3);
+
+  const nextAction =
+    cleanPresentationText((panel.appraisal?.triggered && panel.appraisal.reasoning?.trim()) || "") ||
+    cleanPresentationText(panel.negotiationResponse?.trim()) ||
+    cleanPresentationText(panel.stateLeverage?.[0]?.trim()) ||
+    cleanPresentationText(panel.supplements[0]?.rationale?.trim()) ||
+    "";
+
+  return {
+    conclusion,
+    disputes:
+      disputeTitles.length > 0
+        ? disputeTitles.join("; ")
+        : "No major dispute areas were clearly surfaced from the current analysis.",
+    nextAction:
+      nextAction || "Continue with the strongest supported repair position and document the key disputed items.",
+  };
 }
