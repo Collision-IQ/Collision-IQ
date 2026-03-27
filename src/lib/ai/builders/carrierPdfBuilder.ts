@@ -44,6 +44,9 @@ export function buildCarrierReport({
     panel,
     assistantAnalysis,
   });
+  const vehicleDisplay = exportModel.vehicle.display || "Unspecified";
+  const vinDisplay =
+    exportModel.vehicle.vin || "Not clearly supported in the current material.";
 
   const topItems = selectReportSupplementItems(exportModel.supplementItems);
   const strongestDisputes =
@@ -72,11 +75,11 @@ export function buildCarrierReport({
     summary: [
       {
         label: "Vehicle",
-        value: buildVehicleIdentityValue(exportModel),
+        value: vehicleDisplay,
       },
       {
         label: "VIN",
-        value: exportModel.vehicle.vin || "Not clearly supported in the current material.",
+        value: vinDisplay,
       },
       {
         label: "Repair Conclusion",
@@ -99,12 +102,12 @@ export function buildCarrierReport({
       {
         title: "Vehicle / File Summary",
         bullets: compact([
-          buildVehicleIdentityValue(exportModel) !== "Unspecified"
-            ? `Vehicle: ${buildVehicleIdentityValue(exportModel)}.`
+          vehicleDisplay !== "Unspecified"
+            ? `Vehicle: ${vehicleDisplay}.`
             : undefined,
           exportModel.vehicle.manufacturer ? `Manufacturer: ${exportModel.vehicle.manufacturer}.` : undefined,
           exportModel.vehicle.trim ? `Trim: ${exportModel.vehicle.trim}.` : undefined,
-          exportModel.vehicle.vin ? `VIN: ${exportModel.vehicle.vin}.` : undefined,
+          exportModel.vehicle.vin ? `VIN: ${vinDisplay}.` : undefined,
           `Confidence: ${formatVehicleConfidence(exportModel)}.`,
           report ? `Structured analysis confidence: ${capitalize(report.summary.confidence)}.` : undefined,
           report ? `Evidence quality: ${capitalize(report.summary.evidenceQuality)}.` : undefined,
@@ -163,33 +166,6 @@ function buildExecutiveSummary(params: {
     params.whyItWins,
     `The biggest current dispute areas are ${params.strongestDisputes}.`,
   ].join(" ");
-}
-
-function buildVehicleIdentityValue(
-  exportModel: ReturnType<typeof buildExportModel>
-): string {
-  const parts = [
-    exportModel.vehicle.year,
-    exportModel.vehicle.make,
-    exportModel.vehicle.model,
-    exportModel.vehicle.trim,
-  ].filter(Boolean);
-
-  if (parts.length > 0) {
-    return parts.join(" ");
-  }
-
-  const partialIdentity = [
-    exportModel.vehicle.make,
-    exportModel.vehicle.model,
-    exportModel.vehicle.year,
-  ].filter(Boolean);
-
-  if (partialIdentity.length > 0) {
-    return partialIdentity.join(" ");
-  }
-
-  return "Unspecified";
 }
 
 function buildCredibilityConclusion(

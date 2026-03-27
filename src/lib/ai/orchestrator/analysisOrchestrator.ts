@@ -7,7 +7,7 @@ import { computeEvidenceQuality } from "../scoring/evidenceScore";
 import { computeRiskScore } from "../scoring/riskScore";
 import {
   extractVehicleIdentityFromText,
-  mergeVehicleIdentity,
+  resolveVehicleIdentity,
 } from "../vehicleContext";
 import type {
   AnalysisIssue,
@@ -97,7 +97,7 @@ export async function runRepairAnalysis({
 
   const pipeline = runRepairPipeline(documents);
   const estimateText = documents.map((document) => document.text ?? "").join("\n\n");
-  const inferredVehicle = mergeVehicleIdentity(
+  const inferredVehicle = resolveVehicleIdentity(
     sessionContext?.vehicleMake
       ? {
           make: sessionContext.vehicleMake,
@@ -109,7 +109,7 @@ export async function runRepairAnalysis({
       extractVehicleIdentityFromText(document.text ?? "", "attachment")
     ),
     extractVehicleIdentityFromText(userIntent ?? "", "user")
-  );
+  ).identity;
 
   console.info("[vehicle-reconciliation:analysis]", {
     documentCount: documents.length,

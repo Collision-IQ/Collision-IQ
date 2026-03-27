@@ -1,10 +1,27 @@
 import type { VehicleIdentity } from "./types/analysis";
 
+export type ResolvedVehicleIdentity = {
+  identity?: VehicleIdentity;
+  label?: string;
+  display: string;
+  vehicleDisplay: string;
+  vin?: string;
+  year?: number;
+  make?: string;
+  model?: string;
+  trim?: string;
+  manufacturer?: string;
+  confidence: "supported" | "partial" | "unknown";
+  sourceConfidence?: number;
+  sourceSummary: string[];
+  fieldSources?: VehicleIdentity["fieldSources"];
+  mismatches?: string[];
+};
+
 const KNOWN_MAKES = [
   "Acura",
   "Audi",
   "BMW",
-  "Buick",
   "Cadillac",
   "Chevrolet",
   "Chrysler",
@@ -33,6 +50,9 @@ const KNOWN_MAKES = [
   "Volkswagen",
   "Volvo",
 ];
+const MAKE_ALIASES: Record<string, string> = {
+  tesl: "Tesla",
+};
 
 const SOURCE_RANK: Record<NonNullable<VehicleIdentity["source"]>, number> = {
   vin_decoded: 6,
@@ -42,8 +62,77 @@ const SOURCE_RANK: Record<NonNullable<VehicleIdentity["source"]>, number> = {
   session: 2,
   unknown: 1,
 };
+const SOURCE_QUALITY_RANK: Record<NonNullable<VehicleIdentity["sourceQuality"]>, number> = {
+  explicit_header: 5,
+  labeled_block: 4,
+  vin_backed: 3,
+  note_context: 1,
+  unknown: 0,
+};
 
 const VIN_YEAR_CODES = "ABCDEFGHJKLMNPRSTVWXY123456789";
+const VIN_ALLOWED = /^[A-HJ-NPR-Z0-9]{17}$/;
+const VIN_TRANSLITERATION: Record<string, number> = {
+  A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, G: 7, H: 8,
+  J: 1, K: 2, L: 3, M: 4, N: 5, P: 7, R: 9,
+  S: 2, T: 3, U: 4, V: 5, W: 6, X: 7, Y: 8, Z: 9,
+};
+const VIN_WEIGHTS = [8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2];
+const INVALID_VIN_VALUES = new Set([
+  "UNSPECIFIED",
+  "UNKNOWN",
+  "NOTAVAILABLE",
+  "NOTAPPLICABLE",
+  "NODATA",
+  "NONE",
+  "PENDING",
+  "TBD",
+  "XXXXXXXXXXXXXXX",
+  "XXXXXXXXXXXXXXXXX",
+  "11111111111111111",
+  "99999999999999999",
+  "00000000000000000",
+]);
+const VIN_FIELD_LABELS = ["vin", "vin#", "vehicle identification number"] as const;
+const BLACKLISTED_VIN_HEADER_LABELS = [
+  "workfile id",
+  "federal id",
+  "claim #",
+  "claim number",
+  "claim no",
+  "claim id",
+  "ro #",
+  "ro number",
+  "repair order",
+  "repair order #",
+  "file #",
+  "file id",
+  "loss #",
+  "estimate #",
+] as const;
+const VIN_PAGE_FURNITURE_PATTERNS = [
+  /\bpage\s+\d+\b/i,
+  /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
+  /\b\d{1,2}:\d{2}:\d{2}\b/,
+  /\b(?:am|pm)\b/i,
+  /\bpage\b/i,
+  /\b\d{5,}\b/,
+] as const;
+const INVALID_VIN_FRAGMENT_PATTERNS = [
+  /PAGE/i,
+  /\bAM\b/i,
+  /\bPM\b/i,
+] as const;
+const NOISE_PREFIXES = ["PANEL", "PART", "CLAIM", "WORKFILE", "FEDERAL", "POLICY", "PAGE"] as const;
+const VEHICLE_NOTE_PATTERNS = [
+  "closest like, kind & quality option",
+  "closest like kind quality option",
+  "closest lkq option",
+  "non-database",
+  "ccc note",
+  "substitute vehicle",
+  "modeling note",
+] as const;
 const VEHICLE_FIELDS = [
   "year",
   "make",
@@ -128,15 +217,16 @@ export function extractVehicleIdentityFromText(
   }
 
   const normalized = text.replace(/\r/g, "");
-  const vin =
-    extractVinFromTextBlock(normalized) ??
-    normalizeVin(extractLabeledValue(normalized, ["vin", "vin#", "vehicle identification number"])) ??
-    normalizeVin(normalized.match(/\b[A-HJ-NPR-Z0-9]{17}\b/)?.[0]);
-
-  const vehicleLine =
-    extractLabeledValue(normalized, ["vehicle", "vehicle info", "vehicle information", "vehicle description"]) ??
-    extractVehicleLikeLine(normalized);
-  const parsedVehicleLine = vehicleLine ? parseVehicleLine(vehicleLine) : null;
+  const vin = extractVinFromTextBlock(normalized);
+  const bestVehicleLineCandidate = extractBestVehicleLineCandidate(normalized, source);
+  const parsedVehicleLine = bestVehicleLineCandidate
+    ? {
+        year: bestVehicleLineCandidate.year,
+        make: bestVehicleLineCandidate.make,
+        model: bestVehicleLineCandidate.model,
+        trim: bestVehicleLineCandidate.trim,
+      }
+    : null;
 
   const year =
     parsedVehicleLine?.year ??
@@ -162,6 +252,7 @@ export function extractVehicleIdentityFromText(
     make,
     model,
     trim,
+    sourceQuality: bestVehicleLineCandidate?.sourceQuality ?? (vin ? "vin_backed" : "unknown"),
     confidence: inferVehicleConfidence({ year, make, model, vin, trim }),
     source,
     fieldSources: buildFieldSources({
@@ -195,6 +286,9 @@ export function mergeVehicleIdentity(
     source: normalizedCandidates
       .map((candidate) => candidate.source ?? "unknown")
       .sort((left, right) => SOURCE_RANK[right] - SOURCE_RANK[left])[0],
+    sourceQuality: [...normalizedCandidates]
+      .sort((left, right) => scoreVehicleIdentity(right) - scoreVehicleIdentity(left))[0]
+      ?.sourceQuality ?? "unknown",
     fieldSources: {},
     mismatches: [],
   };
@@ -252,6 +346,7 @@ export function normalizeVehicleIdentity(
     manufacturer: cleanVehicleToken(vehicle.manufacturer),
     bodyStyle: cleanVehicleToken(vehicle.bodyStyle),
     series: cleanVehicleToken(vehicle.series),
+    sourceQuality: vehicle.sourceQuality ?? "unknown",
     confidence:
       typeof vehicle.confidence === "number"
         ? Number(Math.max(0, Math.min(1, vehicle.confidence)).toFixed(2))
@@ -311,6 +406,53 @@ export function buildVehicleLabel(
   return parts.join(" ").trim();
 }
 
+export function buildVehicleDisplayString(
+  vehicle: VehicleIdentity | null | undefined,
+  options?: { includeTrim?: boolean; fallback?: string }
+): string {
+  const label = buildVehicleLabel(vehicle, options);
+  return label || options?.fallback || "Unspecified";
+}
+
+export function resolveVehicleIdentity(
+  ...candidates: Array<VehicleIdentity | null | undefined>
+): ResolvedVehicleIdentity {
+  const identity = mergeVehicleIdentity(...candidates);
+  const label = buildVehicleLabel(identity) || undefined;
+  const display = buildVehicleDisplayString(identity);
+  const detailCount = [
+    identity?.year,
+    identity?.make,
+    identity?.model,
+    identity?.vin,
+    identity?.trim,
+  ].filter(Boolean).length;
+  const sourceSummary = buildVehicleSourceSummary(identity);
+
+  return {
+    identity,
+    label,
+    display,
+    vehicleDisplay: display,
+    vin: identity?.vin,
+    year: identity?.year,
+    make: identity?.make,
+    model: identity?.model,
+    trim: identity?.trim,
+    manufacturer: identity?.manufacturer,
+    confidence:
+      detailCount >= 3 || Boolean(identity?.vin)
+        ? "supported"
+        : detailCount >= 2
+          ? "partial"
+          : "unknown",
+    sourceConfidence: identity?.confidence,
+    sourceSummary,
+    fieldSources: identity?.fieldSources,
+    mismatches: identity?.mismatches,
+  };
+}
+
 function hasAnyVehicleField(vehicle: VehicleIdentity): boolean {
   return Boolean(
     vehicle.year ||
@@ -325,20 +467,26 @@ function hasAnyVehicleField(vehicle: VehicleIdentity): boolean {
 }
 
 function vehiclePreferenceScore(vehicle: VehicleIdentity): number {
-  return (vehicle.confidence ?? 0) + SOURCE_RANK[vehicle.source ?? "unknown"] * 0.25;
+  return (
+    (vehicle.confidence ?? 0) +
+    SOURCE_RANK[vehicle.source ?? "unknown"] * 0.25 +
+    SOURCE_QUALITY_RANK[vehicle.sourceQuality ?? "unknown"] * 1.5
+  );
 }
 
 function chooseVehicleFieldContender(
   field: (typeof VEHICLE_FIELDS)[number],
   contenders: VehicleIdentity[]
 ): VehicleIdentity {
-  const sorted = [...contenders].sort(
-    (left, right) => vehiclePreferenceScore(right) - vehiclePreferenceScore(left)
-  );
-
   if (field === "vin") {
-    return sorted[0];
+    return contenders.reduce((best, contender) =>
+      isBetterVinCandidate(contender, best) ? contender : best
+    );
   }
+
+  const sorted = [...contenders].sort(
+    (left, right) => scoreVehicleIdentity(right) - scoreVehicleIdentity(left)
+  );
 
   const explicitContenders = sorted.filter((candidate) =>
     ["attachment", "user", "session"].includes(
@@ -359,6 +507,24 @@ function chooseVehicleFieldContender(
   }
 
   return sorted[0];
+}
+
+export function isBetterVinCandidate(
+  next: VehicleIdentity | null | undefined,
+  current: VehicleIdentity | null | undefined
+): boolean {
+  if (!next?.vin) return false;
+  if (!current?.vin) return true;
+  return scoreVinIdentity(next) > scoreVinIdentity(current);
+}
+
+export function isBetterVehicleCandidate(
+  next: VehicleIdentity | null | undefined,
+  current: VehicleIdentity | null | undefined
+): boolean {
+  if (!next) return false;
+  if (!current) return true;
+  return scoreVehicleIdentity(next) > scoreVehicleIdentity(current);
 }
 
 function pickPreferredSource(
@@ -410,6 +576,67 @@ function extractLabeledValue(text: string, labels: string[]): string | undefined
   return undefined;
 }
 
+function extractBestVinCandidate(text: string): string | undefined {
+  const lines = text.split("\n");
+  const labeledCandidates = extractLabeledVinCandidates(text).map((candidate) => ({
+    vin: candidate.vin,
+    label: normalizeVinHeaderLabel(candidate.line),
+    isLabeled: candidate.isLabeled,
+    isBlacklistedLabel: false,
+    contextWindow: candidate.localContext,
+    localContext: candidate.localContext,
+  }));
+  const genericCandidates = lines
+    .map((line, index) => buildVinTextCandidate(lines, index))
+    .filter((candidate): candidate is VinTextCandidate => Boolean(candidate));
+  const candidates = [...labeledCandidates, ...genericCandidates];
+  const candidateCounts = new Map<string, number>();
+
+  for (const candidate of candidates) {
+    candidateCounts.set(candidate.vin, (candidateCounts.get(candidate.vin) ?? 0) + 1);
+  }
+
+  const labeledValidCandidates = labeledCandidates.filter(
+    (candidate) =>
+      hasValidVinChecksum(candidate.vin) &&
+      !looksLikeNoiseVinContext(candidate.vin, candidate.localContext, true)
+  );
+
+  if (labeledValidCandidates.length > 0) {
+    return bestRanked(labeledValidCandidates, candidateCounts)?.vin;
+  }
+
+  const genericValidCandidates = candidates.filter(
+    (candidate) =>
+      hasValidVinChecksum(candidate.vin) &&
+      !looksLikeNoiseVinContext(candidate.vin, candidate.contextWindow)
+  );
+
+  return bestRanked(genericValidCandidates, candidateCounts)?.vin;
+}
+
+function extractBestVehicleLineCandidate(
+  text: string,
+  source: VehicleIdentity["source"]
+): VehicleIdentity | undefined {
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const labeledVinLineIndex = lines.findIndex((line) => {
+    const label = normalizeVinHeaderLabel(line);
+    return Boolean(label && isVinFieldLabel(label) && normalizeVin(extractHeaderValue(line)));
+  });
+
+  const candidates = lines
+    .map((line, index) => buildVehicleLineCandidate(line, index, labeledVinLineIndex, source))
+    .filter((candidate): candidate is VehicleIdentity => Boolean(candidate))
+    .sort((left, right) => scoreVehicleIdentity(right) - scoreVehicleIdentity(left));
+
+  return candidates[0];
+}
+
 function extractVehicleLikeLine(text: string): string | undefined {
   const lines = text
     .split("\n")
@@ -418,8 +645,74 @@ function extractVehicleLikeLine(text: string): string | undefined {
 
   return lines.find((line) =>
     /\b(19\d{2}|20\d{2})\b/.test(line) &&
-    KNOWN_MAKES.some((make) => line.toLowerCase().includes(make.toLowerCase()))
+    KNOWN_MAKES.some((make) => line.toLowerCase().includes(make.toLowerCase())) ||
+    Object.keys(MAKE_ALIASES).some((alias) => line.toLowerCase().includes(alias))
   );
+}
+
+function buildVehicleLineCandidate(
+  line: string,
+  index: number,
+  labeledVinLineIndex: number,
+  source: VehicleIdentity["source"]
+): VehicleIdentity | undefined {
+  const explicitVehicleLabelValue = extractInlineLabeledValue(line, [
+    "vehicle",
+    "vehicle info",
+    "vehicle information",
+    "vehicle description",
+  ]);
+  const candidateText = explicitVehicleLabelValue ?? line;
+  const parsed = parseVehicleLine(candidateText);
+  if (!parsed) {
+    return undefined;
+  }
+
+  return {
+    ...parsed,
+    source,
+    sourceQuality: classifyVehicleLineSourceQuality(
+      line,
+      Boolean(explicitVehicleLabelValue),
+      index,
+      labeledVinLineIndex
+    ),
+    confidence: inferVehicleConfidence(parsed),
+  };
+}
+
+function classifyVehicleLineSourceQuality(
+  line: string,
+  hasExplicitVehicleLabel: boolean,
+  index: number,
+  labeledVinLineIndex: number
+): NonNullable<VehicleIdentity["sourceQuality"]> {
+  if (hasExplicitVehicleLabel) {
+    return "explicit_header";
+  }
+
+  const lower = line.toLowerCase();
+  if (VEHICLE_NOTE_PATTERNS.some((pattern) => lower.includes(pattern))) {
+    return "note_context";
+  }
+
+  if (labeledVinLineIndex >= 0 && Math.abs(index - labeledVinLineIndex) <= 3) {
+    return "labeled_block";
+  }
+
+  return "unknown";
+}
+
+function extractInlineLabeledValue(line: string, labels: string[]): string | undefined {
+  for (const label of labels) {
+    const regex = new RegExp(`^\\s*${escapeRegExp(label)}\\s*[:#-]\\s*(.+)$`, "i");
+    const match = line.match(regex);
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+  }
+
+  return undefined;
 }
 
 function parseVehicleLine(line: string): {
@@ -430,9 +723,11 @@ function parseVehicleLine(line: string): {
 } | null {
   const yearMatch = line.match(/\b(19\d{2}|20\d{2})\b/);
   const year = yearMatch ? Number(yearMatch[1]) : undefined;
-  const make = KNOWN_MAKES.find((candidate) =>
-    line.toLowerCase().includes(candidate.toLowerCase())
-  );
+  const normalizedLine = line.toLowerCase();
+  const directMakeMatch = KNOWN_MAKES.find((candidate) => normalizedLine.includes(candidate.toLowerCase()));
+  const aliasMakeMatch = Object.entries(MAKE_ALIASES).find(([alias]) => normalizedLine.includes(alias));
+  const make = directMakeMatch ?? aliasMakeMatch?.[1];
+  const matchedMakeToken = directMakeMatch ?? aliasMakeMatch?.[0];
 
   if (!year && !make) {
     return null;
@@ -440,8 +735,8 @@ function parseVehicleLine(line: string): {
 
   let model: string | undefined;
   let trim: string | undefined;
-  if (make) {
-    const regex = new RegExp(`${escapeRegExp(make)}\\s+(.+)$`, "i");
+  if (matchedMakeToken) {
+    const regex = new RegExp(`${escapeRegExp(matchedMakeToken)}\\s+(.+)$`, "i");
     const makeTail = line.match(regex)?.[1]?.split(/[.;|\n]/)[0]?.trim();
     if (makeTail) {
       const tokens = makeTail.split(/\s+/).filter(Boolean);
@@ -458,24 +753,27 @@ function parseVehicleLine(line: string): {
   };
 }
 
-function normalizeVin(value?: string): string | undefined {
+export function normalizeVin(value?: string): string | undefined {
   if (!value) return undefined;
   const compact = value.toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, "");
-  return compact.match(/^[A-HJ-NPR-Z0-9]{17}$/)?.[0] ?? compact.match(/[A-HJ-NPR-Z0-9]{17}/)?.[0];
+  if (compact.length !== 17) return undefined;
+  if (NOISE_PREFIXES.some((prefix) => compact.startsWith(prefix))) return undefined;
+  if (/^[A-Z]{4,}\d{6,}$/.test(compact)) return undefined;
+  if (INVALID_VIN_VALUES.has(compact)) return undefined;
+  if (containsInvalidVinFragments(compact)) return undefined;
+  if (/^(.)\1{16}$/.test(compact)) return undefined;
+  if (/\b(?:VIN|UNKNOWN|UNSPECIFIED|PENDING|TBD)\b/i.test(value)) return undefined;
+  if (!hasValidVinChecksum(compact)) return undefined;
+  return compact;
 }
 
 function extractVinFromTextBlock(text: string): string | undefined {
-  const labeledVin = extractLabeledValue(text, ["vin", "vin#", "vehicle identification number"]);
-  const normalizedLabelVin = normalizeVin(labeledVin);
-  if (normalizedLabelVin) {
-    return normalizedLabelVin;
-  }
-
-  const looseVinMatch = text.match(/(?:^|[^A-Z0-9])((?:[A-HJ-NPR-Z0-9][\s:-]*){17})(?=[^A-Z0-9]|$)/i)?.[1];
-  return normalizeVin(looseVinMatch);
+  return extractBestVinCandidate(text);
 }
 
 export function decodeVinVehicleIdentity(vin: string): VehicleIdentity | undefined {
+  // This local decode is a lightweight hint for ranking/display only.
+  // If external VIN decode data is supplied elsewhere in the app, NHTSA vPIC remains canonical.
   const normalizedVin = normalizeVin(vin);
   if (!normalizedVin) return undefined;
 
@@ -488,6 +786,7 @@ export function decodeVinVehicleIdentity(vin: string): VehicleIdentity | undefin
     year,
     make: wmi?.make,
     manufacturer: wmi?.manufacturer,
+    sourceQuality: "vin_backed",
     confidence: Number(
       Math.max(
         0.7,
@@ -591,6 +890,40 @@ function stringifyVehicleField(value: unknown): string {
   return "";
 }
 
+function buildVehicleSourceSummary(
+  vehicle: VehicleIdentity | null | undefined
+): string[] {
+  const normalized = normalizeVehicleIdentity(vehicle);
+  if (!normalized) {
+    return [];
+  }
+
+  const summary = new Set<string>();
+  if (normalized.fieldSources?.vin === "attachment") {
+    summary.add("labeled_vin");
+  }
+  if (
+    normalized.sourceQuality === "explicit_header" ||
+    normalized.sourceQuality === "labeled_block"
+  ) {
+    summary.add("explicit_vehicle_block");
+  }
+  if (
+    normalized.fieldSources?.vin === "vin_decoded" ||
+    normalized.sourceQuality === "vin_backed"
+  ) {
+    summary.add("vin_backed_decode");
+  }
+  if (normalized.sourceQuality === "note_context") {
+    summary.add("note_context");
+  }
+  if (summary.size === 0) {
+    summary.add("inferred");
+  }
+
+  return [...summary];
+}
+
 function resolveVinManufacturer(vin: string): { make?: string; manufacturer?: string } | undefined {
   const prefixes = [vin.slice(0, 5), vin.slice(0, 3)];
 
@@ -614,25 +947,267 @@ function decodeVinYear(vin: string): number | undefined {
   return validYears.length > 0 ? Math.max(...validYears) : Math.max(...candidateYears);
 }
 
-function validateVinChecksum(vin: string): boolean {
-  const transliteration: Record<string, number> = {
-    A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, G: 7, H: 8,
-    J: 1, K: 2, L: 3, M: 4, N: 5, P: 7, R: 9,
-    S: 2, T: 3, U: 4, V: 5, W: 6, X: 7, Y: 8, Z: 9,
-  };
-  const weights = [8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2];
+export function validateVinChecksum(vin: string): boolean {
+  return hasValidVinChecksum(vin);
+}
+
+function transliterateVinChar(char: string): number {
+  if (/^[0-9]$/.test(char)) return Number(char);
+  return VIN_TRANSLITERATION[char] ?? -1;
+}
+
+function hasValidVinChecksum(vin: string): boolean {
+  if (!VIN_ALLOWED.test(vin)) return false;
 
   let total = 0;
   for (let index = 0; index < vin.length; index += 1) {
-    const char = vin[index];
-    const value = /\d/.test(char) ? Number(char) : transliteration[char];
-    if (value === undefined) return false;
-    total += value * weights[index];
+    const value = transliterateVinChar(vin[index]);
+    if (value < 0) return false;
+    total += value * VIN_WEIGHTS[index];
   }
 
   const remainder = total % 11;
   const expectedCheckDigit = remainder === 10 ? "X" : String(remainder);
   return vin[8] === expectedCheckDigit;
+}
+
+function scoreVinIdentity(vehicle: VehicleIdentity): number {
+  const vin = normalizeVin(vehicle.vin);
+  if (!vin) return Number.NEGATIVE_INFINITY;
+
+  let score =
+    (vehicle.confidence ?? 0) +
+    SOURCE_RANK[vehicle.source ?? "unknown"] * 0.25;
+
+  score += 10;
+  score += validateVinChecksum(vin) ? 4 : -3;
+
+  const hasDecodedIdentity = Boolean(
+    vehicle.year ||
+      vehicle.make ||
+      vehicle.model ||
+      vehicle.manufacturer ||
+      vehicle.fieldSources?.vin === "vin_decoded" ||
+      vehicle.fieldSources?.year === "vin_decoded" ||
+      vehicle.fieldSources?.make === "vin_decoded"
+  );
+
+  if (hasDecodedIdentity) {
+    score += 3;
+  }
+
+  return score;
+}
+
+function scoreVehicleIdentity(vehicle: VehicleIdentity): number {
+  let score = vehiclePreferenceScore(vehicle);
+
+  if (vehicle.year && vehicle.make && vehicle.model) {
+    score += 6;
+  } else if (vehicle.make && vehicle.model) {
+    score += 3;
+  }
+
+  if (vehicle.vin) {
+    score += scoreVinIdentity(vehicle) / 10;
+  }
+
+  const rawTextLike = [vehicle.make, vehicle.model, vehicle.trim]
+    .filter(Boolean)
+    .some((value) => typeof value === "string" && value.split(/\s+/).length >= 4);
+
+  if (rawTextLike) {
+    score -= 2;
+  }
+
+  return score;
+}
+
+type VinTextCandidate = {
+  vin: string;
+  label?: string;
+  isLabeled: boolean;
+  isBlacklistedLabel: boolean;
+  contextWindow: string;
+  localContext?: string;
+};
+
+function extractLabeledVinCandidates(text: string): Array<{
+  vin: string;
+  isLabeled: true;
+  line: string;
+  localContext: string;
+}> {
+  return text
+    .split(/\r?\n/)
+    .map((line, index, lines) => {
+      const match = line.match(/\bVIN\b\s*[:#-]?\s*([A-HJ-NPR-Z0-9]{17})\b/i);
+      if (!match) return null;
+
+      return {
+        vin: match[1].toUpperCase(),
+        isLabeled: true as const,
+        line,
+        localContext: [lines[index - 1], line, lines[index + 1]].filter(Boolean).join("\n"),
+      };
+    })
+    .filter((candidate): candidate is {
+      vin: string;
+      isLabeled: true;
+      line: string;
+      localContext: string;
+    } => Boolean(candidate));
+}
+
+function buildVinTextCandidate(lines: string[], index: number): VinTextCandidate | null {
+  const line = lines[index] ?? "";
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+
+  const label = normalizeVinHeaderLabel(trimmed);
+  const isBlacklistedLabel = label ? isBlacklistedVinHeaderLabel(label) : false;
+  if (isBlacklistedLabel) {
+    return null;
+  }
+  const pageFurnitureLine = isPageFurnitureLine(trimmed);
+
+  if (label && isVinFieldLabel(label)) {
+    return null;
+  }
+
+  if (pageFurnitureLine) {
+    return null;
+  }
+
+  const contiguousVinMatch = trimmed.toUpperCase().match(/\b[A-HJ-NPR-Z0-9]{17}\b/)?.[0];
+  const normalizedVinValue = normalizeVin(contiguousVinMatch);
+  if (!normalizedVinValue) {
+    return null;
+  }
+  if (
+    containsInvalidVinFragments(normalizedVinValue) ||
+    hasVinNoiseContext(lines, index, normalizedVinValue)
+  ) {
+    return null;
+  }
+
+  return {
+    vin: normalizedVinValue,
+    label,
+    isLabeled: false,
+    isBlacklistedLabel: false,
+    contextWindow: buildVinContextWindow(lines, index),
+  };
+}
+
+function scoreVinTextCandidate(candidate: VinTextCandidate, repeatCount: number): number {
+  let score = 0;
+  if (candidate.isLabeled) score += 100;
+  else if (repeatCount > 1) score += 20;
+  else score += 5;
+  if (candidate.label && isVinFieldLabel(candidate.label)) score += 50;
+  if (candidate.label && candidate.isBlacklistedLabel) score -= 1000;
+  score += 10;
+  return score;
+}
+
+function bestRanked(
+  candidates: VinTextCandidate[],
+  candidateCounts: Map<string, number>
+): VinTextCandidate | null {
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  return [...candidates].sort(
+    (left, right) =>
+      scoreVinTextCandidate(right, candidateCounts.get(right.vin) ?? 1) -
+      scoreVinTextCandidate(left, candidateCounts.get(left.vin) ?? 1)
+  )[0] ?? null;
+}
+
+function normalizeVinHeaderLabel(line: string): string | undefined {
+  const colonIndex = line.indexOf(":");
+  if (colonIndex >= 0) {
+    return line.slice(0, colonIndex).trim().toLowerCase().replace(/\s+/g, " ") || undefined;
+  }
+
+  const separatorMatch = line.match(/^(.+?)\s(?:-|#)\s+/);
+  if (!separatorMatch?.[1]) {
+    return undefined;
+  }
+
+  return separatorMatch[1].trim().toLowerCase().replace(/\s+/g, " ") || undefined;
+}
+
+function isVinFieldLabel(label: string): boolean {
+  return VIN_FIELD_LABELS.some((candidate) => label === candidate || label.startsWith(candidate));
+}
+
+function isBlacklistedVinHeaderLabel(label: string): boolean {
+  return BLACKLISTED_VIN_HEADER_LABELS.some((candidate) =>
+    label === candidate || label.startsWith(candidate)
+  );
+}
+
+function extractHeaderValue(line: string): string | undefined {
+  const colonIndex = line.indexOf(":");
+  if (colonIndex >= 0) {
+    return line.slice(colonIndex + 1).trim() || undefined;
+  }
+
+  const separatorMatch = line.match(/^.+?\s(?:-|#)\s+(.+)$/);
+  return separatorMatch?.[1]?.trim() || undefined;
+}
+
+function isPageFurnitureLine(line: string): boolean {
+  return VIN_PAGE_FURNITURE_PATTERNS.filter((pattern) => pattern.test(line)).length >= 2;
+}
+
+function containsInvalidVinFragments(value: string): boolean {
+  return INVALID_VIN_FRAGMENT_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+function hasVinNoiseContext(lines: string[], index: number, vin: string): boolean {
+  const window = buildVinContextWindow(lines, index);
+
+  return looksLikeNoiseVinContext(vin, window);
+}
+
+function buildVinContextWindow(lines: string[], index: number): string {
+  return lines
+    .slice(Math.max(0, index - 1), Math.min(lines.length, index + 2))
+    .join(" ");
+}
+
+function looksLikeNoiseVinContext(
+  candidate: string,
+  context: string,
+  isDirectLabeledVin = false
+): boolean {
+  if (isDirectLabeledVin && hasValidVinChecksum(candidate)) {
+    return false;
+  }
+
+  const lowerContext = context.toLowerCase();
+  const noiseTokens = [
+    "panel",
+    "part number",
+    "subtotal",
+    "estimate totals",
+    "supplement summary",
+    "workfile",
+    "federal",
+    "lkq",
+    "recond",
+  ];
+
+  if (noiseTokens.some((token) => lowerContext.includes(token))) return true;
+
+  if (/\b\d+\.\d\b/.test(context)) return true;
+  if (/^(PANEL|PART|CLAIM|WORKFILE|FEDERAL|POLICY|PAGE)/i.test(candidate)) return true;
+
+  return false;
 }
 
 function escapeRegExp(value: string): string {

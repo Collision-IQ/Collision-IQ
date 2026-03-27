@@ -6,7 +6,8 @@
     "dev": "cross-env NODE_OPTIONS=--openssl-legacy-provider next dev",
     "build": "prisma generate && next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:vehicle-identity": "node scripts/run-vehicle-identity-tests.cjs"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.19",

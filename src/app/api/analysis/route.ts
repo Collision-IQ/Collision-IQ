@@ -21,15 +21,44 @@ import type {
   VehicleIdentity,
 } from "@/lib/ai/types/analysis";
 import type { DriveRetrievalResponse, DriveRetrievalResult } from "@/lib/ai/contracts/driveRetrievalContract";
-import { mergeVehicleIdentity, normalizeVehicleIdentity } from "@/lib/ai/vehicleContext";
+import { normalizeVehicleIdentity, resolveVehicleIdentity } from "@/lib/ai/vehicleContext";
 import type { EvidenceRecord, } from "@/lib/ai/types/evidence";
 
 export const runtime = "nodejs";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
+let openaiClient: OpenAI | null = null;
 const MODEL = process.env.COLLISION_IQ_MODEL || "gpt-5.4";
+const DEBUG_VEHICLE_IDENTITY = process.env.DEBUG_VEHICLE_IDENTITY === "1";
+
+function getOpenAIClient() {
+  if (!openaiClient) {
+    openaiClient = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY!,
+    });
+  }
+
+  return openaiClient;
+}
+
+function logVehicleCheckpoint(
+  checkpoint: "report.vehicle" | "report.analysis?.vehicle",
+  vehicle?: VehicleIdentity | null
+) {
+  if (!DEBUG_VEHICLE_IDENTITY) {
+    return;
+  }
+
+  console.info(`[vehicle-checkpoint:${checkpoint}]`, {
+    vin: vehicle?.vin ?? null,
+    year: vehicle?.year ?? null,
+    make: vehicle?.make ?? null,
+    model: vehicle?.model ?? null,
+    trim: vehicle?.trim ?? null,
+    confidence: vehicle?.confidence ?? null,
+    source: vehicle?.source ?? null,
+    fieldSources: vehicle?.fieldSources ?? null,
+  });
+}
 
 type AnalysisRequestBody = {
   artifactIds?: string[];
@@ -59,6 +88,8 @@ export async function POST(req: Request) {
       sessionContext: body.sessionContext ?? null,
       userIntent: body.userIntent ?? null,
     });
+    logVehicleCheckpoint("report.vehicle", report.vehicle);
+    logVehicleCheckpoint("report.analysis?.vehicle", report.analysis?.vehicle);
     let analysis = normalizeReportToAnalysisResult(report);
     const retrievalSnapshot = buildAnalysisRetrievalSnapshot({
       userMessage: body.userIntent ?? "",
@@ -97,6 +128,8 @@ export async function POST(req: Request) {
         retrieval,
         userMessage: body.userIntent ?? "",
       });
+      logVehicleCheckpoint("report.vehicle", report.vehicle);
+      logVehicleCheckpoint("report.analysis?.vehicle", report.analysis?.vehicle);
       analysis = normalizeReportToAnalysisResult(report);
     }
 
@@ -144,20 +177,25 @@ function buildAnalysisRetrievalSnapshot(params: {
   ChatAnalysisOutput,
   "taskType" | "summary" | "repairStrategy" | "keyDrivers" | "missingOperations" | "vehicleIdentification"
 > {
+  const snapshotVehicle = resolveVehicleIdentity(
+    normalizeVehicleIdentity(params.analysis.vehicle),
+    normalizeVehicleIdentity(params.report.analysis?.vehicle),
+    normalizeVehicleIdentity(params.report.vehicle)
+  ).identity;
   const firstPassAnswer = buildFirstPassAnalysisAnswer(params.report, params.analysis);
   const vehicle = inferDriveVehicleContext({
     estimateText: params.analysis.rawEstimateText ?? "",
     userQuery: params.userMessage,
-    analysisVehicle: params.report.vehicle
+    analysisVehicle: snapshotVehicle
       ? {
-          year: params.report.vehicle.year,
-          make: params.report.vehicle.make,
-          model: params.report.vehicle.model,
-          trim: params.report.vehicle.trim,
-          manufacturer: params.report.vehicle.manufacturer,
-          vin: params.report.vehicle.vin,
-          source: toChatVehicleSource(params.report.vehicle.source),
-          confidence: params.report.vehicle.confidence ?? 0.45,
+          year: snapshotVehicle.year,
+          make: snapshotVehicle.make,
+          model: snapshotVehicle.model,
+          trim: snapshotVehicle.trim,
+          manufacturer: snapshotVehicle.manufacturer,
+          vin: snapshotVehicle.vin,
+          source: toChatVehicleSource(snapshotVehicle.source),
+          confidence: snapshotVehicle.confidence ?? 0.45,
         }
       : null,
   });
@@ -266,9 +304,11 @@ async function refineAnalysisReportWithDriveSupport(params: {
     userMessage: params.userMessage,
   });
 
-  const mergedVehicle = mergeVehicleIdentity(
-    normalizeVehicleIdentity(params.report.vehicle),
-    normalizeVehicleIdentity({
+  const mergedVehicle = reconcileRefinedVehicle({
+    reportVehicle: params.report.vehicle,
+    reportAnalysisVehicle: params.report.analysis?.vehicle,
+    normalizedAnalysisVehicle: params.analysis.vehicle,
+    retrievalVehicle: {
       year: params.retrieval.request.vehicle.year,
       make: params.retrieval.request.vehicle.make,
       model: params.retrieval.request.vehicle.model,
@@ -288,8 +328,8 @@ async function refineAnalysisReportWithDriveSupport(params: {
           : params.retrieval.request.vehicle.sources.includes("vin_decode_hint")
             ? "vin_decoded"
             : "inferred",
-    })
-  );
+    },
+  });
 
   const mergedEvidence = mergeDriveEvidence(params.report.evidence, params.retrieval.results);
   const driveProcedureState = deriveDriveProcedureState(
@@ -351,7 +391,7 @@ async function generateDriveRefinedAnalysis(params: {
   retrievalContext: string;
   userMessage: string;
 }): Promise<{ narrative: string; recommendedActions: string[] }> {
-  const response = await openai.responses.create({
+  const response = await getOpenAIClient().responses.create({
     model: MODEL,
     temperature: 0.2,
     input: [
@@ -694,7 +734,7 @@ async function generateSupplementCandidates(
     .map((entry) => `- ${entry}`)
     .join("\n");
 
-  const response = await openai.responses.create({
+  const response = await getOpenAIClient().responses.create({
     model: "gpt-4o",
     temperature: 0.2,
     input: [
@@ -754,4 +794,39 @@ ${missingProcedures || "- None identified"}`,
   } catch {
     return [];
   }
+}
+
+export function reconcileRefinedVehicle(params: {
+  reportVehicle?: VehicleIdentity | null;
+  reportAnalysisVehicle?: VehicleIdentity | null;
+  normalizedAnalysisVehicle?: VehicleIdentity | null;
+  retrievalVehicle?: VehicleIdentity | null;
+}): VehicleIdentity | undefined {
+  const upstreamVehicle = resolveVehicleIdentity(
+    normalizeVehicleIdentity(params.reportAnalysisVehicle),
+    normalizeVehicleIdentity(params.reportVehicle),
+    normalizeVehicleIdentity(params.normalizedAnalysisVehicle)
+  ).identity;
+  const mergedVehicle = resolveVehicleIdentity(
+    upstreamVehicle,
+    normalizeVehicleIdentity(params.retrievalVehicle)
+  ).identity;
+
+  if (!mergedVehicle) {
+    return upstreamVehicle;
+  }
+
+  if (upstreamVehicle?.vin && !mergedVehicle.vin) {
+    return {
+      ...mergedVehicle,
+      vin: upstreamVehicle.vin,
+      fieldSources: {
+        ...mergedVehicle.fieldSources,
+        vin: upstreamVehicle.fieldSources?.vin ?? mergedVehicle.fieldSources?.vin,
+      },
+      confidence: Math.max(mergedVehicle.confidence ?? 0, upstreamVehicle.confidence ?? 0),
+    };
+  }
+
+  return mergedVehicle;
 }

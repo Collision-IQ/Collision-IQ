@@ -163,7 +163,7 @@ function RailContent({
 }) {
   const summary = useMemo(() => buildRailSummary(panel, renderModel), [panel, renderModel]);
   const vehicleLabel =
-    cleanVehicleSummaryLabel(renderModel.vehicle.label) ||
+    cleanVehicleSummaryLabel(renderModel.vehicle.display) ||
     "Vehicle details are still limited in the current material.";
   const vehicleTrim = cleanVehicleTrimLabel(renderModel.vehicle.trim);
 

@@ -104,6 +104,12 @@ export type VehicleIdentity = {
   manufacturer?: string;
   bodyStyle?: string;
   series?: string;
+  sourceQuality?:
+    | "explicit_header"
+    | "labeled_block"
+    | "vin_backed"
+    | "note_context"
+    | "unknown";
   confidence?: number;
   source?:
     | "vin_decoded"

@@ -5,30 +5,66 @@ import type {
 } from "../types/analysis";
 import {
   extractVehicleIdentityFromText,
-  mergeVehicleIdentity,
   normalizeVehicleIdentity,
+  resolveVehicleIdentity,
 } from "../vehicleContext";
+
+const DEBUG_VEHICLE_IDENTITY = process.env.DEBUG_VEHICLE_IDENTITY === "1";
+
+function logVehicleCheckpoint(reportVehicle: AnalysisResult["vehicle"]) {
+  if (!DEBUG_VEHICLE_IDENTITY) {
+    return;
+  }
+
+  console.info("[vehicle-checkpoint:normalized analysis.vehicle]", {
+    vin: reportVehicle?.vin ?? null,
+    year: reportVehicle?.year ?? null,
+    make: reportVehicle?.make ?? null,
+    model: reportVehicle?.model ?? null,
+    trim: reportVehicle?.trim ?? null,
+    confidence: reportVehicle?.confidence ?? null,
+    source: reportVehicle?.source ?? null,
+    fieldSources: reportVehicle?.fieldSources ?? null,
+  });
+}
 
 export function normalizeReportToAnalysisResult(
   report: RepairIntelligenceReport
 ): AnalysisResult {
   const estimateEvidenceText = extractEstimateEvidenceText(report.evidence);
+  const reportAnalysisVehicle = normalizeVehicleIdentity(report.analysis?.vehicle);
+  const reportVehicle = normalizeVehicleIdentity(report.vehicle);
   const inferredVehicle = extractVehicleIdentityFromText(
     [
       estimateEvidenceText,
       report.recommendedActions.join("\n"),
-      report.vehicle?.vin,
-      report.analysis?.vehicle?.vin,
+      reportVehicle?.vin,
+      reportAnalysisVehicle?.vin,
     ]
       .filter(Boolean)
       .join("\n\n"),
     "attachment"
   );
+  const resolvedVehicle = resolveVehicleIdentity(
+    reportAnalysisVehicle,
+    reportVehicle,
+    inferredVehicle
+  ).identity;
+  const preservedStructuredVin =
+    reportAnalysisVehicle?.vin ||
+    reportVehicle?.vin ||
+    resolvedVehicle?.vin ||
+    undefined;
+  const finalVehicle = {
+    ...resolvedVehicle,
+    vin: preservedStructuredVin,
+  };
+  logVehicleCheckpoint(finalVehicle);
 
   if (report.analysis) {
     return {
       ...report.analysis,
-      vehicle: mergeVehicleIdentity(report.analysis.vehicle, report.vehicle, inferredVehicle),
+      vehicle: finalVehicle,
     };
   }
 
@@ -89,7 +125,7 @@ export function normalizeReportToAnalysisResult(
     narrative:
       report.recommendedActions[0] ||
       "The estimate needs clearer repair support before it can be treated as fully defended.",
-    vehicle: mergeVehicleIdentity(normalizeVehicleIdentity(report.vehicle), inferredVehicle),
+    vehicle: finalVehicle,
   };
 }
 

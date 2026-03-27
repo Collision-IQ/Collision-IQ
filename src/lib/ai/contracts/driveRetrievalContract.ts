@@ -1,8 +1,8 @@
 import type { ChatAnalysisOutput, ChatbotTaskType } from "./chatAnalysisSchema";
 import {
   extractVehicleIdentityFromText,
-  mergeVehicleIdentity,
   normalizeVehicleIdentity,
+  resolveVehicleIdentity,
 } from "../vehicleContext";
 
 export const DRIVE_RETRIEVAL_TOPICS = [
@@ -203,40 +203,6 @@ type BuildDriveRetrievalRequestParams = {
   maxExcerptChars?: number;
 };
 
-const KNOWN_MAKES = [
-  "acura",
-  "audi",
-  "bmw",
-  "buick",
-  "cadillac",
-  "chevrolet",
-  "chrysler",
-  "dodge",
-  "ford",
-  "gmc",
-  "honda",
-  "hyundai",
-  "infiniti",
-  "jeep",
-  "kia",
-  "lexus",
-  "lincoln",
-  "mazda",
-  "mercedes",
-  "mercedes-benz",
-  "mini",
-  "mitsubishi",
-  "nissan",
-  "polestar",
-  "porsche",
-  "ram",
-  "subaru",
-  "tesla",
-  "toyota",
-  "volkswagen",
-  "volvo",
-] as const;
-
 const DRIVE_TOPIC_RULES: Array<{
   topic: DriveRetrievalTopic;
   keywords: string[];
@@ -410,7 +376,7 @@ export function inferDriveVehicleContext(params: {
   const analysisVehicle = normalizeVehicleIdentity(params.analysisVehicle ?? undefined);
   const attachmentVehicle = extractVehicleIdentityFromText(params.estimateText ?? "", "attachment");
   const userVehicle = extractVehicleIdentityFromText(params.userQuery ?? "", "user");
-  const resolved = mergeVehicleIdentity(analysisVehicle, attachmentVehicle, userVehicle);
+  const resolved = resolveVehicleIdentity(analysisVehicle, attachmentVehicle, userVehicle).identity;
 
   const sources = new Set<DriveVehicleInferenceSource>();
   if (analysisVehicle?.year || analysisVehicle?.make || analysisVehicle?.model || analysisVehicle?.vin) {
@@ -932,60 +898,4 @@ function inferTopicsForLane(
 
 function dedupeLanePlans<T>(values: T[]): T[] {
   return [...new Set(values)];
-}
-
-function extractVin(text: string): string | undefined {
-  const match = text.toUpperCase().match(/\b[A-HJ-NPR-Z0-9]{17}\b/);
-  return match?.[0];
-}
-
-function extractYear(text: string): number | undefined {
-  const matches = [...text.matchAll(/\b(20\d{2}|19\d{2})\b/g)];
-
-  for (const match of matches) {
-    const year = Number(match[1]);
-    if (year >= 1980 && year <= 2035) {
-      return year;
-    }
-  }
-
-  return undefined;
-}
-
-function extractMake(text: string): string | undefined {
-  const lower = text.toLowerCase();
-  const match = KNOWN_MAKES.find((make) => lower.includes(make));
-
-  if (!match) {
-    return undefined;
-  }
-
-  return match === "mercedes-benz" ? "Mercedes-Benz" : titleCase(match);
-}
-
-function extractModel(text: string, make?: string): string | undefined {
-  if (!make) {
-    return undefined;
-  }
-
-  const normalized = text.replace(/\s+/g, " ").trim();
-  const regex = new RegExp(`${escapeRegExp(make)}\\s+([A-Za-z0-9-]{1,30})`, "i");
-  const match = normalized.match(regex);
-  return match?.[1];
-}
-
-function extractTrim(text: string): string | undefined {
-  const match = text.match(/\b(?:trim|series|package)\s*[:#-]?\s*([A-Za-z0-9+\-/ ]{2,30})/i);
-  return match?.[1]?.trim();
-}
-
-function titleCase(value: string): string {
-  return value
-    .split(/[\s-]+/)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

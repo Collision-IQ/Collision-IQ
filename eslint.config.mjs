@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     "android/**",
     "my-mcp-server/build/**",
+    ".tmp/**",
+    "scripts/run-vehicle-identity-tests.cjs",
   ]),
 ]);
 
