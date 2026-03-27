@@ -1,8 +1,9 @@
 import { google } from "googleapis";
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { embedTexts } from "@/lib/rag/embed";
 import { upsertChunks } from "@/lib/rag/upsert";
+import { collisionIqModels } from "@/lib/modelConfig";
+import { openai } from "@/lib/openai";
 
 function chunkText(text: string, size = 500) {
   const chunks: string[] = [];
@@ -29,8 +30,6 @@ export async function GET() {
       version: "v3",
       auth: oauth2Client,
     });
-    const openai = new OpenAI();
-
     const fileId = "1xoFF0VuqR_mCXgH9QkcI5xifWlTCmY7N";
     const metadata = await drive.files.get({
       fileId,
@@ -50,7 +49,7 @@ export async function GET() {
     const base64 = Buffer.from(response.data as ArrayBuffer).toString("base64");
 
     const result = await openai.responses.create({
-      model: "gpt-4.1",
+      model: collisionIqModels.primary,
       input: [
         {
           role: "user",

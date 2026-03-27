@@ -71,6 +71,13 @@ export async function POST(req: Request) {
       );
     }
 
+    console.info("[upload] accepted", {
+      filename: file.name,
+      mimeType: file.type || "unknown",
+      sizeBytes: file.size,
+      isImage: file.type.startsWith("image/"),
+    });
+
     const previewData = await extractFilePreviewData(file);
     const imageDataUrl = await fileToDataUrl(file);
     const stored = saveUploadedAttachment({
@@ -79,6 +86,14 @@ export async function POST(req: Request) {
       text: previewData.text,
       imageDataUrl,
       pageCount: previewData.pageCount,
+    });
+
+    console.info("[upload] attachment stored", {
+      filename: stored.filename,
+      mimeType: stored.type || "unknown",
+      textLength: stored.text.length,
+      pageCount: stored.pageCount ?? null,
+      hasImageDataUrl: Boolean(stored.imageDataUrl),
     });
 
     return NextResponse.json({

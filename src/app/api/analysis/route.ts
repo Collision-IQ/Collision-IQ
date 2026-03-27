@@ -1,6 +1,9 @@
-import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { saveAnalysisReport } from "@/lib/analysisReportStore";
+import {
+  getUploadedAttachments,
+  type StoredAttachment,
+} from "@/lib/uploadedAttachmentStore";
 import {
   buildDriveRefinementContext,
   detectChatTaskType,
@@ -21,44 +24,18 @@ import type {
   VehicleIdentity,
 } from "@/lib/ai/types/analysis";
 import type { DriveRetrievalResponse, DriveRetrievalResult } from "@/lib/ai/contracts/driveRetrievalContract";
-import { normalizeVehicleIdentity, resolveVehicleIdentity } from "@/lib/ai/vehicleContext";
+import { mergeVehicleIdentity, normalizeVehicleIdentity } from "@/lib/ai/vehicleContext";
 import type { EvidenceRecord, } from "@/lib/ai/types/evidence";
+import { collisionIqModels } from "@/lib/modelConfig";
+import { openai } from "@/lib/openai";
 
 export const runtime = "nodejs";
 
-let openaiClient: OpenAI | null = null;
-const MODEL = process.env.COLLISION_IQ_MODEL || "gpt-5.4";
-const DEBUG_VEHICLE_IDENTITY = process.env.DEBUG_VEHICLE_IDENTITY === "1";
-
-function getOpenAIClient() {
-  if (!openaiClient) {
-    openaiClient = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY!,
-    });
-  }
-
-  return openaiClient;
-}
-
-function logVehicleCheckpoint(
-  checkpoint: "report.vehicle" | "report.analysis?.vehicle",
-  vehicle?: VehicleIdentity | null
-) {
-  if (!DEBUG_VEHICLE_IDENTITY) {
-    return;
-  }
-
-  console.info(`[vehicle-checkpoint:${checkpoint}]`, {
-    vin: vehicle?.vin ?? null,
-    year: vehicle?.year ?? null,
-    make: vehicle?.make ?? null,
-    model: vehicle?.model ?? null,
-    trim: vehicle?.trim ?? null,
-    confidence: vehicle?.confidence ?? null,
-    source: vehicle?.source ?? null,
-    fieldSources: vehicle?.fieldSources ?? null,
-  });
-}
+const SUPPLEMENT_MODEL =
+  process.env.COLLISION_IQ_SUPPLEMENT_MODEL?.trim() ||
+  process.env.COLLISION_IQ_MODEL_PRIMARY?.trim() ||
+  process.env.COLLISION_IQ_MODEL?.trim() ||
+  collisionIqModels.helper;
 
 type AnalysisRequestBody = {
   artifactIds?: string[];
@@ -83,13 +60,27 @@ export async function POST(req: Request) {
       );
     }
 
+    const storedAttachments = getUploadedAttachments(artifactIds);
+    console.info("[analysis-attachments] analysis request assembled", {
+      attachmentCount: storedAttachments.length,
+      artifactCount: artifactIds.length,
+      attachments: storedAttachments.map((attachment) => ({
+        filename: attachment.filename,
+        mimeType: attachment.type || "unknown",
+        textLength: attachment.text.length,
+        hasImageDataUrl: Boolean(attachment.imageDataUrl),
+        pageCount: attachment.pageCount ?? null,
+      })),
+    });
+
+    const normalizedAttachments = await normalizeAnalysisAttachments(storedAttachments);
+
     let report = await runRepairAnalysis({
       artifactIds,
+      preloadedAttachments: normalizedAttachments,
       sessionContext: body.sessionContext ?? null,
       userIntent: body.userIntent ?? null,
     });
-    logVehicleCheckpoint("report.vehicle", report.vehicle);
-    logVehicleCheckpoint("report.analysis?.vehicle", report.analysis?.vehicle);
     let analysis = normalizeReportToAnalysisResult(report);
     const retrievalSnapshot = buildAnalysisRetrievalSnapshot({
       userMessage: body.userIntent ?? "",
@@ -128,8 +119,6 @@ export async function POST(req: Request) {
         retrieval,
         userMessage: body.userIntent ?? "",
       });
-      logVehicleCheckpoint("report.vehicle", report.vehicle);
-      logVehicleCheckpoint("report.analysis?.vehicle", report.analysis?.vehicle);
       analysis = normalizeReportToAnalysisResult(report);
     }
 
@@ -168,6 +157,98 @@ export async function POST(req: Request) {
   }
 }
 
+function isImageAttachment(attachment: StoredAttachment) {
+  return Boolean(attachment.imageDataUrl) && attachment.type.startsWith("image/");
+}
+
+async function normalizeAnalysisAttachments(attachments: StoredAttachment[]) {
+  return Promise.all(
+    attachments.map(async (attachment) => {
+      if (!isImageAttachment(attachment) || !attachment.imageDataUrl) {
+        console.info("[analysis-attachments] attachment normalized", {
+          filename: attachment.filename,
+          mimeType: attachment.type || "unknown",
+          normalization: "original_text",
+          textLength: attachment.text.length,
+          hasImageDataUrl: Boolean(attachment.imageDataUrl),
+        });
+        return attachment;
+      }
+
+      const imageSummary = await summarizeImageAttachment(attachment);
+      const normalized = {
+        ...attachment,
+        text: imageSummary || attachment.text,
+      };
+
+      console.info("[analysis-attachments] attachment normalized", {
+        filename: attachment.filename,
+        mimeType: attachment.type || "unknown",
+        normalization: imageSummary ? "vision_summary" : "original_text_fallback",
+        textLength: normalized.text.length,
+        hasImageDataUrl: Boolean(normalized.imageDataUrl),
+      });
+
+      return normalized;
+    })
+  );
+}
+
+async function summarizeImageAttachment(attachment: StoredAttachment) {
+  if (!attachment.imageDataUrl) {
+    return "";
+  }
+
+  console.info("[analysis-attachments] final model payload built", {
+    filename: attachment.filename,
+    mimeType: attachment.type || "unknown",
+    model: collisionIqModels.primary,
+    contentParts: ["input_text", "input_image"],
+    hasImageDataUrl: true,
+  });
+
+  try {
+    const response = await openai.responses.create({
+      model: collisionIqModels.primary,
+      temperature: 0.1,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: `You are preparing a repair-analysis attachment summary for a collision estimator.
+
+Return concise plain text only. Focus on:
+- visible damage areas and likely affected panels/components
+- severity or impact cues that matter to estimate review
+- any readable vehicle identifiers such as VIN, year, make, model, trim, or badges
+- any scan/calibration, structural, lighting, wheel/suspension, or alignment clues
+
+Do not mention that this is an AI summary.
+Do not use markdown or JSON.`,
+            },
+            {
+              type: "input_image",
+              image_url: attachment.imageDataUrl,
+              detail: "auto",
+            },
+          ],
+        },
+      ],
+    });
+
+    return response.output_text?.trim() ?? "";
+  } catch (error) {
+    console.warn("[analysis-attachments] image normalization failed", {
+      filename: attachment.filename,
+      mimeType: attachment.type || "unknown",
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return "";
+  }
+}
+
 function buildAnalysisRetrievalSnapshot(params: {
   userMessage: string;
   report: RepairIntelligenceReport;
@@ -177,25 +258,20 @@ function buildAnalysisRetrievalSnapshot(params: {
   ChatAnalysisOutput,
   "taskType" | "summary" | "repairStrategy" | "keyDrivers" | "missingOperations" | "vehicleIdentification"
 > {
-  const snapshotVehicle = resolveVehicleIdentity(
-    normalizeVehicleIdentity(params.analysis.vehicle),
-    normalizeVehicleIdentity(params.report.analysis?.vehicle),
-    normalizeVehicleIdentity(params.report.vehicle)
-  ).identity;
   const firstPassAnswer = buildFirstPassAnalysisAnswer(params.report, params.analysis);
   const vehicle = inferDriveVehicleContext({
     estimateText: params.analysis.rawEstimateText ?? "",
     userQuery: params.userMessage,
-    analysisVehicle: snapshotVehicle
+    analysisVehicle: params.report.vehicle
       ? {
-          year: snapshotVehicle.year,
-          make: snapshotVehicle.make,
-          model: snapshotVehicle.model,
-          trim: snapshotVehicle.trim,
-          manufacturer: snapshotVehicle.manufacturer,
-          vin: snapshotVehicle.vin,
-          source: toChatVehicleSource(snapshotVehicle.source),
-          confidence: snapshotVehicle.confidence ?? 0.45,
+          year: params.report.vehicle.year,
+          make: params.report.vehicle.make,
+          model: params.report.vehicle.model,
+          trim: params.report.vehicle.trim,
+          manufacturer: params.report.vehicle.manufacturer,
+          vin: params.report.vehicle.vin,
+          source: toChatVehicleSource(params.report.vehicle.source),
+          confidence: params.report.vehicle.confidence ?? 0.45,
         }
       : null,
   });
@@ -304,11 +380,9 @@ async function refineAnalysisReportWithDriveSupport(params: {
     userMessage: params.userMessage,
   });
 
-  const mergedVehicle = reconcileRefinedVehicle({
-    reportVehicle: params.report.vehicle,
-    reportAnalysisVehicle: params.report.analysis?.vehicle,
-    normalizedAnalysisVehicle: params.analysis.vehicle,
-    retrievalVehicle: {
+  const mergedVehicle = mergeVehicleIdentity(
+    normalizeVehicleIdentity(params.report.vehicle),
+    normalizeVehicleIdentity({
       year: params.retrieval.request.vehicle.year,
       make: params.retrieval.request.vehicle.make,
       model: params.retrieval.request.vehicle.model,
@@ -328,8 +402,8 @@ async function refineAnalysisReportWithDriveSupport(params: {
           : params.retrieval.request.vehicle.sources.includes("vin_decode_hint")
             ? "vin_decoded"
             : "inferred",
-    },
-  });
+    })
+  );
 
   const mergedEvidence = mergeDriveEvidence(params.report.evidence, params.retrieval.results);
   const driveProcedureState = deriveDriveProcedureState(
@@ -391,8 +465,8 @@ async function generateDriveRefinedAnalysis(params: {
   retrievalContext: string;
   userMessage: string;
 }): Promise<{ narrative: string; recommendedActions: string[] }> {
-  const response = await getOpenAIClient().responses.create({
-    model: MODEL,
+  const response = await openai.responses.create({
+    model: collisionIqModels.primary,
     temperature: 0.2,
     input: [
       {
@@ -734,8 +808,8 @@ async function generateSupplementCandidates(
     .map((entry) => `- ${entry}`)
     .join("\n");
 
-  const response = await getOpenAIClient().responses.create({
-    model: "gpt-4o",
+  const response = await openai.responses.create({
+    model: SUPPLEMENT_MODEL,
     temperature: 0.2,
     input: [
       {
@@ -794,39 +868,4 @@ ${missingProcedures || "- None identified"}`,
   } catch {
     return [];
   }
-}
-
-export function reconcileRefinedVehicle(params: {
-  reportVehicle?: VehicleIdentity | null;
-  reportAnalysisVehicle?: VehicleIdentity | null;
-  normalizedAnalysisVehicle?: VehicleIdentity | null;
-  retrievalVehicle?: VehicleIdentity | null;
-}): VehicleIdentity | undefined {
-  const upstreamVehicle = resolveVehicleIdentity(
-    normalizeVehicleIdentity(params.reportAnalysisVehicle),
-    normalizeVehicleIdentity(params.reportVehicle),
-    normalizeVehicleIdentity(params.normalizedAnalysisVehicle)
-  ).identity;
-  const mergedVehicle = resolveVehicleIdentity(
-    upstreamVehicle,
-    normalizeVehicleIdentity(params.retrievalVehicle)
-  ).identity;
-
-  if (!mergedVehicle) {
-    return upstreamVehicle;
-  }
-
-  if (upstreamVehicle?.vin && !mergedVehicle.vin) {
-    return {
-      ...mergedVehicle,
-      vin: upstreamVehicle.vin,
-      fieldSources: {
-        ...mergedVehicle.fieldSources,
-        vin: upstreamVehicle.fieldSources?.vin ?? mergedVehicle.fieldSources?.vin,
-      },
-      confidence: Math.max(mergedVehicle.confidence ?? 0, upstreamVehicle.confidence ?? 0),
-    };
-  }
-
-  return mergedVehicle;
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
-import { listDriveFiles } from "@/lib/drive/list";
+import { getConfiguredDriveRootFolders, listDriveFiles } from "@/lib/drive/list";
 import { extractDriveText } from "@/lib/drive/extract";
 import { getImpersonatedAuth } from "@/lib/drive/auth";
 import { google } from "googleapis";
@@ -26,7 +26,11 @@ export async function POST() {
   const auth = await getImpersonatedAuth();
   const drive = google.drive({ version: "v3", auth });
 
-  const files = await listDriveFiles(drive, DRIVE_ID);
+  const rootFolderIds = getConfiguredDriveRootFolders();
+  const files = await listDriveFiles(drive, {
+    driveId: DRIVE_ID,
+    rootFolderIds,
+  });
 
   let indexed = 0;
   let skipped = 0;

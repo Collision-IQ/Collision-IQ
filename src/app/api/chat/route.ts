@@ -1,6 +1,5 @@
 export const runtime = "nodejs";
 
-import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import {
   getUploadedAttachments,
@@ -16,16 +15,18 @@ import {
   inferDriveRetrievalTopics,
   inferDriveVehicleContext,
 } from "@/lib/ai/contracts/driveRetrievalContract";
+import { cleanDisplayText } from "@/lib/ai/displayText";
+import { collisionIqModels } from "@/lib/modelConfig";
+import { openai } from "@/lib/openai";
 
 if (!process.env.OPENAI_API_KEY) {
   console.error("Missing OPENAI_API_KEY");
 }
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY!,
-});
-
-const MODEL = process.env.COLLISION_IQ_MODEL || "gpt-5.4";
+const MAX_UPLOAD_BATCH_FILES = 6;
+const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at once for now.";
+const TRANSIENT_CHAT_ERROR_MESSAGE = "The analysis service had a temporary issue. Please retry.";
+const OPENAI_RETRY_DELAY_MS = 400;
 
 type UploadedDocument = {
   filename: string;
@@ -57,6 +58,12 @@ type ChatRequestBody = {
   messages?: IncomingMessage[];
   attachmentIds?: string[];
   attachments?: IncomingAttachment[];
+};
+
+type OpenAIErrorMeta = {
+  requestId?: string;
+  status?: number;
+  type?: string;
 };
 
 const SYSTEM_INSTRUCTIONS = `
@@ -190,14 +197,16 @@ function formatDocuments(documents: UploadedDocument[]): string {
 
       const textBlock = document.text?.trim()
         ? document.text.trim()
-        : "[No extracted text available]";
+        : document.imageDataUrl
+          ? "[Image attached separately as vision input]"
+          : "[No extracted text available]";
 
       return `### ${label}\n${textBlock}`;
     })
     .join("\n\n---\n\n");
 }
 
-function buildModelInput(params: {
+function buildTextContext(params: {
   userMessage: string;
   conversationContext: string;
   documents: UploadedDocument[];
@@ -223,29 +232,179 @@ function buildModelInput(params: {
   return sections.join("\n\n");
 }
 
+function isImageDocument(document: UploadedDocument): boolean {
+  return Boolean(document.imageDataUrl) && Boolean(document.mime?.startsWith("image/"));
+}
+
+function buildOpenAIInput(params: {
+  userMessage: string;
+  conversationContext: string;
+  documents: UploadedDocument[];
+}) {
+  const textContext = buildTextContext(params);
+  const content: Array<
+    | { type: "input_text"; text: string }
+    | { type: "input_image"; image_url: string; detail: "auto" }
+  > = [{ type: "input_text", text: textContext }];
+
+  params.documents.forEach((document, index) => {
+    if (!isImageDocument(document) || !document.imageDataUrl) {
+      return;
+    }
+
+    content.push({
+      type: "input_text",
+      text: `Image attachment ${index + 1}: ${document.filename}${document.mime ? ` (${document.mime})` : ""}`,
+    });
+    content.push({
+      type: "input_image",
+      image_url: document.imageDataUrl,
+      detail: "auto",
+    });
+  });
+
+  return [
+    {
+      role: "user" as const,
+      content,
+    },
+  ];
+}
+
+function extractOpenAIErrorMeta(error: unknown): OpenAIErrorMeta {
+  if (!error || typeof error !== "object") {
+    return {};
+  }
+
+  const candidate = error as {
+    request_id?: string;
+    requestId?: string;
+    status?: number;
+    error?: { type?: string };
+    type?: string;
+  };
+
+  return {
+    requestId: candidate.request_id ?? candidate.requestId,
+    status: candidate.status,
+    type: candidate.error?.type ?? candidate.type,
+  };
+}
+
+function isTransientOpenAIError(error: unknown): boolean {
+  const meta = extractOpenAIErrorMeta(error);
+  return meta.type === "server_error" || (typeof meta.status === "number" && meta.status >= 500);
+}
+
+function logOpenAIPhaseFailure(phase: "first-pass" | "second-pass", attempt: 1 | 2, error: unknown) {
+  const meta = extractOpenAIErrorMeta(error);
+  console.warn("[chat-openai] upstream failure", {
+    phase,
+    attempt,
+    requestId: meta.requestId ?? null,
+    status: meta.status ?? null,
+    type: meta.type ?? null,
+    message: error instanceof Error ? error.message : String(error),
+  });
+}
+
+async function delay(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function createOpenAIResponseWithRetry(
+  phase: "first-pass" | "second-pass",
+  input: Parameters<typeof openai.responses.create>[0]
+) {
+  try {
+    return await openai.responses.create(input);
+  } catch (error) {
+    logOpenAIPhaseFailure(phase, 1, error);
+    if (!isTransientOpenAIError(error)) {
+      throw error;
+    }
+  }
+
+  await delay(OPENAI_RETRY_DELAY_MS);
+
+  try {
+    return await openai.responses.create(input);
+  } catch (error) {
+    logOpenAIPhaseFailure(phase, 2, error);
+    throw error;
+  }
+}
+
+function getOpenAIOutputText(response: unknown): string | undefined {
+  if (!response || typeof response !== "object") {
+    return undefined;
+  }
+
+  const candidate = response as { output_text?: unknown };
+  return typeof candidate.output_text === "string" ? candidate.output_text : undefined;
+}
+
 export async function POST(req: Request) {
   try {
+    const requestStartedAt = Date.now();
     const body = (await req.json()) as ChatRequestBody;
+    const incomingAttachmentCount = Array.isArray(body.attachments)
+      ? body.attachments.length
+      : Array.isArray(body.attachmentIds)
+        ? body.attachmentIds.length
+        : 0;
+
+    if (incomingAttachmentCount > MAX_UPLOAD_BATCH_FILES) {
+      console.info("[chat-attachments] rejected oversized batch", {
+        fileCount: incomingAttachmentCount,
+      });
+      return NextResponse.json({ error: UPLOAD_CAP_MESSAGE }, { status: 400 });
+    }
 
     const documents = extractDocuments(body);
+    console.info("[chat-attachments] accepted batch", {
+      fileCount: documents.length,
+      totalPdfPages: documents.reduce((sum, document) => sum + (document.pageCount ?? 0), 0),
+      attachments: documents.map((document) => ({
+        filename: document.filename,
+        mimeType: document.mime || "unknown",
+        textLength: document.text?.length ?? 0,
+        hasImageDataUrl: Boolean(document.imageDataUrl),
+        pageCount: document.pageCount ?? null,
+      })),
+      timeToAnalysisStartMs: Date.now() - requestStartedAt,
+    });
     const userMessage = extractLatestUserMessage(body.messages || []);
     const conversationContext = formatRecentConversation(body.messages || []);
-    const input = buildModelInput({
+    const input = buildOpenAIInput({
       userMessage,
       conversationContext,
       documents,
     });
 
-    const firstPass = await openai.responses.create({
-      model: MODEL,
+    console.info("[chat-openai] request attachments", {
+      attachmentCount: documents.length,
+      includedInRequest: documents.map((document, index) => ({
+        index: index + 1,
+        filename: document.filename,
+        mimeType: document.mime || "unknown",
+        includedAs: isImageDocument(document) ? "input_image+text" : "text",
+        hasText: Boolean(document.text?.trim()),
+        hasImageDataUrl: Boolean(document.imageDataUrl),
+      })),
+    });
+
+    const firstPass = await createOpenAIResponseWithRetry("first-pass", {
+      model: collisionIqModels.primary,
       instructions: SYSTEM_INSTRUCTIONS,
       temperature: 0.7,
       input,
     });
 
+    const firstPassOutputText = getOpenAIOutputText(firstPass);
     const firstPassText =
-      typeof firstPass.output_text === "string" && firstPass.output_text.trim()
-        ? firstPass.output_text.trim()
+      typeof firstPassOutputText === "string" && firstPassOutputText.trim()
+        ? firstPassOutputText.trim()
         : "I reviewed the material, but I couldn't generate a usable response.";
 
     const estimateText = documents
@@ -290,12 +449,28 @@ export async function POST(req: Request) {
           })
         : firstPassText;
 
-    return new Response(outputText, {
+    console.info("[chat-attachments] analysis complete", {
+      fileCount: documents.length,
+      totalPdfPages: documents.reduce((sum, document) => sum + (document.pageCount ?? 0), 0),
+      durationMs: Date.now() - requestStartedAt,
+    });
+
+    return new Response(cleanDisplayText(outputText), {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
       },
     });
   } catch (error) {
+    if (isTransientOpenAIError(error)) {
+      return NextResponse.json(
+        { error: TRANSIENT_CHAT_ERROR_MESSAGE },
+        { status: 503 }
+      );
+    }
+
+    console.error("[chat-attachments] analysis failure", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     console.error("Chat route error:", error);
 
     const message =
@@ -392,15 +567,16 @@ async function refineAnswerWithDriveSupport(params: {
     .filter(Boolean)
     .join("\n\n");
 
-  const refined = await openai.responses.create({
-    model: MODEL,
+  const refined = await createOpenAIResponseWithRetry("second-pass", {
+    model: collisionIqModels.primary,
     instructions: `${SYSTEM_INSTRUCTIONS}\n\n${REFINEMENT_INSTRUCTIONS}`,
     temperature: 0.7,
     input: refinementInput,
   });
 
-  return typeof refined.output_text === "string" && refined.output_text.trim()
-    ? refined.output_text.trim()
+  const refinedOutputText = getOpenAIOutputText(refined);
+  return typeof refinedOutputText === "string" && refinedOutputText.trim()
+    ? refinedOutputText.trim()
     : params.firstPassAnswer;
 }
 

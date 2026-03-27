@@ -3,6 +3,7 @@
 import { NextRequest } from "next/server";
 import { openai } from "@/lib/openai";
 import { getAssignment } from "@/lib/assignmentStore";
+import { collisionIqModels } from "@/lib/modelConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,7 +43,7 @@ export async function POST(
     // ✅ OpenAI call using chat completions (non-streaming)
     const client = openai;
     const completion = await client.chat.completions.create({
-      model: "gpt-4",
+      model: collisionIqModels.helper,
       messages: [
         {
           role: "system",

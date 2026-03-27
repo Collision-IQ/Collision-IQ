@@ -1,14 +1,10 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Paperclip, X, Camera, ChevronDown, ChevronUp, Eye, RefreshCcw } from "lucide-react";
+import { Paperclip, X, Camera, ChevronDown, ChevronUp, Eye, RefreshCcw, Volume2, Square } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
-import {
-  cleanPresentationMarkdown,
-  cleanPresentationText,
-} from "@/lib/ui/presentationText";
 import AttachmentPreviewModal, {
   type PreviewAttachment,
 } from "@/components/AttachmentPreviewModal";
@@ -16,6 +12,7 @@ import AttachmentPreviewModal, {
 type Role = "user" | "assistant";
 
 interface Message {
+  id: string;
   role: Role;
   content: string;
 }
@@ -25,6 +22,7 @@ interface Attachment {
   filename: string;
   mime: string;
   text: string;
+  sizeBytes: number;
   imageDataUrl?: string;
   previewUrl?: string;
   pageCount?: number;
@@ -38,21 +36,27 @@ interface ChatWidgetProps {
   onAnalysisChange?: (text: string) => void;
   onAnalysisResultChange?: (data: RepairIntelligenceReport | null) => void;
   onAnalysisPanelChange?: (panel: DecisionPanel | null) => void;
-  analysisPanel?: DecisionPanel | null;
 }
 
 const INITIAL_MESSAGE: Message = {
+  id: "assistant-initial",
   role: "assistant",
   content:
     "Hi there - upload an estimate, OEM procedure, or photo and I'll produce a structured repair analysis.",
 };
+
+const VALUATION_URL_PATTERN = /For a full valuation, continue at https:\/\/www\.collision\.academy\/?/gi;
+const MAX_UPLOAD_BATCH_FILES = 6;
+const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at once for now.";
+const SERVER_TTS_ENABLED =
+  process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_SERVER_TTS === "true";
+const SERVER_TTS_VOICE = process.env.NEXT_PUBLIC_COLLISION_IQ_TTS_VOICE?.trim() || undefined;
 
 export default function ChatWidget({
   onAttachmentChange,
   onAnalysisChange,
   onAnalysisResultChange,
   onAnalysisPanelChange,
-  analysisPanel,
 }: ChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
@@ -61,6 +65,8 @@ export default function ChatWidget({
   const [attachmentsOpen, setAttachmentsOpen] = useState(true);
   const [previewAttachmentId, setPreviewAttachmentId] = useState<string | null>(null);
   const [replaceAttachmentId, setReplaceAttachmentId] = useState<string | null>(null);
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -70,6 +76,11 @@ export default function ChatWidget({
   const abortRef = useRef<AbortController | null>(null);
   const sessionRef = useRef<number>(0);
   const attachmentsRef = useRef<Attachment[]>([]);
+  const firstAttachmentAtRef = useRef<number | null>(null);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+  const messageCounterRef = useRef(0);
 
   const hasAnyAttachment = useMemo(() => attachments.length > 0, [attachments]);
   const visionAttachmentCount = useMemo(
@@ -80,7 +91,6 @@ export default function ChatWidget({
     () => attachments.find((attachment) => attachment.attachmentId === previewAttachmentId) ?? null,
     [attachments, previewAttachmentId]
   );
-  const atAGlance = useMemo(() => buildAtAGlanceSummary(analysisPanel), [analysisPanel]);
 
   useEffect(() => {
     attachmentsRef.current = attachments;
@@ -93,6 +103,7 @@ export default function ChatWidget({
 
   useEffect(() => {
     return () => {
+      stopSpeaking();
       for (const attachment of attachmentsRef.current) {
         if (attachment.previewUrl) {
           URL.revokeObjectURL(attachment.previewUrl);
@@ -112,7 +123,7 @@ export default function ChatWidget({
         return prev;
       }
 
-      return [...prev, { role: "assistant", content: feedback }];
+      return [...prev, createMessage("assistant", feedback)];
     });
   }, [attachments.length]);
 
@@ -158,9 +169,36 @@ export default function ChatWidget({
     return file.type.startsWith("image/");
   }
 
+  function pushAssistantMessage(content: string) {
+    setMessages((prev) => [...prev, createMessage("assistant", content)]);
+  }
+
+  function summarizeAttachmentStats(list: Attachment[]) {
+    return {
+      fileCount: list.length,
+      totalBytes: list.reduce((sum, attachment) => sum + attachment.sizeBytes, 0),
+      totalPdfPages: list.reduce((sum, attachment) => sum + (attachment.pageCount ?? 0), 0),
+    };
+  }
+
+  function rejectOversizedBatch(fileList: FileList | null, source: "file" | "camera") {
+    if (!fileList || fileList.length <= MAX_UPLOAD_BATCH_FILES) {
+      return false;
+    }
+
+    console.info("[attachments] batch rejected", {
+      source,
+      fileCount: fileList.length,
+      totalBytes: Array.from(fileList).reduce((sum, file) => sum + file.size, 0),
+    });
+    pushAssistantMessage(UPLOAD_CAP_MESSAGE);
+    return true;
+  }
+
   function handleEndChat() {
     abortRef.current?.abort();
     abortRef.current = null;
+    stopSpeaking();
     sessionRef.current += 1;
 
     setLoading(false);
@@ -175,6 +213,7 @@ export default function ChatWidget({
     setAttachmentsOpen(true);
     setPreviewAttachmentId(null);
     setReplaceAttachmentId(null);
+    firstAttachmentAtRef.current = null;
 
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (cameraInputRef.current) cameraInputRef.current.value = "";
@@ -194,15 +233,15 @@ export default function ChatWidget({
     if (loading) return;
     if (!input.trim() && attachments.length === 0) return;
 
+    stopSpeaking();
     setLoading(true);
     shouldAutoScrollRef.current = true;
 
     const mySession = sessionRef.current;
     const messageToSend = input.trim() || buildAttachmentSummary(attachments);
-    const userMessage: Message = {
-      role: "user",
-      content: messageToSend,
-    };
+    const attachmentStats = summarizeAttachmentStats(attachments);
+    const analysisStartMs = Date.now();
+    const userMessage: Message = createMessage("user", messageToSend);
 
     const updatedMessages: Message[] = [...messages, userMessage];
     setMessages(updatedMessages);
@@ -213,6 +252,15 @@ export default function ChatWidget({
     abortRef.current = controller;
 
     try {
+      console.info("[attachments] analysis start", {
+        fileCount: attachmentStats.fileCount,
+        totalBytes: attachmentStats.totalBytes,
+        totalPdfPages: attachmentStats.totalPdfPages,
+        timeToAnalysisStartMs: firstAttachmentAtRef.current
+          ? analysisStartMs - firstAttachmentAtRef.current
+          : 0,
+      });
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -224,6 +272,7 @@ export default function ChatWidget({
             filename: attachment.filename,
             type: attachment.mime,
             text: attachment.text,
+            pageCount: attachment.pageCount,
             imageDataUrl: attachment.imageDataUrl,
           })),
         }),
@@ -241,7 +290,17 @@ export default function ChatWidget({
           // Ignore JSON parse failures and keep the fallback message.
         }
 
-        throw new Error(errorMessage);
+        console.warn("[chat] request failed", {
+          status: response.status,
+          message: errorMessage,
+        });
+
+        if (sessionRef.current === mySession) {
+          pushAssistantMessage(errorMessage);
+          onAnalysisResultChange?.(null);
+          onAnalysisPanelChange?.(null);
+        }
+        return;
       }
 
       const contentType = response.headers.get("content-type") || "";
@@ -249,6 +308,17 @@ export default function ChatWidget({
         onAnalysisResultChange?.(null);
         onAnalysisPanelChange?.(null);
       } else {
+        console.info("[attachments] analysis request assembled", {
+          attachmentCount: attachments.length,
+          visionAttachmentCount,
+          attachments: attachments.map((attachment) => ({
+            filename: attachment.filename,
+            mimeType: attachment.mime || "unknown",
+            hasVision: attachment.hasVision,
+            hasImageDataUrl: Boolean(attachment.imageDataUrl),
+            pageCount: attachment.pageCount ?? null,
+          })),
+        });
         void fetch("/api/analysis", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -259,7 +329,15 @@ export default function ChatWidget({
           }),
         })
           .then(async (analysisResponse) => {
+            const analysisDurationMs = Date.now() - analysisStartMs;
             if (!analysisResponse.ok || sessionRef.current !== mySession) {
+              console.info("[attachments] analysis failure", {
+                fileCount: attachmentStats.fileCount,
+                totalBytes: attachmentStats.totalBytes,
+                totalPdfPages: attachmentStats.totalPdfPages,
+                analysisDurationMs,
+                status: analysisResponse.status,
+              });
               onAnalysisResultChange?.(null);
               onAnalysisPanelChange?.(null);
               return;
@@ -271,6 +349,12 @@ export default function ChatWidget({
             };
             onAnalysisResultChange?.(analysisData.report ?? null);
             onAnalysisPanelChange?.(analysisData.panel ?? null);
+            console.info("[attachments] analysis complete", {
+              fileCount: attachmentStats.fileCount,
+              totalBytes: attachmentStats.totalBytes,
+              totalPdfPages: attachmentStats.totalPdfPages,
+              analysisDurationMs,
+            });
             setAttachments((prev) =>
               prev.map((attachment) => ({
                 ...attachment,
@@ -278,7 +362,14 @@ export default function ChatWidget({
               }))
             );
           })
-          .catch(() => {
+          .catch((error) => {
+            console.info("[attachments] analysis failure", {
+              fileCount: attachmentStats.fileCount,
+              totalBytes: attachmentStats.totalBytes,
+              totalPdfPages: attachmentStats.totalPdfPages,
+              analysisDurationMs: Date.now() - analysisStartMs,
+              error: error instanceof Error ? error.message : String(error),
+            });
             if (sessionRef.current === mySession) {
               onAnalysisResultChange?.(null);
               onAnalysisPanelChange?.(null);
@@ -291,7 +382,9 @@ export default function ChatWidget({
         const decoder = new TextDecoder();
         let assistantText = "";
 
-        setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+        stopSpeaking();
+        const streamingAssistantMessage = createMessage("assistant", "");
+        setMessages((prev) => [...prev, streamingAssistantMessage]);
         const assistantIndex = updatedMessages.length;
 
         while (true) {
@@ -307,7 +400,7 @@ export default function ChatWidget({
 
             const next = [...prev];
             if (assistantIndex >= 0 && assistantIndex < next.length) {
-              next[assistantIndex] = { role: "assistant", content: assistantText };
+              next[assistantIndex] = { ...next[assistantIndex], content: assistantText };
             }
             return next;
           });
@@ -321,7 +414,8 @@ export default function ChatWidget({
         const reply = (data.reply as string) || "No response received.";
 
         if (sessionRef.current === mySession) {
-          setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+          stopSpeaking();
+          setMessages((prev) => [...prev, createMessage("assistant", reply)]);
           onAnalysisChange?.(reply);
         }
       }
@@ -330,12 +424,14 @@ export default function ChatWidget({
         return;
       }
 
-      console.error(err);
+      console.warn("[chat] unexpected request failure", {
+        message: err instanceof Error ? err.message : String(err),
+      });
 
       if (sessionRef.current === mySession) {
         setMessages((prev) => [
           ...prev,
-          { role: "assistant", content: "Error connecting to AI." },
+          createMessage("assistant", "The analysis service had a temporary issue. Please retry."),
         ]);
         onAnalysisResultChange?.(null);
         onAnalysisPanelChange?.(null);
@@ -371,12 +467,23 @@ export default function ChatWidget({
     const previewUrl =
       mime === "application/pdf" || isLikelyImageFile(file) ? URL.createObjectURL(file) : undefined;
 
+    console.info("[attachments] upload complete", {
+      filename,
+      mimeType: mime || file.type || "unknown",
+      source,
+      hasVision,
+      hasImageDataUrl: Boolean(imageDataUrl),
+      pageCount: pageCount ?? null,
+      replaceId: replaceId ?? null,
+    });
+
     setAttachments((prev) => {
       const nextAttachment = {
         attachmentId,
         filename,
         mime,
         text,
+        sizeBytes: file.size,
         imageDataUrl,
         previewUrl,
         pageCount,
@@ -407,31 +514,34 @@ export default function ChatWidget({
     onAnalysisPanelChange?.(null);
     setPreviewAttachmentId(replaceId ?? attachmentId);
     setReplaceAttachmentId(null);
+    firstAttachmentAtRef.current ??= Date.now();
 
-    setMessages((prev) => [
-      ...prev,
-      {
-        role: "assistant",
-        content: replaceId
-          ? `File "${filename}" replaced the previous attachment successfully.`
-          : `File "${filename}" uploaded successfully.`,
-      },
-    ]);
+    pushAssistantMessage(
+      replaceId
+        ? `File "${filename}" replaced the previous attachment successfully.`
+        : `File "${filename}" uploaded successfully.`
+    );
   }
 
   async function handleFilesSelected(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
+    if (rejectOversizedBatch(fileList, "file")) {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
 
     try {
+      console.info("[attachments] upload batch selected", {
+        source: "file",
+        fileCount: fileList.length,
+        totalBytes: Array.from(fileList).reduce((sum, file) => sum + file.size, 0),
+      });
       for (const file of Array.from(fileList)) {
         await uploadSingleFile(file, "file", replaceAttachmentId);
       }
     } catch (err) {
       console.error(err);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "One or more uploads failed." },
-      ]);
+      pushAssistantMessage("One or more uploads failed.");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
@@ -439,17 +549,23 @@ export default function ChatWidget({
 
   async function handleCameraSelected(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
+    if (rejectOversizedBatch(fileList, "camera")) {
+      if (cameraInputRef.current) cameraInputRef.current.value = "";
+      return;
+    }
 
     try {
+      console.info("[attachments] upload batch selected", {
+        source: "camera",
+        fileCount: fileList.length,
+        totalBytes: Array.from(fileList).reduce((sum, file) => sum + file.size, 0),
+      });
       for (const file of Array.from(fileList)) {
         await uploadSingleFile(file, "camera", replaceAttachmentId);
       }
     } catch (err) {
       console.error(err);
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "Camera upload failed." },
-      ]);
+      pushAssistantMessage("Camera upload failed.");
     } finally {
       if (cameraInputRef.current) cameraInputRef.current.value = "";
     }
@@ -492,6 +608,144 @@ export default function ChatWidget({
     setReplaceAttachmentId(attachmentId);
     fileInputRef.current?.click();
   }
+
+  function createMessage(role: Role, content: string): Message {
+    messageCounterRef.current += 1;
+    return {
+      id: `${role}-${messageCounterRef.current}`,
+      role,
+      content,
+    };
+  }
+
+  function stopSpeaking() {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
+
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      setSpeakingMessageId(null);
+      setIsSpeaking(false);
+      utteranceRef.current = null;
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    utteranceRef.current = null;
+    setSpeakingMessageId(null);
+    setIsSpeaking(false);
+  }
+
+  async function playServerSpeech(message: Message, plainText: string) {
+    const response = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: plainText,
+        voice: SERVER_TTS_VOICE,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Server TTS failed (${response.status})`);
+    }
+
+    const audioBlob = await response.blob();
+    const audioUrl = URL.createObjectURL(audioBlob);
+    const audio = new Audio(audioUrl);
+
+    audioRef.current = audio;
+    audioUrlRef.current = audioUrl;
+
+    audio.onplay = () => {
+      setSpeakingMessageId(message.id);
+      setIsSpeaking(true);
+    };
+    audio.onended = () => {
+      if (audioRef.current === audio) {
+        stopSpeaking();
+      }
+    };
+    audio.onerror = () => {
+      if (audioRef.current === audio) {
+        stopSpeaking();
+      }
+    };
+
+    await audio.play();
+  }
+
+  function playBrowserSpeech(message: Message, plainText: string) {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      throw new Error("Browser speech is unavailable.");
+    }
+
+    const utterance = new SpeechSynthesisUtterance(plainText);
+    utteranceRef.current = utterance;
+    utterance.onstart = () => {
+      setSpeakingMessageId(message.id);
+      setIsSpeaking(true);
+    };
+    utterance.onend = () => {
+      if (utteranceRef.current === utterance) {
+        utteranceRef.current = null;
+        setSpeakingMessageId(null);
+        setIsSpeaking(false);
+      }
+    };
+    utterance.onerror = () => {
+      if (utteranceRef.current === utterance) {
+        utteranceRef.current = null;
+        setSpeakingMessageId(null);
+        setIsSpeaking(false);
+      }
+    };
+
+    window.speechSynthesis.speak(utterance);
+  }
+
+  async function handleSpeakMessage(message: Message) {
+    if (speakingMessageId === message.id && isSpeaking) {
+      stopSpeaking();
+      return;
+    }
+
+    const plainText = toSpeechText(message.content);
+    if (!plainText) {
+      return;
+    }
+
+    stopSpeaking();
+
+    if (SERVER_TTS_ENABLED) {
+      try {
+        await playServerSpeech(message, plainText);
+        return;
+      } catch (error) {
+        console.warn("[tts] server playback failed, falling back to browser speech", {
+          messageId: message.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      pushAssistantMessage("Read aloud is not available in this browser.");
+      return;
+    }
+
+    playBrowserSpeech(message, plainText);
+  }
+
+  const canReadAloud =
+    SERVER_TTS_ENABLED || (typeof window !== "undefined" && "speechSynthesis" in window);
 
   const userBubble = "bg-black/70 border border-orange-500/30 text-orange-400";
 
@@ -549,9 +803,9 @@ export default function ChatWidget({
             </div>
           )}
 
-          {messages.map((msg, idx) => (
+          {messages.map((msg) => (
             <div
-              key={idx}
+              key={msg.id}
               className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} mb-3`}
             >
               <div
@@ -562,28 +816,34 @@ export default function ChatWidget({
                 }`}
               >
                 {msg.role === "assistant" ? (
-                  <div className="analysis-report text-[15px] leading-[1.65] text-white/90">
-                    {atAGlance && idx === messages.length - 1 && msg.content.trim() !== INITIAL_MESSAGE.content && (
-                      <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.04] p-4">
-                        <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
-                          At a glance
-                        </div>
-                        <div className="mt-3 space-y-2 text-sm leading-6 text-white/82">
-                          <p>
-                            <span className="font-semibold text-white">Best overall conclusion:</span>{" "}
-                            {cleanPresentationText(atAGlance.conclusion)}
-                          </p>
-                          <p>
-                            <span className="font-semibold text-white">Top dispute areas:</span>{" "}
-                            {cleanPresentationText(atAGlance.disputes)}
-                          </p>
-                          <p>
-                            <span className="font-semibold text-white">Next recommended action:</span>{" "}
-                            {cleanPresentationText(atAGlance.nextAction)}
-                          </p>
-                        </div>
-                      </div>
-                    )}
+                  <div>
+                    <div className="mb-3 flex items-center justify-end">
+                      <button
+                        type="button"
+                        onClick={() => handleSpeakMessage(msg)}
+                        disabled={!canReadAloud}
+                        aria-label={
+                          speakingMessageId === msg.id && isSpeaking
+                            ? "Stop reading aloud"
+                            : "Read aloud"
+                        }
+                        title={
+                          canReadAloud
+                            ? speakingMessageId === msg.id && isSpeaking
+                              ? "Stop reading aloud"
+                              : "Read aloud"
+                            : "Read aloud unavailable"
+                        }
+                        className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {speakingMessageId === msg.id && isSpeaking ? (
+                          <Square size={14} />
+                        ) : (
+                          <Volume2 size={14} />
+                        )}
+                      </button>
+                    </div>
+                    <div className="analysis-report text-[15px] leading-[1.65] text-white/90">
                     <ReactMarkdown
                       components={{
                         h2: ({ children }) => (
@@ -619,8 +879,9 @@ export default function ChatWidget({
                         ),
                       }}
                     >
-                      {cleanPresentationMarkdown(msg.content)}
+                      {formatAssistantMessage(msg.content)}
                     </ReactMarkdown>
+                    </div>
                   </div>
                 ) : (
                   <div className="whitespace-pre-wrap text-sm sm:text-base text-current">
@@ -811,35 +1072,18 @@ function formatAttachmentKind(attachment: Attachment): string {
   return attachment.mime || "Unknown";
 }
 
-function buildAtAGlanceSummary(panel?: DecisionPanel | null): {
-  conclusion: string;
-  disputes: string;
-  nextAction: string;
-} | null {
-  if (!panel) return null;
+function formatAssistantMessage(content: string): string {
+  return content.replace(
+    VALUATION_URL_PATTERN,
+    "[Continue for full valuation](https://www.collision.academy/)"
+  );
+}
 
-  const conclusion = cleanPresentationText(panel.narrative?.trim());
-  if (!conclusion) return null;
-
-  const disputeTitles = panel.supplements
-    .map((item) => cleanPresentationText(item.title?.trim()))
-    .filter(Boolean)
-    .slice(0, 3);
-
-  const nextAction =
-    cleanPresentationText((panel.appraisal?.triggered && panel.appraisal.reasoning?.trim()) || "") ||
-    cleanPresentationText(panel.negotiationResponse?.trim()) ||
-    cleanPresentationText(panel.stateLeverage?.[0]?.trim()) ||
-    cleanPresentationText(panel.supplements[0]?.rationale?.trim()) ||
-    "";
-
-  return {
-    conclusion,
-    disputes:
-      disputeTitles.length > 0
-        ? disputeTitles.join("; ")
-        : "No major dispute areas were clearly surfaced from the current analysis.",
-    nextAction:
-      nextAction || "Continue with the strongest supported repair position and document the key disputed items.",
-  };
+function toSpeechText(content: string): string {
+  return formatAssistantMessage(content)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1")
+    .replace(/[`*_>#-]+/g, " ")
+    .replace(/\n+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }

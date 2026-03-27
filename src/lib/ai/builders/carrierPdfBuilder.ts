@@ -1,6 +1,8 @@
 import { buildExportModel, COLLISION_ACADEMY_HANDOFF_URL } from "./buildExportModel";
 import type { DecisionPanel } from "./buildDecisionPanel";
 import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
+const PLACEHOLDER_VEHICLE_LABEL_PATTERN =
+  /^(?:unknown|unspecified|n\/a|na|none|null|undefined|not available|not provided|vehicle details are still limited in the current material\.?)$/i;
 
 export type CarrierReportSection = {
   title: string;
@@ -9,6 +11,7 @@ export type CarrierReportSection = {
 };
 
 export type CarrierReportDocument = {
+  filename?: string;
   brand: {
     companyName: string;
     reportLabel: string;
@@ -44,9 +47,6 @@ export function buildCarrierReport({
     panel,
     assistantAnalysis,
   });
-  const vehicleDisplay = exportModel.vehicle.display || "Unspecified";
-  const vinDisplay =
-    exportModel.vehicle.vin || "Not clearly supported in the current material.";
 
   const topItems = selectReportSupplementItems(exportModel.supplementItems);
   const strongestDisputes =
@@ -57,6 +57,7 @@ export function buildCarrierReport({
   const whyItWins = buildWhyItWins(exportModel, report, analysis);
 
   return {
+    filename: "collision-iq-main-report.pdf",
     brand: {
       companyName: "Collision Academy",
       reportLabel: "Collision Repair Intelligence Report",
@@ -75,11 +76,11 @@ export function buildCarrierReport({
     summary: [
       {
         label: "Vehicle",
-        value: vehicleDisplay,
+        value: buildVehicleIdentityValue(exportModel),
       },
       {
         label: "VIN",
-        value: vinDisplay,
+        value: exportModel.vehicle.vin || "Not clearly supported in the current material.",
       },
       {
         label: "Repair Conclusion",
@@ -102,12 +103,12 @@ export function buildCarrierReport({
       {
         title: "Vehicle / File Summary",
         bullets: compact([
-          vehicleDisplay !== "Unspecified"
-            ? `Vehicle: ${vehicleDisplay}.`
+          buildVehicleIdentityValue(exportModel) !== "Unspecified"
+            ? `Vehicle: ${buildVehicleIdentityValue(exportModel)}.`
             : undefined,
           exportModel.vehicle.manufacturer ? `Manufacturer: ${exportModel.vehicle.manufacturer}.` : undefined,
           exportModel.vehicle.trim ? `Trim: ${exportModel.vehicle.trim}.` : undefined,
-          exportModel.vehicle.vin ? `VIN: ${vinDisplay}.` : undefined,
+          exportModel.vehicle.vin ? `VIN: ${exportModel.vehicle.vin}.` : undefined,
           `Confidence: ${formatVehicleConfidence(exportModel)}.`,
           report ? `Structured analysis confidence: ${capitalize(report.summary.confidence)}.` : undefined,
           report ? `Evidence quality: ${capitalize(report.summary.evidenceQuality)}.` : undefined,
@@ -166,6 +167,46 @@ function buildExecutiveSummary(params: {
     params.whyItWins,
     `The biggest current dispute areas are ${params.strongestDisputes}.`,
   ].join(" ");
+}
+
+function buildVehicleIdentityValue(
+  exportModel: ReturnType<typeof buildExportModel>
+): string {
+  const resolvedLabel = sanitizeVehicleLabel(exportModel.vehicle.label);
+  if (resolvedLabel) {
+    return resolvedLabel;
+  }
+
+  const namedParts = [
+    exportModel.vehicle.year,
+    exportModel.vehicle.make,
+    exportModel.vehicle.model,
+    exportModel.vehicle.trim,
+  ].filter(Boolean);
+
+  if (namedParts.length > 0) {
+    return namedParts.join(" ");
+  }
+
+  const partialIdentity = [
+    exportModel.vehicle.make,
+    exportModel.vehicle.model,
+    exportModel.vehicle.manufacturer,
+  ].filter(Boolean);
+
+  if (partialIdentity.length > 0) {
+    return partialIdentity.join(" ");
+  }
+
+  return "Unspecified";
+}
+
+function sanitizeVehicleLabel(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const cleaned = value.trim();
+  if (!cleaned) return undefined;
+  if (PLACEHOLDER_VEHICLE_LABEL_PATTERN.test(cleaned)) return undefined;
+  return cleaned;
 }
 
 function buildCredibilityConclusion(

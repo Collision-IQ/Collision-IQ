@@ -2,14 +2,23 @@ import type { DecisionPanel } from "./buildDecisionPanel";
 import { deriveRenderInsightsFromChat, type DerivedValuation } from "./deriveRenderInsightsFromChat";
 import type { AnalysisResult, RepairIntelligenceReport, VehicleIdentity } from "../types/analysis";
 import {
+  buildVehicleLabel,
+  decodeVinVehicleIdentity,
   extractVehicleIdentityFromText,
+  isBetterVinCandidate,
   mergeVehicleIdentity,
   normalizeVehicleIdentity,
-  resolveVehicleIdentity,
 } from "../vehicleContext";
+import {
+  assessDisplayQuality,
+  cleanDisplayLabel,
+  cleanDisplayText,
+  getDisplayVehicleInfo,
+} from "../displayText";
 
 export const COLLISION_ACADEMY_HANDOFF_URL = "https://www.collision.academy/";
-const DEBUG_VEHICLE_IDENTITY = process.env.DEBUG_VEHICLE_IDENTITY === "1";
+const PLACEHOLDER_VEHICLE_LABEL_PATTERN =
+  /^(?:unknown|unspecified|n\/a|na|none|null|undefined|not available|not provided|vehicle details are still limited in the current material\.?)$/i;
 
 export type ExportSupplementItem = {
   title: string;
@@ -27,8 +36,6 @@ export type ExportSupplementItem = {
 
 export type ExportVehicleInfo = {
   label?: string;
-  display: string;
-  vehicleDisplay: string;
   vin?: string;
   year?: number;
   make?: string;
@@ -37,7 +44,6 @@ export type ExportVehicleInfo = {
   manufacturer?: string;
   confidence: "supported" | "partial" | "unknown";
   sourceConfidence?: number;
-  sourceSummary?: string[];
   fieldSources?: VehicleIdentity["fieldSources"];
   mismatches?: string[];
 };
@@ -96,115 +102,156 @@ export function buildExportModel(params: {
   const positionStatement = buildPositionStatement(params.report, supplementItems);
   const request = buildRequest(params.report, params.panel, supplementItems, chatInsights.request);
   const valuation = buildValuation(params.panel, chatInsights.valuation);
+  const displayVehicle = getDisplayVehicleInfo(vehicle);
+  const cleanedSupplementItems = supplementItems.map((item) => ({
+    ...item,
+    title: cleanDisplayLabel(item.title),
+    rationale: cleanDisplayText(item.rationale),
+    evidence: item.evidence ? cleanDisplayText(item.evidence) : undefined,
+    source: item.source ? cleanDisplayText(item.source) : undefined,
+  }));
+  const quality = assessDisplayQuality({
+    vehicleLabel: displayVehicle.label ?? vehicle.label,
+    vehicleTrim: displayVehicle.trim ?? vehicle.trim,
+    supplementItems: cleanedSupplementItems,
+  });
+  const structuredVehicleLabel =
+    [vehicle?.year, cleanDisplayLabel(vehicle?.make), cleanDisplayLabel(vehicle?.model)]
+      .filter(Boolean)
+      .join(" ")
+      .trim() ||
+    [vehicle?.year, cleanDisplayLabel(vehicle?.make), cleanDisplayLabel(vehicle?.model), displayVehicle.trim]
+      .filter(Boolean)
+      .join(" ")
+      .trim() ||
+    undefined;
+  const guardedSupplementItems = quality.noisy
+    ? cleanedSupplementItems.filter((item, index) => {
+        if (index === 0) return true;
+        const lower = item.title.toLowerCase();
+        return lower.split(/\s+/).length >= 2 && !/\b(?:wheel|mirror|battery|panel)\b/i.test(lower);
+      })
+    : cleanedSupplementItems;
+  const guardedVehicleLabel = quality.malformedVehicle
+    ? structuredVehicleLabel
+    : displayVehicle.label ?? structuredVehicleLabel ?? vehicle.label;
+  const allLabelsSuppressed = quality.noisy && guardedSupplementItems.length === 0;
 
   return {
-    vehicle,
-    repairPosition,
-    positionStatement,
-    supplementItems,
-    request,
-    valuation,
+    vehicle: {
+      ...vehicle,
+      label: guardedVehicleLabel,
+      trim: displayVehicle.trim,
+      make: cleanDisplayLabel(vehicle.make),
+      model: cleanDisplayLabel(vehicle.model),
+      manufacturer: cleanDisplayText(vehicle.manufacturer),
+    },
+    repairPosition: allLabelsSuppressed
+      ? "The core repair conclusion remains intact, but noisy extracted labels were suppressed in this presentation view."
+      : cleanDisplayText(repairPosition),
+    positionStatement: allLabelsSuppressed
+      ? "The main dispute areas remain supportable, but low-quality extracted labels were removed before rendering."
+      : cleanDisplayText(positionStatement),
+    supplementItems: guardedSupplementItems,
+    request: allLabelsSuppressed
+      ? "Please review the core dispute areas and provide clearer support for the intended repair path and verification steps."
+      : cleanDisplayText(request),
+    valuation: {
+      ...valuation,
+      acvReasoning: cleanDisplayText(valuation.acvReasoning),
+      acvMissingInputs: valuation.acvMissingInputs.map((item) => cleanDisplayLabel(item)),
+      dvReasoning: cleanDisplayText(valuation.dvReasoning),
+      dvMissingInputs: valuation.dvMissingInputs.map((item) => cleanDisplayLabel(item)),
+    },
   };
-}
-
-function logVehicleCheckpoint(
-  vehicle: ExportVehicleInfo,
-  source?: VehicleIdentity["source"]
-) {
-  if (!DEBUG_VEHICLE_IDENTITY) {
-    return;
-  }
-
-  console.info("[vehicle-checkpoint:exportModel.vehicle]", {
-    vin: vehicle.vin ?? null,
-    year: vehicle.year ?? null,
-    make: vehicle.make ?? null,
-    model: vehicle.model ?? null,
-    trim: vehicle.trim ?? null,
-    confidence: vehicle.confidence ?? null,
-    source: source ?? null,
-    fieldSources: vehicle.fieldSources ?? null,
-  });
 }
 
 function inferVehicleInfo(
   report: RepairIntelligenceReport | null,
   analysis: AnalysisResult | null
 ): ExportVehicleInfo {
+  const documentVehicleText = collectVehicleDocumentText(report, analysis);
   const structuredVehicle = mergeVehicleIdentity(
     normalizeVehicleIdentity(report?.vehicle),
     normalizeVehicleIdentity(report?.analysis?.vehicle),
     normalizeVehicleIdentity(analysis?.vehicle)
   );
+  const inferredVehicle = extractVehicleIdentityFromText(documentVehicleText, "attachment");
+  const resolvedVin = resolveExportVin(structuredVehicle, inferredVehicle, documentVehicleText);
+  const decodedVehicle = resolvedVin ? decodeVinVehicleIdentity(resolvedVin) : undefined;
+  const vehicle = mergeVehicleIdentity(decodedVehicle, structuredVehicle, inferredVehicle);
+  const decodedVehicleLabel = buildVehicleDisplayLabel(
+    mergeVehicleIdentity(decodedVehicle, vehicle)
+  );
+  const structuredVehicleLabel = buildVehicleDisplayLabel(vehicle);
+  const rawVehicleLabel = sanitizeVehicleDisplay(buildVehicleLabel(vehicle));
+  const label =
+    decodedVehicleLabel ??
+    structuredVehicleLabel ??
+    rawVehicleLabel;
+  const detailCount = [vehicle?.year, vehicle?.make, vehicle?.model, vehicle?.vin, vehicle?.trim].filter(Boolean).length;
 
-  const lockedReportVin = getLockedReportVin(report, analysis);
-  const needsDocumentFallback =
-    !structuredVehicle?.year ||
-    !structuredVehicle?.make ||
-    !structuredVehicle?.model ||
-    (!structuredVehicle?.trim && !structuredVehicle?.vin);
+  console.info("[vehicle-reconciliation:report]", {
+    structuredVehicle: structuredVehicle ?? null,
+    decodedVehicle: decodedVehicle ?? null,
+    inferredVehicle: inferredVehicle ?? null,
+    resolvedVehicle: vehicle ?? null,
+    resolvedVin: resolvedVin ?? null,
+    hasDocumentVehicleText: Boolean(documentVehicleText.trim()),
+  });
 
-  const documentVehicleText = needsDocumentFallback
-    ? collectVehicleDocumentText(report, analysis)
-    : "";
+  console.info("[export-vehicle-selection]", {
+    vinPresent: Boolean(resolvedVin),
+    decodedVehiclePresent: Boolean(decodedVehicleLabel),
+    structuredFieldsPresent: Boolean(vehicle?.year || vehicle?.make || vehicle?.model || vehicle?.trim),
+    rawVehicleLabelPresent: Boolean(rawVehicleLabel),
+    finalVehicle: label ?? "Unspecified",
+  });
 
-  const inferredVehicle =
-    documentVehicleText.trim().length > 0
-      ? extractVehicleIdentityFromText(documentVehicleText, "attachment")
-      : undefined;
-
-  const resolvedVehicle = resolveVehicleIdentity(structuredVehicle, inferredVehicle);
-  const finalVin = lockedReportVin ?? resolvedVehicle.vin;
-
-  const exportVehicle = {
-    label: resolvedVehicle.label,
-    display: resolvedVehicle.display,
-    vehicleDisplay: resolvedVehicle.vehicleDisplay,
-    vin: finalVin,
-    year: resolvedVehicle.year,
-    make: resolvedVehicle.make,
-    model: resolvedVehicle.model,
-    trim: resolvedVehicle.trim,
-    manufacturer: resolvedVehicle.manufacturer,
-    confidence: resolvedVehicle.confidence,
-    sourceConfidence: resolvedVehicle.sourceConfidence,
-    sourceSummary: resolvedVehicle.sourceSummary,
-    fieldSources: resolvedVehicle.fieldSources,
-    mismatches: resolvedVehicle.mismatches,
+  return {
+    label,
+    vin: cleanDisplayText(resolvedVin),
+    year: vehicle?.year,
+    make: cleanDisplayLabel(vehicle?.make),
+    model: cleanDisplayLabel(vehicle?.model),
+    trim: cleanDisplayText(vehicle?.trim),
+    manufacturer: cleanDisplayText(vehicle?.manufacturer),
+    confidence:
+      detailCount >= 3 || Boolean(vehicle?.vin)
+        ? "supported"
+        : detailCount >= 2
+          ? "partial"
+          : "unknown",
+    sourceConfidence: vehicle?.confidence,
+    fieldSources: vehicle?.fieldSources,
+    mismatches: vehicle?.mismatches,
   };
-
-  if (DEBUG_VEHICLE_IDENTITY) {
-    console.info("[vehicle-reconciliation:report]", {
-      structuredVehicle: structuredVehicle ?? null,
-      lockedReportVin: lockedReportVin ?? null,
-      inferredVehicle: inferredVehicle ?? null,
-      resolvedVin: resolvedVehicle.vin ?? null,
-      finalVin: finalVin ?? null,
-      usedDocumentFallback: Boolean(documentVehicleText.trim()),
-    });
-  }
-  logVehicleCheckpoint(exportVehicle, resolvedVehicle.identity?.source);
-
-  return exportVehicle;
 }
 
-function getLockedReportVin(
-  report: RepairIntelligenceReport | null,
-  analysis: AnalysisResult | null
+function buildVehicleDisplayLabel(
+  vehicle: VehicleIdentity | null | undefined
 ): string | undefined {
-  const candidates = [
-    normalizeVehicleIdentity(analysis?.vehicle)?.vin,
-    normalizeVehicleIdentity(report?.analysis?.vehicle)?.vin,
-    normalizeVehicleIdentity(report?.vehicle)?.vin,
-  ];
+  const normalized = normalizeVehicleIdentity(vehicle);
+  if (!normalized) return undefined;
 
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim()) {
-      return candidate.trim();
-    }
-  }
+  return sanitizeVehicleDisplay(
+    [
+      normalized.year,
+      cleanDisplayLabel(normalized.make),
+      cleanDisplayLabel(normalized.model),
+      cleanDisplayText(normalized.trim),
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+}
 
-  return undefined;
+function sanitizeVehicleDisplay(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const cleaned = cleanDisplayText(value);
+  if (!cleaned) return undefined;
+  if (PLACEHOLDER_VEHICLE_LABEL_PATTERN.test(cleaned)) return undefined;
+  return cleaned;
 }
 
 function collectVehicleDocumentText(
@@ -226,6 +273,43 @@ function collectVehicleDocumentText(
   ]
     .filter((value): value is string => Boolean(value && value.trim()))
     .join("\n\n");
+}
+
+function extractVinFromText(text: string): string | undefined {
+  const candidates = text.toUpperCase().match(/\b[A-HJ-NPR-Z0-9]{17}\b/g) ?? [];
+  let bestVin: string | undefined;
+
+  for (const candidate of candidates) {
+    const normalizedVin = normalizeVehicleIdentity({
+      vin: candidate,
+      source: "attachment",
+    })?.vin;
+    if (normalizedVin && isBetterVinCandidate(normalizedVin, bestVin)) {
+      bestVin = normalizedVin;
+    }
+  }
+
+  return bestVin;
+}
+
+function resolveExportVin(
+  structuredVehicle: VehicleIdentity | null | undefined,
+  inferredVehicle: VehicleIdentity | null | undefined,
+  documentVehicleText: string
+): string | undefined {
+  let bestVin = normalizeVehicleIdentity(structuredVehicle)?.vin;
+
+  const inferredVin = normalizeVehicleIdentity(inferredVehicle)?.vin;
+  if (isBetterVinCandidate(inferredVin, bestVin)) {
+    bestVin = inferredVin;
+  }
+
+  const fallbackVin = extractVinFromText(documentVehicleText);
+  if (isBetterVinCandidate(fallbackVin, bestVin)) {
+    bestVin = fallbackVin;
+  }
+
+  return bestVin;
 }
 
 function buildRepairPosition(

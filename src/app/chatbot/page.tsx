@@ -10,12 +10,10 @@ import {
 } from "@/lib/ai/builders/buildExportModel";
 import { buildCarrierReport } from "@/lib/ai/builders/carrierPdfBuilder";
 import { exportCarrierPDF } from "@/lib/ai/builders/exportPdf";
+import { buildRebuttalEmailPdf } from "@/lib/ai/builders/rebuttalEmailPdfBuilder";
+import { buildSideBySidePdf } from "@/lib/ai/builders/sideBySidePdfBuilder";
+import { buildLineByLinePdf } from "@/lib/ai/builders/lineByLinePdfBuilder";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
-import {
-  cleanPresentationText,
-  cleanVehicleSummaryLabel,
-  cleanVehicleTrimLabel,
-} from "@/lib/ui/presentationText";
 import type {
   AnalysisResult,
   RepairIntelligenceReport,
@@ -63,7 +61,7 @@ export default function ChatbotPage() {
   return (
     <div className="h-screen bg-black text-white flex flex-col">
       <header className="px-6 py-4 border-b border-white/10 bg-black/60 backdrop-blur-md">
-        <div className="flex items-center justify-center gap-4 max-w-[1480px] mx-auto">
+        <div className="flex items-center justify-center gap-4 max-w-[1680px] mx-auto">
           <Image
             src="/brand/logos/Logo-grey.png"
             alt="Collision Academy"
@@ -85,23 +83,25 @@ export default function ChatbotPage() {
         </div>
       </header>
 
-      <div className="flex flex-1 min-h-0 w-full max-w-[1480px] mx-auto">
+      <div className="flex flex-1 min-h-0 w-full max-w-[1680px] mx-auto">
         <div className="flex flex-col flex-1 min-w-0">
           <div className="flex-1 min-h-0 flex justify-center">
-            <div className="flex flex-col w-full max-w-[840px] min-h-0">
+            <div className="flex flex-col w-full max-w-[1040px] min-h-0">
+              {!isMobile && hasAtGlanceContent(renderModel) && (
+                <AtAGlanceCard renderModel={renderModel} analysisResult={analysisResult} />
+              )}
               <ChatWidget
                 onAttachmentChange={setAttachment}
                 onAnalysisChange={setAnalysisText}
                 onAnalysisResultChange={setAnalysisResult}
                 onAnalysisPanelChange={setAnalysisPanel}
-                analysisPanel={analysisPanel}
               />
             </div>
           </div>
         </div>
 
         {!isMobile && (
-          <aside className="w-[480px] border-l border-white/10 bg-black/75 shadow-[-24px_0_60px_rgba(0,0,0,0.28)] backdrop-blur-xl flex flex-col">
+          <aside className="w-[420px] xl:w-[460px] border-l border-white/10 bg-black/70 backdrop-blur-xl flex flex-col shadow-[-24px_0_60px_rgba(0,0,0,0.22)]">
             <RailContent
               attachment={attachment}
               analysisText={analysisText}
@@ -161,66 +161,40 @@ function RailContent({
   normalizedResult: AnalysisResult | null;
   analysisResult: RepairIntelligenceReport | null;
 }) {
-  const summary = useMemo(() => buildRailSummary(panel, renderModel), [panel, renderModel]);
-  const vehicleLabel =
-    cleanVehicleSummaryLabel(renderModel.vehicle.display) ||
-    "Vehicle details are still limited in the current material.";
-  const vehicleTrim = cleanVehicleTrimLabel(renderModel.vehicle.trim);
+  const featuredRecommendation = renderModel.supplementItems[0];
+  const remainingRecommendations = renderModel.supplementItems.slice(1);
+  const valuationLowConfidence = isLowConfidenceValuation(renderModel);
 
   return (
-    <div className="flex h-full flex-col overflow-y-auto">
-      <div className="sticky top-0 z-10 border-b border-white/10 bg-black/88 px-6 pb-4 pt-6 backdrop-blur-xl">
+    <div className="flex flex-col h-full overflow-y-auto p-6 space-y-8">
+      <div>
         <div className="text-xs tracking-[0.3em] uppercase text-white/60">
           Decision Support
         </div>
 
-        <div className="mt-1 text-xl font-semibold">Analysis</div>
+        <div className="text-xl font-semibold mt-1">Analysis</div>
 
         {attachment && (
-          <div className="mt-2 truncate text-xs text-white/40">
+          <div className="mt-2 text-xs text-white/40 truncate">
             Latest attachment: {attachment}
           </div>
         )}
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <RailNavButton targetId="rail-summary" label="Summary" />
-          <RailNavButton targetId="rail-disputes" label="Disputes" />
-          <RailNavButton targetId="rail-valuation" label="Valuation" />
-          <RailNavButton targetId="rail-negotiation" label="Negotiation" />
-        </div>
       </div>
 
-      <div className="space-y-6 p-6">
-        <section
-          id="rail-summary"
-          className="rounded-2xl border border-orange-500/30 bg-gradient-to-br from-[#C65A2A]/14 via-[#C65A2A]/8 to-white/[0.03] p-5 shadow-[0_18px_50px_rgba(198,90,42,0.14)]"
-        >
-          <div className="text-[11px] uppercase tracking-[0.24em] text-orange-200/70">
-            Primary Recommendation
-          </div>
-          <div className="mt-3 text-base font-semibold leading-7 text-white">
-            {summary.conclusion}
-          </div>
-          <div className="mt-4 grid gap-3">
-            <CompactRailItem label="Top dispute areas" value={summary.disputes} />
-            <CompactRailItem label="Next recommended action" value={summary.nextAction} />
-          </div>
-        </section>
+      <DecisionSection title="What Stands Out" body={renderModel.repairPosition} tone="neutral" />
 
-        <DecisionSection
-          title="What Stands Out"
-          body={cleanPresentationText(renderModel.repairPosition)}
-          tone="neutral"
-        />
+      {featuredRecommendation && (
+        <FeaturedRecommendationCard item={featuredRecommendation} />
+      )}
 
       <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
         <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
           Vehicle Context
         </div>
         <div className="space-y-1 text-sm text-white/80">
-          <div>{vehicleLabel}</div>
-          {vehicleTrim && (
-            <div className="text-white/55">Trim: {vehicleTrim}</div>
+          <div>{renderModel.vehicle.label || "Vehicle details are still limited in the current material."}</div>
+          {renderModel.vehicle.trim && (
+            <div className="text-white/55">Trim: {renderModel.vehicle.trim}</div>
           )}
           <div className="text-white/55">
             VIN: {renderModel.vehicle.vin || "Not clearly supported in the current material."}
@@ -231,60 +205,57 @@ function RailContent({
         </div>
       </section>
 
-      <section id="rail-disputes" className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+      <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
         <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
           Supplement Lines
         </div>
-        {renderModel.supplementItems.length > 0 ? (
+        {remainingRecommendations.length > 0 ? (
           <div className="space-y-3">
-            {renderModel.supplementItems.map((item, index) => (
-              <div
-                key={`${item.title}-${index}`}
-                className={`rounded-lg border p-3 ${
-                  index === 0
-                    ? "border-orange-500/30 bg-orange-500/8"
-                    : "border-white/10 bg-black/20"
-                }`}
-              >
+            {remainingRecommendations.map((item, index) => (
+              <div key={`${item.title}-${index}`} className="rounded-lg border border-white/10 bg-black/20 p-3">
                 <div className="text-sm font-medium text-white">
-                  {cleanPresentationText(item.title)}
+                  {item.title}
                 </div>
                 <div className="mt-1 text-xs text-white/60">
                   {formatLabel(item.category)} · {formatLabel(item.kind)} · Priority {formatLabel(item.priority)}
                 </div>
-                <div className="mt-2 text-sm leading-6 text-white/80">{cleanPresentationText(item.rationale)}</div>
+                <div className="mt-2 text-sm leading-6 text-white/80">{item.rationale}</div>
                 {item.evidence && (
-                  <div className="mt-2 text-xs leading-5 text-white/45">Evidence: {cleanPresentationText(item.evidence)}</div>
+                  <div className="mt-2 text-xs leading-5 text-white/45">Evidence: {item.evidence}</div>
                 )}
                 {item.source && (
-                  <div className="mt-1 text-[11px] leading-5 text-white/35">Source: {cleanPresentationText(item.source)}</div>
+                  <div className="mt-1 text-[11px] leading-5 text-white/35">Source: {item.source}</div>
                 )}
               </div>
             ))}
           </div>
         ) : (
           <div className="text-sm text-white/45">
-            No clear supportable missing, underwritten, or disputed repair-path items were identified from the current structured analysis.
+            {featuredRecommendation
+              ? "The strongest recommendation is highlighted above."
+              : "No clear supportable missing, underwritten, or disputed repair-path items were identified from the current structured analysis."}
           </div>
         )}
       </section>
 
       {analysisResult && (
-        <div id="rail-valuation">
-          <ValuationSection renderModel={renderModel} />
-        </div>
+        <ValuationSection renderModel={renderModel} lowConfidence={valuationLowConfidence} />
       )}
 
       {renderModel.request && (
-        <div id="rail-negotiation">
-          <NegotiationSection body={renderModel.request} />
-        </div>
+        <ExpandableDecisionSection
+          title="Negotiation Draft"
+          body={renderModel.request}
+          tone="neutral"
+          mono
+          previewLines={7}
+        />
       )}
 
       {panel.appraisal?.triggered && panel.appraisal.reasoning && (
         <DecisionSection
           title="Appraisal Signal"
-            body={cleanPresentationText(panel.appraisal.reasoning)}
+          body={panel.appraisal.reasoning}
           tone="red"
         />
       )}
@@ -292,22 +263,70 @@ function RailContent({
       {panel.stateLeverage && panel.stateLeverage.length > 0 && (
         <DecisionSection
           title="State Leverage"
-            body={panel.stateLeverage.map((point) => `- ${cleanPresentationText(point)}`).join("\n")}
+          body={panel.stateLeverage.map((point) => `- ${point}`).join("\n")}
           tone="yellow"
         />
       )}
 
       {(analysisText || panel.narrative) && (
-        <button
-          onClick={() =>
-            exportReport(normalizedResult, analysisResult, panel, analysisText)
-          }
-          className="mt-4 w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
-        >
-          Export PDF
-        </button>
+        <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+          <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
+            Exports
+          </div>
+          <div className="grid gap-2">
+            <button
+              onClick={() =>
+                exportReport(normalizedResult, analysisResult, panel, analysisText)
+              }
+              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
+            >
+              Export PDF
+            </button>
+            <button
+              onClick={() =>
+                exportPdfVariant({
+                  normalizedResult,
+                  analysisResult,
+                  panel,
+                  analysisText,
+                  variant: "rebuttal",
+                })
+              }
+              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
+            >
+              Rebuttal Email
+            </button>
+            <button
+              onClick={() =>
+                exportPdfVariant({
+                  normalizedResult,
+                  analysisResult,
+                  panel,
+                  analysisText,
+                  variant: "side_by_side",
+                })
+              }
+              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
+            >
+              Side-by-Side Report
+            </button>
+            <button
+              onClick={() =>
+                exportPdfVariant({
+                  normalizedResult,
+                  analysisResult,
+                  panel,
+                  analysisText,
+                  variant: "line_by_line",
+                })
+              }
+              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
+            >
+              Line-by-Line Report
+            </button>
+          </div>
+        </section>
       )}
-      </div>
     </div>
   );
 }
@@ -329,6 +348,98 @@ function exportReport(
   });
 
   void exportCarrierPDF(reportDocument);
+}
+
+function exportPdfVariant(params: {
+  normalizedResult: AnalysisResult | null;
+  analysisResult: RepairIntelligenceReport | null;
+  panel: DecisionPanel;
+  analysisText: string;
+  variant: "rebuttal" | "side_by_side" | "line_by_line";
+}) {
+  const resolvedAnalysis =
+    params.normalizedResult ??
+    (params.analysisResult ? normalizeReportToAnalysisResult(params.analysisResult) : null);
+
+  const sharedInput = {
+    report: params.analysisResult,
+    analysis: resolvedAnalysis,
+    panel: params.panel,
+    assistantAnalysis: params.analysisText,
+  };
+
+  const document =
+    params.variant === "rebuttal"
+      ? buildRebuttalEmailPdf(sharedInput)
+      : params.variant === "side_by_side"
+        ? buildSideBySidePdf(sharedInput)
+        : buildLineByLinePdf(sharedInput);
+
+  void exportCarrierPDF(document);
+}
+
+function AtAGlanceCard({
+  renderModel,
+  analysisResult,
+}: {
+  renderModel: ReturnType<typeof buildExportModel>;
+  analysisResult: RepairIntelligenceReport | null;
+}) {
+  const bullets = [
+    renderModel.vehicle.label ? `Vehicle: ${renderModel.vehicle.label}` : null,
+    renderModel.supplementItems[0]?.title ? `Top recommendation: ${renderModel.supplementItems[0].title}` : null,
+    analysisResult ? `Evidence quality: ${formatLabel(analysisResult.summary.evidenceQuality)}` : null,
+  ].filter(Boolean) as string[];
+
+  if (bullets.length === 0 && !renderModel.repairPosition) {
+    return null;
+  }
+
+  return (
+    <section className="mb-4 rounded-2xl border border-orange-500/25 bg-gradient-to-br from-[#C65A2A]/18 via-[#C65A2A]/8 to-white/[0.03] p-5 shadow-[0_18px_50px_rgba(198,90,42,0.14)]">
+      <div className="text-[11px] uppercase tracking-[0.22em] text-orange-200/70">At a glance</div>
+      <div className="mt-2 text-lg font-semibold text-white">
+        {renderModel.repairPosition || "Structured analysis highlights will appear here once documents are processed."}
+      </div>
+      {bullets.length > 0 && (
+        <div className="mt-4 grid gap-2 xl:grid-cols-3">
+          {bullets.map((bullet) => (
+            <div key={bullet} className="rounded-xl border border-white/10 bg-black/25 px-3 py-3 text-sm text-white/80">
+              {bullet}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function FeaturedRecommendationCard({
+  item,
+}: {
+  item: ReturnType<typeof buildExportModel>["supplementItems"][number];
+}) {
+  return (
+    <section className="rounded-2xl border border-orange-500/30 bg-gradient-to-br from-[#C65A2A]/16 via-[#C65A2A]/8 to-black/20 p-5 shadow-[0_18px_45px_rgba(198,90,42,0.16)]">
+      <div className="text-[11px] uppercase tracking-[0.22em] text-orange-200/75">Top recommendation</div>
+      <div className="mt-2 text-lg font-semibold text-white">{item.title}</div>
+      <div className="mt-2 text-xs text-white/60">
+        {formatLabel(item.category)} · {formatLabel(item.kind)} · Priority {formatLabel(item.priority)}
+      </div>
+      <div className="mt-4 text-sm leading-6 text-white/82">{item.rationale}</div>
+      {item.evidence && (
+        <div className="mt-3 text-xs leading-5 text-white/48">Evidence: {item.evidence}</div>
+      )}
+      {item.source && (
+        <button
+          type="button"
+          className="mt-4 inline-flex items-center rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white/80 hover:bg-white/10"
+        >
+          View source details
+        </button>
+      )}
+    </section>
+  );
 }
 
 function DecisionSection({
@@ -354,6 +465,56 @@ function DecisionSection({
       <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">{title}</div>
       <div className={`text-sm leading-6 text-white/85 whitespace-pre-wrap ${mono ? "font-mono text-[12px]" : ""}`}>
         {body}
+      </div>
+    </section>
+  );
+}
+
+function ExpandableDecisionSection({
+  title,
+  body,
+  tone,
+  mono = false,
+  previewLines = 6,
+}: {
+  title: string;
+  body: string;
+  tone: "red" | "yellow" | "green" | "neutral";
+  mono?: boolean;
+  previewLines?: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const tones = {
+    red: "border-red-500/30 bg-red-500/5",
+    yellow: "border-yellow-500/30 bg-yellow-500/5",
+    green: "border-green-500/30 bg-green-500/5",
+    neutral: "border-white/10 bg-white/5",
+  };
+  const previewHeightClass = previewLines >= 7 ? "max-h-48" : "max-h-36";
+
+  return (
+    <section className={`rounded-xl border p-4 space-y-3 ${tones[tone]}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">{title}</div>
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="text-[11px] font-medium uppercase tracking-[0.16em] text-orange-200/80 hover:text-orange-100"
+        >
+          {expanded ? "Show less" : "Expand"}
+        </button>
+      </div>
+      <div className="relative">
+        <div
+          className={`text-sm leading-6 text-white/85 whitespace-pre-wrap ${mono ? "font-mono text-[12px]" : ""} ${
+            expanded ? "" : `overflow-hidden ${previewHeightClass}`
+          }`}
+        >
+          {body}
+        </div>
+        {!expanded && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/90 via-black/55 to-transparent" />
+        )}
       </div>
     </section>
   );
@@ -393,6 +554,7 @@ function buildValuationDisplay(renderModel: ReturnType<typeof buildExportModel>)
       reasoning: renderModel.valuation.acvReasoning,
       missingInputs: renderModel.valuation.acvMissingInputs,
       maxRange: 250000,
+      includeHandoffHint: false,
     }),
     "",
     "DV",
@@ -411,6 +573,7 @@ function buildValuationDisplay(renderModel: ReturnType<typeof buildExportModel>)
       reasoning: renderModel.valuation.dvReasoning,
       missingInputs: renderModel.valuation.dvMissingInputs,
       maxRange: 50000,
+      includeHandoffHint: false,
     }),
   ].join("\n");
 }
@@ -424,6 +587,7 @@ function buildSingleValuationDisplay(params: {
   reasoning: string;
   missingInputs: string[];
   maxRange: number;
+  includeHandoffHint?: boolean;
 }): string {
   const lines: string[] = [];
 
@@ -459,7 +623,66 @@ function buildSingleValuationDisplay(params: {
     lines.push("This is a preliminary preview based on the current file set, not a formal appraisal or binding valuation.");
   }
 
+  if (params.includeHandoffHint !== false) {
+    lines.push("Continue below for the full valuation handoff.");
+  }
+
   return lines.join("\n");
+}
+
+function ValuationSection({
+  renderModel,
+  lowConfidence,
+}: {
+  renderModel: ReturnType<typeof buildExportModel>;
+  lowConfidence: boolean;
+}) {
+  const [expanded, setExpanded] = useState(!lowConfidence);
+
+  return (
+    <section
+      className={`rounded-xl border p-4 space-y-3 ${
+        lowConfidence
+          ? "border-white/10 bg-white/[0.03] opacity-85"
+          : "border-green-500/30 bg-green-500/5"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">Valuation</div>
+          {lowConfidence && (
+            <div className="mt-1 text-xs text-white/45">
+              Low-confidence preview. Expand only if you need the provisional range notes.
+            </div>
+          )}
+        </div>
+        {lowConfidence && (
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className="text-[11px] font-medium uppercase tracking-[0.16em] text-white/60 hover:text-white/85"
+          >
+            {expanded ? "Hide" : "Expand"}
+          </button>
+        )}
+      </div>
+
+      {expanded && (
+        <div className="text-sm leading-6 text-white/82 whitespace-pre-wrap">
+          {buildValuationDisplay(renderModel)}
+        </div>
+      )}
+
+      <a
+        href={COLLISION_ACADEMY_HANDOFF_URL}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white/80 hover:bg-white/10"
+      >
+        Continue for Full Valuation
+      </a>
+    </section>
+  );
 }
 
 function formatCurrency(value: number): string {
@@ -509,251 +732,20 @@ function formatVehicleConfidence(
   return `${label} (${vehicle.sourceConfidence.toFixed(2)})`;
 }
 
-function RailNavButton({
-  targetId,
-  label,
-}: {
-  targetId: string;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-      className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] uppercase tracking-[0.18em] text-white/65 transition hover:bg-white/[0.08] hover:text-white"
-    >
-      {label}
-    </button>
+function hasAtGlanceContent(renderModel: ReturnType<typeof buildExportModel>): boolean {
+  return Boolean(
+    renderModel.repairPosition ||
+      renderModel.vehicle.label ||
+      renderModel.supplementItems[0]
   );
 }
 
-function CompactRailItem({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-white/45">{label}</div>
-      <div className="mt-1 text-sm leading-6 text-white/84">{value}</div>
-    </div>
-  );
-}
+function isLowConfidenceValuation(renderModel: ReturnType<typeof buildExportModel>): boolean {
+  const acvLow = !renderModel.valuation.acvConfidence || renderModel.valuation.acvConfidence === "low";
+  const dvLow = !renderModel.valuation.dvConfidence || renderModel.valuation.dvConfidence === "low";
+  const noStrongRange =
+    renderModel.valuation.acvStatus === "not_determinable" &&
+    renderModel.valuation.dvStatus === "not_determinable";
 
-function NegotiationSection({ body }: { body: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const cleaned = cleanPresentationText(body);
-  const preview = truncateLongText(cleaned, 680);
-  const visible = expanded ? cleaned : preview;
-  const isTruncated = preview.length < cleaned.length;
-
-  async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(cleaned);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
-    } catch {
-      setCopied(false);
-    }
-  }
-
-  return (
-    <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">Negotiation Draft</div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleCopy}
-            className="rounded-md border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] text-white/65 transition hover:bg-black/30 hover:text-white"
-          >
-            {copied ? "Copied" : "Copy"}
-          </button>
-          {isTruncated && (
-            <button
-              type="button"
-              onClick={() => setExpanded((value) => !value)}
-              className="rounded-md border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] text-white/65 transition hover:bg-black/30 hover:text-white"
-            >
-              {expanded ? "Collapse" : "Expand"}
-            </button>
-          )}
-        </div>
-      </div>
-      <div className="rounded-lg border border-white/10 bg-black/20 p-3 whitespace-pre-wrap text-sm leading-6 text-white/82">
-        {visible}
-      </div>
-    </section>
-  );
-}
-
-function ValuationSection({
-  renderModel,
-}: {
-  renderModel: ReturnType<typeof buildExportModel>;
-}) {
-  const subdued = shouldDemoteValuation(renderModel.valuation);
-
-  return (
-    <section
-      className={`rounded-xl border p-4 space-y-4 ${
-        subdued
-          ? "border-white/10 bg-white/[0.03]"
-          : "border-green-500/30 bg-green-500/5"
-      }`}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">Valuation</div>
-        {subdued && (
-          <div className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] text-white/55">
-            Low-confidence preview
-          </div>
-        )}
-      </div>
-      <ValuationItem
-        label="ACV"
-        body={buildSingleValuationDisplay({
-          label: "Preliminary ACV preview",
-          status: renderModel.valuation.acvStatus,
-          value:
-            renderModel.valuation.acvStatus === "provided"
-              ? renderModel.valuation.acvValue
-              : undefined,
-          range:
-            renderModel.valuation.acvStatus === "estimated_range"
-              ? renderModel.valuation.acvRange
-              : undefined,
-          confidence: renderModel.valuation.acvConfidence,
-          reasoning: renderModel.valuation.acvReasoning,
-          missingInputs: renderModel.valuation.acvMissingInputs,
-          maxRange: 250000,
-        })}
-      />
-      <ValuationItem
-        label="DV"
-        body={buildSingleValuationDisplay({
-          label: "Preliminary diminished value preview",
-          status: renderModel.valuation.dvStatus,
-          value:
-            renderModel.valuation.dvStatus === "provided"
-              ? renderModel.valuation.dvValue
-              : undefined,
-          range:
-            renderModel.valuation.dvStatus === "estimated_range"
-              ? renderModel.valuation.dvRange
-              : undefined,
-          confidence: renderModel.valuation.dvConfidence,
-          reasoning: renderModel.valuation.dvReasoning,
-          missingInputs: renderModel.valuation.dvMissingInputs,
-          maxRange: 50000,
-        })}
-      />
-      <a
-        href={COLLISION_ACADEMY_HANDOFF_URL}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex items-center rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-white/80 transition hover:bg-black/30 hover:text-white"
-      >
-        Continue to Full Valuation
-      </a>
-    </section>
-  );
-}
-
-function ValuationItem({
-  label,
-  body,
-}: {
-  label: string;
-  body: string;
-}) {
-  return (
-    <div className="rounded-lg border border-white/10 bg-black/20 p-3">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-white/45">{label}</div>
-      <div className="mt-2 whitespace-pre-wrap text-sm leading-6 text-white/82">
-        {cleanPresentationText(body)}
-      </div>
-    </div>
-  );
-}
-
-function buildRailSummary(
-  panel: DecisionPanel,
-  renderModel: ReturnType<typeof buildExportModel>
-): {
-  conclusion: string;
-  disputes: string;
-  nextAction: string;
-} {
-  const conclusion =
-    cleanPresentationText(renderModel.repairPosition) ||
-    cleanPresentationText(panel.narrative) ||
-    "The current material does not yet support a strong repair-position conclusion.";
-  const disputeTitles = renderModel.supplementItems
-    .map((item) => cleanPresentationText(item.title))
-    .filter(Boolean)
-    .slice(0, 3);
-  const nextAction = cleanPresentationText(
-    (panel.appraisal?.triggered && panel.appraisal.reasoning) ||
-      panel.negotiationResponse ||
-      panel.stateLeverage?.[0] ||
-      renderModel.supplementItems[0]?.rationale ||
-      renderModel.request ||
-      "Continue with the strongest supported repair position and document the key disputed items."
-  );
-
-  return {
-    conclusion,
-    disputes:
-      disputeTitles.length > 0
-        ? disputeTitles.join("; ")
-        : "No major dispute areas were clearly surfaced from the current analysis.",
-    nextAction: extractLeadSentence(nextAction) || nextAction,
-  };
-}
-
-function cleanDisplayText(value: string | null | undefined): string {
-  if (!value) return "";
-
-  return value
-    .replace(/Â·/g, "·")
-    .replace(/([A-Za-z])m0\.\d+\b/g, "$1")
-    .replace(/\s+([,.;:])/g, "$1")
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function cleanVehicleTrim(value: string | null | undefined): string {
-  const cleaned = cleanDisplayText(value);
-  if (!cleaned) return "";
-  if (cleaned.length > 36) return "";
-  if (/(scan|module|dtc|fault|code)/i.test(cleaned)) return "";
-  return cleaned;
-}
-
-function extractLeadSentence(value: string): string {
-  const cleaned = cleanPresentationText(value);
-  if (!cleaned) return "";
-  const match = cleaned.match(/^.*?[.!?](\s|$)/);
-  return match ? match[0].trim() : cleaned;
-}
-
-function truncateLongText(value: string, maxChars: number): string {
-  if (value.length <= maxChars) return value;
-  return `${value.slice(0, maxChars).trimEnd()}...`;
-}
-
-function shouldDemoteValuation(
-  valuation: ReturnType<typeof buildExportModel>["valuation"]
-): boolean {
-  const acvWeak =
-    valuation.acvStatus === "not_determinable" || valuation.acvConfidence === "low" || !valuation.acvConfidence;
-  const dvWeak =
-    valuation.dvStatus === "not_determinable" || valuation.dvConfidence === "low" || !valuation.dvConfidence;
-
-  return acvWeak && dvWeak;
+  return (acvLow && dvLow) || noStrongRange;
 }

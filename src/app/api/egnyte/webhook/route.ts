@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const events = normalizeEgnyteEvents(body);
+    console.info("[egnyte-webhook] received events", { count: events.length });
 
     if (events.length === 0) {
       return NextResponse.json(

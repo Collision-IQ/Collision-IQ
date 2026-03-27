@@ -77,7 +77,7 @@ export async function exportCarrierPDF(input: string | CarrierReportDocument) {
     drawPageNumber(doc, pageWidth, pageHeight);
   }
 
-  doc.save("collision-academy-report.pdf");
+  doc.save(input.filename || "collision-academy-report.pdf");
 }
 
 function exportLegacyTextPdf(text: string) {

@@ -1,4 +1,7 @@
-import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
+import {
+  getUploadedAttachments,
+  type StoredAttachment,
+} from "@/lib/uploadedAttachmentStore";
 import { orchestrateRetrieval } from "../retrievalOrchestrator";
 import { buildComparisonAnalysis } from "../builders/comparisonEngine";
 import { runRepairPipeline } from "../pipeline/repairPipeline";
@@ -7,61 +10,102 @@ import { computeEvidenceQuality } from "../scoring/evidenceScore";
 import { computeRiskScore } from "../scoring/riskScore";
 import {
   extractVehicleIdentityFromText,
-  resolveVehicleIdentity,
+  mergeVehicleIdentity,
+  normalizeVehicleIdentity,
 } from "../vehicleContext";
 import type {
   AnalysisIssue,
   RepairIntelligenceReport,
   RequiredProcedureRecord,
+  VehicleIdentity,
   Severity,
 } from "../types/analysis";
 import type { EvidenceRecord } from "../types/evidence";
 
+type VehicleSessionContext = {
+  vehicleMake?: string | null;
+  system?: string | null;
+  component?: string | null;
+  procedure?: string | null;
+} | null | undefined;
+
 type RunRepairAnalysisParams = {
   artifactIds: string[];
-  sessionContext?: {
-    vehicleMake?: string | null;
-    system?: string | null;
-    component?: string | null;
-    procedure?: string | null;
-  } | null;
+  preloadedAttachments?: StoredAttachment[];
+  sessionContext?: VehicleSessionContext;
   userIntent?: string | null;
 };
 
 export async function runRepairAnalysis({
   artifactIds,
+  preloadedAttachments,
   sessionContext,
   userIntent,
 }: RunRepairAnalysisParams): Promise<RepairIntelligenceReport> {
-  const attachments = getUploadedAttachments(artifactIds);
+  const attachments = preloadedAttachments ?? getUploadedAttachments(artifactIds);
   const documents = attachments.map((attachment) => ({
     filename: attachment.filename,
     mime: attachment.type,
     text: attachment.text,
+    imageDataUrl: attachment.imageDataUrl,
   }));
+
+  console.info("[analysis-attachments] orchestrator received", {
+    attachmentCount: documents.length,
+    attachments: documents.map((document) => ({
+      filename: document.filename,
+      mimeType: document.mime || "unknown",
+      textLength: document.text?.length ?? 0,
+      hasImageDataUrl: Boolean(document.imageDataUrl),
+    })),
+  });
 
   const shopText =
     findDocumentText(documents, ["shop", "body shop", "repair facility"]) ?? null;
   const insurerText =
     findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"]) ?? null;
+  const shopVehicle = inferVehicleFromDocument(documents, ["shop", "body shop", "repair facility"]);
+  const insurerVehicle = inferVehicleFromDocument(documents, ["insurer", "insurance", "carrier", "sor"]);
+  const sessionVehicle =
+    sessionContext?.vehicleMake
+      ? {
+          make: sessionContext.vehicleMake,
+          confidence: 0.6,
+          source: "session" as const,
+        }
+      : null;
 
   if (shopText && insurerText) {
     const analysis = buildComparisonAnalysis({
       shopEstimateText: shopText,
       insurerEstimateText: insurerText,
     });
+    const comparisonVehicle = resolveComparisonVehicleIdentity(
+      sessionVehicle,
+      shopVehicle,
+      insurerVehicle,
+      analysis.vehicle
+    );
+    const comparisonAnalysis = {
+      ...analysis,
+      vehicle: comparisonVehicle,
+    };
 
     return {
       summary: {
         riskScore:
-          analysis.summary.riskScore === "unknown" ? "moderate" : analysis.summary.riskScore,
+          comparisonAnalysis.summary.riskScore === "unknown"
+            ? "moderate"
+            : comparisonAnalysis.summary.riskScore,
         confidence:
-          analysis.summary.confidence === "moderate" ? "moderate" : analysis.summary.confidence,
-        criticalIssues: analysis.summary.criticalIssues,
-        evidenceQuality: analysis.summary.evidenceQuality,
+          comparisonAnalysis.summary.confidence === "moderate"
+            ? "moderate"
+            : comparisonAnalysis.summary.confidence,
+        criticalIssues: comparisonAnalysis.summary.criticalIssues,
+        evidenceQuality: comparisonAnalysis.summary.evidenceQuality,
       },
-      vehicle: undefined,
-      issues: analysis.findings
+      vehicle: comparisonVehicle,
+      issues: comparisonAnalysis.findings
         .filter((finding) => finding.status !== "present")
         .map((finding, index) => ({
           id: finding.id || `comparison-issue-${index + 1}`,
@@ -78,38 +122,32 @@ export async function runRepairAnalysis({
           evidenceIds: [],
         })),
       requiredProcedures: [],
-      presentProcedures: analysis.findings
+      presentProcedures: comparisonAnalysis.findings
         .filter((finding) => finding.status === "present")
         .map((finding) => finding.title),
       missingProcedures: [],
-      supplementOpportunities: analysis.supplements.map((finding) => finding.title),
-      evidence: analysis.evidence.map((entry, index) => ({
+      supplementOpportunities: comparisonAnalysis.supplements.map((finding) => finding.title),
+      evidence: comparisonAnalysis.evidence.map((entry, index) => ({
         id: `comparison-evidence-${index + 1}`,
         title: entry.source,
         snippet: entry.quote ?? "",
         source: entry.source,
         authority: "inferred",
       })),
-      recommendedActions: [analysis.narrative],
-      analysis,
+      recommendedActions: [comparisonAnalysis.narrative],
+      analysis: comparisonAnalysis,
     };
   }
 
   const pipeline = runRepairPipeline(documents);
   const estimateText = documents.map((document) => document.text ?? "").join("\n\n");
-  const inferredVehicle = resolveVehicleIdentity(
-    sessionContext?.vehicleMake
-      ? {
-          make: sessionContext.vehicleMake,
-          confidence: 0.6,
-          source: "session",
-        }
-      : null,
+  const inferredVehicle = mergeVehicleIdentity(
+    sessionVehicle,
     ...documents.map((document) =>
       extractVehicleIdentityFromText(document.text ?? "", "attachment")
     ),
     extractVehicleIdentityFromText(userIntent ?? "", "user")
-  ).identity;
+  );
 
   console.info("[vehicle-reconciliation:analysis]", {
     documentCount: documents.length,
@@ -119,33 +157,7 @@ export async function runRepairAnalysis({
 
   const retrievedEvidence = await orchestrateRetrieval({
     userQuery: userIntent || "repair analysis",
-    activeContext: sessionContext
-      ? {
-          vehicle: {
-            year: null,
-            make: sessionContext.vehicleMake ?? null,
-            model: null,
-            vin: null,
-            confidence: sessionContext.vehicleMake ? 0.6 : 0,
-            source: sessionContext.vehicleMake ? "inferred" : "none",
-            updatedAt: new Date().toISOString(),
-          },
-          repair: {
-            system: sessionContext.system ?? null,
-            component: sessionContext.component ?? null,
-            procedure: sessionContext.procedure ?? null,
-            confidence:
-              sessionContext.system || sessionContext.component || sessionContext.procedure
-                ? 0.5
-                : 0,
-            source:
-              sessionContext.system || sessionContext.component || sessionContext.procedure
-                ? "inferred"
-                : "none",
-            updatedAt: new Date().toISOString(),
-          },
-        }
-      : null,
+    activeContext: buildActiveContext(sessionContext, inferredVehicle),
     intelligence: pipeline,
     limit: 5,
   });
@@ -234,6 +246,93 @@ function findDocumentText(
   });
 
   return match?.text ?? undefined;
+}
+
+function inferVehicleFromDocument(
+  documents: Array<{
+    filename?: string | null;
+    mime?: string | null;
+    text?: string | null;
+  }>,
+  keywords: string[]
+) {
+  const match = documents.find((document) => {
+    const haystack = `${document.filename ?? ""} ${document.mime ?? ""}`.toLowerCase();
+    return keywords.some((keyword) => haystack.includes(keyword));
+  });
+
+  return match?.text ? extractVehicleIdentityFromText(match.text, "attachment") : null;
+}
+
+function resolveComparisonVehicleIdentity(
+  sessionVehicle: VehicleIdentity | null | undefined,
+  shopVehicle: VehicleIdentity | null | undefined,
+  insurerVehicle: VehicleIdentity | null | undefined,
+  analysisVehicle: VehicleIdentity | null | undefined
+) {
+  // Keep the strongest structured identity first; later sources only fill gaps or add better-supported fields.
+  return mergeVehicleIdentity(
+    normalizeVehicleIdentity(sessionVehicle),
+    normalizeVehicleIdentity(shopVehicle),
+    normalizeVehicleIdentity(insurerVehicle),
+    normalizeVehicleIdentity(analysisVehicle)
+  );
+}
+
+function buildActiveContext(
+  sessionContext: VehicleSessionContext,
+  inferredVehicle: VehicleIdentity | undefined
+) {
+  if (!sessionContext && !inferredVehicle) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const normalizedVehicle = normalizeVehicleIdentity(inferredVehicle);
+  const hasRepairContext = Boolean(
+    sessionContext?.system || sessionContext?.component || sessionContext?.procedure
+  );
+  const hasVehicleContext = Boolean(
+    normalizedVehicle?.vin ||
+      normalizedVehicle?.year ||
+      normalizedVehicle?.make ||
+      normalizedVehicle?.model ||
+      normalizedVehicle?.trim ||
+      sessionContext?.vehicleMake
+  );
+
+  if (!hasVehicleContext && !hasRepairContext) {
+    return null;
+  }
+
+  const vehicleSource: "explicit" | "inferred" | "none" =
+    normalizedVehicle?.source && normalizedVehicle.source !== "unknown"
+      ? "explicit"
+      : sessionContext?.vehicleMake
+        ? "inferred"
+        : "none";
+  const repairSource: "explicit" | "inferred" | "none" = hasRepairContext ? "inferred" : "none";
+
+  return {
+    vehicle: {
+      vin: normalizedVehicle?.vin ?? null,
+      year: normalizedVehicle?.year ?? null,
+      make: normalizedVehicle?.make ?? sessionContext?.vehicleMake ?? null,
+      model: normalizedVehicle?.model ?? null,
+      trim: normalizedVehicle?.trim ?? null,
+      confidence: normalizedVehicle?.confidence ?? (sessionContext?.vehicleMake ? 0.6 : 0),
+      source: vehicleSource,
+      updatedAt: now,
+    },
+    repair: {
+      system: sessionContext?.system ?? null,
+      component: sessionContext?.component ?? null,
+      procedure: sessionContext?.procedure ?? null,
+      confidence: hasRepairContext ? 0.5 : 0,
+      source: repairSource,
+      updatedAt: now,
+    },
+  };
 }
 
 function buildEvidenceRecords(

@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 import { embedText } from "@/lib/rag/embed";
 import { chunkText } from "@/lib/rag/chunk";
 import { upsertChunks } from "@/lib/rag/upsert";
-import { listDriveFiles } from "@/lib/drive/list";
+import { getConfiguredDriveRootFolders, listDriveFiles } from "@/lib/drive/list";
 import { extractDriveText } from "@/lib/drive/extract";
 
 // TODO: import your existing impersonation auth builder here
@@ -21,7 +21,11 @@ export async function POST() {
   const auth = await getImpersonatedAuth(); // must return google auth client
   const drive = google.drive({ version: "v3", auth });
 
-  const files = await listDriveFiles(drive, DRIVE_ID);
+  const rootFolderIds = getConfiguredDriveRootFolders();
+  const files = await listDriveFiles(drive, {
+    driveId: DRIVE_ID,
+    rootFolderIds,
+  });
 
   let indexed = 0;
   let skipped = 0;

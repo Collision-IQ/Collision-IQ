@@ -5,66 +5,34 @@ import type {
 } from "../types/analysis";
 import {
   extractVehicleIdentityFromText,
+  mergeVehicleIdentity,
   normalizeVehicleIdentity,
-  resolveVehicleIdentity,
 } from "../vehicleContext";
-
-const DEBUG_VEHICLE_IDENTITY = process.env.DEBUG_VEHICLE_IDENTITY === "1";
-
-function logVehicleCheckpoint(reportVehicle: AnalysisResult["vehicle"]) {
-  if (!DEBUG_VEHICLE_IDENTITY) {
-    return;
-  }
-
-  console.info("[vehicle-checkpoint:normalized analysis.vehicle]", {
-    vin: reportVehicle?.vin ?? null,
-    year: reportVehicle?.year ?? null,
-    make: reportVehicle?.make ?? null,
-    model: reportVehicle?.model ?? null,
-    trim: reportVehicle?.trim ?? null,
-    confidence: reportVehicle?.confidence ?? null,
-    source: reportVehicle?.source ?? null,
-    fieldSources: reportVehicle?.fieldSources ?? null,
-  });
-}
 
 export function normalizeReportToAnalysisResult(
   report: RepairIntelligenceReport
 ): AnalysisResult {
-  const estimateEvidenceText = extractEstimateEvidenceText(report.evidence);
-  const reportAnalysisVehicle = normalizeVehicleIdentity(report.analysis?.vehicle);
-  const reportVehicle = normalizeVehicleIdentity(report.vehicle);
+  const estimateEvidenceText = collectHighSignalVehicleEvidenceText(report);
+  const structuredVehicle = mergeVehicleIdentity(
+    normalizeVehicleIdentity(report.analysis?.vehicle),
+    normalizeVehicleIdentity(report.vehicle)
+  );
   const inferredVehicle = extractVehicleIdentityFromText(
     [
       estimateEvidenceText,
-      report.recommendedActions.join("\n"),
-      reportVehicle?.vin,
-      reportAnalysisVehicle?.vin,
+      report.vehicle?.vin,
+      report.analysis?.vehicle?.vin,
     ]
       .filter(Boolean)
       .join("\n\n"),
     "attachment"
   );
-  const resolvedVehicle = resolveVehicleIdentity(
-    reportAnalysisVehicle,
-    reportVehicle,
-    inferredVehicle
-  ).identity;
-  const preservedStructuredVin =
-    reportAnalysisVehicle?.vin ||
-    reportVehicle?.vin ||
-    resolvedVehicle?.vin ||
-    undefined;
-  const finalVehicle = {
-    ...resolvedVehicle,
-    vin: preservedStructuredVin,
-  };
-  logVehicleCheckpoint(finalVehicle);
+  const guardedInferredVehicle = preserveStructuredDescriptors(structuredVehicle, inferredVehicle);
 
   if (report.analysis) {
     return {
       ...report.analysis,
-      vehicle: finalVehicle,
+      vehicle: mergeVehicleIdentity(structuredVehicle, guardedInferredVehicle),
     };
   }
 
@@ -125,8 +93,63 @@ export function normalizeReportToAnalysisResult(
     narrative:
       report.recommendedActions[0] ||
       "The estimate needs clearer repair support before it can be treated as fully defended.",
-    vehicle: finalVehicle,
+    vehicle: mergeVehicleIdentity(structuredVehicle, guardedInferredVehicle),
   };
+}
+
+function preserveStructuredDescriptors(
+  structuredVehicle: ReturnType<typeof normalizeVehicleIdentity>,
+  inferredVehicle: ReturnType<typeof normalizeVehicleIdentity> | null
+) {
+  const normalizedInferred = normalizeVehicleIdentity(inferredVehicle);
+  if (!normalizedInferred) {
+    return normalizedInferred;
+  }
+
+  const structuredHasProtectedVinFields = Boolean(
+    structuredVehicle?.vin &&
+      (
+        structuredVehicle.fieldSources?.vin === "vin_decoded" ||
+        structuredVehicle.fieldSources?.year === "vin_decoded" ||
+        structuredVehicle.fieldSources?.make === "vin_decoded" ||
+        structuredVehicle.fieldSources?.manufacturer === "vin_decoded" ||
+        structuredVehicle.source === "vin_decoded"
+      )
+  );
+
+  const structuredHasValidatedDescriptors = Boolean(
+    (structuredVehicle?.model || structuredVehicle?.trim) &&
+      (
+        structuredHasProtectedVinFields ||
+        structuredVehicle?.fieldSources?.model === "attachment" ||
+        structuredVehicle?.fieldSources?.model === "user" ||
+        structuredVehicle?.fieldSources?.model === "session" ||
+        structuredVehicle?.fieldSources?.trim === "attachment" ||
+        structuredVehicle?.fieldSources?.trim === "user" ||
+        structuredVehicle?.fieldSources?.trim === "session"
+      )
+  );
+
+  if (!structuredHasProtectedVinFields && !structuredHasValidatedDescriptors) {
+    return normalizedInferred;
+  }
+
+  // Structured descriptors that are already supported should win; inference only fills gaps.
+  return {
+    ...normalizedInferred,
+    model: structuredVehicle?.model ?? normalizedInferred.model,
+    trim: structuredVehicle?.trim ?? normalizedInferred.trim,
+  };
+}
+
+function collectHighSignalVehicleEvidenceText(report: RepairIntelligenceReport): string {
+  return [
+    extractEstimateEvidenceText(report.evidence),
+    report.vehicle?.vin,
+    report.analysis?.vehicle?.vin,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function extractEstimateEvidenceText(evidence: RepairIntelligenceReport["evidence"]): string {

@@ -1,7 +1,7 @@
 import { google, type drive_v3 } from "googleapis";
 import { prisma } from "@/lib/prisma";
 import { getDriveAuth } from "@/lib/drive/auth";
-import { listDriveFiles } from "@/lib/drive/list";
+import { getConfiguredDriveRootFolders, listDriveFiles } from "@/lib/drive/list";
 import { embedText } from "@/lib/rag/embed";
 import { getChunkSourceColumn } from "@/lib/rag/chunkSourceColumn";
 import {
@@ -146,20 +146,7 @@ async function getDriveIndex(): Promise<DriveIndexFile[]> {
     throw new Error("Missing GOOGLE_SHARED_DRIVE_ID");
   }
 
-  const labeledRootFolders = [
-    {
-      label: "GOOGLE_OEM_PROCEDURES_FOLDER_ID",
-      id: process.env.GOOGLE_OEM_PROCEDURES_FOLDER_ID?.trim(),
-    },
-    {
-      label: "GOOGLE_OEM_POSITION_STATEMENTS_FOLDER_ID",
-      id: process.env.GOOGLE_OEM_POSITION_STATEMENTS_FOLDER_ID?.trim(),
-    },
-    {
-      label: "GOOGLE_PA_LAW_FOLDER_ID",
-      id: process.env.GOOGLE_PA_LAW_FOLDER_ID?.trim(),
-    },
-  ].filter((value): value is { label: string; id: string } => Boolean(value.id));
+  const labeledRootFolders = getConfiguredDriveRootFolders();
 
   if (labeledRootFolders.length === 0) {
     throw new Error(
@@ -169,10 +156,6 @@ async function getDriveIndex(): Promise<DriveIndexFile[]> {
 
   const auth = await getDriveAuth();
   const drive = google.drive({ version: "v3", auth });
-  console.log({
-    driveId: process.env.GOOGLE_SHARED_DRIVE_ID,
-    rootFolderIds: labeledRootFolders,
-  });
   const listed = await listDriveFiles(drive, {
     driveId,
     rootFolderIds: labeledRootFolders,

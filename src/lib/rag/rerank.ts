@@ -1,7 +1,6 @@
-import OpenAI from "openai";
 import type { RetrievedChunk } from "@/lib/types";
-
-const openai = new OpenAI();
+import { collisionIqModels } from "@/lib/modelConfig";
+import { openai } from "@/lib/openai";
 
 type ChunkMatch = RetrievedChunk & {
   system?: string | null;
@@ -42,7 +41,7 @@ Return the numbers of the ${topK} most relevant passages in order.
 `;
 
   const res = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: collisionIqModels.helper,
     messages: [{ role: "user", content: prompt }],
   });
 
