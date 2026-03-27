@@ -1,8 +1,8 @@
 import type { ChatAnalysisOutput, ChatbotTaskType } from "./chatAnalysisSchema";
 import {
   extractVehicleIdentityFromText,
+  mergeVehicleIdentity,
   normalizeVehicleIdentity,
-  resolveVehicleIdentity,
 } from "../vehicleContext";
 
 export const DRIVE_RETRIEVAL_TOPICS = [
@@ -376,7 +376,7 @@ export function inferDriveVehicleContext(params: {
   const analysisVehicle = normalizeVehicleIdentity(params.analysisVehicle ?? undefined);
   const attachmentVehicle = extractVehicleIdentityFromText(params.estimateText ?? "", "attachment");
   const userVehicle = extractVehicleIdentityFromText(params.userQuery ?? "", "user");
-  const resolved = resolveVehicleIdentity(analysisVehicle, attachmentVehicle, userVehicle).identity;
+  const resolved = mergeVehicleIdentity(analysisVehicle, attachmentVehicle, userVehicle);
 
   const sources = new Set<DriveVehicleInferenceSource>();
   if (analysisVehicle?.year || analysisVehicle?.make || analysisVehicle?.model || analysisVehicle?.vin) {
