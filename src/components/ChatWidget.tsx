@@ -135,6 +135,21 @@ export default function ChatWidget({
   }, []);
 
   useEffect(() => {
+    if (!disabled) return;
+
+    if (isRecording) {
+      disposeRecordingResources(true);
+      setIsRecording(false);
+    }
+
+    setIsTranscribing(false);
+    setRecordingError(null);
+    setPreviewAttachmentId(null);
+    setReplaceAttachmentId(null);
+    stopSpeaking();
+  }, [disabled, isRecording]);
+
+  useEffect(() => {
     if (attachments.length < 2) return;
 
     setMessages((prev) => {
@@ -434,6 +449,7 @@ export default function ChatWidget({
 
     const mySession = sessionRef.current;
     const messageToSend = input.trim() || buildAttachmentSummary(attachments);
+    const hasAttachmentsInTurn = attachments.length > 0;
     const attachmentStats = summarizeAttachmentStats(attachments);
     const analysisStartMs = Date.now();
     const userMessage: Message = createMessage("user", messageToSend);
@@ -492,17 +508,16 @@ export default function ChatWidget({
 
         if (sessionRef.current === mySession) {
           pushAssistantMessage(errorMessage);
-          onAnalysisResultChange?.(null);
-          onAnalysisPanelChange?.(null);
+          if (hasAttachmentsInTurn) {
+            onAnalysisResultChange?.(null);
+            onAnalysisPanelChange?.(null);
+          }
         }
         return;
       }
 
       const contentType = response.headers.get("content-type") || "";
-      if (attachments.length === 0) {
-        onAnalysisResultChange?.(null);
-        onAnalysisPanelChange?.(null);
-      } else {
+      if (hasAttachmentsInTurn) {
         console.info("[attachments] analysis request assembled", {
           attachmentCount: attachments.length,
           visionAttachmentCount,
@@ -628,8 +643,10 @@ export default function ChatWidget({
           ...prev,
           createMessage("assistant", "The analysis service had a temporary issue. Please retry."),
         ]);
-        onAnalysisResultChange?.(null);
-        onAnalysisPanelChange?.(null);
+        if (hasAttachmentsInTurn) {
+          onAnalysisResultChange?.(null);
+          onAnalysisPanelChange?.(null);
+        }
       }
     } finally {
       if (sessionRef.current === mySession) {
@@ -954,7 +971,7 @@ export default function ChatWidget({
   return (
     <div className={`relative flex flex-col h-full min-h-0 overflow-hidden ${disabled ? "opacity-75" : ""}`}>
       <AttachmentPreviewModal
-        attachment={previewAttachment as PreviewAttachment | null}
+        attachment={disabled ? null : (previewAttachment as PreviewAttachment | null)}
         onClose={() => setPreviewAttachmentId(null)}
         onRemove={(attachmentId) => removeAttachment(attachmentId)}
         onReplace={(attachmentId) => handleReplaceAttachment(attachmentId)}
@@ -1236,6 +1253,7 @@ export default function ChatWidget({
                   type="button"
                   className="w-full flex items-center justify-between rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80"
                   onClick={() => setAttachmentsOpen((value) => !value)}
+                  disabled={disabled}
                   aria-label="Toggle attachments"
                 >
                   <span>
@@ -1259,6 +1277,7 @@ export default function ChatWidget({
                         <button
                           type="button"
                           onClick={() => setPreviewAttachmentId(attachment.attachmentId)}
+                          disabled={disabled}
                           className="min-w-0 flex-1 text-left"
                         >
                           <div className="truncate pr-3 font-medium text-white">
@@ -1276,7 +1295,8 @@ export default function ChatWidget({
                             type="button"
                             onClick={() => setPreviewAttachmentId(attachment.attachmentId)}
                             aria-label="Preview attachment"
-                            className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white"
+                            disabled={disabled}
+                            className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <Eye size={15} />
                           </button>
@@ -1284,7 +1304,8 @@ export default function ChatWidget({
                             type="button"
                             onClick={() => handleReplaceAttachment(attachment.attachmentId)}
                             aria-label="Replace attachment"
-                            className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white"
+                            disabled={disabled}
+                            className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <RefreshCcw size={15} />
                           </button>
@@ -1292,7 +1313,8 @@ export default function ChatWidget({
                             type="button"
                             onClick={() => removeAttachment(attachment.attachmentId)}
                             aria-label="Remove attachment"
-                            className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white"
+                            disabled={disabled}
+                            className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <X size={15} />
                           </button>
@@ -1303,7 +1325,8 @@ export default function ChatWidget({
                     <button
                       type="button"
                       onClick={clearAllAttachments}
-                      className="text-xs text-white/60 hover:text-[#C65A2A] transition"
+                      disabled={disabled}
+                      className="text-xs text-white/60 transition hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Clear all
                     </button>

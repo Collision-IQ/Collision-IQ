@@ -54,6 +54,26 @@ function isValidConsentRecord(value: unknown): value is ChatConsentRecord {
   );
 }
 
+function readStoredChatConsent(): ChatConsentRecord | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(CHAT_CONSENT_STORAGE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (isValidConsentRecord(parsed)) {
+      return parsed;
+    }
+
+    window.localStorage.removeItem(CHAT_CONSENT_STORAGE_KEY);
+    return null;
+  } catch {
+    window.localStorage.removeItem(CHAT_CONSENT_STORAGE_KEY);
+    return null;
+  }
+}
+
 export default function ChatbotPage() {
   const router = useRouter();
   const isMobile = useIsMobile();
@@ -91,21 +111,8 @@ export default function ChatbotPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    try {
-      const raw = window.localStorage.getItem(CHAT_CONSENT_STORAGE_KEY);
-      if (!raw) {
-        setConsentAccepted(false);
-        setConsentResolved(true);
-        return;
-      }
-
-      const parsed = JSON.parse(raw) as unknown;
-      setConsentAccepted(isValidConsentRecord(parsed));
-    } catch {
-      setConsentAccepted(false);
-    } finally {
-      setConsentResolved(true);
-    }
+    setConsentAccepted(Boolean(readStoredChatConsent()));
+    setConsentResolved(true);
   }, []);
 
   function handleConsentAccept() {
@@ -241,26 +248,59 @@ export default function ChatbotPage() {
       )}
 
       {chatBlocked && (
-        <div className="fixed inset-0 z-[80] bg-black/82 backdrop-blur-xl">
+        <div
+          className="fixed inset-0 z-[80] bg-black/82 backdrop-blur-xl"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="chat-consent-title"
+        >
           <div className="flex min-h-full items-center justify-center p-6">
             <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-black/80 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] md:p-8">
               <div className="text-xs uppercase tracking-[0.24em] text-white/45">
                 Collision IQ Consent
               </div>
-              <h2 className="mt-3 text-2xl font-semibold text-white md:text-3xl">
-                Review and accept before using chat
+              <h2 id="chat-consent-title" className="mt-3 text-2xl font-semibold text-white md:text-3xl">
+                Consent Required to Use AI Chat
               </h2>
-              <p className="mt-3 text-sm leading-7 text-white/72 md:text-base">
-                Before using Collision IQ, you must review and accept the current{" "}
-                <Link href="/terms" className="text-white underline underline-offset-4 hover:text-orange-200">
-                  Terms of Service
-                </Link>{" "}
-                and{" "}
-                <Link href="/privacy" className="text-white underline underline-offset-4 hover:text-orange-200">
-                  Privacy Policy
-                </Link>.
-                Chat, uploads, voice recording, and read-aloud remain unavailable until consent is accepted.
-              </p>
+              <div className="mt-3 space-y-4 text-sm leading-7 text-white/72 md:text-base">
+                <p>
+                  You are about to use an AI-powered chatbot. This chatbot is an automated system and not a live human representative.
+                </p>
+                <p>
+                  By continuing, you represent that you are at least 18 years old, or that you are using this chatbot with the permission and supervision of a parent or legal guardian where required by law.
+                </p>
+                <p>
+                  You also consent to the Company&apos;s and its service providers&apos; collection, processing, storage, review, monitoring, recording, and retention of your prompts, messages, feedback, uploads, voice communications, and related technical and usage data for the purposes of providing, operating, analyzing, maintaining, improving, and training the chatbot and related systems, and for customer service, quality assurance, safety, security, abuse prevention, legal compliance, and other operational purposes, as described in our{" "}
+                  <a
+                    href="/privacy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-white underline underline-offset-4 hover:text-orange-200"
+                  >
+                    Privacy Policy
+                  </a>.
+                </p>
+                <p>
+                  Your use of this chatbot is subject to our{" "}
+                  <a
+                    href="/terms"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-white underline underline-offset-4 hover:text-orange-200"
+                  >
+                    Terms of Service
+                  </a>{" "}
+                  and{" "}
+                  <a
+                    href="/privacy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-white underline underline-offset-4 hover:text-orange-200"
+                  >
+                    Privacy Policy
+                  </a>.
+                </p>
+              </div>
 
               <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
                 <label className="flex items-start gap-3">
@@ -271,19 +311,33 @@ export default function ChatbotPage() {
                     className="mt-1 h-4 w-4 rounded border-white/20 bg-black/40 text-orange-500 focus:ring-orange-500"
                   />
                   <span className="text-sm leading-6 text-white/80">
-                    I have reviewed and agree to the current Terms of Service and Privacy Policy for
-                    using Collision IQ.
+                    I have read and agree to the Terms of Service and Privacy Policy, and I consent to the use of the AI chatbot as described above.
                   </span>
                 </label>
                 <p className="mt-3 text-xs leading-5 text-white/45">
-                  Consent is stored in this browser only and will be requested again if the terms
-                  or privacy policy version changes.
+                  You must check the box before continuing.
                 </p>
               </div>
 
               <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-                <div className="text-xs text-white/40">
-                  Terms version {CHAT_CONSENT_TERMS_VERSION} / Privacy version {CHAT_CONSENT_PRIVACY_VERSION}
+                <div className="flex flex-wrap items-center gap-3 text-xs text-white/40">
+                  <a
+                    href="/terms"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="transition hover:text-white"
+                  >
+                    Terms of Service
+                  </a>
+                  <span className="opacity-30">|</span>
+                  <a
+                    href="/privacy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="transition hover:text-white"
+                  >
+                    Privacy Policy
+                  </a>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
