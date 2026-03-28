@@ -36,13 +36,13 @@ export default function PrivacyPage() {
           <div className="space-y-10 text-sm leading-7 text-white/80 md:text-base">
             <section>
               <p>
-                Collision Academy ("Collision Academy," "Company," "we," "us," or "our") is
+                Collision Academy (&quot;Collision Academy,&quot; &quot;Company,&quot; &quot;we,&quot; &quot;us,&quot; or &quot;our&quot;) is
                 committed to protecting personal information. This Privacy Policy describes how we
                 collect, use, disclose, retain, and safeguard information obtained through
                 <span className="text-white"> https://www.collision.academy </span>
                 and any chatbot, artificial-intelligence-enabled tool, document-analysis feature,
                 export tool, application, communication, or related service that links to or
-                references this Privacy Policy (collectively, the "Services").
+                references this Privacy Policy (collectively, the &quot;Services&quot;).
               </p>
               <p className="mt-3">
                 By accessing or using the Services, you acknowledge that you have read and
@@ -200,7 +200,7 @@ export default function PrivacyPage() {
                 </p>
                 <p>
                   Except as expressly disclosed elsewhere in this Privacy Policy or in a
-                  supplemental notice, we do not represent that we "sell" personal information for
+                  supplemental notice, we do not represent that we &quot;sell&quot; personal information for
                   monetary consideration.
                 </p>
               </div>
@@ -272,7 +272,7 @@ export default function PrivacyPage() {
               </p>
               <p className="mt-3">
                 Nothing in this Privacy Policy shall be construed as an admission that the Services
-                constitute an "AI companion" or are otherwise subject to any specific Pennsylvania
+                constitute an &quot;AI companion&quot; or are otherwise subject to any specific Pennsylvania
                 artificial-intelligence statute unless and until such applicability is established.
               </p>
             </section>
@@ -292,7 +292,7 @@ export default function PrivacyPage() {
               <h2 className="text-xl font-semibold text-white">13. Changes to This Privacy Policy</h2>
               <p className="mt-3">
                 We may revise this Privacy Policy from time to time in our sole discretion. When we
-                do, we may update the "Last updated" date above and take other steps as required by
+                do, we may update the &quot;Last updated&quot; date above and take other steps as required by
                 applicable law. Your continued use of the Services after an updated Privacy Policy
                 becomes effective constitutes your acknowledgment of the revised policy, to the
                 extent permitted by law.

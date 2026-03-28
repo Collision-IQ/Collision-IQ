@@ -18,6 +18,10 @@ import {
 import { cleanDisplayText } from "@/lib/ai/displayText";
 import { collisionIqModels } from "@/lib/modelConfig";
 import { openai } from "@/lib/openai";
+import {
+  UnauthorizedError,
+  requireCurrentUser,
+} from "@/lib/auth/require-current-user";
 
 if (!process.env.OPENAI_API_KEY) {
   console.error("Missing OPENAI_API_KEY");
@@ -25,10 +29,12 @@ if (!process.env.OPENAI_API_KEY) {
 
 const MAX_UPLOAD_BATCH_FILES = 6;
 const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at once for now.";
-const TRANSIENT_CHAT_ERROR_MESSAGE = "The analysis service had a temporary issue. Please retry.";
+const TRANSIENT_CHAT_ERROR_MESSAGE =
+  "The analysis service had a temporary issue. Please retry.";
 const OPENAI_RETRY_DELAY_MS = 400;
 
 type UploadedDocument = {
+  id?: string;
   filename: string;
   mime?: string;
   text?: string;
@@ -65,6 +71,15 @@ type OpenAIErrorMeta = {
   status?: number;
   type?: string;
 };
+
+class AttachmentAccessError extends Error {
+  status = 404;
+
+  constructor(message = "One or more attachments were not found for the current account.") {
+    super(message);
+    this.name = "AttachmentAccessError";
+  }
+}
 
 const SYSTEM_INSTRUCTIONS = `
 You are Collision-IQ, a senior collision estimator and repair strategist.
@@ -165,27 +180,60 @@ function formatRecentConversation(messages: IncomingMessage[] = []): string {
     .join("\n\n");
 }
 
-function extractDocuments(body: ChatRequestBody): UploadedDocument[] {
-  const uploadedAttachments =
-    Array.isArray(body.attachments) && body.attachments.length > 0
-      ? body.attachments.map((attachment) =>
-          saveUploadedAttachment({
-            filename: attachment.filename,
-            type: attachment.type,
-            text: attachment.text ?? "",
-            imageDataUrl: attachment.imageDataUrl,
-            pageCount: attachment.pageCount,
-          })
-        )
-      : getUploadedAttachments(body.attachmentIds || []);
+async function extractDocuments(params: {
+  body: ChatRequestBody;
+  ownerUserId: string;
+  shopId?: string | null;
+}): Promise<UploadedDocument[]> {
+  const attachmentIds = params.body.attachmentIds ?? [];
+  const incomingAttachments = params.body.attachments ?? [];
 
-  return uploadedAttachments.map((attachment) => ({
-    filename: attachment.filename,
-    mime: attachment.type,
-    text: attachment.text,
-    imageDataUrl: attachment.imageDataUrl,
-    pageCount: attachment.pageCount,
-  }));
+  if (attachmentIds.length > 0) {
+    const uploadedAttachments = await getUploadedAttachments(attachmentIds, {
+      ownerUserId: params.ownerUserId,
+      shopId: params.shopId,
+    });
+
+    if (uploadedAttachments.length !== attachmentIds.length) {
+      throw new AttachmentAccessError();
+    }
+
+    return uploadedAttachments.map((attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename,
+      mime: attachment.type,
+      text: attachment.text,
+      imageDataUrl: attachment.imageDataUrl,
+      pageCount: attachment.pageCount,
+    }));
+  }
+
+  if (incomingAttachments.length > 0) {
+    const persisted = await Promise.all(
+      incomingAttachments.map((attachment) =>
+        saveUploadedAttachment({
+          ownerUserId: params.ownerUserId,
+          shopId: params.shopId,
+          filename: attachment.filename,
+          type: attachment.type,
+          text: attachment.text ?? "",
+          imageDataUrl: attachment.imageDataUrl,
+          pageCount: attachment.pageCount,
+        })
+      )
+    );
+
+    return persisted.map((attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename,
+      mime: attachment.type,
+      text: attachment.text,
+      imageDataUrl: attachment.imageDataUrl,
+      pageCount: attachment.pageCount,
+    }));
+  }
+
+  return [];
 }
 
 function formatDocuments(documents: UploadedDocument[]): string {
@@ -254,7 +302,9 @@ function buildOpenAIInput(params: {
 
     content.push({
       type: "input_text",
-      text: `Image attachment ${index + 1}: ${document.filename}${document.mime ? ` (${document.mime})` : ""}`,
+      text: `Image attachment ${index + 1}: ${document.filename}${
+        document.mime ? ` (${document.mime})` : ""
+      }`,
     });
     content.push({
       type: "input_image",
@@ -296,7 +346,11 @@ function isTransientOpenAIError(error: unknown): boolean {
   return meta.type === "server_error" || (typeof meta.status === "number" && meta.status >= 500);
 }
 
-function logOpenAIPhaseFailure(phase: "first-pass" | "second-pass", attempt: 1 | 2, error: unknown) {
+function logOpenAIPhaseFailure(
+  phase: "first-pass" | "second-pass",
+  attempt: 1 | 2,
+  error: unknown
+) {
   const meta = extractOpenAIErrorMeta(error);
   console.warn("[chat-openai] upstream failure", {
     phase,
@@ -346,26 +400,35 @@ function getOpenAIOutputText(response: unknown): string | undefined {
 
 export async function POST(req: Request) {
   try {
+    const { user, isPlatformAdmin } = await requireCurrentUser();
     const requestStartedAt = Date.now();
     const body = (await req.json()) as ChatRequestBody;
-    const incomingAttachmentCount = Array.isArray(body.attachments)
-      ? body.attachments.length
-      : Array.isArray(body.attachmentIds)
-        ? body.attachmentIds.length
+    const incomingAttachmentCount = Array.isArray(body.attachmentIds)
+      ? body.attachmentIds.length
+      : Array.isArray(body.attachments)
+        ? body.attachments.length
         : 0;
 
     if (incomingAttachmentCount > MAX_UPLOAD_BATCH_FILES) {
       console.info("[chat-attachments] rejected oversized batch", {
         fileCount: incomingAttachmentCount,
+        ownerUserId: user.id,
       });
       return NextResponse.json({ error: UPLOAD_CAP_MESSAGE }, { status: 400 });
     }
 
-    const documents = extractDocuments(body);
+    const documents = await extractDocuments({
+      body,
+      ownerUserId: user.id,
+    });
+
     console.info("[chat-attachments] accepted batch", {
       fileCount: documents.length,
       totalPdfPages: documents.reduce((sum, document) => sum + (document.pageCount ?? 0), 0),
+      ownerUserId: user.id,
+      isPlatformAdmin,
       attachments: documents.map((document) => ({
+        id: document.id ?? null,
         filename: document.filename,
         mimeType: document.mime || "unknown",
         textLength: document.text?.length ?? 0,
@@ -374,6 +437,7 @@ export async function POST(req: Request) {
       })),
       timeToAnalysisStartMs: Date.now() - requestStartedAt,
     });
+
     const userMessage = extractLatestUserMessage(body.messages || []);
     const conversationContext = formatRecentConversation(body.messages || []);
     const input = buildOpenAIInput({
@@ -383,9 +447,11 @@ export async function POST(req: Request) {
     });
 
     console.info("[chat-openai] request attachments", {
+      ownerUserId: user.id,
       attachmentCount: documents.length,
       includedInRequest: documents.map((document, index) => ({
         index: index + 1,
+        attachmentId: document.id ?? null,
         filename: document.filename,
         mimeType: document.mime || "unknown",
         includedAs: isImageDocument(document) ? "input_image+text" : "text",
@@ -411,6 +477,7 @@ export async function POST(req: Request) {
       .map((document) => document.text?.trim())
       .filter(Boolean)
       .join("\n\n");
+
     const retrievalAnalysis = buildRetrievalAnalysisSnapshot({
       taskType: detectChatTaskType({
         userQuery: userMessage,
@@ -439,17 +506,17 @@ export async function POST(req: Request) {
         ? buildDriveRefinementContext(retrieval)
         : "";
 
-    const outputText =
-      retrievalContext
-        ? await refineAnswerWithDriveSupport({
-            userMessage,
-            conversationContext,
-            firstPassAnswer: firstPassText,
-            retrievalContext,
-          })
-        : firstPassText;
+    const outputText = retrievalContext
+      ? await refineAnswerWithDriveSupport({
+          userMessage,
+          conversationContext,
+          firstPassAnswer: firstPassText,
+          retrievalContext,
+        })
+      : firstPassText;
 
     console.info("[chat-attachments] analysis complete", {
+      ownerUserId: user.id,
       fileCount: documents.length,
       totalPdfPages: documents.reduce((sum, document) => sum + (document.pageCount ?? 0), 0),
       durationMs: Date.now() - requestStartedAt,
@@ -461,6 +528,14 @@ export async function POST(req: Request) {
       },
     });
   } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
+    if (error instanceof AttachmentAccessError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
     if (isTransientOpenAIError(error)) {
       return NextResponse.json(
         { error: TRANSIENT_CHAT_ERROR_MESSAGE },
@@ -579,19 +654,3 @@ async function refineAnswerWithDriveSupport(params: {
     ? refinedOutputText.trim()
     : params.firstPassAnswer;
 }
-
-/*
-Vibe coding notes:
-- This keeps chat clean. No classifier goblin. No builder maze. No prompt lasagna.
-- The user's actual question always goes to the model, even when attachments exist.
-- Attachments stay labeled, so comparisons stop becoming document soup.
-- The model is told to evaluate repair strategy, not cosplay as a PDF narrator.
-- This is the right base before adding stage-two OEM / Drive retrieval.
-
-Best next upgrade:
-1. first pass = estimate judgment
-2. conditional retrieval = OEM / Drive / web only when needed
-3. second pass = refined answer
-
-That gives you estimator brain first, context second.
-*/

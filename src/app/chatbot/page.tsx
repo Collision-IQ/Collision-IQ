@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ChatWidget from "@/components/ChatWidget";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
+import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import {
   buildExportModel,
   buildPreferredVehicleIdentityLabel,
@@ -85,6 +86,7 @@ export default function ChatbotPage() {
   const [consentResolved, setConsentResolved] = useState(false);
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [consentChecked, setConsentChecked] = useState(false);
+  const [viewerAccess, setViewerAccess] = useState<AccountEntitlements | null>(null);
   const normalizedResult = useMemo(
     () => (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null),
     [analysisResult]
@@ -108,15 +110,51 @@ export default function ChatbotPage() {
     setDesktopRailOpen(next);
   }
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     setConsentAccepted(Boolean(readStoredChatConsent()));
     setConsentResolved(true);
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
-  function handleConsentAccept() {
-    if (!consentChecked || typeof window === "undefined") return;
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadViewerAccess() {
+      try {
+        const response = await fetch("/api/account/entitlements", {
+          credentials: "same-origin",
+        });
+        if (!response.ok) return;
+
+        const data = (await response.json()) as AccountEntitlements;
+        if (!cancelled) {
+          setViewerAccess(data);
+        }
+      } catch {
+        if (!cancelled) {
+          setViewerAccess(null);
+        }
+      }
+    }
+
+    void loadViewerAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (viewerAccess?.consentStatus !== "ACCEPTED" || typeof window === "undefined") {
+      return;
+    }
+
+    if (consentAccepted) {
+      return;
+    }
 
     const record: ChatConsentRecord = {
       consentStatus: "accepted",
@@ -128,6 +166,35 @@ export default function ChatbotPage() {
 
     window.localStorage.setItem(CHAT_CONSENT_STORAGE_KEY, JSON.stringify(record));
     setConsentAccepted(true);
+  }, [consentAccepted, viewerAccess]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  async function handleConsentAccept() {
+    if (!consentChecked || typeof window === "undefined") return;
+
+    const record: ChatConsentRecord = {
+      consentStatus: "accepted",
+      acceptedAt: new Date().toISOString(),
+      termsVersion: CHAT_CONSENT_TERMS_VERSION,
+      privacyVersion: CHAT_CONSENT_PRIVACY_VERSION,
+      checkboxChecked: true,
+    };
+
+    window.localStorage.setItem(CHAT_CONSENT_STORAGE_KEY, JSON.stringify(record));
+
+    try {
+      await fetch("/api/account/consent", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(record),
+      });
+    } catch {
+      // Local consent remains the primary gate until auth rollout is complete.
+    }
+
+    setConsentAccepted(true);
   }
 
   function handleConsentCancel() {
@@ -137,6 +204,13 @@ export default function ChatbotPage() {
   if (isMobile === null || !consentResolved) return null;
 
   const chatBlocked = !consentAccepted;
+  const featureFlags = viewerAccess?.featureFlags;
+  const canViewSupplementLines = featureFlags?.supplement_lines ?? false;
+  const canViewNegotiationDraft = featureFlags?.negotiation_draft ?? false;
+  const canUseBasicPdfExport = featureFlags?.basic_pdf_export ?? true;
+  const canUseRebuttalEmail = featureFlags?.rebuttal_email ?? false;
+  const canUseSideBySide = featureFlags?.side_by_side_report ?? false;
+  const canUseLineByLine = featureFlags?.line_by_line_report ?? false;
 
   return (
     <div className="h-screen bg-black text-white flex flex-col">
@@ -213,6 +287,12 @@ export default function ChatbotPage() {
               renderModel={renderModel}
               normalizedResult={normalizedResult}
               analysisResult={analysisResult}
+              canViewSupplementLines={canViewSupplementLines}
+              canViewNegotiationDraft={canViewNegotiationDraft}
+              canUseBasicPdfExport={canUseBasicPdfExport}
+              canUseRebuttalEmail={canUseRebuttalEmail}
+              canUseSideBySide={canUseSideBySide}
+              canUseLineByLine={canUseLineByLine}
             />
           </aside>
         )}
@@ -243,6 +323,12 @@ export default function ChatbotPage() {
             renderModel={renderModel}
             normalizedResult={normalizedResult}
             analysisResult={analysisResult}
+            canViewSupplementLines={canViewSupplementLines}
+            canViewNegotiationDraft={canViewNegotiationDraft}
+            canUseBasicPdfExport={canUseBasicPdfExport}
+            canUseRebuttalEmail={canUseRebuttalEmail}
+            canUseSideBySide={canUseSideBySide}
+            canUseLineByLine={canUseLineByLine}
           />
         </div>
       )}
@@ -373,6 +459,12 @@ function RailContent({
   renderModel,
   normalizedResult,
   analysisResult,
+  canViewSupplementLines,
+  canViewNegotiationDraft,
+  canUseBasicPdfExport,
+  canUseRebuttalEmail,
+  canUseSideBySide,
+  canUseLineByLine,
 }: {
   attachment: string | null;
   analysisText: string;
@@ -380,6 +472,12 @@ function RailContent({
   renderModel: ReturnType<typeof buildExportModel>;
   normalizedResult: AnalysisResult | null;
   analysisResult: RepairIntelligenceReport | null;
+  canViewSupplementLines: boolean;
+  canViewNegotiationDraft: boolean;
+  canUseBasicPdfExport: boolean;
+  canUseRebuttalEmail: boolean;
+  canUseSideBySide: boolean;
+  canUseLineByLine: boolean;
 }) {
   const featuredRecommendation = renderModel.supplementItems[0];
   const remainingRecommendations = renderModel.supplementItems.slice(1);
@@ -428,7 +526,8 @@ function RailContent({
         </div>
       </section>
 
-      <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+      {canViewSupplementLines ? (
+        <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
         <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
           Supplement Lines
         </div>
@@ -459,19 +558,32 @@ function RailContent({
               : "No clear supportable missing, underwritten, or disputed repair-path items were identified from the current structured analysis."}
           </div>
         )}
-      </section>
+        </section>
+      ) : (
+        <LockedFeatureCard
+          title="Supplement Lines"
+          body="Upgrade to Pro to unlock detailed supplement-line recommendations, evidence, and export-ready support details."
+        />
+      )}
 
       {analysisResult && (
         <ValuationSection renderModel={renderModel} lowConfidence={valuationLowConfidence} />
       )}
 
-      {renderModel.request && (
+      {renderModel.request && canViewNegotiationDraft && (
         <ExpandableDecisionSection
           title="Negotiation Draft"
           body={renderModel.request}
           tone="neutral"
           mono
           previewLines={7}
+        />
+      )}
+
+      {renderModel.request && !canViewNegotiationDraft && (
+        <LockedFeatureCard
+          title="Negotiation Draft"
+          body="Upgrade to Pro to unlock the negotiation draft, rebuttal support, and premium carrier-facing exports."
         />
       )}
 
@@ -501,7 +613,8 @@ function RailContent({
               onClick={() =>
                 exportReport(normalizedResult, analysisResult, panel, analysisText)
               }
-              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
+              disabled={!canUseBasicPdfExport}
+              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs disabled:cursor-not-allowed disabled:opacity-40"
             >
               Export PDF
             </button>
@@ -515,9 +628,10 @@ function RailContent({
                   variant: "rebuttal",
                 })
               }
-              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
+              disabled={!canUseRebuttalEmail}
+              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Rebuttal Email
+              {canUseRebuttalEmail ? "Rebuttal Email" : "Rebuttal Email (Pro)"}
             </button>
             <button
               onClick={() =>
@@ -529,9 +643,10 @@ function RailContent({
                   variant: "side_by_side",
                 })
               }
-              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
+              disabled={!canUseSideBySide}
+              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Side-by-Side Report
+              {canUseSideBySide ? "Side-by-Side Report" : "Side-by-Side Report (Pro)"}
             </button>
             <button
               onClick={() =>
@@ -543,9 +658,10 @@ function RailContent({
                   variant: "line_by_line",
                 })
               }
-              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
+              disabled={!canUseLineByLine}
+              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Line-by-Line Report
+              {canUseLineByLine ? "Line-by-Line Report" : "Line-by-Line Report (Pro)"}
             </button>
           </div>
         </section>
@@ -666,6 +782,29 @@ function FeaturedRecommendationCard({
   );
 }
 
+function LockedFeatureCard({
+  title,
+  body,
+}: {
+  title: string;
+  body: string;
+}) {
+  return (
+    <section className="rounded-xl border border-orange-500/20 bg-gradient-to-br from-[#C65A2A]/10 via-black/40 to-black/20 p-4 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[11px] uppercase tracking-[0.2em] text-orange-200/70">{title}</div>
+        <Link
+          href="/pricing"
+          className="rounded-full border border-orange-500/30 bg-orange-500/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-orange-100 transition hover:bg-orange-500/20"
+        >
+          Upgrade
+        </Link>
+      </div>
+      <div className="text-sm leading-6 text-white/72">{body}</div>
+    </section>
+  );
+}
+
 function DecisionSection({
   title,
   body,
@@ -750,14 +889,6 @@ function formatLabel(value: string) {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-function formatDVRange(low: number, high: number) {
-  if (low === 0 && high === 0) {
-    return "Not enough data to quantify a DV range yet.";
-  }
-
-  return `$${low} - $${high}`;
 }
 
 function buildValuationDisplay(renderModel: ReturnType<typeof buildExportModel>): string {

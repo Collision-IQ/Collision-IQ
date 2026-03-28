@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { FileText, Image as ImageIcon, X, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 
@@ -163,10 +164,13 @@ export default function AttachmentPreviewModal({
               ) : previewKind === "image" ? (
                 attachment.imageDataUrl ? (
                   <div className="flex min-h-full items-start justify-center overflow-auto p-6">
-                    <img
+                    <Image
                       src={attachment.imageDataUrl}
                       alt={attachment.filename}
-                      className="max-w-full rounded-xl border border-white/10 shadow-xl transition-transform duration-150"
+                      width={1600}
+                      height={1200}
+                      unoptimized
+                      className="h-auto max-w-full rounded-xl border border-white/10 shadow-xl transition-transform duration-150"
                       style={{ transform: `scale(${zoom})`, transformOrigin: "top center" }}
                     />
                   </div>

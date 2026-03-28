@@ -9,18 +9,9 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
-    "**/.next/**",
     "out/**",
     "build/**",
-    "dist/**",
-    "node_modules/**",
     "next-env.d.ts",
-    "clerk-nextjs/**",
-    "clerk-nextjs-sample-disabled/**",
-    "android/**",
-    "my-mcp-server/build/**",
-    ".tmp/**",
-    "scripts/run-vehicle-identity-tests.cjs",
   ]),
 ]);
 

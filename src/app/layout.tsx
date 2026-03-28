@@ -1,5 +1,6 @@
 import "./globals.css";
 import type { Metadata } from "next";
+import { ClerkProvider } from "@clerk/nextjs";
 
 function getSiteUrl() {
   const rawUrl =
@@ -57,6 +58,49 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const hasClerkConfig = Boolean(
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim() &&
+      process.env.CLERK_SECRET_KEY?.trim()
+  );
+
+  const content = (
+    <>
+      {/* Cinematic overlays (non-interactive) */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-0 z-0"
+      >
+        {/* Deep base */}
+        <div className="absolute inset-0 bg-black/70" />
+
+        {/* Directional lighting */}
+        <div className="absolute inset-0 bg-gradient-to-tr from-black via-black/60 to-black/25" />
+
+        {/* Strong vignette */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_35%,rgba(0,0,0,0.92))]" />
+
+        {/* Orange glow accent */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_10%,rgba(198,90,42,0.22),transparent_45%)]" />
+
+        {/* Subtle grain */}
+        <div className="absolute inset-0 opacity-[0.06] mix-blend-overlay bg-[url('/brand/logos/Background.png')]" />
+      </div>
+
+      {/* App layer */}
+      <div
+        className="
+          relative
+          z-10
+          min-h-screen
+          flex
+          flex-col
+        "
+      >
+        {children}
+      </div>
+    </>
+  );
+
   return (
     <html lang="en" className="h-full">
       <head>
@@ -76,39 +120,7 @@ export default function RootLayout({
           root-layout-body
         "
       >
-        {/* Cinematic overlays (non-interactive) */}
-        <div
-          aria-hidden
-          className="pointer-events-none fixed inset-0 z-0"
-        >
-          {/* Deep base */}
-          <div className="absolute inset-0 bg-black/70" />
-
-          {/* Directional lighting */}
-          <div className="absolute inset-0 bg-gradient-to-tr from-black via-black/60 to-black/25" />
-
-          {/* Strong vignette */}
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_35%,rgba(0,0,0,0.92))]" />
-
-          {/* Orange glow accent */}
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_10%,rgba(198,90,42,0.22),transparent_45%)]" />
-
-          {/* Subtle grain */}
-          <div className="absolute inset-0 opacity-[0.06] mix-blend-overlay bg-[url('/brand/logos/Background.png')]" />
-        </div>
-
-        {/* App layer */}
-        <div
-          className="
-            relative
-            z-10
-            min-h-screen
-            flex
-            flex-col
-          "
-        >
-          {children}
-        </div>
+        {hasClerkConfig ? <ClerkProvider>{content}</ClerkProvider> : content}
       </body>
     </html>
   );

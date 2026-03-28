@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
 import { saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
+import {
+  UnauthorizedError,
+  requireCurrentUser,
+} from "@/lib/auth/require-current-user";
 
 export const runtime = "nodejs";
 
@@ -60,15 +64,12 @@ async function fileToDataUrl(file: File): Promise<string | undefined> {
 
 export async function POST(req: Request) {
   try {
+    const { user } = await requireCurrentUser();
     const formData = await req.formData();
-
     const file = formData.get("file");
 
     if (!file || !(file instanceof File)) {
-      return NextResponse.json(
-        { error: "No file received" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "No file received" }, { status: 400 });
     }
 
     console.info("[upload] accepted", {
@@ -76,11 +77,13 @@ export async function POST(req: Request) {
       mimeType: file.type || "unknown",
       sizeBytes: file.size,
       isImage: file.type.startsWith("image/"),
+      ownerUserId: user.id,
     });
 
     const previewData = await extractFilePreviewData(file);
     const imageDataUrl = await fileToDataUrl(file);
-    const stored = saveUploadedAttachment({
+    const stored = await saveUploadedAttachment({
+      ownerUserId: user.id,
       filename: file.name,
       type: file.type,
       text: previewData.text,
@@ -89,11 +92,13 @@ export async function POST(req: Request) {
     });
 
     console.info("[upload] attachment stored", {
+      attachmentId: stored.id,
       filename: stored.filename,
       mimeType: stored.type || "unknown",
       textLength: stored.text.length,
       pageCount: stored.pageCount ?? null,
       hasImageDataUrl: Boolean(stored.imageDataUrl),
+      ownerUserId: user.id,
     });
 
     return NextResponse.json({
@@ -106,10 +111,11 @@ export async function POST(req: Request) {
       hasVision: Boolean(stored.imageDataUrl),
     });
   } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
     console.error("UPLOAD ERROR:", error);
-    return NextResponse.json(
-      { error: "Upload failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Upload failed" }, { status: 500 });
   }
 }

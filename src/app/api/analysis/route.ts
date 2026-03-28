@@ -16,18 +16,29 @@ import {
   inferDriveRetrievalTopics,
   inferDriveVehicleContext,
 } from "@/lib/ai/contracts/driveRetrievalContract";
-import type {
-  ChatAnalysisOutput,
-} from "@/lib/ai/contracts/chatAnalysisSchema";
+import type { ChatAnalysisOutput } from "@/lib/ai/contracts/chatAnalysisSchema";
 import type {
   RepairIntelligenceReport,
   VehicleIdentity,
 } from "@/lib/ai/types/analysis";
-import type { DriveRetrievalResponse, DriveRetrievalResult } from "@/lib/ai/contracts/driveRetrievalContract";
+import type {
+  DriveRetrievalResponse,
+  DriveRetrievalResult,
+} from "@/lib/ai/contracts/driveRetrievalContract";
 import { mergeVehicleIdentity, normalizeVehicleIdentity } from "@/lib/ai/vehicleContext";
-import type { EvidenceRecord, } from "@/lib/ai/types/evidence";
+import type { EvidenceRecord } from "@/lib/ai/types/evidence";
 import { collisionIqModels } from "@/lib/modelConfig";
 import { openai } from "@/lib/openai";
+import {
+  UnauthorizedError,
+  requireCurrentUser,
+} from "@/lib/auth/require-current-user";
+import {
+  UsageAccessError,
+  assertAnalysisAllowed,
+  recordCompletedAnalysisUsage,
+} from "@/lib/billing/usage";
+import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
@@ -48,8 +59,35 @@ type AnalysisRequestBody = {
   userIntent?: string | null;
 };
 
+class AttachmentAccessError extends Error {
+  status = 404;
+
+  constructor(message = "One or more attachments were not found for the current account.") {
+    super(message);
+    this.name = "AttachmentAccessError";
+  }
+}
+
+async function getLatestUserSubscription(userId: string) {
+  return prisma.subscription.findFirst({
+    where: {
+      userId,
+    },
+    orderBy: [
+      {
+        updatedAt: "desc",
+      },
+      {
+        createdAt: "desc",
+      },
+    ],
+  });
+}
+
 export async function POST(req: Request) {
   try {
+    const { user, isPlatformAdmin } = await requireCurrentUser();
+    const subscription = await getLatestUserSubscription(user.id);
     const body = (await req.json()) as AnalysisRequestBody;
     const artifactIds = body.artifactIds ?? [];
 
@@ -60,8 +98,21 @@ export async function POST(req: Request) {
       );
     }
 
-    const storedAttachments = getUploadedAttachments(artifactIds);
+    const usageSnapshot = await assertAnalysisAllowed({ user, subscription });
+    const storedAttachments = await getUploadedAttachments(artifactIds, {
+      ownerUserId: user.id,
+    });
+
+    if (storedAttachments.length !== artifactIds.length) {
+      throw new AttachmentAccessError();
+    }
+
     console.info("[analysis-attachments] analysis request assembled", {
+      ownerUserId: user.id,
+      isPlatformAdmin,
+      plan: usageSnapshot.entitlements.plan,
+      analysesUsedThisPeriod: usageSnapshot.entitlements.analysesUsedThisPeriod,
+      analysesRemaining: usageSnapshot.entitlements.analysesRemaining,
       attachmentCount: storedAttachments.length,
       artifactCount: artifactIds.length,
       attachments: storedAttachments.map((attachment) => ({
@@ -103,6 +154,8 @@ export async function POST(req: Request) {
 
     if (retrieval?.results.length) {
       console.info("[analysis-drive-retrieval]", {
+        ownerUserId: user.id,
+        isPlatformAdmin,
         retrievalMode: retrieval.request.retrievalMode,
         lanes: retrieval.request.targetLanes,
         matchedFiles: retrieval.results.map((result) => ({
@@ -136,9 +189,20 @@ export async function POST(req: Request) {
       },
     });
 
-    const stored = saveAnalysisReport({
+    const stored = await saveAnalysisReport({
+      ownerUserId: user.id,
       artifactIds,
       report,
+    });
+
+    await recordCompletedAnalysisUsage({
+      userId: user.id,
+      analysisReportId: stored.id,
+      isPlatformAdmin,
+      metadataJson: {
+        artifactCount: artifactIds.length,
+        reportId: stored.id,
+      },
     });
 
     return NextResponse.json({
@@ -147,8 +211,32 @@ export async function POST(req: Request) {
       report: stored.report,
       panel,
       retrieval: retrieval ? buildClientSafeRetrievalSummary(retrieval) : null,
+      usage: {
+        plan: usageSnapshot.entitlements.plan,
+        analysesUsedThisPeriod:
+          usageSnapshot.entitlements.analysesUsedThisPeriod + (isPlatformAdmin ? 0 : 1),
+        analysesRemaining:
+          usageSnapshot.entitlements.analysesRemaining === null
+            ? null
+            : Math.max(usageSnapshot.entitlements.analysesRemaining - 1, 0),
+      },
     });
   } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
+    if (error instanceof AttachmentAccessError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
+    if (error instanceof UsageAccessError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status }
+      );
+    }
+
     console.error("ANALYSIS ERROR:", error);
     return NextResponse.json(
       { error: "Analysis failed" },
