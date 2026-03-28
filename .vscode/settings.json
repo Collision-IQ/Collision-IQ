@@ -1,3 +1,12 @@
 {
-    "git.ignoreLimitWarning": true
+    "git.ignoreLimitWarning": true,
+    "files.exclude": {
+        "**/clerk-nextjs-sample-disabled": true
+    },
+    "search.exclude": {
+        "**/clerk-nextjs-sample-disabled": true
+    },
+    "files.watcherExclude": {
+        "**/clerk-nextjs-sample-disabled/**": true
+    }
 }

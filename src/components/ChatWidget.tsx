@@ -665,7 +665,20 @@ export default function ChatWidget({
     formData.append("file", file);
 
     const res = await fetch("/api/upload", { method: "POST", body: formData });
-    if (!res.ok) throw new Error("Upload failed");
+    if (!res.ok) {
+      let message = `Upload failed (${res.status})`;
+
+      try {
+        const data = (await res.json()) as { error?: string } | null;
+        if (data?.error) {
+          message = `Upload failed (${res.status}): ${data.error}`;
+        }
+      } catch {
+        // Keep the fallback message when the response is not JSON.
+      }
+
+      throw new Error(message);
+    }
 
     const data = await res.json();
     const attachmentId: string = data.attachmentId;
