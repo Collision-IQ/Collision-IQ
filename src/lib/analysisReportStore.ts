@@ -14,17 +14,31 @@ type ReportOwnerScope = {
   shopId?: string | null;
 };
 
+function resolveOwner(params: ReportOwnerScope) {
+  if (params.shopId) {
+    return {
+      ownerType: "SHOP" as const,
+      ownerId: params.shopId,
+    };
+  }
+
+  return {
+    ownerType: "USER" as const,
+    ownerId: params.ownerUserId,
+  };
+}
+
 function toStoredAnalysisReport(record: {
   id: string;
   createdAt: Date;
-  reportJson: Prisma.JsonValue;
-  artifacts?: Array<{ artifactId: string }>;
+  report: Prisma.JsonValue;
+  artifacts?: Array<{ attachmentId: string }>;
 }): StoredAnalysisReport {
   return {
     id: record.id,
-    artifactIds: (record.artifacts ?? []).map((entry) => entry.artifactId),
+    artifactIds: (record.artifacts ?? []).map((entry) => entry.attachmentId),
     createdAt: record.createdAt.toISOString(),
-    report: record.reportJson as RepairIntelligenceReport,
+    report: record.report as unknown as RepairIntelligenceReport,
   };
 }
 
@@ -34,15 +48,20 @@ export async function saveAnalysisReport(params: {
   artifactIds: string[];
   report: RepairIntelligenceReport;
 }): Promise<StoredAnalysisReport> {
-  const created = await prisma.storedAnalysisReport.create({
+  const owner = resolveOwner({
+    ownerUserId: params.ownerUserId,
+    shopId: params.shopId,
+  });
+
+  const created = await prisma.analysisReport.create({
     data: {
-      ownerUserId: params.ownerUserId,
-      shopId: params.shopId ?? null,
-      reportJson: params.report as Prisma.InputJsonValue,
+      ownerType: owner.ownerType,
+      ownerId: owner.ownerId,
+      report: params.report as unknown as Prisma.InputJsonValue,
       artifacts: params.artifactIds.length
         ? {
-            create: params.artifactIds.map((artifactId) => ({
-              artifactId,
+            create: params.artifactIds.map((attachmentId) => ({
+              attachmentId,
             })),
           }
         : undefined,
@@ -50,7 +69,7 @@ export async function saveAnalysisReport(params: {
     include: {
       artifacts: {
         select: {
-          artifactId: true,
+          attachmentId: true,
         },
       },
     },
@@ -63,15 +82,17 @@ export async function getAnalysisReport(
   id: string,
   scope: ReportOwnerScope
 ): Promise<StoredAnalysisReport | null> {
-  const record = await prisma.storedAnalysisReport.findFirst({
+  const owner = resolveOwner(scope);
+  const record = await prisma.analysisReport.findFirst({
     where: {
       id,
-      ownerUserId: scope.ownerUserId,
+      ownerType: owner.ownerType,
+      ownerId: owner.ownerId,
     },
     include: {
       artifacts: {
         select: {
-          artifactId: true,
+          attachmentId: true,
         },
       },
     },

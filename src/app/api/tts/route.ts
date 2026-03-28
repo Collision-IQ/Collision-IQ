@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { openai } from "@/lib/openai";
 import { collisionIqModels } from "@/lib/modelConfig";
+import {
+  UnauthorizedError,
+  requireCurrentUser,
+} from "@/lib/auth/require-current-user";
 
 export const runtime = "nodejs";
 
@@ -20,6 +24,7 @@ function normalizeOptionalString(value: unknown) {
 
 export async function POST(req: Request) {
   try {
+    const { user, isPlatformAdmin } = await requireCurrentUser();
     const body = (await req.json()) as TtsRequestBody;
     const text = normalizeOptionalString(body.text);
 
@@ -40,6 +45,14 @@ export async function POST(req: Request) {
 
     const arrayBuffer = await response.arrayBuffer();
 
+    console.info("[tts] completed", {
+      ownerUserId: user.id,
+      isPlatformAdmin,
+      model,
+      voice,
+      inputLength: input.length,
+    });
+
     return new Response(Buffer.from(arrayBuffer), {
       headers: {
         "Content-Type": AUDIO_CONTENT_TYPE,
@@ -47,6 +60,10 @@ export async function POST(req: Request) {
       },
     });
   } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
     console.error("[tts] generation failed", error);
     return NextResponse.json({ error: "TTS failed" }, { status: 500 });
   }

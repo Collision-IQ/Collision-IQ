@@ -42,7 +42,7 @@ export async function runRepairAnalysis({
   sessionContext,
   userIntent,
 }: RunRepairAnalysisParams): Promise<RepairIntelligenceReport> {
-  const attachments = preloadedAttachments ?? getUploadedAttachments(artifactIds);
+  const attachments = preloadedAttachments ?? (await getUploadedAttachments(artifactIds));
   const documents = attachments.map((attachment) => ({
     filename: attachment.filename,
     mime: attachment.type,

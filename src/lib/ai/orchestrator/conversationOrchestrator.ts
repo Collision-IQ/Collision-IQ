@@ -55,7 +55,7 @@ export async function orchestrateConversation({
   activeContext,
 }: ConversationOrchestratorParams): Promise<ConversationOrchestratorResult> {
   const intent = detectConversationIntent(userMessage);
-  const attachments = getUploadedAttachments(artifactIds);
+  const attachments = await getUploadedAttachments(artifactIds);
   const documents = attachments.map((attachment) => ({
     filename: attachment.filename,
     mime: attachment.type,

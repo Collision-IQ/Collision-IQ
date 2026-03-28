@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { openai } from "@/lib/openai";
+import {
+  UnauthorizedError,
+  requireCurrentUser,
+} from "@/lib/auth/require-current-user";
 
 export const runtime = "nodejs";
 
@@ -11,6 +15,7 @@ function normalizeModel(value: string | undefined) {
 
 export async function POST(req: Request) {
   try {
+    const { user, isPlatformAdmin } = await requireCurrentUser();
     const formData = await req.formData();
     const file = formData.get("file");
 
@@ -28,8 +33,19 @@ export async function POST(req: Request) {
       model,
     });
 
+    console.info("[transcribe] completed", {
+      ownerUserId: user.id,
+      isPlatformAdmin,
+      sizeBytes: file.size,
+      model,
+    });
+
     return NextResponse.json({ text: transcription.text ?? "" });
   } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
     console.error("[transcribe] transcription failed", error);
     return NextResponse.json({ error: "Transcription failed." }, { status: 500 });
   }
