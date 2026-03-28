@@ -2,6 +2,10 @@ import type { DecisionPanel } from "./buildDecisionPanel";
 import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
 import { buildExportTemplateSourceModel } from "./exportTemplates";
+import {
+  buildPreferredRebuttalSubjectVehicleLabel,
+  buildPreferredVehicleIdentityLabel,
+} from "./buildExportModel";
 
 export function buildRebuttalEmailPdf(params: {
   report: RepairIntelligenceReport | null;
@@ -12,6 +16,10 @@ export function buildRebuttalEmailPdf(params: {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
   const rebuttalItems = exportModel.supplementItems.slice(0, 5);
+  const vehicleIdentity =
+    buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
+    "Vehicle details still limited in the current material.";
+  const subjectVehicle = buildPreferredRebuttalSubjectVehicleLabel(exportModel.vehicle);
 
   return {
     filename: "collision-iq-rebuttal-email.pdf",
@@ -23,7 +31,7 @@ export function buildRebuttalEmailPdf(params: {
       generatedLabel: `Generated ${source.generatedLabel}`,
     }),
     summary: [
-      { label: "Vehicle", value: exportModel.vehicle.label || "Vehicle details still limited in the current material." },
+      { label: "Vehicle", value: vehicleIdentity },
       { label: "VIN", value: exportModel.vehicle.vin || "Not clearly supported in the current material." },
       { label: "Primary Ask", value: rebuttalItems[0]?.title || "Review the current repair path and provide supporting documentation." },
       { label: "Format", value: "Professional email draft" },
@@ -31,7 +39,7 @@ export function buildRebuttalEmailPdf(params: {
     sections: [
       {
         title: "Recommended Subject",
-        body: `Request for estimate revision - ${exportModel.vehicle.label || "Current repair file"}`,
+        body: `Request for estimate revision - ${subjectVehicle}`,
       },
       {
         title: "Opening Position",

@@ -3,33 +3,10 @@ import { PrismaClient } from "@prisma/client"
 type PrismaGlobal = typeof globalThis & {
   prisma?: PrismaClient
   prismaInstanceId?: number
-  prismaConnectPromise?: Promise<void>
   backgroundTaskPromises?: Map<string, Promise<unknown>>
 }
 
 const globalForPrisma = globalThis as PrismaGlobal
-
-async function connectPrismaClient(prisma: PrismaClient) {
-  globalForPrisma.prismaConnectPromise ??= prisma
-    .$connect()
-    .then(() => {
-      console.info("[prisma] dev connect ok", {
-        instanceId: globalForPrisma.prismaInstanceId,
-        pid: process.pid,
-      })
-    })
-    .catch((error) => {
-      console.error("[prisma] dev connect failed", {
-        instanceId: globalForPrisma.prismaInstanceId,
-        pid: process.pid,
-        error: error instanceof Error ? error.message : String(error),
-      })
-      globalForPrisma.prismaConnectPromise = undefined
-      throw error
-    })
-
-  return globalForPrisma.prismaConnectPromise
-}
 
 function createPrismaClient() {
   const prisma = new PrismaClient({
@@ -52,7 +29,14 @@ function createPrismaClient() {
       nodeEnv: process.env.NODE_ENV,
       stack: new Error().stack?.split("\n").slice(1, 5).join(" | "),
     })
-    return originalDisconnect()
+    try {
+      return await originalDisconnect()
+    } finally {
+      if (globalForPrisma.prisma === prisma) {
+        globalForPrisma.prisma = undefined
+        globalForPrisma.prismaInstanceId = undefined
+      }
+    }
   }
 
   console.info("[prisma] client created", {
@@ -67,7 +51,6 @@ function createPrismaClient() {
 function installPrismaClient(prisma: PrismaClient, instanceId: number) {
   globalForPrisma.prisma = prisma
   globalForPrisma.prismaInstanceId = instanceId
-  globalForPrisma.prismaConnectPromise = undefined
   return prisma
 }
 
@@ -88,8 +71,6 @@ export const prisma = existingPrisma ?? created!.prisma
 
 if (process.env.NODE_ENV !== "production") {
   installPrismaClient(prisma, existingInstanceId ?? created!.instanceId)
-
-  void connectPrismaClient(prisma)
 }
 
 export function ensureSingleWorker(name: string) {

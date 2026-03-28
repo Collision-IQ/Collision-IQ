@@ -1,4 +1,10 @@
-import { buildExportModel, type ExportModel, type ExportSupplementItem } from "./buildExportModel";
+import {
+  buildExportModel,
+  buildPreferredRebuttalSubjectVehicleLabel,
+  buildPreferredVehicleIdentityLabel,
+  type ExportModel,
+  type ExportSupplementItem,
+} from "./buildExportModel";
 import type { DecisionPanel } from "./buildDecisionPanel";
 import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
 
@@ -28,6 +34,21 @@ export type ExportLineComparison = {
   rationale: string;
   support?: string;
 };
+
+export function formatAnalysisModeLabel(
+  mode: AnalysisResult["mode"] | "single-document-review" | undefined
+): string {
+  switch (mode) {
+    case "comparison":
+      return "Comparison Review";
+    case "single-document-review":
+      return "Single Estimate Review";
+    case "parser-incomplete":
+      return "Estimate Review";
+    default:
+      return "Estimate Review";
+  }
+}
 
 export function buildExportTemplateSourceModel(params: {
   report: RepairIntelligenceReport | null;
@@ -83,13 +104,14 @@ export function buildRebuttalEmailTemplate(params: {
 }): string {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
+  const subjectVehicle = buildPreferredRebuttalSubjectVehicleLabel(exportModel.vehicle);
   const topItems = exportModel.supplementItems.slice(0, 4);
   const asks = topItems.length > 0
     ? topItems.map((item) => `- ${item.title}: ${buildRequestSentence(item)}`)
     : ["- Please review the current repair path and provide any supporting documentation needed to confirm the intended scope."];
 
   return [
-    `Subject: Request for estimate revision - ${exportModel.vehicle.label || "Current repair file"}`,
+    `Subject: Request for estimate revision - ${subjectVehicle}`,
     "",
     "To: [Carrier Adjuster Email]",
     "CC: [Shop / File Team]",
@@ -120,6 +142,9 @@ export function buildSideBySideComparisonReport(params: {
 }): string {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
+  const vehicleIdentity =
+    buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
+    "Vehicle details still limited in the current material.";
 
   const sections = source.categoryComparisons.map((category) =>
     [
@@ -135,8 +160,8 @@ export function buildSideBySideComparisonReport(params: {
     "# Side-by-Side Comparison Report",
     "",
     `Generated: ${source.generatedLabel}`,
-    `Vehicle: ${exportModel.vehicle.label || "Vehicle details still limited in the current material."}`,
-    `Mode: ${formatCategoryLabel(source.analysisMode || "single-document-review")}`,
+    `Vehicle: ${vehicleIdentity}`,
+    `Mode: ${formatAnalysisModeLabel(source.analysisMode)}`,
     "",
     "## Overall Position",
     `Summary: ${exportModel.repairPosition}`,
@@ -154,6 +179,9 @@ export function buildLineByLineComparisonReport(params: {
 }): string {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
+  const vehicleIdentity =
+    buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
+    "Vehicle details still limited in the current material.";
 
   const rows = source.lineItems.map((item, index) =>
     [
@@ -174,7 +202,7 @@ export function buildLineByLineComparisonReport(params: {
     "# Line-by-Line Comparison Report",
     "",
     `Generated: ${source.generatedLabel}`,
-    `Vehicle: ${exportModel.vehicle.label || "Vehicle details still limited in the current material."}`,
+    `Vehicle: ${vehicleIdentity}`,
     "",
     "This view focuses on estimate operations, why each line matters, and whether the current carrier-side posture appears supported, underwritten, missing, or disputed.",
     "",

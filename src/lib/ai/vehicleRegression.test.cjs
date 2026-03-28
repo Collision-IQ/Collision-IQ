@@ -21,11 +21,18 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 const {
   buildVehicleLabel,
   decodeVinVehicleIdentity,
+  extractVehicleIdentityFromText,
   isBetterVinCandidate,
   isBetterVehicleCandidate,
   mergeVehicleIdentity,
 } = require("./vehicleContext.ts");
 const { buildCarrierReport } = require("./builders/carrierPdfBuilder.ts");
+const { buildRebuttalEmailPdf } = require("./builders/rebuttalEmailPdfBuilder.ts");
+const {
+  buildRebuttalEmailTemplate,
+  formatAnalysisModeLabel,
+} = require("./builders/exportTemplates.ts");
+const { buildPreferredVehicleIdentityLabel } = require("./builders/buildExportModel.ts");
 
 const BASE_REPORT = {
   summary: {
@@ -140,7 +147,7 @@ run("invalid OCR VIN does not replace a validated VIN in export output", () => {
   assert.equal(findSummaryValue(document, "Vehicle"), "2021 GMC Acadia");
 });
 
-run("VIN present with decoded vehicle data populates report vehicle", () => {
+run("VIN-only decoded vehicle falls back to VIN tail when model is unavailable", () => {
   const document = buildCarrierReport({
     report: {
       ...BASE_REPORT,
@@ -156,7 +163,7 @@ run("VIN present with decoded vehicle data populates report vehicle", () => {
   });
 
   assert.equal(findSummaryValue(document, "VIN"), TEST_VIN);
-  assert.equal(findSummaryValue(document, "Vehicle"), "2021 GMC");
+  assert.equal(findSummaryValue(document, "Vehicle"), "VIN ending 123456");
 });
 
 run("decoded and structured vehicle stay intact in export rendering with partial later data", () => {
@@ -272,6 +279,227 @@ run("year-only vehicle data is upgraded by VIN support instead of rendering as y
     assistantAnalysis: null,
   });
 
-  assert.equal(findSummaryValue(document, "Vehicle"), "2021 GMC");
+  assert.equal(findSummaryValue(document, "Vehicle"), "VIN ending 123456");
   assert.equal(findSummaryValue(document, "VIN"), TEST_VIN);
+});
+
+run("partial decoded year-make identity falls back to VIN tail before render", () => {
+  assert.equal(
+    buildPreferredVehicleIdentityLabel({
+      year: 2021,
+      make: "GMC",
+      vin: TEST_VIN,
+      confidence: "partial",
+    }),
+    "VIN ending 123456"
+  );
+});
+
+run("estimate header parsing normalizes safe make abbreviations", () => {
+  const vehicle = extractVehicleIdentityFromText(
+    [
+      "2019 JAGU E-PACE P250 S AWD",
+      "VIN: SADFJ2FX7K1Z36402",
+    ].join("\n"),
+    "attachment"
+  );
+
+  assert.equal(vehicle?.year, 2019);
+  assert.equal(vehicle?.make, "Jaguar");
+  assert.equal(vehicle?.model, "E-PACE P250");
+  assert.equal(vehicle?.trim, "S AWD");
+});
+
+run("parsed estimate header identity reaches final export vehicle label", () => {
+  const document = buildCarrierReport({
+    report: {
+      ...BASE_REPORT,
+      evidence: [
+        {
+          id: "shop-header",
+          title: "Estimate header",
+          snippet: "2019 JAGU E-PACE P250 S AWD\nVIN: SADFJ2FX7K1Z36402",
+          source: "estimate",
+          authority: "inferred",
+        },
+      ],
+    },
+    analysis: null,
+    panel: null,
+    assistantAnalysis: null,
+  });
+
+  assert.equal(findSummaryValue(document, "Vehicle"), "2019 Jaguar E-Pace P250 S AWD");
+  assert.equal(findSummaryValue(document, "VIN"), "SADFJ2FX7K1Z36402");
+});
+
+run("executive and opening prose drop appended numbered findings blocks", () => {
+  const contaminatedNarrative = [
+    "The carrier estimate remains underwritten relative to the documented repair path.",
+    "",
+    "1. Pre-repair scan is not clearly documented.",
+    "2. Post-repair calibration support remains missing.",
+  ].join("\n");
+
+  const carrierDocument = buildCarrierReport({
+    report: {
+      ...BASE_REPORT,
+      vehicle: {
+        year: 2021,
+        make: "GMC",
+        model: "Acadia",
+        source: "attachment",
+        confidence: 0.92,
+      },
+    },
+    analysis: {
+      mode: "single-document-review",
+      parserStatus: "ok",
+      summary: BASE_REPORT.summary,
+      findings: [],
+      supplements: [],
+      evidence: [],
+      operations: [],
+      narrative: contaminatedNarrative,
+      vehicle: undefined,
+    },
+    panel: null,
+    assistantAnalysis: contaminatedNarrative,
+  });
+  const rebuttalDocument = buildRebuttalEmailPdf({
+    report: {
+      ...BASE_REPORT,
+      vehicle: {
+        year: 2021,
+        make: "GMC",
+        model: "Acadia",
+        source: "attachment",
+        confidence: 0.92,
+      },
+    },
+    analysis: {
+      mode: "single-document-review",
+      parserStatus: "ok",
+      summary: BASE_REPORT.summary,
+      findings: [],
+      supplements: [],
+      evidence: [],
+      operations: [],
+      narrative: contaminatedNarrative,
+      vehicle: undefined,
+    },
+    panel: null,
+    assistantAnalysis: contaminatedNarrative,
+  });
+
+  const executiveBody = carrierDocument.sections.find(
+    (section) => section.title === "Executive Repair Position"
+  )?.body;
+  const openingBody = rebuttalDocument.sections.find(
+    (section) => section.title === "Opening Position"
+  )?.body;
+
+  assert.ok(executiveBody);
+  assert.ok(openingBody);
+  assert.equal(executiveBody.includes("1. Pre-repair scan"), false);
+  assert.equal(executiveBody.includes("2. Post-repair calibration support remains missing."), false);
+  assert.equal(openingBody.includes("1. Pre-repair scan"), false);
+  assert.equal(openingBody.includes("2. Post-repair calibration support remains missing."), false);
+  assert.match(openingBody, /^After reviewing the current file, our position is that .+\.$/);
+});
+
+run("rebuttal subject prefers full vehicle identity and falls back to VIN tail", () => {
+  const withIdentity = buildRebuttalEmailPdf({
+    report: {
+      ...BASE_REPORT,
+      vehicle: {
+        vin: TEST_VIN,
+        year: 2021,
+        make: "GMC",
+        model: "Acadia",
+        trim: "AT4 AWD",
+        source: "attachment",
+        confidence: 0.92,
+      },
+    },
+    analysis: null,
+    panel: null,
+    assistantAnalysis: null,
+  });
+  const withVinOnly = buildRebuttalEmailTemplate({
+    report: {
+      ...BASE_REPORT,
+      vehicle: {
+        vin: TEST_VIN,
+        source: "attachment",
+        confidence: 0.94,
+      },
+    },
+    analysis: null,
+    panel: null,
+    assistantAnalysis: null,
+  });
+
+  assert.equal(
+    withIdentity.sections.find((section) => section.title === "Recommended Subject")?.body,
+    "Request for estimate revision - 2021 GMC Acadia AT4 AWD"
+  );
+  assert.match(withVinOnly, /Subject: Request for estimate revision - VIN ending 123456/);
+});
+
+run("vehicle label falls back to VIN tail before rendering year-only", () => {
+  assert.equal(
+    buildPreferredVehicleIdentityLabel({
+      year: 2019,
+      vin: "SADFJ2FX7K1Z36402",
+      confidence: "partial",
+    }),
+    "VIN ending Z36402"
+  );
+});
+
+run("side-by-side mode label is product-friendly outside compare mode", () => {
+  assert.equal(formatAnalysisModeLabel("comparison"), "Comparison Review");
+  assert.equal(formatAnalysisModeLabel("single-document-review"), "Single Estimate Review");
+  assert.equal(formatAnalysisModeLabel("parser-incomplete"), "Estimate Review");
+});
+
+run("clean presentation prose removes empty pushback stub", () => {
+  const document = buildCarrierReport({
+    report: {
+      ...BASE_REPORT,
+      vehicle: {
+        year: 2021,
+        make: "GMC",
+        model: "Acadia",
+        source: "attachment",
+        confidence: 0.92,
+      },
+    },
+    analysis: {
+      mode: "single-document-review",
+      parserStatus: "ok",
+      summary: BASE_REPORT.summary,
+      findings: [],
+      supplements: [],
+      evidence: [],
+      operations: [],
+      narrative:
+        "The carrier estimate remains underwritten. Areas that look aggressive or likely to get pushback:.",
+      vehicle: undefined,
+    },
+    panel: null,
+    assistantAnalysis:
+      "The carrier estimate remains underwritten. Areas that look aggressive or likely to get pushback:.",
+  });
+
+  const executiveBody = document.sections.find(
+    (section) => section.title === "Executive Repair Position"
+  )?.body;
+
+  assert.ok(executiveBody);
+  assert.equal(
+    executiveBody.includes("Areas that look aggressive or likely to get pushback:."),
+    false
+  );
 });

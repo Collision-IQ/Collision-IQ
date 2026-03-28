@@ -14,6 +14,7 @@ const KNOWN_MAKES = [
   "Honda",
   "Hyundai",
   "Infiniti",
+  "Jaguar",
   "Jeep",
   "Kia",
   "Lexus",
@@ -33,6 +34,10 @@ const KNOWN_MAKES = [
   "Volkswagen",
   "Volvo",
 ];
+
+const MAKE_ABBREVIATIONS: Record<string, string> = {
+  JAGU: "Jaguar",
+};
 
 const SOURCE_RANK: Record<NonNullable<VehicleIdentity["source"]>, number> = {
   vin_decoded: 6,
@@ -149,7 +154,7 @@ export function extractVehicleIdentityFromText(
     normalizeYear(extractLabeledValue(normalized, ["year", "yr", "model year"]));
   const make =
     parsedVehicleLine?.make ??
-    cleanVehicleToken(extractLabeledValue(normalized, ["make", "mk"]));
+    normalizeVehicleMakeToken(cleanVehicleToken(extractLabeledValue(normalized, ["make", "mk"])));
   const model =
     parsedVehicleLine?.model ??
     cleanVehicleToken(extractLabeledValue(normalized, ["model", "mdl"]));
@@ -179,10 +184,20 @@ export function extractVehicleIdentityFromText(
     }, source),
   };
 
-  return mergeVehicleIdentity(
-    statedVehicle,
-    vin ? decodeVinVehicleIdentity(vin) : null
-  ) ?? statedVehicle;
+  const extractedVehicle =
+    mergeVehicleIdentity(
+      statedVehicle,
+      vin ? decodeVinVehicleIdentity(vin) : null
+    ) ?? statedVehicle;
+
+  console.info("[vehicle-label-trace:estimate-parse]", {
+    source,
+    vehicleLine: vehicleLine ?? null,
+    parsedVehicleLine: parsedVehicleLine ?? null,
+    extractedVehicle,
+  });
+
+  return extractedVehicle;
 }
 
 export function mergeVehicleIdentity(
@@ -432,10 +447,7 @@ function extractVehicleLikeLine(text: string): string | undefined {
     .map((line) => line.trim())
     .filter(Boolean);
 
-  return lines.find((line) =>
-    /\b(19\d{2}|20\d{2})\b/.test(line) &&
-    KNOWN_MAKES.some((make) => line.toLowerCase().includes(make.toLowerCase()))
-  );
+  return lines.find((line) => /\b(19\d{2}|20\d{2})\b/.test(line) && Boolean(resolveVehicleMakeMatch(line)));
 }
 
 function parseVehicleLine(line: string): {
@@ -446,9 +458,8 @@ function parseVehicleLine(line: string): {
 } | null {
   const yearMatch = line.match(/\b(19\d{2}|20\d{2})\b/);
   const year = yearMatch ? Number(yearMatch[1]) : undefined;
-  const make = KNOWN_MAKES.find((candidate) =>
-    line.toLowerCase().includes(candidate.toLowerCase())
-  );
+  const makeMatch = resolveVehicleMakeMatch(line);
+  const make = makeMatch?.make;
 
   if (!year && !make) {
     return null;
@@ -456,8 +467,8 @@ function parseVehicleLine(line: string): {
 
   let model: string | undefined;
   let trim: string | undefined;
-  if (make) {
-    const regex = new RegExp(`${escapeRegExp(make)}\\s+(.+)$`, "i");
+  if (makeMatch) {
+    const regex = new RegExp(`${escapeRegExp(makeMatch.matchedToken)}\\s+(.+)$`, "i");
     const makeTail = line.match(regex)?.[1]?.split(/[.;|\n]/)[0]?.trim();
     if (makeTail) {
       const tokens = makeTail.split(/\s+/).filter(Boolean);
@@ -578,6 +589,43 @@ function cleanVehicleToken(value?: string): string | undefined {
     return undefined;
   }
   return cleaned || undefined;
+}
+
+function normalizeVehicleMakeToken(value?: string): string | undefined {
+  if (!value) return undefined;
+
+  const abbreviation = MAKE_ABBREVIATIONS[value.toUpperCase()];
+  if (abbreviation) {
+    return abbreviation;
+  }
+
+  const knownMake = KNOWN_MAKES.find((candidate) => candidate.toLowerCase() === value.toLowerCase());
+  return knownMake ?? value;
+}
+
+function resolveVehicleMakeMatch(
+  line: string
+): { make: string; matchedToken: string } | undefined {
+  for (const [abbreviation, make] of Object.entries(MAKE_ABBREVIATIONS)) {
+    if (new RegExp(`\\b${escapeRegExp(abbreviation)}\\b`, "i").test(line)) {
+      return {
+        make,
+        matchedToken: abbreviation,
+      };
+    }
+  }
+
+  const knownMake = KNOWN_MAKES.find((candidate) =>
+    new RegExp(`\\b${escapeRegExp(candidate)}\\b`, "i").test(line)
+  );
+  if (!knownMake) {
+    return undefined;
+  }
+
+  return {
+    make: knownMake,
+    matchedToken: knownMake,
+  };
 }
 
 function isPlaceholderVehicleValue(value?: string): boolean {

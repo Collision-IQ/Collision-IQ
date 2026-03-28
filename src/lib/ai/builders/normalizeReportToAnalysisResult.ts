@@ -28,11 +28,25 @@ export function normalizeReportToAnalysisResult(
     "attachment"
   );
   const guardedInferredVehicle = preserveStructuredDescriptors(structuredVehicle, inferredVehicle);
+  const normalizedVehicle = mergeVehicleIdentity(structuredVehicle, guardedInferredVehicle);
+
+  console.info("[vehicle-label-trace:raw-extraction]", {
+    reportVehicle: normalizeVehicleIdentity(report.vehicle) ?? null,
+    analysisVehicle: normalizeVehicleIdentity(report.analysis?.vehicle) ?? null,
+    extractedFromEstimateText: normalizeVehicleIdentity(inferredVehicle) ?? null,
+    estimateEvidencePreview: estimateEvidenceText.slice(0, 240) || null,
+  });
+
+  console.info("[vehicle-label-trace:normalized-analysis]", {
+    structuredVehicle: structuredVehicle ?? null,
+    guardedInferredVehicle: guardedInferredVehicle ?? null,
+    normalizedVehicle: normalizedVehicle ?? null,
+  });
 
   if (report.analysis) {
     return {
       ...report.analysis,
-      vehicle: mergeVehicleIdentity(structuredVehicle, guardedInferredVehicle),
+      vehicle: normalizedVehicle,
     };
   }
 
@@ -93,7 +107,7 @@ export function normalizeReportToAnalysisResult(
     narrative:
       report.recommendedActions[0] ||
       "The estimate needs clearer repair support before it can be treated as fully defended.",
-    vehicle: mergeVehicleIdentity(structuredVehicle, guardedInferredVehicle),
+    vehicle: normalizedVehicle,
   };
 }
 

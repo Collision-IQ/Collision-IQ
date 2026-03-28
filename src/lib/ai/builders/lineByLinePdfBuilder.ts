@@ -2,6 +2,7 @@ import type { DecisionPanel } from "./buildDecisionPanel";
 import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
 import { buildExportTemplateSourceModel } from "./exportTemplates";
+import { buildPreferredVehicleIdentityLabel } from "./buildExportModel";
 
 export function buildLineByLinePdf(params: {
   report: RepairIntelligenceReport | null;
@@ -11,6 +12,9 @@ export function buildLineByLinePdf(params: {
 }): CarrierReportDocument {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
+  const vehicleIdentity =
+    buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
+    "Vehicle details still limited in the current material.";
 
   return {
     filename: "collision-iq-line-by-line-report.pdf",
@@ -22,7 +26,7 @@ export function buildLineByLinePdf(params: {
       generatedLabel: `Generated ${source.generatedLabel}`,
     }),
     summary: [
-      { label: "Vehicle", value: exportModel.vehicle.label || "Vehicle details still limited in the current material." },
+      { label: "Vehicle", value: vehicleIdentity },
       { label: "VIN", value: exportModel.vehicle.vin || "Not clearly supported in the current material." },
       { label: "Lines", value: `${source.lineItems.length}` },
       { label: "Focus", value: "Operations, rationale, support status" },

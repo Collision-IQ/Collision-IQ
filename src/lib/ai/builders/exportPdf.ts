@@ -148,21 +148,34 @@ function drawBrandedHeader(
 ): number {
   const topBandHeight = 18;
   const titleY = params.y + topBandHeight + 8;
+  const logoBox = {
+    x: params.x + 4,
+    y: params.y + 4,
+    width: 28,
+    height: 8.5,
+  };
+  let logoRightX = logoBox.x;
+
   doc.setFillColor(248, 246, 242);
   doc.roundedRect(params.x, params.y, params.width, topBandHeight, 2, 2, "F");
 
   if (params.logoDataUrl) {
-    doc.addImage(params.logoDataUrl, "PNG", params.x + 4, params.y + 4, 34, 8.5);
+    const logoSize = resolveContainedImageSize(doc, params.logoDataUrl, logoBox.width, logoBox.height);
+    const logoY = logoBox.y + (logoBox.height - logoSize.height) / 2;
+    doc.addImage(params.logoDataUrl, "PNG", logoBox.x, logoY, logoSize.width, logoSize.height);
+    logoRightX = logoBox.x + logoSize.width;
   }
+
+  const brandTextX = Math.max(params.x + 42, logoRightX + 4);
 
   doc.setTextColor(62, 65, 70);
   doc.setFont("Helvetica", "Bold");
   doc.setFontSize(9);
-  doc.text(params.companyName.toUpperCase(), params.x + 42, params.y + 6.5);
+  doc.text(params.companyName.toUpperCase(), brandTextX, params.y + 6.5);
 
   doc.setFont("Helvetica", "Normal");
   doc.setFontSize(8.5);
-  doc.text(params.reportLabel, params.x + 42, params.y + 11.5);
+  doc.text(params.reportLabel, brandTextX, params.y + 11.5);
 
   doc.setFont("Helvetica", "Bold");
   doc.setFontSize(18);
@@ -185,6 +198,36 @@ function drawBrandedHeader(
   doc.line(params.x, dividerY, params.x + params.width, dividerY);
 
   return dividerY;
+}
+
+function resolveContainedImageSize(
+  doc: jsPDF,
+  imageDataUrl: string,
+  maxWidth: number,
+  maxHeight: number
+): { width: number; height: number } {
+  try {
+    const imageProperties = doc.getImageProperties(imageDataUrl);
+    const intrinsicWidth =
+      typeof imageProperties.width === "number" && imageProperties.width > 0
+        ? imageProperties.width
+        : maxWidth;
+    const intrinsicHeight =
+      typeof imageProperties.height === "number" && imageProperties.height > 0
+        ? imageProperties.height
+        : maxHeight;
+    const scale = Math.min(maxWidth / intrinsicWidth, maxHeight / intrinsicHeight);
+
+    return {
+      width: Number((intrinsicWidth * scale).toFixed(2)),
+      height: Number((intrinsicHeight * scale).toFixed(2)),
+    };
+  } catch {
+    return {
+      width: maxWidth,
+      height: maxHeight,
+    };
+  }
 }
 
 function drawSummaryGrid(

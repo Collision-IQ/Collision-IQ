@@ -73,6 +73,9 @@ const META_COMMENTARY_PATTERNS = [
   "repair-path items",
   "repair path items",
 ] as const;
+const PRESENTATION_DETAIL_BLOCK_PATTERN =
+  /(?:^|\n)\s*(?:\d+[.)]|[-*•]|evidence:|details:|detail:|findings:|requested revisions|requested support)\s+/i;
+const INLINE_ENUMERATION_PATTERN = /([.!?])\s+\d+[.)]\s+[\s\S]*$/;
 
 export function buildExportModel(params: {
   report: RepairIntelligenceReport | null;
@@ -134,24 +137,34 @@ export function buildExportModel(params: {
     : cleanedSupplementItems;
   const guardedVehicleLabel = quality.malformedVehicle
     ? structuredVehicleLabel
-    : displayVehicle.label ?? structuredVehicleLabel ?? vehicle.label;
+    : buildPreferredVehicleIdentityLabel({
+        ...vehicle,
+        label: displayVehicle.label ?? structuredVehicleLabel ?? vehicle.label,
+        trim: displayVehicle.trim ?? vehicle.trim,
+      }) ?? displayVehicle.label ?? structuredVehicleLabel ?? vehicle.label;
   const allLabelsSuppressed = quality.noisy && guardedSupplementItems.length === 0;
+  const exportVehicle = {
+    ...vehicle,
+    label: guardedVehicleLabel,
+    trim: displayVehicle.trim,
+    make: cleanDisplayLabel(vehicle.make),
+    model: cleanDisplayLabel(vehicle.model),
+    manufacturer: cleanDisplayText(vehicle.manufacturer),
+  };
+
+  console.info("[vehicle-label-trace:shared-export-model]", {
+    sourceVehicle: vehicle ?? null,
+    exportVehicle,
+  });
 
   return {
-    vehicle: {
-      ...vehicle,
-      label: guardedVehicleLabel,
-      trim: displayVehicle.trim,
-      make: cleanDisplayLabel(vehicle.make),
-      model: cleanDisplayLabel(vehicle.model),
-      manufacturer: cleanDisplayText(vehicle.manufacturer),
-    },
+    vehicle: exportVehicle,
     repairPosition: allLabelsSuppressed
       ? "The core repair conclusion remains intact, but noisy extracted labels were suppressed in this presentation view."
-      : cleanDisplayText(repairPosition),
+      : cleanPresentationProse(repairPosition),
     positionStatement: allLabelsSuppressed
       ? "The main dispute areas remain supportable, but low-quality extracted labels were removed before rendering."
-      : cleanDisplayText(positionStatement),
+      : cleanPresentationProse(positionStatement),
     supplementItems: guardedSupplementItems,
     request: allLabelsSuppressed
       ? "Please review the core dispute areas and provide clearer support for the intended repair path and verification steps."
@@ -252,6 +265,132 @@ function sanitizeVehicleDisplay(value?: string | null): string | undefined {
   if (!cleaned) return undefined;
   if (PLACEHOLDER_VEHICLE_LABEL_PATTERN.test(cleaned)) return undefined;
   return cleaned;
+}
+
+export function buildPreferredVehicleIdentityLabel(
+  vehicle: ExportVehicleInfo | null | undefined,
+  options?: { fallbackToVinTail?: boolean }
+): string | undefined {
+  if (!vehicle) return undefined;
+
+  let resolvedLabel: string | undefined;
+  const hasModel = Boolean(cleanDisplayLabel(vehicle.model));
+
+  const fullIdentity = [
+    vehicle.year,
+    cleanDisplayLabel(vehicle.make),
+    cleanDisplayLabel(vehicle.model),
+    cleanDisplayText(vehicle.trim),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const rejectedYearOnlyIdentity = looksLikeYearOnlyVehicleLabel(fullIdentity);
+  const rejectedPartialIdentity = Boolean(fullIdentity && !hasModel);
+  if (fullIdentity && !rejectedYearOnlyIdentity && !rejectedPartialIdentity) {
+    resolvedLabel = sanitizeVehicleDisplay(fullIdentity);
+    console.info("[vehicle-label-trace:display-helper]", {
+      vehicle: vehicle ?? null,
+      fullIdentity,
+      resolvedLabel: resolvedLabel ?? null,
+      source: "full_identity",
+    });
+    return resolvedLabel;
+  }
+
+  const namedIdentity = [
+    vehicle.year,
+    cleanDisplayLabel(vehicle.make),
+    cleanDisplayLabel(vehicle.model),
+    cleanDisplayText(vehicle.manufacturer),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const rejectedYearOnlyNamedIdentity = looksLikeYearOnlyVehicleLabel(namedIdentity);
+  const rejectedPartialNamedIdentity = Boolean(namedIdentity && !hasModel);
+  if (namedIdentity && !rejectedYearOnlyNamedIdentity && !rejectedPartialNamedIdentity) {
+    resolvedLabel = sanitizeVehicleDisplay(namedIdentity);
+    console.info("[vehicle-label-trace:display-helper]", {
+      vehicle: vehicle ?? null,
+      namedIdentity,
+      resolvedLabel: resolvedLabel ?? null,
+      source: "named_identity",
+    });
+    return resolvedLabel;
+  }
+
+  const cleanedLabel = sanitizeVehicleDisplay(vehicle.label);
+  const rejectedWeakCleanedLabel = looksLikeWeakVehicleIdentityLabel(cleanedLabel);
+  if (cleanedLabel) {
+    if (!looksLikeYearOnlyVehicleLabel(cleanedLabel) && !rejectedWeakCleanedLabel) {
+      return cleanedLabel;
+    }
+  }
+
+  if (
+    (options?.fallbackToVinTail ||
+      rejectedYearOnlyIdentity ||
+      rejectedYearOnlyNamedIdentity ||
+      rejectedPartialIdentity ||
+      rejectedPartialNamedIdentity ||
+      rejectedWeakCleanedLabel ||
+      looksLikeYearOnlyVehicleLabel(cleanedLabel)) &&
+    vehicle.vin
+  ) {
+    resolvedLabel = `VIN ending ${vehicle.vin.slice(-6)}`;
+    console.info("[vehicle-label-trace:display-helper]", {
+      vehicle: vehicle ?? null,
+      cleanedLabel: cleanedLabel ?? null,
+      resolvedLabel,
+      source: "vin_tail_fallback",
+    });
+    return resolvedLabel;
+  }
+
+  if (cleanedLabel) {
+    resolvedLabel = cleanedLabel;
+    console.info("[vehicle-label-trace:display-helper]", {
+      vehicle: vehicle ?? null,
+      cleanedLabel,
+      resolvedLabel,
+      source: "cleaned_label_fallback",
+    });
+    return resolvedLabel;
+  }
+
+  console.info("[vehicle-label-trace:display-helper]", {
+    vehicle: vehicle ?? null,
+    resolvedLabel: null,
+    source: "no_label",
+  });
+  return undefined;
+}
+
+export function buildPreferredRebuttalSubjectVehicleLabel(
+  vehicle: ExportVehicleInfo | null | undefined
+): string {
+  const subjectMake = cleanDisplayLabel(vehicle?.make);
+  const subjectModel = cleanDisplayLabel(vehicle?.model);
+  const fullSubjectIdentity =
+    subjectModel
+      ? [
+          vehicle?.year,
+          subjectMake,
+          subjectModel,
+          cleanDisplayText(vehicle?.trim),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .trim()
+      : undefined;
+
+  return (
+    sanitizeVehicleDisplay(fullSubjectIdentity) ??
+    (vehicle?.vin ? `VIN ending ${vehicle.vin.slice(-6)}` : undefined) ??
+    buildPreferredVehicleIdentityLabel(vehicle) ??
+    "Current repair file"
+  );
 }
 
 function collectVehicleDocumentText(
@@ -1644,6 +1783,57 @@ function sanitizeNarrative(value?: string | null): string | null {
   }
 
   return cleaned;
+}
+
+function looksLikeYearOnlyVehicleLabel(value?: string | null): boolean {
+  if (!value) return false;
+  return /^(19|20)\d{2}$/.test(value.trim());
+}
+
+function looksLikeWeakVehicleIdentityLabel(value?: string | null): boolean {
+  if (!value) return false;
+
+  const cleaned = cleanDisplayText(value);
+  if (!cleaned || looksLikeYearOnlyVehicleLabel(cleaned)) {
+    return true;
+  }
+
+  const tokens = cleaned
+    .split(/\s+/)
+    .map((token: string) => token.trim())
+    .filter(Boolean);
+  const nonYearTokens = tokens.filter((token: string) => !/^(19|20)\d{2}$/.test(token));
+
+  return nonYearTokens.length < 2;
+}
+
+function cleanPresentationProse(value?: string | null): string {
+  const cleaned = cleanDisplayText(value);
+  if (!cleaned) return "";
+
+  const withoutEmptyStubs = cleaned
+    .replace(
+      /(?:^|[\s.])Areas that look aggressive or likely to get pushback\s*:?\s*(?:\.)?(?=\s|$)/gi,
+      " "
+    )
+    .trim();
+  if (!withoutEmptyStubs) return "";
+
+  const withoutInlineEnumeration = withoutEmptyStubs.replace(INLINE_ENUMERATION_PATTERN, "$1").trim();
+  const detailBlockMatch = withoutInlineEnumeration.match(PRESENTATION_DETAIL_BLOCK_PATTERN);
+  const beforeDetailBlock = detailBlockMatch
+    ? withoutInlineEnumeration.slice(0, detailBlockMatch.index).trim()
+    : withoutInlineEnumeration;
+
+  const collapsed = beforeDetailBlock
+    .split("\n")
+    .map((line: string) => line.trim())
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  return trimTrailingPunctuation(collapsed) + (collapsed ? "." : "");
 }
 
 function makeRepairPositionTail(value: string): string | null {

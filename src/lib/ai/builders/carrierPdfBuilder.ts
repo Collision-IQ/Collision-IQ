@@ -1,8 +1,10 @@
-import { buildExportModel, COLLISION_ACADEMY_HANDOFF_URL } from "./buildExportModel";
+import {
+  buildExportModel,
+  buildPreferredVehicleIdentityLabel,
+  COLLISION_ACADEMY_HANDOFF_URL,
+} from "./buildExportModel";
 import type { DecisionPanel } from "./buildDecisionPanel";
 import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
-const PLACEHOLDER_VEHICLE_LABEL_PATTERN =
-  /^(?:unknown|unspecified|n\/a|na|none|null|undefined|not available|not provided|vehicle details are still limited in the current material\.?)$/i;
 
 export type CarrierReportSection = {
   title: string;
@@ -172,7 +174,7 @@ function buildExecutiveSummary(params: {
 function buildVehicleIdentityValue(
   exportModel: ReturnType<typeof buildExportModel>
 ): string {
-  const resolvedLabel = sanitizeVehicleLabel(exportModel.vehicle.label);
+  const resolvedLabel = buildPreferredVehicleIdentityLabel(exportModel.vehicle);
   if (resolvedLabel) {
     return resolvedLabel;
   }
@@ -199,14 +201,6 @@ function buildVehicleIdentityValue(
   }
 
   return "Unspecified";
-}
-
-function sanitizeVehicleLabel(value?: string | null): string | undefined {
-  if (!value) return undefined;
-  const cleaned = value.trim();
-  if (!cleaned) return undefined;
-  if (PLACEHOLDER_VEHICLE_LABEL_PATTERN.test(cleaned)) return undefined;
-  return cleaned;
 }
 
 function buildCredibilityConclusion(
@@ -242,11 +236,11 @@ function buildWhyItWins(
   }
 
   if (analysis?.narrative) {
-    return trimTrailingPunctuation(analysis.narrative) + ".";
+    return cleanCarrierSummarySentence(analysis.narrative);
   }
 
   if (report?.recommendedActions?.length) {
-    return trimTrailingPunctuation(report.recommendedActions[0]) + ".";
+    return cleanCarrierSummarySentence(report.recommendedActions[0]);
   }
 
   return "The current support is driven by how well the file documents the intended repair path, verification burden, and disputed operations.";
@@ -446,6 +440,22 @@ function joinHumanList(values: string[]): string {
 
 function trimTrailingPunctuation(value: string): string {
   return value.replace(/[.!\s]+$/g, "").trim();
+}
+
+function cleanCarrierSummarySentence(value?: string | null): string {
+  const cleaned = (value ?? "")
+    .replace(
+      /(?:^|[\s.])Areas that look aggressive or likely to get pushback\s*:?\s*(?:\.)?(?=\s|$)/gi,
+      " "
+    )
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  if (!cleaned) {
+    return "The current support is driven by how well the file documents the intended repair path, verification burden, and disputed operations.";
+  }
+
+  return trimTrailingPunctuation(cleaned) + ".";
 }
 
 function compact(values: Array<string | undefined>): string[] {

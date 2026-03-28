@@ -445,7 +445,7 @@ function buildRecommendedActions(
       (procedure) => `Add and document ${procedure} before final repair delivery.`
     ),
     ...supplementOpportunities.map(
-      (issue) => `Review supplement line item: ${issue}.`
+      (issue) => `Please include clear support for ${issue} if it remains part of the intended repair path.`
     ),
   ];
 

@@ -1,7 +1,8 @@
 import type { DecisionPanel } from "./buildDecisionPanel";
 import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
-import { buildExportTemplateSourceModel } from "./exportTemplates";
+import { buildExportTemplateSourceModel, formatAnalysisModeLabel } from "./exportTemplates";
+import { buildPreferredVehicleIdentityLabel } from "./buildExportModel";
 
 export function buildSideBySidePdf(params: {
   report: RepairIntelligenceReport | null;
@@ -11,6 +12,9 @@ export function buildSideBySidePdf(params: {
 }): CarrierReportDocument {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
+  const vehicleIdentity =
+    buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
+    "Vehicle details still limited in the current material.";
 
   return {
     filename: "collision-iq-side-by-side-report.pdf",
@@ -22,9 +26,9 @@ export function buildSideBySidePdf(params: {
       generatedLabel: `Generated ${source.generatedLabel}`,
     }),
     summary: [
-      { label: "Vehicle", value: exportModel.vehicle.label || "Vehicle details still limited in the current material." },
+      { label: "Vehicle", value: vehicleIdentity },
       { label: "VIN", value: exportModel.vehicle.vin || "Not clearly supported in the current material." },
-      { label: "Mode", value: formatLabel(source.analysisMode || "single-document-review") },
+      { label: "Mode", value: formatAnalysisModeLabel(source.analysisMode) },
       { label: "Categories", value: `${source.categoryComparisons.length}` },
     ],
     sections: [

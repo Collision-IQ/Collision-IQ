@@ -1,11 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import ChatWidget from "@/components/ChatWidget";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import {
   buildExportModel,
+  buildPreferredVehicleIdentityLabel,
   COLLISION_ACADEMY_HANDOFF_URL,
 } from "@/lib/ai/builders/buildExportModel";
 import { buildCarrierReport } from "@/lib/ai/builders/carrierPdfBuilder";
@@ -25,14 +28,43 @@ const EMPTY_PANEL: DecisionPanel = {
     "Upload an estimate or supporting documents to generate a real repair intelligence read. The panel will switch from placeholder guidance to decision support once the analysis route runs.",
   supplements: [],
 };
+const CHAT_CONSENT_STORAGE_KEY = "collision_iq_chat_consent";
+const CHAT_CONSENT_TERMS_VERSION = "2026-03-28";
+const CHAT_CONSENT_PRIVACY_VERSION = "2026-03-28";
+
+type ChatConsentRecord = {
+  consentStatus: "accepted";
+  acceptedAt: string;
+  termsVersion: string;
+  privacyVersion: string;
+  checkboxChecked: true;
+};
+
+function isValidConsentRecord(value: unknown): value is ChatConsentRecord {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Partial<ChatConsentRecord>;
+
+  return (
+    record.consentStatus === "accepted" &&
+    typeof record.acceptedAt === "string" &&
+    Boolean(record.acceptedAt.trim()) &&
+    record.termsVersion === CHAT_CONSENT_TERMS_VERSION &&
+    record.privacyVersion === CHAT_CONSENT_PRIVACY_VERSION &&
+    record.checkboxChecked === true
+  );
+}
 
 export default function ChatbotPage() {
+  const router = useRouter();
   const isMobile = useIsMobile();
   const [desktopRailOpen, setDesktopRailOpen] = useState(false);
   const [attachment, setAttachment] = useState<string | null>(null);
   const [analysisText, setAnalysisText] = useState("");
   const [analysisResult, setAnalysisResult] = useState<RepairIntelligenceReport | null>(null);
   const [analysisPanel, setAnalysisPanel] = useState<DecisionPanel | null>(null);
+  const [consentResolved, setConsentResolved] = useState(false);
+  const [consentAccepted, setConsentAccepted] = useState(false);
+  const [consentChecked, setConsentChecked] = useState(false);
   const normalizedResult = useMemo(
     () => (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null),
     [analysisResult]
@@ -56,29 +88,93 @@ export default function ChatbotPage() {
     setDesktopRailOpen(next);
   }
 
-  if (isMobile === null) return null;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const raw = window.localStorage.getItem(CHAT_CONSENT_STORAGE_KEY);
+      if (!raw) {
+        setConsentAccepted(false);
+        setConsentResolved(true);
+        return;
+      }
+
+      const parsed = JSON.parse(raw) as unknown;
+      setConsentAccepted(isValidConsentRecord(parsed));
+    } catch {
+      setConsentAccepted(false);
+    } finally {
+      setConsentResolved(true);
+    }
+  }, []);
+
+  function handleConsentAccept() {
+    if (!consentChecked || typeof window === "undefined") return;
+
+    const record: ChatConsentRecord = {
+      consentStatus: "accepted",
+      acceptedAt: new Date().toISOString(),
+      termsVersion: CHAT_CONSENT_TERMS_VERSION,
+      privacyVersion: CHAT_CONSENT_PRIVACY_VERSION,
+      checkboxChecked: true,
+    };
+
+    window.localStorage.setItem(CHAT_CONSENT_STORAGE_KEY, JSON.stringify(record));
+    setConsentAccepted(true);
+  }
+
+  function handleConsentCancel() {
+    router.push("/");
+  }
+
+  if (isMobile === null || !consentResolved) return null;
+
+  const chatBlocked = !consentAccepted;
 
   return (
     <div className="h-screen bg-black text-white flex flex-col">
       <header className="px-6 py-4 border-b border-white/10 bg-black/60 backdrop-blur-md">
-        <div className="flex items-center justify-center gap-4 max-w-[1680px] mx-auto">
-          <Image
-            src="/brand/logos/Logo-grey.png"
-            alt="Collision Academy"
-            width={150}
-            height={40}
-            className="opacity-90"
-            priority
-          />
+        <div className="flex items-center justify-between gap-4 max-w-[1680px] mx-auto">
+          <div className="flex items-center gap-4">
+            <Image
+              src="/brand/logos/Logo-grey.png"
+              alt="Collision Academy"
+              width={150}
+              height={40}
+              className="opacity-90"
+              priority
+            />
 
-          <div className="text-center">
-            <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-white via-white to-white/70 bg-clip-text text-transparent">
-              Collision-IQ
-            </h1>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-white via-white to-white/70 bg-clip-text text-transparent">
+                Collision-IQ
+              </h1>
 
-            <p className="text-xs text-white/50">
-              Repair intelligence for estimates, OEM procedures, and damage photos
-            </p>
+              <p className="text-xs text-white/50">
+                Repair intelligence for estimates, OEM procedures, and damage photos
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col items-end gap-2">
+            <a
+              href="https://collision-iq.ai/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-2xl border border-white/12 bg-white/5 px-4 py-2 text-sm text-white/85 transition hover:bg-white/10"
+            >
+              Collision Academy
+            </a>
+
+            <div className="flex flex-wrap items-center justify-end gap-3 text-xs text-white/55">
+              <Link href="/terms" className="transition hover:text-white">
+                Terms
+              </Link>
+              <span className="opacity-30">/</span>
+              <Link href="/privacy" className="transition hover:text-white">
+                Privacy
+              </Link>
+            </div>
           </div>
         </div>
       </header>
@@ -95,6 +191,7 @@ export default function ChatbotPage() {
                 onAnalysisChange={setAnalysisText}
                 onAnalysisResultChange={setAnalysisResult}
                 onAnalysisPanelChange={setAnalysisPanel}
+                disabled={chatBlocked}
               />
             </div>
           </div>
@@ -142,6 +239,75 @@ export default function ChatbotPage() {
           />
         </div>
       )}
+
+      {chatBlocked && (
+        <div className="fixed inset-0 z-[80] bg-black/82 backdrop-blur-xl">
+          <div className="flex min-h-full items-center justify-center p-6">
+            <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-black/80 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] md:p-8">
+              <div className="text-xs uppercase tracking-[0.24em] text-white/45">
+                Collision IQ Consent
+              </div>
+              <h2 className="mt-3 text-2xl font-semibold text-white md:text-3xl">
+                Review and accept before using chat
+              </h2>
+              <p className="mt-3 text-sm leading-7 text-white/72 md:text-base">
+                Before using Collision IQ, you must review and accept the current{" "}
+                <Link href="/terms" className="text-white underline underline-offset-4 hover:text-orange-200">
+                  Terms of Service
+                </Link>{" "}
+                and{" "}
+                <Link href="/privacy" className="text-white underline underline-offset-4 hover:text-orange-200">
+                  Privacy Policy
+                </Link>.
+                Chat, uploads, voice recording, and read-aloud remain unavailable until consent is accepted.
+              </p>
+
+              <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={consentChecked}
+                    onChange={(event) => setConsentChecked(event.target.checked)}
+                    className="mt-1 h-4 w-4 rounded border-white/20 bg-black/40 text-orange-500 focus:ring-orange-500"
+                  />
+                  <span className="text-sm leading-6 text-white/80">
+                    I have reviewed and agree to the current Terms of Service and Privacy Policy for
+                    using Collision IQ.
+                  </span>
+                </label>
+                <p className="mt-3 text-xs leading-5 text-white/45">
+                  Consent is stored in this browser only and will be requested again if the terms
+                  or privacy policy version changes.
+                </p>
+              </div>
+
+              <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-xs text-white/40">
+                  Terms version {CHAT_CONSENT_TERMS_VERSION} / Privacy version {CHAT_CONSENT_PRIVACY_VERSION}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleConsentCancel}
+                    className="rounded-2xl border border-white/12 bg-white/5 px-4 py-2 text-sm text-white/80 transition hover:bg-white/10"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConsentAccept}
+                    disabled={!consentChecked}
+                    className="rounded-2xl bg-[#C65A2A] px-5 py-2 text-sm font-semibold text-black transition hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    Continue
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -164,6 +330,9 @@ function RailContent({
   const featuredRecommendation = renderModel.supplementItems[0];
   const remainingRecommendations = renderModel.supplementItems.slice(1);
   const valuationLowConfidence = isLowConfidenceValuation(renderModel);
+  const vehicleIdentity =
+    buildPreferredVehicleIdentityLabel(renderModel.vehicle) ??
+    "Vehicle details are still limited in the current material.";
 
   return (
     <div className="flex flex-col h-full overflow-y-auto p-6 space-y-8">
@@ -192,7 +361,7 @@ function RailContent({
           Vehicle Context
         </div>
         <div className="space-y-1 text-sm text-white/80">
-          <div>{renderModel.vehicle.label || "Vehicle details are still limited in the current material."}</div>
+          <div>{vehicleIdentity}</div>
           {renderModel.vehicle.trim && (
             <div className="text-white/55">Trim: {renderModel.vehicle.trim}</div>
           )}
@@ -385,8 +554,9 @@ function AtAGlanceCard({
   renderModel: ReturnType<typeof buildExportModel>;
   analysisResult: RepairIntelligenceReport | null;
 }) {
+  const vehicleIdentity = buildPreferredVehicleIdentityLabel(renderModel.vehicle);
   const bullets = [
-    renderModel.vehicle.label ? `Vehicle: ${renderModel.vehicle.label}` : null,
+    vehicleIdentity ? `Vehicle: ${vehicleIdentity}` : null,
     renderModel.supplementItems[0]?.title ? `Top recommendation: ${renderModel.supplementItems[0].title}` : null,
     analysisResult ? `Evidence quality: ${formatLabel(analysisResult.summary.evidenceQuality)}` : null,
   ].filter(Boolean) as string[];
@@ -735,7 +905,7 @@ function formatVehicleConfidence(
 function hasAtGlanceContent(renderModel: ReturnType<typeof buildExportModel>): boolean {
   return Boolean(
     renderModel.repairPosition ||
-      renderModel.vehicle.label ||
+      buildPreferredVehicleIdentityLabel(renderModel.vehicle) ||
       renderModel.supplementItems[0]
   );
 }

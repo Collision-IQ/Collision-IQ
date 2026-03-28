@@ -198,8 +198,20 @@ export default function HomePage() {
 
       {/* ================= FOOTER ================= */}
       <footer className="border-t border-white/10 py-10">
-        <div className="mx-auto max-w-6xl px-5 text-sm text-white/55">
-          © {new Date().getFullYear()} Collision Academy
+        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-5 text-sm text-white/55 md:flex-row md:items-center md:justify-between">
+          <div>&copy; {new Date().getFullYear()} Collision Academy</div>
+
+          <div className="flex flex-wrap items-center gap-4">
+            <Link href="/terms" className="transition hover:text-white">
+              Terms
+            </Link>
+            <Link href="/privacy" className="transition hover:text-white">
+              Privacy
+            </Link>
+            <Link href="/chatbot" className="transition hover:text-white">
+              Collision IQ
+            </Link>
+          </div>
         </div>
       </footer>
     </main>

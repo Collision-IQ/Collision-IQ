@@ -1,7 +1,19 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Paperclip, X, Camera, ChevronDown, ChevronUp, Eye, RefreshCcw, Volume2, Square } from "lucide-react";
+import {
+  Paperclip,
+  X,
+  Camera,
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  RefreshCcw,
+  Volume2,
+  Square,
+  Mic,
+  LoaderCircle,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
@@ -36,6 +48,7 @@ interface ChatWidgetProps {
   onAnalysisChange?: (text: string) => void;
   onAnalysisResultChange?: (data: RepairIntelligenceReport | null) => void;
   onAnalysisPanelChange?: (panel: DecisionPanel | null) => void;
+  disabled?: boolean;
 }
 
 const INITIAL_MESSAGE: Message = {
@@ -57,6 +70,7 @@ export default function ChatWidget({
   onAnalysisChange,
   onAnalysisResultChange,
   onAnalysisPanelChange,
+  disabled = false,
 }: ChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
@@ -67,6 +81,9 @@ export default function ChatWidget({
   const [replaceAttachmentId, setReplaceAttachmentId] = useState<string | null>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -81,6 +98,10 @@ export default function ChatWidget({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const messageCounterRef = useRef(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<BlobPart[]>([]);
+  const recordingMimeTypeRef = useRef("audio/webm");
 
   const hasAnyAttachment = useMemo(() => attachments.length > 0, [attachments]);
   const visionAttachmentCount = useMemo(
@@ -103,6 +124,7 @@ export default function ChatWidget({
 
   useEffect(() => {
     return () => {
+      disposeRecordingResources(true);
       stopSpeaking();
       for (const attachment of attachmentsRef.current) {
         if (attachment.previewUrl) {
@@ -173,6 +195,178 @@ export default function ChatWidget({
     setMessages((prev) => [...prev, createMessage("assistant", content)]);
   }
 
+  function browserSupportsRecording() {
+    return (
+      typeof window !== "undefined" &&
+      typeof navigator !== "undefined" &&
+      Boolean(navigator.mediaDevices?.getUserMedia) &&
+      typeof MediaRecorder !== "undefined"
+    );
+  }
+
+  function resolveRecordingMimeType() {
+    if (typeof MediaRecorder === "undefined") {
+      return "audio/webm";
+    }
+
+    const preferredTypes = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+      "audio/mpeg",
+    ];
+
+    return preferredTypes.find((value) => MediaRecorder.isTypeSupported(value)) ?? "audio/webm";
+  }
+
+  function disposeRecordingResources(stopRecorder = false) {
+    const recorder = mediaRecorderRef.current;
+    if (recorder) {
+      recorder.ondataavailable = null;
+      recorder.onstop = null;
+      recorder.onerror = null;
+      if (stopRecorder && recorder.state !== "inactive") {
+        try {
+          recorder.stop();
+        } catch {
+          // Ignore stop errors during cleanup.
+        }
+      }
+    }
+
+    const stream = mediaStreamRef.current;
+    if (stream) {
+      for (const track of stream.getTracks()) {
+        track.stop();
+      }
+    }
+
+    mediaRecorderRef.current = null;
+    mediaStreamRef.current = null;
+    audioChunksRef.current = [];
+  }
+
+  async function startRecording() {
+    if (!browserSupportsRecording()) {
+      setRecordingError("Voice input is not available in this browser.");
+      return;
+    }
+
+    try {
+      setRecordingError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = resolveRecordingMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+
+      audioChunksRef.current = [];
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      recordingMimeTypeRef.current = recorder.mimeType || mimeType;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      recorder.onerror = () => {
+        setRecordingError("Recording stopped unexpectedly. Please try again.");
+        setIsRecording(false);
+        disposeRecordingResources();
+      };
+      recorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      const message =
+        error instanceof DOMException && error.name === "NotAllowedError"
+          ? "Microphone permission was denied."
+          : "Unable to access the microphone.";
+      setRecordingError(message);
+      disposeRecordingResources();
+      setIsRecording(false);
+    }
+  }
+
+  async function stopRecordingAndTranscribe() {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder) return;
+
+    try {
+      setRecordingError(null);
+      setIsRecording(false);
+      setIsTranscribing(true);
+
+      const audioBlob = await new Promise<Blob>((resolve, reject) => {
+        recorder.onstop = () => {
+          const blob = new Blob(audioChunksRef.current, {
+            type: recorder.mimeType || recordingMimeTypeRef.current || "audio/webm",
+          });
+          disposeRecordingResources();
+          resolve(blob);
+        };
+        recorder.onerror = () => {
+          disposeRecordingResources();
+          reject(new Error("Recording stopped unexpectedly."));
+        };
+
+        try {
+          recorder.stop();
+        } catch (error) {
+          disposeRecordingResources();
+          reject(error);
+        }
+      });
+
+      if (!audioBlob.size) {
+        setRecordingError("The recording was empty. Please try again.");
+        return;
+      }
+
+      const extension = audioBlob.type.includes("mp4")
+        ? "m4a"
+        : audioBlob.type.includes("mpeg")
+          ? "mp3"
+          : "webm";
+      const audioFile = new File([audioBlob], `collision-iq-recording.${extension}`, {
+        type: audioBlob.type || "audio/webm",
+      });
+      const formData = new FormData();
+      formData.append("file", audioFile);
+
+      const response = await fetch("/api/transcribe", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error || "Transcription failed.");
+      }
+
+      const data = (await response.json()) as { text?: string };
+      const transcript = data.text?.trim();
+      if (!transcript) {
+        setRecordingError("No speech was detected in the recording.");
+        return;
+      }
+
+      setInput((current) => (current.trim() ? `${current.trim()} ${transcript}` : transcript));
+    } catch (error) {
+      setRecordingError(error instanceof Error ? error.message : "Transcription failed.");
+    } finally {
+      setIsTranscribing(false);
+    }
+  }
+
+  function handleMicClick() {
+    if (disabled || isTranscribing) return;
+    if (isRecording) {
+      void stopRecordingAndTranscribe();
+      return;
+    }
+
+    void startRecording();
+  }
+
   function summarizeAttachmentStats(list: Attachment[]) {
     return {
       fileCount: list.length,
@@ -230,6 +424,7 @@ export default function ChatWidget({
   }
 
   async function handleSend() {
+    if (disabled) return;
     if (loading) return;
     if (!input.trim() && attachments.length === 0) return;
 
@@ -448,6 +643,7 @@ export default function ChatWidget({
     source: "file" | "camera",
     replaceId?: string | null
   ) {
+    if (disabled) return;
     const formData = new FormData();
     formData.append("file", file);
 
@@ -524,6 +720,7 @@ export default function ChatWidget({
   }
 
   async function handleFilesSelected(fileList: FileList | null) {
+    if (disabled) return;
     if (!fileList || fileList.length === 0) return;
     if (rejectOversizedBatch(fileList, "file")) {
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -548,6 +745,7 @@ export default function ChatWidget({
   }
 
   async function handleCameraSelected(fileList: FileList | null) {
+    if (disabled) return;
     if (!fileList || fileList.length === 0) return;
     if (rejectOversizedBatch(fileList, "camera")) {
       if (cameraInputRef.current) cameraInputRef.current.value = "";
@@ -572,6 +770,7 @@ export default function ChatWidget({
   }
 
   function removeAttachment(attachmentId: string) {
+    if (disabled) return;
     const target = attachments.find((attachment) => attachment.attachmentId === attachmentId);
     if (target?.previewUrl) {
       URL.revokeObjectURL(target.previewUrl);
@@ -591,6 +790,7 @@ export default function ChatWidget({
   }
 
   function clearAllAttachments() {
+    if (disabled) return;
     attachments.forEach((attachment) => {
       if (attachment.previewUrl) {
         URL.revokeObjectURL(attachment.previewUrl);
@@ -605,6 +805,7 @@ export default function ChatWidget({
   }
 
   function handleReplaceAttachment(attachmentId: string) {
+    if (disabled) return;
     setReplaceAttachmentId(attachmentId);
     fileInputRef.current?.click();
   }
@@ -712,6 +913,7 @@ export default function ChatWidget({
   }
 
   async function handleSpeakMessage(message: Message) {
+    if (disabled) return;
     if (speakingMessageId === message.id && isSpeaking) {
       stopSpeaking();
       return;
@@ -750,7 +952,7 @@ export default function ChatWidget({
   const userBubble = "bg-black/70 border border-orange-500/30 text-orange-400";
 
   return (
-    <div className="relative flex flex-col h-full min-h-0 overflow-hidden">
+    <div className={`relative flex flex-col h-full min-h-0 overflow-hidden ${disabled ? "opacity-75" : ""}`}>
       <AttachmentPreviewModal
         attachment={previewAttachment as PreviewAttachment | null}
         onClose={() => setPreviewAttachmentId(null)}
@@ -781,21 +983,24 @@ export default function ChatWidget({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl w-full">
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm"
+                  disabled={disabled}
+                  className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Upload Estimate
                 </button>
 
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm"
+                  disabled={disabled}
+                  className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Upload OEM Procedure
                 </button>
 
                 <button
                   onClick={() => cameraInputRef.current?.click()}
-                  className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm"
+                  disabled={disabled}
+                  className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Upload Photos
                 </button>
@@ -821,7 +1026,7 @@ export default function ChatWidget({
                       <button
                         type="button"
                         onClick={() => handleSpeakMessage(msg)}
-                        disabled={!canReadAloud}
+                        disabled={!canReadAloud || disabled}
                         aria-label={
                           speakingMessageId === msg.id && isSpeaking
                             ? "Stop reading aloud"
@@ -904,6 +1109,7 @@ export default function ChatWidget({
                 className="hidden"
                 accept=".pdf,image/*"
                 multiple
+                disabled={disabled}
                 title="Attach files"
                 onChange={(e) => handleFilesSelected(e.target.files)}
               />
@@ -914,6 +1120,7 @@ export default function ChatWidget({
                 className="hidden"
                 accept="image/*"
                 capture="environment"
+                disabled={disabled}
                 title="Take photo"
                 onChange={(e) => handleCameraSelected(e.target.files)}
               />
@@ -921,7 +1128,8 @@ export default function ChatWidget({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="text-white/60 hover:text-[#C65A2A] transition"
+                disabled={disabled}
+                className="text-white/60 hover:text-[#C65A2A] transition disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label="Attach files"
               >
                 <Paperclip size={20} />
@@ -930,21 +1138,56 @@ export default function ChatWidget({
               <button
                 type="button"
                 onClick={() => cameraInputRef.current?.click()}
-                className="text-white/60 hover:text-[#C65A2A] transition"
+                disabled={disabled}
+                className="text-white/60 hover:text-[#C65A2A] transition disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label="Take photo"
               >
                 <Camera size={20} />
               </button>
 
+              <button
+                type="button"
+                onClick={handleMicClick}
+                disabled={isTranscribing || disabled}
+                className={`transition ${
+                  isRecording
+                    ? "text-red-400 hover:text-red-300"
+                    : "text-white/60 hover:text-[#C65A2A]"
+                } disabled:cursor-not-allowed disabled:opacity-50`}
+                aria-label={
+                  isRecording
+                    ? "Stop recording"
+                    : isTranscribing
+                      ? "Transcribing audio"
+                      : "Start voice recording"
+                }
+                title={
+                  isRecording
+                    ? "Stop recording"
+                    : isTranscribing
+                      ? "Transcribing audio"
+                      : "Start voice recording"
+                }
+              >
+                {isTranscribing ? (
+                  <LoaderCircle size={20} className="animate-spin" />
+                ) : isRecording ? (
+                  <Square size={20} />
+                ) : (
+                  <Mic size={20} />
+                )}
+              </button>
+
               <input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                disabled={disabled}
                 placeholder={
                   hasAnyAttachment
                     ? "Ask about the attachments, or add more context..."
                     : "Ask about a repair, upload files, or take a photo..."
                 }
-                className="flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-orange-500 transition text-sm sm:text-base"
+                className="flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-orange-500 transition text-sm sm:text-base disabled:cursor-not-allowed disabled:opacity-50"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -955,7 +1198,7 @@ export default function ChatWidget({
 
               <button
                 onClick={handleSend}
-                disabled={loading}
+                disabled={loading || isTranscribing || disabled}
                 className="rounded-xl bg-[#C65A2A] px-4 sm:px-5 py-3 text-black font-semibold transition hover:bg-[#C65A2A]/90 disabled:opacity-50"
               >
                 {loading ? "..." : "Send"}
@@ -965,13 +1208,27 @@ export default function ChatWidget({
                 type="button"
                 onClick={handleEndChat}
                 className="rounded-xl border border-red-500/40 px-4 sm:px-5 py-3 text-red-400 hover:bg-red-500/10 transition font-semibold disabled:opacity-50"
-                disabled={loading && messages.length <= 1}
+                disabled={disabled || (loading && messages.length <= 1)}
                 aria-label="End chat"
                 title="End chat"
               >
                 End
               </button>
             </div>
+
+            {(isRecording || isTranscribing || recordingError) && (
+              <div
+                className={`mt-3 text-xs ${
+                  recordingError ? "text-red-300" : "text-white/55"
+                }`}
+              >
+                {recordingError
+                  ? recordingError
+                  : isTranscribing
+                    ? "Transcribing your recording..."
+                    : "Recording... click the mic again to stop."}
+              </div>
+            )}
 
             {attachments.length > 0 && (
               <div className="mt-3">
