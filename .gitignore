@@ -81,3 +81,11 @@ coverage/
 
 /generated/prisma
 .vercel
+
+# ===============================
+# Local scratch / key files
+# ===============================
+good_keys.txt
+work_keys.txt
+Collision-IQ/
+t-Path*
