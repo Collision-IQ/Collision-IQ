@@ -280,7 +280,7 @@ export async function recordCompletedAnalysisUsage(access: ViewerAccess, metadat
   });
 }
 
-function buildAnonymousAccess(): ViewerAccess {
+export function buildAnonymousAccess(): ViewerAccess {
   return {
     isAuthenticated: false,
     isPlatformAdmin: false,

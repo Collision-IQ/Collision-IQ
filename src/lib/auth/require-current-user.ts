@@ -51,6 +51,10 @@ export async function requireCurrentUser() {
     const fallbackEmail =
       normalizeEmail(getDefaultPlatformAdminEmail()) || "local-dev@collision.academy";
     const isPlatformAdmin = isPlatformAdminEmail(fallbackEmail);
+    console.info("[auth] resolved local fallback user", {
+      email: fallbackEmail,
+      isPlatformAdmin,
+    });
     const user = await upsertAppUser({
       clerkUserId: "local-dev-user",
       email: fallbackEmail || null,
@@ -81,6 +85,11 @@ export async function requireCurrentUser() {
     )?.emailAddress ?? clerkUser?.emailAddresses[0]?.emailAddress;
   const normalizedEmail = normalizeEmail(primaryEmail) || null;
   const isPlatformAdmin = isPlatformAdminEmail(normalizedEmail);
+  console.info("[auth] resolved clerk user", {
+    clerkUserId: state.userId,
+    email: normalizedEmail,
+    isPlatformAdmin,
+  });
   const user = await upsertAppUser({
     clerkUserId: state.userId,
     email: normalizedEmail,

@@ -9,13 +9,15 @@ type PrismaGlobal = typeof globalThis & {
 const globalForPrisma = globalThis as PrismaGlobal
 
 function createPrismaClient() {
+  console.info("[prisma] env check", {
+    hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
+    cwd: process.cwd(),
+    pid: process.pid,
+    nodeEnv: process.env.NODE_ENV,
+  })
+
   const prisma = new PrismaClient({
     log: ["error"],
-    datasources: {
-      db: {
-        url: process.env.DATABASE_URL,
-      },
-    },
   })
 
   const instanceId = (globalForPrisma.prismaInstanceId ?? 0) + 1

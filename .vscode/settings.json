@@ -8,5 +8,8 @@
     },
     "files.watcherExclude": {
         "**/clerk-nextjs-sample-disabled/**": true
+    },
+    "chat.tools.terminal.autoApprove": {
+        "npm.cmd": true
     }
 }

@@ -64,6 +64,13 @@ async function fileToDataUrl(file: File): Promise<string | undefined> {
 
 export async function POST(req: Request) {
   try {
+    console.info("[upload] env check", {
+      cwd: process.cwd(),
+      hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
+      pid: process.pid,
+      nodeEnv: process.env.NODE_ENV,
+    });
+
     const { user } = await requireCurrentUser();
     const formData = await req.formData();
     const file = formData.get("file");

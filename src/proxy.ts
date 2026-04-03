@@ -23,6 +23,15 @@ const isProtectedRoute = createRouteMatcher([
 ]);
 
 const protectedProxy = clerkMiddleware(async (auth, req) => {
+  console.info("[proxy] request", {
+    pathname: req.nextUrl.pathname,
+    protectedMatch: isProtectedRoute(req),
+    hasClerkConfig: Boolean(
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim() &&
+        process.env.CLERK_SECRET_KEY?.trim()
+    ),
+  });
+
   if (isPublicRoute(req)) {
     return;
   }
@@ -30,7 +39,7 @@ const protectedProxy = clerkMiddleware(async (auth, req) => {
   if (isProtectedRoute(req)) {
     await auth.protect();
   }
-});
+}, { debug: process.env.NODE_ENV === "development" });
 
 export default function proxy(req: NextRequest, event: unknown) {
   const hasClerkConfig = Boolean(
