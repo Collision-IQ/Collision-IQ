@@ -1,6 +1,7 @@
 import type { DecisionPanel } from "./buildDecisionPanel";
 import { deriveRenderInsightsFromChat, type DerivedValuation } from "./deriveRenderInsightsFromChat";
-import type { AnalysisResult, RepairIntelligenceReport, VehicleIdentity } from "../types/analysis";
+import { extractEstimateFacts } from "../extractors/extractEstimateFacts";
+import type { AnalysisResult, EstimateFacts, RepairIntelligenceReport, VehicleIdentity } from "../types/analysis";
 import {
   buildVehicleLabel,
   decodeVinVehicleIdentity,
@@ -50,6 +51,7 @@ export type ExportVehicleInfo = {
 
 export type ExportModel = {
   vehicle: ExportVehicleInfo;
+  estimateFacts: EstimateFacts;
   repairPosition: string;
   positionStatement: string;
   supplementItems: ExportSupplementItem[];
@@ -84,25 +86,29 @@ export function buildExportModel(params: {
   assistantAnalysis?: string | null;
 }): ExportModel {
   const chatInsights = deriveRenderInsightsFromChat(params.assistantAnalysis ?? "");
+  const estimateFacts = inferEstimateFacts(params.report, params.analysis);
   const vehicle = inferVehicleInfo(
     params.report,
-    params.analysis
+    params.analysis,
+    estimateFacts
   );
   const supplementItems = buildExportSupplementItems(
     params.report,
     params.analysis,
     params.panel,
     chatInsights,
-    params.assistantAnalysis ?? null
+    params.assistantAnalysis ?? null,
+    estimateFacts
   );
   const repairPosition = buildRepairPosition(
     params.report,
     params.analysis,
     params.panel,
     chatInsights.narrative ?? params.assistantAnalysis ?? null,
-    supplementItems
+    supplementItems,
+    estimateFacts
   );
-  const positionStatement = buildPositionStatement(params.report, supplementItems);
+  const positionStatement = buildPositionStatement(params.report, params.analysis, supplementItems);
   const request = buildRequest(params.report, params.panel, supplementItems, chatInsights.request);
   const valuation = buildValuation(params.panel, chatInsights.valuation);
   const displayVehicle = getDisplayVehicleInfo(vehicle);
@@ -159,6 +165,7 @@ export function buildExportModel(params: {
 
   return {
     vehicle: exportVehicle,
+    estimateFacts,
     repairPosition: allLabelsSuppressed
       ? "The core repair conclusion remains intact, but noisy extracted labels were suppressed in this presentation view."
       : cleanPresentationProse(repairPosition),
@@ -181,13 +188,15 @@ export function buildExportModel(params: {
 
 function inferVehicleInfo(
   report: RepairIntelligenceReport | null,
-  analysis: AnalysisResult | null
+  analysis: AnalysisResult | null,
+  estimateFacts: EstimateFacts
 ): ExportVehicleInfo {
   const documentVehicleText = collectVehicleDocumentText(report, analysis);
   const structuredVehicle = mergeVehicleIdentity(
     normalizeVehicleIdentity(report?.vehicle),
     normalizeVehicleIdentity(report?.analysis?.vehicle),
-    normalizeVehicleIdentity(analysis?.vehicle)
+    normalizeVehicleIdentity(analysis?.vehicle),
+    normalizeVehicleIdentity(estimateFacts.vehicle)
   );
   const inferredVehicle = extractVehicleIdentityFromText(documentVehicleText, "attachment");
   const resolvedVin = resolveExportVin(structuredVehicle, inferredVehicle, documentVehicleText);
@@ -393,6 +402,57 @@ export function buildPreferredRebuttalSubjectVehicleLabel(
   );
 }
 
+function inferEstimateFacts(
+  report: RepairIntelligenceReport | null,
+  analysis: AnalysisResult | null
+): EstimateFacts {
+  const text = collectVehicleDocumentText(report, analysis);
+  const extracted = extractEstimateFacts({
+    text,
+    vehicle: mergeVehicleIdentity(report?.vehicle, report?.analysis?.vehicle, analysis?.vehicle),
+  });
+
+  return {
+    vehicle: mergeVehicleIdentity(
+      report?.estimateFacts?.vehicle,
+      report?.analysis?.estimateFacts?.vehicle,
+      analysis?.estimateFacts?.vehicle,
+      extracted.vehicle
+    ),
+    mileage:
+      report?.estimateFacts?.mileage ??
+      report?.analysis?.estimateFacts?.mileage ??
+      analysis?.estimateFacts?.mileage ??
+      extracted.mileage,
+    insurer:
+      report?.estimateFacts?.insurer ??
+      report?.analysis?.estimateFacts?.insurer ??
+      analysis?.estimateFacts?.insurer ??
+      extracted.insurer,
+    estimateTotal:
+      report?.estimateFacts?.estimateTotal ??
+      report?.analysis?.estimateFacts?.estimateTotal ??
+      analysis?.estimateFacts?.estimateTotal ??
+      extracted.estimateTotal,
+    documentedProcedures: [
+      ...new Set([
+        ...(report?.estimateFacts?.documentedProcedures ?? []),
+        ...(report?.analysis?.estimateFacts?.documentedProcedures ?? []),
+        ...(analysis?.estimateFacts?.documentedProcedures ?? []),
+        ...(extracted.documentedProcedures ?? []),
+      ]),
+    ],
+    documentedHighlights: [
+      ...new Set([
+        ...(report?.estimateFacts?.documentedHighlights ?? []),
+        ...(report?.analysis?.estimateFacts?.documentedHighlights ?? []),
+        ...(analysis?.estimateFacts?.documentedHighlights ?? []),
+        ...(extracted.documentedHighlights ?? []),
+      ]),
+    ],
+  };
+}
+
 function collectVehicleDocumentText(
   report: RepairIntelligenceReport | null,
   analysis: AnalysisResult | null
@@ -412,6 +472,22 @@ function collectVehicleDocumentText(
   ]
     .filter((value): value is string => Boolean(value && value.trim()))
     .join("\n\n");
+}
+
+function resolveAnalysisMode(
+  report: RepairIntelligenceReport | null,
+  analysis: AnalysisResult | null
+) {
+  return analysis?.mode ?? report?.analysis?.mode ?? "single-document-review";
+}
+
+function buildSingleEstimateLead(estimateFacts: EstimateFacts): string {
+  const positives = estimateFacts.documentedHighlights.slice(0, 4).map((item) => item.toLowerCase());
+  if (positives.length > 0) {
+    return `The estimate reads as a credible preliminary repair plan and already documents positives such as ${joinHumanList(positives)}, but it likely remains incomplete in several verification and hidden-damage areas.`;
+  }
+
+  return "The estimate reads as a credible preliminary repair plan, but it likely remains incomplete in several verification, measuring, calibration, and hidden-damage areas.";
 }
 
 function extractVinFromText(text: string): string | undefined {
@@ -456,7 +532,8 @@ function buildRepairPosition(
   analysis: AnalysisResult | null,
   panel: DecisionPanel | null,
   assistantAnalysis: string | null,
-  supplementItems: ExportSupplementItem[]
+  supplementItems: ExportSupplementItem[],
+  estimateFacts: EstimateFacts
 ): string {
   const candidates = [
     assistantAnalysis,
@@ -472,14 +549,16 @@ function buildRepairPosition(
   const strongestNarrative = candidates
     .filter((value) => !looksLikeMetaCommentary(value))
     .sort((left, right) => scoreRepairNarrative(right) - scoreRepairNarrative(left))[0];
+  const isComparison = resolveAnalysisMode(report, analysis) === "comparison";
 
   if (supplementItems.length > 0) {
     const topItems = supplementItems.slice(0, 5);
     const topTitles = joinHumanList(topItems.map((item) => item.title.toLowerCase()));
-    const carrierUnderwritten = topItems.some((item) => item.kind !== "disputed_repair_path");
-    const lead = carrierUnderwritten
-      ? "The shop estimate reads as materially more complete, while the carrier estimate remains underwritten in several repair-path areas."
-      : "The repair path still contains supportable disputed items that are not resolved in the current carrier-facing documentation.";
+    const lead = isComparison
+      ? topItems.some((item) => item.kind !== "disputed_repair_path")
+        ? "The shop estimate reads as materially more complete, while the carrier estimate remains underwritten in several repair-path areas."
+        : "The repair path still contains supportable disputed items that are not resolved in the current carrier-facing documentation."
+      : buildSingleEstimateLead(estimateFacts);
 
     if (strongestNarrative) {
       const polishedNarrative = makeRepairPositionTail(strongestNarrative);
@@ -518,10 +597,12 @@ function buildRepairPosition(
 
 function buildPositionStatement(
   report: RepairIntelligenceReport | null,
+  analysis: AnalysisResult | null,
   supplementItems: ExportSupplementItem[]
 ): string {
   const unsupportedItems = supplementItems.length;
   const criticalCount = report?.summary.criticalIssues ?? 0;
+  const isComparison = resolveAnalysisMode(report, analysis) === "comparison";
 
   if (criticalCount === 0 && unsupportedItems === 0) {
     return "The current material does not show a clear unsupported repair-process gap.";
@@ -532,13 +613,21 @@ function buildPositionStatement(
     const topOperations = topItems.map((item) => item.title.toLowerCase());
     const kinds = new Set(topItems.map((item) => item.kind));
     const lead =
-      kinds.has("missing_operation")
-        ? "The current estimate still has meaningful missing or unsupported repair-process items across several distinct repair-path areas."
-        : kinds.has("missing_verification")
-          ? "The current estimate still has meaningful verification and documentation gaps across several distinct repair-path areas."
-        : kinds.has("underwritten_operation")
-          ? "The current estimate still shows meaningful underwritten repair-process items across several distinct repair-path areas."
-          : "The current estimate still shows meaningful disputed repair-path items across several distinct repair-path areas.";
+      isComparison
+        ? kinds.has("missing_operation")
+          ? "The current estimate still has meaningful missing or unsupported repair-process items across several distinct repair-path areas."
+          : kinds.has("missing_verification")
+            ? "The current estimate still has meaningful verification and documentation gaps across several distinct repair-path areas."
+            : kinds.has("underwritten_operation")
+              ? "The current estimate still shows meaningful underwritten repair-process items across several distinct repair-path areas."
+              : "The current estimate still shows meaningful disputed repair-path items across several distinct repair-path areas."
+        : kinds.has("missing_operation")
+          ? "The estimate still has meaningful missing or unsupported repair-process items across several distinct repair-path areas."
+          : kinds.has("missing_verification")
+            ? "The estimate still has meaningful verification and documentation gaps across several distinct repair-path areas."
+            : kinds.has("underwritten_operation")
+              ? "The estimate still shows meaningful underwritten repair-process items across several distinct repair-path areas."
+              : "The estimate still shows meaningful disputed repair-path items across several distinct repair-path areas.";
 
     return `${lead} The strongest concerns are ${joinHumanList(topOperations)}.`;
   }
@@ -602,7 +691,8 @@ function buildExportSupplementItems(
   analysis: AnalysisResult | null,
   panel: DecisionPanel | null,
   chatInsights: ReturnType<typeof deriveRenderInsightsFromChat>,
-  assistantAnalysis: string | null
+  assistantAnalysis: string | null,
+  estimateFacts: EstimateFacts
 ): ExportSupplementItem[] {
   const defaultRationale = "This operation appears supportable but is not yet carried clearly in the current estimate.";
   const fromPanel: ExportSupplementItem[] =
@@ -728,7 +818,8 @@ function buildExportSupplementItems(
   }
 
   const resolved = [...deduped.values()].sort(sortSupplementItems);
-  return resolved.map((item) => ({
+  const filtered = resolved.filter((item) => !isContradictedByDocumentedFacts(item, estimateFacts));
+  return filtered.map((item) => ({
     ...item,
     rationale: trimTrailingPunctuation(item.rationale) + ".",
     evidence: item.evidence ? trimTrailingPunctuation(item.evidence) + "." : undefined,
@@ -1043,6 +1134,33 @@ function sanitizeReason(value?: string | null, fallback?: string): string {
     .trim();
 
   return withoutEstimateGlossary || fallback || "";
+}
+
+function isContradictedByDocumentedFacts(
+  item: ExportSupplementItem,
+  estimateFacts: EstimateFacts
+): boolean {
+  const documented = new Set(
+    [
+      ...estimateFacts.documentedProcedures,
+      ...estimateFacts.documentedHighlights,
+    ].map((value) => normalizeKey(value))
+  );
+  const itemKey = normalizeKey(item.title);
+
+  if (!itemKey) return false;
+
+  if (
+    (itemKey === normalizeKey("Pre-Repair Scan") && documented.has(normalizeKey("Pre-repair scan"))) ||
+    (itemKey === normalizeKey("Post-Repair Scan") && documented.has(normalizeKey("Post-repair scan"))) ||
+    (itemKey === normalizeKey("Headlamp aiming check") && documented.has(normalizeKey("Headlamp/fog aim"))) ||
+    (itemKey === normalizeKey("Corrosion Protection / Cavity Wax") && documented.has(normalizeKey("Cavity wax"))) ||
+    (itemKey === normalizeKey("Corrosion Protection / Weld Restoration") && documented.has(normalizeKey("Cavity wax")))
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function sanitizeEvidence(value?: string | null): string | undefined {
@@ -1779,6 +1897,10 @@ function sanitizeNarrative(value?: string | null): string | null {
     .trim();
 
   if (!cleaned || looksLikeEstimateNoise(cleaned)) {
+    return null;
+  }
+
+  if (/upload an estimate or supporting documents to generate a real repair intelligence read/i.test(cleaned)) {
     return null;
   }
 

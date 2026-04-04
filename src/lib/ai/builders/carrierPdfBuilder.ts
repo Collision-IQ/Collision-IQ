@@ -51,6 +51,7 @@ export function buildCarrierReport({
   });
 
   const topItems = selectReportSupplementItems(exportModel.supplementItems);
+  const isComparison = (analysis?.mode ?? report?.analysis?.mode) === "comparison";
   const strongestDisputes =
     topItems.length > 0
       ? joinHumanList(topItems.slice(0, 4).map((item) => item.title.toLowerCase()))
@@ -84,6 +85,15 @@ export function buildCarrierReport({
         label: "VIN",
         value: exportModel.vehicle.vin || "Not clearly supported in the current material.",
       },
+      ...(exportModel.estimateFacts.insurer
+        ? [{ label: "Insurer", value: exportModel.estimateFacts.insurer }]
+        : []),
+      ...(typeof exportModel.estimateFacts.mileage === "number"
+        ? [{ label: "Mileage", value: exportModel.estimateFacts.mileage.toLocaleString("en-US") }]
+        : []),
+      ...(typeof exportModel.estimateFacts.estimateTotal === "number"
+        ? [{ label: "Estimate Total", value: formatMoneyPrecise(exportModel.estimateFacts.estimateTotal) }]
+        : []),
       {
         label: "Repair Conclusion",
         value: credibilityConclusion,
@@ -108,6 +118,13 @@ export function buildCarrierReport({
           buildVehicleIdentityValue(exportModel) !== "Unspecified"
             ? `Vehicle: ${buildVehicleIdentityValue(exportModel)}.`
             : undefined,
+          exportModel.estimateFacts.insurer ? `Insurer: ${exportModel.estimateFacts.insurer}.` : undefined,
+          typeof exportModel.estimateFacts.mileage === "number"
+            ? `Mileage: ${exportModel.estimateFacts.mileage.toLocaleString("en-US")}.`
+            : undefined,
+          typeof exportModel.estimateFacts.estimateTotal === "number"
+            ? `Estimate total: ${formatMoneyPrecise(exportModel.estimateFacts.estimateTotal)}.`
+            : undefined,
           exportModel.vehicle.manufacturer ? `Manufacturer: ${exportModel.vehicle.manufacturer}.` : undefined,
           exportModel.vehicle.trim ? `Trim: ${exportModel.vehicle.trim}.` : undefined,
           exportModel.vehicle.vin ? `VIN: ${exportModel.vehicle.vin}.` : undefined,
@@ -121,7 +138,7 @@ export function buildCarrierReport({
         body: exportModel.repairPosition,
       },
       {
-        title: "Repair Strategy Comparison",
+        title: isComparison ? "Repair Strategy Comparison" : "Repair Review Summary",
         bullets: compact([
           credibilityConclusion,
           whyItWins,
@@ -130,6 +147,12 @@ export function buildCarrierReport({
             : undefined,
         ]),
       },
+      ...(exportModel.estimateFacts.documentedHighlights.length > 0
+        ? [{
+            title: isComparison ? "Documented Positives (Shop File)" : "Documented Positives",
+            bullets: exportModel.estimateFacts.documentedHighlights.map((item) => `${item}.`),
+          }]
+        : []),
       {
         title: "Supportable Supplement / Dispute Items",
         bullets:
@@ -217,10 +240,10 @@ function buildCredibilityConclusion(
   }
 
   if (exportModel.supplementItems.length > 0) {
-    return "The stronger repair position is the one that best supports the listed procedures, verifications, and repair-path items.";
+    return "The estimate is credible as a preliminary repair plan, but the strongest position is the one that best supports the listed procedures, verifications, and repair-path items.";
   }
 
-  return "The current material does not show a major credibility split between repair positions.";
+  return "The current material shows a generally credible estimate with no major unresolved support split.";
 }
 
 function buildWhyItWins(
@@ -230,9 +253,14 @@ function buildWhyItWins(
 ): string {
   const topItems = exportModel.supplementItems.slice(0, 3);
   if (topItems.length > 0) {
-    return `It is stronger because the current file supports ${joinHumanList(
-      topItems.map((item) => item.title.toLowerCase())
-    )} more clearly than the competing posture.`;
+    const analysisMode = analysis?.mode ?? report?.analysis?.mode;
+    return analysisMode === "comparison"
+      ? `It is stronger because the current file supports ${joinHumanList(
+          topItems.map((item) => item.title.toLowerCase())
+        )} more clearly than the competing posture.`
+      : `The estimate likely needs clearer support around ${joinHumanList(
+          topItems.map((item) => item.title.toLowerCase())
+        )}, even though several core procedures are already documented.`;
   }
 
   if (analysis?.narrative) {
@@ -359,6 +387,10 @@ function buildSourceSummary(
 
 function formatMoney(value: number): string {
   return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
+function formatMoneyPrecise(value: number): string {
+  return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function formatVehicleConfidence(

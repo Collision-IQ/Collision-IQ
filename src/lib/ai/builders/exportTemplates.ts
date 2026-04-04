@@ -142,6 +142,7 @@ export function buildSideBySideComparisonReport(params: {
 }): string {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
+  const isComparison = source.analysisMode === "comparison";
   const vehicleIdentity =
     buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
     "Vehicle details still limited in the current material.";
@@ -149,15 +150,15 @@ export function buildSideBySideComparisonReport(params: {
   const sections = source.categoryComparisons.map((category) =>
     [
       `## ${category.category}`,
-      `Shop position: ${category.shopPosition}`,
-      `Carrier position: ${category.carrierPosition}`,
+      `${isComparison ? "Shop position" : "Estimate position"}: ${category.shopPosition}`,
+      `${isComparison ? "Carrier position" : "Support posture"}: ${category.carrierPosition}`,
       `Support status: ${formatCategoryLabel(category.supportStatus)}`,
       `Rationale: ${category.rationale}`,
     ].join("\n")
   );
 
   return [
-    "# Side-by-Side Comparison Report",
+    isComparison ? "# Side-by-Side Comparison Report" : "# Estimate Review Report",
     "",
     `Generated: ${source.generatedLabel}`,
     `Vehicle: ${vehicleIdentity}`,
@@ -165,7 +166,7 @@ export function buildSideBySideComparisonReport(params: {
     "",
     "## Overall Position",
     `Summary: ${exportModel.repairPosition}`,
-    `Carrier-facing posture: ${exportModel.positionStatement}`,
+    `${isComparison ? "Carrier-facing posture" : "Support posture"}: ${exportModel.positionStatement}`,
     "",
     ...sections,
   ].join("\n");
@@ -179,6 +180,7 @@ export function buildLineByLineComparisonReport(params: {
 }): string {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
+  const isComparison = source.analysisMode === "comparison";
   const vehicleIdentity =
     buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
     "Vehicle details still limited in the current material.";
@@ -199,12 +201,14 @@ export function buildLineByLineComparisonReport(params: {
   );
 
   return [
-    "# Line-by-Line Comparison Report",
+    isComparison ? "# Line-by-Line Comparison Report" : "# Line-by-Line Estimate Review",
     "",
     `Generated: ${source.generatedLabel}`,
     `Vehicle: ${vehicleIdentity}`,
     "",
-    "This view focuses on estimate operations, why each line matters, and whether the current carrier-side posture appears supported, underwritten, missing, or disputed.",
+    isComparison
+      ? "This view focuses on estimate operations, why each line matters, and whether the current carrier-side posture appears supported, underwritten, missing, or disputed."
+      : "This view focuses on estimate operations, why each line matters, and whether the current documentation reads as supported, underwritten, missing, or still uncertain.",
     "",
     ...rows,
   ].join("\n");
@@ -341,7 +345,7 @@ function summarizeShopCategoryPosition(
 
 function summarizeCarrierCategoryPosition(items: ExportSupplementItem[]): string {
   if (items.length === 0) {
-    return "No clear carrier-side variance was identified in this category from the current normalized analysis.";
+    return "No clear unsupported variance was identified in this category from the current normalized analysis.";
   }
 
   return items.map((item) => describeCarrierPosition(item)).join(" ");
@@ -361,13 +365,13 @@ function deriveCategorySupportStatus(
 function describeCarrierPosition(item: ExportSupplementItem): string {
   switch (item.kind) {
     case "missing_operation":
-      return `${item.title} is not clearly carried in the current carrier-side posture.`;
+      return `${item.title} is not clearly carried in the current estimate posture.`;
     case "missing_verification":
-      return `${item.title} may be implicitly required, but the carrier-side verification or documentation is not clearly shown.`;
+      return `${item.title} may be implicitly required, but the current verification or documentation is not clearly shown.`;
     case "underwritten_operation":
-      return `${item.title} appears lighter or under-supported on the carrier side.`;
+      return `${item.title} appears lighter or under-supported in the current estimate.`;
     default:
-      return `${item.title} reflects a different repair-path position between shop and carrier views.`;
+      return `${item.title} reflects a repair-path position that still needs clearer support in the current file.`;
   }
 }
 

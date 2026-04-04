@@ -12,22 +12,37 @@ export function buildLineByLinePdf(params: {
 }): CarrierReportDocument {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
+  const isComparison = source.analysisMode === "comparison";
   const vehicleIdentity =
     buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
     "Vehicle details still limited in the current material.";
 
   return {
     filename: "collision-iq-line-by-line-report.pdf",
-    brand: buildPdfBrand("Line-by-Line Report"),
+    brand: buildPdfBrand(isComparison ? "Line-by-Line Report" : "Estimate Review"),
     header: buildPdfHeader({
-      title: "Line-by-Line Comparison Report",
+      title: isComparison ? "Line-by-Line Comparison Report" : "Line-by-Line Estimate Review",
       subtitle:
-        "Operation-focused report showing estimate lines, rationale, and current support status from the shared normalized export model.",
+        isComparison
+          ? "Operation-focused report showing estimate lines, rationale, and current support status from the shared normalized export model."
+          : "Operation-focused estimate review showing documented lines, rationale, and current support status from the shared normalized export model.",
       generatedLabel: `Generated ${source.generatedLabel}`,
     }),
     summary: [
       { label: "Vehicle", value: vehicleIdentity },
       { label: "VIN", value: exportModel.vehicle.vin || "Not clearly supported in the current material." },
+      ...(exportModel.estimateFacts.insurer
+        ? [{ label: "Insurer", value: exportModel.estimateFacts.insurer }]
+        : []),
+      ...(typeof exportModel.estimateFacts.mileage === "number"
+        ? [{ label: "Mileage", value: exportModel.estimateFacts.mileage.toLocaleString("en-US") }]
+        : []),
+      ...(typeof exportModel.estimateFacts.estimateTotal === "number"
+        ? [{
+            label: "Estimate Total",
+            value: `$${exportModel.estimateFacts.estimateTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          }]
+        : []),
       { label: "Lines", value: `${source.lineItems.length}` },
       { label: "Focus", value: "Operations, rationale, support status" },
     ],
@@ -36,7 +51,7 @@ export function buildLineByLinePdf(params: {
       bullets: [
         `Component: ${item.component}`,
         item.rawLine ? `Estimate line: ${item.rawLine}` : undefined,
-        `Carrier position: ${item.carrierPosition}`,
+        `${isComparison ? "Carrier position" : "Support posture"}: ${item.carrierPosition}`,
         `Support status: ${formatLabel(item.supportStatus)}`,
         `Rationale: ${item.rationale}`,
         item.support ? `Support: ${item.support}` : undefined,

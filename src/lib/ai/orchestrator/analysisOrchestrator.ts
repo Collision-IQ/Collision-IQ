@@ -4,6 +4,7 @@ import {
 } from "@/lib/uploadedAttachmentStore";
 import { orchestrateRetrieval } from "../retrievalOrchestrator";
 import { buildComparisonAnalysis } from "../builders/comparisonEngine";
+import { extractEstimateFacts } from "../extractors/extractEstimateFacts";
 import { runRepairPipeline } from "../pipeline/repairPipeline";
 import { computeConfidenceScore } from "../scoring/confidenceScore";
 import { computeEvidenceQuality } from "../scoring/evidenceScore";
@@ -148,6 +149,10 @@ export async function runRepairAnalysis({
     ),
     extractVehicleIdentityFromText(userIntent ?? "", "user")
   );
+  const estimateFacts = extractEstimateFacts({
+    text: estimateText,
+    vehicle: inferredVehicle,
+  });
 
   console.info("[vehicle-reconciliation:analysis]", {
     documentCount: documents.length,
@@ -220,7 +225,7 @@ export async function runRepairAnalysis({
         totalEvidenceCount: evidence.length,
       }),
     },
-    vehicle: inferredVehicle,
+    vehicle: estimateFacts.vehicle ?? inferredVehicle,
     issues,
     requiredProcedures,
     presentProcedures,
@@ -229,6 +234,8 @@ export async function runRepairAnalysis({
     evidence,
     recommendedActions: buildRecommendedActions(missingProcedures, supplementOpportunities),
     analysis: undefined,
+    sourceEstimateText: estimateText,
+    estimateFacts,
   };
 }
 

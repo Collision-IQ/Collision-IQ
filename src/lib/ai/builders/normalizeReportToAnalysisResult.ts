@@ -3,6 +3,7 @@ import type {
   AnalysisResult,
   RepairIntelligenceReport,
 } from "../types/analysis";
+import { extractEstimateFacts } from "../extractors/extractEstimateFacts";
 import {
   extractVehicleIdentityFromText,
   mergeVehicleIdentity,
@@ -29,6 +30,14 @@ export function normalizeReportToAnalysisResult(
   );
   const guardedInferredVehicle = preserveStructuredDescriptors(structuredVehicle, inferredVehicle);
   const normalizedVehicle = mergeVehicleIdentity(structuredVehicle, guardedInferredVehicle);
+  const estimateFacts = mergeEstimateFacts(
+    report.estimateFacts,
+    report.analysis?.estimateFacts,
+    extractEstimateFacts({
+      text: estimateEvidenceText,
+      vehicle: normalizedVehicle,
+    })
+  );
 
   console.info("[vehicle-label-trace:raw-extraction]", {
     reportVehicle: normalizeVehicleIdentity(report.vehicle) ?? null,
@@ -47,6 +56,11 @@ export function normalizeReportToAnalysisResult(
     return {
       ...report.analysis,
       vehicle: normalizedVehicle,
+      rawEstimateText: report.analysis.rawEstimateText || estimateEvidenceText,
+      estimateFacts: {
+        ...estimateFacts,
+        vehicle: estimateFacts.vehicle ?? normalizedVehicle,
+      },
     };
   }
 
@@ -108,6 +122,10 @@ export function normalizeReportToAnalysisResult(
       report.recommendedActions[0] ||
       "The estimate needs clearer repair support before it can be treated as fully defended.",
     vehicle: normalizedVehicle,
+    estimateFacts: {
+      ...estimateFacts,
+      vehicle: estimateFacts.vehicle ?? normalizedVehicle,
+    },
   };
 }
 
@@ -158,12 +176,49 @@ function preserveStructuredDescriptors(
 
 function collectHighSignalVehicleEvidenceText(report: RepairIntelligenceReport): string {
   return [
+    report.sourceEstimateText,
+    report.estimateFacts?.documentedProcedures?.join("\n"),
+    report.estimateFacts?.documentedHighlights?.join("\n"),
+    report.estimateFacts?.vehicle?.vin,
+    report.estimateFacts?.insurer,
     extractEstimateEvidenceText(report.evidence),
+    report.analysis?.rawEstimateText,
     report.vehicle?.vin,
     report.analysis?.vehicle?.vin,
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function mergeEstimateFacts(
+  ...candidates: Array<AnalysisResult["estimateFacts"] | undefined>
+): NonNullable<AnalysisResult["estimateFacts"]> {
+  const normalized = candidates.filter(Boolean);
+  if (normalized.length === 0) {
+    return {
+      documentedProcedures: [],
+      documentedHighlights: [],
+    };
+  }
+
+  return normalized.reduce<NonNullable<AnalysisResult["estimateFacts"]>>(
+    (merged, current) => ({
+      vehicle: mergeVehicleIdentity(merged.vehicle, current?.vehicle),
+      mileage: merged.mileage ?? current?.mileage,
+      insurer: merged.insurer ?? current?.insurer,
+      estimateTotal: merged.estimateTotal ?? current?.estimateTotal,
+      documentedProcedures: [
+        ...new Set([...(merged.documentedProcedures ?? []), ...(current?.documentedProcedures ?? [])]),
+      ],
+      documentedHighlights: [
+        ...new Set([...(merged.documentedHighlights ?? []), ...(current?.documentedHighlights ?? [])]),
+      ],
+    }),
+    {
+      documentedProcedures: [] as string[],
+      documentedHighlights: [] as string[],
+    }
+  );
 }
 
 function extractEstimateEvidenceText(evidence: RepairIntelligenceReport["evidence"]): string {

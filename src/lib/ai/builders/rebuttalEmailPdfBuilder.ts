@@ -33,6 +33,18 @@ export function buildRebuttalEmailPdf(params: {
     summary: [
       { label: "Vehicle", value: vehicleIdentity },
       { label: "VIN", value: exportModel.vehicle.vin || "Not clearly supported in the current material." },
+      ...(exportModel.estimateFacts.insurer
+        ? [{ label: "Insurer", value: exportModel.estimateFacts.insurer }]
+        : []),
+      ...(typeof exportModel.estimateFacts.mileage === "number"
+        ? [{ label: "Mileage", value: exportModel.estimateFacts.mileage.toLocaleString("en-US") }]
+        : []),
+      ...(typeof exportModel.estimateFacts.estimateTotal === "number"
+        ? [{
+            label: "Estimate Total",
+            value: `$${exportModel.estimateFacts.estimateTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          }]
+        : []),
       { label: "Primary Ask", value: rebuttalItems[0]?.title || "Review the current repair path and provide supporting documentation." },
       { label: "Format", value: "Professional email draft" },
     ],

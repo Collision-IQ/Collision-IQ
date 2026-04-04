@@ -12,22 +12,37 @@ export function buildSideBySidePdf(params: {
 }): CarrierReportDocument {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
+  const isComparison = source.analysisMode === "comparison";
   const vehicleIdentity =
     buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
     "Vehicle details still limited in the current material.";
 
   return {
     filename: "collision-iq-side-by-side-report.pdf",
-    brand: buildPdfBrand("Comparison Report"),
+    brand: buildPdfBrand(isComparison ? "Comparison Report" : "Estimate Review"),
     header: buildPdfHeader({
-      title: "Side-by-Side Comparison Report",
+      title: isComparison ? "Side-by-Side Comparison Report" : "Estimate Review Report",
       subtitle:
-        "Category-level comparison of shop and carrier positions using the shared normalized export model.",
+        isComparison
+          ? "Category-level comparison of shop and carrier positions using the shared normalized export model."
+          : "Category-level estimate review built from the shared normalized export model.",
       generatedLabel: `Generated ${source.generatedLabel}`,
     }),
     summary: [
       { label: "Vehicle", value: vehicleIdentity },
       { label: "VIN", value: exportModel.vehicle.vin || "Not clearly supported in the current material." },
+      ...(exportModel.estimateFacts.insurer
+        ? [{ label: "Insurer", value: exportModel.estimateFacts.insurer }]
+        : []),
+      ...(typeof exportModel.estimateFacts.mileage === "number"
+        ? [{ label: "Mileage", value: exportModel.estimateFacts.mileage.toLocaleString("en-US") }]
+        : []),
+      ...(typeof exportModel.estimateFacts.estimateTotal === "number"
+        ? [{
+            label: "Estimate Total",
+            value: `$${exportModel.estimateFacts.estimateTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          }]
+        : []),
       { label: "Mode", value: formatAnalysisModeLabel(source.analysisMode) },
       { label: "Categories", value: `${source.categoryComparisons.length}` },
     ],
@@ -36,14 +51,14 @@ export function buildSideBySidePdf(params: {
         title: "Overall Position",
         bullets: [
           `Summary: ${exportModel.repairPosition}`,
-          `Carrier-facing posture: ${exportModel.positionStatement}`,
+          `${isComparison ? "Carrier-facing posture" : "Support posture"}: ${exportModel.positionStatement}`,
         ],
       },
       ...source.categoryComparisons.map((category) => ({
         title: category.category,
         bullets: [
-          `Shop position: ${category.shopPosition}`,
-          `Carrier position: ${category.carrierPosition}`,
+          `${isComparison ? "Shop position" : "Estimate position"}: ${category.shopPosition}`,
+          `${isComparison ? "Carrier position" : "Support posture"}: ${category.carrierPosition}`,
           `Support status: ${formatLabel(category.supportStatus)}`,
           `Rationale: ${category.rationale}`,
         ],

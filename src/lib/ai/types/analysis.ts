@@ -125,6 +125,15 @@ export type VehicleIdentity = {
   mismatches?: string[];
 };
 
+export type EstimateFacts = {
+  vehicle?: VehicleIdentity;
+  mileage?: number;
+  insurer?: string;
+  estimateTotal?: number;
+  documentedProcedures: string[];
+  documentedHighlights: string[];
+};
+
 export interface AnalysisResult {
   mode?: "comparison" | "single-document-review" | "parser-incomplete";
   parserStatus?: "ok" | "failed_or_incomplete";
@@ -136,6 +145,7 @@ export interface AnalysisResult {
   rawEstimateText?: string;
   narrative: string;
   vehicle?: VehicleIdentity;
+  estimateFacts?: EstimateFacts;
 }
 
 // Legacy v2 contract still used by the current orchestrator/UI.
@@ -174,4 +184,6 @@ export type RepairIntelligenceReport = {
   evidence: EvidenceRecord[];
   recommendedActions: string[];
   analysis?: AnalysisResult;
+  sourceEstimateText?: string;
+  estimateFacts?: EstimateFacts;
 };

@@ -1,0 +1,212 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const ts = require("typescript");
+
+require.extensions[".ts"] = function registerTypeScript(module, filename) {
+  const source = fs.readFileSync(filename, "utf8");
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2020,
+      esModuleInterop: true,
+      moduleResolution: ts.ModuleResolutionKind.NodeJs,
+    },
+    fileName: filename,
+  });
+
+  module._compile(compiled.outputText, filename);
+};
+
+const { extractEstimateFacts } = require("./extractors/extractEstimateFacts.ts");
+const { normalizeReportToAnalysisResult } = require("./builders/normalizeReportToAnalysisResult.ts");
+const { buildExportModel } = require("./builders/buildExportModel.ts");
+const { buildCarrierReport } = require("./builders/carrierPdfBuilder.ts");
+const { buildSideBySidePdf } = require("./builders/sideBySidePdfBuilder.ts");
+
+const SHOP_21733_TEXT = `
+Vehicle Description: 2018 Tesla Model S 75D AWD
+VIN: 5YJSA1E21JF264319
+Mileage: 173,702
+Insurer: GEICO
+Grand Total 19,428.53
+Procedure research and documentation
+Work authorization on file
+Pre-repair scan
+In-process repair scan
+Post-repair scan
+Pre-paint test fit
+Recover and recharge refrigerant
+Headlamp aim and fog aim
+Cavity wax
+Final road test
+HV battery state of charge maintained
+`;
+
+function run(name, fn) {
+  try {
+    fn();
+    console.log(`PASS ${name}`);
+  } catch (error) {
+    console.error(`FAIL ${name}`);
+    throw error;
+  }
+}
+
+function makeReport() {
+  return {
+    summary: {
+      riskScore: "moderate",
+      confidence: "moderate",
+      criticalIssues: 1,
+      evidenceQuality: "moderate",
+    },
+    vehicle: undefined,
+    issues: [
+      {
+        id: "issue-1",
+        category: "documentation",
+        title: "Structural Measurement Verification",
+        finding: "Structural Measurement Verification",
+        impact:
+          "Dimensional verification and measuring support are not clearly documented for the current repair path.",
+        missingOperation: "Structural Measurement Verification",
+        severity: "high",
+        evidenceIds: ["evidence-1"],
+      },
+      {
+        id: "issue-2",
+        category: "parts",
+        title: "Hidden Mounting Geometry / Teardown Growth",
+        finding: "Hidden Mounting Geometry / Teardown Growth",
+        impact:
+          "Front-end teardown growth and hidden mounting geometry remain likely even though the visible estimate is otherwise credible.",
+        missingOperation: "Hidden Mounting Geometry / Teardown Growth",
+        severity: "medium",
+        evidenceIds: ["evidence-1"],
+      },
+    ],
+    requiredProcedures: [],
+    presentProcedures: ["Pre-repair scan", "In-process scan", "Post-repair scan", "Headlamp aiming check"],
+    missingProcedures: ["Structural Measurement Verification"],
+    supplementOpportunities: [
+      "Add and document dimensional/measuring verification.",
+      "Add and document wheel alignment confirmation.",
+      "Add and document Tesla-specific calibration confirmation beyond scan/reset language.",
+    ],
+    evidence: [
+      {
+        id: "evidence-1",
+        title: "Shop 21733 estimate",
+        snippet: SHOP_21733_TEXT,
+        source: "Shop 21733.pdf",
+        authority: "inferred",
+      },
+    ],
+    recommendedActions: [
+      "The estimate reads as a credible preliminary repair plan, but dimensional verification, alignment confirmation, Tesla-specific calibration support, and hidden mounting geometry growth still need clearer documentation.",
+      "Upload an estimate or supporting documents to generate a real repair intelligence read.",
+    ],
+    analysis: undefined,
+    sourceEstimateText: SHOP_21733_TEXT,
+  };
+}
+
+run("extractEstimateFacts captures Shop 21733 hard facts and documented positives", () => {
+  const facts = extractEstimateFacts({ text: SHOP_21733_TEXT });
+
+  assert.equal(facts.vehicle?.year, 2018);
+  assert.equal(facts.vehicle?.make, "Tesla");
+  assert.equal(facts.vehicle?.model, "Model S");
+  assert.equal(facts.vehicle?.trim, "75D AWD");
+  assert.equal(facts.vehicle?.vin, "5YJSA1E21JF264319");
+  assert.equal(facts.mileage, 173702);
+  assert.equal(facts.insurer, "GEICO");
+  assert.equal(facts.estimateTotal, 19428.53);
+  assert.equal(facts.documentedProcedures.includes("Pre-repair scan"), true);
+  assert.equal(facts.documentedProcedures.includes("In-process scan"), true);
+  assert.equal(facts.documentedProcedures.includes("Post-repair scan"), true);
+  assert.equal(facts.documentedHighlights.includes("Procedure research/documentation"), true);
+  assert.equal(facts.documentedHighlights.includes("Work authorization"), true);
+  assert.equal(facts.documentedHighlights.includes("Cavity wax"), true);
+});
+
+run("normalized analysis preserves estimate facts for Shop 21733", () => {
+  const report = makeReport();
+  const analysis = normalizeReportToAnalysisResult(report);
+
+  assert.equal(analysis.estimateFacts?.vehicle?.vin, "5YJSA1E21JF264319");
+  assert.equal(analysis.estimateFacts?.mileage, 173702);
+  assert.equal(analysis.estimateFacts?.insurer, "GEICO");
+  assert.equal(analysis.estimateFacts?.estimateTotal, 19428.53);
+  assert.equal(analysis.rawEstimateText.includes("Grand Total 19,428.53"), true);
+});
+
+run("export model removes placeholder text and keeps documented scans as positives", () => {
+  const report = makeReport();
+  const analysis = normalizeReportToAnalysisResult(report);
+  const exportModel = buildExportModel({
+    report,
+    analysis,
+    panel: null,
+    assistantAnalysis:
+      "Upload an estimate or supporting documents to generate a real repair intelligence read.\n\nThe estimate is credible but likely incomplete in dimensional verification, wheel alignment, Tesla-specific calibration confirmation, and hidden mounting geometry growth.",
+  });
+
+  const supplementTitles = exportModel.supplementItems.map((item) => item.title);
+
+  assert.equal(exportModel.vehicle.vin, "5YJSA1E21JF264319");
+  assert.equal(exportModel.estimateFacts.insurer, "GEICO");
+  assert.equal(exportModel.estimateFacts.mileage, 173702);
+  assert.equal(exportModel.estimateFacts.estimateTotal, 19428.53);
+  assert.equal(exportModel.repairPosition.includes("Upload an estimate or supporting documents"), false);
+  assert.equal(exportModel.request.includes("Upload an estimate or supporting documents"), false);
+  assert.equal(supplementTitles.includes("Pre-Repair Scan"), false);
+  assert.equal(supplementTitles.includes("Post-Repair Scan"), false);
+  assert.equal(exportModel.repairPosition.toLowerCase().includes("carrier estimate"), false);
+  assert.equal(exportModel.repairPosition.toLowerCase().includes("shop estimate"), false);
+});
+
+run("carrier and estimate-review exports show Shop 21733 facts without unsupported VIN language", () => {
+  const report = makeReport();
+  const analysis = normalizeReportToAnalysisResult(report);
+  const carrier = buildCarrierReport({
+    report,
+    analysis,
+    panel: null,
+    assistantAnalysis: null,
+  });
+  const estimateReview = buildSideBySidePdf({
+    report,
+    analysis,
+    panel: null,
+    assistantAnalysis: null,
+  });
+
+  assert.equal(carrier.summary.find((item) => item.label === "Vehicle")?.value, "2018 Tesla Model S 75D AWD");
+  assert.equal(carrier.summary.find((item) => item.label === "VIN")?.value, "5YJSA1E21JF264319");
+  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "GEICO");
+  assert.equal(carrier.summary.find((item) => item.label === "Mileage")?.value, "173,702");
+  assert.equal(carrier.summary.find((item) => item.label === "Estimate Total")?.value, "$19,428.53");
+  assert.equal(
+    carrier.sections.some((section) => section.title === "Documented Positives" && (section.bullets ?? []).includes("Cavity wax.")),
+    true
+  );
+  assert.equal(
+    carrier.summary.find((item) => item.label === "VIN")?.value.includes("Not clearly supported"),
+    false
+  );
+  assert.equal(estimateReview.header.title, "Estimate Review Report");
+  assert.equal(
+    estimateReview.sections.some((section) =>
+      (section.bullets ?? []).some((bullet) => bullet.startsWith("Estimate position:"))
+    ),
+    true
+  );
+  assert.equal(
+    estimateReview.sections.some((section) =>
+      (section.bullets ?? []).some((bullet) => bullet.startsWith("Carrier position:"))
+    ),
+    false
+  );
+});
