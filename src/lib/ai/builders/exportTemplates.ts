@@ -57,16 +57,17 @@ export function buildExportTemplateSourceModel(params: {
   assistantAnalysis?: string | null;
 }): ExportTemplateSourceModel {
   const exportModel = buildExportModel(params);
+  const analysisMode = params.analysis?.mode ?? params.report?.analysis?.mode ?? "single-document-review";
   const source: ExportTemplateSourceModel = {
     exportModel,
-    analysisMode: params.analysis?.mode ?? params.report?.analysis?.mode ?? "single-document-review",
+    analysisMode,
     generatedLabel: new Date().toLocaleDateString("en-US", {
       year: "numeric",
       month: "long",
       day: "numeric",
     }),
-    categoryComparisons: buildCategoryComparisons(exportModel),
-    lineItems: buildLineItems(exportModel, params.analysis),
+    categoryComparisons: buildCategoryComparisons(exportModel, analysisMode),
+    lineItems: buildLineItems(exportModel, params.analysis, analysisMode),
   };
 
   if (source.categoryComparisons.length === 0) {
@@ -86,7 +87,7 @@ export function buildExportTemplateSourceModel(params: {
     source.lineItems = exportModel.supplementItems.slice(0, 8).map((item) => ({
       operation: item.title,
       component: formatCategoryLabel(item.category),
-      carrierPosition: describeCarrierPosition(item),
+      carrierPosition: describeCarrierPosition(item, analysisMode === "comparison"),
       supportStatus: mapSupportStatus(item.kind),
       rationale: item.rationale,
       support: buildSupportSnippet(item),
@@ -193,7 +194,7 @@ export function buildLineByLineComparisonReport(params: {
       `Operation: ${item.operation}`,
       `Component: ${item.component}`,
       item.rawLine ? `Estimate line: ${item.rawLine}` : undefined,
-      `Carrier position: ${item.carrierPosition}`,
+      `${isComparison ? "Carrier position" : "Support posture"}: ${item.carrierPosition}`,
       `Support status: ${formatCategoryLabel(item.supportStatus)}`,
       `Rationale: ${item.rationale}`,
       item.support ? `Support: ${item.support}` : undefined,
@@ -216,7 +217,11 @@ export function buildLineByLineComparisonReport(params: {
   ].join("\n");
 }
 
-function buildCategoryComparisons(exportModel: ExportModel): ExportCategoryComparison[] {
+function buildCategoryComparisons(
+  exportModel: ExportModel,
+  analysisMode: AnalysisResult["mode"] | "single-document-review"
+): ExportCategoryComparison[] {
+  const isComparison = analysisMode === "comparison";
   const grouped = new Map<string, ExportSupplementItem[]>();
 
   for (const item of exportModel.supplementItems) {
@@ -232,8 +237,8 @@ function buildCategoryComparisons(exportModel: ExportModel): ExportCategoryCompa
 
     return {
       category: formatCategoryLabel(category),
-      shopPosition: summarizeShopCategoryPosition(topItems, exportModel.repairPosition),
-      carrierPosition: summarizeCarrierCategoryPosition(topItems),
+      shopPosition: summarizeShopCategoryPosition(topItems, exportModel.repairPosition, isComparison),
+      carrierPosition: summarizeCarrierCategoryPosition(topItems, isComparison),
       supportStatus,
       rationale: topItems.map((item) => item.rationale).join(" "),
       supportingFields: compact([
@@ -247,8 +252,10 @@ function buildCategoryComparisons(exportModel: ExportModel): ExportCategoryCompa
 
 function buildLineItems(
   exportModel: ExportModel,
-  analysis: AnalysisResult | null
+  analysis: AnalysisResult | null,
+  analysisMode: AnalysisResult["mode"] | "single-document-review"
 ): ExportLineComparison[] {
+  const isComparison = analysisMode === "comparison";
   const supplementItems = exportModel.supplementItems;
   const operations = analysis?.operations ?? [];
   const matchedSupplementKeys = new Set<string>();
@@ -264,8 +271,10 @@ function buildLineItems(
       component: operation.component,
       rawLine: operation.rawLine,
       carrierPosition: match
-        ? describeCarrierPosition(match)
-        : "No explicit carrier-side support gap was flagged for this operation in the current normalized analysis.",
+        ? describeCarrierPosition(match, isComparison)
+        : isComparison
+          ? "No explicit carrier-side support gap was flagged for this operation in the current normalized analysis."
+          : "No explicit support gap was flagged for this operation in the current normalized analysis.",
       supportStatus: match ? mapSupportStatus(match.kind) : "supported",
       rationale: match
         ? match.rationale
@@ -280,7 +289,7 @@ function buildLineItems(
     .map((item) => ({
       operation: item.title,
       component: formatCategoryLabel(item.category),
-      carrierPosition: describeCarrierPosition(item),
+      carrierPosition: describeCarrierPosition(item, isComparison),
       supportStatus: mapSupportStatus(item.kind),
       rationale: item.rationale,
       support: buildSupportSnippet(item),
@@ -336,21 +345,31 @@ function tokenize(value: string): Set<string> {
 
 function summarizeShopCategoryPosition(
   items: ExportSupplementItem[],
-  repairPosition: string
+  repairPosition: string,
+  isComparison: boolean
 ): string {
   if (items.length === 0) {
     return repairPosition;
   }
 
+  if (!isComparison) {
+    return `The estimate position supports ${joinHumanList(items.map((item) => item.title.toLowerCase()))}.`;
+  }
+
   return `The shop-side repair path supports ${joinHumanList(items.map((item) => item.title.toLowerCase()))}.`;
 }
 
-function summarizeCarrierCategoryPosition(items: ExportSupplementItem[]): string {
+function summarizeCarrierCategoryPosition(
+  items: ExportSupplementItem[],
+  isComparison: boolean
+): string {
   if (items.length === 0) {
-    return "No clear unsupported variance was identified in this category from the current normalized analysis.";
+    return isComparison
+      ? "No clear unsupported variance was identified in this category from the current normalized analysis."
+      : "No clear support gap was identified in this category from the current normalized analysis.";
   }
 
-  return items.map((item) => describeCarrierPosition(item)).join(" ");
+  return items.map((item) => describeCarrierPosition(item, isComparison)).join(" ");
 }
 
 function deriveCategorySupportStatus(
@@ -364,18 +383,25 @@ function deriveCategorySupportStatus(
   return "supported";
 }
 
-function describeCarrierPosition(item: ExportSupplementItem): string {
+function describeCarrierPosition(item: ExportSupplementItem, isComparison = true): string {
   switch (item.kind) {
     case "missing_operation":
-      return `${item.title} is not clearly carried in the current estimate posture.`;
+      return isComparison
+        ? `${item.title} is not clearly carried in the current estimate posture.`
+        : `${item.title} is not clearly carried in the current estimate.`;
     case "missing_verification":
       return `${item.title} may be implicitly required, but the current verification or documentation is not clearly shown.`;
     case "underwritten_operation":
-      return `${item.title} appears lighter or under-supported in the current estimate.`;
+      return isComparison
+        ? `${item.title} appears lighter or under-supported in the current estimate.`
+        : `${item.title} still needs clearer support in the current estimate.`;
     default:
-      return `${item.title} reflects a repair-path position that still needs clearer support in the current file.`;
+      return isComparison
+        ? `${item.title} reflects a repair-path position that still needs clearer support in the current file.`
+        : `${item.title} still needs clearer support in the current file.`;
   }
 }
+
 
 function mapSupportStatus(
   kind: ExportSupplementItem["kind"]

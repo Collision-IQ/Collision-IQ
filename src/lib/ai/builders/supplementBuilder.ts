@@ -79,28 +79,15 @@ export function buildSupplementLines(
   result: AnalysisResult | RepairIntelligenceReport | AnalysisFinding[]
 ): SupplementLine[] {
   const text = extractTextForFunctions(result);
-  if (!text) return [];
+  const context = extractValidationContext(result);
+  const candidates = extractSupplementCandidates(result);
 
-  const map = buildFunctionMap(text);
-  const lines: SupplementLine[] = [];
-
-  if (!map["post-scan"]) {
-    lines.push({
-      title: "Post-Repair Scan",
-      category: "scan",
-      rationale: "Not clearly represented in estimate.",
-    });
+  if (candidates.length === 0) {
+    return [];
   }
 
-  if (!map["calibration"]) {
-    lines.push({
-      title: "System Calibration",
-      category: "calibration",
-      rationale: "Not clearly represented in estimate.",
-    });
-  }
-
-  return lines;
+  const validatedCandidates = validateSupplements(text, candidates, context);
+  return buildSupplementLinesHybrid(validatedCandidates);
 }
 
 function extractTextForFunctions(
@@ -166,6 +153,7 @@ export function validateSupplements(
     const adasProcedure = canonicalKey
       ? isAdasProcedure(canonicalKey)
       : looksLikeAdasSupplementTitle(title);
+    const scanProcedure = looksLikeScanSupplementTitle(title);
 
     if (canonicalKey && representedMatches.some((match) => match.key === canonicalKey)) {
       return false;
@@ -175,6 +163,13 @@ export function validateSupplements(
       if (title.includes(functionName) && hasFunction(representedText, keywords)) {
         return false;
       }
+    }
+
+    if (
+      scanProcedure &&
+      !isProcedureRequired(canonicalKey, title, requiredProcedureText, requiredProcedureMatches)
+    ) {
+      return false;
     }
 
     if (
@@ -202,11 +197,22 @@ export function inferCategory(title: string): SupplementLine["category"] {
 export function buildSupplementLinesHybrid(
   validatedItems: SupplementCandidate[]
 ): SupplementLine[] {
-  return validatedItems.map((item) => ({
-    title: normalizeSupplementTitle(item.title),
-    category: inferCategory(item.title),
-    rationale: item.reason,
-  }));
+  const seen = new Set<string>();
+
+  return validatedItems
+    .map((item) => ({
+      title: normalizeSupplementTitle(item.title),
+      category: inferCategory(item.title),
+      rationale: item.reason,
+    }))
+    .filter((item) => {
+      const key = item.title.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
 }
 
 function normalizeSupplementTitle(title: string): string {
@@ -268,6 +274,10 @@ function looksLikeAdasSupplementTitle(title: string): boolean {
   );
 }
 
+function looksLikeScanSupplementTitle(title: string): boolean {
+  return title.includes("scan");
+}
+
 function isProcedureRequired(
   canonicalKey: CanonicalProcedureKey | null,
   title: string,
@@ -291,4 +301,81 @@ function isProcedureRequired(
         ))
     );
   });
+}
+
+function extractValidationContext(
+  result: AnalysisResult | RepairIntelligenceReport | AnalysisFinding[]
+): SupplementValidationContext | undefined {
+  if (Array.isArray(result)) {
+    return undefined;
+  }
+
+  if ("findings" in result) {
+    return {
+      requiredProcedures: result.findings
+        .filter((finding) => finding.status !== "present")
+        .map((finding) => finding.title),
+      presentProcedures: result.findings
+        .filter((finding) => finding.status === "present")
+        .map((finding) => finding.title),
+      missingProcedures: result.supplements.map((finding) => finding.title),
+    };
+  }
+
+  return {
+    requiredProcedures: result.requiredProcedures.map((procedure) => procedure.procedure),
+    presentProcedures: result.presentProcedures,
+    missingProcedures: result.missingProcedures,
+  };
+}
+
+function extractSupplementCandidates(
+  result: AnalysisResult | RepairIntelligenceReport | AnalysisFinding[]
+): SupplementCandidate[] {
+  if (Array.isArray(result)) {
+    return result
+      .filter((finding) => finding.status !== "present")
+      .map((finding) => ({
+        title: normalizeSupplementTitle(finding.title),
+        reason: finding.detail,
+      }));
+  }
+
+  if ("findings" in result) {
+    return [
+      ...result.supplements.map((finding) => ({
+        title: normalizeSupplementTitle(finding.title),
+        reason: finding.detail,
+      })),
+      ...result.findings
+        .filter((finding) => finding.status !== "present")
+        .map((finding) => ({
+          title: normalizeSupplementTitle(finding.title),
+          reason: finding.detail,
+        })),
+    ];
+  }
+
+  return [
+    ...result.missingProcedures.map((procedure) => ({
+      title: normalizeSupplementTitle(procedure),
+      reason: "This procedure is not clearly represented in the current estimate.",
+    })),
+    ...result.requiredProcedures
+      .filter((procedure) =>
+        !result.presentProcedures.some(
+          (present) => normalizeSupplementTitle(present).toLowerCase() === normalizeSupplementTitle(procedure.procedure).toLowerCase()
+        )
+      )
+      .map((procedure) => ({
+        title: normalizeSupplementTitle(procedure.procedure),
+        reason: procedure.reason,
+      })),
+    ...result.issues
+      .filter((issue) => issue.missingOperation || issue.category === "calibration" || issue.category === "scan")
+      .map((issue) => ({
+        title: normalizeSupplementTitle(issue.missingOperation ?? issue.title),
+        reason: issue.impact || issue.finding,
+      })),
+  ];
 }

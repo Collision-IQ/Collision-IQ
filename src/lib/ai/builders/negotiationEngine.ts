@@ -31,8 +31,23 @@ export function generateNegotiationResponse(
   }
 
   const bullets = keyIssues
+    .filter((finding) =>
+      supplements.some(
+        (item) => item.title.toLowerCase() === finding.title.toLowerCase() || finding.detail.toLowerCase().includes(item.title.toLowerCase())
+      )
+    )
     .map((finding) => `- ${finding.title}: ${finding.detail}`)
     .join("\n");
+
+  if (!bullets.trim()) {
+    return [
+      "Based on the current estimate, the clearest remaining support gaps are:",
+      "",
+      ...supplements.slice(0, 5).map((item) => `- ${item.title}: ${item.rationale}`),
+      "",
+      "Please review and advise how these operations are being addressed or provide updated documentation reflecting their inclusion.",
+    ].join("\n");
+  }
 
   return `
 Based on the current estimate, there are several areas that require clarification or correction:

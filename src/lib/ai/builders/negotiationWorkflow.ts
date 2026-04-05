@@ -17,6 +17,12 @@ export function generateNegotiationWorkflow(params: {
   const supplements = buildSupplementLines(result).slice(0, 5);
   const leverage = buildStateLeverage(state);
 
+  if (supplements.length === 0) {
+    return `
+The current estimate review does not show a clear unresolved support gap that warrants a negotiation ask at this stage.
+`.trim();
+  }
+
   if (stage === "initial_request") {
     return `
 Please review the attached estimate support and clarify how the following operations are being addressed:

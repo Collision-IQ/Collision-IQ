@@ -23,6 +23,9 @@ const { normalizeReportToAnalysisResult } = require("./builders/normalizeReportT
 const { buildExportModel, deriveExportReportFields } = require("./builders/buildExportModel.ts");
 const { buildCarrierReport } = require("./builders/carrierPdfBuilder.ts");
 const { buildSideBySidePdf } = require("./builders/sideBySidePdfBuilder.ts");
+const { buildSideBySideComparisonReport, buildLineByLineComparisonReport } = require("./builders/exportTemplates.ts");
+const { buildSupplementLines } = require("./builders/supplementBuilder.ts");
+const { generateNegotiationResponse } = require("./builders/negotiationEngine.ts");
 const { buildVehicleLabel, decodeVinVehicleIdentity, extractVehicleIdentityFromText } = require("./vehicleContext.ts");
 
 const SHOP_21733_TEXT = `
@@ -271,4 +274,46 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
     ),
     false
   );
+});
+
+run("single-estimate text templates avoid comparison framing", () => {
+  const report = makeReport();
+  const analysis = normalizeReportToAnalysisResult(report);
+  const sideBySide = buildSideBySideComparisonReport({
+    report,
+    analysis,
+    panel: null,
+    assistantAnalysis: null,
+  });
+  const lineByLine = buildLineByLineComparisonReport({
+    report,
+    analysis,
+    panel: null,
+    assistantAnalysis: null,
+  });
+
+  assert.equal(sideBySide.includes("shop-side repair path"), false);
+  assert.equal(sideBySide.includes("Carrier position:"), false);
+  assert.equal(sideBySide.includes("Estimate position:"), true);
+  assert.equal(lineByLine.includes("Carrier position:"), false);
+  assert.equal(lineByLine.includes("Support posture:"), true);
+});
+
+run("negotiation generation uses validated support gaps only", () => {
+  const report = makeReport();
+  const analysis = normalizeReportToAnalysisResult(report);
+  const supplementLines = buildSupplementLines(report);
+  const negotiation = generateNegotiationResponse(report);
+  const analysisNegotiation = generateNegotiationResponse(analysis);
+
+  assert.equal(supplementLines.some((item) => item.title === "Post-Repair Scan"), false);
+  assert.equal(supplementLines.some((item) => item.title === "System Calibration"), false);
+  assert.equal(
+    supplementLines.some((item) => item.title.includes("Structural Measurement Verification")),
+    true
+  );
+  assert.equal(negotiation.includes("Post-Repair Scan"), false);
+  assert.equal(negotiation.includes("System Calibration"), false);
+  assert.equal(analysisNegotiation.includes("Post-Repair Scan"), false);
+  assert.equal(analysisNegotiation.includes("System Calibration"), false);
 });

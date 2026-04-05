@@ -1,5 +1,6 @@
 import type { DecisionPanel } from "./buildDecisionPanel";
 import { deriveRenderInsightsFromChat, type DerivedValuation } from "./deriveRenderInsightsFromChat";
+import { buildRepairStory } from "./buildRepairStory";
 import { extractEstimateFacts } from "../extractors/extractEstimateFacts";
 import type { AnalysisResult, EstimateFacts, RepairIntelligenceReport, VehicleIdentity } from "../types/analysis";
 import {
@@ -19,7 +20,7 @@ import {
 
 export const COLLISION_ACADEMY_HANDOFF_URL = "https://www.collision.academy/";
 const PLACEHOLDER_VEHICLE_LABEL_PATTERN =
-  /^(?:unknown|unspecified|n\/a|na|none|null|undefined|not available|not provided|vehicle details are still limited in the current material\.?)$/i;
+  /^(?:unknown|unspecified|n\/a|na|none|null|undefined|not available|not provided|vehicle details are still limited in the current material\.?|vehicle details still limited in the current material\.?|not clearly supported(?: in the current material)?\.?)$/i;
 
 export type ExportSupplementItem = {
   title: string;
@@ -559,8 +560,12 @@ function resolveAnalysisMode(
   return analysis?.mode ?? report?.analysis?.mode ?? "single-document-review";
 }
 
-function buildSingleEstimateLead(estimateFacts: EstimateFacts): string {
+function buildSingleEstimateLead(
+  estimateFacts: EstimateFacts,
+  sourceEstimateText?: string | null
+): string {
   const vehicleLabel = buildVehicleDisplayLabel(estimateFacts.vehicle);
+  const story = sourceEstimateText?.trim() ? buildRepairStory(sourceEstimateText) : null;
   const facts: string[] = [];
   if (vehicleLabel) {
     facts.push(`vehicle ${vehicleLabel}`);
@@ -596,8 +601,18 @@ function buildSingleEstimateLead(estimateFacts: EstimateFacts): string {
     strengths.length > 0
       ? ` It already documents strengths such as ${joinHumanList(strengths)}.`
       : "";
+  const scopeLead =
+    story && (story.zones.length > 0 || story.panels.length > 0)
+      ? ` The visible scope centers on ${joinHumanList(
+          [
+            story.impact !== "general" ? `${story.impact} damage` : undefined,
+            story.zones.length > 0 ? `${joinHumanList(story.zones)} areas` : undefined,
+            story.panels.length > 0 ? `${story.panels.length} noted panel${story.panels.length === 1 ? "" : "s"}` : undefined,
+          ].filter((value): value is string => Boolean(value))
+        )}.`
+      : "";
 
-  return `${factLead}${strengthsLead} The visible scope is not obviously padded, but it is still likely incomplete in measuring, alignment, calibration, and hidden-damage verification areas.`;
+  return `${factLead}${scopeLead}${strengthsLead} The visible scope is not obviously padded, but it is still likely incomplete in measuring, alignment, calibration confirmation, and hidden-damage verification areas.`;
 }
 
 function extractVinFromText(text: string): string | undefined {
@@ -672,7 +687,10 @@ function buildRepairPosition(
       ? topItems.some((item) => item.kind !== "disputed_repair_path")
         ? "The shop estimate reads as materially more complete, while the carrier estimate remains underwritten in several repair-path areas."
         : "The repair path still contains supportable disputed items that are not resolved in the current carrier-facing documentation."
-      : buildSingleEstimateLead(estimateFacts);
+      : buildSingleEstimateLead(
+          estimateFacts,
+          report?.sourceEstimateText ?? report?.analysis?.rawEstimateText ?? analysis?.rawEstimateText ?? null
+        );
 
     if (strongestNarrative) {
       const polishedNarrative = makeRepairPositionTail(strongestNarrative);
@@ -707,7 +725,10 @@ function buildRepairPosition(
   }
 
   if (resolveAnalysisMode(report, analysis) !== "comparison") {
-    return buildSingleEstimateLead(estimateFacts);
+    return buildSingleEstimateLead(
+      estimateFacts,
+      report?.sourceEstimateText ?? report?.analysis?.rawEstimateText ?? analysis?.rawEstimateText ?? null
+    );
   }
 
   return "The current material does not show a clear unresolved repair-path issue.";
