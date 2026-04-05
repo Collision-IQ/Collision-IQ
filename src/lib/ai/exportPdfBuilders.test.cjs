@@ -178,3 +178,73 @@ run("line-by-line PDF renders expected operation rows", () => {
     )
   );
 });
+
+run("line-by-line PDF keeps procedure rows grounded instead of forcing fuzzy supplement matches", () => {
+  const document = buildLineByLinePdf({
+    report: REPORT,
+    analysis: {
+      ...ANALYSIS,
+      operations: [
+        {
+          operation: "Proc",
+          component: "Seat belt dynamic function test",
+          rawLine: "Proc Seat belt dynamic function test",
+        },
+        {
+          operation: "Proc",
+          component: "Final road test",
+          rawLine: "Proc Final road test",
+        },
+        {
+          operation: "Proc",
+          component: "Cavity wax",
+          rawLine: "Proc Cavity wax",
+        },
+        {
+          operation: "Proc",
+          component: "Pre-paint test fit",
+          rawLine: "Proc Pre-paint test fit",
+        },
+      ],
+      rawEstimateText:
+        "Proc Seat belt dynamic function test\nProc Final road test\nProc Cavity wax\nProc Pre-paint test fit",
+    },
+    panel: null,
+    assistantAnalysis: null,
+  });
+
+  const seatBeltSection = document.sections.find((section) =>
+    section.title.includes("Seat belt dynamic function test")
+  );
+  const roadTestSection = document.sections.find((section) =>
+    section.title.includes("Final road test")
+  );
+  const cavityWaxSection = document.sections.find((section) =>
+    section.title.includes("Cavity wax")
+  );
+  const testFitSection = document.sections.find((section) =>
+    section.title.includes("Pre-paint test fit")
+  );
+
+  assert.ok(seatBeltSection);
+  assert.ok(roadTestSection);
+  assert.ok(cavityWaxSection);
+  assert.ok(testFitSection);
+  assert.equal(document.sections.some((section) => /^Line \d+: Proc$/i.test(section.title)), false);
+  assert.equal(
+    (seatBeltSection.bullets ?? []).some((bullet) => /Pre-Paint Test Fit/i.test(bullet)),
+    false
+  );
+  assert.equal(
+    (roadTestSection.bullets ?? []).some((bullet) => /Pre-Paint Test Fit/i.test(bullet)),
+    false
+  );
+  assert.equal(
+    (cavityWaxSection.bullets ?? []).some((bullet) => /Pre-Paint Test Fit/i.test(bullet)),
+    false
+  );
+  assert.equal(
+    (cavityWaxSection.bullets ?? []).some((bullet) => /Support status: Supported/i.test(bullet)),
+    true
+  );
+});

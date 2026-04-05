@@ -251,13 +251,15 @@ function buildLineItems(
   const matchedSupplementKeys = new Set<string>();
 
   const lines = operations.map((operation) => {
-    const match = findBestSupplementMatch(operation.component, supplementItems);
+    const operationLabel = resolveOperationLabel(operation);
+    const operationCategory = classifyEstimateOperation(operation);
+    const match = findBestSupplementMatch(operation, supplementItems);
     if (match) {
       matchedSupplementKeys.add(normalizeKey(match.title));
     }
 
     return {
-      operation: operation.operation,
+      operation: operationLabel,
       component: operation.component,
       rawLine: operation.rawLine,
       carrierPosition: match
@@ -289,24 +291,194 @@ function buildLineItems(
 }
 
 function findBestSupplementMatch(
-  component: string,
+  operation: NonNullable<AnalysisResult["operations"]>[number],
   items: ExportSupplementItem[]
 ): ExportSupplementItem | undefined {
-  const componentTokens = tokenize(component);
+  const operationLabel = resolveOperationLabel(operation);
+  const operationCategory = classifyEstimateOperation(operation);
+  const operationTokens = tokenize(`${operationLabel} ${operation.component} ${operation.rawLine}`);
   let best: ExportSupplementItem | undefined;
   let bestScore = 0;
 
   for (const item of items) {
-    const haystack = `${item.title} ${item.rationale} ${item.evidence ?? ""}`;
-    const haystackTokens = tokenize(haystack);
-    const overlap = [...componentTokens].filter((token) => haystackTokens.has(token)).length;
-    if (overlap > bestScore) {
+    const compatibility = scoreLineCompatibility(operation, operationCategory, operationTokens, item);
+    if (compatibility > bestScore) {
       best = item;
-      bestScore = overlap;
+      bestScore = compatibility;
     }
   }
 
-  return bestScore >= 1 ? best : undefined;
+  return bestScore >= 3 ? best : undefined;
+}
+
+function resolveOperationLabel(
+  operation: NonNullable<AnalysisResult["operations"]>[number]
+): string {
+  const cleanedRaw = cleanOperationSourceText(operation.rawLine);
+  const cleanedComponent = cleanOperationSourceText(operation.component);
+  const normalizedOperation = normalizeKey(operation.operation);
+
+  if (!cleanedRaw && !cleanedComponent) {
+    return operation.operation;
+  }
+
+  if (normalizedOperation === "proc" || normalizedOperation === "procedure") {
+    return cleanedRaw || cleanedComponent || operation.operation;
+  }
+
+  const cleanedOperation = cleanOperationSourceText(operation.operation);
+  if (!cleanedOperation) {
+    return cleanedRaw || cleanedComponent || operation.operation;
+  }
+
+  if (
+    cleanedComponent &&
+    normalizeKey(cleanedComponent) !== normalizeKey(cleanedOperation) &&
+    normalizeKey(cleanedComponent).includes(normalizeKey(cleanedOperation))
+  ) {
+    return cleanedComponent;
+  }
+
+  return cleanedOperation;
+}
+
+function cleanOperationSourceText(value: string | undefined): string {
+  if (!value) return "";
+
+  const cleaned = value
+    .replace(/^\s*#?\s*\d+\s+/i, "")
+    .replace(/^\s*(?:proc|procedure|r&i|repl|rpr|blnd|subl|algn)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned) return "";
+  if (/^(?:proc|procedure)$/i.test(cleaned)) return "";
+  return cleaned;
+}
+
+type LineOperationCategory =
+  | "scan"
+  | "test_fit"
+  | "road_test"
+  | "restraint"
+  | "corrosion"
+  | "alignment"
+  | "calibration"
+  | "refinish"
+  | "structural"
+  | "material"
+  | "general";
+
+function classifyEstimateOperation(
+  operation: NonNullable<AnalysisResult["operations"]>[number]
+): LineOperationCategory {
+  const text = `${operation.operation} ${operation.component} ${operation.rawLine}`.toLowerCase();
+
+  if (/(pre-?repair scan|pre scan|in-?process scan|in process scan|post-?repair scan|post scan|diagnostic scan)/i.test(text)) {
+    return "scan";
+  }
+  if (/(pre-?paint test fit|test fit|fit check|mock-?up|fit verification)/i.test(text)) {
+    return "test_fit";
+  }
+  if (/(final road test|road test|quality check)/i.test(text)) {
+    return "road_test";
+  }
+  if (/(seat belt dynamic function test|seat belt|restraint)/i.test(text)) {
+    return "restraint";
+  }
+  if (/(cavity wax|corrosion protection|anti-?corrosion|seam sealer|weld protection)/i.test(text)) {
+    return "corrosion";
+  }
+  if (/(four wheel alignment|4 wheel alignment|wheel alignment|alignment)/i.test(text)) {
+    return "alignment";
+  }
+  if (/(calibration|camera|radar|adas|sensor)/i.test(text)) {
+    return "calibration";
+  }
+  if (/(mask|tint|polish|sand|refinish|blend)/i.test(text)) {
+    return "refinish";
+  }
+  if (/(measure|measuring|dimension|structural|setup|pull|realign|rail|tie bar|support)/i.test(text)) {
+    return "structural";
+  }
+  if (/(material|clip|seal|hardware)/i.test(text)) {
+    return "material";
+  }
+
+  return "general";
+}
+
+function classifySupplementItem(item: ExportSupplementItem): LineOperationCategory {
+  const text = `${item.title} ${item.category} ${item.rationale} ${item.evidence ?? ""}`.toLowerCase();
+
+  if (/scan/.test(text)) return "scan";
+  if (/pre-?paint test fit|test fit|fit check|mock-?up/.test(text)) return "test_fit";
+  if (/road test|quality check/.test(text)) return "road_test";
+  if (/seat belt|restraint/.test(text)) return "restraint";
+  if (/cavity wax|corrosion|seam sealer|weld protection/.test(text)) return "corrosion";
+  if (/alignment/.test(text)) return "alignment";
+  if (/calibration|camera|radar|adas|sensor/.test(text)) return "calibration";
+  if (/refinish|blend|mask|tint|polish|sand/.test(text)) return "refinish";
+  if (/structural|measure|measuring|dimension|setup|pull|realign|rail|tie bar|support/.test(text)) {
+    return "structural";
+  }
+  if (/hardware|seal|clip|material/.test(text)) return "material";
+
+  return "general";
+}
+
+function scoreLineCompatibility(
+  operation: NonNullable<AnalysisResult["operations"]>[number],
+  operationCategory: LineOperationCategory,
+  operationTokens: Set<string>,
+  item: ExportSupplementItem
+): number {
+  const itemCategory = classifySupplementItem(item);
+  if (!categoriesAreCompatible(operationCategory, itemCategory)) {
+    return 0;
+  }
+
+  const haystack = `${item.title} ${item.rationale} ${item.evidence ?? ""}`;
+  const haystackTokens = tokenize(haystack);
+  const overlap = [...operationTokens].filter((token) => haystackTokens.has(token)).length;
+  let score = overlap;
+
+  if (normalizeKey(resolveOperationLabel(operation)) === normalizeKey(item.title)) {
+    score += 5;
+  }
+
+  if (operationCategory === itemCategory && itemCategory !== "general") {
+    score += 3;
+  }
+
+  if (
+    operationCategory === "general" &&
+    overlap < 2
+  ) {
+    return 0;
+  }
+
+  return score;
+}
+
+function categoriesAreCompatible(
+  operationCategory: LineOperationCategory,
+  itemCategory: LineOperationCategory
+): boolean {
+  if (operationCategory === "general" || itemCategory === "general") {
+    return true;
+  }
+
+  if (operationCategory === itemCategory) {
+    return true;
+  }
+
+  if (operationCategory === "scan") return itemCategory === "scan" || itemCategory === "calibration";
+  if (operationCategory === "calibration") return itemCategory === "calibration" || itemCategory === "scan";
+  if (operationCategory === "material") return itemCategory === "material" || itemCategory === "corrosion";
+  if (operationCategory === "corrosion") return itemCategory === "corrosion" || itemCategory === "material";
+
+  return false;
 }
 
 function tokenize(value: string): Set<string> {
@@ -322,6 +494,15 @@ function tokenize(value: string): Set<string> {
     "line",
     "repair",
     "estimate",
+    "proc",
+    "procedure",
+    "final",
+    "dynamic",
+    "function",
+    "test",
+    "operation",
+    "misc",
+    "miscellaneous",
   ]);
 
   return new Set(

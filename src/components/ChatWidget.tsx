@@ -1198,7 +1198,7 @@ export default function ChatWidget({
                 ref={cameraInputRef}
                 className="hidden"
                 accept="image/*"
-                capture={isLikelyMobileCaptureDevice ? "environment" : undefined}
+                {...(isLikelyMobileCaptureDevice && { capture: "environment" })}
                 disabled={disabled}
                 title="Take photo"
                 onChange={(e) => handleCameraSelected(e.target.files)}
