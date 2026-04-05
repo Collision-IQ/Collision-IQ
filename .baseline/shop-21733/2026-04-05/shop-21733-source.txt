@@ -1,0 +1,16 @@
+Vehicle Description: 2018 TESL Model S 75D AWD
+VIN: 5YJSA1E21JF264319
+Mileage: 173,702
+Insurer: GEICO
+Grand Total 19,428.53
+Procedure research and documentation
+Work authorization on file
+Pre-repair scan
+In-process repair scan
+Post-repair scan
+Pre-paint test fit
+Recover and recharge refrigerant
+Headlamp aim and fog aim
+Cavity wax
+Final road test
+HV battery state of charge maintained

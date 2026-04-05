@@ -9,8 +9,10 @@ import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import {
   buildExportModel,
-  buildPreferredVehicleIdentityLabel,
   COLLISION_ACADEMY_HANDOFF_URL,
+  resolveCanonicalInsurer,
+  resolveCanonicalVehicleLabel,
+  resolveCanonicalVin,
 } from "@/lib/ai/builders/buildExportModel";
 import { buildCarrierReport } from "@/lib/ai/builders/carrierPdfBuilder";
 import { exportCarrierPDF } from "@/lib/ai/builders/exportPdf";
@@ -83,6 +85,7 @@ export default function ChatbotPage() {
   const [analysisText, setAnalysisText] = useState("");
   const [analysisResult, setAnalysisResult] = useState<RepairIntelligenceReport | null>(null);
   const [analysisPanel, setAnalysisPanel] = useState<DecisionPanel | null>(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
   const [consentResolved, setConsentResolved] = useState(false);
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [consentChecked, setConsentChecked] = useState(false);
@@ -91,18 +94,19 @@ export default function ChatbotPage() {
     () => (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null),
     [analysisResult]
   );
+  const hasResolvedAnalysis = Boolean(analysisResult && normalizedResult);
   const renderModel = useMemo(
     () =>
       buildExportModel({
         report: analysisResult,
         analysis: normalizedResult,
-        panel: analysisPanel,
-        assistantAnalysis: analysisText,
+        panel: hasResolvedAnalysis ? analysisPanel : null,
+        assistantAnalysis: hasResolvedAnalysis ? analysisText : "",
       }),
-    [analysisPanel, analysisResult, analysisText, normalizedResult]
+    [analysisPanel, analysisResult, analysisText, hasResolvedAnalysis, normalizedResult]
   );
 
-  const panel = analysisPanel ?? EMPTY_PANEL;
+  const panel = hasResolvedAnalysis ? analysisPanel ?? EMPTY_PANEL : EMPTY_PANEL;
   const railOpen = isMobile ? false : desktopRailOpen;
 
   function handleRailOpenChange(next: boolean) {
@@ -264,7 +268,7 @@ export default function ChatbotPage() {
         <div className="flex flex-col flex-1 min-w-0">
           <div className="flex-1 min-h-0 flex justify-center">
             <div className="flex flex-col w-full max-w-[1040px] min-h-0">
-              {!isMobile && hasAtGlanceContent(renderModel) && (
+              {!isMobile && hasResolvedAnalysis && hasAtGlanceContent(renderModel) && (
                 <AtAGlanceCard renderModel={renderModel} analysisResult={analysisResult} />
               )}
               <ChatWidget
@@ -272,6 +276,7 @@ export default function ChatbotPage() {
                 onAnalysisChange={setAnalysisText}
                 onAnalysisResultChange={setAnalysisResult}
                 onAnalysisPanelChange={setAnalysisPanel}
+                onAnalysisLoadingChange={setAnalysisLoading}
                 disabled={chatBlocked}
               />
             </div>
@@ -283,6 +288,8 @@ export default function ChatbotPage() {
             <RailContent
               attachment={attachment}
               analysisText={analysisText}
+              analysisLoading={analysisLoading}
+              hasResolvedAnalysis={hasResolvedAnalysis}
               panel={panel}
               renderModel={renderModel}
               normalizedResult={normalizedResult}
@@ -319,6 +326,8 @@ export default function ChatbotPage() {
           <RailContent
             attachment={attachment}
             analysisText={analysisText}
+            analysisLoading={analysisLoading}
+            hasResolvedAnalysis={hasResolvedAnalysis}
             panel={panel}
             renderModel={renderModel}
             normalizedResult={normalizedResult}
@@ -455,6 +464,8 @@ export default function ChatbotPage() {
 function RailContent({
   attachment,
   analysisText,
+  analysisLoading,
+  hasResolvedAnalysis,
   panel,
   renderModel,
   normalizedResult,
@@ -468,6 +479,8 @@ function RailContent({
 }: {
   attachment: string | null;
   analysisText: string;
+  analysisLoading: boolean;
+  hasResolvedAnalysis: boolean;
   panel: DecisionPanel;
   renderModel: ReturnType<typeof buildExportModel>;
   normalizedResult: AnalysisResult | null;
@@ -482,9 +495,14 @@ function RailContent({
   const featuredRecommendation = renderModel.supplementItems[0];
   const remainingRecommendations = renderModel.supplementItems.slice(1);
   const valuationLowConfidence = isLowConfidenceValuation(renderModel);
-  const vehicleIdentity =
-    buildPreferredVehicleIdentityLabel(renderModel.vehicle) ??
-    "Vehicle details are still limited in the current material.";
+  const vehicleIdentity = resolveCanonicalVehicleLabel(renderModel);
+  const vehicleVin = resolveCanonicalVin(renderModel);
+  const insurer = resolveCanonicalInsurer(renderModel);
+  const estimateTotal =
+    typeof renderModel.reportFields.estimateTotal === "number"
+      ? formatCurrency(renderModel.reportFields.estimateTotal, true)
+      : null;
+  const canRenderExports = hasResolvedAnalysis && Boolean(analysisText || panel.narrative);
 
   return (
     <div className="flex flex-col h-full overflow-y-auto p-6 space-y-8">
@@ -502,31 +520,59 @@ function RailContent({
         )}
       </div>
 
-      <DecisionSection title="What Stands Out" body={renderModel.repairPosition} tone="neutral" />
+      {analysisLoading && !hasResolvedAnalysis && (
+        <section className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4 space-y-2">
+          <div className="text-[11px] uppercase tracking-[0.2em] text-orange-200/70">
+            Analysis in progress
+          </div>
+          <div className="text-sm leading-6 text-white/78">
+            Structured review is still hydrating for the current file set. We&apos;ll populate the
+            rail, valuation, supplement lines, and exports when the analysis route finishes.
+          </div>
+        </section>
+      )}
 
-      {featuredRecommendation && (
+      {hasResolvedAnalysis ? (
+        <DecisionSection title="What Stands Out" body={renderModel.repairPosition} tone="neutral" />
+      ) : (
+        <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
+          <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">What Stands Out</div>
+          <div className="text-sm leading-6 text-white/45">
+            Structured highlights will appear here after the current analysis resolves.
+          </div>
+        </section>
+      )}
+
+      {hasResolvedAnalysis && featuredRecommendation && (
         <FeaturedRecommendationCard item={featuredRecommendation} />
       )}
 
-      <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
-        <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
-          Vehicle Context
-        </div>
-        <div className="space-y-1 text-sm text-white/80">
-          <div>{vehicleIdentity}</div>
-          {renderModel.vehicle.trim && (
-            <div className="text-white/55">Trim: {renderModel.vehicle.trim}</div>
-          )}
-          <div className="text-white/55">
-            VIN: {renderModel.vehicle.vin || "Not clearly supported in the current material."}
+      {hasResolvedAnalysis && (
+        <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+          <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
+            Vehicle Context
           </div>
-          <div className="text-white/45">
-            Confidence: {formatVehicleConfidence(renderModel.vehicle)}
+          <div className="space-y-1 text-sm text-white/80">
+            {vehicleIdentity && <div>{vehicleIdentity}</div>}
+            {renderModel.vehicle.trim && (
+              <div className="text-white/55">Trim: {renderModel.vehicle.trim}</div>
+            )}
+            {vehicleVin && <div className="text-white/55">VIN: {vehicleVin}</div>}
+            {insurer && <div className="text-white/55">Insurer: {insurer}</div>}
+            {typeof renderModel.reportFields.mileage === "number" && (
+              <div className="text-white/55">
+                Mileage: {renderModel.reportFields.mileage.toLocaleString("en-US")}
+              </div>
+            )}
+            {estimateTotal && <div className="text-white/55">Estimate total: {estimateTotal}</div>}
+            <div className="text-white/45">
+              Confidence: {formatVehicleConfidence(renderModel.vehicle)}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
-      {canViewSupplementLines ? (
+      {hasResolvedAnalysis && canViewSupplementLines ? (
         <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
         <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
           Supplement Lines
@@ -559,18 +605,18 @@ function RailContent({
           </div>
         )}
         </section>
-      ) : (
+      ) : hasResolvedAnalysis ? (
         <LockedFeatureCard
           title="Supplement Lines"
           body="Upgrade to Pro to unlock detailed supplement-line recommendations, evidence, and export-ready support details."
         />
-      )}
+      ) : null}
 
-      {analysisResult && (
+      {hasResolvedAnalysis && analysisResult && (
         <ValuationSection renderModel={renderModel} lowConfidence={valuationLowConfidence} />
       )}
 
-      {renderModel.request && canViewNegotiationDraft && (
+      {hasResolvedAnalysis && renderModel.request && canViewNegotiationDraft && (
         <ExpandableDecisionSection
           title="Negotiation Draft"
           body={renderModel.request}
@@ -580,14 +626,14 @@ function RailContent({
         />
       )}
 
-      {renderModel.request && !canViewNegotiationDraft && (
+      {hasResolvedAnalysis && renderModel.request && !canViewNegotiationDraft && (
         <LockedFeatureCard
           title="Negotiation Draft"
           body="Upgrade to Pro to unlock the negotiation draft, rebuttal support, and premium carrier-facing exports."
         />
       )}
 
-      {panel.appraisal?.triggered && panel.appraisal.reasoning && (
+      {hasResolvedAnalysis && panel.appraisal?.triggered && panel.appraisal.reasoning && (
         <DecisionSection
           title="Appraisal Signal"
           body={panel.appraisal.reasoning}
@@ -595,7 +641,7 @@ function RailContent({
         />
       )}
 
-      {panel.stateLeverage && panel.stateLeverage.length > 0 && (
+      {hasResolvedAnalysis && panel.stateLeverage && panel.stateLeverage.length > 0 && (
         <DecisionSection
           title="State Leverage"
           body={panel.stateLeverage.map((point) => `- ${point}`).join("\n")}
@@ -603,7 +649,7 @@ function RailContent({
         />
       )}
 
-      {(analysisText || panel.narrative) && (
+      {canRenderExports && (
         <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
           <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
             Exports
@@ -611,7 +657,7 @@ function RailContent({
           <div className="grid gap-2">
             <button
               onClick={() =>
-                exportReport(normalizedResult, analysisResult, panel, analysisText)
+                exportReport(renderModel, normalizedResult, analysisResult, panel, analysisText)
               }
               disabled={!canUseBasicPdfExport}
               className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs disabled:cursor-not-allowed disabled:opacity-40"
@@ -625,6 +671,7 @@ function RailContent({
                   analysisResult,
                   panel,
                   analysisText,
+                  renderModel,
                   variant: "rebuttal",
                 })
               }
@@ -640,6 +687,7 @@ function RailContent({
                   analysisResult,
                   panel,
                   analysisText,
+                  renderModel,
                   variant: "side_by_side",
                 })
               }
@@ -655,6 +703,7 @@ function RailContent({
                   analysisResult,
                   panel,
                   analysisText,
+                  renderModel,
                   variant: "line_by_line",
                 })
               }
@@ -671,6 +720,7 @@ function RailContent({
 }
 
 function exportReport(
+  renderModel: ReturnType<typeof buildExportModel>,
   normalizedResult: AnalysisResult | null,
   analysisResult: RepairIntelligenceReport | null,
   panel: DecisionPanel,
@@ -680,6 +730,7 @@ function exportReport(
     normalizedResult ?? (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null);
 
   const reportDocument = buildCarrierReport({
+    renderModel,
     report: analysisResult,
     analysis: resolvedAnalysis,
     panel,
@@ -690,6 +741,7 @@ function exportReport(
 }
 
 function exportPdfVariant(params: {
+  renderModel: ReturnType<typeof buildExportModel>;
   normalizedResult: AnalysisResult | null;
   analysisResult: RepairIntelligenceReport | null;
   panel: DecisionPanel;
@@ -701,6 +753,7 @@ function exportPdfVariant(params: {
     (params.analysisResult ? normalizeReportToAnalysisResult(params.analysisResult) : null);
 
   const sharedInput = {
+    renderModel: params.renderModel,
     report: params.analysisResult,
     analysis: resolvedAnalysis,
     panel: params.panel,
@@ -724,9 +777,17 @@ function AtAGlanceCard({
   renderModel: ReturnType<typeof buildExportModel>;
   analysisResult: RepairIntelligenceReport | null;
 }) {
-  const vehicleIdentity = buildPreferredVehicleIdentityLabel(renderModel.vehicle);
+  const vehicleIdentity = resolveCanonicalVehicleLabel(renderModel);
   const bullets = [
     vehicleIdentity ? `Vehicle: ${vehicleIdentity}` : null,
+    resolveCanonicalVin(renderModel) ? `VIN: ${resolveCanonicalVin(renderModel)}` : null,
+    resolveCanonicalInsurer(renderModel) ? `Insurer: ${resolveCanonicalInsurer(renderModel)}` : null,
+    typeof renderModel.reportFields.mileage === "number"
+      ? `Mileage: ${renderModel.reportFields.mileage.toLocaleString("en-US")}`
+      : null,
+    typeof renderModel.reportFields.estimateTotal === "number"
+      ? `Estimate total: ${formatCurrency(renderModel.reportFields.estimateTotal, true)}`
+      : null,
     renderModel.supplementItems[0]?.title ? `Top recommendation: ${renderModel.supplementItems[0].title}` : null,
     analysisResult ? `Evidence quality: ${formatLabel(analysisResult.summary.evidenceQuality)}` : null,
   ].filter(Boolean) as string[];
@@ -1040,8 +1101,13 @@ function ValuationSection({
   );
 }
 
-function formatCurrency(value: number): string {
-  return `$${Math.round(value).toLocaleString("en-US")}`;
+function formatCurrency(value: number, includeCents = false): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: includeCents ? 2 : 0,
+    maximumFractionDigits: includeCents ? 2 : 0,
+  }).format(value);
 }
 
 function hasSaneRange(
@@ -1090,7 +1156,7 @@ function formatVehicleConfidence(
 function hasAtGlanceContent(renderModel: ReturnType<typeof buildExportModel>): boolean {
   return Boolean(
     renderModel.repairPosition ||
-      buildPreferredVehicleIdentityLabel(renderModel.vehicle) ||
+      resolveCanonicalVehicleLabel(renderModel) ||
       renderModel.supplementItems[0]
   );
 }

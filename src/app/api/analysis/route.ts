@@ -129,6 +129,10 @@ export async function POST(req: Request) {
       userIntent: body.userIntent ?? null,
     });
 
+    const retrievalAttempted = true;
+    let retrievalCompleted = false;
+    let retrievalMatchCount = 0;
+    let refinedWithRetrieval = false;
     let report = await runRepairAnalysis({
       artifactIds,
       preloadedAttachments: normalizedAttachments,
@@ -150,10 +154,16 @@ export async function POST(req: Request) {
       analysis: retrievalSnapshot,
       maxResults: 5,
       maxExcerptChars: 500,
-    }).catch((error) => {
-      console.error("Analysis Drive retrieval skipped:", error);
-      return null;
-    });
+    })
+      .then((result) => {
+        retrievalCompleted = true;
+        retrievalMatchCount = result?.results.length ?? 0;
+        return result;
+      })
+      .catch((error) => {
+        console.error("Analysis Drive retrieval skipped:", error);
+        return null;
+      });
 
     if (retrieval?.results.length) {
       console.info("[analysis-drive-retrieval]", {
@@ -176,6 +186,7 @@ export async function POST(req: Request) {
         userMessage: body.userIntent ?? "",
       });
       analysis = normalizeReportToAnalysisResult(report);
+      refinedWithRetrieval = true;
     }
 
     const supplementCandidates = await generateSupplementCandidates(
@@ -214,6 +225,11 @@ export async function POST(req: Request) {
       report: stored.report,
       panel,
       retrieval: retrieval ? buildClientSafeRetrievalSummary(retrieval) : null,
+      retrievalAttempted,
+      retrievalCompleted,
+      retrievalMatchCount,
+      refinedWithRetrieval,
+      analysisCompletedAt: new Date().toISOString(),
       usage: {
         plan: usageSnapshot.entitlements.plan,
         analysesUsedThisPeriod:

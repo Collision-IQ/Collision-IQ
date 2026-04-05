@@ -20,6 +20,8 @@ const COMMON_INSURERS = [
   "AAA",
 ];
 
+const LIKELY_PERSON_NAME_PATTERN = /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}$/;
+
 type HighlightRule = {
   label: string;
   patterns: RegExp[];
@@ -153,22 +155,78 @@ function extractMileage(text: string): number | undefined {
 }
 
 function extractInsurer(text: string): string | undefined {
-  const labeled =
-    text.match(/\b(?:insurer|insurance company|carrier|insurance co(?:mpany)?)\b\s*[:#-]\s*([A-Za-z][A-Za-z .&'-]{1,40})/i)?.[1]?.trim();
-  if (labeled) {
-    return normalizeInsurer(labeled);
-  }
-
-  const matchedCarrier = COMMON_INSURERS.find((carrier) =>
+  const knownFromText = COMMON_INSURERS.find((carrier) =>
     new RegExp(`\\b${escapeRegExp(carrier)}\\b`, "i").test(text)
   );
-  return matchedCarrier;
+  const labeled =
+    text.match(/\b(?:insurer|insurance company|carrier|insurance co(?:mpany)?)\b\s*[:#-]\s*([A-Za-z][A-Za-z .&'-]{1,40})/i)?.[1]?.trim();
+  return resolveCanonicalInsurerCandidate(
+    { value: labeled, source: "labeled" },
+    { value: knownFromText, source: "known_carrier" }
+  );
 }
 
-function normalizeInsurer(value: string): string {
+export function normalizeInsurer(value: string): string {
   const compact = value.replace(/\s+/g, " ").trim();
   const known = COMMON_INSURERS.find((carrier) => carrier.toLowerCase() === compact.toLowerCase());
   return known ?? compact;
+}
+
+export function resolveCanonicalInsurerCandidate(
+  ...candidates: Array<
+    | string
+    | null
+    | undefined
+    | {
+        value?: string | null;
+        source?: "known_carrier" | "labeled" | "prior";
+      }
+  >
+): string | undefined {
+  const scored = candidates
+    .map((candidate) => {
+      if (typeof candidate === "string" || candidate == null) {
+        return buildInsurerCandidateScore(candidate, "prior");
+      }
+
+      return buildInsurerCandidateScore(candidate.value, candidate.source ?? "prior");
+    })
+    .filter((candidate): candidate is ReturnType<typeof buildInsurerCandidateScore> & { normalized: string } => Boolean(candidate));
+
+  if (scored.length === 0) {
+    return undefined;
+  }
+
+  scored.sort((left, right) => right.score - left.score);
+  return scored[0]?.normalized;
+}
+
+function buildInsurerCandidateScore(
+  value: string | null | undefined,
+  source: "known_carrier" | "labeled" | "prior"
+) {
+  if (!value) return null;
+
+  const normalized = normalizeInsurer(value);
+  if (!normalized) return null;
+
+  let score = source === "known_carrier" ? 300 : source === "labeled" ? 220 : 100;
+  if (isKnownCarrier(normalized)) score += 400;
+  if (looksLikeLikelyPersonName(normalized)) score -= 250;
+  if (normalized.length <= 2) score -= 200;
+
+  return { normalized, score };
+}
+
+function isKnownCarrier(value: string): boolean {
+  return COMMON_INSURERS.some((carrier) => carrier.toLowerCase() === value.toLowerCase());
+}
+
+function looksLikeLikelyPersonName(value: string): boolean {
+  if (!value) return false;
+  if (isKnownCarrier(value)) return false;
+  if (/[&/]/.test(value)) return false;
+  return LIKELY_PERSON_NAME_PATTERN.test(value.trim());
 }
 
 function extractEstimateTotal(

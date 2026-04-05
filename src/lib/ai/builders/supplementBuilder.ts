@@ -138,7 +138,29 @@ export function validateSupplements(
     .filter(Boolean)
     .join("\n")
     .toLowerCase();
+  const hasCavityWaxCoverage =
+    representedText.includes("cavity wax") || representedText.includes("corrosion protection");
+  const hasPreScanCoverage =
+    representedText.includes("pre-repair scan") ||
+    representedText.includes("pre repair scan") ||
+    representedText.includes("pre-scan");
+  const hasInProcessScanCoverage =
+    representedText.includes("in-process repair scan") ||
+    representedText.includes("in process repair scan") ||
+    representedText.includes("in-process scan") ||
+    representedText.includes("in process scan");
+  const hasPostScanCoverage =
+    representedText.includes("post-repair scan") ||
+    representedText.includes("post repair scan") ||
+    representedText.includes("post-scan") ||
+    representedText.includes("final scan");
   const functionMap: Record<string, string[]> = {
+    "pre-repair scan": [
+      "pre-repair scan",
+      "pre repair scan",
+      "pre-scan",
+      "diagnostic scan",
+    ],
     "post-repair scan": [
       "post-repair scan",
       "post repair scan",
@@ -163,8 +185,22 @@ export function validateSupplements(
       ? isAdasProcedure(canonicalKey)
       : looksLikeAdasSupplementTitle(title);
     const scanProcedure = looksLikeScanSupplementTitle(title);
+    const corrosionProtectionOnly =
+      title.includes("corrosion") && !title.includes("seam") && !title.includes("weld");
 
     if (canonicalKey && representedMatches.some((match) => match.key === canonicalKey)) {
+      return false;
+    }
+
+    if (
+      (title.includes("pre-repair scan") && hasPreScanCoverage) ||
+      (title.includes("in-process") && hasInProcessScanCoverage) ||
+      (title.includes("post-repair scan") && hasPostScanCoverage)
+    ) {
+      return false;
+    }
+
+    if (corrosionProtectionOnly && hasCavityWaxCoverage) {
       return false;
     }
 

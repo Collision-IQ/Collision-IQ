@@ -1,9 +1,11 @@
 import {
   buildExportModel,
   buildPreferredRebuttalSubjectVehicleLabel,
-  buildPreferredVehicleIdentityLabel,
+  preferCanonicalField,
+  resolveCanonicalVehicleLabel,
   type ExportModel,
   type ExportSupplementItem,
+  type ResolvedExportInput,
 } from "./buildExportModel";
 import type { DecisionPanel } from "./buildDecisionPanel";
 import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
@@ -35,6 +37,16 @@ export type ExportLineComparison = {
   support?: string;
 };
 
+export type ExportBuilderInput =
+  | ResolvedExportInput
+  | {
+      report: RepairIntelligenceReport | null;
+      analysis: AnalysisResult | null;
+      panel: DecisionPanel | null;
+      assistantAnalysis?: string | null;
+      renderModel?: ExportModel | null;
+    };
+
 export function formatAnalysisModeLabel(
   mode: AnalysisResult["mode"] | "single-document-review" | undefined
 ): string {
@@ -50,13 +62,8 @@ export function formatAnalysisModeLabel(
   }
 }
 
-export function buildExportTemplateSourceModel(params: {
-  report: RepairIntelligenceReport | null;
-  analysis: AnalysisResult | null;
-  panel: DecisionPanel | null;
-  assistantAnalysis?: string | null;
-}): ExportTemplateSourceModel {
-  const exportModel = buildExportModel(params);
+export function buildExportTemplateSourceModel(params: ExportBuilderInput): ExportTemplateSourceModel {
+  const exportModel = resolveExportModel(params);
   const analysisMode = params.analysis?.mode ?? params.report?.analysis?.mode ?? "single-document-review";
   const source: ExportTemplateSourceModel = {
     exportModel,
@@ -97,15 +104,14 @@ export function buildExportTemplateSourceModel(params: {
   return source;
 }
 
-export function buildRebuttalEmailTemplate(params: {
-  report: RepairIntelligenceReport | null;
-  analysis: AnalysisResult | null;
-  panel: DecisionPanel | null;
-  assistantAnalysis?: string | null;
-}): string {
+export function buildRebuttalEmailTemplate(params: ExportBuilderInput): string {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
-  const subjectVehicle = buildPreferredRebuttalSubjectVehicleLabel(exportModel.vehicle);
+  const subjectVehicle =
+    preferCanonicalField(
+      exportModel.reportFields.vehicleLabel,
+      buildPreferredRebuttalSubjectVehicleLabel(exportModel.vehicle)
+    ) ?? "Current repair file";
   const topItems = exportModel.supplementItems.slice(0, 4);
   const asks = topItems.length > 0
     ? topItems.map((item) => `- ${item.title}: ${buildRequestSentence(item)}`)
@@ -135,19 +141,11 @@ export function buildRebuttalEmailTemplate(params: {
   ].join("\n");
 }
 
-export function buildSideBySideComparisonReport(params: {
-  report: RepairIntelligenceReport | null;
-  analysis: AnalysisResult | null;
-  panel: DecisionPanel | null;
-  assistantAnalysis?: string | null;
-}): string {
+export function buildSideBySideComparisonReport(params: ExportBuilderInput): string {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
   const isComparison = source.analysisMode === "comparison";
-  const vehicleIdentity =
-    exportModel.reportFields.vehicleLabel ??
-    buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
-    "Unspecified";
+  const vehicleIdentity = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
 
   const sections = source.categoryComparisons.map((category) =>
     [
@@ -174,19 +172,11 @@ export function buildSideBySideComparisonReport(params: {
   ].join("\n");
 }
 
-export function buildLineByLineComparisonReport(params: {
-  report: RepairIntelligenceReport | null;
-  analysis: AnalysisResult | null;
-  panel: DecisionPanel | null;
-  assistantAnalysis?: string | null;
-}): string {
+export function buildLineByLineComparisonReport(params: ExportBuilderInput): string {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
   const isComparison = source.analysisMode === "comparison";
-  const vehicleIdentity =
-    exportModel.reportFields.vehicleLabel ??
-    buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
-    "Unspecified";
+  const vehicleIdentity = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
 
   const rows = source.lineItems.map((item, index) =>
     [
@@ -470,4 +460,17 @@ function joinHumanList(values: string[]): string {
 
 function normalizeKey(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function resolveExportModel(params: ExportBuilderInput): ExportModel {
+  if (params.renderModel) {
+    return params.renderModel;
+  }
+
+  return buildExportModel({
+    report: params.report,
+    analysis: params.analysis,
+    panel: params.panel,
+    assistantAnalysis: params.assistantAnalysis,
+  });
 }

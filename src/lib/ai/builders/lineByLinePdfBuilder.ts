@@ -1,22 +1,18 @@
-import type { DecisionPanel } from "./buildDecisionPanel";
-import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
-import { buildExportTemplateSourceModel } from "./exportTemplates";
-import { buildPreferredVehicleIdentityLabel } from "./buildExportModel";
+import { buildExportTemplateSourceModel, type ExportBuilderInput } from "./exportTemplates";
+import {
+  resolveCanonicalInsurer,
+  resolveCanonicalVehicleLabel,
+  resolveCanonicalVin,
+} from "./buildExportModel";
 
-export function buildLineByLinePdf(params: {
-  report: RepairIntelligenceReport | null;
-  analysis: AnalysisResult | null;
-  panel: DecisionPanel | null;
-  assistantAnalysis?: string | null;
-}): CarrierReportDocument {
+export function buildLineByLinePdf(params: ExportBuilderInput): CarrierReportDocument {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
   const isComparison = source.analysisMode === "comparison";
-  const vehicleIdentity =
-    exportModel.reportFields.vehicleLabel ??
-    buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
-    "Unspecified";
+  const vehicleIdentity = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
+  const vin = resolveCanonicalVin(exportModel) ?? "Unspecified";
+  const insurer = resolveCanonicalInsurer(exportModel);
 
   return {
     filename: "collision-iq-line-by-line-report.pdf",
@@ -31,9 +27,9 @@ export function buildLineByLinePdf(params: {
     }),
     summary: [
       { label: "Vehicle", value: vehicleIdentity },
-      { label: "VIN", value: exportModel.reportFields.vin || exportModel.vehicle.vin || "Unspecified" },
-      ...(exportModel.reportFields.insurer
-        ? [{ label: "Insurer", value: exportModel.reportFields.insurer }]
+      { label: "VIN", value: vin },
+      ...(insurer
+        ? [{ label: "Insurer", value: insurer }]
         : []),
       ...(typeof exportModel.reportFields.mileage === "number"
         ? [{ label: "Mileage", value: exportModel.reportFields.mileage.toLocaleString("en-US") }]

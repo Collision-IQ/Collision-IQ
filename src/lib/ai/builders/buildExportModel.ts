@@ -1,7 +1,10 @@
 import type { DecisionPanel } from "./buildDecisionPanel";
 import { deriveRenderInsightsFromChat, type DerivedValuation } from "./deriveRenderInsightsFromChat";
 import { buildRepairStory } from "./buildRepairStory";
-import { extractEstimateFacts } from "../extractors/extractEstimateFacts";
+import {
+  extractEstimateFacts,
+  resolveCanonicalInsurerCandidate,
+} from "../extractors/extractEstimateFacts";
 import type { AnalysisResult, EstimateFacts, RepairIntelligenceReport, VehicleIdentity } from "../types/analysis";
 import {
   buildVehicleLabel,
@@ -65,6 +68,14 @@ export type ExportModel = {
   valuation: DerivedValuation;
 };
 
+export type ResolvedExportInput = {
+  renderModel: ExportModel;
+  report: RepairIntelligenceReport | null;
+  analysis: AnalysisResult | null;
+  panel: DecisionPanel | null;
+  assistantAnalysis?: string | null;
+};
+
 export type ExportReportFields = {
   vehicleLabel?: string;
   vin?: string;
@@ -78,6 +89,9 @@ export type ExportReportFields = {
   estimateFacts: EstimateFacts;
   vehicle?: VehicleIdentity;
 };
+
+const GENERIC_PLACEHOLDER_FIELD_PATTERN =
+  /^(?:unknown|unspecified|n\/a|na|none|null|undefined|not available|not provided|vehicle details are still limited in the current material\.?|vehicle details still limited in the current material\.?|not clearly supported(?: in the current material)?\.?)$/i;
 
 const META_COMMENTARY_PATTERNS = [
   "repair strategy",
@@ -134,7 +148,7 @@ export function buildExportModel(params: {
   );
   const positionStatement = buildPositionStatement(params.report, params.analysis, supplementItems);
   const request = buildRequest(params.report, params.panel, supplementItems, chatInsights.request);
-  const valuation = buildValuation(params.panel, chatInsights.valuation);
+  const valuation = buildValuation(params.panel, chatInsights.valuation, reportFields);
   const displayVehicle = getDisplayVehicleInfo(vehicle);
   const cleanedSupplementItems = supplementItems.map((item) => ({
     ...item,
@@ -241,11 +255,12 @@ export function deriveExportReportFields(params: {
       params.report?.analysis?.estimateFacts?.mileage ??
       params.analysis?.estimateFacts?.mileage ??
       fallbackFacts.mileage,
-    insurer:
-      params.report?.estimateFacts?.insurer ??
-      params.report?.analysis?.estimateFacts?.insurer ??
-      params.analysis?.estimateFacts?.insurer ??
-      fallbackFacts.insurer,
+    insurer: resolveCanonicalInsurerCandidate(
+      { value: params.report?.estimateFacts?.insurer, source: "prior" },
+      { value: params.report?.analysis?.estimateFacts?.insurer, source: "prior" },
+      { value: params.analysis?.estimateFacts?.insurer, source: "prior" },
+      { value: fallbackFacts.insurer, source: "known_carrier" }
+    ),
     estimateTotal:
       params.report?.estimateFacts?.estimateTotal ??
       params.report?.analysis?.estimateFacts?.estimateTotal ??
@@ -284,7 +299,6 @@ export function deriveExportReportFields(params: {
     ...new Set([
       ...estimateFacts.documentedHighlights,
       ...estimateFacts.documentedProcedures,
-      ...(params.report?.presentProcedures ?? []),
     ]),
   ];
   const likelySupplementAreas = [
@@ -523,6 +537,50 @@ export function buildPreferredRebuttalSubjectVehicleLabel(
     buildPreferredVehicleIdentityLabel(vehicle) ??
     "Current repair file"
   );
+}
+
+export function preferCanonicalField(
+  resolved?: string | null,
+  fallback?: string | null
+): string | undefined {
+  const preferred = sanitizeCanonicalField(resolved);
+  if (preferred) {
+    return preferred;
+  }
+
+  return sanitizeCanonicalField(fallback);
+}
+
+export function resolveCanonicalVehicleLabel(
+  exportModel: Pick<ExportModel, "vehicle" | "reportFields">
+): string | undefined {
+  return preferCanonicalField(
+    exportModel.reportFields.vehicleLabel,
+    buildPreferredVehicleIdentityLabel(exportModel.vehicle)
+  );
+}
+
+export function resolveCanonicalVin(
+  exportModel: Pick<ExportModel, "vehicle" | "reportFields">
+): string | undefined {
+  return preferCanonicalField(exportModel.reportFields.vin, exportModel.vehicle.vin);
+}
+
+export function resolveCanonicalInsurer(
+  exportModel: Pick<ExportModel, "reportFields" | "estimateFacts">
+): string | undefined {
+  return preferCanonicalField(
+    exportModel.reportFields.insurer,
+    exportModel.estimateFacts.insurer
+  );
+}
+
+function sanitizeCanonicalField(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const cleaned = cleanDisplayText(value);
+  if (!cleaned) return undefined;
+  if (GENERIC_PLACEHOLDER_FIELD_PATTERN.test(cleaned)) return undefined;
+  return cleaned;
 }
 
 function inferEstimateFacts(
@@ -983,7 +1041,8 @@ function buildExportSupplementItems(
 
 function buildValuation(
   panel: DecisionPanel | null,
-  chatValuation: DerivedValuation
+  chatValuation: DerivedValuation,
+  reportFields: ExportReportFields
 ): DerivedValuation {
   const sanePanelDv = coerceSaneDvRange(panel?.diminishedValue?.low, panel?.diminishedValue?.high);
   const hasChatDv =
@@ -996,6 +1055,25 @@ function buildValuation(
       ? "estimated_range"
       : "not_determinable";
 
+  const canonicalAcvMissingInputs =
+    normalizeAcvStatus(chatValuation) === "not_determinable"
+      ? scrubValuationMissingInputs(
+          chatValuation.acvMissingInputs.length
+            ? chatValuation.acvMissingInputs
+            : ["vehicle condition", "mileage", "trim/options", "market comparable data"],
+          reportFields
+        )
+      : [];
+  const canonicalDvMissingInputs =
+    dvStatus === "not_determinable"
+      ? scrubValuationMissingInputs(
+          chatValuation.dvMissingInputs.length
+            ? chatValuation.dvMissingInputs
+            : ["repair severity context", "damage photos or confirmed repair scope", "pre-loss market context"],
+          reportFields
+        )
+      : [];
+
   return {
     ...chatValuation,
     acvStatus: normalizeAcvStatus(chatValuation),
@@ -1007,17 +1085,12 @@ function buildValuation(
     acvConfidence: normalizeValuationConfidence(
       normalizeAcvStatus(chatValuation),
       chatValuation.acvConfidence,
-      chatValuation.acvMissingInputs
+      canonicalAcvMissingInputs
     ),
     acvReasoning:
       sanitizeReason(chatValuation.acvReasoning, "ACV is not determinable from the current documents.") ||
       "ACV is not determinable from the current documents.",
-    acvMissingInputs:
-      normalizeAcvStatus(chatValuation) === "not_determinable"
-        ? (chatValuation.acvMissingInputs.length
-            ? chatValuation.acvMissingInputs
-            : ["vehicle condition", "mileage", "trim/options", "market comparable data"])
-        : [],
+    acvMissingInputs: canonicalAcvMissingInputs,
     dvStatus,
     dvValue:
       hasChatDv && chatValuation.dvStatus === "provided" ? chatValuation.dvValue : undefined,
@@ -1028,20 +1101,37 @@ function buildValuation(
     dvConfidence: normalizeValuationConfidence(
       dvStatus,
       chatValuation.dvConfidence ?? normalizePanelDvConfidence(panel?.diminishedValue?.confidence),
-      chatValuation.dvMissingInputs
+      canonicalDvMissingInputs
     ),
     dvReasoning:
       sanitizeReason(
         hasChatDv ? chatValuation.dvReasoning : panel?.diminishedValue?.rationale,
         "DV is not determinable from the current documents."
       ) || "DV is not determinable from the current documents.",
-    dvMissingInputs:
-      dvStatus === "not_determinable"
-        ? (chatValuation.dvMissingInputs.length
-            ? chatValuation.dvMissingInputs
-            : ["repair severity context", "damage photos or confirmed repair scope", "pre-loss market context"])
-        : [],
+    dvMissingInputs: canonicalDvMissingInputs,
   };
+}
+
+function scrubValuationMissingInputs(
+  inputs: string[],
+  reportFields: ExportReportFields
+): string[] {
+  return inputs.filter((input) => {
+    const normalized = normalizeKey(input);
+
+    if (normalized.includes("mileage") && typeof reportFields.mileage === "number") {
+      return false;
+    }
+
+    if (
+      (normalized.includes("trim") || normalized.includes("options")) &&
+      Boolean(reportFields.vehicle?.trim || reportFields.vehicle?.model)
+    ) {
+      return false;
+    }
+
+    return true;
+  });
 }
 
 function normalizePanelDvConfidence(
@@ -1147,7 +1237,7 @@ function deriveSupplementTitle(value: string): string {
     lower.includes("support area") ||
     lower.includes("mounting geometry")
   ) {
-    return "Front Structure Scope / Tie Bar / Upper Rail Reconciliation";
+    return "Hidden Mounting Geometry / Teardown Growth";
   }
   if (lower.includes("structural setup and pull verification")) {
     return "Structural Setup and Pull Verification";
@@ -1312,6 +1402,12 @@ function isContradictedByDocumentedFacts(
   const hasPreScanCoverage = normalizedDocumented.some((value) =>
     /(pre repair scan|pre scan|diagnostic scan)/.test(value)
   );
+  const hasInProcessScanCoverage = normalizedDocumented.some((value) =>
+    /(in process scan|in process repair scan)/.test(value)
+  );
+  const hasCavityWaxCoverage = normalizedDocumented.some((value) =>
+    /(cavity wax|corrosion protection)/.test(value)
+  );
 
   if (!itemKey) return false;
 
@@ -1327,10 +1423,19 @@ function isContradictedByDocumentedFacts(
     }
   }
 
+  if (itemKey.includes("in process") && hasInProcessScanCoverage) {
+    return true;
+  }
+
+  if (hasCavityWaxCoverage && itemKey.includes("corrosion protection")) {
+    return true;
+  }
+
   if (
     (itemKey === normalizeKey("Pre-Repair Scan") && documented.has(normalizeKey("Pre-repair scan"))) ||
     (itemKey === normalizeKey("Post-Repair Scan") && documented.has(normalizeKey("Post-repair scan"))) ||
     (itemKey === normalizeKey("In-process scan") && documented.has(normalizeKey("In-process scan"))) ||
+    (itemKey === normalizeKey("In-process repair scan") && documented.has(normalizeKey("In-process repair scan"))) ||
     (itemKey === normalizeKey("Headlamp aiming check") && documented.has(normalizeKey("Headlamp/fog aim"))) ||
     (itemKey === normalizeKey("Corrosion Protection / Cavity Wax") && documented.has(normalizeKey("Cavity wax"))) ||
     (itemKey === normalizeKey("Corrosion Protection / Weld Restoration") && documented.has(normalizeKey("Cavity wax")))
@@ -1379,11 +1484,27 @@ function sanitizeSupplementEvidence(
 }
 
 function polishSourceLabel(value?: string | null): string | undefined {
-  const cleaned = sanitizeReason(value, "")
+  const raw = sanitizeReason(value, "").trim();
+  if (!raw) return undefined;
+
+  if (
+    /function not clearly represented in estimate|not clearly represented in estimate|not clearly documented in the current estimate|not clearly documented in the current material/i.test(
+      raw
+    )
+  ) {
+    if (/oem/i.test(raw)) return "OEM procedure support";
+    if (/estimate|attachment|document/i.test(raw)) return "Estimate text";
+    if (/narrative/i.test(raw)) return "Narrative synthesis";
+    return "Structured analysis";
+  }
+
+  const cleaned = raw
     .replace(/\bdecision panel\b/gi, "Structured analysis")
     .replace(/\bmissing procedure list\b/gi, "Missing procedures")
     .replace(/\bsupplement opportunity\b/gi, "Supplement analysis")
-    .replace(/\bstructured narrative\b/gi, "Structured narrative")
+    .replace(/\bstructured narrative\b/gi, "Narrative synthesis")
+    .replace(/\bassistant reasoning\b/gi, "Narrative synthesis")
+    .replace(/\battachment\b/gi, "Estimate text")
     .replace(/\bdocumentation\b/gi, "Documentation")
     .replace(/\bparts\b/gi, "Parts analysis")
     .replace(/\bscan\b/gi, "Scan analysis")
@@ -1634,7 +1755,7 @@ function scoreSupplementItem(item: ExportSupplementItem): number {
   if (item.kind === "missing_operation") score += 45;
   if (item.kind === "underwritten_operation") score += 35;
   if (item.kind === "disputed_repair_path") score += 30;
-  if (item.category === "structural") score += 140;
+  if (item.category === "structural") score += 60;
   if (item.category === "material") score += 80;
   if (
     lower.includes("front structure") ||
@@ -1643,7 +1764,7 @@ function scoreSupplementItem(item: ExportSupplementItem): number {
     lower.includes("support area") ||
     lower.includes("upper rail") ||
     lower.includes("core support")
-  ) score += 125;
+  ) score += 15;
   if (lower.includes("setup") || lower.includes("measure") || lower.includes("realignment")) score += 110;
   if (lower.includes("replace vs repair") || lower.includes("repair vs replace")) score += 105;
   if (lower.includes("fit-sensitive") || lower.includes("fit sensitive")) score += 100;
@@ -1651,12 +1772,13 @@ function scoreSupplementItem(item: ExportSupplementItem): number {
   if (lower.includes("test fit")) score += 100;
   if (lower.includes("coolant") || lower.includes("bleed") || lower.includes("refill")) score += 95;
   if (lower.includes("hardware") || lower.includes("seal") || lower.includes("clip") || lower.includes("fastener")) score += 92;
-  if (lower.includes("mounting geometry") || lower.includes("teardown") || lower.includes("hidden")) score += 96;
+  if (lower.includes("mounting geometry") || lower.includes("teardown") || lower.includes("hidden")) score += 120;
   if (lower.includes("corrosion") || lower.includes("cavity wax") || lower.includes("seam sealer") || lower.includes("weld protection")) score += 90;
-  if (lower.includes("alignment")) score += 85;
+  if (lower.includes("alignment")) score += 110;
   if (lower.includes("scan") || lower.includes("calibration")) score += 50;
   if (looksLikeMetaCommentary(lower)) score -= 400;
   if (lower.includes("not documented") || lower.includes("not clearly") || lower.includes("underwritten")) score += 40;
+  if (lower.includes("front structure scope / tie bar / upper rail reconciliation")) score -= 80;
   score += Math.min(item.rationale.length, 100);
   return score;
 }
@@ -1896,25 +2018,6 @@ function synthesizeSupplementItemsFromNarrative(params: {
     });
   };
 
-  if (text.includes("pre scan") || text.includes("pre-scan") || text.includes("post scan") || text.includes("post-scan")) {
-    if (text.includes("pre scan") || text.includes("pre-scan")) {
-      add(
-        "Pre-Repair Scan",
-        "Pre-repair scan support appears relevant to this repair path, but that verification step is not clearly documented in the current estimate.",
-        "medium",
-        "missing_verification"
-      );
-    }
-    if (text.includes("post scan") || text.includes("post-scan")) {
-      add(
-        "Post-Repair Scan",
-        "Post-repair scan support appears relevant to this repair path, but that verification step is not clearly documented in the current estimate.",
-        "medium",
-        "missing_verification"
-      );
-    }
-  }
-
   if (text.includes("test fit") || text.includes("fit-check") || text.includes("fit check")) {
     add(
       "Pre-Paint Test Fit",
@@ -1925,12 +2028,6 @@ function synthesizeSupplementItemsFromNarrative(params: {
   }
 
   if (text.includes("frame bench") || text.includes("setup") || text.includes("measuring") || text.includes("realignment")) {
-    add(
-      "Structural Setup and Pull Verification",
-      "Frame setup, pull, or realignment burden appears supportable here, but that structural setup work is not clearly documented in the current estimate.",
-      "high",
-      "underwritten_operation"
-    );
     add(
       "Structural Measurement Verification",
       "Documented measurements or structural verification appear supportable here, but that verification item is not clearly documented in the current estimate.",
@@ -1946,15 +2043,20 @@ function synthesizeSupplementItemsFromNarrative(params: {
     text.includes("support area") ||
     text.includes("upper rail")
   ) {
-    add(
-      "Front Structure Scope / Tie Bar / Upper Rail Reconciliation",
-      "Front-structure, tie-bar, lock-support, radiator-support, or adjacent support-area scope appears broader than the current estimate reflects.",
-      "high",
-      "disputed_repair_path"
-    );
+    if (/(not clearly|underwritten|not documented|unclear)/.test(text)) {
+      add(
+        "Front Structure Scope / Tie Bar / Upper Rail Reconciliation",
+        "Front-structure, tie-bar, lock-support, radiator-support, or adjacent support-area scope appears broader than the current estimate reflects.",
+        "high",
+        "disputed_repair_path"
+      );
+    }
   }
 
-  if (text.includes("corrosion protection") || text.includes("cavity wax") || text.includes("weld protection") || text.includes("masking")) {
+  if (
+    (text.includes("corrosion protection") || text.includes("weld protection") || text.includes("masking")) &&
+    /(not clearly|underwritten|not documented|unclear|missing)/.test(text)
+  ) {
     add(
       "Corrosion Protection / Weld Restoration",
       "Corrosion protection, cavity wax, weld protection, or related restoration steps appear supportable here, but they are not clearly documented in the current estimate.",
@@ -2070,6 +2172,10 @@ function sanitizeNarrative(value?: string | null): string | null {
   if (!value) return null;
   const cleaned = value
     .replace(/\r/g, "")
+    .replace(
+      /(?:^|\n)\s*(?:what looks reasonable|what still needs support|what looks aggressive|what stands out|documented positives|likely remaining gaps|support posture|estimate position)\s*:\s*(?=\n|$)/gim,
+      "\n"
+    )
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -2112,6 +2218,10 @@ function cleanPresentationProse(value?: string | null): string {
   if (!cleaned) return "";
 
   const withoutEmptyStubs = cleaned
+    .replace(
+      /\b(?:What looks reasonable|What still needs support|What looks aggressive|What stands out|Documented positives|Likely remaining gaps|Support posture|Estimate position):\s*/gi,
+      ""
+    )
     .replace(
       /(?:^|[\s.])Areas that look aggressive or likely to get pushback\s*:?\s*(?:\.)?(?=\s|$)/gi,
       " "

@@ -80,11 +80,7 @@ export function deriveStructuralApplicability(
     "tie bar",
     "lock support",
     "core support",
-    "radiator support",
-    "support replacement",
     "upper rail",
-    "reinforcement",
-    "bolt-on support",
   ]);
   const strongVisualDistortion = hasAny(rawText, [
     "buckled",
@@ -258,7 +254,7 @@ export function isStructuralSupplementSupported(
     lower.includes("core support") ||
     lower.includes("upper rail")
   ) {
-    return applicability.supportReplacementScope || applicability.structuralMeasurementVerification;
+    return applicability.supportReplacementScope;
   }
 
   return true;

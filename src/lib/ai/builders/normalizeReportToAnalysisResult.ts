@@ -3,7 +3,10 @@ import type {
   AnalysisResult,
   RepairIntelligenceReport,
 } from "../types/analysis";
-import { extractEstimateFacts } from "../extractors/extractEstimateFacts";
+import {
+  extractEstimateFacts,
+  resolveCanonicalInsurerCandidate,
+} from "../extractors/extractEstimateFacts";
 import {
   extractVehicleIdentityFromText,
   mergeVehicleIdentity,
@@ -205,7 +208,10 @@ function mergeEstimateFacts(
     (merged, current) => ({
       vehicle: mergeVehicleIdentity(merged.vehicle, current?.vehicle),
       mileage: merged.mileage ?? current?.mileage,
-      insurer: merged.insurer ?? current?.insurer,
+      insurer: resolveCanonicalInsurerCandidate(
+        { value: merged.insurer, source: "prior" },
+        { value: current?.insurer, source: "prior" }
+      ),
       estimateTotal: merged.estimateTotal ?? current?.estimateTotal,
       documentedProcedures: [
         ...new Set([...(merged.documentedProcedures ?? []), ...(current?.documentedProcedures ?? [])]),

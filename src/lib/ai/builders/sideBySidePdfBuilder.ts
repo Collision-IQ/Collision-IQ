@@ -1,22 +1,22 @@
-import type { DecisionPanel } from "./buildDecisionPanel";
-import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
-import { buildExportTemplateSourceModel, formatAnalysisModeLabel } from "./exportTemplates";
-import { buildPreferredVehicleIdentityLabel } from "./buildExportModel";
+import {
+  buildExportTemplateSourceModel,
+  formatAnalysisModeLabel,
+  type ExportBuilderInput,
+} from "./exportTemplates";
+import {
+  resolveCanonicalInsurer,
+  resolveCanonicalVehicleLabel,
+  resolveCanonicalVin,
+} from "./buildExportModel";
 
-export function buildSideBySidePdf(params: {
-  report: RepairIntelligenceReport | null;
-  analysis: AnalysisResult | null;
-  panel: DecisionPanel | null;
-  assistantAnalysis?: string | null;
-}): CarrierReportDocument {
+export function buildSideBySidePdf(params: ExportBuilderInput): CarrierReportDocument {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
   const isComparison = source.analysisMode === "comparison";
-  const vehicleIdentity =
-    exportModel.reportFields.vehicleLabel ??
-    buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
-    "Unspecified";
+  const vehicleIdentity = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
+  const vin = resolveCanonicalVin(exportModel) ?? "Unspecified";
+  const insurer = resolveCanonicalInsurer(exportModel);
 
   return {
     filename: "collision-iq-side-by-side-report.pdf",
@@ -31,9 +31,9 @@ export function buildSideBySidePdf(params: {
     }),
     summary: [
       { label: "Vehicle", value: vehicleIdentity },
-      { label: "VIN", value: exportModel.reportFields.vin || exportModel.vehicle.vin || "Unspecified" },
-      ...(exportModel.reportFields.insurer
-        ? [{ label: "Insurer", value: exportModel.reportFields.insurer }]
+      { label: "VIN", value: vin },
+      ...(insurer
+        ? [{ label: "Insurer", value: insurer }]
         : []),
       ...(typeof exportModel.reportFields.mileage === "number"
         ? [{ label: "Mileage", value: exportModel.reportFields.mileage.toLocaleString("en-US") }]

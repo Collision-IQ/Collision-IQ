@@ -1,10 +1,13 @@
 import {
   buildExportModel,
-  buildPreferredVehicleIdentityLabel,
   COLLISION_ACADEMY_HANDOFF_URL,
+  resolveCanonicalInsurer,
+  resolveCanonicalVehicleLabel,
+  resolveCanonicalVin,
+  type ExportModel,
 } from "./buildExportModel";
-import type { DecisionPanel } from "./buildDecisionPanel";
 import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
+import type { ExportBuilderInput } from "./exportTemplates";
 
 export type CarrierReportSection = {
   title: string;
@@ -37,17 +40,14 @@ export function buildCarrierReport({
   analysis,
   panel,
   assistantAnalysis,
-}: {
-  report: RepairIntelligenceReport | null;
-  analysis: AnalysisResult | null;
-  panel: DecisionPanel | null;
-  assistantAnalysis?: string | null;
-}): CarrierReportDocument {
-  const exportModel = buildExportModel({
+  renderModel,
+}: ExportBuilderInput): CarrierReportDocument {
+  const exportModel = resolveCarrierExportModel({
     report,
     analysis,
     panel,
     assistantAnalysis,
+    renderModel,
   });
 
   const topItems = selectReportSupplementItems(exportModel.supplementItems);
@@ -59,6 +59,10 @@ export function buildCarrierReport({
       : "no major unresolved support gaps identified from the current structured analysis";
   const credibilityConclusion = buildCredibilityConclusion(exportModel);
   const whyItWins = buildWhyItWins(exportModel, report, analysis);
+
+  const canonicalVehicle = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
+  const canonicalVin = resolveCanonicalVin(exportModel) ?? "Unspecified";
+  const canonicalInsurer = resolveCanonicalInsurer(exportModel);
 
   return {
     filename: "collision-iq-main-report.pdf",
@@ -80,14 +84,14 @@ export function buildCarrierReport({
     summary: [
       {
         label: "Vehicle",
-        value: buildVehicleIdentityValue(exportModel),
+        value: canonicalVehicle,
       },
       {
         label: "VIN",
-        value: exportModel.reportFields.vin || exportModel.vehicle.vin || "Unspecified",
+        value: canonicalVin,
       },
-      ...(exportModel.reportFields.insurer
-        ? [{ label: "Insurer", value: exportModel.reportFields.insurer }]
+      ...(canonicalInsurer
+        ? [{ label: "Insurer", value: canonicalInsurer }]
         : []),
       ...(typeof exportModel.reportFields.mileage === "number"
         ? [{ label: "Mileage", value: exportModel.reportFields.mileage.toLocaleString("en-US") }]
@@ -116,10 +120,10 @@ export function buildCarrierReport({
       {
         title: "Vehicle / File Summary",
         bullets: compact([
-          buildVehicleIdentityValue(exportModel) !== "Unspecified"
-            ? `Vehicle: ${buildVehicleIdentityValue(exportModel)}.`
+          canonicalVehicle !== "Unspecified"
+            ? `Vehicle: ${canonicalVehicle}.`
             : undefined,
-          exportModel.reportFields.insurer ? `Insurer: ${exportModel.reportFields.insurer}.` : undefined,
+          canonicalInsurer ? `Insurer: ${canonicalInsurer}.` : undefined,
           typeof exportModel.reportFields.mileage === "number"
             ? `Mileage: ${exportModel.reportFields.mileage.toLocaleString("en-US")}.`
             : undefined,
@@ -128,7 +132,7 @@ export function buildCarrierReport({
             : undefined,
           exportModel.vehicle.manufacturer ? `Manufacturer: ${exportModel.vehicle.manufacturer}.` : undefined,
           exportModel.vehicle.trim ? `Trim: ${exportModel.vehicle.trim}.` : undefined,
-          exportModel.reportFields.vin ? `VIN: ${exportModel.reportFields.vin}.` : undefined,
+          resolveCanonicalVin(exportModel) ? `VIN: ${resolveCanonicalVin(exportModel)}.` : undefined,
           `Confidence: ${formatVehicleConfidence(exportModel)}.`,
           report ? `Structured analysis confidence: ${capitalize(report.summary.confidence)}.` : undefined,
           report ? `Evidence quality: ${capitalize(report.summary.evidenceQuality)}.` : undefined,
@@ -211,40 +215,17 @@ function buildExecutiveSummary(params: {
   return kept.join(" ");
 }
 
-function buildVehicleIdentityValue(
-  exportModel: ReturnType<typeof buildExportModel>
-): string {
-  const resolvedLabel = buildPreferredVehicleIdentityLabel(exportModel.vehicle);
-  if (resolvedLabel) {
-    return resolvedLabel;
+function resolveCarrierExportModel(params: ExportBuilderInput): ExportModel {
+  if (params.renderModel) {
+    return params.renderModel;
   }
 
-  if (exportModel.reportFields.vehicleLabel) {
-    return exportModel.reportFields.vehicleLabel;
-  }
-
-  const namedParts = [
-    exportModel.vehicle.year,
-    exportModel.vehicle.make,
-    exportModel.vehicle.model,
-    exportModel.vehicle.trim,
-  ].filter(Boolean);
-
-  if (namedParts.length > 0) {
-    return namedParts.join(" ");
-  }
-
-  const partialIdentity = [
-    exportModel.vehicle.make,
-    exportModel.vehicle.model,
-    exportModel.vehicle.manufacturer,
-  ].filter(Boolean);
-
-  if (partialIdentity.length > 0) {
-    return partialIdentity.join(" ");
-  }
-
-  return "Unspecified";
+  return buildExportModel({
+    report: params.report,
+    analysis: params.analysis,
+    panel: params.panel,
+    assistantAnalysis: params.assistantAnalysis,
+  });
 }
 
 function buildCredibilityConclusion(

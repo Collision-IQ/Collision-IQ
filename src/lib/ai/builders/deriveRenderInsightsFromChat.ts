@@ -92,6 +92,14 @@ const REPAIR_SECTION_HEADERS = [
   "request",
   "recommendation",
   "recommended supplements",
+  "what looks reasonable",
+  "what still needs support",
+  "what looks aggressive",
+  "what stands out",
+  "documented positives",
+  "likely remaining gaps",
+  "support posture",
+  "estimate position",
 ];
 
 const META_COMMENTARY_PATTERNS = [
@@ -325,7 +333,9 @@ function deriveOperationTitles(line: string): string[] {
     titles.push("OEM Fit-Sensitive Part Posture");
   }
   if (lower.includes("lock support")) {
-    titles.push("Upper Tie Bar / Lock Support Reconciliation");
+    if (lower.includes("underwritten") || lower.includes("not documented") || lower.includes("not clearly")) {
+      titles.push("Upper Tie Bar / Lock Support Reconciliation");
+    }
   }
   if (
     lower.includes("front structure") ||
@@ -335,7 +345,9 @@ function deriveOperationTitles(line: string): string[] {
     lower.includes("tie bar") ||
     lower.includes("core support")
   ) {
-    titles.push("Front Structure Scope / Tie Bar / Upper Rail Reconciliation");
+    if (lower.includes("underwritten") || lower.includes("not documented") || lower.includes("not clearly")) {
+      titles.push("Front Structure Scope / Tie Bar / Upper Rail Reconciliation");
+    }
   }
   if (lower.includes("post-repair scan") || lower.includes("post repair scan")) {
     titles.push("Post-Repair Scan");
@@ -517,6 +529,10 @@ function buildSupplementItemsFromReasoning(line: string): DerivedRenderSupplemen
 function sanitizeHumanText(value: string): string {
   return value
     .replace(/^[^A-Za-z0-9$]+/, "")
+    .replace(
+      /^(?:what looks reasonable|what still needs support|what looks aggressive|what stands out|documented positives|likely remaining gaps|support posture|estimate position)\s*:\s*/i,
+      ""
+    )
     .replace(/\bshould clearl\b/gi, "should clearly")
     .replace(/\bclearl\b/gi, "clearly")
     .replace(/\b(R&I|RPR|REPL|BLND|REFN|CAL|SCAN)\b(?:\s+\b(R&I|RPR|REPL|BLND|REFN|CAL|SCAN)\b)+/gi, "")
@@ -573,15 +589,15 @@ function scoreSupplementCandidate(item: DerivedRenderSupplementItem): number {
     lower.includes("support area") ||
     lower.includes("core support") ||
     lower.includes("upper rail")
-  ) score += 125;
+  ) score += 30;
   if (lower.includes("replace vs repair") || lower.includes("repair vs replace")) score += 105;
   if (lower.includes("fit-sensitive") || lower.includes("fit sensitive")) score += 100;
   if (lower.includes("adas") || lower.includes("calibration procedure support")) score += 95;
   if (lower.includes("test fit")) score += 100;
   if (lower.includes("coolant") || lower.includes("bleed") || lower.includes("refill")) score += 90;
-  if (lower.includes("corrosion") || lower.includes("cavity wax") || lower.includes("seam sealer")) score += 85;
+  if (lower.includes("corrosion") || lower.includes("cavity wax") || lower.includes("seam sealer")) score += 15;
   if (lower.includes("alignment")) score += 80;
-  if (lower.includes("scan") || lower.includes("calibration")) score += 50;
+  if (lower.includes("scan") || lower.includes("calibration")) score += 20;
   if (lower.includes("not documented") || lower.includes("not clearly") || lower.includes("underwritten")) score += 40;
   if (looksLikeMetaCommentary(item.rationale)) score -= 400;
   score += Math.min(item.rationale.length, 120);
@@ -702,7 +718,9 @@ function inferFallbackTitles(line: string): string[] {
     lower.includes("front structure") ||
     lower.includes("support area")
   ) {
-    titles.push("Front Structure Scope / Tie Bar / Upper Rail Reconciliation");
+    if (lower.includes("underwritten") || lower.includes("not documented") || lower.includes("not clearly")) {
+      titles.push("Front Structure Scope / Tie Bar / Upper Rail Reconciliation");
+    }
   }
   if (lower.includes("setup") || lower.includes("measure") || lower.includes("realignment")) {
     titles.push("Structural Setup and Pull Verification");

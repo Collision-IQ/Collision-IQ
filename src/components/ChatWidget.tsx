@@ -48,6 +48,7 @@ interface ChatWidgetProps {
   onAnalysisChange?: (text: string) => void;
   onAnalysisResultChange?: (data: RepairIntelligenceReport | null) => void;
   onAnalysisPanelChange?: (panel: DecisionPanel | null) => void;
+  onAnalysisLoadingChange?: (loading: boolean) => void;
   disabled?: boolean;
 }
 
@@ -70,6 +71,7 @@ export default function ChatWidget({
   onAnalysisChange,
   onAnalysisResultChange,
   onAnalysisPanelChange,
+  onAnalysisLoadingChange,
   disabled = false,
 }: ChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
@@ -92,6 +94,7 @@ export default function ChatWidget({
   const shouldAutoScrollRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
   const sessionRef = useRef<number>(0);
+  const analysisRunRef = useRef<number>(0);
   const attachmentsRef = useRef<Attachment[]>([]);
   const firstAttachmentAtRef = useRef<number | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -104,6 +107,13 @@ export default function ChatWidget({
   const recordingMimeTypeRef = useRef("audio/webm");
 
   const hasAnyAttachment = useMemo(() => attachments.length > 0, [attachments]);
+  const isLikelyMobileCaptureDevice = useMemo(() => {
+    if (typeof navigator === "undefined") return false;
+
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+      navigator.userAgent
+    );
+  }, []);
   const visionAttachmentCount = useMemo(
     () => attachments.filter((attachment) => attachment.hasVision).length,
     [attachments]
@@ -208,6 +218,26 @@ export default function ChatWidget({
 
   function pushAssistantMessage(content: string) {
     setMessages((prev) => [...prev, createMessage("assistant", content)]);
+  }
+
+  function clearStructuredAnalysisState() {
+    onAnalysisChange?.("");
+    onAnalysisResultChange?.(null);
+    onAnalysisPanelChange?.(null);
+  }
+
+  function invalidateStructuredAnalysis() {
+    analysisRunRef.current += 1;
+    clearStructuredAnalysisState();
+    onAnalysisLoadingChange?.(false);
+  }
+
+  function beginStructuredAnalysisRun() {
+    const runId = analysisRunRef.current + 1;
+    analysisRunRef.current = runId;
+    clearStructuredAnalysisState();
+    onAnalysisLoadingChange?.(true);
+    return runId;
   }
 
   function browserSupportsRecording() {
@@ -428,9 +458,7 @@ export default function ChatWidget({
     if (cameraInputRef.current) cameraInputRef.current.value = "";
 
     onAttachmentChange?.(null);
-    onAnalysisChange?.("");
-    onAnalysisResultChange?.(null);
-    onAnalysisPanelChange?.(null);
+    invalidateStructuredAnalysis();
 
     shouldAutoScrollRef.current = true;
     setTimeout(() => {
@@ -450,6 +478,7 @@ export default function ChatWidget({
     const mySession = sessionRef.current;
     const messageToSend = input.trim() || buildAttachmentSummary(attachments);
     const hasAttachmentsInTurn = attachments.length > 0;
+    const activeAnalysisRunId = hasAttachmentsInTurn ? beginStructuredAnalysisRun() : null;
     const attachmentStats = summarizeAttachmentStats(attachments);
     const analysisStartMs = Date.now();
     const userMessage: Message = createMessage("user", messageToSend);
@@ -508,9 +537,11 @@ export default function ChatWidget({
 
         if (sessionRef.current === mySession) {
           pushAssistantMessage(errorMessage);
-          if (hasAttachmentsInTurn) {
-            onAnalysisResultChange?.(null);
-            onAnalysisPanelChange?.(null);
+          if (
+            hasAttachmentsInTurn &&
+            analysisRunRef.current === activeAnalysisRunId
+          ) {
+            onAnalysisLoadingChange?.(false);
           }
         }
         return;
@@ -540,7 +571,11 @@ export default function ChatWidget({
         })
           .then(async (analysisResponse) => {
             const analysisDurationMs = Date.now() - analysisStartMs;
-            if (!analysisResponse.ok || sessionRef.current !== mySession) {
+            if (
+              !analysisResponse.ok ||
+              sessionRef.current !== mySession ||
+              analysisRunRef.current !== activeAnalysisRunId
+            ) {
               console.info("[attachments] analysis failure", {
                 fileCount: attachmentStats.fileCount,
                 totalBytes: attachmentStats.totalBytes,
@@ -548,22 +583,34 @@ export default function ChatWidget({
                 analysisDurationMs,
                 status: analysisResponse.status,
               });
-              onAnalysisResultChange?.(null);
-              onAnalysisPanelChange?.(null);
+              if (analysisRunRef.current === activeAnalysisRunId) {
+                onAnalysisLoadingChange?.(false);
+              }
               return;
             }
 
             const analysisData = (await analysisResponse.json()) as {
               report?: RepairIntelligenceReport;
               panel?: DecisionPanel;
+              retrievalAttempted?: boolean;
+              retrievalCompleted?: boolean;
+              retrievalMatchCount?: number;
+              refinedWithRetrieval?: boolean;
+              analysisCompletedAt?: string;
             };
             onAnalysisResultChange?.(analysisData.report ?? null);
             onAnalysisPanelChange?.(analysisData.panel ?? null);
+            onAnalysisLoadingChange?.(false);
             console.info("[attachments] analysis complete", {
               fileCount: attachmentStats.fileCount,
               totalBytes: attachmentStats.totalBytes,
               totalPdfPages: attachmentStats.totalPdfPages,
               analysisDurationMs,
+              retrievalAttempted: analysisData.retrievalAttempted ?? false,
+              retrievalCompleted: analysisData.retrievalCompleted ?? false,
+              retrievalMatchCount: analysisData.retrievalMatchCount ?? 0,
+              refinedWithRetrieval: analysisData.refinedWithRetrieval ?? false,
+              analysisCompletedAt: analysisData.analysisCompletedAt ?? null,
             });
             setAttachments((prev) =>
               prev.map((attachment) => ({
@@ -580,9 +627,11 @@ export default function ChatWidget({
               analysisDurationMs: Date.now() - analysisStartMs,
               error: error instanceof Error ? error.message : String(error),
             });
-            if (sessionRef.current === mySession) {
-              onAnalysisResultChange?.(null);
-              onAnalysisPanelChange?.(null);
+            if (
+              sessionRef.current === mySession &&
+              analysisRunRef.current === activeAnalysisRunId
+            ) {
+              onAnalysisLoadingChange?.(false);
             }
           });
       }
@@ -616,7 +665,10 @@ export default function ChatWidget({
           });
         }
 
-        if (sessionRef.current === mySession) {
+        if (
+          sessionRef.current === mySession &&
+          (!hasAttachmentsInTurn || analysisRunRef.current === activeAnalysisRunId)
+        ) {
           onAnalysisChange?.(assistantText);
         }
       } else {
@@ -626,7 +678,9 @@ export default function ChatWidget({
         if (sessionRef.current === mySession) {
           stopSpeaking();
           setMessages((prev) => [...prev, createMessage("assistant", reply)]);
-          onAnalysisChange?.(reply);
+          if (!hasAttachmentsInTurn || analysisRunRef.current === activeAnalysisRunId) {
+            onAnalysisChange?.(reply);
+          }
         }
       }
     } catch (err: unknown) {
@@ -643,9 +697,11 @@ export default function ChatWidget({
           ...prev,
           createMessage("assistant", "The analysis service had a temporary issue. Please retry."),
         ]);
-        if (hasAttachmentsInTurn) {
-          onAnalysisResultChange?.(null);
-          onAnalysisPanelChange?.(null);
+        if (
+          hasAttachmentsInTurn &&
+          analysisRunRef.current === activeAnalysisRunId
+        ) {
+          onAnalysisLoadingChange?.(false);
         }
       }
     } finally {
@@ -736,8 +792,7 @@ export default function ChatWidget({
     });
 
     onAttachmentChange?.(filename);
-    onAnalysisResultChange?.(null);
-    onAnalysisPanelChange?.(null);
+    invalidateStructuredAnalysis();
     setPreviewAttachmentId(replaceId ?? attachmentId);
     setReplaceAttachmentId(null);
     firstAttachmentAtRef.current ??= Date.now();
@@ -815,8 +870,7 @@ export default function ChatWidget({
     onAttachmentChange?.(
       remaining.length ? remaining[remaining.length - 1].filename : null
     );
-    onAnalysisResultChange?.(null);
-    onAnalysisPanelChange?.(null);
+    invalidateStructuredAnalysis();
   }
 
   function clearAllAttachments() {
@@ -830,12 +884,12 @@ export default function ChatWidget({
     setPreviewAttachmentId(null);
     setReplaceAttachmentId(null);
     onAttachmentChange?.(null);
-    onAnalysisResultChange?.(null);
-    onAnalysisPanelChange?.(null);
+    invalidateStructuredAnalysis();
   }
 
   function handleReplaceAttachment(attachmentId: string) {
     if (disabled) return;
+    invalidateStructuredAnalysis();
     setReplaceAttachmentId(attachmentId);
     fileInputRef.current?.click();
   }
@@ -1104,11 +1158,6 @@ export default function ChatWidget({
                             {children}
                           </ol>
                         ),
-                        li: ({ children }) => (
-                          <li className="text-white/80">
-                            {children}
-                          </li>
-                        ),
                         strong: ({ children }) => (
                           <span className="font-semibold text-white">{children}</span>
                         ),
@@ -1149,7 +1198,7 @@ export default function ChatWidget({
                 ref={cameraInputRef}
                 className="hidden"
                 accept="image/*"
-                capture="environment"
+                capture={isLikelyMobileCaptureDevice ? "environment" : undefined}
                 disabled={disabled}
                 title="Take photo"
                 onChange={(e) => handleCameraSelected(e.target.files)}

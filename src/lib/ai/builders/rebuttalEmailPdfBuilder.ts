@@ -1,26 +1,25 @@
-import type { DecisionPanel } from "./buildDecisionPanel";
-import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
-import { buildExportTemplateSourceModel } from "./exportTemplates";
+import { buildExportTemplateSourceModel, type ExportBuilderInput } from "./exportTemplates";
 import {
   buildPreferredRebuttalSubjectVehicleLabel,
-  buildPreferredVehicleIdentityLabel,
+  preferCanonicalField,
+  resolveCanonicalInsurer,
+  resolveCanonicalVehicleLabel,
+  resolveCanonicalVin,
 } from "./buildExportModel";
 
-export function buildRebuttalEmailPdf(params: {
-  report: RepairIntelligenceReport | null;
-  analysis: AnalysisResult | null;
-  panel: DecisionPanel | null;
-  assistantAnalysis?: string | null;
-}): CarrierReportDocument {
+export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReportDocument {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
   const rebuttalItems = exportModel.supplementItems.slice(0, 5);
-  const vehicleIdentity =
-    exportModel.reportFields.vehicleLabel ??
-    buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
-    "Unspecified";
-  const subjectVehicle = buildPreferredRebuttalSubjectVehicleLabel(exportModel.vehicle);
+  const vehicleIdentity = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
+  const vin = resolveCanonicalVin(exportModel) ?? "Unspecified";
+  const insurer = resolveCanonicalInsurer(exportModel);
+  const subjectVehicle =
+    preferCanonicalField(
+      exportModel.reportFields.vehicleLabel,
+      buildPreferredRebuttalSubjectVehicleLabel(exportModel.vehicle)
+    ) ?? "Current repair file";
 
   return {
     filename: "collision-iq-rebuttal-email.pdf",
@@ -33,9 +32,9 @@ export function buildRebuttalEmailPdf(params: {
     }),
     summary: [
       { label: "Vehicle", value: vehicleIdentity },
-      { label: "VIN", value: exportModel.reportFields.vin || exportModel.vehicle.vin || "Unspecified" },
-      ...(exportModel.reportFields.insurer
-        ? [{ label: "Insurer", value: exportModel.reportFields.insurer }]
+      { label: "VIN", value: vin },
+      ...(insurer
+        ? [{ label: "Insurer", value: insurer }]
         : []),
       ...(typeof exportModel.reportFields.mileage === "number"
         ? [{ label: "Mileage", value: exportModel.reportFields.mileage.toLocaleString("en-US") }]
