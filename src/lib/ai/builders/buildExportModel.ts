@@ -1116,22 +1116,42 @@ function scrubValuationMissingInputs(
   inputs: string[],
   reportFields: ExportReportFields
 ): string[] {
-  return inputs.filter((input) => {
-    const normalized = normalizeKey(input);
+  return inputs
+    .map((input) => {
+      let cleaned = cleanDisplayLabel(input);
+      const normalized = normalizeKey(cleaned);
 
-    if (normalized.includes("mileage") && typeof reportFields.mileage === "number") {
-      return false;
-    }
+      if (normalized.includes("mileage") && typeof reportFields.mileage === "number") {
+        cleaned = cleaned
+          .replace(/\bmileage\b/gi, "")
+          .replace(/\s*\/\s*/g, " / ")
+          .replace(/\s*,\s*/g, ", ")
+          .replace(/(?:^|\s)[/,-](?=\s|$)/g, " ")
+          .replace(/\(\s*\)/g, "")
+          .replace(/\s{2,}/g, " ")
+          .replace(/^(?:\/|,|-)\s*|\s*(?:\/|,|-)\s*$/g, "")
+          .trim();
+      }
 
-    if (
-      (normalized.includes("trim") || normalized.includes("options")) &&
-      Boolean(reportFields.vehicle?.trim || reportFields.vehicle?.model)
-    ) {
-      return false;
-    }
+      return cleaned;
+    })
+    .filter((input) => {
+      const normalized = normalizeKey(input);
+      if (!normalized) return false;
 
-    return true;
-  });
+      if (normalized.includes("mileage") && typeof reportFields.mileage === "number") {
+        return false;
+      }
+
+      if (
+        (normalized.includes("trim") || normalized.includes("options")) &&
+        Boolean(reportFields.vehicle?.trim || reportFields.vehicle?.model)
+      ) {
+        return false;
+      }
+
+      return true;
+    });
 }
 
 function normalizePanelDvConfidence(
@@ -1487,6 +1507,10 @@ function polishSourceLabel(value?: string | null): string | undefined {
   const raw = sanitizeReason(value, "").trim();
   if (!raw) return undefined;
 
+  if (/seam sealer/i.test(raw)) {
+    return /oem/i.test(raw) ? "OEM procedure support" : "Structured analysis";
+  }
+
   if (
     /function not clearly represented in estimate|not clearly represented in estimate|not clearly documented in the current estimate|not clearly documented in the current material/i.test(
       raw
@@ -1504,11 +1528,14 @@ function polishSourceLabel(value?: string | null): string | undefined {
     .replace(/\bsupplement opportunity\b/gi, "Supplement analysis")
     .replace(/\bstructured narrative\b/gi, "Narrative synthesis")
     .replace(/\bassistant reasoning\b/gi, "Narrative synthesis")
+    .replace(/\bline mapping(?: engine)?\b/gi, "Structured analysis")
+    .replace(/\bhybrid supplement(?: flow)?\b/gi, "Supplement analysis")
     .replace(/\battachment\b/gi, "Estimate text")
     .replace(/\bdocumentation\b/gi, "Documentation")
     .replace(/\bparts\b/gi, "Parts analysis")
     .replace(/\bscan\b/gi, "Scan analysis")
     .replace(/\bcalibration\b/gi, "Calibration analysis")
+    .replace(/\s{2,}/g, " ")
     .trim();
 
   return cleaned || undefined;
@@ -1554,7 +1581,7 @@ function sanitizeSupplementReason(
       (withoutRefinishGlossary && !looksLikeNoisySupplementText(withoutRefinishGlossary)
         ? withoutRefinishGlossary
         : "") ||
-      "Please provide the seam sealer restoration steps and supporting repair-process documentation for the affected repaired or replaced areas."
+      "Please provide seam sealer restoration details for the affected areas, along with supporting repair-process or OEM documentation."
     );
   }
 
@@ -1963,7 +1990,7 @@ function buildRequestLine(item: ExportSupplementItem): string {
     case "Pre-Paint Test Fit":
       return "Please provide the rationale for the pre-paint test fit burden and how final fit was to be confirmed before finish work.";
     case "Seam Sealer Restoration":
-      return "Please provide the seam sealer restoration steps, affected areas, and supporting repair-process or OEM documentation for that sealing operation.";
+      return "Please provide seam sealer restoration details for the affected areas, along with supporting repair-process or OEM documentation.";
     case "Corrosion Protection / Weld Restoration":
       return "Please provide the corrosion-protection, cavity-wax, seam, or weld-restoration documentation supporting this repair path.";
     case "Coolant Fill and Bleed":
