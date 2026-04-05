@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { saveAnalysisReport } from "@/lib/analysisReportStore";
 import {
   getUploadedAttachments,
-  type StoredAttachment,
 } from "@/lib/uploadedAttachmentStore";
 import {
   buildDriveRefinementContext,
@@ -12,6 +11,7 @@ import {
 import { buildDecisionPanelHybrid } from "@/lib/ai/builders/buildDecisionPanel";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import { runRepairAnalysis } from "@/lib/ai/orchestrator/analysisOrchestrator";
+import { enrichAnalysisAttachments } from "@/lib/ai/analysisAttachmentService";
 import {
   inferDriveRetrievalTopics,
   inferDriveVehicleContext,
@@ -124,7 +124,10 @@ export async function POST(req: Request) {
       })),
     });
 
-    const normalizedAttachments = await normalizeAnalysisAttachments(storedAttachments);
+    const normalizedAttachments = await enrichAnalysisAttachments({
+      attachments: storedAttachments,
+      userIntent: body.userIntent ?? null,
+    });
 
     let report = await runRepairAnalysis({
       artifactIds,
@@ -242,98 +245,6 @@ export async function POST(req: Request) {
       { error: "Analysis failed" },
       { status: 500 }
     );
-  }
-}
-
-function isImageAttachment(attachment: StoredAttachment) {
-  return Boolean(attachment.imageDataUrl) && attachment.type.startsWith("image/");
-}
-
-async function normalizeAnalysisAttachments(attachments: StoredAttachment[]) {
-  return Promise.all(
-    attachments.map(async (attachment) => {
-      if (!isImageAttachment(attachment) || !attachment.imageDataUrl) {
-        console.info("[analysis-attachments] attachment normalized", {
-          filename: attachment.filename,
-          mimeType: attachment.type || "unknown",
-          normalization: "original_text",
-          textLength: attachment.text.length,
-          hasImageDataUrl: Boolean(attachment.imageDataUrl),
-        });
-        return attachment;
-      }
-
-      const imageSummary = await summarizeImageAttachment(attachment);
-      const normalized = {
-        ...attachment,
-        text: imageSummary || attachment.text,
-      };
-
-      console.info("[analysis-attachments] attachment normalized", {
-        filename: attachment.filename,
-        mimeType: attachment.type || "unknown",
-        normalization: imageSummary ? "vision_summary" : "original_text_fallback",
-        textLength: normalized.text.length,
-        hasImageDataUrl: Boolean(normalized.imageDataUrl),
-      });
-
-      return normalized;
-    })
-  );
-}
-
-async function summarizeImageAttachment(attachment: StoredAttachment) {
-  if (!attachment.imageDataUrl) {
-    return "";
-  }
-
-  console.info("[analysis-attachments] final model payload built", {
-    filename: attachment.filename,
-    mimeType: attachment.type || "unknown",
-    model: collisionIqModels.primary,
-    contentParts: ["input_text", "input_image"],
-    hasImageDataUrl: true,
-  });
-
-  try {
-    const response = await openai.responses.create({
-      model: collisionIqModels.primary,
-      temperature: 0.1,
-      input: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: `You are preparing a repair-analysis attachment summary for a collision estimator.
-
-Return concise plain text only. Focus on:
-- visible damage areas and likely affected panels/components
-- severity or impact cues that matter to estimate review
-- any readable vehicle identifiers such as VIN, year, make, model, trim, or badges
-- any scan/calibration, structural, lighting, wheel/suspension, or alignment clues
-
-Do not mention that this is an AI summary.
-Do not use markdown or JSON.`,
-            },
-            {
-              type: "input_image",
-              image_url: attachment.imageDataUrl,
-              detail: "auto",
-            },
-          ],
-        },
-      ],
-    });
-
-    return response.output_text?.trim() ?? "";
-  } catch (error) {
-    console.warn("[analysis-attachments] image normalization failed", {
-      filename: attachment.filename,
-      mimeType: attachment.type || "unknown",
-      message: error instanceof Error ? error.message : String(error),
-    });
-    return "";
   }
 }
 

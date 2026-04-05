@@ -1,19 +1,27 @@
-const EGNYTE_BASE_URL = process.env.EGNYTE_BASE_URL;
-const EGNYTE_API_TOKEN = process.env.EGNYTE_API_TOKEN;
+function getEgnyteConfig() {
+  const baseUrl = process.env.EGNYTE_BASE_URL;
+  const token = process.env.EGNYTE_API_TOKEN;
 
-if (!EGNYTE_BASE_URL) {
-  throw new Error("Missing EGNYTE_BASE_URL");
-}
+  if (!baseUrl) {
+    throw new Error("Missing EGNYTE_BASE_URL");
+  }
 
-if (!EGNYTE_API_TOKEN) {
-  throw new Error("Missing EGNYTE_API_TOKEN");
+  if (!token) {
+    throw new Error("Missing EGNYTE_API_TOKEN");
+  }
+
+  return {
+    baseUrl,
+    token,
+  };
 }
 
 async function egnyteFetch(path: string, init?: RequestInit) {
-  const res = await fetch(`${EGNYTE_BASE_URL}${path}`, {
+  const config = getEgnyteConfig();
+  const res = await fetch(`${config.baseUrl}${path}`, {
     ...init,
     headers: {
-      Authorization: `Bearer ${EGNYTE_API_TOKEN}`,
+      Authorization: `Bearer ${config.token}`,
       ...(init?.headers ?? {}),
     },
   });

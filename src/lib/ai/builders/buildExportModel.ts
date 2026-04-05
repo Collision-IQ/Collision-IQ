@@ -17,6 +17,10 @@ import {
   cleanDisplayText,
   getDisplayVehicleInfo,
 } from "../displayText";
+import {
+  deriveStructuralApplicability,
+  filterStructuralTitles,
+} from "../structuralApplicability";
 
 export const COLLISION_ACADEMY_HANDOFF_URL = "https://www.collision.academy/";
 const PLACEHOLDER_VEHICLE_LABEL_PATTERN =
@@ -595,8 +599,8 @@ function buildSingleEstimateLead(
     .map((item) => item.toLowerCase());
   const factLead =
     facts.length > 0
-      ? `The estimate reads as a credible preliminary repair plan based on documented file facts including ${joinHumanList(facts)}.`
-      : "The estimate reads as a credible preliminary repair plan based on the documented file facts available in this estimate.";
+      ? `Documented file facts show ${joinHumanList(facts)}.`
+      : "The estimate provides enough documented facts to support a grounded preliminary review.";
   const strengthsLead =
     strengths.length > 0
       ? ` It already documents strengths such as ${joinHumanList(strengths)}.`
@@ -612,7 +616,7 @@ function buildSingleEstimateLead(
         )}.`
       : "";
 
-  return `${factLead}${scopeLead}${strengthsLead} The visible scope is not obviously padded, but it is still likely incomplete in measuring, alignment, calibration confirmation, and hidden-damage verification areas.`;
+  return `${factLead}${scopeLead}${strengthsLead} Bottom line: credible preliminary estimate, but still likely to grow after teardown.`;
 }
 
 function extractVinFromText(text: string): string | undefined {
@@ -933,9 +937,21 @@ function buildExportSupplementItems(
       recommendedActions: report?.recommendedActions ?? [],
     }),
   ];
+  const structuralApplicability = deriveStructuralApplicability({
+    vehicle: report?.vehicle ?? analysis?.vehicle ?? estimateFacts.vehicle,
+    rawText: collectVehicleDocumentText(report, analysis),
+    evidenceTexts: [
+      ...(report?.evidence.map((entry) => `${entry.title ?? ""} ${entry.snippet ?? ""}`) ?? []),
+      ...(analysis?.evidence.map((entry) => `${entry.source ?? ""} ${entry.quote ?? ""}`) ?? []),
+    ],
+    requiredProcedures: report?.requiredProcedures.map((entry) => entry.procedure),
+    presentProcedures: report?.presentProcedures,
+    missingProcedures: report?.missingProcedures,
+    issueTexts: report?.issues.map((issue) => `${issue.title} ${issue.impact || issue.finding}`),
+  });
   const deduped = new Map<string, ExportSupplementItem>();
 
-  for (const item of merged) {
+  for (const item of filterStructuralTitles(merged, structuralApplicability)) {
     const key = normalizeKey(item.title);
     if (!key) continue;
 
@@ -1805,7 +1821,7 @@ function buildRequestLine(item: ExportSupplementItem): string {
 
   switch (item.title) {
     case "Structural Measurement Verification":
-      return "Please provide the documented measurement or realignment support for this repair path, including how structural verification was performed.";
+      return "Please provide the documented dimensional measurement or verification support for this repair path, including how geometry confirmation was performed.";
     case "Structural Setup and Pull Verification":
       return "Please provide the setup, pull, or realignment rationale and the time support for that structural burden.";
     case "Fender Replace vs Repair Justification":
@@ -2117,7 +2133,7 @@ function cleanPresentationProse(value?: string | null): string {
     .replace(/\s{2,}/g, " ")
     .trim();
 
-  return trimTrailingPunctuation(collapsed) + (collapsed ? "." : "");
+  return removeNearDuplicateConclusionSentences(trimTrailingPunctuation(collapsed) + (collapsed ? "." : ""));
 }
 
 function makeRepairPositionTail(value: string): string | null {
@@ -2127,12 +2143,58 @@ function makeRepairPositionTail(value: string): string | null {
   const lower = cleaned.toLowerCase();
   if (
     lower.includes("the shop estimate appears materially more complete") ||
-    lower.includes("the carrier estimate remains materially underwritten")
+    lower.includes("the carrier estimate remains materially underwritten") ||
+    lower.includes("credible preliminary repair plan") ||
+    lower.includes("not obviously padded") ||
+    lower.includes("likely incomplete in measuring") ||
+    lower.includes("likely to grow after teardown")
   ) {
     return null;
   }
 
   return trimTrailingPunctuation(cleaned);
+}
+
+function removeNearDuplicateConclusionSentences(value: string): string {
+  const sentences = value
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  const kept: string[] = [];
+  const seenConcepts = new Set<string>();
+
+  for (const sentence of sentences) {
+    const concept = normalizeConclusionConcept(sentence);
+    if (concept && seenConcepts.has(concept)) {
+      continue;
+    }
+    if (concept) {
+      seenConcepts.add(concept);
+    }
+    kept.push(sentence);
+  }
+
+  return kept.join(" ").trim();
+}
+
+function normalizeConclusionConcept(value: string): string | null {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (
+    normalized.includes("credible preliminary") ||
+    normalized.includes("likely to grow after teardown") ||
+    normalized.includes("not obviously padded") ||
+    normalized.includes("likely incomplete in measuring") ||
+    normalized.includes("alignment") && normalized.includes("hidden damage")
+  ) {
+    return "single_estimate_conclusion";
+  }
+
+  return null;
 }
 
 function isSpecificSupplementItem(value?: string): boolean {

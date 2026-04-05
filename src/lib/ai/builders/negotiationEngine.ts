@@ -27,7 +27,13 @@ export function generateNegotiationResponse(
         }));
 
   if (!keyIssues.length) {
-    return "";
+    return [
+      "Based on the current estimate, the clearest remaining support gaps are:",
+      "",
+      ...supplements.slice(0, 5).map((item) => `- ${item.title}: ${item.rationale}`),
+      "",
+      "Please review and advise how these operations are being addressed or provide updated documentation reflecting their inclusion.",
+    ].join("\n");
   }
 
   const bullets = keyIssues

@@ -188,11 +188,27 @@ function buildExecutiveSummary(params: {
   whyItWins: string;
   strongestDisputes: string;
 }): string {
-  return [
+  const sentences = [
     params.credibilityConclusion,
     params.whyItWins,
-    `The biggest current dispute areas are ${params.strongestDisputes}.`,
-  ].join(" ");
+    `The biggest remaining gaps are ${params.strongestDisputes}.`,
+  ].filter(Boolean);
+
+  const kept: string[] = [];
+  const seenConcepts = new Set<string>();
+
+  for (const sentence of sentences) {
+    const concept = normalizeCarrierConclusionConcept(sentence);
+    if (concept && seenConcepts.has(concept)) {
+      continue;
+    }
+    if (concept) {
+      seenConcepts.add(concept);
+    }
+    kept.push(sentence);
+  }
+
+  return kept.join(" ");
 }
 
 function buildVehicleIdentityValue(
@@ -263,9 +279,9 @@ function buildWhyItWins(
       ? `It is stronger because the current file supports ${joinHumanList(
           topItems.map((item) => item.title.toLowerCase())
         )} more clearly than the competing posture.`
-      : `The estimate likely needs clearer support around ${joinHumanList(
+      : `The clearest remaining gaps are ${joinHumanList(
           topItems.map((item) => item.title.toLowerCase())
-        )}, even though several core procedures are already documented.`;
+        )}.`;
   }
 
   if (analysis?.narrative) {
@@ -493,6 +509,33 @@ function cleanCarrierSummarySentence(value?: string | null): string {
   }
 
   return trimTrailingPunctuation(cleaned) + ".";
+}
+
+function normalizeCarrierConclusionConcept(value: string): string | null {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (
+    normalized.includes("credible") ||
+    normalized.includes("preliminary repair plan") ||
+    normalized.includes("generally credible estimate") ||
+    normalized.includes("more credible repair document")
+  ) {
+    return "credibility";
+  }
+
+  if (
+    normalized.includes("remaining gaps") ||
+    normalized.includes("dispute areas") ||
+    normalized.includes("needs clearer support around")
+  ) {
+    return "gaps";
+  }
+
+  return null;
 }
 
 function compact(values: Array<string | undefined>): string[] {

@@ -11,6 +11,10 @@ import {
 import { mapSupplementLines } from "./lineMappingEngine";
 import { buildStateLeverage } from "./stateLeverageEngine";
 import type { AnalysisResult } from "../types/analysis";
+import {
+  deriveStructuralApplicabilityFromResult,
+  filterStructuralTitles,
+} from "../structuralApplicability";
 
 export type DecisionPanel = {
   narrative: string;
@@ -64,9 +68,13 @@ export async function buildDecisionPanelHybrid(params: {
   supplementCandidates: Array<{ title: string; reason: string }>;
   supplementContext?: SupplementValidationContext;
 }): Promise<DecisionPanel> {
+  const structurallyScopedCandidates = filterStructuralTitles(
+    params.supplementCandidates,
+    deriveStructuralApplicabilityFromResult(params.result)
+  );
   const validCandidates = validateSupplements(
     params.result.rawEstimateText ?? "",
-    params.supplementCandidates,
+    structurallyScopedCandidates,
     params.supplementContext
   );
   const supplements = buildSupplementLinesHybrid(validCandidates);

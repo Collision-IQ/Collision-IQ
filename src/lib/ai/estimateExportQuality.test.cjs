@@ -210,7 +210,7 @@ run("export model removes placeholder text and keeps documented scans as positiv
   assert.equal(exportModel.request.includes("Upload an estimate or supporting documents"), false);
   assert.equal(supplementTitles.includes("Pre-Repair Scan"), false);
   assert.equal(supplementTitles.includes("Post-Repair Scan"), false);
-  assert.equal(exportModel.repairPosition.includes("credible preliminary repair plan"), true);
+  assert.equal(exportModel.repairPosition.includes("Bottom line: credible preliminary estimate, but still likely to grow after teardown."), true);
   assert.equal(exportModel.repairPosition.includes("documents strengths such as"), true);
   assert.equal(exportModel.repairPosition.includes("vehicle 2018 Tesla Model S 75D AWD"), true);
   assert.equal(exportModel.repairPosition.includes("vehicle details still limited"), false);

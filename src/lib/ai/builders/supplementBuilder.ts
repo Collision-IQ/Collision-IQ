@@ -8,6 +8,10 @@ import {
   findProcedureMatches,
   type CanonicalProcedureKey,
 } from "../procedureEquivalence";
+import {
+  deriveStructuralApplicabilityFromResult,
+  filterStructuralTitles,
+} from "../structuralApplicability";
 
 export type SupplementLine = {
   title: string;
@@ -80,7 +84,12 @@ export function buildSupplementLines(
 ): SupplementLine[] {
   const text = extractTextForFunctions(result);
   const context = extractValidationContext(result);
-  const candidates = extractSupplementCandidates(result);
+  const candidates = Array.isArray(result)
+    ? extractSupplementCandidates(result)
+    : filterStructuralTitles(
+        extractSupplementCandidates(result),
+        deriveStructuralApplicabilityFromResult(result)
+      );
 
   if (candidates.length === 0) {
     return [];
