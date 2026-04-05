@@ -52,6 +52,7 @@ export function buildCarrierReport({
 
   const topItems = selectReportSupplementItems(exportModel.supplementItems);
   const isComparison = (analysis?.mode ?? report?.analysis?.mode) === "comparison";
+  const documentedStrengths = exportModel.reportFields.presentStrengths;
   const strongestDisputes =
     topItems.length > 0
       ? joinHumanList(topItems.slice(0, 4).map((item) => item.title.toLowerCase()))
@@ -83,16 +84,16 @@ export function buildCarrierReport({
       },
       {
         label: "VIN",
-        value: exportModel.vehicle.vin || "Not clearly supported in the current material.",
+        value: exportModel.reportFields.vin || exportModel.vehicle.vin || "Unspecified",
       },
-      ...(exportModel.estimateFacts.insurer
-        ? [{ label: "Insurer", value: exportModel.estimateFacts.insurer }]
+      ...(exportModel.reportFields.insurer
+        ? [{ label: "Insurer", value: exportModel.reportFields.insurer }]
         : []),
-      ...(typeof exportModel.estimateFacts.mileage === "number"
-        ? [{ label: "Mileage", value: exportModel.estimateFacts.mileage.toLocaleString("en-US") }]
+      ...(typeof exportModel.reportFields.mileage === "number"
+        ? [{ label: "Mileage", value: exportModel.reportFields.mileage.toLocaleString("en-US") }]
         : []),
-      ...(typeof exportModel.estimateFacts.estimateTotal === "number"
-        ? [{ label: "Estimate Total", value: formatMoneyPrecise(exportModel.estimateFacts.estimateTotal) }]
+      ...(typeof exportModel.reportFields.estimateTotal === "number"
+        ? [{ label: "Estimate Total", value: formatMoneyPrecise(exportModel.reportFields.estimateTotal) }]
         : []),
       {
         label: "Repair Conclusion",
@@ -118,16 +119,16 @@ export function buildCarrierReport({
           buildVehicleIdentityValue(exportModel) !== "Unspecified"
             ? `Vehicle: ${buildVehicleIdentityValue(exportModel)}.`
             : undefined,
-          exportModel.estimateFacts.insurer ? `Insurer: ${exportModel.estimateFacts.insurer}.` : undefined,
-          typeof exportModel.estimateFacts.mileage === "number"
-            ? `Mileage: ${exportModel.estimateFacts.mileage.toLocaleString("en-US")}.`
+          exportModel.reportFields.insurer ? `Insurer: ${exportModel.reportFields.insurer}.` : undefined,
+          typeof exportModel.reportFields.mileage === "number"
+            ? `Mileage: ${exportModel.reportFields.mileage.toLocaleString("en-US")}.`
             : undefined,
-          typeof exportModel.estimateFacts.estimateTotal === "number"
-            ? `Estimate total: ${formatMoneyPrecise(exportModel.estimateFacts.estimateTotal)}.`
+          typeof exportModel.reportFields.estimateTotal === "number"
+            ? `Estimate total: ${formatMoneyPrecise(exportModel.reportFields.estimateTotal)}.`
             : undefined,
           exportModel.vehicle.manufacturer ? `Manufacturer: ${exportModel.vehicle.manufacturer}.` : undefined,
           exportModel.vehicle.trim ? `Trim: ${exportModel.vehicle.trim}.` : undefined,
-          exportModel.vehicle.vin ? `VIN: ${exportModel.vehicle.vin}.` : undefined,
+          exportModel.reportFields.vin ? `VIN: ${exportModel.reportFields.vin}.` : undefined,
           `Confidence: ${formatVehicleConfidence(exportModel)}.`,
           report ? `Structured analysis confidence: ${capitalize(report.summary.confidence)}.` : undefined,
           report ? `Evidence quality: ${capitalize(report.summary.evidenceQuality)}.` : undefined,
@@ -147,10 +148,10 @@ export function buildCarrierReport({
             : undefined,
         ]),
       },
-      ...(exportModel.estimateFacts.documentedHighlights.length > 0
+      ...(documentedStrengths.length > 0
         ? [{
             title: isComparison ? "Documented Positives (Shop File)" : "Documented Positives",
-            bullets: exportModel.estimateFacts.documentedHighlights.map((item) => `${item}.`),
+            bullets: documentedStrengths.map((item) => `${item}.`),
           }]
         : []),
       {
@@ -200,6 +201,10 @@ function buildVehicleIdentityValue(
   const resolvedLabel = buildPreferredVehicleIdentityLabel(exportModel.vehicle);
   if (resolvedLabel) {
     return resolvedLabel;
+  }
+
+  if (exportModel.reportFields.vehicleLabel) {
+    return exportModel.reportFields.vehicleLabel;
   }
 
   const namedParts = [

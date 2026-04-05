@@ -729,7 +729,7 @@ runTest("safe fallback keeps vehicle when VIN is not clearly supported", () => {
   assert.notEqual(exportModel.vehicle.display, "Unspecified");
   assert.equal(exportModel.vehicle.trim, vehicleNoVinFallbackFixture.expectedTrim);
   assert.equal(pdf.summary.find((item) => item.label === "Vehicle")?.value, vehicleNoVinFallbackFixture.expectedDisplay);
-  assert.equal(pdf.summary.find((item) => item.label === "VIN")?.value, "Not clearly supported in the current material.");
+  assert.equal(pdf.summary.find((item) => item.label === "VIN")?.value, "Unspecified");
   assert.equal(chatVehicle.make, "BMW");
   assert.equal(chatVehicle.model, "X7 xDrive40i");
   assert.equal(chatVehicle.trim, vehicleNoVinFallbackFixture.expectedTrim);
@@ -752,5 +752,5 @@ runTest("no-data case still falls back safely to Unspecified", () => {
   assert.equal(exportModel.vehicle.display, "Unspecified");
   assert.equal(exportModel.vehicle.vin, undefined);
   assert.equal(pdf.summary.find((item) => item.label === "Vehicle")?.value, "Unspecified");
-  assert.equal(pdf.summary.find((item) => item.label === "VIN")?.value, "Not clearly supported in the current material.");
+  assert.equal(pdf.summary.find((item) => item.label === "VIN")?.value, "Unspecified");
 });

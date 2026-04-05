@@ -37,6 +37,7 @@ const KNOWN_MAKES = [
 
 const MAKE_ABBREVIATIONS: Record<string, string> = {
   JAGU: "Jaguar",
+  TESL: "Tesla",
 };
 
 const SOURCE_RANK: Record<NonNullable<VehicleIdentity["source"]>, number> = {
@@ -105,7 +106,9 @@ const WMI_MAP: Record<string, { make: string; manufacturer: string }> = {
   "5TD": { make: "Toyota", manufacturer: "Toyota Motor Manufacturing Indiana, Inc." },
   "5TF": { make: "Toyota", manufacturer: "Toyota Motor Manufacturing Texas, Inc." },
   "5XY": { make: "Kia", manufacturer: "Kia Georgia, Inc." },
+  "5YJ": { make: "Tesla", manufacturer: "Tesla, Inc." },
   "7MU": { make: "Toyota", manufacturer: "Toyota Motor Manufacturing" },
+  "7SA": { make: "Tesla", manufacturer: "Tesla, Inc." },
   "JA4": { make: "Mitsubishi", manufacturer: "Mitsubishi Motors North America" },
   "JF1": { make: "Subaru", manufacturer: "Subaru Corporation" },
   "JF2": { make: "Subaru", manufacturer: "Subaru Corporation" },
@@ -119,6 +122,7 @@ const WMI_MAP: Record<string, { make: string; manufacturer: string }> = {
   "KNA": { make: "Kia", manufacturer: "Kia Corporation" },
   "SAL": { make: "Land Rover", manufacturer: "Jaguar Land Rover Limited" },
   "SCB": { make: "Bentley", manufacturer: "Bentley Motors Limited" },
+  "XP7": { make: "Tesla", manufacturer: "Tesla, Inc." },
   "TRU": { make: "Audi", manufacturer: "AUDI AG" },
   "VSS": { make: "SEAT", manufacturer: "SEAT, S.A." },
   "WA1": { make: "Audi", manufacturer: "AUDI AG" },
@@ -128,6 +132,7 @@ const WMI_MAP: Record<string, { make: string; manufacturer: string }> = {
   "WDD": { make: "Mercedes-Benz", manufacturer: "Mercedes-Benz Group AG" },
   "WDW": { make: "Mercedes-Benz", manufacturer: "Mercedes-Benz Group AG" },
   "WVW": { make: "Volkswagen", manufacturer: "Volkswagen AG" },
+  "LRW": { make: "Tesla", manufacturer: "Tesla Shanghai Co., Ltd." },
   "YV1": { make: "Volvo", manufacturer: "Volvo Car Corporation" },
   "YV4": { make: "Volvo", manufacturer: "Volvo Car Corporation" },
   "ZFF": { make: "Ferrari", manufacturer: "Ferrari S.p.A." },
@@ -330,7 +335,7 @@ export function buildVehicleLabel(
     normalized.year,
     normalized.make,
     normalized.model,
-    options?.includeTrim ? normalized.trim : undefined,
+    options?.includeTrim ?? true ? normalized.trim : undefined,
   ].filter(Boolean);
 
   return parts.join(" ").trim();

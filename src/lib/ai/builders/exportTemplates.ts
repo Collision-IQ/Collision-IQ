@@ -144,8 +144,9 @@ export function buildSideBySideComparisonReport(params: {
   const { exportModel } = source;
   const isComparison = source.analysisMode === "comparison";
   const vehicleIdentity =
+    exportModel.reportFields.vehicleLabel ??
     buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
-    "Vehicle details still limited in the current material.";
+    "Unspecified";
 
   const sections = source.categoryComparisons.map((category) =>
     [
@@ -182,8 +183,9 @@ export function buildLineByLineComparisonReport(params: {
   const { exportModel } = source;
   const isComparison = source.analysisMode === "comparison";
   const vehicleIdentity =
+    exportModel.reportFields.vehicleLabel ??
     buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
-    "Vehicle details still limited in the current material.";
+    "Unspecified";
 
   const rows = source.lineItems.map((item, index) =>
     [

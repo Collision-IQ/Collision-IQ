@@ -52,11 +52,26 @@ export type ExportVehicleInfo = {
 export type ExportModel = {
   vehicle: ExportVehicleInfo;
   estimateFacts: EstimateFacts;
+  reportFields: ExportReportFields;
   repairPosition: string;
   positionStatement: string;
   supplementItems: ExportSupplementItem[];
   request: string;
   valuation: DerivedValuation;
+};
+
+export type ExportReportFields = {
+  vehicleLabel?: string;
+  vin?: string;
+  mileage?: number;
+  insurer?: string;
+  estimateTotal?: number;
+  documentedHighlights: string[];
+  documentedProcedures: string[];
+  presentStrengths: string[];
+  likelySupplementAreas: string[];
+  estimateFacts: EstimateFacts;
+  vehicle?: VehicleIdentity;
 };
 
 const META_COMMENTARY_PATTERNS = [
@@ -86,7 +101,11 @@ export function buildExportModel(params: {
   assistantAnalysis?: string | null;
 }): ExportModel {
   const chatInsights = deriveRenderInsightsFromChat(params.assistantAnalysis ?? "");
-  const estimateFacts = inferEstimateFacts(params.report, params.analysis);
+  const reportFields = deriveExportReportFields({
+    report: params.report,
+    analysis: params.analysis,
+  });
+  const estimateFacts = reportFields.estimateFacts;
   const vehicle = inferVehicleInfo(
     params.report,
     params.analysis,
@@ -106,7 +125,7 @@ export function buildExportModel(params: {
     params.panel,
     chatInsights.narrative ?? params.assistantAnalysis ?? null,
     supplementItems,
-    estimateFacts
+    reportFields
   );
   const positionStatement = buildPositionStatement(params.report, params.analysis, supplementItems);
   const request = buildRequest(params.report, params.panel, supplementItems, chatInsights.request);
@@ -145,14 +164,15 @@ export function buildExportModel(params: {
     ? structuredVehicleLabel
     : buildPreferredVehicleIdentityLabel({
         ...vehicle,
-        label: displayVehicle.label ?? structuredVehicleLabel ?? vehicle.label,
+        label: reportFields.vehicleLabel ?? displayVehicle.label ?? structuredVehicleLabel ?? vehicle.label,
         trim: displayVehicle.trim ?? vehicle.trim,
-      }) ?? displayVehicle.label ?? structuredVehicleLabel ?? vehicle.label;
+      }) ?? reportFields.vehicleLabel ?? displayVehicle.label ?? structuredVehicleLabel ?? vehicle.label;
   const allLabelsSuppressed = quality.noisy && guardedSupplementItems.length === 0;
   const exportVehicle = {
     ...vehicle,
     label: guardedVehicleLabel,
     trim: displayVehicle.trim,
+    vin: reportFields.vin ?? vehicle.vin,
     make: cleanDisplayLabel(vehicle.make),
     model: cleanDisplayLabel(vehicle.model),
     manufacturer: cleanDisplayText(vehicle.manufacturer),
@@ -166,6 +186,7 @@ export function buildExportModel(params: {
   return {
     vehicle: exportVehicle,
     estimateFacts,
+    reportFields,
     repairPosition: allLabelsSuppressed
       ? "The core repair conclusion remains intact, but noisy extracted labels were suppressed in this presentation view."
       : cleanPresentationProse(repairPosition),
@@ -183,6 +204,103 @@ export function buildExportModel(params: {
       dvReasoning: cleanDisplayText(valuation.dvReasoning),
       dvMissingInputs: valuation.dvMissingInputs.map((item) => cleanDisplayLabel(item)),
     },
+  };
+}
+
+export function deriveExportReportFields(params: {
+  report: RepairIntelligenceReport | null;
+  analysis: AnalysisResult | null;
+}): ExportReportFields {
+  const sourceText = collectVehicleDocumentText(params.report, params.analysis);
+  const fallbackFacts = extractEstimateFacts({
+    text: sourceText,
+    vehicle: mergeVehicleIdentity(
+      normalizeVehicleIdentity(params.report?.vehicle),
+      normalizeVehicleIdentity(params.report?.analysis?.vehicle),
+      normalizeVehicleIdentity(params.analysis?.vehicle)
+    ),
+  });
+
+  const estimateFacts: EstimateFacts = {
+    vehicle: mergeVehicleIdentity(
+      normalizeVehicleIdentity(params.report?.estimateFacts?.vehicle),
+      normalizeVehicleIdentity(params.report?.analysis?.estimateFacts?.vehicle),
+      normalizeVehicleIdentity(params.analysis?.estimateFacts?.vehicle),
+      normalizeVehicleIdentity(params.report?.vehicle),
+      normalizeVehicleIdentity(params.report?.analysis?.vehicle),
+      normalizeVehicleIdentity(params.analysis?.vehicle),
+      normalizeVehicleIdentity(fallbackFacts.vehicle)
+    ),
+    mileage:
+      params.report?.estimateFacts?.mileage ??
+      params.report?.analysis?.estimateFacts?.mileage ??
+      params.analysis?.estimateFacts?.mileage ??
+      fallbackFacts.mileage,
+    insurer:
+      params.report?.estimateFacts?.insurer ??
+      params.report?.analysis?.estimateFacts?.insurer ??
+      params.analysis?.estimateFacts?.insurer ??
+      fallbackFacts.insurer,
+    estimateTotal:
+      params.report?.estimateFacts?.estimateTotal ??
+      params.report?.analysis?.estimateFacts?.estimateTotal ??
+      params.analysis?.estimateFacts?.estimateTotal ??
+      fallbackFacts.estimateTotal,
+    documentedProcedures: [
+      ...new Set([
+        ...(params.report?.estimateFacts?.documentedProcedures ?? []),
+        ...(params.report?.analysis?.estimateFacts?.documentedProcedures ?? []),
+        ...(params.analysis?.estimateFacts?.documentedProcedures ?? []),
+        ...(fallbackFacts.documentedProcedures ?? []),
+      ]),
+    ],
+    documentedHighlights: [
+      ...new Set([
+        ...(params.report?.estimateFacts?.documentedHighlights ?? []),
+        ...(params.report?.analysis?.estimateFacts?.documentedHighlights ?? []),
+        ...(params.analysis?.estimateFacts?.documentedHighlights ?? []),
+        ...(fallbackFacts.documentedHighlights ?? []),
+      ]),
+    ],
+  };
+
+  const vehicle = mergeVehicleIdentity(
+    normalizeVehicleIdentity(estimateFacts.vehicle),
+    normalizeVehicleIdentity(params.report?.vehicle),
+    normalizeVehicleIdentity(params.report?.analysis?.vehicle),
+    normalizeVehicleIdentity(params.analysis?.vehicle),
+    normalizeVehicleIdentity(fallbackFacts.vehicle)
+  );
+  const vehicleLabel =
+    buildVehicleDisplayLabel(vehicle) ?? sanitizeVehicleDisplay(buildVehicleLabel(vehicle));
+  const vin =
+    normalizeVehicleIdentity(vehicle)?.vin ?? extractVinFromText(sourceText);
+  const presentStrengths = [
+    ...new Set([
+      ...estimateFacts.documentedHighlights,
+      ...estimateFacts.documentedProcedures,
+      ...(params.report?.presentProcedures ?? []),
+    ]),
+  ];
+  const likelySupplementAreas = [
+    ...new Set([
+      ...(params.report?.supplementOpportunities ?? []),
+      ...(params.report?.missingProcedures ?? []),
+    ]),
+  ];
+
+  return {
+    vehicleLabel,
+    vin,
+    mileage: estimateFacts.mileage,
+    insurer: estimateFacts.insurer,
+    estimateTotal: estimateFacts.estimateTotal,
+    documentedHighlights: estimateFacts.documentedHighlights,
+    documentedProcedures: estimateFacts.documentedProcedures,
+    presentStrengths,
+    likelySupplementAreas,
+    estimateFacts,
+    vehicle,
   };
 }
 
@@ -406,51 +524,7 @@ function inferEstimateFacts(
   report: RepairIntelligenceReport | null,
   analysis: AnalysisResult | null
 ): EstimateFacts {
-  const text = collectVehicleDocumentText(report, analysis);
-  const extracted = extractEstimateFacts({
-    text,
-    vehicle: mergeVehicleIdentity(report?.vehicle, report?.analysis?.vehicle, analysis?.vehicle),
-  });
-
-  return {
-    vehicle: mergeVehicleIdentity(
-      report?.estimateFacts?.vehicle,
-      report?.analysis?.estimateFacts?.vehicle,
-      analysis?.estimateFacts?.vehicle,
-      extracted.vehicle
-    ),
-    mileage:
-      report?.estimateFacts?.mileage ??
-      report?.analysis?.estimateFacts?.mileage ??
-      analysis?.estimateFacts?.mileage ??
-      extracted.mileage,
-    insurer:
-      report?.estimateFacts?.insurer ??
-      report?.analysis?.estimateFacts?.insurer ??
-      analysis?.estimateFacts?.insurer ??
-      extracted.insurer,
-    estimateTotal:
-      report?.estimateFacts?.estimateTotal ??
-      report?.analysis?.estimateFacts?.estimateTotal ??
-      analysis?.estimateFacts?.estimateTotal ??
-      extracted.estimateTotal,
-    documentedProcedures: [
-      ...new Set([
-        ...(report?.estimateFacts?.documentedProcedures ?? []),
-        ...(report?.analysis?.estimateFacts?.documentedProcedures ?? []),
-        ...(analysis?.estimateFacts?.documentedProcedures ?? []),
-        ...(extracted.documentedProcedures ?? []),
-      ]),
-    ],
-    documentedHighlights: [
-      ...new Set([
-        ...(report?.estimateFacts?.documentedHighlights ?? []),
-        ...(report?.analysis?.estimateFacts?.documentedHighlights ?? []),
-        ...(analysis?.estimateFacts?.documentedHighlights ?? []),
-        ...(extracted.documentedHighlights ?? []),
-      ]),
-    ],
-  };
+  return deriveExportReportFields({ report, analysis }).estimateFacts;
 }
 
 function collectVehicleDocumentText(
@@ -458,6 +532,10 @@ function collectVehicleDocumentText(
   analysis: AnalysisResult | null
 ): string {
   return [
+    report?.sourceEstimateText,
+    report?.estimateFacts?.vehicle?.vin,
+    report?.estimateFacts?.documentedProcedures?.join("\n"),
+    report?.estimateFacts?.documentedHighlights?.join("\n"),
     report?.analysis?.rawEstimateText,
     analysis?.rawEstimateText,
     report?.vehicle?.vin,
@@ -482,12 +560,44 @@ function resolveAnalysisMode(
 }
 
 function buildSingleEstimateLead(estimateFacts: EstimateFacts): string {
-  const positives = estimateFacts.documentedHighlights.slice(0, 4).map((item) => item.toLowerCase());
-  if (positives.length > 0) {
-    return `The estimate reads as a credible preliminary repair plan and already documents positives such as ${joinHumanList(positives)}, but it likely remains incomplete in several verification and hidden-damage areas.`;
+  const vehicleLabel = buildVehicleDisplayLabel(estimateFacts.vehicle);
+  const facts: string[] = [];
+  if (vehicleLabel) {
+    facts.push(`vehicle ${vehicleLabel}`);
+  }
+  if (estimateFacts.insurer) {
+    facts.push(`insurer ${estimateFacts.insurer}`);
+  }
+  if (typeof estimateFacts.mileage === "number") {
+    facts.push(`mileage ${estimateFacts.mileage.toLocaleString("en-US")}`);
+  }
+  if (typeof estimateFacts.estimateTotal === "number") {
+    facts.push(
+      `estimate total $${estimateFacts.estimateTotal.toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })}`
+    );
   }
 
-  return "The estimate reads as a credible preliminary repair plan, but it likely remains incomplete in several verification, measuring, calibration, and hidden-damage areas.";
+  const strengths = [
+    ...new Set([
+      ...estimateFacts.documentedHighlights,
+      ...estimateFacts.documentedProcedures,
+    ]),
+  ]
+    .slice(0, 5)
+    .map((item) => item.toLowerCase());
+  const factLead =
+    facts.length > 0
+      ? `The estimate reads as a credible preliminary repair plan based on documented file facts including ${joinHumanList(facts)}.`
+      : "The estimate reads as a credible preliminary repair plan based on the documented file facts available in this estimate.";
+  const strengthsLead =
+    strengths.length > 0
+      ? ` It already documents strengths such as ${joinHumanList(strengths)}.`
+      : "";
+
+  return `${factLead}${strengthsLead} The visible scope is not obviously padded, but it is still likely incomplete in measuring, alignment, calibration, and hidden-damage verification areas.`;
 }
 
 function extractVinFromText(text: string): string | undefined {
@@ -533,8 +643,9 @@ function buildRepairPosition(
   panel: DecisionPanel | null,
   assistantAnalysis: string | null,
   supplementItems: ExportSupplementItem[],
-  estimateFacts: EstimateFacts
+  reportFields: ExportReportFields
 ): string {
+  const estimateFacts = reportFields.estimateFacts;
   const candidates = [
     assistantAnalysis,
     analysis?.narrative,
@@ -545,11 +656,14 @@ function buildRepairPosition(
   ]
     .map((value) => sanitizeNarrative(value))
     .filter((value): value is string => Boolean(value));
+  const isComparison = resolveAnalysisMode(report, analysis) === "comparison";
+  const narrativeCandidates = isComparison
+    ? candidates
+    : candidates.filter((value) => !/\b(carrier estimate|shop estimate)\b/i.test(value));
 
-  const strongestNarrative = candidates
+  const strongestNarrative = narrativeCandidates
     .filter((value) => !looksLikeMetaCommentary(value))
     .sort((left, right) => scoreRepairNarrative(right) - scoreRepairNarrative(left))[0];
-  const isComparison = resolveAnalysisMode(report, analysis) === "comparison";
 
   if (supplementItems.length > 0) {
     const topItems = supplementItems.slice(0, 5);
@@ -570,13 +684,13 @@ function buildRepairPosition(
     return `${lead} The clearest remaining issues are ${topTitles}.`;
   }
 
-  const broaderNarrative = candidates.find((value) => {
+  const broaderNarrative = isComparison ? narrativeCandidates.find((value) => {
     const lower = value.toLowerCase();
     return (
       (lower.includes("carrier estimate") || lower.includes("shop estimate")) &&
       (lower.includes("underwritten") || lower.includes("more complete") || lower.includes("repair path"))
     );
-  });
+  }) : undefined;
 
   if (broaderNarrative) {
     return trimTrailingPunctuation(broaderNarrative) + ".";
@@ -590,6 +704,10 @@ function buildRepairPosition(
     return `The clearest remaining repair-path issues are ${joinHumanList(
       supplementItems.slice(0, 4).map((item) => item.title.toLowerCase())
     )}.`;
+  }
+
+  if (resolveAnalysisMode(report, analysis) !== "comparison") {
+    return buildSingleEstimateLead(estimateFacts);
   }
 
   return "The current material does not show a clear unresolved repair-path issue.";
@@ -1140,19 +1258,42 @@ function isContradictedByDocumentedFacts(
   item: ExportSupplementItem,
   estimateFacts: EstimateFacts
 ): boolean {
-  const documented = new Set(
-    [
-      ...estimateFacts.documentedProcedures,
-      ...estimateFacts.documentedHighlights,
-    ].map((value) => normalizeKey(value))
-  );
+  const normalizedDocumented = [
+    ...estimateFacts.documentedProcedures,
+    ...estimateFacts.documentedHighlights,
+  ].map((value) => normalizeKey(value));
+  const documented = new Set(normalizedDocumented);
   const itemKey = normalizeKey(item.title);
+  const hasAnyScanCoverage = normalizedDocumented.some((value) =>
+    /(pre repair scan|post repair scan|in process scan|in process repair scan|diagnostic scan|scan support|pre scan|post scan)/.test(
+      value
+    )
+  );
+  const hasPostScanCoverage = normalizedDocumented.some((value) =>
+    /(post repair scan|post scan|final scan)/.test(value)
+  );
+  const hasPreScanCoverage = normalizedDocumented.some((value) =>
+    /(pre repair scan|pre scan|diagnostic scan)/.test(value)
+  );
 
   if (!itemKey) return false;
+
+  if (itemKey.includes("scan")) {
+    if (itemKey.includes("post") && (hasPostScanCoverage || hasAnyScanCoverage)) {
+      return true;
+    }
+    if (itemKey.includes("pre") && (hasPreScanCoverage || hasAnyScanCoverage)) {
+      return true;
+    }
+    if (hasAnyScanCoverage) {
+      return true;
+    }
+  }
 
   if (
     (itemKey === normalizeKey("Pre-Repair Scan") && documented.has(normalizeKey("Pre-repair scan"))) ||
     (itemKey === normalizeKey("Post-Repair Scan") && documented.has(normalizeKey("Post-repair scan"))) ||
+    (itemKey === normalizeKey("In-process scan") && documented.has(normalizeKey("In-process scan"))) ||
     (itemKey === normalizeKey("Headlamp aiming check") && documented.has(normalizeKey("Headlamp/fog aim"))) ||
     (itemKey === normalizeKey("Corrosion Protection / Cavity Wax") && documented.has(normalizeKey("Cavity wax"))) ||
     (itemKey === normalizeKey("Corrosion Protection / Weld Restoration") && documented.has(normalizeKey("Cavity wax")))

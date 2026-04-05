@@ -20,12 +20,13 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 
 const { extractEstimateFacts } = require("./extractors/extractEstimateFacts.ts");
 const { normalizeReportToAnalysisResult } = require("./builders/normalizeReportToAnalysisResult.ts");
-const { buildExportModel } = require("./builders/buildExportModel.ts");
+const { buildExportModel, deriveExportReportFields } = require("./builders/buildExportModel.ts");
 const { buildCarrierReport } = require("./builders/carrierPdfBuilder.ts");
 const { buildSideBySidePdf } = require("./builders/sideBySidePdfBuilder.ts");
+const { buildVehicleLabel, decodeVinVehicleIdentity, extractVehicleIdentityFromText } = require("./vehicleContext.ts");
 
 const SHOP_21733_TEXT = `
-Vehicle Description: 2018 Tesla Model S 75D AWD
+Vehicle Description: 2018 TESL Model S 75D AWD
 VIN: 5YJSA1E21JF264319
 Mileage: 173,702
 Insurer: GEICO
@@ -126,9 +127,50 @@ run("extractEstimateFacts captures Shop 21733 hard facts and documented positive
   assert.equal(facts.documentedProcedures.includes("Pre-repair scan"), true);
   assert.equal(facts.documentedProcedures.includes("In-process scan"), true);
   assert.equal(facts.documentedProcedures.includes("Post-repair scan"), true);
+  assert.equal(facts.documentedProcedures.includes("Test fits"), true);
+  assert.equal(facts.documentedProcedures.includes("Refrigerant service"), true);
+  assert.equal(facts.documentedProcedures.includes("Cavity wax"), true);
+  assert.equal(facts.documentedProcedures.includes("Final road test"), true);
+  assert.equal(facts.documentedProcedures.includes("HV battery state-of-charge maintenance"), true);
   assert.equal(facts.documentedHighlights.includes("Procedure research/documentation"), true);
   assert.equal(facts.documentedHighlights.includes("Work authorization"), true);
+  assert.equal(facts.documentedHighlights.includes("Test fits"), true);
+  assert.equal(facts.documentedHighlights.includes("Refrigerant service"), true);
+  assert.equal(facts.documentedHighlights.includes("Headlamp/fog aim"), true);
   assert.equal(facts.documentedHighlights.includes("Cavity wax"), true);
+  assert.equal(facts.documentedHighlights.includes("Final road test"), true);
+  assert.equal(facts.documentedHighlights.includes("HV battery state-of-charge maintenance"), true);
+});
+
+run("vehicle extraction resolves TESL header text and Tesla 5YJ VIN decoding", () => {
+  const extractedVehicle = extractVehicleIdentityFromText(SHOP_21733_TEXT, "attachment");
+  const decodedVehicle = decodeVinVehicleIdentity("5YJSA1E21JF264319");
+
+  assert.equal(extractedVehicle?.make, "Tesla");
+  assert.equal(extractedVehicle?.model, "Model S");
+  assert.equal(extractedVehicle?.trim, "75D AWD");
+  assert.equal(decodedVehicle?.make, "Tesla");
+  assert.equal(decodedVehicle?.manufacturer, "Tesla, Inc.");
+  assert.equal(buildVehicleLabel(extractedVehicle), "2018 Tesla Model S 75D AWD");
+});
+
+run("deriveExportReportFields prefers estimateFacts and suppresses placeholder fallbacks", () => {
+  const report = makeReport();
+  const analysis = normalizeReportToAnalysisResult(report);
+  const fields = deriveExportReportFields({ report, analysis });
+
+  assert.equal(fields.vehicleLabel, "2018 Tesla Model S 75D AWD");
+  assert.equal(fields.vin, "5YJSA1E21JF264319");
+  assert.equal(fields.mileage, 173702);
+  assert.equal(fields.insurer, "GEICO");
+  assert.equal(fields.estimateTotal, 19428.53);
+  assert.equal(fields.presentStrengths.includes("Post-repair scan"), true);
+  assert.equal(fields.presentStrengths.includes("Work authorization"), true);
+  assert.equal(fields.presentStrengths.includes("Test fits"), true);
+  assert.equal(fields.presentStrengths.includes("Refrigerant service"), true);
+  assert.equal(fields.presentStrengths.includes("Final road test"), true);
+  assert.equal(fields.presentStrengths.includes("HV battery state-of-charge maintenance"), true);
+  assert.equal(fields.vehicleLabel?.includes("Vehicle details still limited"), false);
 });
 
 run("normalized analysis preserves estimate facts for Shop 21733", () => {
@@ -159,10 +201,22 @@ run("export model removes placeholder text and keeps documented scans as positiv
   assert.equal(exportModel.estimateFacts.insurer, "GEICO");
   assert.equal(exportModel.estimateFacts.mileage, 173702);
   assert.equal(exportModel.estimateFacts.estimateTotal, 19428.53);
+  assert.equal(exportModel.reportFields.vehicleLabel, "2018 Tesla Model S 75D AWD");
+  assert.equal(exportModel.reportFields.vin, "5YJSA1E21JF264319");
   assert.equal(exportModel.repairPosition.includes("Upload an estimate or supporting documents"), false);
   assert.equal(exportModel.request.includes("Upload an estimate or supporting documents"), false);
   assert.equal(supplementTitles.includes("Pre-Repair Scan"), false);
   assert.equal(supplementTitles.includes("Post-Repair Scan"), false);
+  assert.equal(exportModel.repairPosition.includes("credible preliminary repair plan"), true);
+  assert.equal(exportModel.repairPosition.includes("documents strengths such as"), true);
+  assert.equal(exportModel.repairPosition.includes("vehicle 2018 Tesla Model S 75D AWD"), true);
+  assert.equal(exportModel.repairPosition.includes("vehicle details still limited"), false);
+  assert.equal(exportModel.positionStatement.includes("VIN not clearly supported"), false);
+  assert.equal(
+    exportModel.repairPosition.indexOf("documents strengths such as") <
+      exportModel.repairPosition.indexOf("clearest remaining issues"),
+    true
+  );
   assert.equal(exportModel.repairPosition.toLowerCase().includes("carrier estimate"), false);
   assert.equal(exportModel.repairPosition.toLowerCase().includes("shop estimate"), false);
 });
@@ -190,6 +244,14 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
   assert.equal(carrier.summary.find((item) => item.label === "Estimate Total")?.value, "$19,428.53");
   assert.equal(
     carrier.sections.some((section) => section.title === "Documented Positives" && (section.bullets ?? []).includes("Cavity wax.")),
+    true
+  );
+  assert.equal(
+    carrier.sections.some((section) => section.title === "Documented Positives" && (section.bullets ?? []).includes("Post-repair scan.")),
+    true
+  );
+  assert.equal(
+    carrier.sections.some((section) => section.title === "Documented Positives" && (section.bullets ?? []).includes("Final road test.")),
     true
   );
   assert.equal(

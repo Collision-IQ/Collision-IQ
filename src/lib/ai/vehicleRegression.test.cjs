@@ -249,7 +249,7 @@ run("true no-data export still falls back to Unspecified", () => {
   assert.equal(findSummaryValue(document, "Vehicle"), "Unspecified");
   assert.equal(
     findSummaryValue(document, "VIN"),
-    "Not clearly supported in the current material."
+    "Unspecified"
   );
 });
 

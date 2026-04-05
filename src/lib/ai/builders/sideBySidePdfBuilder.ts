@@ -14,8 +14,9 @@ export function buildSideBySidePdf(params: {
   const { exportModel } = source;
   const isComparison = source.analysisMode === "comparison";
   const vehicleIdentity =
+    exportModel.reportFields.vehicleLabel ??
     buildPreferredVehicleIdentityLabel(exportModel.vehicle) ??
-    "Vehicle details still limited in the current material.";
+    "Unspecified";
 
   return {
     filename: "collision-iq-side-by-side-report.pdf",
@@ -30,17 +31,17 @@ export function buildSideBySidePdf(params: {
     }),
     summary: [
       { label: "Vehicle", value: vehicleIdentity },
-      { label: "VIN", value: exportModel.vehicle.vin || "Not clearly supported in the current material." },
-      ...(exportModel.estimateFacts.insurer
-        ? [{ label: "Insurer", value: exportModel.estimateFacts.insurer }]
+      { label: "VIN", value: exportModel.reportFields.vin || exportModel.vehicle.vin || "Unspecified" },
+      ...(exportModel.reportFields.insurer
+        ? [{ label: "Insurer", value: exportModel.reportFields.insurer }]
         : []),
-      ...(typeof exportModel.estimateFacts.mileage === "number"
-        ? [{ label: "Mileage", value: exportModel.estimateFacts.mileage.toLocaleString("en-US") }]
+      ...(typeof exportModel.reportFields.mileage === "number"
+        ? [{ label: "Mileage", value: exportModel.reportFields.mileage.toLocaleString("en-US") }]
         : []),
-      ...(typeof exportModel.estimateFacts.estimateTotal === "number"
+      ...(typeof exportModel.reportFields.estimateTotal === "number"
         ? [{
             label: "Estimate Total",
-            value: `$${exportModel.estimateFacts.estimateTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+            value: `$${exportModel.reportFields.estimateTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
           }]
         : []),
       { label: "Mode", value: formatAnalysisModeLabel(source.analysisMode) },
