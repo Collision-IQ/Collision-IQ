@@ -221,10 +221,6 @@ export default function ChatWidget({
     return file.type.startsWith("image/");
   }
 
-  function pushAssistantMessage(content: string) {
-    setMessages((prev) => [...prev, createMessage("assistant", content, "analysis")]);
-  }
-
   function upsertSystemStatusMessage(content: string) {
     setMessages((prev) => {
       const activeMessageId = activeSystemStatusMessageIdRef.current;
