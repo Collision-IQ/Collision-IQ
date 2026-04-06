@@ -22,11 +22,13 @@ import AttachmentPreviewModal, {
 } from "@/components/AttachmentPreviewModal";
 
 type Role = "user" | "assistant";
+type AssistantMessageKind = "analysis" | "system_status";
 
 interface Message {
   id: string;
   role: Role;
   content: string;
+  kind?: AssistantMessageKind;
 }
 
 interface Attachment {
@@ -55,6 +57,7 @@ interface ChatWidgetProps {
 const INITIAL_MESSAGE: Message = {
   id: "assistant-initial",
   role: "assistant",
+  kind: "analysis",
   content:
     "Hi there - upload an estimate, OEM procedure, or photo and I'll produce a structured repair analysis.",
 };
@@ -101,6 +104,7 @@ export default function ChatWidget({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const messageCounterRef = useRef(0);
+  const activeSystemStatusMessageIdRef = useRef<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
@@ -161,6 +165,7 @@ export default function ChatWidget({
 
   useEffect(() => {
     if (attachments.length < 2) return;
+    return;
 
     setMessages((prev) => {
       const feedback =
@@ -217,7 +222,51 @@ export default function ChatWidget({
   }
 
   function pushAssistantMessage(content: string) {
-    setMessages((prev) => [...prev, createMessage("assistant", content)]);
+    setMessages((prev) => [...prev, createMessage("assistant", content, "analysis")]);
+  }
+
+  function upsertSystemStatusMessage(content: string) {
+    setMessages((prev) => {
+      const activeMessageId = activeSystemStatusMessageIdRef.current;
+      if (activeMessageId) {
+        const statusIndex = prev.findIndex((message) => message.id === activeMessageId);
+        if (statusIndex >= 0) {
+          if (prev[statusIndex]?.content === content) {
+            return prev;
+          }
+
+          const next = [...prev];
+          next[statusIndex] = { ...next[statusIndex], content };
+          return next;
+        }
+      }
+
+      const nextMessage = createMessage("assistant", content, "system_status");
+      activeSystemStatusMessageIdRef.current = nextMessage.id;
+      return [...prev, nextMessage];
+    });
+  }
+
+  function clearActiveSystemStatusMessage() {
+    const activeMessageId = activeSystemStatusMessageIdRef.current;
+    if (!activeMessageId) return;
+
+    setMessages((prev) => prev.filter((message) => message.id !== activeMessageId));
+    activeSystemStatusMessageIdRef.current = null;
+  }
+
+  function pushSystemStatusMessage(content: string) {
+    setMessages((prev) => {
+      if (
+        prev[prev.length - 1]?.role === "assistant" &&
+        prev[prev.length - 1]?.kind === "system_status" &&
+        prev[prev.length - 1]?.content === content
+      ) {
+        return prev;
+      }
+
+      return [...prev, createMessage("assistant", content, "system_status")];
+    });
   }
 
   function clearStructuredAnalysisState() {
@@ -430,7 +479,7 @@ export default function ChatWidget({
       fileCount: fileList.length,
       totalBytes: Array.from(fileList).reduce((sum, file) => sum + file.size, 0),
     });
-    pushAssistantMessage(UPLOAD_CAP_MESSAGE);
+    upsertSystemStatusMessage(UPLOAD_CAP_MESSAGE);
     return true;
   }
 
@@ -453,6 +502,7 @@ export default function ChatWidget({
     setPreviewAttachmentId(null);
     setReplaceAttachmentId(null);
     firstAttachmentAtRef.current = null;
+    activeSystemStatusMessageIdRef.current = null;
 
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (cameraInputRef.current) cameraInputRef.current.value = "";
@@ -500,6 +550,14 @@ export default function ChatWidget({
           ? analysisStartMs - firstAttachmentAtRef.current
           : 0,
       });
+      if (hasAttachmentsInTurn) {
+        upsertSystemStatusMessage(
+          buildAttachmentBatchStatus(
+            attachments.map((attachment) => ({ type: attachment.mime })),
+            "analysis_starting"
+          )
+        );
+      }
 
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -536,7 +594,11 @@ export default function ChatWidget({
         });
 
         if (sessionRef.current === mySession) {
-          pushAssistantMessage(errorMessage);
+          if (hasAttachmentsInTurn) {
+            upsertSystemStatusMessage(errorMessage);
+          } else {
+            pushSystemStatusMessage(errorMessage);
+          }
           if (
             hasAttachmentsInTurn &&
             analysisRunRef.current === activeAnalysisRunId
@@ -612,6 +674,7 @@ export default function ChatWidget({
               refinedWithRetrieval: analysisData.refinedWithRetrieval ?? false,
               analysisCompletedAt: analysisData.analysisCompletedAt ?? null,
             });
+            upsertSystemStatusMessage("Analysis complete.");
             setAttachments((prev) =>
               prev.map((attachment) => ({
                 ...attachment,
@@ -693,10 +756,18 @@ export default function ChatWidget({
       });
 
       if (sessionRef.current === mySession) {
-        setMessages((prev) => [
-          ...prev,
-          createMessage("assistant", "The analysis service had a temporary issue. Please retry."),
-        ]);
+        if (hasAttachmentsInTurn) {
+          upsertSystemStatusMessage("The analysis service had a temporary issue. Please retry.");
+        } else {
+          setMessages((prev) => [
+            ...prev,
+            createMessage(
+              "assistant",
+              "The analysis service had a temporary issue. Please retry.",
+              "system_status"
+            ),
+          ]);
+        }
         if (
           hasAttachmentsInTurn &&
           analysisRunRef.current === activeAnalysisRunId
@@ -796,12 +867,6 @@ export default function ChatWidget({
     setPreviewAttachmentId(replaceId ?? attachmentId);
     setReplaceAttachmentId(null);
     firstAttachmentAtRef.current ??= Date.now();
-
-    pushAssistantMessage(
-      replaceId
-        ? `File "${filename}" replaced the previous attachment successfully.`
-        : `File "${filename}" uploaded successfully.`
-    );
   }
 
   async function handleFilesSelected(fileList: FileList | null) {
@@ -813,17 +878,20 @@ export default function ChatWidget({
     }
 
     try {
+      const files = Array.from(fileList);
       console.info("[attachments] upload batch selected", {
         source: "file",
         fileCount: fileList.length,
-        totalBytes: Array.from(fileList).reduce((sum, file) => sum + file.size, 0),
+        totalBytes: files.reduce((sum, file) => sum + file.size, 0),
       });
-      for (const file of Array.from(fileList)) {
+      upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "uploading"));
+      for (const file of files) {
         await uploadSingleFile(file, "file", replaceAttachmentId);
       }
+      upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
     } catch (err) {
       console.error(err);
-      pushAssistantMessage("One or more uploads failed.");
+      upsertSystemStatusMessage("Some files could not be attached.");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
@@ -838,17 +906,20 @@ export default function ChatWidget({
     }
 
     try {
+      const files = Array.from(fileList);
       console.info("[attachments] upload batch selected", {
         source: "camera",
         fileCount: fileList.length,
-        totalBytes: Array.from(fileList).reduce((sum, file) => sum + file.size, 0),
+        totalBytes: files.reduce((sum, file) => sum + file.size, 0),
       });
-      for (const file of Array.from(fileList)) {
+      upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "uploading"));
+      for (const file of files) {
         await uploadSingleFile(file, "camera", replaceAttachmentId);
       }
+      upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
     } catch (err) {
       console.error(err);
-      pushAssistantMessage("Camera upload failed.");
+      upsertSystemStatusMessage("Camera upload failed.");
     } finally {
       if (cameraInputRef.current) cameraInputRef.current.value = "";
     }
@@ -870,6 +941,7 @@ export default function ChatWidget({
     onAttachmentChange?.(
       remaining.length ? remaining[remaining.length - 1].filename : null
     );
+    clearActiveSystemStatusMessage();
     invalidateStructuredAnalysis();
   }
 
@@ -884,6 +956,7 @@ export default function ChatWidget({
     setPreviewAttachmentId(null);
     setReplaceAttachmentId(null);
     onAttachmentChange?.(null);
+    clearActiveSystemStatusMessage();
     invalidateStructuredAnalysis();
   }
 
@@ -894,12 +967,17 @@ export default function ChatWidget({
     fileInputRef.current?.click();
   }
 
-  function createMessage(role: Role, content: string): Message {
+  function createMessage(
+    role: Role,
+    content: string,
+    kind?: AssistantMessageKind
+  ): Message {
     messageCounterRef.current += 1;
     return {
       id: `${role}-${messageCounterRef.current}`,
       role,
       content,
+      kind,
     };
   }
 
@@ -997,7 +1075,7 @@ export default function ChatWidget({
   }
 
   async function handleSpeakMessage(message: Message) {
-    if (disabled) return;
+    if (disabled || message.kind === "system_status") return;
     if (speakingMessageId === message.id && isSpeaking) {
       stopSpeaking();
       return;
@@ -1023,7 +1101,7 @@ export default function ChatWidget({
     }
 
     if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-      pushAssistantMessage("Read aloud is not available in this browser.");
+      pushSystemStatusMessage("Read aloud is not available in this browser.");
       return;
     }
 
@@ -1095,16 +1173,28 @@ export default function ChatWidget({
           {messages.map((msg) => (
             <div
               key={msg.id}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} mb-3`}
+              className={`flex ${
+                msg.role === "user"
+                  ? "justify-end"
+                  : msg.kind === "system_status"
+                    ? "justify-center"
+                    : "justify-start"
+              } mb-3`}
             >
               <div
-                className={`rounded-2xl px-5 py-4 ${
+                className={`${
+                  msg.kind === "system_status"
+                    ? "max-w-[560px] rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs text-white/55"
+                    : "rounded-2xl px-5 py-4"
+                } ${
                   msg.role === "user"
                     ? `${userBubble} max-w-[65%]`
-                    : "max-w-[760px] bg-glass border-glass backdrop-blur-md"
+                    : msg.kind === "system_status"
+                      ? ""
+                      : "max-w-[760px] bg-glass border-glass backdrop-blur-md"
                 }`}
               >
-                {msg.role === "assistant" ? (
+                {msg.role === "assistant" && msg.kind !== "system_status" ? (
                   <div>
                     <div className="mb-3 flex items-center justify-end">
                       <button
@@ -1167,6 +1257,8 @@ export default function ChatWidget({
                     </ReactMarkdown>
                     </div>
                   </div>
+                ) : msg.kind === "system_status" ? (
+                  <div className="text-center tracking-[0.02em]">{msg.content}</div>
                 ) : (
                   <div className="whitespace-pre-wrap text-sm sm:text-base text-current">
                     {msg.content}
@@ -1412,6 +1504,35 @@ function formatAttachmentKind(attachment: Attachment): string {
   if (attachment.mime.startsWith("image/")) return "Image";
   if (attachment.text?.trim()) return "Text";
   return attachment.mime || "Unknown";
+}
+
+function buildAttachmentBatchStatus(
+  files: Array<Pick<File, "type">>,
+  verb: "attached" | "updated" | "uploading" | "analysis_starting"
+): string {
+  const imageCount = files.filter((file) => file.type.startsWith("image/")).length;
+  const pdfCount = files.filter((file) => file.type === "application/pdf").length;
+  const otherCount = files.length - imageCount - pdfCount;
+  const parts = [
+    imageCount > 0 ? `${imageCount} ${imageCount === 1 ? "photo" : "photos"}` : null,
+    pdfCount > 0 ? `${pdfCount} ${pdfCount === 1 ? "PDF" : "PDFs"}` : null,
+    otherCount > 0 ? `${otherCount} ${otherCount === 1 ? "file" : "files"}` : null,
+  ].filter(Boolean) as string[];
+
+  if (verb === "uploading") {
+    return `Uploading & assessing ${files.length} ${files.length === 1 ? "file" : "files"}...`;
+  }
+
+  if (verb === "analysis_starting") {
+    const lead = files.length === 1 ? "1 file attached" : `${files.length} files attached`;
+    return `${lead}: ${parts.join(", ")}. Analysis starting.`;
+  }
+
+  if (files.length === 1) {
+    return `1 file ${verb}.`;
+  }
+
+  return `${files.length} files ${verb}: ${parts.join(", ")}.`;
 }
 
 function formatAssistantMessage(content: string): string {
