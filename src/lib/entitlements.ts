@@ -17,6 +17,7 @@ export type FeatureKey =
   | "what_stands_out"
   | "vehicle_context"
   | "basic_pdf_export"
+  | "redacted_chat_export"
   | "supplement_lines"
   | "negotiation_draft"
   | "rebuttal_email"
@@ -50,6 +51,7 @@ const PLAN_FEATURES: Record<PlanTier, Record<FeatureKey, boolean>> = {
     what_stands_out: true,
     vehicle_context: true,
     basic_pdf_export: true,
+    redacted_chat_export: false,
     supplement_lines: false,
     negotiation_draft: false,
     rebuttal_email: false,
@@ -65,6 +67,7 @@ const PLAN_FEATURES: Record<PlanTier, Record<FeatureKey, boolean>> = {
     what_stands_out: true,
     vehicle_context: true,
     basic_pdf_export: true,
+    redacted_chat_export: true,
     supplement_lines: true,
     negotiation_draft: true,
     rebuttal_email: true,
@@ -80,6 +83,7 @@ const PLAN_FEATURES: Record<PlanTier, Record<FeatureKey, boolean>> = {
     what_stands_out: true,
     vehicle_context: true,
     basic_pdf_export: true,
+    redacted_chat_export: true,
     supplement_lines: true,
     negotiation_draft: true,
     rebuttal_email: true,
@@ -295,6 +299,7 @@ export function buildAnonymousAccess(): ViewerAccess {
       what_stands_out: false,
       vehicle_context: false,
       basic_pdf_export: false,
+      redacted_chat_export: false,
     },
     monthlyAnalysisLimit: getPlanAnalysisCap("starter"),
     monthlyAnalysisUsed: 0,
@@ -323,6 +328,7 @@ async function buildAccessFromDbUser(dbUser: DbUserWithRelations): Promise<Viewe
         what_stands_out: true,
         vehicle_context: true,
         basic_pdf_export: true,
+        redacted_chat_export: true,
         supplement_lines: true,
         negotiation_draft: true,
         rebuttal_email: true,

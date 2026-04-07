@@ -38,6 +38,16 @@ Keep estimate-review outputs fair, open-minded, and file-specific so shops, carr
 3. What is still open, mixed, or unclear.
 4. Which position reads stronger, only if the file clearly supports that conclusion.
 
+## Linked-document review
+- Scan uploaded estimate text for linked support documents.
+- When estimate links are present, review relevant linked documents before finalizing the estimate review.
+- Relevant linked documents include OEM procedures, OEM position statements, ADAS reports, paint/refinish documents, and insurer-support documents tied to the estimate.
+- If the link is an Egnyte link, use the existing local Egnyte integration and environment configuration already present in the repo.
+- Do not expose credentials, tokens, or raw secret values.
+- Treat linked documents as supporting evidence, not automatic scope expansion.
+- If linked support changes the conclusion, say what changed and why.
+- If linked support is unavailable, continue with the estimate and file evidence already in hand.
+
 ## Writing rules
 - Prefer evidence-led phrasing over verdict-led phrasing.
 - Avoid always using the same opening sentence.

@@ -583,13 +583,6 @@ function sanitizeCanonicalField(value?: string | null): string | undefined {
   return cleaned;
 }
 
-function inferEstimateFacts(
-  report: RepairIntelligenceReport | null,
-  analysis: AnalysisResult | null
-): EstimateFacts {
-  return deriveExportReportFields({ report, analysis }).estimateFacts;
-}
-
 function collectVehicleDocumentText(
   report: RepairIntelligenceReport | null,
   analysis: AnalysisResult | null
@@ -1256,6 +1249,21 @@ function normalizeValuationConfidence(
 function inferSupplementCategory(value: string): string {
   const lower = value.toLowerCase();
 
+  if (
+    lower.includes("refinish") ||
+    lower.includes("blend") ||
+    lower.includes("tint") ||
+    lower.includes("color sand") ||
+    lower.includes("denib") ||
+    lower.includes("polish") ||
+    lower.includes("masking") ||
+    lower.includes("edge prep") ||
+    lower.includes("flex additive") ||
+    lower.includes("let-down")
+  ) {
+    return "refinish";
+  }
+
   if (lower.includes("scan")) return "scan";
   if (lower.includes("calibration") || lower.includes("radar") || lower.includes("camera")) {
     return "calibration";
@@ -1413,6 +1421,28 @@ function deriveSupplementTitle(value: string): string {
   }
   if (lower.includes("coolant") || lower.includes("bleed") || lower.includes("purge")) {
     return "Coolant Fill and Bleed";
+  }
+  if (lower.includes("tint color") || lower.includes("let-down panel") || lower.includes("let down panel")) {
+    return "Tint Color / Let-Down Panel";
+  }
+  if (
+    lower.includes("finish sand and polish") ||
+    lower.includes("color sand and buff") ||
+    lower.includes("denib")
+  ) {
+    return "Finish Sand and Polish";
+  }
+  if (lower.includes("masking") || lower.includes("edge prep")) {
+    return "Masking / Edge Prep";
+  }
+  if (lower.includes("three-stage refinish") || lower.includes("three stage refinish")) {
+    return "Three-Stage Refinish Operation";
+  }
+  if (lower.includes("flex additive")) {
+    return "Flex Additive";
+  }
+  if (lower.includes("blend")) {
+    return "Blend / Blend Within Panel";
   }
   if (
     lower.includes("hardware") ||
@@ -1919,7 +1949,11 @@ function selectConsistentSupplementItems(
 }
 
 function buildRequestHeading(items: ExportSupplementItem[]): string {
+  const hasOnlyRefinishItems = items.length > 0 && items.every((item) => isRefinishSupportItem(item.title));
   const kinds = new Set(items.map((item) => item.kind));
+  if (hasOnlyRefinishItems) {
+    return "Please review the following refinish-related items and provide the procedure, blend, material, or paint-process support carrying the current position:";
+  }
   if (kinds.has("missing_operation")) {
     return "Please review the following operations and provide support if they remain part of the intended repair plan:";
   }
@@ -2058,6 +2092,18 @@ function buildRequestLine(item: ExportSupplementItem): string {
   const reason = sanitizeReason(item.rationale, "Please clarify how this item is being supported.");
 
   switch (item.title) {
+    case "Tint Color / Let-Down Panel":
+      return "Please provide the tint, let-down, or color-match rationale supporting this refinish step, including the paint-process support carrying the current position.";
+    case "Finish Sand and Polish":
+      return "Please provide the finish sand, denib, color-sand-and-buff, or final-finish rationale supporting this refinish step.";
+    case "Masking / Edge Prep":
+      return "Please provide the masking, edge-prep, or related paint-process rationale supporting this refinish step.";
+    case "Three-Stage Refinish Operation":
+      return "Please provide the three-stage refinish rationale, including the paint-process and material support carrying this operation.";
+    case "Flex Additive":
+      return "Please provide the flex-additive rationale and any supporting paint-process documentation carrying this refinish operation.";
+    case "Blend / Blend Within Panel":
+      return "Please provide the blend rationale and related paint-process support for this refinish operation.";
     case "Structural Measurement Verification":
       return "Please provide the documented dimensional measurement or verification support for this repair path, including how geometry confirmation was performed.";
     case "Structural Setup and Pull Verification":
@@ -2096,6 +2142,23 @@ function makeRequestLineFromReason(reason: string): string {
   }
 
   return `Please provide the supporting rationale or documentation for this item: ${trimmed}.`;
+}
+
+function isRefinishSupportItem(value?: string): boolean {
+  const lower = (value ?? "").toLowerCase();
+  return (
+    lower.includes("refinish") ||
+    lower.includes("blend") ||
+    lower.includes("tint") ||
+    lower.includes("let-down") ||
+    lower.includes("let down") ||
+    lower.includes("color sand") ||
+    lower.includes("denib") ||
+    lower.includes("polish") ||
+    lower.includes("masking") ||
+    lower.includes("edge prep") ||
+    lower.includes("flex additive")
+  );
 }
 
 function synthesizeSupplementItemsFromNarrative(params: {
@@ -2470,6 +2533,17 @@ function isSpecificSupplementItem(value?: string): boolean {
     lower.includes("corrosion") ||
     lower.includes("primer") ||
     lower.includes("wax") ||
+    lower.includes("refinish") ||
+    lower.includes("blend") ||
+    lower.includes("tint") ||
+    lower.includes("let-down") ||
+    lower.includes("let down") ||
+    lower.includes("denib") ||
+    lower.includes("color sand") ||
+    lower.includes("polish") ||
+    lower.includes("masking") ||
+    lower.includes("edge prep") ||
+    lower.includes("flex additive") ||
     lower.includes("tie bar") ||
     lower.includes("lock support") ||
     lower.includes("core support") ||

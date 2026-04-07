@@ -17,6 +17,7 @@ export type AccountEntitlements = Omit<ViewerAccess, "plan"> & {
   analysisCap: number;
   analysisCount: number;
   canUseBasicExports: boolean;
+  canUseRedactedChatExport: boolean;
   canUseSupplementLines: boolean;
   canUseNegotiationDraft: boolean;
   canUseRebuttalEmail: boolean;
@@ -73,6 +74,7 @@ export function toAccountEntitlements(access: ViewerAccess): AccountEntitlements
       analysisCap: Number.MAX_SAFE_INTEGER,
       analysisCount: 0,
       canUseBasicExports: true,
+      canUseRedactedChatExport: true,
       canUseSupplementLines: true,
       canUseNegotiationDraft: true,
       canUseRebuttalEmail: true,
@@ -112,6 +114,7 @@ export function toAccountEntitlements(access: ViewerAccess): AccountEntitlements
     analysisCap,
     analysisCount,
     canUseBasicExports: hasFeature(access, "basic_pdf_export"),
+    canUseRedactedChatExport: hasFeature(access, "redacted_chat_export"),
     canUseSupplementLines: hasFeature(access, "supplement_lines"),
     canUseNegotiationDraft: hasFeature(access, "negotiation_draft"),
     canUseRebuttalEmail: hasFeature(access, "rebuttal_email"),
