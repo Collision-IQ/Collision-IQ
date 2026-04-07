@@ -54,6 +54,9 @@ interface ChatWidgetProps {
   disabled?: boolean;
 }
 
+const OPENING_DISCLAIMER =
+  "Before we get rolling: I'm here to help analyze estimates, procedures, photos, documents, and negotiation support using the information available in the file and knowledge base. I'm not a lawyer, I'm not an engineer, and I can't give legal or engineering advice. You're responsible for reviewing the output and making final decisions. Think of me as your repair-intelligence copilot with a sharp brain and a deep library — not the final signer on the dotted line.";
+
 const INITIAL_MESSAGE: Message = {
   id: "assistant-initial",
   role: "assistant",
@@ -89,6 +92,8 @@ export default function ChatWidget({
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingError, setRecordingError] = useState<string | null>(null);
+  const [showOpeningDisclaimer, setShowOpeningDisclaimer] = useState(true);
+  const [openingDisclaimerDismissed, setOpeningDisclaimerDismissed] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -165,7 +170,6 @@ export default function ChatWidget({
 
   useEffect(() => {
     if (attachments.length < 2) return;
-    return;
 
     setMessages((prev) => {
       const feedback =
@@ -479,6 +483,11 @@ export default function ChatWidget({
     return true;
   }
 
+  function dismissOpeningDisclaimer() {
+    setShowOpeningDisclaimer(false);
+    setOpeningDisclaimerDismissed(true);
+  }
+
   function handleEndChat() {
     abortRef.current?.abort();
     abortRef.current = null;
@@ -499,6 +508,8 @@ export default function ChatWidget({
     setReplaceAttachmentId(null);
     firstAttachmentAtRef.current = null;
     activeSystemStatusMessageIdRef.current = null;
+    setShowOpeningDisclaimer(true);
+    setOpeningDisclaimerDismissed(false);
 
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (cameraInputRef.current) cameraInputRef.current.value = "";
@@ -1136,6 +1147,24 @@ export default function ChatWidget({
         >
           {messages.length === 1 && messages[0].role === "assistant" && (
             <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
+              {showOpeningDisclaimer && !openingDisclaimerDismissed && (
+                <div className="mx-auto max-w-[920px] rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-4 text-sm text-white/75">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="leading-[1.6]">
+                      {OPENING_DISCLAIMER}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={dismissOpeningDisclaimer}
+                      className="shrink-0 rounded-lg border border-white/10 bg-white/5 p-2 text-white/60 transition hover:bg-white/10 hover:text-white"
+                      aria-label="Dismiss disclaimer"
+                      title="Dismiss disclaimer"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="text-white/60 text-sm">Start a repair analysis</div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl w-full">

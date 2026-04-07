@@ -20,6 +20,7 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
       exportModel.reportFields.vehicleLabel,
       buildPreferredRebuttalSubjectVehicleLabel(exportModel.vehicle)
     ) ?? "Current repair file";
+  const openingPosition = buildCarrierOpening(exportModel.repairPosition);
 
   return {
     filename: "collision-iq-rebuttal-email.pdf",
@@ -55,7 +56,7 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
       },
       {
         title: "Opening Position",
-        body: `After reviewing the current file, our position is that ${lowercaseFirst(exportModel.repairPosition)}`,
+        body: openingPosition,
       },
       {
         title: "Requested Revisions / Support",
@@ -72,16 +73,18 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
         body: [
           "Hello,",
           "",
-          `After reviewing the current file, our position is that ${lowercaseFirst(exportModel.repairPosition)}`,
+          openingPosition,
           "",
-          "The main items that still need revision or support are:",
+          rebuttalItems.length > 0
+            ? "The file would benefit from clearer support on the following items:"
+            : "Please review the current repair path and supporting documentation:",
           ...(
             rebuttalItems.length > 0
               ? rebuttalItems.map((item) => `- ${item.title}: ${item.rationale}`)
               : ["- Please review the current repair path and provide supporting documentation."]
           ),
           "",
-          "Please update the estimate or provide the documentation supporting the current position on the items above.",
+          "Please update the estimate or provide any documentation that clarifies the current position on the items above.",
           "",
           "Thank you,",
           "[Your Name]",
@@ -121,7 +124,24 @@ function buildPdfFooter(): string[] {
   ];
 }
 
+function buildCarrierOpening(repairPosition: string): string {
+  const normalized = trimTrailingPunctuation(repairPosition);
+  if (!normalized) {
+    return "The current file supports a focused estimate review.";
+  }
+
+  if (/^(based on|across|from|the file|the current file|documented file facts|support appears)\b/i.test(normalized)) {
+    return normalized + ".";
+  }
+
+  return `Based on the current file, ${lowercaseFirst(normalized)}.`;
+}
+
 function lowercaseFirst(value: string): string {
   if (!value) return value;
   return value.charAt(0).toLowerCase() + value.slice(1);
+}
+
+function trimTrailingPunctuation(value: string): string {
+  return value.replace(/[.!\s]+$/g, "").trim();
 }

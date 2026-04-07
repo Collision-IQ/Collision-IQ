@@ -32,6 +32,8 @@ const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at once for now.";
 const TRANSIENT_CHAT_ERROR_MESSAGE =
   "The analysis service had a temporary issue. Please retry.";
 const OPENAI_RETRY_DELAY_MS = 400;
+const LEGAL_INFO_DISCLAIMER =
+  "Informational support only — not legal advice. I'm not a lawyer, and any legal position should be reviewed by qualified counsel.";
 
 type UploadedDocument = {
   id?: string;
@@ -60,10 +62,15 @@ type IncomingAttachment = {
   pageCount?: number;
 };
 
+type IncomingJurisdiction = {
+  stateCode?: string;
+};
+
 type ChatRequestBody = {
   messages?: IncomingMessage[];
   attachmentIds?: string[];
   attachments?: IncomingAttachment[];
+  jurisdiction?: IncomingJurisdiction;
 };
 
 type OpenAIErrorMeta = {
@@ -165,6 +172,22 @@ function extractLatestUserMessage(messages: IncomingMessage[] = []): string {
     .find((message) => message?.role === "user");
 
   return lastUserMessage ? extractTextContent(lastUserMessage.content).trim() : "";
+}
+
+function resolveJurisdictionFromBody(
+  body: ChatRequestBody
+): { stateCode: string; confidence: "high"; source: "client_input" } | undefined {
+  const stateCode = body.jurisdiction?.stateCode?.trim().toUpperCase();
+
+  if (!stateCode) {
+    return undefined;
+  }
+
+  return {
+    stateCode,
+    confidence: "high",
+    source: "client_input",
+  };
 }
 
 function formatRecentConversation(messages: IncomingMessage[] = []): string {
@@ -346,6 +369,28 @@ function isTransientOpenAIError(error: unknown): boolean {
   return meta.type === "server_error" || (typeof meta.status === "number" && meta.status >= 500);
 }
 
+function isLegalAdjacentNegotiationRequest(userMessage: string): boolean {
+  const lower = userMessage.toLowerCase();
+
+  return [
+    "negotiate",
+    "negotiation",
+    "rebuttal",
+    "carrier",
+    "appraisal",
+    "appraiser",
+    "settlement",
+    "diminished value",
+    "total loss",
+    "aftermarket",
+    "oem part",
+    "consumer rights",
+    "pennsylvania",
+    "pa law",
+    "statute",
+  ].some((term) => lower.includes(term));
+}
+
 function logOpenAIPhaseFailure(
   phase: "first-pass" | "second-pass",
   attempt: 1 | 2,
@@ -403,6 +448,7 @@ export async function POST(req: Request) {
     const { user, isPlatformAdmin } = await requireCurrentUser();
     const requestStartedAt = Date.now();
     const body = (await req.json()) as ChatRequestBody;
+    const explicitJurisdiction = resolveJurisdictionFromBody(body);
     const incomingAttachmentCount = Array.isArray(body.attachmentIds)
       ? body.attachmentIds.length
       : Array.isArray(body.attachments)
@@ -493,6 +539,7 @@ export async function POST(req: Request) {
       userQuery: userMessage,
       estimateText,
       firstPassAnswer: firstPassText,
+      jurisdiction: explicitJurisdiction,
       analysis: retrievalAnalysis,
       maxResults: 5,
       maxExcerptChars: 500,
@@ -522,7 +569,13 @@ export async function POST(req: Request) {
       durationMs: Date.now() - requestStartedAt,
     });
 
-    return new Response(cleanDisplayText(outputText), {
+    const needsLegalDisclaimer = isLegalAdjacentNegotiationRequest(userMessage);
+
+    const finalText = needsLegalDisclaimer
+      ? `${LEGAL_INFO_DISCLAIMER}\n\n${outputText}`
+      : outputText;
+
+    return new Response(cleanDisplayText(finalText), {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
       },

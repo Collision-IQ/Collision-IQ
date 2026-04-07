@@ -8,7 +8,7 @@ import {
   buildDriveRetrievalRequest,
   type DriveDocumentType,
   type DriveInferenceConfidence,
-  type DriveResultMetadata,
+  type DriveJurisdictionContext,
   type DriveRetrievalRequest,
   type DriveRetrievalResponse,
   type DriveRetrievalResult,
@@ -54,6 +54,7 @@ export async function retrieveDriveSupport(params: {
   userQuery: string;
   estimateText?: string;
   firstPassAnswer: string;
+  jurisdiction?: DriveJurisdictionContext;
   analysis?: Pick<
     ChatAnalysisOutput,
     "summary" | "repairStrategy" | "keyDrivers" | "missingOperations" | "vehicleIdentification"
@@ -65,6 +66,7 @@ export async function retrieveDriveSupport(params: {
     taskType: params.taskType,
     userQuery: params.userQuery,
     estimateText: [params.estimateText, params.firstPassAnswer].filter(Boolean).join("\n\n"),
+    jurisdiction: params.jurisdiction,
     analysis: params.analysis ?? null,
     maxResults: params.maxResults ?? 5,
     maxExcerptChars: params.maxExcerptChars ?? 500,
@@ -78,15 +80,44 @@ export async function retrieveDriveSupport(params: {
   const laneResults = new Map<string, Map<string, DriveRetrievalResult>>();
 
   for (const lanePlan of request.lanePlans) {
+    if (lanePlan.lane === "pa_law_lane" && !isStateLawJurisdictionCurrentlyBacked(request)) {
+      continue;
+    }
+
+    if (lanePlan.lane === "pa_law_lane" && !shouldSearchStateLawLane(request)) {
+      continue;
+    }
+
     const candidateFiles = selectFilesForLane(files, lanePlan.sourceBuckets);
     if (candidateFiles.length === 0) continue;
 
-    const laneQuery = buildLaneQuery(request, lanePlan.topics);
-    const laneRows = await searchDriveChunks({
-      query: laneQuery,
-      fileIds: candidateFiles.map((file) => file.id),
-      limit: Math.max(4, request.maxResults),
-    });
+    const deterministicQueries = buildDeterministicLaneQueries(
+      request,
+      lanePlan.topics,
+      lanePlan.lane
+    );
+    const semanticFallbackQuery = buildLaneQuery(request, lanePlan.topics);
+
+    const laneRowGroups = await Promise.all(
+      [...deterministicQueries, semanticFallbackQuery].map((query, index) =>
+        searchDriveChunks({
+          query,
+          fileIds: candidateFiles.map((file) => file.id),
+          limit:
+            index < deterministicQueries.length
+              ? Math.max(3, request.maxResults)
+              : Math.max(4, request.maxResults),
+        })
+      )
+    );
+
+    const laneRows = Array.from(
+      new Map(
+        laneRowGroups
+          .flat()
+          .map((row) => [`${row.file_id}:${row.content.slice(0, 180)}`, row])
+      ).values()
+    );
 
     const laneMap = laneResults.get(lanePlan.lane) ?? new Map<string, DriveRetrievalResult>();
 
@@ -238,6 +269,122 @@ function buildLaneQuery(
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+export function shouldSearchStateLawLane(request: DriveRetrievalRequest): boolean {
+  // State-law-compatible gate, currently PA-backed by existing lane/bucket contracts.
+  const lower = `${request.userQuery} ${request.estimateFirstSummary}`.toLowerCase();
+
+  const hasLegalIntent = [
+    "negotiate",
+    "negotiation",
+    "rebuttal",
+    "appraisal",
+    "appraiser",
+    "settlement",
+    "consumer rights",
+    "aftermarket",
+    "diminished value",
+    "total loss",
+    "statute",
+    "law",
+    "legal",
+  ].some((term) => lower.includes(term));
+
+  const inferredState =
+    normalizeStateCode(request.jurisdiction?.stateCode) ??
+    inferRequestedStateCode(lower) ??
+    inferStateCodeFromVehicleOrEstimateContext(request);
+
+  return hasLegalIntent && Boolean(inferredState);
+}
+
+function inferRequestedStateCode(lowerText: string): string | null {
+  if (lowerText.includes("pennsylvania") || /\bpa\b/.test(lowerText)) {
+    return "PA";
+  }
+
+  return null;
+}
+
+function inferStateCodeFromVehicleOrEstimateContext(
+  request: DriveRetrievalRequest
+): string | null {
+  const explicitStateCode = normalizeStateCode(request.jurisdiction?.stateCode);
+  if (explicitStateCode) {
+    return explicitStateCode;
+  }
+
+  const stateSignals = [
+    request.estimateFirstSummary,
+    ...(request.queryHints ?? []),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (stateSignals.includes("pennsylvania") || /\bpa\b/.test(stateSignals)) {
+    return "PA";
+  }
+
+  return null;
+}
+
+function normalizeStateCode(stateCode?: string): string | null {
+  const normalized = stateCode?.trim().toUpperCase();
+  return normalized ? normalized : null;
+}
+
+function isStateLawJurisdictionCurrentlyBacked(
+  request: DriveRetrievalRequest
+): boolean {
+  const explicitStateCode = normalizeStateCode(request.jurisdiction?.stateCode);
+
+  // Storage is currently PA-backed, so skip explicit non-PA legal retrieval for now.
+  return !explicitStateCode || explicitStateCode === "PA";
+}
+
+function buildDeterministicLaneQueries(
+  request: DriveRetrievalRequest,
+  laneTopics: DriveTopicInference[],
+  lane: "oem_lane" | "pa_law_lane"
+): string[] {
+  if (lane === "pa_law_lane") {
+    const lower = `${request.userQuery} ${request.estimateFirstSummary}`.toLowerCase();
+    const inferredState =
+      normalizeStateCode(request.jurisdiction?.stateCode) ??
+      inferRequestedStateCode(lower) ??
+      inferStateCodeFromVehicleOrEstimateContext(request) ??
+      "PA";
+    const primaryTopic = laneTopics[0]?.topic?.replace(/_/g, " ") ?? "";
+    const legalTriggers = laneTopics.flatMap((topic) => topic.triggers).slice(0, 3);
+
+    const queries = [
+      [inferredState, primaryTopic, request.userQuery].filter(Boolean).join(" ").trim(),
+      ...legalTriggers.map((trigger) => [inferredState, trigger].filter(Boolean).join(" ").trim()),
+      [inferredState, request.estimateFirstSummary].filter(Boolean).join(" ").trim(),
+    ].filter(Boolean);
+
+    return Array.from(new Set(queries)).slice(0, 5);
+  }
+
+  const year = request.vehicle.year ? String(request.vehicle.year) : "";
+  const make = request.vehicle.make ?? "";
+  const model = request.vehicle.model ?? "";
+  const trim = request.vehicle.trim ?? "";
+  const vehicleCore = [year, make, model].filter(Boolean).join(" ").trim();
+  const vehicleWithTrim = [year, make, model, trim].filter(Boolean).join(" ").trim();
+
+  const primaryTopic = laneTopics[0]?.topic?.replace(/_/g, " ") ?? "";
+  const primaryTriggers = laneTopics[0]?.triggers?.slice(0, 3) ?? [];
+
+  const queries = [
+    vehicleWithTrim,
+    [vehicleCore, primaryTopic].filter(Boolean).join(" ").trim(),
+    ...primaryTriggers.map((trigger) => [vehicleCore, trigger].filter(Boolean).join(" ").trim()),
+  ].filter(Boolean);
+
+  return Array.from(new Set(queries)).slice(0, 5);
 }
 
 async function searchDriveChunks(params: {
@@ -430,7 +577,7 @@ function buildJurisdictionRelevance(haystack: string): string {
   if (lower.includes("pennsylvania") || /\bpa\b/.test(lower)) {
     return "Matched Pennsylvania jurisdiction context.";
   }
-  return "Retrieved from the Pennsylvania law lane.";
+  return "Retrieved from state-law support.";
 }
 
 function computeRelevanceScore(params: {
@@ -518,7 +665,7 @@ export function buildDriveRefinementContext(response: DriveRetrievalResponse): s
 
     if (laneResults.length === 0) return "";
 
-  const laneLabel = lanePlan.lane === "oem_lane" ? "OEM Support" : "PA Law Support";
+  const laneLabel = lanePlan.lane === "oem_lane" ? "OEM Support" : "State Law Support";
     return [
       `${laneLabel}:`,
       ...laneResults.map((result) => {

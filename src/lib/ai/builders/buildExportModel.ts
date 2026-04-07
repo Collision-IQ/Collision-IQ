@@ -153,9 +153,9 @@ export function buildExportModel(params: {
   const cleanedSupplementItems = supplementItems.map((item) => ({
     ...item,
     title: cleanDisplayLabel(item.title),
-    rationale: cleanDisplayText(item.rationale),
-    evidence: item.evidence ? cleanDisplayText(item.evidence) : undefined,
-    source: item.source ? cleanDisplayText(item.source) : undefined,
+    rationale: cleanFormalExportText(item.rationale),
+    evidence: item.evidence ? cleanFormalExportText(item.evidence) : undefined,
+    source: item.source ? cleanFormalExportText(item.source) : undefined,
   }));
   const quality = assessDisplayQuality({
     vehicleLabel: displayVehicle.label ?? vehicle.label,
@@ -208,19 +208,19 @@ export function buildExportModel(params: {
     reportFields,
     repairPosition: allLabelsSuppressed
       ? "The core repair conclusion remains intact, but noisy extracted labels were suppressed in this presentation view."
-      : cleanPresentationProse(repairPosition),
+      : cleanFormalExportText(cleanPresentationProse(repairPosition)),
     positionStatement: allLabelsSuppressed
       ? "The main dispute areas remain supportable, but low-quality extracted labels were removed before rendering."
-      : cleanPresentationProse(positionStatement),
+      : cleanFormalExportText(cleanPresentationProse(positionStatement)),
     supplementItems: guardedSupplementItems,
     request: allLabelsSuppressed
       ? "Please review the core dispute areas and provide clearer support for the intended repair path and verification steps."
-      : cleanDisplayText(request),
+      : cleanFormalExportText(request),
     valuation: {
       ...valuation,
-      acvReasoning: cleanDisplayText(valuation.acvReasoning),
+      acvReasoning: cleanFormalExportText(valuation.acvReasoning),
       acvMissingInputs: valuation.acvMissingInputs.map((item) => cleanDisplayLabel(item)),
-      dvReasoning: cleanDisplayText(valuation.dvReasoning),
+      dvReasoning: cleanFormalExportText(valuation.dvReasoning),
       dvMissingInputs: valuation.dvMissingInputs.map((item) => cleanDisplayLabel(item)),
     },
   };
@@ -674,7 +674,7 @@ function buildSingleEstimateLead(
         )}.`
       : "";
 
-  return `${factLead}${scopeLead}${strengthsLead} Bottom line: credible preliminary estimate, but still likely to grow after teardown.`;
+  return `${factLead}${scopeLead}${strengthsLead} The current estimate appears directionally supportable, but additional scope may become clearer after teardown.`;
 }
 
 function extractVinFromText(text: string): string | undefined {
@@ -745,23 +745,28 @@ function buildRepairPosition(
   if (supplementItems.length > 0) {
     const topItems = supplementItems.slice(0, 5);
     const topTitles = joinHumanList(topItems.map((item) => item.title.toLowerCase()));
-    const lead = isComparison
-      ? topItems.some((item) => item.kind !== "disputed_repair_path")
-        ? "The shop estimate reads as materially more complete, while the carrier estimate remains underwritten in several repair-path areas."
-        : "The repair path still contains supportable disputed items that are not resolved in the current carrier-facing documentation."
-      : buildSingleEstimateLead(
-          estimateFacts,
-          report?.sourceEstimateText ?? report?.analysis?.rawEstimateText ?? analysis?.rawEstimateText ?? null
-        );
+    const lead = buildRepairPositionLead({
+      isComparison,
+      topItems,
+      estimateFacts,
+      estimateText:
+        report?.sourceEstimateText ?? report?.analysis?.rawEstimateText ?? analysis?.rawEstimateText ?? null,
+    });
+    const issueBridge = buildRepairIssueBridge({
+      isComparison,
+      topItems,
+      topTitles,
+      reportFields,
+    });
 
     if (strongestNarrative) {
       const polishedNarrative = makeRepairPositionTail(strongestNarrative);
       return polishedNarrative
-        ? `${lead} The clearest remaining issues are ${topTitles}. ${polishedNarrative}.`
-        : `${lead} The clearest remaining issues are ${topTitles}.`;
+        ? `${lead} ${issueBridge} ${polishedNarrative}.`
+        : `${lead} ${issueBridge}`;
     }
 
-    return `${lead} The clearest remaining issues are ${topTitles}.`;
+    return `${lead} ${issueBridge}`;
   }
 
   const broaderNarrative = isComparison ? narrativeCandidates.find((value) => {
@@ -793,7 +798,7 @@ function buildRepairPosition(
     );
   }
 
-  return "The current material does not show a clear unresolved repair-path issue.";
+  return "The file does not point to a clear unresolved repair-path issue.";
 }
 
 function buildPositionStatement(
@@ -813,24 +818,13 @@ function buildPositionStatement(
     const topItems = supplementItems.slice(0, 5);
     const topOperations = topItems.map((item) => item.title.toLowerCase());
     const kinds = new Set(topItems.map((item) => item.kind));
-    const lead =
-      isComparison
-        ? kinds.has("missing_operation")
-          ? "The current estimate still has meaningful missing or unsupported repair-process items across several distinct repair-path areas."
-          : kinds.has("missing_verification")
-            ? "The current estimate still has meaningful verification and documentation gaps across several distinct repair-path areas."
-            : kinds.has("underwritten_operation")
-              ? "The current estimate still shows meaningful underwritten repair-process items across several distinct repair-path areas."
-              : "The current estimate still shows meaningful disputed repair-path items across several distinct repair-path areas."
-        : kinds.has("missing_operation")
-          ? "The estimate still has meaningful missing or unsupported repair-process items across several distinct repair-path areas."
-          : kinds.has("missing_verification")
-            ? "The estimate still has meaningful verification and documentation gaps across several distinct repair-path areas."
-            : kinds.has("underwritten_operation")
-              ? "The estimate still shows meaningful underwritten repair-process items across several distinct repair-path areas."
-              : "The estimate still shows meaningful disputed repair-path items across several distinct repair-path areas.";
+    const lead = buildPositionStatementLead({
+      isComparison,
+      kinds,
+      topOperations,
+    });
 
-    return `${lead} The strongest concerns are ${joinHumanList(topOperations)}.`;
+    return lead;
   }
 
   return "Key procedures or documentation still need clearer support before this estimate reads as fully defended.";
@@ -872,7 +866,7 @@ function buildRequest(
 
   if (topIssues.length > 0) {
     return [
-      "Please review the following items and provide updated support if they are included:",
+      "The file leaves the following items open; please provide updated support if they remain part of the intended repair plan:",
       ...topIssues,
     ].join("\n");
   }
@@ -885,6 +879,82 @@ function buildRequest(
   }
 
   return "Please review and clarify how the repair plan is being supported.";
+}
+
+function buildRepairPositionLead(params: {
+  isComparison: boolean;
+  topItems: ExportSupplementItem[];
+  estimateFacts: EstimateFacts;
+  estimateText: string | null;
+}): string {
+  if (params.isComparison) {
+    const kinds = new Set(params.topItems.map((item) => item.kind));
+    if (kinds.has("missing_operation") || kinds.has("missing_verification")) {
+      return "Across the current file, the support gap is most noticeable in how several repair-path items are documented and verified.";
+    }
+    if (kinds.has("underwritten_operation")) {
+      return "Across the current file, support appears uneven in several repair-process areas, and some items remain open or lightly documented.";
+    }
+    return "Across the current file, several repair-path items remain open enough that a single fully supported position is not yet established.";
+  }
+
+  return buildSingleEstimateLead(params.estimateFacts, params.estimateText);
+}
+
+function buildRepairIssueBridge(params: {
+  isComparison: boolean;
+  topItems: ExportSupplementItem[];
+  topTitles: string;
+  reportFields: ExportReportFields;
+}): string {
+  const hasDocumentedSupport =
+    params.reportFields.documentedProcedures.length > 0 ||
+    params.reportFields.documentedHighlights.length > 0;
+  const kinds = new Set(params.topItems.map((item) => item.kind));
+
+  if (hasDocumentedSupport && (kinds.has("missing_verification") || kinds.has("missing_operation"))) {
+    return `The file documents several parts of the repair path clearly, but support remains open on ${params.topTitles}.`;
+  }
+
+  if (params.isComparison && kinds.has("underwritten_operation")) {
+    return `The clearest separation in the file is around ${params.topTitles}.`;
+  }
+
+  if (kinds.has("disputed_repair_path") && !kinds.has("missing_operation") && !kinds.has("missing_verification")) {
+    return `The file leaves the repair-path support most open around ${params.topTitles}.`;
+  }
+
+  return `The file leaves the following items least settled: ${params.topTitles}.`;
+}
+
+function buildPositionStatementLead(params: {
+  isComparison: boolean;
+  kinds: Set<ExportSupplementItem["kind"]>;
+  topOperations: string[];
+}): string {
+  const joinedOperations = joinHumanList(params.topOperations);
+
+  if (params.kinds.has("missing_verification")) {
+    return params.isComparison
+      ? `The current file leaves verification and documentation support open on ${joinedOperations}.`
+      : `The file leaves verification and documentation support open on ${joinedOperations}.`;
+  }
+
+  if (params.kinds.has("missing_operation")) {
+    return params.isComparison
+      ? `The current file does not yet fully support the intended repair plan on ${joinedOperations}.`
+      : `The file does not yet fully support the intended repair plan on ${joinedOperations}.`;
+  }
+
+  if (params.kinds.has("underwritten_operation")) {
+    return params.isComparison
+      ? `Support appears thinner on ${joinedOperations} in the current file, which keeps those repair-process items open.`
+      : `Support remains light on ${joinedOperations}, which keeps those repair-process items open.`;
+  }
+
+  return params.isComparison
+    ? `The current file still leaves the repair-path rationale most open on ${joinedOperations}.`
+    : `The file still leaves the repair-path rationale most open on ${joinedOperations}.`;
 }
 
 function buildExportSupplementItems(
@@ -1508,7 +1578,7 @@ function polishSourceLabel(value?: string | null): string | undefined {
   if (!raw) return undefined;
 
   if (/seam sealer/i.test(raw)) {
-    return /oem/i.test(raw) ? "OEM procedure support" : "Structured analysis";
+    return /oem/i.test(raw) ? "OEM procedure support" : "File review";
   }
 
   if (
@@ -1518,18 +1588,18 @@ function polishSourceLabel(value?: string | null): string | undefined {
   ) {
     if (/oem/i.test(raw)) return "OEM procedure support";
     if (/estimate|attachment|document/i.test(raw)) return "Estimate text";
-    if (/narrative/i.test(raw)) return "Narrative synthesis";
-    return "Structured analysis";
+    if (/narrative/i.test(raw)) return "File review";
+    return "File review";
   }
 
   const cleaned = raw
-    .replace(/\bdecision panel\b/gi, "Structured analysis")
+    .replace(/\bdecision panel\b/gi, "File review")
     .replace(/\bmissing procedure list\b/gi, "Missing procedures")
-    .replace(/\bsupplement opportunity\b/gi, "Supplement analysis")
-    .replace(/\bstructured narrative\b/gi, "Narrative synthesis")
-    .replace(/\bassistant reasoning\b/gi, "Narrative synthesis")
-    .replace(/\bline mapping(?: engine)?\b/gi, "Structured analysis")
-    .replace(/\bhybrid supplement(?: flow)?\b/gi, "Supplement analysis")
+    .replace(/\bsupplement opportunity\b/gi, "Repair review")
+    .replace(/\bstructured narrative\b/gi, "File review")
+    .replace(/\bassistant reasoning\b/gi, "File review")
+    .replace(/\bline mapping(?: engine)?\b/gi, "File review")
+    .replace(/\bhybrid supplement(?: flow)?\b/gi, "Repair review")
     .replace(/\battachment\b/gi, "Estimate text")
     .replace(/\bdocumentation\b/gi, "Documentation")
     .replace(/\bparts\b/gi, "Parts analysis")
@@ -1539,6 +1609,25 @@ function polishSourceLabel(value?: string | null): string | undefined {
     .trim();
 
   return cleaned || undefined;
+}
+
+function cleanFormalExportText(value?: string | null): string {
+  const cleaned = cleanDisplayText(value);
+
+  if (!cleaned) return "";
+
+  return cleaned
+    .replace(/\bBottom line:\s*/gi, "")
+    .replace(/\bStructured analysis\b/gi, "File review")
+    .replace(/\bSupplement analysis\b/gi, "Repair review")
+    .replace(/\bNarrative synthesis\b/gi, "File review")
+    .replace(/\bStructured narrative\b/gi, "File review")
+    .replace(/\bcurrent normalized repair analysis\b/gi, "current repair file")
+    .replace(/\bexport model\b/gi, "supporting documentation")
+    .replace(/\bfunction not clearly represented\b/gi, "not clearly documented")
+    .replace(/\bthe current material does not clearly document\b/gi, "the file does not clearly support")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function sanitizeSupplementReason(
@@ -1832,13 +1921,13 @@ function selectConsistentSupplementItems(
 function buildRequestHeading(items: ExportSupplementItem[]): string {
   const kinds = new Set(items.map((item) => item.kind));
   if (kinds.has("missing_operation")) {
-    return "Please review the following operations and provide support if they are part of the intended repair plan:";
+    return "Please review the following operations and provide support if they remain part of the intended repair plan:";
   }
   if (kinds.has("missing_verification")) {
-    return "Please review the following verification items and provide the supporting procedure path, measurements, scans, calibrations, or related records:";
+    return "Please review the following verification items and provide the supporting procedure path, measurements, scans, calibrations, or related records where available:";
   }
   if (kinds.has("underwritten_operation")) {
-    return "Please review the following underwritten operations and provide support, time justification, or related documentation:";
+    return "Please review the following items and provide the support, time justification, or related documentation carrying the current position:";
   }
   return "Please review the following disputed repair-path items and provide the supporting rationale or documentation for the intended approach:";
 }

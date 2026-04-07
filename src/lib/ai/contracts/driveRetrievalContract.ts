@@ -88,6 +88,19 @@ export type DriveVehicleContext = {
   mismatches?: string[];
 };
 
+export type DriveJurisdictionSource =
+  | "shop_profile"
+  | "user_setting"
+  | "client_input"
+  | "query_inferred"
+  | "unknown";
+
+export type DriveJurisdictionContext = {
+  stateCode?: string;
+  confidence: DriveInferenceConfidence;
+  source: DriveJurisdictionSource;
+};
+
 export type DriveTopicInference = {
   topic: DriveRetrievalTopic;
   confidence: DriveInferenceConfidence;
@@ -123,6 +136,7 @@ export type DriveRetrievalRequest = {
   taskType: ChatbotTaskType;
   userQuery: string;
   estimateFirstSummary: string;
+  jurisdiction?: DriveJurisdictionContext;
   vehicle: DriveVehicleContext;
   topics: DriveTopicInference[];
   retrievalMode: DriveRetrievalMode;
@@ -195,12 +209,18 @@ type BuildDriveRetrievalRequestParams = {
   taskType: ChatbotTaskType;
   userQuery: string;
   estimateText?: string;
+  jurisdiction?: DriveJurisdictionContext;
   analysis?: Pick<
     ChatAnalysisOutput,
     "summary" | "repairStrategy" | "keyDrivers" | "missingOperations" | "vehicleIdentification"
   > | null;
   maxResults?: number;
   maxExcerptChars?: number;
+};
+
+type ResolveDriveJurisdictionParams = {
+  explicit?: DriveJurisdictionContext;
+  userQuery?: string;
 };
 
 const DRIVE_TOPIC_RULES: Array<{
@@ -582,6 +602,11 @@ export function buildDriveRetrievalRequest(
     params.analysis?.repairStrategy?.overallAssessment ||
     summarizeEstimateForRetrieval(params.estimateText, params.userQuery);
 
+  const jurisdiction = resolveDriveJurisdictionContext({
+    explicit: params.jurisdiction,
+    userQuery: params.userQuery,
+  });
+
   return {
     strategy: "post_understanding_drive_retrieval",
     lifecycle: {
@@ -594,6 +619,7 @@ export function buildDriveRetrievalRequest(
     taskType: params.taskType,
     userQuery: params.userQuery,
     estimateFirstSummary,
+    jurisdiction,
     vehicle,
     topics: resolvedTopics,
     retrievalMode,
@@ -601,6 +627,7 @@ export function buildDriveRetrievalRequest(
     lanePlans,
     queryHints: buildQueryHints({
       vehicle,
+      jurisdiction,
       topics: resolvedTopics,
       keyDrivers: params.analysis?.keyDrivers ?? [],
       missingOperations:
@@ -646,7 +673,7 @@ function inferFallbackTopics(params: {
         topic: "claim_handling_policy_dispute",
         confidence: "low",
         triggers: ["general claim/legal context"],
-        rationale: "The request is claim-handling- or rights-oriented, so PA law support may refine the answer.",
+        rationale: "The request is claim-handling- or rights-oriented, so state-law support may refine the answer.",
       },
     ];
   }
@@ -667,13 +694,39 @@ function summarizeEstimateForRetrieval(
   return userQuery.trim();
 }
 
+function inferJurisdictionFromQuery(userQuery?: string): DriveJurisdictionContext | undefined {
+  const lower = (userQuery ?? "").toLowerCase();
+
+  if (lower.includes("pennsylvania") || /\bpa\b/.test(lower)) {
+    return {
+      stateCode: "PA",
+      confidence: "medium",
+      source: "query_inferred",
+    };
+  }
+
+  return undefined;
+}
+
+function resolveDriveJurisdictionContext(
+  params: ResolveDriveJurisdictionParams
+): DriveJurisdictionContext | undefined {
+  if (params.explicit?.stateCode) {
+    return params.explicit;
+  }
+
+  return inferJurisdictionFromQuery(params.userQuery);
+}
+
 function buildQueryHints(params: {
   vehicle: DriveVehicleContext;
+  jurisdiction?: DriveJurisdictionContext;
   topics: DriveTopicInference[];
   keyDrivers: string[];
   missingOperations: string[];
 }): string[] {
   return [
+    params.jurisdiction?.stateCode ?? "",
     params.vehicle.year ? String(params.vehicle.year) : "",
     params.vehicle.make ?? "",
     params.vehicle.manufacturer ?? "",
