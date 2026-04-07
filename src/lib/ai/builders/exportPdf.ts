@@ -1,11 +1,14 @@
 import jsPDF from "jspdf";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
+import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
 
 export async function exportCarrierPDF(input: string | CarrierReportDocument) {
   if (typeof input === "string") {
-    exportLegacyTextPdf(input);
+    exportLegacyTextPdf(redactDownloadContent(input));
     return;
   }
+
+  const redactedInput = redactCarrierReportDocument(input);
 
   const doc = new jsPDF({
     unit: "mm",
@@ -17,7 +20,7 @@ export async function exportCarrierPDF(input: string | CarrierReportDocument) {
   const marginX = 16;
   const contentWidth = pageWidth - marginX * 2;
   const footerY = pageHeight - 10;
-  const logoDataUrl = await loadLogoDataUrl(input.brand.logoPath).catch(() => null);
+  const logoDataUrl = await loadLogoDataUrl(redactedInput.brand.logoPath).catch(() => null);
 
   let y = 18;
 
@@ -35,11 +38,11 @@ export async function exportCarrierPDF(input: string | CarrierReportDocument) {
     y,
     width: contentWidth,
     logoDataUrl,
-    companyName: input.brand.companyName,
-    reportLabel: input.brand.reportLabel,
-    title: input.header.title,
-    subtitle: input.header.subtitle,
-    generatedLabel: input.header.generatedLabel,
+    companyName: redactedInput.brand.companyName,
+    reportLabel: redactedInput.brand.reportLabel,
+    title: redactedInput.header.title,
+    subtitle: redactedInput.header.subtitle,
+    generatedLabel: redactedInput.header.generatedLabel,
   });
   y += 6;
 
@@ -47,11 +50,11 @@ export async function exportCarrierPDF(input: string | CarrierReportDocument) {
     x: marginX,
     y,
     width: contentWidth,
-    items: input.summary,
+    items: redactedInput.summary,
   });
   y += 9;
 
-  for (const section of input.sections) {
+  for (const section of redactedInput.sections) {
     const estimatedHeight = estimateSectionHeight(doc, contentWidth, section);
     ensureSpace(Math.max(22, estimatedHeight));
     y = drawSection(doc, {
@@ -68,7 +71,7 @@ export async function exportCarrierPDF(input: string | CarrierReportDocument) {
     x: marginX,
     y,
     width: contentWidth,
-    footer: input.footer,
+    footer: redactedInput.footer,
   });
 
   const totalPages = doc.getNumberOfPages();
@@ -77,7 +80,7 @@ export async function exportCarrierPDF(input: string | CarrierReportDocument) {
     drawPageNumber(doc, pageWidth, pageHeight);
   }
 
-  doc.save(input.filename || "collision-academy-report.pdf");
+  doc.save(redactedInput.filename || "collision-academy-report.pdf");
 }
 
 function exportLegacyTextPdf(text: string) {
@@ -106,6 +109,29 @@ function exportLegacyTextPdf(text: string) {
   }
 
   doc.save("collision-evaluation.pdf");
+}
+
+function redactCarrierReportDocument(input: CarrierReportDocument): CarrierReportDocument {
+  return {
+    ...input,
+    header: {
+      ...input.header,
+      title: redactDownloadContent(input.header.title),
+      subtitle: redactDownloadContent(input.header.subtitle),
+      generatedLabel: redactDownloadContent(input.header.generatedLabel),
+    },
+    summary: input.summary.map((item) => ({
+      label: item.label,
+      value: redactDownloadContent(item.value),
+    })),
+    sections: input.sections.map((section) => ({
+      ...section,
+      title: redactDownloadContent(section.title),
+      body: section.body ? redactDownloadContent(section.body) : undefined,
+      bullets: section.bullets?.map((bullet) => redactDownloadContent(bullet)),
+    })),
+    footer: input.footer.map((line) => redactDownloadContent(line)),
+  };
 }
 
 async function loadLogoDataUrl(path: string): Promise<string> {

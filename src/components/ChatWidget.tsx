@@ -83,6 +83,7 @@ export default function ChatWidget({
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isExportingChat, setIsExportingChat] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentsOpen, setAttachmentsOpen] = useState(true);
   const [previewAttachmentId, setPreviewAttachmentId] = useState<string | null>(null);
@@ -103,6 +104,7 @@ export default function ChatWidget({
   const abortRef = useRef<AbortController | null>(null);
   const sessionRef = useRef<number>(0);
   const analysisRunRef = useRef<number>(0);
+  const analysisTextRef = useRef("");
   const attachmentsRef = useRef<Attachment[]>([]);
   const firstAttachmentAtRef = useRef<number | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -270,9 +272,15 @@ export default function ChatWidget({
   }
 
   function clearStructuredAnalysisState() {
+    analysisTextRef.current = "";
     onAnalysisChange?.("");
     onAnalysisResultChange?.(null);
     onAnalysisPanelChange?.(null);
+  }
+
+  function updateAnalysisText(text: string) {
+    analysisTextRef.current = text;
+    onAnalysisChange?.(text);
   }
 
   function invalidateStructuredAnalysis() {
@@ -510,6 +518,7 @@ export default function ChatWidget({
     activeSystemStatusMessageIdRef.current = null;
     setShowOpeningDisclaimer(true);
     setOpeningDisclaimerDismissed(false);
+    analysisTextRef.current = "";
 
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (cameraInputRef.current) cameraInputRef.current.value = "";
@@ -739,7 +748,7 @@ export default function ChatWidget({
           sessionRef.current === mySession &&
           (!hasAttachmentsInTurn || analysisRunRef.current === activeAnalysisRunId)
         ) {
-          onAnalysisChange?.(assistantText);
+          updateAnalysisText(assistantText);
         }
       } else {
         const data = await response.json();
@@ -749,7 +758,7 @@ export default function ChatWidget({
           stopSpeaking();
           setMessages((prev) => [...prev, createMessage("assistant", reply)]);
           if (!hasAttachmentsInTurn || analysisRunRef.current === activeAnalysisRunId) {
-            onAnalysisChange?.(reply);
+            updateAnalysisText(reply);
           }
         }
       }
@@ -972,6 +981,63 @@ export default function ChatWidget({
     invalidateStructuredAnalysis();
     setReplaceAttachmentId(attachmentId);
     fileInputRef.current?.click();
+  }
+
+  async function handleDownloadRedactedChat() {
+    if (disabled || loading || isExportingChat) return;
+
+    const exportMessages = messages
+      .filter((message) => message.kind !== "system_status")
+      .map((message) => ({
+        role: message.role,
+        content: message.content,
+      }))
+      .filter((message) => message.content.trim().length > 0);
+    const analysisText = analysisTextRef.current.trim();
+
+    if (exportMessages.length === 0 && !analysisText) {
+      pushSystemStatusMessage("There is no chat content available to download yet.");
+      return;
+    }
+
+    setIsExportingChat(true);
+
+    try {
+      const response = await fetch("/api/chat/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: exportMessages,
+          analysisText: analysisText || undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+        pushSystemStatusMessage(resolveExportErrorMessage(response.status, data?.error));
+        return;
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const disposition = response.headers.get("Content-Disposition");
+      const filename =
+        disposition?.match(/filename="([^"]+)"/i)?.[1] ?? "chat-export-redacted.txt";
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(downloadUrl);
+    } catch (error) {
+      console.warn("[chat-export] download failed", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      pushSystemStatusMessage("The redacted chat download ran into a temporary issue. Please try again.");
+    } finally {
+      setIsExportingChat(false);
+    }
   }
 
   function createMessage(
@@ -1393,6 +1459,15 @@ export default function ChatWidget({
               />
 
               <button
+                type="button"
+                onClick={handleDownloadRedactedChat}
+                disabled={disabled || loading || isTranscribing || isExportingChat}
+                className="rounded-xl border border-white/10 bg-white/5 px-4 sm:px-5 py-3 text-white/80 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {isExportingChat ? "Preparing..." : "Download Redacted Chat"}
+              </button>
+
+              <button
                 onClick={handleSend}
                 disabled={loading || isTranscribing || disabled}
                 className="rounded-xl bg-[#C65A2A] px-4 sm:px-5 py-3 text-black font-semibold transition hover:bg-[#C65A2A]/90 disabled:opacity-50"
@@ -1574,4 +1649,24 @@ function toSpeechText(content: string): string {
     .replace(/\n+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function resolveExportErrorMessage(status: number, fallback?: string): string {
+  if (status === 401) {
+    return "Please sign in to download a redacted chat export.";
+  }
+
+  if (status === 403) {
+    return "Redacted chat download is not available on this account yet.";
+  }
+
+  if (status === 400) {
+    return fallback || "There was not enough chat content to build a redacted export.";
+  }
+
+  if (status === 501) {
+    return "Redacted chat download is not ready yet.";
+  }
+
+  return fallback || `Redacted chat download failed (${status}).`;
 }

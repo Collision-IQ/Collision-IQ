@@ -89,30 +89,47 @@ function extractMessageText(content: unknown): string {
 }
 
 function resolveExportText(body: ChatExportRequestBody): string {
-  if (typeof body.text === "string" && body.text.trim()) {
-    return body.text;
+  const messageText = Array.isArray(body.messages)
+    ? (body.messages as ChatExportMessage[])
+        .map((message) => {
+          const role = typeof message.role === "string" ? message.role.toUpperCase() : "MESSAGE";
+          const content = extractMessageText(message.content).trim();
+          return content ? `${role}:\n${content}` : "";
+        })
+        .filter(Boolean)
+        .join("\n\n")
+    : "";
+
+  const directText =
+    typeof body.text === "string" && body.text.trim()
+      ? body.text.trim()
+      : typeof body.content === "string" && body.content.trim()
+        ? body.content.trim()
+        : "";
+
+  const primaryText = messageText || directText;
+  const analysisText =
+    typeof body.analysisText === "string" && body.analysisText.trim()
+      ? body.analysisText.trim()
+      : "";
+
+  if (!analysisText) {
+    return primaryText;
   }
 
-  if (typeof body.content === "string" && body.content.trim()) {
-    return body.content;
+  if (!primaryText) {
+    return analysisText;
   }
 
-  if (typeof body.analysisText === "string" && body.analysisText.trim()) {
-    return body.analysisText;
+  if (normalizeExportComparisonText(primaryText).includes(normalizeExportComparisonText(analysisText))) {
+    return primaryText;
   }
 
-  if (Array.isArray(body.messages)) {
-    return (body.messages as ChatExportMessage[])
-      .map((message) => {
-        const role = typeof message.role === "string" ? message.role.toUpperCase() : "MESSAGE";
-        const content = extractMessageText(message.content).trim();
-        return content ? `${role}:\n${content}` : "";
-      })
-      .filter(Boolean)
-      .join("\n\n");
-  }
+  return `${primaryText}\n\nANALYSIS SUMMARY:\n${analysisText}`;
+}
 
-  return "";
+function normalizeExportComparisonText(value: string): string {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 export async function GET() {
