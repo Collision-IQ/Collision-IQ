@@ -651,6 +651,11 @@ function deriveDriveProcedureState(
 
   for (const result of results) {
     for (const topic of result.metadata.topicTags ?? []) {
+      const proactiveOpportunity = buildDriveSupportOpportunity(result, topic, lowerEstimate);
+      if (proactiveOpportunity) {
+        supplementOpportunities.add(proactiveOpportunity);
+      }
+
       const procedure = mapDriveTopicToProcedure(topic);
       if (!procedure) continue;
 
@@ -683,6 +688,144 @@ function deriveDriveProcedureState(
     missingProcedures: [...missing],
     supplementOpportunities: [...supplementOpportunities],
   };
+}
+
+function buildDriveSupportOpportunity(
+  result: DriveRetrievalResult,
+  topic: string,
+  lowerEstimate: string
+): string | null {
+  const sourceLabel = result.filename.trim() || "retrieved OEM support";
+  const clearlyDocumented = hasClearDriveSupportCoverage(lowerEstimate, topic);
+  const partiallyRepresented = hasPartialDriveSupportCoverage(lowerEstimate, topic);
+
+  if (clearlyDocumented) {
+    return null;
+  }
+
+  switch (topic) {
+    case "one_time_use_hardware":
+      return partiallyRepresented
+        ? `OEM support in ${sourceLabel} indicates one-time-use hardware, seals, or clips may already be implicated, but the replacement and related documentation posture remains open.`
+        : `OEM support in ${sourceLabel} indicates one-time-use hardware, seals, or clips may need to be replaced and documented when disturbed.`;
+    case "corrosion_protection_cavity_wax_seam_sealer":
+      return partiallyRepresented
+        ? `OEM support in ${sourceLabel} adds corrosion-protection, cavity-wax, seam-sealer, or related material-restoration requirements that may already be implicated, but the current support remains open.`
+        : `OEM support in ${sourceLabel} adds corrosion-protection, cavity-wax, seam-sealer, or related material-restoration requirements that should be carried or documented for the affected repair path.`;
+    case "weld_prep_weld_protection":
+      return partiallyRepresented
+        ? `OEM support in ${sourceLabel} adds weld-prep, weld-protection, joining-material, or restoration-material requirements that may already be implicated, but the current support remains open.`
+        : `OEM support in ${sourceLabel} adds weld-prep, weld-protection, joining-material, or restoration-material requirements that should be reflected if those joining operations apply.`;
+    case "adas_calibration":
+      return partiallyRepresented
+        ? `OEM support in ${sourceLabel} indicates scan, calibration, alignment, or verification burden may already be partly represented, but the current support remains open.`
+        : `OEM support in ${sourceLabel} indicates scan, calibration, alignment, or verification burden may need to be added or better documented for the affected system.`;
+    case "fit_sensitive_oem_parts":
+      return partiallyRepresented
+        ? `OEM support in ${sourceLabel} indicates a fit-sensitive repair path, so test-fit, mock-up, or related finish-sensitive documentation may already be implicated, but the current support remains open.`
+        : `OEM support in ${sourceLabel} indicates a fit-sensitive repair path, so pre-paint test-fit or mock-up documentation may be needed before final finish work.`;
+    default:
+      return null;
+  }
+}
+
+function hasAnyEstimateHint(lowerEstimate: string, hints: string[]): boolean {
+  return hints.some((hint) => lowerEstimate.includes(hint));
+}
+
+function hasPartialDriveSupportCoverage(lowerEstimate: string, topic: string): boolean {
+  switch (topic) {
+    case "one_time_use_hardware":
+      return hasAnyEstimateHint(lowerEstimate, ["fastener", "clip", "seal", "hardware"]);
+    case "corrosion_protection_cavity_wax_seam_sealer":
+      return hasAnyEstimateHint(lowerEstimate, [
+        "corrosion",
+        "cavity wax",
+        "seam sealer",
+        "anti-corrosion",
+        "refinish protection",
+      ]);
+    case "weld_prep_weld_protection":
+      return hasAnyEstimateHint(lowerEstimate, [
+        "weld",
+        "spot weld",
+        "mig braze",
+        "joining material",
+        "weld primer",
+      ]);
+    case "adas_calibration":
+      return hasAnyEstimateHint(lowerEstimate, [
+        "calibration",
+        "adas",
+        "camera",
+        "radar",
+        "sensor",
+        "alignment",
+        "scan",
+      ]);
+    case "fit_sensitive_oem_parts":
+      return hasAnyEstimateHint(lowerEstimate, [
+        "test fit",
+        "test-fit",
+        "mock-up",
+        "mock up",
+        "fit check",
+        "fit-check",
+        "gap",
+        "flushness",
+        "stack-up",
+        "refinish",
+        "blend",
+      ]);
+    default:
+      return false;
+  }
+}
+
+function hasClearDriveSupportCoverage(lowerEstimate: string, topic: string): boolean {
+  switch (topic) {
+    case "one_time_use_hardware":
+      return hasAnyEstimateHint(lowerEstimate, [
+        "one-time-use",
+        "one time use",
+        "non-reusable",
+        "replace hardware",
+        "new fasteners",
+        "new clips",
+        "new seals",
+      ]);
+    case "corrosion_protection_cavity_wax_seam_sealer":
+      return hasAnyEstimateHint(lowerEstimate, [
+        "corrosion protection",
+        "cavity wax",
+        "seam sealer",
+        "anti-corrosion coating",
+      ]);
+    case "weld_prep_weld_protection":
+      return hasAnyEstimateHint(lowerEstimate, [
+        "weld prep",
+        "weld protection",
+        "weld-through",
+        "weld thru",
+        "weld-through primer",
+        "weld thru primer",
+      ]);
+    case "adas_calibration":
+      return (
+        hasAnyEstimateHint(lowerEstimate, ["calibration", "adas"]) &&
+        hasAnyEstimateHint(lowerEstimate, ["scan", "verification", "alignment", "aim"])
+      );
+    case "fit_sensitive_oem_parts":
+      return hasAnyEstimateHint(lowerEstimate, [
+        "pre-paint test fit",
+        "pre paint test fit",
+        "mock-up",
+        "mock up",
+        "fit verification",
+      ]);
+    default:
+      return false;
+  }
 }
 
 function getDriveProcedurePresenceHints(topic: string): string[] {

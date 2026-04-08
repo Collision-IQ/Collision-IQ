@@ -661,13 +661,83 @@ function buildSingleEstimateLead(
       ? ` The visible scope centers on ${joinHumanList(
           [
             story.impact !== "general" ? `${story.impact} damage` : undefined,
-            story.zones.length > 0 ? `${joinHumanList(story.zones)} areas` : undefined,
-            story.panels.length > 0 ? `${story.panels.length} noted panel${story.panels.length === 1 ? "" : "s"}` : undefined,
+            summarizeVisibleScope(story.zones, story.panels, sourceEstimateText ?? ""),
           ].filter((value): value is string => Boolean(value))
         )}.`
       : "";
 
-  return `${factLead}${scopeLead}${strengthsLead} The current estimate appears directionally supportable, but additional scope may become clearer after teardown.`;
+  return `${factLead}${scopeLead}${strengthsLead} The file supports a grounded preliminary review, while some repair or documentation items may become clearer as teardown progresses.`;
+}
+
+function summarizeVisibleScope(
+  zones: string[],
+  panels: string[],
+  sourceEstimateText: string
+): string | undefined {
+  const normalizedZones = zones.filter(Boolean);
+  const normalizedPanels = panels.map((panel) => panel.toLowerCase()).filter(Boolean);
+  const panelText = normalizedPanels.join(" ");
+  const lowerSource = sourceEstimateText.toLowerCase();
+  const zoneSet = new Set(normalizedZones);
+
+  const leftRearSignal =
+    /(left rear|rear left|left quarter|quarter|left side)/i.test(panelText) ||
+    /(left rear|rear left|left quarter|quarter panel|left side|left rocker|left dog leg)/i.test(
+      lowerSource
+    );
+  const leftFrontSignal =
+    /(left front|left fender|left headlamp)/i.test(panelText) ||
+    /(left front|left fender|left headlamp|lf\b|driver side front)/i.test(lowerSource);
+  const rightFrontSignal =
+    /(right front|right fender|right headlamp)/i.test(panelText) ||
+    /(right front|right fender|right headlamp|rf\b|passenger side front)/i.test(lowerSource);
+
+  if (leftRearSignal) {
+    const supportedZones = normalizedZones.filter(
+      (zone) => zone === "rear body" || zone === "side structure"
+    );
+    if (supportedZones.length > 0) {
+      return `${joinHumanList(supportedZones)} around the left-rear / left-side repair area`;
+    }
+    return "left-rear / left-side areas";
+  }
+
+  if (leftFrontSignal && !rightFrontSignal) {
+    const frontLikeZones = normalizedZones.filter(
+      (zone) => zone === "front-end" || zone === "side structure"
+    );
+    if (frontLikeZones.length > 0) {
+      return `${joinHumanList(frontLikeZones)} around the left-front / left-side repair area`;
+    }
+    return "left-front / left-side areas";
+  }
+
+  if (rightFrontSignal && !leftFrontSignal && !leftRearSignal) {
+    const frontLikeZones = normalizedZones.filter(
+      (zone) => zone === "front-end" || zone === "side structure"
+    );
+    if (frontLikeZones.length > 0) {
+      return `${joinHumanList(frontLikeZones)} around the right-front repair area`;
+    }
+    return "right-front areas";
+  }
+
+  if (zoneSet.has("front-end") && (zoneSet.has("side structure") || zoneSet.has("rear body"))) {
+    const nonFrontZones = normalizedZones.filter((zone) => zone !== "front-end");
+    if (nonFrontZones.length > 0) {
+      return `${joinHumanList(nonFrontZones)} areas`;
+    }
+  }
+
+  if (normalizedZones.length > 0) {
+    return `${joinHumanList(normalizedZones)} areas`;
+  }
+
+  if (panels.length > 0) {
+    return `${panels.length} noted panel${panels.length === 1 ? "" : "s"}`;
+  }
+
+  return undefined;
 }
 
 function extractVinFromText(text: string): string | undefined {
@@ -1001,7 +1071,7 @@ function buildExportSupplementItems(
       category: inferSupplementCategory(item.title),
       kind: inferSupplementKindFromText(item.raw),
       rationale: sanitizeSupplementReason(item.title, item.raw, defaultRationale),
-      source: polishSourceLabel("Supplement opportunity"),
+      source: polishSourceLabel(item.raw) ?? polishSourceLabel("Supplement opportunity"),
       priority: "medium",
     })) ?? [];
 
@@ -1265,12 +1335,23 @@ function inferSupplementCategory(value: string): string {
   }
 
   if (lower.includes("scan")) return "scan";
-  if (lower.includes("calibration") || lower.includes("radar") || lower.includes("camera")) {
+  if (
+    lower.includes("calibration") ||
+    lower.includes("radar") ||
+    lower.includes("camera") ||
+    lower.includes("sensor") ||
+    lower.includes("adas") ||
+    lower.includes("alignment")
+  ) {
     return "calibration";
   }
   if (
     lower.includes("seam") ||
     lower.includes("corrosion") ||
+    lower.includes("hardware") ||
+    lower.includes("clip") ||
+    lower.includes("seal") ||
+    lower.includes("material") ||
     lower.includes("primer") ||
     lower.includes("wax") ||
     lower.includes("protection")
@@ -1607,8 +1688,17 @@ function polishSourceLabel(value?: string | null): string | undefined {
   const raw = sanitizeReason(value, "").trim();
   if (!raw) return undefined;
 
+  if (
+    /^(?:missing procedures?|repair review|file review|estimate text|documentation|parts analysis|scan analysis|calibration analysis|oem procedure support|drive knowledge base)$/i.test(
+      raw
+    ) ||
+    /^retrieved evidence\s*\d+$/i.test(raw)
+  ) {
+    return undefined;
+  }
+
   if (/seam sealer/i.test(raw)) {
-    return /oem/i.test(raw) ? "OEM procedure support" : "File review";
+    return undefined;
   }
 
   if (
@@ -1616,26 +1706,21 @@ function polishSourceLabel(value?: string | null): string | undefined {
       raw
     )
   ) {
-    if (/oem/i.test(raw)) return "OEM procedure support";
-    if (/estimate|attachment|document/i.test(raw)) return "Estimate text";
-    if (/narrative/i.test(raw)) return "File review";
-    return "File review";
+    return undefined;
   }
 
   const cleaned = raw
-    .replace(/\bdecision panel\b/gi, "File review")
-    .replace(/\bmissing procedure list\b/gi, "Missing procedures")
-    .replace(/\bsupplement opportunity\b/gi, "Repair review")
-    .replace(/\bstructured narrative\b/gi, "File review")
-    .replace(/\bassistant reasoning\b/gi, "File review")
-    .replace(/\bline mapping(?: engine)?\b/gi, "File review")
-    .replace(/\bhybrid supplement(?: flow)?\b/gi, "Repair review")
-    .replace(/\battachment\b/gi, "Estimate text")
-    .replace(/\bdocumentation\b/gi, "Documentation")
-    .replace(/\bparts\b/gi, "Parts analysis")
-    .replace(/\bscan\b/gi, "Scan analysis")
-    .replace(/\bcalibration\b/gi, "Calibration analysis")
+    .replace(/\bdecision panel\b/gi, "")
+    .replace(/\bmissing procedure list\b/gi, "")
+    .replace(/\bsupplement opportunity\b/gi, "")
+    .replace(/\bstructured narrative\b/gi, "")
+    .replace(/\bassistant reasoning\b/gi, "")
+    .replace(/\bline mapping(?: engine)?\b/gi, "")
+    .replace(/\bhybrid supplement(?: flow)?\b/gi, "")
+    .replace(/\bdrive knowledge base\b/gi, "")
+    .replace(/\bretrieved evidence\s*\d+\b/gi, "")
     .replace(/\s{2,}/g, " ")
+    .replace(/^[,;:\s-]+|[,;:\s-]+$/g, "")
     .trim();
 
   return cleaned || undefined;
@@ -1647,15 +1732,25 @@ function cleanFormalExportText(value?: string | null): string {
   if (!cleaned) return "";
 
   return cleaned
+    .replace(/\bPotential omissions \/ likely supplement areas\s*:\s*\.?/gi, "")
     .replace(/\bBottom line:\s*/gi, "")
-    .replace(/\bStructured analysis\b/gi, "File review")
-    .replace(/\bSupplement analysis\b/gi, "Repair review")
-    .replace(/\bNarrative synthesis\b/gi, "File review")
-    .replace(/\bStructured narrative\b/gi, "File review")
+    .replace(/\bStructured analysis\b/gi, "")
+    .replace(/\bSupplement analysis\b/gi, "")
+    .replace(/\bNarrative synthesis\b/gi, "")
+    .replace(/\bStructured narrative\b/gi, "")
     .replace(/\bcurrent normalized repair analysis\b/gi, "current repair file")
     .replace(/\bexport model\b/gi, "supporting documentation")
     .replace(/\bfunction not clearly represented\b/gi, "not clearly documented")
     .replace(/\bthe current material does not clearly document\b/gi, "the file does not clearly support")
+    .replace(/\bProc\s*-\s*Structural cues\b/gi, "")
+    .replace(/\bMissing procedures?\b/gi, "")
+    .replace(/\bRetrieved Evidence\s*\d+\b/gi, "")
+    .replace(/\bDrive knowledge base\b/gi, "")
+    .replace(/\bFile review\b/gi, "")
+    .replace(/\bRepair review\b/gi, "")
+    .replace(/\bOEM procedure support\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[,;:\s-]+|[,;:\s-]+$/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();
 }
@@ -1671,14 +1766,14 @@ function sanitizeSupplementReason(
     const filtered = filterHardwareText(cleaned);
     return (
       (filtered && !looksLikeNoisySupplementText(filtered) ? filtered : "") ||
-      "The repair path supports replacement of one-time-use hardware, seals, or clips, but that replacement burden is not clearly documented in the current estimate."
+      "The file supports one-time-use hardware, seals, or clip replacement for the documented repair path, while the related parts, materials, or documentation remain open in the estimate."
     );
   }
 
   if (title === "ADAS / Calibration Procedure Support") {
     const normalized = normalizeSupplementText(cleaned);
     if (!normalized || looksLikeNoisySupplementText(normalized)) {
-      return "The repair path supports required ADAS, scan, and calibration procedures, but the current estimate does not clearly document the needed verification steps.";
+      return "The file supports scan, calibration, or related verification steps, but the estimate does not clearly document what was required or how it would be confirmed.";
     }
 
     return normalizeCalibrationReason(normalized);
@@ -1687,7 +1782,7 @@ function sanitizeSupplementReason(
   if (title === "Headlamp aiming check") {
     const normalized = normalizeSupplementText(cleaned);
     if (!normalized || looksLikeNoisySupplementText(normalized)) {
-      return "The repair path supports a headlamp aiming check after lamp or front-end service, but the current estimate does not clearly document that verification step.";
+      return "The file supports a headlamp aiming check after lamp or related component service, but that verification step is not clearly documented in the estimate.";
     }
 
     return normalizeHeadlampAimReason(normalized);
@@ -1700,7 +1795,7 @@ function sanitizeSupplementReason(
       (withoutRefinishGlossary && !looksLikeNoisySupplementText(withoutRefinishGlossary)
         ? withoutRefinishGlossary
         : "") ||
-      "Please provide seam sealer restoration details for the affected areas, along with supporting repair-process or OEM documentation."
+      "The file would benefit from clearer seam sealer restoration documentation for the affected area, with supporting process or OEM material as needed."
     );
   }
 
@@ -1785,7 +1880,7 @@ function normalizeCalibrationReason(value: string): string {
       .replace(/\bscan analysis\b/gi, "scan support");
   }
 
-  return "The repair path supports required ADAS, scan, and calibration procedures, but the current estimate does not clearly document the needed verification steps.";
+  return "The file supports scan, calibration, or related verification steps, but the estimate does not clearly document what was required or how it would be confirmed.";
 }
 
 function normalizeHeadlampAimReason(value: string): string {
@@ -1794,7 +1889,7 @@ function normalizeHeadlampAimReason(value: string): string {
     return normalized;
   }
 
-  return "The repair path supports a headlamp aiming check after lamp or front-end service, but the current estimate does not clearly document that verification step.";
+  return "The file supports a headlamp aiming check after lamp or related component service, but that verification step is not clearly documented in the estimate.";
 }
 
 function looksLikeNoisySupplementText(value: string): boolean {
@@ -2200,7 +2295,7 @@ function synthesizeSupplementItemsFromNarrative(params: {
   if (text.includes("test fit") || text.includes("fit-check") || text.includes("fit check")) {
     add(
       "Pre-Paint Test Fit",
-      "Test-fit or fit-check burden appears supportable for adjacent front-end panels before final finish work.",
+      "Test-fit or fit-check work appears supportable for adjacent panels before final finish work.",
       "high",
       "underwritten_operation"
     );
@@ -2265,7 +2360,7 @@ function synthesizeSupplementItemsFromNarrative(params: {
   if (text.includes("teardown") || text.includes("mounting geometry") || text.includes("hidden damage")) {
     add(
       "Hidden Mounting Geometry / Teardown Growth",
-      "Teardown growth or hidden mounting-geometry burden appears supportable here, but that front-end scope is not fully reflected in the current estimate.",
+      "Teardown growth or hidden mounting-geometry burden appears supportable here, but that broader scope is not fully reflected in the current estimate.",
       "high",
       "disputed_repair_path"
     );
@@ -2274,7 +2369,7 @@ function synthesizeSupplementItemsFromNarrative(params: {
   if (text.includes("clip") || text.includes("seal") || text.includes("one-time-use") || text.includes("one time use") || text.includes("fastener")) {
     add(
       "One-Time-Use Hardware / Seals / Clips",
-      "Replacement of hardware, seals, clips, or other one-time-use items appears supportable here, but that replacement burden is not clearly documented in the current estimate.",
+      "The file supports one-time-use hardware, seals, clips, or related replacement burden, but the estimate does not yet clearly show what should be added or documented.",
       "medium",
       "underwritten_operation"
     );
@@ -2292,7 +2387,7 @@ function synthesizeSupplementItemsFromNarrative(params: {
   if (text.includes("alignment")) {
     add(
       "Four-Wheel Alignment",
-      "Alignment appears supportable for this repair path, but that operation is not clearly documented in the current estimate.",
+      "Alignment appears relevant to the documented repair scope, but that operation is not clearly documented in the current estimate.",
       "medium",
       "missing_verification"
     );

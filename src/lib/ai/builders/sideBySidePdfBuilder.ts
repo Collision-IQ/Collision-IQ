@@ -25,8 +25,8 @@ export function buildSideBySidePdf(params: ExportBuilderInput): CarrierReportDoc
       title: isComparison ? "Side-by-Side Comparison Report" : "Estimate Review Report",
       subtitle:
         isComparison
-          ? "Category-level comparison of shop and carrier positions using the shared normalized export model."
-          : "Category-level estimate review built from the shared normalized export model.",
+          ? "Category-level comparison of shop and carrier positions using the current file review."
+          : "Category-level estimate review built from the current file review.",
       generatedLabel: `Generated ${source.generatedLabel}`,
     }),
     summary: [
@@ -91,8 +91,8 @@ function buildPdfHeader(params: {
 
 function buildPdfFooter(): string[] {
   return [
-    "This PDF is generated from the shared normalized repair analysis and export model.",
-    "Review and edit the final carrier-facing language as needed before sending or filing.",
+    "This PDF reflects the current estimate review and supporting file material.",
+    "Review and edit the final summary language as needed before sending or filing.",
   ];
 }
 

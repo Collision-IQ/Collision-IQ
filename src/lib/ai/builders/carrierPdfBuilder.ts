@@ -56,7 +56,7 @@ export function buildCarrierReport({
   const strongestDisputes =
     topItems.length > 0
       ? joinHumanList(topItems.slice(0, 4).map((item) => item.title.toLowerCase()))
-      : "no major unresolved support gaps identified from the current structured analysis";
+      : "no major unresolved support items identified from the current file";
   const credibilityConclusion = buildCredibilityConclusion(exportModel);
   const whyItWins = buildWhyItWins(exportModel, report, analysis);
 
@@ -104,7 +104,7 @@ export function buildCarrierReport({
         value: credibilityConclusion,
       },
       {
-        label: "Primary Dispute Areas",
+        label: isComparison ? "Primary Dispute Areas" : "Primary Review Focus",
         value: strongestDisputes,
       },
     ],
@@ -112,6 +112,7 @@ export function buildCarrierReport({
       {
         title: "Executive Repair Position",
         body: buildExecutiveSummary({
+          isComparison,
           credibilityConclusion,
           whyItWins,
           strongestDisputes,
@@ -148,7 +149,9 @@ export function buildCarrierReport({
           credibilityConclusion,
           whyItWins,
           topItems.length > 0
-            ? `The clearest dispute areas are ${joinHumanList(topItems.slice(0, 4).map((item) => item.title.toLowerCase()))}.`
+            ? isComparison
+              ? `The clearest dispute areas are ${joinHumanList(topItems.slice(0, 4).map((item) => item.title.toLowerCase()))}.`
+              : `Support remains open on ${joinHumanList(topItems.slice(0, 4).map((item) => item.title.toLowerCase()))}.`
             : undefined,
         ]),
       },
@@ -159,13 +162,13 @@ export function buildCarrierReport({
           }]
         : []),
       {
-        title: "Supportable Supplement / Dispute Items",
+        title: isComparison ? "Supportable Supplement / Dispute Items" : "Supportable Review Items",
         bullets:
           topItems.length > 0
             ? topItems.map((item) =>
-                `${item.title}: ${item.rationale}${item.evidence ? ` Evidence: ${item.evidence}` : ""}${item.source ? ` Source: ${item.source}.` : ""}`
+                `${item.title}: ${item.rationale}${item.evidence ? ` Support noted: ${item.evidence}` : ""}`
               )
-            : ["No clear supportable missing, underwritten, or disputed repair-path items were identified from the current structured analysis."],
+            : ["No clear supportable missing, underwritten, or disputed estimate-support items were identified from the current file."],
       },
       {
         title: "Negotiation / Rebuttal Support",
@@ -188,6 +191,7 @@ export function buildCarrierReport({
 }
 
 function buildExecutiveSummary(params: {
+  isComparison: boolean;
   credibilityConclusion: string;
   whyItWins: string;
   strongestDisputes: string;
@@ -195,7 +199,9 @@ function buildExecutiveSummary(params: {
   const sentences = [
     params.credibilityConclusion,
     params.whyItWins,
-    `The biggest remaining gaps are ${params.strongestDisputes}.`,
+    params.isComparison
+      ? `The biggest remaining differences are ${params.strongestDisputes}.`
+      : `Support remains open on ${params.strongestDisputes}.`,
   ].filter(Boolean);
 
   const kept: string[] = [];
@@ -232,20 +238,25 @@ function buildCredibilityConclusion(
   exportModel: ReturnType<typeof buildExportModel>
 ): string {
   const lower = exportModel.repairPosition.toLowerCase();
+  const isComparison = /\b(shop estimate|carrier estimate)\b/i.test(exportModel.repairPosition);
 
-  if (lower.includes("shop estimate") && lower.includes("more complete")) {
+  if (isComparison && lower.includes("shop estimate") && lower.includes("more complete")) {
     return "The shop estimate currently reads as the more credible repair document.";
   }
 
-  if (lower.includes("carrier estimate") && lower.includes("underwritten")) {
+  if (isComparison && lower.includes("carrier estimate") && lower.includes("underwritten")) {
     return "The carrier estimate currently reads as underwritten against the stronger repair path.";
   }
 
   if (exportModel.supplementItems.length > 0) {
-    return "The estimate is credible as a preliminary repair plan, but the strongest position is the one that best supports the listed procedures, verifications, and repair-path items.";
+    return isComparison
+      ? "The estimate is credible as a preliminary repair plan, but the stronger position is the one that best supports the listed procedures, verifications, and scope items."
+      : "The file documents a credible preliminary repair plan, with several repair, verification, or documentation items still needing clearer support.";
   }
 
-  return "The current material shows a generally credible estimate with no major unresolved support split.";
+  return isComparison
+    ? "The current material shows no major unresolved support split."
+    : "The current file supports a generally credible estimate review with no major unresolved support issue.";
 }
 
 function buildWhyItWins(
@@ -260,7 +271,7 @@ function buildWhyItWins(
       ? `It is stronger because the current file supports ${joinHumanList(
           topItems.map((item) => item.title.toLowerCase())
         )} more clearly than the competing posture.`
-      : `The clearest remaining gaps are ${joinHumanList(
+      : `The file most clearly leaves open ${joinHumanList(
           topItems.map((item) => item.title.toLowerCase())
         )}.`;
   }
@@ -273,7 +284,7 @@ function buildWhyItWins(
     return cleanCarrierSummarySentence(report.recommendedActions[0]);
   }
 
-  return "The current support is driven by how well the file documents the intended repair path, verification burden, and disputed operations.";
+  return "The file is best read through what it documents clearly, what remains open, and what still needs support or documentation.";
 }
 
 function buildValuationBullets(
@@ -372,7 +383,7 @@ function buildSourceSummary(
 
   const resolved = [...sources].slice(0, 8);
   if (resolved.length === 0) {
-    return ["Source references are limited to the current estimate, uploaded documents, and structured repair analysis."];
+    return ["References are limited to the current estimate, uploaded documents, and related file material."];
   }
 
   const cleaned = resolved
@@ -381,7 +392,7 @@ function buildSourceSummary(
     .slice(0, 8);
 
   if (cleaned.length === 0) {
-    return ["Source references are limited to the current estimate, uploaded documents, and structured repair analysis."];
+    return ["References are limited to the current estimate, uploaded documents, and related file material."];
   }
 
   return cleaned.map((source) => `${trimTrailingPunctuation(source)}.`);
@@ -422,26 +433,41 @@ function cleanValuationReasoning(reasoning?: string | null): string | null {
 function selectReportSupplementItems(
   items: ReturnType<typeof buildExportModel>["supplementItems"]
 ): ReturnType<typeof buildExportModel>["supplementItems"] {
-  if (items.length <= 6) {
+  if (items.length <= 8) {
     return items;
   }
 
-  const narrowFocus = new Set([
-    "ADAS / Calibration Procedure Support",
-    "Headlamp aiming check",
-    "Seam Sealer Restoration",
-  ]);
+  const categorySeen = new Set<string>();
+  const selected: ReturnType<typeof buildExportModel>["supplementItems"] = [];
 
-  const primary = items.filter((item) => !narrowFocus.has(item.title)).slice(0, 5);
-  const fallback = items.filter((item) => narrowFocus.has(item.title)).slice(0, primary.length > 0 ? 1 : 3);
-  return [...primary, ...fallback].slice(0, 6);
+  for (const item of items) {
+    if (!categorySeen.has(item.category)) {
+      selected.push(item);
+      categorySeen.add(item.category);
+    }
+    if (selected.length >= 5) {
+      break;
+    }
+  }
+
+  for (const item of items) {
+    if (selected.some((existing) => existing.title === item.title)) {
+      continue;
+    }
+    selected.push(item);
+    if (selected.length >= 8) {
+      break;
+    }
+  }
+
+  return selected.slice(0, 8);
 }
 
 function toHumanReadableSourceLabel(source: string): string | undefined {
   const trimmed = trimTrailingPunctuation(source).trim();
   if (!trimmed) return undefined;
   if (
-    /repair-pipeline|pipeline evidence|assistant reasoning|structured narrative|structured analysis|supplement analysis|missing procedures|scan analysis|calibration analysis|^inline-\d+$|^retrieved-\d+$/i.test(
+    /repair-pipeline|pipeline evidence|assistant reasoning|structured narrative|structured analysis|supplement analysis|missing procedures|scan analysis|calibration analysis|drive knowledge base|retrieved evidence|^inline-\d+$|^retrieved-\d+$/i.test(
       trimmed
     )
   ) {
@@ -486,7 +512,7 @@ function cleanCarrierSummarySentence(value?: string | null): string {
     .trim();
 
   if (!cleaned) {
-    return "The current support is driven by how well the file documents the intended repair path, verification burden, and disputed operations.";
+    return "The file is best read through what it documents clearly, what remains open, and what still needs support or documentation.";
   }
 
   return trimTrailingPunctuation(cleaned) + ".";

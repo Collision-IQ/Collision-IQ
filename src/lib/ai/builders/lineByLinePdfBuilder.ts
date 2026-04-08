@@ -21,8 +21,8 @@ export function buildLineByLinePdf(params: ExportBuilderInput): CarrierReportDoc
       title: isComparison ? "Line-by-Line Comparison Report" : "Line-by-Line Estimate Review",
       subtitle:
         isComparison
-          ? "Operation-focused report showing estimate lines, rationale, and current support status from the shared normalized export model."
-          : "Operation-focused estimate review showing documented lines, rationale, and current support status from the shared normalized export model.",
+          ? "Operation-focused report showing estimate lines, rationale, and current support status from the current file review."
+          : "Operation-focused estimate review showing documented lines, rationale, and current support status from the current file review.",
       generatedLabel: `Generated ${source.generatedLabel}`,
     }),
     summary: [
@@ -80,8 +80,8 @@ function buildPdfHeader(params: {
 
 function buildPdfFooter(): string[] {
   return [
-    "This PDF is generated from the shared normalized repair analysis and export model.",
-    "Review and edit the final carrier-facing language as needed before sending or filing.",
+    "This PDF reflects the current estimate review and supporting file material.",
+    "Review and edit the final summary language as needed before sending or filing.",
   ];
 }
 

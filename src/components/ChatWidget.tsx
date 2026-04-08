@@ -110,6 +110,7 @@ export default function ChatWidget({
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messageCounterRef = useRef(0);
   const activeSystemStatusMessageIdRef = useRef<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -211,6 +212,14 @@ export default function ChatWidget({
       block: "end",
     });
   }, [messages]);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "0px";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 112)}px`;
+  }, [input]);
 
   function buildAttachmentSummary(list: Attachment[]) {
     if (!list.length) return "";
@@ -1364,7 +1373,7 @@ export default function ChatWidget({
 
         <div className="absolute bottom-0 left-0 right-0 border-t border-white/10 bg-black/85 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur">
           <div className="p-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-end gap-3">
               <input
                 type="file"
                 ref={fileInputRef}
@@ -1440,16 +1449,18 @@ export default function ChatWidget({
                 )}
               </button>
 
-              <input
+              <textarea
+                ref={textareaRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 disabled={disabled}
+                rows={1}
                 placeholder={
                   hasAnyAttachment
                     ? "Ask about the attachments, or add more context..."
                     : "Ask about a repair, upload files, or take a photo..."
                 }
-                className="flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-orange-500 transition text-sm sm:text-base disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-orange-500 transition text-sm sm:text-base disabled:cursor-not-allowed disabled:opacity-50 resize-none overflow-y-auto min-h-[48px] max-h-[112px]"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -1464,7 +1475,7 @@ export default function ChatWidget({
                 disabled={disabled || loading || isTranscribing || isExportingChat}
                 className="rounded-xl border border-white/10 bg-white/5 px-4 sm:px-5 py-3 text-white/80 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {isExportingChat ? "Preparing..." : "Download Redacted Chat"}
+                {isExportingChat ? "Preparing..." : "Download Chat"}
               </button>
 
               <button

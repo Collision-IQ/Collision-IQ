@@ -35,6 +35,8 @@ type RepairFunction = {
 type SupplementCandidate = {
   title: string;
   reason: string;
+  sourceType?: "missing" | "support_gap" | "proactive_oem";
+  supportState?: "missing" | "partial" | "proactive";
 };
 
 export type SupplementValidationContext = {
@@ -187,31 +189,46 @@ export function validateSupplements(
     const scanProcedure = looksLikeScanSupplementTitle(title);
     const corrosionProtectionOnly =
       title.includes("corrosion") && !title.includes("seam") && !title.includes("weld");
-
-    if (canonicalKey && representedMatches.some((match) => match.key === canonicalKey)) {
-      return false;
-    }
+    const proactiveOem = item.sourceType === "proactive_oem";
+    const clearlyRepresented = isClearlyRepresentedEstimateImprovement(
+      title,
+      representedText
+    );
 
     if (
-      (title.includes("pre-repair scan") && hasPreScanCoverage) ||
-      (title.includes("in-process") && hasInProcessScanCoverage) ||
-      (title.includes("post-repair scan") && hasPostScanCoverage)
+      canonicalKey &&
+      representedMatches.some((match) => match.key === canonicalKey) &&
+      (!proactiveOem || clearlyRepresented)
     ) {
       return false;
     }
 
-    if (corrosionProtectionOnly && hasCavityWaxCoverage) {
+    if (
+      ((title.includes("pre-repair scan") && hasPreScanCoverage) ||
+        (title.includes("in-process") && hasInProcessScanCoverage) ||
+        (title.includes("post-repair scan") && hasPostScanCoverage)) &&
+      (!proactiveOem || clearlyRepresented)
+    ) {
+      return false;
+    }
+
+    if (corrosionProtectionOnly && hasCavityWaxCoverage && (!proactiveOem || clearlyRepresented)) {
       return false;
     }
 
     for (const [functionName, keywords] of Object.entries(functionMap)) {
-      if (title.includes(functionName) && hasFunction(representedText, keywords)) {
+      if (
+        title.includes(functionName) &&
+        hasFunction(representedText, keywords) &&
+        (!proactiveOem || clearlyRepresented)
+      ) {
         return false;
       }
     }
 
     if (
       scanProcedure &&
+      !proactiveOem &&
       !isProcedureRequired(canonicalKey, title, requiredProcedureText, requiredProcedureMatches)
     ) {
       return false;
@@ -219,8 +236,13 @@ export function validateSupplements(
 
     if (
       adasProcedure &&
+      !proactiveOem &&
       !isProcedureRequired(canonicalKey, title, requiredProcedureText, requiredProcedureMatches)
     ) {
+      return false;
+    }
+
+    if (proactiveOem && clearlyRepresented) {
       return false;
     }
 
@@ -266,6 +288,48 @@ function normalizeSupplementTitle(title: string): string {
 
   if (lower.includes("kafas")) {
     return "Forward Camera Calibration";
+  }
+
+  if (
+    lower.includes("one-time-use") ||
+    lower.includes("one time use") ||
+    lower.includes("fastener") ||
+    lower.includes("clip") ||
+    lower.includes("seal")
+  ) {
+    return "One-Time-Use Hardware / Seals / Clips";
+  }
+
+  if (
+    lower.includes("test-fit") ||
+    lower.includes("test fit") ||
+    lower.includes("mock-up") ||
+    lower.includes("mock up") ||
+    lower.includes("fit-sensitive")
+  ) {
+    return "Pre-Paint Test Fit";
+  }
+
+  if (lower.includes("cavity wax") || lower.includes("seam sealer") || lower.includes("corrosion-protection")) {
+    return "Corrosion Protection / Weld Restoration";
+  }
+
+  if (lower.includes("weld-prep") || lower.includes("weld prep") || lower.includes("weld-protection") || lower.includes("weld protection")) {
+    return "Corrosion Protection / Weld Restoration";
+  }
+
+  if (lower.includes("alignment")) {
+    return "Four-Wheel Alignment";
+  }
+
+  if (
+    lower.includes("adas") ||
+    lower.includes("calibration") ||
+    lower.includes("camera") ||
+    lower.includes("radar") ||
+    lower.includes("sensor")
+  ) {
+    return "ADAS / Calibration Procedure Support";
   }
 
   return normalized;
@@ -383,6 +447,8 @@ function extractSupplementCandidates(
       .map((finding) => ({
         title: normalizeSupplementTitle(finding.title),
         reason: finding.detail,
+        sourceType: "support_gap",
+        supportState: "partial",
       }));
   }
 
@@ -391,12 +457,16 @@ function extractSupplementCandidates(
       ...result.supplements.map((finding) => ({
         title: normalizeSupplementTitle(finding.title),
         reason: finding.detail,
+        sourceType: "support_gap",
+        supportState: "partial",
       })),
       ...result.findings
         .filter((finding) => finding.status !== "present")
         .map((finding) => ({
           title: normalizeSupplementTitle(finding.title),
           reason: finding.detail,
+          sourceType: "support_gap",
+          supportState: "partial",
         })),
     ];
   }
@@ -405,7 +475,10 @@ function extractSupplementCandidates(
     ...result.missingProcedures.map((procedure) => ({
       title: normalizeSupplementTitle(procedure),
       reason: "This procedure is not clearly represented in the current estimate.",
+      sourceType: "missing" as const,
+      supportState: "missing" as const,
     })),
+    ...result.supplementOpportunities.map((item) => classifySupplementOpportunity(item)),
     ...result.requiredProcedures
       .filter((procedure) =>
         !result.presentProcedures.some(
@@ -415,12 +488,111 @@ function extractSupplementCandidates(
       .map((procedure) => ({
         title: normalizeSupplementTitle(procedure.procedure),
         reason: procedure.reason,
+        sourceType: "missing" as const,
+        supportState: "missing" as const,
       })),
     ...result.issues
       .filter((issue) => issue.missingOperation || issue.category === "calibration" || issue.category === "scan")
       .map((issue) => ({
         title: normalizeSupplementTitle(issue.missingOperation ?? issue.title),
         reason: issue.impact || issue.finding,
+        sourceType: issue.missingOperation ? ("missing" as const) : ("support_gap" as const),
+        supportState: issue.missingOperation ? ("missing" as const) : ("partial" as const),
       })),
   ];
+}
+
+function classifySupplementOpportunity(item: string): SupplementCandidate {
+  const normalizedTitle = normalizeSupplementTitle(item);
+  const proactiveOem = /\boem support in\b/i.test(item) || /\bposition statement\b/i.test(item);
+  const partialSupport =
+    /\bbetter documented\b/i.test(item) ||
+    /\bcarried or documented\b/i.test(item) ||
+    /\breflected if\b/i.test(item) ||
+    /\bmay still need\b/i.test(item) ||
+    /\bremains open\b/i.test(item);
+
+  return {
+    title: normalizedTitle,
+    reason: item,
+    sourceType: proactiveOem ? "proactive_oem" : "support_gap",
+    supportState: proactiveOem ? (partialSupport ? "partial" : "proactive") : "partial",
+  };
+}
+
+function isClearlyRepresentedEstimateImprovement(title: string, representedText: string): boolean {
+  if (!representedText.trim()) return false;
+
+  if (
+    title.includes("one-time-use hardware") ||
+    title.includes("seal") ||
+    title.includes("clip")
+  ) {
+    return hasFunction(representedText, [
+      "replace hardware",
+      "replaced hardware",
+      "one-time-use",
+      "one time use",
+      "non-reusable",
+      "new clips",
+      "new seals",
+      "new fasteners",
+    ]);
+  }
+
+  if (title.includes("corrosion protection") || title.includes("weld restoration")) {
+    return hasFunction(representedText, [
+      "corrosion protection",
+      "cavity wax",
+      "seam sealer",
+      "anti-corrosion",
+      "weld protection",
+      "weld-through primer",
+      "weld thru primer",
+      "refinish protection",
+    ]);
+  }
+
+  if (title.includes("pre-paint test fit")) {
+    return hasFunction(representedText, [
+      "pre-paint test fit",
+      "pre paint test fit",
+      "mock-up",
+      "mock up",
+      "fit verification",
+      "pre-finish fit confirmation",
+    ]);
+  }
+
+  if (title.includes("alignment")) {
+    return hasFunction(representedText, [
+      "four-wheel alignment",
+      "4-wheel alignment",
+      "4 wheel alignment",
+      "alignment check",
+      "wheel alignment",
+    ]);
+  }
+
+  if (title.includes("adas") || title.includes("calibration")) {
+    return (
+      hasFunction(representedText, ["calibration", "adas"]) &&
+      hasFunction(representedText, ["scan", "verification", "aim", "alignment", "documentation"])
+    );
+  }
+
+  if (/refinish|blend|mask|tint|let-?down|polish|sand/.test(title)) {
+    return hasFunction(representedText, [
+      "refinish",
+      "blend",
+      "masking",
+      "tint",
+      "let-down",
+      "let down",
+      "polish",
+      "color sand",
+    ]);
+  }
+
+  return false;
 }

@@ -115,7 +115,7 @@ export function buildRebuttalEmailTemplate(params: ExportBuilderInput): string {
   const topItems = exportModel.supplementItems.slice(0, 4);
   const asks = topItems.length > 0
     ? topItems.map((item) => `- ${item.title}: ${buildRequestSentence(item)}`)
-    : ["- Please review the current repair path and provide any supporting documentation needed to confirm the intended scope."];
+    : ["- Please review the current estimate support and provide any supporting documentation needed to confirm the intended scope."];
 
   return [
     `Subject: Request for estimate revision - ${subjectVehicle}`,
@@ -201,7 +201,7 @@ export function buildLineByLineComparisonReport(params: ExportBuilderInput): str
     "",
     isComparison
       ? "This view focuses on estimate operations, why each line matters, and whether the current carrier-side posture appears supported, underwritten, missing, or disputed."
-      : "This view focuses on estimate operations, why each line matters, and whether the current documentation reads as supported, underwritten, missing, or still uncertain.",
+      : "This view focuses on estimate operations, what the file documents, and whether the current estimate support reads as documented, open, or still uncertain.",
     "",
     ...rows,
   ].join("\n");
@@ -265,12 +265,12 @@ function buildLineItems(
       carrierPosition: match
         ? describeCarrierPosition(match, isComparison)
         : isComparison
-          ? "No explicit carrier-side support gap was flagged for this operation in the current normalized analysis."
-          : "No explicit support gap was flagged for this operation in the current normalized analysis.",
+          ? "No explicit carrier-side support issue was flagged for this operation in the current file review."
+          : "No explicit estimate-support issue was flagged for this operation in the current file review.",
       supportStatus: match ? mapSupportStatus(match.kind) : "supported",
       rationale: match
         ? match.rationale
-        : "This line is present in the parsed estimate operations and was not singled out as a major current support gap.",
+        : "This line is present in the estimate material and was not singled out as a major current support issue.",
       support: match ? buildSupportSnippet(match) : undefined,
     };
   });
@@ -536,8 +536,8 @@ function summarizeCarrierCategoryPosition(
 ): string {
   if (items.length === 0) {
     return isComparison
-      ? "No clear unsupported variance was identified in this category from the current normalized analysis."
-      : "No clear support gap was identified in this category from the current normalized analysis.";
+      ? "No clear unsupported variance was identified in this category from the current file review."
+      : "No clear estimate-support issue was identified in this category from the current file review.";
   }
 
   return items.map((item) => describeCarrierPosition(item, isComparison)).join(" ");
@@ -559,13 +559,15 @@ function describeCarrierPosition(item: ExportSupplementItem, isComparison = true
     case "missing_operation":
       return isComparison
         ? `${item.title} is not clearly carried in the current estimate posture.`
-        : `${item.title} is not clearly carried in the current estimate.`;
+        : `${item.title} is not clearly carried in the current estimate support.`;
     case "missing_verification":
-      return `${item.title} may be implicitly required, but the current verification or documentation is not clearly shown.`;
+      return isComparison
+        ? `${item.title} may be implicitly required, but the current verification or documentation is not clearly shown.`
+        : `${item.title} may be relevant, but the current verification or documentation is not clearly shown.`;
     case "underwritten_operation":
       return isComparison
         ? `${item.title} appears lighter or under-supported in the current estimate.`
-        : `${item.title} still needs clearer support in the current estimate.`;
+        : `${item.title} still needs clearer estimate support or documentation.`;
     default:
       return isComparison
         ? `${item.title} reflects a repair-path position that still needs clearer support in the current file.`
@@ -591,14 +593,11 @@ function mapSupportStatus(
 }
 
 function buildSupportSnippet(item: ExportSupplementItem): string | undefined {
-  if (item.evidence && item.source) {
-    return `${item.evidence} Source: ${item.source}.`;
-  }
   if (item.evidence) {
     return item.evidence;
   }
-  if (item.source) {
-    return `Source: ${item.source}.`;
+  if (item.source && !/^(?:estimate text|documentation)$/i.test(item.source)) {
+    return `Document support: ${item.source}`;
   }
   return undefined;
 }
@@ -606,11 +605,11 @@ function buildSupportSnippet(item: ExportSupplementItem): string | undefined {
 function buildRequestSentence(item: ExportSupplementItem): string {
   switch (item.kind) {
     case "missing_operation":
-      return "Please add this operation or confirm why it is not required.";
+      return "Please add this item or clarify why it is not required for the documented repair path.";
     case "missing_verification":
       return "Please provide the verification, calibration, or documentation support for this item.";
     case "underwritten_operation":
-      return "Please provide time support or documentation showing how this operation is being covered.";
+      return "Please provide the documentation showing how this item is supported in the current estimate.";
     default:
       return "Please clarify the intended repair-path position and provide the supporting documentation for this item.";
   }

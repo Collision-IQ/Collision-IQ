@@ -28,7 +28,7 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
     header: buildPdfHeader({
       title: "Carrier Rebuttal Email",
       subtitle:
-        "Editable carrier-facing summary built from the current normalized repair analysis and support items.",
+        "Editable carrier-facing summary based on the current estimate review and supporting file material.",
       generatedLabel: `Generated ${source.generatedLabel}`,
     }),
     summary: [
@@ -46,7 +46,7 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
             value: `$${exportModel.reportFields.estimateTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
           }]
         : []),
-      { label: "Primary Ask", value: rebuttalItems[0]?.title || "Review the current repair path and provide supporting documentation." },
+      { label: "Primary Ask", value: rebuttalItems[0]?.title || "Review the current estimate support and provide any needed documentation." },
       { label: "Format", value: "Professional email draft" },
     ],
     sections: [
@@ -64,9 +64,9 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
           rebuttalItems.length > 0
             ? rebuttalItems.map(
                 (item) =>
-                  `${item.title}: ${item.rationale}${item.evidence ? ` Evidence: ${item.evidence}` : ""}`
+                  `${item.title}: ${item.rationale}${item.evidence ? ` Support noted: ${item.evidence}` : ""}`
               )
-            : ["Please review the current repair path and provide any supporting documentation needed to confirm the intended scope."],
+            : ["Please review the current estimate support and provide any documentation needed to confirm the intended scope."],
       },
       {
         title: "Editable Email Body",
@@ -77,11 +77,11 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
           "",
           rebuttalItems.length > 0
             ? "The file would benefit from clearer support on the following items:"
-            : "Please review the current repair path and supporting documentation:",
+            : "Please review the current estimate support and related documentation:",
           ...(
             rebuttalItems.length > 0
               ? rebuttalItems.map((item) => `- ${item.title}: ${item.rationale}`)
-              : ["- Please review the current repair path and provide supporting documentation."]
+              : ["- Please review the current estimate support and provide supporting documentation."]
           ),
           "",
           "Please update the estimate or provide any documentation that clarifies the current position on the items above.",
@@ -119,7 +119,7 @@ function buildPdfHeader(params: {
 
 function buildPdfFooter(): string[] {
   return [
-    "This PDF is generated from the shared normalized repair analysis and export model.",
+    "This PDF is intended as an editable carrier-facing summary of the current estimate review.",
     "Review and edit the final carrier-facing language as needed before sending or filing.",
   ];
 }

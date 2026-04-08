@@ -451,12 +451,34 @@ function buildRecommendedActions(
     ...missingProcedures.map(
       (procedure) => `Add and document ${procedure} before final repair delivery.`
     ),
-    ...supplementOpportunities.map(
-      (issue) => `Please include clear support for ${issue} if it remains part of the intended repair path.`
+    ...supplementOpportunities.map((issue) =>
+      buildSupplementOpportunityAction(issue)
     ),
   ];
 
   return [...new Set(actions)].slice(0, 6);
+}
+
+function buildSupplementOpportunityAction(issue: string): string {
+  const cleaned = issue.trim().replace(/\.$/, "");
+  if (!cleaned) {
+    return "Please review the current estimate support and document any remaining open repair items.";
+  }
+
+  if (/^add and document\b/i.test(cleaned)) {
+    return `${cleaned} before final repair delivery.`;
+  }
+
+  if (/oem support in\b/i.test(cleaned)) {
+    const normalized = cleaned
+      .replace(/^OEM support in\s+/i, "")
+      .replace(/\s+indicates\s+/i, " indicates ")
+      .replace(/\s+adds\s+/i, " adds ");
+
+    return `Please review whether ${normalized} is already represented in the estimate, what support remains open, and what should likely be added or documented more clearly.`;
+  }
+
+  return `Please review whether ${cleaned} is already represented in the estimate and what should be added or documented more clearly if it remains part of the repair path.`;
 }
 
 type RAGProcedure = {

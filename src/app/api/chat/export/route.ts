@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { UnauthorizedError } from "@/lib/auth/require-current-user";
 import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
+import { jsPDF } from "jspdf";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -132,6 +133,47 @@ function normalizeExportComparisonText(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+function buildChatExportPdf(text: string): ArrayBuffer {
+  const doc = new jsPDF({
+    unit: "mm",
+    format: "letter",
+  });
+
+  doc.setFont("Helvetica", "Bold");
+  doc.setFontSize(16);
+  doc.text("Redacted Chat Export", 16, 18);
+
+  doc.setFont("Helvetica", "Normal");
+  doc.setFontSize(10);
+  doc.text(
+    "This download preserves the chat content while removing sensitive values from the exported copy.",
+    16,
+    26,
+    { maxWidth: 178 }
+  );
+
+  const marginX = 16;
+  const marginY = 36;
+  const lineHeight = 5.4;
+  const maxWidth = 178;
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const bottomY = pageHeight - 14;
+  const lines = doc.splitTextToSize(text, maxWidth);
+
+  let y = marginY;
+  for (const line of lines) {
+    if (y + lineHeight > bottomY) {
+      doc.addPage();
+      y = 18;
+    }
+
+    doc.text(line, marginX, y);
+    y += lineHeight;
+  }
+
+  return doc.output("arraybuffer");
+}
+
 export async function GET() {
   try {
     return await handleExportAccess();
@@ -166,11 +208,12 @@ export async function POST(req: Request) {
 
     const redacted = redactDownloadContent(exportText);
     const filenameDate = new Date().toISOString().slice(0, 10);
+    const pdf = buildChatExportPdf(redacted);
 
-    return new Response(redacted, {
+    return new Response(pdf, {
       headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Content-Disposition": `attachment; filename="chat-export-redacted-${filenameDate}.txt"`,
+        "Content-Type": "application/pdf",
+        "Content-Disposition": `attachment; filename="chat-export-${filenameDate}.pdf"`,
         "Cache-Control": "no-store",
       },
     });

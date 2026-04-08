@@ -190,6 +190,32 @@ run("negotiation output does not reintroduce unsupported structural pull asks", 
   assert.equal(/Structural Measurement Verification/i.test(response), true);
 });
 
+run("proactive OEM-backed hardware guidance survives partial estimate hints", () => {
+  const lines = buildSupplementLines(
+    makeStructuralReport({
+      evidence: [
+        {
+          id: "e2",
+          title: "OEM note",
+          snippet:
+            "Front bumper removal disturbed clips and seals around the repair area, but the estimate does not show replacement hardware documentation.",
+          source: "estimate.pdf",
+          authority: "inferred",
+        },
+      ],
+      missingProcedures: [],
+      supplementOpportunities: [
+        "OEM support in Ford Bumper Procedure.pdf indicates one-time-use hardware, seals, or clips may already be implicated, but the replacement and related documentation posture remains open.",
+      ],
+    })
+  );
+
+  assert.equal(
+    lines.some((line) => line.title === "One-Time-Use Hardware / Seals / Clips"),
+    true
+  );
+});
+
 runAsync("Egnyte linked documents are detected and incorporated into the analysis corpus", async () => {
   let fetchedPath = null;
   const attachments = await enrichAnalysisAttachments({

@@ -233,14 +233,17 @@ run("export model removes placeholder text and keeps documented scans as positiv
     false
   );
   assert.equal(exportModel.valuation.acvMissingInputs.includes("mileage"), false);
-  assert.equal(exportModel.repairPosition.includes("Bottom line: credible preliminary estimate, but still likely to grow after teardown."), true);
+  assert.equal(
+    exportModel.repairPosition.includes("The file supports a grounded preliminary review, while some repair or documentation items may become clearer as teardown progresses."),
+    true
+  );
   assert.equal(exportModel.repairPosition.includes("documents strengths such as"), true);
   assert.equal(exportModel.repairPosition.includes("vehicle 2018 Tesla Model S 75D AWD"), true);
   assert.equal(exportModel.repairPosition.includes("vehicle details still limited"), false);
   assert.equal(exportModel.positionStatement.includes("VIN not clearly supported"), false);
   assert.equal(
     exportModel.repairPosition.indexOf("documents strengths such as") <
-      exportModel.repairPosition.indexOf("clearest remaining issues"),
+      exportModel.repairPosition.indexOf("support remains open on"),
     true
   );
   assert.equal(exportModel.repairPosition.toLowerCase().includes("carrier estimate"), false);
@@ -446,4 +449,38 @@ run("negotiation generation uses validated support gaps only", () => {
   assert.equal(negotiation.includes("System Calibration"), false);
   assert.equal(analysisNegotiation.includes("Post-Repair Scan"), false);
   assert.equal(analysisNegotiation.includes("System Calibration"), false);
+});
+
+run("OEM-backed supplement opportunities flow into supplement lines and negotiation output", () => {
+  const report = makeReport();
+  report.evidence = [
+    {
+      id: "evidence-1",
+      title: "Shop 21733 estimate",
+      snippet: SHOP_21733_TEXT.replace(/Pre-paint test fit/gi, "Test fits"),
+      source: "Shop 21733.pdf",
+      authority: "inferred",
+    },
+  ];
+  report.sourceEstimateText = SHOP_21733_TEXT.replace(/Pre-paint test fit/gi, "Test fits");
+  report.supplementOpportunities = [
+    "OEM support in BMW Front Bumper Procedure.pdf indicates one-time-use hardware, seals, or clips may need to be replaced and documented when disturbed.",
+    "OEM support in BMW Position Statement.pdf indicates a fit-sensitive repair path, so pre-paint test-fit or mock-up documentation may be needed before final finish work.",
+  ];
+  report.missingProcedures = [];
+  report.presentProcedures = ["Pre-repair scan", "Post-repair scan"];
+
+  const supplementLines = buildSupplementLines(report);
+  const negotiation = generateNegotiationResponse(report);
+
+  assert.equal(
+    supplementLines.some((item) => item.title === "One-Time-Use Hardware / Seals / Clips"),
+    true
+  );
+  assert.equal(
+    supplementLines.some((item) => item.title === "Pre-Paint Test Fit"),
+    true
+  );
+  assert.equal(/BMW Front Bumper Procedure\.pdf/i.test(negotiation), true);
+  assert.equal(/fit-sensitive repair path/i.test(negotiation), true);
 });
