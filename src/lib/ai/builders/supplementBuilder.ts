@@ -444,7 +444,7 @@ function extractSupplementCandidates(
   if (Array.isArray(result)) {
     return result
       .filter((finding) => finding.status !== "present")
-      .map((finding) => ({
+      .map<SupplementCandidate>((finding) => ({
         title: normalizeSupplementTitle(finding.title),
         reason: finding.detail,
         sourceType: "support_gap",
@@ -454,7 +454,7 @@ function extractSupplementCandidates(
 
   if ("findings" in result) {
     return [
-      ...result.supplements.map((finding) => ({
+      ...result.supplements.map<SupplementCandidate>((finding) => ({
         title: normalizeSupplementTitle(finding.title),
         reason: finding.detail,
         sourceType: "support_gap",
@@ -462,7 +462,7 @@ function extractSupplementCandidates(
       })),
       ...result.findings
         .filter((finding) => finding.status !== "present")
-        .map((finding) => ({
+        .map<SupplementCandidate>((finding) => ({
           title: normalizeSupplementTitle(finding.title),
           reason: finding.detail,
           sourceType: "support_gap",
@@ -472,7 +472,7 @@ function extractSupplementCandidates(
   }
 
   return [
-    ...result.missingProcedures.map((procedure) => ({
+    ...result.missingProcedures.map<SupplementCandidate>((procedure) => ({
       title: normalizeSupplementTitle(procedure),
       reason: "This procedure is not clearly represented in the current estimate.",
       sourceType: "missing" as const,
@@ -485,7 +485,7 @@ function extractSupplementCandidates(
           (present) => normalizeSupplementTitle(present).toLowerCase() === normalizeSupplementTitle(procedure.procedure).toLowerCase()
         )
       )
-      .map((procedure) => ({
+      .map<SupplementCandidate>((procedure) => ({
         title: normalizeSupplementTitle(procedure.procedure),
         reason: procedure.reason,
         sourceType: "missing" as const,
@@ -493,7 +493,7 @@ function extractSupplementCandidates(
       })),
     ...result.issues
       .filter((issue) => issue.missingOperation || issue.category === "calibration" || issue.category === "scan")
-      .map((issue) => ({
+      .map<SupplementCandidate>((issue) => ({
         title: normalizeSupplementTitle(issue.missingOperation ?? issue.title),
         reason: issue.impact || issue.finding,
         sourceType: issue.missingOperation ? ("missing" as const) : ("support_gap" as const),
