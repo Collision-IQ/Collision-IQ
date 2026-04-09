@@ -1,0 +1,9 @@
+{
+  "name": "tesla_ccc_note_regression",
+  "vin": "5YJ3E1EA3TF150471",
+  "expectedDisplay": "2025 Tesla Model 3",
+  "expectedTrim": "Standard RWD",
+  "headerText": "VIN: 5YJ3E1EA3TF150471\nVehicle Description: 2025 TESL Model 3 Standard RWD\n",
+  "noteText": "CCC Note: closest like, kind & quality option references 2026 Tesla Model 3 Premium RWD as a non-database substitute vehicle.\n",
+  "combinedText": "VIN: 5YJ3E1EA3TF150471\nVehicle Description: 2025 TESL Model 3 Standard RWD\nCCC Note: closest like, kind & quality option references 2026 Tesla Model 3 Premium RWD as a non-database substitute vehicle.\n"
+}

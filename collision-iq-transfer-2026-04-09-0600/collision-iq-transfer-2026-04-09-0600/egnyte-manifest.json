@@ -1,0 +1,10 @@
+{
+  "appId": "collision-IQ",
+  "name": "Collision-IQ",
+  "type": "web",
+  "description": "Chatbot used to answer auto collision questions regarding procedures, OE position statements and ADAS requirements.",
+  "appLogo": "https://collision-academy-new-git-cha-bfa414-collision-academy-82dbb1d7.vercel.app/favicon-32x32.png",
+  "company": {
+    "name": "Collision Academy"
+  }
+}
