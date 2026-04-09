@@ -12,6 +12,7 @@ import {
   deriveStructuralApplicabilityFromResult,
   filterStructuralTitles,
 } from "../structuralApplicability";
+import { buildRepairStory } from "./buildRepairStory";
 
 export type SupplementLine = {
   title: string;
@@ -98,7 +99,7 @@ export function buildSupplementLines(
   }
 
   const validatedCandidates = validateSupplements(text, candidates, context);
-  return buildSupplementLinesHybrid(validatedCandidates);
+  return buildSupplementLinesHybrid(validatedCandidates, text);
 }
 
 function extractTextForFunctions(
@@ -256,17 +257,39 @@ export function inferCategory(title: string): SupplementLine["category"] {
   if (lower.includes("scan")) return "scan";
   if (lower.includes("calibration")) return "calibration";
   if (lower.includes("refinish")) return "refinish";
-  if (lower.includes("seam") || lower.includes("corrosion")) return "material";
+  if (
+    lower.includes("seam") ||
+    lower.includes("corrosion") ||
+    lower.includes("hardware") ||
+    lower.includes("clip") ||
+    lower.includes("fastener")
+  ) {
+    return "material";
+  }
+  if (
+    lower.includes("measure") ||
+    lower.includes("realignment") ||
+    lower.includes("setup") ||
+    lower.includes("tie bar") ||
+    lower.includes("lock support") ||
+    lower.includes("core support") ||
+    lower.includes("upper rail") ||
+    lower.includes("deck opening") ||
+    lower.includes("rear body")
+  ) {
+    return "structural";
+  }
 
   return "labor";
 }
 
 export function buildSupplementLinesHybrid(
-  validatedItems: SupplementCandidate[]
+  validatedItems: SupplementCandidate[],
+  evidenceText = ""
 ): SupplementLine[] {
   const seen = new Set<string>();
 
-  return validatedItems
+  return curateSupplementCandidates(validatedItems, evidenceText)
     .map((item) => ({
       title: normalizeSupplementTitle(item.title),
       category: inferCategory(item.title),
@@ -294,8 +317,9 @@ function normalizeSupplementTitle(title: string): string {
     lower.includes("one-time-use") ||
     lower.includes("one time use") ||
     lower.includes("fastener") ||
-    lower.includes("clip") ||
-    lower.includes("seal")
+    /\bclip(s)?\b/i.test(lower) ||
+    /\bseal(s)?\b/i.test(lower) ||
+    /\bretainer(s)?\b/i.test(lower)
   ) {
     return "One-Time-Use Hardware / Seals / Clips";
   }
@@ -318,7 +342,7 @@ function normalizeSupplementTitle(title: string): string {
     return "Corrosion Protection / Weld Restoration";
   }
 
-  if (lower.includes("alignment")) {
+  if (hasDirectAlignmentSignal(lower)) {
     return "Four-Wheel Alignment";
   }
 
@@ -333,6 +357,242 @@ function normalizeSupplementTitle(title: string): string {
   }
 
   return normalized;
+}
+
+function curateSupplementCandidates(
+  candidates: SupplementCandidate[],
+  text: string
+): SupplementCandidate[] {
+  if (candidates.length <= 1) return candidates;
+
+  let storyText = "";
+  if (text.trim()) {
+    try {
+      const story = buildRepairStory(text);
+      storyText = [story.impact, ...story.zones, ...story.panels].join(" ");
+    } catch {
+      storyText = "";
+    }
+  }
+
+  const evidenceText = `${text}\n${storyText}`.toLowerCase();
+  const normalized = candidates.map((item) => ({
+    ...item,
+    title: normalizeSupplementTitle(item.title),
+  }));
+  const frontSpecificExists = normalized.some(
+    (item) =>
+      inferSupplementConceptFamily(item.title) === "front_structure_scope" &&
+      !isGenericSupplementTitle(item.title)
+  );
+  const rearSpecificExists = normalized.some(
+    (item) =>
+      inferSupplementConceptFamily(item.title) === "rear_structure_scope" &&
+      !isGenericSupplementTitle(item.title)
+  );
+  const filtered = normalized
+    .filter((item) => {
+      const title = item.title;
+
+      if (title === "Four-Wheel Alignment" && !hasAlignmentEvidence(evidenceText)) {
+        return false;
+      }
+
+      if (title === "One-Time-Use Hardware / Seals / Clips" && !hasHardwareEvidence(evidenceText)) {
+        return false;
+      }
+
+      if (
+        title === "Structural Measurement Verification" &&
+        !hasMeasurementEvidence(evidenceText) &&
+        (frontSpecificExists || rearSpecificExists)
+      ) {
+        return false;
+      }
+
+      if (
+        title === "Hidden Mounting Geometry / Teardown Growth" &&
+        frontSpecificExists &&
+        hasSupportScopeEvidence(evidenceText)
+      ) {
+        return false;
+      }
+
+      return true;
+    })
+    .sort((left, right) => scoreCuratedSupplementCandidate(right) - scoreCuratedSupplementCandidate(left));
+
+  const kept: SupplementCandidate[] = [];
+  const seenFamilies = new Set<string>();
+  let genericFallbacks = 0;
+
+  for (const item of filtered) {
+    const family = inferSupplementConceptFamily(item.title);
+    const generic = isGenericSupplementTitle(item.title);
+
+    if (generic && genericFallbacks >= 1) {
+      continue;
+    }
+
+    if (generic && seenFamilies.has(family)) {
+      continue;
+    }
+
+    kept.push(item);
+    if (family !== "other") {
+      seenFamilies.add(family);
+    }
+    if (generic) {
+      genericFallbacks += 1;
+    }
+  }
+
+  return kept;
+}
+
+function inferSupplementConceptFamily(title: string): string {
+  const lower = normalizeSupplementTitle(title).toLowerCase();
+
+  if (
+    lower.includes("front structure") ||
+    lower.includes("tie bar") ||
+    lower.includes("lock support") ||
+    lower.includes("core support") ||
+    lower.includes("upper rail") ||
+    lower.includes("support area") ||
+    lower.includes("hidden mounting")
+  ) {
+    return "front_structure_scope";
+  }
+  if (
+    lower.includes("rear body") ||
+    lower.includes("deck opening") ||
+    lower.includes("bumper reinforcement") ||
+    lower.includes("bumper absorber") ||
+    lower.includes("rear sensor") ||
+    lower.includes("blind spot") ||
+    lower.includes("deck lid") ||
+    lower.includes("latch") ||
+    lower.includes("striker")
+  ) {
+    return "rear_structure_scope";
+  }
+  if (lower.includes("test fit") || lower.includes("fit-sensitive")) return "fit_verification";
+  if (lower.includes("alignment")) return "alignment";
+  if (lower.includes("hardware") || lower.includes("clip") || lower.includes("fastener")) return "hardware";
+  if (lower.includes("measure") || lower.includes("setup") || lower.includes("realignment")) {
+    return "structural_measurement";
+  }
+  if (
+    lower.includes("scan") ||
+    lower.includes("calibration") ||
+    lower.includes("sensor") ||
+    lower.includes("aim")
+  ) {
+    return "verification";
+  }
+  if (lower.includes("corrosion") || lower.includes("seam") || lower.includes("weld")) {
+    return "corrosion";
+  }
+  return "other";
+}
+
+function isGenericSupplementTitle(title: string): boolean {
+  return [
+    "Four-Wheel Alignment",
+    "One-Time-Use Hardware / Seals / Clips",
+    "Structural Measurement Verification",
+    "Hidden Mounting Geometry / Teardown Growth",
+  ].includes(normalizeSupplementTitle(title));
+}
+
+function scoreCuratedSupplementCandidate(item: SupplementCandidate): number {
+  const lower = `${item.title} ${item.reason}`.toLowerCase();
+  let score = item.reason.length;
+
+  if (item.supportState === "missing") score += 70;
+  if (item.supportState === "partial") score += 40;
+  if (lower.includes("front structure") || lower.includes("tie bar") || lower.includes("lock support")) score += 80;
+  if (lower.includes("rear body") || lower.includes("deck opening") || lower.includes("bumper reinforcement")) score += 80;
+  if (lower.includes("test fit") || lower.includes("fit-sensitive")) score += 60;
+  if (lower.includes("sensor") || lower.includes("radar") || lower.includes("calibration")) score += 45;
+  if (isGenericSupplementTitle(item.title)) score -= 40;
+
+  return score;
+}
+
+function hasDirectAlignmentSignal(value: string): boolean {
+  return (
+    value.includes("four-wheel alignment") ||
+    value.includes("4-wheel alignment") ||
+    value.includes("4 wheel alignment") ||
+    value.includes("wheel alignment") ||
+    value.includes("toe") ||
+    value.includes("camber") ||
+    value.includes("caster")
+  );
+}
+
+function hasAlignmentEvidence(value: string): boolean {
+  return (
+    hasDirectAlignmentSignal(value) ||
+    value.includes("suspension") ||
+    value.includes("steering") ||
+    value.includes("subframe")
+  );
+}
+
+function hasHardwareEvidence(value: string): boolean {
+  return (
+    value.includes("one-time-use") ||
+    value.includes("one time use") ||
+    value.includes("hardware") ||
+    value.includes("fastener") ||
+    value.includes("retainer") ||
+    /\bclip(s)?\b/i.test(value) ||
+    /\bseal(s)?\b/i.test(value)
+  );
+}
+
+function hasMeasurementEvidence(value: string): boolean {
+  return (
+    /(measure|measurement|measuring)/.test(value) ||
+    /\bframe\b/.test(value) ||
+    /\bbench\b/.test(value) ||
+    /\bsetup\b/.test(value) ||
+    /\bpull\b/.test(value) ||
+    /realign(?:ment)?/.test(value) ||
+    /dimension(?:s|al)?/.test(value) ||
+    /\bdatum\b/.test(value) ||
+    /\bgeometry\b/.test(value) ||
+    /structural verification/.test(value) ||
+    hasVerifiedStructuralZoneEvidence(value)
+  );
+}
+
+function hasSupportScopeEvidence(value: string): boolean {
+  return (
+    value.includes("tie bar") ||
+    value.includes("lock support") ||
+    value.includes("core support") ||
+    value.includes("radiator support") ||
+    value.includes("support area") ||
+    value.includes("upper rail") ||
+    value.includes("guide") ||
+    value.includes("bracket") ||
+    value.includes("mount")
+  );
+}
+
+function hasVerifiedStructuralZoneEvidence(value: string): boolean {
+  return (
+    /\b(?:rail|apron)\b.{0,40}\b(?:measure|measurement|measuring|verify|verification|setup|pull|realign|datum|geometry|dimension)\b/.test(
+      value
+    ) ||
+    /\b(?:measure|measurement|measuring|verify|verification|setup|pull|realign|datum|geometry|dimension)\b.{0,40}\b(?:rail|apron)\b/.test(
+      value
+    )
+  );
 }
 
 function hasFunction(text: string, keywords: string[]): boolean {

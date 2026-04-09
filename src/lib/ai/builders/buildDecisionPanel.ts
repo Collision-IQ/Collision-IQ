@@ -45,10 +45,13 @@ export function buildDecisionPanel(result: AnalysisResult): DecisionPanel {
   const appraisal = detectAppraisalOpportunity(result);
   const stateLeverage = buildStateLeverage().points;
 
-  const supplementsWithMappedLabels = supplements.map((supplement, index) => ({
-    ...supplement,
-    mappedLabel: mappedLines[index]?.label,
-  }));
+  const supplementsWithMappedLabels = finalizeDecisionPanelSupplements(
+    supplements.map((supplement, index) => ({
+      ...supplement,
+      mappedLabel: mappedLines[index]?.label,
+    })),
+    result.rawEstimateText ?? ""
+  );
 
   return {
     narrative: result.narrative,
@@ -77,17 +80,23 @@ export async function buildDecisionPanelHybrid(params: {
     structurallyScopedCandidates,
     params.supplementContext
   );
-  const supplements = buildSupplementLinesHybrid(validCandidates);
+  const supplements = buildSupplementLinesHybrid(
+    validCandidates,
+    params.result.rawEstimateText ?? ""
+  );
   const mappedLines = mapSupplementLines(supplements, "ccc");
   const diminishedValue = buildDV(params.result);
   const negotiationResponse = generateNegotiationResponse(params.result);
   const appraisal = detectAppraisalOpportunity(params.result);
   const stateLeverage = buildStateLeverage().points;
 
-  const supplementsWithMappedLabels = supplements.map((supplement, index) => ({
-    ...supplement,
-    mappedLabel: mappedLines[index]?.label,
-  }));
+  const supplementsWithMappedLabels = finalizeDecisionPanelSupplements(
+    supplements.map((supplement, index) => ({
+      ...supplement,
+      mappedLabel: mappedLines[index]?.label,
+    })),
+    params.result.rawEstimateText ?? ""
+  );
 
   return {
     narrative: params.result.narrative,
@@ -100,6 +109,142 @@ export async function buildDecisionPanelHybrid(params: {
     },
     ...(stateLeverage.length > 0 ? { stateLeverage } : {}),
   };
+}
+
+function finalizeDecisionPanelSupplements(
+  supplements: Array<SupplementLine & { mappedLabel?: string }>,
+  evidenceText: string
+): Array<SupplementLine & { mappedLabel?: string }> {
+  const lowerEvidence = evidenceText.toLowerCase();
+  const filtered = supplements.filter((item) => {
+    const title = item.mappedLabel ?? item.title;
+
+    if (title === "Four-Wheel Alignment" && !hasDecisionPanelAlignmentEvidence(lowerEvidence)) {
+      return false;
+    }
+    if (
+      title === "One-Time-Use Hardware / Seals / Clips" &&
+      !hasDecisionPanelHardwareEvidence(lowerEvidence)
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  const ranked = [...filtered].sort(
+    (left, right) =>
+      scoreDecisionPanelSupplement(right) - scoreDecisionPanelSupplement(left)
+  );
+  const kept: Array<SupplementLine & { mappedLabel?: string }> = [];
+  const seenFamilies = new Set<string>();
+  let genericFallbacks = 0;
+
+  for (const item of ranked) {
+    const title = item.mappedLabel ?? item.title;
+    const family = inferDecisionPanelSupplementFamily(title);
+    const generic = isDecisionPanelGenericFallback(title);
+
+    if (seenFamilies.has(family)) {
+      continue;
+    }
+    if (generic && genericFallbacks >= 1) {
+      continue;
+    }
+
+    kept.push(item);
+    seenFamilies.add(family);
+    if (generic) genericFallbacks += 1;
+  }
+
+  return kept;
+}
+
+function inferDecisionPanelSupplementFamily(title: string): string {
+  const lower = title.toLowerCase();
+
+  if (
+    lower.includes("front structure") ||
+    lower.includes("tie bar") ||
+    lower.includes("lock support") ||
+    lower.includes("core support") ||
+    lower.includes("upper rail") ||
+    lower.includes("hidden mounting")
+  ) {
+    return "front_structure_scope";
+  }
+  if (
+    lower.includes("rear body") ||
+    lower.includes("deck opening") ||
+    lower.includes("bumper reinforcement") ||
+    lower.includes("rear sensor") ||
+    lower.includes("blind spot") ||
+    lower.includes("deck lid") ||
+    lower.includes("latch") ||
+    lower.includes("striker")
+  ) {
+    return "rear_structure_scope";
+  }
+  if (lower.includes("test fit") || lower.includes("fit-sensitive")) return "fit_verification";
+  if (lower.includes("alignment")) return "alignment";
+  if (lower.includes("hardware") || lower.includes("clip") || lower.includes("fastener")) return "hardware";
+  if (lower.includes("measure") || lower.includes("setup") || lower.includes("realignment")) {
+    return "structural_measurement";
+  }
+  if (lower.includes("scan") || lower.includes("calibration") || lower.includes("sensor") || lower.includes("aim")) {
+    return "verification";
+  }
+  if (lower.includes("corrosion") || lower.includes("seam") || lower.includes("weld")) {
+    return "corrosion";
+  }
+  return title.toLowerCase();
+}
+
+function isDecisionPanelGenericFallback(title: string): boolean {
+  return [
+    "Four-Wheel Alignment",
+    "One-Time-Use Hardware / Seals / Clips",
+    "Structural Measurement Verification",
+    "Hidden Mounting Geometry / Teardown Growth",
+  ].includes(title);
+}
+
+function scoreDecisionPanelSupplement(
+  item: SupplementLine & { mappedLabel?: string }
+): number {
+  const lower = `${item.mappedLabel ?? item.title} ${item.rationale}`.toLowerCase();
+  let score = item.rationale.length;
+
+  if (lower.includes("front structure") || lower.includes("tie bar") || lower.includes("lock support")) score += 80;
+  if (lower.includes("rear body") || lower.includes("deck opening") || lower.includes("bumper reinforcement")) score += 80;
+  if (lower.includes("test fit") || lower.includes("fit-sensitive")) score += 45;
+  if (lower.includes("sensor") || lower.includes("radar") || lower.includes("calibration")) score += 35;
+  if (isDecisionPanelGenericFallback(item.mappedLabel ?? item.title)) score -= 35;
+
+  return score;
+}
+
+function hasDecisionPanelAlignmentEvidence(value: string): boolean {
+  return (
+    value.includes("alignment") ||
+    value.includes("toe") ||
+    value.includes("camber") ||
+    value.includes("caster") ||
+    value.includes("suspension") ||
+    value.includes("steering") ||
+    value.includes("subframe")
+  );
+}
+
+function hasDecisionPanelHardwareEvidence(value: string): boolean {
+  return (
+    value.includes("one-time-use") ||
+    value.includes("one time use") ||
+    value.includes("hardware") ||
+    value.includes("fastener") ||
+    value.includes("retainer") ||
+    /\bclip(s)?\b/i.test(value) ||
+    /\bseal(s)?\b/i.test(value)
+  );
 }
 
 function buildDV(

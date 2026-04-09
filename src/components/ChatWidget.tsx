@@ -71,6 +71,8 @@ const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at once for now.";
 const SERVER_TTS_ENABLED =
   process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_SERVER_TTS === "true";
 const SERVER_TTS_VOICE = process.env.NEXT_PUBLIC_COLLISION_IQ_TTS_VOICE?.trim() || undefined;
+const TTS_STYLE_PROMPT =
+  "Female voice. Warm, confident, conversational, and natural. Subtle Northeast energy, lightly textured tone, dry wit, smart and grounded. Clear, expressive delivery with brisk but easy pacing. Human and easy on the ears. Avoid parody, caricature, or celebrity imitation.";
 
 export default function ChatWidget({
   onAttachmentChange,
@@ -1095,6 +1097,7 @@ export default function ChatWidget({
       body: JSON.stringify({
         text: plainText,
         voice: SERVER_TTS_VOICE,
+        instructions: TTS_STYLE_PROMPT,
       }),
     });
 

@@ -186,8 +186,11 @@ function extractSupplementItems(text: string): DerivedRenderSupplementItem[] {
     );
   }
 
-  return [...deduped.values()].sort(
-    (left, right) => scoreSupplementCandidate(right) - scoreSupplementCandidate(left)
+  return curateDerivedSupplementItems(
+    [...deduped.values()].sort(
+      (left, right) => scoreSupplementCandidate(right) - scoreSupplementCandidate(left)
+    ),
+    text
   );
 }
 
@@ -399,7 +402,7 @@ function deriveOperationTitles(line: string): string[] {
   ) {
     titles.push("Corrosion Protection / Weld Restoration");
   }
-  if (lower.includes("alignment")) {
+  if (hasDerivedAlignmentEvidence(lower)) {
     titles.push("Four-Wheel Alignment");
   }
   if (lower.includes("setup") || lower.includes("realignment")) {
@@ -735,11 +738,142 @@ function inferFallbackTitles(line: string): string[] {
   ) {
     titles.push("ADAS / Calibration Procedure Support");
   }
-  if (lower.includes("alignment")) {
+  if (hasDerivedAlignmentEvidence(lower)) {
     titles.push("Four-Wheel Alignment");
   }
 
   return [...new Set(titles)];
+}
+
+function curateDerivedSupplementItems(
+  items: DerivedRenderSupplementItem[],
+  sourceText: string
+): DerivedRenderSupplementItem[] {
+  if (items.length <= 1) return items;
+
+  const lowerSource = sourceText.toLowerCase();
+  const frontSpecificExists = items.some(
+    (item) =>
+      inferDerivedSupplementFamily(item.title) === "front_structure_scope" &&
+      !isDerivedGenericFallback(item.title)
+  );
+  const filtered = items.filter((item) => {
+    if (item.title === "Four-Wheel Alignment" && !hasDerivedAlignmentEvidence(lowerSource)) {
+      return false;
+    }
+    if (
+      item.title === "Structural Measurement Verification" &&
+      !hasDerivedMeasurementEvidence(lowerSource) &&
+      frontSpecificExists
+    ) {
+      return false;
+    }
+    if (
+      item.title === "Hidden Mounting Geometry / Teardown Growth" &&
+      frontSpecificExists &&
+      hasDerivedSupportScopeEvidence(lowerSource)
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  const kept: DerivedRenderSupplementItem[] = [];
+  const seenFamilies = new Set<string>();
+  let genericFallbacks = 0;
+
+  for (const item of filtered) {
+    const family = inferDerivedSupplementFamily(item.title);
+    const generic = isDerivedGenericFallback(item.title);
+
+    if (seenFamilies.has(family)) {
+      continue;
+    }
+    if (generic && genericFallbacks >= 1) {
+      continue;
+    }
+
+    kept.push(item);
+    seenFamilies.add(family);
+    if (generic) genericFallbacks += 1;
+  }
+
+  return kept;
+}
+
+function inferDerivedSupplementFamily(title: string): string {
+  const lower = title.toLowerCase();
+
+  if (
+    lower.includes("front structure") ||
+    lower.includes("tie bar") ||
+    lower.includes("lock support") ||
+    lower.includes("core support") ||
+    lower.includes("upper rail") ||
+    lower.includes("hidden mounting")
+  ) {
+    return "front_structure_scope";
+  }
+  if (lower.includes("test fit") || lower.includes("fit-sensitive")) return "fit_verification";
+  if (lower.includes("alignment")) return "alignment";
+  if (lower.includes("measure") || lower.includes("setup") || lower.includes("realignment")) {
+    return "structural_measurement";
+  }
+  if (lower.includes("scan") || lower.includes("calibration") || lower.includes("sensor") || lower.includes("aim")) {
+    return "verification";
+  }
+  if (lower.includes("corrosion") || lower.includes("seam") || lower.includes("weld")) {
+    return "corrosion";
+  }
+  return title.toLowerCase();
+}
+
+function isDerivedGenericFallback(title: string): boolean {
+  return [
+    "Four-Wheel Alignment",
+    "Structural Measurement Verification",
+    "Hidden Mounting Geometry / Teardown Growth",
+  ].includes(title);
+}
+
+function hasDerivedAlignmentEvidence(value: string): boolean {
+  return (
+    value.includes("alignment") ||
+    value.includes("toe") ||
+    value.includes("camber") ||
+    value.includes("caster") ||
+    value.includes("suspension") ||
+    value.includes("steering") ||
+    value.includes("subframe")
+  );
+}
+
+function hasDerivedMeasurementEvidence(value: string): boolean {
+  return (
+    value.includes("measure") ||
+    value.includes("measurement") ||
+    value.includes("measuring") ||
+    value.includes("frame") ||
+    value.includes("setup") ||
+    value.includes("bench") ||
+    value.includes("geometry") ||
+    value.includes("datum") ||
+    value.includes("realignment")
+  );
+}
+
+function hasDerivedSupportScopeEvidence(value: string): boolean {
+  return (
+    value.includes("tie bar") ||
+    value.includes("lock support") ||
+    value.includes("core support") ||
+    value.includes("radiator support") ||
+    value.includes("support area") ||
+    value.includes("upper rail") ||
+    value.includes("guide") ||
+    value.includes("bracket") ||
+    value.includes("mount")
+  );
 }
 
 function looksLikeMetaCommentary(value: string): boolean {

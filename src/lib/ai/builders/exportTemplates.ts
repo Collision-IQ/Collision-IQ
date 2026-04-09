@@ -411,6 +411,9 @@ function classifyEstimateOperation(
 function classifySupplementItem(item: ExportSupplementItem): LineOperationCategory {
   const text = `${item.title} ${item.category} ${item.rationale} ${item.evidence ?? ""}`.toLowerCase();
 
+  if (/structural measurement verification|structural setup and pull verification/.test(text)) {
+    return "structural";
+  }
   if (/scan/.test(text)) return "scan";
   if (/pre-?paint test fit|test fit|fit check|mock-?up/.test(text)) return "test_fit";
   if (/road test|quality check/.test(text)) return "road_test";

@@ -124,6 +124,7 @@ export function buildExportModel(params: {
     report: params.report,
     analysis: params.analysis,
   });
+  const sourceEstimateText = collectVehicleDocumentText(params.report, params.analysis);
   const estimateFacts = reportFields.estimateFacts;
   const vehicle = inferVehicleInfo(
     params.report,
@@ -150,11 +151,28 @@ export function buildExportModel(params: {
   const request = buildRequest(params.report, params.panel, supplementItems, chatInsights.request);
   const valuation = buildValuation(params.panel, chatInsights.valuation, reportFields);
   const displayVehicle = getDisplayVehicleInfo(vehicle);
+  const allowUnsupportedSeamSealerNarrative =
+    hasExplicitSeamSealerSupport(sourceEstimateText) ||
+    supplementItems.some((item) => item.title === "Seam Sealer Restoration");
   const cleanedSupplementItems = supplementItems.map((item) => ({
     ...item,
     title: cleanDisplayLabel(item.title),
-    rationale: cleanFormalExportText(item.rationale),
-    evidence: item.evidence ? cleanFormalExportText(item.evidence) : undefined,
+    rationale: cleanFormalExportText(
+      stripUnsupportedSeamSealerLanguage(
+        item.rationale,
+        sourceEstimateText,
+        allowUnsupportedSeamSealerNarrative
+      )
+    ),
+    evidence: item.evidence
+      ? cleanFormalExportText(
+          stripUnsupportedSeamSealerLanguage(
+            item.evidence,
+            sourceEstimateText,
+            allowUnsupportedSeamSealerNarrative
+          )
+        )
+      : undefined,
     source: item.source ? cleanFormalExportText(item.source) : undefined,
   }));
   const quality = assessDisplayQuality({
@@ -167,7 +185,12 @@ export function buildExportModel(params: {
       .filter(Boolean)
       .join(" ")
       .trim() ||
-    [vehicle?.year, cleanDisplayLabel(vehicle?.make), cleanDisplayLabel(vehicle?.model), displayVehicle.trim]
+    [
+      vehicle?.year,
+      cleanDisplayLabel(vehicle?.make),
+      cleanDisplayLabel(vehicle?.model),
+      cleanVehicleDescriptor(displayVehicle.trim),
+    ]
       .filter(Boolean)
       .join(" ")
       .trim() ||
@@ -190,11 +213,11 @@ export function buildExportModel(params: {
   const exportVehicle = {
     ...vehicle,
     label: guardedVehicleLabel,
-    trim: displayVehicle.trim,
+    trim: cleanVehicleDescriptor(displayVehicle.trim ?? vehicle.trim),
     vin: reportFields.vin ?? vehicle.vin,
     make: cleanDisplayLabel(vehicle.make),
     model: cleanDisplayLabel(vehicle.model),
-    manufacturer: cleanDisplayText(vehicle.manufacturer),
+    manufacturer: cleanVehicleDescriptor(vehicle.manufacturer),
   };
 
   console.info("[vehicle-label-trace:shared-export-model]", {
@@ -208,14 +231,32 @@ export function buildExportModel(params: {
     reportFields,
     repairPosition: allLabelsSuppressed
       ? "The core repair conclusion remains intact, but noisy extracted labels were suppressed in this presentation view."
-      : cleanFormalExportText(cleanPresentationProse(repairPosition)),
+      : cleanFormalExportText(
+          stripUnsupportedSeamSealerLanguage(
+            cleanPresentationProse(repairPosition),
+            sourceEstimateText,
+            allowUnsupportedSeamSealerNarrative
+          )
+        ),
     positionStatement: allLabelsSuppressed
       ? "The main dispute areas remain supportable, but low-quality extracted labels were removed before rendering."
-      : cleanFormalExportText(cleanPresentationProse(positionStatement)),
+      : cleanFormalExportText(
+          stripUnsupportedSeamSealerLanguage(
+            cleanPresentationProse(positionStatement),
+            sourceEstimateText,
+            allowUnsupportedSeamSealerNarrative
+          )
+        ),
     supplementItems: guardedSupplementItems,
     request: allLabelsSuppressed
       ? "Please review the core dispute areas and provide clearer support for the intended repair path and verification steps."
-      : cleanFormalExportText(request),
+      : cleanFormalExportText(
+          stripUnsupportedSeamSealerLanguage(
+            request,
+            sourceEstimateText,
+            allowUnsupportedSeamSealerNarrative
+          )
+        ),
     valuation: {
       ...valuation,
       acvReasoning: cleanFormalExportText(valuation.acvReasoning),
@@ -398,7 +439,7 @@ function buildVehicleDisplayLabel(
       normalized.year,
       cleanDisplayLabel(normalized.make),
       cleanDisplayLabel(normalized.model),
-      cleanDisplayText(normalized.trim),
+      cleanVehicleDescriptor(normalized.trim),
     ]
       .filter(Boolean)
       .join(" ")
@@ -407,7 +448,7 @@ function buildVehicleDisplayLabel(
 
 function sanitizeVehicleDisplay(value?: string | null): string | undefined {
   if (!value) return undefined;
-  const cleaned = cleanDisplayText(value);
+  const cleaned = cleanVehicleDescriptor(value);
   if (!cleaned) return undefined;
   if (PLACEHOLDER_VEHICLE_LABEL_PATTERN.test(cleaned)) return undefined;
   return cleaned;
@@ -426,7 +467,7 @@ export function buildPreferredVehicleIdentityLabel(
     vehicle.year,
     cleanDisplayLabel(vehicle.make),
     cleanDisplayLabel(vehicle.model),
-    cleanDisplayText(vehicle.trim),
+    cleanVehicleDescriptor(vehicle.trim),
   ]
     .filter(Boolean)
     .join(" ")
@@ -448,7 +489,7 @@ export function buildPreferredVehicleIdentityLabel(
     vehicle.year,
     cleanDisplayLabel(vehicle.make),
     cleanDisplayLabel(vehicle.model),
-    cleanDisplayText(vehicle.manufacturer),
+    cleanVehicleDescriptor(vehicle.manufacturer),
   ]
     .filter(Boolean)
     .join(" ")
@@ -524,7 +565,7 @@ export function buildPreferredRebuttalSubjectVehicleLabel(
           vehicle?.year,
           subjectMake,
           subjectModel,
-          cleanDisplayText(vehicle?.trim),
+          cleanVehicleDescriptor(vehicle?.trim),
         ]
           .filter(Boolean)
           .join(" ")
@@ -549,6 +590,37 @@ export function preferCanonicalField(
   }
 
   return sanitizeCanonicalField(fallback);
+}
+
+function cleanVehicleDescriptor(value?: string | null): string | undefined {
+  if (!value) return undefined;
+
+  const cleaned = stripVehicleRoleNoise(cleanDisplayText(value))
+    .replace(/\b4d sedan\b/gi, "4-door sedan")
+    .replace(/\b4 door sedan\b/gi, "4-door sedan")
+    .replace(/\butv\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[,\s-]+|[,\s-]+$/g, "")
+    .trim();
+
+  return cleaned || undefined;
+}
+
+function stripVehicleRoleNoise(value: string): string {
+  return value
+    .replace(
+      /(?:,\s*|\s+)(?:insured|owner|claimant|customer|policyholder|adjuster|appraiser)\b/gi,
+      ""
+    )
+    .replace(
+      /\b(?:insured|owner|claimant|customer|policyholder|adjuster|appraiser)\b\s*,?/gi,
+      ""
+    )
+    .replace(/\s+,/g, ",")
+    .replace(/,\s*,/g, ", ")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[,\s-]+|[,\s-]+$/g, "")
+    .trim();
 }
 
 export function resolveCanonicalVehicleLabel(
@@ -577,7 +649,7 @@ export function resolveCanonicalInsurer(
 
 function sanitizeCanonicalField(value?: string | null): string | undefined {
   if (!value) return undefined;
-  const cleaned = cleanDisplayText(value);
+  const cleaned = cleanVehicleDescriptor(value) ?? cleanDisplayText(value);
   if (!cleaned) return undefined;
   if (GENERIC_PLACEHOLDER_FIELD_PATTERN.test(cleaned)) return undefined;
   return cleaned;
@@ -1029,6 +1101,7 @@ function buildExportSupplementItems(
   estimateFacts: EstimateFacts
 ): ExportSupplementItem[] {
   const defaultRationale = "This operation appears supportable but is not yet carried clearly in the current estimate.";
+  const sourceText = collectVehicleDocumentText(report, analysis);
   const fromPanel: ExportSupplementItem[] =
     panel?.supplements
       .filter((item) => isSpecificSupplementItem(item.title) || isSpecificSupplementItem(item.mappedLabel))
@@ -1165,8 +1238,10 @@ function buildExportSupplementItems(
 
   const resolved = [...deduped.values()].sort(sortSupplementItems);
   const filtered = resolved.filter((item) => !isContradictedByDocumentedFacts(item, estimateFacts));
-  return filtered.map((item) => ({
+  const curated = curateExportSupplementItems(filtered, sourceText);
+  return curated.map((item) => ({
     ...item,
+    category: inferSupplementCategory(item.title),
     rationale: trimTrailingPunctuation(item.rationale) + ".",
     evidence: item.evidence ? trimTrailingPunctuation(item.evidence) + "." : undefined,
   }));
@@ -2004,24 +2079,216 @@ function scoreSupplementItem(item: ExportSupplementItem): number {
     lower.includes("lock support") ||
     lower.includes("support area") ||
     lower.includes("upper rail") ||
-    lower.includes("core support")
-  ) score += 15;
+    lower.includes("core support") ||
+    lower.includes("guide") ||
+    lower.includes("bracket")
+  ) score += 85;
+  if (
+    lower.includes("rear body") ||
+    lower.includes("deck opening") ||
+    lower.includes("bumper reinforcement") ||
+    lower.includes("absorber") ||
+    lower.includes("blind spot") ||
+    lower.includes("rear sensor") ||
+    lower.includes("striker") ||
+    lower.includes("latch")
+  ) score += 85;
   if (lower.includes("setup") || lower.includes("measure") || lower.includes("realignment")) score += 110;
   if (lower.includes("replace vs repair") || lower.includes("repair vs replace")) score += 105;
   if (lower.includes("fit-sensitive") || lower.includes("fit sensitive")) score += 100;
   if (lower.includes("adas") || lower.includes("calibration procedure support")) score += 95;
   if (lower.includes("test fit")) score += 100;
   if (lower.includes("coolant") || lower.includes("bleed") || lower.includes("refill")) score += 95;
-  if (lower.includes("hardware") || lower.includes("seal") || lower.includes("clip") || lower.includes("fastener")) score += 92;
-  if (lower.includes("mounting geometry") || lower.includes("teardown") || lower.includes("hidden")) score += 120;
+  if (lower.includes("hardware") || lower.includes("seal") || lower.includes("clip") || lower.includes("fastener")) score += 28;
+  if (lower.includes("mounting geometry") || lower.includes("teardown") || lower.includes("hidden")) score += 30;
   if (lower.includes("corrosion") || lower.includes("cavity wax") || lower.includes("seam sealer") || lower.includes("weld protection")) score += 90;
-  if (lower.includes("alignment")) score += 110;
+  if (lower.includes("alignment")) score += 20;
   if (lower.includes("scan") || lower.includes("calibration")) score += 50;
   if (looksLikeMetaCommentary(lower)) score -= 400;
   if (lower.includes("not documented") || lower.includes("not clearly") || lower.includes("underwritten")) score += 40;
-  if (lower.includes("front structure scope / tie bar / upper rail reconciliation")) score -= 80;
   score += Math.min(item.rationale.length, 100);
   return score;
+}
+
+function curateExportSupplementItems(
+  items: ExportSupplementItem[],
+  sourceText: string
+): ExportSupplementItem[] {
+  if (items.length <= 1) return items;
+
+  const lowerSource = sourceText.toLowerCase();
+  const frontSpecificExists = items.some(
+    (item) =>
+      inferExportSupplementFamily(item.title) === "front_structure_scope" &&
+      !isGenericExportFallback(item.title)
+  );
+  const rearSpecificExists = items.some(
+    (item) =>
+      inferExportSupplementFamily(item.title) === "rear_structure_scope" &&
+      !isGenericExportFallback(item.title)
+  );
+  const filtered = items.filter((item) => {
+    if (item.title === "Four-Wheel Alignment" && !hasExportAlignmentEvidence(lowerSource)) {
+      return false;
+    }
+    if (item.title === "One-Time-Use Hardware / Seals / Clips" && !hasExportHardwareEvidence(lowerSource, item)) {
+      return false;
+    }
+    if (
+      item.title === "Structural Measurement Verification" &&
+      !hasExportMeasurementEvidence(lowerSource) &&
+      (frontSpecificExists || rearSpecificExists)
+    ) {
+      return false;
+    }
+    if (
+      item.title === "Hidden Mounting Geometry / Teardown Growth" &&
+      frontSpecificExists &&
+      hasExportSupportScopeEvidence(lowerSource)
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  const kept: ExportSupplementItem[] = [];
+  const seenFamilies = new Set<string>();
+  let genericFallbacks = 0;
+
+  for (const item of [...filtered].sort(sortSupplementItems)) {
+    const family = inferExportSupplementFamily(item.title);
+    const generic = isGenericExportFallback(item.title);
+
+    if (seenFamilies.has(family)) {
+      continue;
+    }
+    if (generic && genericFallbacks >= 1) {
+      continue;
+    }
+
+    kept.push(item);
+    seenFamilies.add(family);
+    if (generic) genericFallbacks += 1;
+  }
+
+  return kept;
+}
+
+function inferExportSupplementFamily(title: string): string {
+  const lower = title.toLowerCase();
+
+  if (
+    lower.includes("front structure") ||
+    lower.includes("tie bar") ||
+    lower.includes("lock support") ||
+    lower.includes("core support") ||
+    lower.includes("upper rail") ||
+    lower.includes("support area") ||
+    lower.includes("hidden mounting")
+  ) {
+    return "front_structure_scope";
+  }
+  if (
+    lower.includes("rear body") ||
+    lower.includes("deck opening") ||
+    lower.includes("bumper reinforcement") ||
+    lower.includes("absorber") ||
+    lower.includes("rear sensor") ||
+    lower.includes("blind spot") ||
+    lower.includes("deck lid") ||
+    lower.includes("latch") ||
+    lower.includes("striker")
+  ) {
+    return "rear_structure_scope";
+  }
+  if (lower.includes("test fit") || lower.includes("fit-sensitive")) return "fit_verification";
+  if (lower.includes("alignment")) return "alignment";
+  if (lower.includes("hardware") || lower.includes("clip") || lower.includes("fastener")) return "hardware";
+  if (lower.includes("measure") || lower.includes("setup") || lower.includes("realignment")) {
+    return "structural_measurement";
+  }
+  if (lower.includes("scan") || lower.includes("calibration") || lower.includes("sensor") || lower.includes("aim")) {
+    return "verification";
+  }
+  if (lower.includes("corrosion") || lower.includes("seam") || lower.includes("weld")) {
+    return "corrosion";
+  }
+  return title.toLowerCase();
+}
+
+function isGenericExportFallback(title: string): boolean {
+  return [
+    "Four-Wheel Alignment",
+    "One-Time-Use Hardware / Seals / Clips",
+    "Structural Measurement Verification",
+    "Hidden Mounting Geometry / Teardown Growth",
+  ].includes(title);
+}
+
+function hasExportAlignmentEvidence(value: string): boolean {
+  return (
+    value.includes("alignment") ||
+    value.includes("toe") ||
+    value.includes("camber") ||
+    value.includes("caster") ||
+    value.includes("suspension") ||
+    value.includes("steering") ||
+    value.includes("subframe")
+  );
+}
+
+function hasExportHardwareEvidence(value: string, item: ExportSupplementItem): boolean {
+  const combined = `${value} ${item.rationale} ${item.evidence ?? ""}`.toLowerCase();
+  return (
+    combined.includes("one-time-use") ||
+    combined.includes("one time use") ||
+    combined.includes("hardware") ||
+    combined.includes("fastener") ||
+    combined.includes("retainer") ||
+    /\bclip(s)?\b/i.test(combined) ||
+    /\bseal(s)?\b/i.test(combined)
+  );
+}
+
+function hasExportMeasurementEvidence(value: string): boolean {
+  return (
+    /(measure|measurement|measuring)/.test(value) ||
+    /\bframe\b/.test(value) ||
+    /\bbench\b/.test(value) ||
+    /\bsetup\b/.test(value) ||
+    /\bpull\b/.test(value) ||
+    /realign(?:ment)?/.test(value) ||
+    /dimension(?:s|al)?/.test(value) ||
+    /\bdatum\b/.test(value) ||
+    /\bgeometry\b/.test(value) ||
+    /structural verification/.test(value) ||
+    hasVerifiedStructuralZoneEvidence(value)
+  );
+}
+
+function hasExportSupportScopeEvidence(value: string): boolean {
+  return (
+    value.includes("tie bar") ||
+    value.includes("lock support") ||
+    value.includes("core support") ||
+    value.includes("radiator support") ||
+    value.includes("support area") ||
+    value.includes("upper rail") ||
+    value.includes("guide") ||
+    value.includes("bracket") ||
+    value.includes("mount")
+  );
+}
+
+function hasVerifiedStructuralZoneEvidence(value: string): boolean {
+  return (
+    /\b(?:rail|apron)\b.{0,40}\b(?:measure|measurement|measuring|verify|verification|setup|pull|realign|datum|geometry|dimension)\b/.test(
+      value
+    ) ||
+    /\b(?:measure|measurement|measuring|verify|verification|setup|pull|realign|datum|geometry|dimension)\b.{0,40}\b(?:rail|apron)\b/.test(
+      value
+    )
+  );
 }
 
 function selectConsistentSupplementItems(
@@ -2358,15 +2625,17 @@ function synthesizeSupplementItemsFromNarrative(params: {
   }
 
   if (text.includes("teardown") || text.includes("mounting geometry") || text.includes("hidden damage")) {
-    add(
-      "Hidden Mounting Geometry / Teardown Growth",
-      "Teardown growth or hidden mounting-geometry burden appears supportable here, but that broader scope is not fully reflected in the current estimate.",
-      "high",
-      "disputed_repair_path"
-    );
+    if (hasNarrativeSupportScopeEvidence(text)) {
+      add(
+        "Hidden Mounting Geometry / Teardown Growth",
+        "Teardown growth or hidden mounting-geometry burden appears supportable here, but that broader scope is not fully reflected in the current estimate.",
+        "high",
+        "disputed_repair_path"
+      );
+    }
   }
 
-  if (text.includes("clip") || text.includes("seal") || text.includes("one-time-use") || text.includes("one time use") || text.includes("fastener")) {
+  if (hasNarrativeHardwareEvidence(text)) {
     add(
       "One-Time-Use Hardware / Seals / Clips",
       "The file supports one-time-use hardware, seals, clips, or related replacement burden, but the estimate does not yet clearly show what should be added or documented.",
@@ -2384,7 +2653,7 @@ function synthesizeSupplementItemsFromNarrative(params: {
     );
   }
 
-  if (text.includes("alignment")) {
+  if (hasNarrativeAlignmentEvidence(text)) {
     add(
       "Four-Wheel Alignment",
       "Alignment appears relevant to the documented repair scope, but that operation is not clearly documented in the current estimate.",
@@ -2396,6 +2665,46 @@ function synthesizeSupplementItemsFromNarrative(params: {
   return candidates
     .filter((item, index, all) => all.findIndex((entry) => normalizeKey(entry.title) === normalizeKey(item.title)) === index)
     .sort(sortSupplementItems);
+}
+
+function hasNarrativeAlignmentEvidence(text: string): boolean {
+  return (
+    text.includes("alignment") ||
+    text.includes("toe") ||
+    text.includes("camber") ||
+    text.includes("caster") ||
+    text.includes("suspension") ||
+    text.includes("steering") ||
+    text.includes("subframe")
+  );
+}
+
+function hasNarrativeHardwareEvidence(text: string): boolean {
+  return (
+    text.includes("one-time-use") ||
+    text.includes("one time use") ||
+    text.includes("hardware") ||
+    text.includes("fastener") ||
+    text.includes("retainer") ||
+    /\bclip(s)?\b/i.test(text) ||
+    /\bseal(s)?\b/i.test(text) ||
+    text.includes("non-reusable") ||
+    text.includes("replace hardware")
+  );
+}
+
+function hasNarrativeSupportScopeEvidence(text: string): boolean {
+  return (
+    text.includes("tie bar") ||
+    text.includes("lock support") ||
+    text.includes("core support") ||
+    text.includes("radiator support") ||
+    text.includes("support area") ||
+    text.includes("upper rail") ||
+    text.includes("guide") ||
+    text.includes("bracket") ||
+    text.includes("mount")
+  );
 }
 
 function normalizeAcvStatus(valuation: DerivedValuation): DerivedValuation["acvStatus"] {
@@ -2518,6 +2827,37 @@ function cleanPresentationProse(value?: string | null): string {
     .trim();
 
   return removeNearDuplicateConclusionSentences(trimTrailingPunctuation(collapsed) + (collapsed ? "." : ""));
+}
+
+function stripUnsupportedSeamSealerLanguage(
+  value?: string | null,
+  sourceText = "",
+  preserveWhenCurated = false
+): string {
+  const cleaned = value ?? "";
+  if (!cleaned) return "";
+
+  if (preserveWhenCurated || hasExplicitSeamSealerSupport(sourceText)) {
+    return cleaned;
+  }
+
+  return cleaned
+    .replace(/\bAdd and document Seam sealer application before final repair delivery\.?/gi, "")
+    .replace(
+      /\bPlease review whether Seam sealer application not clearly documented in estimate is already represented in the estimate and what should be added or documented more clearly if it remains part of the repair path\.?/gi,
+      ""
+    )
+    .replace(/\bseam sealer restore\/apply operation\b/gi, "matching repair-process support")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .trim();
+}
+
+function hasExplicitSeamSealerSupport(sourceText: string): boolean {
+  const lower = sourceText.toLowerCase();
+  return /(seam sealer|joint sealing|sealer application|weld protection|weld prep|weld-through primer|weld thru primer)/.test(
+    lower
+  );
 }
 
 function makeRepairPositionTail(value: string): string | null {
