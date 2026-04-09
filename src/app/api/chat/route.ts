@@ -13,9 +13,23 @@ import {
 import type { ChatAnalysisOutput } from "@/lib/ai/contracts/chatAnalysisSchema";
 import {
   inferDriveRetrievalTopics,
+  type DriveRetrievalResponse,
   inferDriveVehicleContext,
 } from "@/lib/ai/contracts/driveRetrievalContract";
 import { cleanDisplayText } from "@/lib/ai/displayText";
+import {
+  assessRetrievedDocumentApplicability,
+  isVehicleContentApplicable,
+  resolveVehicleApplicabilityContext,
+} from "@/lib/ai/vehicleApplicability";
+import {
+  extractEstimateLinksFromDocuments,
+  isFetchableEstimateLink,
+} from "@/lib/ai/estimateLinkExtractor";
+import {
+  buildLinkedProcedureRefinementContext,
+  retrieveEstimateLinkedProcedureDocs,
+} from "@/lib/ai/linkedProcedureRetriever";
 import { collisionIqModels } from "@/lib/modelConfig";
 import { openai } from "@/lib/openai";
 import {
@@ -135,8 +149,10 @@ Rules:
 - if both OEM and PA law support are present, keep them logically separate in the final answer
 - do not dump or paraphrase whole documents
 - use the retrieved support as compact supporting context, not as replacement reasoning
+- estimate-linked OEM or ADAS references for the resolved vehicle are higher priority than broad Drive retrieval
 - stay concise, natural, and direct
 - if the retrieved support is weak or only partially applicable, say that clearly
+- do not let retrieved support for a different make, model, or manufacturer override the submitted vehicle context
 - preserve the ACV/DV product rules, including the Collision Academy handoff
 `.trim();
 
@@ -491,6 +507,51 @@ export async function POST(req: Request) {
       conversationContext,
       documents,
     });
+    const estimateText = documents
+      .map((document) => document.text?.trim())
+      .filter(Boolean)
+      .join("\n\n");
+    const resolvedVehicle = inferDriveVehicleContext({
+      estimateText,
+      userQuery: userMessage,
+    });
+    const resolvedVehicleLabel = [
+      resolvedVehicle.year ? String(resolvedVehicle.year) : "",
+      resolvedVehicle.make ?? "",
+      resolvedVehicle.model ?? "",
+      resolvedVehicle.trim ?? "",
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    console.info("[chat-linked-docs] resolved estimate vehicle", {
+      year: resolvedVehicle.year ?? null,
+      make: resolvedVehicle.make ?? null,
+      model: resolvedVehicle.model ?? null,
+      manufacturer: resolvedVehicle.manufacturer ?? null,
+      trim: resolvedVehicle.trim ?? null,
+      vin: resolvedVehicle.vin ?? null,
+      confidence: resolvedVehicle.confidence,
+    });
+    const estimateLinks = extractEstimateLinksFromDocuments(documents);
+    const fetchableEstimateLinks = estimateLinks.filter(isFetchableEstimateLink);
+    const rejectedEstimateLinks = estimateLinks.filter((link) => !isFetchableEstimateLink(link));
+    console.info("[chat-linked-docs] estimate links scanned", {
+      found: estimateLinks.length,
+      fetchable: fetchableEstimateLinks.length,
+      rejected: rejectedEstimateLinks.map((link) => ({
+        url: link.url,
+        domain: link.domain,
+        classification: link.classification,
+        sourceFilename: link.sourceFilename ?? null,
+      })),
+      links: estimateLinks.map((link) => ({
+        url: link.url,
+        domain: link.domain,
+        classification: link.classification,
+        sourceFilename: link.sourceFilename ?? null,
+      })),
+    });
 
     console.info("[chat-openai] request attachments", {
       ownerUserId: user.id,
@@ -518,11 +579,23 @@ export async function POST(req: Request) {
       typeof firstPassOutputText === "string" && firstPassOutputText.trim()
         ? firstPassOutputText.trim()
         : "I reviewed the material, but I couldn't generate a usable response.";
-
-    const estimateText = documents
-      .map((document) => document.text?.trim())
-      .filter(Boolean)
-      .join("\n\n");
+    const linkedProcedureDocs = await retrieveEstimateLinkedProcedureDocs({
+      links: fetchableEstimateLinks,
+      vehicle: resolveVehicleApplicabilityContext(resolvedVehicle),
+      maxLinks: 4,
+      timeoutMs: 5000,
+    });
+    console.info("[chat-linked-docs] linked procedure retrieval", {
+      fetchedSuccessfully: linkedProcedureDocs.fetchedCount,
+      keptForRefinement: linkedProcedureDocs.keptDocs.map((doc) => ({
+        url: doc.url,
+        domain: doc.domain,
+        title: doc.title ?? null,
+        matchLevel: doc.matchLevel,
+        vehicleSignals: doc.vehicleSignals,
+      })),
+      discarded: linkedProcedureDocs.discardedDocs,
+    });
 
     const retrievalAnalysis = buildRetrievalAnalysisSnapshot({
       taskType: detectChatTaskType({
@@ -548,16 +621,37 @@ export async function POST(req: Request) {
       return null;
     });
 
-    const retrievalContext =
-      retrieval && retrieval.results.length > 0
-        ? buildDriveRefinementContext(retrieval)
+    const applicableRetrieval = retrieval
+      ? filterDriveRetrievalByVehicleApplicability(retrieval)
+      : null;
+    const linkedProcedureContext =
+      linkedProcedureDocs.keptDocs.length > 0
+        ? buildLinkedProcedureRefinementContext(linkedProcedureDocs.keptDocs, resolvedVehicleLabel)
         : "";
+    const retrievalContext =
+      applicableRetrieval && applicableRetrieval.results.length > 0
+        ? buildDriveRefinementContext(applicableRetrieval)
+        : "";
+    const refinementMode =
+      linkedProcedureContext && retrievalContext
+        ? "linked_docs_and_drive"
+        : linkedProcedureContext
+          ? "linked_docs_only"
+          : retrievalContext
+            ? "drive_only"
+            : "estimate_only";
+    console.info("[chat-linked-docs] refinement source selection", {
+      mode: refinementMode,
+      usedDriveFallback: Boolean(retrievalContext),
+      usedLinkedDocs: Boolean(linkedProcedureContext),
+    });
 
-    const outputText = retrievalContext
+    const outputText = linkedProcedureContext || retrievalContext
       ? await refineAnswerWithDriveSupport({
           userMessage,
           conversationContext,
           firstPassAnswer: firstPassText,
+          linkedProcedureContext,
           retrievalContext,
         })
       : firstPassText;
@@ -684,13 +778,17 @@ async function refineAnswerWithDriveSupport(params: {
   userMessage: string;
   conversationContext: string;
   firstPassAnswer: string;
+  linkedProcedureContext: string;
   retrievalContext: string;
 }): Promise<string> {
   const refinementInput = [
     params.userMessage ? `User request:\n${params.userMessage}` : "",
     params.conversationContext ? `Recent conversation:\n${params.conversationContext}` : "",
     `Initial estimate judgment:\n${params.firstPassAnswer}`,
-    `Retrieved Drive support:\n${params.retrievalContext}`,
+    params.linkedProcedureContext
+      ? `Estimate-linked OEM/ADAS references:\n${params.linkedProcedureContext}`
+      : "",
+    params.retrievalContext ? `Retrieved Drive support:\n${params.retrievalContext}` : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -706,4 +804,56 @@ async function refineAnswerWithDriveSupport(params: {
   return typeof refinedOutputText === "string" && refinedOutputText.trim()
     ? refinedOutputText.trim()
     : params.firstPassAnswer;
+}
+
+function filterDriveRetrievalByVehicleApplicability(
+  response: DriveRetrievalResponse
+): DriveRetrievalResponse {
+  const vehicleApplicability = resolveVehicleApplicabilityContext(response.request.vehicle);
+  const filteredResults = response.results.filter((result) => {
+    const applicability = assessRetrievedDocumentApplicability({
+      title: result.filename,
+      excerpt: result.excerpt.excerpt,
+      source: result.metadata.source,
+      vehicle: vehicleApplicability,
+    });
+
+    if (!applicability.keep) {
+      console.info("[chat-drive-filter] discarded vehicle-mismatched Drive result", {
+        estimateVehicle: {
+          make: response.request.vehicle.make ?? null,
+          model: response.request.vehicle.model ?? null,
+          manufacturer: response.request.vehicle.manufacturer ?? null,
+        },
+        document: {
+          filename: result.filename,
+          source: result.metadata.source ?? null,
+          signals: applicability.mentionedTerms,
+        },
+        reason: applicability.reason,
+      });
+      return false;
+    }
+
+    return isVehicleContentApplicable(
+      [
+        result.filename,
+        result.matchReason,
+        result.excerpt.excerpt,
+        result.metadata.make,
+        result.metadata.model,
+        result.metadata.trim,
+        result.metadata.source,
+        ...(result.relevanceReasons ?? []).map((reason) => reason.reason),
+      ]
+        .filter(Boolean)
+        .join(" "),
+      vehicleApplicability
+    );
+  });
+
+  return {
+    ...response,
+    results: filteredResults,
+  };
 }

@@ -219,16 +219,17 @@ function detectComplexityDrivers(
 }
 
 function determineImpact(lower: string, zones: string[]): string {
+  if (includesAny(lower, ["left front", "lf", "left headlamp", "left fender", "driver side front"])) {
+    return "left front";
+  }
+
+  if (includesAny(lower, ["right front", "rf", "right headlamp", "right fender", "passenger side front"])) {
+    return "right front";
+  }
+
   if (
-    includesAny(lower, ["right front", "rf", "right headlamp", "right fender"]) ||
     zones.includes("front-end")
   ) {
-    if (includesAny(lower, ["right"])) {
-      return "right front";
-    }
-    if (includesAny(lower, ["left"])) {
-      return "left front";
-    }
     return "front";
   }
 

@@ -24,8 +24,14 @@ import {
   deriveStructuralApplicability,
   filterStructuralTitles,
 } from "../structuralApplicability";
+import {
+  isVehicleContentApplicable,
+  resolveVehicleApplicabilityContext,
+  sanitizeVehicleSpecificText,
+} from "../vehicleApplicability";
 
 export const COLLISION_ACADEMY_HANDOFF_URL = "https://www.collision.academy/";
+export const REDACTED_INSURER_TOKEN = "[REDACTED_INSURER]";
 const PLACEHOLDER_VEHICLE_LABEL_PATTERN =
   /^(?:unknown|unspecified|n\/a|na|none|null|undefined|not available|not provided|vehicle details are still limited in the current material\.?|vehicle details still limited in the current material\.?|not clearly supported(?: in the current material)?\.?)$/i;
 
@@ -119,13 +125,20 @@ export function buildExportModel(params: {
   panel: DecisionPanel | null;
   assistantAnalysis?: string | null;
 }): ExportModel {
-  const chatInsights = deriveRenderInsightsFromChat(params.assistantAnalysis ?? "");
   const reportFields = deriveExportReportFields({
     report: params.report,
     analysis: params.analysis,
   });
   const sourceEstimateText = collectVehicleDocumentText(params.report, params.analysis);
   const estimateFacts = reportFields.estimateFacts;
+  const vehicleApplicability = resolveVehicleApplicabilityContext(
+    reportFields.vehicle,
+    params.report?.vehicle,
+    params.report?.analysis?.vehicle,
+    params.analysis?.vehicle,
+    estimateFacts.vehicle
+  );
+  const chatInsights = deriveRenderInsightsFromChat(params.assistantAnalysis ?? "", vehicleApplicability);
   const vehicle = inferVehicleInfo(
     params.report,
     params.analysis,
@@ -137,7 +150,8 @@ export function buildExportModel(params: {
     params.panel,
     chatInsights,
     params.assistantAnalysis ?? null,
-    estimateFacts
+    estimateFacts,
+    vehicleApplicability
   );
   const repairPosition = buildRepairPosition(
     params.report,
@@ -233,7 +247,10 @@ export function buildExportModel(params: {
       ? "The core repair conclusion remains intact, but noisy extracted labels were suppressed in this presentation view."
       : cleanFormalExportText(
           stripUnsupportedSeamSealerLanguage(
-            cleanPresentationProse(repairPosition),
+            sanitizeVehicleSpecificText(
+              cleanPresentationProse(repairPosition),
+              vehicleApplicability
+            ),
             sourceEstimateText,
             allowUnsupportedSeamSealerNarrative
           )
@@ -242,7 +259,10 @@ export function buildExportModel(params: {
       ? "The main dispute areas remain supportable, but low-quality extracted labels were removed before rendering."
       : cleanFormalExportText(
           stripUnsupportedSeamSealerLanguage(
-            cleanPresentationProse(positionStatement),
+            sanitizeVehicleSpecificText(
+              cleanPresentationProse(positionStatement),
+              vehicleApplicability
+            ),
             sourceEstimateText,
             allowUnsupportedSeamSealerNarrative
           )
@@ -252,7 +272,7 @@ export function buildExportModel(params: {
       ? "Please review the core dispute areas and provide clearer support for the intended repair path and verification steps."
       : cleanFormalExportText(
           stripUnsupportedSeamSealerLanguage(
-            request,
+            sanitizeVehicleSpecificText(request, vehicleApplicability),
             sourceEstimateText,
             allowUnsupportedSeamSealerNarrative
           )
@@ -647,12 +667,89 @@ export function resolveCanonicalInsurer(
   );
 }
 
+export function redactExportModelForDownload(exportModel: ExportModel): ExportModel {
+  const insurer = resolveCanonicalInsurer(exportModel);
+  if (!insurer || insurer === REDACTED_INSURER_TOKEN) {
+    return exportModel;
+  }
+
+  return {
+    ...exportModel,
+    estimateFacts: {
+      ...exportModel.estimateFacts,
+      insurer: REDACTED_INSURER_TOKEN,
+    },
+    reportFields: {
+      ...exportModel.reportFields,
+      insurer: REDACTED_INSURER_TOKEN,
+      documentedHighlights: exportModel.reportFields.documentedHighlights.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+      documentedProcedures: exportModel.reportFields.documentedProcedures.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+      presentStrengths: exportModel.reportFields.presentStrengths.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+      likelySupplementAreas: exportModel.reportFields.likelySupplementAreas.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+      estimateFacts: {
+        ...exportModel.reportFields.estimateFacts,
+        insurer: REDACTED_INSURER_TOKEN,
+        documentedHighlights: exportModel.reportFields.estimateFacts.documentedHighlights.map((item) =>
+          redactInsurerInText(item, insurer)
+        ),
+        documentedProcedures: exportModel.reportFields.estimateFacts.documentedProcedures.map((item) =>
+          redactInsurerInText(item, insurer)
+        ),
+      },
+    },
+    repairPosition: redactInsurerInText(exportModel.repairPosition, insurer),
+    positionStatement: redactInsurerInText(exportModel.positionStatement, insurer),
+    request: redactInsurerInText(exportModel.request, insurer),
+    supplementItems: exportModel.supplementItems.map((item) => ({
+      ...item,
+      title: redactInsurerInText(item.title, insurer),
+      rationale: redactInsurerInText(item.rationale, insurer),
+      evidence: item.evidence ? redactInsurerInText(item.evidence, insurer) : undefined,
+      source: item.source ? redactInsurerInText(item.source, insurer) : undefined,
+    })),
+    valuation: {
+      ...exportModel.valuation,
+      acvReasoning: redactInsurerInText(exportModel.valuation.acvReasoning, insurer),
+      acvMissingInputs: exportModel.valuation.acvMissingInputs.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+      dvReasoning: redactInsurerInText(exportModel.valuation.dvReasoning, insurer),
+      dvMissingInputs: exportModel.valuation.dvMissingInputs.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+    },
+  };
+}
+
 function sanitizeCanonicalField(value?: string | null): string | undefined {
   if (!value) return undefined;
   const cleaned = cleanVehicleDescriptor(value) ?? cleanDisplayText(value);
   if (!cleaned) return undefined;
   if (GENERIC_PLACEHOLDER_FIELD_PATTERN.test(cleaned)) return undefined;
   return cleaned;
+}
+
+function redactInsurerInText(value: string, insurer: string): string {
+  if (!value || !insurer || value.includes(REDACTED_INSURER_TOKEN)) {
+    return value;
+  }
+
+  const pattern = new RegExp(`(?<!\\w)${escapeRegex(insurer)}(?:'s)?(?!\\w)`, "gi");
+  return value.replace(pattern, (match) =>
+    /'s$/i.test(match) ? `${REDACTED_INSURER_TOKEN}'s` : REDACTED_INSURER_TOKEN
+  );
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function collectVehicleDocumentText(
@@ -1098,7 +1195,13 @@ function buildExportSupplementItems(
   panel: DecisionPanel | null,
   chatInsights: ReturnType<typeof deriveRenderInsightsFromChat>,
   assistantAnalysis: string | null,
-  estimateFacts: EstimateFacts
+  estimateFacts: EstimateFacts,
+  vehicleApplicability = resolveVehicleApplicabilityContext(
+    report?.vehicle,
+    report?.analysis?.vehicle,
+    analysis?.vehicle,
+    estimateFacts.vehicle
+  )
 ): ExportSupplementItem[] {
   const defaultRationale = "This operation appears supportable but is not yet carried clearly in the current estimate.";
   const sourceText = collectVehicleDocumentText(report, analysis);
@@ -1200,7 +1303,19 @@ function buildExportSupplementItems(
       panelNarrative: panel?.narrative ?? null,
       recommendedActions: report?.recommendedActions ?? [],
     }),
-  ];
+  ].map((item) => ({
+    ...item,
+    rationale: sanitizeVehicleSpecificText(item.rationale, vehicleApplicability),
+    evidence: item.evidence ? sanitizeVehicleSpecificText(item.evidence, vehicleApplicability) : undefined,
+    source: item.source ? sanitizeVehicleSpecificText(item.source, vehicleApplicability) : undefined,
+  }))
+    .filter((item) =>
+      isVehicleContentApplicable(
+        `${item.title} ${item.rationale} ${item.evidence ?? ""} ${item.source ?? ""}`,
+        vehicleApplicability
+      )
+    )
+    .filter((item) => Boolean(item.rationale.trim()));
   const structuralApplicability = deriveStructuralApplicability({
     vehicle: report?.vehicle ?? analysis?.vehicle ?? estimateFacts.vehicle,
     rawText: collectVehicleDocumentText(report, analysis),
@@ -1535,7 +1650,10 @@ function deriveSupplementTitle(value: string): string {
   if (lower.includes("fender") && (lower.includes("replace") || lower.includes("repair"))) {
     return "Fender Replace vs Repair Justification";
   }
-  if ((lower.includes("bumper") || lower.includes("lamp") || lower.includes("fender")) && lower.includes("test fit")) {
+  if (
+    (looksLikeFrontEndOrFitSensitiveScope(lower) || lower.includes("fit-sensitive") || lower.includes("fit sensitive")) &&
+    hasExplicitFitCheckLanguage(lower)
+  ) {
     return "Pre-Paint Test Fit";
   }
   if (lower.includes("bumper") && lower.includes("test fit")) {
@@ -1572,7 +1690,7 @@ function deriveSupplementTitle(value: string): string {
   if (lower.includes("setup")) {
     return "Structural Setup and Pull Verification";
   }
-  if (lower.includes("test fit") || lower.includes("mock-up") || lower.includes("mock up")) {
+  if (hasExplicitFitCheckLanguage(lower)) {
     return "Test Fit / Mock-Up";
   }
   if (lower.includes("coolant") || lower.includes("bleed") || lower.includes("purge")) {
@@ -1625,7 +1743,7 @@ function deriveSupplementTitle(value: string): string {
   if (lower.includes("lock support")) {
     return "Upper Tie Bar / Lock Support Reconciliation";
   }
-  if (lower.includes("measure") || lower.includes("measurement") || lower.includes("structural")) {
+  if (hasTrueStructuralMeasurementSignals(lower)) {
     return "Structural Measurement Verification";
   }
   if (lower.includes("weld")) {
@@ -2095,9 +2213,9 @@ function scoreSupplementItem(item: ExportSupplementItem): number {
   ) score += 85;
   if (lower.includes("setup") || lower.includes("measure") || lower.includes("realignment")) score += 110;
   if (lower.includes("replace vs repair") || lower.includes("repair vs replace")) score += 105;
-  if (lower.includes("fit-sensitive") || lower.includes("fit sensitive")) score += 100;
+  if (lower.includes("fit-sensitive") || lower.includes("fit sensitive")) score += 70;
   if (lower.includes("adas") || lower.includes("calibration procedure support")) score += 95;
-  if (lower.includes("test fit")) score += 100;
+  if (lower.includes("test fit")) score += 35;
   if (lower.includes("coolant") || lower.includes("bleed") || lower.includes("refill")) score += 95;
   if (lower.includes("hardware") || lower.includes("seal") || lower.includes("clip") || lower.includes("fastener")) score += 28;
   if (lower.includes("mounting geometry") || lower.includes("teardown") || lower.includes("hidden")) score += 30;
@@ -2135,6 +2253,21 @@ function curateExportSupplementItems(
       return false;
     }
     if (
+      item.title === "Pre-Paint Test Fit" &&
+      (!hasExplicitFitCheckLanguage(`${lowerSource} ${item.rationale.toLowerCase()} ${item.evidence?.toLowerCase() ?? ""}`) ||
+        !looksLikeFrontEndOrFitSensitiveScope(
+          `${lowerSource} ${item.rationale.toLowerCase()} ${item.evidence?.toLowerCase() ?? ""}`
+        ))
+    ) {
+      return false;
+    }
+    if (
+      item.title === "ADAS / Calibration Procedure Support" &&
+      !hasExportAdasProcedureEvidence(lowerSource, item)
+    ) {
+      return false;
+    }
+    if (
       item.title === "Structural Measurement Verification" &&
       !hasExportMeasurementEvidence(lowerSource) &&
       (frontSpecificExists || rearSpecificExists)
@@ -2143,8 +2276,9 @@ function curateExportSupplementItems(
     }
     if (
       item.title === "Hidden Mounting Geometry / Teardown Growth" &&
-      frontSpecificExists &&
-      hasExportSupportScopeEvidence(lowerSource)
+      (!hasExportHiddenMountingEvidence(lowerSource, item) ||
+        (isLightFrontBumperDrivenExportFile(lowerSource, item) &&
+          !hasExportHiddenMountingEvidence(lowerSource, item)))
     ) {
       return false;
     }
@@ -2155,7 +2289,9 @@ function curateExportSupplementItems(
   const seenFamilies = new Set<string>();
   let genericFallbacks = 0;
 
-  for (const item of [...filtered].sort(sortSupplementItems)) {
+  for (const item of [...filtered].sort((left, right) =>
+    scoreExportSupplementItemInContext(right, lowerSource) - scoreExportSupplementItemInContext(left, lowerSource)
+  )) {
     const family = inferExportSupplementFamily(item.title);
     const generic = isGenericExportFallback(item.title);
 
@@ -2261,9 +2397,28 @@ function hasExportMeasurementEvidence(value: string): boolean {
     /dimension(?:s|al)?/.test(value) ||
     /\bdatum\b/.test(value) ||
     /\bgeometry\b/.test(value) ||
-    /structural verification/.test(value) ||
     hasVerifiedStructuralZoneEvidence(value)
   );
+}
+
+function hasExportAdasProcedureEvidence(value: string, item?: ExportSupplementItem): boolean {
+  const combined = `${value} ${item?.rationale ?? ""} ${item?.evidence ?? ""}`.toLowerCase();
+  const hasAdasSubject =
+    combined.includes("adas") ||
+    combined.includes("calibration") ||
+    combined.includes("camera") ||
+    combined.includes("radar") ||
+    combined.includes("sensor") ||
+    combined.includes("scan");
+  const hasProcedureContext =
+    combined.includes("procedure") ||
+    combined.includes("calibrate") ||
+    combined.includes("calibration") ||
+    combined.includes("scan") ||
+    combined.includes("verification") ||
+    combined.includes("aim");
+
+  return hasAdasSubject && hasProcedureContext;
 }
 
 function hasExportSupportScopeEvidence(value: string): boolean {
@@ -2280,15 +2435,138 @@ function hasExportSupportScopeEvidence(value: string): boolean {
   );
 }
 
+function hasExportHiddenMountingEvidence(value: string, item?: ExportSupplementItem): boolean {
+  const combined = `${value} ${item?.rationale ?? ""} ${item?.evidence ?? ""}`.toLowerCase();
+  return (
+    hasExportSupportScopeEvidence(combined) ||
+    combined.includes("reinforcement") ||
+    combined.includes("absorber") ||
+    combined.includes("shutter") ||
+    combined.includes("duct") ||
+    combined.includes("ducting") ||
+    combined.includes("hidden bracket") ||
+    combined.includes("mounting disturbance") ||
+    combined.includes("mounting geometry") ||
+    combined.includes("teardown")
+  );
+}
+
+function isLightFrontBumperDrivenExportFile(value: string, item?: ExportSupplementItem): boolean {
+  const combined = `${value} ${item?.rationale ?? ""} ${item?.evidence ?? ""}`.toLowerCase();
+  const hasLightSignals =
+    combined.includes("bumper") ||
+    combined.includes("fascia") ||
+    combined.includes("trim") ||
+    combined.includes("sensor") ||
+    combined.includes("scan");
+  const lacksHeavySignals =
+    !hasExportHiddenMountingEvidence(combined, item) &&
+    !hasExportMeasurementEvidence(combined) &&
+    !combined.includes("structure") &&
+    !combined.includes("rail") &&
+    !combined.includes("apron");
+
+  return hasLightSignals && lacksHeavySignals;
+}
+
 function hasVerifiedStructuralZoneEvidence(value: string): boolean {
   return (
-    /\b(?:rail|apron)\b.{0,40}\b(?:measure|measurement|measuring|verify|verification|setup|pull|realign|datum|geometry|dimension)\b/.test(
+    /\b(?:rail|apron)\b.{0,40}\b(?:measure|measurement|measuring|setup|pull|realign|datum|geometry|dimension)\b/.test(
       value
     ) ||
-    /\b(?:measure|measurement|measuring|verify|verification|setup|pull|realign|datum|geometry|dimension)\b.{0,40}\b(?:rail|apron)\b/.test(
+    /\b(?:measure|measurement|measuring|setup|pull|realign|datum|geometry|dimension)\b.{0,40}\b(?:rail|apron)\b/.test(
       value
     )
   );
+}
+
+function hasExplicitFitCheckLanguage(value: string): boolean {
+  return (
+    /test fit/.test(value) ||
+    /test-fit/.test(value) ||
+    /fit check/.test(value) ||
+    /fit-check/.test(value) ||
+    /mock up/.test(value) ||
+    /mock-up/.test(value) ||
+    /fit verification/.test(value) ||
+    /gap confirmation/.test(value) ||
+    /aim confirmation/.test(value)
+  );
+}
+
+function looksLikeFrontEndOrFitSensitiveScope(value: string): boolean {
+  return (
+    /\bfront(?:-|\s)?end\b/.test(value) ||
+    /\bbumper\b/.test(value) ||
+    /\bfascia\b/.test(value) ||
+    /\bfender\b/.test(value) ||
+    /\blamp\b/.test(value) ||
+    /\bheadlamp\b/.test(value) ||
+    /\bgrille\b/.test(value) ||
+    /\bhood\b/.test(value) ||
+    /\bfit-sensitive\b/.test(value) ||
+    /\bgap\b/.test(value) ||
+    /\baim\b/.test(value)
+  );
+}
+
+function hasTrueStructuralMeasurementSignals(value: string): boolean {
+  return (
+    /(measure|measurement|measuring)/.test(value) ||
+    /\bframe\b/.test(value) ||
+    /\bbench\b/.test(value) ||
+    /\bsetup\b/.test(value) ||
+    /\bpull\b/.test(value) ||
+    /realign(?:ment)?/.test(value) ||
+    /dimension(?:s|al)?/.test(value) ||
+    /\bdatum\b/.test(value) ||
+    /\bgeometry\b/.test(value) ||
+    hasVerifiedStructuralZoneEvidence(value)
+  );
+}
+
+function hasMajorFitStackUpEvidence(value: string): boolean {
+  const lower = value.toLowerCase();
+  const fitSignals = [
+    "hood",
+    "fender",
+    "lamp",
+    "headlamp",
+    "grille",
+    "gap",
+    "aim",
+    "fit-sensitive",
+    "fit sensitive",
+    "camera",
+  ].filter((signal) => lower.includes(signal)).length;
+
+  return fitSignals >= 2;
+}
+
+function scoreExportSupplementItemInContext(item: ExportSupplementItem, sourceText: string): number {
+  const combined = `${sourceText} ${item.title} ${item.rationale} ${item.evidence ?? ""}`.toLowerCase();
+  let score = scoreSupplementItem(item);
+
+  if (item.title === "Pre-Paint Test Fit") {
+    if (!hasMajorFitStackUpEvidence(combined)) score -= 120;
+    if (isLightFrontBumperDrivenExportFile(sourceText, item)) score -= 140;
+  }
+
+  if (item.title === "Hidden Mounting Geometry / Teardown Growth") {
+    if (isLightFrontBumperDrivenExportFile(sourceText, item)) score -= 180;
+    if (hasExportHiddenMountingEvidence(sourceText, item)) score += 30;
+  }
+
+  if (item.title === "ADAS / Calibration Procedure Support") {
+    if (!hasExportAdasProcedureEvidence(sourceText, item)) score -= 180;
+    if (/\b(?:camera|sensor|scan|calibration|park sensor|front camera)\b/.test(combined)) score += 45;
+  }
+
+  if (/\b(?:bumper|grille|trim|park sensor|front camera|absorber|reinforcement|guide|bracket|shutter|duct)\b/.test(combined)) {
+    score += 35;
+  }
+
+  return score;
 }
 
 function selectConsistentSupplementItems(
@@ -2559,7 +2837,7 @@ function synthesizeSupplementItemsFromNarrative(params: {
     });
   };
 
-  if (text.includes("test fit") || text.includes("fit-check") || text.includes("fit check")) {
+  if (hasExplicitFitCheckLanguage(text) && looksLikeFrontEndOrFitSensitiveScope(text)) {
     add(
       "Pre-Paint Test Fit",
       "Test-fit or fit-check work appears supportable for adjacent panels before final finish work.",
@@ -2568,7 +2846,7 @@ function synthesizeSupplementItemsFromNarrative(params: {
     );
   }
 
-  if (text.includes("frame bench") || text.includes("setup") || text.includes("measuring") || text.includes("realignment")) {
+  if (hasTrueStructuralMeasurementSignals(text)) {
     add(
       "Structural Measurement Verification",
       "Documented measurements or structural verification appear supportable here, but that verification item is not clearly documented in the current estimate.",
@@ -2801,6 +3079,8 @@ function cleanPresentationProse(value?: string | null): string {
   if (!cleaned) return "";
 
   const withoutEmptyStubs = cleaned
+    .replace(/\bNo clear structural measuring listed\.?\b/gi, "")
+    .replace(/\bWhere it looks incomplete or likely to supplement:\.?/gi, "")
     .replace(
       /\b(?:What looks reasonable|What still needs support|What looks aggressive|What stands out|Documented positives|Likely remaining gaps|Support posture|Estimate position):\s*/gi,
       ""

@@ -12,6 +12,12 @@ import {
   deriveStructuralApplicabilityFromResult,
   filterStructuralTitles,
 } from "../structuralApplicability";
+import {
+  isVehicleContentApplicable,
+  resolveVehicleApplicabilityContext,
+  sanitizeVehicleSpecificText,
+  type VehicleApplicabilityContext,
+} from "../vehicleApplicability";
 import { buildRepairStory } from "./buildRepairStory";
 
 export type SupplementLine = {
@@ -87,6 +93,7 @@ export function buildSupplementLines(
 ): SupplementLine[] {
   const text = extractTextForFunctions(result);
   const context = extractValidationContext(result);
+  const vehicleApplicability = extractSupplementVehicleApplicability(result);
   const candidates = Array.isArray(result)
     ? extractSupplementCandidates(result)
     : filterStructuralTitles(
@@ -98,8 +105,8 @@ export function buildSupplementLines(
     return [];
   }
 
-  const validatedCandidates = validateSupplements(text, candidates, context);
-  return buildSupplementLinesHybrid(validatedCandidates, text);
+  const validatedCandidates = validateSupplements(text, candidates, context, vehicleApplicability);
+  return buildSupplementLinesHybrid(validatedCandidates, text, vehicleApplicability);
 }
 
 function extractTextForFunctions(
@@ -119,7 +126,8 @@ function extractTextForFunctions(
 export function validateSupplements(
   text: string,
   candidates: SupplementCandidate[],
-  context?: SupplementValidationContext
+  context?: SupplementValidationContext,
+  vehicleApplicability?: VehicleApplicabilityContext
 ): SupplementCandidate[] {
   const representedText = [
     text,
@@ -182,6 +190,11 @@ export function validateSupplements(
   };
 
   return candidates.filter((item) => {
+    const vehicleScopedText = `${item.title} ${item.reason}`;
+    if (!isVehicleContentApplicable(vehicleScopedText, vehicleApplicability)) {
+      return false;
+    }
+
     const title = normalizeSupplementTitle(item.title).toLowerCase();
     const canonicalKey = inferCanonicalProcedureKey(title);
     const adasProcedure = canonicalKey
@@ -285,11 +298,12 @@ export function inferCategory(title: string): SupplementLine["category"] {
 
 export function buildSupplementLinesHybrid(
   validatedItems: SupplementCandidate[],
-  evidenceText = ""
+  evidenceText = "",
+  vehicleApplicability?: VehicleApplicabilityContext
 ): SupplementLine[] {
   const seen = new Set<string>();
 
-  return curateSupplementCandidates(validatedItems, evidenceText)
+  return curateSupplementCandidates(validatedItems, evidenceText, vehicleApplicability)
     .map((item) => ({
       title: normalizeSupplementTitle(item.title),
       category: inferCategory(item.title),
@@ -327,9 +341,14 @@ function normalizeSupplementTitle(title: string): string {
   if (
     lower.includes("test-fit") ||
     lower.includes("test fit") ||
+    lower.includes("fit-check") ||
+    lower.includes("fit check") ||
     lower.includes("mock-up") ||
     lower.includes("mock up") ||
-    lower.includes("fit-sensitive")
+    lower.includes("fit-sensitive") ||
+    lower.includes("fit verification") ||
+    lower.includes("gap confirmation") ||
+    lower.includes("aim confirmation")
   ) {
     return "Pre-Paint Test Fit";
   }
@@ -361,7 +380,8 @@ function normalizeSupplementTitle(title: string): string {
 
 function curateSupplementCandidates(
   candidates: SupplementCandidate[],
-  text: string
+  text: string,
+  vehicleApplicability?: VehicleApplicabilityContext
 ): SupplementCandidate[] {
   if (candidates.length <= 1) return candidates;
 
@@ -376,9 +396,13 @@ function curateSupplementCandidates(
   }
 
   const evidenceText = `${text}\n${storyText}`.toLowerCase();
+  const resolvedVehicleApplicability =
+    vehicleApplicability ??
+    resolveVehicleApplicabilityContext(extractVehicleIdentityFromSupplementText(text));
   const normalized = candidates.map((item) => ({
     ...item,
     title: normalizeSupplementTitle(item.title),
+    reason: sanitizeVehicleSpecificText(item.reason, resolvedVehicleApplicability),
   }));
   const frontSpecificExists = normalized.some(
     (item) =>
@@ -392,13 +416,38 @@ function curateSupplementCandidates(
   );
   const filtered = normalized
     .filter((item) => {
+      if (
+        !isVehicleContentApplicable(`${item.title} ${item.reason}`, resolvedVehicleApplicability) ||
+        !item.reason.trim()
+      ) {
+        return false;
+      }
+
       const title = item.title;
 
       if (title === "Four-Wheel Alignment" && !hasAlignmentEvidence(evidenceText)) {
         return false;
       }
 
-      if (title === "One-Time-Use Hardware / Seals / Clips" && !hasHardwareEvidence(evidenceText)) {
+      if (
+        title === "One-Time-Use Hardware / Seals / Clips" &&
+        !hasHardwareEvidence(`${evidenceText} ${item.reason}`)
+      ) {
+        return false;
+      }
+
+      if (
+        title === "Pre-Paint Test Fit" &&
+        (!hasExplicitFitCheckEvidence(`${evidenceText} ${item.reason}`) ||
+          !hasFrontEndOrFitSensitiveEvidence(`${evidenceText} ${item.reason}`))
+      ) {
+        return false;
+      }
+
+      if (
+        title === "ADAS / Calibration Procedure Support" &&
+        !hasAdasProcedureEvidence(`${evidenceText} ${item.reason}`)
+      ) {
         return false;
       }
 
@@ -412,15 +461,15 @@ function curateSupplementCandidates(
 
       if (
         title === "Hidden Mounting Geometry / Teardown Growth" &&
-        frontSpecificExists &&
-        hasSupportScopeEvidence(evidenceText)
+        (!hasHiddenMountingEvidence(evidenceText) ||
+          (isLightFrontBumperDrivenFile(evidenceText) && !hasHiddenMountingEvidence(evidenceText)))
       ) {
         return false;
       }
 
       return true;
     })
-    .sort((left, right) => scoreCuratedSupplementCandidate(right) - scoreCuratedSupplementCandidate(left));
+    .sort((left, right) => scoreCuratedSupplementCandidate(right, evidenceText) - scoreCuratedSupplementCandidate(left, evidenceText));
 
   const kept: SupplementCandidate[] = [];
   const seenFamilies = new Set<string>();
@@ -429,8 +478,12 @@ function curateSupplementCandidates(
   for (const item of filtered) {
     const family = inferSupplementConceptFamily(item.title);
     const generic = isGenericSupplementTitle(item.title);
+    const explicitlySupportedGeneric =
+      generic &&
+      ((family === "hardware" && hasHardwareEvidence(item.reason)) ||
+        (family === "fit_verification" && hasExplicitFitCheckEvidence(item.reason)));
 
-    if (generic && genericFallbacks >= 1) {
+    if (generic && !explicitlySupportedGeneric && genericFallbacks >= 1) {
       continue;
     }
 
@@ -442,12 +495,51 @@ function curateSupplementCandidates(
     if (family !== "other") {
       seenFamilies.add(family);
     }
-    if (generic) {
+    if (generic && !explicitlySupportedGeneric) {
       genericFallbacks += 1;
     }
   }
 
   return kept;
+}
+
+function extractSupplementVehicleApplicability(
+  result: AnalysisResult | RepairIntelligenceReport | AnalysisFinding[]
+): VehicleApplicabilityContext {
+  if (Array.isArray(result)) {
+    return resolveVehicleApplicabilityContext(
+      extractVehicleIdentityFromSupplementText(result.map((finding) => `${finding.title} ${finding.detail}`).join("\n"))
+    );
+  }
+
+  if ("findings" in result) {
+    return resolveVehicleApplicabilityContext(result.vehicle);
+  }
+
+  return resolveVehicleApplicabilityContext(result.vehicle, result.analysis?.vehicle);
+}
+
+function extractVehicleIdentityFromSupplementText(text: string): {
+  make?: string;
+  model?: string;
+  manufacturer?: string;
+} | null {
+  const lower = text.toLowerCase();
+
+  if (/\bbmw\b|\bxdrive\b|\bkafas\b/.test(lower)) {
+    return { make: "BMW" };
+  }
+  if (/\bvolvo\b|\bxc40\b|\bxc60\b|\bxc90\b/.test(lower)) {
+    return { make: "Volvo" };
+  }
+  if (/\bnissan\b|\bsentra\b|\baltima\b|\brogue\b/.test(lower)) {
+    return { make: "Nissan" };
+  }
+  if (/\bchevrolet\b|\bchevy\b|\bsilverado\b|\bequinox\b/.test(lower)) {
+    return { make: "Chevrolet", manufacturer: "General Motors" };
+  }
+
+  return null;
 }
 
 function inferSupplementConceptFamily(title: string): string {
@@ -506,7 +598,7 @@ function isGenericSupplementTitle(title: string): boolean {
   ].includes(normalizeSupplementTitle(title));
 }
 
-function scoreCuratedSupplementCandidate(item: SupplementCandidate): number {
+function scoreCuratedSupplementCandidate(item: SupplementCandidate, evidenceText = ""): number {
   const lower = `${item.title} ${item.reason}`.toLowerCase();
   let score = item.reason.length;
 
@@ -514,9 +606,23 @@ function scoreCuratedSupplementCandidate(item: SupplementCandidate): number {
   if (item.supportState === "partial") score += 40;
   if (lower.includes("front structure") || lower.includes("tie bar") || lower.includes("lock support")) score += 80;
   if (lower.includes("rear body") || lower.includes("deck opening") || lower.includes("bumper reinforcement")) score += 80;
-  if (lower.includes("test fit") || lower.includes("fit-sensitive")) score += 60;
+  if (lower.includes("test fit") || lower.includes("fit-sensitive")) score += 20;
   if (lower.includes("sensor") || lower.includes("radar") || lower.includes("calibration")) score += 45;
   if (isGenericSupplementTitle(item.title)) score -= 40;
+
+  if (item.title === "Pre-Paint Test Fit") {
+    if (!hasMajorFitStackUpEvidence(`${evidenceText} ${lower}`)) score -= 100;
+    if (isLightFrontBumperDrivenFile(evidenceText)) score -= 120;
+  }
+
+  if (item.title === "Hidden Mounting Geometry / Teardown Growth" && isLightFrontBumperDrivenFile(evidenceText)) {
+    score -= 160;
+  }
+
+  if (item.title === "ADAS / Calibration Procedure Support") {
+    if (!hasAdasProcedureEvidence(evidenceText)) score -= 160;
+    if (/\b(?:camera|sensor|scan|calibration|park sensor|front camera)\b/.test(evidenceText)) score += 45;
+  }
 
   return score;
 }
@@ -565,9 +671,73 @@ function hasMeasurementEvidence(value: string): boolean {
     /dimension(?:s|al)?/.test(value) ||
     /\bdatum\b/.test(value) ||
     /\bgeometry\b/.test(value) ||
-    /structural verification/.test(value) ||
     hasVerifiedStructuralZoneEvidence(value)
   );
+}
+
+function hasAdasProcedureEvidence(value: string): boolean {
+  const lower = value.toLowerCase();
+  const hasAdasSubject =
+    lower.includes("adas") ||
+    lower.includes("calibration") ||
+    lower.includes("camera") ||
+    lower.includes("radar") ||
+    lower.includes("sensor") ||
+    lower.includes("scan");
+  const hasProcedureContext =
+    lower.includes("procedure") ||
+    lower.includes("calibrate") ||
+    lower.includes("calibration") ||
+    lower.includes("scan") ||
+    lower.includes("verification") ||
+    lower.includes("aim");
+
+  return hasAdasSubject && hasProcedureContext;
+}
+
+function hasExplicitFitCheckEvidence(value: string): boolean {
+  return (
+    /test-?fit/.test(value) ||
+    /fit-?check/.test(value) ||
+    /mock-?up/.test(value) ||
+    /fit verification/.test(value) ||
+    /gap confirmation/.test(value) ||
+    /aim confirmation/.test(value)
+  );
+}
+
+function hasFrontEndOrFitSensitiveEvidence(value: string): boolean {
+  return (
+    /\bfront(?:-|\s)?end\b/.test(value) ||
+    /\bbumper\b/.test(value) ||
+    /\bfascia\b/.test(value) ||
+    /\bfender\b/.test(value) ||
+    /\blamp\b/.test(value) ||
+    /\bheadlamp\b/.test(value) ||
+    /\bgrille\b/.test(value) ||
+    /\bhood\b/.test(value) ||
+    /\bfit-sensitive\b/.test(value) ||
+    /\bgap\b/.test(value) ||
+    /\baim\b/.test(value)
+  );
+}
+
+function hasMajorFitStackUpEvidence(value: string): boolean {
+  const lower = value.toLowerCase();
+  const fitSignals = [
+    "hood",
+    "fender",
+    "lamp",
+    "headlamp",
+    "grille",
+    "gap",
+    "aim",
+    "fit-sensitive",
+    "fit sensitive",
+    "camera",
+  ].filter((signal) => lower.includes(signal)).length;
+
+  return fitSignals >= 2;
 }
 
 function hasSupportScopeEvidence(value: string): boolean {
@@ -584,12 +754,45 @@ function hasSupportScopeEvidence(value: string): boolean {
   );
 }
 
+function hasHiddenMountingEvidence(value: string): boolean {
+  return (
+    hasSupportScopeEvidence(value) ||
+    value.includes("reinforcement") ||
+    value.includes("absorber") ||
+    value.includes("shutter") ||
+    value.includes("duct") ||
+    value.includes("ducting") ||
+    value.includes("hidden bracket") ||
+    value.includes("mounting disturbance") ||
+    value.includes("mounting geometry") ||
+    value.includes("teardown")
+  );
+}
+
+function isLightFrontBumperDrivenFile(value: string): boolean {
+  const lower = value.toLowerCase();
+  const hasLightSignals =
+    lower.includes("bumper") ||
+    lower.includes("fascia") ||
+    lower.includes("trim") ||
+    lower.includes("sensor") ||
+    lower.includes("scan");
+  const lacksHeavySignals =
+    !hasHiddenMountingEvidence(lower) &&
+    !hasMeasurementEvidence(lower) &&
+    !lower.includes("structure") &&
+    !lower.includes("rail") &&
+    !lower.includes("apron");
+
+  return hasLightSignals && lacksHeavySignals;
+}
+
 function hasVerifiedStructuralZoneEvidence(value: string): boolean {
   return (
-    /\b(?:rail|apron)\b.{0,40}\b(?:measure|measurement|measuring|verify|verification|setup|pull|realign|datum|geometry|dimension)\b/.test(
+    /\b(?:rail|apron)\b.{0,40}\b(?:measure|measurement|measuring|setup|pull|realign|datum|geometry|dimension)\b/.test(
       value
     ) ||
-    /\b(?:measure|measurement|measuring|verify|verification|setup|pull|realign|datum|geometry|dimension)\b.{0,40}\b(?:rail|apron)\b/.test(
+    /\b(?:measure|measurement|measuring|setup|pull|realign|datum|geometry|dimension)\b.{0,40}\b(?:rail|apron)\b/.test(
       value
     )
   );
@@ -817,9 +1020,13 @@ function isClearlyRepresentedEstimateImprovement(title: string, representedText:
     return hasFunction(representedText, [
       "pre-paint test fit",
       "pre paint test fit",
+      "fit-check",
+      "fit check",
       "mock-up",
       "mock up",
       "fit verification",
+      "gap confirmation",
+      "aim confirmation",
       "pre-finish fit confirmation",
     ]);
   }

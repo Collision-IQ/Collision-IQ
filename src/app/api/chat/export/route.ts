@@ -133,6 +133,43 @@ function normalizeExportComparisonText(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+type PdfMessageBlock = {
+  role: string;
+  body: string;
+};
+
+function parsePdfMessageBlocks(text: string): PdfMessageBlock[] {
+  const normalized = text.replace(/\r/g, "").trim();
+  if (!normalized) return [];
+
+  const lines = normalized.split("\n");
+  const blocks: PdfMessageBlock[] = [];
+  let currentRole = "MESSAGE";
+  let currentBody: string[] = [];
+
+  const flush = () => {
+    const body = currentBody.join("\n").trim();
+    if (!body) return;
+    blocks.push({ role: currentRole, body });
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    const roleMatch = line.match(/^(USER|ASSISTANT|ANALYSIS SUMMARY|MESSAGE):\s*$/i);
+    if (roleMatch) {
+      flush();
+      currentRole = roleMatch[1].toUpperCase();
+      currentBody = [];
+      continue;
+    }
+
+    currentBody.push(line);
+  }
+
+  flush();
+  return blocks;
+}
+
 function buildChatExportPdf(text: string): ArrayBuffer {
   const doc = new jsPDF({
     unit: "mm",
@@ -154,21 +191,50 @@ function buildChatExportPdf(text: string): ArrayBuffer {
 
   const marginX = 16;
   const marginY = 36;
-  const lineHeight = 5.4;
-  const maxWidth = 178;
+  const blockWidth = 178;
   const pageHeight = doc.internal.pageSize.getHeight();
   const bottomY = pageHeight - 14;
-  const lines = doc.splitTextToSize(text, maxWidth);
+  const blocks = parsePdfMessageBlocks(text);
 
   let y = marginY;
-  for (const line of lines) {
-    if (y + lineHeight > bottomY) {
+  const ensurePageSpace = (requiredHeight: number) => {
+    if (y + requiredHeight > bottomY) {
       doc.addPage();
       y = 18;
     }
+  };
 
-    doc.text(line, marginX, y);
-    y += lineHeight;
+  for (const block of blocks.length > 0 ? blocks : [{ role: "MESSAGE", body: text.trim() }]) {
+    const labelHeight = 6;
+    const bodyLineHeight = 4.8;
+    const bodyTopGap = 4;
+    const blockBottomGap = 6;
+    const labelWidth = Math.min(54, Math.max(24, doc.getTextWidth(block.role) + 8));
+    const bodyLines = doc.splitTextToSize(block.body, blockWidth - 6);
+    const estimatedHeight =
+      labelHeight + bodyTopGap + bodyLines.length * bodyLineHeight + blockBottomGap;
+
+    ensurePageSpace(estimatedHeight);
+
+    doc.setFillColor(238, 241, 245);
+    doc.roundedRect(marginX, y - 4, labelWidth, labelHeight, 1.4, 1.4, "F");
+    doc.setTextColor(67, 76, 94);
+    doc.setFont("Helvetica", "Bold");
+    doc.setFontSize(8.5);
+    doc.text(block.role, marginX + 3, y);
+
+    y += bodyTopGap;
+    doc.setTextColor(35, 35, 35);
+    doc.setFont("Times", "Normal");
+    doc.setFontSize(10.5);
+
+    for (const line of bodyLines) {
+      ensurePageSpace(bodyLineHeight + 2);
+      doc.text(line, marginX, y + 4);
+      y += bodyLineHeight;
+    }
+
+    y += blockBottomGap;
   }
 
   return doc.output("arraybuffer");

@@ -1,3 +1,9 @@
+import {
+  isVehicleContentApplicable,
+  sanitizeVehicleSpecificText,
+  type VehicleApplicabilityContext,
+} from "../vehicleApplicability";
+
 export type DerivedRenderSupplementItem = {
   title: string;
   category: string;
@@ -120,14 +126,17 @@ const META_COMMENTARY_PATTERNS = [
 ];
 
 export function deriveRenderInsightsFromChat(
-  assistantAnalysis: string | null | undefined
+  assistantAnalysis: string | null | undefined,
+  vehicleApplicability?: VehicleApplicabilityContext
 ): DerivedRenderInsights {
   const text = (assistantAnalysis ?? "").replace(/\r/g, "").trim();
+  const narrative = sanitizeVehicleSpecificText(extractNarrative(text), vehicleApplicability) || undefined;
+  const request = sanitizeVehicleSpecificText(extractRequest(text), vehicleApplicability) || undefined;
 
   return {
-    narrative: extractNarrative(text),
-    supplementItems: extractSupplementItems(text),
-    request: extractRequest(text),
+    narrative,
+    supplementItems: extractSupplementItems(text, vehicleApplicability),
+    request,
     valuation: extractValuation(text),
   };
 }
@@ -160,7 +169,10 @@ function extractNarrative(text: string): string | undefined {
   })?.paragraph;
 }
 
-function extractSupplementItems(text: string): DerivedRenderSupplementItem[] {
+function extractSupplementItems(
+  text: string,
+  vehicleApplicability?: VehicleApplicabilityContext
+): DerivedRenderSupplementItem[] {
   if (!text) return [];
 
   const blocks = extractReasoningBlocks(text);
@@ -168,6 +180,7 @@ function extractSupplementItems(text: string): DerivedRenderSupplementItem[] {
     .filter((line, index, all) => all.indexOf(line) === index)
     .filter((line) => looksLikeOperationSupportLine(line) && !looksLikeEstimateNoise(line))
     .filter((line) => !looksLikeMetaCommentary(line))
+    .filter((line) => isVehicleContentApplicable(line, vehicleApplicability))
     .flatMap((line) => buildSupplementItemsFromReasoning(line))
     .filter((item) => item.title && item.rationale.length > 25);
 
@@ -190,7 +203,8 @@ function extractSupplementItems(text: string): DerivedRenderSupplementItem[] {
     [...deduped.values()].sort(
       (left, right) => scoreSupplementCandidate(right) - scoreSupplementCandidate(left)
     ),
-    text
+    text,
+    vehicleApplicability
   );
 }
 
@@ -747,7 +761,8 @@ function inferFallbackTitles(line: string): string[] {
 
 function curateDerivedSupplementItems(
   items: DerivedRenderSupplementItem[],
-  sourceText: string
+  sourceText: string,
+  vehicleApplicability?: VehicleApplicabilityContext
 ): DerivedRenderSupplementItem[] {
   if (items.length <= 1) return items;
 
@@ -758,6 +773,14 @@ function curateDerivedSupplementItems(
       !isDerivedGenericFallback(item.title)
   );
   const filtered = items.filter((item) => {
+    if (
+      !isVehicleContentApplicable(
+        `${item.title} ${item.rationale} ${item.evidence ?? ""} ${item.source}`,
+        vehicleApplicability
+      )
+    ) {
+      return false;
+    }
     if (item.title === "Four-Wheel Alignment" && !hasDerivedAlignmentEvidence(lowerSource)) {
       return false;
     }
@@ -793,7 +816,14 @@ function curateDerivedSupplementItems(
       continue;
     }
 
-    kept.push(item);
+    kept.push({
+      ...item,
+      rationale: sanitizeVehicleSpecificText(item.rationale, vehicleApplicability),
+      evidence: item.evidence
+        ? sanitizeVehicleSpecificText(item.evidence, vehicleApplicability) || undefined
+        : undefined,
+      source: sanitizeVehicleSpecificText(item.source, vehicleApplicability) || item.source,
+    });
     seenFamilies.add(family);
     if (generic) genericFallbacks += 1;
   }

@@ -17,6 +17,10 @@ import {
   type DriveTopicInference,
 } from "@/lib/ai/contracts/driveRetrievalContract";
 import type { ChatAnalysisOutput, ChatbotTaskType } from "@/lib/ai/contracts/chatAnalysisSchema";
+import {
+  assessRetrievedDocumentApplicability,
+  resolveVehicleApplicabilityContext,
+} from "@/lib/ai/vehicleApplicability";
 
 type DriveIndexFile = {
   id: string;
@@ -136,6 +140,7 @@ export async function retrieveDriveSupport(params: {
         sourceBucket: inferredBucket,
         documentClass: inferredClass,
       });
+      if (!result) continue;
 
       const existing = laneMap.get(result.id);
       if (!existing || result.relevanceScore > existing.relevanceScore) {
@@ -464,11 +469,21 @@ function buildRetrievalResult(params: {
   laneTopics: DriveTopicInference[];
   sourceBucket: DriveSourceBucket;
   documentClass: DriveDocumentType;
-}): DriveRetrievalResult {
+}): DriveRetrievalResult | null {
   const pathLower = params.file.path.toLowerCase();
   const contentLower = params.row.content.toLowerCase();
   const relevanceReasons = buildRelevanceReasons(params.laneTopics, pathLower, contentLower);
-  const vehicleRelevance = buildVehicleRelevance(params.request, `${params.file.name} ${params.file.path} ${params.row.content}`);
+  const vehicleApplicability = assessRetrievedDocumentApplicability({
+    title: params.file.name,
+    excerpt: params.row.content,
+    source: params.file.path,
+    vehicle: resolveVehicleApplicabilityContext(params.request.vehicle),
+  });
+  if (!vehicleApplicability.keep) {
+    logVehicleMismatchDiscard(params.request, params.file, vehicleApplicability);
+    return null;
+  }
+  const vehicleRelevance = buildVehicleRelevance(vehicleApplicability);
   const jurisdictionRelevance =
     params.sourceBucket === "pa_law"
       ? buildJurisdictionRelevance(`${params.file.name} ${params.file.path} ${params.row.content}`)
@@ -476,7 +491,7 @@ function buildRetrievalResult(params: {
   const score = computeRelevanceScore({
     row: params.row,
     relevanceReasons,
-    vehicleRelevance,
+    vehicleMatchLevel: vehicleApplicability.matchLevel,
     sourceBucket: params.sourceBucket,
     documentClass: params.documentClass,
   });
@@ -493,6 +508,7 @@ function buildRetrievalResult(params: {
     confidence,
     matchReason:
       relevanceReasons[0]?.reason ??
+      vehicleApplicability.reason ??
       vehicleRelevance ??
       jurisdictionRelevance ??
       "Matched the requested lane, source bucket, and query context.",
@@ -516,6 +532,9 @@ function buildRetrievalResult(params: {
       source: params.file.path,
       system: params.file.path,
       vehicleRelevance,
+      vehicleMatchLevel: vehicleApplicability.matchLevel,
+      vehicleApplicabilityReason: vehicleApplicability.reason,
+      vehicleSignals: vehicleApplicability.mentionedTerms,
       jurisdictionRelevance,
     },
     relevanceReasons,
@@ -549,27 +568,19 @@ function buildRelevanceReasons(
 }
 
 function buildVehicleRelevance(
-  request: DriveRetrievalRequest,
-  haystack: string
+  applicability: ReturnType<typeof assessRetrievedDocumentApplicability>
 ): string | undefined {
-  const lower = haystack.toLowerCase();
-  const matched: string[] = [];
-
-  if (request.vehicle.make && lower.includes(request.vehicle.make.toLowerCase())) {
-    matched.push(request.vehicle.make);
+  const signals = applicability.mentionedTerms.join(" ").trim();
+  if (applicability.matchLevel === "exact_vehicle_match") {
+    return signals ? `Exact vehicle match: ${signals}` : "Exact vehicle match.";
   }
-  if (request.vehicle.model && lower.includes(request.vehicle.model.toLowerCase())) {
-    matched.push(request.vehicle.model);
+  if (applicability.matchLevel === "manufacturer_match") {
+    return signals ? `Same manufacturer context: ${signals}` : "Same manufacturer context.";
   }
-  if (request.vehicle.trim && lower.includes(request.vehicle.trim.toLowerCase())) {
-    matched.push(request.vehicle.trim);
+  if (applicability.matchLevel === "generic") {
+    return "Generic vehicle-neutral support.";
   }
-  if (request.vehicle.year && lower.includes(String(request.vehicle.year))) {
-    matched.push(String(request.vehicle.year));
-  }
-
-  if (matched.length === 0) return undefined;
-  return `Matched vehicle context: ${matched.join(" ")}`;
+  return undefined;
 }
 
 function buildJurisdictionRelevance(haystack: string): string {
@@ -583,7 +594,7 @@ function buildJurisdictionRelevance(haystack: string): string {
 function computeRelevanceScore(params: {
   row: DriveChunkRow;
   relevanceReasons: DriveRelevanceReason[];
-  vehicleRelevance?: string;
+  vehicleMatchLevel?: "exact_vehicle_match" | "manufacturer_match" | "generic" | "mismatched_vehicle";
   sourceBucket: DriveSourceBucket;
   documentClass: DriveDocumentType;
 }): number {
@@ -593,7 +604,11 @@ function computeRelevanceScore(params: {
       : Number(params.row.distance ?? 1.4);
   const vectorScore = Number.isFinite(distance) ? Math.max(0, 1 - Math.min(distance, 1.2) / 1.2) : 0.45;
   const topicBoost = Math.min(params.relevanceReasons.length * 0.12, 0.36);
-  const vehicleBoost = params.vehicleRelevance ? 0.08 : 0;
+  const vehicleBoost =
+    params.vehicleMatchLevel === "exact_vehicle_match" ? 0.12 :
+    params.vehicleMatchLevel === "manufacturer_match" ? 0.06 :
+    params.vehicleMatchLevel === "generic" ? 0.02 :
+    0;
   const bucketBoost =
     params.sourceBucket === "oem_procedures" ? 0.08 :
     params.sourceBucket === "oem_position_statements" ? 0.06 :
@@ -606,6 +621,30 @@ function computeRelevanceScore(params: {
     0.02;
 
   return Number(Math.min(0.99, vectorScore + topicBoost + vehicleBoost + bucketBoost + classBoost).toFixed(3));
+}
+
+function logVehicleMismatchDiscard(
+  request: DriveRetrievalRequest,
+  file: DriveIndexFile,
+  applicability: ReturnType<typeof assessRetrievedDocumentApplicability>
+) {
+  console.info("[drive-retrieval] discarded vehicle-mismatched result", {
+    estimateVehicle: {
+      year: request.vehicle.year ?? null,
+      make: request.vehicle.make ?? null,
+      model: request.vehicle.model ?? null,
+      manufacturer: request.vehicle.manufacturer ?? null,
+      trim: request.vehicle.trim ?? null,
+      confidence: request.vehicle.confidence,
+    },
+    document: {
+      filename: file.name,
+      path: file.path,
+      signals: applicability.mentionedTerms,
+      families: applicability.mentionedFamilies,
+    },
+    reason: applicability.reason,
+  });
 }
 
 export function detectChatTaskType(params: {
@@ -671,8 +710,11 @@ export function buildDriveRefinementContext(response: DriveRetrievalResponse): s
       ...laneResults.map((result) => {
         const reasons = result.relevanceReasons.map((reason) => reason.reason).join(" | ");
         const vehicle = result.metadata.vehicleRelevance ? ` | ${result.metadata.vehicleRelevance}` : "";
+        const vehicleMatch = result.metadata.vehicleMatchLevel
+          ? ` | vehicle_match=${result.metadata.vehicleMatchLevel}`
+          : "";
         const jurisdiction = result.metadata.jurisdictionRelevance ? ` | ${result.metadata.jurisdictionRelevance}` : "";
-        return `- [${result.documentClass}] ${result.filename} | bucket=${result.sourceBucket} | score=${result.relevanceScore}${vehicle}${jurisdiction}
+        return `- [${result.documentClass}] ${result.filename} | bucket=${result.sourceBucket} | score=${result.relevanceScore}${vehicle}${vehicleMatch}${jurisdiction}
   reason: ${result.matchReason}${reasons ? ` | ${reasons}` : ""}
   excerpt: ${result.excerpt.excerpt}`;
       }),

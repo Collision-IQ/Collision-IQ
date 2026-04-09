@@ -2,6 +2,7 @@ import {
   buildExportModel,
   buildPreferredRebuttalSubjectVehicleLabel,
   preferCanonicalField,
+  redactExportModelForDownload,
   resolveCanonicalVehicleLabel,
   type ExportModel,
   type ExportSupplementItem,
@@ -647,13 +648,15 @@ function normalizeKey(value: string): string {
 
 function resolveExportModel(params: ExportBuilderInput): ExportModel {
   if (params.renderModel) {
-    return params.renderModel;
+    return redactExportModelForDownload(params.renderModel);
   }
 
-  return buildExportModel({
-    report: params.report,
-    analysis: params.analysis,
-    panel: params.panel,
-    assistantAnalysis: params.assistantAnalysis,
-  });
+  return redactExportModelForDownload(
+    buildExportModel({
+      report: params.report,
+      analysis: params.analysis,
+      panel: params.panel,
+      assistantAnalysis: params.assistantAnalysis,
+    })
+  );
 }

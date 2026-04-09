@@ -1,7 +1,7 @@
 const VIN_PATTERN = /\b[A-HJ-NPR-Z0-9]{17}\b/g;
 
 const INSURANCE_COMPANY_PATTERN =
-	/\b(?:State\s*Farm|Allstate|GEICO|Progressive|Liberty\s*Mutual|USAA|Farmers|Nationwide|Travelers|The\s*Hartford|American\s*Family|[A-Z][A-Za-z&.'-]*(?:\s+[A-Z][A-Za-z&.'-]*){0,4}\s+(?:Insurance|Assurance|Indemnity|Mutual|Casualty|County\s+Mutual|Underwriters|National|General))\b(?!-)/gi;
+	/\b(?:State\s*Farm|Allstate|GEICO|Progressive|Liberty\s*Mutual|USAA|Farmers|Nationwide|Travelers|The\s*Hartford|American\s*Family|Erie|[A-Z][A-Za-z&.'-]*(?:\s+[A-Z][A-Za-z&.'-]*){0,4}\s+(?:Insurance|Assurance|Indemnity|Mutual|Casualty|County\s+Mutual|Underwriters|National|General))\b(?!-)/gi;
 
 const STREET_ADDRESS_PATTERN =
 	/\b\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,5}\s(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl)\b\.?/gi;

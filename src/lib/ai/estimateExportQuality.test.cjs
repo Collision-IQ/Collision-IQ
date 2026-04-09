@@ -29,6 +29,11 @@ const { buildSideBySideComparisonReport, buildLineByLineComparisonReport } = req
 const { buildSupplementLines } = require("./builders/supplementBuilder.ts");
 const { generateNegotiationResponse } = require("./builders/negotiationEngine.ts");
 const { buildVehicleLabel, decodeVinVehicleIdentity, extractVehicleIdentityFromText } = require("./vehicleContext.ts");
+const {
+  assessRetrievedDocumentApplicability,
+  resolveVehicleApplicabilityContext,
+} = require("./vehicleApplicability.ts");
+const { extractEstimateLinksFromDocuments } = require("./estimateLinkExtractor.ts");
 const { deriveRenderInsightsFromChat } = require("./builders/deriveRenderInsightsFromChat.ts");
 const { cleanVehicleSummaryLabel, cleanVehicleTrimLabel } = require("../ui/presentationText.ts");
 
@@ -269,6 +274,73 @@ Front support replacement may still need dimensional verification, wheel alignme
   );
 });
 
+run("vehicle applicability gate suppresses mismatched make-specific chat carryover", () => {
+  const insights = deriveRenderInsightsFromChat(
+    `
+The BMW X5 estimate supports front camera handling and scan closure.
+Volvo XC40 tie bar logic and Volvo Car Corporation support should drive the review.
+KAFAS calibration remains a BMW-specific issue when the file is BMW.
+`,
+    resolveVehicleApplicabilityContext({
+      year: 2024,
+      make: "Nissan",
+      model: "Sentra",
+      manufacturer: "Nissan Motor",
+    })
+  );
+
+  assert.equal(
+    insights.supplementItems.some((item) => /volvo|bmw|kafas|x5/i.test(`${item.title} ${item.rationale}`)),
+    false
+  );
+  assert.equal((insights.narrative ?? "").includes("Volvo"), false);
+});
+
+run("estimate link extractor keeps trusted procedure links and rejects unrelated links", () => {
+  const links = extractEstimateLinksFromDocuments([
+    {
+      filename: "subaru-estimate.txt",
+      text: `
+OEM procedure reference: https://techinfo.subaru.com/stis/doc/adas/eyesight-calibration.pdf
+Ignore this marketing page: https://www.instagram.com/collision_academy
+      `,
+    },
+  ]);
+
+  assert.equal(links.some((link) => link.classification === "oem_procedure"), true);
+  assert.equal(
+    links.some((link) => /instagram/i.test(link.domain) && link.classification === "unsupported"),
+    true
+  );
+});
+
+run("retrieved document applicability rejects mismatched OEM systems and keeps generic docs", () => {
+  const vehicle = resolveVehicleApplicabilityContext({
+    year: 2023,
+    make: "Subaru",
+    model: "Outback",
+    manufacturer: "Subaru Corporation",
+  });
+
+  const kafasDoc = assessRetrievedDocumentApplicability({
+    title: "BMW KAFAS camera calibration procedure",
+    excerpt: "KAFAS calibration and BMW front camera aiming instructions.",
+    source: "https://bmw.example.com/kafas.pdf",
+    vehicle,
+  });
+  const genericDoc = assessRetrievedDocumentApplicability({
+    title: "Generic calibration verification guide",
+    excerpt: "Post-repair scan and calibration verification steps for camera or radar service.",
+    source: "https://docs.example.com/calibration-guide.pdf",
+    vehicle,
+  });
+
+  assert.equal(kafasDoc.keep, false);
+  assert.equal(kafasDoc.matchLevel, "mismatched_vehicle");
+  assert.equal(genericDoc.keep, true);
+  assert.equal(genericDoc.matchLevel, "generic");
+});
+
 run("carrier and estimate-review exports show Shop 21733 facts without unsupported VIN language", () => {
   const report = makeReport();
   const analysis = normalizeReportToAnalysisResult(report);
@@ -299,7 +371,7 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
 
   assert.equal(carrier.summary.find((item) => item.label === "Vehicle")?.value, "2018 Tesla Model S 75D AWD");
   assert.equal(carrier.summary.find((item) => item.label === "VIN")?.value, "5YJSA1E21JF264319");
-  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "GEICO");
+  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
   assert.equal(carrier.summary.find((item) => item.label === "Mileage")?.value, "173,702");
   assert.equal(carrier.summary.find((item) => item.label === "Estimate Total")?.value, "$19,428.53");
   assert.equal(
@@ -322,7 +394,7 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
     carrier.summary.find((item) => item.label === "VIN")?.value.includes("Not clearly supported"),
     false
   );
-  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "GEICO");
+  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
   assert.equal(carrier.summary.some((item) => item.value === "THOMAS"), false);
   assert.equal(estimateReview.summary.find((item) => item.label === "Vehicle")?.value, "2018 Tesla Model S 75D AWD");
   assert.equal(estimateReview.summary.find((item) => item.label === "VIN")?.value, "5YJSA1E21JF264319");
@@ -397,10 +469,10 @@ run("pdf builders honor a pre-resolved render model without recomputing divergen
 
   assert.equal(carrier.summary.find((item) => item.label === "Vehicle")?.value, renderModel.reportFields.vehicleLabel);
   assert.equal(carrier.summary.find((item) => item.label === "VIN")?.value, renderModel.reportFields.vin);
-  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, renderModel.reportFields.insurer);
+  assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
   assert.equal(sideBySide.summary.find((item) => item.label === "Vehicle")?.value, renderModel.reportFields.vehicleLabel);
   assert.equal(lineByLine.summary.find((item) => item.label === "VIN")?.value, renderModel.reportFields.vin);
-  assert.equal(rebuttal.summary.find((item) => item.label === "Insurer")?.value, renderModel.reportFields.insurer);
+  assert.equal(rebuttal.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
 });
 
 run("single-estimate text templates avoid comparison framing", () => {

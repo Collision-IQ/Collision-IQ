@@ -1,6 +1,7 @@
 import {
   buildExportModel,
   COLLISION_ACADEMY_HANDOFF_URL,
+  redactExportModelForDownload,
   resolveCanonicalInsurer,
   resolveCanonicalVehicleLabel,
   resolveCanonicalVin,
@@ -223,15 +224,17 @@ function buildExecutiveSummary(params: {
 
 function resolveCarrierExportModel(params: ExportBuilderInput): ExportModel {
   if (params.renderModel) {
-    return params.renderModel;
+    return redactExportModelForDownload(params.renderModel);
   }
 
-  return buildExportModel({
-    report: params.report,
-    analysis: params.analysis,
-    panel: params.panel,
-    assistantAnalysis: params.assistantAnalysis,
-  });
+  return redactExportModelForDownload(
+    buildExportModel({
+      report: params.report,
+      analysis: params.analysis,
+      panel: params.panel,
+      assistantAnalysis: params.assistantAnalysis,
+    })
+  );
 }
 
 function buildCredibilityConclusion(

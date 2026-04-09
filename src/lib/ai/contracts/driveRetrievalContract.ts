@@ -4,6 +4,7 @@ import {
   mergeVehicleIdentity,
   normalizeVehicleIdentity,
 } from "../vehicleContext";
+import type { VehicleApplicabilityRating } from "../vehicleApplicability";
 
 export const DRIVE_RETRIEVAL_TOPICS = [
   "adas_calibration",
@@ -167,6 +168,9 @@ export type DriveResultMetadata = {
   source?: string;
   pageHint?: string;
   vehicleRelevance?: string;
+  vehicleMatchLevel?: VehicleApplicabilityRating;
+  vehicleApplicabilityReason?: string;
+  vehicleSignals?: string[];
   jurisdictionRelevance?: string;
 };
 
