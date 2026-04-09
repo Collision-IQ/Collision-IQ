@@ -176,34 +176,57 @@ function buildChatExportPdf(text: string): ArrayBuffer {
     format: "letter",
   });
 
-  doc.setFont("Helvetica", "Bold");
-  doc.setFontSize(16);
-  doc.text("Redacted Chat Export", 16, 18);
-
-  doc.setFont("Helvetica", "Normal");
-  doc.setFontSize(10);
-  doc.text(
-    "This download preserves the chat content while removing sensitive values from the exported copy.",
-    16,
-    26,
-    { maxWidth: 178 }
-  );
-
   const marginX = 16;
-  const marginY = 36;
+  const topMargin = 18;
+  const firstPageContentY = 36;
   const blockWidth = 178;
+  const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
-  const bottomY = pageHeight - 14;
+  const bottomMargin = 18;
+  const contentBottomY = pageHeight - bottomMargin;
   const blocks = parsePdfMessageBlocks(text);
 
-  let y = marginY;
-  const ensurePageSpace = (requiredHeight: number) => {
-    if (y + requiredHeight > bottomY) {
-      doc.addPage();
-      y = 18;
+  const drawPageChrome = (showIntro = false) => {
+    doc.setFont("Helvetica", "Bold");
+    doc.setFontSize(showIntro ? 16 : 10);
+    doc.setTextColor(35, 35, 35);
+    doc.text("Redacted Chat Export", marginX, showIntro ? 18 : 14);
+
+    if (showIntro) {
+      doc.setFont("Helvetica", "Normal");
+      doc.setFontSize(10);
+      doc.text(
+        "This download preserves the chat content while removing sensitive values from the exported copy.",
+        marginX,
+        26,
+        { maxWidth: blockWidth }
+      );
     }
+
+    doc.setFont("Helvetica", "Normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(120, 120, 120);
+    doc.text(`Page ${doc.getCurrentPageInfo().pageNumber}`, pageWidth - marginX, pageHeight - 8, {
+      align: "right",
+    });
   };
 
+  let y = firstPageContentY;
+  drawPageChrome(true);
+
+  const addPage = () => {
+    doc.addPage();
+    y = topMargin;
+    drawPageChrome(false);
+  };
+
+  const ensurePageSpace = (requiredHeight: number) => {
+    if (y + requiredHeight <= contentBottomY) return;
+    addPage();
+  };
+
+  // Render each line safely so long chat blocks can continue across pages
+  // instead of being clipped by a single oversized text call.
   for (const block of blocks.length > 0 ? blocks : [{ role: "MESSAGE", body: text.trim() }]) {
     const labelHeight = 6;
     const bodyLineHeight = 4.8;
@@ -211,10 +234,7 @@ function buildChatExportPdf(text: string): ArrayBuffer {
     const blockBottomGap = 6;
     const labelWidth = Math.min(54, Math.max(24, doc.getTextWidth(block.role) + 8));
     const bodyLines = doc.splitTextToSize(block.body, blockWidth - 6);
-    const estimatedHeight =
-      labelHeight + bodyTopGap + bodyLines.length * bodyLineHeight + blockBottomGap;
-
-    ensurePageSpace(estimatedHeight);
+    ensurePageSpace(labelHeight + bodyTopGap + bodyLineHeight + blockBottomGap);
 
     doc.setFillColor(238, 241, 245);
     doc.roundedRect(marginX, y - 4, labelWidth, labelHeight, 1.4, 1.4, "F");
@@ -228,9 +248,9 @@ function buildChatExportPdf(text: string): ArrayBuffer {
     doc.setFont("Times", "Normal");
     doc.setFontSize(10.5);
 
-    for (const line of bodyLines) {
-      ensurePageSpace(bodyLineHeight + 2);
-      doc.text(line, marginX, y + 4);
+    for (let index = 0; index < bodyLines.length; index += 1) {
+      ensurePageSpace(bodyLineHeight);
+      doc.text(bodyLines[index], marginX, y + 4);
       y += bodyLineHeight;
     }
 

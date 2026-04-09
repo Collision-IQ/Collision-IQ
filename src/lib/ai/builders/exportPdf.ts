@@ -19,17 +19,22 @@ export async function exportCarrierPDF(input: string | CarrierReportDocument) {
   const pageHeight = doc.internal.pageSize.getHeight();
   const marginX = 16;
   const contentWidth = pageWidth - marginX * 2;
-  const footerY = pageHeight - 10;
+  const topMargin = 18;
+  const bottomMargin = 18;
+  const contentBottomY = pageHeight - bottomMargin;
   const logoDataUrl = await loadLogoDataUrl(redactedInput.brand.logoPath).catch(() => null);
 
-  let y = 18;
+  let y = topMargin;
+
+  const addPage = () => {
+    doc.addPage();
+    y = topMargin;
+    drawPageFrame(doc, pageWidth, pageHeight);
+  };
 
   const ensureSpace = (requiredHeight: number) => {
-    if (y + requiredHeight <= footerY - 8) return;
-    doc.addPage();
-    y = 18;
-    drawPageFrame(doc, pageWidth, pageHeight);
-    drawPageNumber(doc, pageWidth, pageHeight);
+    if (y + requiredHeight <= contentBottomY) return;
+    addPage();
   };
 
   drawPageFrame(doc, pageWidth, pageHeight);
@@ -46,6 +51,7 @@ export async function exportCarrierPDF(input: string | CarrierReportDocument) {
   });
   y += 6;
 
+  ensureSpace(estimateSummaryGridHeight(doc, contentWidth, redactedInput.summary));
   y = drawSummaryGrid(doc, {
     x: marginX,
     y,
@@ -55,18 +61,21 @@ export async function exportCarrierPDF(input: string | CarrierReportDocument) {
   y += 9;
 
   for (const section of redactedInput.sections) {
-    const estimatedHeight = estimateSectionHeight(doc, contentWidth, section);
-    ensureSpace(Math.max(22, estimatedHeight));
+    ensureSpace(16);
     y = drawSection(doc, {
       x: marginX,
       y,
       width: contentWidth,
       section,
+      contentBottomY,
+      topMargin,
+      startNewPage: addPage,
     });
     y += 6;
   }
 
-  ensureSpace(18);
+  const footerHeight = estimateFooterHeight(doc, contentWidth, redactedInput.footer);
+  ensureSpace(footerHeight);
   y = drawFooterBlock(doc, {
     x: marginX,
     y,
@@ -89,19 +98,20 @@ function exportLegacyTextPdf(text: string) {
   doc.setFontSize(12);
 
   const marginX = 10;
-  const marginY = 10;
-  const lineHeight = 12 * 1.5 * 0.3528;
+  const topMargin = 12;
+  const bottomMargin = 18;
+  const lineHeight = 6.2;
   const maxWidth = 180;
   const pageHeight = doc.internal.pageSize.getHeight();
-  const bottomY = pageHeight - marginY;
+  const bottomY = pageHeight - bottomMargin;
   const lines = doc.splitTextToSize(text, maxWidth);
 
-  let y = marginY;
+  let y = topMargin;
 
   for (const line of lines) {
     if (y + lineHeight > bottomY) {
       doc.addPage();
-      y = marginY;
+      y = topMargin;
     }
 
     doc.text(line, marginX, y);
@@ -301,6 +311,30 @@ function drawSummaryGrid(
   return maxY;
 }
 
+function estimateSummaryGridHeight(
+  doc: jsPDF,
+  width: number,
+  items: Array<{ label: string; value: string }>
+): number {
+  const columnGap = 4;
+  const cellWidth = (width - columnGap) / 2;
+  const innerPaddingX = 3.5;
+  const topPadding = 4;
+  const bottomPadding = 3.5;
+  const rowGap = 4;
+  let height = 0;
+
+  items.forEach((item, index) => {
+    const valueLines = doc.splitTextToSize(item.value, cellWidth - innerPaddingX * 2);
+    const visibleLines = Math.max(1, Math.min(valueLines.length, 3));
+    const cellHeight = topPadding + 4.5 + 2 + visibleLines * 4.3 + bottomPadding;
+    const row = Math.floor(index / 2);
+    height = Math.max(height, row * (22 + rowGap) + cellHeight);
+  });
+
+  return height;
+}
+
 function drawSection(
   doc: jsPDF,
   params: {
@@ -308,38 +342,69 @@ function drawSection(
     y: number;
     width: number;
     section: CarrierReportDocument["sections"][number];
+    contentBottomY: number;
+    topMargin: number;
+    startNewPage: () => void;
   }
 ): number {
-  doc.setFont("Helvetica", "Bold");
-  doc.setFontSize(11);
-  doc.setTextColor(198, 90, 42);
-  doc.text(params.section.title.toUpperCase(), params.x, params.y);
+  let y = params.y;
 
-  doc.setDrawColor(226, 228, 233);
-  doc.setLineWidth(0.25);
-  doc.line(params.x, params.y + 1.5, params.x + params.width, params.y + 1.5);
+  const drawHeading = (continued = false) => {
+    doc.setFont("Helvetica", "Bold");
+    doc.setFontSize(11);
+    doc.setTextColor(198, 90, 42);
+    doc.text(
+      continued ? `${params.section.title.toUpperCase()} (CONT.)` : params.section.title.toUpperCase(),
+      params.x,
+      y
+    );
 
-  let y = params.y + 9;
+    doc.setDrawColor(226, 228, 233);
+    doc.setLineWidth(0.25);
+    doc.line(params.x, y + 1.5, params.x + params.width, y + 1.5);
+    y += 9;
+  };
+
+  const ensureLineSpace = (requiredHeight: number, continued = true) => {
+    if (y + requiredHeight <= params.contentBottomY) return;
+    params.startNewPage();
+    y = params.topMargin;
+    drawHeading(continued);
+  };
+
+  drawHeading();
 
   if (params.section.body) {
     doc.setFont("Helvetica", "Normal");
     doc.setFontSize(10.5);
     doc.setTextColor(38, 40, 44);
     const bodyLines = doc.splitTextToSize(params.section.body, params.width);
-    doc.text(bodyLines, params.x, y);
-    y += bodyLines.length * 4.9 + 3;
+
+    for (const line of bodyLines) {
+      ensureLineSpace(4.9);
+      doc.text(line, params.x, y);
+      y += 4.9;
+    }
+    y += 3;
   }
 
   if (params.section.bullets?.length) {
     for (const bullet of params.section.bullets) {
       const bulletLines = doc.splitTextToSize(bullet, params.width - 8);
-      doc.setFillColor(198, 90, 42);
-      doc.circle(params.x + 1.8, y - 1.2, 0.8, "F");
       doc.setFont("Helvetica", "Normal");
       doc.setFontSize(10);
       doc.setTextColor(38, 40, 44);
-      doc.text(bulletLines, params.x + 5, y);
-      y += bulletLines.length * 4.6 + 2.8;
+
+      bulletLines.forEach((line: string, index: number) => {
+        ensureLineSpace(4.6);
+        if (index === 0) {
+          doc.setFillColor(198, 90, 42);
+          doc.circle(params.x + 1.8, y - 1.2, 0.8, "F");
+        }
+        doc.text(line, params.x + 5, y);
+        y += 4.6;
+      });
+      y += 2.8;
     }
   }
 
@@ -355,14 +420,15 @@ function drawFooterBlock(
     footer: string[];
   }
 ): number {
+  const lines = doc.splitTextToSize(params.footer.join(" "), params.width - 6);
+  const blockHeight = Math.max(16, lines.length * 4.2 + 6);
   doc.setFillColor(248, 248, 249);
-  doc.roundedRect(params.x, params.y, params.width, 16, 2, 2, "F");
+  doc.roundedRect(params.x, params.y, params.width, blockHeight, 2, 2, "F");
   doc.setFont("Helvetica", "Normal");
   doc.setFontSize(8.5);
   doc.setTextColor(103, 107, 112);
-  const lines = doc.splitTextToSize(params.footer.join(" "), params.width - 6);
   doc.text(lines, params.x + 3, params.y + 5);
-  return params.y + Math.max(16, lines.length * 4.2 + 6);
+  return params.y + blockHeight;
 }
 
 function drawPageNumber(doc: jsPDF, pageWidth: number, pageHeight: number) {
@@ -374,22 +440,7 @@ function drawPageNumber(doc: jsPDF, pageWidth: number, pageHeight: number) {
   });
 }
 
-function estimateSectionHeight(
-  doc: jsPDF,
-  width: number,
-  section: CarrierReportDocument["sections"][number]
-): number {
-  let height = 12;
-
-  if (section.body) {
-    height += doc.splitTextToSize(section.body, width).length * 4.9 + 4;
-  }
-
-  if (section.bullets?.length) {
-    for (const bullet of section.bullets) {
-      height += doc.splitTextToSize(bullet, width - 8).length * 4.6 + 2.8;
-    }
-  }
-
-  return height;
+function estimateFooterHeight(doc: jsPDF, width: number, footer: string[]): number {
+  const lines = doc.splitTextToSize(footer.join(" "), width - 6);
+  return Math.max(16, lines.length * 4.2 + 6);
 }

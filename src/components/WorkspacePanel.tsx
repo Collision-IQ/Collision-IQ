@@ -1,107 +1,19 @@
 import { jsPDF } from "jspdf";
+import type { WorkspaceData } from "@/types/workspaceTypes";
 
 interface Props {
-  variant?: "left" | "right";
-  analysis?: string;
+  workspaceData?: Partial<WorkspaceData> | null;
 }
 
-/* ---------------- Issue extraction ---------------- */
-
-function extractIssues(text?: string): string[] {
-  if (!text) return [];
-
-  const issues: string[] = [];
-  const lines = text.split("\n");
-
-  for (const line of lines) {
-    const lower = line.toLowerCase();
-
-    if (
-      lower.includes("risk") ||
-      lower.includes("exposure") ||
-      lower.includes("missing") ||
-      lower.includes("gap") ||
-      lower.includes("violate")
-    ) {
-      issues.push(line.replace(/[-*]/g, "").trim());
-    }
-  }
-
-  return issues.slice(0, 5);
-}
-
-/* ---------------- Comparison extraction ---------------- */
-
-type ComparisonRow = {
-  category: string;
-  shop: string;
-  insurance: string;
+const EMPTY_WORKSPACE_DATA: WorkspaceData = {
+  riskLevel: "low",
+  confidence: "low",
+  keyIssues: [],
+  estimateComparisons: [],
+  supplementLetter: "",
+  fullAnalysis: "",
 };
-
-function extractComparison(text?: string): ComparisonRow[] {
-  if (!text) return [];
-
-  const rows: ComparisonRow[] = [];
-  const lines = text.split("\n");
-
-  let currentCategory = "";
-
-  for (const line of lines) {
-    const clean = line.replace(/[-*]/g, "").trim();
-    const lower = clean.toLowerCase();
-
-    if (
-      lower.includes("scope") ||
-      lower.includes("labor") ||
-      lower.includes("parts") ||
-      lower.includes("refinish") ||
-      lower.includes("adas")
-    ) {
-      currentCategory = clean.replace(":", "");
-    }
-
-    if (lower.startsWith("shop estimate")) {
-      rows.push({
-        category: currentCategory,
-        shop: clean.replace("Shop Estimate:", "").trim(),
-        insurance: "",
-      });
-    }
-
-    if (lower.startsWith("insurance estimate")) {
-      const last = rows[rows.length - 1];
-      if (last) {
-        last.insurance = clean.replace("Insurance Estimate:", "").trim();
-      }
-    }
-  }
-
-  return rows.slice(0, 5);
-}
-
-type Discrepancy = {
-  category: string;
-  shop: string;
-  insurance: string;
-};
-
-function detectDiscrepancies(rows: ComparisonRow[]): Discrepancy[] {
-  const issues: Discrepancy[] = [];
-
-  rows.forEach((row) => {
-    if (!row.shop || !row.insurance) return;
-
-    if (row.shop !== row.insurance) {
-      issues.push({
-        category: row.category,
-        shop: row.shop,
-        insurance: row.insurance,
-      });
-    }
-  });
-
-  return issues;
-}
+/* ---------------- Sub-components ---------------- */
 
 function IssueCard({ text }: { text: string }) {
   return (
@@ -111,95 +23,93 @@ function IssueCard({ text }: { text: string }) {
   );
 }
 
-function generateSupplement(issues: string[]) {
-  if (!issues.length) return "";
-
-  const intro = `Subject: Request for Repair Supplement
-
-After reviewing the repair estimate and related documentation, several issues
-have been identified that may affect repair safety, OEM compliance, or repair
-quality. These items should be addressed before proceeding with repairs.
-
-Identified Issues:
-`;
-
-  const list = issues.map((i, idx) => `${idx + 1}. ${i}`).join("\n");
-
-  const closing = `
-
-Based on these findings, we respectfully request authorization for the
-appropriate adjustments to ensure the repair follows OEM procedures and
-industry standards.
-
-Please advise if additional documentation is required.
-
-Sincerely,
-Repair Review System
-Collision-IQ
-`;
-
-  return intro + list + closing;
-}
-
 /* ---------------- Component ---------------- */
 
-export default function WorkspacePanel({ analysis }: Props) {
-  const issues = extractIssues(analysis);
-  const comparison = extractComparison(analysis);
-  const discrepancies = detectDiscrepancies(comparison);
-  const supplementLetter = generateSupplement(issues);
+export default function WorkspacePanel({ workspaceData }: Props) {
+  const data = workspaceData
+    ? {
+        ...EMPTY_WORKSPACE_DATA,
+        ...workspaceData,
+        keyIssues: workspaceData.keyIssues ?? EMPTY_WORKSPACE_DATA.keyIssues,
+        estimateComparisons:
+          workspaceData.estimateComparisons ?? EMPTY_WORKSPACE_DATA.estimateComparisons,
+      }
+    : null;
 
   function exportPDF() {
-    if (!analysis) return;
+    if (!data) return;
+
+    const { riskLevel, confidence, keyIssues, estimateComparisons, fullAnalysis } = data;
 
     const doc = new jsPDF();
     const bodyFontSize = 12;
     const headingFontSize = 14;
     const pageHeight = doc.internal.pageSize.getHeight();
+    const pageWidth = doc.internal.pageSize.getWidth();
     const marginX = 15;
     const topMargin = 20;
-    const bottomMargin = 15;
+    const bottomMargin = 18;
     const maxWidth = 180;
-    const lineHeight = bodyFontSize * 1.5 * 0.3528;
-    const sectionSpacing = 12 * 0.3528;
-    const headingSpacing = 16 * 0.3528;
+    const lineHeight = 6.2;
+    const sectionSpacing = 5;
+    const headingSpacing = 7;
+    const contentBottomY = pageHeight - bottomMargin;
 
     let y = topMargin;
 
-    const ensureSpace = (requiredHeight: number) => {
-      if (y + requiredHeight <= pageHeight - bottomMargin) return;
-      doc.addPage();
-      y = topMargin;
+    const drawPageNumber = () => {
+      doc.setFont("Helvetica", "Normal");
+      doc.setFontSize(9);
+      doc.text(`Page ${doc.getCurrentPageInfo().pageNumber}`, pageWidth - marginX, pageHeight - 8, {
+        align: "right",
+      });
     };
 
-    const writeWrappedText = (
-      text: string,
-      options?: {
-        prefix?: string;
-      }
-    ) => {
+    const addPage = () => {
+      doc.addPage();
+      y = topMargin;
+      drawPageNumber();
+    };
+
+    const ensureSpace = (requiredHeight: number) => {
+      if (y + requiredHeight <= contentBottomY) return;
+      addPage();
+    };
+
+    // Write wrapped text line-by-line so long paragraphs can continue safely
+    // onto the next page without clipping at the bottom.
+    const writeWrappedText = (text: string, options?: { prefix?: string }) => {
       const value = options?.prefix ? `${options.prefix}${text}` : text;
       const lines = doc.splitTextToSize(value, maxWidth);
-      ensureSpace(lines.length * lineHeight);
-      doc.text(lines, marginX, y);
-      y += lines.length * lineHeight;
+
+      for (const line of lines) {
+        ensureSpace(lineHeight);
+        doc.text(line, marginX, y);
+        y += lineHeight;
+      }
+    };
+
+    const writeSectionHeading = (title: string) => {
+      ensureSpace(headingSpacing);
+      doc.setFont("Helvetica", "Bold");
+      doc.setFontSize(headingFontSize);
+      doc.text(title, marginX, y);
+      y += headingSpacing;
+      doc.setFont("Helvetica", "Normal");
+      doc.setFontSize(bodyFontSize);
     };
 
     doc.setFont("Helvetica", "Bold");
     doc.setFontSize(18);
     doc.text("Collision-IQ Analysis Report", marginX, y);
-
     y += 12;
+    drawPageNumber();
 
     doc.setFontSize(bodyFontSize);
     doc.setFont("Helvetica", "Normal");
 
-    const riskScore =
-      issues.length > 2 ? "High" : issues.length > 0 ? "Moderate" : "Low";
-    const confidence = analysis ? "Moderate" : "Low";
-
     ensureSpace(lineHeight);
-    doc.text(`Risk Score: ${riskScore}`, marginX, y);
+    doc.text(`Risk Score: ${riskLevel}`, marginX, y);
     y += lineHeight;
 
     ensureSpace(lineHeight);
@@ -208,19 +118,11 @@ export default function WorkspacePanel({ analysis }: Props) {
 
     /* ---------------- Comparison Table ---------------- */
 
-    if (comparison.length > 0) {
-      ensureSpace(headingFontSize * 0.3528 + headingSpacing);
-      doc.setFont("Helvetica", "Bold");
-      doc.setFontSize(headingFontSize);
-      doc.text("Estimate Comparison", marginX, y);
-      y += headingSpacing;
+    if (estimateComparisons.length > 0) {
+      writeSectionHeading("Estimate Comparison");
 
-      doc.setFont("Helvetica", "Normal");
-      doc.setFontSize(bodyFontSize);
-
-      comparison.forEach((row) => {
-        const line = `${row.category} | Shop: ${row.shop} | Insurance: ${row.insurance}`;
-        writeWrappedText(line);
+      estimateComparisons.forEach((row) => {
+        writeWrappedText(`${row.category} | Shop: ${row.shop} | Insurance: ${row.insurance}`);
       });
 
       y += sectionSpacing;
@@ -228,17 +130,10 @@ export default function WorkspacePanel({ analysis }: Props) {
 
     /* ---------------- Key Issues ---------------- */
 
-    if (issues.length > 0) {
-      ensureSpace(headingFontSize * 0.3528 + headingSpacing);
-      doc.setFont("Helvetica", "Bold");
-      doc.setFontSize(headingFontSize);
-      doc.text("Key Issues", marginX, y);
-      y += headingSpacing;
+    if (keyIssues.length > 0) {
+      writeSectionHeading("Key Issues");
 
-      doc.setFont("Helvetica", "Normal");
-      doc.setFontSize(bodyFontSize);
-
-      issues.forEach((issue) => {
+      keyIssues.forEach((issue) => {
         writeWrappedText(issue, { prefix: "! " });
       });
 
@@ -247,19 +142,15 @@ export default function WorkspacePanel({ analysis }: Props) {
 
     /* ---------------- Full Analysis ---------------- */
 
-    ensureSpace(headingFontSize * 0.3528 + headingSpacing);
-    doc.setFont("Helvetica", "Bold");
-    doc.setFontSize(headingFontSize);
-    doc.text("Full Analysis", marginX, y);
-    y += headingSpacing;
-
-    doc.setFont("Helvetica", "Normal");
-    doc.setFontSize(bodyFontSize);
-    writeWrappedText(analysis);
+    if (fullAnalysis) {
+      writeSectionHeading("Full Analysis");
+      writeWrappedText(fullAnalysis);
+    }
 
     doc.save("collision-iq-analysis.pdf");
   }
 
+  // Shorthand for readability below
   return (
     <div className="flex flex-col h-full text-sm text-white">
       {/* Panel intro */}
@@ -277,108 +168,108 @@ export default function WorkspacePanel({ analysis }: Props) {
       {/* Analysis output */}
 
       <div className="flex-1 min-h-0 overflow-y-auto rounded-xl bg-glass border-glass p-4 backdrop-blur-md">
-        {discrepancies.length > 0 && (
-          <div className="mb-4">
-            <div className="mb-2 text-[11px] uppercase tracking-wider text-white/40">
-              Insurance vs Shop Estimate
-            </div>
 
-            <table className="w-full overflow-hidden rounded-lg border border-white/10 text-xs">
-              <tbody>
-                {discrepancies.map((row, i) => (
-                  <tr key={i} className="border-t border-white/10">
-                    <td className="px-2 py-2 text-white/80">{row.category}</td>
+        {/* Empty state */}
 
-                    <td className="px-2 py-2 text-green-300">{row.shop}</td>
-
-                    <td className="px-2 py-2 text-red-300">↓ {row.insurance}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* Comparison table */}
-
-        {comparison.length > 0 && (
-          <div className="mb-4">
-            <div className="mb-2 text-[11px] uppercase tracking-wider text-white/40">
-              Estimate Comparison
-            </div>
-
-            <table className="w-full overflow-hidden rounded-lg border border-white/10 text-xs">
-              <thead className="bg-white/5 text-white/60">
-                <tr>
-                  <th className="px-2 py-2 text-left">Category</th>
-                  <th className="px-2 py-2 text-left">Shop</th>
-                  <th className="px-2 py-2 text-left">Insurance</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {comparison.map((row, i) => (
-                  <tr key={i} className="border-t border-white/10">
-                    <td className="px-2 py-2 text-white/80">{row.category}</td>
-
-                    <td className="px-2 py-2 text-white/60">{row.shop}</td>
-
-                    <td className="px-2 py-2 text-red-300">{row.insurance}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* Issue cards */}
-
-        {issues.length > 0 ? (
-          <div className="flex flex-col gap-2">
-            {issues.map((issue, i) => (
-              <IssueCard key={i} text={issue} />
-            ))}
-          </div>
-        ) : (
+        {!data && (
           <div className="text-xs text-white/40">
             Assistant output will appear here.
           </div>
         )}
 
-        {/* Export button */}
+        {data && (
+          <>
+            {/* Risk and confidence summary */}
 
-        {analysis && (
-          <button
-            onClick={exportPDF}
-            className="mt-4 w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
-          >
-            Export PDF Report
-          </button>
-        )}
+            <div className="mb-4 flex gap-3">
+              <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80">
+                Risk: <span className="font-semibold capitalize">{data.riskLevel}</span>
+              </div>
+              <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80">
+                Confidence: <span className="font-semibold capitalize">{data.confidence}</span>
+              </div>
+            </div>
 
-        {supplementLetter && (
-          <button
-            onClick={() => {
-              const blob = new Blob([supplementLetter], { type: "text/plain" });
-              const url = URL.createObjectURL(blob);
+            {/* Estimate comparison table */}
 
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = "collision-iq-supplement.txt";
-              a.click();
+            {data.estimateComparisons.length > 0 && (
+              <div className="mb-4">
+                <div className="mb-2 text-[11px] uppercase tracking-wider text-white/40">
+                  Estimate Comparison
+                </div>
 
-              URL.revokeObjectURL(url);
-            }}
-            className="mt-2 w-full rounded-md border border-white/10 bg-accent/20 hover:bg-accent/30 p-3 text-xs"
-          >
-            Generate Supplement Letter
-          </button>
-        )}
+                <table className="w-full overflow-hidden rounded-lg border border-white/10 text-xs">
+                  <thead className="bg-white/5 text-white/60">
+                    <tr>
+                      <th className="px-2 py-2 text-left">Category</th>
+                      <th className="px-2 py-2 text-left">Shop</th>
+                      <th className="px-2 py-2 text-left">Insurance</th>
+                    </tr>
+                  </thead>
 
-        {supplementLetter && (
-          <div className="mt-4 rounded-md border border-white/10 bg-black/60 p-3 text-xs whitespace-pre-wrap">
-            {supplementLetter}
-          </div>
+                  <tbody>
+                    {data.estimateComparisons.map((row, i) => (
+                      <tr key={i} className="border-t border-white/10">
+                        <td className="px-2 py-2 text-white/80">{row.category}</td>
+
+                        <td className="px-2 py-2 text-green-300">{row.shop}</td>
+
+                        <td className="px-2 py-2 text-red-300">{row.insurance}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Key issue cards */}
+
+            {data.keyIssues.length > 0 && (
+              <div className="mb-4 flex flex-col gap-2">
+                <div className="mb-1 text-[11px] uppercase tracking-wider text-white/40">
+                  Key Issues
+                </div>
+
+                {data.keyIssues.map((issue, i) => (
+                  <IssueCard key={i} text={issue} />
+                ))}
+              </div>
+            )}
+
+            {/* Export buttons */}
+
+            <button
+              onClick={exportPDF}
+              className="mt-4 w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
+            >
+              Export PDF Report
+            </button>
+
+            {data.supplementLetter && (
+              <>
+                <button
+                  onClick={() => {
+                    const blob = new Blob([data.supplementLetter], { type: "text/plain" });
+                    const url = URL.createObjectURL(blob);
+
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = "collision-iq-supplement.txt";
+                    a.click();
+
+                    URL.revokeObjectURL(url);
+                  }}
+                  className="mt-2 w-full rounded-md border border-white/10 bg-accent/20 hover:bg-accent/30 p-3 text-xs"
+                >
+                  Generate Supplement Letter
+                </button>
+
+                <div className="mt-4 rounded-md border border-white/10 bg-black/60 p-3 text-xs whitespace-pre-wrap">
+                  {data.supplementLetter}
+                </div>
+              </>
+            )}
+          </>
         )}
       </div>
     </div>

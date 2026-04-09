@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ChatWidget from "@/components/ChatWidget";
+import WorkspacePanel from "@/components/WorkspacePanel";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import {
@@ -25,6 +26,7 @@ import type {
   RepairIntelligenceReport,
 } from "@/lib/ai/types/analysis";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import type { WorkspaceData } from "@/types/workspaceTypes";
 
 const EMPTY_PANEL: DecisionPanel = {
   narrative:
@@ -85,6 +87,7 @@ export default function ChatbotPage() {
   const [analysisText, setAnalysisText] = useState("");
   const [analysisResult, setAnalysisResult] = useState<RepairIntelligenceReport | null>(null);
   const [analysisPanel, setAnalysisPanel] = useState<DecisionPanel | null>(null);
+  const [workspaceData, setWorkspaceData] = useState<WorkspaceData | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [consentResolved, setConsentResolved] = useState(false);
   const [consentAccepted, setConsentAccepted] = useState(false);
@@ -277,6 +280,7 @@ export default function ChatbotPage() {
                 onAnalysisResultChange={setAnalysisResult}
                 onAnalysisPanelChange={setAnalysisPanel}
                 onAnalysisLoadingChange={setAnalysisLoading}
+                onWorkspaceDataChange={setWorkspaceData}
                 disabled={chatBlocked}
               />
             </div>
@@ -294,6 +298,7 @@ export default function ChatbotPage() {
               renderModel={renderModel}
               normalizedResult={normalizedResult}
               analysisResult={analysisResult}
+              workspaceData={workspaceData}
               canViewSupplementLines={canViewSupplementLines}
               canViewNegotiationDraft={canViewNegotiationDraft}
               canUseBasicPdfExport={canUseBasicPdfExport}
@@ -332,6 +337,7 @@ export default function ChatbotPage() {
             renderModel={renderModel}
             normalizedResult={normalizedResult}
             analysisResult={analysisResult}
+            workspaceData={workspaceData}
             canViewSupplementLines={canViewSupplementLines}
             canViewNegotiationDraft={canViewNegotiationDraft}
             canUseBasicPdfExport={canUseBasicPdfExport}
@@ -470,6 +476,7 @@ function RailContent({
   renderModel,
   normalizedResult,
   analysisResult,
+  workspaceData,
   canViewSupplementLines,
   canViewNegotiationDraft,
   canUseBasicPdfExport,
@@ -485,6 +492,7 @@ function RailContent({
   renderModel: ReturnType<typeof buildExportModel>;
   normalizedResult: AnalysisResult | null;
   analysisResult: RepairIntelligenceReport | null;
+  workspaceData: WorkspaceData | null;
   canViewSupplementLines: boolean;
   canViewNegotiationDraft: boolean;
   canUseBasicPdfExport: boolean;
@@ -506,6 +514,8 @@ function RailContent({
 
   return (
     <div className="flex flex-col h-full overflow-y-auto p-6 space-y-8">
+      <WorkspacePanel workspaceData={workspaceData ?? undefined} />
+
       <div>
         <div className="text-xs tracking-[0.3em] uppercase text-white/60">
           Decision Support

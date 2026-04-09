@@ -17,19 +17,39 @@ import {
 import ReactMarkdown from "react-markdown";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
+import { buildWorkspaceDataFromAnalysisText } from "@/lib/workspaceAdapter";
+import type { WorkspaceData } from "@/types/workspaceTypes";
+import {
+  buildAttachmentBatchStatus,
+  buildAttachmentSummary,
+  formatAttachmentKind,
+  isLikelyImageFile,
+  MAX_UPLOAD_BATCH_FILES,
+  summarizeAttachmentStats,
+  UPLOAD_CAP_MESSAGE,
+} from "@/components/chatWidget/attachmentUtils";
+import {
+  canUseBrowserReadAloud,
+  formatAssistantMessage,
+  toSpeechText,
+} from "@/components/chatWidget/speechUtils";
+import {
+  buildChatExportPayload,
+  buildExportMessages,
+  getDownloadFilename,
+  hasExportContent,
+  resolveExportErrorMessage,
+} from "@/components/chatWidget/exportUtils";
+import {
+  createMessage,
+  isSystemStatusMessage,
+  type AssistantMessageKind,
+  type ChatMessage as Message,
+  type Role,
+} from "@/components/chatWidget/messageUtils";
 import AttachmentPreviewModal, {
   type PreviewAttachment,
 } from "@/components/AttachmentPreviewModal";
-
-type Role = "user" | "assistant";
-type AssistantMessageKind = "analysis" | "system_status";
-
-interface Message {
-  id: string;
-  role: Role;
-  content: string;
-  kind?: AssistantMessageKind;
-}
 
 interface Attachment {
   attachmentId: string;
@@ -51,6 +71,7 @@ interface ChatWidgetProps {
   onAnalysisResultChange?: (data: RepairIntelligenceReport | null) => void;
   onAnalysisPanelChange?: (panel: DecisionPanel | null) => void;
   onAnalysisLoadingChange?: (loading: boolean) => void;
+  onWorkspaceDataChange?: (data: WorkspaceData | null) => void;
   disabled?: boolean;
 }
 
@@ -65,9 +86,6 @@ const INITIAL_MESSAGE: Message = {
     "Hi there - upload an estimate, OEM procedure, or photo and I'll produce a structured repair analysis.",
 };
 
-const VALUATION_URL_PATTERN = /For a full valuation, continue at https:\/\/www\.collision\.academy\/?/gi;
-const MAX_UPLOAD_BATCH_FILES = 6;
-const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at once for now.";
 const SERVER_TTS_ENABLED =
   process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_SERVER_TTS === "true";
 const SERVER_TTS_VOICE = process.env.NEXT_PUBLIC_COLLISION_IQ_TTS_VOICE?.trim() || undefined;
@@ -80,6 +98,7 @@ export default function ChatWidget({
   onAnalysisResultChange,
   onAnalysisPanelChange,
   onAnalysisLoadingChange,
+  onWorkspaceDataChange,
   disabled = false,
 }: ChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
@@ -107,6 +126,7 @@ export default function ChatWidget({
   const sessionRef = useRef<number>(0);
   const analysisRunRef = useRef<number>(0);
   const analysisTextRef = useRef("");
+  const workspaceDataRef = useRef<WorkspaceData | null>(null);
   const attachmentsRef = useRef<Attachment[]>([]);
   const firstAttachmentAtRef = useRef<number | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
@@ -184,7 +204,8 @@ export default function ChatWidget({
         return prev;
       }
 
-      return [...prev, createMessage("assistant", feedback)];
+      messageCounterRef.current += 1;
+      return [...prev, createMessage(messageCounterRef.current, "assistant", feedback)];
     });
   }, [attachments.length]);
 
@@ -223,21 +244,6 @@ export default function ChatWidget({
     textarea.style.height = `${Math.min(textarea.scrollHeight, 112)}px`;
   }, [input]);
 
-  function buildAttachmentSummary(list: Attachment[]) {
-    if (!list.length) return "";
-    if (list.length === 1) {
-      return `Please analyze the attached file: ${list[0].filename}`;
-    }
-
-    return `Please analyze the attached files (${list.length}): ${list
-      .map((attachment) => attachment.filename)
-      .join(", ")}`;
-  }
-
-  function isLikelyImageFile(file: File) {
-    return file.type.startsWith("image/");
-  }
-
   function upsertSystemStatusMessage(content: string) {
     setMessages((prev) => {
       const activeMessageId = activeSystemStatusMessageIdRef.current;
@@ -254,7 +260,13 @@ export default function ChatWidget({
         }
       }
 
-      const nextMessage = createMessage("assistant", content, "system_status");
+      messageCounterRef.current += 1;
+      const nextMessage = createMessage(
+        messageCounterRef.current,
+        "assistant",
+        content,
+        "system_status"
+      );
       activeSystemStatusMessageIdRef.current = nextMessage.id;
       return [...prev, nextMessage];
     });
@@ -270,28 +282,46 @@ export default function ChatWidget({
 
   function pushSystemStatusMessage(content: string) {
     setMessages((prev) => {
-      if (
-        prev[prev.length - 1]?.role === "assistant" &&
-        prev[prev.length - 1]?.kind === "system_status" &&
-        prev[prev.length - 1]?.content === content
-      ) {
+      if (isSystemStatusMessage(prev[prev.length - 1]) && prev[prev.length - 1]?.content === content) {
         return prev;
       }
 
-      return [...prev, createMessage("assistant", content, "system_status")];
+      messageCounterRef.current += 1;
+      return [
+        ...prev,
+        createMessage(messageCounterRef.current, "assistant", content, "system_status"),
+      ];
     });
   }
 
   function clearStructuredAnalysisState() {
     analysisTextRef.current = "";
+    workspaceDataRef.current = null;
     onAnalysisChange?.("");
     onAnalysisResultChange?.(null);
     onAnalysisPanelChange?.(null);
+    onWorkspaceDataChange?.(null);
+  }
+
+  function setWorkspaceData(data: WorkspaceData | null) {
+    workspaceDataRef.current = data;
+    onWorkspaceDataChange?.(data);
+  }
+
+  function resolveWorkspaceData(text: string): WorkspaceData | null {
+    if (workspaceDataRef.current) {
+      return workspaceDataRef.current;
+    }
+
+    // Temporary emergency fallback: derive Workspace data from assistant prose
+    // only when the backend did not return structured workspaceData.
+    return buildWorkspaceDataFromAnalysisText(text);
   }
 
   function updateAnalysisText(text: string) {
     analysisTextRef.current = text;
     onAnalysisChange?.(text);
+    setWorkspaceData(resolveWorkspaceData(text));
   }
 
   function invalidateStructuredAnalysis() {
@@ -480,14 +510,6 @@ export default function ChatWidget({
     void startRecording();
   }
 
-  function summarizeAttachmentStats(list: Attachment[]) {
-    return {
-      fileCount: list.length,
-      totalBytes: list.reduce((sum, attachment) => sum + attachment.sizeBytes, 0),
-      totalPdfPages: list.reduce((sum, attachment) => sum + (attachment.pageCount ?? 0), 0),
-    };
-  }
-
   function rejectOversizedBatch(fileList: FileList | null, source: "file" | "camera") {
     if (!fileList || fileList.length <= MAX_UPLOAD_BATCH_FILES) {
       return false;
@@ -556,9 +578,13 @@ export default function ChatWidget({
     const messageToSend = input.trim() || buildAttachmentSummary(attachments);
     const hasAttachmentsInTurn = attachments.length > 0;
     const activeAnalysisRunId = hasAttachmentsInTurn ? beginStructuredAnalysisRun() : null;
-    const attachmentStats = summarizeAttachmentStats(attachments);
+    const attachmentStats = {
+      ...summarizeAttachmentStats(attachments),
+      totalPdfPages: attachments.reduce((sum, attachment) => sum + (attachment.pageCount ?? 0), 0),
+    };
     const analysisStartMs = Date.now();
-    const userMessage: Message = createMessage("user", messageToSend);
+    messageCounterRef.current += 1;
+    const userMessage: Message = createMessage(messageCounterRef.current, "user", messageToSend);
 
     const updatedMessages: Message[] = [...messages, userMessage];
     setMessages(updatedMessages);
@@ -681,12 +707,15 @@ export default function ChatWidget({
             const analysisData = (await analysisResponse.json()) as {
               report?: RepairIntelligenceReport;
               panel?: DecisionPanel;
+              workspaceData?: WorkspaceData;
               retrievalAttempted?: boolean;
               retrievalCompleted?: boolean;
               retrievalMatchCount?: number;
               refinedWithRetrieval?: boolean;
               analysisCompletedAt?: string;
             };
+            // Backend workspaceData is the primary source of truth for Workspace rendering.
+            setWorkspaceData(analysisData.workspaceData ?? null);
             onAnalysisResultChange?.(analysisData.report ?? null);
             onAnalysisPanelChange?.(analysisData.panel ?? null);
             onAnalysisLoadingChange?.(false);
@@ -732,7 +761,12 @@ export default function ChatWidget({
         let assistantText = "";
 
         stopSpeaking();
-        const streamingAssistantMessage = createMessage("assistant", "");
+        messageCounterRef.current += 1;
+        const streamingAssistantMessage = createMessage(
+          messageCounterRef.current,
+          "assistant",
+          ""
+        );
         setMessages((prev) => [...prev, streamingAssistantMessage]);
         const assistantIndex = updatedMessages.length;
 
@@ -767,7 +801,11 @@ export default function ChatWidget({
 
         if (sessionRef.current === mySession) {
           stopSpeaking();
-          setMessages((prev) => [...prev, createMessage("assistant", reply)]);
+          messageCounterRef.current += 1;
+          setMessages((prev) => [
+            ...prev,
+            createMessage(messageCounterRef.current, "assistant", reply),
+          ]);
           if (!hasAttachmentsInTurn || analysisRunRef.current === activeAnalysisRunId) {
             updateAnalysisText(reply);
           }
@@ -788,11 +826,15 @@ export default function ChatWidget({
         } else {
           setMessages((prev) => [
             ...prev,
-            createMessage(
-              "assistant",
-              "The analysis service had a temporary issue. Please retry.",
-              "system_status"
-            ),
+            (() => {
+              messageCounterRef.current += 1;
+              return createMessage(
+                messageCounterRef.current,
+                "assistant",
+                "The analysis service had a temporary issue. Please retry.",
+                "system_status"
+              );
+            })(),
           ]);
         }
         if (
@@ -997,16 +1039,10 @@ export default function ChatWidget({
   async function handleDownloadRedactedChat() {
     if (disabled || loading || isExportingChat) return;
 
-    const exportMessages = messages
-      .filter((message) => message.kind !== "system_status")
-      .map((message) => ({
-        role: message.role,
-        content: message.content,
-      }))
-      .filter((message) => message.content.trim().length > 0);
+    const exportMessages = buildExportMessages(messages);
     const analysisText = analysisTextRef.current.trim();
 
-    if (exportMessages.length === 0 && !analysisText) {
+    if (!hasExportContent(exportMessages, analysisText)) {
       pushSystemStatusMessage("There is no chat content available to download yet.");
       return;
     }
@@ -1017,10 +1053,7 @@ export default function ChatWidget({
       const response = await fetch("/api/chat/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: exportMessages,
-          analysisText: analysisText || undefined,
-        }),
+        body: JSON.stringify(buildChatExportPayload(exportMessages, analysisText)),
       });
 
       if (!response.ok) {
@@ -1031,9 +1064,7 @@ export default function ChatWidget({
 
       const blob = await response.blob();
       const downloadUrl = URL.createObjectURL(blob);
-      const disposition = response.headers.get("Content-Disposition");
-      const filename =
-        disposition?.match(/filename="([^"]+)"/i)?.[1] ?? "chat-export-redacted.txt";
+      const filename = getDownloadFilename(response.headers.get("Content-Disposition"));
       const link = document.createElement("a");
       link.href = downloadUrl;
       link.download = filename;
@@ -1051,20 +1082,6 @@ export default function ChatWidget({
     }
   }
 
-  function createMessage(
-    role: Role,
-    content: string,
-    kind?: AssistantMessageKind
-  ): Message {
-    messageCounterRef.current += 1;
-    return {
-      id: `${role}-${messageCounterRef.current}`,
-      role,
-      content,
-      kind,
-    };
-  }
-
   function stopSpeaking() {
     if (audioRef.current) {
       audioRef.current.pause();
@@ -1077,7 +1094,7 @@ export default function ChatWidget({
       audioUrlRef.current = null;
     }
 
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    if (!canUseBrowserReadAloud()) {
       setSpeakingMessageId(null);
       setIsSpeaking(false);
       utteranceRef.current = null;
@@ -1131,7 +1148,7 @@ export default function ChatWidget({
   }
 
   function playBrowserSpeech(message: Message, plainText: string) {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    if (!canUseBrowserReadAloud()) {
       throw new Error("Browser speech is unavailable.");
     }
 
@@ -1185,7 +1202,7 @@ export default function ChatWidget({
       }
     }
 
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    if (!canUseBrowserReadAloud()) {
       pushSystemStatusMessage("Read aloud is not available in this browser.");
       return;
     }
@@ -1193,8 +1210,7 @@ export default function ChatWidget({
     playBrowserSpeech(message, plainText);
   }
 
-  const canReadAloud =
-    SERVER_TTS_ENABLED || (typeof window !== "undefined" && "speechSynthesis" in window);
+  const canReadAloud = SERVER_TTS_ENABLED || canUseBrowserReadAloud();
 
   const userBubble = "bg-black/70 border border-orange-500/30 text-orange-400";
 
@@ -1611,80 +1627,4 @@ export default function ChatWidget({
       </div>
     </div>
   );
-}
-
-function formatAttachmentKind(attachment: Attachment): string {
-  if (attachment.mime === "application/pdf") {
-    return attachment.pageCount
-      ? `PDF (${attachment.pageCount} page${attachment.pageCount === 1 ? "" : "s"})`
-      : "PDF";
-  }
-  if (attachment.mime.startsWith("image/")) return "Image";
-  if (attachment.text?.trim()) return "Text";
-  return attachment.mime || "Unknown";
-}
-
-function buildAttachmentBatchStatus(
-  files: Array<Pick<File, "type">>,
-  verb: "attached" | "updated" | "uploading" | "analysis_starting"
-): string {
-  const imageCount = files.filter((file) => file.type.startsWith("image/")).length;
-  const pdfCount = files.filter((file) => file.type === "application/pdf").length;
-  const otherCount = files.length - imageCount - pdfCount;
-  const parts = [
-    imageCount > 0 ? `${imageCount} ${imageCount === 1 ? "photo" : "photos"}` : null,
-    pdfCount > 0 ? `${pdfCount} ${pdfCount === 1 ? "PDF" : "PDFs"}` : null,
-    otherCount > 0 ? `${otherCount} ${otherCount === 1 ? "file" : "files"}` : null,
-  ].filter(Boolean) as string[];
-
-  if (verb === "uploading") {
-    return `Uploading & assessing ${files.length} ${files.length === 1 ? "file" : "files"}...`;
-  }
-
-  if (verb === "analysis_starting") {
-    const lead = files.length === 1 ? "1 file attached" : `${files.length} files attached`;
-    return `${lead}: ${parts.join(", ")}. Analysis starting.`;
-  }
-
-  if (files.length === 1) {
-    return `1 file ${verb}.`;
-  }
-
-  return `${files.length} files ${verb}: ${parts.join(", ")}.`;
-}
-
-function formatAssistantMessage(content: string): string {
-  return content.replace(
-    VALUATION_URL_PATTERN,
-    "[Continue for full valuation](https://www.collision.academy/)"
-  );
-}
-
-function toSpeechText(content: string): string {
-  return formatAssistantMessage(content)
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1")
-    .replace(/[`*_>#-]+/g, " ")
-    .replace(/\n+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function resolveExportErrorMessage(status: number, fallback?: string): string {
-  if (status === 401) {
-    return "Please sign in to download a redacted chat export.";
-  }
-
-  if (status === 403) {
-    return "Redacted chat download is not available on this account yet.";
-  }
-
-  if (status === 400) {
-    return fallback || "There was not enough chat content to build a redacted export.";
-  }
-
-  if (status === 501) {
-    return "Redacted chat download is not ready yet.";
-  }
-
-  return fallback || `Redacted chat download failed (${status}).`;
 }
