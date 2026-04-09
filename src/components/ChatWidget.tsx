@@ -1374,9 +1374,11 @@ export default function ChatWidget({
           <div ref={bottomRef} />
         </div>
 
-        <div className="absolute bottom-0 left-0 right-0 border-t border-white/10 bg-black/85 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur">
-          <div className="p-4">
-            <div className="flex items-end gap-3">
+        <div className="absolute inset-x-0 bottom-4 z-20 px-4">
+          <div className="mx-auto w-full max-w-[1040px] rounded-[24px] border border-white/10 bg-black/72 shadow-[0_20px_80px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
+            <div className="p-3 sm:p-4">
+              <div className="rounded-[18px] border border-white/8 bg-white/[0.03] px-3 py-3">
+                <div className="flex items-end gap-3">
               <input
                 type="file"
                 ref={fileInputRef}
@@ -1463,7 +1465,7 @@ export default function ChatWidget({
                     ? "Ask about the attachments, or add more context..."
                     : "Ask about a repair, upload files, or take a photo..."
                 }
-                className="flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-orange-500 transition text-sm sm:text-base disabled:cursor-not-allowed disabled:opacity-50 resize-none overflow-y-auto min-h-[48px] max-h-[112px]"
+                className="chat-composer-textarea flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-orange-500 transition text-sm sm:text-base disabled:cursor-not-allowed disabled:opacity-50 resize-none overflow-y-auto min-h-[48px] max-h-[112px]"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -1476,7 +1478,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={handleDownloadRedactedChat}
                 disabled={disabled || loading || isTranscribing || isExportingChat}
-                className="rounded-xl border border-white/10 bg-white/5 px-4 sm:px-5 py-3 text-white/80 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3 text-white/62 transition hover:bg-white/[0.06] hover:text-white/84 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isExportingChat ? "Preparing..." : "Download Chat"}
               </button>
@@ -1492,34 +1494,35 @@ export default function ChatWidget({
               <button
                 type="button"
                 onClick={handleEndChat}
-                className="rounded-xl border border-red-500/40 px-4 sm:px-5 py-3 text-red-400 hover:bg-red-500/10 transition font-semibold disabled:opacity-50"
+                className="rounded-xl border border-red-500/20 bg-transparent px-4 py-3 text-red-300/80 transition hover:bg-red-500/8 hover:text-red-200 disabled:opacity-50"
                 disabled={disabled || (loading && messages.length <= 1)}
                 aria-label="End chat"
                 title="End chat"
               >
                 End
               </button>
-            </div>
+                </div>
 
-            {(isRecording || isTranscribing || recordingError) && (
-              <div
-                className={`mt-3 text-xs ${
-                  recordingError ? "text-red-300" : "text-white/55"
-                }`}
-              >
-                {recordingError
-                  ? recordingError
-                  : isTranscribing
-                    ? "Transcribing your recording..."
-                    : "Recording... click the mic again to stop."}
+                {(isRecording || isTranscribing || recordingError) && (
+                  <div
+                    className={`mt-3 text-xs ${
+                      recordingError ? "text-red-300" : "text-white/55"
+                    }`}
+                  >
+                    {recordingError
+                      ? recordingError
+                      : isTranscribing
+                        ? "Transcribing your recording..."
+                        : "Recording... click the mic again to stop."}
+                  </div>
+                )}
               </div>
-            )}
 
-            {attachments.length > 0 && (
-              <div className="mt-3">
+              {attachments.length > 0 && (
+                <div className="mt-3 rounded-[18px] border border-white/8 bg-white/[0.025] p-3">
                 <button
                   type="button"
-                  className="w-full flex items-center justify-between rounded-xl border border-white/10 bg-black/40 px-4 py-2 text-sm text-white/80"
+                  className="w-full flex items-center justify-between rounded-xl border border-white/10 bg-black/30 px-4 py-2 text-sm text-white/80 transition hover:bg-black/40"
                   onClick={() => setAttachmentsOpen((value) => !value)}
                   disabled={disabled}
                   aria-label="Toggle attachments"
@@ -1540,7 +1543,7 @@ export default function ChatWidget({
                     {attachments.map((attachment) => (
                       <div
                         key={attachment.attachmentId}
-                        className="flex items-center justify-between gap-3 bg-black/40 border border-white/10 px-4 py-3 rounded-xl text-sm text-white/80"
+                        className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/80"
                       >
                         <button
                           type="button"
@@ -1600,8 +1603,9 @@ export default function ChatWidget({
                     </button>
                   </div>
                 )}
-              </div>
-            )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

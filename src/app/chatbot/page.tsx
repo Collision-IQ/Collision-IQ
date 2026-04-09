@@ -218,40 +218,40 @@ export default function ChatbotPage() {
 
   return (
     <div className="h-screen bg-black text-white flex flex-col">
-      <header className="px-6 py-4 border-b border-white/10 bg-black/60 backdrop-blur-md">
-        <div className="flex items-center justify-between gap-4 max-w-[1680px] mx-auto">
-          <div className="flex items-center gap-4">
+      <header className="sticky top-0 z-30 border-b border-white/8 bg-black/35 backdrop-blur-xl">
+        <div className="mx-auto flex h-[72px] max-w-[1680px] items-center justify-between px-5">
+          <div className="flex items-center gap-3">
             <Image
               src="/brand/logos/Logo-grey.png"
               alt="Collision Academy"
               width={150}
               height={40}
-              className="opacity-90"
+              className="h-auto w-[132px] opacity-85"
               priority
             />
 
-            <div>
-              <h1 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-white via-white to-white/70 bg-clip-text text-transparent">
+            <div className="space-y-0.5">
+              <h1 className="bg-gradient-to-r from-white via-white to-white/70 bg-clip-text text-[1.1rem] font-semibold tracking-[-0.02em] text-transparent">
                 Collision-IQ
               </h1>
 
-              <p className="text-xs text-white/50">
+              <p className="text-[11px] text-white/40">
                 Repair intelligence for estimates, OEM procedures, and damage photos
               </p>
             </div>
           </div>
 
-          <div className="flex flex-col items-end gap-2">
+          <div className="flex items-center gap-4">
             <a
               href="https://collision-iq.ai/"
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-2xl border border-white/12 bg-white/5 px-4 py-2 text-sm text-white/85 transition hover:bg-white/10"
+              className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white/72 transition hover:bg-white/[0.08] hover:text-white"
             >
               Collision Academy
             </a>
 
-            <div className="flex flex-wrap items-center justify-end gap-3 text-xs text-white/55">
+            <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] text-white/38">
               <Link href="/terms" className="transition hover:text-white">
                 Terms
               </Link>

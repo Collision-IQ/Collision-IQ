@@ -109,3 +109,25 @@ body > * {
   margin-bottom: 4px;
   font-weight: 600;
 }
+
+.chat-composer-textarea {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.18) transparent;
+}
+
+.chat-composer-textarea::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chat-composer-textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-composer-textarea::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.18);
+  border-radius: 999px;
+}
+
+.chat-composer-textarea::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.28);
+}
