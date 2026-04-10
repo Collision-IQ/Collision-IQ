@@ -1202,7 +1202,10 @@ export default function ChatWidget({
     <div className={`relative flex flex-col h-full min-h-0 overflow-hidden ${disabled ? "opacity-75" : ""}`}>
       <AttachmentPreviewModal
         attachment={disabled ? null : (previewAttachment as PreviewAttachment | null)}
+        attachments={disabled ? [] : (attachments as PreviewAttachment[])}
+        currentIndex={-1}
         onClose={() => setPreviewAttachmentId(null)}
+        onNavigate={() => {}}
         onRemove={(attachmentId) => removeAttachment(attachmentId)}
         onReplace={(attachmentId) => handleReplaceAttachment(attachmentId)}
       />

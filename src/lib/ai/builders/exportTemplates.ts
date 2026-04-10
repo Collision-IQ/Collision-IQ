@@ -1,4 +1,5 @@
 import {
+  buildExportValuationPreviewSummary,
   buildExportModel,
   buildPreferredRebuttalSubjectVehicleLabel,
   preferCanonicalField,
@@ -10,6 +11,13 @@ import {
 } from "./buildExportModel";
 import type { DecisionPanel } from "./buildDecisionPanel";
 import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
+import type { WorkspaceData } from "@/types/workspaceTypes";
+import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
+import {
+  cleanOperationDisplayText,
+  dedupeEstimateComparisonRationales,
+  getTopEstimateComparisonHighlights,
+} from "@/components/workspace/estimateComparisonPresentation";
 
 export type ExportTemplateSourceModel = {
   exportModel: ExportModel;
@@ -17,6 +25,7 @@ export type ExportTemplateSourceModel = {
   generatedLabel: string;
   categoryComparisons: ExportCategoryComparison[];
   lineItems: ExportLineComparison[];
+  topDifferences: string[];
 };
 
 export type ExportCategoryComparison = {
@@ -39,14 +48,18 @@ export type ExportLineComparison = {
 };
 
 export type ExportBuilderInput =
-  | ResolvedExportInput
-  | {
+  (
+    | ResolvedExportInput
+    | {
       report: RepairIntelligenceReport | null;
       analysis: AnalysisResult | null;
       panel: DecisionPanel | null;
       assistantAnalysis?: string | null;
       renderModel?: ExportModel | null;
-    };
+    }
+  ) & {
+    workspaceData?: WorkspaceData | null;
+  };
 
 export function formatAnalysisModeLabel(
   mode: AnalysisResult["mode"] | "single-document-review" | undefined
@@ -66,6 +79,12 @@ export function formatAnalysisModeLabel(
 export function buildExportTemplateSourceModel(params: ExportBuilderInput): ExportTemplateSourceModel {
   const exportModel = resolveExportModel(params);
   const analysisMode = params.analysis?.mode ?? params.report?.analysis?.mode ?? "single-document-review";
+  const fallbackComparisons =
+    params.analysis?.estimateComparisons ?? params.report?.analysis?.estimateComparisons;
+  const structuredComparisons = normalizeWorkspaceEstimateComparisons(
+    params.workspaceData ? (params.workspaceData.estimateComparisons ?? null) : fallbackComparisons
+  );
+  const topDifferences = getTopEstimateComparisonHighlights(structuredComparisons.rows);
   const source: ExportTemplateSourceModel = {
     exportModel,
     analysisMode,
@@ -75,7 +94,8 @@ export function buildExportTemplateSourceModel(params: ExportBuilderInput): Expo
       day: "numeric",
     }),
     categoryComparisons: buildCategoryComparisons(exportModel, analysisMode),
-    lineItems: buildLineItems(exportModel, params.analysis, analysisMode),
+    lineItems: buildUiAlignedLineItems(exportModel, topDifferences, analysisMode),
+    topDifferences,
   };
 
   if (source.categoryComparisons.length === 0) {
@@ -147,6 +167,8 @@ export function buildSideBySideComparisonReport(params: ExportBuilderInput): str
   const { exportModel } = source;
   const isComparison = source.analysisMode === "comparison";
   const vehicleIdentity = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
+  const valuationSummary = buildExportValuationPreviewSummary(exportModel.valuation);
+  const featuredRecommendation = exportModel.supplementItems[0];
 
   const sections = source.categoryComparisons.map((category) =>
     [
@@ -166,11 +188,18 @@ export function buildSideBySideComparisonReport(params: ExportBuilderInput): str
     `Mode: ${formatAnalysisModeLabel(source.analysisMode)}`,
     "",
     "## Overall Position",
-    `Summary: ${exportModel.repairPosition}`,
+    `What stands out: ${exportModel.repairPosition}`,
     `${isComparison ? "Carrier-facing posture" : "Support posture"}: ${exportModel.positionStatement}`,
+    featuredRecommendation ? `Top recommendation: ${featuredRecommendation.title}` : undefined,
+    source.topDifferences.length > 0
+      ? `Top differences: ${source.topDifferences.join(" | ")}`
+      : undefined,
+    `Valuation: ${valuationSummary.acv}; ${valuationSummary.dv}. Continue for Full Valuation for the formal handoff.`,
     "",
     ...sections,
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function buildLineByLineComparisonReport(params: ExportBuilderInput): string {
@@ -178,6 +207,8 @@ export function buildLineByLineComparisonReport(params: ExportBuilderInput): str
   const { exportModel } = source;
   const isComparison = source.analysisMode === "comparison";
   const vehicleIdentity = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
+  const valuationSummary = buildExportValuationPreviewSummary(exportModel.valuation);
+  const featuredRecommendation = exportModel.supplementItems[0];
 
   const rows = source.lineItems.map((item, index) =>
     [
@@ -200,12 +231,21 @@ export function buildLineByLineComparisonReport(params: ExportBuilderInput): str
     `Generated: ${source.generatedLabel}`,
     `Vehicle: ${vehicleIdentity}`,
     "",
+    featuredRecommendation ? `Top recommendation: ${featuredRecommendation.title}` : undefined,
+    `What stands out: ${exportModel.repairPosition}`,
+    source.topDifferences.length > 0
+      ? `Top differences: ${source.topDifferences.join(" | ")}`
+      : undefined,
+    `Valuation: ${valuationSummary.acv}; ${valuationSummary.dv}. Continue for Full Valuation for the formal handoff.`,
+    "",
     isComparison
       ? "This view focuses on estimate operations, why each line matters, and whether the current carrier-side posture appears supported, underwritten, missing, or disputed."
       : "This view focuses on estimate operations, what the file documents, and whether the current estimate support reads as documented, open, or still uncertain.",
     "",
     ...rows,
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function buildCategoryComparisons(
@@ -239,6 +279,33 @@ function buildCategoryComparisons(
       ]),
     };
   });
+}
+
+function buildCategoryComparisonsFromWorkspace(
+  structuredComparisons: ReturnType<typeof normalizeWorkspaceEstimateComparisons>
+): ExportCategoryComparison[] {
+  const grouped = new Map<string, typeof structuredComparisons.rows>();
+  const dedupedRows = dedupeEstimateComparisonRationales(structuredComparisons.rows);
+
+  for (const row of dedupedRows) {
+    const key = row.category || "Estimate Comparison";
+    const existing = grouped.get(key) ?? [];
+    existing.push(row);
+    grouped.set(key, existing);
+  }
+
+  return [...grouped.entries()].map(([category, rows]) => ({
+    category,
+    shopPosition: summarizeComparisonSide(rows, "lhs"),
+    carrierPosition: summarizeComparisonSide(rows, "rhs"),
+    supportStatus: deriveWorkspaceSupportStatus(rows),
+    rationale: rows
+      .flatMap((row) => row.notes ?? [])
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(" "),
+    supportingFields: ["workspaceData.estimateComparisons"],
+  }));
 }
 
 function buildLineItems(
@@ -289,6 +356,34 @@ function buildLineItems(
     }));
 
   return [...lines, ...unmatchedSupplements];
+}
+
+function buildLineItemsFromWorkspace(
+  structuredComparisons: ReturnType<typeof normalizeWorkspaceEstimateComparisons>,
+  analysisMode: AnalysisResult["mode"] | "single-document-review"
+): ExportLineComparison[] {
+  const isComparison = analysisMode === "comparison";
+  const dedupedRows = dedupeEstimateComparisonRationales(structuredComparisons.rows);
+
+  return dedupedRows.map((row) => ({
+    operation: row.operation || row.category || "Comparison",
+    component: row.partName || row.category || "Estimate comparison",
+    rawLine:
+      row.lhsValue !== null &&
+      row.lhsValue !== undefined &&
+      row.rhsValue !== null &&
+      row.rhsValue !== undefined
+        ? `${row.lhsSource ?? "Shop estimate"}: ${row.lhsValue} | ${row.rhsSource ?? "Carrier estimate"}: ${row.rhsValue}`
+        : undefined,
+    carrierPosition: formatWorkspaceCarrierPosition(row, isComparison),
+    supportStatus: mapWorkspaceDeltaToSupportStatus(row.deltaType),
+    rationale:
+      row.notes?.join(" ") ||
+      (typeof row.delta === "string"
+        ? row.delta
+        : "Structured comparison row from backend workspace data."),
+    support: typeof row.delta === "number" ? `Delta: ${row.delta}` : undefined,
+  }));
 }
 
 function findBestSupplementMatch(
@@ -344,17 +439,35 @@ function resolveOperationLabel(
 }
 
 function cleanOperationSourceText(value: string | undefined): string {
-  if (!value) return "";
+  return cleanOperationDisplayText(value);
+}
 
-  const cleaned = value
-    .replace(/^\s*#?\s*\d+\s+/i, "")
-    .replace(/^\s*(?:proc|procedure|r&i|repl|rpr|blnd|subl|algn)\s+/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
+function buildUiAlignedLineItems(
+  exportModel: ExportModel,
+  topDifferences: string[],
+  analysisMode: AnalysisResult["mode"] | "single-document-review"
+): ExportLineComparison[] {
+  const isComparison = analysisMode === "comparison";
+  const supplementItems = exportModel.supplementItems.slice(0, 8).map((item) => ({
+    operation: item.title,
+    component: formatCategoryLabel(item.category),
+    carrierPosition: describeCarrierPosition(item, isComparison),
+    supportStatus: mapSupportStatus(item.kind),
+    rationale: item.rationale,
+    support: buildSupportSnippet(item),
+  }));
 
-  if (!cleaned) return "";
-  if (/^(?:proc|procedure)$/i.test(cleaned)) return "";
-  return cleaned;
+  if (supplementItems.length > 0) {
+    return supplementItems;
+  }
+
+  return topDifferences.slice(0, 5).map((difference, index) => ({
+    operation: `Top Difference ${index + 1}`,
+    component: "Workspace summary",
+    carrierPosition: difference,
+    supportStatus: "underwritten",
+    rationale: difference,
+  }));
 }
 
 type LineOperationCategory =
@@ -579,6 +692,32 @@ function describeCarrierPosition(item: ExportSupplementItem, isComparison = true
   }
 }
 
+function formatWorkspaceCarrierPosition(
+  row: ReturnType<typeof normalizeWorkspaceEstimateComparisons>["rows"][number],
+  isComparison: boolean
+): string {
+  const rhsValue =
+    row.rhsValue === null || row.rhsValue === undefined || `${row.rhsValue}`.trim() === ""
+      ? isComparison
+        ? "Not clearly shown in the carrier estimate."
+        : "Not clearly shown in the current estimate."
+      : `${row.rhsValue}`;
+
+  if (row.deltaType === "added") {
+    return isComparison
+      ? "This item appears on the shop side but is not clearly carried on the carrier side."
+      : "This item appears in the structured comparison but is not clearly carried on the current estimate side.";
+  }
+
+  if (row.deltaType === "removed") {
+    return isComparison
+      ? `Carrier-only position: ${rhsValue}`
+      : `Estimate-side position: ${rhsValue}`;
+  }
+
+  return rhsValue;
+}
+
 
 function mapSupportStatus(
   kind: ExportSupplementItem["kind"]
@@ -619,6 +758,21 @@ function buildRequestSentence(item: ExportSupplementItem): string {
   }
 }
 
+function mapWorkspaceDeltaToSupportStatus(
+  deltaType: ReturnType<typeof normalizeWorkspaceEstimateComparisons>["rows"][number]["deltaType"]
+): ExportLineComparison["supportStatus"] {
+  switch (deltaType) {
+    case "added":
+      return "missing";
+    case "removed":
+      return "disputed";
+    case "changed":
+      return "underwritten";
+    default:
+      return "supported";
+  }
+}
+
 function formatCategoryLabel(value: string): string {
   return value
     .split("_")
@@ -633,6 +787,37 @@ function lowercaseFirst(value: string): string {
 
 function compact(values: Array<string | undefined>): string[] {
   return values.filter((value): value is string => Boolean(value && value.trim()));
+}
+
+function summarizeComparisonSide(
+  rows: ReturnType<typeof normalizeWorkspaceEstimateComparisons>["rows"],
+  side: "lhs" | "rhs"
+): string {
+  const values = rows
+    .map((row) => (side === "lhs" ? row.lhsValue : row.rhsValue))
+    .filter(
+      (value): value is string | number =>
+        value !== null && value !== undefined && `${value}`.trim() !== ""
+    )
+    .slice(0, 3)
+    .map((value) => `${value}`);
+
+  if (values.length === 0) {
+    return side === "lhs"
+      ? "No clear shop-side value was preserved in the structured comparison data."
+      : "No clear carrier-side value was preserved in the structured comparison data.";
+  }
+
+  return values.join(" | ");
+}
+
+function deriveWorkspaceSupportStatus(
+  rows: ReturnType<typeof normalizeWorkspaceEstimateComparisons>["rows"]
+): ExportCategoryComparison["supportStatus"] {
+  if (rows.some((row) => row.deltaType === "added")) return "missing";
+  if (rows.some((row) => row.deltaType === "removed")) return "disputed";
+  if (rows.some((row) => row.deltaType === "changed")) return "underwritten";
+  return "supported";
 }
 
 function joinHumanList(values: string[]): string {

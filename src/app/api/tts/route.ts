@@ -12,7 +12,7 @@ const DEFAULT_VOICE = "nova";
 const MAX_TTS_INPUT_CHARS = 4096;
 const AUDIO_CONTENT_TYPE = "audio/mpeg";
 const DEFAULT_TTS_INSTRUCTIONS =
-  "Female voice. Warm, confident, conversational, and natural. Subtle Northeast energy, lightly textured tone, dry wit, smart and grounded. Clear, expressive delivery with brisk but easy pacing. Human and easy on the ears. Avoid parody, caricature, or celebrity imitation.";
+  "Female voice. Warm, confident, quick-witted, conversational, and natural. Subtle Northeast energy. Smart, grounded, expressive, and slightly dry in tone. Brisk pacing with clear articulation. Sounds like a sharp, street-smart professional explaining something clearly under pressure. Avoid parody, caricature, or celebrity imitation.";
 const DEFAULT_TTS_SPEED = 1.06;
 
 type TtsRequestBody = {

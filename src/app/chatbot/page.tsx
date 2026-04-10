@@ -30,7 +30,7 @@ import type { WorkspaceData } from "@/types/workspaceTypes";
 
 const EMPTY_PANEL: DecisionPanel = {
   narrative:
-    "Upload an estimate or supporting documents to generate a real repair intelligence read. The panel will switch from placeholder guidance to decision support once the analysis route runs.",
+    "Upload an estimate or supporting documents to generate a decision-ready repair review. This rail will surface the key risks, context, and next steps once analysis completes.",
   supplements: [],
 };
 const CHAT_CONSENT_STORAGE_KEY = "collision_iq_chat_consent";
@@ -220,9 +220,13 @@ export default function ChatbotPage() {
   const canUseLineByLine = featureFlags?.line_by_line_report ?? false;
 
   return (
-    <div className="h-screen bg-black text-white flex flex-col">
-      <header className="sticky top-0 z-30 border-b border-white/8 bg-black/35 backdrop-blur-xl">
-        <div className="mx-auto flex h-[72px] max-w-[1680px] items-center justify-between px-5">
+    <div className="flex h-screen flex-col bg-[#050505] text-white">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute inset-x-0 top-[-180px] mx-auto h-[460px] w-[860px] rounded-full bg-[#C65A2A]/10 blur-3xl" />
+        <div className="absolute right-[-140px] top-[18%] h-[360px] w-[360px] rounded-full bg-white/[0.04] blur-3xl" />
+      </div>
+      <header className="sticky top-0 z-30 border-b border-white/6 bg-[#050505]/78 backdrop-blur-2xl">
+        <div className="mx-auto flex h-[70px] max-w-[1640px] items-center justify-between px-5 md:px-6">
           <div className="flex items-center gap-3">
             <Image
               src="/brand/logos/Logo-grey.png"
@@ -234,7 +238,7 @@ export default function ChatbotPage() {
             />
 
             <div className="space-y-0.5">
-              <h1 className="bg-gradient-to-r from-white via-white to-white/70 bg-clip-text text-[1.1rem] font-semibold tracking-[-0.02em] text-transparent">
+              <h1 className="bg-gradient-to-r from-white via-white to-white/70 bg-clip-text text-[1.08rem] font-semibold tracking-[-0.03em] text-transparent">
                 Collision-IQ
               </h1>
 
@@ -249,12 +253,12 @@ export default function ChatbotPage() {
               href="https://collision-iq.ai/"
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white/72 transition hover:bg-white/[0.08] hover:text-white"
+              className="rounded-full bg-white/[0.045] px-3 py-1.5 text-xs font-medium text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
             >
               Collision Academy
             </a>
 
-            <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] text-white/38">
+            <div className="flex flex-wrap items-center justify-end gap-2 text-[11px] text-white/40">
               <Link href="/terms" className="transition hover:text-white">
                 Terms
               </Link>
@@ -267,28 +271,34 @@ export default function ChatbotPage() {
         </div>
       </header>
 
-      <div className="flex flex-1 min-h-0 w-full max-w-[1680px] mx-auto">
-        <div className="flex flex-col flex-1 min-w-0">
-          <div className="flex-1 min-h-0 flex justify-center">
-            <div className="flex flex-col w-full max-w-[1040px] min-h-0">
-              {!isMobile && hasResolvedAnalysis && hasAtGlanceContent(renderModel) && (
-                <AtAGlanceCard renderModel={renderModel} analysisResult={analysisResult} />
+      <div className="relative z-10 mx-auto flex min-h-0 w-full max-w-[1640px] flex-1 gap-5 px-3 pb-3 pt-4 md:px-5 md:pb-5">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-h-0 flex-1 justify-center">
+            <div className="flex min-h-0 w-full max-w-[980px] flex-col">
+              {!isMobile && (
+                <AtAGlanceCard
+                  renderModel={renderModel}
+                  analysisResult={analysisResult}
+                  active={hasResolvedAnalysis && hasAtGlanceContent(renderModel)}
+                />
               )}
-              <ChatWidget
-                onAttachmentChange={setAttachment}
-                onAnalysisChange={setAnalysisText}
-                onAnalysisResultChange={setAnalysisResult}
-                onAnalysisPanelChange={setAnalysisPanel}
-                onAnalysisLoadingChange={setAnalysisLoading}
-                onWorkspaceDataChange={setWorkspaceData}
-                disabled={chatBlocked}
-              />
+              <div className="min-h-0 flex-1">
+                <ChatWidget
+                  onAttachmentChange={setAttachment}
+                  onAnalysisChange={setAnalysisText}
+                  onAnalysisResultChange={setAnalysisResult}
+                  onAnalysisPanelChange={setAnalysisPanel}
+                  onAnalysisLoadingChange={setAnalysisLoading}
+                  onWorkspaceDataChange={setWorkspaceData}
+                  disabled={chatBlocked}
+                />
+              </div>
             </div>
           </div>
         </div>
 
         {!isMobile && (
-          <aside className="w-[420px] xl:w-[460px] border-l border-white/10 bg-black/70 backdrop-blur-xl flex flex-col shadow-[-24px_0_60px_rgba(0,0,0,0.22)]">
+          <aside className="flex w-[400px] xl:w-[436px] flex-col rounded-[28px] bg-white/[0.045] shadow-[0_28px_80px_rgba(0,0,0,0.34)] backdrop-blur-2xl">
             <RailContent
               attachment={attachment}
               analysisText={analysisText}
@@ -356,14 +366,14 @@ export default function ChatbotPage() {
           aria-labelledby="chat-consent-title"
         >
           <div className="flex min-h-full items-center justify-center p-6">
-            <div className="w-full max-w-2xl rounded-3xl border border-white/10 bg-black/80 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] md:p-8">
-              <div className="text-xs uppercase tracking-[0.24em] text-white/45">
+            <div className="w-full max-w-2xl rounded-3xl border border-white/8 bg-black/80 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] md:p-8">
+              <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
                 Collision IQ Consent
               </div>
               <h2 id="chat-consent-title" className="mt-3 text-2xl font-semibold text-white md:text-3xl">
                 Consent Required to Use AI Chat
               </h2>
-              <div className="mt-3 space-y-4 text-sm leading-7 text-white/72 md:text-base">
+              <div className="mt-3 space-y-4 text-sm leading-7 text-white/65 md:text-base">
                 <p>
                   You are about to use an AI-powered chatbot. This chatbot is an automated system and not a live human representative.
                 </p>
@@ -403,7 +413,7 @@ export default function ChatbotPage() {
                 </p>
               </div>
 
-              <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
+              <div className="mt-6 rounded-2xl border border-white/8 bg-white/[0.04] p-4">
                 <label className="flex items-start gap-3">
                   <input
                     type="checkbox"
@@ -411,11 +421,11 @@ export default function ChatbotPage() {
                     onChange={(event) => setConsentChecked(event.target.checked)}
                     className="mt-1 h-4 w-4 rounded border-white/20 bg-black/40 text-orange-500 focus:ring-orange-500"
                   />
-                  <span className="text-sm leading-6 text-white/80">
+                  <span className="text-sm leading-6 text-white/65">
                     I have read and agree to the Terms of Service and Privacy Policy, and I consent to the use of the AI chatbot as described above.
                   </span>
                 </label>
-                <p className="mt-3 text-xs leading-5 text-white/45">
+                <p className="mt-3 text-xs leading-5 text-white/40">
                   You must check the box before continuing.
                 </p>
               </div>
@@ -445,7 +455,7 @@ export default function ChatbotPage() {
                   <button
                     type="button"
                     onClick={handleConsentCancel}
-                    className="rounded-2xl border border-white/12 bg-white/5 px-4 py-2 text-sm text-white/80 transition hover:bg-white/10"
+                    className="rounded-2xl bg-white/[0.045] px-4 py-2 text-sm text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
                   >
                     Cancel
                   </button>
@@ -511,104 +521,140 @@ function RailContent({
       ? formatCurrency(renderModel.reportFields.estimateTotal, true)
       : null;
   const canRenderExports = hasResolvedAnalysis && Boolean(analysisText || panel.narrative);
+  const railRisk = hasResolvedAnalysis
+    ? formatLabel(workspaceData?.riskLevel ?? "low")
+    : "Pending";
+  const railConfidence = hasResolvedAnalysis
+    ? formatLabel(workspaceData?.confidence ?? renderModel.vehicle.confidence)
+    : "Pending";
+  const railStatus = analysisLoading
+    ? "Processing"
+    : hasResolvedAnalysis
+      ? "Ready"
+      : "Awaiting files";
+  const attachmentLabel = attachment ?? "No attachment yet";
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto p-6 space-y-8">
-      <WorkspacePanel workspaceData={workspaceData ?? undefined} />
-
-      <div>
-        <div className="text-xs tracking-[0.3em] uppercase text-white/60">
-          Decision Support
+    <div className="flex h-full flex-col overflow-y-auto px-5 py-5 md:px-6 md:py-6">
+      <section className="rounded-[24px] border border-white/8 bg-gradient-to-br from-white/[0.07] via-white/[0.035] to-black/20 p-4 shadow-[0_20px_48px_rgba(0,0,0,0.24)]">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+              Claim Command Center
+            </div>
+            <div className="mt-1.5 text-[1.12rem] font-semibold tracking-[-0.03em] text-white/85">
+              Decision-Ready Analysis
+            </div>
+            <div className="mt-1 text-[13px] leading-5 text-white/40">
+              Fast scan first. Details below.
+            </div>
+          </div>
+          <div className="rounded-full border border-white/8 bg-black/20 px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-white/40">
+            {railStatus}
+          </div>
         </div>
 
-        <div className="text-xl font-semibold mt-1">Analysis</div>
-
-        {attachment && (
-          <div className="mt-2 text-xs text-white/40 truncate">
-            Latest attachment: {attachment}
-          </div>
-        )}
-      </div>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <MetricCard label="Risk" value={railRisk} prominent={hasResolvedAnalysis} />
+          <MetricCard label="Confidence" value={railConfidence} prominent={hasResolvedAnalysis} />
+          <MetricCard
+            label="Latest file"
+            value={attachmentLabel}
+            detailClassName="truncate text-[12px]"
+          />
+          <MetricCard label="Analysis" value={railStatus} />
+        </div>
+      </section>
 
       {analysisLoading && !hasResolvedAnalysis && (
-        <section className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-4 space-y-2">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-orange-200/70">
+        <section className="mt-5 space-y-2 rounded-2xl border border-orange-500/12 bg-gradient-to-br from-[#C65A2A]/10 via-[#C65A2A]/[0.04] to-white/[0.02] p-3.5">
+          <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/68">
             Analysis in progress
           </div>
-          <div className="text-sm leading-6 text-white/78">
+          <div className="text-[13px] leading-5 text-white/65">
             Structured review is still hydrating for the current file set. We&apos;ll populate the
             rail, valuation, supplement lines, and exports when the analysis route finishes.
           </div>
         </section>
       )}
 
-      {hasResolvedAnalysis ? (
-        <DecisionSection title="What Stands Out" body={renderModel.repairPosition} tone="neutral" />
-      ) : (
-        <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-2">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">What Stands Out</div>
-          <div className="text-sm leading-6 text-white/45">
-            Structured highlights will appear here after the current analysis resolves.
-          </div>
-        </section>
-      )}
+      <RailGroup label="Decision" />
 
       {hasResolvedAnalysis && featuredRecommendation && (
         <FeaturedRecommendationCard item={featuredRecommendation} />
       )}
 
+      {hasResolvedAnalysis ? (
+        <DecisionSection title="What stands out" body={renderModel.repairPosition} tone="neutral" featured />
+      ) : (
+        <section className="mt-5 space-y-2 rounded-2xl border border-white/7 bg-white/[0.03] p-3.5">
+          <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">What stands out</div>
+          <div className="text-[13px] leading-5 text-white/65">
+            Upload an estimate or photos to generate the key repair risks, missing support, and next-step guidance.
+          </div>
+        </section>
+      )}
+
+      <RailGroup label="Context" compact />
+
       {hasResolvedAnalysis && (
-        <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
+        <section className="mt-5 space-y-2.5 rounded-2xl border border-white/7 bg-white/[0.03] p-3.5">
+          <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
             Vehicle Context
           </div>
-          <div className="space-y-1 text-sm text-white/80">
-            {vehicleIdentity && <div>{vehicleIdentity}</div>}
+          <div className="space-y-1.5 text-[13px] leading-5 text-white/65">
+            {vehicleIdentity && <div className="text-white/85">{vehicleIdentity}</div>}
             {renderModel.vehicle.trim && (
-              <div className="text-white/55">Trim: {renderModel.vehicle.trim}</div>
+              <div className="text-white/65">Trim: {renderModel.vehicle.trim}</div>
             )}
-            {vehicleVin && <div className="text-white/55">VIN: {vehicleVin}</div>}
-            {insurer && <div className="text-white/55">Insurer: {insurer}</div>}
+            {vehicleVin && <div className="text-white/65">VIN: {vehicleVin}</div>}
+            {insurer && <div className="text-white/65">Insurer: {insurer}</div>}
             {typeof renderModel.reportFields.mileage === "number" && (
-              <div className="text-white/55">
+              <div className="text-white/65">
                 Mileage: {renderModel.reportFields.mileage.toLocaleString("en-US")}
               </div>
             )}
-            {estimateTotal && <div className="text-white/55">Estimate total: {estimateTotal}</div>}
-            <div className="text-white/45">
+            {estimateTotal && <div className="text-white/65">Estimate total: {estimateTotal}</div>}
+            <div className="text-white/40">
               Confidence: {formatVehicleConfidence(renderModel.vehicle)}
             </div>
           </div>
         </section>
       )}
 
+      <div className="mt-5">
+        <WorkspacePanel workspaceData={workspaceData ?? undefined} />
+      </div>
+
+      <RailGroup label="Action" compact />
+
       {hasResolvedAnalysis && canViewSupplementLines ? (
-        <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
-        <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
-          Supplement Lines
+        <section className="mt-5 space-y-2.5 rounded-2xl border border-white/7 bg-white/[0.03] p-3.5">
+        <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+          Supplements
         </div>
         {remainingRecommendations.length > 0 ? (
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {remainingRecommendations.map((item, index) => (
-              <div key={`${item.title}-${index}`} className="rounded-lg border border-white/10 bg-black/20 p-3">
-                <div className="text-sm font-medium text-white">
+              <div key={`${item.title}-${index}`} className="rounded-xl bg-black/16 px-3 py-3">
+                <div className="text-sm font-medium leading-5 text-white/85">
                   {item.title}
                 </div>
-                <div className="mt-1 text-xs text-white/60">
+                <div className="mt-1 text-xs text-white/40">
                   {formatLabel(item.category)} · {formatLabel(item.kind)} · Priority {formatLabel(item.priority)}
                 </div>
-                <div className="mt-2 text-sm leading-6 text-white/80">{item.rationale}</div>
+                <div className="mt-2 text-[13px] leading-5 text-white/65">{item.rationale}</div>
                 {item.evidence && (
-                  <div className="mt-2 text-xs leading-5 text-white/45">Evidence: {item.evidence}</div>
+                  <div className="mt-2 text-xs leading-5 text-white/40">Evidence: {item.evidence}</div>
                 )}
                 {item.source && (
-                  <div className="mt-1 text-[11px] leading-5 text-white/35">Source: {item.source}</div>
+                  <div className="mt-1 text-[11px] leading-5 text-white/40">Source: {item.source}</div>
                 )}
               </div>
             ))}
           </div>
         ) : (
-          <div className="text-sm text-white/45">
+          <div className="text-[13px] leading-5 text-white/40">
             {featuredRecommendation
               ? "The strongest recommendation is highlighted above."
               : "No clear supportable missing, underwritten, or disputed repair-path items were identified from the current structured analysis."}
@@ -617,7 +663,7 @@ function RailContent({
         </section>
       ) : hasResolvedAnalysis ? (
         <LockedFeatureCard
-          title="Supplement Lines"
+          title="Supplements"
           body="Upgrade to Pro to unlock detailed supplement-line recommendations, evidence, and export-ready support details."
         />
       ) : null}
@@ -648,6 +694,7 @@ function RailContent({
           title="Appraisal Signal"
           body={panel.appraisal.reasoning}
           tone="red"
+          compact
         />
       )}
 
@@ -656,21 +703,31 @@ function RailContent({
           title="State Leverage"
           body={panel.stateLeverage.map((point) => `- ${point}`).join("\n")}
           tone="yellow"
+          compact
         />
       )}
 
+      <RailGroup label="Output" compact />
+
       {canRenderExports && (
-        <section className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
-          <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">
+        <section className="mt-5 space-y-3 rounded-2xl bg-white/[0.03] p-4">
+          <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
             Exports
           </div>
           <div className="grid gap-2">
             <button
               onClick={() =>
-                exportReport(renderModel, normalizedResult, analysisResult, panel, analysisText)
+                exportReport(
+                  renderModel,
+                  normalizedResult,
+                  analysisResult,
+                  panel,
+                  analysisText,
+                  workspaceData
+                )
               }
               disabled={!canUseBasicPdfExport}
-              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+              className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
             >
               Export PDF
             </button>
@@ -681,12 +738,13 @@ function RailContent({
                   analysisResult,
                   panel,
                   analysisText,
+                  workspaceData,
                   renderModel,
                   variant: "rebuttal",
                 })
               }
               disabled={!canUseRebuttalEmail}
-              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+              className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {canUseRebuttalEmail ? "Rebuttal Email" : "Rebuttal Email (Pro)"}
             </button>
@@ -697,12 +755,13 @@ function RailContent({
                   analysisResult,
                   panel,
                   analysisText,
+                  workspaceData,
                   renderModel,
                   variant: "side_by_side",
                 })
               }
               disabled={!canUseSideBySide}
-              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+              className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {canUseSideBySide ? "Side-by-Side Report" : "Side-by-Side Report (Pro)"}
             </button>
@@ -713,12 +772,13 @@ function RailContent({
                   analysisResult,
                   panel,
                   analysisText,
+                  workspaceData,
                   renderModel,
                   variant: "line_by_line",
                 })
               }
               disabled={!canUseLineByLine}
-              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+              className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {canUseLineByLine ? "Line-by-Line Report" : "Line-by-Line Report (Pro)"}
             </button>
@@ -734,7 +794,8 @@ function exportReport(
   normalizedResult: AnalysisResult | null,
   analysisResult: RepairIntelligenceReport | null,
   panel: DecisionPanel,
-  analysisText: string
+  analysisText: string,
+  workspaceData: WorkspaceData | null
 ) {
   const resolvedAnalysis =
     normalizedResult ?? (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null);
@@ -745,6 +806,7 @@ function exportReport(
     analysis: resolvedAnalysis,
     panel,
     assistantAnalysis: analysisText,
+    workspaceData,
   });
 
   void exportCarrierPDF(reportDocument);
@@ -756,6 +818,7 @@ function exportPdfVariant(params: {
   analysisResult: RepairIntelligenceReport | null;
   panel: DecisionPanel;
   analysisText: string;
+  workspaceData: WorkspaceData | null;
   variant: "rebuttal" | "side_by_side" | "line_by_line";
 }) {
   const resolvedAnalysis =
@@ -768,6 +831,7 @@ function exportPdfVariant(params: {
     analysis: resolvedAnalysis,
     panel: params.panel,
     assistantAnalysis: params.analysisText,
+    workspaceData: params.workspaceData,
   };
 
   const document =
@@ -783,9 +847,11 @@ function exportPdfVariant(params: {
 function AtAGlanceCard({
   renderModel,
   analysisResult,
+  active,
 }: {
   renderModel: ReturnType<typeof buildExportModel>;
   analysisResult: RepairIntelligenceReport | null;
+  active: boolean;
 }) {
   const vehicleIdentity = resolveCanonicalVehicleLabel(renderModel);
   const bullets = [
@@ -798,30 +864,116 @@ function AtAGlanceCard({
     typeof renderModel.reportFields.estimateTotal === "number"
       ? `Estimate total: ${formatCurrency(renderModel.reportFields.estimateTotal, true)}`
       : null,
-    renderModel.supplementItems[0]?.title ? `Top recommendation: ${renderModel.supplementItems[0].title}` : null,
-    analysisResult ? `Evidence quality: ${formatLabel(analysisResult.summary.evidenceQuality)}` : null,
+    renderModel.supplementItems[0]?.title
+      ? `Top recommendation: ${renderModel.supplementItems[0].title}`
+      : null,
+    analysisResult
+      ? `Evidence quality: ${formatLabel(analysisResult.summary.evidenceQuality)}`
+      : null,
   ].filter(Boolean) as string[];
-
-  if (bullets.length === 0 && !renderModel.repairPosition) {
-    return null;
-  }
+  const visibleBullets = bullets.slice(0, 3);
+  const hiddenBulletCount = Math.max(0, bullets.length - visibleBullets.length);
+  const headline = active
+    ? renderModel.repairPosition ||
+      "Structured analysis highlights will appear here once documents are processed."
+    : "Analysis summary will settle here once the current file set finishes processing.";
 
   return (
-    <section className="mb-4 rounded-2xl border border-orange-500/25 bg-gradient-to-br from-[#C65A2A]/18 via-[#C65A2A]/8 to-white/[0.03] p-5 shadow-[0_18px_50px_rgba(198,90,42,0.14)]">
-      <div className="text-[11px] uppercase tracking-[0.22em] text-orange-200/70">At a glance</div>
-      <div className="mt-2 text-lg font-semibold text-white">
-        {renderModel.repairPosition || "Structured analysis highlights will appear here once documents are processed."}
+    <section
+      className={`mb-3 shrink-0 rounded-[24px] border px-4 py-3 shadow-[0_20px_50px_rgba(198,90,42,0.12)] transition-colors ${
+        active
+          ? "border-orange-500/18 bg-gradient-to-br from-[#C65A2A]/12 via-[#C65A2A]/[0.05] to-white/[0.025]"
+          : "border-white/7 bg-white/[0.03]"
+      }`}
+    >
+      <div
+        className={`text-[10px] uppercase tracking-[0.22em] ${
+          active ? "text-orange-200/68" : "text-white/40"
+        }`}
+      >
+        At a glance
       </div>
-      {bullets.length > 0 && (
-        <div className="mt-4 grid gap-2 xl:grid-cols-3">
-          {bullets.map((bullet) => (
-            <div key={bullet} className="rounded-xl border border-white/10 bg-black/25 px-3 py-3 text-sm text-white/80">
-              {bullet}
+      <div
+        className={`mt-2 min-h-[48px] max-h-[4.8rem] overflow-hidden text-[1rem] font-semibold leading-6 ${
+          active ? "text-white/85" : "text-white/40"
+        }`}
+      >
+        {headline}
+      </div>
+      <div className="mt-3 grid min-h-[54px] gap-2 sm:grid-cols-3">
+        {active && visibleBullets.length > 0 ? (
+          <>
+            {visibleBullets.map((bullet) => (
+              <div
+                key={bullet}
+                className="rounded-xl bg-black/22 px-3 py-2 text-[13px] leading-5 text-white/65"
+              >
+                {bullet}
+              </div>
+            ))}
+            {hiddenBulletCount > 0 && (
+              <div className="rounded-xl bg-black/18 px-3 py-2 text-[13px] leading-5 text-white/40">
+                +{hiddenBulletCount} more details in the right rail
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="rounded-xl bg-black/18 px-3 py-2 text-[13px] leading-5 text-white/40">
+              Vehicle and estimate summary
             </div>
-          ))}
-        </div>
-      )}
+            <div className="rounded-xl bg-black/18 px-3 py-2 text-[13px] leading-5 text-white/40">
+              Top recommendation snapshot
+            </div>
+            <div className="rounded-xl bg-black/18 px-3 py-2 text-[13px] leading-5 text-white/40">
+              Evidence quality and insurer context
+            </div>
+          </>
+        )}
+      </div>
     </section>
+  );
+}
+
+function RailGroup({
+  label,
+  compact = false,
+}: {
+  label: string;
+  compact?: boolean;
+}) {
+  return (
+    <div className={compact ? "mt-5.5" : "mt-5"}>
+      <div className="flex items-center gap-3">
+        <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">{label}</div>
+        <div className="h-px flex-1 bg-white/8" />
+      </div>
+    </div>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  prominent = false,
+  detailClassName = "",
+}: {
+  label: string;
+  value: string;
+  prominent?: boolean;
+  detailClassName?: string;
+}) {
+  return (
+    <div
+      className={`min-w-0 rounded-xl border border-white/7 px-3 py-2.5 ${
+        prominent
+          ? "bg-gradient-to-br from-[#C65A2A]/18 via-[#C65A2A]/[0.07] to-black/18"
+          : "bg-black/16"
+      }`}
+    >
+      <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">{label}</div>
+      <div className={`mt-1 min-w-0 font-medium text-white/85 ${detailClassName || "text-sm"}`}>{value}</div>
+    </div>
   );
 }
 
@@ -831,20 +983,20 @@ function FeaturedRecommendationCard({
   item: ReturnType<typeof buildExportModel>["supplementItems"][number];
 }) {
   return (
-    <section className="rounded-2xl border border-orange-500/30 bg-gradient-to-br from-[#C65A2A]/16 via-[#C65A2A]/8 to-black/20 p-5 shadow-[0_18px_45px_rgba(198,90,42,0.16)]">
-      <div className="text-[11px] uppercase tracking-[0.22em] text-orange-200/75">Top recommendation</div>
-      <div className="mt-2 text-lg font-semibold text-white">{item.title}</div>
-      <div className="mt-2 text-xs text-white/60">
+    <section className="rounded-[24px] border border-orange-500/20 bg-gradient-to-br from-[#C65A2A]/12 via-[#C65A2A]/[0.045] to-black/20 p-4 shadow-[0_18px_44px_rgba(198,90,42,0.14)]">
+      <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">Top recommendation</div>
+      <div className="mt-2 text-[1.08rem] font-semibold leading-6 text-white/85">{item.title}</div>
+      <div className="mt-2 text-xs text-white/40">
         {formatLabel(item.category)} · {formatLabel(item.kind)} · Priority {formatLabel(item.priority)}
       </div>
-      <div className="mt-4 text-sm leading-6 text-white/82">{item.rationale}</div>
+      <div className="mt-3 text-sm leading-6 text-white/65">{item.rationale}</div>
       {item.evidence && (
-        <div className="mt-3 text-xs leading-5 text-white/48">Evidence: {item.evidence}</div>
+        <div className="mt-3 text-xs leading-5 text-white/40">Evidence: {item.evidence}</div>
       )}
       {item.source && (
         <button
           type="button"
-          className="mt-4 inline-flex items-center rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white/80 hover:bg-white/10"
+          className="mt-4 inline-flex items-center rounded-xl bg-white/[0.045] px-3 py-2 text-xs font-medium text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
         >
           View source details
         </button>
@@ -861,17 +1013,17 @@ function LockedFeatureCard({
   body: string;
 }) {
   return (
-    <section className="rounded-xl border border-orange-500/20 bg-gradient-to-br from-[#C65A2A]/10 via-black/40 to-black/20 p-4 space-y-3">
+    <section className="space-y-2.5 rounded-2xl border border-orange-500/16 bg-gradient-to-br from-[#C65A2A]/9 via-black/34 to-black/18 p-3.5">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[11px] uppercase tracking-[0.2em] text-orange-200/70">{title}</div>
+        <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/68">{title}</div>
         <Link
           href="/pricing"
-          className="rounded-full border border-orange-500/30 bg-orange-500/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-orange-100 transition hover:bg-orange-500/20"
+          className="rounded-full border border-orange-500/24 bg-orange-500/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-orange-100 transition hover:bg-orange-500/18"
         >
           Upgrade
         </Link>
       </div>
-      <div className="text-sm leading-6 text-white/72">{body}</div>
+      <div className="text-[13px] leading-5 text-white/65">{body}</div>
     </section>
   );
 }
@@ -881,23 +1033,35 @@ function DecisionSection({
   body,
   tone,
   mono = false,
+  compact = false,
+  featured = false,
 }: {
   title: string;
   body: string;
   tone: "red" | "yellow" | "green" | "neutral";
   mono?: boolean;
+  compact?: boolean;
+  featured?: boolean;
 }) {
   const tones = {
-    red: "border-red-500/30 bg-red-500/5",
-    yellow: "border-yellow-500/30 bg-yellow-500/5",
-    green: "border-green-500/30 bg-green-500/5",
-    neutral: "border-white/10 bg-white/5",
+    red: "border-red-500/18 bg-red-500/[0.04]",
+    yellow: "border-yellow-500/18 bg-yellow-500/[0.04]",
+    green: "border-green-500/18 bg-green-500/[0.04]",
+    neutral: "border-white/7 bg-white/[0.032]",
   };
 
   return (
-    <section className={`rounded-xl border p-4 space-y-3 ${tones[tone]}`}>
-      <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">{title}</div>
-      <div className={`text-sm leading-6 text-white/85 whitespace-pre-wrap ${mono ? "font-mono text-[12px]" : ""}`}>
+    <section
+      className={`space-y-2.5 rounded-2xl border ${compact ? "p-3.5" : "p-4"} ${tones[tone]} ${
+        featured ? "shadow-[0_18px_40px_rgba(0,0,0,0.18)]" : ""
+      }`}
+    >
+      <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">{title}</div>
+      <div
+        className={`whitespace-pre-wrap ${
+          compact ? "text-[13px] leading-5 text-white/65" : featured ? "text-sm leading-6 text-white/65" : "text-sm leading-6 text-white/65"
+        } ${mono ? "font-mono text-[12px]" : ""}`}
+      >
         {body}
       </div>
     </section>
@@ -919,17 +1083,17 @@ function ExpandableDecisionSection({
 }) {
   const [expanded, setExpanded] = useState(false);
   const tones = {
-    red: "border-red-500/30 bg-red-500/5",
-    yellow: "border-yellow-500/30 bg-yellow-500/5",
-    green: "border-green-500/30 bg-green-500/5",
-    neutral: "border-white/10 bg-white/5",
+    red: "border-red-500/18 bg-red-500/[0.04]",
+    yellow: "border-yellow-500/18 bg-yellow-500/[0.04]",
+    green: "border-green-500/18 bg-green-500/[0.04]",
+    neutral: "border-white/7 bg-white/[0.032]",
   };
   const previewHeightClass = previewLines >= 7 ? "max-h-48" : "max-h-36";
 
   return (
-    <section className={`rounded-xl border p-4 space-y-3 ${tones[tone]}`}>
+    <section className={`space-y-2.5 rounded-2xl border p-3.5 ${tones[tone]}`}>
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">{title}</div>
+        <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">{title}</div>
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
@@ -940,7 +1104,7 @@ function ExpandableDecisionSection({
       </div>
       <div className="relative">
         <div
-          className={`text-sm leading-6 text-white/85 whitespace-pre-wrap ${mono ? "font-mono text-[12px]" : ""} ${
+          className={`text-[13px] leading-5 text-white/65 whitespace-pre-wrap ${mono ? "font-mono text-[12px]" : ""} ${
             expanded ? "" : `overflow-hidden ${previewHeightClass}`
           }`}
         >
@@ -966,7 +1130,7 @@ function buildValuationDisplay(renderModel: ReturnType<typeof buildExportModel>)
   return [
     "ACV",
     buildSingleValuationDisplay({
-      label: "Preliminary ACV preview",
+      label: "Preliminary ACV preview band",
       status: renderModel.valuation.acvStatus,
       value:
         renderModel.valuation.acvStatus === "provided"
@@ -980,12 +1144,14 @@ function buildValuationDisplay(renderModel: ReturnType<typeof buildExportModel>)
       reasoning: renderModel.valuation.acvReasoning,
       missingInputs: renderModel.valuation.acvMissingInputs,
       maxRange: 250000,
+      sourceType: renderModel.valuation.acvSourceType,
+      compCount: renderModel.valuation.acvCompCount,
       includeHandoffHint: false,
     }),
     "",
     "DV",
     buildSingleValuationDisplay({
-      label: "Preliminary diminished value preview",
+      label: "Preliminary diminished value preview band",
       status: renderModel.valuation.dvStatus,
       value:
         renderModel.valuation.dvStatus === "provided"
@@ -1013,28 +1179,34 @@ function buildSingleValuationDisplay(params: {
   reasoning: string;
   missingInputs: string[];
   maxRange: number;
+  sourceType?: "comps" | "jd_power" | "fallback";
+  compCount?: number;
   includeHandoffHint?: boolean;
 }): string {
   const lines: string[] = [];
 
   if (params.status === "provided" && typeof params.value === "number") {
-    lines.push(`${params.label}: ${formatCurrency(params.value)}`);
+    lines.push(`${params.label}: directional preview around ${formatCurrency(params.value)}`);
   } else if (params.status === "estimated_range" && hasSaneRange(params.range, params.maxRange)) {
-    lines.push(
-      `${params.label}: ${formatCurrency(params.range.low)}-${formatCurrency(params.range.high)}`
-    );
+    lines.push(`${params.label}: ${formatCurrency(params.range.low)}-${formatCurrency(params.range.high)}`);
   } else {
-    lines.push(`${params.label}: Not determinable from the current documents.`);
+    lines.push(`${params.label}: Preview band not supportable from the current file set.`);
   }
 
   if (params.confidence) {
-    lines.push(`Confidence: ${formatLabel(params.confidence)}`);
+    lines.push(`Preview confidence: ${formatLabel(params.confidence)}`);
+  }
+
+  if (params.sourceType === "comps" && typeof params.compCount === "number" && params.compCount > 0) {
+    lines.push(`Support: ${params.compCount} comparable listing${params.compCount === 1 ? "" : "s"}`);
+  } else if (params.sourceType === "jd_power") {
+    lines.push("Support: structured market valuation data");
   }
 
   const reasoning = cleanValuationReasoning(
     params.reasoning,
     params.status === "not_determinable"
-      ? "Not determinable from the current documents."
+      ? "Preview band not supportable from the current file set."
       : params.label
   );
   if (reasoning) {
@@ -1042,11 +1214,11 @@ function buildSingleValuationDisplay(params: {
   }
 
   if (params.missingInputs.length) {
-    lines.push(`Missing inputs: ${params.missingInputs.join(", ")}`);
+    lines.push(`Still needed for a stronger preview: ${params.missingInputs.join(", ")}`);
   }
 
   if (params.status === "provided" || params.status === "estimated_range") {
-    lines.push("This is a preliminary preview based on the current file set, not a formal appraisal or binding valuation.");
+    lines.push("Directional only. This preview is not a formal appraisal, binding ACV, or paid valuation result.");
   }
 
   if (params.includeHandoffHint !== false) {
@@ -1067,18 +1239,18 @@ function ValuationSection({
 
   return (
     <section
-      className={`rounded-xl border p-4 space-y-3 ${
+      className={`space-y-3 rounded-2xl border p-3.5 ${
         lowConfidence
-          ? "border-white/10 bg-white/[0.03] opacity-85"
-          : "border-green-500/30 bg-green-500/5"
+          ? "border-white/7 bg-white/[0.03] opacity-90"
+          : "border-green-500/18 bg-green-500/[0.04]"
       }`}
     >
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">Valuation</div>
+          <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">Valuation</div>
           {lowConfidence && (
-            <div className="mt-1 text-xs text-white/45">
-              Low-confidence preview. Expand only if you need the provisional range notes.
+            <div className="mt-1 text-xs leading-5 text-white/40">
+              Low-confidence preview. Expand for the directional band, limits, and missing inputs.
             </div>
           )}
         </div>
@@ -1094,16 +1266,20 @@ function ValuationSection({
       </div>
 
       {expanded && (
-        <div className="text-sm leading-6 text-white/82 whitespace-pre-wrap">
+        <div className="text-[13px] leading-5 text-white/65 whitespace-pre-wrap">
           {buildValuationDisplay(renderModel)}
         </div>
       )}
+
+      <div className="rounded-xl bg-black/18 px-3 py-2.5 text-[12px] leading-5 text-white/40">
+        Premium preview only. The formal valuation service can widen, tighten, or move the band after full file review and broader market support.
+      </div>
 
       <a
         href={COLLISION_ACADEMY_HANDOFF_URL}
         target="_blank"
         rel="noreferrer"
-        className="inline-flex items-center rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white/80 hover:bg-white/10"
+        className="inline-flex items-center justify-center rounded-xl bg-[#C65A2A]/18 px-3 py-2 text-[11px] font-medium text-white/85 transition hover:bg-[#C65A2A]/26 sm:w-auto"
       >
         Continue for Full Valuation
       </a>

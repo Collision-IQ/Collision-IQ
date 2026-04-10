@@ -2,7 +2,16 @@
 
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
-import { FileText, Image as ImageIcon, X, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  Image as ImageIcon,
+  RotateCcw,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 
 export type PreviewAttachment = {
   attachmentId: string;
@@ -19,14 +28,20 @@ export type PreviewAttachment = {
 
 type AttachmentPreviewModalProps = {
   attachment: PreviewAttachment | null;
+  attachments: PreviewAttachment[];
+  currentIndex: number;
   onClose: () => void;
+  onNavigate: (direction: "previous" | "next") => void;
   onRemove: (attachmentId: string) => void;
   onReplace: (attachmentId: string) => void;
 };
 
 export default function AttachmentPreviewModal({
   attachment,
+  attachments,
+  currentIndex,
   onClose,
+  onNavigate,
   onRemove,
   onReplace,
 }: AttachmentPreviewModalProps) {
@@ -38,15 +53,27 @@ export default function AttachmentPreviewModal({
   useEffect(() => {
     if (!attachment) return;
 
-    const handleEscape = (event: KeyboardEvent) => {
+    const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         onClose();
+        return;
+      }
+
+      if (event.key === "ArrowLeft" && currentIndex > 0) {
+        event.preventDefault();
+        onNavigate("previous");
+        return;
+      }
+
+      if (event.key === "ArrowRight" && currentIndex < attachments.length - 1) {
+        event.preventDefault();
+        onNavigate("next");
       }
     };
 
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [attachment, onClose]);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [attachment, attachments.length, currentIndex, onClose, onNavigate]);
 
   const previewKind = useMemo(() => {
     if (!attachment) return "text";
@@ -88,6 +115,8 @@ export default function AttachmentPreviewModal({
 
   const canZoom = previewKind === "image";
   const hasTextPreview = structuredTextPreview.length > 0;
+  const hasPrevious = currentIndex > 0;
+  const hasNext = currentIndex >= 0 && currentIndex < attachments.length - 1;
 
   return (
     <div className="fixed inset-0 z-[80] bg-black/85 backdrop-blur-md">
@@ -106,6 +135,35 @@ export default function AttachmentPreviewModal({
             </div>
 
             <div className="flex items-center gap-2">
+              {attachments.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate("previous")}
+                    disabled={!hasPrevious}
+                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white/70 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <ChevronLeft size={14} />
+                      Previous
+                    </span>
+                  </button>
+                  <div className="min-w-[68px] text-center text-xs text-white/55">
+                    {currentIndex + 1} of {attachments.length}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate("next")}
+                    disabled={!hasNext}
+                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white/70 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      Next
+                      <ChevronRight size={14} />
+                    </span>
+                  </button>
+                </>
+              )}
               {canZoom && (
                 <>
                   <button
@@ -138,7 +196,8 @@ export default function AttachmentPreviewModal({
                 type="button"
                 onClick={onClose}
                 className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/70 transition hover:bg-white/10 hover:text-white"
-                aria-label="Close preview"
+                aria-label="Back to chat"
+                title="Back to chat"
               >
                 <X size={16} />
               </button>
@@ -218,6 +277,13 @@ export default function AttachmentPreviewModal({
 
                 <section className="space-y-2">
                   <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">Actions</div>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-white transition hover:bg-white/10"
+                  >
+                    Back to Chat
+                  </button>
                   <div className="flex gap-3">
                     <button
                       type="button"

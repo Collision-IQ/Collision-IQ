@@ -1,5 +1,6 @@
 import type { EvidenceRecord } from "./evidence";
 import type { EstimateOperation } from "../extractors/estimateExtractor";
+import type { WorkspaceEstimateComparisons } from "@/types/workspaceTypes";
 
 export type FindingStatus = "included" | "missing" | "not_shown";
 export type Severity = "low" | "medium" | "high";
@@ -142,6 +143,9 @@ export interface AnalysisResult {
   supplements: AnalysisFinding[];
   evidence: EvidenceRef[];
   operations?: EstimateOperation[];
+  // Preserve comparison rows at the analysis layer so Workspace and exports can
+  // render the same structured source without re-parsing assistant prose.
+  estimateComparisons?: WorkspaceEstimateComparisons;
   rawEstimateText?: string;
   narrative: string;
   vehicle?: VehicleIdentity;

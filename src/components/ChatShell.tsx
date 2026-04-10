@@ -35,16 +35,16 @@ function Drawer({
 
       <div
         className={[
-          "absolute top-0 h-full w-[88vw] max-w-sm bg-card border border-border shadow-2xl",
+          "absolute top-0 h-full w-[88vw] max-w-sm border-l border-white/7 bg-card/95 shadow-2xl backdrop-blur-xl",
           side === "left" ? "left-0" : "right-0",
         ].join(" ")}
       >
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <div className="text-sm font-semibold text-text">{title}</div>
+        <div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
+          <div className="text-[1.05rem] font-semibold text-text">{title}</div>
 
           <button
             onClick={onClose}
-            className="rounded-lg border border-border bg-white/5 px-2 py-1 text-xs text-text hover:bg-white/10"
+            className="rounded-lg border border-white/7 bg-white/5 px-2 py-1 text-xs text-white/65 transition hover:bg-white/10 hover:text-white/85"
           >
             Close
           </button>
@@ -78,14 +78,14 @@ export default function ChatShell({
       </div>
 
       {/* Header */}
-      <header className="relative z-10 border-b border-border bg-black/20 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-[1440px] items-center justify-between px-4">
+      <header className="relative z-10 border-b border-border/60 bg-black/20 backdrop-blur-xl">
+        <div className="mx-auto flex h-[58px] max-w-[1480px] items-center justify-between px-4 md:px-5">
 
           <div className="flex items-center gap-3">
-            <div className="text-sm font-semibold tracking-wide">
+            <div className="text-[1.08rem] font-semibold tracking-[-0.02em] text-white/85">
               {title}
 
-              <span className="ml-2 rounded-full border border-border bg-white/5 px-2 py-0.5 text-[11px] font-medium text-muted">
+              <span className="ml-2 rounded-full border border-white/7 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-white/40">
                 Beta
               </span>
             </div>
@@ -96,7 +96,7 @@ export default function ChatShell({
             {hasLeft && (
               <button
                 onClick={() => setLeftOpen(true)}
-                className="lg:hidden rounded-lg border border-border bg-white/5 px-3 py-1.5 text-xs text-text hover:bg-white/10"
+                className="lg:hidden rounded-lg border border-white/7 bg-white/5 px-3 py-1.5 text-xs text-text hover:bg-white/10"
               >
                 Workspace
               </button>
@@ -105,7 +105,7 @@ export default function ChatShell({
             {hasRight && (
               <button
                 onClick={() => setRightOpen(true)}
-                className="lg:hidden rounded-lg border border-border bg-white/5 px-3 py-1.5 text-xs text-text hover:bg-white/10"
+                className="lg:hidden rounded-lg border border-white/7 bg-white/5 px-3 py-1.5 text-xs text-text hover:bg-white/10"
               >
                 Inspector
               </button>
@@ -119,25 +119,25 @@ export default function ChatShell({
       <div className="h-[2px] w-full bg-gradient-to-r from-transparent via-[#C65A2A]/60 to-transparent" />
 
       {/* Main layout */}
-      <div className="relative z-10 mx-auto max-w-[1440px] px-4 py-4">
+      <div className="relative z-10 mx-auto max-w-[1480px] px-4 py-4 md:px-5 md:py-5">
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.6fr_1fr] gap-6 h-full">
+        <div className="grid h-full grid-cols-1 gap-5 lg:grid-cols-[1.04fr_1.38fr_1.04fr]">
 
           {/* Left panel */}
           {hasLeft && (
-            <div className="hidden lg:block bg-glass border-glass backdrop-blur-md rounded-xl p-4">
+            <div className="hidden rounded-[24px] border border-white/7 bg-white/[0.04] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.2)] backdrop-blur-md lg:block">
               {left}
             </div>
           )}
 
           {/* Center panel */}
-          <div className="min-w-0 rounded-xl p-4 border border-white/10 bg-white/[0.02]">
+          <div className="min-w-0 rounded-[28px] border border-white/7 bg-white/[0.03] p-4 shadow-[0_20px_60px_rgba(0,0,0,0.24)]">
             {center}
           </div>
 
           {/* Right panel */}
           {hasRight && (
-            <div className="hidden lg:block bg-glass border-glass backdrop-blur-md rounded-xl p-4">
+            <div className="hidden rounded-[24px] border border-white/7 bg-white/[0.04] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.2)] backdrop-blur-md lg:block">
               {right}
             </div>
           )}

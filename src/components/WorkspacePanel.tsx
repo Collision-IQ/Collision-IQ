@@ -1,5 +1,9 @@
-import { jsPDF } from "jspdf";
 import type { WorkspaceData } from "@/types/workspaceTypes";
+import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
+import {
+  getEstimateComparisonRows,
+  getTopEstimateComparisonHighlights,
+} from "@/components/workspace/estimateComparisonPresentation";
 
 interface Props {
   workspaceData?: Partial<WorkspaceData> | null;
@@ -9,7 +13,7 @@ const EMPTY_WORKSPACE_DATA: WorkspaceData = {
   riskLevel: "low",
   confidence: "low",
   keyIssues: [],
-  estimateComparisons: [],
+  estimateComparisons: normalizeWorkspaceEstimateComparisons(null),
   supplementLetter: "",
   fullAnalysis: "",
 };
@@ -17,8 +21,31 @@ const EMPTY_WORKSPACE_DATA: WorkspaceData = {
 
 function IssueCard({ text }: { text: string }) {
   return (
-    <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80">
+    <div className="rounded-xl border border-white/6 bg-black/18 px-3 py-2.5 text-[13px] leading-5 text-white/65">
       {text}
+    </div>
+  );
+}
+
+function TopDifferencesSummary({ items }: { items: string[] }) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mb-4">
+      <div className="mb-2 text-[10px] uppercase tracking-[0.22em] text-white/40">
+        Top Differences
+      </div>
+
+      <div className="space-y-2 rounded-xl border border-white/6 bg-white/[0.04] p-3">
+        {items.map((item) => (
+          <div key={item} className="flex gap-2 text-[12px] leading-5 text-white/85">
+            <span className="pt-[2px] text-[#C65A2A]">&bull;</span>
+            <span>{item}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -35,145 +62,40 @@ export default function WorkspacePanel({ workspaceData }: Props) {
           workspaceData.estimateComparisons ?? EMPTY_WORKSPACE_DATA.estimateComparisons,
       }
     : null;
-
-  function exportPDF() {
-    if (!data) return;
-
-    const { riskLevel, confidence, keyIssues, estimateComparisons, fullAnalysis } = data;
-
-    const doc = new jsPDF();
-    const bodyFontSize = 12;
-    const headingFontSize = 14;
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const marginX = 15;
-    const topMargin = 20;
-    const bottomMargin = 18;
-    const maxWidth = 180;
-    const lineHeight = 6.2;
-    const sectionSpacing = 5;
-    const headingSpacing = 7;
-    const contentBottomY = pageHeight - bottomMargin;
-
-    let y = topMargin;
-
-    const drawPageNumber = () => {
-      doc.setFont("Helvetica", "Normal");
-      doc.setFontSize(9);
-      doc.text(`Page ${doc.getCurrentPageInfo().pageNumber}`, pageWidth - marginX, pageHeight - 8, {
-        align: "right",
-      });
-    };
-
-    const addPage = () => {
-      doc.addPage();
-      y = topMargin;
-      drawPageNumber();
-    };
-
-    const ensureSpace = (requiredHeight: number) => {
-      if (y + requiredHeight <= contentBottomY) return;
-      addPage();
-    };
-
-    // Write wrapped text line-by-line so long paragraphs can continue safely
-    // onto the next page without clipping at the bottom.
-    const writeWrappedText = (text: string, options?: { prefix?: string }) => {
-      const value = options?.prefix ? `${options.prefix}${text}` : text;
-      const lines = doc.splitTextToSize(value, maxWidth);
-
-      for (const line of lines) {
-        ensureSpace(lineHeight);
-        doc.text(line, marginX, y);
-        y += lineHeight;
-      }
-    };
-
-    const writeSectionHeading = (title: string) => {
-      ensureSpace(headingSpacing);
-      doc.setFont("Helvetica", "Bold");
-      doc.setFontSize(headingFontSize);
-      doc.text(title, marginX, y);
-      y += headingSpacing;
-      doc.setFont("Helvetica", "Normal");
-      doc.setFontSize(bodyFontSize);
-    };
-
-    doc.setFont("Helvetica", "Bold");
-    doc.setFontSize(18);
-    doc.text("Collision-IQ Analysis Report", marginX, y);
-    y += 12;
-    drawPageNumber();
-
-    doc.setFontSize(bodyFontSize);
-    doc.setFont("Helvetica", "Normal");
-
-    ensureSpace(lineHeight);
-    doc.text(`Risk Score: ${riskLevel}`, marginX, y);
-    y += lineHeight;
-
-    ensureSpace(lineHeight);
-    doc.text(`Confidence: ${confidence}`, marginX, y);
-    y += headingSpacing;
-
-    /* ---------------- Comparison Table ---------------- */
-
-    if (estimateComparisons.length > 0) {
-      writeSectionHeading("Estimate Comparison");
-
-      estimateComparisons.forEach((row) => {
-        writeWrappedText(`${row.category} | Shop: ${row.shop} | Insurance: ${row.insurance}`);
-      });
-
-      y += sectionSpacing;
-    }
-
-    /* ---------------- Key Issues ---------------- */
-
-    if (keyIssues.length > 0) {
-      writeSectionHeading("Key Issues");
-
-      keyIssues.forEach((issue) => {
-        writeWrappedText(issue, { prefix: "! " });
-      });
-
-      y += sectionSpacing;
-    }
-
-    /* ---------------- Full Analysis ---------------- */
-
-    if (fullAnalysis) {
-      writeSectionHeading("Full Analysis");
-      writeWrappedText(fullAnalysis);
-    }
-
-    doc.save("collision-iq-analysis.pdf");
-  }
+  // WorkspacePanel only renders structured comparison rows. Any prose fallback
+  // conversion should happen upstream in workspaceAdapter when backend data is absent.
+  const comparisonRows = data ? getEstimateComparisonRows(data.estimateComparisons) : [];
+  const topDifferences = getTopEstimateComparisonHighlights(comparisonRows);
 
   // Shorthand for readability below
   return (
-    <div className="flex flex-col h-full text-sm text-white">
+    <div className="flex h-full flex-col text-sm text-white">
       {/* Panel intro */}
 
-      <div className="mb-4 rounded-xl bg-glass border-glass p-4 backdrop-blur-md">
-        <h3 className="mb-2 text-xs uppercase tracking-wider text-white/50">
+      <div className="rounded-2xl border border-white/7 bg-white/[0.035] p-4 shadow-[0_14px_38px_rgba(0,0,0,0.18)] backdrop-blur-md">
+        <h3 className="mb-2 text-[10px] uppercase tracking-[0.22em] text-white/40">
           Repair Intelligence
         </h3>
 
-        <p className="text-xs text-white/60">
-          Uploaded files and structured repair analysis will appear here.
+        <p className="text-sm leading-6 text-white/65">
+          Upload an estimate or photos to generate a repair decision.
         </p>
       </div>
 
       {/* Analysis output */}
 
-      <div className="flex-1 min-h-0 overflow-y-auto rounded-xl bg-glass border-glass p-4 backdrop-blur-md">
+      <div className="mt-4 flex-1 min-h-0 overflow-y-auto rounded-2xl border border-white/7 bg-white/[0.025] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.18)] backdrop-blur-md">
 
         {/* Empty state */}
 
         {!data && (
-          <div className="text-xs text-white/40">
-            Assistant output will appear here.
+          <div className="space-y-2.5">
+            <div className="text-sm leading-6 text-white/85">
+              Upload an estimate or photos to generate a repair decision.
+            </div>
+            <div className="text-sm leading-6 text-white/65">
+              This panel will show the key repair risks and next steps.
+            </div>
           </div>
         )}
 
@@ -181,52 +103,24 @@ export default function WorkspacePanel({ workspaceData }: Props) {
           <>
             {/* Risk and confidence summary */}
 
-            <div className="mb-4 flex gap-3">
-              <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80">
+            <div className="mb-5 grid grid-cols-2 gap-2">
+              <div className="rounded-xl border border-white/6 bg-black/16 px-3 py-2.5 text-xs text-white/65">
                 Risk: <span className="font-semibold capitalize">{data.riskLevel}</span>
               </div>
-              <div className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80">
+              <div className="rounded-xl border border-white/6 bg-black/16 px-3 py-2.5 text-xs text-white/65">
                 Confidence: <span className="font-semibold capitalize">{data.confidence}</span>
               </div>
             </div>
 
-            {/* Estimate comparison table */}
+            {/* Sidebar stays decision-focused. Full comparison rows remain available for exports. */}
 
-            {data.estimateComparisons.length > 0 && (
-              <div className="mb-4">
-                <div className="mb-2 text-[11px] uppercase tracking-wider text-white/40">
-                  Estimate Comparison
-                </div>
-
-                <table className="w-full overflow-hidden rounded-lg border border-white/10 text-xs">
-                  <thead className="bg-white/5 text-white/60">
-                    <tr>
-                      <th className="px-2 py-2 text-left">Category</th>
-                      <th className="px-2 py-2 text-left">Shop</th>
-                      <th className="px-2 py-2 text-left">Insurance</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    {data.estimateComparisons.map((row, i) => (
-                      <tr key={i} className="border-t border-white/10">
-                        <td className="px-2 py-2 text-white/80">{row.category}</td>
-
-                        <td className="px-2 py-2 text-green-300">{row.shop}</td>
-
-                        <td className="px-2 py-2 text-red-300">{row.insurance}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <TopDifferencesSummary items={topDifferences} />
 
             {/* Key issue cards */}
 
             {data.keyIssues.length > 0 && (
-              <div className="mb-4 flex flex-col gap-2">
-                <div className="mb-1 text-[11px] uppercase tracking-wider text-white/40">
+              <div className="mt-5 flex flex-col gap-2">
+                <div className="mb-1 text-[10px] uppercase tracking-[0.22em] text-white/40">
                   Key Issues
                 </div>
 
@@ -235,15 +129,6 @@ export default function WorkspacePanel({ workspaceData }: Props) {
                 ))}
               </div>
             )}
-
-            {/* Export buttons */}
-
-            <button
-              onClick={exportPDF}
-              className="mt-4 w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs"
-            >
-              Export PDF Report
-            </button>
 
             {data.supplementLetter && (
               <>
@@ -259,12 +144,12 @@ export default function WorkspacePanel({ workspaceData }: Props) {
 
                     URL.revokeObjectURL(url);
                   }}
-                  className="mt-2 w-full rounded-md border border-white/10 bg-accent/20 hover:bg-accent/30 p-3 text-xs"
+                  className="mt-5 w-full rounded-xl bg-[#C65A2A]/18 p-3 text-xs text-white/85 transition hover:bg-[#C65A2A]/26"
                 >
                   Generate Supplement Letter
                 </button>
 
-                <div className="mt-4 rounded-md border border-white/10 bg-black/60 p-3 text-xs whitespace-pre-wrap">
+                <div className="mt-4 rounded-xl border border-white/6 bg-black/36 p-3 text-xs whitespace-pre-wrap text-white/65">
                   {data.supplementLetter}
                 </div>
               </>
