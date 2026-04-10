@@ -10,6 +10,7 @@ import {
 } from "./buildExportModel";
 import type { DecisionPanel } from "./buildDecisionPanel";
 import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
+import { cleanOperationDisplayText } from "../../ui/presentationText";
 
 export type ExportTemplateSourceModel = {
   exportModel: ExportModel;
@@ -47,6 +48,8 @@ export type ExportBuilderInput =
       assistantAnalysis?: string | null;
       renderModel?: ExportModel | null;
     };
+
+const OPERATION_DISPLAY_FALLBACK = "Repair Operation";
 
 export function formatAnalysisModeLabel(
   mode: AnalysisResult["mode"] | "single-document-review" | undefined
@@ -93,7 +96,7 @@ export function buildExportTemplateSourceModel(params: ExportBuilderInput): Expo
 
   if (source.lineItems.length === 0) {
     source.lineItems = exportModel.supplementItems.slice(0, 8).map((item) => ({
-      operation: item.title,
+      operation: displaySupplementTitle(item.title),
       component: formatCategoryLabel(item.category),
       carrierPosition: describeCarrierPosition(item, analysisMode === "comparison"),
       supportStatus: mapSupportStatus(item.kind),
@@ -115,7 +118,7 @@ export function buildRebuttalEmailTemplate(params: ExportBuilderInput): string {
     ) ?? "Current repair file";
   const topItems = exportModel.supplementItems.slice(0, 4);
   const asks = topItems.length > 0
-    ? topItems.map((item) => `- ${item.title}: ${buildRequestSentence(item)}`)
+    ? topItems.map((item) => `- ${displaySupplementTitle(item.title)}: ${buildRequestSentence(item)}`)
     : ["- Please review the current estimate support and provide any supporting documentation needed to confirm the intended scope."];
 
   return [
@@ -252,7 +255,7 @@ function buildLineItems(
   const matchedSupplementKeys = new Set<string>();
 
   const lines = operations.map((operation) => {
-    const operationLabel = resolveOperationLabel(operation);
+    const operationLabel = resolveOperationDisplayLabel(operation);
     const operationCategory = classifyEstimateOperation(operation);
     const match = findBestSupplementMatch(operation, supplementItems);
     if (match) {
@@ -280,7 +283,7 @@ function buildLineItems(
     .filter((item) => !matchedSupplementKeys.has(normalizeKey(item.title)))
     .slice(0, Math.max(0, 10 - lines.length))
     .map((item) => ({
-      operation: item.title,
+      operation: displaySupplementTitle(item.title),
       component: formatCategoryLabel(item.category),
       carrierPosition: describeCarrierPosition(item, isComparison),
       supportStatus: mapSupportStatus(item.kind),
@@ -341,6 +344,27 @@ function resolveOperationLabel(
   }
 
   return cleanedOperation;
+}
+
+function resolveOperationDisplayLabel(
+  operation: NonNullable<AnalysisResult["operations"]>[number]
+): string {
+  const resolved = resolveOperationLabel(operation);
+  const cleaned = presentOperationDisplayText(resolved);
+
+  if (cleaned) {
+    return cleaned;
+  }
+
+  const fallbacks = [operation.component, operation.rawLine, operation.operation];
+  for (const candidate of fallbacks) {
+    const safeCandidate = presentOperationDisplayText(candidate);
+    if (safeCandidate) {
+      return safeCandidate;
+    }
+  }
+
+  return OPERATION_DISPLAY_FALLBACK;
 }
 
 function cleanOperationSourceText(value: string | undefined): string {
@@ -528,10 +552,10 @@ function summarizeShopCategoryPosition(
   }
 
   if (!isComparison) {
-    return `The estimate position supports ${joinHumanList(items.map((item) => item.title.toLowerCase()))}.`;
+    return `The estimate position supports ${joinHumanList(items.map((item) => displaySupplementTitle(item.title).toLowerCase()))}.`;
   }
 
-  return `The shop-side repair path supports ${joinHumanList(items.map((item) => item.title.toLowerCase()))}.`;
+  return `The shop-side repair path supports ${joinHumanList(items.map((item) => displaySupplementTitle(item.title).toLowerCase()))}.`;
 }
 
 function summarizeCarrierCategoryPosition(
@@ -562,21 +586,30 @@ function describeCarrierPosition(item: ExportSupplementItem, isComparison = true
   switch (item.kind) {
     case "missing_operation":
       return isComparison
-        ? `${item.title} is not clearly carried in the current estimate posture.`
-        : `${item.title} is not clearly carried in the current estimate support.`;
+        ? `${displaySupplementTitle(item.title)} is not clearly carried in the current estimate posture.`
+        : `${displaySupplementTitle(item.title)} is not clearly carried in the current estimate support.`;
     case "missing_verification":
       return isComparison
-        ? `${item.title} may be implicitly required, but the current verification or documentation is not clearly shown.`
-        : `${item.title} may be relevant, but the current verification or documentation is not clearly shown.`;
+        ? `${displaySupplementTitle(item.title)} may be implicitly required, but the current verification or documentation is not clearly shown.`
+        : `${displaySupplementTitle(item.title)} may be relevant, but the current verification or documentation is not clearly shown.`;
     case "underwritten_operation":
       return isComparison
-        ? `${item.title} appears lighter or under-supported in the current estimate.`
-        : `${item.title} still needs clearer estimate support or documentation.`;
+        ? `${displaySupplementTitle(item.title)} appears lighter or under-supported in the current estimate.`
+        : `${displaySupplementTitle(item.title)} still needs clearer estimate support or documentation.`;
     default:
       return isComparison
-        ? `${item.title} reflects a repair-path position that still needs clearer support in the current file.`
-        : `${item.title} still needs clearer support in the current file.`;
+        ? `${displaySupplementTitle(item.title)} reflects a repair-path position that still needs clearer support in the current file.`
+        : `${displaySupplementTitle(item.title)} still needs clearer support in the current file.`;
   }
+}
+
+function presentOperationDisplayText(value: string | undefined): string {
+  const source = cleanOperationSourceText(value);
+  return cleanOperationDisplayText(source);
+}
+
+function displaySupplementTitle(value: string): string {
+  return cleanOperationDisplayText(value) || value;
 }
 
 

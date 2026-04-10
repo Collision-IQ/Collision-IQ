@@ -9,6 +9,7 @@ import {
 } from "./buildExportModel";
 import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
 import type { ExportBuilderInput } from "./exportTemplates";
+import { cleanOperationDisplayText } from "../../ui/presentationText";
 
 export type CarrierReportSection = {
   title: string;
@@ -56,7 +57,7 @@ export function buildCarrierReport({
   const documentedStrengths = exportModel.reportFields.presentStrengths;
   const strongestDisputes =
     topItems.length > 0
-      ? joinHumanList(topItems.slice(0, 4).map((item) => item.title.toLowerCase()))
+      ? joinHumanList(topItems.slice(0, 4).map((item) => displayOperationLabel(item.title).toLowerCase()))
       : "no major unresolved support items identified from the current file";
   const credibilityConclusion = buildCredibilityConclusion(exportModel);
   const whyItWins = buildWhyItWins(exportModel, report, analysis);
@@ -151,8 +152,8 @@ export function buildCarrierReport({
           whyItWins,
           topItems.length > 0
             ? isComparison
-              ? `The clearest dispute areas are ${joinHumanList(topItems.slice(0, 4).map((item) => item.title.toLowerCase()))}.`
-              : `Support remains open on ${joinHumanList(topItems.slice(0, 4).map((item) => item.title.toLowerCase()))}.`
+              ? `The clearest dispute areas are ${joinHumanList(topItems.slice(0, 4).map((item) => displayOperationLabel(item.title).toLowerCase()))}.`
+              : `Support remains open on ${joinHumanList(topItems.slice(0, 4).map((item) => displayOperationLabel(item.title).toLowerCase()))}.`
             : undefined,
         ]),
       },
@@ -167,7 +168,7 @@ export function buildCarrierReport({
         bullets:
           topItems.length > 0
             ? topItems.map((item) =>
-                `${item.title}: ${item.rationale}${item.evidence ? ` Support noted: ${item.evidence}` : ""}`
+                `${displayOperationLabel(item.title)}: ${item.rationale}${item.evidence ? ` Support noted: ${item.evidence}` : ""}`
               )
             : ["No clear supportable missing, underwritten, or disputed estimate-support items were identified from the current file."],
       },
@@ -189,6 +190,10 @@ export function buildCarrierReport({
       `ACV and diminished value references are preliminary only. For a full valuation, continue at ${COLLISION_ACADEMY_HANDOFF_URL}`,
     ],
   };
+}
+
+function displayOperationLabel(value: string): string {
+  return cleanOperationDisplayText(value) || value;
 }
 
 function buildExecutiveSummary(params: {

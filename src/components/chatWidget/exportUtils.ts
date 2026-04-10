@@ -1,3 +1,5 @@
+import { cleanPresentationMarkdown } from "@/lib/ui/presentationText";
+
 export type ExportableChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -9,7 +11,7 @@ export function buildExportMessages(messages: ExportableChatMessage[]) {
     .filter((message) => message.kind !== "system_status")
     .map((message) => ({
       role: message.role,
-      content: message.content,
+      content: cleanPresentationMarkdown(message.content),
     }))
     .filter((message) => message.content.trim().length > 0);
 }
@@ -27,7 +29,7 @@ export function buildChatExportPayload(
 ) {
   return {
     messages,
-    analysisText: analysisText.trim() || undefined,
+    analysisText: cleanPresentationMarkdown(analysisText).trim() || undefined,
   };
 }
 

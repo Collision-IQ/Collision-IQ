@@ -248,3 +248,56 @@ run("line-by-line PDF keeps procedure rows grounded instead of forcing fuzzy sup
     true
   );
 });
+
+run("line-by-line PDF strips machine-like numeric noise from rendered operation labels", () => {
+  const document = buildLineByLinePdf({
+    report: REPORT,
+    analysis: {
+      ...ANALYSIS,
+      operations: [
+        {
+          operation: "Proc",
+          component: "Fuel Pump Replace 71218877627121.940.2",
+          rawLine: "Proc Fuel Pump Replace 71218877627121.940.2",
+        },
+        {
+          operation: "Proc",
+          component: "Rear__Bumper|||Refinish",
+          rawLine: "Proc Rear__Bumper|||Refinish",
+        },
+      ],
+      rawEstimateText:
+        "Proc Fuel Pump Replace 71218877627121.940.2\nProc Rear__Bumper|||Refinish",
+    },
+    panel: null,
+    assistantAnalysis: null,
+  });
+
+  assert.ok(document.sections.some((section) => section.title.includes("Fuel Pump Replace")));
+  assert.equal(
+    document.sections.some((section) => /71218877627121\.940\.2/.test(section.title)),
+    false
+  );
+  assert.ok(document.sections.some((section) => section.title.includes("Rear Bumper Refinish")));
+});
+
+run("line-by-line PDF falls back to a safe operation label when OCR garbage collapses", () => {
+  const document = buildLineByLinePdf({
+    report: REPORT,
+    analysis: {
+      ...ANALYSIS,
+      operations: [
+        {
+          operation: "Proc",
+          component: "71218877627121.940.2",
+          rawLine: "Proc 71218877627121.940.2",
+        },
+      ],
+      rawEstimateText: "Proc 71218877627121.940.2",
+    },
+    panel: null,
+    assistantAnalysis: null,
+  });
+
+  assert.ok(document.sections.some((section) => section.title.includes("Repair Operation")));
+});

@@ -21,12 +21,17 @@ import { buildRebuttalEmailPdf } from "@/lib/ai/builders/rebuttalEmailPdfBuilder
 import { buildSideBySidePdf } from "@/lib/ai/builders/sideBySidePdfBuilder";
 import { buildLineByLinePdf } from "@/lib/ai/builders/lineByLinePdfBuilder";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
+import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 import type {
   AnalysisResult,
   RepairIntelligenceReport,
 } from "@/lib/ai/types/analysis";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import type { WorkspaceData } from "@/types/workspaceTypes";
+
+function displayOperationLabel(value: string | null | undefined): string {
+  return cleanOperationDisplayText(value) || value || "Repair Operation";
+}
 
 const EMPTY_PANEL: DecisionPanel = {
   narrative:
@@ -592,7 +597,7 @@ function RailContent({
             {remainingRecommendations.map((item, index) => (
               <div key={`${item.title}-${index}`} className="rounded-lg border border-white/10 bg-black/20 p-3">
                 <div className="text-sm font-medium text-white">
-                  {item.title}
+                  {displayOperationLabel(item.title)}
                 </div>
                 <div className="mt-1 text-xs text-white/60">
                   {formatLabel(item.category)} · {formatLabel(item.kind)} · Priority {formatLabel(item.priority)}
@@ -798,7 +803,7 @@ function AtAGlanceCard({
     typeof renderModel.reportFields.estimateTotal === "number"
       ? `Estimate total: ${formatCurrency(renderModel.reportFields.estimateTotal, true)}`
       : null,
-    renderModel.supplementItems[0]?.title ? `Top recommendation: ${renderModel.supplementItems[0].title}` : null,
+    renderModel.supplementItems[0]?.title ? `Top recommendation: ${displayOperationLabel(renderModel.supplementItems[0].title)}` : null,
     analysisResult ? `Evidence quality: ${formatLabel(analysisResult.summary.evidenceQuality)}` : null,
   ].filter(Boolean) as string[];
 
@@ -833,7 +838,7 @@ function FeaturedRecommendationCard({
   return (
     <section className="rounded-2xl border border-orange-500/30 bg-gradient-to-br from-[#C65A2A]/16 via-[#C65A2A]/8 to-black/20 p-5 shadow-[0_18px_45px_rgba(198,90,42,0.16)]">
       <div className="text-[11px] uppercase tracking-[0.22em] text-orange-200/75">Top recommendation</div>
-      <div className="mt-2 text-lg font-semibold text-white">{item.title}</div>
+      <div className="mt-2 text-lg font-semibold text-white">{displayOperationLabel(item.title)}</div>
       <div className="mt-2 text-xs text-white/60">
         {formatLabel(item.category)} · {formatLabel(item.kind)} · Priority {formatLabel(item.priority)}
       </div>

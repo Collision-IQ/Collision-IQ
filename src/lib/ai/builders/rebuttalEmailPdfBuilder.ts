@@ -7,6 +7,7 @@ import {
   resolveCanonicalVehicleLabel,
   resolveCanonicalVin,
 } from "./buildExportModel";
+import { cleanOperationDisplayText } from "../../ui/presentationText";
 
 export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReportDocument {
   const source = buildExportTemplateSourceModel(params);
@@ -46,7 +47,7 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
             value: `$${exportModel.reportFields.estimateTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
           }]
         : []),
-      { label: "Primary Ask", value: rebuttalItems[0]?.title || "Review the current estimate support and provide any needed documentation." },
+      { label: "Primary Ask", value: displayOperationLabel(rebuttalItems[0]?.title) || "Review the current estimate support and provide any needed documentation." },
       { label: "Format", value: "Professional email draft" },
     ],
     sections: [
@@ -64,7 +65,7 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
           rebuttalItems.length > 0
             ? rebuttalItems.map(
                 (item) =>
-                  `${item.title}: ${item.rationale}${item.evidence ? ` Support noted: ${item.evidence}` : ""}`
+                  `${displayOperationLabel(item.title)}: ${item.rationale}${item.evidence ? ` Support noted: ${item.evidence}` : ""}`
               )
             : ["Please review the current estimate support and provide any documentation needed to confirm the intended scope."],
       },
@@ -80,7 +81,7 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
             : "Please review the current estimate support and related documentation:",
           ...(
             rebuttalItems.length > 0
-              ? rebuttalItems.map((item) => `- ${item.title}: ${item.rationale}`)
+              ? rebuttalItems.map((item) => `- ${displayOperationLabel(item.title)}: ${item.rationale}`)
               : ["- Please review the current estimate support and provide supporting documentation."]
           ),
           "",
@@ -122,6 +123,10 @@ function buildPdfFooter(): string[] {
     "This PDF is intended as an editable carrier-facing summary of the current estimate review.",
     "Review and edit the final carrier-facing language as needed before sending or filing.",
   ];
+}
+
+function displayOperationLabel(value: string | undefined): string {
+  return cleanOperationDisplayText(value) || value || "";
 }
 
 function buildCarrierOpening(repairPosition: string): string {

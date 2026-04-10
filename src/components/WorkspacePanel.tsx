@@ -1,5 +1,6 @@
 import { jsPDF } from "jspdf";
 import type { WorkspaceData } from "@/types/workspaceTypes";
+import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 
 interface Props {
   workspaceData?: Partial<WorkspaceData> | null;
@@ -21,6 +22,10 @@ function IssueCard({ text }: { text: string }) {
       {text}
     </div>
   );
+}
+
+function renderComparisonValue(value: string) {
+  return cleanOperationDisplayText(value) || value;
 }
 
 /* ---------------- Component ---------------- */
@@ -122,7 +127,9 @@ export default function WorkspacePanel({ workspaceData }: Props) {
       writeSectionHeading("Estimate Comparison");
 
       estimateComparisons.forEach((row) => {
-        writeWrappedText(`${row.category} | Shop: ${row.shop} | Insurance: ${row.insurance}`);
+        writeWrappedText(
+          `${renderComparisonValue(row.category)} | Shop: ${renderComparisonValue(row.shop)} | Insurance: ${renderComparisonValue(row.insurance)}`
+        );
       });
 
       y += sectionSpacing;
@@ -210,11 +217,11 @@ export default function WorkspacePanel({ workspaceData }: Props) {
                   <tbody>
                     {data.estimateComparisons.map((row, i) => (
                       <tr key={i} className="border-t border-white/10">
-                        <td className="px-2 py-2 text-white/80">{row.category}</td>
+                        <td className="px-2 py-2 text-white/80">{renderComparisonValue(row.category)}</td>
 
-                        <td className="px-2 py-2 text-green-300">{row.shop}</td>
+                        <td className="px-2 py-2 text-green-300">{renderComparisonValue(row.shop)}</td>
 
-                        <td className="px-2 py-2 text-red-300">{row.insurance}</td>
+                        <td className="px-2 py-2 text-red-300">{renderComparisonValue(row.insurance)}</td>
                       </tr>
                     ))}
                   </tbody>

@@ -1,9 +1,13 @@
+import { cleanPresentationMarkdown } from "@/lib/ui/presentationText";
+
 const VALUATION_URL_PATTERN = /For a full valuation, continue at https:\/\/www\.collision\.academy\/?/gi;
 
 export function formatAssistantMessage(content: string): string {
-  return content.replace(
-    VALUATION_URL_PATTERN,
-    "[Continue for full valuation](https://www.collision.academy/)"
+  return cleanPresentationMarkdown(
+    content.replace(
+      VALUATION_URL_PATTERN,
+      "[Continue for full valuation](https://www.collision.academy/)"
+    )
   );
 }
 
