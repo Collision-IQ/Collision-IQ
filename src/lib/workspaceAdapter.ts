@@ -14,6 +14,7 @@
  */
 
 import type { WorkspaceData } from "@/types/workspaceTypes";
+import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
 
 // ---------------------------------------------------------------------------
 // Legacy text-parsing helpers (ported from the original WorkspacePanel parsing
@@ -41,14 +42,12 @@ function extractIssues(text: string): string[] {
   return issues.slice(0, 5);
 }
 
-type ComparisonRow = {
-  category: string;
-  shop: string;
-  insurance: string;
-};
-
-function extractComparison(text: string): ComparisonRow[] {
-  const rows: ComparisonRow[] = [];
+function extractComparison(text: string) {
+  const rows: Array<{
+    category: string;
+    lhsValue: string;
+    rhsValue: string;
+  }> = [];
   const lines = text.split("\n");
   let currentCategory = "";
 
@@ -69,20 +68,29 @@ function extractComparison(text: string): ComparisonRow[] {
     if (lower.startsWith("shop estimate")) {
       rows.push({
         category: currentCategory,
-        shop: clean.replace("Shop Estimate:", "").trim(),
-        insurance: "",
+        lhsValue: clean.replace("Shop Estimate:", "").trim(),
+        rhsValue: "",
       });
     }
 
     if (lower.startsWith("insurance estimate")) {
       const last = rows[rows.length - 1];
       if (last) {
-        last.insurance = clean.replace("Insurance Estimate:", "").trim();
+        last.rhsValue = clean.replace("Insurance Estimate:", "").trim();
       }
     }
   }
 
-  return rows.slice(0, 5);
+  return normalizeWorkspaceEstimateComparisons(
+    rows.slice(0, 5).map((row, index) => ({
+      id: `legacy-comparison-${index + 1}`,
+      category: row.category,
+      lhsSource: "Shop estimate",
+      rhsSource: "Carrier estimate",
+      lhsValue: row.lhsValue,
+      rhsValue: row.rhsValue,
+    }))
+  );
 }
 
 function deriveRiskLevel(issueCount: number): WorkspaceData["riskLevel"] {
@@ -141,7 +149,7 @@ export function buildWorkspaceDataFromAnalysisText(analysis?: string): Workspace
       riskLevel: "low",
       confidence: "low",
       keyIssues: [],
-      estimateComparisons: [],
+      estimateComparisons: normalizeWorkspaceEstimateComparisons(null),
       supplementLetter: "",
       fullAnalysis: "",
     };

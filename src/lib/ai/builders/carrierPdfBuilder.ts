@@ -9,12 +9,23 @@ import {
 } from "./buildExportModel";
 import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
 import type { ExportBuilderInput } from "./exportTemplates";
-import { cleanOperationDisplayText } from "../../ui/presentationText";
+import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
+import { dedupeEstimateComparisonRationales } from "@/components/workspace/estimateComparisonPresentation";
+import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 
 export type CarrierReportSection = {
   title: string;
   body?: string;
   bullets?: string[];
+  comparisonRows?: Array<{
+    label: string;
+    leftLabel: string;
+    leftValue: string;
+    rightLabel: string;
+    rightValue: string;
+    delta?: string;
+    note?: string;
+  }>;
 };
 
 export type CarrierReportDocument = {
@@ -43,6 +54,7 @@ export function buildCarrierReport({
   panel,
   assistantAnalysis,
   renderModel,
+  workspaceData,
 }: ExportBuilderInput): CarrierReportDocument {
   const exportModel = resolveCarrierExportModel({
     report,
@@ -55,9 +67,17 @@ export function buildCarrierReport({
   const topItems = selectReportSupplementItems(exportModel.supplementItems);
   const isComparison = (analysis?.mode ?? report?.analysis?.mode) === "comparison";
   const documentedStrengths = exportModel.reportFields.presentStrengths;
+  const fallbackComparisons =
+    analysis?.estimateComparisons ?? report?.analysis?.estimateComparisons;
+  const structuredComparisons = normalizeWorkspaceEstimateComparisons(
+    workspaceData ? (workspaceData.estimateComparisons ?? null) : fallbackComparisons
+  );
+  const dedupedComparisonRows = dedupeEstimateComparisonRationales(structuredComparisons.rows);
   const strongestDisputes =
     topItems.length > 0
-      ? joinHumanList(topItems.slice(0, 4).map((item) => displayOperationLabel(item.title).toLowerCase()))
+      ? joinHumanList(
+          topItems.slice(0, 4).map((item) => displayOperationLabel(item.title).toLowerCase())
+        )
       : "no major unresolved support items identified from the current file";
   const credibilityConclusion = buildCredibilityConclusion(exportModel);
   const whyItWins = buildWhyItWins(exportModel, report, analysis);
@@ -157,6 +177,25 @@ export function buildCarrierReport({
             : undefined,
         ]),
       },
+      ...(dedupedComparisonRows.length > 0
+        ? [{
+            title: "Structured Estimate Comparison",
+            comparisonRows: dedupedComparisonRows.slice(0, 8).map((row) => ({
+              label: [row.category, row.operation, row.partName]
+                .filter(Boolean)
+                .join(" - ") || "Comparison",
+              leftLabel: row.lhsSource ?? "Shop",
+              leftValue: formatComparisonSide(row.lhsValue),
+              rightLabel: row.rhsSource ?? "Carrier",
+              rightValue: formatComparisonSide(row.rhsValue),
+              delta:
+                row.delta !== null && row.delta !== undefined && `${row.delta}`.trim() !== ""
+                  ? `${row.delta}`
+                  : undefined,
+              note: row.notes?.[0],
+            })),
+          }]
+        : []),
       ...(documentedStrengths.length > 0
         ? [{
             title: isComparison ? "Documented Positives (Shop File)" : "Documented Positives",
@@ -190,10 +229,6 @@ export function buildCarrierReport({
       `ACV and diminished value references are preliminary only. For a full valuation, continue at ${COLLISION_ACADEMY_HANDOFF_URL}`,
     ],
   };
-}
-
-function displayOperationLabel(value: string): string {
-  return cleanOperationDisplayText(value) || value;
 }
 
 function buildExecutiveSummary(params: {
@@ -242,6 +277,14 @@ function resolveCarrierExportModel(params: ExportBuilderInput): ExportModel {
   );
 }
 
+function formatComparisonSide(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || `${value}`.trim() === "") {
+    return "not shown";
+  }
+
+  return `${value}`;
+}
+
 function buildCredibilityConclusion(
   exportModel: ReturnType<typeof buildExportModel>
 ): string {
@@ -277,10 +320,10 @@ function buildWhyItWins(
     const analysisMode = analysis?.mode ?? report?.analysis?.mode;
     return analysisMode === "comparison"
       ? `It is stronger because the current file supports ${joinHumanList(
-          topItems.map((item) => item.title.toLowerCase())
+          topItems.map((item) => displayOperationLabel(item.title).toLowerCase())
         )} more clearly than the competing posture.`
       : `The file most clearly leaves open ${joinHumanList(
-          topItems.map((item) => item.title.toLowerCase())
+          topItems.map((item) => displayOperationLabel(item.title).toLowerCase())
         )}.`;
   }
 
@@ -404,6 +447,10 @@ function buildSourceSummary(
   }
 
   return cleaned.map((source) => `${trimTrailingPunctuation(source)}.`);
+}
+
+function displayOperationLabel(value: string | null | undefined): string {
+  return cleanOperationDisplayText(value) || value || "Repair Operation";
 }
 
 function formatMoney(value: number): string {

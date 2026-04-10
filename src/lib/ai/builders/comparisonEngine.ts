@@ -1,6 +1,8 @@
 import type { AnalysisFinding, AnalysisResult, EvidenceRef } from "../types/analysis";
 import { buildRepairStory, type RepairStory } from "./buildRepairStory";
 import { extractEstimateOps, type EstimateOperation } from "../extractors/estimateExtractor";
+import type { WorkspaceEstimateComparisons } from "@/types/workspaceTypes";
+import { buildWorkspaceEstimateComparisonSummary } from "@/lib/workspace/estimateComparisons";
 
 type ComparisonEngineParams = {
   shopEstimateText: string;
@@ -41,6 +43,13 @@ export function buildComparisonAnalysis(
     supplements: findings.filter((finding) => finding.status !== "present"),
     evidence,
     operations: shopOperations,
+    estimateComparisons: buildEstimateComparisons({
+      shopStory,
+      insurerStory,
+      shopOperations,
+      insurerOperations,
+      findings,
+    }),
     rawEstimateText: [params.shopEstimateText, params.insurerEstimateText].join("\n\n"),
     narrative: buildNarrative({
       shopStory,
@@ -295,6 +304,232 @@ function buildEvidence(
   }
 
   return evidence;
+}
+
+function buildEstimateComparisons(params: {
+  shopStory: RepairStory;
+  insurerStory: RepairStory;
+  shopOperations: EstimateOperation[];
+  insurerOperations: EstimateOperation[];
+  findings: AnalysisFinding[];
+}): WorkspaceEstimateComparisons {
+  const rows: WorkspaceEstimateComparisons["rows"] = [];
+  const comparisonPairs = buildOperationPairs(params.shopOperations, params.insurerOperations);
+
+  if (
+    typeof params.shopStory.laborStructure.bodyHours === "number" ||
+    typeof params.insurerStory.laborStructure.bodyHours === "number"
+  ) {
+    rows.push({
+      id: "labor-body-hours",
+      category: "Labor",
+      operation: "Body labor hours",
+      lhsSource: "Shop estimate",
+      rhsSource: "Carrier estimate",
+      lhsValue: params.shopStory.laborStructure.bodyHours ?? null,
+      rhsValue: params.insurerStory.laborStructure.bodyHours ?? null,
+      delta:
+        typeof params.shopStory.laborStructure.bodyHours === "number" &&
+        typeof params.insurerStory.laborStructure.bodyHours === "number"
+          ? Number(
+              (
+                params.shopStory.laborStructure.bodyHours -
+                params.insurerStory.laborStructure.bodyHours
+              ).toFixed(1)
+            )
+          : null,
+      deltaType: resolveDeltaType(
+        params.shopStory.laborStructure.bodyHours ?? null,
+        params.insurerStory.laborStructure.bodyHours ?? null
+      ),
+      confidence: 0.95,
+      notes: findNotes(params.findings, "labor_difference"),
+    });
+  }
+
+  if (
+    typeof params.shopStory.laborStructure.paintHours === "number" ||
+    typeof params.insurerStory.laborStructure.paintHours === "number"
+  ) {
+    rows.push({
+      id: "labor-paint-hours",
+      category: "Refinish",
+      operation: "Paint / refinish hours",
+      lhsSource: "Shop estimate",
+      rhsSource: "Carrier estimate",
+      lhsValue: params.shopStory.laborStructure.paintHours ?? null,
+      rhsValue: params.insurerStory.laborStructure.paintHours ?? null,
+      delta:
+        typeof params.shopStory.laborStructure.paintHours === "number" &&
+        typeof params.insurerStory.laborStructure.paintHours === "number"
+          ? Number(
+              (
+                params.shopStory.laborStructure.paintHours -
+                params.insurerStory.laborStructure.paintHours
+              ).toFixed(1)
+            )
+          : null,
+      deltaType: resolveDeltaType(
+        params.shopStory.laborStructure.paintHours ?? null,
+        params.insurerStory.laborStructure.paintHours ?? null
+      ),
+      confidence: 0.95,
+      notes: findNotes(params.findings, "labor_difference"),
+    });
+  }
+
+  comparisonPairs.forEach((pair, index) => {
+    const row = buildOperationComparisonRow(pair, params.findings, index);
+    if (row) {
+      rows.push(row);
+    }
+  });
+
+  return { rows, summary: buildWorkspaceEstimateComparisonSummary(rows) };
+}
+
+function buildOperationPairs(
+  shopOperations: EstimateOperation[],
+  insurerOperations: EstimateOperation[]
+) {
+  const insurerBySignature = new Map(
+    insurerOperations.map((operation, index) => [
+      `${buildSignature(operation.component)}:${index}`,
+      operation,
+    ] as const)
+  );
+  const insurerUnused = new Set(insurerBySignature.keys());
+  const pairs: Array<{
+    shop?: EstimateOperation;
+    insurer?: EstimateOperation;
+  }> = [];
+
+  shopOperations.forEach((shopOperation) => {
+    const signature = buildSignature(shopOperation.component);
+    const insurerMatchKey = [...insurerUnused].find((key) => key.startsWith(`${signature}:`));
+    if (insurerMatchKey) {
+      pairs.push({
+        shop: shopOperation,
+        insurer: insurerBySignature.get(insurerMatchKey),
+      });
+      insurerUnused.delete(insurerMatchKey);
+      return;
+    }
+
+    pairs.push({ shop: shopOperation });
+  });
+
+  [...insurerUnused]
+    .map((key) => insurerBySignature.get(key))
+    .filter((operation): operation is EstimateOperation => Boolean(operation))
+    .forEach((insurerOperation) => {
+      pairs.push({ insurer: insurerOperation });
+    });
+
+  return pairs;
+}
+
+function buildOperationComparisonRow(
+  pair: {
+    shop?: EstimateOperation;
+    insurer?: EstimateOperation;
+  },
+  findings: AnalysisFinding[],
+  index: number
+) {
+  const shop = pair.shop;
+  const insurer = pair.insurer;
+  const lhsValue = shop ? formatOperationValue(shop) : null;
+  const rhsValue = insurer ? formatOperationValue(insurer) : null;
+  const deltaType = resolveDeltaType(lhsValue, rhsValue);
+  const notes = [
+    ...findNotes(findings, inferFindingCategory(shop, insurer)),
+    ...findNotes(findings, "functional_equivalence"),
+  ].slice(0, 2);
+
+  if (!shop && !insurer) {
+    return null;
+  }
+
+  return {
+    id: `operation-${index + 1}`,
+    category: classifyOperationCategory(shop ?? insurer!),
+    operation: shop?.operation ?? insurer?.operation,
+    partName: shop?.component ?? insurer?.component,
+    lhsSource: "Shop estimate",
+    rhsSource: "Carrier estimate",
+    lhsValue,
+    rhsValue,
+    delta: buildOperationDelta(shop, insurer, deltaType),
+    deltaType,
+    confidence: shop && insurer ? 0.92 : 0.82,
+    notes,
+  };
+}
+
+function formatOperationValue(operation: EstimateOperation): string {
+  return `${operation.operation} ${operation.component}`.trim();
+}
+
+function buildOperationDelta(
+  shop: EstimateOperation | undefined,
+  insurer: EstimateOperation | undefined,
+  deltaType: WorkspaceEstimateComparisons["rows"][number]["deltaType"]
+) {
+  if (deltaType === "added") return "Present only in shop estimate";
+  if (deltaType === "removed") return "Present only in carrier estimate";
+  if (deltaType === "same") return "Aligned";
+  if (shop && insurer && shop.operation !== insurer.operation) {
+    return `${shop.operation} -> ${insurer.operation}`;
+  }
+  return "Changed";
+}
+
+function resolveDeltaType(
+  lhsValue: string | number | null,
+  rhsValue: string | number | null
+): WorkspaceEstimateComparisons["rows"][number]["deltaType"] {
+  if (lhsValue !== null && lhsValue !== undefined && (rhsValue === null || rhsValue === undefined)) {
+    return "added";
+  }
+  if ((lhsValue === null || lhsValue === undefined) && rhsValue !== null && rhsValue !== undefined) {
+    return "removed";
+  }
+  if (lhsValue === null || lhsValue === undefined || rhsValue === null || rhsValue === undefined) {
+    return "unknown";
+  }
+  if (`${lhsValue}`.trim() === `${rhsValue}`.trim()) {
+    return "same";
+  }
+  return "changed";
+}
+
+function classifyOperationCategory(operation: EstimateOperation): string {
+  const text = `${operation.operation} ${operation.component} ${operation.rawLine}`.toLowerCase();
+
+  if (/(scan|calibration|adas|sensor|camera|radar)/.test(text)) return "ADAS";
+  if (/(paint|refinish|blend|mask|sand|polish|tint)/.test(text)) return "Refinish";
+  if (/(rail|pillar|apron|support|structural|measure|pull)/.test(text)) return "Structural";
+  if (/(align|alignment)/.test(text)) return "Alignment";
+  if (/(proc|procedure|test|quality check|road test)/.test(text)) return "Procedure";
+  return "Operations";
+}
+
+function inferFindingCategory(
+  shop: EstimateOperation | undefined,
+  insurer: EstimateOperation | undefined
+): string {
+  const text = `${shop?.rawLine ?? ""} ${insurer?.rawLine ?? ""}`.toLowerCase();
+  if (/(rail|pillar|apron|support|structural)/.test(text)) return "structural_difference";
+  return "scope_difference";
+}
+
+function findNotes(findings: AnalysisFinding[], category: string): string[] {
+  return findings
+    .filter((finding) => finding.category === category)
+    .map((finding) => finding.detail)
+    .filter(Boolean)
+    .slice(0, 2);
 }
 
 function difference(left: string[], right: string[]): string[] {

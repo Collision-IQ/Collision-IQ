@@ -90,7 +90,7 @@ const SERVER_TTS_ENABLED =
   process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_SERVER_TTS === "true";
 const SERVER_TTS_VOICE = process.env.NEXT_PUBLIC_COLLISION_IQ_TTS_VOICE?.trim() || undefined;
 const TTS_STYLE_PROMPT =
-  "Female voice. Warm, confident, conversational, and natural. Subtle Northeast energy, lightly textured tone, dry wit, smart and grounded. Clear, expressive delivery with brisk but easy pacing. Human and easy on the ears. Avoid parody, caricature, or celebrity imitation.";
+  "Female voice. Warm, confident, quick-witted, conversational, and natural. Subtle Northeast energy. Smart, grounded, expressive, and slightly dry in tone. Brisk pacing with clear articulation. Sounds like a sharp, street-smart professional explaining something clearly under pressure. Avoid parody, caricature, or celebrity imitation.";
 
 export default function ChatWidget({
   onAttachmentChange,
@@ -154,6 +154,13 @@ export default function ChatWidget({
   );
   const previewAttachment = useMemo(
     () => attachments.find((attachment) => attachment.attachmentId === previewAttachmentId) ?? null,
+    [attachments, previewAttachmentId]
+  );
+  const previewAttachmentIndex = useMemo(
+    () =>
+      previewAttachmentId
+        ? attachments.findIndex((attachment) => attachment.attachmentId === previewAttachmentId)
+        : -1,
     [attachments, previewAttachmentId]
   );
 
@@ -854,9 +861,10 @@ export default function ChatWidget({
   async function uploadSingleFile(
     file: File,
     source: "file" | "camera",
-    replaceId?: string | null
-  ) {
-    if (disabled) return;
+    replaceId?: string | null,
+    options?: { openPreview?: boolean }
+  ): Promise<string> {
+    if (disabled) return "";
     const formData = new FormData();
     formData.append("file", file);
 
@@ -933,9 +941,12 @@ export default function ChatWidget({
 
     onAttachmentChange?.(filename);
     invalidateStructuredAnalysis();
-    setPreviewAttachmentId(replaceId ?? attachmentId);
+    if (options?.openPreview ?? true) {
+      setPreviewAttachmentId(replaceId ?? attachmentId);
+    }
     setReplaceAttachmentId(null);
     firstAttachmentAtRef.current ??= Date.now();
+    return attachmentId;
   }
 
   async function handleFilesSelected(fileList: FileList | null) {
@@ -954,8 +965,19 @@ export default function ChatWidget({
         totalBytes: files.reduce((sum, file) => sum + file.size, 0),
       });
       upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "uploading"));
-      for (const file of files) {
-        await uploadSingleFile(file, "file", replaceAttachmentId);
+      const newAttachmentIds: string[] = [];
+      const replacementTargetId = replaceAttachmentId;
+
+      for (const [index, file] of files.entries()) {
+        const attachmentId = await uploadSingleFile(file, "file", replacementTargetId, {
+          openPreview: Boolean(replacementTargetId) || files.length === 1,
+        });
+        if (!replacementTargetId && index === 0) {
+          newAttachmentIds.push(attachmentId);
+        }
+      }
+      if (!replacementTargetId && newAttachmentIds[0]) {
+        setPreviewAttachmentId(newAttachmentIds[0]);
       }
       upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
     } catch (err) {
@@ -982,8 +1004,19 @@ export default function ChatWidget({
         totalBytes: files.reduce((sum, file) => sum + file.size, 0),
       });
       upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "uploading"));
-      for (const file of files) {
-        await uploadSingleFile(file, "camera", replaceAttachmentId);
+      const newAttachmentIds: string[] = [];
+      const replacementTargetId = replaceAttachmentId;
+
+      for (const [index, file] of files.entries()) {
+        const attachmentId = await uploadSingleFile(file, "camera", replacementTargetId, {
+          openPreview: Boolean(replacementTargetId) || files.length === 1,
+        });
+        if (!replacementTargetId && index === 0) {
+          newAttachmentIds.push(attachmentId);
+        }
+      }
+      if (!replacementTargetId && newAttachmentIds[0]) {
+        setPreviewAttachmentId(newAttachmentIds[0]);
       }
       upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
     } catch (err) {
@@ -1004,7 +1037,7 @@ export default function ChatWidget({
     const remaining = attachments.filter((attachment) => attachment.attachmentId !== attachmentId);
     setAttachments(remaining);
     if (previewAttachmentId === attachmentId) {
-      setPreviewAttachmentId(null);
+      setPreviewAttachmentId(resolveNextPreviewAttachmentId(attachments, attachmentId));
     }
 
     onAttachmentChange?.(
@@ -1034,6 +1067,16 @@ export default function ChatWidget({
     invalidateStructuredAnalysis();
     setReplaceAttachmentId(attachmentId);
     fileInputRef.current?.click();
+  }
+
+  function handlePreviewNavigation(direction: "previous" | "next") {
+    if (previewAttachmentIndex < 0) return;
+
+    const nextIndex =
+      direction === "previous" ? previewAttachmentIndex - 1 : previewAttachmentIndex + 1;
+    const nextAttachment = attachments[nextIndex];
+    if (!nextAttachment) return;
+    setPreviewAttachmentId(nextAttachment.attachmentId);
   }
 
   async function handleDownloadRedactedChat() {
@@ -1212,19 +1255,22 @@ export default function ChatWidget({
 
   const canReadAloud = SERVER_TTS_ENABLED || canUseBrowserReadAloud();
 
-  const userBubble = "bg-black/70 border border-orange-500/30 text-orange-400";
+  const userBubble = "border border-orange-500/24 bg-[#1a120d]/88 text-orange-300 shadow-[0_14px_32px_rgba(0,0,0,0.16)]";
 
   return (
-    <div className={`relative flex flex-col h-full min-h-0 overflow-hidden ${disabled ? "opacity-75" : ""}`}>
+    <div className={`relative flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/6 bg-white/[0.035] shadow-[0_22px_70px_rgba(0,0,0,0.32)] ${disabled ? "opacity-75" : ""}`}>
       <AttachmentPreviewModal
         attachment={disabled ? null : (previewAttachment as PreviewAttachment | null)}
+        attachments={disabled ? [] : (attachments as PreviewAttachment[])}
+        currentIndex={disabled ? -1 : previewAttachmentIndex}
         onClose={() => setPreviewAttachmentId(null)}
+        onNavigate={handlePreviewNavigation}
         onRemove={(attachmentId) => removeAttachment(attachmentId)}
         onReplace={(attachmentId) => handleReplaceAttachment(attachmentId)}
       />
 
       <div className="absolute inset-0 pointer-events-none bg-[url('/brand/logos/Logo-grey.png')] bg-no-repeat bg-center bg-[length:60%] opacity-[0.06]" />
-      <div className="absolute inset-0 bg-black/70 pointer-events-none" />
+      <div className="absolute inset-0 bg-[#040404]/74 pointer-events-none" />
 
       <div className="relative z-10 flex flex-col flex-1 min-h-0">
         <div
@@ -1232,25 +1278,25 @@ export default function ChatWidget({
           className="
           overflow-y-auto
           flex-1
-          px-4 sm:px-6
+          px-5 sm:px-6
           min-h-0
-          pt-4 sm:pt-6
-          pb-[240px]
+          pt-5 sm:pt-7
+          pb-[210px]
           space-y-4
         "
         >
           {messages.length === 1 && messages[0].role === "assistant" && (
-            <div className="flex flex-col items-center justify-center py-20 text-center space-y-6">
+            <div className="flex flex-col items-center justify-center space-y-6 py-20 text-center">
               {showOpeningDisclaimer && !openingDisclaimerDismissed && (
-                <div className="mx-auto max-w-[920px] rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-4 text-sm text-white/75">
+                <div className="mx-auto max-w-[860px] rounded-[24px] border border-white/7 bg-white/[0.045] px-5 py-4 text-sm text-white/65 shadow-[0_16px_40px_rgba(0,0,0,0.18)]">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="leading-[1.6]">
+                  <div className="leading-7">
                       {OPENING_DISCLAIMER}
                     </div>
                     <button
                       type="button"
                       onClick={dismissOpeningDisclaimer}
-                      className="shrink-0 rounded-lg border border-white/10 bg-white/5 p-2 text-white/60 transition hover:bg-white/10 hover:text-white"
+                      className="shrink-0 rounded-lg bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white/85"
                       aria-label="Dismiss disclaimer"
                       title="Dismiss disclaimer"
                     >
@@ -1259,13 +1305,20 @@ export default function ChatWidget({
                   </div>
                 </div>
               )}
-              <div className="text-white/60 text-sm">Start a repair analysis</div>
+              <div className="space-y-2 text-center">
+                <div className="text-[1.08rem] font-semibold tracking-[-0.02em] text-white/85">
+                  Start a repair analysis
+                </div>
+                <div className="text-sm leading-6 text-white/65">
+                  Upload an estimate, procedure, or photo set and we&apos;ll turn it into a cleaner repair decision read.
+                </div>
+              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl w-full">
+              <div className="grid w-full max-w-[720px] grid-cols-1 gap-3 sm:grid-cols-3">
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={disabled}
-                  className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-2xl border border-white/7 bg-white/[0.045] px-4 py-3 text-sm text-white/85 transition hover:bg-white/[0.075] disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Upload Estimate
                 </button>
@@ -1273,7 +1326,7 @@ export default function ChatWidget({
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={disabled}
-                  className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-2xl border border-white/7 bg-white/[0.045] px-4 py-3 text-sm text-white/85 transition hover:bg-white/[0.075] disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Upload OEM Procedure
                 </button>
@@ -1281,7 +1334,7 @@ export default function ChatWidget({
                 <button
                   onClick={() => cameraInputRef.current?.click()}
                   disabled={disabled}
-                  className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-2xl border border-white/7 bg-white/[0.045] px-4 py-3 text-sm text-white/85 transition hover:bg-white/[0.075] disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Upload Photos
                 </button>
@@ -1298,19 +1351,19 @@ export default function ChatWidget({
                   : msg.kind === "system_status"
                     ? "justify-center"
                     : "justify-start"
-              } mb-3`}
+              } mb-5`}
             >
               <div
                 className={`${
                   msg.kind === "system_status"
-                    ? "max-w-[560px] rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs text-white/55"
-                    : "rounded-2xl px-5 py-4"
+                    ? "max-w-[560px] rounded-full bg-white/[0.045] px-4 py-2 text-xs text-white/40"
+                    : "rounded-[24px] px-5 py-4"
                 } ${
                   msg.role === "user"
                     ? `${userBubble} max-w-[65%]`
                     : msg.kind === "system_status"
                       ? ""
-                      : "max-w-[760px] bg-glass border-glass backdrop-blur-md"
+                      : "max-w-[720px] bg-white/[0.045] shadow-[0_14px_34px_rgba(0,0,0,0.14)] backdrop-blur-md"
                 }`}
               >
                 {msg.role === "assistant" && msg.kind !== "system_status" ? (
@@ -1332,7 +1385,7 @@ export default function ChatWidget({
                               : "Read aloud"
                             : "Read aloud unavailable"
                         }
-                        className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                        className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         {speakingMessageId === msg.id && isSpeaking ? (
                           <Square size={14} />
@@ -1341,29 +1394,29 @@ export default function ChatWidget({
                         )}
                       </button>
                     </div>
-                    <div className="analysis-report text-[15px] leading-[1.65] text-white/90">
+                    <div className="analysis-report text-[15px] leading-[1.8] text-white/85">
                     <ReactMarkdown
                       components={{
                         h2: ({ children }) => (
-                          <div className="mt-6 mb-2 text-[#C65A2A] text-[16px] font-semibold">
+                          <div className="mb-2 mt-6 text-[1.08rem] font-semibold tracking-[-0.02em] text-[#D27A51]">
                             {children}
                           </div>
                         ),
                         h3: ({ children }) => (
-                          <div className="mt-4 mb-1 text-[#C65A2A] text-[14px] font-medium">
+                          <div className="mb-1 mt-4 text-[15px] font-medium text-[#D27A51]">
                             {children}
                           </div>
                         ),
                         p: ({ children }) => (
-                          <p className="mt-2 text-white/85 leading-[1.65]">{children}</p>
+                          <p className="mt-2 text-white/85 leading-[1.8]">{children}</p>
                         ),
                         ul: ({ children }) => (
-                          <ul className="mt-2 ml-5 list-disc space-y-1 text-white/80">
+                          <ul className="mt-2 ml-5 list-disc space-y-1.5 text-white/65">
                             {children}
                           </ul>
                         ),
                         ol: ({ children }) => (
-                          <ol className="mt-2 ml-5 list-decimal space-y-1 text-white/80">
+                          <ol className="mt-2 ml-5 list-decimal space-y-1.5 text-white/65">
                             {children}
                           </ol>
                         ),
@@ -1390,11 +1443,11 @@ export default function ChatWidget({
           <div ref={bottomRef} />
         </div>
 
-        <div className="absolute inset-x-0 bottom-4 z-20 px-4">
-          <div className="mx-auto w-full max-w-[1040px] rounded-[24px] border border-white/10 bg-black/72 shadow-[0_20px_80px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
-            <div className="p-3 sm:p-4">
-              <div className="rounded-[18px] border border-white/8 bg-white/[0.03] px-3 py-3">
-                <div className="flex items-end gap-3">
+        <div className="absolute inset-x-0 bottom-4 z-20 px-4 sm:px-5">
+          <div className="mx-auto w-full max-w-[980px] rounded-[24px] border border-white/7 bg-[#090909]/74 shadow-[0_20px_80px_rgba(0,0,0,0.38)] backdrop-blur-2xl">
+            <div className="p-3">
+              <div className="rounded-[20px] bg-white/[0.035] px-3 py-2">
+                <div className="flex items-end gap-2.5">
               <input
                 type="file"
                 ref={fileInputRef}
@@ -1421,7 +1474,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled}
-                className="text-white/60 hover:text-[#C65A2A] transition disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-xl p-2 text-white/65 transition hover:bg-white/[0.05] hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label="Attach files"
               >
                 <Paperclip size={20} />
@@ -1431,7 +1484,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={() => cameraInputRef.current?.click()}
                 disabled={disabled}
-                className="text-white/60 hover:text-[#C65A2A] transition disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-xl p-2 text-white/65 transition hover:bg-white/[0.05] hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label="Take photo"
               >
                 <Camera size={20} />
@@ -1441,10 +1494,10 @@ export default function ChatWidget({
                 type="button"
                 onClick={handleMicClick}
                 disabled={isTranscribing || disabled}
-                className={`transition ${
+                className={`rounded-xl p-2 transition ${
                   isRecording
                     ? "text-red-400 hover:text-red-300"
-                    : "text-white/60 hover:text-[#C65A2A]"
+                    : "text-white/65 hover:bg-white/[0.05] hover:text-[#C65A2A]"
                 } disabled:cursor-not-allowed disabled:opacity-50`}
                 aria-label={
                   isRecording
@@ -1481,7 +1534,7 @@ export default function ChatWidget({
                     ? "Ask about the attachments, or add more context..."
                     : "Ask about a repair, upload files, or take a photo..."
                 }
-                className="chat-composer-textarea flex-1 rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white outline-none focus:border-orange-500 transition text-sm sm:text-base disabled:cursor-not-allowed disabled:opacity-50 resize-none overflow-y-auto min-h-[48px] max-h-[112px]"
+                className="chat-composer-textarea min-h-[42px] max-h-[104px] flex-1 resize-none overflow-y-auto rounded-[18px] bg-black/28 px-4 py-3 text-sm text-white/85 outline-none transition focus:bg-black/34 disabled:cursor-not-allowed disabled:opacity-50 sm:text-[15px]"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -1494,7 +1547,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={handleDownloadRedactedChat}
                 disabled={disabled || loading || isTranscribing || isExportingChat}
-                className="rounded-xl border border-white/8 bg-white/[0.03] px-4 py-3 text-white/62 transition hover:bg-white/[0.06] hover:text-white/84 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-[18px] bg-white/[0.04] px-3.5 py-3 text-sm text-white/65 transition hover:bg-white/[0.07] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isExportingChat ? "Preparing..." : "Download Chat"}
               </button>
@@ -1502,7 +1555,7 @@ export default function ChatWidget({
               <button
                 onClick={handleSend}
                 disabled={loading || isTranscribing || disabled}
-                className="rounded-xl bg-[#C65A2A] px-4 sm:px-5 py-3 text-black font-semibold transition hover:bg-[#C65A2A]/90 disabled:opacity-50"
+                className="rounded-[18px] bg-[#C65A2A] px-4 py-3 text-sm font-semibold text-black transition hover:bg-[#C65A2A]/92 disabled:opacity-50 sm:px-5"
               >
                 {loading ? "..." : "Send"}
               </button>
@@ -1510,7 +1563,7 @@ export default function ChatWidget({
               <button
                 type="button"
                 onClick={handleEndChat}
-                className="rounded-xl border border-red-500/20 bg-transparent px-4 py-3 text-red-300/80 transition hover:bg-red-500/8 hover:text-red-200 disabled:opacity-50"
+                className="rounded-[18px] border border-red-500/16 bg-transparent px-3.5 py-3 text-sm text-red-300/75 transition hover:bg-red-500/8 hover:text-red-200 disabled:opacity-50"
                 disabled={disabled || (loading && messages.length <= 1)}
                 aria-label="End chat"
                 title="End chat"
@@ -1521,8 +1574,8 @@ export default function ChatWidget({
 
                 {(isRecording || isTranscribing || recordingError) && (
                   <div
-                    className={`mt-3 text-xs ${
-                      recordingError ? "text-red-300" : "text-white/55"
+                    className={`mt-3 px-1 text-xs ${
+                      recordingError ? "text-red-300" : "text-white/40"
                     }`}
                   >
                     {recordingError
@@ -1535,10 +1588,10 @@ export default function ChatWidget({
               </div>
 
               {attachments.length > 0 && (
-                <div className="mt-3 rounded-[18px] border border-white/8 bg-white/[0.025] p-3">
+                <div className="mt-3 rounded-[20px] border border-white/7 bg-white/[0.03] p-3">
                 <button
                   type="button"
-                  className="w-full flex items-center justify-between rounded-xl border border-white/10 bg-black/30 px-4 py-2 text-sm text-white/80 transition hover:bg-black/40"
+                  className="flex w-full items-center justify-between rounded-[18px] bg-black/24 px-4 py-2.5 text-sm text-white/65 transition hover:bg-black/34"
                   onClick={() => setAttachmentsOpen((value) => !value)}
                   disabled={disabled}
                   aria-label="Toggle attachments"
@@ -1559,7 +1612,7 @@ export default function ChatWidget({
                     {attachments.map((attachment) => (
                       <div
                         key={attachment.attachmentId}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white/80"
+                        className="flex items-center justify-between gap-3 rounded-[18px] border border-white/6 bg-black/22 px-4 py-3 text-sm text-white/65"
                       >
                         <button
                           type="button"
@@ -1570,7 +1623,7 @@ export default function ChatWidget({
                           <div className="truncate pr-3 font-medium text-white">
                             {attachment.filename}
                           </div>
-                          <div className="mt-1 text-xs text-white/45">
+                          <div className="mt-1 text-xs text-white/40">
                             {formatAttachmentKind(attachment)} · {attachment.source === "camera" ? "Photo" : "File"}
                             {attachment.hasVision ? " · Vision" : ""}
                             {attachment.usedInAnalysis ? " · Used in analysis" : ""}
@@ -1583,7 +1636,7 @@ export default function ChatWidget({
                             onClick={() => setPreviewAttachmentId(attachment.attachmentId)}
                             aria-label="Preview attachment"
                             disabled={disabled}
-                            className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                            className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <Eye size={15} />
                           </button>
@@ -1592,7 +1645,7 @@ export default function ChatWidget({
                             onClick={() => handleReplaceAttachment(attachment.attachmentId)}
                             aria-label="Replace attachment"
                             disabled={disabled}
-                            className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                            className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <RefreshCcw size={15} />
                           </button>
@@ -1601,7 +1654,7 @@ export default function ChatWidget({
                             onClick={() => removeAttachment(attachment.attachmentId)}
                             aria-label="Remove attachment"
                             disabled={disabled}
-                            className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                            className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <X size={15} />
                           </button>
@@ -1613,7 +1666,7 @@ export default function ChatWidget({
                       type="button"
                       onClick={clearAllAttachments}
                       disabled={disabled}
-                      className="text-xs text-white/60 transition hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
+                      className="text-xs text-white/65 transition hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Clear all
                     </button>
@@ -1626,5 +1679,26 @@ export default function ChatWidget({
         </div>
       </div>
     </div>
+  );
+}
+
+function resolveNextPreviewAttachmentId(
+  attachments: Attachment[],
+  removedAttachmentId: string
+): string | null {
+  const removedIndex = attachments.findIndex(
+    (attachment) => attachment.attachmentId === removedAttachmentId
+  );
+  if (removedIndex === -1) {
+    return null;
+  }
+
+  const remaining = attachments.filter((attachment) => attachment.attachmentId !== removedAttachmentId);
+  if (remaining.length === 0) {
+    return null;
+  }
+
+  return (
+    remaining[Math.min(removedIndex, remaining.length - 1)]?.attachmentId ?? null
   );
 }

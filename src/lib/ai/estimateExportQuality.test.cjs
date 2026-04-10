@@ -20,7 +20,11 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 
 const { extractEstimateFacts } = require("./extractors/extractEstimateFacts.ts");
 const { normalizeReportToAnalysisResult } = require("./builders/normalizeReportToAnalysisResult.ts");
-const { buildExportModel, deriveExportReportFields } = require("./builders/buildExportModel.ts");
+const {
+  buildExportModel,
+  computeACVFromComps,
+  deriveExportReportFields,
+} = require("./builders/buildExportModel.ts");
 const { buildCarrierReport } = require("./builders/carrierPdfBuilder.ts");
 const { buildSideBySidePdf } = require("./builders/sideBySidePdfBuilder.ts");
 const { buildLineByLinePdf } = require("./builders/lineByLinePdfBuilder.ts");
@@ -253,6 +257,87 @@ run("export model removes placeholder text and keeps documented scans as positiv
   );
   assert.equal(exportModel.repairPosition.toLowerCase().includes("carrier estimate"), false);
   assert.equal(exportModel.repairPosition.toLowerCase().includes("shop estimate"), false);
+});
+
+run("computeACVFromComps derives a normalized market range from comparable listings", () => {
+  const result = computeACVFromComps({
+    vehicle: {
+      year: 2018,
+      make: "Tesla",
+      model: "Model S",
+      trim: "75D AWD",
+    },
+    mileage: 173702,
+    comparableListings: [
+      { price: 18800, mileage: 168000, year: 2018, make: "Tesla", model: "Model S", trim: "75D AWD" },
+      { price: 19450, mileage: 181200, year: 2018, make: "Tesla", model: "Model S", trim: "75D AWD" },
+      { price: 20100, mileage: 176000, year: 2019, make: "Tesla", model: "Model S", trim: "75D" },
+      { price: 21000, mileage: 165000, year: 2018, make: "Tesla", model: "Model 3", trim: "Long Range" },
+    ],
+  });
+
+  assert.ok(result);
+  assert.equal(result.sourceType, "comps");
+  assert.equal(result.compCount, 3);
+  assert.equal(typeof result.acvValue, "number");
+  assert.equal(typeof result.acvRange.low, "number");
+  assert.equal(typeof result.acvRange.high, "number");
+  assert.equal(result.acvRange.low <= result.acvValue, true);
+  assert.equal(result.acvRange.high >= result.acvValue, true);
+  assert.equal(result.confidence, "medium");
+});
+
+run("structured comparable listings override chat-derived ACV in the export model", () => {
+  const report = makeReport();
+  const analysis = normalizeReportToAnalysisResult(report);
+  analysis.valuationData = {
+    comparableListings: [
+      { price: 19100, mileage: 170000, year: 2018, make: "Tesla", model: "Model S", trim: "75D AWD" },
+      { price: 19850, mileage: 176200, year: 2018, make: "Tesla", model: "Model S", trim: "75D AWD" },
+      { price: 20500, mileage: 181000, year: 2019, make: "Tesla", model: "Model S", trim: "75D" },
+    ],
+  };
+
+  const exportModel = buildExportModel({
+    report,
+    analysis,
+    panel: null,
+    assistantAnalysis:
+      "ACV: $9,999. Diminished value may exist. For a full valuation, continue at https://www.collision.academy/",
+  });
+
+  assert.equal(exportModel.valuation.acvSourceType, "comps");
+  assert.equal(exportModel.valuation.acvStatus, "estimated_range");
+  assert.equal(exportModel.valuation.acvCompCount, 3);
+  assert.notEqual(exportModel.valuation.acvValue, 9999);
+  assert.equal(Boolean(exportModel.valuation.acvRange), true);
+  assert.equal(exportModel.valuation.acvMissingInputs.length, 0);
+  assert.equal(/comparable listing/i.test(exportModel.valuation.acvReasoning), true);
+});
+
+run("structured JD Power-style values are used when comps are unavailable", () => {
+  const report = makeReport();
+  const analysis = normalizeReportToAnalysisResult(report);
+  analysis.valuationData = {
+    jdPower: {
+      average: 18650,
+      low: 17400,
+      high: 19800,
+    },
+  };
+
+  const exportModel = buildExportModel({
+    report,
+    analysis,
+    panel: null,
+    assistantAnalysis: "ACV is not determinable from the current documents.",
+  });
+
+  assert.equal(exportModel.valuation.acvSourceType, "jd_power");
+  assert.equal(exportModel.valuation.acvStatus, "estimated_range");
+  assert.equal(exportModel.valuation.acvValue, 18650);
+  assert.deepEqual(exportModel.valuation.acvRange, { low: 17400, high: 19800 });
+  assert.equal(exportModel.valuation.acvConfidence, "medium");
 });
 
 run("chat-derived render insights strip orphan section labels and avoid over-weighting weak structure cues", () => {

@@ -171,6 +171,9 @@ function parsePdfMessageBlocks(text: string): PdfMessageBlock[] {
 }
 
 function buildChatExportPdf(text: string): ArrayBuffer {
+  const BODY_FONT = 10.5;
+  const HEADER_FONT = 14;
+
   const doc = new jsPDF({
     unit: "mm",
     format: "letter",
@@ -188,13 +191,13 @@ function buildChatExportPdf(text: string): ArrayBuffer {
 
   const drawPageChrome = (showIntro = false) => {
     doc.setFont("Helvetica", "Bold");
-    doc.setFontSize(showIntro ? 16 : 10);
+    doc.setFontSize(HEADER_FONT);
     doc.setTextColor(35, 35, 35);
     doc.text("Redacted Chat Export", marginX, showIntro ? 18 : 14);
 
     if (showIntro) {
       doc.setFont("Helvetica", "Normal");
-      doc.setFontSize(10);
+      doc.setFontSize(BODY_FONT);
       doc.text(
         "This download preserves the chat content while removing sensitive values from the exported copy.",
         marginX,
@@ -204,7 +207,7 @@ function buildChatExportPdf(text: string): ArrayBuffer {
     }
 
     doc.setFont("Helvetica", "Normal");
-    doc.setFontSize(8.5);
+    doc.setFontSize(BODY_FONT);
     doc.setTextColor(120, 120, 120);
     doc.text(`Page ${doc.getCurrentPageInfo().pageNumber}`, pageWidth - marginX, pageHeight - 8, {
       align: "right",
@@ -228,25 +231,27 @@ function buildChatExportPdf(text: string): ArrayBuffer {
   // Render each line safely so long chat blocks can continue across pages
   // instead of being clipped by a single oversized text call.
   for (const block of blocks.length > 0 ? blocks : [{ role: "MESSAGE", body: text.trim() }]) {
-    const labelHeight = 6;
+    const labelHeight = 7.5;
     const bodyLineHeight = 4.8;
     const bodyTopGap = 4;
     const blockBottomGap = 6;
-    const labelWidth = Math.min(54, Math.max(24, doc.getTextWidth(block.role) + 8));
+    const labelBoxY = y - 5;
+    const labelTextY = y + 0.7;
+    const labelWidth = Math.min(54, Math.max(24, doc.getTextWidth(block.role) + 10));
     const bodyLines = doc.splitTextToSize(block.body, blockWidth - 6);
     ensurePageSpace(labelHeight + bodyTopGap + bodyLineHeight + blockBottomGap);
 
     doc.setFillColor(238, 241, 245);
-    doc.roundedRect(marginX, y - 4, labelWidth, labelHeight, 1.4, 1.4, "F");
+    doc.roundedRect(marginX, labelBoxY, labelWidth, labelHeight, 1.4, 1.4, "F");
     doc.setTextColor(67, 76, 94);
     doc.setFont("Helvetica", "Bold");
-    doc.setFontSize(8.5);
-    doc.text(block.role, marginX + 3, y);
+    doc.setFontSize(BODY_FONT);
+    doc.text(block.role, marginX + 3, labelTextY);
 
     y += bodyTopGap;
     doc.setTextColor(35, 35, 35);
     doc.setFont("Times", "Normal");
-    doc.setFontSize(10.5);
+    doc.setFontSize(BODY_FONT);
 
     for (let index = 0; index < bodyLines.length; index += 1) {
       ensurePageSpace(bodyLineHeight);

@@ -74,6 +74,11 @@ export type ExportModel = {
   valuation: DerivedValuation;
 };
 
+export type ExportValuationPreviewSummary = {
+  acv: string;
+  dv: string;
+};
+
 export type ResolvedExportInput = {
   renderModel: ExportModel;
   report: RepairIntelligenceReport | null;
@@ -95,6 +100,45 @@ export type ExportReportFields = {
   estimateFacts: EstimateFacts;
   vehicle?: VehicleIdentity;
 };
+
+export type ComparableListing = {
+  price?: number;
+  askingPrice?: number;
+  mileage?: number;
+  year?: number;
+  make?: string;
+  model?: string;
+  trim?: string;
+  source?: string;
+  title?: string;
+};
+
+export type JDPowerValuation = {
+  average?: number;
+  low?: number;
+  high?: number;
+  cleanTradeIn?: number;
+  cleanRetail?: number;
+  source?: string;
+};
+
+export type StructuredValuationData = {
+  comparableListings?: ComparableListing[];
+  jdPower?: JDPowerValuation;
+};
+
+export type ComputedAcvResult = {
+  acvRange: { low: number; high: number };
+  acvValue: number;
+  confidence: "low" | "medium" | "high";
+  compCount: number;
+  sourceType: "comps" | "jd_power";
+  reasoning: string;
+};
+
+const ESTIMATE_TOTAL_ACV_FALLBACK_LOW_OFFSET = 3500;
+const ESTIMATE_TOTAL_ACV_FALLBACK_HIGH_OFFSET = 2500;
+const DV_FALLBACK_RANGE = { low: 500, high: 2500 } as const;
 
 const GENERIC_PLACEHOLDER_FIELD_PATTERN =
   /^(?:unknown|unspecified|n\/a|na|none|null|undefined|not available|not provided|vehicle details are still limited in the current material\.?|vehicle details still limited in the current material\.?|not clearly supported(?: in the current material)?\.?)$/i;
@@ -163,7 +207,13 @@ export function buildExportModel(params: {
   );
   const positionStatement = buildPositionStatement(params.report, params.analysis, supplementItems);
   const request = buildRequest(params.report, params.panel, supplementItems, chatInsights.request);
-  const valuation = buildValuation(params.panel, chatInsights.valuation, reportFields);
+  const valuation = buildValuation(
+    params.panel,
+    chatInsights.valuation,
+    reportFields,
+    params.report,
+    params.analysis
+  );
   const displayVehicle = getDisplayVehicleInfo(vehicle);
   const allowUnsupportedSeamSealerNarrative =
     hasExplicitSeamSealerSupport(sourceEstimateText) ||
@@ -464,6 +514,27 @@ function buildVehicleDisplayLabel(
       .filter(Boolean)
       .join(" ")
   );
+}
+
+export function buildExportValuationPreviewSummary(
+  valuation: DerivedValuation
+): ExportValuationPreviewSummary {
+  return {
+    acv: summarizeExportValuationBand({
+      label: "ACV preview",
+      status: valuation.acvStatus,
+      value: valuation.acvValue,
+      range: valuation.acvRange,
+      maxRange: 250000,
+    }),
+    dv: summarizeExportValuationBand({
+      label: "DV preview",
+      status: valuation.dvStatus,
+      value: valuation.dvValue,
+      range: valuation.dvRange,
+      maxRange: 50000,
+    }),
+  };
 }
 
 function sanitizeVehicleDisplay(value?: string | null): string | undefined {
@@ -1365,28 +1436,69 @@ function buildExportSupplementItems(
 function buildValuation(
   panel: DecisionPanel | null,
   chatValuation: DerivedValuation,
-  reportFields: ExportReportFields
+  reportFields: ExportReportFields,
+  report: RepairIntelligenceReport | null,
+  analysis: AnalysisResult | null
 ): DerivedValuation {
+  const computedAcv = resolveComputedAcv({
+    report,
+    analysis,
+    vehicle: reportFields.vehicle ?? estimateFactsToVehicle(reportFields.estimateFacts),
+    mileage: reportFields.mileage,
+  });
   const sanePanelDv = coerceSaneDvRange(panel?.diminishedValue?.low, panel?.diminishedValue?.high);
-  const hasChatDv =
-    (chatValuation.dvStatus === "provided" && typeof chatValuation.dvValue === "number") ||
-    (chatValuation.dvStatus === "estimated_range" && isSaneRange(chatValuation.dvRange, 50000));
-
-  const dvStatus = hasChatDv
-    ? chatValuation.dvStatus
-    : sanePanelDv
-      ? "estimated_range"
-      : "not_determinable";
+  const chatAcvPreviewRange = computedAcv
+    ? computedAcv.acvRange
+    : resolveValuationPreviewRange({
+        status: normalizeAcvStatus(chatValuation),
+        value: chatValuation.acvValue,
+        range: isSaneRange(chatValuation.acvRange, 250000) ? chatValuation.acvRange : undefined,
+        maxRange: 250000,
+        minSpread: 1200,
+        spreadRatio: 0.08,
+      });
+  const estimateTotalFallbackAcvRange = chatAcvPreviewRange
+    ? undefined
+    : resolveEstimateTotalAcvFallbackRange(reportFields.estimateTotal);
+  const acvPreviewRange = chatAcvPreviewRange ?? estimateTotalFallbackAcvRange;
+  const dvPreviewRange = resolveValuationPreviewRange({
+    status:
+      chatValuation.dvStatus === "provided" && typeof chatValuation.dvValue === "number"
+        ? "provided"
+        : chatValuation.dvStatus === "estimated_range" && isSaneRange(chatValuation.dvRange, 50000)
+          ? "estimated_range"
+          : sanePanelDv
+            ? "estimated_range"
+            : "not_determinable",
+    value: chatValuation.dvValue,
+    range:
+      chatValuation.dvStatus === "estimated_range" && isSaneRange(chatValuation.dvRange, 50000)
+        ? chatValuation.dvRange
+        : sanePanelDv,
+    maxRange: 50000,
+    minSpread: 500,
+    spreadRatio: 0.16,
+  });
+  const dvFallbackRange = dvPreviewRange
+    ? undefined
+    : resolveDirectionalDvFallbackRange({
+        panel,
+        reportFields,
+        report,
+        analysis,
+      });
+  const resolvedDvPreviewRange = dvPreviewRange ?? dvFallbackRange;
 
   const canonicalAcvMissingInputs =
-    normalizeAcvStatus(chatValuation) === "not_determinable"
-      ? scrubValuationMissingInputs(
+    acvPreviewRange && !estimateTotalFallbackAcvRange
+      ? []
+      : scrubValuationMissingInputs(
           chatValuation.acvMissingInputs.length
             ? chatValuation.acvMissingInputs
             : ["vehicle condition", "mileage", "trim/options", "market comparable data"],
           reportFields
-        )
-      : [];
+        );
+  const dvStatus = resolvedDvPreviewRange ? "estimated_range" : "not_determinable";
   const canonicalDvMissingInputs =
     dvStatus === "not_determinable"
       ? scrubValuationMissingInputs(
@@ -1399,40 +1511,537 @@ function buildValuation(
 
   return {
     ...chatValuation,
-    acvStatus: normalizeAcvStatus(chatValuation),
-    acvValue:
-      chatValuation.acvStatus === "provided" && typeof chatValuation.acvValue === "number"
-        ? chatValuation.acvValue
-        : undefined,
-    acvRange: isSaneRange(chatValuation.acvRange, 250000) ? chatValuation.acvRange : undefined,
-    acvConfidence: normalizeValuationConfidence(
-      normalizeAcvStatus(chatValuation),
-      chatValuation.acvConfidence,
-      canonicalAcvMissingInputs
-    ),
-    acvReasoning:
-      sanitizeReason(chatValuation.acvReasoning, "ACV is not determinable from the current documents.") ||
-      "ACV is not determinable from the current documents.",
+    acvStatus: acvPreviewRange ? "estimated_range" : "not_determinable",
+    acvValue: undefined,
+    acvRange: acvPreviewRange,
+    acvConfidence: computedAcv
+      ? computedAcv.confidence
+      : estimateTotalFallbackAcvRange
+        ? "low"
+      : normalizeValuationConfidence(
+          acvPreviewRange ? "estimated_range" : "not_determinable",
+          chatValuation.acvConfidence,
+          canonicalAcvMissingInputs
+        ),
+    acvCompCount: computedAcv?.sourceType === "comps" ? computedAcv.compCount : undefined,
+    acvSourceType: computedAcv?.sourceType ?? "fallback",
+    acvReasoning: computedAcv
+      ? `${computedAcv.reasoning} This remains a directional preview band, not a formal ACV appraisal.`
+      : estimateTotalFallbackAcvRange
+        ? `Directional preview only. No stronger market valuation support was preserved, so the current estimate total is being used as a rough anchor with a conservative fallback band of -$${ESTIMATE_TOTAL_ACV_FALLBACK_LOW_OFFSET.toLocaleString("en-US")} / +$${ESTIMATE_TOTAL_ACV_FALLBACK_HIGH_OFFSET.toLocaleString("en-US")}.`
+      : acvPreviewRange
+        ? sanitizeReason(
+            chatValuation.acvReasoning,
+            "This is a directional ACV preview band based on the current file set."
+          ) || "This is a directional ACV preview band based on the current file set."
+        : sanitizeReason(chatValuation.acvReasoning, "ACV preview is not supportable from the current documents.") ||
+          "ACV preview is not supportable from the current documents.",
     acvMissingInputs: canonicalAcvMissingInputs,
     dvStatus,
-    dvValue:
-      hasChatDv && chatValuation.dvStatus === "provided" ? chatValuation.dvValue : undefined,
-    dvRange:
-      hasChatDv && chatValuation.dvStatus === "estimated_range"
-        ? chatValuation.dvRange
-        : sanePanelDv,
-    dvConfidence: normalizeValuationConfidence(
-      dvStatus,
-      chatValuation.dvConfidence ?? normalizePanelDvConfidence(panel?.diminishedValue?.confidence),
-      canonicalDvMissingInputs
-    ),
+    dvValue: undefined,
+    dvRange: resolvedDvPreviewRange,
+    dvConfidence: dvFallbackRange
+      ? "low"
+      : normalizeValuationConfidence(
+          dvStatus,
+          chatValuation.dvConfidence ?? normalizePanelDvConfidence(panel?.diminishedValue?.confidence),
+          canonicalDvMissingInputs
+        ),
     dvReasoning:
-      sanitizeReason(
-        hasChatDv ? chatValuation.dvReasoning : panel?.diminishedValue?.rationale,
-        "DV is not determinable from the current documents."
-      ) || "DV is not determinable from the current documents.",
+      dvFallbackRange
+        ? "Directional preview only. The file shows enough repair-impact context to support a conservative diminished value preview band, but not a formal appraisal-grade DV conclusion."
+      : resolvedDvPreviewRange
+        ? sanitizeReason(
+            chatValuation.dvReasoning ?? panel?.diminishedValue?.rationale,
+            "This is a directional diminished value preview band based on the current file set."
+          ) || "This is a directional diminished value preview band based on the current file set."
+        : sanitizeReason(
+            chatValuation.dvReasoning ?? panel?.diminishedValue?.rationale,
+            "DV preview is not supportable from the current documents."
+          ) || "DV preview is not supportable from the current documents.",
     dvMissingInputs: canonicalDvMissingInputs,
   };
+}
+
+function resolveEstimateTotalAcvFallbackRange(
+  estimateTotal?: number
+): { low: number; high: number } | undefined {
+  if (typeof estimateTotal !== "number" || !Number.isFinite(estimateTotal) || estimateTotal <= 0) {
+    return undefined;
+  }
+
+  const range = {
+    low: Math.max(1, Math.round(estimateTotal - ESTIMATE_TOTAL_ACV_FALLBACK_LOW_OFFSET)),
+    high: Math.round(estimateTotal + ESTIMATE_TOTAL_ACV_FALLBACK_HIGH_OFFSET),
+  };
+
+  return isSaneRange(range, 250000) ? range : undefined;
+}
+
+function resolveDirectionalDvFallbackRange(params: {
+  panel: DecisionPanel | null;
+  reportFields: ExportReportFields;
+  report: RepairIntelligenceReport | null;
+  analysis: AnalysisResult | null;
+}): { low: number; high: number } | undefined {
+  if (!hasDirectionalDvFallbackSupport(params)) {
+    return undefined;
+  }
+
+  return { ...DV_FALLBACK_RANGE };
+}
+
+function hasDirectionalDvFallbackSupport(params: {
+  panel: DecisionPanel | null;
+  reportFields: ExportReportFields;
+  report: RepairIntelligenceReport | null;
+  analysis: AnalysisResult | null;
+}): boolean {
+  const vehicleYear =
+    params.reportFields.vehicle?.year ?? params.reportFields.estimateFacts.vehicle?.year;
+  const lateModelVehicle =
+    typeof vehicleYear === "number" && vehicleYear >= new Date().getFullYear() - 10;
+  const sourceText = collectVehicleDocumentText(params.report, params.analysis);
+  const repairStory = sourceText ? buildRepairStory(sourceText) : null;
+  const multiPanelRepair = Boolean(repairStory && repairStory.panels.length >= 2);
+  const structuredImpact =
+    Boolean(repairStory && (repairStory.structural || repairStory.impact !== "general")) ||
+    (params.report?.issues.length ?? 0) > 0 ||
+    (params.report?.missingProcedures.length ?? 0) > 0 ||
+    (params.report?.supplementOpportunities.length ?? 0) > 0 ||
+    (params.analysis?.findings.length ?? 0) > 0;
+  const comparisonDispute =
+    (params.analysis?.mode ?? params.report?.analysis?.mode) === "comparison";
+  const calibrationOrStructuralSignals = /calibration|scan|adas|sensor|camera|radar|structural|measure|rail|support|pillar|apron/i.test(
+    [
+      params.panel?.narrative,
+      params.panel?.supplements.map((item) => `${item.title} ${item.rationale}`).join(" "),
+      params.report?.recommendedActions.join(" "),
+      params.report?.missingProcedures.join(" "),
+      params.report?.supplementOpportunities.join(" "),
+      sourceText,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+
+  const strongSignals = [multiPanelRepair, structuredImpact, comparisonDispute].filter(Boolean).length;
+  const supportingSignals = [lateModelVehicle, calibrationOrStructuralSignals].filter(Boolean).length;
+
+  return strongSignals >= 1 || strongSignals + supportingSignals >= 2;
+}
+
+function resolveValuationPreviewRange(params: {
+  status: "provided" | "estimated_range" | "not_determinable";
+  value?: number;
+  range?: { low: number; high: number };
+  maxRange: number;
+  minSpread: number;
+  spreadRatio: number;
+}): { low: number; high: number } | undefined {
+  if (params.status === "estimated_range" && isSaneRange(params.range, params.maxRange)) {
+    return params.range;
+  }
+
+  if (params.status === "provided" && typeof params.value === "number") {
+    return buildPreviewBandFromValue(params.value, params.minSpread, params.spreadRatio, params.maxRange);
+  }
+
+  return undefined;
+}
+
+function buildPreviewBandFromValue(
+  value: number,
+  minSpread: number,
+  spreadRatio: number,
+  maxRange: number
+): { low: number; high: number } | undefined {
+  if (!Number.isFinite(value) || value <= 0 || value > maxRange) {
+    return undefined;
+  }
+
+  const spread = Math.max(minSpread, Math.round(value * spreadRatio));
+  const range = {
+    low: Math.max(1, value - spread),
+    high: Math.min(maxRange, value + spread),
+  };
+
+  return isSaneRange(range, maxRange) ? range : undefined;
+}
+
+function resolveComputedAcv(params: {
+  report: RepairIntelligenceReport | null;
+  analysis: AnalysisResult | null;
+  vehicle?: VehicleIdentity;
+  mileage?: number;
+}): ComputedAcvResult | null {
+  const valuationData = extractStructuredValuationData(params.report, params.analysis);
+  const fromComps = computeACVFromComps({
+    vehicle: params.vehicle,
+    mileage: params.mileage,
+    comparableListings: valuationData.comparableListings,
+  });
+  if (fromComps) return fromComps;
+  return computeACVFromJdPower(valuationData.jdPower);
+}
+
+export function computeACVFromComps(params: {
+  vehicle?: VehicleIdentity;
+  mileage?: number;
+  comparableListings?: ComparableListing[];
+}): ComputedAcvResult | null {
+  const targetVehicle = params.vehicle;
+  const normalizedTargetTrim = normalizeKey(targetVehicle?.trim ?? "");
+  const adjusted = (params.comparableListings ?? [])
+    .map((listing) => normalizeComparableListing(listing))
+    .filter((listing): listing is NormalizedComparableListing => Boolean(listing))
+    .filter((listing) => isComparableListingRelevant(listing, targetVehicle))
+    .map((listing) => {
+      const mileageAdjusted = applyMileageAdjustment(listing.price, params.mileage, listing.mileage);
+      const yearAdjusted = applyYearAdjustment(mileageAdjusted, targetVehicle?.year, listing.year);
+      const trimAdjusted = applyTrimAdjustment(yearAdjusted, normalizedTargetTrim, normalizeKey(listing.trim ?? ""));
+      return {
+        ...listing,
+        adjustedPrice: Math.round(trimAdjusted),
+        exactTrimMatch:
+          Boolean(normalizedTargetTrim) &&
+          Boolean(normalizeKey(listing.trim ?? "")) &&
+          trimsLookEquivalent(normalizedTargetTrim, normalizeKey(listing.trim ?? "")),
+      };
+    })
+    .filter((listing) => Number.isFinite(listing.adjustedPrice) && listing.adjustedPrice > 500);
+
+  if (adjusted.length < 3) {
+    return null;
+  }
+
+  const sorted = adjusted
+    .map((listing) => listing.adjustedPrice)
+    .sort((left, right) => left - right);
+  const median = computeMedian(sorted);
+  const low = computePercentile(sorted, 0.25);
+  const high = computePercentile(sorted, 0.75);
+  const range = {
+    low: Math.min(low, median),
+    high: Math.max(high, median),
+  };
+
+  if (!isSaneRange(range, 250000)) {
+    return null;
+  }
+
+  const mileageKnownCount = adjusted.filter((listing) => typeof listing.mileage === "number").length;
+  const exactTrimMatchCount = adjusted.filter((listing) => listing.exactTrimMatch).length;
+  const confidence = deriveComparableConfidence({
+    compCount: adjusted.length,
+    mileageKnownCount,
+    exactTrimMatchCount,
+  });
+  const notes = [
+    `${adjusted.length} comparable listing${adjusted.length === 1 ? "" : "s"} used`,
+    mileageKnownCount > 0 ? "mileage-normalized" : "limited mileage detail",
+    normalizedTargetTrim
+      ? exactTrimMatchCount > 0
+        ? `${exactTrimMatchCount} trim-aligned`
+        : "trim normalized conservatively"
+      : "target trim not confirmed",
+  ];
+
+  return {
+    acvRange: range,
+    acvValue: median,
+    confidence,
+    compCount: adjusted.length,
+    sourceType: "comps",
+    reasoning: `ACV derived from ${notes.join(", ")} with median comparable pricing used as the working value.`,
+  };
+}
+
+function computeACVFromJdPower(jdPower?: JDPowerValuation): ComputedAcvResult | null {
+  if (!jdPower) return null;
+
+  const low = coerceCurrencyValue(jdPower.low ?? jdPower.cleanTradeIn);
+  const high = coerceCurrencyValue(jdPower.high ?? jdPower.cleanRetail);
+  const average = coerceCurrencyValue(
+    jdPower.average ??
+      (typeof low === "number" && typeof high === "number" ? Math.round((low + high) / 2) : undefined)
+  );
+
+  if (typeof low !== "number" || typeof high !== "number" || typeof average !== "number") {
+    return null;
+  }
+
+  const range = {
+    low: Math.min(low, high),
+    high: Math.max(low, high),
+  };
+
+  if (!isSaneRange(range, 250000)) {
+    return null;
+  }
+
+  return {
+    acvRange: range,
+    acvValue: average,
+    confidence: "medium",
+    compCount: 0,
+    sourceType: "jd_power",
+    reasoning: "ACV derived from structured JD Power-style valuation data using the provided average and range.",
+  };
+}
+
+type NormalizedComparableListing = {
+  price: number;
+  mileage?: number;
+  year?: number;
+  make?: string;
+  model?: string;
+  trim?: string;
+  source?: string;
+  title?: string;
+};
+
+function extractStructuredValuationData(
+  report: RepairIntelligenceReport | null,
+  analysis: AnalysisResult | null
+): StructuredValuationData {
+  const candidates = [
+    analysis,
+    report?.analysis ?? null,
+    report,
+  ].filter(Boolean) as Array<Record<string, unknown>>;
+
+  const valuationData: StructuredValuationData = {};
+
+  for (const candidate of candidates) {
+    const containers = [
+      candidate,
+      asRecord(candidate.valuationData),
+      asRecord(candidate.marketValuation),
+      asRecord(candidate.valuation),
+      asRecord(candidate.acv),
+      asRecord(candidate.marketData),
+    ].filter(Boolean) as Array<Record<string, unknown>>;
+
+    for (const container of containers) {
+      if (!valuationData.comparableListings) {
+        const listings = coerceComparableListings(
+          container.comparableListings ??
+            container.comps ??
+            container.comparables ??
+            container.listings
+        );
+        if (listings.length > 0) {
+          valuationData.comparableListings = listings;
+        }
+      }
+
+      if (!valuationData.jdPower) {
+        const jdPower = coerceJdPowerValuation(
+          container.jdPower ?? container.jd_power ?? container.jdpower
+        );
+        if (jdPower) {
+          valuationData.jdPower = jdPower;
+        }
+      }
+    }
+  }
+
+  return valuationData;
+}
+
+function coerceComparableListings(value: unknown): ComparableListing[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => asRecord(entry))
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+    .map((entry) => ({
+      price: coerceCurrencyValue(
+        entry.price ??
+          entry.askingPrice ??
+          entry.listPrice ??
+          asRecord(entry.price)?.amount
+      ),
+      askingPrice: coerceCurrencyValue(entry.askingPrice ?? entry.listPrice),
+      mileage: coerceIntegerValue(entry.mileage ?? entry.odometer),
+      year: coerceIntegerValue(entry.year),
+      make: coerceStringValue(entry.make),
+      model: coerceStringValue(entry.model),
+      trim: coerceStringValue(entry.trim),
+      source: coerceStringValue(entry.source ?? entry.sourceType ?? entry.provider),
+      title: coerceStringValue(entry.title ?? entry.label ?? entry.name),
+    }))
+    .filter((entry) => typeof (entry.price ?? entry.askingPrice) === "number");
+}
+
+function coerceJdPowerValuation(value: unknown): JDPowerValuation | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  return {
+    average: coerceCurrencyValue(record.average ?? record.mid ?? record.marketValue),
+    low: coerceCurrencyValue(record.low ?? record.tradeIn ?? record.lowRetail),
+    high: coerceCurrencyValue(record.high ?? record.cleanRetail ?? record.highRetail),
+    cleanTradeIn: coerceCurrencyValue(record.cleanTradeIn),
+    cleanRetail: coerceCurrencyValue(record.cleanRetail),
+    source: coerceStringValue(record.source ?? record.provider),
+  };
+}
+
+function normalizeComparableListing(
+  listing: ComparableListing
+): NormalizedComparableListing | null {
+  const price = coerceCurrencyValue(listing.price ?? listing.askingPrice);
+  if (typeof price !== "number" || price <= 500 || price > 250000) {
+    return null;
+  }
+
+  return {
+    price,
+    mileage: coerceIntegerValue(listing.mileage),
+    year: coerceIntegerValue(listing.year),
+    make: cleanDisplayLabel(listing.make),
+    model: cleanDisplayLabel(listing.model),
+    trim: cleanVehicleDescriptor(listing.trim),
+    source: cleanDisplayLabel(listing.source),
+    title: cleanDisplayLabel(listing.title),
+  };
+}
+
+function isComparableListingRelevant(
+  listing: NormalizedComparableListing,
+  targetVehicle?: VehicleIdentity
+): boolean {
+  const targetMake = normalizeKey(targetVehicle?.make ?? "");
+  const targetModel = normalizeKey(targetVehicle?.model ?? "");
+  const listingMake = normalizeKey(listing.make ?? "");
+  const listingModel = normalizeKey(listing.model ?? "");
+
+  if (targetMake && listingMake && targetMake !== listingMake) {
+    return false;
+  }
+  if (targetModel && listingModel && targetModel !== listingModel) {
+    return false;
+  }
+  if (
+    typeof targetVehicle?.year === "number" &&
+    typeof listing.year === "number" &&
+    Math.abs(targetVehicle.year - listing.year) > 1
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function applyMileageAdjustment(
+  price: number,
+  targetMileage?: number,
+  compMileage?: number
+): number {
+  if (typeof targetMileage !== "number" || typeof compMileage !== "number") {
+    return price;
+  }
+
+  const mileageDelta = compMileage - targetMileage;
+  const adjustment = Math.max(-4000, Math.min(4000, Math.round(mileageDelta * 0.08)));
+  return price - adjustment;
+}
+
+function applyYearAdjustment(
+  price: number,
+  targetYear?: number,
+  compYear?: number
+): number {
+  if (typeof targetYear !== "number" || typeof compYear !== "number" || targetYear === compYear) {
+    return price;
+  }
+
+  const yearDelta = compYear - targetYear;
+  const rate = Math.min(Math.abs(yearDelta) * 0.04, 0.12);
+  return Math.round(yearDelta > 0 ? price * (1 - rate) : price * (1 + rate));
+}
+
+function applyTrimAdjustment(
+  price: number,
+  targetTrim: string,
+  compTrim: string
+): number {
+  if (!targetTrim || !compTrim || trimsLookEquivalent(targetTrim, compTrim)) {
+    return price;
+  }
+  return Math.round(price * 0.975);
+}
+
+function trimsLookEquivalent(left: string, right: string): boolean {
+  if (!left || !right) return false;
+  return left === right || left.includes(right) || right.includes(left);
+}
+
+function deriveComparableConfidence(params: {
+  compCount: number;
+  mileageKnownCount: number;
+  exactTrimMatchCount: number;
+}): "low" | "medium" | "high" {
+  if (
+    params.compCount >= 5 &&
+    params.mileageKnownCount >= Math.ceil(params.compCount / 2) &&
+    params.exactTrimMatchCount >= Math.max(1, Math.floor(params.compCount / 2))
+  ) {
+    return "high";
+  }
+
+  if (
+    params.compCount >= 3 &&
+    (params.mileageKnownCount >= 2 || params.exactTrimMatchCount >= 1)
+  ) {
+    return "medium";
+  }
+
+  return "low";
+}
+
+function computeMedian(values: number[]): number {
+  return computePercentile(values, 0.5);
+}
+
+function computePercentile(values: number[], percentile: number): number {
+  if (values.length === 0) return 0;
+  const index = Math.max(0, Math.min(values.length - 1, Math.round((values.length - 1) * percentile)));
+  return values[index];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function coerceCurrencyValue(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.round(value);
+  }
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/[^0-9.-]/g, "");
+  if (!normalized) return undefined;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? Math.round(parsed) : undefined;
+}
+
+function coerceIntegerValue(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.round(value);
+  }
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/[^0-9-]/g, "");
+  if (!normalized) return undefined;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? Math.round(parsed) : undefined;
+}
+
+function coerceStringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function estimateFactsToVehicle(facts?: EstimateFacts): VehicleIdentity | undefined {
+  return facts?.vehicle;
 }
 
 function scrubValuationMissingInputs(
@@ -2993,6 +3602,33 @@ function normalizeAcvStatus(valuation: DerivedValuation): DerivedValuation["acvS
     return "estimated_range";
   }
   return "not_determinable";
+}
+
+function summarizeExportValuationBand(params: {
+  label: string;
+  status: "provided" | "estimated_range" | "not_determinable";
+  value?: number;
+  range?: { low: number; high: number };
+  maxRange: number;
+}): string {
+  if (params.status === "estimated_range" && isSaneRange(params.range, params.maxRange)) {
+    return `${params.label}: ${formatCompactCurrency(params.range.low)}-${formatCompactCurrency(params.range.high)} (directional only)`;
+  }
+
+  if (params.status === "provided" && typeof params.value === "number") {
+    return `${params.label}: around ${formatCompactCurrency(params.value)} (directional only)`;
+  }
+
+  return `${params.label}: directional range not strongly supported from the current file set`;
+}
+
+function formatCompactCurrency(value: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(value);
 }
 
 function coerceSaneDvRange(
