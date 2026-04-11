@@ -8,6 +8,7 @@ export type EstimateComparisonRow = {
   lhsValue?: string | number | null;
   rhsValue?: string | number | null;
   delta?: string | number | null;
+  valueUnit?: "currency" | "hours" | "count" | "text";
   deltaType?: "added" | "removed" | "changed" | "same" | "unknown";
   confidence?: number | null;
   notes?: string[];

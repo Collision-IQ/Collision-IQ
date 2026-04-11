@@ -21,8 +21,6 @@ export type AccountEntitlements = Omit<ViewerAccess, "plan"> & {
   canUseSupplementLines: boolean;
   canUseNegotiationDraft: boolean;
   canUseRebuttalEmail: boolean;
-  canUseSideBySideReport: boolean;
-  canUseLineByLineReport: boolean;
   usageStatus: "ok" | "usage_limit_reached" | "trial_expired" | "upgrade_required";
 };
 
@@ -51,14 +49,6 @@ export function canUseRebuttalEmail(entitlements: AccountEntitlements) {
   return entitlements.canUseRebuttalEmail;
 }
 
-export function canUseSideBySideReport(entitlements: AccountEntitlements) {
-  return entitlements.canUseSideBySideReport;
-}
-
-export function canUseLineByLineReport(entitlements: AccountEntitlements) {
-  return entitlements.canUseLineByLineReport;
-}
-
 export function toAccountEntitlements(access: ViewerAccess): AccountEntitlements {
   if (access.isPlatformAdmin) {
     return {
@@ -78,8 +68,6 @@ export function toAccountEntitlements(access: ViewerAccess): AccountEntitlements
       canUseSupplementLines: true,
       canUseNegotiationDraft: true,
       canUseRebuttalEmail: true,
-      canUseSideBySideReport: true,
-      canUseLineByLineReport: true,
       usageStatus: "ok",
     };
   }
@@ -118,8 +106,6 @@ export function toAccountEntitlements(access: ViewerAccess): AccountEntitlements
     canUseSupplementLines: hasFeature(access, "supplement_lines"),
     canUseNegotiationDraft: hasFeature(access, "negotiation_draft"),
     canUseRebuttalEmail: hasFeature(access, "rebuttal_email"),
-    canUseSideBySideReport: hasFeature(access, "side_by_side_report"),
-    canUseLineByLineReport: hasFeature(access, "line_by_line_report"),
     usageStatus,
   };
 }

@@ -9,8 +9,6 @@ const FEATURES = [
   { key: "supplement_lines", label: "Supplement lines" },
   { key: "negotiation_draft", label: "Negotiation draft" },
   { key: "rebuttal_email", label: "Rebuttal email" },
-  { key: "side_by_side_report", label: "Side-by-side report" },
-  { key: "line_by_line_report", label: "Line-by-line report" },
   { key: "shop_management", label: "Shop management" },
 ] as const;
 

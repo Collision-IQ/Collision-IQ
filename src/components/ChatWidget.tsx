@@ -5,10 +5,6 @@ import {
   Paperclip,
   X,
   Camera,
-  ChevronDown,
-  ChevronUp,
-  Eye,
-  RefreshCcw,
   Volume2,
   Square,
   Mic,
@@ -22,7 +18,6 @@ import type { WorkspaceData } from "@/types/workspaceTypes";
 import {
   buildAttachmentBatchStatus,
   buildAttachmentSummary,
-  formatAttachmentKind,
   isLikelyImageFile,
   MAX_UPLOAD_BATCH_FILES,
   summarizeAttachmentStats,
@@ -43,9 +38,7 @@ import {
 import {
   createMessage,
   isSystemStatusMessage,
-  type AssistantMessageKind,
   type ChatMessage as Message,
-  type Role,
 } from "@/components/chatWidget/messageUtils";
 import AttachmentPreviewModal, {
   type PreviewAttachment,
@@ -67,11 +60,21 @@ interface Attachment {
 
 interface ChatWidgetProps {
   onAttachmentChange?: (filename: string | null) => void;
+  onAttachmentsChange?: (attachments: Attachment[]) => void;
   onAnalysisChange?: (text: string) => void;
+  onPrimaryAnalysisChange?: (data: { messageId: string; content: string } | null) => void;
   onAnalysisResultChange?: (data: RepairIntelligenceReport | null) => void;
   onAnalysisPanelChange?: (panel: DecisionPanel | null) => void;
   onAnalysisLoadingChange?: (loading: boolean) => void;
   onWorkspaceDataChange?: (data: WorkspaceData | null) => void;
+  onSessionReset?: () => void;
+  onSessionControlsReady?: (
+    controls: {
+      focusComposer: () => void;
+      resetSession: () => void;
+    } | null
+  ) => void;
+  suppressedMessageIds?: string[];
   disabled?: boolean;
 }
 
@@ -94,11 +97,16 @@ const TTS_STYLE_PROMPT =
 
 export default function ChatWidget({
   onAttachmentChange,
+  onAttachmentsChange,
   onAnalysisChange,
+  onPrimaryAnalysisChange,
   onAnalysisResultChange,
   onAnalysisPanelChange,
   onAnalysisLoadingChange,
   onWorkspaceDataChange,
+  onSessionReset,
+  onSessionControlsReady,
+  suppressedMessageIds = [],
   disabled = false,
 }: ChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
@@ -106,7 +114,6 @@ export default function ChatWidget({
   const [loading, setLoading] = useState(false);
   const [isExportingChat, setIsExportingChat] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [attachmentsOpen, setAttachmentsOpen] = useState(true);
   const [previewAttachmentId, setPreviewAttachmentId] = useState<string | null>(null);
   const [replaceAttachmentId, setReplaceAttachmentId] = useState<string | null>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
@@ -148,10 +155,6 @@ export default function ChatWidget({
       navigator.userAgent
     );
   }, []);
-  const visionAttachmentCount = useMemo(
-    () => attachments.filter((attachment) => attachment.hasVision).length,
-    [attachments]
-  );
   const previewAttachment = useMemo(
     () => attachments.find((attachment) => attachment.attachmentId === previewAttachmentId) ?? null,
     [attachments, previewAttachmentId]
@@ -163,15 +166,20 @@ export default function ChatWidget({
         : -1,
     [attachments, previewAttachmentId]
   );
+  const suppressedMessageIdSet = useMemo(() => new Set(suppressedMessageIds), [suppressedMessageIds]);
+  const visibleMessages = useMemo(
+    () => messages.filter((message) => !suppressedMessageIdSet.has(message.id)),
+    [messages, suppressedMessageIdSet]
+  );
 
   useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
 
   useEffect(() => {
-    if (attachments.length >= 3) setAttachmentsOpen(false);
-    if (attachments.length === 0) setAttachmentsOpen(true);
-  }, [attachments.length]);
+    onAttachmentsChange?.(attachments);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachments]);
 
   useEffect(() => {
     return () => {
@@ -251,6 +259,17 @@ export default function ChatWidget({
     textarea.style.height = `${Math.min(textarea.scrollHeight, 112)}px`;
   }, [input]);
 
+  useEffect(() => {
+    onSessionControlsReady?.({
+      focusComposer,
+      resetSession: handleEndChat,
+    });
+
+    return () => {
+      onSessionControlsReady?.(null);
+    };
+  });
+
   function upsertSystemStatusMessage(content: string) {
     setMessages((prev) => {
       const activeMessageId = activeSystemStatusMessageIdRef.current;
@@ -305,6 +324,7 @@ export default function ChatWidget({
     analysisTextRef.current = "";
     workspaceDataRef.current = null;
     onAnalysisChange?.("");
+    onPrimaryAnalysisChange?.(null);
     onAnalysisResultChange?.(null);
     onAnalysisPanelChange?.(null);
     onWorkspaceDataChange?.(null);
@@ -536,6 +556,22 @@ export default function ChatWidget({
     setOpeningDisclaimerDismissed(true);
   }
 
+  function focusComposer() {
+    if (disabled) return;
+
+    shouldAutoScrollRef.current = true;
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+
+      textarea.focus({ preventScroll: true });
+      const end = textarea.value.length;
+      textarea.setSelectionRange(end, end);
+    });
+  }
+
   function handleEndChat() {
     abortRef.current?.abort();
     abortRef.current = null;
@@ -551,7 +587,6 @@ export default function ChatWidget({
     });
     setMessages([INITIAL_MESSAGE]);
     setAttachments([]);
-    setAttachmentsOpen(true);
     setPreviewAttachmentId(null);
     setReplaceAttachmentId(null);
     firstAttachmentAtRef.current = null;
@@ -565,6 +600,7 @@ export default function ChatWidget({
 
     onAttachmentChange?.(null);
     invalidateStructuredAnalysis();
+    onSessionReset?.();
 
     shouldAutoScrollRef.current = true;
     setTimeout(() => {
@@ -673,7 +709,7 @@ export default function ChatWidget({
       if (hasAttachmentsInTurn) {
         console.info("[attachments] analysis request assembled", {
           attachmentCount: attachments.length,
-          visionAttachmentCount,
+          visionAttachmentCount: attachments.filter((attachment) => attachment.hasVision).length,
           attachments: attachments.map((attachment) => ({
             filename: attachment.filename,
             mimeType: attachment.mime || "unknown",
@@ -801,6 +837,12 @@ export default function ChatWidget({
           (!hasAttachmentsInTurn || analysisRunRef.current === activeAnalysisRunId)
         ) {
           updateAnalysisText(assistantText);
+          if (hasAttachmentsInTurn) {
+            onPrimaryAnalysisChange?.({
+              messageId: streamingAssistantMessage.id,
+              content: assistantText,
+            });
+          }
         }
       } else {
         const data = await response.json();
@@ -809,12 +851,19 @@ export default function ChatWidget({
         if (sessionRef.current === mySession) {
           stopSpeaking();
           messageCounterRef.current += 1;
+          const assistantMessage = createMessage(messageCounterRef.current, "assistant", reply);
           setMessages((prev) => [
             ...prev,
-            createMessage(messageCounterRef.current, "assistant", reply),
+            assistantMessage,
           ]);
           if (!hasAttachmentsInTurn || analysisRunRef.current === activeAnalysisRunId) {
             updateAnalysisText(reply);
+            if (hasAttachmentsInTurn) {
+              onPrimaryAnalysisChange?.({
+                messageId: assistantMessage.id,
+                content: reply,
+              });
+            }
           }
         }
       }
@@ -1047,21 +1096,6 @@ export default function ChatWidget({
     invalidateStructuredAnalysis();
   }
 
-  function clearAllAttachments() {
-    if (disabled) return;
-    attachments.forEach((attachment) => {
-      if (attachment.previewUrl) {
-        URL.revokeObjectURL(attachment.previewUrl);
-      }
-    });
-    setAttachments([]);
-    setPreviewAttachmentId(null);
-    setReplaceAttachmentId(null);
-    onAttachmentChange?.(null);
-    clearActiveSystemStatusMessage();
-    invalidateStructuredAnalysis();
-  }
-
   function handleReplaceAttachment(attachmentId: string) {
     if (disabled) return;
     invalidateStructuredAnalysis();
@@ -1272,7 +1306,7 @@ export default function ChatWidget({
       <div className="absolute inset-0 pointer-events-none bg-[url('/brand/logos/Logo-grey.png')] bg-no-repeat bg-center bg-[length:60%] opacity-[0.06]" />
       <div className="absolute inset-0 bg-[#040404]/74 pointer-events-none" />
 
-      <div className="relative z-10 flex flex-col flex-1 min-h-0">
+      <div className="relative z-10 flex h-full min-h-0 flex-col">
         <div
           ref={scrollRef}
           className="
@@ -1285,7 +1319,7 @@ export default function ChatWidget({
           space-y-4
         "
         >
-          {messages.length === 1 && messages[0].role === "assistant" && (
+          {visibleMessages.length === 1 && visibleMessages[0].role === "assistant" && (
             <div className="flex flex-col items-center justify-center space-y-6 py-20 text-center">
               {showOpeningDisclaimer && !openingDisclaimerDismissed && (
                 <div className="mx-auto max-w-[860px] rounded-[24px] border border-white/7 bg-white/[0.045] px-5 py-4 text-sm text-white/65 shadow-[0_16px_40px_rgba(0,0,0,0.18)]">
@@ -1342,7 +1376,7 @@ export default function ChatWidget({
             </div>
           )}
 
-          {messages.map((msg) => (
+          {visibleMessages.map((msg) => (
             <div
               key={msg.id}
               className={`flex ${
@@ -1443,7 +1477,7 @@ export default function ChatWidget({
           <div ref={bottomRef} />
         </div>
 
-        <div className="absolute inset-x-0 bottom-4 z-20 px-4 sm:px-5">
+        <div className="sticky inset-x-0 bottom-0 z-20 mt-auto px-4 pb-4 pt-3 sm:px-5">
           <div className="mx-auto w-full max-w-[980px] rounded-[24px] border border-white/7 bg-[#090909]/74 shadow-[0_20px_80px_rgba(0,0,0,0.38)] backdrop-blur-2xl">
             <div className="p-3">
               <div className="rounded-[20px] bg-white/[0.035] px-3 py-2">
@@ -1587,93 +1621,6 @@ export default function ChatWidget({
                 )}
               </div>
 
-              {attachments.length > 0 && (
-                <div className="mt-3 rounded-[20px] border border-white/7 bg-white/[0.03] p-3">
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between rounded-[18px] bg-black/24 px-4 py-2.5 text-sm text-white/65 transition hover:bg-black/34"
-                  onClick={() => setAttachmentsOpen((value) => !value)}
-                  disabled={disabled}
-                  aria-label="Toggle attachments"
-                >
-                  <span>
-                    Attachments ({attachments.length})
-                    <span className="ml-2 text-white/40">
-                      {visionAttachmentCount > 0
-                        ? `- Vision: ${visionAttachmentCount}`
-                        : ""}
-                    </span>
-                  </span>
-                  {attachmentsOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-                </button>
-
-                {attachmentsOpen && (
-                  <div className="mt-2 space-y-2">
-                    {attachments.map((attachment) => (
-                      <div
-                        key={attachment.attachmentId}
-                        className="flex items-center justify-between gap-3 rounded-[18px] border border-white/6 bg-black/22 px-4 py-3 text-sm text-white/65"
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setPreviewAttachmentId(attachment.attachmentId)}
-                          disabled={disabled}
-                          className="min-w-0 flex-1 text-left"
-                        >
-                          <div className="truncate pr-3 font-medium text-white">
-                            {attachment.filename}
-                          </div>
-                          <div className="mt-1 text-xs text-white/40">
-                            {formatAttachmentKind(attachment)} · {attachment.source === "camera" ? "Photo" : "File"}
-                            {attachment.hasVision ? " · Vision" : ""}
-                            {attachment.usedInAnalysis ? " · Used in analysis" : ""}
-                          </div>
-                        </button>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => setPreviewAttachmentId(attachment.attachmentId)}
-                            aria-label="Preview attachment"
-                            disabled={disabled}
-                            className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            <Eye size={15} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleReplaceAttachment(attachment.attachmentId)}
-                            aria-label="Replace attachment"
-                            disabled={disabled}
-                            className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            <RefreshCcw size={15} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeAttachment(attachment.attachmentId)}
-                            aria-label="Remove attachment"
-                            disabled={disabled}
-                            className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            <X size={15} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-
-                    <button
-                      type="button"
-                      onClick={clearAllAttachments}
-                      disabled={disabled}
-                      className="text-xs text-white/65 transition hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      Clear all
-                    </button>
-                  </div>
-                )}
-                </div>
-              )}
             </div>
           </div>
         </div>

@@ -1,5 +1,4 @@
 import {
-  buildExportValuationPreviewSummary,
   buildExportModel,
   buildPreferredRebuttalSubjectVehicleLabel,
   preferCanonicalField,
@@ -16,7 +15,6 @@ import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateC
 import { cleanOperationDisplayText as cleanUiOperationDisplayText } from "@/lib/ui/presentationText";
 import {
   cleanOperationDisplayText,
-  dedupeEstimateComparisonRationales,
   getTopEstimateComparisonHighlights,
 } from "@/components/workspace/estimateComparisonPresentation";
 
@@ -163,91 +161,52 @@ export function buildRebuttalEmailTemplate(params: ExportBuilderInput): string {
   ].join("\n");
 }
 
-export function buildSideBySideComparisonReport(params: ExportBuilderInput): string {
+export function buildDisputeIntelligenceReport(params: ExportBuilderInput): string {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
-  const isComparison = source.analysisMode === "comparison";
   const vehicleIdentity = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
-  const valuationSummary = buildExportValuationPreviewSummary(exportModel.valuation);
-  const featuredRecommendation = exportModel.supplementItems[0];
-
-  const sections = source.categoryComparisons.map((category) =>
+  const report = exportModel.disputeIntelligenceReport;
+  const topDriverBlocks = report.topDrivers.map((driver) =>
     [
-      `## ${category.category}`,
-      `${isComparison ? "Shop position" : "Estimate position"}: ${category.shopPosition}`,
-      `${isComparison ? "Carrier position" : "Support posture"}: ${category.carrierPosition}`,
-      `Support status: ${formatCategoryLabel(category.supportStatus)}`,
-      `Rationale: ${category.rationale}`,
+      `## ${driver.title}`,
+      `Impact: ${formatCategoryLabel(driver.impact)}`,
+      `Support status: ${formatCategoryLabel(driver.supportStatus)}`,
+      `Why it matters: ${driver.whyItMatters}`,
+      `Current gap: ${driver.currentGap}`,
+      `Recommended next action: ${driver.nextAction}`,
     ].join("\n")
   );
 
   return [
-    isComparison ? "# Side-by-Side Comparison Report" : "# Estimate Review Report",
+    "# Dispute Intelligence Report",
     "",
     `Generated: ${source.generatedLabel}`,
     `Vehicle: ${vehicleIdentity}`,
     `Mode: ${formatAnalysisModeLabel(source.analysisMode)}`,
     "",
-    "## Overall Position",
-    `What stands out: ${exportModel.repairPosition}`,
-    `${isComparison ? "Carrier-facing posture" : "Support posture"}: ${exportModel.positionStatement}`,
-    featuredRecommendation
-      ? `Top recommendation: ${displaySupplementTitle(featuredRecommendation.title)}`
-      : undefined,
-    source.topDifferences.length > 0
-      ? `Top differences: ${source.topDifferences.join(" | ")}`
-      : undefined,
-    `Valuation: ${valuationSummary.acv}; ${valuationSummary.dv}. Continue for Full Valuation for the formal handoff.`,
+    "## At-a-Glance Conclusion",
+    report.summary,
     "",
-    ...sections,
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
-export function buildLineByLineComparisonReport(params: ExportBuilderInput): string {
-  const source = buildExportTemplateSourceModel(params);
-  const { exportModel } = source;
-  const isComparison = source.analysisMode === "comparison";
-  const vehicleIdentity = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
-  const valuationSummary = buildExportValuationPreviewSummary(exportModel.valuation);
-  const featuredRecommendation = exportModel.supplementItems[0];
-
-  const rows = source.lineItems.map((item, index) =>
-    [
-      `## Line ${index + 1}`,
-      `Operation: ${item.operation}`,
-      `Component: ${item.component}`,
-      item.rawLine ? `Estimate line: ${item.rawLine}` : undefined,
-      `${isComparison ? "Carrier position" : "Support posture"}: ${item.carrierPosition}`,
-      `Support status: ${formatCategoryLabel(item.supportStatus)}`,
-      `Rationale: ${item.rationale}`,
-      item.support ? `Support: ${item.support}` : undefined,
-    ]
-      .filter(Boolean)
-      .join("\n")
-  );
-
-  return [
-    isComparison ? "# Line-by-Line Comparison Report" : "# Line-by-Line Estimate Review",
+    "## What Helps the Shop Position",
+    ...report.positives.map((item) => `- ${item}`),
     "",
-    `Generated: ${source.generatedLabel}`,
-    `Vehicle: ${vehicleIdentity}`,
+    "## What Still Needs Support",
+    ...report.supportGaps.map((item) => `- ${item}`),
     "",
-    featuredRecommendation
-      ? `Top recommendation: ${displaySupplementTitle(featuredRecommendation.title)}`
-      : undefined,
-    `What stands out: ${exportModel.repairPosition}`,
-    source.topDifferences.length > 0
-      ? `Top differences: ${source.topDifferences.join(" | ")}`
-      : undefined,
-    `Valuation: ${valuationSummary.acv}; ${valuationSummary.dv}. Continue for Full Valuation for the formal handoff.`,
+    "## Recommended Next Moves",
+    ...report.nextMoves.map((item) => `- ${item}`),
     "",
-    isComparison
-      ? "This view focuses on estimate operations, why each line matters, and whether the current carrier-side posture appears supported, underwritten, missing, or disputed."
-      : "This view focuses on estimate operations, what the file documents, and whether the current estimate support reads as documented, open, or still uncertain.",
+    ...(report.valuationPreview
+      ? [
+          "## Valuation Preview",
+          `- ${report.valuationPreview.dv}`,
+          `- ${report.valuationPreview.acv}`,
+          "",
+        ]
+      : []),
+    "## Top Dispute Drivers",
     "",
-    ...rows,
+    ...topDriverBlocks,
   ]
     .filter(Boolean)
     .join("\n");
@@ -286,167 +245,6 @@ function buildCategoryComparisons(
   });
 }
 
-function buildCategoryComparisonsFromWorkspace(
-  structuredComparisons: ReturnType<typeof normalizeWorkspaceEstimateComparisons>
-): ExportCategoryComparison[] {
-  const grouped = new Map<string, typeof structuredComparisons.rows>();
-  const dedupedRows = dedupeEstimateComparisonRationales(structuredComparisons.rows);
-
-  for (const row of dedupedRows) {
-    const key = row.category || "Estimate Comparison";
-    const existing = grouped.get(key) ?? [];
-    existing.push(row);
-    grouped.set(key, existing);
-  }
-
-  return [...grouped.entries()].map(([category, rows]) => ({
-    category,
-    shopPosition: summarizeComparisonSide(rows, "lhs"),
-    carrierPosition: summarizeComparisonSide(rows, "rhs"),
-    supportStatus: deriveWorkspaceSupportStatus(rows),
-    rationale: rows
-      .flatMap((row) => row.notes ?? [])
-      .filter(Boolean)
-      .slice(0, 3)
-      .join(" "),
-    supportingFields: ["workspaceData.estimateComparisons"],
-  }));
-}
-
-function buildLineItems(
-  exportModel: ExportModel,
-  analysis: AnalysisResult | null,
-  analysisMode: AnalysisResult["mode"] | "single-document-review"
-): ExportLineComparison[] {
-  const isComparison = analysisMode === "comparison";
-  const supplementItems = exportModel.supplementItems;
-  const operations = analysis?.operations ?? [];
-  const matchedSupplementKeys = new Set<string>();
-
-  const lines = operations.map((operation) => {
-    const operationLabel = resolveOperationLabel(operation);
-    const operationCategory = classifyEstimateOperation(operation);
-    const match = findBestSupplementMatch(operation, supplementItems);
-    if (match) {
-      matchedSupplementKeys.add(normalizeKey(match.title));
-    }
-
-    return {
-      operation: operationLabel,
-      component: operation.component,
-      rawLine: operation.rawLine,
-      carrierPosition: match
-        ? describeCarrierPosition(match, isComparison)
-        : isComparison
-          ? "No explicit carrier-side support issue was flagged for this operation in the current file review."
-          : "No explicit estimate-support issue was flagged for this operation in the current file review.",
-      supportStatus: match ? mapSupportStatus(match.kind) : "supported",
-      rationale: match
-        ? match.rationale
-        : "This line is present in the estimate material and was not singled out as a major current support issue.",
-      support: match ? buildSupportSnippet(match) : undefined,
-    };
-  });
-
-  const unmatchedSupplements = supplementItems
-    .filter((item) => !matchedSupplementKeys.has(normalizeKey(item.title)))
-    .slice(0, Math.max(0, 10 - lines.length))
-    .map((item) => ({
-      operation: displaySupplementTitle(item.title),
-      component: formatCategoryLabel(item.category),
-      carrierPosition: describeCarrierPosition(item, isComparison),
-      supportStatus: mapSupportStatus(item.kind),
-      rationale: item.rationale,
-      support: buildSupportSnippet(item),
-    }));
-
-  return [...lines, ...unmatchedSupplements];
-}
-
-function buildLineItemsFromWorkspace(
-  structuredComparisons: ReturnType<typeof normalizeWorkspaceEstimateComparisons>,
-  analysisMode: AnalysisResult["mode"] | "single-document-review"
-): ExportLineComparison[] {
-  const isComparison = analysisMode === "comparison";
-  const dedupedRows = dedupeEstimateComparisonRationales(structuredComparisons.rows);
-
-  return dedupedRows.map((row) => ({
-    operation: row.operation || row.category || "Comparison",
-    component: row.partName || row.category || "Estimate comparison",
-    rawLine:
-      row.lhsValue !== null &&
-      row.lhsValue !== undefined &&
-      row.rhsValue !== null &&
-      row.rhsValue !== undefined
-        ? `${row.lhsSource ?? "Shop estimate"}: ${row.lhsValue} | ${row.rhsSource ?? "Carrier estimate"}: ${row.rhsValue}`
-        : undefined,
-    carrierPosition: formatWorkspaceCarrierPosition(row, isComparison),
-    supportStatus: mapWorkspaceDeltaToSupportStatus(row.deltaType),
-    rationale:
-      row.notes?.join(" ") ||
-      (typeof row.delta === "string"
-        ? row.delta
-        : "Structured comparison row from backend workspace data."),
-    support: typeof row.delta === "number" ? `Delta: ${row.delta}` : undefined,
-  }));
-}
-
-function findBestSupplementMatch(
-  operation: NonNullable<AnalysisResult["operations"]>[number],
-  items: ExportSupplementItem[]
-): ExportSupplementItem | undefined {
-  const operationLabel = resolveOperationLabel(operation);
-  const operationCategory = classifyEstimateOperation(operation);
-  const operationTokens = tokenize(`${operationLabel} ${operation.component} ${operation.rawLine}`);
-  let best: ExportSupplementItem | undefined;
-  let bestScore = 0;
-
-  for (const item of items) {
-    const compatibility = scoreLineCompatibility(operation, operationCategory, operationTokens, item);
-    if (compatibility > bestScore) {
-      best = item;
-      bestScore = compatibility;
-    }
-  }
-
-  return bestScore >= 3 ? best : undefined;
-}
-
-function resolveOperationLabel(
-  operation: NonNullable<AnalysisResult["operations"]>[number]
-): string {
-  const cleanedRaw = cleanOperationSourceText(operation.rawLine);
-  const cleanedComponent = cleanOperationSourceText(operation.component);
-  const normalizedOperation = normalizeKey(operation.operation);
-
-  if (!cleanedRaw && !cleanedComponent) {
-    return operation.operation;
-  }
-
-  if (normalizedOperation === "proc" || normalizedOperation === "procedure") {
-    return cleanedRaw || cleanedComponent || operation.operation;
-  }
-
-  const cleanedOperation = cleanOperationSourceText(operation.operation);
-  if (!cleanedOperation) {
-    return cleanedRaw || cleanedComponent || operation.operation;
-  }
-
-  if (
-    cleanedComponent &&
-    normalizeKey(cleanedComponent) !== normalizeKey(cleanedOperation) &&
-    normalizeKey(cleanedComponent).includes(normalizeKey(cleanedOperation))
-  ) {
-    return cleanedComponent;
-  }
-
-  return cleanedOperation;
-}
-
-function cleanOperationSourceText(value: string | undefined): string {
-  return cleanOperationDisplayText(value);
-}
-
 function displaySupplementTitle(value: string | null | undefined): string {
   return cleanUiOperationDisplayText(value) || cleanOperationDisplayText(value) || value || "Repair Operation";
 }
@@ -477,167 +275,6 @@ function buildUiAlignedLineItems(
     supportStatus: "underwritten",
     rationale: difference,
   }));
-}
-
-type LineOperationCategory =
-  | "scan"
-  | "test_fit"
-  | "road_test"
-  | "restraint"
-  | "corrosion"
-  | "alignment"
-  | "calibration"
-  | "refinish"
-  | "structural"
-  | "material"
-  | "general";
-
-function classifyEstimateOperation(
-  operation: NonNullable<AnalysisResult["operations"]>[number]
-): LineOperationCategory {
-  const text = `${operation.operation} ${operation.component} ${operation.rawLine}`.toLowerCase();
-
-  if (/(pre-?repair scan|pre scan|in-?process scan|in process scan|post-?repair scan|post scan|diagnostic scan)/i.test(text)) {
-    return "scan";
-  }
-  if (/(pre-?paint test fit|test fit|fit check|mock-?up|fit verification)/i.test(text)) {
-    return "test_fit";
-  }
-  if (/(final road test|road test|quality check)/i.test(text)) {
-    return "road_test";
-  }
-  if (/(seat belt dynamic function test|seat belt|restraint)/i.test(text)) {
-    return "restraint";
-  }
-  if (/(cavity wax|corrosion protection|anti-?corrosion|seam sealer|weld protection)/i.test(text)) {
-    return "corrosion";
-  }
-  if (/(four wheel alignment|4 wheel alignment|wheel alignment|alignment)/i.test(text)) {
-    return "alignment";
-  }
-  if (/(calibration|camera|radar|adas|sensor)/i.test(text)) {
-    return "calibration";
-  }
-  if (/(mask|tint|polish|sand|refinish|blend)/i.test(text)) {
-    return "refinish";
-  }
-  if (/(measure|measuring|dimension|structural|setup|pull|realign|rail|tie bar|support)/i.test(text)) {
-    return "structural";
-  }
-  if (/(material|clip|seal|hardware)/i.test(text)) {
-    return "material";
-  }
-
-  return "general";
-}
-
-function classifySupplementItem(item: ExportSupplementItem): LineOperationCategory {
-  const text = `${item.title} ${item.category} ${item.rationale} ${item.evidence ?? ""}`.toLowerCase();
-
-  if (/structural measurement verification|structural setup and pull verification/.test(text)) {
-    return "structural";
-  }
-  if (/scan/.test(text)) return "scan";
-  if (/pre-?paint test fit|test fit|fit check|mock-?up/.test(text)) return "test_fit";
-  if (/road test|quality check/.test(text)) return "road_test";
-  if (/seat belt|restraint/.test(text)) return "restraint";
-  if (/cavity wax|corrosion|seam sealer|weld protection/.test(text)) return "corrosion";
-  if (/alignment/.test(text)) return "alignment";
-  if (/calibration|camera|radar|adas|sensor/.test(text)) return "calibration";
-  if (/refinish|blend|mask|tint|polish|sand/.test(text)) return "refinish";
-  if (/structural|measure|measuring|dimension|setup|pull|realign|rail|tie bar|support/.test(text)) {
-    return "structural";
-  }
-  if (/hardware|seal|clip|material/.test(text)) return "material";
-
-  return "general";
-}
-
-function scoreLineCompatibility(
-  operation: NonNullable<AnalysisResult["operations"]>[number],
-  operationCategory: LineOperationCategory,
-  operationTokens: Set<string>,
-  item: ExportSupplementItem
-): number {
-  const itemCategory = classifySupplementItem(item);
-  if (!categoriesAreCompatible(operationCategory, itemCategory)) {
-    return 0;
-  }
-
-  const haystack = `${item.title} ${item.rationale} ${item.evidence ?? ""}`;
-  const haystackTokens = tokenize(haystack);
-  const overlap = [...operationTokens].filter((token) => haystackTokens.has(token)).length;
-  let score = overlap;
-
-  if (normalizeKey(resolveOperationLabel(operation)) === normalizeKey(item.title)) {
-    score += 5;
-  }
-
-  if (operationCategory === itemCategory && itemCategory !== "general") {
-    score += 3;
-  }
-
-  if (
-    operationCategory === "general" &&
-    overlap < 2
-  ) {
-    return 0;
-  }
-
-  return score;
-}
-
-function categoriesAreCompatible(
-  operationCategory: LineOperationCategory,
-  itemCategory: LineOperationCategory
-): boolean {
-  if (operationCategory === "general" || itemCategory === "general") {
-    return true;
-  }
-
-  if (operationCategory === itemCategory) {
-    return true;
-  }
-
-  if (operationCategory === "scan") return itemCategory === "scan" || itemCategory === "calibration";
-  if (operationCategory === "calibration") return itemCategory === "calibration" || itemCategory === "scan";
-  if (operationCategory === "material") return itemCategory === "material" || itemCategory === "corrosion";
-  if (operationCategory === "corrosion") return itemCategory === "corrosion" || itemCategory === "material";
-
-  return false;
-}
-
-function tokenize(value: string): Set<string> {
-  const stopWords = new Set([
-    "the",
-    "and",
-    "for",
-    "with",
-    "this",
-    "that",
-    "from",
-    "into",
-    "line",
-    "repair",
-    "estimate",
-    "proc",
-    "procedure",
-    "final",
-    "dynamic",
-    "function",
-    "test",
-    "operation",
-    "misc",
-    "miscellaneous",
-  ]);
-
-  return new Set(
-    value
-      .toLowerCase()
-      .split(/[^a-z0-9]+/g)
-      .map((token) => token.trim())
-      .filter((token) => token.length >= 3 && !stopWords.has(token))
-  );
 }
 
 function summarizeShopCategoryPosition(
@@ -702,33 +339,6 @@ function describeCarrierPosition(item: ExportSupplementItem, isComparison = true
   }
 }
 
-function formatWorkspaceCarrierPosition(
-  row: ReturnType<typeof normalizeWorkspaceEstimateComparisons>["rows"][number],
-  isComparison: boolean
-): string {
-  const rhsValue =
-    row.rhsValue === null || row.rhsValue === undefined || `${row.rhsValue}`.trim() === ""
-      ? isComparison
-        ? "Not clearly shown in the carrier estimate."
-        : "Not clearly shown in the current estimate."
-      : `${row.rhsValue}`;
-
-  if (row.deltaType === "added") {
-    return isComparison
-      ? "This item appears on the shop side but is not clearly carried on the carrier side."
-      : "This item appears in the structured comparison but is not clearly carried on the current estimate side.";
-  }
-
-  if (row.deltaType === "removed") {
-    return isComparison
-      ? `Carrier-only position: ${rhsValue}`
-      : `Estimate-side position: ${rhsValue}`;
-  }
-
-  return rhsValue;
-}
-
-
 function mapSupportStatus(
   kind: ExportSupplementItem["kind"]
 ): ExportLineComparison["supportStatus"] {
@@ -768,21 +378,6 @@ function buildRequestSentence(item: ExportSupplementItem): string {
   }
 }
 
-function mapWorkspaceDeltaToSupportStatus(
-  deltaType: ReturnType<typeof normalizeWorkspaceEstimateComparisons>["rows"][number]["deltaType"]
-): ExportLineComparison["supportStatus"] {
-  switch (deltaType) {
-    case "added":
-      return "missing";
-    case "removed":
-      return "disputed";
-    case "changed":
-      return "underwritten";
-    default:
-      return "supported";
-  }
-}
-
 function formatCategoryLabel(value: string): string {
   return value
     .split("_")
@@ -799,46 +394,11 @@ function compact(values: Array<string | undefined>): string[] {
   return values.filter((value): value is string => Boolean(value && value.trim()));
 }
 
-function summarizeComparisonSide(
-  rows: ReturnType<typeof normalizeWorkspaceEstimateComparisons>["rows"],
-  side: "lhs" | "rhs"
-): string {
-  const values = rows
-    .map((row) => (side === "lhs" ? row.lhsValue : row.rhsValue))
-    .filter(
-      (value): value is string | number =>
-        value !== null && value !== undefined && `${value}`.trim() !== ""
-    )
-    .slice(0, 3)
-    .map((value) => `${value}`);
-
-  if (values.length === 0) {
-    return side === "lhs"
-      ? "No clear shop-side value was preserved in the structured comparison data."
-      : "No clear carrier-side value was preserved in the structured comparison data.";
-  }
-
-  return values.join(" | ");
-}
-
-function deriveWorkspaceSupportStatus(
-  rows: ReturnType<typeof normalizeWorkspaceEstimateComparisons>["rows"]
-): ExportCategoryComparison["supportStatus"] {
-  if (rows.some((row) => row.deltaType === "added")) return "missing";
-  if (rows.some((row) => row.deltaType === "removed")) return "disputed";
-  if (rows.some((row) => row.deltaType === "changed")) return "underwritten";
-  return "supported";
-}
-
 function joinHumanList(values: string[]): string {
   if (values.length === 0) return "";
   if (values.length === 1) return values[0];
   if (values.length === 2) return `${values[0]} and ${values[1]}`;
   return `${values.slice(0, -1).join(", ")}, and ${values[values.length - 1]}`;
-}
-
-function normalizeKey(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 function resolveExportModel(params: ExportBuilderInput): ExportModel {

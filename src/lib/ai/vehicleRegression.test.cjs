@@ -1,7 +1,19 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const path = require("node:path");
+const Module = require("node:module");
 const ts = require("typescript");
+
+const originalResolveFilename = Module._resolveFilename;
+Module._resolveFilename = function resolveFilenameWithAlias(request, parent, isMain, options) {
+  if (request.startsWith("@/")) {
+    const absolute = path.join(process.cwd(), "src", request.slice(2));
+    return originalResolveFilename.call(this, absolute, parent, isMain, options);
+  }
+
+  return originalResolveFilename.call(this, request, parent, isMain, options);
+};
 
 require.extensions[".ts"] = function registerTypeScript(module, filename) {
   const source = fs.readFileSync(filename, "utf8");
@@ -458,7 +470,7 @@ run("vehicle label falls back to VIN tail before rendering year-only", () => {
   );
 });
 
-run("side-by-side mode label is product-friendly outside compare mode", () => {
+run("analysis mode labels stay product-friendly outside compare mode", () => {
   assert.equal(formatAnalysisModeLabel("comparison"), "Comparison Review");
   assert.equal(formatAnalysisModeLabel("single-document-review"), "Single Estimate Review");
   assert.equal(formatAnalysisModeLabel("parser-incomplete"), "Estimate Review");

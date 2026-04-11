@@ -65,7 +65,7 @@ export default function PricingPage() {
             Manage billing
           </Link>
           <Link
-            href="/chatbot"
+            href="/"
             className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/85 transition hover:bg-white/10"
           >
             Back to chatbot

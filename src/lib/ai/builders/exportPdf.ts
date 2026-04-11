@@ -3,9 +3,40 @@ import type { CarrierReportDocument } from "./carrierPdfBuilder";
 import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
 
 const LINE_HEIGHT = 4.8;
-const SECTION_GAP = 5;    // Space between sections
-const BLOCK_GAP = 3.2;    // Space between blocks (body/bullets/comparisons)
-const HEADING_BODY_GAP = 2.4; // Space from heading to first body line
+const LINE_HEIGHT_FACTOR = 1.15;
+const SECTION_GAP = 5;
+const BLOCK_GAP = 3.2;
+const HEADING_BODY_GAP = 2.4;
+const HEADING_HEIGHT = 9;
+
+export type PdfPageLayout = {
+  pageWidth: number;
+  pageHeight: number;
+  marginX: number;
+  contentWidth: number;
+  topMargin: number;
+  bottomMargin: number;
+  contentBottomY: number;
+  usableHeight: number;
+};
+
+type PdfRenderState = {
+  y: number;
+  lastPageNumber: number;
+};
+
+type PdfColor = [number, number, number];
+
+const DEFAULT_TYPOGRAPHY = {
+  fontFamily: "Helvetica",
+  fontStyle: "Normal" as const,
+  fontSize: 10,
+  textColor: [60, 63, 68] as PdfColor,
+  lineHeightFactor: LINE_HEIGHT_FACTOR,
+  sectionGap: SECTION_GAP,
+  blockGap: BLOCK_GAP,
+  headingBodyGap: HEADING_BODY_GAP,
+};
 
 export async function exportCarrierPDF(input: CarrierReportDocument) {
   const redactedInput = redactCarrierReportDocument(input);
@@ -15,33 +46,20 @@ export async function exportCarrierPDF(input: CarrierReportDocument) {
     format: "letter",
   });
 
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const marginX = 16;
-  const contentWidth = pageWidth - marginX * 2;
-  const topMargin = 18;
-  const bottomMargin = 18;
-  const contentBottomY = pageHeight - bottomMargin;
+  const layout = createPdfPageLayout(doc);
   const logoDataUrl = await loadLogoDataUrl(redactedInput.brand.logoPath).catch(() => null);
-
-  let y = topMargin;
-
-  const addPage = () => {
-    doc.addPage();
-    y = topMargin;
-    drawPageFrame(doc, pageWidth, pageHeight);
+  const state: PdfRenderState = {
+    y: layout.topMargin,
+    lastPageNumber: doc.getCurrentPageInfo().pageNumber,
   };
 
-  const ensureSpace = (requiredHeight: number) => {
-    if (y + requiredHeight <= contentBottomY) return;
-    addPage();
-  };
+  drawPageFrame(doc, layout.pageWidth, layout.pageHeight);
+  resetPdfPageState(doc);
 
-  drawPageFrame(doc, pageWidth, pageHeight);
-  y = drawBrandedHeader(doc, {
-    x: marginX,
-    y,
-    width: contentWidth,
+  state.y = drawBrandedHeader(doc, {
+    x: layout.marginX,
+    y: state.y,
+    width: layout.contentWidth,
     logoDataUrl,
     companyName: redactedInput.brand.companyName,
     reportLabel: redactedInput.brand.reportLabel,
@@ -49,48 +67,51 @@ export async function exportCarrierPDF(input: CarrierReportDocument) {
     subtitle: redactedInput.header.subtitle,
     generatedLabel: redactedInput.header.generatedLabel,
   });
-  y += SECTION_GAP;
+  state.y += SECTION_GAP;
 
-  ensureSpace(estimateSummaryGridHeight(doc, contentWidth, redactedInput.summary));
-  y = drawSummaryGrid(doc, {
-    x: marginX,
-    y,
-    width: contentWidth,
+  ensurePdfSpace(doc, state, layout, estimateSummaryGridHeight(doc, layout.contentWidth, redactedInput.summary));
+  state.y = drawSummaryGrid(doc, {
+    x: layout.marginX,
+    y: state.y,
+    width: layout.contentWidth,
     items: redactedInput.summary,
   });
-  y += SECTION_GAP + 1.5;
+  state.y += SECTION_GAP + 1.5;
 
   for (const section of redactedInput.sections) {
-    if (y > contentBottomY - 40) {
-      addPage();
+    const sectionHeight = estimateSectionHeight(doc, layout.contentWidth, section);
+    const keepTogetherHeight = estimateSectionKeepTogetherHeight(doc, layout.contentWidth, section);
+
+    if (sectionHeight <= layout.usableHeight && state.y + sectionHeight > layout.contentBottomY) {
+      addPdfPage(doc, state, layout, { force: true });
+    } else {
+      ensurePdfSpace(doc, state, layout, Math.min(sectionHeight, keepTogetherHeight));
     }
 
-    ensureSpace(20);
-    y = drawSection(doc, {
-      x: marginX,
-      y,
-      width: contentWidth,
+    drawSection(doc, {
+      x: layout.marginX,
+      width: layout.contentWidth,
       section,
-      contentBottomY,
-      topMargin,
-      startNewPage: addPage,
+      state,
+      layout,
     });
-    y += SECTION_GAP + 1;
+    state.y += SECTION_GAP + 1;
   }
 
-  const footerHeight = estimateFooterHeight(doc, contentWidth, redactedInput.footer);
-  ensureSpace(footerHeight);
-  y = drawFooterBlock(doc, {
-    x: marginX,
-    y,
-    width: contentWidth,
+  const footerHeight = estimateFooterHeight(doc, layout.contentWidth, redactedInput.footer);
+  ensurePdfSpace(doc, state, layout, footerHeight);
+  resetPdfPageState(doc);
+  state.y = drawFooterBlock(doc, {
+    x: layout.marginX,
+    y: state.y,
+    width: layout.contentWidth,
     footer: redactedInput.footer,
   });
 
   const totalPages = doc.getNumberOfPages();
   for (let page = 1; page <= totalPages; page += 1) {
     doc.setPage(page);
-    drawPageNumber(doc, pageWidth, pageHeight);
+    drawPageNumber(doc, layout.pageWidth, layout.pageHeight);
   }
 
   doc.save(redactedInput.filename || "collision-academy-report.pdf");
@@ -114,9 +135,87 @@ function redactCarrierReportDocument(input: CarrierReportDocument): CarrierRepor
       title: redactDownloadContent(section.title),
       body: section.body ? redactDownloadContent(section.body) : undefined,
       bullets: section.bullets?.map((bullet) => redactDownloadContent(bullet)),
+      comparisonRows: section.comparisonRows?.map((row) => ({
+        ...row,
+        label: redactDownloadContent(row.label),
+        leftLabel: redactDownloadContent(row.leftLabel),
+        leftValue: redactDownloadContent(row.leftValue),
+        rightLabel: redactDownloadContent(row.rightLabel),
+        rightValue: redactDownloadContent(row.rightValue),
+        delta: row.delta ? redactDownloadContent(row.delta) : undefined,
+        note: row.note ? redactDownloadContent(row.note) : undefined,
+      })),
     })),
     footer: input.footer.map((line) => redactDownloadContent(line)),
   };
+}
+
+export function createPdfPageLayout(doc: Pick<jsPDF, "internal">): PdfPageLayout {
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const marginX = 16;
+  const topMargin = 18;
+  const bottomMargin = 18;
+  const contentWidth = pageWidth - marginX * 2;
+  const contentBottomY = pageHeight - bottomMargin;
+
+  return {
+    pageWidth,
+    pageHeight,
+    marginX,
+    contentWidth,
+    topMargin,
+    bottomMargin,
+    contentBottomY,
+    usableHeight: contentBottomY - topMargin,
+  };
+}
+
+export function resetPdfPageState(
+  doc: Pick<jsPDF, "setFont" | "setFontSize" | "setTextColor" | "setLineHeightFactor">
+) {
+  doc.setFont(DEFAULT_TYPOGRAPHY.fontFamily, DEFAULT_TYPOGRAPHY.fontStyle);
+  doc.setFontSize(DEFAULT_TYPOGRAPHY.fontSize);
+  doc.setLineHeightFactor(DEFAULT_TYPOGRAPHY.lineHeightFactor);
+  doc.setTextColor(...DEFAULT_TYPOGRAPHY.textColor);
+}
+
+export function addPdfPage(
+  doc: Pick<jsPDF, "addPage" | "getCurrentPageInfo" | "setFont" | "setFontSize" | "setTextColor" | "setLineHeightFactor">,
+  state: PdfRenderState,
+  layout: PdfPageLayout,
+  options?: { force?: boolean }
+): boolean {
+  const currentPageNumber = doc.getCurrentPageInfo().pageNumber;
+  const atFreshTop = state.y <= layout.topMargin + 0.1;
+
+  if (!options?.force && atFreshTop && currentPageNumber === state.lastPageNumber) {
+    resetPdfPageState(doc);
+    return false;
+  }
+
+  doc.addPage();
+  state.y = layout.topMargin;
+  state.lastPageNumber = doc.getCurrentPageInfo().pageNumber;
+  drawPageFrame(doc as jsPDF, layout.pageWidth, layout.pageHeight);
+  resetPdfPageState(doc);
+  return true;
+}
+
+export function ensurePdfSpace(
+  doc: Pick<jsPDF, "addPage" | "getCurrentPageInfo" | "setFont" | "setFontSize" | "setTextColor" | "setLineHeightFactor">,
+  state: PdfRenderState,
+  layout: PdfPageLayout,
+  requiredHeight: number
+) {
+  if (state.y > layout.contentBottomY) {
+    addPdfPage(doc, state, layout);
+    return;
+  }
+  if (state.y + Math.max(requiredHeight, 0) <= layout.contentBottomY) {
+    return;
+  }
+  addPdfPage(doc, state, layout);
 }
 
 async function loadLogoDataUrl(path: string): Promise<string> {
@@ -287,7 +386,7 @@ function drawSummaryGrid(
 }
 
 function estimateSummaryGridHeight(
-  doc: jsPDF,
+  doc: Pick<jsPDF, "splitTextToSize">,
   width: number,
   items: Array<{ label: string; value: string }>
 ): number {
@@ -310,135 +409,223 @@ function estimateSummaryGridHeight(
   return height;
 }
 
+export function estimateSectionKeepTogetherHeight(
+  doc: Pick<jsPDF, "splitTextToSize">,
+  width: number,
+  section: CarrierReportDocument["sections"][number]
+): number {
+  let height = HEADING_HEIGHT;
+
+  if (section.body) {
+    const bodyLines = doc.splitTextToSize(section.body, width);
+    height += HEADING_BODY_GAP + Math.max(1, bodyLines.length) * LINE_HEIGHT;
+    return height;
+  }
+
+  if (section.comparisonRows?.length) {
+    height += HEADING_BODY_GAP + estimateComparisonRowHeight(doc, width, section.comparisonRows[0]);
+    return height;
+  }
+
+  if (section.bullets?.length) {
+    const bulletLines = doc.splitTextToSize(section.bullets[0], width - 8);
+    height += HEADING_BODY_GAP + Math.max(1, bulletLines.length) * LINE_HEIGHT + BLOCK_GAP;
+  }
+
+  return height;
+}
+
+export function estimateSectionHeight(
+  doc: Pick<jsPDF, "splitTextToSize">,
+  width: number,
+  section: CarrierReportDocument["sections"][number]
+): number {
+  let height = HEADING_HEIGHT;
+
+  if (section.body) {
+    const bodyLines = doc.splitTextToSize(section.body, width);
+    height += HEADING_BODY_GAP + Math.max(1, bodyLines.length) * LINE_HEIGHT + BLOCK_GAP;
+  }
+
+  if (section.comparisonRows?.length) {
+    if (!section.body) height += HEADING_BODY_GAP;
+    height += section.comparisonRows.reduce(
+      (sum, row) => sum + estimateComparisonRowHeight(doc, width, row) + BLOCK_GAP,
+      0
+    );
+  }
+
+  if (section.bullets?.length) {
+    if (!section.body && !section.comparisonRows?.length) height += HEADING_BODY_GAP;
+    height += section.bullets.reduce((sum, bullet) => {
+      const lines = doc.splitTextToSize(bullet, width - 8);
+      return sum + Math.max(1, lines.length) * LINE_HEIGHT + BLOCK_GAP;
+    }, 0);
+  }
+
+  return height;
+}
+
+export function estimateComparisonRowHeight(
+  doc: Pick<jsPDF, "splitTextToSize">,
+  width: number,
+  row: NonNullable<CarrierReportDocument["sections"][number]["comparisonRows"]>[number]
+): number {
+  const innerWidth = width - 8;
+  const valueX = 22;
+  const valueWidth = Math.max(10, width - valueX - 4);
+  let height = 0;
+
+  height += Math.max(1, doc.splitTextToSize(`[ ${row.label.toUpperCase()} ]`, innerWidth).length) * LINE_HEIGHT;
+  height += BLOCK_GAP / 2;
+
+  const fields: Array<string | undefined> = [
+    row.leftValue,
+    row.rightValue,
+    row.delta,
+    row.note,
+  ];
+
+  for (const field of fields) {
+    if (!field?.trim()) continue;
+    height += Math.max(1, doc.splitTextToSize(field, valueWidth).length) * LINE_HEIGHT;
+    height += BLOCK_GAP / 2;
+  }
+
+  return height;
+}
+
 function drawSection(
   doc: jsPDF,
   params: {
     x: number;
-    y: number;
     width: number;
     section: CarrierReportDocument["sections"][number];
-    contentBottomY: number;
-    topMargin: number;
-    startNewPage: () => void;
+    state: PdfRenderState;
+    layout: PdfPageLayout;
   }
-): number {
-  let y = params.y;
-
-  const drawHeading = (continued = false) => {
-    // Orphan control: require space for heading + at least 2-3 lines of content
-    const headingHeight = 9;
-    const minContentLines = 2;
-    const requiredSpace = headingHeight + minContentLines * LINE_HEIGHT;
-    
-    if (y + requiredSpace > params.contentBottomY) {
-      params.startNewPage();
-      y = params.topMargin;
-    }
-
-    doc.setFont("Helvetica", "Bold");
-    doc.setFontSize(11.5);
-    doc.setTextColor(190, 80, 30);
-    doc.text(
-      continued ? `${params.section.title.toUpperCase()} (CONT.)` : params.section.title.toUpperCase(),
-      params.x,
-      y
-    );
-
-    doc.setDrawColor(226, 228, 233);
-    doc.setLineWidth(0.25);
-    doc.line(params.x, y + 1.5, params.x + params.width, y + 1.5);
-    y += headingHeight;
+) {
+  const startContinuationPage = () => {
+    addPdfPage(doc, params.state, params.layout, { force: true });
+    drawSectionHeading(doc, params.x, params.width, params.section.title, params.state, true);
   };
 
-  const ensureLineSpace = (requiredHeight: number, continued = true) => {
-    if (y + requiredHeight <= params.contentBottomY) return;
-    params.startNewPage();
-    y = params.topMargin;
-    drawHeading(continued);
-  };
-
-  drawHeading();
+  ensurePdfSpace(
+    doc,
+    params.state,
+    params.layout,
+    Math.min(estimateSectionKeepTogetherHeight(doc, params.width, params.section), params.layout.usableHeight)
+  );
+  drawSectionHeading(doc, params.x, params.width, params.section.title, params.state, false);
 
   if (params.section.body) {
-    y += HEADING_BODY_GAP;
+    params.state.y += HEADING_BODY_GAP;
     doc.setFont("Helvetica", "Normal");
     doc.setFontSize(10);
-    doc.setTextColor(60, 63, 68);
-    const bodyLines = doc.splitTextToSize(params.section.body, params.width);
+    doc.setTextColor(...DEFAULT_TYPOGRAPHY.textColor);
 
-    for (const line of bodyLines) {
-      ensureLineSpace(LINE_HEIGHT);
-      doc.text(line, params.x, y);
-      y += LINE_HEIGHT;
+    for (const line of doc.splitTextToSize(params.section.body, params.width)) {
+      if (params.state.y + LINE_HEIGHT > params.layout.contentBottomY) {
+        startContinuationPage();
+        doc.setFont("Helvetica", "Normal");
+        doc.setFontSize(10);
+        doc.setTextColor(...DEFAULT_TYPOGRAPHY.textColor);
+        params.state.y += HEADING_BODY_GAP;
+      }
+      doc.text(line, params.x, params.state.y);
+      params.state.y += LINE_HEIGHT;
     }
-    y += BLOCK_GAP;
+    params.state.y += BLOCK_GAP;
   }
 
   if (params.section.comparisonRows?.length) {
-    if (!params.section.body) y += HEADING_BODY_GAP; // Add gap if no body
+    if (!params.section.body) params.state.y += HEADING_BODY_GAP;
     for (const row of params.section.comparisonRows) {
-      y = drawComparisonRowBlock(doc, {
+      drawComparisonRowBlock(doc, {
         x: params.x,
-        y,
         width: params.width,
         row,
-        contentBottomY: params.contentBottomY,
-        topMargin: params.topMargin,
-        startNewPage: params.startNewPage,
-        redrawHeading: () => drawHeading(true),
+        state: params.state,
+        layout: params.layout,
+        startContinuationPage,
       });
-      y += BLOCK_GAP;
+      params.state.y += BLOCK_GAP;
     }
   }
 
   if (params.section.bullets?.length) {
-    if (!params.section.body && !params.section.comparisonRows?.length) y += HEADING_BODY_GAP; // Add gap if no body or comparisons
+    if (!params.section.body && !params.section.comparisonRows?.length) {
+      params.state.y += HEADING_BODY_GAP;
+    }
+
     for (const bullet of params.section.bullets) {
-      const bulletLines = doc.splitTextToSize(bullet, params.width - 8);
       doc.setFont("Helvetica", "Normal");
       doc.setFontSize(10);
       doc.setTextColor(62, 65, 70);
 
-      bulletLines.forEach((line: string, index: number) => {
-        ensureLineSpace(LINE_HEIGHT);
+      for (const [index, line] of doc.splitTextToSize(bullet, params.width - 8).entries()) {
+        if (params.state.y + LINE_HEIGHT > params.layout.contentBottomY) {
+          startContinuationPage();
+          doc.setFont("Helvetica", "Normal");
+          doc.setFontSize(10);
+          doc.setTextColor(62, 65, 70);
+          params.state.y += HEADING_BODY_GAP;
+        }
         if (index === 0) {
           doc.setFillColor(190, 80, 30);
-          doc.circle(params.x + 1.8, y - 1.2, 0.8, "F");
+          doc.circle(params.x + 1.8, params.state.y - 1.2, 0.8, "F");
         }
-        doc.text(line, params.x + 5, y);
-        y += LINE_HEIGHT;
-      });
-      y += BLOCK_GAP;
+        doc.text(line, params.x + 5, params.state.y);
+        params.state.y += LINE_HEIGHT;
+      }
+      params.state.y += BLOCK_GAP;
     }
   }
+}
 
-  return y;
+function drawSectionHeading(
+  doc: jsPDF,
+  x: number,
+  width: number,
+  title: string,
+  state: PdfRenderState,
+  continued: boolean
+) {
+  doc.setFont("Helvetica", "Bold");
+  doc.setFontSize(11.5);
+  doc.setTextColor(190, 80, 30);
+  doc.text(continued ? `${title.toUpperCase()} (CONT.)` : title.toUpperCase(), x, state.y);
+
+  doc.setDrawColor(226, 228, 233);
+  doc.setLineWidth(0.25);
+  doc.line(x, state.y + 1.5, x + width, state.y + 1.5);
+  state.y += HEADING_HEIGHT;
 }
 
 function drawComparisonRowBlock(
   doc: jsPDF,
   params: {
     x: number;
-    y: number;
     width: number;
     row: NonNullable<CarrierReportDocument["sections"][number]["comparisonRows"]>[number];
-    contentBottomY: number;
-    topMargin: number;
-    startNewPage: () => void;
-    redrawHeading: () => void;
+    state: PdfRenderState;
+    layout: PdfPageLayout;
+    startContinuationPage: () => void;
   }
-): number {
+) {
   const innerX = params.x + 4;
   const innerWidth = params.width - 8;
   const valueX = innerX + 18;
   const valueWidth = Math.max(10, params.width - (valueX - params.x) - 4);
-  let y = params.y;
+  const rowHeight = estimateComparisonRowHeight(doc, params.width, params.row);
+
+  if (rowHeight <= params.layout.usableHeight && params.state.y + rowHeight > params.layout.contentBottomY) {
+    params.startContinuationPage();
+  }
 
   const ensureLineSpace = () => {
-    if (y + LINE_HEIGHT <= params.contentBottomY) return;
-    params.startNewPage();
-    params.redrawHeading();
-    y = params.topMargin + 9;
+    if (params.state.y + LINE_HEIGHT <= params.layout.contentBottomY) return;
+    params.startContinuationPage();
   };
 
   const drawTagLine = (line: string) => {
@@ -446,50 +633,47 @@ function drawComparisonRowBlock(
     doc.setFont("Helvetica", "Bold");
     doc.setFontSize(10.5);
     doc.setTextColor(35, 37, 40);
-    doc.text(line, innerX, y + 3);
-    y += LINE_HEIGHT;
+    doc.text(line, innerX, params.state.y + 3);
+    params.state.y += LINE_HEIGHT;
   };
 
   const drawLabeledField = (
     fieldLabel: string,
     fieldValue: string | undefined,
-    options?: { boldValue?: boolean; color?: [number, number, number]; isNote?: boolean }
+    options?: { boldValue?: boolean; color?: PdfColor; isNote?: boolean }
   ) => {
     const value = (fieldValue || "").trim();
     if (!value) return;
 
     const valueLines = doc.splitTextToSize(value, valueWidth);
-    valueLines.forEach((line: string, index: number) => {
+    valueLines.forEach((line, index) => {
       ensureLineSpace();
       if (index === 0) {
         doc.setFont("Helvetica", "Bold");
         doc.setFontSize(options?.isNote ? 8.5 : 9.5);
         doc.setTextColor(58, 61, 66);
-        doc.text(`${fieldLabel}:`, innerX, y + 3);
+        doc.text(`${fieldLabel}:`, innerX, params.state.y + 3);
       }
 
       doc.setFont("Helvetica", options?.boldValue ? "Bold" : "Normal");
       doc.setFontSize(options?.isNote ? 8.5 : 9.5);
-      doc.setTextColor(...(options?.color ?? [60, 63, 68]));
-      doc.text(line, valueX, y + 3);
-      y += LINE_HEIGHT;
+      doc.setTextColor(...(options?.color ?? DEFAULT_TYPOGRAPHY.textColor));
+      doc.text(line, valueX, params.state.y + 3);
+      params.state.y += LINE_HEIGHT;
     });
 
-    y += BLOCK_GAP / 2;
+    params.state.y += BLOCK_GAP / 2;
   };
 
-  const labelTagLines = doc.splitTextToSize(`[ ${params.row.label.toUpperCase()} ]`, innerWidth);
-  for (const line of labelTagLines) {
+  for (const line of doc.splitTextToSize(`[ ${params.row.label.toUpperCase()} ]`, innerWidth)) {
     drawTagLine(line);
   }
-  y += BLOCK_GAP / 2;
+  params.state.y += BLOCK_GAP / 2;
 
   drawLabeledField(params.row.leftLabel || "Shop", params.row.leftValue);
   drawLabeledField(params.row.rightLabel || "Carrier", params.row.rightValue);
   drawLabeledField("Delta", params.row.delta, { boldValue: true, color: [104, 64, 36] });
   drawLabeledField("Note", params.row.note, { color: [96, 100, 108], isNote: true });
-
-  return y;
 }
 
 function drawFooterBlock(
@@ -521,7 +705,21 @@ function drawPageNumber(doc: jsPDF, pageWidth: number, pageHeight: number) {
   });
 }
 
-function estimateFooterHeight(doc: jsPDF, width: number, footer: string[]): number {
+function estimateFooterHeight(
+  doc: Pick<jsPDF, "splitTextToSize">,
+  width: number,
+  footer: string[]
+): number {
   const lines = doc.splitTextToSize(footer.join(" "), width - 6);
   return Math.max(16, lines.length * LINE_HEIGHT + BLOCK_GAP);
 }
+
+export const __testables = {
+  createPdfPageLayout,
+  resetPdfPageState,
+  addPdfPage,
+  ensurePdfSpace,
+  estimateSectionHeight,
+  estimateSectionKeepTogetherHeight,
+  estimateComparisonRowHeight,
+};

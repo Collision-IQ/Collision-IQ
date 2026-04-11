@@ -1,5 +1,7 @@
 "use client";
 
+import Image from "next/image";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -69,7 +71,7 @@ export default function ChatShell({
   const hasRight = useMemo(() => Boolean(right), [right]);
 
   return (
-    <div className="min-h-[100svh] bg-bg text-text">
+    <div className="flex h-[100svh] flex-col overflow-hidden bg-bg text-text">
 
       {/* Background accent */}
       <div className="pointer-events-none fixed inset-0 opacity-70">
@@ -79,19 +81,35 @@ export default function ChatShell({
 
       {/* Header */}
       <header className="relative z-10 border-b border-border/60 bg-black/20 backdrop-blur-xl">
-        <div className="mx-auto flex h-[58px] max-w-[1480px] items-center justify-between px-4 md:px-5">
+        <div className="absolute inset-0 opacity-[0.04] bg-[url('/brand/logos/Background.png')] bg-cover pointer-events-none" />
+        <div className="relative mx-auto flex h-[58px] max-w-[1480px] items-center justify-between px-4 md:px-5">
 
           <div className="flex items-center gap-3">
-            <div className="text-[1.08rem] font-semibold tracking-[-0.02em] text-white/85">
-              {title}
+            <Image
+              src="/brand/logos/logo-horizontal.png"
+              alt={title}
+              width={140}
+              height={28}
+              className="h-[28px] w-auto opacity-90"
+              priority
+            />
 
-              <span className="ml-2 rounded-full border border-white/7 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-white/40">
-                Beta
-              </span>
-            </div>
+            <span className="text-[12px] text-white/40">
+              Collision Intelligence
+            </span>
+
+            <span className="ml-2 rounded-full border border-white/7 bg-white/5 px-2 py-0.5 text-[11px] font-medium text-white/40">
+              Beta
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
+            <Link
+              href="/collision-academy"
+              className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/70 transition hover:bg-white/10"
+            >
+              Collision Academy
+            </Link>
 
             {hasLeft && (
               <button
@@ -119,26 +137,19 @@ export default function ChatShell({
       <div className="h-[2px] w-full bg-gradient-to-r from-transparent via-[#C65A2A]/60 to-transparent" />
 
       {/* Main layout */}
-      <div className="relative z-10 mx-auto max-w-[1480px] px-4 py-4 md:px-5 md:py-5">
+      <div className="relative z-10 w-full max-w-none flex-1 min-h-0 px-6 py-4 md:px-8 md:py-5 xl:px-10">
 
-        <div className="grid h-full grid-cols-1 gap-5 lg:grid-cols-[1.04fr_1.38fr_1.04fr]">
+        <div className="grid h-full min-h-0 grid-cols-1 gap-5 lg:grid-cols-[1fr_420px]">
 
-          {/* Left panel */}
-          {hasLeft && (
-            <div className="hidden rounded-[24px] border border-white/7 bg-white/[0.04] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.2)] backdrop-blur-md lg:block">
-              {left}
-            </div>
-          )}
-
-          {/* Center panel */}
-          <div className="min-w-0 rounded-[28px] border border-white/7 bg-white/[0.03] p-4 shadow-[0_20px_60px_rgba(0,0,0,0.24)]">
+          <div className="min-w-0 h-full min-h-0 flex flex-col rounded-[28px] border border-white/7 bg-white/[0.03] p-4 shadow-[0_20px_60px_rgba(0,0,0,0.24)]">
             {center}
           </div>
 
-          {/* Right panel */}
           {hasRight && (
-            <div className="hidden rounded-[24px] border border-white/7 bg-white/[0.04] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.2)] backdrop-blur-md lg:block">
-              {right}
+            <div className="hidden lg:flex flex-col w-[420px] h-full min-h-0 rounded-[24px] border border-white/7 bg-white/[0.04] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.2)] backdrop-blur-md">
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                {right}
+              </div>
             </div>
           )}
 

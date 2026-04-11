@@ -1,7 +1,19 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const path = require("node:path");
+const Module = require("node:module");
 const ts = require("typescript");
+
+const originalResolveFilename = Module._resolveFilename;
+Module._resolveFilename = function resolveFilenameWithAlias(request, parent, isMain, options) {
+  if (request.startsWith("@/")) {
+    const absolute = path.join(process.cwd(), "src", request.slice(2));
+    return originalResolveFilename.call(this, absolute, parent, isMain, options);
+  }
+
+  return originalResolveFilename.call(this, request, parent, isMain, options);
+};
 
 require.extensions[".ts"] = function registerTypeScript(module, filename) {
   const source = fs.readFileSync(filename, "utf8");
@@ -22,11 +34,8 @@ const {
   buildRebuttalEmailPdf,
 } = require("./builders/rebuttalEmailPdfBuilder.ts");
 const {
-  buildSideBySidePdf,
-} = require("./builders/sideBySidePdfBuilder.ts");
-const {
-  buildLineByLinePdf,
-} = require("./builders/lineByLinePdfBuilder.ts");
+  buildDisputeIntelligencePdf,
+} = require("./builders/disputeIntelligencePdfBuilder.ts");
 
 const TEST_VIN = "1GKKNRLS7MZ123456";
 
@@ -135,169 +144,24 @@ run("rebuttal PDF renders expected sections", () => {
   assert.ok(document.summary.some((item) => item.label === "VIN" && item.value === TEST_VIN));
 });
 
-run("side-by-side PDF renders expected comparison sections", () => {
-  const document = buildSideBySidePdf({
+run("dispute intelligence PDF renders decision-ready sections", () => {
+  const document = buildDisputeIntelligencePdf({
     report: REPORT,
     analysis: ANALYSIS,
     panel: null,
     assistantAnalysis: null,
   });
 
-  assert.equal(document.header.title, "Side-by-Side Comparison Report");
-  assert.ok(document.sections.some((section) => section.title === "Overall Position"));
+  assert.equal(document.header.title, "Dispute Intelligence Report");
+  assert.ok(document.sections.some((section) => section.title === "At-a-Glance Conclusion"));
   assert.ok(
     document.sections.some((section) =>
-      (section.bullets ?? []).some((bullet) => bullet.startsWith("Shop position:"))
+      section.title === "Top Dispute Drivers"
     )
   );
   assert.ok(
     document.sections.some((section) =>
-      (section.bullets ?? []).some((bullet) => bullet.startsWith("Carrier position:"))
+      (section.bullets ?? []).some((bullet) => /Status:/i.test(bullet))
     )
   );
-});
-
-run("line-by-line PDF renders expected operation rows", () => {
-  const document = buildLineByLinePdf({
-    report: REPORT,
-    analysis: ANALYSIS,
-    panel: null,
-    assistantAnalysis: null,
-  });
-
-  assert.equal(document.header.title, "Line-by-Line Comparison Report");
-  assert.ok(document.sections.some((section) => section.title.includes("Pre-Repair Scan")));
-  assert.ok(
-    document.sections.some((section) =>
-      (section.bullets ?? []).includes("Estimate line: Proc Pre-Repair Scan")
-    )
-  );
-  assert.ok(
-    document.sections.some((section) =>
-      (section.bullets ?? []).some((bullet) => bullet.startsWith("Support status:"))
-    )
-  );
-});
-
-run("line-by-line PDF keeps procedure rows grounded instead of forcing fuzzy supplement matches", () => {
-  const document = buildLineByLinePdf({
-    report: REPORT,
-    analysis: {
-      ...ANALYSIS,
-      operations: [
-        {
-          operation: "Proc",
-          component: "Seat belt dynamic function test",
-          rawLine: "Proc Seat belt dynamic function test",
-        },
-        {
-          operation: "Proc",
-          component: "Final road test",
-          rawLine: "Proc Final road test",
-        },
-        {
-          operation: "Proc",
-          component: "Cavity wax",
-          rawLine: "Proc Cavity wax",
-        },
-        {
-          operation: "Proc",
-          component: "Pre-paint test fit",
-          rawLine: "Proc Pre-paint test fit",
-        },
-      ],
-      rawEstimateText:
-        "Proc Seat belt dynamic function test\nProc Final road test\nProc Cavity wax\nProc Pre-paint test fit",
-    },
-    panel: null,
-    assistantAnalysis: null,
-  });
-
-  const seatBeltSection = document.sections.find((section) =>
-    section.title.includes("Seat belt dynamic function test")
-  );
-  const roadTestSection = document.sections.find((section) =>
-    section.title.includes("Final road test")
-  );
-  const cavityWaxSection = document.sections.find((section) =>
-    section.title.includes("Cavity wax")
-  );
-  const testFitSection = document.sections.find((section) =>
-    section.title.includes("Pre-paint test fit")
-  );
-
-  assert.ok(seatBeltSection);
-  assert.ok(roadTestSection);
-  assert.ok(cavityWaxSection);
-  assert.ok(testFitSection);
-  assert.equal(document.sections.some((section) => /^Line \d+: Proc$/i.test(section.title)), false);
-  assert.equal(
-    (seatBeltSection.bullets ?? []).some((bullet) => /Pre-Paint Test Fit/i.test(bullet)),
-    false
-  );
-  assert.equal(
-    (roadTestSection.bullets ?? []).some((bullet) => /Pre-Paint Test Fit/i.test(bullet)),
-    false
-  );
-  assert.equal(
-    (cavityWaxSection.bullets ?? []).some((bullet) => /Pre-Paint Test Fit/i.test(bullet)),
-    false
-  );
-  assert.equal(
-    (cavityWaxSection.bullets ?? []).some((bullet) => /Support status: Supported/i.test(bullet)),
-    true
-  );
-});
-
-run("line-by-line PDF strips machine-like numeric noise from rendered operation labels", () => {
-  const document = buildLineByLinePdf({
-    report: REPORT,
-    analysis: {
-      ...ANALYSIS,
-      operations: [
-        {
-          operation: "Proc",
-          component: "Fuel Pump Replace 71218877627121.940.2",
-          rawLine: "Proc Fuel Pump Replace 71218877627121.940.2",
-        },
-        {
-          operation: "Proc",
-          component: "Rear__Bumper|||Refinish",
-          rawLine: "Proc Rear__Bumper|||Refinish",
-        },
-      ],
-      rawEstimateText:
-        "Proc Fuel Pump Replace 71218877627121.940.2\nProc Rear__Bumper|||Refinish",
-    },
-    panel: null,
-    assistantAnalysis: null,
-  });
-
-  assert.ok(document.sections.some((section) => section.title.includes("Fuel Pump Replace")));
-  assert.equal(
-    document.sections.some((section) => /71218877627121\.940\.2/.test(section.title)),
-    false
-  );
-  assert.ok(document.sections.some((section) => section.title.includes("Rear Bumper Refinish")));
-});
-
-run("line-by-line PDF falls back to a safe operation label when OCR garbage collapses", () => {
-  const document = buildLineByLinePdf({
-    report: REPORT,
-    analysis: {
-      ...ANALYSIS,
-      operations: [
-        {
-          operation: "Proc",
-          component: "71218877627121.940.2",
-          rawLine: "Proc 71218877627121.940.2",
-        },
-      ],
-      rawEstimateText: "Proc 71218877627121.940.2",
-    },
-    panel: null,
-    assistantAnalysis: null,
-  });
-
-  assert.ok(document.sections.some((section) => section.title.includes("Repair Operation")));
 });

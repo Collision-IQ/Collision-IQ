@@ -98,9 +98,25 @@ export function extractEstimateOps(text: string): EstimateOperation[] {
 
   return parsed.lines.map((line) => ({
     operation: normalizeOperation(line.op),
-    component: line.raw,
+    component: stripTrailingLaborHours(line.raw),
     rawLine: line.lineNo ? `${line.lineNo} ${line.op} ${line.raw}` : `${line.op} ${line.raw}`,
+    laborHours: extractTrailingLaborHours(line.raw),
   }));
+}
+
+function extractTrailingLaborHours(value: string): number | undefined {
+  const match = value.match(/^(.*?)(?:\s+(\d+(?:\.\d+)?))$/);
+  if (!match) {
+    return undefined;
+  }
+
+  const hours = Number(match[2]);
+  return Number.isFinite(hours) ? hours : undefined;
+}
+
+function stripTrailingLaborHours(value: string): string {
+  const match = value.match(/^(.*?)(?:\s+(\d+(?:\.\d+)?))$/);
+  return match?.[1]?.trim() || value.trim();
 }
 
 function normalizeOperation(operation: string): string {

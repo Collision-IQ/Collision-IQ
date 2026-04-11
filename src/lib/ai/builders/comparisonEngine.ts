@@ -1,6 +1,11 @@
 import type { AnalysisFinding, AnalysisResult, EvidenceRef } from "../types/analysis";
 import { buildRepairStory, type RepairStory } from "./buildRepairStory";
-import { extractEstimateOps, type EstimateOperation } from "../extractors/estimateExtractor";
+import {
+  extractEstimateOps,
+  parseEstimate,
+  type EstimateOperation,
+  type ParsedEstimate,
+} from "../extractors/estimateExtractor";
 import type { WorkspaceEstimateComparisons } from "@/types/workspaceTypes";
 import { buildWorkspaceEstimateComparisonSummary } from "@/lib/workspace/estimateComparisons";
 
@@ -12,6 +17,8 @@ type ComparisonEngineParams = {
 export function buildComparisonAnalysis(
   params: ComparisonEngineParams
 ): AnalysisResult {
+  const shopEstimate = parseEstimate(params.shopEstimateText);
+  const insurerEstimate = parseEstimate(params.insurerEstimateText);
   const shopOperations = extractEstimateOps(params.shopEstimateText);
   const insurerOperations = extractEstimateOps(params.insurerEstimateText);
   const shopStory = buildRepairStory(params.shopEstimateText);
@@ -44,6 +51,8 @@ export function buildComparisonAnalysis(
     evidence,
     operations: shopOperations,
     estimateComparisons: buildEstimateComparisons({
+      shopEstimate,
+      insurerEstimate,
       shopStory,
       insurerStory,
       shopOperations,
@@ -307,6 +316,8 @@ function buildEvidence(
 }
 
 function buildEstimateComparisons(params: {
+  shopEstimate: ParsedEstimate;
+  insurerEstimate: ParsedEstimate;
   shopStory: RepairStory;
   insurerStory: RepairStory;
   shopOperations: EstimateOperation[];
@@ -315,6 +326,33 @@ function buildEstimateComparisons(params: {
 }): WorkspaceEstimateComparisons {
   const rows: WorkspaceEstimateComparisons["rows"] = [];
   const comparisonPairs = buildOperationPairs(params.shopOperations, params.insurerOperations);
+
+  if (
+    typeof params.shopEstimate.totalCost === "number" ||
+    typeof params.insurerEstimate.totalCost === "number"
+  ) {
+    rows.push({
+      id: "estimate-total",
+      category: "Estimate",
+      operation: "Estimate total",
+      lhsSource: "Shop estimate",
+      rhsSource: "Carrier estimate",
+      lhsValue: params.shopEstimate.totalCost ?? null,
+      rhsValue: params.insurerEstimate.totalCost ?? null,
+      delta:
+        typeof params.shopEstimate.totalCost === "number" &&
+        typeof params.insurerEstimate.totalCost === "number"
+          ? Number((params.shopEstimate.totalCost - params.insurerEstimate.totalCost).toFixed(2))
+          : null,
+      valueUnit: "currency",
+      deltaType: resolveDeltaType(
+        params.shopEstimate.totalCost ?? null,
+        params.insurerEstimate.totalCost ?? null
+      ),
+      confidence: 0.98,
+      notes: ["Derived from parsed estimate totals."],
+    });
+  }
 
   if (
     typeof params.shopStory.laborStructure.bodyHours === "number" ||
@@ -338,6 +376,7 @@ function buildEstimateComparisons(params: {
               ).toFixed(1)
             )
           : null,
+      valueUnit: "hours",
       deltaType: resolveDeltaType(
         params.shopStory.laborStructure.bodyHours ?? null,
         params.insurerStory.laborStructure.bodyHours ?? null
@@ -369,6 +408,7 @@ function buildEstimateComparisons(params: {
               ).toFixed(1)
             )
           : null,
+      valueUnit: "hours",
       deltaType: resolveDeltaType(
         params.shopStory.laborStructure.paintHours ?? null,
         params.insurerStory.laborStructure.paintHours ?? null
@@ -379,6 +419,11 @@ function buildEstimateComparisons(params: {
   }
 
   comparisonPairs.forEach((pair, index) => {
+    const quantifiedRow = buildOperationLaborComparisonRow(pair, index);
+    if (quantifiedRow) {
+      rows.push(quantifiedRow);
+    }
+
     const row = buildOperationComparisonRow(pair, params.findings, index);
     if (row) {
       rows.push(row);
@@ -464,6 +509,43 @@ function buildOperationComparisonRow(
     deltaType,
     confidence: shop && insurer ? 0.92 : 0.82,
     notes,
+  };
+}
+
+function buildOperationLaborComparisonRow(
+  pair: {
+    shop?: EstimateOperation;
+    insurer?: EstimateOperation;
+  },
+  index: number
+) {
+  const shop = pair.shop;
+  const insurer = pair.insurer;
+
+  if (
+    typeof shop?.laborHours !== "number" &&
+    typeof insurer?.laborHours !== "number"
+  ) {
+    return null;
+  }
+
+  return {
+    id: `operation-labor-${index + 1}`,
+    category: classifyOperationCategory(shop ?? insurer!),
+    operation: `${shop?.component ?? insurer?.component ?? "Operation"} labor hours`,
+    partName: shop?.component ?? insurer?.component,
+    lhsSource: "Shop estimate",
+    rhsSource: "Carrier estimate",
+    lhsValue: shop?.laborHours ?? null,
+    rhsValue: insurer?.laborHours ?? null,
+    delta:
+      typeof shop?.laborHours === "number" && typeof insurer?.laborHours === "number"
+        ? Number((shop.laborHours - insurer.laborHours).toFixed(1))
+        : null,
+    valueUnit: "hours" as const,
+    deltaType: resolveDeltaType(shop?.laborHours ?? null, insurer?.laborHours ?? null),
+    confidence: shop && insurer ? 0.94 : 0.86,
+    notes: ["Derived from parsed operation labor hours."],
   };
 }
 

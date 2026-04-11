@@ -324,7 +324,7 @@ export default function PrivacyPage() {
             Terms of Service
           </Link>
           <span className="opacity-30">/</span>
-          <Link href="/chatbot" className="transition hover:text-white">
+          <Link href="/" className="transition hover:text-white">
             Collision IQ
           </Link>
         </div>

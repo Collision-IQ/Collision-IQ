@@ -1,7 +1,19 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const path = require("node:path");
+const Module = require("node:module");
 const ts = require("typescript");
+
+const originalResolveFilename = Module._resolveFilename;
+Module._resolveFilename = function resolveFilenameWithAlias(request, parent, isMain, options) {
+  if (request.startsWith("@/")) {
+    const absolute = path.join(process.cwd(), "src", request.slice(2));
+    return originalResolveFilename.call(this, absolute, parent, isMain, options);
+  }
+
+  return originalResolveFilename.call(this, request, parent, isMain, options);
+};
 
 require.extensions[".ts"] = function registerTypeScript(module, filename) {
   const source = fs.readFileSync(filename, "utf8");
@@ -26,10 +38,9 @@ const {
   deriveExportReportFields,
 } = require("./builders/buildExportModel.ts");
 const { buildCarrierReport } = require("./builders/carrierPdfBuilder.ts");
-const { buildSideBySidePdf } = require("./builders/sideBySidePdfBuilder.ts");
-const { buildLineByLinePdf } = require("./builders/lineByLinePdfBuilder.ts");
+const { buildDisputeIntelligencePdf } = require("./builders/disputeIntelligencePdfBuilder.ts");
 const { buildRebuttalEmailPdf } = require("./builders/rebuttalEmailPdfBuilder.ts");
-const { buildSideBySideComparisonReport, buildLineByLineComparisonReport } = require("./builders/exportTemplates.ts");
+const { buildDisputeIntelligenceReport } = require("./builders/exportTemplates.ts");
 const { buildSupplementLines } = require("./builders/supplementBuilder.ts");
 const { generateNegotiationResponse } = require("./builders/negotiationEngine.ts");
 const { buildVehicleLabel, decodeVinVehicleIdentity, extractVehicleIdentityFromText } = require("./vehicleContext.ts");
@@ -335,7 +346,7 @@ run("structured JD Power-style values are used when comps are unavailable", () =
 
   assert.equal(exportModel.valuation.acvSourceType, "jd_power");
   assert.equal(exportModel.valuation.acvStatus, "estimated_range");
-  assert.equal(exportModel.valuation.acvValue, 18650);
+  assert.equal(exportModel.valuation.acvValue, undefined);
   assert.deepEqual(exportModel.valuation.acvRange, { low: 17400, high: 19800 });
   assert.equal(exportModel.valuation.acvConfidence, "medium");
 });
@@ -435,13 +446,7 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
     panel: null,
     assistantAnalysis: null,
   });
-  const estimateReview = buildSideBySidePdf({
-    report,
-    analysis,
-    panel: null,
-    assistantAnalysis: null,
-  });
-  const lineByLine = buildLineByLinePdf({
+  const disputeIntelligence = buildDisputeIntelligencePdf({
     report,
     analysis,
     panel: null,
@@ -481,23 +486,20 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
   );
   assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
   assert.equal(carrier.summary.some((item) => item.value === "THOMAS"), false);
-  assert.equal(estimateReview.summary.find((item) => item.label === "Vehicle")?.value, "2018 Tesla Model S 75D AWD");
-  assert.equal(estimateReview.summary.find((item) => item.label === "VIN")?.value, "5YJSA1E21JF264319");
-  assert.equal(lineByLine.summary.find((item) => item.label === "Vehicle")?.value, "2018 Tesla Model S 75D AWD");
-  assert.equal(lineByLine.summary.find((item) => item.label === "VIN")?.value, "5YJSA1E21JF264319");
-  assert.equal(rebuttal.summary.find((item) => item.label === "Vehicle")?.value, "2018 Tesla Model S 75D AWD");
-  assert.equal(rebuttal.summary.find((item) => item.label === "VIN")?.value, "5YJSA1E21JF264319");
-  assert.equal(estimateReview.summary.some((item) => item.value === "Unspecified"), false);
-  assert.equal(lineByLine.summary.some((item) => item.value === "Unspecified"), false);
-  assert.equal(rebuttal.summary.some((item) => item.value === "Unspecified"), false);
   assert.equal(
-    estimateReview.sections.some((section) =>
-      (section.bullets ?? []).some((bullet) => /Front Structure Scope \/ Tie Bar \/ Upper Rail Reconciliation/i.test(bullet))
-    ),
-    false
+    disputeIntelligence.summary.find((item) => item.label === "Vehicle")?.value,
+    "2018 Tesla Model S 75D AWD"
   );
   assert.equal(
-    lineByLine.sections.some((section) =>
+    disputeIntelligence.summary.find((item) => item.label === "VIN")?.value,
+    "5YJSA1E21JF264319"
+  );
+  assert.equal(rebuttal.summary.find((item) => item.label === "Vehicle")?.value, "2018 Tesla Model S 75D AWD");
+  assert.equal(rebuttal.summary.find((item) => item.label === "VIN")?.value, "5YJSA1E21JF264319");
+  assert.equal(disputeIntelligence.summary.some((item) => item.value === "Unspecified"), false);
+  assert.equal(rebuttal.summary.some((item) => item.value === "Unspecified"), false);
+  assert.equal(
+    disputeIntelligence.sections.some((section) =>
       (section.bullets ?? []).some((bullet) => /Front Structure Scope \/ Tie Bar \/ Upper Rail Reconciliation/i.test(bullet))
     ),
     false
@@ -514,18 +516,18 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
     ),
     false
   );
-  assert.equal(estimateReview.header.title, "Estimate Review Report");
+  assert.equal(disputeIntelligence.header.title, "Dispute Intelligence Report");
   assert.equal(
-    estimateReview.sections.some((section) =>
-      (section.bullets ?? []).some((bullet) => bullet.startsWith("Estimate position:"))
+    disputeIntelligence.sections.some((section) =>
+      section.title === "Top Dispute Drivers"
     ),
     true
   );
   assert.equal(
-    estimateReview.sections.some((section) =>
-      (section.bullets ?? []).some((bullet) => bullet.startsWith("Carrier position:"))
+    disputeIntelligence.sections.some((section) =>
+      section.title === "Recommended Next Moves"
     ),
-    false
+    true
   );
 });
 
@@ -548,39 +550,67 @@ run("pdf builders honor a pre-resolved render model without recomputing divergen
   };
 
   const carrier = buildCarrierReport(sharedInput);
-  const sideBySide = buildSideBySidePdf(sharedInput);
-  const lineByLine = buildLineByLinePdf(sharedInput);
+  const disputeIntelligence = buildDisputeIntelligencePdf(sharedInput);
   const rebuttal = buildRebuttalEmailPdf(sharedInput);
 
   assert.equal(carrier.summary.find((item) => item.label === "Vehicle")?.value, renderModel.reportFields.vehicleLabel);
   assert.equal(carrier.summary.find((item) => item.label === "VIN")?.value, renderModel.reportFields.vin);
   assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
-  assert.equal(sideBySide.summary.find((item) => item.label === "Vehicle")?.value, renderModel.reportFields.vehicleLabel);
-  assert.equal(lineByLine.summary.find((item) => item.label === "VIN")?.value, renderModel.reportFields.vin);
+  assert.equal(
+    disputeIntelligence.summary.find((item) => item.label === "Vehicle")?.value,
+    renderModel.reportFields.vehicleLabel
+  );
+  assert.equal(
+    disputeIntelligence.summary.find((item) => item.label === "VIN")?.value,
+    renderModel.reportFields.vin
+  );
   assert.equal(rebuttal.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
 });
 
-run("single-estimate text templates avoid comparison framing", () => {
+run("dispute intelligence text template stays decision-ready outside compare mode", () => {
   const report = makeReport();
   const analysis = normalizeReportToAnalysisResult(report);
-  const sideBySide = buildSideBySideComparisonReport({
-    report,
-    analysis,
-    panel: null,
-    assistantAnalysis: null,
-  });
-  const lineByLine = buildLineByLineComparisonReport({
+  const disputeIntelligence = buildDisputeIntelligenceReport({
     report,
     analysis,
     panel: null,
     assistantAnalysis: null,
   });
 
-  assert.equal(sideBySide.includes("shop-side repair path"), false);
-  assert.equal(sideBySide.includes("Carrier position:"), false);
-  assert.equal(sideBySide.includes("Estimate position:"), true);
-  assert.equal(lineByLine.includes("Carrier position:"), false);
-  assert.equal(lineByLine.includes("Support posture:"), true);
+  assert.equal(disputeIntelligence.includes("shop-side repair path"), false);
+  assert.equal(disputeIntelligence.includes("Carrier position:"), false);
+  assert.equal(disputeIntelligence.includes("## Top Dispute Drivers"), true);
+  assert.equal(disputeIntelligence.includes("Recommended next action:"), true);
+});
+
+run("export model builds dispute intelligence and premium-ready report models", () => {
+  const report = makeReport();
+  const analysis = normalizeReportToAnalysisResult(report);
+  const exportModel = buildExportModel({
+    report,
+    analysis,
+    panel: null,
+    assistantAnalysis: null,
+  });
+
+  assert.equal(typeof exportModel.disputeIntelligenceReport.summary, "string");
+  assert.equal(Array.isArray(exportModel.disputeIntelligenceReport.topDrivers), true);
+  assert.equal(exportModel.disputeIntelligenceReport.topDrivers.length > 0, true);
+  assert.equal(
+    exportModel.disputeIntelligenceReport.supportGaps.some((gap) =>
+      exportModel.disputeIntelligenceReport.topDrivers.some((driver) => gap.includes(driver.title))
+    ),
+    false
+  );
+  assert.equal(
+    exportModel.disputeIntelligenceReport.nextMoves.some((move) =>
+      exportModel.disputeIntelligenceReport.topDrivers.some((driver) => move === driver.nextAction)
+    ),
+    false
+  );
+  assert.equal(Array.isArray(exportModel.negotiationPlaybook.likelyPushback), true);
+  assert.equal(Array.isArray(exportModel.financialGapBreakdown.drivers), true);
+  assert.equal(typeof exportModel.financialGapBreakdown.narrativeSummary, "string");
 });
 
 run("negotiation generation uses validated support gaps only", () => {

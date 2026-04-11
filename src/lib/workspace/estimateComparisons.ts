@@ -14,6 +14,7 @@ type LegacyComparisonRow = {
   lhsValue?: string | number | null;
   rhsValue?: string | number | null;
   delta?: string | number | null;
+  valueUnit?: EstimateComparisonRow["valueUnit"];
   deltaType?: EstimateComparisonRow["deltaType"];
   confidence?: number | null;
   notes?: string[];
@@ -85,6 +86,7 @@ function normalizeEstimateComparisonRow(
     lhsValue,
     rhsValue,
     delta: row.delta ?? deriveDelta(lhsValue, rhsValue),
+    valueUnit: row.valueUnit,
     deltaType: row.deltaType ?? deriveDeltaType(lhsValue, rhsValue),
     confidence: typeof row.confidence === "number" ? row.confidence : null,
     notes: row.notes?.filter(Boolean) ?? [],

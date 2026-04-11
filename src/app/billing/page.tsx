@@ -17,7 +17,7 @@ export default async function BillingPage() {
 
         <div className="mt-8 grid gap-4 md:grid-cols-3">
           <PlanCard name="Starter" price="Included" description="Basic chat, uploads, at-a-glance, vehicle context, and standard PDF export." />
-          <PlanCard name="Pro" price="Stripe plan" description="Supplement lines, negotiation draft, rebuttal email, side-by-side, and line-by-line exports." />
+          <PlanCard name="Pro" price="Stripe plan" description="Supplement lines, negotiation draft, rebuttal email, and decision-ready dispute exports." />
           <PlanCard name="Team" price="Stripe plan" description="Shared shop support, membership structure, and pooled usage." />
         </div>
 

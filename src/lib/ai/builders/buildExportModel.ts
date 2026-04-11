@@ -72,6 +72,48 @@ export type ExportModel = {
   supplementItems: ExportSupplementItem[];
   request: string;
   valuation: DerivedValuation;
+  disputeIntelligenceReport: DisputeIntelligenceReport;
+  negotiationPlaybook: NegotiationPlaybook;
+  financialGapBreakdown: FinancialGapBreakdown;
+};
+
+export type DisputeIntelligenceDriver = {
+  title: string;
+  impact: "high" | "medium" | "low";
+  supportStatus: "missing" | "underwritten" | "disputed" | "supported";
+  whyItMatters: string;
+  currentGap: string;
+  nextAction: string;
+};
+
+export type DisputeIntelligenceReport = {
+  summary: string;
+  topDrivers: DisputeIntelligenceDriver[];
+  positives: string[];
+  supportGaps: string[];
+  nextMoves: string[];
+  valuationPreview?: ExportValuationPreviewSummary;
+};
+
+export type NegotiationPlaybook = {
+  likelyApproved: string[];
+  likelyPushback: string[];
+  strongestArguments: string[];
+  vulnerablePoints: string[];
+  suggestedSequence: string[];
+  documentationNeeded: string[];
+  fallbackConcessions?: string[];
+};
+
+export type FinancialGapBreakdown = {
+  totalGap?: string;
+  drivers: Array<{
+    category: string;
+    summary: string;
+    impactLevel: "high" | "medium" | "low";
+    estimatedContribution?: string;
+  }>;
+  narrativeSummary: string;
 };
 
 export type ExportValuationPreviewSummary = {
@@ -289,6 +331,23 @@ export function buildExportModel(params: {
     exportVehicle,
   });
 
+  const disputeIntelligenceReport = buildDisputeIntelligenceReport({
+    reportFields,
+    repairPosition,
+    positionStatement,
+    supplementItems: guardedSupplementItems,
+    valuation,
+  });
+  const negotiationPlaybook = buildNegotiationPlaybook({
+    reportFields,
+    supplementItems: guardedSupplementItems,
+  });
+  const financialGapBreakdown = buildFinancialGapBreakdown({
+    report: params.report,
+    analysis: params.analysis,
+    supplementItems: guardedSupplementItems,
+  });
+
   return {
     vehicle: exportVehicle,
     estimateFacts,
@@ -334,6 +393,9 @@ export function buildExportModel(params: {
       dvReasoning: cleanFormalExportText(valuation.dvReasoning),
       dvMissingInputs: valuation.dvMissingInputs.map((item) => cleanDisplayLabel(item)),
     },
+    disputeIntelligenceReport,
+    negotiationPlaybook,
+    financialGapBreakdown,
   };
 }
 
@@ -535,6 +597,399 @@ export function buildExportValuationPreviewSummary(
       maxRange: 50000,
     }),
   };
+}
+
+function buildDisputeIntelligenceReport(params: {
+  reportFields: ExportReportFields;
+  repairPosition: string;
+  positionStatement: string;
+  supplementItems: ExportSupplementItem[];
+  valuation: DerivedValuation;
+}): DisputeIntelligenceReport {
+  const topDrivers = params.supplementItems.slice(0, 5).map((item) => ({
+    title: cleanDisplayLabel(item.title),
+    impact: mapSupplementPriorityToImpact(item.priority),
+    supportStatus: mapSupplementKindToSupportStatus(item.kind),
+    whyItMatters: summarizeSupplementSentence(
+      item.rationale,
+      "This item affects repair quality, documentation, or validation."
+    ),
+    currentGap: buildDisputeDriverGap(item),
+    nextAction: buildDisputeDriverAction(item),
+  }));
+  const positives = dedupeCleanExportBullets([
+    ...params.reportFields.presentStrengths,
+    ...params.reportFields.documentedHighlights,
+    ...params.reportFields.documentedProcedures,
+  ]).slice(0, 5);
+  const supportGaps = buildDisputeSupportGapBullets(params.supplementItems, params.reportFields).slice(0, 5);
+  const nextMoves = buildDisputeNextMoves(params.supplementItems).slice(0, 6);
+  const valuationPreview =
+    params.valuation.acvStatus !== "not_determinable" || params.valuation.dvStatus !== "not_determinable"
+      ? buildExportValuationPreviewSummary(params.valuation)
+      : undefined;
+
+  return {
+    summary: removeNearDuplicateConclusionSentences(
+      [trimTrailingPunctuation(params.repairPosition), trimTrailingPunctuation(params.positionStatement)]
+        .filter(Boolean)
+        .join(" ")
+        .trim()
+    ),
+    topDrivers,
+    positives,
+    supportGaps,
+    nextMoves,
+    valuationPreview,
+  };
+}
+
+function buildNegotiationPlaybook(params: {
+  reportFields: ExportReportFields;
+  supplementItems: ExportSupplementItem[];
+}): NegotiationPlaybook {
+  const approved = dedupeCleanExportBullets(params.reportFields.presentStrengths).slice(0, 4);
+  const likelyPushback = dedupeCleanExportBullets(
+    params.supplementItems
+      .slice(0, 5)
+      .map((item) => `${cleanDisplayLabel(item.title)}: ${buildDisputeDriverGap(item)}`)
+  ).slice(0, 5);
+  const strongestArguments = dedupeCleanExportBullets([
+    ...params.reportFields.documentedProcedures.map(
+      (item) => `Documented procedure support: ${trimTrailingPunctuation(item)}`
+    ),
+    ...params.supplementItems
+      .slice(0, 4)
+      .map((item) => `${cleanDisplayLabel(item.title)} matters because ${lowercaseFirstSafe(summarizeSupplementSentence(item.rationale, ""))}`),
+  ]).slice(0, 5);
+  const vulnerablePoints = dedupeCleanExportBullets(
+    params.supplementItems
+      .filter((item) => item.priority !== "low")
+      .slice(0, 4)
+      .map((item) => `${cleanDisplayLabel(item.title)} still needs ${lowercaseFirstSafe(buildDisputeDriverGap(item))}`)
+  ).slice(0, 4);
+  const documentationNeeded = dedupeCleanExportBullets(
+    params.supplementItems.slice(0, 5).map((item) => buildDisputeDriverAction(item))
+  ).slice(0, 5);
+
+  return {
+    likelyApproved: approved,
+    likelyPushback,
+    strongestArguments,
+    vulnerablePoints,
+    suggestedSequence: [
+      "Lead with the strongest OEM-backed procedure support already documented in the file.",
+      "Move next to missing or underwritten safety, calibration, scan, and measurement items.",
+      "Address lower-dollar labor or process disagreements after the repair-path logic is established.",
+    ],
+    documentationNeeded,
+    fallbackConcessions: [
+      "If needed, concede low-impact manual or presentation items that do not change the core repair-path support.",
+    ],
+  };
+}
+
+function buildFinancialGapBreakdown(params: {
+  report: RepairIntelligenceReport | null;
+  analysis: AnalysisResult | null;
+  supplementItems: ExportSupplementItem[];
+}): FinancialGapBreakdown {
+  const drivers = dedupeFinancialGapDrivers([
+    ...buildComparisonGapDrivers(params.analysis),
+    ...buildSupplementGapDrivers(params.supplementItems),
+  ]).slice(0, 6);
+
+  return {
+    totalGap: deriveDirectionalTotalGap(params.analysis),
+    drivers,
+    narrativeSummary:
+      drivers.length > 0
+        ? `The biggest estimate-gap pressure appears to come from ${joinHumanList(
+            drivers.slice(0, 3).map((driver) => driver.category.toLowerCase())
+          )}, with the current file supporting a directional rather than fully quantified breakdown.`
+        : "The current file does not support a reliable quantified gap breakdown, so any financial read should stay directional only.",
+  };
+}
+
+function mapSupplementPriorityToImpact(
+  priority: ExportSupplementItem["priority"]
+): DisputeIntelligenceDriver["impact"] {
+  if (priority === "high") return "high";
+  if (priority === "medium") return "medium";
+  return "low";
+}
+
+function mapSupplementKindToSupportStatus(
+  kind: ExportSupplementItem["kind"]
+): DisputeIntelligenceDriver["supportStatus"] {
+  switch (kind) {
+    case "missing_operation":
+    case "missing_verification":
+      return "missing";
+    case "underwritten_operation":
+      return "underwritten";
+    case "disputed_repair_path":
+      return "disputed";
+    default:
+      return "supported";
+  }
+}
+
+function summarizeSupplementSentence(value: string, fallback: string): string {
+  const cleaned = cleanFormalExportText(value).trim();
+  if (!cleaned) return fallback;
+  const sentence = cleaned.split(/(?<=[.!?])\s+/)[0]?.trim() ?? cleaned;
+  return trimTrailingPunctuation(sentence) || fallback;
+}
+
+function buildDisputeDriverGap(item: ExportSupplementItem): string {
+  switch (item.kind) {
+    case "missing_operation":
+      return "the operation is not clearly carried in the current estimate posture";
+    case "missing_verification":
+      return "the required verification or documentation path is not clearly shown";
+    case "underwritten_operation":
+      return "the current estimate appears to carry this item lightly relative to the repair path";
+    default:
+      return "the current repair-path position still needs clearer support or reconciliation";
+  }
+}
+
+function buildDisputeDriverAction(item: ExportSupplementItem): string {
+  const title = item.title.toLowerCase();
+
+  if (title.includes("calibration") || title.includes("scan") || title.includes("sensor")) {
+    return "Request OEM procedure support plus invoice-backed scan or calibration records.";
+  }
+  if (title.includes("measure") || title.includes("setup") || title.includes("realignment")) {
+    return "Request documented measurement, setup, or frame verification records.";
+  }
+  if (title.includes("alignment")) {
+    return "Request alignment rationale plus the post-repair printout or supporting documentation.";
+  }
+  if (title.includes("hardware") || title.includes("clip") || title.includes("seal")) {
+    return "Request the OEM parts-support list and any one-time-use hardware documentation.";
+  }
+
+  return "Request OEM procedure support and the documentation carrying the intended repair path.";
+}
+
+function dedupeCleanExportBullets(values: string[]): string[] {
+  return [...new Set(values.map((value) => trimTrailingPunctuation(cleanFormalExportText(value))).filter(Boolean))];
+}
+
+function buildDisputeSupportGapBullets(
+  supplementItems: ExportSupplementItem[],
+  reportFields: ExportReportFields
+): string[] {
+  const values: string[] = [];
+  const titles = supplementItems.map((item) => item.title.toLowerCase());
+
+  if (titles.some((title) => /(measure|frame|structural|setup|realign|rail)/.test(title))) {
+    values.push("Structural measurement or frame-setup records are still missing or under-documented.");
+  }
+  if (titles.some((title) => /(scan|calibration|sensor|camera|radar|adas)/.test(title))) {
+    values.push("Scan and calibration items still need OEM-procedure support and invoice-backed proof.");
+  }
+  if (titles.some((title) => /(alignment|test fit|fit check|mock)/.test(title))) {
+    values.push("Validation items such as alignment or fit-check support still need printouts or documented confirmation.");
+  }
+  if (titles.some((title) => /(oem|alternate|aftermarket|hardware|clip|seal|parts)/.test(title))) {
+    values.push("Parts-position items still need OEM support, one-time-use documentation, or clear replacement rationale.");
+  }
+
+  const remainingAreas = reportFields.likelySupplementAreas
+    .map((item) => trimTrailingPunctuation(cleanFormalExportText(item)))
+    .filter(Boolean)
+    .filter(
+      (item) =>
+        !values.some((value) => normalizeExportConcept(value) === normalizeExportConcept(item))
+    )
+    .slice(0, 2)
+    .map((item) => `${item} still needs stronger file support.`);
+
+  const combined = dedupeCleanExportBullets([...values, ...remainingAreas]);
+  return combined.length > 0
+    ? combined
+    : ["Several repair-path items still need clearer documentation support before they become strong negotiation points."];
+}
+
+function buildDisputeNextMoves(supplementItems: ExportSupplementItem[]): string[] {
+  const titles = supplementItems.map((item) => item.title.toLowerCase());
+  const values = [
+    "Lead with OEM procedures and the strongest documented repair-path support.",
+    titles.some((title) => /(measure|frame|structural|setup|realign|rail)/.test(title))
+      ? "Close the structural measurement or frame-verification gap first, because it drives safety and geometry credibility."
+      : undefined,
+    titles.some((title) => /(scan|calibration|sensor|camera|radar|adas)/.test(title))
+      ? "Anchor scan and calibration items on OEM procedures plus invoice-backed proof before debating pricing."
+      : undefined,
+    titles.some((title) => /(alignment|test fit|fit check|mock)/.test(title))
+      ? "Use alignment printouts, fit-check records, or validation documentation to support process-related charges."
+      : undefined,
+    titles.some((title) => /(oem|alternate|aftermarket|hardware|clip|seal|parts)/.test(title))
+      ? "If parts strategy is contested, tie the request back to OEM guidance and one-time-use replacement requirements."
+      : undefined,
+    "Concede softer manual or presentation-level charges only after the safety and validation items are carried properly.",
+  ];
+
+  return dedupeCleanExportBullets(values.filter((value): value is string => Boolean(value)));
+}
+
+function normalizeExportConcept(value: string): string {
+  return cleanFormalExportText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(
+      /\b(?:request|documented|documentation|records|record|support|proof|still|needs|need|stronger|clearer|file|current|before|items|item)\b/g,
+      " "
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildComparisonGapDrivers(
+  analysis: AnalysisResult | null
+): FinancialGapBreakdown["drivers"] {
+  const rows = analysis?.estimateComparisons?.rows ?? [];
+  const drivers: FinancialGapBreakdown["drivers"] = [];
+
+  for (const row of rows) {
+    const text = `${row.category ?? ""} ${row.operation ?? ""} ${row.partName ?? ""} ${row.delta ?? ""}`.toLowerCase();
+    const estimatedContribution =
+      isCurrencyComparisonRow(row) && typeof row.delta === "number"
+        ? formatCompactCurrency(Math.abs(row.delta))
+        : undefined;
+
+    if (/(paint|refinish|blend|tint|mask)/.test(text)) {
+      drivers.push({
+        category: "Paint / Refinish Gap",
+        summary: "Structured comparison rows show meaningful paint or refinish differences.",
+        impactLevel: estimatedContribution ? "high" : "medium",
+        estimatedContribution,
+      });
+    }
+    if (/(labor|rate|body|frame)/.test(text)) {
+      drivers.push({
+        category: "Labor Rate / Labor Time Gap",
+        summary: "Labor pricing or labor-time differences appear to be contributing to the estimate gap.",
+        impactLevel: estimatedContribution ? "high" : "medium",
+        estimatedContribution,
+      });
+    }
+    if (/(adas|calibration|scan|sensor|camera|radar)/.test(text)) {
+      drivers.push({
+        category: "Calibration / Diagnostics Gap",
+        summary: "Calibration, diagnostics, or scan support appears underfunded relative to the repair path.",
+        impactLevel: "high",
+        estimatedContribution,
+      });
+    }
+    if (/(oem|aftermarket|alt|parts|suspension)/.test(text)) {
+      drivers.push({
+        category: "Parts Strategy Gap",
+        summary: "Parts selection differences are affecting the current estimate posture.",
+        impactLevel: estimatedContribution ? "high" : "medium",
+        estimatedContribution,
+      });
+    }
+  }
+
+  return drivers;
+}
+
+function buildSupplementGapDrivers(
+  supplementItems: ExportSupplementItem[]
+): FinancialGapBreakdown["drivers"] {
+  const drivers: FinancialGapBreakdown["drivers"] = [];
+
+  for (const item of supplementItems) {
+    const text = `${item.title} ${item.category} ${item.rationale}`.toLowerCase();
+
+    if (/(paint|refinish|blend|tint|mask|polish|sand)/.test(text)) {
+      drivers.push({
+        category: "Paint / Refinish Gap",
+        summary: "Paint-process support remains lighter than the likely repair path.",
+        impactLevel: item.priority === "high" ? "high" : "medium",
+      });
+    }
+    if (/(alignment|labor|setup|pull|measure|frame)/.test(text)) {
+      drivers.push({
+        category: "Labor / Structural Process Gap",
+        summary: "Structural process or alignment support appears underwritten relative to the repair burden.",
+        impactLevel: item.priority === "high" ? "high" : "medium",
+      });
+    }
+    if (/(adas|calibration|scan|sensor|camera|radar)/.test(text)) {
+      drivers.push({
+        category: "Calibration / Diagnostics Gap",
+        summary: "Diagnostic, scan, or calibration support remains open in the current estimate posture.",
+        impactLevel: "high",
+      });
+    }
+    if (/(oem|aftermarket|alt|parts|hardware|clip|seal|suspension)/.test(text)) {
+      drivers.push({
+        category: "Parts Strategy Gap",
+        summary: "Parts-support posture appears to be contributing to the current estimate gap.",
+        impactLevel: item.priority === "high" ? "high" : "medium",
+      });
+    }
+  }
+
+  return drivers;
+}
+
+function dedupeFinancialGapDrivers(
+  drivers: FinancialGapBreakdown["drivers"]
+): FinancialGapBreakdown["drivers"] {
+  const kept = new Map<string, FinancialGapBreakdown["drivers"][number]>();
+
+  for (const driver of drivers) {
+    const existing = kept.get(driver.category);
+    if (!existing) {
+      kept.set(driver.category, driver);
+      continue;
+    }
+
+    const rank = { high: 3, medium: 2, low: 1 };
+    if (rank[driver.impactLevel] > rank[existing.impactLevel]) {
+      kept.set(driver.category, driver);
+    }
+  }
+
+  return [...kept.values()];
+}
+
+function deriveDirectionalTotalGap(analysis: AnalysisResult | null): string | undefined {
+  const numericRows = (analysis?.estimateComparisons?.rows ?? []).filter(
+    (row) => isCurrencyComparisonRow(row) && typeof row.delta === "number" && Number.isFinite(row.delta)
+  );
+  if (numericRows.length === 0) {
+    return undefined;
+  }
+
+  const total = numericRows.reduce((sum, row) => sum + Math.abs(Number(row.delta)), 0);
+  if (!Number.isFinite(total) || total <= 0) {
+    return undefined;
+  }
+
+  return `${formatCompactCurrency(total)} (directional only)`;
+}
+
+function isCurrencyComparisonRow(
+  row: NonNullable<AnalysisResult["estimateComparisons"]>["rows"][number]
+): boolean {
+  if (row.valueUnit === "currency") {
+    return true;
+  }
+
+  const text = `${row.category ?? ""} ${row.operation ?? ""}`.toLowerCase();
+  return /\b(?:estimate total|total cost|labor rate|paint rate|refinish rate)\b/.test(text);
+}
+
+function lowercaseFirstSafe(value: string): string {
+  if (!value) return value;
+  return value.charAt(0).toLowerCase() + value.slice(1);
 }
 
 function sanitizeVehicleDisplay(value?: string | null): string | undefined {
@@ -796,6 +1251,71 @@ export function redactExportModelForDownload(exportModel: ExportModel): ExportMo
       dvMissingInputs: exportModel.valuation.dvMissingInputs.map((item) =>
         redactInsurerInText(item, insurer)
       ),
+    },
+    disputeIntelligenceReport: {
+      ...exportModel.disputeIntelligenceReport,
+      summary: redactInsurerInText(exportModel.disputeIntelligenceReport.summary, insurer),
+      topDrivers: exportModel.disputeIntelligenceReport.topDrivers.map((driver) => ({
+        ...driver,
+        title: redactInsurerInText(driver.title, insurer),
+        whyItMatters: redactInsurerInText(driver.whyItMatters, insurer),
+        currentGap: redactInsurerInText(driver.currentGap, insurer),
+        nextAction: redactInsurerInText(driver.nextAction, insurer),
+      })),
+      positives: exportModel.disputeIntelligenceReport.positives.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+      supportGaps: exportModel.disputeIntelligenceReport.supportGaps.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+      nextMoves: exportModel.disputeIntelligenceReport.nextMoves.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+      valuationPreview: exportModel.disputeIntelligenceReport.valuationPreview
+        ? {
+            acv: redactInsurerInText(exportModel.disputeIntelligenceReport.valuationPreview.acv, insurer),
+            dv: redactInsurerInText(exportModel.disputeIntelligenceReport.valuationPreview.dv, insurer),
+          }
+        : undefined,
+    },
+    negotiationPlaybook: {
+      ...exportModel.negotiationPlaybook,
+      likelyApproved: exportModel.negotiationPlaybook.likelyApproved.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+      likelyPushback: exportModel.negotiationPlaybook.likelyPushback.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+      strongestArguments: exportModel.negotiationPlaybook.strongestArguments.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+      vulnerablePoints: exportModel.negotiationPlaybook.vulnerablePoints.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+      suggestedSequence: exportModel.negotiationPlaybook.suggestedSequence.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+      documentationNeeded: exportModel.negotiationPlaybook.documentationNeeded.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+      fallbackConcessions: exportModel.negotiationPlaybook.fallbackConcessions?.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+    },
+    financialGapBreakdown: {
+      ...exportModel.financialGapBreakdown,
+      totalGap: exportModel.financialGapBreakdown.totalGap
+        ? redactInsurerInText(exportModel.financialGapBreakdown.totalGap, insurer)
+        : undefined,
+      drivers: exportModel.financialGapBreakdown.drivers.map((driver) => ({
+        ...driver,
+        category: redactInsurerInText(driver.category, insurer),
+        summary: redactInsurerInText(driver.summary, insurer),
+        estimatedContribution: driver.estimatedContribution
+          ? redactInsurerInText(driver.estimatedContribution, insurer)
+          : undefined,
+      })),
+      narrativeSummary: redactInsurerInText(exportModel.financialGapBreakdown.narrativeSummary, insurer),
     },
   };
 }

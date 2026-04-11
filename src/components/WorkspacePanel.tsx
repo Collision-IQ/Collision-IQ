@@ -66,44 +66,24 @@ export default function WorkspacePanel({ workspaceData }: Props) {
   // conversion should happen upstream in workspaceAdapter when backend data is absent.
   const comparisonRows = data ? getEstimateComparisonRows(data.estimateComparisons) : [];
   const topDifferences = getTopEstimateComparisonHighlights(comparisonRows);
+  const topIssues = (data?.keyIssues ?? []).slice(0, 4);
 
   // Shorthand for readability below
   return (
     <div className="flex h-full flex-col text-sm text-white">
-      {/* Panel intro */}
-
-      <div className="rounded-2xl border border-white/7 bg-white/[0.035] p-4 shadow-[0_14px_38px_rgba(0,0,0,0.18)] backdrop-blur-md">
-        <h3 className="mb-2 text-[10px] uppercase tracking-[0.22em] text-white/40">
-          Repair Intelligence
-        </h3>
-
-        <p className="text-sm leading-6 text-white/65">
-          Upload an estimate or photos to generate a repair decision.
-        </p>
-      </div>
-
-      {/* Analysis output */}
-
-      <div className="mt-4 flex-1 min-h-0 overflow-y-auto rounded-2xl border border-white/7 bg-white/[0.025] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.18)] backdrop-blur-md">
-
-        {/* Empty state */}
-
-        {!data && (
-          <div className="space-y-2.5">
-            <div className="text-sm leading-6 text-white/85">
-              Upload an estimate or photos to generate a repair decision.
-            </div>
-            <div className="text-sm leading-6 text-white/65">
-              This panel will show the key repair risks and next steps.
-            </div>
+      <div className="flex-1 min-h-0 overflow-y-auto rounded-2xl border border-white/7 bg-white/[0.025] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.18)] backdrop-blur-md">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+              Comparison Signals
+            </h3>
+            <p className="mt-1 text-[13px] leading-5 text-white/55">
+              Structured estimate differences and issue flags. Full narrative stays in the center canvas.
+            </p>
           </div>
-        )}
 
-        {data && (
-          <>
-            {/* Risk and confidence summary */}
-
-            <div className="mb-5 grid grid-cols-2 gap-2">
+          {data ? (
+            <div className="grid grid-cols-2 gap-2">
               <div className="rounded-xl border border-white/6 bg-black/16 px-3 py-2.5 text-xs text-white/65">
                 Risk: <span className="font-semibold capitalize">{data.riskLevel}</span>
               </div>
@@ -111,20 +91,33 @@ export default function WorkspacePanel({ workspaceData }: Props) {
                 Confidence: <span className="font-semibold capitalize">{data.confidence}</span>
               </div>
             </div>
+          ) : null}
+        </div>
 
-            {/* Sidebar stays decision-focused. Full comparison rows remain available for exports. */}
+        {/* Empty state */}
 
+        {!data && (
+          <div className="space-y-2.5">
+            <div className="text-sm leading-6 text-white/85">
+              Upload an estimate or photos to generate structured comparison signals.
+            </div>
+            <div className="text-sm leading-6 text-white/65">
+              This area will focus on estimate differences, key issues, and supportable comparison flags.
+            </div>
+          </div>
+        )}
+
+        {data && (
+          <>
             <TopDifferencesSummary items={topDifferences} />
 
-            {/* Key issue cards */}
-
-            {data.keyIssues.length > 0 && (
+            {topIssues.length > 0 && (
               <div className="mt-5 flex flex-col gap-2">
                 <div className="mb-1 text-[10px] uppercase tracking-[0.22em] text-white/40">
                   Key Issues
                 </div>
 
-                {data.keyIssues.map((issue, i) => (
+                {topIssues.map((issue, i) => (
                   <IssueCard key={i} text={issue} />
                 ))}
               </div>
