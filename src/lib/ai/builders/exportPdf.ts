@@ -645,8 +645,8 @@ function drawComparisonRowBlock(
     const value = (fieldValue || "").trim();
     if (!value) return;
 
-    const valueLines = doc.splitTextToSize(value, valueWidth);
-    valueLines.forEach((line, index) => {
+    const valueLines: string[] = doc.splitTextToSize(value, valueWidth);
+    valueLines.forEach((line: string, index: number) => {
       ensureLineSpace();
       if (index === 0) {
         doc.setFont("Helvetica", "Bold");
