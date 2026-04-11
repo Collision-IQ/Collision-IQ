@@ -57,6 +57,7 @@ export function resolveFinancialView(params: {
     params.renderModel.financialGapBreakdown.totalGap;
   const directionalBullets = buildDirectionalFinancialBullets(params.renderModel);
   const narrative = params.renderModel.financialGapBreakdown.narrativeSummary.trim();
+  const valuationFallbackNarrative = buildValuationFallbackNarrative(params.renderModel);
 
   if (totalGap || allDrivers.length > 0) {
     return {
@@ -68,12 +69,18 @@ export function resolveFinancialView(params: {
     };
   }
 
-  if (directionalBullets.length > 0 || hasMeaningfulDirectionalNarrative(narrative)) {
+  if (
+    hasDirectionalValuationSignal(params.renderModel) ||
+    directionalBullets.length > 0 ||
+    hasMeaningfulDirectionalNarrative(narrative)
+  ) {
     return {
       kind: "directional_financial_view",
       bullets: directionalBullets,
       narrative:
-        narrative || "Directional financial posture is available, but the current file set does not support quantified gap math yet.",
+        narrative ||
+        valuationFallbackNarrative ||
+        "Directional financial posture is available, but the current file set does not support quantified gap math yet.",
     };
   }
 
@@ -125,6 +132,53 @@ function buildDirectionalFinancialBullets(renderModel: ExportModel) {
   }
 
   return dedupe(bullets).slice(0, 6);
+}
+
+function hasDirectionalValuationSignal(renderModel: ExportModel) {
+  const valuation = renderModel.valuation;
+
+  return Boolean(
+    hasSaneRange(valuation.acvRange, 250000) ||
+      hasSaneRange(valuation.dvRange, 50000) ||
+      (valuation.acvStatus === "provided" && typeof valuation.acvValue === "number") ||
+      (valuation.dvStatus === "provided" && typeof valuation.dvValue === "number") ||
+      valuation.acvConfidence ||
+      valuation.dvConfidence ||
+      valuation.acvMissingInputs.length > 0 ||
+      valuation.dvMissingInputs.length > 0 ||
+      cleanNarrative(valuation.acvReasoning) ||
+      cleanNarrative(valuation.dvReasoning)
+  );
+}
+
+function buildValuationFallbackNarrative(renderModel: ExportModel) {
+  const valuation = renderModel.valuation;
+  const narrativeParts: string[] = [];
+
+  const acvNarrative = cleanNarrative(valuation.acvReasoning);
+  const dvNarrative = cleanNarrative(valuation.dvReasoning);
+
+  if (acvNarrative) {
+    narrativeParts.push(acvNarrative);
+  }
+
+  if (dvNarrative && dvNarrative !== acvNarrative) {
+    narrativeParts.push(dvNarrative);
+  }
+
+  if (narrativeParts.length > 0) {
+    return narrativeParts.join(" ");
+  }
+
+  if (valuation.acvMissingInputs.length > 0 || valuation.dvMissingInputs.length > 0) {
+    return "Directional valuation support exists, but stronger financial support still depends on additional file inputs and market evidence.";
+  }
+
+  if (valuation.acvConfidence || valuation.dvConfidence) {
+    return "Directional valuation posture is available from the current file set, even though quantified estimate-gap math is not yet supportable.";
+  }
+
+  return "";
 }
 
 function buildQuantifiedGapDrivers(
@@ -262,4 +316,27 @@ function hasMeaningfulDirectionalNarrative(value: string) {
   if (!value) return false;
 
   return !/(not yet quantified|not supportable|does not yet support|not determinable)/i.test(value);
+}
+
+function hasSaneRange(
+  range: { low: number; high: number } | undefined,
+  max: number
+): range is { low: number; high: number } {
+  if (!range) return false;
+  if (!Number.isFinite(range.low) || !Number.isFinite(range.high)) return false;
+  if (range.low <= 0 || range.high <= 0) return false;
+  if (range.high < range.low || range.high > max) return false;
+  return true;
+}
+
+function cleanNarrative(value: string) {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  if (/preview band not supportable from the current file set/i.test(cleaned)) {
+    return "";
+  }
+  if (/not determinable from the current documents/i.test(cleaned)) {
+    return "";
+  }
+  return cleaned;
 }

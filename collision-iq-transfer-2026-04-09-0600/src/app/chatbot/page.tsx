@@ -17,8 +17,6 @@ import {
 import { buildCarrierReport } from "@/lib/ai/builders/carrierPdfBuilder";
 import { exportCarrierPDF } from "@/lib/ai/builders/exportPdf";
 import { buildRebuttalEmailPdf } from "@/lib/ai/builders/rebuttalEmailPdfBuilder";
-import { buildSideBySidePdf } from "@/lib/ai/builders/sideBySidePdfBuilder";
-import { buildLineByLinePdf } from "@/lib/ai/builders/lineByLinePdfBuilder";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import type {
   AnalysisResult,
@@ -213,8 +211,6 @@ export default function ChatbotPage() {
   const canViewNegotiationDraft = featureFlags?.negotiation_draft ?? false;
   const canUseBasicPdfExport = featureFlags?.basic_pdf_export ?? true;
   const canUseRebuttalEmail = featureFlags?.rebuttal_email ?? false;
-  const canUseSideBySide = featureFlags?.side_by_side_report ?? false;
-  const canUseLineByLine = featureFlags?.line_by_line_report ?? false;
 
   return (
     <div className="h-screen bg-black text-white flex flex-col">
@@ -298,8 +294,6 @@ export default function ChatbotPage() {
               canViewNegotiationDraft={canViewNegotiationDraft}
               canUseBasicPdfExport={canUseBasicPdfExport}
               canUseRebuttalEmail={canUseRebuttalEmail}
-              canUseSideBySide={canUseSideBySide}
-              canUseLineByLine={canUseLineByLine}
             />
           </aside>
         )}
@@ -336,8 +330,6 @@ export default function ChatbotPage() {
             canViewNegotiationDraft={canViewNegotiationDraft}
             canUseBasicPdfExport={canUseBasicPdfExport}
             canUseRebuttalEmail={canUseRebuttalEmail}
-            canUseSideBySide={canUseSideBySide}
-            canUseLineByLine={canUseLineByLine}
           />
         </div>
       )}
@@ -474,8 +466,6 @@ function RailContent({
   canViewNegotiationDraft,
   canUseBasicPdfExport,
   canUseRebuttalEmail,
-  canUseSideBySide,
-  canUseLineByLine,
 }: {
   attachment: string | null;
   analysisText: string;
@@ -489,8 +479,6 @@ function RailContent({
   canViewNegotiationDraft: boolean;
   canUseBasicPdfExport: boolean;
   canUseRebuttalEmail: boolean;
-  canUseSideBySide: boolean;
-  canUseLineByLine: boolean;
 }) {
   const featuredRecommendation = renderModel.supplementItems[0];
   const remainingRecommendations = renderModel.supplementItems.slice(1);
@@ -680,38 +668,6 @@ function RailContent({
             >
               {canUseRebuttalEmail ? "Rebuttal Email" : "Rebuttal Email (Pro)"}
             </button>
-            <button
-              onClick={() =>
-                exportPdfVariant({
-                  normalizedResult,
-                  analysisResult,
-                  panel,
-                  analysisText,
-                  renderModel,
-                  variant: "side_by_side",
-                })
-              }
-              disabled={!canUseSideBySide}
-              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {canUseSideBySide ? "Side-by-Side Report" : "Side-by-Side Report (Pro)"}
-            </button>
-            <button
-              onClick={() =>
-                exportPdfVariant({
-                  normalizedResult,
-                  analysisResult,
-                  panel,
-                  analysisText,
-                  renderModel,
-                  variant: "line_by_line",
-                })
-              }
-              disabled={!canUseLineByLine}
-              className="w-full rounded-md border border-white/10 bg-white/5 hover:bg-white/10 p-3 text-xs disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {canUseLineByLine ? "Line-by-Line Report" : "Line-by-Line Report (Pro)"}
-            </button>
           </div>
         </section>
       )}
@@ -746,7 +702,7 @@ function exportPdfVariant(params: {
   analysisResult: RepairIntelligenceReport | null;
   panel: DecisionPanel;
   analysisText: string;
-  variant: "rebuttal" | "side_by_side" | "line_by_line";
+  variant: "rebuttal";
 }) {
   const resolvedAnalysis =
     params.normalizedResult ??
@@ -760,12 +716,7 @@ function exportPdfVariant(params: {
     assistantAnalysis: params.analysisText,
   };
 
-  const document =
-    params.variant === "rebuttal"
-      ? buildRebuttalEmailPdf(sharedInput)
-      : params.variant === "side_by_side"
-        ? buildSideBySidePdf(sharedInput)
-        : buildLineByLinePdf(sharedInput);
+  const document = buildRebuttalEmailPdf(sharedInput);
 
   void exportCarrierPDF(document);
 }

@@ -137,7 +137,7 @@ export default function StructuredAnalysisCanvas({
     renderModel.disputeIntelligenceReport.summary,
   ]).slice(0, 4);
 
-  const sections: SectionData[] = [
+  const sections = [
     {
       insightKey: "executive_summary",
       title: "Executive Summary",
@@ -177,7 +177,8 @@ export default function StructuredAnalysisCanvas({
       bullets: nextMoveBullets,
       prose: "Formal exports and carrier-ready outputs remain available in the right rail.",
     },
-  ].filter((section) => section.bullets.length > 0 || section.prose);
+  ] satisfies SectionData[];
+  const visibleSections = sections.filter((section) => section.bullets.length > 0 || section.prose);
 
   const caseLabel =
     renderModel.vehicle.label || renderModel.reportFields.vehicleLabel || "Vehicle still being resolved";
@@ -274,7 +275,7 @@ export default function StructuredAnalysisCanvas({
       </section>
 
       <div className="space-y-3">
-        {sections.map((section) => (
+        {visibleSections.map((section) => (
           <div
             key={section.title}
             ref={(node) => {

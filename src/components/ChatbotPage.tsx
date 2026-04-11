@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { MutableRefObject, ReactNode } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ChatShell from "@/components/ChatShell";
@@ -578,6 +578,9 @@ function RailContent({
   onInsightSelect: (insightKey: InsightKey) => void;
 }) {
   const sectionRefs = useRef<Partial<Record<InsightKey, HTMLDivElement | null>>>({});
+  function registerSectionRef(insightKey: InsightKey, node: HTMLDivElement | null) {
+    sectionRefs.current[insightKey] = node;
+  }
   const featuredRecommendation = renderModel.supplementItems[0];
   const remainingRecommendations = renderModel.supplementItems.slice(1);
   const valuationLowConfidence = isLowConfidenceValuation(renderModel);
@@ -673,7 +676,7 @@ function RailContent({
       <RailInsightSection
         insightKey="executive_summary"
         activeInsightKey={activeInsightKey}
-        sectionRefs={sectionRefs}
+        registerSectionRef={registerSectionRef}
         onActivate={onInsightSelect}
       >
         {hasResolvedAnalysis && featuredRecommendation ? (
@@ -728,7 +731,7 @@ function RailContent({
         <RailInsightSection
           insightKey="support_strengths"
           activeInsightKey={activeInsightKey}
-          sectionRefs={sectionRefs}
+          registerSectionRef={registerSectionRef}
           onActivate={onInsightSelect}
         >
           <SupportSignalsCard items={supportSignals} />
@@ -741,7 +744,7 @@ function RailContent({
         <RailInsightSection
           insightKey="support_gaps"
           activeInsightKey={activeInsightKey}
-          sectionRefs={sectionRefs}
+          registerSectionRef={registerSectionRef}
           onActivate={onInsightSelect}
         >
           <TopDisputeDriversCard items={renderModel.supplementItems} />
@@ -754,7 +757,7 @@ function RailContent({
         <RailInsightSection
           insightKey="financial_view"
           activeInsightKey={activeInsightKey}
-          sectionRefs={sectionRefs}
+          registerSectionRef={registerSectionRef}
           onActivate={onInsightSelect}
         >
           <GapSummaryCard
@@ -762,6 +765,11 @@ function RailContent({
             normalizedResult={normalizedResult}
             workspaceData={workspaceData}
           />
+          {analysisResult ? (
+            <div className="mt-3">
+              <ValuationSection renderModel={renderModel} lowConfidence={valuationLowConfidence} />
+            </div>
+          ) : null}
         </RailInsightSection>
       ) : null}
 
@@ -769,7 +777,7 @@ function RailContent({
         <RailInsightSection
           insightKey="next_moves"
           activeInsightKey={activeInsightKey}
-          sectionRefs={sectionRefs}
+          registerSectionRef={registerSectionRef}
           onActivate={onInsightSelect}
         >
           {recommendedMoves.length > 0 ? <NextMovesCard items={recommendedMoves} /> : null}
@@ -781,7 +789,7 @@ function RailContent({
         <RailInsightSection
           insightKey="support_gaps"
           activeInsightKey={activeInsightKey}
-          sectionRefs={sectionRefs}
+          registerSectionRef={registerSectionRef}
           onActivate={onInsightSelect}
         >
         <section className="mt-5 space-y-2.5 rounded-2xl border border-white/7 bg-white/[0.03] p-3.5">
@@ -824,22 +832,11 @@ function RailContent({
         />
       ) : null}
 
-      {hasResolvedAnalysis && analysisResult ? (
-        <RailInsightSection
-          insightKey="financial_view"
-          activeInsightKey={activeInsightKey}
-          sectionRefs={sectionRefs}
-          onActivate={onInsightSelect}
-        >
-          <ValuationSection renderModel={renderModel} lowConfidence={valuationLowConfidence} />
-        </RailInsightSection>
-      ) : null}
-
       {hasResolvedAnalysis && renderModel.request && canViewNegotiationDraft ? (
         <RailInsightSection
           insightKey="next_moves"
           activeInsightKey={activeInsightKey}
-          sectionRefs={sectionRefs}
+          registerSectionRef={registerSectionRef}
           onActivate={onInsightSelect}
         >
           <ExpandableDecisionSection
@@ -863,7 +860,7 @@ function RailContent({
         <RailInsightSection
           insightKey="next_moves"
           activeInsightKey={activeInsightKey}
-          sectionRefs={sectionRefs}
+          registerSectionRef={registerSectionRef}
           onActivate={onInsightSelect}
         >
           <DecisionSection
@@ -879,7 +876,7 @@ function RailContent({
         <RailInsightSection
           insightKey="next_moves"
           activeInsightKey={activeInsightKey}
-          sectionRefs={sectionRefs}
+          registerSectionRef={registerSectionRef}
           onActivate={onInsightSelect}
         >
           <DecisionSection
@@ -897,7 +894,7 @@ function RailContent({
         <RailInsightSection
           insightKey="exports"
           activeInsightKey={activeInsightKey}
-          sectionRefs={sectionRefs}
+          registerSectionRef={registerSectionRef}
           onActivate={onInsightSelect}
         >
         <section className="mt-5 space-y-3 rounded-2xl bg-white/[0.03] p-4">
@@ -1110,13 +1107,13 @@ function MetricCard({
 function RailInsightSection({
   insightKey,
   activeInsightKey,
-  sectionRefs,
+  registerSectionRef,
   onActivate,
   children,
 }: {
   insightKey: InsightKey;
   activeInsightKey: InsightKey | null;
-  sectionRefs: MutableRefObject<Partial<Record<InsightKey, HTMLDivElement | null>>>;
+  registerSectionRef: (insightKey: InsightKey, node: HTMLDivElement | null) => void;
   onActivate: (insightKey: InsightKey) => void;
   children: ReactNode;
 }) {
@@ -1125,7 +1122,7 @@ function RailInsightSection({
   return (
     <div
       ref={(node) => {
-        sectionRefs.current[insightKey] = node;
+        registerSectionRef(insightKey, node);
       }}
       onClick={() => onActivate(insightKey)}
       className={`cursor-pointer rounded-[26px] transition-all hover:bg-white/[0.02] ${
