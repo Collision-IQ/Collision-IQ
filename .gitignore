@@ -18,6 +18,18 @@ dist/
 .env.off
 
 # ===============================
+# Third-party API Keys
+# ===============================
+# Clerk Authentication
+CLERK_SECRET_KEY
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+
+# Plaid API
+PLAID_CLIENT_ID
+PLAID_SECRET
+PLAID_ENV
+
+# ===============================
 # Logs
 # ===============================
 npm-debug.log*

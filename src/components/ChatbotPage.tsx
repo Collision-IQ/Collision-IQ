@@ -6,6 +6,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ChatShell from "@/components/ChatShell";
 import ChatWidget from "@/components/ChatWidget";
+import {
+  buildEvidenceLinkModel,
+  type EvidenceLink,
+  type EvidenceLinkModel,
+  findEvidenceLinkForDisputeDriver,
+} from "@/components/chatbot/evidenceLinks";
 import { resolveFinancialView } from "@/components/chatbot/financialView";
 import type { InsightKey } from "@/components/chatbot/insightSync";
 import StructuredAnalysisCanvas from "@/components/StructuredAnalysisCanvas";
@@ -131,6 +137,7 @@ export function ChatbotWorkspacePage() {
     content: string;
   } | null>(null);
   const [activeInsightKey, setActiveInsightKey] = useState<InsightKey | null>("executive_summary");
+  const [activeEvidenceTargetId, setActiveEvidenceTargetId] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<RepairIntelligenceReport | null>(null);
   const [analysisPanel, setAnalysisPanel] = useState<DecisionPanel | null>(null);
   const [workspaceData, setWorkspaceData] = useState<WorkspaceData | null>(null);
@@ -155,6 +162,26 @@ export function ChatbotWorkspacePage() {
       }),
     [analysisPanel, analysisResult, analysisText, hasResolvedAnalysis, normalizedResult]
   );
+  const financialView = useMemo(
+    () =>
+      resolveFinancialView({
+        renderModel,
+        normalizedResult,
+        workspaceData,
+      }),
+    [normalizedResult, renderModel, workspaceData]
+  );
+  const evidenceModel = useMemo<EvidenceLinkModel | null>(() => {
+    if (!hasResolvedAnalysis) return null;
+
+    return buildEvidenceLinkModel({
+      renderModel,
+      workspaceData,
+      normalizedResult,
+      analysisResult,
+      financialView,
+    });
+  }, [analysisResult, financialView, hasResolvedAnalysis, normalizedResult, renderModel, workspaceData]);
 
   const panel = hasResolvedAnalysis ? analysisPanel ?? EMPTY_PANEL : EMPTY_PANEL;
   const hasStructuredAnalysis = hasResolvedAnalysis;
@@ -252,6 +279,7 @@ export function ChatbotWorkspacePage() {
 
   function handleContinueReview() {
     setActiveInsightKey(null);
+    setActiveEvidenceTargetId(null);
     setEndAnalysisConfirming(false);
     chatSessionControlsRef.current?.focusComposer();
   }
@@ -274,7 +302,22 @@ export function ChatbotWorkspacePage() {
     setWorkspaceData(null);
     setAnalysisLoading(false);
     setActiveInsightKey(null);
+    setActiveEvidenceTargetId(null);
     setEndAnalysisConfirming(false);
+  }
+
+  function handleAnalysisResultChange(next: RepairIntelligenceReport | null) {
+    setAnalysisResult(next);
+
+    if (next) {
+      setActiveInsightKey((current) => current ?? "executive_summary");
+    }
+  }
+
+  function handleEvidenceSelect(link: EvidenceLink) {
+    setActiveInsightKey(link.insightKey);
+    setActiveEvidenceTargetId(link.targetId);
+    centerScrollRequestRef.current?.(link.insightKey);
   }
 
   function handleConfirmEndAnalysis() {
@@ -308,7 +351,11 @@ export function ChatbotWorkspacePage() {
             />
 
             <div className="mt-3 rounded-[24px] border border-white/8 bg-white/[0.035] p-3.5">
-              <WorkspacePanel workspaceData={workspaceData ?? undefined} />
+              <WorkspacePanel
+                workspaceData={workspaceData ?? undefined}
+                evidenceModel={evidenceModel}
+                activeEvidenceTargetId={activeEvidenceTargetId}
+              />
             </div>
 
             <StructuredAnalysisCanvas
@@ -322,6 +369,9 @@ export function ChatbotWorkspacePage() {
               activeInsightKey={activeInsightKey}
               onActiveInsightChange={setActiveInsightKey}
               canRenderExports={hasResolvedAnalysis && Boolean(analysisText || panel.narrative)}
+              evidenceModel={evidenceModel}
+              activeEvidenceTargetId={activeEvidenceTargetId}
+              onEvidenceSelect={handleEvidenceSelect}
               onContinueChat={handleContinueReview}
               onRequestEndAnalysis={handleRequestEndAnalysis}
               onConfirmEndAnalysis={handleConfirmEndAnalysis}
@@ -362,7 +412,7 @@ export function ChatbotWorkspacePage() {
                     onAttachmentsChange={setAttachmentsState}
                     onAnalysisChange={setAnalysisText}
                     onPrimaryAnalysisChange={setPrimaryAnalysis}
-                    onAnalysisResultChange={setAnalysisResult}
+                    onAnalysisResultChange={handleAnalysisResultChange}
                     onAnalysisPanelChange={setAnalysisPanel}
                     onAnalysisLoadingChange={setAnalysisLoading}
                     onWorkspaceDataChange={setWorkspaceData}
@@ -382,7 +432,7 @@ export function ChatbotWorkspacePage() {
                   onAttachmentsChange={setAttachmentsState}
                   onAnalysisChange={setAnalysisText}
                   onPrimaryAnalysisChange={setPrimaryAnalysis}
-                  onAnalysisResultChange={setAnalysisResult}
+                  onAnalysisResultChange={handleAnalysisResultChange}
                   onAnalysisPanelChange={setAnalysisPanel}
                   onAnalysisLoadingChange={setAnalysisLoading}
                   onWorkspaceDataChange={setWorkspaceData}
@@ -413,10 +463,14 @@ export function ChatbotWorkspacePage() {
             canUseBasicPdfExport={canUseBasicPdfExport}
             canUseRebuttalEmail={canUseRebuttalEmail}
             activeInsightKey={activeInsightKey}
+            evidenceModel={evidenceModel}
+            activeEvidenceTargetId={activeEvidenceTargetId}
             onInsightSelect={(insightKey) => {
               setActiveInsightKey(insightKey);
+              setActiveEvidenceTargetId(null);
               centerScrollRequestRef.current?.(insightKey);
             }}
+            onEvidenceSelect={handleEvidenceSelect}
           />
         }
       />
@@ -559,7 +613,10 @@ function RailContent({
   canUseBasicPdfExport,
   canUseRebuttalEmail,
   activeInsightKey,
+  evidenceModel,
+  activeEvidenceTargetId,
   onInsightSelect,
+  onEvidenceSelect,
 }: {
   attachment: string | null;
   analysisText: string;
@@ -575,7 +632,10 @@ function RailContent({
   canUseBasicPdfExport: boolean;
   canUseRebuttalEmail: boolean;
   activeInsightKey: InsightKey | null;
+  evidenceModel: EvidenceLinkModel | null;
+  activeEvidenceTargetId: string | null;
   onInsightSelect: (insightKey: InsightKey) => void;
+  onEvidenceSelect: (link: EvidenceLink) => void;
 }) {
   const sectionRefs = useRef<Partial<Record<InsightKey, HTMLDivElement | null>>>({});
   function registerSectionRef(insightKey: InsightKey, node: HTMLDivElement | null) {
@@ -747,7 +807,12 @@ function RailContent({
           registerSectionRef={registerSectionRef}
           onActivate={onInsightSelect}
         >
-          <TopDisputeDriversCard items={renderModel.supplementItems} />
+          <TopDisputeDriversCard
+            items={renderModel.supplementItems}
+            evidenceModel={evidenceModel}
+            activeEvidenceTargetId={activeEvidenceTargetId}
+            onEvidenceSelect={onEvidenceSelect}
+          />
         </RailInsightSection>
       ) : null}
 
@@ -1295,8 +1360,14 @@ function trimDriverSentence(value: string): string {
 
 function TopDisputeDriversCard({
   items,
+  evidenceModel,
+  activeEvidenceTargetId,
+  onEvidenceSelect,
 }: {
   items: SupplementItem[];
+  evidenceModel: EvidenceLinkModel | null;
+  activeEvidenceTargetId: string | null;
+  onEvidenceSelect: (link: EvidenceLink) => void;
 }) {
   const drivers = buildTopDisputeDrivers(items);
 
@@ -1311,26 +1382,85 @@ function TopDisputeDriversCard({
       </div>
       <div className="space-y-3">
         {drivers.map((driver, index) => (
-          <div key={`${driver.title}-${index}`} className="rounded-2xl bg-black/18 px-3.5 py-3">
-            <div className="text-sm font-semibold leading-5 text-white/88">
-              {index + 1}. {driver.title}
-            </div>
-            <div className="mt-2 text-[13px] leading-5 text-white/70">
-              <span className="font-semibold text-white/88">Impact:</span> {driver.impact}
-            </div>
-            <div className="mt-1 text-[13px] leading-5 text-white/70">
-              <span className="font-semibold text-white/88">Why it matters:</span> {driver.whyItMatters}
-            </div>
-            <div className="mt-1 text-[13px] leading-5 text-white/70">
-              <span className="font-semibold text-white/88">What carrier is doing:</span> {driver.carrierPosture}
-            </div>
-            <div className="mt-1 text-[13px] leading-5 text-white/70">
-              <span className="font-semibold text-white/88">What to do:</span> {driver.action}
-            </div>
-          </div>
+          <DisputeDriverCard
+            key={`${driver.title}-${index}`}
+            index={index}
+            driver={driver}
+            evidenceLink={
+              evidenceModel
+                ? findEvidenceLinkForDisputeDriver(
+                    evidenceModel,
+                    driver.title,
+                    `${driver.whyItMatters} ${driver.action}`
+                  )
+                : null
+            }
+            activeEvidenceTargetId={activeEvidenceTargetId}
+            onEvidenceSelect={onEvidenceSelect}
+          />
         ))}
       </div>
     </section>
+  );
+}
+
+function DisputeDriverCard({
+  index,
+  driver,
+  evidenceLink,
+  activeEvidenceTargetId,
+  onEvidenceSelect,
+}: {
+  index: number;
+  driver: DisputeDriver;
+  evidenceLink: EvidenceLink | null;
+  activeEvidenceTargetId: string | null;
+  onEvidenceSelect: (link: EvidenceLink) => void;
+}) {
+  const active = Boolean(evidenceLink && evidenceLink.targetId === activeEvidenceTargetId);
+  const className = `rounded-2xl px-3.5 py-3 transition-[border-color,background-color,box-shadow] duration-300 ${
+    active
+      ? "border border-orange-300/28 bg-[#C65A2A]/12 shadow-[0_0_0_1px_rgba(210,122,81,0.12)]"
+      : "bg-black/18"
+  }`;
+
+  const content = (
+    <>
+      <div className="text-sm font-semibold leading-5 text-white/88">
+        {index + 1}. {driver.title}
+      </div>
+      <div className="mt-2 text-[13px] leading-5 text-white/70">
+        <span className="font-semibold text-white/88">Impact:</span> {driver.impact}
+      </div>
+      <div className="mt-1 text-[13px] leading-5 text-white/70">
+        <span className="font-semibold text-white/88">Why it matters:</span> {driver.whyItMatters}
+      </div>
+      <div className="mt-1 text-[13px] leading-5 text-white/70">
+        <span className="font-semibold text-white/88">What carrier is doing:</span> {driver.carrierPosture}
+      </div>
+      <div className="mt-1 text-[13px] leading-5 text-white/70">
+        <span className="font-semibold text-white/88">What to do:</span> {driver.action}
+      </div>
+      {evidenceLink ? (
+        <div className="mt-2 inline-flex rounded-full border border-white/8 bg-black/18 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-white/48">
+          View support
+        </div>
+      ) : null}
+    </>
+  );
+
+  if (!evidenceLink) {
+    return <div className={className}>{content}</div>;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => onEvidenceSelect(evidenceLink)}
+      className={`${className} w-full text-left hover:border-white/12 hover:bg-black/22`}
+    >
+      {content}
+    </button>
   );
 }
 

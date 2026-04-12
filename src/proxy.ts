@@ -17,7 +17,6 @@ const isProtectedRoute = createRouteMatcher([
   "/billing(.*)",
   "/api/chat(.*)",
   "/api/analysis(.*)",
-  "/api/upload(.*)",
   "/api/transcribe(.*)",
   "/api/tts(.*)",
 ]);
@@ -32,9 +31,7 @@ const protectedProxy = clerkMiddleware(async (auth, req) => {
     ),
   });
 
-  if (isPublicRoute(req)) {
-    return;
-  }
+  if (isPublicRoute(req)) return;
 
   if (isProtectedRoute(req)) {
     await auth.protect();

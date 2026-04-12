@@ -1,5 +1,7 @@
 export const MAX_UPLOAD_BATCH_FILES = 6;
 export const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at once for now.";
+export const MAX_UPLOAD_FILE_BYTES = 20 * 1024 * 1024;
+export const MAX_UPLOAD_TOTAL_BYTES = 75 * 1024 * 1024;
 
 export type AttachmentSummaryItem = {
   filename: string;
@@ -31,6 +33,52 @@ export function summarizeAttachmentStats(list: AttachmentSummaryItem[]) {
   return {
     fileCount: list.length,
     totalBytes: list.reduce((sum, attachment) => sum + attachment.sizeBytes, 0),
+  };
+}
+
+export function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  const precision = unitIndex === 0 ? 0 : value >= 10 ? 0 : 1;
+  return `${value.toFixed(precision)} ${units[unitIndex]}`;
+}
+
+export function validateUploadBatch(files: File[]) {
+  if (files.length === 0) {
+    return { valid: false, error: "No files selected." };
+  }
+
+  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
+  const oversizedFile = files.find((file) => file.size > MAX_UPLOAD_FILE_BYTES);
+
+  if (oversizedFile) {
+    return {
+      valid: false,
+      error: `${oversizedFile.name} is ${formatBytes(oversizedFile.size)}. Max size is ${formatBytes(MAX_UPLOAD_FILE_BYTES)} per file.`,
+      totalBytes,
+    };
+  }
+
+  if (totalBytes > MAX_UPLOAD_TOTAL_BYTES) {
+    return {
+      valid: false,
+      error: `Selected files total ${formatBytes(totalBytes)}. Max total upload size is ${formatBytes(MAX_UPLOAD_TOTAL_BYTES)} per batch.`,
+      totalBytes,
+    };
+  }
+
+  return {
+    valid: true,
+    totalBytes,
   };
 }
 

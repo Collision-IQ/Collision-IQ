@@ -18,10 +18,14 @@ import type { WorkspaceData } from "@/types/workspaceTypes";
 import {
   buildAttachmentBatchStatus,
   buildAttachmentSummary,
+  formatBytes,
   isLikelyImageFile,
   MAX_UPLOAD_BATCH_FILES,
+  MAX_UPLOAD_FILE_BYTES,
+  MAX_UPLOAD_TOTAL_BYTES,
   summarizeAttachmentStats,
   UPLOAD_CAP_MESSAGE,
+  validateUploadBatch,
 } from "@/components/chatWidget/attachmentUtils";
 import {
   canUseBrowserReadAloud,
@@ -94,6 +98,15 @@ const SERVER_TTS_ENABLED =
 const SERVER_TTS_VOICE = process.env.NEXT_PUBLIC_COLLISION_IQ_TTS_VOICE?.trim() || undefined;
 const TTS_STYLE_PROMPT =
   "Female voice. Warm, confident, quick-witted, conversational, and natural. Subtle Northeast energy. Smart, grounded, expressive, and slightly dry in tone. Brisk pacing with clear articulation. Sounds like a sharp, street-smart professional explaining something clearly under pressure. Avoid parody, caricature, or celebrity imitation.";
+const IMAGE_UPLOAD_TARGET_BYTES = 1.25 * 1024 * 1024;
+const IMAGE_UPLOAD_HARD_MAX_BYTES = 1.5 * 1024 * 1024;
+const IMAGE_UPLOAD_MAX_DIMENSION = 1800;
+
+type PreparedUploadFile = {
+  file: File;
+  originalFile: File;
+  wasOptimized: boolean;
+};
 
 export default function ChatWidget({
   onAttachmentChange,
@@ -551,6 +564,160 @@ export default function ChatWidget({
     return true;
   }
 
+  async function loadImageBitmap(file: File) {
+    if (typeof createImageBitmap === "function") {
+      return createImageBitmap(file);
+    }
+
+    const image = await loadImageElement(file);
+    return image;
+  }
+
+  function disposeBitmap(bitmap: ImageBitmap | HTMLImageElement) {
+    if ("close" in bitmap && typeof bitmap.close === "function") {
+      bitmap.close();
+    }
+  }
+
+  async function loadImageElement(file: File): Promise<HTMLImageElement> {
+    const objectUrl = URL.createObjectURL(file);
+
+    try {
+      const image = new Image();
+      image.decoding = "async";
+
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error(`Unable to decode image: ${file.name}`));
+        image.src = objectUrl;
+      });
+
+      return image;
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+
+  function fitWithinBounds(width: number, height: number, maxDimension: number) {
+    if (width <= maxDimension && height <= maxDimension) {
+      return { width, height };
+    }
+
+    const scale = Math.min(maxDimension / width, maxDimension / height);
+    return {
+      width: Math.max(1, Math.round(width * scale)),
+      height: Math.max(1, Math.round(height * scale)),
+    };
+  }
+
+  async function canvasToBlob(
+    canvas: HTMLCanvasElement,
+    mimeType: "image/jpeg" | "image/png",
+    quality?: number
+  ) {
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, mimeType, quality);
+    });
+
+    if (!blob) {
+      throw new Error("Image optimization could not encode the selected file.");
+    }
+
+    return blob;
+  }
+
+  async function buildJpegCandidates(canvas: HTMLCanvasElement) {
+    const qualities = [0.82, 0.72, 0.64, 0.56, 0.48];
+    const blobs: Blob[] = [];
+
+    for (const quality of qualities) {
+      blobs.push(await canvasToBlob(canvas, "image/jpeg", quality));
+      if (blobs[blobs.length - 1].size <= IMAGE_UPLOAD_TARGET_BYTES) {
+        break;
+      }
+    }
+
+    return blobs;
+  }
+
+  async function optimizeImageForUpload(file: File): Promise<PreparedUploadFile> {
+    if (!isLikelyImageFile(file)) {
+      return { file, originalFile: file, wasOptimized: false };
+    }
+
+    const outputType = file.type === "image/png" ? "image/png" : "image/jpeg";
+    const bitmap = await loadImageBitmap(file);
+    const originalWidth = bitmap.width;
+    const originalHeight = bitmap.height;
+    const resized = fitWithinBounds(bitmap.width, bitmap.height, IMAGE_UPLOAD_MAX_DIMENSION);
+    const canvas = document.createElement("canvas");
+    canvas.width = resized.width;
+    canvas.height = resized.height;
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Image optimization is unavailable in this browser.");
+    }
+
+    context.drawImage(bitmap, 0, 0, resized.width, resized.height);
+    disposeBitmap(bitmap);
+
+    const candidateBlobs =
+      outputType === "image/png"
+        ? [await canvasToBlob(canvas, outputType)]
+        : await buildJpegCandidates(canvas);
+    const chosenBlob =
+      candidateBlobs.find((blob) => blob.size <= IMAGE_UPLOAD_HARD_MAX_BYTES) ??
+      candidateBlobs[candidateBlobs.length - 1];
+
+    const optimizedFile = new File([chosenBlob], file.name, {
+      type: outputType,
+      lastModified: file.lastModified,
+    });
+
+    const wasOptimized =
+      optimizedFile.size !== file.size ||
+      optimizedFile.type !== file.type ||
+      resized.width !== originalWidth ||
+      resized.height !== originalHeight;
+
+    console.log("[upload] image optimization", {
+      filename: file.name,
+      originalSizeBytes: file.size,
+      originalSizeLabel: formatBytes(file.size),
+      compressedSizeBytes: optimizedFile.size,
+      compressedSizeLabel: formatBytes(optimizedFile.size),
+      originalType: file.type,
+      outputType,
+      originalWidth,
+      originalHeight,
+      outputWidth: resized.width,
+      outputHeight: resized.height,
+      wasOptimized,
+    });
+
+    return {
+      file: optimizedFile,
+      originalFile: file,
+      wasOptimized,
+    };
+  }
+
+  async function prepareFilesForUpload(files: File[]) {
+    const prepared: PreparedUploadFile[] = [];
+
+    for (const file of files) {
+      if (!isLikelyImageFile(file)) {
+        prepared.push({ file, originalFile: file, wasOptimized: false });
+        continue;
+      }
+
+      prepared.push(await optimizeImageForUpload(file));
+    }
+
+    return prepared;
+  }
+
   function dismissOpeningDisclaimer() {
     setShowOpeningDisclaimer(false);
     setOpeningDisclaimerDismissed(true);
@@ -908,16 +1075,46 @@ export default function ChatWidget({
   }
 
   async function uploadSingleFile(
-    file: File,
+    preparedFile: PreparedUploadFile,
     source: "file" | "camera",
     replaceId?: string | null,
     options?: { openPreview?: boolean }
   ): Promise<string> {
     if (disabled) return "";
+    const file = preparedFile.file;
     const formData = new FormData();
     formData.append("file", file);
 
-    const res = await fetch("/api/upload", { method: "POST", body: formData });
+    console.log("[upload] starting", {
+      filename: file.name,
+      source,
+      sizeBytes: file.size,
+      sizeLabel: formatBytes(file.size),
+      originalSizeBytes: preparedFile.originalFile.size,
+      originalSizeLabel: formatBytes(preparedFile.originalFile.size),
+      wasOptimized: preparedFile.wasOptimized,
+      replaceId: replaceId ?? null,
+    });
+
+    let res: Response;
+
+    try {
+      res = await fetch("/api/upload", { method: "POST", body: formData, credentials: "include" });
+    } catch (error) {
+      console.error("[upload] fetch failed", {
+      filename: file.name,
+      source,
+      sizeBytes: file.size,
+      sizeLabel: formatBytes(file.size),
+      originalSizeBytes: preparedFile.originalFile.size,
+      originalSizeLabel: formatBytes(preparedFile.originalFile.size),
+      wasOptimized: preparedFile.wasOptimized,
+      error,
+      message: error instanceof Error ? error.message : String(error),
+    });
+      throw error;
+    }
+
     if (!res.ok) {
       let message = `Upload failed (${res.status})`;
 
@@ -944,7 +1141,9 @@ export default function ChatWidget({
       typeof data.pageCount === "number" ? data.pageCount : undefined;
     const hasVision: boolean = Boolean(data.hasVision) && isLikelyImageFile(file);
     const previewUrl =
-      mime === "application/pdf" || isLikelyImageFile(file) ? URL.createObjectURL(file) : undefined;
+      mime === "application/pdf" || isLikelyImageFile(preparedFile.originalFile)
+        ? URL.createObjectURL(preparedFile.originalFile)
+        : undefined;
 
     console.info("[attachments] upload complete", {
       filename,
@@ -962,7 +1161,7 @@ export default function ChatWidget({
         filename,
         mime,
         text,
-        sizeBytes: file.size,
+        sizeBytes: preparedFile.originalFile.size,
         imageDataUrl,
         previewUrl,
         pageCount,
@@ -1008,18 +1207,48 @@ export default function ChatWidget({
 
     try {
       const files = Array.from(fileList);
+      upsertSystemStatusMessage("Optimizing large images before upload...");
+      const preparedFiles = await prepareFilesForUpload(files);
+      const uploadFiles = preparedFiles.map((entry) => entry.file);
+      const validation = validateUploadBatch(uploadFiles);
+
+      console.log("[upload] batch selected", {
+        source: "file",
+        fileCount: uploadFiles.length,
+        totalBytes:
+          validation.totalBytes ?? uploadFiles.reduce((sum, file) => sum + file.size, 0),
+        totalLabel: formatBytes(
+          validation.totalBytes ?? uploadFiles.reduce((sum, file) => sum + file.size, 0)
+        ),
+        perFileLimitBytes: MAX_UPLOAD_FILE_BYTES,
+        totalLimitBytes: MAX_UPLOAD_TOTAL_BYTES,
+        optimizedImages: preparedFiles.filter((entry) => entry.wasOptimized).length,
+      });
+
+      if (!validation.valid) {
+        console.warn("[upload] batch blocked by preflight", {
+          source: "file",
+          error: validation.error,
+        });
+        const validationMessage: string = String(
+          validation.error ?? "Selected files could not be uploaded."
+        );
+        upsertSystemStatusMessage(validationMessage);
+        return;
+      }
+
       console.info("[attachments] upload batch selected", {
         source: "file",
         fileCount: fileList.length,
-        totalBytes: files.reduce((sum, file) => sum + file.size, 0),
+        totalBytes: validation.totalBytes,
       });
-      upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "uploading"));
+      upsertSystemStatusMessage(buildAttachmentBatchStatus(uploadFiles, "uploading"));
       const newAttachmentIds: string[] = [];
       const replacementTargetId = replaceAttachmentId;
 
-      for (const [index, file] of files.entries()) {
-        const attachmentId = await uploadSingleFile(file, "file", replacementTargetId, {
-          openPreview: Boolean(replacementTargetId) || files.length === 1,
+      for (const [index, preparedFile] of preparedFiles.entries()) {
+        const attachmentId = await uploadSingleFile(preparedFile, "file", replacementTargetId, {
+          openPreview: Boolean(replacementTargetId) || preparedFiles.length === 1,
         });
         if (!replacementTargetId && index === 0) {
           newAttachmentIds.push(attachmentId);
@@ -1028,9 +1257,12 @@ export default function ChatWidget({
       if (!replacementTargetId && newAttachmentIds[0]) {
         setPreviewAttachmentId(newAttachmentIds[0]);
       }
-      upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
+      upsertSystemStatusMessage(buildAttachmentBatchStatus(uploadFiles, "analysis_starting"));
     } catch (err) {
-      console.error(err);
+      console.error("[upload] file batch failed", {
+        error: err,
+        message: err instanceof Error ? err.message : String(err),
+      });
       upsertSystemStatusMessage("Some files could not be attached.");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -1047,18 +1279,48 @@ export default function ChatWidget({
 
     try {
       const files = Array.from(fileList);
+      upsertSystemStatusMessage("Optimizing large images before upload...");
+      const preparedFiles = await prepareFilesForUpload(files);
+      const uploadFiles = preparedFiles.map((entry) => entry.file);
+      const validation = validateUploadBatch(uploadFiles);
+
+      console.log("[upload] batch selected", {
+        source: "camera",
+        fileCount: uploadFiles.length,
+        totalBytes:
+          validation.totalBytes ?? uploadFiles.reduce((sum, file) => sum + file.size, 0),
+        totalLabel: formatBytes(
+          validation.totalBytes ?? uploadFiles.reduce((sum, file) => sum + file.size, 0)
+        ),
+        perFileLimitBytes: MAX_UPLOAD_FILE_BYTES,
+        totalLimitBytes: MAX_UPLOAD_TOTAL_BYTES,
+        optimizedImages: preparedFiles.filter((entry) => entry.wasOptimized).length,
+      });
+
+      if (!validation.valid) {
+        console.warn("[upload] camera batch blocked by preflight", {
+          source: "camera",
+          error: validation.error,
+        });
+        const validationMessage: string = String(
+          validation.error ?? "Selected files could not be uploaded."
+        );
+        upsertSystemStatusMessage(validationMessage);
+        return;
+      }
+
       console.info("[attachments] upload batch selected", {
         source: "camera",
         fileCount: fileList.length,
-        totalBytes: files.reduce((sum, file) => sum + file.size, 0),
+        totalBytes: validation.totalBytes,
       });
-      upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "uploading"));
+      upsertSystemStatusMessage(buildAttachmentBatchStatus(uploadFiles, "uploading"));
       const newAttachmentIds: string[] = [];
       const replacementTargetId = replaceAttachmentId;
 
-      for (const [index, file] of files.entries()) {
-        const attachmentId = await uploadSingleFile(file, "camera", replacementTargetId, {
-          openPreview: Boolean(replacementTargetId) || files.length === 1,
+      for (const [index, preparedFile] of preparedFiles.entries()) {
+        const attachmentId = await uploadSingleFile(preparedFile, "camera", replacementTargetId, {
+          openPreview: Boolean(replacementTargetId) || preparedFiles.length === 1,
         });
         if (!replacementTargetId && index === 0) {
           newAttachmentIds.push(attachmentId);
@@ -1067,9 +1329,12 @@ export default function ChatWidget({
       if (!replacementTargetId && newAttachmentIds[0]) {
         setPreviewAttachmentId(newAttachmentIds[0]);
       }
-      upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
+      upsertSystemStatusMessage(buildAttachmentBatchStatus(uploadFiles, "analysis_starting"));
     } catch (err) {
-      console.error(err);
+      console.error("[upload] camera batch failed", {
+        error: err,
+        message: err instanceof Error ? err.message : String(err),
+      });
       upsertSystemStatusMessage("Camera upload failed.");
     } finally {
       if (cameraInputRef.current) cameraInputRef.current.value = "";
@@ -1619,6 +1884,9 @@ export default function ChatWidget({
                         : "Recording... click the mic again to stop."}
                   </div>
                 )}
+                <div className="mt-3 px-1 text-[11px] text-white/38">
+                  Large images are automatically optimized before upload.
+                </div>
               </div>
 
             </div>

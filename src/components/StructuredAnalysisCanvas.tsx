@@ -2,6 +2,12 @@
 
 import { useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
+import {
+  type EvidenceLink,
+  type EvidenceLinkModel,
+  getEvidenceTargetById,
+  findEvidenceLinkForSectionItem,
+} from "@/components/chatbot/evidenceLinks";
 import { formatAssistantMessage } from "@/components/chatWidget/speechUtils";
 import { resolveFinancialView } from "@/components/chatbot/financialView";
 import type { InsightKey } from "@/components/chatbot/insightSync";
@@ -28,6 +34,9 @@ type Props = {
   onActiveInsightChange: (key: InsightKey | null) => void;
   onCenterScrollRequest?: (scrollTo: (key: InsightKey) => void) => void;
   canRenderExports?: boolean;
+  evidenceModel?: EvidenceLinkModel | null;
+  activeEvidenceTargetId?: string | null;
+  onEvidenceSelect?: (link: EvidenceLink) => void;
   onContinueChat?: () => void;
   onRequestEndAnalysis?: () => void;
   onConfirmEndAnalysis?: () => void;
@@ -70,6 +79,15 @@ function dedupe(items: Array<string | undefined | null>) {
   return result;
 }
 
+function buildSectionPreview(section: SectionData): string {
+  const segments = dedupe([
+    section.prose,
+    ...section.bullets,
+  ]).slice(0, 2);
+
+  return segments.join(" ");
+}
+
 export default function StructuredAnalysisCanvas({
   analysisText,
   renderModel,
@@ -82,6 +100,9 @@ export default function StructuredAnalysisCanvas({
   onActiveInsightChange,
   onCenterScrollRequest,
   canRenderExports = false,
+  evidenceModel,
+  activeEvidenceTargetId,
+  onEvidenceSelect,
   onContinueChat,
   onRequestEndAnalysis,
   onConfirmEndAnalysis,
@@ -188,6 +209,9 @@ export default function StructuredAnalysisCanvas({
     normalizedResult?.findings.length ??
     renderModel.supplementItems.length;
   const focusModeActive = activeInsightKey !== null;
+  const activeEvidenceTarget = evidenceModel
+    ? getEvidenceTargetById(evidenceModel, activeEvidenceTargetId ?? null)
+    : null;
 
   return (
     <div className="mt-3 space-y-3">
@@ -288,7 +312,9 @@ export default function StructuredAnalysisCanvas({
               title={section.title}
               eyebrow={section.eyebrow}
               summary={section.summary}
-              defaultExpanded={section.defaultExpanded}
+              preview={buildSectionPreview(section)}
+              expanded={activeInsightKey === section.insightKey}
+              collapsible={false}
               active={activeInsightKey === section.insightKey}
               dimmed={focusModeActive && activeInsightKey !== section.insightKey}
               forceExpanded={activeInsightKey === section.insightKey}
@@ -305,15 +331,20 @@ export default function StructuredAnalysisCanvas({
                 {section.bullets.length > 0 ? (
                   <div className="space-y-2">
                     {section.bullets.map((bullet) => (
-                      <div
+                      <LinkedInsightBullet
                         key={bullet}
-                        className="flex gap-2 rounded-2xl border border-white/6 bg-black/18 px-3.5 py-3 text-[13px] leading-5 text-white/70"
-                      >
-                        <span className="pt-[1px] text-orange-200/85">&bull;</span>
-                        <span>{bullet}</span>
-                      </div>
+                        bullet={bullet}
+                        insightKey={section.insightKey}
+                        evidenceModel={evidenceModel}
+                        activeEvidenceTargetId={activeEvidenceTargetId ?? null}
+                        onEvidenceSelect={onEvidenceSelect}
+                      />
                     ))}
                   </div>
+                ) : null}
+
+                {activeEvidenceTarget?.insightKey === section.insightKey ? (
+                  <EvidenceSupportBlock target={activeEvidenceTarget} />
                 ) : null}
               </div>
             </AnalysisSectionCard>
@@ -326,6 +357,8 @@ export default function StructuredAnalysisCanvas({
           title="Full Analysis Transcript"
           eyebrow="Transcript"
           summary="The complete assistant analysis remains available here for detailed review."
+          preview="Open the full transcript when you need the complete narrative, supporting language, or wording details."
+          defaultExpanded={false}
           dimmed={focusModeActive}
         >
           <div className="analysis-report rounded-[20px] border border-white/7 bg-black/22 px-4 py-4 text-[14px] leading-[1.75] text-white/82">
@@ -367,6 +400,9 @@ export default function StructuredAnalysisCanvas({
             title="Ready Outputs"
             eyebrow="Outputs"
             summary="Carrier-ready reports remain available in the right rail when you're ready to export."
+            preview="Collision Repair Intelligence Report, Dispute Intelligence Report, and rebuttal output remain available in the rail."
+            expanded={activeInsightKey === "exports"}
+            collapsible={false}
             active={activeInsightKey === "exports"}
             dimmed={focusModeActive && activeInsightKey !== "exports"}
             forceExpanded={activeInsightKey === "exports"}
@@ -379,6 +415,81 @@ export default function StructuredAnalysisCanvas({
             </div>
           </AnalysisSectionCard>
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+function LinkedInsightBullet({
+  bullet,
+  insightKey,
+  evidenceModel,
+  activeEvidenceTargetId,
+  onEvidenceSelect,
+}: {
+  bullet: string;
+  insightKey: InsightKey;
+  evidenceModel?: EvidenceLinkModel | null;
+  activeEvidenceTargetId: string | null;
+  onEvidenceSelect?: (link: EvidenceLink) => void;
+}) {
+  const evidenceLink = evidenceModel
+    ? findEvidenceLinkForSectionItem(evidenceModel, insightKey, bullet)
+    : null;
+  const active = Boolean(evidenceLink && evidenceLink.targetId === activeEvidenceTargetId);
+
+  if (!evidenceLink) {
+    return (
+      <div className="flex gap-2 rounded-2xl border border-white/6 bg-black/18 px-3.5 py-3 text-[13px] leading-5 text-white/70">
+        <span className="pt-[1px] text-orange-200/85">&bull;</span>
+        <span>{bullet}</span>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => onEvidenceSelect?.(evidenceLink)}
+      className={`w-full rounded-2xl border px-3.5 py-3 text-left transition-[border-color,background-color,box-shadow] duration-300 ${
+        active
+          ? "border-orange-300/28 bg-[#C65A2A]/12 shadow-[0_0_0_1px_rgba(210,122,81,0.12)]"
+          : "border-white/6 bg-black/18 hover:border-white/12 hover:bg-black/24"
+      }`}
+    >
+      <div className="flex gap-2 text-[13px] leading-5 text-white/76">
+        <span className="pt-[1px] text-orange-200/85">&bull;</span>
+        <span>{bullet}</span>
+      </div>
+      <div className="mt-2 inline-flex rounded-full border border-white/8 bg-black/18 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-white/48">
+        View support
+      </div>
+    </button>
+  );
+}
+
+function EvidenceSupportBlock({
+  target,
+}: {
+  target: NonNullable<ReturnType<typeof getEvidenceTargetById>>;
+}) {
+  return (
+    <div className="rounded-2xl border border-orange-300/20 bg-gradient-to-br from-[#C65A2A]/12 via-black/22 to-black/16 px-3.5 py-3 shadow-[0_0_0_1px_rgba(210,122,81,0.1)]">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/68">
+          Supporting Evidence
+        </div>
+        <div className="rounded-full border border-white/8 bg-black/18 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-white/42">
+          {target.type.replace(/_/g, " ")}
+        </div>
+      </div>
+      <div className="mt-2 text-[13px] font-medium leading-5 text-white/86">{target.title}</div>
+      <div className="mt-2 text-[13px] leading-5 text-white/66">{target.detail}</div>
+      {target.summary ? (
+        <div className="mt-2 text-[12px] leading-5 text-white/52">{target.summary}</div>
+      ) : null}
+      {target.sourceLabel ? (
+        <div className="mt-2 text-[11px] leading-5 text-white/42">Source: {target.sourceLabel}</div>
       ) : null}
     </div>
   );
