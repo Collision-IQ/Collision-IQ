@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { getCurrentEntitlements } from "@/lib/billing/entitlements";
+import { getOrCreateAppUser } from "@/lib/auth/get-or-create-app-user";
+import BillingCheckoutButtons from "@/components/BillingCheckoutButtons";
 
 export const dynamic = "force-dynamic";
 
 export default async function BillingPage() {
   const access = await getCurrentEntitlements();
+  const user = await getOrCreateAppUser();
 
   return (
     <main className="mx-auto w-full max-w-5xl px-6 py-16 text-white">
@@ -55,25 +58,7 @@ export default async function BillingPage() {
         </div>
 
         <div className="mt-8 flex flex-wrap gap-3">
-          <form action="/api/billing/checkout" method="post">
-            <input type="hidden" name="plan" value="starter" />
-            <button
-              type="submit"
-              className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/85 transition hover:bg-white/10"
-            >
-              Choose Starter ($50/month)
-            </button>
-          </form>
-
-          <form action="/api/billing/checkout" method="post">
-            <input type="hidden" name="plan" value="pro" />
-            <button
-              type="submit"
-              className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[#C65A2A]/90"
-            >
-              Upgrade to Academy Pro ($200/month)
-            </button>
-          </form>
+          <BillingCheckoutButtons userId={user.id} />
 
           <form action="/api/billing/portal" method="post">
             <button

@@ -16,6 +16,8 @@ dist/
 .env.production
 .env*.local
 .env.off
+.env.clerk*
+.env.stripe*
 
 # ===============================
 # Third-party API Keys
@@ -33,6 +35,10 @@ PLAID_ENV
 STRIPE_SECRET_KEY
 STRIPE_WEBHOOK_SECRET
 STRIPE_*
+
+# Local provider tooling artifacts
+.clerk/
+.stripe/
 
 # ===============================
 # Logs

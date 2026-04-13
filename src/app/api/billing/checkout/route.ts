@@ -17,46 +17,92 @@ function normalizePlan(value: FormDataEntryValue | null) {
   return "pro";
 }
 
-export async function POST(req: Request) {
-  const access = await getCurrentEntitlements();
-  const dbUser = await getOrCreateAppUser();
+async function getCheckoutRequestData(req: Request) {
+  const contentType = req.headers.get("content-type") || "";
+  const expectsJson =
+    contentType.includes("application/json") ||
+    req.headers.get("x-requested-with") === "XMLHttpRequest";
 
-  if (!access.isAuthenticated || !dbUser) {
-    return NextResponse.redirect(new URL("/sign-in", req.url));
+  if (contentType.includes("application/json")) {
+    const body = (await req.json()) as { plan?: string; userId?: string } | null;
+    return {
+      expectsJson: true,
+      plan: normalizePlan(body?.plan ?? null),
+      requestUserId: body?.userId ?? null,
+      requestBody: body,
+    };
   }
 
   const formData = await req.formData();
-  const plan = normalizePlan(formData.get("plan"));
-  const stripe = getStripe();
-  const priceIds = getStripePriceIds();
-  const priceId =
-    plan === "starter" ? priceIds.starter : plan === "team" ? priceIds.team : priceIds.pro;
+  return {
+    expectsJson,
+    plan: normalizePlan(formData.get("plan")),
+    requestUserId: typeof formData.get("userId") === "string" ? String(formData.get("userId")) : null,
+    requestBody: Object.fromEntries(formData.entries()),
+  };
+}
 
-  if (!priceId) {
-    return NextResponse.json({ error: `Missing Stripe price for ${plan}` }, { status: 500 });
+export async function POST(req: Request) {
+  try {
+    console.log("create-checkout-session route hit");
+
+    const access = await getCurrentEntitlements();
+    const dbUser = await getOrCreateAppUser();
+
+    if (!access.isAuthenticated || !dbUser) {
+      return NextResponse.redirect(new URL("/sign-in", req.url));
+    }
+
+    const { expectsJson, plan, requestBody } = await getCheckoutRequestData(req);
+    console.log("request body:", requestBody);
+
+    const stripe = getStripe();
+    const priceIds = getStripePriceIds();
+    const priceId =
+      plan === "starter" ? priceIds.starter : plan === "team" ? priceIds.team : priceIds.pro;
+    console.log("selected priceId:", priceId);
+
+    if (!priceId) {
+      return NextResponse.json({ error: `Missing Stripe price for ${plan}` }, { status: 500 });
+    }
+
+    const customerId = await ensureStripeCustomerId(dbUser.id);
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      payment_method_types: ["card"],
+      customer: customerId,
+      client_reference_id: dbUser.id,
+      line_items: [{ price: priceId, quantity: 1 }],
+      allow_promotion_codes: true,
+      subscription_data:
+        plan === "pro"
+          ? {
+              trial_period_days: getProTrialDays(),
+            }
+          : undefined,
+      success_url: getBillingReturnUrl("/billing?checkout=success"),
+      cancel_url: getBillingReturnUrl("/billing?checkout=cancelled"),
+      metadata: {
+        dbUserId: dbUser.id,
+        plan,
+      },
+    });
+
+    console.log("checkout session created:", session.id);
+    console.log("checkout session url:", session.url);
+
+    if (expectsJson) {
+      return NextResponse.json({ url: session.url });
+    }
+
+    return NextResponse.redirect(session.url || getBillingReturnUrl("/billing"), 303);
+  } catch (err) {
+    console.error("STRIPE ERROR:", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Unknown Stripe error" },
+      { status: 500 }
+    );
   }
-
-  const customerId = await ensureStripeCustomerId(dbUser.id);
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    customer: customerId,
-    line_items: [{ price: priceId, quantity: 1 }],
-    allow_promotion_codes: true,
-    subscription_data:
-      plan === "pro"
-        ? {
-            trial_period_days: getProTrialDays(),
-          }
-        : undefined,
-    success_url: getBillingReturnUrl("/billing?checkout=success"),
-    cancel_url: getBillingReturnUrl("/billing?checkout=cancelled"),
-    metadata: {
-      dbUserId: dbUser.id,
-      plan,
-    },
-  });
-
-  return NextResponse.redirect(session.url || getBillingReturnUrl("/billing"), 303);
 }
 
 async function ensureStripeCustomerId(dbUserId: string) {
