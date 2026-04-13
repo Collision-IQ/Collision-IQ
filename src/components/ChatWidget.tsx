@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import {
   Paperclip,
   X,
@@ -17,6 +18,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
+import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import { buildWorkspaceDataFromAnalysisText } from "@/lib/workspaceAdapter";
 import type { WorkspaceData } from "@/types/workspaceTypes";
 import {
@@ -65,13 +67,38 @@ interface Attachment {
   usedInAnalysis?: boolean;
 }
 
+type AttachmentTrayItem = {
+  attachmentId: string;
+  filename: string;
+  hasVision?: boolean;
+};
+
+type PrimaryAnalysis = {
+  messageId: string;
+  content: string;
+};
+
+type AnalysisStatus = "idle" | "processing" | "complete" | "error";
+
+type ChatSessionControls = {
+  focusComposer: () => void;
+  resetSession: () => void;
+};
+
 interface ChatWidgetProps {
   onAttachmentChange?: (filename: string | null) => void;
+  onAttachmentsChange?: Dispatch<SetStateAction<AttachmentTrayItem[]>>;
   onAnalysisChange?: (text: string) => void;
+  onPrimaryAnalysisChange?: (analysis: PrimaryAnalysis | null) => void;
   onAnalysisResultChange?: (data: RepairIntelligenceReport | null) => void;
   onAnalysisPanelChange?: (panel: DecisionPanel | null) => void;
   onAnalysisLoadingChange?: (loading: boolean) => void;
+  onAnalysisStatusChange?: (status: AnalysisStatus, detail?: string | null) => void;
   onWorkspaceDataChange?: (data: WorkspaceData | null) => void;
+  onSessionReset?: () => void;
+  onSessionControlsReady?: (controls: ChatSessionControls) => void;
+  viewerAccess?: AccountEntitlements | null;
+  suppressedMessageIds?: string[];
   disabled?: boolean;
 }
 
