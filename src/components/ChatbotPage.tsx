@@ -391,13 +391,11 @@ export function ChatbotWorkspacePage() {
               active={hasResolvedAnalysis && hasAtGlanceContent(renderModel)}
             />
 
-            <div className="mt-3 rounded-[24px] border border-white/8 bg-white/[0.035] p-3.5">
-              <WorkspacePanel
-                workspaceData={workspaceData ?? undefined}
-                evidenceModel={evidenceModel}
-                activeEvidenceTargetId={activeEvidenceTargetId}
-              />
-            </div>
+             <div className="mt-3 rounded-[24px] border border-white/8 bg-white/[0.035] p-3.5">
+               <WorkspacePanel
+                 workspaceData={workspaceData ?? undefined}
+               />
+             </div>
 
             <StructuredAnalysisCanvas
               analysisText={primaryAnalysis?.content ?? analysisText}
