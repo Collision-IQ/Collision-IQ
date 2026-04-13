@@ -142,6 +142,8 @@ export function ChatbotWorkspacePage() {
   const [analysisPanel, setAnalysisPanel] = useState<DecisionPanel | null>(null);
   const [workspaceData, setWorkspaceData] = useState<WorkspaceData | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisStatus, setAnalysisStatus] = useState<"idle" | "processing" | "complete" | "error">("idle");
+  const [analysisStatusDetail, setAnalysisStatusDetail] = useState<string | null>(null);
   const [endAnalysisConfirming, setEndAnalysisConfirming] = useState(false);
   const [consentResolved, setConsentResolved] = useState(false);
   const [consentAccepted, setConsentAccepted] = useState(false);
@@ -326,6 +328,8 @@ export function ChatbotWorkspacePage() {
     setAnalysisPanel(null);
     setWorkspaceData(null);
     setAnalysisLoading(false);
+    setAnalysisStatus("idle");
+    setAnalysisStatusDetail(null);
     setActiveInsightKey(null);
     setActiveEvidenceTargetId(null);
     setEndAnalysisConfirming(false);
@@ -335,6 +339,8 @@ export function ChatbotWorkspacePage() {
     setAnalysisResult(next);
 
     if (next) {
+      setAnalysisStatus("complete");
+      setAnalysisStatusDetail(null);
       setActiveInsightKey((current) => current ?? "executive_summary");
     }
   }
@@ -501,6 +507,10 @@ export function ChatbotWorkspacePage() {
                     onAnalysisResultChange={handleAnalysisResultChange}
                     onAnalysisPanelChange={setAnalysisPanel}
                     onAnalysisLoadingChange={setAnalysisLoading}
+                    onAnalysisStatusChange={(status, detail) => {
+                      setAnalysisStatus(status);
+                      setAnalysisStatusDetail(detail ?? null);
+                    }}
                     onWorkspaceDataChange={setWorkspaceData}
                     onSessionReset={handleSessionReset}
                       onSessionControlsReady={(controls) => {
@@ -573,6 +583,10 @@ export function ChatbotWorkspacePage() {
                   onAnalysisResultChange={handleAnalysisResultChange}
                   onAnalysisPanelChange={setAnalysisPanel}
                   onAnalysisLoadingChange={setAnalysisLoading}
+                  onAnalysisStatusChange={(status, detail) => {
+                    setAnalysisStatus(status);
+                    setAnalysisStatusDetail(detail ?? null);
+                  }}
                   onWorkspaceDataChange={setWorkspaceData}
                   onSessionReset={handleSessionReset}
                       onSessionControlsReady={(controls) => {
@@ -591,6 +605,8 @@ export function ChatbotWorkspacePage() {
             attachment={attachment}
             analysisText={analysisText}
             analysisLoading={analysisLoading}
+            analysisStatus={analysisStatus}
+            analysisStatusDetail={analysisStatusDetail}
             hasResolvedAnalysis={hasResolvedAnalysis}
             panel={panel}
             renderModel={renderModel}
@@ -741,6 +757,8 @@ function RailContent({
   attachment,
   analysisText,
   analysisLoading,
+  analysisStatus,
+  analysisStatusDetail,
   hasResolvedAnalysis,
   panel,
   renderModel,
@@ -760,6 +778,8 @@ function RailContent({
   attachment: string | null;
   analysisText: string;
   analysisLoading: boolean;
+  analysisStatus: "idle" | "processing" | "complete" | "error";
+  analysisStatusDetail: string | null;
   hasResolvedAnalysis: boolean;
   panel: DecisionPanel;
   renderModel: ReturnType<typeof buildExportModel>;
@@ -797,11 +817,16 @@ function RailContent({
   const railConfidence = hasResolvedAnalysis
     ? formatLabel(workspaceData?.confidence ?? renderModel.vehicle.confidence)
     : "Pending";
-  const railStatus = analysisLoading
-    ? "Processing"
-    : hasResolvedAnalysis
-      ? "Ready"
-      : "Awaiting files";
+  const railStatus =
+    analysisStatus === "error"
+      ? "Blocked"
+      : analysisLoading || analysisStatus === "processing"
+        ? "Processing"
+        : hasResolvedAnalysis || analysisStatus === "complete"
+          ? "Ready"
+          : attachment
+            ? "Files attached"
+            : "Awaiting files";
   const attachmentLabel = attachment ?? "No attachment yet";
   const supportSignals = dedupeRailItems([
     ...renderModel.reportFields.presentStrengths,
@@ -866,6 +891,18 @@ function RailContent({
           <div className="text-[13px] leading-5 text-white/65">
             Structured review is still hydrating for the current file set. We&apos;ll populate the
             rail, valuation, supplement lines, and exports when the analysis route finishes.
+          </div>
+        </section>
+      )}
+
+      {analysisStatus === "error" && !hasResolvedAnalysis && (
+        <section className="mt-5 space-y-2 rounded-2xl border border-red-500/16 bg-red-500/[0.05] p-3.5">
+          <div className="text-[10px] uppercase tracking-[0.22em] text-red-200/72">
+            Analysis blocked
+          </div>
+          <div className="text-[13px] leading-5 text-white/65">
+            {analysisStatusDetail ||
+              "The current file set could not be analyzed. Review access status or retry."}
           </div>
         </section>
       )}

@@ -34,12 +34,11 @@ import {
   UnauthorizedError,
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
+import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import {
   UsageAccessError,
-  assertAnalysisAllowed,
   recordCompletedAnalysisUsage,
 } from "@/lib/billing/usage";
-import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
@@ -69,26 +68,47 @@ class AttachmentAccessError extends Error {
   }
 }
 
-async function getLatestUserSubscription(userId: string) {
-  return prisma.subscription.findFirst({
-    where: {
-      userId,
-    },
-    orderBy: [
-      {
-        updatedAt: "desc",
-      },
-      {
-        createdAt: "desc",
-      },
-    ],
-  });
+function assertAnalysisAllowedForEntitlements(
+  entitlements: Awaited<ReturnType<typeof getCurrentEntitlements>>,
+  isPlatformAdmin: boolean
+) {
+  if (isPlatformAdmin) {
+    return;
+  }
+
+  if (!entitlements.featureFlags.uploads) {
+    if (entitlements.usageStatus === "trial_expired") {
+      throw new UsageAccessError(
+        "trial_expired",
+        "Your 30-day trial has ended. Upgrade to continue running full analysis."
+      );
+    }
+
+    throw new UsageAccessError(
+      "upgrade_required",
+      "Your current access does not include document-backed analysis. Upgrade to continue."
+    );
+  }
+
+  if (!entitlements.canRunAnalysis) {
+    if (entitlements.usageStatus === "trial_expired") {
+      throw new UsageAccessError(
+        "trial_expired",
+        "Your 30-day trial has ended. Upgrade to continue running full analysis."
+      );
+    }
+
+    throw new UsageAccessError(
+      "usage_limit_reached",
+      "You have reached your analysis limit for this period."
+    );
+  }
 }
 
 export async function POST(req: Request) {
   try {
     const { user, isPlatformAdmin } = await requireCurrentUser();
-    const subscription = await getLatestUserSubscription(user.id);
+    const entitlements = await getCurrentEntitlements();
     const body = (await req.json()) as AnalysisRequestBody;
     const artifactIds = body.artifactIds ?? [];
 
@@ -99,7 +119,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const usageSnapshot = await assertAnalysisAllowed({ user, subscription });
+    assertAnalysisAllowedForEntitlements(entitlements, isPlatformAdmin);
     const storedAttachments = await getUploadedAttachments(artifactIds, {
       ownerUserId: user.id,
     });
@@ -111,9 +131,9 @@ export async function POST(req: Request) {
     console.info("[analysis-attachments] analysis request assembled", {
       ownerUserId: user.id,
       isPlatformAdmin,
-      plan: usageSnapshot.entitlements.plan,
-      analysesUsedThisPeriod: usageSnapshot.entitlements.analysesUsedThisPeriod,
-      analysesRemaining: usageSnapshot.entitlements.analysesRemaining,
+      plan: entitlements.plan,
+      analysesUsedThisPeriod: entitlements.analysisCount,
+      analysesRemaining: entitlements.usage.remaining,
       attachmentCount: storedAttachments.length,
       artifactCount: artifactIds.length,
       attachments: storedAttachments.map((attachment) => ({
@@ -235,13 +255,12 @@ export async function POST(req: Request) {
       refinedWithRetrieval,
       analysisCompletedAt: new Date().toISOString(),
       usage: {
-        plan: usageSnapshot.entitlements.plan,
-        analysesUsedThisPeriod:
-          usageSnapshot.entitlements.analysesUsedThisPeriod + (isPlatformAdmin ? 0 : 1),
+        plan: entitlements.plan,
+        analysesUsedThisPeriod: entitlements.analysisCount + (isPlatformAdmin ? 0 : 1),
         analysesRemaining:
-          usageSnapshot.entitlements.analysesRemaining === null
+          entitlements.usage.remaining === null
             ? null
-            : Math.max(usageSnapshot.entitlements.analysesRemaining - 1, 0),
+            : Math.max(entitlements.usage.remaining - 1, 0),
       },
     });
   } catch (error) {

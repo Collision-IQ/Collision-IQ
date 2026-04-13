@@ -72,6 +72,10 @@ interface ChatWidgetProps {
   onAnalysisResultChange?: (data: RepairIntelligenceReport | null) => void;
   onAnalysisPanelChange?: (panel: DecisionPanel | null) => void;
   onAnalysisLoadingChange?: (loading: boolean) => void;
+  onAnalysisStatusChange?: (
+    status: "idle" | "processing" | "complete" | "error",
+    detail?: string | null
+  ) => void;
   onWorkspaceDataChange?: (data: WorkspaceData | null) => void;
   onSessionReset?: () => void;
   onSessionControlsReady?: (
@@ -119,6 +123,7 @@ export default function ChatWidget({
   onAnalysisResultChange,
   onAnalysisPanelChange,
   onAnalysisLoadingChange,
+  onAnalysisStatusChange,
   onWorkspaceDataChange,
   onSessionReset,
   onSessionControlsReady,
@@ -373,6 +378,7 @@ export default function ChatWidget({
     analysisRunRef.current += 1;
     clearStructuredAnalysisState();
     onAnalysisLoadingChange?.(false);
+    onAnalysisStatusChange?.("idle", null);
   }
 
   function beginStructuredAnalysisRun() {
@@ -380,6 +386,7 @@ export default function ChatWidget({
     analysisRunRef.current = runId;
     clearStructuredAnalysisState();
     onAnalysisLoadingChange?.(true);
+    onAnalysisStatusChange?.("processing", null);
     return runId;
   }
 
@@ -772,6 +779,7 @@ export default function ChatWidget({
 
     onAttachmentChange?.(null);
     invalidateStructuredAnalysis();
+    onAnalysisStatusChange?.("idle", null);
     onSessionReset?.();
 
     shouldAutoScrollRef.current = true;
@@ -930,21 +938,65 @@ export default function ChatWidget({
         })
           .then(async (analysisResponse) => {
             const analysisDurationMs = Date.now() - analysisStartMs;
+
             if (
-              !analysisResponse.ok ||
               sessionRef.current !== mySession ||
               analysisRunRef.current !== activeAnalysisRunId
             ) {
+              return;
+            }
+
+            if (!analysisResponse.ok) {
+              let errorMessage = `Analysis failed (${analysisResponse.status})`;
+              let errorCode: string | null = null;
+
+              try {
+                const data = (await analysisResponse.json()) as {
+                  error?: string;
+                  code?: string;
+                };
+
+                if (data?.error) {
+                  errorMessage = data.error;
+                }
+
+                if (data?.code) {
+                  errorCode = data.code;
+                }
+              } catch {
+                // keep fallback
+              }
+
               console.info("[attachments] analysis failure", {
                 fileCount: attachmentStats.fileCount,
                 totalBytes: attachmentStats.totalBytes,
                 totalPdfPages: attachmentStats.totalPdfPages,
                 analysisDurationMs,
                 status: analysisResponse.status,
+                code: errorCode,
+                message: errorMessage,
               });
-              if (analysisRunRef.current === activeAnalysisRunId) {
-                onAnalysisLoadingChange?.(false);
+
+              onAnalysisLoadingChange?.(false);
+              onAnalysisStatusChange?.("error", errorMessage);
+
+              if (
+                errorCode === "usage_limit_reached" ||
+                errorCode === "trial_expired" ||
+                errorCode === "upgrade_required"
+              ) {
+                if (viewerAccess?.plan === "trial") {
+                  upsertSystemStatusMessage(
+                    "Trial access is enabled, but the analysis route rejected this request. Please retry."
+                  );
+                } else {
+                  upsertSystemStatusMessage(errorMessage);
+                  setShowUpgradeModal(true);
+                }
+              } else {
+                upsertSystemStatusMessage(errorMessage);
               }
+
               return;
             }
 
@@ -963,6 +1015,7 @@ export default function ChatWidget({
             onAnalysisResultChange?.(analysisData.report ?? null);
             onAnalysisPanelChange?.(analysisData.panel ?? null);
             onAnalysisLoadingChange?.(false);
+            onAnalysisStatusChange?.("complete", null);
             console.info("[attachments] analysis complete", {
               fileCount: attachmentStats.fileCount,
               totalBytes: attachmentStats.totalBytes,
@@ -995,6 +1048,13 @@ export default function ChatWidget({
               analysisRunRef.current === activeAnalysisRunId
             ) {
               onAnalysisLoadingChange?.(false);
+              onAnalysisStatusChange?.(
+                "error",
+                "Analysis service had a temporary issue. Please retry."
+              );
+              upsertSystemStatusMessage(
+                "Analysis service had a temporary issue. Please retry."
+              );
             }
           });
       }

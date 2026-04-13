@@ -1,5 +1,6 @@
 import type { Prisma, Subscription, SubscriptionPlan, SubscriptionStatus, User } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import { getPlanAnalysisCap, type BillingPlan } from "@/lib/billing/plans";
 
 export class UsageAccessError extends Error {
@@ -135,6 +136,47 @@ export async function assertAnalysisAllowed(params: {
         subscriptionStatus === "TRIALING" ? "active" : trialExpired ? "expired" : "not_applicable",
       analysesUsedThisPeriod,
       analysesRemaining,
+      canRunAnalysis: true,
+    },
+  };
+}
+
+export function assertAnalysisAllowedForEntitlements(entitlements: AccountEntitlements) {
+  if (entitlements.isPlatformAdmin) {
+    return {
+      entitlements: {
+        plan: entitlements.plan,
+        subscriptionStatus:
+          entitlements.activeSubscriptionStatus ?? ("ACTIVE" as SubscriptionStatus),
+        trialState: "not_applicable" as const,
+        analysesUsedThisPeriod: entitlements.analysisCount,
+        analysesRemaining: null,
+        canRunAnalysis: true,
+      },
+    };
+  }
+
+  if (!entitlements.canRunAnalysis) {
+    if (entitlements.usageStatus === "trial_expired") {
+      throw new UsageAccessError(
+        "trial_expired",
+        "Your trial has expired. Upgrade to continue running analyses."
+      );
+    }
+
+    throw new UsageAccessError(
+      "usage_limit_reached",
+      "You have reached your analysis limit for this period."
+    );
+  }
+
+  return {
+    entitlements: {
+      plan: entitlements.plan,
+      subscriptionStatus: entitlements.activeSubscriptionStatus,
+      trialState: entitlements.billingPlan === "trial" ? "active" : "not_applicable",
+      analysesUsedThisPeriod: entitlements.analysisCount,
+      analysesRemaining: entitlements.usage.remaining,
       canRunAnalysis: true,
     },
   };
