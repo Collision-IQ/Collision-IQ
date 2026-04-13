@@ -16,7 +16,6 @@ import {
 } from "../vehicleContext";
 import type {
   AnalysisIssue,
-  EstimateFacts,
   RepairIntelligenceReport,
   RequiredProcedureRecord,
   VehicleIdentity,
@@ -37,6 +36,307 @@ type RunRepairAnalysisParams = {
   sessionContext?: VehicleSessionContext;
   userIntent?: string | null;
 };
+
+type AnalysisIntentProfile = {
+  repairability: number;
+  supplementReview: number;
+  disputeReview: number;
+  estimateCompleteness: number;
+};
+
+type RepairabilityAssessment = {
+  visibleDamageSummary: string;
+  estimateScopeSummary: string;
+  physicalRepairability: "yes" | "no" | "uncertain";
+  economicRepairability: "favorable" | "borderline" | "unlikely" | "unknown";
+  finalDetermination: string;
+  grade: string;
+  teardownDependencies: string[];
+};
+
+type RepairabilityFocusedReport = RepairIntelligenceReport & {
+  repairabilityAssessment?: RepairabilityAssessment;
+};
+
+function scoreAnalysisIntent(userIntent?: string | null): AnalysisIntentProfile {
+  const lower = (userIntent ?? "").toLowerCase();
+
+  let repairability = 0;
+  let supplementReview = 0;
+  let disputeReview = 0;
+  let estimateCompleteness = 0;
+
+  if (
+    lower.includes("repairability") ||
+    lower.includes("repairable") ||
+    lower.includes("total loss") ||
+    lower.includes("total-loss") ||
+    lower.includes("totaled")
+  ) {
+    repairability += 4;
+  }
+
+  if (
+    lower.includes("grade") ||
+    lower.includes("graded") ||
+    lower.includes("score")
+  ) {
+    repairability += 2;
+    estimateCompleteness += 2;
+  }
+
+  if (
+    lower.includes("supplement") ||
+    lower.includes("missing line") ||
+    lower.includes("add line") ||
+    lower.includes("operations missing")
+  ) {
+    supplementReview += 3;
+  }
+
+  if (
+    lower.includes("carrier") ||
+    lower.includes("rebuttal") ||
+    lower.includes("negotiation") ||
+    lower.includes("dispute")
+  ) {
+    disputeReview += 3;
+  }
+
+  if (
+    lower.includes("review") ||
+    lower.includes("complete") ||
+    lower.includes("completeness") ||
+    lower.includes("scope")
+  ) {
+    estimateCompleteness += 2;
+  }
+
+  return {
+    repairability,
+    supplementReview,
+    disputeReview,
+    estimateCompleteness,
+  };
+}
+
+function shouldPrioritizeRepairability(profile: AnalysisIntentProfile): boolean {
+  return (
+    profile.repairability >= 4 &&
+    profile.repairability >= profile.supplementReview &&
+    profile.repairability >= profile.disputeReview
+  );
+}
+
+function inferPhotoVisibleDamageSummary(
+  documents: Array<{
+    filename?: string | null;
+    mime?: string | null;
+    text?: string | null;
+    imageDataUrl?: string | null;
+  }>
+): string {
+  const photoCount = documents.filter((document) => Boolean(document.imageDataUrl)).length;
+
+  if (photoCount === 0) {
+    return "No photo set was available, so visible damage could not be independently confirmed from images.";
+  }
+
+  return "Photo set is present. Visible damage appears concentrated in the documented impact area, but teardown-only damage cannot be confirmed from photos alone.";
+}
+
+function inferEstimateScopeSummary(params: {
+  estimateTotal?: number | null;
+  rawEstimateText?: string | null;
+}): string {
+  const lower = (params.rawEstimateText ?? "").toLowerCase();
+  const estimateTotal =
+    typeof params.estimateTotal === "number" ? `$${params.estimateTotal.toFixed(2)}` : "unknown";
+
+  const hasStructuralLines =
+    lower.includes("frame") ||
+    lower.includes("rail") ||
+    lower.includes("apron") ||
+    lower.includes("core support") ||
+    lower.includes("structural labor") ||
+    lower.includes("pull");
+
+  if (hasStructuralLines) {
+    return `The current estimate carries documented repair scope totaling ${estimateTotal}, including at least some structural or support-area indicators.`;
+  }
+
+  return `The current estimate carries documented repair scope totaling ${estimateTotal}, but does not clearly show frame, rail, apron, core-support, pull, or structural labor lines.`;
+}
+
+function inferEconomicRepairabilityBand(params: {
+  estimateTotal?: number | null;
+  inferredAcv?: number | null;
+}): RepairabilityAssessment["economicRepairability"] {
+  const estimateTotal = params.estimateTotal;
+  const inferredAcv = params.inferredAcv;
+
+  if (
+    typeof estimateTotal !== "number" ||
+    !Number.isFinite(estimateTotal) ||
+    estimateTotal <= 0 ||
+    typeof inferredAcv !== "number" ||
+    !Number.isFinite(inferredAcv) ||
+    inferredAcv <= 0
+  ) {
+    return "unknown";
+  }
+
+  const ratio = estimateTotal / inferredAcv;
+
+  if (ratio < 0.45) return "favorable";
+  if (ratio <= 0.7) return "borderline";
+  return "unlikely";
+}
+
+function computeRepairGrade(params: {
+  estimateTotal?: number | null;
+  inferredAcv?: number | null;
+  issueCount: number;
+  highSeverityIssues: number;
+  hasStructuralUnknowns: boolean;
+}): string {
+  const economicBand = inferEconomicRepairabilityBand({
+    estimateTotal: params.estimateTotal,
+    inferredAcv: params.inferredAcv,
+  });
+
+  if (economicBand === "unlikely") return "D";
+  if (params.highSeverityIssues >= 3 || params.hasStructuralUnknowns) return "C-";
+  if (economicBand === "borderline") return "C";
+  if (params.issueCount >= 4) return "B-";
+  return "B";
+}
+
+function buildRepairabilityAssessment(params: {
+  report: RepairIntelligenceReport;
+  estimateFacts?: RepairIntelligenceReport["estimateFacts"];
+  documents: Array<{
+    filename?: string | null;
+    mime?: string | null;
+    text?: string | null;
+    imageDataUrl?: string | null;
+  }>;
+}): RepairabilityAssessment {
+  const estimateTotal = params.estimateFacts?.estimateTotal ?? null;
+  const inferredAcv = inferAcvFromDocuments(params.documents);
+  const lowerEstimate = (params.report.sourceEstimateText ?? "").toLowerCase();
+
+  const hasStructuralUnknowns =
+    !lowerEstimate.includes("frame") &&
+    !lowerEstimate.includes("rail") &&
+    !lowerEstimate.includes("apron") &&
+    !lowerEstimate.includes("core support") &&
+    !lowerEstimate.includes("structural labor");
+
+  const economicRepairability = inferEconomicRepairabilityBand({
+    estimateTotal,
+    inferredAcv,
+  });
+
+  const physicalRepairability: RepairabilityAssessment["physicalRepairability"] =
+    hasStructuralUnknowns ? "uncertain" : "yes";
+
+  const issueCount = params.report.issues.length;
+  const highSeverityIssues = params.report.issues.filter(
+    (issue) => issue.severity === "high"
+  ).length;
+
+  const grade = computeRepairGrade({
+    estimateTotal,
+    inferredAcv,
+    issueCount,
+    highSeverityIssues,
+    hasStructuralUnknowns,
+  });
+
+  const finalDetermination =
+    physicalRepairability === "yes" && economicRepairability === "favorable"
+      ? "Vehicle appears physically repairable and economically more favorable to repair from the current file set."
+      : physicalRepairability === "yes" && economicRepairability === "borderline"
+        ? "Vehicle appears physically repairable, but economic repairability is borderline and teardown could materially change the decision."
+        : physicalRepairability === "uncertain" && economicRepairability === "unlikely"
+          ? "Repairability remains uncertain from the current file set, and the economics trend against repair unless teardown stays limited."
+          : "Vehicle may be physically repairable from visible/documented scope, but final determination should wait for teardown, structure verification, and value confirmation.";
+
+  return {
+    visibleDamageSummary: inferPhotoVisibleDamageSummary(params.documents),
+    estimateScopeSummary: inferEstimateScopeSummary({
+      estimateTotal,
+      rawEstimateText: params.report.sourceEstimateText ?? "",
+    }),
+    physicalRepairability,
+    economicRepairability,
+    finalDetermination,
+    grade,
+    teardownDependencies: [
+      "Confirm hidden front structure or support-area damage after teardown.",
+      "Verify whether rail, apron, tie-bar, lock-support, or adjacent support scope expands.",
+      "Confirm final market value / ACV before making the economic repair-vs-total-loss decision.",
+    ],
+  };
+}
+
+function mergeRepairabilityAssessmentIntoReport(params: {
+  report: RepairIntelligenceReport;
+  assessment: RepairabilityAssessment;
+}): RepairabilityFocusedReport {
+  const economicLabel =
+    params.assessment.economicRepairability === "favorable"
+      ? "favorable"
+      : params.assessment.economicRepairability === "borderline"
+        ? "borderline"
+        : params.assessment.economicRepairability === "unlikely"
+          ? "unlikely"
+          : "unknown";
+
+  const leadingActions = [
+    `Physical repairability: ${params.assessment.physicalRepairability.toUpperCase()}.`,
+    `Economic repairability: ${economicLabel.toUpperCase()}.`,
+    `Final determination: ${params.assessment.finalDetermination}`,
+    `Grade: ${params.assessment.grade}`,
+    ...params.assessment.teardownDependencies.map(
+      (item) => `Teardown dependency: ${item}`
+    ),
+  ];
+
+  return {
+    ...params.report,
+    repairabilityAssessment: params.assessment,
+    recommendedActions: dedupeStrings([
+      ...leadingActions,
+      ...params.report.recommendedActions,
+    ]).slice(0, 8),
+  };
+}
+
+function inferAcvFromDocuments(
+  documents: Array<{
+    filename?: string | null;
+    mime?: string | null;
+    text?: string | null;
+  }>
+): number | null {
+  const valuationDoc = documents.find((document) =>
+    `${document.filename ?? ""}`.toLowerCase().includes("value")
+  );
+
+  const text = valuationDoc?.text ?? "";
+  if (!text.trim()) return null;
+
+  const matches = [...text.matchAll(/\$?\s*([\d,]+\.\d{2}|\d{1,3}(?:,\d{3})+|\d{3,6})/g)]
+    .map((match) => Number.parseFloat(match[1].replace(/,/g, "")))
+    .filter((value) => Number.isFinite(value) && value >= 500 && value <= 50000);
+
+  if (matches.length === 0) return null;
+
+  const sorted = [...matches].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)] ?? null;
+}
 
 export async function runRepairAnalysis({
   artifactIds,
@@ -239,135 +539,19 @@ export async function runRepairAnalysis({
     estimateFacts,
   };
 
-  if (isRepairabilityIntent(userIntent)) {
-    return buildRepairabilityFocusedReport({
+  const intentProfile = scoreAnalysisIntent(userIntent);
+  if (shouldPrioritizeRepairability(intentProfile)) {
+    return mergeRepairabilityAssessmentIntoReport({
       report,
-      estimateFacts,
-      documents,
+      assessment: buildRepairabilityAssessment({
+        report,
+        estimateFacts,
+        documents,
+      }),
     });
   }
 
   return report;
-}
-
-function isRepairabilityIntent(userIntent: string | null | undefined) {
-  const lower = userIntent?.toLowerCase() ?? "";
-
-  return (
-    lower.includes("repairability") ||
-    lower.includes("repairable") ||
-    lower.includes("total loss") ||
-    lower.includes("total-loss") ||
-    lower.includes("determine repair") ||
-    lower.includes("grade")
-  );
-}
-
-function buildRepairabilityFocusedReport(params: {
-  report: RepairIntelligenceReport;
-  estimateFacts: EstimateFacts | undefined;
-  documents: Array<{
-    filename: string;
-    mime: string | null;
-    text: string;
-    imageDataUrl: string | null | undefined;
-  }>;
-}): RepairIntelligenceReport {
-  const estimateTotal = params.estimateFacts?.estimateTotal;
-  const acv = inferApproximateAcv(params.documents);
-  const physicalRepairability = estimateTotal && estimateTotal < 5000 ? "YES" : "UNCERTAIN";
-  const economicRepairability = buildEconomicRepairabilityLabel(estimateTotal, acv);
-  const grade = computeRepairGrade(estimateTotal, acv);
-
-  return {
-    ...params.report,
-    recommendedActions: [
-      `Visible Damage Summary: Review the estimate line items and photos together to confirm the current documented damage scope.`,
-      `Estimate Scope Summary: Current estimate total is ${formatCurrencyOrFallback(estimateTotal)}.`,
-      `Physical Repairability: ${physicalRepairability}. ${
-        physicalRepairability === "YES"
-          ? "Vehicle appears physically repairable based on visible scope."
-          : "Repairability remains uncertain pending teardown."
-      }`,
-      `Economic Repairability: ${economicRepairability}. Repair cost vs ACV must be verified${acv ? ` (estimated ACV: ${formatCurrencyOrFallback(acv)})` : ""}.`,
-      `Final Determination: ${
-        physicalRepairability === "YES"
-          ? "Repairable based on current visible scope, subject to teardown confirmation."
-          : "Do not make a final repairability decision until teardown and structural measurement are complete."
-      }`,
-      `Grade: ${grade} - ${buildRepairGradeExplanation(estimateTotal, acv)}`,
-      "Required Teardown Confirmation: Perform teardown and structural measurement before final determination.",
-    ],
-    summary: {
-      ...params.report.summary,
-      riskScore: physicalRepairability === "YES" ? "moderate" : "high",
-    },
-  };
-}
-
-function inferApproximateAcv(
-  documents: Array<{
-    filename: string;
-    mime: string | null;
-    text: string;
-    imageDataUrl: string | null | undefined;
-  }>
-) {
-  const joined = documents.map((document) => document.text).join("\n");
-  const match = joined.match(/\b(?:acv|actual cash value|vehicle value)\D{0,20}\$?\s*([0-9][0-9,]*(?:\.\d{1,2})?)/i);
-  if (!match) return undefined;
-
-  const value = Number.parseFloat(match[1].replace(/,/g, ""));
-  return Number.isFinite(value) ? value : undefined;
-}
-
-function computeRepairGrade(estimateTotal?: number, acv?: number) {
-  if (!estimateTotal || !acv || acv <= 0) return "C";
-
-  const ratio = estimateTotal / acv;
-
-  if (ratio < 0.3) return "A";
-  if (ratio < 0.5) return "B";
-  if (ratio < 0.7) return "C";
-  if (ratio < 0.9) return "D";
-  return "F";
-}
-
-function buildEconomicRepairabilityLabel(estimateTotal?: number, acv?: number) {
-  if (!estimateTotal || !acv || acv <= 0) {
-    return "UNCERTAIN";
-  }
-
-  const ratio = estimateTotal / acv;
-
-  if (ratio < 0.5) return "FAVORABLE";
-  if (ratio < 0.8) return "BORDERLINE";
-  return "HIGH TOTAL-LOSS RISK";
-}
-
-function buildRepairGradeExplanation(estimateTotal?: number, acv?: number) {
-  if (!estimateTotal) {
-    return "Estimate total needs confirmation before a stronger repairability grade can be assigned.";
-  }
-
-  if (!acv || acv <= 0) {
-    return `Estimate total is ${formatCurrencyOrFallback(estimateTotal)}, but ACV is not documented in the current file set.`;
-  }
-
-  const ratio = estimateTotal / acv;
-  return `Estimate is ${formatCurrencyOrFallback(estimateTotal)} against an estimated ACV of ${formatCurrencyOrFallback(acv)} (${Math.round(ratio * 100)}% of value).`;
-}
-
-function formatCurrencyOrFallback(value?: number) {
-  if (!value || !Number.isFinite(value)) {
-    return "an unknown amount";
-  }
-
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(value);
 }
 
 function findDocumentText(
