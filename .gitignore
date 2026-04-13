@@ -29,6 +29,11 @@ PLAID_CLIENT_ID
 PLAID_SECRET
 PLAID_ENV
 
+# Stripe API
+STRIPE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET
+STRIPE_*
+
 # ===============================
 # Logs
 # ===============================
