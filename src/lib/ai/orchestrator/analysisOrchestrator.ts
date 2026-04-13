@@ -351,6 +351,7 @@ export async function runRepairAnalysis({
     text: attachment.text,
     imageDataUrl: attachment.imageDataUrl,
   }));
+  const intentProfile = scoreAnalysisIntent(userIntent);
 
   console.info("[analysis-attachments] orchestrator received", {
     attachmentCount: documents.length,
@@ -539,15 +540,21 @@ export async function runRepairAnalysis({
     estimateFacts,
   };
 
-  const intentProfile = scoreAnalysisIntent(userIntent);
+  console.info("[analysis-intent-profile]", {
+    userIntent: userIntent ?? null,
+    intentProfile,
+  });
+
   if (shouldPrioritizeRepairability(intentProfile)) {
+    const repairabilityAssessment = buildRepairabilityAssessment({
+      report,
+      estimateFacts,
+      documents,
+    });
+
     return mergeRepairabilityAssessmentIntoReport({
       report,
-      assessment: buildRepairabilityAssessment({
-        report,
-        estimateFacts,
-        documents,
-      }),
+      assessment: repairabilityAssessment,
     });
   }
 
