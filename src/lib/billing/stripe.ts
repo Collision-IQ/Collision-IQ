@@ -21,6 +21,7 @@ export function getStripe() {
 
 export function getStripePriceIds() {
   return {
+    starter: process.env.STRIPE_PRICE_STARTER?.trim() || "",
     pro: process.env.STRIPE_PRICE_PRO?.trim() || "",
     team: process.env.STRIPE_PRICE_TEAM?.trim() || "",
   };

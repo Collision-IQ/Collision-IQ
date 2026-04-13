@@ -43,7 +43,7 @@ export function resolveExportErrorMessage(status: number, fallback?: string): st
   }
 
   if (status === 403) {
-    return "Redacted chat download is not available on this account yet.";
+    return "Upgrade required to download redacted chat exports. Visit /billing.";
   }
 
   if (status === 400) {

@@ -9,6 +9,7 @@ generator client {
 }
 
 enum SubscriptionPlan {
+  CHAT_ONLY
   STARTER
   PRO
   TEAM

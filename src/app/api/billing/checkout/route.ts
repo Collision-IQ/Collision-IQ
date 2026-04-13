@@ -12,7 +12,9 @@ import { prisma } from "@/lib/prisma";
 export const runtime = "nodejs";
 
 function normalizePlan(value: FormDataEntryValue | null) {
-  return value === "team" ? "team" : "pro";
+  if (value === "starter") return "starter";
+  if (value === "team") return "team";
+  return "pro";
 }
 
 export async function POST(req: Request) {
@@ -27,7 +29,8 @@ export async function POST(req: Request) {
   const plan = normalizePlan(formData.get("plan"));
   const stripe = getStripe();
   const priceIds = getStripePriceIds();
-  const priceId = plan === "team" ? priceIds.team : priceIds.pro;
+  const priceId =
+    plan === "starter" ? priceIds.starter : plan === "team" ? priceIds.team : priceIds.pro;
 
   if (!priceId) {
     return NextResponse.json({ error: `Missing Stripe price for ${plan}` }, { status: 500 });

@@ -245,6 +245,31 @@ export function ChatbotWorkspacePage() {
   }, [consentAccepted, viewerAccess]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  const trialDaysRemaining = useMemo(() => {
+    if (!viewerAccess) return null;
+
+    const isTrial =
+      viewerAccess.plan === "trial" ||
+      viewerAccess.activeSubscriptionStatus === "TRIALING";
+
+    if (!isTrial) return null;
+
+    const createdAt = viewerAccess.createdAt
+      ? new Date(viewerAccess.createdAt)
+      : null;
+
+    if (!createdAt || Number.isNaN(createdAt.getTime())) return null;
+
+    const now = new Date();
+    const trialEnd = new Date(createdAt);
+    trialEnd.setDate(trialEnd.getDate() + 30);
+
+    const diffMs = trialEnd.getTime() - now.getTime();
+    const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+    return days > 0 ? days : 0;
+  }, [viewerAccess]);
+
   async function handleConsentAccept() {
     if (!consentChecked || typeof window === "undefined") return;
 
@@ -329,6 +354,16 @@ export function ChatbotWorkspacePage() {
 
   const chatBlocked = !consentAccepted;
   const featureFlags = viewerAccess?.featureFlags;
+  const remainingAnalyses = viewerAccess?.usage?.remaining ?? null;
+  const showLowUsageWarning =
+    viewerAccess?.plan !== "trial" &&
+    viewerAccess?.plan !== "pro" &&
+    typeof remainingAnalyses === "number" &&
+    remainingAnalyses > 0 &&
+    remainingAnalyses <= 2;
+  const isTrialing =
+    viewerAccess?.subscriptionStatus === "active" &&
+    (viewerAccess?.plan === "trial" || viewerAccess?.activeSubscriptionStatus === "TRIALING");
   const canViewSupplementLines = featureFlags?.supplement_lines ?? false;
   const canViewNegotiationDraft = featureFlags?.negotiation_draft ?? false;
   const canUseBasicPdfExport = featureFlags?.basic_pdf_export ?? true;
@@ -404,12 +439,63 @@ export function ChatbotWorkspacePage() {
                   >
                     Continue Chat
                   </button>
-                </div>
+                  </div>
 
-                <div className="mt-4 h-[min(56svh,680px)] min-h-[360px]">
-                  <ChatWidget
-                    onAttachmentChange={setAttachment}
-                    onAttachmentsChange={setAttachmentsState}
+                  <div className="mt-4 h-[min(56svh,680px)] min-h-[360px]">
+                    {trialDaysRemaining !== null && trialDaysRemaining <= 7 && (
+                      <div
+                        className={`mb-3 rounded-xl px-4 py-3 text-sm ${
+                          trialDaysRemaining <= 2
+                            ? "border border-red-500/30 bg-red-500/10 text-red-200"
+                            : "border border-orange-500/20 bg-[#C65A2A]/10 text-orange-100"
+                        }`}
+                      >
+                        {trialDaysRemaining > 0 ? (
+                          <>
+                            Trial ends in {trialDaysRemaining} day
+                            {trialDaysRemaining === 1 ? "" : "s"}.
+                            <span className="ml-2 text-white/80">
+                              Upgrade to keep full access.
+                            </span>
+                            <Link
+                              href="/billing"
+                              className="ml-3 inline-block rounded-md bg-[#C65A2A] px-3 py-1 text-xs font-semibold text-black"
+                            >
+                              Upgrade
+                            </Link>
+                          </>
+                        ) : (
+                          <>
+                            Your trial has ended.
+                            <span className="ml-2 text-white/80">
+                              Upgrade to continue using full features.
+                            </span>
+                            <Link
+                              href="/billing"
+                              className="ml-3 inline-block rounded-md bg-[#C65A2A] px-3 py-1 text-xs font-semibold text-black"
+                            >
+                              Upgrade
+                            </Link>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {isTrialing && (
+                      <div className="mb-3 text-xs text-green-300/80">
+                        Trial active - full access enabled
+                      </div>
+                    )}
+                    {showLowUsageWarning && (
+                      <div className="mb-3 rounded-xl border border-orange-500/20 bg-[#C65A2A]/10 px-4 py-3 text-sm text-orange-100">
+                        You have {remainingAnalyses} analysis{remainingAnalyses === 1 ? "" : "es"} remaining.
+                        <span className="ml-2 text-white/80">
+                          Upgrade to avoid interruption.
+                        </span>
+                      </div>
+                    )}
+                    <ChatWidget
+                      onAttachmentChange={setAttachment}
+                      onAttachmentsChange={setAttachmentsState}
                     onAnalysisChange={setAnalysisText}
                     onPrimaryAnalysisChange={setPrimaryAnalysis}
                     onAnalysisResultChange={handleAnalysisResultChange}
@@ -417,19 +503,71 @@ export function ChatbotWorkspacePage() {
                     onAnalysisLoadingChange={setAnalysisLoading}
                     onWorkspaceDataChange={setWorkspaceData}
                     onSessionReset={handleSessionReset}
-                    onSessionControlsReady={(controls) => {
-                      chatSessionControlsRef.current = controls;
-                    }}
-                    suppressedMessageIds={primaryAnalysis ? [primaryAnalysis.messageId] : []}
-                    disabled={chatBlocked}
-                  />
+                      onSessionControlsReady={(controls) => {
+                        chatSessionControlsRef.current = controls;
+                      }}
+                      viewerAccess={viewerAccess}
+                      suppressedMessageIds={primaryAnalysis ? [primaryAnalysis.messageId] : []}
+                      disabled={chatBlocked}
+                    />
                 </div>
-              </section>
-            ) : (
-              <div className="mt-3 min-h-0 flex-1 overflow-hidden">
-                <ChatWidget
-                  onAttachmentChange={setAttachment}
-                  onAttachmentsChange={setAttachmentsState}
+                </section>
+              ) : (
+                <div className="mt-3 min-h-0 flex-1 overflow-hidden">
+                    {trialDaysRemaining !== null && trialDaysRemaining <= 7 && (
+                      <div
+                        className={`mb-3 rounded-xl px-4 py-3 text-sm ${
+                          trialDaysRemaining <= 2
+                            ? "border border-red-500/30 bg-red-500/10 text-red-200"
+                            : "border border-orange-500/20 bg-[#C65A2A]/10 text-orange-100"
+                        }`}
+                      >
+                        {trialDaysRemaining > 0 ? (
+                          <>
+                            Trial ends in {trialDaysRemaining} day
+                            {trialDaysRemaining === 1 ? "" : "s"}.
+                            <span className="ml-2 text-white/80">
+                              Upgrade to keep full access.
+                            </span>
+                            <Link
+                              href="/billing"
+                              className="ml-3 inline-block rounded-md bg-[#C65A2A] px-3 py-1 text-xs font-semibold text-black"
+                            >
+                              Upgrade
+                            </Link>
+                          </>
+                        ) : (
+                          <>
+                            Your trial has ended.
+                            <span className="ml-2 text-white/80">
+                              Upgrade to continue using full features.
+                            </span>
+                            <Link
+                              href="/billing"
+                              className="ml-3 inline-block rounded-md bg-[#C65A2A] px-3 py-1 text-xs font-semibold text-black"
+                            >
+                              Upgrade
+                            </Link>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {isTrialing && (
+                      <div className="mb-3 text-xs text-green-300/80">
+                        Trial active - full access enabled
+                      </div>
+                    )}
+                    {showLowUsageWarning && (
+                        <div className="mb-3 rounded-xl border border-orange-500/20 bg-[#C65A2A]/10 px-4 py-3 text-sm text-orange-100">
+                          You have {remainingAnalyses} analysis{remainingAnalyses === 1 ? "" : "es"} remaining.
+                        <span className="ml-2 text-white/80">
+                          Upgrade to avoid interruption.
+                        </span>
+                      </div>
+                    )}
+                    <ChatWidget
+                      onAttachmentChange={setAttachment}
+                      onAttachmentsChange={setAttachmentsState}
                   onAnalysisChange={setAnalysisText}
                   onPrimaryAnalysisChange={setPrimaryAnalysis}
                   onAnalysisResultChange={handleAnalysisResultChange}
@@ -437,14 +575,15 @@ export function ChatbotWorkspacePage() {
                   onAnalysisLoadingChange={setAnalysisLoading}
                   onWorkspaceDataChange={setWorkspaceData}
                   onSessionReset={handleSessionReset}
-                  onSessionControlsReady={(controls) => {
-                    chatSessionControlsRef.current = controls;
-                  }}
-                  suppressedMessageIds={primaryAnalysis ? [primaryAnalysis.messageId] : []}
-                  disabled={chatBlocked}
-                />
-              </div>
-            )}
+                      onSessionControlsReady={(controls) => {
+                        chatSessionControlsRef.current = controls;
+                      }}
+                      viewerAccess={viewerAccess}
+                      suppressedMessageIds={primaryAnalysis ? [primaryAnalysis.messageId] : []}
+                      disabled={chatBlocked}
+                    />
+                  </div>
+                )}
           </div>
         }
         right={
@@ -1704,15 +1843,15 @@ function LockedFeatureCard({
 }) {
   return (
     <section className="space-y-2.5 rounded-2xl border border-orange-500/16 bg-gradient-to-br from-[#C65A2A]/9 via-black/34 to-black/18 p-3.5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/68">{title}</div>
-        <Link
-          href="/pricing"
-          className="rounded-full border border-orange-500/24 bg-orange-500/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-orange-100 transition hover:bg-orange-500/18"
-        >
-          Upgrade
-        </Link>
-      </div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/68">{title}</div>
+          <Link
+            href="/billing"
+            className="rounded-full border border-orange-500/24 bg-orange-500/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-orange-100 transition hover:bg-orange-500/18"
+          >
+            Upgrade Access
+          </Link>
+        </div>
       <div className="text-[13px] leading-5 text-white/65">{body}</div>
     </section>
   );

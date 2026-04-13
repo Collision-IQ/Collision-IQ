@@ -13,6 +13,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
+import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import { buildWorkspaceDataFromAnalysisText } from "@/lib/workspaceAdapter";
 import type { WorkspaceData } from "@/types/workspaceTypes";
 import {
@@ -47,6 +48,7 @@ import {
 import AttachmentPreviewModal, {
   type PreviewAttachment,
 } from "@/components/AttachmentPreviewModal";
+import UpgradeModal from "@/components/UpgradeModal";
 
 interface Attachment {
   attachmentId: string;
@@ -78,6 +80,7 @@ interface ChatWidgetProps {
       resetSession: () => void;
     } | null
   ) => void;
+  viewerAccess?: AccountEntitlements | null;
   suppressedMessageIds?: string[];
   disabled?: boolean;
 }
@@ -119,6 +122,7 @@ export default function ChatWidget({
   onWorkspaceDataChange,
   onSessionReset,
   onSessionControlsReady,
+  viewerAccess,
   suppressedMessageIds = [],
   disabled = false,
 }: ChatWidgetProps) {
@@ -136,6 +140,7 @@ export default function ChatWidget({
   const [recordingError, setRecordingError] = useState<string | null>(null);
   const [showOpeningDisclaimer, setShowOpeningDisclaimer] = useState(true);
   const [openingDisclaimerDismissed, setOpeningDisclaimerDismissed] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -842,26 +847,54 @@ export default function ChatWidget({
       if (!response.ok) {
         let errorMessage = `Chat API failed (${response.status})`;
 
+        let errorCode: string | null = null;
+
         try {
-          const data = (await response.json()) as { error?: string };
+          const data = (await response.json()) as { error?: string; code?: string };
+
           if (data?.error) {
             errorMessage = data.error;
           }
+
+          if (data?.code) {
+            errorCode = data.code;
+          }
         } catch {
-          // Ignore JSON parse failures and keep the fallback message.
+          // fallback
         }
 
         console.warn("[chat] request failed", {
           status: response.status,
           message: errorMessage,
+          code: errorCode,
         });
 
-        if (sessionRef.current === mySession) {
-          if (hasAttachmentsInTurn) {
-            upsertSystemStatusMessage(errorMessage);
-          } else {
-            pushSystemStatusMessage(errorMessage);
+          if (sessionRef.current === mySession) {
+            if (
+              errorCode === "usage_limit_reached" ||
+              errorCode === "trial_expired" ||
+              errorCode === "upgrade_required"
+            ) {
+              if (viewerAccess?.plan === "trial") {
+                pushSystemStatusMessage(
+                  "Temporary issue detected. Please retry your analysis."
+                );
+                return;
+              }
+
+              pushSystemStatusMessage(
+                "You've reached your current access limit."
+              );
+
+              setShowUpgradeModal(true);
+            } else {
+              if (hasAttachmentsInTurn) {
+                upsertSystemStatusMessage(errorMessage);
+            } else {
+              pushSystemStatusMessage(errorMessage);
+            }
           }
+
           if (
             hasAttachmentsInTurn &&
             analysisRunRef.current === activeAnalysisRunId
@@ -869,6 +902,7 @@ export default function ChatWidget({
             onAnalysisLoadingChange?.(false);
           }
         }
+
         return;
       }
 
@@ -1557,10 +1591,14 @@ export default function ChatWidget({
   const userBubble = "border border-orange-500/24 bg-[#1a120d]/88 text-orange-300 shadow-[0_14px_32px_rgba(0,0,0,0.16)]";
 
   return (
-    <div className={`relative flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/6 bg-white/[0.035] shadow-[0_22px_70px_rgba(0,0,0,0.32)] ${disabled ? "opacity-75" : ""}`}>
-      <AttachmentPreviewModal
-        attachment={disabled ? null : (previewAttachment as PreviewAttachment | null)}
-        attachments={disabled ? [] : (attachments as PreviewAttachment[])}
+      <div className={`relative flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/6 bg-white/[0.035] shadow-[0_22px_70px_rgba(0,0,0,0.32)] ${disabled ? "opacity-75" : ""}`}>
+        <UpgradeModal
+          open={showUpgradeModal}
+          onClose={() => setShowUpgradeModal(false)}
+        />
+        <AttachmentPreviewModal
+          attachment={disabled ? null : (previewAttachment as PreviewAttachment | null)}
+          attachments={disabled ? [] : (attachments as PreviewAttachment[])}
         currentIndex={disabled ? -1 : previewAttachmentIndex}
         onClose={() => setPreviewAttachmentId(null)}
         onNavigate={handlePreviewNavigation}

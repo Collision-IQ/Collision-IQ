@@ -77,6 +77,7 @@ export function toAccountEntitlements(access: ViewerAccess): AccountEntitlements
   const analysisCount = access.monthlyAnalysisUsed;
   const capped = true;
   const remaining = Math.max(analysisCap - analysisCount, 0);
+
   const usageStatus = !access.isAuthenticated
     ? "upgrade_required"
     : !access.canRunAnalysis && billingPlan === "trial"
@@ -84,6 +85,7 @@ export function toAccountEntitlements(access: ViewerAccess): AccountEntitlements
       : !access.canRunAnalysis
         ? "usage_limit_reached"
         : "ok";
+
   const subscriptionStatus =
     access.activeSubscriptionStatus === "ACTIVE" || access.activeSubscriptionStatus === "TRIALING"
       ? "active"

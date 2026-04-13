@@ -5,7 +5,7 @@ import type {
   SubscriptionPlan,
   SubscriptionStatus,
 } from "@prisma/client";
-import { getPlanAnalysisCap } from "@/lib/billing/plans";
+import { getPlanAnalysisCap, PRO_TRIAL_DAYS } from "@/lib/billing/plans";
 import { getOrCreateAppUser } from "@/lib/auth/get-or-create-app-user";
 import { prisma } from "@/lib/prisma";
 
@@ -31,6 +31,7 @@ export type ViewerAccess = {
   isPlatformAdmin: boolean;
   userId: string | null;
   clerkUserId: string | null;
+  createdAt: string | null;
   plan: PlanTier;
   featureFlags: Record<FeatureKey, boolean>;
   monthlyAnalysisLimit: number | null;
@@ -290,16 +291,11 @@ export function buildAnonymousAccess(): ViewerAccess {
     isPlatformAdmin: false,
     userId: null,
     clerkUserId: null,
+    createdAt: null,
     plan: "starter",
     featureFlags: {
       ...PLAN_FEATURES.starter,
       basic_chat: false,
-      uploads: false,
-      at_a_glance: false,
-      what_stands_out: false,
-      vehicle_context: false,
-      basic_pdf_export: false,
-      redacted_chat_export: false,
     },
     monthlyAnalysisLimit: getPlanAnalysisCap("starter"),
     monthlyAnalysisUsed: 0,
@@ -314,12 +310,14 @@ export function buildAnonymousAccess(): ViewerAccess {
 
 async function buildAccessFromDbUser(dbUser: DbUserWithRelations): Promise<ViewerAccess> {
   const activeSubscription = pickActiveSubscription(dbUser);
+
   if (dbUser.isPlatformAdmin) {
     return {
       isAuthenticated: true,
       isPlatformAdmin: true,
       userId: dbUser.id,
       clerkUserId: dbUser.clerkUserId,
+      createdAt: dbUser.createdAt.toISOString(),
       plan: "team",
       featureFlags: {
         basic_chat: true,
@@ -348,15 +346,50 @@ async function buildAccessFromDbUser(dbUser: DbUserWithRelations): Promise<Viewe
     };
   }
 
-  const plan = mapSubscriptionPlan(activeSubscription?.plan);
+  const localTrialActive = isLocalIntroTrialActive(dbUser, activeSubscription);
+  const hasStripeTrial =
+    activeSubscription?.status === "TRIALING";
+
+  const hasActivePaid =
+    activeSubscription?.status === "ACTIVE" ||
+    activeSubscription?.status === "PAST_DUE";
+
+  let effectivePlan: PlanTier;
+
+  if (hasStripeTrial || hasActivePaid) {
+    effectivePlan = mapSubscriptionPlan(activeSubscription?.plan);
+  } else if (localTrialActive) {
+    effectivePlan = "pro"; // trial = pro access
+  } else {
+    effectivePlan = "starter"; // UI will restrict to chat-only
+  }
+
+  let effectiveStatus: SubscriptionStatus | null;
+
+  if (hasStripeTrial || hasActivePaid) {
+    effectiveStatus = activeSubscription?.status ?? null;
+  } else if (localTrialActive) {
+    effectiveStatus = "TRIALING";
+  } else {
+    effectiveStatus = null;
+  }
+
   const activeShopId = activeSubscription?.shopId ?? dbUser.defaultShopId ?? null;
-  const activeShop = dbUser.memberships.find((membership) => membership.shopId === activeShopId)?.shop ?? null;
+  const activeShop =
+    dbUser.memberships.find((membership) => membership.shopId === activeShopId)?.shop ?? null;
+
   const featureOverrides = getActiveFeatureOverrides(
     dbUser.featureOverrides,
     activeShop?.featureOverrides ?? []
   );
-  const featureFlags = applyFeatureOverrides(PLAN_FEATURES[plan], featureOverrides);
-  const monthlyAnalysisLimit = resolveMonthlyAnalysisLimit(plan, featureOverrides);
+
+  const featureFlags = applyFeatureOverrides(PLAN_FEATURES[effectivePlan], featureOverrides);
+  if (!hasStripeTrial && !hasActivePaid && !localTrialActive) {
+    featureFlags.uploads = false;
+    featureFlags.basic_pdf_export = false;
+  }
+  const monthlyAnalysisLimit = resolveMonthlyAnalysisLimit(effectivePlan, featureOverrides);
+
   const monthlyAnalysisUsed = await prisma.usageRecord.aggregate({
     where: {
       kind: "ANALYSIS_COMPLETED",
@@ -379,14 +412,15 @@ async function buildAccessFromDbUser(dbUser: DbUserWithRelations): Promise<Viewe
     isPlatformAdmin: false,
     userId: dbUser.id,
     clerkUserId: dbUser.clerkUserId,
-    plan,
+    createdAt: (hasStripeTrial ? activeSubscription?.createdAt : dbUser.createdAt)?.toISOString() ?? null,
+    plan: effectivePlan,
     featureFlags,
     monthlyAnalysisLimit,
     monthlyAnalysisUsed: used,
     canRunAnalysis,
     dbUserId: dbUser.id,
     activeSubscriptionId: activeSubscription?.id ?? null,
-    activeSubscriptionStatus: activeSubscription?.status ?? null,
+    activeSubscriptionStatus: effectiveStatus,
     activeShopId,
     consentStatus: dbUser.consents[0]?.status ?? null,
   };
@@ -419,8 +453,18 @@ function mapSubscriptionPlan(plan: SubscriptionPlan | null | undefined): PlanTie
     case "TEAM":
       return "team";
     default:
-      return "starter";
+      return "starter"; // paid starter still maps here
   }
+}
+
+function resolveFreePlan(access: ViewerAccess): PlanTier {
+  if (!access.isAuthenticated) return "starter";
+
+  if (!access.activeSubscriptionId) {
+    return "starter"; // will be overridden by CHAT_ONLY logic
+  }
+
+  return access.plan;
 }
 
 function getCurrentPeriodKey() {
@@ -464,9 +508,35 @@ function resolveMonthlyAnalysisLimit(plan: PlanTier, overrides: FeatureOverride[
     .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
 
   if (!limitOverride?.notes) {
-    return getPlanAnalysisCap(plan);
+    return getPlanAnalysisCap(plan === "pro" ? "pro" : plan);
   }
 
   const parsed = Number.parseInt(limitOverride.notes, 10);
-  return Number.isFinite(parsed) ? parsed : getPlanAnalysisCap(plan);
+  return Number.isFinite(parsed) ? parsed : getPlanAnalysisCap(plan === "pro" ? "pro" : plan);
+}
+
+function isLocalIntroTrialActive(
+  dbUser: DbUserWithRelations,
+  activeSubscription: SubscriptionWithRelations | null
+) {
+  if (activeSubscription) {
+    return false;
+  }
+
+  const hasEverSubscribed = dbUser.subscriptions.length > 0;
+
+  if (hasEverSubscribed) {
+    return false;
+  }
+
+  const createdAt = new Date(dbUser.createdAt);
+
+  if (Number.isNaN(createdAt.getTime())) {
+    return false;
+  }
+
+  const trialEndsAt = new Date(createdAt);
+  trialEndsAt.setUTCDate(trialEndsAt.getUTCDate() + PRO_TRIAL_DAYS);
+
+  return Date.now() < trialEndsAt.getTime();
 }

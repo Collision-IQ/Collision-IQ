@@ -6,6 +6,7 @@ import { getStripe } from "@/lib/billing/stripe";
 export const runtime = "nodejs";
 
 const PLAN_BY_PRICE_LOOKUP: Record<string, "STARTER" | "PRO" | "TEAM"> = {
+  [process.env.STRIPE_PRICE_STARTER?.trim() || ""]: "STARTER",
   [process.env.STRIPE_PRICE_PRO?.trim() || ""]: "PRO",
   [process.env.STRIPE_PRICE_TEAM?.trim() || ""]: "TEAM",
 };

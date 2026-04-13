@@ -1,6 +1,8 @@
 import Image from "next/image";
 import Link from "next/link";
 
+const SERVICES_URL = "https://www.collision.academy/s/shop";
+
 export default function CollisionAcademyPage() {
   return (
     <main className="min-h-screen text-white">
@@ -36,7 +38,7 @@ export default function CollisionAcademyPage() {
         </div>
       </header>
 
-      <section className="relative isolate flex min-h-[46vh] items-end overflow-hidden md:min-h-[50vh]">
+      <section className="relative isolate flex min-h-[50vh] items-end overflow-hidden">
         <video
           autoPlay
           muted
@@ -52,109 +54,108 @@ export default function CollisionAcademyPage() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_35%,rgba(0,0,0,0.9))]" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_10%,rgba(198,90,42,0.18),transparent_45%)]" />
 
-        <div className="relative z-10 mx-auto w-full max-w-6xl px-6 pb-10">
+        <div className="relative z-10 mx-auto w-full max-w-6xl px-6 pb-12">
           <h1 className="text-4xl font-bold leading-tight tracking-tight md:text-6xl">
-            Automotive Appraisal &amp; Collision Technology Experts.
+            Automotive Appraisal &amp; Collision Intelligence
           </h1>
 
           <p className="mt-6 max-w-3xl text-lg leading-relaxed text-white/80 md:text-xl">
-            Court-recognized expertise in vehicle appraisals, diminished value,
-            total loss disputes, and right-to-appraisal clauses.
-            Now introducing{" "}
-            <span className="font-semibold text-[#C65A2A]">
-              Collision IQ
-            </span>{" "}
-            - AI-powered production solutions for collision repair shops.
+            Court-recognized expertise in vehicle appraisal, diminished value, total loss disputes,
+            and right-to-appraisal.
           </p>
 
           <div className="mt-8 flex flex-wrap gap-3">
+            <Link
+              href="/"
+              className="rounded-2xl bg-[#C65A2A] px-6 py-3 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(198,90,42,0.25)] transition hover:opacity-90"
+            >
+              Open Collision IQ
+            </Link>
+
             <a
-              href="https://www.collision.academy/s/shop"
+              href={SERVICES_URL}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-2xl bg-[#C65A2A] px-6 py-3 text-sm font-semibold text-black transition hover:opacity-90"
+              className="rounded-2xl border border-white/20 bg-black/25 px-6 py-3 text-sm font-semibold text-white transition hover:bg-black/35"
             >
               View Services
             </a>
-
-            <Link
-              href="/"
-              className="rounded-2xl border border-white/20 bg-black/25 px-6 py-3 text-sm font-semibold text-white transition hover:bg-black/35"
-            >
-              Launch Collision IQ
-            </Link>
           </div>
         </div>
       </section>
 
-      <section className="border-t border-white/10 bg-black/35 backdrop-blur-xl">
-        <div className="mx-auto max-w-6xl px-5 py-5">
-          <Link href="/" className="group flex items-center gap-3">
-            <div className="flex-1 rounded-2xl border border-white/12 bg-black/35 px-4 py-3 text-sm text-white/60 transition group-hover:border-white/30">
-              How can I help you today?
-            </div>
+      <section className="mx-auto max-w-6xl px-5 py-12">
+        <h2 className="mb-2 text-2xl font-semibold">How to work with us</h2>
+        <p className="mb-6 text-sm text-white/60">
+          Choose how you want to engage — tools, services, or systems.
+        </p>
 
-            <div className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:opacity-90">
-              Chat
-            </div>
+        <div className="grid gap-5 md:grid-cols-3">
+          <Link
+            href="/"
+            className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl transition hover:bg-black/40"
+          >
+            <div className="text-lg font-semibold">Collision IQ</div>
+            <p className="mt-2 text-sm text-white/70">
+              AI-powered repair analysis and decision support.
+            </p>
+            <div className="mt-5 text-sm text-[#C65A2A]">Open -&gt;</div>
+          </Link>
+
+          <a
+            href={SERVICES_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl transition hover:bg-black/40"
+          >
+            <div className="text-lg font-semibold">Services</div>
+            <p className="mt-2 text-sm text-white/70">
+              Appraisals, diminished value, and dispute support.
+            </p>
+            <div className="mt-5 text-sm text-[#C65A2A]">View -&gt;</div>
+          </a>
+
+          <Link
+            href="/the-academy"
+            className="rounded-3xl border border-[#C65A2A]/40 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl transition hover:bg-black/40"
+          >
+            <div className="text-lg font-semibold">The Academy</div>
+            <p className="mt-2 text-sm text-white/70">
+              Systems, training, and membership pathways for collision professionals.
+            </p>
+            <div className="mt-5 text-sm text-[#C65A2A]">Enter -&gt;</div>
           </Link>
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-5 py-10">
-        <div className="grid gap-5 md:grid-cols-3">
-          {[
-            {
-              title: "Diminished Value",
-              desc: "Market-based DV documentation for negotiation.",
-            },
-            {
-              title: "Total Loss Value Dispute",
-              desc: "Comp-driven rebuttal support and review.",
-            },
-            {
-              title: "Right to Appraisal",
-              desc: "Process guidance + documentation packet.",
-            },
-          ].map((service) => (
-            <div
-              key={service.title}
-              className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl"
-            >
-              <div className="text-lg font-semibold">{service.title}</div>
-              <div className="mt-2 text-sm text-white/70">{service.desc}</div>
+      <section className="mx-auto max-w-6xl px-5 pb-12">
+        <div className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] backdrop-blur-xl md:p-8">
+          <div className="text-xl font-semibold">Collision IQ</div>
+          <p className="mt-3 max-w-2xl text-white/70">
+            Upload estimates, detect missed operations, and generate dispute-ready documentation
+            using AI built for collision repair.
+          </p>
 
-              <div className="mt-5">
-                <a
-                  href="https://www.collision.academy/s/shop"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center rounded-2xl border border-white/12 bg-white/5 px-4 py-2 text-sm text-white/85 transition hover:bg-white/10"
-                >
-                  Learn more -&gt;
-                </a>
-              </div>
-            </div>
-          ))}
+          <Link href="/" className="mt-6 inline-block text-sm font-medium text-[#C65A2A]">
+            Launch -&gt;
+          </Link>
         </div>
       </section>
 
       <section className="mx-auto max-w-6xl px-5 pb-16">
         <div className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] backdrop-blur-xl md:p-8">
-          <div className="text-xl font-semibold">Next steps</div>
+          <div className="text-xl font-semibold">Stay connected</div>
 
           <div className="mt-5 grid gap-4 md:grid-cols-3">
             <Link
               href="/"
               className="group rounded-2xl border border-white/10 bg-black/35 p-5 transition hover:bg-black/45"
             >
-              <div className="text-sm font-semibold">Collision IQ Chatbot</div>
+              <div className="text-sm font-semibold">Collision IQ</div>
               <div className="mt-2 text-sm text-white/70">
-                Ask repair, OEM, and insurance questions in real time.
+                Open the chatbot and repair intelligence workspace.
               </div>
-              <div className="mt-4 text-sm text-[#C65A2A]">
-                Open -&gt;
-              </div>
+              <div className="mt-4 text-sm text-[#C65A2A]">Open -&gt;</div>
             </Link>
 
             <a
@@ -167,9 +168,7 @@ export default function CollisionAcademyPage() {
               <div className="mt-2 text-sm text-white/70">
                 Repair insights, claim tips, and real-world examples.
               </div>
-              <div className="mt-4 text-sm text-[#C65A2A]">
-                View -&gt;
-              </div>
+              <div className="mt-4 text-sm text-[#C65A2A]">View -&gt;</div>
             </a>
 
             <a
@@ -182,9 +181,7 @@ export default function CollisionAcademyPage() {
               <div className="mt-2 text-sm text-white/70">
                 Industry updates and professional guidance.
               </div>
-              <div className="mt-4 text-sm text-[#C65A2A]">
-                View -&gt;
-              </div>
+              <div className="mt-4 text-sm text-[#C65A2A]">View -&gt;</div>
             </a>
           </div>
         </div>

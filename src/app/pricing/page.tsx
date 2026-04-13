@@ -7,28 +7,29 @@ export default function PricingPage() {
         <div className="text-xs uppercase tracking-[0.24em] text-white/45">Pricing</div>
         <h1 className="mt-3 text-3xl font-semibold md:text-4xl">Starter, Pro, and Team access</h1>
         <p className="mt-4 max-w-3xl text-sm leading-7 text-white/68 md:text-base">
-          Collision IQ phase one uses account-backed access. Starter keeps the core workflow available after sign-in,
-          Pro unlocks advanced supplement and export workflows, and Team adds shop-ready membership structure with pooled analysis usage.
+          Collision IQ now includes a 30-day chat-only free period. Starter adds a single document upload and one report export,
+          Pro unlocks all features with max upload support, and Enterprise capacity is staged for a later release.
         </p>
 
         <div className="mt-10 grid gap-4 lg:grid-cols-3">
           <PricingCard
-            name="Starter"
-            eyebrow="Public access"
-            description="Core chat, uploads, at-a-glance, what stands out, vehicle context, and standard PDF export."
+            name="Free"
+            eyebrow="30 days"
+            description="Chat-only access for the first 30 days. No document upload or report export."
             features={[
               "Basic AI chat",
-              "Estimate and document uploads",
-              "At-a-glance repair position",
-              "Vehicle and VIN context",
-              "Basic PDF export",
+              "No document upload",
+              "No report export",
+              "30-day free window",
+              "Upgrade path to Starter or Pro",
             ]}
           />
           <PricingCard
             name="Pro"
-            eyebrow="Advanced workflows"
-            description="For users who need export-ready supplement strategy, negotiation drafting, and richer comparison outputs."
+            eyebrow="$200"
+            description="All features unlocked with max upload support, advanced analysis outputs, and premium exports."
             features={[
+              "Everything in Starter",
               "Supplement lines",
               "Negotiation draft",
               "Rebuttal email export",
@@ -38,15 +39,15 @@ export default function PricingPage() {
             featured
           />
           <PricingCard
-            name="Team"
-            eyebrow="Shop-ready"
-            description="Built for shared shop context, pooled usage, and seat-aware subscription structure."
+            name="Enterprise"
+            eyebrow="Coming soon"
+            description="Enterprise-scale capacity and controls are planned, but not yet available for checkout."
             features={[
-              "Everything in Pro",
-              "Shop-aware subscription ownership",
-              "Seat-ready membership structure",
-              "Pooled analysis usage",
-              "Org-ready upgrade path",
+              "Up to 1000 analysis capacity",
+              "Organization-level controls",
+              "Seat and membership management",
+              "Dedicated rollout path",
+              "Not currently purchasable",
             ]}
           />
         </div>
