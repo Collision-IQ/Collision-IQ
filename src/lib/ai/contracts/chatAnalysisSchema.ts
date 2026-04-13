@@ -1,5 +1,6 @@
 export const CHATBOT_TASK_TYPES = [
   "estimate_review",
+  "repairability_analysis",
   "document_comparison",
   "photo_review",
   "part_lookup",

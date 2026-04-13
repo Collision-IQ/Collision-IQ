@@ -685,6 +685,20 @@ export function detectChatTaskType(params: {
     return "document_comparison";
   }
 
+  if (
+    params.hasDocuments &&
+    (
+      lower.includes("repairability") ||
+      lower.includes("repairable") ||
+      lower.includes("total loss") ||
+      lower.includes("total-loss") ||
+      lower.includes("determine repair") ||
+      lower.includes("grade")
+    )
+  ) {
+    return "repairability_analysis";
+  }
+
   if (params.hasDocuments) {
     return "estimate_review";
   }

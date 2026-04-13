@@ -505,6 +505,7 @@ export function inferDriveRetrievalMode(params: {
     (hasRepairTopics ||
       hasRepairKeywords ||
       taskType === "estimate_review" ||
+      taskType === "repairability_analysis" ||
       taskType === "oem_procedure_insight")
   ) {
     return "mixed_mode";
@@ -512,7 +513,10 @@ export function inferDriveRetrievalMode(params: {
 
   if (
     hasClaimKeywords &&
-    (hasRepairTopics || hasRepairKeywords || taskType === "estimate_review")
+    (hasRepairTopics ||
+      hasRepairKeywords ||
+      taskType === "estimate_review" ||
+      taskType === "repairability_analysis")
   ) {
     return "mixed_mode";
   }
@@ -657,6 +661,7 @@ function inferFallbackTopics(params: {
   if (
     params.taskType === "oem_procedure_insight" ||
     params.taskType === "estimate_review" ||
+    params.taskType === "repairability_analysis" ||
     /\b(repair|procedure|oem|compliance|calibration|scan|structural)\b/.test(lower)
   ) {
     return [
