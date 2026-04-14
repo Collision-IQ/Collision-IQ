@@ -29,28 +29,28 @@ export default function CaseContextSummary({
   const sections = determinationView
     ? [
         {
-          title: "ADAS / Calibration Support",
           ...determinationView.sections.adas,
+          title: "ADAS / Calibration Support",
         },
         {
-          title: "Pre/Post Scan Support",
           ...determinationView.sections.scans,
+          title: "Pre/Post Scan Support",
         },
         {
-          title: "Structural / Measuring Support",
           ...determinationView.sections.structural,
+          title: "Structural / Measuring Support",
         },
         {
-          title: "Corrosion Protection Support",
           ...determinationView.sections.corrosion,
+          title: "Corrosion Protection Support",
         },
         {
-          title: "Valuation Support",
           ...determinationView.sections.valuation,
+          title: "Valuation Support",
         },
         {
-          title: "Linked OEM / ADAS Evidence",
           ...determinationView.sections.linkedEvidence,
+          title: "Linked OEM / ADAS Evidence",
         },
       ]
     : [];
