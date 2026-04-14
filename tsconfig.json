@@ -44,6 +44,11 @@
     "node_modules",
     "Collision-IQ",
     "clerk-nextjs",
-    "clerk-nextjs-sample-disabled"
+    "clerk-nextjs-sample-disabled",
+    "**/__tests__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx"
   ]
 }

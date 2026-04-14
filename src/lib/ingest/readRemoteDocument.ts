@@ -67,11 +67,19 @@ export async function readRemoteDocument(
 
     if (mimeType?.includes("application/pdf")) {
       const parsed = await pdf(buffer);
+      const parsedInfo =
+        parsed.info && typeof parsed.info === "object"
+          ? (parsed.info as Record<string, unknown>)
+          : null;
+      const title =
+        typeof parsedInfo?.Title === "string" && parsedInfo.Title.trim()
+          ? parsedInfo.Title.trim()
+          : null;
 
       return {
         url: rawUrl,
         finalUrl,
-        title: parsed.info?.Title || null,
+        title,
         mimeType,
         sourceType: "pdf",
         text: parsed.text?.trim() || "",
