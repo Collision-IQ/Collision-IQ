@@ -4,9 +4,12 @@ import {
   getEstimateComparisonRows,
   getTopEstimateComparisonHighlights,
 } from "@/components/workspace/estimateComparisonPresentation";
+import type { EvidenceLinkModel } from "@/components/chatbot/evidenceLinks";
 
 interface Props {
   workspaceData?: Partial<WorkspaceData> | null;
+  evidenceModel?: EvidenceLinkModel | null;
+  activeEvidenceTargetId?: string | null;
 }
 
 const EMPTY_WORKSPACE_DATA: WorkspaceData = {
@@ -52,7 +55,11 @@ function TopDifferencesSummary({ items }: { items: string[] }) {
 
 /* ---------------- Component ---------------- */
 
-export default function WorkspacePanel({ workspaceData }: Props) {
+export default function WorkspacePanel({
+  workspaceData,
+  evidenceModel: _evidenceModel,
+  activeEvidenceTargetId: _activeEvidenceTargetId,
+}: Props) {
   const data = workspaceData
     ? {
         ...EMPTY_WORKSPACE_DATA,
