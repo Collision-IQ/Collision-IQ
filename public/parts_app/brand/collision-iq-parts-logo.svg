@@ -1,0 +1,19 @@
+<svg width="500" height="120" viewBox="0 0 500 120" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100%" height="100%" fill="#0F0F10"/>
+  
+  <!-- Icon -->
+  <circle cx="60" cy="60" r="40" stroke="#F2F2F2" stroke-width="10" fill="none"/>
+  <line x1="60" y1="30" x2="60" y2="90" stroke="#F2F2F2" stroke-width="8"/>
+  <polygon points="70,70 95,95 80,100 65,75" fill="#E4571C"/>
+  
+  <!-- Text -->
+  <text x="130" y="65" font-family="Arial, sans-serif" font-size="28" fill="#F2F2F2" letter-spacing="2">
+    COLLISION
+  </text>
+  <text x="330" y="65" font-family="Arial, sans-serif" font-size="28" fill="#E4571C">
+    IQ
+  </text>
+  <text x="130" y="95" font-family="Arial, sans-serif" font-size="16" fill="#E4571C" letter-spacing="3">
+    PARTS APP
+  </text>
+</svg>

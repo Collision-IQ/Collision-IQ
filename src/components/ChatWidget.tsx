@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
+import type { ExportModel } from "@/lib/ai/builders/buildExportModel";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import { buildWorkspaceDataFromAnalysisText } from "@/lib/workspaceAdapter";
@@ -84,9 +85,16 @@ interface ChatWidgetProps {
       resetSession: () => void;
     } | null
   ) => void;
+  onCaseIntentChange?: (intent: string) => void;
   viewerAccess?: AccountEntitlements | null;
   suppressedMessageIds?: string[];
   disabled?: boolean;
+  caseChatEnabled?: boolean;
+  caseIntent?: string;
+  transcriptSummary?: string;
+  exportModel?: ExportModel | null;
+  followUpFiles?: Array<{ id?: string; name: string; type?: string; url?: string }>;
+  followUpExports?: Array<{ label: string; type?: string; url?: string }>;
 }
 
 const OPENING_DISCLAIMER =
@@ -127,9 +135,16 @@ export default function ChatWidget({
   onWorkspaceDataChange,
   onSessionReset,
   onSessionControlsReady,
+  onCaseIntentChange,
   viewerAccess,
   suppressedMessageIds = [],
   disabled = false,
+  caseChatEnabled = false,
+  caseIntent,
+  transcriptSummary,
+  exportModel = null,
+  followUpFiles = [],
+  followUpExports = [],
 }: ChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
@@ -800,6 +815,10 @@ export default function ChatWidget({
     const mySession = sessionRef.current;
     const messageToSend = input.trim() || buildAttachmentSummary(attachments);
     const hasAttachmentsInTurn = attachments.length > 0;
+    const shouldUseCaseChat =
+      caseChatEnabled &&
+      !hasAttachmentsInTurn &&
+      Boolean(exportModel);
     const activeAnalysisRunId = hasAttachmentsInTurn ? beginStructuredAnalysisRun() : null;
     const attachmentStats = {
       ...summarizeAttachmentStats(attachments),
@@ -827,6 +846,7 @@ export default function ChatWidget({
           : 0,
       });
       if (hasAttachmentsInTurn) {
+        onCaseIntentChange?.(messageToSend);
         upsertSystemStatusMessage(
           buildAttachmentBatchStatus(
             attachments.map((attachment) => ({ type: attachment.mime })),
@@ -835,20 +855,53 @@ export default function ChatWidget({
         );
       }
 
-      const response = await fetch("/api/chat", {
+      const response = await fetch(shouldUseCaseChat ? "/api/case-chat" : "/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
-          messages: updatedMessages,
-          attachmentIds: attachments.map((attachment) => attachment.attachmentId),
-          attachments: attachments.map((attachment) => ({
-            filename: attachment.filename,
-            type: attachment.mime,
-            text: attachment.text,
-            pageCount: attachment.pageCount,
-            imageDataUrl: attachment.imageDataUrl,
-          })),
+          ...(shouldUseCaseChat
+            ? {
+                caseId: null,
+                message: messageToSend,
+                intent: caseIntent || "Continue with this case",
+                exportModel,
+                transcriptSummary,
+                uploadedFiles:
+                  followUpFiles.length > 0
+                    ? followUpFiles.map((file) => ({
+                        id: file.id,
+                        name: file.name,
+                        type: file.type,
+                        url: file.url,
+                      }))
+                    : attachmentsRef.current.map((attachment) => ({
+                        id: attachment.attachmentId,
+                        name: attachment.filename,
+                        type: attachment.mime,
+                        url: attachment.previewUrl,
+                      })),
+                exports: followUpExports,
+                history: updatedMessages
+                  .filter(
+                    (item) => item.role === "user" || item.role === "assistant"
+                  )
+                  .map((item) => ({
+                    role: item.role,
+                    content: item.content,
+                  })),
+              }
+            : {
+                messages: updatedMessages,
+                attachmentIds: attachments.map((attachment) => attachment.attachmentId),
+                attachments: attachments.map((attachment) => ({
+                  filename: attachment.filename,
+                  type: attachment.mime,
+                  text: attachment.text,
+                  pageCount: attachment.pageCount,
+                  imageDataUrl: attachment.imageDataUrl,
+                })),
+              }),
         }),
       });
 
@@ -1927,7 +1980,9 @@ export default function ChatWidget({
                 disabled={disabled}
                 rows={1}
                 placeholder={
-                  hasAnyAttachment
+                  caseChatEnabled && !hasAnyAttachment
+                    ? "Ask a follow-up about this analysis..."
+                    : hasAnyAttachment
                     ? "Ask about the attachments, or add more context..."
                     : "Ask about a repair, upload files, or take a photo..."
                 }

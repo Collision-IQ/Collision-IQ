@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ChatShell from "@/components/ChatShell";
 import ChatWidget from "@/components/ChatWidget";
+import CaseContextSummary from "@/components/CaseContextSummary";
 import {
   buildEvidenceLinkModel,
   type EvidenceLink,
@@ -141,6 +142,7 @@ export function ChatbotWorkspacePage() {
   const [analysisResult, setAnalysisResult] = useState<RepairIntelligenceReport | null>(null);
   const [analysisPanel, setAnalysisPanel] = useState<DecisionPanel | null>(null);
   const [workspaceData, setWorkspaceData] = useState<WorkspaceData | null>(null);
+  const [caseIntent, setCaseIntent] = useState("");
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState<"idle" | "processing" | "complete" | "error">("idle");
   const [analysisStatusDetail, setAnalysisStatusDetail] = useState<string | null>(null);
@@ -327,6 +329,7 @@ export function ChatbotWorkspacePage() {
     setAnalysisResult(null);
     setAnalysisPanel(null);
     setWorkspaceData(null);
+    setCaseIntent("");
     setAnalysisLoading(false);
     setAnalysisStatus("idle");
     setAnalysisStatusDetail(null);
@@ -374,6 +377,17 @@ export function ChatbotWorkspacePage() {
   const canViewNegotiationDraft = featureFlags?.negotiation_draft ?? false;
   const canUseBasicPdfExport = featureFlags?.basic_pdf_export ?? true;
   const canUseRebuttalEmail = featureFlags?.rebuttal_email ?? false;
+  const followUpExports = [
+    canUseBasicPdfExport
+      ? { label: "Collision Repair Intelligence Report", type: "pdf" }
+      : null,
+    canUseRebuttalEmail
+      ? { label: "Rebuttal Email", type: "pdf" }
+      : null,
+    canUseBasicPdfExport
+      ? { label: "Dispute Intelligence Report", type: "pdf" }
+      : null,
+  ].filter(Boolean) as Array<{ label: string; type?: string; url?: string }>;
 
   return (
     <div className="h-[100svh] overflow-hidden bg-[#050505] text-white">
@@ -428,13 +442,14 @@ export function ChatbotWorkspacePage() {
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 pb-3">
                   <div>
                     <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
-                      Continue Chat
+                      Continue with this case
                     </div>
                     <div className="mt-1 text-[1.02rem] font-semibold tracking-[-0.02em] text-white/88">
-                      Follow-Up Conversation
+                      Continue with this case
                     </div>
                     <div className="mt-1 text-[13px] leading-5 text-white/55">
-                      Ask case-specific follow-ups without losing the uploaded files or current analysis context.
+                      This follow-up keeps the uploaded files, extracted facts, transcript summary,
+                      determination, support gaps, and exports in context.
                     </div>
                   </div>
 
@@ -443,8 +458,17 @@ export function ChatbotWorkspacePage() {
                     onClick={handleContinueReview}
                     className="rounded-xl border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-medium text-white/76 transition hover:bg-white/10 hover:text-white"
                   >
-                    Continue Chat
+                    Continue with this case
                   </button>
+                  </div>
+
+                  <div className="mt-4">
+                    <CaseContextSummary
+                      intent={caseIntent || "Continue with this case"}
+                      vehicleLabel={renderModel.vehicle.label || renderModel.reportFields.vehicleLabel}
+                      fileCount={attachmentsState.length}
+                      determinationAnswer={renderModel.determination?.answer}
+                    />
                   </div>
 
                   <div className="mt-4 h-[min(56svh,680px)] min-h-[360px]">
@@ -502,21 +526,32 @@ export function ChatbotWorkspacePage() {
                     <ChatWidget
                       onAttachmentChange={setAttachment}
                       onAttachmentsChange={setAttachmentsState}
-                    onAnalysisChange={setAnalysisText}
-                    onPrimaryAnalysisChange={setPrimaryAnalysis}
-                    onAnalysisResultChange={handleAnalysisResultChange}
-                    onAnalysisPanelChange={setAnalysisPanel}
-                    onAnalysisLoadingChange={setAnalysisLoading}
-                    onAnalysisStatusChange={(status, detail) => {
-                      setAnalysisStatus(status);
-                      setAnalysisStatusDetail(detail ?? null);
-                    }}
-                    onWorkspaceDataChange={setWorkspaceData}
-                    onSessionReset={handleSessionReset}
+                      onAnalysisChange={setAnalysisText}
+                      onPrimaryAnalysisChange={setPrimaryAnalysis}
+                      onAnalysisResultChange={handleAnalysisResultChange}
+                      onAnalysisPanelChange={setAnalysisPanel}
+                      onAnalysisLoadingChange={setAnalysisLoading}
+                      onAnalysisStatusChange={(status, detail) => {
+                        setAnalysisStatus(status);
+                        setAnalysisStatusDetail(detail ?? null);
+                      }}
+                      onWorkspaceDataChange={setWorkspaceData}
+                      onSessionReset={handleSessionReset}
                       onSessionControlsReady={(controls) => {
                         chatSessionControlsRef.current = controls;
                       }}
+                      onCaseIntentChange={setCaseIntent}
                       viewerAccess={viewerAccess}
+                      caseChatEnabled={hasResolvedAnalysis}
+                      caseIntent={caseIntent || "Continue with this case"}
+                      transcriptSummary={primaryAnalysis?.content ?? analysisText}
+                      exportModel={hasResolvedAnalysis ? renderModel : null}
+                      followUpFiles={attachmentsState.map((file) => ({
+                        id: file.attachmentId,
+                        name: file.filename,
+                        type: file.hasVision ? "image" : undefined,
+                      }))}
+                      followUpExports={followUpExports}
                       suppressedMessageIds={primaryAnalysis ? [primaryAnalysis.messageId] : []}
                       disabled={chatBlocked}
                     />

@@ -11,6 +11,7 @@ import {
 import { formatAssistantMessage } from "@/components/chatWidget/speechUtils";
 import { resolveFinancialView } from "@/components/chatbot/financialView";
 import type { InsightKey } from "@/components/chatbot/insightSync";
+import DeterminationCard from "@/components/DeterminationCard";
 import type { ExportModel } from "@/lib/ai/builders/buildExportModel";
 import type { AnalysisResult, RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 import type { WorkspaceData } from "@/types/workspaceTypes";
@@ -215,6 +216,8 @@ export default function StructuredAnalysisCanvas({
 
   return (
     <div className="mt-3 space-y-3">
+      <DeterminationCard determination={renderModel.determination} />
+
       <section className="rounded-[24px] border border-white/8 bg-gradient-to-br from-[#C65A2A]/10 via-white/[0.035] to-black/25 p-4 shadow-[0_18px_44px_rgba(0,0,0,0.2)]">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -259,7 +262,7 @@ export default function StructuredAnalysisCanvas({
               onClick={onContinueChat}
               className="rounded-xl border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-medium text-white/76 transition hover:bg-white/10 hover:text-white"
             >
-              Continue Review
+              Continue with this case
             </button>
 
             {endAnalysisConfirming ? (

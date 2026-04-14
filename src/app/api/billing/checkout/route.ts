@@ -1,36 +1,72 @@
 import { NextResponse } from "next/server";
 import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import { getOrCreateAppUser } from "@/lib/auth/get-or-create-app-user";
+import { UnauthorizedError } from "@/lib/auth/require-current-user";
+import { BILLING_CATALOG, isBillingPlanKey, type BillingPlanKey } from "@/lib/billing/catalog";
 import {
   getBillingReturnUrl,
-  getProTrialDays,
   getStripe,
-  getStripePriceIds,
 } from "@/lib/billing/stripe";
 import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
-function normalizePlan(value: FormDataEntryValue | null) {
-  if (value === "starter") return "starter";
-  if (value === "team") return "team";
-  return "pro";
-}
+async function resolvePlan(req: Request): Promise<BillingPlanKey | null> {
+  const contentType = req.headers.get("content-type") || "";
 
-export async function POST(req: Request) {
-  const access = await getCurrentEntitlements();
-  const dbUser = await getOrCreateAppUser();
-
-  if (!access.isAuthenticated || !dbUser) {
-    return NextResponse.redirect(new URL("/sign-in", req.url));
+  if (contentType.includes("application/json")) {
+    const body = (await req.json().catch(() => null)) as { plan?: string } | null;
+    const plan = body?.plan?.trim();
+    return plan && isBillingPlanKey(plan) ? plan : null;
   }
 
   const formData = await req.formData();
-  const plan = normalizePlan(formData.get("plan"));
+  const value = formData.get("plan");
+  const plan = typeof value === "string" ? value.trim() : "";
+  return plan && isBillingPlanKey(plan) ? plan : null;
+}
+
+function expectsJson(req: Request) {
+  const contentType = req.headers.get("content-type") || "";
+  return contentType.includes("application/json");
+}
+
+export async function POST(req: Request) {
+  const wantsJson = expectsJson(req);
+  let access;
+  let dbUser;
+
+  try {
+    access = await getCurrentEntitlements();
+    dbUser = await getOrCreateAppUser();
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      const signInUrl = new URL("/sign-in", req.url).toString();
+      if (wantsJson) {
+        return NextResponse.json({ url: signInUrl }, { status: 401 });
+      }
+      return NextResponse.redirect(new URL("/sign-in", req.url));
+    }
+
+    throw error;
+  }
+
+  if (!access.isAuthenticated || !dbUser) {
+    const signInUrl = new URL("/sign-in", req.url).toString();
+    if (wantsJson) {
+      return NextResponse.json({ url: signInUrl }, { status: 401 });
+    }
+    return NextResponse.redirect(new URL("/sign-in", req.url));
+  }
+
+  const plan = await resolvePlan(req);
+  if (!plan) {
+    return NextResponse.json({ error: "Plan not available" }, { status: 400 });
+  }
+
   const stripe = getStripe();
-  const priceIds = getStripePriceIds();
-  const priceId =
-    plan === "starter" ? priceIds.starter : plan === "team" ? priceIds.team : priceIds.pro;
+  const catalogEntry = BILLING_CATALOG[plan];
+  const priceId = catalogEntry.priceId;
 
   if (!priceId) {
     return NextResponse.json({ error: `Missing Stripe price for ${plan}` }, { status: 500 });
@@ -38,14 +74,15 @@ export async function POST(req: Request) {
 
   const customerId = await ensureStripeCustomerId(dbUser.id);
   const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
+    mode: catalogEntry.mode,
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
     allow_promotion_codes: true,
     subscription_data:
-      plan === "pro"
+      catalogEntry.mode === "subscription" && plan === "pro"
         ? {
-            trial_period_days: getProTrialDays(),
+            trial_period_days:
+              "trialDays" in catalogEntry ? catalogEntry.trialDays : undefined,
           }
         : undefined,
     success_url: getBillingReturnUrl("/billing?checkout=success"),
@@ -55,6 +92,10 @@ export async function POST(req: Request) {
       plan,
     },
   });
+
+  if (wantsJson) {
+    return NextResponse.json({ url: session.url });
+  }
 
   return NextResponse.redirect(session.url || getBillingReturnUrl("/billing"), 303);
 }

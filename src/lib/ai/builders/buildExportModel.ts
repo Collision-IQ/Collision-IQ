@@ -1,4 +1,5 @@
 import type { DecisionPanel } from "./buildDecisionPanel";
+import { buildDetermination, type Determination } from "./buildDetermination";
 import { deriveRenderInsightsFromChat, type DerivedValuation } from "./deriveRenderInsightsFromChat";
 import { buildRepairStory } from "./buildRepairStory";
 import {
@@ -72,6 +73,7 @@ export type ExportModel = {
   supplementItems: ExportSupplementItem[];
   request: string;
   valuation: DerivedValuation;
+  determination: Determination;
   disputeIntelligenceReport: DisputeIntelligenceReport;
   negotiationPlaybook: NegotiationPlaybook;
   financialGapBreakdown: FinancialGapBreakdown;
@@ -348,7 +350,7 @@ export function buildExportModel(params: {
     supplementItems: guardedSupplementItems,
   });
 
-  return {
+  const exportModel = {
     vehicle: exportVehicle,
     estimateFacts,
     reportFields,
@@ -396,6 +398,11 @@ export function buildExportModel(params: {
     disputeIntelligenceReport,
     negotiationPlaybook,
     financialGapBreakdown,
+  };
+
+  return {
+    ...exportModel,
+    determination: buildDetermination(exportModel),
   };
 }
 
@@ -1241,6 +1248,13 @@ export function redactExportModelForDownload(exportModel: ExportModel): ExportMo
       evidence: item.evidence ? redactInsurerInText(item.evidence, insurer) : undefined,
       source: item.source ? redactInsurerInText(item.source, insurer) : undefined,
     })),
+    determination: {
+      ...exportModel.determination,
+      answer: redactInsurerInText(exportModel.determination.answer, insurer),
+      missingFactors: exportModel.determination.missingFactors.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+    },
     valuation: {
       ...exportModel.valuation,
       acvReasoning: redactInsurerInText(exportModel.valuation.acvReasoning, insurer),
