@@ -1,7 +1,0 @@
-{
-  "name": "bmw_labeled_vin_recovery",
-  "vin": "WBAAANAA4NCH12345",
-  "expectedDisplay": "2022 BMW X7 xDrive40i",
-  "expectedTrim": "Sports Activity Vehicle",
-  "text": "Vehicle Description: 2022 BMW X7 xDrive40i Sports Activity Vehicle\nVIN\nWBAAANAA4NCH12345\n3/24/2026 5:38:57 PM 300060 Page 1\n"
-}

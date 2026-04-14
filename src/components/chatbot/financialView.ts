@@ -101,17 +101,19 @@ function buildDirectionalFinancialBullets(renderModel: ExportModel) {
 
   if (valuation.acvStatus === "provided" && typeof valuation.acvValue === "number") {
     bullets.push(`ACV preview: $${valuation.acvValue.toLocaleString("en-US")}`);
-  } else if (valuation.acvStatus === "estimated_range" && valuation.acvRange) {
+  } else if (valuation.acvStatus === "estimated_range") {
     bullets.push(
-      `ACV preview band: $${valuation.acvRange.low.toLocaleString("en-US")}-$${valuation.acvRange.high.toLocaleString("en-US")}`
+      formatPreviewBand("ACV preview band", valuation.acvRange) ??
+        "ACV preview band: No valuation range available"
     );
   }
 
   if (valuation.dvStatus === "provided" && typeof valuation.dvValue === "number") {
     bullets.push(`Diminished value preview: $${valuation.dvValue.toLocaleString("en-US")}`);
-  } else if (valuation.dvStatus === "estimated_range" && valuation.dvRange) {
+  } else if (valuation.dvStatus === "estimated_range") {
     bullets.push(
-      `Diminished value preview band: $${valuation.dvRange.low.toLocaleString("en-US")}-$${valuation.dvRange.high.toLocaleString("en-US")}`
+      formatPreviewBand("Diminished value preview band", valuation.dvRange) ??
+        "Diminished value preview band: No valuation range available"
     );
   }
 
@@ -316,6 +318,18 @@ function hasMeaningfulDirectionalNarrative(value: string) {
   if (!value) return false;
 
   return !/(not yet quantified|not supportable|does not yet support|not determinable)/i.test(value);
+}
+
+function formatPreviewBand(
+  label: string,
+  range?: { low?: number; high?: number } | null
+): string | null {
+  const low = range?.low;
+  const high = range?.high;
+
+  return typeof low === "number" && typeof high === "number"
+    ? `${label}: $${low.toLocaleString("en-US")}-$${high.toLocaleString("en-US")}`
+    : null;
 }
 
 function hasSaneRange(

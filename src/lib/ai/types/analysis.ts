@@ -1,6 +1,7 @@
 import type { EvidenceRecord } from "./evidence";
 import type { EstimateOperation } from "../extractors/estimateExtractor";
 import type { WorkspaceEstimateComparisons } from "@/types/workspaceTypes";
+import type { LinkedEvidence } from "@/lib/ingest/fetchLinkedEvidence";
 
 export type FindingStatus = "included" | "missing" | "not_shown";
 export type Severity = "low" | "medium" | "high";
@@ -190,4 +191,9 @@ export type RepairIntelligenceReport = {
   analysis?: AnalysisResult;
   sourceEstimateText?: string;
   estimateFacts?: EstimateFacts;
+  linkedEvidence?: LinkedEvidence[];
+  ingestionMeta?: {
+    linkedEvidenceCount?: number;
+    linkedEvidenceFetchedAt?: string;
+  };
 };

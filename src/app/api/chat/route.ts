@@ -36,6 +36,8 @@ import {
   UnauthorizedError,
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
+import { ADAS_POLICY } from "@/lib/analysis/adasDecision";
+import { EVIDENCE_POLICY } from "@/lib/analysis/buildEvidenceCorpus";
 
 if (!process.env.OPENAI_API_KEY) {
   console.error("Missing OPENAI_API_KEY");
@@ -145,6 +147,10 @@ For ACV or diminished value answers:
 Write in short paragraphs.
 Use bullets only when they genuinely improve comparison, negotiation, or rebuttal clarity.
 Avoid rigid templates.
+
+${ADAS_POLICY}
+
+${EVIDENCE_POLICY}
 `.trim();
 
 const REFINEMENT_INSTRUCTIONS = `

@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { saveAnalysisReport } from "@/lib/analysisReportStore";
 import {
   getUploadedAttachments,
+  type StoredAttachment,
 } from "@/lib/uploadedAttachmentStore";
+import { buildEvidenceCorpus } from "@/lib/analysis/buildEvidenceCorpus";
 import {
   buildDriveRefinementContext,
   detectChatTaskType,
@@ -30,6 +32,7 @@ import type { EvidenceRecord } from "@/lib/ai/types/evidence";
 import { collisionIqModels } from "@/lib/modelConfig";
 import { openai } from "@/lib/openai";
 import { buildWorkspaceDataFromReport } from "@/lib/workspace/buildWorkspaceData";
+import { buildLinkedEvidence, type LinkedEvidence } from "@/lib/ingest/fetchLinkedEvidence";
 import {
   UnauthorizedError,
   requireCurrentUser,
@@ -149,6 +152,20 @@ export async function POST(req: Request) {
       attachments: storedAttachments,
       userIntent: body.userIntent ?? null,
     });
+    const attachmentFilesForLinks = normalizedAttachments.map((attachment) => ({
+      name: attachment.filename,
+      text: attachment.text,
+      summary: null,
+    }));
+    const linkedEvidence = await buildLinkedEvidence({
+      estimateText: normalizedAttachments.map((attachment) => attachment.text).join("\n\n"),
+      files: attachmentFilesForLinks,
+    });
+    const linkedEvidenceAttachments = linkedEvidenceToAttachments(linkedEvidence);
+    const preloadedAttachments = [
+      ...normalizedAttachments,
+      ...linkedEvidenceAttachments,
+    ];
 
     const retrievalAttempted = true;
     let retrievalCompleted = false;
@@ -156,9 +173,14 @@ export async function POST(req: Request) {
     let refinedWithRetrieval = false;
     let report = await runRepairAnalysis({
       artifactIds,
-      preloadedAttachments: normalizedAttachments,
+      preloadedAttachments,
       sessionContext: body.sessionContext ?? null,
       userIntent: body.userIntent ?? null,
+    });
+    report = applyLinkedEvidenceToReport({
+      report,
+      uploadedAttachments: normalizedAttachments,
+      linkedEvidence,
     });
     let analysis = normalizeReportToAnalysisResult(report);
     const retrievalSnapshot = buildAnalysisRetrievalSnapshot({
@@ -246,6 +268,13 @@ export async function POST(req: Request) {
       reportId: stored.id,
       createdAt: stored.createdAt,
       report: stored.report,
+      linkedEvidence: (stored.report.linkedEvidence ?? []).map((doc) => ({
+        title: doc.title,
+        url: doc.url,
+        status: doc.status,
+        sourceType: doc.sourceType,
+        textPreview: (doc.text || "").slice(0, 200),
+      })),
       panel,
       workspaceData,
       retrieval: retrieval ? buildClientSafeRetrievalSummary(retrieval) : null,
@@ -285,6 +314,76 @@ export async function POST(req: Request) {
       { status: 500 }
     );
   }
+}
+
+function linkedEvidenceToAttachments(linkedEvidence: LinkedEvidence[]): StoredAttachment[] {
+  return linkedEvidence
+    .filter((doc) => doc.status === "ok" && Boolean(doc.text.trim()))
+    .map((doc, index) => ({
+      id: `linked-evidence:${index + 1}`,
+      filename: doc.title || doc.finalUrl || doc.url,
+      type: doc.mimeType || "text/plain",
+      text: [
+        `Linked evidence source: ${doc.url}`,
+        `Final URL: ${doc.finalUrl}`,
+        `Source type: ${doc.sourceType}`,
+        doc.text,
+      ].join("\n"),
+      imageDataUrl: undefined,
+      pageCount: undefined,
+    }));
+}
+
+function applyLinkedEvidenceToReport(params: {
+  report: RepairIntelligenceReport;
+  uploadedAttachments: StoredAttachment[];
+  linkedEvidence: LinkedEvidence[];
+}): RepairIntelligenceReport {
+  const evidenceCorpus = buildEvidenceCorpus({
+    estimateText: params.report.sourceEstimateText ?? "",
+    files: params.uploadedAttachments.map((attachment) => ({
+      name: attachment.filename,
+      text: attachment.text,
+      summary: null,
+    })),
+    linkedEvidence: params.linkedEvidence,
+  });
+
+  return {
+    ...params.report,
+    sourceEstimateText: evidenceCorpus || params.report.sourceEstimateText,
+    linkedEvidence: params.linkedEvidence,
+    ingestionMeta: {
+      linkedEvidenceCount: params.linkedEvidence.length,
+      linkedEvidenceFetchedAt: new Date().toISOString(),
+    },
+    evidence: mergeLinkedEvidenceRecords(params.report.evidence, params.linkedEvidence),
+  };
+}
+
+function mergeLinkedEvidenceRecords(
+  existing: RepairIntelligenceReport["evidence"],
+  linkedEvidence: LinkedEvidence[]
+): RepairIntelligenceReport["evidence"] {
+  const linked = linkedEvidence
+    .filter((doc) => doc.status === "ok" && Boolean(doc.text.trim()))
+    .map((doc, index) => ({
+      id: `linked-${index + 1}`,
+      title: doc.title || "Linked document",
+      snippet: doc.text.slice(0, 280),
+      source: doc.url,
+      authority: "oem" as const,
+    }));
+
+  const deduped = new Map<string, RepairIntelligenceReport["evidence"][number]>();
+  for (const item of [...existing, ...linked]) {
+    const key = `${item.title}:${item.source}:${item.snippet}`;
+    if (!deduped.has(key)) {
+      deduped.set(key, item);
+    }
+  }
+
+  return [...deduped.values()].slice(0, 12);
 }
 
 function buildAnalysisRetrievalSnapshot(params: {

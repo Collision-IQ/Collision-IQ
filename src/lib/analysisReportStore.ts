@@ -7,6 +7,8 @@ export type StoredAnalysisReport = {
   artifactIds: string[];
   createdAt: string;
   report: RepairIntelligenceReport;
+  linkedEvidence: RepairIntelligenceReport["linkedEvidence"];
+  ingestionMeta: RepairIntelligenceReport["ingestionMeta"];
 };
 
 type ReportOwnerScope = {
@@ -39,6 +41,10 @@ function toStoredAnalysisReport(record: {
     artifactIds: (record.artifacts ?? []).map((entry) => entry.attachmentId),
     createdAt: record.createdAt.toISOString(),
     report: record.report as unknown as RepairIntelligenceReport,
+    linkedEvidence:
+      (record.report as RepairIntelligenceReport | null | undefined)?.linkedEvidence ?? [],
+    ingestionMeta:
+      (record.report as RepairIntelligenceReport | null | undefined)?.ingestionMeta ?? undefined,
   };
 }
 

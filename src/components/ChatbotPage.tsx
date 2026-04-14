@@ -19,6 +19,7 @@ import StructuredAnalysisCanvas from "@/components/StructuredAnalysisCanvas";
 import WorkspacePanel from "@/components/WorkspacePanel";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
+import { getNormalizedDetermination } from "@/lib/analysis/getNormalizedDetermination";
 import {
   buildExportModel,
   COLLISION_ACADEMY_HANDOFF_URL,
@@ -47,6 +48,14 @@ type AttachmentTrayItem = {
   attachmentId: string;
   filename: string;
   hasVision?: boolean;
+};
+
+type LinkedEvidenceDebugItem = {
+  title?: string | null;
+  url?: string;
+  status?: "ok" | "blocked" | "failed";
+  sourceType?: string;
+  textPreview?: string;
 };
 
 type DisputeDriver = {
@@ -133,6 +142,8 @@ export function ChatbotWorkspacePage() {
   const [attachment, setAttachment] = useState<string | null>(null);
   const [attachmentsState, setAttachmentsState] = useState<AttachmentTrayItem[]>([]);
   const [analysisText, setAnalysisText] = useState("");
+  const [analysisReportId, setAnalysisReportId] = useState<string | null>(null);
+  const [linkedEvidenceDebug, setLinkedEvidenceDebug] = useState<LinkedEvidenceDebugItem[]>([]);
   const [primaryAnalysis, setPrimaryAnalysis] = useState<{
     messageId: string;
     content: string;
@@ -186,6 +197,35 @@ export function ChatbotWorkspacePage() {
       financialView,
     });
   }, [analysisResult, financialView, hasResolvedAnalysis, normalizedResult, renderModel, workspaceData]);
+  const structuredDeterminationView = useMemo(() => {
+    if (!analysisResult) return null;
+
+    return getNormalizedDetermination({
+      vehicle: {
+        year: analysisResult.vehicle?.year ?? null,
+        make: analysisResult.vehicle?.make ?? null,
+        model: analysisResult.vehicle?.model ?? null,
+        trim: analysisResult.vehicle?.trim ?? null,
+        mileage: normalizedResult?.estimateFacts?.mileage ?? null,
+      },
+      estimateText:
+        analysisResult.sourceEstimateText ||
+        analysisResult.analysis?.rawEstimateText ||
+        normalizedResult?.rawEstimateText ||
+        "",
+      files: [],
+      linkedEvidence: analysisResult.linkedEvidence ?? [],
+      extractedFacts: {
+        vehicleLabel: renderModel.vehicle.label || renderModel.reportFields.vehicleLabel || null,
+        vin: renderModel.reportFields.vin || null,
+        mileage: renderModel.reportFields.mileage ?? null,
+        estimateTotal: renderModel.reportFields.estimateTotal ?? null,
+        insurer: renderModel.reportFields.insurer || null,
+        repairPosition: renderModel.repairPosition || null,
+        valuationSourceType: renderModel.valuation.acvSourceType || null,
+      },
+    });
+  }, [analysisResult, normalizedResult, renderModel]);
 
   const panel = hasResolvedAnalysis ? analysisPanel ?? EMPTY_PANEL : EMPTY_PANEL;
   const hasStructuredAnalysis = hasResolvedAnalysis;
@@ -325,6 +365,8 @@ export function ChatbotWorkspacePage() {
     setAttachment(null);
     setAttachmentsState([]);
     setAnalysisText("");
+    setAnalysisReportId(null);
+    setLinkedEvidenceDebug([]);
     setPrimaryAnalysis(null);
     setAnalysisResult(null);
     setAnalysisPanel(null);
@@ -468,8 +510,39 @@ export function ChatbotWorkspacePage() {
                       vehicleLabel={renderModel.vehicle.label || renderModel.reportFields.vehicleLabel}
                       fileCount={attachmentsState.length}
                       determinationAnswer={renderModel.determination?.answer}
+                      determinationPayload={structuredDeterminationView}
+                      supportGaps={renderModel.disputeIntelligenceReport.supportGaps}
                     />
                   </div>
+
+                  {linkedEvidenceDebug.length > 0 && (
+                    <section className="mt-4 rounded-[20px] border border-white/8 bg-black/18 p-4">
+                      <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
+                        Linked Evidence
+                      </div>
+                      <div className="mt-3 space-y-3">
+                        {linkedEvidenceDebug.map((item, index) => (
+                          <div
+                            key={`${item.url || item.title || "linked"}-${index}`}
+                            className="rounded-2xl border border-white/7 bg-white/[0.03] px-3.5 py-3"
+                          >
+                            <div className="text-sm font-semibold text-white/88">
+                              {item.title || "Untitled linked document"}
+                            </div>
+                            <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-white/45">
+                              {item.status || "unknown"} · {item.sourceType || "unknown"}
+                            </div>
+                            <div className="mt-2 break-all text-[12px] leading-5 text-white/45">
+                              {item.url || "No URL"}
+                            </div>
+                            <div className="mt-2 text-[13px] leading-5 text-white/65">
+                              {item.textPreview || "No preview available."}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  )}
 
                   <div className="mt-4 h-[min(56svh,680px)] min-h-[360px]">
                     {trialDaysRemaining !== null && trialDaysRemaining <= 7 && (
@@ -528,7 +601,9 @@ export function ChatbotWorkspacePage() {
                       onAttachmentsChange={setAttachmentsState}
                       onAnalysisChange={setAnalysisText}
                       onPrimaryAnalysisChange={setPrimaryAnalysis}
+                      onAnalysisReportIdChange={setAnalysisReportId}
                       onAnalysisResultChange={handleAnalysisResultChange}
+                      onLinkedEvidenceChange={setLinkedEvidenceDebug}
                       onAnalysisPanelChange={setAnalysisPanel}
                       onAnalysisLoadingChange={setAnalysisLoading}
                       onAnalysisStatusChange={(status, detail) => {
@@ -542,7 +617,7 @@ export function ChatbotWorkspacePage() {
                       }}
                       onCaseIntentChange={setCaseIntent}
                       viewerAccess={viewerAccess}
-                      caseChatEnabled={hasResolvedAnalysis}
+                      caseChatEnabled={hasResolvedAnalysis && Boolean(analysisReportId)}
                       caseIntent={caseIntent || "Continue with this case"}
                       transcriptSummary={primaryAnalysis?.content ?? analysisText}
                       exportModel={hasResolvedAnalysis ? renderModel : null}

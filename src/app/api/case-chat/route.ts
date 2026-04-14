@@ -1,88 +1,226 @@
-import { NextResponse } from "next/server";
-import type { ExportModel } from "@/lib/ai/builders/buildExportModel";
-import { buildCaseAwareSystemPrompt } from "@/lib/ai/builders/buildCaseAwareMessages";
-import type {
-  CaseContextExport,
-  CaseContextFile,
-} from "@/lib/context/buildCaseContext";
-import { buildCaseContext } from "@/lib/context/buildCaseContext";
+import { NextRequest, NextResponse } from "next/server";
+import { buildAdasNarrative } from "@/lib/analysis/adasDecision";
+import { EVIDENCE_POLICY } from "@/lib/analysis/buildEvidenceCorpus";
+import { generateChatCompletion } from "@/lib/ai/generateChatCompletion";
+import {
+  UnauthorizedError,
+  requireCurrentUser,
+} from "@/lib/auth/require-current-user";
+import { getCaseById } from "@/lib/cases/getCaseById";
+import { cleanResponse } from "@/lib/vehicle/oemGuardrails";
 
-async function generateCaseAwareReply(params: {
-  systemPrompt: string;
-  message: string;
-  history?: Array<{ role: "user" | "assistant"; content: string }>;
-}): Promise<string> {
-  const { systemPrompt, message } = params;
-  void params.history;
+export const runtime = "nodejs";
 
-  return [
-    "Using the existing case context:",
-    "",
-    "System context loaded.",
-    "",
-    `Direct answer: ${message}`,
-    "",
-    "The current case remains anchored to the uploaded files, extracted facts, transcript summary, and prior determination.",
-    "",
-    "Next step: wire this function into your existing AI/chat helper so the assistant response is model-generated instead of placeholder text.",
-    "",
-    "---",
-    systemPrompt,
-  ].join("\n");
+function limitText(text: string, max = 12000) {
+  if (!text) return "";
+  return text.length > max ? `${text.slice(0, max)}\n...[truncated]` : text;
 }
 
-type CaseChatRequest = {
-  message?: string;
-  intent?: string | null;
-  exportModel?: ExportModel | null;
-  transcriptSummary?: string | null;
-  uploadedFiles?: CaseContextFile[] | null;
-  exports?: CaseContextExport[] | null;
-  history?: Array<{ role: "user" | "assistant"; content: string }> | null;
-};
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as CaseChatRequest;
+    const { user } = await requireCurrentUser();
+    const body = await req.json();
 
-    if (!body.message?.trim()) {
+    const {
+      caseId,
+      message,
+      history = [],
+    }: {
+      caseId: string;
+      message: string;
+      history?: Array<{ role: "user" | "assistant"; content: string }>;
+    } = body;
+
+    if (!caseId || !message) {
       return NextResponse.json(
-        { error: "Missing follow-up message." },
+        { error: "Missing caseId or message" },
         { status: 400 }
       );
     }
 
-    if (!body.exportModel) {
-      return NextResponse.json(
-        { error: "Missing export model context." },
-        { status: 400 }
-      );
+    const caseData = await getCaseById(caseId, {
+      ownerUserId: user.id,
+    });
+
+    if (!caseData) {
+      return NextResponse.json({ error: "Case not found" }, { status: 404 });
     }
 
-    const caseContext = buildCaseContext({
-      intent: body.intent,
-      exportModel: body.exportModel,
-      transcriptSummary: body.transcriptSummary,
-      uploadedFiles: body.uploadedFiles,
-      exports: body.exports,
+    const {
+      vehicle,
+      estimateText = "",
+      files = [],
+      linkedEvidence = [],
+      transcriptSummary,
+      determination,
+      supportGaps,
+      extractedFacts,
+      determinationPayload,
+    } = caseData;
+
+    const adasNarrative = buildAdasNarrative({
+      vehicle: {
+        year: vehicle?.year ?? undefined,
+        make: vehicle?.make ?? undefined,
+        model: vehicle?.model ?? undefined,
+      },
+      estimateText,
+      extractedFacts,
+      files,
     });
 
-    const systemPrompt = buildCaseAwareSystemPrompt(caseContext);
+    const prioritizedLinkedEvidenceContext = linkedEvidence.length
+      ? linkedEvidence
+          .slice(0, 3)
+          .map(
+            (doc, index) =>
+              [
+                `DOC ${index + 1}: ${doc.title || "Untitled"}`,
+                `STATUS: ${doc.status || "unknown"}`,
+                limitText(doc.text || "", 4000),
+              ].join("\n")
+          )
+          .join("\n\n")
+      : "No linked documents available.";
+    const prioritizedFilesContext = files.length
+      ? files
+          .slice(0, 3)
+          .map(
+            (file, index) =>
+              `FILE ${index + 1}: ${file.name}\n${limitText(
+                file.text || file.summary || "",
+                2500
+              )}`
+          )
+          .join("\n\n")
+      : "No uploaded files.";
+    const structuredDeterminationContext = determinationPayload
+      ? `
+STRUCTURED DETERMINATION
+Headline: ${determinationPayload.headline}
+Confidence: ${determinationPayload.confidence}
 
-    const reply = await generateCaseAwareReply({
-      systemPrompt,
-      message: body.message,
-      history: body.history ?? [],
+SCANS
+${determinationPayload.sections.scans.summary}
+
+ADAS
+${determinationPayload.sections.adas.summary}
+
+STRUCTURAL
+${determinationPayload.sections.structural.summary}
+
+CORROSION
+${determinationPayload.sections.corrosion.summary}
+
+VALUATION
+${determinationPayload.sections.valuation.summary}
+
+LINKED EVIDENCE
+${determinationPayload.sections.linkedEvidence.summary}
+
+SUPPORT GAPS
+${determinationPayload.supportGaps.join("\n") || "None"}
+
+CAUTION FLAGS
+${determinationPayload.cautionFlags.join("\n") || "None"}
+`
+      : "No structured determination payload available.";
+
+    const system = `
+You are Collision IQ, an expert collision analysis assistant.
+
+You are continuing an active case. Use the case evidence below before answering.
+
+====================
+VEHICLE
+====================
+${vehicle?.year || ""} ${vehicle?.make || ""} ${vehicle?.model || ""} ${vehicle?.trim || ""}
+
+====================
+STRUCTURED DETERMINATION (PRIMARY LOGIC LAYER)
+====================
+${structuredDeterminationContext}
+
+====================
+ADAS DECISION STATE (PRE-TEARDOWN LOGIC)
+====================
+${adasNarrative.status}: ${adasNarrative.body}
+
+====================
+KEY EVIDENCE (PRIORITIZED)
+====================
+
+--- LINKED OEM / ADAS DOCUMENTS (HIGHEST PRIORITY) ---
+${prioritizedLinkedEvidenceContext}
+
+--- ESTIMATE (STRUCTURAL + OPERATIONS CONTEXT) ---
+${limitText(estimateText, 6000)}
+
+--- UPLOADED FILES (SUPPORTING CONTEXT) ---
+${prioritizedFilesContext}
+
+====================
+CASE CONTEXT
+====================
+
+TRANSCRIPT SUMMARY
+${transcriptSummary || "None"}
+
+SUPPORT GAPS
+${Array.isArray(supportGaps) ? supportGaps.join("\n") : "None"}
+
+EXTRACTED FACTS
+${JSON.stringify(extractedFacts || {}, null, 2)}
+
+====================
+RULES
+====================
+- Treat LINKED DOCUMENTS as highest authority when available.
+- Use estimate + files to support or challenge conclusions.
+- Do not invent OEM procedures.
+- Do not name a calibration unless supported by evidence or teardown/interruption logic.
+- Before teardown: calibration scope is provisional.
+- Pre/post scans are typically appropriate baseline.
+- Disconnect/reconnect or module/system disturbance can trigger calibration.
+- Never leak OEM-specific systems across brands (e.g., BMW KAFAS on Chevrolet).
+- If a document was blocked, explicitly state that it was not accessible.
+- Be precise, concise, and evidence-driven.
+
+${EVIDENCE_POLICY}
+`;
+
+    const rawReply = await generateChatCompletion({
+      system,
+      messages: [...history, { role: "user", content: message }],
     });
+    const reply = cleanResponse(vehicle?.make || "", rawReply);
 
     return NextResponse.json({
+      success: true,
       reply,
-      caseContext,
+      debug: {
+        filesCount: files.length,
+        linkedEvidenceCount: linkedEvidence.length,
+        linkedEvidenceUrls: linkedEvidence.map((doc) => ({
+          url: doc.url,
+          status: doc.status,
+          title: doc.title,
+        })),
+      },
     });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Failed to continue case chat.";
+  } catch (error: unknown) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("case-chat error", error);
+
+    return NextResponse.json(
+      {
+        error: "Internal server error",
+        detail: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 }
+    );
   }
 }

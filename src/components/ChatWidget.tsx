@@ -1,10 +1,15 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import {
   Paperclip,
   X,
   Camera,
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  RefreshCcw,
   Volume2,
   Square,
   Mic,
@@ -12,7 +17,6 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
-import type { ExportModel } from "@/lib/ai/builders/buildExportModel";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import { buildWorkspaceDataFromAnalysisText } from "@/lib/workspaceAdapter";
@@ -20,14 +24,11 @@ import type { WorkspaceData } from "@/types/workspaceTypes";
 import {
   buildAttachmentBatchStatus,
   buildAttachmentSummary,
-  formatBytes,
+  formatAttachmentKind,
   isLikelyImageFile,
   MAX_UPLOAD_BATCH_FILES,
-  MAX_UPLOAD_FILE_BYTES,
-  MAX_UPLOAD_TOTAL_BYTES,
   summarizeAttachmentStats,
   UPLOAD_CAP_MESSAGE,
-  validateUploadBatch,
 } from "@/components/chatWidget/attachmentUtils";
 import {
   canUseBrowserReadAloud,
@@ -44,12 +45,13 @@ import {
 import {
   createMessage,
   isSystemStatusMessage,
+  type AssistantMessageKind,
   type ChatMessage as Message,
+  type Role,
 } from "@/components/chatWidget/messageUtils";
 import AttachmentPreviewModal, {
   type PreviewAttachment,
 } from "@/components/AttachmentPreviewModal";
-import UpgradeModal from "@/components/UpgradeModal";
 
 interface Attachment {
   attachmentId: string;
@@ -65,36 +67,56 @@ interface Attachment {
   usedInAnalysis?: boolean;
 }
 
+type AttachmentTrayItem = {
+  attachmentId: string;
+  filename: string;
+  hasVision?: boolean;
+};
+
+type PrimaryAnalysis = {
+  messageId: string;
+  content: string;
+};
+
+type AnalysisStatus = "idle" | "processing" | "complete" | "error";
+
+type ChatSessionControls = {
+  focusComposer: () => void;
+  resetSession: () => void;
+};
+
+type LinkedEvidenceDebugItem = {
+  title?: string | null;
+  url?: string;
+  status?: "ok" | "blocked" | "failed";
+  sourceType?: string;
+  textPreview?: string;
+};
+
 interface ChatWidgetProps {
   onAttachmentChange?: (filename: string | null) => void;
-  onAttachmentsChange?: (attachments: Attachment[]) => void;
+  onAttachmentsChange?: Dispatch<SetStateAction<AttachmentTrayItem[]>>;
   onAnalysisChange?: (text: string) => void;
-  onPrimaryAnalysisChange?: (data: { messageId: string; content: string } | null) => void;
+  onPrimaryAnalysisChange?: (analysis: PrimaryAnalysis | null) => void;
+  onAnalysisReportIdChange?: (reportId: string | null) => void;
   onAnalysisResultChange?: (data: RepairIntelligenceReport | null) => void;
+  onLinkedEvidenceChange?: (items: LinkedEvidenceDebugItem[]) => void;
   onAnalysisPanelChange?: (panel: DecisionPanel | null) => void;
   onAnalysisLoadingChange?: (loading: boolean) => void;
-  onAnalysisStatusChange?: (
-    status: "idle" | "processing" | "complete" | "error",
-    detail?: string | null
-  ) => void;
+  onAnalysisStatusChange?: (status: AnalysisStatus, detail?: string | null) => void;
   onWorkspaceDataChange?: (data: WorkspaceData | null) => void;
   onSessionReset?: () => void;
-  onSessionControlsReady?: (
-    controls: {
-      focusComposer: () => void;
-      resetSession: () => void;
-    } | null
-  ) => void;
-  onCaseIntentChange?: (intent: string) => void;
+  onSessionControlsReady?: (controls: ChatSessionControls) => void;
+  onCaseIntentChange?: (value: string) => void;
   viewerAccess?: AccountEntitlements | null;
   suppressedMessageIds?: string[];
-  disabled?: boolean;
   caseChatEnabled?: boolean;
   caseIntent?: string;
-  transcriptSummary?: string;
-  exportModel?: ExportModel | null;
-  followUpFiles?: Array<{ id?: string; name: string; type?: string; url?: string }>;
+  transcriptSummary?: string | null;
+  exportModel?: unknown;
+  followUpFiles?: Array<{ id: string; name: string; type?: string; url?: string }>;
   followUpExports?: Array<{ label: string; type?: string; url?: string }>;
+  disabled?: boolean;
 }
 
 const OPENING_DISCLAIMER =
@@ -113,22 +135,15 @@ const SERVER_TTS_ENABLED =
 const SERVER_TTS_VOICE = process.env.NEXT_PUBLIC_COLLISION_IQ_TTS_VOICE?.trim() || undefined;
 const TTS_STYLE_PROMPT =
   "Female voice. Warm, confident, quick-witted, conversational, and natural. Subtle Northeast energy. Smart, grounded, expressive, and slightly dry in tone. Brisk pacing with clear articulation. Sounds like a sharp, street-smart professional explaining something clearly under pressure. Avoid parody, caricature, or celebrity imitation.";
-const IMAGE_UPLOAD_TARGET_BYTES = 1.25 * 1024 * 1024;
-const IMAGE_UPLOAD_HARD_MAX_BYTES = 1.5 * 1024 * 1024;
-const IMAGE_UPLOAD_MAX_DIMENSION = 1800;
-
-type PreparedUploadFile = {
-  file: File;
-  originalFile: File;
-  wasOptimized: boolean;
-};
 
 export default function ChatWidget({
   onAttachmentChange,
   onAttachmentsChange,
   onAnalysisChange,
   onPrimaryAnalysisChange,
+  onAnalysisReportIdChange,
   onAnalysisResultChange,
+  onLinkedEvidenceChange,
   onAnalysisPanelChange,
   onAnalysisLoadingChange,
   onAnalysisStatusChange,
@@ -136,21 +151,16 @@ export default function ChatWidget({
   onSessionReset,
   onSessionControlsReady,
   onCaseIntentChange,
-  viewerAccess,
-  suppressedMessageIds = [],
-  disabled = false,
   caseChatEnabled = false,
-  caseIntent,
-  transcriptSummary,
-  exportModel = null,
-  followUpFiles = [],
-  followUpExports = [],
+  caseIntent = "Continue with this case",
+  disabled = false,
 }: ChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [isExportingChat, setIsExportingChat] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachmentsOpen, setAttachmentsOpen] = useState(true);
   const [previewAttachmentId, setPreviewAttachmentId] = useState<string | null>(null);
   const [replaceAttachmentId, setReplaceAttachmentId] = useState<string | null>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
@@ -160,7 +170,6 @@ export default function ChatWidget({
   const [recordingError, setRecordingError] = useState<string | null>(null);
   const [showOpeningDisclaimer, setShowOpeningDisclaimer] = useState(true);
   const [openingDisclaimerDismissed, setOpeningDisclaimerDismissed] = useState(false);
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -170,6 +179,7 @@ export default function ChatWidget({
   const abortRef = useRef<AbortController | null>(null);
   const sessionRef = useRef<number>(0);
   const analysisRunRef = useRef<number>(0);
+  const analysisReportIdRef = useRef<string | null>(null);
   const analysisTextRef = useRef("");
   const workspaceDataRef = useRef<WorkspaceData | null>(null);
   const attachmentsRef = useRef<Attachment[]>([]);
@@ -193,6 +203,10 @@ export default function ChatWidget({
       navigator.userAgent
     );
   }, []);
+  const visionAttachmentCount = useMemo(
+    () => attachments.filter((attachment) => attachment.hasVision).length,
+    [attachments]
+  );
   const previewAttachment = useMemo(
     () => attachments.find((attachment) => attachment.attachmentId === previewAttachmentId) ?? null,
     [attachments, previewAttachmentId]
@@ -204,20 +218,22 @@ export default function ChatWidget({
         : -1,
     [attachments, previewAttachmentId]
   );
-  const suppressedMessageIdSet = useMemo(() => new Set(suppressedMessageIds), [suppressedMessageIds]);
-  const visibleMessages = useMemo(
-    () => messages.filter((message) => !suppressedMessageIdSet.has(message.id)),
-    [messages, suppressedMessageIdSet]
-  );
 
   useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
 
   useEffect(() => {
-    onAttachmentsChange?.(attachments);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attachments]);
+    onSessionControlsReady?.({
+      focusComposer: () => textareaRef.current?.focus(),
+      resetSession: handleEndChat,
+    });
+  }, [onSessionControlsReady]);
+
+  useEffect(() => {
+    if (attachments.length >= 3) setAttachmentsOpen(false);
+    if (attachments.length === 0) setAttachmentsOpen(true);
+  }, [attachments.length]);
 
   useEffect(() => {
     return () => {
@@ -297,17 +313,6 @@ export default function ChatWidget({
     textarea.style.height = `${Math.min(textarea.scrollHeight, 112)}px`;
   }, [input]);
 
-  useEffect(() => {
-    onSessionControlsReady?.({
-      focusComposer,
-      resetSession: handleEndChat,
-    });
-
-    return () => {
-      onSessionControlsReady?.(null);
-    };
-  });
-
   function upsertSystemStatusMessage(content: string) {
     setMessages((prev) => {
       const activeMessageId = activeSystemStatusMessageIdRef.current;
@@ -359,12 +364,16 @@ export default function ChatWidget({
   }
 
   function clearStructuredAnalysisState() {
+    analysisReportIdRef.current = null;
     analysisTextRef.current = "";
     workspaceDataRef.current = null;
     onAnalysisChange?.("");
     onPrimaryAnalysisChange?.(null);
+    onAnalysisReportIdChange?.(null);
     onAnalysisResultChange?.(null);
+    onLinkedEvidenceChange?.([]);
     onAnalysisPanelChange?.(null);
+    onAnalysisStatusChange?.("idle", null);
     onWorkspaceDataChange?.(null);
   }
 
@@ -389,11 +398,25 @@ export default function ChatWidget({
     setWorkspaceData(resolveWorkspaceData(text));
   }
 
+  function resolveCaseHistory() {
+    return messages
+      .filter(
+        (entry) =>
+          (entry.role === "user" || entry.role === "assistant") &&
+          !isSystemStatusMessage(entry) &&
+          entry.content.trim().length > 0
+      )
+      .slice(-8)
+      .map((entry) => ({
+        role: entry.role,
+        content: entry.content,
+      }));
+  }
+
   function invalidateStructuredAnalysis() {
     analysisRunRef.current += 1;
     clearStructuredAnalysisState();
     onAnalysisLoadingChange?.(false);
-    onAnalysisStatusChange?.("idle", null);
   }
 
   function beginStructuredAnalysisRun() {
@@ -591,179 +614,9 @@ export default function ChatWidget({
     return true;
   }
 
-  async function loadImageBitmap(file: File) {
-    if (typeof createImageBitmap === "function") {
-      return createImageBitmap(file);
-    }
-
-    const image = await loadImageElement(file);
-    return image;
-  }
-
-  function disposeBitmap(bitmap: ImageBitmap | HTMLImageElement) {
-    if ("close" in bitmap && typeof bitmap.close === "function") {
-      bitmap.close();
-    }
-  }
-
-  async function loadImageElement(file: File): Promise<HTMLImageElement> {
-    const objectUrl = URL.createObjectURL(file);
-
-    try {
-      const image = new Image();
-      image.decoding = "async";
-
-      await new Promise<void>((resolve, reject) => {
-        image.onload = () => resolve();
-        image.onerror = () => reject(new Error(`Unable to decode image: ${file.name}`));
-        image.src = objectUrl;
-      });
-
-      return image;
-    } finally {
-      URL.revokeObjectURL(objectUrl);
-    }
-  }
-
-  function fitWithinBounds(width: number, height: number, maxDimension: number) {
-    if (width <= maxDimension && height <= maxDimension) {
-      return { width, height };
-    }
-
-    const scale = Math.min(maxDimension / width, maxDimension / height);
-    return {
-      width: Math.max(1, Math.round(width * scale)),
-      height: Math.max(1, Math.round(height * scale)),
-    };
-  }
-
-  async function canvasToBlob(
-    canvas: HTMLCanvasElement,
-    mimeType: "image/jpeg" | "image/png",
-    quality?: number
-  ) {
-    const blob = await new Promise<Blob | null>((resolve) => {
-      canvas.toBlob(resolve, mimeType, quality);
-    });
-
-    if (!blob) {
-      throw new Error("Image optimization could not encode the selected file.");
-    }
-
-    return blob;
-  }
-
-  async function buildJpegCandidates(canvas: HTMLCanvasElement) {
-    const qualities = [0.82, 0.72, 0.64, 0.56, 0.48];
-    const blobs: Blob[] = [];
-
-    for (const quality of qualities) {
-      blobs.push(await canvasToBlob(canvas, "image/jpeg", quality));
-      if (blobs[blobs.length - 1].size <= IMAGE_UPLOAD_TARGET_BYTES) {
-        break;
-      }
-    }
-
-    return blobs;
-  }
-
-  async function optimizeImageForUpload(file: File): Promise<PreparedUploadFile> {
-    if (!isLikelyImageFile(file)) {
-      return { file, originalFile: file, wasOptimized: false };
-    }
-
-    const outputType = file.type === "image/png" ? "image/png" : "image/jpeg";
-    const bitmap = await loadImageBitmap(file);
-    const originalWidth = bitmap.width;
-    const originalHeight = bitmap.height;
-    const resized = fitWithinBounds(bitmap.width, bitmap.height, IMAGE_UPLOAD_MAX_DIMENSION);
-    const canvas = document.createElement("canvas");
-    canvas.width = resized.width;
-    canvas.height = resized.height;
-    const context = canvas.getContext("2d");
-
-    if (!context) {
-      throw new Error("Image optimization is unavailable in this browser.");
-    }
-
-    context.drawImage(bitmap, 0, 0, resized.width, resized.height);
-    disposeBitmap(bitmap);
-
-    const candidateBlobs =
-      outputType === "image/png"
-        ? [await canvasToBlob(canvas, outputType)]
-        : await buildJpegCandidates(canvas);
-    const chosenBlob =
-      candidateBlobs.find((blob) => blob.size <= IMAGE_UPLOAD_HARD_MAX_BYTES) ??
-      candidateBlobs[candidateBlobs.length - 1];
-
-    const optimizedFile = new File([chosenBlob], file.name, {
-      type: outputType,
-      lastModified: file.lastModified,
-    });
-
-    const wasOptimized =
-      optimizedFile.size !== file.size ||
-      optimizedFile.type !== file.type ||
-      resized.width !== originalWidth ||
-      resized.height !== originalHeight;
-
-    console.log("[upload] image optimization", {
-      filename: file.name,
-      originalSizeBytes: file.size,
-      originalSizeLabel: formatBytes(file.size),
-      compressedSizeBytes: optimizedFile.size,
-      compressedSizeLabel: formatBytes(optimizedFile.size),
-      originalType: file.type,
-      outputType,
-      originalWidth,
-      originalHeight,
-      outputWidth: resized.width,
-      outputHeight: resized.height,
-      wasOptimized,
-    });
-
-    return {
-      file: optimizedFile,
-      originalFile: file,
-      wasOptimized,
-    };
-  }
-
-  async function prepareFilesForUpload(files: File[]) {
-    const prepared: PreparedUploadFile[] = [];
-
-    for (const file of files) {
-      if (!isLikelyImageFile(file)) {
-        prepared.push({ file, originalFile: file, wasOptimized: false });
-        continue;
-      }
-
-      prepared.push(await optimizeImageForUpload(file));
-    }
-
-    return prepared;
-  }
-
   function dismissOpeningDisclaimer() {
     setShowOpeningDisclaimer(false);
     setOpeningDisclaimerDismissed(true);
-  }
-
-  function focusComposer() {
-    if (disabled) return;
-
-    shouldAutoScrollRef.current = true;
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-
-    requestAnimationFrame(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-
-      textarea.focus({ preventScroll: true });
-      const end = textarea.value.length;
-      textarea.setSelectionRange(end, end);
-    });
   }
 
   function handleEndChat() {
@@ -781,20 +634,20 @@ export default function ChatWidget({
     });
     setMessages([INITIAL_MESSAGE]);
     setAttachments([]);
+    setAttachmentsOpen(true);
     setPreviewAttachmentId(null);
     setReplaceAttachmentId(null);
     firstAttachmentAtRef.current = null;
     activeSystemStatusMessageIdRef.current = null;
     setShowOpeningDisclaimer(true);
     setOpeningDisclaimerDismissed(false);
-    analysisTextRef.current = "";
 
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (cameraInputRef.current) cameraInputRef.current.value = "";
 
     onAttachmentChange?.(null);
+    onAttachmentsChange?.([]);
     invalidateStructuredAnalysis();
-    onAnalysisStatusChange?.("idle", null);
     onSessionReset?.();
 
     shouldAutoScrollRef.current = true;
@@ -815,10 +668,6 @@ export default function ChatWidget({
     const mySession = sessionRef.current;
     const messageToSend = input.trim() || buildAttachmentSummary(attachments);
     const hasAttachmentsInTurn = attachments.length > 0;
-    const shouldUseCaseChat =
-      caseChatEnabled &&
-      !hasAttachmentsInTurn &&
-      Boolean(exportModel);
     const activeAnalysisRunId = hasAttachmentsInTurn ? beginStructuredAnalysisRun() : null;
     const attachmentStats = {
       ...summarizeAttachmentStats(attachments),
@@ -835,8 +684,61 @@ export default function ChatWidget({
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    onCaseIntentChange?.(messageToSend || caseIntent);
 
     try {
+      const shouldUseCaseChat =
+        !hasAttachmentsInTurn && caseChatEnabled && Boolean(analysisReportIdRef.current);
+
+      if (shouldUseCaseChat) {
+        const caseChatResponse = await fetch("/api/case-chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            caseId: analysisReportIdRef.current,
+            message: messageToSend,
+            history: resolveCaseHistory(),
+          }),
+        });
+
+        if (!caseChatResponse.ok) {
+          let errorMessage = `Case chat failed (${caseChatResponse.status})`;
+
+          try {
+            const data = (await caseChatResponse.json()) as { error?: string };
+            if (data?.error) {
+              errorMessage = data.error;
+            }
+          } catch {
+            // Keep fallback message when JSON parsing fails.
+          }
+
+          throw new Error(errorMessage);
+        }
+
+        const data = (await caseChatResponse.json()) as { reply?: string };
+        const reply = data.reply?.trim() || "No response received.";
+
+        if (sessionRef.current === mySession) {
+          stopSpeaking();
+          messageCounterRef.current += 1;
+          const assistantMessage = createMessage(
+            messageCounterRef.current,
+            "assistant",
+            reply
+          );
+          setMessages((prev) => [...prev, assistantMessage]);
+          updateAnalysisText(reply);
+          onPrimaryAnalysisChange?.({
+            messageId: assistantMessage.id,
+            content: reply,
+          });
+        }
+
+        return;
+      }
+
       console.info("[attachments] analysis start", {
         fileCount: attachmentStats.fileCount,
         totalBytes: attachmentStats.totalBytes,
@@ -846,7 +748,6 @@ export default function ChatWidget({
           : 0,
       });
       if (hasAttachmentsInTurn) {
-        onCaseIntentChange?.(messageToSend);
         upsertSystemStatusMessage(
           buildAttachmentBatchStatus(
             attachments.map((attachment) => ({ type: attachment.mime })),
@@ -855,107 +756,46 @@ export default function ChatWidget({
         );
       }
 
-      const response = await fetch(shouldUseCaseChat ? "/api/case-chat" : "/api/chat", {
+      const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
-          ...(shouldUseCaseChat
-            ? {
-                caseId: null,
-                message: messageToSend,
-                intent: caseIntent || "Continue with this case",
-                exportModel,
-                transcriptSummary,
-                uploadedFiles:
-                  followUpFiles.length > 0
-                    ? followUpFiles.map((file) => ({
-                        id: file.id,
-                        name: file.name,
-                        type: file.type,
-                        url: file.url,
-                      }))
-                    : attachmentsRef.current.map((attachment) => ({
-                        id: attachment.attachmentId,
-                        name: attachment.filename,
-                        type: attachment.mime,
-                        url: attachment.previewUrl,
-                      })),
-                exports: followUpExports,
-                history: updatedMessages
-                  .filter(
-                    (item) => item.role === "user" || item.role === "assistant"
-                  )
-                  .map((item) => ({
-                    role: item.role,
-                    content: item.content,
-                  })),
-              }
-            : {
-                messages: updatedMessages,
-                attachmentIds: attachments.map((attachment) => attachment.attachmentId),
-                attachments: attachments.map((attachment) => ({
-                  filename: attachment.filename,
-                  type: attachment.mime,
-                  text: attachment.text,
-                  pageCount: attachment.pageCount,
-                  imageDataUrl: attachment.imageDataUrl,
-                })),
-              }),
+          messages: updatedMessages,
+          attachmentIds: attachments.map((attachment) => attachment.attachmentId),
+          attachments: attachments.map((attachment) => ({
+            filename: attachment.filename,
+            type: attachment.mime,
+            text: attachment.text,
+            pageCount: attachment.pageCount,
+            imageDataUrl: attachment.imageDataUrl,
+          })),
         }),
       });
 
       if (!response.ok) {
         let errorMessage = `Chat API failed (${response.status})`;
 
-        let errorCode: string | null = null;
-
         try {
-          const data = (await response.json()) as { error?: string; code?: string };
-
+          const data = (await response.json()) as { error?: string };
           if (data?.error) {
             errorMessage = data.error;
           }
-
-          if (data?.code) {
-            errorCode = data.code;
-          }
         } catch {
-          // fallback
+          // Ignore JSON parse failures and keep the fallback message.
         }
 
         console.warn("[chat] request failed", {
           status: response.status,
           message: errorMessage,
-          code: errorCode,
         });
 
-          if (sessionRef.current === mySession) {
-            if (
-              errorCode === "usage_limit_reached" ||
-              errorCode === "trial_expired" ||
-              errorCode === "upgrade_required"
-            ) {
-              if (viewerAccess?.plan === "trial") {
-                pushSystemStatusMessage(
-                  "Temporary issue detected. Please retry your analysis."
-                );
-                return;
-              }
-
-              pushSystemStatusMessage(
-                "You've reached your current access limit."
-              );
-
-              setShowUpgradeModal(true);
-            } else {
-              if (hasAttachmentsInTurn) {
-                upsertSystemStatusMessage(errorMessage);
-            } else {
-              pushSystemStatusMessage(errorMessage);
-            }
+        if (sessionRef.current === mySession) {
+          if (hasAttachmentsInTurn) {
+            upsertSystemStatusMessage(errorMessage);
+          } else {
+            pushSystemStatusMessage(errorMessage);
           }
-
           if (
             hasAttachmentsInTurn &&
             analysisRunRef.current === activeAnalysisRunId
@@ -963,7 +803,6 @@ export default function ChatWidget({
             onAnalysisLoadingChange?.(false);
           }
         }
-
         return;
       }
 
@@ -971,7 +810,7 @@ export default function ChatWidget({
       if (hasAttachmentsInTurn) {
         console.info("[attachments] analysis request assembled", {
           attachmentCount: attachments.length,
-          visionAttachmentCount: attachments.filter((attachment) => attachment.hasVision).length,
+          visionAttachmentCount,
           attachments: attachments.map((attachment) => ({
             filename: attachment.filename,
             mimeType: attachment.mime || "unknown",
@@ -991,70 +830,29 @@ export default function ChatWidget({
         })
           .then(async (analysisResponse) => {
             const analysisDurationMs = Date.now() - analysisStartMs;
-
             if (
+              !analysisResponse.ok ||
               sessionRef.current !== mySession ||
               analysisRunRef.current !== activeAnalysisRunId
             ) {
-              return;
-            }
-
-            if (!analysisResponse.ok) {
-              let errorMessage = `Analysis failed (${analysisResponse.status})`;
-              let errorCode: string | null = null;
-
-              try {
-                const data = (await analysisResponse.json()) as {
-                  error?: string;
-                  code?: string;
-                };
-
-                if (data?.error) {
-                  errorMessage = data.error;
-                }
-
-                if (data?.code) {
-                  errorCode = data.code;
-                }
-              } catch {
-                // keep fallback
-              }
-
               console.info("[attachments] analysis failure", {
                 fileCount: attachmentStats.fileCount,
                 totalBytes: attachmentStats.totalBytes,
                 totalPdfPages: attachmentStats.totalPdfPages,
                 analysisDurationMs,
                 status: analysisResponse.status,
-                code: errorCode,
-                message: errorMessage,
               });
-
-              onAnalysisLoadingChange?.(false);
-              onAnalysisStatusChange?.("error", errorMessage);
-
-              if (
-                errorCode === "usage_limit_reached" ||
-                errorCode === "trial_expired" ||
-                errorCode === "upgrade_required"
-              ) {
-                if (viewerAccess?.plan === "trial") {
-                  upsertSystemStatusMessage(
-                    "Trial access is enabled, but the analysis route rejected this request. Please retry."
-                  );
-                } else {
-                  upsertSystemStatusMessage(errorMessage);
-                  setShowUpgradeModal(true);
-                }
-              } else {
-                upsertSystemStatusMessage(errorMessage);
+              if (analysisRunRef.current === activeAnalysisRunId) {
+                onAnalysisStatusChange?.("error", `Analysis failed (${analysisResponse.status})`);
+                onAnalysisLoadingChange?.(false);
               }
-
               return;
             }
 
             const analysisData = (await analysisResponse.json()) as {
+              reportId?: string;
               report?: RepairIntelligenceReport;
+              linkedEvidence?: LinkedEvidenceDebugItem[];
               panel?: DecisionPanel;
               workspaceData?: WorkspaceData;
               retrievalAttempted?: boolean;
@@ -1064,11 +862,14 @@ export default function ChatWidget({
               analysisCompletedAt?: string;
             };
             // Backend workspaceData is the primary source of truth for Workspace rendering.
+            analysisReportIdRef.current = analysisData.reportId ?? null;
             setWorkspaceData(analysisData.workspaceData ?? null);
+            onAnalysisReportIdChange?.(analysisData.reportId ?? null);
             onAnalysisResultChange?.(analysisData.report ?? null);
+            onLinkedEvidenceChange?.(analysisData.linkedEvidence ?? []);
             onAnalysisPanelChange?.(analysisData.panel ?? null);
-            onAnalysisLoadingChange?.(false);
             onAnalysisStatusChange?.("complete", null);
+            onAnalysisLoadingChange?.(false);
             console.info("[attachments] analysis complete", {
               fileCount: attachmentStats.fileCount,
               totalBytes: attachmentStats.totalBytes,
@@ -1100,14 +901,8 @@ export default function ChatWidget({
               sessionRef.current === mySession &&
               analysisRunRef.current === activeAnalysisRunId
             ) {
+              onAnalysisStatusChange?.("error", "Analysis failed");
               onAnalysisLoadingChange?.(false);
-              onAnalysisStatusChange?.(
-                "error",
-                "Analysis service had a temporary issue. Please retry."
-              );
-              upsertSystemStatusMessage(
-                "Analysis service had a temporary issue. Please retry."
-              );
             }
           });
       }
@@ -1151,12 +946,10 @@ export default function ChatWidget({
           (!hasAttachmentsInTurn || analysisRunRef.current === activeAnalysisRunId)
         ) {
           updateAnalysisText(assistantText);
-          if (hasAttachmentsInTurn) {
-            onPrimaryAnalysisChange?.({
-              messageId: streamingAssistantMessage.id,
-              content: assistantText,
-            });
-          }
+          onPrimaryAnalysisChange?.({
+            messageId: streamingAssistantMessage.id,
+            content: assistantText,
+          });
         }
       } else {
         const data = await response.json();
@@ -1165,19 +958,21 @@ export default function ChatWidget({
         if (sessionRef.current === mySession) {
           stopSpeaking();
           messageCounterRef.current += 1;
-          const assistantMessage = createMessage(messageCounterRef.current, "assistant", reply);
+          const assistantMessage = createMessage(
+            messageCounterRef.current,
+            "assistant",
+            reply
+          );
           setMessages((prev) => [
             ...prev,
             assistantMessage,
           ]);
           if (!hasAttachmentsInTurn || analysisRunRef.current === activeAnalysisRunId) {
             updateAnalysisText(reply);
-            if (hasAttachmentsInTurn) {
-              onPrimaryAnalysisChange?.({
-                messageId: assistantMessage.id,
-                content: reply,
-              });
-            }
+            onPrimaryAnalysisChange?.({
+              messageId: assistantMessage.id,
+              content: reply,
+            });
           }
         }
       }
@@ -1211,6 +1006,7 @@ export default function ChatWidget({
           hasAttachmentsInTurn &&
           analysisRunRef.current === activeAnalysisRunId
         ) {
+          onAnalysisStatusChange?.("error", "The analysis service had a temporary issue. Please retry.");
           onAnalysisLoadingChange?.(false);
         }
       }
@@ -1222,46 +1018,16 @@ export default function ChatWidget({
   }
 
   async function uploadSingleFile(
-    preparedFile: PreparedUploadFile,
+    file: File,
     source: "file" | "camera",
     replaceId?: string | null,
     options?: { openPreview?: boolean }
   ): Promise<string> {
     if (disabled) return "";
-    const file = preparedFile.file;
     const formData = new FormData();
     formData.append("file", file);
 
-    console.log("[upload] starting", {
-      filename: file.name,
-      source,
-      sizeBytes: file.size,
-      sizeLabel: formatBytes(file.size),
-      originalSizeBytes: preparedFile.originalFile.size,
-      originalSizeLabel: formatBytes(preparedFile.originalFile.size),
-      wasOptimized: preparedFile.wasOptimized,
-      replaceId: replaceId ?? null,
-    });
-
-    let res: Response;
-
-    try {
-      res = await fetch("/api/upload", { method: "POST", body: formData, credentials: "include" });
-    } catch (error) {
-      console.error("[upload] fetch failed", {
-      filename: file.name,
-      source,
-      sizeBytes: file.size,
-      sizeLabel: formatBytes(file.size),
-      originalSizeBytes: preparedFile.originalFile.size,
-      originalSizeLabel: formatBytes(preparedFile.originalFile.size),
-      wasOptimized: preparedFile.wasOptimized,
-      error,
-      message: error instanceof Error ? error.message : String(error),
-    });
-      throw error;
-    }
-
+    const res = await fetch("/api/upload", { method: "POST", body: formData });
     if (!res.ok) {
       let message = `Upload failed (${res.status})`;
 
@@ -1288,9 +1054,7 @@ export default function ChatWidget({
       typeof data.pageCount === "number" ? data.pageCount : undefined;
     const hasVision: boolean = Boolean(data.hasVision) && isLikelyImageFile(file);
     const previewUrl =
-      mime === "application/pdf" || isLikelyImageFile(preparedFile.originalFile)
-        ? URL.createObjectURL(preparedFile.originalFile)
-        : undefined;
+      mime === "application/pdf" || isLikelyImageFile(file) ? URL.createObjectURL(file) : undefined;
 
     console.info("[attachments] upload complete", {
       filename,
@@ -1308,7 +1072,7 @@ export default function ChatWidget({
         filename,
         mime,
         text,
-        sizeBytes: preparedFile.originalFile.size,
+        sizeBytes: file.size,
         imageDataUrl,
         previewUrl,
         pageCount,
@@ -1335,6 +1099,21 @@ export default function ChatWidget({
     });
 
     onAttachmentChange?.(filename);
+    onAttachmentsChange?.((prev) => {
+      const nextItem = {
+        attachmentId,
+        filename,
+        hasVision,
+      };
+
+      if (!replaceId) {
+        return [...prev, nextItem];
+      }
+
+      return prev.map((attachment) =>
+        attachment.attachmentId === replaceId ? nextItem : attachment
+      );
+    });
     invalidateStructuredAnalysis();
     if (options?.openPreview ?? true) {
       setPreviewAttachmentId(replaceId ?? attachmentId);
@@ -1354,48 +1133,18 @@ export default function ChatWidget({
 
     try {
       const files = Array.from(fileList);
-      upsertSystemStatusMessage("Optimizing large images before upload...");
-      const preparedFiles = await prepareFilesForUpload(files);
-      const uploadFiles = preparedFiles.map((entry) => entry.file);
-      const validation = validateUploadBatch(uploadFiles);
-
-      console.log("[upload] batch selected", {
-        source: "file",
-        fileCount: uploadFiles.length,
-        totalBytes:
-          validation.totalBytes ?? uploadFiles.reduce((sum, file) => sum + file.size, 0),
-        totalLabel: formatBytes(
-          validation.totalBytes ?? uploadFiles.reduce((sum, file) => sum + file.size, 0)
-        ),
-        perFileLimitBytes: MAX_UPLOAD_FILE_BYTES,
-        totalLimitBytes: MAX_UPLOAD_TOTAL_BYTES,
-        optimizedImages: preparedFiles.filter((entry) => entry.wasOptimized).length,
-      });
-
-      if (!validation.valid) {
-        console.warn("[upload] batch blocked by preflight", {
-          source: "file",
-          error: validation.error,
-        });
-        const validationMessage: string = String(
-          validation.error ?? "Selected files could not be uploaded."
-        );
-        upsertSystemStatusMessage(validationMessage);
-        return;
-      }
-
       console.info("[attachments] upload batch selected", {
         source: "file",
         fileCount: fileList.length,
-        totalBytes: validation.totalBytes,
+        totalBytes: files.reduce((sum, file) => sum + file.size, 0),
       });
-      upsertSystemStatusMessage(buildAttachmentBatchStatus(uploadFiles, "uploading"));
+      upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "uploading"));
       const newAttachmentIds: string[] = [];
       const replacementTargetId = replaceAttachmentId;
 
-      for (const [index, preparedFile] of preparedFiles.entries()) {
-        const attachmentId = await uploadSingleFile(preparedFile, "file", replacementTargetId, {
-          openPreview: Boolean(replacementTargetId) || preparedFiles.length === 1,
+      for (const [index, file] of files.entries()) {
+        const attachmentId = await uploadSingleFile(file, "file", replacementTargetId, {
+          openPreview: Boolean(replacementTargetId) || files.length === 1,
         });
         if (!replacementTargetId && index === 0) {
           newAttachmentIds.push(attachmentId);
@@ -1404,12 +1153,9 @@ export default function ChatWidget({
       if (!replacementTargetId && newAttachmentIds[0]) {
         setPreviewAttachmentId(newAttachmentIds[0]);
       }
-      upsertSystemStatusMessage(buildAttachmentBatchStatus(uploadFiles, "analysis_starting"));
+      upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
     } catch (err) {
-      console.error("[upload] file batch failed", {
-        error: err,
-        message: err instanceof Error ? err.message : String(err),
-      });
+      console.error(err);
       upsertSystemStatusMessage("Some files could not be attached.");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -1426,48 +1172,18 @@ export default function ChatWidget({
 
     try {
       const files = Array.from(fileList);
-      upsertSystemStatusMessage("Optimizing large images before upload...");
-      const preparedFiles = await prepareFilesForUpload(files);
-      const uploadFiles = preparedFiles.map((entry) => entry.file);
-      const validation = validateUploadBatch(uploadFiles);
-
-      console.log("[upload] batch selected", {
-        source: "camera",
-        fileCount: uploadFiles.length,
-        totalBytes:
-          validation.totalBytes ?? uploadFiles.reduce((sum, file) => sum + file.size, 0),
-        totalLabel: formatBytes(
-          validation.totalBytes ?? uploadFiles.reduce((sum, file) => sum + file.size, 0)
-        ),
-        perFileLimitBytes: MAX_UPLOAD_FILE_BYTES,
-        totalLimitBytes: MAX_UPLOAD_TOTAL_BYTES,
-        optimizedImages: preparedFiles.filter((entry) => entry.wasOptimized).length,
-      });
-
-      if (!validation.valid) {
-        console.warn("[upload] camera batch blocked by preflight", {
-          source: "camera",
-          error: validation.error,
-        });
-        const validationMessage: string = String(
-          validation.error ?? "Selected files could not be uploaded."
-        );
-        upsertSystemStatusMessage(validationMessage);
-        return;
-      }
-
       console.info("[attachments] upload batch selected", {
         source: "camera",
         fileCount: fileList.length,
-        totalBytes: validation.totalBytes,
+        totalBytes: files.reduce((sum, file) => sum + file.size, 0),
       });
-      upsertSystemStatusMessage(buildAttachmentBatchStatus(uploadFiles, "uploading"));
+      upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "uploading"));
       const newAttachmentIds: string[] = [];
       const replacementTargetId = replaceAttachmentId;
 
-      for (const [index, preparedFile] of preparedFiles.entries()) {
-        const attachmentId = await uploadSingleFile(preparedFile, "camera", replacementTargetId, {
-          openPreview: Boolean(replacementTargetId) || preparedFiles.length === 1,
+      for (const [index, file] of files.entries()) {
+        const attachmentId = await uploadSingleFile(file, "camera", replacementTargetId, {
+          openPreview: Boolean(replacementTargetId) || files.length === 1,
         });
         if (!replacementTargetId && index === 0) {
           newAttachmentIds.push(attachmentId);
@@ -1476,12 +1192,9 @@ export default function ChatWidget({
       if (!replacementTargetId && newAttachmentIds[0]) {
         setPreviewAttachmentId(newAttachmentIds[0]);
       }
-      upsertSystemStatusMessage(buildAttachmentBatchStatus(uploadFiles, "analysis_starting"));
+      upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
     } catch (err) {
-      console.error("[upload] camera batch failed", {
-        error: err,
-        message: err instanceof Error ? err.message : String(err),
-      });
+      console.error(err);
       upsertSystemStatusMessage("Camera upload failed.");
     } finally {
       if (cameraInputRef.current) cameraInputRef.current.value = "";
@@ -1504,6 +1217,29 @@ export default function ChatWidget({
     onAttachmentChange?.(
       remaining.length ? remaining[remaining.length - 1].filename : null
     );
+    onAttachmentsChange?.(
+      remaining.map((attachment) => ({
+        attachmentId: attachment.attachmentId,
+        filename: attachment.filename,
+        hasVision: attachment.hasVision,
+      }))
+    );
+    clearActiveSystemStatusMessage();
+    invalidateStructuredAnalysis();
+  }
+
+  function clearAllAttachments() {
+    if (disabled) return;
+    attachments.forEach((attachment) => {
+      if (attachment.previewUrl) {
+        URL.revokeObjectURL(attachment.previewUrl);
+      }
+    });
+    setAttachments([]);
+    setPreviewAttachmentId(null);
+    setReplaceAttachmentId(null);
+    onAttachmentChange?.(null);
+    onAttachmentsChange?.([]);
     clearActiveSystemStatusMessage();
     invalidateStructuredAnalysis();
   }
@@ -1704,14 +1440,10 @@ export default function ChatWidget({
   const userBubble = "border border-orange-500/24 bg-[#1a120d]/88 text-orange-300 shadow-[0_14px_32px_rgba(0,0,0,0.16)]";
 
   return (
-      <div className={`relative flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/6 bg-white/[0.035] shadow-[0_22px_70px_rgba(0,0,0,0.32)] ${disabled ? "opacity-75" : ""}`}>
-        <UpgradeModal
-          open={showUpgradeModal}
-          onClose={() => setShowUpgradeModal(false)}
-        />
-        <AttachmentPreviewModal
-          attachment={disabled ? null : (previewAttachment as PreviewAttachment | null)}
-          attachments={disabled ? [] : (attachments as PreviewAttachment[])}
+    <div className={`relative flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/6 bg-white/[0.035] shadow-[0_22px_70px_rgba(0,0,0,0.32)] ${disabled ? "opacity-75" : ""}`}>
+      <AttachmentPreviewModal
+        attachment={disabled ? null : (previewAttachment as PreviewAttachment | null)}
+        attachments={disabled ? [] : (attachments as PreviewAttachment[])}
         currentIndex={disabled ? -1 : previewAttachmentIndex}
         onClose={() => setPreviewAttachmentId(null)}
         onNavigate={handlePreviewNavigation}
@@ -1722,7 +1454,7 @@ export default function ChatWidget({
       <div className="absolute inset-0 pointer-events-none bg-[url('/brand/logos/Logo-grey.png')] bg-no-repeat bg-center bg-[length:60%] opacity-[0.06]" />
       <div className="absolute inset-0 bg-[#040404]/74 pointer-events-none" />
 
-      <div className="relative z-10 flex h-full min-h-0 flex-col">
+      <div className="relative z-10 flex flex-col flex-1 min-h-0">
         <div
           ref={scrollRef}
           className="
@@ -1735,7 +1467,7 @@ export default function ChatWidget({
           space-y-4
         "
         >
-          {visibleMessages.length === 1 && visibleMessages[0].role === "assistant" && (
+          {messages.length === 1 && messages[0].role === "assistant" && (
             <div className="flex flex-col items-center justify-center space-y-6 py-20 text-center">
               {showOpeningDisclaimer && !openingDisclaimerDismissed && (
                 <div className="mx-auto max-w-[860px] rounded-[24px] border border-white/7 bg-white/[0.045] px-5 py-4 text-sm text-white/65 shadow-[0_16px_40px_rgba(0,0,0,0.18)]">
@@ -1792,7 +1524,7 @@ export default function ChatWidget({
             </div>
           )}
 
-          {visibleMessages.map((msg) => (
+          {messages.map((msg) => (
             <div
               key={msg.id}
               className={`flex ${
@@ -1893,7 +1625,7 @@ export default function ChatWidget({
           <div ref={bottomRef} />
         </div>
 
-        <div className="sticky inset-x-0 bottom-0 z-20 mt-auto px-4 pb-4 pt-3 sm:px-5">
+        <div className="absolute inset-x-0 bottom-4 z-20 px-4 sm:px-5">
           <div className="mx-auto w-full max-w-[980px] rounded-[24px] border border-white/7 bg-[#090909]/74 shadow-[0_20px_80px_rgba(0,0,0,0.38)] backdrop-blur-2xl">
             <div className="p-3">
               <div className="rounded-[20px] bg-white/[0.035] px-3 py-2">
@@ -1980,9 +1712,7 @@ export default function ChatWidget({
                 disabled={disabled}
                 rows={1}
                 placeholder={
-                  caseChatEnabled && !hasAnyAttachment
-                    ? "Ask a follow-up about this analysis..."
-                    : hasAnyAttachment
+                  hasAnyAttachment
                     ? "Ask about the attachments, or add more context..."
                     : "Ask about a repair, upload files, or take a photo..."
                 }
@@ -2037,11 +1767,95 @@ export default function ChatWidget({
                         : "Recording... click the mic again to stop."}
                   </div>
                 )}
-                <div className="mt-3 px-1 text-[11px] text-white/38">
-                  Large images are automatically optimized before upload.
-                </div>
               </div>
 
+              {attachments.length > 0 && (
+                <div className="mt-3 rounded-[20px] border border-white/7 bg-white/[0.03] p-3">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between rounded-[18px] bg-black/24 px-4 py-2.5 text-sm text-white/65 transition hover:bg-black/34"
+                  onClick={() => setAttachmentsOpen((value) => !value)}
+                  disabled={disabled}
+                  aria-label="Toggle attachments"
+                >
+                  <span>
+                    Attachments ({attachments.length})
+                    <span className="ml-2 text-white/40">
+                      {visionAttachmentCount > 0
+                        ? `- Vision: ${visionAttachmentCount}`
+                        : ""}
+                    </span>
+                  </span>
+                  {attachmentsOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                </button>
+
+                {attachmentsOpen && (
+                  <div className="mt-2 space-y-2">
+                    {attachments.map((attachment) => (
+                      <div
+                        key={attachment.attachmentId}
+                        className="flex items-center justify-between gap-3 rounded-[18px] border border-white/6 bg-black/22 px-4 py-3 text-sm text-white/65"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setPreviewAttachmentId(attachment.attachmentId)}
+                          disabled={disabled}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <div className="truncate pr-3 font-medium text-white">
+                            {attachment.filename}
+                          </div>
+                          <div className="mt-1 text-xs text-white/40">
+                            {formatAttachmentKind(attachment)} · {attachment.source === "camera" ? "Photo" : "File"}
+                            {attachment.hasVision ? " · Vision" : ""}
+                            {attachment.usedInAnalysis ? " · Used in analysis" : ""}
+                          </div>
+                        </button>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewAttachmentId(attachment.attachmentId)}
+                            aria-label="Preview attachment"
+                            disabled={disabled}
+                            className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Eye size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleReplaceAttachment(attachment.attachmentId)}
+                            aria-label="Replace attachment"
+                            disabled={disabled}
+                            className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <RefreshCcw size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeAttachment(attachment.attachmentId)}
+                            aria-label="Remove attachment"
+                            disabled={disabled}
+                            className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+
+                    <button
+                      type="button"
+                      onClick={clearAllAttachments}
+                      disabled={disabled}
+                      className="text-xs text-white/65 transition hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                )}
+                </div>
+              )}
             </div>
           </div>
         </div>

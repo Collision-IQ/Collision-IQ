@@ -30,6 +30,7 @@ import {
   resolveVehicleApplicabilityContext,
   sanitizeVehicleSpecificText,
 } from "../vehicleApplicability";
+import { buildAdasNarrative } from "@/lib/analysis/adasDecision";
 
 export const COLLISION_ACADEMY_HANDOFF_URL = "https://www.collision.academy/";
 export const REDACTED_INSURER_TOKEN = "[REDACTED_INSURER]";
@@ -1810,6 +1811,45 @@ function buildExportSupplementItems(
 ): ExportSupplementItem[] {
   const defaultRationale = "This operation appears supportable but is not yet carried clearly in the current estimate.";
   const sourceText = collectVehicleDocumentText(report, analysis);
+  const resolvedVehicle = {
+    make:
+      estimateFacts?.vehicle?.make ??
+      report?.vehicle?.make ??
+      analysis?.vehicle?.make ??
+      undefined,
+    model:
+      estimateFacts?.vehicle?.model ??
+      report?.vehicle?.model ??
+      analysis?.vehicle?.model ??
+      undefined,
+    year:
+      estimateFacts?.vehicle?.year ??
+      report?.vehicle?.year ??
+      analysis?.vehicle?.year ??
+      undefined,
+  };
+  const hasVehicleIdentity =
+    resolvedVehicle.make || resolvedVehicle.model || resolvedVehicle.year;
+  const adasNarrative = buildAdasNarrative({
+    vehicle: hasVehicleIdentity ? resolvedVehicle : undefined,
+    estimateText: sourceText,
+    extractedFacts: {
+      vin: estimateFacts?.vehicle?.vin ?? report?.vehicle?.vin ?? analysis?.vehicle?.vin ?? null,
+      mileage: estimateFacts.mileage ?? null,
+    },
+    files: [
+      ...(report?.evidence.map((entry) => ({
+        name: entry.title,
+        text: entry.snippet,
+        summary: null,
+      })) ?? []),
+      ...(analysis?.evidence?.map((entry) => ({
+        name: entry.source,
+        text: entry.quote,
+        summary: null,
+      })) ?? []),
+    ],
+  });
   const fromPanel: ExportSupplementItem[] =
     panel?.supplements
       .filter((item) => isSpecificSupplementItem(item.title) || isSpecificSupplementItem(item.mappedLabel))
@@ -1820,7 +1860,8 @@ function buildExportSupplementItems(
       rationale: sanitizeSupplementReason(
         deriveSupplementTitle(item.mappedLabel || item.title),
         item.rationale,
-        defaultRationale
+        defaultRationale,
+        adasNarrative.body
       ),
       evidence: sanitizeSupplementEvidence(
         deriveSupplementTitle(item.mappedLabel || item.title),
@@ -1851,14 +1892,14 @@ function buildExportSupplementItems(
       title: item.title,
       category: inferSupplementCategory(item.title),
       kind: inferSupplementKindFromText(item.raw),
-      rationale: sanitizeSupplementReason(item.title, item.raw, defaultRationale),
+      rationale: sanitizeSupplementReason(item.title, item.raw, defaultRationale, adasNarrative.body),
       source: polishSourceLabel(item.raw) ?? polishSourceLabel("Supplement opportunity"),
       priority: "medium",
     })) ?? [];
 
   const fromIssues: ExportSupplementItem[] =
     report?.issues
-      .map((issue) => buildSupplementItemFromIssue(report, issue))
+      .map((issue) => buildSupplementItemFromIssue(report, issue, adasNarrative.body))
       .filter((item): item is ExportSupplementItem => Boolean(item)) ?? [];
 
   const fromAnalysisFindings: ExportSupplementItem[] =
@@ -1872,7 +1913,7 @@ function buildExportSupplementItems(
         title: item.title,
         category: inferSupplementCategory(item.title),
         kind: inferSupplementKindFromText(item.reason),
-        rationale: sanitizeSupplementReason(item.title, item.reason, defaultRationale),
+        rationale: sanitizeSupplementReason(item.title, item.reason, defaultRationale, adasNarrative.body),
         evidence: sanitizeSupplementEvidence(item.title, item.evidence),
         source: polishSourceLabel(item.source),
         priority: item.priority,
@@ -1885,7 +1926,8 @@ function buildExportSupplementItems(
       rationale: sanitizeSupplementReason(
         deriveSupplementTitle(item.title || item.rationale),
         item.rationale,
-        defaultRationale
+        defaultRationale,
+        adasNarrative.body
       ),
       evidence: sanitizeSupplementEvidence(
         deriveSupplementTitle(item.title || item.rationale),
@@ -2712,7 +2754,8 @@ function inferSupplementCategory(value: string): string {
 
 function buildSupplementItemFromIssue(
   report: RepairIntelligenceReport | null,
-  issue: RepairIntelligenceReport["issues"][number]
+  issue: RepairIntelligenceReport["issues"][number],
+  adasNarrativeBody?: string
 ): ExportSupplementItem | null {
   const title = deriveSupplementTitle(
     issue.missingOperation || issue.title || issue.impact || issue.finding
@@ -2730,7 +2773,8 @@ function buildSupplementItemFromIssue(
     rationale: sanitizeSupplementReason(
       title,
       issue.impact || issue.finding,
-      "This operation appears underwritten or not fully supported in the current estimate."
+      "This operation appears underwritten or not fully supported in the current estimate.",
+      adasNarrativeBody
     ),
     evidence: sanitizeSupplementEvidence(title, buildIssueEvidence(report, issue.evidenceIds, title)),
     source: polishSourceLabel(issue.title),
@@ -3094,7 +3138,8 @@ function cleanFormalExportText(value?: string | null): string {
 function sanitizeSupplementReason(
   title: string,
   value?: string | null,
-  fallback?: string
+  fallback?: string,
+  adasNarrativeBody?: string
 ): string {
   const cleaned = sanitizeReason(value, fallback);
 
@@ -3107,6 +3152,10 @@ function sanitizeSupplementReason(
   }
 
   if (title === "ADAS / Calibration Procedure Support") {
+    if (adasNarrativeBody?.trim()) {
+      return adasNarrativeBody.trim();
+    }
+
     const normalized = normalizeSupplementText(cleaned);
     if (!normalized || looksLikeNoisySupplementText(normalized)) {
       return "The file supports scan, calibration, or related verification steps, but the estimate does not clearly document what was required or how it would be confirmed.";
