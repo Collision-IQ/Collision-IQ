@@ -1,3 +1,20 @@
+function readRequiredEnv(name: "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" | "CLERK_SECRET_KEY") {
+  const value = process.env[name]?.trim();
+
+  if (!value) {
+    throw new Error(`Missing ${name}`);
+  }
+
+  return value;
+}
+
+export function assertClerkConfig() {
+  return {
+    publishableKey: readRequiredEnv("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"),
+    secretKey: readRequiredEnv("CLERK_SECRET_KEY"),
+  };
+}
+
 export function hasClerkConfig() {
   return Boolean(
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim() &&

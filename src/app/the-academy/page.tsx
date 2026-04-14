@@ -53,12 +53,19 @@ export default function TheAcademyPage() {
           claim outcomes.
         </p>
 
-        <div className="mt-8 flex flex-wrap gap-3">
+        <div className="mt-8 flex flex-wrap items-center gap-3">
+          <Link
+            href="/the-academy"
+            className="inline-flex items-center gap-2 rounded-full border border-[#d96b32]/50 bg-[#d96b32]/10 px-4 py-2 text-sm font-medium text-[#d96b32] transition hover:bg-[#d96b32]/20"
+          >
+            Explore Academy →
+          </Link>
+
           <Link
             href="/"
-            className="rounded-2xl bg-[#C65A2A] px-6 py-3 text-sm font-semibold text-black transition hover:opacity-90"
+            className="text-sm text-white/60 transition hover:text-white"
           >
-            Open Collision IQ
+            Back to Chat
           </Link>
 
           <button
@@ -68,19 +75,43 @@ export default function TheAcademyPage() {
           >
             Start Pro Free Trial
           </button>
+        </div>
+      </section>
 
-          <Link
-            href="/collision-academy"
-            className="rounded-2xl border border-white/20 bg-black/25 px-6 py-3 text-sm font-semibold text-white transition hover:bg-black/35"
-          >
-            Back to Collision Academy
-          </Link>
+      <section className="mx-auto max-w-6xl px-6 py-10">
+        <div className="grid gap-5 md:grid-cols-3">
+          <div className="rounded-3xl border border-[#C65A2A]/40 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+            <div className="text-lg font-semibold">Membership Access</div>
+            <p className="mt-2 text-sm text-white/70">
+              Tiered membership unlocks deeper tools, workflows, and system
+              access inside Collision IQ.
+            </p>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+            <div className="text-lg font-semibold">Technical Systems</div>
+            <p className="mt-2 text-sm text-white/70">
+              Frameworks for estimating, documentation, negotiation, and modern
+              repair decision support.
+            </p>
+          </div>
+
+          <div className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+            <div className="text-lg font-semibold">Professional Services</div>
+            <p className="mt-2 text-sm text-white/70">
+              Appraisal, diminished value, dispute support, and expert-led
+              engagement for complex claims and operational needs.
+            </p>
+          </div>
         </div>
       </section>
 
       <section className="mx-auto max-w-6xl px-5 py-12">
         <div className="mb-6">
           <h2 className="text-2xl font-semibold">Membership</h2>
+          <p className="mt-3 mb-4 text-sm text-white/50">
+            Access to systems and services is managed through membership.
+          </p>
           <p className="text-sm text-white/60">
             Access Collision IQ tools, training, and decision systems.
           </p>
@@ -137,63 +168,6 @@ export default function TheAcademyPage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-6 pb-10">
-        <div className="rounded-2xl border border-white/10 bg-gradient-to-r from-black/40 to-black/20 p-5 text-sm text-white/70 backdrop-blur">
-          Built for:
-          <span className="ml-2 text-white/90">
-            collision shop owners, estimators, appraisers, and professionals
-            handling complex claims.
-          </span>
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-6xl px-6 py-10">
-        <div className="grid gap-5 md:grid-cols-3">
-          <div className="rounded-3xl border border-[#C65A2A]/40 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
-            <div className="text-lg font-semibold">Membership Access</div>
-            <p className="mt-2 text-sm text-white/70">
-              Tiered membership unlocks deeper tools, workflows, and system
-              access inside Collision IQ.
-            </p>
-          </div>
-
-          <div className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
-            <div className="text-lg font-semibold">Technical Systems</div>
-            <p className="mt-2 text-sm text-white/70">
-              Frameworks for estimating, documentation, negotiation, and modern
-              repair decision support.
-            </p>
-          </div>
-
-          <div className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
-            <div className="text-lg font-semibold">Professional Growth</div>
-            <p className="mt-2 text-sm text-white/70">
-              Designed for collision professionals who want sharper process,
-              cleaner output, and stronger technical leverage.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-6xl px-6 py-10">
-        <div className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] backdrop-blur-xl md:p-8">
-          <div className="text-xl font-semibold">How access works</div>
-
-          <p className="mt-4 max-w-3xl text-white/70">
-            The Academy is its own destination, with access and membership tiers
-            managed through Collision IQ. Enter the platform to begin using the
-            tools, workflows, and systems immediately.
-          </p>
-
-          <Link
-            href="/"
-            className="mt-6 inline-block rounded-xl bg-[#C65A2A] px-6 py-3 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(198,90,42,0.25)] transition hover:opacity-90"
-          >
-            Enter Collision IQ
-          </Link>
-        </div>
-      </section>
-
       <section className="mx-auto max-w-6xl px-5 pb-12">
         <div className="rounded-3xl border border-[#C65A2A]/30 bg-black/30 p-6 backdrop-blur-xl">
           <div className="text-xl font-semibold">Technical Systems</div>
@@ -220,6 +194,25 @@ export default function TheAcademyPage() {
               Get Access with Pro
             </button>
           </div>
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-6 py-10">
+        <div className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] backdrop-blur-xl md:p-8">
+          <div className="text-xl font-semibold">Professional Services</div>
+
+          <p className="mt-4 max-w-3xl text-white/70">
+            Bring in appraisal, diminished value, dispute support, and expert-led
+            guidance when the claim, customer, or repair path needs more than a
+            software workflow alone.
+          </p>
+
+          <Link
+            href="/services"
+            className="mt-6 inline-block rounded-xl bg-[#C65A2A] px-6 py-3 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(198,90,42,0.25)] transition hover:opacity-90"
+          >
+            Explore Services
+          </Link>
         </div>
       </section>
 

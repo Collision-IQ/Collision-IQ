@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import type { NextRequest } from "next/server";
+import { assertClerkConfig } from "@/lib/auth/config";
+
+const clerkConfig = assertClerkConfig();
 
 const isPublicRoute = createRouteMatcher([
   "/",
@@ -25,10 +28,7 @@ const protectedProxy = clerkMiddleware(async (auth, req) => {
   console.info("[proxy] request", {
     pathname: req.nextUrl.pathname,
     protectedMatch: isProtectedRoute(req),
-    hasClerkConfig: Boolean(
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim() &&
-        process.env.CLERK_SECRET_KEY?.trim()
-    ),
+    hasClerkConfig: Boolean(clerkConfig.publishableKey && clerkConfig.secretKey),
   });
 
   if (isPublicRoute(req)) return;
@@ -39,15 +39,6 @@ const protectedProxy = clerkMiddleware(async (auth, req) => {
 }, { debug: process.env.NODE_ENV === "development" });
 
 export default function proxy(req: NextRequest, event: unknown) {
-  const hasClerkConfig = Boolean(
-    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim() &&
-      process.env.CLERK_SECRET_KEY?.trim()
-  );
-
-  if (!hasClerkConfig) {
-    return NextResponse.next();
-  }
-
   return protectedProxy(req, event as never);
 }
 
