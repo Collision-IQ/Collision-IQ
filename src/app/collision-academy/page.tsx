@@ -1,8 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
 
-const SERVICES_URL = "https://www.collision.academy/s/shop";
-
 export default function CollisionAcademyPage() {
   return (
     <main className="min-h-screen text-white">
@@ -29,12 +27,21 @@ export default function CollisionAcademyPage() {
             </div>
           </div>
 
-          <Link
-            href="/"
-            className="rounded-2xl border border-white/12 bg-white/5 px-4 py-2 text-sm text-white/85 transition hover:bg-white/10"
-          >
-            Open Collision IQ
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/the-academy"
+              className="rounded-2xl border border-[#C65A2A]/50 bg-[#C65A2A]/10 px-4 py-2 text-sm font-semibold text-[#C65A2A] transition hover:bg-[#C65A2A]/20"
+            >
+              The Academy
+            </Link>
+
+            <Link
+              href="/"
+              className="rounded-2xl border border-white/12 bg-white/5 px-4 py-2 text-sm text-white/85 transition hover:bg-white/10"
+            >
+              Collision IQ
+            </Link>
+          </div>
         </div>
       </header>
 
@@ -56,12 +63,14 @@ export default function CollisionAcademyPage() {
 
         <div className="relative z-10 mx-auto w-full max-w-6xl px-6 pb-12">
           <h1 className="text-4xl font-bold leading-tight tracking-tight md:text-6xl">
-            Automotive Appraisal &amp; Collision Intelligence
+            Collision IQ inside the Collision Academy brand
           </h1>
 
           <p className="mt-6 max-w-3xl text-lg leading-relaxed text-white/80 md:text-xl">
-            Court-recognized expertise in vehicle appraisal, diminished value, total loss disputes,
-            and right-to-appraisal.
+            Collision Academy is the umbrella brand for professional services,
+            brand presence, and expert positioning. Collision IQ is the working
+            software surface, and Technical Systems is the tailored product layer
+            for shops.
           </p>
 
           <div className="mt-8 flex flex-wrap gap-3">
@@ -72,14 +81,12 @@ export default function CollisionAcademyPage() {
               Open Collision IQ
             </Link>
 
-            <a
-              href={SERVICES_URL}
-              target="_blank"
-              rel="noopener noreferrer"
+            <Link
+              href="/the-academy"
               className="rounded-2xl border border-white/20 bg-black/25 px-6 py-3 text-sm font-semibold text-white transition hover:bg-black/35"
             >
-              View Services
-            </a>
+              View Professional Services
+            </Link>
           </div>
         </div>
       </section>
@@ -87,7 +94,8 @@ export default function CollisionAcademyPage() {
       <section className="mx-auto max-w-6xl px-5 py-12">
         <h2 className="mb-2 text-2xl font-semibold">How to work with us</h2>
         <p className="mb-6 text-sm text-white/60">
-          Choose how you want to engage — tools, services, or systems.
+          Choose how you want to engage — start with Collision IQ, access
+          systems, or work directly with our team.
         </p>
 
         <div className="grid gap-5 md:grid-cols-3">
@@ -102,28 +110,27 @@ export default function CollisionAcademyPage() {
             <div className="mt-5 text-sm text-[#C65A2A]">Open -&gt;</div>
           </Link>
 
-          <a
-            href={SERVICES_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl transition hover:bg-black/40"
-          >
-            <div className="text-lg font-semibold">Services</div>
-            <p className="mt-2 text-sm text-white/70">
-              Appraisals, diminished value, and dispute support.
-            </p>
-            <div className="mt-5 text-sm text-[#C65A2A]">View -&gt;</div>
-          </a>
-
           <Link
             href="/the-academy"
+            className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl transition hover:bg-black/40"
+          >
+            <div className="text-lg font-semibold">Professional Services</div>
+            <p className="mt-2 text-sm text-white/70">
+              Appraisals, diminished value, ACV support, and dispute help.
+            </p>
+            <div className="mt-5 text-sm text-[#C65A2A]">View -&gt;</div>
+          </Link>
+
+          <Link
+            href="/technical-systems"
             className="rounded-3xl border border-[#C65A2A]/40 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl transition hover:bg-black/40"
           >
-            <div className="text-lg font-semibold">The Academy</div>
+            <div className="text-lg font-semibold">Technical Systems</div>
             <p className="mt-2 text-sm text-white/70">
-              Systems, training, and membership pathways for collision professionals.
+              Custom-built applications for collision repair centers — workflows,
+              automation, onboarding, and operational intelligence.
             </p>
-            <div className="mt-5 text-sm text-[#C65A2A]">Enter -&gt;</div>
+            <div className="mt-5 text-sm text-[#C65A2A]">View Systems -&gt;</div>
           </Link>
         </div>
       </section>
@@ -132,8 +139,8 @@ export default function CollisionAcademyPage() {
         <div className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] backdrop-blur-xl md:p-8">
           <div className="text-xl font-semibold">Collision IQ</div>
           <p className="mt-3 max-w-2xl text-white/70">
-            Upload estimates, detect missed operations, and generate dispute-ready documentation
-            using AI built for collision repair.
+            Upload estimates, detect missed operations, and generate
+            dispute-ready documentation using AI built for collision repair.
           </p>
 
           <Link href="/" className="mt-6 inline-block text-sm font-medium text-[#C65A2A]">
@@ -158,31 +165,27 @@ export default function CollisionAcademyPage() {
               <div className="mt-4 text-sm text-[#C65A2A]">Open -&gt;</div>
             </Link>
 
-            <a
-              href="https://www.instagram.com/collision_academy"
-              target="_blank"
-              rel="noopener noreferrer"
+            <Link
+              href="/the-academy"
               className="group rounded-2xl border border-white/10 bg-black/35 p-5 transition hover:bg-black/45"
             >
-              <div className="text-sm font-semibold">Instagram</div>
+              <div className="text-sm font-semibold">Professional Services</div>
               <div className="mt-2 text-sm text-white/70">
-                Repair insights, claim tips, and real-world examples.
+                Move into appraisal, diminished value, ACV, and dispute support.
               </div>
               <div className="mt-4 text-sm text-[#C65A2A]">View -&gt;</div>
-            </a>
+            </Link>
 
-            <a
-              href="https://www.linkedin.com/in/vinny-menichetti-917097304/"
-              target="_blank"
-              rel="noopener noreferrer"
+            <Link
+              href="/technical-systems"
               className="group rounded-2xl border border-white/10 bg-black/35 p-5 transition hover:bg-black/45"
             >
-              <div className="text-sm font-semibold">LinkedIn</div>
+              <div className="text-sm font-semibold">Technical Systems</div>
               <div className="mt-2 text-sm text-white/70">
-                Industry updates and professional guidance.
+                Review subscriptions, apps, onboarding, and tailored system builds.
               </div>
               <div className="mt-4 text-sm text-[#C65A2A]">View -&gt;</div>
-            </a>
+            </Link>
           </div>
         </div>
       </section>

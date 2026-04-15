@@ -31,6 +31,7 @@ export default function FileUpload({
 
       const res = await fetch("/api/upload", {
         method: "POST",
+        credentials: "include",
         body: formData,
       });
 
