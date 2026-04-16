@@ -2,6 +2,7 @@
 
 import React, { useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
+import { SignedOut, SignInButton } from "@clerk/nextjs";
 import type { UploadedDocument } from "@/lib/sessionStore";
 
 type Props = {
@@ -135,7 +136,24 @@ export default function FileUpload({
         </div>
 
         <div className="text-xs text-white/40">
-          {uploadDisabled ? "Sign in to upload files" : "Drag files here or click to browse"}
+          {uploadDisabled ? (
+            <SignedOut>
+              <SignInButton
+                mode="modal"
+                forceRedirectUrl={typeof window !== "undefined" ? window.location.href : "/"}
+              >
+                <button
+                  type="button"
+                  className="underline text-white/60 hover:text-white/85 transition"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  Sign in to upload files
+                </button>
+              </SignInButton>
+            </SignedOut>
+          ) : (
+            "Drag files here or click to browse"
+          )}
         </div>
       </div>
 

@@ -56,7 +56,10 @@ export default function UploadPage() {
       {!isLoaded ? (
         <button disabled>Upload</button>
       ) : !userId ? (
-        <SignInButton mode="modal">
+        <SignInButton
+          mode="modal"
+          forceRedirectUrl={typeof window !== "undefined" ? window.location.href : "/upload"}
+        >
           <button type="button">Sign in to upload</button>
         </SignInButton>
       ) : (
@@ -67,3 +70,4 @@ export default function UploadPage() {
     </div>
   );
 }
+  

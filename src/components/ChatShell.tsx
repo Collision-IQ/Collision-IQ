@@ -4,6 +4,30 @@ import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
+
+function HeaderAuth() {
+  return (
+    <div className="flex items-center gap-2">
+      <SignedIn>
+        <UserButton afterSignOutUrl="/" />
+      </SignedIn>
+      <SignedOut>
+        <SignInButton
+          mode="modal"
+          forceRedirectUrl={typeof window !== "undefined" ? window.location.href : "/"}
+        >
+          <button
+            type="button"
+            className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-medium text-white/85 transition hover:bg-white/10"
+          >
+            Sign in
+          </button>
+        </SignInButton>
+      </SignedOut>
+    </div>
+  );
+}
 
 type Props = {
   title?: string;
@@ -141,6 +165,8 @@ export default function ChatShell({
             >
               Professional Services
             </Link>
+
+            <HeaderAuth />
 
             {hasLeft && (
               <button
