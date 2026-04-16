@@ -16,6 +16,9 @@ export class UnauthorizedError extends Error {
   }
 }
 
+const isDevelopment =
+  process.env.NODE_ENV !== "production" || process.env.VERCEL_ENV !== "production";
+
 async function upsertAppUser(params: {
   clerkUserId: string;
   email: string | null;
@@ -81,6 +84,10 @@ async function upsertAppUser(params: {
 
 export async function requireCurrentUser() {
   if (!hasClerkConfig()) {
+    if (!isDevelopment) {
+      throw new UnauthorizedError("Authentication is not configured on the server.");
+    }
+
     const fallbackEmail =
       normalizeEmail(getDefaultPlatformAdminEmail()) || "local-dev@collision.academy";
     const isPlatformAdmin = isPlatformAdminEmail(fallbackEmail);

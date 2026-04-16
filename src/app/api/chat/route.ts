@@ -1,47 +1,13 @@
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import {
-  getUploadedAttachments,
-  saveUploadedAttachment,
-} from "@/lib/uploadedAttachmentStore";
-import {
-  buildDriveRefinementContext,
-  detectChatTaskType,
-  retrieveDriveSupport,
-} from "@/lib/ai/driveRetrievalService";
 import type { ChatAnalysisOutput } from "@/lib/ai/contracts/chatAnalysisSchema";
-import {
-  inferDriveRetrievalTopics,
-  type DriveRetrievalResponse,
-  inferDriveVehicleContext,
-} from "@/lib/ai/contracts/driveRetrievalContract";
-import { cleanDisplayText } from "@/lib/ai/displayText";
-import {
-  assessRetrievedDocumentApplicability,
-  isVehicleContentApplicable,
-  resolveVehicleApplicabilityContext,
-} from "@/lib/ai/vehicleApplicability";
-import {
-  extractEstimateLinksFromDocuments,
-  isFetchableEstimateLink,
-} from "@/lib/ai/estimateLinkExtractor";
-import {
-  buildLinkedProcedureRefinementContext,
-  retrieveEstimateLinkedProcedureDocs,
-} from "@/lib/ai/linkedProcedureRetriever";
-import { collisionIqModels } from "@/lib/modelConfig";
-import { openai } from "@/lib/openai";
+import type { DriveRetrievalResponse } from "@/lib/ai/contracts/driveRetrievalContract";
 import {
   UnauthorizedError,
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
-import { ADAS_POLICY } from "@/lib/analysis/adasDecision";
-import { EVIDENCE_POLICY } from "@/lib/analysis/buildEvidenceCorpus";
-
-if (!process.env.OPENAI_API_KEY) {
-  console.error("Missing OPENAI_API_KEY");
-}
 
 const MAX_UPLOAD_BATCH_FILES = 6;
 const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at once for now.";
@@ -104,7 +70,91 @@ class AttachmentAccessError extends Error {
   }
 }
 
-const SYSTEM_INSTRUCTIONS = `
+type ChatRouteDeps = {
+  getUploadedAttachments: typeof import("@/lib/uploadedAttachmentStore").getUploadedAttachments;
+  saveUploadedAttachment: typeof import("@/lib/uploadedAttachmentStore").saveUploadedAttachment;
+  buildDriveRefinementContext: typeof import("@/lib/ai/driveRetrievalService").buildDriveRefinementContext;
+  detectChatTaskType: typeof import("@/lib/ai/driveRetrievalService").detectChatTaskType;
+  retrieveDriveSupport: typeof import("@/lib/ai/driveRetrievalService").retrieveDriveSupport;
+  inferDriveRetrievalTopics: typeof import("@/lib/ai/contracts/driveRetrievalContract").inferDriveRetrievalTopics;
+  inferDriveVehicleContext: typeof import("@/lib/ai/contracts/driveRetrievalContract").inferDriveVehicleContext;
+  cleanDisplayText: typeof import("@/lib/ai/displayText").cleanDisplayText;
+  assessRetrievedDocumentApplicability: typeof import("@/lib/ai/vehicleApplicability").assessRetrievedDocumentApplicability;
+  isVehicleContentApplicable: typeof import("@/lib/ai/vehicleApplicability").isVehicleContentApplicable;
+  resolveVehicleApplicabilityContext: typeof import("@/lib/ai/vehicleApplicability").resolveVehicleApplicabilityContext;
+  extractEstimateLinksFromDocuments: typeof import("@/lib/ai/estimateLinkExtractor").extractEstimateLinksFromDocuments;
+  isFetchableEstimateLink: typeof import("@/lib/ai/estimateLinkExtractor").isFetchableEstimateLink;
+  buildLinkedProcedureRefinementContext: typeof import("@/lib/ai/linkedProcedureRetriever").buildLinkedProcedureRefinementContext;
+  retrieveEstimateLinkedProcedureDocs: typeof import("@/lib/ai/linkedProcedureRetriever").retrieveEstimateLinkedProcedureDocs;
+  collisionIqModels: typeof import("@/lib/modelConfig").collisionIqModels;
+  openai: typeof import("@/lib/openai").openai;
+  ADAS_POLICY: typeof import("@/lib/analysis/adasDecision").ADAS_POLICY;
+  EVIDENCE_POLICY: typeof import("@/lib/analysis/buildEvidenceCorpus").EVIDENCE_POLICY;
+};
+
+let chatRouteDepsPromise: Promise<ChatRouteDeps> | null = null;
+
+function loadChatRouteDeps(): Promise<ChatRouteDeps> {
+  if (!chatRouteDepsPromise) {
+    chatRouteDepsPromise = Promise.all([
+      import("@/lib/uploadedAttachmentStore"),
+      import("@/lib/ai/driveRetrievalService"),
+      import("@/lib/ai/contracts/driveRetrievalContract"),
+      import("@/lib/ai/displayText"),
+      import("@/lib/ai/vehicleApplicability"),
+      import("@/lib/ai/estimateLinkExtractor"),
+      import("@/lib/ai/linkedProcedureRetriever"),
+      import("@/lib/modelConfig"),
+      import("@/lib/openai"),
+      import("@/lib/analysis/adasDecision"),
+      import("@/lib/analysis/buildEvidenceCorpus"),
+    ]).then(
+      ([
+        uploadedAttachmentStore,
+        driveRetrievalService,
+        driveRetrievalContract,
+        displayText,
+        vehicleApplicability,
+        estimateLinkExtractor,
+        linkedProcedureRetriever,
+        modelConfig,
+        openaiModule,
+        adasDecision,
+        evidenceCorpus,
+      ]) => ({
+        getUploadedAttachments: uploadedAttachmentStore.getUploadedAttachments,
+        saveUploadedAttachment: uploadedAttachmentStore.saveUploadedAttachment,
+        buildDriveRefinementContext: driveRetrievalService.buildDriveRefinementContext,
+        detectChatTaskType: driveRetrievalService.detectChatTaskType,
+        retrieveDriveSupport: driveRetrievalService.retrieveDriveSupport,
+        inferDriveRetrievalTopics: driveRetrievalContract.inferDriveRetrievalTopics,
+        inferDriveVehicleContext: driveRetrievalContract.inferDriveVehicleContext,
+        cleanDisplayText: displayText.cleanDisplayText,
+        assessRetrievedDocumentApplicability:
+          vehicleApplicability.assessRetrievedDocumentApplicability,
+        isVehicleContentApplicable: vehicleApplicability.isVehicleContentApplicable,
+        resolveVehicleApplicabilityContext:
+          vehicleApplicability.resolveVehicleApplicabilityContext,
+        extractEstimateLinksFromDocuments:
+          estimateLinkExtractor.extractEstimateLinksFromDocuments,
+        isFetchableEstimateLink: estimateLinkExtractor.isFetchableEstimateLink,
+        buildLinkedProcedureRefinementContext:
+          linkedProcedureRetriever.buildLinkedProcedureRefinementContext,
+        retrieveEstimateLinkedProcedureDocs:
+          linkedProcedureRetriever.retrieveEstimateLinkedProcedureDocs,
+        collisionIqModels: modelConfig.collisionIqModels,
+        openai: openaiModule.openai,
+        ADAS_POLICY: adasDecision.ADAS_POLICY,
+        EVIDENCE_POLICY: evidenceCorpus.EVIDENCE_POLICY,
+      })
+    );
+  }
+
+  return chatRouteDepsPromise;
+}
+
+function buildSystemInstructions(adasPolicy: string, evidencePolicy: string) {
+  return `
 You are Collision-IQ, a senior collision estimator and repair strategist.
 
 Think like a real estimator, not a narrator.
@@ -148,10 +198,11 @@ Write in short paragraphs.
 Use bullets only when they genuinely improve comparison, negotiation, or rebuttal clarity.
 Avoid rigid templates.
 
-${ADAS_POLICY}
+${adasPolicy}
 
-${EVIDENCE_POLICY}
+${evidencePolicy}
 `.trim();
+}
 
 const REFINEMENT_INSTRUCTIONS = `
 You are refining an existing collision-repair answer after targeted Google Drive retrieval.
@@ -237,12 +288,13 @@ async function extractDocuments(params: {
   body: ChatRequestBody;
   ownerUserId: string;
   shopId?: string | null;
+  deps: Pick<ChatRouteDeps, "getUploadedAttachments" | "saveUploadedAttachment">;
 }): Promise<UploadedDocument[]> {
   const attachmentIds = params.body.attachmentIds ?? [];
   const incomingAttachments = params.body.attachments ?? [];
 
   if (attachmentIds.length > 0) {
-    const uploadedAttachments = await getUploadedAttachments(attachmentIds, {
+    const uploadedAttachments = await params.deps.getUploadedAttachments(attachmentIds, {
       ownerUserId: params.ownerUserId,
       shopId: params.shopId,
     });
@@ -264,7 +316,7 @@ async function extractDocuments(params: {
   if (incomingAttachments.length > 0) {
     const persisted = await Promise.all(
       incomingAttachments.map((attachment) =>
-        saveUploadedAttachment({
+        params.deps.saveUploadedAttachment({
           ownerUserId: params.ownerUserId,
           shopId: params.shopId,
           filename: attachment.filename,
@@ -442,11 +494,12 @@ async function delay(ms: number) {
 }
 
 async function createOpenAIResponseWithRetry(
+  deps: Pick<ChatRouteDeps, "openai">,
   phase: "first-pass" | "second-pass",
-  input: Parameters<typeof openai.responses.create>[0]
+  input: Parameters<ChatRouteDeps["openai"]["responses"]["create"]>[0]
 ) {
   try {
-    return await openai.responses.create(input);
+    return await deps.openai.responses.create(input);
   } catch (error) {
     logOpenAIPhaseFailure(phase, 1, error);
     if (!isTransientOpenAIError(error)) {
@@ -457,7 +510,7 @@ async function createOpenAIResponseWithRetry(
   await delay(OPENAI_RETRY_DELAY_MS);
 
   try {
-    return await openai.responses.create(input);
+    return await deps.openai.responses.create(input);
   } catch (error) {
     logOpenAIPhaseFailure(phase, 2, error);
     throw error;
@@ -475,6 +528,29 @@ function getOpenAIOutputText(response: unknown): string | undefined {
 
 export async function POST(req: Request) {
   try {
+    if (!process.env.OPENAI_API_KEY?.trim()) {
+      return NextResponse.json(
+        { error: "Chat service is not configured." },
+        { status: 503 }
+      );
+    }
+
+    const deps = await loadChatRouteDeps();
+    const systemInstructions = buildSystemInstructions(
+      deps.ADAS_POLICY,
+      deps.EVIDENCE_POLICY
+    );
+    const {
+      buildDriveRefinementContext,
+      detectChatTaskType,
+      retrieveDriveSupport,
+      inferDriveVehicleContext,
+      extractEstimateLinksFromDocuments,
+      isFetchableEstimateLink,
+      buildLinkedProcedureRefinementContext,
+      retrieveEstimateLinkedProcedureDocs,
+      cleanDisplayText,
+    } = deps;
     const { user, isPlatformAdmin } = await requireCurrentUser();
     const requestStartedAt = Date.now();
     const body = (await req.json()) as ChatRequestBody;
@@ -496,6 +572,7 @@ export async function POST(req: Request) {
     const documents = await extractDocuments({
       body,
       ownerUserId: user.id,
+      deps,
     });
 
     console.info("[chat-attachments] accepted batch", {
@@ -581,9 +658,9 @@ export async function POST(req: Request) {
       })),
     });
 
-    const firstPass = await createOpenAIResponseWithRetry("first-pass", {
-      model: collisionIqModels.primary,
-      instructions: SYSTEM_INSTRUCTIONS,
+    const firstPass = await createOpenAIResponseWithRetry(deps, "first-pass", {
+      model: deps.collisionIqModels.primary,
+      instructions: systemInstructions,
       temperature: 0.7,
       input,
     });
@@ -591,11 +668,11 @@ export async function POST(req: Request) {
     const firstPassOutputText = getOpenAIOutputText(firstPass);
     const firstPassText =
       typeof firstPassOutputText === "string" && firstPassOutputText.trim()
-        ? firstPassOutputText.trim()
+      ? firstPassOutputText.trim()
         : "I reviewed the material, but I couldn't generate a usable response.";
     const linkedProcedureDocs = await retrieveEstimateLinkedProcedureDocs({
       links: fetchableEstimateLinks,
-      vehicle: resolveVehicleApplicabilityContext(resolvedVehicle),
+      vehicle: deps.resolveVehicleApplicabilityContext(resolvedVehicle),
       maxLinks: 4,
       timeoutMs: 5000,
     });
@@ -612,6 +689,7 @@ export async function POST(req: Request) {
     });
 
     const retrievalAnalysis = buildRetrievalAnalysisSnapshot({
+      deps,
       taskType: detectChatTaskType({
         userQuery: userMessage,
         hasDocuments: documents.length > 0,
@@ -636,7 +714,7 @@ export async function POST(req: Request) {
     });
 
     const applicableRetrieval = retrieval
-      ? filterDriveRetrievalByVehicleApplicability(retrieval)
+      ? filterDriveRetrievalByVehicleApplicability(deps, retrieval)
       : null;
     const linkedProcedureContext =
       linkedProcedureDocs.keptDocs.length > 0
@@ -662,6 +740,8 @@ export async function POST(req: Request) {
 
     const outputText = linkedProcedureContext || retrievalContext
       ? await refineAnswerWithDriveSupport({
+          deps,
+          systemInstructions,
           userMessage,
           conversationContext,
           firstPassAnswer: firstPassText,
@@ -717,6 +797,7 @@ export async function POST(req: Request) {
 }
 
 function buildRetrievalAnalysisSnapshot(params: {
+  deps: Pick<ChatRouteDeps, "inferDriveRetrievalTopics" | "inferDriveVehicleContext">;
   taskType: ChatAnalysisOutput["taskType"];
   userMessage: string;
   estimateText: string;
@@ -725,11 +806,11 @@ function buildRetrievalAnalysisSnapshot(params: {
   ChatAnalysisOutput,
   "taskType" | "summary" | "repairStrategy" | "keyDrivers" | "missingOperations" | "vehicleIdentification"
 > {
-  const vehicle = inferDriveVehicleContext({
+  const vehicle = params.deps.inferDriveVehicleContext({
     estimateText: params.estimateText,
     userQuery: params.userMessage,
   });
-  const inferredTopics = inferDriveRetrievalTopics({
+  const inferredTopics = params.deps.inferDriveRetrievalTopics({
     estimateText: params.estimateText,
     userQuery: params.userMessage,
     analysis: {
@@ -789,6 +870,8 @@ function buildRetrievalAnalysisSnapshot(params: {
 }
 
 async function refineAnswerWithDriveSupport(params: {
+  deps: Pick<ChatRouteDeps, "collisionIqModels" | "openai">;
+  systemInstructions: string;
   userMessage: string;
   conversationContext: string;
   firstPassAnswer: string;
@@ -807,9 +890,9 @@ async function refineAnswerWithDriveSupport(params: {
     .filter(Boolean)
     .join("\n\n");
 
-  const refined = await createOpenAIResponseWithRetry("second-pass", {
-    model: collisionIqModels.primary,
-    instructions: `${SYSTEM_INSTRUCTIONS}\n\n${REFINEMENT_INSTRUCTIONS}`,
+  const refined = await createOpenAIResponseWithRetry(params.deps, "second-pass", {
+    model: params.deps.collisionIqModels.primary,
+    instructions: `${params.systemInstructions}\n\n${REFINEMENT_INSTRUCTIONS}`,
     temperature: 0.7,
     input: refinementInput,
   });
@@ -821,11 +904,17 @@ async function refineAnswerWithDriveSupport(params: {
 }
 
 function filterDriveRetrievalByVehicleApplicability(
+  deps: Pick<
+    ChatRouteDeps,
+    | "resolveVehicleApplicabilityContext"
+    | "assessRetrievedDocumentApplicability"
+    | "isVehicleContentApplicable"
+  >,
   response: DriveRetrievalResponse
 ): DriveRetrievalResponse {
-  const vehicleApplicability = resolveVehicleApplicabilityContext(response.request.vehicle);
+  const vehicleApplicability = deps.resolveVehicleApplicabilityContext(response.request.vehicle);
   const filteredResults = response.results.filter((result) => {
-    const applicability = assessRetrievedDocumentApplicability({
+    const applicability = deps.assessRetrievedDocumentApplicability({
       title: result.filename,
       excerpt: result.excerpt.excerpt,
       source: result.metadata.source,
@@ -849,7 +938,7 @@ function filterDriveRetrievalByVehicleApplicability(
       return false;
     }
 
-    return isVehicleContentApplicable(
+    return deps.isVehicleContentApplicable(
       [
         result.filename,
         result.matchReason,
