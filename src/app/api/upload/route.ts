@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
 import {
   extractPreviewDataFromFile,
@@ -25,12 +26,17 @@ function getUploadFiles(formData: FormData): File[] {
 
 export async function POST(req: Request) {
   try {
-    console.info("[upload] env check", {
-      cwd: process.cwd(),
-      hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
-      pid: process.pid,
-      nodeEnv: process.env.NODE_ENV,
-    });
+    const clerkState = await auth();
+
+    if (!clerkState.userId) {
+      return NextResponse.json(
+        {
+          error: "Please sign in on this site before uploading.",
+          code: "AUTH_REQUIRED",
+        },
+        { status: 401 }
+      );
+    }
 
     const { user } = await requireCurrentUser();
     const formData = await req.formData();
@@ -109,10 +115,19 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json(
+        {
+          error: error.message,
+          code: "AUTH_REQUIRED",
+        },
+        { status: error.status }
+      );
     }
 
     console.error("UPLOAD ERROR:", error);
-    return NextResponse.json({ error: "Upload failed" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Upload failed", code: "UPLOAD_FAILED" },
+      { status: 500 }
+    );
   }
 }

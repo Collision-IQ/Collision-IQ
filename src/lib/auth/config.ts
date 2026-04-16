@@ -30,6 +30,29 @@ export function hasClerkConfig() {
   return hasClerkServerConfig();
 }
 
+export function getClerkKeyDiagnostics() {
+  const pk = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim() || "";
+  const sk = process.env.CLERK_SECRET_KEY?.trim() || "";
+
+  return {
+    hasPublishableKey: Boolean(pk),
+    hasSecretKey: Boolean(sk),
+    publishableKeyType: pk.startsWith("pk_live_")
+      ? "live"
+      : pk.startsWith("pk_test_")
+        ? "test"
+        : "unknown",
+    secretKeyType: sk.startsWith("sk_live_")
+      ? "live"
+      : sk.startsWith("sk_test_")
+        ? "test"
+        : "unknown",
+    keysLookMatched:
+      (pk.startsWith("pk_live_") && sk.startsWith("sk_live_")) ||
+      (pk.startsWith("pk_test_") && sk.startsWith("sk_test_")),
+  };
+}
+
 export function hasStripeConfig() {
   return Boolean(
     process.env.STRIPE_SECRET_KEY?.trim() &&

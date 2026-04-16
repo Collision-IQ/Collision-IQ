@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { useUser } from "@clerk/nextjs";
 import {
   Paperclip,
   X,
@@ -155,6 +156,7 @@ export default function ChatWidget({
   caseIntent = "Continue with this case",
   disabled = false,
 }: ChatWidgetProps) {
+  const { isLoaded: isUserLoaded, isSignedIn } = useUser();
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1024,14 +1026,21 @@ export default function ChatWidget({
     options?: { openPreview?: boolean }
   ): Promise<string> {
     if (disabled) return "";
+    if (!isUserLoaded || !isSignedIn) {
+      throw new Error("Please sign in before uploading.");
+    }
+
     const formData = new FormData();
     formData.append("file", file);
 
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      credentials: "include",
+      body: formData,
+    });
+    if (res.status === 401) {
+      throw new Error("Please sign in before uploading.");
+    }
     if (!res.ok) {
       let message = `Upload failed (${res.status})`;
 

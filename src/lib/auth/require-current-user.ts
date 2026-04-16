@@ -114,8 +114,18 @@ export async function requireCurrentUser() {
   }
 
   const state = await auth();
+  console.info("[auth] clerk session check", {
+    hasUserId: Boolean(state.userId),
+    hasOrgId: Boolean(state.orgId),
+    publishableKeyPrefix:
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.slice(0, 8) ?? null,
+    secretKeyPrefix: process.env.CLERK_SECRET_KEY?.slice(0, 8) ?? null,
+    vercelEnv: process.env.VERCEL_ENV ?? null,
+    nodeEnv: process.env.NODE_ENV ?? null,
+  });
+
   if (!state.userId) {
-    throw new UnauthorizedError();
+    throw new UnauthorizedError("No authenticated Clerk session was found for this request.");
   }
 
   const clerkUser = await currentUser();
