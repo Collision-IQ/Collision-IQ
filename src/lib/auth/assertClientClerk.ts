@@ -1,5 +1,7 @@
 "use client";
 
-import { assertClerkConfig } from "@/lib/auth/config";
+import { hasClerkPublishableKey } from "@/lib/auth/config";
 
-assertClerkConfig();
+if (!hasClerkPublishableKey()) {
+  throw new Error("Missing NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY");
+}

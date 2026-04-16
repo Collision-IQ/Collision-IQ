@@ -15,11 +15,19 @@ export function assertClerkConfig() {
   };
 }
 
-export function hasClerkConfig() {
+export function hasClerkPublishableKey() {
+  return Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim());
+}
+
+export function hasClerkServerConfig() {
   return Boolean(
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim() &&
       process.env.CLERK_SECRET_KEY?.trim()
   );
+}
+
+export function hasClerkConfig() {
+  return hasClerkServerConfig();
 }
 
 export function hasStripeConfig() {

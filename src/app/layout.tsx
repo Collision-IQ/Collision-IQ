@@ -1,7 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
-import { hasClerkConfig } from "@/lib/auth/config";
+import { hasClerkPublishableKey } from "@/lib/auth/config";
 
 function getSiteUrl() {
   const rawUrl =
@@ -116,7 +116,7 @@ export default function RootLayout({
           root-layout-body
         "
       >
-        {hasClerkConfig() ? <ClerkProvider>{content}</ClerkProvider> : content}
+        {hasClerkPublishableKey() ? <ClerkProvider>{content}</ClerkProvider> : content}
       </body>
     </html>
   );
