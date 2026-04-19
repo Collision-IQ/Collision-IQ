@@ -97,7 +97,8 @@ export function normalizeReportToAnalysisResult(
       bucket: "supplement" as const,
       category: "missing_procedure",
       title: procedure,
-      detail: "This function is not clearly represented in the current estimate.",
+      detail:
+        "This function is not clearly represented in the current file and remains open to further documentation.",
       severity: "medium" as const,
       status: "not_detected" as const,
       evidence: [],

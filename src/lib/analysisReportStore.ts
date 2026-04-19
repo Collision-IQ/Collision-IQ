@@ -84,6 +84,96 @@ export async function saveAnalysisReport(params: {
   return toStoredAnalysisReport(created);
 }
 
+export async function updateAnalysisReport(params: {
+  id: string;
+  ownerUserId: string;
+  shopId?: string | null;
+  artifactIds: string[];
+  report: RepairIntelligenceReport;
+}): Promise<StoredAnalysisReport | null> {
+  const owner = resolveOwner({
+    ownerUserId: params.ownerUserId,
+    shopId: params.shopId,
+  });
+
+  const existing = await prisma.analysisReport.findFirst({
+    where: {
+      id: params.id,
+      ownerType: owner.ownerType,
+      ownerId: owner.ownerId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!existing) {
+    return null;
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.analysisReportArtifact.deleteMany({
+      where: {
+        reportId: params.id,
+      },
+    });
+
+    return tx.analysisReport.update({
+      where: {
+        id: params.id,
+      },
+      data: {
+        report: params.report as unknown as Prisma.InputJsonValue,
+        artifacts: params.artifactIds.length
+          ? {
+              create: [...new Set(params.artifactIds)].map((attachmentId) => ({
+                attachmentId,
+              })),
+            }
+          : undefined,
+      },
+      include: {
+        artifacts: {
+          select: {
+            attachmentId: true,
+          },
+        },
+      },
+    });
+  });
+
+  return toStoredAnalysisReport(updated);
+}
+
+export async function closeAnalysisReport(params: {
+  id: string;
+  ownerUserId: string;
+  shopId?: string | null;
+}): Promise<StoredAnalysisReport | null> {
+  const existing = await getAnalysisReport(params.id, params);
+  if (!existing) {
+    return null;
+  }
+
+  const closedReport: RepairIntelligenceReport = {
+    ...existing.report,
+    ingestionMeta: {
+      ...existing.report.ingestionMeta,
+      activeCaseId: existing.id,
+      active: false,
+      closedAt: new Date().toISOString(),
+    },
+  };
+
+  return updateAnalysisReport({
+    id: params.id,
+    ownerUserId: params.ownerUserId,
+    shopId: params.shopId,
+    artifactIds: existing.artifactIds,
+    report: closedReport,
+  });
+}
+
 export async function getAnalysisReport(
   id: string,
   scope: ReportOwnerScope

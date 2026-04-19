@@ -65,11 +65,11 @@ function buildComparisonNarrative(params: {
     params.shopStory.structural &&
     !params.insurerStory.structural
   ) {
-    narrative += "The key difference is structural depth: the shop estimate signals structural complexity, while the carrier estimate does not reflect that same level of repair structure. ";
+    narrative += "The key difference is structural depth: one estimate signals structural complexity, while the other does not show the same structural framing. ";
   }
 
   if (params.shopOperations.length > params.insurerOperations.length) {
-    narrative += "The bigger issue is not one missing line at a time - it is that the carrier version appears compressed compared with how the shop estimate structures the repair. ";
+    narrative += "The documents carry different operation depth; whether that difference is material depends on documented damage, repair procedures, and verification needs. ";
   } else {
     narrative += "The broad scope is closer than the line-item debate suggests, but the structure and support still matter more than isolated wording differences. ";
   }
@@ -92,9 +92,9 @@ function buildStructuralFindings(params: {
       id: "story-scope-compression",
       bucket: "compliance",
       category: "story_difference",
-      title: "Carrier estimate appears compressed in repair structure",
+      title: "Documents show different repair-operation depth",
       detail:
-        "The shop estimate carries more visible repair operations, which suggests the carrier estimate may be reduced in structural depth rather than just word choice.",
+        "One estimate carries more visible repair operations than the other. The significance is not established by item count alone and requires comparison against documented damage, repair procedures, and verification needs.",
       severity: "high",
       status: "not_detected",
       evidence: [],
@@ -106,9 +106,9 @@ function buildStructuralFindings(params: {
       id: "story-structural-depth",
       bucket: "critical",
       category: "story_difference",
-      title: "Structural complexity appears underrepresented in carrier estimate",
+      title: "Documents describe structural complexity differently",
       detail:
-        "The shop estimate signals structural involvement, while the carrier estimate does not appear to carry the same structural framing.",
+        "One estimate signals structural involvement, while the other does not appear to carry the same structural framing. Final significance depends on measurements, repair procedures, and fit or dimensional verification.",
       severity: "high",
       status: "not_detected",
       evidence: [],

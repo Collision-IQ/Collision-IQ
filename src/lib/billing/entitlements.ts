@@ -4,6 +4,7 @@ import {
   hasFeature,
   type ViewerAccess,
 } from "@/lib/entitlements";
+import { getUsageCount as getMeteredUsageCount } from "@/lib/usage";
 
 export type AccountEntitlements = Omit<ViewerAccess, "plan"> & {
   plan: "admin" | BillingPlan;
@@ -16,7 +17,14 @@ export type AccountEntitlements = Omit<ViewerAccess, "plan"> & {
   billingPlan: BillingPlan;
   analysisCap: number;
   analysisCount: number;
+  canUpload: boolean;
+  uploadCap: number | null;
+  uploadCount: number;
+  canExport: boolean;
+  exportCap: number | null;
+  exportCount: number;
   canUseBasicExports: boolean;
+  canUseCustomerReport: boolean;
   canUseRedactedChatExport: boolean;
   canUseSupplementLines: boolean;
   canUseNegotiationDraft: boolean;
@@ -26,7 +34,22 @@ export type AccountEntitlements = Omit<ViewerAccess, "plan"> & {
 
 export async function getCurrentEntitlements(): Promise<AccountEntitlements> {
   const access = await getCurrentViewerAccess();
-  return toAccountEntitlements(access);
+  const entitlements = toAccountEntitlements(access);
+
+  if (entitlements.isPlatformAdmin || !entitlements.dbUserId) {
+    return entitlements;
+  }
+
+  const [uploadCount, exportCount] = await Promise.all([
+    getMeteredUsageCount(entitlements.dbUserId, "FILE_UPLOAD"),
+    getMeteredUsageCount(entitlements.dbUserId, "REPORT_EXPORT"),
+  ]);
+
+  return {
+    ...entitlements,
+    uploadCount,
+    exportCount,
+  };
 }
 
 export function canRunAnalysis(entitlements: AccountEntitlements) {
@@ -35,6 +58,10 @@ export function canRunAnalysis(entitlements: AccountEntitlements) {
 
 export function canUseBasicExports(entitlements: AccountEntitlements) {
   return entitlements.canUseBasicExports;
+}
+
+export function canUseCustomerReport(entitlements: AccountEntitlements) {
+  return entitlements.canUseCustomerReport;
 }
 
 export function canUseSupplementLines(entitlements: AccountEntitlements) {
@@ -63,7 +90,14 @@ export function toAccountEntitlements(access: ViewerAccess): AccountEntitlements
       billingPlan: "team",
       analysisCap: Number.MAX_SAFE_INTEGER,
       analysisCount: 0,
+      canUpload: true,
+      uploadCap: null,
+      uploadCount: 0,
+      canExport: true,
+      exportCap: null,
+      exportCount: 0,
       canUseBasicExports: true,
+      canUseCustomerReport: true,
       canUseRedactedChatExport: true,
       canUseSupplementLines: true,
       canUseNegotiationDraft: true,
@@ -80,6 +114,8 @@ export function toAccountEntitlements(access: ViewerAccess): AccountEntitlements
 
   const usageStatus = !access.isAuthenticated
     ? "upgrade_required"
+    : billingPlan === "none"
+      ? "upgrade_required"
     : !access.canRunAnalysis && billingPlan === "trial"
       ? "trial_expired"
       : !access.canRunAnalysis
@@ -103,7 +139,14 @@ export function toAccountEntitlements(access: ViewerAccess): AccountEntitlements
     billingPlan,
     analysisCap,
     analysisCount,
+    canUpload: hasFeature(access, "uploads"),
+    uploadCap: getPlanUploadCap(billingPlan),
+    uploadCount: 0,
+    canExport: hasFeature(access, "basic_pdf_export"),
+    exportCap: getPlanExportCap(billingPlan),
+    exportCount: 0,
     canUseBasicExports: hasFeature(access, "basic_pdf_export"),
+    canUseCustomerReport: hasFeature(access, "customer_report"),
     canUseRedactedChatExport: hasFeature(access, "redacted_chat_export"),
     canUseSupplementLines: hasFeature(access, "supplement_lines"),
     canUseNegotiationDraft: hasFeature(access, "negotiation_draft"),
@@ -114,7 +157,7 @@ export function toAccountEntitlements(access: ViewerAccess): AccountEntitlements
 
 function resolveBillingPlan(access: ViewerAccess): BillingPlan {
   if (!access.isAuthenticated) {
-    return "starter";
+    return "none";
   }
 
   if (access.plan === "team") {
@@ -129,5 +172,37 @@ function resolveBillingPlan(access: ViewerAccess): BillingPlan {
     return "pro";
   }
 
-  return "starter";
+  if (access.activeSubscriptionId) {
+    return "starter";
+  }
+
+  return "none";
+}
+
+export function getPlanUploadCap(plan: BillingPlan): number | null {
+  switch (plan) {
+    case "starter":
+      return 1;
+    case "trial":
+    case "pro":
+    case "team":
+      return null;
+    case "none":
+    default:
+      return 0;
+  }
+}
+
+export function getPlanExportCap(plan: BillingPlan): number | null {
+  switch (plan) {
+    case "starter":
+      return 1;
+    case "trial":
+    case "pro":
+    case "team":
+      return null;
+    case "none":
+    default:
+      return 0;
+  }
 }

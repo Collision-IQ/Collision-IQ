@@ -4,15 +4,16 @@ import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
+import { Show, SignInButton, UserButton } from "@clerk/nextjs";
 
 function HeaderAuth() {
   return (
     <div className="flex items-center gap-2">
-      <SignedIn>
-        <UserButton afterSignOutUrl="/" />
-      </SignedIn>
-      <SignedOut>
+      <Show when="signed-in">
+        <UserButton />
+      </Show>
+
+      <Show when="signed-out">
         <SignInButton
           mode="modal"
           forceRedirectUrl={typeof window !== "undefined" ? window.location.href : "/"}
@@ -24,7 +25,7 @@ function HeaderAuth() {
             Sign in
           </button>
         </SignInButton>
-      </SignedOut>
+      </Show>
     </div>
   );
 }

@@ -17,8 +17,9 @@ LINKED EVIDENCE POLICY
 - URLs found in estimate text or uploaded files should be treated as potential evidence sources.
 - Retrieve accessible linked documents server-side and preserve their extracted text in the case.
 - Use linked OEM procedures and linked ADAS reports as substantive evidence when successfully retrieved.
-- If a link is blocked or private, do not pretend it was reviewed.
-- When linked evidence conflicts with generic assumptions, the linked case-specific evidence wins.
+- If a link is blocked, private, or fails retrieval, do not pretend it was reviewed and do not assume the underlying record does not exist.
+- Treat blocked or failed linked documents as referenced but not yet produced, or open to further documentation.
+- When successfully retrieved linked evidence conflicts with generic assumptions, the linked case-specific evidence wins.
 - Do not assume the model can browse arbitrary URLs at answer time. Only retrieved case evidence should be treated as reviewed.
 `.trim();
 
@@ -44,7 +45,18 @@ export function buildEvidenceCorpus({
   }
 
   for (const doc of linkedEvidence || []) {
-    if (doc.status !== "ok") continue;
+    if (doc.status !== "ok") {
+      parts.push(
+        [
+          `LINKED DOCUMENT REFERENCED BUT NOT PRODUCED: ${doc.title || "Untitled"}`,
+          `URL: ${doc.url || "Unknown"}`,
+          `TYPE: ${doc.sourceType || "unknown"}`,
+          `STATUS: ${doc.status || "unknown"}`,
+          "The link was detected as candidate evidence but the underlying content was not reviewed.",
+        ].join("\n")
+      );
+      continue;
+    }
 
     parts.push(
       [

@@ -60,7 +60,7 @@ export async function buildLinkedEvidence(
   const settled = await Promise.all(urls.map((url) => readRemoteDocument(url)));
 
   return settled
-    .filter((doc) => doc.status === "ok" || doc.status === "blocked")
+    .filter((doc) => doc.status === "ok" || doc.status === "blocked" || doc.status === "failed")
     .sort((a, b) => scoreLinkedDoc(b) - scoreLinkedDoc(a))
     .map((doc) => ({
       url: doc.url,

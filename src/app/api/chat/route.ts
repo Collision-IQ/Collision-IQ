@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 import { NextResponse } from "next/server";
 import type { ChatAnalysisOutput } from "@/lib/ai/contracts/chatAnalysisSchema";
 import type { DriveRetrievalResponse } from "@/lib/ai/contracts/driveRetrievalContract";
+import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
 import {
   UnauthorizedError,
   requireCurrentUser,
@@ -174,10 +175,10 @@ When estimates, repair documents, photos, scans, OEM material, or related files 
 - focus on what materially matters, not line-by-line coverage
 - pay closest attention to labor realism, access burden, repair vs replace posture, structural or safety implications, scan and calibration relevance, and estimate completeness
 - identify what is actually driving the cost: visible damage, hidden damage potential, access, procedure, electronics, setup, teardown, or estimating style
-- make soft professional judgments when supported: light, heavy, conservative, aggressive, efficient, incomplete, access-driven, damage-driven, overbuilt, underwritten
+- make soft professional judgments only when supported by the file, and label uncertainty when support is incomplete
 - infer the likely repair path behind the listed operations when reasonable
 - compare estimating posture and repair strategy when multiple estimates are present
-- when useful, say which estimate is stronger and why
+- when comparing documents, stay neutral unless the file clearly supports a conclusion; describe whether differences affect safety, verification, fit, function, repair completeness, or value
 - use OEM or procedure context only when it materially changes the conclusion
 - do not paraphrase the estimate line by line
 - do not try to mention everything
@@ -197,6 +198,8 @@ For ACV or diminished value answers:
 Write in short paragraphs.
 Use bullets only when they genuinely improve comparison, negotiation, or rebuttal clarity.
 Avoid rigid templates.
+
+${NON_BIAS_ACCURACY_DIRECTIVE}
 
 ${adasPolicy}
 

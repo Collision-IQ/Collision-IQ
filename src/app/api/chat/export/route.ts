@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
-import { UnauthorizedError } from "@/lib/auth/require-current-user";
+import {
+  UnauthorizedError,
+  requireCurrentUser,
+} from "@/lib/auth/require-current-user";
 import { getCurrentEntitlements } from "@/lib/billing/entitlements";
+import { UsageAccessError, recordUsage } from "@/lib/billing/usage";
+import { getUsageCount, incrementUsage } from "@/lib/usage";
 import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
 import { jsPDF } from "jspdf";
 
@@ -19,48 +24,29 @@ type ChatExportRequestBody = {
   messages?: unknown;
 };
 
-function canAccessRedactedChatExport(entitlements: Awaited<ReturnType<typeof getCurrentEntitlements>>) {
-  if (entitlements.isPlatformAdmin) {
-    return true;
-  }
-
-  if (!entitlements.featureFlags.redacted_chat_export) {
-    return false;
-  }
-
-  return (
-    entitlements.activeSubscriptionStatus === "TRIALING" ||
-    entitlements.activeSubscriptionStatus === "ACTIVE"
-  );
-}
-
-async function handleExportAccess() {
-  const entitlements = await getCurrentEntitlements();
-
-  if (!canAccessRedactedChatExport(entitlements)) {
-    return NextResponse.json(
-      { error: "Redacted chat export is not available for this account." },
-      { status: 403 }
-    );
-  }
-
-  return NextResponse.json(
-    { error: "Redacted chat export is not implemented yet." },
-    { status: 501 }
-  );
-}
-
 async function requireExportAccess() {
+  const { user, isPlatformAdmin } = await requireCurrentUser();
   const entitlements = await getCurrentEntitlements();
 
-  if (!canAccessRedactedChatExport(entitlements)) {
+  if (!isPlatformAdmin && !entitlements.canExport) {
     return NextResponse.json(
-      { error: "Redacted chat export is not available for this account." },
+      { error: "EXPORT_NOT_INCLUDED_IN_PLAN" },
       { status: 403 }
     );
   }
 
-  return null;
+  if (!isPlatformAdmin && entitlements.exportCap !== null) {
+    const exportsUsed = await getUsageCount(user.id, "REPORT_EXPORT");
+
+    if (exportsUsed >= entitlements.exportCap) {
+      return NextResponse.json(
+        { error: "EXPORT_LIMIT_REACHED" },
+        { status: 403 }
+      );
+    }
+  }
+
+  return { userId: user.id, isPlatformAdmin };
 }
 
 function extractMessageText(content: unknown): string {
@@ -266,25 +252,19 @@ function buildChatExportPdf(text: string): ArrayBuffer {
 }
 
 export async function GET() {
-  try {
-    return await handleExportAccess();
-  } catch (error) {
-    if (error instanceof UnauthorizedError) {
-      return NextResponse.json(
-        { error: "Authentication is required." },
-        { status: 401 }
-      );
-    }
-
-    throw error;
+  const access = await requireExportAccess();
+  if (access instanceof NextResponse) {
+    return access;
   }
+
+  return NextResponse.json({ ok: true });
 }
 
 export async function POST(req: Request) {
   try {
-    const accessError = await requireExportAccess();
-    if (accessError) {
-      return accessError;
+    const access = await requireExportAccess();
+    if (access instanceof NextResponse) {
+      return access;
     }
 
     const body = (await req.json().catch(() => ({}))) as ChatExportRequestBody;
@@ -301,6 +281,17 @@ export async function POST(req: Request) {
     const filenameDate = new Date().toISOString().slice(0, 10);
     const pdf = buildChatExportPdf(redacted);
 
+    if (!access.isPlatformAdmin) {
+      await recordUsage({
+        userId: access.userId,
+        kind: "REPORT_EXPORT",
+        metadataJson: {
+          source: "chat_export",
+        },
+      });
+      await incrementUsage(access.userId, "REPORT_EXPORT");
+    }
+
     return new Response(pdf, {
       headers: {
         "Content-Type": "application/pdf",
@@ -310,12 +301,17 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
+    if (error instanceof UsageAccessError) {
       return NextResponse.json(
-        { error: "Authentication is required." },
-        { status: 401 }
+        { error: error.message, code: error.code },
+        { status: error.status }
       );
     }
 
-    throw error;
+    console.error("CHAT_EXPORT_ERROR", error);
+    return NextResponse.json({ error: "SERVER_ERROR" }, { status: 500 });
   }
 }

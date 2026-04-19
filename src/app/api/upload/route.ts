@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import {
+  UnauthorizedError,
+  requireCurrentUser,
+} from "@/lib/auth/require-current-user";
+import { getCurrentEntitlements } from "@/lib/billing/entitlements";
+import { UsageAccessError, recordUsage } from "@/lib/billing/usage";
+import { getUsageCount, incrementUsage } from "@/lib/usage";
 import { saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
 import {
   extractPreviewDataFromFile,
   fileToReusableDataUrl,
 } from "@/lib/attachments/extractPreviewData";
-import {
-  UnauthorizedError,
-  requireCurrentUser,
-} from "@/lib/auth/require-current-user";
 
 export const runtime = "nodejs";
 
@@ -26,24 +28,32 @@ function getUploadFiles(formData: FormData): File[] {
 
 export async function POST(req: Request) {
   try {
-    const clerkState = await auth();
+    const { user, isPlatformAdmin } = await requireCurrentUser();
+    const entitlements = await getCurrentEntitlements();
 
-    if (!clerkState.userId) {
+    if (!isPlatformAdmin && !entitlements.canUpload) {
       return NextResponse.json(
-        {
-          error: "Please sign in on this site before uploading.",
-          code: "AUTH_REQUIRED",
-        },
-        { status: 401 }
+        { error: "UPLOAD_NOT_INCLUDED_IN_PLAN" },
+        { status: 403 }
       );
     }
 
-    const { user } = await requireCurrentUser();
+    if (!isPlatformAdmin && entitlements.uploadCap !== null) {
+      const uploadsUsed = await getUsageCount(user.id, "FILE_UPLOAD");
+
+      if (uploadsUsed >= entitlements.uploadCap) {
+        return NextResponse.json(
+          { error: "UPLOAD_LIMIT_REACHED" },
+          { status: 403 }
+        );
+      }
+    }
+
     const formData = await req.formData();
     const files = getUploadFiles(formData);
 
     if (!files.length) {
-      return NextResponse.json({ error: "No file received" }, { status: 400 });
+      return NextResponse.json({ error: "NO_FILE" }, { status: 400 });
     }
 
     let totalBytes = 0;
@@ -104,6 +114,18 @@ export async function POST(req: Request) {
       ownerUserId: user.id,
     });
 
+    if (!isPlatformAdmin) {
+      await recordUsage({
+        userId: user.id,
+        kind: "FILE_UPLOAD",
+        metadataJson: {
+          attachmentId: stored.id,
+          filename: stored.filename,
+        },
+      });
+      await incrementUsage(user.id, "FILE_UPLOAD");
+    }
+
     return NextResponse.json({
       attachmentId: stored.id,
       filename: stored.filename,
@@ -115,19 +137,17 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
+    if (error instanceof UsageAccessError) {
       return NextResponse.json(
-        {
-          error: error.message,
-          code: "AUTH_REQUIRED",
-        },
+        { error: error.message, code: error.code },
         { status: error.status }
       );
     }
 
     console.error("UPLOAD ERROR:", error);
-    return NextResponse.json(
-      { error: "Upload failed", code: "UPLOAD_FAILED" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "SERVER_ERROR" }, { status: 500 });
   }
 }

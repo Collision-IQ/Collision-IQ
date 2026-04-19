@@ -145,6 +145,95 @@ function inferPhotoVisibleDamageSummary(
   return "Photo set is present. Visible damage appears concentrated in the documented impact area, but teardown-only damage cannot be confirmed from photos alone.";
 }
 
+type ImageValidationSignal = {
+  issue?: AnalysisIssue;
+  missingProcedures: string[];
+  supplementOpportunities: string[];
+  recommendedActions: string[];
+};
+
+function inferImageValidationSignal(
+  documents: Array<{
+    filename?: string | null;
+    mime?: string | null;
+    text?: string | null;
+    imageDataUrl?: string | null;
+  }>
+): ImageValidationSignal {
+  const imageTexts = documents
+    .filter((document) => Boolean(document.imageDataUrl))
+    .map((document) => document.text ?? "")
+    .filter(Boolean);
+
+  if (imageTexts.length === 0) {
+    return {
+      missingProcedures: [],
+      supplementOpportunities: [],
+      recommendedActions: [],
+    };
+  }
+
+  const lower = imageTexts.join("\n").toLowerCase();
+  const hasStructuralCue = includesAny(lower, [
+    "quarter panel",
+    "rear body",
+    "pillar",
+    "rocker",
+    "rail",
+    "unibody",
+    "structural",
+    "heavy",
+    "severe",
+  ]);
+  const hasSuspensionCue = includesAny(lower, [
+    "wheel opening",
+    "wheelhouse",
+    "wheel house",
+    "suspension",
+    "rear wheel",
+    "tire",
+    "rim",
+    "alignment",
+  ]);
+
+  if (!hasStructuralCue && !hasSuspensionCue) {
+    return {
+      missingProcedures: [],
+      supplementOpportunities: [],
+      recommendedActions: [],
+    };
+  }
+
+  const procedures = dedupeFindings([
+    hasStructuralCue ? "Structural measurement" : "",
+    hasSuspensionCue ? "Suspension component inspection" : "",
+  ]);
+
+  return {
+    issue: {
+      id: "image-validation-structural-suspension",
+      category: "safety",
+      title: "Photo damage raises open verification needs",
+      finding:
+        "Visible damage may support structural verification and suspension component inspection, pending teardown and documentation.",
+      impact:
+        "Visible damage cues raise concern for structural, wheelhouse, or suspension involvement, but hidden damage is not established from photos alone. Final confirmation depends on measurement, inspection, and teardown documentation.",
+      missingOperation: procedures.join(", "),
+      evidenceStatus: "VISIBLE_IN_IMAGES",
+      severity: hasStructuralCue ? "high" : "medium",
+      evidenceIds: [],
+    },
+    missingProcedures: procedures,
+    supplementOpportunities: dedupeFindings([
+      hasStructuralCue ? "Confirm whether structural measurement verification is required based on visible impact severity and teardown results." : "",
+      hasSuspensionCue ? "Confirm whether suspension and wheel-opening inspection is required based on visible impact severity and teardown results." : "",
+    ]),
+    recommendedActions: [
+      "Use the photo observations as visible-condition evidence, then confirm structural measurement and suspension inspection needs through teardown and documentation.",
+    ],
+  };
+}
+
 function inferEstimateScopeSummary(params: {
   estimateTotal?: number | null;
   rawEstimateText?: string | null;
@@ -421,6 +510,10 @@ export async function runRepairAnalysis({
           title: finding.title,
           finding: finding.title,
           impact: finding.detail,
+          evidenceStatus:
+            finding.status === "unclear"
+              ? "OPEN_PENDING_FURTHER_DOCUMENTATION"
+              : "NOT_ESTABLISHED",
           severity: finding.severity,
           evidenceIds: [],
         })),
@@ -476,19 +569,20 @@ export async function runRepairAnalysis({
   });
 
   const evidence = buildEvidenceRecords(pipeline.evidenceReferences, retrievedEvidence);
-  const issues = buildIssues(pipeline, evidence, ragProcedures);
+  const imageValidation = inferImageValidationSignal(documents);
+  const issues = buildIssues(pipeline, evidence, ragProcedures, imageValidation.issue);
   const requiredProcedures = mergeRequiredProcedures(
     buildRequiredProcedures(pipeline),
     ragProcedures
   );
-  const presentProcedures = dedupeStrings([
+  const presentProcedures = dedupeFindings([
     ...pipeline.observations
       .filter((observation) => observation.status === "present")
       .map((observation) => observation.procedure ?? "")
       .filter(Boolean),
     ...ragProcedures.filter((procedure) => !procedure.isMissing).map((procedure) => procedure.procedure),
   ]);
-  const missingProcedures = dedupeStrings([
+  const missingProcedures = dedupeFindings([
     ...pipeline.observations
       .filter(
         (observation) =>
@@ -497,12 +591,14 @@ export async function runRepairAnalysis({
       .map((observation) => observation.procedure ?? "")
       .filter(Boolean),
     ...ragProcedures.filter((procedure) => procedure.isMissing).map((procedure) => procedure.procedure),
+    ...imageValidation.missingProcedures,
   ]);
-  const supplementOpportunities = dedupeStrings([
+  const supplementOpportunities = dedupeFindings([
     ...pipeline.supplementOpportunities.map((issue) => issue.issue),
     ...ragProcedures
       .filter((procedure) => procedure.isMissing && procedure.category === "supplement")
       .map((procedure) => `Add and document ${procedure.procedure}.`),
+    ...imageValidation.supplementOpportunities,
   ]);
 
   const highSeverityIssues = issues.filter((issue) => issue.severity === "high").length;
@@ -534,7 +630,10 @@ export async function runRepairAnalysis({
     missingProcedures,
     supplementOpportunities,
     evidence,
-    recommendedActions: buildRecommendedActions(missingProcedures, supplementOpportunities),
+    recommendedActions: dedupeFindings([
+      ...imageValidation.recommendedActions,
+      ...buildRecommendedActions(missingProcedures, supplementOpportunities),
+    ]),
     analysis: undefined,
     sourceEstimateText: estimateText,
     estimateFacts,
@@ -703,7 +802,8 @@ function toHumanReadableRetrievedSource(value?: string | null): string | undefin
 function buildIssues(
   pipeline: ReturnType<typeof runRepairPipeline>,
   evidence: EvidenceRecord[],
-  ragProcedures: RAGProcedure[]
+  ragProcedures: RAGProcedure[],
+  imageIssue?: AnalysisIssue
 ): AnalysisIssue[] {
   const pipelineIssues: AnalysisIssue[] = pipeline.observations
     .filter((issue) => issue.status !== "present")
@@ -721,8 +821,12 @@ function buildIssues(
               : "scan",
     title: issue.issue,
     finding: issue.issue,
-    impact: issue.reference,
+    impact: buildIssueImpact(issue.procedure ?? issue.issue, issue.reference),
     missingOperation: issue.procedure ?? extractMissingOperation(issue.reference),
+    evidenceStatus:
+      issue.status === "unclear"
+        ? "OPEN_PENDING_FURTHER_DOCUMENTATION"
+        : "NOT_ESTABLISHED",
     severity: issue.severity,
     evidenceIds: evidence.slice(0, 2).map((item) => item.id),
   }));
@@ -743,15 +847,41 @@ function buildIssues(
                 : "documentation",
       title: `${procedure.procedure} function not clearly represented`,
       finding: `${procedure.procedure} function not clearly represented`,
-      impact: `${procedure.reason} OEM context: ${procedure.evidenceSnippet}`,
+      impact: buildIssueImpact(
+        procedure.procedure,
+        `${procedure.reason} OEM context: ${procedure.evidenceSnippet}`
+      ),
       missingOperation: procedure.procedure,
+      evidenceStatus: "SUPPORTABLE_BUT_UNCONFIRMED",
       severity: procedure.severity,
       evidenceIds: evidence
         .filter((item) => item.id === procedure.evidenceId)
         .map((item) => item.id),
     }));
 
-  return dedupeIssuesByTitle([...pipelineIssues, ...ragIssues]);
+  return dedupeIssuesByTitle([
+    ...pipelineIssues,
+    ...ragIssues,
+    ...(imageIssue ? [imageIssue] : []),
+  ]);
+}
+
+function buildIssueImpact(procedure: string, fallback: string): string {
+  const lower = procedure.toLowerCase();
+
+  if (lower.includes("structural measurement") || lower.includes("measure structure")) {
+    return "Structural measurement verification remains open in the current file. If not confirmed, improper geometry restoration can affect ADAS calibration accuracy and crashworthiness.";
+  }
+
+  if (lower.includes("suspension") || lower.includes("alignment")) {
+    return "Suspension or alignment verification remains open in the current file. If not confirmed, wheel geometry, tire tracking, and ADAS-dependent steering inputs may remain unsupported after impact repair.";
+  }
+
+  if (lower.includes("calibration") || lower.includes("adas")) {
+    return "ADAS verification remains open in the current file. If not confirmed, sensor aim, calibration status, and system readiness may remain unsupported after the repair.";
+  }
+
+  return fallback;
 }
 
 function buildRequiredProcedures(
@@ -978,8 +1108,12 @@ function mergeRequiredProcedures(
   return [...merged.values()];
 }
 
+function dedupeFindings(items: string[]): string[] {
+  return Array.from(new Set(items.map((item) => item.trim()))).filter(Boolean);
+}
+
 function dedupeStrings(values: string[]): string[] {
-  return [...new Set(values.filter(Boolean))];
+  return dedupeFindings(values);
 }
 
 function dedupeIssuesByTitle(issues: AnalysisIssue[]): AnalysisIssue[] {
@@ -1012,4 +1146,8 @@ function dedupeIssuesByTitle(issues: AnalysisIssue[]): AnalysisIssue[] {
 function extractMissingOperation(reference: string): string | undefined {
   const [operation] = reference.split("->");
   return operation?.trim() || undefined;
+}
+
+function includesAny(text: string, terms: string[]) {
+  return terms.some((term) => text.includes(term));
 }

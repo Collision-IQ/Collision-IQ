@@ -1,6 +1,9 @@
-export type BillingPlan = "starter" | "trial" | "pro" | "team";
+export type BillingPlan = "none" | "starter" | "trial" | "pro" | "team";
 
 export const PLAN_CAPS = {
+  // None = chat only. No document-backed analysis, uploads, or exports.
+  none: 0,
+
   // Free = chat only. No document-backed analysis.
   starter: 0,
 

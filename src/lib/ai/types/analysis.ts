@@ -90,6 +90,14 @@ export interface AnalysisFinding {
   evidence: EvidenceRef[];
 }
 
+export type IssueEvidenceStatus =
+  | "DOCUMENTED"
+  | "REFERENCED_NOT_PRODUCED"
+  | "VISIBLE_IN_IMAGES"
+  | "SUPPORTABLE_BUT_UNCONFIRMED"
+  | "OPEN_PENDING_FURTHER_DOCUMENTATION"
+  | "NOT_ESTABLISHED";
+
 export interface AnalysisSummary {
   riskScore: "low" | "moderate" | "high" | "unknown";
   confidence: "low" | "moderate" | "high";
@@ -169,8 +177,96 @@ export type AnalysisIssue = {
   finding: string;
   impact: string;
   missingOperation?: string;
+  evidenceStatus?: IssueEvidenceStatus;
   severity: Severity;
   evidenceIds: string[];
+};
+
+export type CaseEvidenceSourceType =
+  | "shop_estimate"
+  | "carrier_estimate"
+  | "supplement"
+  | "photo"
+  | "procedure_link"
+  | "scan_report"
+  | "calibration_report"
+  | "adas_report"
+  | "oem_documentation"
+  | "manual_note"
+  | "other_supporting_document";
+
+export type CaseEvidenceIngestionState =
+  | "uploaded"
+  | "ingested"
+  | "referenced_not_produced"
+  | "failed";
+
+export type CaseEvidenceRegistryItem = {
+  id: string;
+  sourceType: CaseEvidenceSourceType;
+  label: string;
+  extractedText?: string;
+  linkedUrl?: string;
+  ingestionState: CaseEvidenceIngestionState;
+  evidenceStatus: IssueEvidenceStatus;
+  relatedIssueKeys: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SharedFactualCore = {
+  vehicleSummary: string;
+  currentCaseSummary: string;
+  visibleDamageObservations: string[];
+  documentedRepairOperations: string[];
+  evidenceRegistrySummary: string[];
+  linkedEvidenceState: string[];
+  issueAssessments: Array<{
+    key: string;
+    title: string;
+    status: IssueEvidenceStatus;
+    severity: Severity;
+    summary: string;
+    evidenceIds: string[];
+  }>;
+  documentedPositives: string[];
+  openIssues: string[];
+  unresolvedVerificationNeeds: string[];
+  currentDetermination: string;
+  caseContinuity: {
+    activeCaseId?: string;
+    mode: "new_case" | "active_case_update";
+    reassessedAt: string;
+    evidenceCount: number;
+  };
+};
+
+export type ReassessmentDelta = {
+  addedEvidenceIds: string[];
+  affectedIssueKeys: string[];
+  statusChanges: Array<{
+    key: string;
+    from?: IssueEvidenceStatus;
+    to: IssueEvidenceStatus;
+  }>;
+  newlyDocumented: string[];
+  stillOpen: string[];
+  determinationChanged: boolean;
+  summary: string;
+};
+
+export type ArtifactRefreshDecision = {
+  shouldRefresh: boolean;
+  reason: string;
+  signals: string[];
+};
+
+export type ArtifactRefreshPolicy = {
+  mainReport: ArtifactRefreshDecision;
+  customerReport: ArtifactRefreshDecision;
+  disputeReport: ArtifactRefreshDecision;
+  rebuttalOutput: ArtifactRefreshDecision;
+  chatSummaryOnly: ArtifactRefreshDecision;
 };
 
 export type RepairIntelligenceReport = {
@@ -192,8 +288,17 @@ export type RepairIntelligenceReport = {
   sourceEstimateText?: string;
   estimateFacts?: EstimateFacts;
   linkedEvidence?: LinkedEvidence[];
+  evidenceRegistry?: CaseEvidenceRegistryItem[];
+  factualCore?: SharedFactualCore;
+  reassessmentDelta?: ReassessmentDelta;
+  artifactRefreshPolicy?: ArtifactRefreshPolicy;
   ingestionMeta?: {
     linkedEvidenceCount?: number;
     linkedEvidenceFetchedAt?: string;
+    activeCaseId?: string;
+    reassessedAt?: string;
+    reassessmentMode?: "new_case" | "active_case_update";
+    closedAt?: string;
+    active?: boolean;
   };
 };

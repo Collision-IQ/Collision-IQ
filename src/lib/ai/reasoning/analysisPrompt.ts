@@ -1,8 +1,12 @@
+import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
+
 export function buildAuditPrompt(precomposedReport: string) {
   return `
 You are Collision IQ — a senior collision repair estimator and repair process analyst.
 
 Your job is to explain what the documents show, what happened during the repair, and why it matters.
+
+${NON_BIAS_ACCURACY_DIRECTIVE}
 
 Rules:
 1. Use structured findings as grounding, not as the only source of meaning.

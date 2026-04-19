@@ -5,9 +5,13 @@ import Link from "next/link";
 export default function UpgradeModal({
   open,
   onClose,
+  title = "Continue with full access",
+  description = "You've reached the limits of your current access. Upgrade to continue running analyses, exports, and advanced workflows.",
 }: {
   open: boolean;
   onClose: () => void;
+  title?: string;
+  description?: string;
 }) {
   if (!open) return null;
 
@@ -18,13 +22,10 @@ export default function UpgradeModal({
           Upgrade Required
         </div>
 
-        <h2 className="mt-3 text-xl font-semibold text-white">
-          Continue with full access
-        </h2>
+        <h2 className="mt-3 text-xl font-semibold text-white">{title}</h2>
 
         <p className="mt-3 text-sm text-white/65">
-          You&apos;ve reached the limits of your current access. Upgrade to continue
-          running analyses, exports, and advanced workflows.
+          {description}
         </p>
 
         <div className="mt-6 flex gap-3">

@@ -16,6 +16,7 @@ import {
 import { resolveFinancialView } from "@/components/chatbot/financialView";
 import type { InsightKey } from "@/components/chatbot/insightSync";
 import StructuredAnalysisCanvas from "@/components/StructuredAnalysisCanvas";
+import UpgradeModal from "@/components/UpgradeModal";
 import WorkspacePanel from "@/components/WorkspacePanel";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
@@ -28,6 +29,7 @@ import {
   resolveCanonicalVin,
 } from "@/lib/ai/builders/buildExportModel";
 import { buildCarrierReport } from "@/lib/ai/builders/carrierPdfBuilder";
+import { buildCustomerReportPdf } from "@/lib/ai/builders/customerReportPdfBuilder";
 import { buildDisputeIntelligencePdf } from "@/lib/ai/builders/disputeIntelligencePdfBuilder";
 import { exportCarrierPDF } from "@/lib/ai/builders/exportPdf";
 import { buildRebuttalEmailPdf } from "@/lib/ai/builders/rebuttalEmailPdfBuilder";
@@ -37,6 +39,7 @@ import type {
   AnalysisResult,
   RepairIntelligenceReport,
 } from "@/lib/ai/types/analysis";
+import type { CustomerReport } from "@/lib/ai/generateCustomerReport";
 import type { WorkspaceData } from "@/types/workspaceTypes";
 
 function displayOperationLabel(value: string | null | undefined): string {
@@ -62,7 +65,7 @@ type DisputeDriver = {
   title: string;
   impact: string;
   whyItMatters: string;
-  carrierPosture: string;
+  currentFileStatus: string;
   action: string;
 };
 
@@ -162,6 +165,7 @@ export function ChatbotWorkspacePage() {
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [consentChecked, setConsentChecked] = useState(false);
   const [viewerAccess, setViewerAccess] = useState<AccountEntitlements | null>(null);
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const normalizedResult = useMemo(
     () => (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null),
     [analysisResult]
@@ -419,6 +423,7 @@ export function ChatbotWorkspacePage() {
   const canViewNegotiationDraft = featureFlags?.negotiation_draft ?? false;
   const canUseBasicPdfExport = featureFlags?.basic_pdf_export ?? true;
   const canUseRebuttalEmail = featureFlags?.rebuttal_email ?? false;
+  const canUseCustomerReport = viewerAccess?.canUseCustomerReport ?? false;
   const followUpExports = [
     canUseBasicPdfExport
       ? { label: "Collision Repair Intelligence Report", type: "pdf" }
@@ -428,6 +433,9 @@ export function ChatbotWorkspacePage() {
       : null,
     canUseBasicPdfExport
       ? { label: "Dispute Intelligence Report", type: "pdf" }
+      : null,
+    canUseCustomerReport
+      ? { label: "Customer Report", type: "pdf" }
       : null,
   ].filter(Boolean) as Array<{ label: string; type?: string; url?: string }>;
 
@@ -727,6 +735,8 @@ export function ChatbotWorkspacePage() {
             canViewNegotiationDraft={canViewNegotiationDraft}
             canUseBasicPdfExport={canUseBasicPdfExport}
             canUseRebuttalEmail={canUseRebuttalEmail}
+            canUseCustomerReport={canUseCustomerReport}
+            onCustomerReportLocked={() => setUpgradeModalOpen(true)}
             activeInsightKey={activeInsightKey}
             evidenceModel={evidenceModel}
             activeEvidenceTargetId={activeEvidenceTargetId}
@@ -855,6 +865,13 @@ export function ChatbotWorkspacePage() {
           </div>
         </div>
       )}
+
+      <UpgradeModal
+        open={upgradeModalOpen}
+        onClose={() => setUpgradeModalOpen(false)}
+        title="Upgrade to Pro"
+        description="Upgrade to Pro to generate a Customer Report."
+      />
     </div>
   );
 }
@@ -879,6 +896,8 @@ function RailContent({
   canViewNegotiationDraft,
   canUseBasicPdfExport,
   canUseRebuttalEmail,
+  canUseCustomerReport,
+  onCustomerReportLocked,
   activeInsightKey,
   evidenceModel,
   activeEvidenceTargetId,
@@ -900,6 +919,8 @@ function RailContent({
   canViewNegotiationDraft: boolean;
   canUseBasicPdfExport: boolean;
   canUseRebuttalEmail: boolean;
+  canUseCustomerReport: boolean;
+  onCustomerReportLocked: () => void;
   activeInsightKey: InsightKey | null;
   evidenceModel: EvidenceLinkModel | null;
   activeEvidenceTargetId: string | null;
@@ -907,6 +928,8 @@ function RailContent({
   onEvidenceSelect: (link: EvidenceLink) => void;
 }) {
   const sectionRefs = useRef<Partial<Record<InsightKey, HTMLDivElement | null>>>({});
+  const [isGeneratingCustomerReport, setIsGeneratingCustomerReport] = useState(false);
+  const [customerReportError, setCustomerReportError] = useState<string | null>(null);
   function registerSectionRef(insightKey: InsightKey, node: HTMLDivElement | null) {
     sectionRefs.current[insightKey] = node;
   }
@@ -1303,6 +1326,44 @@ function RailContent({
             >
               Dispute Intelligence Report
             </button>
+            <button
+              type="button"
+              aria-disabled={!canUseCustomerReport || isGeneratingCustomerReport}
+              onClick={() => {
+                if (isGeneratingCustomerReport) {
+                  return;
+                }
+
+                if (!canUseCustomerReport) {
+                  onCustomerReportLocked();
+                  return;
+                }
+
+                void exportCustomerReport({
+                  renderModel,
+                  normalizedResult,
+                  analysisResult,
+                  panel,
+                  analysisText,
+                  workspaceData,
+                  onStart: () => {
+                    setCustomerReportError(null);
+                    setIsGeneratingCustomerReport(true);
+                  },
+                  onComplete: () => setIsGeneratingCustomerReport(false),
+                  onLocked: onCustomerReportLocked,
+                  onError: setCustomerReportError,
+                });
+              }}
+              className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+            >
+              {isGeneratingCustomerReport ? "Generating Customer Report..." : "Customer Report"}
+            </button>
+            {customerReportError ? (
+              <div className="rounded-xl border border-red-500/16 bg-red-500/[0.05] px-3 py-2 text-[12px] leading-5 text-red-200/80">
+                {customerReportError}
+              </div>
+            ) : null}
           </div>
         </section>
         </RailInsightSection>
@@ -1362,6 +1423,170 @@ function exportPdfVariant(params: {
       : buildDisputeIntelligencePdf(sharedInput);
 
   void exportCarrierPDF(document);
+}
+
+async function exportCustomerReport(params: {
+  renderModel: ReturnType<typeof buildExportModel>;
+  normalizedResult: AnalysisResult | null;
+  analysisResult: RepairIntelligenceReport | null;
+  panel: DecisionPanel;
+  analysisText: string;
+  workspaceData: WorkspaceData | null;
+  onStart: () => void;
+  onComplete: () => void;
+  onLocked: () => void;
+  onError: (message: string | null) => void;
+}) {
+  params.onStart();
+
+  try {
+    const response = await fetch("/api/customer-report", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "same-origin",
+      body: JSON.stringify(buildCustomerReportRequest(params)),
+    });
+
+    if (response.status === 403) {
+      params.onLocked();
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error("Customer report could not be generated. Please try again.");
+    }
+
+    const data = (await response.json()) as {
+      fileName?: string;
+      html?: string;
+      report?: CustomerReport;
+    };
+    if (!data.report) {
+      throw new Error("Customer report response was empty.");
+    }
+
+    exportCustomerReportPdf(data.report, {
+      renderModel: params.renderModel,
+      fileName: data.fileName,
+    });
+  } catch (error) {
+    params.onError(
+      error instanceof Error
+        ? error.message
+        : "Customer report could not be generated. Please try again."
+    );
+  } finally {
+    params.onComplete();
+  }
+}
+
+function buildCustomerReportRequest(params: {
+  renderModel: ReturnType<typeof buildExportModel>;
+  normalizedResult: AnalysisResult | null;
+  analysisResult: RepairIntelligenceReport | null;
+  panel: DecisionPanel;
+  analysisText: string;
+  workspaceData: WorkspaceData | null;
+}) {
+  const vehicle =
+    resolveCanonicalVehicleLabel(params.renderModel) ||
+    params.renderModel.reportFields.vehicleLabel ||
+    "Vehicle not specified";
+  const vin = resolveCanonicalVin(params.renderModel);
+  const insurer = resolveCanonicalInsurer(params.renderModel);
+  const mileage =
+    typeof params.renderModel.reportFields.mileage === "number"
+      ? params.renderModel.reportFields.mileage.toLocaleString("en-US")
+      : null;
+  const estimateTotal =
+    typeof params.renderModel.reportFields.estimateTotal === "number"
+      ? formatCurrency(params.renderModel.reportFields.estimateTotal, true)
+      : null;
+  const findings = dedupeRailItems([
+    ...params.renderModel.supplementItems.map((item) =>
+      [displayOperationLabel(item.title), item.rationale].filter(Boolean).join(": ")
+    ),
+    ...(params.analysisResult?.issues.map((issue) =>
+      [issue.title, issue.impact || issue.finding].filter(Boolean).join(": ")
+    ) ?? []),
+    ...(params.analysisResult?.missingProcedures.map((procedure) => `Missing or unclear: ${procedure}`) ?? []),
+    params.panel.narrative,
+  ]);
+  const estimateSummary = dedupeRailItems([
+    params.renderModel.positionStatement,
+    params.renderModel.repairPosition,
+    params.normalizedResult?.narrative,
+    ...(params.workspaceData?.keyIssues ?? []),
+    params.workspaceData?.fullAnalysis,
+    params.analysisText,
+  ]).join("\n\n");
+  const documentedPositives = dedupeRailItems([
+    ...params.renderModel.reportFields.presentStrengths,
+    ...(params.analysisResult?.presentProcedures ?? []),
+  ]);
+  const supportGaps = dedupeRailItems([
+    ...params.renderModel.disputeIntelligenceReport.supportGaps,
+    ...params.renderModel.supplementItems.map((item) =>
+      [displayOperationLabel(item.title), item.rationale].filter(Boolean).join(": ")
+    ),
+    ...(params.analysisResult?.missingProcedures ?? []),
+  ]);
+  const imageSummary = extractImageSummary(params.analysisResult?.sourceEstimateText ?? "");
+
+  return {
+    vehicle,
+    vin,
+    insurer,
+    mileage,
+    estimateTotal,
+    determination: params.renderModel.determination?.answer || params.renderModel.positionStatement,
+    documentedPositives,
+    supportGaps: supportGaps.length > 0 ? supportGaps : findings,
+    estimateSummary,
+    imageSummary,
+  };
+}
+
+function exportCustomerReportPdf(report: CustomerReport, params: {
+  renderModel: ReturnType<typeof buildExportModel>;
+  fileName?: string;
+}) {
+  const vehicle =
+    resolveCanonicalVehicleLabel(params.renderModel) ||
+    params.renderModel.reportFields.vehicleLabel ||
+    "Vehicle";
+  const document = buildCustomerReportPdf({
+    report,
+    vehicle,
+    vin: resolveCanonicalVin(params.renderModel),
+    insurer: resolveCanonicalInsurer(params.renderModel),
+    mileage:
+      typeof params.renderModel.reportFields.mileage === "number"
+        ? params.renderModel.reportFields.mileage.toLocaleString("en-US")
+        : null,
+    estimateTotal:
+      typeof params.renderModel.reportFields.estimateTotal === "number"
+        ? formatCurrency(params.renderModel.reportFields.estimateTotal, true)
+        : null,
+    filename: params.fileName || "customer-report.pdf",
+  });
+
+  void exportCarrierPDF(document);
+}
+
+function extractImageSummary(sourceText: string): string | null {
+  const lines = sourceText
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) =>
+      /^(Visible damage zones|Visible repair cues|Damage severity|Estimate validation signals|Structural cues|Suspension \/ wheel-opening cues):/i.test(
+        line
+      )
+    );
+
+  return lines.length > 0 ? lines.slice(0, 12).join("\n") : null;
 }
 
 function AtAGlanceCard({
@@ -1562,7 +1787,7 @@ function mapSupplementItemToDisputeDriver(item: SupplementItem): DisputeDriver |
       title: "Structural Measurement Verification",
       impact: "HIGH ($$$ + safety critical)",
       whyItMatters: "affects geometry validation",
-      carrierPosture: "under-documenting",
+      currentFileStatus: "open pending measurement support",
       action: "request measurement report + frame data",
     };
   }
@@ -1579,7 +1804,7 @@ function mapSupplementItemToDisputeDriver(item: SupplementItem): DisputeDriver |
       title: "ADAS Calibration",
       impact: "HIGH",
       whyItMatters: "liability + post-repair safety",
-      carrierPosture: "no calibration path documented",
+      currentFileStatus: "calibration path not clearly documented",
       action: "require OEM procedure + invoice-backed calibration",
     };
   }
@@ -1593,7 +1818,7 @@ function mapSupplementItemToDisputeDriver(item: SupplementItem): DisputeDriver |
           ? "MEDIUM"
           : "LOW",
     whyItMatters: summarizeDriverWhyItMatters(item),
-    carrierPosture: summarizeCarrierPosture(item.kind),
+    currentFileStatus: summarizeCurrentFileStatus(item.kind),
     action: summarizeDriverAction(item),
   };
 }
@@ -1608,16 +1833,16 @@ function summarizeDriverWhyItMatters(item: SupplementItem): string {
   return trimDriverSentence(sentence);
 }
 
-function summarizeCarrierPosture(kind: SupplementItem["kind"]): string {
+function summarizeCurrentFileStatus(kind: SupplementItem["kind"]): string {
   switch (kind) {
     case "missing_verification":
       return "verification not documented";
     case "missing_operation":
-      return "not carrying the full operation";
+      return "operation not clearly documented";
     case "underwritten_operation":
-      return "under-documenting the repair path";
+      return "repair path support remains open";
     default:
-      return "keeping the repair path open or lightly supported";
+      return "repair path remains open or lightly supported";
   }
 }
 
@@ -1722,7 +1947,7 @@ function DisputeDriverCard({
         <span className="font-semibold text-white/88">Why it matters:</span> {driver.whyItMatters}
       </div>
       <div className="mt-1 text-[13px] leading-5 text-white/70">
-        <span className="font-semibold text-white/88">What carrier is doing:</span> {driver.carrierPosture}
+        <span className="font-semibold text-white/88">Current file status:</span> {driver.currentFileStatus}
       </div>
       <div className="mt-1 text-[13px] leading-5 text-white/70">
         <span className="font-semibold text-white/88">What to do:</span> {driver.action}
@@ -1761,7 +1986,7 @@ function buildNegotiationPosture(): NegotiationPosture {
       "Alignment cost (needs support)",
     ],
     highLeverageArguments: [
-      "OEM vs aftermarket suspension (BMW case = strong win)",
+      "OEM vs aftermarket suspension support where vehicle-specific documentation applies",
       "Paint time realism (8.9 hour gap)",
     ],
     suggestedStrategy: [
@@ -1776,7 +2001,7 @@ function buildLineStatus(): LineStatus {
   return {
     title: "Structural Measurement Verification",
     impact: "HIGH",
-    status: "Missing / Underwritten",
+    status: "Open pending documentation",
     whyItMatters: "Geometry validation / safety",
     action: "Request documented measurement report",
   };

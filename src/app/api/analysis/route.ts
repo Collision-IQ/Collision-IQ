@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { saveAnalysisReport } from "@/lib/analysisReportStore";
+import {
+  getAnalysisReport,
+  saveAnalysisReport,
+  updateAnalysisReport,
+} from "@/lib/analysisReportStore";
 import {
   getUploadedAttachments,
   type StoredAttachment,
@@ -14,13 +18,20 @@ import { buildDecisionPanelHybrid } from "@/lib/ai/builders/buildDecisionPanel";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import { runRepairAnalysis } from "@/lib/ai/orchestrator/analysisOrchestrator";
 import { enrichAnalysisAttachments } from "@/lib/ai/analysisAttachmentService";
+import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
 import {
   inferDriveRetrievalTopics,
   inferDriveVehicleContext,
 } from "@/lib/ai/contracts/driveRetrievalContract";
 import type { ChatAnalysisOutput } from "@/lib/ai/contracts/chatAnalysisSchema";
 import type {
+  CaseEvidenceRegistryItem,
+  CaseEvidenceSourceType,
+  ArtifactRefreshPolicy,
+  IssueEvidenceStatus,
   RepairIntelligenceReport,
+  ReassessmentDelta,
+  SharedFactualCore,
   VehicleIdentity,
 } from "@/lib/ai/types/analysis";
 import type {
@@ -53,6 +64,7 @@ const SUPPLEMENT_MODEL =
 
 type AnalysisRequestBody = {
   artifactIds?: string[];
+  activeCaseId?: string | null;
   sessionContext?: {
     vehicleMake?: string | null;
     system?: string | null;
@@ -123,6 +135,18 @@ export async function POST(req: Request) {
     }
 
     assertAnalysisAllowedForEntitlements(entitlements, isPlatformAdmin);
+    const existingCase = body.activeCaseId
+      ? await getAnalysisReport(body.activeCaseId, {
+          ownerUserId: user.id,
+        })
+      : null;
+
+    if (body.activeCaseId && !existingCase) {
+      throw new AttachmentAccessError(
+        "The active case could not be found for the current account."
+      );
+    }
+
     const storedAttachments = await getUploadedAttachments(artifactIds, {
       ownerUserId: user.id,
     });
@@ -181,6 +205,8 @@ export async function POST(req: Request) {
       report,
       uploadedAttachments: normalizedAttachments,
       linkedEvidence,
+      activeCaseId: body.activeCaseId ?? null,
+      previousReport: existingCase?.report ?? null,
     });
     let analysis = normalizeReportToAnalysisResult(report);
     const retrievalSnapshot = buildAnalysisRetrievalSnapshot({
@@ -246,11 +272,25 @@ export async function POST(req: Request) {
       },
     });
 
-    const stored = await saveAnalysisReport({
-      ownerUserId: user.id,
-      artifactIds,
-      report,
-    });
+    const stored =
+      body.activeCaseId
+        ? await updateAnalysisReport({
+            id: body.activeCaseId,
+            ownerUserId: user.id,
+            artifactIds: mergeArtifactIds(existingCase?.artifactIds ?? [], artifactIds),
+            report,
+          })
+        : await saveAnalysisReport({
+            ownerUserId: user.id,
+            artifactIds,
+            report,
+          });
+
+    if (!stored) {
+      throw new AttachmentAccessError(
+        "The active case could not be found for the current account."
+      );
+    }
 
     await recordCompletedAnalysisUsage({
       userId: user.id,
@@ -283,6 +323,13 @@ export async function POST(req: Request) {
       retrievalMatchCount,
       refinedWithRetrieval,
       analysisCompletedAt: new Date().toISOString(),
+      caseContinuity: {
+        activeCaseId: stored.id,
+        mode: body.activeCaseId ? "active_case_update" : "new_case",
+        evidenceRegistryCount: stored.report.evidenceRegistry?.length ?? 0,
+      },
+      reassessmentDelta: stored.report.reassessmentDelta ?? null,
+      artifactRefreshPolicy: stored.report.artifactRefreshPolicy ?? null,
       usage: {
         plan: entitlements.plan,
         analysesUsedThisPeriod: entitlements.analysisCount + (isPlatformAdmin ? 0 : 1),
@@ -338,6 +385,8 @@ function applyLinkedEvidenceToReport(params: {
   report: RepairIntelligenceReport;
   uploadedAttachments: StoredAttachment[];
   linkedEvidence: LinkedEvidence[];
+  activeCaseId?: string | null;
+  previousReport?: RepairIntelligenceReport | null;
 }): RepairIntelligenceReport {
   const evidenceCorpus = buildEvidenceCorpus({
     estimateText: params.report.sourceEstimateText ?? "",
@@ -348,17 +397,541 @@ function applyLinkedEvidenceToReport(params: {
     })),
     linkedEvidence: params.linkedEvidence,
   });
+  const evidenceRegistry = mergeEvidenceRegistry(
+    params.previousReport?.evidenceRegistry ?? [],
+    buildCaseEvidenceRegistry({
+      uploadedAttachments: params.uploadedAttachments,
+      linkedEvidence: params.linkedEvidence,
+      issueKeys: params.report.issues.map((issue) => issue.id),
+    })
+  );
+  const issues = mergeIssueAssessments(
+    params.previousReport?.issues ?? [],
+    params.report.issues,
+    evidenceRegistry
+  );
+  const reassessmentMode = params.activeCaseId ? "active_case_update" : "new_case";
+  const reassessmentDelta = buildReassessmentDelta({
+    previousReport: params.previousReport ?? null,
+    nextIssues: issues,
+    nextEvidenceRegistry: evidenceRegistry,
+    nextDetermination: params.report.recommendedActions[0] ?? "",
+  });
 
-  return {
+  const nextReport: RepairIntelligenceReport = {
     ...params.report,
+    issues,
     sourceEstimateText: evidenceCorpus || params.report.sourceEstimateText,
-    linkedEvidence: params.linkedEvidence,
+    linkedEvidence: mergeLinkedEvidence(
+      params.previousReport?.linkedEvidence ?? [],
+      params.linkedEvidence
+    ),
+    evidenceRegistry,
+    reassessmentDelta,
     ingestionMeta: {
       linkedEvidenceCount: params.linkedEvidence.length,
       linkedEvidenceFetchedAt: new Date().toISOString(),
+      activeCaseId: params.activeCaseId ?? undefined,
+      active: true,
+      reassessedAt: new Date().toISOString(),
+      reassessmentMode,
     },
     evidence: mergeLinkedEvidenceRecords(params.report.evidence, params.linkedEvidence),
   };
+  const factualCore = buildSharedFactualCore({
+    report: nextReport,
+    evidenceRegistry,
+    activeCaseId: params.activeCaseId ?? undefined,
+    mode: reassessmentMode,
+  });
+  const artifactRefreshPolicy = buildArtifactRefreshPolicy({
+    report: nextReport,
+    factualCore,
+    delta: reassessmentDelta,
+  });
+
+  return {
+    ...nextReport,
+    factualCore,
+    artifactRefreshPolicy,
+  };
+}
+
+function buildCaseEvidenceRegistry(params: {
+  uploadedAttachments: StoredAttachment[];
+  linkedEvidence: LinkedEvidence[];
+  issueKeys: string[];
+}): CaseEvidenceRegistryItem[] {
+  const now = new Date().toISOString();
+  const uploaded = params.uploadedAttachments.map((attachment) => ({
+    id: attachment.id,
+    sourceType: classifyUploadedEvidenceSource(attachment),
+    label: attachment.filename,
+    extractedText: attachment.text,
+    ingestionState: "uploaded" as const,
+    evidenceStatus: attachment.type.startsWith("image/")
+      ? ("VISIBLE_IN_IMAGES" as const)
+      : ("DOCUMENTED" as const),
+    relatedIssueKeys: inferRelatedIssueKeys(attachment.text, params.issueKeys),
+    createdAt: now,
+    updatedAt: now,
+  }));
+  const linked = params.linkedEvidence.map((doc, index) => ({
+    id: `linked:${index + 1}:${doc.url}`,
+    sourceType: classifyLinkedEvidenceSource(doc),
+    label: doc.title || doc.finalUrl || doc.url,
+    extractedText: doc.status === "ok" ? doc.text : undefined,
+    linkedUrl: doc.url,
+    ingestionState:
+      doc.status === "ok"
+        ? ("ingested" as const)
+        : doc.status === "blocked"
+          ? ("referenced_not_produced" as const)
+          : ("failed" as const),
+    evidenceStatus:
+      doc.status === "ok"
+        ? ("DOCUMENTED" as const)
+        : ("REFERENCED_NOT_PRODUCED" as const),
+    relatedIssueKeys: inferRelatedIssueKeys(`${doc.title ?? ""}\n${doc.text}`, params.issueKeys),
+    createdAt: now,
+    updatedAt: now,
+  }));
+
+  return [...uploaded, ...linked];
+}
+
+function mergeEvidenceRegistry(
+  previous: CaseEvidenceRegistryItem[],
+  next: CaseEvidenceRegistryItem[]
+): CaseEvidenceRegistryItem[] {
+  const merged = new Map<string, CaseEvidenceRegistryItem>();
+
+  for (const item of previous) {
+    merged.set(item.id, item);
+  }
+
+  for (const item of next) {
+    const existing = merged.get(item.id);
+    if (!existing) {
+      merged.set(item.id, item);
+      continue;
+    }
+
+    merged.set(item.id, {
+      ...existing,
+      ...item,
+      createdAt: existing.createdAt,
+      updatedAt: item.updatedAt,
+      evidenceStatus: strongestEvidenceStatus(existing.evidenceStatus, item.evidenceStatus),
+      relatedIssueKeys: dedupeStrings([
+        ...existing.relatedIssueKeys,
+        ...item.relatedIssueKeys,
+      ]),
+      extractedText: item.extractedText ?? existing.extractedText,
+      linkedUrl: item.linkedUrl ?? existing.linkedUrl,
+    });
+  }
+
+  return [...merged.values()];
+}
+
+function mergeIssueAssessments(
+  previous: RepairIntelligenceReport["issues"],
+  next: RepairIntelligenceReport["issues"],
+  evidenceRegistry: CaseEvidenceRegistryItem[]
+): RepairIntelligenceReport["issues"] {
+  const merged = new Map<string, RepairIntelligenceReport["issues"][number]>();
+
+  for (const issue of previous) {
+    merged.set(normalizeIssueKey(issue), issue);
+  }
+
+  for (const issue of next) {
+    const key = normalizeIssueKey(issue);
+    const existing = merged.get(key);
+    const relatedEvidenceIds = evidenceRegistry
+      .filter((item) => item.relatedIssueKeys.includes(issue.id))
+      .map((item) => item.id);
+
+    if (!existing) {
+      merged.set(key, {
+        ...issue,
+        evidenceIds: dedupeStrings([...issue.evidenceIds, ...relatedEvidenceIds]),
+      });
+      continue;
+    }
+
+    const evidenceStatus = strongestEvidenceStatus(
+      existing.evidenceStatus,
+      issue.evidenceStatus
+    );
+
+    merged.set(key, {
+      ...existing,
+      ...issue,
+      severity: strongestSeverity(existing.severity, issue.severity),
+      evidenceStatus,
+      evidenceIds: dedupeStrings([
+        ...existing.evidenceIds,
+        ...issue.evidenceIds,
+        ...relatedEvidenceIds,
+      ]),
+      impact:
+        evidenceStatus === existing.evidenceStatus && existing.impact
+          ? existing.impact
+          : issue.impact,
+    });
+  }
+
+  return [...merged.values()];
+}
+
+function buildReassessmentDelta(params: {
+  previousReport: RepairIntelligenceReport | null;
+  nextIssues: RepairIntelligenceReport["issues"];
+  nextEvidenceRegistry: CaseEvidenceRegistryItem[];
+  nextDetermination: string;
+}): ReassessmentDelta {
+  const previousEvidenceIds = new Set(
+    (params.previousReport?.evidenceRegistry ?? []).map((item) => item.id)
+  );
+  const previousIssueByKey = new Map(
+    (params.previousReport?.issues ?? []).map((issue) => [normalizeIssueKey(issue), issue])
+  );
+  const addedEvidenceIds = params.nextEvidenceRegistry
+    .filter((item) => !previousEvidenceIds.has(item.id))
+    .map((item) => item.id);
+  const statusChanges: ReassessmentDelta["statusChanges"] = params.nextIssues
+    .flatMap((issue) => {
+      const previous = previousIssueByKey.get(normalizeIssueKey(issue));
+      if (previous?.evidenceStatus === issue.evidenceStatus) return [];
+
+      return [{
+        key: issue.id,
+        from: previous?.evidenceStatus,
+        to: issue.evidenceStatus ?? "OPEN_PENDING_FURTHER_DOCUMENTATION",
+      }];
+    });
+  const newlyDocumented = statusChanges
+    .filter((change) => change.to === "DOCUMENTED")
+    .map((change) => change.key);
+  const stillOpen = params.nextIssues
+    .filter((issue) => issue.evidenceStatus !== "DOCUMENTED")
+    .map((issue) => issue.id);
+  const previousDetermination =
+    params.previousReport?.recommendedActions[0] ?? "";
+  const determinationChanged =
+    Boolean(previousDetermination.trim()) &&
+    normalizeText(previousDetermination) !== normalizeText(params.nextDetermination);
+
+  return {
+    addedEvidenceIds,
+    affectedIssueKeys: dedupeStrings([
+      ...statusChanges.map((change) => change.key),
+      ...params.nextEvidenceRegistry.flatMap((item) => item.relatedIssueKeys),
+    ]),
+    statusChanges,
+    newlyDocumented,
+    stillOpen,
+    determinationChanged,
+    summary:
+      addedEvidenceIds.length === 0 && statusChanges.length === 0
+        ? "No material evidence or issue-status change was detected in this reassessment."
+        : `${addedEvidenceIds.length} evidence item(s) added and ${statusChanges.length} issue status change(s) detected.`,
+  };
+}
+
+function buildSharedFactualCore(params: {
+  report: RepairIntelligenceReport;
+  evidenceRegistry: CaseEvidenceRegistryItem[];
+  activeCaseId?: string;
+  mode: "new_case" | "active_case_update";
+}): SharedFactualCore {
+  const report = params.report;
+  const vehicleSummary = [
+    report.vehicle?.year,
+    report.vehicle?.make,
+    report.vehicle?.model,
+    report.vehicle?.trim,
+    report.vehicle?.vin ? `VIN ${report.vehicle.vin}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ") || "Vehicle not fully established";
+  const visibleDamageObservations = params.evidenceRegistry
+    .filter((item) => item.sourceType === "photo")
+    .map((item) => `${item.label}: visible-condition evidence preserved.`);
+  const linkedEvidenceState = params.evidenceRegistry
+    .filter((item) => item.linkedUrl)
+    .map((item) => `${item.label}: ${item.ingestionState}`);
+  const issueAssessments = report.issues.map((issue) => ({
+    key: issue.id,
+    title: issue.title,
+    status: issue.evidenceStatus ?? "OPEN_PENDING_FURTHER_DOCUMENTATION",
+    severity: issue.severity,
+    summary: issue.impact || issue.finding,
+    evidenceIds: issue.evidenceIds,
+  }));
+  const openIssues = issueAssessments
+    .filter((issue) => issue.status !== "DOCUMENTED")
+    .map((issue) => issue.title);
+
+  return {
+    vehicleSummary,
+    currentCaseSummary:
+      report.recommendedActions[0] ??
+      "Current case remains under evidence-based review.",
+    visibleDamageObservations,
+    documentedRepairOperations: report.presentProcedures,
+    evidenceRegistrySummary: params.evidenceRegistry.map(
+      (item) => `${item.label}: ${item.sourceType}, ${item.evidenceStatus}`
+    ),
+    linkedEvidenceState,
+    issueAssessments,
+    documentedPositives: report.estimateFacts?.documentedHighlights ?? [],
+    openIssues,
+    unresolvedVerificationNeeds: dedupeStrings([
+      ...report.missingProcedures,
+      ...report.supplementOpportunities,
+    ]),
+    currentDetermination:
+      report.recommendedActions[0] ??
+      "Current determination remains provisional pending further documentation.",
+    caseContinuity: {
+      activeCaseId: params.activeCaseId,
+      mode: params.mode,
+      reassessedAt: new Date().toISOString(),
+      evidenceCount: params.evidenceRegistry.length,
+    },
+  };
+}
+
+function buildArtifactRefreshPolicy(params: {
+  report: RepairIntelligenceReport;
+  factualCore: SharedFactualCore;
+  delta: ReassessmentDelta;
+}): ArtifactRefreshPolicy {
+  const highImpactChanges = findHighImpactStatusChanges(params.report, params.delta);
+  const highImpactStillOpen = findIssuesByKeys(
+    params.report,
+    params.delta.stillOpen.filter((key) =>
+      params.delta.affectedIssueKeys.map(normalizeText).includes(normalizeText(key))
+    )
+  ).filter((issue) => issue.severity === "high");
+  const customerFacingSignals = buildCustomerFacingSignals(params.report, params.delta);
+  const disputeSignals = dedupeStrings([
+    ...highImpactChanges.map((issue) => `${issue.title} changed status`),
+    ...highImpactStillOpen.map((issue) => `${issue.title} remains open`),
+    ...params.delta.newlyDocumented.map((key) => `${key} became documented`),
+  ]);
+  const rebuttalSignals = disputeSignals.filter((signal) =>
+    /(open|documented|calibration|scan|structural|alignment|support|verification)/i.test(signal)
+  );
+  const mainSignals = dedupeStrings([
+    params.delta.determinationChanged ? "overall determination changed" : "",
+    ...highImpactChanges.map((issue) => `${issue.title} status changed`),
+    ...params.delta.newlyDocumented.map((key) => `${key} became documented`),
+    ...detectVisibleRepairPathSignals(params.factualCore, params.delta),
+  ]);
+  const anyArtifactRefresh =
+    mainSignals.length > 0 ||
+    customerFacingSignals.length > 0 ||
+    disputeSignals.length > 0 ||
+    rebuttalSignals.length > 0;
+
+  return {
+    mainReport: {
+      shouldRefresh: mainSignals.length > 0,
+      reason:
+        mainSignals.length > 0
+          ? "The main report has material case-level changes worth reflecting."
+          : "A concise Case Update is enough; the full main report does not need a rewrite.",
+      signals: mainSignals,
+    },
+    customerReport: {
+      shouldRefresh: customerFacingSignals.length > 0,
+      reason:
+        customerFacingSignals.length > 0
+          ? "The customer-facing repair explanation or expectations changed materially."
+          : "The customer-facing explanation remains materially stable.",
+      signals: customerFacingSignals,
+    },
+    disputeReport: {
+      shouldRefresh: disputeSignals.length > 0,
+      reason:
+        disputeSignals.length > 0
+          ? "Dispute prioritization or documentation status changed."
+          : "Dispute priorities did not materially change.",
+      signals: disputeSignals,
+    },
+    rebuttalOutput: {
+      shouldRefresh: rebuttalSignals.length > 0,
+      reason:
+        rebuttalSignals.length > 0
+          ? "Carrier-facing asks may need to reflect newly changed support status."
+          : "Carrier-facing asks appear materially unchanged.",
+      signals: rebuttalSignals,
+    },
+    chatSummaryOnly: {
+      shouldRefresh: !anyArtifactRefresh,
+      reason: anyArtifactRefresh
+        ? "At least one artifact has a material refresh signal."
+        : "No artifact-level material change was detected; a chat/UI delta summary is sufficient.",
+      signals: anyArtifactRefresh ? [] : ["no material artifact refresh signal"],
+    },
+  };
+}
+
+function findHighImpactStatusChanges(
+  report: RepairIntelligenceReport,
+  delta: ReassessmentDelta
+) {
+  const changedKeys = new Set(delta.statusChanges.map((change) => normalizeText(change.key)));
+  return report.issues.filter(
+    (issue) =>
+      issue.severity === "high" &&
+      (changedKeys.has(normalizeText(issue.id)) ||
+        changedKeys.has(normalizeIssueKey(issue)))
+  );
+}
+
+function findIssuesByKeys(report: RepairIntelligenceReport, keys: string[]) {
+  const normalizedKeys = new Set(keys.map(normalizeText));
+  return report.issues.filter(
+    (issue) =>
+      normalizedKeys.has(normalizeText(issue.id)) ||
+      normalizedKeys.has(normalizeIssueKey(issue))
+  );
+}
+
+function buildCustomerFacingSignals(
+  report: RepairIntelligenceReport,
+  delta: ReassessmentDelta
+): string[] {
+  const changedIssues = findIssuesByKeys(report, [
+    ...delta.affectedIssueKeys,
+    ...delta.newlyDocumented,
+  ]);
+
+  return dedupeStrings(
+    changedIssues
+      .filter((issue) =>
+        issue.severity === "high" &&
+        /(damage|structural|safety|suspension|wheel|alignment|fit|drivability|door|glass|trim|sealing|calibration)/i.test(
+          `${issue.title} ${issue.impact}`
+        )
+      )
+      .map((issue) => `${issue.title} affects customer-facing repair expectations`)
+  );
+}
+
+function detectVisibleRepairPathSignals(
+  factualCore: SharedFactualCore,
+  delta: ReassessmentDelta
+): string[] {
+  if (delta.addedEvidenceIds.length === 0) return [];
+
+  const visibleDamageChanged = factualCore.visibleDamageObservations.some((item) =>
+    delta.addedEvidenceIds.some((id) => item.includes(id))
+  );
+
+  return visibleDamageChanged
+    ? ["visible repair-path understanding changed"]
+    : [];
+}
+
+function classifyUploadedEvidenceSource(attachment: StoredAttachment): CaseEvidenceSourceType {
+  const text = `${attachment.filename}\n${attachment.type}\n${attachment.text}`.toLowerCase();
+
+  if (attachment.type.startsWith("image/")) return "photo";
+  if (text.includes("carrier") || text.includes("insurance estimate")) return "carrier_estimate";
+  if (text.includes("shop") || text.includes("repair facility")) return "shop_estimate";
+  if (text.includes("supplement")) return "supplement";
+  if (text.includes("scan")) return "scan_report";
+  if (text.includes("calibration")) return "calibration_report";
+  if (text.includes("adas")) return "adas_report";
+  if (text.includes("oem") || text.includes("procedure")) return "oem_documentation";
+  return "other_supporting_document";
+}
+
+function classifyLinkedEvidenceSource(doc: LinkedEvidence): CaseEvidenceSourceType {
+  const text = `${doc.url}\n${doc.title ?? ""}\n${doc.text}`.toLowerCase();
+
+  if (text.includes("adas") || text.includes("calibration")) return "adas_report";
+  if (text.includes("scan")) return "scan_report";
+  if (text.includes("oem") || text.includes("procedure") || text.includes("position statement")) {
+    return "procedure_link";
+  }
+  return "other_supporting_document";
+}
+
+function inferRelatedIssueKeys(text: string, issueKeys: string[]): string[] {
+  const lower = text.toLowerCase();
+  return issueKeys.filter((key) => {
+    const normalized = key.toLowerCase().replace(/[-_]+/g, " ");
+    return normalized
+      .split(/\s+/)
+      .filter((part) => part.length >= 4)
+      .some((part) => lower.includes(part));
+  });
+}
+
+function mergeLinkedEvidence(
+  previous: LinkedEvidence[],
+  next: LinkedEvidence[]
+): LinkedEvidence[] {
+  const merged = new Map<string, LinkedEvidence>();
+  for (const item of previous) {
+    merged.set(item.url, item);
+  }
+  for (const item of next) {
+    const existing = merged.get(item.url);
+    if (!existing || existing.status !== "ok") {
+      merged.set(item.url, item);
+    }
+  }
+  return [...merged.values()];
+}
+
+function mergeArtifactIds(previous: string[], next: string[]): string[] {
+  return dedupeStrings([...previous, ...next]);
+}
+
+function normalizeIssueKey(issue: RepairIntelligenceReport["issues"][number]): string {
+  return normalizeText(issue.missingOperation || issue.title || issue.id);
+}
+
+function normalizeText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function strongestEvidenceStatus(
+  left?: IssueEvidenceStatus,
+  right?: IssueEvidenceStatus
+): IssueEvidenceStatus {
+  const rank: Record<IssueEvidenceStatus, number> = {
+    DOCUMENTED: 6,
+    VISIBLE_IN_IMAGES: 5,
+    REFERENCED_NOT_PRODUCED: 4,
+    SUPPORTABLE_BUT_UNCONFIRMED: 3,
+    OPEN_PENDING_FURTHER_DOCUMENTATION: 2,
+    NOT_ESTABLISHED: 1,
+  };
+  const fallback: IssueEvidenceStatus = "OPEN_PENDING_FURTHER_DOCUMENTATION";
+  const leftStatus = left ?? fallback;
+  const rightStatus = right ?? fallback;
+  return rank[leftStatus] >= rank[rightStatus] ? leftStatus : rightStatus;
+}
+
+function strongestSeverity(
+  left: RepairIntelligenceReport["issues"][number]["severity"],
+  right: RepairIntelligenceReport["issues"][number]["severity"]
+) {
+  const rank = {
+    low: 1,
+    medium: 2,
+    high: 3,
+  };
+  return rank[left] >= rank[right] ? left : right;
 }
 
 function mergeLinkedEvidenceRecords(
@@ -366,13 +939,18 @@ function mergeLinkedEvidenceRecords(
   linkedEvidence: LinkedEvidence[]
 ): RepairIntelligenceReport["evidence"] {
   const linked = linkedEvidence
-    .filter((doc) => doc.status === "ok" && Boolean(doc.text.trim()))
     .map((doc, index) => ({
       id: `linked-${index + 1}`,
-      title: doc.title || "Linked document",
-      snippet: doc.text.slice(0, 280),
+      title:
+        doc.status === "ok"
+          ? doc.title || "Linked document"
+          : doc.title || "Referenced linked document",
+      snippet:
+        doc.status === "ok" && doc.text.trim()
+          ? doc.text.slice(0, 280)
+          : `Referenced link detected but not reviewed. Status: ${doc.status}. ${doc.notes ?? ""}`.trim(),
       source: doc.url,
-      authority: "oem" as const,
+      authority: doc.status === "ok" ? ("oem" as const) : ("inferred" as const),
     }));
 
   const deduped = new Map<string, RepairIntelligenceReport["evidence"][number]>();
@@ -613,6 +1191,8 @@ async function generateDriveRefinedAnalysis(params: {
             type: "input_text",
             text: `You are a collision repair decision engine.
 
+${NON_BIAS_ACCURACY_DIRECTIVE}
+
 If the user intent includes repairability, total loss, or grading:
 
 You MUST structure your response as:
@@ -633,6 +1213,7 @@ Rules:
 - do not dump documents or overquote excerpts
 - keep the narrative concise, natural, and direct
 - preserve a professional estimator tone
+- keep documented facts, visible conditions, inferences, and unresolved verification needs separate
 - return JSON only with this shape:
 {
   "narrative": "string",
@@ -1119,6 +1700,8 @@ async function generateSupplementCandidates(
             type: "input_text",
             text: `You are reviewing a collision repair estimate.
 
+${NON_BIAS_ACCURACY_DIRECTIVE}
+
 Use the vehicle-specific required procedure context below to decide what functions are not clearly represented.
 
 Important:
@@ -1126,6 +1709,8 @@ Important:
 - Do NOT suggest front camera, radar, blind spot, or other ADAS calibrations unless they are supported by the required procedure context
 - If a function is already represented in the estimate or present-procedure list, do NOT include it
 - Only flag items that are truly unclear or absent
+- Consolidate duplicate or overlapping issues into one supportable candidate
+- Do not frame a supplement candidate as confirmed unless it is directly documented
 
 Return JSON only:
 [

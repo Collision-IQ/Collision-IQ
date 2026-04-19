@@ -4,6 +4,11 @@ import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeRepo
 import type { NormalizedDeterminationResult } from "@/lib/analysis/normalizeDetermination";
 import { getNormalizedDetermination } from "@/lib/analysis/getNormalizedDetermination";
 import { getAnalysisReport } from "@/lib/analysisReportStore";
+import type {
+  ArtifactRefreshPolicy,
+  ReassessmentDelta,
+  SharedFactualCore,
+} from "@/lib/ai/types/analysis";
 import type { LinkedEvidence } from "@/lib/ingest/fetchLinkedEvidence";
 import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
 
@@ -37,6 +42,9 @@ export type StoredCaseData = {
     trim: string | null;
     vin: string | null;
   };
+  factualCore: SharedFactualCore | null;
+  reassessmentDelta: ReassessmentDelta | null;
+  artifactRefreshPolicy: ArtifactRefreshPolicy | null;
   exportModel: ExportModel;
 };
 
@@ -123,6 +131,9 @@ export async function getCaseById(
         : exportModel.determination?.missingFactors ?? [],
     extractedFacts,
     vehicle,
+    factualCore: storedReport.report.factualCore ?? null,
+    reassessmentDelta: storedReport.report.reassessmentDelta ?? null,
+    artifactRefreshPolicy: storedReport.report.artifactRefreshPolicy ?? null,
     exportModel,
   };
 }

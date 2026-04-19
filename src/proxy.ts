@@ -8,6 +8,7 @@ const hasClerkPublishableKey = Boolean(
 const isProtectedRoute = createRouteMatcher([
   "/account(.*)",
   "/billing(.*)",
+  "/chatbot(.*)",
   "/dashboard(.*)",
 ]);
 

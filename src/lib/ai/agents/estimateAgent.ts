@@ -51,7 +51,7 @@ function analyzeScope(
     observation: `The repair scope is centered around ${scopeLabel}.`,
     comparison:
       shop.lines.length > insurer.lines.length || shopOperations.length > insurerOperations.length
-        ? "The insurer estimate appears reduced in scope."
+        ? "The documents carry different scope depth."
         : "Scope appears generally aligned.",
   };
 }
@@ -66,8 +66,9 @@ function analyzeLabor(
     shop.bodyHours > insurer.bodyHours
   ) {
     return {
-      observation: "Body labor appears reduced in the insurer estimate.",
-      impact: "This suggests potential underwriting rather than omission.",
+      observation: "Body labor differs between the two estimates.",
+      impact:
+        "The difference should be evaluated against documented damage, access needs, repair procedures, and verification requirements.",
     };
   }
 
@@ -88,7 +89,7 @@ function analyzeStructure(
     observation:
       "The structure of the estimate matters more than individual line items.",
     impact: compressed
-      ? "Compressed operations can indicate reduced repair depth even when items appear present."
+      ? "Different operation depth can affect repair completeness, but significance requires confirmation against the file evidence."
       : "The line structure appears broadly aligned, so the bigger question is whether the documented operations are supported clearly enough.",
   };
 }
@@ -103,8 +104,9 @@ function analyzeCost(
     shop.totalCost > insurer.totalCost
   ) {
     return {
-      observation: "Total cost difference reflects reduced operations.",
-      impact: "This is likely a negotiation point rather than a documentation issue.",
+      observation: "The estimates carry different total costs.",
+      impact:
+        "The cost difference should be read through documented scope, safety verification, fit, function, and value rather than assumed fault by either party.",
     };
   }
 

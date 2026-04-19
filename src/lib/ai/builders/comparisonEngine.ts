@@ -91,6 +91,11 @@ function buildNarrative(params: {
     narrative += `${keyDifferences.join(" ")} `;
   }
 
+  if (params.findings.some((finding) => finding.status !== "present")) {
+    narrative +=
+      "The documents describe the repair path differently; final significance depends on whether the narrower document still supports safe, complete repair, fit, function, verification, and value. ";
+  }
+
   const equivalenceFinding = params.findings.find(
     (finding) => finding.category === "functional_equivalence"
   );
@@ -119,10 +124,10 @@ function buildComparisonFindings(params: {
       id: "comparison-scope-reduction",
       bucket: "compliance",
       category: "scope_difference",
-      title: "Carrier estimate narrows repair scope",
+      title: "Documents carry different repair scope",
       detail: `Panels visible in the shop estimate but not clearly carried in the carrier estimate include ${scopeReduction
         .slice(0, 4)
-        .join(", ")}.`,
+        .join(", ")}. This item is documented in one repair document but not clearly carried in the other; the repair significance requires confirmation against the vehicle condition and complete repair procedure needs.`,
       severity: scopeReduction.length >= 3 ? "high" : "medium",
       status: "not_detected",
       evidence: [],
@@ -139,9 +144,9 @@ function buildComparisonFindings(params: {
       id: "comparison-structural-classification",
       bucket: "critical",
       category: "structural_difference",
-      title: "Carrier estimate downshifts structural classification",
+      title: "Documents describe structural classification differently",
       detail:
-        "The shop estimate reads as structural or reinforced work, while the carrier estimate reads closer to a non-structural version of the same repair.",
+        "One estimate reads as structural or reinforced work, while the other reads closer to a non-structural version of the same repair. Final significance depends on documented measurements, repair procedures, and fit or dimensional verification.",
       severity: "high",
       status: "not_detected",
       evidence: [],
@@ -205,8 +210,8 @@ function buildLaborDifference(
     id: "comparison-labor-structure",
     bucket: "compliance",
     category: "labor_difference",
-    title: "Carrier estimate carries lighter labor structure",
-    detail: `${details.join(" and ")}. That reads more like a compressed repair plan than a simple wording change.`,
+    title: "Documents carry different labor structure",
+    detail: `${details.join(" and ")}. The documents describe different labor depth, which may affect repair completeness, access, fit, finish, or verification if the narrower labor structure is not otherwise supported.`,
     severity: bodyDelta >= 2 || paintDelta >= 2 ? "high" : "medium",
     status: "not_detected",
     evidence: [],
@@ -230,11 +235,11 @@ function buildProcessDifference(
     id: "comparison-process-shift",
     bucket: "quality",
     category: "process_difference",
-    title: "Carrier estimate appears restructured rather than simply shortened",
+    title: "Documents describe repair process differently",
     detail:
       replaceShift > 0 && repairShift > 0
-        ? "The carrier version appears to trade replacement depth for more repair-style language, which can change the process without looking like a direct omission."
-        : "The process structure changes between the two estimates, which suggests reduction or reframing rather than a one-line difference.",
+        ? "One version appears to trade replacement depth for more repair-style language. Whether that is supportable depends on documented damage extent, access, repair procedures, and verification results."
+        : "The process structure changes between the two estimates. Whether the difference is material depends on documented damage extent, repair procedures, and verification results.",
     severity: replaceShift > 1 ? "high" : "medium",
     status: "unclear",
     evidence: [],

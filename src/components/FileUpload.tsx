@@ -2,7 +2,7 @@
 
 import React, { useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
-import { SignedOut, SignInButton } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 import type { UploadedDocument } from "@/lib/sessionStore";
 
 type Props = {
@@ -14,6 +14,7 @@ export default function FileUpload({
   onUploadComplete,
   buttonLabel = "Upload documents",
 }: Props) {
+  const router = useRouter();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const { isLoaded, isSignedIn } = useUser();
 
@@ -27,6 +28,7 @@ export default function FileUpload({
     if (!files || files.length === 0) return;
 
     if (uploadDisabled) {
+      router.push("/sign-in?next=/chatbot");
       setError("Please sign in before uploading.");
       return;
     }
@@ -45,6 +47,7 @@ export default function FileUpload({
       });
 
       if (res.status === 401) {
+        router.push("/sign-in?next=/chatbot");
         throw new Error("Please sign in before uploading.");
       }
 
@@ -86,6 +89,7 @@ export default function FileUpload({
     setDragActive(false);
 
     if (uploadDisabled) {
+      router.push("/sign-in?next=/chatbot");
       setError("Please sign in before uploading.");
       return;
     }
@@ -123,6 +127,7 @@ export default function FileUpload({
         } ${dragActive ? "bg-white/10" : "bg-black/40"}`}
         onClick={() => {
           if (uploadDisabled) {
+            router.push("/sign-in?next=/chatbot");
             setError("Please sign in before uploading.");
             return;
           }
@@ -137,20 +142,7 @@ export default function FileUpload({
 
         <div className="text-xs text-white/40">
           {uploadDisabled ? (
-            <SignedOut>
-              <SignInButton
-                mode="modal"
-                forceRedirectUrl={typeof window !== "undefined" ? window.location.href : "/"}
-              >
-                <button
-                  type="button"
-                  className="underline text-white/60 hover:text-white/85 transition"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  Sign in to upload files
-                </button>
-              </SignInButton>
-            </SignedOut>
+            "Sign in to upload files"
           ) : (
             "Drag files here or click to browse"
           )}

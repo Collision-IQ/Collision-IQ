@@ -1,15 +1,274 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
-generator client {
-  provider = "prisma-client-js"
+model SyncJob {
+  id           String    @id @default(cuid())
+  egnytePath   String?
+  egnyteId     String?
+  status       String    @default("pending")
+  attempts     Int       @default(0)
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  cursor       Json?
+  lockedAt     DateTime?
+  lockedBy     String?
+  stage        String?
+  type         String
+}
+
+model FileMap {
+  id            String    @id @default(cuid())
+  egnyteId      String    @unique
+  egnytePath    String
+  driveFileId   String
+  driveParentId String?
+  lastModified  DateTime?
+  contentHash   String?
+  tombstoned    Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model FileMirrorMap {
+  egnytePath   String   @id
+  egnyteFileId String?
+  driveFileId  String
+  drivePath    String?
+  modifiedTime String?
+  contentHash  String?
+  lastSyncedAt DateTime @default(now())
+
+  @@index([driveFileId])
+}
+
+model User {
+  id               String            @id @default(cuid())
+  clerkUserId      String            @unique
+  email            String?           @unique
+  firstName        String?
+  lastName         String?
+  imageUrl         String?
+  isPlatformAdmin  Boolean           @default(false)
+  defaultShopId    String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  consents         ChatConsent[]
+  featureOverrides FeatureOverride[]
+  IdempotencyKey   IdempotencyKey[]
+  ownedShops       Shop[]            @relation("ShopOwner")
+  memberships      ShopMembership[]
+  subscriptions    Subscription[]
+  UsageCounter     UsageCounter[]
+  usageRecords     UsageRecord[]
+  defaultShop      Shop?             @relation("UserDefaultShop", fields: [defaultShopId], references: [id])
+}
+
+model Shop {
+  id               String            @id @default(cuid())
+  name             String
+  slug             String            @unique
+  ownerId          String
+  stripeCustomerId String?           @unique
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  featureOverrides FeatureOverride[]
+  owner            User              @relation("ShopOwner", fields: [ownerId], references: [id])
+  memberships      ShopMembership[]
+  subscriptions    Subscription[]
+  usageRecords     UsageRecord[]
+  defaultUsers     User[]            @relation("UserDefaultShop")
+}
+
+model ShopMembership {
+  id           String   @id @default(cuid())
+  shopId       String
+  userId       String
+  role         ShopRole @default(MEMBER)
+  isSeatActive Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, userId])
+  @@index([userId])
+}
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  userId               String?
+  shopId               String?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?            @unique
+  stripePriceId        String?
+  plan                 SubscriptionPlan   @default(STARTER)
+  status               SubscriptionStatus @default(INCOMPLETE)
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  shop                 Shop?              @relation(fields: [shopId], references: [id])
+  user                 User?              @relation(fields: [userId], references: [id])
+  usageRecords         UsageRecord[]
+
+  @@index([userId])
+  @@index([shopId])
+  @@index([status])
+}
+
+model UsageRecord {
+  id             String        @id @default(cuid())
+  userId         String?
+  shopId         String?
+  subscriptionId String?
+  kind           UsageKind
+  periodKey      String
+  quantity       Int           @default(1)
+  metadata       Json?
+  createdAt      DateTime      @default(now())
+  shop           Shop?         @relation(fields: [shopId], references: [id])
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+  user           User?         @relation(fields: [userId], references: [id])
+
+  @@index([userId, kind, periodKey])
+  @@index([shopId, kind, periodKey])
+}
+
+model ChatConsent {
+  id              String        @id @default(cuid())
+  userId          String
+  status          ConsentStatus @default(ACCEPTED)
+  acceptedAt      DateTime
+  termsVersion    String
+  privacyVersion  String
+  checkboxChecked Boolean
+  ipAddress       String?
+  userAgent       String?
+  sessionId       String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, acceptedAt])
+}
+
+model FeatureOverride {
+  id         String    @id @default(cuid())
+  userId     String?
+  shopId     String?
+  featureKey String
+  enabled    Boolean
+  notes      String?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  shop       Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  user       User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, featureKey])
+  @@index([shopId, featureKey])
+}
+
+model UploadedAttachment {
+  id           String                   @id @default(cuid())
+  filename     String
+  type         String
+  text         String
+  imageDataUrl String?
+  pageCount    Int?
+  ownerType    ArtifactOwnerType
+  ownerId      String
+  sessionId    String?
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+  reports      AnalysisReportArtifact[]
+
+  @@index([ownerType, ownerId, createdAt])
+  @@index([sessionId, createdAt])
+}
+
+model AnalysisReport {
+  id        String                   @id @default(cuid())
+  ownerType ArtifactOwnerType
+  ownerId   String
+  sessionId String?
+  report    Json
+  createdAt DateTime                 @default(now())
+  updatedAt DateTime                 @updatedAt
+  artifacts AnalysisReportArtifact[]
+
+  @@index([ownerType, ownerId, createdAt])
+  @@index([sessionId, createdAt])
+}
+
+model AnalysisReportArtifact {
+  reportId     String
+  attachmentId String
+  attachment   UploadedAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  report       AnalysisReport     @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@id([reportId, attachmentId])
+  @@index([attachmentId])
+}
+
+model IdempotencyKey {
+  key       String   @id
+  userId    String
+  action    String
+  status    String
+  response  Json?
+  errorCode String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, action])
+}
+
+model UsageCounter {
+  id        String    @id
+  userId    String
+  kind      UsageKind
+  count     Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @default(now())
+  User      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind])
+  @@index([kind])
+}
+
+model document_chunks {
+  id        Int                    @id @default(autoincrement())
+  content   String?
+  embedding Unsupported("vector")?
+  file_id   String?
+}
+
+model drive_watch_state {
+  id              String    @id
+  last_page_token String
+  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model rag_chunks {
+  id         String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  drive_path String?
+  text       String?
+  embedding  Unsupported("vector")?
+  created_at DateTime?              @default(now()) @db.Timestamp(6)
 }
 
 enum SubscriptionPlan {
-  CHAT_ONLY
   STARTER
   PRO
   TEAM
@@ -40,235 +299,13 @@ enum ConsentStatus {
 
 enum UsageKind {
   ANALYSIS_COMPLETED
+  FILE_UPLOAD
+  REPORT_EXPORT
+  CHAT_EXPORT
 }
 
 enum ArtifactOwnerType {
   ANONYMOUS
   USER
   SHOP
-}
-
-model SyncJob {
-  id String @id @default(cuid())
-
-  type   String // BACKFILL | WEBHOOK
-  status String @default("pending")
-
-  stage  String? // LIST | MIRROR_FOLDERS | MIRROR_FILES
-  cursor Json?
-
-  egnytePath String?
-  egnyteId   String?
-
-  attempts     Int       @default(0)
-  lockedAt     DateTime?
-  lockedBy     String?
-  errorMessage String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model FileMap {
-  id            String    @id @default(cuid())
-  egnyteId      String    @unique
-  egnytePath    String
-  driveFileId   String
-  driveParentId String?
-  lastModified  DateTime?
-  contentHash   String?
-  tombstoned    Boolean   @default(false)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-}
-
-model FileMirrorMap {
-  egnytePath   String   @id
-  egnyteFileId String?
-  driveFileId  String
-  drivePath    String?
-  modifiedTime String?
-  contentHash  String?
-  lastSyncedAt DateTime @default(now())
-
-  @@index([driveFileId])
-}
-
-model User {
-  id              String   @id @default(cuid())
-  clerkUserId     String   @unique
-  email           String?  @unique
-  firstName       String?
-  lastName        String?
-  imageUrl        String?
-  isPlatformAdmin Boolean  @default(false)
-  defaultShopId   String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  defaultShop      Shop?             @relation("UserDefaultShop", fields: [defaultShopId], references: [id])
-  consents         ChatConsent[]
-  featureOverrides FeatureOverride[]
-  memberships      ShopMembership[]
-  ownedShops       Shop[]            @relation("ShopOwner")
-  subscriptions    Subscription[]
-  usageRecords     UsageRecord[]
-}
-
-model Shop {
-  id               String   @id @default(cuid())
-  name             String
-  slug             String   @unique
-  ownerId          String
-  stripeCustomerId String?  @unique
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  owner            User              @relation("ShopOwner", fields: [ownerId], references: [id])
-  defaultUsers     User[]            @relation("UserDefaultShop")
-  featureOverrides FeatureOverride[]
-  memberships      ShopMembership[]
-  subscriptions    Subscription[]
-  usageRecords     UsageRecord[]
-}
-
-model ShopMembership {
-  id           String   @id @default(cuid())
-  shopId       String
-  userId       String
-  role         ShopRole @default(MEMBER)
-  isSeatActive Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([shopId, userId])
-  @@index([userId])
-}
-
-model Subscription {
-  id                   String             @id @default(cuid())
-  userId               String?
-  shopId               String?
-  stripeCustomerId     String?
-  stripeSubscriptionId String?            @unique
-  stripePriceId        String?
-  plan                 SubscriptionPlan   @default(STARTER)
-  status               SubscriptionStatus @default(INCOMPLETE)
-  currentPeriodStart   DateTime?
-  currentPeriodEnd     DateTime?
-  cancelAtPeriodEnd    Boolean            @default(false)
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
-
-  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
-  shop         Shop?         @relation(fields: [shopId], references: [id], onDelete: SetNull)
-  usageRecords UsageRecord[]
-
-  @@index([userId])
-  @@index([shopId])
-  @@index([status])
-}
-
-model UsageRecord {
-  id             String    @id @default(cuid())
-  userId         String?
-  shopId         String?
-  subscriptionId String?
-  kind           UsageKind
-  periodKey      String
-  quantity       Int       @default(1)
-  metadata       Json?
-  createdAt      DateTime  @default(now())
-
-  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
-  shop         Shop?         @relation(fields: [shopId], references: [id], onDelete: SetNull)
-  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
-
-  @@index([userId, kind, periodKey])
-  @@index([shopId, kind, periodKey])
-}
-
-model ChatConsent {
-  id              String        @id @default(cuid())
-  userId          String
-  status          ConsentStatus @default(ACCEPTED)
-  acceptedAt      DateTime
-  termsVersion    String
-  privacyVersion  String
-  checkboxChecked Boolean
-  ipAddress       String?
-  userAgent       String?
-  sessionId       String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, acceptedAt])
-}
-
-model FeatureOverride {
-  id         String    @id @default(cuid())
-  userId     String?
-  shopId     String?
-  featureKey String
-  enabled    Boolean
-  notes      String?
-  expiresAt  DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-
-  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
-  shop Shop? @relation(fields: [shopId], references: [id], onDelete: Cascade)
-
-  @@index([userId, featureKey])
-  @@index([shopId, featureKey])
-}
-
-model UploadedAttachment {
-  id           String            @id @default(cuid())
-  filename     String
-  type         String
-  text         String
-  imageDataUrl String?
-  pageCount    Int?
-  ownerType    ArtifactOwnerType
-  ownerId      String
-  sessionId    String?
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
-
-  reports AnalysisReportArtifact[]
-
-  @@index([ownerType, ownerId, createdAt])
-  @@index([sessionId, createdAt])
-}
-
-model AnalysisReport {
-  id        String            @id @default(cuid())
-  ownerType ArtifactOwnerType
-  ownerId   String
-  sessionId String?
-  report    Json
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
-
-  artifacts AnalysisReportArtifact[]
-
-  @@index([ownerType, ownerId, createdAt])
-  @@index([sessionId, createdAt])
-}
-
-model AnalysisReportArtifact {
-  reportId     String
-  attachmentId String
-
-  report     AnalysisReport     @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  attachment UploadedAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
-
-  @@id([reportId, attachmentId])
-  @@index([attachmentId])
 }

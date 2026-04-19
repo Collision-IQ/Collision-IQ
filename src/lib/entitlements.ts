@@ -5,7 +5,7 @@ import type {
   SubscriptionPlan,
   SubscriptionStatus,
 } from "@prisma/client";
-import { getPlanAnalysisCap, PRO_TRIAL_DAYS } from "@/lib/billing/plans";
+import { getPlanAnalysisCap } from "@/lib/billing/plans";
 import { getOrCreateAppUser } from "@/lib/auth/get-or-create-app-user";
 import { prisma } from "@/lib/prisma";
 
@@ -18,6 +18,7 @@ export type FeatureKey =
   | "vehicle_context"
   | "basic_pdf_export"
   | "redacted_chat_export"
+  | "customer_report"
   | "supplement_lines"
   | "negotiation_draft"
   | "rebuttal_email"
@@ -44,6 +45,24 @@ export type ViewerAccess = {
   consentStatus: ConsentStatus | null;
 };
 
+export type Capabilities = {
+  canChat: boolean;
+  canUpload: boolean;
+  canUseBasicExports: boolean;
+  canUseCustomerReport: boolean;
+  canUseRebuttalEmail: boolean;
+  canUseSupplementLines: boolean;
+  canUseNegotiationDraft: boolean;
+  uploadLimit: number;
+  mainExportLimit: number;
+  plan: "NONE" | "STARTER" | "PRO" | "TEAM" | "ADMIN";
+};
+
+const CAPABILITY_ACTIVE_STATUSES = new Set<SubscriptionStatus>([
+  "ACTIVE",
+  "TRIALING",
+]);
+
 const PLAN_FEATURES: Record<PlanTier, Record<FeatureKey, boolean>> = {
   starter: {
     basic_chat: true,
@@ -53,6 +72,7 @@ const PLAN_FEATURES: Record<PlanTier, Record<FeatureKey, boolean>> = {
     vehicle_context: true,
     basic_pdf_export: true,
     redacted_chat_export: false,
+    customer_report: false,
     supplement_lines: false,
     negotiation_draft: false,
     rebuttal_email: false,
@@ -69,6 +89,7 @@ const PLAN_FEATURES: Record<PlanTier, Record<FeatureKey, boolean>> = {
     vehicle_context: true,
     basic_pdf_export: true,
     redacted_chat_export: true,
+    customer_report: true,
     supplement_lines: true,
     negotiation_draft: true,
     rebuttal_email: true,
@@ -85,6 +106,7 @@ const PLAN_FEATURES: Record<PlanTier, Record<FeatureKey, boolean>> = {
     vehicle_context: true,
     basic_pdf_export: true,
     redacted_chat_export: true,
+    customer_report: true,
     supplement_lines: true,
     negotiation_draft: true,
     rebuttal_email: true,
@@ -95,11 +117,121 @@ const PLAN_FEATURES: Record<PlanTier, Record<FeatureKey, boolean>> = {
   },
 };
 
+const NONE_FEATURES: Record<FeatureKey, boolean> = {
+  basic_chat: true,
+  uploads: false,
+  at_a_glance: true,
+  what_stands_out: true,
+  vehicle_context: true,
+  basic_pdf_export: false,
+  redacted_chat_export: false,
+  customer_report: false,
+  supplement_lines: false,
+  negotiation_draft: false,
+  rebuttal_email: false,
+  side_by_side_report: false,
+  line_by_line_report: false,
+  shop_management: false,
+  pooled_usage: false,
+};
+
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set<SubscriptionStatus>([
   "ACTIVE",
   "TRIALING",
   "PAST_DUE",
 ]);
+
+/**
+ * Resolve user capabilities from active subscription.
+ * Three main states:
+ * - No subscription (NONE): chat only
+ * - STARTER plan: upload/export with 1-use limits
+ * - PRO/TEAM plans: unlimited uploads/exports + premium features
+ */
+export function resolveCapabilities(user: {
+  isPlatformAdmin?: boolean;
+  subscriptions?: Array<{
+    plan: SubscriptionPlan;
+    status: SubscriptionStatus;
+  }>;
+}): Capabilities {
+  if (user.isPlatformAdmin) {
+    return {
+      plan: "ADMIN",
+      canChat: true,
+      canUpload: true,
+      canUseBasicExports: true,
+      canUseCustomerReport: true,
+      canUseRebuttalEmail: true,
+      canUseSupplementLines: true,
+      canUseNegotiationDraft: true,
+      uploadLimit: Number.POSITIVE_INFINITY,
+      mainExportLimit: Number.POSITIVE_INFINITY,
+    };
+  }
+
+  const activeSubscription =
+    user.subscriptions?.find((sub) => CAPABILITY_ACTIVE_STATUSES.has(sub.status)) ?? null;
+
+  if (!activeSubscription) {
+    return {
+      canChat: true,
+      canUpload: false,
+      canUseBasicExports: false,
+      canUseCustomerReport: false,
+      canUseRebuttalEmail: false,
+      canUseSupplementLines: false,
+      canUseNegotiationDraft: false,
+      uploadLimit: 0,
+      mainExportLimit: 0,
+      plan: "NONE",
+    };
+  }
+
+  if (activeSubscription.plan === "STARTER") {
+    return {
+      canChat: true,
+      canUpload: true,
+      canUseBasicExports: true,
+      canUseCustomerReport: false,
+      canUseRebuttalEmail: false,
+      canUseSupplementLines: false,
+      canUseNegotiationDraft: false,
+      uploadLimit: 1,
+      mainExportLimit: 1,
+      plan: "STARTER",
+    };
+  }
+
+  if (activeSubscription.plan === "PRO" || activeSubscription.plan === "TEAM") {
+    return {
+      canChat: true,
+      canUpload: true,
+      canUseBasicExports: true,
+      canUseCustomerReport: true,
+      canUseRebuttalEmail: true,
+      canUseSupplementLines: true,
+      canUseNegotiationDraft: true,
+      uploadLimit: Number.POSITIVE_INFINITY,
+      mainExportLimit: Number.POSITIVE_INFINITY,
+      plan: activeSubscription.plan,
+    };
+  }
+
+  // Fallback: no recognized plan
+  return {
+    canChat: true,
+    canUpload: false,
+    canUseBasicExports: false,
+    canUseCustomerReport: false,
+    canUseRebuttalEmail: false,
+    canUseSupplementLines: false,
+    canUseNegotiationDraft: false,
+    uploadLimit: 0,
+    mainExportLimit: 0,
+    plan: "NONE",
+  };
+}
 
 type SubscriptionWithRelations = Prisma.SubscriptionGetPayload<{
   include: {
@@ -327,6 +459,7 @@ async function buildAccessFromDbUser(dbUser: DbUserWithRelations): Promise<Viewe
         vehicle_context: true,
         basic_pdf_export: true,
         redacted_chat_export: true,
+        customer_report: true,
         supplement_lines: true,
         negotiation_draft: true,
         rebuttal_email: true,
@@ -346,7 +479,6 @@ async function buildAccessFromDbUser(dbUser: DbUserWithRelations): Promise<Viewe
     };
   }
 
-  const localTrialActive = isLocalIntroTrialActive(dbUser, activeSubscription);
   const hasStripeTrial =
     activeSubscription?.status === "TRIALING";
 
@@ -358,18 +490,14 @@ async function buildAccessFromDbUser(dbUser: DbUserWithRelations): Promise<Viewe
 
   if (hasStripeTrial || hasActivePaid) {
     effectivePlan = mapSubscriptionPlan(activeSubscription?.plan);
-  } else if (localTrialActive) {
-    effectivePlan = "pro"; // trial = pro access
   } else {
-    effectivePlan = "starter"; // UI will restrict to chat-only
+    effectivePlan = "starter";
   }
 
   let effectiveStatus: SubscriptionStatus | null;
 
   if (hasStripeTrial || hasActivePaid) {
     effectiveStatus = activeSubscription?.status ?? null;
-  } else if (localTrialActive) {
-    effectiveStatus = "TRIALING";
   } else {
     effectiveStatus = null;
   }
@@ -383,11 +511,9 @@ async function buildAccessFromDbUser(dbUser: DbUserWithRelations): Promise<Viewe
     activeShop?.featureOverrides ?? []
   );
 
-  const featureFlags = applyFeatureOverrides(PLAN_FEATURES[effectivePlan], featureOverrides);
-  if (!hasStripeTrial && !hasActivePaid && !localTrialActive) {
-    featureFlags.uploads = false;
-    featureFlags.basic_pdf_export = false;
-  }
+  const baseFeatureFlags =
+    hasStripeTrial || hasActivePaid ? PLAN_FEATURES[effectivePlan] : NONE_FEATURES;
+  const featureFlags = applyFeatureOverrides(baseFeatureFlags, featureOverrides);
   const monthlyAnalysisLimit = resolveMonthlyAnalysisLimit(effectivePlan, featureOverrides);
 
   const monthlyAnalysisUsed = await prisma.usageRecord.aggregate({
@@ -457,16 +583,6 @@ function mapSubscriptionPlan(plan: SubscriptionPlan | null | undefined): PlanTie
   }
 }
 
-function resolveFreePlan(access: ViewerAccess): PlanTier {
-  if (!access.isAuthenticated) return "starter";
-
-  if (!access.activeSubscriptionId) {
-    return "starter"; // will be overridden by CHAT_ONLY logic
-  }
-
-  return access.plan;
-}
-
 function getCurrentPeriodKey() {
   const now = new Date();
   const month = `${now.getUTCMonth() + 1}`.padStart(2, "0");
@@ -515,28 +631,3 @@ function resolveMonthlyAnalysisLimit(plan: PlanTier, overrides: FeatureOverride[
   return Number.isFinite(parsed) ? parsed : getPlanAnalysisCap(plan === "pro" ? "pro" : plan);
 }
 
-function isLocalIntroTrialActive(
-  dbUser: DbUserWithRelations,
-  activeSubscription: SubscriptionWithRelations | null
-) {
-  if (activeSubscription) {
-    return false;
-  }
-
-  const hasEverSubscribed = dbUser.subscriptions.length > 0;
-
-  if (hasEverSubscribed) {
-    return false;
-  }
-
-  const createdAt = new Date(dbUser.createdAt);
-
-  if (Number.isNaN(createdAt.getTime())) {
-    return false;
-  }
-
-  const trialEndsAt = new Date(createdAt);
-  trialEndsAt.setUTCDate(trialEndsAt.getUTCDate() + PRO_TRIAL_DAYS);
-
-  return Date.now() < trialEndsAt.getTime();
-}

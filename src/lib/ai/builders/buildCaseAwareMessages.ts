@@ -1,4 +1,5 @@
 import type { CaseContext } from "@/lib/context/buildCaseContext";
+import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
 
 export function buildCaseAwareSystemPrompt(context: CaseContext): string {
   const facts = context.extractedFacts.length
@@ -33,8 +34,10 @@ export function buildCaseAwareSystemPrompt(context: CaseContext): string {
     "You are continuing an existing Collision IQ case analysis.",
     "Do not behave like this is a fresh chat.",
     "Answer using the existing case context first.",
+    "Treat new uploads or follow-up questions as additional evidence for this active case unless the user explicitly ended or reset the case.",
     "Lead with a direct answer, then explain the reason briefly.",
     "Do not ask the user to re-upload or restate information already present unless truly necessary.",
+    NON_BIAS_ACCURACY_DIRECTIVE,
     "",
     `Original ask: ${context.intent}`,
     `Vehicle: ${context.vehicleLabel ?? "Unknown vehicle"}`,

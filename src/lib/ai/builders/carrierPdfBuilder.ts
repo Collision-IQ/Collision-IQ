@@ -131,6 +131,13 @@ export function buildCarrierReport({
       },
     ],
     sections: [
+      ...(report?.reassessmentDelta &&
+      report.ingestionMeta?.reassessmentMode === "active_case_update"
+        ? [{
+            title: "Case Update",
+            bullets: buildCaseUpdateBullets(report),
+          }]
+        : []),
       {
         title: "Executive Repair Position",
         body: buildExecutiveSummary({
@@ -231,6 +238,34 @@ export function buildCarrierReport({
   };
 }
 
+function buildCaseUpdateBullets(report: RepairIntelligenceReport): string[] {
+  const delta = report.reassessmentDelta;
+  if (!delta) return [];
+
+  if (delta.addedEvidenceIds.length === 0 && delta.statusChanges.length === 0) {
+    return [
+      "The latest reassessment did not materially change the current review.",
+      "Current open items remain subject to further documentation where noted.",
+    ];
+  }
+
+  return compact([
+    `${delta.addedEvidenceIds.length} evidence item(s) were added to the active case.`,
+    delta.statusChanges.length > 0
+      ? `${delta.statusChanges.length} issue status change(s) were identified.`
+      : "No issue status changes were identified.",
+    delta.newlyDocumented.length > 0
+      ? `${delta.newlyDocumented.length} item(s) became documented.`
+      : undefined,
+    delta.stillOpen.length > 0
+      ? `${delta.stillOpen.length} item(s) remain open to further documentation.`
+      : undefined,
+    delta.determinationChanged
+      ? "The overall determination changed after reassessment."
+      : "The overall determination did not materially change.",
+  ]);
+}
+
 function buildExecutiveSummary(params: {
   isComparison: boolean;
   credibilityConclusion: string;
@@ -292,16 +327,16 @@ function buildCredibilityConclusion(
   const isComparison = /\b(shop estimate|carrier estimate)\b/i.test(exportModel.repairPosition);
 
   if (isComparison && lower.includes("shop estimate") && lower.includes("more complete")) {
-    return "The shop estimate currently reads as the more credible repair document.";
+    return "The documents describe different levels of repair support, with one estimate carrying broader documented scope.";
   }
 
   if (isComparison && lower.includes("carrier estimate") && lower.includes("underwritten")) {
-    return "The carrier estimate currently reads as underwritten against the stronger repair path.";
+    return "The current material shows a difference between the documented repair path and the narrower estimate posture.";
   }
 
   if (exportModel.supplementItems.length > 0) {
     return isComparison
-      ? "The estimate is credible as a preliminary repair plan, but the stronger position is the one that best supports the listed procedures, verifications, and scope items."
+      ? "The estimates should be evaluated by which items are supported by documented procedures, verifications, and scope evidence."
       : "The file documents a credible preliminary repair plan, with several repair, verification, or documentation items still needing clearer support.";
   }
 
@@ -319,9 +354,9 @@ function buildWhyItWins(
   if (topItems.length > 0) {
     const analysisMode = analysis?.mode ?? report?.analysis?.mode;
     return analysisMode === "comparison"
-      ? `It is stronger because the current file supports ${joinHumanList(
+      ? `The current file most clearly supports review of ${joinHumanList(
           topItems.map((item) => displayOperationLabel(item.title).toLowerCase())
-        )} more clearly than the competing posture.`
+        )} against the competing repair documents.`
       : `The file most clearly leaves open ${joinHumanList(
           topItems.map((item) => displayOperationLabel(item.title).toLowerCase())
         )}.`;
@@ -584,7 +619,7 @@ function normalizeCarrierConclusionConcept(value: string): string | null {
     normalized.includes("credible") ||
     normalized.includes("preliminary repair plan") ||
     normalized.includes("generally credible estimate") ||
-    normalized.includes("more credible repair document")
+    normalized.includes("broader documented scope")
   ) {
     return "credibility";
   }

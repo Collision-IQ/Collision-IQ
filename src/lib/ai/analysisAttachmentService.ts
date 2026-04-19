@@ -176,12 +176,17 @@ Return concise plain text only with these labels:
 - Document type:
 - Visible damage zones:
 - Visible repair cues:
+- Damage severity:
+- Estimate validation signals / open verification concerns:
 - Readable estimate text:
 - Visible identifiers:
 - Structural cues:
+- Suspension / wheel-opening cues:
 
 Document type should be one of: damage photo, estimate screenshot, comparison screenshot, document photo, unknown.
-Prefer grounded observations only.`,
+Prefer grounded observations only.
+Treat the image as evidence of visible condition only. Do not claim hidden damage from the image alone.
+If visible damage raises concern for related verification, phrase it as an open verification concern, for example: visible damage may support structural verification or suspension component inspection pending teardown/documentation.`,
             },
             {
               type: "input_image",

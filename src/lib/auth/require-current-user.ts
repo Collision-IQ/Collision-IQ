@@ -27,15 +27,6 @@ async function upsertAppUser(params: {
   imageUrl?: string | null;
   isPlatformAdmin: boolean;
 }) {
-  const existingUser = await prisma.user.findUnique({
-    where: {
-      clerkUserId: params.clerkUserId,
-    },
-    select: {
-      id: true,
-    },
-  });
-
   const user = await prisma.user.upsert({
     where: {
       clerkUserId: params.clerkUserId,
@@ -56,28 +47,6 @@ async function upsertAppUser(params: {
       isPlatformAdmin: params.isPlatformAdmin,
     },
   });
-
-  if (!existingUser) {
-    // Ensure first-time users get a CHAT_ONLY record as their baseline state.
-    const existingSubscription = await prisma.subscription.findFirst({
-      where: {
-        userId: user.id,
-      },
-      select: {
-        id: true,
-      },
-    });
-
-    if (!existingSubscription) {
-      await prisma.subscription.create({
-        data: {
-          userId: user.id,
-          plan: "CHAT_ONLY",
-          status: "ACTIVE",
-        },
-      });
-    }
-  }
 
   return user;
 }

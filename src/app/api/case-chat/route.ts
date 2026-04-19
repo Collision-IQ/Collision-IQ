@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildAdasNarrative } from "@/lib/analysis/adasDecision";
 import { EVIDENCE_POLICY } from "@/lib/analysis/buildEvidenceCorpus";
 import { generateChatCompletion } from "@/lib/ai/generateChatCompletion";
+import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
 import {
   UnauthorizedError,
   requireCurrentUser,
@@ -52,10 +53,12 @@ export async function POST(req: NextRequest) {
       files = [],
       linkedEvidence = [],
       transcriptSummary,
-      determination,
       supportGaps,
       extractedFacts,
       determinationPayload,
+      factualCore,
+      reassessmentDelta,
+      artifactRefreshPolicy,
     } = caseData;
 
     const adasNarrative = buildAdasNarrative({
@@ -77,7 +80,9 @@ export async function POST(req: NextRequest) {
               [
                 `DOC ${index + 1}: ${doc.title || "Untitled"}`,
                 `STATUS: ${doc.status || "unknown"}`,
-                limitText(doc.text || "", 4000),
+                doc.status === "ok"
+                  ? limitText(doc.text || "", 4000)
+                  : "Referenced link detected, but the underlying document content was not reviewed.",
               ].join("\n")
           )
           .join("\n\n")
@@ -125,11 +130,64 @@ CAUTION FLAGS
 ${determinationPayload.cautionFlags.join("\n") || "None"}
 `
       : "No structured determination payload available.";
+    const factualCoreContext = factualCore
+      ? `
+VEHICLE SUMMARY
+${factualCore.vehicleSummary}
+
+CURRENT CASE SUMMARY
+${factualCore.currentCaseSummary}
+
+OPEN ISSUES
+${factualCore.openIssues.map((item) => `- ${item}`).join("\n") || "- None"}
+
+UNRESOLVED VERIFICATION NEEDS
+${factualCore.unresolvedVerificationNeeds.map((item) => `- ${item}`).join("\n") || "- None"}
+
+LINKED EVIDENCE STATE
+${factualCore.linkedEvidenceState.map((item) => `- ${item}`).join("\n") || "- None"}
+`.trim()
+      : "No stored factual core available.";
+    const reassessmentDeltaContext = reassessmentDelta
+      ? `
+SUMMARY
+${reassessmentDelta.summary}
+
+ADDED EVIDENCE
+${reassessmentDelta.addedEvidenceIds.map((item) => `- ${item}`).join("\n") || "- None"}
+
+AFFECTED ISSUES
+${reassessmentDelta.affectedIssueKeys.map((item) => `- ${item}`).join("\n") || "- None"}
+
+STATUS CHANGES
+${reassessmentDelta.statusChanges.map((change) => `- ${change.key}: ${change.from ?? "new"} -> ${change.to}`).join("\n") || "- None"}
+
+NEWLY DOCUMENTED
+${reassessmentDelta.newlyDocumented.map((item) => `- ${item}`).join("\n") || "- None"}
+
+STILL OPEN
+${reassessmentDelta.stillOpen.slice(0, 8).map((item) => `- ${item}`).join("\n") || "- None"}
+
+DETERMINATION CHANGED
+${reassessmentDelta.determinationChanged ? "Yes" : "No"}
+`.trim()
+      : "No reassessment delta stored.";
+    const artifactRefreshContext = artifactRefreshPolicy
+      ? `
+MAIN REPORT: ${artifactRefreshPolicy.mainReport.shouldRefresh ? "refresh recommended" : "no full refresh needed"} - ${artifactRefreshPolicy.mainReport.reason}
+CUSTOMER REPORT: ${artifactRefreshPolicy.customerReport.shouldRefresh ? "refresh recommended" : "no refresh needed"} - ${artifactRefreshPolicy.customerReport.reason}
+DISPUTE REPORT: ${artifactRefreshPolicy.disputeReport.shouldRefresh ? "refresh recommended" : "no refresh needed"} - ${artifactRefreshPolicy.disputeReport.reason}
+REBUTTAL OUTPUT: ${artifactRefreshPolicy.rebuttalOutput.shouldRefresh ? "refresh recommended" : "no refresh needed"} - ${artifactRefreshPolicy.rebuttalOutput.reason}
+CHAT/UI ONLY: ${artifactRefreshPolicy.chatSummaryOnly.shouldRefresh ? "yes" : "no"} - ${artifactRefreshPolicy.chatSummaryOnly.reason}
+`.trim()
+      : "No artifact refresh policy stored.";
 
     const system = `
 You are Collision IQ, an expert collision analysis assistant.
 
-You are continuing an active case. Use the case evidence below before answering.
+You are continuing an active case. Use the accumulated case evidence below before answering.
+
+${NON_BIAS_ACCURACY_DIRECTIVE}
 
 ====================
 VEHICLE
@@ -142,6 +200,21 @@ STRUCTURED DETERMINATION (PRIMARY LOGIC LAYER)
 ${structuredDeterminationContext}
 
 ====================
+STABLE FACTUAL CORE
+====================
+${factualCoreContext}
+
+====================
+LATEST REASSESSMENT DELTA
+====================
+${reassessmentDeltaContext}
+
+====================
+ARTIFACT REFRESH POLICY
+====================
+${artifactRefreshContext}
+
+====================
 ADAS DECISION STATE (PRE-TEARDOWN LOGIC)
 ====================
 ${adasNarrative.status}: ${adasNarrative.body}
@@ -150,7 +223,7 @@ ${adasNarrative.status}: ${adasNarrative.body}
 KEY EVIDENCE (PRIORITIZED)
 ====================
 
---- LINKED OEM / ADAS DOCUMENTS (HIGHEST PRIORITY) ---
+--- LINKED OEM / ADAS DOCUMENTS (INGESTED SUPPORT OR REFERENCED LINKS) ---
 ${prioritizedLinkedEvidenceContext}
 
 --- ESTIMATE (STRUCTURAL + OPERATIONS CONTEXT) ---
@@ -175,8 +248,15 @@ ${JSON.stringify(extractedFacts || {}, null, 2)}
 ====================
 RULES
 ====================
-- Treat LINKED DOCUMENTS as highest authority when available.
-- Use estimate + files to support or challenge conclusions.
+- Treat uploaded documents and images as the primary active case evidence.
+- Treat successfully ingested linked documents as case-specific supporting evidence.
+- Treat blocked or failed linked documents as referenced but not yet produced, not as absent.
+- If the user asks what changed, answer from LATEST REASSESSMENT DELTA first.
+- If the user asks where the case stands now, answer from STABLE FACTUAL CORE first and then mention relevant delta.
+- If the user asks whether this is a new review, answer no while the active case remains open; explain it is a continuation with added evidence.
+- Do not repeat the full factual core when only the delta matters.
+- If the delta says no material change, say that plainly and do not invent novelty.
+- Do not recommend regenerating every artifact by default; use ARTIFACT REFRESH POLICY to decide whether chat/UI summary is enough.
 - Do not invent OEM procedures.
 - Do not name a calibration unless supported by evidence or teardown/interruption logic.
 - Before teardown: calibration scope is provisional.

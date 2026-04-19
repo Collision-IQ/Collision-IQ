@@ -25,6 +25,61 @@ export function getCurrentUsagePeriodKey() {
   return `${now.getUTCFullYear()}-${month}`;
 }
 
+export async function getUsageCount(params: {
+  userId: string;
+  kind: "ANALYSIS_COMPLETED" | "FILE_UPLOAD" | "REPORT_EXPORT" | "CHAT_EXPORT";
+  periodKey?: string;
+}) {
+  const aggregate = await prisma.usageRecord.aggregate({
+    where: {
+      userId: params.userId,
+      // Cast keeps compatibility when Prisma client lags schema enum updates.
+      kind: params.kind as any,
+      periodKey: params.periodKey ?? getCurrentUsagePeriodKey(),
+    },
+    _sum: {
+      quantity: true,
+    },
+  });
+
+  return aggregate._sum?.quantity ?? 0;
+}
+
+export async function getUploadUsageCount(userId: string) {
+  return getUsageCount({ userId, kind: "FILE_UPLOAD" });
+}
+
+export async function getReportExportUsageCount(userId: string) {
+  return getUsageCount({ userId, kind: "REPORT_EXPORT" });
+}
+
+export async function recordUsage(params: {
+  userId: string;
+  kind: "ANALYSIS_COMPLETED" | "FILE_UPLOAD" | "REPORT_EXPORT" | "CHAT_EXPORT";
+  quantity?: number;
+  metadataJson?: Record<string, unknown>;
+}) {
+  const latestSubscription = await prisma.subscription.findFirst({
+    where: {
+      OR: [{ userId: params.userId }, { shop: { ownerId: params.userId } }],
+    },
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+  });
+
+  await prisma.usageRecord.create({
+    data: {
+      userId: params.userId,
+      shopId: latestSubscription?.shopId ?? null,
+      subscriptionId: latestSubscription?.id ?? null,
+      // Cast keeps compatibility when Prisma client lags schema enum updates.
+      kind: params.kind as any,
+      periodKey: getCurrentUsagePeriodKey(),
+      quantity: params.quantity ?? 1,
+      metadata: (params.metadataJson ?? {}) as Prisma.InputJsonValue,
+    },
+  });
+}
+
 function resolvePlan(plan: SubscriptionPlan | null | undefined, isPlatformAdmin: boolean): BillingPlan | "admin" {
   if (isPlatformAdmin) {
     return "admin";
@@ -192,25 +247,13 @@ export async function recordCompletedAnalysisUsage(params: {
     return;
   }
 
-  const latestSubscription = await prisma.subscription.findFirst({
-    where: {
-      OR: [{ userId: params.userId }, { shop: { ownerId: params.userId } }],
-    },
-    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-  });
-
-  await prisma.usageRecord.create({
-    data: {
-      userId: params.userId,
-      shopId: latestSubscription?.shopId ?? null,
-      subscriptionId: latestSubscription?.id ?? null,
-      kind: "ANALYSIS_COMPLETED",
-      periodKey: getCurrentUsagePeriodKey(),
-      quantity: 1,
-      metadata: {
-        ...(params.metadataJson as Prisma.InputJsonValue extends never ? never : Record<string, unknown>),
-        analysisReportId: params.analysisReportId,
-      } as Prisma.InputJsonValue,
+  await recordUsage({
+    userId: params.userId,
+    kind: "ANALYSIS_COMPLETED",
+    quantity: 1,
+    metadataJson: {
+      ...(params.metadataJson ?? {}),
+      analysisReportId: params.analysisReportId,
     },
   });
 }

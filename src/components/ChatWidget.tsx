@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { useUser } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 import {
   Paperclip,
   X,
@@ -46,9 +47,7 @@ import {
 import {
   createMessage,
   isSystemStatusMessage,
-  type AssistantMessageKind,
   type ChatMessage as Message,
-  type Role,
 } from "@/components/chatWidget/messageUtils";
 import AttachmentPreviewModal, {
   type PreviewAttachment,
@@ -137,6 +136,51 @@ const SERVER_TTS_VOICE = process.env.NEXT_PUBLIC_COLLISION_IQ_TTS_VOICE?.trim() 
 const TTS_STYLE_PROMPT =
   "Female voice. Warm, confident, quick-witted, conversational, and natural. Subtle Northeast energy. Smart, grounded, expressive, and slightly dry in tone. Brisk pacing with clear articulation. Sounds like a sharp, street-smart professional explaining something clearly under pressure. Avoid parody, caricature, or celebrity imitation.";
 
+function formatCaseUpdateStatus(
+  delta: RepairIntelligenceReport["reassessmentDelta"] | undefined,
+  policy: RepairIntelligenceReport["artifactRefreshPolicy"] | undefined
+) {
+  if (policy?.chatSummaryOnly.shouldRefresh) {
+    return `Case reassessment complete. ${policy.chatSummaryOnly.reason}`;
+  }
+
+  if (!delta) {
+    return "Case reassessment complete. This is an update to the current case.";
+  }
+
+  if (delta.addedEvidenceIds.length === 0 && delta.statusChanges.length === 0) {
+    return "Case reassessment complete. The new evidence does not materially change the current review.";
+  }
+
+  const parts = [
+    `Case reassessment complete: ${delta.addedEvidenceIds.length} evidence item(s) added`,
+    `${delta.statusChanges.length} issue status change(s)`,
+  ];
+
+  if (delta.newlyDocumented.length > 0) {
+    parts.push(`${delta.newlyDocumented.length} newly documented`);
+  }
+
+  if (!delta.determinationChanged) {
+    parts.push("overall determination unchanged");
+  }
+
+  if (policy) {
+    const recommended = [
+      policy.mainReport.shouldRefresh ? "main report" : "",
+      policy.customerReport.shouldRefresh ? "customer report" : "",
+      policy.disputeReport.shouldRefresh ? "dispute report" : "",
+      policy.rebuttalOutput.shouldRefresh ? "rebuttal" : "",
+    ].filter(Boolean);
+
+    if (recommended.length > 0) {
+      parts.push(`refresh recommended: ${recommended.join(", ")}`);
+    }
+  }
+
+  return `${parts.join(", ")}.`;
+}
+
 export default function ChatWidget({
   onAttachmentChange,
   onAttachmentsChange,
@@ -156,6 +200,7 @@ export default function ChatWidget({
   caseIntent = "Continue with this case",
   disabled = false,
 }: ChatWidgetProps) {
+  const router = useRouter();
   const { isLoaded: isUserLoaded, isSignedIn } = useUser();
   const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
   const [input, setInput] = useState("");
@@ -224,13 +269,6 @@ export default function ChatWidget({
   useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
-
-  useEffect(() => {
-    onSessionControlsReady?.({
-      focusComposer: () => textareaRef.current?.focus(),
-      resetSession: handleEndChat,
-    });
-  }, [onSessionControlsReady]);
 
   useEffect(() => {
     if (attachments.length >= 3) setAttachmentsOpen(false);
@@ -365,7 +403,7 @@ export default function ChatWidget({
     });
   }
 
-  function clearStructuredAnalysisState() {
+  const clearStructuredAnalysisState = useCallback(() => {
     analysisReportIdRef.current = null;
     analysisTextRef.current = "";
     workspaceDataRef.current = null;
@@ -377,7 +415,16 @@ export default function ChatWidget({
     onAnalysisPanelChange?.(null);
     onAnalysisStatusChange?.("idle", null);
     onWorkspaceDataChange?.(null);
-  }
+  }, [
+    onAnalysisChange,
+    onAnalysisPanelChange,
+    onAnalysisReportIdChange,
+    onAnalysisResultChange,
+    onAnalysisStatusChange,
+    onLinkedEvidenceChange,
+    onPrimaryAnalysisChange,
+    onWorkspaceDataChange,
+  ]);
 
   function setWorkspaceData(data: WorkspaceData | null) {
     workspaceDataRef.current = data;
@@ -415,11 +462,11 @@ export default function ChatWidget({
       }));
   }
 
-  function invalidateStructuredAnalysis() {
+  const invalidateStructuredAnalysis = useCallback(() => {
     analysisRunRef.current += 1;
     clearStructuredAnalysisState();
     onAnalysisLoadingChange?.(false);
-  }
+  }, [clearStructuredAnalysisState, onAnalysisLoadingChange]);
 
   function beginStructuredAnalysisRun() {
     const runId = analysisRunRef.current + 1;
@@ -621,10 +668,39 @@ export default function ChatWidget({
     setOpeningDisclaimerDismissed(true);
   }
 
-  function handleEndChat() {
+  const handleEndChat = useCallback(() => {
+    const caseIdToClose = analysisReportIdRef.current;
+    if (caseIdToClose) {
+      void fetch(`/api/cases/${encodeURIComponent(caseIdToClose)}/close`, {
+        method: "POST",
+        credentials: "same-origin",
+      }).catch((error) => {
+        console.warn("[chat] case close marker failed", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+
     abortRef.current?.abort();
     abortRef.current = null;
-    stopSpeaking();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
+
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+
+    if (canUseBrowserReadAloud()) {
+      window.speechSynthesis.cancel();
+    }
+
+    utteranceRef.current = null;
+    setSpeakingMessageId(null);
+    setIsSpeaking(false);
     sessionRef.current += 1;
 
     setLoading(false);
@@ -656,7 +732,20 @@ export default function ChatWidget({
     setTimeout(() => {
       bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }, 50);
-  }
+  }, [
+    attachments,
+    invalidateStructuredAnalysis,
+    onAttachmentChange,
+    onAttachmentsChange,
+    onSessionReset,
+  ]);
+
+  useEffect(() => {
+    onSessionControlsReady?.({
+      focusComposer: () => textareaRef.current?.focus(),
+      resetSession: handleEndChat,
+    });
+  }, [onSessionControlsReady, handleEndChat]);
 
   async function handleSend() {
     if (disabled) return;
@@ -827,6 +916,7 @@ export default function ChatWidget({
           signal: controller.signal,
           body: JSON.stringify({
             artifactIds: attachments.map((attachment) => attachment.attachmentId),
+            activeCaseId: analysisReportIdRef.current,
             userIntent: messageToSend,
           }),
         })
@@ -862,6 +952,13 @@ export default function ChatWidget({
               retrievalMatchCount?: number;
               refinedWithRetrieval?: boolean;
               analysisCompletedAt?: string;
+              caseContinuity?: {
+                activeCaseId?: string;
+                mode?: "new_case" | "active_case_update";
+                evidenceRegistryCount?: number;
+              };
+              reassessmentDelta?: RepairIntelligenceReport["reassessmentDelta"];
+              artifactRefreshPolicy?: RepairIntelligenceReport["artifactRefreshPolicy"];
             };
             // Backend workspaceData is the primary source of truth for Workspace rendering.
             analysisReportIdRef.current = analysisData.reportId ?? null;
@@ -883,7 +980,14 @@ export default function ChatWidget({
               refinedWithRetrieval: analysisData.refinedWithRetrieval ?? false,
               analysisCompletedAt: analysisData.analysisCompletedAt ?? null,
             });
-            upsertSystemStatusMessage("Analysis complete.");
+            upsertSystemStatusMessage(
+              analysisData.caseContinuity?.mode === "active_case_update"
+                ? formatCaseUpdateStatus(
+                    analysisData.reassessmentDelta,
+                    analysisData.artifactRefreshPolicy
+                  )
+                : "Analysis complete."
+            );
             setAttachments((prev) =>
               prev.map((attachment) => ({
                 ...attachment,
@@ -1027,6 +1131,7 @@ export default function ChatWidget({
   ): Promise<string> {
     if (disabled) return "";
     if (!isUserLoaded || !isSignedIn) {
+      router.push("/sign-in?next=/chatbot");
       throw new Error("Please sign in before uploading.");
     }
 
@@ -1039,6 +1144,7 @@ export default function ChatWidget({
       body: formData,
     });
     if (res.status === 401) {
+      router.push("/sign-in?next=/chatbot");
       throw new Error("Please sign in before uploading.");
     }
     if (!res.ok) {
