@@ -17,6 +17,52 @@ function limitText(text: string, max = 12000) {
   return text.length > max ? `${text.slice(0, max)}\n...[truncated]` : text;
 }
 
+function extractCurrentTopic(
+  message: string,
+  history: Array<{ role: "user" | "assistant"; content: string }>
+) {
+  const explicit = message.match(/Current active topic\/mode:\s*([^\n.]+)/i)?.[1]?.trim();
+  if (explicit) return explicit;
+
+  const latestUserMessage =
+    [...history].reverse().find((entry) => entry.role === "user" && entry.content.trim())?.content ??
+    message;
+  const lower = latestUserMessage.toLowerCase();
+
+  if (/(position statement|oem statement|oem position|position statements|oem support)/i.test(lower)) {
+    return "OEM position statements";
+  }
+  if (/(calibration|calibrate|aiming|initialization|adas|sensor|camera|radar|lidar)/i.test(lower)) {
+    return "calibration requirements";
+  }
+  if (/(structural|measure|measurement|dimension|geometry|frame|unibody|mounting)/i.test(lower)) {
+    return "structural verification";
+  }
+  if (/(corrosion|cavity|seam sealer|rust|anti-corrosion)/i.test(lower)) {
+    return "corrosion protection";
+  }
+  if (/(valuation|value|acv|total loss|market|comparable|comps)/i.test(lower)) {
+    return "valuation";
+  }
+  if (/(rebuttal|carrier|insurer|email|negotia|pushback|ask for|request revision)/i.test(lower)) {
+    return "rebuttal strategy";
+  }
+  if (/(customer report|customer-facing|layman|owner explanation|plain language)/i.test(lower)) {
+    return "customer explanation";
+  }
+  if (/(complete|completeness|included|missing|scope|repair plan|repair path)/i.test(lower)) {
+    return "repair completeness";
+  }
+  if (/(hidden damage|supplement|teardown|bracket|support|absorber|mount|connector invoice|invoice enough)/i.test(lower)) {
+    return "hidden damage concerns";
+  }
+  if (/(scan|pre-scan|post-scan|diagnostic|dtc|codes)/i.test(lower)) {
+    return "scan documentation";
+  }
+
+  return "general case summary";
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { user } = await requireCurrentUser();
@@ -138,6 +184,15 @@ ${factualCore.vehicleSummary}
 CURRENT CASE SUMMARY
 ${factualCore.currentCaseSummary}
 
+VISIBLE DAMAGE OBSERVATIONS
+${factualCore.visibleDamageObservations.map((item) => `- ${item}`).join("\n") || "- None"}
+
+DOCUMENTED REPAIR OPERATIONS / INVOICE SUPPORT
+${factualCore.documentedRepairOperations.map((item) => `- ${item}`).join("\n") || "- None"}
+
+EVIDENCE REGISTRY SUMMARY
+${factualCore.evidenceRegistrySummary.map((item) => `- ${item}`).join("\n") || "- None"}
+
 OPEN ISSUES
 ${factualCore.openIssues.map((item) => `- ${item}`).join("\n") || "- None"}
 
@@ -181,6 +236,7 @@ REBUTTAL OUTPUT: ${artifactRefreshPolicy.rebuttalOutput.shouldRefresh ? "refresh
 CHAT/UI ONLY: ${artifactRefreshPolicy.chatSummaryOnly.shouldRefresh ? "yes" : "no"} - ${artifactRefreshPolicy.chatSummaryOnly.reason}
 `.trim()
       : "No artifact refresh policy stored.";
+    const currentTopic = extractCurrentTopic(message, history);
 
     const system = `
 You are Collision IQ, an expert collision analysis assistant.
@@ -236,6 +292,9 @@ ${prioritizedFilesContext}
 CASE CONTEXT
 ====================
 
+CURRENT CONVERSATIONAL TOPIC
+${currentTopic}
+
 TRANSCRIPT SUMMARY
 ${transcriptSummary || "None"}
 
@@ -251,9 +310,49 @@ RULES
 - Treat uploaded documents and images as the primary active case evidence.
 - Treat successfully ingested linked documents as case-specific supporting evidence.
 - Treat blocked or failed linked documents as referenced but not yet produced, not as absent.
+- Preserve both evidence continuity and topic continuity. The current conversational topic is "${currentTopic}".
+- Answer the current topic first. If the topic is narrow, do not lead with or drift into a broad case recap.
+- A new upload enriches the current topic; it does not reset the topic to general review.
+- Only provide a broad case summary when the current topic is "general case summary" or the user explicitly asks for one.
+- Rank issues before answering by: topic relevance, safety significance, repair-completeness impact, evidence strength, actionability, and whether the issue changed in LATEST REASSESSMENT DELTA.
+- Default active-case answers should include: a direct answer, the top 1-3 relevant supporting points, only the most relevant open item(s), and an optional brief change note.
+- Suppress unrelated or low-signal support gaps unless the user asks for the full picture.
+- Do not repeat the same unresolved issue in every answer unless it is the most relevant topic item, the user asks about it, or it materially changed.
+- Use this compact answer shape for most active-case answers:
+  1. Direct Answer
+  2. Why
+  3. What Remains Open (only if relevant)
+  4. What Changed (only if LATEST REASSESSMENT DELTA materially affects the answer)
+- Start with a direct answer to the user's actual question in 1-3 sentences. Do not begin with a broad recap unless the user asked for one.
+- In "Why", include only the top 1-3 supporting points as short bullets or compact lines.
+- In "What Remains Open", include only 1-2 relevant open items by default. Put material uncertainty here or in the direct answer; do not bury it.
+- In "What Changed", mention reassessment changes only when they materially affect the answer. Keep it short.
+- Avoid long uninterrupted blocks. Prefer short paragraphs, tight bullets, and stable compact sections.
+- Do not duplicate the same point across "Why" and "What Remains Open".
+- Topic-specific shape:
+  - OEM position statements: Direct Answer, most relevant likely position-statement areas, What Remains Open.
+  - Calibration requirements: Direct Answer, why calibration may be relevant, What Remains Open, What Changed if new evidence affected calibration support.
+  - Structural verification: Direct Answer, visible/documented reasons, What Remains Open to further documentation.
+  - Customer explanation: Direct Answer in plain language, top practical implications, what the customer should expect next.
+  - Rebuttal/dispute: Direct Answer, top actionable unresolved points, best next evidence ask.
+- Topic priority guide:
+  - OEM position statements: prioritize procedures, scans, calibrations, structural limits, corrosion, and one-time-use parts.
+  - Calibration requirements: prioritize sensors, scans, aiming, initialization, and disturbed mounting/support areas.
+  - Structural verification: prioritize measurement, pull/setup confirmation, and hidden mounting geometry.
+  - Customer explanation: prioritize plain-language safety, drivability, fit, and next steps.
+  - Rebuttal strategy: prioritize actionable unresolved support asks.
+  - Valuation: prioritize market evidence, severity indicators, and repair-impact significance.
 - If the user asks what changed, answer from LATEST REASSESSMENT DELTA first.
 - If the user asks where the case stands now, answer from STABLE FACTUAL CORE first and then mention relevant delta.
 - If the user asks whether this is a new review, answer no while the active case remains open; explain it is a continuation with added evidence.
+- For active-case upload continuations, prefer a compact case-posture answer that starts with "Current case now includes..." or equivalent.
+- After an active-case upload, preserve and rejoin the user's latest question or topic from the chat history/message instead of drifting into a generic case intro.
+- The newest upload is additive evidence; it does not replace prior user intent, prior documents, or the stored factual core.
+- Do not ask for VIN, year, make, model, or a starter upload when those facts are already present in VEHICLE, EXTRACTED FACTS, STABLE FACTUAL CORE, or uploaded files.
+- In that case-posture answer, separate what is visible in photos, what documents/invoices support, and what remains open pending further documentation.
+- Photos may support visible bumper, lamp, fender, mounting, bracket, support, trim, wheel-area, or teardown observations, but do not claim hidden damage from photos alone.
+- If invoice evidence supports connector, electrical, wiring, or harness repair, state it as invoice-supported repair documentation rather than an inferred hidden-damage conclusion.
+- Keep hidden mounting geometry, bracket/support damage, structural/wheel-area checks, and calibration-related verification open unless directly documented.
 - Do not repeat the full factual core when only the delta matters.
 - If the delta says no material change, say that plainly and do not invent novelty.
 - Do not recommend regenerating every artifact by default; use ARTIFACT REFRESH POLICY to decide whether chat/UI summary is enough.

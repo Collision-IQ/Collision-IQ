@@ -9,6 +9,8 @@ import {
   UnauthorizedError,
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
+import { getCaseById } from "@/lib/cases/getCaseById";
+import type { StoredCaseData } from "@/lib/cases/getCaseById";
 
 const MAX_UPLOAD_BATCH_FILES = 6;
 const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at once for now.";
@@ -53,6 +55,7 @@ type ChatRequestBody = {
   messages?: IncomingMessage[];
   attachmentIds?: string[];
   attachments?: IncomingAttachment[];
+  activeCaseId?: string | null;
   jurisdiction?: IncomingJurisdiction;
 };
 
@@ -366,8 +369,13 @@ function buildTextContext(params: {
   userMessage: string;
   conversationContext: string;
   documents: UploadedDocument[];
+  activeCaseContext?: string;
 }): string {
   const sections: string[] = [];
+
+  if (params.activeCaseContext) {
+    sections.push(params.activeCaseContext);
+  }
 
   if (params.userMessage) {
     sections.push(`User request:\n${params.userMessage}`);
@@ -396,6 +404,7 @@ function buildOpenAIInput(params: {
   userMessage: string;
   conversationContext: string;
   documents: UploadedDocument[];
+  activeCaseContext?: string;
 }) {
   const textContext = buildTextContext(params);
   const content: Array<
@@ -427,6 +436,78 @@ function buildOpenAIInput(params: {
       content,
     },
   ];
+}
+
+function buildActiveCaseChatContext(params: {
+  activeCase: StoredCaseData;
+  documents: UploadedDocument[];
+  conversationContext: string;
+}): string {
+  const factualCore = params.activeCase.factualCore;
+  const delta = params.activeCase.reassessmentDelta;
+  const newUploadSummary = params.documents.length
+    ? params.documents
+        .map((document) => {
+          const kind = document.mime?.startsWith("image/") ? "image" : "document";
+          const textLength = document.text?.trim().length ?? 0;
+          return `- ${document.filename} (${kind}, extracted text ${textLength} chars)`;
+        })
+        .join("\n")
+    : "- None in this turn";
+  const issueContext = factualCore?.issueAssessments.length
+    ? factualCore.issueAssessments
+        .slice(0, 10)
+        .map(
+          (issue) =>
+            `- ${issue.key}: ${issue.title} | ${issue.status} | ${issue.severity} | ${issue.summary}`
+        )
+        .join("\n")
+    : "- No stored issue assessment table.";
+  const registryContext = factualCore?.evidenceRegistrySummary.length
+    ? factualCore.evidenceRegistrySummary.slice(0, 12).map((item) => `- ${item}`).join("\n")
+    : "- No stored evidence registry summary.";
+  const deltaContext = delta
+    ? [
+        `Summary: ${delta.summary}`,
+        `Added evidence: ${delta.addedEvidenceIds.join(", ") || "None"}`,
+        `Affected issues: ${delta.affectedIssueKeys.join(", ") || "None"}`,
+        `Newly documented: ${delta.newlyDocumented.join(", ") || "None"}`,
+        `Still open: ${delta.stillOpen.slice(0, 8).join(", ") || "None"}`,
+        `Determination changed: ${delta.determinationChanged ? "yes" : "no"}`,
+      ].join("\n")
+    : "No prior reassessment delta stored.";
+
+  return `
+ACTIVE CASE CONTINUATION
+This upload belongs to the existing active case ${params.activeCase.id}. It is not a new review.
+
+Stable factual core:
+- Vehicle: ${factualCore?.vehicleSummary ?? "Vehicle not fully established"}
+- Current case summary: ${factualCore?.currentCaseSummary ?? params.activeCase.transcriptSummary ?? "No stored case summary"}
+- Current determination: ${factualCore?.currentDetermination ?? params.activeCase.determination ?? "Provisional / not established"}
+
+Stored issue assessments:
+${issueContext}
+
+Stored evidence registry:
+${registryContext}
+
+Latest stored reassessment delta:
+${deltaContext}
+
+New evidence uploaded in this turn:
+${newUploadSummary}
+
+Recent relevant turns:
+${params.conversationContext || "No recent turns provided."}
+
+Continuation rules:
+- Answer from the merged active case state, not only the newest upload.
+- Treat the new upload as additional evidence to be merged into this case.
+- Lead with what the new material appears to add or clarify, then state what remains stable/open.
+- Do not emit a fresh "start analysis" or first-review style response.
+- Do not imply open items were not performed just because support is incomplete.
+`.trim();
 }
 
 function extractOpenAIErrorMeta(error: unknown): OpenAIErrorMeta {
@@ -596,10 +677,24 @@ export async function POST(req: Request) {
 
     const userMessage = extractLatestUserMessage(body.messages || []);
     const conversationContext = formatRecentConversation(body.messages || []);
+    const activeCase = body.activeCaseId
+      ? await getCaseById(body.activeCaseId, {
+          ownerUserId: user.id,
+        })
+      : null;
+    const activeCaseContext =
+      activeCase && !activeCase.isClosed
+        ? buildActiveCaseChatContext({
+            activeCase,
+            documents,
+            conversationContext,
+          })
+        : undefined;
     const input = buildOpenAIInput({
       userMessage,
       conversationContext,
       documents,
+      activeCaseContext,
     });
     const estimateText = documents
       .map((document) => document.text?.trim())
@@ -649,6 +744,8 @@ export async function POST(req: Request) {
 
     console.info("[chat-openai] request attachments", {
       ownerUserId: user.id,
+      activeCaseId: activeCase && !activeCase.isClosed ? activeCase.id : null,
+      activeCaseClosed: activeCase?.isClosed ?? null,
       attachmentCount: documents.length,
       includedInRequest: documents.map((document, index) => ({
         index: index + 1,

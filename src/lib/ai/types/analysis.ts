@@ -187,6 +187,8 @@ export type CaseEvidenceSourceType =
   | "carrier_estimate"
   | "supplement"
   | "photo"
+  | "invoice"
+  | "sublet_document"
   | "procedure_link"
   | "scan_report"
   | "calibration_report"
@@ -206,6 +208,8 @@ export type CaseEvidenceRegistryItem = {
   sourceType: CaseEvidenceSourceType;
   label: string;
   extractedText?: string;
+  extractedSummary?: string;
+  structuredFacts?: Record<string, string | string[] | null>;
   linkedUrl?: string;
   ingestionState: CaseEvidenceIngestionState;
   evidenceStatus: IssueEvidenceStatus;

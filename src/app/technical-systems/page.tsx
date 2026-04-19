@@ -299,7 +299,7 @@ export default function TechnicalSystemsPage() {
             </div>
             <div className="mt-4">
               <label className="mb-2 block text-sm font-medium text-white/80">What would you want the system to improve?</label>
-              <textarea value={form.goals} onChange={(e) => update("goals", e.target.value)} rows={6} required className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-[#C65A2A]/40" />
+              <textarea value={form.goals} onChange={(e) => update("goals", e.target.value)} rows={6} required placeholder="Describe the improvements you'd like" className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-[#C65A2A]/40" />
             </div>
             {submitted ? <div className="mt-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">Your request was submitted. We can now review whether a tailored system fits your workflow.</div> : null}
             {leadError ? <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">{leadError}</div> : null}

@@ -45,6 +45,7 @@ export type StoredCaseData = {
   factualCore: SharedFactualCore | null;
   reassessmentDelta: ReassessmentDelta | null;
   artifactRefreshPolicy: ArtifactRefreshPolicy | null;
+  isClosed: boolean;
   exportModel: ExportModel;
 };
 
@@ -134,6 +135,8 @@ export async function getCaseById(
     factualCore: storedReport.report.factualCore ?? null,
     reassessmentDelta: storedReport.report.reassessmentDelta ?? null,
     artifactRefreshPolicy: storedReport.report.artifactRefreshPolicy ?? null,
+    isClosed: Boolean(storedReport.report.ingestionMeta?.closedAt) ||
+      storedReport.report.ingestionMeta?.active === false,
     exportModel,
   };
 }

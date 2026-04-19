@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -93,6 +93,26 @@ const CHAT_CONSENT_STORAGE_KEY = "collision_iq_chat_consent";
 const CHAT_CONSENT_TERMS_VERSION = "2026-03-28";
 const CHAT_CONSENT_PRIVACY_VERSION = "2026-03-28";
 
+function getHeroCollapseStorageKey(caseId: string) {
+  return `case:${caseId}:heroCollapsed`;
+}
+
+function getHeaderExpandedStorageKey(caseId: string) {
+  return `case:${caseId}:headerExpanded`;
+}
+
+function getHeaderPinnedStorageKey(caseId: string) {
+  return `case:${caseId}:headerPinnedByUser`;
+}
+
+type ImmersiveHeaderChangeReason =
+  | "AUTO_COLLAPSE_CHAT_ENGAGED"
+  | "AUTO_REOPEN_UPLOAD_COMPLETE"
+  | "USER_OPENED"
+  | "USER_CLOSED"
+  | "CASE_RESET"
+  | "END_CHAT";
+
 type ChatConsentRecord = {
   consentStatus: "accepted";
   acceptedAt: string;
@@ -166,6 +186,10 @@ export function ChatbotWorkspacePage() {
   const [consentChecked, setConsentChecked] = useState(false);
   const [viewerAccess, setViewerAccess] = useState<AccountEntitlements | null>(null);
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  const [isImmersiveHeaderExpanded, setIsImmersiveHeaderExpanded] = useState(true);
+  const [headerPinnedByUser, setHeaderPinnedByUser] = useState(false);
+  const [lastHeaderChangeReason, setLastHeaderChangeReason] =
+    useState<ImmersiveHeaderChangeReason>("CASE_RESET");
   const normalizedResult = useMemo(
     () => (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null),
     [analysisResult]
@@ -272,6 +296,81 @@ export function ChatbotWorkspacePage() {
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
+    if (!analysisReportId) {
+      setIsImmersiveHeaderExpanded(true);
+      setHeaderPinnedByUser(false);
+      setLastHeaderChangeReason("CASE_RESET");
+      return;
+    }
+
+    if (typeof window === "undefined") return;
+
+    const expandedValue = window.localStorage.getItem(
+      getHeaderExpandedStorageKey(analysisReportId)
+    );
+    const pinnedValue = window.localStorage.getItem(
+      getHeaderPinnedStorageKey(analysisReportId)
+    );
+
+    if (expandedValue === "false" || expandedValue === "true") {
+      setIsImmersiveHeaderExpanded(expandedValue === "true");
+    } else {
+      setIsImmersiveHeaderExpanded(true);
+      window.localStorage.setItem(getHeaderExpandedStorageKey(analysisReportId), "true");
+    }
+
+    setHeaderPinnedByUser(pinnedValue === "true");
+  }, [analysisReportId]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  useEffect(() => {
+    if (!analysisReportId || typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(
+      getHeaderExpandedStorageKey(analysisReportId),
+      String(isImmersiveHeaderExpanded)
+    );
+    window.localStorage.setItem(
+      getHeaderPinnedStorageKey(analysisReportId),
+      String(headerPinnedByUser)
+    );
+    window.localStorage.setItem(
+      getHeroCollapseStorageKey(analysisReportId),
+      String(!isImmersiveHeaderExpanded)
+    );
+  }, [analysisReportId, headerPinnedByUser, isImmersiveHeaderExpanded]);
+
+  const collapsePreChatHero = useCallback(() => {
+    if (headerPinnedByUser) {
+      return;
+    }
+
+    setIsImmersiveHeaderExpanded(false);
+    setLastHeaderChangeReason("AUTO_COLLAPSE_CHAT_ENGAGED");
+  }, [headerPinnedByUser]);
+
+  const reopenImmersiveHeaderAfterUpload = useCallback(() => {
+    if (headerPinnedByUser) {
+      return;
+    }
+
+    setIsImmersiveHeaderExpanded(true);
+    setLastHeaderChangeReason("AUTO_REOPEN_UPLOAD_COMPLETE");
+  }, [headerPinnedByUser]);
+
+  const handleToggleImmersiveHeader = useCallback(() => {
+    setIsImmersiveHeaderExpanded((current) => {
+      const next = !current;
+      setHeaderPinnedByUser(true);
+      setLastHeaderChangeReason(next ? "USER_OPENED" : "USER_CLOSED");
+      return next;
+    });
+  }, []);
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
     if (viewerAccess?.consentStatus !== "ACCEPTED" || typeof window === "undefined") {
       return;
     }
@@ -366,6 +465,15 @@ export function ChatbotWorkspacePage() {
   }
 
   function handleSessionReset() {
+    if (analysisReportId && typeof window !== "undefined") {
+      window.localStorage.removeItem(getHeroCollapseStorageKey(analysisReportId));
+      window.localStorage.removeItem(getHeaderExpandedStorageKey(analysisReportId));
+      window.localStorage.removeItem(getHeaderPinnedStorageKey(analysisReportId));
+    }
+
+    setIsImmersiveHeaderExpanded(true);
+    setHeaderPinnedByUser(false);
+    setLastHeaderChangeReason("END_CHAT");
     setAttachment(null);
     setAttachmentsState([]);
     setAnalysisText("");
@@ -449,43 +557,70 @@ export function ChatbotWorkspacePage() {
               hasStructuredAnalysis ? "overflow-y-auto pr-1" : "overflow-hidden"
             }`}
           >
-            <AtAGlanceCard
-              renderModel={renderModel}
-              analysisResult={analysisResult}
-              active={hasResolvedAnalysis && hasAtGlanceContent(renderModel)}
-            />
-
-            <div className="mt-3 rounded-[24px] border border-white/8 bg-white/[0.035] p-3.5">
-              <WorkspacePanel
-                workspaceData={workspaceData ?? undefined}
-                evidenceModel={evidenceModel}
-                activeEvidenceTargetId={activeEvidenceTargetId}
-              />
+            <div className="mb-3 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={handleToggleImmersiveHeader}
+                className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white/72 transition hover:bg-white/10 hover:text-white"
+                aria-expanded={isImmersiveHeaderExpanded}
+                aria-controls="immersive-case-header"
+                title={
+                  isImmersiveHeaderExpanded
+                    ? "Collapse immersive header"
+                    : "Open immersive header"
+                }
+              >
+                <span aria-hidden="true">{isImmersiveHeaderExpanded ? "^" : "v"}</span>
+                <span className="ml-2">
+                  {isImmersiveHeaderExpanded ? "Hide case header" : "Show case header"}
+                </span>
+              </button>
             </div>
 
-            <StructuredAnalysisCanvas
-              analysisText={primaryAnalysis?.content ?? analysisText}
-              renderModel={renderModel}
-              normalizedResult={normalizedResult}
-              analysisResult={analysisResult}
-              workspaceData={workspaceData}
-              attachments={attachmentsState}
-              hasResolvedAnalysis={hasResolvedAnalysis}
-              activeInsightKey={activeInsightKey}
-              onActiveInsightChange={setActiveInsightKey}
-              canRenderExports={hasResolvedAnalysis && Boolean(analysisText || panel.narrative)}
-              evidenceModel={evidenceModel}
-              activeEvidenceTargetId={activeEvidenceTargetId}
-              onEvidenceSelect={handleEvidenceSelect}
-              onContinueChat={handleContinueReview}
-              onRequestEndAnalysis={handleRequestEndAnalysis}
-              onConfirmEndAnalysis={handleConfirmEndAnalysis}
-              onCancelEndAnalysis={handleCancelEndAnalysis}
-              endAnalysisConfirming={endAnalysisConfirming}
-              onCenterScrollRequest={(scrollToCenterSection) => {
-                centerScrollRequestRef.current = scrollToCenterSection;
-              }}
-            />
+            {isImmersiveHeaderExpanded && (
+              <div id="immersive-case-header" data-header-change-reason={lastHeaderChangeReason}>
+                <div className="mb-2 text-right text-[10px] uppercase tracking-[0.16em] text-white/35">
+                  {headerPinnedByUser ? "Pinned by user" : "Auto"}
+                </div>
+                <AtAGlanceCard
+                    renderModel={renderModel}
+                    analysisResult={analysisResult}
+                    active={hasResolvedAnalysis && hasAtGlanceContent(renderModel)}
+                  />
+
+                  <div className="mt-3 rounded-[24px] border border-white/8 bg-white/[0.035] p-3.5">
+                    <WorkspacePanel
+                      workspaceData={workspaceData ?? undefined}
+                      evidenceModel={evidenceModel}
+                      activeEvidenceTargetId={activeEvidenceTargetId}
+                    />
+                  </div>
+
+                  <StructuredAnalysisCanvas
+                    analysisText={primaryAnalysis?.content ?? analysisText}
+                    renderModel={renderModel}
+                    normalizedResult={normalizedResult}
+                    analysisResult={analysisResult}
+                    workspaceData={workspaceData}
+                    attachments={attachmentsState}
+                    hasResolvedAnalysis={hasResolvedAnalysis}
+                    activeInsightKey={activeInsightKey}
+                    onActiveInsightChange={setActiveInsightKey}
+                    canRenderExports={hasResolvedAnalysis && Boolean(analysisText || panel.narrative)}
+                    evidenceModel={evidenceModel}
+                    activeEvidenceTargetId={activeEvidenceTargetId}
+                    onEvidenceSelect={handleEvidenceSelect}
+                    onContinueChat={handleContinueReview}
+                    onRequestEndAnalysis={handleRequestEndAnalysis}
+                    onConfirmEndAnalysis={handleConfirmEndAnalysis}
+                    onCancelEndAnalysis={handleCancelEndAnalysis}
+                    endAnalysisConfirming={endAnalysisConfirming}
+                    onCenterScrollRequest={(scrollToCenterSection) => {
+                      centerScrollRequestRef.current = scrollToCenterSection;
+                    }}
+                  />
+              </div>
+            )}
 
             {hasStructuredAnalysis ? (
               <section className="mt-4 rounded-[26px] border border-white/8 bg-gradient-to-br from-white/[0.04] via-white/[0.025] to-black/24 p-4 shadow-[0_20px_48px_rgba(0,0,0,0.2)]">
@@ -620,6 +755,8 @@ export function ChatbotWorkspacePage() {
                       }}
                       onWorkspaceDataChange={setWorkspaceData}
                       onSessionReset={handleSessionReset}
+                      onChatEngagement={collapsePreChatHero}
+                      onCaseUploadComplete={reopenImmersiveHeaderAfterUpload}
                       onSessionControlsReady={(controls) => {
                         chatSessionControlsRef.current = controls;
                       }}
@@ -707,6 +844,8 @@ export function ChatbotWorkspacePage() {
                   }}
                   onWorkspaceDataChange={setWorkspaceData}
                   onSessionReset={handleSessionReset}
+                  onChatEngagement={collapsePreChatHero}
+                  onCaseUploadComplete={reopenImmersiveHeaderAfterUpload}
                       onSessionControlsReady={(controls) => {
                         chatSessionControlsRef.current = controls;
                       }}

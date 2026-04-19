@@ -106,6 +106,8 @@ interface ChatWidgetProps {
   onAnalysisStatusChange?: (status: AnalysisStatus, detail?: string | null) => void;
   onWorkspaceDataChange?: (data: WorkspaceData | null) => void;
   onSessionReset?: () => void;
+  onChatEngagement?: () => void;
+  onCaseUploadComplete?: () => void;
   onSessionControlsReady?: (controls: ChatSessionControls) => void;
   onCaseIntentChange?: (value: string) => void;
   viewerAccess?: AccountEntitlements | null;
@@ -181,6 +183,57 @@ function formatCaseUpdateStatus(
   return `${parts.join(", ")}.`;
 }
 
+const DEFAULT_CASE_TOPIC = "general case summary";
+
+function isAttachmentSummaryMessage(value: string) {
+  return /^uploaded\s+\d+\s+file/i.test(value.trim());
+}
+
+function resolveCaseTopic(message: string, previousTopic: string) {
+  const normalized = message.trim();
+  const lower = normalized.toLowerCase();
+
+  if (!normalized || isAttachmentSummaryMessage(normalized)) {
+    return previousTopic || DEFAULT_CASE_TOPIC;
+  }
+
+  if (/(position statement|oem statement|oem position|position statements|oem support)/i.test(lower)) {
+    return "OEM position statements";
+  }
+  if (/(calibration|calibrate|aiming|initialization|adas|sensor|camera|radar|lidar)/i.test(lower)) {
+    return "calibration requirements";
+  }
+  if (/(structural|measure|measurement|dimension|geometry|frame|unibody|mounting)/i.test(lower)) {
+    return "structural verification";
+  }
+  if (/(corrosion|cavity|seam sealer|rust|anti-corrosion)/i.test(lower)) {
+    return "corrosion protection";
+  }
+  if (/(valuation|value|acv|total loss|market|comparable|comps)/i.test(lower)) {
+    return "valuation";
+  }
+  if (/(rebuttal|carrier|insurer|email|negotia|pushback|ask for|request revision)/i.test(lower)) {
+    return "rebuttal strategy";
+  }
+  if (/(customer report|customer-facing|layman|owner explanation|plain language)/i.test(lower)) {
+    return "customer explanation";
+  }
+  if (/(complete|completeness|included|missing|scope|repair plan|repair path)/i.test(lower)) {
+    return "repair completeness";
+  }
+  if (/(hidden damage|supplement|teardown|bracket|support|absorber|mount|connector invoice|invoice enough)/i.test(lower)) {
+    return "hidden damage concerns";
+  }
+  if (/(scan|pre-scan|post-scan|diagnostic|dtc|codes)/i.test(lower)) {
+    return "scan documentation";
+  }
+  if (/(summary|recap|where do we stand|overall|whole case|full review|case posture)/i.test(lower)) {
+    return DEFAULT_CASE_TOPIC;
+  }
+
+  return previousTopic || DEFAULT_CASE_TOPIC;
+}
+
 export default function ChatWidget({
   onAttachmentChange,
   onAttachmentsChange,
@@ -194,6 +247,8 @@ export default function ChatWidget({
   onAnalysisStatusChange,
   onWorkspaceDataChange,
   onSessionReset,
+  onChatEngagement,
+  onCaseUploadComplete,
   onSessionControlsReady,
   onCaseIntentChange,
   caseChatEnabled = false,
@@ -237,6 +292,7 @@ export default function ChatWidget({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messageCounterRef = useRef(0);
   const activeSystemStatusMessageIdRef = useRef<string | null>(null);
+  const currentCaseTopicRef = useRef(DEFAULT_CASE_TOPIC);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
@@ -460,6 +516,26 @@ export default function ChatWidget({
         role: entry.role,
         content: entry.content,
       }));
+  }
+
+  function resolveLatestUserQuestion() {
+    return (
+      [...messages]
+        .reverse()
+        .find(
+          (entry) =>
+            entry.role === "user" &&
+            !isSystemStatusMessage(entry) &&
+            entry.content.trim().length > 0
+        )
+        ?.content.trim() ?? null
+    );
+  }
+
+  function updateCaseTopic(message: string) {
+    const nextTopic = resolveCaseTopic(message, currentCaseTopicRef.current);
+    currentCaseTopicRef.current = nextTopic;
+    return nextTopic;
   }
 
   const invalidateStructuredAnalysis = useCallback(() => {
@@ -716,6 +792,7 @@ export default function ChatWidget({
     setPreviewAttachmentId(null);
     setReplaceAttachmentId(null);
     firstAttachmentAtRef.current = null;
+    currentCaseTopicRef.current = DEFAULT_CASE_TOPIC;
     activeSystemStatusMessageIdRef.current = null;
     setShowOpeningDisclaimer(true);
     setOpeningDisclaimerDismissed(false);
@@ -752,12 +829,14 @@ export default function ChatWidget({
     if (loading) return;
     if (!input.trim() && attachments.length === 0) return;
 
+    onChatEngagement?.();
     stopSpeaking();
     setLoading(true);
     shouldAutoScrollRef.current = true;
 
     const mySession = sessionRef.current;
     const messageToSend = input.trim() || buildAttachmentSummary(attachments);
+    const activeCaseTopic = updateCaseTopic(messageToSend);
     const hasAttachmentsInTurn = attachments.length > 0;
     const activeAnalysisRunId = hasAttachmentsInTurn ? beginStructuredAnalysisRun() : null;
     const attachmentStats = {
@@ -788,7 +867,9 @@ export default function ChatWidget({
           signal: controller.signal,
           body: JSON.stringify({
             caseId: analysisReportIdRef.current,
-            message: messageToSend,
+            message:
+              `${messageToSend}\n\nCurrent active topic/mode: ${activeCaseTopic}. ` +
+              "Answer this topic first and avoid a broad case recap unless this topic is a general summary.",
             history: resolveCaseHistory(),
           }),
         });
@@ -847,12 +928,142 @@ export default function ChatWidget({
         );
       }
 
+      if (hasAttachmentsInTurn && analysisReportIdRef.current) {
+        const activeCaseId = analysisReportIdRef.current;
+        const analysisResponse = await fetch("/api/analysis", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            artifactIds: attachments.map((attachment) => attachment.attachmentId),
+            activeCaseId,
+            userIntent: messageToSend,
+          }),
+        });
+        const analysisDurationMs = Date.now() - analysisStartMs;
+
+        if (
+          !analysisResponse.ok ||
+          sessionRef.current !== mySession ||
+          analysisRunRef.current !== activeAnalysisRunId
+        ) {
+          console.info("[attachments] active-case reassessment failure", {
+            fileCount: attachmentStats.fileCount,
+            totalBytes: attachmentStats.totalBytes,
+            totalPdfPages: attachmentStats.totalPdfPages,
+            analysisDurationMs,
+            status: analysisResponse.status,
+          });
+          if (analysisRunRef.current === activeAnalysisRunId) {
+            onAnalysisStatusChange?.("error", `Analysis failed (${analysisResponse.status})`);
+            onAnalysisLoadingChange?.(false);
+          }
+          return;
+        }
+
+        const analysisData = (await analysisResponse.json()) as {
+          reportId?: string;
+          report?: RepairIntelligenceReport;
+          linkedEvidence?: LinkedEvidenceDebugItem[];
+          panel?: DecisionPanel;
+          workspaceData?: WorkspaceData;
+          retrievalAttempted?: boolean;
+          retrievalCompleted?: boolean;
+          retrievalMatchCount?: number;
+          refinedWithRetrieval?: boolean;
+          analysisCompletedAt?: string;
+          caseContinuity?: {
+            activeCaseId?: string;
+            mode?: "new_case" | "active_case_update";
+            evidenceRegistryCount?: number;
+          };
+          reassessmentDelta?: RepairIntelligenceReport["reassessmentDelta"];
+          artifactRefreshPolicy?: RepairIntelligenceReport["artifactRefreshPolicy"];
+        };
+
+        analysisReportIdRef.current = analysisData.reportId ?? activeCaseId;
+        setWorkspaceData(analysisData.workspaceData ?? null);
+        onAnalysisReportIdChange?.(analysisData.reportId ?? activeCaseId);
+        onAnalysisResultChange?.(analysisData.report ?? null);
+        onLinkedEvidenceChange?.(analysisData.linkedEvidence ?? []);
+        onAnalysisPanelChange?.(analysisData.panel ?? null);
+        onAnalysisStatusChange?.("complete", null);
+        onAnalysisLoadingChange?.(false);
+        upsertSystemStatusMessage(
+          formatCaseUpdateStatus(
+            analysisData.reassessmentDelta,
+            analysisData.artifactRefreshPolicy
+          )
+        );
+        setAttachments((prev) =>
+          prev.map((attachment) => ({
+            ...attachment,
+            usedInAnalysis: true,
+          }))
+        );
+        onCaseUploadComplete?.();
+
+        const latestPriorUserQuestion = resolveLatestUserQuestion();
+
+        const caseChatResponse = await fetch("/api/case-chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            caseId: analysisData.reportId ?? activeCaseId,
+            message:
+              `${messageToSend}\n\nAdditional evidence was just uploaded and merged into this active case. ` +
+              `Current active topic/mode: ${activeCaseTopic}.\n` +
+              `Latest prior user question/topic: ${latestPriorUserQuestion ?? caseIntent}.\n` +
+              "Answer as a continuation. Directly answer the active topic first, use the new upload only where it affects that topic, then mention only the most relevant open items. If the active topic is a general case summary, use a compact current-case posture. Otherwise, do not provide a broad case recap. Separate visible photo evidence, document/invoice-supported repairs, and verification items that remain open only when relevant to the active topic. Do not restart the review or ask for vehicle identity already present in the case.",
+            history: resolveCaseHistory(),
+          }),
+        });
+
+        if (!caseChatResponse.ok) {
+          let errorMessage = `Case chat failed (${caseChatResponse.status})`;
+
+          try {
+            const data = (await caseChatResponse.json()) as { error?: string };
+            if (data?.error) {
+              errorMessage = data.error;
+            }
+          } catch {
+            // Keep fallback message when JSON parsing fails.
+          }
+
+          throw new Error(errorMessage);
+        }
+
+        const data = (await caseChatResponse.json()) as { reply?: string };
+        const reply = data.reply?.trim() || "Case reassessment complete.";
+
+        if (sessionRef.current === mySession) {
+          stopSpeaking();
+          messageCounterRef.current += 1;
+          const assistantMessage = createMessage(
+            messageCounterRef.current,
+            "assistant",
+            reply
+          );
+          setMessages((prev) => [...prev, assistantMessage]);
+          updateAnalysisText(reply);
+          onPrimaryAnalysisChange?.({
+            messageId: assistantMessage.id,
+            content: reply,
+          });
+        }
+
+        return;
+      }
+
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
           messages: updatedMessages,
+          activeCaseId: analysisReportIdRef.current,
           attachmentIds: attachments.map((attachment) => attachment.attachmentId),
           attachments: attachments.map((attachment) => ({
             filename: attachment.filename,
@@ -1135,6 +1346,7 @@ export default function ChatWidget({
       throw new Error("Please sign in before uploading.");
     }
 
+    onChatEngagement?.();
     const formData = new FormData();
     formData.append("file", file);
 
@@ -1559,7 +1771,14 @@ export default function ChatWidget({
   const userBubble = "border border-orange-500/24 bg-[#1a120d]/88 text-orange-300 shadow-[0_14px_32px_rgba(0,0,0,0.16)]";
 
   return (
-    <div className={`relative flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/6 bg-white/[0.035] shadow-[0_22px_70px_rgba(0,0,0,0.32)] ${disabled ? "opacity-75" : ""}`}>
+    <div
+      className={`relative flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/6 bg-white/[0.035] shadow-[0_22px_70px_rgba(0,0,0,0.32)] ${disabled ? "opacity-75" : ""}`}
+      onClick={() => {
+        if (!disabled) {
+          onChatEngagement?.();
+        }
+      }}
+    >
       <AttachmentPreviewModal
         attachment={disabled ? null : (previewAttachment as PreviewAttachment | null)}
         attachments={disabled ? [] : (attachments as PreviewAttachment[])}
@@ -1827,7 +2046,11 @@ export default function ChatWidget({
               <textarea
                 ref={textareaRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onFocus={() => onChatEngagement?.()}
+                onChange={(e) => {
+                  onChatEngagement?.();
+                  setInput(e.target.value);
+                }}
                 disabled={disabled}
                 rows={1}
                 placeholder={

@@ -405,9 +405,12 @@ function applyLinkedEvidenceToReport(params: {
       issueKeys: params.report.issues.map((issue) => issue.id),
     })
   );
-  const issues = mergeIssueAssessments(
-    params.previousReport?.issues ?? [],
-    params.report.issues,
+  const issues = augmentIssuesWithEvidenceRegistry(
+    mergeIssueAssessments(
+      params.previousReport?.issues ?? [],
+      params.report.issues,
+      evidenceRegistry
+    ),
     evidenceRegistry
   );
   const reassessmentMode = params.activeCaseId ? "active_case_update" : "new_case";
@@ -463,19 +466,36 @@ function buildCaseEvidenceRegistry(params: {
   issueKeys: string[];
 }): CaseEvidenceRegistryItem[] {
   const now = new Date().toISOString();
-  const uploaded = params.uploadedAttachments.map((attachment) => ({
-    id: attachment.id,
-    sourceType: classifyUploadedEvidenceSource(attachment),
-    label: attachment.filename,
-    extractedText: attachment.text,
-    ingestionState: "uploaded" as const,
-    evidenceStatus: attachment.type.startsWith("image/")
-      ? ("VISIBLE_IN_IMAGES" as const)
-      : ("DOCUMENTED" as const),
-    relatedIssueKeys: inferRelatedIssueKeys(attachment.text, params.issueKeys),
-    createdAt: now,
-    updatedAt: now,
-  }));
+  const uploaded = params.uploadedAttachments.map((attachment) => {
+    const sourceType = classifyUploadedEvidenceSource(attachment);
+    const extractedSummary =
+      sourceType === "invoice" || sourceType === "sublet_document"
+        ? summarizeInvoiceFacts(extractInvoiceFacts(attachment, sourceType))
+        : undefined;
+
+    return {
+      id: attachment.id,
+      sourceType,
+      label: attachment.filename,
+      extractedText: attachment.text,
+      extractedSummary,
+      structuredFacts:
+        sourceType === "invoice" || sourceType === "sublet_document"
+          ? extractInvoiceFacts(attachment, sourceType)
+          : undefined,
+      ingestionState: "uploaded" as const,
+      evidenceStatus: attachment.type.startsWith("image/")
+        ? ("VISIBLE_IN_IMAGES" as const)
+        : ("DOCUMENTED" as const),
+      relatedIssueKeys: inferEvidenceIssueKeys({
+        text: `${attachment.filename}\n${attachment.text}`,
+        sourceType,
+        issueKeys: params.issueKeys,
+      }),
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
   const linked = params.linkedEvidence.map((doc, index) => ({
     id: `linked:${index + 1}:${doc.url}`,
     sourceType: classifyLinkedEvidenceSource(doc),
@@ -492,7 +512,11 @@ function buildCaseEvidenceRegistry(params: {
       doc.status === "ok"
         ? ("DOCUMENTED" as const)
         : ("REFERENCED_NOT_PRODUCED" as const),
-    relatedIssueKeys: inferRelatedIssueKeys(`${doc.title ?? ""}\n${doc.text}`, params.issueKeys),
+    relatedIssueKeys: inferEvidenceIssueKeys({
+      text: `${doc.title ?? ""}\n${doc.text}`,
+      sourceType: classifyLinkedEvidenceSource(doc),
+      issueKeys: params.issueKeys,
+    }),
     createdAt: now,
     updatedAt: now,
   }));
@@ -528,6 +552,8 @@ function mergeEvidenceRegistry(
         ...item.relatedIssueKeys,
       ]),
       extractedText: item.extractedText ?? existing.extractedText,
+      extractedSummary: item.extractedSummary ?? existing.extractedSummary,
+      structuredFacts: item.structuredFacts ?? existing.structuredFacts,
       linkedUrl: item.linkedUrl ?? existing.linkedUrl,
     });
   }
@@ -584,6 +610,189 @@ function mergeIssueAssessments(
   }
 
   return [...merged.values()];
+}
+
+function augmentIssuesWithEvidenceRegistry(
+  issues: RepairIntelligenceReport["issues"],
+  evidenceRegistry: CaseEvidenceRegistryItem[]
+): RepairIntelligenceReport["issues"] {
+  const merged = new Map<string, RepairIntelligenceReport["issues"][number]>();
+
+  for (const issue of issues) {
+    merged.set(normalizeText(issue.id), issue);
+  }
+
+  for (const item of evidenceRegistry) {
+    for (const key of item.relatedIssueKeys) {
+      const normalizedKey = normalizeText(key);
+      const existing = merged.get(normalizedKey);
+      const definition = getEvidenceDerivedIssueDefinition(key, item);
+      if (!definition) continue;
+
+      if (existing) {
+        merged.set(normalizedKey, {
+          ...existing,
+          evidenceStatus: strongestEvidenceStatus(
+            existing.evidenceStatus,
+            definition.evidenceStatus
+          ),
+          severity: strongestSeverity(existing.severity, definition.severity),
+          evidenceIds: dedupeStrings([...existing.evidenceIds, item.id]),
+        });
+        continue;
+      }
+
+      merged.set(normalizedKey, {
+        ...definition,
+        evidenceIds: [item.id],
+      });
+    }
+  }
+
+  return [...merged.values()];
+}
+
+function getEvidenceDerivedIssueDefinition(
+  key: string,
+  evidence: CaseEvidenceRegistryItem
+): RepairIntelligenceReport["issues"][number] | null {
+  const isPhoto = evidence.sourceType === "photo";
+  const isInvoice = evidence.sourceType === "invoice" || evidence.sourceType === "sublet_document";
+  const summaries = {
+    invoice:
+      evidence.extractedSummary ??
+      `${evidence.label}: invoice/vendor evidence is documented in the current case.`,
+    photo: summarizeVisibleDamageEvidence(evidence),
+  };
+
+  switch (key) {
+    case "ELECTRICAL_DAMAGE_DOCUMENTED":
+      if (!isInvoice) return null;
+      return {
+        id: key,
+        category: "safety",
+        title: "Electrical Damage Documented",
+        finding: summaries.invoice,
+        impact:
+          "Invoice evidence documents electrical, wiring, connector, splice, or harness repair activity that should carry forward in the active case.",
+        missingOperation: "Electrical repair documentation",
+        evidenceStatus: "DOCUMENTED",
+        severity: "medium",
+        evidenceIds: [],
+      };
+    case "REPAIR_COMPLETENESS":
+      if (!isInvoice) return null;
+      return {
+        id: key,
+        category: "documentation",
+        title: "Repair Completeness Documentation",
+        finding: summaries.invoice,
+        impact:
+          "The invoice supports a performed repair or sublet activity; related completion records should remain tied to the case.",
+        missingOperation: "Repair completion support",
+        evidenceStatus: "DOCUMENTED",
+        severity: "medium",
+        evidenceIds: [],
+      };
+    case "FRONT_SUPPORT_HIDDEN_DAMAGE_POTENTIAL":
+      if (!isPhoto) return null;
+      return {
+        id: key,
+        category: "parts",
+        title: "Front Support Area Verification",
+        finding: summaries.photo,
+        impact:
+          "Visible front-end damage supports keeping hidden support, absorber, bracket, and mounting-area verification open pending teardown or repair documentation.",
+        missingOperation: "Front support verification",
+        evidenceStatus: "VISIBLE_IN_IMAGES",
+        severity: "high",
+        evidenceIds: [],
+      };
+    case "MOUNTING_GEOMETRY_OPEN_PENDING_FURTHER_DOCUMENTATION":
+      if (!isPhoto) return null;
+      return {
+        id: key,
+        category: "safety",
+        title: "Mounting Geometry Verification Open",
+        finding: summaries.photo,
+        impact:
+          "Visible mounting, lamp, bumper, or bracket-area disturbance supports an open fit and geometry verification concern, but does not prove hidden damage by itself.",
+        missingOperation: "Mounting geometry verification",
+        evidenceStatus: "OPEN_PENDING_FURTHER_DOCUMENTATION",
+        severity: "high",
+        evidenceIds: [],
+      };
+    case "CALIBRATION_VERIFICATION_OPEN":
+      return {
+        id: key,
+        category: "calibration",
+        title: "Calibration Verification Open",
+        finding: isInvoice ? summaries.invoice : summaries.photo,
+        impact:
+          "Disturbed electrical, front-end, lamp, bumper, or sensor-adjacent areas may affect system verification needs; calibration status remains open unless records directly document it.",
+        missingOperation: "Calibration verification",
+        evidenceStatus: "OPEN_PENDING_FURTHER_DOCUMENTATION",
+        severity: "high",
+        evidenceIds: [],
+      };
+    case "SUSPENSION_WHEEL_AREA_VERIFICATION":
+      if (!isPhoto) return null;
+      return {
+        id: key,
+        category: "safety",
+        title: "Suspension / Wheel-Area Verification",
+        finding: summaries.photo,
+        impact:
+          "Visible wheel-opening or wheel-area involvement supports keeping suspension, steering, or wheel-area verification open pending documentation.",
+        missingOperation: "Suspension and wheel-area verification",
+        evidenceStatus: "VISIBLE_IN_IMAGES",
+        severity: "high",
+        evidenceIds: [],
+      };
+    case "ALIGNMENT_VERIFICATION_OPEN_PENDING_FURTHER_DOCUMENTATION":
+      if (!isPhoto) return null;
+      return {
+        id: key,
+        category: "safety",
+        title: "Alignment Verification Open",
+        finding: summaries.photo,
+        impact:
+          "Wheel-area involvement can make alignment verification relevant, but completion is not established unless alignment records are provided.",
+        missingOperation: "Alignment verification",
+        evidenceStatus: "OPEN_PENDING_FURTHER_DOCUMENTATION",
+        severity: "medium",
+        evidenceIds: [],
+      };
+    case "FIT_AND_FINISH_VALIDATION":
+      if (!isPhoto) return null;
+      return {
+        id: key,
+        category: "parts",
+        title: "Fit And Finish Validation",
+        finding: summaries.photo,
+        impact:
+          "Visible panel, lamp, bumper, trim, or mounting-area involvement supports fit validation after repair.",
+        missingOperation: "Fit and finish validation",
+        evidenceStatus: "VISIBLE_IN_IMAGES",
+        severity: "medium",
+        evidenceIds: [],
+      };
+    case "HIDDEN_DAMAGE_POTENTIAL":
+      return {
+        id: key,
+        category: "safety",
+        title: "Hidden Damage Potential",
+        finding: isInvoice ? summaries.invoice : summaries.photo,
+        impact:
+          "The current evidence supports an open hidden-damage verification concern, but hidden damage is not confirmed without teardown, measurements, or supporting records.",
+        missingOperation: "Hidden damage verification",
+        evidenceStatus: isPhoto ? "VISIBLE_IN_IMAGES" : "SUPPORTABLE_BUT_UNCONFIRMED",
+        severity: "medium",
+        evidenceIds: [],
+      };
+    default:
+      return null;
+  }
 }
 
 function buildReassessmentDelta(params: {
@@ -653,16 +862,22 @@ function buildSharedFactualCore(params: {
     report.vehicle?.make,
     report.vehicle?.model,
     report.vehicle?.trim,
-    report.vehicle?.vin ? `VIN ${report.vehicle.vin}` : "",
+    report.vehicle?.vin ? `VIN ending ${report.vehicle.vin.slice(-4)}` : "",
   ]
     .filter(Boolean)
     .join(" ") || "Vehicle not fully established";
   const visibleDamageObservations = params.evidenceRegistry
     .filter((item) => item.sourceType === "photo")
-    .map((item) => `${item.label}: visible-condition evidence preserved.`);
+    .map(summarizeVisibleDamageEvidence);
   const linkedEvidenceState = params.evidenceRegistry
     .filter((item) => item.linkedUrl)
     .map((item) => `${item.label}: ${item.ingestionState}`);
+  const documentedRepairOperations = dedupeStrings([
+    ...report.presentProcedures,
+    ...params.evidenceRegistry
+      .filter((item) => item.sourceType === "invoice" || item.sourceType === "sublet_document")
+      .map(summarizeInvoiceEvidence),
+  ]);
   const issueAssessments = report.issues.map((issue) => ({
     key: issue.id,
     title: issue.title,
@@ -677,11 +892,22 @@ function buildSharedFactualCore(params: {
 
   return {
     vehicleSummary,
-    currentCaseSummary:
-      report.recommendedActions[0] ??
-      "Current case remains under evidence-based review.",
+    currentCaseSummary: buildCurrentCaseSummary({
+      mode: params.mode,
+      vehicleSummary,
+      evidenceRegistry: params.evidenceRegistry,
+      visibleDamageObservations,
+      documentedRepairOperations,
+      unresolvedVerificationNeeds: dedupeStrings([
+        ...report.missingProcedures,
+        ...report.supplementOpportunities,
+      ]),
+      fallback:
+        report.recommendedActions[0] ??
+        "Current case remains under evidence-based review.",
+    }),
     visibleDamageObservations,
-    documentedRepairOperations: report.presentProcedures,
+    documentedRepairOperations,
     evidenceRegistrySummary: params.evidenceRegistry.map(
       (item) => `${item.label}: ${item.sourceType}, ${item.evidenceStatus}`
     ),
@@ -703,6 +929,256 @@ function buildSharedFactualCore(params: {
       evidenceCount: params.evidenceRegistry.length,
     },
   };
+}
+
+function buildCurrentCaseSummary(params: {
+  mode: "new_case" | "active_case_update";
+  vehicleSummary: string;
+  evidenceRegistry: CaseEvidenceRegistryItem[];
+  visibleDamageObservations: string[];
+  documentedRepairOperations: string[];
+  unresolvedVerificationNeeds: string[];
+  fallback: string;
+}): string {
+  const photoCount = params.evidenceRegistry.filter((item) => item.sourceType === "photo").length;
+  const invoiceCount = params.evidenceRegistry.filter(
+    (item) => item.sourceType === "invoice" || item.sourceType === "sublet_document"
+  ).length;
+  const documentCount = params.evidenceRegistry.filter(
+    (item) =>
+      item.sourceType !== "photo" &&
+      item.sourceType !== "invoice" &&
+      item.sourceType !== "sublet_document"
+  ).length;
+  const evidenceParts = [
+    photoCount > 0 ? `${photoCount} damage photo${photoCount === 1 ? "" : "s"}` : "",
+    invoiceCount > 0 ? `${invoiceCount} repair invoice${invoiceCount === 1 ? "" : "s"}` : "",
+    documentCount > 0
+      ? `${documentCount} supporting document${documentCount === 1 ? "" : "s"}`
+      : "",
+  ].filter(Boolean);
+  const opening =
+    params.mode === "active_case_update"
+      ? `Current case now includes ${evidenceParts.join(", ") || "the merged evidence"} for ${params.vehicleSummary}.`
+      : `Current case includes ${evidenceParts.join(", ") || "the available evidence"} for ${params.vehicleSummary}.`;
+  const visible = params.visibleDamageObservations.slice(0, 2).join(" ");
+  const invoice = params.documentedRepairOperations
+    .filter((item) => /invoice|connector|electrical|wire|harness|repair/i.test(item))
+    .slice(0, 2)
+    .join(" ");
+  const verificationNeeds = params.unresolvedVerificationNeeds
+    .filter((item) =>
+      /hidden|mount|bracket|support|geometry|structural|calibration|scan|fit|alignment|wheel|suspension/i.test(
+        item
+      )
+    )
+    .slice(0, 4);
+  const openState =
+    verificationNeeds.length > 0
+      ? ` Keep ${verificationNeeds.join(", ")} open pending further documentation.`
+      : "";
+
+  return dedupeStrings([opening, visible, invoice, openState.trim(), params.fallback])
+    .filter(Boolean)
+    .join(" ");
+}
+
+function summarizeVisibleDamageEvidence(item: CaseEvidenceRegistryItem): string {
+  const sourceText = `${item.label}\n${item.extractedText ?? ""}`;
+  const lower = sourceText.toLowerCase();
+  const observed = [
+    /(front[-\s]?left|left[-\s]?front|driver[-\s]?front)/i.test(sourceText)
+      ? "left-front area"
+      : "",
+    /(front[-\s]?right|right[-\s]?front|passenger[-\s]?front)/i.test(sourceText)
+      ? "right-front area"
+      : "",
+    lower.includes("bumper") ? "bumper" : "",
+    lower.includes("headlamp") || lower.includes("headlight") ? "headlamp" : "",
+    lower.includes("fender") ? "fender" : "",
+    lower.includes("mount") || lower.includes("bracket") || lower.includes("support")
+      ? "mounting/bracket/support area"
+      : "",
+    lower.includes("wheel opening") || lower.includes("wheel-opening") || lower.includes("liner")
+      ? "wheel-opening trim/liner"
+      : "",
+    lower.includes("wheel") || lower.includes("suspension") ? "wheel-area" : "",
+  ].filter(Boolean);
+
+  if (observed.length === 0) {
+    return `${item.label}: photos provide visible-condition evidence only; hidden damage is not confirmed from photos alone.`;
+  }
+
+  return `${item.label}: visible photo evidence supports ${dedupeStrings(observed).join(", ")} involvement.`;
+}
+
+function summarizeInvoiceEvidence(item: CaseEvidenceRegistryItem): string {
+  if (item.extractedSummary) {
+    return item.extractedSummary;
+  }
+
+  const sourceText = `${item.label}\n${item.extractedText ?? ""}`;
+  const lower = sourceText.toLowerCase();
+  const observed = [
+    lower.includes("connector") ? "connector repair" : "",
+    lower.includes("electrical") || lower.includes("wire") || lower.includes("wiring")
+      ? "electrical/wiring repair"
+      : "",
+    lower.includes("harness") ? "harness repair" : "",
+    lower.includes("collision") ? "collision-related repair reference" : "",
+  ].filter(Boolean);
+
+  if (observed.length === 0) {
+    return `${item.label}: repair invoice is documented in the current case.`;
+  }
+
+  return `${item.label}: invoice supports ${dedupeStrings(observed).join(", ")}.`;
+}
+
+function extractInvoiceFacts(
+  attachment: StoredAttachment,
+  sourceType: CaseEvidenceSourceType
+): Record<string, string | string[] | null> {
+  const text = attachment.text || "";
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const vendor =
+    findLabeledValue(text, ["vendor", "facility", "repair facility", "from"]) ??
+    lines.find((line) => /auto|collision|electric|glass|calibration|diagnostic|repair|tesla/i.test(line)) ??
+    lines[0] ??
+    null;
+  const invoiceNumber = findLabeledValue(text, [
+    "invoice #",
+    "invoice no",
+    "invoice number",
+    "inv #",
+    "inv no",
+  ]);
+  const invoiceDate = findLabeledDate(text, ["invoice date", "date"]);
+  const dueDate = findLabeledDate(text, ["due date"]);
+  const vin = text.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0]?.toUpperCase() ?? null;
+  const vehicle = findVehicleLine(text);
+  const billedParty = findLabeledValue(text, ["bill to", "customer", "billed party"]);
+  const technician = findLabeledValue(text, ["technician", "tech"]);
+  const lineItems = extractInvoiceLineItems(lines);
+  const totalAmount =
+    findMoneyNearLabel(text, ["total", "amount due", "balance due"]) ??
+    lineItems.at(-1)?.match(/\$[\d,]+(?:\.\d{2})?/)?.[0] ??
+    null;
+  const narrativeNotes = extractRepairNarrative(lines);
+
+  return {
+    documentType: sourceType === "sublet_document" ? "Sublet/vendor document" : "Invoice",
+    vendor,
+    invoiceNumber,
+    invoiceDate,
+    dueDate,
+    vehicle,
+    vin,
+    billedParty,
+    technician,
+    lineItems,
+    totalAmount,
+    narrativeNotes,
+  };
+}
+
+function summarizeInvoiceFacts(facts: Record<string, string | string[] | null>): string {
+  const lineItems = Array.isArray(facts.lineItems) ? facts.lineItems : [];
+  const narrativeNotes = Array.isArray(facts.narrativeNotes) ? facts.narrativeNotes : [];
+  const supportCategories = dedupeStrings([
+    ...lineItems,
+    ...narrativeNotes,
+  ]).filter((item) =>
+    /connector|harness|splice|wire|wiring|electrical|calibration|scan|glass|alignment|sublet|repair/i.test(
+      item
+    )
+  );
+  const descriptors = supportCategories.slice(0, 4);
+  const vendor = typeof facts.vendor === "string" ? facts.vendor : "Uploaded invoice";
+  const invoiceNumber =
+    typeof facts.invoiceNumber === "string" && facts.invoiceNumber
+      ? ` invoice ${facts.invoiceNumber}`
+      : "";
+  const total =
+    typeof facts.totalAmount === "string" && facts.totalAmount ? ` Total: ${facts.totalAmount}.` : "";
+
+  if (descriptors.length === 0) {
+    return `${vendor}${invoiceNumber}: invoice/vendor document is documented in the current case.${total}`;
+  }
+
+  return `${vendor}${invoiceNumber}: invoice supports ${descriptors.join("; ")}.${total}`;
+}
+
+function findLabeledValue(text: string, labels: string[]): string | null {
+  for (const label of labels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = text.match(new RegExp(`${escaped}\\s*:?\\s*([^\\n\\r]+)`, "i"));
+    const value = match?.[1]?.trim();
+    if (value) return value.slice(0, 120);
+  }
+
+  return null;
+}
+
+function findLabeledDate(text: string, labels: string[]): string | null {
+  for (const label of labels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = text.match(
+      new RegExp(`${escaped}\\s*:?\\s*(\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4})`, "i")
+    );
+    if (match?.[1]) return match[1];
+  }
+
+  return null;
+}
+
+function findMoneyNearLabel(text: string, labels: string[]): string | null {
+  for (const label of labels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = text.match(
+      new RegExp(`${escaped}[^\\n\\r$]{0,40}(\\$\\s*[\\d,]+(?:\\.\\d{2})?)`, "i")
+    );
+    if (match?.[1]) return match[1].replace(/\s+/g, "");
+  }
+
+  return null;
+}
+
+function findVehicleLine(text: string): string | null {
+  const labeled = findLabeledValue(text, ["vehicle", "year/make/model", "year make model"]);
+  if (labeled) return labeled;
+
+  const match = text.match(/\b(20\d{2}|19\d{2})\s+([A-Z][A-Za-z]+)\s+([A-Z0-9][A-Za-z0-9 -]{1,40})/);
+  return match?.[0]?.trim() ?? null;
+}
+
+function extractInvoiceLineItems(lines: string[]): string[] {
+  return dedupeStrings(
+    lines
+      .filter((line) =>
+        /(connector|harness|splice|wire|wiring|electrical|calibration|scan|glass|alignment|sublet|repair|replace|labor|\$[\d,]+(?:\.\d{2})?)/i.test(
+          line
+        )
+      )
+      .map((line) => line.replace(/\s+/g, " ").slice(0, 180))
+      .slice(0, 12)
+  );
+}
+
+function extractRepairNarrative(lines: string[]): string[] {
+  return dedupeStrings(
+    lines
+      .filter((line) =>
+        /(damaged|repaired|replaced|spliced|connector|harness|wire|wiring|electrical|collision|calibrat|scan|align|diagnos)/i.test(
+          line
+        )
+      )
+      .map((line) => line.replace(/\s+/g, " ").slice(0, 220))
+      .slice(0, 8)
+  );
 }
 
 function buildArtifactRefreshPolicy(params: {
@@ -843,6 +1319,15 @@ function classifyUploadedEvidenceSource(attachment: StoredAttachment): CaseEvide
   const text = `${attachment.filename}\n${attachment.type}\n${attachment.text}`.toLowerCase();
 
   if (attachment.type.startsWith("image/")) return "photo";
+  if (
+    /(sublet|vendor|specialty|calibration sublet|scan sublet|glass|alignment)/i.test(text) &&
+    /(invoice|bill|repair order|ro #|statement)/i.test(text)
+  ) {
+    return "sublet_document";
+  }
+  if (text.includes("invoice") || text.includes("repair order") || text.includes("ro #")) {
+    return "invoice";
+  }
   if (text.includes("carrier") || text.includes("insurance estimate")) return "carrier_estimate";
   if (text.includes("shop") || text.includes("repair facility")) return "shop_estimate";
   if (text.includes("supplement")) return "supplement";
@@ -864,15 +1349,61 @@ function classifyLinkedEvidenceSource(doc: LinkedEvidence): CaseEvidenceSourceTy
   return "other_supporting_document";
 }
 
-function inferRelatedIssueKeys(text: string, issueKeys: string[]): string[] {
-  const lower = text.toLowerCase();
-  return issueKeys.filter((key) => {
-    const normalized = key.toLowerCase().replace(/[-_]+/g, " ");
-    return normalized
-      .split(/\s+/)
-      .filter((part) => part.length >= 4)
-      .some((part) => lower.includes(part));
-  });
+function inferEvidenceIssueKeys(params: {
+  text: string;
+  sourceType: CaseEvidenceSourceType;
+  issueKeys: string[];
+}): string[] {
+  const lower = params.text.toLowerCase();
+  const semanticKeys: string[] = [];
+
+  if (params.sourceType === "invoice" || params.sourceType === "sublet_document") {
+    if (/(connector|harness|splice|wire|wiring|electrical)/i.test(params.text)) {
+      semanticKeys.push(
+        "ELECTRICAL_DAMAGE_DOCUMENTED",
+        "REPAIR_COMPLETENESS",
+        "HIDDEN_DAMAGE_POTENTIAL",
+        "CALIBRATION_VERIFICATION_OPEN"
+      );
+    }
+
+    if (/(calibration|aiming|initialization|scan|diagnostic)/i.test(params.text)) {
+      semanticKeys.push("CALIBRATION_VERIFICATION_OPEN", "POST_REPAIR_SCAN");
+    }
+
+    if (/(glass|alignment|mechanical|sublet|vendor)/i.test(params.text)) {
+      semanticKeys.push("REPAIR_COMPLETENESS");
+    }
+  }
+
+  if (params.sourceType === "photo") {
+    if (/(front|bumper|headlamp|headlight|wheel opening|lower support|absorber|valance|bracket|mount)/i.test(params.text)) {
+      semanticKeys.push(
+        "FRONT_SUPPORT_HIDDEN_DAMAGE_POTENTIAL",
+        "FIT_AND_FINISH_VALIDATION",
+        "MOUNTING_GEOMETRY_OPEN_PENDING_FURTHER_DOCUMENTATION",
+        "CALIBRATION_VERIFICATION_OPEN"
+      );
+    }
+
+    if (/(wheel|suspension|alignment)/i.test(params.text)) {
+      semanticKeys.push(
+        "SUSPENSION_WHEEL_AREA_VERIFICATION",
+        "ALIGNMENT_VERIFICATION_OPEN_PENDING_FURTHER_DOCUMENTATION"
+      );
+    }
+  }
+
+  return dedupeStrings([
+    ...semanticKeys,
+    ...params.issueKeys.filter((key) => {
+      const normalized = key.toLowerCase().replace(/[-_]+/g, " ");
+      return normalized
+        .split(/\s+/)
+        .filter((part) => part.length >= 4)
+        .some((part) => lower.includes(part));
+    }),
+  ]);
 }
 
 function mergeLinkedEvidence(
