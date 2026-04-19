@@ -115,15 +115,26 @@ export async function POST(req: Request) {
     });
 
     if (!isPlatformAdmin) {
-      await recordUsage({
-        userId: user.id,
-        kind: "FILE_UPLOAD",
-        metadataJson: {
-          attachmentId: stored.id,
-          filename: stored.filename,
-        },
-      });
-      await incrementUsage(user.id, "FILE_UPLOAD");
+      try {
+        await recordUsage({
+          userId: user.id,
+          kind: "FILE_UPLOAD",
+          metadataJson: {
+            source: "upload",
+            fileName: file.name,
+            fileSize: file.size,
+            attachmentId: stored.id,
+          },
+        });
+      } catch (error) {
+        console.error("USAGE_RECORD_WRITE_FAILED", error);
+      }
+
+      try {
+        await incrementUsage(user.id, "FILE_UPLOAD");
+      } catch (error) {
+        console.error("USAGE_COUNTER_INCREMENT_FAILED", error);
+      }
     }
 
     return NextResponse.json({

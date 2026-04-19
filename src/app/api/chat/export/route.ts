@@ -282,14 +282,23 @@ export async function POST(req: Request) {
     const pdf = buildChatExportPdf(redacted);
 
     if (!access.isPlatformAdmin) {
-      await recordUsage({
-        userId: access.userId,
-        kind: "REPORT_EXPORT",
-        metadataJson: {
-          source: "chat_export",
-        },
-      });
-      await incrementUsage(access.userId, "REPORT_EXPORT");
+      try {
+        await recordUsage({
+          userId: access.userId,
+          kind: "REPORT_EXPORT",
+          metadataJson: {
+            source: "chat_export",
+          },
+        });
+      } catch (error) {
+        console.error("USAGE_RECORD_WRITE_FAILED", error);
+      }
+
+      try {
+        await incrementUsage(access.userId, "REPORT_EXPORT");
+      } catch (error) {
+        console.error("USAGE_COUNTER_INCREMENT_FAILED", error);
+      }
     }
 
     return new Response(pdf, {
