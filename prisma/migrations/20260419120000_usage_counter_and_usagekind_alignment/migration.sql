@@ -33,3 +33,18 @@ BEGIN
     ON DELETE CASCADE ON UPDATE CASCADE;
   END IF;
 END $$;
+
+CREATE OR REPLACE FUNCTION update_usage_counter_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW."updatedAt" = CURRENT_TIMESTAMP;
+  RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+DROP TRIGGER IF EXISTS set_updated_at ON "UsageCounter";
+
+CREATE TRIGGER set_updated_at
+BEFORE UPDATE ON "UsageCounter"
+FOR EACH ROW
+EXECUTE PROCEDURE update_usage_counter_updated_at();

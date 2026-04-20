@@ -8,7 +8,7 @@ type LinkedDocLike = {
   title?: string | null;
   url?: string;
   text?: string | null;
-  status?: "ok" | "blocked" | "failed";
+  status?: "ok" | "blocked" | "failed" | "skipped";
   sourceType?: string;
 };
 
@@ -18,9 +18,10 @@ LINKED EVIDENCE POLICY
 - Retrieve accessible linked documents server-side and preserve their extracted text in the case.
 - Use linked OEM procedures and linked ADAS reports as substantive evidence when successfully retrieved.
 - If a link is blocked, private, or fails retrieval, do not pretend it was reviewed and do not assume the underlying record does not exist.
-- Treat blocked or failed linked documents as referenced but not yet produced, or open to further documentation.
+- Treat blocked, skipped, or failed linked documents as referenced but not yet produced, or open to further documentation.
 - When successfully retrieved linked evidence conflicts with generic assumptions, the linked case-specific evidence wins.
 - Do not assume the model can browse arbitrary URLs at answer time. Only retrieved case evidence should be treated as reviewed.
+- Never reveal raw linked-document URLs to the user. Summarize what retrieved support says without linking.
 `.trim();
 
 export function buildEvidenceCorpus({
@@ -49,7 +50,7 @@ export function buildEvidenceCorpus({
       parts.push(
         [
           `LINKED DOCUMENT REFERENCED BUT NOT PRODUCED: ${doc.title || "Untitled"}`,
-          `URL: ${doc.url || "Unknown"}`,
+          "SOURCE: linked supporting document identified in file review",
           `TYPE: ${doc.sourceType || "unknown"}`,
           `STATUS: ${doc.status || "unknown"}`,
           "The link was detected as candidate evidence but the underlying content was not reviewed.",
@@ -61,7 +62,7 @@ export function buildEvidenceCorpus({
     parts.push(
       [
         `LINKED DOCUMENT: ${doc.title || "Untitled"}`,
-        `URL: ${doc.url || "Unknown"}`,
+        "SOURCE: linked supporting document identified in file review",
         `TYPE: ${doc.sourceType || "unknown"}`,
         doc.text || "",
       ].join("\n")

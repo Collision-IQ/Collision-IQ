@@ -1,4 +1,9 @@
 import pdf from "pdf-parse";
+import {
+  downloadDriveFile,
+  extractDriveFileIdFromUrl,
+  isDriveEnabled,
+} from "@/lib/drive/download";
 import { normalizeRemoteUrl } from "@/lib/ingest/normalizeRemoteUrl";
 
 export type RemoteDocumentResult = {
@@ -8,7 +13,7 @@ export type RemoteDocumentResult = {
   mimeType: string | null;
   sourceType: "google_doc" | "google_drive" | "pdf" | "html" | "unknown";
   text: string;
-  status: "ok" | "blocked" | "failed";
+  status: "ok" | "blocked" | "failed" | "skipped";
   notes?: string;
 };
 
@@ -31,9 +36,60 @@ function extractTitle(html: string): string | null {
 export async function readRemoteDocument(
   rawUrl: string
 ): Promise<RemoteDocumentResult> {
-  const normalized = normalizeRemoteUrl(rawUrl);
+  let normalized: ReturnType<typeof normalizeRemoteUrl> | null = null;
 
   try {
+    normalized = normalizeRemoteUrl(rawUrl);
+
+    if (/egnyte\.com/i.test(rawUrl)) {
+      return {
+        url: rawUrl,
+        finalUrl: rawUrl,
+        title: null,
+        mimeType: null,
+        sourceType: "unknown",
+        text: "",
+        status: "skipped",
+        notes: "legacy_egnyte_link",
+      };
+    }
+
+    if (normalized.sourceType === "google_drive" || normalized.sourceType === "google_doc") {
+      if (!isDriveEnabled()) {
+        return {
+          url: rawUrl,
+          finalUrl: normalized.normalizedUrl,
+          title: null,
+          mimeType: null,
+          sourceType: normalized.sourceType,
+          text: "",
+          status: "skipped",
+          notes: "drive_disabled",
+        };
+      }
+
+      const fileId = extractDriveFileIdFromUrl(rawUrl);
+      if (fileId) {
+        const downloaded = await downloadDriveFile(fileId);
+        const parsed = await parseRemoteBuffer({
+          buffer: downloaded.buffer,
+          mimeType: downloaded.mimeType,
+          title: downloaded.name,
+        });
+
+        return {
+          url: rawUrl,
+          finalUrl: downloaded.webViewLink ?? normalized.normalizedUrl,
+          title: downloaded.name,
+          mimeType: downloaded.mimeType,
+          sourceType: normalized.sourceType,
+          text: parsed.text,
+          status: "ok",
+          notes: parsed.notes,
+        };
+      }
+    }
+
     const response = await fetch(normalized.normalizedUrl, {
       method: "GET",
       redirect: "follow",
@@ -66,23 +122,19 @@ export async function readRemoteDocument(
     const buffer = Buffer.from(arrayBuffer);
 
     if (mimeType?.includes("application/pdf")) {
-      const parsed = await pdf(buffer);
-      const parsedInfo =
-        parsed.info && typeof parsed.info === "object"
-          ? (parsed.info as Record<string, unknown>)
-          : null;
-      const title =
-        typeof parsedInfo?.Title === "string" && parsedInfo.Title.trim()
-          ? parsedInfo.Title.trim()
-          : null;
+      const parsed = await parseRemoteBuffer({
+        buffer,
+        mimeType,
+        title: null,
+      });
 
       return {
         url: rawUrl,
         finalUrl,
-        title,
+        title: parsed.title,
         mimeType,
         sourceType: "pdf",
-        text: parsed.text?.trim() || "",
+        text: parsed.text,
         status: "ok",
       };
     }
@@ -129,13 +181,52 @@ export async function readRemoteDocument(
   } catch (error: unknown) {
     return {
       url: rawUrl,
-      finalUrl: normalized.normalizedUrl,
+      finalUrl: normalized?.normalizedUrl ?? rawUrl,
       title: null,
       mimeType: null,
-      sourceType: normalized.sourceType,
+      sourceType: normalized?.sourceType ?? "unknown",
       text: "",
       status: "failed",
       notes: error instanceof Error ? error.message : "Unknown fetch error",
     };
   }
+}
+
+async function parseRemoteBuffer(params: {
+  buffer: Buffer;
+  mimeType: string | null;
+  title: string | null;
+}): Promise<{ title: string | null; text: string; notes?: string }> {
+  const mimeType = params.mimeType?.toLowerCase() ?? "";
+
+  if (mimeType.includes("application/pdf")) {
+    const parsed = await pdf(params.buffer);
+    const parsedInfo =
+      parsed.info && typeof parsed.info === "object"
+        ? (parsed.info as Record<string, unknown>)
+        : null;
+    const title =
+      params.title ||
+      (typeof parsedInfo?.Title === "string" && parsedInfo.Title.trim()
+        ? parsedInfo.Title.trim()
+        : null);
+
+    return {
+      title,
+      text: parsed.text?.trim() || "",
+    };
+  }
+
+  if (mimeType.includes("text") || mimeType.includes("csv")) {
+    return {
+      title: params.title,
+      text: params.buffer.toString("utf-8").trim(),
+    };
+  }
+
+  return {
+    title: params.title,
+    text: params.buffer.toString("utf-8").trim(),
+    notes: "Parsed as generic text fallback.",
+  };
 }

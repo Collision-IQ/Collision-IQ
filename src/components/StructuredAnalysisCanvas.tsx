@@ -1,20 +1,15 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import ReactMarkdown from "react-markdown";
 import {
   type EvidenceLink,
   type EvidenceLinkModel,
   getEvidenceTargetById,
   findEvidenceLinkForSectionItem,
 } from "@/components/chatbot/evidenceLinks";
-import { formatAssistantMessage } from "@/components/chatWidget/speechUtils";
-import { resolveFinancialView } from "@/components/chatbot/financialView";
 import type { InsightKey } from "@/components/chatbot/insightSync";
 import DeterminationCard from "@/components/DeterminationCard";
 import type { ExportModel } from "@/lib/ai/builders/buildExportModel";
-import type { AnalysisResult, RepairIntelligenceReport } from "@/lib/ai/types/analysis";
-import type { WorkspaceData } from "@/types/workspaceTypes";
 import AnalysisSectionCard from "@/components/AnalysisSectionCard";
 
 type AttachmentTrayItem = {
@@ -24,11 +19,7 @@ type AttachmentTrayItem = {
 };
 
 type Props = {
-  analysisText: string;
   renderModel: ExportModel;
-  normalizedResult: AnalysisResult | null;
-  analysisResult: RepairIntelligenceReport | null;
-  workspaceData: WorkspaceData | null;
   attachments: AttachmentTrayItem[];
   hasResolvedAnalysis: boolean;
   activeInsightKey: InsightKey | null;
@@ -90,11 +81,7 @@ function buildSectionPreview(section: SectionData): string {
 }
 
 export default function StructuredAnalysisCanvas({
-  analysisText,
   renderModel,
-  normalizedResult,
-  analysisResult,
-  workspaceData,
   attachments,
   hasResolvedAnalysis,
   activeInsightKey,
@@ -133,26 +120,31 @@ export default function StructuredAnalysisCanvas({
   const supportBullets = dedupe([
     ...renderModel.reportFields.presentStrengths,
     ...renderModel.disputeIntelligenceReport.positives,
-    ...(analysisResult?.presentProcedures ?? []),
+    ...renderModel.reportFields.documentedProcedures,
+    ...renderModel.reportFields.documentedHighlights,
   ]).slice(0, 6);
 
   const missingBullets = dedupe([
+    ...renderModel.disputeIntelligenceReport.topDrivers.map(
+      (driver) => `${driver.title}: ${driver.whyItMatters}`
+    ),
     ...renderModel.disputeIntelligenceReport.supportGaps,
-    ...(workspaceData?.keyIssues ?? []),
-    ...(analysisResult?.missingProcedures ?? []),
     ...renderModel.supplementItems.slice(0, 5).map((item) => `${item.title}: ${item.rationale}`),
   ]).slice(0, 6);
 
   const nextMoveBullets = dedupe([
     ...renderModel.disputeIntelligenceReport.nextMoves,
-    ...(analysisResult?.recommendedActions ?? []),
     ...renderModel.negotiationPlaybook.suggestedSequence,
+    ...renderModel.negotiationPlaybook.documentationNeeded,
   ]).slice(0, 6);
-  const financialView = resolveFinancialView({
-    renderModel,
-    normalizedResult,
-    workspaceData,
-  });
+  const financialBullets = dedupe([
+    renderModel.valuation.acvReasoning,
+    ...renderModel.valuation.acvMissingInputs,
+    renderModel.valuation.dvReasoning,
+    ...renderModel.valuation.dvMissingInputs,
+    renderModel.disputeIntelligenceReport.valuationPreview?.acv,
+    renderModel.disputeIntelligenceReport.valuationPreview?.dv,
+  ]).slice(0, 6);
 
   const executiveBullets = dedupe([
     renderModel.positionStatement,
@@ -188,8 +180,8 @@ export default function StructuredAnalysisCanvas({
       title: "Financial / Valuation View",
       eyebrow: "Financial View",
       summary: "Directional total-loss, gap, or valuation posture from the current material.",
-      bullets: financialView.kind === "unavailable" ? [] : financialView.bullets,
-      prose: financialView.kind === "unavailable" ? financialView.narrative : financialView.narrative,
+      bullets: financialBullets,
+      prose: buildValuationSummary(renderModel),
     },
     {
       insightKey: "next_moves",
@@ -205,10 +197,7 @@ export default function StructuredAnalysisCanvas({
   const caseLabel =
     renderModel.vehicle.label || renderModel.reportFields.vehicleLabel || "Vehicle still being resolved";
   const latestFile = attachments[attachments.length - 1]?.filename ?? "No attachment yet";
-  const issueCount =
-    analysisResult?.issues.length ??
-    normalizedResult?.findings.length ??
-    renderModel.supplementItems.length;
+  const issueCount = renderModel.supplementItems.length;
   const focusModeActive = activeInsightKey !== null;
   const activeEvidenceTarget = evidenceModel
     ? getEvidenceTargetById(evidenceModel, activeEvidenceTargetId ?? null)
@@ -235,17 +224,15 @@ export default function StructuredAnalysisCanvas({
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Metric
               label="Risk"
-              value={formatLabel(workspaceData?.riskLevel ?? analysisResult?.summary.riskScore)}
+              value={renderModel.supplementItems.length > 0 ? "Review" : "Low"}
             />
             <Metric
               label="Confidence"
-              value={formatLabel(workspaceData?.confidence ?? analysisResult?.summary.confidence)}
+              value={formatLabel(renderModel.vehicle.confidence)}
             />
             <Metric
-              label="Critical"
-              value={String(
-                analysisResult?.summary.criticalIssues ?? normalizedResult?.summary.criticalIssues ?? 0
-              )}
+              label="Drivers"
+              value={String(renderModel.disputeIntelligenceReport.topDrivers.length)}
             />
             <Metric label="Issues" value={String(issueCount)} />
           </div>
@@ -355,44 +342,6 @@ export default function StructuredAnalysisCanvas({
         ))}
       </div>
 
-      {analysisText.trim() ? (
-        <AnalysisSectionCard
-          title="Full Analysis Transcript"
-          eyebrow="Transcript"
-          summary="The complete assistant analysis remains available here for detailed review."
-          preview="Open the full transcript when you need the complete narrative, supporting language, or wording details."
-          defaultExpanded={false}
-          dimmed={focusModeActive}
-        >
-          <div className="analysis-report rounded-[20px] border border-white/7 bg-black/22 px-4 py-4 text-[14px] leading-[1.75] text-white/82">
-            <ReactMarkdown
-              components={{
-                h2: ({ children }) => (
-                  <div className="mb-2 mt-5 text-[1.02rem] font-semibold tracking-[-0.02em] text-[#D27A51]">
-                    {children}
-                  </div>
-                ),
-                h3: ({ children }) => (
-                  <div className="mb-1 mt-4 text-[14px] font-medium text-[#D27A51]">
-                    {children}
-                  </div>
-                ),
-                p: ({ children }) => <p className="mt-2 leading-[1.75] text-white/82">{children}</p>,
-                ul: ({ children }) => (
-                  <ul className="mt-2 ml-5 list-disc space-y-1.5 text-white/68">{children}</ul>
-                ),
-                ol: ({ children }) => (
-                  <ol className="mt-2 ml-5 list-decimal space-y-1.5 text-white/68">{children}</ol>
-                ),
-                strong: ({ children }) => <span className="font-semibold text-white">{children}</span>,
-              }}
-            >
-              {formatAssistantMessage(analysisText)}
-            </ReactMarkdown>
-          </div>
-        </AnalysisSectionCard>
-      ) : null}
-
       {canRenderExports ? (
         <div
           ref={(node) => {
@@ -421,6 +370,19 @@ export default function StructuredAnalysisCanvas({
       ) : null}
     </div>
   );
+}
+
+function buildValuationSummary(renderModel: ExportModel): string | undefined {
+  const parts = dedupe([
+    renderModel.valuation.acvStatus !== "not_determinable"
+      ? `ACV posture: ${formatLabel(renderModel.valuation.acvStatus)}.`
+      : null,
+    renderModel.valuation.dvStatus !== "not_determinable"
+      ? `DV posture: ${formatLabel(renderModel.valuation.dvStatus)}.`
+      : null,
+  ]);
+
+  return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
 function LinkedInsightBullet({

@@ -33,6 +33,11 @@ import { buildCustomerReportPdf } from "@/lib/ai/builders/customerReportPdfBuild
 import { buildDisputeIntelligencePdf } from "@/lib/ai/builders/disputeIntelligencePdfBuilder";
 import { exportCarrierPDF } from "@/lib/ai/builders/exportPdf";
 import { buildRebuttalEmailPdf } from "@/lib/ai/builders/rebuttalEmailPdfBuilder";
+import {
+  normalizeExternalDocumentDisplay,
+  redactExternalDocumentUrls,
+  summarizeExternalDocumentForDisplay,
+} from "@/lib/externalDocuments";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 import type {
@@ -54,11 +59,14 @@ type AttachmentTrayItem = {
 };
 
 type LinkedEvidenceDebugItem = {
+  id?: string | null;
   title?: string | null;
   url?: string;
-  status?: "ok" | "blocked" | "failed";
+  finalUrl?: string;
+  status?: "ok" | "blocked" | "failed" | "skipped";
   sourceType?: string;
   textPreview?: string;
+  notes?: string;
 };
 
 type DisputeDriver = {
@@ -190,6 +198,7 @@ export function ChatbotWorkspacePage() {
   const [headerPinnedByUser, setHeaderPinnedByUser] = useState(false);
   const [lastHeaderChangeReason, setLastHeaderChangeReason] =
     useState<ImmersiveHeaderChangeReason>("CASE_RESET");
+  const immersiveHeaderExpandedRef = useRef(true);
   const normalizedResult = useMemo(
     () => (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null),
     [analysisResult]
@@ -257,6 +266,21 @@ export function ChatbotWorkspacePage() {
 
   const panel = hasResolvedAnalysis ? analysisPanel ?? EMPTY_PANEL : EMPTY_PANEL;
   const hasStructuredAnalysis = hasResolvedAnalysis;
+
+  useEffect(() => {
+    immersiveHeaderExpandedRef.current = isImmersiveHeaderExpanded;
+    console.info("[immersive-header] state changed", {
+      expanded: isImmersiveHeaderExpanded,
+      activeCaseId: analysisReportId,
+      hasStructuredAnalysis,
+      lastHeaderChangeReason,
+    });
+  }, [
+    analysisReportId,
+    hasStructuredAnalysis,
+    isImmersiveHeaderExpanded,
+    lastHeaderChangeReason,
+  ]);
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -344,30 +368,65 @@ export function ChatbotWorkspacePage() {
 
   const collapsePreChatHero = useCallback(() => {
     if (headerPinnedByUser) {
+      console.info("[immersive-header] auto-state skipped", {
+        reason: "user_pinned",
+        requestedState: "collapsed",
+        activeCaseId: analysisReportId,
+        hasStructuredAnalysis,
+        lastHeaderChangeReason,
+      });
       return;
     }
 
+    console.info("[immersive-header] auto-state applied", {
+      requestedState: "collapsed",
+      activeCaseId: analysisReportId,
+      hasStructuredAnalysis,
+      lastHeaderChangeReason,
+    });
     setIsImmersiveHeaderExpanded(false);
     setLastHeaderChangeReason("AUTO_COLLAPSE_CHAT_ENGAGED");
-  }, [headerPinnedByUser]);
+  }, [analysisReportId, hasStructuredAnalysis, headerPinnedByUser, lastHeaderChangeReason]);
 
   const reopenImmersiveHeaderAfterUpload = useCallback(() => {
     if (headerPinnedByUser) {
+      console.info("[immersive-header] auto-state skipped", {
+        reason: "user_pinned",
+        requestedState: "expanded",
+        activeCaseId: analysisReportId,
+        hasStructuredAnalysis,
+        lastHeaderChangeReason,
+      });
       return;
     }
 
+    console.info("[immersive-header] auto-state applied", {
+      requestedState: "expanded",
+      activeCaseId: analysisReportId,
+      hasStructuredAnalysis,
+      lastHeaderChangeReason,
+    });
     setIsImmersiveHeaderExpanded(true);
     setLastHeaderChangeReason("AUTO_REOPEN_UPLOAD_COMPLETE");
-  }, [headerPinnedByUser]);
+  }, [analysisReportId, hasStructuredAnalysis, headerPinnedByUser, lastHeaderChangeReason]);
 
   const handleToggleImmersiveHeader = useCallback(() => {
-    setIsImmersiveHeaderExpanded((current) => {
-      const next = !current;
-      setHeaderPinnedByUser(true);
-      setLastHeaderChangeReason(next ? "USER_OPENED" : "USER_CLOSED");
-      return next;
+    const previous = immersiveHeaderExpandedRef.current;
+    const next = !previous;
+
+    console.info("[immersive-header] toggle requested", {
+      previousExpanded: previous,
+      nextExpanded: next,
+      activeCaseId: analysisReportId,
+      hasStructuredAnalysis,
+      lastHeaderChangeReason,
     });
-  }, []);
+
+    immersiveHeaderExpandedRef.current = next;
+    setHeaderPinnedByUser(true);
+    setLastHeaderChangeReason(next ? "USER_OPENED" : "USER_CLOSED");
+    setIsImmersiveHeaderExpanded(next);
+  }, [analysisReportId, hasStructuredAnalysis, lastHeaderChangeReason]);
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -513,8 +572,6 @@ export function ChatbotWorkspacePage() {
     handleSessionReset();
   }
 
-  if (!consentResolved) return null;
-
   const chatBlocked = !consentAccepted;
   const featureFlags = viewerAccess?.featureFlags;
   const remainingAnalyses = viewerAccess?.usage?.remaining ?? null;
@@ -533,6 +590,9 @@ export function ChatbotWorkspacePage() {
   const canUseRebuttalEmail = featureFlags?.rebuttal_email ?? false;
   const canUseCustomerReport = viewerAccess?.canUseCustomerReport ?? false;
   const followUpExports = [
+    hasResolvedAnalysis
+      ? { label: "Chat Export", type: "pdf" }
+      : null,
     canUseBasicPdfExport
       ? { label: "Collision Repair Intelligence Report", type: "pdf" }
       : null,
@@ -546,22 +606,298 @@ export function ChatbotWorkspacePage() {
       ? { label: "Customer Report", type: "pdf" }
       : null,
   ].filter(Boolean) as Array<{ label: string; type?: string; url?: string }>;
+  const canonicalWorkspaceCounts = useMemo(
+    () => ({
+      supportSignals: dedupeRailItems([
+        ...renderModel.reportFields.presentStrengths,
+        ...renderModel.disputeIntelligenceReport.positives,
+        ...renderModel.reportFields.documentedProcedures,
+        ...renderModel.reportFields.documentedHighlights,
+      ]).length,
+      topDisputeDrivers: renderModel.disputeIntelligenceReport.topDrivers.length,
+      supportGaps: renderModel.disputeIntelligenceReport.supportGaps.length,
+      supplementItems: renderModel.supplementItems.length,
+      cautionFlags: panel.appraisal?.triggered ? 1 : 0,
+      linkedEvidence: linkedEvidenceDebug.length,
+      negotiationDraftSections: renderModel.request ? 1 : 0,
+      exports: followUpExports.length,
+    }),
+    [
+      followUpExports.length,
+      linkedEvidenceDebug.length,
+      panel.appraisal?.triggered,
+      renderModel,
+    ]
+  );
+
+  useEffect(() => {
+    if (!hasResolvedAnalysis) return;
+
+    console.info("[workspace] canonical model built", {
+      activeCaseId: analysisReportId,
+      ...canonicalWorkspaceCounts,
+    });
+    console.info("[workspace] left-immersive hydrated", {
+      activeCaseId: analysisReportId,
+      ...canonicalWorkspaceCounts,
+    });
+    console.info("[workspace] right-rail hydrated", {
+      activeCaseId: analysisReportId,
+      ...canonicalWorkspaceCounts,
+    });
+    console.info("[workspace] section counts", {
+      activeCaseId: analysisReportId,
+      ...canonicalWorkspaceCounts,
+    });
+    console.info("[workspace] hydrated prior exports", {
+      activeCaseId: analysisReportId,
+      hasStoredReport: Boolean(analysisResult),
+      artifactCount: followUpExports.length,
+    });
+    console.info("[workspace] merged export sources", {
+      activeCaseId: analysisReportId,
+      storedArtifacts: followUpExports.length,
+      transientArtifacts: 0,
+      artifactCount: followUpExports.length,
+    });
+  }, [
+    analysisReportId,
+    analysisResult,
+    canonicalWorkspaceCounts,
+    followUpExports.length,
+    hasResolvedAnalysis,
+  ]);
+
+  if (!consentResolved) return null;
 
   return (
     <div className="h-[100svh] overflow-hidden bg-[#050505] text-white">
       <ChatShell
         title="Collision-IQ"
         center={
-          <div
-            className={`flex h-full min-h-0 w-full flex-col ${
-              hasStructuredAnalysis ? "overflow-y-auto pr-1" : "overflow-hidden"
-            }`}
-          >
-            <div className="mb-3 flex items-center justify-end">
+          <div className="relative h-full min-h-0 w-full">
+            <div
+              className="flex h-full min-h-0 w-full flex-col pt-12"
+            >
+              {hasStructuredAnalysis && (
+                <div className="max-h-[55%] min-h-0 shrink-0 overflow-y-auto px-1 pb-4">
+                  {isImmersiveHeaderExpanded && (
+                    <div id="immersive-case-header" data-header-change-reason={lastHeaderChangeReason}>
+                      <div className="mb-2 text-right text-[10px] uppercase tracking-[0.16em] text-white/35">
+                        {headerPinnedByUser ? "Pinned by user" : "Auto"}
+                      </div>
+                      <AtAGlanceCard
+                    renderModel={renderModel}
+                    analysisResult={analysisResult}
+                    active={hasResolvedAnalysis && hasAtGlanceContent(renderModel)}
+                  />
+
+                      <div className="mt-3 rounded-[24px] border border-white/8 bg-white/[0.035] p-3.5">
+                        <WorkspacePanel
+                          workspaceData={workspaceData ?? undefined}
+                          evidenceModel={evidenceModel}
+                          activeEvidenceTargetId={activeEvidenceTargetId}
+                        />
+                      </div>
+
+                    </div>
+                  )}
+
+                  <StructuredAnalysisCanvas
+                    renderModel={renderModel}
+                    attachments={attachmentsState}
+                    hasResolvedAnalysis={hasResolvedAnalysis}
+                    activeInsightKey={activeInsightKey}
+                    onActiveInsightChange={setActiveInsightKey}
+                    canRenderExports={hasResolvedAnalysis}
+                    evidenceModel={evidenceModel}
+                    activeEvidenceTargetId={activeEvidenceTargetId}
+                    onEvidenceSelect={handleEvidenceSelect}
+                    onContinueChat={handleContinueReview}
+                    onRequestEndAnalysis={handleRequestEndAnalysis}
+                    onConfirmEndAnalysis={handleConfirmEndAnalysis}
+                    onCancelEndAnalysis={handleCancelEndAnalysis}
+                    endAnalysisConfirming={endAnalysisConfirming}
+                    onCenterScrollRequest={(scrollToCenterSection) => {
+                      centerScrollRequestRef.current = scrollToCenterSection;
+                    }}
+                  />
+
+                  <section className="mt-4 rounded-[26px] border border-white/8 bg-gradient-to-br from-white/[0.04] via-white/[0.025] to-black/24 p-4 shadow-[0_20px_48px_rgba(0,0,0,0.2)]">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 pb-3">
+                      <div>
+                        <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
+                          Continue with this case
+                        </div>
+                        <div className="mt-1 text-[1.02rem] font-semibold tracking-[-0.02em] text-white/88">
+                          Continue with this case
+                        </div>
+                        <div className="mt-1 text-[13px] leading-5 text-white/55">
+                          This follow-up keeps the uploaded files, extracted facts, transcript summary,
+                          determination, support gaps, and exports in context.
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleContinueReview}
+                        className="rounded-xl border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-medium text-white/76 transition hover:bg-white/10 hover:text-white"
+                      >
+                        Continue with this case
+                      </button>
+                    </div>
+
+                    <div className="mt-4">
+                      <CaseContextSummary
+                        intent={caseIntent || "Continue with this case"}
+                        vehicleLabel={renderModel.vehicle.label || renderModel.reportFields.vehicleLabel}
+                        fileCount={attachmentsState.length}
+                        determinationAnswer={renderModel.determination?.answer}
+                        determinationPayload={structuredDeterminationView}
+                        supportGaps={renderModel.disputeIntelligenceReport.supportGaps}
+                      />
+                    </div>
+
+                    {linkedEvidenceDebug.length > 0 && (
+                      <section className="mt-4 rounded-[20px] border border-white/8 bg-black/18 p-4">
+                        <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
+                          Linked OEM / procedure evidence
+                        </div>
+                        <div className="mt-3 space-y-3">
+                          {linkedEvidenceDebug.map((item, index) => {
+                            const display = normalizeExternalDocumentDisplay(item, `linked-${index + 1}`);
+
+                            return (
+                              <div
+                                key={`${display.id}-${index}`}
+                                className="rounded-2xl border border-white/7 bg-white/[0.03] px-3.5 py-3"
+                              >
+                                <div className="text-sm font-semibold text-white/88">
+                                  {display.title}
+                                </div>
+                                <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-white/45">
+                                  {formatExternalDocumentStatus(display.status)} - {formatExternalDocumentSource(display.source)}
+                                </div>
+                                <div className="mt-2 text-[13px] leading-5 text-white/65">
+                                  {summarizeExternalDocumentForDisplay(display)}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    )}
+
+                  </section>
+                </div>
+              )}
+              <div
+                className={
+                  hasStructuredAnalysis
+                    ? "mt-3 min-h-0 flex-1"
+                    : "mt-3 min-h-0 flex-1 overflow-hidden"
+                }
+              >
+                {trialDaysRemaining !== null && trialDaysRemaining <= 7 && (
+                  <div
+                    className={`mb-3 rounded-xl px-4 py-3 text-sm ${
+                      trialDaysRemaining <= 2
+                        ? "border border-red-500/30 bg-red-500/10 text-red-200"
+                        : "border border-orange-500/20 bg-[#C65A2A]/10 text-orange-100"
+                    }`}
+                  >
+                    {trialDaysRemaining > 0 ? (
+                      <>
+                        Trial ends in {trialDaysRemaining} day
+                        {trialDaysRemaining === 1 ? "" : "s"}.
+                        <span className="ml-2 text-white/80">
+                          Upgrade to keep full access.
+                        </span>
+                        <Link
+                          href="/billing"
+                          className="ml-3 inline-block rounded-md bg-[#C65A2A] px-3 py-1 text-xs font-semibold text-black"
+                        >
+                          Upgrade
+                        </Link>
+                      </>
+                    ) : (
+                      <>
+                        Your trial has ended.
+                        <span className="ml-2 text-white/80">
+                          Upgrade to continue using full features.
+                        </span>
+                        <Link
+                          href="/billing"
+                          className="ml-3 inline-block rounded-md bg-[#C65A2A] px-3 py-1 text-xs font-semibold text-black"
+                        >
+                          Upgrade
+                        </Link>
+                      </>
+                    )}
+                  </div>
+                )}
+                {isTrialing && (
+                  <div className="mb-3 text-xs text-green-300/80">
+                    Trial active - full access enabled
+                  </div>
+                )}
+                {showLowUsageWarning && (
+                  <div className="mb-3 rounded-xl border border-orange-500/20 bg-[#C65A2A]/10 px-4 py-3 text-sm text-orange-100">
+                    You have {remainingAnalyses} analysis{remainingAnalyses === 1 ? "" : "es"} remaining.
+                    <span className="ml-2 text-white/80">
+                      Upgrade to avoid interruption.
+                    </span>
+                  </div>
+                )}
+                <ChatWidget
+                  key="chat-widget"
+                  onAttachmentChange={setAttachment}
+                  onAttachmentsChange={setAttachmentsState}
+                  onAnalysisChange={setAnalysisText}
+                  onPrimaryAnalysisChange={setPrimaryAnalysis}
+                  onAnalysisReportIdChange={(reportId) => {
+                    if (reportId !== analysisReportId) {
+                      setAnalysisReportId(reportId);
+                    }
+                  }}
+                  onAnalysisResultChange={handleAnalysisResultChange}
+                  onLinkedEvidenceChange={setLinkedEvidenceDebug}
+                  onAnalysisPanelChange={setAnalysisPanel}
+                  onAnalysisLoadingChange={setAnalysisLoading}
+                  onAnalysisStatusChange={(status, detail) => {
+                    setAnalysisStatus(status);
+                    setAnalysisStatusDetail(detail ?? null);
+                  }}
+                  onWorkspaceDataChange={setWorkspaceData}
+                  onSessionReset={handleSessionReset}
+                  onChatEngagement={collapsePreChatHero}
+                  onCaseUploadComplete={reopenImmersiveHeaderAfterUpload}
+                  onSessionControlsReady={(controls) => {
+                    chatSessionControlsRef.current = controls;
+                  }}
+                  onCaseIntentChange={setCaseIntent}
+                  viewerAccess={viewerAccess}
+                  caseChatEnabled={Boolean(analysisReportId)}
+                  activeCaseId={analysisReportId}
+                  caseIntent={caseIntent || "Continue with this case"}
+                  transcriptSummary={primaryAnalysis?.content ?? analysisText}
+                  exportModel={hasResolvedAnalysis ? renderModel : null}
+                  followUpFiles={attachmentsState.map((file) => ({
+                    id: file.attachmentId,
+                    name: file.filename,
+                    type: file.hasVision ? "image" : undefined,
+                  }))}
+                  followUpExports={followUpExports}
+                  suppressedMessageIds={primaryAnalysis ? [primaryAnalysis.messageId] : []}
+                  disabled={chatBlocked}
+                />
+              </div>
+            </div>
+            <div className="pointer-events-none absolute right-3 top-3 z-30 flex justify-end">
               <button
                 type="button"
                 onClick={handleToggleImmersiveHeader}
-                className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white/72 transition hover:bg-white/10 hover:text-white"
+                className="pointer-events-auto rounded-xl border border-white/10 bg-black/70 px-3 py-2 text-xs font-medium text-white/72 shadow-lg shadow-black/30 backdrop-blur-md transition hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-200/70"
                 aria-expanded={isImmersiveHeaderExpanded}
                 aria-controls="immersive-case-header"
                 title={
@@ -576,291 +912,12 @@ export function ChatbotWorkspacePage() {
                 </span>
               </button>
             </div>
-
-            {isImmersiveHeaderExpanded && (
-              <div id="immersive-case-header" data-header-change-reason={lastHeaderChangeReason}>
-                <div className="mb-2 text-right text-[10px] uppercase tracking-[0.16em] text-white/35">
-                  {headerPinnedByUser ? "Pinned by user" : "Auto"}
-                </div>
-                <AtAGlanceCard
-                    renderModel={renderModel}
-                    analysisResult={analysisResult}
-                    active={hasResolvedAnalysis && hasAtGlanceContent(renderModel)}
-                  />
-
-                  <div className="mt-3 rounded-[24px] border border-white/8 bg-white/[0.035] p-3.5">
-                    <WorkspacePanel
-                      workspaceData={workspaceData ?? undefined}
-                      evidenceModel={evidenceModel}
-                      activeEvidenceTargetId={activeEvidenceTargetId}
-                    />
-                  </div>
-
-                  <StructuredAnalysisCanvas
-                    analysisText={primaryAnalysis?.content ?? analysisText}
-                    renderModel={renderModel}
-                    normalizedResult={normalizedResult}
-                    analysisResult={analysisResult}
-                    workspaceData={workspaceData}
-                    attachments={attachmentsState}
-                    hasResolvedAnalysis={hasResolvedAnalysis}
-                    activeInsightKey={activeInsightKey}
-                    onActiveInsightChange={setActiveInsightKey}
-                    canRenderExports={hasResolvedAnalysis && Boolean(analysisText || panel.narrative)}
-                    evidenceModel={evidenceModel}
-                    activeEvidenceTargetId={activeEvidenceTargetId}
-                    onEvidenceSelect={handleEvidenceSelect}
-                    onContinueChat={handleContinueReview}
-                    onRequestEndAnalysis={handleRequestEndAnalysis}
-                    onConfirmEndAnalysis={handleConfirmEndAnalysis}
-                    onCancelEndAnalysis={handleCancelEndAnalysis}
-                    endAnalysisConfirming={endAnalysisConfirming}
-                    onCenterScrollRequest={(scrollToCenterSection) => {
-                      centerScrollRequestRef.current = scrollToCenterSection;
-                    }}
-                  />
-              </div>
-            )}
-
-            {hasStructuredAnalysis ? (
-              <section className="mt-4 rounded-[26px] border border-white/8 bg-gradient-to-br from-white/[0.04] via-white/[0.025] to-black/24 p-4 shadow-[0_20px_48px_rgba(0,0,0,0.2)]">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 pb-3">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
-                      Continue with this case
-                    </div>
-                    <div className="mt-1 text-[1.02rem] font-semibold tracking-[-0.02em] text-white/88">
-                      Continue with this case
-                    </div>
-                    <div className="mt-1 text-[13px] leading-5 text-white/55">
-                      This follow-up keeps the uploaded files, extracted facts, transcript summary,
-                      determination, support gaps, and exports in context.
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleContinueReview}
-                    className="rounded-xl border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-medium text-white/76 transition hover:bg-white/10 hover:text-white"
-                  >
-                    Continue with this case
-                  </button>
-                  </div>
-
-                  <div className="mt-4">
-                    <CaseContextSummary
-                      intent={caseIntent || "Continue with this case"}
-                      vehicleLabel={renderModel.vehicle.label || renderModel.reportFields.vehicleLabel}
-                      fileCount={attachmentsState.length}
-                      determinationAnswer={renderModel.determination?.answer}
-                      determinationPayload={structuredDeterminationView}
-                      supportGaps={renderModel.disputeIntelligenceReport.supportGaps}
-                    />
-                  </div>
-
-                  {linkedEvidenceDebug.length > 0 && (
-                    <section className="mt-4 rounded-[20px] border border-white/8 bg-black/18 p-4">
-                      <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
-                        Linked Evidence
-                      </div>
-                      <div className="mt-3 space-y-3">
-                        {linkedEvidenceDebug.map((item, index) => (
-                          <div
-                            key={`${item.url || item.title || "linked"}-${index}`}
-                            className="rounded-2xl border border-white/7 bg-white/[0.03] px-3.5 py-3"
-                          >
-                            <div className="text-sm font-semibold text-white/88">
-                              {item.title || "Untitled linked document"}
-                            </div>
-                            <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-white/45">
-                              {item.status || "unknown"} · {item.sourceType || "unknown"}
-                            </div>
-                            <div className="mt-2 break-all text-[12px] leading-5 text-white/45">
-                              {item.url || "No URL"}
-                            </div>
-                            <div className="mt-2 text-[13px] leading-5 text-white/65">
-                              {item.textPreview || "No preview available."}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                  )}
-
-                  <div className="mt-4 h-[min(56svh,680px)] min-h-[360px]">
-                    {trialDaysRemaining !== null && trialDaysRemaining <= 7 && (
-                      <div
-                        className={`mb-3 rounded-xl px-4 py-3 text-sm ${
-                          trialDaysRemaining <= 2
-                            ? "border border-red-500/30 bg-red-500/10 text-red-200"
-                            : "border border-orange-500/20 bg-[#C65A2A]/10 text-orange-100"
-                        }`}
-                      >
-                        {trialDaysRemaining > 0 ? (
-                          <>
-                            Trial ends in {trialDaysRemaining} day
-                            {trialDaysRemaining === 1 ? "" : "s"}.
-                            <span className="ml-2 text-white/80">
-                              Upgrade to keep full access.
-                            </span>
-                            <Link
-                              href="/billing"
-                              className="ml-3 inline-block rounded-md bg-[#C65A2A] px-3 py-1 text-xs font-semibold text-black"
-                            >
-                              Upgrade
-                            </Link>
-                          </>
-                        ) : (
-                          <>
-                            Your trial has ended.
-                            <span className="ml-2 text-white/80">
-                              Upgrade to continue using full features.
-                            </span>
-                            <Link
-                              href="/billing"
-                              className="ml-3 inline-block rounded-md bg-[#C65A2A] px-3 py-1 text-xs font-semibold text-black"
-                            >
-                              Upgrade
-                            </Link>
-                          </>
-                        )}
-                      </div>
-                    )}
-                    {isTrialing && (
-                      <div className="mb-3 text-xs text-green-300/80">
-                        Trial active - full access enabled
-                      </div>
-                    )}
-                    {showLowUsageWarning && (
-                      <div className="mb-3 rounded-xl border border-orange-500/20 bg-[#C65A2A]/10 px-4 py-3 text-sm text-orange-100">
-                        You have {remainingAnalyses} analysis{remainingAnalyses === 1 ? "" : "es"} remaining.
-                        <span className="ml-2 text-white/80">
-                          Upgrade to avoid interruption.
-                        </span>
-                      </div>
-                    )}
-                    <ChatWidget
-                      onAttachmentChange={setAttachment}
-                      onAttachmentsChange={setAttachmentsState}
-                      onAnalysisChange={setAnalysisText}
-                      onPrimaryAnalysisChange={setPrimaryAnalysis}
-                      onAnalysisReportIdChange={setAnalysisReportId}
-                      onAnalysisResultChange={handleAnalysisResultChange}
-                      onLinkedEvidenceChange={setLinkedEvidenceDebug}
-                      onAnalysisPanelChange={setAnalysisPanel}
-                      onAnalysisLoadingChange={setAnalysisLoading}
-                      onAnalysisStatusChange={(status, detail) => {
-                        setAnalysisStatus(status);
-                        setAnalysisStatusDetail(detail ?? null);
-                      }}
-                      onWorkspaceDataChange={setWorkspaceData}
-                      onSessionReset={handleSessionReset}
-                      onChatEngagement={collapsePreChatHero}
-                      onCaseUploadComplete={reopenImmersiveHeaderAfterUpload}
-                      onSessionControlsReady={(controls) => {
-                        chatSessionControlsRef.current = controls;
-                      }}
-                      onCaseIntentChange={setCaseIntent}
-                      viewerAccess={viewerAccess}
-                      caseChatEnabled={hasResolvedAnalysis && Boolean(analysisReportId)}
-                      caseIntent={caseIntent || "Continue with this case"}
-                      transcriptSummary={primaryAnalysis?.content ?? analysisText}
-                      exportModel={hasResolvedAnalysis ? renderModel : null}
-                      followUpFiles={attachmentsState.map((file) => ({
-                        id: file.attachmentId,
-                        name: file.filename,
-                        type: file.hasVision ? "image" : undefined,
-                      }))}
-                      followUpExports={followUpExports}
-                      suppressedMessageIds={primaryAnalysis ? [primaryAnalysis.messageId] : []}
-                      disabled={chatBlocked}
-                    />
-                </div>
-                </section>
-              ) : (
-                <div className="mt-3 min-h-0 flex-1 overflow-hidden">
-                    {trialDaysRemaining !== null && trialDaysRemaining <= 7 && (
-                      <div
-                        className={`mb-3 rounded-xl px-4 py-3 text-sm ${
-                          trialDaysRemaining <= 2
-                            ? "border border-red-500/30 bg-red-500/10 text-red-200"
-                            : "border border-orange-500/20 bg-[#C65A2A]/10 text-orange-100"
-                        }`}
-                      >
-                        {trialDaysRemaining > 0 ? (
-                          <>
-                            Trial ends in {trialDaysRemaining} day
-                            {trialDaysRemaining === 1 ? "" : "s"}.
-                            <span className="ml-2 text-white/80">
-                              Upgrade to keep full access.
-                            </span>
-                            <Link
-                              href="/billing"
-                              className="ml-3 inline-block rounded-md bg-[#C65A2A] px-3 py-1 text-xs font-semibold text-black"
-                            >
-                              Upgrade
-                            </Link>
-                          </>
-                        ) : (
-                          <>
-                            Your trial has ended.
-                            <span className="ml-2 text-white/80">
-                              Upgrade to continue using full features.
-                            </span>
-                            <Link
-                              href="/billing"
-                              className="ml-3 inline-block rounded-md bg-[#C65A2A] px-3 py-1 text-xs font-semibold text-black"
-                            >
-                              Upgrade
-                            </Link>
-                          </>
-                        )}
-                      </div>
-                    )}
-                    {isTrialing && (
-                      <div className="mb-3 text-xs text-green-300/80">
-                        Trial active - full access enabled
-                      </div>
-                    )}
-                    {showLowUsageWarning && (
-                        <div className="mb-3 rounded-xl border border-orange-500/20 bg-[#C65A2A]/10 px-4 py-3 text-sm text-orange-100">
-                          You have {remainingAnalyses} analysis{remainingAnalyses === 1 ? "" : "es"} remaining.
-                        <span className="ml-2 text-white/80">
-                          Upgrade to avoid interruption.
-                        </span>
-                      </div>
-                    )}
-                    <ChatWidget
-                      onAttachmentChange={setAttachment}
-                      onAttachmentsChange={setAttachmentsState}
-                  onAnalysisChange={setAnalysisText}
-                  onPrimaryAnalysisChange={setPrimaryAnalysis}
-                  onAnalysisResultChange={handleAnalysisResultChange}
-                  onAnalysisPanelChange={setAnalysisPanel}
-                  onAnalysisLoadingChange={setAnalysisLoading}
-                  onAnalysisStatusChange={(status, detail) => {
-                    setAnalysisStatus(status);
-                    setAnalysisStatusDetail(detail ?? null);
-                  }}
-                  onWorkspaceDataChange={setWorkspaceData}
-                  onSessionReset={handleSessionReset}
-                  onChatEngagement={collapsePreChatHero}
-                  onCaseUploadComplete={reopenImmersiveHeaderAfterUpload}
-                      onSessionControlsReady={(controls) => {
-                        chatSessionControlsRef.current = controls;
-                      }}
-                      viewerAccess={viewerAccess}
-                      suppressedMessageIds={primaryAnalysis ? [primaryAnalysis.messageId] : []}
-                      disabled={chatBlocked}
-                    />
-                  </div>
-                )}
           </div>
         }
         right={
           <RailContent
             attachment={attachment}
-            analysisText={analysisText}
+            analysisText={redactExternalDocumentUrls(analysisText)}
             analysisLoading={analysisLoading}
             analysisStatus={analysisStatus}
             analysisStatusDetail={analysisStatusDetail}
@@ -1084,10 +1141,12 @@ function RailContent({
       : null;
   const canRenderExports = hasResolvedAnalysis && Boolean(analysisText || panel.narrative);
   const railRisk = hasResolvedAnalysis
-    ? formatLabel(workspaceData?.riskLevel ?? "low")
+    ? renderModel.supplementItems.length > 0
+      ? "Review"
+      : "Low"
     : "Pending";
   const railConfidence = hasResolvedAnalysis
-    ? formatLabel(workspaceData?.confidence ?? renderModel.vehicle.confidence)
+    ? formatLabel(renderModel.vehicle.confidence)
     : "Pending";
   const railStatus =
     analysisStatus === "error"
@@ -1103,12 +1162,13 @@ function RailContent({
   const supportSignals = dedupeRailItems([
     ...renderModel.reportFields.presentStrengths,
     ...renderModel.disputeIntelligenceReport.positives,
-    ...(analysisResult?.presentProcedures ?? []),
+    ...renderModel.reportFields.documentedProcedures,
+    ...renderModel.reportFields.documentedHighlights,
   ]).slice(0, 5);
   const recommendedMoves = dedupeRailItems([
     ...renderModel.disputeIntelligenceReport.nextMoves,
-    ...(analysisResult?.recommendedActions ?? []),
     ...renderModel.negotiationPlaybook.suggestedSequence,
+    ...renderModel.negotiationPlaybook.documentationNeeded,
   ]).slice(0, 5);
 
   useEffect(() => {
@@ -1275,8 +1335,6 @@ function RailContent({
         >
           <GapSummaryCard
             renderModel={renderModel}
-            normalizedResult={normalizedResult}
-            workspaceData={workspaceData}
           />
           {analysisResult ? (
             <div className="mt-3">
@@ -1652,7 +1710,7 @@ function buildCustomerReportRequest(params: {
     ) ?? []),
     ...(params.analysisResult?.missingProcedures.map((procedure) => `Missing or unclear: ${procedure}`) ?? []),
     params.panel.narrative,
-  ]);
+  ]).map(redactExternalDocumentUrls);
   const estimateSummary = dedupeRailItems([
     params.renderModel.positionStatement,
     params.renderModel.repairPosition,
@@ -1660,7 +1718,7 @@ function buildCustomerReportRequest(params: {
     ...(params.workspaceData?.keyIssues ?? []),
     params.workspaceData?.fullAnalysis,
     params.analysisText,
-  ]).join("\n\n");
+  ]).map(redactExternalDocumentUrls).join("\n\n");
   const documentedPositives = dedupeRailItems([
     ...params.renderModel.reportFields.presentStrengths,
     ...(params.analysisResult?.presentProcedures ?? []),
@@ -1671,7 +1729,7 @@ function buildCustomerReportRequest(params: {
       [displayOperationLabel(item.title), item.rationale].filter(Boolean).join(": ")
     ),
     ...(params.analysisResult?.missingProcedures ?? []),
-  ]);
+  ]).map(redactExternalDocumentUrls);
   const imageSummary = extractImageSummary(params.analysisResult?.sourceEstimateText ?? "");
 
   return {
@@ -1681,7 +1739,7 @@ function buildCustomerReportRequest(params: {
     mileage,
     estimateTotal,
     determination: params.renderModel.determination?.answer || params.renderModel.positionStatement,
-    documentedPositives,
+    documentedPositives: documentedPositives.map(redactExternalDocumentUrls),
     supportGaps: supportGaps.length > 0 ? supportGaps : findings,
     estimateSummary,
     imageSummary,
@@ -1916,6 +1974,27 @@ function buildTopDisputeDrivers(items: SupplementItem[]): DisputeDriver[] {
   }
 
   return drivers;
+}
+
+function formatExternalDocumentSource(source: "drive" | "external" | "legacy_egnyte") {
+  if (source === "drive") return "Drive-linked evidence";
+  return "External document";
+}
+
+function formatExternalDocumentStatus(status: ReturnType<typeof normalizeExternalDocumentDisplay>["status"]) {
+  switch (status) {
+    case "ready":
+      return "Ready";
+    case "access_limited":
+      return "Access limited";
+    case "failed":
+      return "Failed to load";
+    case "skipped":
+      return "Skipped";
+    case "preview_unavailable":
+    default:
+      return "Preview unavailable";
+  }
 }
 
 function mapSupplementItemToDisputeDriver(item: SupplementItem): DisputeDriver | null {
@@ -2177,62 +2256,49 @@ function LineStatusCard() {
 
 function GapSummaryCard({
   renderModel,
-  normalizedResult,
-  workspaceData,
 }: {
   renderModel: ReturnType<typeof buildExportModel>;
-  normalizedResult: AnalysisResult | null;
-  workspaceData: WorkspaceData | null;
 }) {
-  const financialView = resolveFinancialView({
-    renderModel,
-    normalizedResult,
-    workspaceData,
-  });
+  const financialSignals = dedupeRailItems([
+    renderModel.valuation.acvReasoning,
+    ...renderModel.valuation.acvMissingInputs,
+    renderModel.valuation.dvReasoning,
+    ...renderModel.valuation.dvMissingInputs,
+    renderModel.disputeIntelligenceReport.valuationPreview?.acv,
+    renderModel.disputeIntelligenceReport.valuationPreview?.dv,
+  ]).slice(0, 5);
+  const hasValuationPosture =
+    renderModel.valuation.acvStatus !== "not_determinable" ||
+    renderModel.valuation.dvStatus !== "not_determinable";
+  const postureSummary = dedupeRailItems([
+    renderModel.valuation.acvStatus !== "not_determinable"
+      ? `ACV posture: ${formatLabel(renderModel.valuation.acvStatus)}.`
+      : null,
+    renderModel.valuation.dvStatus !== "not_determinable"
+      ? `DV posture: ${formatLabel(renderModel.valuation.dvStatus)}.`
+      : null,
+  ]).join(" ");
 
   return (
     <section className="mt-5 space-y-3 rounded-[24px] border border-orange-500/18 bg-gradient-to-br from-[#C65A2A]/10 via-[#C65A2A]/[0.04] to-black/20 p-4 shadow-[0_18px_44px_rgba(198,90,42,0.12)]">
       <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
-        {financialView.kind === "quantified_gap" ? "Gap Summary" : "Financial View"}
+        Financial View
       </div>
       <div className="rounded-2xl bg-black/20 px-3.5 py-3">
         <div className="text-[11px] uppercase tracking-[0.18em] text-white/45">
-          {financialView.kind === "quantified_gap" ? "Total Gap" : "Directional Posture"}
+          Directional Posture
         </div>
-        {financialView.kind === "quantified_gap" ? (
-          <div className="mt-2 text-[1.2rem] font-semibold tracking-[-0.02em] text-white/88">
-            {financialView.totalGap ?? "Not yet quantified"}
-          </div>
-        ) : (
-          <div className="mt-2 text-[13px] leading-5 text-white/70">
-            {financialView.narrative}
-          </div>
-        )}
+        <div className="mt-2 text-[13px] leading-5 text-white/70">
+          {postureSummary || "The canonical export model does not yet include a reliable valuation posture."}
+        </div>
       </div>
       <div className="rounded-2xl bg-black/20 px-3.5 py-3">
         <div className="text-[11px] uppercase tracking-[0.18em] text-white/45">
-          {financialView.kind === "quantified_gap" ? "Drivers" : "Available Signals"}
+          Available Signals
         </div>
-        {financialView.kind === "quantified_gap" ? (
-          financialView.drivers.length > 0 ? (
-            <div className="mt-2 space-y-2">
-              {financialView.drivers.map((driver) => (
-                <div key={`${driver.label}-${driver.value}`} className="flex gap-2 text-[13px] leading-5 text-white/70">
-                  <span className="pt-[1px] text-orange-200/85">&bull;</span>
-                  <span>
-                    {driver.label}: <span className="text-white/88">{driver.value}</span>
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="mt-2 text-[13px] leading-5 text-white/55">
-              {financialView.narrative ?? "The current structured comparison does not yet support a reliable quantified driver breakdown."}
-            </div>
-          )
-        ) : financialView.kind === "directional_financial_view" ? (
+        {hasValuationPosture && financialSignals.length > 0 ? (
           <div className="mt-2 space-y-2">
-            {financialView.bullets.map((item) => (
+            {financialSignals.map((item) => (
               <div key={item} className="flex gap-2 text-[13px] leading-5 text-white/70">
                 <span className="pt-[1px] text-orange-200/85">&bull;</span>
                 <span>{item}</span>
@@ -2241,7 +2307,7 @@ function GapSummaryCard({
           </div>
         ) : (
           <div className="mt-2 text-[13px] leading-5 text-white/55">
-            Not yet quantified.
+            Not yet quantified in the canonical export model.
           </div>
         )}
       </div>

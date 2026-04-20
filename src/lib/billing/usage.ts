@@ -1,4 +1,11 @@
-import type { Prisma, Subscription, SubscriptionPlan, SubscriptionStatus, User } from "@prisma/client";
+import type {
+  Prisma,
+  Subscription,
+  SubscriptionPlan,
+  SubscriptionStatus,
+  UsageKind,
+  User,
+} from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import { getPlanAnalysisCap, type BillingPlan } from "@/lib/billing/plans";
@@ -30,19 +37,28 @@ export async function getUsageCount(params: {
   kind: "ANALYSIS_COMPLETED" | "FILE_UPLOAD" | "REPORT_EXPORT" | "CHAT_EXPORT";
   periodKey?: string;
 }) {
-  const aggregate = await prisma.usageRecord.aggregate({
-    where: {
-      userId: params.userId,
-      // Cast keeps compatibility when Prisma client lags schema enum updates.
-      kind: params.kind as any,
-      periodKey: params.periodKey ?? getCurrentUsagePeriodKey(),
-    },
-    _sum: {
-      quantity: true,
-    },
-  });
+  try {
+    const aggregate = await prisma.usageRecord.aggregate({
+      where: {
+        userId: params.userId,
+        // Cast keeps compatibility when Prisma client lags schema enum updates.
+        kind: params.kind as unknown as UsageKind,
+        periodKey: params.periodKey ?? getCurrentUsagePeriodKey(),
+      },
+      _sum: {
+        quantity: true,
+      },
+    });
 
-  return aggregate._sum?.quantity ?? 0;
+    return aggregate._sum?.quantity ?? 0;
+  } catch (error) {
+    console.error("[usage:getUsageCount] fail-open", {
+      userId: params.userId,
+      kind: params.kind,
+      error,
+    });
+    return 0;
+  }
 }
 
 export async function getUploadUsageCount(userId: string) {
@@ -59,25 +75,33 @@ export async function recordUsage(params: {
   quantity?: number;
   metadataJson?: Record<string, unknown>;
 }) {
-  const latestSubscription = await prisma.subscription.findFirst({
-    where: {
-      OR: [{ userId: params.userId }, { shop: { ownerId: params.userId } }],
-    },
-    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-  });
+  try {
+    const latestSubscription = await prisma.subscription.findFirst({
+      where: {
+        OR: [{ userId: params.userId }, { shop: { ownerId: params.userId } }],
+      },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    });
 
-  await prisma.usageRecord.create({
-    data: {
+    await prisma.usageRecord.create({
+      data: {
+        userId: params.userId,
+        shopId: latestSubscription?.shopId ?? null,
+        subscriptionId: latestSubscription?.id ?? null,
+        // Cast keeps compatibility when Prisma client lags schema enum updates.
+        kind: params.kind as unknown as UsageKind,
+        periodKey: getCurrentUsagePeriodKey(),
+        quantity: params.quantity ?? 1,
+        metadata: (params.metadataJson ?? {}) as Prisma.InputJsonValue,
+      },
+    });
+  } catch (error) {
+    console.error("[usage:recordUsage] fail-open", {
       userId: params.userId,
-      shopId: latestSubscription?.shopId ?? null,
-      subscriptionId: latestSubscription?.id ?? null,
-      // Cast keeps compatibility when Prisma client lags schema enum updates.
-      kind: params.kind as any,
-      periodKey: getCurrentUsagePeriodKey(),
-      quantity: params.quantity ?? 1,
-      metadata: (params.metadataJson ?? {}) as Prisma.InputJsonValue,
-    },
-  });
+      kind: params.kind,
+      error,
+    });
+  }
 }
 
 function resolvePlan(plan: SubscriptionPlan | null | undefined, isPlatformAdmin: boolean): BillingPlan | "admin" {
@@ -112,21 +136,30 @@ export async function getCompletedAnalysisUsage(params: {
     return 0;
   }
 
-  const aggregate = await prisma.usageRecord.aggregate({
-    where: {
-      kind: "ANALYSIS_COMPLETED",
-      periodKey: getCurrentUsagePeriodKey(),
-      OR: [
-        { userId: params.ownerUserId },
-        ...(params.shopId ? [{ shopId: params.shopId }] : []),
-      ],
-    },
-    _sum: {
-      quantity: true,
-    },
-  });
+  try {
+    const aggregate = await prisma.usageRecord.aggregate({
+      where: {
+        kind: "ANALYSIS_COMPLETED",
+        periodKey: getCurrentUsagePeriodKey(),
+        OR: [
+          { userId: params.ownerUserId },
+          ...(params.shopId ? [{ shopId: params.shopId }] : []),
+        ],
+      },
+      _sum: {
+        quantity: true,
+      },
+    });
 
-  return aggregate._sum.quantity ?? 0;
+    return aggregate._sum.quantity ?? 0;
+  } catch (error) {
+    console.error("[usage:getCompletedAnalysisUsage] fail-open", {
+      userId: params.ownerUserId,
+      shopId: params.shopId,
+      error,
+    });
+    return 0;
+  }
 }
 
 export async function assertAnalysisAllowed(params: {

@@ -5,12 +5,16 @@ import {
   bufferToReusableDataUrl,
   extractPreviewDataFromBuffer,
 } from "@/lib/attachments/extractPreviewData";
-import { downloadEgnyteFile } from "@/app/api/egnyte/client";
+import {
+  downloadDriveFile,
+  extractDriveFileIdFromUrl,
+  isDriveEnabled,
+} from "@/lib/drive/download";
 
 type AttachmentVisionDeps = {
   summarizeImageAttachment?: (attachment: StoredAttachment) => Promise<string>;
   summarizePdfAttachment?: (attachment: StoredAttachment) => Promise<string>;
-  downloadLinkedFile?: (path: string) => Promise<ArrayBuffer>;
+  downloadLinkedFile?: (fileIdOrUrl: string) => Promise<ArrayBuffer>;
 };
 
 export async function enrichAnalysisAttachments(params: {
@@ -23,7 +27,7 @@ export async function enrichAnalysisAttachments(params: {
       normalizeStoredAttachment(attachment, params.deps)
     )
   );
-  const linkedAttachments = await fetchEgnyteLinkedAttachments({
+  const linkedAttachments = await fetchDriveLinkedAttachments({
     attachments: normalizedAttachments,
     userIntent: params.userIntent ?? "",
     deps: params.deps,
@@ -32,40 +36,23 @@ export async function enrichAnalysisAttachments(params: {
   return [...normalizedAttachments, ...linkedAttachments];
 }
 
-export function extractEgnyteUrls(text: string): string[] {
+export function extractDriveUrls(text: string): string[] {
   if (!text.trim()) return [];
 
   const matches = text.match(/https?:\/\/[^\s)\]>"]+/gi) ?? [];
-  return [...new Set(matches.filter((value) => /egnyte\.com/i.test(value)))];
+  return [
+    ...new Set(
+      matches.filter((value) => /(?:drive|docs)\.google\.com/i.test(value))
+    ),
+  ];
 }
 
-export function extractEgnytePathFromUrl(urlValue: string): string | null {
-  try {
-    const url = new URL(urlValue);
-    const searchPath = url.searchParams.get("path");
-    if (searchPath) {
-      return normalizeEgnytePath(searchPath);
-    }
-
-    const hashPath = new URLSearchParams(url.hash.replace(/^#/, "")).get("path");
-    if (hashPath) {
-      return normalizeEgnytePath(hashPath);
-    }
-
-    const segments = url.pathname.split("/").filter(Boolean);
-    const markerIndex = segments.findIndex((segment) =>
-      ["d", "dd", "dl", "shared-files"].includes(segment.toLowerCase())
-    );
-
-    if (markerIndex >= 0) {
-      return normalizeEgnytePath(`/${segments.slice(markerIndex + 1).join("/")}`);
-    }
-
-    return normalizeEgnytePath(url.pathname);
-  } catch {
-    return null;
-  }
+export function extractDriveFileId(urlValue: string): string | null {
+  return extractDriveFileIdFromUrl(urlValue);
 }
+
+export const extractEgnyteUrls = extractDriveUrls;
+export const extractEgnytePathFromUrl = extractDriveFileId;
 
 async function normalizeStoredAttachment(
   attachment: StoredAttachment,
@@ -90,29 +77,38 @@ async function normalizeStoredAttachment(
   return attachment;
 }
 
-async function fetchEgnyteLinkedAttachments(params: {
+async function fetchDriveLinkedAttachments(params: {
   attachments: StoredAttachment[];
   userIntent: string;
   deps?: AttachmentVisionDeps;
 }): Promise<StoredAttachment[]> {
-  const urls = [
-    ...params.attachments.flatMap((attachment) => extractEgnyteUrls(attachment.text || "")),
-    ...extractEgnyteUrls(params.userIntent),
-  ];
-  const uniquePaths = [...new Set(urls.map(extractEgnytePathFromUrl).filter(Boolean))] as string[];
+  if (!isDriveEnabled()) {
+    return [];
+  }
 
-  if (uniquePaths.length === 0) {
+  const urls = [
+    ...params.attachments.flatMap((attachment) => extractDriveUrls(attachment.text || "")),
+    ...extractDriveUrls(params.userIntent),
+  ];
+  const uniqueFileIds = [...new Set(urls.map(extractDriveFileId).filter(Boolean))] as string[];
+
+  if (uniqueFileIds.length === 0) {
     return [];
   }
 
   const linkedAttachments = await Promise.all(
-    uniquePaths.map(async (pathValue, index) => {
+    uniqueFileIds.map(async (fileId, index) => {
       try {
-        const buffer = Buffer.from(
-          await (params.deps?.downloadLinkedFile ?? downloadEgnyteFile)(pathValue)
-        );
-        const filename = pathValue.split("/").pop() || `egnyte-linked-${index + 1}`;
-        const mimeType = inferMimeType(filename);
+        const downloaded = params.deps?.downloadLinkedFile
+          ? {
+              buffer: Buffer.from(await params.deps.downloadLinkedFile(fileId)),
+              name: `drive-linked-${index + 1}`,
+              mimeType: null,
+            }
+          : await downloadDriveFile(fileId);
+        const buffer = downloaded.buffer;
+        const filename = downloaded.name || `drive-linked-${index + 1}`;
+        const mimeType = downloaded.mimeType || inferMimeType(filename);
         const preview = await extractPreviewDataFromBuffer({
           buffer,
           mimeType,
@@ -123,12 +119,12 @@ async function fetchEgnyteLinkedAttachments(params: {
           mimeType,
         });
         const baseAttachment: StoredAttachment = {
-          id: `egnyte:${index + 1}:${filename}`,
+          id: `drive:${index + 1}:${fileId}`,
           filename,
           type: mimeType,
           text: mergeObservationText(
             preview.text,
-            `Egnyte linked document source: ${pathValue}`
+            `Drive-linked document source: ${fileId}`
           ),
           imageDataUrl,
           pageCount: preview.pageCount,
@@ -139,12 +135,12 @@ async function fetchEgnyteLinkedAttachments(params: {
           ...normalized,
           text: mergeObservationText(
             normalized.text,
-            "Provenance: Egnyte linked document"
+            "Provenance: Drive-linked external document"
           ),
         };
       } catch (error) {
-        console.warn("[analysis-attachments] egnyte linked-document fetch failed", {
-          path: pathValue,
+        console.error("[drive] external lookup failed (non-blocking)", {
+          fileId,
           message: error instanceof Error ? error.message : String(error),
         });
         return null;
@@ -270,12 +266,6 @@ function mergeObservationText(baseText: string, addition: string) {
   }
 
   return `${baseText}\n\n${trimmedAddition}`;
-}
-
-function normalizeEgnytePath(value: string): string | null {
-  const decoded = decodeURIComponent(value).trim();
-  if (!decoded) return null;
-  return decoded.startsWith("/") ? decoded : `/${decoded}`;
 }
 
 function inferMimeType(filename: string): string {

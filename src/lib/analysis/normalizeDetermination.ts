@@ -45,7 +45,7 @@ export function normalizeDetermination(
       structural: withBody("Structural / Measuring Support", result.sections.structural),
       corrosion: withBody("Corrosion Protection Support", result.sections.corrosion),
       valuation: withBody("Valuation Support", result.sections.valuation),
-      linkedEvidence: withBody("Linked OEM / ADAS Evidence", result.sections.linkedEvidence),
+      linkedEvidence: withBody("Linked OEM / Procedure Evidence", result.sections.linkedEvidence),
     },
   };
 }

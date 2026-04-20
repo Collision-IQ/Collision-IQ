@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 
 type EgnyteWebhookEvent = {
   eventType?: string;
@@ -43,35 +42,20 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const events = normalizeEgnyteEvents(body);
-    console.info("[egnyte-webhook] received events", { count: events.length });
-
-    if (events.length === 0) {
-      return NextResponse.json(
-        { ok: false, error: "No events found" },
-        { status: 400 }
-      );
-    }
-
-    const jobs = await prisma.$transaction(
-      events.map((event) =>
-        prisma.syncJob.create({
-          data: {
-            type: "WEBHOOK",
-            status: "pending",
-            egnytePath: typeof event.path === "string" ? event.path : null
-          }
-        })
-      )
-    );
+    console.info("[external-doc-webhook] ignored legacy provider events", {
+      count: events.length,
+      source: "legacy_egnyte",
+    });
 
     return NextResponse.json({
       ok: true,
+      skipped: true,
+      reason: "legacy_provider_disabled",
       received: events.length,
-      jobsCreated: jobs.length,
-      jobIds: jobs.map((j) => j.id),
+      jobsCreated: 0,
     });
   } catch (error) {
-    console.error("Egnyte webhook error:", error);
+    console.error("Legacy external-doc webhook error:", error);
 
     return NextResponse.json(
       { ok: false, error: "Invalid webhook payload" },

@@ -40,10 +40,23 @@ export async function getCurrentEntitlements(): Promise<AccountEntitlements> {
     return entitlements;
   }
 
-  const [uploadCount, exportCount] = await Promise.all([
+  let uploadCount = 0;
+  let exportCount = 0;
+
+  const results = await Promise.allSettled([
     getMeteredUsageCount(entitlements.dbUserId, "FILE_UPLOAD"),
     getMeteredUsageCount(entitlements.dbUserId, "REPORT_EXPORT"),
   ]);
+
+  uploadCount = results[0].status === "fulfilled" ? results[0].value : 0;
+  exportCount = results[1].status === "fulfilled" ? results[1].value : 0;
+
+  if (results.some((result) => result.status === "rejected")) {
+    console.error("[entitlements] usage read failed (non-blocking)", {
+      userId: entitlements.dbUserId,
+      results,
+    });
+  }
 
   return {
     ...entitlements,

@@ -52,6 +52,7 @@ import {
 import AttachmentPreviewModal, {
   type PreviewAttachment,
 } from "@/components/AttachmentPreviewModal";
+import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 
 interface Attachment {
   attachmentId: string;
@@ -86,11 +87,14 @@ type ChatSessionControls = {
 };
 
 type LinkedEvidenceDebugItem = {
+  id?: string | null;
   title?: string | null;
   url?: string;
-  status?: "ok" | "blocked" | "failed";
+  finalUrl?: string;
+  status?: "ok" | "blocked" | "failed" | "skipped";
   sourceType?: string;
   textPreview?: string;
+  notes?: string;
 };
 
 interface ChatWidgetProps {
@@ -113,6 +117,7 @@ interface ChatWidgetProps {
   viewerAccess?: AccountEntitlements | null;
   suppressedMessageIds?: string[];
   caseChatEnabled?: boolean;
+  activeCaseId?: string | null;
   caseIntent?: string;
   transcriptSummary?: string | null;
   exportModel?: unknown;
@@ -252,6 +257,7 @@ export default function ChatWidget({
   onSessionControlsReady,
   onCaseIntentChange,
   caseChatEnabled = false,
+  activeCaseId = null,
   caseIntent = "Continue with this case",
   disabled = false,
 }: ChatWidgetProps) {
@@ -325,6 +331,22 @@ export default function ChatWidget({
   useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
+
+  useEffect(() => {
+    if (!activeCaseId) return;
+    if (analysisReportIdRef.current === activeCaseId) return;
+
+    console.info("[attachments] chat continuity preserved", {
+      activeCaseIdBefore: analysisReportIdRef.current,
+      activeCaseIdAfter: activeCaseId,
+      reportIdBefore: analysisReportIdRef.current,
+      reportIdAfter: activeCaseId,
+      messageCount: messages.length,
+      skippedReset: true,
+    });
+    analysisReportIdRef.current = activeCaseId;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- messages.length is logging-only; including it would retrigger on every message
+  }, [activeCaseId]);
 
   useEffect(() => {
     if (attachments.length >= 3) setAttachmentsOpen(false);
@@ -539,15 +561,47 @@ export default function ChatWidget({
   }
 
   const invalidateStructuredAnalysis = useCallback(() => {
+    if (analysisReportIdRef.current) {
+      console.info("[attachments] follow-up upload preserving chat state", {
+        activeCaseIdBefore: analysisReportIdRef.current,
+        activeCaseIdAfter: analysisReportIdRef.current,
+        reportIdBefore: analysisReportIdRef.current,
+        reportIdAfter: analysisReportIdRef.current,
+        messageCount: messages.length,
+        skippedReset: true,
+      });
+      console.info("[workspace] preserved prior exports during active-case interaction", {
+        activeCaseId: analysisReportIdRef.current,
+        artifactCount: 1,
+      });
+      return;
+    }
+
     analysisRunRef.current += 1;
     clearStructuredAnalysisState();
     onAnalysisLoadingChange?.(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- messages.length is logging-only; omitted to prevent stale-closure churn
   }, [clearStructuredAnalysisState, onAnalysisLoadingChange]);
 
   function beginStructuredAnalysisRun() {
     const runId = analysisRunRef.current + 1;
     analysisRunRef.current = runId;
-    clearStructuredAnalysisState();
+    if (!analysisReportIdRef.current) {
+      clearStructuredAnalysisState();
+    } else {
+      console.info("[attachments] follow-up upload preserving chat state", {
+        activeCaseIdBefore: analysisReportIdRef.current,
+        activeCaseIdAfter: analysisReportIdRef.current,
+        reportIdBefore: analysisReportIdRef.current,
+        reportIdAfter: analysisReportIdRef.current,
+        messageCount: messages.length,
+        skippedReset: true,
+      });
+      console.info("[workspace] preserved prior exports during active-case analysis", {
+        activeCaseId: analysisReportIdRef.current,
+        artifactCount: 1,
+      });
+    }
     onAnalysisLoadingChange?.(true);
     onAnalysisStatusChange?.("processing", null);
     return runId;
@@ -890,7 +944,9 @@ export default function ChatWidget({
         }
 
         const data = (await caseChatResponse.json()) as { reply?: string };
-        const reply = data.reply?.trim() || "No response received.";
+        const reply = redactExternalDocumentUrls(
+          data.reply?.trim() || "No response received."
+        );
 
         if (sessionRef.current === mySession) {
           stopSpeaking();
@@ -981,14 +1037,40 @@ export default function ChatWidget({
           artifactRefreshPolicy?: RepairIntelligenceReport["artifactRefreshPolicy"];
         };
 
-        analysisReportIdRef.current = analysisData.reportId ?? activeCaseId;
-        setWorkspaceData(analysisData.workspaceData ?? null);
-        onAnalysisReportIdChange?.(analysisData.reportId ?? activeCaseId);
-        onAnalysisResultChange?.(analysisData.report ?? null);
+        const returnedActiveCaseId =
+          analysisData.caseContinuity?.activeCaseId ?? analysisData.reportId ?? activeCaseId;
+        const nextActiveCaseId =
+          returnedActiveCaseId === activeCaseId || analysisData.caseContinuity?.mode === "active_case_update"
+            ? activeCaseId
+            : returnedActiveCaseId;
+        analysisReportIdRef.current = nextActiveCaseId;
+        setWorkspaceData(analysisData.workspaceData ?? workspaceDataRef.current);
+        onAnalysisReportIdChange?.(nextActiveCaseId);
+        if (analysisData.report) {
+          onAnalysisResultChange?.(analysisData.report);
+        }
         onLinkedEvidenceChange?.(analysisData.linkedEvidence ?? []);
         onAnalysisPanelChange?.(analysisData.panel ?? null);
         onAnalysisStatusChange?.("complete", null);
         onAnalysisLoadingChange?.(false);
+        console.info("[attachments] upload completion case state", {
+          activeCaseId,
+          activeCaseIdAfter: nextActiveCaseId,
+          reportId: nextActiveCaseId,
+          attachmentIds: attachments.map((attachment) => attachment.attachmentId),
+          caseContinuityActiveCaseId: analysisData.caseContinuity?.activeCaseId ?? null,
+          messageCountBefore: messages.length,
+          messageCountAfter: updatedMessages.length,
+        });
+        console.info("[attachments] chat continuity preserved", {
+          activeCaseIdBefore: activeCaseId,
+          activeCaseIdAfter: nextActiveCaseId,
+          reportIdBefore: activeCaseId,
+          reportIdAfter: nextActiveCaseId,
+          messageCountBefore: messages.length,
+          messageCountAfter: updatedMessages.length,
+          skippedReset: true,
+        });
         upsertSystemStatusMessage(
           formatCaseUpdateStatus(
             analysisData.reassessmentDelta,
@@ -1036,7 +1118,9 @@ export default function ChatWidget({
         }
 
         const data = (await caseChatResponse.json()) as { reply?: string };
-        const reply = data.reply?.trim() || "Case reassessment complete.";
+        const reply = redactExternalDocumentUrls(
+          data.reply?.trim() || "Case reassessment complete."
+        );
 
         if (sessionRef.current === mySession) {
           stopSpeaking();
@@ -1173,13 +1257,21 @@ export default function ChatWidget({
             };
             // Backend workspaceData is the primary source of truth for Workspace rendering.
             analysisReportIdRef.current = analysisData.reportId ?? null;
-            setWorkspaceData(analysisData.workspaceData ?? null);
+            setWorkspaceData(analysisData.workspaceData ?? workspaceDataRef.current);
             onAnalysisReportIdChange?.(analysisData.reportId ?? null);
-            onAnalysisResultChange?.(analysisData.report ?? null);
+            if (analysisData.report) {
+              onAnalysisResultChange?.(analysisData.report);
+            }
             onLinkedEvidenceChange?.(analysisData.linkedEvidence ?? []);
             onAnalysisPanelChange?.(analysisData.panel ?? null);
             onAnalysisStatusChange?.("complete", null);
             onAnalysisLoadingChange?.(false);
+            console.info("[attachments] upload completion case state", {
+              activeCaseId: analysisReportIdRef.current,
+              reportId: analysisData.reportId ?? null,
+              attachmentIds: attachments.map((attachment) => attachment.attachmentId),
+              caseContinuityActiveCaseId: analysisData.caseContinuity?.activeCaseId ?? null,
+            });
             console.info("[attachments] analysis complete", {
               fileCount: attachmentStats.fileCount,
               totalBytes: attachmentStats.totalBytes,
@@ -1245,7 +1337,9 @@ export default function ChatWidget({
           const { value, done } = await reader.read();
           if (done) break;
 
-          assistantText += decoder.decode(value, { stream: true });
+          assistantText = redactExternalDocumentUrls(
+            assistantText + decoder.decode(value, { stream: true })
+          );
 
           setMessages((prev) => {
             if (sessionRef.current !== mySession) return prev;
@@ -1270,7 +1364,9 @@ export default function ChatWidget({
         }
       } else {
         const data = await response.json();
-        const reply = (data.reply as string) || "No response received.";
+        const reply = redactExternalDocumentUrls(
+          (data.reply as string) || "No response received."
+        );
 
         if (sessionRef.current === mySession) {
           stopSpeaking();
@@ -1349,6 +1445,9 @@ export default function ChatWidget({
     onChatEngagement?.();
     const formData = new FormData();
     formData.append("file", file);
+    if (analysisReportIdRef.current) {
+      formData.append("activeCaseId", analysisReportIdRef.current);
+    }
 
     const res = await fetch("/api/upload", {
       method: "POST",
@@ -1376,6 +1475,14 @@ export default function ChatWidget({
 
     const data = await res.json();
     const attachmentId: string = data.attachmentId;
+    const returnedActiveCaseId =
+      typeof data.caseContinuity?.activeCaseId === "string"
+        ? data.caseContinuity.activeCaseId
+        : null;
+    const activeCaseIdBeforeUpload = analysisReportIdRef.current;
+    if (!analysisReportIdRef.current && returnedActiveCaseId) {
+      analysisReportIdRef.current = returnedActiveCaseId;
+    }
     const filename: string = data.filename || file.name;
     const mime: string = data.type || file.type;
     const text: string = data.text || "";
@@ -1388,6 +1495,11 @@ export default function ChatWidget({
       mime === "application/pdf" || isLikelyImageFile(file) ? URL.createObjectURL(file) : undefined;
 
     console.info("[attachments] upload complete", {
+      activeCaseId: analysisReportIdRef.current,
+      activeCaseIdBeforeUpload,
+      activeCaseIdAfterUpload: analysisReportIdRef.current,
+      reportId: analysisReportIdRef.current,
+      attachmentId,
       filename,
       mimeType: mime || file.type || "unknown",
       source,
@@ -1395,7 +1507,19 @@ export default function ChatWidget({
       hasImageDataUrl: Boolean(imageDataUrl),
       pageCount: pageCount ?? null,
       replaceId: replaceId ?? null,
+      sameCaseFollowUp: Boolean(data.caseContinuity?.sameCaseFollowUp),
     });
+
+    if (analysisReportIdRef.current) {
+      console.info("[attachments] merged into existing case", {
+        activeCaseIdBefore: activeCaseIdBeforeUpload,
+        activeCaseIdAfter: analysisReportIdRef.current,
+        reportIdBefore: activeCaseIdBeforeUpload,
+        reportIdAfter: analysisReportIdRef.current,
+        attachmentId,
+        messageCount: messages.length,
+      });
+    }
 
     setAttachments((prev) => {
       const nextAttachment = {

@@ -3,6 +3,8 @@ export type CanonicalProcedureKey =
   | "in_process_scan"
   | "post_scan"
   | "fault_clear"
+  | "headlamp_aim"
+  | "fog_lamp_aim"
   | "wheel_alignment"
   | "seat_belt_check"
   | "front_camera_calibration"
@@ -67,6 +69,31 @@ export const CANONICAL_PROCEDURES: CanonicalProcedure[] = [
       "clear faults",
       "faults cleared",
       "clear fault memory",
+    ],
+  },
+  {
+    key: "headlamp_aim",
+    label: "Headlamp aim",
+    aliases: [
+      "aim headlamps",
+      "aim headlamp",
+      "headlamp aim",
+      "headlamp aiming",
+      "aim headlights",
+      "headlight aim",
+      "headlight aiming",
+    ],
+  },
+  {
+    key: "fog_lamp_aim",
+    label: "Fog lamp aim",
+    aliases: [
+      "aim fog lamps",
+      "aim fog lamp",
+      "fog lamp aim",
+      "fog lamp aiming",
+      "fog light aim",
+      "fog light aiming",
     ],
   },
   {

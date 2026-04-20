@@ -23,7 +23,16 @@ export async function POST(req: NextRequest): Promise<Response> {
     }
 
     if (!isPlatformAdmin && entitlements.uploadCap !== null) {
-      const uploadsUsed = await getUsageCount(user.id, "FILE_UPLOAD");
+      let uploadsUsed = 0;
+
+      try {
+        uploadsUsed = await getUsageCount(user.id, "FILE_UPLOAD");
+      } catch (error) {
+        console.error("[assignments-upload] usage read failed (non-blocking)", {
+          userId: user.id,
+          error,
+        });
+      }
 
       if (uploadsUsed >= entitlements.uploadCap) {
         return NextResponse.json(

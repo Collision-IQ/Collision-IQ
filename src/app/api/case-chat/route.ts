@@ -9,6 +9,7 @@ import {
 } from "@/lib/auth/require-current-user";
 import { getCaseById } from "@/lib/cases/getCaseById";
 import { cleanResponse } from "@/lib/vehicle/oemGuardrails";
+import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 
 export const runtime = "nodejs";
 
@@ -90,6 +91,13 @@ export async function POST(req: NextRequest) {
     });
 
     if (!caseData) {
+      console.info("[chat] no active case found", {
+        activeCaseId: caseId,
+        hasActiveCase: false,
+        latestReportId: null,
+        attachmentCount: 0,
+        hasVehicleContext: false,
+      });
       return NextResponse.json({ error: "Case not found" }, { status: 404 });
     }
 
@@ -106,6 +114,35 @@ export async function POST(req: NextRequest) {
       reassessmentDelta,
       artifactRefreshPolicy,
     } = caseData;
+    const hasVehicleContext = Boolean(
+      vehicle?.vin ||
+        vehicle?.year ||
+        vehicle?.make ||
+        vehicle?.model ||
+        extractedFacts?.vehicleLabel ||
+        factualCore?.vehicleSummary
+    );
+    const hasEstimateText = Boolean(
+      estimateText.trim() || files.some((file) => file.text?.trim())
+    );
+    const hasFactualCore = Boolean(factualCore);
+    const hasStoredEvidence = Boolean(
+      files.length > 0 ||
+        hasEstimateText ||
+        hasFactualCore ||
+        linkedEvidence.length > 0 ||
+        Object.keys(extractedFacts ?? {}).length > 0
+    );
+
+    console.info("[chat] hydrated active case", {
+      activeCaseId: caseId,
+      hasActiveCase: true,
+      latestReportId: caseData.id,
+      attachmentCount: files.length,
+      hasVehicleContext,
+      hasEstimateText,
+      hasFactualCore,
+    });
 
     const adasNarrative = buildAdasNarrative({
       vehicle: {
@@ -127,7 +164,7 @@ export async function POST(req: NextRequest) {
                 `DOC ${index + 1}: ${doc.title || "Untitled"}`,
                 `STATUS: ${doc.status || "unknown"}`,
                 doc.status === "ok"
-                  ? limitText(doc.text || "", 4000)
+                  ? limitText(redactExternalDocumentUrls(doc.text || ""), 4000)
                   : "Referenced link detected, but the underlying document content was not reviewed.",
               ].join("\n")
           )
@@ -139,7 +176,7 @@ export async function POST(req: NextRequest) {
           .map(
             (file, index) =>
               `FILE ${index + 1}: ${file.name}\n${limitText(
-                file.text || file.summary || "",
+                redactExternalDocumentUrls(file.text || file.summary || ""),
                 2500
               )}`
           )
@@ -238,6 +275,26 @@ CHAT/UI ONLY: ${artifactRefreshPolicy.chatSummaryOnly.shouldRefresh ? "yes" : "n
       : "No artifact refresh policy stored.";
     const currentTopic = extractCurrentTopic(message, history);
 
+    console.info("[chat] evidence context attached", {
+      activeCaseId: caseId,
+      latestReportId: caseData.id,
+      attachmentCount: files.length,
+      hasVehicleContext,
+      hasEstimateText,
+      hasFactualCore,
+    });
+
+    if (hasStoredEvidence) {
+      console.info("[chat] fallback prevented because stored evidence exists", {
+        activeCaseId: caseId,
+        hasActiveCase: true,
+        attachmentCount: files.length,
+        hasVehicleContext,
+        hasEstimateText,
+        hasFactualCore,
+      });
+    }
+
     const system = `
 You are Collision IQ, an expert collision analysis assistant.
 
@@ -279,14 +336,14 @@ ${adasNarrative.status}: ${adasNarrative.body}
 KEY EVIDENCE (PRIORITIZED)
 ====================
 
---- LINKED OEM / ADAS DOCUMENTS (INGESTED SUPPORT OR REFERENCED LINKS) ---
-${prioritizedLinkedEvidenceContext}
-
 --- ESTIMATE (STRUCTURAL + OPERATIONS CONTEXT) ---
-${limitText(estimateText, 6000)}
+${limitText(redactExternalDocumentUrls(estimateText), 6000)}
 
 --- UPLOADED FILES (SUPPORTING CONTEXT) ---
 ${prioritizedFilesContext}
+
+--- LINKED EXTERNAL OEM / PROCEDURE DOCUMENTS (OPTIONAL ENRICHMENT) ---
+${prioritizedLinkedEvidenceContext}
 
 ====================
 CASE CONTEXT
@@ -308,8 +365,14 @@ ${JSON.stringify(extractedFacts || {}, null, 2)}
 RULES
 ====================
 - Treat uploaded documents and images as the primary active case evidence.
-- Treat successfully ingested linked documents as case-specific supporting evidence.
-- Treat blocked or failed linked documents as referenced but not yet produced, not as absent.
+- Treat stored report JSON, the factual core, and the evidence registry as primary active-case evidence after uploaded documents.
+- Treat successfully ingested linked external documents as optional case-specific supporting evidence.
+- Treat blocked, skipped, or failed linked documents as referenced but not yet produced, not as absent.
+- Stored case evidence is already loaded here. Never fall back to generic onboarding just because this turn has no fresh attachment.
+- Never reveal raw external document URLs.
+- When supporting OEM/procedure/external documents are present, describe their relevance without linking.
+- If asked for more detail, summarize the findings from those documents as reflected in the case evidence.
+- Do not tell the user to open or visit an external document link.
 - Preserve both evidence continuity and topic continuity. The current conversational topic is "${currentTopic}".
 - Answer the current topic first. If the topic is narrow, do not lead with or drift into a broad case recap.
 - A new upload enriches the current topic; it does not reset the topic to general review.
@@ -338,7 +401,7 @@ RULES
 - Topic priority guide:
   - OEM position statements: prioritize procedures, scans, calibrations, structural limits, corrosion, and one-time-use parts.
   - Calibration requirements: prioritize sensors, scans, aiming, initialization, and disturbed mounting/support areas.
-  - Structural verification: prioritize measurement, pull/setup confirmation, and hidden mounting geometry.
+  - Structural verification: prioritize measurement, pull/setup confirmation, and geometry/fit verification tied to the documented impact zone.
   - Customer explanation: prioritize plain-language safety, drivability, fit, and next steps.
   - Rebuttal strategy: prioritize actionable unresolved support asks.
   - Valuation: prioritize market evidence, severity indicators, and repair-impact significance.
@@ -349,10 +412,15 @@ RULES
 - After an active-case upload, preserve and rejoin the user's latest question or topic from the chat history/message instead of drifting into a generic case intro.
 - The newest upload is additive evidence; it does not replace prior user intent, prior documents, or the stored factual core.
 - Do not ask for VIN, year, make, model, or a starter upload when those facts are already present in VEHICLE, EXTRACTED FACTS, STABLE FACTUAL CORE, or uploaded files.
+- If uploaded files, case evidence, factual core, extracted facts, or report attachments exist, never tell the user to upload the estimate again.
+- Treat active-case evidence as the current source of truth.
+- If vehicle identity is present in VEHICLE, EXTRACTED FACTS, STABLE FACTUAL CORE, ESTIMATE, or uploaded files, answer from that vehicle identity directly.
+- Only state "vehicle not established" if it is genuinely absent from every stored active-case evidence section.
+- If stored case evidence exists, never say you do not know which vehicle this is.
 - In that case-posture answer, separate what is visible in photos, what documents/invoices support, and what remains open pending further documentation.
 - Photos may support visible bumper, lamp, fender, mounting, bracket, support, trim, wheel-area, or teardown observations, but do not claim hidden damage from photos alone.
 - If invoice evidence supports connector, electrical, wiring, or harness repair, state it as invoice-supported repair documentation rather than an inferred hidden-damage conclusion.
-- Keep hidden mounting geometry, bracket/support damage, structural/wheel-area checks, and calibration-related verification open unless directly documented.
+- Keep bracket/support damage, structural/wheel-area checks, calibration-related verification, and geometry/fit checks open only when tied to the documented impact zone or directly supported evidence.
 - Do not repeat the full factual core when only the delta matters.
 - If the delta says no material change, say that plainly and do not invent novelty.
 - Do not recommend regenerating every artifact by default; use ARTIFACT REFRESH POLICY to decide whether chat/UI summary is enough.
@@ -372,7 +440,7 @@ ${EVIDENCE_POLICY}
       system,
       messages: [...history, { role: "user", content: message }],
     });
-    const reply = cleanResponse(vehicle?.make || "", rawReply);
+    const reply = redactExternalDocumentUrls(cleanResponse(vehicle?.make || "", rawReply));
 
     return NextResponse.json({
       success: true,
@@ -380,8 +448,7 @@ ${EVIDENCE_POLICY}
       debug: {
         filesCount: files.length,
         linkedEvidenceCount: linkedEvidence.length,
-        linkedEvidenceUrls: linkedEvidence.map((doc) => ({
-          url: doc.url,
+        linkedEvidence: linkedEvidence.map((doc) => ({
           status: doc.status,
           title: doc.title,
         })),

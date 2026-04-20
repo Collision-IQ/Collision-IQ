@@ -1,5 +1,10 @@
 import pdfParse from "pdf-parse";
 import {
+  downloadDriveFile,
+  extractDriveFileIdFromUrl,
+  isDriveEnabled,
+} from "@/lib/drive/download";
+import {
   assessRetrievedDocumentApplicability,
   type VehicleApplicabilityContext,
 } from "./vehicleApplicability";
@@ -120,8 +125,7 @@ export function buildLinkedProcedureRefinementContext(
       ]
         .filter(Boolean)
         .join(", ");
-      return `- ${doc.title ?? doc.url} | domain=${doc.domain} | ${flags}
-  source link: ${doc.url}
+      return `- ${doc.title ?? "Linked supporting document"} | source=${doc.domain} | ${flags}
   excerpt: ${doc.excerpt}`;
     }),
   ].join("\n");
@@ -131,6 +135,36 @@ async function fetchLinkedProcedureDoc(
   link: EstimateLinkCandidate,
   timeoutMs: number
 ): Promise<{ title?: string; text: string } | null> {
+  const driveFileId = extractDriveFileIdFromUrl(link.url);
+  if (driveFileId) {
+    if (!isDriveEnabled()) {
+      return null;
+    }
+
+    try {
+      const downloaded = await downloadDriveFile(driveFileId);
+      const mimeType = downloaded.mimeType?.toLowerCase() ?? "";
+      if (mimeType.includes("application/pdf")) {
+        const parsed = await pdfParse(downloaded.buffer);
+        const text = parsed.text?.replace(/\s+/g, " ").trim();
+        return text ? { title: downloaded.name, text } : null;
+      }
+
+      if (mimeType.includes("text") || mimeType.includes("csv")) {
+        const text = downloaded.buffer.toString("utf-8").replace(/\s+/g, " ").trim();
+        return text ? { title: downloaded.name, text } : null;
+      }
+
+      return null;
+    } catch (error) {
+      console.error("[drive] external lookup failed (non-blocking)", {
+        fileId: driveFileId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 

@@ -1,40 +1,137 @@
-import { UsageKind } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
-type SupportedUsageKind = UsageKind | "FILE_UPLOAD" | "REPORT_EXPORT" | "CHAT_EXPORT";
+type SupportedUsageKind =
+  | "ANALYSIS_COMPLETED"
+  | "FILE_UPLOAD"
+  | "REPORT_EXPORT"
+  | "CHAT_EXPORT";
 
-export async function incrementUsage(userId: string, kind: SupportedUsageKind) {
-  return prisma.usageCounter.upsert({
+type UsageCounterRecord = {
+  count: number;
+};
+
+type UsageCounterDelegate = {
+  upsert(args: {
     where: {
       userId_kind: {
-        userId,
-        kind: kind as UsageKind,
-      },
-    },
+        userId: string;
+        kind: SupportedUsageKind;
+      };
+    };
     update: {
       count: {
-        increment: 1,
-      },
-      updatedAt: new Date(),
-    },
+        increment: number;
+      };
+      updatedAt: Date;
+    };
     create: {
-      id: `${userId}_${kind}`,
+      id: string;
+      userId: string;
+      kind: SupportedUsageKind;
+      count: number;
+    };
+  }): Promise<unknown>;
+  findUnique(args: {
+    where: {
+      userId_kind: {
+        userId: string;
+        kind: SupportedUsageKind;
+      };
+    };
+  }): Promise<UsageCounterRecord | null>;
+};
+
+function getUsageCounterDelegate(): UsageCounterDelegate | null {
+  try {
+    const candidate = (prisma as any).usageCounter;
+    if (!candidate) {
+      return null;
+    }
+
+    if (
+      typeof candidate.upsert !== "function" ||
+      typeof candidate.findUnique !== "function"
+    ) {
+      return null;
+    }
+
+    return candidate as UsageCounterDelegate;
+  } catch (error) {
+    console.error("[usage:getUsageCounterDelegate] fail-open", { error });
+    return null;
+  }
+}
+
+export async function incrementUsage(userId: string, kind: SupportedUsageKind) {
+  const usageCounter = getUsageCounterDelegate();
+  if (!usageCounter) {
+    console.error("[usage:incrementUsage] fail-open", {
+      reason: "usageCounter delegate unavailable",
       userId,
-      kind: kind as UsageKind,
-      count: 1,
-    },
-  });
+      kind,
+    });
+    return null;
+  }
+
+  try {
+    return await usageCounter.upsert({
+      where: {
+        userId_kind: {
+          userId,
+          kind,
+        },
+      },
+      update: {
+        count: {
+          increment: 1,
+        },
+        updatedAt: new Date(),
+      },
+      create: {
+        id: `${userId}_${kind}`,
+        userId,
+        kind,
+        count: 1,
+      },
+    });
+  } catch (error) {
+    console.error("[usage:incrementUsage] fail-open", {
+      userId,
+      kind,
+      error,
+    });
+    return null;
+  }
 }
 
 export async function getUsageCount(userId: string, kind: SupportedUsageKind) {
-  const record = await prisma.usageCounter.findUnique({
-    where: {
-      userId_kind: {
-        userId,
-        kind: kind as UsageKind,
-      },
-    },
-  });
+  const usageCounter = getUsageCounterDelegate();
+  if (!usageCounter) {
+    console.error("[usage:getUsageCount] fail-open", {
+      reason: "usageCounter delegate unavailable",
+      userId,
+      kind,
+    });
+    return 0;
+  }
 
-  return record?.count ?? 0;
+  try {
+    const record = await usageCounter.findUnique({
+      where: {
+        userId_kind: {
+          userId,
+          kind,
+        },
+      },
+    });
+
+    return record?.count ?? 0;
+  } catch (error) {
+    console.error("[usage:getUsageCount] fail-open", {
+      userId,
+      kind,
+      error,
+    });
+    return 0;
+  }
 }

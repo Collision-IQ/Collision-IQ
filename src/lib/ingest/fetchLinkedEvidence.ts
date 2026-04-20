@@ -14,7 +14,7 @@ export type LinkedEvidence = {
   mimeType: string | null;
   sourceType: "google_doc" | "google_drive" | "pdf" | "html" | "unknown";
   text: string;
-  status: "ok" | "blocked" | "failed";
+  status: "ok" | "blocked" | "failed" | "skipped";
   notes?: string;
 };
 
@@ -60,7 +60,12 @@ export async function buildLinkedEvidence(
   const settled = await Promise.all(urls.map((url) => readRemoteDocument(url)));
 
   return settled
-    .filter((doc) => doc.status === "ok" || doc.status === "blocked" || doc.status === "failed")
+    .filter((doc) =>
+      doc.status === "ok" ||
+      doc.status === "blocked" ||
+      doc.status === "failed" ||
+      doc.status === "skipped"
+    )
     .sort((a, b) => scoreLinkedDoc(b) - scoreLinkedDoc(a))
     .map((doc) => ({
       url: doc.url,

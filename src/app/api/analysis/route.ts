@@ -39,11 +39,22 @@ import type {
   DriveRetrievalResult,
 } from "@/lib/ai/contracts/driveRetrievalContract";
 import { mergeVehicleIdentity, normalizeVehicleIdentity } from "@/lib/ai/vehicleContext";
+import {
+  analyzeEstimateOperations,
+  inferImpactSide,
+  isOperationAlreadyRepresented,
+} from "@/lib/ai/estimateOperationEquivalence";
+import {
+  deriveImpactZone,
+  hasFrontSupportZoneEvidence,
+  isSideImpactZone,
+} from "@/lib/ai/impactZone";
 import type { EvidenceRecord } from "@/lib/ai/types/evidence";
 import { collisionIqModels } from "@/lib/modelConfig";
 import { openai } from "@/lib/openai";
 import { buildWorkspaceDataFromReport } from "@/lib/workspace/buildWorkspaceData";
 import { buildLinkedEvidence, type LinkedEvidence } from "@/lib/ingest/fetchLinkedEvidence";
+import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import {
   UnauthorizedError,
   requireCurrentUser,
@@ -309,11 +320,12 @@ export async function POST(req: Request) {
       createdAt: stored.createdAt,
       report: stored.report,
       linkedEvidence: (stored.report.linkedEvidence ?? []).map((doc) => ({
+        id: doc.title || doc.sourceType || "linked-supporting-document",
         title: doc.title,
-        url: doc.url,
         status: doc.status,
         sourceType: doc.sourceType,
-        textPreview: (doc.text || "").slice(0, 200),
+        notes: doc.notes,
+        textPreview: redactExternalDocumentUrls(doc.text || "").slice(0, 200),
       })),
       panel,
       workspaceData,
@@ -368,13 +380,12 @@ function linkedEvidenceToAttachments(linkedEvidence: LinkedEvidence[]): StoredAt
     .filter((doc) => doc.status === "ok" && Boolean(doc.text.trim()))
     .map((doc, index) => ({
       id: `linked-evidence:${index + 1}`,
-      filename: doc.title || doc.finalUrl || doc.url,
+      filename: doc.title || `Linked supporting document ${index + 1}`,
       type: doc.mimeType || "text/plain",
       text: [
-        `Linked evidence source: ${doc.url}`,
-        `Final URL: ${doc.finalUrl}`,
+        "Linked supporting document identified in file review.",
         `Source type: ${doc.sourceType}`,
-        doc.text,
+        redactExternalDocumentUrls(doc.text),
       ].join("\n"),
       imageDataUrl: undefined,
       pageCount: undefined,
@@ -405,13 +416,20 @@ function applyLinkedEvidenceToReport(params: {
       issueKeys: params.report.issues.map((issue) => issue.id),
     })
   );
-  const issues = augmentIssuesWithEvidenceRegistry(
+  const operationContext = [
+    params.report.sourceEstimateText ?? "",
+    ...params.uploadedAttachments.map((attachment) => `${attachment.filename}\n${attachment.text}`),
+  ].join("\n\n");
+  const issues = normalizeIssuesForEstimateOperations(
+    augmentIssuesWithEvidenceRegistry(
     mergeIssueAssessments(
       params.previousReport?.issues ?? [],
       params.report.issues,
       evidenceRegistry
     ),
     evidenceRegistry
+    ),
+    operationContext
   );
   const reassessmentMode = params.activeCaseId ? "active_case_update" : "new_case";
   const reassessmentDelta = buildReassessmentDelta({
@@ -497,17 +515,19 @@ function buildCaseEvidenceRegistry(params: {
     };
   });
   const linked = params.linkedEvidence.map((doc, index) => ({
-    id: `linked:${index + 1}:${doc.url}`,
+    id: `linked:${index + 1}`,
     sourceType: classifyLinkedEvidenceSource(doc),
-    label: doc.title || doc.finalUrl || doc.url,
-    extractedText: doc.status === "ok" ? doc.text : undefined,
-    linkedUrl: doc.url,
+    label: doc.title || `Linked supporting document ${index + 1}`,
+    extractedText: doc.status === "ok" ? redactExternalDocumentUrls(doc.text) : undefined,
+    linkedUrl: undefined,
     ingestionState:
       doc.status === "ok"
         ? ("ingested" as const)
         : doc.status === "blocked"
-          ? ("referenced_not_produced" as const)
-          : ("failed" as const),
+          ? ("access_limited" as const)
+          : doc.status === "skipped"
+            ? ("skipped" as const)
+            : ("failed" as const),
     evidenceStatus:
       doc.status === "ok"
         ? ("DOCUMENTED" as const)
@@ -554,11 +574,18 @@ function mergeEvidenceRegistry(
       extractedText: item.extractedText ?? existing.extractedText,
       extractedSummary: item.extractedSummary ?? existing.extractedSummary,
       structuredFacts: item.structuredFacts ?? existing.structuredFacts,
-      linkedUrl: item.linkedUrl ?? existing.linkedUrl,
+      linkedUrl: undefined,
     });
   }
 
-  return [...merged.values()];
+  return [...merged.values()].map((item) => ({
+    ...item,
+    linkedUrl: undefined,
+    extractedText: item.extractedText ? redactExternalDocumentUrls(item.extractedText) : undefined,
+    extractedSummary: item.extractedSummary
+      ? redactExternalDocumentUrls(item.extractedSummary)
+      : undefined,
+  }));
 }
 
 function mergeIssueAssessments(
@@ -650,6 +677,217 @@ function augmentIssuesWithEvidenceRegistry(
   }
 
   return [...merged.values()];
+}
+
+function normalizeIssuesForEstimateOperations(
+  issues: RepairIntelligenceReport["issues"],
+  estimateText: string
+): RepairIntelligenceReport["issues"] {
+  if (!estimateText.trim()) {
+    return dedupeIssueFamilies(issues.map((issue) => ({
+      ...issue,
+      basisTier: issue.basisTier ?? issue.evidenceStatus ?? "SUPPORTABLE_BUT_UNCONFIRMED",
+    })));
+  }
+
+  return dedupeIssueFamilies(
+    issues.flatMap((issue) => normalizeIssueForEstimateOperations(issue, estimateText))
+  );
+}
+
+function normalizeIssueForEstimateOperations(
+  issue: RepairIntelligenceReport["issues"][number],
+  estimateText: string
+): RepairIntelligenceReport["issues"] {
+  const issueWithBasis = {
+    ...issue,
+    basisTier: issue.basisTier ?? issue.evidenceStatus ?? "SUPPORTABLE_BUT_UNCONFIRMED",
+  };
+  const text = `${issue.id} ${issue.title} ${issue.finding} ${issue.impact} ${issue.missingOperation ?? ""}`;
+  const lower = text.toLowerCase();
+  const impactZone = deriveImpactZone({ text: estimateText });
+  const normalizedImpact = impactZone.primary === "rear"
+    ? issue.impact.replace(/\bfront-end damage\b/gi, "rear-area damage")
+    : issue.impact;
+  const sideImpactWithoutFrontSupport =
+    isSideImpactZone(impactZone) &&
+    impactZone.confidence !== "low" &&
+    !hasFrontSupportZoneEvidence(estimateText);
+
+  if (
+    sideImpactWithoutFrontSupport &&
+    /(front support|front-end|mounting geometry|hidden mounting|teardown growth)/i.test(text)
+  ) {
+    return [
+      {
+        ...issue,
+        basisTier: issueWithBasis.basisTier,
+        id: issue.id === "FRONT_SUPPORT_HIDDEN_DAMAGE_POTENTIAL"
+          ? "SIDE_STRUCTURE_APERTURE_VERIFICATION"
+          : issue.id,
+        title: "Side Structure / Aperture Fit Verification",
+        finding: rewriteAsDocumentationFollowUp(
+          issue.finding,
+          "The stored estimate and supplement indicate a side-impact repair pattern."
+        ),
+        impact:
+          "The open verification concern should track the documented side structure, aperture, door-shell, quarter, roof-rail, closure, and sealing repair path rather than a generic front-end mounting-geometry assumption.",
+        missingOperation: undefined,
+        evidenceStatus:
+          issue.evidenceStatus === "DOCUMENTED"
+            ? issue.evidenceStatus
+            : "OPEN_PENDING_FURTHER_DOCUMENTATION",
+      },
+    ];
+  }
+
+  if (
+    /(headlamp|headlight|lamp).*\baim|aim.*(headlamp|headlight|lamp)/i.test(text) &&
+    (isOperationAlreadyRepresented(estimateText, "headlamp_aim") ||
+      isOperationAlreadyRepresented(estimateText, "fog_lamp_aim"))
+  ) {
+    return [];
+  }
+
+  if (/(suspension|wheel[-\s]?area|steering|alignment)/i.test(text)) {
+    const represented =
+      isOperationAlreadyRepresented(estimateText, "alignment") ||
+      isOperationAlreadyRepresented(estimateText, "suspension_steering");
+    if (represented && /missing|not represented|absent|does not document/i.test(text)) {
+      return [
+        {
+          ...issue,
+          basisTier: issueWithBasis.basisTier,
+          title: "Suspension / Alignment Documentation Follow-Up",
+          finding: rewriteAsDocumentationFollowUp(issue.finding, "Suspension, steering, or alignment work is represented in the estimate."),
+          impact:
+            "Suspension, steering, or alignment operations are represented in the estimate; remaining concern is limited to completion documentation or final records if not produced.",
+          missingOperation: undefined,
+          evidenceStatus: issue.evidenceStatus === "DOCUMENTED"
+            ? issue.evidenceStatus
+            : "OPEN_PENDING_FURTHER_DOCUMENTATION",
+        },
+      ];
+    }
+  }
+
+  if (/(scan|calibration|adas|aiming)/i.test(text)) {
+    const scanOrCalibrationRepresented =
+      isOperationAlreadyRepresented(estimateText, "scan") ||
+      isOperationAlreadyRepresented(estimateText, "calibration") ||
+      isOperationAlreadyRepresented(estimateText, "headlamp_aim") ||
+      isOperationAlreadyRepresented(estimateText, "fog_lamp_aim");
+    if (scanOrCalibrationRepresented && /missing|not represented|absent|does not document/i.test(text)) {
+      return [
+        {
+          ...issue,
+          basisTier: issueWithBasis.basisTier,
+          title: lower.includes("scan")
+            ? "Scan Report Documentation Follow-Up"
+            : "Calibration / Aiming Documentation Follow-Up",
+          finding: rewriteAsDocumentationFollowUp(issue.finding, "Scan, calibration, or aiming operations are represented in the estimate."),
+          impact:
+            "The estimate carries scan, calibration, or aiming-related operations; the remaining issue is whether final reports, certificates, or proof of completion were produced.",
+          missingOperation: undefined,
+          evidenceStatus: "OPEN_PENDING_FURTHER_DOCUMENTATION",
+        },
+      ];
+    }
+  }
+
+  if (/(structural|measurement|measure|frame|unibody|pull|rail|apron)/i.test(text)) {
+    const snapshot = analyzeEstimateOperations(estimateText);
+    if (snapshot.structural_measurement_support && !snapshot.final_structural_measurement_record) {
+      return [
+        {
+          ...issue,
+          basisTier: issueWithBasis.basisTier,
+          title: "Structural Measurement Documentation Follow-Up",
+          finding: rewriteAsDocumentationFollowUp(
+            issue.finding,
+            "The estimate represents structural setup, pull, measurement, or unibody work."
+          ),
+          impact:
+            "Structural repair and measurement-support operations are represented in the estimate, but a final measurement printout or comparable produced record remains open if it is not included.",
+          missingOperation: undefined,
+          evidenceStatus: "OPEN_PENDING_FURTHER_DOCUMENTATION",
+        },
+      ];
+    }
+  }
+
+  if (issue.evidenceStatus === "VISIBLE_IN_IMAGES") {
+    return [
+      {
+        ...issue,
+        basisTier: issueWithBasis.basisTier,
+        finding: ensurePhotoCaution(issue.finding),
+        impact: ensurePhotoCaution(normalizedImpact),
+        missingOperation: undefined,
+      },
+    ];
+  }
+
+  return [
+    {
+      ...issueWithBasis,
+      impact: normalizedImpact,
+    },
+  ];
+}
+
+function rewriteAsDocumentationFollowUp(value: string, prefix: string) {
+  const cleaned = value.replace(/\b(missing|absent|not represented|not clearly represented)\b/gi, "open").trim();
+  return `${prefix} ${cleaned || "Completion documentation remains open if final records were not produced."}`;
+}
+
+function ensurePhotoCaution(value: string) {
+  if (/photos? alone|visible[-\s]?condition|not confirmed|remains open/i.test(value)) {
+    return value;
+  }
+  return `${value} This remains a visible-condition concern only; hidden damage or missing operations are not established from photos alone.`;
+}
+
+function dedupeIssueFamilies(
+  issues: RepairIntelligenceReport["issues"]
+): RepairIntelligenceReport["issues"] {
+  const merged = new Map<string, RepairIntelligenceReport["issues"][number]>();
+
+  for (const issue of issues) {
+    const family = inferIssueFamily(issue);
+    const existing = merged.get(family);
+    if (!existing) {
+      merged.set(family, issue);
+      continue;
+    }
+
+    merged.set(family, {
+      ...existing,
+      severity: strongestSeverity(existing.severity, issue.severity),
+      evidenceStatus: strongestEvidenceStatus(existing.evidenceStatus, issue.evidenceStatus),
+      basisTier: strongestEvidenceStatus(existing.basisTier, issue.basisTier),
+      evidenceIds: dedupeStrings([...existing.evidenceIds, ...issue.evidenceIds]),
+      impact: pickLongerText(existing.impact, issue.impact),
+      finding: pickLongerText(existing.finding, issue.finding),
+      missingOperation: existing.missingOperation ?? issue.missingOperation,
+    });
+  }
+
+  return [...merged.values()];
+}
+
+function inferIssueFamily(issue: RepairIntelligenceReport["issues"][number]) {
+  const text = normalizeText(`${issue.id} ${issue.title} ${issue.missingOperation ?? ""}`);
+  if (/structural|measure|geometry|frame|unibody|pull/.test(text)) return "structural_measurement_geometry";
+  if (/front support|apron|upper frame|lower rail|tie bar|lock support/.test(text)) return "front_support_structure";
+  if (/suspension|wheel|alignment|steering/.test(text)) return "suspension_alignment";
+  if (/scan|calibration|aim|adas/.test(text)) return "scan_calibration_aiming";
+  if (/fit sensitive|fit|oem parts|aftermarket/.test(text)) return "oem_fit_parts";
+  return normalizeIssueKey(issue);
+}
+
+function pickLongerText(left: string, right: string) {
+  return right.length > left.length ? right : left;
 }
 
 function getEvidenceDerivedIssueDefinition(
@@ -870,7 +1108,7 @@ function buildSharedFactualCore(params: {
     .filter((item) => item.sourceType === "photo")
     .map(summarizeVisibleDamageEvidence);
   const linkedEvidenceState = params.evidenceRegistry
-    .filter((item) => item.linkedUrl)
+    .filter((item) => item.sourceType === "procedure_link" || item.ingestionState !== "uploaded")
     .map((item) => `${item.label}: ${item.ingestionState}`);
   const documentedRepairOperations = dedupeStrings([
     ...report.presentProcedures,
@@ -986,12 +1224,13 @@ function buildCurrentCaseSummary(params: {
 function summarizeVisibleDamageEvidence(item: CaseEvidenceRegistryItem): string {
   const sourceText = `${item.label}\n${item.extractedText ?? ""}`;
   const lower = sourceText.toLowerCase();
+  const side = inferImpactSide(sourceText);
   const observed = [
-    /(front[-\s]?left|left[-\s]?front|driver[-\s]?front)/i.test(sourceText)
-      ? "left-front area"
-      : "",
-    /(front[-\s]?right|right[-\s]?front|passenger[-\s]?front)/i.test(sourceText)
+    side === "right_front"
       ? "right-front area"
+      : "",
+    side === "left_front"
+      ? "left-front area"
       : "",
     lower.includes("bumper") ? "bumper" : "",
     lower.includes("headlamp") || lower.includes("headlight") ? "headlamp" : "",
@@ -1339,7 +1578,7 @@ function classifyUploadedEvidenceSource(attachment: StoredAttachment): CaseEvide
 }
 
 function classifyLinkedEvidenceSource(doc: LinkedEvidence): CaseEvidenceSourceType {
-  const text = `${doc.url}\n${doc.title ?? ""}\n${doc.text}`.toLowerCase();
+  const text = `${doc.title ?? ""}\n${doc.text}`.toLowerCase();
 
   if (text.includes("adas") || text.includes("calibration")) return "adas_report";
   if (text.includes("scan")) return "scan_report";
@@ -1478,9 +1717,9 @@ function mergeLinkedEvidenceRecords(
           : doc.title || "Referenced linked document",
       snippet:
         doc.status === "ok" && doc.text.trim()
-          ? doc.text.slice(0, 280)
+          ? redactExternalDocumentUrls(doc.text).slice(0, 280)
           : `Referenced link detected but not reviewed. Status: ${doc.status}. ${doc.notes ?? ""}`.trim(),
-      source: doc.url,
+      source: "linked_supporting_document",
       authority: doc.status === "ok" ? ("oem" as const) : ("inferred" as const),
     }));
 
@@ -1770,10 +2009,10 @@ ${params.report.issues.map((issue) => `- ${issue.title}: ${issue.impact || issue
 [Current Missing Procedures]
 ${params.report.missingProcedures.map((procedure) => `- ${procedure}`).join("\n") || "- None listed"}
 
-[Drive Retrieval Mode]
+[Linked External-Document Retrieval Mode]
 ${params.retrieval.request.retrievalMode}
 
-[Retrieved Drive Support]
+[Retrieved Linked External-Document Support]
 ${params.retrievalContext}`,
           },
         ],
@@ -1843,7 +2082,7 @@ function mergeDriveRequiredProcedures(
 
       merged.set(key, {
         procedure,
-        reason: `Direct Drive support found in ${result.filename}. ${result.matchReason}`,
+        reason: `Linked external-document support found in ${result.filename}. ${result.matchReason}`,
         source: "oem_doc",
         severity: result.confidence === "high" ? "high" : "medium",
       });
@@ -2131,7 +2370,7 @@ function sanitizeExistingEvidenceRecord(record: EvidenceRecord): EvidenceRecord 
     ? "Retrieved support"
     : record.title;
   const normalizedSource = looksOpaqueIdentifier(record.source)
-    ? "Drive knowledge base"
+    ? "Linked external-document knowledge base"
     : record.source;
 
   return {
@@ -2261,7 +2500,7 @@ Return JSON only:
             text: `[Estimate Text]
 ${text}
 
-[Vehicle-Specific Required Procedures From Drive/OEM]
+[Vehicle-Specific Required Procedures From Linked OEM Support]
 ${requiredProcedures || "- None provided"}
 
 [Procedures Already Represented]

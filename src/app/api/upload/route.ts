@@ -7,6 +7,7 @@ import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import { UsageAccessError, recordUsage } from "@/lib/billing/usage";
 import { getUsageCount, incrementUsage } from "@/lib/usage";
 import { saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
+import { getAnalysisReport } from "@/lib/analysisReportStore";
 import {
   extractPreviewDataFromFile,
   fileToReusableDataUrl,
@@ -39,7 +40,16 @@ export async function POST(req: Request) {
     }
 
     if (!isPlatformAdmin && entitlements.uploadCap !== null) {
-      const uploadsUsed = await getUsageCount(user.id, "FILE_UPLOAD");
+      let uploadsUsed = 0;
+
+      try {
+        uploadsUsed = await getUsageCount(user.id, "FILE_UPLOAD");
+      } catch (error) {
+        console.error("[upload] usage read failed (non-blocking)", {
+          userId: user.id,
+          error,
+        });
+      }
 
       if (uploadsUsed >= entitlements.uploadCap) {
         return NextResponse.json(
@@ -51,6 +61,7 @@ export async function POST(req: Request) {
 
     const formData = await req.formData();
     const files = getUploadFiles(formData);
+    const activeCaseId = String(formData.get("activeCaseId") ?? "").trim() || null;
 
     if (!files.length) {
       return NextResponse.json({ error: "NO_FILE" }, { status: 400 });
@@ -82,6 +93,17 @@ export async function POST(req: Request) {
     }
 
     const file = files[0];
+    const activeCase = activeCaseId
+      ? await getAnalysisReport(activeCaseId, { ownerUserId: user.id })
+      : null;
+
+    if (activeCaseId) {
+      console.info("[upload] resolved active case for follow-up upload", {
+        activeCaseId,
+        hasActiveCase: Boolean(activeCase),
+        ownerUserId: user.id,
+      });
+    }
 
     console.info("[upload] accepted", {
       filename: file.name,
@@ -91,6 +113,8 @@ export async function POST(req: Request) {
       fileCount: files.length,
       isImage: file.type.startsWith("image/"),
       ownerUserId: user.id,
+      activeCaseId,
+      sameCaseFollowUp: Boolean(activeCase),
     });
 
     const previewData = await extractPreviewDataFromFile(file);
@@ -112,7 +136,23 @@ export async function POST(req: Request) {
       pageCount: stored.pageCount ?? null,
       hasImageDataUrl: Boolean(stored.imageDataUrl),
       ownerUserId: user.id,
+      activeCaseId,
+      sameCaseFollowUp: Boolean(activeCase),
     });
+
+    if (activeCase) {
+      console.info("[upload] attached files to existing case", {
+        activeCaseId: activeCase.id,
+        attachmentId: stored.id,
+        ownerUserId: user.id,
+      });
+      console.info("[upload] returned same-case continuity", {
+        activeCaseId: activeCase.id,
+        reportId: activeCase.id,
+        attachmentIds: [stored.id],
+        sameCaseFollowUp: true,
+      });
+    }
 
     if (!isPlatformAdmin) {
       try {
@@ -127,13 +167,23 @@ export async function POST(req: Request) {
           },
         });
       } catch (error) {
-        console.error("USAGE_RECORD_WRITE_FAILED", error);
+        console.error("[upload] usage tracking failed (non-blocking)", {
+          phase: "recordUsage",
+          userId: user.id,
+          fileName: file.name,
+          error,
+        });
       }
 
       try {
         await incrementUsage(user.id, "FILE_UPLOAD");
       } catch (error) {
-        console.error("USAGE_COUNTER_INCREMENT_FAILED", error);
+        console.error("[upload] usage tracking failed (non-blocking)", {
+          phase: "incrementUsage",
+          userId: user.id,
+          fileName: file.name,
+          error,
+        });
       }
     }
 
@@ -145,6 +195,21 @@ export async function POST(req: Request) {
       imageDataUrl: stored.imageDataUrl,
       pageCount: stored.pageCount,
       hasVision: Boolean(stored.imageDataUrl),
+      caseContinuity: activeCase
+        ? {
+            activeCaseId: activeCase.id,
+            reportId: activeCase.id,
+            sameCaseFollowUp: true,
+            attachmentIds: [stored.id],
+          }
+        : activeCaseId
+          ? {
+              activeCaseId,
+              reportId: activeCaseId,
+              sameCaseFollowUp: false,
+              attachmentIds: [stored.id],
+            }
+          : null,
     });
   } catch (error) {
     if (error instanceof UnauthorizedError) {

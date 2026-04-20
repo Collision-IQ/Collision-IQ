@@ -404,17 +404,24 @@ export async function recordCompletedAnalysisUsage(access: ViewerAccess, metadat
     return;
   }
 
-  await prisma.usageRecord.create({
-    data: {
+  try {
+    await prisma.usageRecord.create({
+      data: {
+        userId: access.dbUserId,
+        shopId: access.activeShopId,
+        subscriptionId: access.activeSubscriptionId,
+        kind: "ANALYSIS_COMPLETED",
+        periodKey: getCurrentPeriodKey(),
+        quantity: 1,
+        metadata,
+      },
+    });
+  } catch (error) {
+    console.error("[usage:recordCompletedAnalysisUsage] fail-open", {
       userId: access.dbUserId,
-      shopId: access.activeShopId,
-      subscriptionId: access.activeSubscriptionId,
-      kind: "ANALYSIS_COMPLETED",
-      periodKey: getCurrentPeriodKey(),
-      quantity: 1,
-      metadata,
-    },
-  });
+      error,
+    });
+  }
 }
 
 export function buildAnonymousAccess(): ViewerAccess {
@@ -516,21 +523,32 @@ async function buildAccessFromDbUser(dbUser: DbUserWithRelations): Promise<Viewe
   const featureFlags = applyFeatureOverrides(baseFeatureFlags, featureOverrides);
   const monthlyAnalysisLimit = resolveMonthlyAnalysisLimit(effectivePlan, featureOverrides);
 
-  const monthlyAnalysisUsed = await prisma.usageRecord.aggregate({
-    where: {
-      kind: "ANALYSIS_COMPLETED",
-      periodKey: getCurrentPeriodKey(),
-      OR: [
-        { userId: dbUser.id },
-        ...(activeShopId ? [{ shopId: activeShopId }] : []),
-      ],
-    },
-    _sum: {
-      quantity: true,
-    },
-  });
+  let used = 0;
 
-  const used = monthlyAnalysisUsed._sum.quantity ?? 0;
+  try {
+    const monthlyAnalysisUsed = await prisma.usageRecord.aggregate({
+      where: {
+        kind: "ANALYSIS_COMPLETED",
+        periodKey: getCurrentPeriodKey(),
+        OR: [
+          { userId: dbUser.id },
+          ...(activeShopId ? [{ shopId: activeShopId }] : []),
+        ],
+      },
+      _sum: {
+        quantity: true,
+      },
+    });
+
+    used = monthlyAnalysisUsed._sum.quantity ?? 0;
+  } catch (error) {
+    console.error("[entitlements] usage read failed (non-blocking)", {
+      userId: dbUser.id,
+      shopId: activeShopId,
+      error,
+    });
+  }
+
   const canRunAnalysis = monthlyAnalysisLimit === null ? true : used < monthlyAnalysisLimit;
 
   return {

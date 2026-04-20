@@ -31,6 +31,14 @@ import {
   sanitizeVehicleSpecificText,
 } from "../vehicleApplicability";
 import { buildAdasNarrative } from "@/lib/analysis/adasDecision";
+import { analyzeEstimateOperations } from "@/lib/ai/estimateOperationEquivalence";
+import {
+  deriveImpactZone,
+  formatImpactZone,
+  hasFrontSupportZoneEvidence,
+  isSideImpactZone,
+} from "@/lib/ai/impactZone";
+import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 
 export const COLLISION_ACADEMY_HANDOFF_URL = "https://www.collision.academy/";
 export const REDACTED_INSURER_TOKEN = "[REDACTED_INSURER]";
@@ -266,23 +274,23 @@ export function buildExportModel(params: {
   const cleanedSupplementItems = supplementItems.map((item) => ({
     ...item,
     title: cleanDisplayLabel(item.title),
-    rationale: cleanFormalExportText(
+    rationale: redactExternalDocumentUrls(cleanFormalExportText(
       stripUnsupportedSeamSealerLanguage(
         item.rationale,
         sourceEstimateText,
         allowUnsupportedSeamSealerNarrative
       )
-    ),
+    )),
     evidence: item.evidence
-      ? cleanFormalExportText(
+      ? redactExternalDocumentUrls(cleanFormalExportText(
           stripUnsupportedSeamSealerLanguage(
             item.evidence,
             sourceEstimateText,
             allowUnsupportedSeamSealerNarrative
           )
-        )
+        ))
       : undefined,
-    source: item.source ? cleanFormalExportText(item.source) : undefined,
+    source: item.source ? redactExternalDocumentUrls(cleanFormalExportText(item.source)) : undefined,
   }));
   const quality = assessDisplayQuality({
     vehicleLabel: displayVehicle.label ?? vehicle.label,
@@ -1454,6 +1462,13 @@ function summarizeVisibleScope(
   const panelText = normalizedPanels.join(" ");
   const lowerSource = sourceEstimateText.toLowerCase();
   const zoneSet = new Set(normalizedZones);
+  const impactZone = deriveImpactZone({ text: sourceEstimateText });
+
+  if (isSideImpactZone(impactZone) && impactZone.confidence !== "low") {
+    const sideZones = normalizedZones.filter((zone) => zone !== "front-end");
+    const sideScope = sideZones.length > 0 ? joinHumanList(sideZones) : "side structure";
+    return `${sideScope} around the ${formatImpactZone(impactZone)} repair area`;
+  }
 
   const leftRearSignal =
     /(left rear|rear left|left quarter|quarter|left side)/i.test(panelText) ||
@@ -2738,6 +2753,10 @@ function inferSupplementCategory(value: string): string {
     lower.includes("setup") ||
     lower.includes("realignment") ||
     lower.includes("structural") ||
+    lower.includes("aperture") ||
+    lower.includes("roof rail") ||
+    lower.includes("door shell") ||
+    lower.includes("quarter") ||
     lower.includes("section") ||
     lower.includes("measure") ||
     lower.includes("support area") ||
@@ -2789,6 +2808,16 @@ function deriveSupplementTitle(value: string): string {
     return "Front Structure Scope / Tie Bar / Upper Rail Reconciliation";
   }
   if (
+    lower.includes("aperture") ||
+    lower.includes("door shell") ||
+    lower.includes("roof rail") ||
+    lower.includes("side structure") ||
+    lower.includes("side-impact sensor") ||
+    lower.includes("side impact sensor")
+  ) {
+    return "Side Structure / Aperture / Door-Shell Fit Verification";
+  }
+  if (
     lower.includes("sidemember") ||
     lower.includes("support area") ||
     lower.includes("mounting geometry")
@@ -2830,6 +2859,15 @@ function deriveSupplementTitle(value: string): string {
     (lower.includes("lamp") && lower.includes("aim"))
   ) {
     return "Headlamp aiming check";
+  }
+  if (lower.includes("alignment documentation follow-up")) {
+    return "Final Alignment Printout / Completion Support";
+  }
+  if (lower.includes("scan report documentation follow-up")) {
+    return "Final Scan Report Documentation";
+  }
+  if (lower.includes("calibration / aiming documentation follow-up")) {
+    return "Calibration / Aiming Completion Documentation";
   }
   if (lower.includes("fit-sensitive") || lower.includes("fit sensitive")) {
     return "OEM Fit-Sensitive Part Posture";
@@ -3125,7 +3163,7 @@ function cleanFormalExportText(value?: string | null): string {
     .replace(/\bProc\s*-\s*Structural cues\b/gi, "")
     .replace(/\bMissing procedures?\b/gi, "")
     .replace(/\bRetrieved Evidence\s*\d+\b/gi, "")
-    .replace(/\bDrive knowledge base\b/gi, "")
+    .replace(/\b(?:Drive|Linked external-document) knowledge base\b/gi, "")
     .replace(/\bFile review\b/gi, "")
     .replace(/\bRepair review\b/gi, "")
     .replace(/\bOEM procedure support\b/gi, "")
@@ -3427,6 +3465,22 @@ function curateExportSupplementItems(
   if (items.length <= 1) return items;
 
   const lowerSource = sourceText.toLowerCase();
+  const operationSnapshot = analyzeEstimateOperations(sourceText);
+  const impactZone = deriveImpactZone({ text: sourceText });
+  const hasFrontSupportOperations = hasFrontSupportZoneEvidence(sourceText);
+  const hasRadiatorSupport = /\b(?:radiator support|core support|lock support)\b/.test(lowerSource);
+  const hasTieBar = /\btie bar\b/.test(lowerSource);
+  const hasApron = /\bapron\b/.test(lowerSource);
+  const hasUpperRail = /\bupper rail\b/.test(lowerSource);
+  const hasLowerRail = /\blower rail\b/.test(lowerSource);
+  const allowHiddenMountingGeometry =
+    impactZone.primary === "front" ||
+    hasFrontSupportOperations ||
+    hasRadiatorSupport ||
+    hasTieBar ||
+    hasApron ||
+    hasUpperRail ||
+    hasLowerRail;
   const frontSpecificExists = items.some(
     (item) =>
       inferExportSupplementFamily(item.title) === "front_structure_scope" &&
@@ -3438,6 +3492,15 @@ function curateExportSupplementItems(
       !isGenericExportFallback(item.title)
   );
   const filtered = items.filter((item) => {
+    if (
+      item.title === "Headlamp aiming check" &&
+      (operationSnapshot.headlamp_aim || operationSnapshot.fog_lamp_aim)
+    ) {
+      return false;
+    }
+    if (item.title === "Four-Wheel Alignment" && operationSnapshot.alignment) {
+      return false;
+    }
     if (item.title === "Four-Wheel Alignment" && !hasExportAlignmentEvidence(lowerSource)) {
       return false;
     }
@@ -3468,9 +3531,7 @@ function curateExportSupplementItems(
     }
     if (
       item.title === "Hidden Mounting Geometry / Teardown Growth" &&
-      (!hasExportHiddenMountingEvidence(lowerSource, item) ||
-        (isLightFrontBumperDrivenExportFile(lowerSource, item) &&
-          !hasExportHiddenMountingEvidence(lowerSource, item)))
+      (!allowHiddenMountingGeometry || !hasExportHiddenMountingEvidence(lowerSource, item))
     ) {
       return false;
     }
@@ -3530,6 +3591,15 @@ function inferExportSupplementFamily(title: string): string {
     return "rear_structure_scope";
   }
   if (lower.includes("test fit") || lower.includes("fit-sensitive")) return "fit_verification";
+  if (
+    lower.includes("aperture") ||
+    lower.includes("door shell") ||
+    lower.includes("quarter") ||
+    lower.includes("roof rail") ||
+    lower.includes("side structure")
+  ) {
+    return "side_structure_scope";
+  }
   if (lower.includes("alignment")) return "alignment";
   if (lower.includes("hardware") || lower.includes("clip") || lower.includes("fastener")) return "hardware";
   if (lower.includes("measure") || lower.includes("setup") || lower.includes("realignment")) {
@@ -3746,6 +3816,25 @@ function scoreExportSupplementItemInContext(item: ExportSupplementItem, sourceTe
 
   if (item.title === "Hidden Mounting Geometry / Teardown Growth") {
     if (isLightFrontBumperDrivenExportFile(sourceText, item)) score -= 180;
+    const impactZone = deriveImpactZone({ text: sourceText });
+    const lowerSource = sourceText.toLowerCase();
+    const hasFrontSupportOperations = hasFrontSupportZoneEvidence(sourceText);
+    const hasRadiatorSupport = /\b(?:radiator support|core support|lock support)\b/.test(lowerSource);
+    const hasTieBar = /\btie bar\b/.test(lowerSource);
+    const hasApron = /\bapron\b/.test(lowerSource);
+    const hasUpperRail = /\bupper rail\b/.test(lowerSource);
+    const hasLowerRail = /\blower rail\b/.test(lowerSource);
+    const allowHiddenMountingGeometry =
+      impactZone.primary === "front" ||
+      hasFrontSupportOperations ||
+      hasRadiatorSupport ||
+      hasTieBar ||
+      hasApron ||
+      hasUpperRail ||
+      hasLowerRail;
+    if (!allowHiddenMountingGeometry) {
+      score -= 240;
+    }
     if (hasExportHiddenMountingEvidence(sourceText, item)) score += 30;
   }
 
@@ -4065,6 +4154,18 @@ function synthesizeSupplementItemsFromNarrative(params: {
   }
 
   if (
+    /\b(?:aperture|door shell|quarter|roof rail|side structure|side[-\s]?impact sensor)\b/.test(text) &&
+    /(not clearly|underwritten|not documented|unclear|verification|fit|gap|seal|closure)/.test(text)
+  ) {
+    add(
+      "Side Structure / Aperture / Door-Shell Fit Verification",
+      "The narrative supports side-structure, aperture, door-shell, quarter, roof-rail, or closure-fit verification tied to the documented side repair path.",
+      "high",
+      "missing_verification"
+    );
+  }
+
+  if (
     (text.includes("corrosion protection") || text.includes("weld protection") || text.includes("masking")) &&
     /(not clearly|underwritten|not documented|unclear|missing)/.test(text)
   ) {
@@ -4095,13 +4196,23 @@ function synthesizeSupplementItemsFromNarrative(params: {
   }
 
   if (text.includes("teardown") || text.includes("mounting geometry") || text.includes("hidden damage")) {
+    const impactZone = deriveImpactZone({ text });
     if (hasNarrativeSupportScopeEvidence(text)) {
-      add(
-        "Hidden Mounting Geometry / Teardown Growth",
-        "Teardown growth or hidden mounting-geometry burden appears supportable here, but that broader scope is not fully reflected in the current estimate.",
-        "high",
-        "disputed_repair_path"
-      );
+      if (isSideImpactZone(impactZone) && impactZone.confidence !== "low" && !hasFrontSupportZoneEvidence(text)) {
+        add(
+          "Side Structure / Aperture / Door-Shell Fit Verification",
+          "Teardown or documentation follow-up should stay tied to the documented side-impact repair path rather than a generic front mounting-geometry assumption.",
+          "high",
+          "missing_verification"
+        );
+      } else {
+        add(
+          "Hidden Mounting Geometry / Teardown Growth",
+          "Teardown growth or hidden mounting-geometry burden appears supportable here, but that broader scope is not fully reflected in the current estimate.",
+          "high",
+          "disputed_repair_path"
+        );
+      }
     }
   }
 
@@ -4448,6 +4559,11 @@ function isSpecificSupplementItem(value?: string): boolean {
     lower.includes("fit-sensitive") ||
     lower.includes("fit sensitive") ||
     lower.includes("fender") ||
+    lower.includes("aperture") ||
+    lower.includes("door shell") ||
+    lower.includes("roof rail") ||
+    lower.includes("quarter") ||
+    lower.includes("side structure") ||
     lower.includes("bumper") ||
     lower.includes("lamp") ||
     lower.includes("replace vs repair") ||

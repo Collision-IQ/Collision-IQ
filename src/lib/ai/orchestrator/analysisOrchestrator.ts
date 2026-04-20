@@ -782,7 +782,7 @@ function buildEvidenceRecords(
     id: `retrieved-${index + 1}`,
     title: toHumanReadableRetrievedSource(item.file_id) || `Retrieved Evidence ${index + 1}`,
     snippet: item.content.slice(0, 280),
-    source: toHumanReadableRetrievedSource(item.file_id) || "Drive knowledge base",
+    source: toHumanReadableRetrievedSource(item.file_id) || "Linked external-document knowledge base",
     authority: "internal" as const,
   }));
 

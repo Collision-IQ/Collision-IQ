@@ -19,6 +19,12 @@ import {
   type VehicleApplicabilityContext,
 } from "../vehicleApplicability";
 import { buildRepairStory } from "./buildRepairStory";
+import { analyzeEstimateOperations } from "../estimateOperationEquivalence";
+import {
+  deriveImpactZone,
+  hasFrontSupportZoneEvidence,
+  isSideImpactZone,
+} from "../impactZone";
 
 export type SupplementLine = {
   title: string;
@@ -137,6 +143,7 @@ export function validateSupplements(
     .join("\n")
     .toLowerCase();
   const representedMatches = findProcedureMatches(representedText);
+  const representedOperations = analyzeEstimateOperations(representedText);
   const requiredProcedureMatches = findProcedureMatches(
     [...(context?.requiredProcedures ?? []), ...(context?.missingProcedures ?? [])]
       .filter(Boolean)
@@ -208,6 +215,18 @@ export function validateSupplements(
       title,
       representedText
     );
+
+    if (
+      title.includes("headlamp") &&
+      title.includes("aim") &&
+      (representedOperations.headlamp_aim || representedOperations.fog_lamp_aim)
+    ) {
+      return false;
+    }
+
+    if (title.includes("alignment") && representedOperations.alignment) {
+      return false;
+    }
 
     if (
       canonicalKey &&
@@ -283,6 +302,10 @@ export function inferCategory(title: string): SupplementLine["category"] {
     lower.includes("measure") ||
     lower.includes("realignment") ||
     lower.includes("setup") ||
+    lower.includes("aperture") ||
+    lower.includes("door shell") ||
+    lower.includes("roof rail") ||
+    lower.includes("side structure") ||
     lower.includes("tie bar") ||
     lower.includes("lock support") ||
     lower.includes("core support") ||
@@ -366,6 +389,17 @@ function normalizeSupplementTitle(title: string): string {
   }
 
   if (
+    lower.includes("aperture") ||
+    lower.includes("door shell") ||
+    lower.includes("roof rail") ||
+    lower.includes("side structure") ||
+    lower.includes("side-impact sensor") ||
+    lower.includes("side impact sensor")
+  ) {
+    return "Side Structure / Aperture / Door-Shell Fit Verification";
+  }
+
+  if (
     lower.includes("adas") ||
     lower.includes("calibration") ||
     lower.includes("camera") ||
@@ -396,6 +430,21 @@ function curateSupplementCandidates(
   }
 
   const evidenceText = `${text}\n${storyText}`.toLowerCase();
+  const impactZone = deriveImpactZone({ text: evidenceText });
+  const hasFrontSupportOperations = hasFrontSupportZoneEvidence(evidenceText);
+  const hasRadiatorSupport = /\b(?:radiator support|core support|lock support)\b/.test(evidenceText);
+  const hasTieBar = /\btie bar\b/.test(evidenceText);
+  const hasApron = /\bapron\b/.test(evidenceText);
+  const hasUpperRail = /\bupper rail\b/.test(evidenceText);
+  const hasLowerRail = /\blower rail\b/.test(evidenceText);
+  const allowHiddenMountingGeometry =
+    impactZone.primary === "front" ||
+    hasFrontSupportOperations ||
+    hasRadiatorSupport ||
+    hasTieBar ||
+    hasApron ||
+    hasUpperRail ||
+    hasLowerRail;
   const resolvedVehicleApplicability =
     vehicleApplicability ??
     resolveVehicleApplicabilityContext(extractVehicleIdentityFromSupplementText(text));
@@ -461,8 +510,7 @@ function curateSupplementCandidates(
 
       if (
         title === "Hidden Mounting Geometry / Teardown Growth" &&
-        (!hasHiddenMountingEvidence(evidenceText) ||
-          (isLightFrontBumperDrivenFile(evidenceText) && !hasHiddenMountingEvidence(evidenceText)))
+        (!allowHiddenMountingGeometry || !hasHiddenMountingEvidence(evidenceText))
       ) {
         return false;
       }
@@ -570,6 +618,14 @@ function inferSupplementConceptFamily(title: string): string {
     return "rear_structure_scope";
   }
   if (lower.includes("test fit") || lower.includes("fit-sensitive")) return "fit_verification";
+  if (
+    lower.includes("aperture") ||
+    lower.includes("door shell") ||
+    lower.includes("roof rail") ||
+    lower.includes("side structure")
+  ) {
+    return "side_structure_scope";
+  }
   if (lower.includes("alignment")) return "alignment";
   if (lower.includes("hardware") || lower.includes("clip") || lower.includes("fastener")) return "hardware";
   if (lower.includes("measure") || lower.includes("setup") || lower.includes("realignment")) {
@@ -605,6 +661,7 @@ function scoreCuratedSupplementCandidate(item: SupplementCandidate, evidenceText
   if (item.supportState === "missing") score += 70;
   if (item.supportState === "partial") score += 40;
   if (lower.includes("front structure") || lower.includes("tie bar") || lower.includes("lock support")) score += 80;
+  if (lower.includes("aperture") || lower.includes("door shell") || lower.includes("roof rail") || lower.includes("side structure")) score += 85;
   if (lower.includes("rear body") || lower.includes("deck opening") || lower.includes("bumper reinforcement")) score += 80;
   if (lower.includes("test fit") || lower.includes("fit-sensitive")) score += 20;
   if (lower.includes("sensor") || lower.includes("radar") || lower.includes("calibration")) score += 45;
@@ -617,6 +674,26 @@ function scoreCuratedSupplementCandidate(item: SupplementCandidate, evidenceText
 
   if (item.title === "Hidden Mounting Geometry / Teardown Growth" && isLightFrontBumperDrivenFile(evidenceText)) {
     score -= 160;
+  }
+  if (item.title === "Hidden Mounting Geometry / Teardown Growth") {
+    const impactZone = deriveImpactZone({ text: evidenceText });
+    const hasFrontSupportOperations = hasFrontSupportZoneEvidence(evidenceText);
+    const hasRadiatorSupport = /\b(?:radiator support|core support|lock support)\b/.test(evidenceText);
+    const hasTieBar = /\btie bar\b/.test(evidenceText);
+    const hasApron = /\bapron\b/.test(evidenceText);
+    const hasUpperRail = /\bupper rail\b/.test(evidenceText);
+    const hasLowerRail = /\blower rail\b/.test(evidenceText);
+    const allowHiddenMountingGeometry =
+      impactZone.primary === "front" ||
+      hasFrontSupportOperations ||
+      hasRadiatorSupport ||
+      hasTieBar ||
+      hasApron ||
+      hasUpperRail ||
+      hasLowerRail;
+    if (!allowHiddenMountingGeometry) {
+      score -= 220;
+    }
   }
 
   if (item.title === "ADAS / Calibration Procedure Support") {

@@ -12,7 +12,7 @@ export type LinkedEvidence = {
   mimeType?: string | null;
   sourceType?: "google_doc" | "google_drive" | "pdf" | "html" | "unknown";
   text?: string | null;
-  status?: "ok" | "blocked" | "failed";
+  status?: "ok" | "blocked" | "failed" | "skipped";
   notes?: string;
 };
 
@@ -269,7 +269,7 @@ function buildEvidenceCorpus(input: DeterminationInput) {
     parts.push(
       [
         `LINKED DOCUMENT: ${doc.title || "Untitled"}`,
-        `URL: ${doc.url || "Unknown"}`,
+        "SOURCE: linked supporting document identified in file review",
         `TYPE: ${doc.sourceType || "unknown"}`,
         doc.text || "",
       ].join("\n")
@@ -295,20 +295,25 @@ function countAny(text: string, signals: string[]) {
 function getLinkedEvidenceSummary(linkedEvidence: LinkedEvidence[]) {
   const accessible = linkedEvidence.filter((doc) => doc.status === "ok");
   const blocked = linkedEvidence.filter((doc) => doc.status === "blocked");
+  const unavailable = linkedEvidence.filter((doc) => doc.status === "failed" || doc.status === "skipped");
 
   const evidence: string[] = [];
 
   for (const doc of accessible.slice(0, 5)) {
-    evidence.push(doc.title || doc.url || "Linked document");
+    evidence.push(doc.title || "Linked supporting document");
   }
 
   for (const doc of blocked.slice(0, 3)) {
-    evidence.push(`Blocked link: ${doc.title || doc.url || "Unknown link"}`);
+    evidence.push(`Access-limited supporting document: ${doc.title || "Referenced document"}`);
+  }
+
+  for (const doc of unavailable.slice(0, 3)) {
+    evidence.push(`Preview unavailable: ${doc.title || "Referenced supporting document"}`);
   }
 
   return {
     accessible,
-    blocked,
+    blocked: [...blocked, ...unavailable],
     evidence,
   };
 }
@@ -492,7 +497,7 @@ function buildLinkedEvidenceSection(linkedEvidence: LinkedEvidence[]): Determina
 
   if (accessible.length > 0) {
     return {
-      title: "Linked OEM / ADAS Evidence",
+      title: "Linked OEM / Procedure Evidence",
       status: "supported",
       summary:
         "Linked documents were successfully retrieved and can be used as substantive case evidence, including OEM procedures or ADAS-related reports where applicable.",
@@ -503,17 +508,17 @@ function buildLinkedEvidenceSection(linkedEvidence: LinkedEvidence[]): Determina
 
   if (blocked.length > 0) {
     return {
-      title: "Linked OEM / ADAS Evidence",
+      title: "Linked OEM / Procedure Evidence",
       status: "provisional",
       summary:
-        "Case links were detected, but one or more linked documents were blocked or not accessible to the system. Those links should not be treated as reviewed evidence until retrievable.",
+        "Case links were detected, but one or more linked documents were access-limited, unavailable, or skipped. Those links should not be treated as reviewed evidence until retrievable.",
       evidence,
       confidence: 52,
     };
   }
 
   return {
-    title: "Linked OEM / ADAS Evidence",
+    title: "Linked OEM / Procedure Evidence",
     status: "unsupported",
     summary:
       "No retrievable linked OEM or ADAS evidence was preserved in the current case data.",

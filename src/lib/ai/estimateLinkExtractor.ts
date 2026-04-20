@@ -120,8 +120,7 @@ function classifyEstimateLink(urlValue: string): EstimateLinkClassification {
     const trustedDocHost =
       lowerHost.includes("docs.google.com") ||
       lowerHost.includes("drive.google.com") ||
-      lowerHost.includes("dropbox.com") ||
-      lowerHost.includes("egnyte.com");
+      lowerHost.includes("dropbox.com");
 
     if ((hasOemHint && (hasProcedureHint || directPdf)) || (directPdf && hasProcedureHint)) {
       return "oem_procedure";

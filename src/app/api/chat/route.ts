@@ -11,6 +11,7 @@ import {
 } from "@/lib/auth/require-current-user";
 import { getCaseById } from "@/lib/cases/getCaseById";
 import type { StoredCaseData } from "@/lib/cases/getCaseById";
+import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 
 const MAX_UPLOAD_BATCH_FILES = 6;
 const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at once for now.";
@@ -19,6 +20,11 @@ const TRANSIENT_CHAT_ERROR_MESSAGE =
 const OPENAI_RETRY_DELAY_MS = 400;
 const LEGAL_INFO_DISCLAIMER =
   "Informational support only — not legal advice. I'm not a lawyer, and any legal position should be reviewed by qualified counsel.";
+
+function limitText(text: string, max = 12000) {
+  if (!text) return "";
+  return text.length > max ? `${text.slice(0, max)}\n...[truncated]` : text;
+}
 
 type UploadedDocument = {
   id?: string;
@@ -210,8 +216,36 @@ ${evidencePolicy}
 `.trim();
 }
 
+function buildActiveCaseSystemGuard(params: {
+  hasStoredEvidence: boolean;
+  hasVehicleContext: boolean;
+  hasEstimateText: boolean;
+  hasFactualCore: boolean;
+}) {
+  if (!params.hasStoredEvidence) return "";
+
+  return `
+ACTIVE CASE CONTINUITY GUARD:
+- This is an active case continuation. Stored case evidence is already loaded into the prompt when present.
+- If stored case evidence exists, never fall back to generic onboarding just because this turn has no fresh attachment.
+- If vehicle identity appears in VEHICLE, EXTRACTED FACTS, STABLE FACTUAL CORE, stored estimate text, report attachments, or uploaded files, never say you do not know the vehicle.
+- If uploaded files, stored estimate text, stored report attachments, factual core, extracted facts, or vehicle identity exist, never ask for VIN or for the user to upload the estimate again.
+- Only say vehicle identity is not established if it is genuinely absent from every stored case evidence source.
+- Treat uploaded attachments and stored active-case evidence as primary. Treat linked external documents as supplemental only.
+- Never reveal raw external document URLs.
+- When supporting OEM/procedure/external documents are present, describe their relevance without linking.
+- If asked for more detail, summarize the findings from those documents as reflected in the case evidence.
+- Do not tell the user to open or visit an external document link.
+
+Loaded evidence flags:
+- hasVehicleContext: ${params.hasVehicleContext ? "yes" : "no"}
+- hasEstimateText: ${params.hasEstimateText ? "yes" : "no"}
+- hasFactualCore: ${params.hasFactualCore ? "yes" : "no"}
+`.trim();
+}
+
 const REFINEMENT_INSTRUCTIONS = `
-You are refining an existing collision-repair answer after targeted Google Drive retrieval.
+You are refining an existing collision-repair answer after targeted linked external-document retrieval.
 
 Rules:
 - keep the original estimator-style conclusion as the base
@@ -220,7 +254,7 @@ Rules:
 - if both OEM and PA law support are present, keep them logically separate in the final answer
 - do not dump or paraphrase whole documents
 - use the retrieved support as compact supporting context, not as replacement reasoning
-- estimate-linked OEM or ADAS references for the resolved vehicle are higher priority than broad Drive retrieval
+- estimate-linked OEM or ADAS references for the resolved vehicle are higher priority than broad external-document retrieval
 - stay concise, natural, and direct
 - if the retrieved support is weak or only partially applicable, say that clearly
 - do not let retrieved support for a different make, model, or manufacturer override the submitted vehicle context
@@ -445,6 +479,11 @@ function buildActiveCaseChatContext(params: {
 }): string {
   const factualCore = params.activeCase.factualCore;
   const delta = params.activeCase.reassessmentDelta;
+  const hasStoredEvidence =
+    params.activeCase.files.length > 0 ||
+    params.activeCase.estimateText.trim().length > 0 ||
+    params.activeCase.evidenceRegistry.length > 0 ||
+    Boolean(factualCore);
   const newUploadSummary = params.documents.length
     ? params.documents
         .map((document) => {
@@ -466,6 +505,44 @@ function buildActiveCaseChatContext(params: {
   const registryContext = factualCore?.evidenceRegistrySummary.length
     ? factualCore.evidenceRegistrySummary.slice(0, 12).map((item) => `- ${item}`).join("\n")
     : "- No stored evidence registry summary.";
+  const reportEvidenceRegistryContext = params.activeCase.evidenceRegistry.length
+    ? params.activeCase.evidenceRegistry
+        .slice(0, 12)
+        .map((item) =>
+          [
+            `- ${item.id}: ${item.label}`,
+            `  Type: ${item.sourceType}`,
+            `  Status: ${item.evidenceStatus}`,
+            `  Ingestion: ${item.ingestionState}`,
+            item.extractedSummary ? `  Summary: ${item.extractedSummary}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n")
+        )
+        .join("\n")
+    : "- No report evidence registry entries.";
+  const storedAttachmentsContext = params.activeCase.files.length
+    ? params.activeCase.files
+        .slice(0, 5)
+        .map((file, index) =>
+          [
+            `ATTACHMENT ${index + 1}: ${file.name} (${file.type || "unknown"})`,
+            limitText(redactExternalDocumentUrls(file.text || file.summary || ""), 1800),
+          ]
+            .filter(Boolean)
+            .join("\n")
+        )
+        .join("\n\n")
+    : "No stored attachments.";
+  const supportGapsContext = params.activeCase.supportGaps.length
+    ? params.activeCase.supportGaps.slice(0, 12).map((gap) => `- ${gap}`).join("\n")
+    : "- None";
+  const linkedEvidenceContext = params.activeCase.linkedEvidence.length
+    ? params.activeCase.linkedEvidence
+        .slice(0, 8)
+        .map((doc) => `- ${doc.title || "Linked supporting document"} | ${doc.status} | ${doc.sourceType}`)
+        .join("\n")
+    : "- None";
   const deltaContext = delta
     ? [
         `Summary: ${delta.summary}`,
@@ -480,11 +557,18 @@ function buildActiveCaseChatContext(params: {
   return `
 ACTIVE CASE CONTINUATION
 This upload belongs to the existing active case ${params.activeCase.id}. It is not a new review.
+Stored case evidence exists: ${hasStoredEvidence ? "yes" : "no"}.
 
 Stable factual core:
 - Vehicle: ${factualCore?.vehicleSummary ?? "Vehicle not fully established"}
 - Current case summary: ${factualCore?.currentCaseSummary ?? params.activeCase.transcriptSummary ?? "No stored case summary"}
 - Current determination: ${factualCore?.currentDetermination ?? params.activeCase.determination ?? "Provisional / not established"}
+
+Structured vehicle identity:
+${JSON.stringify(params.activeCase.vehicle, null, 2)}
+
+Extracted facts:
+${JSON.stringify(params.activeCase.extractedFacts, null, 2)}
 
 Stored issue assessments:
 ${issueContext}
@@ -492,8 +576,23 @@ ${issueContext}
 Stored evidence registry:
 ${registryContext}
 
+Report evidence registry:
+${reportEvidenceRegistryContext}
+
+Support gaps:
+${supportGapsContext}
+
+Linked evidence:
+${linkedEvidenceContext}
+
 Latest stored reassessment delta:
 ${deltaContext}
+
+Stored estimate excerpt:
+${limitText(redactExternalDocumentUrls(params.activeCase.estimateText), 3500) || "No stored estimate text."}
+
+Stored report attachments:
+${storedAttachmentsContext}
 
 New evidence uploaded in this turn:
 ${newUploadSummary}
@@ -503,6 +602,12 @@ ${params.conversationContext || "No recent turns provided."}
 
 Continuation rules:
 - Answer from the merged active case state, not only the newest upload.
+- Treat stored active-case evidence as the current source of truth for this conversation.
+- If uploaded files, stored attachments, estimate text, factual core, extracted facts, or evidence registry entries exist, do not ask the user to upload the estimate or provide the VIN again.
+- If vehicle identity is present in Structured vehicle identity, Extracted facts, Stable factual core, Stored estimate excerpt, or Stored report attachments, answer from that identity directly.
+- Only say the vehicle is not established if it is genuinely absent from all stored active-case evidence above.
+- Never reveal raw external document URLs, and never tell the user to open or visit a linked external document.
+- If linked supporting documents are present, summarize what they support without linking.
 - Treat the new upload as additional evidence to be merged into this case.
 - Lead with what the new material appears to add or clarify, then state what remains stable/open.
 - Do not emit a fresh "start analysis" or first-review style response.
@@ -620,7 +725,7 @@ export async function POST(req: Request) {
     }
 
     const deps = await loadChatRouteDeps();
-    const systemInstructions = buildSystemInstructions(
+    const baseSystemInstructions = buildSystemInstructions(
       deps.ADAS_POLICY,
       deps.EVIDENCE_POLICY
     );
@@ -682,28 +787,129 @@ export async function POST(req: Request) {
           ownerUserId: user.id,
         })
       : null;
+    const openActiveCase = activeCase && !activeCase.isClosed ? activeCase : null;
+    const activeCaseAttachmentCount = openActiveCase?.files.length ?? 0;
+    const activeCaseHasEstimateText = Boolean(
+      openActiveCase &&
+        (openActiveCase.estimateText.trim().length > 0 ||
+          openActiveCase.files.some((file) => file.text?.trim()))
+    );
+    const activeCaseHasFactualCore = Boolean(openActiveCase?.factualCore);
+    const activeCaseHasStoredEvidence = Boolean(
+      openActiveCase &&
+        (activeCaseAttachmentCount > 0 ||
+          activeCaseHasEstimateText ||
+          activeCaseHasFactualCore ||
+          openActiveCase.evidenceRegistry.length > 0 ||
+          Object.keys(openActiveCase.extractedFacts ?? {}).length > 0)
+    );
+    const activeCaseHasVehicleContext = Boolean(
+      openActiveCase &&
+        (openActiveCase.vehicle.vin ||
+          openActiveCase.vehicle.year ||
+          openActiveCase.vehicle.make ||
+          openActiveCase.vehicle.model ||
+          openActiveCase.extractedFacts.vehicleLabel ||
+          openActiveCase.factualCore?.vehicleSummary)
+    );
+
+    if (body.activeCaseId && openActiveCase) {
+      console.info("[chat] hydrated active case", {
+        activeCaseId: body.activeCaseId,
+        hasActiveCase: true,
+        latestReportId: openActiveCase.id,
+        attachmentCount: activeCaseAttachmentCount,
+        hasVehicleContext: activeCaseHasVehicleContext,
+        hasEstimateText: activeCaseHasEstimateText,
+        hasFactualCore: activeCaseHasFactualCore,
+      });
+    } else if (body.activeCaseId) {
+      console.info("[chat] no active case found", {
+        activeCaseId: body.activeCaseId,
+        hasActiveCase: false,
+        latestReportId: null,
+        attachmentCount: 0,
+        hasVehicleContext: false,
+        hasEstimateText: false,
+        hasFactualCore: false,
+        activeCaseClosed: activeCase?.isClosed ?? null,
+      });
+    }
+
     const activeCaseContext =
-      activeCase && !activeCase.isClosed
+      openActiveCase
         ? buildActiveCaseChatContext({
-            activeCase,
+            activeCase: openActiveCase,
             documents,
             conversationContext,
           })
         : undefined;
+
+    if (activeCaseContext) {
+      console.info("[chat] evidence context attached", {
+        activeCaseId: openActiveCase?.id ?? null,
+        latestReportId: openActiveCase?.id ?? null,
+        attachmentCount: activeCaseAttachmentCount + documents.length,
+        storedAttachmentCount: activeCaseAttachmentCount,
+        turnAttachmentCount: documents.length,
+        hasVehicleContext: activeCaseHasVehicleContext,
+        hasEstimateText: activeCaseHasEstimateText,
+        hasFactualCore: activeCaseHasFactualCore,
+      });
+    }
+
+    if (openActiveCase && documents.length === 0 && activeCaseHasStoredEvidence) {
+      console.info("[chat] fallback prevented because stored evidence exists", {
+        activeCaseId: openActiveCase.id,
+        hasActiveCase: true,
+        attachmentCount: activeCaseAttachmentCount,
+        hasVehicleContext: activeCaseHasVehicleContext,
+        hasEstimateText: activeCaseHasEstimateText,
+        hasFactualCore: activeCaseHasFactualCore,
+      });
+    }
+
+    const systemInstructions = [
+      baseSystemInstructions,
+      buildActiveCaseSystemGuard({
+        hasStoredEvidence: activeCaseHasStoredEvidence,
+        hasVehicleContext: activeCaseHasVehicleContext,
+        hasEstimateText: activeCaseHasEstimateText,
+        hasFactualCore: activeCaseHasFactualCore,
+      }),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
     const input = buildOpenAIInput({
       userMessage,
       conversationContext,
       documents,
       activeCaseContext,
     });
-    const estimateText = documents
+    const turnEstimateText = documents
       .map((document) => document.text?.trim())
       .filter(Boolean)
       .join("\n\n");
+    const activeCaseEstimateText = [
+      openActiveCase?.estimateText ?? "",
+      ...(openActiveCase?.files ?? []).map((file) => file.text),
+    ]
+      .map((text) => text?.trim())
+      .filter(Boolean)
+      .join("\n\n");
+    const estimateText = turnEstimateText || activeCaseEstimateText;
     const resolvedVehicle = inferDriveVehicleContext({
       estimateText,
       userQuery: userMessage,
     });
+    if (openActiveCase) {
+      resolvedVehicle.year ??= openActiveCase.vehicle.year ?? undefined;
+      resolvedVehicle.make ??= openActiveCase.vehicle.make ?? undefined;
+      resolvedVehicle.model ??= openActiveCase.vehicle.model ?? undefined;
+      resolvedVehicle.trim ??= openActiveCase.vehicle.trim ?? undefined;
+      resolvedVehicle.vin ??= openActiveCase.vehicle.vin ?? undefined;
+    }
     const resolvedVehicleLabel = [
       resolvedVehicle.year ? String(resolvedVehicle.year) : "",
       resolvedVehicle.make ?? "",
@@ -722,7 +928,14 @@ export async function POST(req: Request) {
       vin: resolvedVehicle.vin ?? null,
       confidence: resolvedVehicle.confidence,
     });
-    const estimateLinks = extractEstimateLinksFromDocuments(documents);
+    const activeCaseDocuments: UploadedDocument[] = (openActiveCase?.files ?? []).map((file) => ({
+      id: file.id,
+      filename: file.name,
+      mime: file.type,
+      text: file.text,
+    }));
+    const documentsForEvidence = documents.length > 0 ? documents : activeCaseDocuments;
+    const estimateLinks = extractEstimateLinksFromDocuments(documentsForEvidence);
     const fetchableEstimateLinks = estimateLinks.filter(isFetchableEstimateLink);
     const rejectedEstimateLinks = estimateLinks.filter((link) => !isFetchableEstimateLink(link));
     console.info("[chat-linked-docs] estimate links scanned", {
@@ -792,7 +1005,7 @@ export async function POST(req: Request) {
       deps,
       taskType: detectChatTaskType({
         userQuery: userMessage,
-        hasDocuments: documents.length > 0,
+        hasDocuments: documents.length > 0 || Boolean(openActiveCase),
       }),
       userMessage,
       estimateText,
@@ -859,9 +1072,11 @@ export async function POST(req: Request) {
 
     const needsLegalDisclaimer = isLegalAdjacentNegotiationRequest(userMessage);
 
-    const finalText = needsLegalDisclaimer
-      ? `${LEGAL_INFO_DISCLAIMER}\n\n${outputText}`
-      : outputText;
+    const finalText = redactExternalDocumentUrls(
+      needsLegalDisclaimer
+        ? `${LEGAL_INFO_DISCLAIMER}\n\n${outputText}`
+        : outputText
+    );
 
     return new Response(cleanDisplayText(finalText), {
       headers: {
@@ -985,7 +1200,7 @@ async function refineAnswerWithDriveSupport(params: {
     params.linkedProcedureContext
       ? `Estimate-linked OEM/ADAS references:\n${params.linkedProcedureContext}`
       : "",
-    params.retrievalContext ? `Retrieved Drive support:\n${params.retrievalContext}` : "",
+    params.retrievalContext ? `Retrieved linked external-document support:\n${params.retrievalContext}` : "",
   ]
     .filter(Boolean)
     .join("\n\n");

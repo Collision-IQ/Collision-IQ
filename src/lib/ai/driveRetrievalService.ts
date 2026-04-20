@@ -1,6 +1,7 @@
 import { google, type drive_v3 } from "googleapis";
 import { prisma } from "@/lib/prisma";
 import { getDriveAuth } from "@/lib/drive/auth";
+import { isDriveEnabled } from "@/lib/drive/download";
 import { getConfiguredDriveRootFolders, listDriveFiles } from "@/lib/drive/list";
 import { embedText } from "@/lib/rag/embed";
 import { getChunkSourceColumn } from "@/lib/rag/chunkSourceColumn";
@@ -66,6 +67,10 @@ export async function retrieveDriveSupport(params: {
   maxResults?: number;
   maxExcerptChars?: number;
 }): Promise<DriveRetrievalResponse | null> {
+  if (!isDriveEnabled()) {
+    return null;
+  }
+
   const request = buildDriveRetrievalRequest({
     taskType: params.taskType,
     userQuery: params.userQuery,
@@ -80,10 +85,11 @@ export async function retrieveDriveSupport(params: {
     return null;
   }
 
-  const files = await getDriveIndex();
-  const laneResults = new Map<string, Map<string, DriveRetrievalResult>>();
+  try {
+    const files = await getDriveIndex();
+    const laneResults = new Map<string, Map<string, DriveRetrievalResult>>();
 
-  for (const lanePlan of request.lanePlans) {
+    for (const lanePlan of request.lanePlans) {
     if (lanePlan.lane === "pa_law_lane" && !isStateLawJurisdictionCurrentlyBacked(request)) {
       continue;
     }
@@ -151,28 +157,36 @@ export async function retrieveDriveSupport(params: {
     laneResults.set(lanePlan.lane, laneMap);
   }
 
-  const perLaneLimit = Math.max(1, Math.ceil(request.maxResults / Math.max(request.lanePlans.length, 1)));
-  const results = request.lanePlans
-    .flatMap((lanePlan) =>
-      [...(laneResults.get(lanePlan.lane)?.values() ?? [])]
-        .sort((left, right) => right.relevanceScore - left.relevanceScore)
-        .slice(0, perLaneLimit)
-    )
-    .sort((left, right) => right.relevanceScore - left.relevanceScore)
-    .slice(0, request.maxResults);
+    const perLaneLimit = Math.max(1, Math.ceil(request.maxResults / Math.max(request.lanePlans.length, 1)));
+    const results = request.lanePlans
+      .flatMap((lanePlan) =>
+        [...(laneResults.get(lanePlan.lane)?.values() ?? [])]
+          .sort((left, right) => right.relevanceScore - left.relevanceScore)
+          .slice(0, perLaneLimit)
+      )
+      .sort((left, right) => right.relevanceScore - left.relevanceScore)
+      .slice(0, request.maxResults);
 
-  return {
-    request,
-    results,
-    usage: {
-      topMatchesOnly: true,
-      excerptsOnly: true,
-      fullDocumentDumpAllowed: false,
-    },
-  };
+    return {
+      request,
+      results,
+      usage: {
+        topMatchesOnly: true,
+        excerptsOnly: true,
+        fullDocumentDumpAllowed: false,
+      },
+    };
+  } catch (error) {
+    console.error("[drive] external lookup failed (non-blocking)", { error });
+    return null;
+  }
 }
 
 async function getDriveIndex(): Promise<DriveIndexFile[]> {
+  if (!isDriveEnabled()) {
+    return [];
+  }
+
   if (driveIndexCache && Date.now() - driveIndexCache.loadedAt < DRIVE_INDEX_TTL_MS) {
     return driveIndexCache.files;
   }

@@ -3,6 +3,13 @@ import {
   type EstimateOperation as DetailedEstimateOperation,
 } from "../estimateParser";
 import { parseEstimate as parseStructuredEstimate } from "../extractors/estimateExtractor";
+import {
+  deriveImpactZone,
+  formatImpactZone,
+  hasFrontSupportZoneEvidence,
+  isSideImpactZone,
+  type ImpactZone,
+} from "../impactZone";
 
 type LaborMix = {
   replace: number;
@@ -21,6 +28,7 @@ type StoryOperations = {
 
 export type RepairStory = {
   impact: string;
+  impactZone: ImpactZone;
   zones: string[];
   panels: string[];
   replacedPanels: string[];
@@ -41,7 +49,8 @@ export function buildRepairStory(estimateText: string): RepairStory {
   const detailedEstimate = parseEstimatorView(estimateText);
   const structuredEstimate = parseStructuredEstimate(estimateText);
   const panels = collectPanels(detailedEstimate.operations);
-  const zones = collectZones(lower, panels);
+  const impactZone = deriveImpactZone({ text: estimateText });
+  const zones = collectZones(lower, panels, impactZone);
   const replacedPanels = collectPanelsByOperation(detailedEstimate.operations, ["Repl"]);
   const repairedPanels = collectPanelsByOperation(detailedEstimate.operations, ["Rpr"]);
   const operations = {
@@ -54,10 +63,11 @@ export function buildRepairStory(estimateText: string): RepairStory {
     lower.includes("structural") ||
     lower.includes("door shell") ||
     includesAny(lower, ["rail", "apron", "pillar", "core support", "reinforcement"]);
-  const impact = determineImpact(lower, zones);
+  const impact = determineImpact(lower, zones, impactZone);
 
   return {
     impact,
+    impactZone,
     zones,
     panels,
     replacedPanels,
@@ -155,7 +165,7 @@ function normalizePanelName(component: string): string {
   return component.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-function collectZones(lower: string, panels: string[]): string[] {
+function collectZones(lower: string, panels: string[], impactZone: ImpactZone): string[] {
   const zones = new Set<string>();
 
   if (
@@ -182,6 +192,10 @@ function collectZones(lower: string, panels: string[]): string[] {
     zones.add("front-end");
   }
 
+  if (isSideImpactZone(impactZone) && !hasFrontSupportZoneEvidence(lower)) {
+    zones.delete("front-end");
+  }
+
   if (
     includesAny(lower, ["door", "pillar", "rocker", "apron"]) ||
     panels.some((panel) => includesAny(panel, ["door", "pillar", "apron"]))
@@ -201,30 +215,25 @@ function collectZones(lower: string, panels: string[]): string[] {
   return [...zones];
 }
 
-function detectComplexityDrivers(
-  lower: string,
-  structural: boolean
-): string[] {
-  const drivers: string[] = [];
-
-  if (includesAny(lower, ["harness", "module", "wiring", "electrical"])) {
-    drivers.push("electrical handling");
+function determineImpact(lower: string, zones: string[], impactZone: ImpactZone): string {
+  if (impactZone.primary !== "unspecified" && impactZone.confidence !== "low") {
+    return formatImpactZone(impactZone);
   }
 
-  if (structural) {
-    drivers.push("structural support");
+  if (/\bpoint\s+of\s+impact\s*:?\s*0?1\s+right\s+front\b/i.test(lower)) {
+    return "right front";
   }
 
-  return [...new Set(drivers)];
-}
-
-function determineImpact(lower: string, zones: string[]): string {
-  if (includesAny(lower, ["left front", "lf", "left headlamp", "left fender", "driver side front"])) {
+  if (/\bpoint\s+of\s+impact\s*:?\s*0?1\s+left\s+front\b/i.test(lower)) {
     return "left front";
   }
 
-  if (includesAny(lower, ["right front", "rf", "right headlamp", "right fender", "passenger side front"])) {
+  if (/\b(right front|front right|rf|right headlamp|right fender|passenger side front)\b/i.test(lower)) {
     return "right front";
+  }
+
+  if (/\b(left front|front left|lf|left headlamp|left fender|driver side front)\b/i.test(lower)) {
+    return "left front";
   }
 
   if (

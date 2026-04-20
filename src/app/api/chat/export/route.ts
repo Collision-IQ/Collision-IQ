@@ -3,6 +3,7 @@ import {
   UnauthorizedError,
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
+import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import { UsageAccessError, recordUsage } from "@/lib/billing/usage";
 import { getUsageCount, incrementUsage } from "@/lib/usage";
@@ -36,7 +37,16 @@ async function requireExportAccess() {
   }
 
   if (!isPlatformAdmin && entitlements.exportCap !== null) {
-    const exportsUsed = await getUsageCount(user.id, "REPORT_EXPORT");
+    let exportsUsed = 0;
+
+    try {
+      exportsUsed = await getUsageCount(user.id, "REPORT_EXPORT");
+    } catch (error) {
+      console.error("[chat-export] usage read failed (non-blocking)", {
+        userId: user.id,
+        error,
+      });
+    }
 
     if (exportsUsed >= entitlements.exportCap) {
       return NextResponse.json(
@@ -277,7 +287,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const redacted = redactDownloadContent(exportText);
+    const redacted = redactExternalDocumentUrls(redactDownloadContent(exportText));
     const filenameDate = new Date().toISOString().slice(0, 10);
     const pdf = buildChatExportPdf(redacted);
 
@@ -291,13 +301,21 @@ export async function POST(req: Request) {
           },
         });
       } catch (error) {
-        console.error("USAGE_RECORD_WRITE_FAILED", error);
+        console.error("[chat-export] usage tracking failed (non-blocking)", {
+          phase: "recordUsage",
+          userId: access.userId,
+          error,
+        });
       }
 
       try {
         await incrementUsage(access.userId, "REPORT_EXPORT");
       } catch (error) {
-        console.error("USAGE_COUNTER_INCREMENT_FAILED", error);
+        console.error("[chat-export] usage tracking failed (non-blocking)", {
+          phase: "incrementUsage",
+          userId: access.userId,
+          error,
+        });
       }
     }
 

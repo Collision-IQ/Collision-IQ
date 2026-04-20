@@ -178,6 +178,7 @@ export type AnalysisIssue = {
   impact: string;
   missingOperation?: string;
   evidenceStatus?: IssueEvidenceStatus;
+  basisTier?: IssueEvidenceStatus;
   severity: Severity;
   evidenceIds: string[];
 };
@@ -201,6 +202,8 @@ export type CaseEvidenceIngestionState =
   | "uploaded"
   | "ingested"
   | "referenced_not_produced"
+  | "access_limited"
+  | "skipped"
   | "failed";
 
 export type CaseEvidenceRegistryItem = {

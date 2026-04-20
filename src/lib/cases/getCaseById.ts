@@ -5,6 +5,7 @@ import type { NormalizedDeterminationResult } from "@/lib/analysis/normalizeDete
 import { getNormalizedDetermination } from "@/lib/analysis/getNormalizedDetermination";
 import { getAnalysisReport } from "@/lib/analysisReportStore";
 import type {
+  CaseEvidenceRegistryItem,
   ArtifactRefreshPolicy,
   ReassessmentDelta,
   SharedFactualCore,
@@ -43,6 +44,7 @@ export type StoredCaseData = {
     vin: string | null;
   };
   factualCore: SharedFactualCore | null;
+  evidenceRegistry: CaseEvidenceRegistryItem[];
   reassessmentDelta: ReassessmentDelta | null;
   artifactRefreshPolicy: ArtifactRefreshPolicy | null;
   isClosed: boolean;
@@ -133,6 +135,7 @@ export async function getCaseById(
     extractedFacts,
     vehicle,
     factualCore: storedReport.report.factualCore ?? null,
+    evidenceRegistry: storedReport.report.evidenceRegistry ?? [],
     reassessmentDelta: storedReport.report.reassessmentDelta ?? null,
     artifactRefreshPolicy: storedReport.report.artifactRefreshPolicy ?? null,
     isClosed: Boolean(storedReport.report.ingestionMeta?.closedAt) ||

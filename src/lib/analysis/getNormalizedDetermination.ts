@@ -26,7 +26,7 @@ type CaseLike = {
     mimeType?: string | null;
     sourceType?: "google_doc" | "google_drive" | "pdf" | "html" | "unknown";
     text?: string | null;
-    status?: "ok" | "blocked" | "failed";
+    status?: "ok" | "blocked" | "failed" | "skipped";
     notes?: string;
   }> | null;
   extractedFacts?: Record<string, unknown> | null;
