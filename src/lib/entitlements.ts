@@ -9,7 +9,7 @@ import { getPlanAnalysisCap } from "@/lib/billing/plans";
 import { getOrCreateAppUser } from "@/lib/auth/get-or-create-app-user";
 import { prisma } from "@/lib/prisma";
 
-export type PlanTier = "starter" | "pro" | "team";
+export type PlanTier = "none" | "starter" | "pro" | "team";
 export type FeatureKey =
   | "basic_chat"
   | "uploads"
@@ -63,7 +63,7 @@ const CAPABILITY_ACTIVE_STATUSES = new Set<SubscriptionStatus>([
   "TRIALING",
 ]);
 
-const PLAN_FEATURES: Record<PlanTier, Record<FeatureKey, boolean>> = {
+const PLAN_FEATURES: Record<Exclude<PlanTier, "none">, Record<FeatureKey, boolean>> = {
   starter: {
     basic_chat: true,
     uploads: true,
@@ -271,7 +271,7 @@ type DbUserWithRelations = Prisma.UserGetPayload<{
 }>;
 
 export function getFeatureFlagsForPlan(plan: PlanTier) {
-  return PLAN_FEATURES[plan];
+  return plan === "none" ? NONE_FEATURES : PLAN_FEATURES[plan];
 }
 
 export function hasFeature(access: ViewerAccess, feature: FeatureKey) {
@@ -431,9 +431,9 @@ export function buildAnonymousAccess(): ViewerAccess {
     userId: null,
     clerkUserId: null,
     createdAt: null,
-    plan: "starter",
+    plan: "none",
     featureFlags: {
-      ...PLAN_FEATURES.starter,
+      ...NONE_FEATURES,
       basic_chat: false,
     },
     monthlyAnalysisLimit: getPlanAnalysisCap("starter"),
@@ -493,12 +493,16 @@ async function buildAccessFromDbUser(dbUser: DbUserWithRelations): Promise<Viewe
     activeSubscription?.status === "ACTIVE" ||
     activeSubscription?.status === "PAST_DUE";
 
+  const createdAtMs = dbUser.createdAt.getTime();
+  const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+  const isWithinFreeProWindow = Date.now() - createdAtMs < thirtyDaysMs;
+
   let effectivePlan: PlanTier;
 
   if (hasStripeTrial || hasActivePaid) {
     effectivePlan = mapSubscriptionPlan(activeSubscription?.plan);
   } else {
-    effectivePlan = "starter";
+    effectivePlan = isWithinFreeProWindow ? "pro" : "none";
   }
 
   let effectiveStatus: SubscriptionStatus | null;
@@ -518,8 +522,7 @@ async function buildAccessFromDbUser(dbUser: DbUserWithRelations): Promise<Viewe
     activeShop?.featureOverrides ?? []
   );
 
-  const baseFeatureFlags =
-    hasStripeTrial || hasActivePaid ? PLAN_FEATURES[effectivePlan] : NONE_FEATURES;
+  const baseFeatureFlags = getFeatureFlagsForPlan(effectivePlan);
   const featureFlags = applyFeatureOverrides(baseFeatureFlags, featureOverrides);
   const monthlyAnalysisLimit = resolveMonthlyAnalysisLimit(effectivePlan, featureOverrides);
 
@@ -642,10 +645,12 @@ function resolveMonthlyAnalysisLimit(plan: PlanTier, overrides: FeatureOverride[
     .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
 
   if (!limitOverride?.notes) {
-    return getPlanAnalysisCap(plan === "pro" ? "pro" : plan);
+    return getPlanAnalysisCap(plan === "none" ? "starter" : plan === "pro" ? "pro" : plan);
   }
 
   const parsed = Number.parseInt(limitOverride.notes, 10);
-  return Number.isFinite(parsed) ? parsed : getPlanAnalysisCap(plan === "pro" ? "pro" : plan);
+  return Number.isFinite(parsed)
+    ? parsed
+    : getPlanAnalysisCap(plan === "none" ? "starter" : plan === "pro" ? "pro" : plan);
 }
 

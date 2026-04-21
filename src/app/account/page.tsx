@@ -3,6 +3,25 @@ import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 
 export const dynamic = "force-dynamic";
 
+function getPlanLabel(plan: string) {
+  switch (plan) {
+    case "none":
+      return "Free";
+    case "trial":
+      return "30-Day Trial";
+    case "starter":
+      return "Starter";
+    case "pro":
+      return "Pro";
+    case "team":
+      return "Team";
+    case "admin":
+      return "Admin";
+    default:
+      return plan;
+  }
+}
+
 export default async function AccountPage() {
   const access = await getCurrentEntitlements();
 
@@ -17,7 +36,7 @@ export default async function AccountPage() {
 
         <div className="mt-8 grid gap-4 md:grid-cols-3">
           <StatCard label="Authenticated" value={access.isAuthenticated ? "Yes" : "No"} />
-          <StatCard label="Plan" value={access.plan.toUpperCase()} />
+          <StatCard label="Plan" value={getPlanLabel(access.plan)} />
           <StatCard
             label="Completed analyses this month"
             value={

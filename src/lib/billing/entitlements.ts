@@ -173,6 +173,10 @@ function resolveBillingPlan(access: ViewerAccess): BillingPlan {
     return "none";
   }
 
+  if (access.plan === "none") {
+    return "none";
+  }
+
   if (access.plan === "team") {
     return "team";
   }
@@ -181,11 +185,11 @@ function resolveBillingPlan(access: ViewerAccess): BillingPlan {
     return "trial";
   }
 
-  if (access.plan === "pro" && access.activeSubscriptionId) {
+  if (access.plan === "pro") {
     return "pro";
   }
 
-  if (access.activeSubscriptionId) {
+  if (access.plan === "starter" && access.activeSubscriptionId) {
     return "starter";
   }
 
@@ -195,9 +199,9 @@ function resolveBillingPlan(access: ViewerAccess): BillingPlan {
 export function getPlanUploadCap(plan: BillingPlan): number | null {
   switch (plan) {
     case "starter":
-      return 1;
     case "trial":
     case "pro":
+      return 1;
     case "team":
       return null;
     case "none":
@@ -209,9 +213,9 @@ export function getPlanUploadCap(plan: BillingPlan): number | null {
 export function getPlanExportCap(plan: BillingPlan): number | null {
   switch (plan) {
     case "starter":
-      return 1;
     case "trial":
     case "pro":
+      return 1;
     case "team":
       return null;
     case "none":
