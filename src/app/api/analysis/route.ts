@@ -271,7 +271,8 @@ export async function POST(req: Request) {
 
     const supplementCandidates = await generateSupplementCandidates(
       analysis.rawEstimateText ?? "",
-      report
+      report,
+      linkedEvidence
     );
     const panel = await buildDecisionPanelHybrid({
       result: analysis,
@@ -2445,7 +2446,8 @@ function safeParseJsonObject<T>(value: string): T | null {
 
 async function generateSupplementCandidates(
   text: string,
-  report: RepairIntelligenceReport
+  report: RepairIntelligenceReport,
+  linkedEvidence: LinkedEvidence[] = []
 ) {
   if (!text.trim()) return [];
 
@@ -2458,6 +2460,7 @@ async function generateSupplementCandidates(
   const missingProcedures = report.missingProcedures
     .map((entry) => `- ${entry}`)
     .join("\n");
+  const linkedProcedureSupport = summarizeReferencedProcedureSupport(linkedEvidence);
 
   const response = await openai.responses.create({
     model: SUPPLEMENT_MODEL,
@@ -2477,6 +2480,8 @@ Use the vehicle-specific required procedure context below to decide what functio
 Important:
 - Do NOT assume every vehicle has the same ADAS systems
 - Do NOT suggest front camera, radar, blind spot, or other ADAS calibrations unless they are supported by the required procedure context
+- Treat referenced OEM/procedure documentation as a real support signal for repair-path reasoning, especially for ADAS, calibration, structural verification, alignment, and fit-check operations
+- But explicitly distinguish when the actual linked document was referenced but not retrieved
 - If a function is already represented in the estimate or present-procedure list, do NOT include it
 - Only flag items that are truly unclear or absent
 - Consolidate duplicate or overlapping issues into one supportable candidate
@@ -2503,6 +2508,9 @@ ${text}
 [Vehicle-Specific Required Procedures From Linked OEM Support]
 ${requiredProcedures || "- None provided"}
 
+[Referenced OEM/Procedure Support State]
+${linkedProcedureSupport}
+
 [Procedures Already Represented]
 ${presentProcedures || "- None documented"}
 
@@ -2523,4 +2531,28 @@ ${missingProcedures || "- None identified"}`,
   } catch {
     return [];
   }
+}
+
+function summarizeReferencedProcedureSupport(linkedEvidence: LinkedEvidence[]) {
+  const lines = linkedEvidence
+    .filter((doc) => (doc.inferredProcedureSignals?.length ?? 0) > 0)
+    .slice(0, 8)
+    .map((doc) => {
+      const support = (doc.inferredProcedureSignals ?? [])
+        .map((signal) => signal.category.replace(/_/g, " "))
+        .filter((value, index, list) => list.indexOf(value) === index)
+        .join(", ");
+      const status =
+        doc.status === "ok"
+          ? "retrieved and reviewable"
+          : "referenced but not retrieved";
+
+      return `- ${doc.title || "Referenced procedure document"}: ${status}${
+        support ? `; directional support for ${support}` : ""
+      }`;
+    });
+
+  return lines.length > 0
+    ? lines.join("\n")
+    : "- No referenced procedure support signals were detected.";
 }

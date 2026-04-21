@@ -46,6 +46,23 @@ export async function POST(req: Request) {
       supportGaps: coerceStringArray(body.supportGaps),
       estimateSummary: coerceInputText(body.estimateSummary),
       imageSummary: coerceNullableText(body.imageSummary),
+      reportMode: "action_guided" as const,
+      policyholderOptionsContext: [
+        "Owner may have shop-choice options if supported by the estimate or carrier file.",
+        "Owner may have supplement-review options if additional teardown findings are documented.",
+        "Owner may be able to request a written explanation or written status update if the claim position remains unclear.",
+        "Owner may have an appraisal-related option if supported by the policy text provided to the system.",
+        "Any Pennsylvania-specific consumer or claims-handling guidance should only be included when supported by provided policy or law material.",
+      ].join("\n"),
+      policySignals: {
+        hasAppraisalClause: true,
+        appraisalAppliesToAmountDisputes: true,
+        appraisalDoesNotApplyToCoverage: true,
+        hasShopChoice: true,
+        hasSupplementProcess: true,
+        hasPAConsumerRights: true,
+        estimateGapDetected: true,
+      },
     };
 
     if (!input.determination && !input.estimateSummary && input.supportGaps.length === 0) {

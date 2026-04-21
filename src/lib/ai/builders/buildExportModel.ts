@@ -343,6 +343,7 @@ export function buildExportModel(params: {
   });
 
   const disputeIntelligenceReport = buildDisputeIntelligenceReport({
+    report: params.report,
     reportFields,
     repairPosition,
     positionStatement,
@@ -616,12 +617,16 @@ export function buildExportValuationPreviewSummary(
 }
 
 function buildDisputeIntelligenceReport(params: {
+  report: RepairIntelligenceReport | null;
   reportFields: ExportReportFields;
   repairPosition: string;
   positionStatement: string;
   supplementItems: ExportSupplementItem[];
   valuation: DerivedValuation;
 }): DisputeIntelligenceReport {
+  const hasReferencedProcedureSupport = hasReferencedButNotRetrievedProcedureSupport(
+    params.report
+  );
   const topDrivers = params.supplementItems.slice(0, 5).map((item) => ({
     title: cleanDisplayLabel(item.title),
     impact: mapSupplementPriorityToImpact(item.priority),
@@ -637,8 +642,15 @@ function buildDisputeIntelligenceReport(params: {
     ...params.reportFields.presentStrengths,
     ...params.reportFields.documentedHighlights,
     ...params.reportFields.documentedProcedures,
+    hasReferencedProcedureSupport
+      ? "Referenced OEM/procedure documents add directional dispute support when they align with the damage path, but they are not treated as fully reviewed procedure evidence."
+      : "",
   ]).slice(0, 5);
-  const supportGaps = buildDisputeSupportGapBullets(params.supplementItems, params.reportFields).slice(0, 5);
+  const supportGaps = buildDisputeSupportGapBullets(
+    params.supplementItems,
+    params.reportFields,
+    hasReferencedProcedureSupport
+  ).slice(0, 5);
   const nextMoves = buildDisputeNextMoves(params.supplementItems).slice(0, 6);
   const valuationPreview =
     params.valuation.acvStatus !== "not_determinable" || params.valuation.dvStatus !== "not_determinable"
@@ -658,6 +670,18 @@ function buildDisputeIntelligenceReport(params: {
     nextMoves,
     valuationPreview,
   };
+}
+
+function hasReferencedButNotRetrievedProcedureSupport(
+  report: RepairIntelligenceReport | null
+): boolean {
+  return (report?.linkedEvidence ?? []).some((item) => {
+    const status = item.status?.toLowerCase();
+    return (
+      (status === "skipped" || status === "referenced_not_retrieved") &&
+      (item.inferredProcedureSignals?.length ?? 0) > 0
+    );
+  });
 }
 
 function buildNegotiationPlaybook(params: {
@@ -796,10 +820,17 @@ function dedupeCleanExportBullets(values: string[]): string[] {
 
 function buildDisputeSupportGapBullets(
   supplementItems: ExportSupplementItem[],
-  reportFields: ExportReportFields
+  reportFields: ExportReportFields,
+  hasReferencedProcedureSupport = false
 ): string[] {
   const values: string[] = [];
   const titles = supplementItems.map((item) => item.title.toLowerCase());
+
+  if (hasReferencedProcedureSupport) {
+    values.push(
+      "Referenced procedure support should not be treated as no support, but exact OEM procedure steps still need the retrieved document or equivalent file evidence."
+    );
+  }
 
   if (titles.some((title) => /(measure|frame|structural|setup|realign|rail)/.test(title))) {
     values.push("Structural measurement or frame-setup records are still missing or under-documented.");

@@ -144,7 +144,7 @@ export function renderCustomerReportHtml(input: RenderCustomerReportHtmlInput): 
     <div class="brand">Collision Academy</div>
     <h1 class="title">${escapeHtml(report.title)}</h1>
     <div class="subtitle">
-      Simple, customer-friendly explanation of the repair situation and what the next steps mean.
+      Straight explanation for the vehicle owner about which repair path looks more accurate, what matters for safety, and the practical options from here.
     </div>
 
     <div class="meta">
@@ -157,47 +157,38 @@ export function renderCustomerReportHtml(input: RenderCustomerReportHtmlInput): 
     </div>
 
     <div class="section">
-      <h2>Overview</h2>
-      <p>${escapeHtml(report.overview)}</p>
+      <h2>What This Means For You</h2>
+      <p>${escapeHtml(report.openingSummary)}</p>
     </div>
 
     <div class="section">
-      <h2>What Was Found</h2>
-      <ul>${renderList(report.whatWasFound)}</ul>
+      <h2>Which Repair Plan Looks Stronger</h2>
+      <p>${escapeHtml(report.whichRepairPlanLooksStronger)}</p>
     </div>
 
     <div class="section">
-      <h2>What Needs To Happen</h2>
-      <ul>${renderList(report.whatNeedsToHappen)}</ul>
+      <h2>Safety Comes First</h2>
+      <p>${escapeHtml(report.safetyFirst)}</p>
     </div>
 
     <div class="section">
-      <h2>Why These Repairs Matter</h2>
-      <p>${escapeHtml(report.whyTheseRepairsMatter)}</p>
+      <h2>What Still Needs Proof</h2>
+      <ul>${renderList(report.whatStillNeedsProof)}</ul>
     </div>
 
     <div class="section">
-      <h2>Safety And Technology</h2>
-      <ul>${renderList(report.safetyAndTechnology)}</ul>
+      <h2>Your Options Moving Forward</h2>
+      <ul>${renderList(report.yourOptions)}</ul>
     </div>
 
     <div class="section">
-      <h2>What May Still Need To Be Confirmed</h2>
-      <ul>${renderList(report.whatMayStillNeedToBeConfirmed)}</ul>
-    </div>
-
-    <div class="section">
-      <h2>What The Customer Should Expect</h2>
-      <ul>${renderList(report.whatTheCustomerShouldExpect)}</ul>
-    </div>
-
-    <div class="section">
-      <h2>Reassurance</h2>
-      <p>${escapeHtml(report.reassurance)}</p>
+      <h2>Bottom Line</h2>
+      <p>${escapeHtml(report.bottomLine)}</p>
     </div>
 
     <div class="footer">
-      This report is intended to explain the repair situation in plain language for the vehicle owner.
+      <p>This report is intended to explain the repair situation in plain language for the vehicle owner.</p>
+      <p>Any policy-related or Pennsylvania-specific options should be read as practical guidance and then confirmed against the actual policy and claim record.</p>
     </div>
   </div>
 </body>

@@ -116,8 +116,10 @@ function getHeaderPinnedStorageKey(caseId: string) {
 type ImmersiveHeaderChangeReason =
   | "AUTO_COLLAPSE_CHAT_ENGAGED"
   | "AUTO_REOPEN_UPLOAD_COMPLETE"
+  | "RAIL_REOPENED"
   | "USER_OPENED"
   | "USER_CLOSED"
+  | "CHAT_FOCUS"
   | "CASE_RESET"
   | "END_CHAT";
 
@@ -166,6 +168,10 @@ function readStoredChatConsent(): ChatConsentRecord | null {
 export function ChatbotWorkspacePage() {
   const router = useRouter();
   const centerScrollRequestRef = useRef<((key: InsightKey) => void) | null>(null);
+  const immersiveWorkspaceRef = useRef<HTMLDivElement | null>(null);
+  const immersiveToolbarRef = useRef<HTMLDivElement | null>(null);
+  const revealScrollTimeoutRef = useRef<number | null>(null);
+  const [activeLeftPane, setActiveLeftPane] = useState<"review" | "chat">("chat");
   const chatSessionControlsRef = useRef<{
     focusComposer: () => void;
     resetSession: () => void;
@@ -199,6 +205,19 @@ export function ChatbotWorkspacePage() {
   const [lastHeaderChangeReason, setLastHeaderChangeReason] =
     useState<ImmersiveHeaderChangeReason>("CASE_RESET");
   const immersiveHeaderExpandedRef = useRef(true);
+
+  useEffect(() => {
+    immersiveHeaderExpandedRef.current = isImmersiveHeaderExpanded;
+  }, [isImmersiveHeaderExpanded]);
+
+  useEffect(() => {
+    return () => {
+      if (revealScrollTimeoutRef.current !== null) {
+        window.clearTimeout(revealScrollTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const normalizedResult = useMemo(
     () => (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null),
     [analysisResult]
@@ -266,6 +285,13 @@ export function ChatbotWorkspacePage() {
 
   const panel = hasResolvedAnalysis ? analysisPanel ?? EMPTY_PANEL : EMPTY_PANEL;
   const hasStructuredAnalysis = hasResolvedAnalysis;
+
+  const isReviewOpen = hasStructuredAnalysis && isImmersiveHeaderExpanded;
+  const isReviewActive = isReviewOpen && activeLeftPane === "review";
+  const isChatActive = activeLeftPane === "chat";
+  const workspaceRowsClass = hasStructuredAnalysis
+    ? "grid-rows-[auto_minmax(0,1fr)_auto]"
+    : "grid-rows-[minmax(0,1fr)]";
 
   useEffect(() => {
     immersiveHeaderExpandedRef.current = isImmersiveHeaderExpanded;
@@ -426,7 +452,76 @@ export function ChatbotWorkspacePage() {
     setHeaderPinnedByUser(true);
     setLastHeaderChangeReason(next ? "USER_OPENED" : "USER_CLOSED");
     setIsImmersiveHeaderExpanded(next);
+
+    if (next) {
+      setActiveLeftPane("review");
+    } else {
+      setActiveLeftPane("chat");
+    }
   }, [analysisReportId, hasStructuredAnalysis, lastHeaderChangeReason]);
+
+  const collapseForChatFocus = useCallback(() => {
+    if (revealScrollTimeoutRef.current !== null) {
+      window.clearTimeout(revealScrollTimeoutRef.current);
+      revealScrollTimeoutRef.current = null;
+    }
+
+    immersiveHeaderExpandedRef.current = false;
+    setHeaderPinnedByUser(false);
+    setLastHeaderChangeReason("CHAT_FOCUS");
+    setIsImmersiveHeaderExpanded(false);
+    setActiveLeftPane("chat");
+    setActiveEvidenceTargetId(null);
+  }, []);
+
+  const collapseChatPane = useCallback(() => {
+    if (hasStructuredAnalysis) {
+      immersiveHeaderExpandedRef.current = true;
+      setIsImmersiveHeaderExpanded(true);
+      setActiveLeftPane("review");
+    }
+  }, [hasStructuredAnalysis]);
+
+  const openChatPane = useCallback(() => {
+    immersiveHeaderExpandedRef.current = false;
+    setIsImmersiveHeaderExpanded(false);
+    setActiveLeftPane("chat");
+  }, []);
+
+  const scheduleImmersiveReveal = useCallback((insightKey: InsightKey, delayMs = 180) => {
+    if (revealScrollTimeoutRef.current !== null) {
+      window.clearTimeout(revealScrollTimeoutRef.current);
+    }
+
+    revealScrollTimeoutRef.current = window.setTimeout(() => {
+      immersiveToolbarRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+
+      window.setTimeout(() => {
+        centerScrollRequestRef.current?.(insightKey);
+      }, 120);
+    }, delayMs);
+  }, []);
+
+  const revealImmersiveSection = useCallback(
+    (insightKey: InsightKey, evidenceTargetId: string | null = null) => {
+      setActiveInsightKey(insightKey);
+      setActiveEvidenceTargetId(evidenceTargetId);
+      setActiveLeftPane("review");
+
+      const wasExpanded = immersiveHeaderExpandedRef.current;
+
+      immersiveHeaderExpandedRef.current = true;
+      setHeaderPinnedByUser(true);
+      setLastHeaderChangeReason("RAIL_REOPENED");
+      setIsImmersiveHeaderExpanded(true);
+
+      scheduleImmersiveReveal(insightKey, wasExpanded ? 40 : 220);
+    },
+    [scheduleImmersiveReveal]
+  );
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -562,9 +657,7 @@ export function ChatbotWorkspacePage() {
   }
 
   function handleEvidenceSelect(link: EvidenceLink) {
-    setActiveInsightKey(link.insightKey);
-    setActiveEvidenceTargetId(link.targetId);
-    centerScrollRequestRef.current?.(link.insightKey);
+    revealImmersiveSection(link.insightKey, link.targetId);
   }
 
   function handleConfirmEndAnalysis() {
@@ -676,21 +769,60 @@ export function ChatbotWorkspacePage() {
         title="Collision-IQ"
         center={
           <div className="relative h-full min-h-0 w-full">
-            <div
-              className="flex h-full min-h-0 w-full flex-col pt-12"
-            >
+            <div className={`grid h-full min-h-0 w-full gap-3 pt-12 ${workspaceRowsClass}`}>
               {hasStructuredAnalysis && (
-                <div className="max-h-[55%] min-h-0 shrink-0 overflow-y-auto px-1 pb-4">
-                  {isImmersiveHeaderExpanded && (
-                    <div id="immersive-case-header" data-header-change-reason={lastHeaderChangeReason}>
-                      <div className="mb-2 text-right text-[10px] uppercase tracking-[0.16em] text-white/35">
-                        {headerPinnedByUser ? "Pinned by user" : "Auto"}
+                <div
+                  className={
+                    isReviewActive
+                      ? "row-span-2 flex min-h-0 flex-col px-1"
+                      : "flex min-h-0 flex-col px-1"
+                  }
+                >
+                  <div
+                    ref={immersiveToolbarRef}
+                    className="z-20 mb-3 shrink-0 rounded-[22px] border border-white/10 bg-[#0b0b0b]/88 px-4 py-3 shadow-[0_18px_44px_rgba(0,0,0,0.28),0_0_0_1px_rgba(255,255,255,0.03)_inset] ring-1 ring-orange-400/8 backdrop-blur-xl"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-[10px] uppercase tracking-[0.18em] text-white/40">
+                          Review workspace
+                        </div>
+                        <div className="mt-1 text-sm text-white/68">
+                          {isReviewActive
+                            ? "The case review is open. Collapse it anytime to give chat more room."
+                            : "The case review is collapsed. Selecting a right-rail item will reopen it and jump to the matching section."}
+                        </div>
                       </div>
-                      <AtAGlanceCard
-                    renderModel={renderModel}
-                    analysisResult={analysisResult}
-                    active={hasResolvedAnalysis && hasAtGlanceContent(renderModel)}
-                  />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleToggleImmersiveHeader}
+                          className="rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-xs font-medium text-white/72 transition hover:bg-white/10 hover:text-white"
+                          aria-expanded={isReviewActive}
+                          aria-controls="immersive-case-header"
+                        >
+                          {isReviewActive
+                            ? "Collapse review workspace"
+                            : "Open review workspace"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {isReviewActive ? (
+                    <div
+                      ref={immersiveWorkspaceRef}
+                      className="min-h-0 flex-1 overflow-y-auto rounded-[26px] border border-white/8 bg-[#0a0a0a]/66 px-1 pb-4 shadow-[0_24px_70px_rgba(0,0,0,0.22),0_0_0_1px_rgba(255,255,255,0.025)_inset] ring-1 ring-orange-400/6"
+                    >
+                      <div id="immersive-case-header" data-header-change-reason={lastHeaderChangeReason}>
+                        <div className="mb-2 text-right text-[10px] uppercase tracking-[0.16em] text-white/35">
+                          {headerPinnedByUser ? "Pinned by user" : "Auto"}
+                        </div>
+                        <AtAGlanceCard
+                          renderModel={renderModel}
+                          analysisResult={analysisResult}
+                          active={hasResolvedAnalysis && hasAtGlanceContent(renderModel)}
+                        />
 
                       <div className="mt-3 rounded-[24px] border border-white/8 bg-white/[0.035] p-3.5">
                         <WorkspacePanel
@@ -701,7 +833,6 @@ export function ChatbotWorkspacePage() {
                       </div>
 
                     </div>
-                  )}
 
                   <StructuredAnalysisCanvas
                     renderModel={renderModel}
@@ -789,15 +920,11 @@ export function ChatbotWorkspacePage() {
                     )}
 
                   </section>
+                    </div>
+                  ) : null}
                 </div>
               )}
-              <div
-                className={
-                  hasStructuredAnalysis
-                    ? "mt-3 min-h-0 flex-1"
-                    : "mt-3 min-h-0 flex-1 overflow-hidden"
-                }
-              >
+              <div className="flex min-h-0 flex-col">
                 {trialDaysRemaining !== null && trialDaysRemaining <= 7 && (
                   <div
                     className={`mb-3 rounded-xl px-4 py-3 text-sm ${
@@ -849,68 +976,111 @@ export function ChatbotWorkspacePage() {
                     </span>
                   </div>
                 )}
-                <ChatWidget
-                  key="chat-widget"
-                  onAttachmentChange={setAttachment}
-                  onAttachmentsChange={setAttachmentsState}
-                  onAnalysisChange={setAnalysisText}
-                  onPrimaryAnalysisChange={setPrimaryAnalysis}
-                  onAnalysisReportIdChange={(reportId) => {
-                    if (reportId !== analysisReportId) {
-                      setAnalysisReportId(reportId);
-                    }
-                  }}
-                  onAnalysisResultChange={handleAnalysisResultChange}
-                  onLinkedEvidenceChange={setLinkedEvidenceDebug}
-                  onAnalysisPanelChange={setAnalysisPanel}
-                  onAnalysisLoadingChange={setAnalysisLoading}
-                  onAnalysisStatusChange={(status, detail) => {
-                    setAnalysisStatus(status);
-                    setAnalysisStatusDetail(detail ?? null);
-                  }}
-                  onWorkspaceDataChange={setWorkspaceData}
-                  onSessionReset={handleSessionReset}
-                  onChatEngagement={collapsePreChatHero}
-                  onCaseUploadComplete={reopenImmersiveHeaderAfterUpload}
-                  onSessionControlsReady={(controls) => {
-                    chatSessionControlsRef.current = controls;
-                  }}
-                  onCaseIntentChange={setCaseIntent}
-                  viewerAccess={viewerAccess}
-                  caseChatEnabled={Boolean(analysisReportId)}
-                  activeCaseId={analysisReportId}
-                  caseIntent={caseIntent || "Continue with this case"}
-                  transcriptSummary={primaryAnalysis?.content ?? analysisText}
-                  exportModel={hasResolvedAnalysis ? renderModel : null}
-                  followUpFiles={attachmentsState.map((file) => ({
-                    id: file.attachmentId,
-                    name: file.filename,
-                    type: file.hasVision ? "image" : undefined,
-                  }))}
-                  followUpExports={followUpExports}
-                  suppressedMessageIds={primaryAnalysis ? [primaryAnalysis.messageId] : []}
-                  disabled={chatBlocked}
-                />
+                <section className="h-full min-h-0 overflow-hidden">
+                {!isChatActive && (
+                  <div className="relative">
+                    <div className="pointer-events-none absolute inset-x-10 -top-1 z-10 h-4 rounded-full bg-orange-500/8 blur-2xl" />
+                    <div className="rounded-[24px] border border-white/10 bg-[#070707]/86 px-4 py-3 shadow-[0_18px_50px_rgba(0,0,0,0.34),0_0_0_1px_rgba(255,255,255,0.03)_inset] ring-1 ring-orange-400/8 backdrop-blur-2xl">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <button
+                          type="button"
+                          onClick={openChatPane}
+                          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                        >
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-xs font-semibold text-white/80">
+                            Chat
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-[10px] uppercase tracking-[0.18em] text-white/38">
+                              Chat available
+                            </div>
+                            <div className="truncate text-sm text-white/72">
+                              Click to reopen chat.
+                            </div>
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={openChatPane}
+                          className="rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-xs font-medium text-white/72 transition hover:bg-white/10 hover:text-white"
+                        >
+                          Open chat
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {isChatActive && (
+                  <div className="relative h-full min-h-0">
+                    <div className="pointer-events-none absolute inset-x-8 -top-2 z-10 h-5 rounded-full bg-orange-500/10 blur-2xl" />
+                    <div className="relative flex h-full min-h-0 flex-col overflow-visible rounded-[30px] border border-white/12 bg-[#070707]/82 shadow-[0_28px_90px_rgba(0,0,0,0.46),0_0_0_1px_rgba(255,255,255,0.035)_inset] ring-1 ring-orange-400/10 backdrop-blur-2xl">
+                      <div className="flex shrink-0 items-center justify-between border-b border-white/7 px-4 py-3">
+                        <div>
+                          <div className="text-[10px] uppercase tracking-[0.18em] text-white/38">
+                            Chat workspace
+                          </div>
+                          <div className="mt-1 text-sm text-white/68">
+                            Collapse it anytime to focus on the immersive review.
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={collapseChatPane}
+                          className="rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-xs font-medium text-white/72 transition hover:bg-white/10 hover:text-white"
+                        >
+                          Collapse chat
+                        </button>
+                      </div>
+                      <div className="h-full min-h-0">
+                        <ChatWidget
+                          key="chat-widget"
+                          onAttachmentChange={setAttachment}
+                          onAttachmentsChange={setAttachmentsState}
+                          onAnalysisChange={setAnalysisText}
+                          onPrimaryAnalysisChange={setPrimaryAnalysis}
+                          onAnalysisReportIdChange={(reportId) => {
+                            if (reportId !== analysisReportId) {
+                              setAnalysisReportId(reportId);
+                            }
+                          }}
+                          onAnalysisResultChange={handleAnalysisResultChange}
+                          onLinkedEvidenceChange={setLinkedEvidenceDebug}
+                          onAnalysisPanelChange={setAnalysisPanel}
+                          onAnalysisLoadingChange={setAnalysisLoading}
+                          onAnalysisStatusChange={(status, detail) => {
+                            setAnalysisStatus(status);
+                            setAnalysisStatusDetail(detail ?? null);
+                          }}
+                          onWorkspaceDataChange={setWorkspaceData}
+                          onSessionReset={handleSessionReset}
+                          onChatEngagement={collapsePreChatHero}
+                          onUserPromptSent={collapseForChatFocus}
+                          onCaseUploadComplete={reopenImmersiveHeaderAfterUpload}
+                          onSessionControlsReady={(controls) => {
+                            chatSessionControlsRef.current = controls;
+                          }}
+                          onCaseIntentChange={setCaseIntent}
+                          viewerAccess={viewerAccess}
+                          caseChatEnabled={Boolean(analysisReportId)}
+                          activeCaseId={analysisReportId}
+                          caseIntent={caseIntent || "Continue with this case"}
+                          transcriptSummary={primaryAnalysis?.content ?? analysisText}
+                          exportModel={hasResolvedAnalysis ? renderModel : null}
+                          followUpFiles={attachmentsState.map((file) => ({
+                            id: file.attachmentId,
+                            name: file.filename,
+                            type: file.hasVision ? "image" : undefined,
+                          }))}
+                          followUpExports={followUpExports}
+                          suppressedMessageIds={primaryAnalysis ? [primaryAnalysis.messageId] : []}
+                          disabled={chatBlocked}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+                </section>
               </div>
-            </div>
-            <div className="pointer-events-none absolute right-3 top-3 z-30 flex justify-end">
-              <button
-                type="button"
-                onClick={handleToggleImmersiveHeader}
-                className="pointer-events-auto rounded-xl border border-white/10 bg-black/70 px-3 py-2 text-xs font-medium text-white/72 shadow-lg shadow-black/30 backdrop-blur-md transition hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-200/70"
-                aria-expanded={isImmersiveHeaderExpanded}
-                aria-controls="immersive-case-header"
-                title={
-                  isImmersiveHeaderExpanded
-                    ? "Collapse immersive header"
-                    : "Open immersive header"
-                }
-              >
-                <span aria-hidden="true">{isImmersiveHeaderExpanded ? "^" : "v"}</span>
-                <span className="ml-2">
-                  {isImmersiveHeaderExpanded ? "Hide case header" : "Show case header"}
-                </span>
-              </button>
             </div>
           </div>
         }
@@ -937,9 +1107,7 @@ export function ChatbotWorkspacePage() {
             evidenceModel={evidenceModel}
             activeEvidenceTargetId={activeEvidenceTargetId}
             onInsightSelect={(insightKey) => {
-              setActiveInsightKey(insightKey);
-              setActiveEvidenceTargetId(null);
-              centerScrollRequestRef.current?.(insightKey);
+              revealImmersiveSection(insightKey);
             }}
             onEvidenceSelect={handleEvidenceSelect}
           />
@@ -1989,6 +2157,10 @@ function formatExternalDocumentStatus(status: ReturnType<typeof normalizeExterna
       return "Access limited";
     case "failed":
       return "Failed to load";
+    case "directional_support_only":
+      return "Directional procedure support";
+    case "referenced_not_retrieved":
+      return "Referenced, not retrieved";
     case "skipped":
       return "Skipped";
     case "preview_unavailable":

@@ -25,6 +25,14 @@ export default function CaseContextSummary({
     determinationView?.supportGaps?.length
       ? determinationView.supportGaps
       : legacySupportGaps || [];
+  const displayedSupportGaps = [
+    ...supportGaps,
+    ...(determinationView?.referencedProcedureWeightApplied
+      ? [
+          "Referenced OEM/procedure documents add directional repair-path support, but they were not retrieved, so exact procedure steps remain unverified.",
+        ]
+      : []),
+  ].filter((item, index, list) => list.indexOf(item) === index);
   const cautionFlags = determinationView?.cautionFlags || [];
   const sections = determinationView
     ? [
@@ -110,13 +118,13 @@ export default function CaseContextSummary({
         </div>
       ) : null}
 
-      {supportGaps.length > 0 ? (
+      {displayedSupportGaps.length > 0 ? (
         <div className="mt-4 rounded-xl border border-white/6 bg-black/18 px-3.5 py-3">
           <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-zinc-400">
             Support Gaps
           </div>
           <ul className="mt-2 ml-5 list-disc space-y-1.5 text-sm leading-6 text-zinc-200">
-            {supportGaps.map((item) => (
+            {displayedSupportGaps.map((item) => (
               <li key={item}>{item}</li>
             ))}
           </ul>

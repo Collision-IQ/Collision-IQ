@@ -98,6 +98,7 @@ type LinkedEvidenceDebugItem = {
 };
 
 interface ChatWidgetProps {
+  onUserPromptSent?: () => void;
   onAttachmentChange?: (filename: string | null) => void;
   onAttachmentsChange?: Dispatch<SetStateAction<AttachmentTrayItem[]>>;
   onAnalysisChange?: (text: string) => void;
@@ -240,6 +241,7 @@ function resolveCaseTopic(message: string, previousTopic: string) {
 }
 
 export default function ChatWidget({
+  onUserPromptSent,
   onAttachmentChange,
   onAttachmentsChange,
   onAnalysisChange,
@@ -883,6 +885,8 @@ export default function ChatWidget({
     if (loading) return;
     if (!input.trim() && attachments.length === 0) return;
 
+    // Collapse the review workspace from the real send path so typed prompts always focus chat.
+    onUserPromptSent?.();
     onChatEngagement?.();
     stopSpeaking();
     setLoading(true);
@@ -1903,15 +1907,18 @@ export default function ChatWidget({
         }
       }}
     >
-      <AttachmentPreviewModal
-        attachment={disabled ? null : (previewAttachment as PreviewAttachment | null)}
-        attachments={disabled ? [] : (attachments as PreviewAttachment[])}
-        currentIndex={disabled ? -1 : previewAttachmentIndex}
-        onClose={() => setPreviewAttachmentId(null)}
-        onNavigate={handlePreviewNavigation}
-        onRemove={(attachmentId) => removeAttachment(attachmentId)}
-        onReplace={(attachmentId) => handleReplaceAttachment(attachmentId)}
-      />
+      {!disabled && previewAttachment ? (
+        <AttachmentPreviewModal
+          key={previewAttachment.attachmentId}
+          attachment={previewAttachment as PreviewAttachment}
+          attachments={attachments as PreviewAttachment[]}
+          currentIndex={previewAttachmentIndex}
+          onClose={() => setPreviewAttachmentId(null)}
+          onNavigate={handlePreviewNavigation}
+          onRemove={(attachmentId) => removeAttachment(attachmentId)}
+          onReplace={(attachmentId) => handleReplaceAttachment(attachmentId)}
+        />
+      ) : null}
 
       <div className="absolute inset-0 pointer-events-none bg-[url('/brand/logos/Logo-grey.png')] bg-no-repeat bg-center bg-[length:60%] opacity-[0.06]" />
       <div className="absolute inset-0 bg-[#040404]/74 pointer-events-none" />
@@ -1922,11 +1929,11 @@ export default function ChatWidget({
           className="
           overflow-y-auto
           flex-1
-          px-5 sm:px-6
+          px-6 sm:px-8
           min-h-0
-          pt-5 sm:pt-7
-          pb-[210px]
-          space-y-4
+          pt-6 sm:pt-8
+          pb-[236px]
+          space-y-7
         "
         >
           {messages.length === 1 && messages[0].role === "assistant" && (
@@ -1995,19 +2002,19 @@ export default function ChatWidget({
                   : msg.kind === "system_status"
                     ? "justify-center"
                     : "justify-start"
-              } mb-5`}
+              }`}
             >
               <div
                 className={`${
                   msg.kind === "system_status"
                     ? "max-w-[560px] rounded-full bg-white/[0.045] px-4 py-2 text-xs text-white/40"
-                    : "rounded-[24px] px-5 py-4"
+                    : "rounded-[26px] px-6 py-5"
                 } ${
                   msg.role === "user"
-                    ? `${userBubble} max-w-[65%]`
+                    ? `${userBubble} max-w-[72%] border border-orange-400/14 shadow-[0_18px_42px_rgba(0,0,0,0.22),0_0_0_1px_rgba(255,180,120,0.04)_inset]`
                     : msg.kind === "system_status"
                       ? ""
-                      : "max-w-[720px] bg-white/[0.045] shadow-[0_14px_34px_rgba(0,0,0,0.14)] backdrop-blur-md"
+                      : "max-w-[820px] border border-white/9 bg-white/[0.04] shadow-[0_18px_42px_rgba(0,0,0,0.18),0_0_0_1px_rgba(255,255,255,0.03)_inset] backdrop-blur-md"
                 }`}
               >
                 {msg.role === "assistant" && msg.kind !== "system_status" ? (
@@ -2038,7 +2045,7 @@ export default function ChatWidget({
                         )}
                       </button>
                     </div>
-                    <div className="analysis-report text-[15px] leading-[1.8] text-white/85">
+                    <div className="analysis-report text-[15px] leading-[1.9] text-white/84">
                     <ReactMarkdown
                       components={{
                         h2: ({ children }) => (
@@ -2052,7 +2059,7 @@ export default function ChatWidget({
                           </div>
                         ),
                         p: ({ children }) => (
-                          <p className="mt-2 text-white/85 leading-[1.8]">{children}</p>
+                          <p className="mt-4 text-white/84 leading-[1.95]">{children}</p>
                         ),
                         ul: ({ children }) => (
                           <ul className="mt-2 ml-5 list-disc space-y-1.5 text-white/65">
@@ -2088,7 +2095,7 @@ export default function ChatWidget({
         </div>
 
         <div className="absolute inset-x-0 bottom-4 z-20 px-4 sm:px-5">
-          <div className="mx-auto w-full max-w-[980px] rounded-[24px] border border-white/7 bg-[#090909]/74 shadow-[0_20px_80px_rgba(0,0,0,0.38)] backdrop-blur-2xl">
+          <div className="mx-auto w-full max-w-[1120px] rounded-[28px] border border-white/10 bg-[#090909]/76 shadow-[0_24px_90px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.035)_inset] backdrop-blur-2xl">
             <div className="p-3">
               <div className="rounded-[20px] bg-white/[0.035] px-3 py-2">
                 <div className="flex items-end gap-2.5">

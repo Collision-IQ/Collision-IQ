@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ChevronLeft,
   ChevronRight,
@@ -117,12 +118,23 @@ export default function AttachmentPreviewModal({
   const hasTextPreview = structuredTextPreview.length > 0;
   const hasPrevious = currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < attachments.length - 1;
+  const isOpen = Boolean(attachment);
 
-  return (
-    <div className="fixed inset-0 z-[80] bg-black/85 backdrop-blur-md">
-      <div className="flex h-full w-full items-center justify-center p-4 sm:p-6">
-        <div className="flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#111111] shadow-2xl">
-          <div className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-4">
+  const modal = (
+    <div className="fixed inset-0 z-[120] bg-black/78 backdrop-blur-sm">
+      <div className="absolute left-4 top-4 z-10 rounded bg-black/70 px-2 py-1 text-xs text-white">
+        {JSON.stringify({
+          isOpen,
+          hasAttachment: Boolean(attachment),
+          name: attachment?.filename,
+          mimeType: attachment?.mime,
+          previewUrl: Boolean(attachment?.previewUrl),
+        })}
+      </div>
+      <div className="flex h-full w-full items-center justify-center p-2 sm:p-4">
+        <div className="flex h-full min-h-0 w-[min(1700px,98vw)] max-h-[calc(100vh-2.5rem)] flex-col overflow-hidden rounded-[24px] border border-white/10 bg-[#0b0b0b] shadow-2xl">
+          <div className="shrink-0 border-b border-white/10 px-5 py-4">
+            <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <div className="truncate text-base font-semibold text-white">{attachment.filename}</div>
               <div className="mt-1 text-xs uppercase tracking-[0.18em] text-white/45">
@@ -202,16 +214,18 @@ export default function AttachmentPreviewModal({
                 <X size={16} />
               </button>
             </div>
+            </div>
           </div>
 
-          <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[minmax(0,1.4fr)_380px]">
-            <div className="min-h-0 overflow-auto bg-black/30">
+          <div className="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(320px,28vw)] xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="min-h-0 min-w-0 bg-black/30 p-4">
+              <div className="h-full min-h-0 overflow-hidden rounded-[18px] border border-white/8 bg-black/40">
               {previewKind === "pdf" ? (
                 attachment.previewUrl ? (
                   <iframe
                     title={attachment.filename}
                     src={attachment.previewUrl}
-                    className="h-full min-h-[480px] w-full"
+                    className="h-full min-h-0 w-full"
                   />
                 ) : (
                   <EmptyPreviewState
@@ -222,14 +236,14 @@ export default function AttachmentPreviewModal({
                 )
               ) : previewKind === "image" ? (
                 attachment.imageDataUrl ? (
-                  <div className="flex min-h-full items-start justify-center overflow-auto p-6">
+                  <div className="flex h-full min-h-0 items-center justify-center overflow-auto p-6">
                     <Image
                       src={attachment.imageDataUrl}
                       alt={attachment.filename}
                       width={1600}
                       height={1200}
                       unoptimized
-                      className="h-auto max-w-full rounded-xl border border-white/10 shadow-xl transition-transform duration-150"
+                      className="h-auto max-h-full max-w-full rounded-xl border border-white/10 object-contain shadow-xl transition-transform duration-150"
                       style={{ transform: `scale(${zoom})`, transformOrigin: "top center" }}
                     />
                   </div>
@@ -245,37 +259,42 @@ export default function AttachmentPreviewModal({
                   <TextPreview paragraphs={structuredTextPreview} />
                 </div>
               )}
+              </div>
             </div>
 
-            <div className="min-h-0 overflow-auto border-t border-white/10 bg-white/5 p-5 lg:border-l lg:border-t-0">
-              <div className="space-y-5">
-                <section className="space-y-2">
-                  <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">File</div>
-                  <div className="rounded-xl border border-white/10 bg-black/25 p-4 text-sm text-white/80">
-                    <div className="truncate">{attachment.filename}</div>
-                    <div className="mt-2 text-xs text-white/45">{formatMimeLabel(attachment.mime)}</div>
-                    {attachment.mime === "application/pdf" && attachment.pageCount ? (
-                      <div className="mt-1 text-xs text-white/45">
-                        Pages: {attachment.pageCount}
-                      </div>
-                    ) : null}
-                    <div className="mt-1 text-xs text-white/45">
-                      Source: {attachment.source === "camera" ? "Camera" : "Upload"}
-                    </div>
-                    <div className="mt-1 text-xs text-white/45">
-                      Analysis: {attachment.usedInAnalysis ? "Used in current analysis" : "Not yet used in current analysis"}
-                    </div>
-                  </div>
-                </section>
-
-                {hasTextPreview && (
+            <div className="flex min-h-0 min-w-0 flex-col border-t border-white/10 bg-white/5 lg:border-l lg:border-t-0">
+              <div className="min-h-0 flex-1 overflow-auto p-5">
+                <div className="space-y-5">
                   <section className="space-y-2">
-                    <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">Extracted Text Preview</div>
-                    <TextPreview paragraphs={structuredTextPreview.slice(0, 5)} compact />
+                    <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">File</div>
+                    <div className="rounded-xl border border-white/10 bg-black/25 p-4 text-sm text-white/80">
+                      <div className="truncate">{attachment.filename}</div>
+                      <div className="mt-2 text-xs text-white/45">{formatMimeLabel(attachment.mime)}</div>
+                      {attachment.mime === "application/pdf" && attachment.pageCount ? (
+                        <div className="mt-1 text-xs text-white/45">
+                          Pages: {attachment.pageCount}
+                        </div>
+                      ) : null}
+                      <div className="mt-1 text-xs text-white/45">
+                        Source: {attachment.source === "camera" ? "Camera" : "Upload"}
+                      </div>
+                      <div className="mt-1 text-xs text-white/45">
+                        Analysis: {attachment.usedInAnalysis ? "Used in current analysis" : "Not yet used in current analysis"}
+                      </div>
+                    </div>
                   </section>
-                )}
 
-                <section className="space-y-2">
+                  {hasTextPreview && (
+                    <section className="space-y-2">
+                      <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">Extracted Text Preview</div>
+                      <TextPreview paragraphs={structuredTextPreview.slice(0, 5)} compact />
+                    </section>
+                  )}
+                </div>
+              </div>
+
+              <div className="shrink-0 border-t border-white/8 p-5">
+                <div className="space-y-2">
                   <div className="text-[11px] uppercase tracking-[0.2em] text-white/45">Actions</div>
                   <button
                     type="button"
@@ -300,7 +319,7 @@ export default function AttachmentPreviewModal({
                       Remove
                     </button>
                   </div>
-                </section>
+                </div>
               </div>
             </div>
           </div>
@@ -308,6 +327,8 @@ export default function AttachmentPreviewModal({
       </div>
     </div>
   );
+
+  return typeof document !== "undefined" ? createPortal(modal, document.body) : null;
 }
 
 function TextPreview({

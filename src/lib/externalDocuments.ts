@@ -22,7 +22,14 @@ export type ExternalDocumentDisplay = {
   title: string;
   url: string | null;
   source: "drive" | "external" | "legacy_egnyte";
-  status: "ready" | "preview_unavailable" | "access_limited" | "failed" | "skipped";
+  status:
+    | "ready"
+    | "preview_unavailable"
+    | "access_limited"
+    | "failed"
+    | "skipped"
+    | "referenced_not_retrieved"
+    | "directional_support_only";
   reason?: string;
   previewUrl?: string | null;
   html?: string | null;
@@ -42,6 +49,7 @@ type ExternalDocumentLike = {
   status?: string | null;
   reason?: string | null;
   notes?: string | null;
+  directionalSupportOnly?: boolean | null;
   text?: string | null;
   textPreview?: string | null;
   html?: string | null;
@@ -78,7 +86,10 @@ export function normalizeExternalDocumentDisplay(
 
   return {
     id: document.id || url || fallbackId,
-    title: document.title || document.name || "Linked OEM / procedure document",
+    title:
+      status === "referenced_not_retrieved" && document.directionalSupportOnly
+        ? document.title || document.name || "Referenced OEM Support"
+        : document.title || document.name || "Linked OEM / procedure document",
     url: null,
     source,
     status,
@@ -123,6 +134,20 @@ export function getExternalDocumentTerminalSummary(
   if (status === "failed") {
     return "Supporting document reference was preserved, but preview could not be loaded.";
   }
+  if (status === "referenced_not_retrieved") {
+    return (
+      "The estimate references OEM or procedure-level documentation that supports this repair path, " +
+      "but the linked document was not retrieved into the file. Treat this as directional support, " +
+      "not fully preserved proof."
+    );
+  }
+  if (status === "directional_support_only") {
+    return (
+      "The estimate references OEM or procedure-level documentation that supports this repair path, " +
+      "but the linked document was not retrieved into the file. Treat this as directional support, " +
+      "not fully preserved proof."
+    );
+  }
   if (status === "skipped") {
     return "Supporting document lookup was skipped without blocking the case review.";
   }
@@ -163,9 +188,11 @@ function resolveExternalDocumentDisplayStatus(
 ): ExternalDocumentDisplay["status"] {
   const rawStatus = document.status?.toLowerCase();
   if (source === "legacy_egnyte") return "preview_unavailable";
+  if (document.directionalSupportOnly) return "directional_support_only";
+  if (rawStatus === "directional_support_only") return "directional_support_only";
   if (rawStatus === "blocked") return "access_limited";
   if (rawStatus === "failed") return "failed";
-  if (rawStatus === "skipped") return "skipped";
+  if (rawStatus === "skipped") return "referenced_not_retrieved";
   if (rawStatus === "ok" && (document.previewUrl || document.html || textContent)) {
     return "ready";
   }

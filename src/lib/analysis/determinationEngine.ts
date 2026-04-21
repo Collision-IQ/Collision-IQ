@@ -1,3 +1,11 @@
+import { inferProcedureSupport } from "@/lib/analysis/applyProcedureInference";
+import {
+  applyReferencedProcedureWeight,
+  EMPTY_AREA_WEIGHTS,
+  type AreaWeightAccumulator,
+} from "@/lib/analysis/applyReferencedProcedureWeight";
+import type { ReferencedProcedureSignal } from "@/lib/analysis/procedureInference";
+
 export type UploadedFile = {
   name?: string;
   text?: string | null;
@@ -14,6 +22,7 @@ export type LinkedEvidence = {
   text?: string | null;
   status?: "ok" | "blocked" | "failed" | "skipped";
   notes?: string;
+  inferredProcedureSignals?: ReferencedProcedureSignal[];
 };
 
 export type VehicleInfo = {
@@ -67,6 +76,8 @@ export type DeterminationResult = {
   headline: string;
   determination: string;
   confidence: number;
+  referencedProcedureWeightApplied: boolean;
+  areaWeights: AreaWeightAccumulator;
   supportGaps: string[];
   cautionFlags: string[];
   sections: {
@@ -292,15 +303,69 @@ function countAny(text: string, signals: string[]) {
   );
 }
 
+function buildReferencedProcedureEvidence(
+  areaWeights: AreaWeightAccumulator,
+  categories: Array<keyof AreaWeightAccumulator>
+) {
+  const labels: Record<keyof AreaWeightAccumulator, string> = {
+    adas: "Referenced procedure document suggests ADAS-related support.",
+    structural: "Referenced procedure document suggests structural verification support.",
+    calibration: "Referenced procedure document suggests scan/calibration support.",
+    alignment: "Referenced procedure document suggests alignment verification support.",
+    fit_finish: "Referenced procedure document suggests fit and finish verification support.",
+  };
+
+  return categories
+    .filter((category) => areaWeights[category] > 0)
+    .map((category) => labels[category]);
+}
+
+function hasReferencedProcedureWeightApplied(linkedEvidence: LinkedEvidence[]) {
+  return linkedEvidence.some((item) => {
+    const normalizedStatus = item.status?.toLowerCase();
+    return (
+      (normalizedStatus === "referenced_not_retrieved" ||
+        normalizedStatus === "skipped") &&
+      (item.inferredProcedureSignals?.length ?? 0) > 0
+    );
+  });
+}
+
 function getLinkedEvidenceSummary(linkedEvidence: LinkedEvidence[]) {
-  const accessible = linkedEvidence.filter((doc) => doc.status === "ok");
-  const blocked = linkedEvidence.filter((doc) => doc.status === "blocked");
-  const unavailable = linkedEvidence.filter((doc) => doc.status === "failed" || doc.status === "skipped");
+  const inferredDocs = inferProcedureSupport(
+    linkedEvidence as Array<Record<string, unknown>>,
+    linkedEvidence
+      .map((doc) => `${doc.title || ""} ${doc.sourceType || ""}`)
+      .join(" ")
+  ) as Array<
+    LinkedEvidence & {
+      supportClassification?: "fully_documented_with_evidence" | "supported_by_reference" | "none";
+      inferredSupport?: string[];
+    }
+  >;
+
+  const accessible = inferredDocs.filter(
+    (doc) => doc.supportClassification === "fully_documented_with_evidence"
+  );
+  const referenced = inferredDocs.filter(
+    (doc) => doc.supportClassification === "supported_by_reference"
+  );
+  const blocked = inferredDocs.filter((doc) => doc.status === "blocked");
+  const unavailable = inferredDocs.filter((doc) => doc.status === "failed" || doc.status === "skipped");
 
   const evidence: string[] = [];
 
   for (const doc of accessible.slice(0, 5)) {
-    evidence.push(doc.title || "Linked supporting document");
+    evidence.push(`Fully documented with evidence: ${doc.title || "Linked supporting document"}`);
+  }
+
+  for (const doc of referenced.slice(0, 3)) {
+    const inferred = (doc.inferredSupport || []).slice(0, 3).join(", ");
+    evidence.push(
+      `Supported by reference: ${doc.title || "Referenced supporting document"}${
+        inferred ? ` (implies ${inferred})` : ""
+      }`
+    );
   }
 
   for (const doc of blocked.slice(0, 3)) {
@@ -313,6 +378,7 @@ function getLinkedEvidenceSummary(linkedEvidence: LinkedEvidence[]) {
 
   return {
     accessible,
+    referenced,
     blocked: [...blocked, ...unavailable],
     evidence,
   };
@@ -358,17 +424,25 @@ function buildScansSection(corpus: string): DeterminationSection {
   };
 }
 
-function buildAdasSection(corpus: string, vehicle?: VehicleInfo): AdasResult {
+function buildAdasSection(
+  corpus: string,
+  vehicle?: VehicleInfo,
+  areaWeights: AreaWeightAccumulator = EMPTY_AREA_WEIGHTS
+): AdasResult {
   const hasTeardownSignal = hasAny(corpus, TEARDOWN_SIGNALS);
   const hasScanSignal = hasAny(corpus, SCAN_SIGNALS);
   const hasInterruptionSignal = hasAny(corpus, INTERRUPTION_SIGNALS);
   const hasSpecificCalibrationSignal = hasAny(corpus, SPECIFIC_CALIBRATION_SIGNALS);
+  const referencedProcedureBoost = Math.round(
+    (areaWeights.adas + areaWeights.calibration) * 10
+  );
 
   const evidence = uniqueStrings([
     ...firstMatchSnippet(corpus, SPECIFIC_CALIBRATION_SIGNALS),
     ...firstMatchSnippet(corpus, INTERRUPTION_SIGNALS),
     ...firstMatchSnippet(corpus, SCAN_SIGNALS),
     ...firstMatchSnippet(corpus, TEARDOWN_SIGNALS),
+    ...buildReferencedProcedureEvidence(areaWeights, ["adas", "calibration"]),
   ]).slice(0, 6);
 
   const make = lower(vehicle?.make);
@@ -390,8 +464,25 @@ function buildAdasSection(corpus: string, vehicle?: VehicleInfo): AdasResult {
         filteredEvidence.length * 2,
         hasInterruptionSignal ? 4 : 0,
         hasTeardownSignal ? 4 : 0,
+        referencedProcedureBoost,
       ]),
       evidence: filteredEvidence,
+    };
+  }
+
+  if (areaWeights.adas > 0 || areaWeights.calibration > 0) {
+    return {
+      status: "partial",
+      state: "teardown_dependent",
+      summary:
+        "Referenced procedure-level material directionally supports ADAS or calibration review, but the exact procedure steps were not retrieved. Final calibration scope should remain tied to teardown, component disturbance, scans, and vehicle-specific procedure confirmation.",
+      confidence: scoreConfidence(58, [
+        referencedProcedureBoost,
+        hasScanSignal ? 4 : 0,
+        hasInterruptionSignal ? 4 : 0,
+        evidence.length,
+      ]),
+      evidence,
     };
   }
 
@@ -404,6 +495,7 @@ function buildAdasSection(corpus: string, vehicle?: VehicleInfo): AdasResult {
       confidence: scoreConfidence(70, [
         hasScanSignal ? 6 : 0,
         hasInterruptionSignal ? 8 : 0,
+        referencedProcedureBoost,
         evidence.length,
       ]),
       evidence,
@@ -431,9 +523,16 @@ function buildAdasSection(corpus: string, vehicle?: VehicleInfo): AdasResult {
   };
 }
 
-function buildStructuralSection(corpus: string): DeterminationSection {
+function buildStructuralSection(
+  corpus: string,
+  areaWeights: AreaWeightAccumulator = EMPTY_AREA_WEIGHTS
+): DeterminationSection {
   const structuralCount = countAny(corpus, STRUCTURAL_SIGNALS);
-  const evidence = firstMatchSnippet(corpus, STRUCTURAL_SIGNALS);
+  const referencedProcedureBoost = Math.round(areaWeights.structural * 10);
+  const evidence = uniqueStrings([
+    ...firstMatchSnippet(corpus, STRUCTURAL_SIGNALS),
+    ...buildReferencedProcedureEvidence(areaWeights, ["structural"]),
+  ]);
 
   if (structuralCount >= 2) {
     return {
@@ -442,7 +541,11 @@ function buildStructuralSection(corpus: string): DeterminationSection {
       summary:
         "The file set includes structural repair signals, but dedicated measuring or verification documentation may still be needed to fully support final structural procedures.",
       evidence,
-      confidence: scoreConfidence(68, [evidence.length * 3, structuralCount * 2]),
+      confidence: scoreConfidence(68, [
+        evidence.length * 3,
+        structuralCount * 2,
+        referencedProcedureBoost,
+      ]),
     };
   }
 
@@ -453,7 +556,18 @@ function buildStructuralSection(corpus: string): DeterminationSection {
       summary:
         "There is some structural repair indication, but stronger measuring or verification support is still advisable.",
       evidence,
-      confidence: 56,
+      confidence: scoreConfidence(56, [referencedProcedureBoost]),
+    };
+  }
+
+  if (areaWeights.structural > 0) {
+    return {
+      title: "Structural / Measuring Support",
+      status: "provisional",
+      summary:
+        "Referenced procedure-level material suggests structural verification may be relevant, but the underlying document was not retrieved. Structural measuring or verification should remain provisional until the repair file confirms the actual procedure need.",
+      evidence,
+      confidence: scoreConfidence(46, [referencedProcedureBoost, evidence.length]),
     };
   }
 
@@ -493,16 +607,38 @@ function buildCorrosionSection(corpus: string): DeterminationSection {
 }
 
 function buildLinkedEvidenceSection(linkedEvidence: LinkedEvidence[]): DeterminationSection {
-  const { accessible, blocked, evidence } = getLinkedEvidenceSummary(linkedEvidence);
+  const { accessible, referenced, blocked, evidence } = getLinkedEvidenceSummary(linkedEvidence);
+
+  if (accessible.length > 0 && referenced.length > 0) {
+    return {
+      title: "Linked OEM / Procedure Evidence",
+      status: "supported",
+      summary:
+        "Linked documents include fully documented evidence and additional procedure-level references. Retrieved links are treated as verified evidence; unresolved links are treated as supported-by-reference signals only.",
+      evidence,
+      confidence: scoreConfidence(80, [accessible.length * 3, referenced.length * 1]),
+    };
+  }
 
   if (accessible.length > 0) {
     return {
       title: "Linked OEM / Procedure Evidence",
       status: "supported",
       summary:
-        "Linked documents were successfully retrieved and can be used as substantive case evidence, including OEM procedures or ADAS-related reports where applicable.",
+        "Linked documents were successfully retrieved and are fully documented with evidence, including OEM procedures or ADAS-related reports where applicable.",
       evidence,
       confidence: scoreConfidence(78, [accessible.length * 3]),
+    };
+  }
+
+  if (referenced.length > 0) {
+    return {
+      title: "Linked OEM / Procedure Evidence",
+      status: "partial",
+      summary:
+        "No linked documents were fully retrievable, but procedure-level references were detected. These are treated as supported-by-reference signals (for example calibration, scan, alignment, or verification implications), not as fully documented evidence.",
+      evidence,
+      confidence: scoreConfidence(58, [referenced.length * 2]),
     };
   }
 
@@ -699,9 +835,16 @@ function buildDeterminationText(
 
 export function runDeterminationEngine(input: DeterminationInput): DeterminationResult {
   const corpus = buildEvidenceCorpus(input);
+  const areaWeights = applyReferencedProcedureWeight(
+    { ...EMPTY_AREA_WEIGHTS },
+    input.linkedEvidence ?? []
+  );
+  const referencedProcedureWeightApplied = hasReferencedProcedureWeightApplied(
+    input.linkedEvidence ?? []
+  );
   const scans = buildScansSection(corpus);
-  const adas = buildAdasSection(corpus, input.vehicle);
-  const structural = buildStructuralSection(corpus);
+  const adas = buildAdasSection(corpus, input.vehicle, areaWeights);
+  const structural = buildStructuralSection(corpus, areaWeights);
   const corrosion = buildCorrosionSection(corpus);
   const valuation = buildValuationSection(input, corpus);
   const linkedEvidence = buildLinkedEvidenceSection(input.linkedEvidence || []);
@@ -743,6 +886,8 @@ export function runDeterminationEngine(input: DeterminationInput): Determination
       linkedEvidence
     ),
     confidence,
+    referencedProcedureWeightApplied,
+    areaWeights,
     supportGaps,
     cautionFlags,
     sections,

@@ -3,6 +3,7 @@ import {
   normalizeDetermination,
   type NormalizedDeterminationResult,
 } from "@/lib/analysis/normalizeDetermination";
+import type { ReferencedProcedureSignal } from "@/lib/analysis/procedureInference";
 
 type CaseLike = {
   vehicle?: {
@@ -28,6 +29,7 @@ type CaseLike = {
     text?: string | null;
     status?: "ok" | "blocked" | "failed" | "skipped";
     notes?: string;
+    inferredProcedureSignals?: ReferencedProcedureSignal[];
   }> | null;
   extractedFacts?: Record<string, unknown> | null;
 };

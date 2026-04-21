@@ -6,6 +6,10 @@ import {
   readRemoteDocument,
   type RemoteDocumentResult,
 } from "@/lib/ingest/readRemoteDocument";
+import {
+  inferReferencedProcedureSignals,
+  type ReferencedProcedureSignal,
+} from "@/lib/analysis/procedureInference";
 
 export type LinkedEvidence = {
   url: string;
@@ -16,6 +20,9 @@ export type LinkedEvidence = {
   text: string;
   status: "ok" | "blocked" | "failed" | "skipped";
   notes?: string;
+  reason?: string;
+  directionalSupportOnly?: boolean;
+  inferredProcedureSignals?: ReferencedProcedureSignal[];
 };
 
 type BuildLinkedEvidenceInput = {
@@ -67,14 +74,43 @@ export async function buildLinkedEvidence(
       doc.status === "skipped"
     )
     .sort((a, b) => scoreLinkedDoc(b) - scoreLinkedDoc(a))
-    .map((doc) => ({
-      url: doc.url,
-      finalUrl: doc.finalUrl,
-      title: doc.title,
-      mimeType: doc.mimeType,
-      sourceType: doc.sourceType,
-      text: doc.text,
-      status: doc.status,
-      notes: doc.notes,
-    }));
+    .map((doc) => {
+      const isReferencedButNotRetrieved = doc.status === "skipped";
+      const referencedDescription =
+        "The estimate references OEM or procedure-level documentation that supports this repair path, " +
+        "but the linked document was not retrieved into the file. Treat this as directional support, " +
+        "not fully preserved proof.";
+      const inferredProcedureSignals =
+        isReferencedButNotRetrieved
+          ? inferReferencedProcedureSignals({
+              title: doc.title ?? "Referenced OEM Support",
+              description: doc.notes
+                ? `${doc.notes}. ${referencedDescription}`
+                : referencedDescription,
+              documentType: doc.mimeType || doc.sourceType,
+            })
+          : [];
+
+      return {
+        url: doc.url,
+        finalUrl: doc.finalUrl,
+        title: isReferencedButNotRetrieved
+          ? doc.title || "Referenced OEM Support"
+          : doc.title,
+        mimeType: doc.mimeType,
+        sourceType: doc.sourceType,
+        text: doc.text,
+        status: doc.status,
+        notes: isReferencedButNotRetrieved
+          ? referencedDescription
+          : doc.notes,
+        ...(isReferencedButNotRetrieved
+          ? {
+              reason: "external_document_not_retrieved",
+              directionalSupportOnly: true,
+            }
+          : {}),
+        ...(inferredProcedureSignals.length > 0 ? { inferredProcedureSignals } : {}),
+      };
+    });
 }

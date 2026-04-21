@@ -32,7 +32,7 @@ export function buildCustomerReportPdf({
     header: {
       title: report.title || "Customer Report",
       subtitle:
-        "Simple, customer-friendly explanation of the repair situation and what the next steps mean.",
+        "Straight explanation for the vehicle owner about which repair path looks more accurate, what matters for safety, and the practical options from here.",
       generatedLabel:
         generatedAt ||
         `Generated ${new Date().toLocaleDateString("en-US", {
@@ -50,41 +50,34 @@ export function buildCustomerReportPdf({
     ],
     sections: [
       {
-        title: "Overview",
-        body: report.overview,
+        title: "What This Means For You",
+        body: report.openingSummary,
       },
       {
-        title: "What Was Found",
-        bullets: withFallback(report.whatWasFound),
+        title: "Which Repair Plan Looks Stronger",
+        body: report.whichRepairPlanLooksStronger,
       },
       {
-        title: "What Needs To Happen",
-        bullets: withFallback(report.whatNeedsToHappen),
+        title: "Safety Comes First",
+        body: report.safetyFirst,
       },
       {
-        title: "Why These Repairs Matter",
-        body: report.whyTheseRepairsMatter,
+        title: "What Still Needs Proof",
+        bullets: withFallback(report.whatStillNeedsProof),
       },
       {
-        title: "Safety And Technology",
-        bullets: withFallback(report.safetyAndTechnology),
+        title: "Your Options Moving Forward",
+        bullets: withFallback(report.yourOptions),
       },
       {
-        title: "What May Still Need To Be Confirmed",
-        bullets: withFallback(report.whatMayStillNeedToBeConfirmed),
-      },
-      {
-        title: "What The Customer Should Expect",
-        bullets: withFallback(report.whatTheCustomerShouldExpect),
-      },
-      {
-        title: "Reassurance",
-        body: report.reassurance,
+        title: "Bottom Line",
+        body: report.bottomLine,
       },
     ],
     footer: [
       "This report is intended to explain the repair situation in plain language for the vehicle owner.",
-      "Final repair decisions should be confirmed by the repair facility after inspection, teardown, and required post-repair checks.",
+      "Any policy-related or Pennsylvania-specific options should be read in practical terms and then confirmed against the actual policy and claim record.",
+      "Final repair decisions should still be confirmed by the repair facility after inspection, teardown, measurement, scan, calibration, and post-repair verification as required.",
     ],
   };
 }
