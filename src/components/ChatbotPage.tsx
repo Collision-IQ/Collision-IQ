@@ -58,6 +58,8 @@ type AttachmentTrayItem = {
   hasVision?: boolean;
 };
 
+type LeftPaneMode = "chat" | "review";
+
 type LinkedEvidenceDebugItem = {
   id?: string | null;
   title?: string | null;
@@ -118,7 +120,7 @@ type ImmersiveHeaderChangeReason =
   | "AUTO_REOPEN_UPLOAD_COMPLETE"
   | "RAIL_REOPENED"
   | "USER_OPENED"
-  | "USER_CLOSED"
+  | "USER_COLLAPSED"
   | "CHAT_FOCUS"
   | "CASE_RESET"
   | "END_CHAT";
@@ -171,7 +173,7 @@ export function ChatbotWorkspacePage() {
   const immersiveWorkspaceRef = useRef<HTMLDivElement | null>(null);
   const immersiveToolbarRef = useRef<HTMLDivElement | null>(null);
   const revealScrollTimeoutRef = useRef<number | null>(null);
-  const [activeLeftPane, setActiveLeftPane] = useState<"review" | "chat">("chat");
+  const [leftPaneMode, setLeftPaneMode] = useState<LeftPaneMode>("chat");
   const chatSessionControlsRef = useRef<{
     focusComposer: () => void;
     resetSession: () => void;
@@ -287,8 +289,8 @@ export function ChatbotWorkspacePage() {
   const hasStructuredAnalysis = hasResolvedAnalysis;
 
   const isReviewOpen = hasStructuredAnalysis && isImmersiveHeaderExpanded;
-  const isReviewActive = isReviewOpen && activeLeftPane === "review";
-  const isChatActive = activeLeftPane === "chat";
+  const isReviewActive = isReviewOpen && leftPaneMode === "review";
+  const isChatActive = leftPaneMode === "chat";
   const workspaceRowsClass = hasStructuredAnalysis
     ? "grid-rows-[auto_minmax(0,1fr)_auto]"
     : "grid-rows-[minmax(0,1fr)]";
@@ -393,26 +395,9 @@ export function ChatbotWorkspacePage() {
   }, [analysisReportId, headerPinnedByUser, isImmersiveHeaderExpanded]);
 
   const collapsePreChatHero = useCallback(() => {
-    if (headerPinnedByUser) {
-      console.info("[immersive-header] auto-state skipped", {
-        reason: "user_pinned",
-        requestedState: "collapsed",
-        activeCaseId: analysisReportId,
-        hasStructuredAnalysis,
-        lastHeaderChangeReason,
-      });
-      return;
-    }
-
-    console.info("[immersive-header] auto-state applied", {
-      requestedState: "collapsed",
-      activeCaseId: analysisReportId,
-      hasStructuredAnalysis,
-      lastHeaderChangeReason,
-    });
-    setIsImmersiveHeaderExpanded(false);
-    setLastHeaderChangeReason("AUTO_COLLAPSE_CHAT_ENGAGED");
-  }, [analysisReportId, hasStructuredAnalysis, headerPinnedByUser, lastHeaderChangeReason]);
+    // Removed implicit auto-collapse path.
+    // Left pane mode is controlled only by explicit UI transitions.
+  }, []);
 
   const reopenImmersiveHeaderAfterUpload = useCallback(() => {
     if (headerPinnedByUser) {
@@ -449,18 +434,18 @@ export function ChatbotWorkspacePage() {
     });
 
     immersiveHeaderExpandedRef.current = next;
-    setHeaderPinnedByUser(true);
-    setLastHeaderChangeReason(next ? "USER_OPENED" : "USER_CLOSED");
+    setHeaderPinnedByUser(next);
+    setLastHeaderChangeReason(next ? "USER_OPENED" : "USER_COLLAPSED");
     setIsImmersiveHeaderExpanded(next);
 
     if (next) {
-      setActiveLeftPane("review");
+      setLeftPaneMode("review");
     } else {
-      setActiveLeftPane("chat");
+      setLeftPaneMode("chat");
     }
   }, [analysisReportId, hasStructuredAnalysis, lastHeaderChangeReason]);
 
-  const collapseForChatFocus = useCallback(() => {
+  const activateChatPane = useCallback(() => {
     if (revealScrollTimeoutRef.current !== null) {
       window.clearTimeout(revealScrollTimeoutRef.current);
       revealScrollTimeoutRef.current = null;
@@ -470,7 +455,7 @@ export function ChatbotWorkspacePage() {
     setHeaderPinnedByUser(false);
     setLastHeaderChangeReason("CHAT_FOCUS");
     setIsImmersiveHeaderExpanded(false);
-    setActiveLeftPane("chat");
+    setLeftPaneMode("chat");
     setActiveEvidenceTargetId(null);
   }, []);
 
@@ -478,15 +463,25 @@ export function ChatbotWorkspacePage() {
     if (hasStructuredAnalysis) {
       immersiveHeaderExpandedRef.current = true;
       setIsImmersiveHeaderExpanded(true);
-      setActiveLeftPane("review");
+      setLeftPaneMode("review");
     }
   }, [hasStructuredAnalysis]);
 
   const openChatPane = useCallback(() => {
-    immersiveHeaderExpandedRef.current = false;
-    setIsImmersiveHeaderExpanded(false);
-    setActiveLeftPane("chat");
+    setLeftPaneMode("chat");
   }, []);
+
+  const openReviewPane = useCallback(() => {
+    if (!hasStructuredAnalysis) {
+      return;
+    }
+
+    immersiveHeaderExpandedRef.current = true;
+    setHeaderPinnedByUser(true);
+    setLastHeaderChangeReason("USER_OPENED");
+    setIsImmersiveHeaderExpanded(true);
+    setLeftPaneMode("review");
+  }, [hasStructuredAnalysis]);
 
   const scheduleImmersiveReveal = useCallback((insightKey: InsightKey, delayMs = 180) => {
     if (revealScrollTimeoutRef.current !== null) {
@@ -509,7 +504,7 @@ export function ChatbotWorkspacePage() {
     (insightKey: InsightKey, evidenceTargetId: string | null = null) => {
       setActiveInsightKey(insightKey);
       setActiveEvidenceTargetId(evidenceTargetId);
-      setActiveLeftPane("review");
+      setLeftPaneMode("review");
 
       const wasExpanded = immersiveHeaderExpandedRef.current;
 
@@ -796,7 +791,7 @@ export function ChatbotWorkspacePage() {
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={handleToggleImmersiveHeader}
+                          onClick={isReviewActive ? handleToggleImmersiveHeader : openReviewPane}
                           className="rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-xs font-medium text-white/72 transition hover:bg-white/10 hover:text-white"
                           aria-expanded={isReviewActive}
                           aria-controls="immersive-case-header"
@@ -1054,7 +1049,7 @@ export function ChatbotWorkspacePage() {
                           onWorkspaceDataChange={setWorkspaceData}
                           onSessionReset={handleSessionReset}
                           onChatEngagement={collapsePreChatHero}
-                          onUserPromptSent={collapseForChatFocus}
+                          onUserPromptSent={activateChatPane}
                           onCaseUploadComplete={reopenImmersiveHeaderAfterUpload}
                           onSessionControlsReady={(controls) => {
                             chatSessionControlsRef.current = controls;

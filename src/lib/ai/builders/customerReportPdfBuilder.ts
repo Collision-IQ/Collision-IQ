@@ -75,9 +75,7 @@ export function buildCustomerReportPdf({
       },
     ],
     footer: [
-      "This report is intended to explain the repair situation in plain language for the vehicle owner.",
-      "Any policy-related or Pennsylvania-specific options should be read in practical terms and then confirmed against the actual policy and claim record.",
-      "Final repair decisions should still be confirmed by the repair facility after inspection, teardown, measurement, scan, calibration, and post-repair verification as required.",
+      "This report is intended to explain the repair situation in plain language for the vehicle owner. Final repair decisions should still be confirmed by the repair facility after inspection, teardown, measurement, scan, calibration, and post-repair verification as required.",
     ],
   };
 }

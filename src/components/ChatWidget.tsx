@@ -800,6 +800,18 @@ export default function ChatWidget({
     setOpeningDisclaimerDismissed(true);
   }
 
+  function openAttachmentPreview(attachmentId: string) {
+    setPreviewAttachmentId(attachmentId);
+  }
+
+  function closeAttachmentPreview() {
+    setPreviewAttachmentId(null);
+  }
+
+  function handlePreviewAttachment(attachmentId: string) {
+    openAttachmentPreview(attachmentId);
+  }
+
   const handleEndChat = useCallback(() => {
     const caseIdToClose = analysisReportIdRef.current;
     if (caseIdToClose) {
@@ -1575,7 +1587,7 @@ export default function ChatWidget({
     });
     invalidateStructuredAnalysis();
     if (options?.openPreview ?? true) {
-      setPreviewAttachmentId(replaceId ?? attachmentId);
+      openAttachmentPreview(replaceId ?? attachmentId);
     }
     setReplaceAttachmentId(null);
     firstAttachmentAtRef.current ??= Date.now();
@@ -1610,7 +1622,7 @@ export default function ChatWidget({
         }
       }
       if (!replacementTargetId && newAttachmentIds[0]) {
-        setPreviewAttachmentId(newAttachmentIds[0]);
+        openAttachmentPreview(newAttachmentIds[0]);
       }
       upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
     } catch (err) {
@@ -1649,7 +1661,7 @@ export default function ChatWidget({
         }
       }
       if (!replacementTargetId && newAttachmentIds[0]) {
-        setPreviewAttachmentId(newAttachmentIds[0]);
+        openAttachmentPreview(newAttachmentIds[0]);
       }
       upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
     } catch (err) {
@@ -1670,7 +1682,8 @@ export default function ChatWidget({
     const remaining = attachments.filter((attachment) => attachment.attachmentId !== attachmentId);
     setAttachments(remaining);
     if (previewAttachmentId === attachmentId) {
-      setPreviewAttachmentId(resolveNextPreviewAttachmentId(attachments, attachmentId));
+      const nextPreviewAttachmentId = resolveNextPreviewAttachmentId(attachments, attachmentId);
+      setPreviewAttachmentId(nextPreviewAttachmentId);
     }
 
     onAttachmentChange?.(
@@ -1695,7 +1708,7 @@ export default function ChatWidget({
       }
     });
     setAttachments([]);
-    setPreviewAttachmentId(null);
+    closeAttachmentPreview();
     setReplaceAttachmentId(null);
     onAttachmentChange?.(null);
     onAttachmentsChange?.([]);
@@ -1913,7 +1926,7 @@ export default function ChatWidget({
           attachment={previewAttachment as PreviewAttachment}
           attachments={attachments as PreviewAttachment[]}
           currentIndex={previewAttachmentIndex}
-          onClose={() => setPreviewAttachmentId(null)}
+          onClose={closeAttachmentPreview}
           onNavigate={handlePreviewNavigation}
           onRemove={(attachmentId) => removeAttachment(attachmentId)}
           onReplace={(attachmentId) => handleReplaceAttachment(attachmentId)}
@@ -2271,7 +2284,7 @@ export default function ChatWidget({
                       >
                         <button
                           type="button"
-                          onClick={() => setPreviewAttachmentId(attachment.attachmentId)}
+                          onClick={() => handlePreviewAttachment(attachment.attachmentId)}
                           disabled={disabled}
                           className="min-w-0 flex-1 text-left"
                         >
@@ -2288,7 +2301,7 @@ export default function ChatWidget({
                         <div className="flex items-center gap-2 shrink-0">
                           <button
                             type="button"
-                            onClick={() => setPreviewAttachmentId(attachment.attachmentId)}
+                            onClick={() => handlePreviewAttachment(attachment.attachmentId)}
                             aria-label="Preview attachment"
                             disabled={disabled}
                             className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"

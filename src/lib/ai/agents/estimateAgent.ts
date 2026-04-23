@@ -18,10 +18,27 @@ export type EstimateAgentFinding = {
   cost: EstimateAgentInsight | null;
 };
 
+export type EstimateAgentInput = {
+  shopEstimateText?: string;
+  insurerEstimateText?: string;
+  complianceRules?: string;
+};
+
 export async function runEstimateAgent(
-  shopEstimateText: string,
-  insurerEstimateText: string
+  shopEstimateTextOrInput: string | EstimateAgentInput,
+  insurerEstimateTextArg?: string
 ): Promise<EstimateAgentFinding> {
+  const { shopEstimateText, insurerEstimateText } =
+    typeof shopEstimateTextOrInput === "string"
+      ? {
+          shopEstimateText: shopEstimateTextOrInput,
+          insurerEstimateText: insurerEstimateTextArg ?? "",
+        }
+      : {
+          shopEstimateText: shopEstimateTextOrInput.shopEstimateText ?? "",
+          insurerEstimateText: shopEstimateTextOrInput.insurerEstimateText ?? "",
+        };
+
   const shop = parseEstimate(shopEstimateText);
   const insurer = parseEstimate(insurerEstimateText);
   const shopOperations = extractEstimateOps(shopEstimateText);

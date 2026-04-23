@@ -8,6 +8,7 @@ import { recordUsage } from "@/lib/billing/usage";
 import { incrementUsage } from "@/lib/usage";
 import { generateCustomerReport } from "@/lib/ai/generateCustomerReport";
 import { renderCustomerReportHtml } from "@/lib/ai/renderCustomerReportHtml";
+import { finalizeExportPayload } from "@/lib/ai/policy/finalizeExportPayload";
 import { collisionIqModels } from "@/lib/modelConfig";
 import { openai } from "@/lib/openai";
 
@@ -115,13 +116,15 @@ export async function POST(req: Request) {
       await incrementUsage(user.id, "REPORT_EXPORT");
     }
 
-    return NextResponse.json({
+    const exportPayload = finalizeExportPayload({
       ok: true,
       fileName: "customer-report.pdf",
       mimeType: "application/pdf",
       html,
       report,
     });
+
+    return NextResponse.json(exportPayload);
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
