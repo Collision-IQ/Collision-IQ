@@ -12,6 +12,10 @@ import {
   mergeVehicleIdentity,
   normalizeVehicleIdentity,
 } from "../vehicleContext";
+import {
+  summarizeTextMetadataForLog,
+  summarizeVehicleForLog,
+} from "../safeVehicleLog";
 
 export function normalizeReportToAnalysisResult(
   report: RepairIntelligenceReport
@@ -43,16 +47,16 @@ export function normalizeReportToAnalysisResult(
   );
 
   console.info("[vehicle-label-trace:raw-extraction]", {
-    reportVehicle: normalizeVehicleIdentity(report.vehicle) ?? null,
-    analysisVehicle: normalizeVehicleIdentity(report.analysis?.vehicle) ?? null,
-    extractedFromEstimateText: normalizeVehicleIdentity(inferredVehicle) ?? null,
-    estimateEvidencePreview: estimateEvidenceText.slice(0, 240) || null,
+    reportVehicle: summarizeVehicleForLog(normalizeVehicleIdentity(report.vehicle)),
+    analysisVehicle: summarizeVehicleForLog(normalizeVehicleIdentity(report.analysis?.vehicle)),
+    extractedFromEstimateText: summarizeVehicleForLog(normalizeVehicleIdentity(inferredVehicle)),
+    estimateEvidenceText: summarizeTextMetadataForLog(estimateEvidenceText),
   });
 
   console.info("[vehicle-label-trace:normalized-analysis]", {
-    structuredVehicle: structuredVehicle ?? null,
-    guardedInferredVehicle: guardedInferredVehicle ?? null,
-    normalizedVehicle: normalizedVehicle ?? null,
+    structuredVehicle: summarizeVehicleForLog(structuredVehicle),
+    guardedInferredVehicle: summarizeVehicleForLog(guardedInferredVehicle),
+    normalizedVehicle: summarizeVehicleForLog(normalizedVehicle),
   });
 
   if (report.analysis) {

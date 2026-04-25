@@ -129,6 +129,10 @@ export function buildCarrierReport({
         label: isComparison ? "Primary Dispute Areas" : "Primary Review Focus",
         value: strongestDisputes,
       },
+      {
+        label: "Adjusted Confidence",
+        value: exportModel.confidenceIntegrity.adjustedConfidence,
+      },
     ],
     sections: [
       ...(report?.reassessmentDelta &&
@@ -164,14 +168,40 @@ export function buildCarrierReport({
           exportModel.vehicle.trim ? `Trim: ${exportModel.vehicle.trim}.` : undefined,
           resolveCanonicalVin(exportModel) ? `VIN: ${resolveCanonicalVin(exportModel)}.` : undefined,
           `Confidence: ${formatVehicleConfidence(exportModel)}.`,
-          report ? `Structured analysis confidence: ${capitalize(report.summary.confidence)}.` : undefined,
+          `Adjusted confidence: ${exportModel.confidenceIntegrity.adjustedConfidence}.`,
+          `Evidence completeness: ${formatCompletenessStatus(exportModel.confidenceIntegrity.completenessStatus)}.`,
+          report ? `Base structured confidence: ${capitalize(report.summary.confidence)}.` : undefined,
           report ? `Evidence quality: ${capitalize(report.summary.evidenceQuality)}.` : undefined,
         ]),
+      },
+      {
+        title: "File Coverage / Evidence Completeness",
+        bullets: buildConfidenceIntegrityBullets(exportModel.confidenceIntegrity),
       },
       {
         title: "Key Findings / What Stands Out",
         body: exportModel.repairPosition,
       },
+      ...(exportModel.findingReasoning.length > 0
+        ? [{
+            title: "Finding Reasoning",
+            bullets: exportModel.findingReasoning.slice(0, 6).map((finding) =>
+              `${finding.priorityRank ?? ""}. ${finding.issue} | Why: ${finding.why_it_matters} | Proof: ${finding.what_proves_it} | Next: ${finding.next_action} | Evidence: ${capitalize(finding.evidenceLevel)}`
+            ),
+          }]
+        : []),
+      ...(exportModel.retrievalSummary
+        ? [{
+            title: "Retrieval Summary",
+            bullets: buildRetrievalSummaryBullets(exportModel.retrievalSummary),
+          }]
+        : []),
+      ...(exportModel.disputeStrategy
+        ? [{
+            title: "Dispute Strategy",
+            bullets: buildDisputeStrategyBullets(exportModel.disputeStrategy),
+          }]
+        : []),
       {
         title: isComparison ? "Repair Strategy Comparison" : "Repair Review Summary",
         bullets: compact([
@@ -180,7 +210,7 @@ export function buildCarrierReport({
           topItems.length > 0
             ? isComparison
               ? `The clearest dispute areas are ${joinHumanList(topItems.slice(0, 4).map((item) => displayOperationLabel(item.title).toLowerCase()))}.`
-              : `Support remains open on ${joinHumanList(topItems.slice(0, 4).map((item) => displayOperationLabel(item.title).toLowerCase()))}.`
+              : `The unresolved review items are ${joinHumanList(topItems.slice(0, 4).map((item) => displayOperationLabel(item.title).toLowerCase()))}.`
             : undefined,
         ]),
       },
@@ -266,6 +296,65 @@ function buildCaseUpdateBullets(report: RepairIntelligenceReport): string[] {
   ]);
 }
 
+function buildRetrievalSummaryBullets(
+  summary: NonNullable<ExportModel["retrievalSummary"]>
+): string[] {
+  return compact([
+    `Drive docs used: ${summary.driveDocsUsed}.`,
+    `Web sources used: ${summary.webSourcesUsed}.`,
+    `Serper status: ${capitalize(summary.serperStatus.toLowerCase())}.`,
+    `OEM evidence found: ${summary.oemEvidenceFound ? "Yes" : "No"}.`,
+    ...summary.sourcesInfluencingFindings.slice(0, 6).map(
+      (source) =>
+        `${source.title} (${source.sourceType}) influenced ${source.relatedFindingIds.length} finding(s).`
+    ),
+  ]);
+}
+
+function buildConfidenceIntegrityBullets(
+  integrity: ExportModel["confidenceIntegrity"]
+): string[] {
+  return compact([
+    `Base confidence: ${integrity.baseConfidence}.`,
+    `Adjusted confidence: ${integrity.adjustedConfidence}.`,
+    `Completeness: ${formatCompletenessStatus(integrity.completenessStatus)}.`,
+    `Uploaded files reviewed: ${integrity.uploadedFileCount}.`,
+    integrity.uploadLimitReached ? "Upload cap reached for this review." : "Upload cap not reached.",
+    integrity.userIndicatedMoreFiles ? "User indicated more files exist outside the current upload set." : undefined,
+    integrity.missingCriticalEvidence.length > 0
+      ? `Missing proof: ${integrity.missingCriticalEvidence.join("; ")}.`
+      : undefined,
+    ...integrity.confidencePenalties.map((penalty) =>
+      `${penalty.reason}: -${penalty.impact}. ${penalty.explanation}`
+    ),
+    integrity.userFacingDisclosure,
+  ]);
+}
+
+function buildDisputeStrategyBullets(
+  strategy: NonNullable<ExportModel["disputeStrategy"]>
+): string[] {
+  return compact([
+    `Leverage score: ${strategy.leverageScore}/100.`,
+    strategy.priorityFindings.length > 0
+      ? `Priority rank: ${strategy.priorityFindings.join("; ")}.`
+      : undefined,
+    strategy.easyWins.length > 0
+      ? `Easy wins: ${strategy.easyWins.join("; ")}.`
+      : undefined,
+    strategy.hardFights.length > 0
+      ? `Hard fights: ${strategy.hardFights.join("; ")}.`
+      : undefined,
+    ...strategy.recommendedSequence.slice(0, 5).map((item, index) =>
+      `${index + 1}. ${item}`
+    ),
+  ]);
+}
+
+function formatCompletenessStatus(status: ExportModel["confidenceIntegrity"]["completenessStatus"]): string {
+  return status.charAt(0) + status.slice(1).toLowerCase();
+}
+
 function buildExecutiveSummary(params: {
   isComparison: boolean;
   credibilityConclusion: string;
@@ -277,7 +366,7 @@ function buildExecutiveSummary(params: {
     params.whyItWins,
     params.isComparison
       ? `The biggest remaining differences are ${params.strongestDisputes}.`
-      : `Support remains open on ${params.strongestDisputes}.`,
+      : `The unresolved review items are ${params.strongestDisputes}.`,
   ].filter(Boolean);
 
   const kept: string[] = [];
@@ -337,7 +426,7 @@ function buildCredibilityConclusion(
   if (exportModel.supplementItems.length > 0) {
     return isComparison
       ? "The estimates should be evaluated by which items are supported by documented procedures, verifications, and scope evidence."
-      : "The file documents a credible preliminary repair plan, with several repair, verification, or documentation items still needing clearer support.";
+      : "The current file identifies specific repair, verification, or documentation items that need line-item support.";
   }
 
   return isComparison

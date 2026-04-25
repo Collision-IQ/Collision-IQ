@@ -8,6 +8,7 @@ import type {
 import { getPlanAnalysisCap } from "@/lib/billing/plans";
 import { getOrCreateAppUser } from "@/lib/auth/get-or-create-app-user";
 import { prisma } from "@/lib/prisma";
+export { canAccessFeature } from "@/lib/featureAccess";
 
 export type PlanTier = "none" | "starter" | "pro" | "team";
 export type FeatureKey =

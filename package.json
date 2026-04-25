@@ -7,7 +7,8 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint .",
-    "test:vehicle-identity": "node scripts/run-vehicle-identity-tests.cjs"
+    "test:vehicle-identity": "node scripts/run-vehicle-identity-tests.cjs",
+    "test:claim-specific-reports": "node src/lib/ai/claimSpecificReportRegression.test.cjs"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.19",

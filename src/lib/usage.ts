@@ -43,19 +43,24 @@ type UsageCounterDelegate = {
 
 function getUsageCounterDelegate(): UsageCounterDelegate | null {
   try {
-    const candidate = (prisma as any).usageCounter;
+    const candidate = (prisma as unknown as { usageCounter?: unknown }).usageCounter;
     if (!candidate) {
       return null;
     }
 
+    if (typeof candidate !== "object") {
+      return null;
+    }
+
+    const delegate = candidate as Partial<UsageCounterDelegate>;
     if (
-      typeof candidate.upsert !== "function" ||
-      typeof candidate.findUnique !== "function"
+      typeof delegate.upsert !== "function" ||
+      typeof delegate.findUnique !== "function"
     ) {
       return null;
     }
 
-    return candidate as UsageCounterDelegate;
+    return delegate as UsageCounterDelegate;
   } catch (error) {
     console.error("[usage:getUsageCounterDelegate] fail-open", { error });
     return null;

@@ -1,6 +1,6 @@
 import type { ExportModel } from "./buildExportModel";
 
-type DeterminationInput = Omit<ExportModel, "determination">;
+type DeterminationInput = Omit<ExportModel, "determination" | "collisionSnapshot">;
 
 export type DeterminationStatus =
   | "repairable"

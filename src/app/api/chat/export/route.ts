@@ -8,6 +8,7 @@ import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import { UsageAccessError, recordUsage } from "@/lib/billing/usage";
 import { getUsageCount, incrementUsage } from "@/lib/usage";
 import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
+import { canAccessFeature } from "@/lib/featureAccess";
 import { jsPDF } from "jspdf";
 
 export const runtime = "nodejs";
@@ -29,7 +30,7 @@ async function requireExportAccess() {
   const { user, isPlatformAdmin } = await requireCurrentUser();
   const entitlements = await getCurrentEntitlements();
 
-  if (!isPlatformAdmin && !entitlements.canExport) {
+  if (!isPlatformAdmin && !canAccessFeature(entitlements.plan, "full_report_export")) {
     return NextResponse.json(
       { error: "EXPORT_NOT_INCLUDED_IN_PLAN" },
       { status: 403 }
@@ -184,15 +185,18 @@ function buildChatExportPdf(text: string): ArrayBuffer {
   const bottomMargin = 18;
   const contentBottomY = pageHeight - bottomMargin;
   const blocks = parsePdfMessageBlocks(text);
+  const setPdfFont = (style: "normal" | "bold" = "normal") => {
+    doc.setFont("helvetica", style);
+  };
 
   const drawPageChrome = (showIntro = false) => {
-    doc.setFont("Helvetica", "Bold");
+    setPdfFont("bold");
     doc.setFontSize(HEADER_FONT);
     doc.setTextColor(35, 35, 35);
     doc.text("Redacted Chat Export", marginX, showIntro ? 18 : 14);
 
     if (showIntro) {
-      doc.setFont("Helvetica", "Normal");
+      setPdfFont();
       doc.setFontSize(BODY_FONT);
       doc.text(
         "This download preserves the chat content while removing sensitive values from the exported copy.",
@@ -202,7 +206,7 @@ function buildChatExportPdf(text: string): ArrayBuffer {
       );
     }
 
-    doc.setFont("Helvetica", "Normal");
+    setPdfFont();
     doc.setFontSize(BODY_FONT);
     doc.setTextColor(120, 120, 120);
     doc.text(`Page ${doc.getCurrentPageInfo().pageNumber}`, pageWidth - marginX, pageHeight - 8, {
@@ -240,13 +244,13 @@ function buildChatExportPdf(text: string): ArrayBuffer {
     doc.setFillColor(238, 241, 245);
     doc.roundedRect(marginX, labelBoxY, labelWidth, labelHeight, 1.4, 1.4, "F");
     doc.setTextColor(67, 76, 94);
-    doc.setFont("Helvetica", "Bold");
+    setPdfFont("bold");
     doc.setFontSize(BODY_FONT);
     doc.text(block.role, marginX + 3, labelTextY);
 
     y += bodyTopGap;
     doc.setTextColor(35, 35, 35);
-    doc.setFont("Times", "Normal");
+    setPdfFont();
     doc.setFontSize(BODY_FONT);
 
     for (let index = 0; index < bodyLines.length; index += 1) {

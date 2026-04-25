@@ -11,6 +11,7 @@ import { renderCustomerReportHtml } from "@/lib/ai/renderCustomerReportHtml";
 import { finalizeExportPayload } from "@/lib/ai/policy/finalizeExportPayload";
 import { collisionIqModels } from "@/lib/modelConfig";
 import { openai } from "@/lib/openai";
+import { canAccessFeature } from "@/lib/featureAccess";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,7 +34,7 @@ export async function POST(req: Request) {
     const { user, isPlatformAdmin } = await requireCurrentUser();
     const entitlements = await getCurrentEntitlements();
 
-    if (!isPlatformAdmin && !entitlements.canUseCustomerReport) {
+    if (!isPlatformAdmin && !canAccessFeature(entitlements.plan, "customer_report_export")) {
       return NextResponse.json({ error: "PRO_REQUIRED" }, { status: 403 });
     }
 

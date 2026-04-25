@@ -21,6 +21,8 @@ import WorkspacePanel from "@/components/WorkspacePanel";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import { getNormalizedDetermination } from "@/lib/analysis/getNormalizedDetermination";
+import { canAccessFeature } from "@/lib/featureAccess";
+import { emitSafeCrmEventFromClient } from "@/lib/crm/events";
 import {
   buildExportModel,
   COLLISION_ACADEMY_HANDOFF_URL,
@@ -29,10 +31,22 @@ import {
   resolveCanonicalVin,
 } from "@/lib/ai/builders/buildExportModel";
 import { buildCarrierReport } from "@/lib/ai/builders/carrierPdfBuilder";
+import { buildCollisionSnapshot, type CollisionSnapshot } from "@/lib/ai/builders/collisionSnapshot";
+import {
+  buildCollisionSnapshotPdf,
+  buildCollisionSnapshotPdfFromSnapshot,
+} from "@/lib/ai/builders/collisionSnapshotPdfBuilder";
 import { buildCustomerReportPdf } from "@/lib/ai/builders/customerReportPdfBuilder";
 import { buildDisputeIntelligencePdf } from "@/lib/ai/builders/disputeIntelligencePdfBuilder";
-import { exportCarrierPDF } from "@/lib/ai/builders/exportPdf";
+import { buildCarrierPdfBlob, exportCarrierPDF } from "@/lib/ai/builders/exportPdf";
 import { buildRebuttalEmailPdf } from "@/lib/ai/builders/rebuttalEmailPdfBuilder";
+import {
+  buildSnapshotEmailBody,
+  buildSnapshotPlainText,
+  buildSnapshotSendSafeEvent,
+  sanitizeSnapshotOutboundText,
+  type SnapshotDestinationType,
+} from "@/lib/ai/builders/snapshotShare";
 import {
   normalizeExternalDocumentDisplay,
   redactExternalDocumentUrls,
@@ -674,24 +688,38 @@ export function ChatbotWorkspacePage() {
     (viewerAccess?.plan === "trial" || viewerAccess?.activeSubscriptionStatus === "TRIALING");
   const canViewSupplementLines = featureFlags?.supplement_lines ?? false;
   const canViewNegotiationDraft = featureFlags?.negotiation_draft ?? false;
-  const canUseBasicPdfExport = featureFlags?.basic_pdf_export ?? true;
-  const canUseRebuttalEmail = featureFlags?.rebuttal_email ?? false;
-  const canUseCustomerReport = viewerAccess?.canUseCustomerReport ?? false;
+  const plan = viewerAccess?.plan ?? "none";
+  const canUseSnapshotExport = canAccessFeature(plan, "snapshot_export");
+  const canUseBasicPdfExport = canAccessFeature(plan, "full_report_export");
+  const canUseDisputeReportExport = canAccessFeature(plan, "dispute_report_export");
+  const canUseRebuttalEmail = canAccessFeature(plan, "rebuttal_export");
+  const canUseCustomerReport = canAccessFeature(plan, "customer_report_export");
   const followUpExports = [
     hasResolvedAnalysis
       ? { label: "Chat Export", type: "pdf" }
       : null,
+    canUseSnapshotExport
+      ? { label: "1-Page Snapshot", type: "pdf" }
+      : null,
     canUseBasicPdfExport
       ? { label: "Collision Repair Intelligence Report", type: "pdf" }
+      : hasResolvedAnalysis
+        ? { label: "Collision Repair Intelligence Report (Pro)", type: "locked" }
       : null,
     canUseRebuttalEmail
       ? { label: "Rebuttal Email", type: "pdf" }
+      : hasResolvedAnalysis
+        ? { label: "Rebuttal Email (Pro)", type: "locked" }
       : null,
-    canUseBasicPdfExport
+    canUseDisputeReportExport
       ? { label: "Dispute Intelligence Report", type: "pdf" }
+      : hasResolvedAnalysis
+        ? { label: "Dispute Intelligence Report (Pro)", type: "locked" }
       : null,
     canUseCustomerReport
       ? { label: "Customer Report", type: "pdf" }
+      : hasResolvedAnalysis
+        ? { label: "Customer Report (Pro)", type: "locked" }
       : null,
   ].filter(Boolean) as Array<{ label: string; type?: string; url?: string }>;
   const canonicalWorkspaceCounts = useMemo(
@@ -836,6 +864,7 @@ export function ChatbotWorkspacePage() {
                     activeInsightKey={activeInsightKey}
                     onActiveInsightChange={setActiveInsightKey}
                     canRenderExports={hasResolvedAnalysis}
+                    canUseFullReportExports={canUseBasicPdfExport}
                     evidenceModel={evidenceModel}
                     activeEvidenceTargetId={activeEvidenceTargetId}
                     onEvidenceSelect={handleEvidenceSelect}
@@ -1093,9 +1122,12 @@ export function ChatbotWorkspacePage() {
             analysisResult={analysisResult}
             workspaceData={workspaceData}
             canViewSupplementLines={canViewSupplementLines}
-            canViewNegotiationDraft={canViewNegotiationDraft}
-            canUseBasicPdfExport={canUseBasicPdfExport}
-            canUseRebuttalEmail={canUseRebuttalEmail}
+                          canViewNegotiationDraft={canViewNegotiationDraft}
+                          plan={plan}
+                          canUseSnapshotExport={canUseSnapshotExport}
+                          canUseBasicPdfExport={canUseBasicPdfExport}
+                          canUseDisputeReportExport={canUseDisputeReportExport}
+                          canUseRebuttalEmail={canUseRebuttalEmail}
             canUseCustomerReport={canUseCustomerReport}
             onCustomerReportLocked={() => setUpgradeModalOpen(true)}
             activeInsightKey={activeInsightKey}
@@ -1253,7 +1285,10 @@ function RailContent({
   workspaceData,
   canViewSupplementLines,
   canViewNegotiationDraft,
+  plan,
+  canUseSnapshotExport,
   canUseBasicPdfExport,
+  canUseDisputeReportExport,
   canUseRebuttalEmail,
   canUseCustomerReport,
   onCustomerReportLocked,
@@ -1276,7 +1311,10 @@ function RailContent({
   workspaceData: WorkspaceData | null;
   canViewSupplementLines: boolean;
   canViewNegotiationDraft: boolean;
+  plan: AccountEntitlements["plan"] | "none";
+  canUseSnapshotExport: boolean;
   canUseBasicPdfExport: boolean;
+  canUseDisputeReportExport: boolean;
   canUseRebuttalEmail: boolean;
   canUseCustomerReport: boolean;
   onCustomerReportLocked: () => void;
@@ -1289,9 +1327,30 @@ function RailContent({
   const sectionRefs = useRef<Partial<Record<InsightKey, HTMLDivElement | null>>>({});
   const [isGeneratingCustomerReport, setIsGeneratingCustomerReport] = useState(false);
   const [customerReportError, setCustomerReportError] = useState<string | null>(null);
+  const [snapshotPreviewOpen, setSnapshotPreviewOpen] = useState(false);
+  const [snapshotSendTarget, setSnapshotSendTarget] = useState<SnapshotDestinationType | null>(null);
+  const [snapshotRecipientEmail, setSnapshotRecipientEmail] = useState("");
+  const [snapshotSubject, setSnapshotSubject] = useState("");
+  const [snapshotMessage, setSnapshotMessage] = useState("");
+  const [snapshotReviewed, setSnapshotReviewed] = useState(false);
+  const [snapshotStatus, setSnapshotStatus] = useState<string | null>(null);
+  const [snapshotSending, setSnapshotSending] = useState(false);
   function registerSectionRef(insightKey: InsightKey, node: HTMLDivElement | null) {
     sectionRefs.current[insightKey] = node;
   }
+  const snapshot = useMemo(
+    () =>
+      hasResolvedAnalysis
+        ? buildCollisionSnapshot({
+            renderModel,
+            estimateComparisons:
+              workspaceData?.estimateComparisons ??
+              normalizedResult?.estimateComparisons ??
+              analysisResult?.analysis?.estimateComparisons,
+          })
+        : null,
+    [analysisResult, hasResolvedAnalysis, normalizedResult, renderModel, workspaceData]
+  );
   const featuredRecommendation = renderModel.supplementItems[0];
   const remainingRecommendations = renderModel.supplementItems.slice(1);
   const valuationLowConfidence = isLowConfidenceValuation(renderModel);
@@ -1333,6 +1392,149 @@ function RailContent({
     ...renderModel.negotiationPlaybook.suggestedSequence,
     ...renderModel.negotiationPlaybook.documentationNeeded,
   ]).slice(0, 5);
+  const snapshotSendReady =
+    Boolean(snapshotSendTarget) &&
+    isValidEmail(snapshotRecipientEmail) &&
+    Boolean(snapshotSubject.trim()) &&
+    Boolean(snapshotMessage.trim()) &&
+    snapshotReviewed &&
+    !snapshotSending;
+
+  function openSnapshotPreview() {
+    if (!snapshot) {
+      setSnapshotStatus("Snapshot could not be generated from the current report.");
+      return;
+    }
+
+    setSnapshotStatus(null);
+    setSnapshotPreviewOpen(true);
+    emitSafeCrmEventFromClient({
+      event: "snapshot_created",
+      plan,
+      adjustedConfidence: snapshot.evidenceCompleteness.adjustedConfidence,
+      completenessStatus: snapshot.evidenceCompleteness.completenessStatus,
+      topDisputeCount: snapshot.topDisputeItems.length,
+      uploadLimitReached: snapshot.evidenceCompleteness.uploadLimitReached,
+      userIndicatedMoreFiles: snapshot.evidenceCompleteness.userIndicatedMoreFiles,
+    });
+  }
+
+  function downloadSnapshotPdf() {
+    if (!snapshot) {
+      setSnapshotStatus("Snapshot could not be generated from the current report.");
+      return;
+    }
+
+    void exportCarrierPDF(buildCollisionSnapshotPdfFromSnapshot(snapshot));
+    emitSafeCrmEventFromClient({
+      event: "snapshot_downloaded",
+      plan,
+      exportType: "snapshot",
+      adjustedConfidence: snapshot.evidenceCompleteness.adjustedConfidence,
+      completenessStatus: snapshot.evidenceCompleteness.completenessStatus,
+      topDisputeCount: snapshot.topDisputeItems.length,
+      uploadLimitReached: snapshot.evidenceCompleteness.uploadLimitReached,
+      userIndicatedMoreFiles: snapshot.evidenceCompleteness.userIndicatedMoreFiles,
+    });
+  }
+
+  async function copySnapshotSummary() {
+    if (!snapshot) {
+      setSnapshotStatus("Snapshot could not be generated from the current report.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(buildSnapshotPlainText(snapshot));
+      setSnapshotStatus("Redacted snapshot summary copied.");
+      emitSafeCrmEventFromClient({
+        event: "snapshot_copied",
+        plan,
+        adjustedConfidence: snapshot.evidenceCompleteness.adjustedConfidence,
+        completenessStatus: snapshot.evidenceCompleteness.completenessStatus,
+        topDisputeCount: snapshot.topDisputeItems.length,
+        uploadLimitReached: snapshot.evidenceCompleteness.uploadLimitReached,
+        userIndicatedMoreFiles: snapshot.evidenceCompleteness.userIndicatedMoreFiles,
+      });
+    } catch {
+      setSnapshotStatus("Snapshot summary could not be copied.");
+    }
+  }
+
+  function openSnapshotSend(target: SnapshotDestinationType) {
+    if (!snapshot) {
+      setSnapshotStatus("Snapshot could not be generated from the current report.");
+      return;
+    }
+
+    setSnapshotSendTarget(target);
+    setSnapshotRecipientEmail("");
+    setSnapshotSubject(
+      target === "customer"
+        ? "Collision Snapshot for Your Vehicle"
+        : "Collision Snapshot - Repair Plan and Estimate Comparison"
+    );
+    setSnapshotMessage(buildSnapshotEmailBody(snapshot, target));
+    setSnapshotReviewed(false);
+    setSnapshotStatus(null);
+  }
+
+  async function sendSnapshot() {
+    if (!snapshot || !snapshotSendTarget || !snapshotSendReady) {
+      return;
+    }
+
+    setSnapshotSending(true);
+    setSnapshotStatus(null);
+
+    try {
+      const document = buildCollisionSnapshotPdfFromSnapshot(snapshot);
+      const pdfBlob = await buildCarrierPdfBlob(document);
+      const pdfBase64 = await blobToBase64(pdfBlob);
+      logSnapshotSendAttempt(snapshot, snapshotSendTarget, Boolean(pdfBase64));
+
+      const response = await fetch("/api/snapshot/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          destinationType: snapshotSendTarget,
+          recipientEmail: snapshotRecipientEmail,
+          subject: snapshotSubject,
+          message: sanitizeSnapshotOutboundText(snapshotMessage),
+          snapshot,
+          pdfBase64,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Snapshot email failed.");
+      }
+
+      const result = (await response.json()) as { deliveryMode?: "email" | "manual"; message?: string };
+      setSnapshotStatus(
+        result.deliveryMode === "manual"
+          ? result.message || "Email provider is not configured. Download the PDF and send manually."
+          : "Redacted snapshot sent."
+      );
+      emitSafeCrmEventFromClient({
+        event: snapshotSendTarget === "customer" ? "snapshot_sent_customer" : "snapshot_sent_carrier",
+        plan,
+        destinationType: snapshotSendTarget,
+        exportType: "snapshot",
+        adjustedConfidence: snapshot.evidenceCompleteness.adjustedConfidence,
+        completenessStatus: snapshot.evidenceCompleteness.completenessStatus,
+        topDisputeCount: snapshot.topDisputeItems.length,
+        uploadLimitReached: snapshot.evidenceCompleteness.uploadLimitReached,
+        userIndicatedMoreFiles: snapshot.evidenceCompleteness.userIndicatedMoreFiles,
+      });
+      setSnapshotSendTarget(null);
+    } catch {
+      setSnapshotStatus("Snapshot was not sent. Please download the PDF and send manually.");
+    } finally {
+      setSnapshotSending(false);
+    }
+  }
 
   useEffect(() => {
     if (!activeInsightKey) return;
@@ -1458,6 +1660,10 @@ function RailContent({
         </section>
       )}
 
+      {hasResolvedAnalysis ? (
+        <ConfidenceIntegrityCard integrity={renderModel.confidenceIntegrity} />
+      ) : null}
+
       {hasResolvedAnalysis && supportSignals.length > 0 ? (
         <RailInsightSection
           insightKey="support_strengths"
@@ -1484,10 +1690,21 @@ function RailContent({
             activeEvidenceTargetId={activeEvidenceTargetId}
             onEvidenceSelect={onEvidenceSelect}
           />
+          {renderModel.findingReasoning.length > 0 ? (
+            <FindingReasoningCard findings={renderModel.findingReasoning} />
+          ) : null}
+          {renderModel.retrievalSummary ? (
+            <RetrievalSummaryCard summary={renderModel.retrievalSummary} />
+          ) : null}
+          {renderModel.disputeStrategy ? (
+            <DisputeStrategyCard strategy={renderModel.disputeStrategy} />
+          ) : null}
         </RailInsightSection>
       ) : null}
 
-      {hasResolvedAnalysis && canViewSupplementLines ? <LineStatusCard /> : null}
+      {hasResolvedAnalysis && canViewSupplementLines && renderModel.findingReasoning.length === 0 ? (
+        <LineStatusCard />
+      ) : null}
 
       {hasResolvedAnalysis && canViewSupplementLines ? (
         <RailInsightSection
@@ -1515,7 +1732,9 @@ function RailContent({
           onActivate={onInsightSelect}
         >
           {recommendedMoves.length > 0 ? <NextMovesCard items={recommendedMoves} /> : null}
-          {hasResolvedAnalysis && canViewSupplementLines ? <NegotiationPostureCard /> : null}
+          {hasResolvedAnalysis && canViewSupplementLines && !renderModel.disputeStrategy ? (
+            <NegotiationPostureCard />
+          ) : null}
         </RailInsightSection>
       ) : null}
 
@@ -1637,96 +1856,164 @@ function RailContent({
           </div>
           <div className="grid gap-2">
             <button
-              onClick={() =>
-                exportReport(
-                  renderModel,
-                  normalizedResult,
-                  analysisResult,
-                  panel,
-                  analysisText,
-                  workspaceData
-                )
-              }
-              disabled={!canUseBasicPdfExport}
+              onClick={openSnapshotPreview}
+              disabled={!canUseSnapshotExport}
               className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Collision Repair Intelligence Report
+              1-Page Snapshot
             </button>
-            <button
-              onClick={() =>
-                exportPdfVariant({
-                  normalizedResult,
-                  analysisResult,
-                  panel,
-                  analysisText,
-                  workspaceData,
-                  renderModel,
-                  variant: "rebuttal",
-                })
-              }
-              disabled={!canUseRebuttalEmail}
-              className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {canUseRebuttalEmail ? "Rebuttal Email" : "Rebuttal Email (Pro)"}
-            </button>
-            <button
-              onClick={() =>
-                exportPdfVariant({
-                  normalizedResult,
-                  analysisResult,
-                  panel,
-                  analysisText,
-                  workspaceData,
-                  renderModel,
-                  variant: "dispute_intelligence",
-                })
-              }
-              disabled={!canUseBasicPdfExport}
-              className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Dispute Intelligence Report
-            </button>
-            <button
-              type="button"
-              aria-disabled={!canUseCustomerReport || isGeneratingCustomerReport}
-              onClick={() => {
-                if (isGeneratingCustomerReport) {
-                  return;
-                }
+            {canUseBasicPdfExport ? (
+              <button
+                onClick={() => {
+                  exportReport(
+                    renderModel,
+                    normalizedResult,
+                    analysisResult,
+                    panel,
+                    analysisText,
+                    workspaceData
+                  );
+                  emitSafeCrmEventFromClient({
+                    event: "report_generated",
+                    plan,
+                    exportType: "full_report",
+                  });
+                }}
+                className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+              >
+                Collision Repair Intelligence Report
+              </button>
+            ) : null}
+            {canUseRebuttalEmail ? (
+              <button
+                onClick={() => {
+                  exportPdfVariant({
+                    normalizedResult,
+                    analysisResult,
+                    panel,
+                    analysisText,
+                    workspaceData,
+                    renderModel,
+                    variant: "rebuttal",
+                  });
+                  emitSafeCrmEventFromClient({
+                    event: "report_generated",
+                    plan,
+                    exportType: "rebuttal",
+                  });
+                }}
+                className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+              >
+                Rebuttal Email
+              </button>
+            ) : null}
+            {canUseDisputeReportExport ? (
+              <button
+                onClick={() => {
+                  exportPdfVariant({
+                    normalizedResult,
+                    analysisResult,
+                    panel,
+                    analysisText,
+                    workspaceData,
+                    renderModel,
+                    variant: "dispute_intelligence",
+                  });
+                  emitSafeCrmEventFromClient({
+                    event: "report_generated",
+                    plan,
+                    exportType: "dispute_report",
+                  });
+                }}
+                className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+              >
+                Dispute Intelligence Report
+              </button>
+            ) : null}
+            {canUseCustomerReport ? (
+              <button
+                type="button"
+                aria-disabled={isGeneratingCustomerReport}
+                onClick={() => {
+                  if (isGeneratingCustomerReport) {
+                    return;
+                  }
 
-                if (!canUseCustomerReport) {
-                  onCustomerReportLocked();
-                  return;
-                }
-
-                void exportCustomerReport({
-                  renderModel,
-                  normalizedResult,
-                  analysisResult,
-                  panel,
-                  analysisText,
-                  workspaceData,
-                  onStart: () => {
-                    setCustomerReportError(null);
-                    setIsGeneratingCustomerReport(true);
-                  },
-                  onComplete: () => setIsGeneratingCustomerReport(false),
-                  onLocked: onCustomerReportLocked,
-                  onError: setCustomerReportError,
-                });
-              }}
-              className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-            >
-              {isGeneratingCustomerReport ? "Generating Customer Report..." : "Customer Report"}
-            </button>
+                  void exportCustomerReport({
+                    renderModel,
+                    normalizedResult,
+                    analysisResult,
+                    panel,
+                    analysisText,
+                    workspaceData,
+                    onStart: () => {
+                      setCustomerReportError(null);
+                      setIsGeneratingCustomerReport(true);
+                    },
+                    onComplete: () => setIsGeneratingCustomerReport(false),
+                    onLocked: onCustomerReportLocked,
+                    onError: setCustomerReportError,
+                  });
+                  emitSafeCrmEventFromClient({
+                    event: "report_generated",
+                    plan,
+                    exportType: "customer_report",
+                  });
+                }}
+                className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+              >
+                {isGeneratingCustomerReport ? "Generating Customer Report..." : "Customer Report"}
+              </button>
+            ) : null}
+            {!canUseBasicPdfExport || !canUseDisputeReportExport || !canUseRebuttalEmail || !canUseCustomerReport ? (
+              <button
+                type="button"
+                onClick={onCustomerReportLocked}
+                className="w-full rounded-xl border border-orange-400/18 bg-[#C65A2A]/10 p-3 text-xs text-orange-100/80 transition hover:bg-[#C65A2A]/16"
+              >
+                Full reports, Dispute Intelligence, Rebuttal PDF, and Customer Report are available on Pro.
+              </button>
+            ) : null}
             {customerReportError ? (
               <div className="rounded-xl border border-red-500/16 bg-red-500/[0.05] px-3 py-2 text-[12px] leading-5 text-red-200/80">
                 {customerReportError}
               </div>
             ) : null}
+            {snapshotStatus ? (
+              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-2 text-[12px] leading-5 text-white/55">
+                {snapshotStatus}
+              </div>
+            ) : null}
           </div>
         </section>
         </RailInsightSection>
+      ) : null}
+
+      {snapshotPreviewOpen && snapshot ? (
+        <SnapshotPreviewModal
+          snapshot={snapshot}
+          sendTarget={snapshotSendTarget}
+          recipientEmail={snapshotRecipientEmail}
+          subject={snapshotSubject}
+          message={snapshotMessage}
+          reviewed={snapshotReviewed}
+          sending={snapshotSending}
+          status={snapshotStatus}
+          sendReady={snapshotSendReady}
+          onClose={() => {
+            setSnapshotPreviewOpen(false);
+            setSnapshotSendTarget(null);
+          }}
+          onDownload={downloadSnapshotPdf}
+          onCopy={copySnapshotSummary}
+          onOpenSend={openSnapshotSend}
+          onRecipientEmailChange={setSnapshotRecipientEmail}
+          onSubjectChange={setSnapshotSubject}
+          onMessageChange={setSnapshotMessage}
+          onReviewedChange={setSnapshotReviewed}
+          onSend={() => void sendSnapshot()}
+          onCancelSend={() => setSnapshotSendTarget(null)}
+        />
       ) : null}
     </div>
   );
@@ -1762,7 +2049,7 @@ function exportPdfVariant(params: {
   panel: DecisionPanel;
   analysisText: string;
   workspaceData: WorkspaceData | null;
-  variant: "rebuttal" | "dispute_intelligence";
+  variant: "snapshot" | "rebuttal" | "dispute_intelligence";
 }) {
   const resolvedAnalysis =
     params.normalizedResult ??
@@ -1778,11 +2065,244 @@ function exportPdfVariant(params: {
   };
 
   const document =
-    params.variant === "rebuttal"
+    params.variant === "snapshot"
+      ? buildCollisionSnapshotPdf(sharedInput)
+      : params.variant === "rebuttal"
       ? buildRebuttalEmailPdf(sharedInput)
       : buildDisputeIntelligencePdf(sharedInput);
 
   void exportCarrierPDF(document);
+}
+
+function SnapshotPreviewModal({
+  snapshot,
+  sendTarget,
+  recipientEmail,
+  subject,
+  message,
+  reviewed,
+  sending,
+  status,
+  sendReady,
+  onClose,
+  onDownload,
+  onCopy,
+  onOpenSend,
+  onRecipientEmailChange,
+  onSubjectChange,
+  onMessageChange,
+  onReviewedChange,
+  onSend,
+  onCancelSend,
+}: {
+  snapshot: CollisionSnapshot;
+  sendTarget: SnapshotDestinationType | null;
+  recipientEmail: string;
+  subject: string;
+  message: string;
+  reviewed: boolean;
+  sending: boolean;
+  status: string | null;
+  sendReady: boolean;
+  onClose: () => void;
+  onDownload: () => void;
+  onCopy: () => void;
+  onOpenSend: (target: SnapshotDestinationType) => void;
+  onRecipientEmailChange: (value: string) => void;
+  onSubjectChange: (value: string) => void;
+  onMessageChange: (value: string) => void;
+  onReviewedChange: (value: boolean) => void;
+  onSend: () => void;
+  onCancelSend: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[90] overflow-y-auto bg-black/78 px-4 py-6 backdrop-blur-xl" role="dialog" aria-modal="true">
+      <div className="mx-auto max-w-3xl rounded-3xl border border-white/10 bg-[#0B0B0C] p-5 shadow-[0_30px_90px_rgba(0,0,0,0.65)]">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/70">
+              {snapshot.redactionNotice}
+            </div>
+            <h2 className="mt-2 text-2xl font-semibold text-white">{snapshot.title}</h2>
+            <div className="mt-1 text-sm text-white/50">{snapshot.vehicleLabel}</div>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-xl bg-white/[0.06] px-3 py-2 text-xs text-white/65 hover:bg-white/[0.1]">
+            Close
+          </button>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-2">
+          <SnapshotPanel title="Adjusted Confidence" items={[
+            snapshot.evidenceCompleteness.adjustedConfidence,
+            `Completeness: ${formatLabel(snapshot.evidenceCompleteness.completenessStatus)}`,
+          ]} />
+          <SnapshotPanel title="Repair Plan Verdict" items={[
+            `More complete plan: ${snapshot.repairPlanVerdict.moreCompletePlan}`,
+            `Carrier plan: ${snapshot.repairPlanVerdict.carrierPlanStatus}`,
+            snapshot.repairPlanVerdict.reason,
+          ]} />
+          <SnapshotPanel title="Damage Snapshot" items={snapshot.damageSummary} />
+          <SnapshotPanel title="Estimate Comparison" items={
+            snapshot.estimateComparison.available
+              ? [
+                  snapshot.estimateComparison.shopEstimateTotal ? `Shop: ${snapshot.estimateComparison.shopEstimateTotal}` : null,
+                  snapshot.estimateComparison.carrierEstimateTotal ? `Carrier: ${snapshot.estimateComparison.carrierEstimateTotal}` : null,
+                  snapshot.estimateComparison.difference ? `Difference: ${snapshot.estimateComparison.difference}` : null,
+                  ...snapshot.estimateComparison.keyDeltas,
+                ].filter((item): item is string => Boolean(item))
+              : [snapshot.estimateComparison.unavailableReason ?? "Estimate comparison is unavailable."]
+          } />
+          <SnapshotPanel
+            title="Top 3 Dispute Items"
+            items={snapshot.topDisputeItems.map(
+              (item, index) => `${index + 1}. ${item.issue}: ${item.evidenceState} Next: ${item.nextAction}`
+            )}
+          />
+          <SnapshotPanel title="Evidence Completeness" items={[
+            `Files uploaded: ${snapshot.evidenceCompleteness.uploadedFileCount}`,
+            `Upload cap reached: ${snapshot.evidenceCompleteness.uploadLimitReached ? "Yes" : "No"}`,
+            `More files indicated: ${snapshot.evidenceCompleteness.userIndicatedMoreFiles ? "Yes" : "No"}`,
+            snapshot.evidenceCompleteness.missingCriticalEvidence.length
+              ? `Missing proof: ${snapshot.evidenceCompleteness.missingCriticalEvidence.join(", ")}`
+              : "No critical missing proof listed.",
+            snapshot.evidenceCompleteness.userFacingDisclosure,
+          ]} />
+          <SnapshotPanel title="Next Actions" items={snapshot.nextActions.map((item, index) => `${index + 1}. ${item}`)} />
+          <SnapshotPanel title="ACV / DV Preview" items={
+            snapshot.valuationSnapshot.available
+              ? [
+                  snapshot.valuationSnapshot.acvPreviewRange ? `ACV: ${snapshot.valuationSnapshot.acvPreviewRange}` : null,
+                  snapshot.valuationSnapshot.dvPreviewRange ? `DV: ${snapshot.valuationSnapshot.dvPreviewRange}` : null,
+                  snapshot.valuationSnapshot.confidence ? `Confidence: ${snapshot.valuationSnapshot.confidence}` : null,
+                  snapshot.valuationSnapshot.disclosure,
+                ].filter((item): item is string => Boolean(item))
+              : [snapshot.valuationSnapshot.disclosure]
+          } />
+        </div>
+
+        <div className="mt-5 flex flex-wrap gap-2">
+          <button type="button" onClick={onDownload} className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90">
+            Download PDF
+          </button>
+          <button type="button" onClick={onCopy} className="rounded-xl bg-white/[0.06] px-4 py-2 text-sm text-white/70 hover:bg-white/[0.1]">
+            Copy Summary
+          </button>
+          <button type="button" onClick={() => onOpenSend("customer")} className="rounded-xl bg-white/[0.06] px-4 py-2 text-sm text-white/70 hover:bg-white/[0.1]">
+            Send to Customer
+          </button>
+          <button type="button" onClick={() => onOpenSend("carrier")} className="rounded-xl bg-white/[0.06] px-4 py-2 text-sm text-white/70 hover:bg-white/[0.1]">
+            Send to Carrier
+          </button>
+        </div>
+
+        {sendTarget ? (
+          <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+            <div className="text-sm font-semibold text-white">
+              Send redacted snapshot to {sendTarget === "customer" ? "customer" : "carrier"}
+            </div>
+            <div className="mt-3 grid gap-3">
+              <SnapshotInput label="Recipient email" value={recipientEmail} onChange={onRecipientEmailChange} type="email" />
+              <SnapshotInput label="Subject" value={subject} onChange={onSubjectChange} />
+              <label className="grid gap-1 text-xs text-white/45">
+                Message
+                <textarea
+                  value={message}
+                  onChange={(event) => onMessageChange(event.target.value)}
+                  rows={6}
+                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm leading-6 text-white/75 outline-none focus:border-orange-300/40"
+                />
+              </label>
+              <label className="flex items-start gap-3 text-sm text-white/65">
+                <input
+                  type="checkbox"
+                  checked={reviewed}
+                  onChange={(event) => onReviewedChange(event.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-white/20 bg-black/40 text-orange-500 focus:ring-orange-500"
+                />
+                <span>I reviewed this redacted snapshot</span>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={onSend} disabled={!sendReady} className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-45">
+                  {sending ? "Sending..." : "Send"}
+                </button>
+                <button type="button" onClick={onCancelSend} className="rounded-xl bg-white/[0.06] px-4 py-2 text-sm text-white/70 hover:bg-white/[0.1]">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {status ? <div className="mt-4 rounded-xl bg-white/[0.04] px-3 py-2 text-sm text-white/60">{status}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+function SnapshotPanel({ title, items }: { title: string; items: string[] }) {
+  return (
+    <section className="rounded-2xl border border-white/8 bg-white/[0.035] p-3">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-white/40">{title}</div>
+      <div className="mt-2 space-y-1.5 text-[13px] leading-5 text-white/65">
+        {items.map((item, index) => (
+          <div key={`${title}-${index}`}>{item}</div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SnapshotInput({
+  label,
+  value,
+  onChange,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+}) {
+  return (
+    <label className="grid gap-1 text-xs text-white/45">
+      {label}
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/75 outline-none focus:border-orange-300/40"
+      />
+    </label>
+  );
+}
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("Unable to read snapshot PDF."));
+      }
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Unable to read snapshot PDF."));
+    reader.readAsDataURL(blob);
+  });
+
+  return dataUrl.split(",")[1] ?? "";
+}
+
+function logSnapshotSendAttempt(
+  snapshot: CollisionSnapshot,
+  destinationType: SnapshotDestinationType,
+  hasPdf: boolean
+) {
+  console.info("[snapshot_send_attempt]", buildSnapshotSendSafeEvent({ snapshot, destinationType, hasPdf }));
 }
 
 async function exportCustomerReport(params: {
@@ -1931,6 +2451,7 @@ function exportCustomerReportPdf(report: CustomerReport, params: {
         ? formatCurrency(params.renderModel.reportFields.estimateTotal, true)
         : null,
     filename: params.fileName || "customer-report.pdf",
+    confidenceIntegrity: params.renderModel.confidenceIntegrity,
   });
 
   void exportCarrierPDF(document);
@@ -2225,7 +2746,7 @@ function summarizeCurrentFileStatus(kind: SupplementItem["kind"]): string {
     case "missing_operation":
       return "operation not clearly documented";
     case "underwritten_operation":
-      return "repair path support remains open";
+      return "repair path documentation is not shown";
     default:
       return "repair path remains open or lightly supported";
   }
@@ -2297,6 +2818,170 @@ function TopDisputeDriversCard({
         ))}
       </div>
     </section>
+  );
+}
+
+function FindingReasoningCard({
+  findings,
+}: {
+  findings: ReturnType<typeof buildExportModel>["findingReasoning"];
+}) {
+  if (!findings.length) return null;
+
+  return (
+    <section className="space-y-3 rounded-[24px] border border-white/7 bg-white/[0.03] p-4">
+      <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+        Finding Reasoning
+      </div>
+      <div className="space-y-3">
+        {findings.slice(0, 5).map((finding, index) => (
+          <div key={finding.id ?? `${finding.issue}-${index}`} className="rounded-2xl bg-black/18 px-3.5 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm font-semibold leading-5 text-white/88">
+                {finding.priorityRank ?? index + 1}. {finding.issue}
+              </div>
+              <div className="rounded-full border border-white/8 bg-black/18 px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-white/46">
+                {formatLabel(finding.evidenceLevel)}
+              </div>
+            </div>
+            <ReasoningLine label="Why it matters" value={finding.why_it_matters} />
+            <ReasoningLine label="What proves it" value={finding.what_proves_it} />
+            <ReasoningLine label="Next action" value={finding.next_action} />
+            <div className="mt-2 text-[11px] leading-5 text-white/38">
+              Confidence {Math.round(finding.confidence * 100)}% · Specificity {formatLabel(finding.claimSpecificity)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReasoningLine({ label, value }: { label: string; value: string }) {
+  if (!value.trim()) return null;
+
+  return (
+    <div className="mt-2 text-[13px] leading-5 text-white/70">
+      <span className="font-semibold text-white/88">{label}:</span> {value}
+    </div>
+  );
+}
+
+function RetrievalSummaryCard({
+  summary,
+}: {
+  summary: NonNullable<ReturnType<typeof buildExportModel>["retrievalSummary"]>;
+}) {
+  const sources = summary.sourcesInfluencingFindings.slice(0, 5);
+
+  return (
+    <section className="space-y-3 rounded-[24px] border border-white/7 bg-white/[0.03] p-4">
+      <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+        Retrieval Summary
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <MetricCard label="Drive Docs" value={String(summary.driveDocsUsed)} />
+        <MetricCard label="Web Sources" value={String(summary.webSourcesUsed)} />
+        <MetricCard label="Serper" value={formatLabel(summary.serperStatus)} />
+        <MetricCard label="OEM Evidence" value={summary.oemEvidenceFound ? "Found" : "Not found"} />
+      </div>
+      {sources.length > 0 ? (
+        <div className="space-y-2">
+          {sources.map((source, index) => (
+            <div key={`${source.title}-${index}`} className="rounded-xl bg-black/16 px-3 py-2.5">
+              <div className="text-[13px] font-medium leading-5 text-white/78">{source.title}</div>
+              <div className="mt-1 text-[11px] uppercase tracking-[0.14em] text-white/38">
+                {formatLabel(source.sourceType)} · {source.relatedFindingIds.length} finding(s)
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-[13px] leading-5 text-white/42">
+          No retrieved source influenced an included finding.
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ConfidenceIntegrityCard({
+  integrity,
+}: {
+  integrity: ReturnType<typeof buildExportModel>["confidenceIntegrity"];
+}) {
+  return (
+    <section className="mt-5 space-y-3 rounded-[24px] border border-white/7 bg-white/[0.03] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+          File Coverage / Evidence Completeness
+        </div>
+        <div className="rounded-full border border-white/8 bg-black/18 px-3 py-1 text-[11px] font-semibold text-white/70">
+          {integrity.completenessStatus}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <MetricCard label="Adjusted" value={integrity.adjustedConfidence} prominent />
+        <MetricCard label="Base" value={integrity.baseConfidence} />
+        <MetricCard label="Files" value={String(integrity.uploadedFileCount)} />
+        <MetricCard label="Upload Cap" value={integrity.uploadLimitReached ? "Reached" : "Not reached"} />
+      </div>
+      <div className="rounded-2xl bg-black/16 px-3.5 py-3 text-[13px] leading-5 text-white/68">
+        {integrity.userFacingDisclosure}
+      </div>
+      {integrity.missingCriticalEvidence.length > 0 ? (
+        <StrategyList label="Missing Proof" items={integrity.missingCriticalEvidence} />
+      ) : null}
+    </section>
+  );
+}
+
+function DisputeStrategyCard({
+  strategy,
+}: {
+  strategy: NonNullable<ReturnType<typeof buildExportModel>["disputeStrategy"]>;
+}) {
+  return (
+    <section className="space-y-3 rounded-[24px] border border-white/7 bg-white/[0.03] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+          Dispute Strategy
+        </div>
+        <div className="rounded-full border border-orange-400/18 bg-[#C65A2A]/10 px-3 py-1 text-[11px] font-semibold text-orange-100/82">
+          Leverage {strategy.leverageScore}/100
+        </div>
+      </div>
+      <StrategyList label="Priority Rank" items={strategy.priorityFindings} />
+      <StrategyList label="Easy Wins" items={strategy.easyWins} />
+      <StrategyList label="Hard Fights" items={strategy.hardFights} />
+      <StrategyList label="Recommended Sequence" items={strategy.recommendedSequence} numbered />
+    </section>
+  );
+}
+
+function StrategyList({
+  label,
+  items,
+  numbered = false,
+}: {
+  label: string;
+  items: string[];
+  numbered?: boolean;
+}) {
+  if (!items.length) return null;
+
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-[0.18em] text-white/36">{label}</div>
+      <div className="mt-2 space-y-1.5">
+        {items.slice(0, 5).map((item, index) => (
+          <div key={`${label}-${item}-${index}`} className="flex gap-2 rounded-xl bg-black/16 px-3 py-2 text-[13px] leading-5 text-white/68">
+            <span className="font-semibold text-white/80">{numbered ? `${index + 1}.` : "•"}</span>
+            <span>{item}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

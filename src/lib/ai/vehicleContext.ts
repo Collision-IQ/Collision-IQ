@@ -1,4 +1,9 @@
 import type { VehicleIdentity } from "./types/analysis";
+import {
+  summarizeParsedVehicleLineForLog,
+  summarizeTextMetadataForLog,
+  summarizeVehicleForLog,
+} from "./safeVehicleLog";
 
 const KNOWN_MAKES = [
   "Acura",
@@ -197,9 +202,9 @@ export function extractVehicleIdentityFromText(
 
   console.info("[vehicle-label-trace:estimate-parse]", {
     source,
-    vehicleLine: vehicleLine ?? null,
-    parsedVehicleLine: parsedVehicleLine ?? null,
-    extractedVehicle,
+    vehicleLine: summarizeTextMetadataForLog(vehicleLine),
+    parsedVehicleLine: summarizeParsedVehicleLineForLog(parsedVehicleLine),
+    extractedVehicle: summarizeVehicleForLog(extractedVehicle),
   });
 
   return extractedVehicle;

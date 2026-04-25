@@ -96,7 +96,7 @@ run("page state reset reapplies baseline typography after a page add", () => {
   assert.equal(state.y, layout.topMargin);
   assert.equal(doc.currentPage, 2);
   assert.equal(
-    doc.calls.some((entry) => entry[0] === "setFont" && entry[1] === "Helvetica" && entry[2] === "Normal"),
+    doc.calls.some((entry) => entry[0] === "setFont" && entry[1] === "helvetica" && entry[2] === "normal"),
     true
   );
   assert.equal(

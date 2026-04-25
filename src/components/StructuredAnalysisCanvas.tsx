@@ -26,6 +26,7 @@ type Props = {
   onActiveInsightChange: (key: InsightKey | null) => void;
   onCenterScrollRequest?: (scrollTo: (key: InsightKey) => void) => void;
   canRenderExports?: boolean;
+  canUseFullReportExports?: boolean;
   evidenceModel?: EvidenceLinkModel | null;
   activeEvidenceTargetId?: string | null;
   onEvidenceSelect?: (link: EvidenceLink) => void;
@@ -88,6 +89,7 @@ export default function StructuredAnalysisCanvas({
   onActiveInsightChange,
   onCenterScrollRequest,
   canRenderExports = false,
+  canUseFullReportExports = false,
   evidenceModel,
   activeEvidenceTargetId,
   onEvidenceSelect,
@@ -118,6 +120,9 @@ export default function StructuredAnalysisCanvas({
   }
 
   const supportBullets = dedupe([
+    `Adjusted confidence: ${renderModel.confidenceIntegrity.adjustedConfidence}.`,
+    `Evidence completeness: ${formatLabel(renderModel.confidenceIntegrity.completenessStatus)}.`,
+    renderModel.confidenceIntegrity.userFacingDisclosure,
     ...renderModel.reportFields.presentStrengths,
     ...renderModel.disputeIntelligenceReport.positives,
     ...renderModel.reportFields.documentedProcedures,
@@ -125,6 +130,9 @@ export default function StructuredAnalysisCanvas({
   ]).slice(0, 6);
 
   const missingBullets = dedupe([
+    ...renderModel.findingReasoning.map((finding) =>
+      `${finding.issue}: why - ${finding.why_it_matters}; proof - ${finding.what_proves_it}; next - ${finding.next_action}; evidence - ${formatLabel(finding.evidenceLevel)}`
+    ),
     ...renderModel.disputeIntelligenceReport.topDrivers.map(
       (driver) => `${driver.title}: ${driver.whyItMatters}`
     ),
@@ -133,10 +141,36 @@ export default function StructuredAnalysisCanvas({
   ]).slice(0, 6);
 
   const nextMoveBullets = dedupe([
+    ...(renderModel.disputeStrategy
+      ? [
+          `Leverage score: ${renderModel.disputeStrategy.leverageScore}/100.`,
+          ...renderModel.disputeStrategy.recommendedSequence.map((item, index) => `${index + 1}. ${item}`),
+        ]
+      : []),
     ...renderModel.disputeIntelligenceReport.nextMoves,
     ...renderModel.negotiationPlaybook.suggestedSequence,
     ...renderModel.negotiationPlaybook.documentationNeeded,
   ]).slice(0, 6);
+  const retrievalBullets = renderModel.retrievalSummary
+    ? dedupe([
+        `Drive docs used: ${renderModel.retrievalSummary.driveDocsUsed}.`,
+        `Web sources used: ${renderModel.retrievalSummary.webSourcesUsed}.`,
+        `Serper status: ${formatLabel(renderModel.retrievalSummary.serperStatus)}.`,
+        `OEM evidence found: ${renderModel.retrievalSummary.oemEvidenceFound ? "Yes" : "No"}.`,
+        ...renderModel.retrievalSummary.sourcesInfluencingFindings.map(
+          (source) => `${source.title} (${formatLabel(source.sourceType)}) influenced ${source.relatedFindingIds.length} finding(s).`
+        ),
+      ]).slice(0, 6)
+    : [];
+  const retrievalSections: SectionData[] = retrievalBullets.length > 0
+    ? [{
+        insightKey: "support_strengths",
+        title: "Retrieval Summary",
+        eyebrow: "Sources",
+        summary: "Only sources that influenced included findings are shown.",
+        bullets: retrievalBullets,
+      }]
+    : [];
   const financialBullets = dedupe([
     renderModel.valuation.acvReasoning,
     ...renderModel.valuation.acvMissingInputs,
@@ -175,6 +209,7 @@ export default function StructuredAnalysisCanvas({
       summary: "The main omissions, support gaps, or underwritten items worth pressing on.",
       bullets: missingBullets,
     },
+    ...retrievalSections,
     {
       insightKey: "financial_view",
       title: "Financial / Valuation View",
@@ -228,7 +263,7 @@ export default function StructuredAnalysisCanvas({
             />
             <Metric
               label="Confidence"
-              value={formatLabel(renderModel.vehicle.confidence)}
+              value={renderModel.confidenceIntegrity.adjustedConfidence}
             />
             <Metric
               label="Drivers"
@@ -351,8 +386,16 @@ export default function StructuredAnalysisCanvas({
           <AnalysisSectionCard
             title="Ready Outputs"
             eyebrow="Outputs"
-            summary="Carrier-ready reports remain available in the right rail when you're ready to export."
-            preview="Collision Repair Intelligence Report, Dispute Intelligence Report, and rebuttal output remain available in the rail."
+            summary={
+              canUseFullReportExports
+                ? "Carrier-ready reports remain available in the right rail when you're ready to export."
+                : "Your 1-Page Snapshot is available in the right rail. Full reports are available on Pro."
+            }
+            preview={
+              canUseFullReportExports
+                ? "Collision Repair Intelligence Report, Dispute Intelligence Report, and rebuttal output remain available in the rail."
+                : "Use the 1-Page Snapshot for the shareable export. Dispute Intelligence and rebuttal outputs are Pro-only upgrades."
+            }
             expanded={activeInsightKey === "exports"}
             collapsible={false}
             active={activeInsightKey === "exports"}
@@ -362,8 +405,9 @@ export default function StructuredAnalysisCanvas({
             onClearFocus={() => onActiveInsightChange(null)}
           >
             <div className="rounded-2xl border border-white/6 bg-black/18 px-3.5 py-3 text-[13px] leading-5 text-white/70">
-              Use the rail to generate the Collision Repair Intelligence Report, Dispute Intelligence
-              Report, or rebuttal output.
+              {canUseFullReportExports
+                ? "Use the rail to generate the Collision Repair Intelligence Report, Dispute Intelligence Report, or rebuttal output."
+                : "Use the rail to download the 1-Page Snapshot. Full reports, Dispute Intelligence, rebuttal PDF, and Customer Report are available on Pro."}
             </div>
           </AnalysisSectionCard>
         </div>

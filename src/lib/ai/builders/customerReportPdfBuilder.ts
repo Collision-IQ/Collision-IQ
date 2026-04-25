@@ -1,5 +1,6 @@
 import type { CustomerReport } from "@/lib/ai/generateCustomerReport";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
+import type { ConfidenceIntegrity } from "@/lib/ai/types/analysis";
 
 type BuildCustomerReportPdfParams = {
   report: CustomerReport;
@@ -10,6 +11,7 @@ type BuildCustomerReportPdfParams = {
   estimateTotal?: string | null;
   generatedAt?: string;
   filename?: string;
+  confidenceIntegrity?: ConfidenceIntegrity;
 };
 
 export function buildCustomerReportPdf({
@@ -21,6 +23,7 @@ export function buildCustomerReportPdf({
   estimateTotal,
   generatedAt,
   filename,
+  confidenceIntegrity,
 }: BuildCustomerReportPdfParams): CarrierReportDocument {
   return {
     filename: filename || "customer-report.pdf",
@@ -53,6 +56,12 @@ export function buildCustomerReportPdf({
         title: "What This Means For You",
         body: report.openingSummary,
       },
+      ...(confidenceIntegrity
+        ? [{
+            title: "File Coverage / Evidence Completeness",
+            bullets: buildPlainConfidenceBullets(confidenceIntegrity),
+          }]
+        : []),
       {
         title: "Which Repair Plan Looks Stronger",
         body: report.whichRepairPlanLooksStronger,
@@ -78,6 +87,18 @@ export function buildCustomerReportPdf({
       "This report is intended to explain the repair situation in plain language for the vehicle owner. Final repair decisions should still be confirmed by the repair facility after inspection, teardown, measurement, scan, calibration, and post-repair verification as required.",
     ],
   };
+}
+
+function buildPlainConfidenceBullets(integrity: ConfidenceIntegrity): string[] {
+  return [
+    `Adjusted confidence: ${integrity.adjustedConfidence}.`,
+    `File coverage: ${integrity.completenessStatus.toLowerCase()}.`,
+    `Files reviewed: ${integrity.uploadedFileCount}.`,
+    integrity.userFacingDisclosure,
+    ...(integrity.missingCriticalEvidence.length > 0
+      ? [`Still needed: ${integrity.missingCriticalEvidence.join(", ")}.`]
+      : []),
+  ];
 }
 
 function withFallback(items: string[]): string[] {

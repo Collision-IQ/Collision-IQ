@@ -28,8 +28,8 @@ type PdfRenderState = {
 type PdfColor = [number, number, number];
 
 const DEFAULT_TYPOGRAPHY = {
-  fontFamily: "Helvetica",
-  fontStyle: "Normal" as const,
+  fontFamily: "helvetica",
+  fontStyle: "normal" as const,
   fontSize: 10,
   textColor: [60, 63, 68] as PdfColor,
   lineHeightFactor: LINE_HEIGHT_FACTOR,
@@ -38,7 +38,7 @@ const DEFAULT_TYPOGRAPHY = {
   headingBodyGap: HEADING_BODY_GAP,
 };
 
-export async function exportCarrierPDF(input: CarrierReportDocument) {
+export async function buildCarrierPdfBlob(input: CarrierReportDocument): Promise<Blob> {
   const redactedInput = redactCarrierReportDocument(input);
 
   const doc = new jsPDF({
@@ -114,7 +114,19 @@ export async function exportCarrierPDF(input: CarrierReportDocument) {
     drawPageNumber(doc, layout.pageWidth, layout.pageHeight);
   }
 
-  doc.save(redactedInput.filename || "collision-academy-report.pdf");
+  return doc.output("blob");
+}
+
+export async function exportCarrierPDF(input: CarrierReportDocument) {
+  const blob = await buildCarrierPdfBlob(input);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = input.filename || "collision-academy-report.pdf";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function redactCarrierReportDocument(input: CarrierReportDocument): CarrierReportDocument {
@@ -174,10 +186,17 @@ export function createPdfPageLayout(doc: Pick<jsPDF, "internal">): PdfPageLayout
 export function resetPdfPageState(
   doc: Pick<jsPDF, "setFont" | "setFontSize" | "setTextColor" | "setLineHeightFactor">
 ) {
-  doc.setFont(DEFAULT_TYPOGRAPHY.fontFamily, DEFAULT_TYPOGRAPHY.fontStyle);
+  setPdfFont(doc, DEFAULT_TYPOGRAPHY.fontStyle);
   doc.setFontSize(DEFAULT_TYPOGRAPHY.fontSize);
   doc.setLineHeightFactor(DEFAULT_TYPOGRAPHY.lineHeightFactor);
   doc.setTextColor(...DEFAULT_TYPOGRAPHY.textColor);
+}
+
+function setPdfFont(
+  doc: Pick<jsPDF, "setFont">,
+  style: "normal" | "bold" = "normal"
+) {
+  doc.setFont(DEFAULT_TYPOGRAPHY.fontFamily, style);
 }
 
 export function addPdfPage(
@@ -279,20 +298,20 @@ function drawBrandedHeader(
   const brandTextX = Math.max(params.x + 42, logoRightX + 4);
 
   doc.setTextColor(62, 65, 70);
-  doc.setFont("Helvetica", "Bold");
+  setPdfFont(doc, "bold");
   doc.setFontSize(9);
   doc.text(params.companyName.toUpperCase(), brandTextX, params.y + 6.5);
 
-  doc.setFont("Helvetica", "Normal");
+  setPdfFont(doc);
   doc.setFontSize(8.5);
   doc.text(params.reportLabel, brandTextX, params.y + 11.5);
 
-  doc.setFont("Helvetica", "Bold");
+  setPdfFont(doc, "bold");
   doc.setFontSize(18);
   doc.setTextColor(28, 28, 30);
   doc.text(params.title, params.x, titleY);
 
-  doc.setFont("Helvetica", "Normal");
+  setPdfFont(doc);
   doc.setFontSize(10);
   doc.setTextColor(82, 86, 92);
   const subtitleLines = doc.splitTextToSize(params.subtitle, params.width);
@@ -370,12 +389,12 @@ function drawSummaryGrid(
     doc.setDrawColor(230, 232, 236);
     doc.roundedRect(cellX, cellY, cellWidth, cellHeight, 2, 2, "FD");
 
-    doc.setFont("Helvetica", "Bold");
+    setPdfFont(doc, "bold");
     doc.setFontSize(7.5);
     doc.setTextColor(96, 100, 106);
     doc.text(item.label.toUpperCase(), cellX + innerPaddingX, cellY + topPadding + 1);
 
-    doc.setFont("Helvetica", "Normal");
+    setPdfFont(doc);
     doc.setFontSize(10);
     doc.setTextColor(35, 37, 40);
     doc.text(valueLines.slice(0, 4), cellX + innerPaddingX, cellY + topPadding + 7.2);
@@ -520,14 +539,14 @@ function drawSection(
 
   if (params.section.body) {
     params.state.y += HEADING_BODY_GAP;
-    doc.setFont("Helvetica", "Normal");
+    setPdfFont(doc);
     doc.setFontSize(10);
     doc.setTextColor(...DEFAULT_TYPOGRAPHY.textColor);
 
     for (const line of doc.splitTextToSize(params.section.body, params.width)) {
       if (params.state.y + LINE_HEIGHT > params.layout.contentBottomY) {
         startContinuationPage();
-        doc.setFont("Helvetica", "Normal");
+        setPdfFont(doc);
         doc.setFontSize(10);
         doc.setTextColor(...DEFAULT_TYPOGRAPHY.textColor);
         params.state.y += HEADING_BODY_GAP;
@@ -559,14 +578,14 @@ function drawSection(
     }
 
     for (const bullet of params.section.bullets) {
-      doc.setFont("Helvetica", "Normal");
+      setPdfFont(doc);
       doc.setFontSize(10);
       doc.setTextColor(62, 65, 70);
 
       for (const [index, line] of doc.splitTextToSize(bullet, params.width - 8).entries()) {
         if (params.state.y + LINE_HEIGHT > params.layout.contentBottomY) {
           startContinuationPage();
-          doc.setFont("Helvetica", "Normal");
+          setPdfFont(doc);
           doc.setFontSize(10);
           doc.setTextColor(62, 65, 70);
           params.state.y += HEADING_BODY_GAP;
@@ -591,7 +610,7 @@ function drawSectionHeading(
   state: PdfRenderState,
   continued: boolean
 ) {
-  doc.setFont("Helvetica", "Bold");
+  setPdfFont(doc, "bold");
   doc.setFontSize(11.5);
   doc.setTextColor(190, 80, 30);
   doc.text(continued ? `${title.toUpperCase()} (CONT.)` : title.toUpperCase(), x, state.y);
@@ -630,7 +649,7 @@ function drawComparisonRowBlock(
 
   const drawTagLine = (line: string) => {
     ensureLineSpace();
-    doc.setFont("Helvetica", "Bold");
+    setPdfFont(doc, "bold");
     doc.setFontSize(10.5);
     doc.setTextColor(35, 37, 40);
     doc.text(line, innerX, params.state.y + 3);
@@ -649,13 +668,13 @@ function drawComparisonRowBlock(
     valueLines.forEach((line: string, index: number) => {
       ensureLineSpace();
       if (index === 0) {
-        doc.setFont("Helvetica", "Bold");
+        setPdfFont(doc, "bold");
         doc.setFontSize(options?.isNote ? 8.5 : 9.5);
         doc.setTextColor(58, 61, 66);
         doc.text(`${fieldLabel}:`, innerX, params.state.y + 3);
       }
 
-      doc.setFont("Helvetica", options?.boldValue ? "Bold" : "Normal");
+      setPdfFont(doc, options?.boldValue ? "bold" : "normal");
       doc.setFontSize(options?.isNote ? 8.5 : 9.5);
       doc.setTextColor(...(options?.color ?? DEFAULT_TYPOGRAPHY.textColor));
       doc.text(line, valueX, params.state.y + 3);
@@ -689,7 +708,7 @@ function drawFooterBlock(
   const blockHeight = Math.max(16, lines.length * LINE_HEIGHT + BLOCK_GAP);
   doc.setFillColor(248, 248, 249);
   doc.roundedRect(params.x, params.y, params.width, blockHeight, 2, 2, "F");
-  doc.setFont("Helvetica", "Normal");
+  setPdfFont(doc);
   doc.setFontSize(8.5);
   doc.setTextColor(103, 107, 112);
   doc.text(lines, params.x + 3, params.y + 5);
@@ -697,7 +716,7 @@ function drawFooterBlock(
 }
 
 function drawPageNumber(doc: jsPDF, pageWidth: number, pageHeight: number) {
-  doc.setFont("Helvetica", "Normal");
+  setPdfFont(doc);
   doc.setFontSize(8);
   doc.setTextColor(125, 129, 134);
   doc.text(`Page ${doc.getCurrentPageInfo().pageNumber}`, pageWidth - 16, pageHeight - 4, {

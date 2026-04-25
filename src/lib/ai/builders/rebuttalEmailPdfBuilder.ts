@@ -6,6 +6,7 @@ import {
   resolveCanonicalInsurer,
   resolveCanonicalVehicleLabel,
   resolveCanonicalVin,
+  type ExportSupplementItem,
 } from "./buildExportModel";
 import { cleanOperationDisplayText } from "../../ui/presentationText";
 
@@ -21,7 +22,8 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
       exportModel.reportFields.vehicleLabel,
       buildPreferredRebuttalSubjectVehicleLabel(exportModel.vehicle)
     ) ?? "Current repair file";
-  const openingPosition = buildCarrierOpening(exportModel.repairPosition);
+
+  const numberedAsks = buildNumberedRevisionAsks(rebuttalItems);
 
   return {
     filename: "collision-iq-rebuttal-email.pdf",
@@ -47,55 +49,127 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
             value: `$${exportModel.reportFields.estimateTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
           }]
         : []),
-      { label: "Primary Ask", value: displayOperationLabel(rebuttalItems[0]?.title) || "Review the current estimate support and provide any needed documentation." },
-      { label: "Format", value: "Professional email draft" },
+      { label: "Open Items", value: String(rebuttalItems.length) },
+      { label: "Format", value: "Negotiation email draft" },
     ],
     sections: [
       {
         title: "Recommended Subject",
-        body: `Request for estimate revision - ${subjectVehicle}`,
+        body: `Request for Estimate Revision - ${subjectVehicle}`,
       },
       {
-        title: "Opening Position",
-        body: openingPosition,
-      },
-      {
-        title: "Requested Revisions / Support",
-        bullets:
-          rebuttalItems.length > 0
-            ? rebuttalItems.map(
-                (item) =>
-                  `${displayOperationLabel(item.title)}: ${item.rationale}${item.evidence ? ` Support noted: ${item.evidence}` : ""}`
-              )
-            : ["Please review the current estimate support and provide any documentation needed to confirm the intended scope."],
+        title: "Revision Asks",
+        bullets: numberedAsks.map(
+          (ask) =>
+            `${ask.number}. ${ask.issue} - Evidence: ${ask.evidence} - Requested action: ${ask.requestedAction}`
+        ),
       },
       {
         title: "Editable Email Body",
-        body: [
-          "Hello,",
-          "",
-          openingPosition,
-          "",
-          rebuttalItems.length > 0
-            ? "The file would benefit from clearer support on the following items:"
-            : "Please review the current estimate support and related documentation:",
-          ...(
-            rebuttalItems.length > 0
-              ? rebuttalItems.map((item) => `- ${displayOperationLabel(item.title)}: ${item.rationale}`)
-              : ["- Please review the current estimate support and provide supporting documentation."]
-          ),
-          "",
-          "Please update the estimate or provide any documentation that clarifies the current position on the items above.",
-          "",
-          "Thank you,",
-          "[Your Name]",
-          "[Title / Shop]",
-          "[Phone / Email]",
-        ].join("\n"),
+        body: buildEmailBody({ subjectVehicle, insurer: insurer ?? null, numberedAsks }),
       },
     ],
     footer: buildPdfFooter(),
   };
+}
+
+type RevisionAsk = {
+  number: number;
+  issue: string;
+  evidence: string;
+  requestedAction: string;
+};
+
+function buildNumberedRevisionAsks(items: ExportSupplementItem[]): RevisionAsk[] {
+  return items.map((item, i) => ({
+    number: i + 1,
+    issue: displayOperationLabel(item.title),
+    evidence: buildEvidenceDescription(item),
+    requestedAction: buildRequestedAction(item),
+  }));
+}
+
+function buildEvidenceDescription(
+  item: { kind: string; rationale: string; evidence?: string }
+): string {
+  const cleanedEvidence = stripGenericNarrative(item.evidence ?? "");
+  if (cleanedEvidence) {
+    return cleanedEvidence;
+  }
+
+  const cleanedRationale = stripGenericNarrative(item.rationale);
+  if (cleanedRationale) {
+    return cleanedRationale;
+  }
+
+  switch (item.kind) {
+    case "missing_operation":
+      return "The current estimate does not show the requested operation as a separate line.";
+    case "missing_verification":
+      return "The file does not show the verification record tied to this item.";
+    case "underwritten_operation":
+      return "The estimate shows the item, but the allowance appears narrower than the documented repair need.";
+    case "disputed_repair_path":
+      return "The estimate and repair position do not align on the repair method.";
+    default:
+      return "The current file identifies this as an unresolved estimate item.";
+  }
+}
+
+function buildRequestedAction(
+  item: { kind: string; priority: string; rationale: string }
+): string {
+  const lower = item.rationale.toLowerCase();
+  if (/safety|airbag|adas|calibration|srs|scan/.test(lower)) {
+    return "Add or explain the scan, calibration, aiming, or safety-system verification line.";
+  }
+  if (/structural|measurement|frame|rail|unibody/.test(lower)) {
+    return "Add or explain the structural measurement, alignment, or geometry verification allowance.";
+  }
+  if (/corrosion|cavity wax|weld|seam/.test(lower)) {
+    return "Add or explain the corrosion-protection material and labor allowance.";
+  }
+  if (/paint|blend|refinish|finish/.test(lower)) {
+    return "Add or explain the refinish, blend, finish, or quality-control allowance.";
+  }
+  if (item.kind === "underwritten_operation") {
+    return "Revise the allowance or provide the estimating basis for the reduced amount.";
+  }
+  if (item.priority === "high") {
+    return "Revise the estimate or identify the specific file evidence used to deny the item.";
+  }
+  return "Revise the estimate or provide a written line-item explanation.";
+}
+
+function buildEmailBody(params: {
+  subjectVehicle: string;
+  insurer: string | null;
+  numberedAsks: RevisionAsk[];
+}): string {
+  const greeting = params.insurer
+    ? `Hello ${params.insurer} Claims Team,`
+    : "Hello,";
+
+  const asksBlock = params.numberedAsks.length > 0
+    ? params.numberedAsks.map((ask) =>
+        `${ask.number}. ${ask.issue}\n   Evidence: ${ask.evidence}\n   Requested action: ${ask.requestedAction}`
+      ).join("\n\n")
+    : "   Please review the current estimate and identify the file evidence supporting any denied or reduced items.";
+
+  return [
+    greeting,
+    "",
+    `We reviewed the current estimate for the ${params.subjectVehicle}. Please address the numbered items below in the revised estimate or written response.`,
+    "",
+    asksBlock,
+    "",
+    "Please issue a revised estimate or provide a written line-item explanation for any item not added.",
+    "",
+    "Regards,",
+    "[Your Name]",
+    "[Title / Shop]",
+    "[Phone / Email]",
+  ].join("\n");
 }
 
 function buildPdfBrand(reportLabel: string): CarrierReportDocument["brand"] {
@@ -120,8 +194,8 @@ function buildPdfHeader(params: {
 
 function buildPdfFooter(): string[] {
   return [
-    "This PDF is intended as an editable carrier-facing summary of the current estimate review.",
-    "Review and edit the final carrier-facing language as needed before sending or filing.",
+    "This PDF is intended as an editable carrier-facing negotiation draft.",
+    "Review and adjust the final language as needed before sending or filing.",
   ];
 }
 
@@ -129,24 +203,15 @@ function displayOperationLabel(value: string | undefined): string {
   return cleanOperationDisplayText(value) || value || "";
 }
 
-function buildCarrierOpening(repairPosition: string): string {
-  const normalized = trimTrailingPunctuation(repairPosition);
-  if (!normalized) {
-    return "The current file supports a focused estimate review.";
-  }
-
-  if (/^(based on|across|from|the file|the current file|documented file facts|support appears)\b/i.test(normalized)) {
-    return normalized + ".";
-  }
-
-  return `Based on the current file, ${lowercaseFirst(normalized)}.`;
-}
-
-function lowercaseFirst(value: string): string {
-  if (!value) return value;
-  return value.charAt(0).toLowerCase() + value.slice(1);
-}
-
-function trimTrailingPunctuation(value: string): string {
-  return value.replace(/[.!\s]+$/g, "").trim();
+function stripGenericNarrative(value: string): string {
+  return value
+    .replace(/\bcredible preliminary repair plan\b/gi, "")
+    .replace(/\bsupport remains open\b/gi, "documentation is not shown")
+    .replace(/\brepair path appears supportable\b/gi, "the repair item is identified")
+    .replace(/\bprocedure support should not be treated as no support\b/gi, "")
+    .replace(/\bfile documents several parts\b/gi, "the estimate identifies specific items")
+    .replace(/\bcurrent file set supports\b/gi, "the file evidence identifies")
+    .replace(/\bthe narrative supports\b/gi, "the file evidence identifies")
+    .replace(/\s+/g, " ")
+    .trim();
 }

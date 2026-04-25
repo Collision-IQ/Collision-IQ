@@ -14,6 +14,7 @@ import {
   mergeVehicleIdentity,
   normalizeVehicleIdentity,
 } from "../vehicleContext";
+import { summarizeVehicleForLog } from "../safeVehicleLog";
 import type {
   AnalysisIssue,
   RepairIntelligenceReport,
@@ -552,7 +553,7 @@ export async function runRepairAnalysis({
   console.info("[vehicle-reconciliation:analysis]", {
     documentCount: documents.length,
     sessionVehicleMake: sessionContext?.vehicleMake ?? null,
-    extractedVehicle: inferredVehicle ?? null,
+    extractedVehicle: summarizeVehicleForLog(inferredVehicle),
   });
 
   const retrievedEvidence = await orchestrateRetrieval({

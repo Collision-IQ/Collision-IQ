@@ -79,6 +79,25 @@ run("comparison analysis emits currency total row and hour-based labor rows", ()
   assert.equal(operationHoursRow.delta, 2);
 });
 
+run("comparison parser normalizes glued procedure hours without turning 1.0 into 11", () => {
+  const analysis = buildComparisonAnalysis({
+    shopEstimateText: [
+      "Grand Total 1200.00",
+      "Proc OEM documentation / procedure research11.0",
+      "Proc A120.00Incl.",
+    ].join("\n"),
+    insurerEstimateText: "Grand Total 1000.00",
+  });
+
+  const researchRow = analysis.estimateComparisons.rows.find((row) =>
+    /OEM documentation/i.test(`${row.operation ?? ""} ${row.partName ?? ""}`)
+  );
+
+  assert.equal(researchRow?.lhsValue, 1);
+  assert.notEqual(researchRow?.lhsValue, 11);
+  assert.doesNotMatch(`${researchRow?.operation ?? ""} ${researchRow?.partName ?? ""}`, /documentation11\.0/i);
+});
+
 run("export financial gap summary only uses currency-backed comparison rows for total gap", () => {
   const analysis = buildComparisonAnalysis({
     shopEstimateText: SHOP_TEXT,

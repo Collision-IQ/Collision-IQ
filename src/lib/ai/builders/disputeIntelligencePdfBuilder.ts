@@ -25,8 +25,7 @@ export function buildDisputeIntelligencePdf(params: ExportBuilderInput): Carrier
   const insurer = resolveCanonicalInsurer(exportModel);
   const evidenceQuality =
     params.report?.summary.evidenceQuality ?? params.analysis?.summary?.evidenceQuality ?? undefined;
-  const confidence =
-    params.report?.summary.confidence ?? params.analysis?.summary?.confidence ?? exportModel.vehicle.confidence;
+  const confidence = exportModel.confidenceIntegrity.adjustedConfidence;
 
   return {
     filename: "collision-iq-dispute-intelligence-report.pdf",
@@ -61,7 +60,7 @@ export function buildDisputeIntelligencePdf(params: ExportBuilderInput): Carrier
             })}`,
           }]
         : []),
-      { label: "Confidence", value: capitalize(confidence) },
+      { label: "Adjusted Confidence", value: confidence },
       ...(evidenceQuality ? [{ label: "Evidence Quality", value: capitalize(evidenceQuality) }] : []),
     ],
     sections: [
@@ -69,12 +68,49 @@ export function buildDisputeIntelligencePdf(params: ExportBuilderInput): Carrier
         title: "At-a-Glance Conclusion",
         body: report.summary,
       },
+      {
+        title: "File Coverage / Evidence Completeness",
+        bullets: buildConfidenceIntegrityBullets(exportModel.confidenceIntegrity),
+      },
       ...(report.topDrivers.length > 0
         ? [{
             title: "Top Dispute Drivers",
             bullets: report.topDrivers.map(
+              (driver) => {
+                const retrievalNote = driver.retrievalSupport.length > 0
+                  ? ` | Sources: ${driver.retrievalSupport.join(", ")}`
+                  : "";
+                return `#${driver.priorityRank} ${driver.title} | Impact: ${capitalize(driver.impact)} | Leverage: ${driver.leverageScore}/100 | Evidence: ${driver.evidenceLevel} | ${driver.whyThisWins}${retrievalNote} | Status: ${driver.currentGap} | Next: ${driver.nextAction}`;
+              }
+            ),
+          }]
+        : []),
+      ...(exportModel.findingReasoning.length > 0
+        ? [{
+            title: "Finding Reasoning",
+            bullets: exportModel.findingReasoning.slice(0, 6).map((finding) =>
+              `${finding.priorityRank ?? ""}. ${finding.issue} | Why: ${finding.why_it_matters} | Proof: ${finding.what_proves_it} | Next: ${finding.next_action} | Evidence: ${capitalize(finding.evidenceLevel)}`
+            ),
+          }]
+        : []),
+      ...(exportModel.retrievalSummary
+        ? [{
+            title: "Retrieval Summary",
+            bullets: buildRetrievalSummaryBullets(exportModel.retrievalSummary),
+          }]
+        : []),
+      ...(exportModel.disputeStrategy
+        ? [{
+            title: "Dispute Strategy",
+            bullets: buildDisputeStrategyBullets(exportModel.disputeStrategy),
+          }]
+        : []),
+      ...(report.top3.length > 0
+        ? [{
+            title: "3 Strongest Dispute Items",
+            bullets: report.top3.map(
               (driver) =>
-                `${driver.title} | Impact: ${capitalize(driver.impact)} | Status: ${capitalize(driver.supportStatus)} | Why it matters: ${driver.whyItMatters} | Current gap: ${driver.currentGap} | Next action: ${driver.nextAction}`
+                `${driver.title}: ${driver.whyItMatters} — ${driver.nextAction}`
             ),
           }]
         : []),
@@ -122,4 +158,59 @@ function ensureSentence(value: string): string {
 
 function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function buildRetrievalSummaryBullets(
+  summary: NonNullable<ReturnType<typeof buildExportModel>["retrievalSummary"]>
+): string[] {
+  return [
+    `Drive docs used: ${summary.driveDocsUsed}.`,
+    `Web sources used: ${summary.webSourcesUsed}.`,
+    `Serper status: ${capitalize(summary.serperStatus.toLowerCase())}.`,
+    `OEM evidence found: ${summary.oemEvidenceFound ? "Yes" : "No"}.`,
+    ...summary.sourcesInfluencingFindings.slice(0, 6).map(
+      (source) =>
+        `${source.title} (${source.sourceType}) influenced ${source.relatedFindingIds.length} finding(s).`
+    ),
+  ];
+}
+
+function buildConfidenceIntegrityBullets(
+  integrity: NonNullable<ReturnType<typeof buildExportModel>["confidenceIntegrity"]>
+): string[] {
+  return [
+    `Base confidence: ${integrity.baseConfidence}.`,
+    `Adjusted confidence: ${integrity.adjustedConfidence}.`,
+    `Completeness: ${capitalize(integrity.completenessStatus.toLowerCase())}.`,
+    `Uploaded files reviewed: ${integrity.uploadedFileCount}.`,
+    integrity.uploadLimitReached ? "Upload cap reached for this review." : "Upload cap not reached.",
+    ...(integrity.userIndicatedMoreFiles ? ["User indicated more files exist outside the current upload set."] : []),
+    ...(integrity.missingCriticalEvidence.length > 0
+      ? [`Missing proof: ${integrity.missingCriticalEvidence.join("; ")}.`]
+      : []),
+    ...integrity.confidencePenalties.map((penalty) =>
+      `${penalty.reason}: -${penalty.impact}. ${penalty.explanation}`
+    ),
+    integrity.userFacingDisclosure,
+  ];
+}
+
+function buildDisputeStrategyBullets(
+  strategy: NonNullable<ReturnType<typeof buildExportModel>["disputeStrategy"]>
+): string[] {
+  return [
+    `Leverage score: ${strategy.leverageScore}/100.`,
+    ...(strategy.priorityFindings.length > 0
+      ? [`Priority rank: ${strategy.priorityFindings.join("; ")}.`]
+      : []),
+    ...(strategy.easyWins.length > 0
+      ? [`Easy wins: ${strategy.easyWins.join("; ")}.`]
+      : []),
+    ...(strategy.hardFights.length > 0
+      ? [`Hard fights: ${strategy.hardFights.join("; ")}.`]
+      : []),
+    ...strategy.recommendedSequence.slice(0, 5).map((item, index) =>
+      `${index + 1}. ${item}`
+    ),
+  ];
 }

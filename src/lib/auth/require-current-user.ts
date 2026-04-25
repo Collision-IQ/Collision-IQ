@@ -19,6 +19,13 @@ export class UnauthorizedError extends Error {
 const isDevelopment =
   process.env.NODE_ENV !== "production" || process.env.VERCEL_ENV !== "production";
 
+function maskEmailForLog(email: string | null | undefined) {
+  if (!email) return null;
+  const [local, domain] = email.split("@");
+  if (!local || !domain) return "[redacted-email]";
+  return `${local.slice(0, 2)}***@${domain}`;
+}
+
 async function upsertAppUser(params: {
   clerkUserId: string;
   email: string | null;
@@ -61,7 +68,7 @@ export async function requireCurrentUser() {
       normalizeEmail(getDefaultPlatformAdminEmail()) || "local-dev@collision.academy";
     const isPlatformAdmin = isPlatformAdminEmail(fallbackEmail);
     console.info("[auth] resolved local fallback user", {
-      email: fallbackEmail,
+      email: maskEmailForLog(fallbackEmail),
       isPlatformAdmin,
     });
     const user = await upsertAppUser({
@@ -106,7 +113,7 @@ export async function requireCurrentUser() {
   const isPlatformAdmin = isPlatformAdminEmail(normalizedEmail);
   console.info("[auth] resolved clerk user", {
     clerkUserId: state.userId,
-    email: normalizedEmail,
+    email: maskEmailForLog(normalizedEmail),
     isPlatformAdmin,
   });
   const user = await upsertAppUser({

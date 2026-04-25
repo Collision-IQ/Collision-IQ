@@ -225,6 +225,8 @@ export function cleanOperationDisplayText(value?: string | null): string {
   if (!value) return "";
 
   const cleaned = value
+    .replace(/([A-Za-z)])\d(\d\.\d)\b/g, "$1 $2")
+    .replace(/([A-Za-z])(\d{2,}(?:\.\d{2})?)(Incl\.?|Included)\b/gi, "$1 $2 $3")
     .replace(/^\s*#?\s*\d+\s+/i, "")
     .replace(/^\s*(?:proc|procedure|r&i|repl|rpr|blnd|subl|algn)\s+/i, "")
     .replace(/\b([a-z]{3,})\d[\d.]{5,}\b/gi, "$1")

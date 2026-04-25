@@ -64,6 +64,7 @@ import {
   UsageAccessError,
   recordCompletedAnalysisUsage,
 } from "@/lib/billing/usage";
+import { MAX_UPLOAD_BATCH_FILES } from "@/components/chatWidget/attachmentUtils";
 
 export const runtime = "nodejs";
 
@@ -218,6 +219,9 @@ export async function POST(req: Request) {
       linkedEvidence,
       activeCaseId: body.activeCaseId ?? null,
       previousReport: existingCase?.report ?? null,
+      userIntent: body.userIntent ?? null,
+      uploadLimitReached: artifactIds.length >= MAX_UPLOAD_BATCH_FILES,
+      totalUploadedFileCount: mergeArtifactIds(existingCase?.artifactIds ?? [], artifactIds).length,
     });
     let analysis = normalizeReportToAnalysisResult(report);
     const retrievalSnapshot = buildAnalysisRetrievalSnapshot({
@@ -399,6 +403,9 @@ function applyLinkedEvidenceToReport(params: {
   linkedEvidence: LinkedEvidence[];
   activeCaseId?: string | null;
   previousReport?: RepairIntelligenceReport | null;
+  userIntent?: string | null;
+  uploadLimitReached?: boolean;
+  totalUploadedFileCount?: number;
 }): RepairIntelligenceReport {
   const evidenceCorpus = buildEvidenceCorpus({
     estimateText: params.report.sourceEstimateText ?? "",
@@ -457,6 +464,9 @@ function applyLinkedEvidenceToReport(params: {
       active: true,
       reassessedAt: new Date().toISOString(),
       reassessmentMode,
+      uploadedFileCount: params.totalUploadedFileCount ?? params.uploadedAttachments.length,
+      uploadLimitReached: Boolean(params.uploadLimitReached),
+      userIndicatedMoreFiles: userIndicatedMoreFiles(params.userIntent ?? ""),
     },
     evidence: mergeLinkedEvidenceRecords(params.report.evidence, params.linkedEvidence),
   };
@@ -477,6 +487,10 @@ function applyLinkedEvidenceToReport(params: {
     factualCore,
     artifactRefreshPolicy,
   };
+}
+
+function userIndicatedMoreFiles(value: string): boolean {
+  return /\b(more|additional|other|another|rest of|remaining)\s+(files?|documents?|photos?|estimates?|invoices?)\b|\b(can'?t|cannot|unable to|won'?t let me)\s+upload\b|\bupload limit\b|\btoo many files\b/i.test(value);
 }
 
 function buildCaseEvidenceRegistry(params: {
@@ -2192,23 +2206,23 @@ function buildDriveSupportOpportunity(
   switch (topic) {
     case "one_time_use_hardware":
       return partiallyRepresented
-        ? `OEM support in ${sourceLabel} indicates one-time-use hardware, seals, or clips may already be implicated, but the replacement and related documentation posture remains open.`
+        ? `OEM support in ${sourceLabel} indicates one-time-use hardware, seals, or clips may already be implicated, but replacement documentation is not shown.`
         : `OEM support in ${sourceLabel} indicates one-time-use hardware, seals, or clips may need to be replaced and documented when disturbed.`;
     case "corrosion_protection_cavity_wax_seam_sealer":
       return partiallyRepresented
-        ? `OEM support in ${sourceLabel} adds corrosion-protection, cavity-wax, seam-sealer, or related material-restoration requirements that may already be implicated, but the current support remains open.`
+        ? `OEM support in ${sourceLabel} adds corrosion-protection, cavity-wax, seam-sealer, or related material-restoration requirements that may already be implicated, but current documentation is not shown.`
         : `OEM support in ${sourceLabel} adds corrosion-protection, cavity-wax, seam-sealer, or related material-restoration requirements that should be carried or documented for the affected repair path.`;
     case "weld_prep_weld_protection":
       return partiallyRepresented
-        ? `OEM support in ${sourceLabel} adds weld-prep, weld-protection, joining-material, or restoration-material requirements that may already be implicated, but the current support remains open.`
+        ? `OEM support in ${sourceLabel} adds weld-prep, weld-protection, joining-material, or restoration-material requirements that may already be implicated, but current documentation is not shown.`
         : `OEM support in ${sourceLabel} adds weld-prep, weld-protection, joining-material, or restoration-material requirements that should be reflected if those joining operations apply.`;
     case "adas_calibration":
       return partiallyRepresented
-        ? `OEM support in ${sourceLabel} indicates scan, calibration, alignment, or verification burden may already be partly represented, but the current support remains open.`
+        ? `OEM support in ${sourceLabel} indicates scan, calibration, alignment, or verification burden may already be partly represented, but current documentation is not shown.`
         : `OEM support in ${sourceLabel} indicates scan, calibration, alignment, or verification burden may need to be added or better documented for the affected system.`;
     case "fit_sensitive_oem_parts":
       return partiallyRepresented
-        ? `OEM support in ${sourceLabel} indicates a fit-sensitive repair path, so test-fit, mock-up, or related finish-sensitive documentation may already be implicated, but the current support remains open.`
+        ? `OEM support in ${sourceLabel} indicates a fit-sensitive repair path, so test-fit, mock-up, or related finish-sensitive documentation may already be implicated, but current documentation is not shown.`
         : `OEM support in ${sourceLabel} indicates a fit-sensitive repair path, so pre-paint test-fit or mock-up documentation may be needed before final finish work.`;
     default:
       return null;

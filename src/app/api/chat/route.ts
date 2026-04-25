@@ -12,9 +12,10 @@ import {
 import { getCaseById } from "@/lib/cases/getCaseById";
 import type { StoredCaseData } from "@/lib/cases/getCaseById";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
+import { buildProductAccessGuard } from "@/lib/featureAccess";
 
 const MAX_UPLOAD_BATCH_FILES = 6;
-const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at once for now.";
+const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at a time.";
 const TRANSIENT_CHAT_ERROR_MESSAGE =
   "The analysis service had a temporary issue. Please retry.";
 const OPENAI_RETRY_DELAY_MS = 400;
@@ -63,6 +64,11 @@ type ChatRequestBody = {
   attachments?: IncomingAttachment[];
   activeCaseId?: string | null;
   jurisdiction?: IncomingJurisdiction;
+  productAccess?: {
+    plan?: string;
+    chatReportRecommendations?: boolean;
+    snapshotExport?: boolean;
+  };
 };
 
 type OpenAIErrorMeta = {
@@ -871,6 +877,7 @@ export async function POST(req: Request) {
 
     const systemInstructions = [
       baseSystemInstructions,
+      buildProductAccessGuard(body.productAccess),
       buildActiveCaseSystemGuard({
         hasStoredEvidence: activeCaseHasStoredEvidence,
         hasVehicleContext: activeCaseHasVehicleContext,

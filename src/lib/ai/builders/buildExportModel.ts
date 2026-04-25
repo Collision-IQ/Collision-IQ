@@ -1,12 +1,22 @@
 import type { DecisionPanel } from "./buildDecisionPanel";
 import { buildDetermination, type Determination } from "./buildDetermination";
+import { buildCollisionSnapshot, type CollisionSnapshot } from "./collisionSnapshot";
 import { deriveRenderInsightsFromChat, type DerivedValuation } from "./deriveRenderInsightsFromChat";
 import { buildRepairStory } from "./buildRepairStory";
 import {
   extractEstimateFacts,
   resolveCanonicalInsurerCandidate,
 } from "../extractors/extractEstimateFacts";
-import type { AnalysisResult, EstimateFacts, RepairIntelligenceReport, VehicleIdentity } from "../types/analysis";
+import type {
+  AnalysisResult,
+  ConfidenceIntegrity,
+  EstimateFacts,
+  RepairIntelligenceReport,
+  ReportDisputeStrategy,
+  ReportFindingReasoning,
+  ReportRetrievalSummary,
+  VehicleIdentity,
+} from "../types/analysis";
 import {
   buildVehicleLabel,
   decodeVinVehicleIdentity,
@@ -15,6 +25,10 @@ import {
   mergeVehicleIdentity,
   normalizeVehicleIdentity,
 } from "../vehicleContext";
+import {
+  summarizeVehicleForLog,
+  summarizeVehicleLabelForLog,
+} from "../safeVehicleLog";
 import {
   assessDisplayQuality,
   cleanDisplayLabel,
@@ -84,6 +98,11 @@ export type ExportModel = {
   valuation: DerivedValuation;
   determination: Determination;
   disputeIntelligenceReport: DisputeIntelligenceReport;
+  findingReasoning: ReportFindingReasoning[];
+  retrievalSummary?: ReportRetrievalSummary;
+  disputeStrategy?: ReportDisputeStrategy;
+  confidenceIntegrity: ConfidenceIntegrity;
+  collisionSnapshot: CollisionSnapshot;
   negotiationPlaybook: NegotiationPlaybook;
   financialGapBreakdown: FinancialGapBreakdown;
 };
@@ -95,11 +114,17 @@ export type DisputeIntelligenceDriver = {
   whyItMatters: string;
   currentGap: string;
   nextAction: string;
+  evidenceLevel: "documented" | "referenced" | "inferred" | "missing";
+  retrievalSupport: Array<"web:oem" | "web:legal" | "drive:estimate" | "drive:procedure" | "upload">;
+  leverageScore: number;
+  priorityRank: number;
+  whyThisWins: string;
 };
 
 export type DisputeIntelligenceReport = {
   summary: string;
   topDrivers: DisputeIntelligenceDriver[];
+  top3: DisputeIntelligenceDriver[];
   positives: string[];
   supportGaps: string[];
   nextMoves: string[];
@@ -338,8 +363,8 @@ export function buildExportModel(params: {
   };
 
   console.info("[vehicle-label-trace:shared-export-model]", {
-    sourceVehicle: vehicle ?? null,
-    exportVehicle,
+    sourceVehicle: summarizeVehicleForLog(vehicle),
+    exportVehicle: summarizeVehicleForLog(exportVehicle),
   });
 
   const disputeIntelligenceReport = buildDisputeIntelligenceReport({
@@ -406,13 +431,26 @@ export function buildExportModel(params: {
       dvMissingInputs: valuation.dvMissingInputs.map((item) => cleanDisplayLabel(item)),
     },
     disputeIntelligenceReport,
+    findingReasoning: resolveReportFindingReasoning(params.report),
+    retrievalSummary: resolveReportRetrievalSummary(params.report),
+    disputeStrategy: resolveReportDisputeStrategy(params.report),
+    confidenceIntegrity: buildConfidenceIntegrity({
+      report: params.report,
+      analysis: params.analysis,
+      supplementItems: guardedSupplementItems,
+    }),
     negotiationPlaybook,
     financialGapBreakdown,
   };
 
-  return {
+  const modelWithDetermination = {
     ...exportModel,
     determination: buildDetermination(exportModel),
+  };
+
+  return {
+    ...modelWithDetermination,
+    collisionSnapshot: buildCollisionSnapshot(modelWithDetermination),
   };
 }
 
@@ -513,6 +551,250 @@ export function deriveExportReportFields(params: {
   };
 }
 
+function resolveReportFindingReasoning(
+  report: RepairIntelligenceReport | null
+): ReportFindingReasoning[] {
+  if (!report) return [];
+  if (Array.isArray(report.findingReasoning)) {
+    return rankFindingReasoning(report.findingReasoning);
+  }
+
+  const maybeFindings = (report as unknown as { findings?: unknown }).findings;
+  if (!maybeFindings || typeof maybeFindings !== "object") {
+    return [];
+  }
+
+  const extracted = Object.values(maybeFindings as Record<string, unknown>)
+    .flatMap((entry) => {
+      if (!entry || typeof entry !== "object") return [];
+      const data = (entry as { data?: unknown }).data;
+      return Array.isArray(data) ? data : [];
+    })
+    .filter(isReportFindingReasoning);
+
+  return rankFindingReasoning(extracted);
+}
+
+function resolveReportRetrievalSummary(
+  report: RepairIntelligenceReport | null
+): ReportRetrievalSummary | undefined {
+  return report?.retrievalSummary;
+}
+
+function resolveReportDisputeStrategy(
+  report: RepairIntelligenceReport | null
+): ReportDisputeStrategy | undefined {
+  return report?.disputeStrategy;
+}
+
+function buildConfidenceIntegrity(params: {
+  report: RepairIntelligenceReport | null;
+  analysis: AnalysisResult | null;
+  supplementItems: ExportSupplementItem[];
+}): ConfidenceIntegrity {
+  if (params.report?.confidenceIntegrity) {
+    return params.report.confidenceIntegrity;
+  }
+
+  const baseConfidence = normalizeReportConfidence(
+    params.report?.summary.confidence ?? params.analysis?.summary.confidence
+  );
+  const uploadedFileCount =
+    params.report?.ingestionMeta?.uploadedFileCount ??
+    params.report?.evidenceRegistry?.filter((item) => item.ingestionState === "uploaded").length ??
+    0;
+  const uploadLimitReached = Boolean(params.report?.ingestionMeta?.uploadLimitReached);
+  const userIndicatedMoreFiles = Boolean(params.report?.ingestionMeta?.userIndicatedMoreFiles);
+  const missingCriticalEvidence = deriveMissingCriticalEvidence(params);
+  const confidencePenalties = buildConfidencePenalties({
+    uploadedFileCount,
+    uploadLimitReached,
+    userIndicatedMoreFiles,
+    missingCriticalEvidence,
+    evidenceQuality: params.report?.summary.evidenceQuality ?? params.analysis?.summary.evidenceQuality,
+    retrievalSummary: params.report?.retrievalSummary,
+  });
+  const totalPenalty = confidencePenalties.reduce((sum, penalty) => sum + penalty.impact, 0);
+  const adjustedConfidence = lowerConfidence(baseConfidence, totalPenalty);
+  const completenessStatus =
+    uploadedFileCount === 0 || totalPenalty >= 45
+      ? "INSUFFICIENT"
+      : confidencePenalties.length > 0
+        ? "PARTIAL"
+        : "COMPLETE";
+
+  return {
+    baseConfidence,
+    adjustedConfidence,
+    completenessStatus,
+    uploadedFileCount,
+    uploadLimitReached,
+    userIndicatedMoreFiles,
+    missingCriticalEvidence,
+    confidencePenalties,
+    userFacingDisclosure: buildConfidenceDisclosure({
+      completenessStatus,
+      adjustedConfidence,
+      missingCriticalEvidence,
+      uploadLimitReached,
+      userIndicatedMoreFiles,
+    }),
+  };
+}
+
+function normalizeReportConfidence(value?: string | null): ConfidenceIntegrity["baseConfidence"] {
+  if (/^high$/i.test(value ?? "")) return "High";
+  if (/^low$/i.test(value ?? "")) return "Low";
+  return "Moderate";
+}
+
+function lowerConfidence(
+  base: ConfidenceIntegrity["baseConfidence"],
+  totalPenalty: number
+): ConfidenceIntegrity["adjustedConfidence"] {
+  const score = base === "High" ? 3 : base === "Moderate" ? 2 : 1;
+  const steps = totalPenalty >= 45 ? 2 : totalPenalty >= 15 ? 1 : 0;
+  const adjusted = Math.max(1, score - steps);
+  return adjusted === 3 ? "High" : adjusted === 2 ? "Moderate" : "Low";
+}
+
+function deriveMissingCriticalEvidence(params: {
+  report: RepairIntelligenceReport | null;
+  analysis: AnalysisResult | null;
+  supplementItems: ExportSupplementItem[];
+}): string[] {
+  const corpus = [
+    params.report?.missingProcedures.join("\n"),
+    params.report?.recommendedActions.join("\n"),
+    params.report?.issues.map((issue) => `${issue.title} ${issue.finding} ${issue.impact} ${issue.missingOperation ?? ""}`).join("\n"),
+    params.report?.findingReasoning?.map((finding) => `${finding.issue} ${finding.next_action} ${finding.what_proves_it}`).join("\n"),
+    params.analysis?.findings.map((finding) => `${finding.title} ${finding.detail}`).join("\n"),
+    params.supplementItems.map((item) => `${item.title} ${item.rationale} ${item.evidence ?? ""}`).join("\n"),
+  ].filter(Boolean).join("\n").toLowerCase();
+  const missing = new Set<string>();
+  const addIfRelevant = (label: string, relevant: RegExp, documented: RegExp) => {
+    if (relevant.test(corpus) && !documented.test(corpus)) {
+      missing.add(label);
+    }
+  };
+
+  addIfRelevant("Scan records", /\b(scan|diagnostic|dtc|srs|module)\b/, /\b(scan report|scan record|dtc report|diagnostic report|invoice-backed scan)\b/);
+  addIfRelevant("Calibration records", /\b(calibration|adas|aim|radar|camera|sensor)\b/, /\b(calibration report|calibration record|aiming record|invoice-backed calibration)\b/);
+  addIfRelevant("Alignment printout", /\b(alignment|suspension|steering|geometry)\b/, /\b(alignment printout|alignment report|post-repair alignment)\b/);
+  addIfRelevant("Final invoice", /\b(invoice|final bill|paid|sublet|reimbursement|estimate total|cost gap)\b/, /\b(final invoice|paid invoice|closed repair order)\b/);
+  addIfRelevant("Teardown photos", /\b(teardown|hidden damage|structural|rail|apron|pillar|quarter|core support|mounting)\b/, /\b(teardown photos?|disassembly photos?|photo documented)\b/);
+  addIfRelevant("OEM procedures", /\b(oem|procedure|position statement|corrosion|cavity wax|weld|calibration|scan)\b/, /\b(oem procedure attached|retrieved oem|oem evidence found|position statement attached)\b/);
+
+  for (const procedure of params.report?.missingProcedures ?? []) {
+    if (/scan/i.test(procedure)) missing.add("Scan records");
+    if (/calibration|aim|adas/i.test(procedure)) missing.add("Calibration records");
+    if (/alignment/i.test(procedure)) missing.add("Alignment printout");
+    if (/oem|procedure/i.test(procedure)) missing.add("OEM procedures");
+  }
+
+  return Array.from(missing).slice(0, 8);
+}
+
+function buildConfidencePenalties(params: {
+  uploadedFileCount: number;
+  uploadLimitReached: boolean;
+  userIndicatedMoreFiles: boolean;
+  missingCriticalEvidence: string[];
+  evidenceQuality?: string;
+  retrievalSummary?: ReportRetrievalSummary;
+}): ConfidenceIntegrity["confidencePenalties"] {
+  const penalties: ConfidenceIntegrity["confidencePenalties"] = [];
+  if (params.uploadedFileCount === 0) {
+    penalties.push({
+      reason: "NO_UPLOADS",
+      impact: 35,
+      explanation: "No uploaded claim files are attached to the report.",
+    });
+  }
+  if (params.uploadLimitReached) {
+    penalties.push({
+      reason: "UPLOAD_LIMIT_REACHED",
+      impact: 15,
+      explanation: "The upload batch reached the current file cap, so the review may not include every claim document.",
+    });
+  }
+  if (params.userIndicatedMoreFiles) {
+    penalties.push({
+      reason: "USER_INDICATED_MORE_FILES",
+      impact: 20,
+      explanation: "The user indicated additional claim files exist but are not included in the current review.",
+    });
+  }
+  if (params.missingCriticalEvidence.length > 0) {
+    penalties.push({
+      reason: "MISSING_CRITICAL_EVIDENCE",
+      impact: Math.min(30, params.missingCriticalEvidence.length * 8),
+      explanation: `Missing proof: ${params.missingCriticalEvidence.join(", ")}.`,
+    });
+  }
+  if (params.evidenceQuality === "weak") {
+    penalties.push({
+      reason: "WEAK_EVIDENCE_QUALITY",
+      impact: 15,
+      explanation: "The structured analysis marked evidence quality as weak.",
+    });
+  }
+  if (params.retrievalSummary?.serperStatus === "FAILED" && params.retrievalSummary.webSourcesUsed === 0) {
+    penalties.push({
+      reason: "WEB_RETRIEVAL_FAILED",
+      impact: 10,
+      explanation: "Public web retrieval failed and did not influence any included finding.",
+    });
+  }
+  return penalties;
+}
+
+function buildConfidenceDisclosure(params: {
+  completenessStatus: ConfidenceIntegrity["completenessStatus"];
+  adjustedConfidence: ConfidenceIntegrity["adjustedConfidence"];
+  missingCriticalEvidence: string[];
+  uploadLimitReached: boolean;
+  userIndicatedMoreFiles: boolean;
+}): string {
+  if (params.completenessStatus === "COMPLETE") {
+    return `File coverage appears complete for the reviewed materials. Adjusted confidence is ${params.adjustedConfidence}.`;
+  }
+
+  const limits = [
+    params.uploadLimitReached ? "the upload cap was reached" : "",
+    params.userIndicatedMoreFiles ? "additional files were indicated but not included" : "",
+  ].filter(Boolean);
+  const missing = params.missingCriticalEvidence.length > 0
+    ? ` Missing proof includes ${params.missingCriticalEvidence.slice(0, 4).join(", ")}.`
+    : "";
+  const limitText = limits.length > 0 ? ` ${limits.join("; ")}.` : "";
+  return `This is not a final file-complete conclusion. Evidence coverage is ${params.completenessStatus.toLowerCase()}, and adjusted confidence is ${params.adjustedConfidence}.${limitText}${missing}`;
+}
+
+function isReportFindingReasoning(value: unknown): value is ReportFindingReasoning {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Partial<ReportFindingReasoning>;
+  return (
+    typeof record.issue === "string" &&
+    typeof record.why_it_matters === "string" &&
+    typeof record.what_proves_it === "string" &&
+    typeof record.next_action === "string" &&
+    typeof record.evidenceLevel === "string" &&
+    typeof record.confidence === "number" &&
+    typeof record.claimSpecificity === "string"
+  );
+}
+
+function rankFindingReasoning(findings: ReportFindingReasoning[]): ReportFindingReasoning[] {
+  return findings
+    .filter((finding) => finding.issue.trim())
+    .map((finding, index) => ({
+      ...finding,
+      priorityRank: finding.priorityRank ?? index + 1,
+    }))
+    .slice(0, 8);
+}
+
 function inferVehicleInfo(
   report: RepairIntelligenceReport | null,
   analysis: AnalysisResult | null,
@@ -541,11 +823,11 @@ function inferVehicleInfo(
   const detailCount = [vehicle?.year, vehicle?.make, vehicle?.model, vehicle?.vin, vehicle?.trim].filter(Boolean).length;
 
   console.info("[vehicle-reconciliation:report]", {
-    structuredVehicle: structuredVehicle ?? null,
-    decodedVehicle: decodedVehicle ?? null,
-    inferredVehicle: inferredVehicle ?? null,
-    resolvedVehicle: vehicle ?? null,
-    resolvedVin: resolvedVin ?? null,
+    structuredVehicle: summarizeVehicleForLog(structuredVehicle),
+    decodedVehicle: summarizeVehicleForLog(decodedVehicle),
+    inferredVehicle: summarizeVehicleForLog(inferredVehicle),
+    resolvedVehicle: summarizeVehicleForLog(vehicle),
+    resolvedVinTail: resolvedVin ? `*****${resolvedVin.slice(-4)}` : null,
     hasDocumentVehicleText: Boolean(documentVehicleText.trim()),
   });
 
@@ -554,7 +836,7 @@ function inferVehicleInfo(
     decodedVehiclePresent: Boolean(decodedVehicleLabel),
     structuredFieldsPresent: Boolean(vehicle?.year || vehicle?.make || vehicle?.model || vehicle?.trim),
     rawVehicleLabelPresent: Boolean(rawVehicleLabel),
-    finalVehicle: label ?? "Unspecified",
+    finalVehicle: summarizeVehicleLabelForLog(label) ?? "Unspecified",
   });
 
   return {
@@ -627,17 +909,37 @@ function buildDisputeIntelligenceReport(params: {
   const hasReferencedProcedureSupport = hasReferencedButNotRetrievedProcedureSupport(
     params.report
   );
-  const topDrivers = params.supplementItems.slice(0, 5).map((item) => ({
-    title: cleanDisplayLabel(item.title),
-    impact: mapSupplementPriorityToImpact(item.priority),
-    supportStatus: mapSupplementKindToSupportStatus(item.kind),
-    whyItMatters: summarizeSupplementSentence(
-      item.rationale,
-      "This item affects repair quality, documentation, or validation."
-    ),
-    currentGap: buildDisputeDriverGap(item),
-    nextAction: buildDisputeDriverAction(item),
-  }));
+  const rawDrivers = params.supplementItems.slice(0, 5).map((item, index) => {
+    const impact = mapSupplementPriorityToImpact(item.priority);
+    const supportStatus = mapSupplementKindToSupportStatus(item.kind);
+    const evidenceLevel = mapSupportStatusToEvidenceLevel(supportStatus);
+    const retrievalSupport = inferRetrievalSupport(item);
+    const leverageScore = computeLeverageScore(impact, evidenceLevel, retrievalSupport);
+    return {
+      title: cleanDisplayLabel(item.title),
+      impact,
+      supportStatus,
+      whyItMatters: summarizeSupplementSentence(
+        item.rationale,
+        "This item affects repair quality, documentation, or validation."
+      ),
+      currentGap: buildDisputeDriverGap(item),
+      nextAction: buildDisputeDriverAction(item),
+      evidenceLevel,
+      retrievalSupport,
+      leverageScore,
+      priorityRank: index + 1,
+      whyThisWins: buildWhyThisWins(item, evidenceLevel, retrievalSupport),
+    };
+  });
+
+  // Re-sort by leverageScore descending, then re-assign ranks
+  const topDrivers = [...rawDrivers]
+    .sort((a, b) => b.leverageScore - a.leverageScore)
+    .map((driver, i) => ({ ...driver, priorityRank: i + 1 }));
+
+  const top3 = topDrivers.slice(0, 3);
+
   const positives = dedupeCleanExportBullets([
     ...params.reportFields.presentStrengths,
     ...params.reportFields.documentedHighlights,
@@ -665,12 +967,78 @@ function buildDisputeIntelligenceReport(params: {
         .trim()
     ),
     topDrivers,
+    top3,
     positives,
     supportGaps,
     nextMoves,
     valuationPreview,
   };
 }
+
+function mapSupportStatusToEvidenceLevel(
+  supportStatus: DisputeIntelligenceDriver["supportStatus"]
+): DisputeIntelligenceDriver["evidenceLevel"] {
+  switch (supportStatus) {
+    case "supported":
+      return "documented";
+    case "underwritten":
+      return "referenced";
+    case "disputed":
+      return "inferred";
+    case "missing":
+      return "missing";
+  }
+}
+
+function inferRetrievalSupport(
+  item: ExportSupplementItem
+): DisputeIntelligenceDriver["retrievalSupport"] {
+  const text = `${item.title} ${item.rationale} ${item.evidence ?? ""}`.toLowerCase();
+  const sources: DisputeIntelligenceDriver["retrievalSupport"] = [];
+  if (/oem|procedure|position statement|manufacturer/.test(text)) sources.push("web:oem");
+  if (/statute|regulation|insurance code|bad faith/.test(text)) sources.push("web:legal");
+  if (/estimate|supplement|scope/.test(text)) sources.push("drive:estimate");
+  if (/calibration|scan|corrosion|weld|adas/.test(text)) sources.push("drive:procedure");
+  sources.push("upload");
+  return [...new Set(sources)] as DisputeIntelligenceDriver["retrievalSupport"];
+}
+
+function computeLeverageScore(
+  impact: DisputeIntelligenceDriver["impact"],
+  evidenceLevel: DisputeIntelligenceDriver["evidenceLevel"],
+  retrievalSupport: DisputeIntelligenceDriver["retrievalSupport"]
+): number {
+  let score = 0;
+  // Impact weight: 0–50
+  if (impact === "high") score += 50;
+  else if (impact === "medium") score += 30;
+  else score += 10;
+  // Evidence level: 0–30
+  if (evidenceLevel === "documented") score += 30;
+  else if (evidenceLevel === "referenced") score += 20;
+  else if (evidenceLevel === "inferred") score += 10;
+  // Retrieval breadth: 0–20
+  if (retrievalSupport.includes("web:oem")) score += 10;
+  if (retrievalSupport.includes("web:legal")) score += 5;
+  if (retrievalSupport.includes("drive:procedure")) score += 5;
+  return Math.min(score, 100);
+}
+
+function buildWhyThisWins(
+  item: ExportSupplementItem,
+  evidenceLevel: DisputeIntelligenceDriver["evidenceLevel"],
+  retrievalSupport: DisputeIntelligenceDriver["retrievalSupport"]
+): string {
+  const parts: string[] = [];
+  if (item.priority === "high") parts.push("high safety or financial impact");
+  if (evidenceLevel === "documented") parts.push("fully documented in file");
+  else if (evidenceLevel === "referenced") parts.push("OEM or procedure reference available");
+  else if (evidenceLevel === "missing") parts.push("creates clear gap for supplement");
+  if (retrievalSupport.includes("web:oem")) parts.push("OEM source found");
+  if (retrievalSupport.includes("drive:procedure")) parts.push("procedure document in Drive");
+  return parts.length > 0 ? parts.join(" + ") : "Repair-path relevance established from file evidence";
+}
+
 
 function hasReferencedButNotRetrievedProcedureSupport(
   report: RepairIntelligenceReport | null
@@ -970,7 +1338,7 @@ function buildSupplementGapDrivers(
     if (/(adas|calibration|scan|sensor|camera|radar)/.test(text)) {
       drivers.push({
         category: "Calibration / Diagnostics Gap",
-        summary: "Diagnostic, scan, or calibration support remains open in the current estimate posture.",
+        summary: "Diagnostic, scan, or calibration documentation is not shown in the current estimate posture.",
         impactLevel: "high",
       });
     }
@@ -1070,9 +1438,9 @@ export function buildPreferredVehicleIdentityLabel(
   if (fullIdentity && !rejectedYearOnlyIdentity && !rejectedPartialIdentity) {
     resolvedLabel = sanitizeVehicleDisplay(fullIdentity);
     console.info("[vehicle-label-trace:display-helper]", {
-      vehicle: vehicle ?? null,
-      fullIdentity,
-      resolvedLabel: resolvedLabel ?? null,
+      vehicle: summarizeVehicleForLog(vehicle),
+      fullIdentity: summarizeVehicleLabelForLog(fullIdentity),
+      resolvedLabel: summarizeVehicleLabelForLog(resolvedLabel),
       source: "full_identity",
     });
     return resolvedLabel;
@@ -1092,9 +1460,9 @@ export function buildPreferredVehicleIdentityLabel(
   if (namedIdentity && !rejectedYearOnlyNamedIdentity && !rejectedPartialNamedIdentity) {
     resolvedLabel = sanitizeVehicleDisplay(namedIdentity);
     console.info("[vehicle-label-trace:display-helper]", {
-      vehicle: vehicle ?? null,
-      namedIdentity,
-      resolvedLabel: resolvedLabel ?? null,
+      vehicle: summarizeVehicleForLog(vehicle),
+      namedIdentity: summarizeVehicleLabelForLog(namedIdentity),
+      resolvedLabel: summarizeVehicleLabelForLog(resolvedLabel),
       source: "named_identity",
     });
     return resolvedLabel;
@@ -1120,8 +1488,8 @@ export function buildPreferredVehicleIdentityLabel(
   ) {
     resolvedLabel = `VIN ending ${vehicle.vin.slice(-6)}`;
     console.info("[vehicle-label-trace:display-helper]", {
-      vehicle: vehicle ?? null,
-      cleanedLabel: cleanedLabel ?? null,
+      vehicle: summarizeVehicleForLog(vehicle),
+      cleanedLabel: summarizeVehicleLabelForLog(cleanedLabel),
       resolvedLabel,
       source: "vin_tail_fallback",
     });
@@ -1131,16 +1499,16 @@ export function buildPreferredVehicleIdentityLabel(
   if (cleanedLabel) {
     resolvedLabel = cleanedLabel;
     console.info("[vehicle-label-trace:display-helper]", {
-      vehicle: vehicle ?? null,
-      cleanedLabel,
-      resolvedLabel,
+      vehicle: summarizeVehicleForLog(vehicle),
+      cleanedLabel: summarizeVehicleLabelForLog(cleanedLabel),
+      resolvedLabel: summarizeVehicleLabelForLog(resolvedLabel),
       source: "cleaned_label_fallback",
     });
     return resolvedLabel;
   }
 
   console.info("[vehicle-label-trace:display-helper]", {
-    vehicle: vehicle ?? null,
+    vehicle: summarizeVehicleForLog(vehicle),
     resolvedLabel: null,
     source: "no_label",
   });
@@ -1281,6 +1649,51 @@ export function redactExportModelForDownload(exportModel: ExportModel): ExportMo
     repairPosition: redactInsurerInText(exportModel.repairPosition, insurer),
     positionStatement: redactInsurerInText(exportModel.positionStatement, insurer),
     request: redactInsurerInText(exportModel.request, insurer),
+    findingReasoning: exportModel.findingReasoning.map((finding) => ({
+      ...finding,
+      issue: redactInsurerInText(finding.issue, insurer),
+      finding: finding.finding ? redactInsurerInText(finding.finding, insurer) : undefined,
+      why_it_matters: redactInsurerInText(finding.why_it_matters, insurer),
+      what_proves_it: redactInsurerInText(finding.what_proves_it, insurer),
+      next_action: redactInsurerInText(finding.next_action, insurer),
+    })),
+    retrievalSummary: exportModel.retrievalSummary
+      ? {
+          ...exportModel.retrievalSummary,
+          sourcesInfluencingFindings: exportModel.retrievalSummary.sourcesInfluencingFindings.map((source) => ({
+            ...source,
+            title: redactInsurerInText(source.title, insurer),
+          })),
+        }
+      : undefined,
+    disputeStrategy: exportModel.disputeStrategy
+      ? {
+          ...exportModel.disputeStrategy,
+          priorityFindings: exportModel.disputeStrategy.priorityFindings.map((item) =>
+            redactInsurerInText(item, insurer)
+          ),
+          easyWins: exportModel.disputeStrategy.easyWins.map((item) =>
+            redactInsurerInText(item, insurer)
+          ),
+          hardFights: exportModel.disputeStrategy.hardFights.map((item) =>
+            redactInsurerInText(item, insurer)
+          ),
+          recommendedSequence: exportModel.disputeStrategy.recommendedSequence.map((item) =>
+            redactInsurerInText(item, insurer)
+          ),
+        }
+      : undefined,
+    confidenceIntegrity: {
+      ...exportModel.confidenceIntegrity,
+      missingCriticalEvidence: exportModel.confidenceIntegrity.missingCriticalEvidence.map((item) =>
+        redactInsurerInText(item, insurer)
+      ),
+      confidencePenalties: exportModel.confidenceIntegrity.confidencePenalties.map((penalty) => ({
+        ...penalty,
+        explanation: redactInsurerInText(penalty.explanation, insurer),
+      })),
+      userFacingDisclosure: redactInsurerInText(exportModel.confidenceIntegrity.userFacingDisclosure, insurer),
+    },
     supplementItems: exportModel.supplementItems.map((item) => ({
       ...item,
       title: redactInsurerInText(item.title, insurer),
@@ -1797,7 +2210,7 @@ function buildRepairIssueBridge(params: {
   const kinds = new Set(params.topItems.map((item) => item.kind));
 
   if (hasDocumentedSupport && (kinds.has("missing_verification") || kinds.has("missing_operation"))) {
-    return `The file documents several parts of the repair path clearly, but support remains open on ${params.topTitles}.`;
+    return `The file documents several parts of the repair path clearly, but documentation is not shown for ${params.topTitles}.`;
   }
 
   if (params.isComparison && kinds.has("underwritten_operation")) {
@@ -3191,6 +3604,7 @@ function cleanFormalExportText(value?: string | null): string {
     .replace(/\bexport model\b/gi, "supporting documentation")
     .replace(/\bfunction not clearly represented\b/gi, "not clearly documented")
     .replace(/\bthe current material does not clearly document\b/gi, "the file does not clearly support")
+    .replace(/\bsupport remains open\b/gi, "documentation is not shown")
     .replace(/\bProc\s*-\s*Structural cues\b/gi, "")
     .replace(/\bMissing procedures?\b/gi, "")
     .replace(/\bRetrieved Evidence\s*\d+\b/gi, "")
@@ -3198,6 +3612,7 @@ function cleanFormalExportText(value?: string | null): string {
     .replace(/\bFile review\b/gi, "")
     .replace(/\bRepair review\b/gi, "")
     .replace(/\bOEM procedure support\b/gi, "")
+    .replace(/\bthe\s+the\b/gi, "the")
     .replace(/\s{2,}/g, " ")
     .replace(/^[,;:\s-]+|[,;:\s-]+$/g, "")
     .replace(/\s{2,}/g, " ")
@@ -4549,14 +4964,28 @@ function normalizeConclusionConcept(value: string): string | null {
     .replace(/\s+/g, " ")
     .trim();
 
-  if (
-    normalized.includes("credible preliminary") ||
-    normalized.includes("likely to grow after teardown") ||
-    normalized.includes("not obviously padded") ||
-    normalized.includes("likely incomplete in measuring") ||
-    normalized.includes("alignment") && normalized.includes("hidden damage")
-  ) {
-    return "single_estimate_conclusion";
+  // Broad category buckets — each key phrase maps to a single concept slot
+  const conceptMap: Array<[RegExp, string]> = [
+    [/credible preliminary (repair plan|position)/, "single_estimate_conclusion"],
+    [/likely to grow after teardown/, "single_estimate_conclusion"],
+    [/not obviously padded/, "single_estimate_conclusion"],
+    [/likely incomplete in measuring/, "single_estimate_conclusion"],
+    [/alignment.+hidden damage/, "hidden_damage_concept"],
+    [/file documents a credible/, "file_credibility_statement"],
+    [/supports a focused estimate review/, "file_credibility_statement"],
+    [/repair path appears (supported|credible|defensible)/, "repair_path_statement"],
+    [/adas calibration (may|is|remains)/, "adas_calibration_mention"],
+    [/pre.?repair scan/, "pre_scan_mention"],
+    [/corrosion protection/, "corrosion_protection_mention"],
+    [/structural measurement/, "structural_measurement_mention"],
+    [/support remains open/, "support_open_generic"],
+    [/further documentation (is needed|needed|required)/, "support_open_generic"],
+    [/referenced.+not produced/, "referenced_not_produced"],
+    [/supplementable (but|with)/, "supplement_opportunity_generic"],
+  ];
+
+  for (const [pattern, concept] of conceptMap) {
+    if (pattern.test(normalized)) return concept;
   }
 
   return null;

@@ -28,6 +28,7 @@ const PROCEDURE_PATTERNS = [
   /seat weight sensor|zero point calibration/i,
   /seat belt dynamic function test/i,
   /post-?repair scan/i,
+  /oem documentation|procedure research|procedure support/i,
   /final road test|safety\s*&?\s*quality check/i,
   /mask jambs/i,
   /tint color/i,
@@ -36,7 +37,7 @@ const PROCEDURE_PATTERNS = [
 ];
 
 export function parseEstimate(text: string): ParsedEstimate {
-  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  const lines = text.split("\n").map((line) => normalizeEstimateLineText(line).trim()).filter(Boolean);
   const out: ParsedEstimate = {
     rawText: text,
     allLines: lines,
@@ -45,7 +46,7 @@ export function parseEstimate(text: string): ParsedEstimate {
 
   for (const line of lines) {
     const opMatch = line.match(
-      /^#?\s*(\d+)?\s*(R&I|Repl|Rpr|Blnd|Subl|Algn)\s+(.*)$/i
+      /^#?\s*(\d+)?\s*(R&I|Repl|Rpr|Blnd|Subl|Algn|Proc)\s+(.*)$/i
     );
 
     if (opMatch) {
@@ -104,19 +105,31 @@ export function extractEstimateOps(text: string): EstimateOperation[] {
   }));
 }
 
+export function normalizeEstimateLineText(value: string): string {
+  return value
+    .replace(/([A-Za-z)])\d(\d\.\d)\s*$/g, "$1 $2")
+    .replace(/([A-Za-z)])(\d{1,2}\.\d)\s*$/g, "$1 $2")
+    .replace(/([A-Za-z])(\d{2,}(?:\.\d{2})?)(Incl\.?|Included)\b/gi, "$1 $2 $3")
+    .replace(/\s{2,}/g, " ");
+}
+
 function extractTrailingLaborHours(value: string): number | undefined {
-  const match = value.match(/^(.*?)(?:\s+(\d+(?:\.\d+)?))$/);
+  const normalized = normalizeEstimateLineText(value);
+  const match = normalized.match(/^(.*?)(?:\s+(\d{1,2}(?:\.\d+)?))$/);
   if (!match) {
     return undefined;
   }
 
   const hours = Number(match[2]);
-  return Number.isFinite(hours) ? hours : undefined;
+  return Number.isFinite(hours) && hours <= 80 ? hours : undefined;
 }
 
 function stripTrailingLaborHours(value: string): string {
-  const match = value.match(/^(.*?)(?:\s+(\d+(?:\.\d+)?))$/);
-  return match?.[1]?.trim() || value.trim();
+  const normalized = normalizeEstimateLineText(value);
+  const match = normalized.match(/^(.*?)(?:\s+(\d{1,2}(?:\.\d+)?))$/);
+  if (!match) return normalized.trim();
+  const hours = Number(match[2]);
+  return Number.isFinite(hours) && hours <= 80 ? match[1]?.trim() || normalized.trim() : normalized.trim();
 }
 
 function normalizeOperation(operation: string): string {

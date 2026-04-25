@@ -16,6 +16,9 @@ import {
   Square,
   Mic,
   LoaderCircle,
+  Pause,
+  Play,
+  StopCircle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
@@ -53,6 +56,10 @@ import AttachmentPreviewModal, {
   type PreviewAttachment,
 } from "@/components/AttachmentPreviewModal";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
+import { buildPlanRecommendationGuard, canAccessFeature } from "@/lib/featureAccess";
+import { emitSafeCrmEventFromClient } from "@/lib/crm/events";
+import { buildNextBatchPrompt, buildUploadBatchGuidance, NEXT_UPLOAD_PRIORITY } from "@/lib/uploadBatching";
+import { TTS_STYLE_PROMPT, VOICE_PRESETS } from "@/lib/voicePresets";
 
 interface Attachment {
   attachmentId: string;
@@ -140,9 +147,9 @@ const INITIAL_MESSAGE: Message = {
 
 const SERVER_TTS_ENABLED =
   process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_SERVER_TTS === "true";
+const BROWSER_TTS_ENABLED =
+  process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_BROWSER_TTS === "true";
 const SERVER_TTS_VOICE = process.env.NEXT_PUBLIC_COLLISION_IQ_TTS_VOICE?.trim() || undefined;
-const TTS_STYLE_PROMPT =
-  "Female voice. Warm, confident, quick-witted, conversational, and natural. Subtle Northeast energy. Smart, grounded, expressive, and slightly dry in tone. Brisk pacing with clear articulation. Sounds like a sharp, street-smart professional explaining something clearly under pressure. Avoid parody, caricature, or celebrity imitation.";
 
 function formatCaseUpdateStatus(
   delta: RepairIntelligenceReport["reassessmentDelta"] | undefined,
@@ -258,6 +265,7 @@ export default function ChatWidget({
   onCaseUploadComplete,
   onSessionControlsReady,
   onCaseIntentChange,
+  viewerAccess = null,
   caseChatEnabled = false,
   activeCaseId = null,
   caseIntent = "Continue with this case",
@@ -275,6 +283,11 @@ export default function ChatWidget({
   const [replaceAttachmentId, setReplaceAttachmentId] = useState<string | null>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isSpeechPaused, setIsSpeechPaused] = useState(false);
+  const [ttsVoiceName, setTtsVoiceName] = useState<string | null>(null);
+  const [ttsPresetId, setTtsPresetId] = useState<string>("default");
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [totalFilesReviewed, setTotalFilesReviewed] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingError, setRecordingError] = useState<string | null>(null);
@@ -329,10 +342,42 @@ export default function ChatWidget({
         : -1,
     [attachments, previewAttachmentId]
   );
+  const effectiveAttachmentsOpen =
+    attachments.length === 0 ? true : attachments.length >= 3 ? false : attachmentsOpen;
+  const productPlan = viewerAccess?.plan ?? "none";
+  const hasProChatRecommendations = canAccessFeature(productPlan, "chat_report_recommendations");
+  const selectedVoicePreset =
+    VOICE_PRESETS.find((preset) => preset.id === ttsPresetId) ?? VOICE_PRESETS[0];
+  const browserVoiceNotice =
+    BROWSER_TTS_ENABLED && canUseBrowserReadAloud() && availableVoices.length === 0
+      ? "Voice options depend on your browser/system voices."
+      : null;
+  const selectedVoiceDescription =
+    "description" in selectedVoicePreset ? selectedVoicePreset.description : "Select voice";
+  const uploadBatchGuidance = buildUploadBatchGuidance(
+    totalFilesReviewed,
+    attachments.length,
+    MAX_UPLOAD_BATCH_FILES
+  );
 
   useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
+
+  // Load available browser TTS voices
+  useEffect(() => {
+    if (!BROWSER_TTS_ENABLED) return;
+    if (!canUseBrowserReadAloud()) return;
+    function loadVoices() {
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length > 0) {
+        setAvailableVoices(voices);
+      }
+    }
+    loadVoices();
+    window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
+    return () => window.speechSynthesis.removeEventListener("voiceschanged", loadVoices);
+  }, []);
 
   useEffect(() => {
     if (!activeCaseId) return;
@@ -351,11 +396,6 @@ export default function ChatWidget({
   }, [activeCaseId]);
 
   useEffect(() => {
-    if (attachments.length >= 3) setAttachmentsOpen(false);
-    if (attachments.length === 0) setAttachmentsOpen(true);
-  }, [attachments.length]);
-
-  useEffect(() => {
     return () => {
       disposeRecordingResources(true);
       stopSpeaking();
@@ -372,14 +412,19 @@ export default function ChatWidget({
 
     if (isRecording) {
       disposeRecordingResources(true);
-      setIsRecording(false);
     }
 
-    setIsTranscribing(false);
-    setRecordingError(null);
-    setPreviewAttachmentId(null);
-    setReplaceAttachmentId(null);
     stopSpeaking();
+
+    const resetTimer = window.setTimeout(() => {
+      setIsRecording(false);
+      setIsTranscribing(false);
+      setRecordingError(null);
+      setPreviewAttachmentId(null);
+      setReplaceAttachmentId(null);
+    }, 0);
+
+    return () => window.clearTimeout(resetTimer);
   }, [disabled, isRecording]);
 
   useEffect(() => {
@@ -791,7 +836,9 @@ export default function ChatWidget({
       fileCount: fileList.length,
       totalBytes: Array.from(fileList).reduce((sum, file) => sum + file.size, 0),
     });
-    upsertSystemStatusMessage(UPLOAD_CAP_MESSAGE);
+    upsertSystemStatusMessage(
+      `${UPLOAD_CAP_MESSAGE} Upload the next ${MAX_UPLOAD_BATCH_FILES} most important files: ${NEXT_UPLOAD_PRIORITY.join(", ")}.`
+    );
     return true;
   }
 
@@ -856,6 +903,7 @@ export default function ChatWidget({
     });
     setMessages([INITIAL_MESSAGE]);
     setAttachments([]);
+    setTotalFilesReviewed(0);
     setAttachmentsOpen(true);
     setPreviewAttachmentId(null);
     setReplaceAttachmentId(null);
@@ -939,7 +987,8 @@ export default function ChatWidget({
             caseId: analysisReportIdRef.current,
             message:
               `${messageToSend}\n\nCurrent active topic/mode: ${activeCaseTopic}. ` +
-              "Answer this topic first and avoid a broad case recap unless this topic is a general summary.",
+              "Answer this topic first and avoid a broad case recap unless this topic is a general summary. " +
+              buildPlanRecommendationGuard(hasProChatRecommendations),
             history: resolveCaseHistory(),
           }),
         });
@@ -1069,6 +1118,13 @@ export default function ChatWidget({
         onAnalysisPanelChange?.(analysisData.panel ?? null);
         onAnalysisStatusChange?.("complete", null);
         onAnalysisLoadingChange?.(false);
+        setTotalFilesReviewed((current) => current + attachmentStats.fileCount);
+        emitSafeCrmEventFromClient({
+          event: "upload_batch_completed",
+          plan: productPlan,
+          fileCount: attachmentStats.fileCount,
+          totalFilesReviewed: totalFilesReviewed + attachmentStats.fileCount,
+        });
         console.info("[attachments] upload completion case state", {
           activeCaseId,
           activeCaseIdAfter: nextActiveCaseId,
@@ -1087,11 +1143,12 @@ export default function ChatWidget({
           messageCountAfter: updatedMessages.length,
           skippedReset: true,
         });
+        const reviewedCount = totalFilesReviewed + attachmentStats.fileCount;
         upsertSystemStatusMessage(
-          formatCaseUpdateStatus(
+          `${formatCaseUpdateStatus(
             analysisData.reassessmentDelta,
             analysisData.artifactRefreshPolicy
-          )
+          )} ${buildNextBatchPrompt(reviewedCount, MAX_UPLOAD_BATCH_FILES)}`
         );
         setAttachments((prev) =>
           prev.map((attachment) => ({
@@ -1113,7 +1170,8 @@ export default function ChatWidget({
               `${messageToSend}\n\nAdditional evidence was just uploaded and merged into this active case. ` +
               `Current active topic/mode: ${activeCaseTopic}.\n` +
               `Latest prior user question/topic: ${latestPriorUserQuestion ?? caseIntent}.\n` +
-              "Answer as a continuation. Directly answer the active topic first, use the new upload only where it affects that topic, then mention only the most relevant open items. If the active topic is a general case summary, use a compact current-case posture. Otherwise, do not provide a broad case recap. Separate visible photo evidence, document/invoice-supported repairs, and verification items that remain open only when relevant to the active topic. Do not restart the review or ask for vehicle identity already present in the case.",
+              "Answer as a continuation. Directly answer the active topic first, use the new upload only where it affects that topic, then mention only the most relevant open items. If the active topic is a general case summary, use a compact current-case posture. Otherwise, do not provide a broad case recap. Separate visible photo evidence, document/invoice-supported repairs, and verification items that remain open only when relevant to the active topic. Do not restart the review or ask for vehicle identity already present in the case. " +
+              buildPlanRecommendationGuard(hasProChatRecommendations),
             history: resolveCaseHistory(),
           }),
         });
@@ -1172,6 +1230,11 @@ export default function ChatWidget({
             pageCount: attachment.pageCount,
             imageDataUrl: attachment.imageDataUrl,
           })),
+          productAccess: {
+            plan: productPlan,
+            chatReportRecommendations: hasProChatRecommendations,
+            snapshotExport: canAccessFeature(productPlan, "snapshot_export"),
+          },
         }),
       });
 
@@ -1203,6 +1266,13 @@ export default function ChatWidget({
             analysisRunRef.current === activeAnalysisRunId
           ) {
             onAnalysisLoadingChange?.(false);
+            setTotalFilesReviewed((current) => current + attachmentStats.fileCount);
+            emitSafeCrmEventFromClient({
+              event: "upload_batch_completed",
+              plan: productPlan,
+              fileCount: attachmentStats.fileCount,
+              totalFilesReviewed: totalFilesReviewed + attachmentStats.fileCount,
+            });
           }
         }
         return;
@@ -1299,13 +1369,14 @@ export default function ChatWidget({
               refinedWithRetrieval: analysisData.refinedWithRetrieval ?? false,
               analysisCompletedAt: analysisData.analysisCompletedAt ?? null,
             });
+            const reviewedCount = totalFilesReviewed + attachmentStats.fileCount;
             upsertSystemStatusMessage(
-              analysisData.caseContinuity?.mode === "active_case_update"
+              `${analysisData.caseContinuity?.mode === "active_case_update"
                 ? formatCaseUpdateStatus(
                     analysisData.reassessmentDelta,
                     analysisData.artifactRefreshPolicy
                   )
-                : "Analysis complete."
+                : "Analysis complete."} ${buildNextBatchPrompt(reviewedCount, MAX_UPLOAD_BATCH_FILES)}`
             );
             setAttachments((prev) =>
               prev.map((attachment) => ({
@@ -1791,7 +1862,7 @@ export default function ChatWidget({
       audioUrlRef.current = null;
     }
 
-    if (!canUseBrowserReadAloud()) {
+    if (!BROWSER_TTS_ENABLED || !canUseBrowserReadAloud()) {
       setSpeakingMessageId(null);
       setIsSpeaking(false);
       utteranceRef.current = null;
@@ -1802,6 +1873,31 @@ export default function ChatWidget({
     utteranceRef.current = null;
     setSpeakingMessageId(null);
     setIsSpeaking(false);
+    setIsSpeechPaused(false);
+  }
+
+  function pauseSpeaking() {
+    if (audioRef.current && !audioRef.current.paused) {
+      audioRef.current.pause();
+      setIsSpeechPaused(true);
+      return;
+    }
+    if (BROWSER_TTS_ENABLED && canUseBrowserReadAloud() && window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+      window.speechSynthesis.pause();
+      setIsSpeechPaused(true);
+    }
+  }
+
+  function resumeSpeaking() {
+    if (audioRef.current && audioRef.current.paused) {
+      void audioRef.current.play();
+      setIsSpeechPaused(false);
+      return;
+    }
+    if (BROWSER_TTS_ENABLED && canUseBrowserReadAloud() && window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+      setIsSpeechPaused(false);
+    }
   }
 
   async function playServerSpeech(message: Message, plainText: string) {
@@ -1845,32 +1941,63 @@ export default function ChatWidget({
   }
 
   function playBrowserSpeech(message: Message, plainText: string) {
-    if (!canUseBrowserReadAloud()) {
+    if (!BROWSER_TTS_ENABLED || !canUseBrowserReadAloud()) {
       throw new Error("Browser speech is unavailable.");
     }
 
-    const utterance = new SpeechSynthesisUtterance(plainText);
-    utteranceRef.current = utterance;
-    utterance.onstart = () => {
-      setSpeakingMessageId(message.id);
-      setIsSpeaking(true);
-    };
-    utterance.onend = () => {
-      if (utteranceRef.current === utterance) {
-        utteranceRef.current = null;
-        setSpeakingMessageId(null);
-        setIsSpeaking(false);
-      }
-    };
-    utterance.onerror = () => {
-      if (utteranceRef.current === utterance) {
-        utteranceRef.current = null;
-        setSpeakingMessageId(null);
-        setIsSpeaking(false);
-      }
-    };
+    // Chunk long text into paragraphs so the browser doesn't drop words mid-read
+    const chunks = plainText
+      .split(/\n{2,}/)
+      .map((c) => c.trim())
+      .filter(Boolean);
+    const speakChunks = chunks.length > 0 ? chunks : [plainText];
 
-    window.speechSynthesis.speak(utterance);
+    let chunkIndex = 0;
+
+    function speakNext() {
+      if (chunkIndex >= speakChunks.length) {
+        setSpeakingMessageId(null);
+        setIsSpeaking(false);
+        setIsSpeechPaused(false);
+        utteranceRef.current = null;
+        return;
+      }
+      const text = speakChunks[chunkIndex++];
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = selectedVoicePreset.rate;
+      utterance.pitch = selectedVoicePreset.pitch;
+      utterance.volume = 1;
+
+      const browserVoices = window.speechSynthesis.getVoices();
+      if (ttsVoiceName) {
+        const match = browserVoices.find((v) => v.name === ttsVoiceName);
+        if (match) utterance.voice = match;
+      }
+
+      utterance.onstart = () => {
+        setSpeakingMessageId(message.id);
+        setIsSpeaking(true);
+        setIsSpeechPaused(false);
+      };
+      utterance.onend = () => {
+        if (utteranceRef.current === utterance) {
+          speakNext();
+        }
+      };
+      utterance.onerror = () => {
+        if (utteranceRef.current === utterance) {
+          utteranceRef.current = null;
+          setSpeakingMessageId(null);
+          setIsSpeaking(false);
+          setIsSpeechPaused(false);
+        }
+      };
+
+      utteranceRef.current = utterance;
+      window.speechSynthesis.speak(utterance);
+    }
+
+    speakNext();
   }
 
   async function handleSpeakMessage(message: Message) {
@@ -1899,15 +2026,19 @@ export default function ChatWidget({
       }
     }
 
-    if (!canUseBrowserReadAloud()) {
-      pushSystemStatusMessage("Read aloud is not available in this browser.");
+    if (!BROWSER_TTS_ENABLED || !canUseBrowserReadAloud()) {
+      pushSystemStatusMessage(
+        SERVER_TTS_ENABLED
+          ? "Voiceover is temporarily unavailable."
+          : "Voiceover is disabled until premium server speech is enabled."
+      );
       return;
     }
 
     playBrowserSpeech(message, plainText);
   }
 
-  const canReadAloud = SERVER_TTS_ENABLED || canUseBrowserReadAloud();
+  const canReadAloud = SERVER_TTS_ENABLED || (BROWSER_TTS_ENABLED && canUseBrowserReadAloud());
 
   const userBubble = "border border-orange-500/24 bg-[#1a120d]/88 text-orange-300 shadow-[0_14px_32px_rgba(0,0,0,0.16)]";
 
@@ -1976,6 +2107,9 @@ export default function ChatWidget({
                 <div className="text-sm leading-6 text-white/65">
                   Upload an estimate, procedure, or photo set and we&apos;ll turn it into a cleaner repair decision read.
                 </div>
+                <div className="mx-auto mt-2 max-w-[680px] text-xs leading-5 text-white/42">
+                  {uploadBatchGuidance}
+                </div>
               </div>
 
               <div className="grid w-full max-w-[720px] grid-cols-1 gap-3 sm:grid-cols-3">
@@ -2032,31 +2166,96 @@ export default function ChatWidget({
               >
                 {msg.role === "assistant" && msg.kind !== "system_status" ? (
                   <div>
-                    <div className="mb-3 flex items-center justify-end">
-                      <button
-                        type="button"
-                        onClick={() => handleSpeakMessage(msg)}
-                        disabled={!canReadAloud || disabled}
-                        aria-label={
-                          speakingMessageId === msg.id && isSpeaking
-                            ? "Stop reading aloud"
-                            : "Read aloud"
-                        }
-                        title={
-                          canReadAloud
-                            ? speakingMessageId === msg.id && isSpeaking
-                              ? "Stop reading aloud"
-                              : "Read aloud"
-                            : "Read aloud unavailable"
-                        }
-                        className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        {speakingMessageId === msg.id && isSpeaking ? (
-                          <Square size={14} />
-                        ) : (
+                    <div className="mb-3 flex items-center justify-end gap-1">
+                      {/* Browser voice selector — explicit fallback only; server TTS is the launch-quality path */}
+                      {BROWSER_TTS_ENABLED && !SERVER_TTS_ENABLED && speakingMessageId !== msg.id && (
+                        <div className="flex flex-col items-end gap-1">
+                          <select
+                            value={ttsVoiceName ? `voice:${ttsVoiceName}` : `preset:${ttsPresetId}`}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              if (value.startsWith("voice:")) {
+                                setTtsVoiceName(value.slice("voice:".length) || null);
+                                return;
+                              }
+                              setTtsPresetId(value.replace(/^preset:/, "") || "default");
+                              setTtsVoiceName(null);
+                            }}
+                            aria-label="Select voice"
+                            title={selectedVoiceDescription}
+                            className="rounded-xl border border-white/10 bg-[#151515] px-2 py-1.5 text-[11px] font-medium text-white/88 shadow-sm transition hover:bg-[#1d1d1d] focus:border-orange-300/40 focus:outline-none"
+                            style={{ colorScheme: "dark" }}
+                          >
+                            {VOICE_PRESETS.map((preset) => (
+                              <option key={preset.id} value={`preset:${preset.id}`} className="bg-[#151515] text-white">
+                                {preset.label}
+                              </option>
+                            ))}
+                            {availableVoices.map((v) => (
+                              <option key={v.name} value={`voice:${v.name}`} className="bg-[#151515] text-white">{v.name}</option>
+                            ))}
+                          </select>
+                          {browserVoiceNotice || selectedVoiceDescription ? (
+                            <span className="max-w-[220px] text-right text-[10px] leading-4 text-white/35">
+                              {browserVoiceNotice ?? selectedVoiceDescription}
+                            </span>
+                          ) : null}
+                        </div>
+                      )}
+                      {/* Read button — shown when not currently speaking this message */}
+                      {speakingMessageId !== msg.id && (
+                        <button
+                          type="button"
+                          onClick={() => handleSpeakMessage(msg)}
+                          disabled={!canReadAloud || disabled}
+                          aria-label="Read aloud"
+                          title={
+                            canReadAloud
+                              ? SERVER_TTS_ENABLED
+                                ? "Read aloud"
+                                : "Basic browser reader"
+                              : "Voiceover requires server speech"
+                          }
+                          className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
                           <Volume2 size={14} />
-                        )}
-                      </button>
+                        </button>
+                      )}
+                      {/* Pause / Resume — shown when this message is speaking */}
+                      {speakingMessageId === msg.id && isSpeaking && !isSpeechPaused && (
+                        <button
+                          type="button"
+                          onClick={pauseSpeaking}
+                          aria-label="Pause"
+                          title="Pause"
+                          className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+                        >
+                          <Pause size={14} />
+                        </button>
+                      )}
+                      {speakingMessageId === msg.id && isSpeechPaused && (
+                        <button
+                          type="button"
+                          onClick={resumeSpeaking}
+                          aria-label="Resume"
+                          title="Resume"
+                          className="rounded-xl bg-white/[0.045] p-2 text-orange-400/80 transition hover:bg-white/[0.075] hover:text-orange-400"
+                        >
+                          <Play size={14} />
+                        </button>
+                      )}
+                      {/* Stop — shown whenever something is speaking */}
+                      {speakingMessageId === msg.id && (
+                        <button
+                          type="button"
+                          onClick={stopSpeaking}
+                          aria-label="Stop reading"
+                          title="Stop"
+                          className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-red-400"
+                        >
+                          <StopCircle size={14} />
+                        </button>
+                      )}
                     </div>
                     <div className="analysis-report text-[15px] leading-[1.9] text-white/84">
                     <ReactMarkdown
@@ -2271,12 +2470,18 @@ export default function ChatWidget({
                         ? `- Vision: ${visionAttachmentCount}`
                         : ""}
                     </span>
+                    <span className="ml-2 text-white/35">
+                      Files reviewed so far: {totalFilesReviewed}
+                    </span>
                   </span>
-                  {attachmentsOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                  {effectiveAttachmentsOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
                 </button>
 
-                {attachmentsOpen && (
+                {effectiveAttachmentsOpen && (
                   <div className="mt-2 space-y-2">
+                    <div className="rounded-2xl bg-black/18 px-3 py-2 text-xs leading-5 text-white/42">
+                      {uploadBatchGuidance}
+                    </div>
                     {attachments.map((attachment) => (
                       <div
                         key={attachment.attachmentId}

@@ -5,6 +5,42 @@ import type { LinkedEvidence } from "@/lib/ingest/fetchLinkedEvidence";
 
 export type FindingStatus = "included" | "missing" | "not_shown";
 export type Severity = "low" | "medium" | "high";
+
+// ─── Enhanced agent output contract ─────────────────────────────────────────
+export type AgentEvidenceLevel =
+  | "documented"
+  | "referenced"
+  | "inferred"
+  | "missing";
+
+export type AgentSupportSource =
+  | "upload"
+  | "google-drive"
+  | "web"
+  | "serper"
+  | "manual";
+
+export type AgentFindingEnhanced = {
+  issue: string;
+  finding: string;
+  evidenceLevel: AgentEvidenceLevel;
+  supportSources: AgentSupportSource[];
+  risk: "low" | "medium" | "high";
+  confidence: number;
+  secondLevelReasoning: string;
+  thirdLevelAction: string;
+};
+
+export type RetrievalImpact = {
+  driveDocumentsUsed: number;
+  webDocumentsUsed: number;
+  serperWorked: boolean;
+  oemSourcesFound: boolean;
+  legalSourcesFound: boolean;
+  changedFindings: string[];
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 export type FindingBucket =
   | "critical"
   | "compliance"
@@ -276,6 +312,56 @@ export type ArtifactRefreshPolicy = {
   chatSummaryOnly: ArtifactRefreshDecision;
 };
 
+export type ReportFindingReasoning = {
+  id?: string;
+  issue: string;
+  finding?: string;
+  why_it_matters: string;
+  what_proves_it: string;
+  next_action: string;
+  evidenceLevel: "documented" | "referenced" | "inferred" | "missing" | "unsupported";
+  confidence: number;
+  claimSpecificity: "high" | "medium" | "low";
+  priorityRank?: number;
+};
+
+export type ReportRetrievalSummary = {
+  driveDocsUsed: number;
+  webSourcesUsed: number;
+  serperStatus: "SUCCESS" | "FAILED" | "NOT_RUN";
+  oemEvidenceFound: boolean;
+  sourcesInfluencingFindings: Array<{
+    title: string;
+    sourceType: "drive" | "web" | "oem" | "estimate";
+    url?: string;
+    relatedFindingIds: string[];
+  }>;
+};
+
+export type ReportDisputeStrategy = {
+  leverageScore: number;
+  priorityFindings: string[];
+  easyWins: string[];
+  hardFights: string[];
+  recommendedSequence: string[];
+};
+
+export type ConfidenceIntegrity = {
+  baseConfidence: "Low" | "Moderate" | "High";
+  adjustedConfidence: "Low" | "Moderate" | "High";
+  completenessStatus: "COMPLETE" | "PARTIAL" | "INSUFFICIENT";
+  uploadedFileCount: number;
+  uploadLimitReached: boolean;
+  userIndicatedMoreFiles: boolean;
+  missingCriticalEvidence: string[];
+  confidencePenalties: Array<{
+    reason: string;
+    impact: number;
+    explanation: string;
+  }>;
+  userFacingDisclosure: string;
+};
+
 export type RepairIntelligenceReport = {
   summary: {
     riskScore: "low" | "moderate" | "high";
@@ -299,12 +385,19 @@ export type RepairIntelligenceReport = {
   factualCore?: SharedFactualCore;
   reassessmentDelta?: ReassessmentDelta;
   artifactRefreshPolicy?: ArtifactRefreshPolicy;
+  findingReasoning?: ReportFindingReasoning[];
+  retrievalSummary?: ReportRetrievalSummary;
+  disputeStrategy?: ReportDisputeStrategy;
+  confidenceIntegrity?: ConfidenceIntegrity;
   ingestionMeta?: {
     linkedEvidenceCount?: number;
     linkedEvidenceFetchedAt?: string;
     activeCaseId?: string;
     reassessedAt?: string;
     reassessmentMode?: "new_case" | "active_case_update";
+    uploadedFileCount?: number;
+    uploadLimitReached?: boolean;
+    userIndicatedMoreFiles?: boolean;
     closedAt?: string;
     active?: boolean;
   };
