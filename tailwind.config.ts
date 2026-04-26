@@ -1,5 +1,5 @@
 import type { Config } from "tailwindcss";
-import type { PluginAPI } from "tailwindcss/types/config";
+import type { PluginAPI } from "tailwindcss/plugin";
 import typography from "@tailwindcss/typography";
 
 export default {
