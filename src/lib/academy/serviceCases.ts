@@ -11,18 +11,16 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import type { AcademyServiceType } from "@prisma/client";
-
-export type { AcademyServiceType };
 
 export type CreateServiceCaseParams = {
-  userId: string;
-  serviceType: AcademyServiceType;
+  userId?: string | null;
+  serviceType: string;
   claimId?: string | null;
   stripeSessionId?: string | null;
   stripePaymentIntentId?: string | null;
-  amountPaid?: number | null;
-  notes?: string | null;
+  intakeNotes?: string | null;
+  internalNotes?: string | null;
+  lastUpdate?: string | null;
 };
 
 /**
@@ -32,7 +30,7 @@ export type CreateServiceCaseParams = {
  */
 export async function createServiceCase(
   params: CreateServiceCaseParams
-): Promise<{ id: string; serviceType: AcademyServiceType; status: string }> {
+): Promise<{ id: string; serviceType: string; status: string }> {
   const existing = params.stripeSessionId
     ? await prisma.academyServiceCase.findUnique({
         where: { stripeSessionId: params.stripeSessionId },
@@ -51,8 +49,9 @@ export async function createServiceCase(
       claimId: params.claimId ?? null,
       stripeSessionId: params.stripeSessionId ?? null,
       stripePaymentIntentId: params.stripePaymentIntentId ?? null,
-      amountPaid: params.amountPaid ?? null,
-      notes: params.notes ?? null,
+      intakeNotes: params.intakeNotes ?? null,
+      internalNotes: params.internalNotes ?? null,
+      lastUpdate: params.lastUpdate ?? null,
       status: "PENDING_INTAKE",
     },
     select: {

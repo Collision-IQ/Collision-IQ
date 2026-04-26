@@ -107,7 +107,7 @@ export async function POST(req: Request) {
     customer: customerId,
     line_items: [{ price: entry.priceId, quantity: 1 }],
     allow_promotion_codes: true,
-    success_url: getBillingReturnUrl("/the-academy?checkout=success"),
+    success_url: getBillingReturnUrl("/cases?checkout=success"),
     cancel_url: getBillingReturnUrl("/the-academy?checkout=cancelled"),
     metadata: {
       type: "service",

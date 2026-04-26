@@ -63,7 +63,6 @@ model User {
   consents         ChatConsent[]
   featureOverrides FeatureOverride[]
   IdempotencyKey        IdempotencyKey[]
-  academyServiceCases   AcademyServiceCase[]
   ownedShops       Shop[]            @relation("ShopOwner")
   memberships      ShopMembership[]
   subscriptions    Subscription[]
@@ -312,39 +311,30 @@ enum ArtifactOwnerType {
 }
 
 model AcademyServiceCase {
-  id                    String               @id @default(cuid())
-  userId                String
-  serviceType           AcademyServiceType
-  status                AcademyCaseStatus    @default(PENDING_INTAKE)
+  id                    String                   @id @default(cuid())
+  userId                String?
   claimId               String?
-  stripeSessionId       String?              @unique
+  serviceType           String
+  status                AcademyServiceCaseStatus @default(PENDING_INTAKE)
+  stripeSessionId       String?                  @unique
   stripePaymentIntentId String?
-  amountPaid            Int?
-  notes                 String?
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime             @updatedAt
-  user                  User                 @relation(fields: [userId], references: [id])
+  intakeNotes           String?
+  internalNotes         String?
+  lastUpdate            String?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
 
   @@index([userId])
+  @@index([claimId])
   @@index([status])
   @@index([serviceType])
 }
 
-enum AcademyServiceType {
-  REKEY_ESTIMATING
-  LEGAL_ASSIST
-  ACV_REVIEW
-  APPRAISAL
-  APPRAISAL_CLAUSE
-  VALUE_DISPUTE
-  DIMINISHED_VALUE
-}
-
-enum AcademyCaseStatus {
+enum AcademyServiceCaseStatus {
   PENDING_INTAKE
-  INTAKE_RECEIVED
   IN_REVIEW
   IN_PROGRESS
-  COMPLETED
-  CANCELED
+  AWAITING_INFO
+  COMPLETE
+  CANCELLED
 }
