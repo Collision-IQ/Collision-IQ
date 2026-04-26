@@ -33,8 +33,18 @@ export async function POST(req: Request) {
     );
   }
 
-  if (
-    event.type === "checkout.session.completed" ||
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object as Stripe.Checkout.Session;
+
+    if (session.metadata?.type === "service") {
+      const result = await handleServiceCheckoutCompleted(session);
+      if (!result.ok) {
+        return NextResponse.json({ error: result.error }, { status: 400 });
+      }
+    } else {
+      await syncSubscriptionFromStripeEvent(event);
+    }
+  } else if (
     event.type === "customer.subscription.created" ||
     event.type === "customer.subscription.updated" ||
     event.type === "customer.subscription.deleted"
@@ -127,6 +137,45 @@ async function syncSubscriptionFromStripeEvent(event: Stripe.Event) {
       cancelAtPeriodEnd: subscription.cancel_at_period_end,
     },
   });
+}
+
+async function handleServiceCheckoutCompleted(
+  session: Stripe.Checkout.Session
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const claimId = session.metadata?.claimId?.trim();
+  const serviceType = session.metadata?.serviceType?.trim();
+
+  if (!claimId || !serviceType) {
+    return { ok: false, error: "Missing required service checkout metadata" };
+  }
+
+  const stripePaymentIntentId =
+    typeof session.payment_intent === "string"
+      ? session.payment_intent
+      : session.payment_intent?.id ?? null;
+
+  await prisma.academyServiceCase.upsert({
+    where: {
+      stripeSessionId: session.id,
+    },
+    update: {
+      userId: session.metadata?.userId?.trim() || null,
+      claimId,
+      serviceType,
+      stripePaymentIntentId,
+    },
+    create: {
+      userId: session.metadata?.userId?.trim() || null,
+      claimId,
+      serviceType,
+      stripeSessionId: session.id,
+      stripePaymentIntentId,
+      status: "PENDING_INTAKE",
+      lastUpdate: "Payment received. Intake is pending.",
+    },
+  });
+
+  return { ok: true };
 }
 
 function normalizeStripeStatus(status: Stripe.Subscription.Status) {

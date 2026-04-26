@@ -6,8 +6,9 @@
  * (Lane 1 subscriptions) to keep the two lanes clearly distinct.
  *
  * POST body (JSON or form):
- *   serviceKey  — BillingPlanKey for an Academy service (e.g. "academy_rekey_estimating")
- *   claimId?    — optional claim identifier to attach to the service case
+ *   serviceType — Academy service type stored in ServicePriceConfig
+ *   serviceKey  — legacy alias for serviceType
+ *   claimId     — claim identifier to attach to the service case
  */
 
 import { NextResponse } from "next/server";
@@ -20,42 +21,37 @@ import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
-const METADATA_SERVICE_TYPE_BY_CATALOG_KEY: Record<string, string> = {
-  academy_rekey_estimating: "rekey_estimating",
-  academy_legal_assist: "legal_assist",
-  academy_acv_review: "acv_review",
-  academy_appraisal: "appraisal",
-  academy_appraisal_clause: "appraisal_clause",
-  academy_value_dispute: "value_dispute",
-  academy_diminished_value: "diminished_value",
-};
-
 // Only allow keys that belong to the service lane
-function isServiceKey(key: string): boolean {
-  if (!isBillingPlanKey(key)) return false;
-  const entry = BILLING_CATALOG[key];
+function isServiceType(serviceType: string): serviceType is keyof typeof BILLING_CATALOG {
+  if (!isBillingPlanKey(serviceType)) return false;
+  const entry = BILLING_CATALOG[serviceType];
   return "lane" in entry && entry.lane === "service";
 }
 
 async function resolveParams(
   req: Request
-): Promise<{ serviceKey: string | null; claimId: string | null }> {
+): Promise<{ serviceType: string | null; claimId: string | null }> {
   const contentType = req.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
     const body = (await req.json().catch(() => null)) as {
+      serviceType?: string;
       serviceKey?: string;
       claimId?: string;
     } | null;
     return {
-      serviceKey: body?.serviceKey?.trim() ?? null,
+      serviceType: (body?.serviceType ?? body?.serviceKey)?.trim() ?? null,
       claimId: normalizeClaimId(body?.claimId?.trim() ?? null),
     };
   }
   const formData = await req.formData();
+  const rawServiceType =
+    typeof formData.get("serviceType") === "string"
+      ? (formData.get("serviceType") as string)
+      : typeof formData.get("serviceKey") === "string"
+        ? (formData.get("serviceKey") as string)
+        : null;
   return {
-    serviceKey: typeof formData.get("serviceKey") === "string"
-      ? (formData.get("serviceKey") as string).trim()
-      : null,
+    serviceType: rawServiceType?.trim() ?? null,
     claimId: typeof formData.get("claimId") === "string"
       ? normalizeClaimId((formData.get("claimId") as string).trim())
       : null,
@@ -78,13 +74,18 @@ export async function POST(req: Request) {
     throw error;
   }
 
-  const { serviceKey, claimId } = await resolveParams(req);
+  const { serviceType, claimId } = await resolveParams(req);
 
-  if (!serviceKey || !isServiceKey(serviceKey)) {
-    return NextResponse.json({ error: "Invalid service key" }, { status: 400 });
+  if (!serviceType || !isServiceType(serviceType)) {
+    return NextResponse.json({ error: "Invalid service type" }, { status: 400 });
   }
 
-  const entry = BILLING_CATALOG[serviceKey as keyof typeof BILLING_CATALOG] as {
+  const stableClaimId = toStableClaimId(claimId);
+  if (!stableClaimId) {
+    return NextResponse.json({ error: "Missing or invalid claim id" }, { status: 400 });
+  }
+
+  const entry = BILLING_CATALOG[serviceType] as {
     priceId: string;
     mode: string;
     lane: string;
@@ -92,9 +93,30 @@ export async function POST(req: Request) {
     label: string;
   };
 
-  if (!entry.priceId) {
+  const dbConfig = await prisma.servicePriceConfig.findUnique({
+    where: { serviceType },
+  });
+
+  if (dbConfig && !dbConfig.isActive) {
     return NextResponse.json(
-      { error: `Missing Stripe price for ${serviceKey}` },
+      { error: `Inactive Stripe price config for ${serviceType}` },
+      { status: 400 }
+    );
+  }
+
+  // Prefer the DB-configured price ID; fall back to catalog env var.
+  const priceId = (dbConfig?.stripePriceId || entry.priceId).trim();
+
+  if (!priceId) {
+    return NextResponse.json(
+      { error: `Missing Stripe price for ${serviceType}` },
+      { status: 500 }
+    );
+  }
+
+  if (!priceId.startsWith("price_")) {
+    return NextResponse.json(
+      { error: `Invalid Stripe price id for ${serviceType}` },
       { status: 500 }
     );
   }
@@ -102,31 +124,18 @@ export async function POST(req: Request) {
   const stripe = getStripe();
   const customerId = await ensureStripeCustomerId(dbUser.id);
 
-  // Prefer the DB-configured price ID; fall back to catalog env var.
-  const dbConfig = await prisma.servicePriceConfig.findUnique({
-    where: { serviceType: serviceKey },
-  });
-  const priceId = dbConfig?.stripePriceId || entry.priceId;
-
-  if (!priceId) {
-    return NextResponse.json(
-      { error: `Missing Stripe price for ${serviceKey}` },
-      { status: 500 }
-    );
-  }
-
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
     allow_promotion_codes: true,
     success_url: getBillingReturnUrl("/cases?checkout=success"),
-    cancel_url: getBillingReturnUrl("/the-academy?checkout=cancelled"),
+    cancel_url: getBillingReturnUrl("/cases?checkout=cancel"),
     metadata: {
       type: "service",
-      serviceType: METADATA_SERVICE_TYPE_BY_CATALOG_KEY[serviceKey] || "",
-      claimId: toStableClaimId(claimId) ?? "",
       userId: dbUser.id,
+      claimId: stableClaimId,
+      serviceType,
     },
   });
 
