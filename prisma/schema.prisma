@@ -62,13 +62,14 @@ model User {
   updatedAt        DateTime          @updatedAt
   consents         ChatConsent[]
   featureOverrides FeatureOverride[]
-  IdempotencyKey        IdempotencyKey[]
   ownedShops       Shop[]            @relation("ShopOwner")
   memberships      ShopMembership[]
   subscriptions    Subscription[]
   UsageCounter     UsageCounter[]
   usageRecords     UsageRecord[]
   defaultShop      Shop?             @relation("UserDefaultShop", fields: [defaultShopId], references: [id])
+  IdempotencyKey        IdempotencyKey[]
+  academyServiceCases  AcademyServiceCase[]
 }
 
 model Shop {
@@ -244,28 +245,6 @@ model UsageCounter {
   User      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, kind])
-  @@index([kind])
-}
-
-model document_chunks {
-  id        Int                    @id @default(autoincrement())
-  content   String?
-  embedding Unsupported("vector")?
-  file_id   String?
-}
-
-model drive_watch_state {
-  id              String    @id
-  last_page_token String
-  updated_at      DateTime? @default(now()) @db.Timestamp(6)
-}
-
-model rag_chunks {
-  id         String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  drive_path String?
-  text       String?
-  embedding  Unsupported("vector")?
-  created_at DateTime?              @default(now()) @db.Timestamp(6)
 }
 
 enum SubscriptionPlan {
@@ -310,25 +289,16 @@ enum ArtifactOwnerType {
   SHOP
 }
 
-model AcademyServiceCase {
-  id                    String                   @id @default(cuid())
-  userId                String?
-  claimId               String?
-  serviceType           String
-  status                AcademyServiceCaseStatus @default(PENDING_INTAKE)
-  stripeSessionId       String?                  @unique
-  stripePaymentIntentId String?
-  intakeNotes           String?
-  internalNotes         String?
-  lastUpdate            String?
-  createdAt             DateTime                 @default(now())
-  updatedAt             DateTime                 @updatedAt
 
-  @@index([userId])
-  @@index([claimId])
-  @@index([status])
-  @@index([serviceType])
+model ServicePriceConfig {
+  serviceType   String   @id
+  stripePriceId String
+  label         String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
+
 
 enum AcademyServiceCaseStatus {
   PENDING_INTAKE
@@ -338,3 +308,27 @@ enum AcademyServiceCaseStatus {
   COMPLETE
   CANCELLED
 }
+
+model AcademyServiceCase {
+  id                    String                   @id @default(cuid())
+  userId                String?
+  serviceType           String
+  status                AcademyServiceCaseStatus @default(PENDING_INTAKE)
+  claimId               String?
+  stripeSessionId       String?                  @unique
+  stripePaymentIntentId String?
+  intakeNotes           String?
+  internalNotes         String?
+  lastUpdate            String?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  user                  User?                    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([claimId])
+  @@index([status])
+  @@index([serviceType])
+}
+
+
+

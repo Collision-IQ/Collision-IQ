@@ -2,6 +2,9 @@
   "name": "collision-academy-new",
   "version": "0.1.0",
   "private": true,
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
   "scripts": {
     "dev": "cross-env NODE_OPTIONS=--openssl-legacy-provider next dev --webpack",
     "build": "prisma generate && next build",

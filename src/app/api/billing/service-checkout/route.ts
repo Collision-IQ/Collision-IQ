@@ -102,10 +102,23 @@ export async function POST(req: Request) {
   const stripe = getStripe();
   const customerId = await ensureStripeCustomerId(dbUser.id);
 
+  // Prefer the DB-configured price ID; fall back to catalog env var.
+  const dbConfig = await prisma.servicePriceConfig.findUnique({
+    where: { serviceType: serviceKey },
+  });
+  const priceId = dbConfig?.stripePriceId || entry.priceId;
+
+  if (!priceId) {
+    return NextResponse.json(
+      { error: `Missing Stripe price for ${serviceKey}` },
+      { status: 500 }
+    );
+  }
+
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
     customer: customerId,
-    line_items: [{ price: entry.priceId, quantity: 1 }],
+    line_items: [{ price: priceId, quantity: 1 }],
     allow_promotion_codes: true,
     success_url: getBillingReturnUrl("/cases?checkout=success"),
     cancel_url: getBillingReturnUrl("/the-academy?checkout=cancelled"),
