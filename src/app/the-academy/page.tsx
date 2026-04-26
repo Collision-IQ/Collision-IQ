@@ -2,53 +2,79 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
-const SERVICES = [
+type AcademyService = {
+  title: string;
+  price: string;
+  description: string;
+  whenToUse: string;
+  serviceKey: string;
+};
+
+const SERVICES: AcademyService[] = [
   {
     title: "Rekey Estimating",
     price: "Case-based pricing",
     description:
       "Estimate rewriting and repair-plan restructuring when the current file needs a cleaner technical position.",
+    whenToUse: "Use this when the estimate is disorganized, incomplete, or needs a cleaner repair-plan structure.",
+    serviceKey: "academy_rekey_estimating",
   },
   {
     title: "Legal Assist",
     price: "Scope-based engagement",
     description:
       "Documentation support for matters that need stronger positioning, clearer claim framing, and organized escalation support.",
+    whenToUse: "Use this when the claim needs stronger documentation, escalation framing, or position support beyond normal estimate discussion.",
+    serviceKey: "academy_legal_assist",
   },
   {
     title: "ACV",
     price: "Valuation engagement",
     description:
       "Actual cash value support when total-loss numbers, comparable support, or insurer valuation logic need review.",
+    whenToUse: "Use this when your vehicle may be undervalued as a total loss.",
+    serviceKey: "academy_acv_review",
   },
   {
     title: "Appraisal",
     price: "Professional service",
     description:
       "Formal appraisal-oriented support when a normal supplement discussion is no longer enough to move the claim.",
+    whenToUse: "Use this when negotiations have stalled and the file needs formal appraisal escalation.",
+    serviceKey: "academy_appraisal",
   },
   {
     title: "Right to Appraisal Clause",
     price: "Positioning review",
     description:
       "Guidance around appraisal-path language, claim posture, and when invoking appraisal becomes strategically appropriate.",
+    whenToUse: "Use this when you need help deciding whether appraisal language should be invoked on the claim.",
+    serviceKey: "academy_appraisal_clause",
   },
   {
     title: "Value Dispute",
     price: "Case-based pricing",
     description:
       "Support for disputed numbers, weak settlement logic, and valuation gaps that need a stronger technical response.",
+    whenToUse: "Use this when your estimate is too low or missing key repairs.",
+    serviceKey: "academy_value_dispute",
   },
   {
     title: "Diminished Value",
     price: "Valuation engagement",
     description:
       "Diminished value support for files where repair severity, market reaction, and loss-in-value need stronger documentation.",
+    whenToUse: "Use this after repairs to recover lost resale value.",
+    serviceKey: "academy_diminished_value",
   },
 ];
 
 export default function TheAcademyPage() {
+  const searchParams = useSearchParams();
+  const checkoutResult = searchParams.get("checkout");
+
   return (
     <main className="min-h-screen text-white">
       <header className="sticky top-0 z-40 border-b border-white/10 bg-black/50 backdrop-blur-xl">
@@ -177,19 +203,51 @@ export default function TheAcademyPage() {
           {SERVICES.map((service) => (
             <div
               key={service.title}
-              className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+              className="flex flex-col rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl"
             >
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#E88A5F]">
                 {service.price}
               </div>
               <h3 className="mt-3 text-xl font-semibold">{service.title}</h3>
-              <p className="mt-3 text-sm leading-7 text-white/70">
+              <p className="mt-3 flex-1 text-sm leading-7 text-white/70">
                 {service.description}
               </p>
+              <div className="mt-3 rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-3 text-sm leading-6 text-white/72">
+                <span className="font-semibold text-white/88">When should I use this?</span>{" "}
+                {service.whenToUse}
+              </div>
+              <form
+                action="/api/billing/service-checkout"
+                method="post"
+                className="mt-5"
+              >
+                <input type="hidden" name="serviceKey" value={service.serviceKey} />
+                <button
+                  type="submit"
+                  className="rounded-2xl border border-[#C65A2A]/40 bg-[#C65A2A]/10 px-4 py-2 text-sm font-semibold text-[#E88A5F] transition hover:bg-[#C65A2A]/20"
+                >
+                  Request this service →
+                </button>
+              </form>
             </div>
           ))}
         </div>
       </section>
+
+      {checkoutResult === "success" && (
+        <div className="mx-auto max-w-6xl px-5 pb-2">
+          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-4 text-sm text-emerald-300">
+            Payment received. Your service case has been created and our team will be in touch to begin intake.
+          </div>
+        </div>
+      )}
+      {checkoutResult === "cancelled" && (
+        <div className="mx-auto max-w-6xl px-5 pb-2">
+          <div className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4 text-sm text-white/65">
+            Checkout was cancelled. No charge was made.
+          </div>
+        </div>
+      )}
 
       <section className="mx-auto max-w-6xl px-5 pb-12">
         <div className="rounded-3xl border border-[#C65A2A]/25 bg-black/30 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] backdrop-blur-xl md:p-8">

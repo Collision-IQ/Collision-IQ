@@ -4,14 +4,13 @@ export const PLAN_CAPS = {
   // None = chat only. No document-backed analysis, uploads, or exports.
   none: 0,
 
-  // Free = chat only. No document-backed analysis.
-  starter: 0,
+  // Starter = paid subscription. Basic upload + export, limited analysis capacity.
+  starter: 10,
 
-  // Trial = full-feature temporary access for first-time signed-in users.
-  // Match Pro capacity during the 30-day window.
+  // Trial kept for any grandfathered TRIALING subscriptions.
   trial: 200,
 
-  // Paid Pro
+  // Paid Pro — full feature access, instant on subscribe.
   pro: 200,
 
   // Team / enterprise capacity

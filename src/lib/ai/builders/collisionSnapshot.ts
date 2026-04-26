@@ -1,4 +1,5 @@
 import type { ExportModel } from "./buildExportModel";
+import { type PressureMode, computeItemPressureMode } from "./pressureMode";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 import type { EstimateComparisonRow, WorkspaceEstimateComparisons } from "@/types/workspaceTypes";
 
@@ -29,7 +30,10 @@ export type CollisionSnapshot = {
     whyItMatters: string;
     evidenceState: string;
     nextAction: string;
+    pressureMode: PressureMode;
   }>;
+  pressureMode: PressureMode;
+  pressureModeRationale: string;
   evidenceCompleteness: {
     adjustedConfidence: ExportModel["confidenceIntegrity"]["adjustedConfidence"];
     completenessStatus: ExportModel["confidenceIntegrity"]["completenessStatus"];
@@ -40,6 +44,7 @@ export type CollisionSnapshot = {
     userFacingDisclosure: string;
   };
   nextActions: string[];
+  verdictLine?: string;
   valuationSnapshot: {
     available: boolean;
     acvPreviewRange?: string;
@@ -88,9 +93,12 @@ export function buildCollisionSnapshot(input: SnapshotSource): CollisionSnapshot
       userFacingDisclosure: snapshotSafeReport.confidenceIntegrity.userFacingDisclosure,
     },
     nextActions: buildNextActions(snapshotSafeReport),
+    verdictLine: buildVerdictLine(snapshotSafeReport, estimateComparisons),
     valuationSnapshot: buildValuationSnapshot(snapshotSafeReport),
     disclosure: buildSnapshotDisclosure(snapshotSafeReport),
     redactionNotice: "Sensitive details removed for sharing.",
+    pressureMode: snapshotSafeReport.pressureMode.mode,
+    pressureModeRationale: snapshotSafeReport.pressureMode.rationale,
   };
 
   return sanitizeSnapshot(snapshot);
@@ -239,21 +247,40 @@ function buildEstimateComparison(
   };
 }
 
+function buildVerdictLine(
+  renderModel: SnapshotRenderModel,
+  estimateComparisons?: WorkspaceEstimateComparisons | null
+): string | undefined {
+  const hasLaborDelta =
+    renderModel.supplementItems.some((item) => /labor/i.test(item.category)) ||
+    (estimateComparisons?.rows ?? []).some(
+      (row) =>
+        /labor/i.test(`${row.category ?? ""} ${row.operation ?? ""}`) &&
+        row.deltaType &&
+        row.deltaType !== "same"
+    );
+
+  const hasMissingVerification =
+    renderModel.supplementItems.some((item) => item.kind === "missing_verification") ||
+    renderModel.confidenceIntegrity.missingCriticalEvidence.length > 0;
+
+  if (hasLaborDelta && hasMissingVerification) {
+    return "Carrier estimate likely incomplete based on current evidence.";
+  }
+  return undefined;
+}
+
 function buildTopDisputeItems(renderModel: SnapshotRenderModel): CollisionSnapshot["topDisputeItems"] {
-  const priorityIssues = renderModel.disputeStrategy?.priorityFindings ?? [];
-  const rankedFindings = [...renderModel.findingReasoning].sort((left, right) => {
-    const leftPriority = priorityIssues.findIndex((issue) => sameIssue(issue, left.issue));
-    const rightPriority = priorityIssues.findIndex((issue) => sameIssue(issue, right.issue));
-    const leftScore = (leftPriority >= 0 ? 100 - leftPriority : 0) + left.confidence * 20;
-    const rightScore = (rightPriority >= 0 ? 100 - rightPriority : 0) + right.confidence * 20;
-    return rightScore - leftScore;
-  });
+  const rankedFindings = [...renderModel.findingReasoning].sort(
+    (left, right) => (right.leverageScore ?? 0) - (left.leverageScore ?? 0)
+  );
 
   return rankedFindings.slice(0, 3).map((finding) => ({
     issue: cleanSnapshotText(finding.issue) || "Included dispute item",
     whyItMatters: cleanSnapshotText(finding.why_it_matters) || "This item affects the repair-plan or estimate position.",
     evidenceState: `${formatLabel(finding.evidenceLevel)} evidence at ${Math.round(finding.confidence * 100)}% confidence.`,
     nextAction: cleanSnapshotText(finding.next_action) || "Request a revised estimate or written explanation.",
+    pressureMode: computeItemPressureMode(finding.evidenceLevel, finding.leverageScore ?? 0),
   }));
 }
 
@@ -406,10 +433,6 @@ function formatMoney(value: number): string {
 
 function formatLabel(value: string): string {
   return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function sameIssue(left: string, right: string): boolean {
-  return normalizeKey(left).includes(normalizeKey(right)) || normalizeKey(right).includes(normalizeKey(left));
 }
 
 function normalizeKey(value: string): string {

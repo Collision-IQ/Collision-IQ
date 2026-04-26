@@ -322,6 +322,7 @@ export type ReportFindingReasoning = {
   evidenceLevel: "documented" | "referenced" | "inferred" | "missing" | "unsupported";
   confidence: number;
   claimSpecificity: "high" | "medium" | "low";
+  leverageScore?: number;
   priorityRank?: number;
 };
 

@@ -53,6 +53,7 @@ import {
   isSideImpactZone,
 } from "@/lib/ai/impactZone";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
+import { computeModelPressureMode, type PressureModeContext } from "./pressureMode";
 
 export const COLLISION_ACADEMY_HANDOFF_URL = "https://www.collision.academy/";
 export const REDACTED_INSURER_TOKEN = "[REDACTED_INSURER]";
@@ -71,6 +72,7 @@ export type ExportSupplementItem = {
   evidence?: string;
   source?: string;
   priority: "low" | "medium" | "high";
+  leverageScore?: number;
 };
 
 export type ExportVehicleInfo = {
@@ -105,7 +107,10 @@ export type ExportModel = {
   collisionSnapshot: CollisionSnapshot;
   negotiationPlaybook: NegotiationPlaybook;
   financialGapBreakdown: FinancialGapBreakdown;
+  pressureMode: PressureModeContext;
 };
+
+export type { PressureModeContext };
 
 export type DisputeIntelligenceDriver = {
   title: string;
@@ -344,6 +349,7 @@ export function buildExportModel(params: {
         return lower.split(/\s+/).length >= 2 && !/\b(?:wheel|mirror|battery|panel)\b/i.test(lower);
       })
     : cleanedSupplementItems;
+  const leverageSortedSupplementItems = sortDisputeItemsByLeverageScore(guardedSupplementItems);
   const guardedVehicleLabel = quality.malformedVehicle
     ? structuredVehicleLabel
     : buildPreferredVehicleIdentityLabel({
@@ -372,17 +378,19 @@ export function buildExportModel(params: {
     reportFields,
     repairPosition,
     positionStatement,
-    supplementItems: guardedSupplementItems,
+    supplementItems: leverageSortedSupplementItems,
     valuation,
   });
+  const rankedFindingReasoning = resolveReportFindingReasoning(params.report);
+  const disputeStrategy = resolveReportDisputeStrategy(params.report, rankedFindingReasoning);
   const negotiationPlaybook = buildNegotiationPlaybook({
     reportFields,
-    supplementItems: guardedSupplementItems,
+    supplementItems: leverageSortedSupplementItems,
   });
   const financialGapBreakdown = buildFinancialGapBreakdown({
     report: params.report,
     analysis: params.analysis,
-    supplementItems: guardedSupplementItems,
+    supplementItems: leverageSortedSupplementItems,
   });
 
   const exportModel = {
@@ -413,7 +421,7 @@ export function buildExportModel(params: {
             allowUnsupportedSeamSealerNarrative
           )
         ),
-    supplementItems: guardedSupplementItems,
+    supplementItems: leverageSortedSupplementItems,
     request: allLabelsSuppressed
       ? "Please review the core dispute areas and provide clearer support for the intended repair path and verification steps."
       : cleanFormalExportText(
@@ -431,16 +439,21 @@ export function buildExportModel(params: {
       dvMissingInputs: valuation.dvMissingInputs.map((item) => cleanDisplayLabel(item)),
     },
     disputeIntelligenceReport,
-    findingReasoning: resolveReportFindingReasoning(params.report),
+    findingReasoning: rankedFindingReasoning,
     retrievalSummary: resolveReportRetrievalSummary(params.report),
-    disputeStrategy: resolveReportDisputeStrategy(params.report),
+    disputeStrategy,
     confidenceIntegrity: buildConfidenceIntegrity({
       report: params.report,
       analysis: params.analysis,
-      supplementItems: guardedSupplementItems,
+      supplementItems: leverageSortedSupplementItems,
     }),
     negotiationPlaybook,
     financialGapBreakdown,
+    pressureMode: computeModelPressureMode({
+      findingReasoning: rankedFindingReasoning,
+      supplementItems: leverageSortedSupplementItems,
+      topDrivers: disputeIntelligenceReport.topDrivers,
+    }),
   };
 
   const modelWithDetermination = {
@@ -582,9 +595,26 @@ function resolveReportRetrievalSummary(
 }
 
 function resolveReportDisputeStrategy(
-  report: RepairIntelligenceReport | null
+  report: RepairIntelligenceReport | null,
+  rankedFindings: ReportFindingReasoning[]
 ): ReportDisputeStrategy | undefined {
-  return report?.disputeStrategy;
+  if (!report?.disputeStrategy) {
+    return undefined;
+  }
+
+  const rankedIssues = rankedFindings.map((finding) => finding.issue);
+  const rankedOnly = rankedIssues.length > 0
+    ? rankedIssues
+    : report.disputeStrategy.priorityFindings;
+  const mergedPriority = dedupeIssueOrder([
+    ...rankedOnly,
+    ...report.disputeStrategy.priorityFindings,
+  ]).slice(0, 5);
+
+  return {
+    ...report.disputeStrategy,
+    priorityFindings: mergedPriority,
+  };
 }
 
 function buildConfidenceIntegrity(params: {
@@ -788,11 +818,83 @@ function isReportFindingReasoning(value: unknown): value is ReportFindingReasoni
 function rankFindingReasoning(findings: ReportFindingReasoning[]): ReportFindingReasoning[] {
   return findings
     .filter((finding) => finding.issue.trim())
+    .map((finding) => ({
+      ...finding,
+      leverageScore: finding.leverageScore ?? computeFindingLeverageScore(finding),
+    }))
+    .sort((left, right) => {
+      const scoreDelta = (right.leverageScore ?? 0) - (left.leverageScore ?? 0);
+      if (scoreDelta !== 0) return scoreDelta;
+      return right.confidence - left.confidence;
+    })
     .map((finding, index) => ({
       ...finding,
-      priorityRank: finding.priorityRank ?? index + 1,
+      priorityRank: index + 1,
     }))
     .slice(0, 8);
+}
+
+function computeFindingLeverageScore(finding: ReportFindingReasoning): number {
+  const evidenceScore =
+    finding.evidenceLevel === "documented" ? 30 :
+    finding.evidenceLevel === "referenced" ? 24 :
+    finding.evidenceLevel === "inferred" ? 12 :
+    4;
+  const confidenceScore = Math.round(finding.confidence * 25);
+  const specificityScore =
+    finding.claimSpecificity === "high" ? 20 :
+    finding.claimSpecificity === "medium" ? 13 :
+    4;
+  const mismatchScore =
+    /gap|missing|absent|not included|not documented|excluded|vs/i.test(
+      `${finding.issue} ${finding.finding ?? ""}`
+    )
+      ? 10
+      : 0;
+  const ambiguityPenalty =
+    finding.evidenceLevel === "inferred" ||
+    /may|depending|confirm|procedure-dependent|if /i.test(
+      `${finding.finding ?? ""} ${finding.why_it_matters}`
+    )
+      ? 10
+      : 0;
+
+  return Math.max(
+    0,
+    Math.min(100, evidenceScore + confidenceScore + specificityScore + mismatchScore - ambiguityPenalty)
+  );
+}
+
+function sortDisputeItemsByLeverageScore(items: ExportSupplementItem[]): ExportSupplementItem[] {
+  return [...items]
+    .map((item) => {
+      const impact = mapSupplementPriorityToImpact(item.priority);
+      const supportStatus = mapSupplementKindToSupportStatus(item.kind);
+      const evidenceLevel = mapSupportStatusToEvidenceLevel(supportStatus);
+      const retrievalSupport = inferRetrievalSupport(item);
+      const leverageScore = computeLeverageScore(impact, evidenceLevel, retrievalSupport);
+      return {
+        ...item,
+        leverageScore,
+      };
+    })
+    .sort((left, right) => {
+      const scoreDelta = (right.leverageScore ?? 0) - (left.leverageScore ?? 0);
+      if (scoreDelta !== 0) return scoreDelta;
+      return left.title.localeCompare(right.title);
+    });
+}
+
+function dedupeIssueOrder(items: string[]): string[] {
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    const normalized = item.trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    deduped.push(item);
+  }
+  return deduped;
 }
 
 function inferVehicleInfo(

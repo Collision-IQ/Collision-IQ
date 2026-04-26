@@ -2183,8 +2183,7 @@ export default function ChatWidget({
                             }}
                             aria-label="Select voice"
                             title={selectedVoiceDescription}
-                            className="rounded-xl border border-white/10 bg-[#151515] px-2 py-1.5 text-[11px] font-medium text-white/88 shadow-sm transition hover:bg-[#1d1d1d] focus:border-orange-300/40 focus:outline-none"
-                            style={{ colorScheme: "dark" }}
+                            className="color-scheme-dark rounded-xl border border-white/10 bg-[#151515] px-2 py-1.5 text-[11px] font-medium text-white/88 shadow-sm transition hover:bg-[#1d1d1d] focus:border-orange-300/40 focus:outline-none"
                           >
                             {VOICE_PRESETS.map((preset) => (
                               <option key={preset.id} value={`preset:${preset.id}`} className="bg-[#151515] text-white">

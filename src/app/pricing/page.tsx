@@ -5,29 +5,30 @@ export default function PricingPage() {
     <main className="mx-auto w-full max-w-6xl px-6 py-16 text-white">
       <div className="rounded-[2rem] border border-white/10 bg-black/70 p-8 shadow-[0_24px_70px_rgba(0,0,0,0.45)] md:p-10">
         <div className="text-xs uppercase tracking-[0.24em] text-white/45">Pricing</div>
-        <h1 className="mt-3 text-3xl font-semibold md:text-4xl">Starter, Pro, and Team access</h1>
+        <h1 className="mt-3 text-3xl font-semibold md:text-4xl">Starter and Pro subscriptions</h1>
         <p className="mt-4 max-w-3xl text-sm leading-7 text-white/68 md:text-base">
-          Collision IQ now includes a 30-day chat-only free period. Starter adds a single document upload and one report export,
-          Pro unlocks all features with max upload support, and Enterprise capacity is staged for a later release.
+          Collision IQ is subscription-based with instant access. Subscribe to Starter or Pro
+          and your account activates immediately — no waiting, no manual setup.
+          Starter covers essential analysis and one export per period. Pro unlocks the full system.
         </p>
 
         <div className="mt-10 grid gap-4 lg:grid-cols-3">
           <PricingCard
-            name="Free"
-            eyebrow="30 days"
-            description="Chat-only access for the first 30 days. No document upload or report export."
+            name="Starter"
+            eyebrow="$50 / month"
+            description="Essential access for single-file reviews. Upload, analyze, and export one main report per billing period."
             features={[
-              "Basic AI chat",
-              "No document upload",
-              "No report export",
-              "30-day free window",
-              "Upgrade path to Starter or Pro",
+              "AI chat",
+              "1 document upload per period",
+              "Basic analysis",
+              "1 main report export",
+              "Instant access on subscribe",
             ]}
           />
           <PricingCard
             name="Pro"
-            eyebrow="$200"
-            description="All features unlocked with max upload support, advanced analysis outputs, and premium exports."
+            eyebrow="$200 / month"
+            description="All features unlocked with full analysis capacity, all exports, and every premium workflow."
             features={[
               "Everything in Starter",
               "Supplement lines",
@@ -35,6 +36,7 @@ export default function PricingPage() {
               "Rebuttal email export",
               "Side-by-side report",
               "Line-by-line report",
+              "Instant access on subscribe",
             ]}
             featured
           />

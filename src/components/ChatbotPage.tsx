@@ -40,6 +40,7 @@ import { buildCustomerReportPdf } from "@/lib/ai/builders/customerReportPdfBuild
 import { buildDisputeIntelligencePdf } from "@/lib/ai/builders/disputeIntelligencePdfBuilder";
 import { buildCarrierPdfBlob, exportCarrierPDF } from "@/lib/ai/builders/exportPdf";
 import { buildRebuttalEmailPdf } from "@/lib/ai/builders/rebuttalEmailPdfBuilder";
+import { toStableClaimId } from "@/lib/claims/claimIdentity";
 import {
   buildSnapshotEmailBody,
   buildSnapshotPlainText,
@@ -1129,6 +1130,7 @@ export function ChatbotWorkspacePage() {
                           canUseDisputeReportExport={canUseDisputeReportExport}
                           canUseRebuttalEmail={canUseRebuttalEmail}
             canUseCustomerReport={canUseCustomerReport}
+            analysisReportId={analysisReportId}
             onCustomerReportLocked={() => setUpgradeModalOpen(true)}
             activeInsightKey={activeInsightKey}
             evidenceModel={evidenceModel}
@@ -1291,6 +1293,7 @@ function RailContent({
   canUseDisputeReportExport,
   canUseRebuttalEmail,
   canUseCustomerReport,
+  analysisReportId,
   onCustomerReportLocked,
   activeInsightKey,
   evidenceModel,
@@ -1317,6 +1320,7 @@ function RailContent({
   canUseDisputeReportExport: boolean;
   canUseRebuttalEmail: boolean;
   canUseCustomerReport: boolean;
+  analysisReportId: string | null;
   onCustomerReportLocked: () => void;
   activeInsightKey: InsightKey | null;
   evidenceModel: EvidenceLinkModel | null;
@@ -1392,6 +1396,15 @@ function RailContent({
     ...renderModel.negotiationPlaybook.suggestedSequence,
     ...renderModel.negotiationPlaybook.documentationNeeded,
   ]).slice(0, 5);
+  const stableClaimId = toStableClaimId(analysisReportId);
+  const academyTrigger = snapshot
+    ? resolveAcademyServiceTrigger({
+        snapshot,
+        renderModel,
+        valuationLowConfidence,
+        appraisalTriggered: Boolean(panel.appraisal?.triggered),
+      })
+    : null;
   const snapshotSendReady =
     Boolean(snapshotSendTarget) &&
     isValidEmail(snapshotRecipientEmail) &&
@@ -1974,6 +1987,20 @@ function RailContent({
                 Full reports, Dispute Intelligence, Rebuttal PDF, and Customer Report are available on Pro.
               </button>
             ) : null}
+            {academyTrigger ? (
+              <form action="/api/billing/service-checkout" method="post" className="w-full">
+                <input type="hidden" name="serviceKey" value={academyTrigger.serviceKey} />
+                <input type="hidden" name="claimId" value={stableClaimId ?? ""} />
+                <button
+                  type="submit"
+                  className="w-full rounded-xl border border-[#C65A2A]/30 bg-gradient-to-br from-[#C65A2A]/18 via-[#C65A2A]/10 to-white/[0.02] p-3 text-left transition hover:bg-[#C65A2A]/20"
+                >
+                  <div className="text-[10px] uppercase tracking-[0.22em] text-[#E8A27F]">Academy Service</div>
+                  <div className="mt-1 text-sm font-semibold text-white/88">{academyTrigger.cta}</div>
+                  <div className="mt-1 text-xs leading-5 text-white/62">Why this is showing: {academyTrigger.reason}</div>
+                </button>
+              </form>
+            ) : null}
             {customerReportError ? (
               <div className="rounded-xl border border-red-500/16 bg-red-500/[0.05] px-3 py-2 text-[12px] leading-5 text-red-200/80">
                 {customerReportError}
@@ -2011,6 +2038,7 @@ function RailContent({
           onSubjectChange={setSnapshotSubject}
           onMessageChange={setSnapshotMessage}
           onReviewedChange={setSnapshotReviewed}
+          stableClaimId={stableClaimId}
           onSend={() => void sendSnapshot()}
           onCancelSend={() => setSnapshotSendTarget(null)}
         />
@@ -2084,6 +2112,7 @@ function SnapshotPreviewModal({
   sending,
   status,
   sendReady,
+  stableClaimId,
   onClose,
   onDownload,
   onCopy,
@@ -2104,6 +2133,7 @@ function SnapshotPreviewModal({
   sending: boolean;
   status: string | null;
   sendReady: boolean;
+  stableClaimId: string | null;
   onClose: () => void;
   onDownload: () => void;
   onCopy: () => void;
@@ -2195,6 +2225,41 @@ function SnapshotPreviewModal({
           </button>
         </div>
 
+        {resolveAcademyServiceTrigger({
+          snapshot,
+          renderModel: buildSnapshotRenderModel(snapshot),
+          valuationLowConfidence:
+            snapshot.valuationSnapshot.confidence?.toLowerCase() === "low" ||
+            snapshot.evidenceCompleteness.adjustedConfidence === "Low",
+          appraisalTriggered: false,
+        }) ? (
+          <div className="mt-5 rounded-2xl border border-[#C65A2A]/24 bg-gradient-to-br from-[#C65A2A]/14 via-[#C65A2A]/08 to-white/[0.02] p-4">
+            {(() => {
+              const trigger = resolveAcademyServiceTrigger({
+                snapshot,
+                renderModel: buildSnapshotRenderModel(snapshot),
+                valuationLowConfidence:
+                  snapshot.valuationSnapshot.confidence?.toLowerCase() === "low" ||
+                  snapshot.evidenceCompleteness.adjustedConfidence === "Low",
+                appraisalTriggered: false,
+              });
+              if (!trigger) return null;
+              return (
+                <form action="/api/billing/service-checkout" method="post">
+                  <input type="hidden" name="serviceKey" value={trigger.serviceKey} />
+                  <input type="hidden" name="claimId" value={stableClaimId ?? ""} />
+                  <div className="text-[10px] uppercase tracking-[0.22em] text-[#E8A27F]">Need Help Resolving This?</div>
+                  <div className="mt-1 text-base font-semibold text-white">{trigger.cta}</div>
+                  <div className="mt-1 text-sm leading-6 text-white/66">Why this is showing: {trigger.reason}</div>
+                  <button type="submit" className="mt-3 rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90">
+                    Start service case
+                  </button>
+                </form>
+              );
+            })()}
+          </div>
+        ) : null}
+
         {sendTarget ? (
           <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
             <div className="text-sm font-semibold text-white">
@@ -2274,6 +2339,69 @@ function SnapshotInput({
       />
     </label>
   );
+}
+
+function resolveAcademyServiceTrigger(params: {
+  snapshot: CollisionSnapshot;
+  renderModel: ReturnType<typeof buildExportModel> | SnapshotTriggerRenderModel;
+  valuationLowConfidence: boolean;
+  appraisalTriggered: boolean;
+}): {
+  serviceKey: string;
+  cta: string;
+  reason: string;
+} | null {
+  const missingCritical = params.snapshot.evidenceCompleteness.missingCriticalEvidence;
+  const missingCalibration =
+    missingCritical.some((item) => /calibration|scan|adas/i.test(item)) ||
+    params.snapshot.topDisputeItems.some((item) => /calibration|scan|adas/i.test(item.issue));
+  const laborDelta = params.snapshot.estimateComparison.keyDeltas.some((item) => /labor/i.test(item));
+  const valuationGap =
+    params.valuationLowConfidence ||
+    /ACV|DV/i.test(params.snapshot.valuationSnapshot.disclosure) ||
+    params.snapshot.topDisputeItems.some((item) => /value|valuation|acv|dv/i.test(item.issue));
+
+  if (params.appraisalTriggered) {
+    return {
+      serviceKey: "academy_appraisal",
+      cta: "Need help resolving this? Start an Appraisal case",
+      reason: "The claim appears to be moving beyond normal estimate negotiation and may require formal escalation.",
+    };
+  }
+
+  if (valuationGap) {
+    return {
+      serviceKey: "academy_acv_review",
+      cta: "Need help resolving this? Start an ACV Review case",
+      reason: "Valuation support may be incomplete, which could affect the total-loss or value position on the claim.",
+    };
+  }
+
+  if (missingCalibration || laborDelta || params.snapshot.topDisputeItems.length >= 2) {
+    return {
+      serviceKey: "academy_value_dispute",
+      cta: "Need help resolving this? Start a Value Dispute case",
+      reason: missingCalibration && laborDelta
+        ? "Missing calibration documentation and reduced estimate scope may affect repair completeness."
+        : missingCalibration
+          ? "Calibration or scan documentation may be incomplete, which can affect repair completeness and verification."
+          : laborDelta
+            ? "The estimate scope appears reduced in labor-related areas, which may affect repair completeness."
+            : "The file shows multiple unresolved estimate gaps that may benefit from assisted claim resolution.",
+    };
+  }
+
+  return null;
+}
+
+type SnapshotTriggerRenderModel = {
+  valuationSnapshot?: CollisionSnapshot["valuationSnapshot"];
+};
+
+function buildSnapshotRenderModel(snapshot: CollisionSnapshot): SnapshotTriggerRenderModel {
+  return {
+    valuationSnapshot: snapshot.valuationSnapshot,
+  };
 }
 
 function isValidEmail(value: string): boolean {

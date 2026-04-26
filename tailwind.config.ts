@@ -49,5 +49,14 @@ export default {
   },
 },
 
-  plugins: [typography],
+  plugins: [
+    typography,
+    ({ addUtilities }) => {
+      addUtilities({
+        ".color-scheme-dark": {
+          colorScheme: "dark",
+        },
+      });
+    },
+  ],
 } satisfies Config;

@@ -110,11 +110,7 @@ body > * {
   font-weight: 600;
 }
 
-.chat-composer-textarea {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255,255,255,0.18) transparent;
-}
-
+/* Scrollbar styling handled via webkit pseudo-elements for better browser support */
 .chat-composer-textarea::-webkit-scrollbar {
   width: 8px;
 }

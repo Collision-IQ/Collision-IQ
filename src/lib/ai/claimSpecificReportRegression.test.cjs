@@ -433,10 +433,10 @@ run("collision snapshot includes top 3 dispute items only", () => {
   const snapshot = buildCollisionSnapshot(renderModel);
 
   assert.equal(snapshot.topDisputeItems.length, 3);
-  assert.equal(snapshot.topDisputeItems[0]?.issue, "Claim-specific item 4");
+  assert.equal(snapshot.topDisputeItems[0]?.issue, "Claim-specific item 1");
   assert.equal(snapshot.topDisputeItems[1]?.issue, "Claim-specific item 2");
-  assert.equal(snapshot.topDisputeItems[2]?.issue, "Claim-specific item 1");
-  assert.equal(snapshot.topDisputeItems.some((item) => item.issue === "Claim-specific item 3"), false);
+  assert.equal(snapshot.topDisputeItems[2]?.issue, "Claim-specific item 3");
+  assert.equal(snapshot.topDisputeItems.some((item) => item.issue === "Claim-specific item 4"), false);
 });
 
 run("collision snapshot does not include banned generic phrases", () => {

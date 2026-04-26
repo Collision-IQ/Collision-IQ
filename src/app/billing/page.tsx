@@ -13,45 +13,36 @@ export default async function BillingPage() {
         <h1 className="mt-3 text-3xl font-semibold">Upgrade and manage your plan</h1>
 
         <p className="mt-3 text-sm text-white/65">
-          New accounts receive a 30-day full-feature trial. No payment is required to start. After
-          30 days, your account will automatically continue on a paid plan if selected, or revert
-          to chat-only access if no subscription is active. All subscriptions renew every 30 days
-          and can be modified or canceled at any time.
+          Collision IQ is subscription-based. Subscribe to Starter or Pro and get immediate access
+          — no trial period, no waiting. Subscriptions renew monthly and can be modified or
+          canceled at any time through the billing portal.
         </p>
 
-        <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <PlanCard
-            name="Free"
-            price="Chat only"
-            description="Basic chat access only. No uploads, no document analysis, and no exports."
-          />
+        <div className="mt-8 grid gap-4 md:grid-cols-2">
           <PlanCard
             name="Starter"
             price="$50/month"
-            description="Chat + 1 file upload + 1 main report export."
+            description="Chat + document upload + basic analysis + 1 main report export per billing period."
           />
           <PlanCard
-            name="30-Day Trial"
-            price="Full feature access"
-            description="First-time signed-in users receive temporary Pro-level access for uploads, analysis, exports, and premium workflows."
-          />
-          <PlanCard
-            name="Academy Pro"
+            name="Pro"
             price="$200/month"
-            description="Full system access after trial - advanced analysis, exports, negotiation tools, and premium workflows."
+            description="Full system access — advanced analysis, supplement lines, negotiation tools, rebuttal email, and all premium exports."
             featured
           />
         </div>
 
         <div className="mt-6 text-sm text-white/60">
           Current access:{" "}
-          {access.plan === "trial"
-            ? "30-Day Trial"
-            : access.plan === "pro"
-              ? "Academy Pro"
-              : access.plan === "team"
-                ? "Academy Team"
-                : "Free"}
+          {access.plan === "pro"
+            ? "Pro"
+            : access.plan === "starter"
+              ? "Starter"
+              : access.plan === "trial"
+                ? "Pro (legacy trial)"
+                : access.plan === "team"
+                  ? "Team"
+                  : "No active subscription"}
         </div>
 
         <div className="mt-8 flex flex-wrap gap-3">
@@ -61,7 +52,7 @@ export default async function BillingPage() {
               type="submit"
               className="rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/85 transition hover:bg-white/10"
             >
-              Choose Starter ($50/month)
+              Subscribe to Starter ($50/month)
             </button>
           </form>
 
@@ -71,7 +62,7 @@ export default async function BillingPage() {
               type="submit"
               className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[#C65A2A]/90"
             >
-              Upgrade to Academy Pro ($200/month)
+              Subscribe to Pro ($200/month)
             </button>
           </form>
 

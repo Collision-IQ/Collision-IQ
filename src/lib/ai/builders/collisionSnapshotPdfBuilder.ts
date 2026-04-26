@@ -44,6 +44,7 @@ export function buildCollisionSnapshotPdfFromSnapshot(snapshot: CollisionSnapsho
       { label: "More Complete Plan", value: snapshot.repairPlanVerdict.moreCompletePlan },
       { label: "Carrier Plan", value: snapshot.repairPlanVerdict.carrierPlanStatus },
       { label: "Confidence", value: snapshot.evidenceCompleteness.adjustedConfidence },
+      { label: "Approach", value: snapshot.pressureMode.charAt(0).toUpperCase() + snapshot.pressureMode.slice(1) },
     ],
     sections: [
       {
@@ -54,6 +55,9 @@ export function buildCollisionSnapshotPdfFromSnapshot(snapshot: CollisionSnapsho
         title: "Repair Plan Verdict",
         body: snapshot.repairPlanVerdict.reason,
       },
+      ...(snapshot.verdictLine
+        ? [{ title: "File Assessment", body: snapshot.verdictLine }]
+        : []),
       {
         title: "Estimate Comparison",
         bullets: buildEstimateBullets(snapshot),

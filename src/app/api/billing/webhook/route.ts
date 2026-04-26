@@ -2,6 +2,8 @@ import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/billing/stripe";
+import { createServiceCase } from "@/lib/academy/serviceCases";
+import type { AcademyServiceType } from "@prisma/client";
 
 export const runtime = "nodejs";
 
@@ -9,6 +11,16 @@ const PLAN_BY_PRICE_LOOKUP: Record<string, "STARTER" | "PRO" | "TEAM"> = {
   [process.env.STRIPE_PRICE_STARTER?.trim() || ""]: "STARTER",
   [process.env.STRIPE_PRICE_PRO?.trim() || ""]: "PRO",
   [process.env.STRIPE_PRICE_TEAM?.trim() || ""]: "TEAM",
+};
+
+const SERVICE_TYPE_MAP: Record<string, AcademyServiceType> = {
+  rekey_estimating: "REKEY_ESTIMATING",
+  legal_assist: "LEGAL_ASSIST",
+  acv_review: "ACV_REVIEW",
+  appraisal: "APPRAISAL",
+  appraisal_clause: "APPRAISAL_CLAUSE",
+  value_dispute: "VALUE_DISPUTE",
+  diminished_value: "DIMINISHED_VALUE",
 };
 
 export async function POST(req: Request) {
@@ -33,8 +45,18 @@ export async function POST(req: Request) {
     );
   }
 
-  if (
-    event.type === "checkout.session.completed" ||
+  // ── Router: dispatch by lane ──────────────────────────────────────────
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object as Stripe.Checkout.Session;
+    const checkoutType = session.metadata?.type;
+
+    if (checkoutType === "service") {
+      await handleServiceCheckoutCompleted(session);
+    } else {
+      // Lane 1 (subscription) or legacy payment — sync subscription record
+      await syncSubscriptionFromStripeEvent(event);
+    }
+  } else if (
     event.type === "customer.subscription.created" ||
     event.type === "customer.subscription.updated" ||
     event.type === "customer.subscription.deleted"
@@ -57,7 +79,7 @@ async function syncSubscriptionFromStripeEvent(event: Stripe.Event) {
       typeof session.subscription === "string" ? session.subscription : session.subscription?.id || null;
     customerId =
       typeof session.customer === "string" ? session.customer : session.customer?.id || null;
-    dbUserId = session.metadata?.dbUserId || null;
+    dbUserId = session.metadata?.userId || session.metadata?.dbUserId || null;
   } else {
     const subscription = event.data.object as Stripe.Subscription;
     subscriptionId = subscription.id;
@@ -148,4 +170,38 @@ function normalizeStripeStatus(status: Stripe.Subscription.Status) {
     default:
       return "INCOMPLETE";
   }
+}
+
+// ── Lane 2: Service case creation ─────────────────────────────────────
+
+async function handleServiceCheckoutCompleted(
+  session: Stripe.Checkout.Session
+): Promise<void> {
+  const serviceType = session.metadata?.serviceType || "";
+  const dbUserId = session.metadata?.userId || session.metadata?.dbUserId;
+  const claimId = session.metadata?.claimId ?? null;
+  const normalizedServiceType = SERVICE_TYPE_MAP[serviceType];
+
+  if (!dbUserId || !normalizedServiceType) {
+    console.error("[webhook] service checkout missing required metadata", {
+      sessionId: session.id,
+      serviceType,
+      dbUserId,
+    });
+    return;
+  }
+
+  const paymentIntentId =
+    typeof session.payment_intent === "string"
+      ? session.payment_intent
+      : session.payment_intent?.id ?? null;
+
+  await createServiceCase({
+    userId: dbUserId,
+    serviceType: normalizedServiceType,
+    claimId: claimId || null,
+    stripeSessionId: session.id,
+    stripePaymentIntentId: paymentIntentId,
+    amountPaid: session.amount_total ?? null,
+  });
 }

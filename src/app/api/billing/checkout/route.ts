@@ -11,19 +11,32 @@ import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 
-async function resolvePlan(req: Request): Promise<BillingPlanKey | null> {
+type CheckoutPayload = {
+  plan: BillingPlanKey | null;
+  claimId: string | null;
+};
+
+async function resolveCheckoutPayload(req: Request): Promise<CheckoutPayload> {
   const contentType = req.headers.get("content-type") || "";
 
   if (contentType.includes("application/json")) {
-    const body = (await req.json().catch(() => null)) as { plan?: string } | null;
+    const body = (await req.json().catch(() => null)) as { plan?: string; claimId?: string } | null;
     const plan = body?.plan?.trim();
-    return plan && isBillingPlanKey(plan) ? plan : null;
+    return {
+      plan: plan && isBillingPlanKey(plan) ? plan : null,
+      claimId: body?.claimId?.trim() || null,
+    };
   }
 
   const formData = await req.formData();
   const value = formData.get("plan");
   const plan = typeof value === "string" ? value.trim() : "";
-  return plan && isBillingPlanKey(plan) ? plan : null;
+  const claimIdValue = formData.get("claimId");
+
+  return {
+    plan: plan && isBillingPlanKey(plan) ? plan : null,
+    claimId: typeof claimIdValue === "string" ? claimIdValue.trim() || null : null,
+  };
 }
 
 function expectsJson(req: Request) {
@@ -59,7 +72,7 @@ export async function POST(req: Request) {
     return NextResponse.redirect(new URL("/sign-in", req.url));
   }
 
-  const plan = await resolvePlan(req);
+  const { plan, claimId } = await resolveCheckoutPayload(req);
   if (!plan) {
     return NextResponse.json({ error: "Plan not available" }, { status: 400 });
   }
@@ -78,18 +91,13 @@ export async function POST(req: Request) {
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
     allow_promotion_codes: true,
-    subscription_data:
-      catalogEntry.mode === "subscription" && plan === "pro"
-        ? {
-            trial_period_days:
-              "trialDays" in catalogEntry ? catalogEntry.trialDays : undefined,
-          }
-        : undefined,
     success_url: getBillingReturnUrl("/billing?checkout=success"),
     cancel_url: getBillingReturnUrl("/billing?checkout=cancelled"),
     metadata: {
-      dbUserId: dbUser.id,
+      type: "subscription",
       plan,
+      claimId: claimId ?? "",
+      userId: dbUser.id,
     },
   });
 
@@ -121,7 +129,7 @@ async function ensureStripeCustomerId(dbUserId: string) {
     email: dbUser?.email || undefined,
     name: [dbUser?.firstName, dbUser?.lastName].filter(Boolean).join(" ") || undefined,
     metadata: {
-      dbUserId,
+      userId: dbUserId,
     },
   });
 

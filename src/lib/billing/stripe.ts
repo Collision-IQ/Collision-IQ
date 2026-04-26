@@ -1,6 +1,5 @@
 import Stripe from "stripe";
 import { getAppUrl } from "@/lib/auth/config";
-import { PRO_TRIAL_DAYS } from "@/lib/billing/plans";
 
 const globalForStripe = globalThis as typeof globalThis & {
   stripe?: Stripe;
@@ -25,10 +24,6 @@ export function getStripePriceIds() {
     pro: process.env.STRIPE_PRICE_PRO?.trim() || "",
     team: process.env.STRIPE_PRICE_TEAM?.trim() || "",
   };
-}
-
-export function getProTrialDays() {
-  return PRO_TRIAL_DAYS;
 }
 
 export function getBillingReturnUrl(path = "/billing") {

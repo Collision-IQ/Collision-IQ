@@ -8,6 +8,7 @@ import {
   resolveCanonicalVin,
   type ExportSupplementItem,
 } from "./buildExportModel";
+import { buildRebuttalOpeningLine, buildRebuttalClosingCta, type PressureMode } from "./pressureMode";
 import { cleanOperationDisplayText } from "../../ui/presentationText";
 
 export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReportDocument {
@@ -51,6 +52,7 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
         : []),
       { label: "Open Items", value: String(rebuttalItems.length) },
       { label: "Format", value: "Negotiation email draft" },
+      { label: "Approach", value: exportModel.pressureMode.mode.charAt(0).toUpperCase() + exportModel.pressureMode.mode.slice(1) },
     ],
     sections: [
       {
@@ -66,7 +68,13 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
       },
       {
         title: "Editable Email Body",
-        body: buildEmailBody({ subjectVehicle, insurer: insurer ?? null, numberedAsks }),
+        body: buildEmailBody({
+          subjectVehicle,
+          insurer: insurer ?? null,
+          numberedAsks,
+          pressureMode: exportModel.pressureMode.mode,
+          repairPosition: exportModel.repairPosition,
+        }),
       },
     ],
     footer: buildPdfFooter(),
@@ -145,10 +153,20 @@ function buildEmailBody(params: {
   subjectVehicle: string;
   insurer: string | null;
   numberedAsks: RevisionAsk[];
+  pressureMode: PressureMode;
+  repairPosition: string;
 }): string {
   const greeting = params.insurer
     ? `Hello ${params.insurer} Claims Team,`
     : "Hello,";
+
+  const openingLine = buildRebuttalOpeningLine(
+    params.pressureMode,
+    params.subjectVehicle,
+    params.repairPosition
+  );
+
+  const closingCta = buildRebuttalClosingCta(params.pressureMode);
 
   const asksBlock = params.numberedAsks.length > 0
     ? params.numberedAsks.map((ask) =>
@@ -159,11 +177,11 @@ function buildEmailBody(params: {
   return [
     greeting,
     "",
-    `We reviewed the current estimate for the ${params.subjectVehicle}. Please address the numbered items below in the revised estimate or written response.`,
+    openingLine,
     "",
     asksBlock,
     "",
-    "Please issue a revised estimate or provide a written line-item explanation for any item not added.",
+    closingCta,
     "",
     "Regards,",
     "[Your Name]",

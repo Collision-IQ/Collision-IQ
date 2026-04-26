@@ -62,7 +62,8 @@ model User {
   updatedAt        DateTime          @updatedAt
   consents         ChatConsent[]
   featureOverrides FeatureOverride[]
-  IdempotencyKey   IdempotencyKey[]
+  IdempotencyKey        IdempotencyKey[]
+  academyServiceCases   AcademyServiceCase[]
   ownedShops       Shop[]            @relation("ShopOwner")
   memberships      ShopMembership[]
   subscriptions    Subscription[]
@@ -308,4 +309,42 @@ enum ArtifactOwnerType {
   ANONYMOUS
   USER
   SHOP
+}
+
+model AcademyServiceCase {
+  id                    String               @id @default(cuid())
+  userId                String
+  serviceType           AcademyServiceType
+  status                AcademyCaseStatus    @default(PENDING_INTAKE)
+  claimId               String?
+  stripeSessionId       String?              @unique
+  stripePaymentIntentId String?
+  amountPaid            Int?
+  notes                 String?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  user                  User                 @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([serviceType])
+}
+
+enum AcademyServiceType {
+  REKEY_ESTIMATING
+  LEGAL_ASSIST
+  ACV_REVIEW
+  APPRAISAL
+  APPRAISAL_CLAUSE
+  VALUE_DISPUTE
+  DIMINISHED_VALUE
+}
+
+enum AcademyCaseStatus {
+  PENDING_INTAKE
+  INTAKE_RECEIVED
+  IN_REVIEW
+  IN_PROGRESS
+  COMPLETED
+  CANCELED
 }
