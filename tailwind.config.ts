@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import type { PluginAPI } from "tailwindcss/types/config";
 import typography from "@tailwindcss/typography";
 
 export default {
@@ -51,7 +52,7 @@ export default {
 
   plugins: [
     typography,
-    ({ addUtilities }) => {
+    ({ addUtilities }: PluginAPI) => {
       addUtilities({
         ".color-scheme-dark": {
           colorScheme: "dark",
