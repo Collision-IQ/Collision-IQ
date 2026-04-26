@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
 type AcademyService = {
   title: string;
@@ -71,9 +72,31 @@ const SERVICES: AcademyService[] = [
   },
 ];
 
-export default function TheAcademyPage() {
+function CheckoutBanner() {
   const searchParams = useSearchParams();
   const checkoutResult = searchParams.get("checkout");
+  if (checkoutResult === "success") {
+    return (
+      <div className="mx-auto max-w-6xl px-5 pb-2">
+        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-4 text-sm text-emerald-300">
+          Payment received. Your service case has been created and our team will be in touch to begin intake.
+        </div>
+      </div>
+    );
+  }
+  if (checkoutResult === "cancelled") {
+    return (
+      <div className="mx-auto max-w-6xl px-5 pb-2">
+        <div className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4 text-sm text-white/65">
+          Checkout was cancelled. No charge was made.
+        </div>
+      </div>
+    );
+  }
+  return null;
+}
+
+export default function TheAcademyPage() {
 
   return (
     <main className="min-h-screen text-white">
@@ -234,20 +257,9 @@ export default function TheAcademyPage() {
         </div>
       </section>
 
-      {checkoutResult === "success" && (
-        <div className="mx-auto max-w-6xl px-5 pb-2">
-          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-4 text-sm text-emerald-300">
-            Payment received. Your service case has been created and our team will be in touch to begin intake.
-          </div>
-        </div>
-      )}
-      {checkoutResult === "cancelled" && (
-        <div className="mx-auto max-w-6xl px-5 pb-2">
-          <div className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4 text-sm text-white/65">
-            Checkout was cancelled. No charge was made.
-          </div>
-        </div>
-      )}
+      <Suspense fallback={null}>
+        <CheckoutBanner />
+      </Suspense>
 
       <section className="mx-auto max-w-6xl px-5 pb-12">
         <div className="rounded-3xl border border-[#C65A2A]/25 bg-black/30 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] backdrop-blur-xl md:p-8">
