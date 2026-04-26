@@ -1339,6 +1339,7 @@ function RailContent({
   const [snapshotReviewed, setSnapshotReviewed] = useState(false);
   const [snapshotStatus, setSnapshotStatus] = useState<string | null>(null);
   const [snapshotSending, setSnapshotSending] = useState(false);
+  const [serviceCheckoutLoading, setServiceCheckoutLoading] = useState(false);
   function registerSectionRef(insightKey: InsightKey, node: HTMLDivElement | null) {
     sectionRefs.current[insightKey] = node;
   }
@@ -1546,6 +1547,52 @@ function RailContent({
       setSnapshotStatus("Snapshot was not sent. Please download the PDF and send manually.");
     } finally {
       setSnapshotSending(false);
+    }
+  }
+
+  async function startAcademyServiceCheckout() {
+    if (!analysisReportId) {
+      setSnapshotStatus("Start a case review before opening an Academy service checkout.");
+      return;
+    }
+
+    const claimId = toStableClaimId(analysisReportId);
+    if (!claimId) {
+      setSnapshotStatus("We could not resolve the active case ID for checkout.");
+      return;
+    }
+
+    setServiceCheckoutLoading(true);
+    setSnapshotStatus(null);
+
+    try {
+      const response = await fetch("/api/billing/service-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          serviceType: "academy_appraisal",
+          claimId,
+        }),
+      });
+
+      const data = (await response.json().catch(() => null)) as {
+        url?: string;
+        error?: string;
+      } | null;
+
+      if (!response.ok || !data?.url) {
+        throw new Error(data?.error || "Academy checkout could not be started.");
+      }
+
+      window.location.href = data.url;
+    } catch (error) {
+      setSnapshotStatus(
+        error instanceof Error
+          ? error.message
+          : "Academy checkout could not be started."
+      );
+      setServiceCheckoutLoading(false);
     }
   }
 
@@ -1988,18 +2035,18 @@ function RailContent({
               </button>
             ) : null}
             {academyTrigger ? (
-              <form action="/api/billing/service-checkout" method="post" className="w-full">
-                <input type="hidden" name="serviceKey" value={academyTrigger.serviceKey} />
-                <input type="hidden" name="claimId" value={stableClaimId ?? ""} />
-                <button
-                  type="submit"
-                  className="w-full rounded-xl border border-[#C65A2A]/30 bg-gradient-to-br from-[#C65A2A]/18 via-[#C65A2A]/10 to-white/[0.02] p-3 text-left transition hover:bg-[#C65A2A]/20"
-                >
-                  <div className="text-[10px] uppercase tracking-[0.22em] text-[#E8A27F]">Academy Service</div>
-                  <div className="mt-1 text-sm font-semibold text-white/88">{academyTrigger.cta}</div>
-                  <div className="mt-1 text-xs leading-5 text-white/62">Why this is showing: {academyTrigger.reason}</div>
-                </button>
-              </form>
+              <button
+                type="button"
+                onClick={() => void startAcademyServiceCheckout()}
+                disabled={serviceCheckoutLoading}
+                className="w-full rounded-xl border border-[#C65A2A]/30 bg-gradient-to-br from-[#C65A2A]/18 via-[#C65A2A]/10 to-white/[0.02] p-3 text-left transition hover:bg-[#C65A2A]/20 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <div className="text-[10px] uppercase tracking-[0.22em] text-[#E8A27F]">Academy Service</div>
+                <div className="mt-1 text-sm font-semibold text-white/88">
+                  {serviceCheckoutLoading ? "Opening checkout..." : academyTrigger.cta}
+                </div>
+                <div className="mt-1 text-xs leading-5 text-white/62">Why this is showing: {academyTrigger.reason}</div>
+              </button>
             ) : null}
             {customerReportError ? (
               <div className="rounded-xl border border-red-500/16 bg-red-500/[0.05] px-3 py-2 text-[12px] leading-5 text-red-200/80">
@@ -2039,6 +2086,8 @@ function RailContent({
           onMessageChange={setSnapshotMessage}
           onReviewedChange={setSnapshotReviewed}
           stableClaimId={stableClaimId}
+          serviceCheckoutLoading={serviceCheckoutLoading}
+          onStartServiceCase={() => void startAcademyServiceCheckout()}
           onSend={() => void sendSnapshot()}
           onCancelSend={() => setSnapshotSendTarget(null)}
         />
@@ -2113,6 +2162,7 @@ function SnapshotPreviewModal({
   status,
   sendReady,
   stableClaimId,
+  serviceCheckoutLoading,
   onClose,
   onDownload,
   onCopy,
@@ -2121,6 +2171,7 @@ function SnapshotPreviewModal({
   onSubjectChange,
   onMessageChange,
   onReviewedChange,
+  onStartServiceCase,
   onSend,
   onCancelSend,
 }: {
@@ -2134,6 +2185,7 @@ function SnapshotPreviewModal({
   status: string | null;
   sendReady: boolean;
   stableClaimId: string | null;
+  serviceCheckoutLoading: boolean;
   onClose: () => void;
   onDownload: () => void;
   onCopy: () => void;
@@ -2142,6 +2194,7 @@ function SnapshotPreviewModal({
   onSubjectChange: (value: string) => void;
   onMessageChange: (value: string) => void;
   onReviewedChange: (value: boolean) => void;
+  onStartServiceCase: () => void;
   onSend: () => void;
   onCancelSend: () => void;
 }) {
@@ -2245,16 +2298,19 @@ function SnapshotPreviewModal({
               });
               if (!trigger) return null;
               return (
-                <form action="/api/billing/service-checkout" method="post">
-                  <input type="hidden" name="serviceKey" value={trigger.serviceKey} />
-                  <input type="hidden" name="claimId" value={stableClaimId ?? ""} />
+                <div>
                   <div className="text-[10px] uppercase tracking-[0.22em] text-[#E8A27F]">Need Help Resolving This?</div>
                   <div className="mt-1 text-base font-semibold text-white">{trigger.cta}</div>
                   <div className="mt-1 text-sm leading-6 text-white/66">Why this is showing: {trigger.reason}</div>
-                  <button type="submit" className="mt-3 rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90">
-                    Start service case
+                  <button
+                    type="button"
+                    onClick={onStartServiceCase}
+                    disabled={serviceCheckoutLoading}
+                    className="mt-3 rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {serviceCheckoutLoading ? "Opening checkout..." : "Start service case"}
                   </button>
-                </form>
+                </div>
               );
             })()}
           </div>
