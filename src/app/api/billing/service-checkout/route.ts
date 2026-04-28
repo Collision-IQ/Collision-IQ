@@ -15,7 +15,7 @@ import { NextResponse } from "next/server";
 import { getOrCreateAppUser } from "@/lib/auth/get-or-create-app-user";
 import { UnauthorizedError } from "@/lib/auth/require-current-user";
 import { BILLING_CATALOG, isBillingPlanKey } from "@/lib/billing/catalog";
-import { getBillingReturnUrl, getStripe } from "@/lib/billing/stripe";
+import { getStripe } from "@/lib/billing/stripe";
 import { normalizeClaimId, toStableClaimId } from "@/lib/claims/claimIdentity";
 import { prisma } from "@/lib/prisma";
 
@@ -26,6 +26,32 @@ function isServiceType(serviceType: string): serviceType is keyof typeof BILLING
   if (!isBillingPlanKey(serviceType)) return false;
   const entry = BILLING_CATALOG[serviceType];
   return "lane" in entry && entry.lane === "service";
+}
+
+function getAppBaseUrl(): string | null {
+  const explicitUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL;
+
+  const candidate = explicitUrl
+    ? explicitUrl
+    : process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : null;
+
+  if (!candidate) return null;
+
+  if (!candidate.startsWith("http://") && !candidate.startsWith("https://")) {
+    return null;
+  }
+
+  if (
+    candidate.startsWith("sk_") ||
+    candidate.startsWith("pk_") ||
+    candidate.startsWith("whsec_")
+  ) {
+    return null;
+  }
+
+  return candidate.replace(/\/$/, "");
 }
 
 async function resolveParams(
@@ -59,7 +85,16 @@ async function resolveParams(
 }
 
 export async function POST(req: Request) {
-  console.log("DB HOST:", process.env.DATABASE_URL?.match(/@([^/?]+)/)?.[1]);
+  console.log("DB + URL check", {
+    dbHost: process.env.DATABASE_URL?.match(/@([^/?]+)/)?.[1],
+    appUrl: process.env.NEXT_PUBLIC_APP_URL,
+    env: process.env.VERCEL_ENV,
+  });
+  console.log("FINAL DB CHECK:", {
+    DATABASE_URL: process.env.DATABASE_URL?.includes("raspy-heart"),
+    DIRECT_URL: process.env.DIRECT_URL?.includes("raspy-heart"),
+  });
+
   const wantsJson = (req.headers.get("content-type") || "").includes("application/json");
 
   let dbUser: Awaited<ReturnType<typeof getOrCreateAppUser>>;
@@ -89,6 +124,30 @@ export async function POST(req: Request) {
   if (!stableClaimId) {
     return NextResponse.json({ error: "Missing or invalid claim id" }, { status: 400 });
   }
+
+  const appBaseUrl = getAppBaseUrl();
+
+  if (!appBaseUrl) {
+    console.error("Invalid checkout return URL config", {
+      hasNextPublicAppUrl: Boolean(process.env.NEXT_PUBLIC_APP_URL),
+      hasAppBaseUrl: Boolean(process.env.APP_BASE_URL),
+      hasVercelUrl: Boolean(process.env.VERCEL_URL),
+    });
+
+    return NextResponse.json(
+      { error: "Invalid checkout return URL configuration." },
+      { status: 500 }
+    );
+  }
+
+  const successUrl = new URL("/cases", appBaseUrl);
+  successUrl.searchParams.set("checkout", "success");
+  successUrl.searchParams.set("session_id", "{CHECKOUT_SESSION_ID}");
+
+  const cancelUrl = new URL("/cases", appBaseUrl);
+  cancelUrl.searchParams.set("checkout", "cancelled");
+
+  const academyUrl = new URL("/the-academy", appBaseUrl);
 
   const stripe = getStripe();
 
@@ -135,8 +194,8 @@ export async function POST(req: Request) {
         },
       ],
       allow_promotion_codes: true,
-      success_url: getBillingReturnUrl("/cases?checkout=success"),
-      cancel_url: getBillingReturnUrl("/cases?checkout=cancel"),
+      success_url: successUrl.toString(),
+      cancel_url: cancelUrl.toString(),
       metadata: {
         type: "service",
         userId: dbUser.id,
@@ -170,7 +229,7 @@ export async function POST(req: Request) {
   if (wantsJson) {
     return NextResponse.json({ url: session.url });
   }
-  return NextResponse.redirect(session.url || getBillingReturnUrl("/the-academy"), 303);
+  return NextResponse.redirect(session.url || academyUrl.toString(), 303);
 }
 
 async function ensureStripeCustomerId(dbUserId: string): Promise<string> {
