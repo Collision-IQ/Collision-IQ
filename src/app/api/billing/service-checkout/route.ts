@@ -59,6 +59,7 @@ async function resolveParams(
 }
 
 export async function POST(req: Request) {
+  console.log("DB HOST:", process.env.DATABASE_URL?.match(/@([^/?]+)/)?.[1]);
   const wantsJson = (req.headers.get("content-type") || "").includes("application/json");
 
   let dbUser: Awaited<ReturnType<typeof getOrCreateAppUser>>;
