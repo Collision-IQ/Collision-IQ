@@ -76,7 +76,11 @@ export async function POST(req: Request) {
 
   const { serviceType, claimId } = await resolveParams(req);
 
-  if (!serviceType || !isServiceType(serviceType)) {
+  if (!serviceType) {
+    return NextResponse.json({ error: "Missing service type" }, { status: 400 });
+  }
+
+  if (!isServiceType(serviceType)) {
     return NextResponse.json({ error: "Invalid service type" }, { status: 400 });
   }
 
@@ -85,59 +89,82 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Missing or invalid claim id" }, { status: 400 });
   }
 
-  const entry = BILLING_CATALOG[serviceType] as {
-    priceId: string;
-    mode: string;
-    lane: string;
-    serviceType: string;
-    label: string;
-  };
-
-  const dbConfig = await prisma.servicePriceConfig.findUnique({
-    where: { serviceType },
-  });
-
-  if (dbConfig && !dbConfig.isActive) {
-    return NextResponse.json(
-      { error: `Inactive Stripe price config for ${serviceType}` },
-      { status: 400 }
-    );
-  }
-
-  // Prefer the DB-configured price ID; fall back to catalog env var.
-  const priceId = (dbConfig?.stripePriceId || entry.priceId).trim();
-
-  if (!priceId) {
-    return NextResponse.json(
-      { error: `Missing Stripe price for ${serviceType}` },
-      { status: 500 }
-    );
-  }
-
-  if (!priceId.startsWith("price_")) {
-    return NextResponse.json(
-      { error: `Invalid Stripe price id for ${serviceType}` },
-      { status: 500 }
-    );
-  }
-
   const stripe = getStripe();
-  const customerId = await ensureStripeCustomerId(dbUser.id);
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    customer: customerId,
-    line_items: [{ price: priceId, quantity: 1 }],
-    allow_promotion_codes: true,
-    success_url: getBillingReturnUrl("/cases?checkout=success"),
-    cancel_url: getBillingReturnUrl("/cases?checkout=cancel"),
-    metadata: {
-      type: "service",
-      userId: dbUser.id,
-      claimId: stableClaimId,
+  let session;
+  let stripePriceIdForLog: string | undefined;
+  try {
+    const servicePriceConfig = await prisma.servicePriceConfig.findUnique({
+      where: { serviceType },
+    });
+
+    if (!servicePriceConfig) {
+      return NextResponse.json(
+        { error: `No price config found for ${serviceType}` },
+        { status: 400 }
+      );
+    }
+
+    if (!servicePriceConfig.isActive) {
+      return NextResponse.json(
+        { error: `Inactive Stripe price config for ${serviceType}` },
+        { status: 400 }
+      );
+    }
+
+    const stripePriceId = servicePriceConfig.stripePriceId.trim();
+    stripePriceIdForLog = stripePriceId;
+
+    if (!stripePriceId || !stripePriceId.startsWith("price_")) {
+      return NextResponse.json(
+        { error: `Invalid Stripe price ID for ${serviceType}. Expected price_*.` },
+        { status: 400 }
+      );
+    }
+
+    const customerId = await ensureStripeCustomerId(dbUser.id);
+
+    session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      customer: customerId,
+      line_items: [
+        {
+          price: servicePriceConfig.stripePriceId,
+          quantity: 1,
+        },
+      ],
+      allow_promotion_codes: true,
+      success_url: getBillingReturnUrl("/cases?checkout=success"),
+      cancel_url: getBillingReturnUrl("/cases?checkout=cancel"),
+      metadata: {
+        type: "service",
+        userId: dbUser.id,
+        claimId: stableClaimId,
+        serviceType,
+      },
+    });
+  } catch (error) {
+    const stripeError = error as {
+      message?: string;
+      type?: string;
+      code?: string;
+      param?: string;
+    };
+
+    console.error("Service checkout failed:", {
+      message: stripeError.message,
+      type: stripeError.type,
+      code: stripeError.code,
+      param: stripeError.param,
       serviceType,
-    },
-  });
+      stripePriceId: stripePriceIdForLog,
+    });
+
+    return NextResponse.json(
+      { error: stripeError.message ?? "Checkout could not be started." },
+      { status: 500 }
+    );
+  }
 
   if (wantsJson) {
     return NextResponse.json({ url: session.url });
