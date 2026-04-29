@@ -182,6 +182,12 @@ function readStoredChatConsent(): ChatConsentRecord | null {
   }
 }
 
+function getCurrentWorkspaceReturnUrl(): string | null {
+  if (typeof window === "undefined") return null;
+
+  return window.location.href;
+}
+
 export function ChatbotWorkspacePage() {
   const router = useRouter();
   const centerScrollRequestRef = useRef<((key: InsightKey) => void) | null>(null);
@@ -1397,7 +1403,6 @@ function RailContent({
     ...renderModel.negotiationPlaybook.suggestedSequence,
     ...renderModel.negotiationPlaybook.documentationNeeded,
   ]).slice(0, 5);
-  const stableClaimId = toStableClaimId(analysisReportId);
   const academyTrigger = snapshot
     ? resolveAcademyServiceTrigger({
         snapshot,
@@ -1565,6 +1570,11 @@ function RailContent({
     setServiceCheckoutLoading(true);
     setSnapshotStatus(null);
 
+    const checkoutWindow = window.open("about:blank", "_blank");
+    if (checkoutWindow) {
+      checkoutWindow.opener = null;
+    }
+
     try {
       const response = await fetch("/api/billing/service-checkout", {
         method: "POST",
@@ -1573,6 +1583,7 @@ function RailContent({
         body: JSON.stringify({
           serviceType: "academy_appraisal",
           claimId,
+          returnUrl: getCurrentWorkspaceReturnUrl(),
         }),
       });
 
@@ -1585,8 +1596,13 @@ function RailContent({
         throw new Error(data?.error || "Academy checkout could not be started.");
       }
 
-      window.location.href = data.url;
+      if (checkoutWindow) {
+        checkoutWindow.location.href = data.url;
+      } else {
+        window.open(data.url, "_blank", "noopener,noreferrer");
+      }
     } catch (error) {
+      checkoutWindow?.close();
       setSnapshotStatus(
         error instanceof Error
           ? error.message
@@ -2085,7 +2101,6 @@ function RailContent({
           onSubjectChange={setSnapshotSubject}
           onMessageChange={setSnapshotMessage}
           onReviewedChange={setSnapshotReviewed}
-          stableClaimId={stableClaimId}
           serviceCheckoutLoading={serviceCheckoutLoading}
           onStartServiceCase={() => void startAcademyServiceCheckout()}
           onSend={() => void sendSnapshot()}
@@ -2161,7 +2176,6 @@ function SnapshotPreviewModal({
   sending,
   status,
   sendReady,
-  stableClaimId,
   serviceCheckoutLoading,
   onClose,
   onDownload,
@@ -2184,7 +2198,6 @@ function SnapshotPreviewModal({
   sending: boolean;
   status: string | null;
   sendReady: boolean;
-  stableClaimId: string | null;
   serviceCheckoutLoading: boolean;
   onClose: () => void;
   onDownload: () => void;

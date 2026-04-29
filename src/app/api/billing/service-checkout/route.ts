@@ -56,17 +56,19 @@ function getAppBaseUrl(): string | null {
 
 async function resolveParams(
   req: Request
-): Promise<{ serviceType: string | null; claimId: string | null }> {
+): Promise<{ serviceType: string | null; claimId: string | null; returnUrl: string | null }> {
   const contentType = req.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
     const body = (await req.json().catch(() => null)) as {
       serviceType?: string;
       serviceKey?: string;
       claimId?: string;
+      returnUrl?: string;
     } | null;
     return {
       serviceType: (body?.serviceType ?? body?.serviceKey)?.trim() ?? null,
       claimId: normalizeClaimId(body?.claimId?.trim() ?? null),
+      returnUrl: body?.returnUrl?.trim() ?? null,
     };
   }
   const formData = await req.formData();
@@ -81,7 +83,32 @@ async function resolveParams(
     claimId: typeof formData.get("claimId") === "string"
       ? normalizeClaimId((formData.get("claimId") as string).trim())
       : null,
+    returnUrl: typeof formData.get("returnUrl") === "string"
+      ? (formData.get("returnUrl") as string).trim()
+      : null,
   };
+}
+
+function resolveSafeReturnUrl(params: {
+  rawReturnUrl: string | null;
+  appBaseUrl: string;
+  requestUrl: string;
+}): string | null {
+  if (!params.rawReturnUrl) return null;
+
+  try {
+    const appOrigin = new URL(params.appBaseUrl).origin;
+    const requestOrigin = new URL(params.requestUrl).origin;
+    const candidate = new URL(params.rawReturnUrl, requestOrigin);
+    const allowedOrigins = new Set([appOrigin, requestOrigin]);
+
+    if (!allowedOrigins.has(candidate.origin)) return null;
+    if (candidate.protocol !== "http:" && candidate.protocol !== "https:") return null;
+
+    return candidate.toString();
+  } catch {
+    return null;
+  }
 }
 
 export async function POST(req: Request) {
@@ -110,7 +137,7 @@ export async function POST(req: Request) {
     throw error;
   }
 
-  const { serviceType, claimId } = await resolveParams(req);
+  const { serviceType, claimId, returnUrl } = await resolveParams(req);
 
   if (!serviceType) {
     return NextResponse.json({ error: "Missing service type" }, { status: 400 });
@@ -144,8 +171,12 @@ export async function POST(req: Request) {
   successUrl.searchParams.set("checkout", "success");
   successUrl.searchParams.set("session_id", "{CHECKOUT_SESSION_ID}");
 
-  const cancelUrl = new URL("/cases", appBaseUrl);
-  cancelUrl.searchParams.set("checkout", "cancelled");
+  const cancelUrl =
+    resolveSafeReturnUrl({
+      rawReturnUrl: returnUrl,
+      appBaseUrl,
+      requestUrl: req.url,
+    }) ?? new URL("/the-academy?checkout=cancelled", appBaseUrl).toString();
 
   const academyUrl = new URL("/the-academy", appBaseUrl);
 
@@ -195,7 +226,7 @@ export async function POST(req: Request) {
       ],
       allow_promotion_codes: true,
       success_url: successUrl.toString(),
-      cancel_url: cancelUrl.toString(),
+      cancel_url: cancelUrl,
       metadata: {
         type: "service",
         userId: dbUser.id,

@@ -3,40 +3,48 @@ const { PrismaClient } = require("@prisma/client");
 
 const prisma = new PrismaClient();
 
+function requiredEnv(name) {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing required env var: ${name}`);
+  }
+  return value;
+}
+
 const SERVICE_PRICES = [
   {
     serviceType: "academy_rekey_estimating",
-    stripePriceId: "price_1QekAMGG7AvpJVXdf5FBLp1J",
+    stripePriceId: requiredEnv("STRIPE_PRICE_RE-KEY_APPRAISAL_ID"),
     label: "Rekey Estimating",
   },
   {
     serviceType: "academy_legal_assist",
-    stripePriceId: "price_1QdnbrGG7AvpJVXd2yrjTpGt",
+    stripePriceId: requiredEnv("STRIPE_PRICE_LEGAL_ASSIST_ID"),
     label: "Legal Assist",
   },
   {
     serviceType: "academy_acv_review",
-    stripePriceId: "price_1QdnXaGG7AvpJVXdlfq3D1hQ",
+    stripePriceId: requiredEnv("STRIPE_PRICE_ACTUAL_COST_VALUE"),
     label: "ACV Review",
   },
   {
     serviceType: "academy_appraisal",
-    stripePriceId: "price_1QdnWaGG7AvpJVXdxwsB08qx",
+    stripePriceId: requiredEnv("STRIPE_PRICE_APPRAISAL_ID"),
     label: "Appraisal",
   },
   {
     serviceType: "academy_appraisal_clause",
-    stripePriceId: "price_1QdnVuGG7AvpJVXdEAOGrsA1",
+    stripePriceId: requiredEnv("STRIPE_RIGHT_TO_APPRAISAL_ID"),
     label: "Right to Appraisal Clause",
   },
   {
     serviceType: "academy_value_dispute",
-    stripePriceId: "price_1QdnMiGG7AvpJVXd4vKwxNJs",
+    stripePriceId: requiredEnv("STRIPE_PRICE_VALUE_DISPUTE_ID"),
     label: "Value Dispute",
   },
   {
     serviceType: "academy_diminished_value",
-    stripePriceId: "price_1QdnJMGG7AvpJVXdF1C6crgE",
+    stripePriceId: requiredEnv("STRIPE_PRICE_DIMINISHED_VALUE_ID"),
     label: "Diminished Value",
   },
 ];
