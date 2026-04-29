@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { createServiceCaseFromCheckoutSession } from "@/lib/academy/serviceCases";
 import { getStripe } from "@/lib/billing/stripe";
 
 export const runtime = "nodejs";
@@ -34,13 +35,33 @@ export async function POST(req: Request) {
   }
 
   // ── Router: dispatch by lane ──────────────────────────────────────────
-  if (event.type === "checkout.session.completed") {
+  console.info("[stripe-webhook] received event", {
+    eventId: event.id,
+    eventType: event.type,
+  });
+
+  if (
+    event.type === "checkout.session.completed" ||
+    event.type === "checkout.session.async_payment_succeeded"
+  ) {
     const session = event.data.object as Stripe.Checkout.Session;
     const checkoutType = session.metadata?.type;
 
     if (checkoutType === "service") {
-      await handleServiceCheckoutCompleted(session);
-    } else {
+      const result = await createServiceCaseFromCheckoutSession({
+        session,
+        eventId: event.id,
+      });
+      if (!result.ok) {
+        console.error("[stripe-webhook] service checkout could not create case", {
+          eventId: event.id,
+          sessionId: session.id,
+          error: result.error,
+          metadata: session.metadata,
+        });
+        return NextResponse.json({ received: true, error: result.error });
+      }
+    } else if (event.type === "checkout.session.completed") {
       // Lane 1 (subscription) or legacy payment — sync subscription record
       await syncSubscriptionFromStripeEvent(event);
     }
@@ -162,31 +183,3 @@ function normalizeStripeStatus(status: Stripe.Subscription.Status) {
 
 // ── Lane 2: Service case creation ─────────────────────────────────────
 
-async function handleServiceCheckoutCompleted(
-  session: Stripe.Checkout.Session
-): Promise<void> {
-  await prisma.academyServiceCase.upsert({
-    where: {
-      stripeSessionId: session.id,
-    },
-    update: {
-      status: "PENDING_INTAKE",
-      stripePaymentIntentId:
-        typeof session.payment_intent === "string"
-          ? session.payment_intent
-          : session.payment_intent?.id ?? null,
-    },
-    create: {
-      userId: session.metadata?.userId ?? session.metadata?.dbUserId ?? null,
-      claimId: session.metadata?.claimId ?? null,
-      serviceType: session.metadata?.serviceType ?? "UNKNOWN",
-      stripeSessionId: session.id,
-      stripePaymentIntentId:
-        typeof session.payment_intent === "string"
-          ? session.payment_intent
-          : session.payment_intent?.id ?? null,
-      status: "PENDING_INTAKE",
-      lastUpdate: "Payment received. Intake is pending.",
-    },
-  });
-}

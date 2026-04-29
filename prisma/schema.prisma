@@ -248,7 +248,11 @@ model AcademyServiceCase {
   serviceType           String
   stripeSessionId       String?                  @unique
   stripePaymentIntentId String?
+  stripeEventId         String?
   status                AcademyServiceCaseStatus @default(PENDING_INTAKE)
+  attachmentIds         Json?
+  reviewSnapshot        Json?
+  checkoutMetadata      Json?
   intakeNotes           String?
   internalNotes         String?
   lastUpdate            String?

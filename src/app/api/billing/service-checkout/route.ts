@@ -56,7 +56,13 @@ function getAppBaseUrl(): string | null {
 
 async function resolveParams(
   req: Request
-): Promise<{ serviceType: string | null; claimId: string | null; returnUrl: string | null }> {
+): Promise<{
+  serviceType: string | null;
+  claimId: string | null;
+  returnUrl: string | null;
+  analysisReportId: string | null;
+  attachmentIds: string[];
+}> {
   const contentType = req.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
     const body = (await req.json().catch(() => null)) as {
@@ -64,11 +70,15 @@ async function resolveParams(
       serviceKey?: string;
       claimId?: string;
       returnUrl?: string;
+      analysisReportId?: string;
+      attachmentIds?: unknown;
     } | null;
     return {
       serviceType: (body?.serviceType ?? body?.serviceKey)?.trim() ?? null,
       claimId: normalizeClaimId(body?.claimId?.trim() ?? null),
       returnUrl: body?.returnUrl?.trim() ?? null,
+      analysisReportId: body?.analysisReportId?.trim() ?? null,
+      attachmentIds: normalizeAttachmentIds(body?.attachmentIds),
     };
   }
   const formData = await req.formData();
@@ -86,7 +96,33 @@ async function resolveParams(
     returnUrl: typeof formData.get("returnUrl") === "string"
       ? (formData.get("returnUrl") as string).trim()
       : null,
+    analysisReportId: typeof formData.get("analysisReportId") === "string"
+      ? (formData.get("analysisReportId") as string).trim()
+      : null,
+    attachmentIds: normalizeAttachmentIds(formData.get("attachmentIds")),
   };
+}
+
+function normalizeAttachmentIds(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .filter((entry): entry is string => typeof entry === "string")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function serializeMetadataList(values: string[]): string {
+  return [...new Set(values)].join(",").slice(0, 500);
 }
 
 function resolveSafeReturnUrl(params: {
@@ -137,7 +173,8 @@ export async function POST(req: Request) {
     throw error;
   }
 
-  const { serviceType, claimId, returnUrl } = await resolveParams(req);
+  const { serviceType, claimId, returnUrl, analysisReportId, attachmentIds } =
+    await resolveParams(req);
 
   if (!serviceType) {
     return NextResponse.json({ error: "Missing service type" }, { status: 400 });
@@ -167,7 +204,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const successUrl = new URL("/cases", appBaseUrl);
+  const successUrl = new URL("/service-cases", appBaseUrl);
   successUrl.searchParams.set("checkout", "success");
   successUrl.searchParams.set("session_id", "{CHECKOUT_SESSION_ID}");
 
@@ -214,6 +251,23 @@ export async function POST(req: Request) {
     }
 
     const customerId = await ensureStripeCustomerId(dbUser.id);
+    const checkoutMetadata = {
+      type: "service",
+      userId: dbUser.id,
+      claimId: stableClaimId,
+      serviceType,
+      analysisReportId: analysisReportId ?? stableClaimId,
+      attachmentIds: serializeMetadataList(attachmentIds),
+    };
+
+    console.info("[service-checkout] creating Stripe Checkout session", {
+      userId: dbUser.id,
+      serviceType,
+      claimId: stableClaimId,
+      analysisReportId: checkoutMetadata.analysisReportId,
+      attachmentCount: attachmentIds.length,
+      cancelUrl,
+    });
 
     session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -227,12 +281,14 @@ export async function POST(req: Request) {
       allow_promotion_codes: true,
       success_url: successUrl.toString(),
       cancel_url: cancelUrl,
-      metadata: {
-        type: "service",
-        userId: dbUser.id,
-        claimId: stableClaimId,
-        serviceType,
-      },
+      metadata: checkoutMetadata,
+    });
+
+    console.info("[service-checkout] Stripe Checkout session created", {
+      sessionId: session.id,
+      userId: dbUser.id,
+      serviceType,
+      metadata: checkoutMetadata,
     });
   } catch (error) {
     const stripeError = error as {

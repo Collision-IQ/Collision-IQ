@@ -1134,9 +1134,10 @@ export function ChatbotWorkspacePage() {
                           canUseSnapshotExport={canUseSnapshotExport}
                           canUseBasicPdfExport={canUseBasicPdfExport}
                           canUseDisputeReportExport={canUseDisputeReportExport}
-                          canUseRebuttalEmail={canUseRebuttalEmail}
+            canUseRebuttalEmail={canUseRebuttalEmail}
             canUseCustomerReport={canUseCustomerReport}
             analysisReportId={analysisReportId}
+            attachmentIds={attachmentsState.map((file) => file.attachmentId)}
             onCustomerReportLocked={() => setUpgradeModalOpen(true)}
             activeInsightKey={activeInsightKey}
             evidenceModel={evidenceModel}
@@ -1300,6 +1301,7 @@ function RailContent({
   canUseRebuttalEmail,
   canUseCustomerReport,
   analysisReportId,
+  attachmentIds,
   onCustomerReportLocked,
   activeInsightKey,
   evidenceModel,
@@ -1327,6 +1329,7 @@ function RailContent({
   canUseRebuttalEmail: boolean;
   canUseCustomerReport: boolean;
   analysisReportId: string | null;
+  attachmentIds: string[];
   onCustomerReportLocked: () => void;
   activeInsightKey: InsightKey | null;
   evidenceModel: EvidenceLinkModel | null;
@@ -1583,6 +1586,8 @@ function RailContent({
         body: JSON.stringify({
           serviceType: "academy_appraisal",
           claimId,
+          analysisReportId,
+          attachmentIds,
           returnUrl: getCurrentWorkspaceReturnUrl(),
         }),
       });

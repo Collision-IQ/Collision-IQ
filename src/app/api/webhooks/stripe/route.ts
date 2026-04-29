@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { createServiceCaseFromCheckoutSession } from "@/lib/academy/serviceCases";
 import { getStripe } from "@/lib/billing/stripe";
 
 export const runtime = "nodejs";
@@ -33,15 +34,32 @@ export async function POST(req: Request) {
     );
   }
 
-  if (event.type === "checkout.session.completed") {
+  console.info("[stripe-webhook] received event", {
+    eventId: event.id,
+    eventType: event.type,
+  });
+
+  if (
+    event.type === "checkout.session.completed" ||
+    event.type === "checkout.session.async_payment_succeeded"
+  ) {
     const session = event.data.object as Stripe.Checkout.Session;
 
     if (session.metadata?.type === "service") {
-      const result = await handleServiceCheckoutCompleted(session);
+      const result = await createServiceCaseFromCheckoutSession({
+        session,
+        eventId: event.id,
+      });
       if (!result.ok) {
-        return NextResponse.json({ error: result.error }, { status: 400 });
+        console.error("[stripe-webhook] service checkout could not create case", {
+          eventId: event.id,
+          sessionId: session.id,
+          error: result.error,
+          metadata: session.metadata,
+        });
+        return NextResponse.json({ received: true, error: result.error });
       }
-    } else {
+    } else if (event.type === "checkout.session.completed") {
       await syncSubscriptionFromStripeEvent(event);
     }
   } else if (
@@ -137,45 +155,6 @@ async function syncSubscriptionFromStripeEvent(event: Stripe.Event) {
       cancelAtPeriodEnd: subscription.cancel_at_period_end,
     },
   });
-}
-
-async function handleServiceCheckoutCompleted(
-  session: Stripe.Checkout.Session
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const claimId = session.metadata?.claimId?.trim();
-  const serviceType = session.metadata?.serviceType?.trim();
-
-  if (!claimId || !serviceType) {
-    return { ok: false, error: "Missing required service checkout metadata" };
-  }
-
-  const stripePaymentIntentId =
-    typeof session.payment_intent === "string"
-      ? session.payment_intent
-      : session.payment_intent?.id ?? null;
-
-  await prisma.academyServiceCase.upsert({
-    where: {
-      stripeSessionId: session.id,
-    },
-    update: {
-      userId: session.metadata?.userId?.trim() || null,
-      claimId,
-      serviceType,
-      stripePaymentIntentId,
-    },
-    create: {
-      userId: session.metadata?.userId?.trim() || null,
-      claimId,
-      serviceType,
-      stripeSessionId: session.id,
-      stripePaymentIntentId,
-      status: "PENDING_INTAKE",
-      lastUpdate: "Payment received. Intake is pending.",
-    },
-  });
-
-  return { ok: true };
 }
 
 function normalizeStripeStatus(status: Stripe.Subscription.Status) {
