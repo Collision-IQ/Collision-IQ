@@ -15,8 +15,29 @@ import {
 
 export const runtime = "nodejs";
 
-const MAX_UPLOAD_FILE_BYTES = 20 * 1024 * 1024;
-const MAX_UPLOAD_TOTAL_BYTES = 75 * 1024 * 1024;
+const MAX_UPLOAD_FILE_BYTES = 4 * 1024 * 1024;
+
+type UploadSuccess = {
+  attachmentId: string;
+  filename: string;
+  type: string;
+  text: string;
+  imageDataUrl?: string;
+  pageCount?: number;
+  hasVision: boolean;
+  caseContinuity: {
+    activeCaseId: string;
+    reportId: string;
+    sameCaseFollowUp: boolean;
+    attachmentIds: string[];
+  } | null;
+};
+
+type UploadFailure = {
+  filename: string;
+  reason: string;
+  code?: string;
+};
 
 function getUploadFiles(formData: FormData): File[] {
   const candidates = [
@@ -67,32 +88,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "NO_FILE" }, { status: 400 });
     }
 
-    let totalBytes = 0;
-    for (const file of files) {
-      totalBytes += file.size;
-
-      if (file.size > MAX_UPLOAD_FILE_BYTES) {
-        return NextResponse.json(
-          {
-            error: `File \"${file.name}\" exceeds 20MB limit`,
-            code: "FILE_TOO_LARGE",
-          },
-          { status: 413 }
-        );
-      }
-    }
-
-    if (totalBytes > MAX_UPLOAD_TOTAL_BYTES) {
-      return NextResponse.json(
-        {
-          error: "Total upload exceeds 75MB limit",
-          code: "UPLOAD_TOO_LARGE",
-        },
-        { status: 413 }
-      );
-    }
-
-    const file = files[0];
     const activeCase = activeCaseId
       ? await getAnalysisReport(activeCaseId, { ownerUserId: user.id })
       : null;
@@ -105,111 +100,189 @@ export async function POST(req: Request) {
       });
     }
 
+    const successfulUploads: UploadSuccess[] = [];
+    const failedUploads: UploadFailure[] = [];
+    let uploadsUsed = 0;
+
+    if (!isPlatformAdmin && entitlements.uploadCap !== null) {
+      try {
+        uploadsUsed = await getUsageCount(user.id, "FILE_UPLOAD");
+      } catch (error) {
+        console.error("[upload] usage read failed during processing (non-blocking)", {
+          userId: user.id,
+          error,
+        });
+      }
+    }
+
     console.info("[upload] accepted", {
-      filename: file.name,
-      mimeType: file.type || "unknown",
-      sizeBytes: file.size,
-      totalBytes,
+      totalBytes: files.reduce((sum, file) => sum + file.size, 0),
       fileCount: files.length,
-      isImage: file.type.startsWith("image/"),
       ownerUserId: user.id,
       activeCaseId,
       sameCaseFollowUp: Boolean(activeCase),
     });
 
-    const previewData = await extractPreviewDataFromFile(file);
-    const imageDataUrl = await fileToReusableDataUrl(file);
-    const stored = await saveUploadedAttachment({
-      ownerUserId: user.id,
-      filename: file.name,
-      type: file.type,
-      text: previewData.text,
-      imageDataUrl,
-      pageCount: previewData.pageCount,
-    });
-
-    console.info("[upload] attachment stored", {
-      attachmentId: stored.id,
-      filename: stored.filename,
-      mimeType: stored.type || "unknown",
-      textLength: stored.text.length,
-      pageCount: stored.pageCount ?? null,
-      hasImageDataUrl: Boolean(stored.imageDataUrl),
-      ownerUserId: user.id,
-      activeCaseId,
-      sameCaseFollowUp: Boolean(activeCase),
-    });
-
-    if (activeCase) {
-      console.info("[upload] attached files to existing case", {
-        activeCaseId: activeCase.id,
-        attachmentId: stored.id,
-        ownerUserId: user.id,
-      });
-      console.info("[upload] returned same-case continuity", {
-        activeCaseId: activeCase.id,
-        reportId: activeCase.id,
-        attachmentIds: [stored.id],
-        sameCaseFollowUp: true,
-      });
-    }
-
-    if (!isPlatformAdmin) {
-      try {
-        await recordUsage({
-          userId: user.id,
-          kind: "FILE_UPLOAD",
-          metadataJson: {
-            source: "upload",
-            fileName: file.name,
-            fileSize: file.size,
-            attachmentId: stored.id,
-          },
+    for (const file of files) {
+      if (file.size > MAX_UPLOAD_FILE_BYTES) {
+        failedUploads.push({
+          filename: file.name,
+          reason: `File exceeds 4MB limit (${Math.ceil(file.size / 1024 / 1024)}MB).`,
+          code: "FILE_TOO_LARGE",
         });
-      } catch (error) {
-        console.error("[upload] usage tracking failed (non-blocking)", {
-          phase: "recordUsage",
-          userId: user.id,
-          fileName: file.name,
-          error,
+        continue;
+      }
+
+      if (
+        !isPlatformAdmin &&
+        entitlements.uploadCap !== null &&
+        uploadsUsed + successfulUploads.length >= entitlements.uploadCap
+      ) {
+        failedUploads.push({
+          filename: file.name,
+          reason: "Upload limit reached for your plan.",
+          code: "UPLOAD_LIMIT_REACHED",
         });
+        continue;
       }
 
       try {
-        await incrementUsage(user.id, "FILE_UPLOAD");
-      } catch (error) {
-        console.error("[upload] usage tracking failed (non-blocking)", {
-          phase: "incrementUsage",
-          userId: user.id,
-          fileName: file.name,
-          error,
+        const previewData = await extractPreviewDataFromFile(file);
+        const imageDataUrl = await fileToReusableDataUrl(file);
+        const stored = await saveUploadedAttachment({
+          ownerUserId: user.id,
+          filename: file.name,
+          type: file.type,
+          text: previewData.text,
+          imageDataUrl,
+          pageCount: previewData.pageCount,
         });
-      }
-    }
 
-    return NextResponse.json({
-      attachmentId: stored.id,
-      filename: stored.filename,
-      type: stored.type,
-      text: stored.text,
-      imageDataUrl: stored.imageDataUrl,
-      pageCount: stored.pageCount,
-      hasVision: Boolean(stored.imageDataUrl),
-      caseContinuity: activeCase
-        ? {
-            activeCaseId: activeCase.id,
-            reportId: activeCase.id,
-            sameCaseFollowUp: true,
-            attachmentIds: [stored.id],
-          }
-        : activeCaseId
+        const caseContinuity = activeCase
           ? {
-              activeCaseId,
-              reportId: activeCaseId,
-              sameCaseFollowUp: false,
+              activeCaseId: activeCase.id,
+              reportId: activeCase.id,
+              sameCaseFollowUp: true,
               attachmentIds: [stored.id],
             }
-          : null,
+          : activeCaseId
+            ? {
+                activeCaseId,
+                reportId: activeCaseId,
+                sameCaseFollowUp: false,
+                attachmentIds: [stored.id],
+              }
+            : null;
+
+        successfulUploads.push({
+          attachmentId: stored.id,
+          filename: stored.filename,
+          type: stored.type,
+          text: stored.text,
+          imageDataUrl: stored.imageDataUrl,
+          pageCount: stored.pageCount,
+          hasVision: Boolean(stored.imageDataUrl),
+          caseContinuity,
+        });
+
+        console.info("[upload] attachment stored", {
+          attachmentId: stored.id,
+          filename: stored.filename,
+          mimeType: stored.type || "unknown",
+          textLength: stored.text.length,
+          pageCount: stored.pageCount ?? null,
+          hasImageDataUrl: Boolean(stored.imageDataUrl),
+          ownerUserId: user.id,
+          activeCaseId,
+          sameCaseFollowUp: Boolean(activeCase),
+        });
+
+        if (activeCase) {
+          console.info("[upload] returned same-case continuity", {
+            activeCaseId: activeCase.id,
+            reportId: activeCase.id,
+            attachmentIds: [stored.id],
+            sameCaseFollowUp: true,
+          });
+        }
+
+        if (!isPlatformAdmin) {
+          try {
+            await recordUsage({
+              userId: user.id,
+              kind: "FILE_UPLOAD",
+              metadataJson: {
+                source: "upload",
+                fileName: file.name,
+                fileSize: file.size,
+                attachmentId: stored.id,
+              },
+            });
+          } catch (error) {
+            console.error("[upload] usage tracking failed (non-blocking)", {
+              phase: "recordUsage",
+              userId: user.id,
+              fileName: file.name,
+              error,
+            });
+          }
+
+          try {
+            await incrementUsage(user.id, "FILE_UPLOAD");
+          } catch (error) {
+            console.error("[upload] usage tracking failed (non-blocking)", {
+              phase: "incrementUsage",
+              userId: user.id,
+              fileName: file.name,
+              error,
+            });
+          }
+        }
+      } catch (error) {
+        console.error("[upload] file processing failed", {
+          filename: file.name,
+          mimeType: file.type || "unknown",
+          sizeBytes: file.size,
+          ownerUserId: user.id,
+          error,
+        });
+        failedUploads.push({
+          filename: file.name,
+          reason: error instanceof Error ? error.message : "Upload processing failed.",
+          code: "FILE_PROCESSING_FAILED",
+        });
+      }
+    }
+
+    if (!successfulUploads.length) {
+      return NextResponse.json(
+        {
+          error: failedUploads[0]?.reason ?? "No files could be uploaded.",
+          code: failedUploads[0]?.code ?? "UPLOAD_FAILED",
+          successfulUploads,
+          failedUploads,
+          documents: [],
+        },
+        { status: failedUploads.some((failure) => failure.code === "FILE_TOO_LARGE") ? 413 : 400 }
+      );
+    }
+
+    const firstUpload = successfulUploads[0];
+    const responseBody = {
+      ...firstUpload,
+      successfulUploads,
+      failedUploads,
+      documents: successfulUploads.map((upload) => ({
+        filename: upload.filename,
+        type: upload.type,
+        text: upload.text,
+        pageCount: upload.pageCount,
+        attachmentId: upload.attachmentId,
+      })),
+    };
+
+    return NextResponse.json(responseBody, {
+      status: failedUploads.length ? 207 : 200,
     });
   } catch (error) {
     if (error instanceof UnauthorizedError) {

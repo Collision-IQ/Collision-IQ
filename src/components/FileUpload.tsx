@@ -4,6 +4,11 @@ import React, { useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import type { UploadedDocument } from "@/lib/sessionStore";
+import {
+  formatBytes,
+  MAX_UPLOAD_BATCH_FILES,
+  MAX_UPLOAD_FILE_BYTES,
+} from "@/components/chatWidget/attachmentUtils";
 
 type Props = {
   onUploadComplete: (docs: UploadedDocument[]) => void;
@@ -37,44 +42,95 @@ export default function FileUpload({
     setError(null);
 
     try {
-      const formData = new FormData();
-      Array.from(files).forEach((file) => formData.append("files", file));
+      const selectedFiles = Array.from(files);
+      const acceptedFiles = selectedFiles
+        .slice(0, MAX_UPLOAD_BATCH_FILES)
+        .filter((file) => file.size <= MAX_UPLOAD_FILE_BYTES);
+      const failures = [
+        ...selectedFiles.slice(MAX_UPLOAD_BATCH_FILES).map(
+          (file) => `${file.name}: only ${MAX_UPLOAD_BATCH_FILES} files can be uploaded at a time.`
+        ),
+        ...selectedFiles
+          .slice(0, MAX_UPLOAD_BATCH_FILES)
+          .filter((file) => file.size > MAX_UPLOAD_FILE_BYTES)
+          .map(
+            (file) =>
+              `${file.name}: ${formatBytes(file.size)} exceeds ${formatBytes(MAX_UPLOAD_FILE_BYTES)}.`
+          ),
+      ];
 
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      });
+      const docs: UploadedDocument[] = [];
 
-      if (res.status === 401) {
-        router.push("/sign-in?next=/chatbot");
-        throw new Error("Please sign in before uploading.");
+      for (const file of acceptedFiles) {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          credentials: "include",
+          body: formData,
+        });
+
+        const data = (await res.json().catch(() => null)) as
+          | {
+              documents?: UploadedDocument[];
+              failedUploads?: Array<{ filename?: string; reason?: string }>;
+              error?: string;
+            }
+          | null;
+
+        if (res.status === 401) {
+          router.push("/sign-in?next=/chatbot");
+          throw new Error("Please sign in before uploading.");
+        }
+
+        if (!res.ok) {
+          if (data?.failedUploads?.length) {
+            failures.push(
+              ...data.failedUploads.map(
+                (failure) =>
+                  `${failure.filename ?? file.name}: ${failure.reason ?? "Upload failed."}`
+              )
+            );
+            continue;
+          }
+
+          failures.push(`${file.name}: ${data?.error ?? `Upload failed (${res.status}).`}`);
+          continue;
+        }
+
+        if (!data?.documents?.length) {
+          failures.push(`${file.name}: upload response missing documents.`);
+          continue;
+        }
+
+        docs.push(...data.documents);
+        if (data.failedUploads?.length) {
+          failures.push(
+            ...data.failedUploads.map(
+              (failure) =>
+                `${failure.filename ?? file.name}: ${failure.reason ?? "Upload failed."}`
+            )
+          );
+        }
       }
-
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(txt || `Upload failed (${res.status})`);
-      }
-
-      const data: unknown = await res.json();
-
-      if (
-        !data ||
-        typeof data !== "object" ||
-        !("documents" in data) ||
-        !Array.isArray((data as { documents: unknown }).documents)
-      ) {
-        throw new Error("Upload response missing documents[]");
-      }
-
-      const docs = (data as { documents: UploadedDocument[] }).documents;
 
       if (!docs.every((doc) => typeof doc?.filename === "string" && typeof doc?.text === "string")) {
         throw new Error("Upload documents have invalid shape");
       }
 
-      onUploadComplete(docs);
-      setUploaded(docs.map((doc) => doc.filename));
+      if (docs.length) {
+        onUploadComplete(docs);
+        setUploaded(docs.map((doc) => doc.filename));
+      }
+
+      if (failures.length) {
+        setError(`Could not attach ${failures.join("; ")}`);
+      }
+
+      if (!docs.length && failures.length) {
+        return;
+      }
 
       if (inputRef.current) inputRef.current.value = "";
     } catch (e) {

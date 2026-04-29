@@ -29,11 +29,12 @@ import type { WorkspaceData } from "@/types/workspaceTypes";
 import {
   buildAttachmentBatchStatus,
   buildAttachmentSummary,
+  formatBytes,
   formatAttachmentKind,
   isLikelyImageFile,
   MAX_UPLOAD_BATCH_FILES,
+  MAX_UPLOAD_FILE_BYTES,
   summarizeAttachmentStats,
-  UPLOAD_CAP_MESSAGE,
 } from "@/components/chatWidget/attachmentUtils";
 import {
   canUseBrowserReadAloud,
@@ -58,7 +59,7 @@ import AttachmentPreviewModal, {
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { buildPlanRecommendationGuard, canAccessFeature } from "@/lib/featureAccess";
 import { emitSafeCrmEventFromClient } from "@/lib/crm/events";
-import { buildNextBatchPrompt, buildUploadBatchGuidance, NEXT_UPLOAD_PRIORITY } from "@/lib/uploadBatching";
+import { buildNextBatchPrompt, buildUploadBatchGuidance } from "@/lib/uploadBatching";
 import { TTS_STYLE_PROMPT, VOICE_PRESETS } from "@/lib/voicePresets";
 
 interface Attachment {
@@ -79,6 +80,32 @@ type AttachmentTrayItem = {
   attachmentId: string;
   filename: string;
   hasVision?: boolean;
+};
+
+type UploadFailureResult = {
+  filename?: string;
+  reason?: string;
+  code?: string;
+};
+
+type UploadSuccessResult = {
+  attachmentId?: string;
+  filename?: string;
+  type?: string;
+  text?: string;
+  imageDataUrl?: string;
+  pageCount?: number;
+  hasVision?: boolean;
+  caseContinuity?: {
+    activeCaseId?: string;
+    sameCaseFollowUp?: boolean;
+  };
+};
+
+type UploadResponse = UploadSuccessResult & {
+  successfulUploads?: UploadSuccessResult[];
+  failedUploads?: UploadFailureResult[];
+  error?: string;
 };
 
 type PrimaryAnalysis = {
@@ -200,6 +227,31 @@ const DEFAULT_CASE_TOPIC = "general case summary";
 
 function isAttachmentSummaryMessage(value: string) {
   return /^uploaded\s+\d+\s+file/i.test(value.trim());
+}
+
+function buildUploadFailureStatus(failures: UploadFailureResult[]) {
+  const namedFailures = failures.filter((failure) => failure.filename);
+
+  if (!namedFailures.length) {
+    return "No files could be attached.";
+  }
+
+  return `Could not attach ${namedFailures
+    .map((failure) => `${failure.filename}: ${failure.reason ?? "Upload failed."}`)
+    .join("; ")}`;
+}
+
+function buildUploadCompletionStatus(successCount: number, failures: UploadFailureResult[]) {
+  if (!failures.length) {
+    return null;
+  }
+
+  const failureMessage = buildUploadFailureStatus(failures);
+  if (successCount <= 0) {
+    return failureMessage;
+  }
+
+  return `${successCount} ${successCount === 1 ? "file" : "files"} attached. ${failureMessage}`;
 }
 
 function resolveCaseTopic(message: string, previousTopic: string) {
@@ -826,20 +878,47 @@ export default function ChatWidget({
     void startRecording();
   }
 
-  function rejectOversizedBatch(fileList: FileList | null, source: "file" | "camera") {
-    if (!fileList || fileList.length <= MAX_UPLOAD_BATCH_FILES) {
+  function prepareFilesForUpload(fileList: FileList | null, source: "file" | "camera") {
+    const selectedFiles = Array.from(fileList ?? []);
+    const rejectedFiles: UploadFailureResult[] = [];
+
+    const filesWithinCount = selectedFiles.filter((file, index) => {
+      if (index < MAX_UPLOAD_BATCH_FILES) {
+        return true;
+      }
+
+      rejectedFiles.push({
+        filename: file.name,
+        reason: `Only ${MAX_UPLOAD_BATCH_FILES} files can be uploaded at a time.`,
+        code: "TOO_MANY_FILES",
+      });
       return false;
+    });
+
+    const acceptedFiles = filesWithinCount.filter((file) => {
+      if (file.size <= MAX_UPLOAD_FILE_BYTES) {
+        return true;
+      }
+
+      rejectedFiles.push({
+        filename: file.name,
+        reason: `File is ${formatBytes(file.size)}. Max size is ${formatBytes(MAX_UPLOAD_FILE_BYTES)}.`,
+        code: "FILE_TOO_LARGE",
+      });
+      return false;
+    });
+
+    if (rejectedFiles.length) {
+      console.info("[attachments] files rejected before upload", {
+        source,
+        selectedCount: selectedFiles.length,
+        acceptedCount: acceptedFiles.length,
+        rejectedFiles,
+      });
+      upsertSystemStatusMessage(buildUploadFailureStatus(rejectedFiles));
     }
 
-    console.info("[attachments] batch rejected", {
-      source,
-      fileCount: fileList.length,
-      totalBytes: Array.from(fileList).reduce((sum, file) => sum + file.size, 0),
-    });
-    upsertSystemStatusMessage(
-      `${UPLOAD_CAP_MESSAGE} Upload the next ${MAX_UPLOAD_BATCH_FILES} most important files: ${NEXT_UPLOAD_PRIORITY.join(", ")}.`
-    );
-    return true;
+    return { acceptedFiles, rejectedFiles };
   }
 
   function dismissOpeningDisclaimer() {
@@ -1546,39 +1625,51 @@ export default function ChatWidget({
       router.push("/sign-in?next=/chatbot");
       throw new Error("Please sign in before uploading.");
     }
+    const data = (await res.json().catch(() => null)) as UploadResponse | null;
+
     if (!res.ok) {
       let message = `Upload failed (${res.status})`;
 
-      try {
-        const data = (await res.json()) as { error?: string } | null;
-        if (data?.error) {
-          message = `Upload failed (${res.status}): ${data.error}`;
-        }
-      } catch {
-        // Keep the fallback message when the response is not JSON.
+      if (data?.failedUploads?.length) {
+        message = data.failedUploads
+          .map((failure) => failure.reason ?? "Upload failed.")
+          .join("; ");
+      } else if (data?.error) {
+        message = `Upload failed (${res.status}): ${data.error}`;
       }
 
       throw new Error(message);
     }
 
-    const data = await res.json();
-    const attachmentId: string = data.attachmentId;
+    const upload = data?.successfulUploads?.[0] ?? data;
+    const failedUploads = data?.failedUploads ?? [];
+    if (failedUploads.length) {
+      upsertSystemStatusMessage(buildUploadFailureStatus(failedUploads));
+    }
+    const attachmentId = upload?.attachmentId;
+    if (!attachmentId) {
+      throw new Error(
+        data?.failedUploads?.length
+          ? data.failedUploads.map((failure) => failure.reason ?? "Upload failed.").join("; ")
+          : "Upload response missing attachmentId."
+      );
+    }
     const returnedActiveCaseId =
-      typeof data.caseContinuity?.activeCaseId === "string"
-        ? data.caseContinuity.activeCaseId
+      typeof upload?.caseContinuity?.activeCaseId === "string"
+        ? upload.caseContinuity.activeCaseId
         : null;
     const activeCaseIdBeforeUpload = analysisReportIdRef.current;
     if (!analysisReportIdRef.current && returnedActiveCaseId) {
       analysisReportIdRef.current = returnedActiveCaseId;
     }
-    const filename: string = data.filename || file.name;
-    const mime: string = data.type || file.type;
-    const text: string = data.text || "";
+    const filename: string = upload?.filename || file.name;
+    const mime: string = upload?.type || file.type;
+    const text: string = upload?.text || "";
     const imageDataUrl: string | undefined =
-      typeof data.imageDataUrl === "string" ? data.imageDataUrl : undefined;
+      typeof upload?.imageDataUrl === "string" ? upload.imageDataUrl : undefined;
     const pageCount: number | undefined =
-      typeof data.pageCount === "number" ? data.pageCount : undefined;
-    const hasVision: boolean = Boolean(data.hasVision) && isLikelyImageFile(file);
+      typeof upload?.pageCount === "number" ? upload.pageCount : undefined;
+    const hasVision: boolean = Boolean(upload?.hasVision) && isLikelyImageFile(file);
     const previewUrl =
       mime === "application/pdf" || isLikelyImageFile(file) ? URL.createObjectURL(file) : undefined;
 
@@ -1595,7 +1686,7 @@ export default function ChatWidget({
       hasImageDataUrl: Boolean(imageDataUrl),
       pageCount: pageCount ?? null,
       replaceId: replaceId ?? null,
-      sameCaseFollowUp: Boolean(data.caseContinuity?.sameCaseFollowUp),
+      sameCaseFollowUp: Boolean(upload?.caseContinuity?.sameCaseFollowUp),
     });
 
     if (analysisReportIdRef.current) {
@@ -1669,37 +1760,61 @@ export default function ChatWidget({
   async function handleFilesSelected(fileList: FileList | null) {
     if (disabled) return;
     if (!fileList || fileList.length === 0) return;
-    if (rejectOversizedBatch(fileList, "file")) {
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
 
     try {
-      const files = Array.from(fileList);
+      const { acceptedFiles, rejectedFiles } = prepareFilesForUpload(fileList, "file");
+      if (!acceptedFiles.length) {
+        if (rejectedFiles.length) {
+          upsertSystemStatusMessage(buildUploadFailureStatus(rejectedFiles));
+        }
+        return;
+      }
+
+      const files = acceptedFiles;
       console.info("[attachments] upload batch selected", {
         source: "file",
-        fileCount: fileList.length,
+        fileCount: files.length,
+        rejectedCount: rejectedFiles.length,
         totalBytes: files.reduce((sum, file) => sum + file.size, 0),
       });
       upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "uploading"));
       const newAttachmentIds: string[] = [];
       const replacementTargetId = replaceAttachmentId;
+      const uploadFailures = [...rejectedFiles];
+      let successfulUploadCount = 0;
 
-      for (const [index, file] of files.entries()) {
-        const attachmentId = await uploadSingleFile(file, "file", replacementTargetId, {
-          openPreview: Boolean(replacementTargetId) || files.length === 1,
-        });
-        if (!replacementTargetId && index === 0) {
-          newAttachmentIds.push(attachmentId);
+      for (const file of files) {
+        try {
+          const attachmentId = await uploadSingleFile(file, "file", replacementTargetId, {
+            openPreview: Boolean(replacementTargetId) || files.length === 1,
+          });
+          successfulUploadCount += 1;
+          if (!replacementTargetId) {
+            newAttachmentIds.push(attachmentId);
+          }
+        } catch (error) {
+          console.error(error);
+          uploadFailures.push({
+            filename: file.name,
+            reason: error instanceof Error ? error.message : "Upload failed.",
+          });
         }
       }
       if (!replacementTargetId && newAttachmentIds[0]) {
         openAttachmentPreview(newAttachmentIds[0]);
       }
-      upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
+      const completionStatus = buildUploadCompletionStatus(
+        successfulUploadCount,
+        uploadFailures
+      );
+      if (completionStatus) {
+        upsertSystemStatusMessage(completionStatus);
+      } else {
+        upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
+      }
     } catch (err) {
       console.error(err);
-      upsertSystemStatusMessage("Some files could not be attached.");
+      upsertSystemStatusMessage("File upload could not start.");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
@@ -1708,37 +1823,61 @@ export default function ChatWidget({
   async function handleCameraSelected(fileList: FileList | null) {
     if (disabled) return;
     if (!fileList || fileList.length === 0) return;
-    if (rejectOversizedBatch(fileList, "camera")) {
-      if (cameraInputRef.current) cameraInputRef.current.value = "";
-      return;
-    }
 
     try {
-      const files = Array.from(fileList);
+      const { acceptedFiles, rejectedFiles } = prepareFilesForUpload(fileList, "camera");
+      if (!acceptedFiles.length) {
+        if (rejectedFiles.length) {
+          upsertSystemStatusMessage(buildUploadFailureStatus(rejectedFiles));
+        }
+        return;
+      }
+
+      const files = acceptedFiles;
       console.info("[attachments] upload batch selected", {
         source: "camera",
-        fileCount: fileList.length,
+        fileCount: files.length,
+        rejectedCount: rejectedFiles.length,
         totalBytes: files.reduce((sum, file) => sum + file.size, 0),
       });
       upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "uploading"));
       const newAttachmentIds: string[] = [];
       const replacementTargetId = replaceAttachmentId;
+      const uploadFailures = [...rejectedFiles];
+      let successfulUploadCount = 0;
 
-      for (const [index, file] of files.entries()) {
-        const attachmentId = await uploadSingleFile(file, "camera", replacementTargetId, {
-          openPreview: Boolean(replacementTargetId) || files.length === 1,
-        });
-        if (!replacementTargetId && index === 0) {
-          newAttachmentIds.push(attachmentId);
+      for (const file of files) {
+        try {
+          const attachmentId = await uploadSingleFile(file, "camera", replacementTargetId, {
+            openPreview: Boolean(replacementTargetId) || files.length === 1,
+          });
+          successfulUploadCount += 1;
+          if (!replacementTargetId) {
+            newAttachmentIds.push(attachmentId);
+          }
+        } catch (error) {
+          console.error(error);
+          uploadFailures.push({
+            filename: file.name,
+            reason: error instanceof Error ? error.message : "Upload failed.",
+          });
         }
       }
       if (!replacementTargetId && newAttachmentIds[0]) {
         openAttachmentPreview(newAttachmentIds[0]);
       }
-      upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
+      const completionStatus = buildUploadCompletionStatus(
+        successfulUploadCount,
+        uploadFailures
+      );
+      if (completionStatus) {
+        upsertSystemStatusMessage(completionStatus);
+      } else {
+        upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
+      }
     } catch (err) {
       console.error(err);
-      upsertSystemStatusMessage("Camera upload failed.");
+      upsertSystemStatusMessage("Camera upload could not start.");
     } finally {
       if (cameraInputRef.current) cameraInputRef.current.value = "";
     }
