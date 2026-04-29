@@ -198,11 +198,10 @@ function resolveBillingPlan(access: ViewerAccess): BillingPlan {
 
 export function getPlanUploadCap(plan: BillingPlan): number | null {
   switch (plan) {
+    case "pro":
+    case "team":
     case "starter":
     case "trial":
-    case "pro":
-      return 1;
-    case "team":
       return null;
     case "none":
     default:

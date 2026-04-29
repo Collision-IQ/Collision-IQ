@@ -890,7 +890,7 @@ export default function ChatWidget({
       rejectedFiles.push({
         filename: file.name,
         reason: `Only ${MAX_UPLOAD_BATCH_FILES} files can be uploaded at a time.`,
-        code: "TOO_MANY_FILES",
+        code: "MAX_FILES_REACHED",
       });
       return false;
     });

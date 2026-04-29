@@ -1,7 +1,6 @@
 export const MAX_UPLOAD_BATCH_FILES = 6;
 export const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at a time.";
-export const MAX_UPLOAD_FILE_BYTES = 4 * 1024 * 1024;
-export const MAX_UPLOAD_TOTAL_BYTES = 75 * 1024 * 1024;
+export const MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024;
 
 export type AttachmentSummaryItem = {
   filename: string;
@@ -57,28 +56,19 @@ export function validateUploadBatch(files: File[]) {
     return { valid: false, error: "No files selected." };
   }
 
-  const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
   const oversizedFile = files.find((file) => file.size > MAX_UPLOAD_FILE_BYTES);
 
   if (oversizedFile) {
     return {
       valid: false,
       error: `${oversizedFile.name} is ${formatBytes(oversizedFile.size)}. Max size is ${formatBytes(MAX_UPLOAD_FILE_BYTES)} per file.`,
-      totalBytes,
-    };
-  }
-
-  if (totalBytes > MAX_UPLOAD_TOTAL_BYTES) {
-    return {
-      valid: false,
-      error: `Selected files total ${formatBytes(totalBytes)}. Max total upload size is ${formatBytes(MAX_UPLOAD_TOTAL_BYTES)} per batch.`,
-      totalBytes,
+      totalBytes: files.reduce((sum, file) => sum + file.size, 0),
     };
   }
 
   return {
     valid: true,
-    totalBytes,
+    totalBytes: files.reduce((sum, file) => sum + file.size, 0),
   };
 }
 

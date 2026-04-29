@@ -15,7 +15,8 @@ import {
 
 export const runtime = "nodejs";
 
-const MAX_UPLOAD_FILE_BYTES = 4 * 1024 * 1024;
+const MAX_UPLOAD_BATCH_FILES = 6;
+const MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024;
 
 type UploadSuccess = {
   attachmentId: string;
@@ -39,6 +40,22 @@ type UploadFailure = {
   code?: string;
 };
 
+function formatLimitBytes(bytes: number) {
+  return `${Math.round(bytes / 1024 / 1024)}MB`;
+}
+
+function getFailureStatus(failedUploads: UploadFailure[]) {
+  if (failedUploads.some((failure) => failure.code === "UPLOAD_QUOTA_REACHED")) {
+    return 403;
+  }
+
+  if (failedUploads.some((failure) => failure.code === "FILE_TOO_LARGE")) {
+    return 413;
+  }
+
+  return 400;
+}
+
 function getUploadFiles(formData: FormData): File[] {
   const candidates = [
     ...formData.getAll("file"),
@@ -54,30 +71,26 @@ export async function POST(req: Request) {
     const entitlements = await getCurrentEntitlements();
 
     if (!isPlatformAdmin && !entitlements.canUpload) {
+      console.info("[upload] request rejected", {
+        code: "UNAUTHORIZED",
+        reason: "uploads not included in plan",
+        ownerUserId: user.id,
+        plan: entitlements.plan,
+        billingPlan: entitlements.billingPlan,
+        subscriptionStatus: entitlements.subscriptionStatus,
+        uploadCount: entitlements.uploadCount,
+        uploadCap: entitlements.uploadCap,
+      });
       return NextResponse.json(
-        { error: "UPLOAD_NOT_INCLUDED_IN_PLAN" },
+        {
+          error: "Uploads are not included in your current plan.",
+          code: "UNAUTHORIZED",
+          successfulUploads: [],
+          failedUploads: [],
+          documents: [],
+        },
         { status: 403 }
       );
-    }
-
-    if (!isPlatformAdmin && entitlements.uploadCap !== null) {
-      let uploadsUsed = 0;
-
-      try {
-        uploadsUsed = await getUsageCount(user.id, "FILE_UPLOAD");
-      } catch (error) {
-        console.error("[upload] usage read failed (non-blocking)", {
-          userId: user.id,
-          error,
-        });
-      }
-
-      if (uploadsUsed >= entitlements.uploadCap) {
-        return NextResponse.json(
-          { error: "UPLOAD_LIMIT_REACHED" },
-          { status: 403 }
-        );
-      }
     }
 
     const formData = await req.formData();
@@ -102,7 +115,7 @@ export async function POST(req: Request) {
 
     const successfulUploads: UploadSuccess[] = [];
     const failedUploads: UploadFailure[] = [];
-    let uploadsUsed = 0;
+    let uploadsUsed = entitlements.uploadCount;
 
     if (!isPlatformAdmin && entitlements.uploadCap !== null) {
       try {
@@ -118,17 +131,58 @@ export async function POST(req: Request) {
     console.info("[upload] accepted", {
       totalBytes: files.reduce((sum, file) => sum + file.size, 0),
       fileCount: files.length,
+      maxFileCount: MAX_UPLOAD_BATCH_FILES,
+      maxFileBytes: MAX_UPLOAD_FILE_BYTES,
       ownerUserId: user.id,
       activeCaseId,
       sameCaseFollowUp: Boolean(activeCase),
+      entitlement: {
+        plan: entitlements.plan,
+        billingPlan: entitlements.billingPlan,
+        subscriptionStatus: entitlements.subscriptionStatus,
+        canUpload: entitlements.canUpload,
+        uploadCount: uploadsUsed,
+        uploadCap: entitlements.uploadCap,
+        usageStatus: entitlements.usageStatus,
+        isPlatformAdmin,
+      },
+      files: files.map((file, index) => ({
+        index,
+        filename: file.name,
+        mimeType: file.type || "unknown",
+        sizeBytes: file.size,
+      })),
     });
 
-    for (const file of files) {
+    for (const [index, file] of files.entries()) {
+      if (index >= MAX_UPLOAD_BATCH_FILES) {
+        failedUploads.push({
+          filename: file.name,
+          reason: `Only ${MAX_UPLOAD_BATCH_FILES} files can be uploaded at a time.`,
+          code: "MAX_FILES_REACHED",
+        });
+        console.info("[upload] file rejected", {
+          filename: file.name,
+          code: "MAX_FILES_REACHED",
+          fileIndex: index,
+          maxFileCount: MAX_UPLOAD_BATCH_FILES,
+          ownerUserId: user.id,
+        });
+        continue;
+      }
+
       if (file.size > MAX_UPLOAD_FILE_BYTES) {
         failedUploads.push({
           filename: file.name,
-          reason: `File exceeds 4MB limit (${Math.ceil(file.size / 1024 / 1024)}MB).`,
+          reason: `File exceeds ${formatLimitBytes(MAX_UPLOAD_FILE_BYTES)} limit (${formatLimitBytes(file.size)}).`,
           code: "FILE_TOO_LARGE",
+        });
+        console.info("[upload] file rejected", {
+          filename: file.name,
+          code: "FILE_TOO_LARGE",
+          sizeBytes: file.size,
+          maxFileBytes: MAX_UPLOAD_FILE_BYTES,
+          ownerUserId: user.id,
         });
         continue;
       }
@@ -140,8 +194,18 @@ export async function POST(req: Request) {
       ) {
         failedUploads.push({
           filename: file.name,
-          reason: "Upload limit reached for your plan.",
-          code: "UPLOAD_LIMIT_REACHED",
+          reason: "Upload quota reached for your plan.",
+          code: "UPLOAD_QUOTA_REACHED",
+        });
+        console.info("[upload] file rejected", {
+          filename: file.name,
+          code: "UPLOAD_QUOTA_REACHED",
+          uploadCount: uploadsUsed,
+          uploadCap: entitlements.uploadCap,
+          successfulInRequest: successfulUploads.length,
+          ownerUserId: user.id,
+          plan: entitlements.plan,
+          billingPlan: entitlements.billingPlan,
         });
         continue;
       }
@@ -259,17 +323,37 @@ export async function POST(req: Request) {
         {
           error: failedUploads[0]?.reason ?? "No files could be uploaded.",
           code: failedUploads[0]?.code ?? "UPLOAD_FAILED",
+          limits: {
+            maxFiles: MAX_UPLOAD_BATCH_FILES,
+            maxFileBytes: MAX_UPLOAD_FILE_BYTES,
+          },
+          usage: {
+            uploadCount: uploadsUsed,
+            uploadCap: entitlements.uploadCap,
+            plan: entitlements.plan,
+            billingPlan: entitlements.billingPlan,
+          },
           successfulUploads,
           failedUploads,
           documents: [],
         },
-        { status: failedUploads.some((failure) => failure.code === "FILE_TOO_LARGE") ? 413 : 400 }
+        { status: getFailureStatus(failedUploads) }
       );
     }
 
     const firstUpload = successfulUploads[0];
     const responseBody = {
       ...firstUpload,
+      limits: {
+        maxFiles: MAX_UPLOAD_BATCH_FILES,
+        maxFileBytes: MAX_UPLOAD_FILE_BYTES,
+      },
+      usage: {
+        uploadCount: uploadsUsed + successfulUploads.length,
+        uploadCap: entitlements.uploadCap,
+        plan: entitlements.plan,
+        billingPlan: entitlements.billingPlan,
+      },
       successfulUploads,
       failedUploads,
       documents: successfulUploads.map((upload) => ({
