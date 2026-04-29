@@ -1228,7 +1228,8 @@ export default function ChatWidget({
             type: attachment.mime,
             text: attachment.text,
             pageCount: attachment.pageCount,
-            imageDataUrl: attachment.imageDataUrl,
+            // imageDataUrl intentionally omitted — server fetches it from the
+            // attachment store via attachmentIds, keeping the payload small.
           })),
           productAccess: {
             plan: productPlan,
