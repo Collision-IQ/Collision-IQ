@@ -110,3 +110,6 @@ good_keys.txt
 work_keys.txt
 Collision-IQ/
 t-Path*
+
+# HubSpot config file
+hubspot.config.yml

@@ -62,6 +62,23 @@ export async function POST(request: Request) {
     });
   }
 
+  const plainText = body.message;
+  const htmlBody = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#222;max-width:600px;margin:0 auto;padding:24px">
+${plainText
+  .split("\n")
+  .map((line) => (line.trim() ? `<p style="margin:0 0 12px">${line}</p>` : ""))
+  .join("\n")}
+<hr style="border:none;border-top:1px solid #ddd;margin:24px 0">
+<p style="font-size:12px;color:#888">Sent via Collision IQ &mdash; <a href="https://collision-iq.ai" style="color:#C65A2A">collision-iq.ai</a></p>
+</body>
+</html>`;
+
+  const senderName = "Collision IQ";
+  const formattedFrom = fromEmail.includes("<") ? fromEmail : `${senderName} <${fromEmail}>`;
+
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -69,10 +86,12 @@ export async function POST(request: Request) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: fromEmail,
+      from: formattedFrom,
+      reply_to: ["support@collision-iq.ai"],
       to: [body.recipientEmail],
       subject: body.subject,
-      text: body.message,
+      text: plainText,
+      html: htmlBody,
       attachments: body.pdfBase64
         ? [
             {

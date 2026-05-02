@@ -1493,8 +1493,8 @@ function RailContent({
     setSnapshotRecipientEmail("");
     setSnapshotSubject(
       target === "customer"
-        ? "Collision Snapshot for Your Vehicle"
-        : "Collision Snapshot - Repair Plan and Estimate Comparison"
+        ? "[Collision IQ] Your Vehicle Snapshot Report"
+        : "[Collision IQ] Collision Snapshot - Repair Plan and Estimate Comparison"
     );
     setSnapshotMessage(buildSnapshotEmailBody(snapshot, target));
     setSnapshotReviewed(false);
