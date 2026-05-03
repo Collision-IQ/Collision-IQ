@@ -30,7 +30,7 @@ import {
   resolveCanonicalVehicleLabel,
   resolveCanonicalVin,
 } from "@/lib/ai/builders/buildExportModel";
-import { buildCarrierReport } from "@/lib/ai/builders/carrierPdfBuilder";
+import { buildCarrierReport, type CarrierReportDocument } from "@/lib/ai/builders/carrierPdfBuilder";
 import { buildCollisionSnapshot, type CollisionSnapshot } from "@/lib/ai/builders/collisionSnapshot";
 import {
   buildCollisionSnapshotPdf,
@@ -74,6 +74,28 @@ type AttachmentTrayItem = {
 };
 
 type LeftPaneMode = "chat" | "review";
+type ReportType =
+  | "snapshot"
+  | "full_report"
+  | "rebuttal"
+  | "dispute_intelligence"
+  | "customer_report";
+type ReportDestinationType = "customer" | "carrier" | "internal";
+type ReportSendHistoryItem = {
+  id: string;
+  caseId: string | null;
+  reportType: ReportType;
+  destinationType: ReportDestinationType;
+  recipient: string;
+  subject: string | null;
+  resendId: string | null;
+  status: string;
+  sentAt: string;
+  deliveredAt: string | null;
+  bouncedAt: string | null;
+  failedAt: string | null;
+  openedAt: string | null;
+};
 
 type LinkedEvidenceDebugItem = {
   id?: string | null;
@@ -1348,6 +1370,18 @@ function RailContent({
   const [snapshotReviewed, setSnapshotReviewed] = useState(false);
   const [snapshotStatus, setSnapshotStatus] = useState<string | null>(null);
   const [snapshotSending, setSnapshotSending] = useState(false);
+  const [snapshotSent, setSnapshotSent] = useState(false);
+  const [reportSendTarget, setReportSendTarget] = useState<ReportDestinationType>("internal");
+  const [activeReportToSend, setActiveReportToSend] = useState<ReportType | null>(null);
+  const [reportRecipientEmail, setReportRecipientEmail] = useState("");
+  const [reportSubject, setReportSubject] = useState("");
+  const [reportMessage, setReportMessage] = useState("");
+  const [reportSending, setReportSending] = useState(false);
+  const [reportSent, setReportSent] = useState(false);
+  const [reportSendStatus, setReportSendStatus] = useState<string | null>(null);
+  const [reportReviewed, setReportReviewed] = useState(false);
+  const [reportSendHistory, setReportSendHistory] = useState<ReportSendHistoryItem[]>([]);
+  const [reportSendHistoryLoading, setReportSendHistoryLoading] = useState(false);
   const [serviceCheckoutLoading, setServiceCheckoutLoading] = useState(false);
   function registerSectionRef(insightKey: InsightKey, node: HTMLDivElement | null) {
     sectionRefs.current[insightKey] = node;
@@ -1414,6 +1448,38 @@ function RailContent({
         appraisalTriggered: Boolean(panel.appraisal?.triggered),
       })
     : null;
+  const fetchReportSendHistory = useCallback(async () => {
+    if (!analysisReportId) {
+      setReportSendHistory([]);
+      return;
+    }
+
+    setReportSendHistoryLoading(true);
+    try {
+      const response = await fetch(
+        `/api/reports/sends?caseId=${encodeURIComponent(analysisReportId)}&limit=25`,
+        { credentials: "same-origin" }
+      );
+      if (!response.ok) {
+        return;
+      }
+      const data = (await response.json()) as { sends?: ReportSendHistoryItem[] };
+      setReportSendHistory(Array.isArray(data.sends) ? data.sends : []);
+    } catch {
+      // Send history is advisory; email and download flows should keep working.
+    } finally {
+      setReportSendHistoryLoading(false);
+    }
+  }, [analysisReportId]);
+  const getLastSendFor = useCallback(
+    (reportType: ReportType, destinationType?: ReportDestinationType) =>
+      reportSendHistory.find(
+        (send) =>
+          send.reportType === reportType &&
+          (!destinationType || send.destinationType === destinationType)
+      ) ?? null,
+    [reportSendHistory]
+  );
   const snapshotSendReady =
     Boolean(snapshotSendTarget) &&
     isValidEmail(snapshotRecipientEmail) &&
@@ -1421,6 +1487,19 @@ function RailContent({
     Boolean(snapshotMessage.trim()) &&
     snapshotReviewed &&
     !snapshotSending;
+  const reportSendReady =
+    Boolean(activeReportToSend) &&
+    isValidEmail(reportRecipientEmail) &&
+    Boolean(reportSubject.trim()) &&
+    Boolean(reportMessage.trim()) &&
+    reportReviewed &&
+    !reportSending;
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    void fetchReportSendHistory();
+  }, [fetchReportSendHistory]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function openSnapshotPreview() {
     if (!snapshot) {
@@ -1501,13 +1580,167 @@ function RailContent({
     setSnapshotStatus(null);
   }
 
+  function openReportSend(reportType: ReportType, destinationType: ReportDestinationType = "internal") {
+    if (reportType === "snapshot" && !snapshot) {
+      setSnapshotStatus("Snapshot could not be generated from the current report.");
+      return;
+    }
+    if (reportType !== "snapshot" && !canRenderExports) {
+      setReportSendStatus("Report is not ready to send yet.");
+      return;
+    }
+
+    setActiveReportToSend(reportType);
+    setReportSendTarget(destinationType);
+    setReportRecipientEmail("");
+    setReportSubject(getDefaultReportSubject(reportType));
+    setReportMessage(getDefaultReportMessage(reportType, destinationType, renderModel));
+    setReportReviewed(false);
+    setReportSendStatus(null);
+  }
+
+  async function buildReportDocument(reportType: ReportType): Promise<CarrierReportDocument> {
+    if (reportType === "snapshot") {
+      if (!snapshot) {
+        throw new Error("Snapshot could not be generated from the current report.");
+      }
+      return buildCollisionSnapshotPdfFromSnapshot(snapshot);
+    }
+
+    const resolvedAnalysis =
+      normalizedResult ?? (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null);
+    const sharedInput = {
+      renderModel,
+      report: analysisResult,
+      analysis: resolvedAnalysis,
+      panel,
+      assistantAnalysis: analysisText,
+      workspaceData,
+    };
+
+    if (reportType === "full_report") {
+      return buildCarrierReport(sharedInput);
+    }
+    if (reportType === "rebuttal") {
+      return buildRebuttalEmailPdf(sharedInput);
+    }
+    if (reportType === "dispute_intelligence") {
+      return buildDisputeIntelligencePdf(sharedInput);
+    }
+
+    return await buildCustomerReportDocument({
+      renderModel,
+      normalizedResult,
+      analysisResult,
+      panel,
+      analysisText,
+      workspaceData,
+      onLocked: onCustomerReportLocked,
+    });
+  }
+
+  async function sendReportEmail() {
+    if (!activeReportToSend || !reportSendReady) {
+      return;
+    }
+
+    setReportSending(true);
+    setReportSendStatus("Sending...");
+    setReportSent(false);
+    setCustomerReportError(null);
+
+    try {
+      const document = await buildReportDocument(activeReportToSend);
+      const pdfBlob = await buildCarrierPdfBlob(document);
+      const pdfBase64 = await blobToBase64(pdfBlob);
+      const response = await fetch("/api/reports/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          reportType: activeReportToSend,
+          destinationType: reportSendTarget,
+          recipientEmail: reportRecipientEmail,
+          subject: reportSubject,
+          message: reportMessage,
+          pdfBase64,
+          filename: document.filename || getDefaultReportFilename(activeReportToSend),
+          metadata: {
+            caseId: analysisReportId ?? undefined,
+            vehicle: vehicleIdentity ?? undefined,
+            vin: vehicleVin ?? undefined,
+            customerEmail: undefined,
+          },
+        }),
+      });
+
+      const result = (await response.json().catch(() => null)) as {
+        deliveryMode?: "email" | "manual";
+        message?: string;
+        error?: string;
+        id?: string | null;
+        sentAt?: string;
+        reportSendId?: string | null;
+      } | null;
+
+      if (!response.ok) {
+        throw new Error(result?.error || "Report email failed.");
+      }
+
+      if (result?.deliveryMode === "manual") {
+        setReportSendStatus(result.message || "Email provider is not configured. Download the PDF and send manually.");
+      } else {
+        setReportSent(true);
+        setReportSendStatus("Sent successfully.");
+      }
+      emitSafeCrmEventFromClient({
+        event: "report_sent",
+        plan,
+        exportType: activeReportToSend,
+        destinationType: reportSendTarget,
+      });
+      if (analysisReportId) {
+        void fetchReportSendHistory();
+      } else if (result?.sentAt) {
+        const sentAt = result.sentAt;
+        setReportSendHistory((current) => [
+          {
+            id: result.reportSendId ?? `local-${sentAt}`,
+            caseId: null,
+            reportType: activeReportToSend,
+            destinationType: reportSendTarget,
+            recipient: reportRecipientEmail,
+            subject: reportSubject,
+            resendId: result.id ?? null,
+            status: result.deliveryMode === "manual" ? "manual" : "sent",
+            sentAt,
+            deliveredAt: null,
+            bouncedAt: null,
+            failedAt: null,
+            openedAt: null,
+          },
+          ...current,
+        ]);
+      }
+    } catch (error) {
+      setReportSendStatus(
+        error instanceof Error
+          ? error.message
+          : "Report was not sent. Please download the PDF and send manually."
+      );
+    } finally {
+      setReportSending(false);
+    }
+  }
+
   async function sendSnapshot() {
     if (!snapshot || !snapshotSendTarget || !snapshotSendReady) {
       return;
     }
 
     setSnapshotSending(true);
-    setSnapshotStatus(null);
+    setSnapshotStatus("Sending...");
+    setSnapshotSent(false);
 
     try {
       const document = buildCollisionSnapshotPdfFromSnapshot(snapshot);
@@ -1515,17 +1748,23 @@ function RailContent({
       const pdfBase64 = await blobToBase64(pdfBlob);
       logSnapshotSendAttempt(snapshot, snapshotSendTarget, Boolean(pdfBase64));
 
-      const response = await fetch("/api/snapshot/send", {
+      const response = await fetch("/api/reports/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
         body: JSON.stringify({
+          reportType: "snapshot",
           destinationType: snapshotSendTarget,
           recipientEmail: snapshotRecipientEmail,
           subject: snapshotSubject,
           message: sanitizeSnapshotOutboundText(snapshotMessage),
-          snapshot,
           pdfBase64,
+          filename: "collision-snapshot.pdf",
+          metadata: {
+            caseId: analysisReportId ?? undefined,
+            vehicle: snapshot.vehicleLabel,
+            vin: vehicleVin ?? undefined,
+          },
         }),
       });
 
@@ -1533,12 +1772,48 @@ function RailContent({
         throw new Error("Snapshot email failed.");
       }
 
-      const result = (await response.json()) as { deliveryMode?: "email" | "manual"; message?: string };
-      setSnapshotStatus(
-        result.deliveryMode === "manual"
-          ? result.message || "Email provider is not configured. Download the PDF and send manually."
-          : "Redacted snapshot sent."
-      );
+      const result = (await response.json()) as {
+        deliveryMode?: "email" | "manual";
+        message?: string;
+        id?: string | null;
+        sentAt?: string;
+        reportSendId?: string | null;
+      };
+      if (result.deliveryMode === "manual") {
+        setSnapshotStatus(result.message || "Email provider is not configured. Download the PDF and send manually.");
+      } else {
+        setSnapshotSent(true);
+        setSnapshotStatus("Sent successfully.");
+      }
+      emitSafeCrmEventFromClient({
+        event: "report_sent",
+        plan,
+        destinationType: snapshotSendTarget,
+        exportType: "snapshot",
+      });
+      if (analysisReportId) {
+        void fetchReportSendHistory();
+      } else if (result.sentAt) {
+        const sentAt = result.sentAt;
+        setReportSendHistory((current) => [
+          {
+            id: result.reportSendId ?? `local-${sentAt}`,
+            caseId: null,
+            reportType: "snapshot",
+            destinationType: snapshotSendTarget,
+            recipient: snapshotRecipientEmail,
+            subject: snapshotSubject,
+            resendId: result.id ?? null,
+            status: result.deliveryMode === "manual" ? "manual" : "sent",
+            sentAt,
+            deliveredAt: null,
+            bouncedAt: null,
+            failedAt: null,
+            openedAt: null,
+          },
+          ...current,
+        ]);
+      }
       emitSafeCrmEventFromClient({
         event: snapshotSendTarget === "customer" ? "snapshot_sent_customer" : "snapshot_sent_carrier",
         plan,
@@ -1550,7 +1825,6 @@ function RailContent({
         uploadLimitReached: snapshot.evidenceCompleteness.uploadLimitReached,
         userIndicatedMoreFiles: snapshot.evidenceCompleteness.userIndicatedMoreFiles,
       });
-      setSnapshotSendTarget(null);
     } catch {
       setSnapshotStatus("Snapshot was not sent. Please download the PDF and send manually.");
     } finally {
@@ -1943,108 +2217,173 @@ function RailContent({
             >
               1-Page Snapshot
             </button>
+            <ReportSendStatusLine
+              send={getLastSendFor("snapshot")}
+              loading={reportSendHistoryLoading}
+            />
             {canUseBasicPdfExport ? (
-              <button
-                onClick={() => {
-                  exportReport(
-                    renderModel,
-                    normalizedResult,
-                    analysisResult,
-                    panel,
-                    analysisText,
-                    workspaceData
-                  );
-                  emitSafeCrmEventFromClient({
-                    event: "report_generated",
-                    plan,
-                    exportType: "full_report",
-                  });
-                }}
-                className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
-              >
-                Collision Repair Intelligence Report
-              </button>
+              <div className="space-y-1.5">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <button
+                    onClick={() => {
+                      exportReport(
+                        renderModel,
+                        normalizedResult,
+                        analysisResult,
+                        panel,
+                        analysisText,
+                        workspaceData
+                      );
+                      emitSafeCrmEventFromClient({
+                        event: "report_generated",
+                        plan,
+                        exportType: "full_report",
+                      });
+                    }}
+                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+                  >
+                    Download Collision Repair Intelligence Report
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openReportSend("full_report")}
+                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+                  >
+                    Email Collision Repair Intelligence Report
+                  </button>
+                </div>
+                <ReportSendStatusLine
+                  send={getLastSendFor("full_report")}
+                  loading={reportSendHistoryLoading}
+                />
+              </div>
             ) : null}
             {canUseRebuttalEmail ? (
-              <button
-                onClick={() => {
-                  exportPdfVariant({
-                    normalizedResult,
-                    analysisResult,
-                    panel,
-                    analysisText,
-                    workspaceData,
-                    renderModel,
-                    variant: "rebuttal",
-                  });
-                  emitSafeCrmEventFromClient({
-                    event: "report_generated",
-                    plan,
-                    exportType: "rebuttal",
-                  });
-                }}
-                className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
-              >
-                Rebuttal Email
-              </button>
+              <div className="space-y-1.5">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <button
+                    onClick={() => {
+                      exportPdfVariant({
+                        normalizedResult,
+                        analysisResult,
+                        panel,
+                        analysisText,
+                        workspaceData,
+                        renderModel,
+                        variant: "rebuttal",
+                      });
+                      emitSafeCrmEventFromClient({
+                        event: "report_generated",
+                        plan,
+                        exportType: "rebuttal",
+                      });
+                    }}
+                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+                  >
+                    Download Rebuttal Email
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openReportSend("rebuttal", "carrier")}
+                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+                  >
+                    Email Rebuttal Email
+                  </button>
+                </div>
+                <ReportSendStatusLine
+                  send={getLastSendFor("rebuttal")}
+                  loading={reportSendHistoryLoading}
+                />
+              </div>
             ) : null}
             {canUseDisputeReportExport ? (
-              <button
-                onClick={() => {
-                  exportPdfVariant({
-                    normalizedResult,
-                    analysisResult,
-                    panel,
-                    analysisText,
-                    workspaceData,
-                    renderModel,
-                    variant: "dispute_intelligence",
-                  });
-                  emitSafeCrmEventFromClient({
-                    event: "report_generated",
-                    plan,
-                    exportType: "dispute_report",
-                  });
-                }}
-                className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
-              >
-                Dispute Intelligence Report
-              </button>
+              <div className="space-y-1.5">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <button
+                    onClick={() => {
+                      exportPdfVariant({
+                        normalizedResult,
+                        analysisResult,
+                        panel,
+                        analysisText,
+                        workspaceData,
+                        renderModel,
+                        variant: "dispute_intelligence",
+                      });
+                      emitSafeCrmEventFromClient({
+                        event: "report_generated",
+                        plan,
+                        exportType: "dispute_report",
+                      });
+                    }}
+                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+                  >
+                    Download Dispute Intelligence Report
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openReportSend("dispute_intelligence", "carrier")}
+                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+                  >
+                    Email Dispute Intelligence Report
+                  </button>
+                </div>
+                <ReportSendStatusLine
+                  send={getLastSendFor("dispute_intelligence")}
+                  loading={reportSendHistoryLoading}
+                />
+              </div>
             ) : null}
             {canUseCustomerReport ? (
-              <button
-                type="button"
-                aria-disabled={isGeneratingCustomerReport}
-                onClick={() => {
-                  if (isGeneratingCustomerReport) {
-                    return;
-                  }
+              <div className="space-y-1.5">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    aria-disabled={isGeneratingCustomerReport}
+                    onClick={() => {
+                      if (isGeneratingCustomerReport) {
+                        return;
+                      }
 
-                  void exportCustomerReport({
-                    renderModel,
-                    normalizedResult,
-                    analysisResult,
-                    panel,
-                    analysisText,
-                    workspaceData,
-                    onStart: () => {
-                      setCustomerReportError(null);
-                      setIsGeneratingCustomerReport(true);
-                    },
-                    onComplete: () => setIsGeneratingCustomerReport(false),
-                    onLocked: onCustomerReportLocked,
-                    onError: setCustomerReportError,
-                  });
-                  emitSafeCrmEventFromClient({
-                    event: "report_generated",
-                    plan,
-                    exportType: "customer_report",
-                  });
-                }}
-                className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-              >
-                {isGeneratingCustomerReport ? "Generating Customer Report..." : "Customer Report"}
-              </button>
+                      void exportCustomerReport({
+                        renderModel,
+                        normalizedResult,
+                        analysisResult,
+                        panel,
+                        analysisText,
+                        workspaceData,
+                        onStart: () => {
+                          setCustomerReportError(null);
+                          setIsGeneratingCustomerReport(true);
+                        },
+                        onComplete: () => setIsGeneratingCustomerReport(false),
+                        onLocked: onCustomerReportLocked,
+                        onError: setCustomerReportError,
+                      });
+                      emitSafeCrmEventFromClient({
+                        event: "report_generated",
+                        plan,
+                        exportType: "customer_report",
+                      });
+                    }}
+                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                  >
+                    {isGeneratingCustomerReport ? "Generating Customer Report..." : "Download Customer Report"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isGeneratingCustomerReport}
+                    onClick={() => openReportSend("customer_report", "customer")}
+                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Email Customer Report
+                  </button>
+                </div>
+                <ReportSendStatusLine
+                  send={getLastSendFor("customer_report")}
+                  loading={reportSendHistoryLoading}
+                />
+              </div>
             ) : null}
             {!canUseBasicPdfExport || !canUseDisputeReportExport || !canUseRebuttalEmail || !canUseCustomerReport ? (
               <button
@@ -2079,6 +2418,11 @@ function RailContent({
                 {snapshotStatus}
               </div>
             ) : null}
+            {reportSendStatus ? (
+              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-2 text-[12px] leading-5 text-white/55">
+                {reportSendStatus}
+              </div>
+            ) : null}
           </div>
         </section>
         </RailInsightSection>
@@ -2093,11 +2437,13 @@ function RailContent({
           message={snapshotMessage}
           reviewed={snapshotReviewed}
           sending={snapshotSending}
+          sent={snapshotSent}
           status={snapshotStatus}
           sendReady={snapshotSendReady}
           onClose={() => {
             setSnapshotPreviewOpen(false);
             setSnapshotSendTarget(null);
+            setSnapshotSent(false);
           }}
           onDownload={downloadSnapshotPdf}
           onCopy={copySnapshotSummary}
@@ -2109,7 +2455,31 @@ function RailContent({
           serviceCheckoutLoading={serviceCheckoutLoading}
           onStartServiceCase={() => void startAcademyServiceCheckout()}
           onSend={() => void sendSnapshot()}
-          onCancelSend={() => setSnapshotSendTarget(null)}
+          onCancelSend={() => { setSnapshotSendTarget(null); setSnapshotSent(false); }}
+        />
+      ) : null}
+      {activeReportToSend ? (
+        <ReportSendModal
+          destinationType={reportSendTarget}
+          recipientEmail={reportRecipientEmail}
+          subject={reportSubject}
+          message={reportMessage}
+          reviewed={reportReviewed}
+          sending={reportSending}
+          sent={reportSent}
+          sendReady={reportSendReady}
+          status={reportSendStatus}
+          onDestinationTypeChange={setReportSendTarget}
+          onRecipientEmailChange={setReportRecipientEmail}
+          onSubjectChange={setReportSubject}
+          onMessageChange={setReportMessage}
+          onReviewedChange={setReportReviewed}
+          onSend={() => void sendReportEmail()}
+          onCancel={() => {
+            setActiveReportToSend(null);
+            setReportSendStatus(null);
+            setReportSent(false);
+          }}
         />
       ) : null}
     </div>
@@ -2171,6 +2541,240 @@ function exportPdfVariant(params: {
   void exportCarrierPDF(document);
 }
 
+function getDefaultReportSubject(reportType: ReportType): string {
+  switch (reportType) {
+    case "snapshot":
+      return "[Collision IQ] Your Vehicle Snapshot Report";
+    case "full_report":
+      return "[Collision IQ] Collision Repair Intelligence Report";
+    case "rebuttal":
+      return "[Collision IQ] Carrier Rebuttal Package";
+    case "dispute_intelligence":
+      return "[Collision IQ] Dispute Intelligence Report";
+    case "customer_report":
+      return "[Collision IQ] Customer Repair Summary";
+  }
+}
+
+function getDefaultReportFilename(reportType: ReportType): string {
+  switch (reportType) {
+    case "snapshot":
+      return "collision-snapshot.pdf";
+    case "full_report":
+      return "collision-iq-main-report.pdf";
+    case "rebuttal":
+      return "carrier-rebuttal-package.pdf";
+    case "dispute_intelligence":
+      return "dispute-intelligence-report.pdf";
+    case "customer_report":
+      return "customer-report.pdf";
+  }
+}
+
+function getDefaultReportMessage(
+  reportType: ReportType,
+  destinationType: ReportDestinationType,
+  renderModel: ReturnType<typeof buildExportModel>
+): string {
+  const vehicle = resolveCanonicalVehicleLabel(renderModel) || "the vehicle";
+  const reportName = getDefaultReportSubject(reportType).replace("[Collision IQ] ", "");
+  const greeting =
+    destinationType === "carrier"
+      ? "Hello,"
+      : destinationType === "customer"
+        ? "Hi,"
+        : "Hello,";
+
+  return [
+    greeting,
+    "",
+    `Attached is the ${reportName} for ${vehicle}.`,
+    "",
+    "Please review the attached PDF and let us know if you have any questions.",
+    "",
+    "Thank you,",
+    "Collision IQ",
+  ].join("\n");
+}
+
+function ReportSendStatusLine({
+  send,
+  loading,
+}: {
+  send: ReportSendHistoryItem | null;
+  loading: boolean;
+}) {
+  if (loading && !send) {
+    return <div className="px-1 text-[11px] leading-4 text-white/32">Loading send history...</div>;
+  }
+  if (!send) {
+    return null;
+  }
+
+  return (
+    <div className="px-1 text-[11px] leading-4 text-white/42">
+      {formatReportSendStatus(send)}
+    </div>
+  );
+}
+
+function formatReportSendStatus(send: ReportSendHistoryItem): string {
+  const destination = formatReportDestination(send.destinationType);
+  const relativeTime = formatRelativeTime(send.sentAt);
+
+  if (send.status === "manual") {
+    return `Manual send required for ${destination}${relativeTime ? ` ${relativeTime}` : ""}`;
+  }
+  if (send.status === "delivered") {
+    return `Delivered to ${destination}${relativeTime ? ` ${relativeTime}` : ""}`;
+  }
+  if (send.status === "bounced") {
+    return `Bounced to ${destination}${relativeTime ? ` ${relativeTime}` : ""}`;
+  }
+  if (send.status === "failed") {
+    return `Failed sending to ${destination}${relativeTime ? ` ${relativeTime}` : ""}`;
+  }
+  if (send.status === "opened") {
+    return `Opened by ${destination}${relativeTime ? ` ${relativeTime}` : ""}`;
+  }
+
+  return `Last sent to ${destination}${relativeTime ? ` ${relativeTime}` : ""}`;
+}
+
+function formatReportDestination(destinationType: ReportDestinationType): string {
+  switch (destinationType) {
+    case "customer":
+      return "customer";
+    case "carrier":
+      return "carrier";
+    case "internal":
+      return "internal review";
+  }
+}
+
+function formatRelativeTime(value: string): string | null {
+  const date = new Date(value);
+  const time = date.getTime();
+  if (Number.isNaN(time)) {
+    return null;
+  }
+
+  const diffMs = Date.now() - time;
+  const diffMinutes = Math.max(0, Math.round(diffMs / 60000));
+  if (diffMinutes < 1) return "just now";
+  if (diffMinutes < 60) return `${diffMinutes} min ago`;
+
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours} hr ago`;
+
+  const diffDays = Math.round(diffHours / 24);
+  if (diffDays < 30) return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
+
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: date.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+  });
+}
+
+function ReportSendModal({
+  destinationType,
+  recipientEmail,
+  subject,
+  message,
+  reviewed,
+  sending,
+  sent,
+  sendReady,
+  status,
+  onDestinationTypeChange,
+  onRecipientEmailChange,
+  onSubjectChange,
+  onMessageChange,
+  onReviewedChange,
+  onSend,
+  onCancel,
+}: {
+  destinationType: ReportDestinationType;
+  recipientEmail: string;
+  subject: string;
+  message: string;
+  reviewed: boolean;
+  sending: boolean;
+  sent: boolean;
+  sendReady: boolean;
+  status: string | null;
+  onDestinationTypeChange: (value: ReportDestinationType) => void;
+  onRecipientEmailChange: (value: string) => void;
+  onSubjectChange: (value: string) => void;
+  onMessageChange: (value: string) => void;
+  onReviewedChange: (value: boolean) => void;
+  onSend: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[95] overflow-y-auto bg-black/78 px-4 py-6 backdrop-blur-xl" role="dialog" aria-modal="true">
+      <div className="mx-auto max-w-xl rounded-3xl border border-white/10 bg-[#0B0B0C] p-5 shadow-[0_30px_90px_rgba(0,0,0,0.65)]">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/70">
+              Collision IQ
+            </div>
+            <h2 className="mt-2 text-2xl font-semibold text-white">Send report</h2>
+          </div>
+          <button type="button" onClick={onCancel} className="rounded-xl bg-white/[0.06] px-3 py-2 text-xs text-white/65 hover:bg-white/[0.1]">
+            Cancel
+          </button>
+        </div>
+
+        <div className="mt-5 grid gap-3">
+          <label className="grid gap-1 text-xs text-white/45">
+            Destination
+            <select
+              value={destinationType}
+              onChange={(event) => onDestinationTypeChange(event.target.value as ReportDestinationType)}
+              className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/75 outline-none focus:border-orange-300/40"
+            >
+              <option value="customer">Customer</option>
+              <option value="carrier">Carrier</option>
+              <option value="internal">Internal review</option>
+            </select>
+          </label>
+          <SnapshotInput label="Recipient email" value={recipientEmail} onChange={onRecipientEmailChange} type="email" />
+          <SnapshotInput label="Subject" value={subject} onChange={onSubjectChange} />
+          <label className="grid gap-1 text-xs text-white/45">
+            Message
+            <textarea
+              value={message}
+              onChange={(event) => onMessageChange(event.target.value)}
+              rows={7}
+              className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm leading-6 text-white/75 outline-none focus:border-orange-300/40"
+            />
+          </label>
+          <label className="flex items-start gap-3 text-sm text-white/65">
+            <input
+              type="checkbox"
+              checked={reviewed}
+              onChange={(event) => onReviewedChange(event.target.checked)}
+              className="mt-1 h-4 w-4 rounded border-white/20 bg-black/40 text-orange-500 focus:ring-orange-500"
+            />
+            <span>I reviewed this report before sending</span>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={onSend} disabled={!sendReady} className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-45">
+              {sending ? "Sending..." : sent ? "Resend" : "Send"}
+            </button>
+            <button type="button" onClick={onCancel} className="rounded-xl bg-white/[0.06] px-4 py-2 text-sm text-white/70 hover:bg-white/[0.1]">
+              Cancel
+            </button>
+          </div>
+          {status ? <div className="rounded-xl bg-white/[0.04] px-3 py-2 text-sm text-white/60">{status}</div> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SnapshotPreviewModal({
   snapshot,
   sendTarget,
@@ -2179,6 +2783,7 @@ function SnapshotPreviewModal({
   message,
   reviewed,
   sending,
+  sent,
   status,
   sendReady,
   serviceCheckoutLoading,
@@ -2201,6 +2806,7 @@ function SnapshotPreviewModal({
   message: string;
   reviewed: boolean;
   sending: boolean;
+  sent: boolean;
   status: string | null;
   sendReady: boolean;
   serviceCheckoutLoading: boolean;
@@ -2362,7 +2968,7 @@ function SnapshotPreviewModal({
               </label>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={onSend} disabled={!sendReady} className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-45">
-                  {sending ? "Sending..." : "Send"}
+                  {sending ? "Sending..." : sent ? "Resend" : "Send"}
                 </button>
                 <button type="button" onClick={onCancelSend} className="rounded-xl bg-white/[0.06] px-4 py-2 text-sm text-white/70 hover:bg-white/[0.1]">
                   Cancel
@@ -2564,6 +3170,48 @@ async function exportCustomerReport(params: {
   }
 }
 
+async function buildCustomerReportDocument(params: {
+  renderModel: ReturnType<typeof buildExportModel>;
+  normalizedResult: AnalysisResult | null;
+  analysisResult: RepairIntelligenceReport | null;
+  panel: DecisionPanel;
+  analysisText: string;
+  workspaceData: WorkspaceData | null;
+  onLocked: () => void;
+}): Promise<CarrierReportDocument> {
+  const response = await fetch("/api/customer-report", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    credentials: "same-origin",
+    body: JSON.stringify(buildCustomerReportRequest(params)),
+  });
+
+  if (response.status === 403) {
+    params.onLocked();
+    throw new Error("Customer report export is not included in this plan.");
+  }
+
+  if (!response.ok) {
+    throw new Error("Customer report could not be generated. Please try again.");
+  }
+
+  const data = (await response.json()) as {
+    fileName?: string;
+    report?: CustomerReport;
+  };
+
+  if (!data.report) {
+    throw new Error("Customer report response was empty.");
+  }
+
+  return createCustomerReportPdfDocument(data.report, {
+    renderModel: params.renderModel,
+    fileName: data.fileName,
+  });
+}
+
 function buildCustomerReportRequest(params: {
   renderModel: ReturnType<typeof buildExportModel>;
   normalizedResult: AnalysisResult | null;
@@ -2635,11 +3283,18 @@ function exportCustomerReportPdf(report: CustomerReport, params: {
   renderModel: ReturnType<typeof buildExportModel>;
   fileName?: string;
 }) {
+  void exportCarrierPDF(createCustomerReportPdfDocument(report, params));
+}
+
+function createCustomerReportPdfDocument(report: CustomerReport, params: {
+  renderModel: ReturnType<typeof buildExportModel>;
+  fileName?: string;
+}): CarrierReportDocument {
   const vehicle =
     resolveCanonicalVehicleLabel(params.renderModel) ||
     params.renderModel.reportFields.vehicleLabel ||
     "Vehicle";
-  const document = buildCustomerReportPdf({
+  return buildCustomerReportPdf({
     report,
     vehicle,
     vin: resolveCanonicalVin(params.renderModel),
@@ -2655,8 +3310,6 @@ function exportCustomerReportPdf(report: CustomerReport, params: {
     filename: params.fileName || "customer-report.pdf",
     confidenceIntegrity: params.renderModel.confidenceIntegrity,
   });
-
-  void exportCarrierPDF(document);
 }
 
 function extractImageSummary(sourceText: string): string | null {

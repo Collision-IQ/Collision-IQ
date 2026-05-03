@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { emitSafeCrmEvent, type SafeCrmEventPayload } from "@/lib/crm/events";
+import type { SafeCrmEventPayload } from "@/lib/crm/events";
+import { emitSafeCrmEvent } from "@/lib/crm/serverEvents";
 
 export async function POST(request: Request) {
   let payload: SafeCrmEventPayload;

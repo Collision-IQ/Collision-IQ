@@ -1,4 +1,4 @@
-import { canAccessFeature, type ProductPlan } from "@/lib/featureAccess";
+import type { ProductPlan } from "@/lib/featureAccess";
 
 export type CrmEventName =
   | "snapshot_created"
@@ -6,6 +6,7 @@ export type CrmEventName =
   | "snapshot_copied"
   | "snapshot_sent_customer"
   | "snapshot_sent_carrier"
+  | "report_sent"
   | "report_generated"
   | "upload_batch_completed";
 
@@ -13,7 +14,7 @@ export type SafeCrmEventPayload = {
   event: CrmEventName;
   plan?: ProductPlan | string | null;
   source?: "client" | "server";
-  destinationType?: "customer" | "carrier";
+  destinationType?: "customer" | "carrier" | "internal";
   fileCount?: number;
   totalFilesReviewed?: number;
   adjustedConfidence?: string;
@@ -21,38 +22,14 @@ export type SafeCrmEventPayload = {
   topDisputeCount?: number;
   uploadLimitReached?: boolean;
   userIndicatedMoreFiles?: boolean;
-  exportType?: "snapshot" | "full_report" | "dispute_report" | "rebuttal" | "customer_report";
+  exportType?: "snapshot" | "full_report" | "dispute_report" | "dispute_intelligence" | "rebuttal" | "customer_report";
+  caseId?: string | null;
+  reportType?: string | null;
+  recipient?: string | null;
+  sentAt?: string | null;
+  resendId?: string | null;
+  reportSendId?: string | null;
 };
-
-export async function emitSafeCrmEvent(payload: SafeCrmEventPayload): Promise<void> {
-  const safePayload = sanitizeCrmPayload(payload);
-
-  if (!canAccessFeature(safePayload.plan, "crm_sync")) {
-    console.info("[crm:event:skipped]", {
-      event: safePayload.event,
-      reason: "plan_not_enabled",
-      plan: safePayload.plan ?? null,
-    });
-    return;
-  }
-
-  if (!process.env.HUBSPOT_PRIVATE_APP_TOKEN) {
-    console.info("[crm:event:skipped]", {
-      event: safePayload.event,
-      reason: "hubspot_not_configured",
-    });
-    return;
-  }
-
-  try {
-    await sendHubSpotTimelineStub(safePayload);
-  } catch (error) {
-    console.warn("[crm:event:hubspot_failed]", {
-      event: safePayload.event,
-      message: error instanceof Error ? error.message : "Unknown HubSpot error",
-    });
-  }
-}
 
 export function emitSafeCrmEventFromClient(payload: SafeCrmEventPayload): void {
   const safePayload = sanitizeCrmPayload({ ...payload, source: "client" });
@@ -84,16 +61,13 @@ export function sanitizeCrmPayload(payload: SafeCrmEventPayload): SafeCrmEventPa
     uploadLimitReached: payload.uploadLimitReached,
     userIndicatedMoreFiles: payload.userIndicatedMoreFiles,
     exportType: payload.exportType,
+    caseId: payload.caseId ?? null,
+    reportType: payload.reportType ?? null,
+    recipient: payload.recipient ?? null,
+    sentAt: payload.sentAt ?? null,
+    resendId: payload.resendId ?? null,
+    reportSendId: payload.reportSendId ?? null,
   };
-}
-
-async function sendHubSpotTimelineStub(payload: SafeCrmEventPayload): Promise<void> {
-  // Stub for later HubSpot timeline-note mapping. Keep non-blocking and PII-free.
-  console.info("[crm:event:hubspot_stub]", {
-    event: payload.event,
-    exportType: payload.exportType ?? null,
-    destinationType: payload.destinationType ?? null,
-  });
 }
 
 function finiteNumber(value?: number): number | undefined {

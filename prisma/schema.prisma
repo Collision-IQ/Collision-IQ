@@ -266,6 +266,31 @@ model AcademyServiceCase {
   @@index([serviceType])
 }
 
+model ReportSend {
+  id              String    @id @default(cuid())
+  caseId          String?
+  reportType      String
+  destinationType String
+  recipient       String
+  subject         String?
+  resendId        String?
+  status          String    @default("sent")
+  sentAt          DateTime  @default(now())
+  deliveredAt     DateTime?
+  bouncedAt       DateTime?
+  failedAt        DateTime?
+  openedAt        DateTime?
+  rawEvent        Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([caseId])
+  @@index([resendId])
+  @@index([reportType])
+  @@index([destinationType])
+  @@index([status])
+}
+
 enum SubscriptionPlan {
   STARTER
   PRO

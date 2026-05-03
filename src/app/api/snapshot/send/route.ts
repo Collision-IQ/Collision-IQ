@@ -8,6 +8,8 @@ import { requireCurrentUser } from "@/lib/auth/require-current-user";
 import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import { canAccessFeature } from "@/lib/featureAccess";
 
+// Deprecated: report email sends now use /api/reports/send.
+
 type SnapshotSendRequest = {
   destinationType?: SnapshotDestinationType;
   recipientEmail?: string;
