@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Show, SignInButton, UserButton } from "@clerk/nextjs";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 function HeaderAuth() {
   return (
@@ -20,7 +21,7 @@ function HeaderAuth() {
         >
           <button
             type="button"
-            className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-medium text-white/85 transition hover:bg-white/10"
+            className="rounded-xl bg-muted/80 px-4 py-2 text-sm font-medium text-foreground shadow-sm ring-1 ring-border/60 transition hover:bg-muted"
           >
             Sign in
           </button>
@@ -57,13 +58,13 @@ function Drawer({
     <div className="fixed inset-0 z-[80] lg:hidden">
       <button
         aria-label="Close overlay"
-        className="absolute inset-0 bg-black/60"
+        className="absolute inset-0 bg-foreground/60"
         onClick={onClose}
       />
 
       <div
         className={[
-          "absolute top-0 h-full w-[88vw] max-w-sm border-l border-white/7 bg-card/95 shadow-2xl backdrop-blur-xl",
+          "absolute top-0 h-full w-[88vw] max-w-sm border-l border-border bg-card/95 shadow-2xl backdrop-blur-xl",
           side === "left" ? "left-0" : "right-0",
         ].join(" ")}
       >
@@ -72,7 +73,7 @@ function Drawer({
 
           <button
             onClick={onClose}
-            className="rounded-lg border border-white/7 bg-white/5 px-2 py-1 text-xs text-white/65 transition hover:bg-white/10 hover:text-white/85"
+            className="rounded-lg border border-border bg-muted px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted/80 hover:text-foreground"
           >
             Close
           </button>
@@ -90,9 +91,9 @@ function getPlanTone(planLabel: string) {
     return "border-[#C65A2A]/40 bg-[#C65A2A]/12 text-[#F3A37F]";
   }
   if (value.includes("starter")) {
-    return "border-white/15 bg-white/5 text-white/80";
+    return "border-border bg-muted text-muted-foreground";
   }
-  return "border-emerald-400/20 bg-emerald-400/10 text-emerald-300";
+  return "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
 }
 
 export default function ChatShell({
@@ -109,15 +110,15 @@ export default function ChatShell({
   const hasRight = useMemo(() => Boolean(right), [right]);
 
   return (
-    <div className="flex h-[100svh] flex-col overflow-hidden bg-bg text-text">
+    <div className="flex h-[100svh] flex-col overflow-hidden bg-background text-foreground">
       <div className="pointer-events-none fixed inset-0 opacity-70">
         <div className="absolute -top-40 left-1/2 h-[520px] w-[900px] -translate-x-1/2 rounded-full bg-accent/10 blur-3xl" />
         <div className="absolute bottom-[-280px] right-[-220px] h-[520px] w-[520px] rounded-full bg-white/5 blur-3xl" />
       </div>
 
-      <header className="relative z-10 border-b border-border/60 bg-black/20 backdrop-blur-xl">
+      <header className="relative z-10 border-b border-border/60 bg-card/88 shadow-[0_10px_36px_rgba(15,23,42,0.06)] backdrop-blur-xl dark:shadow-[0_10px_36px_rgba(0,0,0,0.18)]">
         <div className="absolute inset-0 pointer-events-none bg-[url('/brand/logos/Background.png')] bg-cover opacity-[0.04]" />
-        <div className="relative mx-auto flex h-[64px] max-w-[1480px] items-center justify-between px-4 md:px-5">
+        <div className="relative mx-auto flex min-h-[64px] max-w-[1480px] items-center justify-between gap-4 px-4 py-2 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex items-center gap-2">
               <Image
@@ -133,12 +134,12 @@ export default function ChatShell({
                 alt={title}
                 width={150}
                 height={30}
-                className="h-[30px] w-auto opacity-95"
+                className="h-[30px] w-auto invert dark:invert-0"
                 priority
               />
             </div>
 
-            <span className="hidden text-[12px] text-white/40 md:inline">
+            <span className="hidden text-[12px] text-muted md:inline">
               Powered by Collision Academy
             </span>
 
@@ -152,27 +153,29 @@ export default function ChatShell({
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2.5">
             <Link
               href="/technical-systems"
-              className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black shadow-[0_8px_25px_rgba(198,90,42,0.35)] transition hover:opacity-90"
+              className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black shadow-[0_8px_25px_rgba(198,90,42,0.28)] transition hover:bg-[#D76835]"
             >
               Technical Systems
             </Link>
 
             <Link
               href="/the-academy"
-              className="rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-sm font-medium text-white/85 transition hover:bg-white/10"
+              className="rounded-xl bg-muted/80 px-4 py-2 text-sm font-medium text-foreground shadow-sm ring-1 ring-border/60 transition hover:bg-muted"
             >
               Professional Services
             </Link>
+
+            <ThemeToggle />
 
             <HeaderAuth />
 
             {hasLeft && (
               <button
                 onClick={() => setLeftOpen(true)}
-                className="rounded-lg border border-white/7 bg-white/5 px-3 py-1.5 text-xs text-text hover:bg-white/10 lg:hidden"
+                className="rounded-lg border border-border bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-muted/80 lg:hidden"
               >
                 Workspace
               </button>
@@ -181,7 +184,7 @@ export default function ChatShell({
             {hasRight && (
               <button
                 onClick={() => setRightOpen(true)}
-                className="rounded-lg border border-white/7 bg-white/5 px-3 py-1.5 text-xs text-text hover:bg-white/10 lg:hidden"
+                className="rounded-lg border border-border bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-muted/80 lg:hidden"
               >
                 Inspector
               </button>
@@ -190,13 +193,13 @@ export default function ChatShell({
         </div>
       </header>
 
-      <div className="h-[2px] w-full bg-gradient-to-r from-transparent via-[#C65A2A]/60 to-transparent" />
+      <div className="h-px w-full bg-gradient-to-r from-transparent via-[#C65A2A]/45 to-transparent" />
 
-      <div className="relative z-10 min-h-0 w-full max-w-none flex-1 px-6 py-4 md:px-8 md:py-5 xl:px-10">
-        <div className="grid h-full min-h-0 grid-cols-1 gap-5 lg:grid-cols-[1fr_420px]">
-          <div className="flex h-full min-h-0 min-w-0 flex-col rounded-[28px] border border-white/7 bg-white/[0.03] p-4 shadow-[0_20px_60px_rgba(0,0,0,0.24)]">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="inline-flex items-center gap-2 rounded-full border border-[#C65A2A]/30 bg-[#C65A2A]/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#E88A5F]">
+      <div className="relative z-10 min-h-0 w-full max-w-none flex-1 px-5 py-4 md:px-7 md:py-5 xl:px-9">
+        <div className="grid h-full min-h-0 grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_400px] xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="flex h-full min-h-0 min-w-0 flex-col rounded-[30px] bg-card/86 p-4 shadow-[0_22px_70px_rgba(15,23,42,0.10)] ring-1 ring-border/55 backdrop-blur-xl dark:shadow-[0_22px_70px_rgba(0,0,0,0.26)]">
+            <div className="mb-3 flex items-center justify-between gap-4 px-1">
+              <div className="inline-flex items-center gap-2 rounded-full bg-[#C65A2A]/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#C65A2A] ring-1 ring-[#C65A2A]/20 dark:text-[#E88A5F]">
                 <Image
                   src="/iq/iq-favicon.png"
                   alt="Collision IQ"
@@ -207,7 +210,7 @@ export default function ChatShell({
                 Collision IQ
               </div>
 
-              <div className="text-xs text-white/35">
+              <div className="text-xs text-muted-foreground">
                 AI repair intelligence workspace
               </div>
             </div>
@@ -216,7 +219,7 @@ export default function ChatShell({
           </div>
 
           {hasRight && (
-            <div className="hidden h-full min-h-0 w-[420px] flex-col rounded-[24px] border border-white/7 bg-white/[0.04] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.2)] backdrop-blur-md lg:flex">
+            <div className="hidden h-full min-h-0 w-full flex-col rounded-[28px] bg-card/82 p-4 shadow-[0_18px_50px_rgba(15,23,42,0.09)] ring-1 ring-border/55 backdrop-blur-xl dark:shadow-[0_18px_50px_rgba(0,0,0,0.22)] lg:flex">
               <div className="flex-1 min-h-0 overflow-y-auto">{right}</div>
             </div>
           )}

@@ -516,11 +516,22 @@ export default function ChatWidget({
     if (lastMessage?.role !== "assistant") return;
     if (!shouldAutoScrollRef.current) return;
 
-    bottomRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "end",
+    requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (el) {
+        el.scrollTo({
+          top: el.scrollHeight,
+          behavior: "smooth",
+        });
+        return;
+      }
+
+      bottomRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "end",
+      });
     });
-  }, [messages]);
+  }, [messages, loading]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -2180,11 +2191,11 @@ export default function ChatWidget({
 
   const canReadAloud = SERVER_TTS_ENABLED || (BROWSER_TTS_ENABLED && canUseBrowserReadAloud());
 
-  const userBubble = "border border-orange-500/24 bg-[#1a120d]/88 text-orange-300 shadow-[0_14px_32px_rgba(0,0,0,0.16)]";
+  const userBubble = "border border-[#C65A2A]/28 bg-card text-foreground shadow-[0_14px_32px_rgba(15,23,42,0.08)] dark:bg-muted dark:shadow-[0_14px_32px_rgba(0,0,0,0.16)]";
 
   return (
     <div
-      className={`relative flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] border border-white/6 bg-white/[0.035] shadow-[0_22px_70px_rgba(0,0,0,0.32)] ${disabled ? "opacity-75" : ""}`}
+      className={`relative flex h-full min-h-0 flex-col overflow-hidden rounded-[26px] bg-card/70 text-card-foreground ${disabled ? "opacity-75" : ""}`}
       onClick={() => {
         if (!disabled) {
           onChatEngagement?.();
@@ -2204,8 +2215,8 @@ export default function ChatWidget({
         />
       ) : null}
 
-      <div className="absolute inset-0 pointer-events-none bg-[url('/brand/logos/Logo-grey.png')] bg-no-repeat bg-center bg-[length:60%] opacity-[0.06]" />
-      <div className="absolute inset-0 bg-[#040404]/74 pointer-events-none" />
+      <div className="absolute inset-0 pointer-events-none bg-[url('/brand/logos/Logo-grey.png')] bg-no-repeat bg-center bg-[length:60%] opacity-[0.035] dark:opacity-[0.06]" />
+      <div className="pointer-events-none absolute inset-0 bg-background/42 dark:bg-background/62" />
 
       <div className="relative z-10 flex flex-col flex-1 min-h-0">
         <div
@@ -2213,17 +2224,17 @@ export default function ChatWidget({
           className="
           overflow-y-auto
           flex-1
-          px-6 sm:px-8
+          px-5 sm:px-7
           min-h-0
-          pt-6 sm:pt-8
-          pb-[236px]
+          pt-5 sm:pt-7
+          pb-6
           space-y-7
         "
         >
           {messages.length === 1 && messages[0].role === "assistant" && (
-            <div className="flex flex-col items-center justify-center space-y-6 py-20 text-center">
+            <div className="flex flex-col items-center justify-center space-y-6 py-16 text-center">
               {showOpeningDisclaimer && !openingDisclaimerDismissed && (
-                <div className="mx-auto max-w-[860px] rounded-[24px] border border-white/7 bg-white/[0.045] px-5 py-4 text-sm text-white/65 shadow-[0_16px_40px_rgba(0,0,0,0.18)]">
+                <div className="mx-auto max-w-[860px] rounded-[24px] bg-card/88 px-5 py-4 text-sm text-muted-foreground shadow-[0_18px_46px_rgba(15,23,42,0.10)] ring-1 ring-border/55 dark:shadow-[0_18px_46px_rgba(0,0,0,0.20)]">
                   <div className="flex items-start justify-between gap-3">
                   <div className="leading-7">
                       {OPENING_DISCLAIMER}
@@ -2231,7 +2242,7 @@ export default function ChatWidget({
                     <button
                       type="button"
                       onClick={dismissOpeningDisclaimer}
-                      className="shrink-0 rounded-lg bg-white/5 p-2 text-white/65 transition hover:bg-white/10 hover:text-white/85"
+                      className="shrink-0 rounded-lg bg-card p-2 text-muted-foreground transition hover:bg-background hover:text-foreground"
                       aria-label="Dismiss disclaimer"
                       title="Dismiss disclaimer"
                     >
@@ -2241,22 +2252,22 @@ export default function ChatWidget({
                 </div>
               )}
               <div className="space-y-2 text-center">
-                <div className="text-[1.08rem] font-semibold tracking-[-0.02em] text-white/85">
+                <div className="text-[1.08rem] font-semibold tracking-[-0.02em] text-foreground">
                   Start a repair analysis
                 </div>
-                <div className="text-sm leading-6 text-white/65">
+                <div className="text-sm leading-6 text-muted-foreground">
                   Upload an estimate, procedure, or photo set and we&apos;ll turn it into a cleaner repair decision read.
                 </div>
-                <div className="mx-auto mt-2 max-w-[680px] text-xs leading-5 text-white/42">
+                <div className="mx-auto mt-2 max-w-[680px] text-xs leading-5 text-muted-foreground">
                   {uploadBatchGuidance}
                 </div>
               </div>
 
-              <div className="grid w-full max-w-[720px] grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="grid w-full max-w-[760px] grid-cols-1 gap-3 sm:grid-cols-3">
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={disabled}
-                  className="rounded-2xl border border-white/7 bg-white/[0.045] px-4 py-3 text-sm text-white/85 transition hover:bg-white/[0.075] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-2xl bg-card/92 px-4 py-3 text-sm font-medium text-foreground shadow-[0_12px_34px_rgba(15,23,42,0.08)] ring-1 ring-border/55 transition hover:-translate-y-0.5 hover:bg-muted hover:shadow-[0_16px_42px_rgba(198,90,42,0.12)] disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Upload Estimate
                 </button>
@@ -2264,7 +2275,7 @@ export default function ChatWidget({
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={disabled}
-                  className="rounded-2xl border border-white/7 bg-white/[0.045] px-4 py-3 text-sm text-white/85 transition hover:bg-white/[0.075] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-2xl bg-card/92 px-4 py-3 text-sm font-medium text-foreground shadow-[0_12px_34px_rgba(15,23,42,0.08)] ring-1 ring-border/55 transition hover:-translate-y-0.5 hover:bg-muted hover:shadow-[0_16px_42px_rgba(198,90,42,0.12)] disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Upload OEM Procedure
                 </button>
@@ -2272,7 +2283,7 @@ export default function ChatWidget({
                 <button
                   onClick={() => cameraInputRef.current?.click()}
                   disabled={disabled}
-                  className="rounded-2xl border border-white/7 bg-white/[0.045] px-4 py-3 text-sm text-white/85 transition hover:bg-white/[0.075] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-2xl bg-card/92 px-4 py-3 text-sm font-medium text-foreground shadow-[0_12px_34px_rgba(15,23,42,0.08)] ring-1 ring-border/55 transition hover:-translate-y-0.5 hover:bg-muted hover:shadow-[0_16px_42px_rgba(198,90,42,0.12)] disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Upload Photos
                 </button>
@@ -2294,14 +2305,14 @@ export default function ChatWidget({
               <div
                 className={`${
                   msg.kind === "system_status"
-                    ? "max-w-[560px] rounded-full bg-white/[0.045] px-4 py-2 text-xs text-white/40"
+                    ? "max-w-[560px] rounded-full bg-muted/80 px-4 py-2 text-xs text-muted-foreground"
                     : "rounded-[26px] px-6 py-5"
                 } ${
                   msg.role === "user"
-                    ? `${userBubble} max-w-[72%] border border-orange-400/14 shadow-[0_18px_42px_rgba(0,0,0,0.22),0_0_0_1px_rgba(255,180,120,0.04)_inset]`
+                    ? `${userBubble} max-w-[min(72%,820px)] overflow-hidden break-words`
                     : msg.kind === "system_status"
                       ? ""
-                      : "max-w-[820px] border border-white/9 bg-white/[0.04] shadow-[0_18px_42px_rgba(0,0,0,0.18),0_0_0_1px_rgba(255,255,255,0.03)_inset] backdrop-blur-md"
+                      : "min-w-0 max-w-full overflow-hidden break-words bg-card/92 shadow-[0_18px_42px_rgba(15,23,42,0.09)] ring-1 ring-border/45 backdrop-blur-md dark:shadow-[0_18px_42px_rgba(0,0,0,0.18)] sm:max-w-[820px]"
                 }`}
               >
                 {msg.role === "assistant" && msg.kind !== "system_status" ? (
@@ -2323,19 +2334,19 @@ export default function ChatWidget({
                             }}
                             aria-label="Select voice"
                             title={selectedVoiceDescription}
-                            className="color-scheme-dark rounded-xl border border-white/10 bg-[#151515] px-2 py-1.5 text-[11px] font-medium text-white/88 shadow-sm transition hover:bg-[#1d1d1d] focus:border-orange-300/40 focus:outline-none"
+                            className="rounded-xl border border-input bg-background px-2 py-1.5 text-[11px] font-medium text-foreground shadow-sm transition hover:bg-muted focus:border-ring focus:outline-none"
                           >
                             {VOICE_PRESETS.map((preset) => (
-                              <option key={preset.id} value={`preset:${preset.id}`} className="bg-[#151515] text-white">
+                              <option key={preset.id} value={`preset:${preset.id}`} className="bg-background text-foreground">
                                 {preset.label}
                               </option>
                             ))}
                             {availableVoices.map((v) => (
-                              <option key={v.name} value={`voice:${v.name}`} className="bg-[#151515] text-white">{v.name}</option>
+                              <option key={v.name} value={`voice:${v.name}`} className="bg-background text-foreground">{v.name}</option>
                             ))}
                           </select>
                           {browserVoiceNotice || selectedVoiceDescription ? (
-                            <span className="max-w-[220px] text-right text-[10px] leading-4 text-white/35">
+                            <span className="max-w-[220px] text-right text-[10px] leading-4 text-muted-foreground">
                               {browserVoiceNotice ?? selectedVoiceDescription}
                             </span>
                           ) : null}
@@ -2355,7 +2366,7 @@ export default function ChatWidget({
                                 : "Basic browser reader"
                               : "Voiceover requires server speech"
                           }
-                          className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
+                          className="rounded-xl bg-muted p-2 text-muted-foreground transition hover:bg-muted/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <Volume2 size={14} />
                         </button>
@@ -2367,7 +2378,7 @@ export default function ChatWidget({
                           onClick={pauseSpeaking}
                           aria-label="Pause"
                           title="Pause"
-                          className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+                          className="rounded-xl bg-muted p-2 text-muted-foreground transition hover:bg-muted/70 hover:text-foreground"
                         >
                           <Pause size={14} />
                         </button>
@@ -2378,7 +2389,7 @@ export default function ChatWidget({
                           onClick={resumeSpeaking}
                           aria-label="Resume"
                           title="Resume"
-                          className="rounded-xl bg-white/[0.045] p-2 text-orange-400/80 transition hover:bg-white/[0.075] hover:text-orange-400"
+                          className="rounded-xl bg-muted p-2 text-orange-600 transition hover:bg-muted/70 hover:text-orange-500"
                         >
                           <Play size={14} />
                         </button>
@@ -2390,13 +2401,13 @@ export default function ChatWidget({
                           onClick={stopSpeaking}
                           aria-label="Stop reading"
                           title="Stop"
-                          className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-red-400"
+                          className="rounded-xl bg-muted p-2 text-muted-foreground transition hover:bg-muted/70 hover:text-red-500"
                         >
                           <StopCircle size={14} />
                         </button>
                       )}
                     </div>
-                    <div className="analysis-report text-[15px] leading-[1.9] text-white/84">
+                    <div className="analysis-report min-w-0 overflow-hidden break-words text-[15px] leading-[1.9] text-card-foreground">
                     <ReactMarkdown
                       components={{
                         h2: ({ children }) => (
@@ -2410,20 +2421,20 @@ export default function ChatWidget({
                           </div>
                         ),
                         p: ({ children }) => (
-                          <p className="mt-4 text-white/84 leading-[1.95]">{children}</p>
+                          <p className="mt-4 leading-[1.95] text-card-foreground">{children}</p>
                         ),
                         ul: ({ children }) => (
-                          <ul className="mt-2 ml-5 list-disc space-y-1.5 text-white/65">
+                          <ul className="mt-2 ml-5 list-disc space-y-1.5 text-muted-foreground">
                             {children}
                           </ul>
                         ),
                         ol: ({ children }) => (
-                          <ol className="mt-2 ml-5 list-decimal space-y-1.5 text-white/65">
+                          <ol className="mt-2 ml-5 list-decimal space-y-1.5 text-muted-foreground">
                             {children}
                           </ol>
                         ),
                         strong: ({ children }) => (
-                          <span className="font-semibold text-white">{children}</span>
+                          <span className="font-semibold text-foreground">{children}</span>
                         ),
                       }}
                     >
@@ -2445,11 +2456,10 @@ export default function ChatWidget({
           <div ref={bottomRef} />
         </div>
 
-        <div className="absolute inset-x-0 bottom-4 z-20 px-4 sm:px-5">
-          <div className="mx-auto w-full max-w-[1120px] rounded-[28px] border border-white/10 bg-[#090909]/76 shadow-[0_24px_90px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.035)_inset] backdrop-blur-2xl">
-            <div className="p-3">
-              <div className="rounded-[20px] bg-white/[0.035] px-3 py-2">
-                <div className="flex items-end gap-2.5">
+        <div className="z-20 shrink-0 px-4 pb-4 sm:px-5">
+          <div className="mx-auto w-full max-w-[1120px] rounded-[26px] bg-card/94 p-2.5 shadow-[0_24px_80px_rgba(15,23,42,0.14)] ring-1 ring-border/55 backdrop-blur-2xl dark:shadow-[0_24px_90px_rgba(0,0,0,0.4)]">
+            <div className="rounded-[20px] bg-muted/72 px-2.5 py-2">
+                <div className="flex items-center gap-2.5">
               <input
                 type="file"
                 ref={fileInputRef}
@@ -2476,7 +2486,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled}
-                className="rounded-xl p-2 text-white/65 transition hover:bg-white/[0.05] hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-xl p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label="Attach files"
               >
                 <Paperclip size={20} />
@@ -2486,7 +2496,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={() => cameraInputRef.current?.click()}
                 disabled={disabled}
-                className="rounded-xl p-2 text-white/65 transition hover:bg-white/[0.05] hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-xl p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label="Take photo"
               >
                 <Camera size={20} />
@@ -2499,7 +2509,7 @@ export default function ChatWidget({
                 className={`rounded-xl p-2 transition ${
                   isRecording
                     ? "text-red-400 hover:text-red-300"
-                    : "text-white/65 hover:bg-white/[0.05] hover:text-[#C65A2A]"
+                    : "text-muted-foreground hover:bg-card hover:text-[#C65A2A]"
                 } disabled:cursor-not-allowed disabled:opacity-50`}
                 aria-label={
                   isRecording
@@ -2540,7 +2550,7 @@ export default function ChatWidget({
                     ? "Ask about the attachments, or add more context..."
                     : "Ask about a repair, upload files, or take a photo..."
                 }
-                className="chat-composer-textarea min-h-[42px] max-h-[104px] flex-1 resize-none overflow-y-auto rounded-[18px] bg-black/28 px-4 py-3 text-sm text-white/85 outline-none transition focus:bg-black/34 disabled:cursor-not-allowed disabled:opacity-50 sm:text-[15px]"
+                className="chat-composer-textarea min-h-[42px] max-h-[104px] flex-1 resize-none overflow-y-auto rounded-[17px] border-0 bg-background/88 px-4 py-3 text-sm text-foreground shadow-inner outline-none ring-1 ring-input/70 transition placeholder:text-muted-foreground focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50 sm:text-[15px]"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -2553,7 +2563,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={handleDownloadRedactedChat}
                 disabled={disabled || loading || isTranscribing || isExportingChat}
-                className="rounded-[18px] bg-white/[0.04] px-3.5 py-3 text-sm text-white/65 transition hover:bg-white/[0.07] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-[17px] bg-card px-3.5 py-3 text-sm text-muted-foreground shadow-sm transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isExportingChat ? "Preparing..." : "Download Chat"}
               </button>
@@ -2561,7 +2571,7 @@ export default function ChatWidget({
               <button
                 onClick={handleSend}
                 disabled={loading || isTranscribing || disabled}
-                className="rounded-[18px] bg-[#C65A2A] px-4 py-3 text-sm font-semibold text-black transition hover:bg-[#C65A2A]/92 disabled:opacity-50 sm:px-5"
+                className="rounded-[17px] bg-[#C65A2A] px-4 py-3 text-sm font-semibold text-black shadow-[0_10px_24px_rgba(198,90,42,0.28)] transition hover:bg-[#D76835] disabled:opacity-50 sm:px-5"
               >
                 {loading ? "..." : "Send"}
               </button>
@@ -2569,7 +2579,7 @@ export default function ChatWidget({
               <button
                 type="button"
                 onClick={handleEndChat}
-                className="rounded-[18px] border border-red-500/16 bg-transparent px-3.5 py-3 text-sm text-red-300/75 transition hover:bg-red-500/8 hover:text-red-200 disabled:opacity-50"
+                className="rounded-[17px] bg-card px-3.5 py-3 text-sm text-red-400/75 shadow-sm transition hover:bg-red-500/8 hover:text-red-500 disabled:opacity-50 dark:text-red-300/75 dark:hover:text-red-200"
                 disabled={disabled || (loading && messages.length <= 1)}
                 aria-label="End chat"
                 title="End chat"
@@ -2581,7 +2591,7 @@ export default function ChatWidget({
                 {(isRecording || isTranscribing || recordingError) && (
                   <div
                     className={`mt-3 px-1 text-xs ${
-                      recordingError ? "text-red-300" : "text-white/40"
+                      recordingError ? "text-red-500" : "text-muted-foreground"
                     }`}
                   >
                     {recordingError
@@ -2594,22 +2604,22 @@ export default function ChatWidget({
               </div>
 
               {attachments.length > 0 && (
-                <div className="mt-3 rounded-[20px] border border-white/7 bg-white/[0.03] p-3">
+                <div className="mt-3 rounded-[20px] border border-border bg-card p-3">
                 <button
                   type="button"
-                  className="flex w-full items-center justify-between rounded-[18px] bg-black/24 px-4 py-2.5 text-sm text-white/65 transition hover:bg-black/34"
+                  className="flex w-full items-center justify-between rounded-[18px] bg-muted px-4 py-2.5 text-sm text-muted-foreground transition hover:bg-muted/70"
                   onClick={() => setAttachmentsOpen((value) => !value)}
                   disabled={disabled}
                   aria-label="Toggle attachments"
                 >
                   <span>
                     Attachments ({attachments.length})
-                    <span className="ml-2 text-white/40">
+                    <span className="ml-2 text-muted-foreground">
                       {visionAttachmentCount > 0
                         ? `- Vision: ${visionAttachmentCount}`
                         : ""}
                     </span>
-                    <span className="ml-2 text-white/35">
+                    <span className="ml-2 text-muted-foreground">
                       Files reviewed so far: {totalFilesReviewed}
                     </span>
                   </span>
@@ -2618,13 +2628,13 @@ export default function ChatWidget({
 
                 {effectiveAttachmentsOpen && (
                   <div className="mt-2 space-y-2">
-                    <div className="rounded-2xl bg-black/18 px-3 py-2 text-xs leading-5 text-white/42">
+                    <div className="rounded-2xl bg-muted px-3 py-2 text-xs leading-5 text-muted-foreground">
                       {uploadBatchGuidance}
                     </div>
                     {attachments.map((attachment) => (
                       <div
                         key={attachment.attachmentId}
-                        className="flex items-center justify-between gap-3 rounded-[18px] border border-white/6 bg-black/22 px-4 py-3 text-sm text-white/65"
+                        className="flex items-center justify-between gap-3 rounded-[18px] border border-border bg-card px-4 py-3 text-sm text-muted-foreground"
                       >
                         <button
                           type="button"
@@ -2632,10 +2642,10 @@ export default function ChatWidget({
                           disabled={disabled}
                           className="min-w-0 flex-1 text-left"
                         >
-                          <div className="truncate pr-3 font-medium text-white">
+                          <div className="truncate pr-3 font-medium text-foreground">
                             {attachment.filename}
                           </div>
-                          <div className="mt-1 text-xs text-white/40">
+                          <div className="mt-1 text-xs text-muted-foreground">
                             {formatAttachmentKind(attachment)} · {attachment.source === "camera" ? "Photo" : "File"}
                             {attachment.hasVision ? " · Vision" : ""}
                             {attachment.usedInAnalysis ? " · Used in analysis" : ""}
@@ -2648,7 +2658,7 @@ export default function ChatWidget({
                             onClick={() => handlePreviewAttachment(attachment.attachmentId)}
                             aria-label="Preview attachment"
                             disabled={disabled}
-                            className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="rounded-xl bg-muted p-2 text-muted-foreground transition hover:bg-muted/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <Eye size={15} />
                           </button>
@@ -2657,7 +2667,7 @@ export default function ChatWidget({
                             onClick={() => handleReplaceAttachment(attachment.attachmentId)}
                             aria-label="Replace attachment"
                             disabled={disabled}
-                            className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="rounded-xl bg-muted p-2 text-muted-foreground transition hover:bg-muted/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <RefreshCcw size={15} />
                           </button>
@@ -2666,7 +2676,7 @@ export default function ChatWidget({
                             onClick={() => removeAttachment(attachment.attachmentId)}
                             aria-label="Remove attachment"
                             disabled={disabled}
-                            className="rounded-xl bg-white/[0.045] p-2 text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="rounded-xl bg-muted p-2 text-muted-foreground transition hover:bg-muted/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <X size={15} />
                           </button>
@@ -2678,7 +2688,7 @@ export default function ChatWidget({
                       type="button"
                       onClick={clearAllAttachments}
                       disabled={disabled}
-                      className="text-xs text-white/65 transition hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
+                      className="text-xs text-muted-foreground transition hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Clear all
                     </button>
@@ -2689,7 +2699,6 @@ export default function ChatWidget({
             </div>
           </div>
         </div>
-      </div>
     </div>
   );
 }

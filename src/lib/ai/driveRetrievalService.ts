@@ -49,7 +49,20 @@ const DRIVE_INDEX_TTL_MS = 10 * 60 * 1000;
 const BUCKET_PATH_HINTS: Record<DriveSourceBucket, string[]> = {
   oem_procedures: ["oem procedures", "oem procedure", "procedures", "repair procedures"],
   oem_position_statements: ["position statements", "position statement", "oem position"],
-  pa_law: ["pa law", "pennsylvania law", "law", "statute", "consumer rights"],
+  pa_law: [
+    "pa law",
+    "pennsylvania law",
+    "law",
+    "statute",
+    "consumer rights",
+    "insurance policies",
+    "insurance policy",
+    "policy forms",
+    "appraisal clause",
+    "duties after loss",
+    "google_pa_law_folder_id",
+    "google_pa_insurance_policies_folder_id",
+  ],
   insurer_guidelines: ["insurer guidelines", "claim handling", "guidelines", "carrier guidelines"],
   general_reference: ["reference", "general reference", "industry reference"],
 };
@@ -200,7 +213,7 @@ async function getDriveIndex(): Promise<DriveIndexFile[]> {
 
   if (labeledRootFolders.length === 0) {
     throw new Error(
-      "Missing root folder env vars: GOOGLE_OEM_PROCEDURES_FOLDER_ID, GOOGLE_OEM_POSITION_STATEMENTS_FOLDER_ID, GOOGLE_PA_LAW_FOLDER_ID"
+      "Missing root folder env vars: GOOGLE_OEM_PROCEDURES_FOLDER_ID, GOOGLE_OEM_POSITION_STATEMENTS_FOLDER_ID, GOOGLE_PA_LAW_FOLDER_ID, or GOOGLE_PA_INSURANCE_POLICIES_FOLDER_ID"
     );
   }
 
@@ -308,6 +321,13 @@ export function shouldSearchStateLawLane(request: DriveRetrievalRequest): boolea
     "statute",
     "law",
     "legal",
+    "policy",
+    "insurance policy",
+    "appraisal clause",
+    "exclusion",
+    "limits",
+    "duties after loss",
+    "supplement procedure",
   ].some((term) => lower.includes(term));
 
   const inferredState =
@@ -732,7 +752,7 @@ export function buildDriveRefinementContext(response: DriveRetrievalResponse): s
 
     if (laneResults.length === 0) return "";
 
-  const laneLabel = lanePlan.lane === "oem_lane" ? "OEM Support" : "State Law Support";
+  const laneLabel = lanePlan.lane === "oem_lane" ? "OEM Support" : "State Law / Policy Support";
     return [
       `${laneLabel}:`,
       ...laneResults.map((result) => {
@@ -744,7 +764,7 @@ export function buildDriveRefinementContext(response: DriveRetrievalResponse): s
         const jurisdiction = result.metadata.jurisdictionRelevance ? ` | ${result.metadata.jurisdictionRelevance}` : "";
         return `- [${result.documentClass}] ${result.filename} | bucket=${result.sourceBucket} | score=${result.relevanceScore}${vehicle}${vehicleMatch}${jurisdiction}
   reason: ${result.matchReason}${reasons ? ` | ${reasons}` : ""}
-  excerpt: ${result.excerpt.excerpt}`;
+  matched language: "${result.excerpt.excerpt}"`;
       }),
     ].join("\n");
   });

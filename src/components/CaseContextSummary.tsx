@@ -64,40 +64,40 @@ export default function CaseContextSummary({
     : [];
 
   return (
-    <div className="rounded-2xl border border-orange-500/20 bg-[#141414] p-4">
+    <div className="rounded-2xl border border-orange-500/20 bg-card p-4 shadow-sm">
       <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-orange-400/80">
         Continue with this case
       </div>
 
-      <div className="mt-3 space-y-2 text-sm text-zinc-300">
+      <div className="mt-3 space-y-2 text-sm text-muted-foreground">
         <div>
-          <span className="text-zinc-500">Original ask:</span>{" "}
-          <span className="text-zinc-100">{intent}</span>
+          <span className="text-muted-foreground">Original ask:</span>{" "}
+          <span className="font-medium text-foreground">{intent}</span>
         </div>
 
         {vehicleLabel ? (
           <div>
-            <span className="text-zinc-500">Vehicle:</span>{" "}
-            <span className="text-zinc-100">{vehicleLabel}</span>
+            <span className="text-muted-foreground">Vehicle:</span>{" "}
+            <span className="font-medium text-foreground">{vehicleLabel}</span>
           </div>
         ) : null}
 
         <div>
-          <span className="text-zinc-500">Files in context:</span>{" "}
-          <span className="text-zinc-100">{fileCount}</span>
+          <span className="text-muted-foreground">Files in context:</span>{" "}
+          <span className="font-medium text-foreground">{fileCount}</span>
         </div>
 
         {headline ? (
           <div>
-            <span className="text-zinc-500">Current determination:</span>{" "}
-            <span className="text-zinc-100">{headline}</span>
+            <span className="text-muted-foreground">Current determination:</span>{" "}
+            <span className="font-medium text-foreground">{headline}</span>
           </div>
         ) : null}
 
         {confidence !== null ? (
           <div>
-            <span className="text-zinc-500">Confidence:</span>{" "}
-            <span className="text-zinc-100">{confidence}</span>
+            <span className="text-muted-foreground">Confidence:</span>{" "}
+            <span className="font-medium text-foreground">{confidence}</span>
           </div>
         ) : null}
       </div>
@@ -107,23 +107,23 @@ export default function CaseContextSummary({
           {sections.map((section) => (
             <div
               key={section.title}
-              className="rounded-xl border border-white/6 bg-black/18 px-3.5 py-3"
+              className="rounded-xl border border-border bg-muted px-3.5 py-3"
             >
-              <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-zinc-400">
+              <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
                 {section.title}
               </div>
-              <div className="mt-2 text-sm leading-6 text-zinc-200">{section.summary}</div>
+              <div className="mt-2 text-sm leading-6 text-foreground">{section.summary}</div>
             </div>
           ))}
         </div>
       ) : null}
 
       {displayedSupportGaps.length > 0 ? (
-        <div className="mt-4 rounded-xl border border-white/6 bg-black/18 px-3.5 py-3">
-          <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-zinc-400">
+        <div className="mt-4 rounded-xl border border-border bg-muted px-3.5 py-3">
+          <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
             Support Gaps
           </div>
-          <ul className="mt-2 ml-5 list-disc space-y-1.5 text-sm leading-6 text-zinc-200">
+          <ul className="mt-2 ml-5 list-disc space-y-1.5 text-sm leading-6 text-foreground">
             {displayedSupportGaps.map((item) => (
               <li key={item}>{item}</li>
             ))}
@@ -132,11 +132,11 @@ export default function CaseContextSummary({
       ) : null}
 
       {cautionFlags.length > 0 ? (
-        <div className="mt-4 rounded-xl border border-white/6 bg-black/18 px-3.5 py-3">
-          <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-zinc-400">
+        <div className="mt-4 rounded-xl border border-border bg-muted px-3.5 py-3">
+          <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
             Caution Flags
           </div>
-          <ul className="mt-2 ml-5 list-disc space-y-1.5 text-sm leading-6 text-zinc-200">
+          <ul className="mt-2 ml-5 list-disc space-y-1.5 text-sm leading-6 text-foreground">
             {cautionFlags.map((item) => (
               <li key={item}>{item}</li>
             ))}

@@ -53,12 +53,12 @@ export default function AnalysisSectionCard({
   return (
     <section
       ref={cardRef}
-      className={`rounded-[24px] border shadow-[0_18px_40px_rgba(0,0,0,0.18)] transition-[opacity,border-color,background-color,box-shadow,padding,transform] duration-300 ease-out ${
+      className={`rounded-[24px] border shadow-[0_18px_40px_rgba(15,23,42,0.10)] transition-[opacity,border-color,background-color,box-shadow,padding,transform] duration-300 ease-out dark:shadow-[0_18px_40px_rgba(0,0,0,0.18)] ${
         active
-          ? "border-orange-300/45 bg-gradient-to-br from-[#C65A2A]/18 via-white/[0.05] to-black/24 p-5 shadow-[0_0_0_1px_rgba(210,122,81,0.18),0_24px_54px_rgba(198,90,42,0.16)]"
+          ? "border-orange-400/45 bg-gradient-to-br from-[#C65A2A]/16 via-card to-muted p-5 shadow-[0_0_0_1px_rgba(210,122,81,0.14),0_24px_54px_rgba(198,90,42,0.12)]"
           : dimmed
-            ? "border-white/6 bg-gradient-to-br from-white/[0.03] via-white/[0.02] to-black/18 p-4 opacity-[0.86]"
-            : "border-white/8 bg-gradient-to-br from-white/[0.055] via-white/[0.03] to-black/20 p-4"
+            ? "border-border bg-card p-4 opacity-[0.86]"
+            : "border-border bg-card p-4"
       }`}
     >
       <button
@@ -70,20 +70,20 @@ export default function AnalysisSectionCard({
       >
         <div className="min-w-0 flex-1">
           {eyebrow ? (
-            <div className={`text-[10px] uppercase tracking-[0.22em] ${active ? "text-orange-200/72" : "text-white/40"}`}>
+            <div className={`text-[10px] uppercase tracking-[0.22em] ${active ? "text-orange-700 dark:text-orange-200/72" : "text-muted-foreground"}`}>
               {eyebrow}
             </div>
           ) : null}
-          <div className={`mt-1 text-[1.02rem] font-semibold tracking-[-0.02em] ${active ? "text-white" : "text-white/88"}`}>
+          <div className={`mt-1 text-[1.02rem] font-semibold tracking-[-0.02em] ${active ? "text-foreground" : "text-card-foreground"}`}>
             {title}
           </div>
           {isExpanded && summary ? (
-            <div className={`mt-1 text-[13px] leading-5 transition-colors ${active ? "text-white/64" : "text-white/50"}`}>{summary}</div>
+            <div className={`mt-1 text-[13px] leading-5 transition-colors ${active ? "text-muted-foreground" : "text-muted-foreground"}`}>{summary}</div>
           ) : null}
           {showPreview && previewText ? (
             <div className="relative mt-2 max-w-[52rem]">
               <div
-                className={`pr-6 text-[13px] leading-5 transition-colors ${active ? "text-white/60" : "text-white/58"}`}
+                className={`pr-6 text-[13px] leading-5 transition-colors ${active ? "text-muted-foreground" : "text-muted-foreground"}`}
                 style={{
                   display: "-webkit-box",
                   WebkitBoxOrient: "vertical",
@@ -93,7 +93,7 @@ export default function AnalysisSectionCard({
               >
                 {previewText}
               </div>
-              <div className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-[#080808] via-black/45 to-transparent" />
+              <div className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-card via-card/80 to-transparent" />
             </div>
           ) : null}
         </div>
@@ -114,7 +114,7 @@ export default function AnalysisSectionCard({
                   onClearFocus();
                 }
               }}
-              className="rounded-full border border-white/8 bg-black/22 px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-white/58 transition hover:bg-black/32 hover:text-white/78"
+              className="rounded-full border border-border bg-muted px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground transition hover:bg-muted/70 hover:text-foreground"
             >
               Show all
             </span>
@@ -123,8 +123,8 @@ export default function AnalysisSectionCard({
           <span
             className={`inline-flex items-center rounded-full border p-2 transition-[color,background-color,border-color,transform] duration-300 ${
               active
-                ? "border-orange-300/35 bg-[#C65A2A]/16 text-orange-50/90"
-                : "border-white/8 bg-black/18 text-white/55"
+                ? "border-orange-400/35 bg-[#C65A2A]/16 text-orange-700 dark:text-orange-100"
+                : "border-border bg-muted text-muted-foreground"
             }`}
           >
             <ChevronDown

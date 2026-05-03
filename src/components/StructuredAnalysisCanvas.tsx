@@ -242,16 +242,16 @@ export default function StructuredAnalysisCanvas({
     <div className="mt-3 space-y-3">
       <DeterminationCard determination={renderModel.determination} />
 
-      <section className="rounded-[24px] border border-white/8 bg-gradient-to-br from-[#C65A2A]/10 via-white/[0.035] to-black/25 p-4 shadow-[0_18px_44px_rgba(0,0,0,0.2)]">
+      <section className="rounded-[24px] border border-border bg-gradient-to-br from-[#C65A2A]/10 via-card to-muted p-4 shadow-[0_18px_44px_rgba(15,23,42,0.10)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.2)]">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
               Active Case
             </div>
-            <div className="mt-1 text-[1.08rem] font-semibold tracking-[-0.02em] text-white/88">
+            <div className="mt-1 text-[1.08rem] font-semibold tracking-[-0.02em] text-card-foreground">
               {caseLabel}
             </div>
-            <div className="mt-1 text-[13px] leading-5 text-white/55">
+            <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
               Latest file: {latestFile}
             </div>
           </div>
@@ -273,8 +273,8 @@ export default function StructuredAnalysisCanvas({
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/8 pt-4">
-          <div className="text-[12px] leading-5 text-white/52">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+          <div className="text-[12px] leading-5 text-muted-foreground">
             Continue the current review or intentionally clear this case before starting a new one.
           </div>
 
@@ -282,7 +282,7 @@ export default function StructuredAnalysisCanvas({
             <button
               type="button"
               onClick={onContinueChat}
-              className="rounded-xl border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-medium text-white/76 transition hover:bg-white/10 hover:text-white"
+              className="rounded-xl border border-border bg-muted px-3.5 py-2 text-xs font-medium text-foreground transition hover:bg-muted/70"
             >
               Continue with this case
             </button>
@@ -299,7 +299,7 @@ export default function StructuredAnalysisCanvas({
                 <button
                   type="button"
                   onClick={onCancelEndAnalysis}
-                  className="rounded-xl border border-white/8 bg-black/22 px-3.5 py-2 text-xs text-white/62 transition hover:bg-black/30 hover:text-white/82"
+                  className="rounded-xl border border-border bg-muted px-3.5 py-2 text-xs text-muted-foreground transition hover:bg-muted/70 hover:text-foreground"
                 >
                   Cancel
                 </button>
@@ -317,7 +317,7 @@ export default function StructuredAnalysisCanvas({
         </div>
 
         {endAnalysisConfirming ? (
-          <div className="mt-3 rounded-2xl border border-red-500/16 bg-black/20 px-3.5 py-3 text-[12px] leading-5 text-white/58">
+          <div className="mt-3 rounded-2xl border border-red-500/20 bg-red-500/10 px-3.5 py-3 text-[12px] leading-5 text-muted-foreground">
             This clears the current transcript, uploaded files, structured analysis, and rail state for this browser session.
           </div>
         ) : null}
@@ -348,7 +348,7 @@ export default function StructuredAnalysisCanvas({
             >
               <div className="space-y-3">
                 {section.prose ? (
-                  <div className="rounded-2xl bg-black/18 px-3.5 py-3 text-[13px] leading-6 text-white/70">
+                  <div className="rounded-2xl bg-muted px-3.5 py-3 text-[13px] leading-6 text-muted-foreground">
                     {section.prose}
                   </div>
                 ) : null}
@@ -404,7 +404,7 @@ export default function StructuredAnalysisCanvas({
             onInteract={() => onActiveInsightChange("exports")}
             onClearFocus={() => onActiveInsightChange(null)}
           >
-            <div className="rounded-2xl border border-white/6 bg-black/18 px-3.5 py-3 text-[13px] leading-5 text-white/70">
+            <div className="rounded-2xl border border-border bg-muted px-3.5 py-3 text-[13px] leading-5 text-muted-foreground">
               {canUseFullReportExports
                 ? "Use the rail to generate the Collision Repair Intelligence Report, Dispute Intelligence Report, or rebuttal output."
                 : "Use the rail to download the 1-Page Snapshot. Full reports, Dispute Intelligence, rebuttal PDF, and Customer Report are available on Pro."}
@@ -449,7 +449,7 @@ function LinkedInsightBullet({
 
   if (!evidenceLink) {
     return (
-      <div className="flex gap-2 rounded-2xl border border-white/6 bg-black/18 px-3.5 py-3 text-[13px] leading-5 text-white/70">
+      <div className="flex gap-2 rounded-2xl border border-border bg-muted px-3.5 py-3 text-[13px] leading-5 text-muted-foreground">
         <span className="pt-[1px] text-orange-200/85">&bull;</span>
         <span>{bullet}</span>
       </div>
@@ -463,14 +463,14 @@ function LinkedInsightBullet({
       className={`w-full rounded-2xl border px-3.5 py-3 text-left transition-[border-color,background-color,box-shadow] duration-300 ${
         active
           ? "border-orange-300/28 bg-[#C65A2A]/12 shadow-[0_0_0_1px_rgba(210,122,81,0.12)]"
-          : "border-white/6 bg-black/18 hover:border-white/12 hover:bg-black/24"
+          : "border-border bg-muted hover:border-ring/30 hover:bg-muted/70"
       }`}
     >
-      <div className="flex gap-2 text-[13px] leading-5 text-white/76">
+      <div className="flex gap-2 text-[13px] leading-5 text-foreground">
         <span className="pt-[1px] text-orange-200/85">&bull;</span>
         <span>{bullet}</span>
       </div>
-      <div className="mt-2 inline-flex rounded-full border border-white/8 bg-black/18 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-white/48">
+      <div className="mt-2 inline-flex rounded-full border border-border bg-card px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
         View support
       </div>
     </button>
@@ -483,22 +483,22 @@ function EvidenceSupportBlock({
   target: NonNullable<ReturnType<typeof getEvidenceTargetById>>;
 }) {
   return (
-    <div className="rounded-2xl border border-orange-300/20 bg-gradient-to-br from-[#C65A2A]/12 via-black/22 to-black/16 px-3.5 py-3 shadow-[0_0_0_1px_rgba(210,122,81,0.1)]">
+    <div className="rounded-2xl border border-orange-300/20 bg-gradient-to-br from-[#C65A2A]/12 via-card to-muted px-3.5 py-3 shadow-[0_0_0_1px_rgba(210,122,81,0.1)]">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/68">
           Supporting Evidence
         </div>
-        <div className="rounded-full border border-white/8 bg-black/18 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-white/42">
+        <div className="rounded-full border border-border bg-muted px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
           {target.type.replace(/_/g, " ")}
         </div>
       </div>
-      <div className="mt-2 text-[13px] font-medium leading-5 text-white/86">{target.title}</div>
-      <div className="mt-2 text-[13px] leading-5 text-white/66">{target.detail}</div>
+      <div className="mt-2 text-[13px] font-medium leading-5 text-foreground">{target.title}</div>
+      <div className="mt-2 text-[13px] leading-5 text-muted-foreground">{target.detail}</div>
       {target.summary ? (
-        <div className="mt-2 text-[12px] leading-5 text-white/52">{target.summary}</div>
+        <div className="mt-2 text-[12px] leading-5 text-muted-foreground">{target.summary}</div>
       ) : null}
       {target.sourceLabel ? (
-        <div className="mt-2 text-[11px] leading-5 text-white/42">Source: {target.sourceLabel}</div>
+        <div className="mt-2 text-[11px] leading-5 text-muted-foreground">Source: {target.sourceLabel}</div>
       ) : null}
     </div>
   );
@@ -506,9 +506,9 @@ function EvidenceSupportBlock({
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-[84px] rounded-2xl border border-white/8 bg-black/20 px-3 py-2.5">
-      <div className="text-[10px] uppercase tracking-[0.16em] text-white/40">{label}</div>
-      <div className="mt-1 text-sm font-semibold text-white/86">{value}</div>
+    <div className="min-w-[84px] rounded-2xl border border-border bg-muted px-3 py-2.5">
+      <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{label}</div>
+      <div className="mt-1 text-sm font-semibold text-foreground">{value}</div>
     </div>
   );
 }

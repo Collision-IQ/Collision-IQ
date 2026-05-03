@@ -7,6 +7,7 @@ export type LabeledDriveFolder = {
 };
 
 const GOOGLE_DRIVE_URL_PATTERN = /^https?:\/\/(?:drive|docs)\.google\.com\//i;
+const PA_INSURANCE_POLICIES_FOLDER_ID = "1fxDcmu_anJLGRJ8qLvORWAq8kNR1vzkf";
 
 function normalizeDriveIdentifier(params: {
   label: string;
@@ -65,6 +66,10 @@ export function getConfiguredDriveRootFolders(): LabeledDriveFolder[] {
     {
       label: "GOOGLE_PA_LAW_FOLDER_ID",
       id: process.env.GOOGLE_PA_LAW_FOLDER_ID,
+    },
+    {
+      label: "GOOGLE_PA_INSURANCE_POLICIES_FOLDER_ID",
+      id: process.env.GOOGLE_PA_INSURANCE_POLICIES_FOLDER_ID || PA_INSURANCE_POLICIES_FOLDER_ID,
     },
   ]
     .map((entry) => {
@@ -221,7 +226,7 @@ export async function listDriveFiles(
     }
 
     try {
-      await crawl(rootFolder.label, rootFolderId);
+      await crawl(rootFolder.label, rootFolderId, `${rootFolder.label}/`);
     } catch (error) {
       console.log("[drive] failed root folder", {
         label: rootFolder.label,

@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ArrowRight, Download, FileText, Mail } from "lucide-react";
 import ChatShell from "@/components/ChatShell";
 import ChatWidget from "@/components/ChatWidget";
 import CaseContextSummary from "@/components/CaseContextSummary";
@@ -25,7 +27,6 @@ import { canAccessFeature } from "@/lib/featureAccess";
 import { emitSafeCrmEventFromClient } from "@/lib/crm/events";
 import {
   buildExportModel,
-  COLLISION_ACADEMY_HANDOFF_URL,
   resolveCanonicalInsurer,
   resolveCanonicalVehicleLabel,
   resolveCanonicalVin,
@@ -816,7 +817,7 @@ export function ChatbotWorkspacePage() {
   if (!consentResolved) return null;
 
   return (
-    <div className="h-[100svh] overflow-hidden bg-[#050505] text-white">
+    <div className="h-[100svh] overflow-hidden bg-background text-foreground">
       <ChatShell
         title="Collision-IQ"
         center={
@@ -832,14 +833,14 @@ export function ChatbotWorkspacePage() {
                 >
                   <div
                     ref={immersiveToolbarRef}
-                    className="z-20 mb-3 shrink-0 rounded-[22px] border border-white/10 bg-[#0b0b0b]/88 px-4 py-3 shadow-[0_18px_44px_rgba(0,0,0,0.28),0_0_0_1px_rgba(255,255,255,0.03)_inset] ring-1 ring-orange-400/8 backdrop-blur-xl"
+                    className="z-20 mb-3 shrink-0 rounded-[22px] border border-border bg-card/95 px-4 py-3 shadow-[0_18px_44px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 backdrop-blur-xl dark:shadow-[0_18px_44px_rgba(0,0,0,0.28)]"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-[10px] uppercase tracking-[0.18em] text-white/40">
+                        <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                           Review workspace
                         </div>
-                        <div className="mt-1 text-sm text-white/68">
+                        <div className="mt-1 text-sm text-muted-foreground">
                           {isReviewActive
                             ? "The case review is open. Collapse it anytime to give chat more room."
                             : "The case review is collapsed. Selecting a right-rail item will reopen it and jump to the matching section."}
@@ -849,7 +850,7 @@ export function ChatbotWorkspacePage() {
                         <button
                           type="button"
                           onClick={isReviewActive ? handleToggleImmersiveHeader : openReviewPane}
-                          className="rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-xs font-medium text-white/72 transition hover:bg-white/10 hover:text-white"
+                          className="rounded-xl border border-border bg-muted px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted/70"
                           aria-expanded={isReviewActive}
                           aria-controls="immersive-case-header"
                         >
@@ -864,10 +865,10 @@ export function ChatbotWorkspacePage() {
                   {isReviewActive ? (
                     <div
                       ref={immersiveWorkspaceRef}
-                      className="min-h-0 flex-1 overflow-y-auto rounded-[26px] border border-white/8 bg-[#0a0a0a]/66 px-1 pb-4 shadow-[0_24px_70px_rgba(0,0,0,0.22),0_0_0_1px_rgba(255,255,255,0.025)_inset] ring-1 ring-orange-400/6"
+                      className="min-h-0 flex-1 overflow-y-auto rounded-[26px] border border-border bg-card/80 px-1 pb-4 shadow-[0_24px_70px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 dark:shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
                     >
                       <div id="immersive-case-header" data-header-change-reason={lastHeaderChangeReason}>
-                        <div className="mb-2 text-right text-[10px] uppercase tracking-[0.16em] text-white/35">
+                        <div className="mb-2 text-right text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                           {headerPinnedByUser ? "Pinned by user" : "Auto"}
                         </div>
                         <AtAGlanceCard
@@ -876,7 +877,7 @@ export function ChatbotWorkspacePage() {
                           active={hasResolvedAnalysis && hasAtGlanceContent(renderModel)}
                         />
 
-                      <div className="mt-3 rounded-[24px] border border-white/8 bg-white/[0.035] p-3.5">
+                      <div className="mt-3 rounded-[24px] border border-border bg-card p-3.5">
                         <WorkspacePanel
                           workspaceData={workspaceData ?? undefined}
                           evidenceModel={evidenceModel}
@@ -907,16 +908,16 @@ export function ChatbotWorkspacePage() {
                     }}
                   />
 
-                  <section className="mt-4 rounded-[26px] border border-white/8 bg-gradient-to-br from-white/[0.04] via-white/[0.025] to-black/24 p-4 shadow-[0_20px_48px_rgba(0,0,0,0.2)]">
-                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 pb-3">
+                  <section className="mt-4 rounded-[26px] border border-border bg-card p-4 shadow-[0_20px_48px_rgba(15,23,42,0.10)] dark:shadow-[0_20px_48px_rgba(0,0,0,0.2)]">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
                       <div>
                         <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
                           Continue with this case
                         </div>
-                        <div className="mt-1 text-[1.02rem] font-semibold tracking-[-0.02em] text-white/88">
+                        <div className="mt-1 text-[1.02rem] font-semibold tracking-[-0.02em] text-card-foreground">
                           Continue with this case
                         </div>
-                        <div className="mt-1 text-[13px] leading-5 text-white/55">
+                        <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
                           This follow-up keeps the uploaded files, extracted facts, transcript summary,
                           determination, support gaps, and exports in context.
                         </div>
@@ -925,7 +926,7 @@ export function ChatbotWorkspacePage() {
                       <button
                         type="button"
                         onClick={handleContinueReview}
-                        className="rounded-xl border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-medium text-white/76 transition hover:bg-white/10 hover:text-white"
+                        className="rounded-xl border border-border bg-muted px-3.5 py-2 text-xs font-medium text-foreground transition hover:bg-muted/70"
                       >
                         Continue with this case
                       </button>
@@ -943,7 +944,7 @@ export function ChatbotWorkspacePage() {
                     </div>
 
                     {linkedEvidenceDebug.length > 0 && (
-                      <section className="mt-4 rounded-[20px] border border-white/8 bg-black/18 p-4">
+                      <section className="mt-4 rounded-[20px] border border-border bg-muted p-4">
                         <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
                           Linked OEM / procedure evidence
                         </div>
@@ -954,15 +955,15 @@ export function ChatbotWorkspacePage() {
                             return (
                               <div
                                 key={`${display.id}-${index}`}
-                                className="rounded-2xl border border-white/7 bg-white/[0.03] px-3.5 py-3"
+                                className="rounded-2xl border border-border bg-card px-3.5 py-3"
                               >
-                                <div className="text-sm font-semibold text-white/88">
+                                <div className="text-sm font-semibold text-card-foreground">
                                   {display.title}
                                 </div>
-                                <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-white/45">
+                                <div className="mt-1 text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
                                   {formatExternalDocumentStatus(display.status)} - {formatExternalDocumentSource(display.source)}
                                 </div>
-                                <div className="mt-2 text-[13px] leading-5 text-white/65">
+                                <div className="mt-2 text-[13px] leading-5 text-muted-foreground">
                                   {summarizeExternalDocumentForDisplay(display)}
                                 </div>
                               </div>
@@ -990,7 +991,7 @@ export function ChatbotWorkspacePage() {
                       <>
                         Trial ends in {trialDaysRemaining} day
                         {trialDaysRemaining === 1 ? "" : "s"}.
-                        <span className="ml-2 text-white/80">
+                        <span className="ml-2 text-foreground/80">
                           Upgrade to keep full access.
                         </span>
                         <Link
@@ -1003,7 +1004,7 @@ export function ChatbotWorkspacePage() {
                     ) : (
                       <>
                         Your trial has ended.
-                        <span className="ml-2 text-white/80">
+                        <span className="ml-2 text-foreground/80">
                           Upgrade to continue using full features.
                         </span>
                         <Link
@@ -1024,7 +1025,7 @@ export function ChatbotWorkspacePage() {
                 {showLowUsageWarning && (
                   <div className="mb-3 rounded-xl border border-orange-500/20 bg-[#C65A2A]/10 px-4 py-3 text-sm text-orange-100">
                     You have {remainingAnalyses} analysis{remainingAnalyses === 1 ? "" : "es"} remaining.
-                    <span className="ml-2 text-white/80">
+                    <span className="ml-2 text-foreground/80">
                       Upgrade to avoid interruption.
                     </span>
                   </div>
@@ -1033,21 +1034,21 @@ export function ChatbotWorkspacePage() {
                 {!isChatActive && (
                   <div className="relative">
                     <div className="pointer-events-none absolute inset-x-10 -top-1 z-10 h-4 rounded-full bg-orange-500/8 blur-2xl" />
-                    <div className="rounded-[24px] border border-white/10 bg-[#070707]/86 px-4 py-3 shadow-[0_18px_50px_rgba(0,0,0,0.34),0_0_0_1px_rgba(255,255,255,0.03)_inset] ring-1 ring-orange-400/8 backdrop-blur-2xl">
+                    <div className="rounded-[24px] border border-border bg-card/95 px-4 py-3 shadow-[0_18px_50px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 backdrop-blur-2xl dark:shadow-[0_18px_50px_rgba(0,0,0,0.34)]">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <button
                           type="button"
                           onClick={openChatPane}
                           className="flex min-w-0 flex-1 items-center gap-3 text-left"
                         >
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-xs font-semibold text-white/80">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-xs font-semibold text-foreground">
                             Chat
                           </div>
                           <div className="min-w-0">
-                            <div className="text-[10px] uppercase tracking-[0.18em] text-white/38">
+                            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                               Chat available
                             </div>
-                            <div className="truncate text-sm text-white/72">
+                            <div className="truncate text-sm text-foreground/80">
                               Click to reopen chat.
                             </div>
                           </div>
@@ -1055,7 +1056,7 @@ export function ChatbotWorkspacePage() {
                         <button
                           type="button"
                           onClick={openChatPane}
-                          className="rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-xs font-medium text-white/72 transition hover:bg-white/10 hover:text-white"
+                          className="rounded-xl border border-border bg-muted px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted/70"
                         >
                           Open chat
                         </button>
@@ -1066,20 +1067,20 @@ export function ChatbotWorkspacePage() {
                 {isChatActive && (
                   <div className="relative h-full min-h-0">
                     <div className="pointer-events-none absolute inset-x-8 -top-2 z-10 h-5 rounded-full bg-orange-500/10 blur-2xl" />
-                    <div className="relative flex h-full min-h-0 flex-col overflow-visible rounded-[30px] border border-white/12 bg-[#070707]/82 shadow-[0_28px_90px_rgba(0,0,0,0.46),0_0_0_1px_rgba(255,255,255,0.035)_inset] ring-1 ring-orange-400/10 backdrop-blur-2xl">
-                      <div className="flex shrink-0 items-center justify-between border-b border-white/7 px-4 py-3">
+                    <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] bg-background/78 shadow-[0_24px_80px_rgba(15,23,42,0.10)] ring-1 ring-border/45 backdrop-blur-2xl dark:bg-background/70 dark:shadow-[0_28px_90px_rgba(0,0,0,0.38)]">
+                      <div className="flex shrink-0 items-center justify-between gap-4 px-5 py-4">
                         <div>
-                          <div className="text-[10px] uppercase tracking-[0.18em] text-white/38">
+                          <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                             Chat workspace
                           </div>
-                          <div className="mt-1 text-sm text-white/68">
+                          <div className="mt-1 text-sm text-muted-foreground">
                             Collapse it anytime to focus on the immersive review.
                           </div>
                         </div>
                         <button
                           type="button"
                           onClick={collapseChatPane}
-                          className="rounded-xl border border-white/10 bg-black/50 px-3 py-2 text-xs font-medium text-white/72 transition hover:bg-white/10 hover:text-white"
+                          className="rounded-xl bg-card px-3 py-2 text-xs font-medium text-muted-foreground shadow-sm ring-1 ring-border/60 transition hover:bg-muted hover:text-foreground"
                         >
                           Collapse chat
                         </button>
@@ -1174,20 +1175,20 @@ export function ChatbotWorkspacePage() {
 
       {chatBlocked && (
         <div
-          className="fixed inset-0 z-[80] bg-black/82 backdrop-blur-xl"
+          className="fixed inset-0 z-[80] bg-background/82 backdrop-blur-xl"
           role="dialog"
           aria-modal="true"
           aria-labelledby="chat-consent-title"
         >
           <div className="flex min-h-full items-center justify-center p-6">
-            <div className="w-full max-w-2xl rounded-3xl border border-white/8 bg-black/80 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] md:p-8">
-              <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+            <div className="w-full max-w-2xl rounded-3xl border border-border bg-card/95 p-6 text-card-foreground shadow-[0_30px_90px_rgba(15,23,42,0.20)] dark:shadow-[0_30px_90px_rgba(0,0,0,0.6)] md:p-8">
+              <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
                 Collision IQ Consent
               </div>
-              <h2 id="chat-consent-title" className="mt-3 text-2xl font-semibold text-white md:text-3xl">
+              <h2 id="chat-consent-title" className="mt-3 text-2xl font-semibold text-card-foreground md:text-3xl">
                 Consent Required to Use AI Chat
               </h2>
-              <div className="mt-3 space-y-4 text-sm leading-7 text-white/65 md:text-base">
+              <div className="mt-3 space-y-4 text-sm leading-7 text-muted-foreground md:text-base">
                 <p>
                   You are about to use an AI-powered chatbot. This chatbot is an automated system and not a live human representative.
                 </p>
@@ -1200,7 +1201,7 @@ export function ChatbotWorkspacePage() {
                     href="/privacy"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-white underline underline-offset-4 hover:text-orange-200"
+                    className="text-foreground underline underline-offset-4 hover:text-orange-600"
                   >
                     Privacy Policy
                   </a>.
@@ -1211,7 +1212,7 @@ export function ChatbotWorkspacePage() {
                     href="/terms"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-white underline underline-offset-4 hover:text-orange-200"
+                    className="text-foreground underline underline-offset-4 hover:text-orange-600"
                   >
                     Terms of Service
                   </a>{" "}
@@ -1220,37 +1221,37 @@ export function ChatbotWorkspacePage() {
                     href="/privacy"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-white underline underline-offset-4 hover:text-orange-200"
+                    className="text-foreground underline underline-offset-4 hover:text-orange-600"
                   >
                     Privacy Policy
                   </a>.
                 </p>
               </div>
 
-              <div className="mt-6 rounded-2xl border border-white/8 bg-white/[0.04] p-4">
+              <div className="mt-6 rounded-2xl border border-border bg-muted p-4">
                 <label className="flex items-start gap-3">
                   <input
                     type="checkbox"
                     checked={consentChecked}
                     onChange={(event) => setConsentChecked(event.target.checked)}
-                    className="mt-1 h-4 w-4 rounded border-white/20 bg-black/40 text-orange-500 focus:ring-orange-500"
+                    className="mt-1 h-4 w-4 rounded border-border bg-input text-orange-500 focus:ring-orange-500"
                   />
-                  <span className="text-sm leading-6 text-white/65">
+                  <span className="text-sm leading-6 text-muted-foreground">
                     I have read and agree to the Terms of Service and Privacy Policy, and I consent to the use of the AI chatbot as described above.
                   </span>
                 </label>
-                <p className="mt-3 text-xs leading-5 text-white/40">
+                <p className="mt-3 text-xs leading-5 text-muted-foreground">
                   You must check the box before continuing.
                 </p>
               </div>
 
               <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-3 text-xs text-white/40">
+                <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                   <a
                     href="/terms"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="transition hover:text-white"
+                    className="transition hover:text-foreground"
                   >
                     Terms of Service
                   </a>
@@ -1259,7 +1260,7 @@ export function ChatbotWorkspacePage() {
                     href="/privacy"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="transition hover:text-white"
+                    className="transition hover:text-foreground"
                   >
                     Privacy Policy
                   </a>
@@ -1269,7 +1270,7 @@ export function ChatbotWorkspacePage() {
                   <button
                     type="button"
                     onClick={handleConsentCancel}
-                    className="rounded-2xl bg-white/[0.045] px-4 py-2 text-sm text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+                    className="rounded-2xl bg-background px-4 py-2 text-sm text-muted-foreground transition hover:bg-card hover:text-foreground"
                   >
                     Cancel
                   </button>
@@ -1832,7 +1833,7 @@ function RailContent({
     }
   }
 
-  async function startAcademyServiceCheckout() {
+  async function startAcademyServiceCheckout(serviceTypeOverride?: string) {
     if (!analysisReportId) {
       setSnapshotStatus("Start a case review before opening an Academy service checkout.");
       return;
@@ -1846,6 +1847,7 @@ function RailContent({
 
     setServiceCheckoutLoading(true);
     setSnapshotStatus(null);
+    const serviceType = serviceTypeOverride ?? academyTrigger?.serviceKey ?? "academy_appraisal";
 
     const checkoutWindow = window.open("about:blank", "_blank");
     if (checkoutWindow) {
@@ -1858,7 +1860,7 @@ function RailContent({
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
         body: JSON.stringify({
-          serviceType: "academy_appraisal",
+          serviceType,
           claimId,
           analysisReportId,
           attachmentIds,
@@ -1880,6 +1882,7 @@ function RailContent({
       } else {
         window.open(data.url, "_blank", "noopener,noreferrer");
       }
+      setSnapshotStatus("Checkout opened in a new tab. You can keep working in this chat.");
     } catch (error) {
       checkoutWindow?.close();
       setSnapshotStatus(
@@ -1887,6 +1890,7 @@ function RailContent({
           ? error.message
           : "Academy checkout could not be started."
       );
+    } finally {
       setServiceCheckoutLoading(false);
     }
   }
@@ -1904,26 +1908,26 @@ function RailContent({
   }, [activeInsightKey]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col px-5 py-5 md:px-6 md:py-6">
-      <section className="rounded-[24px] border border-white/8 bg-gradient-to-br from-white/[0.07] via-white/[0.035] to-black/20 p-4 shadow-[0_20px_48px_rgba(0,0,0,0.24)]">
+    <div className="flex h-full min-h-0 flex-col px-4 py-5 md:px-5 md:py-6">
+      <section className="rounded-[24px] bg-card/92 p-4 shadow-[0_18px_46px_rgba(15,23,42,0.09)] ring-1 ring-border/50 dark:shadow-[0_18px_46px_rgba(0,0,0,0.22)]">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+            <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
               Claim Command Center
             </div>
-            <div className="mt-1.5 text-[1.12rem] font-semibold tracking-[-0.03em] text-white/85">
+            <div className="mt-1.5 text-[1.12rem] font-semibold tracking-[-0.03em] text-card-foreground">
               Decision-Ready Analysis
             </div>
-            <div className="mt-1 text-[13px] leading-5 text-white/40">
+            <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
               Fast scan first. Details below.
             </div>
           </div>
-          <div className="rounded-full border border-white/8 bg-black/20 px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-white/40">
+          <div className="rounded-full bg-muted/85 px-3 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground ring-1 ring-border/50">
             {railStatus}
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="mt-4 grid grid-cols-2 gap-2.5">
           <MetricCard label="Risk" value={railRisk} prominent={hasResolvedAnalysis} />
           <MetricCard label="Confidence" value={railConfidence} prominent={hasResolvedAnalysis} />
           <MetricCard
@@ -1940,7 +1944,7 @@ function RailContent({
           <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/68">
             Analysis in progress
           </div>
-          <div className="text-[13px] leading-5 text-white/65">
+          <div className="text-[13px] leading-5 text-muted-foreground">
             Structured review is still hydrating for the current file set. We&apos;ll populate the
             rail, valuation, supplement lines, and exports when the analysis route finishes.
           </div>
@@ -1952,7 +1956,7 @@ function RailContent({
           <div className="text-[10px] uppercase tracking-[0.22em] text-red-200/72">
             Analysis blocked
           </div>
-          <div className="text-[13px] leading-5 text-white/65">
+          <div className="text-[13px] leading-5 text-muted-foreground">
             {analysisStatusDetail ||
               "The current file set could not be analyzed. Review access status or retry."}
           </div>
@@ -1979,9 +1983,9 @@ function RailContent({
             featured
           />
         ) : (
-          <section className="mt-5 space-y-2 rounded-2xl border border-white/7 bg-white/[0.03] p-3.5">
-            <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">Decision Snapshot</div>
-            <div className="text-[13px] leading-5 text-white/65">
+          <section className="mt-5 space-y-2 rounded-2xl bg-card/88 p-3.5 shadow-sm ring-1 ring-border/45">
+            <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Decision Snapshot</div>
+            <div className="text-[13px] leading-5 text-muted-foreground">
               Upload an estimate or photos to generate the key repair risks, missing support, and next-step guidance.
             </div>
           </section>
@@ -1991,24 +1995,24 @@ function RailContent({
       <RailGroup label="Context" compact />
 
       {hasResolvedAnalysis && (
-        <section className="mt-5 space-y-2.5 rounded-2xl border border-white/7 bg-white/[0.03] p-3.5">
-          <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+        <section className="mt-5 space-y-2.5 rounded-2xl border border-border bg-card p-3.5">
+          <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
             Vehicle Context
           </div>
-          <div className="space-y-1.5 text-[13px] leading-5 text-white/65">
-            {vehicleIdentity && <div className="text-white/85">{vehicleIdentity}</div>}
+          <div className="space-y-1.5 text-[13px] leading-5 text-muted-foreground">
+            {vehicleIdentity && <div className="text-foreground">{vehicleIdentity}</div>}
             {renderModel.vehicle.trim && (
-              <div className="text-white/65">Trim: {renderModel.vehicle.trim}</div>
+              <div className="text-muted-foreground">Trim: {renderModel.vehicle.trim}</div>
             )}
-            {vehicleVin && <div className="text-white/65">VIN: {vehicleVin}</div>}
-            {insurer && <div className="text-white/65">Insurer: {insurer}</div>}
+            {vehicleVin && <div className="text-muted-foreground">VIN: {vehicleVin}</div>}
+            {insurer && <div className="text-muted-foreground">Insurer: {insurer}</div>}
             {typeof renderModel.reportFields.mileage === "number" && (
-              <div className="text-white/65">
+              <div className="text-muted-foreground">
                 Mileage: {renderModel.reportFields.mileage.toLocaleString("en-US")}
               </div>
             )}
-            {estimateTotal && <div className="text-white/65">Estimate total: {estimateTotal}</div>}
-            <div className="text-white/40">
+            {estimateTotal && <div className="text-muted-foreground">Estimate total: {estimateTotal}</div>}
+            <div className="text-muted-foreground">
               Confidence: {formatVehicleConfidence(renderModel.vehicle)}
             </div>
           </div>
@@ -2073,7 +2077,12 @@ function RailContent({
           />
           {analysisResult ? (
             <div className="mt-3">
-              <ValuationSection renderModel={renderModel} lowConfidence={valuationLowConfidence} />
+              <ValuationSection
+                renderModel={renderModel}
+                lowConfidence={valuationLowConfidence}
+                checkoutLoading={serviceCheckoutLoading}
+                onStartAcvCheckout={() => void startAcademyServiceCheckout("academy_acv_review")}
+              />
             </div>
           ) : null}
         </RailInsightSection>
@@ -2100,32 +2109,32 @@ function RailContent({
           registerSectionRef={registerSectionRef}
           onActivate={onInsightSelect}
         >
-        <section className="mt-5 space-y-2.5 rounded-2xl border border-white/7 bg-white/[0.03] p-3.5">
-        <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+        <section className="mt-5 space-y-2.5 rounded-2xl border border-border bg-card p-3.5">
+        <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
           Support Gaps
         </div>
         {remainingRecommendations.length > 0 ? (
           <div className="space-y-2.5">
             {remainingRecommendations.map((item, index) => (
-              <div key={`${item.title}-${index}`} className="rounded-xl bg-black/16 px-3 py-3">
-                <div className="text-sm font-medium leading-5 text-white/85">
+              <div key={`${item.title}-${index}`} className="rounded-xl bg-muted px-3 py-3">
+                <div className="text-sm font-medium leading-5 text-foreground">
                   {displayOperationLabel(item.title)}
                 </div>
-                <div className="mt-1 text-xs text-white/40">
+                <div className="mt-1 text-xs text-muted-foreground">
                   {formatLabel(item.category)} · {formatLabel(item.kind)} · Priority {formatLabel(item.priority)}
                 </div>
-                <div className="mt-2 text-[13px] leading-5 text-white/65">{item.rationale}</div>
+                <div className="mt-2 text-[13px] leading-5 text-muted-foreground">{item.rationale}</div>
                 {item.evidence && (
-                  <div className="mt-2 text-xs leading-5 text-white/40">Evidence: {item.evidence}</div>
+                  <div className="mt-2 text-xs leading-5 text-muted-foreground">Evidence: {item.evidence}</div>
                 )}
                 {item.source && (
-                  <div className="mt-1 text-[11px] leading-5 text-white/40">Source: {item.source}</div>
+                  <div className="mt-1 text-[11px] leading-5 text-muted-foreground">Source: {item.source}</div>
                 )}
               </div>
             ))}
           </div>
         ) : (
-          <div className="text-[13px] leading-5 text-white/40">
+          <div className="text-[13px] leading-5 text-muted-foreground">
             {featuredRecommendation
               ? "The strongest recommendation is highlighted above."
               : "No clear supportable missing, underwritten, or disputed repair-path items were identified from the current structured analysis."}
@@ -2205,26 +2214,49 @@ function RailContent({
           registerSectionRef={registerSectionRef}
           onActivate={onInsightSelect}
         >
-        <section className="mt-5 space-y-3 rounded-2xl bg-white/[0.03] p-4">
-          <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
-            Exports
+        <section className="mt-5 space-y-3 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border/45">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+              Reports & Exports
+            </div>
+            <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
+              Download carrier-ready PDFs or email a report directly.
+            </div>
           </div>
-          <div className="grid gap-2">
+          <div className="grid gap-3">
             <button
+              type="button"
               onClick={openSnapshotPreview}
               disabled={!canUseSnapshotExport}
-              className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-40"
+              className="group flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#C65A2A]/35 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring/25 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              1-Page Snapshot
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#C65A2A]/12 text-[#C65A2A]">
+                  <FileText size={17} aria-hidden />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-foreground">1-Page Snapshot</span>
+                  <span className="block text-[12px] leading-5 text-muted-foreground">Preview, download, or send a redacted snapshot.</span>
+                </span>
+              </span>
+              <ArrowRight size={16} className="shrink-0 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-[#C65A2A]" aria-hidden />
             </button>
             <ReportSendStatusLine
               send={getLastSendFor("snapshot")}
               loading={reportSendHistoryLoading}
             />
             {canUseBasicPdfExport ? (
-              <div className="space-y-1.5">
+              <div className="space-y-2 rounded-xl border border-border bg-card p-4 shadow-sm transition hover:border-[#C65A2A]/25 hover:shadow-md">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <FileText size={15} className="text-[#C65A2A]" aria-hidden />
+                    Collision Repair Intelligence Report
+                  </div>
+                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">Carrier-ready repair intelligence package.</div>
+                </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <button
+                    type="button"
                     onClick={() => {
                       exportReport(
                         renderModel,
@@ -2240,16 +2272,18 @@ function RailContent({
                         exportType: "full_report",
                       });
                     }}
-                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99]"
                   >
-                    Download Collision Repair Intelligence Report
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download PDF</span>
+                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
                     type="button"
                     onClick={() => openReportSend("full_report")}
-                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-[#C65A2A] bg-[#C65A2A] px-3 py-2.5 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99]"
                   >
-                    Email Collision Repair Intelligence Report
+                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>
+                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </div>
                 <ReportSendStatusLine
@@ -2259,9 +2293,17 @@ function RailContent({
               </div>
             ) : null}
             {canUseRebuttalEmail ? (
-              <div className="space-y-1.5">
+              <div className="space-y-2 rounded-xl border border-border bg-card p-4 shadow-sm transition hover:border-[#C65A2A]/25 hover:shadow-md">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <FileText size={15} className="text-[#C65A2A]" aria-hidden />
+                    Rebuttal Email
+                  </div>
+                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">Negotiation-ready rebuttal language.</div>
+                </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <button
+                    type="button"
                     onClick={() => {
                       exportPdfVariant({
                         normalizedResult,
@@ -2278,16 +2320,18 @@ function RailContent({
                         exportType: "rebuttal",
                       });
                     }}
-                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99]"
                   >
-                    Download Rebuttal Email
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download PDF</span>
+                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
                     type="button"
                     onClick={() => openReportSend("rebuttal", "carrier")}
-                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-[#C65A2A] bg-[#C65A2A] px-3 py-2.5 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99]"
                   >
-                    Email Rebuttal Email
+                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>
+                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </div>
                 <ReportSendStatusLine
@@ -2297,9 +2341,17 @@ function RailContent({
               </div>
             ) : null}
             {canUseDisputeReportExport ? (
-              <div className="space-y-1.5">
+              <div className="space-y-2 rounded-xl border border-border bg-card p-4 shadow-sm transition hover:border-[#C65A2A]/25 hover:shadow-md">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <FileText size={15} className="text-[#C65A2A]" aria-hidden />
+                    Dispute Intelligence Report
+                  </div>
+                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">Evidence-backed dispute framing.</div>
+                </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <button
+                    type="button"
                     onClick={() => {
                       exportPdfVariant({
                         normalizedResult,
@@ -2316,16 +2368,18 @@ function RailContent({
                         exportType: "dispute_report",
                       });
                     }}
-                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99]"
                   >
-                    Download Dispute Intelligence Report
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download PDF</span>
+                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
                     type="button"
                     onClick={() => openReportSend("dispute_intelligence", "carrier")}
-                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-[#C65A2A] bg-[#C65A2A] px-3 py-2.5 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99]"
                   >
-                    Email Dispute Intelligence Report
+                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>
+                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </div>
                 <ReportSendStatusLine
@@ -2335,7 +2389,14 @@ function RailContent({
               </div>
             ) : null}
             {canUseCustomerReport ? (
-              <div className="space-y-1.5">
+              <div className="space-y-2 rounded-xl border border-border bg-card p-4 shadow-sm transition hover:border-[#C65A2A]/25 hover:shadow-md">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <FileText size={15} className="text-[#C65A2A]" aria-hidden />
+                    Customer Report
+                  </div>
+                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">Plain-language customer-facing summary.</div>
+                </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <button
                     type="button"
@@ -2366,17 +2427,19 @@ function RailContent({
                         exportType: "customer_report",
                       });
                     }}
-                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99] aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
                   >
-                    {isGeneratingCustomerReport ? "Generating Customer Report..." : "Download Customer Report"}
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> {isGeneratingCustomerReport ? "Generating..." : "Download PDF"}</span>
+                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
                     type="button"
                     disabled={isGeneratingCustomerReport}
                     onClick={() => openReportSend("customer_report", "customer")}
-                    className="w-full rounded-xl bg-white/[0.045] p-3 text-xs text-white/65 transition hover:bg-white/[0.075] hover:text-white/85 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-[#C65A2A] bg-[#C65A2A] px-3 py-2.5 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Email Customer Report
+                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>
+                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </div>
                 <ReportSendStatusLine
@@ -2389,7 +2452,7 @@ function RailContent({
               <button
                 type="button"
                 onClick={onCustomerReportLocked}
-                className="w-full rounded-xl border border-orange-400/18 bg-[#C65A2A]/10 p-3 text-xs text-orange-100/80 transition hover:bg-[#C65A2A]/16"
+                className="w-full rounded-xl border border-orange-400/18 bg-[#C65A2A]/10 p-3 text-xs text-foreground transition hover:bg-[#C65A2A]/16"
               >
                 Full reports, Dispute Intelligence, Rebuttal PDF, and Customer Report are available on Pro.
               </button>
@@ -2402,10 +2465,10 @@ function RailContent({
                 className="w-full rounded-xl border border-[#C65A2A]/30 bg-gradient-to-br from-[#C65A2A]/18 via-[#C65A2A]/10 to-white/[0.02] p-3 text-left transition hover:bg-[#C65A2A]/20 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <div className="text-[10px] uppercase tracking-[0.22em] text-[#E8A27F]">Academy Service</div>
-                <div className="mt-1 text-sm font-semibold text-white/88">
+                <div className="mt-1 text-sm font-semibold text-foreground">
                   {serviceCheckoutLoading ? "Opening checkout..." : academyTrigger.cta}
                 </div>
-                <div className="mt-1 text-xs leading-5 text-white/62">Why this is showing: {academyTrigger.reason}</div>
+                <div className="mt-1 text-xs leading-5 text-muted-foreground">Why this is showing: {academyTrigger.reason}</div>
               </button>
             ) : null}
             {customerReportError ? (
@@ -2414,12 +2477,12 @@ function RailContent({
               </div>
             ) : null}
             {snapshotStatus ? (
-              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-2 text-[12px] leading-5 text-white/55">
+              <div className="rounded-xl border border-border bg-muted px-3 py-2 text-[12px] leading-5 text-muted-foreground">
                 {snapshotStatus}
               </div>
             ) : null}
             {reportSendStatus ? (
-              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-2 text-[12px] leading-5 text-white/55">
+              <div className="rounded-xl border border-border bg-muted px-3 py-2 text-[12px] leading-5 text-muted-foreground">
                 {reportSendStatus}
               </div>
             ) : null}
@@ -2605,14 +2668,14 @@ function ReportSendStatusLine({
   loading: boolean;
 }) {
   if (loading && !send) {
-    return <div className="px-1 text-[11px] leading-4 text-white/32">Loading send history...</div>;
+    return <div className="px-1 text-[11px] leading-4 text-muted-foreground">Loading send history...</div>;
   }
   if (!send) {
     return null;
   }
 
   return (
-    <div className="px-1 text-[11px] leading-4 text-white/42">
+    <div className="px-1 text-[11px] leading-4 text-muted-foreground">
       {formatReportSendStatus(send)}
     </div>
   );
@@ -2712,28 +2775,57 @@ function ReportSendModal({
   onSend: () => void;
   onCancel: () => void;
 }) {
-  return (
-    <div className="fixed inset-0 z-[95] overflow-y-auto bg-black/78 px-4 py-6 backdrop-blur-xl" role="dialog" aria-modal="true">
-      <div className="mx-auto max-w-xl rounded-3xl border border-white/10 bg-[#0B0B0C] p-5 shadow-[0_30px_90px_rgba(0,0,0,0.65)]">
-        <div className="flex items-start justify-between gap-4">
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, []);
+
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[10000]"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="send-report-title"
+    >
+      <div className="fixed inset-0 z-[10000] bg-black/40 dark:bg-black/60" />
+      <div className="fixed inset-0 isolate z-[10010] flex items-center justify-center p-4 sm:p-6">
+      <div
+        className="relative z-[10020] flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] shadow-xl"
+      >
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border/60 px-5 py-4">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/70">
+            <div className="text-[10px] uppercase tracking-[0.22em] text-[#C65A2A]">
               Collision IQ
             </div>
-            <h2 className="mt-2 text-2xl font-semibold text-white">Send report</h2>
+            <h2 id="send-report-title" className="mt-2 text-2xl font-semibold text-foreground">Send report</h2>
           </div>
-          <button type="button" onClick={onCancel} className="rounded-xl bg-white/[0.06] px-3 py-2 text-xs text-white/65 hover:bg-white/[0.1]">
+          <button ref={closeButtonRef} type="button" onClick={onCancel} className="rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground hover:bg-muted/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring/25">
             Cancel
           </button>
         </div>
 
-        <div className="mt-5 grid gap-3">
-          <label className="grid gap-1 text-xs text-white/45">
+        <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto px-5 py-4 pb-8">
+          <div className="grid gap-3">
+          <label className="grid gap-1 text-xs text-muted-foreground">
             Destination
             <select
               value={destinationType}
               onChange={(event) => onDestinationTypeChange(event.target.value as ReportDestinationType)}
-              className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/75 outline-none focus:border-orange-300/40"
+              className="relative z-[160] rounded-xl border border-[var(--border)] bg-[var(--input)] px-3 py-2 text-sm text-[var(--foreground)] outline-none focus:border-ring focus:ring-2 focus:ring-ring/15"
             >
               <option value="customer">Customer</option>
               <option value="carrier">Carrier</option>
@@ -2742,36 +2834,39 @@ function ReportSendModal({
           </label>
           <SnapshotInput label="Recipient email" value={recipientEmail} onChange={onRecipientEmailChange} type="email" />
           <SnapshotInput label="Subject" value={subject} onChange={onSubjectChange} />
-          <label className="grid gap-1 text-xs text-white/45">
+          <label className="grid gap-1 text-xs text-muted-foreground">
             Message
             <textarea
               value={message}
               onChange={(event) => onMessageChange(event.target.value)}
               rows={7}
-              className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm leading-6 text-white/75 outline-none focus:border-orange-300/40"
+              className="rounded-xl border border-[var(--border)] bg-[var(--input)] px-3 py-2 text-sm leading-6 text-[var(--foreground)] outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/15"
             />
           </label>
-          <label className="flex items-start gap-3 text-sm text-white/65">
+          <label className="flex items-start gap-3 text-sm text-muted-foreground">
             <input
               type="checkbox"
               checked={reviewed}
               onChange={(event) => onReviewedChange(event.target.checked)}
-              className="mt-1 h-4 w-4 rounded border-white/20 bg-black/40 text-orange-500 focus:ring-orange-500"
+              className="mt-1 h-4 w-4 rounded border-border bg-input text-orange-500 focus:ring-ring"
             />
             <span>I reviewed this report before sending</span>
           </label>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={onSend} disabled={!sendReady} className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-45">
-              {sending ? "Sending..." : sent ? "Resend" : "Send"}
-            </button>
-            <button type="button" onClick={onCancel} className="rounded-xl bg-white/[0.06] px-4 py-2 text-sm text-white/70 hover:bg-white/[0.1]">
-              Cancel
-            </button>
+          {status ? <div className="rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">{status}</div> : null}
           </div>
-          {status ? <div className="rounded-xl bg-white/[0.04] px-3 py-2 text-sm text-white/60">{status}</div> : null}
+        </div>
+        <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-[var(--border)] bg-[var(--background)] px-5 py-4">
+          <button type="button" onClick={onCancel} className="rounded-xl bg-muted px-4 py-2 text-sm text-muted-foreground hover:bg-muted/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring/25">
+            Cancel
+          </button>
+          <button type="button" onClick={onSend} disabled={!sendReady} className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-45">
+            {sending ? "Sending..." : sent ? "Resend" : "Send"}
+          </button>
         </div>
       </div>
-    </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -2822,23 +2917,46 @@ function SnapshotPreviewModal({
   onSend: () => void;
   onCancelSend: () => void;
 }) {
-  return (
-    <div className="fixed inset-0 z-[90] overflow-y-auto bg-black/78 px-4 py-6 backdrop-blur-xl" role="dialog" aria-modal="true">
-      <div className="mx-auto max-w-3xl rounded-3xl border border-white/10 bg-[#0B0B0C] p-5 shadow-[0_30px_90px_rgba(0,0,0,0.65)]">
-        <div className="flex items-start justify-between gap-4">
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[10000]"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="snapshot-preview-title"
+    >
+      <div className="fixed inset-0 z-[10000] bg-black/40 dark:bg-black/60" />
+      <div className="fixed inset-0 isolate z-[10010] flex items-center justify-center p-4 sm:p-6">
+      <div
+        className="relative z-[10020] flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] shadow-xl"
+      >
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border/60 px-5 py-4">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/70">
+            <div className="text-[10px] uppercase tracking-[0.22em] text-[#C65A2A]">
               {snapshot.redactionNotice}
             </div>
-            <h2 className="mt-2 text-2xl font-semibold text-white">{snapshot.title}</h2>
-            <div className="mt-1 text-sm text-white/50">{snapshot.vehicleLabel}</div>
+            <h2 id="snapshot-preview-title" className="mt-2 text-2xl font-semibold text-foreground">{snapshot.title}</h2>
+            <div className="mt-1 text-sm text-muted-foreground">{snapshot.vehicleLabel}</div>
           </div>
-          <button type="button" onClick={onClose} className="rounded-xl bg-white/[0.06] px-3 py-2 text-xs text-white/65 hover:bg-white/[0.1]">
+          <button type="button" onClick={onClose} className="rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground hover:bg-muted/80 hover:text-foreground">
             Close
           </button>
         </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-2">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 pb-8">
+        <div className="grid gap-3 md:grid-cols-2">
           <SnapshotPanel title="Adjusted Confidence" items={[
             snapshot.evidenceCompleteness.adjustedConfidence,
             `Completeness: ${formatLabel(snapshot.evidenceCompleteness.completenessStatus)}`,
@@ -2887,21 +3005,6 @@ function SnapshotPreviewModal({
           } />
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-2">
-          <button type="button" onClick={onDownload} className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90">
-            Download PDF
-          </button>
-          <button type="button" onClick={onCopy} className="rounded-xl bg-white/[0.06] px-4 py-2 text-sm text-white/70 hover:bg-white/[0.1]">
-            Copy Summary
-          </button>
-          <button type="button" onClick={() => onOpenSend("customer")} className="rounded-xl bg-white/[0.06] px-4 py-2 text-sm text-white/70 hover:bg-white/[0.1]">
-            Send to Customer
-          </button>
-          <button type="button" onClick={() => onOpenSend("carrier")} className="rounded-xl bg-white/[0.06] px-4 py-2 text-sm text-white/70 hover:bg-white/[0.1]">
-            Send to Carrier
-          </button>
-        </div>
-
         {resolveAcademyServiceTrigger({
           snapshot,
           renderModel: buildSnapshotRenderModel(snapshot),
@@ -2924,8 +3027,8 @@ function SnapshotPreviewModal({
               return (
                 <div>
                   <div className="text-[10px] uppercase tracking-[0.22em] text-[#E8A27F]">Need Help Resolving This?</div>
-                  <div className="mt-1 text-base font-semibold text-white">{trigger.cta}</div>
-                  <div className="mt-1 text-sm leading-6 text-white/66">Why this is showing: {trigger.reason}</div>
+                  <div className="mt-1 text-base font-semibold text-foreground">{trigger.cta}</div>
+                  <div className="mt-1 text-sm leading-6 text-muted-foreground">Why this is showing: {trigger.reason}</div>
                   <button
                     type="button"
                     onClick={onStartServiceCase}
@@ -2941,28 +3044,28 @@ function SnapshotPreviewModal({
         ) : null}
 
         {sendTarget ? (
-          <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-            <div className="text-sm font-semibold text-white">
+          <div className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--muted)] p-4">
+            <div className="text-sm font-semibold text-foreground">
               Send redacted snapshot to {sendTarget === "customer" ? "customer" : "carrier"}
             </div>
             <div className="mt-3 grid gap-3">
               <SnapshotInput label="Recipient email" value={recipientEmail} onChange={onRecipientEmailChange} type="email" />
               <SnapshotInput label="Subject" value={subject} onChange={onSubjectChange} />
-              <label className="grid gap-1 text-xs text-white/45">
+              <label className="grid gap-1 text-xs text-muted-foreground">
                 Message
                 <textarea
                   value={message}
                   onChange={(event) => onMessageChange(event.target.value)}
                   rows={6}
-                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm leading-6 text-white/75 outline-none focus:border-orange-300/40"
+                  className="rounded-xl border border-[var(--border)] bg-[var(--input)] px-3 py-2 text-sm leading-6 text-[var(--foreground)] outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/15"
                 />
               </label>
-              <label className="flex items-start gap-3 text-sm text-white/65">
+              <label className="flex items-start gap-3 text-sm text-muted-foreground">
                 <input
                   type="checkbox"
                   checked={reviewed}
                   onChange={(event) => onReviewedChange(event.target.checked)}
-                  className="mt-1 h-4 w-4 rounded border-white/20 bg-black/40 text-orange-500 focus:ring-orange-500"
+                  className="mt-1 h-4 w-4 rounded border-border bg-input text-orange-500 focus:ring-ring"
                 />
                 <span>I reviewed this redacted snapshot</span>
               </label>
@@ -2970,7 +3073,7 @@ function SnapshotPreviewModal({
                 <button type="button" onClick={onSend} disabled={!sendReady} className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-45">
                   {sending ? "Sending..." : sent ? "Resend" : "Send"}
                 </button>
-                <button type="button" onClick={onCancelSend} className="rounded-xl bg-white/[0.06] px-4 py-2 text-sm text-white/70 hover:bg-white/[0.1]">
+                <button type="button" onClick={onCancelSend} className="rounded-xl bg-muted/80 px-4 py-2 text-sm text-muted-foreground hover:bg-background hover:text-foreground">
                   Cancel
                 </button>
               </div>
@@ -2978,17 +3081,34 @@ function SnapshotPreviewModal({
           </div>
         ) : null}
 
-        {status ? <div className="mt-4 rounded-xl bg-white/[0.04] px-3 py-2 text-sm text-white/60">{status}</div> : null}
+        {status ? <div className="mt-4 rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">{status}</div> : null}
+        </div>
+        <div className="sticky bottom-0 flex shrink-0 flex-wrap gap-2 border-t border-[var(--border)] bg-[var(--background)] px-5 py-4">
+          <button type="button" onClick={onDownload} className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90">
+            Download PDF
+          </button>
+          <button type="button" onClick={onCopy} className="rounded-xl bg-muted px-4 py-2 text-sm text-muted-foreground hover:bg-muted/80 hover:text-foreground">
+            Copy Summary
+          </button>
+          <button type="button" onClick={() => onOpenSend("customer")} className="rounded-xl bg-muted px-4 py-2 text-sm text-muted-foreground hover:bg-muted/80 hover:text-foreground">
+            Send to Customer
+          </button>
+          <button type="button" onClick={() => onOpenSend("carrier")} className="rounded-xl bg-muted px-4 py-2 text-sm text-muted-foreground hover:bg-muted/80 hover:text-foreground">
+            Send to Carrier
+          </button>
+        </div>
       </div>
-    </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
 function SnapshotPanel({ title, items }: { title: string; items: string[] }) {
   return (
-    <section className="rounded-2xl border border-white/8 bg-white/[0.035] p-3">
-      <div className="text-[10px] uppercase tracking-[0.18em] text-white/40">{title}</div>
-      <div className="mt-2 space-y-1.5 text-[13px] leading-5 text-white/65">
+    <section className="rounded-2xl border border-[var(--border)] bg-[var(--muted)] p-3">
+      <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{title}</div>
+      <div className="mt-2 space-y-1.5 text-[13px] leading-5 text-foreground/75">
         {items.map((item, index) => (
           <div key={`${title}-${index}`}>{item}</div>
         ))}
@@ -3009,13 +3129,13 @@ function SnapshotInput({
   type?: string;
 }) {
   return (
-    <label className="grid gap-1 text-xs text-white/45">
+    <label className="grid gap-1 text-xs text-muted-foreground">
       {label}
       <input
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm text-white/75 outline-none focus:border-orange-300/40"
+        className="rounded-xl border border-[var(--border)] bg-[var(--input)] px-3 py-2 text-sm text-[var(--foreground)] outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/15"
       />
     </label>
   );
@@ -3353,21 +3473,21 @@ function AtAGlanceCard({
     <section
       className={`shrink-0 rounded-[20px] border px-4 py-3 shadow-[0_16px_40px_rgba(198,90,42,0.1)] transition-colors ${
         active
-          ? "border-orange-500/18 bg-gradient-to-br from-[#C65A2A]/12 via-[#C65A2A]/[0.05] to-white/[0.025]"
-          : "border-white/7 bg-white/[0.03]"
+          ? "border-orange-500/25 bg-gradient-to-br from-[#C65A2A]/12 via-[#C65A2A]/[0.05] to-card"
+          : "border-border bg-card"
       }`}
     >
       <div
         className={`text-[10px] uppercase tracking-[0.22em] ${
-          active ? "text-orange-200/68" : "text-white/40"
+          active ? "text-orange-700 dark:text-orange-200/68" : "text-muted-foreground"
         }`}
       >
         At a glance
       </div>
-      <div className={`mt-2 text-sm font-semibold leading-6 ${active ? "text-white/85" : "text-white/40"}`}>
+      <div className={`mt-2 text-sm font-semibold leading-6 ${active ? "text-card-foreground" : "text-muted-foreground"}`}>
         {headline}
       </div>
-      <div className="mt-2 text-xs leading-5 text-white/55">
+      <div className="mt-2 text-xs leading-5 text-muted-foreground">
         {compactSummary || "Vehicle context, recommendation priority, and evidence quality will appear here."}
       </div>
     </section>
@@ -3384,8 +3504,8 @@ function RailGroup({
   return (
     <div className={compact ? "mt-5.5" : "mt-5"}>
       <div className="flex items-center gap-3">
-        <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">{label}</div>
-        <div className="h-px flex-1 bg-white/8" />
+        <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{label}</div>
+        <div className="h-px flex-1 bg-gradient-to-r from-border/80 to-transparent" />
       </div>
     </div>
   );
@@ -3404,14 +3524,14 @@ function MetricCard({
 }) {
   return (
     <div
-      className={`min-w-0 rounded-xl border border-white/7 px-3 py-2.5 ${
+      className={`min-w-0 rounded-2xl px-3 py-2.5 shadow-sm ring-1 ring-border/50 ${
         prominent
-          ? "bg-gradient-to-br from-[#C65A2A]/18 via-[#C65A2A]/[0.07] to-black/18"
-          : "bg-black/16"
+          ? "bg-gradient-to-br from-[#C65A2A]/18 via-[#C65A2A]/[0.07] to-card"
+          : "bg-muted/72"
       }`}
     >
-      <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">{label}</div>
-      <div className={`mt-1 min-w-0 font-medium text-white/85 ${detailClassName || "text-sm"}`}>{value}</div>
+      <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{label}</div>
+      <div className={`mt-1 min-w-0 font-medium text-foreground ${detailClassName || "text-sm"}`}>{value}</div>
     </div>
   );
 }
@@ -3437,7 +3557,7 @@ function RailInsightSection({
         registerSectionRef(insightKey, node);
       }}
       onClick={() => onActivate(insightKey)}
-      className={`cursor-pointer rounded-[26px] transition-all hover:bg-white/[0.02] ${
+      className={`cursor-pointer rounded-[26px] transition-all hover:bg-muted/50 ${
         active ? "bg-[#C65A2A]/[0.06] ring-1 ring-inset ring-orange-400/18" : ""
       }`}
     >
@@ -3465,12 +3585,12 @@ function dedupeRailItems(items: Array<string | undefined | null>) {
 
 function SupportSignalsCard({ items }: { items: string[] }) {
   return (
-    <section className="mt-5 space-y-2.5 rounded-2xl border border-white/7 bg-white/[0.03] p-3.5">
-      <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">Support Signals</div>
+    <section className="mt-5 space-y-2.5 rounded-2xl border border-border bg-card p-3.5">
+      <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Support Signals</div>
       <div className="space-y-2">
         {items.map((item) => (
-          <div key={item} className="flex gap-2 rounded-xl bg-black/16 px-3 py-3 text-[13px] leading-5 text-white/70">
-            <span className="pt-[1px] text-green-300/80">&bull;</span>
+          <div key={item} className="flex gap-2 rounded-xl bg-muted px-3 py-3 text-[13px] leading-5 text-muted-foreground">
+            <span className="pt-[1px] text-green-600 dark:text-green-300/80">&bull;</span>
             <span>{item}</span>
           </div>
         ))}
@@ -3481,12 +3601,12 @@ function SupportSignalsCard({ items }: { items: string[] }) {
 
 function NextMovesCard({ items }: { items: string[] }) {
   return (
-    <section className="mt-5 space-y-2.5 rounded-2xl border border-white/7 bg-white/[0.03] p-3.5">
-      <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">Next Moves</div>
+    <section className="mt-5 space-y-2.5 rounded-2xl border border-border bg-card p-3.5">
+      <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Next Moves</div>
       <div className="space-y-2">
         {items.map((item, index) => (
-          <div key={item} className="flex gap-2 rounded-xl bg-black/16 px-3 py-3 text-[13px] leading-5 text-white/70">
-            <span className="font-semibold text-white/88">{index + 1}.</span>
+          <div key={item} className="flex gap-2 rounded-xl bg-muted px-3 py-3 text-[13px] leading-5 text-muted-foreground">
+            <span className="font-semibold text-foreground">{index + 1}.</span>
             <span>{item}</span>
           </div>
         ))}
@@ -3648,7 +3768,7 @@ function TopDisputeDriversCard({
   }
 
   return (
-    <section className="mt-5 space-y-3 rounded-[24px] border border-orange-500/18 bg-gradient-to-br from-[#C65A2A]/10 via-[#C65A2A]/[0.04] to-black/20 p-4 shadow-[0_18px_44px_rgba(198,90,42,0.12)]">
+    <section className="mt-5 space-y-3 rounded-[24px] border border-orange-500/18 bg-gradient-to-br from-[#C65A2A]/10 via-card to-muted p-4 shadow-[0_18px_44px_rgba(198,90,42,0.12)]">
       <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
         Top Dispute Drivers
       </div>
@@ -3684,25 +3804,25 @@ function FindingReasoningCard({
   if (!findings.length) return null;
 
   return (
-    <section className="space-y-3 rounded-[24px] border border-white/7 bg-white/[0.03] p-4">
-      <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+    <section className="space-y-3 rounded-[24px] border border-border bg-card p-4">
+      <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
         Finding Reasoning
       </div>
       <div className="space-y-3">
         {findings.slice(0, 5).map((finding, index) => (
-          <div key={finding.id ?? `${finding.issue}-${index}`} className="rounded-2xl bg-black/18 px-3.5 py-3">
+          <div key={finding.id ?? `${finding.issue}-${index}`} className="rounded-2xl bg-muted px-3.5 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-sm font-semibold leading-5 text-white/88">
+              <div className="text-sm font-semibold leading-5 text-foreground">
                 {finding.priorityRank ?? index + 1}. {finding.issue}
               </div>
-              <div className="rounded-full border border-white/8 bg-black/18 px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-white/46">
+              <div className="rounded-full border border-border bg-card px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
                 {formatLabel(finding.evidenceLevel)}
               </div>
             </div>
             <ReasoningLine label="Why it matters" value={finding.why_it_matters} />
             <ReasoningLine label="What proves it" value={finding.what_proves_it} />
             <ReasoningLine label="Next action" value={finding.next_action} />
-            <div className="mt-2 text-[11px] leading-5 text-white/38">
+            <div className="mt-2 text-[11px] leading-5 text-muted-foreground">
               Confidence {Math.round(finding.confidence * 100)}% · Specificity {formatLabel(finding.claimSpecificity)}
             </div>
           </div>
@@ -3716,8 +3836,8 @@ function ReasoningLine({ label, value }: { label: string; value: string }) {
   if (!value.trim()) return null;
 
   return (
-    <div className="mt-2 text-[13px] leading-5 text-white/70">
-      <span className="font-semibold text-white/88">{label}:</span> {value}
+    <div className="mt-2 text-[13px] leading-5 text-muted-foreground">
+      <span className="font-semibold text-foreground">{label}:</span> {value}
     </div>
   );
 }
@@ -3730,8 +3850,8 @@ function RetrievalSummaryCard({
   const sources = summary.sourcesInfluencingFindings.slice(0, 5);
 
   return (
-    <section className="space-y-3 rounded-[24px] border border-white/7 bg-white/[0.03] p-4">
-      <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+    <section className="space-y-3 rounded-[24px] border border-border bg-card p-4">
+      <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
         Retrieval Summary
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -3743,16 +3863,16 @@ function RetrievalSummaryCard({
       {sources.length > 0 ? (
         <div className="space-y-2">
           {sources.map((source, index) => (
-            <div key={`${source.title}-${index}`} className="rounded-xl bg-black/16 px-3 py-2.5">
-              <div className="text-[13px] font-medium leading-5 text-white/78">{source.title}</div>
-              <div className="mt-1 text-[11px] uppercase tracking-[0.14em] text-white/38">
+            <div key={`${source.title}-${index}`} className="rounded-xl bg-muted px-3 py-2.5">
+              <div className="text-[13px] font-medium leading-5 text-foreground">{source.title}</div>
+              <div className="mt-1 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
                 {formatLabel(source.sourceType)} · {source.relatedFindingIds.length} finding(s)
               </div>
             </div>
           ))}
         </div>
       ) : (
-        <div className="text-[13px] leading-5 text-white/42">
+        <div className="text-[13px] leading-5 text-muted-foreground">
           No retrieved source influenced an included finding.
         </div>
       )}
@@ -3766,12 +3886,12 @@ function ConfidenceIntegrityCard({
   integrity: ReturnType<typeof buildExportModel>["confidenceIntegrity"];
 }) {
   return (
-    <section className="mt-5 space-y-3 rounded-[24px] border border-white/7 bg-white/[0.03] p-4">
+    <section className="mt-5 space-y-3 rounded-[24px] border border-border bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+        <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
           File Coverage / Evidence Completeness
         </div>
-        <div className="rounded-full border border-white/8 bg-black/18 px-3 py-1 text-[11px] font-semibold text-white/70">
+        <div className="rounded-full border border-border bg-muted px-3 py-1 text-[11px] font-semibold text-foreground">
           {integrity.completenessStatus}
         </div>
       </div>
@@ -3781,7 +3901,7 @@ function ConfidenceIntegrityCard({
         <MetricCard label="Files" value={String(integrity.uploadedFileCount)} />
         <MetricCard label="Upload Cap" value={integrity.uploadLimitReached ? "Reached" : "Not reached"} />
       </div>
-      <div className="rounded-2xl bg-black/16 px-3.5 py-3 text-[13px] leading-5 text-white/68">
+      <div className="rounded-2xl bg-muted px-3.5 py-3 text-[13px] leading-5 text-muted-foreground">
         {integrity.userFacingDisclosure}
       </div>
       {integrity.missingCriticalEvidence.length > 0 ? (
@@ -3797,9 +3917,9 @@ function DisputeStrategyCard({
   strategy: NonNullable<ReturnType<typeof buildExportModel>["disputeStrategy"]>;
 }) {
   return (
-    <section className="space-y-3 rounded-[24px] border border-white/7 bg-white/[0.03] p-4">
+    <section className="space-y-3 rounded-[24px] border border-border bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">
+        <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
           Dispute Strategy
         </div>
         <div className="rounded-full border border-orange-400/18 bg-[#C65A2A]/10 px-3 py-1 text-[11px] font-semibold text-orange-100/82">
@@ -3827,11 +3947,11 @@ function StrategyList({
 
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-[0.18em] text-white/36">{label}</div>
+      <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
       <div className="mt-2 space-y-1.5">
         {items.slice(0, 5).map((item, index) => (
-          <div key={`${label}-${item}-${index}`} className="flex gap-2 rounded-xl bg-black/16 px-3 py-2 text-[13px] leading-5 text-white/68">
-            <span className="font-semibold text-white/80">{numbered ? `${index + 1}.` : "•"}</span>
+          <div key={`${label}-${item}-${index}`} className="flex gap-2 rounded-xl bg-muted px-3 py-2 text-[13px] leading-5 text-muted-foreground">
+            <span className="font-semibold text-foreground">{numbered ? `${index + 1}.` : "•"}</span>
             <span>{item}</span>
           </div>
         ))}
@@ -3857,28 +3977,28 @@ function DisputeDriverCard({
   const className = `rounded-2xl px-3.5 py-3 transition-[border-color,background-color,box-shadow] duration-300 ${
     active
       ? "border border-orange-300/28 bg-[#C65A2A]/12 shadow-[0_0_0_1px_rgba(210,122,81,0.12)]"
-      : "bg-black/18"
+      : "border border-border bg-muted"
   }`;
 
   const content = (
     <>
-      <div className="text-sm font-semibold leading-5 text-white/88">
+      <div className="text-sm font-semibold leading-5 text-foreground">
         {index + 1}. {driver.title}
       </div>
-      <div className="mt-2 text-[13px] leading-5 text-white/70">
-        <span className="font-semibold text-white/88">Impact:</span> {driver.impact}
+      <div className="mt-2 text-[13px] leading-5 text-muted-foreground">
+        <span className="font-semibold text-foreground">Impact:</span> {driver.impact}
       </div>
-      <div className="mt-1 text-[13px] leading-5 text-white/70">
-        <span className="font-semibold text-white/88">Why it matters:</span> {driver.whyItMatters}
+      <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
+        <span className="font-semibold text-foreground">Why it matters:</span> {driver.whyItMatters}
       </div>
-      <div className="mt-1 text-[13px] leading-5 text-white/70">
-        <span className="font-semibold text-white/88">Current file status:</span> {driver.currentFileStatus}
+      <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
+        <span className="font-semibold text-foreground">Current file status:</span> {driver.currentFileStatus}
       </div>
-      <div className="mt-1 text-[13px] leading-5 text-white/70">
-        <span className="font-semibold text-white/88">What to do:</span> {driver.action}
+      <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
+        <span className="font-semibold text-foreground">What to do:</span> {driver.action}
       </div>
       {evidenceLink ? (
-        <div className="mt-2 inline-flex rounded-full border border-white/8 bg-black/18 px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-white/48">
+        <div className="mt-2 inline-flex rounded-full border border-border bg-card px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
           View support
         </div>
       ) : null}
@@ -3893,7 +4013,7 @@ function DisputeDriverCard({
     <button
       type="button"
       onClick={() => onEvidenceSelect(evidenceLink)}
-      className={`${className} w-full text-left hover:border-white/12 hover:bg-black/22`}
+      className={`${className} w-full text-left hover:border-ring/30 hover:bg-muted/70`}
     >
       {content}
     </button>
@@ -3936,25 +4056,25 @@ function LineStatusCard() {
   const lineStatus = buildLineStatus();
 
   return (
-    <section className="mt-5 space-y-3 rounded-[24px] border border-red-500/18 bg-gradient-to-br from-red-500/[0.08] via-[#C65A2A]/[0.05] to-black/20 p-4 shadow-[0_18px_40px_rgba(0,0,0,0.18)]">
+    <section className="mt-5 space-y-3 rounded-[24px] border border-red-500/18 bg-gradient-to-br from-red-500/[0.08] via-[#C65A2A]/[0.05] to-muted p-4 shadow-[0_18px_40px_rgba(0,0,0,0.10)] dark:shadow-[0_18px_40px_rgba(0,0,0,0.18)]">
       <div className="text-[10px] uppercase tracking-[0.22em] text-red-200/72">Decision Card</div>
-      <div className="rounded-2xl bg-black/20 px-3.5 py-3">
-        <div className="text-sm font-semibold leading-5 text-white/88">
+      <div className="rounded-2xl bg-card/70 px-3.5 py-3">
+        <div className="text-sm font-semibold leading-5 text-foreground">
           [Red] {lineStatus.title.toUpperCase()}
         </div>
-        <div className="mt-2 text-[13px] leading-5 text-white/70">
-          <span className="font-semibold text-white/88">Impact:</span> {lineStatus.impact}
+        <div className="mt-2 text-[13px] leading-5 text-muted-foreground">
+          <span className="font-semibold text-foreground">Impact:</span> {lineStatus.impact}
         </div>
-        <div className="mt-1 text-[13px] leading-5 text-white/70">
-          <span className="font-semibold text-white/88">Status:</span> {lineStatus.status}
+        <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
+          <span className="font-semibold text-foreground">Status:</span> {lineStatus.status}
         </div>
-        <div className="mt-3 text-[13px] leading-5 text-white/70">
-          <span className="font-semibold text-white/88">Why it matters:</span>
-          <div className="mt-1 text-white/70">-&gt; {lineStatus.whyItMatters}</div>
+        <div className="mt-3 text-[13px] leading-5 text-muted-foreground">
+          <span className="font-semibold text-foreground">Why it matters:</span>
+          <div className="mt-1 text-muted-foreground">-&gt; {lineStatus.whyItMatters}</div>
         </div>
-        <div className="mt-3 text-[13px] leading-5 text-white/70">
-          <span className="font-semibold text-white/88">What to do:</span>
-          <div className="mt-1 text-white/70">-&gt; {lineStatus.action}</div>
+        <div className="mt-3 text-[13px] leading-5 text-muted-foreground">
+          <span className="font-semibold text-foreground">What to do:</span>
+          <div className="mt-1 text-muted-foreground">-&gt; {lineStatus.action}</div>
         </div>
       </div>
     </section>
@@ -3987,33 +4107,33 @@ function GapSummaryCard({
   ]).join(" ");
 
   return (
-    <section className="mt-5 space-y-3 rounded-[24px] border border-orange-500/18 bg-gradient-to-br from-[#C65A2A]/10 via-[#C65A2A]/[0.04] to-black/20 p-4 shadow-[0_18px_44px_rgba(198,90,42,0.12)]">
+    <section className="mt-5 space-y-3 rounded-[24px] border border-orange-500/18 bg-gradient-to-br from-[#C65A2A]/10 via-[#C65A2A]/[0.04] to-muted p-4 shadow-[0_18px_44px_rgba(198,90,42,0.12)]">
       <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
         Financial View
       </div>
-      <div className="rounded-2xl bg-black/20 px-3.5 py-3">
-        <div className="text-[11px] uppercase tracking-[0.18em] text-white/45">
+      <div className="rounded-2xl bg-card/70 px-3.5 py-3">
+        <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           Directional Posture
         </div>
-        <div className="mt-2 text-[13px] leading-5 text-white/70">
+        <div className="mt-2 text-[13px] leading-5 text-muted-foreground">
           {postureSummary || "The canonical export model does not yet include a reliable valuation posture."}
         </div>
       </div>
-      <div className="rounded-2xl bg-black/20 px-3.5 py-3">
-        <div className="text-[11px] uppercase tracking-[0.18em] text-white/45">
+      <div className="rounded-2xl bg-card/70 px-3.5 py-3">
+        <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           Available Signals
         </div>
         {hasValuationPosture && financialSignals.length > 0 ? (
           <div className="mt-2 space-y-2">
             {financialSignals.map((item) => (
-              <div key={item} className="flex gap-2 text-[13px] leading-5 text-white/70">
+              <div key={item} className="flex gap-2 text-[13px] leading-5 text-muted-foreground">
                 <span className="pt-[1px] text-orange-200/85">&bull;</span>
                 <span>{item}</span>
               </div>
             ))}
           </div>
         ) : (
-          <div className="mt-2 text-[13px] leading-5 text-white/55">
+          <div className="mt-2 text-[13px] leading-5 text-muted-foreground">
             Not yet quantified in the canonical export model.
           </div>
         )}
@@ -4026,8 +4146,8 @@ function NegotiationPostureCard() {
   const posture = buildNegotiationPosture();
 
   return (
-    <section className="mt-5 space-y-3 rounded-[24px] border border-white/8 bg-gradient-to-br from-white/[0.055] via-white/[0.03] to-black/20 p-4 shadow-[0_18px_40px_rgba(0,0,0,0.18)]">
-      <div className="text-[10px] uppercase tracking-[0.22em] text-white/45">
+    <section className="mt-5 space-y-3 rounded-[24px] border border-border bg-gradient-to-br from-card via-card to-muted p-4 shadow-[0_18px_40px_rgba(0,0,0,0.10)] dark:shadow-[0_18px_40px_rgba(0,0,0,0.18)]">
+      <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
         Negotiation Posture
       </div>
 
@@ -4049,14 +4169,14 @@ function NegotiationPostureCard() {
         accentClassName="text-orange-200/85"
       />
 
-      <div className="rounded-2xl bg-black/18 px-3.5 py-3">
-        <div className="text-[11px] uppercase tracking-[0.18em] text-white/45">
+      <div className="rounded-2xl bg-muted px-3.5 py-3">
+        <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           Suggested Strategy
         </div>
         <div className="mt-2 space-y-2">
           {posture.suggestedStrategy.map((item, index) => (
-            <div key={item} className="flex gap-2 text-[13px] leading-5 text-white/70">
-              <span className="font-semibold text-white/88">{index + 1}.</span>
+            <div key={item} className="flex gap-2 text-[13px] leading-5 text-muted-foreground">
+              <span className="font-semibold text-foreground">{index + 1}.</span>
               <span>{item}</span>
             </div>
           ))}
@@ -4076,11 +4196,11 @@ function NegotiationPostureList({
   accentClassName: string;
 }) {
   return (
-    <div className="rounded-2xl bg-black/18 px-3.5 py-3">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-white/45">{title}</div>
+    <div className="rounded-2xl bg-muted px-3.5 py-3">
+      <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{title}</div>
       <div className="mt-2 space-y-2">
         {items.map((item) => (
-          <div key={item} className="flex gap-2 text-[13px] leading-5 text-white/70">
+          <div key={item} className="flex gap-2 text-[13px] leading-5 text-muted-foreground">
             <span className={`pt-[1px] ${accentClassName}`}>&bull;</span>
             <span>{item}</span>
           </div>
@@ -4096,20 +4216,20 @@ function FeaturedRecommendationCard({
   item: SupplementItem;
 }) {
   return (
-    <section className="rounded-[24px] border border-orange-500/20 bg-gradient-to-br from-[#C65A2A]/12 via-[#C65A2A]/[0.045] to-black/20 p-4 shadow-[0_18px_44px_rgba(198,90,42,0.14)]">
+    <section className="rounded-[24px] border border-orange-500/20 bg-gradient-to-br from-[#C65A2A]/12 via-[#C65A2A]/[0.045] to-muted p-4 shadow-[0_18px_44px_rgba(198,90,42,0.14)]">
       <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">Top recommendation</div>
-      <div className="mt-2 text-[1.08rem] font-semibold leading-6 text-white/85">{displayOperationLabel(item.title)}</div>
-      <div className="mt-2 text-xs text-white/40">
+      <div className="mt-2 text-[1.08rem] font-semibold leading-6 text-foreground">{displayOperationLabel(item.title)}</div>
+      <div className="mt-2 text-xs text-muted-foreground">
         {formatLabel(item.category)} · {formatLabel(item.kind)} · Priority {formatLabel(item.priority)}
       </div>
-      <div className="mt-3 text-sm leading-6 text-white/65">{item.rationale}</div>
+      <div className="mt-3 text-sm leading-6 text-muted-foreground">{item.rationale}</div>
       {item.evidence && (
-        <div className="mt-3 text-xs leading-5 text-white/40">Evidence: {item.evidence}</div>
+        <div className="mt-3 text-xs leading-5 text-muted-foreground">Evidence: {item.evidence}</div>
       )}
       {item.source && (
         <button
           type="button"
-          className="mt-4 inline-flex items-center rounded-xl bg-white/[0.045] px-3 py-2 text-xs font-medium text-white/65 transition hover:bg-white/[0.075] hover:text-white/85"
+          className="mt-4 inline-flex items-center rounded-xl bg-muted px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-card hover:text-foreground"
         >
           View source details
         </button>
@@ -4126,17 +4246,17 @@ function LockedFeatureCard({
   body: string;
 }) {
   return (
-    <section className="space-y-2.5 rounded-2xl border border-orange-500/16 bg-gradient-to-br from-[#C65A2A]/9 via-black/34 to-black/18 p-3.5">
+    <section className="space-y-2.5 rounded-2xl border border-orange-500/16 bg-gradient-to-br from-[#C65A2A]/9 via-muted to-card p-3.5">
         <div className="flex items-center justify-between gap-3">
           <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/68">{title}</div>
           <Link
             href="/billing"
-            className="rounded-full border border-orange-500/24 bg-orange-500/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-orange-100 transition hover:bg-orange-500/18"
+            className="rounded-full border border-orange-500/24 bg-orange-500/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-[#C65A2A] transition hover:bg-orange-500/18 dark:text-orange-100"
           >
             Upgrade Access
           </Link>
         </div>
-      <div className="text-[13px] leading-5 text-white/65">{body}</div>
+      <div className="text-[13px] leading-5 text-muted-foreground">{body}</div>
     </section>
   );
 }
@@ -4160,7 +4280,7 @@ function DecisionSection({
     red: "border-red-500/18 bg-red-500/[0.04]",
     yellow: "border-yellow-500/18 bg-yellow-500/[0.04]",
     green: "border-green-500/18 bg-green-500/[0.04]",
-    neutral: "border-white/7 bg-white/[0.032]",
+    neutral: "border-border bg-card",
   };
 
   return (
@@ -4169,10 +4289,10 @@ function DecisionSection({
         featured ? "shadow-[0_18px_40px_rgba(0,0,0,0.18)]" : ""
       }`}
     >
-      <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">{title}</div>
+      <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{title}</div>
       <div
         className={`whitespace-pre-wrap ${
-          compact ? "text-[13px] leading-5 text-white/65" : featured ? "text-sm leading-6 text-white/65" : "text-sm leading-6 text-white/65"
+          compact ? "text-[13px] leading-5 text-muted-foreground" : featured ? "text-sm leading-6 text-muted-foreground" : "text-sm leading-6 text-muted-foreground"
         } ${mono ? "font-mono text-[12px]" : ""}`}
       >
         {body}
@@ -4199,14 +4319,14 @@ function ExpandableDecisionSection({
     red: "border-red-500/18 bg-red-500/[0.04]",
     yellow: "border-yellow-500/18 bg-yellow-500/[0.04]",
     green: "border-green-500/18 bg-green-500/[0.04]",
-    neutral: "border-white/7 bg-white/[0.032]",
+    neutral: "border-border bg-card",
   };
   const previewHeightClass = previewLines >= 7 ? "max-h-48" : "max-h-36";
 
   return (
     <section className={`space-y-2.5 rounded-2xl border p-3.5 ${tones[tone]}`}>
       <div className="flex items-center justify-between gap-3">
-        <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">{title}</div>
+        <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{title}</div>
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
@@ -4217,15 +4337,12 @@ function ExpandableDecisionSection({
       </div>
       <div className="relative">
         <div
-          className={`text-[13px] leading-5 text-white/65 whitespace-pre-wrap ${mono ? "font-mono text-[12px]" : ""} ${
+          className={`text-[13px] leading-5 text-muted-foreground whitespace-pre-wrap ${mono ? "font-mono text-[12px]" : ""} ${
             expanded ? "" : `overflow-hidden ${previewHeightClass}`
           }`}
         >
           {body}
         </div>
-        {!expanded && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/90 via-black/55 to-transparent" />
-        )}
       </div>
     </section>
   );
@@ -4344,25 +4461,35 @@ function buildSingleValuationDisplay(params: {
 function ValuationSection({
   renderModel,
   lowConfidence,
+  checkoutLoading,
+  onStartAcvCheckout,
 }: {
   renderModel: ReturnType<typeof buildExportModel>;
   lowConfidence: boolean;
+  checkoutLoading: boolean;
+  onStartAcvCheckout: () => void;
 }) {
   const [expanded, setExpanded] = useState(!lowConfidence);
+  const hasAcvService =
+    renderModel.valuation.acvStatus !== "not_determinable" ||
+    Boolean(renderModel.valuation.acvRange || renderModel.valuation.acvValue);
+  const hasDiminishedValueService =
+    renderModel.valuation.dvStatus !== "not_determinable" ||
+    Boolean(renderModel.valuation.dvRange || renderModel.valuation.dvValue);
 
   return (
     <section
       className={`space-y-3 rounded-2xl border p-3.5 ${
         lowConfidence
-          ? "border-white/7 bg-white/[0.03] opacity-90"
+          ? "border-border bg-card opacity-90"
           : "border-green-500/18 bg-green-500/[0.04]"
       }`}
     >
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-[10px] uppercase tracking-[0.22em] text-white/40">Valuation</div>
+          <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Valuation</div>
           {lowConfidence && (
-            <div className="mt-1 text-xs leading-5 text-white/40">
+            <div className="mt-1 text-xs leading-5 text-muted-foreground">
               Low-confidence preview. Expand for the directional band, limits, and missing inputs.
             </div>
           )}
@@ -4371,7 +4498,7 @@ function ValuationSection({
           <button
             type="button"
             onClick={() => setExpanded((value) => !value)}
-            className="text-[11px] font-medium uppercase tracking-[0.16em] text-white/60 hover:text-white/85"
+            className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground hover:text-foreground"
           >
             {expanded ? "Hide" : "Expand"}
           </button>
@@ -4379,23 +4506,47 @@ function ValuationSection({
       </div>
 
       {expanded && (
-        <div className="text-[13px] leading-5 text-white/65 whitespace-pre-wrap">
+        <div className="text-[13px] leading-5 text-muted-foreground whitespace-pre-wrap">
           {buildValuationDisplay(renderModel)}
         </div>
       )}
 
-      <div className="rounded-xl bg-black/18 px-3 py-2.5 text-[12px] leading-5 text-white/40">
+      <div className="rounded-xl bg-muted px-3 py-2.5 text-[12px] leading-5 text-muted-foreground">
         Premium preview only. The formal valuation service can widen, tighten, or move the band after full file review and broader market support.
       </div>
 
-      <a
-        href={COLLISION_ACADEMY_HANDOFF_URL}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex items-center justify-center rounded-xl bg-[#C65A2A]/18 px-3 py-2 text-[11px] font-medium text-white/85 transition hover:bg-[#C65A2A]/26 sm:w-auto"
-      >
-        Continue for Full Valuation
-      </a>
+      <div className="flex flex-wrap gap-2">
+        {hasAcvService ? (
+          <button
+            type="button"
+            onClick={onStartAcvCheckout}
+            disabled={checkoutLoading}
+            className="inline-flex items-center justify-center rounded-xl bg-[#C65A2A] px-3 py-2 text-[11px] font-semibold text-black transition hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+          >
+            {checkoutLoading ? "Opening checkout..." : "Start ACV Review Checkout"}
+          </button>
+        ) : null}
+        {hasDiminishedValueService ? (
+          <Link
+            href="/the-academy"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center justify-center rounded-xl border border-border bg-background px-3 py-2 text-[11px] font-semibold text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted sm:w-auto"
+          >
+            View Diminished Value Services
+          </Link>
+        ) : null}
+        {!hasAcvService && !hasDiminishedValueService ? (
+          <Link
+            href="/the-academy"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center justify-center rounded-xl border border-border bg-background px-3 py-2 text-[11px] font-semibold text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted sm:w-auto"
+          >
+            View Academy Services
+          </Link>
+        ) : null}
+      </div>
     </section>
   );
 }

@@ -24,7 +24,7 @@ const EMPTY_WORKSPACE_DATA: WorkspaceData = {
 
 function IssueCard({ text }: { text: string }) {
   return (
-    <div className="rounded-xl border border-white/6 bg-black/18 px-3 py-2.5 text-[13px] leading-5 text-white/65">
+    <div className="rounded-xl border border-border bg-muted px-3 py-2.5 text-[13px] leading-5 text-muted-foreground">
       {text}
     </div>
   );
@@ -37,13 +37,13 @@ function TopDifferencesSummary({ items }: { items: string[] }) {
 
   return (
     <div className="mb-4">
-      <div className="mb-2 text-[10px] uppercase tracking-[0.22em] text-white/40">
+      <div className="mb-2 text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
         Top Differences
       </div>
 
-      <div className="space-y-2 rounded-xl border border-white/6 bg-white/[0.04] p-3">
+      <div className="space-y-2 rounded-xl border border-border bg-muted p-3">
         {items.map((item) => (
-          <div key={item} className="flex gap-2 text-[12px] leading-5 text-white/85">
+          <div key={item} className="flex gap-2 text-[12px] leading-5 text-foreground">
             <span className="pt-[2px] text-[#C65A2A]">&bull;</span>
             <span>{item}</span>
           </div>
@@ -76,31 +76,31 @@ export default function WorkspacePanel({
 
   // Shorthand for readability below
   return (
-    <div className="flex h-full flex-col text-sm text-white">
+    <div className="flex h-full flex-col text-sm text-foreground">
       {/* Panel intro */}
 
-      <div className="rounded-2xl border border-white/7 bg-white/[0.035] p-4 shadow-[0_14px_38px_rgba(0,0,0,0.18)] backdrop-blur-md">
-        <h3 className="mb-2 text-[10px] uppercase tracking-[0.22em] text-white/40">
+      <div className="rounded-2xl border border-border bg-card p-4 shadow-[0_14px_38px_rgba(15,23,42,0.10)] backdrop-blur-md dark:shadow-[0_14px_38px_rgba(0,0,0,0.18)]">
+        <h3 className="mb-2 text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
           Repair Intelligence
         </h3>
 
-        <p className="text-sm leading-6 text-white/65">
+        <p className="text-sm leading-6 text-muted-foreground">
           Upload an estimate or photos to generate a repair decision.
         </p>
       </div>
 
       {/* Analysis output */}
 
-      <div className="mt-4 flex-1 min-h-0 overflow-y-auto rounded-2xl border border-white/7 bg-white/[0.025] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.18)] backdrop-blur-md">
+      <div className="mt-4 flex-1 min-h-0 overflow-y-auto rounded-2xl border border-border bg-card p-4 shadow-[0_18px_40px_rgba(15,23,42,0.10)] backdrop-blur-md dark:shadow-[0_18px_40px_rgba(0,0,0,0.18)]">
 
         {/* Empty state */}
 
         {!data && (
           <div className="space-y-2.5">
-            <div className="text-sm leading-6 text-white/85">
+            <div className="text-sm leading-6 text-foreground">
               Upload an estimate or photos to generate a repair decision.
             </div>
-            <div className="text-sm leading-6 text-white/65">
+            <div className="text-sm leading-6 text-muted-foreground">
               This panel will show the key repair risks and next steps.
             </div>
           </div>
@@ -111,10 +111,10 @@ export default function WorkspacePanel({
             {/* Risk and confidence summary */}
 
             <div className="mb-5 grid grid-cols-2 gap-2">
-              <div className="rounded-xl border border-white/6 bg-black/16 px-3 py-2.5 text-xs text-white/65">
+              <div className="rounded-xl border border-border bg-muted px-3 py-2.5 text-xs text-muted-foreground">
                 Risk: <span className="font-semibold capitalize">{data.riskLevel}</span>
               </div>
-              <div className="rounded-xl border border-white/6 bg-black/16 px-3 py-2.5 text-xs text-white/65">
+              <div className="rounded-xl border border-border bg-muted px-3 py-2.5 text-xs text-muted-foreground">
                 Confidence: <span className="font-semibold capitalize">{data.confidence}</span>
               </div>
             </div>
@@ -127,7 +127,7 @@ export default function WorkspacePanel({
 
             {data.keyIssues.length > 0 && (
               <div className="mt-5 flex flex-col gap-2">
-                <div className="mb-1 text-[10px] uppercase tracking-[0.22em] text-white/40">
+                <div className="mb-1 text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
                   Key Issues
                 </div>
 
@@ -151,12 +151,12 @@ export default function WorkspacePanel({
 
                     URL.revokeObjectURL(url);
                   }}
-                  className="mt-5 w-full rounded-xl bg-[#C65A2A]/18 p-3 text-xs text-white/85 transition hover:bg-[#C65A2A]/26"
+                  className="mt-5 w-full rounded-xl bg-[#C65A2A]/18 p-3 text-xs text-foreground transition hover:bg-[#C65A2A]/26"
                 >
                   Generate Supplement Letter
                 </button>
 
-                <div className="mt-4 rounded-xl border border-white/6 bg-black/36 p-3 text-xs whitespace-pre-wrap text-white/65">
+                <div className="mt-4 rounded-xl border border-border bg-muted p-3 text-xs whitespace-pre-wrap text-muted-foreground">
                   {data.supplementLetter}
                 </div>
               </>
