@@ -1864,6 +1864,7 @@ function RailContent({
           claimId,
           analysisReportId,
           attachmentIds,
+          sourcePage: "collision-iq-case",
           returnUrl: getCurrentWorkspaceReturnUrl(),
         }),
       });

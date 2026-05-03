@@ -180,12 +180,12 @@ export default function TechnicalSystemsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-black text-white">
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/60 backdrop-blur-xl">
+    <main className="min-h-screen bg-background text-foreground">
+      <header className="sticky top-0 z-40 border-b border-border bg-card">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
           <Link href="/the-academy" className="flex items-center gap-3">
             <Image
-              src="/iq/iq_logo-white.png"
+              src="/iq/iq_logo.png"
               alt="Collision IQ"
               width={140}
               height={28}
@@ -194,7 +194,7 @@ export default function TechnicalSystemsPage() {
             />
           </Link>
           <div className="flex flex-wrap items-center gap-3">
-            <Link href="/the-academy" className="rounded-2xl border border-white/12 bg-white/5 px-4 py-2 text-sm text-white/85 transition hover:bg-white/10">Professional Services</Link>
+            <Link href="/the-academy" className="rounded-2xl border border-border bg-background px-4 py-2 text-sm text-foreground transition hover:bg-muted">Professional Services</Link>
             <Link href="/" className="rounded-2xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black transition hover:opacity-90">Open Collision IQ</Link>
           </div>
         </div>
@@ -202,28 +202,28 @@ export default function TechnicalSystemsPage() {
 
       <section className="mx-auto grid max-w-6xl gap-8 px-5 py-16 md:grid-cols-[1.15fr_0.85fr]">
         <div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-[#C65A2A]/30 bg-[#C65A2A]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#E88A5F]">Technical Systems</div>
-          <div className="mb-2 mt-5 text-sm text-white/40">Collision IQ Systems</div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-[#C65A2A]/30 bg-[#C65A2A]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#C65A2A]">Technical Systems</div>
+          <div className="mb-2 mt-5 text-sm text-muted-foreground">Collision IQ Systems</div>
           <h1 className="mt-6 max-w-4xl text-4xl font-bold leading-tight tracking-tight md:text-6xl">Collision IQ subscriptions, shop apps, and tailored systems for repair centers.</h1>
-          <p className="mt-6 max-w-3xl text-lg leading-relaxed text-white/75">Technical Systems is the product-and-systems layer under Collision Academy. Start with Collision IQ, then extend into Shop-Flow, Parts App, Shop Hub, onboarding, and tailored implementations.</p>
+          <p className="mt-6 max-w-3xl text-lg leading-relaxed text-muted-foreground">Technical Systems is the product-and-systems layer under Collision Academy. Start with Collision IQ, then extend into Shop-Flow, Parts App, Shop Hub, onboarding, and tailored implementations.</p>
           <div className="mt-8 flex flex-wrap gap-3">
             <button type="button" onClick={scrollToLeadForm} className="rounded-2xl bg-[#C65A2A] px-6 py-3 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(198,90,42,0.25)] transition hover:opacity-90">Request a tailored systems call</button>
-            <button type="button" onClick={() => void handleCheckout("pro")} disabled={activeCheckout === "pro"} className="rounded-2xl border border-white/20 bg-black/25 px-6 py-3 text-sm font-semibold text-white transition hover:bg-black/35 disabled:opacity-60">{activeCheckout === "pro" ? "Redirecting..." : "Start 30-Day Free Trial"}</button>
+            <button type="button" onClick={() => void handleCheckout("pro")} disabled={activeCheckout === "pro"} className="rounded-2xl border border-border bg-card px-6 py-3 text-sm font-semibold text-foreground transition hover:bg-muted disabled:opacity-60">{activeCheckout === "pro" ? "Redirecting..." : "Start 30-Day Free Trial"}</button>
           </div>
-          <div className="mt-8 grid gap-3 text-sm text-white/70 md:grid-cols-2">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">Built around real collision workflows</div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">Designed around your process, not generic software</div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">Strong fit for growing shops, groups, and multi-person teams</div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">Best paired with Collision IQ Pro subscription</div>
+          <div className="mt-8 grid gap-3 text-sm text-muted-foreground md:grid-cols-2">
+            <div className="rounded-2xl border border-border bg-card p-4">Built around real collision workflows</div>
+            <div className="rounded-2xl border border-border bg-card p-4">Designed around your process, not generic software</div>
+            <div className="rounded-2xl border border-border bg-card p-4">Strong fit for growing shops, groups, and multi-person teams</div>
+            <div className="rounded-2xl border border-border bg-card p-4">Best paired with Collision IQ Pro subscription</div>
           </div>
-          {checkoutError ? <div className="mt-5 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">{checkoutError}</div> : null}
+          {checkoutError ? <div className="mt-5 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">{checkoutError}</div> : null}
         </div>
 
-        <div className="rounded-3xl border border-[#C65A2A]/25 bg-black/40 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.65)] backdrop-blur-xl">
-          <div className="text-sm font-semibold uppercase tracking-[0.16em] text-[#E88A5F]">Collision IQ access</div>
+        <div className="rounded-3xl border border-[#C65A2A]/25 bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
+          <div className="text-sm font-semibold uppercase tracking-[0.16em] text-[#C65A2A]">Collision IQ access</div>
           <h2 className="mt-3 text-2xl font-semibold">Every new account begins with a 30-day free Collision IQ trial</h2>
-          <p className="mt-4 text-sm leading-7 text-white/75">All new Collision IQ accounts begin with a 30-day free trial. After the trial, users can continue on Starter for lighter usage or Pro for the full production workflow.</p>
-          <ul className="mt-5 space-y-2 text-sm text-white/70">
+          <p className="mt-4 text-sm leading-7 text-muted-foreground">All new Collision IQ accounts begin with a 30-day free trial. After the trial, users can continue on Starter for lighter usage or Pro for the full production workflow.</p>
+          <ul className="mt-5 space-y-2 text-sm text-muted-foreground">
             <li>- Start with a 30-day free Collision IQ trial</li>
             <li>- Continue on Starter for lighter usage</li>
             <li>- Move to Pro for full production use</li>
@@ -234,14 +234,14 @@ export default function TechnicalSystemsPage() {
 
       <section className="mx-auto max-w-6xl px-5 pb-10">
         <h2 className="text-2xl font-semibold">Collision IQ subscriptions</h2>
-        <p className="mt-2 max-w-3xl text-sm text-white/60">Every new account begins with a 30-day free trial before selecting Starter or Pro.</p>
+        <p className="mt-2 max-w-3xl text-sm text-muted-foreground">Every new account begins with a 30-day free trial before selecting Starter or Pro.</p>
         <div className="mt-6 grid gap-6 md:grid-cols-2">
           {SUBSCRIPTIONS.map((item) => (
-            <div key={item.title} className={`rounded-3xl border p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl ${item.title === "Pro" ? "border-[#C65A2A]/40 bg-black/35" : "border-white/10 bg-black/30"}`}>
+            <div key={item.title} className={`rounded-3xl border bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)] ${item.title === "Pro" ? "border-[#C65A2A]/40" : "border-border"}`}>
               <div className="text-lg font-semibold">{item.title}</div>
               <div className="mt-2 text-2xl font-bold">{item.priceLabel}</div>
-              <ul className="mt-4 space-y-2 text-sm text-white/70">{item.features.map((feature) => <li key={feature} className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">{feature}</li>)}</ul>
-              <button type="button" onClick={() => void handleCheckout(item.plan)} disabled={activeCheckout === item.plan} className={`mt-6 w-full rounded-2xl px-4 py-3 text-sm font-semibold transition disabled:opacity-60 ${item.title === "Pro" ? "bg-[#C65A2A] text-black hover:opacity-90" : "border border-white/20 bg-black/25 text-white hover:bg-black/35"}`}>{activeCheckout === item.plan ? "Redirecting..." : item.title === "Starter" ? "Choose a Collision IQ Plan" : "Start 30-Day Free Trial"}</button>
+              <ul className="mt-4 space-y-2 text-sm text-muted-foreground">{item.features.map((feature) => <li key={feature} className="rounded-xl border border-border bg-muted px-3 py-2">{feature}</li>)}</ul>
+              <button type="button" onClick={() => void handleCheckout(item.plan)} disabled={activeCheckout === item.plan} className={`mt-6 w-full rounded-2xl px-4 py-3 text-sm font-semibold transition disabled:opacity-60 ${item.title === "Pro" ? "bg-[#C65A2A] text-black hover:opacity-90" : "border border-border bg-background text-foreground hover:bg-muted"}`}>{activeCheckout === item.plan ? "Redirecting..." : item.title === "Starter" ? "Choose a Collision IQ Plan" : "Start 30-Day Free Trial"}</button>
             </div>
           ))}
         </div>
@@ -251,16 +251,16 @@ export default function TechnicalSystemsPage() {
         <h2 className="text-2xl font-semibold">Available systems</h2>
         <div className="mt-6 grid gap-6 lg:grid-cols-3">
           {SYSTEMS.map((item) => (
-            <div key={item.title} className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+            <div key={item.title} className="rounded-3xl border border-border bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
               <div className="flex items-start justify-between gap-4">
                 <h3 className="text-2xl font-semibold">{item.title}</h3>
-                <div className="text-sm font-medium text-[#E88A5F]">{item.priceLabel}</div>
+                <div className="text-sm font-medium text-[#C65A2A]">{item.priceLabel}</div>
               </div>
-              <p className="mt-3 text-sm leading-7 text-white/70">{item.description}</p>
-              <ul className="mt-4 space-y-2 text-sm text-white/70">{item.highlights.map((highlight) => <li key={highlight} className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">{highlight}</li>)}</ul>
+              <p className="mt-3 text-sm leading-7 text-muted-foreground">{item.description}</p>
+              <ul className="mt-4 space-y-2 text-sm text-muted-foreground">{item.highlights.map((highlight) => <li key={highlight} className="rounded-xl border border-border bg-muted px-3 py-2">{highlight}</li>)}</ul>
               <div className="mt-6 flex flex-wrap gap-3">
                 <button type="button" onClick={() => void handleCheckout(item.plan)} disabled={activeCheckout === item.plan} className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:opacity-90 disabled:opacity-60">{activeCheckout === item.plan ? "Redirecting..." : `Get ${item.title}`}</button>
-                <button type="button" onClick={scrollToLeadForm} className="rounded-2xl border border-white/20 bg-black/25 px-5 py-3 text-sm font-semibold text-white transition hover:bg-black/35">Ask about tailoring this</button>
+                <button type="button" onClick={scrollToLeadForm} className="rounded-2xl border border-border bg-background px-5 py-3 text-sm font-semibold text-foreground transition hover:bg-muted">Ask about tailoring this</button>
               </div>
             </div>
           ))}
@@ -270,10 +270,10 @@ export default function TechnicalSystemsPage() {
       <section className="mx-auto max-w-6xl px-5 py-10">
         <div className="grid gap-6 md:grid-cols-2">
           {ONBOARDING.map((item) => (
-            <div key={item.title} className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] backdrop-blur-xl">
+            <div key={item.title} className="rounded-3xl border border-border bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
               <div className="flex items-start justify-between gap-4">
                 <div className="text-xl font-semibold">{item.title}</div>
-                <div className="text-sm font-medium text-[#E88A5F]">{item.priceLabel}</div>
+                <div className="text-sm font-medium text-[#C65A2A]">{item.priceLabel}</div>
               </div>
               <button type="button" onClick={() => void handleCheckout(item.plan)} disabled={activeCheckout === item.plan} className="mt-5 rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:opacity-90 disabled:opacity-60">{activeCheckout === item.plan ? "Redirecting..." : `Buy ${item.title}`}</button>
             </div>
@@ -283,12 +283,12 @@ export default function TechnicalSystemsPage() {
 
       <section id="lead-form" className="mx-auto max-w-6xl px-5 py-10">
         <div className="grid gap-6 md:grid-cols-[0.9fr_1.1fr]">
-          <div className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] backdrop-blur-xl">
+          <div className="rounded-3xl border border-border bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
             <div className="text-xl font-semibold">Collision IQ is the on-ramp into Technical Systems</div>
-            <p className="mt-3 text-sm leading-7 text-white/70">Start with the 30-day Collision IQ trial, then continue on Starter or Pro based on how your team works. From there, extend into systems, onboarding, and tailored implementation.</p>
+            <p className="mt-3 text-sm leading-7 text-muted-foreground">Start with the 30-day Collision IQ trial, then continue on Starter or Pro based on how your team works. From there, extend into systems, onboarding, and tailored implementation.</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="rounded-3xl border border-[#C65A2A]/20 bg-black/30 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] backdrop-blur-xl">
+          <form onSubmit={handleSubmit} className="rounded-3xl border border-[#C65A2A]/20 bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="Your name" value={form.name} onChange={(value) => update("name", value)} required />
               <Field label="Business / shop" value={form.business} onChange={(value) => update("business", value)} required />
@@ -298,26 +298,26 @@ export default function TechnicalSystemsPage() {
               <Field label="Current workflow pain point" value={form.currentWorkflow} onChange={(value) => update("currentWorkflow", value)} />
             </div>
             <div className="mt-4">
-              <label className="mb-2 block text-sm font-medium text-white/80">What would you want the system to improve?</label>
-              <textarea value={form.goals} onChange={(e) => update("goals", e.target.value)} rows={6} required placeholder="Describe the improvements you'd like" className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-[#C65A2A]/40" />
+              <label className="mb-2 block text-sm font-medium text-foreground">What would you want the system to improve?</label>
+              <textarea value={form.goals} onChange={(e) => update("goals", e.target.value)} rows={6} required placeholder="Describe the improvements you'd like" className="w-full rounded-2xl border border-border bg-background px-4 py-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-[#C65A2A]/40" />
             </div>
-            {submitted ? <div className="mt-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-300">Your request was submitted. We can now review whether a tailored system fits your workflow.</div> : null}
-            {leadError ? <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">{leadError}</div> : null}
+            {submitted ? <div className="mt-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300">Your request was submitted. We can now review whether a tailored system fits your workflow.</div> : null}
+            {leadError ? <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">{leadError}</div> : null}
             <div className="mt-5 flex flex-wrap gap-3">
               <button type="submit" disabled={isSubmitting} className="rounded-2xl bg-[#C65A2A] px-6 py-3 text-sm font-semibold text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60">{isSubmitting ? "Submitting..." : "Request systems call"}</button>
-              <button type="button" onClick={() => void handleCheckout("pro")} disabled={activeCheckout === "pro"} className="rounded-2xl border border-white/20 bg-black/25 px-6 py-3 text-sm font-semibold text-white transition hover:bg-black/35 disabled:opacity-60">{activeCheckout === "pro" ? "Redirecting..." : "Start 30-Day Free Trial"}</button>
+              <button type="button" onClick={() => void handleCheckout("pro")} disabled={activeCheckout === "pro"} className="rounded-2xl border border-border bg-background px-6 py-3 text-sm font-semibold text-foreground transition hover:bg-muted disabled:opacity-60">{activeCheckout === "pro" ? "Redirecting..." : "Start 30-Day Free Trial"}</button>
             </div>
           </form>
         </div>
       </section>
 
       <section className="mx-auto max-w-6xl px-5 pb-16 pt-6">
-        <div className="rounded-3xl border border-white/10 bg-black/30 p-6 text-center shadow-[0_30px_90px_rgba(0,0,0,0.6)] backdrop-blur-xl md:p-8">
+        <div className="rounded-3xl border border-border bg-card p-6 text-center shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)] md:p-8">
           <h2 className="text-3xl font-semibold tracking-tight">Build your process advantage</h2>
-          <p className="mx-auto mt-4 max-w-3xl text-sm leading-7 text-white/70">Collision IQ helps teams analyze files. Technical Systems helps them turn that intelligence into a workflow system tailored to how the business actually runs.</p>
+          <p className="mx-auto mt-4 max-w-3xl text-sm leading-7 text-muted-foreground">Collision IQ helps teams analyze files. Technical Systems helps them turn that intelligence into a workflow system tailored to how the business actually runs.</p>
           <div className="mt-6 flex flex-wrap justify-center gap-3">
             <button type="button" onClick={scrollToLeadForm} className="rounded-2xl bg-[#C65A2A] px-6 py-3 text-sm font-semibold text-black transition hover:opacity-90">Request a tailored systems call</button>
-            <Link href="/the-academy" className="rounded-2xl border border-white/20 bg-black/25 px-6 py-3 text-sm font-semibold text-white transition hover:bg-black/35">View Professional Services</Link>
+            <Link href="/the-academy" className="rounded-2xl border border-border bg-background px-6 py-3 text-sm font-semibold text-foreground transition hover:bg-muted">View Professional Services</Link>
           </div>
         </div>
       </section>
@@ -340,8 +340,8 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-2 block text-sm font-medium text-white/80">{label}</span>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} required={required} className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-[#C65A2A]/40" />
+      <span className="mb-2 block text-sm font-medium text-foreground">{label}</span>
+      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} required={required} className="w-full rounded-2xl border border-border bg-background px-4 py-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-[#C65A2A]/40" />
     </label>
   );
 }

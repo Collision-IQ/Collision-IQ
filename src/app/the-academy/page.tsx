@@ -78,7 +78,7 @@ function CheckoutBanner() {
   if (checkoutResult === "success") {
     return (
       <div className="mx-auto max-w-6xl px-5 pb-2">
-        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-4 text-sm text-emerald-300">
+        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-5 py-4 text-sm text-emerald-700 dark:text-emerald-300">
           Payment received. Your service case has been created and our team will be in touch to begin intake.
         </div>
       </div>
@@ -87,7 +87,7 @@ function CheckoutBanner() {
   if (checkoutResult === "cancelled") {
     return (
       <div className="mx-auto max-w-6xl px-5 pb-2">
-        <div className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4 text-sm text-white/65">
+        <div className="rounded-2xl border border-border bg-card px-5 py-4 text-sm text-muted-foreground">
           Checkout was cancelled. No charge was made.
         </div>
       </div>
@@ -99,8 +99,8 @@ function CheckoutBanner() {
 export default function TheAcademyPage() {
 
   return (
-    <main className="min-h-screen text-white">
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-black/50 backdrop-blur-xl">
+    <main className="min-h-screen bg-background text-foreground">
+      <header className="sticky top-0 z-40 border-b border-border bg-card">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-3">
           <Link href="/the-academy" className="flex items-center gap-3">
             <div className="relative h-9 w-40">
@@ -117,13 +117,13 @@ export default function TheAcademyPage() {
           <div className="flex flex-wrap items-center gap-3">
             <Link
               href="/"
-              className="rounded-2xl border border-white/12 bg-white/5 px-4 py-2 text-sm text-white/85 transition hover:bg-white/10"
+              className="rounded-2xl border border-border bg-background px-4 py-2 text-sm text-foreground transition hover:bg-muted"
             >
               Open Collision IQ
             </Link>
             <Link
               href="/technical-systems"
-              className="rounded-2xl border border-[#C65A2A]/40 bg-[#C65A2A]/10 px-4 py-2 text-sm font-semibold text-[#E88A5F] transition hover:bg-[#C65A2A]/20"
+              className="rounded-2xl border border-[#C65A2A]/40 bg-[#C65A2A]/10 px-4 py-2 text-sm font-semibold text-[#C65A2A] transition hover:bg-[#C65A2A]/20"
             >
               Explore Technical Systems
             </Link>
@@ -131,22 +131,9 @@ export default function TheAcademyPage() {
         </div>
       </header>
 
-      <section className="relative isolate overflow-hidden">
-        <video
-          autoPlay
-          muted
-          loop
-          playsInline
-          className="absolute inset-0 h-full w-full object-cover"
-        >
-          <source src="/brand/logos/Logo-video.mp4" type="video/mp4" />
-        </video>
-        <div className="absolute inset-0 bg-black/70" />
-        <div className="absolute inset-0 bg-gradient-to-tr from-black via-black/70 to-black/20" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_10%,rgba(198,90,42,0.20),transparent_45%)]" />
-
-        <div className="relative mx-auto max-w-6xl px-5 py-16 md:py-24">
-          <div className="inline-flex items-center gap-2 rounded-full border border-[#C65A2A]/30 bg-[#C65A2A]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#E88A5F]">
+      <section className="border-b border-border bg-background">
+        <div className="mx-auto max-w-6xl px-5 py-16 md:py-24">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[#C65A2A]/30 bg-[#C65A2A]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#C65A2A]">
             Collision Academy Services
           </div>
 
@@ -155,7 +142,7 @@ export default function TheAcademyPage() {
             appraisal-driven files.
           </h1>
 
-          <p className="mt-6 max-w-3xl text-lg leading-relaxed text-white/78 md:text-xl">
+          <p className="mt-6 max-w-3xl text-lg leading-relaxed text-muted-foreground md:text-xl">
             Collision Academy is the umbrella brand. This page is the
             professional-services surface: appraisal support, diminished value,
             ACV review, legal assist, and claim-positioning work when software
@@ -173,13 +160,13 @@ export default function TheAcademyPage() {
             </a>
             <Link
               href="/"
-              className="rounded-2xl border border-white/20 bg-black/25 px-6 py-3 text-sm font-semibold text-white transition hover:bg-black/35"
+              className="rounded-2xl border border-border bg-card px-6 py-3 text-sm font-semibold text-foreground transition hover:bg-muted"
             >
               Open Collision IQ
             </Link>
             <Link
               href="/technical-systems"
-              className="rounded-2xl border border-white/20 bg-black/25 px-6 py-3 text-sm font-semibold text-white transition hover:bg-black/35"
+              className="rounded-2xl border border-border bg-card px-6 py-3 text-sm font-semibold text-foreground transition hover:bg-muted"
             >
               Explore Technical Systems
             </Link>
@@ -189,23 +176,23 @@ export default function TheAcademyPage() {
 
       <section className="mx-auto max-w-6xl px-5 py-12">
         <div className="grid gap-5 md:grid-cols-3">
-          <div className="rounded-3xl border border-[#C65A2A]/35 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+          <div className="rounded-3xl border border-[#C65A2A]/35 bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
             <div className="text-lg font-semibold">Professional Services</div>
-            <p className="mt-2 text-sm leading-7 text-white/70">
+            <p className="mt-2 text-sm leading-7 text-muted-foreground">
               Collision Academy handles the expert-service layer when files
               need claim support, valuation work, or dispute strategy.
             </p>
           </div>
-          <div className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+          <div className="rounded-3xl border border-border bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
             <div className="text-lg font-semibold">Collision IQ</div>
-            <p className="mt-2 text-sm leading-7 text-white/70">
+            <p className="mt-2 text-sm leading-7 text-muted-foreground">
               Use Collision IQ when you need the working software surface for
               upload, analysis, documentation, and exports.
             </p>
           </div>
-          <div className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+          <div className="rounded-3xl border border-border bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
             <div className="text-lg font-semibold">Technical Systems</div>
-            <p className="mt-2 text-sm leading-7 text-white/70">
+            <p className="mt-2 text-sm leading-7 text-muted-foreground">
               Move into Technical Systems when your shop needs software,
               onboarding, workflow tooling, or tailored operating systems.
             </p>
@@ -216,7 +203,7 @@ export default function TheAcademyPage() {
       <section className="mx-auto max-w-6xl px-5 pb-12">
         <div className="mb-6">
           <h2 className="text-2xl font-semibold">Professional service lanes</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-7 text-white/60">
+          <p className="mt-2 max-w-3xl text-sm leading-7 text-muted-foreground">
             These offers stay on the services side of the brand. They are not
             framed as software subscriptions or member-only access.
           </p>
@@ -226,17 +213,17 @@ export default function TheAcademyPage() {
           {SERVICES.map((service) => (
             <div
               key={service.title}
-              className="flex flex-col rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+              className="flex flex-col rounded-3xl border border-border bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)]"
             >
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#E88A5F]">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#C65A2A]">
                 {service.price}
               </div>
               <h3 className="mt-3 text-xl font-semibold">{service.title}</h3>
-              <p className="mt-3 flex-1 text-sm leading-7 text-white/70">
+              <p className="mt-3 flex-1 text-sm leading-7 text-muted-foreground">
                 {service.description}
               </p>
-              <div className="mt-3 rounded-2xl border border-white/8 bg-white/[0.03] px-3 py-3 text-sm leading-6 text-white/72">
-                <span className="font-semibold text-white/88">When should I use this?</span>{" "}
+              <div className="mt-3 rounded-2xl border border-border bg-muted px-3 py-3 text-sm leading-6 text-muted-foreground">
+                <span className="font-semibold text-foreground">When should I use this?</span>{" "}
                 {service.whenToUse}
               </div>
               <form
@@ -245,9 +232,10 @@ export default function TheAcademyPage() {
                 className="mt-5"
               >
                 <input type="hidden" name="serviceKey" value={service.serviceKey} />
+                <input type="hidden" name="sourcePage" value="the-academy" />
                 <button
                   type="submit"
-                  className="rounded-2xl border border-[#C65A2A]/40 bg-[#C65A2A]/10 px-4 py-2 text-sm font-semibold text-[#E88A5F] transition hover:bg-[#C65A2A]/20"
+                  className="rounded-2xl border border-[#C65A2A]/40 bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#C65A2A]/90"
                 >
                   Request this service →
                 </button>
@@ -262,26 +250,26 @@ export default function TheAcademyPage() {
       </Suspense>
 
       <section className="mx-auto max-w-6xl px-5 pb-12">
-        <div className="rounded-3xl border border-[#C65A2A]/25 bg-black/30 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] backdrop-blur-xl md:p-8">
-          <div className="text-sm font-semibold uppercase tracking-[0.16em] text-[#E88A5F]">
+        <div className="rounded-3xl border border-[#C65A2A]/25 bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)] md:p-8">
+          <div className="text-sm font-semibold uppercase tracking-[0.16em] text-[#C65A2A]">
             How the surfaces connect
           </div>
           <h2 className="mt-3 text-2xl font-semibold">
             Choose the right layer for the work in front of you
           </h2>
           <div className="mt-5 grid gap-4 md:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-7 text-white/72">
-              <span className="font-semibold text-white">Collision IQ:</span>{" "}
+            <div className="rounded-2xl border border-border bg-muted p-4 text-sm leading-7 text-muted-foreground">
+              <span className="font-semibold text-foreground">Collision IQ:</span>{" "}
               the working software surface for analysis, chat, uploads, and
               exports.
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-7 text-white/72">
-              <span className="font-semibold text-white">Technical Systems:</span>{" "}
+            <div className="rounded-2xl border border-border bg-muted p-4 text-sm leading-7 text-muted-foreground">
+              <span className="font-semibold text-foreground">Technical Systems:</span>{" "}
               the apps, bundles, onboarding, and tailored operating systems for
               shops.
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-7 text-white/72">
-              <span className="font-semibold text-white">Collision Academy:</span>{" "}
+            <div className="rounded-2xl border border-border bg-muted p-4 text-sm leading-7 text-muted-foreground">
+              <span className="font-semibold text-foreground">Collision Academy:</span>{" "}
               the expert professional-services layer for valuation, appraisal,
               and claim support.
             </div>
@@ -290,16 +278,16 @@ export default function TheAcademyPage() {
       </section>
 
       <section className="mx-auto max-w-6xl px-5 pb-16">
-        <div className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-[0_30px_90px_rgba(0,0,0,0.6)] backdrop-blur-xl md:p-8">
+        <div className="rounded-3xl border border-border bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)] md:p-8">
           <div className="text-xl font-semibold">Stay connected</div>
 
           <div className="mt-5 grid gap-4 md:grid-cols-3">
             <Link
               href="/"
-              className="group rounded-2xl border border-white/10 bg-black/35 p-5 transition hover:bg-black/45"
+              className="group rounded-2xl border border-border bg-muted p-5 transition hover:bg-card"
             >
               <div className="text-sm font-semibold">Collision IQ</div>
-              <div className="mt-2 text-sm text-white/70">
+              <div className="mt-2 text-sm text-muted-foreground">
                 Open the software workspace for live repair analysis and export workflows.
               </div>
               <div className="mt-4 text-sm text-[#C65A2A]">Open -&gt;</div>
@@ -307,10 +295,10 @@ export default function TheAcademyPage() {
 
             <Link
               href="/technical-systems"
-              className="group rounded-2xl border border-white/10 bg-black/35 p-5 transition hover:bg-black/45"
+              className="group rounded-2xl border border-border bg-muted p-5 transition hover:bg-card"
             >
               <div className="text-sm font-semibold">Technical Systems</div>
-              <div className="mt-2 text-sm text-white/70">
+              <div className="mt-2 text-sm text-muted-foreground">
                 Review subscriptions, apps, onboarding, and tailored system options.
               </div>
               <div className="mt-4 text-sm text-[#C65A2A]">View Systems -&gt;</div>
@@ -320,10 +308,10 @@ export default function TheAcademyPage() {
               href="https://www.collision.academy/s/shop"
               target="_blank"
               rel="noopener noreferrer"
-              className="group rounded-2xl border border-white/10 bg-black/35 p-5 transition hover:bg-black/45"
+              className="group rounded-2xl border border-border bg-muted p-5 transition hover:bg-card"
             >
               <div className="text-sm font-semibold">Professional Services</div>
-              <div className="mt-2 text-sm text-white/70">
+              <div className="mt-2 text-sm text-muted-foreground">
                 Continue into the live services shop for scoped service engagement.
               </div>
               <div className="mt-4 text-sm text-[#C65A2A]">View Services -&gt;</div>

@@ -59,9 +59,14 @@ async function resolveParams(
 ): Promise<{
   serviceType: string | null;
   claimId: string | null;
+  claimIdProvided: boolean;
   returnUrl: string | null;
   analysisReportId: string | null;
   attachmentIds: string[];
+  sourcePage: string | null;
+  customerName: string | null;
+  customerEmail: string | null;
+  customerPhone: string | null;
 }> {
   const contentType = req.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -72,13 +77,23 @@ async function resolveParams(
       returnUrl?: string;
       analysisReportId?: string;
       attachmentIds?: unknown;
+      sourcePage?: string;
+      customerName?: string;
+      customerEmail?: string;
+      customerPhone?: string;
     } | null;
+    const rawClaimId = body?.claimId?.trim() ?? null;
     return {
       serviceType: (body?.serviceType ?? body?.serviceKey)?.trim() ?? null,
-      claimId: normalizeClaimId(body?.claimId?.trim() ?? null),
+      claimId: normalizeClaimId(rawClaimId),
+      claimIdProvided: Boolean(rawClaimId),
       returnUrl: body?.returnUrl?.trim() ?? null,
       analysisReportId: body?.analysisReportId?.trim() ?? null,
       attachmentIds: normalizeAttachmentIds(body?.attachmentIds),
+      sourcePage: body?.sourcePage?.trim() ?? null,
+      customerName: body?.customerName?.trim() ?? null,
+      customerEmail: body?.customerEmail?.trim() ?? null,
+      customerPhone: body?.customerPhone?.trim() ?? null,
     };
   }
   const formData = await req.formData();
@@ -88,11 +103,14 @@ async function resolveParams(
       : typeof formData.get("serviceKey") === "string"
         ? (formData.get("serviceKey") as string)
         : null;
+  const rawClaimId =
+    typeof formData.get("claimId") === "string"
+      ? (formData.get("claimId") as string).trim()
+      : null;
   return {
     serviceType: rawServiceType?.trim() ?? null,
-    claimId: typeof formData.get("claimId") === "string"
-      ? normalizeClaimId((formData.get("claimId") as string).trim())
-      : null,
+    claimId: normalizeClaimId(rawClaimId),
+    claimIdProvided: Boolean(rawClaimId),
     returnUrl: typeof formData.get("returnUrl") === "string"
       ? (formData.get("returnUrl") as string).trim()
       : null,
@@ -100,6 +118,18 @@ async function resolveParams(
       ? (formData.get("analysisReportId") as string).trim()
       : null,
     attachmentIds: normalizeAttachmentIds(formData.get("attachmentIds")),
+    sourcePage: typeof formData.get("sourcePage") === "string"
+      ? (formData.get("sourcePage") as string).trim()
+      : null,
+    customerName: typeof formData.get("customerName") === "string"
+      ? (formData.get("customerName") as string).trim()
+      : null,
+    customerEmail: typeof formData.get("customerEmail") === "string"
+      ? (formData.get("customerEmail") as string).trim()
+      : null,
+    customerPhone: typeof formData.get("customerPhone") === "string"
+      ? (formData.get("customerPhone") as string).trim()
+      : null,
   };
 }
 
@@ -123,6 +153,10 @@ function normalizeAttachmentIds(value: unknown): string[] {
 
 function serializeMetadataList(values: string[]): string {
   return [...new Set(values)].join(",").slice(0, 500);
+}
+
+function toMetadataValue(value: string | null | undefined): string {
+  return (value ?? "").trim().slice(0, 500);
 }
 
 function resolveSafeReturnUrl(params: {
@@ -173,8 +207,18 @@ export async function POST(req: Request) {
     throw error;
   }
 
-  const { serviceType, claimId, returnUrl, analysisReportId, attachmentIds } =
-    await resolveParams(req);
+  const {
+    serviceType,
+    claimId,
+    claimIdProvided,
+    returnUrl,
+    analysisReportId,
+    attachmentIds,
+    sourcePage,
+    customerName,
+    customerEmail,
+    customerPhone,
+  } = await resolveParams(req);
 
   if (!serviceType) {
     return NextResponse.json({ error: "Missing service type" }, { status: 400 });
@@ -184,9 +228,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid service type" }, { status: 400 });
   }
 
-  const stableClaimId = toStableClaimId(claimId);
-  if (!stableClaimId) {
-    return NextResponse.json({ error: "Missing or invalid claim id" }, { status: 400 });
+  const stableClaimId = claimId ? toStableClaimId(claimId) : null;
+  const isCaseTiedCheckout =
+    claimIdProvided || Boolean(analysisReportId) || attachmentIds.length > 0;
+
+  if (isCaseTiedCheckout && !stableClaimId) {
+    return NextResponse.json(
+      { error: "Missing or invalid claim id for case-tied service checkout." },
+      { status: 400 }
+    );
   }
 
   const appBaseUrl = getAppBaseUrl();
@@ -253,17 +303,25 @@ export async function POST(req: Request) {
     const customerId = await ensureStripeCustomerId(dbUser.id);
     const checkoutMetadata = {
       type: "service",
+      checkoutScope: stableClaimId ? "case" : "public",
       userId: dbUser.id,
-      claimId: stableClaimId,
+      claimId: stableClaimId ?? "",
       serviceType,
-      analysisReportId: analysisReportId ?? stableClaimId,
+      analysisReportId: analysisReportId ?? stableClaimId ?? "",
       attachmentIds: serializeMetadataList(attachmentIds),
+      sourcePage: toMetadataValue(
+        sourcePage ?? (stableClaimId ? "collision-iq-case" : "the-academy")
+      ),
+      customerName: toMetadataValue(customerName),
+      customerEmail: toMetadataValue(customerEmail),
+      customerPhone: toMetadataValue(customerPhone),
     };
 
     console.info("[service-checkout] creating Stripe Checkout session", {
       userId: dbUser.id,
       serviceType,
       claimId: stableClaimId,
+      checkoutScope: checkoutMetadata.checkoutScope,
       analysisReportId: checkoutMetadata.analysisReportId,
       attachmentCount: attachmentIds.length,
       cancelUrl,

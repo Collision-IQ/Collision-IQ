@@ -154,7 +154,7 @@ export async function createServiceCaseFromCheckoutSession(params: {
 }): Promise<ServiceCheckoutResult> {
   const { session, eventId } = params;
   const metadata = session.metadata ?? {};
-  const claimId = metadata.claimId?.trim();
+  const claimId = metadata.claimId?.trim() || null;
   const serviceType = metadata.serviceType?.trim();
   const userId = metadata.userId?.trim() || metadata.dbUserId?.trim() || null;
   const analysisReportId = metadata.analysisReportId?.trim() || null;
@@ -175,7 +175,7 @@ export async function createServiceCaseFromCheckoutSession(params: {
     return { ok: true, created: false, serviceCaseId: null, reason: "payment_not_paid" };
   }
 
-  if (!claimId || !serviceType || !userId) {
+  if (!serviceType || !userId) {
     return {
       ok: false,
       error: "Missing required service checkout metadata",
@@ -220,7 +220,9 @@ export async function createServiceCaseFromCheckoutSession(params: {
     attachmentIds,
     reviewSnapshot: reportContext.snapshot,
     checkoutMetadata: toCheckoutMetadataJson(session.metadata),
-    lastUpdate: "Payment received. Service case pending review.",
+    lastUpdate: claimId
+      ? "Payment received. Service case pending review."
+      : "Payment received. Public service case pending intake.",
   });
 
   if (!serviceCase.created) {
