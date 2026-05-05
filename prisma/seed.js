@@ -1,5 +1,10 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 // @ts-check
+const path = require("node:path");
 const { PrismaClient } = require("@prisma/client");
+const {
+  loadVerifiedRegulationSeedRecords,
+} = require("../src/lib/policyLegal/verifiedRegulationSeed.cjs");
 
 const prisma = new PrismaClient();
 
@@ -49,6 +54,35 @@ const SERVICE_PRICES = [
   },
 ];
 
+const REGULATION_STATES = [
+  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL",
+  "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME",
+  "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH",
+  "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI",
+  "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI",
+  "WY",
+];
+
+const REGULATION_CATEGORIES = [
+  "unfair_claims_practices",
+  "parts_usage",
+  "repair_standards",
+  "steering",
+  "disclosure",
+  "labor_procedures",
+  "total_loss",
+  "diminished_value",
+];
+
+const PLACEHOLDER_CITATION = "TBD - requires official state source verification";
+const VERIFIED_REGULATIONS_SEED_PATH = path.join(
+  process.cwd(),
+  "src",
+  "lib",
+  "policyLegal",
+  "verifiedRegulations.seed.json"
+);
+
 async function main() {
   console.log("Seeding ServicePriceConfig...");
   for (const entry of SERVICE_PRICES) {
@@ -58,6 +92,40 @@ async function main() {
       create: entry,
     });
     console.log(`  upserted: ${entry.serviceType} → ${entry.stripePriceId}`);
+  }
+  console.log("Seeding placeholder Regulation records...");
+  await prisma.regulation.createMany({
+    data: REGULATION_STATES.flatMap((state) =>
+      REGULATION_CATEGORIES.map((category) => ({
+        id: `${state.toLowerCase()}-${category}`,
+        state,
+        category,
+        rule: `${category.replace(/_/g, " ")} placeholder for ${state}. Do not treat as a governing rule until verified from an official source.`,
+        citation: PLACEHOLDER_CITATION,
+        sourceUrl: null,
+        sourceName: null,
+        applicability:
+          "Placeholder seed record only. Requires official state source verification before legal or regulatory support is asserted.",
+        severity: "medium",
+        effectiveDate: null,
+        retrievedAt: null,
+        verifiedBy: null,
+        notes: null,
+      }))
+    ),
+    skipDuplicates: true,
+  });
+  const verifiedRegulations = loadVerifiedRegulationSeedRecords(VERIFIED_REGULATIONS_SEED_PATH);
+  if (verifiedRegulations.length > 0) {
+    console.log(`Seeding ${verifiedRegulations.length} verified Regulation records...`);
+  }
+  for (const regulation of verifiedRegulations) {
+    await prisma.regulation.upsert({
+      where: { id: regulation.id },
+      update: regulation,
+      create: regulation,
+    });
+    console.log(`  upserted verified regulation: ${regulation.id}`);
   }
   console.log("Done.");
 }

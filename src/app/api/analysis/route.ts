@@ -56,6 +56,11 @@ import { buildWorkspaceDataFromReport } from "@/lib/workspace/buildWorkspaceData
 import { buildLinkedEvidence, type LinkedEvidence } from "@/lib/ingest/fetchLinkedEvidence";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import {
+  buildPolicyLegalCitationSnapshotData,
+  persistPolicyLegalCitationSnapshot,
+} from "@/lib/policyLegal/audit";
+import { prisma } from "@/lib/prisma";
+import {
   UnauthorizedError,
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
@@ -77,6 +82,8 @@ const SUPPLEMENT_MODEL =
 type AnalysisRequestBody = {
   artifactIds?: string[];
   activeCaseId?: string | null;
+  claimZip?: string | null;
+  claimState?: string | null;
   sessionContext?: {
     vehicleMake?: string | null;
     system?: string | null;
@@ -212,6 +219,11 @@ export async function POST(req: Request) {
       preloadedAttachments,
       sessionContext: body.sessionContext ?? null,
       userIntent: body.userIntent ?? null,
+      claimZip: body.claimZip ?? null,
+      claimState: body.claimState ?? null,
+      policyContext: {
+        active_case_id: body.activeCaseId ?? null,
+      },
     });
     report = applyLinkedEvidenceToReport({
       report,
@@ -306,6 +318,23 @@ export async function POST(req: Request) {
       throw new AttachmentAccessError(
         "The active case could not be found for the current account."
       );
+    }
+
+    if (stored.report.policyLegalReview) {
+      const snapshotData = buildPolicyLegalCitationSnapshotData({
+        caseId: stored.id,
+        claimId: null,
+        review: stored.report.policyLegalReview,
+        generatedAt: new Date(),
+      });
+
+      await persistPolicyLegalCitationSnapshot({
+        data: snapshotData,
+        createSnapshot: (data) =>
+          prisma.policyLegalReviewSnapshot.create({
+            data,
+          }),
+      });
     }
 
     await recordCompletedAnalysisUsage({

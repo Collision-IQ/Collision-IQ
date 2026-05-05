@@ -9,6 +9,7 @@ import type {
   ArtifactRefreshPolicy,
   ReassessmentDelta,
   SharedFactualCore,
+  PolicyLegalReview,
 } from "@/lib/ai/types/analysis";
 import type { LinkedEvidence } from "@/lib/ingest/fetchLinkedEvidence";
 import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
@@ -47,6 +48,7 @@ export type StoredCaseData = {
   evidenceRegistry: CaseEvidenceRegistryItem[];
   reassessmentDelta: ReassessmentDelta | null;
   artifactRefreshPolicy: ArtifactRefreshPolicy | null;
+  policyLegalReview: PolicyLegalReview | null;
   isClosed: boolean;
   exportModel: ExportModel;
 };
@@ -138,6 +140,7 @@ export async function getCaseById(
     evidenceRegistry: storedReport.report.evidenceRegistry ?? [],
     reassessmentDelta: storedReport.report.reassessmentDelta ?? null,
     artifactRefreshPolicy: storedReport.report.artifactRefreshPolicy ?? null,
+    policyLegalReview: storedReport.report.policyLegalReview ?? null,
     isClosed: Boolean(storedReport.report.ingestionMeta?.closedAt) ||
       storedReport.report.ingestionMeta?.active === false,
     exportModel,

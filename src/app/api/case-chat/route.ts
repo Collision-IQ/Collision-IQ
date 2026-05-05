@@ -113,6 +113,7 @@ export async function POST(req: NextRequest) {
       factualCore,
       reassessmentDelta,
       artifactRefreshPolicy,
+      policyLegalReview,
     } = caseData;
     const hasVehicleContext = Boolean(
       vehicle?.vin ||
@@ -273,6 +274,9 @@ REBUTTAL OUTPUT: ${artifactRefreshPolicy.rebuttalOutput.shouldRefresh ? "refresh
 CHAT/UI ONLY: ${artifactRefreshPolicy.chatSummaryOnly.shouldRefresh ? "yes" : "no"} - ${artifactRefreshPolicy.chatSummaryOnly.reason}
 `.trim()
       : "No artifact refresh policy stored.";
+    const policyLegalContext = policyLegalReview
+      ? JSON.stringify(policyLegalReview.claim_context, null, 2)
+      : "No policy/legal context stored.";
     const currentTopic = extractCurrentTopic(message, history);
 
     console.info("[chat] evidence context attached", {
@@ -326,6 +330,11 @@ ${reassessmentDeltaContext}
 ARTIFACT REFRESH POLICY
 ====================
 ${artifactRefreshContext}
+
+====================
+POLICY / LEGAL INTELLIGENCE CONTEXT
+====================
+${policyLegalContext}
 
 ====================
 ADAS DECISION STATE (PRE-TEARDOWN LOGIC)
@@ -424,6 +433,9 @@ RULES
 - Do not repeat the full factual core when only the delta matters.
 - If the delta says no material change, say that plainly and do not invent novelty.
 - Do not recommend regenerating every artifact by default; use ARTIFACT REFRESH POLICY to decide whether chat/UI summary is enough.
+- This is not legal advice. Provide claim intelligence and citation-backed repair review support only.
+- For legal-adjacent recommendations, cite OEM support, a verified regulation, an insurer guideline, or say: No governing regulation found.
+- Do not assert legal or regulatory conclusions from placeholder regulations.
 - Do not invent OEM procedures.
 - Do not name a calibration unless supported by evidence or teardown/interruption logic.
 - Before teardown: calibration scope is provisional.

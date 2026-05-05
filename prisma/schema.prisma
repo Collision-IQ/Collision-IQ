@@ -291,6 +291,64 @@ model ReportSend {
   @@index([status])
 }
 
+model Regulation {
+  id            String    @id
+  state         String
+  category      String
+  rule          String
+  citation      String
+  sourceUrl     String?   @map("source_url")
+  sourceName    String?   @map("source_name")
+  applicability String?
+  severity      String?
+  effectiveDate DateTime? @map("effective_date")
+  retrievedAt   DateTime? @map("retrieved_at")
+  verifiedBy    String?   @map("verified_by")
+  notes         String?
+
+  @@map("Regulation")
+}
+
+model PolicyLegalRegulationAccessLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  state       String?
+  requestId   String?
+  cacheStatus String?
+  status      Int
+  totalCount  Int      @default(0)
+  verifiedCount Int    @default(0)
+  placeholderCount Int @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([state])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("PolicyLegalRegulationAccessLog")
+}
+
+model PolicyLegalReviewSnapshot {
+  id                         String   @id @default(cuid())
+  caseId                     String?  @map("case_id")
+  claimId                    String?  @map("claim_id")
+  claimState                 String?  @map("claim_state")
+  regulationIdsUsed          Json     @map("regulation_ids_used")
+  regulationSourcesUsed      Json     @map("regulation_sources_used")
+  citationsUsed              Json     @map("citations_used")
+  oemSourcesUsed             Json     @map("oem_sources_used")
+  carrierSourcesUsed         Json     @map("carrier_sources_used")
+  placeholderCitations       Json     @map("placeholder_citations")
+  policyLegalConfidenceScore Int      @map("policy_legal_confidence_score")
+  generatedAt                DateTime @map("generated_at")
+  createdAt                  DateTime @default(now()) @map("created_at")
+
+  @@index([caseId])
+  @@index([claimId])
+  @@index([claimState])
+  @@index([generatedAt])
+  @@map("PolicyLegalReviewSnapshot")
+}
+
 enum SubscriptionPlan {
   STARTER
   PRO

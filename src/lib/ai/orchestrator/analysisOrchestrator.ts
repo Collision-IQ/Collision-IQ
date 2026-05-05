@@ -5,6 +5,7 @@ import {
 import { orchestrateRetrieval } from "../retrievalOrchestrator";
 import { buildComparisonAnalysis } from "../builders/comparisonEngine";
 import { extractEstimateFacts } from "../extractors/extractEstimateFacts";
+import { extractEstimateOps } from "../extractors/estimateExtractor";
 import { runRepairPipeline } from "../pipeline/repairPipeline";
 import { computeConfidenceScore } from "../scoring/confidenceScore";
 import { computeEvidenceQuality } from "../scoring/evidenceScore";
@@ -15,6 +16,9 @@ import {
   normalizeVehicleIdentity,
 } from "../vehicleContext";
 import { summarizeVehicleForLog } from "../safeVehicleLog";
+import { buildPolicyLegalContextWithDbRegulations } from "@/lib/policyLegal/context";
+import { buildPolicyLegalReviewIfEnabled } from "@/lib/policyLegal/gate";
+import { prisma } from "@/lib/prisma";
 import type {
   AnalysisIssue,
   RepairIntelligenceReport,
@@ -36,6 +40,9 @@ type RunRepairAnalysisParams = {
   preloadedAttachments?: StoredAttachment[];
   sessionContext?: VehicleSessionContext;
   userIntent?: string | null;
+  claimZip?: string | null;
+  claimState?: string | null;
+  policyContext?: Record<string, string | number | boolean | null>;
 };
 
 type AnalysisIntentProfile = {
@@ -433,6 +440,9 @@ export async function runRepairAnalysis({
   preloadedAttachments,
   sessionContext,
   userIntent,
+  claimZip,
+  claimState,
+  policyContext,
 }: RunRepairAnalysisParams): Promise<RepairIntelligenceReport> {
   const attachments = preloadedAttachments ?? (await getUploadedAttachments(artifactIds));
   const documents = attachments.map((attachment) => ({
@@ -484,7 +494,7 @@ export async function runRepairAnalysis({
       vehicle: comparisonVehicle,
     };
 
-    return {
+    const comparisonReport: RepairIntelligenceReport = {
       summary: {
         riskScore:
           comparisonAnalysis.summary.riskScore === "unknown"
@@ -533,6 +543,28 @@ export async function runRepairAnalysis({
       })),
       recommendedActions: [comparisonAnalysis.narrative],
       analysis: comparisonAnalysis,
+    };
+    const comparisonPolicyLegalContext = await buildPolicyLegalContextWithDbRegulations({
+      zip: claimZip,
+      state: claimState,
+      estimateText: `${shopText}\n\n${insurerText}`,
+      oemProcedures: comparisonReport.requiredProcedures.map((entry) => entry.procedure),
+      carrierGuidelines: extractCarrierGuidelines(insurerText),
+      policyContext,
+      findRegulations: (state) =>
+        prisma.regulation.findMany({
+          where: { state },
+          orderBy: [{ state: "asc" }, { category: "asc" }],
+        }),
+    });
+
+    return {
+      ...comparisonReport,
+      policyLegalReview: buildPolicyLegalReviewIfEnabled({
+        context: comparisonPolicyLegalContext,
+        report: comparisonReport,
+        operations: extractEstimateOps(shopText),
+      }),
     };
   }
 
@@ -606,7 +638,7 @@ export async function runRepairAnalysis({
   const mediumSeverityIssues = issues.filter((issue) => issue.severity === "medium").length;
   const lowSeverityIssues = issues.filter((issue) => issue.severity === "low").length;
 
-  const report: RepairIntelligenceReport = {
+  const baseReport: RepairIntelligenceReport = {
     summary: {
       riskScore: computeRiskScore({
         highSeverityIssues,
@@ -638,6 +670,27 @@ export async function runRepairAnalysis({
     analysis: undefined,
     sourceEstimateText: estimateText,
     estimateFacts,
+  };
+  const policyLegalContext = await buildPolicyLegalContextWithDbRegulations({
+    zip: claimZip,
+    state: claimState,
+    estimateText,
+    oemProcedures: requiredProcedures.map((entry) => entry.procedure),
+    carrierGuidelines: extractCarrierGuidelines(estimateText),
+    policyContext,
+    findRegulations: (state) =>
+      prisma.regulation.findMany({
+        where: { state },
+        orderBy: [{ state: "asc" }, { category: "asc" }],
+      }),
+  });
+  const report: RepairIntelligenceReport = {
+    ...baseReport,
+    policyLegalReview: buildPolicyLegalReviewIfEnabled({
+      context: policyLegalContext,
+      report: baseReport,
+      operations: pipeline.operations,
+    }),
   };
 
   console.info("[analysis-intent-profile]", {
@@ -675,6 +728,16 @@ function findDocumentText(
   });
 
   return match?.text ?? undefined;
+}
+
+function extractCarrierGuidelines(text: string): string[] {
+  return text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) =>
+      /\b(?:carrier|insurer|insurance|guideline|policy|allowance|included|denied)\b/i.test(line)
+    )
+    .slice(0, 12);
 }
 
 function inferVehicleFromDocument(

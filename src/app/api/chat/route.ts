@@ -13,6 +13,11 @@ import { getCaseById } from "@/lib/cases/getCaseById";
 import type { StoredCaseData } from "@/lib/cases/getCaseById";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { buildProductAccessGuard } from "@/lib/featureAccess";
+import {
+  buildPolicyLegalContextWithDbRegulations,
+  formatPolicyLegalPromptContext,
+} from "@/lib/policyLegal/context";
+import { prisma } from "@/lib/prisma";
 
 const MAX_UPLOAD_BATCH_FILES = 6;
 const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at a time.";
@@ -56,6 +61,7 @@ type IncomingAttachment = {
 
 type IncomingJurisdiction = {
   stateCode?: string;
+  zipCode?: string;
 };
 
 type ChatRequestBody = {
@@ -315,6 +321,10 @@ function resolveJurisdictionFromBody(
     confidence: "high",
     source: "client_input",
   };
+}
+
+function resolveJurisdictionZipFromBody(body: ChatRequestBody): string | null {
+  return body.jurisdiction?.zipCode?.trim() || null;
 }
 
 function formatRecentConversation(messages: IncomingMessage[] = []): string {
@@ -750,6 +760,7 @@ export async function POST(req: Request) {
     const requestStartedAt = Date.now();
     const body = (await req.json()) as ChatRequestBody;
     const explicitJurisdiction = resolveJurisdictionFromBody(body);
+    const explicitJurisdictionZip = resolveJurisdictionZipFromBody(body);
     const incomingAttachmentCount = Array.isArray(body.attachmentIds)
       ? body.attachmentIds.length
       : Array.isArray(body.attachments)
@@ -906,6 +917,32 @@ export async function POST(req: Request) {
       .filter(Boolean)
       .join("\n\n");
     const estimateText = turnEstimateText || activeCaseEstimateText;
+    const policyLegalContext = openActiveCase?.policyLegalReview?.claim_context ??
+      await buildPolicyLegalContextWithDbRegulations({
+        zip: explicitJurisdictionZip,
+        state: explicitJurisdiction?.stateCode ?? null,
+        estimateText,
+        oemProcedures: [],
+        carrierGuidelines: [],
+        policyContext: {
+          active_case_id: openActiveCase?.id ?? null,
+        },
+        findRegulations: (state) =>
+          prisma.regulation.findMany({
+            where: { state },
+            orderBy: [{ state: "asc" }, { category: "asc" }],
+          }),
+      });
+    const policyLegalPromptContext = `
+POLICY / LEGAL INTELLIGENCE CONTEXT:
+${formatPolicyLegalPromptContext(policyLegalContext)}
+
+Rules:
+- This is not legal advice. Provide claim intelligence and citation-backed repair review support only.
+- Every recommendation must cite OEM support, a verified regulation, an insurer guideline, or say: No governing regulation found.
+- Mark unsupported legal conclusions as unsupported instead of presenting them as law.
+- Placeholder regulation records are not legal support.
+`.trim();
     const resolvedVehicle = inferDriveVehicleContext({
       estimateText,
       userQuery: userMessage,
@@ -980,7 +1017,7 @@ export async function POST(req: Request) {
 
     const firstPass = await createOpenAIResponseWithRetry(deps, "first-pass", {
       model: deps.collisionIqModels.primary,
-      instructions: systemInstructions,
+      instructions: `${systemInstructions}\n\n${policyLegalPromptContext}`,
       temperature: 0.7,
       input,
     });
@@ -1062,6 +1099,7 @@ export async function POST(req: Request) {
       ? await refineAnswerWithDriveSupport({
           deps,
           systemInstructions,
+          policyLegalPromptContext,
           userMessage,
           conversationContext,
           firstPassAnswer: firstPassText,
@@ -1194,6 +1232,7 @@ function buildRetrievalAnalysisSnapshot(params: {
 async function refineAnswerWithDriveSupport(params: {
   deps: Pick<ChatRouteDeps, "collisionIqModels" | "openai">;
   systemInstructions: string;
+  policyLegalPromptContext?: string;
   userMessage: string;
   conversationContext: string;
   firstPassAnswer: string;
@@ -1214,7 +1253,7 @@ async function refineAnswerWithDriveSupport(params: {
 
   const refined = await createOpenAIResponseWithRetry(params.deps, "second-pass", {
     model: params.deps.collisionIqModels.primary,
-    instructions: `${params.systemInstructions}\n\n${REFINEMENT_INSTRUCTIONS}`,
+    instructions: `${params.systemInstructions}\n\n${params.policyLegalPromptContext ?? ""}\n\n${REFINEMENT_INSTRUCTIONS}`,
     temperature: 0.7,
     input: refinementInput,
   });

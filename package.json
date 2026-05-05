@@ -10,7 +10,9 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint .",
+    "smoke:policy-legal": "node scripts/smoke-policy-legal.cjs",
     "test:vehicle-identity": "node scripts/run-vehicle-identity-tests.cjs",
+    "test:policy-legal": "node src/lib/policyLegal/policyLegal.test.cjs",
     "test:claim-specific-reports": "node src/lib/ai/claimSpecificReportRegression.test.cjs"
   },
   "dependencies": {

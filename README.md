@@ -28,6 +28,10 @@ GOOGLE_PA_INSURANCE_POLICIES_FOLDER_ID=1fxDcmu_anJLGRJ8qLvORWAq8kNR1vzkf
 
 The folder must be accessible to the configured Google Drive service account or impersonated subject, and Drive ingestion must be run so policy language is indexed before the bot can cite matched excerpts. If the connector/index is unavailable, the bot should say the policy folder/index needs to be checked instead of making policy-specific conclusions.
 
+## Policy & Legal Intelligence Rollout
+
+See [docs/policy-legal-rollout.md](docs/policy-legal-rollout.md) for the rollout environment flag, Neon/Prisma migration note, verified regulation seed command, release checklist, and smoke test.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

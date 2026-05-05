@@ -6,6 +6,96 @@ import type { LinkedEvidence } from "@/lib/ingest/fetchLinkedEvidence";
 export type FindingStatus = "included" | "missing" | "not_shown";
 export type Severity = "low" | "medium" | "high";
 
+export type RegulatoryCategory =
+  | "unfair_claims_practices"
+  | "parts_usage"
+  | "repair_standards"
+  | "steering"
+  | "disclosure"
+  | "labor_procedures"
+  | "total_loss"
+  | "diminished_value";
+
+export type RegulationRecord = {
+  id: string;
+  state: string;
+  category: RegulatoryCategory;
+  rule: string;
+  citation: string;
+  source_url: string | null;
+  source_name: string | null;
+  applicability: string;
+  severity: Severity;
+  effective_date: string | null;
+  retrieved_at: string | null;
+  verified_by: string | null;
+  notes: string | null;
+  verification_state: "verified" | "placeholder";
+};
+
+export type PolicyLegalContext = {
+  claim_state: string | null;
+  applicable_regulations: RegulationRecord[];
+  oem_procedures: string[];
+  carrier_guidelines: string[];
+  policy_context: Record<string, string | number | boolean | null>;
+  citation_required: true;
+};
+
+export type PolicyLegalLineItemReview = {
+  line_item: string;
+  recommendation: string;
+  oem_compliant: boolean | null;
+  regulatory_compliant: boolean | null;
+  insurer_aligned: boolean | null;
+  regulatory_support: "Yes" | "No";
+  citation: string;
+  source_type: "OEM" | "Regulation" | "Insurer" | "None";
+  dispute_strength: "Low" | "Medium" | "High";
+  recommended_rebuttal: string;
+  incomplete: boolean;
+};
+
+export type PolicyLegalReview = {
+  claim_context: PolicyLegalContext;
+  compliance_summary: {
+    total_line_items: number;
+    complete_citations: number;
+    incomplete_items: number;
+    oem_supported_items: number;
+    regulation_supported_items: number;
+    insurer_aligned_items: number;
+    unsupported_legal_claims_blocked: number;
+    disclaimer: string;
+  };
+  line_item_reviews: PolicyLegalLineItemReview[];
+  disputable_items: PolicyLegalLineItemReview[];
+  regulatory_support_log: Array<{
+    state: string | null;
+    category: RegulatoryCategory;
+    support: "verified" | "placeholder" | "none";
+    citation: string;
+    note: string;
+  }>;
+  citation_log: Array<{
+    line_item: string;
+    citation: string;
+    source_type: PolicyLegalLineItemReview["source_type"];
+    complete: boolean;
+  }>;
+  missing_support: string[];
+  final_score: {
+    PolicyLegalConfidenceScore: number;
+    components: {
+      citation_completeness: number;
+      oem_compliance: number;
+      regulatory_compliance: number;
+      insurer_alignment: number;
+      dispute_strength: number;
+    };
+  };
+};
+
 // ─── Enhanced agent output contract ─────────────────────────────────────────
 export type AgentEvidenceLevel =
   | "documented"
@@ -390,6 +480,7 @@ export type RepairIntelligenceReport = {
   retrievalSummary?: ReportRetrievalSummary;
   disputeStrategy?: ReportDisputeStrategy;
   confidenceIntegrity?: ConfidenceIntegrity;
+  policyLegalReview?: PolicyLegalReview;
   ingestionMeta?: {
     linkedEvidenceCount?: number;
     linkedEvidenceFetchedAt?: string;
