@@ -1,6 +1,6 @@
 import type { CustomerReport } from "@/lib/ai/generateCustomerReport";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
-import type { ConfidenceIntegrity } from "@/lib/ai/types/analysis";
+import type { ConfidenceIntegrity, OEMContradiction, ReportFindingReasoning } from "@/lib/ai/types/analysis";
 
 type BuildCustomerReportPdfParams = {
   report: CustomerReport;
@@ -12,6 +12,8 @@ type BuildCustomerReportPdfParams = {
   generatedAt?: string;
   filename?: string;
   confidenceIntegrity?: ConfidenceIntegrity;
+  findingReasoning?: ReportFindingReasoning[];
+  oemContradictions?: OEMContradiction[];
 };
 
 export function buildCustomerReportPdf({
@@ -24,6 +26,8 @@ export function buildCustomerReportPdf({
   generatedAt,
   filename,
   confidenceIntegrity,
+  findingReasoning = [],
+  oemContradictions = [],
 }: BuildCustomerReportPdfParams): CarrierReportDocument {
   return {
     filename: filename || "customer-report.pdf",
@@ -74,6 +78,22 @@ export function buildCustomerReportPdf({
         title: "What Still Needs Proof",
         bullets: withFallback(report.whatStillNeedsProof),
       },
+      ...(findingReasoning.length > 0
+        ? [{
+            title: "Why These Items Matter",
+            bullets: findingReasoning.slice(0, 5).map((finding) =>
+              `${finding.issue}: ${finding.rationaleSummary ?? finding.why_it_matters} Evidence: ${finding.evidenceChainSummary ?? finding.what_proves_it} Risk if omitted: ${finding.riskIfOmitted ?? "The repair position may be harder to support."} Support: ${formatLabel(finding.supportConfidenceIndicator ?? finding.evidenceLevel)}.`
+            ),
+          }]
+        : []),
+      ...(oemContradictions.length > 0
+        ? [{
+            title: "OEM Support Conflicts",
+            bullets: oemContradictions.slice(0, 4).map((contradiction) =>
+              `${contradiction.affectedOperation}: ${contradiction.conflictSummary} OEM support: ${contradiction.oemSupportCitation ?? "inferred only; verify OEM support before relying on it."} Follow-up: ${contradiction.recommendedFollowUp}`
+            ),
+          }]
+        : []),
       {
         title: "Your Options Moving Forward",
         bullets: withFallback(report.yourOptions),
@@ -103,4 +123,10 @@ function buildPlainConfidenceBullets(integrity: ConfidenceIntegrity): string[] {
 
 function withFallback(items: string[]): string[] {
   return items.length > 0 ? items : ["None noted."];
+}
+
+function formatLabel(value: string): string {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

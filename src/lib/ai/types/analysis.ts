@@ -319,6 +319,10 @@ export type ReportFindingReasoning = {
   why_it_matters: string;
   what_proves_it: string;
   next_action: string;
+  rationaleSummary?: string;
+  evidenceChainSummary?: string;
+  riskIfOmitted?: string;
+  supportConfidenceIndicator?: "verified" | "referenced" | "inferred" | "missing" | "unsupported";
   evidenceLevel: "documented" | "referenced" | "inferred" | "missing" | "unsupported";
   confidence: number;
   claimSpecificity: "high" | "medium" | "low";
@@ -339,12 +343,98 @@ export type ReportRetrievalSummary = {
   }>;
 };
 
+export type ExportResearchAgentName =
+  | "Legal / Regulation Agent"
+  | "Policy Rights Agent"
+  | "OEM Procedure Agent"
+  | "Estimate Scrubber Agent"
+  | "Citation Verification Agent"
+  | "Source Conflict Agent";
+
+export type ExportResearchSupportCategory =
+  | "Verified Law"
+  | "Verified Policy Language"
+  | "Verified OEM / Position Statement Support"
+  | "Internet-Sourced Industry Support"
+  | "Inferred Repair Intelligence"
+  | "Unsupported / Needs Review";
+
+export type ExportResearchSource = {
+  id: string;
+  sourceType: "drive" | "web" | "oem" | "policy" | "law" | "industry" | "inference";
+  sourceTitle: string;
+  locator: string;
+  url?: string;
+  driveFileId?: string;
+  retrievalTimestamp: string;
+  jurisdiction?: string;
+  effectiveDate?: string;
+  confidenceScore: number;
+  agent: ExportResearchAgentName;
+  supportCategory: ExportResearchSupportCategory;
+  accepted: boolean;
+  rejectionReason?: string;
+};
+
+export type ExportResearchSnapshot = {
+  id: string;
+  reportType:
+    | "policy_rights_review"
+    | "estimate_scrubber"
+    | "doi_complaint_packet"
+    | "oem_contradiction_detection"
+    | "repair_intelligence";
+  generatedAt: string;
+  retrievalTimestamp: string;
+  agentsRun: ExportResearchAgentName[];
+  searchQueriesUsed: Array<{
+    agent: ExportResearchAgentName;
+    query: string;
+    sourceTarget: "drive" | "internet";
+  }>;
+  sourcesReviewed: ExportResearchSource[];
+  sourcesAccepted: ExportResearchSource[];
+  sourcesRejected: ExportResearchSource[];
+  citationMap: Array<{
+    assertionType: ExportResearchSupportCategory;
+    sourceIds: string[];
+    confidenceScore: number;
+    status: "verified" | "inferred" | "unverified_needs_source";
+  }>;
+  verificationSummary: {
+    uncitedLegalClaimsRejected: number;
+    fabricatedStatutesRejected: number;
+    staleOrSupersededRegulationsRejected: number;
+    unsupportedOemRequirementsRejected: number;
+    inferredPolicyRightsDowngraded: number;
+  };
+  unsupportedFindings: string[];
+  immutableSnapshotHash: string;
+};
+
 export type ReportDisputeStrategy = {
   leverageScore: number;
   priorityFindings: string[];
   easyWins: string[];
   hardFights: string[];
   recommendedSequence: string[];
+};
+
+export type OEMContradictionSeverity = "informational" | "moderate" | "high" | "critical";
+
+export type OEMContradiction = {
+  conflictSummary: string;
+  affectedOperation: string;
+  oemSupportCitation: string | null;
+  contradictionSeverity: OEMContradictionSeverity;
+  recommendedFollowUp: string;
+  supportStatus: "verified" | "referenced" | "inferred";
+  sourceType:
+    | "OEMProcedure"
+    | "OEMPositionStatement"
+    | "CalibrationRequirement"
+    | "StructuralVerification"
+    | "InferredProcedureConflict";
 };
 
 export type ConfidenceIntegrity = {
@@ -388,6 +478,7 @@ export type RepairIntelligenceReport = {
   artifactRefreshPolicy?: ArtifactRefreshPolicy;
   findingReasoning?: ReportFindingReasoning[];
   retrievalSummary?: ReportRetrievalSummary;
+  exportResearchSnapshot?: ExportResearchSnapshot;
   disputeStrategy?: ReportDisputeStrategy;
   confidenceIntegrity?: ConfidenceIntegrity;
   ingestionMeta?: {
@@ -401,5 +492,95 @@ export type RepairIntelligenceReport = {
     userIndicatedMoreFiles?: boolean;
     closedAt?: string;
     active?: boolean;
+  };
+};
+
+export type RegulatoryCategory =
+  | "unfair_claims_practices"
+  | "parts_usage"
+  | "repair_standards"
+  | "steering"
+  | "disclosure"
+  | "labor_procedures"
+  | "total_loss"
+  | "diminished_value";
+
+export type RegulationRecord = {
+  id: string;
+  state: string;
+  category: RegulatoryCategory;
+  rule: string;
+  citation: string;
+  source_url: string | null;
+  source_name: string | null;
+  applicability: string;
+  severity: Severity;
+  effective_date: string | null;
+  retrieved_at: string | null;
+  verified_by: string | null;
+  notes: string | null;
+  verification_state: "verified" | "placeholder";
+};
+
+export type PolicyLegalContext = {
+  claim_state: string | null;
+  applicable_regulations: RegulationRecord[];
+  oem_procedures: string[];
+  carrier_guidelines: string[];
+  policy_context: Record<string, string | number | boolean | null>;
+  citation_required: boolean;
+};
+
+export type PolicyLegalLineItemReview = {
+  line_item: string;
+  recommendation: string;
+  oem_compliant: boolean | null;
+  regulatory_compliant: boolean | null;
+  insurer_aligned: boolean | null;
+  regulatory_support: "Yes" | "No";
+  citation: string;
+  source_type: "OEM" | "Regulation" | "Insurer" | "None";
+  dispute_strength: "Low" | "Medium" | "High";
+  recommended_rebuttal: string;
+  incomplete: boolean;
+};
+
+export type PolicyLegalReview = {
+  claim_context: PolicyLegalContext;
+  compliance_summary: {
+    total_line_items: number;
+    complete_citations: number;
+    incomplete_items: number;
+    oem_supported_items: number;
+    regulation_supported_items: number;
+    insurer_aligned_items: number;
+    unsupported_legal_claims_blocked: number;
+    disclaimer: string;
+  };
+  line_item_reviews: PolicyLegalLineItemReview[];
+  disputable_items: PolicyLegalLineItemReview[];
+  regulatory_support_log: Array<{
+    state: string | null;
+    category: RegulatoryCategory;
+    support: "verified" | "placeholder" | "none";
+    citation: string;
+    note: string;
+  }>;
+  citation_log: Array<{
+    line_item: string;
+    citation: string;
+    source_type: PolicyLegalLineItemReview["source_type"];
+    complete: boolean;
+  }>;
+  missing_support: string[];
+  final_score: {
+    PolicyLegalConfidenceScore: number;
+    components: {
+      citation_completeness: number;
+      oem_compliance: number;
+      regulatory_compliance: number;
+      insurer_alignment: number;
+      dispute_strength: number;
+    };
   };
 };

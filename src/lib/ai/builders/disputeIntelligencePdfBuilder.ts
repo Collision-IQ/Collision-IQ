@@ -89,7 +89,7 @@ export function buildDisputeIntelligencePdf(params: ExportBuilderInput): Carrier
         ? [{
             title: "Finding Reasoning",
             bullets: exportModel.findingReasoning.slice(0, 6).map((finding) =>
-              `${finding.priorityRank ?? ""}. ${finding.issue} | Why: ${finding.why_it_matters} | Proof: ${finding.what_proves_it} | Next: ${finding.next_action} | Evidence: ${capitalize(finding.evidenceLevel)}`
+              `${finding.priorityRank ?? ""}. ${finding.issue} | Rationale: ${finding.rationaleSummary ?? finding.why_it_matters} | Evidence chain: ${finding.evidenceChainSummary ?? finding.what_proves_it} | Risk if omitted: ${finding.riskIfOmitted ?? "Could weaken the documented repair position."} | Next: ${finding.next_action} | Support: ${capitalize(finding.supportConfidenceIndicator ?? finding.evidenceLevel)}`
             ),
           }]
         : []),

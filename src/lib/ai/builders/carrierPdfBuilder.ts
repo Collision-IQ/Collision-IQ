@@ -9,6 +9,7 @@ import {
 } from "./buildExportModel";
 import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
 import type { ExportBuilderInput } from "./exportTemplates";
+import { buildExportResearchSections } from "./exportResearchSections";
 import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
 import { dedupeEstimateComparisonRationales } from "@/components/workspace/estimateComparisonPresentation";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
@@ -55,6 +56,7 @@ export function buildCarrierReport({
   assistantAnalysis,
   renderModel,
   workspaceData,
+  exportResearchSnapshot,
 }: ExportBuilderInput): CarrierReportDocument {
   const exportModel = resolveCarrierExportModel({
     report,
@@ -87,16 +89,16 @@ export function buildCarrierReport({
   const canonicalInsurer = resolveCanonicalInsurer(exportModel);
 
   return {
-    filename: "collision-iq-main-report.pdf",
+    filename: "repair-intelligence-report.pdf",
     brand: {
       companyName: "Collision Academy",
-      reportLabel: "Collision Repair Intelligence Report",
+      reportLabel: "Repair Intelligence Report",
       logoPath: "/brand/logos/logo-horizontal.png",
     },
     header: {
-      title: "Collision Repair Supplement & Evaluation",
+      title: "Repair Intelligence Report",
       subtitle:
-        "Professional repair-position summary built from the current estimate, structured analysis, and supporting documentation.",
+        "Technical, procedural, evidentiary, and negotiation-aware repair position built from the current estimate, structured analysis, and supporting documentation.",
       generatedLabel: `Generated ${new Date().toLocaleDateString("en-US", {
         year: "numeric",
         month: "long",
@@ -135,12 +137,8 @@ export function buildCarrierReport({
       },
     ],
     sections: [
-      ...(report?.reassessmentDelta &&
-      report.ingestionMeta?.reassessmentMode === "active_case_update"
-        ? [{
-            title: "Case Update",
-            bullets: buildCaseUpdateBullets(report),
-          }]
+      ...(exportModel.oemContradictions.length > 0
+        ? buildExportResearchSections(exportResearchSnapshot)
         : []),
       {
         title: "Executive Repair Position",
@@ -152,75 +150,24 @@ export function buildCarrierReport({
         }),
       },
       {
-        title: "Vehicle / File Summary",
-        bullets: compact([
-          canonicalVehicle !== "Unspecified"
-            ? `Vehicle: ${canonicalVehicle}.`
-            : undefined,
-          canonicalInsurer ? `Insurer: ${canonicalInsurer}.` : undefined,
-          typeof exportModel.reportFields.mileage === "number"
-            ? `Mileage: ${exportModel.reportFields.mileage.toLocaleString("en-US")}.`
-            : undefined,
-          typeof exportModel.reportFields.estimateTotal === "number"
-            ? `Estimate total: ${formatMoneyPrecise(exportModel.reportFields.estimateTotal)}.`
-            : undefined,
-          exportModel.vehicle.manufacturer ? `Manufacturer: ${exportModel.vehicle.manufacturer}.` : undefined,
-          exportModel.vehicle.trim ? `Trim: ${exportModel.vehicle.trim}.` : undefined,
-          resolveCanonicalVin(exportModel) ? `VIN: ${resolveCanonicalVin(exportModel)}.` : undefined,
-          `Confidence: ${formatVehicleConfidence(exportModel)}.`,
-          `Adjusted confidence: ${exportModel.confidenceIntegrity.adjustedConfidence}.`,
-          `Evidence completeness: ${formatCompletenessStatus(exportModel.confidenceIntegrity.completenessStatus)}.`,
-          report ? `Base structured confidence: ${capitalize(report.summary.confidence)}.` : undefined,
-          report ? `Evidence quality: ${capitalize(report.summary.evidenceQuality)}.` : undefined,
-        ]),
-      },
-      {
-        title: "File Coverage / Evidence Completeness",
+        title: "File Completeness & Confidence",
         bullets: buildConfidenceIntegrityBullets(exportModel.confidenceIntegrity),
       },
       {
-        title: "Key Findings / What Stands Out",
-        body: exportModel.repairPosition,
-      },
-      ...(exportModel.findingReasoning.length > 0
-        ? [{
-            title: "Finding Reasoning",
-            bullets: exportModel.findingReasoning.slice(0, 6).map((finding) =>
-              `${finding.priorityRank ?? ""}. ${finding.issue} | Why: ${finding.why_it_matters} | Proof: ${finding.what_proves_it} | Next: ${finding.next_action} | Evidence: ${capitalize(finding.evidenceLevel)}`
-            ),
-          }]
-        : []),
-      ...(exportModel.retrievalSummary
-        ? [{
-            title: "Retrieval Summary",
-            bullets: buildRetrievalSummaryBullets(exportModel.retrievalSummary),
-          }]
-        : []),
-      ...(exportModel.disputeStrategy
-        ? [{
-            title: "Dispute Strategy",
-            bullets: buildDisputeStrategyBullets(exportModel.disputeStrategy),
-          }]
-        : []),
-      {
-        title: isComparison ? "Repair Strategy Comparison" : "Repair Review Summary",
-        bullets: compact([
+        title: "Repair Strategy Comparison",
+        bullets: buildRepairStrategyComparisonBullets({
+          exportModel,
           credibilityConclusion,
           whyItWins,
-          topItems.length > 0
-            ? isComparison
-              ? `The clearest dispute areas are ${joinHumanList(topItems.slice(0, 4).map((item) => displayOperationLabel(item.title).toLowerCase()))}.`
-              : `The unresolved review items are ${joinHumanList(topItems.slice(0, 4).map((item) => displayOperationLabel(item.title).toLowerCase()))}.`
-            : undefined,
-        ]),
+          topItems,
+          isComparison,
+        }),
       },
       ...(dedupedComparisonRows.length > 0
         ? [{
-            title: "Structured Estimate Comparison",
+            title: "Structured Estimate Differences",
             comparisonRows: dedupedComparisonRows.slice(0, 8).map((row) => ({
-              label: [row.category, row.operation, row.partName]
-                .filter(Boolean)
-                .join(" - ") || "Comparison",
+              label: formatComparisonLabel(row.category, row.operation, row.partName),
               leftLabel: row.lhsSource ?? "Shop",
               leftValue: formatComparisonSide(row.lhsValue),
               rightLabel: row.rhsSource ?? "Carrier",
@@ -233,37 +180,45 @@ export function buildCarrierReport({
             })),
           }]
         : []),
-      ...(documentedStrengths.length > 0
+      {
+        title: "Top Dispute Drivers",
+        bullets: buildTopDisputeDriverBullets(exportModel, topItems),
+      },
+      ...(exportModel.findingReasoning.length > 0
         ? [{
-            title: isComparison ? "Documented Positives (Shop File)" : "Documented Positives",
-            bullets: documentedStrengths.map((item) => `${item}.`),
+            title: "Explainability Summary",
+            bullets: buildExplainabilityBullets(exportModel),
+          }]
+        : []),
+      ...(exportModel.oemContradictions.length > 0
+        ? [{
+            title: "OEM Contradiction Detection",
+            bullets: buildOemContradictionBullets(exportModel),
           }]
         : []),
       {
-        title: isComparison ? "Supportable Supplement / Dispute Items" : "Supportable Review Items",
-        bullets:
-          topItems.length > 0
-            ? topItems.map((item) =>
-                `${displayOperationLabel(item.title)}: ${item.rationale}${item.evidence ? ` Support noted: ${item.evidence}` : ""}`
-              )
-            : ["No clear supportable missing, underwritten, or disputed estimate-support items were identified from the current file."],
+        title: "OEM / Procedure Support",
+        bullets: buildOemProcedureSupportBullets(exportModel, documentedStrengths),
       },
       {
-        title: "Negotiation / Rebuttal Support",
-        body: exportModel.request,
+        title: "Missing Verification Evidence",
+        bullets: buildMissingVerificationBullets(exportModel),
       },
       {
-        title: "Valuation Preview",
-        bullets: buildValuationBullets(exportModel),
+        title: "Recommended Next Actions",
+        bullets: buildRecommendedNextActionBullets(report, exportModel),
       },
       {
-        title: "Source / Document Summary",
-        bullets: buildSourceSummary(report, analysis, exportModel),
+        title: "Negotiation Leverage Areas",
+        bullets: buildNegotiationLeverageBullets(exportModel),
+      },
+      {
+        title: "Source & Citation Summary",
+        bullets: buildSourceCitationSummary(report, analysis, exportModel),
       },
     ],
     footer: [
       "This report is a repair-position and documentation-support summary based on the current material.",
-      `ACV and diminished value references are preliminary only. For a full valuation, continue at ${COLLISION_ACADEMY_HANDOFF_URL}`,
     ],
   };
 }
@@ -407,6 +362,200 @@ function formatComparisonSide(value: string | number | null | undefined): string
   }
 
   return `${value}`;
+}
+
+function buildRepairStrategyComparisonBullets(params: {
+  exportModel: ExportModel;
+  credibilityConclusion: string;
+  whyItWins: string;
+  topItems: ExportModel["supplementItems"];
+  isComparison: boolean;
+}): string[] {
+  return dedupeBullets(compact([
+    params.credibilityConclusion,
+    params.whyItWins,
+    params.exportModel.disputeIntelligenceReport.summary,
+    params.topItems.length > 0
+      ? params.isComparison
+        ? `Primary differences: ${joinHumanList(params.topItems.slice(0, 4).map((item) => displayOperationLabel(item.title).toLowerCase()))}.`
+        : `Primary open items: ${joinHumanList(params.topItems.slice(0, 4).map((item) => displayOperationLabel(item.title).toLowerCase()))}.`
+      : undefined,
+  ]));
+}
+
+function buildTopDisputeDriverBullets(
+  exportModel: ExportModel,
+  fallbackItems: ExportModel["supplementItems"]
+): string[] {
+  const driverBullets = exportModel.disputeIntelligenceReport.topDrivers.slice(0, 6).map((driver) =>
+    [
+      `#${driver.priorityRank} ${displayOperationLabel(driver.title)}`,
+      `impact ${driver.impact}`,
+      `status ${formatSupportStatus(driver.supportStatus)}`,
+      `leverage ${driver.leverageScore}/100`,
+      `evidence ${driver.evidenceLevel}`,
+      driver.whyThisWins,
+      `Gap: ${driver.currentGap}`,
+      `Next: ${driver.nextAction}`,
+    ].join(" | ")
+  );
+
+  if (driverBullets.length > 0) {
+    return dedupeBullets(driverBullets);
+  }
+
+  if (fallbackItems.length === 0) {
+    return ["No clear dispute drivers were isolated from the current file."];
+  }
+
+  return dedupeBullets(fallbackItems.slice(0, 6).map((item) =>
+    `${displayOperationLabel(item.title)} | priority ${item.priority} | ${item.rationale}${item.evidence ? ` | Support: ${item.evidence}` : ""}`
+  ));
+}
+
+function buildExplainabilityBullets(exportModel: ExportModel): string[] {
+  return dedupeBullets(exportModel.findingReasoning.slice(0, 6).map((finding) =>
+    [
+      `#${finding.priorityRank ?? ""} ${displayOperationLabel(finding.issue)}`,
+      `Rationale: ${finding.rationaleSummary ?? finding.why_it_matters}`,
+      `Evidence chain: ${finding.evidenceChainSummary ?? finding.what_proves_it}`,
+      `Risk if omitted: ${finding.riskIfOmitted ?? "Could weaken the documented repair position."}`,
+      `Support: ${formatSupportStatus(finding.supportConfidenceIndicator ?? finding.evidenceLevel)}`,
+      `Confidence: ${Math.round(finding.confidence * 100)}%`,
+    ].join(" | ")
+  ));
+}
+
+function buildOemContradictionBullets(exportModel: ExportModel): string[] {
+  return dedupeBullets(exportModel.oemContradictions.map((contradiction) =>
+    [
+      `Affected operation: ${displayOperationLabel(contradiction.affectedOperation)}`,
+      `Conflict summary: ${contradiction.conflictSummary}`,
+      `OEM support citation: ${contradiction.oemSupportCitation ?? "Inferred only; verify OEM support before asserting."}`,
+      `Severity: ${formatSupportStatus(contradiction.contradictionSeverity)}`,
+      `Support: ${formatSupportStatus(contradiction.supportStatus)}`,
+      `Follow-up: ${contradiction.recommendedFollowUp}`,
+    ].join(" | ")
+  ));
+}
+
+function buildOemProcedureSupportBullets(
+  exportModel: ExportModel,
+  documentedStrengths: string[]
+): string[] {
+  const retrievalSupport = exportModel.retrievalSummary?.sourcesInfluencingFindings
+    .filter((source) => /oem|procedure|position/i.test(`${source.title} ${source.sourceType}`))
+    .map((source) => `${source.title} (${source.sourceType}).`) ?? [];
+  const procedureSupport = [
+    ...exportModel.reportFields.documentedProcedures,
+    ...exportModel.reportFields.documentedHighlights,
+    ...documentedStrengths,
+  ].map((item) => ensureSentence(item));
+  const itemSupport = exportModel.supplementItems
+    .filter((item) => /oem|procedure|position|scan|calibration|corrosion|weld|bond/i.test(`${item.category} ${item.rationale} ${item.evidence ?? ""}`))
+    .slice(0, 6)
+    .map((item) => `${displayOperationLabel(item.title)}: ${item.evidence || item.rationale}`);
+
+  const bullets = dedupeBullets([...procedureSupport, ...itemSupport, ...retrievalSupport]);
+  return bullets.length > 0
+    ? bullets
+    : ["No specific OEM procedure or position-statement support was isolated from the current file."];
+}
+
+function buildMissingVerificationBullets(exportModel: ExportModel): string[] {
+  const missingProof = exportModel.confidenceIntegrity.missingCriticalEvidence.map((item) => ensureSentence(item));
+  const supportGaps = exportModel.disputeIntelligenceReport.supportGaps.map((item) => ensureSentence(item));
+  const missingItems = exportModel.supplementItems
+    .filter((item) => item.kind === "missing_verification" || item.kind === "missing_operation")
+    .slice(0, 8)
+    .map((item) => `${displayOperationLabel(item.title)}: ${item.rationale}`);
+
+  const bullets = dedupeBullets([...missingProof, ...supportGaps, ...missingItems]);
+  return bullets.length > 0
+    ? bullets
+    : ["No additional missing verification evidence was isolated beyond the current confidence and source limitations."];
+}
+
+function buildRecommendedNextActionBullets(
+  report: RepairIntelligenceReport | null,
+  exportModel: ExportModel
+): string[] {
+  const bullets = dedupeBullets([
+    ...exportModel.disputeIntelligenceReport.nextMoves.map((item) => ensureSentence(item)),
+    ...(exportModel.disputeStrategy?.recommendedSequence.map((item) => ensureSentence(item)) ?? []),
+    ...(report?.recommendedActions.map((item) => ensureSentence(item)) ?? []),
+  ]);
+
+  return bullets.length > 0
+    ? bullets.slice(0, 8)
+    : ["Request the missing documentation, reconcile the estimate differences, and update the repair position after support is received."];
+}
+
+function buildNegotiationLeverageBullets(exportModel: ExportModel): string[] {
+  const strategy = exportModel.disputeStrategy;
+  const playbook = exportModel.negotiationPlaybook;
+  const bullets = compact([
+    strategy ? `Leverage score: ${strategy.leverageScore}/100.` : undefined,
+    ...(strategy?.priorityFindings.length ? [`Priority findings: ${strategy.priorityFindings.join("; ")}.`] : []),
+    ...(strategy?.easyWins.length ? [`Likely easier approvals: ${strategy.easyWins.join("; ")}.`] : []),
+    ...(strategy?.hardFights.length ? [`Higher-friction items: ${strategy.hardFights.join("; ")}.`] : []),
+    ...playbook.strongestArguments.slice(0, 4).map((item) => `Strong argument: ${ensureSentence(item)}`),
+    ...playbook.vulnerablePoints.slice(0, 3).map((item) => `Vulnerable point: ${ensureSentence(item)}`),
+  ]);
+
+  return dedupeBullets(bullets).slice(0, 10);
+}
+
+function buildSourceCitationSummary(
+  report: RepairIntelligenceReport | null,
+  analysis: AnalysisResult | null,
+  exportModel: ExportModel
+): string[] {
+  const bullets = [
+    ...buildSourceSummary(report, analysis, exportModel),
+    ...(exportModel.retrievalSummary ? buildRetrievalSummaryBullets(exportModel.retrievalSummary) : []),
+  ];
+
+  return dedupeBullets(bullets).slice(0, 12);
+}
+
+function formatComparisonLabel(
+  category?: string | null,
+  operation?: string | null,
+  partName?: string | null
+): string {
+  const cleanedOperation = displayOperationLabel(operation);
+  const parts = [category, cleanedOperation, partName]
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part && !/^(repair operation|n\/a|none|unknown)$/i.test(part)));
+
+  return dedupeBullets(parts).join(" - ") || "Estimate Difference";
+}
+
+function formatSupportStatus(status: string): string {
+  return status.replace(/_/g, " ");
+}
+
+function dedupeBullets(items: string[]): string[] {
+  const seen = new Set<string>();
+  const kept: string[] = [];
+
+  for (const item of items) {
+    const cleaned = item.trim().replace(/\s+/g, " ");
+    if (!cleaned) continue;
+    const key = normalizeCarrierConclusionConcept(cleaned) || cleaned.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(cleaned);
+  }
+
+  return kept;
+}
+
+function ensureSentence(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
 function buildCredibilityConclusion(

@@ -9,8 +9,11 @@ import {
 } from "../extractors/extractEstimateFacts";
 import type {
   AnalysisResult,
+  AnalysisIssue,
   ConfidenceIntegrity,
   EstimateFacts,
+  OEMContradiction,
+  OEMContradictionSeverity,
   RepairIntelligenceReport,
   ReportDisputeStrategy,
   ReportFindingReasoning,
@@ -103,6 +106,7 @@ export type ExportModel = {
   findingReasoning: ReportFindingReasoning[];
   retrievalSummary?: ReportRetrievalSummary;
   disputeStrategy?: ReportDisputeStrategy;
+  oemContradictions: OEMContradiction[];
   confidenceIntegrity: ConfidenceIntegrity;
   collisionSnapshot: CollisionSnapshot;
   negotiationPlaybook: NegotiationPlaybook;
@@ -381,8 +385,13 @@ export function buildExportModel(params: {
     supplementItems: leverageSortedSupplementItems,
     valuation,
   });
-  const rankedFindingReasoning = resolveReportFindingReasoning(params.report);
+  const rankedFindingReasoning = resolveReportFindingReasoning(params.report, params.analysis);
   const disputeStrategy = resolveReportDisputeStrategy(params.report, rankedFindingReasoning);
+  const oemContradictions = detectOemContradictions({
+    report: params.report,
+    supplementItems: leverageSortedSupplementItems,
+    retrievalSummary: resolveReportRetrievalSummary(params.report),
+  });
   const negotiationPlaybook = buildNegotiationPlaybook({
     reportFields,
     supplementItems: leverageSortedSupplementItems,
@@ -442,6 +451,7 @@ export function buildExportModel(params: {
     findingReasoning: rankedFindingReasoning,
     retrievalSummary: resolveReportRetrievalSummary(params.report),
     disputeStrategy,
+    oemContradictions,
     confidenceIntegrity: buildConfidenceIntegrity({
       report: params.report,
       analysis: params.analysis,
@@ -565,27 +575,29 @@ export function deriveExportReportFields(params: {
 }
 
 function resolveReportFindingReasoning(
-  report: RepairIntelligenceReport | null
+  report: RepairIntelligenceReport | null,
+  analysis: AnalysisResult | null
 ): ReportFindingReasoning[] {
-  if (!report) return [];
-  if (Array.isArray(report.findingReasoning)) {
+  if (Array.isArray(report?.findingReasoning)) {
     return rankFindingReasoning(report.findingReasoning);
   }
 
-  const maybeFindings = (report as unknown as { findings?: unknown }).findings;
-  if (!maybeFindings || typeof maybeFindings !== "object") {
-    return [];
-  }
+  const maybeFindings = report
+    ? (report as unknown as { findings?: unknown }).findings
+    : undefined;
+  const extracted = maybeFindings && typeof maybeFindings === "object"
+    ? Object.values(maybeFindings as Record<string, unknown>)
+        .flatMap((entry) => {
+          if (!entry || typeof entry !== "object") return [];
+          const data = (entry as { data?: unknown }).data;
+          return Array.isArray(data) ? data : [];
+        })
+        .filter(isReportFindingReasoning)
+    : [];
 
-  const extracted = Object.values(maybeFindings as Record<string, unknown>)
-    .flatMap((entry) => {
-      if (!entry || typeof entry !== "object") return [];
-      const data = (entry as { data?: unknown }).data;
-      return Array.isArray(data) ? data : [];
-    })
-    .filter(isReportFindingReasoning);
+  const fallback = buildFallbackFindingReasoning(report, analysis);
 
-  return rankFindingReasoning(extracted);
+  return rankFindingReasoning([...extracted, ...fallback]);
 }
 
 function resolveReportRetrievalSummary(
@@ -818,10 +830,7 @@ function isReportFindingReasoning(value: unknown): value is ReportFindingReasoni
 function rankFindingReasoning(findings: ReportFindingReasoning[]): ReportFindingReasoning[] {
   return findings
     .filter((finding) => finding.issue.trim())
-    .map((finding) => ({
-      ...finding,
-      leverageScore: finding.leverageScore ?? computeFindingLeverageScore(finding),
-    }))
+    .map(enrichFindingExplainability)
     .sort((left, right) => {
       const scoreDelta = (right.leverageScore ?? 0) - (left.leverageScore ?? 0);
       if (scoreDelta !== 0) return scoreDelta;
@@ -832,6 +841,373 @@ function rankFindingReasoning(findings: ReportFindingReasoning[]): ReportFinding
       priorityRank: index + 1,
     }))
     .slice(0, 8);
+}
+
+function detectOemContradictions(params: {
+  report: RepairIntelligenceReport | null;
+  supplementItems: ExportSupplementItem[];
+  retrievalSummary?: ReportRetrievalSummary;
+}): OEMContradiction[] {
+  const sourceIndex = buildOemSupportIndex(params);
+  const candidates = [
+    ...params.supplementItems.map((item) => ({
+      operation: item.title,
+      text: `${item.title} ${item.category} ${item.kind} ${item.rationale} ${item.evidence ?? ""} ${item.source ?? ""}`,
+      followUpSource: item.source ?? item.evidence ?? null,
+      priority: item.priority,
+    })),
+    ...(params.report?.issues ?? []).map((issue) => ({
+      operation: issue.missingOperation ?? issue.title,
+      text: `${issue.title} ${issue.category} ${issue.finding} ${issue.impact} ${issue.missingOperation ?? ""}`,
+      followUpSource: issue.evidenceIds.length > 0 ? `Evidence references: ${issue.evidenceIds.join(", ")}` : null,
+      priority: issue.severity,
+    })),
+  ];
+
+  const contradictions = candidates
+    .map((candidate): OEMContradiction | null => {
+      const conflictType = inferOemConflictType(candidate.text);
+      if (!conflictType) return null;
+
+      const support = findBestOemSupport(candidate.text, sourceIndex);
+      const severity = inferOemContradictionSeverity(candidate.text, candidate.priority, Boolean(support));
+      const affectedOperation = cleanDisplayLabel(candidate.operation) || "OEM-supported operation";
+      const supportStatus = support?.verified ? "verified" : support ? "referenced" : "inferred";
+      const supportDescription = support
+        ? support.citation
+        : "No verified OEM citation attached; contradiction is inferred from current repair context.";
+
+      return {
+        conflictSummary: `${affectedOperation} appears inconsistent with the carrier estimate, claim position, or denial logic when compared with ${formatOemConflictType(conflictType)}. ${supportStatus === "inferred" ? "This is inferred and requires OEM source verification." : "OEM support metadata is available."}`,
+        affectedOperation,
+        oemSupportCitation: support?.citation ?? null,
+        contradictionSeverity: severity,
+        recommendedFollowUp: buildOemContradictionFollowUp(affectedOperation, conflictType, supportDescription),
+        supportStatus,
+        sourceType: conflictType,
+      };
+    })
+    .filter((item): item is OEMContradiction => Boolean(item));
+
+  return dedupeOemContradictions(contradictions)
+    .sort((left, right) => {
+      const severityDelta = severityRank(right.contradictionSeverity) - severityRank(left.contradictionSeverity);
+      if (severityDelta !== 0) return severityDelta;
+      return supportStatusRank(right.supportStatus) - supportStatusRank(left.supportStatus);
+    })
+    .slice(0, 8);
+}
+
+function buildOemSupportIndex(params: {
+  report: RepairIntelligenceReport | null;
+  supplementItems: ExportSupplementItem[];
+  retrievalSummary?: ReportRetrievalSummary;
+}) {
+  const indexed: Array<{ citation: string; haystack: string; verified: boolean }> = [];
+
+  for (const procedure of params.report?.requiredProcedures ?? []) {
+    if (!/oem|procedure|scan|calibration|adas|structural|measure|weld|bond|corrosion/i.test(`${procedure.source} ${procedure.procedure} ${procedure.reason}`)) {
+      continue;
+    }
+    indexed.push({
+      citation: `Required procedure: ${procedure.procedure} - ${procedure.reason}`,
+      haystack: `${procedure.procedure} ${procedure.reason}`,
+      verified: procedure.source === "oem_doc",
+    });
+  }
+
+  for (const source of params.retrievalSummary?.sourcesInfluencingFindings ?? []) {
+    if (!/oem|procedure|position|calibration|scan|adas|structural|measure/i.test(`${source.title} ${source.sourceType}`)) {
+      continue;
+    }
+    indexed.push({
+      citation: source.url ? `${source.title} (${source.url})` : source.title,
+      haystack: `${source.title} ${source.sourceType} ${source.relatedFindingIds.join(" ")}`,
+      verified: source.sourceType === "oem" || /oem|position statement|procedure/i.test(source.title),
+    });
+  }
+
+  for (const item of params.supplementItems) {
+    const sourceText = `${item.source ?? ""} ${item.evidence ?? ""}`;
+    if (!sourceText.trim() || !/oem|procedure|position|calibration|scan|adas|structural|measure/i.test(sourceText)) {
+      continue;
+    }
+    indexed.push({
+      citation: item.source ?? item.evidence ?? "",
+      haystack: `${item.title} ${item.category} ${sourceText}`,
+      verified: /oem|position statement|procedure/i.test(sourceText),
+    });
+  }
+
+  return indexed;
+}
+
+function inferOemConflictType(text: string): OEMContradiction["sourceType"] | null {
+  const lower = text.toLowerCase();
+  const hasConflict =
+    /\b(missing|under[- ]?documented|not included|omitted|denied|denial|excluded|unsupported|gap|carrier|claim position|position)\b/.test(lower);
+  if (!hasConflict) return null;
+  if (/\b(calibration|adas|aim|camera|radar|sensor)\b/.test(lower)) return "CalibrationRequirement";
+  if (/\b(structural|measure|measurement|frame|rail|pillar|apron|weld|bond|section)\b/.test(lower)) return "StructuralVerification";
+  if (/\b(position statement|scrs|manufacturer position)\b/.test(lower)) return "OEMPositionStatement";
+  if (/\b(oem|procedure|scan|corrosion|one[- ]time|one time)\b/.test(lower)) return "OEMProcedure";
+  return null;
+}
+
+function findBestOemSupport(
+  text: string,
+  sourceIndex: Array<{ citation: string; haystack: string; verified: boolean }>
+) {
+  const tokens = [...tokenizeOemSupport(text)];
+  if (tokens.length === 0) return null;
+  let best: { citation: string; verified: boolean; score: number } | null = null;
+
+  for (const source of sourceIndex) {
+    const sourceTokens = tokenizeOemSupport(source.haystack);
+    const score = tokens.filter((token) => sourceTokens.has(token)).length;
+    const bestScore: number = best === null ? 0 : best.score;
+    if (score > bestScore || (score === bestScore && source.verified && best?.verified !== true)) {
+      best = { citation: source.citation, verified: source.verified, score };
+    }
+  }
+
+  return best && best.score >= 1 ? best : null;
+}
+
+function tokenizeOemSupport(value: string) {
+  return new Set(
+    value
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length > 3 && !/^(missing|under|documented|carrier|estimate|claim|position)$/.test(token))
+  );
+}
+
+function inferOemContradictionSeverity(
+  text: string,
+  priority: string,
+  hasSupport: boolean
+): OEMContradictionSeverity {
+  const lower = text.toLowerCase();
+  if (/\b(structural|frame|rail|pillar|weld|bond|adas|calibration|radar|camera)\b/.test(lower) && hasSupport) {
+    return "critical";
+  }
+  if (/\b(structural|frame|rail|pillar|weld|bond|adas|calibration|radar|camera|scan)\b/.test(lower)) {
+    return "high";
+  }
+  if (priority === "high" || /\b(safety|oem|procedure|corrosion|one[- ]time)\b/.test(lower)) {
+    return hasSupport ? "high" : "moderate";
+  }
+  return "moderate";
+}
+
+function buildOemContradictionFollowUp(
+  operation: string,
+  sourceType: OEMContradiction["sourceType"],
+  supportDescription: string
+) {
+  const supportInstruction = supportDescription.startsWith("No verified")
+    ? "verify the applicable OEM procedure or position statement before asserting OEM conflict"
+    : `attach or cite ${supportDescription}`;
+  switch (sourceType) {
+    case "CalibrationRequirement":
+      return `Request the OEM calibration, scan, or aiming requirement for ${operation}; ${supportInstruction}; ask for a written explanation if the carrier position omits it.`;
+    case "StructuralVerification":
+      return `Request OEM structural verification, measurement, weld/bond, or repair-method support for ${operation}; ${supportInstruction}; ask how the denial reconciles with that requirement.`;
+    case "OEMPositionStatement":
+      return `Request the applicable OEM position statement for ${operation}; ${supportInstruction}; ask for a claim-position response tied to the cited statement.`;
+    case "OEMProcedure":
+      return `Request the applicable OEM procedure for ${operation}; ${supportInstruction}; ask for a revised estimate or written denial rationale.`;
+    case "InferredProcedureConflict":
+      return `Treat ${operation} as an inferred procedure conflict until OEM support is verified, then request a written reconciliation from the carrier.`;
+  }
+}
+
+function formatOemConflictType(sourceType: OEMContradiction["sourceType"]) {
+  switch (sourceType) {
+    case "CalibrationRequirement":
+      return "calibration or ADAS requirements";
+    case "StructuralVerification":
+      return "structural verification requirements";
+    case "OEMPositionStatement":
+      return "OEM position-statement support";
+    case "OEMProcedure":
+      return "OEM procedure support";
+    case "InferredProcedureConflict":
+      return "inferred OEM procedure support";
+  }
+}
+
+function dedupeOemContradictions(contradictions: OEMContradiction[]) {
+  const seen = new Set<string>();
+  return contradictions.filter((contradiction) => {
+    const key = `${contradiction.affectedOperation}:${contradiction.sourceType}`.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function severityRank(severity: OEMContradictionSeverity) {
+  switch (severity) {
+    case "critical":
+      return 4;
+    case "high":
+      return 3;
+    case "moderate":
+      return 2;
+    case "informational":
+      return 1;
+  }
+}
+
+function supportStatusRank(status: OEMContradiction["supportStatus"]) {
+  if (status === "verified") return 3;
+  if (status === "referenced") return 2;
+  return 1;
+}
+
+function buildFallbackFindingReasoning(
+  report: RepairIntelligenceReport | null,
+  analysis: AnalysisResult | null
+): ReportFindingReasoning[] {
+  const issueReasoning =
+    report?.issues.map((issue) => {
+      const evidenceLevel = issue.evidenceStatus
+        ? mapIssueEvidenceStatusToEvidenceLevel(issue.evidenceStatus)
+        : issue.evidenceIds.length > 0
+          ? "documented" as const
+          : "inferred" as const;
+      return {
+        id: issue.id,
+        issue: cleanDisplayLabel(issue.title),
+        finding: issue.finding,
+        why_it_matters: issue.impact || "This item can affect the documented repair position.",
+        what_proves_it: issue.evidenceIds.length > 0
+          ? `Evidence references: ${issue.evidenceIds.join(", ")}.`
+          : "Current structured analysis and estimate context; verify with source documents before use.",
+        next_action: issue.missingOperation
+          ? `Request documentation or estimate revision for ${issue.missingOperation}.`
+          : "Request the missing supporting documentation or a written estimate explanation.",
+        evidenceLevel,
+        confidence: evidenceLevel === "documented" ? 0.86 : evidenceLevel === "referenced" ? 0.74 : 0.56,
+        claimSpecificity: issue.evidenceIds.length > 0 || issue.missingOperation ? "high" as const : "medium" as const,
+      };
+    }) ?? [];
+
+  const analysisReasoning =
+    analysis?.findings.map((finding) => {
+      const evidenceLevel = finding.evidence.length > 0
+        ? "documented" as const
+        : finding.status === "unclear"
+          ? "inferred" as const
+          : "missing" as const;
+      return {
+        id: finding.id,
+        issue: cleanDisplayLabel(finding.title),
+        finding: finding.detail,
+        why_it_matters: finding.detail,
+        what_proves_it: finding.evidence.length > 0
+          ? finding.evidence.map((item) => `${item.source}${item.page ? ` p.${item.page}` : ""}`).join("; ")
+          : "No direct evidence citation is attached to this analysis finding.",
+        next_action: finding.status === "present"
+          ? "Preserve the supporting record in the file."
+          : "Request supporting documentation or revise the estimate record.",
+        evidenceLevel,
+        confidence: evidenceLevel === "documented" ? 0.82 : evidenceLevel === "inferred" ? 0.58 : 0.44,
+        claimSpecificity: finding.evidence.length > 0 ? "high" as const : "medium" as const,
+      };
+    }) ?? [];
+
+  return dedupeFindingReasoning([...issueReasoning, ...analysisReasoning]);
+}
+
+function enrichFindingExplainability(
+  finding: ReportFindingReasoning
+): ReportFindingReasoning {
+  const supportConfidenceIndicator =
+    finding.supportConfidenceIndicator ?? mapEvidenceLevelToSupportConfidence(finding.evidenceLevel);
+  return {
+    ...finding,
+    rationaleSummary: finding.rationaleSummary ?? buildRationaleSummary(finding),
+    evidenceChainSummary: finding.evidenceChainSummary ?? buildEvidenceChainSummary(finding),
+    riskIfOmitted: finding.riskIfOmitted ?? buildRiskIfOmitted(finding),
+    supportConfidenceIndicator,
+    leverageScore: finding.leverageScore ?? computeFindingLeverageScore(finding),
+  };
+}
+
+function dedupeFindingReasoning(findings: ReportFindingReasoning[]): ReportFindingReasoning[] {
+  const seen = new Set<string>();
+  const deduped: ReportFindingReasoning[] = [];
+  for (const finding of findings) {
+    const key = `${finding.issue} ${finding.finding ?? ""}`.toLowerCase().replace(/\s+/g, " ").trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(finding);
+  }
+  return deduped;
+}
+
+function mapIssueEvidenceStatusToEvidenceLevel(
+  status: NonNullable<AnalysisIssue["evidenceStatus"]>
+): ReportFindingReasoning["evidenceLevel"] {
+  switch (status) {
+    case "DOCUMENTED":
+    case "VISIBLE_IN_IMAGES":
+      return "documented";
+    case "REFERENCED_NOT_PRODUCED":
+    case "SUPPORTABLE_BUT_UNCONFIRMED":
+      return "referenced";
+    case "OPEN_PENDING_FURTHER_DOCUMENTATION":
+      return "missing";
+    case "NOT_ESTABLISHED":
+      return "unsupported";
+  }
+}
+
+function mapEvidenceLevelToSupportConfidence(
+  evidenceLevel: ReportFindingReasoning["evidenceLevel"]
+): NonNullable<ReportFindingReasoning["supportConfidenceIndicator"]> {
+  if (evidenceLevel === "documented") return "verified";
+  return evidenceLevel;
+}
+
+function buildRationaleSummary(finding: ReportFindingReasoning): string {
+  return cleanFormalExportText(
+    `${finding.issue}: ${finding.why_it_matters || finding.finding || "This affects the repair position."}`
+  );
+}
+
+function buildEvidenceChainSummary(finding: ReportFindingReasoning): string {
+  const support = formatExplainabilitySupport(finding.evidenceLevel);
+  const proof = finding.what_proves_it || "No source citation is attached.";
+  return cleanFormalExportText(`${support}. Support basis: ${proof}`);
+}
+
+function buildRiskIfOmitted(finding: ReportFindingReasoning): string {
+  if (finding.evidenceLevel === "missing" || /missing|omit|absent|not included/i.test(finding.issue)) {
+    return "If omitted, the file may lack the documentation needed to support the repair position or requested revision.";
+  }
+  if (finding.evidenceLevel === "unsupported") {
+    return "If relied on without added support, the point should be treated as unsupported commentary.";
+  }
+  return "If omitted, the report may understate a documented repair, procedure, or estimate-support issue.";
+}
+
+function formatExplainabilitySupport(evidenceLevel: ReportFindingReasoning["evidenceLevel"]): string {
+  switch (evidenceLevel) {
+    case "documented":
+      return "Support is verified from current file evidence";
+    case "referenced":
+      return "Support is referenced and should be preserved with source metadata";
+    case "inferred":
+      return "Support is inferred from available context and needs confirmation";
+    case "missing":
+      return "Support is currently missing";
+    case "unsupported":
+      return "Support is not established";
+  }
 }
 
 function computeFindingLeverageScore(finding: ReportFindingReasoning): number {
@@ -1758,6 +2134,15 @@ export function redactExportModelForDownload(exportModel: ExportModel): ExportMo
       why_it_matters: redactInsurerInText(finding.why_it_matters, insurer),
       what_proves_it: redactInsurerInText(finding.what_proves_it, insurer),
       next_action: redactInsurerInText(finding.next_action, insurer),
+      rationaleSummary: finding.rationaleSummary
+        ? redactInsurerInText(finding.rationaleSummary, insurer)
+        : undefined,
+      evidenceChainSummary: finding.evidenceChainSummary
+        ? redactInsurerInText(finding.evidenceChainSummary, insurer)
+        : undefined,
+      riskIfOmitted: finding.riskIfOmitted
+        ? redactInsurerInText(finding.riskIfOmitted, insurer)
+        : undefined,
     })),
     retrievalSummary: exportModel.retrievalSummary
       ? {
@@ -1785,6 +2170,15 @@ export function redactExportModelForDownload(exportModel: ExportModel): ExportMo
           ),
         }
       : undefined,
+    oemContradictions: exportModel.oemContradictions.map((contradiction) => ({
+      ...contradiction,
+      conflictSummary: redactInsurerInText(contradiction.conflictSummary, insurer),
+      affectedOperation: redactInsurerInText(contradiction.affectedOperation, insurer),
+      oemSupportCitation: contradiction.oemSupportCitation
+        ? redactInsurerInText(contradiction.oemSupportCitation, insurer)
+        : null,
+      recommendedFollowUp: redactInsurerInText(contradiction.recommendedFollowUp, insurer),
+    })),
     confidenceIntegrity: {
       ...exportModel.confidenceIntegrity,
       missingCriticalEvidence: exportModel.confidenceIntegrity.missingCriticalEvidence.map((item) =>

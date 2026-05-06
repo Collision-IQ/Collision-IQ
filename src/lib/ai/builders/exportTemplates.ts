@@ -9,7 +9,7 @@ import {
   type ResolvedExportInput,
 } from "./buildExportModel";
 import type { DecisionPanel } from "./buildDecisionPanel";
-import type { AnalysisResult, RepairIntelligenceReport } from "../types/analysis";
+import type { AnalysisResult, ExportResearchSnapshot, RepairIntelligenceReport } from "../types/analysis";
 import type { WorkspaceData } from "@/types/workspaceTypes";
 import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
 import { cleanOperationDisplayText as cleanUiOperationDisplayText } from "@/lib/ui/presentationText";
@@ -58,6 +58,7 @@ export type ExportBuilderInput =
     }
   ) & {
     workspaceData?: WorkspaceData | null;
+    exportResearchSnapshot?: ExportResearchSnapshot | null;
   };
 
 export function formatAnalysisModeLabel(
