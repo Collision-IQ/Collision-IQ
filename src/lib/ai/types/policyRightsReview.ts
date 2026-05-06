@@ -20,10 +20,14 @@ export type PolicyRightsConfidenceBand = "high" | "medium" | "low" | "insufficie
 export type ImmutablePolicyCitation = {
   id: string;
   source: PolicyRightsCitationSource;
+  sourceType?: "drive" | "web" | "oem" | "estimate" | "runtime";
   title: string;
   locator?: string;
   url?: string;
   retrievedAt?: string;
+  jurisdiction?: string;
+  effectiveDate?: string;
+  confidenceScore?: number;
   immutableKey: string;
 };
 

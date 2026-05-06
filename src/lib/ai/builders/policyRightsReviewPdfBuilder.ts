@@ -353,9 +353,13 @@ function buildImmutableCitations(
 
     return createCitation({
       source: citationSource,
+      sourceType: source.sourceType,
       title: source.title,
       locator,
       url: source.url,
+      retrievedAt: new Date().toISOString(),
+      jurisdiction: inferCitationJurisdiction(`${source.title} ${locator ?? ""}`),
+      confidenceScore: source.sourceType === "oem" ? 0.78 : source.sourceType === "web" ? 0.62 : 0.7,
       index,
     });
   });
@@ -363,8 +367,11 @@ function buildImmutableCitations(
   if (params.report?.ingestionMeta?.uploadedFileCount || exportModel.confidenceIntegrity.uploadedFileCount > 0) {
     citations.push(createCitation({
       source: "ClaimAnalysisRuntime",
+      sourceType: "runtime",
       title: "Claim analysis runtime context",
       locator: `Uploaded files reviewed: ${exportModel.confidenceIntegrity.uploadedFileCount}`,
+      retrievedAt: new Date().toISOString(),
+      confidenceScore: 0.45,
       index: citations.length,
     }));
   }
@@ -394,9 +401,14 @@ function classifyCitationSource(
 
 function createCitation(params: {
   source: PolicyRightsCitationSource;
+  sourceType?: ImmutablePolicyCitation["sourceType"];
   title: string;
   locator?: string;
   url?: string;
+  retrievedAt?: string;
+  jurisdiction?: string;
+  effectiveDate?: string;
+  confidenceScore?: number;
   index: number;
 }): ImmutablePolicyCitation {
   const immutableKey = stableHash([
@@ -409,11 +421,28 @@ function createCitation(params: {
   return {
     id: `PRR-${String(params.index + 1).padStart(3, "0")}-${immutableKey.slice(0, 8)}`,
     source: params.source,
+    ...(params.sourceType ? { sourceType: params.sourceType } : {}),
     title: params.title,
     ...(params.locator ? { locator: params.locator } : {}),
     ...(params.url ? { url: params.url } : {}),
+    ...(params.retrievedAt ? { retrievedAt: params.retrievedAt } : {}),
+    ...(params.jurisdiction ? { jurisdiction: params.jurisdiction } : {}),
+    ...(params.effectiveDate ? { effectiveDate: params.effectiveDate } : {}),
+    ...(typeof params.confidenceScore === "number" ? { confidenceScore: params.confidenceScore } : {}),
     immutableKey,
   };
+}
+
+function inferCitationJurisdiction(text: string): string | undefined {
+  for (const [code, name] of Object.entries(STATE_NAMES)) {
+    const codePattern = new RegExp(`\\b${code}\\b`);
+    const namePattern = new RegExp(`\\b${escapeRegExp(name)}\\b`, "i");
+    if (namePattern.test(text) || codePattern.test(text)) {
+      return `${name} (${code})`;
+    }
+  }
+
+  return undefined;
 }
 
 function detectJurisdiction(
@@ -685,8 +714,13 @@ function formatCitationIndexItem(citation: ImmutablePolicyCitation): string {
   return [
     `${citation.id}: ${citation.title}`,
     `Source: ${formatCitationSource(citation.source)}`,
+    citation.sourceType ? `Source type: ${citation.sourceType}` : null,
     citation.locator ? `Locator: ${citation.locator}` : null,
     citation.url ? `URL: ${citation.url}` : null,
+    citation.retrievedAt ? `Retrieved: ${citation.retrievedAt}` : null,
+    citation.jurisdiction ? `Jurisdiction: ${citation.jurisdiction}` : null,
+    citation.effectiveDate ? `Effective date: ${citation.effectiveDate}` : null,
+    typeof citation.confidenceScore === "number" ? `Confidence score: ${Math.round(citation.confidenceScore * 100)}%` : null,
     `Immutable key: ${citation.immutableKey}`,
   ]
     .filter(Boolean)

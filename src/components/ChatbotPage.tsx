@@ -2441,6 +2441,29 @@ function RailContent({
                   loading={reportSendHistoryLoading}
                 />
               </div>
+            ) : hasResolvedAnalysis ? (
+              <div className="space-y-2 rounded-md border border-border bg-card p-3 opacity-95 transition hover:border-[#C65A2A]/25 dark:bg-card">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <FileText size={15} className="text-[#C65A2A]" aria-hidden />
+                    Policy & Rights Review
+                    <span className="rounded-sm border border-[#C65A2A]/25 bg-[#C65A2A]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[#a35d26] dark:text-[#d08a4b]">
+                      Pro
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
+                    Verified law, policy rights, appraisal indicators, DOI escalation support, and immutable citation metadata.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={onCustomerReportLocked}
+                  className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
+                >
+                  <span className="inline-flex items-center gap-2"><ArrowRight size={15} aria-hidden /> Unlock report</span>
+                  <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
+                </button>
+              </div>
             ) : null}
             {canUseDoiComplaintPacketExport ? (
               <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[#C65A2A]/25">
