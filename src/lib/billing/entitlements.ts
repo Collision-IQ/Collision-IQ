@@ -7,6 +7,15 @@ import {
 import { getUsageCount as getMeteredUsageCount } from "@/lib/usage";
 import { isPlatformAdminEmail } from "@/lib/auth/platform-admin";
 
+const TRIAL_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
+
+export type EntitlementResolutionContext = {
+  userEmail?: string | null;
+  trialActive?: boolean;
+  subscriptionTier?: BillingPlan | "admin" | null;
+  isPlatformAdmin?: boolean;
+};
+
 export type AccountEntitlements = Omit<ViewerAccess, "plan"> & {
   plan: "admin" | BillingPlan;
   subscriptionStatus: "active" | "inactive";
@@ -37,15 +46,20 @@ export type AccountEntitlements = Omit<ViewerAccess, "plan"> & {
   canExportPolicyRightsReview: boolean;
   canExportEstimateScrubber: boolean;
   canUseChatExport: boolean;
+  trialActive: boolean;
+  maxUploadsPerReview: number | null;
   usageStatus: "ok" | "usage_limit_reached" | "trial_expired" | "upgrade_required";
 };
 
-export async function getCurrentEntitlements(params?: {
-  userEmail?: string | null;
-}): Promise<AccountEntitlements> {
+export async function getCurrentEntitlements(
+  params?: EntitlementResolutionContext
+): Promise<AccountEntitlements> {
   const access = await getCurrentViewerAccess();
   const entitlements = toAccountEntitlements(access, {
     userEmail: params?.userEmail,
+    trialActive: params?.trialActive,
+    subscriptionTier: params?.subscriptionTier,
+    isPlatformAdmin: params?.isPlatformAdmin,
   });
 
   if (entitlements.isPlatformAdmin || !entitlements.dbUserId) {
@@ -103,11 +117,13 @@ export function canUseRebuttalEmail(entitlements: AccountEntitlements) {
 
 export function toAccountEntitlements(
   access: ViewerAccess,
-  params?: { userEmail?: string | null }
+  params?: EntitlementResolutionContext
 ): AccountEntitlements {
   const isEnvAdmin = isPlatformAdminEmail(params?.userEmail ?? null);
+  const trialActive = resolveEffectiveTrialActive(access, params?.trialActive);
+  const contextAdmin = Boolean(params?.isPlatformAdmin);
 
-  if (access.isPlatformAdmin || isEnvAdmin) {
+  if (access.isPlatformAdmin || contextAdmin || isEnvAdmin) {
     return {
       ...access,
       isPlatformAdmin: true,
@@ -141,11 +157,16 @@ export function toAccountEntitlements(
       canExportPolicyRightsReview: true,
       canExportEstimateScrubber: true,
       canUseChatExport: true,
+      trialActive,
+      maxUploadsPerReview: null,
       usageStatus: "ok",
     };
   }
 
-  const billingPlan = resolveBillingPlan(access);
+  const billingPlan = resolveBillingPlan(access, {
+    subscriptionTier: params?.subscriptionTier,
+    trialActive,
+  });
   const analysisCap = getPlanAnalysisCap(billingPlan);
   const analysisCount = access.monthlyAnalysisUsed;
   const capped = true;
@@ -178,13 +199,13 @@ export function toAccountEntitlements(
     billingPlan,
     analysisCap,
     analysisCount,
-    canUpload: hasFeature(access, "uploads"),
+    canUpload: billingPlan !== "none" || trialActive || hasFeature(access, "uploads"),
     uploadCap: getPlanUploadCap(billingPlan),
     uploadCount: 0,
-    canExport: hasFeature(access, "basic_pdf_export"),
+    canExport: billingPlan !== "none" || trialActive || hasFeature(access, "basic_pdf_export"),
     exportCap: getPlanExportCap(billingPlan),
     exportCount: 0,
-    canUseBasicExports: hasFeature(access, "basic_pdf_export"),
+    canUseBasicExports: billingPlan !== "none" || trialActive || hasFeature(access, "basic_pdf_export"),
     canUseCustomerReport: hasFeature(access, "customer_report"),
     canUseRedactedChatExport: hasFeature(access, "redacted_chat_export"),
     canUseSupplementLines: hasFeature(access, "supplement_lines"),
@@ -208,13 +229,30 @@ export function toAccountEntitlements(
     canExportEstimateScrubber:
       billingPlan === "trial" || billingPlan === "pro" || billingPlan === "team",
     canUseChatExport: billingPlan === "trial" || billingPlan === "pro" || billingPlan === "team",
+    trialActive,
+    maxUploadsPerReview: getPlanUploadCap(billingPlan),
     usageStatus,
   };
 }
 
-function resolveBillingPlan(access: ViewerAccess): BillingPlan {
+function resolveBillingPlan(
+  access: ViewerAccess,
+  params?: { subscriptionTier?: BillingPlan | "admin" | null; trialActive?: boolean }
+): BillingPlan {
   if (!access.isAuthenticated) {
     return "none";
+  }
+
+  if (
+    params?.trialActive &&
+    !access.activeSubscriptionId &&
+    !access.activeSubscriptionStatus
+  ) {
+    return "trial";
+  }
+
+  if (params?.subscriptionTier && params.subscriptionTier !== "admin") {
+    return params.subscriptionTier;
   }
 
   if (access.plan === "none") {
@@ -238,6 +276,49 @@ function resolveBillingPlan(access: ViewerAccess): BillingPlan {
   }
 
   return "none";
+}
+
+export function resolveTrialActive(
+  access: Pick<ViewerAccess, "activeSubscriptionStatus" | "activeSubscriptionId" | "createdAt" | "plan">
+) {
+  if (access.activeSubscriptionStatus === "TRIALING") {
+    return true;
+  }
+
+  if (access.activeSubscriptionId || access.activeSubscriptionStatus === "ACTIVE") {
+    return false;
+  }
+
+  if (access.plan !== "pro") {
+    return false;
+  }
+
+  if (!access.createdAt) {
+    return false;
+  }
+
+  const createdAtMs = new Date(access.createdAt).getTime();
+  if (Number.isNaN(createdAtMs)) {
+    return false;
+  }
+
+  return Date.now() - createdAtMs < TRIAL_DURATION_MS;
+}
+
+function resolveEffectiveTrialActive(access: ViewerAccess, explicitTrialActive?: boolean) {
+  if (access.activeSubscriptionStatus === "TRIALING") {
+    return true;
+  }
+
+  if (access.activeSubscriptionId || access.activeSubscriptionStatus === "ACTIVE") {
+    return false;
+  }
+
+  if (typeof explicitTrialActive === "boolean") {
+    return explicitTrialActive;
+  }
+
+  return resolveTrialActive(access);
 }
 
 export function getPlanUploadCap(plan: BillingPlan): number | null {

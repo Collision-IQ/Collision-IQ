@@ -187,6 +187,30 @@ run("trial user can upload", () => {
   assert.equal(entitlements.uploadCap, null);
 });
 
+run("active free trial can upload even when feature flags drift", () => {
+  const entitlements = toAccountEntitlements(
+    buildAccess({
+      plan: "none",
+      activeSubscriptionId: null,
+      activeSubscriptionStatus: null,
+      featureFlags: {
+        ...adminAccess.featureFlags,
+        uploads: false,
+      },
+    }),
+    {
+      userEmail: "trial-window@example.com",
+      trialActive: true,
+      subscriptionTier: "none",
+    }
+  );
+
+  assert.equal(entitlements.trialActive, true);
+  assert.equal(entitlements.billingPlan, "trial");
+  assert.equal(entitlements.canUpload, true);
+  assert.equal(entitlements.maxUploadsPerReview, null);
+});
+
 run("Starter can upload one file", () => {
   const entitlements = toAccountEntitlements(
     buildAccess({

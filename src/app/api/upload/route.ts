@@ -18,6 +18,7 @@ export const runtime = "nodejs";
 
 const MAX_UPLOAD_BATCH_FILES = 6;
 const MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024;
+const TRIAL_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 
 type UploadSuccess = {
   attachmentId: string;
@@ -72,13 +73,17 @@ export async function POST(req: Request) {
     const normalizedEmail = normalizeEmail(user.email);
     const isEnvAdmin = isPlatformAdminEmail(normalizedEmail);
     const effectiveIsAdmin = isPlatformAdmin || isEnvAdmin;
+    const trialActive = resolveUploadTrialActive({
+      createdAt: user.createdAt,
+    });
     const entitlements = await getCurrentEntitlements({
       userEmail: normalizedEmail,
+      trialActive,
+      isPlatformAdmin: effectiveIsAdmin,
     });
-    const trialActive =
-      entitlements.billingPlan === "trial" || entitlements.activeSubscriptionStatus === "TRIALING";
+    const canUploadFiles = effectiveIsAdmin || entitlements.trialActive || entitlements.canUpload;
 
-    if (!effectiveIsAdmin && !entitlements.canUpload) {
+    if (!canUploadFiles) {
       console.info("[upload] request rejected", {
         code: "UNAUTHORIZED",
         reason: "uploads not included in plan",
@@ -87,10 +92,10 @@ export async function POST(req: Request) {
         plan: entitlements.plan,
         billingPlan: entitlements.billingPlan,
         subscriptionStatus: entitlements.subscriptionStatus,
-        trialActive,
+        trialActive: entitlements.trialActive,
         isAdmin: effectiveIsAdmin,
-        canUploadFiles: entitlements.canUpload,
-        maxUploadsPerReview: entitlements.uploadCap ?? "unlimited",
+        canUploadFiles,
+        maxUploadsPerReview: entitlements.maxUploadsPerReview ?? "unlimited",
         uploadCount: entitlements.uploadCount,
         uploadCap: entitlements.uploadCap,
       });
@@ -154,9 +159,12 @@ export async function POST(req: Request) {
         billingPlan: entitlements.billingPlan,
         subscriptionStatus: entitlements.subscriptionStatus,
         canUpload: entitlements.canUpload,
+        canUploadFiles,
         uploadCount: uploadsUsed,
         uploadCap: entitlements.uploadCap,
+        maxUploadsPerReview: entitlements.maxUploadsPerReview,
         usageStatus: entitlements.usageStatus,
+        trialActive: entitlements.trialActive,
         isPlatformAdmin,
         isEnvAdmin,
         effectiveIsAdmin,
@@ -398,4 +406,13 @@ export async function POST(req: Request) {
     console.error("UPLOAD ERROR:", error);
     return NextResponse.json({ error: "SERVER_ERROR" }, { status: 500 });
   }
+}
+
+function resolveUploadTrialActive(params: { createdAt?: Date | string | null }) {
+  if (!params.createdAt) return false;
+
+  const createdAtMs = new Date(params.createdAt).getTime();
+  if (Number.isNaN(createdAtMs)) return false;
+
+  return Date.now() - createdAtMs < TRIAL_DURATION_MS;
 }
