@@ -3,8 +3,13 @@ import {
   UnauthorizedError,
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
-import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import { isPlatformAdminEmail, maskEmail, normalizeEmail } from "@/lib/auth/platform-admin";
+import {
+  canUploadFiles as resolveCanUploadFiles,
+  getCurrentProductEntitlements,
+  getCurrentSubscriptionTierForUser,
+  resolveProductTrialActive,
+} from "@/lib/billing/productEntitlements";
 import { UsageAccessError, recordUsage } from "@/lib/billing/usage";
 import { getUsageCount, incrementUsage } from "@/lib/usage";
 import { saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
@@ -18,7 +23,6 @@ export const runtime = "nodejs";
 
 const MAX_UPLOAD_BATCH_FILES = 6;
 const MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024;
-const TRIAL_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 
 type UploadSuccess = {
   attachmentId: string;
@@ -73,31 +77,31 @@ export async function POST(req: Request) {
     const normalizedEmail = normalizeEmail(user.email);
     const isEnvAdmin = isPlatformAdminEmail(normalizedEmail);
     const effectiveIsAdmin = isPlatformAdmin || isEnvAdmin;
-    const trialActive = resolveUploadTrialActive({
+    const subscriptionTier = await getCurrentSubscriptionTierForUser(user.id);
+    const trialActive = resolveProductTrialActive({
+      activeSubscriptionId: subscriptionTier ? "active-subscription" : null,
+      activeSubscriptionStatus:
+        subscriptionTier === "trial" ? "TRIALING" : subscriptionTier ? "ACTIVE" : null,
       createdAt: user.createdAt,
+      plan: subscriptionTier ?? "pro",
     });
-    const entitlements = await getCurrentEntitlements({
+    const entitlements = await getCurrentProductEntitlements({
       userEmail: normalizedEmail,
       trialActive,
+      subscriptionTier,
       isPlatformAdmin: effectiveIsAdmin,
     });
-    const canUploadFiles = effectiveIsAdmin || entitlements.trialActive || entitlements.canUpload;
+    const canUploadFiles = resolveCanUploadFiles(entitlements);
 
     if (!canUploadFiles) {
       console.info("[upload] request rejected", {
-        code: "UNAUTHORIZED",
-        reason: "uploads not included in plan",
-        ownerUserId: user.id,
+        userId: user.id,
         email: maskEmail(normalizedEmail),
         plan: entitlements.plan,
-        billingPlan: entitlements.billingPlan,
-        subscriptionStatus: entitlements.subscriptionStatus,
         trialActive: entitlements.trialActive,
         isAdmin: effectiveIsAdmin,
         canUploadFiles,
-        maxUploadsPerReview: entitlements.maxUploadsPerReview ?? "unlimited",
-        uploadCount: entitlements.uploadCount,
-        uploadCap: entitlements.uploadCap,
+        maxUploadsPerReview: entitlements.maxUploadsPerReview,
       });
       return NextResponse.json(
         {
@@ -406,13 +410,4 @@ export async function POST(req: Request) {
     console.error("UPLOAD ERROR:", error);
     return NextResponse.json({ error: "SERVER_ERROR" }, { status: 500 });
   }
-}
-
-function resolveUploadTrialActive(params: { createdAt?: Date | string | null }) {
-  if (!params.createdAt) return false;
-
-  const createdAtMs = new Date(params.createdAt).getTime();
-  if (Number.isNaN(createdAtMs)) return false;
-
-  return Date.now() - createdAtMs < TRIAL_DURATION_MS;
 }

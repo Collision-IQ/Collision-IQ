@@ -40,6 +40,11 @@ const {
 const { isAdminEmail } = require("../admins.ts");
 const { canAccessFeature } = require("../featureAccess.ts");
 const { toAccountEntitlements } = require("./entitlements.ts");
+const {
+  canUploadFiles,
+  getMaxUploadsPerReview,
+  resolveProductEntitlements,
+} = require("./productEntitlements.ts");
 
 function run(name, test) {
   try {
@@ -137,7 +142,7 @@ run("env admins receive Pro-level entitlements", () => {
 });
 
 run("env admin can upload even without subscription", () => {
-  const entitlements = toAccountEntitlements(
+  const entitlements = resolveProductEntitlements(
     buildAccess({
       plan: "none",
       activeSubscriptionId: null,
@@ -148,12 +153,13 @@ run("env admin can upload even without subscription", () => {
   );
 
   assert.equal(entitlements.isPlatformAdmin, true);
-  assert.equal(entitlements.canUpload, true);
+  assert.equal(canUploadFiles(entitlements), true);
   assert.equal(entitlements.uploadCap, null);
+  assert.equal(entitlements.maxUploadsPerReview, null);
 });
 
 run("non-admin no-subscription cannot upload", () => {
-  const entitlements = toAccountEntitlements(
+  const entitlements = resolveProductEntitlements(
     buildAccess({
       plan: "none",
       activeSubscriptionId: null,
@@ -164,12 +170,13 @@ run("non-admin no-subscription cannot upload", () => {
   );
 
   assert.equal(entitlements.isPlatformAdmin, false);
-  assert.equal(entitlements.canUpload, false);
+  assert.equal(canUploadFiles(entitlements), false);
   assert.equal(entitlements.uploadCap, 0);
+  assert.equal(entitlements.maxUploadsPerReview, 0);
 });
 
 run("trial user can upload", () => {
-  const entitlements = toAccountEntitlements(
+  const entitlements = resolveProductEntitlements(
     buildAccess({
       plan: "pro",
       activeSubscriptionId: "sub_trial",
@@ -183,12 +190,13 @@ run("trial user can upload", () => {
   );
 
   assert.equal(entitlements.billingPlan, "trial");
-  assert.equal(entitlements.canUpload, true);
+  assert.equal(canUploadFiles(entitlements), true);
   assert.equal(entitlements.uploadCap, null);
+  assert.equal(entitlements.maxUploadsPerReview, null);
 });
 
 run("active free trial can upload even when feature flags drift", () => {
-  const entitlements = toAccountEntitlements(
+  const entitlements = resolveProductEntitlements(
     buildAccess({
       plan: "none",
       activeSubscriptionId: null,
@@ -207,12 +215,12 @@ run("active free trial can upload even when feature flags drift", () => {
 
   assert.equal(entitlements.trialActive, true);
   assert.equal(entitlements.billingPlan, "trial");
-  assert.equal(entitlements.canUpload, true);
+  assert.equal(canUploadFiles(entitlements), true);
   assert.equal(entitlements.maxUploadsPerReview, null);
 });
 
 run("Starter can upload one file", () => {
-  const entitlements = toAccountEntitlements(
+  const entitlements = resolveProductEntitlements(
     buildAccess({
       plan: "starter",
       activeSubscriptionId: "sub_starter",
@@ -226,8 +234,10 @@ run("Starter can upload one file", () => {
   );
 
   assert.equal(entitlements.billingPlan, "starter");
-  assert.equal(entitlements.canUpload, true);
+  assert.equal(canUploadFiles(entitlements), true);
   assert.equal(entitlements.uploadCap, 1);
+  assert.equal(entitlements.maxUploadsPerReview, 1);
+  assert.equal(getMaxUploadsPerReview("starter"), 1);
 });
 
 run("admin product plan bypass unlocks all exports", () => {
