@@ -1,10 +1,9 @@
-const ADMIN_EMAILS = new Set([
-  "vinny@collision.academy",
-  "max@collision.academy",
-  "hempsteadcollision@gmail.com",
-]);
+import { isPlatformAdminEmail } from "@/lib/auth/platform-admin";
 
+/**
+ * @deprecated Use "@/lib/auth/platform-admin" directly. This compatibility shim
+ * keeps older call sites on the env-backed platform admin allow-list.
+ */
 export function isAdminEmail(email: string | null | undefined): boolean {
-  if (!email) return false;
-  return ADMIN_EMAILS.has(email.trim().toLowerCase());
+  return isPlatformAdminEmail(email);
 }

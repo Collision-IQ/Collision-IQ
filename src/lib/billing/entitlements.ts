@@ -29,6 +29,13 @@ export type AccountEntitlements = Omit<ViewerAccess, "plan"> & {
   canUseSupplementLines: boolean;
   canUseNegotiationDraft: boolean;
   canUseRebuttalEmail: boolean;
+  canUseChatOnly: boolean;
+  canUseImmersiveReports: boolean;
+  canExportSnapshot: boolean;
+  canExportRepairIntelligence: boolean;
+  canExportPolicyRightsReview: boolean;
+  canExportEstimateScrubber: boolean;
+  canUseChatExport: boolean;
   usageStatus: "ok" | "usage_limit_reached" | "trial_expired" | "upgrade_required";
 };
 
@@ -94,6 +101,7 @@ export function toAccountEntitlements(access: ViewerAccess): AccountEntitlements
     return {
       ...access,
       plan: "admin",
+      canRunAnalysis: true,
       subscriptionStatus: "active",
       usage: {
         capped: false,
@@ -115,6 +123,13 @@ export function toAccountEntitlements(access: ViewerAccess): AccountEntitlements
       canUseSupplementLines: true,
       canUseNegotiationDraft: true,
       canUseRebuttalEmail: true,
+      canUseChatOnly: true,
+      canUseImmersiveReports: true,
+      canExportSnapshot: true,
+      canExportRepairIntelligence: true,
+      canExportPolicyRightsReview: true,
+      canExportEstimateScrubber: true,
+      canUseChatExport: true,
       usageStatus: "ok",
     };
   }
@@ -164,6 +179,24 @@ export function toAccountEntitlements(access: ViewerAccess): AccountEntitlements
     canUseSupplementLines: hasFeature(access, "supplement_lines"),
     canUseNegotiationDraft: hasFeature(access, "negotiation_draft"),
     canUseRebuttalEmail: hasFeature(access, "rebuttal_email"),
+    canUseChatOnly: billingPlan === "trial" || billingPlan === "pro" || billingPlan === "team",
+    canUseImmersiveReports:
+      billingPlan === "trial" ||
+      billingPlan === "starter" ||
+      billingPlan === "pro" ||
+      billingPlan === "team",
+    canExportSnapshot:
+      billingPlan === "trial" ||
+      billingPlan === "starter" ||
+      billingPlan === "pro" ||
+      billingPlan === "team",
+    canExportRepairIntelligence:
+      billingPlan === "trial" || billingPlan === "pro" || billingPlan === "team",
+    canExportPolicyRightsReview:
+      billingPlan === "trial" || billingPlan === "pro" || billingPlan === "team",
+    canExportEstimateScrubber:
+      billingPlan === "trial" || billingPlan === "pro" || billingPlan === "team",
+    canUseChatExport: billingPlan === "trial" || billingPlan === "pro" || billingPlan === "team",
     usageStatus,
   };
 }

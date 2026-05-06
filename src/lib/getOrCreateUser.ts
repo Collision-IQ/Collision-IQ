@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { isAdminEmail } from "@/lib/admins";
+import { isPlatformAdminEmail } from "@/lib/auth/platform-admin";
 
 type ClerkUserSeed = {
   clerkUserId: string;
@@ -15,7 +15,7 @@ type ClerkUserSeed = {
  */
 export async function getOrCreateUser(input: ClerkUserSeed) {
   const normalizedEmail = input.email?.trim().toLowerCase() ?? null;
-  const platformAdmin = isAdminEmail(normalizedEmail);
+  const platformAdmin = isPlatformAdminEmail(normalizedEmail);
 
   return prisma.user.upsert({
     where: { clerkUserId: input.clerkUserId },
