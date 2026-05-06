@@ -596,17 +596,14 @@ export function ChatbotWorkspacePage() {
 
     if (!isTrial) return null;
 
-    const createdAt = viewerAccess.createdAt
-      ? new Date(viewerAccess.createdAt)
+    const trialEndDate = viewerAccess.trialEnd
+      ? new Date(viewerAccess.trialEnd)
       : null;
 
-    if (!createdAt || Number.isNaN(createdAt.getTime())) return null;
+    if (!trialEndDate || Number.isNaN(trialEndDate.getTime())) return null;
 
     const now = new Date();
-    const trialEnd = new Date(createdAt);
-    trialEnd.setDate(trialEnd.getDate() + 30);
-
-    const diffMs = trialEnd.getTime() - now.getTime();
+    const diffMs = trialEndDate.getTime() - now.getTime();
     const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
     return days > 0 ? days : 0;

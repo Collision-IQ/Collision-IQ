@@ -1,16 +1,17 @@
-import { getPlanAnalysisCap, type BillingPlan } from "@/lib/billing/plans";
+import { getPlanAnalysisCap, PRO_TRIAL_DAYS, type BillingPlan } from "@/lib/billing/plans";
 import {
   getCurrentViewerAccess,
-  hasFeature,
+  getFeatureFlagsForPlan,
   type ViewerAccess,
 } from "@/lib/entitlements";
 import { getUsageCount as getMeteredUsageCount } from "@/lib/usage";
-import { isPlatformAdminEmail } from "@/lib/auth/platform-admin";
+import { isPlatformAdminEmailList, maskEmail } from "@/lib/auth/platform-admin";
 
 const TRIAL_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type EntitlementResolutionContext = {
   userEmail?: string | null;
+  userEmails?: Array<string | null | undefined>;
   trialActive?: boolean;
   subscriptionTier?: BillingPlan | "admin" | null;
   isPlatformAdmin?: boolean;
@@ -47,8 +48,11 @@ export type AccountEntitlements = Omit<ViewerAccess, "plan"> & {
   canExportEstimateScrubber: boolean;
   canUseChatExport: boolean;
   trialActive: boolean;
+  trialStart: string | null;
+  trialEnd: string | null;
   maxUploadsPerReview: number | null;
   usageStatus: "ok" | "usage_limit_reached" | "trial_expired" | "upgrade_required";
+  entitlementSource: "free_access_admin" | "paid_subscription" | "trial" | "starter_subscription" | "locked";
 };
 
 export async function getCurrentEntitlements(
@@ -57,9 +61,15 @@ export async function getCurrentEntitlements(
   const access = await getCurrentViewerAccess();
   const entitlements = toAccountEntitlements(access, {
     userEmail: params?.userEmail,
+    userEmails: params?.userEmails,
     trialActive: params?.trialActive,
     subscriptionTier: params?.subscriptionTier,
     isPlatformAdmin: params?.isPlatformAdmin,
+  });
+
+  logEntitlementDiagnostics(entitlements, {
+    userEmail: params?.userEmail,
+    userEmails: params?.userEmails,
   });
 
   if (entitlements.isPlatformAdmin || !entitlements.dbUserId) {
@@ -119,9 +129,14 @@ export function toAccountEntitlements(
   access: ViewerAccess,
   params?: EntitlementResolutionContext
 ): AccountEntitlements {
-  const isEnvAdmin = isPlatformAdminEmail(params?.userEmail ?? null);
+  const resolvedEmails = [
+    ...(params?.userEmails ?? []),
+    params?.userEmail,
+  ].filter(Boolean);
+  const isEnvAdmin = isPlatformAdminEmailList(resolvedEmails);
   const trialActive = resolveEffectiveTrialActive(access, params?.trialActive);
   const contextAdmin = Boolean(params?.isPlatformAdmin);
+  const trialWindow = resolveTrialWindow(access);
 
   if (access.isPlatformAdmin || contextAdmin || isEnvAdmin) {
     return {
@@ -157,9 +172,12 @@ export function toAccountEntitlements(
       canExportPolicyRightsReview: true,
       canExportEstimateScrubber: true,
       canUseChatExport: true,
-      trialActive,
+      trialActive: false,
+      trialStart: null,
+      trialEnd: null,
       maxUploadsPerReview: null,
       usageStatus: "ok",
+      entitlementSource: "free_access_admin",
     };
   }
 
@@ -169,7 +187,8 @@ export function toAccountEntitlements(
   });
   const analysisCap = getPlanAnalysisCap(billingPlan);
   const analysisCount = access.monthlyAnalysisUsed;
-  const capped = true;
+  const isProLike = billingPlan === "trial" || billingPlan === "pro" || billingPlan === "team";
+  const capped = billingPlan !== "team";
   const remaining = Math.max(analysisCap - analysisCount, 0);
 
   const usageStatus = !access.isAuthenticated
@@ -190,6 +209,7 @@ export function toAccountEntitlements(
   return {
     ...access,
     plan: billingPlan,
+    featureFlags: isProLike ? getFeatureFlagsForPlan("pro") : access.featureFlags,
     subscriptionStatus,
     usage: {
       capped,
@@ -199,18 +219,19 @@ export function toAccountEntitlements(
     billingPlan,
     analysisCap,
     analysisCount,
-    canUpload: billingPlan !== "none" || trialActive || hasFeature(access, "uploads"),
+    canRunAnalysis: isProLike ? true : access.canRunAnalysis,
+    canUpload: billingPlan !== "none",
     uploadCap: getPlanUploadCap(billingPlan),
     uploadCount: 0,
-    canExport: billingPlan !== "none" || trialActive || hasFeature(access, "basic_pdf_export"),
+    canExport: billingPlan !== "none",
     exportCap: getPlanExportCap(billingPlan),
     exportCount: 0,
-    canUseBasicExports: billingPlan !== "none" || trialActive || hasFeature(access, "basic_pdf_export"),
-    canUseCustomerReport: hasFeature(access, "customer_report"),
-    canUseRedactedChatExport: hasFeature(access, "redacted_chat_export"),
-    canUseSupplementLines: hasFeature(access, "supplement_lines"),
-    canUseNegotiationDraft: hasFeature(access, "negotiation_draft"),
-    canUseRebuttalEmail: hasFeature(access, "rebuttal_email"),
+    canUseBasicExports: billingPlan !== "none",
+    canUseCustomerReport: isProLike,
+    canUseRedactedChatExport: isProLike,
+    canUseSupplementLines: isProLike,
+    canUseNegotiationDraft: isProLike,
+    canUseRebuttalEmail: isProLike,
     canUseChatOnly: billingPlan === "trial" || billingPlan === "pro" || billingPlan === "team",
     canUseImmersiveReports:
       billingPlan === "trial" ||
@@ -230,8 +251,11 @@ export function toAccountEntitlements(
       billingPlan === "trial" || billingPlan === "pro" || billingPlan === "team",
     canUseChatExport: billingPlan === "trial" || billingPlan === "pro" || billingPlan === "team",
     trialActive,
+    trialStart: billingPlan === "trial" ? trialWindow.start : null,
+    trialEnd: billingPlan === "trial" ? trialWindow.end : null,
     maxUploadsPerReview: getPlanUploadCap(billingPlan),
     usageStatus,
+    entitlementSource: resolveEntitlementSource(billingPlan, params?.subscriptionTier),
   };
 }
 
@@ -243,16 +267,20 @@ function resolveBillingPlan(
     return "none";
   }
 
-  if (
-    params?.trialActive &&
-    !access.activeSubscriptionId &&
-    !access.activeSubscriptionStatus
-  ) {
-    return "trial";
+  if (params?.subscriptionTier && params.subscriptionTier !== "admin") {
+    if (params.subscriptionTier === "pro" || params.subscriptionTier === "team") {
+      return params.subscriptionTier;
+    }
+
+    if (params?.trialActive) {
+      return "trial";
+    }
+
+    return params.subscriptionTier;
   }
 
-  if (params?.subscriptionTier && params.subscriptionTier !== "admin") {
-    return params.subscriptionTier;
+  if (params?.trialActive) {
+    return "trial";
   }
 
   if (access.plan === "none") {
@@ -319,6 +347,69 @@ function resolveEffectiveTrialActive(access: ViewerAccess, explicitTrialActive?:
   }
 
   return resolveTrialActive(access);
+}
+
+function resolveTrialWindow(access: Pick<ViewerAccess, "createdAt">) {
+  if (!access.createdAt) {
+    return { start: null, end: null };
+  }
+
+  const start = new Date(access.createdAt);
+  if (Number.isNaN(start.getTime())) {
+    return { start: null, end: null };
+  }
+
+  const end = new Date(start.getTime() + PRO_TRIAL_DAYS * 24 * 60 * 60 * 1000);
+  return {
+    start: start.toISOString(),
+    end: end.toISOString(),
+  };
+}
+
+function resolveEntitlementSource(
+  billingPlan: BillingPlan,
+  subscriptionTier?: BillingPlan | "admin" | null
+): AccountEntitlements["entitlementSource"] {
+  if (subscriptionTier === "pro" || subscriptionTier === "team") {
+    return "paid_subscription";
+  }
+
+  if (billingPlan === "trial") {
+    return "trial";
+  }
+
+  if (billingPlan === "starter") {
+    return "starter_subscription";
+  }
+
+  return "locked";
+}
+
+function logEntitlementDiagnostics(
+  entitlements: AccountEntitlements,
+  params?: { userEmail?: string | null; userEmails?: Array<string | null | undefined> }
+) {
+  const shouldLog =
+    process.env.NODE_ENV !== "production" ||
+    (Boolean(process.env.VERCEL_ENV) && process.env.VERCEL_ENV !== "production") ||
+    entitlements.isPlatformAdmin;
+
+  if (!shouldLog) {
+    return;
+  }
+
+  console.info("[entitlements] resolved", {
+    userId: entitlements.dbUserId ?? entitlements.userId,
+    email: maskEmail(params?.userEmail ?? null),
+    verifiedEmails: (params?.userEmails ?? []).map((email) => maskEmail(email)),
+    isFreeAccessAdmin: entitlements.entitlementSource === "free_access_admin",
+    subscriptionTier: entitlements.billingPlan,
+    trialStart: entitlements.trialStart,
+    trialEnd: entitlements.trialEnd,
+    trialActive: entitlements.trialActive,
+    resolvedPlan: entitlements.plan,
+    entitlementSource: entitlements.entitlementSource,
+  });
 }
 
 export function getPlanUploadCap(plan: BillingPlan): number | null {

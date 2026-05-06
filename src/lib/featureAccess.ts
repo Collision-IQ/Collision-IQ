@@ -1,4 +1,4 @@
-export type ProductPlan = "none" | "starter" | "pro" | "team" | "admin" | "NONE" | "STARTER" | "PRO" | "TEAM" | "ADMIN";
+export type ProductPlan = "none" | "starter" | "trial" | "pro" | "team" | "admin" | "NONE" | "STARTER" | "TRIAL" | "PRO" | "TEAM" | "ADMIN";
 
 export type ProductFeature =
   | "snapshot_export"
@@ -18,6 +18,7 @@ export function normalizeProductPlan(plan: ProductPlan | string | null | undefin
   const normalized = `${plan ?? "none"}`.toLowerCase();
   if (normalized === "admin") return "admin";
   if (normalized === "team") return "team";
+  if (normalized === "trial") return "pro";
   if (normalized === "pro") return "pro";
   if (normalized === "starter") return "starter";
   return "none";

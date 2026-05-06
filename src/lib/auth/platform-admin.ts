@@ -1,4 +1,12 @@
 const PLATFORM_ADMIN_ENV_KEY = "COLLISION_IQ_PLATFORM_ADMIN_EMAILS";
+const BUILT_IN_FREE_ACCESS_EMAILS = [
+  "vinny@collision.academy",
+  "olga@collision.academy",
+  "max@conestogacollision.com",
+  "anthony@conestogacollision.com",
+  "john@johnmcshane.com",
+  "hempsteadcollision@gmail.com",
+];
 
 export function normalizeEmail(email: string | null | undefined) {
   return email?.trim().toLowerCase() || "";
@@ -6,12 +14,12 @@ export function normalizeEmail(email: string | null | undefined) {
 
 export function getPlatformAdminEmails() {
   const raw = process.env[PLATFORM_ADMIN_ENV_KEY] ?? "";
-  return new Set(
-    raw
-      .split(",")
-      .map((value) => normalizeEmail(value))
-      .filter(Boolean)
-  );
+  const envEmails = raw
+    .split(",")
+    .map((value) => normalizeEmail(value))
+    .filter(Boolean);
+
+  return new Set([...BUILT_IN_FREE_ACCESS_EMAILS, ...envEmails]);
 }
 
 export function getPlatformAdminEntitlementSource() {
@@ -41,6 +49,20 @@ export function isPlatformAdminEmail(email: string | null | undefined): boolean 
     ...getPlatformAdminEntitlementSource(),
     matched,
     email: maskEmail(normalized),
+  });
+
+  return matched;
+}
+
+export function isPlatformAdminEmailList(emails: Array<string | null | undefined>): boolean {
+  const adminEmails = getPlatformAdminEmails();
+  const normalizedEmails = emails.map((email) => normalizeEmail(email)).filter(Boolean);
+  const matched = normalizedEmails.some((email) => adminEmails.has(email));
+
+  console.info("[platform-admin] entitlement source resolved", {
+    ...getPlatformAdminEntitlementSource(),
+    matched,
+    emails: normalizedEmails.map((email) => maskEmail(email)),
   });
 
   return matched;

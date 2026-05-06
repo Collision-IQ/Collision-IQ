@@ -4,6 +4,7 @@ import { hasClerkConfig } from "@/lib/auth/config";
 import {
   getDefaultPlatformAdminEmail,
   isPlatformAdminEmail,
+  isPlatformAdminEmailList,
   normalizeEmail,
 } from "@/lib/auth/platform-admin";
 
@@ -24,6 +25,18 @@ function maskEmailForLog(email: string | null | undefined) {
   const [local, domain] = email.split("@");
   if (!local || !domain) return "[redacted-email]";
   return `${local.slice(0, 2)}***@${domain}`;
+}
+
+function getVerifiedClerkEmails(clerkUser: Awaited<ReturnType<typeof currentUser>>) {
+  return (
+    clerkUser?.emailAddresses
+      .filter((emailAddress) => {
+        const verification = emailAddress.verification as { status?: string } | null | undefined;
+        return verification?.status === "verified";
+      })
+      .map((emailAddress) => normalizeEmail(emailAddress.emailAddress))
+      .filter(Boolean) ?? []
+  );
 }
 
 async function upsertAppUser(params: {
@@ -85,6 +98,7 @@ export async function requireCurrentUser() {
       clerkUserId: user.clerkUserId,
       orgId: null,
       email: user.email,
+      verifiedEmails: fallbackEmail ? [fallbackEmail] : [],
       isPlatformAdmin,
     };
   }
@@ -110,10 +124,13 @@ export async function requireCurrentUser() {
       (emailAddress) => emailAddress.id === clerkUser?.primaryEmailAddressId
     )?.emailAddress ?? clerkUser?.emailAddresses[0]?.emailAddress;
   const normalizedEmail = normalizeEmail(primaryEmail) || null;
-  const isPlatformAdmin = isPlatformAdminEmail(normalizedEmail);
+  const verifiedEmails = getVerifiedClerkEmails(clerkUser);
+  const adminCandidateEmails = verifiedEmails.length ? verifiedEmails : [normalizedEmail];
+  const isPlatformAdmin = isPlatformAdminEmailList(adminCandidateEmails);
   console.info("[auth] resolved clerk user", {
     clerkUserId: state.userId,
     email: maskEmailForLog(normalizedEmail),
+    verifiedEmails: verifiedEmails.map((email) => maskEmailForLog(email)),
     isPlatformAdmin,
   });
   const user = await upsertAppUser({
@@ -130,6 +147,7 @@ export async function requireCurrentUser() {
     clerkUserId: user.clerkUserId,
     orgId: state.orgId ?? null,
     email: user.email,
+    verifiedEmails,
     isPlatformAdmin,
   };
 }

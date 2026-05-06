@@ -36,6 +36,7 @@ process.env.COLLISION_IQ_PLATFORM_ADMIN_EMAILS =
 const {
   getPlatformAdminEntitlementSource,
   isPlatformAdminEmail,
+  isPlatformAdminEmailList,
 } = require("../auth/platform-admin.ts");
 const { isAdminEmail } = require("../admins.ts");
 const { canAccessFeature } = require("../featureAccess.ts");
@@ -45,6 +46,15 @@ const {
   getMaxUploadsPerReview,
   resolveProductEntitlements,
 } = require("./productEntitlements.ts");
+
+const BUILT_IN_FREE_ACCESS_EMAILS = [
+  "vinny@collision.academy",
+  "olga@collision.academy",
+  "max@conestogacollision.com",
+  "anthony@conestogacollision.com",
+  "john@johnmcshane.com",
+  "hempsteadcollision@gmail.com",
+];
 
 function run(name, test) {
   try {
@@ -105,6 +115,26 @@ function buildAccess(overrides) {
   };
 }
 
+function assertFullAccess(entitlements) {
+  assert.equal(entitlements.isPlatformAdmin, true);
+  assert.equal(entitlements.plan, "admin");
+  assert.equal(entitlements.entitlementSource, "free_access_admin");
+  assert.equal(entitlements.canUseChatOnly, true);
+  assert.equal(entitlements.canUseImmersiveReports, true);
+  assert.equal(entitlements.canExport, true);
+  assert.equal(entitlements.exportCap, null);
+  assert.equal(entitlements.canUpload, true);
+  assert.equal(entitlements.uploadCap, null);
+  assert.equal(entitlements.canUseChatExport, true);
+  assert.equal(entitlements.canUseRebuttalEmail, true);
+  assert.equal(entitlements.canExportPolicyRightsReview, true);
+  assert.equal(entitlements.canExportRepairIntelligence, true);
+  assert.equal(entitlements.canExportEstimateScrubber, true);
+  assert.equal(entitlements.trialActive, false);
+  assert.equal(entitlements.trialStart, null);
+  assert.equal(entitlements.trialEnd, null);
+}
+
 run("env admin emails are the source of truth", () => {
   assert.equal(isPlatformAdminEmail("admin.one@example.com"), true);
   assert.equal(isPlatformAdminEmail("SECOND-ADMIN@example.com"), true);
@@ -112,8 +142,60 @@ run("env admin emails are the source of truth", () => {
   assert.equal(isAdminEmail("admin.one@example.com"), true);
   assert.deepEqual(getPlatformAdminEntitlementSource(), {
     envKey: "COLLISION_IQ_PLATFORM_ADMIN_EMAILS",
-    configuredAdminCount: 2,
+    configuredAdminCount: 8,
   });
+});
+
+run("built-in free-access emails receive full access without subscription", () => {
+  for (const email of BUILT_IN_FREE_ACCESS_EMAILS) {
+    const entitlements = resolveProductEntitlements(
+      buildAccess({
+        plan: "none",
+        activeSubscriptionId: null,
+        activeSubscriptionStatus: null,
+        canRunAnalysis: false,
+      }),
+      { userEmail: email }
+    );
+
+    assertFullAccess(entitlements);
+  }
+});
+
+run("free-access admin match is case-insensitive", () => {
+  const entitlements = resolveProductEntitlements(
+    buildAccess({
+      plan: "none",
+      activeSubscriptionId: null,
+      activeSubscriptionStatus: null,
+      canRunAnalysis: false,
+    }),
+    { userEmail: "  VINNY@Collision.Academy  " }
+  );
+
+  assertFullAccess(entitlements);
+});
+
+run("free-access admin match works on secondary verified Clerk email", () => {
+  assert.equal(
+    isPlatformAdminEmailList(["primary@example.com", " MAX@ConestogaCollision.com "]),
+    true
+  );
+
+  const entitlements = resolveProductEntitlements(
+    buildAccess({
+      plan: "none",
+      activeSubscriptionId: null,
+      activeSubscriptionStatus: null,
+      canRunAnalysis: false,
+    }),
+    {
+      userEmail: "primary@example.com",
+      userEmails: ["primary@example.com", " MAX@ConestogaCollision.com "],
+    }
+  );
+
+  assertFullAccess(entitlements);
 });
 
 run("env admins receive Pro-level entitlements", () => {
@@ -219,6 +301,98 @@ run("active free trial can upload even when feature flags drift", () => {
   assert.equal(entitlements.maxUploadsPerReview, null);
 });
 
+run("brand-new non-admin account receives active 30-day trial", () => {
+  const createdAt = new Date(Date.now() - 60 * 1000).toISOString();
+  const entitlements = resolveProductEntitlements(
+    buildAccess({
+      createdAt,
+      plan: "pro",
+      activeSubscriptionId: null,
+      activeSubscriptionStatus: null,
+      canRunAnalysis: true,
+    }),
+    { userEmail: "new-user@example.com" }
+  );
+
+  assert.equal(entitlements.plan, "trial");
+  assert.equal(entitlements.entitlementSource, "trial");
+  assert.equal(entitlements.trialActive, true);
+  assert.equal(entitlements.trialStart, createdAt);
+  assert.equal(
+    entitlements.trialEnd,
+    new Date(new Date(createdAt).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString()
+  );
+});
+
+run("active trial grants Pro-like access", () => {
+  const entitlements = resolveProductEntitlements(
+    buildAccess({
+      plan: "none",
+      activeSubscriptionId: null,
+      activeSubscriptionStatus: null,
+      canRunAnalysis: false,
+      featureFlags: {
+        ...adminAccess.featureFlags,
+      },
+    }),
+    {
+      userEmail: "trial-user@example.com",
+      trialActive: true,
+    }
+  );
+
+  assert.equal(entitlements.plan, "trial");
+  assert.equal(entitlements.canRunAnalysis, true);
+  assert.equal(entitlements.canUseCustomerReport, true);
+  assert.equal(entitlements.canUseRebuttalEmail, true);
+  assert.equal(entitlements.canExportRepairIntelligence, true);
+  assert.equal(entitlements.canExportPolicyRightsReview, true);
+  assert.equal(entitlements.canExportEstimateScrubber, true);
+  assert.equal(entitlements.canUseChatExport, true);
+  assert.equal(entitlements.canUpload, true);
+  assert.equal(entitlements.uploadCap, null);
+});
+
+run("expired trial locks access unless paid subscription exists", () => {
+  const expiredCreatedAt = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+  const expired = resolveProductEntitlements(
+    buildAccess({
+      createdAt: expiredCreatedAt,
+      plan: "none",
+      activeSubscriptionId: null,
+      activeSubscriptionStatus: null,
+      canRunAnalysis: false,
+    }),
+    { userEmail: "expired@example.com" }
+  );
+
+  assert.equal(expired.plan, "none");
+  assert.equal(expired.entitlementSource, "locked");
+  assert.equal(expired.trialActive, false);
+  assert.equal(expired.canRunAnalysis, false);
+  assert.equal(expired.canUpload, false);
+  assert.equal(expired.canExport, false);
+
+  const paid = resolveProductEntitlements(
+    buildAccess({
+      createdAt: expiredCreatedAt,
+      plan: "pro",
+      activeSubscriptionId: "sub_pro",
+      activeSubscriptionStatus: "ACTIVE",
+      canRunAnalysis: true,
+    }),
+    {
+      userEmail: "paid@example.com",
+      subscriptionTier: "pro",
+    }
+  );
+
+  assert.equal(paid.plan, "pro");
+  assert.equal(paid.entitlementSource, "paid_subscription");
+  assert.equal(paid.canUpload, true);
+  assert.equal(paid.canExportRepairIntelligence, true);
+});
+
 run("Starter can upload one file", () => {
   const entitlements = resolveProductEntitlements(
     buildAccess({
@@ -238,6 +412,44 @@ run("Starter can upload one file", () => {
   assert.equal(entitlements.uploadCap, 1);
   assert.equal(entitlements.maxUploadsPerReview, 1);
   assert.equal(getMaxUploadsPerReview("starter"), 1);
+  assert.equal(entitlements.canExportSnapshot, true);
+  assert.equal(entitlements.canExportRepairIntelligence, false);
+  assert.equal(entitlements.canExportPolicyRightsReview, false);
+  assert.equal(entitlements.canExportEstimateScrubber, false);
+  assert.equal(canAccessFeature(entitlements.plan, "snapshot_export"), true);
+  assert.equal(canAccessFeature(entitlements.plan, "repair_intelligence_export"), false);
+});
+
+run("backend upload/export/chat-only gates use resolved entitlement", () => {
+  const trial = resolveProductEntitlements(
+    buildAccess({
+      plan: "none",
+      activeSubscriptionId: null,
+      activeSubscriptionStatus: null,
+    }),
+    {
+      userEmail: "trial-gates@example.com",
+      trialActive: true,
+    }
+  );
+
+  assert.equal(canUploadFiles(trial), true);
+  assert.equal(canAccessFeature(trial.plan, "repair_intelligence_export"), true);
+  assert.equal(trial.canUseChatOnly, true);
+
+  const locked = resolveProductEntitlements(
+    buildAccess({
+      plan: "none",
+      activeSubscriptionId: null,
+      activeSubscriptionStatus: null,
+      canRunAnalysis: false,
+    }),
+    { userEmail: "locked-gates@example.com" }
+  );
+
+  assert.equal(canUploadFiles(locked), false);
+  assert.equal(canAccessFeature(locked.plan, "repair_intelligence_export"), false);
+  assert.equal(locked.canUseChatOnly, false);
 });
 
 run("admin product plan bypass unlocks all exports", () => {

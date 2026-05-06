@@ -73,7 +73,7 @@ function getUploadFiles(formData: FormData): File[] {
 
 export async function POST(req: Request) {
   try {
-    const { user, isPlatformAdmin } = await requireCurrentUser();
+    const { user, verifiedEmails, isPlatformAdmin } = await requireCurrentUser();
     const normalizedEmail = normalizeEmail(user.email);
     const isEnvAdmin = isPlatformAdminEmail(normalizedEmail);
     const effectiveIsAdmin = isPlatformAdmin || isEnvAdmin;
@@ -87,6 +87,7 @@ export async function POST(req: Request) {
     });
     const entitlements = await getCurrentProductEntitlements({
       userEmail: normalizedEmail,
+      userEmails: verifiedEmails,
       trialActive,
       subscriptionTier,
       isPlatformAdmin: effectiveIsAdmin,
