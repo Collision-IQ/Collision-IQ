@@ -4,6 +4,7 @@ import {
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
 import { getCurrentEntitlements } from "@/lib/billing/entitlements";
+import { isPlatformAdminEmail, maskEmail, normalizeEmail } from "@/lib/auth/platform-admin";
 import { UsageAccessError, recordUsage } from "@/lib/billing/usage";
 import { getUsageCount, incrementUsage } from "@/lib/usage";
 import { saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
@@ -68,16 +69,28 @@ function getUploadFiles(formData: FormData): File[] {
 export async function POST(req: Request) {
   try {
     const { user, isPlatformAdmin } = await requireCurrentUser();
-    const entitlements = await getCurrentEntitlements();
+    const normalizedEmail = normalizeEmail(user.email);
+    const isEnvAdmin = isPlatformAdminEmail(normalizedEmail);
+    const effectiveIsAdmin = isPlatformAdmin || isEnvAdmin;
+    const entitlements = await getCurrentEntitlements({
+      userEmail: normalizedEmail,
+    });
+    const trialActive =
+      entitlements.billingPlan === "trial" || entitlements.activeSubscriptionStatus === "TRIALING";
 
-    if (!isPlatformAdmin && !entitlements.canUpload) {
+    if (!effectiveIsAdmin && !entitlements.canUpload) {
       console.info("[upload] request rejected", {
         code: "UNAUTHORIZED",
         reason: "uploads not included in plan",
         ownerUserId: user.id,
+        email: maskEmail(normalizedEmail),
         plan: entitlements.plan,
         billingPlan: entitlements.billingPlan,
         subscriptionStatus: entitlements.subscriptionStatus,
+        trialActive,
+        isAdmin: effectiveIsAdmin,
+        canUploadFiles: entitlements.canUpload,
+        maxUploadsPerReview: entitlements.uploadCap ?? "unlimited",
         uploadCount: entitlements.uploadCount,
         uploadCap: entitlements.uploadCap,
       });
@@ -117,7 +130,7 @@ export async function POST(req: Request) {
     const failedUploads: UploadFailure[] = [];
     let uploadsUsed = entitlements.uploadCount;
 
-    if (!isPlatformAdmin && entitlements.uploadCap !== null) {
+    if (!effectiveIsAdmin && entitlements.uploadCap !== null) {
       try {
         uploadsUsed = await getUsageCount(user.id, "FILE_UPLOAD");
       } catch (error) {
@@ -145,6 +158,8 @@ export async function POST(req: Request) {
         uploadCap: entitlements.uploadCap,
         usageStatus: entitlements.usageStatus,
         isPlatformAdmin,
+        isEnvAdmin,
+        effectiveIsAdmin,
       },
       files: files.map((file, index) => ({
         index,
@@ -188,7 +203,7 @@ export async function POST(req: Request) {
       }
 
       if (
-        !isPlatformAdmin &&
+        !effectiveIsAdmin &&
         entitlements.uploadCap !== null &&
         uploadsUsed + successfulUploads.length >= entitlements.uploadCap
       ) {
@@ -270,7 +285,7 @@ export async function POST(req: Request) {
           });
         }
 
-        if (!isPlatformAdmin) {
+        if (!effectiveIsAdmin) {
           try {
             await recordUsage({
               userId: user.id,

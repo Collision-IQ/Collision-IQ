@@ -5,6 +5,7 @@ import {
   type ViewerAccess,
 } from "@/lib/entitlements";
 import { getUsageCount as getMeteredUsageCount } from "@/lib/usage";
+import { isPlatformAdminEmail } from "@/lib/auth/platform-admin";
 
 export type AccountEntitlements = Omit<ViewerAccess, "plan"> & {
   plan: "admin" | BillingPlan;
@@ -39,9 +40,13 @@ export type AccountEntitlements = Omit<ViewerAccess, "plan"> & {
   usageStatus: "ok" | "usage_limit_reached" | "trial_expired" | "upgrade_required";
 };
 
-export async function getCurrentEntitlements(): Promise<AccountEntitlements> {
+export async function getCurrentEntitlements(params?: {
+  userEmail?: string | null;
+}): Promise<AccountEntitlements> {
   const access = await getCurrentViewerAccess();
-  const entitlements = toAccountEntitlements(access);
+  const entitlements = toAccountEntitlements(access, {
+    userEmail: params?.userEmail,
+  });
 
   if (entitlements.isPlatformAdmin || !entitlements.dbUserId) {
     return entitlements;
@@ -96,10 +101,16 @@ export function canUseRebuttalEmail(entitlements: AccountEntitlements) {
   return entitlements.canUseRebuttalEmail;
 }
 
-export function toAccountEntitlements(access: ViewerAccess): AccountEntitlements {
-  if (access.isPlatformAdmin) {
+export function toAccountEntitlements(
+  access: ViewerAccess,
+  params?: { userEmail?: string | null }
+): AccountEntitlements {
+  const isEnvAdmin = isPlatformAdminEmail(params?.userEmail ?? null);
+
+  if (access.isPlatformAdmin || isEnvAdmin) {
     return {
       ...access,
+      isPlatformAdmin: true,
       plan: "admin",
       canRunAnalysis: true,
       subscriptionStatus: "active",
@@ -231,9 +242,10 @@ function resolveBillingPlan(access: ViewerAccess): BillingPlan {
 
 export function getPlanUploadCap(plan: BillingPlan): number | null {
   switch (plan) {
+    case "starter":
+      return 1;
     case "pro":
     case "team":
-    case "starter":
     case "trial":
       return null;
     case "none":

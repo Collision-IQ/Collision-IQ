@@ -85,6 +85,21 @@ const adminAccess = {
   consentStatus: null,
 };
 
+function buildAccess(overrides) {
+  return {
+    ...adminAccess,
+    isPlatformAdmin: false,
+    canRunAnalysis: true,
+    plan: "none",
+    activeSubscriptionId: null,
+    activeSubscriptionStatus: null,
+    featureFlags: {
+      ...adminAccess.featureFlags,
+    },
+    ...overrides,
+  };
+}
+
 run("env admin emails are the source of truth", () => {
   assert.equal(isPlatformAdminEmail("admin.one@example.com"), true);
   assert.equal(isPlatformAdminEmail("SECOND-ADMIN@example.com"), true);
@@ -97,7 +112,12 @@ run("env admin emails are the source of truth", () => {
 });
 
 run("env admins receive Pro-level entitlements", () => {
-  const entitlements = toAccountEntitlements(adminAccess);
+  const entitlements = toAccountEntitlements(
+    buildAccess({
+      canRunAnalysis: false,
+    }),
+    { userEmail: "admin.one@example.com" }
+  );
 
   assert.equal(entitlements.plan, "admin");
   assert.equal(entitlements.canRunAnalysis, true);
@@ -114,6 +134,76 @@ run("env admins receive Pro-level entitlements", () => {
   assert.equal(entitlements.canUseRedactedChatExport, true);
   assert.equal(entitlements.canUseChatExport, true);
   assert.equal(entitlements.canUseRebuttalEmail, true);
+});
+
+run("env admin can upload even without subscription", () => {
+  const entitlements = toAccountEntitlements(
+    buildAccess({
+      plan: "none",
+      activeSubscriptionId: null,
+      activeSubscriptionStatus: null,
+      canRunAnalysis: false,
+    }),
+    { userEmail: "admin.one@example.com" }
+  );
+
+  assert.equal(entitlements.isPlatformAdmin, true);
+  assert.equal(entitlements.canUpload, true);
+  assert.equal(entitlements.uploadCap, null);
+});
+
+run("non-admin no-subscription cannot upload", () => {
+  const entitlements = toAccountEntitlements(
+    buildAccess({
+      plan: "none",
+      activeSubscriptionId: null,
+      activeSubscriptionStatus: null,
+      canRunAnalysis: false,
+    }),
+    { userEmail: "not-admin@example.com" }
+  );
+
+  assert.equal(entitlements.isPlatformAdmin, false);
+  assert.equal(entitlements.canUpload, false);
+  assert.equal(entitlements.uploadCap, 0);
+});
+
+run("trial user can upload", () => {
+  const entitlements = toAccountEntitlements(
+    buildAccess({
+      plan: "pro",
+      activeSubscriptionId: "sub_trial",
+      activeSubscriptionStatus: "TRIALING",
+      featureFlags: {
+        ...adminAccess.featureFlags,
+        uploads: true,
+      },
+    }),
+    { userEmail: "trial-user@example.com" }
+  );
+
+  assert.equal(entitlements.billingPlan, "trial");
+  assert.equal(entitlements.canUpload, true);
+  assert.equal(entitlements.uploadCap, null);
+});
+
+run("Starter can upload one file", () => {
+  const entitlements = toAccountEntitlements(
+    buildAccess({
+      plan: "starter",
+      activeSubscriptionId: "sub_starter",
+      activeSubscriptionStatus: "ACTIVE",
+      featureFlags: {
+        ...adminAccess.featureFlags,
+        uploads: true,
+      },
+    }),
+    { userEmail: "starter-user@example.com" }
+  );
+
+  assert.equal(entitlements.billingPlan, "starter");
+  assert.equal(entitlements.canUpload, true);
+  assert.equal(entitlements.uploadCap, 1);
 });
 
 run("admin product plan bypass unlocks all exports", () => {
