@@ -1,5 +1,9 @@
 import Link from "next/link";
 import { getCurrentEntitlements } from "@/lib/billing/entitlements";
+import CarrierTrendAnalyticsPanel from "@/components/CarrierTrendAnalyticsPanel";
+import EnterpriseAuditDashboardPanel from "@/components/EnterpriseAuditDashboardPanel";
+import EnvironmentVerificationPanel from "@/components/EnvironmentVerificationPanel";
+import PolicyLegalSnapshotViewerPanel from "@/components/PolicyLegalSnapshotViewerPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +68,15 @@ export default async function AccountPage() {
             View dashboard
           </Link>
         </div>
+
+        {access.isPlatformAdmin ? (
+          <>
+            <EnvironmentVerificationPanel />
+            <EnterpriseAuditDashboardPanel />
+            <CarrierTrendAnalyticsPanel />
+            <PolicyLegalSnapshotViewerPanel />
+          </>
+        ) : null}
       </div>
     </main>
   );

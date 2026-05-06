@@ -4,6 +4,7 @@ import {
   saveAnalysisReport,
   updateAnalysisReport,
 } from "@/lib/analysisReportStore";
+import { recordCarrierTrendEvent } from "@/lib/analytics/carrierTrends";
 import {
   getUploadedAttachments,
   type StoredAttachment,
@@ -316,6 +317,17 @@ export async function POST(req: Request) {
         artifactCount: artifactIds.length,
         reportId: stored.id,
       },
+    });
+
+    await recordCarrierTrendEvent({
+      reportId: stored.id,
+      report: stored.report,
+      panel,
+    }).catch((error) => {
+      console.warn("[carrier-trends] record failed", {
+        reportId: stored.id,
+        message: error instanceof Error ? error.message : "Unknown carrier trend error",
+      });
     });
 
     const workspaceData = buildWorkspaceDataFromReport(stored.report);

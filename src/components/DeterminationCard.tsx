@@ -22,18 +22,18 @@ function getStatusLabel(value: Props["determination"]["status"]): string {
 
 export default function DeterminationCard({ determination }: Props) {
   return (
-    <section className="rounded-[24px] border border-orange-500/20 bg-gradient-to-br from-[#C65A2A]/12 via-card to-muted p-4 shadow-[0_18px_44px_rgba(15,23,42,0.10)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.2)]">
+    <section className="rounded-md border border-[#b86a2d]/28 bg-[#C65A2A]/10 p-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
-            Answer To Your Question
+          <div className="text-[10px] uppercase tracking-[0.08em] text-[#b86a2d]">
+            Determination
           </div>
-          <div className="mt-2 text-[1.12rem] font-semibold tracking-[-0.02em] text-card-foreground">
+          <div className="mt-1.5 text-base font-semibold text-card-foreground">
             {determination.answer}
           </div>
         </div>
 
-        <div className="rounded-full border border-border bg-muted px-3 py-1.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+        <div className="rounded-md border border-border bg-muted px-2.5 py-1 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
           {getStatusLabel(determination.status)}
         </div>
       </div>
@@ -43,8 +43,8 @@ export default function DeterminationCard({ determination }: Props) {
       </div>
 
       {determination.missingFactors.length > 0 ? (
-        <div className="mt-4 rounded-2xl border border-border bg-muted px-3.5 py-3">
-          <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+        <div className="mt-3 rounded-md border border-border bg-muted px-3 py-2.5">
+          <div className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
             What Still Needs Confirmation
           </div>
           <ul className="mt-2 ml-5 list-disc space-y-1.5 text-[13px] leading-5 text-muted-foreground">
