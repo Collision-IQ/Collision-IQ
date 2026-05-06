@@ -1,6 +1,6 @@
 export const MAX_UPLOAD_BATCH_FILES = 6;
 export const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at a time.";
-export const MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024;
+export const MAX_UPLOAD_FILE_BYTES = 50 * 1024 * 1024;
 
 export type AttachmentSummaryItem = {
   filename: string;

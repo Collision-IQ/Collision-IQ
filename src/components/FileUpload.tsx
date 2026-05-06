@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
+import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import type { UploadedDocument } from "@/lib/sessionStore";
 import {
   formatBytes,
@@ -15,6 +16,32 @@ type Props = {
   buttonLabel?: string;
 };
 
+type UploadStage = "idle" | "uploading" | "extracting_zip" | "preparing_analysis";
+
+const LARGE_UPLOAD_WARNING_BYTES = 10 * 1024 * 1024;
+
+function isZipFile(file: Pick<File, "name" | "type">) {
+  return (
+    file.name.toLowerCase().endsWith(".zip") ||
+    file.type === "application/zip" ||
+    file.type === "application/x-zip-compressed"
+  );
+}
+
+function formatUploadFailure(filename: string, failure?: { reason?: string; code?: string }) {
+  if (!failure) return `${filename}: Upload failed.`;
+
+  if (failure.code === "UPLOAD_BODY_TOO_LARGE" || failure.code === "UPLOAD_BODY_PARSE_FAILED") {
+    return `${filename}: this upload is too large for the current upload path. Try a smaller file or split the ZIP.`;
+  }
+
+  if (failure.code?.startsWith("ZIP_")) {
+    return `${filename}: ${failure.reason ?? "ZIP could not be extracted safely."}`;
+  }
+
+  return `${filename}: ${failure.reason ?? "Upload failed."}`;
+}
+
 export default function FileUpload({
   onUploadComplete,
   buttonLabel = "Upload documents",
@@ -26,8 +53,44 @@ export default function FileUpload({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploaded, setUploaded] = useState<string[]>([]);
+  const [uploadHint, setUploadHint] = useState("You can upload PDFs, photos, screenshots, or ZIP files.");
+  const [zipSummary, setZipSummary] = useState<string | null>(null);
+  const [largeUploadWarning, setLargeUploadWarning] = useState<string | null>(null);
+  const [uploadStage, setUploadStage] = useState<UploadStage>("idle");
   const [dragActive, setDragActive] = useState(false);
   const uploadDisabled = !isLoaded || !isSignedIn;
+
+  useEffect(() => {
+    if (!isSignedIn) return;
+
+    let cancelled = false;
+    async function loadEntitlements() {
+      try {
+        const response = await fetch("/api/account/entitlements", {
+          credentials: "same-origin",
+        });
+        if (!response.ok) return;
+
+        const entitlements = (await response.json()) as AccountEntitlements;
+        if (cancelled) return;
+
+        if (entitlements.plan === "admin") {
+          setUploadHint("You can upload PDFs, photos, screenshots, or ZIP files. Admin/free access: 50 MB files.");
+        } else if (entitlements.plan === "pro" || entitlements.plan === "trial") {
+          setUploadHint("You can upload PDFs, photos, screenshots, or ZIP files. Pro trial/Pro: 30 MB files.");
+        } else {
+          setUploadHint("You can upload PDFs, photos, or screenshots. Starter: 10 MB, 1 file.");
+        }
+      } catch {
+        // Server-side upload limits remain authoritative.
+      }
+    }
+
+    void loadEntitlements();
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn]);
 
   async function uploadFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -40,9 +103,20 @@ export default function FileUpload({
 
     setBusy(true);
     setError(null);
+    setZipSummary(null);
+    setLargeUploadWarning(null);
+    setUploadStage("uploading");
 
     try {
       const selectedFiles = Array.from(files);
+      const largeFiles = selectedFiles.filter((file) => file.size >= LARGE_UPLOAD_WARNING_BYTES);
+      if (largeFiles.length) {
+        setLargeUploadWarning("Large files may take longer. Keep this tab open.");
+      }
+      if (selectedFiles.some(isZipFile)) {
+        setUploadStage("extracting_zip");
+      }
+
       const acceptedFiles = selectedFiles
         .slice(0, MAX_UPLOAD_BATCH_FILES)
         .filter((file) => file.size <= MAX_UPLOAD_FILE_BYTES);
@@ -75,6 +149,12 @@ export default function FileUpload({
           | {
               documents?: UploadedDocument[];
               failedUploads?: Array<{ filename?: string; reason?: string }>;
+              zipSummaries?: Array<{
+                archive?: string;
+                acceptedFiles?: number;
+                rejectedFiles?: number;
+                extractedBytes?: number;
+              }>;
               error?: string;
             }
           | null;
@@ -89,7 +169,7 @@ export default function FileUpload({
             failures.push(
               ...data.failedUploads.map(
                 (failure) =>
-                  `${failure.filename ?? file.name}: ${failure.reason ?? "Upload failed."}`
+                  formatUploadFailure(failure.filename ?? file.name, failure)
               )
             );
             continue;
@@ -105,11 +185,23 @@ export default function FileUpload({
         }
 
         docs.push(...data.documents);
+        if (data.zipSummaries?.length) {
+          setUploadStage("preparing_analysis");
+          setZipSummary(
+            data.zipSummaries
+              .map((summary) => {
+                const accepted = summary.acceptedFiles ?? 0;
+                const rejected = summary.rejectedFiles ?? 0;
+                return `${summary.archive ?? "ZIP"}: extracted ${accepted} supported ${accepted === 1 ? "file" : "files"}${rejected ? `, rejected ${rejected}` : ""}.`;
+              })
+              .join(" ")
+          );
+        }
         if (data.failedUploads?.length) {
           failures.push(
             ...data.failedUploads.map(
               (failure) =>
-                `${failure.filename ?? file.name}: ${failure.reason ?? "Upload failed."}`
+                formatUploadFailure(failure.filename ?? file.name, failure)
             )
           );
         }
@@ -137,6 +229,7 @@ export default function FileUpload({
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setBusy(false);
+      setUploadStage("idle");
     }
   }
 
@@ -193,14 +286,20 @@ export default function FileUpload({
         title={!isSignedIn ? "Sign in to upload files." : "Upload files"}
       >
         <div className="mb-1 text-sm text-white/70">
-          {busy ? "Uploading..." : buttonLabel}
+          {busy
+            ? uploadStage === "extracting_zip"
+              ? "Extracting ZIP..."
+              : uploadStage === "preparing_analysis"
+                ? "Preparing analysis..."
+                : "Uploading..."
+            : buttonLabel}
         </div>
 
         <div className="text-xs text-white/40">
           {uploadDisabled ? (
             "Sign in to upload files"
           ) : (
-            "Drag files here or click to browse"
+            uploadHint
           )}
         </div>
       </div>
@@ -218,6 +317,9 @@ export default function FileUpload({
         </div>
       )}
 
+      {largeUploadWarning && <div className="text-xs text-amber-200">{largeUploadWarning}</div>}
+      {busy && <div className="text-xs text-white/50">Keep this tab open while upload processing finishes.</div>}
+      {zipSummary && <div className="rounded bg-slate-900 px-3 py-2 text-sm text-slate-200">{zipSummary}</div>}
       {error && <div className="rounded bg-red-950 px-3 py-2 text-sm text-red-200">{error}</div>}
     </div>
   );

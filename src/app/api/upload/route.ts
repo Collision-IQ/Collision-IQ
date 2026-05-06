@@ -15,19 +15,33 @@ import { getUsageCount, incrementUsage } from "@/lib/usage";
 import { saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
 import { getAnalysisReport } from "@/lib/analysisReportStore";
 import {
-  extractPreviewDataFromFile,
-  fileToReusableDataUrl,
+  bufferToReusableDataUrl,
+  extractPreviewDataFromBuffer,
 } from "@/lib/attachments/extractPreviewData";
+import {
+  formatUploadLimitBytes,
+  resolveUploadPlanLimits,
+} from "@/lib/uploadSafety/uploadLimits";
+import {
+  isZipUpload,
+  prepareUploadFile,
+  type PreparedUploadFile,
+  type ZipExtractionSummary,
+} from "@/lib/uploadSafety/zipSafety";
 
 export const runtime = "nodejs";
 
 const MAX_UPLOAD_BATCH_FILES = 6;
-const MAX_UPLOAD_FILE_BYTES = 10 * 1024 * 1024;
+const MULTIPART_BODY_OVERHEAD_BYTES = 5 * 1024 * 1024;
 
 type UploadSuccess = {
   attachmentId: string;
   filename: string;
   type: string;
+  sizeBytes: number;
+  source: "direct_upload" | "zip_extraction";
+  sourceArchive?: string;
+  classification: "image" | "pdf" | "text" | "docx";
   text: string;
   imageDataUrl?: string;
   pageCount?: number;
@@ -46,9 +60,20 @@ type UploadFailure = {
   code?: string;
 };
 
-function formatLimitBytes(bytes: number) {
-  return `${Math.round(bytes / 1024 / 1024)}MB`;
-}
+type UploadTelemetry = {
+  rawUploadSize: number;
+  extractedFileCount: number;
+  rejectedFileCount: number;
+  extractedTotalSize: number;
+  planLimitUsed: {
+    plan: string;
+    maxUploadBytes: number;
+    zipAllowed: boolean;
+    maxExtractedFiles: number;
+    maxExtractedTotalBytes: number;
+    maxZipNestingDepth: number;
+  };
+};
 
 function getFailureStatus(failedUploads: UploadFailure[]) {
   if (failedUploads.some((failure) => failure.code === "UPLOAD_QUOTA_REACHED")) {
@@ -69,6 +94,81 @@ function getUploadFiles(formData: FormData): File[] {
   ];
 
   return candidates.filter((value): value is File => value instanceof File);
+}
+
+function getContentLength(req: Request) {
+  const raw = req.headers.get("content-length");
+  if (!raw) return null;
+
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function readUploadFormData(req: Request, maxBodyBytes: number) {
+  const contentLength = getContentLength(req);
+  if (contentLength !== null && contentLength > maxBodyBytes) {
+    return {
+      error: NextResponse.json(
+        {
+          error:
+            "Upload body is too large for this plan. Try a smaller file or split the upload.",
+          code: "UPLOAD_BODY_TOO_LARGE",
+          maxBodyBytes,
+        },
+        { status: 413 }
+      ),
+    };
+  }
+
+  try {
+    return { formData: await req.formData() };
+  } catch (error) {
+    console.info("[upload] multipart body parse failed", {
+      code: "UPLOAD_BODY_PARSE_FAILED",
+      contentLength,
+      maxBodyBytes,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      error: NextResponse.json(
+        {
+          error:
+            "Upload body could not be read. The file may be too large for the current runtime. Try a smaller file or split the upload.",
+          code: "UPLOAD_BODY_PARSE_FAILED",
+          maxBodyBytes,
+        },
+        { status: 413 }
+      ),
+    };
+  }
+}
+
+function buildUploadTelemetry(params: {
+  rawUploadSize: number;
+  zipSummaries: ZipExtractionSummary[];
+  failedUploads: UploadFailure[];
+  uploadLimits: ReturnType<typeof resolveUploadPlanLimits>;
+}): UploadTelemetry {
+  return {
+    rawUploadSize: params.rawUploadSize,
+    extractedFileCount: params.zipSummaries.reduce(
+      (sum, summary) => sum + summary.acceptedFiles,
+      0
+    ),
+    rejectedFileCount: params.failedUploads.length,
+    extractedTotalSize: params.zipSummaries.reduce(
+      (sum, summary) => sum + summary.extractedBytes,
+      0
+    ),
+    planLimitUsed: {
+      plan: params.uploadLimits.plan,
+      maxUploadBytes: params.uploadLimits.maxUploadBytes,
+      zipAllowed: params.uploadLimits.zipAllowed,
+      maxExtractedFiles: params.uploadLimits.maxExtractedFiles,
+      maxExtractedTotalBytes: params.uploadLimits.maxExtractedTotalBytes,
+      maxZipNestingDepth: params.uploadLimits.maxZipNestingDepth,
+    },
+  };
 }
 
 export async function POST(req: Request) {
@@ -93,6 +193,9 @@ export async function POST(req: Request) {
       isPlatformAdmin: effectiveIsAdmin,
     });
     const canUploadFiles = resolveCanUploadFiles(entitlements);
+    const uploadLimits = resolveUploadPlanLimits(entitlements);
+    // TODO(direct-to-storage): replace multipart uploads with signed object-storage URLs
+    // and async extraction/analysis jobs once uploads need to exceed runtime limits.
 
     if (!canUploadFiles) {
       console.info("[upload] request rejected", {
@@ -116,9 +219,16 @@ export async function POST(req: Request) {
       );
     }
 
-    const formData = await req.formData();
+    const maxBodyBytes = uploadLimits.maxUploadBytes + MULTIPART_BODY_OVERHEAD_BYTES;
+    const parsedBody = await readUploadFormData(req, maxBodyBytes);
+    if (parsedBody.error) {
+      return parsedBody.error;
+    }
+
+    const formData = parsedBody.formData;
     const files = getUploadFiles(formData);
     const activeCaseId = String(formData.get("activeCaseId") ?? "").trim() || null;
+    const rawUploadSize = files.reduce((sum, file) => sum + file.size, 0);
 
     if (!files.length) {
       return NextResponse.json({ error: "NO_FILE" }, { status: 400 });
@@ -152,10 +262,10 @@ export async function POST(req: Request) {
     }
 
     console.info("[upload] accepted", {
-      totalBytes: files.reduce((sum, file) => sum + file.size, 0),
+      totalBytes: rawUploadSize,
       fileCount: files.length,
-      maxFileCount: MAX_UPLOAD_BATCH_FILES,
-      maxFileBytes: MAX_UPLOAD_FILE_BYTES,
+      maxFileCount: uploadLimits.maxFilesPerReview ?? MAX_UPLOAD_BATCH_FILES,
+      maxFileBytes: uploadLimits.maxUploadBytes,
       ownerUserId: user.id,
       activeCaseId,
       sameCaseFollowUp: Boolean(activeCase),
@@ -168,6 +278,7 @@ export async function POST(req: Request) {
         uploadCount: uploadsUsed,
         uploadCap: entitlements.uploadCap,
         maxUploadsPerReview: entitlements.maxUploadsPerReview,
+        uploadLimits,
         usageStatus: entitlements.usageStatus,
         trialActive: entitlements.trialActive,
         isPlatformAdmin,
@@ -182,35 +293,47 @@ export async function POST(req: Request) {
       })),
     });
 
+    const zipSummaries: ZipExtractionSummary[] = [];
+
     for (const [index, file] of files.entries()) {
-      if (index >= MAX_UPLOAD_BATCH_FILES) {
+      const maxFilesPerReview = uploadLimits.maxFilesPerReview ?? MAX_UPLOAD_BATCH_FILES;
+      if (index >= maxFilesPerReview) {
         failedUploads.push({
           filename: file.name,
-          reason: `Only ${MAX_UPLOAD_BATCH_FILES} files can be uploaded at a time.`,
+          reason: `Only ${maxFilesPerReview} file${maxFilesPerReview === 1 ? "" : "s"} can be uploaded per review on your plan.`,
           code: "MAX_FILES_REACHED",
         });
         console.info("[upload] file rejected", {
           filename: file.name,
           code: "MAX_FILES_REACHED",
           fileIndex: index,
-          maxFileCount: MAX_UPLOAD_BATCH_FILES,
+          maxFileCount: maxFilesPerReview,
           ownerUserId: user.id,
         });
         continue;
       }
 
-      if (file.size > MAX_UPLOAD_FILE_BYTES) {
+      if (file.size > uploadLimits.maxUploadBytes) {
         failedUploads.push({
           filename: file.name,
-          reason: `File exceeds ${formatLimitBytes(MAX_UPLOAD_FILE_BYTES)} limit (${formatLimitBytes(file.size)}).`,
+          reason: `File exceeds ${formatUploadLimitBytes(uploadLimits.maxUploadBytes)} limit (${formatUploadLimitBytes(file.size)}).`,
           code: "FILE_TOO_LARGE",
         });
         console.info("[upload] file rejected", {
           filename: file.name,
           code: "FILE_TOO_LARGE",
           sizeBytes: file.size,
-          maxFileBytes: MAX_UPLOAD_FILE_BYTES,
+          maxFileBytes: uploadLimits.maxUploadBytes,
           ownerUserId: user.id,
+        });
+        continue;
+      }
+
+      if (isZipUpload(file) && !uploadLimits.zipAllowed) {
+        failedUploads.push({
+          filename: file.name,
+          reason: "ZIP uploads are not included in your current plan.",
+          code: "ZIP_NOT_ALLOWED",
         });
         continue;
       }
@@ -239,95 +362,90 @@ export async function POST(req: Request) {
       }
 
       try {
-        const previewData = await extractPreviewDataFromFile(file);
-        const imageDataUrl = await fileToReusableDataUrl(file);
-        const stored = await saveUploadedAttachment({
-          ownerUserId: user.id,
-          filename: file.name,
-          type: file.type,
-          text: previewData.text,
-          imageDataUrl,
-          pageCount: previewData.pageCount,
-        });
+        const prepared = await prepareUploadFile(file, uploadLimits);
+        zipSummaries.push(...prepared.zipSummaries);
+        failedUploads.push(...prepared.rejectedFiles);
 
-        const caseContinuity = activeCase
-          ? {
+        for (const preparedFile of prepared.files) {
+          if (
+            !effectiveIsAdmin &&
+            entitlements.uploadCap !== null &&
+            uploadsUsed + successfulUploads.length >= entitlements.uploadCap
+          ) {
+            failedUploads.push({
+              filename: preparedFile.filename,
+              reason: "Upload quota reached for your plan.",
+              code: "UPLOAD_QUOTA_REACHED",
+            });
+            continue;
+          }
+
+          const storedUpload = await processPreparedUpload({
+            file: preparedFile,
+            ownerUserId: user.id,
+            activeCaseId,
+            activeCase,
+            maxImageDataUrlBytes: uploadLimits.maxUploadBytes,
+          });
+
+          successfulUploads.push(storedUpload);
+
+          console.info("[upload] attachment stored", {
+            attachmentId: storedUpload.attachmentId,
+            filename: storedUpload.filename,
+            mimeType: storedUpload.type || "unknown",
+            textLength: storedUpload.text.length,
+            pageCount: storedUpload.pageCount ?? null,
+            hasImageDataUrl: Boolean(storedUpload.imageDataUrl),
+            ownerUserId: user.id,
+            activeCaseId,
+            sameCaseFollowUp: Boolean(activeCase),
+            sourceArchive: preparedFile.sourceArchive ?? null,
+            classification: preparedFile.classification,
+          });
+
+          if (activeCase) {
+            console.info("[upload] returned same-case continuity", {
               activeCaseId: activeCase.id,
               reportId: activeCase.id,
+              attachmentIds: [storedUpload.attachmentId],
               sameCaseFollowUp: true,
-              attachmentIds: [stored.id],
-            }
-          : activeCaseId
-            ? {
-                activeCaseId,
-                reportId: activeCaseId,
-                sameCaseFollowUp: false,
-                attachmentIds: [stored.id],
-              }
-            : null;
-
-        successfulUploads.push({
-          attachmentId: stored.id,
-          filename: stored.filename,
-          type: stored.type,
-          text: stored.text,
-          imageDataUrl: stored.imageDataUrl,
-          pageCount: stored.pageCount,
-          hasVision: Boolean(stored.imageDataUrl),
-          caseContinuity,
-        });
-
-        console.info("[upload] attachment stored", {
-          attachmentId: stored.id,
-          filename: stored.filename,
-          mimeType: stored.type || "unknown",
-          textLength: stored.text.length,
-          pageCount: stored.pageCount ?? null,
-          hasImageDataUrl: Boolean(stored.imageDataUrl),
-          ownerUserId: user.id,
-          activeCaseId,
-          sameCaseFollowUp: Boolean(activeCase),
-        });
-
-        if (activeCase) {
-          console.info("[upload] returned same-case continuity", {
-            activeCaseId: activeCase.id,
-            reportId: activeCase.id,
-            attachmentIds: [stored.id],
-            sameCaseFollowUp: true,
-          });
-        }
-
-        if (!effectiveIsAdmin) {
-          try {
-            await recordUsage({
-              userId: user.id,
-              kind: "FILE_UPLOAD",
-              metadataJson: {
-                source: "upload",
-                fileName: file.name,
-                fileSize: file.size,
-                attachmentId: stored.id,
-              },
-            });
-          } catch (error) {
-            console.error("[upload] usage tracking failed (non-blocking)", {
-              phase: "recordUsage",
-              userId: user.id,
-              fileName: file.name,
-              error,
             });
           }
 
-          try {
-            await incrementUsage(user.id, "FILE_UPLOAD");
-          } catch (error) {
-            console.error("[upload] usage tracking failed (non-blocking)", {
-              phase: "incrementUsage",
-              userId: user.id,
-              fileName: file.name,
-              error,
-            });
+          if (!effectiveIsAdmin) {
+            try {
+              await recordUsage({
+                userId: user.id,
+                kind: "FILE_UPLOAD",
+                metadataJson: {
+                  source: preparedFile.sourceArchive ? "zip_upload" : "upload",
+                  fileName: preparedFile.filename,
+                  fileSize: preparedFile.buffer.byteLength,
+                  classification: preparedFile.classification,
+                  attachmentId: storedUpload.attachmentId,
+                  sourceArchive: preparedFile.sourceArchive,
+                },
+              });
+            } catch (error) {
+              console.error("[upload] usage tracking failed (non-blocking)", {
+                phase: "recordUsage",
+                userId: user.id,
+                fileName: preparedFile.filename,
+                error,
+              });
+            }
+
+            try {
+              await incrementUsage(user.id, "FILE_UPLOAD");
+            } catch (error) {
+              console.error("[upload] usage tracking failed (non-blocking)", {
+                phase: "incrementUsage",
+                userId: user.id,
+                fileName: preparedFile.filename,
+                error,
+              });
+            }
           }
         }
       } catch (error) {
@@ -338,23 +456,46 @@ export async function POST(req: Request) {
           ownerUserId: user.id,
           error,
         });
+        const zipProcessingFailed = isZipUpload(file);
         failedUploads.push({
           filename: file.name,
-          reason: error instanceof Error ? error.message : "Upload processing failed.",
-          code: "FILE_PROCESSING_FAILED",
+          reason: zipProcessingFailed
+            ? "ZIP could not be extracted safely. Check that it is not corrupted, encrypted, or too large."
+            : error instanceof Error
+              ? error.message
+              : "Upload processing failed.",
+          code: zipProcessingFailed ? "ZIP_EXTRACTION_FAILED" : "FILE_PROCESSING_FAILED",
         });
       }
     }
 
     if (!successfulUploads.length) {
+      const telemetry = buildUploadTelemetry({
+        rawUploadSize,
+        zipSummaries,
+        failedUploads,
+        uploadLimits,
+      });
+      console.info("[upload] completed", {
+        ownerUserId: user.id,
+        successfulCount: successfulUploads.length,
+        ...telemetry,
+      });
+
       return NextResponse.json(
         {
           error: failedUploads[0]?.reason ?? "No files could be uploaded.",
           code: failedUploads[0]?.code ?? "UPLOAD_FAILED",
           limits: {
-            maxFiles: MAX_UPLOAD_BATCH_FILES,
-            maxFileBytes: MAX_UPLOAD_FILE_BYTES,
+            maxFiles: uploadLimits.maxFilesPerReview ?? MAX_UPLOAD_BATCH_FILES,
+            maxFileBytes: uploadLimits.maxUploadBytes,
+            zipAllowed: uploadLimits.zipAllowed,
+            maxExtractedFiles: uploadLimits.maxExtractedFiles,
+            maxExtractedTotalBytes: uploadLimits.maxExtractedTotalBytes,
+            maxZipNestingDepth: uploadLimits.maxZipNestingDepth,
           },
+          zipSummaries,
+          telemetry,
           usage: {
             uploadCount: uploadsUsed,
             uploadCap: entitlements.uploadCap,
@@ -370,12 +511,30 @@ export async function POST(req: Request) {
     }
 
     const firstUpload = successfulUploads[0];
+    const telemetry = buildUploadTelemetry({
+      rawUploadSize,
+      zipSummaries,
+      failedUploads,
+      uploadLimits,
+    });
+    console.info("[upload] completed", {
+      ownerUserId: user.id,
+      successfulCount: successfulUploads.length,
+      ...telemetry,
+    });
+
     const responseBody = {
       ...firstUpload,
       limits: {
-        maxFiles: MAX_UPLOAD_BATCH_FILES,
-        maxFileBytes: MAX_UPLOAD_FILE_BYTES,
+        maxFiles: uploadLimits.maxFilesPerReview ?? MAX_UPLOAD_BATCH_FILES,
+        maxFileBytes: uploadLimits.maxUploadBytes,
+        zipAllowed: uploadLimits.zipAllowed,
+        maxExtractedFiles: uploadLimits.maxExtractedFiles,
+        maxExtractedTotalBytes: uploadLimits.maxExtractedTotalBytes,
+        maxZipNestingDepth: uploadLimits.maxZipNestingDepth,
       },
+      zipSummaries,
+      telemetry,
       usage: {
         uploadCount: uploadsUsed + successfulUploads.length,
         uploadCap: entitlements.uploadCap,
@@ -387,6 +546,10 @@ export async function POST(req: Request) {
       documents: successfulUploads.map((upload) => ({
         filename: upload.filename,
         type: upload.type,
+        sizeBytes: upload.sizeBytes,
+        source: upload.source,
+        sourceArchive: upload.sourceArchive,
+        classification: upload.classification,
         text: upload.text,
         pageCount: upload.pageCount,
         attachmentId: upload.attachmentId,
@@ -411,4 +574,65 @@ export async function POST(req: Request) {
     console.error("UPLOAD ERROR:", error);
     return NextResponse.json({ error: "SERVER_ERROR" }, { status: 500 });
   }
+}
+
+async function processPreparedUpload(params: {
+  file: PreparedUploadFile;
+  ownerUserId: string;
+  activeCaseId: string | null;
+  activeCase: Awaited<ReturnType<typeof getAnalysisReport>>;
+  maxImageDataUrlBytes: number;
+}): Promise<UploadSuccess> {
+  const previewData = await extractPreviewDataFromBuffer({
+    buffer: params.file.buffer,
+    mimeType: params.file.type,
+    filename: params.file.filename,
+  });
+  const imageDataUrl = bufferToReusableDataUrl({
+    buffer: params.file.buffer,
+    mimeType: params.file.type,
+    maxBytes: params.file.classification === "image"
+      ? params.maxImageDataUrlBytes
+      : undefined,
+  });
+
+  const stored = await saveUploadedAttachment({
+    ownerUserId: params.ownerUserId,
+    filename: params.file.filename,
+    type: params.file.type,
+    text: previewData.text,
+    imageDataUrl,
+    pageCount: previewData.pageCount,
+  });
+
+  const caseContinuity = params.activeCase
+    ? {
+        activeCaseId: params.activeCase.id,
+        reportId: params.activeCase.id,
+        sameCaseFollowUp: true,
+        attachmentIds: [stored.id],
+      }
+    : params.activeCaseId
+      ? {
+          activeCaseId: params.activeCaseId,
+          reportId: params.activeCaseId,
+          sameCaseFollowUp: false,
+          attachmentIds: [stored.id],
+        }
+      : null;
+
+  return {
+    attachmentId: stored.id,
+    filename: stored.filename,
+    type: stored.type,
+    sizeBytes: params.file.sizeBytes,
+    source: params.file.source,
+    sourceArchive: params.file.sourceArchive,
+    classification: params.file.classification,
+    text: stored.text,
+    imageDataUrl: stored.imageDataUrl,
+    pageCount: stored.pageCount,
+    hasVision: Boolean(stored.imageDataUrl),
+    caseContinuity,
+  };
 }

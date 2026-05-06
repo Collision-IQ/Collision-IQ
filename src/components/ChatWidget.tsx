@@ -72,6 +72,9 @@ interface Attachment {
   previewUrl?: string;
   pageCount?: number;
   source: "file" | "camera";
+  uploadSource?: "direct_upload" | "zip_extraction";
+  sourceArchive?: string;
+  classification?: "image" | "pdf" | "text" | "docx";
   hasVision: boolean;
   usedInAnalysis?: boolean;
 }
@@ -92,6 +95,10 @@ type UploadSuccessResult = {
   attachmentId?: string;
   filename?: string;
   type?: string;
+  sizeBytes?: number;
+  source?: "direct_upload" | "zip_extraction";
+  sourceArchive?: string;
+  classification?: "image" | "pdf" | "text" | "docx";
   text?: string;
   imageDataUrl?: string;
   pageCount?: number;
@@ -105,6 +112,12 @@ type UploadSuccessResult = {
 type UploadResponse = UploadSuccessResult & {
   successfulUploads?: UploadSuccessResult[];
   failedUploads?: UploadFailureResult[];
+  zipSummaries?: Array<{
+    archive?: string;
+    acceptedFiles?: number;
+    rejectedFiles?: number;
+    extractedBytes?: number;
+  }>;
   error?: string;
 };
 
@@ -177,6 +190,7 @@ const SERVER_TTS_ENABLED =
 const BROWSER_TTS_ENABLED =
   process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_BROWSER_TTS === "true";
 const SERVER_TTS_VOICE = process.env.NEXT_PUBLIC_COLLISION_IQ_TTS_VOICE?.trim() || undefined;
+const LARGE_UPLOAD_WARNING_BYTES = 10 * 1024 * 1024;
 
 function formatCaseUpdateStatus(
   delta: RepairIntelligenceReport["reassessmentDelta"] | undefined,
@@ -239,6 +253,42 @@ function buildUploadFailureStatus(failures: UploadFailureResult[]) {
   return `Could not attach ${namedFailures
     .map((failure) => `${failure.filename}: ${failure.reason ?? "Upload failed."}`)
     .join("; ")}`;
+}
+
+function buildZipExtractionStatus(summaries: NonNullable<UploadResponse["zipSummaries"]>) {
+  return summaries
+    .filter((summary) => summary.archive)
+    .map((summary) => {
+      const accepted = summary.acceptedFiles ?? 0;
+      const rejected = summary.rejectedFiles ?? 0;
+      const size = formatBytes(summary.extractedBytes ?? 0);
+      return `${summary.archive}: extracted ${accepted} supported ${accepted === 1 ? "file" : "files"} (${size})${rejected ? `; rejected ${rejected}` : ""}.`;
+    })
+    .join(" ");
+}
+
+function isZipFile(file: Pick<File, "name" | "type">) {
+  return (
+    file.name.toLowerCase().endsWith(".zip") ||
+    file.type === "application/zip" ||
+    file.type === "application/x-zip-compressed"
+  );
+}
+
+function buildLargeUploadWarning(files: File[]) {
+  const largeFiles = files.filter((file) => file.size >= LARGE_UPLOAD_WARNING_BYTES);
+  if (!largeFiles.length) return null;
+
+  return `Large files may take longer. Keep this tab open. ${largeFiles
+    .map((file) => `${file.name} (${formatBytes(file.size)})`)
+    .join(", ")}`;
+}
+
+function buildZipProgressStatus(files: File[]) {
+  const zipCount = files.filter(isZipFile).length;
+  if (!zipCount) return null;
+
+  return `Uploading ${zipCount} ZIP ${zipCount === 1 ? "archive" : "archives"}. ZIP extraction will run before analysis.`;
 }
 
 function buildUploadCompletionStatus(successCount: number, failures: UploadFailureResult[]) {
@@ -1657,6 +1707,13 @@ export default function ChatWidget({
     if (failedUploads.length) {
       upsertSystemStatusMessage(buildUploadFailureStatus(failedUploads));
     }
+    if (data?.zipSummaries?.length) {
+      const zipStatus = buildZipExtractionStatus(data.zipSummaries);
+      if (zipStatus) {
+        upsertSystemStatusMessage(zipStatus);
+      }
+      upsertSystemStatusMessage("ZIP extraction complete. Classifying extracted files for analysis.");
+    }
     const attachmentId = upload?.attachmentId;
     if (!attachmentId) {
       throw new Error(
@@ -1673,6 +1730,7 @@ export default function ChatWidget({
     if (!analysisReportIdRef.current && returnedActiveCaseId) {
       analysisReportIdRef.current = returnedActiveCaseId;
     }
+    const returnedUploads = data?.successfulUploads?.length ? data.successfulUploads : [upload];
     const filename: string = upload?.filename || file.name;
     const mime: string = upload?.type || file.type;
     const text: string = upload?.text || "";
@@ -1680,9 +1738,11 @@ export default function ChatWidget({
       typeof upload?.imageDataUrl === "string" ? upload.imageDataUrl : undefined;
     const pageCount: number | undefined =
       typeof upload?.pageCount === "number" ? upload.pageCount : undefined;
-    const hasVision: boolean = Boolean(upload?.hasVision) && isLikelyImageFile(file);
+    const hasVision: boolean = Boolean(upload?.hasVision) && mime.startsWith("image/");
     const previewUrl =
-      mime === "application/pdf" || isLikelyImageFile(file) ? URL.createObjectURL(file) : undefined;
+      returnedUploads.length === 1 && (mime === "application/pdf" || isLikelyImageFile(file))
+        ? URL.createObjectURL(file)
+        : undefined;
 
     console.info("[attachments] upload complete", {
       activeCaseId: analysisReportIdRef.current,
@@ -1712,24 +1772,44 @@ export default function ChatWidget({
     }
 
     setAttachments((prev) => {
-      const nextAttachment = {
-        attachmentId,
-        filename,
-        mime,
-        text,
-        sizeBytes: file.size,
-        imageDataUrl,
-        previewUrl,
-        pageCount,
-        source,
-        hasVision,
-        usedInAnalysis: false,
-      };
+      const nextAttachments = returnedUploads
+        .filter((item): item is UploadSuccessResult & { attachmentId: string } =>
+          typeof item?.attachmentId === "string"
+        )
+        .map((item, itemIndex) => {
+          const itemMime = item.type || file.type;
+          return {
+            attachmentId: item.attachmentId,
+            filename: item.filename || file.name,
+            mime: itemMime,
+            text: item.text || "",
+            sizeBytes: typeof item.sizeBytes === "number"
+              ? item.sizeBytes
+              : returnedUploads.length === 1
+                ? file.size
+                : 0,
+            imageDataUrl:
+              typeof item.imageDataUrl === "string" ? item.imageDataUrl : undefined,
+            previewUrl: itemIndex === 0 ? previewUrl : undefined,
+            pageCount: typeof item.pageCount === "number" ? item.pageCount : undefined,
+            source,
+            uploadSource: item.source,
+            sourceArchive: item.sourceArchive,
+            classification: item.classification,
+            hasVision: Boolean(item.hasVision) && itemMime.startsWith("image/"),
+            usedInAnalysis: false,
+          };
+        });
 
-      if (!replaceId) {
-        return [...prev, nextAttachment];
+      if (!nextAttachments.length) {
+        return prev;
       }
 
+      if (!replaceId) {
+        return [...prev, ...nextAttachments];
+      }
+
+      const [replacement, ...additional] = nextAttachments;
       return prev.map((attachment) => {
         if (attachment.attachmentId !== replaceId) {
           return attachment;
@@ -1739,25 +1819,34 @@ export default function ChatWidget({
           URL.revokeObjectURL(attachment.previewUrl);
         }
 
-        return nextAttachment;
-      });
+        return replacement;
+      }).concat(additional);
     });
 
     onAttachmentChange?.(filename);
     onAttachmentsChange?.((prev) => {
-      const nextItem = {
-        attachmentId,
-        filename,
-        hasVision,
-      };
+      const nextItems = returnedUploads
+        .filter((item): item is UploadSuccessResult & { attachmentId: string } =>
+          typeof item?.attachmentId === "string"
+        )
+        .map((item) => ({
+          attachmentId: item.attachmentId,
+          filename: item.filename || file.name,
+          hasVision: Boolean(item.hasVision),
+        }));
 
-      if (!replaceId) {
-        return [...prev, nextItem];
+      if (!nextItems.length) {
+        return prev;
       }
 
+      if (!replaceId) {
+        return [...prev, ...nextItems];
+      }
+
+      const [replacement, ...additional] = nextItems;
       return prev.map((attachment) =>
-        attachment.attachmentId === replaceId ? nextItem : attachment
-      );
+        attachment.attachmentId === replaceId ? replacement : attachment
+      ).concat(additional);
     });
     invalidateStructuredAnalysis();
     if (options?.openPreview ?? true) {
@@ -1789,6 +1878,14 @@ export default function ChatWidget({
         totalBytes: files.reduce((sum, file) => sum + file.size, 0),
       });
       upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "uploading"));
+      const largeUploadWarning = buildLargeUploadWarning(files);
+      if (largeUploadWarning) {
+        upsertSystemStatusMessage(largeUploadWarning);
+      }
+      const zipProgressStatus = buildZipProgressStatus(files);
+      if (zipProgressStatus) {
+        upsertSystemStatusMessage(zipProgressStatus);
+      }
       const newAttachmentIds: string[] = [];
       const replacementTargetId = replaceAttachmentId;
       const uploadFailures = [...rejectedFiles];
@@ -1821,6 +1918,7 @@ export default function ChatWidget({
       if (completionStatus) {
         upsertSystemStatusMessage(completionStatus);
       } else {
+        upsertSystemStatusMessage("Upload processing complete. Preparing files for analysis.");
         upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
       }
     } catch (err) {
@@ -1852,6 +1950,14 @@ export default function ChatWidget({
         totalBytes: files.reduce((sum, file) => sum + file.size, 0),
       });
       upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "uploading"));
+      const largeUploadWarning = buildLargeUploadWarning(files);
+      if (largeUploadWarning) {
+        upsertSystemStatusMessage(largeUploadWarning);
+      }
+      const zipProgressStatus = buildZipProgressStatus(files);
+      if (zipProgressStatus) {
+        upsertSystemStatusMessage(zipProgressStatus);
+      }
       const newAttachmentIds: string[] = [];
       const replacementTargetId = replaceAttachmentId;
       const uploadFailures = [...rejectedFiles];
@@ -1884,6 +1990,7 @@ export default function ChatWidget({
       if (completionStatus) {
         upsertSystemStatusMessage(completionStatus);
       } else {
+        upsertSystemStatusMessage("Upload processing complete. Preparing files for analysis.");
         upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
       }
     } catch (err) {
