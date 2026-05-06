@@ -32,7 +32,9 @@ import {
 export const runtime = "nodejs";
 
 const MAX_UPLOAD_BATCH_FILES = 6;
-const MULTIPART_BODY_OVERHEAD_BYTES = 5 * 1024 * 1024;
+const RUNTIME_SAFE_MULTIPART_BODY_BYTES = 20 * 1024 * 1024;
+const RUNTIME_LIMIT_MESSAGE =
+  "This file is within your plan limit, but exceeds the current platform upload limit. Direct large-file upload support is coming soon. For now, split ZIPs over 20 MB into smaller uploads.";
 
 type UploadSuccess = {
   attachmentId: string;
@@ -67,6 +69,8 @@ type UploadTelemetry = {
   extractedTotalSize: number;
   planLimitUsed: {
     plan: string;
+    targetMaxUploadBytes: number;
+    runtimeMaxUploadBytes: number;
     maxUploadBytes: number;
     zipAllowed: boolean;
     maxExtractedFiles: number;
@@ -104,16 +108,20 @@ function getContentLength(req: Request) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-async function readUploadFormData(req: Request, maxBodyBytes: number) {
+async function readUploadFormData(req: Request, params: {
+  runtimeMaxBodyBytes: number;
+  planMaxUploadBytes: number;
+}) {
   const contentLength = getContentLength(req);
-  if (contentLength !== null && contentLength > maxBodyBytes) {
+  if (contentLength !== null && contentLength > params.runtimeMaxBodyBytes) {
     return {
       error: NextResponse.json(
         {
-          error:
-            "Upload body is too large for this plan. Try a smaller file or split the upload.",
-          code: "UPLOAD_BODY_TOO_LARGE",
-          maxBodyBytes,
+          error: RUNTIME_LIMIT_MESSAGE,
+          code: "RUNTIME_BODY_LIMIT_EXCEEDED",
+          runtimeMaxBodyBytes: params.runtimeMaxBodyBytes,
+          planMaxUploadBytes: params.planMaxUploadBytes,
+          temporaryPlatformLimit: true,
         },
         { status: 413 }
       ),
@@ -126,16 +134,19 @@ async function readUploadFormData(req: Request, maxBodyBytes: number) {
     console.info("[upload] multipart body parse failed", {
       code: "UPLOAD_BODY_PARSE_FAILED",
       contentLength,
-      maxBodyBytes,
+      runtimeMaxBodyBytes: params.runtimeMaxBodyBytes,
+      planMaxUploadBytes: params.planMaxUploadBytes,
       error: error instanceof Error ? error.message : String(error),
     });
     return {
       error: NextResponse.json(
         {
           error:
-            "Upload body could not be read. The file may be too large for the current runtime. Try a smaller file or split the upload.",
+            "Upload body could not be read. It may exceed the current platform upload limit. Direct large-file upload support is coming soon.",
           code: "UPLOAD_BODY_PARSE_FAILED",
-          maxBodyBytes,
+          runtimeMaxBodyBytes: params.runtimeMaxBodyBytes,
+          planMaxUploadBytes: params.planMaxUploadBytes,
+          temporaryPlatformLimit: true,
         },
         { status: 413 }
       ),
@@ -162,7 +173,15 @@ function buildUploadTelemetry(params: {
     ),
     planLimitUsed: {
       plan: params.uploadLimits.plan,
-      maxUploadBytes: params.uploadLimits.maxUploadBytes,
+      targetMaxUploadBytes: params.uploadLimits.maxUploadBytes,
+      runtimeMaxUploadBytes: Math.min(
+        params.uploadLimits.maxUploadBytes,
+        RUNTIME_SAFE_MULTIPART_BODY_BYTES
+      ),
+      maxUploadBytes: Math.min(
+        params.uploadLimits.maxUploadBytes,
+        RUNTIME_SAFE_MULTIPART_BODY_BYTES
+      ),
       zipAllowed: params.uploadLimits.zipAllowed,
       maxExtractedFiles: params.uploadLimits.maxExtractedFiles,
       maxExtractedTotalBytes: params.uploadLimits.maxExtractedTotalBytes,
@@ -195,7 +214,11 @@ export async function POST(req: Request) {
     const canUploadFiles = resolveCanUploadFiles(entitlements);
     const uploadLimits = resolveUploadPlanLimits(entitlements);
     // TODO(direct-to-storage): replace multipart uploads with signed object-storage URLs
-    // and async extraction/analysis jobs once uploads need to exceed runtime limits.
+    // -> object storage -> async ZIP extraction -> analysis once uploads need to exceed runtime limits.
+    const runtimeMaxUploadBytes = Math.min(
+      uploadLimits.maxUploadBytes,
+      RUNTIME_SAFE_MULTIPART_BODY_BYTES
+    );
 
     if (!canUploadFiles) {
       console.info("[upload] request rejected", {
@@ -219,8 +242,10 @@ export async function POST(req: Request) {
       );
     }
 
-    const maxBodyBytes = uploadLimits.maxUploadBytes + MULTIPART_BODY_OVERHEAD_BYTES;
-    const parsedBody = await readUploadFormData(req, maxBodyBytes);
+    const parsedBody = await readUploadFormData(req, {
+      runtimeMaxBodyBytes: runtimeMaxUploadBytes,
+      planMaxUploadBytes: uploadLimits.maxUploadBytes,
+    });
     if (parsedBody.error) {
       return parsedBody.error;
     }
@@ -266,6 +291,7 @@ export async function POST(req: Request) {
       fileCount: files.length,
       maxFileCount: uploadLimits.maxFilesPerReview ?? MAX_UPLOAD_BATCH_FILES,
       maxFileBytes: uploadLimits.maxUploadBytes,
+      runtimeMaxFileBytes: runtimeMaxUploadBytes,
       ownerUserId: user.id,
       activeCaseId,
       sameCaseFollowUp: Boolean(activeCase),
@@ -324,6 +350,24 @@ export async function POST(req: Request) {
           code: "FILE_TOO_LARGE",
           sizeBytes: file.size,
           maxFileBytes: uploadLimits.maxUploadBytes,
+          runtimeMaxFileBytes: runtimeMaxUploadBytes,
+          ownerUserId: user.id,
+        });
+        continue;
+      }
+
+      if (file.size > runtimeMaxUploadBytes) {
+        failedUploads.push({
+          filename: file.name,
+          reason: RUNTIME_LIMIT_MESSAGE,
+          code: "RUNTIME_BODY_LIMIT_EXCEEDED",
+        });
+        console.info("[upload] file rejected", {
+          filename: file.name,
+          code: "RUNTIME_BODY_LIMIT_EXCEEDED",
+          sizeBytes: file.size,
+          runtimeMaxFileBytes: runtimeMaxUploadBytes,
+          planMaxFileBytes: uploadLimits.maxUploadBytes,
           ownerUserId: user.id,
         });
         continue;
@@ -489,6 +533,8 @@ export async function POST(req: Request) {
           limits: {
             maxFiles: uploadLimits.maxFilesPerReview ?? MAX_UPLOAD_BATCH_FILES,
             maxFileBytes: uploadLimits.maxUploadBytes,
+            runtimeMaxFileBytes: runtimeMaxUploadBytes,
+            temporaryPlatformLimit: true,
             zipAllowed: uploadLimits.zipAllowed,
             maxExtractedFiles: uploadLimits.maxExtractedFiles,
             maxExtractedTotalBytes: uploadLimits.maxExtractedTotalBytes,
@@ -528,6 +574,8 @@ export async function POST(req: Request) {
       limits: {
         maxFiles: uploadLimits.maxFilesPerReview ?? MAX_UPLOAD_BATCH_FILES,
         maxFileBytes: uploadLimits.maxUploadBytes,
+        runtimeMaxFileBytes: runtimeMaxUploadBytes,
+        temporaryPlatformLimit: true,
         zipAllowed: uploadLimits.zipAllowed,
         maxExtractedFiles: uploadLimits.maxExtractedFiles,
         maxExtractedTotalBytes: uploadLimits.maxExtractedTotalBytes,

@@ -31,8 +31,12 @@ function isZipFile(file: Pick<File, "name" | "type">) {
 function formatUploadFailure(filename: string, failure?: { reason?: string; code?: string }) {
   if (!failure) return `${filename}: Upload failed.`;
 
-  if (failure.code === "UPLOAD_BODY_TOO_LARGE" || failure.code === "UPLOAD_BODY_PARSE_FAILED") {
-    return `${filename}: this upload is too large for the current upload path. Try a smaller file or split the ZIP.`;
+  if (failure.code === "RUNTIME_BODY_LIMIT_EXCEEDED") {
+    return `${filename}: This file is within your plan limit, but exceeds the current platform upload limit. Direct large-file upload support is coming soon. For now, split ZIPs over 20 MB into smaller uploads.`;
+  }
+
+  if (failure.code === "UPLOAD_BODY_PARSE_FAILED") {
+    return `${filename}: this upload may exceed the current platform upload limit. Direct large-file upload support is coming soon. For now, split ZIPs over 20 MB into smaller uploads.`;
   }
 
   if (failure.code?.startsWith("ZIP_")) {
@@ -75,9 +79,9 @@ export default function FileUpload({
         if (cancelled) return;
 
         if (entitlements.plan === "admin") {
-          setUploadHint("You can upload PDFs, photos, screenshots, or ZIP files. Admin/free access: 50 MB files.");
+          setUploadHint("You can upload PDFs, photos, screenshots, or ZIP files. Admin target: 50 MB; temporary platform upload limit: 20 MB.");
         } else if (entitlements.plan === "pro" || entitlements.plan === "trial") {
-          setUploadHint("You can upload PDFs, photos, screenshots, or ZIP files. Pro trial/Pro: 30 MB files.");
+          setUploadHint("You can upload PDFs, photos, screenshots, or ZIP files. Pro trial/Pro target: 30 MB; temporary platform upload limit: 20 MB.");
         } else {
           setUploadHint("You can upload PDFs, photos, or screenshots. Starter: 10 MB, 1 file.");
         }
@@ -175,7 +179,11 @@ export default function FileUpload({
             continue;
           }
 
-          failures.push(`${file.name}: ${data?.error ?? `Upload failed (${res.status}).`}`);
+          failures.push(
+            data?.error
+              ? `${file.name}: ${data.error}`
+              : `${file.name}: Upload failed (${res.status}).`
+          );
           continue;
         }
 

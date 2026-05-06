@@ -251,7 +251,13 @@ function buildUploadFailureStatus(failures: UploadFailureResult[]) {
   }
 
   return `Could not attach ${namedFailures
-    .map((failure) => `${failure.filename}: ${failure.reason ?? "Upload failed."}`)
+    .map((failure) => {
+      if (failure.code === "RUNTIME_BODY_LIMIT_EXCEEDED") {
+        return `${failure.filename}: This file is within your plan limit, but exceeds the current platform upload limit. Direct large-file upload support is coming soon. For now, split ZIPs over 20 MB into smaller uploads.`;
+      }
+
+      return `${failure.filename}: ${failure.reason ?? "Upload failed."}`;
+    })
     .join("; ")}`;
 }
 
