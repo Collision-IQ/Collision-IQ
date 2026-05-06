@@ -23,7 +23,7 @@ export function buildCarrierReport(
   });
 
   return `
-Collision Repair Supplement & Evaluation
+Repair Intelligence Report
 
 Vehicle: ${meta.vehicle || "Unknown"}
 

@@ -30,7 +30,7 @@ async function requireExportAccess() {
   const { user, isPlatformAdmin } = await requireCurrentUser();
   const entitlements = await getCurrentEntitlements();
 
-  if (!isPlatformAdmin && !canAccessFeature(entitlements.plan, "full_report_export")) {
+  if (!isPlatformAdmin && !canAccessFeature(entitlements.plan, "repair_intelligence_export")) {
     return NextResponse.json(
       { error: "EXPORT_NOT_INCLUDED_IN_PLAN" },
       { status: 403 }

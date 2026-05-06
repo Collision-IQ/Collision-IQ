@@ -2,7 +2,10 @@ export type ProductPlan = "none" | "starter" | "pro" | "team" | "admin" | "NONE"
 
 export type ProductFeature =
   | "snapshot_export"
+  | "repair_intelligence_export"
+  /** @deprecated Use repair_intelligence_export. */
   | "full_report_export"
+  /** @deprecated Merged into repair_intelligence_export. */
   | "dispute_report_export"
   | "estimate_scrubber_export"
   | "policy_rights_review_export"
@@ -32,6 +35,10 @@ export function canAccessFeature(
 
   if (feature === "snapshot_export") {
     return normalized === "starter" || normalized === "pro";
+  }
+
+  if (feature === "full_report_export" || feature === "dispute_report_export") {
+    return canAccessFeature(plan, "repair_intelligence_export");
   }
 
   if (normalized === "pro") {

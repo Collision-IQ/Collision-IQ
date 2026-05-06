@@ -722,7 +722,7 @@ export function ChatbotWorkspacePage() {
   const canViewNegotiationDraft = featureFlags?.negotiation_draft ?? false;
   const plan = viewerAccess?.plan ?? "none";
   const canUseSnapshotExport = canAccessFeature(plan, "snapshot_export");
-  const canUseBasicPdfExport = canAccessFeature(plan, "full_report_export");
+  const canUseBasicPdfExport = canAccessFeature(plan, "repair_intelligence_export");
   const canUseEstimateScrubberExport = canAccessFeature(plan, "estimate_scrubber_export");
   const canUsePolicyRightsReviewExport = canAccessFeature(plan, "policy_rights_review_export");
   const canUseDoiComplaintPacketExport = canAccessFeature(plan, "doi_complaint_packet_export");

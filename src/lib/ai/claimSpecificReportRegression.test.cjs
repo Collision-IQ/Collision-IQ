@@ -621,12 +621,14 @@ run("snapshot send logs contain no recipient email or raw report text", () => {
 
 run("product gating keeps snapshot on Starter and locks report exports", () => {
   assert.equal(canAccessFeature("starter", "snapshot_export"), true);
+  assert.equal(canAccessFeature("starter", "repair_intelligence_export"), false);
   assert.equal(canAccessFeature("starter", "full_report_export"), false);
   assert.equal(canAccessFeature("starter", "dispute_report_export"), false);
   assert.equal(canAccessFeature("starter", "policy_rights_review_export"), false);
   assert.equal(canAccessFeature("starter", "customer_report_export"), false);
   assert.equal(canAccessFeature("starter", "chat_report_recommendations"), false);
   assert.equal(canAccessFeature("pro", "snapshot_export"), true);
+  assert.equal(canAccessFeature("pro", "repair_intelligence_export"), true);
   assert.equal(canAccessFeature("pro", "full_report_export"), true);
   assert.equal(canAccessFeature("pro", "dispute_report_export"), true);
   assert.equal(canAccessFeature("pro", "policy_rights_review_export"), true);
@@ -650,8 +652,9 @@ run("Starter can preview, download, and send Snapshot only", () => {
   );
 });
 
-run("Starter cannot access full, dispute, customer, or chat PDFs", () => {
+run("Starter cannot access repair intelligence, customer, or chat PDFs", () => {
   const lockedFeatures = [
+    "repair_intelligence_export",
     "full_report_export",
     "dispute_report_export",
     "policy_rights_review_export",
@@ -674,7 +677,7 @@ run("Starter chat recommendations require upgrade framing for locked exports", (
 
   assert.match(guard, /Snapshot export is available/i);
   assert.match(guard, /Pro-only upgrades/i);
-  assert.doesNotMatch(guard, /Generate the Dispute Intelligence Report next/i);
+  assert.doesNotMatch(guard, /Generate a separate dispute report next/i);
   assert.match(productGuard, /Snapshot export is available/i);
   assert.match(productGuard, /Pro-only upgrades/i);
 });
@@ -682,6 +685,7 @@ run("Starter chat recommendations require upgrade framing for locked exports", (
 run("Pro can access every export feature", () => {
   const exportFeatures = [
     "snapshot_export",
+    "repair_intelligence_export",
     "full_report_export",
     "dispute_report_export",
     "policy_rights_review_export",
@@ -699,7 +703,7 @@ run("export API routes enforce locked features server-side", () => {
   const routeChecks = [
     {
       file: "src/app/api/chat/export/route.ts",
-      feature: "full_report_export",
+      feature: "repair_intelligence_export",
     },
     {
       file: "src/app/api/customer-report/route.ts",

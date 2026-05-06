@@ -144,7 +144,7 @@ run("rebuttal PDF renders expected sections", () => {
   assert.ok(document.summary.some((item) => item.label === "VIN" && item.value === TEST_VIN));
 });
 
-run("dispute intelligence PDF renders decision-ready sections", () => {
+run("legacy dispute PDF builder renders unified Repair Intelligence report", () => {
   const document = buildDisputeIntelligencePdf({
     report: REPORT,
     analysis: ANALYSIS,
@@ -152,8 +152,8 @@ run("dispute intelligence PDF renders decision-ready sections", () => {
     assistantAnalysis: null,
   });
 
-  assert.equal(document.header.title, "Dispute Intelligence Report");
-  assert.ok(document.sections.some((section) => section.title === "At-a-Glance Conclusion"));
+  assert.equal(document.header.title, "Repair Intelligence Report");
+  assert.ok(document.sections.some((section) => section.title === "Executive Repair Position"));
   assert.ok(
     document.sections.some((section) =>
       section.title === "Top Dispute Drivers"
@@ -161,7 +161,7 @@ run("dispute intelligence PDF renders decision-ready sections", () => {
   );
   assert.ok(
     document.sections.some((section) =>
-      (section.bullets ?? []).some((bullet) => /Status:/i.test(bullet))
+      (section.bullets ?? []).some((bullet) => /\bstatus\b/i.test(bullet))
     )
   );
 });

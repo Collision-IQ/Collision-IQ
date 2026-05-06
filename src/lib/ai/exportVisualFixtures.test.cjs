@@ -239,12 +239,12 @@ run("long main report fixture estimates beyond one page for pagination QA", () =
   });
   const { total, layout } = estimateDocumentSectionsHeight(document);
 
-  assert.equal(document.header.title, "Collision Repair Supplement & Evaluation");
+  assert.equal(document.header.title, "Repair Intelligence Report");
   assert.ok(document.sections.length >= 8);
   assert.ok(total > layout.usableHeight * 1.8);
 });
 
-run("long dispute intelligence fixture stays concise but still stresses multi-page rendering", () => {
+run("legacy dispute intelligence fixture renders unified Repair Intelligence report", () => {
   const { report, analysis } = makeLongReportFixture();
   const document = buildDisputeIntelligencePdf({
     report,
@@ -256,12 +256,12 @@ run("long dispute intelligence fixture stays concise but still stresses multi-pa
   const { total, layout } = estimateDocumentSectionsHeight(document);
   const topDrivers = document.sections.find((section) => section.title === "Top Dispute Drivers");
 
-  assert.equal(document.header.title, "Dispute Intelligence Report");
+  assert.equal(document.header.title, "Repair Intelligence Report");
   assert.ok(document.sections.length >= 4);
   assert.ok(total > layout.usableHeight);
   assert.ok((topDrivers?.bullets ?? []).length >= 4);
   assert.equal(
-    document.sections.some((section) => section.title === "What Still Needs Support"),
+    document.sections.some((section) => section.title === "Missing Verification Evidence"),
     true
   );
 });

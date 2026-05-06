@@ -179,19 +179,27 @@ export function buildDisputeIntelligenceReport(params: ExportBuilderInput): stri
   );
 
   return [
-    "# Dispute Intelligence Report",
+    "# Repair Intelligence Report",
     "",
     `Generated: ${source.generatedLabel}`,
     `Vehicle: ${vehicleIdentity}`,
     `Mode: ${formatAnalysisModeLabel(source.analysisMode)}`,
     "",
-    "## At-a-Glance Conclusion",
+    "## Executive Repair Position",
     report.summary,
     "",
-    "## What Helps the Shop Position",
+    "## File Completeness & Confidence",
+    `Adjusted confidence: ${exportModel.confidenceIntegrity.adjustedConfidence}`,
+    `Evidence completeness: ${formatCategoryLabel(exportModel.confidenceIntegrity.completenessStatus)}`,
+    "",
+    "## Support Already Present",
     ...report.positives.map((item) => `- ${item}`),
     "",
-    "## What Still Needs Support",
+    "## Top Dispute Drivers",
+    "",
+    ...topDriverBlocks,
+    "",
+    "## Missing Verification Evidence",
     ...report.supportGaps.map((item) => `- ${item}`),
     "",
     "## Recommended Next Moves",
@@ -205,9 +213,6 @@ export function buildDisputeIntelligenceReport(params: ExportBuilderInput): stri
           "",
         ]
       : []),
-    "## Top Dispute Drivers",
-    "",
-    ...topDriverBlocks,
   ]
     .filter(Boolean)
     .join("\n");

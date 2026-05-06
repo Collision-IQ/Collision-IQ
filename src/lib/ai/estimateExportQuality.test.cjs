@@ -516,7 +516,7 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
     ),
     false
   );
-  assert.equal(disputeIntelligence.header.title, "Dispute Intelligence Report");
+  assert.equal(disputeIntelligence.header.title, "Repair Intelligence Report");
   assert.equal(
     disputeIntelligence.sections.some((section) =>
       section.title === "Top Dispute Drivers"
