@@ -34,13 +34,13 @@ import {
 import { buildCarrierReport, type CarrierReportDocument } from "@/lib/ai/builders/carrierPdfBuilder";
 import { buildCollisionSnapshot, type CollisionSnapshot } from "@/lib/ai/builders/collisionSnapshot";
 import {
-  buildCollisionSnapshotPdf,
   buildCollisionSnapshotPdfFromSnapshot,
 } from "@/lib/ai/builders/collisionSnapshotPdfBuilder";
 import { buildCustomerReportPdf } from "@/lib/ai/builders/customerReportPdfBuilder";
-import { buildDisputeIntelligencePdf } from "@/lib/ai/builders/disputeIntelligencePdfBuilder";
+import { buildDoiComplaintPacketPdf } from "@/lib/ai/builders/doiComplaintPacketPdfBuilder";
+import { buildEstimateScrubberPdf } from "@/lib/ai/builders/estimateScrubberPdfBuilder";
+import { buildPolicyRightsReviewPdf } from "@/lib/ai/builders/policyRightsReviewPdfBuilder";
 import { buildCarrierPdfBlob, exportCarrierPDF } from "@/lib/ai/builders/exportPdf";
-import { buildRebuttalEmailPdf } from "@/lib/ai/builders/rebuttalEmailPdfBuilder";
 import { toStableClaimId } from "@/lib/claims/claimIdentity";
 import {
   buildSnapshotEmailBody,
@@ -58,6 +58,7 @@ import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeRepo
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 import type {
   AnalysisResult,
+  ExportResearchSnapshot,
   RepairIntelligenceReport,
 } from "@/lib/ai/types/analysis";
 import type { CustomerReport } from "@/lib/ai/generateCustomerReport";
@@ -75,17 +76,18 @@ type AttachmentTrayItem = {
 };
 
 type LeftPaneMode = "chat" | "review";
-type ReportType =
+export type ReportKind =
   | "snapshot"
-  | "full_report"
-  | "rebuttal"
-  | "dispute_intelligence"
-  | "customer_report";
+  | "customer_report"
+  | "repair_intelligence"
+  | "estimate_scrubber"
+  | "policy_rights_review"
+  | "doi_complaint_packet";
 type ReportDestinationType = "customer" | "carrier" | "internal";
 type ReportSendHistoryItem = {
   id: string;
   caseId: string | null;
-  reportType: ReportType;
+  reportType: ReportKind;
   destinationType: ReportDestinationType;
   recipient: string;
   subject: string | null;
@@ -721,8 +723,9 @@ export function ChatbotWorkspacePage() {
   const plan = viewerAccess?.plan ?? "none";
   const canUseSnapshotExport = canAccessFeature(plan, "snapshot_export");
   const canUseBasicPdfExport = canAccessFeature(plan, "full_report_export");
-  const canUseDisputeReportExport = canAccessFeature(plan, "dispute_report_export");
-  const canUseRebuttalEmail = canAccessFeature(plan, "rebuttal_export");
+  const canUseEstimateScrubberExport = canAccessFeature(plan, "estimate_scrubber_export");
+  const canUsePolicyRightsReviewExport = canAccessFeature(plan, "policy_rights_review_export");
+  const canUseDoiComplaintPacketExport = canAccessFeature(plan, "doi_complaint_packet_export");
   const canUseCustomerReport = canAccessFeature(plan, "customer_report_export");
   const followUpExports = [
     hasResolvedAnalysis
@@ -732,19 +735,24 @@ export function ChatbotWorkspacePage() {
       ? { label: "1-Page Snapshot", type: "pdf" }
       : null,
     canUseBasicPdfExport
-      ? { label: "Collision Repair Intelligence Report", type: "pdf" }
+      ? { label: "Repair Intelligence Report", type: "pdf" }
       : hasResolvedAnalysis
-        ? { label: "Collision Repair Intelligence Report (Pro)", type: "locked" }
+        ? { label: "Repair Intelligence Report (Pro)", type: "locked" }
       : null,
-    canUseRebuttalEmail
-      ? { label: "Rebuttal Email", type: "pdf" }
+    canUseEstimateScrubberExport
+      ? { label: "Estimate Scrubber Report", type: "pdf" }
       : hasResolvedAnalysis
-        ? { label: "Rebuttal Email (Pro)", type: "locked" }
+        ? { label: "Estimate Scrubber Report (Pro)", type: "locked" }
       : null,
-    canUseDisputeReportExport
-      ? { label: "Dispute Intelligence Report", type: "pdf" }
+    canUsePolicyRightsReviewExport
+      ? { label: "Policy & Rights Review", type: "pdf" }
       : hasResolvedAnalysis
-        ? { label: "Dispute Intelligence Report (Pro)", type: "locked" }
+        ? { label: "Policy & Rights Review (Pro)", type: "locked" }
+      : null,
+    canUseDoiComplaintPacketExport
+      ? { label: "DOI Complaint Packet", type: "pdf" }
+      : hasResolvedAnalysis
+        ? { label: "DOI Complaint Packet (Pro)", type: "locked" }
       : null,
     canUseCustomerReport
       ? { label: "Customer Report", type: "pdf" }
@@ -1033,30 +1041,29 @@ export function ChatbotWorkspacePage() {
                 <section className="h-full min-h-0 overflow-hidden">
                 {!isChatActive && (
                   <div className="relative">
-                    <div className="pointer-events-none absolute inset-x-10 -top-1 z-10 h-4 rounded-full bg-orange-500/8 blur-2xl" />
-                    <div className="rounded-[24px] border border-border bg-card/95 px-4 py-3 shadow-[0_18px_50px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 backdrop-blur-2xl dark:shadow-[0_18px_50px_rgba(0,0,0,0.34)]">
+                    <div className="rounded-md border border-border bg-card px-3 py-2">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <button
                           type="button"
                           onClick={openChatPane}
                           className="flex min-w-0 flex-1 items-center gap-3 text-left"
                         >
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-xs font-semibold text-foreground">
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted text-[11px] font-semibold text-foreground">
                             Chat
                           </div>
                           <div className="min-w-0">
-                            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                              Chat available
+                            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                              Command surface
                             </div>
-                            <div className="truncate text-sm text-foreground/80">
-                              Click to reopen chat.
+                            <div className="truncate text-[13px] text-foreground/80">
+                              Reopen the case command thread.
                             </div>
                           </div>
                         </button>
                         <button
                           type="button"
                           onClick={openChatPane}
-                          className="rounded-xl border border-border bg-muted px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted/70"
+                          className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-muted/70"
                         >
                           Open chat
                         </button>
@@ -1066,21 +1073,20 @@ export function ChatbotWorkspacePage() {
                 )}
                 {isChatActive && (
                   <div className="relative h-full min-h-0">
-                    <div className="pointer-events-none absolute inset-x-8 -top-2 z-10 h-5 rounded-full bg-orange-500/10 blur-2xl" />
-                    <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-[28px] bg-background/78 shadow-[0_24px_80px_rgba(15,23,42,0.10)] ring-1 ring-border/45 backdrop-blur-2xl dark:bg-background/70 dark:shadow-[0_28px_90px_rgba(0,0,0,0.38)]">
-                      <div className="flex shrink-0 items-center justify-between gap-4 px-5 py-4">
+                    <div className="relative flex h-full min-h-0 flex-col overflow-hidden border border-border bg-background">
+                      <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-3 py-2">
                         <div>
-                          <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                            Chat workspace
+                          <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                            Command Surface
                           </div>
-                          <div className="mt-1 text-sm text-muted-foreground">
-                            Collapse it anytime to focus on the immersive review.
+                          <div className="mt-0.5 text-xs text-muted-foreground">
+                            Case commands, uploads, and follow-up analysis.
                           </div>
                         </div>
                         <button
                           type="button"
                           onClick={collapseChatPane}
-                          className="rounded-xl bg-card px-3 py-2 text-xs font-medium text-muted-foreground shadow-sm ring-1 ring-border/60 transition hover:bg-muted hover:text-foreground"
+                          className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-muted/70 hover:text-foreground"
                         >
                           Collapse chat
                         </button>
@@ -1156,8 +1162,9 @@ export function ChatbotWorkspacePage() {
                           plan={plan}
                           canUseSnapshotExport={canUseSnapshotExport}
                           canUseBasicPdfExport={canUseBasicPdfExport}
-                          canUseDisputeReportExport={canUseDisputeReportExport}
-            canUseRebuttalEmail={canUseRebuttalEmail}
+                          canUseEstimateScrubberExport={canUseEstimateScrubberExport}
+                          canUsePolicyRightsReviewExport={canUsePolicyRightsReviewExport}
+                          canUseDoiComplaintPacketExport={canUseDoiComplaintPacketExport}
             canUseCustomerReport={canUseCustomerReport}
             analysisReportId={analysisReportId}
             attachmentIds={attachmentsState.map((file) => file.attachmentId)}
@@ -1320,8 +1327,9 @@ function RailContent({
   plan,
   canUseSnapshotExport,
   canUseBasicPdfExport,
-  canUseDisputeReportExport,
-  canUseRebuttalEmail,
+  canUseEstimateScrubberExport,
+  canUsePolicyRightsReviewExport,
+  canUseDoiComplaintPacketExport,
   canUseCustomerReport,
   analysisReportId,
   attachmentIds,
@@ -1348,8 +1356,9 @@ function RailContent({
   plan: AccountEntitlements["plan"] | "none";
   canUseSnapshotExport: boolean;
   canUseBasicPdfExport: boolean;
-  canUseDisputeReportExport: boolean;
-  canUseRebuttalEmail: boolean;
+  canUseEstimateScrubberExport: boolean;
+  canUsePolicyRightsReviewExport: boolean;
+  canUseDoiComplaintPacketExport: boolean;
   canUseCustomerReport: boolean;
   analysisReportId: string | null;
   attachmentIds: string[];
@@ -1373,7 +1382,7 @@ function RailContent({
   const [snapshotSending, setSnapshotSending] = useState(false);
   const [snapshotSent, setSnapshotSent] = useState(false);
   const [reportSendTarget, setReportSendTarget] = useState<ReportDestinationType>("internal");
-  const [activeReportToSend, setActiveReportToSend] = useState<ReportType | null>(null);
+  const [activeReportToSend, setActiveReportToSend] = useState<ReportKind | null>(null);
   const [reportRecipientEmail, setReportRecipientEmail] = useState("");
   const [reportSubject, setReportSubject] = useState("");
   const [reportMessage, setReportMessage] = useState("");
@@ -1473,7 +1482,7 @@ function RailContent({
     }
   }, [analysisReportId]);
   const getLastSendFor = useCallback(
-    (reportType: ReportType, destinationType?: ReportDestinationType) =>
+    (reportType: ReportKind, destinationType?: ReportDestinationType) =>
       reportSendHistory.find(
         (send) =>
           send.reportType === reportType &&
@@ -1581,7 +1590,7 @@ function RailContent({
     setSnapshotStatus(null);
   }
 
-  function openReportSend(reportType: ReportType, destinationType: ReportDestinationType = "internal") {
+  function openReportSend(reportType: ReportKind, destinationType: ReportDestinationType = "internal") {
     if (reportType === "snapshot" && !snapshot) {
       setSnapshotStatus("Snapshot could not be generated from the current report.");
       return;
@@ -1600,7 +1609,60 @@ function RailContent({
     setReportSendStatus(null);
   }
 
-  async function buildReportDocument(reportType: ReportType): Promise<CarrierReportDocument> {
+  async function prepareExportResearch(reportType: ReportKind): Promise<ExportResearchSnapshot | null> {
+    const needsResearch =
+      reportType === "policy_rights_review" ||
+      reportType === "estimate_scrubber" ||
+      reportType === "doi_complaint_packet" ||
+      (reportType === "repair_intelligence" && renderModel.oemContradictions.length > 0);
+
+    if (!needsResearch || !analysisResult) {
+      return null;
+    }
+
+    setReportSendStatus("Running Drive and internet source research...");
+
+    const researchReportType =
+      reportType === "repair_intelligence" ? "oem_contradiction_detection" : reportType;
+    const response = await fetch("/api/reports/research", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        reportType: researchReportType,
+        caseId: analysisReportId ?? undefined,
+        report: analysisResult,
+      }),
+    });
+    const payload = (await response.json().catch(() => null)) as {
+      snapshot?: ExportResearchSnapshot;
+      error?: string;
+    } | null;
+
+    if (!response.ok || !payload?.snapshot) {
+      setReportSendStatus(payload?.error || "Source research failed; unsupported findings will remain marked as needing source.");
+      return null;
+    }
+
+    setReportSendStatus(null);
+    return payload.snapshot;
+  }
+
+  async function downloadReportDocument(reportType: ReportKind) {
+    if (reportType !== "snapshot" && !canRenderExports) {
+      setReportSendStatus("Report is not ready to download yet.");
+      return;
+    }
+
+    try {
+      const document = await buildReportDocument(reportType);
+      void exportCarrierPDF(document);
+    } catch (error) {
+      setReportSendStatus(error instanceof Error ? error.message : "Report download failed.");
+    }
+  }
+
+  async function buildReportDocument(reportType: ReportKind): Promise<CarrierReportDocument> {
     if (reportType === "snapshot") {
       if (!snapshot) {
         throw new Error("Snapshot could not be generated from the current report.");
@@ -1610,6 +1672,7 @@ function RailContent({
 
     const resolvedAnalysis =
       normalizedResult ?? (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null);
+    const exportResearchSnapshot = await prepareExportResearch(reportType);
     const sharedInput = {
       renderModel,
       report: analysisResult,
@@ -1617,16 +1680,20 @@ function RailContent({
       panel,
       assistantAnalysis: analysisText,
       workspaceData,
+      exportResearchSnapshot,
     };
 
-    if (reportType === "full_report") {
+    if (reportType === "repair_intelligence") {
       return buildCarrierReport(sharedInput);
     }
-    if (reportType === "rebuttal") {
-      return buildRebuttalEmailPdf(sharedInput);
+    if (reportType === "estimate_scrubber") {
+      return buildEstimateScrubberPdf(sharedInput);
     }
-    if (reportType === "dispute_intelligence") {
-      return buildDisputeIntelligencePdf(sharedInput);
+    if (reportType === "policy_rights_review") {
+      return buildPolicyRightsReviewPdf(sharedInput);
+    }
+    if (reportType === "doi_complaint_packet") {
+      return buildDoiComplaintPacketPdf(sharedInput);
     }
 
     return await buildCustomerReportDocument({
@@ -2053,6 +2120,9 @@ function RailContent({
           {renderModel.findingReasoning.length > 0 ? (
             <FindingReasoningCard findings={renderModel.findingReasoning} />
           ) : null}
+          {renderModel.oemContradictions.length > 0 ? (
+            <OemContradictionCard contradictions={renderModel.oemContradictions} />
+          ) : null}
           {renderModel.retrievalSummary ? (
             <RetrievalSummaryCard summary={renderModel.retrievalSummary} />
           ) : null}
@@ -2215,28 +2285,28 @@ function RailContent({
           registerSectionRef={registerSectionRef}
           onActivate={onInsightSelect}
         >
-        <section className="mt-5 space-y-3 rounded-2xl bg-card p-4 shadow-sm ring-1 ring-border/45">
+        <section className="mt-4 space-y-2 border border-border bg-card p-3">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
               Reports & Exports
             </div>
-            <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
-              Download carrier-ready PDFs or email a report directly.
+            <div className="mt-1 text-xs leading-5 text-muted-foreground">
+              Carrier-ready documents, snapshots, and audit packets.
             </div>
           </div>
-          <div className="grid gap-3">
+          <div className="grid gap-2">
             <button
               type="button"
               onClick={openSnapshotPreview}
               disabled={!canUseSnapshotExport}
-              className="group flex w-full cursor-pointer items-center justify-between gap-3 rounded-xl border border-border bg-card p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-[#C65A2A]/35 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-ring/25 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-40"
+              className="group flex w-full cursor-pointer items-center justify-between gap-3 rounded-md border border-border bg-muted p-3 text-left transition hover:border-[#C65A2A]/35 hover:bg-card focus:outline-none focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <span className="flex min-w-0 items-center gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#C65A2A]/12 text-[#C65A2A]">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#C65A2A]/20 bg-[#C65A2A]/10 text-[#C65A2A]">
                   <FileText size={17} aria-hidden />
                 </span>
                 <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-foreground">1-Page Snapshot</span>
+                  <span className="block text-[13px] font-semibold text-foreground">1-Page Snapshot</span>
                   <span className="block text-[12px] leading-5 text-muted-foreground">Preview, download, or send a redacted snapshot.</span>
                 </span>
               </span>
@@ -2247,150 +2317,161 @@ function RailContent({
               loading={reportSendHistoryLoading}
             />
             {canUseBasicPdfExport ? (
-              <div className="space-y-2 rounded-xl border border-border bg-card p-4 shadow-sm transition hover:border-[#C65A2A]/25 hover:shadow-md">
+              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[#C65A2A]/25">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[#C65A2A]" aria-hidden />
-                    Collision Repair Intelligence Report
+                    Repair Intelligence Report
                   </div>
-                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">Carrier-ready repair intelligence package.</div>
+                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
+                    Technical, procedural, evidentiary, and negotiation-aware repair position.
+                  </div>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <button
                     type="button"
                     onClick={() => {
-                      exportReport(
-                        renderModel,
-                        normalizedResult,
-                        analysisResult,
-                        panel,
-                        analysisText,
-                        workspaceData
-                      );
+                      void downloadReportDocument("repair_intelligence");
                       emitSafeCrmEventFromClient({
                         event: "report_generated",
                         plan,
-                        exportType: "full_report",
+                        exportType: "repair_intelligence",
                       });
                     }}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99]"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
                     <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download PDF</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
                     type="button"
-                    onClick={() => openReportSend("full_report")}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-[#C65A2A] bg-[#C65A2A] px-3 py-2.5 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99]"
+                    onClick={() => openReportSend("repair_intelligence")}
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[#C65A2A] bg-[#C65A2A] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
                     <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </div>
                 <ReportSendStatusLine
-                  send={getLastSendFor("full_report")}
+                  send={getLastSendFor("repair_intelligence")}
                   loading={reportSendHistoryLoading}
                 />
               </div>
             ) : null}
-            {canUseRebuttalEmail ? (
-              <div className="space-y-2 rounded-xl border border-border bg-card p-4 shadow-sm transition hover:border-[#C65A2A]/25 hover:shadow-md">
+            {canUseEstimateScrubberExport ? (
+              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[#C65A2A]/25">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[#C65A2A]" aria-hidden />
-                    Rebuttal Email
+                    Estimate Scrubber Report
                   </div>
-                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">Negotiation-ready rebuttal language.</div>
+                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
+                    Estimate QA and compliance audit for missing or under-documented operations.
+                  </div>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <button
                     type="button"
                     onClick={() => {
-                      exportPdfVariant({
-                        normalizedResult,
-                        analysisResult,
-                        panel,
-                        analysisText,
-                        workspaceData,
-                        renderModel,
-                        variant: "rebuttal",
-                      });
+                      void downloadReportDocument("estimate_scrubber");
                       emitSafeCrmEventFromClient({
                         event: "report_generated",
                         plan,
-                        exportType: "rebuttal",
+                        exportType: "estimate_scrubber",
                       });
                     }}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99]"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
                     <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download PDF</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
                     type="button"
-                    onClick={() => openReportSend("rebuttal", "carrier")}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-[#C65A2A] bg-[#C65A2A] px-3 py-2.5 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99]"
+                    onClick={() => openReportSend("estimate_scrubber", "carrier")}
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[#C65A2A] bg-[#C65A2A] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
                     <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </div>
                 <ReportSendStatusLine
-                  send={getLastSendFor("rebuttal")}
+                  send={getLastSendFor("estimate_scrubber")}
                   loading={reportSendHistoryLoading}
                 />
               </div>
             ) : null}
-            {canUseDisputeReportExport ? (
-              <div className="space-y-2 rounded-xl border border-border bg-card p-4 shadow-sm transition hover:border-[#C65A2A]/25 hover:shadow-md">
+            {canUsePolicyRightsReviewExport ? (
+              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[#C65A2A]/25">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[#C65A2A]" aria-hidden />
-                    Dispute Intelligence Report
+                    Policy & Rights Review
                   </div>
-                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">Evidence-backed dispute framing.</div>
+                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
+                    Jurisdiction, policy rights, appraisal indicators, obligations, and escalation support.
+                  </div>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <button
                     type="button"
                     onClick={() => {
-                      exportPdfVariant({
-                        normalizedResult,
-                        analysisResult,
-                        panel,
-                        analysisText,
-                        workspaceData,
-                        renderModel,
-                        variant: "dispute_intelligence",
-                      });
+                      void downloadReportDocument("policy_rights_review");
                       emitSafeCrmEventFromClient({
                         event: "report_generated",
                         plan,
-                        exportType: "dispute_report",
+                        exportType: "policy_rights_review",
                       });
                     }}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99]"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
                     <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download PDF</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
                     type="button"
-                    onClick={() => openReportSend("dispute_intelligence", "carrier")}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-[#C65A2A] bg-[#C65A2A] px-3 py-2.5 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99]"
+                    onClick={() => openReportSend("policy_rights_review", "carrier")}
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[#C65A2A] bg-[#C65A2A] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
                     <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </div>
                 <ReportSendStatusLine
-                  send={getLastSendFor("dispute_intelligence")}
+                  send={getLastSendFor("policy_rights_review")}
                   loading={reportSendHistoryLoading}
                 />
+              </div>
+            ) : null}
+            {canUseDoiComplaintPacketExport ? (
+              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[#C65A2A]/25">
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <FileText size={15} className="text-[#C65A2A]" aria-hidden />
+                    DOI Complaint Packet
+                  </div>
+                  <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
+                    Formal documentation packet for DOI escalation support, evidence, citations, and unresolved claim items.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void downloadReportDocument("doi_complaint_packet");
+                    emitSafeCrmEventFromClient({
+                      event: "report_generated",
+                      plan,
+                      exportType: "doi_complaint_packet",
+                    });
+                  }}
+                  className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
+                >
+                  <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download PDF</span>
+                  <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
+                </button>
               </div>
             ) : null}
             {canUseCustomerReport ? (
-              <div className="space-y-2 rounded-xl border border-border bg-card p-4 shadow-sm transition hover:border-[#C65A2A]/25 hover:shadow-md">
+              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[#C65A2A]/25">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[#C65A2A]" aria-hidden />
@@ -2428,7 +2509,7 @@ function RailContent({
                         exportType: "customer_report",
                       });
                     }}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2.5 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99] aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
                   >
                     <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> {isGeneratingCustomerReport ? "Generating..." : "Download PDF"}</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -2437,7 +2518,7 @@ function RailContent({
                     type="button"
                     disabled={isGeneratingCustomerReport}
                     onClick={() => openReportSend("customer_report", "customer")}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl border border-[#C65A2A] bg-[#C65A2A] px-3 py-2.5 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[#C65A2A] bg-[#C65A2A] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -2449,13 +2530,13 @@ function RailContent({
                 />
               </div>
             ) : null}
-            {!canUseBasicPdfExport || !canUseDisputeReportExport || !canUseRebuttalEmail || !canUseCustomerReport ? (
+            {!canUseBasicPdfExport || !canUseEstimateScrubberExport || !canUsePolicyRightsReviewExport || !canUseDoiComplaintPacketExport || !canUseCustomerReport ? (
               <button
                 type="button"
                 onClick={onCustomerReportLocked}
-                className="w-full rounded-xl border border-orange-400/18 bg-[#C65A2A]/10 p-3 text-xs text-foreground transition hover:bg-[#C65A2A]/16"
+                className="w-full rounded-md border border-orange-400/18 bg-[#C65A2A]/10 p-3 text-xs text-foreground transition hover:bg-[#C65A2A]/16"
               >
-                Full reports, Dispute Intelligence, Rebuttal PDF, and Customer Report are available on Pro.
+                Repair Intelligence, Estimate Scrubber, Policy & Rights Review, DOI Complaint Packet, and Customer Report are available on Pro.
               </button>
             ) : null}
             {academyTrigger ? (
@@ -2463,9 +2544,9 @@ function RailContent({
                 type="button"
                 onClick={() => void startAcademyServiceCheckout()}
                 disabled={serviceCheckoutLoading}
-                className="w-full rounded-xl border border-[#C65A2A]/30 bg-gradient-to-br from-[#C65A2A]/18 via-[#C65A2A]/10 to-white/[0.02] p-3 text-left transition hover:bg-[#C65A2A]/20 disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full rounded-md border border-[#C65A2A]/30 bg-[#C65A2A]/10 p-3 text-left transition hover:bg-[#C65A2A]/16 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <div className="text-[10px] uppercase tracking-[0.22em] text-[#E8A27F]">Academy Service</div>
+                <div className="text-[10px] uppercase tracking-[0.12em] text-[#b86a2d]">Academy Service</div>
                 <div className="mt-1 text-sm font-semibold text-foreground">
                   {serviceCheckoutLoading ? "Opening checkout..." : academyTrigger.cta}
                 </div>
@@ -2473,17 +2554,17 @@ function RailContent({
               </button>
             ) : null}
             {customerReportError ? (
-              <div className="rounded-xl border border-red-500/16 bg-red-500/[0.05] px-3 py-2 text-[12px] leading-5 text-red-200/80">
+              <div className="rounded-md border border-red-500/16 bg-red-500/[0.05] px-3 py-2 text-[12px] leading-5 text-red-500">
                 {customerReportError}
               </div>
             ) : null}
             {snapshotStatus ? (
-              <div className="rounded-xl border border-border bg-muted px-3 py-2 text-[12px] leading-5 text-muted-foreground">
+              <div className="rounded-md border border-border bg-muted px-3 py-2 text-[12px] leading-5 text-muted-foreground">
                 {snapshotStatus}
               </div>
             ) : null}
             {reportSendStatus ? (
-              <div className="rounded-xl border border-border bg-muted px-3 py-2 text-[12px] leading-5 text-muted-foreground">
+              <div className="rounded-md border border-border bg-muted px-3 py-2 text-[12px] leading-5 text-muted-foreground">
                 {reportSendStatus}
               </div>
             ) : null}
@@ -2550,93 +2631,42 @@ function RailContent({
   );
 }
 
-function exportReport(
-  renderModel: ReturnType<typeof buildExportModel>,
-  normalizedResult: AnalysisResult | null,
-  analysisResult: RepairIntelligenceReport | null,
-  panel: DecisionPanel,
-  analysisText: string,
-  workspaceData: WorkspaceData | null
-) {
-  const resolvedAnalysis =
-    normalizedResult ?? (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null);
-
-  const reportDocument = buildCarrierReport({
-    renderModel,
-    report: analysisResult,
-    analysis: resolvedAnalysis,
-    panel,
-    assistantAnalysis: analysisText,
-    workspaceData,
-  });
-
-  void exportCarrierPDF(reportDocument);
-}
-
-function exportPdfVariant(params: {
-  renderModel: ReturnType<typeof buildExportModel>;
-  normalizedResult: AnalysisResult | null;
-  analysisResult: RepairIntelligenceReport | null;
-  panel: DecisionPanel;
-  analysisText: string;
-  workspaceData: WorkspaceData | null;
-  variant: "snapshot" | "rebuttal" | "dispute_intelligence";
-}) {
-  const resolvedAnalysis =
-    params.normalizedResult ??
-    (params.analysisResult ? normalizeReportToAnalysisResult(params.analysisResult) : null);
-
-  const sharedInput = {
-    renderModel: params.renderModel,
-    report: params.analysisResult,
-    analysis: resolvedAnalysis,
-    panel: params.panel,
-    assistantAnalysis: params.analysisText,
-    workspaceData: params.workspaceData,
-  };
-
-  const document =
-    params.variant === "snapshot"
-      ? buildCollisionSnapshotPdf(sharedInput)
-      : params.variant === "rebuttal"
-      ? buildRebuttalEmailPdf(sharedInput)
-      : buildDisputeIntelligencePdf(sharedInput);
-
-  void exportCarrierPDF(document);
-}
-
-function getDefaultReportSubject(reportType: ReportType): string {
+function getDefaultReportSubject(reportType: ReportKind): string {
   switch (reportType) {
     case "snapshot":
       return "[Collision IQ] Your Vehicle Snapshot Report";
-    case "full_report":
-      return "[Collision IQ] Collision Repair Intelligence Report";
-    case "rebuttal":
-      return "[Collision IQ] Carrier Rebuttal Package";
-    case "dispute_intelligence":
-      return "[Collision IQ] Dispute Intelligence Report";
+    case "repair_intelligence":
+      return "[Collision IQ] Repair Intelligence Report";
+    case "estimate_scrubber":
+      return "[Collision IQ] Estimate Scrubber Report";
+    case "policy_rights_review":
+      return "[Collision IQ] Policy & Rights Review";
+    case "doi_complaint_packet":
+      return "[Collision IQ] DOI Complaint Packet";
     case "customer_report":
       return "[Collision IQ] Customer Repair Summary";
   }
 }
 
-function getDefaultReportFilename(reportType: ReportType): string {
+function getDefaultReportFilename(reportType: ReportKind): string {
   switch (reportType) {
     case "snapshot":
       return "collision-snapshot.pdf";
-    case "full_report":
-      return "collision-iq-main-report.pdf";
-    case "rebuttal":
-      return "carrier-rebuttal-package.pdf";
-    case "dispute_intelligence":
-      return "dispute-intelligence-report.pdf";
+    case "repair_intelligence":
+      return "repair-intelligence-report.pdf";
+    case "estimate_scrubber":
+      return "estimate-scrubber-report.pdf";
+    case "policy_rights_review":
+      return "policy-rights-review.pdf";
+    case "doi_complaint_packet":
+      return "doi-complaint-packet.pdf";
     case "customer_report":
       return "customer-report.pdf";
   }
 }
 
 function getDefaultReportMessage(
-  reportType: ReportType,
+  reportType: ReportKind,
   destinationType: ReportDestinationType,
   renderModel: ReturnType<typeof buildExportModel>
 ): string {
@@ -3430,6 +3460,8 @@ function createCustomerReportPdfDocument(report: CustomerReport, params: {
         : null,
     filename: params.fileName || "customer-report.pdf",
     confidenceIntegrity: params.renderModel.confidenceIntegrity,
+    findingReasoning: params.renderModel.findingReasoning,
+    oemContradictions: params.renderModel.oemContradictions,
   });
 }
 
@@ -3820,11 +3852,12 @@ function FindingReasoningCard({
                 {formatLabel(finding.evidenceLevel)}
               </div>
             </div>
-            <ReasoningLine label="Why it matters" value={finding.why_it_matters} />
-            <ReasoningLine label="What proves it" value={finding.what_proves_it} />
+            <ReasoningLine label="Rationale" value={finding.rationaleSummary ?? finding.why_it_matters} />
+            <ReasoningLine label="Evidence chain" value={finding.evidenceChainSummary ?? finding.what_proves_it} />
+            <ReasoningLine label="Risk if omitted" value={finding.riskIfOmitted ?? ""} />
             <ReasoningLine label="Next action" value={finding.next_action} />
             <div className="mt-2 text-[11px] leading-5 text-muted-foreground">
-              Confidence {Math.round(finding.confidence * 100)}% · Specificity {formatLabel(finding.claimSpecificity)}
+              Support {formatLabel(finding.supportConfidenceIndicator ?? finding.evidenceLevel)} · Confidence {Math.round(finding.confidence * 100)}% · Specificity {formatLabel(finding.claimSpecificity)}
             </div>
           </div>
         ))}
@@ -3840,6 +3873,45 @@ function ReasoningLine({ label, value }: { label: string; value: string }) {
     <div className="mt-2 text-[13px] leading-5 text-muted-foreground">
       <span className="font-semibold text-foreground">{label}:</span> {value}
     </div>
+  );
+}
+
+function OemContradictionCard({
+  contradictions,
+}: {
+  contradictions: ReturnType<typeof buildExportModel>["oemContradictions"];
+}) {
+  if (!contradictions.length) return null;
+
+  return (
+    <section className="space-y-3 rounded-[24px] border border-border bg-card p-4">
+      <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+        OEM Contradictions
+      </div>
+      <div className="space-y-3">
+        {contradictions.slice(0, 4).map((contradiction, index) => (
+          <div key={`${contradiction.affectedOperation}-${index}`} className="rounded-2xl bg-muted px-3.5 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-sm font-semibold leading-5 text-foreground">
+                {contradiction.affectedOperation}
+              </div>
+              <div className="rounded-full border border-border bg-card px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                {formatLabel(contradiction.contradictionSeverity)}
+              </div>
+            </div>
+            <ReasoningLine label="Conflict" value={contradiction.conflictSummary} />
+            <ReasoningLine
+              label="OEM support"
+              value={contradiction.oemSupportCitation ?? "Inferred only; verify OEM support before asserting."}
+            />
+            <ReasoningLine label="Follow-up" value={contradiction.recommendedFollowUp} />
+            <div className="mt-2 text-[11px] leading-5 text-muted-foreground">
+              Support {formatLabel(contradiction.supportStatus)} · Source {formatLabel(contradiction.sourceType)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 

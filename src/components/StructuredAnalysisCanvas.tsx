@@ -131,12 +131,15 @@ export default function StructuredAnalysisCanvas({
 
   const missingBullets = dedupe([
     ...renderModel.findingReasoning.map((finding) =>
-      `${finding.issue}: why - ${finding.why_it_matters}; proof - ${finding.what_proves_it}; next - ${finding.next_action}; evidence - ${formatLabel(finding.evidenceLevel)}`
+      `${finding.issue}: ${finding.rationaleSummary ?? finding.why_it_matters}; evidence chain - ${finding.evidenceChainSummary ?? finding.what_proves_it}; risk if omitted - ${finding.riskIfOmitted ?? "not specified"}; support - ${formatLabel(finding.supportConfidenceIndicator ?? finding.evidenceLevel)}; next - ${finding.next_action}`
     ),
     ...renderModel.disputeIntelligenceReport.topDrivers.map(
       (driver) => `${driver.title}: ${driver.whyItMatters}`
     ),
     ...renderModel.disputeIntelligenceReport.supportGaps,
+    ...renderModel.oemContradictions.map((contradiction) =>
+      `${contradiction.affectedOperation}: ${contradiction.conflictSummary}; OEM support - ${contradiction.oemSupportCitation ?? "inferred only, verify before asserting"}; severity - ${formatLabel(contradiction.contradictionSeverity)}; follow-up - ${contradiction.recommendedFollowUp}`
+    ),
     ...renderModel.supplementItems.slice(0, 5).map((item) => `${item.title}: ${item.rationale}`),
   ]).slice(0, 6);
 
@@ -239,19 +242,19 @@ export default function StructuredAnalysisCanvas({
     : null;
 
   return (
-    <div className="mt-3 space-y-3">
+    <div className="mt-2 space-y-2">
       <DeterminationCard determination={renderModel.determination} />
 
-      <section className="rounded-[24px] border border-border bg-gradient-to-br from-[#C65A2A]/10 via-card to-muted p-4 shadow-[0_18px_44px_rgba(15,23,42,0.10)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.2)]">
+      <section className="border border-border bg-card p-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
+            <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-[#a35d26] dark:text-[#c57934]">
               Active Case
             </div>
-            <div className="mt-1 text-[1.08rem] font-semibold tracking-[-0.02em] text-card-foreground">
+            <div className="mt-1 text-[1rem] font-semibold text-card-foreground">
               {caseLabel}
             </div>
-            <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
+            <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
               Latest file: {latestFile}
             </div>
           </div>
@@ -273,7 +276,7 @@ export default function StructuredAnalysisCanvas({
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
           <div className="text-[12px] leading-5 text-muted-foreground">
             Continue the current review or intentionally clear this case before starting a new one.
           </div>
@@ -282,7 +285,7 @@ export default function StructuredAnalysisCanvas({
             <button
               type="button"
               onClick={onContinueChat}
-              className="rounded-xl border border-border bg-muted px-3.5 py-2 text-xs font-medium text-foreground transition hover:bg-muted/70"
+              className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-background"
             >
               Continue with this case
             </button>
@@ -292,14 +295,14 @@ export default function StructuredAnalysisCanvas({
                 <button
                   type="button"
                   onClick={onConfirmEndAnalysis}
-                  className="rounded-xl border border-orange-400/20 bg-[#C65A2A]/14 px-3.5 py-2 text-xs font-medium text-orange-100 transition hover:bg-[#C65A2A]/22"
+                  className="rounded-md border border-[#b86a2d]/30 bg-[#b86a2d]/12 px-3 py-1.5 text-xs font-medium text-[#b86a2d] transition hover:bg-[#b86a2d]/18 dark:text-[#c57934]"
                 >
                   Confirm End Analysis
                 </button>
                 <button
                   type="button"
                   onClick={onCancelEndAnalysis}
-                  className="rounded-xl border border-border bg-muted px-3.5 py-2 text-xs text-muted-foreground transition hover:bg-muted/70 hover:text-foreground"
+                  className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs text-muted-foreground transition hover:bg-background hover:text-foreground"
                 >
                   Cancel
                 </button>
@@ -308,7 +311,7 @@ export default function StructuredAnalysisCanvas({
               <button
                 type="button"
                 onClick={onRequestEndAnalysis}
-                className="rounded-xl border border-red-500/18 bg-red-500/8 px-3.5 py-2 text-xs font-medium text-red-200/82 transition hover:bg-red-500/14 hover:text-red-100"
+                className="rounded-md border border-red-500/25 bg-red-500/8 px-3 py-1.5 text-xs font-medium text-red-700 transition hover:bg-red-500/14 dark:text-red-300"
               >
                 End Analysis
               </button>
@@ -317,13 +320,13 @@ export default function StructuredAnalysisCanvas({
         </div>
 
         {endAnalysisConfirming ? (
-          <div className="mt-3 rounded-2xl border border-red-500/20 bg-red-500/10 px-3.5 py-3 text-[12px] leading-5 text-muted-foreground">
+          <div className="mt-3 border border-red-500/20 bg-red-500/10 px-3 py-2 text-[12px] leading-5 text-muted-foreground">
             This clears the current transcript, uploaded files, structured analysis, and rail state for this browser session.
           </div>
         ) : null}
       </section>
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         {visibleSections.map((section) => (
           <div
             key={section.title}
@@ -348,7 +351,7 @@ export default function StructuredAnalysisCanvas({
             >
               <div className="space-y-3">
                 {section.prose ? (
-                  <div className="rounded-2xl bg-muted px-3.5 py-3 text-[13px] leading-6 text-muted-foreground">
+                  <div className="border border-border bg-muted px-3 py-2.5 text-[13px] leading-5 text-muted-foreground">
                     {section.prose}
                   </div>
                 ) : null}
@@ -389,12 +392,12 @@ export default function StructuredAnalysisCanvas({
             summary={
               canUseFullReportExports
                 ? "Carrier-ready reports remain available in the right rail when you're ready to export."
-                : "Your 1-Page Snapshot is available in the right rail. Full reports are available on Pro."
+                : "Your 1-Page Snapshot is available in the right rail. Repair Intelligence, Estimate Scrubber, and Policy & Rights Review reports are available on Pro."
             }
             preview={
               canUseFullReportExports
-                ? "Collision Repair Intelligence Report, Dispute Intelligence Report, and rebuttal output remain available in the rail."
-                : "Use the 1-Page Snapshot for the shareable export. Dispute Intelligence and rebuttal outputs are Pro-only upgrades."
+                ? "Repair Intelligence Report, Estimate Scrubber Report, and Policy & Rights Review remain available in the rail."
+                : "Use the 1-Page Snapshot for the shareable export. Repair Intelligence, Estimate Scrubber, and Policy & Rights Review are Pro-only upgrades."
             }
             expanded={activeInsightKey === "exports"}
             collapsible={false}
@@ -404,10 +407,10 @@ export default function StructuredAnalysisCanvas({
             onInteract={() => onActiveInsightChange("exports")}
             onClearFocus={() => onActiveInsightChange(null)}
           >
-            <div className="rounded-2xl border border-border bg-muted px-3.5 py-3 text-[13px] leading-5 text-muted-foreground">
+            <div className="border border-border bg-muted px-3 py-2.5 text-[13px] leading-5 text-muted-foreground">
               {canUseFullReportExports
-                ? "Use the rail to generate the Collision Repair Intelligence Report, Dispute Intelligence Report, or rebuttal output."
-                : "Use the rail to download the 1-Page Snapshot. Full reports, Dispute Intelligence, rebuttal PDF, and Customer Report are available on Pro."}
+                ? "Use the rail to generate the Repair Intelligence Report, Estimate Scrubber Report, or Policy & Rights Review."
+                : "Use the rail to download the 1-Page Snapshot. Repair Intelligence, Estimate Scrubber, Policy & Rights Review, and Customer Report are available on Pro."}
             </div>
           </AnalysisSectionCard>
         </div>
@@ -449,8 +452,8 @@ function LinkedInsightBullet({
 
   if (!evidenceLink) {
     return (
-      <div className="flex gap-2 rounded-2xl border border-border bg-muted px-3.5 py-3 text-[13px] leading-5 text-muted-foreground">
-        <span className="pt-[1px] text-orange-200/85">&bull;</span>
+      <div className="flex gap-2 border border-border bg-muted px-3 py-2.5 text-[13px] leading-5 text-muted-foreground">
+        <span className="pt-[1px] text-[#b86a2d]">&bull;</span>
         <span>{bullet}</span>
       </div>
     );
@@ -460,17 +463,17 @@ function LinkedInsightBullet({
     <button
       type="button"
       onClick={() => onEvidenceSelect?.(evidenceLink)}
-      className={`w-full rounded-2xl border px-3.5 py-3 text-left transition-[border-color,background-color,box-shadow] duration-300 ${
+      className={`w-full rounded-md border px-3 py-2.5 text-left transition-[border-color,background-color] duration-200 ${
         active
-          ? "border-orange-300/28 bg-[#C65A2A]/12 shadow-[0_0_0_1px_rgba(210,122,81,0.12)]"
+          ? "border-[#b86a2d]/40 bg-[#C65A2A]/10"
           : "border-border bg-muted hover:border-ring/30 hover:bg-muted/70"
       }`}
     >
       <div className="flex gap-2 text-[13px] leading-5 text-foreground">
-        <span className="pt-[1px] text-orange-200/85">&bull;</span>
+        <span className="pt-[1px] text-[#b86a2d]">&bull;</span>
         <span>{bullet}</span>
       </div>
-      <div className="mt-2 inline-flex rounded-full border border-border bg-card px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+      <div className="mt-2 inline-flex rounded-sm border border-border bg-card px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
         View support
       </div>
     </button>
@@ -483,12 +486,12 @@ function EvidenceSupportBlock({
   target: NonNullable<ReturnType<typeof getEvidenceTargetById>>;
 }) {
   return (
-    <div className="rounded-2xl border border-orange-300/20 bg-gradient-to-br from-[#C65A2A]/12 via-card to-muted px-3.5 py-3 shadow-[0_0_0_1px_rgba(210,122,81,0.1)]">
+    <div className="rounded-md border border-[#b86a2d]/28 bg-[#C65A2A]/10 px-3 py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/68">
+        <div className="text-[10px] uppercase tracking-[0.08em] text-[#b86a2d]">
           Supporting Evidence
         </div>
-        <div className="rounded-full border border-border bg-muted px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+        <div className="rounded-sm border border-border bg-muted px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
           {target.type.replace(/_/g, " ")}
         </div>
       </div>
@@ -506,8 +509,8 @@ function EvidenceSupportBlock({
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-[84px] rounded-2xl border border-border bg-muted px-3 py-2.5">
-      <div className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">{label}</div>
+    <div className="min-w-[84px] rounded-md border border-border bg-muted px-3 py-2">
+      <div className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">{label}</div>
       <div className="mt-1 text-sm font-semibold text-foreground">{value}</div>
     </div>
   );

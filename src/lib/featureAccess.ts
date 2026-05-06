@@ -4,7 +4,9 @@ export type ProductFeature =
   | "snapshot_export"
   | "full_report_export"
   | "dispute_report_export"
-  | "rebuttal_export"
+  | "estimate_scrubber_export"
+  | "policy_rights_review_export"
+  | "doi_complaint_packet_export"
   | "customer_report_export"
   | "chat_report_recommendations"
   | "crm_sync";
@@ -41,8 +43,8 @@ export function canAccessFeature(
 
 export function buildPlanRecommendationGuard(hasProChatRecommendations: boolean) {
   return hasProChatRecommendations
-    ? "Full report, Dispute Intelligence, and Rebuttal recommendations may be suggested when relevant."
-    : "Snapshot export is available. Do not recommend full reports, Dispute Intelligence, Rebuttal PDF, or Customer Report as next steps unless you explicitly frame them as Pro-only upgrades.";
+    ? "Repair Intelligence Report, Estimate Scrubber Report, Policy & Rights Review, DOI Complaint Packet, and rebuttal recommendations may be suggested when relevant."
+    : "Snapshot export is available. Do not recommend Repair Intelligence, Estimate Scrubber, Policy & Rights Review, DOI Complaint Packet, or Customer Report exports as next steps unless you explicitly frame them as Pro-only upgrades.";
 }
 
 export function buildProductAccessGuard(access?: {
@@ -62,7 +64,7 @@ export function buildProductAccessGuard(access?: {
   }
 
   if (canUseSnapshot) {
-    return "Product access: Snapshot export is available. Do not recommend full reports, Dispute Intelligence, Rebuttal PDF, or Customer Report as next steps unless you explicitly frame them as Pro-only upgrades.";
+    return "Product access: Snapshot export is available. Do not recommend Repair Intelligence, Estimate Scrubber, Policy & Rights Review, DOI Complaint Packet, or Customer Report exports as next steps unless you explicitly frame them as Pro-only upgrades.";
   }
 
   return "Product access: Do not recommend locked exports as available actions. Mention upgrade context if the user asks about reports.";

@@ -5,12 +5,12 @@ import { emitSafeCrmEvent } from "@/lib/crm/serverEvents";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type ReportType =
+export type ReportKind =
   | "snapshot"
-  | "full_report"
-  | "rebuttal"
-  | "dispute_intelligence"
-  | "customer_report";
+  | "customer_report"
+  | "repair_intelligence"
+  | "estimate_scrubber"
+  | "policy_rights_review";
 
 type DestinationType = "customer" | "carrier" | "internal";
 
@@ -31,12 +31,12 @@ type SendReportRequest = {
   };
 };
 
-const REPORT_TYPES: ReportType[] = [
+const REPORT_TYPES: ReportKind[] = [
   "snapshot",
-  "full_report",
-  "rebuttal",
-  "dispute_intelligence",
   "customer_report",
+  "repair_intelligence",
+  "estimate_scrubber",
+  "policy_rights_review",
 ];
 const DESTINATION_TYPES: DestinationType[] = ["customer", "carrier", "internal"];
 
@@ -215,24 +215,24 @@ function sanitizeMessage(value: string): string {
   return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim().slice(0, 5000);
 }
 
-function safeReportLabel(reportType: ReportType): string {
+function safeReportLabel(reportType: ReportKind): string {
   switch (reportType) {
     case "snapshot":
       return "1-Page Snapshot";
-    case "full_report":
-      return "Collision Repair Intelligence Report";
-    case "rebuttal":
-      return "Carrier Rebuttal Package";
-    case "dispute_intelligence":
-      return "Dispute Intelligence Report";
+    case "repair_intelligence":
+      return "Repair Intelligence Report";
+    case "estimate_scrubber":
+      return "Estimate Scrubber Report";
+    case "policy_rights_review":
+      return "Policy & Rights Review";
     case "customer_report":
       return "Customer Repair Summary";
   }
 }
 
-function coerceReportType(value: unknown): ReportType | null {
-  return typeof value === "string" && REPORT_TYPES.includes(value as ReportType)
-    ? (value as ReportType)
+function coerceReportType(value: unknown): ReportKind | null {
+  return typeof value === "string" && REPORT_TYPES.includes(value as ReportKind)
+    ? (value as ReportKind)
     : null;
 }
 
@@ -261,7 +261,7 @@ function isLikelyPdfBase64(value: string): boolean {
 
 async function persistReportSend(params: {
   caseId: string | null;
-  reportType: ReportType;
+  reportType: ReportKind;
   destinationType: DestinationType;
   recipientEmail: string;
   subject: string;

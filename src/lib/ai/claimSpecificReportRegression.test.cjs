@@ -213,6 +213,62 @@ run("retrieved OEM source surfaces as OEM evidence in report output", () => {
   assert.equal(renderModel.retrievalSummary?.sourcesInfluencingFindings[0]?.sourceType, "oem");
 });
 
+run("OEM contradiction detection separates cited support from inferred conflicts", () => {
+  const citedReport = baseReport({
+    issues: [
+      {
+        id: "calibration-gap",
+        category: "documentation",
+        title: "ADAS calibration omitted by carrier",
+        finding: "Carrier estimate does not include ADAS calibration after front sensor work.",
+        impact: "Calibration documentation is needed to reconcile the repair path.",
+        missingOperation: "ADAS calibration",
+        severity: "high",
+        evidenceIds: [],
+      },
+    ],
+    requiredProcedures: [
+      {
+        procedure: "ADAS calibration",
+        reason: "OEM procedure support requires calibration after front radar removal.",
+        source: "oem_doc",
+        severity: "high",
+      },
+    ],
+    supplementOpportunities: ["ADAS calibration omitted by carrier"],
+  });
+  const citedModel = buildExportModel({ report: citedReport, analysis: null, panel: null, assistantAnalysis: "" });
+  const cited = citedModel.oemContradictions[0];
+
+  assert.equal(cited.supportStatus, "verified");
+  assert.match(cited.oemSupportCitation, /Required procedure: ADAS calibration/i);
+  assert.match(cited.conflictSummary, /OEM support metadata is available/i);
+
+  const inferredReport = baseReport({
+    issues: [
+      {
+        id: "structural-gap",
+        category: "documentation",
+        title: "Structural verification denied",
+        finding: "Carrier position denies structural measurement verification.",
+        impact: "Structural verification may be needed before final repair-path closure.",
+        missingOperation: "Structural measurement verification",
+        severity: "high",
+        evidenceIds: [],
+      },
+    ],
+    requiredProcedures: [],
+    supplementOpportunities: ["Structural verification denied"],
+  });
+  const inferredModel = buildExportModel({ report: inferredReport, analysis: null, panel: null, assistantAnalysis: "" });
+  const inferred = inferredModel.oemContradictions[0];
+
+  assert.equal(inferred.supportStatus, "inferred");
+  assert.equal(inferred.oemSupportCitation, null);
+  assert.match(inferred.conflictSummary, /inferred and requires OEM source verification/i);
+  assert.match(inferred.recommendedFollowUp, /verify the applicable OEM procedure/i);
+});
+
 run("Serper failed is exposed without implying web support", () => {
   const report = baseReport({
     retrievalSummary: {
@@ -567,13 +623,13 @@ run("product gating keeps snapshot on Starter and locks report exports", () => {
   assert.equal(canAccessFeature("starter", "snapshot_export"), true);
   assert.equal(canAccessFeature("starter", "full_report_export"), false);
   assert.equal(canAccessFeature("starter", "dispute_report_export"), false);
-  assert.equal(canAccessFeature("starter", "rebuttal_export"), false);
+  assert.equal(canAccessFeature("starter", "policy_rights_review_export"), false);
   assert.equal(canAccessFeature("starter", "customer_report_export"), false);
   assert.equal(canAccessFeature("starter", "chat_report_recommendations"), false);
   assert.equal(canAccessFeature("pro", "snapshot_export"), true);
   assert.equal(canAccessFeature("pro", "full_report_export"), true);
   assert.equal(canAccessFeature("pro", "dispute_report_export"), true);
-  assert.equal(canAccessFeature("pro", "rebuttal_export"), true);
+  assert.equal(canAccessFeature("pro", "policy_rights_review_export"), true);
   assert.equal(canAccessFeature("pro", "customer_report_export"), true);
 });
 
@@ -594,11 +650,11 @@ run("Starter can preview, download, and send Snapshot only", () => {
   );
 });
 
-run("Starter cannot access full, dispute, rebuttal, customer, or chat PDFs", () => {
+run("Starter cannot access full, dispute, customer, or chat PDFs", () => {
   const lockedFeatures = [
     "full_report_export",
     "dispute_report_export",
-    "rebuttal_export",
+    "policy_rights_review_export",
     "customer_report_export",
     "chat_report_recommendations",
   ];
@@ -628,7 +684,7 @@ run("Pro can access every export feature", () => {
     "snapshot_export",
     "full_report_export",
     "dispute_report_export",
-    "rebuttal_export",
+    "policy_rights_review_export",
     "customer_report_export",
     "chat_report_recommendations",
     "crm_sync",

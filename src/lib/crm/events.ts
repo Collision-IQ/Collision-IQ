@@ -22,7 +22,13 @@ export type SafeCrmEventPayload = {
   topDisputeCount?: number;
   uploadLimitReached?: boolean;
   userIndicatedMoreFiles?: boolean;
-  exportType?: "snapshot" | "full_report" | "dispute_report" | "dispute_intelligence" | "rebuttal" | "customer_report";
+  exportType?:
+    | "snapshot"
+    | "customer_report"
+    | "repair_intelligence"
+    | "estimate_scrubber"
+    | "policy_rights_review"
+    | "doi_complaint_packet";
   caseId?: string | null;
   reportType?: string | null;
   recipient?: string | null;
