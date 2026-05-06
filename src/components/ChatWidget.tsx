@@ -32,7 +32,6 @@ import {
   formatBytes,
   formatAttachmentKind,
   isLikelyImageFile,
-  MAX_UPLOAD_BATCH_FILES,
   MAX_UPLOAD_FILE_BYTES,
   summarizeAttachmentStats,
 } from "@/components/chatWidget/attachmentUtils";
@@ -60,6 +59,10 @@ import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { buildPlanRecommendationGuard, canAccessFeature } from "@/lib/featureAccess";
 import { emitSafeCrmEventFromClient } from "@/lib/crm/events";
 import { buildNextBatchPrompt, buildUploadBatchGuidance } from "@/lib/uploadBatching";
+import {
+  getUploadBatchLimitMessage,
+  resolveUploadPlanLimits,
+} from "@/lib/uploadSafety/uploadLimits";
 import { TTS_STYLE_PROMPT, VOICE_PRESETS } from "@/lib/voicePresets";
 
 interface Attachment {
@@ -191,6 +194,16 @@ const BROWSER_TTS_ENABLED =
   process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_BROWSER_TTS === "true";
 const SERVER_TTS_VOICE = process.env.NEXT_PUBLIC_COLLISION_IQ_TTS_VOICE?.trim() || undefined;
 const LARGE_UPLOAD_WARNING_BYTES = 10 * 1024 * 1024;
+
+const DEFAULT_UPLOAD_LIMIT_ENTITLEMENTS: Pick<
+  AccountEntitlements,
+  "plan" | "billingPlan" | "isPlatformAdmin" | "entitlementSource"
+> = {
+  plan: "pro",
+  billingPlan: "pro",
+  isPlatformAdmin: false,
+  entitlementSource: "paid_subscription",
+};
 
 function formatCaseUpdateStatus(
   delta: RepairIntelligenceReport["reassessmentDelta"] | undefined,
@@ -462,10 +475,15 @@ export default function ChatWidget({
       : null;
   const selectedVoiceDescription =
     "description" in selectedVoicePreset ? selectedVoicePreset.description : "Select voice";
+  const uploadPlanLimits = useMemo(
+    () => resolveUploadPlanLimits(viewerAccess ?? DEFAULT_UPLOAD_LIMIT_ENTITLEMENTS),
+    [viewerAccess]
+  );
+  const maxUploadBatchFiles = uploadPlanLimits.maxFilesPerReview;
   const uploadBatchGuidance = buildUploadBatchGuidance(
     totalFilesReviewed,
     attachments.length,
-    MAX_UPLOAD_BATCH_FILES
+    maxUploadBatchFiles
   );
 
   useEffect(() => {
@@ -950,13 +968,13 @@ export default function ChatWidget({
     const rejectedFiles: UploadFailureResult[] = [];
 
     const filesWithinCount = selectedFiles.filter((file, index) => {
-      if (index < MAX_UPLOAD_BATCH_FILES) {
+      if (index < maxUploadBatchFiles) {
         return true;
       }
 
       rejectedFiles.push({
         filename: file.name,
-        reason: `Only ${MAX_UPLOAD_BATCH_FILES} files can be uploaded at a time.`,
+        reason: getUploadBatchLimitMessage(uploadPlanLimits),
         code: "MAX_FILES_REACHED",
       });
       return false;
@@ -1294,7 +1312,7 @@ export default function ChatWidget({
           `${formatCaseUpdateStatus(
             analysisData.reassessmentDelta,
             analysisData.artifactRefreshPolicy
-          )} ${buildNextBatchPrompt(reviewedCount, MAX_UPLOAD_BATCH_FILES)}`
+          )} ${buildNextBatchPrompt(reviewedCount, maxUploadBatchFiles)}`
         );
         setAttachments((prev) =>
           prev.map((attachment) => ({
@@ -1523,7 +1541,7 @@ export default function ChatWidget({
                     analysisData.reassessmentDelta,
                     analysisData.artifactRefreshPolicy
                   )
-                : "Analysis complete."} ${buildNextBatchPrompt(reviewedCount, MAX_UPLOAD_BATCH_FILES)}`
+                : "Analysis complete."} ${buildNextBatchPrompt(reviewedCount, maxUploadBatchFiles)}`
             );
             setAttachments((prev) =>
               prev.map((attachment) => ({

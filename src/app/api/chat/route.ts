@@ -9,13 +9,21 @@ import {
   UnauthorizedError,
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
+import { isPlatformAdminEmail, normalizeEmail } from "@/lib/auth/platform-admin";
+import {
+  getCurrentProductEntitlements,
+  getCurrentSubscriptionTierForUser,
+  resolveProductTrialActive,
+} from "@/lib/billing/productEntitlements";
 import { getCaseById } from "@/lib/cases/getCaseById";
 import type { StoredCaseData } from "@/lib/cases/getCaseById";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { buildProductAccessGuard } from "@/lib/featureAccess";
+import {
+  getUploadBatchLimitMessage,
+  resolveUploadPlanLimits,
+} from "@/lib/uploadSafety/uploadLimits";
 
-const MAX_UPLOAD_BATCH_FILES = 6;
-const UPLOAD_CAP_MESSAGE = "You can upload up to 6 files at a time.";
 const TRANSIENT_CHAT_ERROR_MESSAGE =
   "The analysis service had a temporary issue. Please retry.";
 const OPENAI_RETRY_DELAY_MS = 400;
@@ -746,7 +754,7 @@ export async function POST(req: Request) {
       retrieveEstimateLinkedProcedureDocs,
       cleanDisplayText,
     } = deps;
-    const { user, isPlatformAdmin } = await requireCurrentUser();
+    const { user, verifiedEmails, isPlatformAdmin } = await requireCurrentUser();
     const requestStartedAt = Date.now();
     const body = (await req.json()) as ChatRequestBody;
     const explicitJurisdiction = resolveJurisdictionFromBody(body);
@@ -756,12 +764,37 @@ export async function POST(req: Request) {
         ? body.attachments.length
         : 0;
 
-    if (incomingAttachmentCount > MAX_UPLOAD_BATCH_FILES) {
+    const normalizedEmail = normalizeEmail(user.email);
+    const isEnvAdmin = isPlatformAdminEmail(normalizedEmail);
+    const effectiveIsAdmin = isPlatformAdmin || isEnvAdmin;
+    const subscriptionTier = await getCurrentSubscriptionTierForUser(user.id);
+    const trialActive = resolveProductTrialActive({
+      activeSubscriptionId: subscriptionTier ? "active-subscription" : null,
+      activeSubscriptionStatus:
+        subscriptionTier === "trial" ? "TRIALING" : subscriptionTier ? "ACTIVE" : null,
+      createdAt: user.createdAt,
+      plan: subscriptionTier ?? "pro",
+    });
+    const entitlements = await getCurrentProductEntitlements({
+      userEmail: normalizedEmail,
+      userEmails: verifiedEmails,
+      trialActive,
+      subscriptionTier,
+      isPlatformAdmin: effectiveIsAdmin,
+    });
+    const uploadLimits = resolveUploadPlanLimits(entitlements);
+
+    if (incomingAttachmentCount > uploadLimits.maxFilesPerReview) {
       console.info("[chat-attachments] rejected oversized batch", {
         fileCount: incomingAttachmentCount,
+        maxFileCount: uploadLimits.maxFilesPerReview,
+        plan: uploadLimits.plan,
         ownerUserId: user.id,
       });
-      return NextResponse.json({ error: UPLOAD_CAP_MESSAGE }, { status: 400 });
+      return NextResponse.json(
+        { error: getUploadBatchLimitMessage(uploadLimits) },
+        { status: 400 }
+      );
     }
 
     const documents = await extractDocuments({

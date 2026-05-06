@@ -17,6 +17,12 @@ export async function extractPreviewDataFromBuffer(params: {
     return { text: params.buffer.toString("utf8") };
   }
 
+  if (mimeType.startsWith("image/")) {
+    return {
+      text: `[[Image attached for visual analysis: ${params.filename || "uploaded image"}. OCR text was not extracted, but the image remains available for screenshot/photo review.]]`,
+    };
+  }
+
   if (mimeType === "application/pdf") {
     const result = await pdfParse(params.buffer);
     return {

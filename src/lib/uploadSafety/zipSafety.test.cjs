@@ -33,7 +33,9 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 
 const {
   MB,
+  getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
+  validateUploadBatchFileCount,
 } = require("./uploadLimits.ts");
 const {
   prepareZipUpload,
@@ -173,6 +175,48 @@ run("Starter still limited to 1 screenshot/photo", () => {
   const limits = resolveUploadPlanLimits(starterEntitlements());
   assert.equal(limits.maxFilesPerReview, 1);
   assert.equal(limits.maxUploadBytes, 10 * MB);
+});
+
+run("Starter rejects second file", () => {
+  const limits = resolveUploadPlanLimits(starterEntitlements());
+  const result = validateUploadBatchFileCount(2, limits);
+
+  assert.equal(limits.maxFilesPerReview, 1);
+  assert.equal(result.valid, false);
+  assert.equal(result.code, "MAX_FILES_REACHED");
+  assert.equal(result.reason, "You can upload 1 file per review.");
+});
+
+run("Pro allows 6 and rejects 7 in same batch", () => {
+  const limits = resolveUploadPlanLimits(proEntitlements());
+
+  assert.equal(limits.maxFilesPerReview, 6);
+  assert.equal(validateUploadBatchFileCount(6, limits).valid, true);
+  assert.equal(validateUploadBatchFileCount(7, limits).valid, false);
+  assert.equal(getUploadBatchLimitMessage(limits), "You can upload up to 6 files at a time.");
+});
+
+run("Trial allows 6 and rejects 7 in same batch", () => {
+  const limits = resolveUploadPlanLimits({
+    plan: "trial",
+    billingPlan: "trial",
+    isPlatformAdmin: false,
+    entitlementSource: "trial",
+  });
+
+  assert.equal(limits.maxFilesPerReview, 6);
+  assert.equal(validateUploadBatchFileCount(6, limits).valid, true);
+  assert.equal(validateUploadBatchFileCount(7, limits).valid, false);
+});
+
+run("Admin/free-access allows more than 6 and caps at 50", () => {
+  const limits = resolveUploadPlanLimits(adminEntitlements());
+
+  assert.equal(limits.maxFilesPerReview, 50);
+  assert.equal(validateUploadBatchFileCount(7, limits).valid, true);
+  assert.equal(validateUploadBatchFileCount(50, limits).valid, true);
+  assert.equal(validateUploadBatchFileCount(51, limits).valid, false);
+  assert.equal(getUploadBatchLimitMessage(limits), "You can upload up to 50 files at a time.");
 });
 
 run("Pro/Admin can upload screenshots within plan size limits", () => {

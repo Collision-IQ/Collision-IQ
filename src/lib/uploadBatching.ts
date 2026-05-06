@@ -16,8 +16,14 @@ export function buildUploadBatchGuidance(
   currentBatchCount: number,
   maxBatchFiles = 6
 ) {
+  const uploadLimitText =
+    maxBatchFiles === 1
+      ? "You can upload 1 file per review."
+      : `You can upload up to ${maxBatchFiles} files at a time.`;
+
   return [
-    `You can upload up to ${maxBatchFiles} files at a time.`,
+    "You can upload PDFs, photos, screenshots, or ZIP files.",
+    uploadLimitText,
     `Files reviewed so far: ${totalFilesReviewed}.`,
     currentBatchCount >= maxBatchFiles - 1
       ? `Upload the next ${maxBatchFiles} most important files.`

@@ -10,6 +10,10 @@ import {
   MAX_UPLOAD_BATCH_FILES,
   MAX_UPLOAD_FILE_BYTES,
 } from "@/components/chatWidget/attachmentUtils";
+import {
+  getUploadBatchLimitMessage,
+  resolveUploadPlanLimits,
+} from "@/lib/uploadSafety/uploadLimits";
 
 type Props = {
   onUploadComplete: (docs: UploadedDocument[]) => void;
@@ -58,14 +62,19 @@ export default function FileUpload({
   const [error, setError] = useState<string | null>(null);
   const [uploaded, setUploaded] = useState<string[]>([]);
   const [uploadHint, setUploadHint] = useState("You can upload PDFs, photos, screenshots, or ZIP files.");
+  const [maxUploadBatchFiles, setMaxUploadBatchFiles] = useState(MAX_UPLOAD_BATCH_FILES);
+  const [uploadLimitsLoaded, setUploadLimitsLoaded] = useState(false);
   const [zipSummary, setZipSummary] = useState<string | null>(null);
   const [largeUploadWarning, setLargeUploadWarning] = useState<string | null>(null);
   const [uploadStage, setUploadStage] = useState<UploadStage>("idle");
   const [dragActive, setDragActive] = useState(false);
-  const uploadDisabled = !isLoaded || !isSignedIn;
+  const uploadDisabled = !isLoaded || !isSignedIn || (isSignedIn && !uploadLimitsLoaded);
 
   useEffect(() => {
-    if (!isSignedIn) return;
+    if (!isSignedIn) {
+      setUploadLimitsLoaded(false);
+      return;
+    }
 
     let cancelled = false;
     async function loadEntitlements() {
@@ -73,20 +82,31 @@ export default function FileUpload({
         const response = await fetch("/api/account/entitlements", {
           credentials: "same-origin",
         });
-        if (!response.ok) return;
+        if (!response.ok) {
+          if (cancelled) return;
+          setUploadLimitsLoaded(true);
+          return;
+        }
 
         const entitlements = (await response.json()) as AccountEntitlements;
         if (cancelled) return;
 
-        if (entitlements.plan === "admin") {
-          setUploadHint("You can upload PDFs, photos, screenshots, or ZIP files. Admin target: 50 MB; temporary platform upload limit: 20 MB.");
-        } else if (entitlements.plan === "pro" || entitlements.plan === "trial") {
-          setUploadHint("You can upload PDFs, photos, screenshots, or ZIP files. Pro trial/Pro target: 30 MB; temporary platform upload limit: 20 MB.");
+        const uploadLimits = resolveUploadPlanLimits(entitlements);
+        setMaxUploadBatchFiles(uploadLimits.maxFilesPerReview);
+
+        if (uploadLimits.plan === "admin") {
+          setUploadHint(`You can upload PDFs, photos, screenshots, or ZIP files. ${getUploadBatchLimitMessage(uploadLimits)} Admin target: 50 MB; temporary platform upload limit: 20 MB.`);
+        } else if (uploadLimits.plan === "pro" || uploadLimits.plan === "trial") {
+          setUploadHint(`You can upload PDFs, photos, screenshots, or ZIP files. ${getUploadBatchLimitMessage(uploadLimits)} Pro trial/Pro target: 30 MB; temporary platform upload limit: 20 MB.`);
         } else {
-          setUploadHint("You can upload PDFs, photos, or screenshots. Starter: 10 MB, 1 file.");
+          setUploadHint(`You can upload PDFs, photos, screenshots, or ZIP files. ${getUploadBatchLimitMessage(uploadLimits)} Starter: 10 MB; ZIP files are not included.`);
         }
+        setUploadLimitsLoaded(true);
       } catch {
         // Server-side upload limits remain authoritative.
+        if (!cancelled) {
+          setUploadLimitsLoaded(true);
+        }
       }
     }
 
@@ -100,8 +120,12 @@ export default function FileUpload({
     if (!files || files.length === 0) return;
 
     if (uploadDisabled) {
-      router.push("/sign-in?next=/chatbot");
-      setError("Please sign in before uploading.");
+      if (!isSignedIn) {
+        router.push("/sign-in?next=/chatbot");
+        setError("Please sign in before uploading.");
+      } else {
+        setError("Upload limits are still loading. Try again in a moment.");
+      }
       return;
     }
 
@@ -122,14 +146,14 @@ export default function FileUpload({
       }
 
       const acceptedFiles = selectedFiles
-        .slice(0, MAX_UPLOAD_BATCH_FILES)
+        .slice(0, maxUploadBatchFiles)
         .filter((file) => file.size <= MAX_UPLOAD_FILE_BYTES);
       const failures = [
-        ...selectedFiles.slice(MAX_UPLOAD_BATCH_FILES).map(
-          (file) => `${file.name}: only ${MAX_UPLOAD_BATCH_FILES} files can be uploaded at a time.`
+        ...selectedFiles.slice(maxUploadBatchFiles).map(
+          (file) => `${file.name}: ${getUploadBatchLimitMessage({ maxFilesPerReview: maxUploadBatchFiles })}`
         ),
         ...selectedFiles
-          .slice(0, MAX_UPLOAD_BATCH_FILES)
+          .slice(0, maxUploadBatchFiles)
           .filter((file) => file.size > MAX_UPLOAD_FILE_BYTES)
           .map(
             (file) =>
@@ -246,8 +270,12 @@ export default function FileUpload({
     setDragActive(false);
 
     if (uploadDisabled) {
-      router.push("/sign-in?next=/chatbot");
-      setError("Please sign in before uploading.");
+      if (!isSignedIn) {
+        router.push("/sign-in?next=/chatbot");
+        setError("Please sign in before uploading.");
+      } else {
+        setError("Upload limits are still loading. Try again in a moment.");
+      }
       return;
     }
 
@@ -284,8 +312,12 @@ export default function FileUpload({
         } ${dragActive ? "bg-white/10" : "bg-black/40"}`}
         onClick={() => {
           if (uploadDisabled) {
-            router.push("/sign-in?next=/chatbot");
-            setError("Please sign in before uploading.");
+            if (!isSignedIn) {
+              router.push("/sign-in?next=/chatbot");
+              setError("Please sign in before uploading.");
+            } else {
+              setError("Upload limits are still loading. Try again in a moment.");
+            }
             return;
           }
 
@@ -305,7 +337,7 @@ export default function FileUpload({
 
         <div className="text-xs text-white/40">
           {uploadDisabled ? (
-            "Sign in to upload files"
+            isSignedIn ? "Loading upload limits..." : "Sign in to upload files"
           ) : (
             uploadHint
           )}

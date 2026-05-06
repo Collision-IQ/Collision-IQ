@@ -37,7 +37,7 @@ export const SCREENSHOT_IMAGE_EXTENSIONS = new Set([
 export type UploadPlanLimits = {
   plan: "starter" | "trial" | "pro" | "admin";
   maxUploadBytes: number;
-  maxFilesPerReview: number | null;
+  maxFilesPerReview: number;
   zipAllowed: boolean;
   maxExtractedFiles: number;
   maxExtractedTotalBytes: number;
@@ -58,7 +58,7 @@ export function resolveUploadPlanLimits(
     return {
       plan: "admin",
       maxUploadBytes: 50 * MB,
-      maxFilesPerReview: null,
+      maxFilesPerReview: 50,
       zipAllowed: true,
       maxExtractedFiles: 50,
       maxExtractedTotalBytes: 150 * MB,
@@ -75,7 +75,7 @@ export function resolveUploadPlanLimits(
     return {
       plan: entitlements.billingPlan === "trial" || entitlements.plan === "trial" ? "trial" : "pro",
       maxUploadBytes: 30 * MB,
-      maxFilesPerReview: null,
+      maxFilesPerReview: 6,
       zipAllowed: true,
       maxExtractedFiles: 25,
       maxExtractedTotalBytes: 75 * MB,
@@ -96,4 +96,26 @@ export function resolveUploadPlanLimits(
 
 export function formatUploadLimitBytes(bytes: number) {
   return `${Math.round(bytes / MB)}MB`;
+}
+
+export function getUploadBatchLimitMessage(
+  limits: Pick<UploadPlanLimits, "maxFilesPerReview">
+) {
+  if (limits.maxFilesPerReview === 1) {
+    return "You can upload 1 file per review.";
+  }
+
+  return `You can upload up to ${limits.maxFilesPerReview} files at a time.`;
+}
+
+export function validateUploadBatchFileCount(
+  fileCount: number,
+  limits: Pick<UploadPlanLimits, "maxFilesPerReview">
+) {
+  const valid = fileCount <= limits.maxFilesPerReview;
+  return {
+    valid,
+    code: valid ? null : "MAX_FILES_REACHED",
+    reason: valid ? null : getUploadBatchLimitMessage(limits),
+  };
 }

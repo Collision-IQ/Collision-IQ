@@ -65,7 +65,7 @@ import {
   UsageAccessError,
   recordCompletedAnalysisUsage,
 } from "@/lib/billing/usage";
-import { MAX_UPLOAD_BATCH_FILES } from "@/components/chatWidget/attachmentUtils";
+import { resolveUploadPlanLimits } from "@/lib/uploadSafety/uploadLimits";
 
 export const runtime = "nodejs";
 
@@ -137,6 +137,10 @@ export async function POST(req: Request) {
   try {
     const { user, isPlatformAdmin } = await requireCurrentUser();
     const entitlements = await getCurrentEntitlements();
+    const uploadLimits = resolveUploadPlanLimits({
+      ...entitlements,
+      isPlatformAdmin: entitlements.isPlatformAdmin || isPlatformAdmin,
+    });
     const body = (await req.json()) as AnalysisRequestBody;
     const artifactIds = body.artifactIds ?? [];
 
@@ -221,7 +225,7 @@ export async function POST(req: Request) {
       activeCaseId: body.activeCaseId ?? null,
       previousReport: existingCase?.report ?? null,
       userIntent: body.userIntent ?? null,
-      uploadLimitReached: artifactIds.length >= MAX_UPLOAD_BATCH_FILES,
+      uploadLimitReached: artifactIds.length >= uploadLimits.maxFilesPerReview,
       totalUploadedFileCount: mergeArtifactIds(existingCase?.artifactIds ?? [], artifactIds).length,
     });
     let analysis = normalizeReportToAnalysisResult(report);

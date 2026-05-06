@@ -20,6 +20,7 @@ import {
 } from "@/lib/attachments/extractPreviewData";
 import {
   formatUploadLimitBytes,
+  getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
 } from "@/lib/uploadSafety/uploadLimits";
 import {
@@ -31,7 +32,6 @@ import {
 
 export const runtime = "nodejs";
 
-const MAX_UPLOAD_BATCH_FILES = 6;
 const RUNTIME_SAFE_MULTIPART_BODY_BYTES = 20 * 1024 * 1024;
 const RUNTIME_LIMIT_MESSAGE =
   "This file is within your plan limit, but exceeds the current platform upload limit. Direct large-file upload support is coming soon. For now, split ZIPs over 20 MB into smaller uploads.";
@@ -72,6 +72,7 @@ type UploadTelemetry = {
     targetMaxUploadBytes: number;
     runtimeMaxUploadBytes: number;
     maxUploadBytes: number;
+    maxFilesPerReview: number;
     zipAllowed: boolean;
     maxExtractedFiles: number;
     maxExtractedTotalBytes: number;
@@ -182,6 +183,7 @@ function buildUploadTelemetry(params: {
         params.uploadLimits.maxUploadBytes,
         RUNTIME_SAFE_MULTIPART_BODY_BYTES
       ),
+      maxFilesPerReview: params.uploadLimits.maxFilesPerReview,
       zipAllowed: params.uploadLimits.zipAllowed,
       maxExtractedFiles: params.uploadLimits.maxExtractedFiles,
       maxExtractedTotalBytes: params.uploadLimits.maxExtractedTotalBytes,
@@ -289,7 +291,7 @@ export async function POST(req: Request) {
     console.info("[upload] accepted", {
       totalBytes: rawUploadSize,
       fileCount: files.length,
-      maxFileCount: uploadLimits.maxFilesPerReview ?? MAX_UPLOAD_BATCH_FILES,
+      maxFileCount: uploadLimits.maxFilesPerReview,
       maxFileBytes: uploadLimits.maxUploadBytes,
       runtimeMaxFileBytes: runtimeMaxUploadBytes,
       ownerUserId: user.id,
@@ -322,11 +324,11 @@ export async function POST(req: Request) {
     const zipSummaries: ZipExtractionSummary[] = [];
 
     for (const [index, file] of files.entries()) {
-      const maxFilesPerReview = uploadLimits.maxFilesPerReview ?? MAX_UPLOAD_BATCH_FILES;
+      const maxFilesPerReview = uploadLimits.maxFilesPerReview;
       if (index >= maxFilesPerReview) {
         failedUploads.push({
           filename: file.name,
-          reason: `Only ${maxFilesPerReview} file${maxFilesPerReview === 1 ? "" : "s"} can be uploaded per review on your plan.`,
+          reason: getUploadBatchLimitMessage(uploadLimits),
           code: "MAX_FILES_REACHED",
         });
         console.info("[upload] file rejected", {
@@ -531,7 +533,7 @@ export async function POST(req: Request) {
           error: failedUploads[0]?.reason ?? "No files could be uploaded.",
           code: failedUploads[0]?.code ?? "UPLOAD_FAILED",
           limits: {
-            maxFiles: uploadLimits.maxFilesPerReview ?? MAX_UPLOAD_BATCH_FILES,
+            maxFiles: uploadLimits.maxFilesPerReview,
             maxFileBytes: uploadLimits.maxUploadBytes,
             runtimeMaxFileBytes: runtimeMaxUploadBytes,
             temporaryPlatformLimit: true,
@@ -572,7 +574,7 @@ export async function POST(req: Request) {
     const responseBody = {
       ...firstUpload,
       limits: {
-        maxFiles: uploadLimits.maxFilesPerReview ?? MAX_UPLOAD_BATCH_FILES,
+        maxFiles: uploadLimits.maxFilesPerReview,
         maxFileBytes: uploadLimits.maxUploadBytes,
         runtimeMaxFileBytes: runtimeMaxUploadBytes,
         temporaryPlatformLimit: true,
