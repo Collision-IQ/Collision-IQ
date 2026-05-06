@@ -50,25 +50,25 @@ model FileMirrorMap {
 }
 
 model User {
-  id               String            @id @default(cuid())
-  clerkUserId      String            @unique
-  email            String?           @unique
+  id               String               @id @default(cuid())
+  clerkUserId      String               @unique
+  email            String?              @unique
   firstName        String?
   lastName         String?
   imageUrl         String?
-  isPlatformAdmin  Boolean           @default(false)
+  isPlatformAdmin  Boolean              @default(false)
   defaultShopId    String?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
   consents         ChatConsent[]
   featureOverrides FeatureOverride[]
-  ownedShops       Shop[]            @relation("ShopOwner")
+  ownedShops       Shop[]               @relation("ShopOwner")
   memberships      ShopMembership[]
   subscriptions    Subscription[]
   serviceCases     AcademyServiceCase[]
   UsageCounter     UsageCounter[]
   usageRecords     UsageRecord[]
-  defaultShop      Shop?             @relation("UserDefaultShop", fields: [defaultShopId], references: [id])
+  defaultShop      Shop?                @relation("UserDefaultShop", fields: [defaultShopId], references: [id])
 }
 
 model Shop {
@@ -289,6 +289,127 @@ model ReportSend {
   @@index([reportType])
   @@index([destinationType])
   @@index([status])
+}
+
+model Regulation {
+  id            String    @id
+  state         String
+  category      String
+  rule          String
+  citation      String
+  sourceUrl     String?   @map("source_url")
+  sourceName    String?   @map("source_name")
+  applicability String?
+  severity      String?
+  effectiveDate DateTime? @map("effective_date")
+  retrievedAt   DateTime? @map("retrieved_at")
+  verifiedBy    String?   @map("verified_by")
+  notes         String?
+
+  @@index([state])
+  @@index([category])
+  @@map("Regulation")
+}
+
+model RegulationVersion {
+  id                    String    @id @default(cuid())
+  regulationId          String    @map("regulation_id")
+  jurisdiction          String
+  effectiveDate         DateTime? @map("effective_date")
+  supersededDate        DateTime? @map("superseded_date")
+  sourcePublicationDate DateTime? @map("source_publication_date")
+  versionHash           String    @map("version_hash")
+  verificationStatus    String    @map("verification_status")
+  citationSource        String    @map("citation_source")
+  retrievalTimestamp    DateTime  @map("retrieval_timestamp")
+  snapshot              Json
+  createdAt             DateTime  @default(now()) @map("created_at")
+
+  @@unique([regulationId, versionHash])
+  @@index([regulationId])
+  @@index([jurisdiction])
+  @@index([effectiveDate])
+  @@index([retrievalTimestamp])
+  @@map("RegulationVersion")
+}
+
+model PolicyLegalRegulationAccessLog {
+  id               String   @id @default(cuid())
+  userId           String?
+  state            String?
+  requestId        String?
+  cacheStatus      String?
+  status           Int
+  totalCount       Int      @default(0)
+  verifiedCount    Int      @default(0)
+  placeholderCount Int      @default(0)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([state])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("PolicyLegalRegulationAccessLog")
+}
+
+model PolicyLegalReviewSnapshot {
+  id                         String   @id @default(cuid())
+  caseId                     String?  @map("case_id")
+  claimId                    String?  @map("claim_id")
+  claimState                 String?  @map("claim_state")
+  regulationIdsUsed          Json     @map("regulation_ids_used")
+  regulationSourcesUsed      Json     @map("regulation_sources_used")
+  citationsUsed              Json     @map("citations_used")
+  oemSourcesUsed             Json     @map("oem_sources_used")
+  carrierSourcesUsed         Json     @map("carrier_sources_used")
+  placeholderCitations       Json     @map("placeholder_citations")
+  policyLegalConfidenceScore Int      @map("policy_legal_confidence_score")
+  generatedAt                DateTime @map("generated_at")
+  createdAt                  DateTime @default(now()) @map("created_at")
+
+  @@index([caseId])
+  @@index([claimId])
+  @@index([claimState])
+  @@index([generatedAt])
+  @@map("PolicyLegalReviewSnapshot")
+}
+
+model CarrierTrendEvent {
+  id                         String   @id @default(cuid())
+  carrierKey                 String   @map("carrier_key")
+  carrierName                String   @map("carrier_name")
+  sourceReportHash           String   @unique @map("source_report_hash")
+  eventDate                  DateTime @default(now()) @map("event_date")
+  deniedOperationCount       Int      @default(0) @map("denied_operation_count")
+  calibrationDisputeCount    Int      @default(0) @map("calibration_dispute_count")
+  laborSuppressionCount      Int      @default(0) @map("labor_suppression_count")
+  recurringOmissionCount     Int      @default(0) @map("recurring_omission_count")
+  supplementOpportunityCount Int      @default(0) @map("supplement_opportunity_count")
+  supplementApprovedCount    Int      @default(0) @map("supplement_approved_count")
+  deniedOperations           Json     @map("denied_operations")
+  calibrationOperations      Json     @map("calibration_operations")
+  laborSuppressionOperations Json     @map("labor_suppression_operations")
+  omittedOperations          Json     @map("omitted_operations")
+  metadata                   Json?
+  createdAt                  DateTime @default(now()) @map("created_at")
+
+  @@index([carrierKey])
+  @@index([eventDate])
+  @@map("CarrierTrendEvent")
+}
+
+model ExportResearchAuditSnapshot {
+  id           String   @id @default(cuid())
+  caseId       String?  @map("case_id")
+  reportType   String   @map("report_type")
+  snapshotHash String   @map("snapshot_hash")
+  snapshot     Json
+  generatedAt  DateTime @map("generated_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([caseId])
+  @@index([reportType])
+  @@index([generatedAt])
+  @@map("ExportResearchAuditSnapshot")
 }
 
 enum SubscriptionPlan {
