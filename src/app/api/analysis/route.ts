@@ -65,7 +65,11 @@ import {
   UsageAccessError,
   recordCompletedAnalysisUsage,
 } from "@/lib/billing/usage";
-import { resolveUploadPlanLimits } from "@/lib/uploadSafety/uploadLimits";
+import {
+  getUploadBatchLimitMessage,
+  resolveUploadPlanLimits,
+  validateUploadBatchFileCount,
+} from "@/lib/uploadSafety/uploadLimits";
 
 export const runtime = "nodejs";
 
@@ -135,8 +139,12 @@ function assertAnalysisAllowedForEntitlements(
 
 export async function POST(req: Request) {
   try {
-    const { user, isPlatformAdmin } = await requireCurrentUser();
-    const entitlements = await getCurrentEntitlements();
+    const { user, verifiedEmails, isPlatformAdmin } = await requireCurrentUser();
+    const entitlements = await getCurrentEntitlements({
+      userEmail: user.email,
+      userEmails: verifiedEmails,
+      isPlatformAdmin,
+    });
     const uploadLimits = resolveUploadPlanLimits({
       ...entitlements,
       isPlatformAdmin: entitlements.isPlatformAdmin || isPlatformAdmin,
@@ -147,6 +155,26 @@ export async function POST(req: Request) {
     if (!artifactIds.length) {
       return NextResponse.json(
         { error: "artifactIds are required" },
+        { status: 400 }
+      );
+    }
+
+    const batchValidation = validateUploadBatchFileCount(artifactIds.length, uploadLimits);
+    if (!batchValidation.valid) {
+      console.info("[analysis-attachments] rejected oversized batch", {
+        artifactCount: artifactIds.length,
+        maxFileCount: uploadLimits.maxFilesPerReview,
+        plan: uploadLimits.plan,
+        ownerUserId: user.id,
+      });
+      return NextResponse.json(
+        {
+          error: batchValidation.reason ?? getUploadBatchLimitMessage(uploadLimits),
+          code: batchValidation.code ?? "MAX_FILES_REACHED",
+          limits: {
+            maxFiles: uploadLimits.maxFilesPerReview,
+          },
+        },
         { status: 400 }
       );
     }

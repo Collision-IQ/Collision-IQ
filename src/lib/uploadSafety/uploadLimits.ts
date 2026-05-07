@@ -1,6 +1,9 @@
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
 
 export const MB = 1024 * 1024;
+export const STARTER_UPLOAD_BATCH_FILE_LIMIT = 1;
+export const PRO_UPLOAD_BATCH_FILE_LIMIT = 6;
+export const ADMIN_UPLOAD_BATCH_FILE_LIMIT = 50;
 
 export const ALLOWED_UPLOAD_EXTENSIONS = new Set([
   ".pdf",
@@ -58,7 +61,7 @@ export function resolveUploadPlanLimits(
     return {
       plan: "admin",
       maxUploadBytes: 50 * MB,
-      maxFilesPerReview: 50,
+      maxFilesPerReview: ADMIN_UPLOAD_BATCH_FILE_LIMIT,
       zipAllowed: true,
       maxExtractedFiles: 50,
       maxExtractedTotalBytes: 150 * MB,
@@ -75,7 +78,7 @@ export function resolveUploadPlanLimits(
     return {
       plan: entitlements.billingPlan === "trial" || entitlements.plan === "trial" ? "trial" : "pro",
       maxUploadBytes: 30 * MB,
-      maxFilesPerReview: 6,
+      maxFilesPerReview: PRO_UPLOAD_BATCH_FILE_LIMIT,
       zipAllowed: true,
       maxExtractedFiles: 25,
       maxExtractedTotalBytes: 75 * MB,
@@ -86,7 +89,7 @@ export function resolveUploadPlanLimits(
   return {
     plan: "starter",
     maxUploadBytes: 10 * MB,
-    maxFilesPerReview: 1,
+    maxFilesPerReview: STARTER_UPLOAD_BATCH_FILE_LIMIT,
     zipAllowed: false,
     maxExtractedFiles: 0,
     maxExtractedTotalBytes: 0,

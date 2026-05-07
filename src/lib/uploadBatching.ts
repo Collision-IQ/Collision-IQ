@@ -1,3 +1,5 @@
+import { PRO_UPLOAD_BATCH_FILE_LIMIT } from "@/lib/uploadSafety/uploadLimits";
+
 export const NEXT_UPLOAD_PRIORITY = [
   "final invoice",
   "scan reports",
@@ -7,14 +9,17 @@ export const NEXT_UPLOAD_PRIORITY = [
   "OEM procedure excerpts",
 ] as const;
 
-export function buildNextBatchPrompt(totalFilesReviewed: number, maxBatchFiles = 6) {
+export function buildNextBatchPrompt(
+  totalFilesReviewed: number,
+  maxBatchFiles = PRO_UPLOAD_BATCH_FILE_LIMIT
+) {
   return `Files reviewed so far: ${totalFilesReviewed}. You can upload another batch when ready. Upload the next ${maxBatchFiles} most important files: ${NEXT_UPLOAD_PRIORITY.join(", ")}.`;
 }
 
 export function buildUploadBatchGuidance(
   totalFilesReviewed: number,
   currentBatchCount: number,
-  maxBatchFiles = 6
+  maxBatchFiles = PRO_UPLOAD_BATCH_FILE_LIMIT
 ) {
   const uploadLimitText =
     maxBatchFiles === 1

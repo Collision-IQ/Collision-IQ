@@ -1107,7 +1107,8 @@ export default function ChatWidget({
   async function handleSend() {
     if (disabled) return;
     if (loading) return;
-    if (!input.trim() && attachments.length === 0) return;
+    const attachmentsForTurn = attachments.filter((attachment) => !attachment.usedInAnalysis);
+    if (!input.trim() && attachmentsForTurn.length === 0) return;
 
     // Collapse the review workspace from the real send path so typed prompts always focus chat.
     onUserPromptSent?.();
@@ -1117,13 +1118,13 @@ export default function ChatWidget({
     shouldAutoScrollRef.current = true;
 
     const mySession = sessionRef.current;
-    const messageToSend = input.trim() || buildAttachmentSummary(attachments);
+    const messageToSend = input.trim() || buildAttachmentSummary(attachmentsForTurn);
     const activeCaseTopic = updateCaseTopic(messageToSend);
-    const hasAttachmentsInTurn = attachments.length > 0;
+    const hasAttachmentsInTurn = attachmentsForTurn.length > 0;
     const activeAnalysisRunId = hasAttachmentsInTurn ? beginStructuredAnalysisRun() : null;
     const attachmentStats = {
-      ...summarizeAttachmentStats(attachments),
-      totalPdfPages: attachments.reduce((sum, attachment) => sum + (attachment.pageCount ?? 0), 0),
+      ...summarizeAttachmentStats(attachmentsForTurn),
+      totalPdfPages: attachmentsForTurn.reduce((sum, attachment) => sum + (attachment.pageCount ?? 0), 0),
     };
     const analysisStartMs = Date.now();
     messageCounterRef.current += 1;
@@ -1207,7 +1208,7 @@ export default function ChatWidget({
       if (hasAttachmentsInTurn) {
         upsertSystemStatusMessage(
           buildAttachmentBatchStatus(
-            attachments.map((attachment) => ({ type: attachment.mime })),
+            attachmentsForTurn.map((attachment) => ({ type: attachment.mime })),
             "analysis_starting"
           )
         );
@@ -1220,7 +1221,7 @@ export default function ChatWidget({
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
           body: JSON.stringify({
-            artifactIds: attachments.map((attachment) => attachment.attachmentId),
+            artifactIds: attachmentsForTurn.map((attachment) => attachment.attachmentId),
             activeCaseId,
             userIntent: messageToSend,
           }),
@@ -1293,7 +1294,7 @@ export default function ChatWidget({
           activeCaseId,
           activeCaseIdAfter: nextActiveCaseId,
           reportId: nextActiveCaseId,
-          attachmentIds: attachments.map((attachment) => attachment.attachmentId),
+          attachmentIds: attachmentsForTurn.map((attachment) => attachment.attachmentId),
           caseContinuityActiveCaseId: analysisData.caseContinuity?.activeCaseId ?? null,
           messageCountBefore: messages.length,
           messageCountAfter: updatedMessages.length,
@@ -1386,8 +1387,8 @@ export default function ChatWidget({
         body: JSON.stringify({
           messages: updatedMessages,
           activeCaseId: analysisReportIdRef.current,
-          attachmentIds: attachments.map((attachment) => attachment.attachmentId),
-          attachments: attachments.map((attachment) => ({
+          attachmentIds: attachmentsForTurn.map((attachment) => attachment.attachmentId),
+          attachments: attachmentsForTurn.map((attachment) => ({
             filename: attachment.filename,
             type: attachment.mime,
             text: attachment.text,
@@ -1446,9 +1447,9 @@ export default function ChatWidget({
       const contentType = response.headers.get("content-type") || "";
       if (hasAttachmentsInTurn) {
         console.info("[attachments] analysis request assembled", {
-          attachmentCount: attachments.length,
-          visionAttachmentCount,
-          attachments: attachments.map((attachment) => ({
+          attachmentCount: attachmentsForTurn.length,
+          visionAttachmentCount: attachmentsForTurn.filter((attachment) => attachment.hasVision).length,
+          attachments: attachmentsForTurn.map((attachment) => ({
             filename: attachment.filename,
             mimeType: attachment.mime || "unknown",
             hasVision: attachment.hasVision,
@@ -1461,7 +1462,7 @@ export default function ChatWidget({
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
           body: JSON.stringify({
-            artifactIds: attachments.map((attachment) => attachment.attachmentId),
+            artifactIds: attachmentsForTurn.map((attachment) => attachment.attachmentId),
             activeCaseId: analysisReportIdRef.current,
             userIntent: messageToSend,
           }),
@@ -1520,7 +1521,7 @@ export default function ChatWidget({
             console.info("[attachments] upload completion case state", {
               activeCaseId: analysisReportIdRef.current,
               reportId: analysisData.reportId ?? null,
-              attachmentIds: attachments.map((attachment) => attachment.attachmentId),
+              attachmentIds: attachmentsForTurn.map((attachment) => attachment.attachmentId),
               caseContinuityActiveCaseId: analysisData.caseContinuity?.activeCaseId ?? null,
             });
             console.info("[attachments] analysis complete", {
@@ -1757,7 +1758,6 @@ export default function ChatWidget({
     const returnedUploads = data?.successfulUploads?.length ? data.successfulUploads : [upload];
     const filename: string = upload?.filename || file.name;
     const mime: string = upload?.type || file.type;
-    const text: string = upload?.text || "";
     const imageDataUrl: string | undefined =
       typeof upload?.imageDataUrl === "string" ? upload.imageDataUrl : undefined;
     const pageCount: number | undefined =

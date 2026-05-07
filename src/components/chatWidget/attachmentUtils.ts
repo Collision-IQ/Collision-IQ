@@ -1,4 +1,6 @@
-export const MAX_UPLOAD_BATCH_FILES = 6;
+import { PRO_UPLOAD_BATCH_FILE_LIMIT } from "@/lib/uploadSafety/uploadLimits";
+
+export const MAX_UPLOAD_BATCH_FILES = PRO_UPLOAD_BATCH_FILE_LIMIT;
 export const MAX_UPLOAD_FILE_BYTES = 50 * 1024 * 1024;
 
 export type AttachmentSummaryItem = {
