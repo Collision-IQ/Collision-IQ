@@ -24,7 +24,7 @@ export type DerivedValuation = {
   acvRange?: { low: number; high: number };
   acvConfidence?: "low" | "medium" | "high";
   acvCompCount?: number;
-  acvSourceType?: "comps" | "jd_power" | "fallback";
+  acvSourceType?: "comps" | "jd_power" | "fallback" | "unavailable";
   acvReasoning: string;
   acvMissingInputs: string[];
   dvStatus: "provided" | "estimated_range" | "not_determinable";

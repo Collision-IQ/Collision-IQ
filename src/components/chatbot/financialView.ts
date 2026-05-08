@@ -100,11 +100,11 @@ function buildDirectionalFinancialBullets(renderModel: ExportModel) {
   }
 
   if (valuation.acvStatus === "provided" && typeof valuation.acvValue === "number") {
-    bullets.push(`ACV preview: $${valuation.acvValue.toLocaleString("en-US")}`);
+    bullets.push(`Market preview: $${valuation.acvValue.toLocaleString("en-US")}`);
   } else if (valuation.acvStatus === "estimated_range") {
     bullets.push(
-      formatPreviewBand("ACV preview band", valuation.acvRange) ??
-        "ACV preview band: No valuation range available"
+      formatPreviewBand("Market preview band", valuation.acvRange) ??
+        "Market preview band: No valuation range available"
     );
   }
 
@@ -118,7 +118,7 @@ function buildDirectionalFinancialBullets(renderModel: ExportModel) {
   }
 
   if (valuation.acvConfidence) {
-    bullets.push(`ACV confidence: ${formatLabel(valuation.acvConfidence)}`);
+    bullets.push(`Market preview confidence: ${formatLabel(valuation.acvConfidence)}`);
   }
 
   if (valuation.dvConfidence) {
@@ -126,7 +126,7 @@ function buildDirectionalFinancialBullets(renderModel: ExportModel) {
   }
 
   if (valuation.acvMissingInputs.length > 0) {
-    bullets.push(`Still needed for stronger ACV support: ${valuation.acvMissingInputs.join(", ")}`);
+    bullets.push(`Still needed for stronger market preview support: ${valuation.acvMissingInputs.join(", ")}`);
   }
 
   if (valuation.dvMissingInputs.length > 0) {

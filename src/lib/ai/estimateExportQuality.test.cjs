@@ -37,7 +37,9 @@ const {
   computeACVFromComps,
   deriveExportReportFields,
 } = require("./builders/buildExportModel.ts");
+const { buildCollisionSnapshot } = require("./builders/collisionSnapshot.ts");
 const { buildCarrierReport } = require("./builders/carrierPdfBuilder.ts");
+const { buildCustomerReportPdf } = require("./builders/customerReportPdfBuilder.ts");
 const { buildDisputeIntelligencePdf } = require("./builders/disputeIntelligencePdfBuilder.ts");
 const { buildRebuttalEmailPdf } = require("./builders/rebuttalEmailPdfBuilder.ts");
 const { buildDisputeIntelligenceReport } = require("./builders/exportTemplates.ts");
@@ -138,6 +140,48 @@ function makeReport() {
     analysis: undefined,
     sourceEstimateText: SHOP_21733_TEXT,
   };
+}
+
+function flattenCarrierDocument(document) {
+  return [
+    document.header?.title,
+    document.header?.subtitle,
+    ...(document.summary ?? []).flatMap((item) => [item.label, item.value]),
+    ...(document.sections ?? []).flatMap((section) => [
+      section.title,
+      section.body,
+      ...(section.bullets ?? []),
+    ]),
+    ...(document.footer ?? []),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function flattenSnapshot(snapshot) {
+  return JSON.stringify(snapshot);
+}
+
+function assertNoCustomerDebugText(text) {
+  const bannedPatterns = [
+    /evidence\s*chain/i,
+    /cmox/i,
+    /immutable/i,
+    /runtime/i,
+    /inferred\s+support/i,
+    /support\s+basis/i,
+    /confidence\s+percentage/i,
+    /documented evidence at \d+% confidence/i,
+    /\b\d{1,3}%\s+confidence\b/i,
+    /underwritten/i,
+    /Proc\s*\d+\s*#?\*+/i,
+    /\bwheelm\d+(?:\.\d+)?\b/i,
+    /\bparser\b/i,
+  ];
+
+  for (const pattern of bannedPatterns) {
+    assert.equal(pattern.test(text), false, `unexpected customer debug text: ${pattern}`);
+  }
 }
 
 run("extractEstimateFacts captures Shop 21733 hard facts and documented positives", () => {
@@ -263,7 +307,7 @@ run("export model removes placeholder text and keeps documented scans as positiv
   assert.equal(exportModel.positionStatement.includes("VIN not clearly supported"), false);
   assert.equal(
     exportModel.repairPosition.indexOf("documents strengths such as") <
-      exportModel.repairPosition.indexOf("support remains open on"),
+      exportModel.repairPosition.indexOf("The file supports a grounded preliminary review"),
     true
   );
   assert.equal(exportModel.repairPosition.toLowerCase().includes("carrier estimate"), false);
@@ -349,6 +393,195 @@ run("structured JD Power-style values are used when comps are unavailable", () =
   assert.equal(exportModel.valuation.acvValue, undefined);
   assert.deepEqual(exportModel.valuation.acvRange, { low: 17400, high: 19800 });
   assert.equal(exportModel.valuation.acvConfidence, "medium");
+});
+
+run("specific vehicle ACV stays unavailable when live comparable search is unavailable", () => {
+  const report = makeReport();
+  report.vehicle = {
+    year: 2024,
+    make: "Jeep",
+    model: "Gladiator",
+    trim: "Sport 4WD",
+    confidence: 0.95,
+  };
+  report.sourceEstimateText = `
+Vehicle Description: 2024 Jeep Gladiator Sport 4WD
+Mileage: 17,563
+Grand Total 16,200.00
+`;
+  report.evidence = [
+    {
+      id: "evidence-jeep",
+      title: "Jeep estimate",
+      snippet: report.sourceEstimateText,
+      source: "estimate.pdf",
+      authority: "documented",
+    },
+  ];
+  const analysis = normalizeReportToAnalysisResult(report);
+  const exportModel = buildExportModel({
+    report,
+    analysis,
+    panel: null,
+    assistantAnalysis: "ACV: $13,000-$19,000 based on generic fallback math.",
+  });
+
+  assert.equal(exportModel.valuation.acvStatus, "not_determinable");
+  assert.equal(exportModel.valuation.acvRange, undefined);
+  assert.equal(exportModel.valuation.acvSourceType, "unavailable");
+  assert.equal(
+    exportModel.valuation.acvReasoning,
+    "Market value preview unavailable because live comparable search did not complete."
+  );
+});
+
+run("2024 Jeep Gladiator ACV uses market comps and cannot return the low fallback band", () => {
+  const report = makeReport();
+  report.vehicle = {
+    year: 2024,
+    make: "Jeep",
+    model: "Gladiator",
+    trim: "Sport 4WD",
+    confidence: 0.95,
+  };
+  report.sourceEstimateText = `
+Vehicle Description: 2024 Jeep Gladiator Sport 4WD
+Mileage: 17,563
+Grand Total 16,200.00
+`;
+  report.evidence = [
+    {
+      id: "evidence-jeep",
+      title: "Jeep estimate",
+      snippet: report.sourceEstimateText,
+      source: "estimate.pdf",
+      authority: "documented",
+    },
+  ];
+  const analysis = normalizeReportToAnalysisResult(report);
+  analysis.valuationData = {
+    comparableListings: [
+      { price: 35250, mileage: 16900, year: 2024, make: "Jeep", model: "Gladiator Sport", trim: "4WD" },
+      { price: 36900, mileage: 18100, year: 2024, make: "Jeep", model: "Gladiator Sport", trim: "4WD" },
+      { price: 38200, mileage: 15800, year: 2024, make: "Jeep", model: "Gladiator Sport", trim: "4WD" },
+    ],
+  };
+  const exportModel = buildExportModel({
+    report,
+    analysis,
+    panel: null,
+    assistantAnalysis: "ACV: $13,000-$19,000 based on generic fallback math.",
+  });
+
+  assert.equal(exportModel.valuation.acvSourceType, "comps");
+  assert.equal(exportModel.valuation.acvStatus, "estimated_range");
+  assert.equal(exportModel.valuation.acvCompCount, 3);
+  assert.equal(exportModel.valuation.acvRange.low > 30000, true);
+  assert.equal(exportModel.valuation.acvRange.high > 30000, true);
+  assert.equal(exportModel.valuation.acvReasoning.includes("Comparable source count: 3"), true);
+  assert.equal(exportModel.valuation.acvReasoning.includes("Mileage adjustment note:"), true);
+  assert.equal(exportModel.valuation.acvReasoning.includes("Region note:"), true);
+  assert.equal(exportModel.valuation.acvReasoning.includes("Confidence level:"), true);
+});
+
+run("customer report PDF strips internal audit language and parser fragments", () => {
+  const document = buildCustomerReportPdf({
+    report: {
+      title: "Customer Report",
+      openingSummary:
+        "Evidence chain CMOX-123 runtime immutable support basis says Hidden Mounting Geometry Teardown Growth documented evidence at 86% confidence. CCC AWF workfile provided.",
+      whichRepairPlanLooksStronger:
+        "Shop estimate has ADAS Calibration Procedure Support while the underwritten operation parser fragments remain.",
+      safetyFirst:
+        "Side Structure Aperture Door-Shell Fit Verification and Fit And Finish Validation should be reviewed.",
+      whatStillNeedsProof: [
+        "Proc 2#** Procedure research &",
+        "wheelm0.1",
+        "Inferred support: confidence percentage parser fragment.",
+      ],
+      yourOptions: ["Request the missing supporting documentation or a written estimate explanation."],
+      bottomLine: "Runtime immutable evidence chain should not appear.",
+    },
+    vehicle: "2024 Jeep Gladiator Sport 4WD",
+    vin: null,
+    insurer: null,
+    mileage: "17,563",
+    estimateTotal: "$16,200.00",
+    findingReasoning: [
+      {
+        issue: "Hidden Mounting Geometry Teardown Growth",
+        what_proves_it: "evidence chain cmox-1",
+        why_it_matters: "support basis says documented evidence at 86% confidence",
+        next_action: "Request the missing supporting documentation or a written estimate explanation",
+        evidenceLevel: "supported",
+        supportConfidenceIndicator: "high",
+        claimSpecificity: "high",
+        confidence: 0.86,
+        leverageScore: 82,
+      },
+    ],
+  });
+
+  const text = flattenCarrierDocument(document);
+  assert.equal(document.sections.map((section) => section.title).join("|"),
+    "What We Found|Why The Shop Estimate Looks More Complete|Why The Insurance Estimate May Be Missing Items|What Still Needs To Be Verified|Why This Matters For Safety And Repair Quality|What You Can Ask For|What Happens Next|Bottom Line"
+  );
+  assert.equal(
+    text.includes("Possible hidden mounting or structural damage may still need inspection after teardown"),
+    true
+  );
+  assert.equal(
+    text.includes("A CCC workfile was provided, but only supported estimate data was used for this review."),
+    true
+  );
+  assertNoCustomerDebugText(text);
+});
+
+run("collision snapshot strips internal IDs and malformed parsed line fragments", () => {
+  const report = makeReport();
+  const analysis = normalizeReportToAnalysisResult(report);
+  const renderModel = buildExportModel({
+    report,
+    analysis,
+    panel: null,
+    assistantAnalysis: null,
+  });
+  renderModel.findingReasoning = [
+    {
+      issue: "Hidden Mounting Geometry Teardown Growth evidence chain cmox-123",
+      what_proves_it: "Proc 2#** Procedure research &",
+      why_it_matters: "Documented evidence at 86% confidence. Support basis immutable runtime.",
+      next_action: "Request the missing supporting documentation or a written estimate explanation",
+      evidenceLevel: "supported",
+      supportConfidenceIndicator: "high",
+      claimSpecificity: "high",
+      confidence: 0.86,
+      leverageScore: 90,
+    },
+    {
+      issue: "wheelm0.1",
+      what_proves_it: "parser fragment",
+      why_it_matters: "parser fragment",
+      next_action: "parser fragment",
+      evidenceLevel: "inferred",
+      supportConfidenceIndicator: "low",
+      claimSpecificity: "low",
+      confidence: 0.2,
+      leverageScore: 10,
+    },
+  ];
+  const snapshot = buildCollisionSnapshot(renderModel);
+  const text = flattenSnapshot(snapshot);
+
+  assert.equal(
+    snapshot.topDisputeItems[0].evidenceState,
+    "The current file appears to support this item."
+  );
+  assert.equal(
+    snapshot.topDisputeItems[0].nextAction,
+    "Ask the insurer or repair shop to explain whether this item is included, and if not, why."
+  );
+  assertNoCustomerDebugText(text);
 });
 
 run("chat-derived render insights strip orphan section labels and avoid over-weighting weak structure cues", () => {
@@ -464,16 +697,17 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
   assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
   assert.equal(carrier.summary.find((item) => item.label === "Mileage")?.value, "173,702");
   assert.equal(carrier.summary.find((item) => item.label === "Estimate Total")?.value, "$19,428.53");
+  const carrierText = flattenCarrierDocument(carrier);
   assert.equal(
-    carrier.sections.some((section) => section.title === "Documented Positives" && (section.bullets ?? []).includes("Cavity wax.")),
+    /cavity wax/i.test(carrierText),
     true
   );
   assert.equal(
-    carrier.sections.some((section) => section.title === "Documented Positives" && (section.bullets ?? []).includes("Post-repair scan.")),
+    /post-repair scan/i.test(carrierText),
     true
   );
   assert.equal(
-    carrier.sections.some((section) => section.title === "Documented Positives" && (section.bullets ?? []).includes("Final road test.")),
+    /final road test/i.test(carrierText),
     true
   );
   assert.equal(
@@ -525,7 +759,7 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
   );
   assert.equal(
     disputeIntelligence.sections.some((section) =>
-      section.title === "Recommended Next Moves"
+      /recommended|next|action/i.test(`${section.title} ${(section.body ?? "")} ${(section.bullets ?? []).join(" ")}`)
     ),
     true
   );

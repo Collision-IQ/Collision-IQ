@@ -226,6 +226,8 @@ export type ComputedAcvResult = {
 const ESTIMATE_TOTAL_ACV_FALLBACK_LOW_OFFSET = 3500;
 const ESTIMATE_TOTAL_ACV_FALLBACK_HIGH_OFFSET = 2500;
 const DV_FALLBACK_RANGE = { low: 500, high: 2500 } as const;
+const MARKET_SEARCH_UNAVAILABLE_MESSAGE =
+  "Market value preview unavailable because live comparable search did not complete.";
 
 const GENERIC_PLACEHOLDER_FIELD_PATTERN =
   /^(?:unknown|unspecified|n\/a|na|none|null|undefined|not available|not provided|vehicle details are still limited in the current material\.?|vehicle details still limited in the current material\.?|not clearly supported(?: in the current material)?\.?)$/i;
@@ -2971,16 +2973,23 @@ function buildValuation(
   report: RepairIntelligenceReport | null,
   analysis: AnalysisResult | null
 ): DerivedValuation {
+  const vehicleForValuation = reportFields.vehicle ?? estimateFactsToVehicle(reportFields.estimateFacts);
+  const requiresLiveMarketSearch = hasSpecificVehicleValuationIdentity({
+    vehicle: vehicleForValuation,
+    mileage: reportFields.mileage,
+  });
   const computedAcv = resolveComputedAcv({
     report,
     analysis,
-    vehicle: reportFields.vehicle ?? estimateFactsToVehicle(reportFields.estimateFacts),
+    vehicle: vehicleForValuation,
     mileage: reportFields.mileage,
   });
   const sanePanelDv = coerceSaneDvRange(panel?.diminishedValue?.low, panel?.diminishedValue?.high);
   const chatAcvPreviewRange = computedAcv
     ? computedAcv.acvRange
-    : resolveValuationPreviewRange({
+    : requiresLiveMarketSearch
+      ? undefined
+      : resolveValuationPreviewRange({
         status: normalizeAcvStatus(chatValuation),
         value: chatValuation.acvValue,
         range: isSaneRange(chatValuation.acvRange, 250000) ? chatValuation.acvRange : undefined,
@@ -2990,7 +2999,9 @@ function buildValuation(
       });
   const estimateTotalFallbackAcvRange = chatAcvPreviewRange
     ? undefined
-    : resolveEstimateTotalAcvFallbackRange(reportFields.estimateTotal);
+    : requiresLiveMarketSearch
+      ? undefined
+      : resolveEstimateTotalAcvFallbackRange(reportFields.estimateTotal);
   const acvPreviewRange = chatAcvPreviewRange ?? estimateTotalFallbackAcvRange;
   const dvPreviewRange = resolveValuationPreviewRange({
     status:
@@ -3055,18 +3066,20 @@ function buildValuation(
           canonicalAcvMissingInputs
         ),
     acvCompCount: computedAcv?.sourceType === "comps" ? computedAcv.compCount : undefined,
-    acvSourceType: computedAcv?.sourceType ?? "fallback",
+    acvSourceType: computedAcv?.sourceType ?? (acvPreviewRange ? "fallback" : "unavailable"),
     acvReasoning: computedAcv
-      ? `${computedAcv.reasoning} This remains a directional preview band, not a formal ACV appraisal.`
+      ? `${computedAcv.reasoning} This is a market preview, not a formal ACV appraisal.`
       : estimateTotalFallbackAcvRange
         ? `Directional preview only. No stronger market valuation support was preserved, so the current estimate total is being used as a rough anchor with a conservative fallback band of -$${ESTIMATE_TOTAL_ACV_FALLBACK_LOW_OFFSET.toLocaleString("en-US")} / +$${ESTIMATE_TOTAL_ACV_FALLBACK_HIGH_OFFSET.toLocaleString("en-US")}.`
       : acvPreviewRange
         ? sanitizeReason(
             chatValuation.acvReasoning,
-            "This is a directional ACV preview band based on the current file set."
-          ) || "This is a directional ACV preview band based on the current file set."
-        : sanitizeReason(chatValuation.acvReasoning, "ACV preview is not supportable from the current documents.") ||
-          "ACV preview is not supportable from the current documents.",
+            "This is a market preview band based on the current file set."
+          ) || "This is a market preview band based on the current file set."
+        : requiresLiveMarketSearch
+          ? MARKET_SEARCH_UNAVAILABLE_MESSAGE
+          : sanitizeReason(chatValuation.acvReasoning, "Market preview is not supportable from the current documents.") ||
+            "Market preview is not supportable from the current documents.",
     acvMissingInputs: canonicalAcvMissingInputs,
     dvStatus,
     dvValue: undefined,
@@ -3107,6 +3120,21 @@ function resolveEstimateTotalAcvFallbackRange(
   };
 
   return isSaneRange(range, 250000) ? range : undefined;
+}
+
+function hasSpecificVehicleValuationIdentity(params: {
+  vehicle?: VehicleIdentity;
+  mileage?: number;
+}) {
+  const vehicle = normalizeVehicleIdentity(params.vehicle);
+  const hasYearMakeModel =
+    typeof vehicle?.year === "number" &&
+    Boolean(vehicle.make?.trim()) &&
+    Boolean(vehicle.model?.trim());
+  const hasTrimOrVin = Boolean(vehicle?.trim?.trim()) || Boolean(vehicle?.vin?.trim());
+  const hasMileage = typeof params.mileage === "number" && Number.isFinite(params.mileage);
+
+  return hasYearMakeModel && hasTrimOrVin && hasMileage;
 }
 
 function resolveDirectionalDvFallbackRange(params: {
@@ -3269,8 +3297,9 @@ export function computeACVFromComps(params: {
     exactTrimMatchCount,
   });
   const notes = [
-    `${adjusted.length} comparable listing${adjusted.length === 1 ? "" : "s"} used`,
-    mileageKnownCount > 0 ? "mileage-normalized" : "limited mileage detail",
+    `Comparable source count: ${adjusted.length}`,
+    mileageKnownCount > 0 ? "Mileage adjustment note: mileage-normalized against the uploaded mileage" : "Mileage adjustment note: limited mileage detail",
+    "Region note: use local comparable listings when available",
     normalizedTargetTrim
       ? exactTrimMatchCount > 0
         ? `${exactTrimMatchCount} trim-aligned`
@@ -3284,7 +3313,7 @@ export function computeACVFromComps(params: {
     confidence,
     compCount: adjusted.length,
     sourceType: "comps",
-    reasoning: `ACV derived from ${notes.join(", ")} with median comparable pricing used as the working value.`,
+    reasoning: `Market preview derived from ${notes.join("; ")}. Confidence level: ${confidence}.`,
   };
 }
 
@@ -3317,7 +3346,7 @@ function computeACVFromJdPower(jdPower?: JDPowerValuation): ComputedAcvResult | 
     confidence: "medium",
     compCount: 0,
     sourceType: "jd_power",
-    reasoning: "ACV derived from structured JD Power-style valuation data using the provided average and range.",
+    reasoning: "Market preview derived from structured JD Power-style valuation data. Comparable source count: 1 valuation guide source. Mileage adjustment note: guide range used as provided. Region note: regional listings should be added when available. Confidence level: medium.",
   };
 }
 

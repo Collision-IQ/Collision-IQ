@@ -56,6 +56,7 @@ import {
 } from "@/lib/externalDocuments";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
+import { toCustomerFacingText } from "@/lib/ai/customerFacingText";
 import type {
   AnalysisResult,
   ExportResearchSnapshot,
@@ -2205,7 +2206,7 @@ function RailContent({
           <div className="text-[13px] leading-5 text-muted-foreground">
             {featuredRecommendation
               ? "The strongest recommendation is highlighted above."
-              : "No clear supportable missing, underwritten, or disputed repair-path items were identified from the current structured analysis."}
+              : "No clear missing, reduced, or disputed repair items were identified from the current review."}
           </div>
         )}
         </section>
@@ -2449,7 +2450,7 @@ function RailContent({
                     </span>
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                    Verified law, policy rights, appraisal indicators, DOI escalation support, and immutable citation metadata.
+                    Verified law, policy rights, appraisal indicators, DOI escalation support, and source details.
                   </div>
                 </div>
                 <button
@@ -3872,12 +3873,12 @@ function FindingReasoningCard({
                 {formatLabel(finding.evidenceLevel)}
               </div>
             </div>
-            <ReasoningLine label="Rationale" value={finding.rationaleSummary ?? finding.why_it_matters} />
-            <ReasoningLine label="Evidence chain" value={finding.evidenceChainSummary ?? finding.what_proves_it} />
-            <ReasoningLine label="Risk if omitted" value={finding.riskIfOmitted ?? ""} />
-            <ReasoningLine label="Next action" value={finding.next_action} />
+            <ReasoningLine label="Why it matters" value={finding.rationaleSummary ?? finding.why_it_matters} />
+            <ReasoningLine label="What the file shows" value={finding.evidenceChainSummary ?? finding.what_proves_it} />
+            <ReasoningLine label="What to ask about" value={finding.riskIfOmitted ?? finding.next_action ?? ""} />
+            <ReasoningLine label="Next step" value={finding.next_action} />
             <div className="mt-2 text-[11px] leading-5 text-muted-foreground">
-              Support {formatLabel(finding.supportConfidenceIndicator ?? finding.evidenceLevel)} · Confidence {Math.round(finding.confidence * 100)}% · Specificity {formatLabel(finding.claimSpecificity)}
+              Review priority {formatLabel(finding.claimSpecificity)}
             </div>
           </div>
         ))}
@@ -3887,11 +3888,12 @@ function FindingReasoningCard({
 }
 
 function ReasoningLine({ label, value }: { label: string; value: string }) {
-  if (!value.trim()) return null;
+  const cleanValue = toCustomerFacingText(value);
+  if (!cleanValue) return null;
 
   return (
     <div className="mt-2 text-[13px] leading-5 text-muted-foreground">
-      <span className="font-semibold text-foreground">{label}:</span> {value}
+      <span className="font-semibold text-foreground">{label}:</span> {cleanValue}
     </div>
   );
 }
@@ -4451,9 +4453,9 @@ function formatLabel(value: string) {
 
 function buildValuationDisplay(renderModel: ReturnType<typeof buildExportModel>): string {
   return [
-    "ACV",
+    "Market preview",
     buildSingleValuationDisplay({
-      label: "Preliminary ACV preview band",
+      label: "Market preview band",
       status: renderModel.valuation.acvStatus,
       value:
         renderModel.valuation.acvStatus === "provided"
@@ -4502,7 +4504,7 @@ function buildSingleValuationDisplay(params: {
   reasoning: string;
   missingInputs: string[];
   maxRange: number;
-  sourceType?: "comps" | "jd_power" | "fallback";
+  sourceType?: "comps" | "jd_power" | "fallback" | "unavailable";
   compCount?: number;
   includeHandoffHint?: boolean;
 }): string {

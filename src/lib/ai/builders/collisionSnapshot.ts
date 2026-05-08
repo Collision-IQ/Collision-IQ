@@ -2,6 +2,7 @@ import type { ExportModel } from "./buildExportModel";
 import { type PressureMode, computeItemPressureMode } from "./pressureMode";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 import type { EstimateComparisonRow, WorkspaceEstimateComparisons } from "@/types/workspaceTypes";
+import { toCustomerFacingText } from "@/lib/ai/customerFacingText";
 
 export type SnapshotRedactionOptions = {
   showInsurerName?: boolean;
@@ -202,10 +203,10 @@ function buildRepairPlanVerdict(renderModel: SnapshotRenderModel): CollisionSnap
           ? "INCONCLUSIVE"
           : "COMPLETE";
   const reasonBase = hasDisputes
-    ? "Included findings identify estimate-specific gaps that need revision or written explanation."
-    : "The current included findings do not show a stronger competing repair-plan gap.";
+    ? "The current file shows items that may need to be added, clarified, or explained before the estimate is treated as complete."
+    : "The current file does not clearly show a stronger competing repair-plan gap.";
   const reason = incomplete
-    ? `${reasonBase} Because evidence completeness is ${renderModel.confidenceIntegrity.completenessStatus.toLowerCase()}, this snapshot is not a final repair conclusion.`
+    ? `${reasonBase} Because the file set is not complete, this snapshot is not a final repair conclusion.`
     : reasonBase;
 
   return { moreCompletePlan, carrierPlanStatus, reason };
@@ -276,10 +277,12 @@ function buildTopDisputeItems(renderModel: SnapshotRenderModel): CollisionSnapsh
   );
 
   return rankedFindings.slice(0, 3).map((finding) => ({
-    issue: cleanSnapshotText(finding.issue) || "Included dispute item",
-    whyItMatters: cleanSnapshotText(finding.why_it_matters) || "This item affects the repair-plan or estimate position.",
-    evidenceState: `${formatLabel(finding.evidenceLevel)} evidence at ${Math.round(finding.confidence * 100)}% confidence.`,
-    nextAction: cleanSnapshotText(finding.next_action) || "Request a revised estimate or written explanation.",
+    issue: cleanSnapshotText(finding.issue) || "Repair item to review",
+    whyItMatters: cleanSnapshotText(finding.why_it_matters) || "This item may affect repair quality, safety, or final fit.",
+    evidenceState: "The current file appears to support this item.",
+    nextAction:
+      cleanSnapshotText(finding.next_action) ||
+      "Ask the insurer or repair shop to explain whether this item is included, and if not, why.",
     pressureMode: computeItemPressureMode(finding.evidenceLevel, finding.leverageScore ?? 0),
   }));
 }
@@ -287,11 +290,11 @@ function buildTopDisputeItems(renderModel: SnapshotRenderModel): CollisionSnapsh
 function buildNextActions(renderModel: SnapshotRenderModel): string[] {
   const missingProof = renderModel.confidenceIntegrity.missingCriticalEvidence.slice(0, 3);
   return [
-    "Request a revised estimate tied to the included dispute items.",
-    "Request a written line-item explanation for any denied or reduced operation.",
+    "Ask the repair shop which items still need teardown, scan, calibration, fit, or alignment confirmation.",
+    "Ask the insurer or repair shop to explain whether this item is included, and if not, why.",
     missingProof.length
-      ? `Request missing proof: ${joinHumanList(missingProof)}.`
-      : "Request final support records before treating the analysis as complete.",
+      ? `Ask what is still needed for ${joinHumanList(missingProof.map((item) => cleanSnapshotText(item) ?? item))}.`
+      : "Ask what will be checked before the estimate is considered complete.",
   ];
 }
 
@@ -302,7 +305,7 @@ function buildValuationSnapshot(renderModel: SnapshotRenderModel): CollisionSnap
   if (!acvPreviewRange && !dvPreviewRange) {
     return {
       available: false,
-      disclosure: "Valuation preview not available from current file.",
+      disclosure: renderModel.valuation.acvReasoning || "Market value preview unavailable because live comparable search did not complete.",
     };
   }
 
@@ -311,10 +314,10 @@ function buildValuationSnapshot(renderModel: SnapshotRenderModel): CollisionSnap
     acvPreviewRange,
     dvPreviewRange,
     confidence: [
-      renderModel.valuation.acvConfidence ? `ACV ${renderModel.valuation.acvConfidence}` : null,
+      renderModel.valuation.acvConfidence ? `Market preview ${renderModel.valuation.acvConfidence}` : null,
       renderModel.valuation.dvConfidence ? `DV ${renderModel.valuation.dvConfidence}` : null,
     ].filter(Boolean).join(" / ") || "Directional",
-    disclosure: "Directional preview only; not a formal valuation or appraisal.",
+    disclosure: "Market preview only; not a formal valuation or appraisal.",
   };
 }
 
@@ -377,19 +380,23 @@ function maskIdentifierLast4(value: string): string {
 
 function cleanSnapshotText(value?: string | null): string | null {
   if (!value) return null;
-  let output = value.replace(/\s+/g, " ").replace(/\bthe\s+the\b/gi, "the").trim();
+  let output = toCustomerFacingText(value)
+    .replace(/\s+/g, " ")
+    .replace(/\bthe\s+the\b/gi, "the")
+    .trim();
   for (const phrase of BANNED_GENERIC_PHRASES) {
     output = output.replace(new RegExp(escapeRegex(phrase), "gi"), "");
   }
+  if (looksMalformedParserFragment(output)) return null;
   output = output.replace(/\s{2,}/g, " ").trim();
   return output || null;
 }
 
 function formatComparisonDelta(row: EstimateComparisonRow): string | null {
   const label =
-    cleanOperationDisplayText(row.operation) ||
-    cleanOperationDisplayText(row.partName) ||
-    cleanOperationDisplayText(row.category) ||
+    cleanSnapshotText(cleanOperationDisplayText(row.operation)) ||
+    cleanSnapshotText(cleanOperationDisplayText(row.partName)) ||
+    cleanSnapshotText(cleanOperationDisplayText(row.category)) ||
     "Estimate line";
   const delta = typeof row.delta === "number" ? `${row.delta > 0 ? "+" : ""}${row.delta}` : row.delta;
   const left = formatComparisonValue(row.lhsValue);
@@ -402,6 +409,16 @@ function formatComparisonDelta(row: EstimateComparisonRow): string | null {
     return `${label}: ${left} vs ${right}${delta ? ` (${delta})` : ""}`;
   }
   return `${label}: ${left} vs ${right}${delta ? ` (${delta})` : ""}`;
+}
+
+function looksMalformedParserFragment(value: string): boolean {
+  return (
+    /\bProc\s*\d+\s*#?\*+/i.test(value) ||
+    /\bwheelm\d+(?:\.\d+)?\b/i.test(value) ||
+    /\b[a-z]{3,}m\d+\.\d+\b/i.test(value) ||
+    /[#*_|]{3,}/.test(value) ||
+    value.split(/\s+/).filter(Boolean).length < 3 && /\d/.test(value)
+  );
 }
 
 function formatComparisonValue(value: string | number | null | undefined): string {

@@ -43,7 +43,6 @@ export function buildCollisionSnapshotPdfFromSnapshot(snapshot: CollisionSnapsho
       { label: "Vehicle", value: snapshot.vehicleLabel },
       { label: "More Complete Plan", value: snapshot.repairPlanVerdict.moreCompletePlan },
       { label: "Carrier Plan", value: snapshot.repairPlanVerdict.carrierPlanStatus },
-      { label: "Confidence", value: snapshot.evidenceCompleteness.adjustedConfidence },
       { label: "Approach", value: snapshot.pressureMode.charAt(0).toUpperCase() + snapshot.pressureMode.slice(1) },
     ],
     sections: [
@@ -125,15 +124,13 @@ function buildEstimateBullets(snapshot: ReturnType<typeof buildCollisionSnapshot
 
 function buildCompletenessBullets(snapshot: ReturnType<typeof buildCollisionSnapshot>): string[] {
   return [
-    `Adjusted confidence: ${snapshot.evidenceCompleteness.adjustedConfidence}`,
-    `Completeness: ${snapshot.evidenceCompleteness.completenessStatus}`,
     `Uploaded files: ${snapshot.evidenceCompleteness.uploadedFileCount}`,
-    snapshot.evidenceCompleteness.uploadLimitReached ? "Upload cap reached: yes" : "Upload cap reached: no",
+    snapshot.evidenceCompleteness.uploadLimitReached ? "The current upload limit was reached." : "More files can be added if needed.",
     snapshot.evidenceCompleteness.userIndicatedMoreFiles
-      ? "User indicated more files: yes"
-      : "User indicated more files: no",
+      ? "The owner or shop indicated there may be more files to review."
+      : "No additional file note was provided.",
     snapshot.evidenceCompleteness.missingCriticalEvidence.length
-      ? `Missing proof: ${snapshot.evidenceCompleteness.missingCriticalEvidence.slice(0, 4).join(", ")}`
+      ? `Still worth checking: ${snapshot.evidenceCompleteness.missingCriticalEvidence.slice(0, 4).join(", ")}`
       : null,
     snapshot.evidenceCompleteness.userFacingDisclosure,
   ].filter((item): item is string => Boolean(item));
@@ -146,7 +143,7 @@ function buildValuationBullets(snapshot: ReturnType<typeof buildCollisionSnapsho
 
   return [
     snapshot.valuationSnapshot.acvPreviewRange
-      ? `ACV preview: ${snapshot.valuationSnapshot.acvPreviewRange}`
+      ? `Market preview: ${snapshot.valuationSnapshot.acvPreviewRange}`
       : null,
     snapshot.valuationSnapshot.dvPreviewRange
       ? `DV preview: ${snapshot.valuationSnapshot.dvPreviewRange}`

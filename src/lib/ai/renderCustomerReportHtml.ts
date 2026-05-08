@@ -1,4 +1,5 @@
 import type { CustomerReport } from "./generateCustomerReport";
+import { toCustomerFacingList, toCustomerFacingText } from "./customerFacingText";
 
 type RenderCustomerReportHtmlInput = {
   report: CustomerReport;
@@ -15,7 +16,7 @@ function renderList(items: string[]) {
     return "<li>None noted.</li>";
   }
 
-  return items.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+  return toCustomerFacingList(items).map((item) => `<li>${escapeHtml(item)}</li>`).join("");
 }
 
 function escapeHtml(value: string): string {
@@ -29,6 +30,10 @@ function escapeHtml(value: string): string {
 
 export function renderCustomerReportHtml(input: RenderCustomerReportHtmlInput): string {
   const { report } = input;
+  const openingSummary = toCustomerFacingText(report.openingSummary);
+  const strongerPlan = toCustomerFacingText(report.whichRepairPlanLooksStronger);
+  const safetyFirst = toCustomerFacingText(report.safetyFirst);
+  const bottomLine = toCustomerFacingText(report.bottomLine);
 
   return `
 <!DOCTYPE html>
@@ -158,32 +163,46 @@ export function renderCustomerReportHtml(input: RenderCustomerReportHtmlInput): 
 
     <div class="section">
       <h2>What This Means For You</h2>
-      <p>${escapeHtml(report.openingSummary)}</p>
+      <p>${escapeHtml(openingSummary)}</p>
     </div>
 
     <div class="section">
-      <h2>Which Repair Plan Looks Stronger</h2>
-      <p>${escapeHtml(report.whichRepairPlanLooksStronger)}</p>
+      <h2>Why The Shop Estimate Looks More Complete</h2>
+      <p>${escapeHtml(strongerPlan)}</p>
     </div>
 
     <div class="section">
-      <h2>Safety Comes First</h2>
-      <p>${escapeHtml(report.safetyFirst)}</p>
-    </div>
-
-    <div class="section">
-      <h2>What Still Needs Proof</h2>
+      <h2>Why The Insurance Estimate May Be Missing Items</h2>
       <ul>${renderList(report.whatStillNeedsProof)}</ul>
     </div>
 
     <div class="section">
-      <h2>Your Options Moving Forward</h2>
+      <h2>What Still Needs To Be Verified</h2>
+      <ul>${renderList(report.whatStillNeedsProof)}</ul>
+    </div>
+
+    <div class="section">
+      <h2>Why This Matters For Safety And Repair Quality</h2>
+      <p>${escapeHtml(safetyFirst)}</p>
+    </div>
+
+    <div class="section">
+      <h2>What You Can Ask For</h2>
       <ul>${renderList(report.yourOptions)}</ul>
     </div>
 
     <div class="section">
+      <h2>What Happens Next</h2>
+      <ul>${renderList([
+        "The repair shop can inspect the vehicle further and document any added repair needs.",
+        "The insurer or repair shop should explain whether each concern is already included.",
+        "If something is not included, ask why and whether it will be reviewed as a supplement.",
+      ])}</ul>
+    </div>
+
+    <div class="section">
       <h2>Bottom Line</h2>
-      <p>${escapeHtml(report.bottomLine)}</p>
+      <p>${escapeHtml(bottomLine)}</p>
     </div>
 
     <div class="footer">
