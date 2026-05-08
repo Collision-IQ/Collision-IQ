@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "@/components/theme-provider";
 import { hasClerkPublishableKey } from "@/lib/auth/config";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 function getSiteUrl() {
   const rawUrl =
@@ -120,6 +121,7 @@ export default function RootLayout({
         <ThemeProvider>
           {hasClerkPublishableKey() ? <ClerkProvider>{content}</ClerkProvider> : content}
         </ThemeProvider>
+        <SpeedInsights />
       </body>
     </html>
   );
