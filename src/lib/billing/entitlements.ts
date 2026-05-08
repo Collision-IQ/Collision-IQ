@@ -175,7 +175,7 @@ export function toAccountEntitlements(
       trialActive: false,
       trialStart: null,
       trialEnd: null,
-      maxUploadsPerReview: null,
+      maxUploadsPerReview: getPlanUploadBatchLimit("admin"),
       usageStatus: "ok",
       entitlementSource: "free_access_admin",
     };
@@ -253,7 +253,7 @@ export function toAccountEntitlements(
     trialActive,
     trialStart: billingPlan === "trial" ? trialWindow.start : null,
     trialEnd: billingPlan === "trial" ? trialWindow.end : null,
-    maxUploadsPerReview: getPlanUploadCap(billingPlan),
+    maxUploadsPerReview: getPlanUploadBatchLimit(billingPlan),
     usageStatus,
     entitlementSource: resolveEntitlementSource(billingPlan, params?.subscriptionTier),
   };
@@ -420,6 +420,22 @@ export function getPlanUploadCap(plan: BillingPlan): number | null {
     case "team":
     case "trial":
       return null;
+    case "none":
+    default:
+      return 0;
+  }
+}
+
+export function getPlanUploadBatchLimit(plan: BillingPlan | "admin"): number {
+  switch (plan) {
+    case "admin":
+    case "team":
+      return 50;
+    case "trial":
+    case "pro":
+      return 6;
+    case "starter":
+      return 1;
     case "none":
     default:
       return 0;

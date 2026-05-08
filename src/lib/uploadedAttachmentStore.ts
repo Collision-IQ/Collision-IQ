@@ -1,4 +1,8 @@
 import { prisma } from "@/lib/prisma";
+import type {
+  CccWorkfileMetadata,
+  UploadClassification,
+} from "@/lib/ccc/cccWorkfile";
 
 export type StoredAttachment = {
   id: string;
@@ -7,6 +11,12 @@ export type StoredAttachment = {
   text: string;
   imageDataUrl?: string;
   pageCount?: number;
+  classification?: UploadClassification;
+  sizeBytes?: number;
+  sha256?: string;
+  metadata?: CccWorkfileMetadata;
+  source?: "direct_upload" | "zip_extraction";
+  sourceArchive?: string;
 };
 
 type AttachmentOwnerScope = {
@@ -35,6 +45,12 @@ function toStoredAttachment(record: {
   text: string;
   imageDataUrl: string | null;
   pageCount: number | null;
+  classification?: string | null;
+  sizeBytes?: number | null;
+  sha256?: string | null;
+  metadata?: unknown;
+  source?: string | null;
+  sourceArchive?: string | null;
 }): StoredAttachment {
   return {
     id: record.id,
@@ -43,6 +59,17 @@ function toStoredAttachment(record: {
     text: record.text,
     imageDataUrl: record.imageDataUrl ?? undefined,
     pageCount: record.pageCount ?? undefined,
+    classification: isUploadClassification(record.classification)
+      ? record.classification
+      : undefined,
+    sizeBytes: record.sizeBytes ?? undefined,
+    sha256: record.sha256 ?? undefined,
+    metadata: isCccWorkfileMetadata(record.metadata) ? record.metadata : undefined,
+    source:
+      record.source === "direct_upload" || record.source === "zip_extraction"
+        ? record.source
+        : undefined,
+    sourceArchive: record.sourceArchive ?? undefined,
   };
 }
 
@@ -54,6 +81,12 @@ export async function saveUploadedAttachment(params: {
   text: string;
   imageDataUrl?: string;
   pageCount?: number;
+  classification?: UploadClassification;
+  sizeBytes?: number;
+  sha256?: string;
+  metadata?: CccWorkfileMetadata;
+  source?: "direct_upload" | "zip_extraction";
+  sourceArchive?: string;
 }): Promise<StoredAttachment> {
   const owner = resolveOwner({
     ownerUserId: params.ownerUserId,
@@ -67,12 +100,39 @@ export async function saveUploadedAttachment(params: {
       text: params.text,
       imageDataUrl: params.imageDataUrl ?? null,
       pageCount: params.pageCount ?? null,
+      classification: params.classification ?? null,
+      sizeBytes: params.sizeBytes ?? null,
+      sha256: params.sha256 ?? null,
+      metadata: params.metadata ?? undefined,
+      source: params.source ?? null,
+      sourceArchive: params.sourceArchive ?? null,
       ownerType: owner.ownerType,
       ownerId: owner.ownerId,
     },
   });
 
   return toStoredAttachment(created);
+}
+
+function isUploadClassification(value: unknown): value is UploadClassification {
+  return (
+    value === "image" ||
+    value === "pdf" ||
+    value === "text" ||
+    value === "docx" ||
+    value === "ccc_workfile" ||
+    value === "ccc_awf" ||
+    value === "ccc_companion_file"
+  );
+}
+
+function isCccWorkfileMetadata(value: unknown): value is CccWorkfileMetadata {
+  const maybeMetadata = value as { artifactFamily?: unknown } | null;
+  return (
+    typeof maybeMetadata === "object" &&
+    maybeMetadata !== null &&
+    maybeMetadata.artifactFamily === "ccc_workfile"
+  );
 }
 
 export async function getUploadedAttachments(

@@ -237,7 +237,7 @@ run("env admin can upload even without subscription", () => {
   assert.equal(entitlements.isPlatformAdmin, true);
   assert.equal(canUploadFiles(entitlements), true);
   assert.equal(entitlements.uploadCap, null);
-  assert.equal(entitlements.maxUploadsPerReview, null);
+  assert.equal(entitlements.maxUploadsPerReview, 50);
 });
 
 run("non-admin no-subscription cannot upload", () => {
@@ -274,7 +274,7 @@ run("trial user can upload", () => {
   assert.equal(entitlements.billingPlan, "trial");
   assert.equal(canUploadFiles(entitlements), true);
   assert.equal(entitlements.uploadCap, null);
-  assert.equal(entitlements.maxUploadsPerReview, null);
+  assert.equal(entitlements.maxUploadsPerReview, 6);
 });
 
 run("active free trial can upload even when feature flags drift", () => {
@@ -298,7 +298,7 @@ run("active free trial can upload even when feature flags drift", () => {
   assert.equal(entitlements.trialActive, true);
   assert.equal(entitlements.billingPlan, "trial");
   assert.equal(canUploadFiles(entitlements), true);
-  assert.equal(entitlements.maxUploadsPerReview, null);
+  assert.equal(entitlements.maxUploadsPerReview, 6);
 });
 
 run("brand-new non-admin account receives active 30-day trial", () => {

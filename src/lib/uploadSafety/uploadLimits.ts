@@ -69,7 +69,7 @@ export function resolveUploadPlanLimits(
   entitlements: Pick<
     AccountEntitlements,
     "plan" | "billingPlan" | "isPlatformAdmin" | "entitlementSource"
-  >
+  > & { maxUploadsPerReview?: number | null }
 ): UploadPlanLimits {
   if (
     entitlements.isPlatformAdmin ||
@@ -79,7 +79,7 @@ export function resolveUploadPlanLimits(
     return {
       plan: "admin",
       maxUploadBytes: 50 * MB,
-      maxFilesPerReview: ADMIN_UPLOAD_BATCH_FILE_LIMIT,
+      maxFilesPerReview: entitlements.maxUploadsPerReview ?? ADMIN_UPLOAD_BATCH_FILE_LIMIT,
       zipAllowed: true,
       maxExtractedFiles: 50,
       maxExtractedTotalBytes: 150 * MB,
@@ -102,7 +102,7 @@ export function resolveUploadPlanLimits(
     return {
       plan,
       maxUploadBytes: 30 * MB,
-      maxFilesPerReview: PRO_UPLOAD_BATCH_FILE_LIMIT,
+      maxFilesPerReview: entitlements.maxUploadsPerReview ?? PRO_UPLOAD_BATCH_FILE_LIMIT,
       zipAllowed: true,
       maxExtractedFiles: 25,
       maxExtractedTotalBytes: 75 * MB,
@@ -114,7 +114,7 @@ export function resolveUploadPlanLimits(
   return {
     plan: "starter",
     maxUploadBytes: 10 * MB,
-    maxFilesPerReview: STARTER_UPLOAD_BATCH_FILE_LIMIT,
+    maxFilesPerReview: entitlements.maxUploadsPerReview ?? STARTER_UPLOAD_BATCH_FILE_LIMIT,
     zipAllowed: false,
     maxExtractedFiles: 0,
     maxExtractedTotalBytes: 0,

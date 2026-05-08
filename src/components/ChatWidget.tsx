@@ -199,10 +199,10 @@ const DEFAULT_UPLOAD_LIMIT_ENTITLEMENTS: Pick<
   AccountEntitlements,
   "plan" | "billingPlan" | "isPlatformAdmin" | "entitlementSource"
 > = {
-  plan: "pro",
-  billingPlan: "pro",
+  plan: "starter",
+  billingPlan: "starter",
   isPlatformAdmin: false,
-  entitlementSource: "paid_subscription",
+  entitlementSource: "starter_subscription",
 };
 
 function formatCaseUpdateStatus(
@@ -414,6 +414,9 @@ export default function ChatWidget({
   const [recordingError, setRecordingError] = useState<string | null>(null);
   const [showOpeningDisclaimer, setShowOpeningDisclaimer] = useState(true);
   const [openingDisclaimerDismissed, setOpeningDisclaimerDismissed] = useState(false);
+  const [resolvedViewerAccess, setResolvedViewerAccess] = useState<AccountEntitlements | null>(
+    viewerAccess
+  );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -465,7 +468,41 @@ export default function ChatWidget({
   );
   const effectiveAttachmentsOpen =
     attachments.length === 0 ? true : attachments.length >= 3 ? false : attachmentsOpen;
-  const productPlan = viewerAccess?.plan ?? "none";
+  useEffect(() => {
+    if (viewerAccess) {
+      setResolvedViewerAccess(viewerAccess);
+      return;
+    }
+
+    if (!isUserLoaded || !isSignedIn) {
+      setResolvedViewerAccess(null);
+      return;
+    }
+
+    let cancelled = false;
+    async function loadViewerAccess() {
+      try {
+        const response = await fetch("/api/account/entitlements", {
+          credentials: "same-origin",
+        });
+        if (!response.ok) return;
+
+        const entitlements = (await response.json()) as AccountEntitlements;
+        if (!cancelled) {
+          setResolvedViewerAccess(entitlements);
+        }
+      } catch {
+        // Server-side upload limits remain authoritative if entitlement loading fails.
+      }
+    }
+
+    void loadViewerAccess();
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn, isUserLoaded, viewerAccess]);
+
+  const productPlan = resolvedViewerAccess?.plan ?? "none";
   const hasProChatRecommendations = canAccessFeature(productPlan, "chat_report_recommendations");
   const selectedVoicePreset =
     VOICE_PRESETS.find((preset) => preset.id === ttsPresetId) ?? VOICE_PRESETS[0];
@@ -476,8 +513,8 @@ export default function ChatWidget({
   const selectedVoiceDescription =
     "description" in selectedVoicePreset ? selectedVoicePreset.description : "Select voice";
   const uploadPlanLimits = useMemo(
-    () => resolveUploadPlanLimits(viewerAccess ?? DEFAULT_UPLOAD_LIMIT_ENTITLEMENTS),
-    [viewerAccess]
+    () => resolveUploadPlanLimits(resolvedViewerAccess ?? DEFAULT_UPLOAD_LIMIT_ENTITLEMENTS),
+    [resolvedViewerAccess]
   );
   const maxUploadBatchFiles = uploadPlanLimits.maxFilesPerReview;
   const uploadBatchGuidance = buildUploadBatchGuidance(

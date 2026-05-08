@@ -57,6 +57,10 @@ import { buildWorkspaceDataFromReport } from "@/lib/workspace/buildWorkspaceData
 import { buildLinkedEvidence, type LinkedEvidence } from "@/lib/ingest/fetchLinkedEvidence";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import {
+  CCC_WORKFILE_DISCLAIMER,
+  isCccUploadClassification,
+} from "@/lib/ccc/cccWorkfile";
+import {
   UnauthorizedError,
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
@@ -309,7 +313,8 @@ export async function POST(req: Request) {
     const supplementCandidates = await generateSupplementCandidates(
       analysis.rawEstimateText ?? "",
       report,
-      linkedEvidence
+      linkedEvidence,
+      buildCccWorkfilePromptContext(storedAttachments)
     );
     const panel = await buildDecisionPanelHybrid({
       result: analysis,
@@ -495,6 +500,10 @@ function applyLinkedEvidenceToReport(params: {
     ...params.report,
     issues,
     sourceEstimateText: evidenceCorpus || params.report.sourceEstimateText,
+    cccWorkfileContext: buildMergedCccWorkfileReportContext(
+      params.previousReport?.cccWorkfileContext,
+      params.uploadedAttachments
+    ),
     linkedEvidence: mergeLinkedEvidence(
       params.previousReport?.linkedEvidence ?? [],
       params.linkedEvidence
@@ -563,6 +572,8 @@ function buildCaseEvidenceRegistry(params: {
       ingestionState: "uploaded" as const,
       evidenceStatus: attachment.type.startsWith("image/")
         ? ("VISIBLE_IN_IMAGES" as const)
+        : isCccUploadClassification(attachment.classification ?? "text")
+          ? ("DOCUMENTED" as const)
         : ("DOCUMENTED" as const),
       relatedIssueKeys: inferEvidenceIssueKeys({
         text: `${attachment.filename}\n${attachment.text}`,
@@ -1616,6 +1627,9 @@ function detectVisibleRepairPathSignals(
 function classifyUploadedEvidenceSource(attachment: StoredAttachment): CaseEvidenceSourceType {
   const text = `${attachment.filename}\n${attachment.type}\n${attachment.text}`.toLowerCase();
 
+  if (attachment.classification === "ccc_awf") return "ccc_awf";
+  if (attachment.classification === "ccc_workfile") return "ccc_workfile";
+  if (attachment.classification === "ccc_companion_file") return "ccc_companion_file";
   if (attachment.type.startsWith("image/")) return "photo";
   if (
     /(sublet|vendor|specialty|calibration sublet|scan sublet|glass|alignment)/i.test(text) &&
@@ -2502,12 +2516,73 @@ function safeParseJsonObject<T>(value: string): T | null {
   }
 }
 
+function buildCccWorkfilePromptContext(attachments: StoredAttachment[]) {
+  const cccArtifacts = attachments.filter((attachment) =>
+    isCccUploadClassification(attachment.classification ?? "text")
+  );
+
+  if (!cccArtifacts.length) return "";
+
+  return [
+    CCC_WORKFILE_DISCLAIMER,
+    ...cccArtifacts.map((attachment) => {
+      const metadata = attachment.metadata;
+      return [
+        `- ${attachment.filename}`,
+        `classification=${attachment.classification}`,
+        `parserStatus=${metadata?.parserStatus ?? "unknown"}`,
+        `sha256=${attachment.sha256 ?? metadata?.sha256 ?? "not recorded"}`,
+        `sizeBytes=${attachment.sizeBytes ?? metadata?.sizeBytes ?? "unknown"}`,
+      ].join("; ");
+    }),
+  ].join("\n");
+}
+
+function buildCccWorkfileReportContext(
+  attachments: StoredAttachment[]
+): RepairIntelligenceReport["cccWorkfileContext"] | undefined {
+  const artifacts = attachments
+    .filter((attachment) => isCccUploadClassification(attachment.classification ?? "text"))
+    .map((attachment) => ({
+      id: attachment.id,
+      filename: attachment.filename,
+      classification: attachment.classification as "ccc_workfile" | "ccc_awf" | "ccc_companion_file",
+      parserStatus: attachment.metadata?.parserStatus,
+      sha256: attachment.sha256 ?? attachment.metadata?.sha256,
+      sizeBytes: attachment.sizeBytes ?? attachment.metadata?.sizeBytes,
+    }));
+
+  return artifacts.length
+    ? {
+        disclaimer: CCC_WORKFILE_DISCLAIMER,
+        artifacts,
+      }
+    : undefined;
+}
+
+function buildMergedCccWorkfileReportContext(
+  existing: RepairIntelligenceReport["cccWorkfileContext"] | undefined,
+  attachments: StoredAttachment[]
+): RepairIntelligenceReport["cccWorkfileContext"] | undefined {
+  const next = buildCccWorkfileReportContext(attachments);
+  const artifacts = [...(existing?.artifacts ?? []), ...(next?.artifacts ?? [])];
+  const deduped = new Map(artifacts.map((artifact) => [artifact.id, artifact]));
+
+  return deduped.size
+    ? {
+        disclaimer: CCC_WORKFILE_DISCLAIMER,
+        artifacts: [...deduped.values()],
+      }
+    : undefined;
+}
+
 async function generateSupplementCandidates(
   text: string,
   report: RepairIntelligenceReport,
-  linkedEvidence: LinkedEvidence[] = []
+  linkedEvidence: LinkedEvidence[] = [],
+  cccWorkfileContext = ""
 ) {
-  if (!text.trim()) return [];
+  if (!text.trim() && !cccWorkfileContext.trim()) return [];
 
   const requiredProcedures = report.requiredProcedures
     .map((entry) => `- ${entry.procedure}`)
@@ -2539,7 +2614,9 @@ Important:
 - Do NOT assume every vehicle has the same ADAS systems
 - Do NOT suggest front camera, radar, blind spot, or other ADAS calibrations unless they are supported by the required procedure context
 - Treat referenced OEM/procedure documentation as a real support signal for repair-path reasoning, especially for ADAS, calibration, structural verification, alignment, and fit-check operations
+- Treat CCC AWF/workfile context as estimate-structure support for comparison, scrubber review, and supplement assistance only
 - But explicitly distinguish when the actual linked document was referenced but not retrieved
+- Never represent this system as replacing CCC or generating final CCC estimates
 - If a function is already represented in the estimate or present-procedure list, do NOT include it
 - Only flag items that are truly unclear or absent
 - Consolidate duplicate or overlapping issues into one supportable candidate
@@ -2562,6 +2639,9 @@ Return JSON only:
             type: "input_text",
             text: `[Estimate Text]
 ${text}
+
+[CCC AWF / Workfile Context]
+${cccWorkfileContext || "- None uploaded"}
 
 [Vehicle-Specific Required Procedures From Linked OEM Support]
 ${requiredProcedures || "- None provided"}

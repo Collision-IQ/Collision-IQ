@@ -7,7 +7,6 @@ import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import type { UploadedDocument } from "@/lib/sessionStore";
 import {
   formatBytes,
-  MAX_UPLOAD_BATCH_FILES,
   MAX_UPLOAD_FILE_BYTES,
 } from "@/components/chatWidget/attachmentUtils";
 import {
@@ -23,6 +22,13 @@ type Props = {
 type UploadStage = "idle" | "uploading" | "extracting_zip" | "preparing_analysis";
 
 const LARGE_UPLOAD_WARNING_BYTES = 10 * 1024 * 1024;
+const STARTER_UPLOAD_LIMITS = resolveUploadPlanLimits({
+  plan: "starter",
+  billingPlan: "starter",
+  isPlatformAdmin: false,
+  entitlementSource: "starter_subscription",
+  maxUploadsPerReview: 1,
+});
 
 function isZipFile(file: Pick<File, "name" | "type">) {
   return (
@@ -62,7 +68,9 @@ export default function FileUpload({
   const [error, setError] = useState<string | null>(null);
   const [uploaded, setUploaded] = useState<string[]>([]);
   const [uploadHint, setUploadHint] = useState("You can upload PDFs, photos, screenshots, or ZIP files.");
-  const [maxUploadBatchFiles, setMaxUploadBatchFiles] = useState(MAX_UPLOAD_BATCH_FILES);
+  const [maxUploadBatchFiles, setMaxUploadBatchFiles] = useState(
+    STARTER_UPLOAD_LIMITS.maxFilesPerReview
+  );
   const [uploadLimitsLoaded, setUploadLimitsLoaded] = useState(false);
   const [zipSummary, setZipSummary] = useState<string | null>(null);
   const [largeUploadWarning, setLargeUploadWarning] = useState<string | null>(null);

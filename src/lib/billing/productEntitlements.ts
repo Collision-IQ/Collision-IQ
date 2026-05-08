@@ -1,7 +1,7 @@
 import type { SubscriptionPlan, SubscriptionStatus } from "@prisma/client";
 import {
   getCurrentEntitlements,
-  getPlanUploadCap,
+  getPlanUploadBatchLimit,
   toAccountEntitlements,
   type AccountEntitlements,
   type EntitlementResolutionContext,
@@ -37,7 +37,7 @@ export function canUploadFiles(entitlements: Pick<ProductEntitlements, "canUploa
 }
 
 export function getMaxUploadsPerReview(plan: BillingPlan) {
-  return getPlanUploadCap(plan);
+  return getPlanUploadBatchLimit(plan);
 }
 
 export function resolveProductTrialActive(access: {

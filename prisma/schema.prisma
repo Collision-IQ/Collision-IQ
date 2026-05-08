@@ -185,6 +185,12 @@ model UploadedAttachment {
   text         String
   imageDataUrl String?
   pageCount    Int?
+  classification String?
+  sizeBytes    Int?
+  sha256       String?
+  metadata     Json?
+  source       String?
+  sourceArchive String?
   ownerType    ArtifactOwnerType
   ownerId      String
   sessionId    String?
@@ -194,6 +200,8 @@ model UploadedAttachment {
 
   @@index([ownerType, ownerId, createdAt])
   @@index([sessionId, createdAt])
+  @@index([classification])
+  @@index([sha256])
 }
 
 model AnalysisReport {

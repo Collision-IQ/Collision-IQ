@@ -1,4 +1,4 @@
-import { PRO_UPLOAD_BATCH_FILE_LIMIT } from "@/lib/uploadSafety/uploadLimits";
+import { STARTER_UPLOAD_BATCH_FILE_LIMIT } from "@/lib/uploadSafety/uploadLimits";
 
 export const NEXT_UPLOAD_PRIORITY = [
   "final invoice",
@@ -11,7 +11,7 @@ export const NEXT_UPLOAD_PRIORITY = [
 
 export function buildNextBatchPrompt(
   totalFilesReviewed: number,
-  maxBatchFiles = PRO_UPLOAD_BATCH_FILE_LIMIT
+  maxBatchFiles = STARTER_UPLOAD_BATCH_FILE_LIMIT
 ) {
   return `Files reviewed so far: ${totalFilesReviewed}. You can upload another batch when ready. Upload the next ${maxBatchFiles} most important files: ${NEXT_UPLOAD_PRIORITY.join(", ")}.`;
 }
@@ -19,7 +19,7 @@ export function buildNextBatchPrompt(
 export function buildUploadBatchGuidance(
   totalFilesReviewed: number,
   currentBatchCount: number,
-  maxBatchFiles = PRO_UPLOAD_BATCH_FILE_LIMIT
+  maxBatchFiles = STARTER_UPLOAD_BATCH_FILE_LIMIT
 ) {
   const uploadLimitText =
     maxBatchFiles === 1
