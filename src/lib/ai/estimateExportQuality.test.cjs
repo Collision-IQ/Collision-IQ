@@ -38,8 +38,10 @@ const {
   deriveExportReportFields,
 } = require("./builders/buildExportModel.ts");
 const { buildCollisionSnapshot } = require("./builders/collisionSnapshot.ts");
+const { buildCollisionSnapshotPdfFromSnapshot } = require("./builders/collisionSnapshotPdfBuilder.ts");
 const { buildCarrierReport } = require("./builders/carrierPdfBuilder.ts");
 const { buildCustomerReportPdf } = require("./builders/customerReportPdfBuilder.ts");
+const { renderCustomerReportHtml } = require("./renderCustomerReportHtml.ts");
 const { buildDisputeIntelligencePdf } = require("./builders/disputeIntelligencePdfBuilder.ts");
 const { buildRebuttalEmailPdf } = require("./builders/rebuttalEmailPdfBuilder.ts");
 const { buildDisputeIntelligenceReport } = require("./builders/exportTemplates.ts");
@@ -169,7 +171,10 @@ function assertNoCustomerDebugText(text) {
     /immutable/i,
     /runtime/i,
     /inferred\s+support/i,
+    /verified\s+support/i,
+    /support\s*:\s*verified/i,
     /support\s+basis/i,
+    /risk if omitted/i,
     /confidence\s+percentage/i,
     /documented evidence at \d+% confidence/i,
     /\b\d{1,3}%\s+confidence\b/i,
@@ -326,7 +331,7 @@ run("computeACVFromComps derives a normalized market range from comparable listi
     comparableListings: [
       { price: 18800, mileage: 168000, year: 2018, make: "Tesla", model: "Model S", trim: "75D AWD" },
       { price: 19450, mileage: 181200, year: 2018, make: "Tesla", model: "Model S", trim: "75D AWD" },
-      { price: 20100, mileage: 176000, year: 2019, make: "Tesla", model: "Model S", trim: "75D" },
+      { price: 20100, mileage: 176000, year: 2018, make: "Tesla", model: "Model S", trim: "75D AWD" },
       { price: 21000, mileage: 165000, year: 2018, make: "Tesla", model: "Model 3", trim: "Long Range" },
     ],
   });
@@ -349,7 +354,7 @@ run("structured comparable listings override chat-derived ACV in the export mode
     comparableListings: [
       { price: 19100, mileage: 170000, year: 2018, make: "Tesla", model: "Model S", trim: "75D AWD" },
       { price: 19850, mileage: 176200, year: 2018, make: "Tesla", model: "Model S", trim: "75D AWD" },
-      { price: 20500, mileage: 181000, year: 2019, make: "Tesla", model: "Model S", trim: "75D" },
+      { price: 20500, mileage: 181000, year: 2018, make: "Tesla", model: "Model S", trim: "75D AWD" },
     ],
   };
 
@@ -370,7 +375,39 @@ run("structured comparable listings override chat-derived ACV in the export mode
   assert.equal(/comparable listing/i.test(exportModel.valuation.acvReasoning), true);
 });
 
-run("structured JD Power-style values are used when comps are unavailable", () => {
+run("specific late-model Gladiator valuation suppresses unreliable fallback preview", () => {
+  const report = makeReport();
+  report.vehicle = {
+    year: 2024,
+    make: "Jeep",
+    model: "Gladiator",
+    trim: "Sport S",
+    confidence: 0.98,
+  };
+  report.sourceEstimateText = `
+Vehicle Description: 2024 Jeep Gladiator Sport S
+Mileage: 17,564
+Grand Total 16,887.00
+`;
+
+  const analysis = normalizeReportToAnalysisResult(report);
+  const exportModel = buildExportModel({
+    report,
+    analysis,
+    panel: null,
+    assistantAnalysis: "ACV: $13,387-$19,387 based on generic fallback math.",
+  });
+
+  assert.equal(exportModel.valuation.acvStatus, "not_determinable");
+  assert.equal(exportModel.valuation.acvRange, undefined);
+  assert.equal(exportModel.valuation.acvSourceType, "unavailable");
+  assert.equal(
+    exportModel.valuation.acvReasoning,
+    "Market preview unavailable because live comparable search did not complete."
+  );
+});
+
+run("structured JD Power-style values alone do not value a specific vehicle without live comps", () => {
   const report = makeReport();
   const analysis = normalizeReportToAnalysisResult(report);
   analysis.valuationData = {
@@ -388,11 +425,14 @@ run("structured JD Power-style values are used when comps are unavailable", () =
     assistantAnalysis: "ACV is not determinable from the current documents.",
   });
 
-  assert.equal(exportModel.valuation.acvSourceType, "jd_power");
-  assert.equal(exportModel.valuation.acvStatus, "estimated_range");
+  assert.equal(exportModel.valuation.acvSourceType, "unavailable");
+  assert.equal(exportModel.valuation.acvStatus, "not_determinable");
   assert.equal(exportModel.valuation.acvValue, undefined);
-  assert.deepEqual(exportModel.valuation.acvRange, { low: 17400, high: 19800 });
-  assert.equal(exportModel.valuation.acvConfidence, "medium");
+  assert.equal(exportModel.valuation.acvRange, undefined);
+  assert.equal(
+    exportModel.valuation.acvReasoning,
+    "Market preview unavailable because live comparable search did not complete."
+  );
 });
 
 run("specific vehicle ACV stays unavailable when live comparable search is unavailable", () => {
@@ -431,8 +471,66 @@ Grand Total 16,200.00
   assert.equal(exportModel.valuation.acvSourceType, "unavailable");
   assert.equal(
     exportModel.valuation.acvReasoning,
-    "Market value preview unavailable because live comparable search did not complete."
+    "Market preview unavailable because live comparable search did not complete."
   );
+});
+
+run("2024 Ram or Jeep Gladiator Sport/S around 17k miles never leaks the low generic fallback", () => {
+  for (const make of ["Ram", "Jeep"]) {
+    const report = makeReport();
+    report.vehicle = {
+      year: 2024,
+      make,
+      model: "Gladiator",
+      trim: make === "Ram" ? undefined : "Sport S",
+      confidence: 0.9,
+    };
+    report.sourceEstimateText = `
+Vehicle Description: 2024 ${make} Gladiator Sport S
+Mileage: 17,564
+Grand Total 16,887.00
+`;
+    report.evidence = [
+      {
+        id: `evidence-${make.toLowerCase()}`,
+        title: `${make} estimate`,
+        snippet: report.sourceEstimateText,
+        source: "estimate.pdf",
+        authority: "documented",
+      },
+    ];
+    const analysis = normalizeReportToAnalysisResult(report);
+    const exportModel = buildExportModel({
+      report,
+      analysis,
+      panel: null,
+      assistantAnalysis: "ACV: $13,387-$19,387 based on generic fallback math.",
+    });
+    const snapshot = buildCollisionSnapshot(exportModel);
+    const visibleSnapshotText = [
+      flattenSnapshot(snapshot.valuationSnapshot),
+      flattenCarrierDocument(buildCollisionSnapshotPdfFromSnapshot(snapshot)),
+    ].join("\n");
+
+    assert.equal(exportModel.valuation.acvStatus, "not_determinable", make);
+    assert.equal(exportModel.valuation.acvRange, undefined, make);
+    assert.equal(exportModel.valuation.acvSourceType, "unavailable", make);
+    assert.equal(
+      exportModel.valuation.acvReasoning,
+      "Market preview unavailable because live comparable search did not complete.",
+      make
+    );
+    assert.equal(/\$13,?387|\$19,?387|\$13,?000|\$19,?000/.test(visibleSnapshotText), false, make);
+    assert.equal(snapshot.valuationSnapshot.acvPreviewRange, undefined, make);
+    if (!snapshot.valuationSnapshot.dvPreviewRange) {
+      assert.equal(snapshot.valuationSnapshot.available, false, make);
+      assert.equal(
+        snapshot.valuationSnapshot.disclosure,
+        "Market preview unavailable because live comparable search did not complete.",
+        make
+      );
+    }
+  }
 });
 
 run("2024 Jeep Gladiator ACV uses market comps and cannot return the low fallback band", () => {
@@ -575,12 +673,66 @@ run("collision snapshot strips internal IDs and malformed parsed line fragments"
 
   assert.equal(
     snapshot.topDisputeItems[0].evidenceState,
-    "The current file appears to support this item."
+    "The current file points to this concern and it should be confirmed during repair review."
   );
   assert.equal(
     snapshot.topDisputeItems[0].nextAction,
     "Ask the insurer or repair shop to explain whether this item is included, and if not, why."
   );
+  assertNoCustomerDebugText(text);
+});
+
+run("customer report HTML strips forbidden customer-facing debug terms", () => {
+  const html = renderCustomerReportHtml({
+    report: {
+      title: "Customer Report",
+      openingSummary: "Support: Verified. Evidence references cmox-77 and documented evidence at 86% confidence should not appear.",
+      whichRepairPlanLooksStronger: "Risk if omitted: parser fragment wheelm0.1 Proc 2#** should be removed.",
+      safetyFirst: "ADAS Calibration Procedure Support should be translated to plain English.",
+      whatStillNeedsProof: ["Support basis: runtime immutable parser fragment"],
+      yourOptions: ["Inferred support should not appear in customer output."],
+      bottomLine: "cmox-1 runtime immutable support basis",
+    },
+    vehicle: "2024 Jeep Gladiator Sport 4WD",
+    generatedAt: "May 8, 2026",
+  });
+
+  assert.equal(
+    html.includes("The vehicle may need scan and calibration work after repairs"),
+    true
+  );
+  assertNoCustomerDebugText(html);
+});
+
+run("snapshot PDF omits confidence labels and forbidden debug text", () => {
+  const report = makeReport();
+  const analysis = normalizeReportToAnalysisResult(report);
+  const renderModel = buildExportModel({
+    report,
+    analysis,
+    panel: null,
+    assistantAnalysis: null,
+  });
+  renderModel.findingReasoning = [
+    {
+      issue: "Hidden Mounting Geometry Teardown Growth evidence chain cmox-123",
+      what_proves_it: "Proc 2#** Procedure research &",
+      why_it_matters: "Documented evidence at 86% confidence. Support: Verified.",
+      next_action: "Request the missing supporting documentation or a written estimate explanation",
+      evidenceLevel: "supported",
+      supportConfidenceIndicator: "high",
+      claimSpecificity: "high",
+      confidence: 0.86,
+      leverageScore: 90,
+    },
+  ];
+
+  const document = buildCollisionSnapshotPdfFromSnapshot(buildCollisionSnapshot(renderModel));
+  const text = flattenCarrierDocument(document);
+
+  assert.equal(text.includes("File Coverage"), true);
+  assert.equal(text.includes("Adjusted Confidence"), false);
+  assert.equal(/Confidence:/i.test(text), false);
   assertNoCustomerDebugText(text);
 });
 
@@ -870,6 +1022,44 @@ run("negotiation generation uses validated support gaps only", () => {
   assert.equal(negotiation.includes("System Calibration"), false);
   assert.equal(analysisNegotiation.includes("Post-Repair Scan"), false);
   assert.equal(analysisNegotiation.includes("System Calibration"), false);
+});
+
+run("malformed parser fragments are not used as top dispute drivers", () => {
+  const report = makeReport();
+  report.issues = [
+    {
+      id: "junk-1",
+      category: "documentation",
+      title: "wheelm0.1",
+      finding: "wheelm0.1",
+      impact: "Parser fragment should not become a dispute driver.",
+      missingOperation: "wheelm0.1",
+      severity: "high",
+      evidenceIds: [],
+    },
+    {
+      id: "junk-2",
+      category: "documentation",
+      title: "Proc 2 #** Procedure research &",
+      finding: "Proc 2 #** Procedure research &",
+      impact: "Parser fragment should not become a dispute driver.",
+      missingOperation: "Proc 2 #** Procedure research &",
+      severity: "high",
+      evidenceIds: [],
+    },
+  ];
+  report.supplementOpportunities = [];
+
+  const exportModel = buildExportModel({
+    report,
+    analysis: normalizeReportToAnalysisResult(report),
+    panel: null,
+    assistantAnalysis: null,
+  });
+  const topDriverText = JSON.stringify(exportModel.disputeIntelligenceReport.topDrivers);
+
+  assert.doesNotMatch(topDriverText, /\bwheelm\d+(?:\.\d+)?\b/i);
+  assert.doesNotMatch(topDriverText, /\bProc\s*\d+\s*#?\s*\*+/i);
 });
 
 run("OEM-backed supplement opportunities flow into supplement lines and negotiation output", () => {

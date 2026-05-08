@@ -1,0 +1,1430 @@
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: false,
+  zipProvided: true,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: false,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: null,
+  stateDetected: false
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: null,
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 0,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: null }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_verified_regulation_used',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_verified_regulation_used',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_regulation_access',
+  value: 1,
+  dimensions: { state: 'FL', status: 401, cacheStatus: null }
+}
+[policy-legal] {
+  event: 'regulation_access',
+  state: 'FL',
+  status: 401,
+  totalCount: 0,
+  verifiedCount: 0,
+  placeholderCount: 0,
+  cacheStatus: null
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_regulation_access',
+  value: 1,
+  dimensions: { state: 'FL', status: 403, cacheStatus: null }
+}
+[policy-legal] {
+  event: 'regulation_access',
+  state: 'FL',
+  status: 403,
+  totalCount: 0,
+  verifiedCount: 0,
+  placeholderCount: 0,
+  cacheStatus: null
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_regulation_access',
+  value: 1,
+  dimensions: { state: null, status: 400, cacheStatus: null }
+}
+[policy-legal] {
+  event: 'regulation_access',
+  state: null,
+  status: 400,
+  totalCount: 0,
+  verifiedCount: 0,
+  placeholderCount: 0,
+  cacheStatus: null
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_verified_regulation_used',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_missing_citation',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_verified_regulation_used',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+PASS valid ZIP resolves to state
+PASS invalid or missing ZIP resolves to null
+PASS no verified regulation uses governing-regulation fallback
+PASS TBD placeholder citation does not count as regulatory support
+PASS each line item receives citation and source fallback
+PASS disputable item detection highlights strong OEM-supported issue
+PASS PolicyLegalConfidenceScore calculation is deterministic
+PASS legacy report compatibility handles missing policy/legal fields and arrays
+PASS Prisma camelCase Regulation record maps into review support
+PASS empty Regulation table falls back to placeholder JSON dataset
+PASS valid verified regulation seed record is accepted
+PASS regulation version hash is stable and excludes retrieval timestamp
+PASS regulation version comparison detects changed source snapshots
+PASS point-in-time regulation replay selects historical version
+PASS verified regulation seed rejects TBD citation
+PASS verified regulation seed rejects missing source URL
+PASS DB verified record overrides placeholder support
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 1,
+  placeholderRegulationCount: 0,
+  citationRequired: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_regulation_db_fallback',
+  value: 1,
+  dimensions: { state: 'FL' }
+}
+[policy-legal] { event: 'regulation_db_fallback', state: 'FL', errorName: 'Error' }
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+PASS verified regulation seed rejects missing source metadata
+PASS regulations debug payload returns verified before placeholders with counts
+PASS placeholder records never show regulatory support Yes
+[policy-legal:metric] {
+  metric: 'policy_legal_regulation_access',
+  value: 1,
+  dimensions: { state: 'FL', status: 200, cacheStatus: 'bypass' }
+}
+[policy-legal] {
+  event: 'regulation_access',
+  state: 'FL',
+  status: 200,
+  totalCount: 8,
+  verifiedCount: 1,
+  placeholderCount: 7,
+  cacheStatus: 'bypass'
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_regulation_access',
+  value: 1,
+  dimensions: { state: 'FL', status: 200, cacheStatus: 'miss' }
+}
+[policy-legal] {
+  event: 'regulation_access',
+  state: 'FL',
+  status: 200,
+  totalCount: 8,
+  verifiedCount: 1,
+  placeholderCount: 7,
+  cacheStatus: 'miss'
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_regulation_access',
+  value: 1,
+  dimensions: { state: 'GA', status: 200, cacheStatus: 'bypass' }
+}
+[policy-legal] {
+  event: 'regulation_access',
+  state: 'GA',
+  status: 200,
+  totalCount: 8,
+  verifiedCount: 1,
+  placeholderCount: 7,
+  cacheStatus: 'bypass'
+}
+PASS review citation snapshot includes regulation and citation ids
+PASS review snapshot marks placeholder citations without treating them as support
+PASS repeated policy/legal review creates a new immutable snapshot payload
+PASS missing citation increments metric and logs enforcement failure without line details
+PASS placeholder usage is counted
+PASS verified regulation usage is counted
+PASS feature disabled skips policy/legal review
+[policy-legal:metric] {
+  metric: 'policy_legal_regulation_db_fallback',
+  value: 1,
+  dimensions: { state: 'PA' }
+}
+[policy-legal] { event: 'regulation_db_fallback', state: 'PA', errorName: 'Error' }
+[policy-legal:metric] {
+  metric: 'policy_legal_regulation_access',
+  value: 1,
+  dimensions: { state: 'PA', status: 200, cacheStatus: 'bypass' }
+}
+[policy-legal] {
+  event: 'regulation_access',
+  state: 'PA',
+  status: 200,
+  totalCount: 8,
+  verifiedCount: 0,
+  placeholderCount: 8,
+  cacheStatus: 'bypass'
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_regulation_db_fallback',
+  value: 1,
+  dimensions: { state: 'FL' }
+}
+[policy-legal] { event: 'regulation_db_fallback', state: 'FL', errorName: 'Error' }
+[policy-legal:metric] {
+  metric: 'policy_legal_regulation_access',
+  value: 1,
+  dimensions: { state: 'FL', status: 200, cacheStatus: 'bypass' }
+}
+[policy-legal] {
+  event: 'regulation_access',
+  state: 'FL',
+  status: 200,
+  totalCount: 8,
+  verifiedCount: 0,
+  placeholderCount: 8,
+  cacheStatus: 'bypass'
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_regulation_db_fallback',
+  value: 1,
+  dimensions: { state: 'PA' }
+}
+[policy-legal] { event: 'regulation_db_fallback', state: 'PA', errorName: 'Error' }
+[policy-legal:metric] {
+  metric: 'policy_legal_regulation_access',
+  value: 1,
+  dimensions: { state: 'PA', status: 200, cacheStatus: 'bypass' }
+}
+[policy-legal] {
+  event: 'regulation_access',
+  state: 'PA',
+  status: 200,
+  totalCount: 8,
+  verifiedCount: 0,
+  placeholderCount: 8,
+  cacheStatus: 'bypass'
+}
+PASS malformed regulation record is ignored and review remains valid
+PASS policy rights review rejects mixed-jurisdiction and weak legal sources
+[policy-legal:metric] {
+  metric: 'policy_legal_snapshot_create_failed',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal] {
+  event: 'snapshot_creation_failure',
+  claimState: 'PA',
+  errorName: 'Error'
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_regulation_access',
+  value: 1,
+  dimensions: { state: 'TX', status: 200, cacheStatus: 'miss' }
+}
+[policy-legal] {
+  event: 'regulation_access',
+  state: 'TX',
+  status: 200,
+  totalCount: 8,
+  verifiedCount: 0,
+  placeholderCount: 8,
+  cacheStatus: 'miss'
+}
+PASS feature flag toggle mid-run does not leak partial review objects
+PASS high-volume lightweight review generation has isolated outputs
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_verified_regulation_used',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+FAIL doi packet omits weak legal sources from verified support sections
+[policy-legal:metric] {
+  metric: 'policy_legal_regulation_access',
+  value: 1,
+  dimensions: { state: 'FL', status: 200, cacheStatus: 'hit' }
+}
+[policy-legal] {
+  event: 'regulation_access',
+  state: 'FL',
+  status: 200,
+  totalCount: 8,
+  verifiedCount: 1,
+  placeholderCount: 7,
+  cacheStatus: 'hit'
+}
+PASS snapshots endpoint blocks unauthenticated requests
+PASS snapshots endpoint blocks non-admin requests
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'FL',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'FL',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'FL' }
+}
+[policy-legal] {
+  event: 'state_detection_result',
+  inputStateProvided: true,
+  zipProvided: false,
+  textZipDetected: false,
+  claimState: 'PA',
+  stateDetected: true
+}
+[policy-legal] {
+  event: 'context_injected',
+  claimState: 'PA',
+  verifiedRegulationCount: 0,
+  placeholderRegulationCount: 8,
+  citationRequired: true
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_review_generated',
+  value: 1,
+  dimensions: { claimState: 'PA' }
+}
+[policy-legal:metric] {
+  metric: 'policy_legal_placeholder_used',
+  value: 8,
+  dimensions: { claimState: 'PA' }
+}
+PASS verified DB regulation is used in review without manually supplying dbRecords
+PASS placeholder context is used only when no verified DB record exists
+PASS policy/legal context DB failure falls back safely
+PASS regulations endpoint blocks unauthenticated requests
+PASS regulations endpoint blocks non-admin requests
+PASS regulations endpoint rejects invalid state
+PASS snapshots endpoint returns newest snapshots first
+PASS snapshots endpoint shows repeated reviews as distinct snapshots
+PASS snapshots endpoint marks placeholders without regulatory support
+PASS snapshot write failure logs metric and does not throw
+PASS regulations endpoint returns verified records before placeholders
+PASS regulations endpoint access logs are created with counts and cache status
+PASS regulation DB lookup failure falls back safely to placeholders
+PASS health endpoint payload returns expected readiness fields
+PASS fallback placeholders do not fabricate regulatory support
+PASS regulation DB outage falls back and does not create regulatory support
+PASS corrupted regulation cache is rebuilt safely
+PASS regulations endpoint cache returns stable payload

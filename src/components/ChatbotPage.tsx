@@ -35,6 +35,7 @@ import { buildCarrierReport, type CarrierReportDocument } from "@/lib/ai/builder
 import { buildCollisionSnapshot, type CollisionSnapshot } from "@/lib/ai/builders/collisionSnapshot";
 import {
   buildCollisionSnapshotPdfFromSnapshot,
+  sanitizeSnapshotForFinalRender,
 } from "@/lib/ai/builders/collisionSnapshotPdfBuilder";
 import { buildCustomerReportPdf } from "@/lib/ai/builders/customerReportPdfBuilder";
 import { buildDoiComplaintPacketPdf } from "@/lib/ai/builders/doiComplaintPacketPdfBuilder";
@@ -2969,6 +2970,8 @@ function SnapshotPreviewModal({
   onSend: () => void;
   onCancelSend: () => void;
 }) {
+  const safeSnapshot = useMemo(() => sanitizeSnapshotForFinalRender(snapshot), [snapshot]);
+
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -2997,10 +3000,10 @@ function SnapshotPreviewModal({
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border/60 px-5 py-4">
           <div>
             <div className="text-[10px] uppercase tracking-[0.22em] text-[#C65A2A]">
-              {snapshot.redactionNotice}
+              {safeSnapshot.redactionNotice}
             </div>
-            <h2 id="snapshot-preview-title" className="mt-2 text-2xl font-semibold text-foreground">{snapshot.title}</h2>
-            <div className="mt-1 text-sm text-muted-foreground">{snapshot.vehicleLabel}</div>
+            <h2 id="snapshot-preview-title" className="mt-2 text-2xl font-semibold text-foreground">{safeSnapshot.title}</h2>
+            <div className="mt-1 text-sm text-muted-foreground">{safeSnapshot.vehicleLabel}</div>
           </div>
           <button type="button" onClick={onClose} className="rounded-xl bg-muted px-3 py-2 text-xs text-muted-foreground hover:bg-muted/80 hover:text-foreground">
             Close
@@ -3009,70 +3012,69 @@ function SnapshotPreviewModal({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 pb-8">
         <div className="grid gap-3 md:grid-cols-2">
-          <SnapshotPanel title="Adjusted Confidence" items={[
-            snapshot.evidenceCompleteness.adjustedConfidence,
-            `Completeness: ${formatLabel(snapshot.evidenceCompleteness.completenessStatus)}`,
+          <SnapshotPanel title="File Coverage" items={[
+            `Coverage status: ${formatLabel(snapshot.evidenceCompleteness.completenessStatus)}`,
+            safeSnapshot.evidenceCompleteness.userFacingDisclosure,
           ]} />
           <SnapshotPanel title="Repair Plan Verdict" items={[
-            `More complete plan: ${snapshot.repairPlanVerdict.moreCompletePlan}`,
-            `Carrier plan: ${snapshot.repairPlanVerdict.carrierPlanStatus}`,
-            snapshot.repairPlanVerdict.reason,
+            `More complete plan: ${safeSnapshot.repairPlanVerdict.moreCompletePlan}`,
+            `Carrier plan: ${safeSnapshot.repairPlanVerdict.carrierPlanStatus}`,
+            safeSnapshot.repairPlanVerdict.reason,
           ]} />
-          <SnapshotPanel title="Damage Snapshot" items={snapshot.damageSummary} />
+          <SnapshotPanel title="Damage Snapshot" items={safeSnapshot.damageSummary} />
           <SnapshotPanel title="Estimate Comparison" items={
-            snapshot.estimateComparison.available
+            safeSnapshot.estimateComparison.available
               ? [
-                  snapshot.estimateComparison.shopEstimateTotal ? `Shop: ${snapshot.estimateComparison.shopEstimateTotal}` : null,
-                  snapshot.estimateComparison.carrierEstimateTotal ? `Carrier: ${snapshot.estimateComparison.carrierEstimateTotal}` : null,
-                  snapshot.estimateComparison.difference ? `Difference: ${snapshot.estimateComparison.difference}` : null,
-                  ...snapshot.estimateComparison.keyDeltas,
+                  safeSnapshot.estimateComparison.shopEstimateTotal ? `Shop: ${safeSnapshot.estimateComparison.shopEstimateTotal}` : null,
+                  safeSnapshot.estimateComparison.carrierEstimateTotal ? `Carrier: ${safeSnapshot.estimateComparison.carrierEstimateTotal}` : null,
+                  safeSnapshot.estimateComparison.difference ? `Difference: ${safeSnapshot.estimateComparison.difference}` : null,
+                  ...safeSnapshot.estimateComparison.keyDeltas,
                 ].filter((item): item is string => Boolean(item))
-              : [snapshot.estimateComparison.unavailableReason ?? "Estimate comparison is unavailable."]
+              : [safeSnapshot.estimateComparison.unavailableReason ?? "Estimate comparison is unavailable."]
           } />
           <SnapshotPanel
             title="Top 3 Dispute Items"
-            items={snapshot.topDisputeItems.map(
+            items={safeSnapshot.topDisputeItems.map(
               (item, index) => `${index + 1}. ${item.issue}: ${item.evidenceState} Next: ${item.nextAction}`
             )}
           />
-          <SnapshotPanel title="Evidence Completeness" items={[
-            `Files uploaded: ${snapshot.evidenceCompleteness.uploadedFileCount}`,
-            `Upload cap reached: ${snapshot.evidenceCompleteness.uploadLimitReached ? "Yes" : "No"}`,
-            `More files indicated: ${snapshot.evidenceCompleteness.userIndicatedMoreFiles ? "Yes" : "No"}`,
-            snapshot.evidenceCompleteness.missingCriticalEvidence.length
-              ? `Missing proof: ${snapshot.evidenceCompleteness.missingCriticalEvidence.join(", ")}`
+          <SnapshotPanel title="File Coverage" items={[
+            `Files uploaded: ${safeSnapshot.evidenceCompleteness.uploadedFileCount}`,
+            `Upload cap reached: ${safeSnapshot.evidenceCompleteness.uploadLimitReached ? "Yes" : "No"}`,
+            `More files indicated: ${safeSnapshot.evidenceCompleteness.userIndicatedMoreFiles ? "Yes" : "No"}`,
+            safeSnapshot.evidenceCompleteness.missingCriticalEvidence.length
+              ? `Still worth checking: ${safeSnapshot.evidenceCompleteness.missingCriticalEvidence.join(", ")}`
               : "No critical missing proof listed.",
-            snapshot.evidenceCompleteness.userFacingDisclosure,
+            safeSnapshot.evidenceCompleteness.userFacingDisclosure,
           ]} />
-          <SnapshotPanel title="Next Actions" items={snapshot.nextActions.map((item, index) => `${index + 1}. ${item}`)} />
-          <SnapshotPanel title="ACV / DV Preview" items={
-            snapshot.valuationSnapshot.available
+          <SnapshotPanel title="Next Actions" items={safeSnapshot.nextActions.map((item, index) => `${index + 1}. ${item}`)} />
+          <SnapshotPanel title="Market Preview" items={
+            safeSnapshot.valuationSnapshot.available
               ? [
-                  snapshot.valuationSnapshot.acvPreviewRange ? `ACV: ${snapshot.valuationSnapshot.acvPreviewRange}` : null,
-                  snapshot.valuationSnapshot.dvPreviewRange ? `DV: ${snapshot.valuationSnapshot.dvPreviewRange}` : null,
-                  snapshot.valuationSnapshot.confidence ? `Confidence: ${snapshot.valuationSnapshot.confidence}` : null,
-                  snapshot.valuationSnapshot.disclosure,
+                  safeSnapshot.valuationSnapshot.acvPreviewRange ? `ACV: ${safeSnapshot.valuationSnapshot.acvPreviewRange}` : null,
+                  safeSnapshot.valuationSnapshot.dvPreviewRange ? `DV: ${safeSnapshot.valuationSnapshot.dvPreviewRange}` : null,
+                  safeSnapshot.valuationSnapshot.disclosure,
                 ].filter((item): item is string => Boolean(item))
-              : [snapshot.valuationSnapshot.disclosure]
+              : [safeSnapshot.valuationSnapshot.disclosure]
           } />
         </div>
 
         {resolveAcademyServiceTrigger({
-          snapshot,
-          renderModel: buildSnapshotRenderModel(snapshot),
+          snapshot: safeSnapshot,
+          renderModel: buildSnapshotRenderModel(safeSnapshot),
           valuationLowConfidence:
-            snapshot.valuationSnapshot.confidence?.toLowerCase() === "low" ||
-            snapshot.evidenceCompleteness.adjustedConfidence === "Low",
+            safeSnapshot.valuationSnapshot.confidence?.toLowerCase() === "low" ||
+            safeSnapshot.evidenceCompleteness.adjustedConfidence === "Low",
           appraisalTriggered: false,
         }) ? (
           <div className="mt-5 rounded-2xl border border-[#C65A2A]/24 bg-gradient-to-br from-[#C65A2A]/14 via-[#C65A2A]/08 to-white/[0.02] p-4">
             {(() => {
               const trigger = resolveAcademyServiceTrigger({
-                snapshot,
-                renderModel: buildSnapshotRenderModel(snapshot),
+                snapshot: safeSnapshot,
+                renderModel: buildSnapshotRenderModel(safeSnapshot),
                 valuationLowConfidence:
-                  snapshot.valuationSnapshot.confidence?.toLowerCase() === "low" ||
-                  snapshot.evidenceCompleteness.adjustedConfidence === "Low",
+                  safeSnapshot.valuationSnapshot.confidence?.toLowerCase() === "low" ||
+                  safeSnapshot.evidenceCompleteness.adjustedConfidence === "Low",
                 appraisalTriggered: false,
               });
               if (!trigger) return null;
@@ -3157,11 +3159,15 @@ function SnapshotPreviewModal({
 }
 
 function SnapshotPanel({ title, items }: { title: string; items: string[] }) {
+  const safeItems = items
+    .map((item) => toCustomerFacingText(item))
+    .filter(Boolean);
+
   return (
     <section className="rounded-2xl border border-[var(--border)] bg-[var(--muted)] p-3">
       <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{title}</div>
       <div className="mt-2 space-y-1.5 text-[13px] leading-5 text-foreground/75">
-        {items.map((item, index) => (
+        {safeItems.map((item, index) => (
           <div key={`${title}-${index}`}>{item}</div>
         ))}
       </div>

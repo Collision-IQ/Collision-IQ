@@ -7,6 +7,7 @@ import { buildCollisionSnapshot, type CollisionSnapshot } from "./collisionSnaps
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
 import type { ExportBuilderInput } from "./exportTemplates";
 import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
+import { sanitizeCustomerFacingDocument, toCustomerFacingList, toCustomerFacingText } from "@/lib/ai/customerFacingText";
 
 export function buildCollisionSnapshotPdf(params: ExportBuilderInput): CarrierReportDocument {
   const exportModel = resolveSnapshotExportModel(params);
@@ -23,7 +24,9 @@ export function buildCollisionSnapshotPdf(params: ExportBuilderInput): CarrierRe
 }
 
 export function buildCollisionSnapshotPdfFromSnapshot(snapshot: CollisionSnapshot): CarrierReportDocument {
-  return {
+  const cleanSnapshot = sanitizeSnapshotForFinalRender(snapshot);
+
+  return sanitizeCustomerFacingDocument({
     filename: "collision-snapshot.pdf",
     brand: {
       companyName: "Collision Academy",
@@ -31,8 +34,8 @@ export function buildCollisionSnapshotPdfFromSnapshot(snapshot: CollisionSnapsho
       logoPath: "/brand/logos/logo-horizontal.png",
     },
     header: {
-      title: snapshot.title,
-      subtitle: `${snapshot.vehicleLabel} | Sensitive details removed for sharing`,
+      title: cleanSnapshot.title,
+      subtitle: `${cleanSnapshot.vehicleLabel} | Sensitive details removed for sharing`,
       generatedLabel: `Generated ${new Date().toLocaleDateString("en-US", {
         year: "numeric",
         month: "short",
@@ -40,51 +43,103 @@ export function buildCollisionSnapshotPdfFromSnapshot(snapshot: CollisionSnapsho
       })}`,
     },
     summary: [
-      { label: "Vehicle", value: snapshot.vehicleLabel },
-      { label: "More Complete Plan", value: snapshot.repairPlanVerdict.moreCompletePlan },
-      { label: "Carrier Plan", value: snapshot.repairPlanVerdict.carrierPlanStatus },
-      { label: "Approach", value: snapshot.pressureMode.charAt(0).toUpperCase() + snapshot.pressureMode.slice(1) },
+      { label: "Vehicle", value: cleanSnapshot.vehicleLabel },
+      { label: "More Complete Plan", value: cleanSnapshot.repairPlanVerdict.moreCompletePlan },
+      { label: "Carrier Plan", value: cleanSnapshot.repairPlanVerdict.carrierPlanStatus },
+      { label: "Approach", value: cleanSnapshot.pressureMode.charAt(0).toUpperCase() + cleanSnapshot.pressureMode.slice(1) },
     ],
     sections: [
       {
         title: "Damage Snapshot",
-        bullets: snapshot.damageSummary.slice(0, 3),
+        bullets: cleanSnapshot.damageSummary.slice(0, 3),
       },
       {
         title: "Repair Plan Verdict",
-        body: snapshot.repairPlanVerdict.reason,
+        body: cleanSnapshot.repairPlanVerdict.reason,
       },
-      ...(snapshot.verdictLine
-        ? [{ title: "File Assessment", body: snapshot.verdictLine }]
+      ...(cleanSnapshot.verdictLine
+        ? [{ title: "File Assessment", body: cleanSnapshot.verdictLine }]
         : []),
       {
         title: "Estimate Comparison",
-        bullets: buildEstimateBullets(snapshot),
+        bullets: buildEstimateBullets(cleanSnapshot),
       },
       {
         title: "Top Dispute Items",
-        bullets: snapshot.topDisputeItems.map(
+        bullets: cleanSnapshot.topDisputeItems.map(
           (item, index) =>
-            `${index + 1}. ${item.issue}: ${item.whyItMatters} Evidence: ${item.evidenceState} Action: ${item.nextAction}`
+            `${index + 1}. ${item.issue}: ${item.whyItMatters} The current file appears to support this item. Next: ${item.nextAction}`
         ),
       },
       {
-        title: "Evidence Completeness",
-        bullets: buildCompletenessBullets(snapshot),
+        title: "File Coverage",
+        bullets: buildCompletenessBullets(cleanSnapshot),
       },
       {
         title: "Next Actions",
-        bullets: snapshot.nextActions.map((item, index) => `${index + 1}. ${item}`),
+        bullets: cleanSnapshot.nextActions.map((item, index) => `${index + 1}. ${item}`),
       },
       {
-        title: "Valuation Snapshot",
-        bullets: buildValuationBullets(snapshot),
+        title: "Market Preview",
+        bullets: buildValuationBullets(cleanSnapshot),
       },
     ],
     footer: [
-      snapshot.disclosure,
-      snapshot.redactionNotice,
+      cleanSnapshot.disclosure,
+      cleanSnapshot.redactionNotice,
     ],
+  });
+}
+
+export function sanitizeSnapshotForFinalRender(snapshot: CollisionSnapshot): CollisionSnapshot {
+  return {
+    ...snapshot,
+    title: toCustomerFacingText(snapshot.title, "Collision Snapshot"),
+    vehicleLabel: toCustomerFacingText(snapshot.vehicleLabel, "Vehicle not specified"),
+    damageSummary: toCustomerFacingList(snapshot.damageSummary, [
+      "Damage summary is limited to the current uploaded and retrieved file set.",
+    ]).slice(0, 3),
+    repairPlanVerdict: {
+      moreCompletePlan: snapshot.repairPlanVerdict.moreCompletePlan,
+      carrierPlanStatus: snapshot.repairPlanVerdict.carrierPlanStatus,
+      reason: toCustomerFacingText(snapshot.repairPlanVerdict.reason),
+    },
+    estimateComparison: {
+      ...snapshot.estimateComparison,
+      keyDeltas: toCustomerFacingList(snapshot.estimateComparison.keyDeltas, []),
+      unavailableReason: snapshot.estimateComparison.unavailableReason
+        ? toCustomerFacingText(snapshot.estimateComparison.unavailableReason)
+        : undefined,
+    },
+    topDisputeItems: snapshot.topDisputeItems.map((item) => ({
+      ...item,
+      issue: toCustomerFacingText(item.issue, "Repair item to review"),
+      whyItMatters: toCustomerFacingText(item.whyItMatters, "This item may affect repair quality, safety, or final fit."),
+      evidenceState: "The current file appears to support this item.",
+      nextAction: toCustomerFacingText(
+        item.nextAction,
+        "Ask the insurer or repair shop to explain whether this item is included, and if not, why."
+      ),
+    })),
+    evidenceCompleteness: {
+      ...snapshot.evidenceCompleteness,
+      missingCriticalEvidence: toCustomerFacingList(snapshot.evidenceCompleteness.missingCriticalEvidence, []),
+      userFacingDisclosure: toCustomerFacingText(snapshot.evidenceCompleteness.userFacingDisclosure),
+    },
+    nextActions: toCustomerFacingList(snapshot.nextActions, [
+      "Ask what will be checked before the estimate is considered complete.",
+    ]),
+    verdictLine: snapshot.verdictLine ? toCustomerFacingText(snapshot.verdictLine) : undefined,
+    valuationSnapshot: {
+      ...snapshot.valuationSnapshot,
+      confidence: snapshot.valuationSnapshot.confidence
+        ? toCustomerFacingText(snapshot.valuationSnapshot.confidence)
+        : undefined,
+      disclosure: toCustomerFacingText(snapshot.valuationSnapshot.disclosure),
+    },
+    disclosure: toCustomerFacingText(snapshot.disclosure),
+    redactionNotice: toCustomerFacingText(snapshot.redactionNotice, "Sensitive details removed for sharing."),
+    pressureModeRationale: toCustomerFacingText(snapshot.pressureModeRationale),
   };
 }
 
@@ -148,7 +203,6 @@ function buildValuationBullets(snapshot: ReturnType<typeof buildCollisionSnapsho
     snapshot.valuationSnapshot.dvPreviewRange
       ? `DV preview: ${snapshot.valuationSnapshot.dvPreviewRange}`
       : null,
-    snapshot.valuationSnapshot.confidence ? `Confidence: ${snapshot.valuationSnapshot.confidence}` : null,
     snapshot.valuationSnapshot.disclosure,
   ].filter((item): item is string => Boolean(item));
 }

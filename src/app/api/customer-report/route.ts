@@ -7,6 +7,7 @@ import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import { recordUsage } from "@/lib/billing/usage";
 import { incrementUsage } from "@/lib/usage";
 import { generateCustomerReport } from "@/lib/ai/generateCustomerReport";
+import { sanitizeCustomerReportForRender } from "@/lib/ai/customerFacingText";
 import { renderCustomerReportHtml } from "@/lib/ai/renderCustomerReportHtml";
 import { finalizeExportPayload } from "@/lib/ai/policy/finalizeExportPayload";
 import { collisionIqModels } from "@/lib/modelConfig";
@@ -74,7 +75,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const report = await generateCustomerReport(input, {
+    const report = sanitizeCustomerReportForRender(await generateCustomerReport(input, {
       generateText: async (prompt) => {
         const response = await openai.responses.create({
           model: collisionIqModels.helper,
@@ -94,7 +95,7 @@ export async function POST(req: Request) {
 
         return response.output_text ?? "";
       },
-    });
+    }));
     const generatedAt = new Date().toLocaleString();
     const html = renderCustomerReportHtml({
       report,

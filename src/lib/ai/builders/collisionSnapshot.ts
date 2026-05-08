@@ -279,7 +279,7 @@ function buildTopDisputeItems(renderModel: SnapshotRenderModel): CollisionSnapsh
   return rankedFindings.slice(0, 3).map((finding) => ({
     issue: cleanSnapshotText(finding.issue) || "Repair item to review",
     whyItMatters: cleanSnapshotText(finding.why_it_matters) || "This item may affect repair quality, safety, or final fit.",
-    evidenceState: "The current file appears to support this item.",
+    evidenceState: "The current file points to this concern and it should be confirmed during repair review.",
     nextAction:
       cleanSnapshotText(finding.next_action) ||
       "Ask the insurer or repair shop to explain whether this item is included, and if not, why.",
@@ -305,7 +305,7 @@ function buildValuationSnapshot(renderModel: SnapshotRenderModel): CollisionSnap
   if (!acvPreviewRange && !dvPreviewRange) {
     return {
       available: false,
-      disclosure: renderModel.valuation.acvReasoning || "Market value preview unavailable because live comparable search did not complete.",
+      disclosure: renderModel.valuation.acvReasoning || "Market preview unavailable because live comparable search did not complete.",
     };
   }
 

@@ -31,7 +31,7 @@ export function buildSnapshotPlainText(snapshot: CollisionSnapshot): string {
     ...snapshot.topDisputeItems.map(
       (item, index) => `${index + 1}. ${item.issue} - ${item.evidenceState} ${item.nextAction}`
     ),
-    `Evidence completeness: ${snapshot.evidenceCompleteness.adjustedConfidence}, ${snapshot.evidenceCompleteness.completenessStatus}. ${snapshot.evidenceCompleteness.userFacingDisclosure}`,
+    `File coverage: ${snapshot.evidenceCompleteness.completenessStatus}. ${snapshot.evidenceCompleteness.userFacingDisclosure}`,
     "Next actions:",
     ...snapshot.nextActions.map((item, index) => `${index + 1}. ${item}`),
   ].join("\n"));

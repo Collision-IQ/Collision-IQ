@@ -12,7 +12,10 @@ import type { DecisionPanel } from "./buildDecisionPanel";
 import type { AnalysisResult, ExportResearchSnapshot, RepairIntelligenceReport } from "../types/analysis";
 import type { WorkspaceData } from "@/types/workspaceTypes";
 import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
-import { cleanOperationDisplayText as cleanUiOperationDisplayText } from "@/lib/ui/presentationText";
+import {
+  cleanEstimateLineForTechnicalExport,
+  cleanOperationDisplayText as cleanUiOperationDisplayText,
+} from "@/lib/ui/presentationText";
 import {
   cleanOperationDisplayText,
   getTopEstimateComparisonHighlights,
@@ -252,7 +255,8 @@ function buildCategoryComparisons(
 }
 
 function displaySupplementTitle(value: string | null | undefined): string {
-  return cleanUiOperationDisplayText(value) || cleanOperationDisplayText(value) || value || "Repair Operation";
+  if (!value?.trim()) return "Repair Operation";
+  return cleanEstimateLineForTechnicalExport(value) || cleanUiOperationDisplayText(value) || cleanOperationDisplayText(value) || value || "Repair Operation";
 }
 
 function buildUiAlignedLineItems(

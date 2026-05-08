@@ -10,7 +10,10 @@ import type { ExportBuilderInput } from "./exportTemplates";
 import { buildExportResearchSections } from "./exportResearchSections";
 import type { EstimateScrubFinding, SourceCitation } from "@/lib/ai/types/estimateScrubber";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
-import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
+import {
+  cleanEstimateLineForTechnicalExport,
+  cleanOperationDisplayText,
+} from "@/lib/ui/presentationText";
 import { CCC_WORKFILE_DISCLAIMER } from "@/lib/ccc/cccWorkfile";
 
 export function buildEstimateScrubberPdf(params: ExportBuilderInput): CarrierReportDocument {
@@ -357,7 +360,7 @@ function buildRecommendedRevision(
 }
 
 function normalizeEstimateOperationName(value: string): string {
-  const cleaned = cleanOperationDisplayText(cleanScrubberText(value)) || cleanScrubberText(value);
+  const cleaned = cleanEstimateLineForTechnicalExport(cleanScrubberText(value)) || cleanOperationDisplayText(cleanScrubberText(value)) || cleanScrubberText(value);
   return cleaned
     .replace(/\bpre repair\b/gi, "Pre-repair")
     .replace(/\bpost repair\b/gi, "Post-repair")

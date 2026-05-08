@@ -18,7 +18,13 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
   module._compile(compiled.outputText, filename);
 };
 
-const { cleanOperationDisplayText } = require("./presentationText.ts");
+const {
+  cleanEstimateLineForCustomer,
+  cleanEstimateLineForTechnicalExport,
+  cleanOperationDisplayText,
+  isMalformedEstimateLine,
+  sanitizeEstimateLine,
+} = require("./presentationText.ts");
 
 function run(name, fn) {
   try {
@@ -43,4 +49,20 @@ run("cleanOperationDisplayText normalizes noisy operation labels", () => {
   for (const [input, expected] of cases) {
     assert.equal(cleanOperationDisplayText(input), expected);
   }
+});
+
+run("estimate-line sanitizer hides known parser junk for customer output", () => {
+  for (const input of ["Proc 2 #** Procedure research &", "wheelm0.1", "battery primarym0.3"]) {
+    const result = sanitizeEstimateLine(input);
+    assert.equal(result.malformed, true);
+    assert.equal(result.hideFromCustomer, true);
+    assert.equal(cleanEstimateLineForCustomer(input), "");
+    assert.equal(cleanEstimateLineForTechnicalExport(input), "Parser review needed");
+  }
+});
+
+run("estimate-line sanitizer cleans fused part-number descriptions for technical output", () => {
+  assert.equal(isMalformedEstimateLine("rear bumper68184713AB"), true);
+  assert.equal(cleanEstimateLineForTechnicalExport("rear bumper68184713AB"), "Rear Bumper");
+  assert.equal(cleanEstimateLineForCustomer("rear bumper68184713AB"), "Rear Bumper");
 });

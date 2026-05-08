@@ -1,5 +1,9 @@
 import type { CustomerReport } from "./generateCustomerReport";
-import { toCustomerFacingList, toCustomerFacingText } from "./customerFacingText";
+import {
+  sanitizeCustomerReportForRender,
+  toCustomerFacingList,
+  toCustomerFacingText,
+} from "./customerFacingText";
 
 type RenderCustomerReportHtmlInput = {
   report: CustomerReport;
@@ -29,7 +33,7 @@ function escapeHtml(value: string): string {
 }
 
 export function renderCustomerReportHtml(input: RenderCustomerReportHtmlInput): string {
-  const { report } = input;
+  const report = sanitizeCustomerReportForRender(input.report);
   const openingSummary = toCustomerFacingText(report.openingSummary);
   const strongerPlan = toCustomerFacingText(report.whichRepairPlanLooksStronger);
   const safetyFirst = toCustomerFacingText(report.safetyFirst);

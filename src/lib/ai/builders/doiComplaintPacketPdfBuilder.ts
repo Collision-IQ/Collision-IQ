@@ -5,12 +5,12 @@ import {
   resolveCanonicalVin,
   type ExportModel,
 } from "./buildExportModel";
+import { buildPolicyRightsReviewModel } from "./policyRightsReviewPdfBuilder";
 import {
   buildExportTemplateSourceModel,
   type ExportBuilderInput,
   type ExportLineComparison,
 } from "./exportTemplates";
-import { buildExportResearchSections } from "./exportResearchSections";
 import type { CaseEvidenceRegistryItem, RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 import type { EvidenceRecord } from "@/lib/ai/types/evidence";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
@@ -18,12 +18,14 @@ import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierReportDocument {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
+  const rightsReview = buildPolicyRightsReviewModel(params, exportModel);
   const vehicleIdentity = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
   const vin = resolveCanonicalVin(exportModel) ?? "Unspecified";
   const insurer = resolveCanonicalInsurer(exportModel);
-  const verifiedRegulationSources = getVerifiedRegulationSources(exportModel);
-  const policySources = getPolicySources(exportModel, params.report);
+  const verifiedRegulationSources = getVerifiedRegulationSources(rightsReview);
+  const policySources = getPolicySources(rightsReview, params.report);
   const evidenceIndex = buildEvidenceIndex(params.report);
+  const needsReview = buildNeedsReviewBullets(exportModel, rightsReview);
 
   return {
     filename: "doi-complaint-packet.pdf",
@@ -48,7 +50,6 @@ export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierR
       { label: "Completeness", value: exportModel.confidenceIntegrity.completenessStatus },
     ],
     sections: [
-      ...buildExportResearchSections(params.exportResearchSnapshot),
       {
         title: "Claim Timeline",
         bullets: buildClaimTimeline(params.report, source.generatedLabel),
@@ -60,9 +61,11 @@ export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierR
       {
         title: "Regulation Support",
         bullets: verifiedRegulationSources.length
-          ? verifiedRegulationSources.map(formatSourceCitation)
+          ? verifiedRegulationSources.map(formatPolicyCitation)
           : [
-              "No verified regulation citation metadata was available in the current source set. This packet does not assert statutory or regulatory obligations without source metadata.",
+              rightsReview.jurisdiction.confidence === "high"
+                ? "No verified regulation citation metadata was available in the current source set. This packet does not assert statutory or regulatory obligations without source metadata."
+                : "Jurisdiction not confirmed; legal support unavailable.",
             ],
       },
       {
@@ -72,10 +75,6 @@ export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierR
           : [
               "No uploaded policy provision or verified policy-library citation was isolated in the current source set. Policy-rights assertions should remain pending until the applicable policy language is attached and reviewed.",
             ],
-      },
-      {
-        title: "Communication Summary",
-        bullets: buildCommunicationSummary(params.report, exportModel),
       },
       {
         title: "OEM Support",
@@ -97,8 +96,14 @@ export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierR
       },
       {
         title: "Citation Appendix",
-        bullets: buildCitationAppendix(exportModel, params.report),
+        bullets: buildCitationAppendix(rightsReview, params.report),
       },
+      ...(needsReview.length
+        ? [{
+            title: "Needs Review",
+            bullets: needsReview,
+          }]
+        : []),
     ],
     footer: [
       "This packet is formal, institutional, and documentation-focused. It is not legal advice.",
@@ -123,7 +128,6 @@ function buildClaimTimeline(report: RepairIntelligenceReport | null | undefined,
     report?.ingestionMeta?.closedAt
       ? `Review closed: ${formatDateTime(report.ingestionMeta.closedAt)}.`
       : null,
-    report?.reassessmentDelta?.summary ? `Reassessment summary: ${cleanPacketText(report.reassessmentDelta.summary)}.` : null,
   ].filter(Boolean) as string[];
 
   return timeline.length > 1
@@ -151,21 +155,19 @@ function buildUnresolvedOperationBullets(exportModel: ExportModel): string[] {
     : ["No unresolved estimate operations were isolated from the current structured analysis."];
 }
 
-function getVerifiedRegulationSources(exportModel: ExportModel) {
-  return (exportModel.retrievalSummary?.sourcesInfluencingFindings ?? []).filter((source) =>
-    /law|regulation|statute|doi|department of insurance|insurance department|appraisal|claim handling|unfair/i.test(
-      `${source.title} ${source.sourceType} ${source.url ?? ""}`
-    )
+function getVerifiedRegulationSources(review: ReturnType<typeof buildPolicyRightsReviewModel>) {
+  return dedupePolicyCitations(
+    review.verifiedRegulations.flatMap((assertion) => assertion.citations)
   );
 }
 
 function getPolicySources(
-  exportModel: ExportModel,
+  review: ReturnType<typeof buildPolicyRightsReviewModel>,
   report: RepairIntelligenceReport | null | undefined
 ): string[] {
-  const sourceBullets = (exportModel.retrievalSummary?.sourcesInfluencingFindings ?? [])
-    .filter((source) => /policy|declarations|appraisal|endorsement/i.test(`${source.title} ${source.url ?? ""}`))
-    .map(formatSourceCitation);
+  const sourceBullets = dedupePolicyCitations(
+    review.policyRights.flatMap((assertion) => assertion.citations)
+  ).map(formatPolicyCitation);
   const registryBullets = (report?.evidenceRegistry ?? [])
     .filter((item) => /policy|declarations|endorsement|appraisal/i.test(`${item.label} ${item.sourceType}`))
     .map((item) => `Policy source: ${cleanPacketText(item.label)}. Status: ${formatLabel(item.ingestionState)}.`);
@@ -212,9 +214,9 @@ function buildOemSupportBullets(
       `Support status: ${formatLabel(contradiction.supportStatus)}.`,
       contradiction.oemSupportCitation
         ? `OEM support citation: ${cleanPacketText(contradiction.oemSupportCitation)}.`
-        : "OEM support citation: Inferred conflict only; verified OEM procedure still required.",
+        : null,
       `Recommended follow-up: ${cleanPacketText(contradiction.recommendedFollowUp)}.`,
-    ].join(" ")
+    ].filter(Boolean).join(" ")
   );
   const procedureBullets = [
     ...(report?.requiredProcedures ?? []).map((procedure) => `Required procedure: ${cleanPacketText(procedure.procedure)}.`),
@@ -267,27 +269,76 @@ function buildDocumentationGaps(
 
 function buildEvidenceIndex(report: RepairIntelligenceReport | null | undefined): string[] {
   const registry = (report?.evidenceRegistry ?? []).map(formatRegistryEvidence);
-  const evidence = (report?.evidence ?? []).map(formatEvidenceRecord);
+  const evidence = (report?.evidence ?? [])
+    .filter(isVerifiedEvidenceRecord)
+    .map(formatEvidenceRecord);
   const factualCore = report?.factualCore?.evidenceRegistrySummary ?? [];
 
   return dedupeStrings([...registry, ...evidence, ...factualCore.map((item) => `Evidence summary: ${cleanPacketText(item)}.`)]).slice(0, 20);
 }
 
 function buildCitationAppendix(
-  exportModel: ExportModel,
+  review: ReturnType<typeof buildPolicyRightsReviewModel>,
   report: RepairIntelligenceReport | null | undefined
 ): string[] {
-  const retrievalSources = (exportModel.retrievalSummary?.sourcesInfluencingFindings ?? []).map(formatSourceCitation);
-  const oemSources = exportModel.oemContradictions
-    .filter((contradiction) => contradiction.oemSupportCitation)
-    .map((contradiction) => `OEM citation: ${cleanPacketText(contradiction.oemSupportCitation ?? "")}.`);
-  const evidenceSources = (report?.evidence ?? []).map(
-    (item) => `Evidence citation: ${cleanPacketText(item.title)}. Source: ${cleanPacketText(item.source)}. Authority: ${formatLabel(item.authority)}.`
-  );
+  const retrievalSources = dedupePolicyCitations([
+    ...review.verifiedRegulations.flatMap((assertion) => assertion.citations),
+    ...review.policyRights.flatMap((assertion) => assertion.citations),
+    ...review.oemPositionSupport.flatMap((assertion) => assertion.citations),
+    ...review.escalationOptions.flatMap((assertion) => assertion.citations),
+  ]).map(formatPolicyCitation);
+  const evidenceSources = (report?.evidence ?? [])
+    .filter(isVerifiedEvidenceRecord)
+    .map(
+      (item) => `Evidence citation: ${cleanPacketText(item.title)}. Source: ${cleanPacketText(item.source)}. Authority: ${formatLabel(item.authority)}.`
+    );
 
-  return dedupeStrings([...retrievalSources, ...oemSources, ...evidenceSources]).slice(0, 24).length
-    ? dedupeStrings([...retrievalSources, ...oemSources, ...evidenceSources]).slice(0, 24)
+  return dedupeStrings([...retrievalSources, ...evidenceSources]).slice(0, 24).length
+    ? dedupeStrings([...retrievalSources, ...evidenceSources]).slice(0, 24)
     : ["No immutable citation metadata was available in the current report payload."];
+}
+
+function buildNeedsReviewBullets(
+  exportModel: ExportModel,
+  review: ReturnType<typeof buildPolicyRightsReviewModel>
+): string[] {
+  const verifiedLegalKeys = new Set(
+    review.verifiedRegulations.flatMap((assertion) => assertion.citations.map((citation) => citation.immutableKey))
+  );
+  const unverifiedLegalSourceCount = review.citations.filter((citation) =>
+    !verifiedLegalKeys.has(citation.immutableKey) &&
+    (
+      citation.source === "InternetResearch" ||
+      /statute|regulation|insurance code|department of insurance|\bDOI\b|law|legal|appraisal/i.test(
+        `${citation.title} ${citation.url ?? ""} ${citation.locator ?? ""}`
+      )
+    )
+  ).length;
+  const bullets = [
+    ...(review.jurisdiction.confidence === "high"
+      ? []
+      : ["Jurisdiction not confirmed; legal support unavailable."]),
+    ...(unverifiedLegalSourceCount
+      ? [
+          "Needs review: Non-official, weak, or jurisdiction-mismatched legal sources were excluded from verified support.",
+        ]
+      : []),
+    ...(review.internetDerivedSupport.length
+      ? [
+          "Needs review: Internet-sourced legal commentary was excluded until a jurisdiction-matched official source is verified.",
+        ]
+      : []),
+    ...(review.proceduralInference.length
+      ? [
+          "Needs review: Inferred claim-handling commentary was excluded until verified legal or policy support is available.",
+        ]
+      : []),
+    ...exportModel.oemContradictions
+      .filter((contradiction) => !contradiction.oemSupportCitation)
+      .map((contradiction) => `Needs review: ${cleanPacketText(contradiction.affectedOperation)} lacks verified OEM citation support.`),
+  ];
+
+  return dedupeStrings(bullets).slice(0, 12);
 }
 
 function formatRegistryEvidence(item: CaseEvidenceRegistryItem): string {
@@ -314,15 +365,33 @@ function formatEvidenceRecord(item: EvidenceRecord): string {
     .join(" ");
 }
 
-function formatSourceCitation(source: NonNullable<ExportModel["retrievalSummary"]>["sourcesInfluencingFindings"][number]): string {
+function isVerifiedEvidenceRecord(item: EvidenceRecord): boolean {
+  return item.authority === "oem" || item.authority === "internal";
+}
+
+function formatPolicyCitation(citation: { title: string; source: string; sourceType?: string; url?: string; retrievedAt?: string; jurisdiction?: string; effectiveDate?: string; locator?: string }): string {
   return [
-    `Source: ${cleanPacketText(source.title)}.`,
-    `Source type: ${formatLabel(source.sourceType)}.`,
-    source.url ? `Locator: ${source.url}.` : "Locator: Not provided.",
-    source.relatedFindingIds.length ? `Related finding IDs: ${source.relatedFindingIds.join(", ")}.` : null,
+    `Source: ${cleanPacketText(citation.title)}.`,
+    `Source type: ${formatLabel(citation.sourceType ?? citation.source)}.`,
+    citation.url ? `Locator: ${citation.url}.` : citation.locator ? `Locator: ${citation.locator}.` : "Locator: Not provided.",
+    citation.retrievedAt ? `Retrieved: ${citation.retrievedAt}.` : null,
+    citation.effectiveDate ? `Effective date: ${citation.effectiveDate}.` : null,
+    citation.jurisdiction ? `Jurisdiction: ${citation.jurisdiction}.` : null,
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function dedupePolicyCitations<T extends { id?: string; title: string; source: string }>(citations: T[]): T[] {
+  const seen = new Set<string>();
+  return citations.filter((citation) => {
+    const key = citation.id ?? `${citation.source}:${citation.title}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function formatOperation(value: string): string {

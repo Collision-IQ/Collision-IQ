@@ -3,6 +3,7 @@ import type {
   WorkspaceEstimateComparisons,
 } from "@/types/workspaceTypes";
 import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
+import { sanitizeEstimateLine } from "@/lib/ui/presentationText";
 
 export function getEstimateComparisonRows(
   estimateComparisons?: WorkspaceEstimateComparisons | null
@@ -24,6 +25,7 @@ export function getTopEstimateComparisonHighlights(
 
   return prioritizeEstimateComparisonRows(dedupeEstimateComparisonRationales(rows))
     .filter((row) => row.deltaType !== "same")
+    .filter(rowHasUsableEstimateLabel)
     .map((row) => summarizeEstimateComparisonRow(row))
     .filter((summary): summary is string => Boolean(summary))
     .filter((summary) => {
@@ -215,6 +217,15 @@ function summarizeEstimateComparisonRow(row: EstimateComparisonRow): string | nu
   return label ? toSentenceCase(label) : null;
 }
 
+function rowHasUsableEstimateLabel(row: EstimateComparisonRow): boolean {
+  const candidates = [row.operation, row.partName, row.category].filter(Boolean) as string[];
+  if (candidates.length === 0) return true;
+  return candidates.some((value) => {
+    const sanitized = sanitizeEstimateLine(value);
+    return !sanitized.malformed || !sanitized.hideFromCustomer;
+  });
+}
+
 function toSentenceCase(value: string): string {
   const cleaned = value.trim();
   if (!cleaned) return "";
@@ -223,6 +234,8 @@ function toSentenceCase(value: string): string {
 
 export function cleanOperationDisplayText(value?: string | null): string {
   if (!value) return "";
+  const sanitized = sanitizeEstimateLine(value);
+  if (sanitized.malformed) return sanitized.hideFromCustomer ? "" : sanitized.cleaned;
 
   const cleaned = value
     .replace(/([A-Za-z)])\d(\d\.\d)\b/g, "$1 $2")

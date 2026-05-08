@@ -23,6 +23,19 @@ const leakedTimeFragmentPattern = new RegExp(
 const ORPHAN_SECTION_LABEL_PATTERN =
   /(?:^|\n)\s*(?:what looks reasonable|what still needs support|what looks aggressive|what stands out|documented positives|likely remaining gaps|support posture|estimate position)\s*:\s*(?=\n|$)/gim;
 const OPERATION_DISPLAY_FALLBACK = "Repair Operation";
+const PARSER_REVIEW_NEEDED_LABEL = "Parser review needed";
+const MALFORMED_PROC_PATTERN = /\bproc\s*\d+\s*#?\s*\*+/i;
+const LEAKED_SUFFIX_ONLY_PATTERN = /^\s*[a-z][a-z\s/-]*m\d+(?:\.\d+)?\s*$/i;
+const FUSED_PART_TOKEN_PATTERN = /\b([a-z][a-z/&'-]{2,}?)(?:m?0\.[1-9]|\d{6,}[a-z]{0,3})\b/gi;
+const CODE_HEAVY_TOKEN_PATTERN = /\b[A-Za-z]*\d[A-Za-z0-9.-]{7,}\b/g;
+
+export type EstimateLineSanitization = {
+  raw: string;
+  cleaned: string;
+  technicalLabel: string;
+  malformed: boolean;
+  hideFromCustomer: boolean;
+};
 
 export function cleanPresentationText(value: string | null | undefined): string {
   if (!value) return "";
@@ -40,6 +53,65 @@ export function cleanPresentationText(value: string | null | undefined): string 
 
 export function cleanPresentationMarkdown(value: string): string {
   return cleanPresentationText(value);
+}
+
+export function sanitizeEstimateLine(value: string | null | undefined): EstimateLineSanitization {
+  const raw = `${value ?? ""}`.replace(/\r/g, " ").trim();
+  if (!raw) {
+    return {
+      raw: "",
+      cleaned: "",
+      technicalLabel: PARSER_REVIEW_NEEDED_LABEL,
+      malformed: false,
+      hideFromCustomer: true,
+    };
+  }
+
+  const hasLeakedTimeFragment = leakedTimeFragmentPattern.test(raw);
+  leakedTimeFragmentPattern.lastIndex = 0;
+  const hasCodeHeavyToken = CODE_HEAVY_TOKEN_PATTERN.test(raw);
+  CODE_HEAVY_TOKEN_PATTERN.lastIndex = 0;
+  const leakedTokenCount = raw.match(/\b[a-z][a-z\s/-]*m\d+(?:\.\d+)?\b/gi)?.length ?? 0;
+  const malformed =
+    MALFORMED_PROC_PATTERN.test(raw) ||
+    LEAKED_SUFFIX_ONLY_PATTERN.test(raw) ||
+    hasLeakedTimeFragment ||
+    hasCodeHeavyToken;
+
+  const cleaned = cleanPresentationText(raw)
+    .replace(MALFORMED_PROC_PATTERN, " ")
+    .replace(FUSED_PART_TOKEN_PATTERN, "$1")
+    .replace(CODE_HEAVY_TOKEN_PATTERN, " ")
+    .replace(/\b(?:procedure\s+research|primary)\b/gi, " ")
+    .replace(/[#+*|_~]+/g, " ")
+    .replace(/\b\d+(?:\.\d+){2,}\b/g, " ")
+    .replace(/\s+([,.;:])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  const display = cleanOperationDisplayText(cleaned);
+  const isGeneric = !display || display === OPERATION_DISPLAY_FALLBACK || /^(?:wheel|battery|proc|procedure|primary)$/i.test(display);
+  const hideFromCustomer = malformed && (isGeneric || cleaned.length < 8 || leakedTokenCount >= 2);
+
+  return {
+    raw,
+    cleaned: hideFromCustomer ? "" : display,
+    technicalLabel: malformed && isGeneric ? PARSER_REVIEW_NEEDED_LABEL : display || PARSER_REVIEW_NEEDED_LABEL,
+    malformed,
+    hideFromCustomer,
+  };
+}
+
+export function isMalformedEstimateLine(value: string | null | undefined): boolean {
+  return sanitizeEstimateLine(value).malformed;
+}
+
+export function cleanEstimateLineForCustomer(value: string | null | undefined): string {
+  const result = sanitizeEstimateLine(value);
+  return result.hideFromCustomer ? "" : result.cleaned;
+}
+
+export function cleanEstimateLineForTechnicalExport(value: string | null | undefined): string {
+  return sanitizeEstimateLine(value).technicalLabel;
 }
 
 export function cleanOperationDisplayText(value: string | null | undefined): string {

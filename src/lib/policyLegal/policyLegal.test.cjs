@@ -63,6 +63,11 @@ const {
   regulationFromPrismaRecord,
 } = require("./regulations.ts");
 const {
+  buildPolicyRightsReviewModel,
+  buildPolicyRightsReviewPdf,
+} = require("../ai/builders/policyRightsReviewPdfBuilder.ts");
+const { buildDoiComplaintPacketPdf } = require("../ai/builders/doiComplaintPacketPdfBuilder.ts");
+const {
   normalizeVerifiedRegulationSeedRecord,
 } = require("./verifiedRegulationSeed.cjs");
 const {
@@ -111,6 +116,51 @@ function makeOperation(overrides = {}) {
     operation: "Proc",
     component: "Pre-repair scan",
     rawLine: "Proc Pre-repair scan",
+    ...overrides,
+  };
+}
+
+function makePolicyRenderModel(overrides = {}) {
+  return {
+    repairPosition: "Indiana claim handling dispute review.",
+    positionStatement: "Indiana claim handling dispute review.",
+    request: "Review Indiana rights and DOI options.",
+    confidenceIntegrity: {
+      uploadedFileCount: 2,
+      completenessStatus: "COMPLETE",
+      missingCriticalEvidence: [],
+      confidencePenalties: [],
+    },
+    reportFields: {
+      insurer: null,
+      vehicle: null,
+      vin: null,
+      documentedProcedures: [],
+    },
+    estimateFacts: {
+      insurer: null,
+      vehicle: null,
+      vin: null,
+    },
+    vehicle: {
+      vin: null,
+      year: null,
+      make: null,
+      model: null,
+      trim: null,
+    },
+    disputeIntelligenceReport: {
+      supportGaps: [],
+    },
+    retrievalSummary: {
+      driveDocsUsed: 1,
+      webSourcesUsed: 3,
+      serperStatus: "SUCCESS",
+      oemEvidenceFound: false,
+      sourcesInfluencingFindings: [],
+    },
+    supplementItems: [],
+    oemContradictions: [],
     ...overrides,
   };
 }
@@ -1251,6 +1301,179 @@ run("malformed regulation record is ignored and review remains valid", () => {
   assert.equal(review.claim_context.claim_state, "PA");
   assert.equal(review.line_item_reviews[0].citation, "No governing regulation found.");
   assert.equal(review.line_item_reviews[0].regulatory_support, "No");
+});
+
+run("policy rights review rejects mixed-jurisdiction and weak legal sources", () => {
+  const review = buildPolicyRightsReviewModel(
+    {
+      renderModel: makePolicyRenderModel({
+        retrievalSummary: {
+          driveDocsUsed: 1,
+          webSourcesUsed: 4,
+          serperStatus: "SUCCESS",
+          oemEvidenceFound: false,
+          sourcesInfluencingFindings: [
+            {
+              title: "Indiana Department of Insurance complaint process",
+              sourceType: "drive",
+              url: "https://www.in.gov/idoi/consumer-services/complaints/",
+              relatedFindingIds: ["f1"],
+            },
+            {
+              title: "Rhode Island unfair claims regulation",
+              sourceType: "drive",
+              url: "https://dbr.ri.gov/rules/claims-regulation",
+              relatedFindingIds: ["f2"],
+            },
+            {
+              title: "Texas bad faith overview by Smith Law Firm",
+              sourceType: "web",
+              url: "https://smithlawfirm.example.com/texas-bad-faith",
+              relatedFindingIds: ["f3"],
+            },
+            {
+              title: "California DOI explainer on YouTube",
+              sourceType: "web",
+              url: "https://www.youtube.com/watch?v=12345",
+              relatedFindingIds: ["f4"],
+            },
+          ],
+        },
+      }),
+      report: makeReport(),
+      analysis: null,
+      panel: null,
+      assistantAnalysis: "Indiana claim with complaint-process questions.",
+    },
+    makePolicyRenderModel({
+      retrievalSummary: {
+        driveDocsUsed: 1,
+        webSourcesUsed: 4,
+        serperStatus: "SUCCESS",
+        oemEvidenceFound: false,
+        sourcesInfluencingFindings: [
+          {
+            title: "Indiana Department of Insurance complaint process",
+            sourceType: "drive",
+            url: "https://www.in.gov/idoi/consumer-services/complaints/",
+            relatedFindingIds: ["f1"],
+          },
+          {
+            title: "Rhode Island unfair claims regulation",
+            sourceType: "drive",
+            url: "https://dbr.ri.gov/rules/claims-regulation",
+            relatedFindingIds: ["f2"],
+          },
+          {
+            title: "Texas bad faith overview by Smith Law Firm",
+            sourceType: "web",
+            url: "https://smithlawfirm.example.com/texas-bad-faith",
+            relatedFindingIds: ["f3"],
+          },
+          {
+            title: "California DOI explainer on YouTube",
+            sourceType: "web",
+            url: "https://www.youtube.com/watch?v=12345",
+            relatedFindingIds: ["f4"],
+          },
+        ],
+      },
+    })
+  );
+
+  assert.equal(review.jurisdiction.state, "Indiana (IN)");
+  assert.equal(review.jurisdiction.confidence, "high");
+  assert.equal(review.verifiedRegulations.length, 1);
+  assert.match(review.verifiedRegulations[0].statement, /Indiana Department of Insurance/i);
+  assert.equal(review.verifiedRegulations.some((item) => /Rhode Island|Texas|California/i.test(item.statement)), false);
+  assert.ok(review.internetDerivedSupport.some((item) => /internet-derived support source available/i.test(item.statement)));
+});
+
+run("doi packet omits weak legal sources from verified support sections", () => {
+  const renderModel = makePolicyRenderModel({
+    retrievalSummary: {
+      driveDocsUsed: 1,
+      webSourcesUsed: 4,
+      serperStatus: "SUCCESS",
+      oemEvidenceFound: false,
+      sourcesInfluencingFindings: [
+        {
+          title: "Indiana Department of Insurance complaint process",
+          sourceType: "drive",
+          url: "https://www.in.gov/idoi/consumer-services/complaints/",
+          relatedFindingIds: ["f1"],
+        },
+        {
+          title: "Rhode Island unfair claims regulation",
+          sourceType: "drive",
+          url: "https://dbr.ri.gov/rules/claims-regulation",
+          relatedFindingIds: ["f2"],
+        },
+        {
+          title: "Texas bad faith overview by Smith Law Firm",
+          sourceType: "web",
+          url: "https://smithlawfirm.example.com/texas-bad-faith",
+          relatedFindingIds: ["f3"],
+        },
+        {
+          title: "California DOI explainer on YouTube",
+          sourceType: "web",
+          url: "https://www.youtube.com/watch?v=12345",
+          relatedFindingIds: ["f4"],
+        },
+      ],
+    },
+  });
+
+  const document = buildDoiComplaintPacketPdf({
+    renderModel,
+    report: makeReport(),
+    analysis: null,
+    panel: null,
+    assistantAnalysis: "Indiana claim with complaint-process questions.",
+  });
+  const text = JSON.stringify(document);
+
+  assert.match(text, /Indiana Department of Insurance complaint process/);
+  assert.doesNotMatch(text, /Rhode Island unfair claims regulation/);
+  assert.doesNotMatch(text, /Texas bad faith overview by Smith Law Firm/);
+  assert.doesNotMatch(text, /California DOI explainer on YouTube/);
+  assert.match(text, /Needs Review/);
+});
+
+run("policy rights review does not assert legal support without confirmed jurisdiction", () => {
+  const renderModel = makePolicyRenderModel({
+    repairPosition: "Claim handling dispute review.",
+    positionStatement: "Claim handling dispute review.",
+    request: "Review rights and DOI options.",
+    retrievalSummary: {
+      driveDocsUsed: 0,
+      webSourcesUsed: 1,
+      serperStatus: "SUCCESS",
+      oemEvidenceFound: false,
+      sourcesInfluencingFindings: [
+        {
+          title: "General insurance claim article by Smith Law Firm",
+          sourceType: "web",
+          url: "https://smithlawfirm.example.com/claim-article",
+          relatedFindingIds: ["f1"],
+        },
+      ],
+    },
+  });
+
+  const document = buildPolicyRightsReviewPdf({
+    renderModel,
+    report: makeReport(),
+    analysis: null,
+    panel: null,
+    assistantAnalysis: "Claim handling dispute review.",
+  });
+  const text = JSON.stringify(document);
+
+  assert.match(text, /Jurisdiction not confirmed; legal support unavailable\./);
+  assert.doesNotMatch(text, /Verified legal or regulatory source available/i);
+  assert.doesNotMatch(text, /Smith Law Firm/);
 });
 
 run("snapshot write failure logs metric and does not throw", async () => {

@@ -1,3 +1,7 @@
+import type { CustomerReport } from "./generateCustomerReport";
+import type { CarrierReportDocument } from "./builders/carrierPdfBuilder";
+import { sanitizeEstimateLine } from "@/lib/ui/presentationText";
+
 const TECHNICAL_TRANSLATIONS: Array<[RegExp, string]> = [
   [
     /\bHidden\s+Mounting\s+Geometry\s*\/?\s*Teardown\s+Growth\b/gi,
@@ -35,11 +39,14 @@ const TECHNICAL_TRANSLATIONS: Array<[RegExp, string]> = [
 
 const INTERNAL_PATTERNS = [
   /\bevidence\s*chain\b/gi,
+  /\bevidence\s+references?\b/gi,
   /\bsupport\s*basis\b/gi,
   /\brisk\s*if\s*omitted\b/gi,
   /\bsupport\s*confidence\b/gi,
   /\bconfidence\s*percentage\b/gi,
   /\binferred\s+support\b/gi,
+  /\bverified\s+support\b/gi,
+  /\bsupport\s*:\s*(?:verified|inferred|supported|unsupported|documented)\b/gi,
   /\bverified\s+percentage\b/gi,
   /\bunderwritten(?:\s+operation)?\b/gi,
   /\bsource\s+conflict\b/gi,
@@ -52,15 +59,18 @@ const INTERNAL_PATTERNS = [
   /\b(?:evidence|issue|finding|linked|drive|artifact|snapshot|render)[-_:]?[a-z0-9_-]{6,}\b/gi,
   /\b\d{1,3}%\s*(?:confidence|supported|verified)?\b/gi,
   /\b(?:documented|referenced|missing|inferred|verified)\s+evidence\s+at\s+\d{1,3}%\s+confidence\b/gi,
-  /\bProc\s*\d+\s*#?\*+\s*[^.;\n]*/gi,
+  /\bProc\s*\d+\s*#?\s*\*+\s*[^.;\n]*/gi,
   /\bwheelm\d+(?:\.\d+)?\b/gi,
+  /\bbattery\s+primarym\d+(?:\.\d+)?\b/gi,
   /\b[a-z]{3,}m\d+\.\d+\b/gi,
 ];
 
 const DEBUG_LINE_PATTERNS = [
-  /\b(?:sha-?256|classification|parser status|artifact family|source archive|runtime|immutable|cmox)\b/i,
-  /\bProc\s*\d+\s*#?\*+/i,
+  /\b(?:sha-?256|classification|parser status|artifact family|source archive)\b/i,
+  /\bProc\s*\d+\s*#?\s*\*+/i,
   /\bwheelm\d+(?:\.\d+)?\b/i,
+  /\bbattery\s+primarym\d+(?:\.\d+)?\b/i,
+  /\b[a-z]{3,}m\d+\.\d+\b/i,
   /^[^a-zA-Z]*(?:\d+[#*]|[|_]{2,})/,
 ];
 
@@ -74,7 +84,12 @@ export function toCustomerFacingText(value?: string | null, fallback = ""): stri
 
   output = output
     .split(/\n|(?<=\.)\s+(?=(?:Evidence|Risk if omitted|Support|Source|Confidence|Citation):)/i)
-    .map((line) => line.trim())
+    .map((line) => {
+      const trimmed = line.trim();
+      const estimateLine = sanitizeEstimateLine(trimmed);
+      if (!estimateLine.malformed) return trimmed;
+      return estimateLine.hideFromCustomer ? "" : estimateLine.cleaned;
+    })
     .filter((line) => line && !DEBUG_LINE_PATTERNS.some((pattern) => pattern.test(line)))
     .join(" ");
 
@@ -83,6 +98,7 @@ export function toCustomerFacingText(value?: string | null, fallback = ""): stri
   }
 
   output = output
+    .replace(/(?:^|[\s;|])(?:Evidence|Evidence references?|Risk if omitted|Support|Support basis|Confidence|Source|Runtime|Immutable)\s*:\s*[^.;|\n]*/gi, " ")
     .replace(/\bDOCUMENTED\b|\bSUPPORTABLE_BUT_UNCONFIRMED\b|\bOPEN_PENDING_FURTHER_DOCUMENTATION\b|\bREFERENCED_NOT_PRODUCED\b/gi, "")
     .replace(/\bAI\s+audit\b|\baudit\s+language\b/gi, "")
     .replace(/\s*;\s*(?:Evidence|Risk|Support|Source|Confidence|Citation)\s*:[^.;]*/gi, "")
@@ -111,6 +127,54 @@ export function toCustomerFacingList(
     });
 
   return cleaned.length ? cleaned : fallback;
+}
+
+export function sanitizeCustomerReportForRender(report: CustomerReport): CustomerReport {
+  return {
+    title: toCustomerFacingText(report.title, "Customer Report") || "Customer Report",
+    openingSummary: toCustomerFacingText(report.openingSummary),
+    whichRepairPlanLooksStronger: toCustomerFacingText(report.whichRepairPlanLooksStronger),
+    safetyFirst: toCustomerFacingText(report.safetyFirst),
+    whatStillNeedsProof: toCustomerFacingList(report.whatStillNeedsProof),
+    yourOptions: toCustomerFacingList(report.yourOptions),
+    bottomLine: toCustomerFacingText(report.bottomLine),
+  };
+}
+
+export function sanitizeCustomerFacingDocument(document: CarrierReportDocument): CarrierReportDocument {
+  return {
+    ...document,
+    brand: {
+      ...document.brand,
+      companyName: toCustomerFacingText(document.brand.companyName, document.brand.companyName),
+      reportLabel: toCustomerFacingText(document.brand.reportLabel, document.brand.reportLabel),
+    },
+    header: {
+      title: toCustomerFacingText(document.header.title, document.header.title),
+      subtitle: toCustomerFacingText(document.header.subtitle, document.header.subtitle),
+      generatedLabel: toCustomerFacingText(document.header.generatedLabel, document.header.generatedLabel),
+    },
+    summary: document.summary.map((item) => ({
+      label: toCustomerFacingText(item.label, item.label),
+      value: toCustomerFacingText(item.value, item.value),
+    })),
+    sections: document.sections.map((section) => ({
+      ...section,
+      title: toCustomerFacingText(section.title, section.title),
+      body: section.body ? toCustomerFacingText(section.body) : undefined,
+      bullets: section.bullets ? toCustomerFacingList(section.bullets, []) : undefined,
+      comparisonRows: section.comparisonRows?.map((row) => ({
+        label: toCustomerFacingText(row.label, row.label),
+        leftLabel: toCustomerFacingText(row.leftLabel, row.leftLabel),
+        leftValue: toCustomerFacingText(row.leftValue, row.leftValue),
+        rightLabel: toCustomerFacingText(row.rightLabel, row.rightLabel),
+        rightValue: toCustomerFacingText(row.rightValue, row.rightValue),
+        delta: row.delta ? toCustomerFacingText(row.delta, row.delta) : undefined,
+        note: row.note ? toCustomerFacingText(row.note) : undefined,
+      })),
+    })),
+    footer: toCustomerFacingList(document.footer, []),
+  };
 }
 
 export function containsCccWorkfileSignal(values: Array<string | null | undefined>) {

@@ -57,6 +57,10 @@ import {
 } from "@/lib/ai/impactZone";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { computeModelPressureMode, type PressureModeContext } from "./pressureMode";
+import {
+  cleanEstimateLineForTechnicalExport,
+  isMalformedEstimateLine,
+} from "@/lib/ui/presentationText";
 
 export const COLLISION_ACADEMY_HANDOFF_URL = "https://www.collision.academy/";
 export const REDACTED_INSURER_TOKEN = "[REDACTED_INSURER]";
@@ -227,7 +231,7 @@ const ESTIMATE_TOTAL_ACV_FALLBACK_LOW_OFFSET = 3500;
 const ESTIMATE_TOTAL_ACV_FALLBACK_HIGH_OFFSET = 2500;
 const DV_FALLBACK_RANGE = { low: 500, high: 2500 } as const;
 const MARKET_SEARCH_UNAVAILABLE_MESSAGE =
-  "Market value preview unavailable because live comparable search did not complete.";
+  "Market preview unavailable because live comparable search did not complete.";
 
 const GENERIC_PLACEHOLDER_FIELD_PATTERN =
   /^(?:unknown|unspecified|n\/a|na|none|null|undefined|not available|not provided|vehicle details are still limited in the current material\.?|vehicle details still limited in the current material\.?|not clearly supported(?: in the current material)?\.?)$/i;
@@ -309,7 +313,7 @@ export function buildExportModel(params: {
     supplementItems.some((item) => item.title === "Seam Sealer Restoration");
   const cleanedSupplementItems = supplementItems.map((item) => ({
     ...item,
-    title: cleanDisplayLabel(item.title),
+    title: cleanEstimateLineForTechnicalExport(item.title),
     rationale: redactExternalDocumentUrls(cleanFormalExportText(
       stripUnsupportedSeamSealerLanguage(
         item.rationale,
@@ -1389,7 +1393,10 @@ function buildDisputeIntelligenceReport(params: {
   const hasReferencedProcedureSupport = hasReferencedButNotRetrievedProcedureSupport(
     params.report
   );
-  const rawDrivers = params.supplementItems.slice(0, 5).map((item, index) => {
+  const driverItems = params.supplementItems
+    .filter((item) => item.title !== "Parser review needed" && !isMalformedEstimateLine(item.title))
+    .slice(0, 5);
+  const rawDrivers = driverItems.map((item, index) => {
     const impact = mapSupplementPriorityToImpact(item.priority);
     const supportStatus = mapSupplementKindToSupportStatus(item.kind);
     const evidenceLevel = mapSupportStatusToEvidenceLevel(supportStatus);
@@ -2974,20 +2981,36 @@ function buildValuation(
   analysis: AnalysisResult | null
 ): DerivedValuation {
   const vehicleForValuation = reportFields.vehicle ?? estimateFactsToVehicle(reportFields.estimateFacts);
-  const requiresLiveMarketSearch = hasSpecificVehicleValuationIdentity({
+  const hasKnownVehicleMarketInputs = hasVehicleMarketIdentity({
     vehicle: vehicleForValuation,
     mileage: reportFields.mileage,
   });
-  const computedAcv = resolveComputedAcv({
+  const hasCompleteSpecificVehicleInputs = hasSpecificVehicleValuationIdentity({
+    vehicle: vehicleForValuation,
+    mileage: reportFields.mileage,
+  });
+  const rawComputedAcv = resolveComputedAcv({
+    report,
+    analysis,
+    vehicle: vehicleForValuation,
+    mileage: reportFields.mileage,
+  });
+  const computedAcv =
+    hasKnownVehicleMarketInputs && rawComputedAcv?.sourceType !== "comps"
+      ? null
+      : hasKnownVehicleMarketInputs && !hasCompleteSpecificVehicleInputs
+        ? null
+        : rawComputedAcv;
+  const likelyStructuredAcvRange = computedAcv?.acvRange ?? resolveLikelyStructuredAcvRange({
     report,
     analysis,
     vehicle: vehicleForValuation,
     mileage: reportFields.mileage,
   });
   const sanePanelDv = coerceSaneDvRange(panel?.diminishedValue?.low, panel?.diminishedValue?.high);
-  const chatAcvPreviewRange = computedAcv
+  const rawChatAcvPreviewRange = computedAcv
     ? computedAcv.acvRange
-    : requiresLiveMarketSearch
+    : hasKnownVehicleMarketInputs
       ? undefined
       : resolveValuationPreviewRange({
         status: normalizeAcvStatus(chatValuation),
@@ -2997,11 +3020,23 @@ function buildValuation(
         minSpread: 1200,
         spreadRatio: 0.08,
       });
-  const estimateTotalFallbackAcvRange = chatAcvPreviewRange
+  const chatAcvPreviewRange = isFallbackMateriallyBelowLikelyMarket(
+    rawChatAcvPreviewRange,
+    likelyStructuredAcvRange
+  )
     ? undefined
-    : requiresLiveMarketSearch
+    : rawChatAcvPreviewRange;
+  const rawEstimateTotalFallbackAcvRange = chatAcvPreviewRange
+    ? undefined
+    : hasKnownVehicleMarketInputs
       ? undefined
       : resolveEstimateTotalAcvFallbackRange(reportFields.estimateTotal);
+  const estimateTotalFallbackAcvRange = isFallbackMateriallyBelowLikelyMarket(
+    rawEstimateTotalFallbackAcvRange,
+    likelyStructuredAcvRange
+  )
+    ? undefined
+    : rawEstimateTotalFallbackAcvRange;
   const acvPreviewRange = chatAcvPreviewRange ?? estimateTotalFallbackAcvRange;
   const dvPreviewRange = resolveValuationPreviewRange({
     status:
@@ -3076,7 +3111,7 @@ function buildValuation(
             chatValuation.acvReasoning,
             "This is a market preview band based on the current file set."
           ) || "This is a market preview band based on the current file set."
-        : requiresLiveMarketSearch
+      : hasKnownVehicleMarketInputs || Boolean(likelyStructuredAcvRange)
           ? MARKET_SEARCH_UNAVAILABLE_MESSAGE
           : sanitizeReason(chatValuation.acvReasoning, "Market preview is not supportable from the current documents.") ||
             "Market preview is not supportable from the current documents.",
@@ -3127,14 +3162,24 @@ function hasSpecificVehicleValuationIdentity(params: {
   mileage?: number;
 }) {
   const vehicle = normalizeVehicleIdentity(params.vehicle);
+  const hasYearMakeModel = hasVehicleMarketIdentity(params);
+  const hasTrim = Boolean(vehicle?.trim?.trim());
+
+  return hasYearMakeModel && hasTrim;
+}
+
+function hasVehicleMarketIdentity(params: {
+  vehicle?: VehicleIdentity;
+  mileage?: number;
+}) {
+  const vehicle = normalizeVehicleIdentity(params.vehicle);
   const hasYearMakeModel =
     typeof vehicle?.year === "number" &&
     Boolean(vehicle.make?.trim()) &&
     Boolean(vehicle.model?.trim());
-  const hasTrimOrVin = Boolean(vehicle?.trim?.trim()) || Boolean(vehicle?.vin?.trim());
   const hasMileage = typeof params.mileage === "number" && Number.isFinite(params.mileage);
 
-  return hasYearMakeModel && hasTrimOrVin && hasMileage;
+  return hasYearMakeModel && hasMileage;
 }
 
 function resolveDirectionalDvFallbackRange(params: {
@@ -3254,7 +3299,7 @@ export function computeACVFromComps(params: {
   const adjusted = (params.comparableListings ?? [])
     .map((listing) => normalizeComparableListing(listing))
     .filter((listing): listing is NormalizedComparableListing => Boolean(listing))
-    .filter((listing) => isComparableListingRelevant(listing, targetVehicle))
+    .filter((listing) => isComparableListingRelevant(listing, targetVehicle, params.mileage))
     .map((listing) => {
       const mileageAdjusted = applyMileageAdjustment(listing.price, params.mileage, listing.mileage);
       const yearAdjusted = applyYearAdjustment(mileageAdjusted, targetVehicle?.year, listing.year);
@@ -3469,12 +3514,15 @@ function normalizeComparableListing(
 
 function isComparableListingRelevant(
   listing: NormalizedComparableListing,
-  targetVehicle?: VehicleIdentity
+  targetVehicle?: VehicleIdentity,
+  targetMileage?: number
 ): boolean {
   const targetMake = normalizeKey(targetVehicle?.make ?? "");
   const targetModel = normalizeKey(targetVehicle?.model ?? "");
+  const targetTrim = normalizeKey(targetVehicle?.trim ?? "");
   const listingMake = normalizeKey(listing.make ?? "");
   const listingModel = normalizeKey(listing.model ?? "");
+  const listingTrim = normalizeKey(listing.trim ?? "");
 
   if (targetMake && listingMake && targetMake !== listingMake) {
     return false;
@@ -3489,8 +3537,75 @@ function isComparableListingRelevant(
   ) {
     return false;
   }
+  if (typeof targetVehicle?.year === "number" && typeof listing.year === "number" && targetVehicle.year !== listing.year) {
+    return false;
+  }
+  if (targetTrim && listingTrim && !trimsLookEquivalent(targetTrim, listingTrim)) {
+    return false;
+  }
+  if (typeof targetMileage === "number" && typeof listing.mileage === "number") {
+    const band = Math.max(5000, Math.round(targetMileage * 0.2));
+    if (Math.abs(targetMileage - listing.mileage) > band) {
+      return false;
+    }
+  }
 
   return true;
+}
+
+function resolveLikelyStructuredAcvRange(params: {
+  report: RepairIntelligenceReport | null;
+  analysis: AnalysisResult | null;
+  vehicle?: VehicleIdentity;
+  mileage?: number;
+}): { low: number; high: number } | undefined {
+  const valuationData = extractStructuredValuationData(params.report, params.analysis);
+  const targetVehicle = normalizeVehicleIdentity(params.vehicle);
+  const comparablePrices = (valuationData.comparableListings ?? [])
+    .map((listing) => normalizeComparableListing(listing))
+    .filter((listing): listing is NormalizedComparableListing => Boolean(listing))
+    .filter((listing) => isComparableListingRelevant(listing, targetVehicle, params.mileage))
+    .map((listing) => {
+      const mileageAdjusted = applyMileageAdjustment(listing.price, params.mileage, listing.mileage);
+      const yearAdjusted = applyYearAdjustment(mileageAdjusted, targetVehicle?.year, listing.year);
+      return Math.round(
+        applyTrimAdjustment(
+          yearAdjusted,
+          normalizeKey(targetVehicle?.trim ?? ""),
+          normalizeKey(listing.trim ?? "")
+        )
+      );
+    })
+    .filter((price) => Number.isFinite(price) && price > 500)
+    .sort((left, right) => left - right);
+
+  if (comparablePrices.length > 0) {
+    const range = comparablePrices.length === 1
+      ? buildPreviewBandFromValue(comparablePrices[0], 1200, 0.08, 250000)
+      : {
+          low: comparablePrices[0],
+          high: comparablePrices[comparablePrices.length - 1],
+        };
+    if (isSaneRange(range, 250000)) {
+      return range;
+    }
+  }
+
+  return computeACVFromJdPower(valuationData.jdPower)?.acvRange;
+}
+
+function isFallbackMateriallyBelowLikelyMarket(
+  fallbackRange: { low: number; high: number } | undefined,
+  likelyRange: { low: number; high: number } | undefined
+): boolean {
+  if (!fallbackRange || !likelyRange) {
+    return false;
+  }
+
+  const fallbackMid = (fallbackRange.low + fallbackRange.high) / 2;
+  const likelyMid = (likelyRange.low + likelyRange.high) / 2;
+
+  return fallbackMid < likelyMid * 0.7;
 }
 
 function applyMileageAdjustment(

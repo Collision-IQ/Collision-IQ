@@ -3,6 +3,8 @@ import type { CarrierReportDocument } from "./carrierPdfBuilder";
 import type { ConfidenceIntegrity, OEMContradiction, ReportFindingReasoning } from "@/lib/ai/types/analysis";
 import {
   containsCccWorkfileSignal,
+  sanitizeCustomerFacingDocument,
+  sanitizeCustomerReportForRender,
   toCustomerFacingList,
   toCustomerFacingText,
 } from "@/lib/ai/customerFacingText";
@@ -34,21 +36,22 @@ export function buildCustomerReportPdf({
   findingReasoning = [],
   oemContradictions = [],
 }: BuildCustomerReportPdfParams): CarrierReportDocument {
+  const sanitizedReport = sanitizeCustomerReportForRender(report);
   const cccDisclosure = buildCccDisclosure(report, findingReasoning, oemContradictions);
   const possibleMissingItems = buildPossibleMissingItems({
-    report,
+    report: sanitizedReport,
     confidenceIntegrity,
     findingReasoning,
     oemContradictions,
   });
   const verificationItems = buildVerificationItems({
-    report,
+    report: sanitizedReport,
     confidenceIntegrity,
     findingReasoning,
   });
-  const askForItems = buildAskForItems(report);
+  const askForItems = buildAskForItems(sanitizedReport);
 
-  return {
+  return sanitizeCustomerFacingDocument({
     filename: filename || "customer-report.pdf",
     brand: {
       companyName: "Collision Academy",
@@ -56,7 +59,7 @@ export function buildCustomerReportPdf({
       logoPath: "/brand/logos/logo-horizontal.png",
     },
     header: {
-      title: report.title || "Customer Report",
+      title: sanitizedReport.title || "Customer Report",
       subtitle:
         "Straight explanation for the vehicle owner about which repair path looks more accurate, what matters for safety, and the practical options from here.",
       generatedLabel:
@@ -79,7 +82,7 @@ export function buildCustomerReportPdf({
         title: "What We Found",
         body: [
           toCustomerFacingText(
-            report.openingSummary,
+            sanitizedReport.openingSummary,
             "The current file gives us enough information to explain the repair concerns in plain language."
           ),
           cccDisclosure,
@@ -88,7 +91,7 @@ export function buildCustomerReportPdf({
       {
         title: "Why The Shop Estimate Looks More Complete",
         body: toCustomerFacingText(
-          report.whichRepairPlanLooksStronger,
+          sanitizedReport.whichRepairPlanLooksStronger,
           "The shop estimate appears to account for more of the inspection, repair, and verification steps that may be needed."
         ),
       },
@@ -103,7 +106,7 @@ export function buildCustomerReportPdf({
       {
         title: "Why This Matters For Safety And Repair Quality",
         body: toCustomerFacingText(
-          report.safetyFirst,
+          sanitizedReport.safetyFirst,
           "These checks matter because the vehicle should be repaired, fitted, scanned, and verified before it is returned to normal use."
         ),
       },
@@ -122,7 +125,7 @@ export function buildCustomerReportPdf({
       {
         title: "Bottom Line",
         body: toCustomerFacingText(
-          report.bottomLine,
+          sanitizedReport.bottomLine,
           "The safest next step is to have the estimate reviewed against the actual repair needs before treating it as complete."
         ),
       },
@@ -130,7 +133,7 @@ export function buildCustomerReportPdf({
     footer: [
       "This report is intended to explain the repair situation in plain language for the vehicle owner. Final repair decisions should still be confirmed by the repair facility after inspection, teardown, measurement, scan, calibration, and post-repair verification as required.",
     ],
-  };
+  });
 }
 
 function buildPossibleMissingItems(params: {

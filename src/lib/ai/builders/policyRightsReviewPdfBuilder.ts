@@ -7,6 +7,14 @@ import {
   resolveCanonicalVin,
 } from "./buildExportModel";
 import type { ExportBuilderInput } from "./exportTemplates";
+import {
+  buildJurisdictionUnavailableMessage,
+  getClaimStateCodeFromJurisdiction,
+  isOfficialLegalSource,
+  isVerifiedLegalCitation,
+  isVerifiedPolicyCitation,
+  isWeakLegalSource,
+} from "./policySourceValidation";
 import type {
   ImmutablePolicyCitation,
   PolicyRightsAssertion,
@@ -15,7 +23,6 @@ import type {
   PolicyRightsReviewModel,
   PolicyRightsSupportCategory,
 } from "@/lib/ai/types/policyRightsReview";
-import { buildExportResearchSections } from "./exportResearchSections";
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama",
@@ -85,6 +92,8 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
   const vehicleIdentity = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
   const vin = resolveCanonicalVin(exportModel) ?? "Unspecified";
   const insurer = resolveCanonicalInsurer(exportModel);
+  const verifiedCitations = getVerifiedReviewCitations(review);
+  const needsReview = buildSourceNeedsReviewBullets(review);
 
   return {
     filename: "policy-rights-review.pdf",
@@ -115,12 +124,11 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
           review.appraisalRights.confidence
         )})`,
       },
-      { label: "Verified Legal Citations", value: String(review.citations.length) },
+      { label: "Verified Legal Citations", value: String(getVerifiedLegalCitationCount(review)) },
       { label: "Verified / Inferred Assertions", value: formatVerifiedInferredCount(review) },
       { label: "Incomplete Evidence Items", value: String(countAssertionsByConfidence(review, "insufficient")) },
     ],
     sections: [
-      ...buildExportResearchSections(params.exportResearchSnapshot),
       {
         title: "Jurisdiction Summary",
         bullets: [
@@ -133,7 +141,9 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
         title: "Verified Regulation Support",
         bullets: formatAssertions(
           review.verifiedRegulations,
-          "No verified regulation citations were available in the current source set. The report does not infer statutes or regulatory duties without citation metadata."
+          review.jurisdiction.confidence === "high"
+            ? "No verified regulation citations were available in the current source set. The report does not infer statutes or regulatory duties without citation metadata."
+            : buildJurisdictionUnavailableMessage()
         ),
       },
       {
@@ -141,11 +151,10 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
         bullets: formatAssertions(review.policyRights, "No uploaded policy-rights provisions were identified in the current source set."),
       },
       {
-        title: "Internet-Derived Support",
-        bullets: formatAssertions(
-          review.internetDerivedSupport,
-          "No internet-derived legal, policy, or OEM support was isolated. Web-derived support remains unavailable rather than inferred."
-        ),
+        title: "Needs Review",
+        bullets: needsReview.length
+          ? needsReview
+          : ["No weak, unsupported, or mismatched legal sources were used as verified legal support."],
       },
       {
         title: "Appraisal Rights",
@@ -178,7 +187,9 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
         title: "Escalation Options",
         bullets: formatAssertions(
           review.escalationOptions,
-          "No DOI escalation citation was available. Escalation should not be recommended as a legal conclusion without verified jurisdiction support."
+          review.jurisdiction.confidence === "high"
+            ? "No DOI escalation citation was available. Escalation should not be recommended as a legal conclusion without verified jurisdiction support."
+            : buildJurisdictionUnavailableMessage()
         ),
       },
       {
@@ -187,8 +198,8 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
       },
       {
         title: "Source & Citation Index",
-        bullets: review.citations.length
-          ? review.citations.map(formatCitationIndexItem)
+        bullets: verifiedCitations.length
+          ? verifiedCitations.map(formatCitationIndexItem)
           : ["No immutable legal or policy citation metadata was available from the current source set."],
       },
     ],
@@ -199,7 +210,7 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
   };
 }
 
-function buildPolicyRightsReviewModel(
+export function buildPolicyRightsReviewModel(
   params: ExportBuilderInput,
   exportModel: ReturnType<typeof buildExportModel>
 ): PolicyRightsReviewModel {
@@ -224,10 +235,15 @@ function buildPolicyRightsReviewModel(
   );
   const oemCitations = citations.filter((citation) => citation.source === "OEMPositionStatement");
   const jurisdiction = detectJurisdiction(sourceText, legalCitations);
+  const claimStateCode = getClaimStateCodeFromJurisdiction(jurisdiction);
+  const verifiedLegalCitations = legalCitations.filter((citation) =>
+    isVerifiedLegalCitation(citation, claimStateCode)
+  );
+  const verifiedPolicyCitations = policyCitations.filter((citation) => isVerifiedPolicyCitation(citation));
   const appraisalDetected =
     Boolean(params.panel?.appraisal?.triggered) || /\bappraisal\b/i.test(sourceText);
-  const appraisalCitations = legalCitations.filter((citation) => /appraisal/i.test(citation.title));
-  const doiCitations = legalCitations.filter((citation) =>
+  const appraisalCitations = verifiedLegalCitations.filter((citation) => /appraisal/i.test(citation.title));
+  const doiCitations = verifiedLegalCitations.filter((citation) =>
     /\bDOI\b|department of insurance|insurance department/i.test(`${citation.title} ${citation.locator ?? ""}`)
   );
 
@@ -239,21 +255,21 @@ function buildPolicyRightsReviewModel(
       basis: params.panel?.appraisal?.reasoning || "No verified appraisal clause or regulation was isolated from the current source set.",
       citations: appraisalCitations,
     },
-    verifiedRegulations: legalCitations.map((citation) =>
+    verifiedRegulations: verifiedLegalCitations.map((citation) =>
       buildConfidenceWeightedAssertion({
         statement: `Verified legal or regulatory source available for review: ${citation.title}.`,
         supportCategory: "verified_regulation",
         citations: [citation],
       })
     ),
-    policyRights: policyCitations.map((citation) =>
+    policyRights: verifiedPolicyCitations.map((citation) =>
       buildConfidenceWeightedAssertion({
         statement: `Policy document source available for rights review: ${citation.title}.`,
         supportCategory: "policy_extraction",
         citations: [citation],
       })
     ),
-    insurerObligations: buildInsurerObligationAssertions(sourceText, legalCitations),
+    insurerObligations: buildInsurerObligationAssertions(sourceText, verifiedLegalCitations),
     oemPositionSupport: oemCitations.map((citation) =>
       buildConfidenceWeightedAssertion({
         statement: `OEM position support source available: ${citation.title}.`,
@@ -276,7 +292,7 @@ function buildPolicyRightsReviewModel(
         citations: [citation],
       })
     ),
-    missingDocumentation: buildMissingDocumentation(policyCitations, legalCitations, oemCitations),
+    missingDocumentation: buildMissingDocumentation(verifiedPolicyCitations, verifiedLegalCitations, oemCitations),
     citations,
   };
 }
@@ -383,19 +399,21 @@ function classifyCitationSource(
   title: string,
   sourceType: "drive" | "web" | "oem" | "estimate"
 ): PolicyRightsCitationSource {
+  const weakSource = isWeakLegalSource(title);
+  const officialSource = isOfficialLegalSource(title);
   if (/policy|declarations|endorsement|coverage/i.test(title)) {
     return sourceType === "drive" ? "DrivePolicyFolder" : "UploadedPolicyDocument";
   }
   if (/statute|regulation|insurance code|department of insurance|\bDOI\b|appraisal|consumer rights/i.test(title)) {
-    if (sourceType === "drive") return "DriveLawFolder";
-    if (sourceType === "web") return "InternetResearch";
-    return "VerifiedRegulationsDatabase";
+    if (officialSource && !weakSource) {
+      return sourceType === "drive" ? "DriveLawFolder" : "VerifiedRegulationsDatabase";
+    }
+    return "InternetResearch";
   }
   if (sourceType === "oem" || /oem|position statement|manufacturer/i.test(title)) {
     return "OEMPositionStatement";
   }
   if (sourceType === "web") return "InternetResearch";
-  if (sourceType === "drive") return "DriveLawFolder";
   return "ClaimAnalysisRuntime";
 }
 
@@ -702,6 +720,63 @@ function countAssertionsByConfidence(
   return getAllAssertions(review).filter((assertion) => assertion.confidence === confidence).length;
 }
 
+function getVerifiedLegalCitationCount(review: PolicyRightsReviewModel): number {
+  const claimStateCode = getClaimStateCodeFromJurisdiction(review.jurisdiction);
+  return dedupeCitations(
+    review.citations.filter((citation) => isVerifiedLegalCitation(citation, claimStateCode))
+  ).length;
+}
+
+function getVerifiedReviewCitations(review: PolicyRightsReviewModel): ImmutablePolicyCitation[] {
+  const claimStateCode = getClaimStateCodeFromJurisdiction(review.jurisdiction);
+  return dedupeCitations(
+    review.citations.filter((citation) => {
+      if (isVerifiedLegalCitation(citation, claimStateCode)) {
+        return true;
+      }
+      if (isVerifiedPolicyCitation(citation)) {
+        return true;
+      }
+      return citation.source === "OEMPositionStatement" && Boolean(citation.retrievedAt || citation.effectiveDate);
+    })
+  );
+}
+
+function buildSourceNeedsReviewBullets(review: PolicyRightsReviewModel): string[] {
+  const claimStateCode = getClaimStateCodeFromJurisdiction(review.jurisdiction);
+  const legalLikeCitations = review.citations.filter((citation) =>
+    /statute|regulation|insurance code|department of insurance|\bDOI\b|appraisal|consumer rights|law|legal/i.test(
+      `${citation.title} ${citation.url ?? ""} ${citation.locator ?? ""}`
+    )
+  );
+  const unverifiedLegalSources = legalLikeCitations.filter((citation) =>
+    !isVerifiedLegalCitation(citation, claimStateCode)
+  );
+  const weakLegalSources = unverifiedLegalSources.filter((citation) =>
+    isWeakLegalSource(`${citation.title} ${citation.url ?? ""} ${citation.locator ?? ""}`)
+  );
+  const mismatchedOfficialSources = unverifiedLegalSources.filter((citation) => {
+    const haystack = `${citation.title} ${citation.url ?? ""} ${citation.locator ?? ""}`;
+    return isOfficialLegalSource(haystack) && !isWeakLegalSource(haystack);
+  });
+
+  return dedupeStrings([
+    review.jurisdiction.confidence === "high" ? null : buildJurisdictionUnavailableMessage(),
+    weakLegalSources.length
+      ? "Non-official commentary, articles, social media, or law-firm material was excluded from verified legal support."
+      : null,
+    mismatchedOfficialSources.length
+      ? "Official legal or DOI sources from a different jurisdiction were excluded from verified legal support."
+      : null,
+    review.internetDerivedSupport.length
+      ? "Internet-derived material remains pending review unless it is tied to a jurisdiction-matched official source with a retrieval or effective date."
+      : null,
+    review.proceduralInference.length
+      ? "Inferred claim-handling or procedure commentary remains pending review until verified legal, policy, or OEM support is attached."
+      : null,
+  ]);
+}
+
 function formatCitationList(citations: ImmutablePolicyCitation[]): string {
   if (citations.length === 0) {
     return "Citations: none attached.";
@@ -737,6 +812,26 @@ function dedupeCitations(citations: ImmutablePolicyCitation[]): ImmutablePolicyC
     }
     seen.add(citation.immutableKey);
     deduped.push(citation);
+  }
+
+  return deduped;
+}
+
+function dedupeStrings(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+
+  for (const value of values) {
+    const cleaned = value?.trim();
+    if (!cleaned) {
+      continue;
+    }
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(cleaned);
   }
 
   return deduped;
