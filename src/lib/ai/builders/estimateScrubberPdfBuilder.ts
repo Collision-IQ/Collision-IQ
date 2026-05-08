@@ -9,7 +9,9 @@ import {
 import type { ExportBuilderInput } from "./exportTemplates";
 import { buildExportResearchSections } from "./exportResearchSections";
 import type { EstimateScrubFinding, SourceCitation } from "@/lib/ai/types/estimateScrubber";
+import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
+import { CCC_WORKFILE_DISCLAIMER } from "@/lib/ccc/cccWorkfile";
 
 export function buildEstimateScrubberPdf(params: ExportBuilderInput): CarrierReportDocument {
   const exportModel = params.renderModel
@@ -78,6 +80,12 @@ export function buildEstimateScrubberPdf(params: ExportBuilderInput): CarrierRep
           "ADAS operations, scan requirements, structural verification, blend requirements, hazardous-material operations, and material allowances.",
         ],
       },
+      ...(params.report?.cccWorkfileContext
+        ? [{
+            title: "CCC Workfile Context",
+            bullets: buildCccWorkfileScrubberBullets(params.report.cccWorkfileContext),
+          }]
+        : []),
       ...(findings.length > 0
         ? [{
             title: "Estimate QA Findings",
@@ -95,9 +103,23 @@ export function buildEstimateScrubberPdf(params: ExportBuilderInput): CarrierRep
     ],
     footer: [
       "This report is an estimate QA and compliance audit, not a final repair authorization.",
+      CCC_WORKFILE_DISCLAIMER,
       "Use it to identify missing or under-documented estimate operations and the support needed to justify corrections.",
     ],
   };
+}
+
+export function buildCccWorkfileScrubberBullets(
+  cccWorkfileContext: RepairIntelligenceReport["cccWorkfileContext"]
+): string[] {
+  if (!cccWorkfileContext?.artifacts.length) return [];
+
+  return [
+    CCC_WORKFILE_DISCLAIMER,
+    ...cccWorkfileContext.artifacts.map((artifact) =>
+      `${artifact.filename} (${artifact.classification}; ${artifact.parserStatus ?? "metadata recorded"}).`
+    ),
+  ];
 }
 
 function buildEstimateScrubFindings(
@@ -187,6 +209,9 @@ function buildSourceFallback(exportModel: ReturnType<typeof buildExportModel>): 
 
   return [
     ...retrievalSources,
+    ...(exportModel.reportFields.documentedHighlights.some((item) => /ccc|awf|workfile/i.test(item))
+      ? [{ title: "CCC workfile artifact", sourceType: "EstimateParser" as const, verified: false }]
+      : []),
     { title: "Existing estimate parser", sourceType: "EstimateParser", verified: false },
     { title: "Uploaded claim documents", sourceType: "UploadedDocument", verified: false },
   ];

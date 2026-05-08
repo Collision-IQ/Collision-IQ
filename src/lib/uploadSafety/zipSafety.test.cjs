@@ -42,6 +42,13 @@ const {
   prepareUploadFile,
   validateUploadFilename,
 } = require("./zipSafety.ts");
+const {
+  CCC_WORKFILE_DISCLAIMER,
+  parseCccWorkfileArtifact,
+} = require("../ccc/cccWorkfile.ts");
+const {
+  buildCccWorkfileScrubberBullets,
+} = require("../ai/builders/estimateScrubberPdfBuilder.ts");
 
 const tests = [];
 
@@ -227,6 +234,96 @@ run("Pro/Admin can upload screenshots within plan size limits", () => {
   assert.equal(adminLimits.maxUploadBytes, 50 * MB);
   assert.equal(5 * MB <= proLimits.maxUploadBytes, true);
   assert.equal(5 * MB <= adminLimits.maxUploadBytes, true);
+});
+
+run("AWF accepted for Pro and Admin", async () => {
+  const proResult = await prepareUploadFile(
+    makeFile("claim.AWF", "application/octet-stream", "opaque-awf"),
+    resolveUploadPlanLimits(proEntitlements())
+  );
+  const adminResult = await prepareUploadFile(
+    makeFile("claim.awf", "application/octet-stream", "opaque-awf"),
+    resolveUploadPlanLimits(adminEntitlements())
+  );
+
+  assert.equal(proResult.files.length, 1);
+  assert.equal(proResult.files[0].classification, "ccc_awf");
+  assert.equal(adminResult.files.length, 1);
+  assert.equal(adminResult.files[0].classification, "ccc_awf");
+});
+
+run("AWF rejected for Starter", async () => {
+  const result = await prepareUploadFile(
+    makeFile("claim.awf", "application/octet-stream", "opaque-awf"),
+    resolveUploadPlanLimits(starterEntitlements())
+  );
+
+  assert.equal(result.files.length, 0);
+  assert.equal(result.rejectedFiles[0].code, "CCC_WORKFILE_PLAN_REQUIRED");
+});
+
+run("AWF rejected for Trial until upgraded to Pro", async () => {
+  const result = await prepareUploadFile(
+    makeFile("claim.awf", "application/octet-stream", "opaque-awf"),
+    resolveUploadPlanLimits({
+      plan: "trial",
+      billingPlan: "trial",
+      isPlatformAdmin: false,
+      entitlementSource: "trial",
+    })
+  );
+
+  assert.equal(result.files.length, 0);
+  assert.equal(result.rejectedFiles[0].code, "CCC_WORKFILE_PLAN_REQUIRED");
+});
+
+run("CCC companion unsupported files rejected unless explicitly allowed", async () => {
+  const unsupported = await prepareUploadFile(
+    makeFile("claim.bin", "application/octet-stream", "opaque"),
+    resolveUploadPlanLimits(proEntitlements())
+  );
+  const allowed = await prepareUploadFile(
+    makeFile("claim.xml", "application/xml", "<estimate />"),
+    resolveUploadPlanLimits(proEntitlements())
+  );
+
+  assert.equal(unsupported.files.length, 0);
+  assert.equal(unsupported.rejectedFiles[0].code, "UNSUPPORTED_EXTENSION");
+  assert.equal(allowed.files.length, 1);
+  assert.equal(allowed.files[0].classification, "ccc_companion_file");
+});
+
+run("AWF parser stores opaque metadata and hash", () => {
+  const parsed = parseCccWorkfileArtifact({
+    filename: "claim.awf",
+    mimeType: "application/octet-stream",
+    buffer: Buffer.from("opaque-awf"),
+    classification: "ccc_awf",
+  });
+
+  assert.equal(parsed.metadata.classification, "ccc_awf");
+  assert.equal(parsed.metadata.parserStatus, "opaque_artifact");
+  assert.equal(parsed.metadata.sha256.length, 64);
+  assert.equal(parsed.text.includes(CCC_WORKFILE_DISCLAIMER), true);
+});
+
+run("Estimate Scrubber can receive ccc_awf context", () => {
+  const bullets = buildCccWorkfileScrubberBullets({
+    disclaimer: CCC_WORKFILE_DISCLAIMER,
+    artifacts: [
+      {
+        id: "artifact-1",
+        filename: "claim.awf",
+        classification: "ccc_awf",
+        parserStatus: "opaque_artifact",
+        sha256: "abc",
+        sizeBytes: 10,
+      },
+    ],
+  });
+
+  assert.equal(bullets[0], CCC_WORKFILE_DISCLAIMER);
+  assert.equal(bullets.some((line) => line.includes("ccc_awf")), true);
 });
 
 run("unsafe ZIP filenames rejected", () => {

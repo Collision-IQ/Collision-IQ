@@ -223,6 +223,9 @@ export type CaseEvidenceSourceType =
   | "shop_estimate"
   | "carrier_estimate"
   | "supplement"
+  | "ccc_workfile"
+  | "ccc_awf"
+  | "ccc_companion_file"
   | "photo"
   | "invoice"
   | "sublet_document"
@@ -481,6 +484,17 @@ export type RepairIntelligenceReport = {
   exportResearchSnapshot?: ExportResearchSnapshot;
   disputeStrategy?: ReportDisputeStrategy;
   confidenceIntegrity?: ConfidenceIntegrity;
+  cccWorkfileContext?: {
+    disclaimer: string;
+    artifacts: Array<{
+      id: string;
+      filename: string;
+      classification: "ccc_workfile" | "ccc_awf" | "ccc_companion_file";
+      parserStatus?: string;
+      sha256?: string;
+      sizeBytes?: number;
+    }>;
+  };
   ingestionMeta?: {
     linkedEvidenceCount?: number;
     linkedEvidenceFetchedAt?: string;

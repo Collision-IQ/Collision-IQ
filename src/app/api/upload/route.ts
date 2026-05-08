@@ -19,6 +19,12 @@ import {
   extractPreviewDataFromBuffer,
 } from "@/lib/attachments/extractPreviewData";
 import {
+  isCccUploadClassification,
+  parseCccWorkfileArtifact,
+  type CccWorkfileMetadata,
+  type UploadClassification,
+} from "@/lib/ccc/cccWorkfile";
+import {
   formatUploadLimitBytes,
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
@@ -43,7 +49,9 @@ type UploadSuccess = {
   sizeBytes: number;
   source: "direct_upload" | "zip_extraction";
   sourceArchive?: string;
-  classification: "image" | "pdf" | "text" | "docx";
+  classification: UploadClassification;
+  metadata?: CccWorkfileMetadata;
+  sha256?: string;
   text: string;
   imageDataUrl?: string;
   pageCount?: number;
@@ -74,6 +82,7 @@ type UploadTelemetry = {
     maxUploadBytes: number;
     maxFilesPerReview: number;
     zipAllowed: boolean;
+    cccWorkfileAllowed: boolean;
     maxExtractedFiles: number;
     maxExtractedTotalBytes: number;
     maxZipNestingDepth: number;
@@ -185,6 +194,7 @@ function buildUploadTelemetry(params: {
       ),
       maxFilesPerReview: params.uploadLimits.maxFilesPerReview,
       zipAllowed: params.uploadLimits.zipAllowed,
+      cccWorkfileAllowed: params.uploadLimits.cccWorkfileAllowed,
       maxExtractedFiles: params.uploadLimits.maxExtractedFiles,
       maxExtractedTotalBytes: params.uploadLimits.maxExtractedTotalBytes,
       maxZipNestingDepth: params.uploadLimits.maxZipNestingDepth,
@@ -541,6 +551,7 @@ export async function POST(req: Request) {
             maxExtractedFiles: uploadLimits.maxExtractedFiles,
             maxExtractedTotalBytes: uploadLimits.maxExtractedTotalBytes,
             maxZipNestingDepth: uploadLimits.maxZipNestingDepth,
+            cccWorkfileAllowed: uploadLimits.cccWorkfileAllowed,
           },
           zipSummaries,
           telemetry,
@@ -579,6 +590,7 @@ export async function POST(req: Request) {
         runtimeMaxFileBytes: runtimeMaxUploadBytes,
         temporaryPlatformLimit: true,
         zipAllowed: uploadLimits.zipAllowed,
+        cccWorkfileAllowed: uploadLimits.cccWorkfileAllowed,
         maxExtractedFiles: uploadLimits.maxExtractedFiles,
         maxExtractedTotalBytes: uploadLimits.maxExtractedTotalBytes,
         maxZipNestingDepth: uploadLimits.maxZipNestingDepth,
@@ -600,6 +612,8 @@ export async function POST(req: Request) {
         source: upload.source,
         sourceArchive: upload.sourceArchive,
         classification: upload.classification,
+        metadata: upload.metadata,
+        sha256: upload.sha256,
         text: upload.text,
         pageCount: upload.pageCount,
         attachmentId: upload.attachmentId,
@@ -633,11 +647,21 @@ async function processPreparedUpload(params: {
   activeCase: Awaited<ReturnType<typeof getAnalysisReport>>;
   maxImageDataUrlBytes: number;
 }): Promise<UploadSuccess> {
-  const previewData = await extractPreviewDataFromBuffer({
-    buffer: params.file.buffer,
-    mimeType: params.file.type,
-    filename: params.file.filename,
-  });
+  const cccParsed = isCccUploadClassification(params.file.classification)
+    ? parseCccWorkfileArtifact({
+        filename: params.file.filename,
+        mimeType: params.file.type,
+        buffer: params.file.buffer,
+        classification: params.file.classification,
+      })
+    : null;
+  const previewData = cccParsed
+    ? { text: cccParsed.text }
+    : await extractPreviewDataFromBuffer({
+        buffer: params.file.buffer,
+        mimeType: params.file.type,
+        filename: params.file.filename,
+      });
   const imageDataUrl = bufferToReusableDataUrl({
     buffer: params.file.buffer,
     mimeType: params.file.type,
@@ -653,6 +677,12 @@ async function processPreparedUpload(params: {
     text: previewData.text,
     imageDataUrl,
     pageCount: previewData.pageCount,
+    classification: params.file.classification,
+    sizeBytes: params.file.sizeBytes,
+    sha256: cccParsed?.metadata.sha256,
+    metadata: cccParsed?.metadata,
+    source: params.file.source,
+    sourceArchive: params.file.sourceArchive,
   });
 
   const caseContinuity = params.activeCase
@@ -679,6 +709,8 @@ async function processPreparedUpload(params: {
     source: params.file.source,
     sourceArchive: params.file.sourceArchive,
     classification: params.file.classification,
+    metadata: cccParsed?.metadata,
+    sha256: cccParsed?.metadata.sha256,
     text: stored.text,
     imageDataUrl: stored.imageDataUrl,
     pageCount: stored.pageCount,

@@ -16,6 +16,19 @@ export const ALLOWED_UPLOAD_EXTENSIONS = new Set([
   ".docx",
 ]);
 
+export const CCC_UPLOAD_EXTENSIONS = new Set([
+  ".awf",
+  ".ccc",
+  ".xml",
+  ".json",
+  ".csv",
+  ".dat",
+  ".dbf",
+  ".cfg",
+  ".ini",
+  ".log",
+]);
+
 export const BLOCKED_UPLOAD_EXTENSIONS = new Set([
   ".exe",
   ".bat",
@@ -27,6 +40,10 @@ export const BLOCKED_UPLOAD_EXTENSIONS = new Set([
   ".dll",
   ".scr",
   ".msi",
+  ".com",
+  ".ps1",
+  ".vbs",
+  ".jar",
 ]);
 
 export const SCREENSHOT_IMAGE_EXTENSIONS = new Set([
@@ -45,6 +62,7 @@ export type UploadPlanLimits = {
   maxExtractedFiles: number;
   maxExtractedTotalBytes: number;
   maxZipNestingDepth: number;
+  cccWorkfileAllowed: boolean;
 };
 
 export function resolveUploadPlanLimits(
@@ -66,6 +84,7 @@ export function resolveUploadPlanLimits(
       maxExtractedFiles: 50,
       maxExtractedTotalBytes: 150 * MB,
       maxZipNestingDepth: 2,
+      cccWorkfileAllowed: true,
     };
   }
 
@@ -75,14 +94,20 @@ export function resolveUploadPlanLimits(
     entitlements.plan === "pro" ||
     entitlements.plan === "trial"
   ) {
+    const plan =
+      entitlements.billingPlan === "trial" || entitlements.plan === "trial"
+        ? "trial"
+        : "pro";
+
     return {
-      plan: entitlements.billingPlan === "trial" || entitlements.plan === "trial" ? "trial" : "pro",
+      plan,
       maxUploadBytes: 30 * MB,
       maxFilesPerReview: PRO_UPLOAD_BATCH_FILE_LIMIT,
       zipAllowed: true,
       maxExtractedFiles: 25,
       maxExtractedTotalBytes: 75 * MB,
       maxZipNestingDepth: 2,
+      cccWorkfileAllowed: plan === "pro",
     };
   }
 
@@ -94,6 +119,7 @@ export function resolveUploadPlanLimits(
     maxExtractedFiles: 0,
     maxExtractedTotalBytes: 0,
     maxZipNestingDepth: 0,
+    cccWorkfileAllowed: false,
   };
 }
 

@@ -1,8 +1,15 @@
 import path from "node:path";
 import JSZip from "jszip";
 import {
+  cccMimeTypeForFilename,
+  getCccUploadClassification,
+  isExplicitlyAllowedCccExtension,
+  type UploadClassification,
+} from "@/lib/ccc/cccWorkfile";
+import {
   ALLOWED_UPLOAD_EXTENSIONS,
   BLOCKED_UPLOAD_EXTENSIONS,
+  CCC_UPLOAD_EXTENSIONS,
   SCREENSHOT_IMAGE_EXTENSIONS,
   formatUploadLimitBytes,
   type UploadPlanLimits,
@@ -15,7 +22,7 @@ export type PreparedUploadFile = {
   sizeBytes: number;
   source: "direct_upload" | "zip_extraction";
   sourceArchive?: string;
-  classification: "image" | "pdf" | "text" | "docx";
+  classification: UploadClassification;
 };
 
 export type UploadRejectedFile = {
@@ -56,6 +63,9 @@ export function getUploadExtension(filename: string) {
 }
 
 export function classifyUploadFilename(filename: string): PreparedUploadFile["classification"] {
+  const cccClassification = getCccUploadClassification(filename);
+  if (cccClassification) return cccClassification;
+
   const extension = getUploadExtension(filename);
   if (SCREENSHOT_IMAGE_EXTENSIONS.has(extension)) return "image";
   if (extension === ".pdf") return "pdf";
@@ -69,7 +79,10 @@ export function normalizeUploadFilename(filename: string) {
   return baseName.replace(/[^\w.\- ()]/g, "_").replace(/\s+/g, " ").slice(0, 180);
 }
 
-export function validateUploadFilename(filename: string): UploadRejectedFile | null {
+export function validateUploadFilename(
+  filename: string,
+  limits?: Pick<UploadPlanLimits, "cccWorkfileAllowed">
+): UploadRejectedFile | null {
   const normalized = filename.replace(/\\/g, "/");
   const segments = normalized.split("/");
   const safeName = normalizeUploadFilename(filename);
@@ -96,6 +109,26 @@ export function validateUploadFilename(filename: string): UploadRejectedFile | n
     };
   }
 
+  if (CCC_UPLOAD_EXTENSIONS.has(extension) || isExplicitlyAllowedCccExtension(safeName)) {
+    if (!limits?.cccWorkfileAllowed) {
+      return {
+        filename: safeName,
+        reason: "CCC workfile/AWF uploads are available on Pro and Admin plans.",
+        code: "CCC_WORKFILE_PLAN_REQUIRED",
+      };
+    }
+
+    if (!isExplicitlyAllowedCccExtension(safeName)) {
+      return {
+        filename: safeName,
+        reason: `CCC companion file type ${extension || "unknown"} is not explicitly allowed.`,
+        code: "CCC_COMPANION_UNSUPPORTED",
+      };
+    }
+
+    return null;
+  }
+
   if (!ALLOWED_UPLOAD_EXTENSIONS.has(extension)) {
     return {
       filename: safeName,
@@ -118,7 +151,7 @@ export async function prepareUploadFile(file: File, limits: UploadPlanLimits) {
     });
   }
 
-  const rejected = validateUploadFilename(file.name);
+  const rejected = validateUploadFilename(file.name, limits);
   if (rejected) {
     return {
       files: [],
@@ -262,7 +295,7 @@ async function extractZipEntries(params: {
       continue;
     }
 
-    const rejected = validateUploadFilename(originalName);
+    const rejected = validateUploadFilename(originalName, params.limits);
     if (rejected) {
       params.accumulator.rejected.push({
         ...rejected,
@@ -359,6 +392,10 @@ export function hasEncryptedZipEntries(buffer: Buffer) {
 }
 
 export function mimeTypeForFilename(filename: string) {
+  if (isExplicitlyAllowedCccExtension(filename)) {
+    return cccMimeTypeForFilename(filename);
+  }
+
   switch (getUploadExtension(filename)) {
     case ".pdf":
       return "application/pdf";
