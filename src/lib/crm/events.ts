@@ -27,6 +27,7 @@ export type SafeCrmEventPayload = {
     | "customer_report"
     | "repair_intelligence"
     | "estimate_scrubber"
+    | "estimator_change_request_list"
     | "policy_rights_review"
     | "doi_complaint_packet";
   caseId?: string | null;

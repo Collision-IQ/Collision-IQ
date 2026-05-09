@@ -259,8 +259,8 @@ function extractValuation(text: string): DerivedValuation {
     acvReasoning:
       sanitizeHumanText(acvBlock ?? "") ||
       (lower.includes("acv") || lower.includes("actual cash value")
-        ? "ACV was discussed, but the current documents do not support a reliable exact value."
-        : "ACV is not determinable from the current documents."),
+        ? "Market Preview was discussed, but the current documents do not support a reliable exact value."
+        : "Market Preview is not determinable from the current documents."),
     acvMissingInputs,
     dvStatus:
       dvNumbers.length >= 2 || (dvExplicitRange && dvNumbers.length === 2)

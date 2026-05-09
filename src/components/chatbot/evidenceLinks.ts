@@ -222,7 +222,7 @@ function buildValuationTargets(params: {
       id: buildValuationTargetId("acv_reasoning"),
       type: "valuation_note",
       insightKey: "financial_view",
-      title: "ACV rationale",
+      title: "Market Preview rationale",
       detail: acvReasoning,
       workspaceScrollTargetId: strongestFinancialRow?.targetId,
     });
@@ -233,7 +233,7 @@ function buildValuationTargets(params: {
       id: buildValuationTargetId("acv_missing_inputs"),
       type: "valuation_note",
       insightKey: "financial_view",
-      title: "ACV missing inputs",
+      title: "Market Preview missing inputs",
       detail: valuation.acvMissingInputs.join(", "),
       workspaceScrollTargetId: strongestFinancialRow?.targetId,
     });

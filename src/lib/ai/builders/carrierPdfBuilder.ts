@@ -358,10 +358,22 @@ function resolveCarrierExportModel(params: ExportBuilderInput): ExportModel {
 
 function formatComparisonSide(value: string | number | null | undefined): string {
   if (value === null || value === undefined || `${value}`.trim() === "") {
-    return "not shown";
+    return "Not clearly shown";
   }
 
-  return `${value}`;
+  return cleanComparisonDisplayText(`${value}`) || "Not clearly shown";
+}
+
+function cleanComparisonDisplayText(value: string): string {
+  return value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Za-z])(\$?\d)/g, "$1 $2")
+    .replace(/(\d)([A-Za-z$])/g, "$1 $2")
+    .replace(/\s*[|]{1,}\s*/g, " - ")
+    .replace(/\bshown\b/i, "Not clearly shown")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .slice(0, 240);
 }
 
 function buildRepairStrategyComparisonBullets(params: {
@@ -389,15 +401,11 @@ function buildTopDisputeDriverBullets(
 ): string[] {
   const driverBullets = exportModel.disputeIntelligenceReport.topDrivers.slice(0, 6).map((driver) =>
     [
-      `#${driver.priorityRank} ${displayOperationLabel(driver.title)}`,
-      `impact ${driver.impact}`,
-      `status ${formatSupportStatus(driver.supportStatus)}`,
-      `leverage ${driver.leverageScore}/100`,
-      `evidence ${driver.evidenceLevel}`,
-      driver.whyThisWins,
-      `Gap: ${driver.currentGap}`,
-      `Next: ${driver.nextAction}`,
-    ].join(" | ")
+      `${displayOperationLabel(driver.title)}`,
+      `${driver.whyThisWins} The item is ranked ${driver.priorityRank} with ${formatSupportStatus(driver.impact)} impact and ${formatSupportStatus(driver.supportStatus)} support.`,
+      `The current gap is ${driver.currentGap}`,
+      `Recommended next action: ${driver.nextAction}`,
+    ].join("\n\n")
   );
 
   if (driverBullets.length > 0) {
@@ -409,33 +417,29 @@ function buildTopDisputeDriverBullets(
   }
 
   return dedupeBullets(fallbackItems.slice(0, 6).map((item) =>
-    `${displayOperationLabel(item.title)} | priority ${item.priority} | ${item.rationale}${item.evidence ? ` | Support: ${item.evidence}` : ""}`
+    `${displayOperationLabel(item.title)}\n\n${item.rationale}${item.evidence ? ` Current support: ${item.evidence}` : ""}`
   ));
 }
 
 function buildExplainabilityBullets(exportModel: ExportModel): string[] {
   return dedupeBullets(exportModel.findingReasoning.slice(0, 6).map((finding) =>
     [
-      `#${finding.priorityRank ?? ""} ${displayOperationLabel(finding.issue)}`,
-      `Rationale: ${finding.rationaleSummary ?? finding.why_it_matters}`,
-      `Evidence chain: ${finding.evidenceChainSummary ?? finding.what_proves_it}`,
-      `Risk if omitted: ${finding.riskIfOmitted ?? "Could weaken the documented repair position."}`,
-      `Support: ${formatSupportStatus(finding.supportConfidenceIndicator ?? finding.evidenceLevel)}`,
-      `Confidence: ${Math.round(finding.confidence * 100)}%`,
-    ].join(" | ")
+      `${displayOperationLabel(finding.issue)}`,
+      `${finding.rationaleSummary ?? finding.why_it_matters}`,
+      `The evidence record currently shows ${finding.evidenceChainSummary ?? finding.what_proves_it}.`,
+      `${finding.riskIfOmitted ?? "If omitted, the documented repair position may be weaker."} Support posture: ${formatSupportStatus(finding.supportConfidenceIndicator ?? finding.evidenceLevel)}.`,
+    ].join("\n\n")
   ));
 }
 
 function buildOemContradictionBullets(exportModel: ExportModel): string[] {
   return dedupeBullets(exportModel.oemContradictions.map((contradiction) =>
     [
-      `Affected operation: ${displayOperationLabel(contradiction.affectedOperation)}`,
-      `Conflict summary: ${contradiction.conflictSummary}`,
-      `OEM support citation: ${contradiction.oemSupportCitation ?? "Inferred only; verify OEM support before asserting."}`,
-      `Severity: ${formatSupportStatus(contradiction.contradictionSeverity)}`,
-      `Support: ${formatSupportStatus(contradiction.supportStatus)}`,
-      `Follow-up: ${contradiction.recommendedFollowUp}`,
-    ].join(" | ")
+      `${displayOperationLabel(contradiction.affectedOperation)}`,
+      `${contradiction.conflictSummary}`,
+      `OEM support status: ${contradiction.oemSupportCitation ?? "not yet verified from an attached OEM procedure"}. Severity is ${formatSupportStatus(contradiction.contradictionSeverity)} and support is ${formatSupportStatus(contradiction.supportStatus)}.`,
+      `Recommended follow-up: ${contradiction.recommendedFollowUp}`,
+    ].join("\n\n")
   ));
 }
 
@@ -617,7 +621,7 @@ function buildValuationBullets(
   const bullets: string[] = [];
   const valuation = exportModel.valuation;
 
-  bullets.push(renderValuationBullet("ACV", {
+  bullets.push(renderValuationBullet("Market Preview", {
     status: valuation.acvStatus,
     value: valuation.acvValue,
     range: valuation.acvRange,

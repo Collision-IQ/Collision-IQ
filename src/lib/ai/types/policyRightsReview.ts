@@ -17,9 +17,17 @@ export type PolicyRightsSupportCategory =
 
 export type PolicyRightsConfidenceBand = "high" | "medium" | "low" | "insufficient";
 
+export type SourceAuthorityTier =
+  | "LEGAL_AUTHORITY"
+  | "POLICY_CONTRACT"
+  | "OEM_PROCEDURE"
+  | "INDUSTRY_CONTEXT"
+  | "REJECTED_FOR_LEGAL_USE";
+
 export type ImmutablePolicyCitation = {
   id: string;
   source: PolicyRightsCitationSource;
+  sourceAuthorityTier: SourceAuthorityTier;
   sourceType?: "drive" | "web" | "oem" | "estimate" | "runtime";
   title: string;
   locator?: string;

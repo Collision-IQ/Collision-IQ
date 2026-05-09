@@ -134,32 +134,46 @@ function redactCarrierReportDocument(input: CarrierReportDocument): CarrierRepor
     ...input,
     header: {
       ...input.header,
-      title: redactDownloadContent(input.header.title),
-      subtitle: redactDownloadContent(input.header.subtitle),
-      generatedLabel: redactDownloadContent(input.header.generatedLabel),
+      title: sanitizeReportText(redactDownloadContent(input.header.title)),
+      subtitle: sanitizeReportText(redactDownloadContent(input.header.subtitle)),
+      generatedLabel: sanitizeReportText(redactDownloadContent(input.header.generatedLabel)),
     },
     summary: input.summary.map((item) => ({
-      label: item.label,
-      value: redactDownloadContent(item.value),
+      label: sanitizeReportText(item.label),
+      value: sanitizeReportText(redactDownloadContent(item.value)),
     })),
     sections: input.sections.map((section) => ({
       ...section,
-      title: redactDownloadContent(section.title),
-      body: section.body ? redactDownloadContent(section.body) : undefined,
-      bullets: section.bullets?.map((bullet) => redactDownloadContent(bullet)),
+      title: sanitizeReportText(redactDownloadContent(section.title)),
+      body: section.body ? sanitizeReportText(redactDownloadContent(section.body)) : undefined,
+      bullets: section.bullets?.map((bullet) => sanitizeReportText(redactDownloadContent(bullet))),
       comparisonRows: section.comparisonRows?.map((row) => ({
         ...row,
-        label: redactDownloadContent(row.label),
-        leftLabel: redactDownloadContent(row.leftLabel),
-        leftValue: redactDownloadContent(row.leftValue),
-        rightLabel: redactDownloadContent(row.rightLabel),
-        rightValue: redactDownloadContent(row.rightValue),
-        delta: row.delta ? redactDownloadContent(row.delta) : undefined,
-        note: row.note ? redactDownloadContent(row.note) : undefined,
+        label: sanitizeReportText(redactDownloadContent(row.label)),
+        leftLabel: sanitizeReportText(redactDownloadContent(row.leftLabel)),
+        leftValue: sanitizeReportText(redactDownloadContent(row.leftValue)),
+        rightLabel: sanitizeReportText(redactDownloadContent(row.rightLabel)),
+        rightValue: sanitizeReportText(redactDownloadContent(row.rightValue)),
+        delta: row.delta ? sanitizeReportText(redactDownloadContent(row.delta)) : undefined,
+        note: row.note ? sanitizeReportText(redactDownloadContent(row.note)) : undefined,
       })),
     })),
-    footer: input.footer.map((line) => redactDownloadContent(line)),
+    footer: input.footer.map((line) => sanitizeReportText(redactDownloadContent(line))),
   };
+}
+
+export function sanitizeReportText(value: string): string {
+  return value
+    .replace(/\bcm[a-z0-9]{20,}\b/gi, "Uploaded document")
+    .replace(/\b(?:evidence|chain|source|finding|issue|doc|line|parser|vector|object)[-_ ]?[a-z0-9]{8,}\b/gi, "uploaded document")
+    .replace(/\b[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\b/gi, "uploaded document")
+    .replace(/\b[a-f0-9]{24,64}\b/gi, "uploaded document")
+    .replace(/\bSame rationale as earlier\b/gi, "Related estimate rationale")
+    .replace(/\bOperation:\s*/gi, "Item: ")
+    .replace(/\s*\|\s*Status:\s*/gi, " - Status: ")
+    .replace(/\b(?:undefined|null|NaN)\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 export function createPdfPageLayout(doc: Pick<jsPDF, "internal">): PdfPageLayout {
@@ -491,27 +505,28 @@ export function estimateComparisonRowHeight(
   row: NonNullable<CarrierReportDocument["sections"][number]["comparisonRows"]>[number]
 ): number {
   const innerWidth = width - 8;
-  const valueX = 22;
-  const valueWidth = Math.max(10, width - valueX - 4);
+  const valueWidth = Math.max(24, innerWidth - 4);
   let height = 0;
 
-  height += Math.max(1, doc.splitTextToSize(`[ ${row.label.toUpperCase()} ]`, innerWidth).length) * LINE_HEIGHT;
-  height += BLOCK_GAP / 2;
+  height += Math.max(1, doc.splitTextToSize(formatComparisonHeading(row.label), valueWidth).length) * LINE_HEIGHT;
+  height += BLOCK_GAP;
 
-  const fields: Array<string | undefined> = [
-    row.leftValue,
-    row.rightValue,
-    row.delta,
-    row.note,
+  const fields: Array<{ label: string; value?: string; note?: boolean }> = [
+    { label: row.leftLabel || "Shop estimate", value: row.leftValue },
+    { label: row.rightLabel || "Carrier estimate", value: row.rightValue },
+    { label: "Delta", value: row.delta },
+    { label: "Note", value: row.note, note: true },
   ];
 
   for (const field of fields) {
-    if (!field?.trim()) continue;
-    height += Math.max(1, doc.splitTextToSize(field, valueWidth).length) * LINE_HEIGHT;
-    height += BLOCK_GAP / 2;
+    const value = sanitizeComparisonText(field.value);
+    if (!value) continue;
+    const text = field.note ? value : `${field.label}: ${value}`;
+    height += Math.max(1, doc.splitTextToSize(text, valueWidth).length) * (field.note ? LINE_HEIGHT - 0.4 : LINE_HEIGHT);
+    height += field.note ? BLOCK_GAP : BLOCK_GAP / 1.5;
   }
 
-  return height;
+  return height + BLOCK_GAP;
 }
 
 function drawSection(
@@ -634,8 +649,7 @@ function drawComparisonRowBlock(
 ) {
   const innerX = params.x + 4;
   const innerWidth = params.width - 8;
-  const valueX = innerX + 18;
-  const valueWidth = Math.max(10, params.width - (valueX - params.x) - 4);
+  const valueWidth = Math.max(24, innerWidth - 4);
   const rowHeight = estimateComparisonRowHeight(doc, params.width, params.row);
 
   if (rowHeight <= params.layout.usableHeight && params.state.y + rowHeight > params.layout.contentBottomY) {
@@ -647,52 +661,66 @@ function drawComparisonRowBlock(
     params.startContinuationPage();
   };
 
-  const drawTagLine = (line: string) => {
+  const drawLine = (
+    line: string,
+    options: { bold?: boolean; size?: number; color?: PdfColor; indent?: number } = {}
+  ) => {
     ensureLineSpace();
-    setPdfFont(doc, "bold");
-    doc.setFontSize(10.5);
-    doc.setTextColor(35, 37, 40);
-    doc.text(line, innerX, params.state.y + 3);
+    setPdfFont(doc, options.bold ? "bold" : "normal");
+    doc.setFontSize(options.size ?? 9.5);
+    doc.setTextColor(...(options.color ?? DEFAULT_TYPOGRAPHY.textColor));
+    doc.text(line, innerX + (options.indent ?? 0), params.state.y + 3);
     params.state.y += LINE_HEIGHT;
   };
 
-  const drawLabeledField = (
-    fieldLabel: string,
-    fieldValue: string | undefined,
-    options?: { boldValue?: boolean; color?: PdfColor; isNote?: boolean }
+  const drawWrappedBlock = (
+    value: string | undefined,
+    options: { bold?: boolean; color?: PdfColor; size?: number; indent?: number; note?: boolean } = {}
   ) => {
-    const value = (fieldValue || "").trim();
-    if (!value) return;
-
-    const valueLines: string[] = doc.splitTextToSize(value, valueWidth);
-    valueLines.forEach((line: string, index: number) => {
-      ensureLineSpace();
-      if (index === 0) {
-        setPdfFont(doc, "bold");
-        doc.setFontSize(options?.isNote ? 8.5 : 9.5);
-        doc.setTextColor(58, 61, 66);
-        doc.text(`${fieldLabel}:`, innerX, params.state.y + 3);
-      }
-
-      setPdfFont(doc, options?.boldValue ? "bold" : "normal");
-      doc.setFontSize(options?.isNote ? 8.5 : 9.5);
-      doc.setTextColor(...(options?.color ?? DEFAULT_TYPOGRAPHY.textColor));
-      doc.text(line, valueX, params.state.y + 3);
-      params.state.y += LINE_HEIGHT;
-    });
-
-    params.state.y += BLOCK_GAP / 2;
+    const text = sanitizeComparisonText(value);
+    if (!text) return;
+    const lines: string[] = doc.splitTextToSize(text, valueWidth - (options.indent ?? 0));
+    for (const line of lines) {
+      drawLine(line, options);
+    }
+    params.state.y += options.note ? BLOCK_GAP : BLOCK_GAP / 1.5;
   };
 
-  for (const line of doc.splitTextToSize(`[ ${params.row.label.toUpperCase()} ]`, innerWidth)) {
-    drawTagLine(line);
-  }
-  params.state.y += BLOCK_GAP / 2;
+  const drawLabeledBlock = (fieldLabel: string, fieldValue: string | undefined, options?: { color?: PdfColor }) => {
+    const value = sanitizeComparisonText(fieldValue);
+    if (!value) return;
+    drawWrappedBlock(`${fieldLabel}: ${value}`, { color: options?.color });
+  };
 
-  drawLabeledField(params.row.leftLabel || "Shop", params.row.leftValue);
-  drawLabeledField(params.row.rightLabel || "Carrier", params.row.rightValue);
-  drawLabeledField("Delta", params.row.delta, { boldValue: true, color: [104, 64, 36] });
-  drawLabeledField("Note", params.row.note, { color: [96, 100, 108], isNote: true });
+  drawWrappedBlock(formatComparisonHeading(params.row.label), {
+    bold: true,
+    size: 10.5,
+    color: [35, 37, 40],
+  });
+
+  drawLabeledBlock(params.row.leftLabel || "Shop estimate", params.row.leftValue);
+  drawLabeledBlock(params.row.rightLabel || "Carrier estimate", params.row.rightValue);
+  drawLabeledBlock("Delta", params.row.delta, { color: [104, 64, 36] });
+  drawWrappedBlock(sanitizeComparisonText(params.row.note), {
+    color: [96, 100, 108],
+    size: 8.8,
+    note: true,
+  });
+}
+
+function formatComparisonHeading(value: string | undefined): string {
+  const cleaned = sanitizeComparisonText(value) || "Estimate difference";
+  return cleaned.length > 140 ? `${cleaned.slice(0, 137).trimEnd()}...` : cleaned;
+}
+
+function sanitizeComparisonText(value: string | undefined): string {
+  return sanitizeReportText(value ?? "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Za-z])(\$?\d)/g, "$1 $2")
+    .replace(/(\d)([A-Za-z$])/g, "$1 $2")
+    .replace(/\bshown\b/i, "Not clearly shown")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function drawFooterBlock(

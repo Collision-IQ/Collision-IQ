@@ -396,7 +396,7 @@ export default function StructuredAnalysisCanvas({
             }
             preview={
               canUseFullReportExports
-                ? "Repair Intelligence Report, Estimate Scrubber Report, and Policy & Rights Review remain available in the rail."
+                ? "Repair Intelligence Report, Annotated Estimate Scrubber, and Policy & Rights Review remain available in the rail."
                 : "Use the 1-Page Snapshot for the shareable export. Repair Intelligence, Estimate Scrubber, and Policy & Rights Review are Pro-only upgrades."
             }
             expanded={activeInsightKey === "exports"}
@@ -409,7 +409,7 @@ export default function StructuredAnalysisCanvas({
           >
             <div className="border border-border bg-muted px-3 py-2.5 text-[13px] leading-5 text-muted-foreground">
               {canUseFullReportExports
-                ? "Use the rail to generate the Repair Intelligence Report, Estimate Scrubber Report, or Policy & Rights Review."
+                ? "Use the rail to generate the Repair Intelligence Report, Annotated Estimate Scrubber, or Policy & Rights Review."
                 : "Use the rail to download the 1-Page Snapshot. Repair Intelligence, Estimate Scrubber, Policy & Rights Review, and Customer Report are available on Pro."}
             </div>
           </AnalysisSectionCard>
@@ -422,7 +422,7 @@ export default function StructuredAnalysisCanvas({
 function buildValuationSummary(renderModel: ExportModel): string | undefined {
   const parts = dedupe([
     renderModel.valuation.acvStatus !== "not_determinable"
-      ? `ACV posture: ${formatLabel(renderModel.valuation.acvStatus)}.`
+      ? `Market Preview posture: ${formatLabel(renderModel.valuation.acvStatus)}.`
       : null,
     renderModel.valuation.dvStatus !== "not_determinable"
       ? `DV posture: ${formatLabel(renderModel.valuation.dvStatus)}.`

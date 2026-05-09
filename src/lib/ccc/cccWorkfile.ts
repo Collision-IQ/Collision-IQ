@@ -1,8 +1,9 @@
+import "server-only";
 import crypto from "node:crypto";
 import path from "node:path";
+import { CCC_WORKFILE_DISCLAIMER } from "./cccWorkfileClient";
 
-export const CCC_WORKFILE_DISCLAIMER =
-  "CCC workfile support is used for estimate-structure review and supplement assistance only. Final estimate entries must be reviewed in the estimating platform by a qualified estimator.";
+export { CCC_WORKFILE_DISCLAIMER };
 
 export type UploadClassification =
   | "image"

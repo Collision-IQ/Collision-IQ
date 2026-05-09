@@ -62,6 +62,7 @@ export type ExportBuilderInput =
   ) & {
     workspaceData?: WorkspaceData | null;
     exportResearchSnapshot?: ExportResearchSnapshot | null;
+    promptGeneratedText?: string | null;
   };
 
 export function formatAnalysisModeLabel(

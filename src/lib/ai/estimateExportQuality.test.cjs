@@ -401,10 +401,7 @@ Grand Total 16,887.00
   assert.equal(exportModel.valuation.acvStatus, "not_determinable");
   assert.equal(exportModel.valuation.acvRange, undefined);
   assert.equal(exportModel.valuation.acvSourceType, "unavailable");
-  assert.equal(
-    exportModel.valuation.acvReasoning,
-    "Market preview unavailable because live comparable search did not complete."
-  );
+  assert.match(exportModel.valuation.acvReasoning, /Market Preview unavailable:.*no live local comparable ads/i);
 });
 
 run("structured JD Power-style values alone do not value a specific vehicle without live comps", () => {
@@ -429,10 +426,7 @@ run("structured JD Power-style values alone do not value a specific vehicle with
   assert.equal(exportModel.valuation.acvStatus, "not_determinable");
   assert.equal(exportModel.valuation.acvValue, undefined);
   assert.equal(exportModel.valuation.acvRange, undefined);
-  assert.equal(
-    exportModel.valuation.acvReasoning,
-    "Market preview unavailable because live comparable search did not complete."
-  );
+  assert.match(exportModel.valuation.acvReasoning, /Market Preview unavailable:.*no live local comparable ads/i);
 });
 
 run("specific vehicle ACV stays unavailable when live comparable search is unavailable", () => {
@@ -469,10 +463,7 @@ Grand Total 16,200.00
   assert.equal(exportModel.valuation.acvStatus, "not_determinable");
   assert.equal(exportModel.valuation.acvRange, undefined);
   assert.equal(exportModel.valuation.acvSourceType, "unavailable");
-  assert.equal(
-    exportModel.valuation.acvReasoning,
-    "Market preview unavailable because live comparable search did not complete."
-  );
+  assert.match(exportModel.valuation.acvReasoning, /Market Preview unavailable:.*no live local comparable ads/i);
 });
 
 run("2024 Ram or Jeep Gladiator Sport/S around 17k miles never leaks the low generic fallback", () => {
@@ -515,20 +506,12 @@ Grand Total 16,887.00
     assert.equal(exportModel.valuation.acvStatus, "not_determinable", make);
     assert.equal(exportModel.valuation.acvRange, undefined, make);
     assert.equal(exportModel.valuation.acvSourceType, "unavailable", make);
-    assert.equal(
-      exportModel.valuation.acvReasoning,
-      "Market preview unavailable because live comparable search did not complete.",
-      make
-    );
+    assert.match(exportModel.valuation.acvReasoning, /Market Preview unavailable:.*no live local comparable ads/i, make);
     assert.equal(/\$13,?387|\$19,?387|\$13,?000|\$19,?000/.test(visibleSnapshotText), false, make);
     assert.equal(snapshot.valuationSnapshot.acvPreviewRange, undefined, make);
     if (!snapshot.valuationSnapshot.dvPreviewRange) {
       assert.equal(snapshot.valuationSnapshot.available, false, make);
-      assert.equal(
-        snapshot.valuationSnapshot.disclosure,
-        "Market preview unavailable because live comparable search did not complete.",
-        make
-      );
+      assert.match(snapshot.valuationSnapshot.disclosure, /Market Preview unavailable:.*no live local comparable ads/i, make);
     }
   }
 });

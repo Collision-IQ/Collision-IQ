@@ -1387,6 +1387,167 @@ run("policy rights review rejects mixed-jurisdiction and weak legal sources", ()
   assert.match(review.verifiedRegulations[0].statement, /Indiana Department of Insurance/i);
   assert.equal(review.verifiedRegulations.some((item) => /Rhode Island|Texas|California/i.test(item.statement)), false);
   assert.ok(review.internetDerivedSupport.some((item) => /internet-derived support source available/i.test(item.statement)));
+  assert.equal(review.verifiedRegulations[0].citations[0].sourceAuthorityTier, "LEGAL_AUTHORITY");
+  assert.equal(
+    review.citations.find((citation) => /YouTube/i.test(citation.title)).sourceAuthorityTier,
+    "REJECTED_FOR_LEGAL_USE"
+  );
+});
+
+run("legal citation authority tiers reject social repairer attorney news and trade sources", () => {
+  const renderModel = makePolicyRenderModel({
+    repairPosition: "Pennsylvania claim handling dispute review.",
+    positionStatement: "Pennsylvania claim handling dispute review.",
+    request: "Review Pennsylvania DOI options.",
+    retrievalSummary: {
+      driveDocsUsed: 1,
+      webSourcesUsed: 8,
+      serperStatus: "SUCCESS",
+      oemEvidenceFound: true,
+      sourcesInfluencingFindings: [
+        {
+          title: "Pennsylvania Department of Insurance official consumer notice",
+          sourceType: "web",
+          url: "https://www.insurance.pa.gov/Consumers/Pages/Consumer-Notice.aspx",
+          relatedFindingIds: ["official"],
+        },
+        {
+          title: "Pennsylvania Department of Insurance explainer on YouTube",
+          sourceType: "web",
+          url: "https://www.youtube.com/watch?v=abc123",
+          relatedFindingIds: ["youtube"],
+        },
+        {
+          title: "Pennsylvania DOI complaint discussion on Facebook",
+          sourceType: "web",
+          url: "https://www.facebook.com/example/posts/123",
+          relatedFindingIds: ["facebook"],
+        },
+        {
+          title: "Wreck Check Atlanta insurance claim rights article",
+          sourceType: "web",
+          url: "https://wreckcheckatlanta.example.com/insurance-claims",
+          relatedFindingIds: ["repairer"],
+        },
+        {
+          title: "Pennsylvania bad faith article by Smith Law Firm",
+          sourceType: "web",
+          url: "https://smithlawfirm.example.com/pa-bad-faith",
+          relatedFindingIds: ["attorney"],
+        },
+        {
+          title: "News article about Pennsylvania DOI complaints",
+          sourceType: "web",
+          url: "https://news.example.com/pa-doi-complaints",
+          relatedFindingIds: ["news"],
+        },
+        {
+          title: "SCRS DEG I-CAR trade article about regulations",
+          sourceType: "web",
+          url: "https://scrs.example.com/deg-icar-regulations",
+          relatedFindingIds: ["trade"],
+        },
+        {
+          title: "OEM position statement about scan procedures",
+          sourceType: "oem",
+          url: "https://oem.example.com/position-statement",
+          relatedFindingIds: ["oem"],
+        },
+      ],
+    },
+  });
+  const review = buildPolicyRightsReviewModel(
+    {
+      renderModel,
+      report: makeReport(),
+      analysis: null,
+      panel: null,
+      assistantAnalysis: "Pennsylvania claim handling dispute review.",
+    },
+    renderModel
+  );
+  const citationByTitle = new Map(review.citations.map((citation) => [citation.title, citation]));
+
+  assert.equal(review.verifiedRegulations.length, 1);
+  assert.match(review.verifiedRegulations[0].statement, /Pennsylvania Department of Insurance official consumer notice/);
+  assert.equal(citationByTitle.get("Pennsylvania Department of Insurance official consumer notice").sourceAuthorityTier, "LEGAL_AUTHORITY");
+  assert.equal(citationByTitle.get("Pennsylvania Department of Insurance explainer on YouTube").sourceAuthorityTier, "REJECTED_FOR_LEGAL_USE");
+  assert.equal(citationByTitle.get("Pennsylvania DOI complaint discussion on Facebook").sourceAuthorityTier, "REJECTED_FOR_LEGAL_USE");
+  assert.equal(citationByTitle.get("Wreck Check Atlanta insurance claim rights article").sourceAuthorityTier, "REJECTED_FOR_LEGAL_USE");
+  assert.equal(citationByTitle.get("Pennsylvania bad faith article by Smith Law Firm").sourceAuthorityTier, "REJECTED_FOR_LEGAL_USE");
+  assert.equal(citationByTitle.get("News article about Pennsylvania DOI complaints").sourceAuthorityTier, "REJECTED_FOR_LEGAL_USE");
+  assert.equal(citationByTitle.get("SCRS DEG I-CAR trade article about regulations").sourceAuthorityTier, "INDUSTRY_CONTEXT");
+  assert.equal(citationByTitle.get("OEM position statement about scan procedures").sourceAuthorityTier, "OEM_PROCEDURE");
+  assert.equal(
+    review.verifiedRegulations.some((assertion) =>
+      /YouTube|Facebook|Wreck Check|Smith Law Firm|News article|SCRS|DEG|I-CAR|OEM/i.test(assertion.statement)
+    ),
+    false
+  );
+});
+
+run("uploaded Pennsylvania policy package establishes jurisdiction before web sources", () => {
+  const renderModel = makePolicyRenderModel({
+    repairPosition: "Policy package uploaded for rights review.",
+    positionStatement: "Policy package uploaded for rights review.",
+    request: "Review policy rights.",
+    retrievalSummary: {
+      driveDocsUsed: 1,
+      webSourcesUsed: 1,
+      serperStatus: "SUCCESS",
+      oemEvidenceFound: false,
+      sourcesInfluencingFindings: [
+        {
+          title: "Indiana Department of Insurance complaint process",
+          sourceType: "web",
+          url: "https://www.in.gov/idoi/consumer-services/complaints/",
+          relatedFindingIds: ["web-indiana"],
+        },
+      ],
+    },
+  });
+  const report = makeReport({
+    evidenceRegistry: [
+      {
+        id: "pa-policy-package",
+        sourceType: "other_supporting_document",
+        label: "Uploaded Pennsylvania policy package",
+        extractedText: [
+          "Pennsylvania Financial Responsibility Identification Card",
+          "Pennsylvania policy notices",
+          "Named insured mailing address: 123 Market Street, Philadelphia, PA 19103",
+          "Policy issued for a Pennsylvania risk.",
+          "This policy is governed by Pennsylvania law.",
+        ].join("\n"),
+        extractedSummary: "Policy package includes Pennsylvania ID card, notices, address, risk state, and governing-law clause.",
+        structuredFacts: {
+          governingLaw: "Pennsylvania law applies",
+          declarationsState: "PA",
+          insuranceIdCardState: "PA",
+        },
+        ingestionState: "uploaded",
+        evidenceStatus: "DOCUMENTED",
+        relatedIssueKeys: [],
+        createdAt: "2026-05-01T00:00:00.000Z",
+        updatedAt: "2026-05-01T00:00:00.000Z",
+      },
+    ],
+  });
+  const review = buildPolicyRightsReviewModel(
+    {
+      renderModel,
+      report,
+      analysis: null,
+      panel: null,
+      assistantAnalysis: "Do not use web-search jurisdiction if uploaded policy documents establish jurisdiction.",
+    },
+    renderModel
+  );
+
+  assert.equal(review.jurisdiction.state, "PA");
+  assert.equal(review.jurisdiction.confidence, "high");
+  assert.match(review.jurisdiction.basis, /policy governing-law clause/);
+  assert.equal(review.verifiedRegulations.length, 0);
 });
 
 run("doi packet omits weak legal sources from verified support sections", () => {
@@ -1438,7 +1599,7 @@ run("doi packet omits weak legal sources from verified support sections", () => 
   assert.doesNotMatch(text, /Rhode Island unfair claims regulation/);
   assert.doesNotMatch(text, /Texas bad faith overview by Smith Law Firm/);
   assert.doesNotMatch(text, /California DOI explainer on YouTube/);
-  assert.match(text, /Needs Review/);
+  assert.match(text, /DOI Readiness Review/);
 });
 
 run("policy rights review does not assert legal support without confirmed jurisdiction", () => {

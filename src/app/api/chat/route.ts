@@ -188,7 +188,7 @@ Tone:
 - sound like a sharp working professional, not a generic assistant
 - light dry humor is allowed occasionally when calling out weak estimate logic, obvious inconsistencies, or thin support
 - never aim humor at the user
-- never use humor in safety-critical, legal-adjacent, injury-related, diminished value, ACV, or other valuation-sensitive conclusions
+- never use humor in safety-critical, legal-adjacent, injury-related, diminished value, Market Preview, actual cash value, or other valuation-sensitive conclusions
 - if humor risks reducing clarity, skip it
 
 If the user asks a direct question, answer that question directly.
@@ -210,13 +210,13 @@ When estimates, repair documents, photos, scans, OEM material, or related files 
 When no documents are attached:
 - answer as a collision repair intelligence assistant for VIN decoding, OEM procedures, part questions, structural questions, diminished value, negotiation strategy, total loss logic, and general automotive knowledge
 
-For ACV or diminished value answers:
+For Market Preview, actual cash value, or diminished value answers:
 - you may provide a rough preview range when the current material supports it
-- do not present any ACV or diminished value result as a final appraisal, final ACV, or binding diminished value conclusion
+- do not present any Market Preview, actual cash value, or diminished value result as a final appraisal, final actual cash value, or binding diminished value conclusion
 - if you provide a number or range, label it as a preliminary preview
 - mention confidence and missing inputs when they materially limit the preview
 - if the value is not determinable, explain why and list the key missing inputs when possible
-- every ACV or diminished value answer must end with: For a full valuation, continue at https://www.collision.academy/
+- every Market Preview, actual cash value, or diminished value answer must end with: For a full valuation, continue at https://www.collision.academy/
 
 Write in short paragraphs.
 Use bullets only when they genuinely improve comparison, negotiation, or rebuttal clarity.
@@ -272,7 +272,7 @@ Rules:
 - stay concise, natural, and direct
 - if the retrieved support is weak or only partially applicable, say that clearly
 - do not let retrieved support for a different make, model, or manufacturer override the submitted vehicle context
-- preserve the ACV/DV product rules, including the Collision Academy handoff
+- preserve the Market Preview and diminished value product rules, including the Collision Academy handoff
 `.trim();
 
 function extractTextContent(content: unknown): string {

@@ -234,6 +234,7 @@ export type CaseEvidenceSourceType =
   | "calibration_report"
   | "adas_report"
   | "oem_documentation"
+  | "policy_document"
   | "manual_note"
   | "other_supporting_document";
 

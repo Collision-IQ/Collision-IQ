@@ -15,6 +15,22 @@ import type { CaseEvidenceRegistryItem, RepairIntelligenceReport } from "@/lib/a
 import type { EvidenceRecord } from "@/lib/ai/types/evidence";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 
+type DoiReadinessState = "READY_FOR_DOI" | "NOT_READY_FOR_DOI" | "NEEDS_MORE_DOCUMENTATION";
+
+type DoiReadinessReview = {
+  state: DoiReadinessState;
+  jurisdictionConfirmed: boolean;
+  verifiedRegulationSourceCount: number;
+  documentedConduct: string[];
+  missingPrerequisites: string[];
+  explanation: string;
+};
+
+const NOT_READY_SUMMARY =
+  "The file currently supports an appraisal-process and repair-scope dispute. It does not yet establish a verified unfair claims handling violation because no confirmed regulatory citation, written denial, delay log, refusal-to-review documentation, or communication timeline has been isolated.";
+const NOT_READY_CONDUCT_EXPLANATION =
+  "The current file supports a repair-scope or appraisal dispute, but does not yet establish documented regulatory misconduct.";
+
 export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierReportDocument {
   const source = buildExportTemplateSourceModel(params);
   const { exportModel } = source;
@@ -26,6 +42,29 @@ export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierR
   const policySources = getPolicySources(rightsReview, params.report);
   const evidenceIndex = buildEvidenceIndex(params.report);
   const needsReview = buildNeedsReviewBullets(exportModel, rightsReview);
+  const userContextBullets = buildUserProvidedContextBullets(params.assistantAnalysis);
+  const readiness = buildDoiReadinessReview({
+    report: params.report,
+    assistantAnalysis: params.assistantAnalysis,
+    exportModel,
+    rightsReview,
+    verifiedRegulationSourceCount: verifiedRegulationSources.length,
+  });
+
+  if (readiness.state !== "READY_FOR_DOI") {
+    return buildDoiReadinessReviewDocument({
+      source,
+      exportModel,
+      rightsReview,
+      vehicleIdentity,
+      vin,
+      insurer,
+      verifiedRegulationSources,
+      evidenceIndex,
+      readiness,
+      assistantAnalysis: params.assistantAnalysis,
+    });
+  }
 
   return {
     filename: "doi-complaint-packet.pdf",
@@ -37,26 +76,47 @@ export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierR
     header: {
       title: "DOI Complaint Packet",
       subtitle:
-        "Formal documentation packet for claim timeline, unresolved operations, verified support, communication summary, estimate comparison, documentation gaps, and citation appendix. Not legal advice.",
+        "Formal documentation packet for documented claim-handling conduct, verified regulatory support, evidence attachments, repair-scope context, and citation appendix. Repair or estimate disputes are not presented as DOI violations by themselves. Not legal advice.",
       generatedLabel: `Generated ${source.generatedLabel}`,
     },
     summary: [
       { label: "Vehicle", value: vehicleIdentity },
       { label: "VIN", value: vin },
       ...(insurer ? [{ label: "Insurer", value: insurer }] : []),
+      { label: "DOI Readiness State", value: readiness.state },
+      { label: "Jurisdiction", value: rightsReview.jurisdiction.state },
       { label: "Evidence Items", value: String(evidenceIndex.length) },
-      { label: "Unresolved Operations", value: String(exportModel.supplementItems.length) },
+      { label: "Repair/Estimate Attachments", value: String(exportModel.supplementItems.length) },
       { label: "Verified Regulation Sources", value: String(verifiedRegulationSources.length) },
+      { label: "Documented Conduct Items", value: String(readiness.documentedConduct.length) },
       { label: "Completeness", value: exportModel.confidenceIntegrity.completenessStatus },
     ],
     sections: [
+      {
+        title: "DOI Readiness",
+        bullets: buildReadinessBullets(readiness),
+      },
       {
         title: "Claim Timeline",
         bullets: buildClaimTimeline(params.report, source.generatedLabel),
       },
       {
-        title: "Unresolved Operations",
-        bullets: buildUnresolvedOperationBullets(exportModel),
+        title: "Claim Communication Summary",
+        bullets: buildCommunicationSummary(params.report, exportModel),
+      },
+      ...(userContextBullets.length
+        ? [{
+            title: "User-Provided Chat Context",
+            bullets: userContextBullets,
+          }]
+        : []),
+      {
+        title: "Complaint Grounds - Documented Claim Conduct",
+        bullets: buildComplaintGroundBullets(readiness, verifiedRegulationSources),
+      },
+      {
+        title: "Evidence Attachments - Repair/Estimate Dispute Items",
+        bullets: buildRepairDisputeAttachmentBullets(exportModel),
       },
       {
         title: "Regulation Support",
@@ -82,7 +142,7 @@ export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierR
       },
       {
         title: "Estimate Comparison",
-        bullets: buildEstimateComparisonBullets(source.lineItems),
+        bullets: buildEstimateComparisonAttachmentBullets(source.lineItems),
       },
       {
         title: "Documentation Gaps",
@@ -107,9 +167,245 @@ export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierR
     ],
     footer: [
       "This packet is formal, institutional, and documentation-focused. It is not legal advice.",
+      "Repair-scope disagreement, missing operations, underwritten estimate items, OEM support, scan/calibration gaps, structural verification issues, supplement disputes, and appraisal amount disagreements are evidence attachments only unless tied to documented insurer claim-handling conduct.",
       "Verified citations are separated from inferred operational commentary. Do not cite inferred commentary as a statute, regulation, policy term, or OEM procedure.",
     ],
   };
+}
+
+function buildDoiReadinessReviewDocument(params: {
+  source: ReturnType<typeof buildExportTemplateSourceModel>;
+  exportModel: ExportModel;
+  rightsReview: ReturnType<typeof buildPolicyRightsReviewModel>;
+  vehicleIdentity: string;
+  vin: string;
+  insurer: string | null | undefined;
+  verifiedRegulationSources: ReturnType<typeof getVerifiedRegulationSources>;
+  evidenceIndex: string[];
+  readiness: DoiReadinessReview;
+  assistantAnalysis?: string | null;
+}): CarrierReportDocument {
+  const userContextBullets = buildUserProvidedContextBullets(params.assistantAnalysis);
+  return {
+    filename: "doi-readiness-review.pdf",
+    brand: {
+      companyName: "Collision Academy",
+      reportLabel: "DOI Readiness Review",
+      logoPath: "/brand/logos/logo-horizontal.png",
+    },
+    header: {
+      title: "DOI Readiness Review",
+      subtitle:
+        "Prerequisite review for DOI escalation. A formal DOI complaint packet is blocked until jurisdiction, verified regulation support, and documented claim-handling conduct are established. Not legal advice.",
+      generatedLabel: `Generated ${params.source.generatedLabel}`,
+    },
+    summary: [
+      { label: "Vehicle", value: params.vehicleIdentity },
+      { label: "VIN", value: params.vin },
+      ...(params.insurer ? [{ label: "Insurer", value: params.insurer }] : []),
+      { label: "DOI Readiness State", value: params.readiness.state },
+      { label: "Jurisdiction", value: params.rightsReview.jurisdiction.state },
+      { label: "Jurisdiction Confirmed", value: params.readiness.jurisdictionConfirmed ? "Yes" : "No" },
+      { label: "Verified Regulation Sources", value: String(params.readiness.verifiedRegulationSourceCount) },
+      { label: "Documented Conduct Items", value: String(params.readiness.documentedConduct.length) },
+      { label: "Repair/Estimate Attachments", value: String(params.exportModel.supplementItems.length) },
+    ],
+    sections: [
+      {
+        title: "Complaint Readiness Status",
+        bullets: buildComplaintReadinessStatusBullets(params.readiness, params.verifiedRegulationSources),
+      },
+      {
+        title: "What The File Currently Supports",
+        bullets: buildCurrentSupportBullets(params.exportModel),
+      },
+      ...(userContextBullets.length
+        ? [{
+            title: "User-Provided Chat Context",
+            bullets: userContextBullets,
+          }]
+        : []),
+      {
+        title: "What Is Not Yet Proven",
+        bullets: buildNotYetProvenBullets(params.readiness),
+      },
+      {
+        title: "Missing Complaint Evidence",
+        bullets: buildMissingComplaintEvidenceBullets(params.readiness),
+      },
+      {
+        title: "Documents Needed Before Filing",
+        bullets: buildDocumentsNeededBeforeFilingBullets(params.readiness),
+      },
+      ...(params.readiness.state === "READY_FOR_DOI"
+        ? [{
+            title: "Optional Draft Complaint",
+            bullets: buildOptionalDraftComplaintBullets(params.readiness, params.verifiedRegulationSources),
+          }]
+        : []),
+    ],
+    footer: [
+      "A DOI readiness review is not a formal DOI complaint packet.",
+      "Technical repair or estimate issues are not labeled as DOI violations unless the file documents insurer claim-handling conduct tied to those issues.",
+      "This review does not imply a payment outcome, and it does not state a legal violation unless verified legal authority and documented conduct support that conclusion.",
+      "Verified citations are separated from inferred operational commentary. Do not cite inferred commentary as a statute, regulation, policy term, or OEM procedure.",
+    ],
+  };
+}
+
+function buildDoiReadinessReview(params: {
+  report: RepairIntelligenceReport | null | undefined;
+  assistantAnalysis?: string | null;
+  exportModel: ExportModel;
+  rightsReview: ReturnType<typeof buildPolicyRightsReviewModel>;
+  verifiedRegulationSourceCount: number;
+}): DoiReadinessReview {
+  const documentedConduct = detectDocumentedClaimHandlingConduct(params.report);
+  const reportedConduct = detectUserReportedClaimHandlingContext(params.assistantAnalysis);
+  const jurisdictionConfirmed = params.rightsReview.jurisdiction.confidence === "high";
+  const hasVerifiedRegulationSource = params.verifiedRegulationSourceCount > 0;
+  const hasDocumentedConduct = documentedConduct.length > 0;
+  const missingPrerequisites = [
+    jurisdictionConfirmed ? null : "Confirmed claim jurisdiction.",
+    hasVerifiedRegulationSource ? null : "At least one verified authoritative regulation or DOI source from the confirmed jurisdiction.",
+    hasDocumentedConduct ? null : "Documented claim-handling conduct beyond repair-scope or appraisal disagreement.",
+  ].filter(Boolean) as string[];
+  const state: DoiReadinessState =
+    jurisdictionConfirmed && hasVerifiedRegulationSource && hasDocumentedConduct
+      ? "READY_FOR_DOI"
+      : !hasDocumentedConduct
+        ? "NOT_READY_FOR_DOI"
+        : "NEEDS_MORE_DOCUMENTATION";
+
+  return {
+    state,
+    jurisdictionConfirmed,
+    verifiedRegulationSourceCount: params.verifiedRegulationSourceCount,
+    documentedConduct,
+    missingPrerequisites: reportedConduct.length
+      ? dedupeStrings([
+          ...missingPrerequisites,
+          "Written carrier or IA demand, correspondence, appraisal invocation, and applicable policy language supporting the user-reported appraisal-process concern.",
+        ])
+      : missingPrerequisites,
+    explanation: state === "NOT_READY_FOR_DOI"
+      ? hasVerifiedRegulationSource
+        ? NOT_READY_CONDUCT_EXPLANATION
+        : NOT_READY_SUMMARY
+      : state === "NEEDS_MORE_DOCUMENTATION"
+        ? "The file includes possible claim-handling conduct, but the jurisdiction or verified authoritative regulation support is not complete enough for a formal DOI complaint packet."
+        : "All DOI complaint prerequisites are present.",
+  };
+}
+
+function buildUserProvidedContextBullets(value: string | null | undefined): string[] {
+  const reported = detectUserReportedClaimHandlingContext(value);
+  if (!reported.length) return [];
+
+  return [
+    "User-provided context reports an appraisal-process dispute, including a disputed demand about award-letter timing before repairs continue. This context is not treated as verified insurer misconduct by itself.",
+    `Reported issue category: ${reported.join("; ")}.`,
+    "Uploaded policy/appraisal language must be reviewed before making any policy-rights conclusion.",
+    "Written carrier or IA demand, date-stamped correspondence, appraisal invocation, inspection records, and the applicable policy clause are needed before the DOI readiness gate can treat the conduct as documented.",
+  ];
+}
+
+function detectUserReportedClaimHandlingContext(value: string | null | undefined): string[] {
+  const text = (value ?? "").toLowerCase();
+  const findings = [
+    /appraisal|award letter|independent appraiser|\bia\b/.test(text) ? "user-reported appraisal-process dispute" : null,
+    /denied right to appraisal|denied.*appraisal/.test(text) ? "reported denial of appraisal-rights position" : null,
+    /demanding an award letter|before the shop can continue|force/.test(text) ? "reported premature or coercive appraisal demand" : null,
+    /legal team|attorney|counsel/.test(text) ? "reported legal-team involvement" : null,
+  ].filter(Boolean) as string[];
+  return dedupeStrings(findings);
+}
+
+function buildComplaintReadinessStatusBullets(
+  readiness: DoiReadinessReview,
+  verifiedRegulationSources: ReturnType<typeof getVerifiedRegulationSources>
+): string[] {
+  const verifiedSourceBullet = verifiedRegulationSources.length
+    ? `Verified authoritative source(s): ${verifiedRegulationSources.map((source) => cleanPacketText(source.title)).join("; ")}.`
+    : "Verified authoritative source(s): None isolated from the confirmed jurisdiction.";
+
+  return [
+    `State: ${readiness.state}.`,
+    readiness.explanation,
+    `Jurisdiction confirmed: ${readiness.jurisdictionConfirmed ? "Yes" : "No"}.`,
+    `Verified authoritative regulation/source count: ${readiness.verifiedRegulationSourceCount}.`,
+    verifiedSourceBullet,
+    `Documented claim-handling conduct count: ${readiness.documentedConduct.length}.`,
+    "No legal violation is asserted unless verified legal authority and documented claim-handling conduct are both present.",
+  ];
+}
+
+function buildReadinessBullets(readiness: DoiReadinessReview): string[] {
+  return [
+    `State: ${readiness.state}.`,
+    readiness.explanation,
+    `Jurisdiction confirmed: ${readiness.jurisdictionConfirmed ? "Yes" : "No"}.`,
+    `Verified authoritative regulation/source count: ${readiness.verifiedRegulationSourceCount}.`,
+    `Documented claim-handling conduct count: ${readiness.documentedConduct.length}.`,
+    "Repair or estimate disputes alone are treated as support attachments, not DOI complaint grounds.",
+  ];
+}
+
+function buildCurrentSupportBullets(exportModel: ExportModel): string[] {
+  return [
+    "The file currently supports an appraisal-process and repair-scope dispute.",
+    "Repair or estimate issues may be used as supporting attachments, not as standalone DOI complaint grounds.",
+    ...buildRepairDisputeAttachmentBullets(exportModel).slice(0, 8),
+  ];
+}
+
+function buildNotYetProvenBullets(readiness: DoiReadinessReview): string[] {
+  const gaps = [
+    readiness.verifiedRegulationSourceCount > 0 ? null : "A confirmed regulatory citation tied to the alleged conduct has not been isolated.",
+    readiness.documentedConduct.some((item) => /denial/i.test(item)) ? null : "A written denial or written claim-position explanation has not been isolated.",
+    readiness.documentedConduct.some((item) => /delay|respond/i.test(item)) ? null : "A delay log, ignored-communication log, or communication timeline has not been isolated.",
+    readiness.documentedConduct.some((item) => /supplement|review/i.test(item)) ? null : "Refusal-to-review or refusal-to-consider supplement documentation has not been isolated.",
+  ].filter(Boolean) as string[];
+
+  return gaps.length
+    ? gaps
+    : ["No unresolved proof gaps were identified by the readiness gate."];
+}
+
+function buildMissingComplaintEvidenceBullets(readiness: DoiReadinessReview): string[] {
+  return [
+    ...(readiness.missingPrerequisites.length ? readiness.missingPrerequisites : []),
+    readiness.verifiedRegulationSourceCount > 0 ? null : "Confirmed regulatory citation from the correct jurisdiction.",
+    "Written denial, written claim-position letter, or written explanation of the insurer position.",
+    "Date-stamped communication timeline showing unanswered, delayed, or refused communications.",
+    "Supplement review request and any documented refusal to inspect, review, or consider the documented supplement.",
+  ].filter(Boolean) as string[];
+}
+
+function buildDocumentsNeededBeforeFilingBullets(readiness: DoiReadinessReview): string[] {
+  return dedupeStrings([
+    ...readiness.missingPrerequisites,
+    "Applicable policy/declarations and any governing-law or state-specific policy notices.",
+    "Official regulation, statute, DOI bulletin/notice, or administrative-code citation from the confirmed jurisdiction.",
+    "Carrier written denial, written claim position, supplement response, or explanation of payment decision.",
+    "Date-stamped emails, letters, call logs, portal messages, or notes showing delay, nonresponse, refusal to inspect, refusal to review a supplement, misrepresentation, or coercive appraisal conduct.",
+    "Repair-scope, appraisal, estimate, OEM, scan/calibration, or structural-verification materials as attachments only.",
+  ]);
+}
+
+function buildOptionalDraftComplaintBullets(
+  readiness: DoiReadinessReview,
+  verifiedRegulationSources: ReturnType<typeof getVerifiedRegulationSources>
+): string[] {
+  if (readiness.state !== "READY_FOR_DOI") {
+    return [];
+  }
+
+  return [
+    "Draft complaint may be prepared because jurisdiction, verified regulatory support, and documented claim-handling conduct are present.",
+    ...buildComplaintGroundBullets(readiness, verifiedRegulationSources),
+    "Requested review should be framed as regulatory review of documented claim-handling conduct, not as a request for the DOI to force payment.",
+  ];
 }
 
 function buildClaimTimeline(report: RepairIntelligenceReport | null | undefined, generatedLabel: string): string[] {
@@ -138,21 +434,39 @@ function buildClaimTimeline(report: RepairIntelligenceReport | null | undefined,
       ];
 }
 
-function buildUnresolvedOperationBullets(exportModel: ExportModel): string[] {
+function buildRepairDisputeAttachmentBullets(exportModel: ExportModel): string[] {
   const items = exportModel.supplementItems.slice(0, 12).map((item) =>
     [
-      `Operation: ${formatOperation(item.title)}.`,
-      `Status: ${formatLabel(item.kind)}.`,
-      `Severity: ${formatPriority(item.priority, item.leverageScore)}.`,
+      `Attachment context: ${formatOperation(item.title)}.`,
+      `Repair/estimate issue type: ${formatLabel(item.kind)}.`,
+      `Dispute priority: ${formatPriority(item.priority, item.leverageScore)}.`,
       `Why it matters: ${cleanPacketText(item.rationale)}.`,
       item.evidence ? `Support: ${cleanPacketText(item.evidence)}.` : "Support: Not verified in attached source metadata.",
       item.source ? `Source: ${cleanPacketText(item.source)}.` : "Source: Current estimate analysis; citation still needed.",
+      "DOI status: Not a complaint ground unless tied to documented insurer claim-handling conduct.",
     ].join(" ")
   );
 
   return items.length
     ? items
     : ["No unresolved estimate operations were isolated from the current structured analysis."];
+}
+
+function buildComplaintGroundBullets(
+  readiness: DoiReadinessReview,
+  verifiedRegulationSources: ReturnType<typeof getVerifiedRegulationSources>
+): string[] {
+  if (!readiness.documentedConduct.length) {
+    return ["No DOI complaint grounds are established because no documented claim-handling conduct was isolated."];
+  }
+
+  const regulationSummary = verifiedRegulationSources.length
+    ? `Verified regulatory support count: ${verifiedRegulationSources.length}.`
+    : "Verified regulatory support count: 0.";
+
+  return readiness.documentedConduct.map((conduct) =>
+    `${conduct} Complaint-ground status: conduct-based. ${regulationSummary} Repair-scope disagreement is attachment context only.`
+  );
 }
 
 function getVerifiedRegulationSources(review: ReturnType<typeof buildPolicyRightsReviewModel>) {
@@ -230,15 +544,16 @@ function buildOemSupportBullets(
     : ["No verified OEM procedure, position-statement, calibration, or structural-verification support was attached to the current packet."];
 }
 
-function buildEstimateComparisonBullets(lineItems: ExportLineComparison[]): string[] {
+function buildEstimateComparisonAttachmentBullets(lineItems: ExportLineComparison[]): string[] {
   const bullets = lineItems.slice(0, 12).map((item) =>
     [
-      `Operation: ${formatOperation(item.operation)}.`,
+      `Attachment context: ${formatOperation(item.operation)}.`,
       `Component: ${cleanPacketText(item.component || "Unspecified")}.`,
       `Carrier position: ${cleanPacketText(item.carrierPosition)}.`,
       `Support status: ${formatLabel(item.supportStatus)}.`,
       `Rationale: ${cleanPacketText(item.rationale)}.`,
       item.support ? `Support: ${cleanPacketText(item.support)}.` : null,
+      "DOI status: Estimate comparison only; not a DOI violation without documented claim-handling conduct.",
     ]
       .filter(Boolean)
       .join(" ")
@@ -275,6 +590,36 @@ function buildEvidenceIndex(report: RepairIntelligenceReport | null | undefined)
   const factualCore = report?.factualCore?.evidenceRegistrySummary ?? [];
 
   return dedupeStrings([...registry, ...evidence, ...factualCore.map((item) => `Evidence summary: ${cleanPacketText(item)}.`)]).slice(0, 20);
+}
+
+function detectDocumentedClaimHandlingConduct(report: RepairIntelligenceReport | null | undefined): string[] {
+  const evidenceText = [
+    ...(report?.evidenceRegistry ?? []).map((item) =>
+      [
+        item.label,
+        item.extractedText,
+        item.extractedSummary,
+        ...Object.values(item.structuredFacts ?? {}).flatMap((value) => Array.isArray(value) ? value : value ? [String(value)] : []),
+      ].filter(Boolean).join(" ")
+    ),
+    ...(report?.evidence ?? []).map((item) => [item.title, item.snippet, item.source].filter(Boolean).join(" ")),
+    ...(report?.factualCore?.evidenceRegistrySummary ?? []),
+    ...(report?.reassessmentDelta?.newlyDocumented ?? []),
+  ].join("\n");
+
+  const conductPatterns: Array<{ label: string; pattern: RegExp }> = [
+    { label: "Unreasonable delay", pattern: /\b(unreasonable|excessive|extended|unexplained|ongoing)\s+delay\b|\bdelay(?:ed|s)?\s+(?:payment|claim|response|review|inspection|supplement)\b/i },
+    { label: "Denial without explanation", pattern: /\bden(?:y|ied|ial)\b(?:(?!\n).){0,80}\b(without|no)\b(?:(?!\n).){0,40}\b(explanation|basis|reason|rationale)\b|\b(without|no)\b(?:(?!\n).){0,40}\b(explanation|basis|reason|rationale)\b(?:(?!\n).){0,80}\bden(?:y|ied|ial)\b/i },
+    { label: "Failure to respond", pattern: /\b(fail(?:ed|ure)?|refus(?:ed|al)|did not|no)\s+(?:to\s+)?respond\b|\bno response\b|\bunanswered\b|\bnon[- ]?responsive\b/i },
+    { label: "Refusal to review supplement", pattern: /\brefus(?:ed|al|es|ing)\b(?:(?!\n).){0,80}\b(review|consider|inspect|reinspect)\b(?:(?!\n).){0,80}\bsupplement\b|\bsupplement\b(?:(?!\n).){0,80}\brefus(?:ed|al|es|ing)\b/i },
+    { label: "Misrepresentation of policy rights", pattern: /\bmisrepresent(?:ed|ation|s|ing)?\b(?:(?!\n).){0,80}\b(policy|coverage|rights|appraisal)\b|\b(policy|coverage|appraisal)\s+rights\b(?:(?!\n).){0,80}\bmisstated\b/i },
+    { label: "Coercive appraisal conduct", pattern: /\b(coerc(?:ed|ion|ive)|pressur(?:ed|e)|threat(?:ened|s)?)\b(?:(?!\n).){0,80}\bappraisal\b|\bappraisal\b(?:(?!\n).){0,80}\b(coerc(?:ed|ion|ive)|pressur(?:ed|e)|threat(?:ened|s)?)\b/i },
+    { label: "Refusal to provide written claim position", pattern: /\brefus(?:ed|al|es|ing)\b(?:(?!\n).){0,100}\b(written|in writing)\b(?:(?!\n).){0,80}\b(claim )?position\b|\b(written|in writing)\b(?:(?!\n).){0,80}\b(claim )?position\b(?:(?!\n).){0,80}\brefus(?:ed|al|es|ing)\b/i },
+  ];
+
+  return conductPatterns
+    .filter((conduct) => conduct.pattern.test(evidenceText))
+    .map((conduct) => `Documented conduct: ${conduct.label}.`);
 }
 
 function buildCitationAppendix(

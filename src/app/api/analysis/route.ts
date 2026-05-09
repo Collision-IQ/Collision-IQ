@@ -310,6 +310,13 @@ export async function POST(req: Request) {
       refinedWithRetrieval = true;
     }
 
+    report = await attachMarketPreviewComparables({
+      report,
+      uploadedAttachments: normalizedAttachments,
+      userIntent: body.userIntent ?? "",
+    });
+    analysis = normalizeReportToAnalysisResult(report);
+
     const supplementCandidates = await generateSupplementCandidates(
       analysis.rawEstimateText ?? "",
       report,
@@ -446,6 +453,327 @@ function linkedEvidenceToAttachments(linkedEvidence: LinkedEvidence[]): StoredAt
     }));
 }
 
+type MarketPreviewComparableAd = {
+  price?: number;
+  askingPrice?: number;
+  mileage?: number;
+  year?: number;
+  make?: string;
+  model?: string;
+  trim?: string;
+  source: string;
+  title: string;
+  location?: string;
+  url?: string;
+  dateAccessed: string;
+};
+
+type MarketPreviewReport = RepairIntelligenceReport & {
+  valuationData?: {
+    comparableListings?: MarketPreviewComparableAd[];
+  };
+  marketPreviewSearch?: {
+    attempted: boolean;
+    state: "idle" | "searching" | "completed" | "failed";
+    status: "completed" | "provider_not_configured" | "vehicle_identifiers_missing" | "no_results" | "timeout" | "parsing_failed" | "failed";
+    query?: string;
+    widenedQuery?: string;
+    failureReason?: string;
+    dateAccessed: string;
+    comparableCount: number;
+    validPriceCount: number;
+  };
+};
+
+async function attachMarketPreviewComparables(params: {
+  report: RepairIntelligenceReport;
+  uploadedAttachments: StoredAttachment[];
+  userIntent: string;
+}): Promise<RepairIntelligenceReport> {
+  const dateAccessed = new Date().toISOString().slice(0, 10);
+  const vehicle = normalizeVehicleIdentity(params.report.vehicle);
+  const mileage = extractMarketPreviewMileage(params.report, params.uploadedAttachments, params.userIntent);
+  const location = extractMarketPreviewLocation(params.uploadedAttachments, params.userIntent);
+
+  if (!vehicle?.year || !vehicle.make || !vehicle.model) {
+    console.info("marketPreview.search.failed", {
+      reason: "vehicle_identifiers_missing",
+      compCount: 0,
+      validPriceCount: 0,
+    });
+    return {
+      ...params.report,
+      marketPreviewSearch: {
+        attempted: false,
+        state: "failed",
+        status: "vehicle_identifiers_missing",
+        failureReason: "Year, make, and model were not all available for a local comparable search.",
+        dateAccessed,
+        comparableCount: 0,
+        validPriceCount: 0,
+      },
+    } as MarketPreviewReport;
+  }
+
+  const apiKey = process.env.SERPER_API_KEY?.trim();
+  if (!apiKey) {
+    console.info("marketPreview.search.failed", {
+      reason: "provider_not_configured",
+      compCount: 0,
+      validPriceCount: 0,
+    });
+    return {
+      ...params.report,
+      marketPreviewSearch: {
+        attempted: true,
+        state: "failed",
+        status: "provider_not_configured",
+        failureReason: "SERPER_API_KEY is not configured, so live comparable ad retrieval could not run.",
+        dateAccessed,
+        comparableCount: 0,
+        validPriceCount: 0,
+      },
+    } as MarketPreviewReport;
+  }
+
+  const baseQuery = buildMarketPreviewQuery({ vehicle, mileage, location, includeTrim: true });
+  const widenedQuery = vehicle.trim
+    ? buildMarketPreviewQuery({ vehicle, mileage, location, includeTrim: false })
+    : null;
+
+  console.info("marketPreview.search.started", {
+    query: baseQuery,
+    widenedQuery,
+    vehicle: [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" "),
+    mileage,
+    location,
+  });
+
+  try {
+    const firstPass = await runMarketPreviewSearch(baseQuery, apiKey, dateAccessed, vehicle, location);
+    const searchResult = firstPass.comps.length > 0 || !widenedQuery
+      ? firstPass
+      : await runMarketPreviewSearch(widenedQuery, apiKey, dateAccessed, vehicle, location);
+    const selected = dedupeMarketPreviewComparables(searchResult.comps).slice(0, 3);
+    const validPriceCount = selected.filter((comp) => typeof comp.price === "number" || typeof comp.askingPrice === "number").length;
+    const failedStatus =
+      searchResult.comps.length === 0 && searchResult.rawResultCount === 0
+        ? "no_results"
+        : selected.length === 0 || validPriceCount === 0
+          ? "parsing_failed"
+          : null;
+
+    if (failedStatus) {
+      console.info("marketPreview.search.failed", {
+        reason: failedStatus,
+        compCount: selected.length,
+        validPriceCount,
+      });
+      return {
+        ...params.report,
+        marketPreviewSearch: {
+          attempted: true,
+          state: "failed",
+          status: failedStatus,
+          query: baseQuery,
+          widenedQuery: firstPass.comps.length === 0 && widenedQuery ? widenedQuery : undefined,
+          dateAccessed,
+          comparableCount: selected.length,
+          validPriceCount,
+          failureReason:
+            failedStatus === "no_results"
+              ? "No comparable vehicle ads were returned for the local market query."
+              : "Comparable results were returned, but no usable asking prices could be parsed.",
+        },
+      } as MarketPreviewReport;
+    }
+
+    console.info("marketPreview.search.completed", {
+      compCount: selected.length,
+      validPriceCount,
+      query: baseQuery,
+      widened: firstPass.comps.length === 0 && Boolean(widenedQuery),
+    });
+
+    return {
+      ...params.report,
+      valuationData: {
+        ...((params.report as MarketPreviewReport).valuationData ?? {}),
+        comparableListings: selected,
+      },
+      marketPreviewSearch: {
+        attempted: true,
+        state: "completed",
+        status: "completed",
+        query: baseQuery,
+        widenedQuery: firstPass.comps.length === 0 && widenedQuery ? widenedQuery : undefined,
+        dateAccessed,
+        comparableCount: selected.length,
+        validPriceCount,
+      },
+    } as MarketPreviewReport;
+  } catch (error) {
+    const isTimeout = error instanceof Error && error.name === "AbortError";
+    console.info("marketPreview.search.failed", {
+      reason: isTimeout ? "timeout" : "failed",
+      compCount: 0,
+      validPriceCount: 0,
+      message: error instanceof Error ? error.message : "Unknown market preview search failure",
+    });
+    return {
+      ...params.report,
+      marketPreviewSearch: {
+        attempted: true,
+        state: "failed",
+        status: isTimeout ? "timeout" : "failed",
+        query: baseQuery,
+        dateAccessed,
+        comparableCount: 0,
+        validPriceCount: 0,
+        failureReason: isTimeout
+          ? "Market comparable search timed out before usable results were returned."
+          : error instanceof Error ? error.message : "Live comparable search failed.",
+      },
+    } as MarketPreviewReport;
+  }
+}
+
+function buildMarketPreviewQuery(params: {
+  vehicle: VehicleIdentity;
+  mileage?: number;
+  location?: string;
+  includeTrim: boolean;
+}) {
+  return [
+    params.vehicle.year,
+    params.vehicle.make,
+    params.vehicle.model,
+    params.includeTrim ? params.vehicle.trim : null,
+    "for sale",
+    params.mileage ? `${Math.round(params.mileage).toLocaleString("en-US")} miles` : null,
+    params.location ?? null,
+  ].filter(Boolean).join(" ");
+}
+
+async function runMarketPreviewSearch(
+  query: string,
+  apiKey: string,
+  dateAccessed: string,
+  vehicle: VehicleIdentity,
+  fallbackLocation?: string
+): Promise<{ comps: MarketPreviewComparableAd[]; rawResultCount: number }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  const response = await fetch("https://google.serper.dev/search", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-KEY": apiKey,
+    },
+    body: JSON.stringify({ q: query, num: 10 }),
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timeout));
+
+  if (!response.ok) {
+    throw new Error(`Market comparable search failed with status ${response.status}.`);
+  }
+
+  const payload = await response.json();
+  const organic: unknown[] = Array.isArray(payload?.organic) ? payload.organic : [];
+  const comps = organic
+    .map((item: unknown) => parseMarketPreviewComparable(item, dateAccessed, vehicle, fallbackLocation))
+    .filter((item: MarketPreviewComparableAd | null): item is MarketPreviewComparableAd => Boolean(item));
+  return { comps, rawResultCount: organic.length };
+}
+
+function parseMarketPreviewComparable(
+  item: unknown,
+  dateAccessed: string,
+  vehicle: VehicleIdentity,
+  fallbackLocation?: string
+): MarketPreviewComparableAd | null {
+  if (!item || typeof item !== "object") return null;
+  const record = item as Record<string, unknown>;
+  const title = typeof record.title === "string" ? record.title : "";
+  const snippet = typeof record.snippet === "string" ? record.snippet : "";
+  const link = typeof record.link === "string" ? record.link : undefined;
+  const text = `${title} ${snippet}`;
+  const price = extractCurrency(text);
+  if (typeof price !== "number") return null;
+
+  return {
+    price,
+    askingPrice: price,
+    mileage: extractMileage(text),
+    year: vehicle.year,
+    make: vehicle.make,
+    model: vehicle.model,
+    trim: vehicle.trim,
+    source: extractHostname(link) ?? "web search result",
+    title,
+    location: extractListingLocation(text) ?? fallbackLocation,
+    url: link,
+    dateAccessed,
+  };
+}
+
+function extractHostname(link?: string): string | undefined {
+  if (!link) return undefined;
+  try {
+    return new URL(link).hostname.replace(/^www\./, "");
+  } catch {
+    return undefined;
+  }
+}
+
+function dedupeMarketPreviewComparables(comps: MarketPreviewComparableAd[]) {
+  const seen = new Set<string>();
+  return comps.filter((comp) => {
+    const key = `${comp.url ?? ""}|${comp.title}|${comp.price}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function extractMarketPreviewMileage(
+  report: RepairIntelligenceReport,
+  attachments: StoredAttachment[],
+  userIntent: string
+): number | undefined {
+  const text = [userIntent, report.sourceEstimateText, ...attachments.map((attachment) => attachment.text)].join("\n");
+  return extractMileage(text);
+}
+
+function extractMarketPreviewLocation(
+  attachments: StoredAttachment[],
+  userIntent: string
+): string | undefined {
+  const text = [userIntent, ...attachments.map((attachment) => attachment.text)].join("\n");
+  const zip = text.match(/\b\d{5}(?:-\d{4})?\b/)?.[0];
+  if (zip) return zip;
+  const cityState = text.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?),\s*([A-Z]{2})\b/)?.[0];
+  return cityState;
+}
+
+function extractCurrency(value: string): number | undefined {
+  const match = value.match(/\$\s*([0-9][0-9,]{3,})(?:\.\d{2})?/);
+  if (!match) return undefined;
+  const parsed = Number(match[1].replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function extractMileage(value: string): number | undefined {
+  const match = value.match(/\b([0-9][0-9,]{2,6})\s*(?:mi|mile|miles|odometer)\b/i);
+  if (!match) return undefined;
+  const parsed = Number(match[1].replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function extractListingLocation(value: string): string | undefined {
+  return value.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?,\s*[A-Z]{2}\b/)?.[0];
+}
+
 function applyLinkedEvidenceToReport(params: {
   report: RepairIntelligenceReport;
   uploadedAttachments: StoredAttachment[];
@@ -557,6 +885,8 @@ function buildCaseEvidenceRegistry(params: {
     const extractedSummary =
       sourceType === "invoice" || sourceType === "sublet_document"
         ? summarizeInvoiceFacts(extractInvoiceFacts(attachment, sourceType))
+        : sourceType === "policy_document"
+          ? summarizePolicyFacts(extractPolicyFacts(attachment))
         : undefined;
 
     return {
@@ -568,6 +898,8 @@ function buildCaseEvidenceRegistry(params: {
       structuredFacts:
         sourceType === "invoice" || sourceType === "sublet_document"
           ? extractInvoiceFacts(attachment, sourceType)
+          : sourceType === "policy_document"
+            ? extractPolicyFacts(attachment)
           : undefined,
       ingestionState: "uploaded" as const,
       evidenceStatus: attachment.type.startsWith("image/")
@@ -1631,6 +1963,7 @@ function classifyUploadedEvidenceSource(attachment: StoredAttachment): CaseEvide
   if (attachment.classification === "ccc_workfile") return "ccc_workfile";
   if (attachment.classification === "ccc_companion_file") return "ccc_companion_file";
   if (attachment.type.startsWith("image/")) return "photo";
+  if (isPolicyEvidenceText(text)) return "policy_document";
   if (
     /(sublet|vendor|specialty|calibration sublet|scan sublet|glass|alignment)/i.test(text) &&
     /(invoice|bill|repair order|ro #|statement)/i.test(text)
@@ -1648,6 +1981,68 @@ function classifyUploadedEvidenceSource(attachment: StoredAttachment): CaseEvide
   if (text.includes("adas")) return "adas_report";
   if (text.includes("oem") || text.includes("procedure")) return "oem_documentation";
   return "other_supporting_document";
+}
+
+function isPolicyEvidenceText(text: string): boolean {
+  return /\b(policy|declarations?|endorsement|coverage|collision coverage|comprehensive coverage|appraisal|arbitration|if we cannot agree|duties after loss|payment of loss|financial responsibility|identification card|governing law|laws? of pennsylvania|pennsylvania law)\b/i.test(text);
+}
+
+function extractPolicyFacts(attachment: StoredAttachment): Record<string, string | string[] | null> {
+  const text = `${attachment.filename}\n${attachment.text}`;
+  const facts: Record<string, string | string[] | null> = {
+    carrier: extractFirstPolicyMatch(text, /\b(Allstate|State Farm|GEICO|Progressive|Erie|USAA|Nationwide|Liberty Mutual|Travelers|Farmers)\b/i),
+    jurisdiction: extractPolicyJurisdiction(text),
+    coverage: extractPolicyCoverage(text),
+    appraisalOrArbitration: extractPolicyClauseSummary(text, /\b(appraisal|arbitration|if we cannot agree|cannot agree)\b/i),
+    dutiesAfterLoss: extractPolicyClauseSummary(text, /\b(duties after loss|cooperat(?:e|ion)|payment of loss|proof of loss|claim)\b/i),
+    policyForms: extractPolicyForms(text),
+  };
+
+  return facts;
+}
+
+function summarizePolicyFacts(facts: Record<string, string | string[] | null>): string {
+  const forms = Array.isArray(facts.policyForms) ? facts.policyForms.join(", ") : "";
+  return [
+    facts.carrier ? `Carrier: ${facts.carrier}.` : null,
+    facts.jurisdiction ? `Jurisdiction indicator: ${facts.jurisdiction}.` : null,
+    facts.coverage ? `Coverage indicators: ${facts.coverage}.` : null,
+    facts.appraisalOrArbitration ? `Dispute-resolution language: ${facts.appraisalOrArbitration}.` : null,
+    facts.dutiesAfterLoss ? `Claim duties/payment language: ${facts.dutiesAfterLoss}.` : null,
+    forms ? `Forms or endorsements: ${forms}.` : null,
+  ].filter(Boolean).join(" ");
+}
+
+function extractPolicyJurisdiction(text: string): string | null {
+  if (/\b(Pennsylvania|PA)\b/i.test(text)) return "PA";
+  const match = text.match(/\blaws? of (?:the Commonwealth of )?([A-Z][a-z]+)\b/);
+  return match?.[1] ?? null;
+}
+
+function extractPolicyCoverage(text: string): string | null {
+  const coverage: string[] = [];
+  if (/\bcollision\b/i.test(text)) coverage.push("collision");
+  if (/\bcomprehensive\b/i.test(text)) coverage.push("comprehensive");
+  return coverage.length ? coverage.join(", ") : null;
+}
+
+function extractPolicyForms(text: string): string[] {
+  return Array.from(text.matchAll(/\b(?:form|endorsement|notice)\s*(?:no\.?|number|#)?\s*[:\-]?\s*([A-Z0-9-]{3,})/gi))
+    .map((match) => match[1])
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function extractPolicyClauseSummary(text: string, pattern: RegExp): string | null {
+  const match = pattern.exec(text);
+  if (!match?.index) return match ? match[0] : null;
+  const start = Math.max(0, match.index - 90);
+  const end = Math.min(text.length, match.index + 220);
+  return text.slice(start, end).replace(/\s+/g, " ").trim();
+}
+
+function extractFirstPolicyMatch(text: string, pattern: RegExp): string | null {
+  return text.match(pattern)?.[1] ?? null;
 }
 
 function classifyLinkedEvidenceSource(doc: LinkedEvidence): CaseEvidenceSourceType {

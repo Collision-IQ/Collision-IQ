@@ -51,7 +51,7 @@ export function canAccessFeature(
 
 export function buildPlanRecommendationGuard(hasProChatRecommendations: boolean) {
   return hasProChatRecommendations
-    ? "Repair Intelligence Report, Estimate Scrubber Report, Policy & Rights Review, DOI Complaint Packet, and rebuttal recommendations may be suggested when relevant."
+    ? "Repair Intelligence Report, Annotated Estimate Scrubber, Policy & Rights Review, DOI Complaint Packet, and rebuttal recommendations may be suggested when relevant."
     : "Snapshot export is available. Do not recommend Repair Intelligence, Estimate Scrubber, Policy & Rights Review, DOI Complaint Packet, or Customer Report exports as next steps unless you explicitly frame them as Pro-only upgrades.";
 }
 

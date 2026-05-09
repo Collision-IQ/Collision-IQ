@@ -39,7 +39,12 @@ import {
 } from "@/lib/ai/builders/collisionSnapshotPdfBuilder";
 import { buildCustomerReportPdf } from "@/lib/ai/builders/customerReportPdfBuilder";
 import { buildDoiComplaintPacketPdf } from "@/lib/ai/builders/doiComplaintPacketPdfBuilder";
-import { buildEstimateScrubberPdf } from "@/lib/ai/builders/estimateScrubberPdfBuilder";
+import {
+  buildAnnotatedEstimateReviewModel,
+  buildAnnotatedEstimateReviewPdf,
+  buildEstimatorChangeRequestListPdf,
+  type AnnotatedEstimateReviewModel,
+} from "@/lib/ai/builders/estimateScrubberPdfBuilder";
 import { buildPolicyRightsReviewPdf } from "@/lib/ai/builders/policyRightsReviewPdfBuilder";
 import { buildCarrierPdfBlob, exportCarrierPDF } from "@/lib/ai/builders/exportPdf";
 import { toStableClaimId } from "@/lib/claims/claimIdentity";
@@ -83,6 +88,7 @@ export type ReportKind =
   | "customer_report"
   | "repair_intelligence"
   | "estimate_scrubber"
+  | "estimator_change_request_list"
   | "policy_rights_review"
   | "doi_complaint_packet";
 type ReportDestinationType = "customer" | "carrier" | "internal";
@@ -739,9 +745,9 @@ export function ChatbotWorkspacePage() {
         ? { label: "Repair Intelligence Report (Pro)", type: "locked" }
       : null,
     canUseEstimateScrubberExport
-      ? { label: "Estimate Scrubber Report", type: "pdf" }
+      ? { label: "Annotated Estimate Scrubber", type: "pdf" }
       : hasResolvedAnalysis
-        ? { label: "Estimate Scrubber Report (Pro)", type: "locked" }
+        ? { label: "Annotated Estimate Scrubber (Pro)", type: "locked" }
       : null,
     canUsePolicyRightsReviewExport
       ? { label: "Policy & Rights Review", type: "pdf" }
@@ -1147,6 +1153,8 @@ export function ChatbotWorkspacePage() {
           <RailContent
             attachment={attachment}
             analysisText={redactExternalDocumentUrls(analysisText)}
+            caseIntent={caseIntent}
+            primaryAnalysisContent={primaryAnalysis?.content ?? ""}
             analysisLoading={analysisLoading}
             analysisStatus={analysisStatus}
             analysisStatusDetail={analysisStatusDetail}
@@ -1312,6 +1320,8 @@ export default function ChatbotPage() {
 function RailContent({
   attachment,
   analysisText,
+  caseIntent,
+  primaryAnalysisContent,
   analysisLoading,
   analysisStatus,
   analysisStatusDetail,
@@ -1341,6 +1351,8 @@ function RailContent({
 }: {
   attachment: string | null;
   analysisText: string;
+  caseIntent: string;
+  primaryAnalysisContent: string;
   analysisLoading: boolean;
   analysisStatus: "idle" | "processing" | "complete" | "error";
   analysisStatusDetail: string | null;
@@ -1612,6 +1624,7 @@ function RailContent({
     const needsResearch =
       reportType === "policy_rights_review" ||
       reportType === "estimate_scrubber" ||
+      reportType === "estimator_change_request_list" ||
       reportType === "doi_complaint_packet" ||
       (reportType === "repair_intelligence" && renderModel.oemContradictions.length > 0);
 
@@ -1622,7 +1635,11 @@ function RailContent({
     setReportSendStatus("Running Drive and internet source research...");
 
     const researchReportType =
-      reportType === "repair_intelligence" ? "oem_contradiction_detection" : reportType;
+      reportType === "repair_intelligence"
+        ? "oem_contradiction_detection"
+          : reportType === "estimator_change_request_list"
+            ? "estimate_scrubber"
+          : reportType;
     const response = await fetch("/api/reports/research", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1645,6 +1662,57 @@ function RailContent({
 
     setReportSendStatus(null);
     return payload.snapshot;
+  }
+
+  async function prepareAnnotatedEstimatePromptText(
+    reportType: ReportKind,
+    input: {
+      renderModel: ReturnType<typeof buildExportModel>;
+      report: RepairIntelligenceReport | null;
+      analysis: AnalysisResult | null;
+      panel: DecisionPanel;
+      assistantAnalysis: string;
+      workspaceData: WorkspaceData | null;
+      exportResearchSnapshot: ExportResearchSnapshot | null;
+    }
+  ): Promise<string | null> {
+    const annotationMode = mapReportKindToAnnotationMode(reportType);
+    if (!annotationMode) {
+      return null;
+    }
+
+    const model = buildAnnotatedEstimateReviewModel(input);
+    setReportSendStatus("Generating annotated estimate review with Collision IQ prompt...");
+
+    const response = await fetch("/api/reports/annotated-estimate-prompt", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        user_request:
+          "Generate an annotated estimate review. Show missing, under-documented, reduced, and proof-needed items directly against the relevant estimate lines or sections.",
+        case_context: buildAnnotatedPromptCaseContext(input, model),
+        uploaded_documents: buildAnnotatedPromptUploadedDocuments(input),
+        carrier_estimate_text: buildAnnotatedPromptCarrierEstimateText(input, model),
+        shop_estimate_text: buildAnnotatedPromptShopEstimateText(model),
+        scrubber_findings: buildAnnotatedPromptScrubberFindings(model),
+        audience: "estimator",
+        annotation_mode: annotationMode,
+      }),
+    });
+    const data = (await response.json().catch(() => null)) as {
+      output_text?: unknown;
+      error?: string;
+    } | null;
+    const promptText = typeof data?.output_text === "string" ? data.output_text : "";
+
+    if (!response.ok) {
+      setReportSendStatus(data?.error || "Stored prompt generation failed; using deterministic annotations.");
+      return null;
+    }
+
+    setReportSendStatus(null);
+    return promptText.trim() || null;
   }
 
   async function downloadReportDocument(reportType: ReportKind) {
@@ -1681,18 +1749,39 @@ function RailContent({
       workspaceData,
       exportResearchSnapshot,
     };
+    const promptGeneratedText = await prepareAnnotatedEstimatePromptText(reportType, sharedInput);
+    const annotatedInput = {
+      ...sharedInput,
+      promptGeneratedText,
+    };
+    const userProvidedReportContext = buildUserProvidedContextForReports(
+      [
+        caseIntent ? `Case intent: ${caseIntent}` : null,
+        primaryAnalysisContent ? `Primary chat analysis: ${primaryAnalysisContent}` : null,
+        analysisText,
+      ].filter(Boolean).join("\n\n")
+    );
 
     if (reportType === "repair_intelligence") {
       return buildCarrierReport(sharedInput);
     }
     if (reportType === "estimate_scrubber") {
-      return buildEstimateScrubberPdf(sharedInput);
+      return buildAnnotatedEstimateReviewPdf(annotatedInput);
+    }
+    if (reportType === "estimator_change_request_list") {
+      return buildEstimatorChangeRequestListPdf(annotatedInput);
     }
     if (reportType === "policy_rights_review") {
-      return buildPolicyRightsReviewPdf(sharedInput);
+      return buildPolicyRightsReviewPdf({
+        ...sharedInput,
+        assistantAnalysis: userProvidedReportContext,
+      });
     }
     if (reportType === "doi_complaint_packet") {
-      return buildDoiComplaintPacketPdf(sharedInput);
+      return buildDoiComplaintPacketPdf({
+        ...sharedInput,
+        assistantAnalysis: userProvidedReportContext,
+      });
     }
 
     return await buildCustomerReportDocument({
@@ -2362,10 +2451,10 @@ function RailContent({
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[#C65A2A]" aria-hidden />
-                    Estimate Scrubber Report
+                    Annotated Estimate Scrubber
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                    Estimate QA and compliance audit for missing or under-documented operations.
+                    Markup of the lowest uploaded estimate with missing, reduced, and proof-needed items attached to estimate lines.
                   </div>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -2381,7 +2470,7 @@ function RailContent({
                     }}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download PDF</span>
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download scrubber</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
@@ -2390,6 +2479,14 @@ function RailContent({
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[#C65A2A] bg-[#C65A2A] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
                     <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>
+                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void downloadReportDocument("estimator_change_request_list")}
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 sm:col-span-2"
+                  >
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Estimator change list</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </div>
@@ -2653,6 +2750,113 @@ function RailContent({
   );
 }
 
+function mapReportKindToAnnotationMode(
+  reportType: ReportKind
+):
+  | "annotated_estimate_review"
+  | "estimator_change_request_list"
+  | null {
+  switch (reportType) {
+    case "estimate_scrubber":
+      return "annotated_estimate_review";
+    case "estimator_change_request_list":
+      return "estimator_change_request_list";
+    default:
+      return null;
+  }
+}
+
+function buildAnnotatedPromptCaseContext(
+  input: {
+    renderModel: ReturnType<typeof buildExportModel>;
+    report: RepairIntelligenceReport | null;
+    analysis: AnalysisResult | null;
+    assistantAnalysis: string;
+  },
+  model: AnnotatedEstimateReviewModel
+): string {
+  return compactTextLines([
+    `Vehicle: ${model.vehicleIdentity}`,
+    `VIN: ${model.vin}`,
+    model.insurer ? `Insurer: ${model.insurer}` : null,
+    `Repair position: ${input.renderModel.repairPosition}`,
+    `Current position statement: ${input.renderModel.positionStatement}`,
+    input.analysis?.narrative ? `Analysis narrative: ${input.analysis.narrative}` : null,
+    input.report?.summary ? `Risk: ${input.report.summary.riskScore}; Confidence: ${input.report.summary.confidence}` : null,
+    input.assistantAnalysis ? `Assistant analysis: ${input.assistantAnalysis}` : null,
+  ]);
+}
+
+function buildAnnotatedPromptUploadedDocuments(input: {
+  renderModel: ReturnType<typeof buildExportModel>;
+  report: RepairIntelligenceReport | null;
+}): string {
+  return compactTextLines([
+    ...input.renderModel.reportFields.documentedProcedures.map((item) => `Documented procedure: ${item}`),
+    ...input.renderModel.reportFields.documentedHighlights.map((item) => `Documented highlight: ${item}`),
+    ...(input.report?.evidence ?? []).slice(0, 10).map((item) =>
+      `Evidence: ${item.title ?? "Untitled"} - ${item.snippet ?? item.source ?? ""}`
+    ),
+  ]);
+}
+
+function buildAnnotatedPromptCarrierEstimateText(
+  input: { analysis: AnalysisResult | null },
+  model: AnnotatedEstimateReviewModel
+): string {
+  return compactTextLines([
+    input.analysis?.rawEstimateText ?? null,
+    ...model.lineAnchors
+      .filter((anchor) => anchor.sourceRole !== "shop")
+      .map((anchor) => `${anchor.lineId}: ${anchor.text}`),
+  ]);
+}
+
+function buildAnnotatedPromptShopEstimateText(model: AnnotatedEstimateReviewModel): string {
+  return compactTextLines([
+    ...model.lineAnchors
+      .filter((anchor) => anchor.sourceRole === "shop")
+      .map((anchor) => `${anchor.lineId}: ${anchor.text}`),
+    ...model.comparisonRows.map((row) =>
+      row.lhsValue ? `${row.lhsSource ?? "Shop"} ${row.operation ?? row.partName ?? "line"}: ${row.lhsValue}` : null
+    ),
+  ]);
+}
+
+function buildAnnotatedPromptScrubberFindings(model: AnnotatedEstimateReviewModel): string {
+  return compactTextLines(
+    model.annotations.map((annotation) =>
+      [
+        `${annotation.title}`,
+        `The selected estimate anchor is ${annotation.lineId ?? annotation.section ?? "the related estimate section"} and the annotation category is ${annotation.category}.`,
+        `${annotation.explanation}`,
+        `Support posture: ${annotation.supportStatus}.`,
+        `Estimator request: ${annotation.estimatorText}`,
+        annotation.carrierLine ? `Carrier line: ${annotation.carrierLine}` : null,
+        annotation.shopLine ? `Shop line: ${annotation.shopLine}` : null,
+        annotation.difference ? `Difference: ${annotation.difference}` : null,
+      ].filter(Boolean).join("\n")
+    )
+  );
+}
+
+function compactTextLines(values: Array<string | null | undefined>): string {
+  return values
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .join("\n")
+    .slice(0, 24000);
+}
+
+function buildUserProvidedContextForReports(value: string): string {
+  const cleaned = value.trim();
+  if (!cleaned) return "";
+  return [
+    "User-Provided Chat Context",
+    "This context may identify reported conduct, timeline details, policy questions, or appraisal posture. It is not verified document evidence unless supported by uploaded emails, letters, claim notes, policy pages, or written insurer positions.",
+    cleaned,
+  ].join("\n\n");
+}
+
 function getDefaultReportSubject(reportType: ReportKind): string {
   switch (reportType) {
     case "snapshot":
@@ -2660,7 +2864,9 @@ function getDefaultReportSubject(reportType: ReportKind): string {
     case "repair_intelligence":
       return "[Collision IQ] Repair Intelligence Report";
     case "estimate_scrubber":
-      return "[Collision IQ] Estimate Scrubber Report";
+      return "[Collision IQ] Annotated Estimate Scrubber";
+    case "estimator_change_request_list":
+      return "[Collision IQ] Estimator Change Request List";
     case "policy_rights_review":
       return "[Collision IQ] Policy & Rights Review";
     case "doi_complaint_packet":
@@ -2677,7 +2883,9 @@ function getDefaultReportFilename(reportType: ReportKind): string {
     case "repair_intelligence":
       return "repair-intelligence-report.pdf";
     case "estimate_scrubber":
-      return "estimate-scrubber-report.pdf";
+      return "annotated-estimate-scrubber.pdf";
+    case "estimator_change_request_list":
+      return "estimator-change-request-list.pdf";
     case "policy_rights_review":
       return "policy-rights-review.pdf";
     case "doi_complaint_packet":
@@ -3051,7 +3259,7 @@ function SnapshotPreviewModal({
           <SnapshotPanel title="Market Preview" items={
             safeSnapshot.valuationSnapshot.available
               ? [
-                  safeSnapshot.valuationSnapshot.acvPreviewRange ? `ACV: ${safeSnapshot.valuationSnapshot.acvPreviewRange}` : null,
+                  safeSnapshot.valuationSnapshot.acvPreviewRange ? `Market Preview: ${safeSnapshot.valuationSnapshot.acvPreviewRange}` : null,
                   safeSnapshot.valuationSnapshot.dvPreviewRange ? `DV: ${safeSnapshot.valuationSnapshot.dvPreviewRange}` : null,
                   safeSnapshot.valuationSnapshot.disclosure,
                 ].filter((item): item is string => Boolean(item))
@@ -3216,7 +3424,7 @@ function resolveAcademyServiceTrigger(params: {
   const laborDelta = params.snapshot.estimateComparison.keyDeltas.some((item) => /labor/i.test(item));
   const valuationGap =
     params.valuationLowConfidence ||
-    /ACV|DV/i.test(params.snapshot.valuationSnapshot.disclosure) ||
+    /market preview|DV|valuation/i.test(params.snapshot.valuationSnapshot.disclosure) ||
     params.snapshot.topDisputeItems.some((item) => /value|valuation|acv|dv/i.test(item.issue));
 
   if (params.appraisalTriggered) {
@@ -3230,7 +3438,7 @@ function resolveAcademyServiceTrigger(params: {
   if (valuationGap) {
     return {
       serviceKey: "academy_acv_review",
-      cta: "Need help resolving this? Start an ACV Review case",
+      cta: "Need help resolving this? Start a Market Preview review",
       reason: "Valuation support may be incomplete, which could affect the total-loss or value position on the claim.",
     };
   }
@@ -4200,7 +4408,7 @@ function GapSummaryCard({
     renderModel.valuation.dvStatus !== "not_determinable";
   const postureSummary = dedupeRailItems([
     renderModel.valuation.acvStatus !== "not_determinable"
-      ? `ACV posture: ${formatLabel(renderModel.valuation.acvStatus)}.`
+      ? `Market Preview posture: ${formatLabel(renderModel.valuation.acvStatus)}.`
       : null,
     renderModel.valuation.dvStatus !== "not_determinable"
       ? `DV posture: ${formatLabel(renderModel.valuation.dvStatus)}.`
@@ -4464,7 +4672,7 @@ function buildValuationDisplay(renderModel: ReturnType<typeof buildExportModel>)
       label: "Market preview band",
       status: renderModel.valuation.acvStatus,
       value:
-        renderModel.valuation.acvStatus === "provided"
+        renderModel.valuation.acvStatus === "provided" || renderModel.valuation.acvSourceType === "comps"
           ? renderModel.valuation.acvValue
           : undefined,
       range:
@@ -4519,6 +4727,9 @@ function buildSingleValuationDisplay(params: {
   if (params.status === "provided" && typeof params.value === "number") {
     lines.push(`${params.label}: directional preview around ${formatCurrency(params.value)}`);
   } else if (params.status === "estimated_range" && hasSaneRange(params.range, params.maxRange)) {
+    if (params.sourceType === "comps" && typeof params.value === "number" && (params.compCount ?? 0) >= 2) {
+      lines.push(`Market Preview median: ${formatCurrency(params.value)}`);
+    }
     lines.push(`${params.label}: ${formatCurrency(params.range.low)}-${formatCurrency(params.range.high)}`);
   } else {
     lines.push(`${params.label}: Preview band not supportable from the current file set.`);
@@ -4549,7 +4760,7 @@ function buildSingleValuationDisplay(params: {
   }
 
   if (params.status === "provided" || params.status === "estimated_range") {
-    lines.push("Directional only. This preview is not a formal appraisal, binding ACV, or paid valuation result.");
+    lines.push("Directional only. This preview is not a formal appraisal, binding actual cash value conclusion, or paid valuation result.");
   }
 
   if (params.includeHandoffHint !== false) {
@@ -4624,7 +4835,7 @@ function ValuationSection({
             disabled={checkoutLoading}
             className="inline-flex items-center justify-center rounded-xl bg-[#C65A2A] px-3 py-2 text-[11px] font-semibold text-black transition hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
           >
-            {checkoutLoading ? "Opening checkout..." : "Start ACV Review Checkout"}
+            {checkoutLoading ? "Opening checkout..." : "Start Market Preview Checkout"}
           </button>
         ) : null}
         {hasDiminishedValueService ? (

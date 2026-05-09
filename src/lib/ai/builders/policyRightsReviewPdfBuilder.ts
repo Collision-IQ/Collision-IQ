@@ -9,6 +9,7 @@ import {
 import type { ExportBuilderInput } from "./exportTemplates";
 import {
   buildJurisdictionUnavailableMessage,
+  classifySourceAuthorityTier,
   getClaimStateCodeFromJurisdiction,
   isOfficialLegalSource,
   isVerifiedLegalCitation,
@@ -94,6 +95,7 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
   const insurer = resolveCanonicalInsurer(exportModel);
   const verifiedCitations = getVerifiedReviewCitations(review);
   const needsReview = buildSourceNeedsReviewBullets(review);
+  const userContextBullets = buildUserProvidedContextBullets(params.assistantAnalysis);
 
   return {
     filename: "policy-rights-review.pdf",
@@ -150,6 +152,12 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
         title: "Policy Rights Review",
         bullets: formatAssertions(review.policyRights, "No uploaded policy-rights provisions were identified in the current source set."),
       },
+      ...(userContextBullets.length
+        ? [{
+            title: "User-Provided Chat Context",
+            bullets: userContextBullets,
+          }]
+        : []),
       {
         title: "Needs Review",
         bullets: needsReview.length
@@ -214,7 +222,9 @@ export function buildPolicyRightsReviewModel(
   params: ExportBuilderInput,
   exportModel: ReturnType<typeof buildExportModel>
 ): PolicyRightsReviewModel {
+  const uploadedJurisdictionText = buildUploadedJurisdictionText(params);
   const sourceText = [
+    uploadedJurisdictionText,
     params.assistantAnalysis,
     params.analysis?.narrative,
     params.report?.analysis?.narrative,
@@ -227,22 +237,29 @@ export function buildPolicyRightsReviewModel(
     .join("\n");
   const citations = buildImmutableCitations(params, exportModel);
   const legalCitations = citations.filter((citation) =>
-    ["VerifiedRegulationsDatabase", "DriveLawFolder"].includes(citation.source)
+    ["VerifiedRegulationsDatabase", "DriveLawFolder"].includes(citation.source) &&
+    citation.sourceAuthorityTier === "LEGAL_AUTHORITY"
   );
   const internetCitations = citations.filter((citation) => citation.source === "InternetResearch");
   const policyCitations = citations.filter((citation) =>
     ["DrivePolicyFolder", "UploadedPolicyDocument"].includes(citation.source)
   );
   const oemCitations = citations.filter((citation) => citation.source === "OEMPositionStatement");
-  const jurisdiction = detectJurisdiction(sourceText, legalCitations);
+  const jurisdiction = detectJurisdiction(uploadedJurisdictionText, sourceText, legalCitations);
   const claimStateCode = getClaimStateCodeFromJurisdiction(jurisdiction);
   const verifiedLegalCitations = legalCitations.filter((citation) =>
     isVerifiedLegalCitation(citation, claimStateCode)
   );
   const verifiedPolicyCitations = policyCitations.filter((citation) => isVerifiedPolicyCitation(citation));
   const appraisalDetected =
-    Boolean(params.panel?.appraisal?.triggered) || /\bappraisal\b/i.test(sourceText);
-  const appraisalCitations = verifiedLegalCitations.filter((citation) => /appraisal/i.test(citation.title));
+    Boolean(params.panel?.appraisal?.triggered) ||
+    /\b(appraisal|arbitration|if we cannot agree|cannot agree)\b/i.test(sourceText);
+  const appraisalCitations = [
+    ...verifiedLegalCitations.filter((citation) => /appraisal/i.test(citation.title)),
+    ...verifiedPolicyCitations.filter((citation) =>
+      /appraisal|arbitration|cannot agree/i.test(`${citation.title} ${citation.locator ?? ""}`)
+    ),
+  ];
   const doiCitations = verifiedLegalCitations.filter((citation) =>
     /\bDOI\b|department of insurance|insurance department/i.test(`${citation.title} ${citation.locator ?? ""}`)
   );
@@ -252,7 +269,9 @@ export function buildPolicyRightsReviewModel(
     appraisalRights: {
       detected: appraisalDetected,
       confidence: appraisalCitations.length > 0 ? "high" : appraisalDetected ? "medium" : "low",
-      basis: params.panel?.appraisal?.reasoning || "No verified appraisal clause or regulation was isolated from the current source set.",
+      basis: appraisalCitations.length > 0
+        ? "Uploaded policy or verified source metadata includes appraisal, arbitration, or disagreement-resolution language."
+        : params.panel?.appraisal?.reasoning || "No verified appraisal clause or regulation was isolated from the current source set.",
       citations: appraisalCitations,
     },
     verifiedRegulations: verifiedLegalCitations.map((citation) =>
@@ -337,7 +356,11 @@ function buildProceduralInferenceAssertions(
 ): PolicyRightsAssertion[] {
   const hasProcedureSignals = /\b(oem|procedure|scan|calibration|adas|structural|corrosion|weld|blend|refinish|one[- ]?time|verification)\b/i.test(sourceText);
   const hasVerifiedSupport = citations.some((citation) =>
-    ["OEMPositionStatement", "VerifiedRegulationsDatabase", "DriveLawFolder"].includes(citation.source)
+    citation.source === "OEMPositionStatement" ||
+    (
+      ["VerifiedRegulationsDatabase", "DriveLawFolder"].includes(citation.source) &&
+      citation.sourceAuthorityTier === "LEGAL_AUTHORITY"
+    )
   );
 
   if (!hasProcedureSignals || hasVerifiedSupport) {
@@ -362,13 +385,20 @@ function buildImmutableCitations(
 ): ImmutablePolicyCitation[] {
   const rawSources = exportModel.retrievalSummary?.sourcesInfluencingFindings ?? [];
   const citations = rawSources.map((source, index) => {
-    const citationSource = classifyCitationSource(source.title, source.sourceType);
     const locator = source.relatedFindingIds.length
       ? `Related findings: ${source.relatedFindingIds.join(", ")}`
       : undefined;
+    const sourceAuthorityTier = classifySourceAuthorityTier({
+      title: source.title,
+      sourceType: source.sourceType,
+      url: source.url,
+      locator,
+    });
+    const citationSource = classifyCitationSource(source.title, source.sourceType, sourceAuthorityTier);
 
     return createCitation({
       source: citationSource,
+      sourceAuthorityTier,
       sourceType: source.sourceType,
       title: source.title,
       locator,
@@ -383,6 +413,7 @@ function buildImmutableCitations(
   if (params.report?.ingestionMeta?.uploadedFileCount || exportModel.confidenceIntegrity.uploadedFileCount > 0) {
     citations.push(createCitation({
       source: "ClaimAnalysisRuntime",
+      sourceAuthorityTier: "INDUSTRY_CONTEXT",
       sourceType: "runtime",
       title: "Claim analysis runtime context",
       locator: `Uploaded files reviewed: ${exportModel.confidenceIntegrity.uploadedFileCount}`,
@@ -392,26 +423,81 @@ function buildImmutableCitations(
     }));
   }
 
+  const uploadedPolicyText = buildUploadedJurisdictionText(params);
+  const uploadedPolicyCitations = buildUploadedPolicyCitations(uploadedPolicyText, citations.length);
+  citations.push(...uploadedPolicyCitations);
+
   return dedupeCitations(citations);
+}
+
+function buildUserProvidedContextBullets(value: string | null | undefined): string[] {
+  const text = (value ?? "").replace(/\r/g, "\n").trim();
+  if (!text || !/User-Provided Chat Context|appraisal|carrier|claim|denial|delay|refus|award letter|independent appraiser|IA/i.test(text)) {
+    return [];
+  }
+
+  return [
+    "User-provided context reports an appraisal-process dispute or claim-handling concern. This is treated as user-provided context, not verified document evidence.",
+    "The context should be used to identify what policy issue to review, including appraisal language, disagreement-resolution terms, repair-completion posture, award-letter timing, and any written carrier or IA demand.",
+    "Uploaded policy/appraisal language, written carrier or IA correspondence, appraisal invocation, inspection notes, and any legal-team correspondence must be reviewed before stating a policy position.",
+  ];
+}
+
+function buildUploadedPolicyCitations(text: string, startIndex: number): ImmutablePolicyCitation[] {
+  if (!hasUploadedPolicyEvidence(text)) return [];
+
+  const jurisdiction = inferCitationJurisdiction(text);
+  const policySignals = [
+    /governed by|laws? of|policy state|declarations?|financial responsibility|identification card/i.test(text)
+      ? "jurisdiction, declarations, or insurance identification-card indicators"
+      : null,
+    /collision|comprehensive|coverage/i.test(text) ? "collision or comprehensive coverage indicators" : null,
+    /appraisal|arbitration|if we cannot agree|cannot agree/i.test(text)
+      ? "appraisal, arbitration, or disagreement-resolution wording"
+      : null,
+    /duties after loss|cooperat|payment of loss|loss payable|claim/i.test(text)
+      ? "duties after loss, cooperation, claim, or payment-of-loss wording"
+      : null,
+  ].filter(Boolean).join("; ");
+
+  return [
+    createCitation({
+      source: "UploadedPolicyDocument",
+      sourceAuthorityTier: "POLICY_CONTRACT",
+      sourceType: "runtime",
+      title: jurisdiction
+        ? `Uploaded policy packet with ${jurisdiction} policy indicators`
+        : "Uploaded policy packet",
+      locator: policySignals || "Policy evidence was uploaded and classified from policy-related document text.",
+      jurisdiction,
+      retrievedAt: new Date().toISOString(),
+      confidenceScore: 0.86,
+      index: startIndex,
+    }),
+  ];
+}
+
+function hasUploadedPolicyEvidence(text: string): boolean {
+  return /\b(policy|declarations?|endorsement|coverage|collision|comprehensive|appraisal|arbitration|financial responsibility|identification card|governing law|laws? of|duties after loss|payment of loss)\b/i.test(text);
 }
 
 function classifyCitationSource(
   title: string,
-  sourceType: "drive" | "web" | "oem" | "estimate"
+  sourceType: "drive" | "web" | "oem" | "estimate",
+  sourceAuthorityTier: ImmutablePolicyCitation["sourceAuthorityTier"]
 ): PolicyRightsCitationSource {
-  const weakSource = isWeakLegalSource(title);
-  const officialSource = isOfficialLegalSource(title);
+  const officialSource = sourceAuthorityTier === "LEGAL_AUTHORITY";
   if (/policy|declarations|endorsement|coverage/i.test(title)) {
     return sourceType === "drive" ? "DrivePolicyFolder" : "UploadedPolicyDocument";
   }
+  if (sourceAuthorityTier === "OEM_PROCEDURE" || sourceType === "oem" || /oem|position statement|manufacturer/i.test(title)) {
+    return "OEMPositionStatement";
+  }
   if (/statute|regulation|insurance code|department of insurance|\bDOI\b|appraisal|consumer rights/i.test(title)) {
-    if (officialSource && !weakSource) {
+    if (officialSource) {
       return sourceType === "drive" ? "DriveLawFolder" : "VerifiedRegulationsDatabase";
     }
     return "InternetResearch";
-  }
-  if (sourceType === "oem" || /oem|position statement|manufacturer/i.test(title)) {
-    return "OEMPositionStatement";
   }
   if (sourceType === "web") return "InternetResearch";
   return "ClaimAnalysisRuntime";
@@ -419,6 +505,7 @@ function classifyCitationSource(
 
 function createCitation(params: {
   source: PolicyRightsCitationSource;
+  sourceAuthorityTier: ImmutablePolicyCitation["sourceAuthorityTier"];
   sourceType?: ImmutablePolicyCitation["sourceType"];
   title: string;
   locator?: string;
@@ -439,6 +526,7 @@ function createCitation(params: {
   return {
     id: `PRR-${String(params.index + 1).padStart(3, "0")}-${immutableKey.slice(0, 8)}`,
     source: params.source,
+    sourceAuthorityTier: params.sourceAuthorityTier,
     ...(params.sourceType ? { sourceType: params.sourceType } : {}),
     title: params.title,
     ...(params.locator ? { locator: params.locator } : {}),
@@ -463,10 +551,43 @@ function inferCitationJurisdiction(text: string): string | undefined {
   return undefined;
 }
 
+function buildUploadedJurisdictionText(params: ExportBuilderInput): string {
+  const registryText = (params.report?.evidenceRegistry ?? [])
+    .filter((item) =>
+      /policy|declaration|declarations|insurance|identification card|id card|financial responsibility|mailing|address|garaging|registration/i.test(
+        `${item.label} ${item.sourceType} ${item.extractedText ?? ""} ${item.extractedSummary ?? ""}`
+      )
+    )
+    .map((item) =>
+      [
+        item.label,
+        item.extractedText,
+        item.extractedSummary,
+        ...Object.values(item.structuredFacts ?? {}).flatMap((value) => Array.isArray(value) ? value : value ? [String(value)] : []),
+      ].filter(Boolean).join(" ")
+    );
+  const evidenceText = (params.report?.evidence ?? [])
+    .filter((item) =>
+      item.authority === "internal" &&
+      /policy|declaration|declarations|insurance|identification card|id card|financial responsibility|mailing|address|garaging|registration/i.test(
+        `${item.title} ${item.source} ${item.snippet ?? ""}`
+      )
+    )
+    .map((item) => [item.title, item.source, item.snippet].filter(Boolean).join(" "));
+
+  return [...registryText, ...evidenceText].join("\n");
+}
+
 function detectJurisdiction(
+  uploadedPolicyText: string,
   text: string,
   citations: ImmutablePolicyCitation[]
 ): PolicyRightsReviewModel["jurisdiction"] {
+  const uploadedPolicyJurisdiction = detectUploadedPolicyJurisdiction(uploadedPolicyText);
+  if (uploadedPolicyJurisdiction) {
+    return uploadedPolicyJurisdiction;
+  }
+
   const haystack = `${text}\n${citations.map((citation) => citation.title).join("\n")}`;
 
   for (const [code, name] of Object.entries(STATE_NAMES)) {
@@ -569,8 +690,12 @@ function scoreAssertionConfidence(
     };
   }
 
-  const hasVerifiedRegulation = citations.some((citation) => citation.source === "VerifiedRegulationsDatabase");
-  const hasDriveLaw = citations.some((citation) => citation.source === "DriveLawFolder");
+  const hasVerifiedRegulation = citations.some(
+    (citation) => citation.source === "VerifiedRegulationsDatabase" && citation.sourceAuthorityTier === "LEGAL_AUTHORITY"
+  );
+  const hasDriveLaw = citations.some(
+    (citation) => citation.source === "DriveLawFolder" && citation.sourceAuthorityTier === "LEGAL_AUTHORITY"
+  );
   const hasPolicy = citations.some((citation) =>
     ["DrivePolicyFolder", "UploadedPolicyDocument"].includes(citation.source)
   );
@@ -690,7 +815,12 @@ function formatAssertions(assertions: PolicyRightsAssertion[], fallback: string)
     const support = assertion.supportConfidenceIndicator ?? assertion.verification;
     const commentary = assertion.commentary ? ` Commentary: ${assertion.commentary}` : "";
 
-    return `${prefix}: ${assertion.statement} Support category: ${formatSupportCategory(assertion.supportCategory)}. Confidence: ${capitalize(assertion.confidence)} (${Math.round(assertion.confidenceWeight * 100)}%). Confidence basis: ${assertion.confidenceRationale} Rationale: ${rationale} Evidence chain: ${evidenceChain} Risk if omitted: ${riskIfOmitted} Support confidence: ${formatLabel(support)}.${legalGuard} ${citationText}${commentary}`;
+    return [
+      `${prefix}: ${assertion.statement}`,
+      `${rationale} The confidence band is ${capitalize(assertion.confidence)} because ${assertion.confidenceRationale}`,
+      `${evidenceChain} Support posture is ${formatLabel(support)}.${legalGuard}`,
+      `${riskIfOmitted} ${citationText}${commentary}`,
+    ].join("\n\n");
   });
 }
 
@@ -718,6 +848,78 @@ function countAssertionsByConfidence(
   confidence: PolicyRightsConfidenceBand
 ): number {
   return getAllAssertions(review).filter((assertion) => assertion.confidence === confidence).length;
+}
+
+function detectUploadedPolicyJurisdiction(text: string): PolicyRightsReviewModel["jurisdiction"] | null {
+  if (!text.trim()) {
+    return null;
+  }
+
+  const detectors: Array<{
+    basis: string;
+    matches: (code: string, name: string, haystack: string) => boolean;
+  }> = [
+    {
+      basis: "policy governing-law clause",
+      matches: (code, name, haystack) => {
+        const namePattern = escapeRegExp(name);
+        return new RegExp(`\\b(?:${namePattern}|${code})\\s+law\\s+(?:applies|governs)\\b`, "i").test(haystack) ||
+          new RegExp(`\\b(?:governed by|subject to|construed under|in accordance with)\\s+(?:the\\s+)?(?:laws?\\s+of\\s+)?(?:the\\s+Commonwealth\\s+of\\s+)?${namePattern}\\b`, "i").test(haystack) ||
+          new RegExp(`\\blaws?\\s+of\\s+(?:the\\s+Commonwealth\\s+of\\s+)?${namePattern}\\b`, "i").test(haystack);
+      },
+    },
+    {
+      basis: "policy declarations/form state",
+      matches: (code, name, haystack) => {
+        const namePattern = escapeRegExp(name);
+        return new RegExp(`\\b(?:declarations?|policy\\s+form|form\\s+state|policy\\s+state|rated\\s+state|risk\\s+state)\\b(?:(?!\\n).){0,120}\\b(?:${namePattern}|${code})\\b`, "i").test(haystack) ||
+          new RegExp(`\\b(?:${namePattern}|${code})\\b(?:(?!\\n).){0,80}\\b(?:policy\\s+form|declarations?)\\b`, "i").test(haystack);
+      },
+    },
+    {
+      basis: "insurance ID card",
+      matches: (code, name, haystack) => {
+        const namePattern = escapeRegExp(name);
+        return new RegExp(`\\b(?:${namePattern}|${code})\\b(?:(?!\\n).){0,100}\\b(?:financial\\s+responsibility|identification\\s+card|insurance\\s+id\\s+card|id\\s+card)\\b`, "i").test(haystack) ||
+          new RegExp(`\\b(?:financial\\s+responsibility|identification\\s+card|insurance\\s+id\\s+card|id\\s+card)\\b(?:(?!\\n).){0,100}\\b(?:${namePattern}|${code})\\b`, "i").test(haystack);
+      },
+    },
+    {
+      basis: "named insured address",
+      matches: (code, name, haystack) => {
+        const namePattern = escapeRegExp(name);
+        return new RegExp(`\\b(?:named\\s+insured|mailing\\s+address|insured\\s+address|address)\\b(?:(?!\\n).){0,160}\\b(?:${namePattern}|${code})\\b\\s+\\d{5}(?:-\\d{4})?\\b`, "i").test(haystack);
+      },
+    },
+    {
+      basis: "vehicle garaging/registration state",
+      matches: (code, name, haystack) => {
+        const namePattern = escapeRegExp(name);
+        return new RegExp(`\\b(?:garag(?:ed|ing)|registration|registered|principally\\s+garaged)\\b(?:(?!\\n).){0,120}\\b(?:${namePattern}|${code})\\b`, "i").test(haystack);
+      },
+    },
+    {
+      basis: "claim/loss location",
+      matches: (code, name, haystack) => {
+        const namePattern = escapeRegExp(name);
+        return new RegExp(`\\b(?:claim|loss|accident|date\\s+of\\s+loss|loss\\s+location)\\b(?:(?!\\n).){0,120}\\b(?:${namePattern}|${code})\\b`, "i").test(haystack);
+      },
+    },
+  ];
+
+  for (const detector of detectors) {
+    for (const [code, name] of Object.entries(STATE_NAMES)) {
+      if (detector.matches(code, name, text)) {
+        return {
+          state: code,
+          confidence: "high",
+          basis: `Jurisdiction established from uploaded policy package: ${detector.basis}.`,
+        };
+      }
+    }
+  }
+
+  return null;
 }
 
 function getVerifiedLegalCitationCount(review: PolicyRightsReviewModel): number {
@@ -790,6 +992,7 @@ function formatCitationIndexItem(citation: ImmutablePolicyCitation): string {
     `${citation.id}: ${citation.title}`,
     `Source: ${formatCitationSource(citation.source)}`,
     citation.sourceType ? `Source type: ${citation.sourceType}` : null,
+    `Authority tier: ${formatLabel(citation.sourceAuthorityTier)}`,
     citation.locator ? `Locator: ${citation.locator}` : null,
     citation.url ? `URL: ${citation.url}` : null,
     citation.retrievedAt ? `Retrieved: ${citation.retrievedAt}` : null,

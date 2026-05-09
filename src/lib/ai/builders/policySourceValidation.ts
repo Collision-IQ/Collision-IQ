@@ -1,4 +1,4 @@
-import type { ImmutablePolicyCitation, PolicyRightsReviewModel } from "@/lib/ai/types/policyRightsReview";
+import type { ImmutablePolicyCitation, PolicyRightsReviewModel, SourceAuthorityTier } from "@/lib/ai/types/policyRightsReview";
 
 const STATE_NAMES: Record<string, string> = {
   AL: "Alabama",
@@ -54,7 +54,13 @@ const STATE_NAMES: Record<string, string> = {
 };
 
 const WEAK_LEGAL_SOURCE_PATTERN =
-  /(youtube|youtu\.be|facebook|instagram|tiktok|x\.com|twitter|law\s*firm|attorneys?|lawyers?|legal\s+blog|blog|substack|medium|linkedin|justia|avvo|nolo|findlaw|news\s+article|general\s+article|article\s+by|overview|explainer|commentary)/i;
+  /(youtube|youtu\.be|facebook|instagram|tiktok|x\.com|twitter|law\s*firm|attorneys?|lawyers?|legal\s+blog|blog|substack|medium|linkedin|justia|avvo|nolo|findlaw|news\s+article|general\s+article|article\s+by|overview|explainer|commentary|repairer|body\s+shop|collision\s+repair|wreck\s+check)/i;
+
+const INDUSTRY_CONTEXT_PATTERN =
+  /\b(SCRS|DEG|I-?CAR|OEM|manufacturer|position statement|trade association|trade article)\b/i;
+
+const LEGAL_TOPIC_PATTERN =
+  /\b(DOI|department of insurance|insurance department|insurance commissioner|statute|statutes|code|administrative code|regulation|regulations|bulletin|notice|consumer rights|case law|court opinion|opinion)\b/i;
 
 export function getClaimStateCodeFromJurisdiction(jurisdiction: PolicyRightsReviewModel["jurisdiction"]): string | null {
   if (jurisdiction.confidence !== "high") {
@@ -77,14 +83,16 @@ export function isVerifiedLegalCitation(
   if (citation.source !== "VerifiedRegulationsDatabase" && citation.source !== "DriveLawFolder") {
     return false;
   }
+  if (citation.sourceAuthorityTier !== "LEGAL_AUTHORITY") {
+    return false;
+  }
 
   const citationStateCode = extractStateCode(citation.jurisdiction ?? citation.title);
   if (citationStateCode !== claimStateCode) {
     return false;
   }
 
-  const haystack = `${citation.title} ${citation.url ?? ""} ${citation.locator ?? ""}`;
-  return isOfficialLegalSource(haystack) && !isWeakLegalSource(haystack);
+  return isOfficialLegalSource(citation) && !isWeakLegalSource(formatCitationAuthorityText(citation));
 }
 
 export function isVerifiedPolicyCitation(citation: ImmutablePolicyCitation): boolean {
@@ -98,17 +106,56 @@ export function isWeakLegalSource(value: string): boolean {
   return WEAK_LEGAL_SOURCE_PATTERN.test(value);
 }
 
-export function isOfficialLegalSource(value: string): boolean {
+export function classifySourceAuthorityTier(params: {
+  title: string;
+  sourceType?: ImmutablePolicyCitation["sourceType"];
+  url?: string;
+  locator?: string;
+}): SourceAuthorityTier {
+  const value = formatAuthorityText(params.title, params.url, params.locator);
+
+  if (/policy|declarations|endorsement|coverage/i.test(params.title)) {
+    return "POLICY_CONTRACT";
+  }
+
+  if (params.sourceType === "oem" || /\b(oem|manufacturer|position statement)\b/i.test(value)) {
+    return "OEM_PROCEDURE";
+  }
+
+  if (isWeakLegalSource(value)) {
+    return "REJECTED_FOR_LEGAL_USE";
+  }
+
+  if (isAcceptedOfficialLegalAuthority(params)) {
+    return "LEGAL_AUTHORITY";
+  }
+
+  if (INDUSTRY_CONTEXT_PATTERN.test(value)) {
+    return "INDUSTRY_CONTEXT";
+  }
+
+  if (LEGAL_TOPIC_PATTERN.test(value)) {
+    return "REJECTED_FOR_LEGAL_USE";
+  }
+
+  return "INDUSTRY_CONTEXT";
+}
+
+export function isOfficialLegalSource(value: string | ImmutablePolicyCitation): boolean {
   if (!value) {
     return false;
   }
 
-  const lower = value.toLowerCase();
-  if (/\.gov\b/.test(lower) || /courts?\./.test(lower) || /legislature\./.test(lower) || /insurance\.[a-z]{2}\.gov/.test(lower)) {
-    return true;
+  if (typeof value !== "string") {
+    return isAcceptedOfficialLegalAuthority({
+      title: value.title,
+      sourceType: value.sourceType,
+      url: value.url,
+      locator: value.locator,
+    });
   }
 
-  return /department of insurance|insurance department|commissioner|statute|regulation|administrative code|court of appeals|supreme court/i.test(value);
+  return isAcceptedOfficialLegalAuthority({ title: value });
 }
 
 export function buildJurisdictionUnavailableMessage(): string {
@@ -138,4 +185,38 @@ function extractStateCode(value?: string | null): string | null {
   }
 
   return null;
+}
+
+function isAcceptedOfficialLegalAuthority(params: {
+  title: string;
+  sourceType?: ImmutablePolicyCitation["sourceType"];
+  url?: string;
+  locator?: string;
+}): boolean {
+  const value = formatAuthorityText(params.title, params.url, params.locator);
+  if (isWeakLegalSource(value) || INDUSTRY_CONTEXT_PATTERN.test(value)) {
+    return false;
+  }
+
+  const lower = value.toLowerCase();
+  const hasOfficialHost =
+    /\.gov(?:\/|$|\b)/.test(lower) ||
+    /\b(?:legislature|legis|courts?|judiciary)\.[a-z]{2}\.gov\b/.test(lower) ||
+    /\b(?:flsenate|malegislature|nyassembly|capitol\.texas)\.gov\b/.test(lower);
+  const hasOfficialLegalMarker =
+    /\bdepartment of insurance\b|\binsurance department\b|\binsurance commissioner\b|\bdoi\b/i.test(value) ||
+    /\bstatutes?\b|\badministrative code\b|\badmin(?:istrative)?\.?\s*code\b|\bregulations?\b/i.test(value) ||
+    /\bbulletins?\b|\bnotices?\b/i.test(value);
+  const hasExplicitCaseLaw =
+    /\b(case law|court opinion|judicial opinion|appellate opinion)\b/i.test(value);
+
+  return hasOfficialHost && (hasOfficialLegalMarker || hasExplicitCaseLaw);
+}
+
+function formatCitationAuthorityText(citation: ImmutablePolicyCitation): string {
+  return formatAuthorityText(citation.title, citation.url, citation.locator);
+}
+
+function formatAuthorityText(title: string, url?: string, locator?: string): string {
+  return `${title} ${url ?? ""} ${locator ?? ""}`;
 }

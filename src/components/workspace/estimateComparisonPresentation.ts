@@ -60,7 +60,7 @@ export function dedupeEstimateComparisonRationales(
           return note;
         }
 
-        return `Same rationale as earlier: ${shortenComparisonNote(note)}`;
+        return `Related estimate rationale: ${shortenComparisonNote(note)}`;
       });
 
     return notes.join(" ") === row.notes.join(" ") ? row : { ...row, notes };

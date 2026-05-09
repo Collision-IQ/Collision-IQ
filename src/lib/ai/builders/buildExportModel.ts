@@ -202,6 +202,9 @@ export type ComparableListing = {
   trim?: string;
   source?: string;
   title?: string;
+  location?: string;
+  url?: string;
+  dateAccessed?: string;
 };
 
 export type JDPowerValuation = {
@@ -227,11 +230,7 @@ export type ComputedAcvResult = {
   reasoning: string;
 };
 
-const ESTIMATE_TOTAL_ACV_FALLBACK_LOW_OFFSET = 3500;
-const ESTIMATE_TOTAL_ACV_FALLBACK_HIGH_OFFSET = 2500;
 const DV_FALLBACK_RANGE = { low: 500, high: 2500 } as const;
-const MARKET_SEARCH_UNAVAILABLE_MESSAGE =
-  "Market preview unavailable because live comparable search did not complete.";
 
 const GENERIC_PLACEHOLDER_FIELD_PATTERN =
   /^(?:unknown|unspecified|n\/a|na|none|null|undefined|not available|not provided|vehicle details are still limited in the current material\.?|vehicle details still limited in the current material\.?|not clearly supported(?: in the current material)?\.?)$/i;
@@ -1366,7 +1365,7 @@ export function buildExportValuationPreviewSummary(
 ): ExportValuationPreviewSummary {
   return {
     acv: summarizeExportValuationBand({
-      label: "ACV preview",
+      label: "Market Preview",
       status: valuation.acvStatus,
       value: valuation.acvValue,
       range: valuation.acvRange,
@@ -3026,18 +3025,7 @@ function buildValuation(
   )
     ? undefined
     : rawChatAcvPreviewRange;
-  const rawEstimateTotalFallbackAcvRange = chatAcvPreviewRange
-    ? undefined
-    : hasKnownVehicleMarketInputs
-      ? undefined
-      : resolveEstimateTotalAcvFallbackRange(reportFields.estimateTotal);
-  const estimateTotalFallbackAcvRange = isFallbackMateriallyBelowLikelyMarket(
-    rawEstimateTotalFallbackAcvRange,
-    likelyStructuredAcvRange
-  )
-    ? undefined
-    : rawEstimateTotalFallbackAcvRange;
-  const acvPreviewRange = chatAcvPreviewRange ?? estimateTotalFallbackAcvRange;
+  const acvPreviewRange = chatAcvPreviewRange;
   const dvPreviewRange = resolveValuationPreviewRange({
     status:
       chatValuation.dvStatus === "provided" && typeof chatValuation.dvValue === "number"
@@ -3067,12 +3055,12 @@ function buildValuation(
   const resolvedDvPreviewRange = dvPreviewRange ?? dvFallbackRange;
 
   const canonicalAcvMissingInputs =
-    acvPreviewRange && !estimateTotalFallbackAcvRange
+    acvPreviewRange
       ? []
       : scrubValuationMissingInputs(
           chatValuation.acvMissingInputs.length
             ? chatValuation.acvMissingInputs
-            : ["vehicle condition", "mileage", "trim/options", "market comparable data"],
+            : ["vehicle condition", "mileage", "trim/submodel", "ZIP or local market location", "three local comparable vehicle ads"],
           reportFields
         );
   const dvStatus = resolvedDvPreviewRange ? "estimated_range" : "not_determinable";
@@ -3089,12 +3077,10 @@ function buildValuation(
   return {
     ...chatValuation,
     acvStatus: acvPreviewRange ? "estimated_range" : "not_determinable",
-    acvValue: undefined,
+    acvValue: computedAcv?.sourceType === "comps" ? computedAcv.acvValue : undefined,
     acvRange: acvPreviewRange,
     acvConfidence: computedAcv
       ? computedAcv.confidence
-      : estimateTotalFallbackAcvRange
-        ? "low"
       : normalizeValuationConfidence(
           acvPreviewRange ? "estimated_range" : "not_determinable",
           chatValuation.acvConfidence,
@@ -3103,17 +3089,15 @@ function buildValuation(
     acvCompCount: computedAcv?.sourceType === "comps" ? computedAcv.compCount : undefined,
     acvSourceType: computedAcv?.sourceType ?? (acvPreviewRange ? "fallback" : "unavailable"),
     acvReasoning: computedAcv
-      ? `${computedAcv.reasoning} This is a market preview, not a formal ACV appraisal.`
-      : estimateTotalFallbackAcvRange
-        ? `Directional preview only. No stronger market valuation support was preserved, so the current estimate total is being used as a rough anchor with a conservative fallback band of -$${ESTIMATE_TOTAL_ACV_FALLBACK_LOW_OFFSET.toLocaleString("en-US")} / +$${ESTIMATE_TOTAL_ACV_FALLBACK_HIGH_OFFSET.toLocaleString("en-US")}.`
+      ? `${computedAcv.reasoning} This is a market preview, not a formal actual cash value appraisal.`
       : acvPreviewRange
         ? sanitizeReason(
             chatValuation.acvReasoning,
             "This is a market preview band based on the current file set."
           ) || "This is a market preview band based on the current file set."
       : hasKnownVehicleMarketInputs || Boolean(likelyStructuredAcvRange)
-          ? MARKET_SEARCH_UNAVAILABLE_MESSAGE
-          : sanitizeReason(chatValuation.acvReasoning, "Market preview is not supportable from the current documents.") ||
+          ? buildMarketPreviewUnavailableReason(reportFields, report, analysis)
+      : sanitizeReason(chatValuation.acvReasoning, "Market preview is not supportable from the current documents.") ||
             "Market preview is not supportable from the current documents.",
     acvMissingInputs: canonicalAcvMissingInputs,
     dvStatus,
@@ -3142,21 +3126,6 @@ function buildValuation(
   };
 }
 
-function resolveEstimateTotalAcvFallbackRange(
-  estimateTotal?: number
-): { low: number; high: number } | undefined {
-  if (typeof estimateTotal !== "number" || !Number.isFinite(estimateTotal) || estimateTotal <= 0) {
-    return undefined;
-  }
-
-  const range = {
-    low: Math.max(1, Math.round(estimateTotal - ESTIMATE_TOTAL_ACV_FALLBACK_LOW_OFFSET)),
-    high: Math.round(estimateTotal + ESTIMATE_TOTAL_ACV_FALLBACK_HIGH_OFFSET),
-  };
-
-  return isSaneRange(range, 250000) ? range : undefined;
-}
-
 function hasSpecificVehicleValuationIdentity(params: {
   vehicle?: VehicleIdentity;
   mileage?: number;
@@ -3166,6 +3135,65 @@ function hasSpecificVehicleValuationIdentity(params: {
   const hasTrim = Boolean(vehicle?.trim?.trim());
 
   return hasYearMakeModel && hasTrim;
+}
+
+function buildMarketPreviewUnavailableReason(
+  reportFields: ExportModel["reportFields"],
+  report: RepairIntelligenceReport | null,
+  analysis: AnalysisResult | null
+): string {
+  const searchState = getMarketPreviewSearchState(report, analysis);
+  if (searchState?.state === "failed") {
+    return `Market Preview unavailable: ${searchState.failureReason || formatMarketPreviewFailureReason(searchState.status)} Status: ${searchState.status}. Comparable ads preserved: ${searchState.comparableCount ?? 0}. Valid prices: ${searchState.validPriceCount ?? 0}.`;
+  }
+  const vehicle = reportFields.vehicle;
+  const available = [
+    vehicle?.year ? `year ${vehicle.year}` : null,
+    vehicle?.make ? `make ${vehicle.make}` : null,
+    vehicle?.model ? `model ${vehicle.model}` : null,
+    vehicle?.trim ? `trim ${vehicle.trim}` : null,
+    typeof reportFields.mileage === "number" ? `mileage ${reportFields.mileage.toLocaleString("en-US")}` : null,
+  ].filter(Boolean).join(", ");
+  const preservedComps = extractStructuredValuationData(report, analysis).comparableListings ?? [];
+  if (preservedComps.length > 0 && preservedComps.length < 3) {
+    return `Market Preview limited: ${preservedComps.length} local comparable ad${preservedComps.length === 1 ? " was" : "s were"} found and preserved, but fewer than three usable comps were available after year, make, model, trim, mileage, and local-market filtering. Show the comp source, asking price, mileage, location, URL or title, and date accessed, but do not treat the preview as reliable until more local support is available.`;
+  }
+  return `Market Preview unavailable: the report has ${available || "limited vehicle identity data"}, but no live local comparable ads or structured valuation comps were preserved for this generation. The system must retrieve up to three local comparable ads with source, asking price, mileage, location, URL or title, and date accessed before showing a market preview value.`;
+}
+
+function getMarketPreviewSearchState(
+  report: RepairIntelligenceReport | null,
+  analysis: AnalysisResult | null
+): {
+  state?: "idle" | "searching" | "completed" | "failed";
+  status?: string;
+  failureReason?: string;
+  comparableCount?: number;
+  validPriceCount?: number;
+} | null {
+  const candidates = [report, analysis, report?.analysis].filter(Boolean) as Array<Record<string, unknown>>;
+  for (const candidate of candidates) {
+    const state = asRecord(candidate.marketPreviewSearch);
+    if (state) return state as ReturnType<typeof getMarketPreviewSearchState>;
+  }
+  return null;
+}
+
+function formatMarketPreviewFailureReason(status: string | undefined): string {
+  switch (status) {
+    case "provider_not_configured":
+      return "provider not configured";
+    case "vehicle_identifiers_missing":
+      return "vehicle identifiers missing";
+    case "no_results":
+      return "no comparable ads returned";
+    case "timeout":
+      return "search timed out";
+    case "parsing_failed":
+      return "results were returned but usable prices could not be parsed";
+    default:
+      return "live comparable search failed";
+  }
 }
 
 function hasVehicleMarketIdentity(params: {
@@ -3315,7 +3343,7 @@ export function computeACVFromComps(params: {
     })
     .filter((listing) => Number.isFinite(listing.adjustedPrice) && listing.adjustedPrice > 500);
 
-  if (adjusted.length < 3) {
+  if (adjusted.length < 2) {
     return null;
   }
 
@@ -3351,14 +3379,25 @@ export function computeACVFromComps(params: {
         : "trim normalized conservatively"
       : "target trim not confirmed",
   ];
+  const compSummary = adjusted
+    .slice(0, 3)
+    .map((listing, index) => {
+      const price = formatCompactCurrency(listing.price);
+      const mileage = typeof listing.mileage === "number" ? `${listing.mileage.toLocaleString("en-US")} miles` : "mileage not listed";
+      const location = listing.location ? `, ${listing.location}` : "";
+      const source = listing.source || listing.title || listing.url || "market listing";
+      const accessed = listing.dateAccessed ? `, accessed ${listing.dateAccessed}` : "";
+      return `Comp ${index + 1}: ${source}, ${price}, ${mileage}${location}${accessed}`;
+    })
+    .join("; ");
 
   return {
     acvRange: range,
     acvValue: median,
-    confidence,
+    confidence: adjusted.length < 3 ? "low" : confidence,
     compCount: adjusted.length,
     sourceType: "comps",
-    reasoning: `Market preview derived from ${notes.join("; ")}. Confidence level: ${confidence}.`,
+    reasoning: `Market preview median derived from ${notes.join("; ")}. ${compSummary ? `${compSummary}. ` : ""}Confidence level: ${adjusted.length < 3 ? "low because fewer than three valid comps were available" : confidence}.`,
   };
 }
 
@@ -3404,6 +3443,9 @@ type NormalizedComparableListing = {
   trim?: string;
   source?: string;
   title?: string;
+  location?: string;
+  url?: string;
+  dateAccessed?: string;
 };
 
 function extractStructuredValuationData(
@@ -3475,6 +3517,9 @@ function coerceComparableListings(value: unknown): ComparableListing[] {
       trim: coerceStringValue(entry.trim),
       source: coerceStringValue(entry.source ?? entry.sourceType ?? entry.provider),
       title: coerceStringValue(entry.title ?? entry.label ?? entry.name),
+      location: coerceStringValue(entry.location ?? entry.market),
+      url: coerceStringValue(entry.url ?? entry.link),
+      dateAccessed: coerceStringValue(entry.dateAccessed ?? entry.accessedAt ?? entry.retrievedAt),
     }))
     .filter((entry) => typeof (entry.price ?? entry.askingPrice) === "number");
 }
@@ -3509,6 +3554,9 @@ function normalizeComparableListing(
     trim: cleanVehicleDescriptor(listing.trim),
     source: cleanDisplayLabel(listing.source),
     title: cleanDisplayLabel(listing.title),
+    location: cleanDisplayLabel(listing.location),
+    url: cleanDisplayLabel(listing.url),
+    dateAccessed: cleanDisplayLabel(listing.dateAccessed),
   };
 }
 
