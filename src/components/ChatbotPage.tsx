@@ -3799,7 +3799,7 @@ function MetricCard({
       }`}
     >
       <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{label}</div>
-      <div className={`mt-1 min-w-0 font-medium text-foreground ${detailClassName || "text-sm"}`}>{value}</div>
+      <div className={`mt-1 min-w-0 break-words font-medium text-foreground ${detailClassName || "text-sm"}`}>{value}</div>
     </div>
   );
 }
@@ -4367,11 +4367,11 @@ function LineStatusCard() {
   return (
     <section className="mt-5 space-y-3 rounded-[24px] border border-red-500/18 bg-gradient-to-br from-red-500/[0.08] via-[#C65A2A]/[0.05] to-muted p-4 shadow-[0_18px_40px_rgba(0,0,0,0.10)] dark:shadow-[0_18px_40px_rgba(0,0,0,0.18)]">
       <div className="text-[10px] uppercase tracking-[0.22em] text-red-200/72">Decision Card</div>
-      <div className="rounded-2xl bg-card/70 px-3.5 py-3">
+      <div className="min-w-0 rounded-2xl bg-card/70 px-3.5 py-3">
         <div className="text-sm font-semibold leading-5 text-foreground">
           [Red] {lineStatus.title.toUpperCase()}
         </div>
-        <div className="mt-2 text-[13px] leading-5 text-muted-foreground">
+        <div className="mt-2 break-words text-[13px] leading-5 text-muted-foreground">
           <span className="font-semibold text-foreground">Impact:</span> {lineStatus.impact}
         </div>
         <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
@@ -4420,7 +4420,7 @@ function GapSummaryCard({
       <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
         Financial View
       </div>
-      <div className="rounded-2xl bg-card/70 px-3.5 py-3">
+      <div className="min-w-0 rounded-2xl bg-card/70 px-3.5 py-3">
         <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           Directional Posture
         </div>
@@ -4435,14 +4435,14 @@ function GapSummaryCard({
         {hasValuationPosture && financialSignals.length > 0 ? (
           <div className="mt-2 space-y-2">
             {financialSignals.map((item) => (
-              <div key={item} className="flex gap-2 text-[13px] leading-5 text-muted-foreground">
+              <div key={item} className="flex min-w-0 gap-2 text-[13px] leading-5 text-muted-foreground">
                 <span className="pt-[1px] text-orange-200/85">&bull;</span>
-                <span>{item}</span>
+                <span className="min-w-0 break-words">{item}</span>
               </div>
             ))}
           </div>
         ) : (
-          <div className="mt-2 text-[13px] leading-5 text-muted-foreground">
+          <div className="mt-2 break-words text-[13px] leading-5 text-muted-foreground">
             Not yet quantified in the canonical export model.
           </div>
         )}

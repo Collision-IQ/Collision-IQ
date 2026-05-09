@@ -40,6 +40,8 @@ import type {
   DriveRetrievalResult,
 } from "@/lib/ai/contracts/driveRetrievalContract";
 import { mergeVehicleIdentity, normalizeVehicleIdentity } from "@/lib/ai/vehicleContext";
+import { extractEstimateFacts } from "@/lib/ai/extractors/extractEstimateFacts";
+import { resolveStateFromZip } from "@/lib/policyLegal/stateFromZip";
 import {
   analyzeEstimateOperations,
   inferImpactSide,
@@ -472,18 +474,54 @@ type MarketPreviewReport = RepairIntelligenceReport & {
   valuationData?: {
     comparableListings?: MarketPreviewComparableAd[];
   };
+  marketPreview?: {
+    status: "completed" | "failed";
+    comps: MarketPreviewComparableAd[];
+    median?: number;
+    failureReason?: string;
+    dateAccessed: string;
+  };
   marketPreviewSearch?: {
     attempted: boolean;
     state: "idle" | "searching" | "completed" | "failed";
-    status: "completed" | "provider_not_configured" | "vehicle_identifiers_missing" | "no_results" | "timeout" | "parsing_failed" | "failed";
+    status: "completed" | "provider_not_configured" | "vehicle_identifiers_missing" | "location_missing" | "no_results" | "timeout" | "parsing_failed" | "failed";
     query?: string;
     widenedQuery?: string;
     failureReason?: string;
     dateAccessed: string;
     comparableCount: number;
     validPriceCount: number;
+    medianValue?: number;
+    rawResultCount?: number;
   };
 };
+
+type MarketPreviewSearchInputs = {
+  vehicle: VehicleIdentity | null;
+  mileage?: number;
+  zip?: string;
+  state?: string;
+};
+
+type MarketPreviewSearchQuery = {
+  query: string;
+  label: "trim_zip" | "trim_radius_zip" | "model_city" | "cars_site" | "autotrader_site" | "cargurus_site";
+};
+
+type MarketPreviewSearchResult = {
+  comps: MarketPreviewComparableAd[];
+  rawResultCount: number;
+  query: string;
+  queryLabel: MarketPreviewSearchQuery["label"];
+};
+
+const MARKET_PREVIEW_PREFERRED_DOMAINS = [
+  "cars.com",
+  "autotrader.com",
+  "cargurus.com",
+  "carfax.com",
+  "truecar.com",
+] as const;
 
 async function attachMarketPreviewComparables(params: {
   report: RepairIntelligenceReport;
@@ -491,15 +529,38 @@ async function attachMarketPreviewComparables(params: {
   userIntent: string;
 }): Promise<RepairIntelligenceReport> {
   const dateAccessed = new Date().toISOString().slice(0, 10);
-  const vehicle = normalizeVehicleIdentity(params.report.vehicle);
-  const mileage = extractMarketPreviewMileage(params.report, params.uploadedAttachments, params.userIntent);
-  const location = extractMarketPreviewLocation(params.uploadedAttachments, params.userIntent);
+  const inputs = extractMarketPreviewSearchInputs(
+    params.report,
+    params.uploadedAttachments,
+    params.userIntent
+  );
+  const vehicle = inputs.vehicle;
+  const providerConfigured = Boolean(process.env.SERPER_API_KEY?.trim());
+
+  console.info("marketPreview.inputs.extracted", {
+    vehicleInputs: {
+      year: vehicle?.year,
+      make: vehicle?.make,
+      model: vehicle?.model,
+      trim: vehicle?.trim,
+      vin: vehicle?.vin,
+      mileage: inputs.mileage,
+      ownerZip: inputs.zip,
+      state: inputs.state,
+    },
+    zipSelected: inputs.zip,
+    searchRadiusMiles: 150,
+    providerConfigured,
+  });
 
   if (!vehicle?.year || !vehicle.make || !vehicle.model) {
     console.info("marketPreview.search.failed", {
       reason: "vehicle_identifiers_missing",
+      providerConfigured,
       compCount: 0,
       validPriceCount: 0,
+      medianValue: null,
+      finalStatus: "failed",
     });
     return {
       ...params.report,
@@ -511,6 +572,13 @@ async function attachMarketPreviewComparables(params: {
         dateAccessed,
         comparableCount: 0,
         validPriceCount: 0,
+        rawResultCount: 0,
+      },
+      marketPreview: {
+        status: "failed",
+        comps: [],
+        failureReason: "Year, make, and model were not all available for a local comparable search.",
+        dateAccessed,
       },
     } as MarketPreviewReport;
   }
@@ -519,8 +587,12 @@ async function attachMarketPreviewComparables(params: {
   if (!apiKey) {
     console.info("marketPreview.search.failed", {
       reason: "provider_not_configured",
+      providerConfigured: false,
+      zipSelected: inputs.zip,
       compCount: 0,
       validPriceCount: 0,
+      medianValue: null,
+      finalStatus: "failed",
     });
     return {
       ...params.report,
@@ -528,34 +600,82 @@ async function attachMarketPreviewComparables(params: {
         attempted: true,
         state: "failed",
         status: "provider_not_configured",
-        failureReason: "SERPER_API_KEY is not configured, so live comparable ad retrieval could not run.",
+        failureReason: "Market Preview unavailable: the live comparable search provider is not configured for this environment.",
         dateAccessed,
         comparableCount: 0,
         validPriceCount: 0,
+        rawResultCount: 0,
+      },
+      marketPreview: {
+        status: "failed",
+        comps: [],
+        failureReason: "Market Preview unavailable: the live comparable search provider is not configured for this environment.",
+        dateAccessed,
       },
     } as MarketPreviewReport;
   }
 
-  const baseQuery = buildMarketPreviewQuery({ vehicle, mileage, location, includeTrim: true });
-  const widenedQuery = vehicle.trim
-    ? buildMarketPreviewQuery({ vehicle, mileage, location, includeTrim: false })
-    : null;
+  if (!inputs.zip) {
+    console.info("marketPreview.search.failed", {
+      reason: "location_missing",
+      providerConfigured: true,
+      vehicle: [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" "),
+      compCount: 0,
+      validPriceCount: 0,
+      medianValue: null,
+      finalStatus: "failed",
+    });
+    return {
+      ...params.report,
+      marketPreviewSearch: {
+        attempted: false,
+        state: "failed",
+        status: "location_missing",
+        failureReason: "Owner or insured ZIP was not available in the uploaded estimate, so a 150-mile local comparable search could not run.",
+        dateAccessed,
+        comparableCount: 0,
+        validPriceCount: 0,
+        rawResultCount: 0,
+      },
+      marketPreview: {
+        status: "failed",
+        comps: [],
+        failureReason: "Owner or insured ZIP was not available in the uploaded estimate, so a 150-mile local comparable search could not run.",
+        dateAccessed,
+      },
+    } as MarketPreviewReport;
+  }
+
+  const queries = buildMarketPreviewQueries({ vehicle, zip: inputs.zip, state: inputs.state });
+  const baseQuery = queries[0]?.query ?? "";
+  const widenedQuery = queries[1]?.query;
 
   console.info("marketPreview.search.started", {
     query: baseQuery,
-    widenedQuery,
+    fallbackQueries: queries.slice(1).map((entry) => entry.query),
+    providerConfigured: true,
     vehicle: [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" "),
-    mileage,
-    location,
+    mileage: inputs.mileage,
+    zipSelected: inputs.zip,
+    state: inputs.state,
+    searchRadiusMiles: 150,
   });
 
   try {
-    const firstPass = await runMarketPreviewSearch(baseQuery, apiKey, dateAccessed, vehicle, location);
-    const searchResult = firstPass.comps.length > 0 || !widenedQuery
-      ? firstPass
-      : await runMarketPreviewSearch(widenedQuery, apiKey, dateAccessed, vehicle, location);
+    const searchResult = await runMarketPreviewSearchSequence({
+      queries,
+      apiKey,
+      dateAccessed,
+      vehicle,
+      fallbackLocation: inputs.zip,
+    });
     const selected = dedupeMarketPreviewComparables(searchResult.comps).slice(0, 3);
-    const validPriceCount = selected.filter((comp) => typeof comp.price === "number" || typeof comp.askingPrice === "number").length;
+    const validPrices = selected
+      .map((comp) => comp.price ?? comp.askingPrice)
+      .filter((price): price is number => typeof price === "number" && Number.isFinite(price) && price > 500)
+      .sort((left, right) => left - right);
+    const validPriceCount = validPrices.length;
+    const medianValue = validPriceCount >= 2 ? computeMarketPreviewMedian(validPrices) : undefined;
     const failedStatus =
       searchResult.comps.length === 0 && searchResult.rawResultCount === 0
         ? "no_results"
@@ -564,10 +684,24 @@ async function attachMarketPreviewComparables(params: {
           : null;
 
     if (failedStatus) {
+      const failureReason = buildMarketPreviewSearchFailureReason({
+        status: failedStatus,
+        rawResultCount: searchResult.rawResultCount,
+        parsedCompCount: searchResult.comps.length,
+        validPriceCount,
+        query: searchResult.query,
+      });
       console.info("marketPreview.search.failed", {
         reason: failedStatus,
+        providerConfigured: true,
+        queryUsed: searchResult.query,
+        queryLabel: searchResult.queryLabel,
+        rawResultCount: searchResult.rawResultCount,
+        parsedCompCount: searchResult.comps.length,
         compCount: selected.length,
         validPriceCount,
+        medianValue: medianValue ?? null,
+        finalStatus: "failed",
       });
       return {
         ...params.report,
@@ -576,14 +710,20 @@ async function attachMarketPreviewComparables(params: {
           state: "failed",
           status: failedStatus,
           query: baseQuery,
-          widenedQuery: firstPass.comps.length === 0 && widenedQuery ? widenedQuery : undefined,
+          widenedQuery: searchResult.query !== baseQuery ? searchResult.query : widenedQuery,
           dateAccessed,
           comparableCount: selected.length,
           validPriceCount,
-          failureReason:
-            failedStatus === "no_results"
-              ? "No comparable vehicle ads were returned for the local market query."
-              : "Comparable results were returned, but no usable asking prices could be parsed.",
+          medianValue,
+          rawResultCount: searchResult.rawResultCount,
+          failureReason,
+        },
+        marketPreview: {
+          status: "failed",
+          comps: selected,
+          median: medianValue,
+          failureReason,
+          dateAccessed,
         },
       } as MarketPreviewReport;
     }
@@ -591,8 +731,16 @@ async function attachMarketPreviewComparables(params: {
     console.info("marketPreview.search.completed", {
       compCount: selected.length,
       validPriceCount,
-      query: baseQuery,
-      widened: firstPass.comps.length === 0 && Boolean(widenedQuery),
+      medianValue: medianValue ?? null,
+      queryUsed: searchResult.query,
+      queryLabel: searchResult.queryLabel,
+      providerConfigured: true,
+      rawResultCount: searchResult.rawResultCount,
+      parsedCompCount: searchResult.comps.length,
+      zipSelected: inputs.zip,
+      state: inputs.state,
+      finalStatus: "completed",
+      widened: searchResult.query !== baseQuery,
     });
 
     return {
@@ -601,23 +749,37 @@ async function attachMarketPreviewComparables(params: {
         ...((params.report as MarketPreviewReport).valuationData ?? {}),
         comparableListings: selected,
       },
+      marketPreview: {
+        status: "completed",
+        comps: selected,
+        median: medianValue,
+        dateAccessed,
+      },
       marketPreviewSearch: {
         attempted: true,
         state: "completed",
         status: "completed",
         query: baseQuery,
-        widenedQuery: firstPass.comps.length === 0 && widenedQuery ? widenedQuery : undefined,
+        widenedQuery: searchResult.query !== baseQuery ? searchResult.query : widenedQuery,
         dateAccessed,
         comparableCount: selected.length,
         validPriceCount,
+        medianValue,
+        rawResultCount: searchResult.rawResultCount,
       },
     } as MarketPreviewReport;
   } catch (error) {
     const isTimeout = error instanceof Error && error.name === "AbortError";
     console.info("marketPreview.search.failed", {
       reason: isTimeout ? "timeout" : "failed",
+      providerConfigured: true,
+      queryUsed: baseQuery,
+      rawResultCount: 0,
+      parsedCompCount: 0,
       compCount: 0,
       validPriceCount: 0,
+      medianValue: null,
+      finalStatus: "failed",
       message: error instanceof Error ? error.message : "Unknown market preview search failure",
     });
     return {
@@ -630,38 +792,130 @@ async function attachMarketPreviewComparables(params: {
         dateAccessed,
         comparableCount: 0,
         validPriceCount: 0,
+        rawResultCount: 0,
         failureReason: isTimeout
           ? "Market comparable search timed out before usable results were returned."
           : error instanceof Error ? error.message : "Live comparable search failed.",
+      },
+      marketPreview: {
+        status: "failed",
+        comps: [],
+        failureReason: isTimeout
+          ? "Market comparable search timed out before usable results were returned."
+          : error instanceof Error ? error.message : "Live comparable search failed.",
+        dateAccessed,
       },
     } as MarketPreviewReport;
   }
 }
 
-function buildMarketPreviewQuery(params: {
+function buildMarketPreviewQueries(params: {
   vehicle: VehicleIdentity;
-  mileage?: number;
-  location?: string;
-  includeTrim: boolean;
-}) {
-  return [
+  zip: string;
+  state?: string;
+}): MarketPreviewSearchQuery[] {
+  const trimIdentity = [
     params.vehicle.year,
     params.vehicle.make,
     params.vehicle.model,
-    params.includeTrim ? params.vehicle.trim : null,
-    "for sale",
-    params.mileage ? `${Math.round(params.mileage).toLocaleString("en-US")} miles` : null,
-    params.location ?? null,
+    params.vehicle.trim,
   ].filter(Boolean).join(" ");
+  const modelIdentity = [
+    params.vehicle.year,
+    params.vehicle.make,
+    params.vehicle.model,
+  ].filter(Boolean).join(" ");
+  const cityState = resolveMarketPreviewCityState(params.zip, params.state);
+
+  return [
+    { label: "trim_zip", query: `${trimIdentity} for sale ${params.zip}` },
+    { label: "trim_radius_zip", query: `${trimIdentity} for sale within 150 miles of ${params.zip}` },
+    { label: "model_city", query: `${modelIdentity} for sale near ${cityState}` },
+    { label: "cars_site", query: `site:cars.com ${trimIdentity} for sale ${params.zip}` },
+    { label: "autotrader_site", query: `site:autotrader.com ${trimIdentity} for sale ${params.zip}` },
+    { label: "cargurus_site", query: `site:cargurus.com ${trimIdentity} for sale ${params.zip}` },
+  ];
+}
+
+function resolveMarketPreviewCityState(zip: string, state?: string): string {
+  if (zip === "19380") return "West Chester PA";
+  if (zip === "19096") return "Wynnewood PA";
+  return state ? `${zip} ${state}` : zip;
+}
+
+function buildMarketPreviewSearchFailureReason(params: {
+  status: "no_results" | "parsing_failed";
+  rawResultCount: number;
+  parsedCompCount: number;
+  validPriceCount: number;
+  query: string;
+}): string {
+  if (params.status === "no_results") {
+    return `Market Preview unavailable: live search returned no organic results for "${params.query}".`;
+  }
+
+  if (params.parsedCompCount > 0 && params.validPriceCount === 0) {
+    return `Market Preview unavailable: live search returned ${params.rawResultCount} organic result(s) and ${params.parsedCompCount} active vehicle listing(s), but none had a usable asking price after parsing title, snippet, rich snippets, and sitelinks.`;
+  }
+
+  return `Market Preview unavailable: live search returned ${params.rawResultCount} organic result(s), but no active vehicle-for-sale listing with a usable asking price remained after filtering parts pages, repair articles, review pages, and inactive auction/history results.`;
+}
+
+async function runMarketPreviewSearchSequence(params: {
+  queries: MarketPreviewSearchQuery[];
+  apiKey: string;
+  dateAccessed: string;
+  vehicle: VehicleIdentity;
+  fallbackLocation?: string;
+}): Promise<MarketPreviewSearchResult> {
+  let bestResult: MarketPreviewSearchResult | null = null;
+
+  for (const query of params.queries) {
+    console.info("marketPreview.serper.query", {
+      query: query.query,
+      queryLabel: query.label,
+      vehicle: [params.vehicle.year, params.vehicle.make, params.vehicle.model, params.vehicle.trim].filter(Boolean).join(" "),
+      searchRadiusMiles: 150,
+    });
+    const result = await runMarketPreviewSearch(
+      query,
+      params.apiKey,
+      params.dateAccessed,
+      params.vehicle,
+      params.fallbackLocation
+    );
+
+    console.info("marketPreview.serper.result", {
+      query: query.query,
+      queryLabel: query.label,
+      rawOrganicResultCount: result.rawResultCount,
+      parsedCompCount: result.comps.length,
+    });
+
+    if (!bestResult || result.comps.length > bestResult.comps.length) {
+      bestResult = result;
+    }
+
+    if (result.comps.length >= 3) {
+      return result;
+    }
+  }
+
+  return bestResult ?? {
+    comps: [],
+    rawResultCount: 0,
+    query: params.queries[0]?.query ?? "",
+    queryLabel: params.queries[0]?.label ?? "trim_zip",
+  };
 }
 
 async function runMarketPreviewSearch(
-  query: string,
+  searchQuery: MarketPreviewSearchQuery,
   apiKey: string,
   dateAccessed: string,
   vehicle: VehicleIdentity,
   fallbackLocation?: string
-): Promise<{ comps: MarketPreviewComparableAd[]; rawResultCount: number }> {
+): Promise<MarketPreviewSearchResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
   const response = await fetch("https://google.serper.dev/search", {
@@ -670,7 +924,7 @@ async function runMarketPreviewSearch(
       "Content-Type": "application/json",
       "X-API-KEY": apiKey,
     },
-    body: JSON.stringify({ q: query, num: 10 }),
+    body: JSON.stringify({ q: searchQuery.query, num: 10 }),
     signal: controller.signal,
   }).finally(() => clearTimeout(timeout));
 
@@ -683,7 +937,12 @@ async function runMarketPreviewSearch(
   const comps = organic
     .map((item: unknown) => parseMarketPreviewComparable(item, dateAccessed, vehicle, fallbackLocation))
     .filter((item: MarketPreviewComparableAd | null): item is MarketPreviewComparableAd => Boolean(item));
-  return { comps, rawResultCount: organic.length };
+  return {
+    comps,
+    rawResultCount: organic.length,
+    query: searchQuery.query,
+    queryLabel: searchQuery.label,
+  };
 }
 
 function parseMarketPreviewComparable(
@@ -695,10 +954,14 @@ function parseMarketPreviewComparable(
   if (!item || typeof item !== "object") return null;
   const record = item as Record<string, unknown>;
   const title = typeof record.title === "string" ? record.title : "";
-  const snippet = typeof record.snippet === "string" ? record.snippet : "";
   const link = typeof record.link === "string" ? record.link : undefined;
-  const text = `${title} ${snippet}`;
-  const price = extractCurrency(text);
+  const source = extractHostname(link) ?? "web search result";
+  const text = collectMarketPreviewResultText(record);
+  if (!isLikelyActiveVehicleListing({ text, title, source, url: link, vehicle })) {
+    return null;
+  }
+
+  const price = extractMarketPreviewPrice(text, source);
   if (typeof price !== "number") return null;
 
   return {
@@ -709,12 +972,67 @@ function parseMarketPreviewComparable(
     make: vehicle.make,
     model: vehicle.model,
     trim: vehicle.trim,
-    source: extractHostname(link) ?? "web search result",
+    source,
     title,
     location: extractListingLocation(text) ?? fallbackLocation,
     url: link,
     dateAccessed,
   };
+}
+
+function collectMarketPreviewResultText(value: unknown, depth = 0): string {
+  if (depth > 4 || value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (Array.isArray(value)) {
+    return value.map((entry) => collectMarketPreviewResultText(entry, depth + 1)).join(" ");
+  }
+  if (typeof value !== "object") return "";
+
+  return Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => !/image|thumbnail|position|cached|favicon/i.test(key))
+    .map(([, entry]) => collectMarketPreviewResultText(entry, depth + 1))
+    .join(" ");
+}
+
+function isLikelyActiveVehicleListing(params: {
+  text: string;
+  title: string;
+  source: string;
+  url?: string;
+  vehicle: VehicleIdentity;
+}): boolean {
+  const text = `${params.title} ${params.text} ${params.url ?? ""}`.toLowerCase();
+  const preferredDomain = isPreferredMarketPreviewDomain(params.source);
+  const dealershipDomain = isLikelyDealershipDomain(params.source);
+  const hasVehicle =
+    containsNormalizedToken(text, String(params.vehicle.year ?? "")) &&
+    containsNormalizedToken(text, params.vehicle.make ?? "") &&
+    containsNormalizedToken(text, params.vehicle.model ?? "");
+  const hasSaleSignal = /\b(for sale|used|new|inventory|listing|listings|vehicle details|cars for sale|available|stock #?|vin)\b/i.test(text);
+  const rejected =
+    /\b(parts?|accessor(?:y|ies)|repair|recall|review|reviews|article|news|specs?|forum|manual|warranty|tire|wheel|bumper|door|hood|fender)\b/i.test(text) &&
+    !/\b(for sale|inventory|listing|vehicle details|stock #?|vin)\b/i.test(text);
+  const auctionHistory =
+    /\b(auction|bid history|sold for|sale history|copart|iaai)\b/i.test(text) &&
+    !/\b(for sale|available|current bid|buy now|inventory)\b/i.test(text);
+
+  if (rejected || auctionHistory) return false;
+  return hasVehicle && hasSaleSignal && (preferredDomain || dealershipDomain || /\b(price|mileage|odometer|\$)\b/i.test(text));
+}
+
+function containsNormalizedToken(text: string, token: string): boolean {
+  const normalized = token.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!normalized) return true;
+  return text.replace(/[^a-z0-9]+/g, " ").includes(normalized);
+}
+
+function isPreferredMarketPreviewDomain(source: string): boolean {
+  return MARKET_PREVIEW_PREFERRED_DOMAINS.some((domain) => source.toLowerCase().endsWith(domain));
+}
+
+function isLikelyDealershipDomain(source: string): boolean {
+  return /\b(auto|cars?|jeep|chrysler|dodge|ram|dealer|motors|inventory)\b/i.test(source);
 }
 
 function extractHostname(link?: string): string | undefined {
@@ -736,30 +1054,162 @@ function dedupeMarketPreviewComparables(comps: MarketPreviewComparableAd[]) {
   });
 }
 
-function extractMarketPreviewMileage(
+function extractMarketPreviewSearchInputs(
   report: RepairIntelligenceReport,
   attachments: StoredAttachment[],
   userIntent: string
-): number | undefined {
+): MarketPreviewSearchInputs {
   const text = [userIntent, report.sourceEstimateText, ...attachments.map((attachment) => attachment.text)].join("\n");
-  return extractMileage(text);
+  const structuredVehicle = mergeVehicleIdentity(
+    normalizeVehicleIdentity(report.estimateFacts?.vehicle),
+    normalizeVehicleIdentity(report.analysis?.estimateFacts?.vehicle),
+    normalizeVehicleIdentity(report.analysis?.vehicle),
+    normalizeVehicleIdentity(report.vehicle)
+  );
+  const facts = extractEstimateFacts({ text, vehicle: structuredVehicle });
+  const zip = selectOwnerOrInsuredZip(text);
+
+  const vehicle = normalizeMarketPreviewVehicle(
+    normalizeVehicleIdentity(
+      mergeVehicleIdentity(
+        normalizeVehicleIdentity(report.vehicle),
+        normalizeVehicleIdentity(report.analysis?.vehicle),
+        normalizeVehicleIdentity(report.estimateFacts?.vehicle),
+        normalizeVehicleIdentity(report.analysis?.estimateFacts?.vehicle),
+        normalizeVehicleIdentity(facts.vehicle)
+      )
+    ),
+    text
+  );
+
+  return {
+    vehicle,
+    mileage:
+      report.estimateFacts?.mileage ??
+      report.analysis?.estimateFacts?.mileage ??
+      facts.mileage ??
+      extractMileage(text),
+    zip,
+    state: extractMarketPreviewState(text, zip),
+  };
 }
 
-function extractMarketPreviewLocation(
-  attachments: StoredAttachment[],
-  userIntent: string
-): string | undefined {
-  const text = [userIntent, ...attachments.map((attachment) => attachment.text)].join("\n");
-  const zip = text.match(/\b\d{5}(?:-\d{4})?\b/)?.[0];
-  if (zip) return zip;
-  const cityState = text.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?),\s*([A-Z]{2})\b/)?.[0];
-  return cityState;
+function normalizeMarketPreviewVehicle(
+  vehicle: VehicleIdentity | null | undefined,
+  text: string
+): VehicleIdentity | null {
+  const normalized = normalizeVehicleIdentity(vehicle);
+  if (!normalized) return null;
+  const next: VehicleIdentity = {
+    ...normalized,
+    vin: normalized.vin ?? extractVinFromTextForMarketPreview(text),
+  };
+
+  const model = next.model?.trim();
+  const trim = next.trim?.trim();
+  if (/^gladiator\s+sport\b/i.test(model ?? "")) {
+    next.model = "Gladiator";
+    next.trim = trim || model?.replace(/^gladiator\s+/i, "").trim() || "Sport";
+  } else if (/^gladiator$/i.test(model ?? "") && !trim) {
+    const cccGladiator = text.match(/\b20\d{2}\s+JEEP\s+Gladiator\s+([A-Za-z0-9][A-Za-z0-9 /-]{1,30})/i)?.[1]?.trim();
+    if (cccGladiator) {
+      next.trim = cccGladiator.replace(/\s+(?:VIN|Mileage|Odometer)\b.*$/i, "").trim();
+    }
+  }
+
+  return next;
+}
+
+function extractVinFromTextForMarketPreview(text: string): string | undefined {
+  const vin = text.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0]?.toUpperCase();
+  return vin;
+}
+
+function selectOwnerOrInsuredZip(text: string): string | undefined {
+  const candidates: Array<{ zip: string; score: number; index: number }> = [];
+  const regex = /\b\d{5}(?:-\d{4})?\b/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    const zip = match[0].slice(0, 5);
+    if (!resolveStateFromZip(zip)) continue;
+    const index = match.index;
+    const context = text.slice(Math.max(0, index - 180), Math.min(text.length, index + 180)).toLowerCase();
+    let score = 10;
+    if (/\b(owner|insured|claimant|customer|vehicle owner|policyholder)\b/.test(context)) score += 100;
+    if (/\b(repair facility|repair shop|body shop|collision center|appraiser|estimator|supplement|facility)\b/.test(context)) score -= 75;
+    if (/\b(zip|postal|address|city|state)\b/.test(context)) score += 10;
+    candidates.push({ zip, score, index });
+  }
+
+  if (candidates.length === 0) return undefined;
+  candidates.sort((left, right) => right.score - left.score || left.index - right.index);
+  return candidates[0]?.zip;
+}
+
+function extractMarketPreviewState(text: string, zip?: string): string | undefined {
+  if (zip) {
+    return resolveStateFromZip(zip) ?? undefined;
+  }
+
+  return text.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?,\s*([A-Z]{2})\s+\d{5}(?:-\d{4})?\b/)?.[1];
+}
+
+function computeMarketPreviewMedian(values: number[]): number {
+  if (values.length === 0) return 0;
+  const midpoint = Math.floor(values.length / 2);
+  return values.length % 2 === 1
+    ? values[midpoint]
+    : Math.round((values[midpoint - 1] + values[midpoint]) / 2);
+}
+
+function extractMarketPreviewPrice(value: string, source: string): number | undefined {
+  const currency = extractCurrency(value);
+  if (typeof currency === "number") return currency;
+
+  if (!isPreferredMarketPreviewDomain(source) && !isLikelyDealershipDomain(source)) {
+    return undefined;
+  }
+
+  const candidates = [
+    ...value.matchAll(
+      /\b(?:price|sale price|internet price|asking price|list price|dealer price|our price)\D{0,32}([1-9]\d{1,2}[,\s]?\d{3}|[1-9]\d{4,5})\b/gi
+    ),
+  ]
+    .map((match) => parseMarketPreviewPriceNumber(match[1]))
+    .filter((price): price is number => typeof price === "number" && price >= 5000 && price <= 250000);
+
+  if (candidates[0]) return candidates[0];
+
+  const plainCandidates = [...value.matchAll(/\b([1-9]\d{1,2}[,\s]?\d{3}|[1-9]\d{4,5})\b/g)]
+    .map((match) => {
+      const index = match.index ?? 0;
+      const context = value.slice(Math.max(0, index - 24), Math.min(value.length, index + 36));
+      return {
+        price: parseMarketPreviewPriceNumber(match[1]),
+        context,
+      };
+    })
+    .filter((candidate) =>
+      typeof candidate.price === "number" &&
+      candidate.price >= 15000 &&
+      candidate.price <= 250000 &&
+      !/\b(mi|mile|miles|odometer)\b/i.test(candidate.context)
+    )
+    .map((candidate) => candidate.price);
+
+  return plainCandidates[0];
 }
 
 function extractCurrency(value: string): number | undefined {
-  const match = value.match(/\$\s*([0-9][0-9,]{3,})(?:\.\d{2})?/);
+  const match = value.match(/\$\s*([0-9][0-9,\s]{3,})(?:\.\d{2})?/);
   if (!match) return undefined;
-  const parsed = Number(match[1].replace(/,/g, ""));
+  const parsed = parseMarketPreviewPriceNumber(match[1]);
+  return typeof parsed === "number" && parsed >= 5000 && parsed <= 250000 ? parsed : undefined;
+}
+
+function parseMarketPreviewPriceNumber(value: string): number | undefined {
+  const parsed = Number(value.replace(/[\s,]/g, ""));
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 

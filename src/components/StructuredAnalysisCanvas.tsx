@@ -247,19 +247,19 @@ export default function StructuredAnalysisCanvas({
 
       <section className="border border-border bg-card p-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-[#a35d26] dark:text-[#c57934]">
               Active Case
             </div>
-            <div className="mt-1 text-[1rem] font-semibold text-card-foreground">
+            <div className="mt-1 break-words text-[1rem] font-semibold text-card-foreground">
               {caseLabel}
             </div>
-            <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
+            <div className="mt-1 break-words text-[12px] leading-5 text-muted-foreground">
               Latest file: {latestFile}
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:w-auto sm:grid-cols-4">
             <Metric
               label="Risk"
               value={renderModel.supplementItems.length > 0 ? "Review" : "Low"}
@@ -351,7 +351,7 @@ export default function StructuredAnalysisCanvas({
             >
               <div className="space-y-3">
                 {section.prose ? (
-                  <div className="border border-border bg-muted px-3 py-2.5 text-[13px] leading-5 text-muted-foreground">
+                  <div className="break-words border border-border bg-muted px-3 py-2.5 text-[13px] leading-5 text-muted-foreground">
                     {section.prose}
                   </div>
                 ) : null}
@@ -452,9 +452,9 @@ function LinkedInsightBullet({
 
   if (!evidenceLink) {
     return (
-      <div className="flex gap-2 border border-border bg-muted px-3 py-2.5 text-[13px] leading-5 text-muted-foreground">
+      <div className="flex min-w-0 gap-2 border border-border bg-muted px-3 py-2.5 text-[13px] leading-5 text-muted-foreground">
         <span className="pt-[1px] text-[#b86a2d]">&bull;</span>
-        <span>{bullet}</span>
+        <span className="min-w-0 break-words">{bullet}</span>
       </div>
     );
   }
@@ -469,9 +469,9 @@ function LinkedInsightBullet({
           : "border-border bg-muted hover:border-ring/30 hover:bg-muted/70"
       }`}
     >
-      <div className="flex gap-2 text-[13px] leading-5 text-foreground">
+      <div className="flex min-w-0 gap-2 text-[13px] leading-5 text-foreground">
         <span className="pt-[1px] text-[#b86a2d]">&bull;</span>
-        <span>{bullet}</span>
+        <span className="min-w-0 break-words">{bullet}</span>
       </div>
       <div className="mt-2 inline-flex rounded-sm border border-border bg-card px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
         View support
@@ -509,9 +509,9 @@ function EvidenceSupportBlock({
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-[84px] rounded-md border border-border bg-muted px-3 py-2">
+    <div className="min-w-0 rounded-md border border-border bg-muted px-3 py-2 sm:min-w-[84px]">
       <div className="text-[10px] uppercase tracking-[0.08em] text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-semibold text-foreground">{value}</div>
+      <div className="mt-1 break-words text-sm font-semibold text-foreground">{value}</div>
     </div>
   );
 }

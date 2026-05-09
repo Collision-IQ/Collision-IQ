@@ -254,9 +254,52 @@ run("Annotated Estimate Review shows scrubber findings beside estimate anchors",
 
 run("Annotated Estimate Review model exposes stable anchors and audience-safe annotation fields", () => {
   const model = buildAnnotatedEstimateReviewModel({
-    report: REPORT,
+    report: {
+      ...REPORT,
+      issues: [
+        ...REPORT.issues,
+        {
+          id: "issue-alignment-proof",
+          category: "alignment",
+          title: "Four-Wheel Alignment Completion Record",
+          finding: "Four-Wheel Alignment Completion Record",
+          impact: "Alignment appears in the estimate, but completion support should be confirmed.",
+          missingOperation: "Four-Wheel Alignment",
+          severity: "medium",
+          evidenceIds: [],
+        },
+      ],
+    },
     analysis: {
       ...ANALYSIS,
+      issues: [
+        ...(ANALYSIS.issues ?? []),
+        {
+          id: "issue-alignment-proof",
+          category: "alignment",
+          title: "Four-Wheel Alignment Completion Record",
+          finding: "Four-Wheel Alignment Completion Record",
+          impact: "Alignment appears in the estimate, but completion support should be confirmed.",
+          missingOperation: "Four-Wheel Alignment",
+          severity: "medium",
+          evidenceIds: [],
+        },
+      ],
+      estimateComparisons: {
+        rows: [
+          {
+            id: "alignment-row",
+            category: "Diagnostics",
+            operation: "Four-Wheel Alignment",
+            lhsSource: "Shop",
+            rhsSource: "Carrier",
+            lhsValue: "Algn Four-Wheel Alignment",
+            rhsValue: "Alignment not documented",
+            delta: "Completion proof pending",
+            deltaType: "changed",
+          },
+        ],
+      },
       rawEstimateText: [
         "Subl Post-repair scan -- pending invoice",
         "Algn Four-Wheel Alignment",
@@ -268,7 +311,7 @@ run("Annotated Estimate Review model exposes stable anchors and audience-safe an
   });
 
   assert.ok(model.lineAnchors.some((anchor) => anchor.lineId.startsWith("line-1")));
-  assert.ok(model.annotations.length > 0);
+  assert.ok(model.annotations.length >= 2);
   const annotation = model.annotations[0];
   assert.ok(annotation.id);
   assert.ok(annotation.estimateId);

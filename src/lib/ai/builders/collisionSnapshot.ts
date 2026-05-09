@@ -305,7 +305,7 @@ function buildValuationSnapshot(renderModel: SnapshotRenderModel): CollisionSnap
   if (!acvPreviewRange && !dvPreviewRange) {
     return {
       available: false,
-      disclosure: renderModel.valuation.acvReasoning || "Market preview unavailable because live comparable search did not complete.",
+      disclosure: renderModel.valuation.acvReasoning || "Market Preview unavailable: no completed comparable listings or supported valuation data were preserved for this generation.",
     };
   }
 

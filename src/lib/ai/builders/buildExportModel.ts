@@ -3025,7 +3025,9 @@ function buildValuation(
   )
     ? undefined
     : rawChatAcvPreviewRange;
-  const acvPreviewRange = chatAcvPreviewRange;
+  const acvPreviewRange = computedAcv?.sourceType === "comps"
+    ? computedAcv.acvRange
+    : chatAcvPreviewRange;
   const dvPreviewRange = resolveValuationPreviewRange({
     status:
       chatValuation.dvStatus === "provided" && typeof chatValuation.dvValue === "number"
@@ -3144,7 +3146,18 @@ function buildMarketPreviewUnavailableReason(
 ): string {
   const searchState = getMarketPreviewSearchState(report, analysis);
   if (searchState?.state === "failed") {
-    return `Market Preview unavailable: ${searchState.failureReason || formatMarketPreviewFailureReason(searchState.status)} Status: ${searchState.status}. Comparable ads preserved: ${searchState.comparableCount ?? 0}. Valid prices: ${searchState.validPriceCount ?? 0}.`;
+    const reason = normalizeMarketPreviewFailureText(
+      searchState.failureReason || formatMarketPreviewFailureReason(searchState.status)
+    );
+    const counts = [
+      typeof searchState.comparableCount === "number"
+        ? `${searchState.comparableCount} comparable listing${searchState.comparableCount === 1 ? "" : "s"} preserved`
+        : null,
+      typeof searchState.validPriceCount === "number"
+        ? `${searchState.validPriceCount} valid asking price${searchState.validPriceCount === 1 ? "" : "s"}`
+        : null,
+    ].filter(Boolean).join("; ");
+    return counts ? `${reason} ${counts}.` : reason;
   }
   const vehicle = reportFields.vehicle;
   const available = [
@@ -3156,9 +3169,19 @@ function buildMarketPreviewUnavailableReason(
   ].filter(Boolean).join(", ");
   const preservedComps = extractStructuredValuationData(report, analysis).comparableListings ?? [];
   if (preservedComps.length > 0 && preservedComps.length < 3) {
-    return `Market Preview limited: ${preservedComps.length} local comparable ad${preservedComps.length === 1 ? " was" : "s were"} found and preserved, but fewer than three usable comps were available after year, make, model, trim, mileage, and local-market filtering. Show the comp source, asking price, mileage, location, URL or title, and date accessed, but do not treat the preview as reliable until more local support is available.`;
+    return `Market Preview limited: ${preservedComps.length} local comparable listing${preservedComps.length === 1 ? " was" : "s were"} found, so confidence is limited because fewer than three usable local comps were available.`;
   }
-  return `Market Preview unavailable: the report has ${available || "limited vehicle identity data"}, but no live local comparable ads or structured valuation comps were preserved for this generation. The system must retrieve up to three local comparable ads with source, asking price, mileage, location, URL or title, and date accessed before showing a market preview value.`;
+  return `Market Preview unavailable: the report has ${available || "limited vehicle identity data"}, but no completed live local comparable listings or structured valuation comps were preserved for this generation.`;
+}
+
+function normalizeMarketPreviewFailureText(value: string): string {
+  const trimmed = value.replace(/\s+/g, " ").trim();
+  if (!trimmed) {
+    return "Market Preview unavailable: live comparable search failed.";
+  }
+  return /^Market Preview\b/i.test(trimmed)
+    ? trimmed
+    : `Market Preview unavailable: ${trimmed.replace(/\.$/, "")}.`;
 }
 
 function getMarketPreviewSearchState(
@@ -3185,6 +3208,8 @@ function formatMarketPreviewFailureReason(status: string | undefined): string {
       return "provider not configured";
     case "vehicle_identifiers_missing":
       return "vehicle identifiers missing";
+    case "location_missing":
+      return "owner or insured ZIP missing";
     case "no_results":
       return "no comparable ads returned";
     case "timeout":
@@ -3348,7 +3373,7 @@ export function computeACVFromComps(params: {
   }
 
   const sorted = adjusted
-    .map((listing) => listing.adjustedPrice)
+    .map((listing) => listing.price)
     .sort((left, right) => left - right);
   const median = computeMedian(sorted);
   const low = computePercentile(sorted, 0.25);
@@ -3468,6 +3493,7 @@ function extractStructuredValuationData(
       asRecord(candidate.valuation),
       asRecord(candidate.acv),
       asRecord(candidate.marketData),
+      asRecord(candidate.marketPreview),
     ].filter(Boolean) as Array<Record<string, unknown>>;
 
     for (const container of containers) {
@@ -3575,7 +3601,7 @@ function isComparableListingRelevant(
   if (targetMake && listingMake && targetMake !== listingMake) {
     return false;
   }
-  if (targetModel && listingModel && targetModel !== listingModel) {
+  if (targetModel && listingModel && !modelKeysLookEquivalent(targetModel, listingModel)) {
     return false;
   }
   if (
@@ -3599,6 +3625,13 @@ function isComparableListingRelevant(
   }
 
   return true;
+}
+
+function modelKeysLookEquivalent(targetModel: string, listingModel: string): boolean {
+  if (!targetModel || !listingModel) return false;
+  return targetModel === listingModel ||
+    listingModel.startsWith(`${targetModel} `) ||
+    targetModel.startsWith(`${listingModel} `);
 }
 
 function resolveLikelyStructuredAcvRange(params: {

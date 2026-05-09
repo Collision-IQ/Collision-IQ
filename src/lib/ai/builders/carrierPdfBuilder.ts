@@ -628,6 +628,8 @@ function buildValuationBullets(
     confidence: valuation.acvConfidence,
     reasoning: valuation.acvReasoning,
     missingInputs: valuation.acvMissingInputs,
+    sourceType: valuation.acvSourceType,
+    compCount: valuation.acvCompCount,
   }));
 
   bullets.push(renderValuationBullet("Diminished Value", {
@@ -653,9 +655,20 @@ function renderValuationBullet(
     confidence?: "low" | "medium" | "high";
     reasoning: string;
     missingInputs: string[];
+    sourceType?: "comps" | "jd_power" | "fallback" | "unavailable";
+    compCount?: number;
   }
 ): string {
   const parts: string[] = [];
+
+  if (
+    label === "Market Preview" &&
+    params.sourceType === "comps" &&
+    typeof params.value === "number" &&
+    (params.compCount ?? 0) >= 3
+  ) {
+    parts.push(`Market Preview median: ${formatMoney(params.value)}`);
+  }
 
   if (params.status === "provided" && typeof params.value === "number") {
     parts.push(`${label}: preliminary preview ${formatMoney(params.value)}`);

@@ -401,7 +401,7 @@ Grand Total 16,887.00
   assert.equal(exportModel.valuation.acvStatus, "not_determinable");
   assert.equal(exportModel.valuation.acvRange, undefined);
   assert.equal(exportModel.valuation.acvSourceType, "unavailable");
-  assert.match(exportModel.valuation.acvReasoning, /Market Preview unavailable:.*no live local comparable ads/i);
+  assert.match(exportModel.valuation.acvReasoning, /Market Preview unavailable:.*no completed live local comparable listings/i);
 });
 
 run("structured JD Power-style values alone do not value a specific vehicle without live comps", () => {
@@ -426,7 +426,7 @@ run("structured JD Power-style values alone do not value a specific vehicle with
   assert.equal(exportModel.valuation.acvStatus, "not_determinable");
   assert.equal(exportModel.valuation.acvValue, undefined);
   assert.equal(exportModel.valuation.acvRange, undefined);
-  assert.match(exportModel.valuation.acvReasoning, /Market Preview unavailable:.*no live local comparable ads/i);
+  assert.match(exportModel.valuation.acvReasoning, /Market Preview unavailable:.*no completed live local comparable listings/i);
 });
 
 run("specific vehicle ACV stays unavailable when live comparable search is unavailable", () => {
@@ -463,7 +463,7 @@ Grand Total 16,200.00
   assert.equal(exportModel.valuation.acvStatus, "not_determinable");
   assert.equal(exportModel.valuation.acvRange, undefined);
   assert.equal(exportModel.valuation.acvSourceType, "unavailable");
-  assert.match(exportModel.valuation.acvReasoning, /Market Preview unavailable:.*no live local comparable ads/i);
+  assert.match(exportModel.valuation.acvReasoning, /Market Preview unavailable:.*no completed live local comparable listings/i);
 });
 
 run("2024 Ram or Jeep Gladiator Sport/S around 17k miles never leaks the low generic fallback", () => {
@@ -506,12 +506,12 @@ Grand Total 16,887.00
     assert.equal(exportModel.valuation.acvStatus, "not_determinable", make);
     assert.equal(exportModel.valuation.acvRange, undefined, make);
     assert.equal(exportModel.valuation.acvSourceType, "unavailable", make);
-    assert.match(exportModel.valuation.acvReasoning, /Market Preview unavailable:.*no live local comparable ads/i, make);
+    assert.match(exportModel.valuation.acvReasoning, /Market Preview unavailable:.*no completed live local comparable listings/i, make);
     assert.equal(/\$13,?387|\$19,?387|\$13,?000|\$19,?000/.test(visibleSnapshotText), false, make);
     assert.equal(snapshot.valuationSnapshot.acvPreviewRange, undefined, make);
     if (!snapshot.valuationSnapshot.dvPreviewRange) {
       assert.equal(snapshot.valuationSnapshot.available, false, make);
-      assert.match(snapshot.valuationSnapshot.disclosure, /Market Preview unavailable:.*no live local comparable ads/i, make);
+      assert.match(snapshot.valuationSnapshot.disclosure, /Market Preview unavailable:.*no completed live local comparable listings/i, make);
     }
   }
 });
@@ -557,12 +557,14 @@ Grand Total 16,200.00
   assert.equal(exportModel.valuation.acvSourceType, "comps");
   assert.equal(exportModel.valuation.acvStatus, "estimated_range");
   assert.equal(exportModel.valuation.acvCompCount, 3);
+  assert.equal(exportModel.valuation.acvValue, 36900);
   assert.equal(exportModel.valuation.acvRange.low > 30000, true);
   assert.equal(exportModel.valuation.acvRange.high > 30000, true);
   assert.equal(exportModel.valuation.acvReasoning.includes("Comparable source count: 3"), true);
   assert.equal(exportModel.valuation.acvReasoning.includes("Mileage adjustment note:"), true);
   assert.equal(exportModel.valuation.acvReasoning.includes("Region note:"), true);
   assert.equal(exportModel.valuation.acvReasoning.includes("Confidence level:"), true);
+  assert.equal(/will upload once comps are pulled|working on ACV/i.test(JSON.stringify(exportModel)), false);
 });
 
 run("customer report PDF strips internal audit language and parser fragments", () => {
