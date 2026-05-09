@@ -479,7 +479,7 @@ run("DOI packet is blocked when complaint prerequisites are missing", () => {
   assert.ok(document.summary.some((item) => item.label === "Verified Regulation Sources" && item.value === "0"));
   assert.ok(
     document.sections.some((section) =>
-      section.title === "Complaint Readiness Status" &&
+      section.title === "DOI Readiness Status" &&
       section.bullets.some((bullet) =>
         bullet.includes("The file currently supports an appraisal-process and repair-scope dispute. It does not yet establish a verified unfair claims handling violation because no confirmed regulatory citation, written denial, delay log, refusal-to-review documentation, or communication timeline has been isolated.")
       )
@@ -488,15 +488,25 @@ run("DOI packet is blocked when complaint prerequisites are missing", () => {
   assert.deepEqual(
     document.sections.map((section) => section.title),
     [
-      "Complaint Readiness Status",
-      "What The File Currently Supports",
+      "Claim Handling / Appraisal Dispute Summary",
+      "What The User Reports",
+      "Reported Premature Appraisal Award Demand",
+      "Reported Restriction On Continuing Repairs",
+      "Reported Post-Repair Appraisal Denial Concerns",
+      "What Uploaded Documents Support",
+      "What Is Not Yet Verified",
+      "Why The Timing Dispute Matters",
+      "Documents Needed Before Filing",
+      "Supporting Repair/Scope Attachments",
+      "Recommended Next Documentation",
+      "DOI Readiness Status",
       "User-Provided Chat Context",
       "What Is Not Yet Proven",
       "Missing Complaint Evidence",
       "Documents Needed Before Filing",
     ]
   );
-  assert.doesNotMatch(JSON.stringify(document), /force payment|insurer violated law/i);
+  assert.doesNotMatch(JSON.stringify(document), /insurer violated law/i);
 });
 
 run("DOI readiness does not treat technical repair disputes as regulatory misconduct", () => {
@@ -541,7 +551,8 @@ run("DOI readiness does not treat technical repair disputes as regulatory miscon
   assert.ok(document.summary.some((item) => item.label === "DOI Readiness State" && item.value === "NOT_READY_FOR_DOI"));
   assert.ok(document.summary.some((item) => item.label === "Verified Regulation Sources" && item.value === "1"));
   assert.ok(document.summary.some((item) => item.label === "Documented Conduct Items" && item.value === "0"));
-  assert.ok(document.sections.some((section) => section.title === "What The File Currently Supports"));
+  assert.ok(document.sections.some((section) => section.title === "Claim Handling / Appraisal Dispute Summary"));
+  assert.ok(document.sections.some((section) => section.title === "Supporting Repair/Scope Attachments"));
   assert.ok(!document.sections.some((section) => section.title === "Optional Draft Complaint"));
 });
 
@@ -561,12 +572,23 @@ run("DOI and Policy reviews include appraisal-process chat context without treat
 
   const doiContext = doiDocument.sections.find((section) => section.title === "User-Provided Chat Context");
   const policyContext = policyDocument.sections.find((section) => section.title === "User-Provided Chat Context");
+  const doiDisputeSummary = doiDocument.sections.find((section) => section.title === "Claim Handling / Appraisal Dispute Summary");
+  const policyDisputeFocus = policyDocument.sections.find((section) => section.title === "Policy / Appraisal Dispute Focus");
   assert.ok(doiContext);
   assert.ok(policyContext);
+  assert.ok(doiDisputeSummary);
+  assert.ok(policyDisputeFocus);
   assert.match(JSON.stringify(doiContext), /appraisal-process dispute/i);
   assert.match(JSON.stringify(doiContext), /written carrier or IA demand/i);
-  assert.match(JSON.stringify(policyContext), /Uploaded policy\/appraisal language/i);
-  assert.doesNotMatch(JSON.stringify({ doiDocument, policyDocument }), /insurer violated law|verified legal violation/i);
+  assert.match(JSON.stringify(policyContext), /Policy\/appraisal language/i);
+  assert.match(JSON.stringify(doiDocument), /Reported Premature Appraisal Award Demand/i);
+  assert.match(JSON.stringify(doiDocument), /Reported Restriction On Continuing Repairs/i);
+  assert.match(JSON.stringify(doiDocument), /Reported Post-Repair Appraisal Denial Concerns/i);
+  assert.match(JSON.stringify(policyDocument), /amount-of-loss timing/i);
+  assert.doesNotMatch(
+    JSON.stringify({ doiDocument, policyDocument }),
+    /insurer violated law|verified legal violation|claim-\[REDACTED_CLAIM\]|policy-\[REDACTED_POLICY\]|\buploaded document\b|Same rationale as earlier|Current estimate analysis; citation still needed|Calibration Verification Open/i
+  );
 });
 
 run("DOI complaint packet renders only when readiness prerequisites are met", () => {
@@ -613,7 +635,8 @@ run("DOI complaint packet renders only when readiness prerequisites are met", ()
   assert.ok(document.summary.some((item) => item.label === "DOI Readiness State" && item.value === "READY_FOR_DOI"));
   assert.ok(document.summary.some((item) => item.label === "Verified Regulation Sources" && item.value === "1"));
   assert.ok(document.sections.some((section) => section.title === "Complaint Grounds - Documented Claim Conduct"));
-  assert.ok(document.sections.some((section) => section.title === "Evidence Attachments - Repair/Estimate Dispute Items"));
+  assert.ok(document.sections.some((section) => section.title === "Supporting Repair/Scope Attachments"));
+  assert.ok(document.sections.some((section) => section.title === "Additional Repair/Scope Attachment Detail"));
   assert.ok(!document.sections.some((section) => section.title === "Unresolved Operations"));
   const complaintGrounds = document.sections.find((section) => section.title === "Complaint Grounds - Documented Claim Conduct");
   assert.ok(complaintGrounds.bullets.every((bullet) => !/Pre-Repair Scan|Four-Wheel Alignment/i.test(bullet)));

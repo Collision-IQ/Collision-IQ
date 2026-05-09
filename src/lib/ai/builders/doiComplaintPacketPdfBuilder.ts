@@ -11,6 +11,7 @@ import {
   type ExportBuilderInput,
   type ExportLineComparison,
 } from "./exportTemplates";
+import { buildClaimHandlingDisputeContext } from "./claimHandlingDisputeContext";
 import type { CaseEvidenceRegistryItem, RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 import type { EvidenceRecord } from "@/lib/ai/types/evidence";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
@@ -42,7 +43,8 @@ export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierR
   const policySources = getPolicySources(rightsReview, params.report);
   const evidenceIndex = buildEvidenceIndex(params.report);
   const needsReview = buildNeedsReviewBullets(exportModel, rightsReview);
-  const userContextBullets = buildUserProvidedContextBullets(params.assistantAnalysis);
+  const claimHandlingContext = buildClaimHandlingDisputeContext(params, exportModel);
+  const userContextBullets = buildUserProvidedContextBullets(params.assistantAnalysis, claimHandlingContext.userReports);
   const readiness = buildDoiReadinessReview({
     report: params.report,
     assistantAnalysis: params.assistantAnalysis,
@@ -93,7 +95,44 @@ export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierR
     ],
     sections: [
       {
-        title: "DOI Readiness",
+        title: "Claim Handling / Appraisal Dispute Summary",
+        bullets: claimHandlingContext.summary,
+      },
+      {
+        title: "What The User Reports",
+        bullets: claimHandlingContext.userReports.length
+          ? claimHandlingContext.userReports
+          : ["No specific user-reported appraisal-process conduct was isolated in the runtime context."],
+      },
+      ...claimHandlingContext.explicitSections,
+      {
+        title: "What Uploaded Documents Support",
+        bullets: claimHandlingContext.documentSupport.length
+          ? claimHandlingContext.documentSupport
+          : ["The current source set does not yet isolate written claim-handling communications supporting the reported appraisal-process issue."],
+      },
+      {
+        title: "What Is Not Yet Verified",
+        bullets: claimHandlingContext.unverified,
+      },
+      {
+        title: "Why The Timing Dispute Matters",
+        bullets: claimHandlingContext.timingConcerns,
+      },
+      {
+        title: "Documents Needed Before Filing",
+        bullets: claimHandlingContext.documentsNeeded,
+      },
+      {
+        title: "Supporting Repair/Scope Attachments",
+        bullets: claimHandlingContext.repairAttachments,
+      },
+      {
+        title: "Recommended Next Documentation",
+        bullets: claimHandlingContext.nextDocumentation,
+      },
+      {
+        title: "DOI Readiness Status",
         bullets: buildReadinessBullets(readiness),
       },
       {
@@ -115,7 +154,7 @@ export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierR
         bullets: buildComplaintGroundBullets(readiness, verifiedRegulationSources),
       },
       {
-        title: "Evidence Attachments - Repair/Estimate Dispute Items",
+        title: "Additional Repair/Scope Attachment Detail",
         bullets: buildRepairDisputeAttachmentBullets(exportModel),
       },
       {
@@ -133,7 +172,7 @@ export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierR
         bullets: policySources.length
           ? policySources
           : [
-              "No uploaded policy provision or verified policy-library citation was isolated in the current source set. Policy-rights assertions should remain pending until the applicable policy language is attached and reviewed.",
+              "No policy provision or verified policy-library citation was isolated in the current source set. Policy-rights assertions should remain pending until the applicable policy language is attached and reviewed.",
             ],
       },
       {
@@ -185,7 +224,15 @@ function buildDoiReadinessReviewDocument(params: {
   readiness: DoiReadinessReview;
   assistantAnalysis?: string | null;
 }): CarrierReportDocument {
-  const userContextBullets = buildUserProvidedContextBullets(params.assistantAnalysis);
+  const readinessInput: ExportBuilderInput = {
+    report: null,
+    analysis: null,
+    panel: null,
+    assistantAnalysis: params.assistantAnalysis ?? null,
+    renderModel: params.exportModel,
+  };
+  const claimHandlingContext = buildClaimHandlingDisputeContext(readinessInput, params.exportModel);
+  const userContextBullets = buildUserProvidedContextBullets(params.assistantAnalysis, claimHandlingContext.userReports);
   return {
     filename: "doi-readiness-review.pdf",
     brand: {
@@ -212,12 +259,45 @@ function buildDoiReadinessReviewDocument(params: {
     ],
     sections: [
       {
-        title: "Complaint Readiness Status",
-        bullets: buildComplaintReadinessStatusBullets(params.readiness, params.verifiedRegulationSources),
+        title: "Claim Handling / Appraisal Dispute Summary",
+        bullets: claimHandlingContext.summary,
       },
       {
-        title: "What The File Currently Supports",
-        bullets: buildCurrentSupportBullets(params.exportModel),
+        title: "What The User Reports",
+        bullets: claimHandlingContext.userReports.length
+          ? claimHandlingContext.userReports
+          : ["No specific user-reported appraisal-process conduct was isolated in the runtime context."],
+      },
+      ...claimHandlingContext.explicitSections,
+      {
+        title: "What Uploaded Documents Support",
+        bullets: claimHandlingContext.documentSupport.length
+          ? claimHandlingContext.documentSupport
+          : ["The current source set does not yet isolate written claim-handling communications supporting the reported appraisal-process issue."],
+      },
+      {
+        title: "What Is Not Yet Verified",
+        bullets: claimHandlingContext.unverified,
+      },
+      {
+        title: "Why The Timing Dispute Matters",
+        bullets: claimHandlingContext.timingConcerns,
+      },
+      {
+        title: "Documents Needed Before Filing",
+        bullets: claimHandlingContext.documentsNeeded,
+      },
+      {
+        title: "Supporting Repair/Scope Attachments",
+        bullets: claimHandlingContext.repairAttachments,
+      },
+      {
+        title: "Recommended Next Documentation",
+        bullets: claimHandlingContext.nextDocumentation,
+      },
+      {
+        title: "DOI Readiness Status",
+        bullets: buildComplaintReadinessStatusBullets(params.readiness, params.verifiedRegulationSources),
       },
       ...(userContextBullets.length
         ? [{
@@ -298,14 +378,15 @@ function buildDoiReadinessReview(params: {
   };
 }
 
-function buildUserProvidedContextBullets(value: string | null | undefined): string[] {
+function buildUserProvidedContextBullets(value: string | null | undefined, reportedIssues: string[] = []): string[] {
   const reported = detectUserReportedClaimHandlingContext(value);
-  if (!reported.length) return [];
+  const combined = dedupeStrings([...reported, ...reportedIssues]);
+  if (!combined.length) return [];
 
   return [
     "User-provided context reports an appraisal-process dispute, including a disputed demand about award-letter timing before repairs continue. This context is not treated as verified insurer misconduct by itself.",
-    `Reported issue category: ${reported.join("; ")}.`,
-    "Uploaded policy/appraisal language must be reviewed before making any policy-rights conclusion.",
+    `Reported issue category: ${combined.join("; ")}.`,
+    "Policy/appraisal language must be reviewed before making any policy-rights conclusion.",
     "Written carrier or IA demand, date-stamped correspondence, appraisal invocation, inspection records, and the applicable policy clause are needed before the DOI readiness gate can treat the conduct as documented.",
   ];
 }
@@ -348,14 +429,6 @@ function buildReadinessBullets(readiness: DoiReadinessReview): string[] {
     `Verified authoritative regulation/source count: ${readiness.verifiedRegulationSourceCount}.`,
     `Documented claim-handling conduct count: ${readiness.documentedConduct.length}.`,
     "Repair or estimate disputes alone are treated as support attachments, not DOI complaint grounds.",
-  ];
-}
-
-function buildCurrentSupportBullets(exportModel: ExportModel): string[] {
-  return [
-    "The file currently supports an appraisal-process and repair-scope dispute.",
-    "Repair or estimate issues may be used as supporting attachments, not as standalone DOI complaint grounds.",
-    ...buildRepairDisputeAttachmentBullets(exportModel).slice(0, 8),
   ];
 }
 
@@ -442,7 +515,7 @@ function buildRepairDisputeAttachmentBullets(exportModel: ExportModel): string[]
       `Dispute priority: ${formatPriority(item.priority, item.leverageScore)}.`,
       `Why it matters: ${cleanPacketText(item.rationale)}.`,
       item.evidence ? `Support: ${cleanPacketText(item.evidence)}.` : "Support: Not verified in attached source metadata.",
-      item.source ? `Source: ${cleanPacketText(item.source)}.` : "Source: Current estimate analysis; citation still needed.",
+      item.source ? `Source: ${cleanPacketText(item.source)}.` : "Source: Repair attachment context; independent citation still needed.",
       "DOI status: Not a complaint ground unless tied to documented insurer claim-handling conduct.",
     ].join(" ")
   );
@@ -770,7 +843,16 @@ function formatDateTime(value: string): string {
 }
 
 function cleanPacketText(value: string): string {
-  return value.replace(/\s+/g, " ").replace(/[^\S\r\n]+/g, " ").trim();
+  return value
+    .replace(/\buploaded document\b/gi, "source material")
+    .replace(/\bSame rationale as earlier\b/gi, "The same support should be reviewed with the current claim context.")
+    .replace(/\bCurrent estimate analysis; citation still needed\b/gi, "Repair attachment context; independent citation still needed")
+    .replace(/\bclaim-\[REDACTED_CLAIM\]\b/gi, "the claim")
+    .replace(/\bpolicy-\[REDACTED_POLICY\]\b/gi, "the policy")
+    .replace(/\bCalibration Verification Open\b/gi, "scan and calibration verification remains open")
+    .replace(/\s+/g, " ")
+    .replace(/[^\S\r\n]+/g, " ")
+    .trim();
 }
 
 function dedupeStrings(values: Array<string | null | undefined>): string[] {

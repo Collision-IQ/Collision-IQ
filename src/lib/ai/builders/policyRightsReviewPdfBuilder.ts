@@ -7,6 +7,7 @@ import {
   resolveCanonicalVin,
 } from "./buildExportModel";
 import type { ExportBuilderInput } from "./exportTemplates";
+import { buildClaimHandlingDisputeContext } from "./claimHandlingDisputeContext";
 import {
   buildJurisdictionUnavailableMessage,
   classifySourceAuthorityTier,
@@ -95,7 +96,8 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
   const insurer = resolveCanonicalInsurer(exportModel);
   const verifiedCitations = getVerifiedReviewCitations(review);
   const needsReview = buildSourceNeedsReviewBullets(review);
-  const userContextBullets = buildUserProvidedContextBullets(params.assistantAnalysis);
+  const claimHandlingContext = buildClaimHandlingDisputeContext(params, exportModel);
+  const userContextBullets = buildUserProvidedContextBullets(params.assistantAnalysis, claimHandlingContext.userReports);
 
   return {
     filename: "policy-rights-review.pdf",
@@ -132,11 +134,51 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
     ],
     sections: [
       {
+        title: "Policy / Appraisal Dispute Focus",
+        bullets: [
+          ...claimHandlingContext.summary,
+          "This review prioritizes the policy appraisal clause, disagreement-resolution process, carrier written position, supplement maturity, and amount-of-loss timing before any repair operation detail.",
+        ],
+      },
+      {
+        title: "What The User Reports",
+        bullets: claimHandlingContext.userReports.length
+          ? claimHandlingContext.userReports
+          : ["No specific appraisal-process conduct was isolated in the runtime context."],
+      },
+      ...claimHandlingContext.explicitSections,
+      {
+        title: "Appraisal / Amount-Of-Loss Timing Issues",
+        bullets: claimHandlingContext.timingConcerns,
+      },
+      {
+        title: "Appraisal Rights",
+        bullets: [
+          `Detection: ${review.appraisalRights.detected ? "Detected" : "Not confirmed"}.`,
+          `Confidence: ${capitalize(review.appraisalRights.confidence)}.`,
+          `Basis: ${humanizePolicyText(review.appraisalRights.basis)}`,
+          formatCitationList(review.appraisalRights.citations),
+          "The key policy question is whether the disagreement-resolution language supports finalizing the amount of loss before teardown-dependent supplements and final repair documentation are mature.",
+        ],
+      },
+      {
+        title: "Policy Rights Review",
+        bullets: formatAssertions(review.policyRights, "No policy-rights provisions were identified in the current source set."),
+      },
+      {
+        title: "Need For Written Carrier Position",
+        bullets: claimHandlingContext.nextDocumentation,
+      },
+      {
+        title: "Repair Scope Only Where Tied To Loss Maturity",
+        bullets: claimHandlingContext.repairAttachments,
+      },
+      {
         title: "Jurisdiction Summary",
         bullets: [
           `Detected jurisdiction: ${review.jurisdiction.state}.`,
           `Detection confidence: ${capitalize(review.jurisdiction.confidence)}.`,
-          `Basis: ${review.jurisdiction.basis}`,
+          `Basis: ${humanizePolicyText(review.jurisdiction.basis)}`,
         ],
       },
       {
@@ -147,10 +189,6 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
             ? "No verified regulation citations were available in the current source set. The report does not infer statutes or regulatory duties without citation metadata."
             : buildJurisdictionUnavailableMessage()
         ),
-      },
-      {
-        title: "Policy Rights Review",
-        bullets: formatAssertions(review.policyRights, "No uploaded policy-rights provisions were identified in the current source set."),
       },
       ...(userContextBullets.length
         ? [{
@@ -165,32 +203,18 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
           : ["No weak, unsupported, or mismatched legal sources were used as verified legal support."],
       },
       {
-        title: "Appraisal Rights",
-        bullets: [
-          `Detection: ${review.appraisalRights.detected ? "Detected" : "Not confirmed"}.`,
-          `Confidence: ${capitalize(review.appraisalRights.confidence)}.`,
-          `Basis: ${review.appraisalRights.basis}`,
-          formatCitationList(review.appraisalRights.citations),
-        ],
-      },
-      {
         title: "Insurer Obligation Indicators",
         bullets: formatAssertions(
           review.insurerObligations,
           "No verified insurer-obligation citation was available. Operational concerns should be treated as claim-handling indicators only."
         ),
       },
-      {
-        title: "OEM Position Support",
-        bullets: formatAssertions(review.oemPositionSupport, "No OEM position statement citation was available in the current source set."),
-      },
-      {
-        title: "Procedural Inference",
-        bullets: formatAssertions(
-          review.proceduralInference,
-          "No procedural inference was used for legal or policy support. Procedure-related conclusions require verified OEM, policy, or estimate support before escalation."
-        ),
-      },
+      ...(review.oemPositionSupport.length
+        ? [{
+            title: "OEM / Repair Support Attachments",
+            bullets: formatAssertions(review.oemPositionSupport, "No OEM position statement citation was available in the current source set."),
+          }]
+        : []),
       {
         title: "Escalation Options",
         bullets: formatAssertions(
@@ -311,7 +335,7 @@ export function buildPolicyRightsReviewModel(
         citations: [citation],
       })
     ),
-    missingDocumentation: buildMissingDocumentation(verifiedPolicyCitations, verifiedLegalCitations, oemCitations),
+    missingDocumentation: buildMissingDocumentation(verifiedPolicyCitations, verifiedLegalCitations),
     citations,
   };
 }
@@ -430,16 +454,20 @@ function buildImmutableCitations(
   return dedupeCitations(citations);
 }
 
-function buildUserProvidedContextBullets(value: string | null | undefined): string[] {
+function buildUserProvidedContextBullets(value: string | null | undefined, reportedIssues: string[] = []): string[] {
   const text = (value ?? "").replace(/\r/g, "\n").trim();
-  if (!text || !/User-Provided Chat Context|appraisal|carrier|claim|denial|delay|refus|award letter|independent appraiser|IA/i.test(text)) {
+  if (!text && reportedIssues.length === 0) {
+    return [];
+  }
+  if (!/User-Provided Chat Context|appraisal|carrier|claim|denial|delay|refus|award letter|independent appraiser|IA/i.test(text) && reportedIssues.length === 0) {
     return [];
   }
 
   return [
     "User-provided context reports an appraisal-process dispute or claim-handling concern. This is treated as user-provided context, not verified document evidence.",
-    "The context should be used to identify what policy issue to review, including appraisal language, disagreement-resolution terms, repair-completion posture, award-letter timing, and any written carrier or IA demand.",
-    "Uploaded policy/appraisal language, written carrier or IA correspondence, appraisal invocation, inspection notes, and any legal-team correspondence must be reviewed before stating a policy position.",
+    ...(reportedIssues.length ? [`Reported issue category: ${dedupeStrings(reportedIssues).join("; ")}.`] : []),
+    "The context should be used to identify what policy issue to review, including appraisal language, disagreement-resolution terms, repair-completion posture, award-letter timing, amount-of-loss maturity, and any written carrier or IA demand.",
+    "Policy/appraisal language, written carrier or IA correspondence, appraisal invocation, inspection notes, and any legal-team correspondence must be reviewed before stating a policy position.",
   ];
 }
 
@@ -468,7 +496,7 @@ function buildUploadedPolicyCitations(text: string, startIndex: number): Immutab
       title: jurisdiction
         ? `Uploaded policy packet with ${jurisdiction} policy indicators`
         : "Uploaded policy packet",
-      locator: policySignals || "Policy evidence was uploaded and classified from policy-related document text.",
+      locator: policySignals || "Policy evidence was classified from policy-related source text.",
       jurisdiction,
       retrievedAt: new Date().toISOString(),
       confidenceScore: 0.86,
@@ -618,21 +646,17 @@ function detectJurisdiction(
 
 function buildMissingDocumentation(
   policyCitations: ImmutablePolicyCitation[],
-  legalCitations: ImmutablePolicyCitation[],
-  oemCitations: ImmutablePolicyCitation[]
+  legalCitations: ImmutablePolicyCitation[]
 ): string[] {
   return [
     ...(policyCitations.length === 0
-      ? ["Uploaded policy jacket, declarations page, endorsements, and appraisal clause."]
+      ? ["Policy jacket, declarations page, endorsements, and appraisal clause."]
       : []),
     ...(legalCitations.length === 0
       ? ["Verified state regulation/statute or DOI source with immutable citation metadata."]
       : []),
-    ...(oemCitations.length === 0
-      ? ["OEM position statement or manufacturer procedure support tied to the disputed operation."]
-      : []),
-    "Carrier denial, supplement response, or written claim-position correspondence.",
-    "Current estimate, revised estimate, and any line-item explanation from the insurer.",
+    "Carrier denial, supplement response, appraisal demand, or written claim-position correspondence.",
+    "Supplement 1, reinspection records, teardown findings, final estimate updates, and repair-completion documentation tied to amount-of-loss maturity.",
   ];
 }
 
@@ -816,10 +840,10 @@ function formatAssertions(assertions: PolicyRightsAssertion[], fallback: string)
     const commentary = assertion.commentary ? ` Commentary: ${assertion.commentary}` : "";
 
     return [
-      `${prefix}: ${assertion.statement}`,
-      `${rationale} The confidence band is ${capitalize(assertion.confidence)} because ${assertion.confidenceRationale}`,
-      `${evidenceChain} Support posture is ${formatLabel(support)}.${legalGuard}`,
-      `${riskIfOmitted} ${citationText}${commentary}`,
+      `${prefix}: ${humanizePolicyText(assertion.statement)}`,
+      `${humanizePolicyText(rationale)} The confidence band is ${capitalize(assertion.confidence)} because ${humanizePolicyText(assertion.confidenceRationale)}`,
+      `${humanizePolicyText(evidenceChain)} Support posture is ${formatLabel(support)}.${legalGuard}`,
+      `${humanizePolicyText(riskIfOmitted)} ${citationText}${humanizePolicyText(commentary)}`,
     ].join("\n\n");
   });
 }
@@ -984,25 +1008,37 @@ function formatCitationList(citations: ImmutablePolicyCitation[]): string {
     return "Citations: none attached.";
   }
 
-  return `Citations: ${citations.map((citation) => citation.id).join(", ")}.`;
+  return `Citations: ${citations.map((citation) => humanizePolicyText(citation.title)).join("; ")}.`;
 }
 
 function formatCitationIndexItem(citation: ImmutablePolicyCitation): string {
   return [
-    `${citation.id}: ${citation.title}`,
+    `Citation: ${humanizePolicyText(citation.title)}`,
     `Source: ${formatCitationSource(citation.source)}`,
     citation.sourceType ? `Source type: ${citation.sourceType}` : null,
     `Authority tier: ${formatLabel(citation.sourceAuthorityTier)}`,
-    citation.locator ? `Locator: ${citation.locator}` : null,
+    citation.locator ? `Locator: ${humanizePolicyText(citation.locator)}` : null,
     citation.url ? `URL: ${citation.url}` : null,
     citation.retrievedAt ? `Retrieved: ${citation.retrievedAt}` : null,
     citation.jurisdiction ? `Jurisdiction: ${citation.jurisdiction}` : null,
     citation.effectiveDate ? `Effective date: ${citation.effectiveDate}` : null,
     typeof citation.confidenceScore === "number" ? `Confidence score: ${Math.round(citation.confidenceScore * 100)}%` : null,
-    `Immutable key: ${citation.immutableKey}`,
   ]
     .filter(Boolean)
     .join(" | ");
+}
+
+function humanizePolicyText(value: string): string {
+  return value
+    .replace(/\buploaded document\b/gi, "source material")
+    .replace(/\buploaded policy packet\b/gi, "policy packet")
+    .replace(/\bSame rationale as earlier\b/gi, "The same policy support should be reviewed with the current claim context.")
+    .replace(/\bCurrent estimate analysis; citation still needed\b/gi, "Repair attachment context; independent citation still needed")
+    .replace(/\bclaim-\[REDACTED_CLAIM\]\b/gi, "the claim")
+    .replace(/\bpolicy-\[REDACTED_POLICY\]\b/gi, "the policy")
+    .replace(/\bCalibration Verification Open\b/gi, "scan and calibration verification remains open")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function dedupeCitations(citations: ImmutablePolicyCitation[]): ImmutablePolicyCitation[] {
