@@ -414,9 +414,7 @@ export default function ChatWidget({
   const [recordingError, setRecordingError] = useState<string | null>(null);
   const [showOpeningDisclaimer, setShowOpeningDisclaimer] = useState(true);
   const [openingDisclaimerDismissed, setOpeningDisclaimerDismissed] = useState(false);
-  const [resolvedViewerAccess, setResolvedViewerAccess] = useState<AccountEntitlements | null>(
-    viewerAccess
-  );
+  const [fetchedViewerAccess, setFetchedViewerAccess] = useState<AccountEntitlements | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -470,12 +468,10 @@ export default function ChatWidget({
     attachments.length === 0 ? true : attachments.length >= 3 ? false : attachmentsOpen;
   useEffect(() => {
     if (viewerAccess) {
-      setResolvedViewerAccess(viewerAccess);
       return;
     }
 
     if (!isUserLoaded || !isSignedIn) {
-      setResolvedViewerAccess(null);
       return;
     }
 
@@ -489,7 +485,7 @@ export default function ChatWidget({
 
         const entitlements = (await response.json()) as AccountEntitlements;
         if (!cancelled) {
-          setResolvedViewerAccess(entitlements);
+          setFetchedViewerAccess(entitlements);
         }
       } catch {
         // Server-side upload limits remain authoritative if entitlement loading fails.
@@ -502,6 +498,7 @@ export default function ChatWidget({
     };
   }, [isSignedIn, isUserLoaded, viewerAccess]);
 
+  const resolvedViewerAccess = isSignedIn ? viewerAccess ?? fetchedViewerAccess : null;
   const productPlan = resolvedViewerAccess?.plan ?? "none";
   const hasProChatRecommendations = canAccessFeature(productPlan, "chat_report_recommendations");
   const selectedVoicePreset =
@@ -520,7 +517,8 @@ export default function ChatWidget({
   const uploadBatchGuidance = buildUploadBatchGuidance(
     totalFilesReviewed,
     attachments.length,
-    maxUploadBatchFiles
+    maxUploadBatchFiles,
+    uploadPlanLimits.plan
   );
 
   useEffect(() => {

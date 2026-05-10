@@ -71,6 +71,7 @@ export default function FileUpload({
   const [maxUploadBatchFiles, setMaxUploadBatchFiles] = useState(
     STARTER_UPLOAD_LIMITS.maxFilesPerReview
   );
+  const [uploadPlanName, setUploadPlanName] = useState(STARTER_UPLOAD_LIMITS.plan);
   const [uploadLimitsLoaded, setUploadLimitsLoaded] = useState(false);
   const [zipSummary, setZipSummary] = useState<string | null>(null);
   const [largeUploadWarning, setLargeUploadWarning] = useState<string | null>(null);
@@ -80,7 +81,6 @@ export default function FileUpload({
 
   useEffect(() => {
     if (!isSignedIn) {
-      setUploadLimitsLoaded(false);
       return;
     }
 
@@ -101,11 +101,14 @@ export default function FileUpload({
 
         const uploadLimits = resolveUploadPlanLimits(entitlements);
         setMaxUploadBatchFiles(uploadLimits.maxFilesPerReview);
+        setUploadPlanName(uploadLimits.plan);
 
         if (uploadLimits.plan === "admin") {
           setUploadHint(`You can upload PDFs, photos, screenshots, or ZIP files. ${getUploadBatchLimitMessage(uploadLimits)} Admin target: 50 MB; temporary platform upload limit: 20 MB.`);
         } else if (uploadLimits.plan === "pro" || uploadLimits.plan === "trial") {
           setUploadHint(`You can upload PDFs, photos, screenshots, or ZIP files. ${getUploadBatchLimitMessage(uploadLimits)} Pro trial/Pro target: 30 MB; temporary platform upload limit: 20 MB.`);
+        } else if (uploadLimits.plan === "free") {
+          setUploadHint(`Free accounts can upload PDFs or photos. ${getUploadBatchLimitMessage(uploadLimits)} Monthly limit: 3 uploads.`);
         } else {
           setUploadHint(`You can upload PDFs, photos, screenshots, or ZIP files. ${getUploadBatchLimitMessage(uploadLimits)} Starter: 10 MB; ZIP files are not included.`);
         }
@@ -158,7 +161,7 @@ export default function FileUpload({
         .filter((file) => file.size <= MAX_UPLOAD_FILE_BYTES);
       const failures = [
         ...selectedFiles.slice(maxUploadBatchFiles).map(
-          (file) => `${file.name}: ${getUploadBatchLimitMessage({ maxFilesPerReview: maxUploadBatchFiles })}`
+          (file) => `${file.name}: ${getUploadBatchLimitMessage({ maxFilesPerReview: maxUploadBatchFiles, plan: uploadPlanName })}`
         ),
         ...selectedFiles
           .slice(0, maxUploadBatchFiles)

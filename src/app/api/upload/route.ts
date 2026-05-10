@@ -10,6 +10,15 @@ import {
   getCurrentSubscriptionTierForUser,
   resolveProductTrialActive,
 } from "@/lib/billing/productEntitlements";
+import {
+  FREE_MONTHLY_UPLOAD_LIMIT,
+  FREE_UPLOAD_BATCH_MESSAGE,
+  FREE_UPLOAD_LIMIT_MESSAGE,
+  evaluateFreeUploadRequest,
+  getFreeUploadUsageCount,
+  isFreeUploadEntitlement,
+  recordFreeUploadUsage,
+} from "@/lib/billing/freeUploadEntitlements";
 import { UsageAccessError, recordUsage } from "@/lib/billing/usage";
 import { getUsageCount, incrementUsage } from "@/lib/usage";
 import { saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
@@ -225,6 +234,10 @@ export async function POST(req: Request) {
     });
     const canUploadFiles = resolveCanUploadFiles(entitlements);
     const uploadLimits = resolveUploadPlanLimits(entitlements);
+    const isFreeUploadPlan = isFreeUploadEntitlement({
+      ...entitlements,
+      isPlatformAdmin: effectiveIsAdmin,
+    });
     // TODO(direct-to-storage): replace multipart uploads with signed object-storage URLs
     // -> object storage -> async ZIP extraction -> analysis once uploads need to exceed runtime limits.
     const runtimeMaxUploadBytes = Math.min(
@@ -271,6 +284,106 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "NO_FILE" }, { status: 400 });
     }
 
+    let freeUploadsUsed: number | null = null;
+
+    if (isFreeUploadPlan) {
+      const freeFileInputs = files.map((file) => ({
+        filename: file.name,
+        type: file.type,
+      }));
+
+      const preUsageFreeRequest = evaluateFreeUploadRequest({
+        files: freeFileInputs,
+        used: 0,
+      });
+
+      if (preUsageFreeRequest.code === "FREE_UPLOAD_BATCH_LIMIT") {
+        return NextResponse.json(
+          {
+            error: FREE_UPLOAD_BATCH_MESSAGE,
+            code: "FREE_UPLOAD_BATCH_LIMIT",
+            successfulUploads: [],
+            failedUploads: files.map((file) => ({
+              filename: file.name,
+              reason: FREE_UPLOAD_BATCH_MESSAGE,
+              code: "FREE_UPLOAD_BATCH_LIMIT",
+            })),
+            documents: [],
+          },
+          { status: 400 }
+        );
+      }
+
+      const freeFile = files[0];
+      if (preUsageFreeRequest.code === "FREE_UPLOAD_FILE_TYPE_LIMIT") {
+        return NextResponse.json(
+          {
+            error: preUsageFreeRequest.message,
+            code: preUsageFreeRequest.code,
+            successfulUploads: [],
+            failedUploads: [
+              {
+                filename: freeFile.name,
+                reason: preUsageFreeRequest.message,
+                code: preUsageFreeRequest.code,
+              },
+            ],
+            documents: [],
+          },
+          { status: 400 }
+        );
+      }
+
+      try {
+        freeUploadsUsed = await getFreeUploadUsageCount({ userId: user.id });
+      } catch (error) {
+        console.error("[upload] free monthly usage read failed", {
+          userId: user.id,
+          error,
+        });
+        return NextResponse.json(
+          {
+            error: "Upload usage could not be verified. Please try again in a moment.",
+            code: "UPLOAD_USAGE_UNAVAILABLE",
+            successfulUploads: [],
+            failedUploads: [],
+            documents: [],
+          },
+          { status: 503 }
+        );
+      }
+
+      const freeQuota = evaluateFreeUploadRequest({
+        files: freeFileInputs,
+        used: freeUploadsUsed,
+      });
+
+      if (!freeQuota.allowed && freeQuota.code === "FREE_MONTHLY_UPLOAD_LIMIT_REACHED") {
+        return NextResponse.json(
+          {
+            error: FREE_UPLOAD_LIMIT_MESSAGE,
+            code: "FREE_MONTHLY_UPLOAD_LIMIT_REACHED",
+            successfulUploads: [],
+            failedUploads: [
+              {
+                filename: freeFile.name,
+                reason: FREE_UPLOAD_LIMIT_MESSAGE,
+                code: "FREE_MONTHLY_UPLOAD_LIMIT_REACHED",
+              },
+            ],
+            usage: {
+              uploadCount: freeUploadsUsed,
+              uploadCap: FREE_MONTHLY_UPLOAD_LIMIT,
+              plan: entitlements.plan,
+              billingPlan: entitlements.billingPlan,
+            },
+            documents: [],
+          },
+          { status: 403 }
+        );
+      }
+    }
+
     const activeCase = activeCaseId
       ? await getAnalysisReport(activeCaseId, { ownerUserId: user.id })
       : null;
@@ -286,8 +399,11 @@ export async function POST(req: Request) {
     const successfulUploads: UploadSuccess[] = [];
     const failedUploads: UploadFailure[] = [];
     let uploadsUsed = entitlements.uploadCount;
+    if (freeUploadsUsed !== null) {
+      uploadsUsed = freeUploadsUsed;
+    }
 
-    if (!effectiveIsAdmin && entitlements.uploadCap !== null) {
+    if (!isFreeUploadPlan && !effectiveIsAdmin && entitlements.uploadCap !== null) {
       try {
         uploadsUsed = await getUsageCount(user.id, "FILE_UPLOAD");
       } catch (error) {
@@ -314,7 +430,8 @@ export async function POST(req: Request) {
         canUpload: entitlements.canUpload,
         canUploadFiles,
         uploadCount: uploadsUsed,
-        uploadCap: entitlements.uploadCap,
+        uploadCap: isFreeUploadPlan ? FREE_MONTHLY_UPLOAD_LIMIT : entitlements.uploadCap,
+        freeRollingUploadCount: freeUploadsUsed,
         maxUploadsPerReview: entitlements.maxUploadsPerReview,
         uploadLimits,
         usageStatus: entitlements.usageStatus,
@@ -444,6 +561,19 @@ export async function POST(req: Request) {
             maxImageDataUrlBytes: uploadLimits.maxUploadBytes,
           });
 
+          if (isFreeUploadPlan) {
+            await recordFreeUploadUsage({
+              userId: user.id,
+              metadataJson: {
+                source: "free_upload",
+                fileName: preparedFile.filename,
+                fileSize: preparedFile.buffer.byteLength,
+                classification: preparedFile.classification,
+                attachmentId: storedUpload.attachmentId,
+              },
+            });
+          }
+
           successfulUploads.push(storedUpload);
 
           console.info("[upload] attachment stored", {
@@ -469,7 +599,7 @@ export async function POST(req: Request) {
             });
           }
 
-          if (!effectiveIsAdmin) {
+          if (!effectiveIsAdmin && !isFreeUploadPlan) {
             try {
               await recordUsage({
                 userId: user.id,
@@ -556,11 +686,11 @@ export async function POST(req: Request) {
           zipSummaries,
           telemetry,
           usage: {
-            uploadCount: uploadsUsed,
-            uploadCap: entitlements.uploadCap,
-            plan: entitlements.plan,
-            billingPlan: entitlements.billingPlan,
-          },
+          uploadCount: uploadsUsed,
+          uploadCap: isFreeUploadPlan ? FREE_MONTHLY_UPLOAD_LIMIT : entitlements.uploadCap,
+          plan: entitlements.plan,
+          billingPlan: entitlements.billingPlan,
+        },
           successfulUploads,
           failedUploads,
           documents: [],
@@ -599,7 +729,7 @@ export async function POST(req: Request) {
       telemetry,
       usage: {
         uploadCount: uploadsUsed + successfulUploads.length,
-        uploadCap: entitlements.uploadCap,
+        uploadCap: isFreeUploadPlan ? FREE_MONTHLY_UPLOAD_LIMIT : entitlements.uploadCap,
         plan: entitlements.plan,
         billingPlan: entitlements.billingPlan,
       },

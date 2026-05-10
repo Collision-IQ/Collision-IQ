@@ -220,7 +220,7 @@ export function toAccountEntitlements(
     analysisCap,
     analysisCount,
     canRunAnalysis: isProLike ? true : access.canRunAnalysis,
-    canUpload: billingPlan !== "none",
+    canUpload: access.isAuthenticated,
     uploadCap: getPlanUploadCap(billingPlan),
     uploadCount: 0,
     canExport: billingPlan !== "none",
@@ -422,7 +422,7 @@ export function getPlanUploadCap(plan: BillingPlan): number | null {
       return null;
     case "none":
     default:
-      return 0;
+      return null;
   }
 }
 
@@ -435,8 +435,8 @@ export function getPlanUploadBatchLimit(plan: BillingPlan | "admin"): number {
     case "pro":
       return 6;
     case "starter":
-      return 1;
     case "none":
+      return 1;
     default:
       return 0;
   }

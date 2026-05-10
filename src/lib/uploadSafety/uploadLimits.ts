@@ -4,6 +4,8 @@ export const MB = 1024 * 1024;
 export const STARTER_UPLOAD_BATCH_FILE_LIMIT = 1;
 export const PRO_UPLOAD_BATCH_FILE_LIMIT = 6;
 export const ADMIN_UPLOAD_BATCH_FILE_LIMIT = 50;
+export const FREE_UPLOAD_BATCH_LIMIT_MESSAGE =
+  "Free accounts can upload 1 file per analysis. Please remove extra files and try again.";
 
 export const ALLOWED_UPLOAD_EXTENSIONS = new Set([
   ".pdf",
@@ -55,7 +57,7 @@ export const SCREENSHOT_IMAGE_EXTENSIONS = new Set([
 ]);
 
 export type UploadPlanLimits = {
-  plan: "starter" | "trial" | "pro" | "admin";
+  plan: "free" | "starter" | "trial" | "pro" | "admin";
   maxUploadBytes: number;
   maxFilesPerReview: number;
   zipAllowed: boolean;
@@ -111,8 +113,13 @@ export function resolveUploadPlanLimits(
     };
   }
 
+  const isFreePlan =
+    entitlements.billingPlan === "none" ||
+    entitlements.plan === "none" ||
+    entitlements.entitlementSource === "locked";
+
   return {
-    plan: "starter",
+    plan: isFreePlan ? "free" : "starter",
     maxUploadBytes: 10 * MB,
     maxFilesPerReview: entitlements.maxUploadsPerReview ?? STARTER_UPLOAD_BATCH_FILE_LIMIT,
     zipAllowed: false,
@@ -128,8 +135,12 @@ export function formatUploadLimitBytes(bytes: number) {
 }
 
 export function getUploadBatchLimitMessage(
-  limits: Pick<UploadPlanLimits, "maxFilesPerReview">
+  limits: Pick<UploadPlanLimits, "maxFilesPerReview"> & { plan?: UploadPlanLimits["plan"] }
 ) {
+  if (limits.plan === "free" && limits.maxFilesPerReview === 1) {
+    return FREE_UPLOAD_BATCH_LIMIT_MESSAGE;
+  }
+
   if (limits.maxFilesPerReview === 1) {
     return "You can upload 1 file per review.";
   }

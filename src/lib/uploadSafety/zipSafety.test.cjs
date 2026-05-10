@@ -7,6 +7,7 @@ const ts = require("typescript");
 const JSZip = require("jszip");
 
 const originalResolveFilename = Module._resolveFilename;
+const originalLoad = Module._load;
 Module._resolveFilename = function resolveFilenameWithAlias(request, parent, isMain, options) {
   if (request.startsWith("@/")) {
     const absolute = path.join(process.cwd(), "src", request.slice(2));
@@ -14,6 +15,13 @@ Module._resolveFilename = function resolveFilenameWithAlias(request, parent, isM
   }
 
   return originalResolveFilename.call(this, request, parent, isMain, options);
+};
+Module._load = function loadWithServerOnlyShim(request, parent, isMain) {
+  if (request === "server-only") {
+    return {};
+  }
+
+  return originalLoad.call(this, request, parent, isMain);
 };
 
 require.extensions[".ts"] = function registerTypeScript(module, filename) {
@@ -79,6 +87,15 @@ function proEntitlements() {
     billingPlan: "pro",
     isPlatformAdmin: false,
     entitlementSource: "paid_subscription",
+  };
+}
+
+function freeEntitlements() {
+  return {
+    plan: "none",
+    billingPlan: "none",
+    isPlatformAdmin: false,
+    entitlementSource: "locked",
   };
 }
 
@@ -192,6 +209,20 @@ run("Starter rejects second file", () => {
   assert.equal(result.valid, false);
   assert.equal(result.code, "MAX_FILES_REACHED");
   assert.equal(result.reason, "You can upload 1 file per review.");
+});
+
+run("Free upload plan allows one PDF/photo per analysis", () => {
+  const limits = resolveUploadPlanLimits(freeEntitlements());
+  const result = validateUploadBatchFileCount(2, limits);
+
+  assert.equal(limits.plan, "free");
+  assert.equal(limits.maxFilesPerReview, 1);
+  assert.equal(limits.zipAllowed, false);
+  assert.equal(result.valid, false);
+  assert.equal(
+    result.reason,
+    "Free accounts can upload 1 file per analysis. Please remove extra files and try again."
+  );
 });
 
 run("Pro allows 6 and rejects 7 in same batch", () => {

@@ -114,7 +114,7 @@ function assertAnalysisAllowedForEntitlements(
     return;
   }
 
-  if (!entitlements.featureFlags.uploads) {
+  if (!entitlements.canUpload) {
     if (entitlements.usageStatus === "trial_expired") {
       throw new UsageAccessError(
         "trial_expired",

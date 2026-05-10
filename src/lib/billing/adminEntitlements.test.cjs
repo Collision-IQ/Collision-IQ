@@ -240,7 +240,7 @@ run("env admin can upload even without subscription", () => {
   assert.equal(entitlements.maxUploadsPerReview, 50);
 });
 
-run("non-admin no-subscription cannot upload", () => {
+run("non-admin no-subscription can upload limited free files", () => {
   const entitlements = resolveProductEntitlements(
     buildAccess({
       plan: "none",
@@ -252,9 +252,9 @@ run("non-admin no-subscription cannot upload", () => {
   );
 
   assert.equal(entitlements.isPlatformAdmin, false);
-  assert.equal(canUploadFiles(entitlements), false);
-  assert.equal(entitlements.uploadCap, 0);
-  assert.equal(entitlements.maxUploadsPerReview, 0);
+  assert.equal(canUploadFiles(entitlements), true);
+  assert.equal(entitlements.uploadCap, null);
+  assert.equal(entitlements.maxUploadsPerReview, 1);
 });
 
 run("trial user can upload", () => {
@@ -370,7 +370,7 @@ run("expired trial locks access unless paid subscription exists", () => {
   assert.equal(expired.entitlementSource, "locked");
   assert.equal(expired.trialActive, false);
   assert.equal(expired.canRunAnalysis, false);
-  assert.equal(expired.canUpload, false);
+  assert.equal(expired.canUpload, true);
   assert.equal(expired.canExport, false);
 
   const paid = resolveProductEntitlements(
@@ -447,7 +447,7 @@ run("backend upload/export/chat-only gates use resolved entitlement", () => {
     { userEmail: "locked-gates@example.com" }
   );
 
-  assert.equal(canUploadFiles(locked), false);
+  assert.equal(canUploadFiles(locked), true);
   assert.equal(canAccessFeature(locked.plan, "repair_intelligence_export"), false);
   assert.equal(locked.canUseChatOnly, false);
 });
