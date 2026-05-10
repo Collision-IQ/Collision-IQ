@@ -113,3 +113,8 @@ t-Path*
 
 # HubSpot config file
 hubspot.config.yml
+
+# ELEVENLABS config file
+elevenlabs.config.yml
+ELVEENLABS_API_KEY
+ELEVENLABS_VOICE_ID

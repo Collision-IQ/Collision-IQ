@@ -63,7 +63,7 @@ import {
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
 } from "@/lib/uploadSafety/uploadLimits";
-import { TTS_STYLE_PROMPT, VOICE_PRESETS } from "@/lib/voicePresets";
+import { VOICE_PRESETS } from "@/lib/voicePresets";
 
 interface Attachment {
   attachmentId: string;
@@ -188,11 +188,9 @@ const INITIAL_MESSAGE: Message = {
     "Hi there - upload an estimate, OEM procedure, or photo and I'll produce a structured repair analysis.",
 };
 
-const SERVER_TTS_ENABLED =
-  process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_SERVER_TTS === "true";
+const SERVER_TTS_ENABLED = true;
 const BROWSER_TTS_ENABLED =
   process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_BROWSER_TTS === "true";
-const SERVER_TTS_VOICE = process.env.NEXT_PUBLIC_COLLISION_IQ_TTS_VOICE?.trim() || undefined;
 const LARGE_UPLOAD_WARNING_BYTES = 10 * 1024 * 1024;
 
 const DEFAULT_UPLOAD_LIMIT_ENTITLEMENTS: Pick<
@@ -405,6 +403,7 @@ export default function ChatWidget({
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isSpeechPaused, setIsSpeechPaused] = useState(false);
+  const [ttsGeneratingMessageId, setTtsGeneratingMessageId] = useState<string | null>(null);
   const [ttsVoiceName, setTtsVoiceName] = useState<string | null>(null);
   const [ttsPresetId, setTtsPresetId] = useState<string>("default");
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -432,6 +431,7 @@ export default function ChatWidget({
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+  const audioBlobCacheRef = useRef<Map<string, Blob>>(new Map());
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messageCounterRef = useRef(0);
   const activeSystemStatusMessageIdRef = useRef<string | null>(null);
@@ -557,9 +557,11 @@ export default function ChatWidget({
   }, [activeCaseId]);
 
   useEffect(() => {
+    const audioBlobCache = audioBlobCacheRef.current;
     return () => {
       disposeRecordingResources(true);
       stopSpeaking();
+      audioBlobCache.clear();
       for (const attachment of attachmentsRef.current) {
         if (attachment.previewUrl) {
           URL.revokeObjectURL(attachment.previewUrl);
@@ -1101,6 +1103,7 @@ export default function ChatWidget({
       }
     });
     setMessages([INITIAL_MESSAGE]);
+    audioBlobCacheRef.current.clear();
     setAttachments([]);
     setTotalFilesReviewed(0);
     setAttachmentsOpen(true);
@@ -2218,21 +2221,32 @@ export default function ChatWidget({
   }
 
   async function playServerSpeech(message: Message, plainText: string) {
-    const response = await fetch("/api/tts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text: plainText,
-        voice: SERVER_TTS_VOICE,
-        instructions: TTS_STYLE_PROMPT,
-      }),
-    });
+    let audioBlob = audioBlobCacheRef.current.get(message.id);
 
-    if (!response.ok) {
-      throw new Error(`Server TTS failed (${response.status})`);
+    if (!audioBlob) {
+      setTtsGeneratingMessageId(message.id);
+      try {
+        const response = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: plainText }),
+        });
+
+        if (!response.ok) {
+          const data = (await response.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(data?.error ?? `Server TTS failed (${response.status})`);
+        }
+
+        audioBlob = await response.blob();
+        if (!audioBlob.size) {
+          throw new Error("Voice generation returned empty audio.");
+        }
+        audioBlobCacheRef.current.set(message.id, audioBlob);
+      } finally {
+        setTtsGeneratingMessageId((current) => (current === message.id ? null : current));
+      }
     }
 
-    const audioBlob = await response.blob();
     const audioUrl = URL.createObjectURL(audioBlob);
     const audio = new Audio(audioUrl);
 
@@ -2242,6 +2256,7 @@ export default function ChatWidget({
     audio.onplay = () => {
       setSpeakingMessageId(message.id);
       setIsSpeaking(true);
+      setIsSpeechPaused(false);
     };
     audio.onended = () => {
       if (audioRef.current === audio) {
@@ -2523,18 +2538,22 @@ export default function ChatWidget({
                         <button
                           type="button"
                           onClick={() => handleSpeakMessage(msg)}
-                          disabled={!canReadAloud || disabled}
-                          aria-label="Read aloud"
+                          disabled={!canReadAloud || disabled || ttsGeneratingMessageId === msg.id}
+                          aria-label={ttsGeneratingMessageId === msg.id ? "Generating voice" : "Play voice"}
                           title={
-                            canReadAloud
-                              ? SERVER_TTS_ENABLED
-                                ? "Read aloud"
-                                : "Basic browser reader"
+                            ttsGeneratingMessageId === msg.id
+                              ? "Generating voice"
+                              : canReadAloud
+                              ? "Play voice"
                               : "Voiceover requires server speech"
                           }
                           className="rounded-xl bg-muted p-2 text-muted-foreground transition hover:bg-muted/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                         >
-                          <Volume2 size={14} />
+                          {ttsGeneratingMessageId === msg.id ? (
+                            <LoaderCircle size={14} className="animate-spin" />
+                          ) : (
+                            <Volume2 size={14} />
+                          )}
                         </button>
                       )}
                       {/* Pause / Resume — shown when this message is speaking */}
