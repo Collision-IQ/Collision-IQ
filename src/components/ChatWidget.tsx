@@ -191,7 +191,17 @@ const INITIAL_MESSAGE: Message = {
 const SERVER_TTS_ENABLED = true;
 const BROWSER_TTS_ENABLED =
   process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_BROWSER_TTS === "true";
+const SERVER_TTS_MAX_INPUT_CHARS = 4_000;
 const LARGE_UPLOAD_WARNING_BYTES = 10 * 1024 * 1024;
+
+function clampServerTtsText(text: string) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= SERVER_TTS_MAX_INPUT_CHARS) {
+    return normalized;
+  }
+
+  return normalized.slice(0, SERVER_TTS_MAX_INPUT_CHARS).trimEnd();
+}
 
 const DEFAULT_UPLOAD_LIMIT_ENTITLEMENTS: Pick<
   AccountEntitlements,
@@ -2363,11 +2373,13 @@ export default function ChatWidget({
       return;
     }
 
+    const serverSpeechText = clampServerTtsText(plainText);
+
     stopSpeaking();
 
     if (SERVER_TTS_ENABLED) {
       try {
-        await playServerSpeech(message, plainText);
+        await playServerSpeech(message, serverSpeechText);
         return;
       } catch (error) {
         console.warn("[tts] server playback failed, falling back to browser speech", {

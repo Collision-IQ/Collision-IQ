@@ -61,12 +61,6 @@ export async function POST(req: Request) {
     const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
     const voiceId = process.env.ELEVENLABS_VOICE_ID?.trim();
 
-    console.log("[tts] request received");
-    console.log("[tts] env", {
-      hasApiKey: !!process.env.ELEVENLABS_API_KEY,
-      hasVoiceId: !!process.env.ELEVENLABS_VOICE_ID,
-    });
-
     if (!apiKey || !voiceId) {
       console.error("[tts] ElevenLabs is not configured", {
         hasApiKey: Boolean(apiKey),
@@ -104,10 +98,6 @@ export async function POST(req: Request) {
     }
 
     if (!elevenLabsResponse.ok) {
-      console.log("[tts] provider status", elevenLabsResponse.status);
-      const providerErrorText = await elevenLabsResponse.text();
-      console.log("[tts] provider body", providerErrorText.slice(0, 500));
-
       console.warn("[tts] ElevenLabs request failed", {
         ownerUserId: user.id,
         isPlatformAdmin,
@@ -129,10 +119,6 @@ export async function POST(req: Request) {
       );
     }
 
-    console.log("[tts] provider status", elevenLabsResponse.status);
-    const providerOkText = await elevenLabsResponse.clone().text().catch(() => "");
-    console.log("[tts] provider body", providerOkText.slice(0, 500));
-
     const arrayBuffer = await elevenLabsResponse.arrayBuffer();
     if (arrayBuffer.byteLength === 0) {
       console.warn("[tts] ElevenLabs returned empty audio", {
@@ -141,15 +127,6 @@ export async function POST(req: Request) {
       });
       return jsonError("Voice generation returned empty audio.", "TTS_EMPTY_AUDIO", 502);
     }
-
-    console.info("[tts] completed", {
-      ownerUserId: user.id,
-      isPlatformAdmin,
-      provider: "elevenlabs",
-      model: ELEVENLABS_MODEL_ID,
-      inputLength: text.length,
-      audioBytes: arrayBuffer.byteLength,
-    });
 
     return new Response(arrayBuffer, {
       headers: {
