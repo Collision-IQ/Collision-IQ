@@ -61,6 +61,12 @@ export async function POST(req: Request) {
     const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
     const voiceId = process.env.ELEVENLABS_VOICE_ID?.trim();
 
+    console.log("[tts] request received");
+    console.log("[tts] env", {
+      hasApiKey: !!process.env.ELEVENLABS_API_KEY,
+      hasVoiceId: !!process.env.ELEVENLABS_VOICE_ID,
+    });
+
     if (!apiKey || !voiceId) {
       console.error("[tts] ElevenLabs is not configured", {
         hasApiKey: Boolean(apiKey),
@@ -89,10 +95,6 @@ export async function POST(req: Request) {
           body: JSON.stringify({
             text,
             model_id: ELEVENLABS_MODEL_ID,
-            voice_settings: {
-              stability: 0.5,
-              similarity_boost: 0.8,
-            },
           }),
           signal: controller.signal,
         }
@@ -102,6 +104,10 @@ export async function POST(req: Request) {
     }
 
     if (!elevenLabsResponse.ok) {
+      console.log("[tts] provider status", elevenLabsResponse.status);
+      const providerErrorText = await elevenLabsResponse.text();
+      console.log("[tts] provider body", providerErrorText.slice(0, 500));
+
       console.warn("[tts] ElevenLabs request failed", {
         ownerUserId: user.id,
         isPlatformAdmin,
@@ -122,6 +128,10 @@ export async function POST(req: Request) {
         502
       );
     }
+
+    console.log("[tts] provider status", elevenLabsResponse.status);
+    const providerOkText = await elevenLabsResponse.clone().text().catch(() => "");
+    console.log("[tts] provider body", providerOkText.slice(0, 500));
 
     const arrayBuffer = await elevenLabsResponse.arrayBuffer();
     if (arrayBuffer.byteLength === 0) {

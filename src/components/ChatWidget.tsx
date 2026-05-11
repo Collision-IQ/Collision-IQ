@@ -2228,13 +2228,32 @@ export default function ChatWidget({
       try {
         const response = await fetch("/api/tts", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          headers: {
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify({ text: plainText }),
         });
 
+        const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+
         if (!response.ok) {
-          const data = (await response.json().catch(() => null)) as { error?: string } | null;
-          throw new Error(data?.error ?? `Server TTS failed (${response.status})`);
+          const data = (await response.json().catch(() => null)) as
+            | { error?: string; code?: string }
+            | null;
+          const errorCode = data?.code ? ` ${data.code}` : "";
+          throw new Error(
+            data?.error ??
+              `Server TTS failed (${response.status}${errorCode}; content-type=${contentType || "unknown"})`
+          );
+        }
+
+        if (!contentType.includes("audio/")) {
+          const diagnosticBody = await response.text().catch(() => "");
+          const preview = diagnosticBody.slice(0, 180).replace(/\s+/g, " ").trim();
+          throw new Error(
+            `Server TTS returned non-audio content (status=${response.status}; content-type=${contentType || "unknown"}; body=${preview || "<empty>"})`
+          );
         }
 
         audioBlob = await response.blob();

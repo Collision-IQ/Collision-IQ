@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Show, SignInButton, UserButton } from "@clerk/nextjs";
+import { ClerkProvider, Show, SignInButton, UserButton } from "@clerk/nextjs";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 function HeaderAuth() {
@@ -110,7 +110,8 @@ export default function ChatShell({
   const hasRight = useMemo(() => Boolean(right), [right]);
 
   return (
-    <div className="ci-workstation flex h-[100svh] flex-col overflow-hidden bg-background text-foreground">
+    <ClerkProvider>
+      <div className="ci-workstation flex h-[100svh] flex-col overflow-hidden bg-background text-foreground">
       <header className="relative z-10 border-b border-border bg-card">
         <div className="relative mx-auto flex min-h-[52px] max-w-none items-center justify-between gap-4 px-4 py-1.5 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
@@ -245,5 +246,6 @@ export default function ChatShell({
         </Drawer>
       )}
     </div>
+  </ClerkProvider>
   );
 }

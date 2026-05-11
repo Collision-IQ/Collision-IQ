@@ -99,28 +99,30 @@ export default function RootLayout({
   );
 
   return (
-    <html lang="en" className="h-full" suppressHydrationWarning>
-      <head>
-        {/* Safe-area support for mobile */}
-        <meta
-          name="viewport"
-          content="width=device-width, initial-scale=1, viewport-fit=cover"
-        />
-      </head>
+    <ClerkProvider>
+      <html lang="en" className="h-full" suppressHydrationWarning>
+        <head>
+          {/* Safe-area support for mobile */}
+          <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1, viewport-fit=cover"
+          />
+        </head>
 
-      <body
-        className="
-          h-full
-          bg-background
-          text-foreground antialiased
-          overflow-x-hidden
-          root-layout-body
-        "
-      >
-        <ThemeProvider>
-          {hasClerkPublishableKey() ? <ClerkProvider>{content}</ClerkProvider> : content}
-        </ThemeProvider>
-      </body>
-    </html>
+        <body
+          className="
+            h-full
+            bg-background
+            text-foreground antialiased
+            overflow-x-hidden
+            root-layout-body
+          "
+        >
+          <ThemeProvider>
+            {content}
+          </ThemeProvider>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }
