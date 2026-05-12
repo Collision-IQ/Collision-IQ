@@ -129,7 +129,7 @@ run("estimate delta report buckets Honda newer-estimate ADAS additions and body 
       "Proc Pre-repair scan 1.0",
       "Proc Post-repair scan 1.0",
       "Rpr Front bumper cover 2.0",
-      "REVV ADAS report",
+      "REVVAdas Report",
       "In-process scan",
       "Four wheel alignment",
       "Radar calibration",
@@ -138,6 +138,8 @@ run("estimate delta report buckets Honda newer-estimate ADAS additions and body 
       "Seat weight sensor zero point calibration",
       "Power window initialization",
     ].join("\n"),
+    shopEstimateLabel: "Estimate 1",
+    insurerEstimateLabel: "Estimate 2",
   });
 
   const document = buildEstimatorChangeRequestListPdf({
@@ -151,7 +153,7 @@ run("estimate delta report buckets Honda newer-estimate ADAS additions and body 
   const text = JSON.stringify(document);
 
   assert.equal(document.header.title, "Estimate Delta / Change Requests");
-  assert.match(added.join("\n"), /REVV ADAS report/i);
+  assert.match(added.join("\n"), /REVVAdas Report/i);
   assert.match(added.join("\n"), /In-process scan/i);
   assert.match(added.join("\n"), /Four wheel alignment/i);
   assert.match(added.join("\n"), /Radar calibration/i);

@@ -12,6 +12,8 @@ import { buildWorkspaceEstimateComparisonSummary } from "@/lib/workspace/estimat
 type ComparisonEngineParams = {
   shopEstimateText: string;
   insurerEstimateText: string;
+  shopEstimateLabel?: string;
+  insurerEstimateLabel?: string;
 };
 
 export function buildComparisonAnalysis(
@@ -23,13 +25,21 @@ export function buildComparisonAnalysis(
   const insurerOperations = extractEstimateOps(params.insurerEstimateText);
   const shopStory = buildRepairStory(params.shopEstimateText);
   const insurerStory = buildRepairStory(params.insurerEstimateText);
+  const shopEstimateLabel = params.shopEstimateLabel ?? "Shop estimate";
+  const insurerEstimateLabel = params.insurerEstimateLabel ?? "Carrier estimate";
   const findings = buildComparisonFindings({
     shopStory,
     insurerStory,
     shopOperations,
     insurerOperations,
   });
-  const evidence = buildEvidence(params, shopOperations, insurerOperations);
+  const evidence = buildEvidence(
+    params,
+    shopOperations,
+    insurerOperations,
+    shopEstimateLabel,
+    insurerEstimateLabel
+  );
 
   return {
     mode: "comparison",
@@ -58,6 +68,8 @@ export function buildComparisonAnalysis(
       shopOperations,
       insurerOperations,
       findings,
+      shopEstimateLabel,
+      insurerEstimateLabel,
     }),
     rawEstimateText: [params.shopEstimateText, params.insurerEstimateText].join("\n\n"),
     narrative: buildNarrative({
@@ -290,29 +302,31 @@ function buildEquivalenceFinding(
 function buildEvidence(
   params: ComparisonEngineParams,
   shopOperations: EstimateOperation[],
-  insurerOperations: EstimateOperation[]
+  insurerOperations: EstimateOperation[],
+  shopEstimateLabel = "Shop estimate",
+  insurerEstimateLabel = "Carrier estimate"
 ): EvidenceRef[] {
   const evidence: EvidenceRef[] = [
     {
-      source: "shop-estimate",
+      source: shopEstimateLabel,
       quote: params.shopEstimateText.slice(0, 280),
     },
     {
-      source: "carrier-estimate",
+      source: insurerEstimateLabel,
       quote: params.insurerEstimateText.slice(0, 280),
     },
   ];
 
   if (shopOperations[0]) {
     evidence.push({
-      source: "shop-estimate",
+      source: shopEstimateLabel,
       quote: shopOperations[0].rawLine,
     });
   }
 
   if (insurerOperations[0]) {
     evidence.push({
-      source: "carrier-estimate",
+      source: insurerEstimateLabel,
       quote: insurerOperations[0].rawLine,
     });
   }
@@ -328,6 +342,8 @@ function buildEstimateComparisons(params: {
   shopOperations: EstimateOperation[];
   insurerOperations: EstimateOperation[];
   findings: AnalysisFinding[];
+  shopEstimateLabel: string;
+  insurerEstimateLabel: string;
 }): WorkspaceEstimateComparisons {
   const rows: WorkspaceEstimateComparisons["rows"] = [];
   const comparisonPairs = buildOperationPairs(params.shopOperations, params.insurerOperations);
@@ -340,8 +356,8 @@ function buildEstimateComparisons(params: {
       id: "estimate-total",
       category: "Estimate",
       operation: "Estimate total",
-      lhsSource: "Shop estimate",
-      rhsSource: "Carrier estimate",
+      lhsSource: params.shopEstimateLabel,
+      rhsSource: params.insurerEstimateLabel,
       lhsValue: params.shopEstimate.totalCost ?? null,
       rhsValue: params.insurerEstimate.totalCost ?? null,
       delta:
@@ -367,8 +383,8 @@ function buildEstimateComparisons(params: {
       id: "labor-body-hours",
       category: "Labor",
       operation: "Body labor hours",
-      lhsSource: "Shop estimate",
-      rhsSource: "Carrier estimate",
+      lhsSource: params.shopEstimateLabel,
+      rhsSource: params.insurerEstimateLabel,
       lhsValue: params.shopStory.laborStructure.bodyHours ?? null,
       rhsValue: params.insurerStory.laborStructure.bodyHours ?? null,
       delta:
@@ -399,8 +415,8 @@ function buildEstimateComparisons(params: {
       id: "labor-paint-hours",
       category: "Refinish",
       operation: "Paint / refinish hours",
-      lhsSource: "Shop estimate",
-      rhsSource: "Carrier estimate",
+      lhsSource: params.shopEstimateLabel,
+      rhsSource: params.insurerEstimateLabel,
       lhsValue: params.shopStory.laborStructure.paintHours ?? null,
       rhsValue: params.insurerStory.laborStructure.paintHours ?? null,
       delta:
@@ -424,12 +440,18 @@ function buildEstimateComparisons(params: {
   }
 
   comparisonPairs.forEach((pair, index) => {
-    const quantifiedRow = buildOperationLaborComparisonRow(pair, index);
+    const quantifiedRow = buildOperationLaborComparisonRow(pair, index, {
+      shopEstimateLabel: params.shopEstimateLabel,
+      insurerEstimateLabel: params.insurerEstimateLabel,
+    });
     if (quantifiedRow) {
       rows.push(quantifiedRow);
     }
 
-    const row = buildOperationComparisonRow(pair, params.findings, index);
+    const row = buildOperationComparisonRow(pair, params.findings, index, {
+      shopEstimateLabel: params.shopEstimateLabel,
+      insurerEstimateLabel: params.insurerEstimateLabel,
+    });
     if (row) {
       rows.push(row);
     }
@@ -485,7 +507,11 @@ function buildOperationComparisonRow(
     insurer?: EstimateOperation;
   },
   findings: AnalysisFinding[],
-  index: number
+  index: number,
+  labels: {
+    shopEstimateLabel: string;
+    insurerEstimateLabel: string;
+  }
 ) {
   const shop = pair.shop;
   const insurer = pair.insurer;
@@ -506,8 +532,8 @@ function buildOperationComparisonRow(
     category: classifyOperationCategory(shop ?? insurer!),
     operation: shop?.operation ?? insurer?.operation,
     partName: shop?.component ?? insurer?.component,
-    lhsSource: "Shop estimate",
-    rhsSource: "Carrier estimate",
+    lhsSource: labels.shopEstimateLabel,
+    rhsSource: labels.insurerEstimateLabel,
     lhsValue,
     rhsValue,
     delta: buildOperationDelta(shop, insurer, deltaType),
@@ -522,7 +548,11 @@ function buildOperationLaborComparisonRow(
     shop?: EstimateOperation;
     insurer?: EstimateOperation;
   },
-  index: number
+  index: number,
+  labels: {
+    shopEstimateLabel: string;
+    insurerEstimateLabel: string;
+  }
 ) {
   const shop = pair.shop;
   const insurer = pair.insurer;
@@ -539,8 +569,8 @@ function buildOperationLaborComparisonRow(
     category: classifyOperationCategory(shop ?? insurer!),
     operation: `${shop?.component ?? insurer?.component ?? "Operation"} labor hours`,
     partName: shop?.component ?? insurer?.component,
-    lhsSource: "Shop estimate",
-    rhsSource: "Carrier estimate",
+    lhsSource: labels.shopEstimateLabel,
+    rhsSource: labels.insurerEstimateLabel,
     lhsValue: shop?.laborHours ?? null,
     rhsValue: insurer?.laborHours ?? null,
     delta:

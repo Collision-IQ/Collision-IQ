@@ -457,6 +457,8 @@ export async function runRepairAnalysis({
     findDocumentText(documents, ["shop", "body shop", "repair facility"]) ?? null;
   const insurerText =
     findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"]) ?? null;
+  const estimateVersionPair =
+    shopText && insurerText ? null : findEstimateVersionPair(documents);
   const shopVehicle = inferVehicleFromDocument(documents, ["shop", "body shop", "repair facility"]);
   const insurerVehicle = inferVehicleFromDocument(documents, ["insurer", "insurance", "carrier", "sor"]);
   const sessionVehicle =
@@ -467,16 +469,44 @@ export async function runRepairAnalysis({
           source: "session" as const,
         }
       : null;
+  const comparisonInput =
+    shopText && insurerText
+      ? {
+          olderText: shopText,
+          newerText: insurerText,
+          olderLabel: "Shop estimate",
+          newerLabel: "Carrier estimate",
+          olderVehicle: shopVehicle,
+          newerVehicle: insurerVehicle,
+        }
+      : estimateVersionPair
+        ? {
+            olderText: estimateVersionPair.older.text,
+            newerText: estimateVersionPair.newer.text,
+            olderLabel: estimateVersionPair.older.label,
+            newerLabel: estimateVersionPair.newer.label,
+            olderVehicle: extractVehicleIdentityFromText(
+              estimateVersionPair.older.text,
+              "attachment"
+            ),
+            newerVehicle: extractVehicleIdentityFromText(
+              estimateVersionPair.newer.text,
+              "attachment"
+            ),
+          }
+        : null;
 
-  if (shopText && insurerText) {
+  if (comparisonInput) {
     const analysis = buildComparisonAnalysis({
-      shopEstimateText: shopText,
-      insurerEstimateText: insurerText,
+      shopEstimateText: comparisonInput.olderText,
+      insurerEstimateText: comparisonInput.newerText,
+      shopEstimateLabel: comparisonInput.olderLabel,
+      insurerEstimateLabel: comparisonInput.newerLabel,
     });
     const comparisonVehicle = resolveComparisonVehicleIdentity(
       sessionVehicle,
-      shopVehicle,
-      insurerVehicle,
+      comparisonInput.olderVehicle,
+      comparisonInput.newerVehicle,
       analysis.vehicle
     );
     const comparisonAnalysis = {
@@ -675,6 +705,92 @@ function findDocumentText(
   });
 
   return match?.text ?? undefined;
+}
+
+function findEstimateVersionPair(
+  documents: Array<{
+    filename?: string | null;
+    mime?: string | null;
+    text?: string | null;
+  }>
+): {
+  older: { text: string; label: string };
+  newer: { text: string; label: string };
+} | null {
+  const candidates = documents
+    .map((document, index) => ({
+      index,
+      filename: document.filename ?? "",
+      mime: document.mime ?? "",
+      text: document.text?.trim() ?? "",
+    }))
+    .filter((document) => document.text && looksLikeEstimateVersionDocument(document));
+
+  if (candidates.length < 2) {
+    return null;
+  }
+
+  const sorted = [...candidates].sort((left, right) => {
+    const leftVersion = inferEstimateVersionNumber(left.filename);
+    const rightVersion = inferEstimateVersionNumber(right.filename);
+
+    if (leftVersion !== null && rightVersion !== null && leftVersion !== rightVersion) {
+      return leftVersion - rightVersion;
+    }
+
+    return left.index - right.index;
+  });
+  const older = sorted[0];
+  const newer = sorted[1];
+
+  if (!older || !newer) {
+    return null;
+  }
+
+  return {
+    older: {
+      text: older.text,
+      label: buildEstimateVersionLabel(older.filename, "Estimate 1"),
+    },
+    newer: {
+      text: newer.text,
+      label: buildEstimateVersionLabel(newer.filename, "Estimate 2"),
+    },
+  };
+}
+
+function looksLikeEstimateVersionDocument(document: {
+  filename: string;
+  mime: string;
+  text: string;
+}) {
+  const filename = document.filename.toLowerCase();
+  const text = document.text;
+
+  if (/\b(oem|procedure|position statement|adas report|scan report|invoice|photo)\b/i.test(filename)) {
+    return false;
+  }
+
+  return (
+    /\b(estimate|supplement|supp|ccc|mitchell)\b/i.test(filename) ||
+    /\b(grand total|body labor|paint labor|estimate total)\b/i.test(text) ||
+    /(?:^|\n)\s*#?\s*\d*\s*(?:R&I|Repl|Rpr|Blnd|Subl|Algn|Proc)\s+/i.test(text)
+  );
+}
+
+function inferEstimateVersionNumber(filename: string): number | null {
+  const match = filename.match(/\b(?:estimate|supplement|supp|version|rev(?:ision)?)\s*[-_# ]*\s*(\d{1,2})\b/i);
+  if (!match) {
+    return null;
+  }
+
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function buildEstimateVersionLabel(filename: string, fallback: string) {
+  const version = inferEstimateVersionNumber(filename);
+  return version ? `Estimate ${version}` : fallback;
 }
 
 function inferVehicleFromDocument(
