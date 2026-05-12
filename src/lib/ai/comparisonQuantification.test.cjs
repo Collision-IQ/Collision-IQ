@@ -32,6 +32,9 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 
 const { buildComparisonAnalysis } = require("./builders/comparisonEngine.ts");
 const { buildExportModel } = require("./builders/buildExportModel.ts");
+const {
+  buildEstimatorChangeRequestListPdf,
+} = require("./builders/estimateScrubberPdfBuilder.ts");
 
 function run(name, fn) {
   try {
@@ -111,4 +114,48 @@ run("export financial gap summary only uses currency-backed comparison rows for 
   });
 
   assert.equal(exportModel.financialGapBreakdown.totalGap, "$2,550 (directional only)");
+});
+
+run("estimate delta report buckets Honda newer-estimate ADAS additions and body labor change", () => {
+  const analysis = buildComparisonAnalysis({
+    shopEstimateText: [
+      "Body Labor 16.3",
+      "Proc Pre-repair scan 1.0",
+      "Proc Post-repair scan 1.0",
+      "Rpr Front bumper cover 2.0",
+    ].join("\n"),
+    insurerEstimateText: [
+      "Body Labor 16.8",
+      "Proc Pre-repair scan 1.0",
+      "Proc Post-repair scan 1.0",
+      "Rpr Front bumper cover 2.0",
+      "REVV ADAS report",
+      "In-process scan",
+      "Four wheel alignment",
+      "Radar calibration",
+      "Camera calibration",
+      "Steering angle sensor calibration",
+      "Seat weight sensor zero point calibration",
+      "Power window initialization",
+    ].join("\n"),
+  });
+
+  const document = buildEstimatorChangeRequestListPdf({
+    report: null,
+    analysis,
+    panel: null,
+    assistantAnalysis: null,
+  });
+  const added = document.sections.find((section) => section.title === "Added In Newer Estimate")?.bullets ?? [];
+  const changed = document.sections.find((section) => section.title === "Changed Labor / Qty / Price")?.bullets ?? [];
+  const text = JSON.stringify(document);
+
+  assert.equal(document.header.title, "Estimate Delta / Change Requests");
+  assert.match(added.join("\n"), /REVV ADAS report/i);
+  assert.match(added.join("\n"), /In-process scan/i);
+  assert.match(added.join("\n"), /Four wheel alignment/i);
+  assert.match(added.join("\n"), /Radar calibration/i);
+  assert.match(added.join("\n"), /Camera calibration|Steering angle sensor calibration|Seat weight sensor zero point calibration|Power window initialization/i);
+  assert.match(changed.join("\n"), /Body labor hours.*16\.3.*16\.8/i);
+  assert.doesNotMatch(text, /Estimate total|DOI|legal|Not clearly Not clearly/i);
 });

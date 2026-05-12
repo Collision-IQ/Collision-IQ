@@ -494,8 +494,8 @@ run("Annotated Estimate Review selects lower-cost carrier estimate and keeps com
   assert.ok(estimatorList.sections.some((section) => section.title === "Missing From Newer Estimate"));
   assert.ok(estimatorList.sections.some((section) => section.title === "Changed Labor / Qty / Price"));
   assert.ok(estimatorList.sections.some((section) => section.title === "Possible Rekey / Lock / Supplement Gaps"));
-  assert.match(JSON.stringify(estimatorList), /newer estimate adds Refinish labor 1\.5/i);
-  assert.match(JSON.stringify(estimatorList), /newer estimate does not show it/i);
+  assert.match(JSON.stringify(estimatorList), /newer adds Refinish labor 1\.5/i);
+  assert.match(JSON.stringify(estimatorList), /newer not shown/i);
   assert.match(JSON.stringify(estimatorList), /Lock support price/i);
   assert.match(text, /A\/M hood/);
   assert.match(text, /OEM hood/);

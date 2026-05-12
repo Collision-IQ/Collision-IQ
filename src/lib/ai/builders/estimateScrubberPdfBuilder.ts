@@ -1030,16 +1030,16 @@ function formatEstimateDeltaBullet(
   const change = delta ? ` Delta: ${delta}.` : "";
 
   if (bucket === "added") {
-    return `${label}: newer estimate adds ${newer}. Request: confirm this new line is intended.`;
+    return `${label}: newer adds ${newer}.`;
   }
   if (bucket === "missing") {
-    return `${label}: older estimate showed ${older}; newer estimate does not show it. Request: carry forward or explain removal.`;
+    return `${label}: older showed ${older}; newer not shown.`;
   }
   if (bucket === "gap") {
-    return `${label}: check rekey/lock/supplement handling. Older: ${older}. Newer: ${newer}.${change}`;
+    return `${label}: possible rekey/lock/supplement gap. Older: ${older}. Newer: ${newer}.${change}`;
   }
 
-  return `${label}: older ${older}; newer ${newer}.${change} Request: confirm labor, quantity, rate, or price basis.`;
+  return `${label}: older ${older}; newer ${newer}.${change}`;
 }
 
 function resolveEstimateDeltaSides(row: EstimateComparisonRow): {
