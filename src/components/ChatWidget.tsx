@@ -194,6 +194,25 @@ const BROWSER_TTS_ENABLED =
   process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_BROWSER_TTS === "true";
 const SERVER_TTS_MAX_INPUT_CHARS = 4_000;
 const LARGE_UPLOAD_WARNING_BYTES = 10 * 1024 * 1024;
+type ServerTtsVoiceOptionId = "primary" | "secondary";
+type ServerTtsVoiceOption = {
+  id: ServerTtsVoiceOptionId;
+  label: string;
+  voiceId?: string;
+};
+const SECONDARY_SERVER_TTS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
+const DEFAULT_SERVER_TTS_VOICE: ServerTtsVoiceOptionId = "primary";
+const SERVER_TTS_VOICE_OPTIONS: [ServerTtsVoiceOption, ServerTtsVoiceOption] = [
+  {
+    id: "primary",
+    label: "Voice 1",
+  },
+  {
+    id: "secondary",
+    label: "Voice 2",
+    voiceId: SECONDARY_SERVER_TTS_VOICE_ID,
+  },
+];
 
 function clampServerTtsText(text: string) {
   const normalized = text.replace(/\s+/g, " ").trim();
@@ -424,6 +443,8 @@ export default function ChatWidget({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isSpeechPaused, setIsSpeechPaused] = useState(false);
   const [ttsGeneratingMessageId, setTtsGeneratingMessageId] = useState<string | null>(null);
+  const [serverTtsVoiceId, setServerTtsVoiceId] =
+    useState<ServerTtsVoiceOptionId>(DEFAULT_SERVER_TTS_VOICE);
   const [ttsVoiceName, setTtsVoiceName] = useState<string | null>(null);
   const [ttsPresetId, setTtsPresetId] = useState<string>("default");
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -525,6 +546,9 @@ export default function ChatWidget({
   const resolvedViewerAccess = isSignedIn ? viewerAccess ?? fetchedViewerAccess : null;
   const productPlan = resolvedViewerAccess?.plan ?? "none";
   const hasProChatRecommendations = canAccessFeature(productPlan, "chat_report_recommendations");
+  const selectedServerTtsVoice =
+    SERVER_TTS_VOICE_OPTIONS.find((option) => option.id === serverTtsVoiceId) ??
+    SERVER_TTS_VOICE_OPTIONS[0];
   const selectedVoicePreset =
     VOICE_PRESETS.find((preset) => preset.id === ttsPresetId) ?? VOICE_PRESETS[0];
   const browserVoiceNotice =
@@ -2332,8 +2356,13 @@ export default function ChatWidget({
     }
   }
 
-  async function playServerSpeech(message: Message, plainText: string) {
-    let audioBlob = audioBlobCacheRef.current.get(message.id);
+  async function playServerSpeech(
+    message: Message,
+    plainText: string,
+    voice: ServerTtsVoiceOption = SERVER_TTS_VOICE_OPTIONS[0]
+  ) {
+    const cacheKey = `${message.id}:${voice.id}`;
+    let audioBlob = audioBlobCacheRef.current.get(cacheKey);
 
     if (!audioBlob) {
       setTtsGeneratingMessageId(message.id);
@@ -2344,7 +2373,10 @@ export default function ChatWidget({
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ text: plainText }),
+          body: JSON.stringify({
+            text: plainText,
+            ...(voice.voiceId ? { voiceId: voice.voiceId } : {}),
+          }),
         });
 
         const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
@@ -2372,7 +2404,7 @@ export default function ChatWidget({
         if (!audioBlob.size) {
           throw new Error("Voice generation returned empty audio.");
         }
-        audioBlobCacheRef.current.set(message.id, audioBlob);
+        audioBlobCacheRef.current.set(cacheKey, audioBlob);
       } finally {
         setTtsGeneratingMessageId((current) => (current === message.id ? null : current));
       }
@@ -2463,7 +2495,10 @@ export default function ChatWidget({
     speakNext();
   }
 
-  async function handleSpeakMessage(message: Message) {
+  async function handleSpeakMessage(
+    message: Message,
+    voice: ServerTtsVoiceOption = SERVER_TTS_VOICE_OPTIONS[0]
+  ) {
     if (disabled || message.kind === "system_status") return;
     if (speakingMessageId === message.id && isSpeaking) {
       stopSpeaking();
@@ -2481,7 +2516,7 @@ export default function ChatWidget({
 
     if (SERVER_TTS_ENABLED) {
       try {
-        await playServerSpeech(message, serverSpeechText);
+        await playServerSpeech(message, serverSpeechText, voice);
         return;
       } catch (error) {
         console.warn("[tts] server playback failed, falling back to browser speech", {
@@ -2666,6 +2701,24 @@ export default function ChatWidget({
                 {msg.role === "assistant" && msg.kind !== "system_status" ? (
                   <div>
                     <div className="mb-3 flex items-center justify-end gap-1">
+                      {SERVER_TTS_ENABLED && speakingMessageId !== msg.id && (
+                        <select
+                          value={serverTtsVoiceId}
+                          onChange={(event) =>
+                            setServerTtsVoiceId(event.target.value as ServerTtsVoiceOptionId)
+                          }
+                          disabled={disabled || ttsGeneratingMessageId === msg.id}
+                          aria-label="Select voice"
+                          title="Select voice"
+                          className="min-h-9 max-w-[120px] rounded-xl border border-input bg-background px-2 py-1.5 text-[11px] font-medium text-foreground shadow-sm transition hover:bg-muted focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {SERVER_TTS_VOICE_OPTIONS.map((option) => (
+                            <option key={option.id} value={option.id} className="bg-background text-foreground">
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                       {/* Browser voice selector — explicit fallback only; server TTS is the launch-quality path */}
                       {BROWSER_TTS_ENABLED && !SERVER_TTS_ENABLED && speakingMessageId !== msg.id && (
                         <div className="flex flex-col items-end gap-1">
@@ -2704,7 +2757,7 @@ export default function ChatWidget({
                       {speakingMessageId !== msg.id && (
                         <button
                           type="button"
-                          onClick={() => handleSpeakMessage(msg)}
+                          onClick={() => handleSpeakMessage(msg, selectedServerTtsVoice)}
                           disabled={!canReadAloud || disabled || ttsGeneratingMessageId === msg.id}
                           aria-label={ttsGeneratingMessageId === msg.id ? "Generating voice" : "Play voice"}
                           title={

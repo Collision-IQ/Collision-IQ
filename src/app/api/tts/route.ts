@@ -13,12 +13,51 @@ const ELEVENLABS_TIMEOUT_MS = 30_000;
 
 type TtsRequestBody = {
   text?: unknown;
+  voice?: unknown;
+  voiceId?: unknown;
 };
 
 function normalizeText(value: unknown) {
   if (typeof value !== "string") return null;
   const text = value.replace(/\s+/g, " ").trim();
   return text.length > 0 ? text : null;
+}
+
+function normalizeVoiceId(value: unknown) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") return undefined;
+
+  const voiceId = value.trim();
+  return voiceId.length > 0 ? voiceId : null;
+}
+
+function resolveVoiceId(body: TtsRequestBody): { voiceId: string | null; label: string } | null {
+  const requestedVoiceId = normalizeVoiceId(body.voiceId);
+
+  if (requestedVoiceId === undefined) {
+    return null;
+  }
+
+  if (requestedVoiceId) {
+    return {
+      voiceId: requestedVoiceId,
+      label: "custom",
+    };
+  }
+
+  const voice = body.voice === undefined ? "primary" : body.voice;
+
+  if (voice !== "primary" && voice !== "secondary") {
+    return null;
+  }
+
+  return {
+    label: voice,
+    voiceId:
+      voice === "secondary"
+        ? process.env.ELEVENLABS_VOICE_ID_SECOND?.trim() || null
+        : process.env.ELEVENLABS_VOICE_ID?.trim() || null,
+  };
 }
 
 function jsonError(error: string, code: string, status: number) {
@@ -59,12 +98,23 @@ export async function POST(req: Request) {
     }
 
     const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
-    const voiceId = process.env.ELEVENLABS_VOICE_ID?.trim();
+    const resolvedVoice = resolveVoiceId(body);
+
+    if (!resolvedVoice) {
+      return jsonError(
+        'Voice must be "primary", "secondary", or a string voiceId.',
+        "UNSUPPORTED_VOICE",
+        400
+      );
+    }
+
+    const voiceId = resolvedVoice.voiceId;
 
     if (!apiKey || !voiceId) {
       console.error("[tts] ElevenLabs is not configured", {
         hasApiKey: Boolean(apiKey),
         hasVoiceId: Boolean(voiceId),
+        voice: resolvedVoice.label,
       });
       return jsonError("Voice generation is not configured.", "TTS_NOT_CONFIGURED", 503);
     }
