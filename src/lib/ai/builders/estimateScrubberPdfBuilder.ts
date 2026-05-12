@@ -151,26 +151,37 @@ export function buildEstimatorChangeRequestListPdf(
   const audience = options.audience ?? "estimator";
   const model = buildAnnotatedEstimateReviewModel(params);
   const annotations = filterAnnotationsForAudience(model.annotations, audience);
-  const rows = buildEstimatorChangeRows(model, annotations);
 
   return buildAnnotatedEstimateDocument({
     model,
     annotations,
     audience,
-    filename: "estimator-change-request-list.pdf",
-    title: "Estimator Change Request List",
-    reportLabel: "Estimator Change Request List",
+    filename: "estimate-delta-change-requests.pdf",
+    title: "Estimate Delta / Change Requests",
+    reportLabel: "Estimate Delta / Change Requests",
     subtitle:
-      "Plain line-difference list for missing, reduced, changed, or proof-needed items before supplement agreement.",
+      "Short find-the-differences report for added, missing, and changed estimate items.",
+    summary: buildEstimateDeltaSummary(model),
     sections: [
       {
-        title: "Line Difference Requests",
-        comparisonRows: rows,
+        title: "Added In Newer Estimate",
+        bullets: buildEstimateDeltaBullets(model.comparisonRows, "added"),
       },
       {
-        title: "Difference Totals",
-        bullets: buildEstimatorDifferenceTotals(model.comparisonRows),
+        title: "Missing From Newer Estimate",
+        bullets: buildEstimateDeltaBullets(model.comparisonRows, "missing"),
       },
+      {
+        title: "Changed Labor / Qty / Price",
+        bullets: buildEstimateDeltaBullets(model.comparisonRows, "changed"),
+      },
+      {
+        title: "Possible Rekey / Lock / Supplement Gaps",
+        bullets: buildEstimateDeltaBullets(model.comparisonRows, "gap"),
+      },
+    ],
+    footer: [
+      "Estimate delta only. Verify any unclear line against the source estimates before sending.",
     ],
   });
 }
@@ -218,9 +229,11 @@ function buildAnnotatedEstimateDocument(params: {
   reportLabel: string;
   subtitle: string;
   sections: CarrierReportDocument["sections"];
+  summary?: CarrierReportDocument["summary"];
   redCount?: number;
   yellowCount?: number;
   blueCount?: number;
+  footer?: string[];
 }): CarrierReportDocument {
   const redCount = params.redCount ?? params.annotations.filter((item) => item.severity === "red").length;
   const yellowCount = params.yellowCount ?? params.annotations.filter((item) => item.severity === "yellow").length;
@@ -238,7 +251,7 @@ function buildAnnotatedEstimateDocument(params: {
       subtitle: params.subtitle,
       generatedLabel: `Generated ${params.model.generatedLabel}`,
     },
-    summary: [
+    summary: params.summary ?? [
       { label: "Vehicle", value: params.model.vehicleIdentity },
       { label: "VIN", value: params.model.vin },
       ...(params.model.insurer ? [{ label: "Insurer", value: params.model.insurer }] : []),
@@ -250,7 +263,7 @@ function buildAnnotatedEstimateDocument(params: {
       { label: "Needs Proof / OEM", value: String(blueCount) },
     ],
     sections: params.sections,
-    footer: [
+    footer: params.footer ?? [
       "This annotated estimate review is an estimate markup, not a DOI complaint or legal-violation analysis.",
       "Estimate changes are framed as repair-scope, documentation, supplement, or proof requests.",
       "Inferred support is not treated as confirmed procedure support. Attach the OEM procedure, invoice, or completion record before treating a support item as verified.",
@@ -951,86 +964,149 @@ function buildEstimatorChangeRequestBullets(params: {
   ];
 }
 
-function buildEstimatorChangeRows(
-  model: AnnotatedEstimateReviewModel,
-  annotations: EstimateAnnotation[]
-): NonNullable<CarrierReportDocument["sections"][number]["comparisonRows"]> {
-  return annotations.slice(0, 30).map((annotation) => ({
-    label: annotation.section ?? annotation.category,
-    leftLabel: "Higher estimate line/item",
-    leftValue: annotation.shopLine ?? inferHigherEstimateLine(annotation, model.scrubTarget.role),
-    rightLabel: "Lower estimate line/item",
-    rightValue: annotation.carrierLine ?? annotation.anchorText ?? "Not clearly shown",
-    delta: annotation.difference ?? formatStatusToken(annotation.severity),
-    note: buildSimpleEstimatorNote(annotation),
-  }));
+type EstimateDeltaBucket = "added" | "missing" | "changed" | "gap";
+
+function buildEstimateDeltaBullets(
+  comparisonRows: EstimateComparisonRow[],
+  bucket: EstimateDeltaBucket
+): string[] {
+  const bullets = comparisonRows
+    .filter((row) => !isEstimateDeltaExcludedRow(row))
+    .filter((row) => rowMatchesEstimateDeltaBucket(row, bucket))
+    .map((row) => formatEstimateDeltaBullet(row, bucket))
+    .filter(Boolean)
+    .slice(0, 8);
+
+  if (bullets.length > 0) {
+    return bullets;
+  }
+
+  switch (bucket) {
+    case "added":
+      return ["No added newer-estimate items were isolated."];
+    case "missing":
+      return ["No older-estimate items missing from the newer estimate were isolated."];
+    case "changed":
+      return ["No changed labor, quantity, or price lines were isolated."];
+    case "gap":
+      return ["No rekey, lock, or supplement gap was detectable from the parsed comparison rows."];
+  }
 }
 
-function inferHigherEstimateLine(
-  annotation: EstimateAnnotation,
-  scrubTargetRole: AnnotatedEstimateReviewModel["scrubTarget"]["role"]
+function rowMatchesEstimateDeltaBucket(
+  row: EstimateComparisonRow,
+  bucket: EstimateDeltaBucket
+): boolean {
+  const sides = resolveEstimateDeltaSides(row);
+  const hasOlder = hasComparisonValue(sides.olderValue);
+  const hasNewer = hasComparisonValue(sides.newerValue);
+  const text = buildEstimateDeltaSearchText(row);
+
+  if (bucket === "added") return !hasOlder && hasNewer;
+  if (bucket === "missing") return hasOlder && !hasNewer;
+  if (bucket === "changed") {
+    return (
+      hasOlder &&
+      hasNewer &&
+      formatEstimateDeltaValue(sides.olderValue) !== formatEstimateDeltaValue(sides.newerValue) &&
+      isLaborQtyOrPriceDelta(row)
+    );
+  }
+  return (
+    /re-?key|lock support|\block\b|supplement|supp\b/i.test(text) &&
+    (!hasOlder || !hasNewer || formatEstimateDeltaValue(sides.olderValue) !== formatEstimateDeltaValue(sides.newerValue))
+  );
+}
+
+function formatEstimateDeltaBullet(
+  row: EstimateComparisonRow,
+  bucket: EstimateDeltaBucket
 ): string {
-  if (scrubTargetRole === "shop") return annotation.carrierLine ?? "Not clearly shown";
-  return annotation.shopLine ?? "Not clearly shown";
+  const sides = resolveEstimateDeltaSides(row);
+  const label = cleanCustomerFacingEstimateLine(row.operation ?? row.partName ?? row.category ?? "Estimate item");
+  const older = formatEstimateDeltaValue(sides.olderValue) || "Not shown";
+  const newer = formatEstimateDeltaValue(sides.newerValue) || "Not shown";
+  const delta = formatEstimateDeltaValue(row.delta);
+  const change = delta ? ` Delta: ${delta}.` : "";
+
+  if (bucket === "added") {
+    return `${label}: newer estimate adds ${newer}. Request: confirm this new line is intended.`;
+  }
+  if (bucket === "missing") {
+    return `${label}: older estimate showed ${older}; newer estimate does not show it. Request: carry forward or explain removal.`;
+  }
+  if (bucket === "gap") {
+    return `${label}: check rekey/lock/supplement handling. Older: ${older}. Newer: ${newer}.${change}`;
+  }
+
+  return `${label}: older ${older}; newer ${newer}.${change} Request: confirm labor, quantity, rate, or price basis.`;
 }
 
-function buildSimpleEstimatorNote(annotation: EstimateAnnotation): string {
-  if (annotation.category === "Missing operation") {
-    return `Request ${annotation.title}: confirm whether the item is included elsewhere, omitted, or disputed.`;
+function resolveEstimateDeltaSides(row: EstimateComparisonRow): {
+  olderValue: EstimateComparisonRow["lhsValue"];
+  newerValue: EstimateComparisonRow["rhsValue"];
+} {
+  const lhsSource = row.lhsSource ?? "";
+  const rhsSource = row.rhsSource ?? "";
+  const lhsLooksNewer = /\b(new|newer|latest|current|revised|updated|supplement|supp)\b/i.test(lhsSource);
+  const rhsLooksOlder = /\b(old|older|prior|previous|original|initial)\b/i.test(rhsSource);
+
+  if (lhsLooksNewer || rhsLooksOlder) {
+    return { olderValue: row.rhsValue, newerValue: row.lhsValue };
   }
-  if (annotation.category === "Reduced labor/material") {
-    return `Request ${annotation.title}: review the labor, material, refinish, rate, or price difference.`;
-  }
-  if (annotation.category === "Needs invoice/proof" || annotation.category === "Needs OEM procedure support") {
-    return `Request ${annotation.title}: attach the invoice, scan, calibration, alignment, OEM, or completion proof as applicable.`;
-  }
-  return `Request ${annotation.title}: clarify the lower-estimate treatment.`;
+
+  return { olderValue: row.lhsValue, newerValue: row.rhsValue };
 }
 
-function buildEstimatorDifferenceTotals(comparisonRows: EstimateComparisonRow[]): string[] {
-  const totals = {
-    body: sumRows(comparisonRows, /body/i),
-    paint: sumRows(comparisonRows, /paint|refinish/i),
-    frameMechanical: sumRows(comparisonRows, /frame|mechanical|structural|measure/i),
-    parts: sumRows(comparisonRows, /part|hood|bumper|lamp|panel|hardware/i),
-    materials: sumRows(comparisonRows, /material|paint material|corrosion|cavity|wax/i),
-    estimate: detectEstimateTotals(comparisonRows),
-  };
+function isLaborQtyOrPriceDelta(row: EstimateComparisonRow): boolean {
+  if (row.valueUnit === "currency" || row.valueUnit === "hours" || row.valueUnit === "count") {
+    return true;
+  }
+
+  return /\b(labor|hour|qty|quantity|rate|price|pricing|cost|amount|total|material|refinish|paint)\b/i.test(
+    buildEstimateDeltaSearchText(row)
+  );
+}
+
+function formatEstimateDeltaValue(value: EstimateComparisonRow["lhsValue"]): string {
+  const raw = value === null || value === undefined ? "" : `${value}`.trim();
+  if (raw && /[$\d]/.test(raw)) return raw;
+  const formatted = formatComparisonValue(value);
+  if (formatted) return formatted;
+  return raw;
+}
+
+function buildEstimateDeltaSearchText(row: EstimateComparisonRow): string {
+  return `${row.category ?? ""} ${row.operation ?? ""} ${row.partName ?? ""} ${row.lhsValue ?? ""} ${row.rhsValue ?? ""} ${row.delta ?? ""} ${row.notes?.join(" ") ?? ""}`;
+}
+
+function hasComparisonValue(value: EstimateComparisonRow["lhsValue"]): boolean {
+  return value !== null && value !== undefined && `${value}`.trim().length > 0;
+}
+
+function isEstimateDeltaExcludedRow(row: EstimateComparisonRow): boolean {
+  return /\b(total|subtotal|tax|deductible|betterment)\b/i.test(
+    `${row.category ?? ""} ${row.operation ?? ""} ${row.partName ?? ""}`
+  );
+}
+
+function buildEstimateDeltaSummary(
+  model: AnnotatedEstimateReviewModel
+): CarrierReportDocument["summary"] {
+  const rows = model.comparisonRows.filter((row) => !isEstimateDeltaExcludedRow(row));
+  const changedCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "changed")).length;
+  const addedCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "added")).length;
+  const missingCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "missing")).length;
+  const gapCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "gap")).length;
 
   return [
-    `Total body labor difference: ${formatMaybeNumber(totals.body)}.`,
-    `Total paint labor difference: ${formatMaybeNumber(totals.paint)}.`,
-    `Total frame/mechanical labor difference: ${formatMaybeNumber(totals.frameMechanical)}.`,
-    `Total parts difference: ${formatMaybeNumber(totals.parts, true)}.`,
-    `Total paint/material difference: ${formatMaybeNumber(totals.materials, true)}.`,
-    `Total estimate difference: ${formatEstimateDifference(totals.estimate)}.`,
+    { label: "Vehicle", value: model.vehicleIdentity },
+    { label: "VIN", value: model.vin },
+    { label: "Added", value: String(addedCount) },
+    { label: "Missing", value: String(missingCount) },
+    { label: "Changed", value: String(changedCount) },
+    { label: "Possible Gaps", value: String(gapCount) },
   ];
-}
-
-function sumRows(comparisonRows: EstimateComparisonRow[], pattern: RegExp): number | null {
-  const values = comparisonRows
-    .filter((row) => pattern.test(`${row.category ?? ""} ${row.operation ?? ""} ${row.partName ?? ""}`))
-    .map((row) => parseMoney(row.delta) ?? parseNumeric(row.delta))
-    .filter((value): value is number => typeof value === "number");
-  if (!values.length) return null;
-  return values.reduce((sum, value) => sum + Math.abs(value), 0);
-}
-
-function parseNumeric(value: string | number | null | undefined): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value !== "string") return undefined;
-  const parsed = Number(value.replace(/[^\d.-]/g, ""));
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function formatMaybeNumber(value: number | null, money = false): string {
-  if (typeof value !== "number") return "not isolated";
-  return money ? formatMoney(value) : value.toLocaleString("en-US", { maximumFractionDigits: 2 });
-}
-
-function formatEstimateDifference(totals: { shop?: number; carrier?: number }): string {
-  if (typeof totals.shop !== "number" || typeof totals.carrier !== "number") return "not isolated";
-  return formatMoney(Math.abs(totals.shop - totals.carrier));
 }
 
 function formatPromptGeneratedBullets(value: string | null | undefined, label: string): string[] {

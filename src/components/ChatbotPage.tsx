@@ -1624,7 +1624,6 @@ function RailContent({
     const needsResearch =
       reportType === "policy_rights_review" ||
       reportType === "estimate_scrubber" ||
-      reportType === "estimator_change_request_list" ||
       reportType === "doi_complaint_packet" ||
       (reportType === "repair_intelligence" && renderModel.oemContradictions.length > 0);
 
@@ -1637,8 +1636,6 @@ function RailContent({
     const researchReportType =
       reportType === "repair_intelligence"
         ? "oem_contradiction_detection"
-          : reportType === "estimator_change_request_list"
-            ? "estimate_scrubber"
           : reportType;
     const response = await fetch("/api/reports/research", {
       method: "POST",
@@ -1676,6 +1673,10 @@ function RailContent({
       exportResearchSnapshot: ExportResearchSnapshot | null;
     }
   ): Promise<string | null> {
+    if (reportType === "estimator_change_request_list") {
+      return null;
+    }
+
     const annotationMode = mapReportKindToAnnotationMode(reportType);
     if (!annotationMode) {
       return null;
@@ -2486,7 +2487,7 @@ function RailContent({
                     onClick={() => void downloadReportDocument("estimator_change_request_list")}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 sm:col-span-2"
                   >
-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Estimator change list</span>
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Estimate delta</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </div>
@@ -2866,7 +2867,7 @@ function getDefaultReportSubject(reportType: ReportKind): string {
     case "estimate_scrubber":
       return "[Collision IQ] Annotated Estimate Scrubber";
     case "estimator_change_request_list":
-      return "[Collision IQ] Estimator Change Request List";
+      return "[Collision IQ] Estimate Delta / Change Requests";
     case "policy_rights_review":
       return "[Collision IQ] Policy & Rights Review";
     case "doi_complaint_packet":
@@ -2885,7 +2886,7 @@ function getDefaultReportFilename(reportType: ReportKind): string {
     case "estimate_scrubber":
       return "annotated-estimate-scrubber.pdf";
     case "estimator_change_request_list":
-      return "estimator-change-request-list.pdf";
+      return "estimate-delta-change-requests.pdf";
     case "policy_rights_review":
       return "policy-rights-review.pdf";
     case "doi_complaint_packet":

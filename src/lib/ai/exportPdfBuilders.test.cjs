@@ -424,6 +424,40 @@ run("Annotated Estimate Review selects lower-cost carrier estimate and keeps com
           delta: "Proof pending",
           deltaType: "changed",
         },
+        {
+          id: "newer-added-row",
+          category: "Operations",
+          operation: "Additional refinish labor",
+          lhsSource: "Original estimate",
+          rhsSource: "Newer estimate",
+          lhsValue: null,
+          rhsValue: "Refinish labor 1.5",
+          delta: "Added in newer estimate",
+          deltaType: "removed",
+        },
+        {
+          id: "newer-missing-row",
+          category: "Operations",
+          operation: "Wheel opening molding",
+          lhsSource: "Original estimate",
+          rhsSource: "Newer estimate",
+          lhsValue: "R&I wheel opening molding",
+          rhsValue: null,
+          delta: "Missing from newer estimate",
+          deltaType: "added",
+        },
+        {
+          id: "newer-price-row",
+          category: "Parts",
+          operation: "Lock support price",
+          lhsSource: "Original estimate",
+          rhsSource: "Newer estimate",
+          lhsValue: "$120.00",
+          rhsValue: "$95.00",
+          delta: "-$25.00",
+          valueUnit: "currency",
+          deltaType: "changed",
+        },
       ],
     },
     rawEstimateText: "Carrier estimate\nA/M hood\nSubl Post-repair scan -- pending invoice\nAlgn Four-Wheel Alignment\nShop estimate\nOEM hood",
@@ -454,7 +488,15 @@ run("Annotated Estimate Review selects lower-cost carrier estimate and keeps com
   assert.match(model.scrubTarget.label, /Lower-cost carrier estimate/i);
   assert.equal(annotated.header.title, "Annotated Estimate Scrubber");
   assert.match(text, /Estimate Selected For Scrub/);
-  assert.equal(estimatorList.header.title, "Estimator Change Request List");
+  assert.equal(estimatorList.header.title, "Estimate Delta / Change Requests");
+  assert.equal(estimatorList.filename, "estimate-delta-change-requests.pdf");
+  assert.ok(estimatorList.sections.some((section) => section.title === "Added In Newer Estimate"));
+  assert.ok(estimatorList.sections.some((section) => section.title === "Missing From Newer Estimate"));
+  assert.ok(estimatorList.sections.some((section) => section.title === "Changed Labor / Qty / Price"));
+  assert.ok(estimatorList.sections.some((section) => section.title === "Possible Rekey / Lock / Supplement Gaps"));
+  assert.match(JSON.stringify(estimatorList), /newer estimate adds Refinish labor 1\.5/i);
+  assert.match(JSON.stringify(estimatorList), /newer estimate does not show it/i);
+  assert.match(JSON.stringify(estimatorList), /Lock support price/i);
   assert.match(text, /A\/M hood/);
   assert.match(text, /OEM hood/);
   assert.match(text, /Alternate part difference/);
@@ -462,6 +504,7 @@ run("Annotated Estimate Review selects lower-cost carrier estimate and keeps com
   assert.doesNotMatch(chatbotSource, /side_by_side_estimate_comparison/);
   assert.doesNotMatch(chatbotSource, /supplement_request_checklist|Supplement Support Package/);
   assert.doesNotMatch(chatbotSource, /Side-by-side PDF|Side-By-Side Estimate Comparison/);
+  assert.doesNotMatch(JSON.stringify(estimatorList), /legal|DOI/i);
   assert.doesNotMatch(text, /legal authority|DOI violation|verified OEM procedure/i);
 });
 
