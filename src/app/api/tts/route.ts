@@ -8,7 +8,8 @@ export const runtime = "nodejs";
 
 const MAX_TTS_INPUT_CHARS = 4_000;
 const AUDIO_CONTENT_TYPE = "audio/mpeg";
-const ELEVENLABS_MODEL_ID = "eleven_flash_v2_5";
+const ELEVENLABS_MODEL_ID = "eleven_v3";
+const ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128";
 const ELEVENLABS_TIMEOUT_MS = 30_000;
 
 type TtsRequestBody = {
@@ -98,7 +99,15 @@ export async function POST(req: Request) {
     }
 
     const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
+    const requestedVoice = body.voice === "secondary" ? "secondary" : "primary";
     const resolvedVoice = resolveVoiceId(body);
+
+    console.log("[tts] voice selection", {
+      requestedVoice,
+      resolvedVoice: requestedVoice,
+      hasPrimary: !!process.env.ELEVENLABS_VOICE_ID,
+      hasSecondary: !!process.env.ELEVENLABS_VOICE_ID_SECOND,
+    });
 
     if (!resolvedVoice) {
       return jsonError(
@@ -139,6 +148,13 @@ export async function POST(req: Request) {
           body: JSON.stringify({
             text,
             model_id: ELEVENLABS_MODEL_ID,
+            output_format: ELEVENLABS_OUTPUT_FORMAT,
+            voice_settings: {
+              stability: 0.65,
+              similarity_boost: 0.9,
+              style: 0.2,
+              use_speaker_boost: true,
+            },
           }),
           signal: controller.signal,
         }

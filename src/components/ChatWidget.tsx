@@ -198,9 +198,7 @@ type ServerTtsVoiceOptionId = "primary" | "secondary";
 type ServerTtsVoiceOption = {
   id: ServerTtsVoiceOptionId;
   label: string;
-  voiceId?: string;
 };
-const SECONDARY_SERVER_TTS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM";
 const DEFAULT_SERVER_TTS_VOICE: ServerTtsVoiceOptionId = "primary";
 const SERVER_TTS_VOICE_OPTIONS: [ServerTtsVoiceOption, ServerTtsVoiceOption] = [
   {
@@ -210,7 +208,6 @@ const SERVER_TTS_VOICE_OPTIONS: [ServerTtsVoiceOption, ServerTtsVoiceOption] = [
   {
     id: "secondary",
     label: "Voice 2",
-    voiceId: SECONDARY_SERVER_TTS_VOICE_ID,
   },
 ];
 
@@ -2359,9 +2356,9 @@ export default function ChatWidget({
   async function playServerSpeech(
     message: Message,
     plainText: string,
-    voice: ServerTtsVoiceOption = SERVER_TTS_VOICE_OPTIONS[0]
+    selectedVoice: ServerTtsVoiceOptionId = SERVER_TTS_VOICE_OPTIONS[0].id
   ) {
-    const cacheKey = `${message.id}:${voice.id}`;
+    const cacheKey = `${message.id}:${selectedVoice}`;
     let audioBlob = audioBlobCacheRef.current.get(cacheKey);
 
     if (!audioBlob) {
@@ -2375,7 +2372,7 @@ export default function ChatWidget({
           },
           body: JSON.stringify({
             text: plainText,
-            ...(voice.voiceId ? { voiceId: voice.voiceId } : {}),
+            voice: selectedVoice,
           }),
         });
 
@@ -2516,7 +2513,7 @@ export default function ChatWidget({
 
     if (SERVER_TTS_ENABLED) {
       try {
-        await playServerSpeech(message, serverSpeechText, voice);
+        await playServerSpeech(message, serverSpeechText, voice.id);
         return;
       } catch (error) {
         console.warn("[tts] server playback failed, falling back to browser speech", {
