@@ -1,4 +1,4 @@
-export type ProductPlan = "none" | "starter" | "trial" | "pro" | "team" | "admin" | "NONE" | "STARTER" | "TRIAL" | "PRO" | "TEAM" | "ADMIN";
+export type ProductPlan = "none" | "free" | "starter" | "trial" | "pro" | "team" | "admin" | "NONE" | "FREE" | "STARTER" | "TRIAL" | "PRO" | "TEAM" | "ADMIN";
 
 export type ProductFeature =
   | "snapshot_export"
@@ -21,6 +21,7 @@ export function normalizeProductPlan(plan: ProductPlan | string | null | undefin
   if (normalized === "trial") return "pro";
   if (normalized === "pro") return "pro";
   if (normalized === "starter") return "starter";
+  if (normalized === "free") return "none";
   return "none";
 }
 

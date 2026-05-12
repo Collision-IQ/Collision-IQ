@@ -1,8 +1,11 @@
-export type BillingPlan = "none" | "starter" | "trial" | "pro" | "team";
+export type BillingPlan = "none" | "free" | "starter" | "trial" | "pro" | "team";
 
 export const PLAN_CAPS = {
-  // None = chat only. No document-backed analysis, uploads, or exports.
+  // None = unauthenticated / unavailable. No document-backed analysis, uploads, or exports.
   none: 0,
+
+  // Free = authenticated expired/no-subscription access with monthly upload-backed analysis.
+  free: 5,
 
   // Starter = paid subscription. Basic upload + export, limited analysis capacity.
   starter: 10,

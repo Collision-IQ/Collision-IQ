@@ -54,10 +54,6 @@ export function resolveProductTrialActive(access: {
     return false;
   }
 
-  if (access.plan && access.plan !== "pro" && access.plan !== "trial") {
-    return false;
-  }
-
   if (!access.createdAt) {
     return false;
   }

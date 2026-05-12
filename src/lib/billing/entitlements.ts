@@ -52,7 +52,7 @@ export type AccountEntitlements = Omit<ViewerAccess, "plan"> & {
   trialEnd: string | null;
   maxUploadsPerReview: number | null;
   usageStatus: "ok" | "usage_limit_reached" | "trial_expired" | "upgrade_required";
-  entitlementSource: "free_access_admin" | "paid_subscription" | "trial" | "starter_subscription" | "locked";
+  entitlementSource: "free_access_admin" | "paid_subscription" | "trial" | "starter_subscription" | "free" | "locked";
 };
 
 export async function getCurrentEntitlements(
@@ -187,7 +187,10 @@ export function toAccountEntitlements(
   });
   const analysisCap = getPlanAnalysisCap(billingPlan);
   const analysisCount = access.monthlyAnalysisUsed;
+  const isFree = billingPlan === "free";
   const isProLike = billingPlan === "trial" || billingPlan === "pro" || billingPlan === "team";
+  const hasAnyAccess = billingPlan !== "none";
+  const resolvedCanRunAnalysis = isProLike || isFree ? true : access.canRunAnalysis;
   const capped = billingPlan !== "team";
   const remaining = Math.max(analysisCap - analysisCount, 0);
 
@@ -195,9 +198,9 @@ export function toAccountEntitlements(
     ? "upgrade_required"
     : billingPlan === "none"
       ? "upgrade_required"
-    : !access.canRunAnalysis && billingPlan === "trial"
+    : !resolvedCanRunAnalysis && billingPlan === "trial"
       ? "trial_expired"
-      : !access.canRunAnalysis
+      : !resolvedCanRunAnalysis
         ? "usage_limit_reached"
         : "ok";
 
@@ -219,20 +222,20 @@ export function toAccountEntitlements(
     billingPlan,
     analysisCap,
     analysisCount,
-    canRunAnalysis: isProLike ? true : access.canRunAnalysis,
+    canRunAnalysis: resolvedCanRunAnalysis,
     canUpload: access.isAuthenticated,
     uploadCap: getPlanUploadCap(billingPlan),
     uploadCount: 0,
-    canExport: billingPlan !== "none",
+    canExport: hasAnyAccess && !isFree,
     exportCap: getPlanExportCap(billingPlan),
     exportCount: 0,
-    canUseBasicExports: billingPlan !== "none",
+    canUseBasicExports: hasAnyAccess && !isFree,
     canUseCustomerReport: isProLike,
     canUseRedactedChatExport: isProLike,
     canUseSupplementLines: isProLike,
     canUseNegotiationDraft: isProLike,
     canUseRebuttalEmail: isProLike,
-    canUseChatOnly: billingPlan === "trial" || billingPlan === "pro" || billingPlan === "team",
+    canUseChatOnly: hasAnyAccess,
     canUseImmersiveReports:
       billingPlan === "trial" ||
       billingPlan === "starter" ||
@@ -268,7 +271,11 @@ function resolveBillingPlan(
   }
 
   if (params?.subscriptionTier && params.subscriptionTier !== "admin") {
-    if (params.subscriptionTier === "pro" || params.subscriptionTier === "team") {
+    if (
+      params.subscriptionTier === "starter" ||
+      params.subscriptionTier === "pro" ||
+      params.subscriptionTier === "team"
+    ) {
       return params.subscriptionTier;
     }
 
@@ -276,7 +283,7 @@ function resolveBillingPlan(
       return "trial";
     }
 
-    return params.subscriptionTier;
+    return "free";
   }
 
   if (params?.trialActive) {
@@ -284,7 +291,7 @@ function resolveBillingPlan(
   }
 
   if (access.plan === "none") {
-    return "none";
+    return "free";
   }
 
   if (access.plan === "team") {
@@ -303,7 +310,7 @@ function resolveBillingPlan(
     return "starter";
   }
 
-  return "none";
+  return "free";
 }
 
 export function resolveTrialActive(
@@ -314,10 +321,6 @@ export function resolveTrialActive(
   }
 
   if (access.activeSubscriptionId || access.activeSubscriptionStatus === "ACTIVE") {
-    return false;
-  }
-
-  if (access.plan !== "pro") {
     return false;
   }
 
@@ -382,6 +385,10 @@ function resolveEntitlementSource(
     return "starter_subscription";
   }
 
+  if (billingPlan === "free") {
+    return "free";
+  }
+
   return "locked";
 }
 
@@ -414,43 +421,50 @@ function logEntitlementDiagnostics(
 
 export function getPlanUploadCap(plan: BillingPlan): number | null {
   switch (plan) {
+    case "free":
+      return 5;
     case "starter":
-      return 1;
+      return null;
     case "pro":
-    case "team":
     case "trial":
+      return 100;
+    case "team":
       return null;
     case "none":
+      return 0;
     default:
-      return null;
+      return 0;
   }
 }
 
-export function getPlanUploadBatchLimit(plan: BillingPlan | "admin"): number {
+export function getPlanUploadBatchLimit(plan: BillingPlan | "admin"): number | null {
   switch (plan) {
     case "admin":
     case "team":
-      return 50;
+      return null;
     case "trial":
     case "pro":
       return 6;
     case "starter":
+    case "free":
     case "none":
       return 1;
     default:
-      return 0;
+      return 1;
   }
 }
 
 export function getPlanExportCap(plan: BillingPlan): number | null {
   switch (plan) {
     case "starter":
+      return 1;
     case "trial":
     case "pro":
-      return 1;
     case "team":
       return null;
+    case "free":
     case "none":
+      return 0;
     default:
       return 0;
   }

@@ -237,12 +237,14 @@ run("env admin can upload even without subscription", () => {
   assert.equal(entitlements.isPlatformAdmin, true);
   assert.equal(canUploadFiles(entitlements), true);
   assert.equal(entitlements.uploadCap, null);
-  assert.equal(entitlements.maxUploadsPerReview, 50);
+  assert.equal(entitlements.maxUploadsPerReview, null);
 });
 
 run("non-admin no-subscription can upload limited free files", () => {
+  const expiredCreatedAt = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
   const entitlements = resolveProductEntitlements(
     buildAccess({
+      createdAt: expiredCreatedAt,
       plan: "none",
       activeSubscriptionId: null,
       activeSubscriptionStatus: null,
@@ -252,8 +254,11 @@ run("non-admin no-subscription can upload limited free files", () => {
   );
 
   assert.equal(entitlements.isPlatformAdmin, false);
+  assert.equal(entitlements.plan, "free");
+  assert.equal(entitlements.billingPlan, "free");
+  assert.equal(entitlements.entitlementSource, "free");
   assert.equal(canUploadFiles(entitlements), true);
-  assert.equal(entitlements.uploadCap, null);
+  assert.equal(entitlements.uploadCap, 5);
   assert.equal(entitlements.maxUploadsPerReview, 1);
 });
 
@@ -273,7 +278,7 @@ run("trial user can upload", () => {
 
   assert.equal(entitlements.billingPlan, "trial");
   assert.equal(canUploadFiles(entitlements), true);
-  assert.equal(entitlements.uploadCap, null);
+  assert.equal(entitlements.uploadCap, 100);
   assert.equal(entitlements.maxUploadsPerReview, 6);
 });
 
@@ -324,6 +329,27 @@ run("brand-new non-admin account receives active 30-day trial", () => {
   );
 });
 
+run("brand-new authenticated free account receives active trial", () => {
+  const createdAt = new Date(Date.now() - 60 * 1000).toISOString();
+  const entitlements = resolveProductEntitlements(
+    buildAccess({
+      createdAt,
+      plan: "none",
+      activeSubscriptionId: null,
+      activeSubscriptionStatus: null,
+      canRunAnalysis: false,
+    }),
+    { userEmail: "new-free-user@example.com" }
+  );
+
+  assert.equal(entitlements.plan, "trial");
+  assert.equal(entitlements.entitlementSource, "trial");
+  assert.equal(entitlements.trialActive, true);
+  assert.equal(entitlements.canUseCustomerReport, true);
+  assert.equal(entitlements.maxUploadsPerReview, 6);
+  assert.equal(entitlements.uploadCap, 100);
+});
+
 run("active trial grants Pro-like access", () => {
   const entitlements = resolveProductEntitlements(
     buildAccess({
@@ -350,10 +376,10 @@ run("active trial grants Pro-like access", () => {
   assert.equal(entitlements.canExportEstimateScrubber, true);
   assert.equal(entitlements.canUseChatExport, true);
   assert.equal(entitlements.canUpload, true);
-  assert.equal(entitlements.uploadCap, null);
+  assert.equal(entitlements.uploadCap, 100);
 });
 
-run("expired trial locks access unless paid subscription exists", () => {
+run("expired trial falls back to free access unless paid subscription exists", () => {
   const expiredCreatedAt = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
   const expired = resolveProductEntitlements(
     buildAccess({
@@ -366,11 +392,14 @@ run("expired trial locks access unless paid subscription exists", () => {
     { userEmail: "expired@example.com" }
   );
 
-  assert.equal(expired.plan, "none");
-  assert.equal(expired.entitlementSource, "locked");
+  assert.equal(expired.plan, "free");
+  assert.equal(expired.billingPlan, "free");
+  assert.equal(expired.entitlementSource, "free");
   assert.equal(expired.trialActive, false);
-  assert.equal(expired.canRunAnalysis, false);
+  assert.equal(expired.canRunAnalysis, true);
   assert.equal(expired.canUpload, true);
+  assert.equal(expired.uploadCap, 5);
+  assert.equal(expired.maxUploadsPerReview, 1);
   assert.equal(expired.canExport, false);
 
   const paid = resolveProductEntitlements(
@@ -409,7 +438,7 @@ run("Starter can upload one file", () => {
 
   assert.equal(entitlements.billingPlan, "starter");
   assert.equal(canUploadFiles(entitlements), true);
-  assert.equal(entitlements.uploadCap, 1);
+  assert.equal(entitlements.uploadCap, null);
   assert.equal(entitlements.maxUploadsPerReview, 1);
   assert.equal(getMaxUploadsPerReview("starter"), 1);
   assert.equal(entitlements.canExportSnapshot, true);
@@ -437,19 +466,21 @@ run("backend upload/export/chat-only gates use resolved entitlement", () => {
   assert.equal(canAccessFeature(trial.plan, "repair_intelligence_export"), true);
   assert.equal(trial.canUseChatOnly, true);
 
-  const locked = resolveProductEntitlements(
+  const free = resolveProductEntitlements(
     buildAccess({
+      createdAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString(),
       plan: "none",
       activeSubscriptionId: null,
       activeSubscriptionStatus: null,
       canRunAnalysis: false,
     }),
-    { userEmail: "locked-gates@example.com" }
+    { userEmail: "free-gates@example.com" }
   );
 
-  assert.equal(canUploadFiles(locked), true);
-  assert.equal(canAccessFeature(locked.plan, "repair_intelligence_export"), false);
-  assert.equal(locked.canUseChatOnly, false);
+  assert.equal(free.plan, "free");
+  assert.equal(canUploadFiles(free), true);
+  assert.equal(canAccessFeature(free.plan, "repair_intelligence_export"), false);
+  assert.equal(free.canUseChatOnly, true);
 });
 
 run("admin product plan bypass unlocks all exports", () => {

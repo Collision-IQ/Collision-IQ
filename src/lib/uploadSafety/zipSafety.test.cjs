@@ -92,10 +92,10 @@ function proEntitlements() {
 
 function freeEntitlements() {
   return {
-    plan: "none",
-    billingPlan: "none",
+    plan: "free",
+    billingPlan: "free",
     isPlatformAdmin: false,
-    entitlementSource: "locked",
+    entitlementSource: "free",
   };
 }
 

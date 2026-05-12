@@ -3,9 +3,9 @@ import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import { prisma } from "@/lib/prisma";
 import { FREE_UPLOAD_BATCH_LIMIT_MESSAGE } from "@/lib/uploadSafety/uploadLimits";
 
-export const FREE_MONTHLY_UPLOAD_LIMIT = 3;
+export const FREE_MONTHLY_UPLOAD_LIMIT = 5;
 export const FREE_UPLOAD_LIMIT_MESSAGE =
-  "You’ve used your 3 free uploads for this month. Upgrade to continue uploading files, or try again next month.";
+  "You have used your 5 free uploads for this month. Upgrade to continue uploading files, or try again next month.";
 export const FREE_UPLOAD_BATCH_MESSAGE = FREE_UPLOAD_BATCH_LIMIT_MESSAGE;
 
 const ROLLING_UPLOAD_WINDOW_DAYS = 30;
@@ -42,9 +42,9 @@ export function isFreeUploadEntitlement(
 ) {
   return (
     !entitlements.isPlatformAdmin &&
-    entitlements.entitlementSource === "locked" &&
-    entitlements.billingPlan === "none" &&
-    entitlements.plan === "none"
+    entitlements.entitlementSource === "free" &&
+    entitlements.billingPlan === "free" &&
+    entitlements.plan === "free"
   );
 }
 

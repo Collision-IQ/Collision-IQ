@@ -83,21 +83,20 @@ run("free user cannot upload 2 files in same analysis", () => {
   assert.equal(result.countedUploadCount, 0);
 });
 
-run("free user can upload 3 files across rolling month and is blocked on 4th", () => {
-  assert.equal(FREE_MONTHLY_UPLOAD_LIMIT, 3);
+run("free user can upload 5 files across rolling month and is blocked on 6th", () => {
+  assert.equal(FREE_MONTHLY_UPLOAD_LIMIT, 5);
   assert.equal(resolveFreeUploadQuotaStatus({ used: 0 }).allowed, true);
-  assert.equal(resolveFreeUploadQuotaStatus({ used: 1 }).allowed, true);
-  assert.equal(resolveFreeUploadQuotaStatus({ used: 2 }).allowed, true);
+  assert.equal(resolveFreeUploadQuotaStatus({ used: 4 }).allowed, true);
 
-  const fourth = evaluateFreeUploadRequest({
-    files: [{ filename: "fourth.pdf", type: "application/pdf" }],
-    used: 3,
+  const sixth = evaluateFreeUploadRequest({
+    files: [{ filename: "sixth.pdf", type: "application/pdf" }],
+    used: 5,
   });
 
-  assert.equal(fourth.allowed, false);
-  assert.equal(fourth.code, "FREE_MONTHLY_UPLOAD_LIMIT_REACHED");
-  assert.equal(fourth.message, FREE_UPLOAD_LIMIT_MESSAGE);
-  assert.equal(fourth.countedUploadCount, 0);
+  assert.equal(sixth.allowed, false);
+  assert.equal(sixth.code, "FREE_MONTHLY_UPLOAD_LIMIT_REACHED");
+  assert.equal(sixth.message, FREE_UPLOAD_LIMIT_MESSAGE);
+  assert.equal(sixth.countedUploadCount, 0);
 });
 
 run("rejected upload does not count toward free monthly usage", () => {
