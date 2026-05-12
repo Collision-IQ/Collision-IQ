@@ -130,6 +130,7 @@ type PrimaryAnalysis = {
 };
 
 type AnalysisStatus = "idle" | "processing" | "complete" | "error";
+type UploadUiState = "idle" | "uploading" | "uploaded" | "error";
 
 type ChatSessionControls = {
   focusComposer: () => void;
@@ -318,6 +319,15 @@ function buildZipProgressStatus(files: File[]) {
   return `Uploading ${zipCount} ZIP ${zipCount === 1 ? "archive" : "archives"}. ZIP extraction will run before analysis.`;
 }
 
+function isSupportedDropUploadFile(file: File) {
+  const name = file.name.toLowerCase();
+  return (
+    file.type === "application/pdf" ||
+    file.type.startsWith("image/") ||
+    /\.(pdf|jpe?g|png|webp|heic)$/i.test(name)
+  );
+}
+
 function buildUploadCompletionStatus(successCount: number, failures: UploadFailureResult[]) {
   if (!failures.length) {
     return null;
@@ -424,6 +434,10 @@ export default function ChatWidget({
   const [showOpeningDisclaimer, setShowOpeningDisclaimer] = useState(true);
   const [openingDisclaimerDismissed, setOpeningDisclaimerDismissed] = useState(false);
   const [fetchedViewerAccess, setFetchedViewerAccess] = useState<AccountEntitlements | null>(null);
+  const [uploadUiState, setUploadUiState] = useState<UploadUiState>("idle");
+  const [selectedUploadNames, setSelectedUploadNames] = useState<string[]>([]);
+  const [uploadUiMessage, setUploadUiMessage] = useState<string | null>(null);
+  const [isDragActive, setIsDragActive] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -1010,7 +1024,7 @@ export default function ChatWidget({
     void startRecording();
   }
 
-  function prepareFilesForUpload(fileList: FileList | null, source: "file" | "camera") {
+  function prepareFilesForUpload(fileList: FileList | File[] | null, source: "file" | "camera") {
     const selectedFiles = Array.from(fileList ?? []);
     const rejectedFiles: UploadFailureResult[] = [];
 
@@ -1028,6 +1042,15 @@ export default function ChatWidget({
     });
 
     const acceptedFiles = filesWithinCount.filter((file) => {
+      if (!isSupportedDropUploadFile(file)) {
+        rejectedFiles.push({
+          filename: file.name,
+          reason: "Only PDF and image uploads are supported here.",
+          code: "UNSUPPORTED_EXTENSION",
+        });
+        return false;
+      }
+
       if (file.size <= MAX_UPLOAD_FILE_BYTES) {
         return true;
       }
@@ -1119,6 +1142,10 @@ export default function ChatWidget({
     setAttachmentsOpen(true);
     setPreviewAttachmentId(null);
     setReplaceAttachmentId(null);
+    setUploadUiState("idle");
+    setSelectedUploadNames([]);
+    setUploadUiMessage(null);
+    setIsDragActive(false);
     firstAttachmentAtRef.current = null;
     currentCaseTopicRef.current = DEFAULT_CASE_TOPIC;
     activeSystemStatusMessageIdRef.current = null;
@@ -1929,16 +1956,25 @@ export default function ChatWidget({
     return attachmentId;
   }
 
-  async function handleFilesSelected(fileList: FileList | null) {
+  async function handleFilesSelected(fileList: FileList | File[] | null) {
     if (disabled) return;
     if (!fileList || fileList.length === 0) return;
 
     try {
+      const selectedFiles = Array.from(fileList);
+      setSelectedUploadNames(selectedFiles.map((file) => file.name));
+      setUploadUiState("uploading");
+      setUploadUiMessage(
+        `Uploading ${selectedFiles.length} ${selectedFiles.length === 1 ? "file" : "files"}...`
+      );
+
       const { acceptedFiles, rejectedFiles } = prepareFilesForUpload(fileList, "file");
       if (!acceptedFiles.length) {
         if (rejectedFiles.length) {
           upsertSystemStatusMessage(buildUploadFailureStatus(rejectedFiles));
         }
+        setUploadUiState("error");
+        setUploadUiMessage(rejectedFiles[0]?.reason ?? "No supported files selected.");
         return;
       }
 
@@ -1989,13 +2025,21 @@ export default function ChatWidget({
       );
       if (completionStatus) {
         upsertSystemStatusMessage(completionStatus);
+        setUploadUiState(successfulUploadCount > 0 ? "uploaded" : "error");
+        setUploadUiMessage(completionStatus);
       } else {
         upsertSystemStatusMessage("Upload processing complete. Preparing files for analysis.");
         upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
+        setUploadUiState("uploaded");
+        setUploadUiMessage(
+          `${successfulUploadCount} ${successfulUploadCount === 1 ? "file" : "files"} uploaded.`
+        );
       }
     } catch (err) {
       console.error(err);
       upsertSystemStatusMessage("File upload could not start.");
+      setUploadUiState("error");
+      setUploadUiMessage("File upload could not start.");
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
@@ -2006,11 +2050,20 @@ export default function ChatWidget({
     if (!fileList || fileList.length === 0) return;
 
     try {
+      const selectedFiles = Array.from(fileList);
+      setSelectedUploadNames(selectedFiles.map((file) => file.name));
+      setUploadUiState("uploading");
+      setUploadUiMessage(
+        `Uploading ${selectedFiles.length} ${selectedFiles.length === 1 ? "photo" : "photos"}...`
+      );
+
       const { acceptedFiles, rejectedFiles } = prepareFilesForUpload(fileList, "camera");
       if (!acceptedFiles.length) {
         if (rejectedFiles.length) {
           upsertSystemStatusMessage(buildUploadFailureStatus(rejectedFiles));
         }
+        setUploadUiState("error");
+        setUploadUiMessage(rejectedFiles[0]?.reason ?? "No supported photos selected.");
         return;
       }
 
@@ -2061,16 +2114,57 @@ export default function ChatWidget({
       );
       if (completionStatus) {
         upsertSystemStatusMessage(completionStatus);
+        setUploadUiState(successfulUploadCount > 0 ? "uploaded" : "error");
+        setUploadUiMessage(completionStatus);
       } else {
         upsertSystemStatusMessage("Upload processing complete. Preparing files for analysis.");
         upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
+        setUploadUiState("uploaded");
+        setUploadUiMessage(
+          `${successfulUploadCount} ${successfulUploadCount === 1 ? "photo" : "photos"} uploaded.`
+        );
       }
     } catch (err) {
       console.error(err);
       upsertSystemStatusMessage("Camera upload could not start.");
+      setUploadUiState("error");
+      setUploadUiMessage("Camera upload could not start.");
     } finally {
       if (cameraInputRef.current) cameraInputRef.current.value = "";
     }
+  }
+
+  function handleUploadDragEnter(event: React.DragEvent<HTMLElement>) {
+    if (disabled) return;
+    if (!Array.from(event.dataTransfer.items ?? []).some((item) => item.kind === "file")) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsDragActive(true);
+  }
+
+  function handleUploadDragOver(event: React.DragEvent<HTMLElement>) {
+    if (disabled) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setIsDragActive(true);
+  }
+
+  function handleUploadDragLeave(event: React.DragEvent<HTMLElement>) {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+
+    setIsDragActive(false);
+  }
+
+  function handleUploadDrop(event: React.DragEvent<HTMLElement>) {
+    if (disabled) return;
+    event.preventDefault();
+    setIsDragActive(false);
+    void handleFilesSelected(Array.from(event.dataTransfer.files));
   }
 
   function removeAttachment(attachmentId: string) {
@@ -2082,6 +2176,11 @@ export default function ChatWidget({
 
     const remaining = attachments.filter((attachment) => attachment.attachmentId !== attachmentId);
     setAttachments(remaining);
+    if (!remaining.length) {
+      setUploadUiState("idle");
+      setSelectedUploadNames([]);
+      setUploadUiMessage(null);
+    }
     if (previewAttachmentId === attachmentId) {
       const nextPreviewAttachmentId = resolveNextPreviewAttachmentId(attachments, attachmentId);
       setPreviewAttachmentId(nextPreviewAttachmentId);
@@ -2111,6 +2210,9 @@ export default function ChatWidget({
     setAttachments([]);
     closeAttachmentPreview();
     setReplaceAttachmentId(null);
+    setUploadUiState("idle");
+    setSelectedUploadNames([]);
+    setUploadUiMessage(null);
     onAttachmentChange?.(null);
     onAttachmentsChange?.([]);
     clearActiveSystemStatusMessage();
@@ -2475,11 +2577,23 @@ export default function ChatWidget({
                 </div>
               </div>
 
-              <div className="grid w-full max-w-[760px] grid-cols-1 gap-3 sm:grid-cols-3">
+              <div
+                onDragEnter={handleUploadDragEnter}
+                onDragOver={handleUploadDragOver}
+                onDragLeave={handleUploadDragLeave}
+                onDrop={handleUploadDrop}
+                className={[
+                  "w-full max-w-[760px] border border-dashed p-3 transition",
+                  isDragActive
+                    ? "border-[#b86a2d] bg-[#b86a2d]/10"
+                    : "border-border bg-muted/40",
+                ].join(" ")}
+              >
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={disabled}
-                  className="border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  className="min-h-11 border border-border bg-card px-3 py-2.5 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Upload Estimate
                 </button>
@@ -2487,7 +2601,7 @@ export default function ChatWidget({
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={disabled}
-                  className="border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  className="min-h-11 border border-border bg-card px-3 py-2.5 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Upload OEM Procedure
                 </button>
@@ -2495,10 +2609,32 @@ export default function ChatWidget({
                 <button
                   onClick={() => cameraInputRef.current?.click()}
                   disabled={disabled}
-                  className="border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  className="min-h-11 border border-border bg-card px-3 py-2.5 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Upload Photos
                 </button>
+              </div>
+
+              <div className="mt-3 text-xs leading-5 text-muted-foreground">
+                Drop PDFs or images here, or use the upload buttons.
+                {selectedUploadNames.length > 0 && (
+                  <div className="mt-2 truncate">
+                    Selected: {selectedUploadNames.join(", ")}
+                  </div>
+                )}
+                <div
+                  className={[
+                    "mt-1 font-mono uppercase tracking-[0.08em]",
+                    uploadUiState === "error"
+                      ? "text-red-500"
+                      : uploadUiState === "uploaded"
+                        ? "text-emerald-600 dark:text-emerald-300"
+                        : "text-muted-foreground",
+                  ].join(" ")}
+                >
+                  {uploadUiState}{uploadUiMessage ? ` - ${uploadUiMessage}` : ""}
+                </div>
+              </div>
               </div>
             </div>
           )}
@@ -2674,8 +2810,19 @@ export default function ChatWidget({
 
         <div className="z-20 shrink-0 border-t border-border bg-card px-3 py-2">
           <div className="mx-auto w-full max-w-[1120px]">
-            <div className="border border-border bg-muted px-2 py-2">
-                <div className="flex items-center gap-2.5">
+            <div
+              onDragEnter={handleUploadDragEnter}
+              onDragOver={handleUploadDragOver}
+              onDragLeave={handleUploadDragLeave}
+              onDrop={handleUploadDrop}
+              className={[
+                "border px-2 py-2 transition",
+                isDragActive
+                  ? "border-[#b86a2d] bg-[#b86a2d]/10"
+                  : "border-border bg-muted",
+              ].join(" ")}
+            >
+                <div className="flex flex-wrap items-center gap-2">
               <input
                 type="file"
                 ref={fileInputRef}
@@ -2702,7 +2849,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled}
-                className="rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
+                className="min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label="Attach files"
               >
                 <Paperclip size={20} />
@@ -2712,7 +2859,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={() => cameraInputRef.current?.click()}
                 disabled={disabled}
-                className="rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
+                className="min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label="Take photo"
               >
                 <Camera size={20} />
@@ -2722,7 +2869,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={handleMicClick}
                 disabled={isTranscribing || disabled}
-                className={`rounded-md p-2 transition ${
+                className={`min-h-10 min-w-10 rounded-md p-2 transition ${
                   isRecording
                     ? "text-red-400 hover:text-red-300"
                     : "text-muted-foreground hover:bg-card hover:text-[#C65A2A]"
@@ -2766,7 +2913,7 @@ export default function ChatWidget({
                     ? "Ask about the attached case file or add context..."
                     : "Enter a repair analysis command or upload documentation..."
                 }
-                className="chat-composer-textarea min-h-[38px] max-h-[88px] flex-1 resize-none overflow-y-auto border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[#b86a2d] focus:ring-1 focus:ring-[#b86a2d]/30 disabled:cursor-not-allowed disabled:opacity-50"
+                className="chat-composer-textarea min-h-11 max-h-[88px] min-w-[180px] flex-[1_1_100%] resize-none overflow-y-auto border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[#b86a2d] focus:ring-1 focus:ring-[#b86a2d]/30 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-1"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -2779,7 +2926,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={handleDownloadRedactedChat}
                 disabled={disabled || loading || isTranscribing || isExportingChat}
-                className="rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                className="min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isExportingChat ? "Preparing..." : "Download Chat"}
               </button>
@@ -2787,7 +2934,7 @@ export default function ChatWidget({
               <button
                 onClick={handleSend}
                 disabled={loading || isTranscribing || disabled}
-                className="rounded-md border border-[#b86a2d] bg-[#b86a2d] px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#c57934] disabled:opacity-50 sm:px-5"
+                className="min-h-10 flex-1 rounded-md border border-[#b86a2d] bg-[#b86a2d] px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#c57934] disabled:opacity-50 sm:flex-none sm:px-5"
               >
                 {loading ? "..." : "Send"}
               </button>
@@ -2795,7 +2942,7 @@ export default function ChatWidget({
               <button
                 type="button"
                 onClick={handleEndChat}
-                className="rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-red-500/80 transition hover:bg-red-500/8 hover:text-red-500 disabled:opacity-50 dark:text-red-300/75 dark:hover:text-red-200"
+                className="min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-red-500/80 transition hover:bg-red-500/8 hover:text-red-500 disabled:opacity-50 dark:text-red-300/75 dark:hover:text-red-200"
                 disabled={disabled || (loading && messages.length <= 1)}
                 aria-label="End chat"
                 title="End chat"
@@ -2815,6 +2962,27 @@ export default function ChatWidget({
                       : isTranscribing
                         ? "Transcribing your recording..."
                         : "Recording... click the mic again to stop."}
+                  </div>
+                )}
+                {(selectedUploadNames.length > 0 || uploadUiState !== "idle") && (
+                  <div
+                    className={`mt-3 px-1 text-xs ${
+                      uploadUiState === "error"
+                        ? "text-red-500"
+                        : uploadUiState === "uploaded"
+                          ? "text-emerald-600 dark:text-emerald-300"
+                          : "text-muted-foreground"
+                    }`}
+                  >
+                    <span className="font-mono uppercase tracking-[0.08em]">
+                      {uploadUiState}
+                    </span>
+                    {uploadUiMessage ? ` - ${uploadUiMessage}` : ""}
+                    {selectedUploadNames.length > 0 ? (
+                      <span className="ml-2 text-muted-foreground">
+                        {selectedUploadNames.join(", ")}
+                      </span>
+                    ) : null}
                   </div>
                 )}
               </div>

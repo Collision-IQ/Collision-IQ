@@ -64,7 +64,7 @@ function Drawer({
 
       <div
         className={[
-          "absolute top-0 h-full w-[88vw] max-w-sm border-l border-border bg-card",
+          "absolute top-0 h-full w-[92vw] max-w-sm border-l border-border bg-card",
           side === "left" ? "left-0" : "right-0",
         ].join(" ")}
       >
@@ -73,7 +73,7 @@ function Drawer({
 
           <button
             onClick={onClose}
-            className="rounded-md border border-border bg-muted px-2 py-1 text-xs text-muted-foreground transition hover:bg-background hover:text-foreground"
+            className="min-h-10 rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground transition hover:bg-background hover:text-foreground"
           >
             Close
           </button>
@@ -111,9 +111,9 @@ export default function ChatShell({
 
   return (
     <ClerkProvider>
-      <div className="ci-workstation flex h-[100svh] flex-col overflow-hidden bg-background text-foreground">
+      <div className="ci-workstation flex h-[100svh] max-w-full flex-col overflow-hidden bg-background text-foreground">
       <header className="relative z-10 border-b border-border bg-card">
-        <div className="relative mx-auto flex min-h-[52px] max-w-none items-center justify-between gap-4 px-4 py-1.5 md:px-5">
+        <div className="relative mx-auto flex min-h-[52px] max-w-none items-center justify-between gap-2 px-3 py-2 md:gap-4 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex items-center gap-2">
               <Image
@@ -129,7 +129,7 @@ export default function ChatShell({
                 alt={title}
                 width={150}
                 height={30}
-                className="h-[26px] w-auto invert dark:invert-0"
+                className="h-[24px] w-auto max-w-[132px] invert dark:invert-0 sm:max-w-[150px]"
                 priority
               />
             </div>
@@ -148,17 +148,17 @@ export default function ChatShell({
             </span>
           </div>
 
-          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
             <Link
               href="/technical-systems"
-              className="rounded-md border border-[#b86a2d] bg-[#b86a2d] px-3 py-1.5 text-xs font-semibold text-black transition hover:bg-[#c57934]"
+              className="hidden min-h-10 items-center rounded-md border border-[#b86a2d] bg-[#b86a2d] px-3 py-2 text-xs font-semibold text-black transition hover:bg-[#c57934] sm:inline-flex"
             >
               Technical Systems
             </Link>
 
             <Link
               href="/the-academy"
-              className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-background"
+              className="hidden min-h-10 items-center rounded-md border border-border bg-muted px-3 py-2 text-xs font-medium text-foreground transition hover:bg-background md:inline-flex"
             >
               Professional Services
             </Link>
@@ -170,7 +170,7 @@ export default function ChatShell({
             {hasLeft && (
               <button
                 onClick={() => setLeftOpen(true)}
-                className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-background lg:hidden"
+                className="min-h-10 rounded-md border border-border bg-muted px-3 py-2 text-xs text-foreground hover:bg-background lg:hidden"
               >
                 Workspace
               </button>
@@ -179,7 +179,7 @@ export default function ChatShell({
             {hasRight && (
               <button
                 onClick={() => setRightOpen(true)}
-                className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs text-foreground hover:bg-background lg:hidden"
+                className="min-h-10 rounded-md border border-border bg-muted px-3 py-2 text-xs text-foreground hover:bg-background lg:hidden"
               >
                 Inspector
               </button>
@@ -190,7 +190,7 @@ export default function ChatShell({
 
       <div className="h-px w-full bg-border" />
 
-      <div className="relative z-10 min-h-0 w-full max-w-none flex-1 px-3 py-3 md:px-4">
+      <div className="relative z-10 min-h-0 w-full max-w-none flex-1 overflow-hidden px-2 py-2 md:px-4 md:py-3">
         <div className="grid h-full min-h-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_410px]">
           <div className="flex h-full min-h-0 min-w-0 flex-col border border-border bg-card">
             <div className="flex items-center justify-between gap-4 border-b border-border px-3 py-2">

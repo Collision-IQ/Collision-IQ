@@ -118,23 +118,12 @@ export default function AttachmentPreviewModal({
   const hasTextPreview = structuredTextPreview.length > 0;
   const hasPrevious = currentIndex > 0;
   const hasNext = currentIndex >= 0 && currentIndex < attachments.length - 1;
-  const isOpen = Boolean(attachment);
-
   const modal = (
     <div className="fixed inset-0 z-[120] bg-black/78 backdrop-blur-sm">
-      <div className="absolute left-4 top-4 z-10 rounded bg-black/70 px-2 py-1 text-xs text-white">
-        {JSON.stringify({
-          isOpen,
-          hasAttachment: Boolean(attachment),
-          name: attachment?.filename,
-          mimeType: attachment?.mime,
-          previewUrl: Boolean(attachment?.previewUrl),
-        })}
-      </div>
-      <div className="flex h-full w-full items-center justify-center p-2 sm:p-4">
-        <div className="flex h-full min-h-0 w-[min(1700px,98vw)] max-h-[calc(100vh-2.5rem)] flex-col overflow-hidden rounded-[24px] border border-white/10 bg-[#0b0b0b] shadow-2xl">
-          <div className="shrink-0 border-b border-white/10 px-5 py-4">
-            <div className="flex items-start justify-between gap-4">
+      <div className="flex h-full w-full items-center justify-center p-1 sm:p-4">
+        <div className="flex h-full min-h-0 w-full max-w-[1700px] flex-col overflow-hidden border border-white/10 bg-[#0b0b0b] shadow-2xl sm:max-h-[calc(100vh-2.5rem)] sm:w-[98vw] sm:rounded-[24px]">
+          <div className="shrink-0 border-b border-white/10 px-3 py-3 sm:px-5 sm:py-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
             <div className="min-w-0">
               <div className="truncate text-base font-semibold text-white">{attachment.filename}</div>
               <div className="mt-1 text-xs uppercase tracking-[0.18em] text-white/45">
@@ -146,14 +135,14 @@ export default function AttachmentPreviewModal({
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {attachments.length > 1 && (
                 <>
                   <button
                     type="button"
                     onClick={() => onNavigate("previous")}
                     disabled={!hasPrevious}
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white/70 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                    className="min-h-10 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white/70 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
                   >
                     <span className="inline-flex items-center gap-1.5">
                       <ChevronLeft size={14} />
@@ -167,7 +156,7 @@ export default function AttachmentPreviewModal({
                     type="button"
                     onClick={() => onNavigate("next")}
                     disabled={!hasNext}
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white/70 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+                    className="min-h-10 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white/70 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
                   >
                     <span className="inline-flex items-center gap-1.5">
                       Next
@@ -181,7 +170,7 @@ export default function AttachmentPreviewModal({
                   <button
                     type="button"
                     onClick={() => setZoom((value) => Math.max(0.75, value - 0.25))}
-                    className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/70 transition hover:bg-white/10 hover:text-white"
+                    className="min-h-10 min-w-10 rounded-lg border border-white/10 bg-white/5 p-2 text-white/70 transition hover:bg-white/10 hover:text-white"
                     aria-label="Zoom out"
                   >
                     <ZoomOut size={16} />
@@ -189,7 +178,7 @@ export default function AttachmentPreviewModal({
                   <button
                     type="button"
                     onClick={() => setZoom((value) => Math.min(3, value + 0.25))}
-                    className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/70 transition hover:bg-white/10 hover:text-white"
+                    className="min-h-10 min-w-10 rounded-lg border border-white/10 bg-white/5 p-2 text-white/70 transition hover:bg-white/10 hover:text-white"
                     aria-label="Zoom in"
                   >
                     <ZoomIn size={16} />
@@ -197,7 +186,7 @@ export default function AttachmentPreviewModal({
                   <button
                     type="button"
                     onClick={() => setZoom(1)}
-                    className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/70 transition hover:bg-white/10 hover:text-white"
+                    className="min-h-10 min-w-10 rounded-lg border border-white/10 bg-white/5 p-2 text-white/70 transition hover:bg-white/10 hover:text-white"
                     aria-label="Reset zoom"
                   >
                     <RotateCcw size={16} />
@@ -207,7 +196,7 @@ export default function AttachmentPreviewModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-lg border border-white/10 bg-white/5 p-2 text-white/70 transition hover:bg-white/10 hover:text-white"
+                className="min-h-10 min-w-10 rounded-lg border border-white/10 bg-white/5 p-2 text-white/70 transition hover:bg-white/10 hover:text-white"
                 aria-label="Back to chat"
                 title="Back to chat"
               >
@@ -218,8 +207,8 @@ export default function AttachmentPreviewModal({
           </div>
 
           <div className="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(320px,28vw)] xl:grid-cols-[minmax(0,1fr)_360px]">
-            <div className="min-h-0 min-w-0 bg-black/30 p-4">
-              <div className="h-full min-h-0 overflow-hidden rounded-[18px] border border-white/8 bg-black/40">
+            <div className="min-h-0 min-w-0 bg-black/30 p-2 sm:p-4">
+              <div className="h-full min-h-0 overflow-hidden border border-white/8 bg-black/40 sm:rounded-[18px]">
               {previewKind === "pdf" ? (
                 attachment.previewUrl ? (
                   <iframe
