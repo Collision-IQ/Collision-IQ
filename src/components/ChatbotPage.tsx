@@ -151,6 +151,26 @@ const EMPTY_PANEL: DecisionPanel = {
 const CHAT_CONSENT_STORAGE_KEY = "collision_iq_chat_consent";
 const CHAT_CONSENT_TERMS_VERSION = "2026-03-28";
 const CHAT_CONSENT_PRIVACY_VERSION = "2026-03-28";
+const CHAT_ONLY_STORAGE_KEY = "collisionIq.chatOnlyMode";
+const ASSISTANCE_PROFILE_STORAGE_KEY = "collisionIq.assistanceProfile";
+
+type AssistanceProfile =
+  | "shop"
+  | "insurance_adjuster"
+  | "policyholder"
+  | "attorney_or_appraiser"
+  | "other";
+
+const ASSISTANCE_PROFILE_OPTIONS: Array<{
+  value: AssistanceProfile;
+  label: string;
+}> = [
+  { value: "shop", label: "Repair shop" },
+  { value: "insurance_adjuster", label: "Insurance adjuster" },
+  { value: "policyholder", label: "Vehicle owner / policyholder" },
+  { value: "attorney_or_appraiser", label: "Attorney / appraiser" },
+  { value: "other", label: "Other" },
+];
 
 function getHeroCollapseStorageKey(caseId: string) {
   return `case:${caseId}:heroCollapsed`;
@@ -162,6 +182,21 @@ function getHeaderExpandedStorageKey(caseId: string) {
 
 function getHeaderPinnedStorageKey(caseId: string) {
   return `case:${caseId}:headerPinnedByUser`;
+}
+
+function readStoredChatOnlyMode() {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(CHAT_ONLY_STORAGE_KEY) === "true";
+}
+
+function isAssistanceProfile(value: string | null): value is AssistanceProfile {
+  return ASSISTANCE_PROFILE_OPTIONS.some((option) => option.value === value);
+}
+
+function readStoredAssistanceProfile(): AssistanceProfile | null {
+  if (typeof window === "undefined") return null;
+  const value = window.localStorage.getItem(ASSISTANCE_PROFILE_STORAGE_KEY);
+  return isAssistanceProfile(value) ? value : null;
 }
 
 type ImmersiveHeaderChangeReason =
@@ -261,11 +296,34 @@ export function ChatbotWorkspacePage() {
   const [headerPinnedByUser, setHeaderPinnedByUser] = useState(false);
   const [lastHeaderChangeReason, setLastHeaderChangeReason] =
     useState<ImmersiveHeaderChangeReason>("CASE_RESET");
+  const [chatOnlyMode, setChatOnlyMode] = useState(false);
+  const [assistanceProfile, setAssistanceProfile] = useState<AssistanceProfile | null>(null);
+  const [assistanceProfileResolved, setAssistanceProfileResolved] = useState(false);
   const immersiveHeaderExpandedRef = useRef(true);
 
   useEffect(() => {
     immersiveHeaderExpandedRef.current = isImmersiveHeaderExpanded;
   }, [isImmersiveHeaderExpanded]);
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    setChatOnlyMode(readStoredChatOnlyMode());
+    setAssistanceProfile(readStoredAssistanceProfile());
+    setAssistanceProfileResolved(true);
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(CHAT_ONLY_STORAGE_KEY, String(chatOnlyMode));
+  }, [chatOnlyMode]);
+
+  const handleAssistanceProfileSelect = useCallback((profile: AssistanceProfile) => {
+    setAssistanceProfile(profile);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(ASSISTANCE_PROFILE_STORAGE_KEY, profile);
+    }
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -455,6 +513,17 @@ export function ChatbotWorkspacePage() {
   }, []);
 
   const reopenImmersiveHeaderAfterUpload = useCallback(() => {
+    if (chatOnlyMode) {
+      console.info("[immersive-header] auto-state skipped", {
+        reason: "chat_only_mode",
+        requestedState: "expanded",
+        activeCaseId: analysisReportId,
+        hasStructuredAnalysis,
+        lastHeaderChangeReason,
+      });
+      return;
+    }
+
     if (headerPinnedByUser) {
       console.info("[immersive-header] auto-state skipped", {
         reason: "user_pinned",
@@ -474,7 +543,7 @@ export function ChatbotWorkspacePage() {
     });
     setIsImmersiveHeaderExpanded(true);
     setLastHeaderChangeReason("AUTO_REOPEN_UPLOAD_COMPLETE");
-  }, [analysisReportId, hasStructuredAnalysis, headerPinnedByUser, lastHeaderChangeReason]);
+  }, [analysisReportId, chatOnlyMode, hasStructuredAnalysis, headerPinnedByUser, lastHeaderChangeReason]);
 
   const handleToggleImmersiveHeader = useCallback(() => {
     const previous = immersiveHeaderExpandedRef.current;
@@ -515,12 +584,16 @@ export function ChatbotWorkspacePage() {
   }, []);
 
   const collapseChatPane = useCallback(() => {
+    if (chatOnlyMode) {
+      return;
+    }
+
     if (hasStructuredAnalysis) {
       immersiveHeaderExpandedRef.current = true;
       setIsImmersiveHeaderExpanded(true);
       setLeftPaneMode("review");
     }
-  }, [hasStructuredAnalysis]);
+  }, [chatOnlyMode, hasStructuredAnalysis]);
 
   const openChatPane = useCallback(() => {
     setLeftPaneMode("chat");
@@ -1079,26 +1152,58 @@ export function ChatbotWorkspacePage() {
                 )}
                 {isChatActive && (
                   <div className="relative h-full min-h-0">
-                    <div className="relative flex h-full min-h-0 flex-col overflow-hidden border border-border bg-background">
-                      <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-3 py-2">
-                        <div>
+                      <div className="relative flex h-full min-h-0 flex-col overflow-hidden border border-border bg-background">
+                        <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-3 py-2">
+                          <div>
                           <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
                             Command Surface
                           </div>
                           <div className="mt-0.5 text-xs text-muted-foreground">
-                            Case commands, uploads, and follow-up analysis.
+                              Case commands, uploads, and follow-up analysis.
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setChatOnlyMode((value) => !value)}
+                              className={`rounded-md border px-3 py-1.5 text-xs font-medium transition ${
+                                chatOnlyMode
+                                  ? "border-[#C65A2A]/40 bg-[#C65A2A]/15 text-[#C65A2A]"
+                                  : "border-border bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                              }`}
+                              aria-pressed={chatOnlyMode}
+                            >
+                              Chat Only: {chatOnlyMode ? "On" : "Off"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={collapseChatPane}
+                              className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-muted/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                              disabled={chatOnlyMode}
+                            >
+                              Collapse chat
+                            </button>
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={collapseChatPane}
-                          className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-muted/70 hover:text-foreground"
-                        >
-                          Collapse chat
-                        </button>
-                      </div>
-                      <div className="h-full min-h-0">
-                        <ChatWidget
+                        {assistanceProfileResolved && !assistanceProfile ? (
+                          <div className="border-b border-border bg-muted/35 px-3 py-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-medium text-foreground">Who are we helping today?</span>
+                              {ASSISTANCE_PROFILE_OPTIONS.map((option) => (
+                                <button
+                                  key={option.value}
+                                  type="button"
+                                  onClick={() => handleAssistanceProfileSelect(option.value)}
+                                  className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                                >
+                                  {option.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                        <div className="h-full min-h-0">
+                          <ChatWidget
                           key="chat-widget"
                           onAttachmentChange={setAttachment}
                           onAttachmentsChange={setAttachmentsState}
@@ -1130,6 +1235,7 @@ export function ChatbotWorkspacePage() {
                           caseChatEnabled={Boolean(analysisReportId)}
                           activeCaseId={analysisReportId}
                           caseIntent={caseIntent || "Continue with this case"}
+                          assistanceProfile={assistanceProfile}
                           transcriptSummary={primaryAnalysis?.content ?? analysisText}
                           exportModel={hasResolvedAnalysis ? renderModel : null}
                           followUpFiles={attachmentsState.map((file) => ({
@@ -2154,35 +2260,6 @@ function RailContent({
         </section>
       )}
 
-      <RailGroup label="Decision" />
-
-      <RailInsightSection
-        insightKey="executive_summary"
-        activeInsightKey={activeInsightKey}
-        registerSectionRef={registerSectionRef}
-        onActivate={onInsightSelect}
-      >
-        {hasResolvedAnalysis && featuredRecommendation ? (
-          <FeaturedRecommendationCard item={featuredRecommendation} />
-        ) : null}
-
-        {hasResolvedAnalysis ? (
-          <DecisionSection
-            title="Decision Snapshot"
-            body={renderModel.positionStatement || renderModel.repairPosition}
-            tone="neutral"
-            featured
-          />
-        ) : (
-          <section className="mt-5 space-y-2 rounded-2xl bg-card/88 p-3.5 shadow-sm ring-1 ring-border/45">
-            <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Decision Snapshot</div>
-            <div className="text-[13px] leading-5 text-muted-foreground">
-              Upload an estimate or photos to generate the key repair risks, missing support, and next-step guidance.
-            </div>
-          </section>
-        )}
-      </RailInsightSection>
-
       <RailGroup label="Context" compact />
 
       {hasResolvedAnalysis && (
@@ -2212,6 +2289,17 @@ function RailContent({
 
       {hasResolvedAnalysis ? (
         <ConfidenceIntegrityCard integrity={renderModel.confidenceIntegrity} />
+      ) : null}
+
+      {hasResolvedAnalysis && featuredRecommendation ? (
+        <RailInsightSection
+          insightKey="executive_summary"
+          activeInsightKey={activeInsightKey}
+          registerSectionRef={registerSectionRef}
+          onActivate={onInsightSelect}
+        >
+          <FeaturedRecommendationCard item={featuredRecommendation} />
+        </RailInsightSection>
       ) : null}
 
       {hasResolvedAnalysis && supportSignals.length > 0 ? (

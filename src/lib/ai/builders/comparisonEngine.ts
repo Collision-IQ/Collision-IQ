@@ -392,8 +392,8 @@ function buildEstimateComparisons(params: {
         typeof params.insurerStory.laborStructure.bodyHours === "number"
           ? Number(
               (
-                params.shopStory.laborStructure.bodyHours -
-                params.insurerStory.laborStructure.bodyHours
+                params.insurerStory.laborStructure.bodyHours -
+                params.shopStory.laborStructure.bodyHours
               ).toFixed(1)
             )
           : null,
@@ -424,8 +424,8 @@ function buildEstimateComparisons(params: {
         typeof params.insurerStory.laborStructure.paintHours === "number"
           ? Number(
               (
-                params.shopStory.laborStructure.paintHours -
-                params.insurerStory.laborStructure.paintHours
+                params.insurerStory.laborStructure.paintHours -
+                params.shopStory.laborStructure.paintHours
               ).toFixed(1)
             )
           : null,
@@ -575,7 +575,7 @@ function buildOperationLaborComparisonRow(
     rhsValue: insurer?.laborHours ?? null,
     delta:
       typeof shop?.laborHours === "number" && typeof insurer?.laborHours === "number"
-        ? Number((shop.laborHours - insurer.laborHours).toFixed(1))
+        ? Number((insurer.laborHours - shop.laborHours).toFixed(1))
         : null,
     valueUnit: "hours" as const,
     deltaType: resolveDeltaType(shop?.laborHours ?? null, insurer?.laborHours ?? null),
@@ -597,7 +597,7 @@ function buildOperationDelta(
   if (deltaType === "removed") return "Present only in carrier estimate";
   if (deltaType === "same") return "Aligned";
   if (shop && insurer && shop.operation !== insurer.operation) {
-    return `${shop.operation} -> ${insurer.operation}`;
+    return `${shop.operation} → ${insurer.operation}`;
   }
   return "Changed";
 }

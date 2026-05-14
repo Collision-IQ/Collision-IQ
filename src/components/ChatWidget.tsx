@@ -171,6 +171,7 @@ interface ChatWidgetProps {
   caseChatEnabled?: boolean;
   activeCaseId?: string | null;
   caseIntent?: string;
+  assistanceProfile?: string | null;
   transcriptSummary?: string | null;
   exportModel?: unknown;
   followUpFiles?: Array<{ id: string; name: string; type?: string; url?: string }>;
@@ -424,6 +425,7 @@ export default function ChatWidget({
   caseChatEnabled = false,
   activeCaseId = null,
   caseIntent = "Continue with this case",
+  assistanceProfile = null,
   disabled = false,
 }: ChatWidgetProps) {
   const router = useRouter();
@@ -1251,6 +1253,7 @@ export default function ChatWidget({
               "Answer this topic first and avoid a broad case recap unless this topic is a general summary. " +
               buildPlanRecommendationGuard(hasProChatRecommendations),
             history: resolveCaseHistory(),
+            assistanceProfile,
           }),
         });
 
@@ -1320,6 +1323,7 @@ export default function ChatWidget({
             artifactIds: attachmentsForTurn.map((attachment) => attachment.attachmentId),
             activeCaseId,
             userIntent: messageToSend,
+            assistanceProfile,
           }),
         });
         const analysisDurationMs = Date.now() - analysisStartMs;
@@ -1497,6 +1501,7 @@ export default function ChatWidget({
             chatReportRecommendations: hasProChatRecommendations,
             snapshotExport: canAccessFeature(productPlan, "snapshot_export"),
           },
+          assistanceProfile,
         }),
       });
 
@@ -1561,6 +1566,7 @@ export default function ChatWidget({
             artifactIds: attachmentsForTurn.map((attachment) => attachment.attachmentId),
             activeCaseId: analysisReportIdRef.current,
             userIntent: messageToSend,
+            assistanceProfile,
           }),
         })
           .then(async (analysisResponse) => {

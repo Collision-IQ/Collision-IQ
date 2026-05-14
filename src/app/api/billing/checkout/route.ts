@@ -82,6 +82,14 @@ export async function POST(req: Request) {
   const priceId = catalogEntry.priceId;
 
   if (!priceId) {
+    if (plan === "starter" || plan === "pro") {
+      const signupUrl = new URL("/sign-up", req.url).toString();
+      if (wantsJson) {
+        return NextResponse.json({ url: signupUrl });
+      }
+      return NextResponse.redirect(signupUrl, 303);
+    }
+
     return NextResponse.json({ error: `Missing Stripe price for ${plan}` }, { status: 500 });
   }
 

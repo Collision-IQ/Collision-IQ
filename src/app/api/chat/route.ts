@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import type { ChatAnalysisOutput } from "@/lib/ai/contracts/chatAnalysisSchema";
 import type { DriveRetrievalResponse } from "@/lib/ai/contracts/driveRetrievalContract";
 import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
+import { buildAssistanceProfileInstruction } from "@/lib/ai/assistanceProfile";
 import {
   UnauthorizedError,
   requireCurrentUser,
@@ -77,6 +78,7 @@ type ChatRequestBody = {
     chatReportRecommendations?: boolean;
     snapshotExport?: boolean;
   };
+  assistanceProfile?: string | null;
 };
 
 type OpenAIErrorMeta = {
@@ -911,6 +913,7 @@ export async function POST(req: Request) {
     const systemInstructions = [
       baseSystemInstructions,
       buildProductAccessGuard(body.productAccess),
+      buildAssistanceProfileInstruction(body.assistanceProfile),
       buildActiveCaseSystemGuard({
         hasStoredEvidence: activeCaseHasStoredEvidence,
         hasVehicleContext: activeCaseHasVehicleContext,

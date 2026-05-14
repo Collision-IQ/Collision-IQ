@@ -20,6 +20,7 @@ import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeRepo
 import { runRepairAnalysis } from "@/lib/ai/orchestrator/analysisOrchestrator";
 import { enrichAnalysisAttachments } from "@/lib/ai/analysisAttachmentService";
 import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
+import { buildAssistanceProfileInstruction } from "@/lib/ai/assistanceProfile";
 import {
   inferDriveRetrievalTopics,
   inferDriveVehicleContext,
@@ -95,6 +96,7 @@ type AnalysisRequestBody = {
     procedure?: string | null;
   } | null;
   userIntent?: string | null;
+  assistanceProfile?: string | null;
 };
 
 class AttachmentAccessError extends Error {
@@ -157,6 +159,10 @@ export async function POST(req: Request) {
     });
     const body = (await req.json()) as AnalysisRequestBody;
     const artifactIds = body.artifactIds ?? [];
+    const profileInstruction = buildAssistanceProfileInstruction(body.assistanceProfile);
+    const requestUserIntent = [body.userIntent ?? "", profileInstruction]
+      .filter(Boolean)
+      .join("\n\n");
 
     if (!artifactIds.length) {
       return NextResponse.json(
@@ -225,7 +231,7 @@ export async function POST(req: Request) {
 
     const normalizedAttachments = await enrichAnalysisAttachments({
       attachments: storedAttachments,
-      userIntent: body.userIntent ?? null,
+      userIntent: requestUserIntent || null,
     });
     const attachmentFilesForLinks = normalizedAttachments.map((attachment) => ({
       name: attachment.filename,
@@ -250,7 +256,7 @@ export async function POST(req: Request) {
       artifactIds,
       preloadedAttachments,
       sessionContext: body.sessionContext ?? null,
-      userIntent: body.userIntent ?? null,
+      userIntent: requestUserIntent || null,
     });
     report = applyLinkedEvidenceToReport({
       report,
@@ -258,20 +264,20 @@ export async function POST(req: Request) {
       linkedEvidence,
       activeCaseId: body.activeCaseId ?? null,
       previousReport: existingCase?.report ?? null,
-      userIntent: body.userIntent ?? null,
+      userIntent: requestUserIntent || null,
       uploadLimitReached: artifactIds.length >= uploadLimits.maxFilesPerReview,
       totalUploadedFileCount: mergeArtifactIds(existingCase?.artifactIds ?? [], artifactIds).length,
     });
     let analysis = normalizeReportToAnalysisResult(report);
     const retrievalSnapshot = buildAnalysisRetrievalSnapshot({
-      userMessage: body.userIntent ?? "",
+      userMessage: requestUserIntent,
       report,
       analysis,
       hasDocuments: artifactIds.length > 0,
     });
     const retrieval = await retrieveDriveSupport({
       taskType: retrievalSnapshot.taskType,
-      userQuery: body.userIntent ?? "repair analysis",
+      userQuery: requestUserIntent || "repair analysis",
       estimateText: analysis.rawEstimateText ?? "",
       firstPassAnswer: retrievalSnapshot.summary.overview,
       analysis: retrievalSnapshot,
@@ -306,7 +312,7 @@ export async function POST(req: Request) {
         report,
         analysis,
         retrieval,
-        userMessage: body.userIntent ?? "",
+        userMessage: requestUserIntent,
       });
       analysis = normalizeReportToAnalysisResult(report);
       refinedWithRetrieval = true;
@@ -315,7 +321,7 @@ export async function POST(req: Request) {
     report = await attachMarketPreviewComparables({
       report,
       uploadedAttachments: normalizedAttachments,
-      userIntent: body.userIntent ?? "",
+      userIntent: requestUserIntent,
     });
     analysis = normalizeReportToAnalysisResult(report);
 

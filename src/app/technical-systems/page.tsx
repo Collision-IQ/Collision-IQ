@@ -57,6 +57,7 @@ const SYSTEMS = [
   {
     title: "Shop-Flow",
     plan: "shop_flow" as PurchasablePlan,
+    href: "/technical-systems/shop-flow",
     priceLabel: "$200/month",
     description:
       "Tailored workflow software for estimate review, supplement handling, and cleaner repair-process execution.",
@@ -69,6 +70,7 @@ const SYSTEMS = [
   {
     title: "Parts App",
     plan: "parts_app" as PurchasablePlan,
+    href: "/technical-systems/parts-app",
     priceLabel: "$200/month",
     description:
       "Parts-focused process support and decision guidance inside the repair workflow.",
@@ -81,6 +83,7 @@ const SYSTEMS = [
   {
     title: "Shop Hub",
     plan: "shop_hub" as PurchasablePlan,
+    href: "/technical-systems/shop-hub",
     priceLabel: "$300/month",
     description:
       "A bundled operating system that includes both apps with a lower monthly price and free virtual onboarding.",
@@ -259,7 +262,7 @@ export default function TechnicalSystemsPage() {
               <p className="mt-3 text-sm leading-7 text-muted-foreground">{item.description}</p>
               <ul className="mt-4 space-y-2 text-sm text-muted-foreground">{item.highlights.map((highlight) => <li key={highlight} className="rounded-xl border border-border bg-muted px-3 py-2">{highlight}</li>)}</ul>
               <div className="mt-6 flex flex-wrap gap-3">
-                <button type="button" onClick={() => void handleCheckout(item.plan)} disabled={activeCheckout === item.plan} className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:opacity-90 disabled:opacity-60">{activeCheckout === item.plan ? "Redirecting..." : `Get ${item.title}`}</button>
+                <Link href={item.href} className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:opacity-90">View {item.title}</Link>
                 <button type="button" onClick={scrollToLeadForm} className="rounded-2xl border border-border bg-background px-5 py-3 text-sm font-semibold text-foreground transition hover:bg-muted">Ask about tailoring this</button>
               </div>
             </div>

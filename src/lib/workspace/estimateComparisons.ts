@@ -76,7 +76,7 @@ function normalizeEstimateComparisonRow(
   const lhsValue = row.lhsValue ?? row.shop ?? null;
   const rhsValue = row.rhsValue ?? row.insurance ?? null;
 
-  return {
+  const normalized: EstimateComparisonRow = {
     id: row.id ?? `comparison-row-${index + 1}`,
     category: row.category ?? "Estimate comparison",
     operation: row.operation,
@@ -91,6 +91,8 @@ function normalizeEstimateComparisonRow(
     confidence: typeof row.confidence === "number" ? row.confidence : null,
     notes: row.notes?.filter(Boolean) ?? [],
   };
+
+  return hasMeaningfulComparisonRow(normalized) ? normalized : null;
 }
 
 function deriveDeltaType(
@@ -109,7 +111,7 @@ function deriveDelta(
   rhsValue: EstimateComparisonRow["rhsValue"]
 ): string | number | null {
   if (typeof lhsValue === "number" && typeof rhsValue === "number") {
-    return Number((lhsValue - rhsValue).toFixed(2));
+    return Number((rhsValue - lhsValue).toFixed(2));
   }
 
   const deltaType = deriveDeltaType(lhsValue, rhsValue);
@@ -134,4 +136,33 @@ export function buildWorkspaceEstimateComparisonSummary(
 
 function hasValue(value: EstimateComparisonRow["lhsValue"]) {
   return value !== null && value !== undefined && `${value}`.trim().length > 0;
+}
+
+function hasMeaningfulComparisonRow(row: EstimateComparisonRow) {
+  const labels = [row.operation, row.partName, row.category]
+    .map((value) => normalizeComparisonLabel(value))
+    .filter(Boolean);
+
+  if (labels.some((label) => !isGenericOperationToken(label))) {
+    return true;
+  }
+
+  const text = `${row.category ?? ""} ${row.notes?.join(" ") ?? ""}`.toLowerCase();
+  if (/\b(total|subtotal|tax|labor|body|paint|frame|structural|scan|calibration|alignment|measurement|parts?)\b/.test(text)) {
+    return true;
+  }
+
+  return false;
+}
+
+function normalizeComparisonLabel(value: string | null | undefined) {
+  return (value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isGenericOperationToken(value: string) {
+  return /^(?:r&i|r&r|repl|rpr|refn|o\/h|subl|add|overlap|repair operation|operation|estimate comparison)$/i.test(
+    value
+  );
 }
