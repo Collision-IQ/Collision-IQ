@@ -3,10 +3,12 @@ import type {
   EstimateComparisonRow,
   WorkspaceEstimateComparisons,
 } from "@/types/workspaceTypes";
+import { normalizeEstimateOperationLabel } from "@/lib/ui/presentationText";
 
 type LegacyComparisonRow = {
   id?: string;
   category?: string;
+  description?: string;
   shop?: string;
   insurance?: string;
   lhsSource?: string;
@@ -75,11 +77,17 @@ function normalizeEstimateComparisonRow(
 
   const lhsValue = row.lhsValue ?? row.shop ?? null;
   const rhsValue = row.rhsValue ?? row.insurance ?? null;
+  const normalizedOperation = normalizeEstimateOperationLabel({
+    description: row.description,
+    operation: row.operation,
+    partName: row.partName,
+    category: row.category,
+  });
 
   const normalized: EstimateComparisonRow = {
     id: row.id ?? `comparison-row-${index + 1}`,
     category: row.category ?? "Estimate comparison",
-    operation: row.operation,
+    operation: normalizedOperation || row.operation,
     partName: row.partName,
     lhsSource: row.lhsSource ?? "Shop estimate",
     rhsSource: row.rhsSource ?? "Carrier estimate",

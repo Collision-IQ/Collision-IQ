@@ -148,8 +148,14 @@ run("estimate delta report buckets Honda newer-estimate ADAS additions and body 
     panel: null,
     assistantAnalysis: null,
   });
-  const added = document.sections.find((section) => section.title === "Added In Newer Estimate")?.bullets ?? [];
-  const changed = document.sections.find((section) => section.title === "Changed Labor / Qty / Price")?.bullets ?? [];
+  const added = document.sections.find((section) =>
+    section.bullets?.some((bullet) => /REVVAdas Report|In-process scan|Radar calibration/i.test(bullet))
+  )?.bullets ?? [];
+  const changed = document.sections.find((section) =>
+    /^(Changed Labor \/ Qty \/ Price|CHANGED FROM PRIOR ESTIMATE|CHANGED BETWEEN ESTIMATES)$/i.test(
+      section.title
+    )
+  )?.bullets ?? [];
   const text = JSON.stringify(document);
 
   assert.equal(document.header.title, "Estimate Delta / Change Requests");

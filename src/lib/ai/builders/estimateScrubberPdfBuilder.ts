@@ -17,6 +17,7 @@ import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateC
 import {
   cleanEstimateLineForTechnicalExport,
   cleanOperationDisplayText,
+  normalizeEstimateOperationLabel,
 } from "@/lib/ui/presentationText";
 import { CCC_WORKFILE_DISCLAIMER } from "@/lib/ccc/cccWorkfileClient";
 
@@ -152,6 +153,8 @@ export function buildEstimatorChangeRequestListPdf(
   const model = buildAnnotatedEstimateReviewModel(params);
   const annotations = filterAnnotationsForAudience(model.annotations, audience);
 
+  const deltaSections = buildEstimateDeltaSections(model.comparisonRows);
+
   return buildAnnotatedEstimateDocument({
     model,
     annotations,
@@ -162,24 +165,7 @@ export function buildEstimatorChangeRequestListPdf(
     subtitle:
       "Short find-the-differences report for added, missing, and changed estimate items.",
     summary: buildEstimateDeltaSummary(model),
-    sections: [
-      {
-        title: "Added In Newer Estimate",
-        bullets: buildEstimateDeltaBullets(model.comparisonRows, "added"),
-      },
-      {
-        title: "Missing From Newer Estimate",
-        bullets: buildEstimateDeltaBullets(model.comparisonRows, "missing"),
-      },
-      {
-        title: "Changed Labor / Qty / Price",
-        bullets: buildEstimateDeltaBullets(model.comparisonRows, "changed"),
-      },
-      {
-        title: "Possible Rekey / Lock / Supplement Gaps",
-        bullets: buildEstimateDeltaBullets(model.comparisonRows, "gap"),
-      },
-    ],
+    sections: deltaSections,
     footer: [
       "Estimate delta only. Verify any unclear line against the source estimates before sending.",
     ],
@@ -900,7 +886,15 @@ function formatEstimatorChangeRequest(
   audience: AnnotatedEstimateAudience
 ): string {
   const request = audience === "customer" ? annotation.customerText : annotation.estimatorText;
-  return `${annotation.title}\n\n${request} The support currently tied to this request is ${formatAnnotationEvidence(annotation, audience)}. Treat this as a supplement or documentation request unless the file also contains written claim-handling conduct.`;
+  const label = normalizeEstimateOperationLabel({
+    label: annotation.title,
+    operation: annotation.title,
+    category: annotation.section,
+  });
+  if (!label) return "";
+
+  const badge = getVisibleAnnotationBadge(annotation);
+  return `${badge} ${label}: ${request} The support currently tied to this request is ${formatAnnotationEvidence(annotation, audience)}. Treat this as a supplement or documentation request unless the file also contains written claim-handling conduct.`;
 }
 
 function buildTargetEstimateMarkupBullets(params: {
@@ -959,24 +953,126 @@ function buildEstimatorChangeRequestBullets(params: {
   return [
     ...formatPromptGeneratedBullets(params.promptGeneratedText, "Stored prompt change request summary"),
     ...(params.annotations.length
-      ? params.annotations.map((annotation) => formatEstimatorChangeRequest(annotation, params.audience))
+      ? params.annotations
+          .map((annotation) => formatEstimatorChangeRequest(annotation, params.audience))
+          .filter(Boolean)
       : ["No estimator-facing change requests were isolated from the current estimate review."]),
   ];
 }
 
-type EstimateDeltaBucket = "added" | "missing" | "changed" | "gap";
+type EstimateDeltaBucket = "only_first" | "only_second" | "changed" | "gap";
+type EstimateDeltaMode = "dueling" | "sequential" | "neutral";
+
+function buildEstimateDeltaSections(comparisonRows: EstimateComparisonRow[]): CarrierReportDocument["sections"] {
+  const mode = detectEstimateDeltaMode(comparisonRows);
+  const titles = getEstimateDeltaSectionTitles(mode);
+  const sections: CarrierReportDocument["sections"] = [
+    {
+      title: titles.onlyFirst,
+      bullets: buildEstimateDeltaBullets(comparisonRows, "only_first", mode),
+    },
+    {
+      title: titles.onlySecond,
+      bullets: buildEstimateDeltaBullets(comparisonRows, "only_second", mode),
+    },
+    {
+      title: titles.changed,
+      bullets: buildEstimateDeltaBullets(comparisonRows, "changed", mode),
+    },
+    {
+      title: "Possible Rekey / Lock / Supplement Gaps",
+      bullets: buildEstimateDeltaBullets(comparisonRows, "gap", mode),
+    },
+  ];
+
+  return sections.filter((section) => (section.bullets?.length ?? 0) > 0);
+}
+
+function getEstimateDeltaSectionTitles(mode: EstimateDeltaMode): {
+  onlyFirst: string;
+  onlySecond: string;
+  changed: string;
+} {
+  if (mode === "dueling") {
+    return {
+      onlyFirst: "ONLY IN SHOP ESTIMATE",
+      onlySecond: "ONLY IN CARRIER ESTIMATE",
+      changed: "CHANGED BETWEEN ESTIMATES",
+    };
+  }
+
+  if (mode === "sequential") {
+    return {
+      onlyFirst: "ADDED IN NEWER ESTIMATE",
+      onlySecond: "REMOVED FROM NEWER ESTIMATE",
+      changed: "CHANGED FROM PRIOR ESTIMATE",
+    };
+  }
+
+  return {
+    onlyFirst: "ONLY IN ESTIMATE 1",
+    onlySecond: "ONLY IN ESTIMATE 2",
+    changed: "CHANGED BETWEEN ESTIMATES",
+  };
+}
+
+function detectEstimateDeltaMode(comparisonRows: EstimateComparisonRow[]): EstimateDeltaMode {
+  if (comparisonRows.length === 0) return "neutral";
+
+  const sourcePairs = comparisonRows
+    .map((row) => ({ lhs: (row.lhsSource ?? "").trim(), rhs: (row.rhsSource ?? "").trim() }))
+    .filter((row) => row.lhs || row.rhs);
+
+  if (sourcePairs.length === 0) {
+    return "neutral";
+  }
+
+  const hasShopCarrierSignals = sourcePairs.some((pair) => {
+    const leftRole = detectEstimateSourceRole(pair.lhs);
+    const rightRole = detectEstimateSourceRole(pair.rhs);
+    return (
+      (leftRole === "shop" && rightRole === "carrier") ||
+      (leftRole === "carrier" && rightRole === "shop")
+    );
+  });
+  if (hasShopCarrierSignals) return "dueling";
+
+  const hasSequentialSignals = sourcePairs.some((pair) =>
+    looksSequentialEstimateLabel(pair.lhs) || looksSequentialEstimateLabel(pair.rhs)
+  );
+  const likelySameEstimateFamily = sourcePairs.some((pair) =>
+    pair.lhs && pair.rhs && looksSameEstimateFamily(pair.lhs, pair.rhs)
+  );
+
+  if (hasSequentialSignals && likelySameEstimateFamily) {
+    return "sequential";
+  }
+
+  return "neutral";
+}
 
 function buildEstimateDeltaBullets(
   comparisonRows: EstimateComparisonRow[],
-  bucket: EstimateDeltaBucket
+  bucket: EstimateDeltaBucket,
+  mode: EstimateDeltaMode
 ): string[] {
+  const seenLabels = new Set<string>();
   const bullets = comparisonRows
     .filter((row) => !isEstimateDeltaExcludedRow(row))
-    .filter((row) => rowMatchesEstimateDeltaBucket(row, bucket))
-    .map((row) => formatEstimateDeltaBullet(row, bucket))
-    .filter(Boolean)
+    .filter((row) => rowMatchesEstimateDeltaBucket(row, bucket, mode))
+    .map((row) => formatEstimateDeltaBullet(row, bucket, mode))
+    .filter((bullet): bullet is string => Boolean(bullet))
+    .filter((bullet) => {
+      const label = bullet.split(":")[0]?.trim().toLowerCase();
+      if (!label || seenLabels.has(label)) {
+        return false;
+      }
+      seenLabels.add(label);
+      return true;
+    })
     .slice(0, 8);
 
+<<<<<<< HEAD
   if (bullets.length > 0) {
     return bullets;
   }
@@ -991,43 +1087,62 @@ function buildEstimateDeltaBullets(
     case "gap":
       return ["No rekey, lock, or supplement gap was detectable."];
   }
+=======
+  return bullets;
+>>>>>>> 29d8ddc (Normalize estimate delta and scrubber operation labels)
 }
 
 function rowMatchesEstimateDeltaBucket(
   row: EstimateComparisonRow,
-  bucket: EstimateDeltaBucket
+  bucket: EstimateDeltaBucket,
+  mode: EstimateDeltaMode
 ): boolean {
-  const sides = resolveEstimateDeltaSides(row);
-  const hasOlder = hasComparisonValue(sides.olderValue);
-  const hasNewer = hasComparisonValue(sides.newerValue);
+  const sides = resolveEstimateDeltaSides(row, mode);
+  const hasFirst = hasComparisonValue(sides.firstValue);
+  const hasSecond = hasComparisonValue(sides.secondValue);
   const text = buildEstimateDeltaSearchText(row);
 
-  if (bucket === "added") return !hasOlder && hasNewer;
-  if (bucket === "missing") return hasOlder && !hasNewer;
+  if (bucket === "only_first") return hasFirst && !hasSecond;
+  if (bucket === "only_second") return !hasFirst && hasSecond;
   if (bucket === "changed") {
     return (
-      hasOlder &&
-      hasNewer &&
-      formatEstimateDeltaValue(sides.olderValue) !== formatEstimateDeltaValue(sides.newerValue) &&
+      hasFirst &&
+      hasSecond &&
+      formatEstimateDeltaComparableValue(sides.firstValue, row.valueUnit) !==
+        formatEstimateDeltaComparableValue(sides.secondValue, row.valueUnit) &&
       isLaborQtyOrPriceDelta(row)
     );
   }
   return (
     /re-?key|lock support|\block\b|supplement|supp\b/i.test(text) &&
-    (!hasOlder || !hasNewer || formatEstimateDeltaValue(sides.olderValue) !== formatEstimateDeltaValue(sides.newerValue))
+    (!hasFirst ||
+      !hasSecond ||
+      formatEstimateDeltaComparableValue(sides.firstValue, row.valueUnit) !==
+        formatEstimateDeltaComparableValue(sides.secondValue, row.valueUnit))
   );
 }
 
 function formatEstimateDeltaBullet(
   row: EstimateComparisonRow,
-  bucket: EstimateDeltaBucket
+  bucket: EstimateDeltaBucket,
+  mode: EstimateDeltaMode
 ): string {
+<<<<<<< HEAD
   const label = cleanCustomerFacingEstimateLine(row.operation ?? row.partName ?? row.category ?? "Estimate item");
+=======
+  const label = normalizeEstimateOperationLabel({
+    operation: row.operation,
+    partName: row.partName,
+    category: row.category,
+    label: cleanCustomerFacingEstimateLine(row.operation ?? row.partName ?? row.category ?? ""),
+  });
+>>>>>>> 29d8ddc (Normalize estimate delta and scrubber operation labels)
 
   if (!label || /^(?:Repair Operation|Estimate item|Parser review needed)$/i.test(label)) {
     return "";
   }
 
+<<<<<<< HEAD
   if (bucket === "added" || bucket === "missing") {
     return label;
   }
@@ -1042,22 +1157,55 @@ function formatEstimateDeltaBullet(
   const change = deltaSign ? ` (${deltaSign})` : "";
 
   return `${label}: ${older} → ${newer}${change}`;
+=======
+  if (bucket === "only_first" || bucket === "only_second") {
+    return label;
+  }
+
+  const sides = resolveEstimateDeltaSides(row, mode);
+  const first = formatEstimateDeltaComparableValue(sides.firstValue, row.valueUnit) || "-";
+  const second = formatEstimateDeltaComparableValue(sides.secondValue, row.valueUnit) || "-";
+  const derivedDelta = deriveDirectionalDelta(sides.firstValue, sides.secondValue, row.valueUnit);
+  const deltaSign = derivedDelta ?? formatEstimateDeltaComparableValue(row.delta, row.valueUnit);
+  const change = deltaSign ? ` (${deltaSign})` : "";
+
+  return `${label}: ${first} → ${second}${change}`;
+>>>>>>> 29d8ddc (Normalize estimate delta and scrubber operation labels)
 }
 
-function resolveEstimateDeltaSides(row: EstimateComparisonRow): {
-  olderValue: EstimateComparisonRow["lhsValue"];
-  newerValue: EstimateComparisonRow["rhsValue"];
+function resolveEstimateDeltaSides(
+  row: EstimateComparisonRow,
+  mode: EstimateDeltaMode
+): {
+  firstValue: EstimateComparisonRow["lhsValue"];
+  secondValue: EstimateComparisonRow["rhsValue"];
 } {
+  if (mode === "dueling") {
+    const lhsRole = detectEstimateSourceRole(row.lhsSource ?? "");
+    const rhsRole = detectEstimateSourceRole(row.rhsSource ?? "");
+    if (lhsRole === "shop" && rhsRole === "carrier") {
+      return { firstValue: row.lhsValue, secondValue: row.rhsValue };
+    }
+    if (lhsRole === "carrier" && rhsRole === "shop") {
+      return { firstValue: row.rhsValue, secondValue: row.lhsValue };
+    }
+    return { firstValue: row.lhsValue, secondValue: row.rhsValue };
+  }
+
+  if (mode !== "sequential") {
+    return { firstValue: row.lhsValue, secondValue: row.rhsValue };
+  }
+
   const lhsSource = row.lhsSource ?? "";
   const rhsSource = row.rhsSource ?? "";
   const lhsLooksNewer = /\b(new|newer|latest|current|revised|updated|supplement|supp)\b/i.test(lhsSource);
   const rhsLooksOlder = /\b(old|older|prior|previous|original|initial)\b/i.test(rhsSource);
 
   if (lhsLooksNewer || rhsLooksOlder) {
-    return { olderValue: row.rhsValue, newerValue: row.lhsValue };
+    return { firstValue: row.lhsValue, secondValue: row.rhsValue };
   }
 
-  return { olderValue: row.lhsValue, newerValue: row.rhsValue };
+  return { firstValue: row.rhsValue, secondValue: row.lhsValue };
 }
 
 function isLaborQtyOrPriceDelta(row: EstimateComparisonRow): boolean {
@@ -1070,12 +1218,52 @@ function isLaborQtyOrPriceDelta(row: EstimateComparisonRow): boolean {
   );
 }
 
-function formatEstimateDeltaValue(value: EstimateComparisonRow["lhsValue"]): string {
+function formatEstimateDeltaComparableValue(
+  value: EstimateComparisonRow["lhsValue"],
+  unit?: EstimateComparisonRow["valueUnit"]
+): string {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (unit === "currency") return value.toFixed(2);
+    return value.toFixed(1);
+  }
+
   const raw = value === null || value === undefined ? "" : `${value}`.trim();
+  if (raw && /^\$/.test(raw)) return raw;
+  if (raw && /^-?\d+(?:\.\d+)?$/.test(raw)) {
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return raw;
+    if (unit === "currency") return parsed.toFixed(2);
+    return parsed.toFixed(1);
+  }
+
   if (raw && /[$\d]/.test(raw)) return raw;
   const formatted = formatComparisonValue(value);
   if (formatted) return formatted;
   return raw;
+}
+
+function deriveDirectionalDelta(
+  firstValue: EstimateComparisonRow["lhsValue"],
+  secondValue: EstimateComparisonRow["rhsValue"],
+  unit?: EstimateComparisonRow["valueUnit"]
+): string | null {
+  const first = parseComparableNumber(firstValue);
+  const second = parseComparableNumber(secondValue);
+  if (first === null || second === null) return null;
+
+  const precision = unit === "currency" ? 2 : 1;
+  const delta = second - first;
+  const formatted = delta.toFixed(precision);
+  return `${delta >= 0 ? "+" : ""}${formatted}`;
+}
+
+function parseComparableNumber(value: EstimateComparisonRow["lhsValue"]): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const cleaned = value.replace(/[$,%\s,]/g, "");
+  if (!cleaned || !/^-?\d+(?:\.\d+)?$/.test(cleaned)) return null;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function buildEstimateDeltaSearchText(row: EstimateComparisonRow): string {
@@ -1084,6 +1272,54 @@ function buildEstimateDeltaSearchText(row: EstimateComparisonRow): string {
 
 function hasComparisonValue(value: EstimateComparisonRow["lhsValue"]): boolean {
   return value !== null && value !== undefined && `${value}`.trim().length > 0;
+}
+
+function detectEstimateSourceRole(value: string): "shop" | "carrier" | "unknown" {
+  const cleaned = value.toLowerCase();
+  if (/\b(shop|repair\s+facility|body\s+shop|collision\s+center)\b/.test(cleaned)) return "shop";
+  if (/\b(carrier|insurer|insurance)\b/.test(cleaned)) return "carrier";
+  return "unknown";
+}
+
+function looksSequentialEstimateLabel(value: string): boolean {
+  return /\b(old|older|prior|previous|original|initial|new|newer|latest|current|revised|updated|supplement|supp|version|revision)\b/i.test(
+    value
+  );
+}
+
+function looksSameEstimateFamily(lhsSource: string, rhsSource: string): boolean {
+  const normalizeSource = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/\b(old|older|prior|previous|original|initial|new|newer|latest|current|revised|updated|supplement|supp|version|revision|estimate|file|workfile)\b/g, " ")
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  const left = normalizeSource(lhsSource);
+  const right = normalizeSource(rhsSource);
+  if (!left || !right) return false;
+  if (left === right) return true;
+
+  const leftTokens = new Set(left.split(" ").filter((token) => token.length > 2));
+  const rightTokens = right.split(" ").filter((token) => token.length > 2);
+  const overlap = rightTokens.filter((token) => leftTokens.has(token)).length;
+  return overlap >= Math.max(1, Math.min(leftTokens.size, rightTokens.length));
+}
+
+function getVisibleAnnotationBadge(annotation: EstimateAnnotation): string {
+  switch (annotation.severity) {
+    case "green":
+      return "[SUPPORTED]";
+    case "yellow":
+      return "[UNDER-DOCUMENTED]";
+    case "red":
+      return "[MISSING / REDUCED]";
+    case "blue":
+      return "[NEEDS PROOF / OEM]";
+    case "gray":
+      return "[INFO]";
+  }
 }
 
 function isEstimateDeltaExcludedRow(row: EstimateComparisonRow): boolean {
@@ -1096,10 +1332,11 @@ function buildEstimateDeltaSummary(
   model: AnnotatedEstimateReviewModel
 ): CarrierReportDocument["summary"] {
   const rows = model.comparisonRows.filter((row) => !isEstimateDeltaExcludedRow(row));
-  const changedCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "changed")).length;
-  const addedCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "added")).length;
-  const missingCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "missing")).length;
-  const gapCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "gap")).length;
+  const mode = detectEstimateDeltaMode(rows);
+  const changedCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "changed", mode)).length;
+  const addedCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "only_first", mode)).length;
+  const missingCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "only_second", mode)).length;
+  const gapCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "gap", mode)).length;
 
   return [
     { label: "Vehicle", value: model.vehicleIdentity },
@@ -1333,7 +1570,14 @@ function buildRecommendedRevision(
 }
 
 function normalizeEstimateOperationName(value: string): string {
-  const cleaned = cleanEstimateLineForTechnicalExport(cleanScrubberText(value)) || cleanOperationDisplayText(cleanScrubberText(value)) || cleanScrubberText(value);
+  const cleaned =
+    normalizeEstimateOperationLabel({
+      label: cleanScrubberText(value),
+      operation: cleanScrubberText(value),
+    }) ||
+    cleanEstimateLineForTechnicalExport(cleanScrubberText(value)) ||
+    cleanOperationDisplayText(cleanScrubberText(value)) ||
+    cleanScrubberText(value);
   return cleaned
     .replace(/\bpre repair\b/gi, "Pre-repair")
     .replace(/\bpost repair\b/gi, "Post-repair")
@@ -1364,9 +1608,12 @@ function isVerifiedScrubberSource(value: string): boolean {
 
 function cleanCustomerFacingEstimateLine(value: string | null | undefined): string {
   if (!value) return "";
-  const cleaned = cleanEstimateLineForTechnicalExport(cleanScrubberText(value)) ||
-    cleanOperationDisplayText(cleanScrubberText(value)) ||
-    cleanScrubberText(value);
+  const scrubbed = cleanScrubberText(value);
+  const cleaned =
+    normalizeEstimateOperationLabel({ label: scrubbed, operation: scrubbed }) ||
+    cleanEstimateLineForTechnicalExport(scrubbed) ||
+    cleanOperationDisplayText(scrubbed) ||
+    scrubbed;
 
   return cleaned
     .replace(/([a-z])([A-Z])/g, "$1 $2")

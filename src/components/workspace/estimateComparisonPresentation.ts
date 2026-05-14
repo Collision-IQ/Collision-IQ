@@ -3,7 +3,10 @@ import type {
   WorkspaceEstimateComparisons,
 } from "@/types/workspaceTypes";
 import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
-import { sanitizeEstimateLine } from "@/lib/ui/presentationText";
+import {
+  normalizeEstimateOperationLabel,
+  sanitizeEstimateLine,
+} from "@/lib/ui/presentationText";
 
 export function getEstimateComparisonRows(
   estimateComparisons?: WorkspaceEstimateComparisons | null
@@ -68,12 +71,11 @@ export function dedupeEstimateComparisonRationales(
 }
 
 export function getEstimateComparisonLabel(row: EstimateComparisonRow): string {
-  return (
-    cleanOperationDisplayText(row.operation) ||
-    cleanOperationDisplayText(row.partName) ||
-    cleanOperationDisplayText(row.category) ||
-    "Comparison"
-  );
+  return normalizeEstimateOperationLabel({
+    operation: row.operation,
+    partName: row.partName,
+    category: row.category,
+  }) || "Comparison";
 }
 
 export function formatEstimateComparisonValue(
@@ -242,10 +244,11 @@ function scoreEstimateComparisonRow(row: EstimateComparisonRow): number {
 }
 
 function summarizeEstimateComparisonRow(row: EstimateComparisonRow): string | null {
-  const label =
-    cleanOperationDisplayText(row.operation) ||
-    cleanOperationDisplayText(row.partName) ||
-    cleanOperationDisplayText(row.category);
+  const label = normalizeEstimateOperationLabel({
+    operation: row.operation,
+    partName: row.partName,
+    category: row.category,
+  });
 
   const combinedText = `${row.category ?? ""} ${row.operation ?? ""} ${row.partName ?? ""} ${row.notes?.join(" ") ?? ""}`
     .toLowerCase();
@@ -304,6 +307,7 @@ export function cleanOperationDisplayText(value?: string | null): string {
   if (!value) return "";
   const sanitized = sanitizeEstimateLine(value);
   if (sanitized.malformed) return sanitized.hideFromCustomer ? "" : sanitized.cleaned;
+<<<<<<< HEAD
 
   const cleaned = sanitizeComparisonDisplayText(value)
     .replace(/([A-Za-z)])\d(\d\.\d)\b/g, "$1 $2")
@@ -333,4 +337,7 @@ function looksLikeCodeHeavyToken(value: string): boolean {
   const digitCount = (value.match(/\d/g) ?? []).length;
   const alphaCount = (value.match(/[a-z]/gi) ?? []).length;
   return digitCount >= 5 && digitCount > alphaCount * 2;
+=======
+  return normalizeEstimateOperationLabel(value);
+>>>>>>> 29d8ddc (Normalize estimate delta and scrubber operation labels)
 }

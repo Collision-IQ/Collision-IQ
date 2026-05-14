@@ -15,6 +15,7 @@ import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateC
 import {
   cleanEstimateLineForTechnicalExport,
   cleanOperationDisplayText as cleanUiOperationDisplayText,
+  normalizeEstimateOperationLabel,
 } from "@/lib/ui/presentationText";
 import {
   cleanOperationDisplayText,
@@ -258,7 +259,12 @@ function buildCategoryComparisons(
 
 function displaySupplementTitle(value: string | null | undefined): string {
   if (!value?.trim()) return "Repair Operation";
-  return cleanEstimateLineForTechnicalExport(value) || cleanUiOperationDisplayText(value) || cleanOperationDisplayText(value) || value || "Repair Operation";
+  return normalizeEstimateOperationLabel({ label: value, operation: value })
+    || cleanEstimateLineForTechnicalExport(value)
+    || cleanUiOperationDisplayText(value)
+    || cleanOperationDisplayText(value)
+    || value
+    || "Repair Operation";
 }
 
 function buildUiAlignedLineItems(

@@ -12,7 +12,10 @@ import type { ExportBuilderInput } from "./exportTemplates";
 import { buildExportResearchSections } from "./exportResearchSections";
 import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
 import { dedupeEstimateComparisonRationales } from "@/components/workspace/estimateComparisonPresentation";
-import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
+import {
+  cleanOperationDisplayText,
+  normalizeEstimateOperationLabel,
+} from "@/lib/ui/presentationText";
 
 export type CarrierReportSection = {
   title: string;
@@ -88,7 +91,7 @@ export function buildCarrierReport({
   const canonicalVin = resolveCanonicalVin(exportModel) ?? "Unspecified";
   const canonicalInsurer = resolveCanonicalInsurer(exportModel);
 
-  return {
+  const document: CarrierReportDocument = {
     filename: "repair-intelligence-report.pdf",
     brand: {
       companyName: "Collision Academy",
@@ -221,6 +224,8 @@ export function buildCarrierReport({
       "This report is a repair-position and documentation-support summary based on the current material.",
     ],
   };
+
+  return cleanCarrierReportNarrative(document);
 }
 
 function buildCaseUpdateBullets(report: RepairIntelligenceReport): string[] {
@@ -806,7 +811,55 @@ function buildSourceSummary(
 }
 
 function displayOperationLabel(value: string | null | undefined): string {
-  return cleanOperationDisplayText(value) || value || "Repair Operation";
+  return normalizeEstimateOperationLabel({ label: value, operation: value })
+    || cleanOperationDisplayText(value)
+    || value
+    || "Repair Operation";
+}
+
+function cleanCarrierReportNarrative(document: CarrierReportDocument): CarrierReportDocument {
+  return {
+    ...document,
+    header: {
+      title: cleanUserFacingRepairProse(document.header.title),
+      subtitle: cleanUserFacingRepairProse(document.header.subtitle),
+      generatedLabel: cleanUserFacingRepairProse(document.header.generatedLabel),
+    },
+    summary: document.summary.map((item) => ({
+      label: cleanUserFacingRepairProse(item.label),
+      value: cleanUserFacingRepairProse(item.value),
+    })),
+    sections: document.sections.map((section) => ({
+      ...section,
+      title: cleanUserFacingRepairProse(section.title),
+      body: section.body ? cleanUserFacingRepairProse(section.body) : undefined,
+      bullets: section.bullets?.map((bullet) => cleanUserFacingRepairProse(bullet)),
+      comparisonRows: section.comparisonRows?.map((row) => ({
+        ...row,
+        label: cleanUserFacingRepairProse(row.label),
+        leftLabel: cleanUserFacingRepairProse(row.leftLabel),
+        leftValue: cleanUserFacingRepairProse(row.leftValue),
+        rightLabel: cleanUserFacingRepairProse(row.rightLabel),
+        rightValue: cleanUserFacingRepairProse(row.rightValue),
+        delta: row.delta ? cleanUserFacingRepairProse(row.delta) : undefined,
+        note: row.note ? cleanUserFacingRepairProse(row.note) : undefined,
+      })),
+    })),
+    footer: document.footer.map((line) => cleanUserFacingRepairProse(line)),
+  };
+}
+
+function cleanUserFacingRepairProse(value: string): string {
+  return value
+    .replace(/\bEvidence references?:\s*(?:cmp[\w-]+(?:\s*,\s*)?)+\b/gi, "")
+    .replace(/\bcmp[\w-]{4,}\b/gi, "")
+    .replace(/\buploaded document\b(?:\s*,\s*\buploaded document\b)+/gi, "documentation")
+    .replace(/\buploaded document\b/gi, "documentation")
+    .replace(/\b(Repair Intelligence Report|Estimate Delta \/ Change Requests|Annotated Estimate Scrubber)\s*:\s*\1\b/gi, "$1")
+    .replace(/\b(?:[A-Z]*\d[A-Z0-9-]{5,}|\d{6,}[A-Za-z]{0,3})\b/g, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;:])/g, "$1")
+    .trim();
 }
 
 function formatMoney(value: number): string {

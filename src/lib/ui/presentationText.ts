@@ -28,6 +28,32 @@ const MALFORMED_PROC_PATTERN = /\bproc\s*\d+\s*#?\s*\*+/i;
 const LEAKED_SUFFIX_ONLY_PATTERN = /^\s*[a-z][a-z\s/-]*m\d+(?:\.\d+)?\s*$/i;
 const FUSED_PART_TOKEN_PATTERN = /\b([a-z][a-z/&'-]{2,}?)(?:m?0\.[1-9]|\d{6,}[a-z]{0,3})\b/gi;
 const CODE_HEAVY_TOKEN_PATTERN = /\b[A-Za-z]*\d[A-Za-z0-9.-]{7,}\b/g;
+const GENERIC_OPERATION_ONLY_PATTERN = /^(?:r\s*&\s*i|r\s*&\s*r|repl|rpr|refn|o\s*\/\s*h|subl|add|overlap|repair operation|labor paint|labor|paint)$/i;
+const KNOWN_OPERATION_VERBS = [
+  "R&I",
+  "R&R",
+  "Repl",
+  "Rpr",
+  "Refn",
+  "O/H",
+  "Subl",
+  "Add",
+  "Overlap",
+  "Proc",
+  "Algn",
+  "Test fit",
+  "Measure",
+  "Realign",
+  "Set up",
+] as const;
+
+export type EstimateOperationLabelInput = {
+  description?: string | null;
+  operation?: string | null;
+  partName?: string | null;
+  category?: string | null;
+  label?: string | null;
+};
 
 export type EstimateLineSanitization = {
   raw: string;
@@ -115,28 +141,42 @@ export function cleanEstimateLineForTechnicalExport(value: string | null | undef
 }
 
 export function cleanOperationDisplayText(value: string | null | undefined): string {
-  const source = cleanPresentationText(value);
-  if (!source) return OPERATION_DISPLAY_FALLBACK;
+  const normalized = normalizeEstimateOperationLabel(value);
+  return normalized || OPERATION_DISPLAY_FALLBACK;
+}
 
-  const cleaned = source
-    .replace(/^\s*#?\s*\d+\s+/i, "")
-    .replace(/^\s*(?:proc|procedure|r&i|repl|rpr|blnd|subl|algn)\s+/i, "")
-    .replace(/\b\d+\.\d+\.\d+(?:\.\d+)*\b/g, " ")
-    .replace(/[|_~]+/g, " ")
-    .replace(/\.(?=\d)/g, " ")
-    .replace(/\s*\/+\s*/g, " ")
-    .split(/\s+/)
-    .map(cleanOperationDisplayToken)
-    .filter(Boolean)
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim();
+export function normalizeEstimateOperationLabel(
+  value: string | EstimateOperationLabelInput | null | undefined
+): string {
+  const input = typeof value === "string" ? { label: value } : value ?? {};
+  const description = cleanOperationCandidate(input.description);
+  const operation = cleanOperationCandidate(input.operation);
+  const partName = cleanOperationCandidate(input.partName);
+  const category = cleanOperationCandidate(input.category);
+  const label = cleanOperationCandidate(input.label);
+  const verb = resolveOperationVerb(operation || label || "");
+  const labelWithoutVerb = dropLeadingOperationVerb(label, verb);
+  const descriptionWithoutVerb = dropLeadingOperationVerb(description, verb);
+  const partWithoutVerb = dropLeadingOperationVerb(partName, verb);
 
-  if (!cleaned) return OPERATION_DISPLAY_FALLBACK;
-  if (!/[A-Za-z]/.test(cleaned)) return OPERATION_DISPLAY_FALLBACK;
-  if (/^(?:proc|procedure)$/i.test(cleaned)) return OPERATION_DISPLAY_FALLBACK;
+  const candidates = [
+    description,
+    combineVerbAndDetail(verb, descriptionWithoutVerb),
+    combineVerbAndDetail(verb, partWithoutVerb),
+    category,
+    label,
+    combineVerbAndDetail(verb, labelWithoutVerb),
+    operation,
+  ];
 
-  return formatOperationDisplayCase(cleaned);
+  for (const candidate of candidates) {
+    const resolved = finalizeOperationLabel(candidate);
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  return "";
 }
 
 export function cleanVehicleSummaryLabel(value: string | null | undefined): string {
@@ -236,6 +276,98 @@ function cleanOperationDisplayToken(token: string): string {
   if (!/[A-Za-z]/.test(cleaned)) return "";
 
   return cleaned;
+}
+
+function cleanOperationCandidate(value: string | null | undefined): string {
+  if (!value) return "";
+
+  const cleaned = cleanPresentationText(value)
+    .replace(/^\s*operations?\s*[-:]+\s*/i, "")
+    .replace(/^\s*#?\s*\d+\s+/i, "")
+    .replace(/\b(?:incl(?:uded)?\.?|n\/?a|none|unknown)\b/gi, " ")
+    .replace(/\b\d+\.\d+\.\d+(?:\.\d+)*\b/g, " ")
+    .replace(/\b[+-]?\d+(?:\.\d+)?%\b/g, " ")
+    .replace(/\b\$?\d{1,4}(?:,\d{3})*(?:\.\d{2})\b/g, " ")
+    .replace(/\b([A-Za-z][A-Za-z/&'-]{2,})\d[A-Za-z0-9.-]{4,}\b/g, "$1")
+    .replace(/\b(?:[A-Z]*\d[A-Z0-9-]{5,}|\d{6,}[A-Za-z]{0,4})\b/g, " ")
+    .replace(/\b[a-z]{1,5}\d[a-z0-9.]{5,}\b/gi, " ")
+    .replace(/(?:\b(?:t|m|hr|hrs|ea|qty)\b\s*)+$/i, " ")
+    .replace(/[|_~]+/g, " ")
+    .replace(/\.(?=\d)/g, " ")
+    .replace(/\s*\/+\s*/g, " ")
+    .split(/\s+/)
+    .map(cleanOperationDisplayToken)
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return cleaned;
+}
+
+function resolveOperationVerb(value: string): string {
+  const cleaned = cleanOperationCandidate(value).toLowerCase();
+  if (!cleaned) return "";
+
+  const matched = KNOWN_OPERATION_VERBS.find((token) =>
+    new RegExp(`^${token.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&").replace(/\\s+/g, "\\s+")}(?:\\b|$)`, "i").test(cleaned)
+  );
+
+  if (matched) {
+    return matched;
+  }
+
+  const simpleMatch = cleaned.match(/^(r\s*&\s*i|r\s*&\s*r|repl|rpr|refn|subl|add|overlap|algn|proc|o\s*\/\s*h)\b/i);
+  if (!simpleMatch) return "";
+
+  const canonical = simpleMatch[1].replace(/\s+/g, " ").toLowerCase();
+  if (canonical.includes("r & i")) return "R&I";
+  if (canonical.includes("r & r")) return "R&R";
+  if (canonical === "repl") return "Repl";
+  if (canonical === "rpr") return "Rpr";
+  if (canonical === "refn") return "Refn";
+  if (canonical === "subl") return "Subl";
+  if (canonical === "add") return "Add";
+  if (canonical === "overlap") return "Overlap";
+  if (canonical === "algn") return "Algn";
+  if (canonical === "proc") return "Proc";
+  if (canonical.includes("o / h")) return "O/H";
+  return "";
+}
+
+function dropLeadingOperationVerb(value: string, verb: string): string {
+  if (!value) return "";
+  if (!verb) return value;
+
+  const escaped = verb.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+  return value.replace(new RegExp(`^${escaped}\\b[\\s:-]*`, "i"), "").trim();
+}
+
+function combineVerbAndDetail(verb: string, detail: string): string {
+  const cleanedDetail = detail.trim();
+  if (verb && cleanedDetail) {
+    return `${verb} ${cleanedDetail}`.trim();
+  }
+  return cleanedDetail || verb;
+}
+
+function finalizeOperationLabel(value: string): string {
+  const cleaned = cleanOperationCandidate(value);
+  if (!cleaned) return "";
+  if (!/[A-Za-z]/.test(cleaned)) return "";
+
+  const withoutDuplicateVerb = cleaned.replace(
+    /^(R&I|R&R|Repl|Rpr|Refn|Subl|Add|Overlap|Algn|Proc|O\/H)\s+\1\b\s*/i,
+    "$1 "
+  ).trim();
+  if (!withoutDuplicateVerb) return "";
+
+  const normalized = formatOperationDisplayCase(withoutDuplicateVerb);
+  if (!normalized) return "";
+  if (GENERIC_OPERATION_ONLY_PATTERN.test(normalized)) return "";
+  if (/^(?:operations?|procedure|proc)$/i.test(normalized)) return "";
+
+  return normalized;
 }
 
 function formatOperationDisplayCase(value: string): string {

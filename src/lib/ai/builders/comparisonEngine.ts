@@ -8,6 +8,7 @@ import {
 } from "../extractors/estimateExtractor";
 import type { WorkspaceEstimateComparisons } from "@/types/workspaceTypes";
 import { buildWorkspaceEstimateComparisonSummary } from "@/lib/workspace/estimateComparisons";
+import { normalizeEstimateOperationLabel } from "@/lib/ui/presentationText";
 
 type ComparisonEngineParams = {
   shopEstimateText: string;
@@ -527,10 +528,16 @@ function buildOperationComparisonRow(
     return null;
   }
 
+  const normalizedLabel = normalizeEstimateOperationLabel({
+    operation: shop?.operation ?? insurer?.operation,
+    partName: shop?.component ?? insurer?.component,
+    category: classifyOperationCategory(shop ?? insurer!),
+  });
+
   return {
     id: `operation-${index + 1}`,
     category: classifyOperationCategory(shop ?? insurer!),
-    operation: shop?.operation ?? insurer?.operation,
+    operation: normalizedLabel || shop?.operation || insurer?.operation,
     partName: shop?.component ?? insurer?.component,
     lhsSource: labels.shopEstimateLabel,
     rhsSource: labels.insurerEstimateLabel,

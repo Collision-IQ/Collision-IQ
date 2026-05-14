@@ -23,6 +23,7 @@ const {
   cleanEstimateLineForTechnicalExport,
   cleanOperationDisplayText,
   isMalformedEstimateLine,
+  normalizeEstimateOperationLabel,
   sanitizeEstimateLine,
 } = require("./presentationText.ts");
 
@@ -49,6 +50,20 @@ run("cleanOperationDisplayText normalizes noisy operation labels", () => {
   for (const [input, expected] of cases) {
     assert.equal(cleanOperationDisplayText(input), expected);
   }
+});
+
+run("normalizeEstimateOperationLabel keeps meaningful estimator-grade labels and drops generic-only rows", () => {
+  assert.equal(
+    normalizeEstimateOperationLabel("Repl Impact bar 68293716AC 1 449.00 Incl."),
+    "Repl Impact bar"
+  );
+  assert.equal(normalizeEstimateOperationLabel("Repl"), "");
+  assert.equal(normalizeEstimateOperationLabel("R&I"), "");
+  assert.equal(
+    normalizeEstimateOperationLabel("Subl Pre-repair scan +34% 1 201.00 T m"),
+    "Subl Pre-repair scan"
+  );
+  assert.equal(normalizeEstimateOperationLabel("Repair Operation"), "");
 });
 
 run("estimate-line sanitizer hides known parser junk for customer output", () => {

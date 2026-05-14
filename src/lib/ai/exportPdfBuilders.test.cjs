@@ -490,12 +490,12 @@ run("Annotated Estimate Review selects lower-cost carrier estimate and keeps com
   assert.match(text, /Estimate Selected For Scrub/);
   assert.equal(estimatorList.header.title, "Estimate Delta / Change Requests");
   assert.equal(estimatorList.filename, "estimate-delta-change-requests.pdf");
-  assert.ok(estimatorList.sections.some((section) => section.title === "Added In Newer Estimate"));
-  assert.ok(estimatorList.sections.some((section) => section.title === "Missing From Newer Estimate"));
-  assert.ok(estimatorList.sections.some((section) => section.title === "Changed Labor / Qty / Price"));
+  assert.ok(estimatorList.sections.some((section) => /^(Added In Newer Estimate|ONLY IN ESTIMATE 1|ONLY IN SHOP ESTIMATE)$/i.test(section.title)));
+  assert.ok(estimatorList.sections.some((section) => /^(Missing From Newer Estimate|ONLY IN ESTIMATE 2|ONLY IN CARRIER ESTIMATE|REMOVED FROM NEWER ESTIMATE)$/i.test(section.title)));
+  assert.ok(estimatorList.sections.some((section) => /^(Changed Labor \/ Qty \/ Price|CHANGED FROM PRIOR ESTIMATE|CHANGED BETWEEN ESTIMATES)$/i.test(section.title)));
   assert.ok(estimatorList.sections.some((section) => section.title === "Possible Rekey / Lock / Supplement Gaps"));
-  assert.match(JSON.stringify(estimatorList), /newer adds Refinish labor 1\.5/i);
-  assert.match(JSON.stringify(estimatorList), /newer not shown/i);
+  assert.match(JSON.stringify(estimatorList), /Additional refinish labor|Refinish labor 1\.5/i);
+  assert.match(JSON.stringify(estimatorList), /Wheel opening molding/i);
   assert.match(JSON.stringify(estimatorList), /Lock support price/i);
   assert.match(text, /A\/M hood/);
   assert.match(text, /OEM hood/);
