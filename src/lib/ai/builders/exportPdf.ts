@@ -1,7 +1,7 @@
 import jsPDF from "jspdf";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
 import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
-import { sanitizeUserFacingEvidenceText } from "@/components/workspace/estimateComparisonPresentation";
+import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 
 const LINE_HEIGHT = 4.8;
 const LINE_HEIGHT_FACTOR = 1.15;
@@ -164,31 +164,13 @@ function redactCarrierReportDocument(input: CarrierReportDocument): CarrierRepor
 }
 
 export function sanitizeReportText(value: string): string {
-<<<<<<< HEAD
-  return sanitizeUserFacingEvidenceText(value)
-    .replace(/\bSupport basis:\s*Evidence references?:\s*(?:cmp[a-z0-9]{8,}\s*,?\s*)+/gi, "Support is verified from current file evidence.")
-    .replace(/\bEvidence references?:\s*(?:cmp[a-z0-9]{8,}\s*,?\s*)+/gi, "Evidence basis: Current file evidence.")
-    .replace(/\bcmp[a-z0-9]{8,}\b/gi, "")
-    .replace(/\bcm[a-z0-9]{20,}\b/gi, "")
-    .replace(/\b(?:evidence|chain|source|finding|issue|doc|line|parser|vector|object)[-_ ][a-z0-9]{8,}\b/gi, "")
-    .replace(/\b(?:evidence|chain|source|finding|issue|doc|line|parser|vector|object)[a-z0-9]*\d[a-z0-9]{7,}\b/gi, "")
-    .replace(/\b[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\b/gi, "uploaded file")
-    .replace(/\b[a-f0-9]{24,64}\b/gi, "uploaded file")
-    .replace(/\bSame rationale as earlier\b/gi, "Related estimate rationale")
-    .replace(/\bOperation:\s*/gi, "Item: ")
-    .replace(/\s*\|\s*Status:\s*/gi, " - Status: ")
-    .replace(/\b(?:uploaded document\s*,\s*){1,}uploaded document\b/gi, "supporting evidence")
-    .replace(/\buploaded document\b/gi, "supporting evidence")
-    .replace(/\bRepair Operation\b(?=\s*(?:[-:;,]|$))/gi, "")
-    .replace(/\b(?:R&I|R&R|Repl|Rpr|Subl)\b(?=\s*(?:[-:;,]|$))/gi, "")
-=======
   return value
     .replace(/\bcm[a-z0-9]{20,}\b/gi, "Uploaded document")
     .replace(/\bEvidence references?:\s*(?:cmp[\w-]+(?:\s*,\s*)?)+\b/gi, "")
     .replace(/\bcmp[\w-]{4,}\b/gi, "uploaded file")
     .replace(/\b(?:evidence|chain|source|finding|issue|doc|line|parser|vector|object)[-_ ]?[a-z0-9]{8,}\b/gi, "uploaded document")
     .replace(/\b[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\b/gi, "uploaded document")
-    .replace(/\b[a-f0-9]{24,64}\b/gi, "uploaded document")
+    .replace(/\b[a-f0-9]{24,64}\b/gi, "uploaded file")
     .replace(/\buploaded document\b(?:\s*,\s*\buploaded document\b)+/gi, "documentation")
     .replace(/\buploaded document\b/gi, "documentation")
     .replace(/\bSame rationale as earlier\b/gi, "Related estimate rationale")
@@ -196,7 +178,6 @@ export function sanitizeReportText(value: string): string {
     .replace(/\s*\|\s*Status:\s*/gi, " - Status: ")
     .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "uploaded file")
     .replace(/\b(?:[A-Za-z]:)?(?:[\\/][^\\/\s]+){2,}\b/g, "uploaded file")
->>>>>>> 29d8ddc (Normalize estimate delta and scrubber operation labels)
     .replace(/\b(?:undefined|null|NaN)\b/gi, "")
     .replace(/\s+([,.;:])/g, "$1")
     .replace(/(?:[,;]\s*){2,}/g, "; ")

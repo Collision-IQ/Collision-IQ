@@ -307,37 +307,12 @@ export function cleanOperationDisplayText(value?: string | null): string {
   if (!value) return "";
   const sanitized = sanitizeEstimateLine(value);
   if (sanitized.malformed) return sanitized.hideFromCustomer ? "" : sanitized.cleaned;
-<<<<<<< HEAD
 
-  const cleaned = sanitizeComparisonDisplayText(value)
-    .replace(/([A-Za-z)])\d(\d\.\d)\b/g, "$1 $2")
-    .replace(/([A-Za-z])(\d{2,}(?:\.\d{2})?)(Incl\.?|Included)\b/gi, "$1 $2 $3")
-    .replace(/^\s*#?\s*\d+\s+/i, "")
-    .replace(/^\s*(?:proc|procedure|r&i|repl|rpr|blnd|subl|algn)\s+/i, "")
-    .replace(/\b([a-z]{3,})\d[\d.]{5,}\b/gi, "$1")
-    .replace(/\b[a-z]*\d[a-z\d.]{8,}\b/gi, (token) =>
-      looksLikeCodeHeavyToken(token) ? "" : token
-    )
-    .replace(/\s{2,}/g, " ")
-    .trim();
-
-  if (!cleaned) return "";
-  if (/^(?:proc|procedure)$/i.test(cleaned)) return "";
-
-  const compact = cleaned.replace(/\s+/g, "");
-  const attachedCodeMatch = compact.match(/^([a-z][a-z\s/&-]{2,}?)(\d[\d.]{5,})$/i);
-  if (attachedCodeMatch?.[1]) {
-    return attachedCodeMatch[1].trim();
-  }
-
-  return cleaned;
+  return normalizeEstimateOperationLabel(value);
 }
 
 function looksLikeCodeHeavyToken(value: string): boolean {
   const digitCount = (value.match(/\d/g) ?? []).length;
   const alphaCount = (value.match(/[a-z]/gi) ?? []).length;
   return digitCount >= 5 && digitCount > alphaCount * 2;
-=======
-  return normalizeEstimateOperationLabel(value);
->>>>>>> 29d8ddc (Normalize estimate delta and scrubber operation labels)
 }

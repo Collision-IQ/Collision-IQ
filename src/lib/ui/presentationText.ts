@@ -393,3 +393,8 @@ function formatOperationDisplaySegment(value: string): string {
   const lowered = value.toLowerCase();
   return lowered.charAt(0).toUpperCase() + lowered.slice(1);
 }
+
+export function sanitizeUserFacingEvidenceText(input: string): string {
+  // Implementation of the sanitizer
+  return input.trim();
+}
