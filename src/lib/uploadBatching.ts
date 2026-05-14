@@ -34,7 +34,7 @@ export function buildUploadBatchGuidance(
       ? "Free accounts can upload PDFs or photos."
       : "You can upload PDFs, photos, screenshots, or ZIP files.",
     uploadLimitText,
-    plan === "free" ? "Free accounts include 3 uploads per rolling month." : null,
+    plan === "free" ? "Free accounts include 5 uploads per rolling month." : null,
     `Files reviewed so far: ${totalFilesReviewed}.`,
     currentBatchCount >= maxBatchFiles - 1
       ? `Upload the next ${maxBatchFiles} most important files.`

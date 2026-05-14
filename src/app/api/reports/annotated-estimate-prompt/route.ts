@@ -30,6 +30,7 @@ export async function POST(request: Request) {
       user_request: userRequest,
       case_context: coerceText(body.case_context),
       uploaded_documents: coerceText(body.uploaded_documents),
+      applicability_instruction: coerceText(body.applicability_instruction),
       carrier_estimate_text: coerceText(body.carrier_estimate_text),
       shop_estimate_text: coerceText(body.shop_estimate_text),
       scrubber_findings: coerceText(body.scrubber_findings),

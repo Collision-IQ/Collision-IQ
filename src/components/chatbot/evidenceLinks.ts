@@ -122,7 +122,7 @@ export function buildEvidenceLinkModel({
     type: "comparison_row" as const,
     insightKey: "financial_view" as const,
     title: getEstimateComparisonLabel(row),
-    detail: `${row.lhsSource ?? "Shop estimate"}: ${formatEstimateComparisonValue(row.lhsValue)} | ${row.rhsSource ?? "Carrier estimate"}: ${formatEstimateComparisonValue(row.rhsValue)} | Delta: ${formatEstimateComparisonDelta(row)}`,
+    detail: `${row.lhsSource ?? "Shop estimate"}: ${formatEstimateComparisonValue(row.lhsValue)} | ${row.rhsSource ?? "Carrier estimate"}: ${formatEstimateComparisonValue(row.rhsValue)} | Change: ${formatEstimateComparisonDelta(row)}`,
     summary: row.notes?.[0],
     workspaceScrollTargetId: row.targetId,
   }));

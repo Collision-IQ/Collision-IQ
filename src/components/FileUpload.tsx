@@ -104,11 +104,11 @@ export default function FileUpload({
         setUploadPlanName(uploadLimits.plan);
 
         if (uploadLimits.plan === "admin") {
-          setUploadHint(`You can upload PDFs, photos, screenshots, or ZIP files. ${getUploadBatchLimitMessage(uploadLimits)} Admin target: 50 MB; temporary platform upload limit: 20 MB.`);
+          setUploadHint(`You can upload PDFs, photos, screenshots, or ZIP files. ${getUploadBatchLimitMessage(uploadLimits)} Admin target: 50 MB per file; temporary platform upload limit: 20 MB.`);
         } else if (uploadLimits.plan === "pro" || uploadLimits.plan === "trial") {
           setUploadHint(`You can upload PDFs, photos, screenshots, or ZIP files. ${getUploadBatchLimitMessage(uploadLimits)} Pro trial/Pro target: 30 MB; temporary platform upload limit: 20 MB.`);
         } else if (uploadLimits.plan === "free") {
-          setUploadHint(`Free accounts can upload PDFs or photos. ${getUploadBatchLimitMessage(uploadLimits)} Monthly limit: 3 uploads.`);
+          setUploadHint(`Free accounts can upload PDFs or photos. ${getUploadBatchLimitMessage(uploadLimits)} Monthly limit: 5 uploads.`);
         } else {
           setUploadHint(`You can upload PDFs, photos, screenshots, or ZIP files. ${getUploadBatchLimitMessage(uploadLimits)} Starter: 10 MB; ZIP files are not included.`);
         }

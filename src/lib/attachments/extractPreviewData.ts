@@ -1,5 +1,4 @@
 import pdfParse from "pdf-parse";
-import mammoth from "mammoth";
 
 const MAX_REUSABLE_DATA_URL_BYTES = 4 * 1024 * 1024;
 
@@ -35,6 +34,7 @@ export async function extractPreviewDataFromBuffer(params: {
     mimeType ===
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
   ) {
+    const mammoth = await import("mammoth");
     const result = await mammoth.extractRawText({ buffer: params.buffer });
     return { text: result.value || "" };
   }

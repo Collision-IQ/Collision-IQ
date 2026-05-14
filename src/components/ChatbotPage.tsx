@@ -60,6 +60,7 @@ import {
   redactExternalDocumentUrls,
   summarizeExternalDocumentForDisplay,
 } from "@/lib/externalDocuments";
+import { buildReportApplicability } from "@/lib/reports/applicability";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 import { toCustomerFacingText } from "@/lib/ai/customerFacingText";
@@ -1669,6 +1670,7 @@ function RailContent({
       analysis: AnalysisResult | null;
       panel: DecisionPanel;
       assistantAnalysis: string;
+      applicabilityInstruction?: string;
       workspaceData: WorkspaceData | null;
       exportResearchSnapshot: ExportResearchSnapshot | null;
     }
@@ -1694,6 +1696,7 @@ function RailContent({
           "Generate an annotated estimate review. Show missing, under-documented, reduced, and proof-needed items directly against the relevant estimate lines or sections.",
         case_context: buildAnnotatedPromptCaseContext(input, model),
         uploaded_documents: buildAnnotatedPromptUploadedDocuments(input),
+        applicability_instruction: input.applicabilityInstruction ?? "",
         carrier_estimate_text: buildAnnotatedPromptCarrierEstimateText(input, model),
         shop_estimate_text: buildAnnotatedPromptShopEstimateText(model),
         scrubber_findings: buildAnnotatedPromptScrubberFindings(model),
@@ -1741,12 +1744,33 @@ function RailContent({
     const resolvedAnalysis =
       normalizedResult ?? (analysisResult ? normalizeReportToAnalysisResult(analysisResult) : null);
     const exportResearchSnapshot = await prepareExportResearch(reportType);
+    const damageDescription =
+      renderModel.repairPosition || renderModel.positionStatement || resolvedAnalysis?.narrative;
+    const vehicle =
+      vehicleIdentity || renderModel.reportFields.vehicleLabel || resolvedAnalysis?.vehicle?.make;
+    const jurisdiction = extractJurisdictionFromSnapshot(exportResearchSnapshot);
+    const uploadedDocuments = buildReportUploadedDocuments(analysisResult);
+    const applicability = buildReportApplicability({
+      documents: uploadedDocuments.map((doc) => ({
+        id: doc.id,
+        filename: doc.filename,
+        kind: doc.kind,
+        text: doc.text,
+      })),
+      claimFacts: {
+        damageDescription,
+        vehicle,
+        jurisdiction,
+      },
+    });
+    const analysisWithApplicability = [analysisText, applicability.instruction].filter(Boolean).join("\n\n");
     const sharedInput = {
       renderModel,
       report: analysisResult,
       analysis: resolvedAnalysis,
       panel,
-      assistantAnalysis: analysisText,
+      assistantAnalysis: analysisWithApplicability,
+      applicabilityInstruction: applicability.instruction,
       workspaceData,
       exportResearchSnapshot,
     };
@@ -1759,7 +1783,7 @@ function RailContent({
       [
         caseIntent ? `Case intent: ${caseIntent}` : null,
         primaryAnalysisContent ? `Primary chat analysis: ${primaryAnalysisContent}` : null,
-        analysisText,
+        analysisWithApplicability,
       ].filter(Boolean).join("\n\n")
     );
 
@@ -2749,6 +2773,105 @@ function RailContent({
       ) : null}
     </div>
   );
+}
+
+function extractJurisdictionFromSnapshot(snapshot: ExportResearchSnapshot | null): string | undefined {
+  if (!snapshot) {
+    return undefined;
+  }
+
+  const jurisdiction =
+    snapshot.sourcesAccepted.find((source) => Boolean(source.jurisdiction?.trim()))?.jurisdiction ||
+    snapshot.sourcesReviewed.find((source) => Boolean(source.jurisdiction?.trim()))?.jurisdiction;
+
+  return jurisdiction?.trim() || undefined;
+}
+
+function buildReportUploadedDocuments(report: RepairIntelligenceReport | null): Array<{
+  id?: string;
+  filename?: string;
+  kind?:
+    | "estimate"
+    | "policy"
+    | "photo"
+    | "invoice"
+    | "scan"
+    | "calibration"
+    | "repair_order"
+    | "unknown";
+  text?: string;
+}> {
+  const registryDocuments = (report?.evidenceRegistry ?? []).map((doc) => ({
+    id: doc.id,
+    filename: doc.label,
+    kind: mapEvidenceSourceTypeToDocumentKind(doc.sourceType),
+    text: [doc.extractedText, doc.extractedSummary].filter(Boolean).join("\n").trim() || undefined,
+  }));
+
+  if (registryDocuments.length > 0) {
+    return registryDocuments;
+  }
+
+  return (report?.evidence ?? []).map((doc) => ({
+    id: doc.id,
+    filename: doc.title,
+    kind: mapEvidenceTextToDocumentKind(`${doc.title}\n${doc.snippet}\n${doc.source}`),
+    text: doc.snippet,
+  }));
+}
+
+function mapEvidenceSourceTypeToDocumentKind(sourceType: string):
+  | "estimate"
+  | "policy"
+  | "photo"
+  | "invoice"
+  | "scan"
+  | "calibration"
+  | "repair_order"
+  | "unknown" {
+  if (sourceType === "shop_estimate" || sourceType === "carrier_estimate" || sourceType === "supplement") {
+    return "estimate";
+  }
+  if (sourceType === "policy_document") {
+    return "policy";
+  }
+  if (sourceType === "photo") {
+    return "photo";
+  }
+  if (sourceType === "invoice" || sourceType === "sublet_document") {
+    return "invoice";
+  }
+  if (sourceType === "scan_report" || sourceType === "adas_report") {
+    return "scan";
+  }
+  if (sourceType === "calibration_report") {
+    return "calibration";
+  }
+  if (sourceType === "repair_order") {
+    return "repair_order";
+  }
+
+  return "unknown";
+}
+
+function mapEvidenceTextToDocumentKind(value: string):
+  | "estimate"
+  | "policy"
+  | "photo"
+  | "invoice"
+  | "scan"
+  | "calibration"
+  | "repair_order"
+  | "unknown" {
+  const text = value.toLowerCase();
+  if (/(estimate|mitchell|ccc|audatex|supplement)/.test(text)) return "estimate";
+  if (/(policy|coverage|declarations|insured)/.test(text)) return "policy";
+  if (/(photo|image|visible damage)/.test(text)) return "photo";
+  if (/(invoice|receipt|sublet)/.test(text)) return "invoice";
+  if (/(scan|diagnostic|pre[- ]scan|post[- ]scan|adas)/.test(text)) return "scan";
+  if (/(calibration|recalibration)/.test(text)) return "calibration";
+  if (/(repair order|ro\b|work order)/.test(text)) return "repair_order";
+  return "unknown";
 }
 
 function mapReportKindToAnnotationMode(

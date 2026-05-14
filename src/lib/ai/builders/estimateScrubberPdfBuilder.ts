@@ -983,13 +983,13 @@ function buildEstimateDeltaBullets(
 
   switch (bucket) {
     case "added":
-      return ["No added newer-estimate items were isolated."];
+      return ["No added items isolated from the newer estimate."];
     case "missing":
-      return ["No older-estimate items missing from the newer estimate were isolated."];
+      return ["No items missing from the newer estimate were isolated."];
     case "changed":
       return ["No changed labor, quantity, or price lines were isolated."];
     case "gap":
-      return ["No rekey, lock, or supplement gap was detectable from the parsed comparison rows."];
+      return ["No rekey, lock, or supplement gap was detectable."];
   }
 }
 
@@ -1022,24 +1022,26 @@ function formatEstimateDeltaBullet(
   row: EstimateComparisonRow,
   bucket: EstimateDeltaBucket
 ): string {
-  const sides = resolveEstimateDeltaSides(row);
   const label = cleanCustomerFacingEstimateLine(row.operation ?? row.partName ?? row.category ?? "Estimate item");
-  const older = formatEstimateDeltaValue(sides.olderValue) || "Not shown";
-  const newer = formatEstimateDeltaValue(sides.newerValue) || "Not shown";
-  const delta = formatEstimateDeltaValue(row.delta);
-  const change = delta ? ` Delta: ${delta}.` : "";
 
-  if (bucket === "added") {
-    return `${label}: newer adds ${newer}.`;
-  }
-  if (bucket === "missing") {
-    return `${label}: older showed ${older}; newer not shown.`;
-  }
-  if (bucket === "gap") {
-    return `${label}: possible rekey/lock/supplement gap. Older: ${older}. Newer: ${newer}.${change}`;
+  if (!label || /^(?:Repair Operation|Estimate item|Parser review needed)$/i.test(label)) {
+    return "";
   }
 
-  return `${label}: older ${older}; newer ${newer}.${change}`;
+  if (bucket === "added" || bucket === "missing") {
+    return label;
+  }
+
+  const sides = resolveEstimateDeltaSides(row);
+  const older = formatEstimateDeltaValue(sides.olderValue) || "–";
+  const newer = formatEstimateDeltaValue(sides.newerValue) || "–";
+  const deltaNum = typeof row.delta === "number" ? row.delta : null;
+  const deltaSign = deltaNum !== null
+    ? `${deltaNum >= 0 ? "+" : ""}${deltaNum}`
+    : formatEstimateDeltaValue(row.delta);
+  const change = deltaSign ? ` (${deltaSign})` : "";
+
+  return `${label}: ${older} → ${newer}${change}`;
 }
 
 function resolveEstimateDeltaSides(row: EstimateComparisonRow): {

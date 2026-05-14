@@ -1,4 +1,3 @@
-import mammoth from "mammoth";
 import pdf from "pdf-parse";
 
 export type OneDriveSourceType = "onedrive1" | "onedrive2";
@@ -154,6 +153,7 @@ export async function extractOneDriveText(file: OneDriveFile): Promise<string> {
     mime ===
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
   ) {
+    const mammoth = await import("mammoth");
     const result = await mammoth.extractRawText({ buffer });
     return result.value || "";
   }

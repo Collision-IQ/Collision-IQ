@@ -19,6 +19,7 @@ export type RunCollisionIqPromptArgs = {
   user_request: string;
   case_context?: string;
   uploaded_documents?: string;
+  applicability_instruction?: string;
   carrier_estimate_text?: string;
   shop_estimate_text?: string;
   scrubber_findings?: string;
@@ -34,14 +35,22 @@ export async function runCollisionIqPrompt(
   }
 
   try {
+    const baseSystemPrompt = typeof args.case_context === "string" ? args.case_context.trim() : "";
+    const systemPrompt = `
+${baseSystemPrompt}
+
+${args.applicability_instruction ?? ""}
+`.trim();
+
     const response = await openai.responses.create({
       prompt: {
         id: COLLISION_IQ_GPT55_PROMPT_ID,
         version: "1",
         variables: {
           user_request: args.user_request,
-          case_context: args.case_context ?? "",
+          case_context: systemPrompt,
           uploaded_documents: args.uploaded_documents ?? "",
+          applicability_instruction: args.applicability_instruction ?? "",
           carrier_estimate_text: args.carrier_estimate_text ?? "",
           shop_estimate_text: args.shop_estimate_text ?? "",
           scrubber_findings: args.scrubber_findings ?? "",
