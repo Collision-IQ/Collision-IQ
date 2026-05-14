@@ -596,8 +596,19 @@ function drawSection(
       setPdfFont(doc);
       doc.setFontSize(10);
       doc.setTextColor(62, 65, 70);
+      const statusBadge = parseStatusBadge(bullet);
+      const bulletText = statusBadge ? bullet.slice(statusBadge.token.length).replace(/^:\s*/, "").trim() : bullet;
 
-      for (const [index, line] of doc.splitTextToSize(bullet, params.width - 8).entries()) {
+      if (statusBadge) {
+        if (params.state.y + LINE_HEIGHT > params.layout.contentBottomY) {
+          startContinuationPage();
+          params.state.y += HEADING_BODY_GAP;
+        }
+        drawStatusBadge(doc, params.x + 5, params.state.y - 3.5, statusBadge);
+        params.state.y += LINE_HEIGHT;
+      }
+
+      for (const [index, line] of doc.splitTextToSize(bulletText, params.width - 8).entries()) {
         if (params.state.y + LINE_HEIGHT > params.layout.contentBottomY) {
           startContinuationPage();
           setPdfFont(doc);
@@ -605,9 +616,15 @@ function drawSection(
           doc.setTextColor(62, 65, 70);
           params.state.y += HEADING_BODY_GAP;
         }
-        if (index === 0) {
+        if (index === 0 && !statusBadge) {
           doc.setFillColor(190, 80, 30);
           doc.circle(params.x + 1.8, params.state.y - 1.2, 0.8, "F");
+        }
+        if (statusBadge) {
+          doc.setDrawColor(...statusBadge.border);
+          doc.setLineWidth(0.35);
+          doc.line(params.x + 2, params.state.y - 3.5, params.x + 2, params.state.y + 1.5);
+          doc.setTextColor(62, 65, 70);
         }
         doc.text(line, params.x + 5, params.state.y);
         params.state.y += LINE_HEIGHT;
@@ -615,6 +632,42 @@ function drawSection(
       params.state.y += BLOCK_GAP;
     }
   }
+}
+
+type StatusBadgeStyle = {
+  token: string;
+  label: string;
+  fill: PdfColor;
+  border: PdfColor;
+  text: PdfColor;
+};
+
+function parseStatusBadge(value: string): StatusBadgeStyle | null {
+  const match = value.match(/^\[(SUPPORTED|UNDER-DOCUMENTED|MISSING \/ REDUCED|NEEDS PROOF(?: \/ OEM)?|INFO)\]/i);
+  if (!match) return null;
+
+  const token = match[0];
+  const label = token.slice(1, -1).toUpperCase() === "NEEDS PROOF" ? "NEEDS PROOF / OEM" : token.slice(1, -1).toUpperCase();
+
+  if (label === "SUPPORTED") return { token, label, fill: [222, 247, 232], border: [36, 128, 76], text: [24, 92, 56] };
+  if (label === "UNDER-DOCUMENTED") return { token, label, fill: [255, 245, 204], border: [181, 132, 24], text: [120, 82, 12] };
+  if (label === "MISSING / REDUCED") return { token, label, fill: [255, 226, 226], border: [190, 55, 55], text: [132, 36, 36] };
+  if (label === "NEEDS PROOF / OEM") return { token, label, fill: [224, 238, 255], border: [52, 103, 190], text: [36, 77, 145] };
+  return { token, label, fill: [235, 237, 240], border: [122, 128, 138], text: [77, 82, 90] };
+}
+
+function drawStatusBadge(doc: jsPDF, x: number, y: number, badge: StatusBadgeStyle) {
+  const width = Math.min(58, doc.getTextWidth(badge.label) + 7);
+  doc.setFillColor(...badge.fill);
+  doc.setDrawColor(...badge.border);
+  doc.setLineWidth(0.35);
+  doc.roundedRect(x, y, width, 5, 1.2, 1.2, "FD");
+  setPdfFont(doc, "bold");
+  doc.setFontSize(7);
+  doc.setTextColor(...badge.text);
+  doc.text(badge.label, x + 3, y + 3.6);
+  setPdfFont(doc);
+  doc.setFontSize(10);
 }
 
 function drawSectionHeading(
