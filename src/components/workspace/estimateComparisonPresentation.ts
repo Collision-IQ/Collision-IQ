@@ -91,8 +91,8 @@ export function formatEstimateComparisonValue(
 
 export function formatEstimateComparisonDelta(row: EstimateComparisonRow): string {
   if (typeof row.delta === "number") {
-    const lhs = formatEstimateComparisonDeltaSide(row.lhsValue, row.valueUnit);
-    const rhs = formatEstimateComparisonDeltaSide(row.rhsValue, row.valueUnit);
+    const lhs = formatEstimateComparisonValue(row.lhsValue);
+    const rhs = formatEstimateComparisonValue(row.rhsValue);
     return `${lhs} → ${rhs} (${row.delta > 0 ? "+" : ""}${row.delta})`;
   }
 
@@ -121,17 +121,6 @@ function sanitizeComparisonNote(value: string, row: EstimateComparisonRow): stri
   cleaned = removeDuplicatedLeadingTitle(cleaned, getEstimateComparisonLabel(row));
   cleaned = shortenComparisonNote(cleaned);
   return cleaned ? cleaned : null;
-}
-
-function formatEstimateComparisonDeltaSide(
-  value: string | number | null | undefined,
-  unit: EstimateComparisonRow["valueUnit"]
-): string {
-  if (typeof value === "number" && unit === "hours") {
-    return value.toFixed(1);
-  }
-
-  return formatEstimateComparisonValue(value);
 }
 
 function sanitizeComparisonDisplayText(value: string): string {

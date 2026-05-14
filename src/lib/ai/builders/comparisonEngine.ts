@@ -363,7 +363,7 @@ function buildEstimateComparisons(params: {
       delta:
         typeof params.shopEstimate.totalCost === "number" &&
         typeof params.insurerEstimate.totalCost === "number"
-          ? Number((params.insurerEstimate.totalCost - params.shopEstimate.totalCost).toFixed(2))
+          ? Number((params.shopEstimate.totalCost - params.insurerEstimate.totalCost).toFixed(2))
           : null,
       valueUnit: "currency",
       deltaType: resolveDeltaType(

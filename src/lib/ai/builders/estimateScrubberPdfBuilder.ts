@@ -162,7 +162,24 @@ export function buildEstimatorChangeRequestListPdf(
     subtitle:
       "Short find-the-differences report for added, missing, and changed estimate items.",
     summary: buildEstimateDeltaSummary(model),
-    sections: buildEstimateDeltaSections(model),
+    sections: [
+      {
+        title: "Added In Newer Estimate",
+        bullets: buildEstimateDeltaBullets(model.comparisonRows, "added"),
+      },
+      {
+        title: "Missing From Newer Estimate",
+        bullets: buildEstimateDeltaBullets(model.comparisonRows, "missing"),
+      },
+      {
+        title: "Changed Labor / Qty / Price",
+        bullets: buildEstimateDeltaBullets(model.comparisonRows, "changed"),
+      },
+      {
+        title: "Possible Rekey / Lock / Supplement Gaps",
+        bullets: buildEstimateDeltaBullets(model.comparisonRows, "gap"),
+      },
+    ],
     footer: [
       "Estimate delta only. Verify any unclear line against the source estimates before sending.",
     ],
@@ -351,7 +368,7 @@ function buildMarkupLegendBullets(): string[] {
     "[SUPPORTED]: supported and present.",
     "[UNDER-DOCUMENTED]: present but under-documented.",
     "[MISSING / REDUCED]: missing or materially reduced.",
-    "[NEEDS PROOF / OEM]: needs proof, invoice, scan, calibration record, OEM procedure, or alignment printout.",
+    "[NEEDS PROOF]: needs proof, invoice, scan, calibration record, OEM procedure, or alignment printout.",
     "[INFO]: informational only.",
   ];
 }
@@ -462,7 +479,7 @@ function buildComparisonOnlyAnnotations(
       const lowerLine = getLowerEstimateLine(comparisonRow, scrubTargetRole);
       const higherLine = getHigherEstimateLine(comparisonRow, scrubTargetRole);
       const targetLine = lowerLine || "Not clearly shown";
-      const title = normalizeDeltaLabel(comparisonRow) || cleanCustomerFacingEstimateLine(comparisonRow.category ?? "Estimate comparison item");
+      const title = cleanCustomerFacingEstimateLine(comparisonRow.operation ?? comparisonRow.partName ?? comparisonRow.category ?? "Estimate comparison item");
       const category = classifyComparisonAnnotationCategory(comparisonRow);
       const severity = category === "Informational repair-planning reminder" ? "gray" : "red";
       const anchor = findBestLineAnchor(normalizeDedupeKey(`${targetLine} ${higherLine ?? ""} ${title}`), lineAnchors);
@@ -549,7 +566,7 @@ function buildComparisonExplanation(
   lowerLine?: string,
   higherLine?: string
 ): string {
-  const label = normalizeDeltaLabel(row) || cleanCustomerFacingEstimateLine(row.category ?? "Estimate item");
+  const label = cleanCustomerFacingEstimateLine(row.operation ?? row.partName ?? row.category ?? "Estimate item");
   const lower = lowerLine ?? "not clearly shown on the lower estimate";
   const higher = higherLine ?? "documented differently on the higher estimate";
   return `The lower estimate shows ${lower}. The higher estimate shows ${higher}. ${label} should be reviewed by section, operation, part description, labor category, paint hours, price, and proof status as a repair-scope or documentation issue, not as a regulatory complaint ground by itself.`;
@@ -562,7 +579,7 @@ function buildComparisonCustomerText(
   if (category === "Alternate/aftermarket part concern") {
     return "Ask for written confirmation that the selected part is appropriate for the repair, policy, fit, safety, warranty, and repair-procedure requirements.";
   }
-  return `Ask the insurer or repair shop to confirm the difference for ${normalizeDeltaLabel(row) || "this estimate item"}.`;
+  return `Ask the insurer or repair shop to confirm the difference for ${cleanCustomerFacingEstimateLine(row.operation ?? row.partName ?? "this estimate item")}.`;
 }
 
 function buildComparisonEstimatorText(
@@ -572,7 +589,7 @@ function buildComparisonEstimatorText(
   if (category === "Alternate/aftermarket part concern") {
     return "Alternate part difference. Confirm whether the selected part complies with policy, fit, safety, warranty, and repair-procedure requirements.";
   }
-  return `Review side-by-side difference for ${normalizeDeltaLabel(row) || "this estimate item"}; add supplement support or document accepted variance.`;
+  return `Review side-by-side difference for ${cleanCustomerFacingEstimateLine(row.operation ?? row.partName ?? "this estimate item")}; add supplement support or document accepted variance.`;
 }
 
 function dedupeAnnotations(annotations: EstimateAnnotation[]): EstimateAnnotation[] {
@@ -947,131 +964,108 @@ function buildEstimatorChangeRequestBullets(params: {
   ];
 }
 
-type EstimateComparisonMode = "dueling" | "sequential" | "neutral";
-type EstimateDeltaBucket = "onlyA" | "onlyB" | "changed" | "gap";
-
-function buildEstimateDeltaSections(model: AnnotatedEstimateReviewModel): CarrierReportDocument["sections"] {
-  const mode = classifyComparisonMode(model.comparisonRows);
-  return [
-    {
-      title: getEstimateDeltaSectionTitle(mode, "onlyA"),
-      bullets: buildEstimateDeltaBullets(model.comparisonRows, "onlyA", mode),
-    },
-    {
-      title: getEstimateDeltaSectionTitle(mode, "onlyB"),
-      bullets: buildEstimateDeltaBullets(model.comparisonRows, "onlyB", mode),
-    },
-    {
-      title: getEstimateDeltaSectionTitle(mode, "changed"),
-      bullets: buildEstimateDeltaBullets(model.comparisonRows, "changed", mode),
-    },
-    {
-      title: "Possible Rekey / Lock / Supplement Gaps",
-      bullets: buildEstimateDeltaBullets(model.comparisonRows, "gap", mode),
-    },
-  ].filter((section) => section.bullets.length > 0);
-}
+type EstimateDeltaBucket = "added" | "missing" | "changed" | "gap";
 
 function buildEstimateDeltaBullets(
   comparisonRows: EstimateComparisonRow[],
-  bucket: EstimateDeltaBucket,
-  mode: EstimateComparisonMode
+  bucket: EstimateDeltaBucket
 ): string[] {
-  return comparisonRows
+  const bullets = comparisonRows
     .filter((row) => !isEstimateDeltaExcludedRow(row))
-    .filter((row) => rowMatchesEstimateDeltaBucket(row, bucket, mode))
-    .map((row) => formatEstimateDeltaBullet(row, bucket, mode))
+    .filter((row) => rowMatchesEstimateDeltaBucket(row, bucket))
+    .map((row) => formatEstimateDeltaBullet(row, bucket))
     .filter(Boolean)
     .slice(0, 8);
+
+  if (bullets.length > 0) {
+    return bullets;
+  }
+
+  switch (bucket) {
+    case "added":
+      return ["No added items isolated from the newer estimate."];
+    case "missing":
+      return ["No items missing from the newer estimate were isolated."];
+    case "changed":
+      return ["No changed labor, quantity, or price lines were isolated."];
+    case "gap":
+      return ["No rekey, lock, or supplement gap was detectable."];
+  }
 }
 
 function rowMatchesEstimateDeltaBucket(
   row: EstimateComparisonRow,
-  bucket: EstimateDeltaBucket,
-  mode: EstimateComparisonMode
+  bucket: EstimateDeltaBucket
 ): boolean {
-  const sides = resolveEstimateDeltaSides(row, mode);
-  const hasLeft = hasComparisonValue(sides.leftValue);
-  const hasRight = hasComparisonValue(sides.rightValue);
+  const sides = resolveEstimateDeltaSides(row);
+  const hasOlder = hasComparisonValue(sides.olderValue);
+  const hasNewer = hasComparisonValue(sides.newerValue);
   const text = buildEstimateDeltaSearchText(row);
 
-  if (bucket === "onlyA") return hasLeft && !hasRight;
-  if (bucket === "onlyB") return !hasLeft && hasRight;
+  if (bucket === "added") return !hasOlder && hasNewer;
+  if (bucket === "missing") return hasOlder && !hasNewer;
   if (bucket === "changed") {
     return (
-      hasLeft &&
-      hasRight &&
-      formatEstimateDeltaValue(sides.leftValue) !== formatEstimateDeltaValue(sides.rightValue) &&
-      isMaterialEstimateDelta(row)
+      hasOlder &&
+      hasNewer &&
+      formatEstimateDeltaValue(sides.olderValue) !== formatEstimateDeltaValue(sides.newerValue) &&
+      isLaborQtyOrPriceDelta(row)
     );
   }
   return (
     /re-?key|lock support|\block\b|supplement|supp\b/i.test(text) &&
-    (!hasLeft || !hasRight || formatEstimateDeltaValue(sides.leftValue) !== formatEstimateDeltaValue(sides.rightValue))
+    (!hasOlder || !hasNewer || formatEstimateDeltaValue(sides.olderValue) !== formatEstimateDeltaValue(sides.newerValue))
   );
 }
 
 function formatEstimateDeltaBullet(
   row: EstimateComparisonRow,
-  bucket: EstimateDeltaBucket,
-  mode: EstimateComparisonMode
+  bucket: EstimateDeltaBucket
 ): string {
-  const label = normalizeDeltaLabel(row);
+  const label = cleanCustomerFacingEstimateLine(row.operation ?? row.partName ?? row.category ?? "Estimate item");
 
-  if (!label || isGenericDeltaLabel(label)) {
+  if (!label || /^(?:Repair Operation|Estimate item|Parser review needed)$/i.test(label)) {
     return "";
   }
 
-  if (bucket === "onlyA" || bucket === "onlyB") {
+  if (bucket === "added" || bucket === "missing") {
     return label;
   }
 
-  return `${label}: ${formatDeltaArrow(row, mode)}`;
+  const sides = resolveEstimateDeltaSides(row);
+  const older = formatEstimateDeltaValue(sides.olderValue) || "–";
+  const newer = formatEstimateDeltaValue(sides.newerValue) || "–";
+  const deltaNum = typeof row.delta === "number" ? row.delta : null;
+  const deltaSign = deltaNum !== null
+    ? `${deltaNum >= 0 ? "+" : ""}${deltaNum}`
+    : formatEstimateDeltaValue(row.delta);
+  const change = deltaSign ? ` (${deltaSign})` : "";
+
+  return `${label}: ${older} → ${newer}${change}`;
 }
 
-function resolveEstimateDeltaSides(row: EstimateComparisonRow, mode: EstimateComparisonMode = "sequential"): {
-  leftValue: EstimateComparisonRow["lhsValue"];
-  rightValue: EstimateComparisonRow["rhsValue"];
+function resolveEstimateDeltaSides(row: EstimateComparisonRow): {
   olderValue: EstimateComparisonRow["lhsValue"];
   newerValue: EstimateComparisonRow["rhsValue"];
 } {
-  if (mode !== "sequential") {
-    return {
-      leftValue: row.lhsValue,
-      rightValue: row.rhsValue,
-      olderValue: row.lhsValue,
-      newerValue: row.rhsValue,
-    };
-  }
-
   const lhsSource = row.lhsSource ?? "";
   const rhsSource = row.rhsSource ?? "";
   const lhsLooksNewer = /\b(new|newer|latest|current|revised|updated|supplement|supp)\b/i.test(lhsSource);
   const rhsLooksOlder = /\b(old|older|prior|previous|original|initial)\b/i.test(rhsSource);
 
   if (lhsLooksNewer || rhsLooksOlder) {
-    return {
-      leftValue: row.rhsValue,
-      rightValue: row.lhsValue,
-      olderValue: row.rhsValue,
-      newerValue: row.lhsValue,
-    };
+    return { olderValue: row.rhsValue, newerValue: row.lhsValue };
   }
 
-  return {
-    leftValue: row.lhsValue,
-    rightValue: row.rhsValue,
-    olderValue: row.lhsValue,
-    newerValue: row.rhsValue,
-  };
+  return { olderValue: row.lhsValue, newerValue: row.rhsValue };
 }
 
-function isMaterialEstimateDelta(row: EstimateComparisonRow): boolean {
+function isLaborQtyOrPriceDelta(row: EstimateComparisonRow): boolean {
   if (row.valueUnit === "currency" || row.valueUnit === "hours" || row.valueUnit === "count") {
     return true;
   }
 
-  return /\b(labor|hour|qty|quantity|rate|price|pricing|cost|amount|total|material|refinish|paint|part|scan|calibration|procedure|source)\b/i.test(
+  return /\b(labor|hour|qty|quantity|rate|price|pricing|cost|amount|total|material|refinish|paint)\b/i.test(
     buildEstimateDeltaSearchText(row)
   );
 }
@@ -1093,7 +1087,7 @@ function hasComparisonValue(value: EstimateComparisonRow["lhsValue"]): boolean {
 }
 
 function isEstimateDeltaExcludedRow(row: EstimateComparisonRow): boolean {
-  return /\b(tax|deductible|betterment)\b/i.test(
+  return /\b(total|subtotal|tax|deductible|betterment)\b/i.test(
     `${row.category ?? ""} ${row.operation ?? ""} ${row.partName ?? ""}`
   );
 }
@@ -1102,166 +1096,19 @@ function buildEstimateDeltaSummary(
   model: AnnotatedEstimateReviewModel
 ): CarrierReportDocument["summary"] {
   const rows = model.comparisonRows.filter((row) => !isEstimateDeltaExcludedRow(row));
-  const mode = classifyComparisonMode(rows);
-  const changedCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "changed", mode)).length;
-  const leftOnlyCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "onlyA", mode)).length;
-  const rightOnlyCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "onlyB", mode)).length;
-  const gapCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "gap", mode)).length;
+  const changedCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "changed")).length;
+  const addedCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "added")).length;
+  const missingCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "missing")).length;
+  const gapCount = rows.filter((row) => rowMatchesEstimateDeltaBucket(row, "gap")).length;
 
   return [
     { label: "Vehicle", value: model.vehicleIdentity },
     { label: "VIN", value: model.vin },
-    { label: "Mode", value: formatComparisonMode(mode) },
-    { label: mode === "sequential" ? "Removed" : "Only in Estimate 1", value: String(leftOnlyCount) },
-    { label: mode === "sequential" ? "Added" : "Only in Estimate 2", value: String(rightOnlyCount) },
+    { label: "Added", value: String(addedCount) },
+    { label: "Missing", value: String(missingCount) },
     { label: "Changed", value: String(changedCount) },
     { label: "Possible Gaps", value: String(gapCount) },
   ];
-}
-
-function classifyComparisonMode(comparisonRows: EstimateComparisonRow[]): EstimateComparisonMode {
-  const sourceText = comparisonRows.map((row) => `${row.lhsSource ?? ""} ${row.rhsSource ?? ""}`).join(" ").toLowerCase();
-
-  if (/\b(shop|repair facility|body shop)\b/.test(sourceText) && /\b(carrier|insurer|insurance)\b/.test(sourceText)) {
-    return "dueling";
-  }
-
-  if (/\b(supplement|supp|version|revision|revised|updated|newer|older|prior|previous|original|initial|workfile|ro|claim)\b/.test(sourceText)) {
-    return "sequential";
-  }
-
-  const sourcePairs = comparisonRows
-    .map((row) => [normalizeDedupeKey(row.lhsSource ?? ""), normalizeDedupeKey(row.rhsSource ?? "")] as const)
-    .filter(([left, right]) => left && right);
-
-  if (sourcePairs.length > 0 && sourcePairs.every(([left, right]) => left === right)) {
-    return "sequential";
-  }
-
-  return "neutral";
-}
-
-function formatComparisonMode(mode: EstimateComparisonMode): string {
-  if (mode === "dueling") return "Shop estimate vs carrier estimate";
-  if (mode === "sequential") return "Sequential estimate versions";
-  return "Neutral estimate comparison";
-}
-
-function getEstimateDeltaSectionTitle(mode: EstimateComparisonMode, bucket: EstimateDeltaBucket): string {
-  if (mode === "sequential") {
-    if (bucket === "onlyA") return "Removed From Newer Estimate";
-    if (bucket === "onlyB") return "Added In Newer Estimate";
-    return "Changed From Prior Estimate";
-  }
-
-  if (mode === "dueling") {
-    if (bucket === "onlyA") return "Only In Shop Estimate";
-    if (bucket === "onlyB") return "Only In Carrier Estimate";
-    return "Changed Between Estimates";
-  }
-
-  if (bucket === "onlyA") return "Only In Estimate 1";
-  if (bucket === "onlyB") return "Only In Estimate 2";
-  return "Changed Between Estimates";
-}
-
-function normalizeDeltaLabel(row: EstimateComparisonRow): string {
-  const operation = cleanCustomerFacingEstimateLine(row.operation);
-  const partName = cleanCustomerFacingEstimateLine(row.partName);
-  const category = cleanCustomerFacingEstimateLine(row.category);
-  const operationVerb = normalizeDeltaOperationVerb(row.operation);
-  const valueLabel = cleanCustomerFacingEstimateLine(
-    hasComparisonValue(row.lhsValue) ? `${row.lhsValue}` : hasComparisonValue(row.rhsValue) ? `${row.rhsValue}` : ""
-  );
-  const operationKey = normalizeDedupeKey(operation);
-  const partKey = normalizeDedupeKey(partName);
-  const operationIsGeneric = !operation || isGenericDeltaLabel(operation) || /^repair operation$/i.test(operation);
-  const combined = operationVerb && partName
-    ? `${operationVerb} ${partName}`
-    : operationIsGeneric && partName
-      ? partName
-      : operation && partName && partKey && !partKey.includes(operationKey)
-    ? `${operation} ${partName}`
-    : operation || partName || category || valueLabel;
-
-  return (operationVerb && partName ? combined : cleanCustomerFacingEstimateLine(combined))
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
-function normalizeDeltaOperationVerb(value: string | null | undefined): string {
-  const raw = (value ?? "").trim();
-  if (/^r\s*&\s*i$/i.test(raw)) return "R&I";
-  if (/^r\s*&\s*r$/i.test(raw)) return "R&R";
-  if (/^repl$/i.test(raw)) return "Repl";
-  if (/^rpr$/i.test(raw)) return "Rpr";
-  if (/^refn$/i.test(raw)) return "Refn";
-  if (/^o\/h$/i.test(raw)) return "O/H";
-  if (/^subl$/i.test(raw)) return "Subl";
-  if (/^overlap$/i.test(raw)) return "Overlap";
-  if (/^add$/i.test(raw)) return "";
-  if (/^(?:proc|procedure|repair operation|operation)$/i.test(raw)) return "";
-  return "";
-}
-
-function isGenericDeltaLabel(value: string): boolean {
-  const normalized = normalizeDedupeKey(value);
-  return /^(?:r i|r r|repl|rpr|refn|o h|subl|add|overlap|repair operation|operation|estimate item|parser review needed)$/.test(normalized);
-}
-
-function formatDeltaArrow(row: EstimateComparisonRow, mode: EstimateComparisonMode): string {
-  const sides = resolveEstimateDeltaSides(row, mode);
-  const left = formatEstimateDeltaSideValue(sides.leftValue, row.valueUnit) || "-";
-  const right = formatEstimateDeltaSideValue(sides.rightValue, row.valueUnit) || "-";
-  const numericDelta = calculateDisplayDelta(sides.leftValue, sides.rightValue, row.delta);
-  const delta = numericDelta !== null
-    ? ` (${formatSignedNumber(numericDelta)})`
-    : row.delta !== null && row.delta !== undefined
-      ? ` (${normalizeDeltaArrowText(formatEstimateDeltaValue(row.delta))})`
-      : "";
-
-  return `${left} → ${right}${delta}`;
-}
-
-function formatEstimateDeltaSideValue(
-  value: EstimateComparisonRow["lhsValue"],
-  unit: EstimateComparisonRow["valueUnit"]
-): string {
-  if (typeof value === "number" && unit === "hours") {
-    return value.toFixed(1);
-  }
-  return formatEstimateDeltaValue(value);
-}
-
-function calculateDisplayDelta(
-  leftValue: EstimateComparisonRow["lhsValue"],
-  rightValue: EstimateComparisonRow["rhsValue"],
-  fallbackDelta: EstimateComparisonRow["delta"]
-): number | null {
-  const left = parseNumericDeltaValue(leftValue);
-  const right = parseNumericDeltaValue(rightValue);
-  if (left !== null && right !== null) {
-    return Number((right - left).toFixed(2));
-  }
-  return typeof fallbackDelta === "number" && Number.isFinite(fallbackDelta) ? fallbackDelta : null;
-}
-
-function parseNumericDeltaValue(value: EstimateComparisonRow["lhsValue"]): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value !== "string") return null;
-  const cleaned = value.replace(/[$,\s]/g, "");
-  if (!/^-?\d+(?:\.\d+)?$/.test(cleaned)) return null;
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function formatSignedNumber(value: number): string {
-  const fixed = Number.isInteger(value) ? value.toFixed(1) : value.toFixed(2).replace(/0$/, "");
-  return `${value >= 0 ? "+" : ""}${fixed}`;
-}
-
-function normalizeDeltaArrowText(value: string): string {
-  return value.replace(/!['’]/g, "→").replace(/\s*->\s*/g, " → ").replace(/â†’/g, "→");
 }
 
 function formatPromptGeneratedBullets(value: string | null | undefined, label: string): string[] {
@@ -1288,7 +1135,7 @@ function formatStatusToken(status: EstimateAnnotationSeverity): string {
     case "red":
       return "[MISSING / REDUCED]";
     case "blue":
-      return "[NEEDS PROOF / OEM]";
+      return "[NEEDS PROOF]";
     case "gray":
       return "[INFO]";
   }
