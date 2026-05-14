@@ -11,45 +11,44 @@ const SUPPORT_CATEGORIES: ExportResearchSupportCategory[] = [
 ];
 
 export function buildExportResearchSections(
-  snapshot: ExportResearchSnapshot | null | undefined
+  snapshot: ExportResearchSnapshot | null | undefined,
+  options: { includeInternalAudit?: boolean } = {}
 ): CarrierReportSection[] {
   if (!snapshot) {
-    return [{
-      title: "Required Research Snapshot",
-      bullets: [
-        "Unverified / Needs Source: Export-specific source research was not available for this generated report.",
-        "Do not present legal, policy, OEM, or internet-derived support as verified unless a later audit snapshot supplies accepted citation metadata.",
-      ],
-    }];
+    return [];
   }
 
   return [
-    {
-      title: "Research Flow Audit Snapshot",
-      bullets: [
-        `Generated: ${snapshot.generatedAt}.`,
-        `Immutable snapshot hash: ${snapshot.immutableSnapshotHash}.`,
-        `Agents run: ${snapshot.agentsRun.join(", ")}.`,
-        `Search queries used: ${snapshot.searchQueriesUsed.length}.`,
-        `Sources reviewed / accepted / rejected: ${snapshot.sourcesReviewed.length} / ${snapshot.sourcesAccepted.length} / ${snapshot.sourcesRejected.length}.`,
-      ],
-    },
-    ...SUPPORT_CATEGORIES.map((category) => ({
-      title: category,
-      bullets: formatCategoryBullets(snapshot, category),
-    })),
-    {
-      title: "Citation Verification Results",
-      bullets: [
-        `Uncited legal claims rejected: ${snapshot.verificationSummary.uncitedLegalClaimsRejected}.`,
-        `Fabricated or non-authoritative statute candidates rejected: ${snapshot.verificationSummary.fabricatedStatutesRejected}.`,
-        `Stale or superseded regulation candidates rejected: ${snapshot.verificationSummary.staleOrSupersededRegulationsRejected}.`,
-        `Unsupported OEM requirement candidates rejected: ${snapshot.verificationSummary.unsupportedOemRequirementsRejected}.`,
-        `Inferred policy rights downgraded: ${snapshot.verificationSummary.inferredPolicyRightsDowngraded}.`,
-        ...snapshot.unsupportedFindings.slice(0, 8),
-      ],
-    },
-  ];
+    ...(options.includeInternalAudit
+      ? [{
+          title: "Research Flow Audit Snapshot",
+          bullets: [
+            `Generated: ${snapshot.generatedAt}.`,
+            `Immutable snapshot hash: ${snapshot.immutableSnapshotHash}.`,
+            `Agents run: ${snapshot.agentsRun.join(", ")}.`,
+            `Search queries used: ${snapshot.searchQueriesUsed.length}.`,
+            `Sources reviewed / accepted / rejected: ${snapshot.sourcesReviewed.length} / ${snapshot.sourcesAccepted.length} / ${snapshot.sourcesRejected.length}.`,
+          ],
+        }]
+      : []),
+    ...SUPPORT_CATEGORIES.flatMap((category) => {
+      const bullets = formatCategoryBullets(snapshot, category).filter(isMeaningfulReportText);
+      return bullets.length > 0 ? [{ title: category, bullets }] : [];
+    }),
+    ...(options.includeInternalAudit
+      ? [{
+          title: "Citation Verification Results",
+          bullets: [
+            `Uncited legal claims rejected: ${snapshot.verificationSummary.uncitedLegalClaimsRejected}.`,
+            `Fabricated or non-authoritative statute candidates rejected: ${snapshot.verificationSummary.fabricatedStatutesRejected}.`,
+            `Stale or superseded regulation candidates rejected: ${snapshot.verificationSummary.staleOrSupersededRegulationsRejected}.`,
+            `Unsupported OEM requirement candidates rejected: ${snapshot.verificationSummary.unsupportedOemRequirementsRejected}.`,
+            `Inferred policy rights downgraded: ${snapshot.verificationSummary.inferredPolicyRightsDowngraded}.`,
+            ...snapshot.unsupportedFindings.slice(0, 8),
+          ].filter(isMeaningfulReportText),
+        }]
+      : []),
+  ].filter((section) => section.bullets && section.bullets.length > 0);
 }
 
 function formatCategoryBullets(
@@ -77,4 +76,15 @@ function formatCategoryBullets(
       .filter(Boolean)
       .join(" ")
   );
+}
+
+function isMeaningfulReportText(value: string | null | undefined): value is string {
+  const text = value?.replace(/\s+/g, " ").trim();
+  if (!text) return false;
+  return ![
+    /^Unverified \/ Needs Source/i,
+    /^No accepted .* source was available/i,
+    /^Needs Source for oem_contradiction_detection/i,
+    /^Citation Verification Results$/i,
+  ].some((pattern) => pattern.test(text));
 }

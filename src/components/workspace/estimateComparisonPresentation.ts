@@ -88,11 +88,13 @@ export function formatEstimateComparisonValue(
 
 export function formatEstimateComparisonDelta(row: EstimateComparisonRow): string {
   if (typeof row.delta === "number") {
-    return `${row.delta > 0 ? "+" : ""}${row.delta}`;
+    const lhs = formatEstimateComparisonValue(row.lhsValue);
+    const rhs = formatEstimateComparisonValue(row.rhsValue);
+    return `${lhs} → ${rhs} (${row.delta > 0 ? "+" : ""}${row.delta})`;
   }
 
   if (row.delta) {
-    return row.delta;
+    return row.delta.replace(/!['’]/g, "→").replace(/\s*->\s*/g, " → ");
   }
 
   switch (row.deltaType) {
@@ -115,11 +117,18 @@ function sanitizeComparisonNote(value: string): string | null {
 }
 
 function shortenComparisonNote(value: string): string {
-  const firstSentence = value.split(/(?<=[.!?])\s+/)[0] || value;
-  if (firstSentence.length <= 96) {
-    return firstSentence;
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= 500) {
+    return cleaned;
   }
-  return `${firstSentence.slice(0, 93).trimEnd()}...`;
+
+  const truncated = cleaned.slice(0, 500);
+  const sentenceEnd = Math.max(
+    truncated.lastIndexOf("."),
+    truncated.lastIndexOf("!"),
+    truncated.lastIndexOf("?")
+  );
+  return sentenceEnd > 120 ? truncated.slice(0, sentenceEnd + 1).trim() : `${truncated.trimEnd()}.`;
 }
 
 function notesLookDuplicated(left: string, right: string): boolean {

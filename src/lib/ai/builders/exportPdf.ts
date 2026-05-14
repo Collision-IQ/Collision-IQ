@@ -164,10 +164,10 @@ function redactCarrierReportDocument(input: CarrierReportDocument): CarrierRepor
 
 export function sanitizeReportText(value: string): string {
   return value
-    .replace(/\bcm[a-z0-9]{20,}\b/gi, "Uploaded document")
-    .replace(/\b(?:evidence|chain|source|finding|issue|doc|line|parser|vector|object)[-_ ]?[a-z0-9]{8,}\b/gi, "uploaded document")
-    .replace(/\b[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\b/gi, "uploaded document")
-    .replace(/\b[a-f0-9]{24,64}\b/gi, "uploaded document")
+    .replace(/\bcm[a-z0-9]{20,}\b/gi, "Uploaded file")
+    .replace(/\b(?:evidence|chain|source|finding|issue|doc|line|parser|vector|object)[-_ ]?[a-z0-9]{8,}\b/gi, "uploaded file")
+    .replace(/\b[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\b/gi, "uploaded file")
+    .replace(/\b[a-f0-9]{24,64}\b/gi, "uploaded file")
     .replace(/\bSame rationale as earlier\b/gi, "Related estimate rationale")
     .replace(/\bOperation:\s*/gi, "Item: ")
     .replace(/\s*\|\s*Status:\s*/gi, " - Status: ")
@@ -710,7 +710,18 @@ function drawComparisonRowBlock(
 
 function formatComparisonHeading(value: string | undefined): string {
   const cleaned = sanitizeComparisonText(value) || "Estimate difference";
-  return cleaned.length > 140 ? `${cleaned.slice(0, 137).trimEnd()}...` : cleaned;
+  return limitComparisonHeading(cleaned);
+}
+
+function limitComparisonHeading(value: string): string {
+  if (value.length <= 500) return value;
+  const truncated = value.slice(0, 500);
+  const sentenceEnd = Math.max(
+    truncated.lastIndexOf("."),
+    truncated.lastIndexOf("!"),
+    truncated.lastIndexOf("?")
+  );
+  return sentenceEnd > 120 ? truncated.slice(0, sentenceEnd + 1).trim() : `${truncated.trimEnd()}.`;
 }
 
 function sanitizeComparisonText(value: string | undefined): string {

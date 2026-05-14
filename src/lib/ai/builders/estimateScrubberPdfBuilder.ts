@@ -365,11 +365,11 @@ function parseMoney(value: string | number | null | undefined): number | undefin
 
 function buildMarkupLegendBullets(): string[] {
   return [
-    "Green/check: supported and present.",
-    "Yellow: present but under-documented.",
-    "Red: missing or materially reduced.",
-    "Blue: needs proof, invoice, scan, calibration record, OEM procedure, or alignment printout.",
-    "Gray: informational only.",
+    "[SUPPORTED]: supported and present.",
+    "[UNDER-DOCUMENTED]: present but under-documented.",
+    "[MISSING / REDUCED]: missing or materially reduced.",
+    "[NEEDS PROOF]: needs proof, invoice, scan, calibration record, OEM procedure, or alignment printout.",
+    "[INFO]: informational only.",
   ];
 }
 
@@ -825,7 +825,7 @@ function buildAnnotationExplanation(
 ): string {
   const supportPhrase =
     supportStatus === "verified"
-      ? "The concern is tied to directly extracted estimate, policy, invoice, scan, procedure, or uploaded document support."
+      ? "The concern is tied to directly extracted estimate, policy, invoice, scan, procedure, or supporting evidence."
       : supportStatus === "referenced"
         ? "The item is referenced in the file, but the completion proof, invoice, scan record, procedure support, or estimate explanation should still be checked."
         : supportStatus === "inferred"
@@ -935,7 +935,7 @@ function buildTargetEstimateMarkupBullets(params: {
         `Line ${anchor.lineNumber}: ${anchor.text}`,
         ...(attached.length
           ? attached.map((annotation) => formatAnnotatedIssue(annotation, params.audience))
-          : ["Gray: This line is present in the selected estimate and is retained as informational repair-planning context. No specific correction was generated for this line from the current structured scrubber model."]),
+          : ["[INFO]: This line is present in the selected estimate and is retained as informational repair-planning context. No specific correction was generated for this line from the current structured scrubber model."]),
       ].join("\n\n"),
     ];
   });
@@ -1129,15 +1129,15 @@ function formatPromptGeneratedBullets(value: string | null | undefined, label: s
 function formatStatusToken(status: EstimateAnnotationSeverity): string {
   switch (status) {
     case "green":
-      return "Green/check";
+      return "[SUPPORTED]";
     case "yellow":
-      return "Yellow";
+      return "[UNDER-DOCUMENTED]";
     case "red":
-      return "Red";
+      return "[MISSING / REDUCED]";
     case "blue":
-      return "Blue";
+      return "[NEEDS PROOF]";
     case "gray":
-      return "Gray";
+      return "[INFO]";
   }
 }
 

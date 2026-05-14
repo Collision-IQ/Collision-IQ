@@ -373,7 +373,7 @@ function cleanComparisonDisplayText(value: string): string {
     .replace(/\bshown\b/i, "Not clearly shown")
     .replace(/\s{2,}/g, " ")
     .trim()
-    .slice(0, 240);
+    .slice(0, 500);
 }
 
 function buildRepairStrategyComparisonBullets(params: {
@@ -425,11 +425,77 @@ function buildExplainabilityBullets(exportModel: ExportModel): string[] {
   return dedupeBullets(exportModel.findingReasoning.slice(0, 6).map((finding) =>
     [
       `${displayOperationLabel(finding.issue)}`,
-      `${finding.rationaleSummary ?? finding.why_it_matters}`,
-      `The evidence record currently shows ${finding.evidenceChainSummary ?? finding.what_proves_it}.`,
-      `${finding.riskIfOmitted ?? "If omitted, the documented repair position may be weaker."} Support posture: ${formatSupportStatus(finding.supportConfidenceIndicator ?? finding.evidenceLevel)}.`,
+      `- Finding: ${cleanExplainabilityDetail(finding.finding || finding.rationaleSummary || finding.why_it_matters, finding.issue)}`,
+      `- Support status: ${formatExplainabilityStatus(finding.supportConfidenceIndicator ?? finding.evidenceLevel)}`,
+      `- Evidence basis: ${buildEvidenceBasisLabel(finding)}`,
+      `- Next step: ${cleanExplainabilityDetail(finding.next_action || finding.riskIfOmitted || "Request the missing support or revise the estimate position.", finding.issue)}`,
     ].join("\n\n")
   ));
+}
+
+function cleanExplainabilityDetail(value: string | null | undefined, title: string): string {
+  const titlePattern = escapeRegExp(displayOperationLabel(title));
+  const cleaned = sanitizeReportProse(value || "Review this item against the current file evidence.")
+    .replace(new RegExp(`^${titlePattern}\\s*:?\\s*`, "i"), "")
+    .replace(/\bSupport is verified from current file evidence\.\s*Support basis:\s*/gi, "")
+    .trim();
+
+  return limitToReadableParagraph(cleaned || "Review this item against the current file evidence.");
+}
+
+function buildEvidenceBasisLabel(
+  finding: ExportModel["findingReasoning"][number]
+): string {
+  const raw = [
+    finding.what_proves_it,
+    finding.evidenceChainSummary,
+  ].join(" ");
+  const normalized = sanitizeReportProse(raw).toLowerCase();
+  const labels: string[] = [];
+
+  if (/invoice|receipt|paid|vendor/.test(normalized)) labels.push("invoice");
+  if (/photo|image|visible/.test(normalized)) labels.push("photo");
+  if (/scan|dtc|diagnostic/.test(normalized)) labels.push("scan");
+  if (/oem|procedure|position statement|repair manual/.test(normalized)) labels.push("OEM procedure");
+  if (/comparison|shop estimate|carrier estimate|estimate/.test(normalized)) labels.push("estimate comparison");
+  if (/policy|coverage|endorsement/.test(normalized)) labels.push("policy record");
+
+  return labels.length > 0 ? joinHumanList([...new Set(labels)]) : "Current file evidence";
+}
+
+function formatExplainabilityStatus(value: string): string {
+  if (/verified|documented/i.test(value)) return "Verified";
+  if (/missing|unsupported|not established/i.test(value)) return "Missing";
+  if (/inferred/i.test(value)) return "Inferred";
+  if (/referenced/i.test(value)) return "Referenced";
+  return formatSupportStatus(value);
+}
+
+function sanitizeReportProse(value: string): string {
+  return value
+    .replace(/\buploaded document\b/gi, "supporting evidence")
+    .replace(/\bUploaded document\b/g, "Supporting evidence")
+    .replace(/\buploaded file:?\s*(?:uploaded file|uploaded document|documentation)(?:,\s*(?:uploaded file|uploaded document|documentation))*\.?/gi, "uploaded file")
+    .replace(/\bsupporting evidence:?\s*(?:supporting evidence|uploaded document|documentation)(?:,\s*(?:supporting evidence|uploaded document|documentation))*\.?/gi, "supporting evidence")
+    .replace(/\b([A-Z][A-Za-z0-9 /&()-]{6,80})\s+\1\s*:/g, "$1:")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function limitToReadableParagraph(value: string): string {
+  if (value.length <= 500) return ensureSentence(value);
+
+  const truncated = value.slice(0, 500);
+  const sentenceEnd = Math.max(
+    truncated.lastIndexOf("."),
+    truncated.lastIndexOf("!"),
+    truncated.lastIndexOf("?")
+  );
+  return sentenceEnd > 120 ? truncated.slice(0, sentenceEnd + 1).trim() : `${truncated.trimEnd()}.`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function buildOemContradictionBullets(exportModel: ExportModel): string[] {
@@ -724,7 +790,7 @@ function buildSourceSummary(
 
   const resolved = [...sources].slice(0, 8);
   if (resolved.length === 0) {
-    return ["References are limited to the current estimate, uploaded documents, and related file material."];
+    return ["References are limited to the current estimate, supporting documentation, and related file material."];
   }
 
   const cleaned = resolved
@@ -733,7 +799,7 @@ function buildSourceSummary(
     .slice(0, 8);
 
   if (cleaned.length === 0) {
-    return ["References are limited to the current estimate, uploaded documents, and related file material."];
+    return ["References are limited to the current estimate, supporting documentation, and related file material."];
   }
 
   return cleaned.map((source) => `${trimTrailingPunctuation(source)}.`);
@@ -822,6 +888,9 @@ function toHumanReadableSourceLabel(source: string): string | undefined {
   const lastSegment = trimmed.split(/[\\/]/).pop()?.trim() ?? trimmed;
   const withoutOpaqueId = lastSegment.replace(/\b[a-z0-9_-]{20,}\b/gi, "").replace(/\s{2,}/g, " ").trim();
   if (!withoutOpaqueId) return undefined;
+  if (/^(?:uploaded document|uploaded file|documentation|supporting evidence)$/i.test(withoutOpaqueId)) {
+    return undefined;
+  }
   if (/^[a-z0-9_-]{12,}$/i.test(withoutOpaqueId)) return undefined;
   if (/\.(pdf|docx?|xlsx?|png|jpe?g|heic|txt)$/i.test(withoutOpaqueId)) {
     return withoutOpaqueId;
