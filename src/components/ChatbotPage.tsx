@@ -1004,7 +1004,7 @@ export function ChatbotWorkspacePage() {
                     {trialDaysRemaining > 0 ? (
                       <>
                         Trial ends in {trialDaysRemaining} day
-                        {trialDaysRemaining === 1 ? "" : "s"}.
+                        {trialDaysRemaining === 1 ? "" : "s"}
                         <span className="ml-2 text-foreground/80">
                           Upgrade to keep full access.
                         </span>
@@ -1882,26 +1882,31 @@ function RailContent({
       });
       if (analysisReportId) {
         void fetchReportSendHistory();
-      } else if (result?.sentAt) {
-        const sentAt = result.sentAt;
-        setReportSendHistory((current) => [
-          {
-            id: result.reportSendId ?? `local-${sentAt}`,
-            caseId: null,
-            reportType: activeReportToSend,
-            destinationType: reportSendTarget,
-            recipient: reportRecipientEmail,
-            subject: reportSubject,
-            resendId: result.id ?? null,
-            status: result.deliveryMode === "manual" ? "manual" : "sent",
-            sentAt,
-            deliveredAt: null,
-            bouncedAt: null,
-            failedAt: null,
-            openedAt: null,
-          },
-          ...current,
-        ]);
+      } else {
+        if (!result) {
+          return;
+        }
+        if (result.sentAt) {
+          const sentAt = result.sentAt;
+          setReportSendHistory((current) => [
+            {
+              id: result.reportSendId ?? `local-${sentAt}`,
+              caseId: null,
+              reportType: activeReportToSend,
+              destinationType: reportSendTarget,
+              recipient: reportRecipientEmail,
+              subject: reportSubject,
+              resendId: result.id ?? null,
+              status: result.deliveryMode === "manual" ? "manual" : "sent",
+              sentAt,
+              deliveredAt: null,
+              bouncedAt: null,
+              failedAt: null,
+              openedAt: null,
+            },
+            ...current,
+          ]);
+        }
       }
     } catch (error) {
       setReportSendStatus(
@@ -1971,6 +1976,11 @@ function RailContent({
         plan,
         destinationType: snapshotSendTarget,
         exportType: "snapshot",
+        adjustedConfidence: snapshot.evidenceCompleteness.adjustedConfidence,
+        completenessStatus: snapshot.evidenceCompleteness.completenessStatus,
+        topDisputeCount: snapshot.topDisputeItems.length,
+        uploadLimitReached: snapshot.evidenceCompleteness.uploadLimitReached,
+        userIndicatedMoreFiles: snapshot.evidenceCompleteness.userIndicatedMoreFiles,
       });
       if (analysisReportId) {
         void fetchReportSendHistory();
@@ -3204,7 +3214,7 @@ function ReportSendModal({
         </div>
 
         <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto px-5 py-4 pb-8">
-          <div className="grid gap-3">
+        <div className="grid gap-3">
           <label className="grid gap-1 text-xs text-muted-foreground">
             Destination
             <select
@@ -3244,7 +3254,7 @@ function ReportSendModal({
           <button type="button" onClick={onCancel} className="rounded-xl bg-muted px-4 py-2 text-sm text-muted-foreground hover:bg-muted/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring/25">
             Cancel
           </button>
-          <button type="button" onClick={onSend} disabled={!sendReady} className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-45">
+          <button type="button" onClick={onSend} disabled={!sendReady} className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-45">
             {sending ? "Sending..." : sent ? "Resend" : "Send"}
           </button>
         </div>
@@ -3716,7 +3726,7 @@ async function buildCustomerReportDocument(params: {
     throw new Error("Customer report response was empty.");
   }
 
-  return createCustomerReportPdfDocument(data.report, {
+  return createCustomerReportDocument(data.report, {
     renderModel: params.renderModel,
     fileName: data.fileName,
   });
@@ -3793,10 +3803,10 @@ function exportCustomerReportPdf(report: CustomerReport, params: {
   renderModel: ReturnType<typeof buildExportModel>;
   fileName?: string;
 }) {
-  void exportCarrierPDF(createCustomerReportPdfDocument(report, params));
+  void exportCarrierPDF(createCustomerReportDocument(report, params));
 }
 
-function createCustomerReportPdfDocument(report: CustomerReport, params: {
+function createCustomerReportDocument(report: CustomerReport, params: {
   renderModel: ReturnType<typeof buildExportModel>;
   fileName?: string;
 }): CarrierReportDocument {
@@ -4718,10 +4728,7 @@ function DecisionSection({
 
   return (
     <section
-      className={`space-y-2.5 rounded-2xl border ${compact ? "p-3.5" : "p-4"} ${tones[tone]} ${
-        featured ? "shadow-[0_18px_40px_rgba(0,0,0,0.18)]" : ""
-      }`}
-    >
+      className={`space-y-2.5 rounded-2xl border p-3.5 ${tones[tone]}`}>
       <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{title}</div>
       <div
         className={`whitespace-pre-wrap ${
@@ -4765,7 +4772,7 @@ function ExpandableDecisionSection({
           onClick={() => setExpanded((value) => !value)}
           className="text-[11px] font-medium uppercase tracking-[0.16em] text-orange-200/80 hover:text-orange-100"
         >
-          {expanded ? "Show less" : "Expand"}
+          {expanded ? "Hide" : "Expand"}
         </button>
       </div>
       <div className="relative">
