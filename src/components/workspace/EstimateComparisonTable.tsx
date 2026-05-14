@@ -4,6 +4,7 @@ import {
   formatEstimateComparisonDelta,
   formatEstimateComparisonValue,
   getTopEstimateComparisonHighlights,
+  sanitizeUserFacingEvidenceText,
 } from "./estimateComparisonPresentation";
 
 type Props = {
@@ -34,7 +35,7 @@ export function EstimateComparisonTable({ rows }: Props) {
             {topDifferences.map((difference) => (
               <div key={difference} className="flex gap-2">
                 <span className="pt-[2px] text-[#C65A2A]">&bull;</span>
-                <span>{difference}</span>
+                <span>{sanitizeUserFacingEvidenceText(difference)}</span>
               </div>
             ))}
           </div>
@@ -55,15 +56,15 @@ export function EstimateComparisonTable({ rows }: Props) {
           {displayRows.map((row) => (
             <tr key={row.id} className="border-t border-white/8 bg-black/[0.14] align-top">
               <td className="px-3 py-2.5 text-white/76">
-                <div>{row.category || "Comparison"}</div>
+                <div>{sanitizeUserFacingEvidenceText(row.category) || "Comparison"}</div>
                 {(row.operation || row.partName) && (
                   <div className="mt-0.5 text-[11px] leading-4 text-white/43">
-                    {[row.operation, row.partName].filter(Boolean).join(" - ")}
+                    {[row.operation, row.partName].map((value) => sanitizeUserFacingEvidenceText(value)).filter(Boolean).join(" - ")}
                   </div>
                 )}
                 {row.notes?.[0] && (
                   <div className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-white/43">
-                    {row.notes[0]}
+                    {sanitizeUserFacingEvidenceText(row.notes[0])}
                   </div>
                 )}
               </td>

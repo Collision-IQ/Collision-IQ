@@ -3,6 +3,7 @@ import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateC
 import {
   getEstimateComparisonRows,
   getTopEstimateComparisonHighlights,
+  sanitizeUserFacingEvidenceText,
 } from "@/components/workspace/estimateComparisonPresentation";
 import type { EvidenceLinkModel } from "@/components/chatbot/evidenceLinks";
 
@@ -23,9 +24,12 @@ const EMPTY_WORKSPACE_DATA: WorkspaceData = {
 /* ---------------- Sub-components ---------------- */
 
 function IssueCard({ text }: { text: string }) {
+  const cleanText = sanitizeUserFacingEvidenceText(text);
+  if (!cleanText) return null;
+
   return (
     <div className="rounded-xl border border-border bg-muted px-3 py-2.5 text-[13px] leading-5 text-muted-foreground">
-      {text}
+      {cleanText}
     </div>
   );
 }
@@ -45,7 +49,7 @@ function TopDifferencesSummary({ items }: { items: string[] }) {
         {items.map((item) => (
           <div key={item} className="flex gap-2 text-[12px] leading-5 text-foreground">
             <span className="pt-[2px] text-[#C65A2A]">&bull;</span>
-            <span>{item}</span>
+            <span>{sanitizeUserFacingEvidenceText(item)}</span>
           </div>
         ))}
       </div>
@@ -157,7 +161,7 @@ export default function WorkspacePanel({
                 </button>
 
                 <div className="mt-4 rounded-xl border border-border bg-muted p-3 text-xs whitespace-pre-wrap text-muted-foreground">
-                  {data.supplementLetter}
+                  {sanitizeUserFacingEvidenceText(data.supplementLetter)}
                 </div>
               </>
             )}

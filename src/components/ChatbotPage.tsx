@@ -60,6 +60,7 @@ import {
   redactExternalDocumentUrls,
   summarizeExternalDocumentForDisplay,
 } from "@/lib/externalDocuments";
+import { sanitizeUserFacingEvidenceText } from "@/components/workspace/estimateComparisonPresentation";
 import { buildReportApplicability } from "@/lib/reports/applicability";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
@@ -2405,13 +2406,21 @@ function RailContent({
                 <div className="mt-1 text-xs text-muted-foreground">
                   {formatLabel(item.category)} · {formatLabel(item.kind)} · Priority {formatLabel(item.priority)}
                 </div>
-                <div className="mt-2 text-[13px] leading-5 text-muted-foreground">{item.rationale}</div>
-                {item.evidence && (
-                  <div className="mt-2 text-xs leading-5 text-muted-foreground">Evidence: {item.evidence}</div>
-                )}
-                {item.source && (
-                  <div className="mt-1 text-[11px] leading-5 text-muted-foreground">Source: {item.source}</div>
-                )}
+                {cleanWorkspaceDisplayText(item.rationale, item.title) ? (
+                  <div className="mt-2 text-[13px] leading-5 text-muted-foreground">
+                    {cleanWorkspaceDisplayText(item.rationale, item.title)}
+                  </div>
+                ) : null}
+                {cleanWorkspaceDisplayText(item.evidence, item.title, "Evidence") ? (
+                  <div className="mt-2 text-xs leading-5 text-muted-foreground">
+                    Evidence: {cleanWorkspaceDisplayText(item.evidence, item.title, "Evidence")}
+                  </div>
+                ) : null}
+                {cleanWorkspaceDisplayText(item.source, item.title) ? (
+                  <div className="mt-1 text-[11px] leading-5 text-muted-foreground">
+                    Source: {cleanWorkspaceDisplayText(item.source, item.title)}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -3590,7 +3599,7 @@ function SnapshotPreviewModal({
 
 function SnapshotPanel({ title, items }: { title: string; items: string[] }) {
   const safeItems = items
-    .map((item) => toCustomerFacingText(item))
+    .map((item) => sanitizeUserFacingEvidenceText(toCustomerFacingText(item)))
     .filter(Boolean);
 
   return (
@@ -4012,6 +4021,8 @@ function MetricCard({
   prominent?: boolean;
   detailClassName?: string;
 }) {
+  const cleanValue = sanitizeUserFacingEvidenceText(value) || value;
+
   return (
     <div
       className={`min-w-0 rounded-2xl px-3 py-2.5 shadow-sm ring-1 ring-border/50 ${
@@ -4021,7 +4032,7 @@ function MetricCard({
       }`}
     >
       <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{label}</div>
-      <div className={`mt-1 min-w-0 break-words font-medium text-foreground ${detailClassName || "text-sm"}`}>{value}</div>
+      <div className={`mt-1 min-w-0 break-words font-medium text-foreground ${detailClassName || "text-sm"}`}>{cleanValue}</div>
     </div>
   );
 }
@@ -4061,7 +4072,7 @@ function dedupeRailItems(items: Array<string | undefined | null>) {
   const seen = new Set<string>();
 
   for (const item of items) {
-    const normalized = item?.replace(/\s+/g, " ").trim();
+    const normalized = sanitizeUserFacingEvidenceText(item)?.replace(/\s+/g, " ").trim();
     if (!normalized) continue;
 
     const key = normalized.toLowerCase();
@@ -4074,11 +4085,13 @@ function dedupeRailItems(items: Array<string | undefined | null>) {
 }
 
 function SupportSignalsCard({ items }: { items: string[] }) {
+  const cleanItems = items.map((item) => sanitizeUserFacingEvidenceText(item)).filter(Boolean);
+
   return (
     <section className="mt-5 space-y-2.5 rounded-2xl border border-border bg-card p-3.5">
       <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Support Signals</div>
       <div className="space-y-2">
-        {items.map((item) => (
+        {cleanItems.map((item) => (
           <div key={item} className="flex gap-2 rounded-xl bg-muted px-3 py-3 text-[13px] leading-5 text-muted-foreground">
             <span className="pt-[1px] text-green-600 dark:text-green-300/80">&bull;</span>
             <span>{item}</span>
@@ -4090,11 +4103,13 @@ function SupportSignalsCard({ items }: { items: string[] }) {
 }
 
 function NextMovesCard({ items }: { items: string[] }) {
+  const cleanItems = items.map((item) => sanitizeUserFacingEvidenceText(item)).filter(Boolean);
+
   return (
     <section className="mt-5 space-y-2.5 rounded-2xl border border-border bg-card p-3.5">
       <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Next Moves</div>
       <div className="space-y-2">
-        {items.map((item, index) => (
+        {cleanItems.map((item, index) => (
           <div key={item} className="flex gap-2 rounded-xl bg-muted px-3 py-3 text-[13px] leading-5 text-muted-foreground">
             <span className="font-semibold text-foreground">{index + 1}.</span>
             <span>{item}</span>
@@ -4334,48 +4349,16 @@ function ReasoningLine({ label, value, title }: { label: string; value: string; 
 }
 
 function cleanWorkspaceDisplayText(value: string | null | undefined, title?: string, label?: string): string {
-  let cleaned = toCustomerFacingText(value ?? "");
-  if (!cleaned) return "";
+  const cleaned = sanitizeUserFacingEvidenceText(toCustomerFacingText(value ?? ""), title);
 
-  cleaned = removeWorkspaceEvidenceReferences(cleaned);
-  cleaned = removeDuplicatedWorkspaceTitle(cleaned, title);
-  cleaned = cleaned
-    .replace(/\buploaded document:\s*(?:uploaded document\s*,?\s*){2,}/gi, "supporting evidence: ")
-    .replace(/\b(?:uploaded document\s*,\s*){2,}uploaded document\b/gi, "supporting evidence")
-    .replace(/\buploaded document\b/gi, "supporting evidence")
-    .replace(/\b(?:cmp[a-z0-9-]{6,}|[a-f0-9]{24,}|[a-f0-9]{8}-[a-f0-9-]{27,})\b/gi, "")
-    .replace(/\s+([,.;:])/g, "$1")
-    .replace(/(?:,\s*){2,}/g, ", ")
-    .replace(/\(\s*\)/g, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-
-  if (!cleaned || isInternalWorkspaceEvidenceOnly(cleaned)) {
-    return label?.toLowerCase() === "support" ? "Evidence basis: Current file evidence" : "";
+  if (!cleaned) {
+    const normalizedLabel = label?.toLowerCase();
+    return normalizedLabel === "support" || normalizedLabel === "evidence"
+      ? "Support is verified from current file evidence."
+      : "";
   }
 
   return cleaned;
-}
-
-function removeWorkspaceEvidenceReferences(value: string): string {
-  return value
-    .replace(/\bEvidence references?:\s*(?:[,; ]*(?:cmp[a-z0-9-]{6,}|[a-f0-9]{24,}|[a-f0-9-]{32,}))+\.?/gi, "")
-    .replace(/\bEvidence references?:\s*\.?/gi, "");
-}
-
-function removeDuplicatedWorkspaceTitle(value: string, title?: string): string {
-  const cleanedTitle = toCustomerFacingText(title ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&").trim();
-  if (!cleanedTitle) return value;
-
-  return value
-    .replace(new RegExp(`^(${cleanedTitle})\\s+\\1\\s*:?\\s*`, "i"), "$1: ")
-    .replace(new RegExp(`^(${cleanedTitle})\\s*:\\s*\\1\\s*:?\\s*`, "i"), "$1: ")
-    .trim();
-}
-
-function isInternalWorkspaceEvidenceOnly(value: string): boolean {
-  const normalized = value.toLowerCase().replace(/[^\w\s/-]/g, " ").replace(/\s+/g, " ").trim();
-  return !normalized || /^(?:evidence references?|current file evidence|supporting evidence|source references?)$/.test(normalized);
 }
 
 function OemContradictionCard({
@@ -4440,7 +4423,7 @@ function RetrievalSummaryCard({
         <div className="space-y-2">
           {sources.map((source, index) => (
             <div key={`${source.title}-${index}`} className="rounded-xl bg-muted px-3 py-2.5">
-              <div className="text-[13px] font-medium leading-5 text-foreground">{source.title}</div>
+              <div className="text-[13px] font-medium leading-5 text-foreground">{sanitizeUserFacingEvidenceText(source.title) || "Supporting source"}</div>
               <div className="mt-1 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
                 {formatLabel(source.sourceType)} · {source.relatedFindingIds.length} finding(s)
               </div>
@@ -4478,7 +4461,7 @@ function ConfidenceIntegrityCard({
         <MetricCard label="Upload Cap" value={integrity.uploadLimitReached ? "Reached" : "Not reached"} />
       </div>
       <div className="rounded-2xl bg-muted px-3.5 py-3 text-[13px] leading-5 text-muted-foreground">
-        {integrity.userFacingDisclosure}
+        {sanitizeUserFacingEvidenceText(integrity.userFacingDisclosure)}
       </div>
       {integrity.missingCriticalEvidence.length > 0 ? (
         <StrategyList label="Missing Proof" items={integrity.missingCriticalEvidence} />
@@ -4519,13 +4502,14 @@ function StrategyList({
   items: string[];
   numbered?: boolean;
 }) {
-  if (!items.length) return null;
+  const cleanItems = items.map((item) => sanitizeUserFacingEvidenceText(item)).filter(Boolean);
+  if (!cleanItems.length) return null;
 
   return (
     <div>
       <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{label}</div>
       <div className="mt-2 space-y-1.5">
-        {items.slice(0, 5).map((item, index) => (
+        {cleanItems.slice(0, 5).map((item, index) => (
           <div key={`${label}-${item}-${index}`} className="flex gap-2 rounded-xl bg-muted px-3 py-2 text-[13px] leading-5 text-muted-foreground">
             <span className="font-semibold text-foreground">{numbered ? `${index + 1}.` : "•"}</span>
             <span>{item}</span>
@@ -4694,6 +4678,8 @@ function GapSummaryCard({
       ? `DV posture: ${formatLabel(renderModel.valuation.dvStatus)}.`
       : null,
   ]).join(" ");
+  const cleanPostureSummary = sanitizeUserFacingEvidenceText(postureSummary);
+  const cleanFinancialSignals = financialSignals.map((item) => sanitizeUserFacingEvidenceText(item)).filter(Boolean);
 
   return (
     <section className="mt-5 space-y-3 rounded-[24px] border border-orange-500/18 bg-gradient-to-br from-[#C65A2A]/10 via-[#C65A2A]/[0.04] to-muted p-4 shadow-[0_18px_44px_rgba(198,90,42,0.12)]">
@@ -4705,16 +4691,16 @@ function GapSummaryCard({
           Directional Posture
         </div>
         <div className="mt-2 text-[13px] leading-5 text-muted-foreground">
-          {postureSummary || "The canonical export model does not yet include a reliable valuation posture."}
+          {cleanPostureSummary || "The canonical export model does not yet include a reliable valuation posture."}
         </div>
       </div>
       <div className="rounded-2xl bg-card/70 px-3.5 py-3">
         <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           Available Signals
         </div>
-        {hasValuationPosture && financialSignals.length > 0 ? (
+        {hasValuationPosture && cleanFinancialSignals.length > 0 ? (
           <div className="mt-2 space-y-2">
-            {financialSignals.map((item) => (
+            {cleanFinancialSignals.map((item) => (
               <div key={item} className="flex min-w-0 gap-2 text-[13px] leading-5 text-muted-foreground">
                 <span className="pt-[1px] text-orange-200/85">&bull;</span>
                 <span className="min-w-0 break-words">{item}</span>
@@ -4766,7 +4752,7 @@ function NegotiationPostureCard() {
           {posture.suggestedStrategy.map((item, index) => (
             <div key={item} className="flex gap-2 text-[13px] leading-5 text-muted-foreground">
               <span className="font-semibold text-foreground">{index + 1}.</span>
-              <span>{item}</span>
+              <span>{sanitizeUserFacingEvidenceText(item) || item}</span>
             </div>
           ))}
         </div>
@@ -4784,11 +4770,13 @@ function NegotiationPostureList({
   items: string[];
   accentClassName: string;
 }) {
+  const cleanItems = items.map((item) => sanitizeUserFacingEvidenceText(item)).filter(Boolean);
+
   return (
     <div className="rounded-2xl bg-muted px-3.5 py-3">
       <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{title}</div>
       <div className="mt-2 space-y-2">
-        {items.map((item) => (
+        {cleanItems.map((item) => (
           <div key={item} className="flex gap-2 text-[13px] leading-5 text-muted-foreground">
             <span className={`pt-[1px] ${accentClassName}`}>&bull;</span>
             <span>{item}</span>
@@ -4804,6 +4792,9 @@ function FeaturedRecommendationCard({
 }: {
   item: SupplementItem;
 }) {
+  const rationale = cleanWorkspaceDisplayText(item.rationale, item.title);
+  const evidence = cleanWorkspaceDisplayText(item.evidence, item.title, "Evidence");
+
   return (
     <section className="rounded-[24px] border border-orange-500/20 bg-gradient-to-br from-[#C65A2A]/12 via-[#C65A2A]/[0.045] to-muted p-4 shadow-[0_18px_44px_rgba(198,90,42,0.14)]">
       <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">Top recommendation</div>
@@ -4811,10 +4802,12 @@ function FeaturedRecommendationCard({
       <div className="mt-2 text-xs text-muted-foreground">
         {formatLabel(item.category)} · {formatLabel(item.kind)} · Priority {formatLabel(item.priority)}
       </div>
-      <div className="mt-3 text-sm leading-6 text-muted-foreground">{item.rationale}</div>
-      {item.evidence && (
-        <div className="mt-3 text-xs leading-5 text-muted-foreground">Evidence: {item.evidence}</div>
-      )}
+      {rationale ? (
+        <div className="mt-3 text-sm leading-6 text-muted-foreground">{rationale}</div>
+      ) : null}
+      {evidence ? (
+        <div className="mt-3 text-xs leading-5 text-muted-foreground">Evidence: {evidence}</div>
+      ) : null}
       {item.source && (
         <button
           type="button"
@@ -4834,6 +4827,8 @@ function LockedFeatureCard({
   title: string;
   body: string;
 }) {
+  const cleanBody = sanitizeUserFacingEvidenceText(body) || body;
+
   return (
     <section className="space-y-2.5 rounded-2xl border border-orange-500/16 bg-gradient-to-br from-[#C65A2A]/9 via-muted to-card p-3.5">
         <div className="flex items-center justify-between gap-3">
@@ -4845,7 +4840,7 @@ function LockedFeatureCard({
             Upgrade Access
           </Link>
         </div>
-      <div className="text-[13px] leading-5 text-muted-foreground">{body}</div>
+      <div className="text-[13px] leading-5 text-muted-foreground">{cleanBody}</div>
     </section>
   );
 }
@@ -4872,6 +4867,8 @@ function DecisionSection({
     neutral: "border-border bg-card",
   };
 
+  const cleanBody = sanitizeUserFacingEvidenceText(body) || body;
+
   return (
     <section
       className={`space-y-2.5 rounded-2xl border p-3.5 ${tones[tone]}`}>
@@ -4881,7 +4878,7 @@ function DecisionSection({
           compact ? "text-[13px] leading-5 text-muted-foreground" : featured ? "text-sm leading-6 text-muted-foreground" : "text-sm leading-6 text-muted-foreground"
         } ${mono ? "font-mono text-[12px]" : ""}`}
       >
-        {body}
+        {cleanBody}
       </div>
     </section>
   );
@@ -4908,6 +4905,7 @@ function ExpandableDecisionSection({
     neutral: "border-border bg-card",
   };
   const previewHeightClass = previewLines >= 7 ? "max-h-48" : "max-h-36";
+  const cleanBody = sanitizeUserFacingEvidenceText(body) || body;
 
   return (
     <section className={`space-y-2.5 rounded-2xl border p-3.5 ${tones[tone]}`}>
@@ -4927,7 +4925,7 @@ function ExpandableDecisionSection({
             expanded ? "" : `overflow-hidden ${previewHeightClass}`
           }`}
         >
-          {body}
+          {cleanBody}
         </div>
       </div>
     </section>
