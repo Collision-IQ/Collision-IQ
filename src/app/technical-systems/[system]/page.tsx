@@ -59,16 +59,18 @@ export function generateStaticParams() {
   return Object.keys(SYSTEM_PAGES).map((system) => ({ system }));
 }
 
-export default function TechnicalSystemDetailPage({
-  params,
-}: {
-  params: { system: string };
-}) {
-  if (!isSystemSlug(params.system)) {
+type PageProps = {
+  params: Promise<{ system: string }>;
+};
+
+export default async function TechnicalSystemDetailPage({ params }: PageProps) {
+  const { system } = await params;
+
+  if (!isSystemSlug(system)) {
     notFound();
   }
 
-  const page = SYSTEM_PAGES[params.system];
+  const page = SYSTEM_PAGES[system];
   const assets = discoverAssets(page.assetRoots);
 
   return (

@@ -4303,16 +4303,15 @@ function FindingReasoningCard({
           <div key={finding.id ?? `${finding.issue}-${index}`} className="rounded-2xl bg-muted px-3.5 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm font-semibold leading-5 text-foreground">
-                {finding.priorityRank ?? index + 1}. {finding.issue}
+                {finding.priorityRank ?? index + 1}. {cleanWorkspaceDisplayText(finding.issue) || "Finding"}
               </div>
               <div className="rounded-full border border-border bg-card px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
                 {formatLabel(finding.evidenceLevel)}
               </div>
             </div>
-            <ReasoningLine label="Why it matters" value={finding.rationaleSummary ?? finding.why_it_matters} />
-            <ReasoningLine label="What the file shows" value={finding.evidenceChainSummary ?? finding.what_proves_it} />
-            <ReasoningLine label="What to ask about" value={finding.riskIfOmitted ?? finding.next_action ?? ""} />
-            <ReasoningLine label="Next step" value={finding.next_action} />
+            <ReasoningLine label="Finding" value={finding.rationaleSummary ?? finding.why_it_matters} title={finding.issue} />
+            <ReasoningLine label="Support" value={finding.evidenceChainSummary ?? finding.what_proves_it} title={finding.issue} />
+            <ReasoningLine label="Next step" value={finding.next_action || finding.riskIfOmitted || ""} title={finding.issue} />
             <div className="mt-2 text-[11px] leading-5 text-muted-foreground">
               Review priority {formatLabel(finding.claimSpecificity)}
             </div>
@@ -4323,8 +4322,8 @@ function FindingReasoningCard({
   );
 }
 
-function ReasoningLine({ label, value }: { label: string; value: string }) {
-  const cleanValue = toCustomerFacingText(value);
+function ReasoningLine({ label, value, title }: { label: string; value: string; title?: string }) {
+  const cleanValue = cleanWorkspaceDisplayText(value, title, label);
   if (!cleanValue) return null;
 
   return (
@@ -4332,6 +4331,51 @@ function ReasoningLine({ label, value }: { label: string; value: string }) {
       <span className="font-semibold text-foreground">{label}:</span> {cleanValue}
     </div>
   );
+}
+
+function cleanWorkspaceDisplayText(value: string | null | undefined, title?: string, label?: string): string {
+  let cleaned = toCustomerFacingText(value ?? "");
+  if (!cleaned) return "";
+
+  cleaned = removeWorkspaceEvidenceReferences(cleaned);
+  cleaned = removeDuplicatedWorkspaceTitle(cleaned, title);
+  cleaned = cleaned
+    .replace(/\buploaded document:\s*(?:uploaded document\s*,?\s*){2,}/gi, "supporting evidence: ")
+    .replace(/\b(?:uploaded document\s*,\s*){2,}uploaded document\b/gi, "supporting evidence")
+    .replace(/\buploaded document\b/gi, "supporting evidence")
+    .replace(/\b(?:cmp[a-z0-9-]{6,}|[a-f0-9]{24,}|[a-f0-9]{8}-[a-f0-9-]{27,})\b/gi, "")
+    .replace(/\s+([,.;:])/g, "$1")
+    .replace(/(?:,\s*){2,}/g, ", ")
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  if (!cleaned || isInternalWorkspaceEvidenceOnly(cleaned)) {
+    return label?.toLowerCase() === "support" ? "Evidence basis: Current file evidence" : "";
+  }
+
+  return cleaned;
+}
+
+function removeWorkspaceEvidenceReferences(value: string): string {
+  return value
+    .replace(/\bEvidence references?:\s*(?:[,; ]*(?:cmp[a-z0-9-]{6,}|[a-f0-9]{24,}|[a-f0-9-]{32,}))+\.?/gi, "")
+    .replace(/\bEvidence references?:\s*\.?/gi, "");
+}
+
+function removeDuplicatedWorkspaceTitle(value: string, title?: string): string {
+  const cleanedTitle = toCustomerFacingText(title ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&").trim();
+  if (!cleanedTitle) return value;
+
+  return value
+    .replace(new RegExp(`^(${cleanedTitle})\\s+\\1\\s*:?\\s*`, "i"), "$1: ")
+    .replace(new RegExp(`^(${cleanedTitle})\\s*:\\s*\\1\\s*:?\\s*`, "i"), "$1: ")
+    .trim();
+}
+
+function isInternalWorkspaceEvidenceOnly(value: string): boolean {
+  const normalized = value.toLowerCase().replace(/[^\w\s/-]/g, " ").replace(/\s+/g, " ").trim();
+  return !normalized || /^(?:evidence references?|current file evidence|supporting evidence|source references?)$/.test(normalized);
 }
 
 function OemContradictionCard({
@@ -4351,18 +4395,19 @@ function OemContradictionCard({
           <div key={`${contradiction.affectedOperation}-${index}`} className="rounded-2xl bg-muted px-3.5 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm font-semibold leading-5 text-foreground">
-                {contradiction.affectedOperation}
+                {cleanWorkspaceDisplayText(contradiction.affectedOperation) || `Procedure review ${index + 1}`}
               </div>
               <div className="rounded-full border border-border bg-card px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
                 {formatLabel(contradiction.contradictionSeverity)}
               </div>
             </div>
-            <ReasoningLine label="Conflict" value={contradiction.conflictSummary} />
+            <ReasoningLine label="Finding" value={contradiction.conflictSummary} title={contradiction.affectedOperation} />
             <ReasoningLine
-              label="OEM support"
+              label="Support"
               value={contradiction.oemSupportCitation ?? "Inferred only; verify OEM support before asserting."}
+              title={contradiction.affectedOperation}
             />
-            <ReasoningLine label="Follow-up" value={contradiction.recommendedFollowUp} />
+            <ReasoningLine label="Next step" value={contradiction.recommendedFollowUp} title={contradiction.affectedOperation} />
             <div className="mt-2 text-[11px] leading-5 text-muted-foreground">
               Support {formatLabel(contradiction.supportStatus)} · Source {formatLabel(contradiction.sourceType)}
             </div>
@@ -4505,6 +4550,11 @@ function DisputeDriverCard({
   onEvidenceSelect: (link: EvidenceLink) => void;
 }) {
   const active = Boolean(evidenceLink && evidenceLink.targetId === activeEvidenceTargetId);
+  const title = cleanWorkspaceDisplayText(driver.title) || "Dispute driver";
+  const impact = cleanWorkspaceDisplayText(driver.impact);
+  const finding = cleanWorkspaceDisplayText(driver.whyItMatters, driver.title);
+  const support = cleanWorkspaceDisplayText(driver.currentFileStatus, driver.title, "Support");
+  const nextStep = cleanWorkspaceDisplayText(driver.action, driver.title);
   const className = `rounded-2xl px-3.5 py-3 transition-[border-color,background-color,box-shadow] duration-300 ${
     active
       ? "border border-orange-300/28 bg-[#C65A2A]/12 shadow-[0_0_0_1px_rgba(210,122,81,0.12)]"
@@ -4514,20 +4564,28 @@ function DisputeDriverCard({
   const content = (
     <>
       <div className="text-sm font-semibold leading-5 text-foreground">
-        {index + 1}. {driver.title}
+        {index + 1}. {title}
       </div>
-      <div className="mt-2 text-[13px] leading-5 text-muted-foreground">
-        <span className="font-semibold text-foreground">Impact:</span> {driver.impact}
-      </div>
-      <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
-        <span className="font-semibold text-foreground">Why it matters:</span> {driver.whyItMatters}
-      </div>
-      <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
-        <span className="font-semibold text-foreground">Current file status:</span> {driver.currentFileStatus}
-      </div>
-      <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
-        <span className="font-semibold text-foreground">What to do:</span> {driver.action}
-      </div>
+      {impact ? (
+        <div className="mt-2 text-[13px] leading-5 text-muted-foreground">
+          <span className="font-semibold text-foreground">Impact:</span> {impact}
+        </div>
+      ) : null}
+      {finding ? (
+        <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
+          <span className="font-semibold text-foreground">Finding:</span> {finding}
+        </div>
+      ) : null}
+      {support ? (
+        <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
+          <span className="font-semibold text-foreground">Support:</span> {support}
+        </div>
+      ) : null}
+      {nextStep ? (
+        <div className="mt-1 text-[13px] leading-5 text-muted-foreground">
+          <span className="font-semibold text-foreground">Next step:</span> {nextStep}
+        </div>
+      ) : null}
       {evidenceLink ? (
         <div className="mt-2 inline-flex rounded-full border border-border bg-card px-2.5 py-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
           View support

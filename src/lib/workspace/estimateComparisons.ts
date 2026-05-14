@@ -89,7 +89,7 @@ function normalizeEstimateComparisonRow(
     valueUnit: row.valueUnit,
     deltaType: row.deltaType ?? deriveDeltaType(lhsValue, rhsValue),
     confidence: typeof row.confidence === "number" ? row.confidence : null,
-    notes: row.notes?.filter(Boolean) ?? [],
+    notes: row.notes?.filter(isMeaningfulComparisonNote) ?? [],
   };
 
   return hasMeaningfulComparisonRow(normalized) ? normalized : null;
@@ -165,4 +165,17 @@ function isGenericOperationToken(value: string) {
   return /^(?:r&i|r&r|repl|rpr|refn|o\/h|subl|add|overlap|repair operation|operation|estimate comparison)$/i.test(
     value
   );
+}
+
+function isMeaningfulComparisonNote(value: string | null | undefined): value is string {
+  const cleaned = (value ?? "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return false;
+
+  const withoutEvidenceIds = cleaned
+    .replace(/\bEvidence references?:\s*/gi, "")
+    .replace(/\b(?:cmp[a-z0-9-]{6,}|[a-f0-9]{24,}|[a-f0-9]{8}-[a-f0-9-]{27,})\b/gi, "")
+    .replace(/[,\s.;:]+/g, " ")
+    .trim();
+
+  return withoutEvidenceIds.length > 0;
 }

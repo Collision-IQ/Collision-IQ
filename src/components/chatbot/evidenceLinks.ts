@@ -90,9 +90,9 @@ export function buildEvidenceLinkModel({
     id: buildReportEvidenceTargetId(entry.id),
     type: "report_evidence" as const,
     insightKey: "executive_summary" as const,
-    title: entry.title || entry.source,
-    detail: entry.snippet,
-    sourceLabel: entry.source,
+    title: cleanEvidenceText(entry.title || entry.source) || "Supporting evidence",
+    detail: cleanEvidenceText(entry.snippet) || "Current file evidence",
+    sourceLabel: cleanEvidenceText(entry.source),
   }));
 
   const supplementTargets = renderModel.supplementItems.map((item, index) => {
@@ -105,9 +105,9 @@ export function buildEvidenceLinkModel({
       type: "supplement_item" as const,
       insightKey: "support_gaps" as const,
       title: cleanOperationDisplayText(item.title) || item.title,
-      detail: item.rationale,
-      summary: item.evidence,
-      sourceLabel: item.source,
+      detail: cleanEvidenceText(item.rationale) || "Current file evidence",
+      summary: cleanEvidenceText(item.evidence),
+      sourceLabel: cleanEvidenceText(item.source),
       workspaceScrollTargetId,
     };
   });
@@ -123,7 +123,7 @@ export function buildEvidenceLinkModel({
     insightKey: "financial_view" as const,
     title: getEstimateComparisonLabel(row),
     detail: `${row.lhsSource ?? "Shop estimate"}: ${formatEstimateComparisonValue(row.lhsValue)} | ${row.rhsSource ?? "Carrier estimate"}: ${formatEstimateComparisonValue(row.rhsValue)} | Change: ${formatEstimateComparisonDelta(row)}`,
-    summary: row.notes?.[0],
+    summary: cleanEvidenceText(row.notes?.[0]),
     workspaceScrollTargetId: row.targetId,
   }));
 
@@ -132,7 +132,7 @@ export function buildEvidenceLinkModel({
     type: "workspace_issue" as const,
     insightKey: "support_gaps" as const,
     title: "Workspace issue",
-    detail: issue.text,
+    detail: cleanEvidenceText(issue.text) || "Current file evidence",
     workspaceScrollTargetId: issue.targetId,
   }));
 
@@ -405,7 +405,7 @@ function classifyFinancialGapRow(row: EstimateComparisonRow) {
 }
 
 function cleanNarrative(value: string) {
-  const cleaned = value.replace(/\s+/g, " ").trim();
+  const cleaned = cleanEvidenceText(value);
   if (!cleaned) return "";
   if (/preview band not supportable from the current file set/i.test(cleaned)) {
     return "";
@@ -413,6 +413,31 @@ function cleanNarrative(value: string) {
   if (/not determinable from the current documents/i.test(cleaned)) {
     return "";
   }
+  return cleaned;
+}
+
+function cleanEvidenceText(value: string | null | undefined) {
+  let cleaned = (value ?? "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+
+  cleaned = cleaned
+    .replace(/\bEvidence references?:\s*(?:[,; ]*(?:cmp[a-z0-9-]{6,}|[a-f0-9]{24,}|[a-f0-9-]{32,}))+\.?/gi, "")
+    .replace(/\bEvidence references?:\s*\.?/gi, "")
+    .replace(/\buploaded document:\s*(?:uploaded document\s*,?\s*){2,}/gi, "supporting evidence: ")
+    .replace(/\b(?:uploaded document\s*,\s*){2,}uploaded document\b/gi, "supporting evidence")
+    .replace(/\buploaded document\b/gi, "supporting evidence")
+    .replace(/\b(?:cmp[a-z0-9-]{6,}|[a-f0-9]{24,}|[a-f0-9]{8}-[a-f0-9-]{27,})\b/gi, "")
+    .replace(/\s+([,.;:])/g, "$1")
+    .replace(/(?:,\s*){2,}/g, ", ")
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  const normalized = cleaned.toLowerCase().replace(/[^\w\s/-]/g, " ").replace(/\s+/g, " ").trim();
+  if (!normalized || /^(?:evidence references?|current file evidence|supporting evidence|source references?)$/.test(normalized)) {
+    return "";
+  }
+
   return cleaned;
 }
 

@@ -210,7 +210,7 @@ export default function TechnicalSystemsPage() {
           <h1 className="mt-6 max-w-4xl text-4xl font-bold leading-tight tracking-tight md:text-6xl">Collision IQ subscriptions, shop apps, and tailored systems for repair centers.</h1>
           <p className="mt-6 max-w-3xl text-lg leading-relaxed text-muted-foreground">Technical Systems is the product-and-systems layer under Collision Academy. Start with Collision IQ, then extend into Shop-Flow, Parts App, Shop Hub, onboarding, and tailored implementations.</p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <button type="button" onClick={scrollToLeadForm} className="rounded-2xl bg-[#C65A2A] px-6 py-3 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(198,90,42,0.25)] transition hover:opacity-90">Request a tailored systems call</button>
+            <Link href="/professional" className="rounded-2xl bg-[#C65A2A] px-6 py-3 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(198,90,42,0.25)] transition hover:opacity-90">View Professional Services</Link>
             <button type="button" onClick={() => void handleCheckout("pro")} disabled={activeCheckout === "pro"} className="rounded-2xl border border-border bg-card px-6 py-3 text-sm font-semibold text-foreground transition hover:bg-muted disabled:opacity-60">{activeCheckout === "pro" ? "Redirecting..." : "Start 30-Day Free Trial"}</button>
           </div>
           <div className="mt-8 grid gap-3 text-sm text-muted-foreground md:grid-cols-2">

@@ -51,7 +51,7 @@ export function dedupeEstimateComparisonRationales(
     }
 
     const notes = row.notes
-      .map((note) => sanitizeComparisonNote(note))
+      .map((note) => sanitizeComparisonNote(note, row))
       .filter((note): note is string => Boolean(note))
       .map((note) => {
         const duplicateOf = seenNotes.find((existing) => notesLookDuplicated(existing, note));
@@ -83,7 +83,10 @@ export function formatEstimateComparisonValue(
     return "Not shown";
   }
 
-  return typeof value === "number" ? `${value}` : value;
+  if (typeof value === "number") return `${value}`;
+
+  const cleaned = sanitizeComparisonDisplayText(value);
+  return cleaned || "Not shown";
 }
 
 export function formatEstimateComparisonDelta(row: EstimateComparisonRow): string {
@@ -111,9 +114,65 @@ export function formatEstimateComparisonDelta(row: EstimateComparisonRow): strin
   }
 }
 
-function sanitizeComparisonNote(value: string): string | null {
-  const cleaned = value.replace(/\s+/g, " ").trim();
+function sanitizeComparisonNote(value: string, row: EstimateComparisonRow): string | null {
+  let cleaned = sanitizeComparisonDisplayText(value);
+  if (!cleaned) return null;
+
+  cleaned = removeDuplicatedLeadingTitle(cleaned, getEstimateComparisonLabel(row));
+  cleaned = shortenComparisonNote(cleaned);
   return cleaned ? cleaned : null;
+}
+
+function sanitizeComparisonDisplayText(value: string): string {
+  let cleaned = value.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+
+  cleaned = removeInternalEvidenceReferences(cleaned);
+  cleaned = removeRepeatedUploadedDocumentNoise(cleaned);
+  cleaned = removeInternalEvidenceIds(cleaned);
+  cleaned = cleaned
+    .replace(/\s+([,.;:])/g, "$1")
+    .replace(/(?:,\s*){2,}/g, ", ")
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  if (!cleaned || isInternalOnlyEvidenceText(cleaned)) return "";
+  return cleaned;
+}
+
+function removeInternalEvidenceReferences(value: string): string {
+  return value
+    .replace(/\bEvidence references?:\s*(?:[,; ]*(?:cmp[a-z0-9-]{6,}|[a-f0-9]{24,}|[a-f0-9-]{32,}))+\.?/gi, "")
+    .replace(/\bEvidence references?:\s*\.?/gi, "");
+}
+
+function removeRepeatedUploadedDocumentNoise(value: string): string {
+  return value
+    .replace(/\buploaded document:\s*(?:uploaded document\s*,?\s*){2,}/gi, "supporting evidence: ")
+    .replace(/\b(?:uploaded document\s*,\s*){2,}uploaded document\b/gi, "supporting evidence")
+    .replace(/\buploaded document\b/gi, "supporting evidence");
+}
+
+function removeInternalEvidenceIds(value: string): string {
+  return value.replace(/\b(?:cmp[a-z0-9-]{6,}|[a-f0-9]{24,}|[a-f0-9]{8}-[a-f0-9-]{27,})\b/gi, "");
+}
+
+function removeDuplicatedLeadingTitle(value: string, title: string): string {
+  const cleanedTitle = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").trim();
+  if (!cleanedTitle) return value;
+
+  return value
+    .replace(new RegExp(`^(${cleanedTitle})\\s+\\1\\s*:?\\s*`, "i"), "$1: ")
+    .replace(new RegExp(`^(${cleanedTitle})\\s*:\\s*\\1\\s*:?\\s*`, "i"), "$1: ")
+    .trim();
+}
+
+function isInternalOnlyEvidenceText(value: string): boolean {
+  const normalized = value.toLowerCase().replace(/[^\w\s/-]/g, " ").replace(/\s+/g, " ").trim();
+  if (!normalized) return true;
+
+  return /^(?:evidence references?|supporting evidence|current file evidence|source references?)$/i.test(normalized);
 }
 
 function shortenComparisonNote(value: string): string {
@@ -246,7 +305,7 @@ export function cleanOperationDisplayText(value?: string | null): string {
   const sanitized = sanitizeEstimateLine(value);
   if (sanitized.malformed) return sanitized.hideFromCustomer ? "" : sanitized.cleaned;
 
-  const cleaned = value
+  const cleaned = sanitizeComparisonDisplayText(value)
     .replace(/([A-Za-z)])\d(\d\.\d)\b/g, "$1 $2")
     .replace(/([A-Za-z])(\d{2,}(?:\.\d{2})?)(Incl\.?|Included)\b/gi, "$1 $2 $3")
     .replace(/^\s*#?\s*\d+\s+/i, "")
