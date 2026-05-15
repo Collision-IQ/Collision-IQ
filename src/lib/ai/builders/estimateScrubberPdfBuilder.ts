@@ -1072,24 +1072,22 @@ function buildEstimateDeltaBullets(
     })
     .slice(0, 8);
 
-<<<<<<< HEAD
   if (bullets.length > 0) {
     return bullets;
   }
 
   switch (bucket) {
-    case "added":
+    case "only_first":
       return ["No added items isolated from the newer estimate."];
-    case "missing":
+    case "only_second":
       return ["No items missing from the newer estimate were isolated."];
     case "changed":
       return ["No changed labor, quantity, or price lines were isolated."];
     case "gap":
       return ["No rekey, lock, or supplement gap was detectable."];
+    default:
+      return [];
   }
-=======
-  return bullets;
->>>>>>> 29d8ddc (Normalize estimate delta and scrubber operation labels)
 }
 
 function rowMatchesEstimateDeltaBucket(
@@ -1127,37 +1125,17 @@ function formatEstimateDeltaBullet(
   bucket: EstimateDeltaBucket,
   mode: EstimateDeltaMode
 ): string {
-<<<<<<< HEAD
-  const label = cleanCustomerFacingEstimateLine(row.operation ?? row.partName ?? row.category ?? "Estimate item");
-=======
   const label = normalizeEstimateOperationLabel({
     operation: row.operation,
     partName: row.partName,
     category: row.category,
     label: cleanCustomerFacingEstimateLine(row.operation ?? row.partName ?? row.category ?? ""),
   });
->>>>>>> 29d8ddc (Normalize estimate delta and scrubber operation labels)
 
   if (!label || /^(?:Repair Operation|Estimate item|Parser review needed)$/i.test(label)) {
     return "";
   }
 
-<<<<<<< HEAD
-  if (bucket === "added" || bucket === "missing") {
-    return label;
-  }
-
-  const sides = resolveEstimateDeltaSides(row);
-  const older = formatEstimateDeltaValue(sides.olderValue) || "–";
-  const newer = formatEstimateDeltaValue(sides.newerValue) || "–";
-  const deltaNum = typeof row.delta === "number" ? row.delta : null;
-  const deltaSign = deltaNum !== null
-    ? `${deltaNum >= 0 ? "+" : ""}${deltaNum}`
-    : formatEstimateDeltaValue(row.delta);
-  const change = deltaSign ? ` (${deltaSign})` : "";
-
-  return `${label}: ${older} → ${newer}${change}`;
-=======
   if (bucket === "only_first" || bucket === "only_second") {
     return label;
   }
@@ -1170,7 +1148,6 @@ function formatEstimateDeltaBullet(
   const change = deltaSign ? ` (${deltaSign})` : "";
 
   return `${label}: ${first} → ${second}${change}`;
->>>>>>> 29d8ddc (Normalize estimate delta and scrubber operation labels)
 }
 
 function resolveEstimateDeltaSides(
