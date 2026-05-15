@@ -90,7 +90,9 @@ export default function CarrierTrendAnalyticsPanel() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <label htmlFor="windowDaysSelect" className="sr-only">Select time window</label>
           <select
+            id="windowDaysSelect"
             value={windowDays}
             onChange={(event) => setWindowDays(Number(event.target.value))}
             className="rounded-2xl border border-white/10 bg-black px-3 py-2 text-sm text-white"
