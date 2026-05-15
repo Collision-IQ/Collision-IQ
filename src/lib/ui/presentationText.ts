@@ -394,7 +394,58 @@ function formatOperationDisplaySegment(value: string): string {
   return lowered.charAt(0).toUpperCase() + lowered.slice(1);
 }
 
-export function sanitizeUserFacingEvidenceText(input: string): string {
-  // Implementation of the sanitizer
-  return input.trim();
+export function sanitizeUserFacingEvidenceText(
+  input: string | null | undefined,
+  contextTitle?: string | null
+): string {
+  let cleaned = cleanPresentationText(input ?? "");
+  if (!cleaned) return "";
+
+  cleaned = cleaned
+    .replace(/\bEvidence references?:\s*(?:[,; ]*(?:cmp[a-z0-9-]{6,}|[a-f0-9]{24,}|[a-f0-9-]{32,}))+\.?/gi, "")
+    .replace(/\bEvidence references?:\s*\.?/gi, "")
+    .replace(/\bcmp[a-z0-9-]{4,}\b/gi, "uploaded file")
+    .replace(/\b[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\b/gi, "uploaded document")
+    .replace(/\b[a-f0-9]{24,64}\b/gi, "uploaded file")
+    .replace(/\b(?:evidence|chain|source|finding|issue|doc|line|parser|vector|object)[-_ ]?[a-z0-9]{8,}\b/gi, "uploaded document")
+    .replace(/\b(?:uploaded document\s*[,;:]?\s*){2,}/gi, "supporting evidence ")
+    .replace(/\buploaded document:\s*(?:uploaded document\s*,?\s*){2,}/gi, "supporting evidence: ")
+    .replace(/\bSame rationale as earlier\b/gi, "Related estimate rationale")
+    .replace(/\bRepair Operation\b/gi, "Estimate item")
+    .replace(/\bParser review needed\b/gi, "Estimate item")
+    .replace(/\bgeneric operation labels?\b/gi, "estimate items")
+    .replace(/\bOperation:\s*/gi, "Item: ")
+    .replace(/\s*\|\s*Status:\s*/gi, " - Status: ")
+    .replace(/\b(?:undefined|null|NaN)\b/gi, "")
+    .replace(/\s+([,.;:])/g, "$1")
+    .replace(/(?:[,;]\s*){2,}/g, "; ")
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  if (contextTitle) {
+    const normalizedTitle = normalizeEstimateOperationLabel(contextTitle) || contextTitle.trim();
+    if (normalizedTitle) {
+      const escapedTitle = normalizedTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      cleaned = cleaned
+        .replace(new RegExp(`^(${escapedTitle})\\s+\\1\\s*:?\\s*`, "i"), "$1: ")
+        .replace(new RegExp(`^(${escapedTitle})\\s*:\\s*\\1\\s*:?\\s*`, "i"), "$1: ")
+        .trim();
+    }
+  }
+
+  const internalOnly = cleaned
+    .toLowerCase()
+    .replace(/[^\w\s/-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (
+    !cleaned ||
+    /^(?:evidence references?|supporting evidence|current file evidence|source references?)$/i.test(internalOnly)
+  ) {
+    return "";
+  }
+
+  return cleaned;
 }

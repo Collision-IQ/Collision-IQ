@@ -60,7 +60,7 @@ import {
   redactExternalDocumentUrls,
   summarizeExternalDocumentForDisplay,
 } from "@/lib/externalDocuments";
-import { sanitizeUserFacingEvidenceText } from "@/components/workspace/estimateComparisonPresentation";
+import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 import { buildReportApplicability } from "@/lib/reports/applicability";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";

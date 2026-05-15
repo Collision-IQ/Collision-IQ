@@ -164,7 +164,9 @@ function redactCarrierReportDocument(input: CarrierReportDocument): CarrierRepor
 }
 
 export function sanitizeReportText(value: string): string {
-  return value
+  const normalized = sanitizeUserFacingEvidenceText(value);
+
+  return normalized
     .replace(/\bcm[a-z0-9]{20,}\b/gi, "Uploaded document")
     .replace(/\bEvidence references?:\s*(?:cmp[\w-]+(?:\s*,\s*)?)+\b/gi, "")
     .replace(/\bcmp[\w-]{4,}\b/gi, "uploaded file")
@@ -174,6 +176,9 @@ export function sanitizeReportText(value: string): string {
     .replace(/\buploaded document\b(?:\s*,\s*\buploaded document\b)+/gi, "documentation")
     .replace(/\buploaded document\b/gi, "documentation")
     .replace(/\bSame rationale as earlier\b/gi, "Related estimate rationale")
+    .replace(/\bRepair Operation\b/gi, "Estimate item")
+    .replace(/\bParser review needed\b/gi, "Estimate item")
+    .replace(/\bgeneric operation labels?\b/gi, "estimate items")
     .replace(/\bOperation:\s*/gi, "Item: ")
     .replace(/\s*\|\s*Status:\s*/gi, " - Status: ")
     .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "uploaded file")

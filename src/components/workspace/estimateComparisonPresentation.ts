@@ -7,6 +7,7 @@ import {
   normalizeEstimateOperationLabel,
   sanitizeEstimateLine,
 } from "@/lib/ui/presentationText";
+export { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 
 export function getEstimateComparisonRows(
   estimateComparisons?: WorkspaceEstimateComparisons | null
@@ -304,15 +305,5 @@ function toSentenceCase(value: string): string {
 }
 
 export function cleanOperationDisplayText(value?: string | null): string {
-  if (!value) return "";
-  const sanitized = sanitizeEstimateLine(value);
-  if (sanitized.malformed) return sanitized.hideFromCustomer ? "" : sanitized.cleaned;
-
   return normalizeEstimateOperationLabel(value);
-}
-
-function looksLikeCodeHeavyToken(value: string): boolean {
-  const digitCount = (value.match(/\d/g) ?? []).length;
-  const alphaCount = (value.match(/[a-z]/gi) ?? []).length;
-  return digitCount >= 5 && digitCount > alphaCount * 2;
 }

@@ -3,8 +3,8 @@ import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateC
 import {
   getEstimateComparisonRows,
   getTopEstimateComparisonHighlights,
-  sanitizeUserFacingEvidenceText,
 } from "@/components/workspace/estimateComparisonPresentation";
+import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 import type { EvidenceLinkModel } from "@/components/chatbot/evidenceLinks";
 
 interface Props {
