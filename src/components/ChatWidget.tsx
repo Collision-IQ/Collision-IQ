@@ -63,7 +63,10 @@ import {
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
 } from "@/lib/uploadSafety/uploadLimits";
-import { buildReviewCompletenessMessage } from "@/lib/reviewCompleteness";
+import {
+  buildReviewCompletenessMessage,
+  type ExcludedFromReviewReason,
+} from "@/lib/reviewCompleteness";
 import { VOICE_PRESETS } from "@/lib/voicePresets";
 
 interface Attachment {
@@ -147,6 +150,9 @@ export type ReviewProgress = {
   indexed: number;
   visionProcessed: number;
   reviewedForDetermination: number;
+  reviewableFileCount: number;
+  excludedFromReviewCount: number;
+  excludedFromReviewReasons: ExcludedFromReviewReason[];
   totalKnownFiles: number;
 };
 
@@ -339,7 +345,7 @@ function countKnownFilesFromUploadResponse(data: UploadResponse | null, returned
 function buildReviewCompletionMessage(progress: ReviewProgress) {
   return buildReviewCompletenessMessage({
     reviewed: progress.reviewedForDetermination,
-    total: progress.totalKnownFiles,
+    total: progress.reviewableFileCount || progress.totalKnownFiles,
   });
 }
 
@@ -514,6 +520,9 @@ export default function ChatWidget({
     indexed: 0,
     visionProcessed: 0,
     reviewedForDetermination: 0,
+    reviewableFileCount: 0,
+    excludedFromReviewCount: 0,
+    excludedFromReviewReasons: [],
     totalKnownFiles: 0,
   });
   const firstAttachmentAtRef = useRef<number | null>(null);
@@ -1225,6 +1234,9 @@ export default function ChatWidget({
       indexed: 0,
       visionProcessed: 0,
       reviewedForDetermination: 0,
+      reviewableFileCount: 0,
+      excludedFromReviewCount: 0,
+      excludedFromReviewReasons: [],
       totalKnownFiles: 0,
     });
     setAttachmentsOpen(true);
@@ -1455,6 +1467,11 @@ export default function ChatWidget({
           const reviewedForDetermination =
             analysisData.reviewProgress?.reviewedForDetermination ??
             current.reviewedForDetermination + attachmentStats.fileCount;
+          const reviewableFileCount = Math.max(
+            current.reviewableFileCount,
+            analysisData.reviewProgress?.reviewableFileCount ?? 0,
+            reviewedForDetermination
+          );
           return {
             uploaded: Math.max(current.uploaded, analysisData.reviewProgress?.uploaded ?? 0),
             indexed: Math.max(current.indexed, analysisData.reviewProgress?.indexed ?? 0),
@@ -1463,6 +1480,18 @@ export default function ChatWidget({
               analysisData.reviewProgress?.visionProcessed ?? 0
             ),
             reviewedForDetermination,
+            reviewableFileCount,
+            excludedFromReviewCount: Math.max(
+              current.excludedFromReviewCount,
+              analysisData.reviewProgress?.excludedFromReviewCount ?? 0,
+              Math.max(0, (analysisData.reviewProgress?.indexed ?? current.indexed) - reviewableFileCount)
+            ),
+            excludedFromReviewReasons: [
+              ...new Set([
+                ...current.excludedFromReviewReasons,
+                ...(analysisData.reviewProgress?.excludedFromReviewReasons ?? []),
+              ]),
+            ],
             totalKnownFiles: Math.max(
               current.totalKnownFiles,
               analysisData.reviewProgress?.totalKnownFiles ?? 0,
@@ -1712,6 +1741,11 @@ export default function ChatWidget({
               const reviewedForDetermination =
                 analysisData.reviewProgress?.reviewedForDetermination ??
                 current.reviewedForDetermination + attachmentStats.fileCount;
+              const reviewableFileCount = Math.max(
+                current.reviewableFileCount,
+                analysisData.reviewProgress?.reviewableFileCount ?? 0,
+                reviewedForDetermination
+              );
               return {
                 uploaded: Math.max(current.uploaded, analysisData.reviewProgress?.uploaded ?? 0),
                 indexed: Math.max(current.indexed, analysisData.reviewProgress?.indexed ?? 0),
@@ -1720,6 +1754,18 @@ export default function ChatWidget({
                   analysisData.reviewProgress?.visionProcessed ?? 0
                 ),
                 reviewedForDetermination,
+                reviewableFileCount,
+                excludedFromReviewCount: Math.max(
+                  current.excludedFromReviewCount,
+                  analysisData.reviewProgress?.excludedFromReviewCount ?? 0,
+                  Math.max(0, (analysisData.reviewProgress?.indexed ?? current.indexed) - reviewableFileCount)
+                ),
+                excludedFromReviewReasons: [
+                  ...new Set([
+                    ...current.excludedFromReviewReasons,
+                    ...(analysisData.reviewProgress?.excludedFromReviewReasons ?? []),
+                  ]),
+                ],
                 totalKnownFiles: Math.max(
                   current.totalKnownFiles,
                   analysisData.reviewProgress?.totalKnownFiles ?? 0,
@@ -2012,6 +2058,9 @@ export default function ChatWidget({
       indexed: current.indexed + indexedCount,
       visionProcessed: current.visionProcessed + visionProcessedCount,
       reviewedForDetermination: current.reviewedForDetermination,
+      reviewableFileCount: current.reviewableFileCount,
+      excludedFromReviewCount: current.excludedFromReviewCount,
+      excludedFromReviewReasons: current.excludedFromReviewReasons,
       totalKnownFiles: current.totalKnownFiles + knownFileCount,
     }));
 

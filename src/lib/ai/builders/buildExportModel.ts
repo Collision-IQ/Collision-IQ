@@ -64,6 +64,7 @@ import {
   summarizeUserFacingSupport,
 } from "@/lib/ui/presentationText";
 import { classifyOutputMode, type OutputMode } from "@/lib/ai/outputMode";
+import { normalizeReviewProgressCounts } from "@/lib/reviewCompleteness";
 
 export const COLLISION_ACADEMY_HANDOFF_URL = "https://www.collision.academy/";
 export const REDACTED_INSURER_TOKEN = "[REDACTED_INSURER]";
@@ -650,7 +651,31 @@ function buildConfidenceIntegrity(params: {
   supplementItems: ExportSupplementItem[];
 }): ConfidenceIntegrity {
   if (params.report?.confidenceIntegrity) {
-    return params.report.confidenceIntegrity;
+    const integrity = params.report.confidenceIntegrity;
+    const counts = normalizeReviewProgressCounts({
+      uploadedCount: integrity.uploadedFileCount,
+      indexedCount: integrity.indexedFileCount ?? integrity.uploadedFileCount,
+      visionProcessedCount: integrity.visionProcessedFileCount,
+      reviewedFileCount: integrity.reviewedFileCount,
+      reviewableFileCount: integrity.reviewableFileCount,
+      excludedFromReviewCount: integrity.excludedFromReviewCount,
+      excludedFromReviewReasons: integrity.excludedFromReviewReasons,
+    });
+    return {
+      ...integrity,
+      indexedFileCount: counts.indexedCount,
+      visionProcessedFileCount: counts.visionProcessedCount,
+      reviewedFileCount: counts.reviewedFileCount,
+      reviewableFileCount: counts.reviewableFileCount,
+      excludedFromReviewCount: counts.excludedFromReviewCount,
+      excludedFromReviewReasons: counts.excludedFromReviewReasons,
+      totalKnownFileCount: Math.max(
+        integrity.totalKnownFileCount ?? 0,
+        counts.uploadedCount,
+        counts.indexedCount,
+        counts.reviewableFileCount
+      ),
+    };
   }
 
   const baseConfidence = normalizeReportConfidence(
@@ -672,11 +697,21 @@ function buildConfidenceIntegrity(params: {
     params.report?.ingestionMeta?.reviewedFileCount ??
     params.report?.evidenceRegistry?.filter((item) => item.ingestionState === "uploaded").length ??
     0;
+  const reviewProgressCounts = normalizeReviewProgressCounts({
+    uploadedCount: uploadedFileCount,
+    indexedCount: indexedFileCount,
+    visionProcessedCount: visionProcessedFileCount,
+    reviewedFileCount,
+    reviewableFileCount: params.report?.ingestionMeta?.reviewableFileCount,
+    excludedFromReviewCount: params.report?.ingestionMeta?.excludedFromReviewCount,
+    excludedFromReviewReasons: params.report?.ingestionMeta?.excludedFromReviewReasons,
+  });
   const totalKnownFileCount = Math.max(
     params.report?.ingestionMeta?.totalKnownFileCount ?? 0,
     uploadedFileCount,
     indexedFileCount,
-    reviewedFileCount
+    reviewedFileCount,
+    reviewProgressCounts.reviewableFileCount
   );
   const uploadLimitReached = Boolean(params.report?.ingestionMeta?.uploadLimitReached);
   const userIndicatedMoreFiles = Boolean(params.report?.ingestionMeta?.userIndicatedMoreFiles);
@@ -706,6 +741,9 @@ function buildConfidenceIntegrity(params: {
     indexedFileCount,
     visionProcessedFileCount,
     reviewedFileCount,
+    reviewableFileCount: reviewProgressCounts.reviewableFileCount,
+    excludedFromReviewCount: reviewProgressCounts.excludedFromReviewCount,
+    excludedFromReviewReasons: reviewProgressCounts.excludedFromReviewReasons,
     totalKnownFileCount,
     uploadLimitReached,
     userIndicatedMoreFiles,

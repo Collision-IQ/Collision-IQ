@@ -444,7 +444,7 @@ function buildImmutableCitations(
       title: "Claim analysis runtime context",
       locator: buildReviewCompletenessMessage({
         reviewed: exportModel.confidenceIntegrity.reviewedFileCount ?? 0,
-        total: exportModel.confidenceIntegrity.totalKnownFileCount ?? exportModel.confidenceIntegrity.uploadedFileCount,
+        total: exportModel.confidenceIntegrity.reviewableFileCount ?? exportModel.confidenceIntegrity.totalKnownFileCount ?? exportModel.confidenceIntegrity.uploadedFileCount,
       }),
       retrievedAt: new Date().toISOString(),
       confidenceScore: 0.45,

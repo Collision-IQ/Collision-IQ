@@ -77,6 +77,10 @@ import {
   resolveUploadPlanLimits,
   validateUploadBatchFileCount,
 } from "@/lib/uploadSafety/uploadLimits";
+import {
+  normalizeReviewProgressCounts,
+  type ExcludedFromReviewReason,
+} from "@/lib/reviewCompleteness";
 
 export const runtime = "nodejs";
 
@@ -102,6 +106,9 @@ type AnalysisRequestBody = {
     indexed?: number;
     visionProcessed?: number;
     reviewedForDetermination?: number;
+    reviewableFileCount?: number;
+    excludedFromReviewCount?: number;
+    excludedFromReviewReasons?: ExcludedFromReviewReason[];
     totalKnownFiles?: number;
   } | null;
 };
@@ -1317,12 +1324,28 @@ function applyLinkedEvidenceToReport(params: {
     visionProcessedEvidenceCount
   );
   const reviewedFileCount = uploadedEvidenceCount;
+  const reviewProgressCounts = normalizeReviewProgressCounts({
+    uploadedCount: uploadedFileCount,
+    indexedCount: indexedFileCount,
+    visionProcessedCount: visionProcessedFileCount,
+    reviewedFileCount,
+    reviewableFileCount:
+      params.reviewProgress?.reviewableFileCount ??
+      params.previousReport?.ingestionMeta?.reviewableFileCount,
+    excludedFromReviewCount:
+      params.reviewProgress?.excludedFromReviewCount ??
+      params.previousReport?.ingestionMeta?.excludedFromReviewCount,
+    excludedFromReviewReasons:
+      params.reviewProgress?.excludedFromReviewReasons ??
+      params.previousReport?.ingestionMeta?.excludedFromReviewReasons,
+  });
   const totalKnownFileCount = Math.max(
     params.reviewProgress?.totalKnownFiles ?? 0,
     params.previousReport?.ingestionMeta?.totalKnownFileCount ?? 0,
     uploadedFileCount,
     indexedFileCount,
-    reviewedFileCount
+    reviewedFileCount,
+    reviewProgressCounts.reviewableFileCount
   );
 
   const nextReport: RepairIntelligenceReport = {
@@ -1350,6 +1373,9 @@ function applyLinkedEvidenceToReport(params: {
       indexedFileCount,
       visionProcessedFileCount,
       reviewedFileCount,
+      reviewableFileCount: reviewProgressCounts.reviewableFileCount,
+      excludedFromReviewCount: reviewProgressCounts.excludedFromReviewCount,
+      excludedFromReviewReasons: reviewProgressCounts.excludedFromReviewReasons,
       totalKnownFileCount,
       uploadLimitReached: Boolean(params.uploadLimitReached),
       userIndicatedMoreFiles: userIndicatedMoreFiles(params.userIntent ?? ""),
@@ -1409,11 +1435,21 @@ function buildReviewProgressPayload(
     report.ingestionMeta?.reviewedFileCount ?? 0,
     uploadedEvidenceCount
   );
+  const reviewProgressCounts = normalizeReviewProgressCounts({
+    uploadedCount: uploaded,
+    indexedCount: indexed,
+    visionProcessedCount: visionProcessed,
+    reviewedFileCount: reviewedForDetermination,
+    reviewableFileCount: report.ingestionMeta?.reviewableFileCount,
+    excludedFromReviewCount: report.ingestionMeta?.excludedFromReviewCount,
+    excludedFromReviewReasons: report.ingestionMeta?.excludedFromReviewReasons,
+  });
   const totalKnownFiles = Math.max(
     report.ingestionMeta?.totalKnownFileCount ?? 0,
     uploaded,
     indexed,
-    reviewedForDetermination
+    reviewedForDetermination,
+    reviewProgressCounts.reviewableFileCount
   );
 
   return {
@@ -1421,6 +1457,9 @@ function buildReviewProgressPayload(
     indexed,
     visionProcessed,
     reviewedForDetermination,
+    reviewableFileCount: reviewProgressCounts.reviewableFileCount,
+    excludedFromReviewCount: reviewProgressCounts.excludedFromReviewCount,
+    excludedFromReviewReasons: reviewProgressCounts.excludedFromReviewReasons,
     totalKnownFiles,
   };
 }

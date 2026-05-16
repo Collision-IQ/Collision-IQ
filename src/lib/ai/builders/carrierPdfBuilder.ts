@@ -16,7 +16,10 @@ import {
   cleanOperationDisplayText,
   normalizeEstimateOperationLabel,
 } from "@/lib/ui/presentationText";
-import { buildReviewCompletenessMessage } from "@/lib/reviewCompleteness";
+import {
+  buildIndexedExclusionAuditNote,
+  buildReviewCompletenessMessage,
+} from "@/lib/reviewCompleteness";
 import {
   evaluateAppraisalAward,
   formatAppraisalAwardPosture,
@@ -292,8 +295,13 @@ function buildConfidenceIntegrityBullets(
     `Completeness: ${formatCompletenessStatus(integrity.completenessStatus)}.`,
     buildReviewCompletenessMessage({
       reviewed: integrity.reviewedFileCount ?? 0,
-      total: integrity.totalKnownFileCount ?? integrity.uploadedFileCount,
+      total: integrity.reviewableFileCount ?? integrity.totalKnownFileCount ?? integrity.uploadedFileCount,
     }),
+    buildIndexedExclusionAuditNote({
+      indexedCount: integrity.indexedFileCount ?? integrity.uploadedFileCount,
+      reviewableFileCount: integrity.reviewableFileCount ?? integrity.reviewedFileCount ?? integrity.uploadedFileCount,
+      excludedFromReviewCount: integrity.excludedFromReviewCount,
+    }) ?? undefined,
     typeof integrity.indexedFileCount === "number" ? `Indexed files: ${integrity.indexedFileCount}.` : undefined,
     typeof integrity.visionProcessedFileCount === "number" ? `Vision-processed files: ${integrity.visionProcessedFileCount}.` : undefined,
     integrity.uploadLimitReached ? "Upload cap reached for this review." : "Upload cap not reached.",
@@ -347,7 +355,7 @@ function buildAppraisalRecommendationBullets(
     ],
     unresolvedMaterialEvidence: exportModel.confidenceIntegrity.missingCriticalEvidence,
     reviewedFileCount: exportModel.confidenceIntegrity.reviewedFileCount,
-    totalKnownFileCount: exportModel.confidenceIntegrity.totalKnownFileCount ?? exportModel.confidenceIntegrity.uploadedFileCount,
+    totalKnownFileCount: exportModel.confidenceIntegrity.reviewableFileCount ?? exportModel.confidenceIntegrity.totalKnownFileCount ?? exportModel.confidenceIntegrity.uploadedFileCount,
   });
 
   return compact([

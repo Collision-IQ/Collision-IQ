@@ -39,7 +39,11 @@ export type CollisionSnapshot = {
     adjustedConfidence: ExportModel["confidenceIntegrity"]["adjustedConfidence"];
     completenessStatus: ExportModel["confidenceIntegrity"]["completenessStatus"];
     uploadedFileCount: number;
+    indexedFileCount: number;
     reviewedFileCount: number;
+    reviewableFileCount: number;
+    excludedFromReviewCount: number;
+    excludedFromReviewReasons: ExportModel["confidenceIntegrity"]["excludedFromReviewReasons"];
     totalKnownFileCount: number;
     uploadLimitReached: boolean;
     userIndicatedMoreFiles: boolean;
@@ -90,7 +94,16 @@ export function buildCollisionSnapshot(input: SnapshotSource): CollisionSnapshot
       adjustedConfidence: snapshotSafeReport.confidenceIntegrity.adjustedConfidence,
       completenessStatus: snapshotSafeReport.confidenceIntegrity.completenessStatus,
       uploadedFileCount: snapshotSafeReport.confidenceIntegrity.uploadedFileCount,
+      indexedFileCount:
+        snapshotSafeReport.confidenceIntegrity.indexedFileCount ??
+        snapshotSafeReport.confidenceIntegrity.uploadedFileCount,
       reviewedFileCount: snapshotSafeReport.confidenceIntegrity.reviewedFileCount ?? 0,
+      reviewableFileCount:
+        snapshotSafeReport.confidenceIntegrity.reviewableFileCount ??
+        snapshotSafeReport.confidenceIntegrity.reviewedFileCount ??
+        snapshotSafeReport.confidenceIntegrity.uploadedFileCount,
+      excludedFromReviewCount: snapshotSafeReport.confidenceIntegrity.excludedFromReviewCount ?? 0,
+      excludedFromReviewReasons: snapshotSafeReport.confidenceIntegrity.excludedFromReviewReasons ?? [],
       totalKnownFileCount:
         snapshotSafeReport.confidenceIntegrity.totalKnownFileCount ??
         snapshotSafeReport.confidenceIntegrity.uploadedFileCount,

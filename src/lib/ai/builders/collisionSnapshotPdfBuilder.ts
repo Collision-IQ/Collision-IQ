@@ -8,7 +8,10 @@ import type { CarrierReportDocument } from "./carrierPdfBuilder";
 import type { ExportBuilderInput } from "./exportTemplates";
 import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
 import { sanitizeCustomerFacingDocument, toCustomerFacingList, toCustomerFacingText } from "@/lib/ai/customerFacingText";
-import { buildReviewCompletenessMessage } from "@/lib/reviewCompleteness";
+import {
+  buildIndexedExclusionAuditNote,
+  buildReviewCompletenessMessage,
+} from "@/lib/reviewCompleteness";
 
 export function buildCollisionSnapshotPdf(params: ExportBuilderInput): CarrierReportDocument {
   const exportModel = resolveSnapshotExportModel(params);
@@ -182,7 +185,12 @@ function buildCompletenessBullets(snapshot: ReturnType<typeof buildCollisionSnap
   return [
     buildReviewCompletenessMessage({
       reviewed: snapshot.evidenceCompleteness.reviewedFileCount,
-      total: snapshot.evidenceCompleteness.totalKnownFileCount,
+      total: snapshot.evidenceCompleteness.reviewableFileCount,
+    }),
+    buildIndexedExclusionAuditNote({
+      indexedCount: snapshot.evidenceCompleteness.indexedFileCount,
+      reviewableFileCount: snapshot.evidenceCompleteness.reviewableFileCount,
+      excludedFromReviewCount: snapshot.evidenceCompleteness.excludedFromReviewCount,
     }),
     snapshot.evidenceCompleteness.uploadLimitReached ? "The current upload limit was reached." : "More files can be added if needed.",
     snapshot.evidenceCompleteness.userIndicatedMoreFiles

@@ -28,8 +28,10 @@ const {
   sanitizeEstimateLine,
 } = require("./presentationText.ts");
 const {
+  buildIndexedExclusionAuditNote,
   buildReviewCompletenessMessage,
   getReviewCompletenessState,
+  normalizeReviewProgressCounts,
 } = require("../reviewCompleteness.ts");
 
 function run(name, fn) {
@@ -126,10 +128,48 @@ run("user-facing evidence sanitizer removes evidence-reference lead-in without d
   assert.equal(cleaned, "Repair path support is documented.");
 });
 
-run("review completeness uses near-complete language for 185 of 186 files", () => {
+run("review completeness uses near-complete language for 185 of 186 reviewable files", () => {
   assert.equal(getReviewCompletenessState({ reviewed: 185, total: 186 }), "NEAR_COMPLETE_REVIEW");
   const message = buildReviewCompletenessMessage({ reviewed: 185, total: 186 });
 
-  assert.match(message, /^Near-complete review: 185 of 186 files reviewed\./);
+  assert.match(message, /^Near-complete review: 185 of 186 reviewable files reviewed\./);
   assert.equal(/Do not rely on this as a final umpire determination/i.test(message), false);
+});
+
+run("review completeness treats indexed non-reviewable item as excluded, not skipped", () => {
+  const counts = normalizeReviewProgressCounts({
+    indexedCount: 186,
+    visionProcessedCount: 185,
+    reviewedFileCount: 185,
+    reviewableFileCount: 185,
+  });
+  const message = buildReviewCompletenessMessage({
+    reviewed: counts.reviewedFileCount,
+    total: counts.reviewableFileCount,
+  });
+  const note = buildIndexedExclusionAuditNote(counts);
+
+  assert.equal(counts.excludedFromReviewCount, 1);
+  assert.match(message, /^Reviewed 185 of 185 reviewable files\. Full reviewable-file review complete\.$/);
+  assert.equal(/Only 185 of 186 files reviewed/i.test(message), false);
+  assert.equal(
+    note,
+    "1 indexed item was excluded from determination review because it was non-reviewable, duplicate, unsupported, or metadata-only."
+  );
+  assert.equal(/\bcmp[a-z0-9]{8,}\b/i.test(note), false);
+});
+
+run("review completeness still warns when a true reviewable file is skipped", () => {
+  const counts = normalizeReviewProgressCounts({
+    indexedCount: 186,
+    reviewableFileCount: 186,
+    reviewedFileCount: 185,
+  });
+  const message = buildReviewCompletenessMessage({
+    reviewed: counts.reviewedFileCount,
+    total: counts.reviewableFileCount,
+  });
+
+  assert.equal(counts.excludedFromReviewCount, 0);
+  assert.match(message, /^Near-complete review: 185 of 186 reviewable files reviewed\./);
 });

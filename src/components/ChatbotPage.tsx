@@ -63,7 +63,10 @@ import {
   summarizeExternalDocumentForDisplay,
 } from "@/lib/externalDocuments";
 import { sanitizeUserFacingEvidenceText, summarizeUserFacingSupport } from "@/lib/ui/presentationText";
-import { buildReviewCompletenessMessage } from "@/lib/reviewCompleteness";
+import {
+  buildIndexedExclusionAuditNote,
+  buildReviewCompletenessMessage,
+} from "@/lib/reviewCompleteness";
 import { buildReportApplicability } from "@/lib/reports/applicability";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
@@ -129,12 +132,31 @@ function resolveEffectiveReviewProgress(
     integrity.totalKnownFileCount ?? indexed,
     reviewedForDetermination
   );
+  const reviewableFileCount = Math.max(
+    progress.reviewableFileCount,
+    integrity.reviewableFileCount ?? 0,
+    reviewedForDetermination,
+    visionProcessed
+  );
+  const excludedFromReviewCount = Math.max(
+    progress.excludedFromReviewCount,
+    integrity.excludedFromReviewCount ?? 0,
+    Math.max(0, indexed - reviewableFileCount)
+  );
 
   return {
     uploaded: Math.max(progress.uploaded, integrity.uploadedFileCount),
     indexed,
     visionProcessed,
     reviewedForDetermination,
+    reviewableFileCount,
+    excludedFromReviewCount,
+    excludedFromReviewReasons: [
+      ...new Set([
+        ...progress.excludedFromReviewReasons,
+        ...(integrity.excludedFromReviewReasons ?? []),
+      ]),
+    ],
     totalKnownFiles,
   };
 }
@@ -305,6 +327,9 @@ export function ChatbotWorkspacePage() {
     indexed: 0,
     visionProcessed: 0,
     reviewedForDetermination: 0,
+    reviewableFileCount: 0,
+    excludedFromReviewCount: 0,
+    excludedFromReviewReasons: [],
     totalKnownFiles: 0,
   });
   const [analysisText, setAnalysisText] = useState("");
@@ -1604,12 +1629,17 @@ function RailContent({
     renderModel.confidenceIntegrity
   );
   const fileReviewWarning =
-    effectiveReviewProgress.totalKnownFiles > effectiveReviewProgress.reviewedForDetermination
+    effectiveReviewProgress.reviewableFileCount > effectiveReviewProgress.reviewedForDetermination
       ? buildReviewCompletenessMessage({
           reviewed: effectiveReviewProgress.reviewedForDetermination,
-          total: effectiveReviewProgress.totalKnownFiles,
+          total: effectiveReviewProgress.reviewableFileCount,
         })
       : null;
+  const indexedExclusionAuditNote = buildIndexedExclusionAuditNote({
+    indexedCount: effectiveReviewProgress.indexed,
+    reviewableFileCount: effectiveReviewProgress.reviewableFileCount,
+    excludedFromReviewCount: effectiveReviewProgress.excludedFromReviewCount,
+  });
   const supportSignals = dedupeRailItems([
     ...renderModel.reportFields.presentStrengths,
     ...renderModel.disputeIntelligenceReport.positives,
@@ -2294,13 +2324,24 @@ function RailContent({
           <MetricCard label="Vision processed" value={String(effectiveReviewProgress.visionProcessed)} />
           <MetricCard
             label="Reviewed"
-            value={`${effectiveReviewProgress.reviewedForDetermination}/${effectiveReviewProgress.totalKnownFiles}`}
+            value={`${effectiveReviewProgress.reviewedForDetermination}/${effectiveReviewProgress.reviewableFileCount || effectiveReviewProgress.reviewedForDetermination}`}
           />
+        </div>
+
+        <div className="mt-2 text-[12px] leading-5 text-muted-foreground">
+          Reviewed {effectiveReviewProgress.reviewedForDetermination} of{" "}
+          {effectiveReviewProgress.reviewableFileCount || effectiveReviewProgress.reviewedForDetermination} reviewable files.
         </div>
 
         {fileReviewWarning ? (
           <div className="mt-3 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-[12px] leading-5 text-amber-800 dark:text-amber-200">
             {fileReviewWarning}
+          </div>
+        ) : null}
+
+        {indexedExclusionAuditNote ? (
+          <div className="mt-3 rounded-xl border border-border bg-muted px-3 py-2 text-[12px] leading-5 text-muted-foreground">
+            {indexedExclusionAuditNote}
           </div>
         ) : null}
       </section>
