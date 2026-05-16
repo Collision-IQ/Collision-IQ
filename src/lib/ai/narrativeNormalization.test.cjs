@@ -61,3 +61,19 @@ run("normalizes compressed umpire reasoning while preserving technical meaning",
     assert.ok(semicolonCount <= 2, `too many semicolons in sentence: ${sentence}`);
   }
 });
+
+run("normalizes stacked repair operation chains while preserving posture and amount", () => {
+  const compressed =
+    "Appraisal Recommendation: Award reconciled supported amount $18,425.36 Rationale: The file supports the quarter replacement path rear bumper replacement/overhaul tail lamp pocket/fuel pocket blind spot radar replacement related calibration activity because the reviewed evidence supports OE/safety repair scope Vulnerabilities: carrier omits calibration and structural verification; shop still must prove final invoice Final Posture: award reconciled supported amount $18,425.36.";
+
+  const normalized = normalizeNarrativeProse(compressed, "UMPIRING");
+
+  assert.match(normalized, /Award reconciled supported amount \$18,425\.36/i);
+  assert.match(normalized, /Final Posture:\naward reconciled supported amount \$18,425\.36\./i);
+  assert.match(
+    normalized,
+    /quarter replacement path, rear bumper replacement\/overhaul, tail lamp pocket, fuel pocket, blind spot radar replacement, and related calibration activity/i
+  );
+  assert.match(normalized, /carrier omits calibration and structural verification/i);
+  assert.match(normalized, /shop still must prove final invoice/i);
+});
