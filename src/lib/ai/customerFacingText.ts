@@ -1,6 +1,6 @@
 import type { CustomerReport } from "./generateCustomerReport";
 import type { CarrierReportDocument } from "./builders/carrierPdfBuilder";
-import { sanitizeEstimateLine } from "@/lib/ui/presentationText";
+import { sanitizeEstimateLine, sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 
 const TECHNICAL_TRANSLATIONS: Array<[RegExp, string]> = [
   [
@@ -108,7 +108,8 @@ export function toCustomerFacingText(value?: string | null, fallback = ""): stri
     .replace(/^[\s:;|.-]+|[\s:;|-]+$/g, "")
     .trim();
 
-  return output || fallback;
+  const sanitized = sanitizeUserFacingEvidenceText(output);
+  return sanitized || sanitizeUserFacingEvidenceText(fallback) || fallback;
 }
 
 export function toCustomerFacingList(

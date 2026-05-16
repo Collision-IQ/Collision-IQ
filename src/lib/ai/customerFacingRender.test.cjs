@@ -67,6 +67,7 @@ function flattenDocument(document) {
 function assertNoForbiddenCustomerText(text) {
   const forbidden = [
     /evidence\s+references?/i,
+    /\bcmp[a-z0-9]{8,}\b/i,
     /cmox/i,
     /support\s+basis/i,
     /risk\s*if\s*omitted/i,
@@ -88,15 +89,17 @@ function assertNoForbiddenCustomerText(text) {
   }
 }
 
+const cmp = "cmp";
+
 const dirtyReport = {
   title: "Customer Report",
   openingSummary:
-    "Evidence references cmox-abc Support: Verified. Hidden Mounting Geometry Teardown Growth documented evidence at 86% confidence.",
+    `Evidence references ${cmp}7qdm12345678, ${cmp}abcdefghi90 cmox-abc Support: Verified. Hidden Mounting Geometry Teardown Growth documented evidence at 86% confidence.`,
   whichRepairPlanLooksStronger:
     "Risk if omitted: Proc 2 #** Procedure research & wheelm0.1 battery primarym0.3",
   safetyFirst: "ADAS Calibration Procedure Support. Support basis runtime immutable.",
   whatStillNeedsProof: [
-    "Side Structure Aperture Door-Shell Fit Verification support basis cmox-22",
+    `Side Structure Aperture Door-Shell Fit Verification support basis Evidence references: ${cmp}0123456789 cmox-22`,
     "Proc 2 #** Procedure research &",
     "battery primarym0.3",
   ],
@@ -117,7 +120,7 @@ run("customer report PDF final render strips forbidden debug and parser text", (
     estimateTotal: "$16,200",
     findingReasoning: [
       {
-        issue: "Hidden Mounting Geometry Teardown Growth cmox-123",
+        issue: `Hidden Mounting Geometry Teardown Growth ${cmp}7qdm12345678 cmox-123`,
         what_proves_it: "Proc 2 #** Procedure research &",
         why_it_matters: "Support basis and documented evidence at 86% confidence.",
         next_action: "Risk if omitted: battery primarym0.3",
@@ -166,7 +169,7 @@ run("snapshot modal/PDF final render strips forbidden debug and parser text", ()
     },
     topDisputeItems: [
       {
-        issue: "Hidden Mounting Geometry Teardown Growth evidence references cmox-9",
+        issue: `Hidden Mounting Geometry Teardown Growth evidence references ${cmp}7qdm12345678 cmox-9`,
         whyItMatters: "Support basis runtime immutable.",
         evidenceState: "Documented evidence at 86% confidence.",
         nextAction: "Risk if omitted: Proc 2 #** Procedure research &",

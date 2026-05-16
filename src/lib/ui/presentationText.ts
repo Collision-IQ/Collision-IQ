@@ -29,6 +29,9 @@ const LEAKED_SUFFIX_ONLY_PATTERN = /^\s*[a-z][a-z\s/-]*m\d+(?:\.\d+)?\s*$/i;
 const FUSED_PART_TOKEN_PATTERN = /\b([a-z][a-z/&'-]{2,}?)(?:m?0\.[1-9]|\d{6,}[a-z]{0,3})\b/gi;
 const CODE_HEAVY_TOKEN_PATTERN = /\b[A-Za-z]*\d[A-Za-z0-9.-]{7,}\b/g;
 const GENERIC_OPERATION_ONLY_PATTERN = /^(?:r\s*&\s*i|r\s*&\s*r|repl|rpr|refn|o\s*\/\s*h|subl|add|overlap|repair operation|labor paint|labor|paint)$/i;
+const CMP_EVIDENCE_ID_PATTERN = /\bcmp[a-z0-9]{8,}\b/gi;
+const CMP_EVIDENCE_ID_CHAIN_PATTERN = /(?:\bcmp[a-z0-9]{8,}\b[\s,;]*){2,}/gi;
+const EVIDENCE_REFERENCE_LEAD_IN_PATTERN = /Evidence references?:\s*(?:[.,;:\-\s]*)/gi;
 const KNOWN_OPERATION_VERBS = [
   "R&I",
   "R&R",
@@ -402,9 +405,12 @@ export function sanitizeUserFacingEvidenceText(
   if (!cleaned) return "";
 
   cleaned = cleaned
+    .replace(CMP_EVIDENCE_ID_CHAIN_PATTERN, " ")
+    .replace(CMP_EVIDENCE_ID_PATTERN, " ")
     .replace(/\bEvidence references?:\s*(?:[,; ]*(?:cmp[a-z0-9-]{6,}|[a-f0-9]{24,}|[a-f0-9-]{32,}))+\.?/gi, "")
+    .replace(EVIDENCE_REFERENCE_LEAD_IN_PATTERN, " ")
     .replace(/\bEvidence references?:\s*\.?/gi, "")
-    .replace(/\bcmp[a-z0-9-]{4,}\b/gi, "uploaded file")
+    .replace(/\bcmp[a-z0-9-]{4,}\b/gi, " ")
     .replace(/\b[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\b/gi, "uploaded document")
     .replace(/\b[a-f0-9]{24,64}\b/gi, "uploaded file")
     .replace(/\b(?:evidence|chain|source|finding|issue|doc|line|parser|vector|object)[-_ ]?[a-z0-9]{8,}\b/gi, "uploaded document")
@@ -417,8 +423,14 @@ export function sanitizeUserFacingEvidenceText(
     .replace(/\bOperation:\s*/gi, "Item: ")
     .replace(/\s*\|\s*Status:\s*/gi, " - Status: ")
     .replace(/\b(?:undefined|null|NaN)\b/gi, "")
+    .replace(/\bSupport basis:\s*Evidence references?\b[\s,;:.]*/gi, "")
+    .replace(/\bSupport basis:\s*/gi, "")
     .replace(/\s+([,.;:])/g, "$1")
+    .replace(/(?:,\s*){2,}/g, ", ")
+    .replace(/(?:;\s*){2,}/g, "; ")
     .replace(/(?:[,;]\s*){2,}/g, "; ")
+    .replace(/(^|[\s([])[,;:.-]+(?=\s|$|[)\]])/g, "$1")
+    .replace(/\s+([,.;:])/g, "$1")
     .replace(/\(\s*\)/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();

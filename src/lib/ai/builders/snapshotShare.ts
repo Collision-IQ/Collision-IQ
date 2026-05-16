@@ -1,4 +1,5 @@
 import type { CollisionSnapshot } from "./collisionSnapshot";
+import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 
 export type SnapshotDestinationType = "customer" | "carrier";
 
@@ -57,7 +58,7 @@ export function buildSnapshotEmailBody(
 }
 
 export function sanitizeSnapshotOutboundText(value: string): string {
-  return value
+  return sanitizeUserFacingEvidenceText(value
     .replace(/\b[A-HJ-NPR-Z0-9]{17}\b/g, (vin) => `*****${vin.slice(-4)}`)
     .replace(/\bclaim\s*(?:(?:number|no\.?|#|id)\s*[:#-]?|[:#])\s*([A-Z0-9-]{5,})\b/gi, (_match, claim: string) => {
       const compact = claim.replace(/[^A-Za-z0-9]/g, "");
@@ -70,7 +71,7 @@ export function sanitizeSnapshotOutboundText(value: string): string {
       ""
     )
     .replace(/\s{2,}/g, " ")
-    .trim();
+    .trim());
 }
 
 export function buildSnapshotSendSafeEvent(params: {

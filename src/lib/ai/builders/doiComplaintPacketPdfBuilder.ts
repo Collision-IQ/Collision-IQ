@@ -14,7 +14,7 @@ import {
 import { buildClaimHandlingDisputeContext } from "./claimHandlingDisputeContext";
 import type { CaseEvidenceRegistryItem, RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 import type { EvidenceRecord } from "@/lib/ai/types/evidence";
-import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
+import { cleanOperationDisplayText, sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 
 type DoiReadinessState = "READY_FOR_DOI" | "NOT_READY_FOR_DOI" | "NEEDS_MORE_DOCUMENTATION";
 
@@ -843,7 +843,7 @@ function formatDateTime(value: string): string {
 }
 
 function cleanPacketText(value: string): string {
-  return value
+  return sanitizeUserFacingEvidenceText(value
     .replace(/\buploaded document\b/gi, "source material")
     .replace(/\bSame rationale as earlier\b/gi, "The same support should be reviewed with the current claim context.")
     .replace(/\bCurrent estimate analysis; citation still needed\b/gi, "Repair attachment context; independent citation still needed")
@@ -852,7 +852,7 @@ function cleanPacketText(value: string): string {
     .replace(/\bCalibration Verification Open\b/gi, "scan and calibration verification remains open")
     .replace(/\s+/g, " ")
     .replace(/[^\S\r\n]+/g, " ")
-    .trim();
+    .trim());
 }
 
 function dedupeStrings(values: Array<string | null | undefined>): string[] {

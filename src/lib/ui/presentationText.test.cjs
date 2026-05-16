@@ -24,6 +24,7 @@ const {
   cleanOperationDisplayText,
   isMalformedEstimateLine,
   normalizeEstimateOperationLabel,
+  sanitizeUserFacingEvidenceText,
   sanitizeEstimateLine,
 } = require("./presentationText.ts");
 
@@ -80,4 +81,16 @@ run("estimate-line sanitizer cleans fused part-number descriptions for technical
   assert.equal(isMalformedEstimateLine("rear bumper68184713AB"), true);
   assert.equal(cleanEstimateLineForTechnicalExport("rear bumper68184713AB"), "Rear Bumper");
   assert.equal(cleanEstimateLineForCustomer("rear bumper68184713AB"), "Rear Bumper");
+});
+
+run("user-facing evidence sanitizer removes cmp evidence ids and dangling lead-ins", () => {
+  const cmp = "cmp";
+  const cleaned = sanitizeUserFacingEvidenceText(
+    `Support basis: Evidence references: ${cmp}7qdm12345678, ${cmp}abcdefghi90; ${cmp}0123456789. Blend operation remains under-supported.`
+  );
+
+  assert.equal(/\bcmp[a-z0-9]{8,}\b/i.test(cleaned), false);
+  assert.equal(/Evidence references?/i.test(cleaned), false);
+  assert.equal(/Support basis:\s*Evidence references?/i.test(cleaned), false);
+  assert.equal(cleaned, "Blend operation remains under-supported.");
 });

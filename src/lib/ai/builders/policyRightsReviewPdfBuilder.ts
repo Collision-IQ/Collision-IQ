@@ -8,6 +8,7 @@ import {
 } from "./buildExportModel";
 import type { ExportBuilderInput } from "./exportTemplates";
 import { buildClaimHandlingDisputeContext } from "./claimHandlingDisputeContext";
+import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 import {
   buildJurisdictionUnavailableMessage,
   classifySourceAuthorityTier,
@@ -1029,7 +1030,7 @@ function formatCitationIndexItem(citation: ImmutablePolicyCitation): string {
 }
 
 function humanizePolicyText(value: string): string {
-  return value
+  return sanitizeUserFacingEvidenceText(value
     .replace(/\buploaded document\b/gi, "source material")
     .replace(/\buploaded policy packet\b/gi, "policy packet")
     .replace(/\bSame rationale as earlier\b/gi, "The same policy support should be reviewed with the current claim context.")
@@ -1038,7 +1039,7 @@ function humanizePolicyText(value: string): string {
     .replace(/\bpolicy-\[REDACTED_POLICY\]\b/gi, "the policy")
     .replace(/\bCalibration Verification Open\b/gi, "scan and calibration verification remains open")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim());
 }
 
 function dedupeCitations(citations: ImmutablePolicyCitation[]): ImmutablePolicyCitation[] {

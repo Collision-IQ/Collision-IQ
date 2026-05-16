@@ -5,6 +5,7 @@ import type {
 import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
 import {
   normalizeEstimateOperationLabel,
+  sanitizeUserFacingEvidenceText,
   sanitizeEstimateLine,
 } from "@/lib/ui/presentationText";
 export { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
@@ -127,7 +128,7 @@ function sanitizeComparisonNote(value: string, row: EstimateComparisonRow): stri
 }
 
 function sanitizeComparisonDisplayText(value: string): string {
-  let cleaned = value.replace(/\s+/g, " ").trim();
+  let cleaned = sanitizeUserFacingEvidenceText(value).replace(/\s+/g, " ").trim();
   if (!cleaned) return "";
 
   cleaned = removeInternalEvidenceReferences(cleaned);
