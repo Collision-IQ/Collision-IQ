@@ -42,8 +42,8 @@ export function summarizeAttachmentStats(list: AttachmentSummaryItem[]) {
 
 export function buildCompactAttachmentSummary(list: AttachmentCompactSummaryItem[]) {
   const totalCount = list.length;
-  const photoCount = list.filter(isPhotoAttachment).length;
   const pdfCount = list.filter(isPdfAttachment).length;
+  const photoCount = list.filter((attachment) => !isPdfAttachment(attachment) && isPhotoAttachment(attachment)).length;
   const otherCount = Math.max(0, totalCount - photoCount - pdfCount);
   const parts = [
     `${totalCount} ${totalCount === 1 ? "file" : "files"} uploaded`,
@@ -60,7 +60,6 @@ function isPhotoAttachment(attachment: AttachmentCompactSummaryItem) {
   const filename = attachment.filename ?? "";
   return (
     attachment.source === "camera" ||
-    attachment.hasVision === true ||
     mime.startsWith("image/") ||
     /\.(?:png|jpe?g|webp|gif|heic|heif)$/i.test(filename)
   );

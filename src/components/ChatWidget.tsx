@@ -38,6 +38,7 @@ import {
 } from "@/components/chatWidget/attachmentUtils";
 import {
   canUseBrowserReadAloud,
+  formatAssistantDisplayMessage,
   formatAssistantMessage,
   toSpeechText,
 } from "@/components/chatWidget/speechUtils";
@@ -581,6 +582,19 @@ export default function ChatWidget({
     () => buildCompactAttachmentSummary(attachments),
     [attachments]
   );
+  const isLargeAttachmentTray = attachments.length > 20;
+  const attachmentTraySummary = useMemo(() => {
+    const parts = [
+      compactAttachmentSummary,
+      visionAttachmentCount > 0 ? `Vision: ${visionAttachmentCount}` : null,
+      `Files reviewed so far: ${totalFilesReviewed}`,
+    ].filter(Boolean);
+    return parts.join(" · ");
+  }, [compactAttachmentSummary, totalFilesReviewed, visionAttachmentCount]);
+  const selectedUploadStatusText =
+    selectedUploadNames.length > 20
+      ? `${selectedUploadNames.length} files selected`
+      : selectedUploadNames.join(", ");
   const previousAttachmentCountRef = useRef(0);
   useEffect(() => {
     const previousCount = previousAttachmentCountRef.current;
@@ -3025,7 +3039,7 @@ export default function ChatWidget({
                         ),
                       }}
                     >
-                      {formatAssistantMessage(msg.content)}
+                      {formatAssistantDisplayMessage(msg.content)}
                     </ReactMarkdown>
                     </div>
                   </div>
@@ -3215,7 +3229,7 @@ export default function ChatWidget({
                     {uploadUiMessage ? ` - ${uploadUiMessage}` : ""}
                     {selectedUploadNames.length > 0 ? (
                       <span className="ml-2 text-muted-foreground">
-                        {selectedUploadNames.join(", ")}
+                        {selectedUploadStatusText}
                       </span>
                     ) : null}
                   </div>
@@ -3232,17 +3246,21 @@ export default function ChatWidget({
                   aria-label="Toggle attachments"
                 >
                   <span className="min-w-0 truncate text-left">
-                    {attachments.length > 20
-                      ? compactAttachmentSummary
-                      : `Attachments (${attachments.length})`}
-                    <span className="ml-2 text-muted-foreground">
-                      {visionAttachmentCount > 0
-                        ? `- Vision: ${visionAttachmentCount}`
-                        : ""}
-                    </span>
-                    <span className="ml-2 text-muted-foreground">
-                      Files reviewed so far: {totalFilesReviewed}
-                    </span>
+                    {isLargeAttachmentTray ? (
+                      attachmentTraySummary
+                    ) : (
+                      <>
+                        Attachments ({attachments.length})
+                        <span className="ml-2 text-muted-foreground">
+                          {visionAttachmentCount > 0
+                            ? `- Vision: ${visionAttachmentCount}`
+                            : ""}
+                        </span>
+                        <span className="ml-2 text-muted-foreground">
+                          Files reviewed so far: {totalFilesReviewed}
+                        </span>
+                      </>
+                    )}
                   </span>
                   <span className="flex shrink-0 items-center gap-2">
                     {effectiveAttachmentsOpen ? "Hide file list" : "Show file list"}
