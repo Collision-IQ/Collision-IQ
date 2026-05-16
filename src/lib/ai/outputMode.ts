@@ -1,3 +1,5 @@
+import { buildAppraisalAwardEvaluatorInstruction } from "@/lib/ai/appraisalAwardEvaluator";
+
 export type OutputMode =
   | "DOCUMENT_REVIEW"
   | "NEGOTIATION_SUPPORT"
@@ -61,8 +63,13 @@ Allowed recommendation outcomes:
 - Defer final award because full-file review is incomplete
 - Defer final award because amount-of-loss maturity is incomplete
 Do not default to no decision when the reviewed file supports a directional answer.
+Do not choose carrier because it is cheaper. Do not choose shop because it is broader.
+Choose the repair path that best supports safe, complete, OEM-consistent repair.
+If both estimates are partly right, recommend a reconciled supported amount/posture.
+Never treat "not isolated as a standalone file" as unsupported when the reviewed record otherwise supports the operation.
 Do not present a partial award as the normal answer. Use "reconciled supported amount" or "line-adjusted award recommendation" instead.
 If final award is deferred, name the exact blocker: full-file review incomplete, final supplement not mature, disputed final invoice not reviewed, verified completion records not isolated, or policy/appraisal timing issue prevents finality.
+${buildAppraisalAwardEvaluatorInstruction()}
 ${shared}`.trim();
     case "DOI_PREP":
       return `

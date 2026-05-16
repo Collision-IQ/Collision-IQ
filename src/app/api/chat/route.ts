@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import type { ChatAnalysisOutput } from "@/lib/ai/contracts/chatAnalysisSchema";
 import type { DriveRetrievalResponse } from "@/lib/ai/contracts/driveRetrievalContract";
 import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
+import { buildAppraisalAwardEvaluatorInstruction } from "@/lib/ai/appraisalAwardEvaluator";
 import { buildAssistanceProfileInstruction } from "@/lib/ai/assistanceProfile";
 import {
   UnauthorizedError,
@@ -21,6 +22,7 @@ import type { StoredCaseData } from "@/lib/cases/getCaseById";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { buildProductAccessGuard } from "@/lib/featureAccess";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
+import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 import {
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
@@ -739,10 +741,12 @@ function enforceModeResponseShape(text: string, mode: OutputMode): string {
 
   return [
     "**Appraisal Recommendation**",
-    "Based on the reviewed file, use the appraisal record to make a directional amount-of-loss recommendation rather than treating every open support item as no decision. If the reviewed file is incomplete, the final award should be deferred only to the extent the file is not ready for final-award confidence.",
+    "Based on the reviewed file, use the appraisal record to make a directional amount-of-loss recommendation based on safe, complete, OEM-consistent repair scope rather than lowest cost or automatic shop preference.",
     "",
     "**Award Posture**",
     "Use one of these postures: award shop estimate, award carrier estimate, award reconciled supported amount, defer final award because full-file review is incomplete, or defer final award because amount-of-loss maturity is incomplete.",
+    "",
+    buildAppraisalAwardEvaluatorInstruction(),
     "",
     text,
   ].join("\n");
@@ -1135,11 +1139,11 @@ export async function POST(req: Request) {
 
     const needsLegalDisclaimer = isLegalAdjacentNegotiationRequest(userMessage);
 
-    const finalText = redactExternalDocumentUrls(
+    const finalText = sanitizeUserFacingEvidenceText(redactExternalDocumentUrls(
       needsLegalDisclaimer
         ? `${LEGAL_INFO_DISCLAIMER}\n\n${modeShapedOutput}`
         : modeShapedOutput
-    );
+    ));
 
     return new Response(cleanDisplayText(finalText), {
       headers: {

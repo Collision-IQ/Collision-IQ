@@ -17,6 +17,10 @@ import {
   normalizeEstimateOperationLabel,
 } from "@/lib/ui/presentationText";
 import { buildReviewCompletenessMessage } from "@/lib/reviewCompleteness";
+import {
+  evaluateAppraisalAward,
+  formatAppraisalAwardPosture,
+} from "@/lib/ai/appraisalAwardEvaluator";
 
 export type CarrierReportSection = {
   title: string;
@@ -307,33 +311,58 @@ function buildAppraisalRecommendationBullets(
   exportModel: ExportModel,
   isComparison: boolean
 ): string[] {
-  const hasLineVulnerabilities = exportModel.supplementItems.length > 0;
-  const incompleteReview =
-    exportModel.confidenceIntegrity.completenessStatus !== "COMPLETE" ||
-    (exportModel.confidenceIntegrity.totalKnownFileCount ?? exportModel.confidenceIntegrity.uploadedFileCount) >
-      (exportModel.confidenceIntegrity.reviewedFileCount ?? exportModel.confidenceIntegrity.uploadedFileCount);
-  const amountMaturityIncomplete =
-    exportModel.confidenceIntegrity.missingCriticalEvidence.some((item) =>
-      /invoice|supplement|completion|calibration|alignment|scan|final/i.test(item)
-    );
-  const posture = incompleteReview
-    ? "Defer final award because full-file review is incomplete."
-    : amountMaturityIncomplete
-      ? "Defer final award because amount-of-loss maturity is incomplete."
-      : hasLineVulnerabilities
-        ? "Award reconciled supported amount."
-        : isComparison
-          ? "Award the estimate with the better-supported complete repair path from the reviewed file."
-          : "Award the reviewed supported repair amount.";
+  const award = evaluateAppraisalAward({
+    shopEstimateSummary: exportModel.reportFields.estimateFacts.documentedHighlights.join("; "),
+    carrierEstimateSummary: isComparison ? exportModel.financialGapBreakdown.narrativeSummary : undefined,
+    repairOperations: [
+      ...exportModel.reportFields.estimateFacts.documentedProcedures,
+      ...exportModel.reportFields.likelySupplementAreas,
+      ...exportModel.findingReasoning.map((finding) => `${finding.issue}: ${finding.why_it_matters}`),
+    ],
+    fileEvidenceSupportSignals: [
+      ...exportModel.reportFields.presentStrengths,
+      ...exportModel.findingReasoning
+        .filter((finding) => finding.evidenceLevel === "documented" || finding.evidenceLevel === "referenced")
+        .map((finding) => finding.evidenceChainSummary ?? finding.what_proves_it),
+    ],
+    oemProcedureSupportSignals: [
+      ...exportModel.reportFields.estimateFacts.documentedProcedures,
+      ...exportModel.oemContradictions.map((item) => item.oemSupportCitation ?? item.conflictSummary),
+    ],
+    invoiceScanCalibrationAlignmentIndicators: exportModel.findingReasoning
+      .filter((finding) => /invoice|scan|calibration|alignment|test[- ]?fit|road[- ]?test/i.test(`${finding.issue} ${finding.what_proves_it}`))
+      .map((finding) => finding.issue),
+    completionIndicators: exportModel.reportFields.documentedHighlights,
+    carrierVulnerabilitySignals: [
+      ...exportModel.supplementItems.map((item) => `${item.title}: ${item.rationale}`),
+      ...exportModel.disputeIntelligenceReport.topDrivers.map((driver) => `${driver.title}: ${driver.whyItMatters}`),
+      ...exportModel.oemContradictions.map((item) => item.conflictSummary),
+    ],
+    shopVulnerabilitySignals: [
+      ...exportModel.findingReasoning
+        .filter((finding) => finding.evidenceLevel === "missing" || finding.evidenceLevel === "unsupported")
+        .map((finding) => `${finding.issue}: ${finding.next_action}`),
+      ...exportModel.confidenceIntegrity.missingCriticalEvidence,
+    ],
+    unresolvedMaterialEvidence: exportModel.confidenceIntegrity.missingCriticalEvidence,
+    reviewedFileCount: exportModel.confidenceIntegrity.reviewedFileCount,
+    totalKnownFileCount: exportModel.confidenceIntegrity.totalKnownFileCount ?? exportModel.confidenceIntegrity.uploadedFileCount,
+  });
 
   return compact([
-    `Award posture: ${posture}`,
-    hasLineVulnerabilities
-      ? "Based on the reviewed file, the broader repair path may be supportable subject to specifically unsupported line reductions listed in the dispute drivers."
-      : "Based on the reviewed file, no major line-level vulnerability was isolated in this export model.",
-    exportModel.disputeIntelligenceReport.topDrivers.length > 0
-      ? `Better-supported basis: ${exportModel.disputeIntelligenceReport.topDrivers.slice(0, 3).map((driver) => driver.title).join("; ")}.`
-      : "Better-supported basis should be tied to the reviewed estimate, invoice, scan, calibration, alignment, supplement, and repair records.",
+    `Award posture: ${formatAppraisalAwardPosture(award.posture)}.`,
+    `Confidence: ${award.confidence}.`,
+    award.recommendedLanguage,
+    `Why this posture is better supported: ${award.reason}`,
+    award.safetyCriticalSupport.length > 0
+      ? `Safety/OEM/completion support: ${award.safetyCriticalSupport.slice(0, 4).join("; ")}.`
+      : "Safety/OEM/completion support: Support not yet located in reviewed files.",
+    award.carrierVulnerabilities.length > 0
+      ? `Carrier vulnerabilities: ${award.carrierVulnerabilities.slice(0, 4).join("; ")}.`
+      : "Carrier vulnerabilities: no major repair-path vulnerability isolated.",
+    award.shopVulnerabilities.length > 0
+      ? `Shop vulnerabilities: ${award.shopVulnerabilities.slice(0, 4).join("; ")}.`
+      : "Shop vulnerabilities: no major unsupported broader-scope item isolated.",
     exportModel.confidenceIntegrity.missingCriticalEvidence.length > 0
       ? `Not final-award confidence: ${exportModel.confidenceIntegrity.missingCriticalEvidence.join("; ")}.`
       : "Final-award confidence: no critical support item remains not yet located in reviewed files.",

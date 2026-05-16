@@ -5,6 +5,7 @@ import { generateChatCompletion } from "@/lib/ai/generateChatCompletion";
 import { buildAssistanceProfileInstruction } from "@/lib/ai/assistanceProfile";
 import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
+import { buildAppraisalAwardEvaluatorInstruction } from "@/lib/ai/appraisalAwardEvaluator";
 import {
   UnauthorizedError,
   requireCurrentUser,
@@ -12,6 +13,7 @@ import {
 import { getCaseById } from "@/lib/cases/getCaseById";
 import { cleanResponse } from "@/lib/vehicle/oemGuardrails";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
+import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 
 export const runtime = "nodejs";
 
@@ -79,10 +81,12 @@ function enforceModeResponseShape(text: string, mode: OutputMode): string {
 
   return [
     "**Appraisal Recommendation**",
-    "Based on the reviewed file, make a directional amount-of-loss recommendation when the reviewed evidence supports one. If finality is not ready, say whether the blocker is full-file review, supplement maturity, final invoice review, completion records, or policy/appraisal timing.",
+    "Based on the reviewed file, make a directional amount-of-loss recommendation when the reviewed evidence supports one. The recommendation must be based on safe, complete, OEM-consistent repair scope, not lowest cost and not automatic shop preference.",
     "",
     "**Award Posture**",
     "Use one posture: award shop estimate, award carrier estimate, award reconciled supported amount, defer for incomplete full-file review, or defer for incomplete amount-of-loss maturity.",
+    "",
+    buildAppraisalAwardEvaluatorInstruction(),
     "",
     text,
   ].join("\n");
@@ -471,8 +475,10 @@ ${EVIDENCE_POLICY}
       system,
       messages: [...history, { role: "user", content: message }],
     });
-    const reply = redactExternalDocumentUrls(
-      enforceModeResponseShape(cleanResponse(vehicle?.make || "", rawReply), outputMode.mode)
+    const reply = sanitizeUserFacingEvidenceText(
+      redactExternalDocumentUrls(
+        enforceModeResponseShape(cleanResponse(vehicle?.make || "", rawReply), outputMode.mode)
+      )
     );
 
     return NextResponse.json({
