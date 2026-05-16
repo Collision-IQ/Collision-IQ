@@ -1,6 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { ThemeProvider } from "@/components/theme-provider";
 import { hasClerkPublishableKey } from "@/lib/auth/config";
 
@@ -121,6 +122,7 @@ export default function RootLayout({
           <ThemeProvider>
             {content}
           </ThemeProvider>
+          <SpeedInsights />
         </body>
       </html>
     </ClerkProvider>
