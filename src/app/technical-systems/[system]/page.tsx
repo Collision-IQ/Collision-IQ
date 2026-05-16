@@ -1,17 +1,131 @@
-import fs from "node:fs";
-import path from "node:path";
+import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 type SystemSlug = "shop-flow" | "parts-app" | "shop-hub";
+
+type ScreenshotAsset = {
+  src: string;
+  alt: string;
+  title: string;
+  caption: string;
+  width: number;
+  height: number;
+  featured?: boolean;
+};
+
+type VideoAsset = {
+  src: string;
+  title: string;
+};
 
 type SystemPage = {
   title: string;
   kicker: string;
   description: string;
   capabilities: string[];
-  assetRoots: string[];
+  screenshots: ScreenshotAsset[];
+  videos: VideoAsset[];
 };
+
+const SHOP_FLOW_SCREENSHOTS: ScreenshotAsset[] = [
+  {
+    src: "/shop_flow/screenshots/production_page.png",
+    alt: "Shop-Flow production management board",
+    title: "Production management board",
+    caption:
+      "Shows the high-level production view teams use to track active repair work and handoffs.",
+    width: 3425,
+    height: 1271,
+    featured: true,
+  },
+  {
+    src: "/shop_flow/screenshots/shop_flow.png",
+    alt: "Shop-Flow workflow dashboard",
+    title: "Shop workflow dashboard",
+    caption:
+      "Shows how Shop-Flow keeps repair-stage visibility and operational attention in one place.",
+    width: 1536,
+    height: 1024,
+  },
+];
+
+const PARTS_APP_SCREENSHOTS: ScreenshotAsset[] = [
+  {
+    src: "/parts_app/screenshots/parts_home.png",
+    alt: "Parts App inventory home",
+    title: "Parts inventory",
+    caption:
+      "Proves the parts workspace has a dedicated inventory entry point instead of a generic task list.",
+    width: 1689,
+    height: 1330,
+    featured: true,
+  },
+  {
+    src: "/parts_app/screenshots/parts_queue.png",
+    alt: "Parts App request queue",
+    title: "Parts request queue",
+    caption:
+      "Shows the shared queue where requests can be reviewed, prioritized, and advanced.",
+    width: 1536,
+    height: 1024,
+    featured: true,
+  },
+  {
+    src: "/parts_app/screenshots/tech_parts_request.png",
+    alt: "Parts App technician parts request",
+    title: "Tech parts request",
+    caption:
+      "Shows the technician request flow for capturing needed parts from the floor.",
+    width: 1674,
+    height: 1249,
+  },
+  {
+    src: "/parts_app/screenshots/office_request.png",
+    alt: "Parts App office parts request",
+    title: "Office parts request",
+    caption:
+      "Shows the office-side request path for coordinating parts needs from administration.",
+    width: 1674,
+    height: 1249,
+  },
+  {
+    src: "/parts_app/screenshots/appraiser_request.png",
+    alt: "Parts App appraiser parts request",
+    title: "Appraiser parts request",
+    caption:
+      "Shows the appraiser intake path for turning estimate review into a trackable parts request.",
+    width: 1674,
+    height: 1249,
+  },
+  {
+    src: "/parts_app/screenshots/my_requests.png",
+    alt: "Parts App active requests",
+    title: "My active requests",
+    caption:
+      "Shows how individual users can track the requests they already opened.",
+    width: 1674,
+    height: 1249,
+  },
+  {
+    src: "/parts_app/screenshots/work_queue.png",
+    alt: "Parts App work queue",
+    title: "My work queue",
+    caption:
+      "Shows the personal work queue that keeps each role focused on its next actions.",
+    width: 1674,
+    height: 1249,
+  },
+  {
+    src: "/parts_app/screenshots/parts_locator.png",
+    alt: "Parts App parts locator",
+    title: "Parts locator",
+    caption:
+      "Shows the locator view that supports faster coordination when parts need to be found.",
+    width: 1674,
+    height: 1249,
+  },
+];
 
 const SYSTEM_PAGES: Record<SystemSlug, SystemPage> = {
   "shop-flow": {
@@ -24,7 +138,11 @@ const SYSTEM_PAGES: Record<SystemSlug, SystemPage> = {
       "Workflow checkpoints for estimate review, supplement handling, and handoff",
       "Operational views that help teams see what needs attention next",
     ],
-    assetRoots: ["shop_flow"],
+    screenshots: SHOP_FLOW_SCREENSHOTS,
+    videos: [
+      { src: "/shop_flow/videos/home_video.mp4", title: "Shop-Flow home workflow" },
+      { src: "/shop_flow/videos/production_video.mp4", title: "Shop-Flow production workflow" },
+    ],
   },
   "parts-app": {
     title: "Parts App",
@@ -36,7 +154,8 @@ const SYSTEM_PAGES: Record<SystemSlug, SystemPage> = {
       "Queue and locator views for faster internal coordination",
       "Management views for tracking request volume and status",
     ],
-    assetRoots: ["parts_app"],
+    screenshots: PARTS_APP_SCREENSHOTS,
+    videos: [{ src: "/parts_app/videos/Office request video sample.mp4", title: "Office request sample" }],
   },
   "shop-hub": {
     title: "Shop Hub",
@@ -48,12 +167,20 @@ const SYSTEM_PAGES: Record<SystemSlug, SystemPage> = {
       "Shared operating rhythm across office, appraiser, production, and parts roles",
       "Launch path for tailored implementation and onboarding",
     ],
-    assetRoots: ["shop_flow", "parts_app"],
+    screenshots: [
+      SHOP_FLOW_SCREENSHOTS[0],
+      SHOP_FLOW_SCREENSHOTS[1],
+      PARTS_APP_SCREENSHOTS[1],
+      PARTS_APP_SCREENSHOTS[7],
+      PARTS_APP_SCREENSHOTS[2],
+      PARTS_APP_SCREENSHOTS[5],
+    ],
+    videos: [
+      { src: "/shop_flow/videos/production_video.mp4", title: "Shop-Flow production workflow" },
+      { src: "/parts_app/videos/Office request video sample.mp4", title: "Parts App office request sample" },
+    ],
   },
 };
-
-const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"]);
-const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".mov"]);
 
 export function generateStaticParams() {
   return Object.keys(SYSTEM_PAGES).map((system) => ({ system }));
@@ -71,10 +198,11 @@ export default async function TechnicalSystemDetailPage({ params }: PageProps) {
   }
 
   const page = SYSTEM_PAGES[system];
-  const assets = discoverAssets(page.assetRoots);
+  const featuredScreenshots = page.screenshots.filter((asset) => asset.featured);
+  const supportingScreenshots = page.screenshots.filter((asset) => !asset.featured);
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
+    <main className="ci-workstation min-h-screen bg-background text-foreground">
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
           <Link href="/technical-systems" className="text-sm font-semibold text-foreground">
@@ -112,74 +240,83 @@ export default async function TechnicalSystemDetailPage({ params }: PageProps) {
         ))}
       </section>
 
-      {assets.images.length > 0 || assets.videos.length > 0 ? (
-        <section className="mx-auto max-w-6xl px-5 pb-16">
-          <h2 className="text-2xl font-semibold">Product views</h2>
-          {assets.videos.length > 0 ? (
-            <div className="mt-6 grid gap-6 md:grid-cols-2">
-              {assets.videos.map((asset) => (
-                <video key={asset.src} controls className="aspect-video w-full rounded-3xl border border-border bg-black">
+      <section className="mx-auto max-w-6xl px-5 pb-16">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold">Product views</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+              Real workflow media selected for this product area, with screenshots used as proof points rather than a raw asset gallery.
+            </p>
+          </div>
+        </div>
+
+        {page.videos.length > 0 ? (
+          <div className="mt-6 grid gap-6 md:grid-cols-2">
+            {page.videos.map((asset) => (
+              <figure key={asset.src} className="rounded-3xl border border-border bg-card p-3">
+                <video controls className="aspect-video w-full rounded-xl border border-border bg-black">
                   <source src={asset.src} />
                 </video>
-              ))}
-            </div>
-          ) : null}
-          {assets.images.length > 0 ? (
-            <div className="mt-6 grid gap-6 md:grid-cols-2">
-              {assets.images.map((asset) => (
-                <img
-                  key={asset.src}
-                  src={asset.src}
-                  alt={asset.alt}
-                  className="w-full rounded-3xl border border-border bg-card object-cover shadow-[0_18px_44px_rgba(15,23,42,0.08)]"
-                />
-              ))}
-            </div>
-          ) : null}
-        </section>
-      ) : null}
+                <figcaption className="mt-3 text-sm font-medium text-foreground">{asset.title}</figcaption>
+              </figure>
+            ))}
+          </div>
+        ) : null}
+
+        {featuredScreenshots.length > 0 ? (
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            {featuredScreenshots.map((asset) => (
+              <ScreenshotFrame key={asset.src} asset={asset} priority />
+            ))}
+          </div>
+        ) : null}
+
+        {supportingScreenshots.length > 0 ? (
+          <div className="mt-6 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
+            {supportingScreenshots.map((asset) => (
+              <ScreenshotFrame key={`${asset.src}-${asset.title}`} asset={asset} compact />
+            ))}
+          </div>
+        ) : null}
+      </section>
     </main>
+  );
+}
+
+function ScreenshotFrame({
+  asset,
+  compact = false,
+  priority = false,
+}: {
+  asset: ScreenshotAsset;
+  compact?: boolean;
+  priority?: boolean;
+}) {
+  return (
+    <figure className="overflow-hidden rounded-3xl border border-border bg-card">
+      <div className="flex items-center gap-1.5 border-b border-border bg-muted px-3 py-2">
+        <span className="h-2.5 w-2.5 rounded-full bg-[#C65A2A]" />
+        <span className="h-2.5 w-2.5 rounded-full bg-border" />
+        <span className="h-2.5 w-2.5 rounded-full bg-border" />
+      </div>
+      <div className={`relative bg-background ${compact ? "aspect-[4/3]" : "aspect-[16/10]"}`}>
+        <Image
+          src={asset.src}
+          alt={asset.alt}
+          fill
+          priority={priority}
+          sizes={compact ? "(min-width: 1024px) 33vw, (min-width: 768px) 50vw, 100vw" : "(min-width: 1024px) 50vw, 100vw"}
+          className="object-contain p-3"
+        />
+      </div>
+      <figcaption className="border-t border-border p-4">
+        <div className="text-sm font-semibold text-foreground">{asset.title}</div>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">{asset.caption}</p>
+      </figcaption>
+    </figure>
   );
 }
 
 function isSystemSlug(value: string): value is SystemSlug {
   return value in SYSTEM_PAGES;
-}
-
-function discoverAssets(roots: string[]) {
-  const publicRoot = path.join(process.cwd(), "public");
-  const images: Array<{ src: string; alt: string }> = [];
-  const videos: Array<{ src: string }> = [];
-
-  for (const root of roots) {
-    const absoluteRoot = path.join(publicRoot, root);
-    if (!fs.existsSync(absoluteRoot)) continue;
-
-    for (const file of walkFiles(absoluteRoot)) {
-      const ext = path.extname(file).toLowerCase();
-      const src = `/${path.relative(publicRoot, file).replace(/\\/g, "/")}`;
-      if (IMAGE_EXTENSIONS.has(ext) && images.length < 8) {
-        images.push({ src, alt: humanizeAssetName(file) });
-      }
-      if (VIDEO_EXTENSIONS.has(ext) && videos.length < 4) {
-        videos.push({ src });
-      }
-    }
-  }
-
-  return { images, videos };
-}
-
-function walkFiles(directory: string): string[] {
-  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const file = path.join(directory, entry.name);
-    return entry.isDirectory() ? walkFiles(file) : [file];
-  });
-}
-
-function humanizeAssetName(file: string) {
-  return path
-    .basename(file, path.extname(file))
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
