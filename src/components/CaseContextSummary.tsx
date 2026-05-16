@@ -1,4 +1,5 @@
 import type { NormalizedDeterminationResult } from "@/lib/analysis/normalizeDetermination";
+import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 
 type CaseContextSummaryProps = {
   intent: string;
@@ -19,7 +20,8 @@ export default function CaseContextSummary({
 }: CaseContextSummaryProps) {
   const determinationView = determinationPayload;
   const headline =
-    determinationView?.headline || determinationAnswer || "No determination available";
+    sanitizeUserFacingEvidenceText(determinationView?.headline || determinationAnswer) ||
+    "No determination available";
   const confidence = determinationView?.confidence ?? null;
   const supportGaps =
     determinationView?.supportGaps?.length
@@ -72,7 +74,7 @@ export default function CaseContextSummary({
       <div className="mt-3 space-y-2 text-sm text-muted-foreground">
         <div>
           <span className="text-muted-foreground">Original ask:</span>{" "}
-          <span className="font-medium text-foreground">{intent}</span>
+          <span className="font-medium text-foreground">{sanitizeUserFacingEvidenceText(intent) || intent}</span>
         </div>
 
         {vehicleLabel ? (
@@ -112,7 +114,7 @@ export default function CaseContextSummary({
               <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
                 {section.title}
               </div>
-              <div className="mt-2 text-sm leading-6 text-foreground">{section.summary}</div>
+              <div className="mt-2 text-sm leading-6 text-foreground">{sanitizeUserFacingEvidenceText(section.summary) || "Evidence supported."}</div>
             </div>
           ))}
         </div>
@@ -125,7 +127,7 @@ export default function CaseContextSummary({
           </div>
           <ul className="mt-2 ml-5 list-disc space-y-1.5 text-sm leading-6 text-foreground">
             {displayedSupportGaps.map((item) => (
-              <li key={item}>{item}</li>
+              <li key={item}>{sanitizeUserFacingEvidenceText(item) || "Not yet located in reviewed files."}</li>
             ))}
           </ul>
         </div>
@@ -138,7 +140,7 @@ export default function CaseContextSummary({
           </div>
           <ul className="mt-2 ml-5 list-disc space-y-1.5 text-sm leading-6 text-foreground">
             {cautionFlags.map((item) => (
-              <li key={item}>{item}</li>
+              <li key={item}>{sanitizeUserFacingEvidenceText(item) || "Support present; final proof incomplete."}</li>
             ))}
           </ul>
         </div>

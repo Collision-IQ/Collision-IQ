@@ -62,7 +62,8 @@ import {
   redactExternalDocumentUrls,
   summarizeExternalDocumentForDisplay,
 } from "@/lib/externalDocuments";
-import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
+import { sanitizeUserFacingEvidenceText, summarizeUserFacingSupport } from "@/lib/ui/presentationText";
+import { buildReviewCompletenessMessage } from "@/lib/reviewCompleteness";
 import { buildReportApplicability } from "@/lib/reports/applicability";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
@@ -1604,7 +1605,10 @@ function RailContent({
   );
   const fileReviewWarning =
     effectiveReviewProgress.totalKnownFiles > effectiveReviewProgress.reviewedForDetermination
-      ? `Only ${effectiveReviewProgress.reviewedForDetermination} of ${effectiveReviewProgress.totalKnownFiles} files reviewed. Do not rely on this as a final umpire determination.`
+      ? buildReviewCompletenessMessage({
+          reviewed: effectiveReviewProgress.reviewedForDetermination,
+          total: effectiveReviewProgress.totalKnownFiles,
+        })
       : null;
   const supportSignals = dedupeRailItems([
     ...renderModel.reportFields.presentStrengths,
@@ -4413,12 +4417,16 @@ function ReasoningLine({ label, value, title }: { label: string; value: string; 
 }
 
 function cleanWorkspaceDisplayText(value: string | null | undefined, title?: string, label?: string): string {
+  if (label?.toLowerCase() === "support" || label?.toLowerCase() === "evidence") {
+    return summarizeUserFacingSupport(value);
+  }
+
   const cleaned = sanitizeUserFacingEvidenceText(toCustomerFacingText(value ?? ""), title);
 
   if (!cleaned) {
     const normalizedLabel = label?.toLowerCase();
     return normalizedLabel === "support" || normalizedLabel === "evidence"
-      ? "Support is verified from current file evidence."
+      ? "Support verified from reviewed file evidence."
       : "";
   }
 

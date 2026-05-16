@@ -11,6 +11,10 @@ import type { InsightKey } from "@/components/chatbot/insightSync";
 import DeterminationCard from "@/components/DeterminationCard";
 import type { ExportModel } from "@/lib/ai/builders/buildExportModel";
 import AnalysisSectionCard from "@/components/AnalysisSectionCard";
+import {
+  sanitizeUserFacingEvidenceText,
+  summarizeUserFacingSupport,
+} from "@/lib/ui/presentationText";
 
 type AttachmentTrayItem = {
   attachmentId: string;
@@ -60,7 +64,7 @@ function dedupe(items: Array<string | undefined | null>) {
   const seen = new Set<string>();
 
   for (const item of items) {
-    const normalized = item?.replace(/\s+/g, " ").trim();
+    const normalized = sanitizeUserFacingEvidenceText(item)?.replace(/\s+/g, " ").trim();
     if (!normalized) continue;
 
     const key = normalized.toLowerCase();
@@ -131,14 +135,14 @@ export default function StructuredAnalysisCanvas({
 
   const missingBullets = dedupe([
     ...renderModel.findingReasoning.map((finding) =>
-      `${finding.issue}: ${finding.rationaleSummary ?? finding.why_it_matters}; evidence chain - ${finding.evidenceChainSummary ?? finding.what_proves_it}; risk if omitted - ${finding.riskIfOmitted ?? "not specified"}; support - ${formatLabel(finding.supportConfidenceIndicator ?? finding.evidenceLevel)}; next - ${finding.next_action}`
+      `${finding.issue}: ${finding.rationaleSummary ?? finding.why_it_matters}; ${summarizeUserFacingSupport(finding.evidenceChainSummary ?? finding.what_proves_it)} ${finding.riskIfOmitted ?? ""} ${finding.next_action}`
     ),
     ...renderModel.disputeIntelligenceReport.topDrivers.map(
       (driver) => `${driver.title}: ${driver.whyItMatters}`
     ),
     ...renderModel.disputeIntelligenceReport.supportGaps,
     ...renderModel.oemContradictions.map((contradiction) =>
-      `${contradiction.affectedOperation}: ${contradiction.conflictSummary}; OEM support - ${contradiction.oemSupportCitation ?? "inferred only, verify before asserting"}; severity - ${formatLabel(contradiction.contradictionSeverity)}; follow-up - ${contradiction.recommendedFollowUp}`
+      `${contradiction.affectedOperation}: ${contradiction.conflictSummary}; ${summarizeUserFacingSupport(contradiction.oemSupportCitation)} Follow-up: ${contradiction.recommendedFollowUp}`
     ),
     ...renderModel.supplementItems.slice(0, 5).map((item) => `${item.title}: ${item.rationale}`),
   ]).slice(0, 6);
@@ -352,7 +356,7 @@ export default function StructuredAnalysisCanvas({
               <div className="space-y-3">
                 {section.prose ? (
                   <div className="break-words border border-border bg-muted px-3 py-2.5 text-[13px] leading-5 text-muted-foreground">
-                    {section.prose}
+                    {sanitizeUserFacingEvidenceText(section.prose)}
                   </div>
                 ) : null}
 
@@ -454,7 +458,7 @@ function LinkedInsightBullet({
     return (
       <div className="flex min-w-0 gap-2 border border-border bg-muted px-3 py-2.5 text-[13px] leading-5 text-muted-foreground">
         <span className="pt-[1px] text-[#b86a2d]">&bull;</span>
-        <span className="min-w-0 break-words">{bullet}</span>
+        <span className="min-w-0 break-words">{sanitizeUserFacingEvidenceText(bullet) || "Evidence supported."}</span>
       </div>
     );
   }
@@ -471,7 +475,7 @@ function LinkedInsightBullet({
     >
       <div className="flex min-w-0 gap-2 text-[13px] leading-5 text-foreground">
         <span className="pt-[1px] text-[#b86a2d]">&bull;</span>
-        <span className="min-w-0 break-words">{bullet}</span>
+        <span className="min-w-0 break-words">{sanitizeUserFacingEvidenceText(bullet) || "Evidence supported."}</span>
       </div>
       <div className="mt-2 inline-flex rounded-sm border border-border bg-card px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
         View support
@@ -495,13 +499,13 @@ function EvidenceSupportBlock({
           {target.type.replace(/_/g, " ")}
         </div>
       </div>
-      <div className="mt-2 text-[13px] font-medium leading-5 text-foreground">{target.title}</div>
-      <div className="mt-2 text-[13px] leading-5 text-muted-foreground">{target.detail}</div>
+      <div className="mt-2 text-[13px] font-medium leading-5 text-foreground">{sanitizeUserFacingEvidenceText(target.title) || "Supporting evidence"}</div>
+      <div className="mt-2 text-[13px] leading-5 text-muted-foreground">{sanitizeUserFacingEvidenceText(target.detail) || "Evidence supported."}</div>
       {target.summary ? (
-        <div className="mt-2 text-[12px] leading-5 text-muted-foreground">{target.summary}</div>
+        <div className="mt-2 text-[12px] leading-5 text-muted-foreground">{sanitizeUserFacingEvidenceText(target.summary) || "Evidence supported."}</div>
       ) : null}
       {target.sourceLabel ? (
-        <div className="mt-2 text-[11px] leading-5 text-muted-foreground">Source: {target.sourceLabel}</div>
+        <div className="mt-2 text-[11px] leading-5 text-muted-foreground">Source: {sanitizeUserFacingEvidenceText(target.sourceLabel) || "reviewed file evidence"}</div>
       ) : null}
     </div>
   );

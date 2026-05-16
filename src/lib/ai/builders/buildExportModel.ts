@@ -60,6 +60,8 @@ import { computeModelPressureMode, type PressureModeContext } from "./pressureMo
 import {
   cleanEstimateLineForTechnicalExport,
   isMalformedEstimateLine,
+  sanitizeUserFacingEvidenceText,
+  summarizeUserFacingSupport,
 } from "@/lib/ui/presentationText";
 import { classifyOutputMode, type OutputMode } from "@/lib/ai/outputMode";
 
@@ -894,7 +896,7 @@ function detectOemContradictions(params: {
     ...(params.report?.issues ?? []).map((issue) => ({
       operation: issue.missingOperation ?? issue.title,
       text: `${issue.title} ${issue.category} ${issue.finding} ${issue.impact} ${issue.missingOperation ?? ""}`,
-      followUpSource: issue.evidenceIds.length > 0 ? `Evidence references: ${issue.evidenceIds.join(", ")}` : null,
+      followUpSource: issue.evidenceIds.length > 0 ? "Support verified from reviewed file evidence." : null,
       priority: issue.severity,
     })),
   ];
@@ -1119,7 +1121,7 @@ function buildFallbackFindingReasoning(
         finding: issue.finding,
         why_it_matters: issue.impact || "This item can affect the documented repair position.",
         what_proves_it: issue.evidenceIds.length > 0
-          ? `Evidence references: ${issue.evidenceIds.join(", ")}.`
+          ? "Support verified from reviewed file evidence."
           : "Current structured analysis and estimate context; verify with source documents before use.",
         next_action: issue.missingOperation
           ? `Request documentation or estimate revision for ${issue.missingOperation}.`
@@ -1143,7 +1145,7 @@ function buildFallbackFindingReasoning(
         finding: finding.detail,
         why_it_matters: finding.detail,
         what_proves_it: finding.evidence.length > 0
-          ? finding.evidence.map((item) => `${item.source}${item.page ? ` p.${item.page}` : ""}`).join("; ")
+          ? "Support verified from reviewed file evidence."
           : "No direct evidence citation is attached to this analysis finding.",
         next_action: finding.status === "present"
           ? "Preserve the supporting record in the file."
@@ -1215,9 +1217,7 @@ function buildRationaleSummary(finding: ReportFindingReasoning): string {
 }
 
 function buildEvidenceChainSummary(finding: ReportFindingReasoning): string {
-  const support = formatExplainabilitySupport(finding.evidenceLevel);
-  const proof = finding.what_proves_it || "No source citation is attached.";
-  return cleanFormalExportText(`${support}. Support basis: ${proof}`);
+  return summarizeUserFacingSupport(finding.what_proves_it, formatExplainabilitySupport(finding.evidenceLevel));
 }
 
 function buildRiskIfOmitted(finding: ReportFindingReasoning): string {
@@ -1233,13 +1233,13 @@ function buildRiskIfOmitted(finding: ReportFindingReasoning): string {
 function formatExplainabilitySupport(evidenceLevel: ReportFindingReasoning["evidenceLevel"]): string {
   switch (evidenceLevel) {
     case "documented":
-      return "Support is verified from current file evidence";
+      return "Support verified from reviewed file evidence.";
     case "referenced":
-      return "Support is referenced and should be preserved with source metadata";
+      return "Referenced support present; completion record not fully isolated.";
     case "inferred":
       return "Support is inferred from available context and needs confirmation";
     case "missing":
-      return "Support is currently missing";
+      return "Not yet located in reviewed files.";
     case "unsupported":
       return "Support is not established";
   }
@@ -2170,13 +2170,13 @@ export function redactExportModelForDownload(exportModel: ExportModel): ExportMo
       issue: redactInsurerInText(finding.issue, insurer),
       finding: finding.finding ? redactInsurerInText(finding.finding, insurer) : undefined,
       why_it_matters: redactInsurerInText(finding.why_it_matters, insurer),
-      what_proves_it: redactInsurerInText(finding.what_proves_it, insurer),
+      what_proves_it: sanitizeUserFacingEvidenceText(redactInsurerInText(finding.what_proves_it, insurer)),
       next_action: redactInsurerInText(finding.next_action, insurer),
       rationaleSummary: finding.rationaleSummary
         ? redactInsurerInText(finding.rationaleSummary, insurer)
         : undefined,
       evidenceChainSummary: finding.evidenceChainSummary
-        ? redactInsurerInText(finding.evidenceChainSummary, insurer)
+        ? sanitizeUserFacingEvidenceText(redactInsurerInText(finding.evidenceChainSummary, insurer))
         : undefined,
       riskIfOmitted: finding.riskIfOmitted
         ? redactInsurerInText(finding.riskIfOmitted, insurer)

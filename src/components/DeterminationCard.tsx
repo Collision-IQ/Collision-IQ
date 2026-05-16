@@ -1,4 +1,5 @@
 import type { ExportModel } from "@/lib/ai/builders/buildExportModel";
+import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 
 type Props = {
   determination: ExportModel["determination"];
@@ -29,7 +30,7 @@ export default function DeterminationCard({ determination }: Props) {
             Determination
           </div>
           <div className="mt-1.5 text-base font-semibold text-card-foreground">
-            {determination.answer}
+            {sanitizeUserFacingEvidenceText(determination.answer) || determination.answer}
           </div>
         </div>
 
@@ -49,7 +50,7 @@ export default function DeterminationCard({ determination }: Props) {
           </div>
           <ul className="mt-2 ml-5 list-disc space-y-1.5 text-[13px] leading-5 text-muted-foreground">
             {determination.missingFactors.map((factor) => (
-              <li key={factor}>{factor}</li>
+              <li key={factor}>{sanitizeUserFacingEvidenceText(factor) || "Not yet located in reviewed files."}</li>
             ))}
           </ul>
         </div>

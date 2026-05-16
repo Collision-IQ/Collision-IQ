@@ -9,6 +9,7 @@ import {
 import type { ExportBuilderInput } from "./exportTemplates";
 import { buildClaimHandlingDisputeContext } from "./claimHandlingDisputeContext";
 import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
+import { buildReviewCompletenessMessage } from "@/lib/reviewCompleteness";
 import {
   buildJurisdictionUnavailableMessage,
   classifySourceAuthorityTier,
@@ -441,7 +442,10 @@ function buildImmutableCitations(
       sourceAuthorityTier: "INDUSTRY_CONTEXT",
       sourceType: "runtime",
       title: "Claim analysis runtime context",
-      locator: `Reviewed ${exportModel.confidenceIntegrity.reviewedFileCount ?? 0} of ${exportModel.confidenceIntegrity.totalKnownFileCount ?? exportModel.confidenceIntegrity.uploadedFileCount} files for this determination`,
+      locator: buildReviewCompletenessMessage({
+        reviewed: exportModel.confidenceIntegrity.reviewedFileCount ?? 0,
+        total: exportModel.confidenceIntegrity.totalKnownFileCount ?? exportModel.confidenceIntegrity.uploadedFileCount,
+      }),
       retrievedAt: new Date().toISOString(),
       confidenceScore: 0.45,
       index: citations.length,

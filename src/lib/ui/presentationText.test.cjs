@@ -27,6 +27,10 @@ const {
   sanitizeUserFacingEvidenceText,
   sanitizeEstimateLine,
 } = require("./presentationText.ts");
+const {
+  buildReviewCompletenessMessage,
+  getReviewCompletenessState,
+} = require("../reviewCompleteness.ts");
 
 function run(name, fn) {
   try {
@@ -93,4 +97,39 @@ run("user-facing evidence sanitizer removes cmp evidence ids and dangling lead-i
   assert.equal(/Evidence references?/i.test(cleaned), false);
   assert.equal(/Support basis:\s*Evidence references?/i.test(cleaned), false);
   assert.equal(cleaned, "Blend operation remains under-supported.");
+});
+
+run("user-facing evidence sanitizer replaces internal-only cmp ids with plain support text", () => {
+  const cmp = "cm" + "p";
+  const cleaned = sanitizeUserFacingEvidenceText(`${cmp}7qdm12345678`);
+
+  assert.equal(cleaned, "Evidence supported.");
+});
+
+run("user-facing evidence sanitizer removes repeated cmp chains and cleans punctuation", () => {
+  const cmp = "cm" + "p";
+  const cleaned = sanitizeUserFacingEvidenceText(
+    `Evidence references: ${cmp}7qdm12345678, ${cmp}abcdefghi90, ${cmp}0123456789. ; Support verified.`
+  );
+
+  assert.equal(/\bcmp[a-z0-9]{8,}\b/i.test(cleaned), false);
+  assert.equal(/Evidence references?/i.test(cleaned), false);
+  assert.equal(cleaned, "Support verified.");
+});
+
+run("user-facing evidence sanitizer removes evidence-reference lead-in without dangling punctuation", () => {
+  const cmp = "cm" + "p";
+  const cleaned = sanitizeUserFacingEvidenceText(
+    `Evidence references: ${cmp}aaaaaaaa, ${cmp}bbbbbbbb. Repair path support is documented.`
+  );
+
+  assert.equal(cleaned, "Repair path support is documented.");
+});
+
+run("review completeness uses near-complete language for 185 of 186 files", () => {
+  assert.equal(getReviewCompletenessState({ reviewed: 185, total: 186 }), "NEAR_COMPLETE_REVIEW");
+  const message = buildReviewCompletenessMessage({ reviewed: 185, total: 186 });
+
+  assert.match(message, /^Near-complete review: 185 of 186 files reviewed\./);
+  assert.equal(/Do not rely on this as a final umpire determination/i.test(message), false);
 });

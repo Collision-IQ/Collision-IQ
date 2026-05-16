@@ -10,6 +10,7 @@ import {
 } from "@/components/workspace/estimateComparisonPresentation";
 import type { ExportModel } from "@/lib/ai/builders/buildExportModel";
 import type { AnalysisResult, RepairIntelligenceReport } from "@/lib/ai/types/analysis";
+import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 import type { EstimateComparisonRow, WorkspaceData } from "@/types/workspaceTypes";
 
 export type EvidenceTargetType =
@@ -417,22 +418,7 @@ function cleanNarrative(value: string) {
 }
 
 function cleanEvidenceText(value: string | null | undefined) {
-  let cleaned = (value ?? "").replace(/\s+/g, " ").trim();
-  if (!cleaned) return "";
-
-  cleaned = cleaned
-    .replace(/\bEvidence references?:\s*(?:[,; ]*(?:cmp[a-z0-9-]{6,}|[a-f0-9]{24,}|[a-f0-9-]{32,}))+\.?/gi, "")
-    .replace(/\bEvidence references?:\s*\.?/gi, "")
-    .replace(/\buploaded document:\s*(?:uploaded document\s*,?\s*){2,}/gi, "supporting evidence: ")
-    .replace(/\b(?:uploaded document\s*,\s*){2,}uploaded document\b/gi, "supporting evidence")
-    .replace(/\buploaded document\b/gi, "supporting evidence")
-    .replace(/\b(?:cmp[a-z0-9-]{6,}|[a-f0-9]{24,}|[a-f0-9]{8}-[a-f0-9-]{27,})\b/gi, "")
-    .replace(/\s+([,.;:])/g, "$1")
-    .replace(/(?:,\s*){2,}/g, ", ")
-    .replace(/\(\s*\)/g, "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-
+  const cleaned = sanitizeUserFacingEvidenceText(value).replace(/\s+/g, " ").trim();
   const normalized = cleaned.toLowerCase().replace(/[^\w\s/-]/g, " ").replace(/\s+/g, " ").trim();
   if (!normalized || /^(?:evidence references?|current file evidence|supporting evidence|source references?)$/.test(normalized)) {
     return "";

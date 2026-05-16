@@ -63,6 +63,7 @@ import {
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
 } from "@/lib/uploadSafety/uploadLimits";
+import { buildReviewCompletenessMessage } from "@/lib/reviewCompleteness";
 import { VOICE_PRESETS } from "@/lib/voicePresets";
 
 interface Attachment {
@@ -336,17 +337,10 @@ function countKnownFilesFromUploadResponse(data: UploadResponse | null, returned
 }
 
 function buildReviewCompletionMessage(progress: ReviewProgress) {
-  const reviewed = progress.reviewedForDetermination;
-  const total = Math.max(progress.totalKnownFiles, reviewed);
-  const lines = [`Reviewed ${reviewed} of ${total} files for this determination.`];
-
-  if (reviewed === total) {
-    lines.push("Full-file review complete.");
-  } else {
-    lines.push(`Only ${reviewed} of ${total} files reviewed. Do not rely on this as a final umpire determination.`);
-  }
-
-  return lines.join(" ");
+  return buildReviewCompletenessMessage({
+    reviewed: progress.reviewedForDetermination,
+    total: progress.totalKnownFiles,
+  });
 }
 
 function isZipFile(file: Pick<File, "name" | "type">) {

@@ -32,6 +32,8 @@ const GENERIC_OPERATION_ONLY_PATTERN = /^(?:r\s*&\s*i|r\s*&\s*r|repl|rpr|refn|o\
 const CMP_EVIDENCE_ID_PATTERN = /\bcmp[a-z0-9]{8,}\b/gi;
 const CMP_EVIDENCE_ID_CHAIN_PATTERN = /(?:\bcmp[a-z0-9]{8,}\b[\s,;]*){2,}/gi;
 const EVIDENCE_REFERENCE_LEAD_IN_PATTERN = /Evidence references?:\s*(?:[.,;:\-\s]*)/gi;
+const INTERNAL_METADATA_BLOB_PATTERN =
+  /\b(?:evidence|source|support|vector|retrieval|metadata|ingestion|reference|chain|ids?)\s*(?:references?|ids?|chain|metadata|blob)?\s*:\s*(?:\[[^\]]{0,500}\]|\{[^}]{0,500}\}|(?:[\w:-]{8,}\s*[,;]\s*){2,}[\w:-]{8,})/gi;
 const KNOWN_OPERATION_VERBS = [
   "R&I",
   "R&R",
@@ -81,7 +83,7 @@ export function cleanPresentationText(value: string | null | undefined): string 
 }
 
 export function cleanPresentationMarkdown(value: string): string {
-  return cleanPresentationText(value);
+  return sanitizeUserFacingEvidenceText(value);
 }
 
 export function sanitizeEstimateLine(value: string | null | undefined): EstimateLineSanitization {
@@ -401,10 +403,20 @@ export function sanitizeUserFacingEvidenceText(
   input: string | null | undefined,
   contextTitle?: string | null
 ): string {
-  let cleaned = cleanPresentationText(input ?? "");
+  const original = input ?? "";
+  const hadInternalEvidenceId =
+    CMP_EVIDENCE_ID_PATTERN.test(original) ||
+    CMP_EVIDENCE_ID_CHAIN_PATTERN.test(original) ||
+    /\b(?:vector|retrieval|ingestion|metadata|reference|evidence)[-_ ]?[a-z0-9]{8,}\b/i.test(original);
+  CMP_EVIDENCE_ID_PATTERN.lastIndex = 0;
+  CMP_EVIDENCE_ID_CHAIN_PATTERN.lastIndex = 0;
+
+  let cleaned = cleanPresentationText(original);
   if (!cleaned) return "";
 
   cleaned = cleaned
+    .replace(INTERNAL_METADATA_BLOB_PATTERN, " ")
+    .replace(/\b(?:evidence|source|support|vector|retrieval|metadata|ingestion|reference|chain)\s*(?:ids?|references?|chain|metadata)\s*:\s*$/gim, " ")
     .replace(CMP_EVIDENCE_ID_CHAIN_PATTERN, " ")
     .replace(CMP_EVIDENCE_ID_PATTERN, " ")
     .replace(/\bEvidence references?:\s*(?:[,; ]*(?:cmp[a-z0-9-]{6,}|[a-f0-9]{24,}|[a-f0-9-]{32,}))+\.?/gi, "")
@@ -414,6 +426,7 @@ export function sanitizeUserFacingEvidenceText(
     .replace(/\b[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\b/gi, "uploaded document")
     .replace(/\b[a-f0-9]{24,64}\b/gi, "uploaded file")
     .replace(/\b(?:evidence|chain|source|finding|issue|doc|line|parser|vector|object)[-_ ]?[a-z0-9]{8,}\b/gi, "uploaded document")
+    .replace(/\b(?:cmox|cm|vec|emb|retrieval|vector|chunk|node)[-_]?[a-z0-9]{6,}\b/gi, " ")
     .replace(/\b(?:uploaded document\s*[,;:]?\s*){2,}/gi, "supporting evidence ")
     .replace(/\buploaded document:\s*(?:uploaded document\s*,?\s*){2,}/gi, "supporting evidence: ")
     .replace(/\bSame rationale as earlier\b/gi, "Related estimate rationale")
@@ -456,8 +469,29 @@ export function sanitizeUserFacingEvidenceText(
     !cleaned ||
     /^(?:evidence references?|supporting evidence|current file evidence|source references?)$/i.test(internalOnly)
   ) {
-    return "";
+    return hadInternalEvidenceId ? "Evidence supported." : "";
   }
 
   return cleaned;
+}
+
+export function summarizeUserFacingSupport(
+  value: string | null | undefined,
+  fallback: string = "Evidence supported."
+): string {
+  const cleaned = sanitizeUserFacingEvidenceText(value);
+  if (!cleaned) return fallback;
+  if (/not yet located in reviewed files/i.test(cleaned)) {
+    return "Not yet located in reviewed files.";
+  }
+  if (/referenced|not fully isolated|completion record/i.test(cleaned)) {
+    return "Referenced support present; completion record not fully isolated.";
+  }
+  if (/final proof incomplete|proof incomplete|support present/i.test(cleaned)) {
+    return "Support present; final proof incomplete.";
+  }
+  if (/invoice|photo|estimate|document|reviewed file|visible|documented/i.test(cleaned)) {
+    return "Support verified from reviewed file evidence.";
+  }
+  return fallback;
 }

@@ -8,6 +8,7 @@ import type { CarrierReportDocument } from "./carrierPdfBuilder";
 import type { ExportBuilderInput } from "./exportTemplates";
 import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
 import { sanitizeCustomerFacingDocument, toCustomerFacingList, toCustomerFacingText } from "@/lib/ai/customerFacingText";
+import { buildReviewCompletenessMessage } from "@/lib/reviewCompleteness";
 
 export function buildCollisionSnapshotPdf(params: ExportBuilderInput): CarrierReportDocument {
   const exportModel = resolveSnapshotExportModel(params);
@@ -179,7 +180,10 @@ function buildEstimateBullets(snapshot: ReturnType<typeof buildCollisionSnapshot
 
 function buildCompletenessBullets(snapshot: ReturnType<typeof buildCollisionSnapshot>): string[] {
   return [
-    `Reviewed ${snapshot.evidenceCompleteness.reviewedFileCount} of ${snapshot.evidenceCompleteness.totalKnownFileCount} files for this determination.`,
+    buildReviewCompletenessMessage({
+      reviewed: snapshot.evidenceCompleteness.reviewedFileCount,
+      total: snapshot.evidenceCompleteness.totalKnownFileCount,
+    }),
     snapshot.evidenceCompleteness.uploadLimitReached ? "The current upload limit was reached." : "More files can be added if needed.",
     snapshot.evidenceCompleteness.userIndicatedMoreFiles
       ? "The owner or shop indicated there may be more files to review."

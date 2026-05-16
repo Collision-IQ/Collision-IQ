@@ -16,6 +16,7 @@ import {
   cleanOperationDisplayText,
   normalizeEstimateOperationLabel,
 } from "@/lib/ui/presentationText";
+import { buildReviewCompletenessMessage } from "@/lib/reviewCompleteness";
 
 export type CarrierReportSection = {
   title: string;
@@ -284,7 +285,10 @@ function buildConfidenceIntegrityBullets(
     `Base confidence: ${integrity.baseConfidence}.`,
     `Adjusted confidence: ${integrity.adjustedConfidence}.`,
     `Completeness: ${formatCompletenessStatus(integrity.completenessStatus)}.`,
-    `Reviewed ${integrity.reviewedFileCount ?? 0} of ${integrity.totalKnownFileCount ?? integrity.uploadedFileCount} files for this determination.`,
+    buildReviewCompletenessMessage({
+      reviewed: integrity.reviewedFileCount ?? 0,
+      total: integrity.totalKnownFileCount ?? integrity.uploadedFileCount,
+    }),
     typeof integrity.indexedFileCount === "number" ? `Indexed files: ${integrity.indexedFileCount}.` : undefined,
     typeof integrity.visionProcessedFileCount === "number" ? `Vision-processed files: ${integrity.visionProcessedFileCount}.` : undefined,
     integrity.uploadLimitReached ? "Upload cap reached for this review." : "Upload cap not reached.",
