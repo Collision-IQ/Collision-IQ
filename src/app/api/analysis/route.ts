@@ -97,6 +97,13 @@ type AnalysisRequestBody = {
   } | null;
   userIntent?: string | null;
   assistanceProfile?: string | null;
+  reviewProgress?: {
+    uploaded?: number;
+    indexed?: number;
+    visionProcessed?: number;
+    reviewedForDetermination?: number;
+    totalKnownFiles?: number;
+  } | null;
 };
 
 class AttachmentAccessError extends Error {
@@ -267,6 +274,7 @@ export async function POST(req: Request) {
       userIntent: requestUserIntent || null,
       uploadLimitReached: artifactIds.length >= uploadLimits.maxFilesPerReview,
       totalUploadedFileCount: mergeArtifactIds(existingCase?.artifactIds ?? [], artifactIds).length,
+      reviewProgress: body.reviewProgress ?? null,
     });
     let analysis = normalizeReportToAnalysisResult(report);
     const retrievalSnapshot = buildAnalysisRetrievalSnapshot({
@@ -384,10 +392,13 @@ export async function POST(req: Request) {
 
     const workspaceData = buildWorkspaceDataFromReport(stored.report);
 
+    const reviewProgress = buildReviewProgressPayload(stored.report, stored.artifactIds);
+
     return NextResponse.json({
       reportId: stored.id,
       createdAt: stored.createdAt,
       report: stored.report,
+      reviewProgress,
       linkedEvidence: (stored.report.linkedEvidence ?? []).map((doc) => ({
         id: doc.title || doc.sourceType || "linked-supporting-document",
         title: doc.title,
@@ -1239,6 +1250,7 @@ function applyLinkedEvidenceToReport(params: {
   userIntent?: string | null;
   uploadLimitReached?: boolean;
   totalUploadedFileCount?: number;
+  reviewProgress?: AnalysisRequestBody["reviewProgress"];
 }): RepairIntelligenceReport {
   const evidenceCorpus = buildEvidenceCorpus({
     estimateText: params.report.sourceEstimateText ?? "",
@@ -1279,6 +1291,39 @@ function applyLinkedEvidenceToReport(params: {
     nextEvidenceRegistry: evidenceRegistry,
     nextDetermination: params.report.recommendedActions[0] ?? "",
   });
+  const uploadedEvidenceCount = evidenceRegistry.filter((item) => item.ingestionState === "uploaded").length;
+  const indexedEvidenceCount = evidenceRegistry.filter((item) =>
+    ["uploaded", "ingested"].includes(item.ingestionState)
+  ).length;
+  const visionProcessedEvidenceCount = evidenceRegistry.filter(
+    (item) => item.evidenceStatus === "VISIBLE_IN_IMAGES"
+  ).length;
+  const uploadedFileCount = Math.max(
+    params.totalUploadedFileCount ?? 0,
+    params.reviewProgress?.uploaded ?? 0,
+    params.previousReport?.ingestionMeta?.uploadedFileCount ?? 0,
+    uploadedEvidenceCount,
+    params.uploadedAttachments.length
+  );
+  const indexedFileCount = Math.max(
+    params.reviewProgress?.indexed ?? 0,
+    params.previousReport?.ingestionMeta?.indexedFileCount ?? 0,
+    indexedEvidenceCount,
+    uploadedFileCount
+  );
+  const visionProcessedFileCount = Math.max(
+    params.reviewProgress?.visionProcessed ?? 0,
+    params.previousReport?.ingestionMeta?.visionProcessedFileCount ?? 0,
+    visionProcessedEvidenceCount
+  );
+  const reviewedFileCount = uploadedEvidenceCount;
+  const totalKnownFileCount = Math.max(
+    params.reviewProgress?.totalKnownFiles ?? 0,
+    params.previousReport?.ingestionMeta?.totalKnownFileCount ?? 0,
+    uploadedFileCount,
+    indexedFileCount,
+    reviewedFileCount
+  );
 
   const nextReport: RepairIntelligenceReport = {
     ...params.report,
@@ -1301,7 +1346,11 @@ function applyLinkedEvidenceToReport(params: {
       active: true,
       reassessedAt: new Date().toISOString(),
       reassessmentMode,
-      uploadedFileCount: params.totalUploadedFileCount ?? params.uploadedAttachments.length,
+      uploadedFileCount,
+      indexedFileCount,
+      visionProcessedFileCount,
+      reviewedFileCount,
+      totalKnownFileCount,
       uploadLimitReached: Boolean(params.uploadLimitReached),
       userIndicatedMoreFiles: userIndicatedMoreFiles(params.userIntent ?? ""),
     },
@@ -1328,6 +1377,52 @@ function applyLinkedEvidenceToReport(params: {
 
 function userIndicatedMoreFiles(value: string): boolean {
   return /\b(more|additional|other|another|rest of|remaining)\s+(files?|documents?|photos?|estimates?|invoices?)\b|\b(can'?t|cannot|unable to|won'?t let me)\s+upload\b|\bupload limit\b|\btoo many files\b/i.test(value);
+}
+
+function buildReviewProgressPayload(
+  report: RepairIntelligenceReport,
+  artifactIds: string[]
+) {
+  const uploadedEvidenceCount =
+    report.evidenceRegistry?.filter((item) => item.ingestionState === "uploaded").length ?? 0;
+  const indexedEvidenceCount =
+    report.evidenceRegistry?.filter((item) =>
+      ["uploaded", "ingested"].includes(item.ingestionState)
+    ).length ?? uploadedEvidenceCount;
+  const visionProcessedEvidenceCount =
+    report.evidenceRegistry?.filter((item) => item.evidenceStatus === "VISIBLE_IN_IMAGES").length ?? 0;
+  const uploaded = Math.max(
+    report.ingestionMeta?.uploadedFileCount ?? 0,
+    artifactIds.length,
+    uploadedEvidenceCount
+  );
+  const indexed = Math.max(
+    report.ingestionMeta?.indexedFileCount ?? 0,
+    indexedEvidenceCount,
+    uploadedEvidenceCount
+  );
+  const visionProcessed = Math.max(
+    report.ingestionMeta?.visionProcessedFileCount ?? 0,
+    visionProcessedEvidenceCount
+  );
+  const reviewedForDetermination = Math.max(
+    report.ingestionMeta?.reviewedFileCount ?? 0,
+    uploadedEvidenceCount
+  );
+  const totalKnownFiles = Math.max(
+    report.ingestionMeta?.totalKnownFileCount ?? 0,
+    uploaded,
+    indexed,
+    reviewedForDetermination
+  );
+
+  return {
+    uploaded,
+    indexed,
+    visionProcessed,
+    reviewedForDetermination,
+    totalKnownFiles,
+  };
 }
 
 function buildCaseEvidenceRegistry(params: {

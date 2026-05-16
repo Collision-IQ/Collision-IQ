@@ -659,13 +659,23 @@ function buildConfidenceIntegrity(params: {
     params.report?.evidenceRegistry?.filter((item) => item.ingestionState === "uploaded").length ??
     0;
   const indexedFileCount =
+    params.report?.ingestionMeta?.indexedFileCount ??
     params.report?.evidenceRegistry?.filter((item) =>
       ["uploaded", "ingested"].includes(item.ingestionState)
     ).length ?? uploadedFileCount;
   const visionProcessedFileCount =
+    params.report?.ingestionMeta?.visionProcessedFileCount ??
     params.report?.evidenceRegistry?.filter((item) => item.evidenceStatus === "VISIBLE_IN_IMAGES").length ?? 0;
-  const reviewedFileCount = uploadedFileCount;
-  const totalKnownFileCount = Math.max(uploadedFileCount, indexedFileCount);
+  const reviewedFileCount =
+    params.report?.ingestionMeta?.reviewedFileCount ??
+    params.report?.evidenceRegistry?.filter((item) => item.ingestionState === "uploaded").length ??
+    0;
+  const totalKnownFileCount = Math.max(
+    params.report?.ingestionMeta?.totalKnownFileCount ?? 0,
+    uploadedFileCount,
+    indexedFileCount,
+    reviewedFileCount
+  );
   const uploadLimitReached = Boolean(params.report?.ingestionMeta?.uploadLimitReached);
   const userIndicatedMoreFiles = Boolean(params.report?.ingestionMeta?.userIndicatedMoreFiles);
   const missingCriticalEvidence = deriveMissingCriticalEvidence(params);

@@ -179,7 +179,7 @@ function buildEstimateBullets(snapshot: ReturnType<typeof buildCollisionSnapshot
 
 function buildCompletenessBullets(snapshot: ReturnType<typeof buildCollisionSnapshot>): string[] {
   return [
-    `Uploaded files reviewed for this determination: ${snapshot.evidenceCompleteness.uploadedFileCount}`,
+    `Reviewed ${snapshot.evidenceCompleteness.reviewedFileCount} of ${snapshot.evidenceCompleteness.totalKnownFileCount} files for this determination.`,
     snapshot.evidenceCompleteness.uploadLimitReached ? "The current upload limit was reached." : "More files can be added if needed.",
     snapshot.evidenceCompleteness.userIndicatedMoreFiles
       ? "The owner or shop indicated there may be more files to review."

@@ -39,6 +39,8 @@ export type CollisionSnapshot = {
     adjustedConfidence: ExportModel["confidenceIntegrity"]["adjustedConfidence"];
     completenessStatus: ExportModel["confidenceIntegrity"]["completenessStatus"];
     uploadedFileCount: number;
+    reviewedFileCount: number;
+    totalKnownFileCount: number;
     uploadLimitReached: boolean;
     userIndicatedMoreFiles: boolean;
     missingCriticalEvidence: string[];
@@ -88,6 +90,10 @@ export function buildCollisionSnapshot(input: SnapshotSource): CollisionSnapshot
       adjustedConfidence: snapshotSafeReport.confidenceIntegrity.adjustedConfidence,
       completenessStatus: snapshotSafeReport.confidenceIntegrity.completenessStatus,
       uploadedFileCount: snapshotSafeReport.confidenceIntegrity.uploadedFileCount,
+      reviewedFileCount: snapshotSafeReport.confidenceIntegrity.reviewedFileCount ?? 0,
+      totalKnownFileCount:
+        snapshotSafeReport.confidenceIntegrity.totalKnownFileCount ??
+        snapshotSafeReport.confidenceIntegrity.uploadedFileCount,
       uploadLimitReached: snapshotSafeReport.confidenceIntegrity.uploadLimitReached,
       userIndicatedMoreFiles: snapshotSafeReport.confidenceIntegrity.userIndicatedMoreFiles,
       missingCriticalEvidence: snapshotSafeReport.confidenceIntegrity.missingCriticalEvidence.slice(0, 5),

@@ -335,6 +335,20 @@ function countKnownFilesFromUploadResponse(data: UploadResponse | null, returned
   return Math.max(telemetryKnown, zipKnown, returnedUploads.length + (data?.failedUploads?.length ?? 0));
 }
 
+function buildReviewCompletionMessage(progress: ReviewProgress) {
+  const reviewed = progress.reviewedForDetermination;
+  const total = Math.max(progress.totalKnownFiles, reviewed);
+  const lines = [`Reviewed ${reviewed} of ${total} files for this determination.`];
+
+  if (reviewed === total) {
+    lines.push("Full-file review complete.");
+  } else {
+    lines.push(`Only ${reviewed} of ${total} files reviewed. Do not rely on this as a final umpire determination.`);
+  }
+
+  return lines.join(" ");
+}
+
 function isZipFile(file: Pick<File, "name" | "type">) {
   return (
     file.name.toLowerCase().endsWith(".zip") ||
@@ -501,6 +515,13 @@ export default function ChatWidget({
   const analysisTextRef = useRef("");
   const workspaceDataRef = useRef<WorkspaceData | null>(null);
   const attachmentsRef = useRef<Attachment[]>([]);
+  const reviewProgressRef = useRef<ReviewProgress>({
+    uploaded: 0,
+    indexed: 0,
+    visionProcessed: 0,
+    reviewedForDetermination: 0,
+    totalKnownFiles: 0,
+  });
   const firstAttachmentAtRef = useRef<number | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -514,6 +535,19 @@ export default function ChatWidget({
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
   const recordingMimeTypeRef = useRef("audio/webm");
+
+  const updateReviewProgress = useCallback(
+    (update: SetStateAction<ReviewProgress>) => {
+      const next =
+        typeof update === "function"
+          ? (update as (current: ReviewProgress) => ReviewProgress)(reviewProgressRef.current)
+          : update;
+      reviewProgressRef.current = next;
+      onReviewProgressChange?.(next);
+      return next;
+    },
+    [onReviewProgressChange]
+  );
 
   const hasAnyAttachment = useMemo(() => attachments.length > 0, [attachments]);
   const isLikelyMobileCaptureDevice = useMemo(() => {
@@ -1192,7 +1226,7 @@ export default function ChatWidget({
     audioBlobCacheRef.current.clear();
     setAttachments([]);
     setTotalFilesReviewed(0);
-    onReviewProgressChange?.({
+    updateReviewProgress({
       uploaded: 0,
       indexed: 0,
       visionProcessed: 0,
@@ -1229,8 +1263,8 @@ export default function ChatWidget({
     invalidateStructuredAnalysis,
     onAttachmentChange,
     onAttachmentsChange,
-    onReviewProgressChange,
     onSessionReset,
+    updateReviewProgress,
   ]);
 
   useEffect(() => {
@@ -1362,6 +1396,7 @@ export default function ChatWidget({
             activeCaseId,
             userIntent: messageToSend,
             assistanceProfile,
+            reviewProgress: reviewProgressRef.current,
           }),
         });
         const analysisDurationMs = Date.now() - analysisStartMs;
@@ -1403,6 +1438,7 @@ export default function ChatWidget({
           };
           reassessmentDelta?: RepairIntelligenceReport["reassessmentDelta"];
           artifactRefreshPolicy?: RepairIntelligenceReport["artifactRefreshPolicy"];
+          reviewProgress?: ReviewProgress;
         };
 
         const returnedActiveCaseId =
@@ -1421,17 +1457,31 @@ export default function ChatWidget({
         onAnalysisPanelChange?.(analysisData.panel ?? null);
         onAnalysisStatusChange?.("complete", null);
         onAnalysisLoadingChange?.(false);
-        setTotalFilesReviewed((current) => current + attachmentStats.fileCount);
-        onReviewProgressChange?.((current) => ({
-          ...current,
-          reviewedForDetermination: current.reviewedForDetermination + attachmentStats.fileCount,
-          totalKnownFiles: Math.max(current.totalKnownFiles, current.reviewedForDetermination + attachmentStats.fileCount),
-        }));
+        const nextReviewProgress = updateReviewProgress((current) => {
+          const reviewedForDetermination =
+            analysisData.reviewProgress?.reviewedForDetermination ??
+            current.reviewedForDetermination + attachmentStats.fileCount;
+          return {
+            uploaded: Math.max(current.uploaded, analysisData.reviewProgress?.uploaded ?? 0),
+            indexed: Math.max(current.indexed, analysisData.reviewProgress?.indexed ?? 0),
+            visionProcessed: Math.max(
+              current.visionProcessed,
+              analysisData.reviewProgress?.visionProcessed ?? 0
+            ),
+            reviewedForDetermination,
+            totalKnownFiles: Math.max(
+              current.totalKnownFiles,
+              analysisData.reviewProgress?.totalKnownFiles ?? 0,
+              reviewedForDetermination
+            ),
+          };
+        });
+        setTotalFilesReviewed(nextReviewProgress.reviewedForDetermination);
         emitSafeCrmEventFromClient({
           event: "upload_batch_completed",
           plan: productPlan,
           fileCount: attachmentStats.fileCount,
-          totalFilesReviewed: totalFilesReviewed + attachmentStats.fileCount,
+          totalFilesReviewed: nextReviewProgress.reviewedForDetermination,
         });
         console.info("[attachments] upload completion case state", {
           activeCaseId,
@@ -1451,12 +1501,11 @@ export default function ChatWidget({
           messageCountAfter: updatedMessages.length,
           skippedReset: true,
         });
-        const reviewedCount = totalFilesReviewed + attachmentStats.fileCount;
         upsertSystemStatusMessage(
           `${formatCaseUpdateStatus(
             analysisData.reassessmentDelta,
             analysisData.artifactRefreshPolicy
-          )} ${buildNextBatchPrompt(reviewedCount, maxUploadBatchFiles)}`
+          )} ${buildReviewCompletionMessage(nextReviewProgress)} ${buildNextBatchPrompt(nextReviewProgress.reviewedForDetermination, maxUploadBatchFiles)}`
         );
         setAttachments((prev) =>
           prev.map((attachment) => ({
@@ -1503,6 +1552,7 @@ export default function ChatWidget({
         const reply = redactExternalDocumentUrls(
           data.reply?.trim() || "Case reassessment complete."
         );
+        const replyWithReviewProgress = `${reply}\n\n${buildReviewCompletionMessage(nextReviewProgress)}`;
 
         if (sessionRef.current === mySession) {
           stopSpeaking();
@@ -1510,13 +1560,13 @@ export default function ChatWidget({
           const assistantMessage = createMessage(
             messageCounterRef.current,
             "assistant",
-            reply
+            replyWithReviewProgress
           );
           setMessages((prev) => [...prev, assistantMessage]);
-          updateAnalysisText(reply);
+          updateAnalysisText(replyWithReviewProgress);
           onPrimaryAnalysisChange?.({
             messageId: assistantMessage.id,
-            content: reply,
+            content: replyWithReviewProgress,
           });
         }
 
@@ -1576,12 +1626,11 @@ export default function ChatWidget({
             analysisRunRef.current === activeAnalysisRunId
           ) {
             onAnalysisLoadingChange?.(false);
-            setTotalFilesReviewed((current) => current + attachmentStats.fileCount);
             emitSafeCrmEventFromClient({
               event: "upload_batch_completed",
               plan: productPlan,
               fileCount: attachmentStats.fileCount,
-              totalFilesReviewed: totalFilesReviewed + attachmentStats.fileCount,
+              totalFilesReviewed: reviewProgressRef.current.reviewedForDetermination,
             });
           }
         }
@@ -1610,6 +1659,7 @@ export default function ChatWidget({
             activeCaseId: analysisReportIdRef.current,
             userIntent: messageToSend,
             assistanceProfile,
+            reviewProgress: reviewProgressRef.current,
           }),
         })
           .then(async (analysisResponse) => {
@@ -1651,6 +1701,7 @@ export default function ChatWidget({
               };
               reassessmentDelta?: RepairIntelligenceReport["reassessmentDelta"];
               artifactRefreshPolicy?: RepairIntelligenceReport["artifactRefreshPolicy"];
+              reviewProgress?: ReviewProgress;
             };
             // Backend workspaceData is the primary source of truth for Workspace rendering.
             analysisReportIdRef.current = analysisData.reportId ?? null;
@@ -1663,12 +1714,26 @@ export default function ChatWidget({
             onAnalysisPanelChange?.(analysisData.panel ?? null);
             onAnalysisStatusChange?.("complete", null);
             onAnalysisLoadingChange?.(false);
-            setTotalFilesReviewed((current) => current + attachmentStats.fileCount);
-            onReviewProgressChange?.((current) => ({
-              ...current,
-              reviewedForDetermination: current.reviewedForDetermination + attachmentStats.fileCount,
-              totalKnownFiles: Math.max(current.totalKnownFiles, current.reviewedForDetermination + attachmentStats.fileCount),
-            }));
+            const nextReviewProgress = updateReviewProgress((current) => {
+              const reviewedForDetermination =
+                analysisData.reviewProgress?.reviewedForDetermination ??
+                current.reviewedForDetermination + attachmentStats.fileCount;
+              return {
+                uploaded: Math.max(current.uploaded, analysisData.reviewProgress?.uploaded ?? 0),
+                indexed: Math.max(current.indexed, analysisData.reviewProgress?.indexed ?? 0),
+                visionProcessed: Math.max(
+                  current.visionProcessed,
+                  analysisData.reviewProgress?.visionProcessed ?? 0
+                ),
+                reviewedForDetermination,
+                totalKnownFiles: Math.max(
+                  current.totalKnownFiles,
+                  analysisData.reviewProgress?.totalKnownFiles ?? 0,
+                  reviewedForDetermination
+                ),
+              };
+            });
+            setTotalFilesReviewed(nextReviewProgress.reviewedForDetermination);
             console.info("[attachments] upload completion case state", {
               activeCaseId: analysisReportIdRef.current,
               reportId: analysisData.reportId ?? null,
@@ -1686,14 +1751,13 @@ export default function ChatWidget({
               refinedWithRetrieval: analysisData.refinedWithRetrieval ?? false,
               analysisCompletedAt: analysisData.analysisCompletedAt ?? null,
             });
-            const reviewedCount = totalFilesReviewed + attachmentStats.fileCount;
             upsertSystemStatusMessage(
               `${analysisData.caseContinuity?.mode === "active_case_update"
                 ? formatCaseUpdateStatus(
                     analysisData.reassessmentDelta,
                     analysisData.artifactRefreshPolicy
                   )
-                : "Analysis complete."} ${buildNextBatchPrompt(reviewedCount, maxUploadBatchFiles)}`
+                : "Analysis complete."} ${buildReviewCompletionMessage(nextReviewProgress)} ${buildNextBatchPrompt(nextReviewProgress.reviewedForDetermination, maxUploadBatchFiles)}`
             );
             setAttachments((prev) =>
               prev.map((attachment) => ({
@@ -1949,7 +2013,7 @@ export default function ChatWidget({
       });
     }
 
-    onReviewProgressChange?.((current) => ({
+    updateReviewProgress((current) => ({
       uploaded: current.uploaded + 1,
       indexed: current.indexed + indexedCount,
       visionProcessed: current.visionProcessed + visionProcessedCount,

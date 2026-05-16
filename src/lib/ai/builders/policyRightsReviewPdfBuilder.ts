@@ -441,7 +441,7 @@ function buildImmutableCitations(
       sourceAuthorityTier: "INDUSTRY_CONTEXT",
       sourceType: "runtime",
       title: "Claim analysis runtime context",
-      locator: `Uploaded files reviewed for this determination: ${exportModel.confidenceIntegrity.reviewedFileCount ?? exportModel.confidenceIntegrity.uploadedFileCount}`,
+      locator: `Reviewed ${exportModel.confidenceIntegrity.reviewedFileCount ?? 0} of ${exportModel.confidenceIntegrity.totalKnownFileCount ?? exportModel.confidenceIntegrity.uploadedFileCount} files for this determination`,
       retrievedAt: new Date().toISOString(),
       confidenceScore: 0.45,
       index: citations.length,

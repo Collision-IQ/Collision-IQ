@@ -119,7 +119,7 @@ function resolveEffectiveReviewProgress(
 ): ReviewProgress {
   const reviewedForDetermination = Math.max(
     progress.reviewedForDetermination,
-    integrity.reviewedFileCount ?? integrity.uploadedFileCount
+    integrity.reviewedFileCount ?? 0
   );
   const indexed = Math.max(progress.indexed, integrity.indexedFileCount ?? integrity.uploadedFileCount);
   const visionProcessed = Math.max(progress.visionProcessed, integrity.visionProcessedFileCount ?? 0);

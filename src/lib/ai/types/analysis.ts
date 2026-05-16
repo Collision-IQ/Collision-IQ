@@ -507,6 +507,10 @@ export type RepairIntelligenceReport = {
     reassessedAt?: string;
     reassessmentMode?: "new_case" | "active_case_update";
     uploadedFileCount?: number;
+    indexedFileCount?: number;
+    visionProcessedFileCount?: number;
+    reviewedFileCount?: number;
+    totalKnownFileCount?: number;
     uploadLimitReached?: boolean;
     userIndicatedMoreFiles?: boolean;
     closedAt?: string;

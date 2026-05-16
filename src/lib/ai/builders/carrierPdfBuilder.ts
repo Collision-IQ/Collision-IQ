@@ -284,7 +284,7 @@ function buildConfidenceIntegrityBullets(
     `Base confidence: ${integrity.baseConfidence}.`,
     `Adjusted confidence: ${integrity.adjustedConfidence}.`,
     `Completeness: ${formatCompletenessStatus(integrity.completenessStatus)}.`,
-    `Uploaded files reviewed for this determination: ${integrity.reviewedFileCount ?? integrity.uploadedFileCount}.`,
+    `Reviewed ${integrity.reviewedFileCount ?? 0} of ${integrity.totalKnownFileCount ?? integrity.uploadedFileCount} files for this determination.`,
     typeof integrity.indexedFileCount === "number" ? `Indexed files: ${integrity.indexedFileCount}.` : undefined,
     typeof integrity.visionProcessedFileCount === "number" ? `Vision-processed files: ${integrity.visionProcessedFileCount}.` : undefined,
     integrity.uploadLimitReached ? "Upload cap reached for this review." : "Upload cap not reached.",
