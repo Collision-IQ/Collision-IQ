@@ -15,11 +15,14 @@ import {
   sanitizeUserFacingEvidenceText,
   summarizeUserFacingSupport,
 } from "@/lib/ui/presentationText";
+import { buildCompactAttachmentSummary } from "@/components/chatWidget/attachmentUtils";
 
 type AttachmentTrayItem = {
   attachmentId: string;
   filename: string;
   hasVision?: boolean;
+  mime?: string;
+  source?: string;
 };
 
 type Props = {
@@ -239,6 +242,10 @@ export default function StructuredAnalysisCanvas({
   const caseLabel =
     renderModel.vehicle.label || renderModel.reportFields.vehicleLabel || "Vehicle still being resolved";
   const latestFile = attachments[attachments.length - 1]?.filename ?? "No attachment yet";
+  const attachmentStatus =
+    attachments.length > 20
+      ? buildCompactAttachmentSummary(attachments)
+      : `Latest file: ${latestFile}`;
   const issueCount = renderModel.supplementItems.length;
   const focusModeActive = activeInsightKey !== null;
   const activeEvidenceTarget = evidenceModel
@@ -259,7 +266,7 @@ export default function StructuredAnalysisCanvas({
               {caseLabel}
             </div>
             <div className="mt-1 break-words text-[12px] leading-5 text-muted-foreground">
-              Latest file: {latestFile}
+              {attachmentStatus}
             </div>
           </div>
 

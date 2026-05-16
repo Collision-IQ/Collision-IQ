@@ -31,6 +31,7 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 };
 
 const { normalizeNarrativeProse } = require("./narrativeNormalization.ts");
+const { sanitizeUserFacingEvidenceText } = require("../ui/presentationText.ts");
 
 function run(name, fn) {
   try {
@@ -72,8 +73,25 @@ run("normalizes stacked repair operation chains while preserving posture and amo
   assert.match(normalized, /Final Posture:\naward reconciled supported amount \$18,425\.36\./i);
   assert.match(
     normalized,
-    /quarter replacement path, rear bumper replacement\/overhaul, tail lamp pocket, fuel pocket, blind spot radar replacement, and related calibration activity/i
+    /The file supports:\n- quarter replacement path\n- rear bumper replacement or overhaul\n- tail lamp pocket work\n- fuel pocket work\n- blind spot radar replacement\n- scan, calibration, and alignment activity/i
   );
+  assert.match(normalized, /Because the reviewed evidence supports OE\/safety repair scope/i);
   assert.match(normalized, /carrier omits calibration and structural verification/i);
   assert.match(normalized, /shop still must prove final invoice/i);
+});
+
+run("separates numbered umpire sections and preserves sanitized decision output", () => {
+  const internalIdPrefix = "cm" + "p";
+  const compressed =
+    `1. Appraisal Recommendation Award reconciled supported amount $18,425.36 2. Award Posture RECONCILED_SUPPORTED Evidence references: ${internalIdPrefix}8abc1234, ${internalIdPrefix}9def5678 3. Why the selected posture is better supported The carrier omits calibration and structural verification.`;
+
+  const normalized = normalizeNarrativeProse(
+    sanitizeUserFacingEvidenceText(compressed),
+    "UMPIRING"
+  );
+
+  assert.match(normalized, /1\. Appraisal Recommendation Award reconciled supported amount \$18,425\.36/i);
+  assert.match(normalized, /\n\n2\. Award Posture RECONCILED_SUPPORTED/i);
+  assert.match(normalized, /\n\n3\. Why the selected posture is better supported/i);
+  assert.doesNotMatch(normalized, /cmp[a-z0-9]{8,}/i);
 });

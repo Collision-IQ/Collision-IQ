@@ -29,6 +29,7 @@ import type { WorkspaceData } from "@/types/workspaceTypes";
 import {
   buildAttachmentBatchStatus,
   buildAttachmentSummary,
+  buildCompactAttachmentSummary,
   formatBytes,
   formatAttachmentKind,
   isLikelyImageFile,
@@ -575,8 +576,19 @@ export default function ChatWidget({
         : -1,
     [attachments, previewAttachmentId]
   );
-  const effectiveAttachmentsOpen =
-    attachments.length === 0 ? true : attachments.length >= 3 ? false : attachmentsOpen;
+  const effectiveAttachmentsOpen = attachments.length === 0 ? true : attachmentsOpen;
+  const compactAttachmentSummary = useMemo(
+    () => buildCompactAttachmentSummary(attachments),
+    [attachments]
+  );
+  const previousAttachmentCountRef = useRef(0);
+  useEffect(() => {
+    const previousCount = previousAttachmentCountRef.current;
+    if (attachments.length > 20 && previousCount <= 20) {
+      setAttachmentsOpen(false);
+    }
+    previousAttachmentCountRef.current = attachments.length;
+  }, [attachments.length]);
   useEffect(() => {
     if (viewerAccess) {
       return;
@@ -3214,13 +3226,15 @@ export default function ChatWidget({
                 <div className="mt-2 border border-border bg-card p-2">
                 <button
                   type="button"
-                  className="flex w-full items-center justify-between bg-muted px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-muted/70"
+                  className="flex w-full items-center justify-between gap-3 bg-muted px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-muted/70"
                   onClick={() => setAttachmentsOpen((value) => !value)}
                   disabled={disabled}
                   aria-label="Toggle attachments"
                 >
-                  <span>
-                    Attachments ({attachments.length})
+                  <span className="min-w-0 truncate text-left">
+                    {attachments.length > 20
+                      ? compactAttachmentSummary
+                      : `Attachments (${attachments.length})`}
                     <span className="ml-2 text-muted-foreground">
                       {visionAttachmentCount > 0
                         ? `- Vision: ${visionAttachmentCount}`
@@ -3230,7 +3244,10 @@ export default function ChatWidget({
                       Files reviewed so far: {totalFilesReviewed}
                     </span>
                   </span>
-                  {effectiveAttachmentsOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                  <span className="flex shrink-0 items-center gap-2">
+                    {effectiveAttachmentsOpen ? "Hide file list" : "Show file list"}
+                    {effectiveAttachmentsOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                  </span>
                 </button>
 
                 {effectiveAttachmentsOpen && (
@@ -3238,6 +3255,7 @@ export default function ChatWidget({
                     <div className="border border-border bg-muted px-3 py-2 text-xs leading-5 text-muted-foreground">
                       {uploadBatchGuidance}
                     </div>
+                    <div className="max-h-[120px] space-y-2 overflow-y-auto pr-1 sm:max-h-[160px]">
                     {attachments.map((attachment) => (
                       <div
                         key={attachment.attachmentId}
@@ -3290,6 +3308,7 @@ export default function ChatWidget({
                         </div>
                       </div>
                     ))}
+                    </div>
 
                     <button
                       type="button"

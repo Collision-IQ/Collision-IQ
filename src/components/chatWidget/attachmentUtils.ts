@@ -5,6 +5,13 @@ export type AttachmentSummaryItem = {
   sizeBytes: number;
 };
 
+export type AttachmentCompactSummaryItem = {
+  filename: string;
+  mime?: string;
+  source?: string;
+  hasVision?: boolean;
+};
+
 export type AttachmentKindInput = {
   mime: string;
   text: string;
@@ -31,6 +38,38 @@ export function summarizeAttachmentStats(list: AttachmentSummaryItem[]) {
     fileCount: list.length,
     totalBytes: list.reduce((sum, attachment) => sum + attachment.sizeBytes, 0),
   };
+}
+
+export function buildCompactAttachmentSummary(list: AttachmentCompactSummaryItem[]) {
+  const totalCount = list.length;
+  const photoCount = list.filter(isPhotoAttachment).length;
+  const pdfCount = list.filter(isPdfAttachment).length;
+  const otherCount = Math.max(0, totalCount - photoCount - pdfCount);
+  const parts = [
+    `${totalCount} ${totalCount === 1 ? "file" : "files"} uploaded`,
+    photoCount > 0 ? `${photoCount} ${photoCount === 1 ? "photo" : "photos"}` : null,
+    pdfCount > 0 ? `${pdfCount} ${pdfCount === 1 ? "PDF" : "PDFs"}` : null,
+    otherCount > 0 ? `${otherCount} ${otherCount === 1 ? "other file" : "other files"}` : null,
+  ].filter(Boolean);
+
+  return parts.join(" · ");
+}
+
+function isPhotoAttachment(attachment: AttachmentCompactSummaryItem) {
+  const mime = attachment.mime ?? "";
+  const filename = attachment.filename ?? "";
+  return (
+    attachment.source === "camera" ||
+    attachment.hasVision === true ||
+    mime.startsWith("image/") ||
+    /\.(?:png|jpe?g|webp|gif|heic|heif)$/i.test(filename)
+  );
+}
+
+function isPdfAttachment(attachment: AttachmentCompactSummaryItem) {
+  const mime = attachment.mime ?? "";
+  const filename = attachment.filename ?? "";
+  return mime === "application/pdf" || /\.pdf$/i.test(filename);
 }
 
 export function formatBytes(bytes: number) {

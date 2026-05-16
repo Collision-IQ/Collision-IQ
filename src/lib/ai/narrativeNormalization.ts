@@ -11,6 +11,9 @@ const SECTION_LABEL_PATTERN =
 const MARKDOWN_SECTION_PATTERN =
   /(\*\*(?:Appraisal Recommendation|Award Posture|Why the selected posture is better supported|What remains not final-award confidence|Specific line\/item vulnerabilities|Whether final award is ready or deferred|Recommendation|Rationale|Vulnerabilities|Unresolved Evidence|Final Posture)\*\*)/gi;
 
+const NUMBERED_SECTION_PATTERN =
+  /\s+(?=(?:[1-6]\.\s+(?:Appraisal Recommendation|Award Posture|Why the selected posture is better supported|What remains not final-award confidence|Specific line\/item vulnerabilities|Whether final award is ready or deferred|Recommendation|Rationale|Vulnerabilities|Unresolved Evidence|Final Posture)\b))/gi;
+
 const SENTENCE_STARTERS =
   /\b(Based on|Because|However|Therefore|This means|The carrier|The shop|The reviewed file|Final award|Support remains|Unresolved evidence|Carrier vulnerabilities|Shop vulnerabilities|Safety\/OEM\/completion support)\b/g;
 
@@ -53,6 +56,7 @@ export function normalizeNarrativeProse(
 
   return protectedLines
     .join("\n")
+    .replace(NUMBERED_SECTION_PATTERN, "\n\n")
     .replace(MARKDOWN_SECTION_PATTERN, "\n\n$1\n")
     .replace(SECTION_LABEL_PATTERN, "\n\n$1:\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -75,31 +79,65 @@ function normalizeLine(line: string, mode: NarrativeNormalizationMode): string {
 }
 
 function normalizeParagraph(paragraph: string, mode: NarrativeNormalizationMode): string {
+  if (paragraph.includes("\n- ")) return paragraph.trim();
+
   const trimmed = paragraph.replace(/\s+/g, " ").trim();
   if (!trimmed) return "";
   if (/^[-*]\s+/.test(trimmed) || /^\d+\.\s+/.test(trimmed) || /^\*\*[^*]+\*\*$/.test(trimmed)) {
     return trimmed;
   }
 
-  const sentenceBoundaryText = normalizeRepairOperationChains(addSentenceBoundaries(trimmed));
+  const sentenceBoundaryText = addSentenceBoundaries(trimmed);
   const semicolonLimited = sentenceBoundaryText
     .split(/(?<=[.!?])\s+/)
     .map(limitSemicolonClauses)
     .join(" ");
 
-  return ensureTerminalPunctuation(semicolonLimited, mode)
+  const cleaned = ensureTerminalPunctuation(semicolonLimited, mode)
     .replace(/\s+([,.;:!?])/g, "$1")
     .replace(/([.!?])([A-Z])/g, "$1 $2")
     .replace(/([.!?]\s+)([a-z])/g, (_match, boundary: string, letter: string) => `${boundary}${letter.toUpperCase()}`)
     .replace(/\s{2,}/g, " ")
     .trim();
+
+  return splitLongParagraph(normalizeRepairOperationChains(cleaned, mode));
 }
 
-function normalizeRepairOperationChains(value: string): string {
+function normalizeRepairOperationChains(value: string, mode: NarrativeNormalizationMode): string {
   const escaped = REPAIR_OPERATION_PHRASES.map(escapeRegExp).join("|");
   const phrasePattern = new RegExp(`\\b(?:${escaped})\\b`, "gi");
   const matches = [...value.matchAll(phrasePattern)];
   if (matches.length < 3) return value;
+
+  const uniqueMatches = matches.filter((match, index) => {
+    const normalized = match[0].toLowerCase();
+    return matches.findIndex((candidate) => candidate[0].toLowerCase() === normalized) === index;
+  });
+
+  if (mode === "UMPIRING" && uniqueMatches.length >= 4) {
+    const firstIndex = uniqueMatches[0].index ?? 0;
+    const boundaryMatch = /\s+(?:because|carrier|shop|final posture|vulnerabilities|unresolved evidence)\b/i.exec(
+      value.slice(firstIndex)
+    );
+    const chainEnd = boundaryMatch ? firstIndex + boundaryMatch.index : value.length;
+    const chainValue = value.slice(firstIndex, chainEnd);
+    const chainMatches = [...chainValue.matchAll(phrasePattern)].filter((match, index, list) => {
+      const normalized = match[0].toLowerCase();
+      return list.findIndex((candidate) => candidate[0].toLowerCase() === normalized) === index;
+    });
+    if (chainMatches.length < 4) return value;
+
+    const prefix = value.slice(0, firstIndex).trimEnd();
+    const suffix = value.slice(chainEnd).trimStart();
+    const listLead = prefix
+      .replace(/\bthe$/i, "")
+      .replace(/\bsupports$/i, "supports:")
+      .replace(/\s+:/g, ":")
+      .trimEnd();
+    const bullets = chainMatches.map((match) => `- ${formatRepairOperation(match[0])}`);
+    const suffixText = suffix ? `\n\n${capitalizeSentenceStart(suffix)}` : "";
+    return `${listLead.endsWith(":") ? listLead : `${listLead}:`}\n${bullets.join("\n")}${suffixText}`.trim();
+  }
 
   const matchStarts = new Set(matches.slice(1).map((match) => match.index ?? -1));
   let operationIndex = 0;
@@ -117,6 +155,45 @@ function normalizeRepairOperationChains(value: string): string {
     .replace(/,\s*,/g, ",")
     .replace(/\s+,/g, ",")
     .replace(/,\s+(and\s+)?related calibration activity\b/gi, ", and related calibration activity");
+}
+
+function formatRepairOperation(value: string): string {
+  const normalized = value.toLowerCase();
+  if (normalized === "rear bumper replacement/overhaul") return "rear bumper replacement or overhaul";
+  if (normalized === "tail lamp pocket") return "tail lamp pocket work";
+  if (normalized === "fuel pocket") return "fuel pocket work";
+  if (normalized === "related calibration activity" || normalized === "calibration activity") {
+    return "scan, calibration, and alignment activity";
+  }
+  return value;
+}
+
+function capitalizeSentenceStart(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
+}
+
+function splitLongParagraph(value: string): string {
+  if (value.length <= 360 || value.includes("\n- ")) return value;
+
+  const sentences = value.split(/(?<=[.!?])\s+/).filter(Boolean);
+  if (sentences.length < 2) return value;
+
+  const paragraphs: string[] = [];
+  let current = "";
+  for (const sentence of sentences) {
+    const next = current ? `${current} ${sentence}` : sentence;
+    if (next.length > 320 && current) {
+      paragraphs.push(current);
+      current = sentence;
+    } else {
+      current = next;
+    }
+  }
+
+  if (current) paragraphs.push(current);
+  return paragraphs.join("\n\n");
 }
 
 function escapeRegExp(value: string): string {
