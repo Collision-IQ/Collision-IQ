@@ -16,25 +16,38 @@ type CheckoutPayload = {
   claimId: string | null;
 };
 
+const CHECKOUT_PLAN_ALIASES: Record<string, BillingPlanKey> = {
+  "executive-onboarding": "executive_onboarding",
+  "virtual-onboarding": "virtual_onboarding",
+  "shop-hub": "shop_hub",
+  "shop-flow": "shop_flow",
+  "parts-app": "parts_app",
+};
+
+function resolveBillingPlanKey(value: string | undefined): BillingPlanKey | null {
+  const plan = value?.trim();
+  if (!plan) return null;
+  if (isBillingPlanKey(plan)) return plan;
+  return CHECKOUT_PLAN_ALIASES[plan] ?? null;
+}
+
 async function resolveCheckoutPayload(req: Request): Promise<CheckoutPayload> {
   const contentType = req.headers.get("content-type") || "";
 
   if (contentType.includes("application/json")) {
     const body = (await req.json().catch(() => null)) as { plan?: string; claimId?: string } | null;
-    const plan = body?.plan?.trim();
     return {
-      plan: plan && isBillingPlanKey(plan) ? plan : null,
+      plan: resolveBillingPlanKey(body?.plan),
       claimId: body?.claimId?.trim() || null,
     };
   }
 
   const formData = await req.formData();
   const value = formData.get("plan");
-  const plan = typeof value === "string" ? value.trim() : "";
   const claimIdValue = formData.get("claimId");
 
   return {
-    plan: plan && isBillingPlanKey(plan) ? plan : null,
+    plan: resolveBillingPlanKey(typeof value === "string" ? value : undefined),
     claimId: typeof claimIdValue === "string" ? claimIdValue.trim() || null : null,
   };
 }
@@ -82,7 +95,7 @@ export async function POST(req: Request) {
   const priceId = catalogEntry.priceId;
 
   if (!priceId) {
-    return NextResponse.json({ error: `Missing Stripe price for ${plan}` }, { status: 500 });
+    return NextResponse.json({ error: "This checkout price is not configured yet." }, { status: 500 });
   }
 
   const customerId = await ensureStripeCustomerId(dbUser.id);

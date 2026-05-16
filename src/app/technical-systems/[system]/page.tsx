@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ProductScreenshotFrame } from "@/components/technical-systems/ProductScreenshotFrame";
+import { TechnicalSystemCheckoutButton } from "@/components/technical-systems/TechnicalSystemCheckoutButton";
 
 type SystemSlug = "shop-flow" | "parts-app" | "shop-hub";
+type SystemCheckoutPlan = "shop_flow" | "parts_app" | "shop_hub";
 
 type ScreenshotAsset = {
   src: string;
@@ -23,6 +25,7 @@ type SystemPage = {
   title: string;
   kicker: string;
   description: string;
+  checkoutPlan: SystemCheckoutPlan;
   capabilities: string[];
   screenshots: ScreenshotAsset[];
   videos: VideoAsset[];
@@ -131,6 +134,7 @@ const SYSTEM_PAGES: Record<SystemSlug, SystemPage> = {
   "shop-flow": {
     title: "Shop-Flow",
     kicker: "Production workflow system",
+    checkoutPlan: "shop_flow",
     description:
       "A workflow layer for repair centers that need cleaner handoffs, more consistent production visibility, and a clearer path from estimate review to action.",
     capabilities: [
@@ -147,6 +151,7 @@ const SYSTEM_PAGES: Record<SystemSlug, SystemPage> = {
   "parts-app": {
     title: "Parts App",
     kicker: "Parts request and coordination system",
+    checkoutPlan: "parts_app",
     description:
       "A parts-focused system for intake, requests, queue review, management visibility, and coordination between office, appraiser, and technician workflows.",
     capabilities: [
@@ -160,6 +165,7 @@ const SYSTEM_PAGES: Record<SystemSlug, SystemPage> = {
   "shop-hub": {
     title: "Shop Hub",
     kicker: "Bundled shop operating layer",
+    checkoutPlan: "shop_hub",
     description:
       "A bundled technical systems package that combines Shop-Flow and Parts App into a broader operating layer for shops that want both workflow and parts coordination in one path.",
     capabilities: [
@@ -208,9 +214,12 @@ export default async function TechnicalSystemDetailPage({ params }: PageProps) {
           <Link href="/technical-systems" className="text-sm font-semibold text-foreground">
             Collision IQ Technical Systems
           </Link>
-          <Link href="/technical-systems" className="rounded-2xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black transition hover:opacity-90">
+          <TechnicalSystemCheckoutButton
+            plan={page.checkoutPlan}
+            className="rounded-2xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black transition hover:opacity-90 disabled:opacity-60"
+          >
             Start trial
-          </Link>
+          </TechnicalSystemCheckoutButton>
         </div>
       </header>
 
@@ -225,9 +234,12 @@ export default async function TechnicalSystemDetailPage({ params }: PageProps) {
             <Link href="/technical-systems" className="rounded-2xl border border-border bg-card px-5 py-3 text-sm font-semibold text-foreground transition hover:bg-muted">
               Back to systems
             </Link>
-            <Link href="/technical-systems" className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:opacity-90">
+            <TechnicalSystemCheckoutButton
+              plan={page.checkoutPlan}
+              className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:opacity-90 disabled:opacity-60"
+            >
               Contact / start trial
-            </Link>
+            </TechnicalSystemCheckoutButton>
           </div>
         </div>
       </section>

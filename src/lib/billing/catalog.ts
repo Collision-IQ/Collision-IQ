@@ -68,27 +68,42 @@ export const BILLING_CATALOG = {
   },
   // ── Legacy / Technical Systems ────────────────────────────────────────
   executive_onboarding: {
-    priceId: process.env.STRIPE_EXECUTIVE_ONBOARDING_PRICE_ID?.trim() || "",
+    priceId:
+      process.env.STRIPE_PRICE_EXECUTIVE_ONBOARDING?.trim() ||
+      process.env.STRIPE_EXECUTIVE_ONBOARDING_PRICE_ID?.trim() ||
+      "",
     mode: "payment",
     lane: "legacy",
   },
   virtual_onboarding: {
-    priceId: process.env.STRIPE_VIRTUAL_ONBOARDING_PRICE_ID?.trim() || "",
+    priceId:
+      process.env.STRIPE_PRICE_VIRTUAL_ONBOARDING?.trim() ||
+      process.env.STRIPE_VIRTUAL_ONBOARDING_PRICE_ID?.trim() ||
+      "",
     mode: "payment",
     lane: "legacy",
   },
   shop_hub: {
-    priceId: process.env.STRIPE_SHOP_HUB_PRICE_ID?.trim() || "",
+    priceId:
+      process.env.STRIPE_PRICE_SHOP_HUB?.trim() ||
+      process.env.STRIPE_SHOP_HUB_PRICE_ID?.trim() ||
+      "",
     mode: "subscription",
     lane: "subscription",
   },
   shop_flow: {
-    priceId: process.env.STRIPE_SHOP_FLOW_PRICE_ID?.trim() || "",
+    priceId:
+      process.env.STRIPE_PRICE_SHOP_FLOW?.trim() ||
+      process.env.STRIPE_SHOP_FLOW_PRICE_ID?.trim() ||
+      "",
     mode: "subscription",
     lane: "subscription",
   },
   parts_app: {
-    priceId: process.env.STRIPE_PARTS_APP_PRICE_ID?.trim() || "",
+    priceId:
+      process.env.STRIPE_PRICE_PARTS_APP?.trim() ||
+      process.env.STRIPE_PARTS_APP_PRICE_ID?.trim() ||
+      "",
     mode: "subscription",
     lane: "subscription",
   },
