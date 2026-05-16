@@ -14,6 +14,7 @@ import { getCaseById } from "@/lib/cases/getCaseById";
 import { cleanResponse } from "@/lib/vehicle/oemGuardrails";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
+import { normalizeNarrativeProse } from "@/lib/ai/narrativeNormalization";
 
 export const runtime = "nodejs";
 
@@ -475,10 +476,17 @@ ${EVIDENCE_POLICY}
       system,
       messages: [...history, { role: "user", content: message }],
     });
-    const reply = sanitizeUserFacingEvidenceText(
-      redactExternalDocumentUrls(
-        enforceModeResponseShape(cleanResponse(vehicle?.make || "", rawReply), outputMode.mode)
-      )
+    const reply = normalizeNarrativeProse(
+      sanitizeUserFacingEvidenceText(
+        redactExternalDocumentUrls(
+          enforceModeResponseShape(cleanResponse(vehicle?.make || "", rawReply), outputMode.mode)
+        )
+      ),
+      outputMode.mode === "UMPIRING"
+        ? "UMPIRING"
+        : outputMode.mode === "CUSTOMER_SUMMARY"
+          ? "CUSTOMER_SUMMARY"
+          : "CHAT_EXPORT"
     );
 
     return NextResponse.json({

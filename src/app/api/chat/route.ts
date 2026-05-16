@@ -23,6 +23,7 @@ import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { buildProductAccessGuard } from "@/lib/featureAccess";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
 import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
+import { normalizeNarrativeProse } from "@/lib/ai/narrativeNormalization";
 import {
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
@@ -1139,13 +1140,20 @@ export async function POST(req: Request) {
 
     const needsLegalDisclaimer = isLegalAdjacentNegotiationRequest(userMessage);
 
-    const finalText = sanitizeUserFacingEvidenceText(redactExternalDocumentUrls(
+    const normalizedFinalText = normalizeNarrativeProse(
+      sanitizeUserFacingEvidenceText(redactExternalDocumentUrls(
       needsLegalDisclaimer
         ? `${LEGAL_INFO_DISCLAIMER}\n\n${modeShapedOutput}`
         : modeShapedOutput
-    ));
+      )),
+      outputMode.mode === "UMPIRING"
+        ? "UMPIRING"
+        : outputMode.mode === "CUSTOMER_SUMMARY"
+          ? "CUSTOMER_SUMMARY"
+          : "CHAT_EXPORT"
+    );
 
-    return new Response(cleanDisplayText(finalText), {
+    return new Response(cleanDisplayText(normalizedFinalText), {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
       },

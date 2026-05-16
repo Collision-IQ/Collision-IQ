@@ -2,6 +2,7 @@ import jsPDF from "jspdf";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
 import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
 import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
+import { normalizeNarrativeProse } from "@/lib/ai/narrativeNormalization";
 
 const LINE_HEIGHT = 4.8;
 const LINE_HEIGHT_FACTOR = 1.15;
@@ -166,7 +167,7 @@ function redactCarrierReportDocument(input: CarrierReportDocument): CarrierRepor
 export function sanitizeReportText(value: string): string {
   const normalized = sanitizeUserFacingEvidenceText(value);
 
-  return normalized
+  return normalizeNarrativeProse(normalized
     .replace(/\bcm[a-z0-9]{20,}\b/gi, "Uploaded document")
     .replace(/\bEvidence references?:\s*(?:cmp[\w-]+(?:\s*,\s*)?)+\b/gi, "")
     .replace(/\bcmp[\w-]{4,}\b/gi, "uploaded file")
@@ -188,7 +189,7 @@ export function sanitizeReportText(value: string): string {
     .replace(/(?:[,;]\s*){2,}/g, "; ")
     .replace(/\s*[-,;:]\s*$/g, "")
     .replace(/\s{2,}/g, " ")
-    .trim();
+    .trim(), "REPORT");
 }
 
 export function createPdfPageLayout(doc: Pick<jsPDF, "internal">): PdfPageLayout {

@@ -21,6 +21,7 @@ import {
   evaluateAppraisalAward,
   formatAppraisalAwardPosture,
 } from "@/lib/ai/appraisalAwardEvaluator";
+import { normalizeNarrativeProse } from "@/lib/ai/narrativeNormalization";
 
 export type CarrierReportSection = {
   title: string;
@@ -556,14 +557,14 @@ function formatExplainabilityStatus(value: string): string {
 }
 
 function sanitizeReportProse(value: string): string {
-  return value
+  return normalizeNarrativeProse(value
     .replace(/\buploaded document\b/gi, "supporting evidence")
     .replace(/\bUploaded document\b/g, "Supporting evidence")
     .replace(/\buploaded file:?\s*(?:uploaded file|uploaded document|documentation)(?:,\s*(?:uploaded file|uploaded document|documentation))*\.?/gi, "uploaded file")
     .replace(/\bsupporting evidence:?\s*(?:supporting evidence|uploaded document|documentation)(?:,\s*(?:supporting evidence|uploaded document|documentation))*\.?/gi, "supporting evidence")
     .replace(/\b([A-Z][A-Za-z0-9 /&()-]{6,80})\s+\1\s*:/g, "$1:")
     .replace(/\s{2,}/g, " ")
-    .trim();
+    .trim(), "REPORT");
 }
 
 function limitToReadableParagraph(value: string): string {

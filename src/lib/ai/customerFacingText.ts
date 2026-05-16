@@ -1,6 +1,7 @@
 import type { CustomerReport } from "./generateCustomerReport";
 import type { CarrierReportDocument } from "./builders/carrierPdfBuilder";
 import { sanitizeEstimateLine, sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
+import { normalizeNarrativeProse } from "@/lib/ai/narrativeNormalization";
 
 const TECHNICAL_TRANSLATIONS: Array<[RegExp, string]> = [
   [
@@ -109,7 +110,8 @@ export function toCustomerFacingText(value?: string | null, fallback = ""): stri
     .trim();
 
   const sanitized = sanitizeUserFacingEvidenceText(output);
-  return sanitized || sanitizeUserFacingEvidenceText(fallback) || fallback;
+  const normalized = normalizeNarrativeProse(sanitized, "CUSTOMER_SUMMARY");
+  return normalized || normalizeNarrativeProse(sanitizeUserFacingEvidenceText(fallback), "CUSTOMER_SUMMARY") || fallback;
 }
 
 export function toCustomerFacingList(
