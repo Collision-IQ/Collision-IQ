@@ -1,6 +1,6 @@
-import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ProductScreenshotFrame } from "@/components/technical-systems/ProductScreenshotFrame";
 
 type SystemSlug = "shop-flow" | "parts-app" | "shop-hub";
 
@@ -208,7 +208,7 @@ export default async function TechnicalSystemDetailPage({ params }: PageProps) {
           <Link href="/technical-systems" className="text-sm font-semibold text-foreground">
             Collision IQ Technical Systems
           </Link>
-          <Link href="/sign-up" className="rounded-2xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black transition hover:opacity-90">
+          <Link href="/technical-systems" className="rounded-2xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black transition hover:opacity-90">
             Start trial
           </Link>
         </div>
@@ -225,7 +225,7 @@ export default async function TechnicalSystemDetailPage({ params }: PageProps) {
             <Link href="/technical-systems" className="rounded-2xl border border-border bg-card px-5 py-3 text-sm font-semibold text-foreground transition hover:bg-muted">
               Back to systems
             </Link>
-            <Link href="/sign-up" className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:opacity-90">
+            <Link href="/technical-systems" className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:opacity-90">
               Contact / start trial
             </Link>
           </div>
@@ -266,7 +266,7 @@ export default async function TechnicalSystemDetailPage({ params }: PageProps) {
         {featuredScreenshots.length > 0 ? (
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
             {featuredScreenshots.map((asset) => (
-              <ScreenshotFrame key={asset.src} asset={asset} priority />
+              <ProductScreenshotFrame key={asset.src} asset={asset} priority />
             ))}
           </div>
         ) : null}
@@ -274,46 +274,12 @@ export default async function TechnicalSystemDetailPage({ params }: PageProps) {
         {supportingScreenshots.length > 0 ? (
           <div className="mt-6 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
             {supportingScreenshots.map((asset) => (
-              <ScreenshotFrame key={`${asset.src}-${asset.title}`} asset={asset} compact />
+              <ProductScreenshotFrame key={`${asset.src}-${asset.title}`} asset={asset} compact />
             ))}
           </div>
         ) : null}
       </section>
     </main>
-  );
-}
-
-function ScreenshotFrame({
-  asset,
-  compact = false,
-  priority = false,
-}: {
-  asset: ScreenshotAsset;
-  compact?: boolean;
-  priority?: boolean;
-}) {
-  return (
-    <figure className="overflow-hidden rounded-3xl border border-border bg-card">
-      <div className="flex items-center gap-1.5 border-b border-border bg-muted px-3 py-2">
-        <span className="h-2.5 w-2.5 rounded-full bg-[#C65A2A]" />
-        <span className="h-2.5 w-2.5 rounded-full bg-border" />
-        <span className="h-2.5 w-2.5 rounded-full bg-border" />
-      </div>
-      <div className={`relative bg-background ${compact ? "aspect-[4/3]" : "aspect-[16/10]"}`}>
-        <Image
-          src={asset.src}
-          alt={asset.alt}
-          fill
-          priority={priority}
-          sizes={compact ? "(min-width: 1024px) 33vw, (min-width: 768px) 50vw, 100vw" : "(min-width: 1024px) 50vw, 100vw"}
-          className="object-contain p-3"
-        />
-      </div>
-      <figcaption className="border-t border-border p-4">
-        <div className="text-sm font-semibold text-foreground">{asset.title}</div>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">{asset.caption}</p>
-      </figcaption>
-    </figure>
   );
 }
 

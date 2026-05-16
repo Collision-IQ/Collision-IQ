@@ -211,7 +211,7 @@ export default function TechnicalSystemsPage() {
           <p className="mt-6 max-w-3xl text-lg leading-relaxed text-muted-foreground">Technical Systems is the product-and-systems layer under Collision Academy. Start with Collision IQ, then extend into Shop-Flow, Parts App, Shop Hub, onboarding, and tailored implementations.</p>
           <div className="mt-8 flex flex-wrap gap-3">
             <Link href="/professional" className="rounded-2xl bg-[#C65A2A] px-6 py-3 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(198,90,42,0.25)] transition hover:opacity-90">View Professional Services</Link>
-            <button type="button" onClick={() => void handleCheckout("pro")} disabled={activeCheckout === "pro"} className="rounded-2xl border border-border bg-card px-6 py-3 text-sm font-semibold text-foreground transition hover:bg-muted disabled:opacity-60">{activeCheckout === "pro" ? "Redirecting..." : "Start 30-Day Free Trial"}</button>
+            <button type="button" onClick={() => void handleCheckout("pro")} disabled={activeCheckout === "pro"} className="rounded-2xl border border-border bg-card px-6 py-3 text-sm font-semibold text-foreground transition hover:bg-muted disabled:opacity-60">{activeCheckout === "pro" ? "Redirecting..." : "Choose a Collision IQ Plan"}</button>
           </div>
           <div className="mt-8 grid gap-3 text-sm text-muted-foreground md:grid-cols-2">
             <div className="rounded-2xl border border-border bg-card p-4">Built around real collision workflows</div>
@@ -244,7 +244,7 @@ export default function TechnicalSystemsPage() {
               <div className="text-lg font-semibold">{item.title}</div>
               <div className="mt-2 text-2xl font-bold">{item.priceLabel}</div>
               <ul className="mt-4 space-y-2 text-sm text-muted-foreground">{item.features.map((feature) => <li key={feature} className="rounded-xl border border-border bg-muted px-3 py-2">{feature}</li>)}</ul>
-              <button type="button" onClick={() => void handleCheckout(item.plan)} disabled={activeCheckout === item.plan} className={`mt-6 w-full rounded-2xl px-4 py-3 text-sm font-semibold transition disabled:opacity-60 ${item.title === "Pro" ? "bg-[#C65A2A] text-black hover:opacity-90" : "border border-border bg-background text-foreground hover:bg-muted"}`}>{activeCheckout === item.plan ? "Redirecting..." : item.title === "Starter" ? "Choose a Collision IQ Plan" : "Start 30-Day Free Trial"}</button>
+              <button type="button" onClick={() => void handleCheckout(item.plan)} disabled={activeCheckout === item.plan} className={`mt-6 w-full rounded-2xl px-4 py-3 text-sm font-semibold transition disabled:opacity-60 ${item.title === "Pro" ? "bg-[#C65A2A] text-black hover:opacity-90" : "border border-border bg-background text-foreground hover:bg-muted"}`}>{activeCheckout === item.plan ? "Redirecting..." : "Choose a Collision IQ Plan"}</button>
             </div>
           ))}
         </div>
@@ -308,7 +308,7 @@ export default function TechnicalSystemsPage() {
             {leadError ? <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">{leadError}</div> : null}
             <div className="mt-5 flex flex-wrap gap-3">
               <button type="submit" disabled={isSubmitting} className="rounded-2xl bg-[#C65A2A] px-6 py-3 text-sm font-semibold text-black transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60">{isSubmitting ? "Submitting..." : "Request systems call"}</button>
-              <button type="button" onClick={() => void handleCheckout("pro")} disabled={activeCheckout === "pro"} className="rounded-2xl border border-border bg-background px-6 py-3 text-sm font-semibold text-foreground transition hover:bg-muted disabled:opacity-60">{activeCheckout === "pro" ? "Redirecting..." : "Start 30-Day Free Trial"}</button>
+              <button type="button" onClick={() => void handleCheckout("pro")} disabled={activeCheckout === "pro"} className="rounded-2xl border border-border bg-background px-6 py-3 text-sm font-semibold text-foreground transition hover:bg-muted disabled:opacity-60">{activeCheckout === "pro" ? "Redirecting..." : "Choose a Collision IQ Plan"}</button>
             </div>
           </form>
         </div>

@@ -1,6 +1,28 @@
 import Image from "next/image";
 import Link from "next/link";
 
+// TODO: Replace placeholder profile roots with confirmed Collision Academy social URLs.
+const SOCIAL_LINKS = [
+  {
+    name: "Facebook",
+    href: "https://www.facebook.com/",
+    label: "Follow on Facebook",
+    description: "Company Facebook profile placeholder pending the confirmed Collision Academy URL.",
+  },
+  {
+    name: "Instagram",
+    href: "https://www.instagram.com/",
+    label: "Follow on Instagram",
+    description: "Company Instagram profile placeholder pending the confirmed Collision Academy URL.",
+  },
+  {
+    name: "LinkedIn",
+    href: "https://www.linkedin.com/",
+    label: "Connect on LinkedIn",
+    description: "Company LinkedIn profile placeholder pending the confirmed Collision Academy URL.",
+  },
+];
+
 export default function CollisionAcademyPage() {
   return (
     <main className="min-h-screen text-white">
@@ -154,38 +176,21 @@ export default function CollisionAcademyPage() {
           <div className="text-xl font-semibold">Stay connected</div>
 
           <div className="mt-5 grid gap-4 md:grid-cols-3">
-            <Link
-              href="/"
-              className="group rounded-2xl border border-white/10 bg-black/35 p-5 transition hover:bg-black/45"
-            >
-              <div className="text-sm font-semibold">Collision IQ</div>
-              <div className="mt-2 text-sm text-white/70">
-                Open the chatbot and repair intelligence workspace.
-              </div>
-              <div className="mt-4 text-sm text-[#C65A2A]">Open -&gt;</div>
-            </Link>
-
-            <Link
-              href="/the-academy"
-              className="group rounded-2xl border border-white/10 bg-black/35 p-5 transition hover:bg-black/45"
-            >
-              <div className="text-sm font-semibold">Professional Services</div>
-              <div className="mt-2 text-sm text-white/70">
-                Move into appraisal, diminished value, ACV, and dispute support.
-              </div>
-              <div className="mt-4 text-sm text-[#C65A2A]">View -&gt;</div>
-            </Link>
-
-            <Link
-              href="/technical-systems"
-              className="group rounded-2xl border border-white/10 bg-black/35 p-5 transition hover:bg-black/45"
-            >
-              <div className="text-sm font-semibold">Technical Systems</div>
-              <div className="mt-2 text-sm text-white/70">
-                Review subscriptions, apps, onboarding, and tailored system builds.
-              </div>
-              <div className="mt-4 text-sm text-[#C65A2A]">View -&gt;</div>
-            </Link>
+            {SOCIAL_LINKS.map((link) => (
+              <a
+                key={link.name}
+                href={link.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group rounded-2xl border border-white/10 bg-black/35 p-5 transition hover:bg-black/45"
+              >
+                <div className="text-sm font-semibold">{link.name}</div>
+                <div className="mt-2 text-sm text-white/70">
+                  {link.description}
+                </div>
+                <div className="mt-4 text-sm text-[#C65A2A]">{link.label} -&gt;</div>
+              </a>
+            ))}
           </div>
         </div>
       </section>

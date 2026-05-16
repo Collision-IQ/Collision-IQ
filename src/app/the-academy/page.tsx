@@ -72,6 +72,28 @@ const SERVICES: AcademyService[] = [
   },
 ];
 
+// TODO: Replace placeholder profile roots with confirmed Collision Academy social URLs.
+const SOCIAL_LINKS = [
+  {
+    name: "Facebook",
+    href: "https://www.facebook.com/",
+    label: "Follow on Facebook",
+    description: "Company Facebook profile placeholder pending the confirmed Collision Academy URL.",
+  },
+  {
+    name: "Instagram",
+    href: "https://www.instagram.com/",
+    label: "Follow on Instagram",
+    description: "Company Instagram profile placeholder pending the confirmed Collision Academy URL.",
+  },
+  {
+    name: "LinkedIn",
+    href: "https://www.linkedin.com/",
+    label: "Connect on LinkedIn",
+    description: "Company LinkedIn profile placeholder pending the confirmed Collision Academy URL.",
+  },
+];
+
 function CheckoutBanner() {
   const searchParams = useSearchParams();
   const checkoutResult = searchParams.get("checkout");
@@ -282,40 +304,21 @@ export default function TheAcademyPage() {
           <div className="text-xl font-semibold">Stay connected</div>
 
           <div className="mt-5 grid gap-4 md:grid-cols-3">
-            <Link
-              href="/"
-              className="group rounded-2xl border border-border bg-muted p-5 transition hover:bg-card"
-            >
-              <div className="text-sm font-semibold">Collision IQ</div>
-              <div className="mt-2 text-sm text-muted-foreground">
-                Open the software workspace for live repair analysis and export workflows.
-              </div>
-              <div className="mt-4 text-sm text-[#C65A2A]">Open -&gt;</div>
-            </Link>
-
-            <Link
-              href="/technical-systems"
-              className="group rounded-2xl border border-border bg-muted p-5 transition hover:bg-card"
-            >
-              <div className="text-sm font-semibold">Technical Systems</div>
-              <div className="mt-2 text-sm text-muted-foreground">
-                Review subscriptions, apps, onboarding, and tailored system options.
-              </div>
-              <div className="mt-4 text-sm text-[#C65A2A]">View Systems -&gt;</div>
-            </Link>
-
-            <a
-              href="https://www.collision.academy/s/shop"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group rounded-2xl border border-border bg-muted p-5 transition hover:bg-card"
-            >
-              <div className="text-sm font-semibold">Professional Services</div>
-              <div className="mt-2 text-sm text-muted-foreground">
-                Continue into the live services shop for scoped service engagement.
-              </div>
-              <div className="mt-4 text-sm text-[#C65A2A]">View Services -&gt;</div>
-            </a>
+            {SOCIAL_LINKS.map((link) => (
+              <a
+                key={link.name}
+                href={link.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group rounded-2xl border border-border bg-muted p-5 transition hover:bg-card"
+              >
+                <div className="text-sm font-semibold">{link.name}</div>
+                <div className="mt-2 text-sm text-muted-foreground">
+                  {link.description}
+                </div>
+                <div className="mt-4 text-sm text-[#C65A2A]">{link.label} -&gt;</div>
+              </a>
+            ))}
           </div>
         </div>
       </section>
