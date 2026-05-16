@@ -205,7 +205,7 @@ export function buildDisputeIntelligenceReport(params: ExportBuilderInput): stri
     "",
     ...topDriverBlocks,
     "",
-    "## Missing Verification Evidence",
+    "## Open Verification Evidence",
     ...report.supportGaps.map((item) => `- ${item}`),
     "",
     "## Recommended Next Moves",

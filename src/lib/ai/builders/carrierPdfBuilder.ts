@@ -143,6 +143,12 @@ export function buildCarrierReport({
       ...(exportModel.oemContradictions.length > 0
         ? buildExportResearchSections(exportResearchSnapshot)
         : []),
+      ...(exportModel.outputMode === "UMPIRING"
+        ? [{
+            title: "Appraisal Recommendation",
+            bullets: buildAppraisalRecommendationBullets(exportModel, isComparison),
+          }]
+        : []),
       {
         title: "Executive Repair Position",
         body: buildExecutiveSummary({
@@ -204,7 +210,7 @@ export function buildCarrierReport({
         bullets: buildOemProcedureSupportBullets(exportModel, documentedStrengths),
       },
       {
-        title: "Missing Verification Evidence",
+        title: "Open Verification Evidence",
         bullets: buildMissingVerificationBullets(exportModel),
       },
       {
@@ -278,16 +284,56 @@ function buildConfidenceIntegrityBullets(
     `Base confidence: ${integrity.baseConfidence}.`,
     `Adjusted confidence: ${integrity.adjustedConfidence}.`,
     `Completeness: ${formatCompletenessStatus(integrity.completenessStatus)}.`,
-    `Uploaded files reviewed: ${integrity.uploadedFileCount}.`,
+    `Uploaded files reviewed for this determination: ${integrity.reviewedFileCount ?? integrity.uploadedFileCount}.`,
+    typeof integrity.indexedFileCount === "number" ? `Indexed files: ${integrity.indexedFileCount}.` : undefined,
+    typeof integrity.visionProcessedFileCount === "number" ? `Vision-processed files: ${integrity.visionProcessedFileCount}.` : undefined,
     integrity.uploadLimitReached ? "Upload cap reached for this review." : "Upload cap not reached.",
     integrity.userIndicatedMoreFiles ? "User indicated more files exist outside the current upload set." : undefined,
     integrity.missingCriticalEvidence.length > 0
-      ? `Missing proof: ${integrity.missingCriticalEvidence.join("; ")}.`
+      ? `Not yet located in reviewed files: ${integrity.missingCriticalEvidence.join("; ")}.`
       : undefined,
     ...integrity.confidencePenalties.map((penalty) =>
       `${penalty.reason}: -${penalty.impact}. ${penalty.explanation}`
     ),
     integrity.userFacingDisclosure,
+  ]);
+}
+
+function buildAppraisalRecommendationBullets(
+  exportModel: ExportModel,
+  isComparison: boolean
+): string[] {
+  const hasLineVulnerabilities = exportModel.supplementItems.length > 0;
+  const incompleteReview =
+    exportModel.confidenceIntegrity.completenessStatus !== "COMPLETE" ||
+    (exportModel.confidenceIntegrity.totalKnownFileCount ?? exportModel.confidenceIntegrity.uploadedFileCount) >
+      (exportModel.confidenceIntegrity.reviewedFileCount ?? exportModel.confidenceIntegrity.uploadedFileCount);
+  const amountMaturityIncomplete =
+    exportModel.confidenceIntegrity.missingCriticalEvidence.some((item) =>
+      /invoice|supplement|completion|calibration|alignment|scan|final/i.test(item)
+    );
+  const posture = incompleteReview
+    ? "Defer final award because full-file review is incomplete."
+    : amountMaturityIncomplete
+      ? "Defer final award because amount-of-loss maturity is incomplete."
+      : hasLineVulnerabilities
+        ? "Award reconciled supported amount."
+        : isComparison
+          ? "Award the estimate with the better-supported complete repair path from the reviewed file."
+          : "Award the reviewed supported repair amount.";
+
+  return compact([
+    `Award posture: ${posture}`,
+    hasLineVulnerabilities
+      ? "Based on the reviewed file, the broader repair path may be supportable subject to specifically unsupported line reductions listed in the dispute drivers."
+      : "Based on the reviewed file, no major line-level vulnerability was isolated in this export model.",
+    exportModel.disputeIntelligenceReport.topDrivers.length > 0
+      ? `Better-supported basis: ${exportModel.disputeIntelligenceReport.topDrivers.slice(0, 3).map((driver) => driver.title).join("; ")}.`
+      : "Better-supported basis should be tied to the reviewed estimate, invoice, scan, calibration, alignment, supplement, and repair records.",
+    exportModel.confidenceIntegrity.missingCriticalEvidence.length > 0
+      ? `Not final-award confidence: ${exportModel.confidenceIntegrity.missingCriticalEvidence.join("; ")}.`
+      : "Final-award confidence: no critical support item remains not yet located in reviewed files.",
+    "Partial awards are not treated as the default appraisal outcome; use a reconciled supported amount or line-adjusted award recommendation when the full estimate is not cleanly awardable.",
   ]);
 }
 
@@ -433,7 +479,7 @@ function buildExplainabilityBullets(exportModel: ExportModel): string[] {
       `- Finding: ${cleanExplainabilityDetail(finding.finding || finding.rationaleSummary || finding.why_it_matters, finding.issue)}`,
       `- Support status: ${formatExplainabilityStatus(finding.supportConfidenceIndicator ?? finding.evidenceLevel)}`,
       `- Evidence basis: ${buildEvidenceBasisLabel(finding)}`,
-      `- Next step: ${cleanExplainabilityDetail(finding.next_action || finding.riskIfOmitted || "Request the missing support or revise the estimate position.", finding.issue)}`,
+      `- Next step: ${cleanExplainabilityDetail(finding.next_action || finding.riskIfOmitted || "Request the support not yet located in reviewed files or revise the estimate position.", finding.issue)}`,
     ].join("\n\n")
   ));
 }

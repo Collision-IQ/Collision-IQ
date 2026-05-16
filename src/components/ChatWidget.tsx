@@ -121,6 +121,10 @@ type UploadResponse = UploadSuccessResult & {
     rejectedFiles?: number;
     extractedBytes?: number;
   }>;
+  telemetry?: {
+    extractedFileCount?: number;
+    rejectedFileCount?: number;
+  };
   error?: string;
 };
 
@@ -135,6 +139,14 @@ type UploadUiState = "idle" | "uploading" | "uploaded" | "error";
 type ChatSessionControls = {
   focusComposer: () => void;
   resetSession: () => void;
+};
+
+export type ReviewProgress = {
+  uploaded: number;
+  indexed: number;
+  visionProcessed: number;
+  reviewedForDetermination: number;
+  totalKnownFiles: number;
 };
 
 type LinkedEvidenceDebugItem = {
@@ -166,6 +178,7 @@ interface ChatWidgetProps {
   onCaseUploadComplete?: () => void;
   onSessionControlsReady?: (controls: ChatSessionControls) => void;
   onCaseIntentChange?: (value: string) => void;
+  onReviewProgressChange?: Dispatch<SetStateAction<ReviewProgress>>;
   viewerAccess?: AccountEntitlements | null;
   suppressedMessageIds?: string[];
   caseChatEnabled?: boolean;
@@ -312,6 +325,16 @@ function buildZipExtractionStatus(summaries: NonNullable<UploadResponse["zipSumm
     .join(" ");
 }
 
+function countKnownFilesFromUploadResponse(data: UploadResponse | null, returnedUploads: UploadSuccessResult[]) {
+  const telemetryKnown =
+    (data?.telemetry?.extractedFileCount ?? 0) + (data?.telemetry?.rejectedFileCount ?? 0);
+  const zipKnown = (data?.zipSummaries ?? []).reduce(
+    (sum, summary) => sum + (summary.acceptedFiles ?? 0) + (summary.rejectedFiles ?? 0),
+    0
+  );
+  return Math.max(telemetryKnown, zipKnown, returnedUploads.length + (data?.failedUploads?.length ?? 0));
+}
+
 function isZipFile(file: Pick<File, "name" | "type">) {
   return (
     file.name.toLowerCase().endsWith(".zip") ||
@@ -396,6 +419,12 @@ function resolveCaseTopic(message: string, previousTopic: string) {
   if (/(scan|pre-scan|post-scan|diagnostic|dtc|codes)/i.test(lower)) {
     return "scan documentation";
   }
+  if (/(umpire|appraisal|appraiser|award|amount of loss|amount-of-loss|which amount|decide between estimates|which estimate)/i.test(lower)) {
+    return "appraisal award recommendation";
+  }
+  if (/(doi|department of insurance|insurance department|regulator|complaint|bad faith|unfair claim)/i.test(lower)) {
+    return "DOI preparation";
+  }
   if (/(summary|recap|where do we stand|overall|whole case|full review|case posture)/i.test(lower)) {
     return DEFAULT_CASE_TOPIC;
   }
@@ -421,6 +450,7 @@ export default function ChatWidget({
   onCaseUploadComplete,
   onSessionControlsReady,
   onCaseIntentChange,
+  onReviewProgressChange,
   viewerAccess = null,
   caseChatEnabled = false,
   activeCaseId = null,
@@ -1162,6 +1192,13 @@ export default function ChatWidget({
     audioBlobCacheRef.current.clear();
     setAttachments([]);
     setTotalFilesReviewed(0);
+    onReviewProgressChange?.({
+      uploaded: 0,
+      indexed: 0,
+      visionProcessed: 0,
+      reviewedForDetermination: 0,
+      totalKnownFiles: 0,
+    });
     setAttachmentsOpen(true);
     setPreviewAttachmentId(null);
     setReplaceAttachmentId(null);
@@ -1192,6 +1229,7 @@ export default function ChatWidget({
     invalidateStructuredAnalysis,
     onAttachmentChange,
     onAttachmentsChange,
+    onReviewProgressChange,
     onSessionReset,
   ]);
 
@@ -1384,6 +1422,11 @@ export default function ChatWidget({
         onAnalysisStatusChange?.("complete", null);
         onAnalysisLoadingChange?.(false);
         setTotalFilesReviewed((current) => current + attachmentStats.fileCount);
+        onReviewProgressChange?.((current) => ({
+          ...current,
+          reviewedForDetermination: current.reviewedForDetermination + attachmentStats.fileCount,
+          totalKnownFiles: Math.max(current.totalKnownFiles, current.reviewedForDetermination + attachmentStats.fileCount),
+        }));
         emitSafeCrmEventFromClient({
           event: "upload_batch_completed",
           plan: productPlan,
@@ -1620,6 +1663,12 @@ export default function ChatWidget({
             onAnalysisPanelChange?.(analysisData.panel ?? null);
             onAnalysisStatusChange?.("complete", null);
             onAnalysisLoadingChange?.(false);
+            setTotalFilesReviewed((current) => current + attachmentStats.fileCount);
+            onReviewProgressChange?.((current) => ({
+              ...current,
+              reviewedForDetermination: current.reviewedForDetermination + attachmentStats.fileCount,
+              totalKnownFiles: Math.max(current.totalKnownFiles, current.reviewedForDetermination + attachmentStats.fileCount),
+            }));
             console.info("[attachments] upload completion case state", {
               activeCaseId: analysisReportIdRef.current,
               reportId: analysisData.reportId ?? null,
@@ -1858,6 +1907,9 @@ export default function ChatWidget({
       analysisReportIdRef.current = returnedActiveCaseId;
     }
     const returnedUploads = data?.successfulUploads?.length ? data.successfulUploads : [upload];
+    const indexedCount = returnedUploads.filter((item) => typeof item.attachmentId === "string").length;
+    const visionProcessedCount = returnedUploads.filter((item) => Boolean(item.hasVision)).length;
+    const knownFileCount = countKnownFilesFromUploadResponse(data, returnedUploads);
     const filename: string = upload?.filename || file.name;
     const mime: string = upload?.type || file.type;
     const imageDataUrl: string | undefined =
@@ -1896,6 +1948,14 @@ export default function ChatWidget({
         messageCount: messages.length,
       });
     }
+
+    onReviewProgressChange?.((current) => ({
+      uploaded: current.uploaded + 1,
+      indexed: current.indexed + indexedCount,
+      visionProcessed: current.visionProcessed + visionProcessedCount,
+      reviewedForDetermination: current.reviewedForDetermination,
+      totalKnownFiles: current.totalKnownFiles + knownFileCount,
+    }));
 
     setAttachments((prev) => {
       const nextAttachments = returnedUploads

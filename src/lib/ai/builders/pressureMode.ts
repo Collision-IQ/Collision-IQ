@@ -72,13 +72,13 @@ export function computeItemPressureMode(
   const isHigh = leverageScore >= HIGH_LEVERAGE;
 
   if (isHigh) {
-    // missing evidence + high leverage = carrier is clearly holding out
+    // incomplete proof + high leverage = carrier is clearly holding out
     if (evidenceLevel === "missing") return "assertive";
     // well-documented + high leverage = strongest ground
     if (evidenceLevel === "documented" || evidenceLevel === "referenced") return "assertive";
   }
 
-  // medium leverage with partial or missing support → explain the gap
+  // medium leverage with partial or incomplete support -> explain the gap
   return "explanatory";
 }
 
@@ -218,7 +218,7 @@ function buildModeRationale(
   switch (mode) {
     case "assertive":
       return (
-        `Top findings show ${top.evidenceLevel === "missing" ? "missing evidence" : "strong evidence"} ` +
+        `Top findings show ${top.evidenceLevel === "missing" ? "support not yet located in reviewed files" : "strong evidence"} ` +
         `with a leverage score of ${top.leverageScore}. The file supports a direct revision request.`
       );
     case "explanatory":

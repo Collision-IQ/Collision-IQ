@@ -446,6 +446,10 @@ export type ConfidenceIntegrity = {
   adjustedConfidence: "Low" | "Moderate" | "High";
   completenessStatus: "COMPLETE" | "PARTIAL" | "INSUFFICIENT";
   uploadedFileCount: number;
+  indexedFileCount?: number;
+  visionProcessedFileCount?: number;
+  reviewedFileCount?: number;
+  totalKnownFileCount?: number;
   uploadLimitReached: boolean;
   userIndicatedMoreFiles: boolean;
   missingCriticalEvidence: string[];

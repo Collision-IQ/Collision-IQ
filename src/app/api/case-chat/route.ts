@@ -4,6 +4,7 @@ import { EVIDENCE_POLICY } from "@/lib/analysis/buildEvidenceCorpus";
 import { generateChatCompletion } from "@/lib/ai/generateChatCompletion";
 import { buildAssistanceProfileInstruction } from "@/lib/ai/assistanceProfile";
 import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
+import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
 import {
   UnauthorizedError,
   requireCurrentUser,
@@ -46,6 +47,12 @@ function extractCurrentTopic(
   if (/(valuation|value|acv|total loss|market|comparable|comps)/i.test(lower)) {
     return "valuation";
   }
+  if (/(umpire|appraisal|appraiser|award|amount of loss|amount-of-loss|which amount|decide between estimates|which estimate)/i.test(lower)) {
+    return "appraisal award recommendation";
+  }
+  if (/(doi|department of insurance|insurance department|regulator|complaint|bad faith|unfair claim)/i.test(lower)) {
+    return "DOI preparation";
+  }
   if (/(rebuttal|carrier|insurer|email|negotia|pushback|ask for|request revision)/i.test(lower)) {
     return "rebuttal strategy";
   }
@@ -63,6 +70,22 @@ function extractCurrentTopic(
   }
 
   return "general case summary";
+}
+
+function enforceModeResponseShape(text: string, mode: OutputMode): string {
+  if (mode !== "UMPIRING" || /appraisal recommendation/i.test(text)) {
+    return text;
+  }
+
+  return [
+    "**Appraisal Recommendation**",
+    "Based on the reviewed file, make a directional amount-of-loss recommendation when the reviewed evidence supports one. If finality is not ready, say whether the blocker is full-file review, supplement maturity, final invoice review, completion records, or policy/appraisal timing.",
+    "",
+    "**Award Posture**",
+    "Use one posture: award shop estimate, award carrier estimate, award reconciled supported amount, defer for incomplete full-file review, or defer for incomplete amount-of-loss maturity.",
+    "",
+    text,
+  ].join("\n");
 }
 
 export async function POST(req: NextRequest) {
@@ -277,6 +300,7 @@ CHAT/UI ONLY: ${artifactRefreshPolicy.chatSummaryOnly.shouldRefresh ? "yes" : "n
 `.trim()
       : "No artifact refresh policy stored.";
     const currentTopic = extractCurrentTopic(message, history);
+    const outputMode = buildModeContext(`${message}\n\n${currentTopic}\n\n${transcriptSummary}`);
 
     console.info("[chat] evidence context attached", {
       activeCaseId: caseId,
@@ -307,39 +331,41 @@ ${NON_BIAS_ACCURACY_DIRECTIVE}
 
 ${buildAssistanceProfileInstruction(assistanceProfile)}
 
-====================
+${outputMode.instruction}
+
+--------------------
 VEHICLE
-====================
+--------------------
 ${vehicle?.year || ""} ${vehicle?.make || ""} ${vehicle?.model || ""} ${vehicle?.trim || ""}
 
-====================
+--------------------
 STRUCTURED DETERMINATION (PRIMARY LOGIC LAYER)
-====================
+--------------------
 ${structuredDeterminationContext}
 
-====================
+--------------------
 STABLE FACTUAL CORE
-====================
+--------------------
 ${factualCoreContext}
 
-====================
+--------------------
 LATEST REASSESSMENT DELTA
-====================
+--------------------
 ${reassessmentDeltaContext}
 
-====================
+--------------------
 ARTIFACT REFRESH POLICY
-====================
+--------------------
 ${artifactRefreshContext}
 
-====================
+--------------------
 ADAS DECISION STATE (PRE-TEARDOWN LOGIC)
-====================
+--------------------
 ${adasNarrative.status}: ${adasNarrative.body}
 
-====================
+--------------------
 KEY EVIDENCE (PRIORITIZED)
-====================
+--------------------
 
 --- ESTIMATE (STRUCTURAL + OPERATIONS CONTEXT) ---
 ${limitText(redactExternalDocumentUrls(estimateText), 6000)}
@@ -350,9 +376,9 @@ ${prioritizedFilesContext}
 --- LINKED EXTERNAL OEM / PROCEDURE DOCUMENTS (OPTIONAL ENRICHMENT) ---
 ${prioritizedLinkedEvidenceContext}
 
-====================
+--------------------
 CASE CONTEXT
-====================
+--------------------
 
 CURRENT CONVERSATIONAL TOPIC
 ${currentTopic}
@@ -366,9 +392,9 @@ ${Array.isArray(supportGaps) ? supportGaps.join("\n") : "None"}
 EXTRACTED FACTS
 ${JSON.stringify(extractedFacts || {}, null, 2)}
 
-====================
+--------------------
 RULES
-====================
+--------------------
 - Treat uploaded documents and images as the primary active case evidence.
 - Treat stored report JSON, the factual core, and the evidence registry as primary active-case evidence after uploaded documents.
 - Treat successfully ingested linked external documents as optional case-specific supporting evidence.
@@ -445,7 +471,9 @@ ${EVIDENCE_POLICY}
       system,
       messages: [...history, { role: "user", content: message }],
     });
-    const reply = redactExternalDocumentUrls(cleanResponse(vehicle?.make || "", rawReply));
+    const reply = redactExternalDocumentUrls(
+      enforceModeResponseShape(cleanResponse(vehicle?.make || "", rawReply), outputMode.mode)
+    );
 
     return NextResponse.json({
       success: true,

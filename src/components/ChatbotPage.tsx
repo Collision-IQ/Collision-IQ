@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { ArrowRight, Download, FileText, Mail } from "lucide-react";
 import ChatShell from "@/components/ChatShell";
 import ChatWidget from "@/components/ChatWidget";
+import type { ReviewProgress } from "@/components/ChatWidget";
 import CaseContextSummary from "@/components/CaseContextSummary";
 import {
   buildEvidenceLinkModel,
@@ -48,6 +49,7 @@ import {
 import { buildPolicyRightsReviewPdf } from "@/lib/ai/builders/policyRightsReviewPdfBuilder";
 import { buildCarrierPdfBlob, exportCarrierPDF } from "@/lib/ai/builders/exportPdf";
 import { toStableClaimId } from "@/lib/claims/claimIdentity";
+import { classifyOutputMode } from "@/lib/ai/outputMode";
 import {
   buildSnapshotEmailBody,
   buildSnapshotPlainText,
@@ -67,6 +69,7 @@ import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 import { toCustomerFacingText } from "@/lib/ai/customerFacingText";
 import type {
   AnalysisResult,
+  ConfidenceIntegrity,
   ExportResearchSnapshot,
   RepairIntelligenceReport,
 } from "@/lib/ai/types/analysis";
@@ -109,6 +112,31 @@ type ReportSendHistoryItem = {
   failedAt: string | null;
   openedAt: string | null;
 };
+
+function resolveEffectiveReviewProgress(
+  progress: ReviewProgress,
+  integrity: ConfidenceIntegrity
+): ReviewProgress {
+  const reviewedForDetermination = Math.max(
+    progress.reviewedForDetermination,
+    integrity.reviewedFileCount ?? integrity.uploadedFileCount
+  );
+  const indexed = Math.max(progress.indexed, integrity.indexedFileCount ?? integrity.uploadedFileCount);
+  const visionProcessed = Math.max(progress.visionProcessed, integrity.visionProcessedFileCount ?? 0);
+  const totalKnownFiles = Math.max(
+    progress.totalKnownFiles,
+    integrity.totalKnownFileCount ?? indexed,
+    reviewedForDetermination
+  );
+
+  return {
+    uploaded: Math.max(progress.uploaded, integrity.uploadedFileCount),
+    indexed,
+    visionProcessed,
+    reviewedForDetermination,
+    totalKnownFiles,
+  };
+}
 
 type LinkedEvidenceDebugItem = {
   id?: string | null;
@@ -271,6 +299,13 @@ export function ChatbotWorkspacePage() {
   } | null>(null);
   const [attachment, setAttachment] = useState<string | null>(null);
   const [attachmentsState, setAttachmentsState] = useState<AttachmentTrayItem[]>([]);
+  const [reviewProgress, setReviewProgress] = useState<ReviewProgress>({
+    uploaded: 0,
+    indexed: 0,
+    visionProcessed: 0,
+    reviewedForDetermination: 0,
+    totalKnownFiles: 0,
+  });
   const [analysisText, setAnalysisText] = useState("");
   const [analysisReportId, setAnalysisReportId] = useState<string | null>(null);
   const [linkedEvidenceDebug, setLinkedEvidenceDebug] = useState<LinkedEvidenceDebugItem[]>([]);
@@ -346,8 +381,9 @@ export function ChatbotWorkspacePage() {
         analysis: normalizedResult,
         panel: hasResolvedAnalysis ? analysisPanel : null,
         assistantAnalysis: hasResolvedAnalysis ? analysisText : "",
+        outputMode: classifyOutputMode(`${caseIntent}\n\n${primaryAnalysis?.content ?? ""}\n\n${analysisText}`),
       }),
-    [analysisPanel, analysisResult, analysisText, hasResolvedAnalysis, normalizedResult]
+    [analysisPanel, analysisResult, analysisText, caseIntent, hasResolvedAnalysis, normalizedResult, primaryAnalysis]
   );
   const financialView = useMemo(
     () =>
@@ -1232,6 +1268,7 @@ export function ChatbotWorkspacePage() {
                             chatSessionControlsRef.current = controls;
                           }}
                           onCaseIntentChange={setCaseIntent}
+                          onReviewProgressChange={setReviewProgress}
                           viewerAccess={viewerAccess}
                           caseChatEnabled={Boolean(analysisReportId)}
                           activeCaseId={analysisReportId}
@@ -1271,6 +1308,7 @@ export function ChatbotWorkspacePage() {
             renderModel={renderModel}
             normalizedResult={normalizedResult}
             analysisResult={analysisResult}
+            reviewProgress={reviewProgress}
             workspaceData={workspaceData}
             canViewSupplementLines={canViewSupplementLines}
                           canViewNegotiationDraft={canViewNegotiationDraft}
@@ -1438,6 +1476,7 @@ function RailContent({
   renderModel,
   normalizedResult,
   analysisResult,
+  reviewProgress,
   workspaceData,
   canViewSupplementLines,
   canViewNegotiationDraft,
@@ -1469,6 +1508,7 @@ function RailContent({
   renderModel: ReturnType<typeof buildExportModel>;
   normalizedResult: AnalysisResult | null;
   analysisResult: RepairIntelligenceReport | null;
+  reviewProgress: ReviewProgress;
   workspaceData: WorkspaceData | null;
   canViewSupplementLines: boolean;
   canViewNegotiationDraft: boolean;
@@ -1558,6 +1598,14 @@ function RailContent({
             ? "Files attached"
             : "Awaiting files";
   const attachmentLabel = attachment ?? "No attachment yet";
+  const effectiveReviewProgress = resolveEffectiveReviewProgress(
+    reviewProgress,
+    renderModel.confidenceIntegrity
+  );
+  const fileReviewWarning =
+    effectiveReviewProgress.totalKnownFiles > effectiveReviewProgress.reviewedForDetermination
+      ? `Only ${effectiveReviewProgress.reviewedForDetermination} of ${effectiveReviewProgress.totalKnownFiles} files reviewed. Do not rely on this as a final umpire determination.`
+      : null;
   const supportSignals = dedupeRailItems([
     ...renderModel.reportFields.presentStrengths,
     ...renderModel.disputeIntelligenceReport.positives,
@@ -2235,6 +2283,22 @@ function RailContent({
           />
           <MetricCard label="Analysis" value={railStatus} />
         </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2.5">
+          <MetricCard label="Uploaded" value={String(effectiveReviewProgress.uploaded)} />
+          <MetricCard label="Indexed" value={String(effectiveReviewProgress.indexed)} />
+          <MetricCard label="Vision processed" value={String(effectiveReviewProgress.visionProcessed)} />
+          <MetricCard
+            label="Reviewed"
+            value={`${effectiveReviewProgress.reviewedForDetermination}/${effectiveReviewProgress.totalKnownFiles}`}
+          />
+        </div>
+
+        {fileReviewWarning ? (
+          <div className="mt-3 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-[12px] leading-5 text-amber-800 dark:text-amber-200">
+            {fileReviewWarning}
+          </div>
+        ) : null}
       </section>
 
       {analysisLoading && !hasResolvedAnalysis && (
@@ -3483,7 +3547,7 @@ function SnapshotPreviewModal({
             `More files indicated: ${safeSnapshot.evidenceCompleteness.userIndicatedMoreFiles ? "Yes" : "No"}`,
             safeSnapshot.evidenceCompleteness.missingCriticalEvidence.length
               ? `Still worth checking: ${safeSnapshot.evidenceCompleteness.missingCriticalEvidence.join(", ")}`
-              : "No critical missing proof listed.",
+              : "No critical support item remains not yet located in reviewed files.",
             safeSnapshot.evidenceCompleteness.userFacingDisclosure,
           ]} />
           <SnapshotPanel title="Next Actions" items={safeSnapshot.nextActions.map((item, index) => `${index + 1}. ${item}`)} />

@@ -61,6 +61,7 @@ import {
   cleanEstimateLineForTechnicalExport,
   isMalformedEstimateLine,
 } from "@/lib/ui/presentationText";
+import { classifyOutputMode, type OutputMode } from "@/lib/ai/outputMode";
 
 export const COLLISION_ACADEMY_HANDOFF_URL = "https://www.collision.academy/";
 export const REDACTED_INSURER_TOKEN = "[REDACTED_INSURER]";
@@ -116,6 +117,7 @@ export type ExportModel = {
   negotiationPlaybook: NegotiationPlaybook;
   financialGapBreakdown: FinancialGapBreakdown;
   pressureMode: PressureModeContext;
+  outputMode: OutputMode;
 };
 
 export type { PressureModeContext };
@@ -260,6 +262,7 @@ export function buildExportModel(params: {
   analysis: AnalysisResult | null;
   panel: DecisionPanel | null;
   assistantAnalysis?: string | null;
+  outputMode?: OutputMode;
 }): ExportModel {
   const reportFields = deriveExportReportFields({
     report: params.report,
@@ -469,6 +472,11 @@ export function buildExportModel(params: {
       supplementItems: leverageSortedSupplementItems,
       topDrivers: disputeIntelligenceReport.topDrivers,
     }),
+    outputMode: params.outputMode ?? classifyOutputMode([
+      params.assistantAnalysis ?? "",
+      params.panel?.narrative ?? "",
+      params.panel?.appraisal?.reasoning ?? "",
+    ].join("\n\n")),
   };
 
   const modelWithDetermination = {
@@ -650,6 +658,14 @@ function buildConfidenceIntegrity(params: {
     params.report?.ingestionMeta?.uploadedFileCount ??
     params.report?.evidenceRegistry?.filter((item) => item.ingestionState === "uploaded").length ??
     0;
+  const indexedFileCount =
+    params.report?.evidenceRegistry?.filter((item) =>
+      ["uploaded", "ingested"].includes(item.ingestionState)
+    ).length ?? uploadedFileCount;
+  const visionProcessedFileCount =
+    params.report?.evidenceRegistry?.filter((item) => item.evidenceStatus === "VISIBLE_IN_IMAGES").length ?? 0;
+  const reviewedFileCount = uploadedFileCount;
+  const totalKnownFileCount = Math.max(uploadedFileCount, indexedFileCount);
   const uploadLimitReached = Boolean(params.report?.ingestionMeta?.uploadLimitReached);
   const userIndicatedMoreFiles = Boolean(params.report?.ingestionMeta?.userIndicatedMoreFiles);
   const missingCriticalEvidence = deriveMissingCriticalEvidence(params);
@@ -675,6 +691,10 @@ function buildConfidenceIntegrity(params: {
     adjustedConfidence,
     completenessStatus,
     uploadedFileCount,
+    indexedFileCount,
+    visionProcessedFileCount,
+    reviewedFileCount,
+    totalKnownFileCount,
     uploadLimitReached,
     userIndicatedMoreFiles,
     missingCriticalEvidence,
@@ -776,7 +796,7 @@ function buildConfidencePenalties(params: {
     penalties.push({
       reason: "MISSING_CRITICAL_EVIDENCE",
       impact: Math.min(30, params.missingCriticalEvidence.length * 8),
-      explanation: `Missing proof: ${params.missingCriticalEvidence.join(", ")}.`,
+      explanation: `Not yet located in reviewed files: ${params.missingCriticalEvidence.join(", ")}.`,
     });
   }
   if (params.evidenceQuality === "weak") {
@@ -812,7 +832,7 @@ function buildConfidenceDisclosure(params: {
     params.userIndicatedMoreFiles ? "additional files were indicated but not included" : "",
   ].filter(Boolean);
   const missing = params.missingCriticalEvidence.length > 0
-    ? ` Missing proof includes ${params.missingCriticalEvidence.slice(0, 4).join(", ")}.`
+    ? ` Not yet located in reviewed files: ${params.missingCriticalEvidence.slice(0, 4).join(", ")}.`
     : "";
   const limitText = limits.length > 0 ? ` ${limits.join("; ")}.` : "";
   return `This is not a final file-complete conclusion. Evidence coverage is ${params.completenessStatus.toLowerCase()}, and adjusted confidence is ${params.adjustedConfidence}.${limitText}${missing}`;
@@ -1093,7 +1113,7 @@ function buildFallbackFindingReasoning(
           : "Current structured analysis and estimate context; verify with source documents before use.",
         next_action: issue.missingOperation
           ? `Request documentation or estimate revision for ${issue.missingOperation}.`
-          : "Request the missing supporting documentation or a written estimate explanation.",
+          : "Request the supporting documentation not yet located in reviewed files or a written estimate explanation.",
         evidenceLevel,
         confidence: evidenceLevel === "documented" ? 0.86 : evidenceLevel === "referenced" ? 0.74 : 0.56,
         claimSpecificity: issue.evidenceIds.length > 0 || issue.missingOperation ? "high" as const : "medium" as const,
@@ -1117,7 +1137,7 @@ function buildFallbackFindingReasoning(
           : "No direct evidence citation is attached to this analysis finding.",
         next_action: finding.status === "present"
           ? "Preserve the supporting record in the file."
-          : "Request supporting documentation or revise the estimate record.",
+          : "Request the completion/support record not yet isolated in reviewed files or revise the estimate record.",
         evidenceLevel,
         confidence: evidenceLevel === "documented" ? 0.82 : evidenceLevel === "inferred" ? 0.58 : 0.44,
         claimSpecificity: finding.evidence.length > 0 ? "high" as const : "medium" as const,

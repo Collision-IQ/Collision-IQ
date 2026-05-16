@@ -20,6 +20,7 @@ import { getCaseById } from "@/lib/cases/getCaseById";
 import type { StoredCaseData } from "@/lib/cases/getCaseById";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { buildProductAccessGuard } from "@/lib/featureAccess";
+import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
 import {
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
@@ -731,6 +732,22 @@ function getOpenAIOutputText(response: unknown): string | undefined {
   return typeof candidate.output_text === "string" ? candidate.output_text : undefined;
 }
 
+function enforceModeResponseShape(text: string, mode: OutputMode): string {
+  if (mode !== "UMPIRING" || /appraisal recommendation/i.test(text)) {
+    return text;
+  }
+
+  return [
+    "**Appraisal Recommendation**",
+    "Based on the reviewed file, use the appraisal record to make a directional amount-of-loss recommendation rather than treating every open support item as no decision. If the reviewed file is incomplete, the final award should be deferred only to the extent the file is not ready for final-award confidence.",
+    "",
+    "**Award Posture**",
+    "Use one of these postures: award shop estimate, award carrier estimate, award reconciled supported amount, defer final award because full-file review is incomplete, or defer final award because amount-of-loss maturity is incomplete.",
+    "",
+    text,
+  ].join("\n");
+}
+
 export async function POST(req: Request) {
   try {
     if (!process.env.OPENAI_API_KEY?.trim()) {
@@ -823,6 +840,7 @@ export async function POST(req: Request) {
 
     const userMessage = extractLatestUserMessage(body.messages || []);
     const conversationContext = formatRecentConversation(body.messages || []);
+    const outputMode = buildModeContext(`${userMessage}\n\n${conversationContext}`);
     const activeCase = body.activeCaseId
       ? await getCaseById(body.activeCaseId, {
           ownerUserId: user.id,
@@ -914,6 +932,7 @@ export async function POST(req: Request) {
       baseSystemInstructions,
       buildProductAccessGuard(body.productAccess),
       buildAssistanceProfileInstruction(body.assistanceProfile),
+      outputMode.instruction,
       buildActiveCaseSystemGuard({
         hasStoredEvidence: activeCaseHasStoredEvidence,
         hasVehicleContext: activeCaseHasVehicleContext,
@@ -1105,6 +1124,7 @@ export async function POST(req: Request) {
           retrievalContext,
         })
       : firstPassText;
+    const modeShapedOutput = enforceModeResponseShape(outputText, outputMode.mode);
 
     console.info("[chat-attachments] analysis complete", {
       ownerUserId: user.id,
@@ -1117,8 +1137,8 @@ export async function POST(req: Request) {
 
     const finalText = redactExternalDocumentUrls(
       needsLegalDisclaimer
-        ? `${LEGAL_INFO_DISCLAIMER}\n\n${outputText}`
-        : outputText
+        ? `${LEGAL_INFO_DISCLAIMER}\n\n${modeShapedOutput}`
+        : modeShapedOutput
     );
 
     return new Response(cleanDisplayText(finalText), {
