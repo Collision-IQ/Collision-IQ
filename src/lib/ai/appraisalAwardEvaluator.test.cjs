@@ -92,3 +92,15 @@ run("defers only for material final-award evidence, not any near-complete omissi
   });
   assert.equal(material.posture, "DEFER_FOR_MATERIAL_EVIDENCE");
 });
+
+run("appraisal instruction contains safety-first non-partisan mission governance", () => {
+  const { buildAppraisalAwardEvaluatorInstruction } = require("./appraisalAwardEvaluator.ts");
+  const instruction = buildAppraisalAwardEvaluatorInstruction();
+
+  assert.match(instruction, /non-partisan repair intelligence and appraisal support system/i);
+  assert.match(instruction, /policyholder and public safety/i);
+  assert.match(instruction, /EVs and heavier vehicle platforms/i);
+  assert.match(instruction, /carrier underpayment/i);
+  assert.match(instruction, /shop overreach/i);
+  assert.match(instruction, /Which repair path is OE\/safety supported/i);
+});
