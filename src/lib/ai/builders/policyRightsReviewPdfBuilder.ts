@@ -479,10 +479,9 @@ function buildUserProvidedContextBullets(value: string | null | undefined, repor
 function buildUploadedPolicyCitations(text: string, startIndex: number): ImmutablePolicyCitation[] {
   if (!hasUploadedPolicyEvidence(text)) return [];
 
-  const jurisdiction = inferCitationJurisdiction(text);
   const policySignals = [
     /governed by|laws? of|policy state|declarations?|financial responsibility|identification card/i.test(text)
-      ? "jurisdiction, declarations, or insurance identification-card indicators"
+      ? "policy, declarations, or insurance identification-card indicators; jurisdiction metadata is redacted or ambiguous"
       : null,
     /collision|comprehensive|coverage/i.test(text) ? "collision or comprehensive coverage indicators" : null,
     /appraisal|arbitration|if we cannot agree|cannot agree/i.test(text)
@@ -498,11 +497,8 @@ function buildUploadedPolicyCitations(text: string, startIndex: number): Immutab
       source: "UploadedPolicyDocument",
       sourceAuthorityTier: "POLICY_CONTRACT",
       sourceType: "runtime",
-      title: jurisdiction
-        ? `Uploaded policy packet with ${jurisdiction} policy indicators`
-        : "Uploaded policy packet",
+      title: "Uploaded policy packet / appraisal-language support; jurisdiction metadata redacted or ambiguous",
       locator: policySignals || "Policy evidence was classified from policy-related source text.",
-      jurisdiction,
       retrievedAt: new Date().toISOString(),
       confidenceScore: 0.86,
       index: startIndex,
@@ -593,7 +589,6 @@ function buildUploadedJurisdictionText(params: ExportBuilderInput): string {
     )
     .map((item) =>
       [
-        item.label,
         item.extractedText,
         item.extractedSummary,
         ...Object.values(item.structuredFacts ?? {}).flatMap((value) => Array.isArray(value) ? value : value ? [String(value)] : []),
@@ -1017,6 +1012,7 @@ function formatCitationList(citations: ImmutablePolicyCitation[]): string {
 }
 
 function formatCitationIndexItem(citation: ImmutablePolicyCitation): string {
+  const isUploadedPolicy = citation.source === "UploadedPolicyDocument";
   return [
     `Citation: ${humanizePolicyText(citation.title)}`,
     `Source: ${formatCitationSource(citation.source)}`,
@@ -1025,9 +1021,14 @@ function formatCitationIndexItem(citation: ImmutablePolicyCitation): string {
     citation.locator ? `Locator: ${humanizePolicyText(citation.locator)}` : null,
     citation.url ? `URL: ${citation.url}` : null,
     citation.retrievedAt ? `Retrieved: ${citation.retrievedAt}` : null,
-    citation.jurisdiction ? `Jurisdiction: ${citation.jurisdiction}` : null,
+    isUploadedPolicy
+      ? "Jurisdiction metadata: redacted or ambiguous"
+      : citation.jurisdiction ? `Jurisdiction: ${citation.jurisdiction}` : null,
     citation.effectiveDate ? `Effective date: ${citation.effectiveDate}` : null,
     typeof citation.confidenceScore === "number" ? `Confidence score: ${Math.round(citation.confidenceScore * 100)}%` : null,
+    isUploadedPolicy
+      ? "Source metadata is redacted or ambiguous; policy language should be reviewed directly."
+      : null,
   ]
     .filter(Boolean)
     .join(" | ");
@@ -1035,8 +1036,9 @@ function formatCitationIndexItem(citation: ImmutablePolicyCitation): string {
 
 function humanizePolicyText(value: string): string {
   return sanitizeUserFacingEvidenceText(value
+    .replace(/\bpolicy packet with\s+(?:Georgia|GA|[A-Z][a-z]+)\s*(?:\([A-Z]{2}\))?\s+policy indicators\b/gi, "uploaded policy packet / appraisal-language support; jurisdiction metadata redacted or ambiguous")
+    .replace(/\bJurisdiction:\s*Georgia\s*\(GA\)\b/gi, "Jurisdiction metadata: redacted or ambiguous")
     .replace(/\buploaded document\b/gi, "source material")
-    .replace(/\buploaded policy packet\b/gi, "policy packet")
     .replace(/\bSame rationale as earlier\b/gi, "The same policy support should be reviewed with the current claim context.")
     .replace(/\bCurrent estimate analysis; citation still needed\b/gi, "Repair attachment context; independent citation still needed")
     .replace(/\bclaim-\[REDACTED_CLAIM\]\b/gi, "the claim")

@@ -57,6 +57,7 @@ const INLINE_LABEL_JOIN_PATTERN =
 const SENTENCE_COMPRESSION_PATTERN = /([a-z0-9),\]])\.\s+(?=(?:[A-Z][a-z]+(?:\s+[A-Z]?[a-z]+){0,5}:|[1-9]\.\s+))/g;
 const MALFORMED_RETRIEVED_PATTERN = /\bRetrieved:\s*(?::\s*)?(?:(\d{4}-\d{2}-\d{2}T)?\s*)?(\d{1,2})\s*:\s*(\d{2})\s*:\s*(\d{2}(?:\.\d+)?Z?)\b/gi;
 const MALFORMED_RETRIEVED_SHORT_PATTERN = /\bRetrieved:\s*:\s*(\d{1,2})\s*:\s*(\d{2}(?:\.\d+)?Z?)\b/gi;
+const ORPHAN_RETRIEVED_TIME_PATTERN = /\bRetrieved:\s*\d{1,2}:\d{2}(?:\.\d+)?Z\b\.?/gi;
 const URL_PATTERN = /\bhttps?:\/\/[^\s)\]]+/gi;
 const INTERNAL_METADATA_BLOB_PATTERN =
   /\b(?:evidence|source|support|vector|retrieval|metadata|ingestion|reference|chain|ids?)\s*(?:references?|ids?|chain|metadata|blob)?\s*:\s*(?:\[[^\]]{0,500}\]|\{[^}]{0,500}\}|(?:[\w:-]{8,}\s*[,;]\s*){2,}[\w:-]{8,})/gi;
@@ -131,6 +132,7 @@ export function cleanUserFacingPresentationText(
     .replace(/(?:â†’|→)/g, " -> ")
     .replace(/\bclaim-\s*\[REDACTED_CLAIM\]/gi, "claim [REDACTED_CLAIM]")
     .replace(/\bpolicy-\s*\[REDACTED_POLICY\]/gi, "policy [REDACTED_POLICY]")
+    .replace(/\bGenerated\s+([A-Z][a-z]+)\s+(\d{1,2}),\s*(\d{4})\b/g, "Generated $1 $2, $3")
     .replace(URL_PATTERN, "source link")
     .replace(MALFORMED_RETRIEVED_SHORT_PATTERN, (_match, first: string, second: string) => `Retrieved: ${first}:${second}`)
     .replace(MALFORMED_RETRIEVED_PATTERN, (_match, datePrefix: string | undefined, hours: string, minutes: string, seconds: string) => {
@@ -143,6 +145,7 @@ export function cleanUserFacingPresentationText(
     .replace(/\bnot yet clearly with printouts\b/gi, "not yet clearly documented with printouts")
     .replace(/\bcontinue documentation added findings\b/gi, "continue documenting added findings")
     .replace(/\bincluding a,\s*pre-repair scan\b/gi, "including a pre-repair scan")
+    .replace(/\bstill needs to be clearly to avoid\b/gi, "still needs to be clearly documented to avoid")
     .replace(/\bshould be clearly to address\b/gi, "should be clearly documented to address")
     .replace(/\bThis supportable\b/g, "This appears supportable")
     .replace(/\bthis supportable\b/g, "this appears supportable")
@@ -150,6 +153,8 @@ export function cleanUserFacingPresentationText(
     .replace(/\bfinal uploaded documents?\b/gi, "final documentation")
     .replace(/\buploaded documents?\s+(?:are|is)\b/gi, "documentation is")
     .replace(/\bmounting\s*uploaded file\b/gi, "mounting documentation")
+    .replace(/\bSafetydocumentation support\b/g, "Safety documentation support")
+    .replace(/\bmountingdocumentation area\b/gi, "mounting documentation area")
     .replace(/\buploaded file:\s*(?:source link|documentation|supporting evidence)\b/gi, "documentation")
     .replace(/\buploaded file\s+source link\b/gi, "source link")
     .replace(/\buploaded documents?\b/gi, "documentation")
@@ -158,8 +163,12 @@ export function cleanUserFacingPresentationText(
     .replace(/\bStructural cues\s+Structural\s+/gi, "Structural ")
     .replace(/\bStructural cues:\s*(?:none visible|not clearly shown)\.?\s*/gi, "")
     .replace(/\b(?:battery|wheel|bumper|fender|door|hood|lamp|liner|mirror|panel|grille|fascia|sensor|scan|calibration)\s+primarym\d+(?:\.\d+)?\b/gi, "")
-    .replace(/\b(?:four-w|repai)\b(?=[\s.,;:)]|$)/gi, "")
+    .replace(/\b(?:four-w|four-whe|post-pull c|alignmen|confi|repai)\b(?=[\s.,;:)]|$)/gi, "")
     .replace(/\b(?:Not clearly\s+){2,}shown\b/gi, "Not clearly shown")
+    .replace(/\bpolicy packet with\s+(?:Georgia|GA|[A-Z][a-z]+)\s*(?:\([A-Z]{2}\))?\s+policy indicators\b/gi, "uploaded policy packet / appraisal-language support; jurisdiction metadata redacted or ambiguous")
+    .replace(/\bJurisdiction:\s*Georgia\s*\(GA\)\b/gi, "Jurisdiction metadata: redacted or ambiguous")
+    .replace(/\bcontinue at source link\b\.?/gi, "")
+    .replace(ORPHAN_RETRIEVED_TIME_PATTERN, "")
     .replace(/\.{2,}/g, ".")
     .replace(/\s+([,.;:])/g, "$1")
     .replace(/([,;:])(?=\S)/g, "$1 ")
@@ -173,8 +182,14 @@ export function cleanUserFacingPresentationText(
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/\bRetrieved:\s*(\d{1,2}):\s+(\d{2}(?:\.\d+)?Z?)\b/g, "Retrieved: $1:$2")
+    .replace(ORPHAN_RETRIEVED_TIME_PATTERN, "")
+    .replace(/\bGenerated\s+([A-Z][a-z]+)\s+(\d{1,2}),\s*(\d{4})\b/g, "Generated $1 $2, $3")
+    .replace(/,\s*(\d{4})\b/g, ", $1")
+    .replace(/\bJurisdiction:\s*Georgia\s*\(GA\)\b/gi, "Jurisdiction metadata: redacted or ambiguous")
     .replace(/(\$?\d{1,3}),\s+(\d{3})/g, "$1,$2")
     .replace(/\b(\d{1,2})\s*:\s*(\d{2})\s*:\s*(\d{2}(?:\.\d+)?Z?)\b/g, "$1:$2:$3")
+    .replace(/\bGenerated\s+([A-Z][a-z]+)\s+(\d{1,2}),\s*(\d{4})\b/g, "Generated $1 $2, $3")
+    .replace(/(^|[\s\n])Jurisdiction:\s*Georgia\s*\(GA\)/gi, "$1Jurisdiction metadata: redacted or ambiguous")
     .replace(/\s+([,.;:])/g, "$1")
     .replace(/(^|[\s([])[,;:.-]+(?=\s|$|[)\]])/g, "$1");
 

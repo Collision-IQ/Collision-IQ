@@ -118,3 +118,11 @@ hubspot.config.yml
 elevenlabs.config.yml
 ELVEENLABS_API_KEY
 ELEVENLABS_VOICE_ID
+
+# Local Google service account / secret material
+*.b64
+*service-account*.json
+*sync*.json
+google-sa*.json
+google-sa*.b64
+collision-iq-sync-*.json

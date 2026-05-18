@@ -713,16 +713,16 @@ function buildCustomerFacingRequest(
   category: EstimateAnnotationCategory
 ): string {
   if (category === "Needs invoice/proof") {
-    return `Ask for written confirmation that ${finding.operation.toLowerCase()} was completed and documented.`;
+    return `Ask for written confirmation that ${cleanCustomerFacingEstimateLine(finding.operation).toLowerCase()} was completed and documented.`;
   }
   if (category === "Needs OEM procedure support") {
-    return `Ask the insurer or repair shop to confirm whether ${finding.operation.toLowerCase()} is included and documented.`;
+    return `Ask the insurer or repair shop to confirm whether ${cleanCustomerFacingEstimateLine(finding.operation).toLowerCase()} is included and documented.`;
   }
   if (category === "Alternate/aftermarket part concern") {
     return "Ask for written confirmation that the selected part is appropriate for the repair, policy, fit, safety, warranty, and repair-procedure requirements.";
   }
   if (category === "Missing operation") {
-    return `Ask the insurer or repair shop to confirm whether ${finding.operation.toLowerCase()} is included and documented.`;
+    return `Ask the insurer or repair shop to confirm whether ${cleanCustomerFacingEstimateLine(finding.operation).toLowerCase()} is included and documented.`;
   }
   return `Ask the insurer or repair shop to confirm whether this item is included and documented.`;
 }
@@ -731,22 +731,23 @@ function buildEstimatorFacingRequest(
   finding: EstimateScrubFinding,
   category: EstimateAnnotationCategory
 ): string {
+  const operation = cleanCustomerFacingEstimateLine(finding.operation);
   if (category === "Needs invoice/proof") {
-    return `Needs proof: ${finding.operation} is referenced but final invoice-backed completion is not shown. Request final scan, calibration, alignment, material, or invoice support before closing this item.`;
+    return `Needs proof: ${operation} is referenced but final invoice-backed completion is not shown. Request final scan, calibration, alignment, material, or invoice support before closing this item.`;
   }
   if (category === "Needs OEM procedure support") {
-    return `Add or document ${finding.operation} if OEM procedure applies; attach procedure-backed scan, calibration, fit-verification, or repair-method support.`;
+    return `Add or document ${operation} if OEM procedure applies; attach procedure-backed scan, calibration, fit-verification, or repair-method support.`;
   }
   if (category === "Alternate/aftermarket part concern") {
     return "Alternate part difference. Confirm whether the selected part complies with policy, fit, safety, warranty, and repair-procedure requirements.";
   }
   if (category === "Reduced labor/material") {
-    return `Review labor, refinish, material, rate, alternate-part, or allowance reduction for ${finding.operation}; add a supported supplement line or document the accepted variance.`;
+    return `Review labor, refinish, material, rate, alternate-part, or allowance reduction for ${operation}; add a supported supplement line or document the accepted variance.`;
   }
   if (category === "Needs supplement review") {
-    return `Route ${finding.operation} for supplement review with the supporting estimate excerpt, photos, procedure note, and repair-plan basis.`;
+    return `Route ${operation} for supplement review with the supporting estimate excerpt, photos, procedure note, and repair-plan basis.`;
   }
-  return `Add or clarify ${finding.operation}; document the estimate basis and attach supporting repair-plan evidence.`;
+  return `Add or clarify ${operation}; document the estimate basis and attach supporting repair-plan evidence.`;
 }
 
 function buildAnnotationSourceRefs(finding: EstimateScrubFinding): string[] {
@@ -1588,6 +1589,8 @@ function isVerifiedScrubberSource(value: string): boolean {
 function cleanCustomerFacingEstimateLine(value: string | null | undefined): string {
   if (!value) return "";
   const scrubbed = cleanScrubberText(value);
+  const structuralFallback = resolveStructuralParserFallback(scrubbed);
+  if (structuralFallback) return structuralFallback;
   const cleaned =
     normalizeEstimateOperationLabel({ label: scrubbed, operation: scrubbed }) ||
     cleanEstimateLineForTechnicalExport(scrubbed) ||
@@ -1599,6 +1602,7 @@ function cleanCustomerFacingEstimateLine(value: string | null | undefined): stri
     .replace(/([A-Za-z])(\$?\d)/g, "$1 $2")
     .replace(/(\d)([A-Za-z$])/g, "$1 $2")
     .replace(/\bparser\s+fragment\b/gi, "")
+    .replace(/\b(?:four-whe|four-w|post-pull c|alignmen|confi|repai)\b(?=[\s.,;:)]|$)/gi, "")
     .replace(/\b(?:evidence|chain|source|finding|issue|doc|line)[-_ ]?[a-z0-9]{4,}\b/gi, "")
     .replace(/\b[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b/gi, "")
     .replace(/[{}[\]<>]/g, "")
@@ -1609,6 +1613,19 @@ function cleanCustomerFacingEstimateLine(value: string | null | undefined): stri
     .replace(/^[-:;,\s]+|[-:;,\s]+$/g, "")
     .trim()
     .slice(0, 220);
+}
+
+function resolveStructuralParserFallback(value: string): string {
+  if (!/structural|frame|measure|measurement|pull|post-pull|setup|set up|alignment/i.test(value)) {
+    return "";
+  }
+  if (/\b(pull|post-pull|set\s*up|setup|bench|realign)\b/i.test(value)) {
+    return "Structural setup and pull verification";
+  }
+  if (/\b(structural|frame|measure|measurement|alignment|geometry)\b/i.test(value)) {
+    return "Structural frame and measurement verification";
+  }
+  return "";
 }
 
 function cleanPromptGeneratedText(value: string | null | undefined): string {

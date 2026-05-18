@@ -134,6 +134,10 @@ function normalizeExportComparisonText(value: string): string {
 function cleanProfessionalChatExportText(value: string): string {
   return cleanUserFacingPresentationText(value, { preserveMarkdown: true })
     .replace(/\bNice try,\s*but no\.?\s*/gi, "")
+    .replace(/\bThat trick gets old fast\.?\s*/gi, "")
+    .replace(/\ba neat trick\b\.?\s*/gi, "")
+    .replace(/\b(?:cute|clever)\s+trick\b\.?\s*/gi, "")
+    .replace(/\bcontinue at source link\b\.?\s*/gi, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }

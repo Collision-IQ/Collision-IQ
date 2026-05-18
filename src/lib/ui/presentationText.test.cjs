@@ -158,7 +158,7 @@ run("presentation cleanup normalizes export grammar, timestamps, numbers, URLs, 
 
   assert.doesNotMatch(cleaned, /https?:\/\//);
   assert.match(cleaned, /source link/);
-  assert.match(cleaned, /Retrieved: 50:37\.877Z/);
+  assert.doesNotMatch(cleaned, /Retrieved:\s*(?::|\d{1,2}:\d{2})/);
   assert.match(cleaned, /\$16,886\.67/);
   assert.match(cleaned, /17,563/);
   assert.match(cleaned, /13:50:43/);
@@ -170,6 +170,30 @@ run("presentation cleanup normalizes export grammar, timestamps, numbers, URLs, 
   assert.match(cleaned, /\n\nCarrier vulnerabilities:/);
   assert.match(cleaned, /\n\nShop vulnerabilities:/);
   assert.match(cleaned, /\n\nNot final-award confidence:/);
+});
+
+run("presentation cleanup removes release-blocker export artifacts", () => {
+  const cleaned = cleanUserFacingPresentationText(
+    [
+      "Generated May 18,2026.",
+      "Safetydocumentation support in the mountingdocumentation area.",
+      "Retrieved: 40:13.304Z.",
+      "still needs to be clearly to avoid confusion.",
+      "policy packet with Georgia (GA) policy indicators. Jurisdiction: Georgia (GA).",
+      "continue at source link.",
+      "four-whe post-pull c alignmen confi Not clearly Not clearly shown.",
+    ].join(" "),
+    { preserveMarkdown: true }
+  );
+
+  assert.match(cleaned, /Generated May 18, 2026/);
+  assert.match(cleaned, /Safety documentation support/);
+  assert.match(cleaned, /mounting documentation area/);
+  assert.doesNotMatch(cleaned, /Retrieved: 40:13\.304Z/);
+  assert.match(cleaned, /still needs to be clearly documented to avoid/);
+  assert.match(cleaned, /uploaded policy packet \/ appraisal-language support; jurisdiction metadata redacted or ambiguous/);
+  assert.match(cleaned, /Jurisdiction metadata: redacted or ambiguous/);
+  assert.doesNotMatch(cleaned, /continue at source link|four-whe|post-pull c|alignmen|confi|Not clearly Not clearly/);
 });
 
 run("review completeness uses near-complete language for 185 of 186 reviewable files", () => {

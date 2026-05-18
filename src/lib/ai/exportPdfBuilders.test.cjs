@@ -384,6 +384,52 @@ run("Policy Rights Review promotes uploaded policy document evidence", () => {
   assert.doesNotMatch(text, /No uploaded policy|no verified policy language/i);
 });
 
+run("Policy Rights Review labels redacted policy metadata neutrally without implying Georgia jurisdiction", () => {
+  const policyReport = {
+    ...REPORT,
+    evidenceRegistry: [
+      {
+        id: "policy-upload-redacted",
+        sourceType: "policy_document",
+        label: "policy packet with Georgia (GA) policy indicators.pdf",
+        extractedText: [
+          "Pennsylvania Financial Responsibility Identification Card",
+          "Collision Coverage and Comprehensive Coverage are shown.",
+          "If we cannot agree, either party may demand appraisal.",
+        ].join("\n"),
+        extractedSummary:
+          "Jurisdiction indicator: PA. Redacted source metadata may contain unrelated state shorthand.",
+        structuredFacts: {
+          jurisdiction: "PA",
+          appraisalOrArbitration: "If we cannot agree, either party may demand appraisal.",
+        },
+        ingestionState: "uploaded",
+        evidenceStatus: "DOCUMENTED",
+        relatedIssueKeys: [],
+        createdAt: "2026-05-09T00:00:00.000Z",
+        updatedAt: "2026-05-09T00:00:00.000Z",
+      },
+    ],
+    ingestionMeta: {
+      uploadedFileCount: 1,
+    },
+  };
+
+  const document = buildPolicyRightsReviewPdf({
+    report: policyReport,
+    analysis: ANALYSIS,
+    panel: null,
+    assistantAnalysis: "Pennsylvania claim jurisdiction is established from the claim file.",
+  });
+  const text = JSON.stringify(document);
+
+  assert.ok(document.summary.some((item) => item.label === "Jurisdiction" && /PA|Pennsylvania/i.test(item.value)));
+  assert.match(text, /uploaded policy packet \/ appraisal-language support; jurisdiction metadata redacted or ambiguous/i);
+  assert.match(text, /Jurisdiction metadata: redacted or ambiguous/i);
+  assert.match(text, /Source metadata is redacted or ambiguous; policy language should be reviewed directly/i);
+  assert.doesNotMatch(text, /Georgia \(GA\) policy indicators|Jurisdiction: Georgia \(GA\)/i);
+});
+
 run("Annotated Estimate Review selects lower-cost carrier estimate and keeps comparison internal", () => {
   const comparisonAnalysis = {
     ...ANALYSIS,

@@ -941,6 +941,13 @@ function cleanUserFacingRepairProse(value: string): string {
   return value
     .replace(/\bEvidence references?:\s*(?:cmp[\w-]+(?:\s*,\s*)?)+\b/gi, "")
     .replace(/\bcmp[\w-]{4,}\b/gi, "")
+    .replace(/\bGenerated\s+([A-Z][a-z]+)\s+(\d{1,2}),\s*(\d{4})\b/g, "Generated $1 $2, $3")
+    .replace(/\bSafetydocumentation support\b/g, "Safety documentation support")
+    .replace(/\bmountingdocumentation area\b/gi, "mounting documentation area")
+    .replace(/\b(?:Not clearly\s+){2,}shown\b/gi, "Not clearly shown")
+    .replace(/\bRetrieved:\s*\d{1,2}:\d{2}(?:\.\d+)?Z\b\.?/gi, "")
+    .replace(/\bJurisdiction:\s*(?:IN|Indiana)\b/gi, "Jurisdiction relevance: not established")
+    .replace(/\bsource link\b\.?/gi, "")
     .replace(/\buploaded document\b(?:\s*,\s*\buploaded document\b)+/gi, "documentation")
     .replace(/\buploaded document\b/gi, "documentation")
     .replace(/\b(Repair Intelligence Report|Estimate Delta \/ Change Requests|Annotated Estimate Scrubber)\s*:\s*\1\b/gi, "$1")
