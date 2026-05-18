@@ -53,8 +53,11 @@ const MAJOR_NUMBERED_SECTION_PATTERN =
   /([^\n])\s+((?:[1-9]|1[0-9])\.\s+(?=[A-Z][A-Za-z][^\n]{4,}))/g;
 const MARKDOWN_HEADING_JOIN_PATTERN = /([^\n])\s+(#{1,4}\s+)/g;
 const INLINE_LABEL_JOIN_PATTERN =
-  /([.!?])\s+((?:Carrier vulnerabilities|Shop vulnerabilities|Final award|Bottom line|Support posture|Estimate position|What still needs support|What looks reasonable|What looks aggressive|Documented positives|Likely remaining gaps|Next action|Recommended action)\s*:)/gi;
+  /([.!?])\s+((?:Carrier vulnerabilities|Shop vulnerabilities|Not final-award confidence|Final award|Bottom line|Support posture|Estimate position|What still needs support|What looks reasonable|What looks aggressive|Documented positives|Likely remaining gaps|Next action|Recommended action)\s*:)/gi;
 const SENTENCE_COMPRESSION_PATTERN = /([a-z0-9),\]])\.\s+(?=(?:[A-Z][a-z]+(?:\s+[A-Z]?[a-z]+){0,5}:|[1-9]\.\s+))/g;
+const MALFORMED_RETRIEVED_PATTERN = /\bRetrieved:\s*(?::\s*)?(?:(\d{4}-\d{2}-\d{2}T)?\s*)?(\d{1,2})\s*:\s*(\d{2})\s*:\s*(\d{2}(?:\.\d+)?Z?)\b/gi;
+const MALFORMED_RETRIEVED_SHORT_PATTERN = /\bRetrieved:\s*:\s*(\d{1,2})\s*:\s*(\d{2}(?:\.\d+)?Z?)\b/gi;
+const URL_PATTERN = /\bhttps?:\/\/[^\s)\]]+/gi;
 const INTERNAL_METADATA_BLOB_PATTERN =
   /\b(?:evidence|source|support|vector|retrieval|metadata|ingestion|reference|chain|ids?)\s*(?:references?|ids?|chain|metadata|blob)?\s*:\s*(?:\[[^\]]{0,500}\]|\{[^}]{0,500}\}|(?:[\w:-]{8,}\s*[,;]\s*){2,}[\w:-]{8,})/gi;
 const KNOWN_OPERATION_VERBS = [
@@ -128,6 +131,18 @@ export function cleanUserFacingPresentationText(
     .replace(/(?:â†’|→)/g, " -> ")
     .replace(/\bclaim-\s*\[REDACTED_CLAIM\]/gi, "claim [REDACTED_CLAIM]")
     .replace(/\bpolicy-\s*\[REDACTED_POLICY\]/gi, "policy [REDACTED_POLICY]")
+    .replace(URL_PATTERN, "source link")
+    .replace(MALFORMED_RETRIEVED_SHORT_PATTERN, (_match, first: string, second: string) => `Retrieved: ${first}:${second}`)
+    .replace(MALFORMED_RETRIEVED_PATTERN, (_match, datePrefix: string | undefined, hours: string, minutes: string, seconds: string) => {
+      const time = `${hours.padStart(2, "0")}:${minutes}:${seconds}`;
+      return `Retrieved: ${datePrefix ? `${datePrefix}${time}` : time}`;
+    })
+    .replace(/(\$?\d{1,3}),\s+(\d{3})/g, "$1,$2")
+    .replace(/\b(\d{1,2})\s*:\s*(\d{2})\s*:\s*(\d{2}(?:\.\d+)?Z?)\b/g, "$1:$2:$3")
+    .replace(/\bThe calibration-related procedures\.\s+The record includes\b/gi, "The file supports calibration-related procedures. The record includes")
+    .replace(/\bnot yet clearly with printouts\b/gi, "not yet clearly documented with printouts")
+    .replace(/\bcontinue documentation added findings\b/gi, "continue documenting added findings")
+    .replace(/\bincluding a,\s*pre-repair scan\b/gi, "including a pre-repair scan")
     .replace(/\bshould be clearly to address\b/gi, "should be clearly documented to address")
     .replace(/\bThis supportable\b/g, "This appears supportable")
     .replace(/\bthis supportable\b/g, "this appears supportable")
@@ -135,8 +150,15 @@ export function cleanUserFacingPresentationText(
     .replace(/\bfinal uploaded documents?\b/gi, "final documentation")
     .replace(/\buploaded documents?\s+(?:are|is)\b/gi, "documentation is")
     .replace(/\bmounting\s*uploaded file\b/gi, "mounting documentation")
+    .replace(/\buploaded file:\s*(?:source link|documentation|supporting evidence)\b/gi, "documentation")
+    .replace(/\buploaded file\s+source link\b/gi, "source link")
     .replace(/\buploaded documents?\b/gi, "documentation")
+    .replace(/\buploaded files?\b/gi, "documentation")
     .replace(/\buploaded file artifacts?\b/gi, "uploaded file references")
+    .replace(/\bStructural cues\s+Structural\s+/gi, "Structural ")
+    .replace(/\bStructural cues:\s*(?:none visible|not clearly shown)\.?\s*/gi, "")
+    .replace(/\b(?:battery|wheel|bumper|fender|door|hood|lamp|liner|mirror|panel|grille|fascia|sensor|scan|calibration)\s+primarym\d+(?:\.\d+)?\b/gi, "")
+    .replace(/\b(?:four-w|repai)\b(?=[\s.,;:)]|$)/gi, "")
     .replace(/\b(?:Not clearly\s+){2,}shown\b/gi, "Not clearly shown")
     .replace(/\.{2,}/g, ".")
     .replace(/\s+([,.;:])/g, "$1")
@@ -149,7 +171,12 @@ export function cleanUserFacingPresentationText(
     .replace(SENTENCE_COMPRESSION_PATTERN, "$1.\n\n")
     .replace(/(^|\n)(#{1,4}\s+[^\n]+)\n(?!\n)/g, "$1$2\n\n")
     .replace(/\n{3,}/g, "\n\n")
-    .replace(/[ \t]{2,}/g, " ");
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\bRetrieved:\s*(\d{1,2}):\s+(\d{2}(?:\.\d+)?Z?)\b/g, "Retrieved: $1:$2")
+    .replace(/(\$?\d{1,3}),\s+(\d{3})/g, "$1,$2")
+    .replace(/\b(\d{1,2})\s*:\s*(\d{2})\s*:\s*(\d{2}(?:\.\d+)?Z?)\b/g, "$1:$2:$3")
+    .replace(/\s+([,.;:])/g, "$1")
+    .replace(/(^|[\s([])[,;:.-]+(?=\s|$|[)\]])/g, "$1");
 
   if (!options.preserveMarkdown) {
     cleaned = cleaned.replace(/\n+/g, " ");

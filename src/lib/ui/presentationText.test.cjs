@@ -143,6 +143,35 @@ run("presentation cleanup preserves markdown while adding readable status and se
   assert.match(cleaned, /Not clearly shown\.$/);
 });
 
+run("presentation cleanup normalizes export grammar, timestamps, numbers, URLs, and parser artifacts", () => {
+  const cleaned = cleanUserFacingPresentationText(
+    [
+      "Source: https://example.test/source.pdf Retrieved: : 50: 37.877Z.",
+      "$16, 886.67 and 17, 563 at 13: 50: 43.",
+      "The calibration-related procedures. The record includes not yet clearly with printouts.",
+      "Please continue documentation added findings including a, pre-repair scan.",
+      "Structural cues Structural frame-related operations battery primarym0.3 four-w repai Not clearly Not clearly shown.",
+      "Carrier vulnerabilities: A. Shop vulnerabilities: B. Not final-award confidence: C.",
+    ].join(" "),
+    { preserveMarkdown: true }
+  );
+
+  assert.doesNotMatch(cleaned, /https?:\/\//);
+  assert.match(cleaned, /source link/);
+  assert.match(cleaned, /Retrieved: 50:37\.877Z/);
+  assert.match(cleaned, /\$16,886\.67/);
+  assert.match(cleaned, /17,563/);
+  assert.match(cleaned, /13:50:43/);
+  assert.match(cleaned, /The file supports calibration-related procedures\. The record includes not yet clearly documented with printouts\./);
+  assert.match(cleaned, /continue documenting added findings including a pre-repair scan/);
+  assert.match(cleaned, /Structural frame-related operations/);
+  assert.doesNotMatch(cleaned, /primarym|four-w|\brepai\b/);
+  assert.match(cleaned, /Not clearly shown/);
+  assert.match(cleaned, /\n\nCarrier vulnerabilities:/);
+  assert.match(cleaned, /\n\nShop vulnerabilities:/);
+  assert.match(cleaned, /\n\nNot final-award confidence:/);
+});
+
 run("review completeness uses near-complete language for 185 of 186 reviewable files", () => {
   assert.equal(getReviewCompletenessState({ reviewed: 185, total: 186 }), "NEAR_COMPLETE_REVIEW");
   const message = buildReviewCompletenessMessage({ reviewed: 185, total: 186 });

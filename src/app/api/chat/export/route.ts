@@ -131,6 +131,13 @@ function normalizeExportComparisonText(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+function cleanProfessionalChatExportText(value: string): string {
+  return cleanUserFacingPresentationText(value, { preserveMarkdown: true })
+    .replace(/\bNice try,\s*but no\.?\s*/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 type PdfMessageBlock = {
   role: string;
   body: string;
@@ -185,7 +192,7 @@ function buildChatExportPdf(text: string): ArrayBuffer {
   const pageHeight = doc.internal.pageSize.getHeight();
   const bottomMargin = 18;
   const contentBottomY = pageHeight - bottomMargin;
-  const cleanedText = cleanUserFacingPresentationText(text, { preserveMarkdown: true });
+  const cleanedText = cleanProfessionalChatExportText(text);
   const blocks = parsePdfMessageBlocks(cleanedText);
   const setPdfFont = (style: "normal" | "bold" = "normal") => {
     doc.setFont("helvetica", style);
@@ -241,7 +248,7 @@ function buildChatExportPdf(text: string): ArrayBuffer {
     const labelTextY = y + 0.7;
     const labelWidth = Math.min(54, Math.max(24, doc.getTextWidth(block.role) + 10));
     const bodyLines = doc.splitTextToSize(
-      cleanUserFacingPresentationText(block.body, { preserveMarkdown: true }),
+      cleanProfessionalChatExportText(block.body),
       blockWidth - 6
     );
     ensurePageSpace(labelHeight + bodyTopGap + bodyLineHeight + blockBottomGap);
@@ -296,9 +303,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const redacted = cleanUserFacingPresentationText(
+    const redacted = cleanProfessionalChatExportText(
       redactExternalDocumentUrls(redactDownloadContent(exportText)),
-      { preserveMarkdown: true }
     );
     const filenameDate = new Date().toISOString().slice(0, 10);
     const pdf = buildChatExportPdf(redacted);
