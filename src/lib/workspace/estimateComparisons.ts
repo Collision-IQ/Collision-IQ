@@ -83,11 +83,16 @@ function normalizeEstimateComparisonRow(
     partName: row.partName,
     category: row.category,
   });
+  const directOperation = normalizeEstimateOperationLabel(row.operation);
+  const displayOperation =
+    directOperation && isGenericComparisonCategory(normalizedOperation, row.category)
+      ? directOperation
+      : normalizedOperation || directOperation || row.operation;
 
   const normalized: EstimateComparisonRow = {
     id: row.id ?? `comparison-row-${index + 1}`,
     category: row.category ?? "Estimate comparison",
-    operation: normalizedOperation || row.operation,
+    operation: displayOperation,
     partName: row.partName,
     lhsSource: row.lhsSource ?? "Shop estimate",
     rhsSource: row.rhsSource ?? "Carrier estimate",
@@ -173,6 +178,11 @@ function isGenericOperationToken(value: string) {
   return /^(?:r&i|r&r|repl|rpr|refn|o\/h|subl|add|overlap|repair operation|operation|estimate comparison)$/i.test(
     value
   );
+}
+
+function isGenericComparisonCategory(value: string, category: string | undefined) {
+  if (!value || !category) return false;
+  return value.trim().toLowerCase() === category.trim().toLowerCase();
 }
 
 function isMeaningfulComparisonNote(value: string | null | undefined): value is string {

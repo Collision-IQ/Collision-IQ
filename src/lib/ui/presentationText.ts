@@ -32,6 +32,29 @@ const GENERIC_OPERATION_ONLY_PATTERN = /^(?:r\s*&\s*i|r\s*&\s*r|repl|rpr|refn|o\
 const CMP_EVIDENCE_ID_PATTERN = /\bcmp[a-z0-9]{8,}\b/gi;
 const CMP_EVIDENCE_ID_CHAIN_PATTERN = /(?:\bcmp[a-z0-9]{8,}\b[\s,;]*){2,}/gi;
 const EVIDENCE_REFERENCE_LEAD_IN_PATTERN = /Evidence references?:\s*(?:[.,;:\-\s]*)/gi;
+const READABILITY_STATUS_LABELS = [
+  "DOCUMENTED",
+  "VISIBLE_IN_IMAGES",
+  "REFERENCED_BUT_NOT_COMPLETED",
+  "REFERENCED_NOT_PRODUCED",
+  "SUPPORT_PRESENT_PROOF_INCOMPLETE",
+  "SUPPORTABLE_BUT_UNCONFIRMED",
+  "OPEN_PENDING_FURTHER_DOCUMENTATION",
+  "NOT_ESTABLISHED",
+  "NOT_YET_LOCATED",
+  "NEEDS_REVIEW",
+  "UNDER-DOCUMENTED",
+] as const;
+const READABILITY_STATUS_PATTERN = new RegExp(
+  `([^\\n])\\s*(\\[?(?:${READABILITY_STATUS_LABELS.map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\]?:)`,
+  "g"
+);
+const MAJOR_NUMBERED_SECTION_PATTERN =
+  /([^\n])\s+((?:[1-9]|1[0-9])\.\s+(?=[A-Z][A-Za-z][^\n]{4,}))/g;
+const MARKDOWN_HEADING_JOIN_PATTERN = /([^\n])\s+(#{1,4}\s+)/g;
+const INLINE_LABEL_JOIN_PATTERN =
+  /([.!?])\s+((?:Carrier vulnerabilities|Shop vulnerabilities|Final award|Bottom line|Support posture|Estimate position|What still needs support|What looks reasonable|What looks aggressive|Documented positives|Likely remaining gaps|Next action|Recommended action)\s*:)/gi;
+const SENTENCE_COMPRESSION_PATTERN = /([a-z0-9),\]])\.\s+(?=(?:[A-Z][a-z]+(?:\s+[A-Z]?[a-z]+){0,5}:|[1-9]\.\s+))/g;
 const INTERNAL_METADATA_BLOB_PATTERN =
   /\b(?:evidence|source|support|vector|retrieval|metadata|ingestion|reference|chain|ids?)\s*(?:references?|ids?|chain|metadata|blob)?\s*:\s*(?:\[[^\]]{0,500}\]|\{[^}]{0,500}\}|(?:[\w:-]{8,}\s*[,;]\s*){2,}[\w:-]{8,})/gi;
 const KNOWN_OPERATION_VERBS = [
@@ -83,7 +106,56 @@ export function cleanPresentationText(value: string | null | undefined): string 
 }
 
 export function cleanPresentationMarkdown(value: string): string {
-  return sanitizeUserFacingEvidenceText(value);
+  return cleanUserFacingPresentationText(value, { preserveMarkdown: true });
+}
+
+export function cleanUserFacingPresentationText(
+  value: string | null | undefined,
+  options: { preserveMarkdown?: boolean } = {}
+): string {
+  if (!value) return "";
+
+  let cleaned = `${value}`.replace(/\r\n?/g, "\n");
+
+  cleaned = cleaned
+    .replace(/[Ã‚Â·]+/g, "-")
+    .replace(/[â€“â€”]/g, "-")
+    .replace(/â€™/g, "'")
+    .replace(/â€œ|â€�/g, '"')
+    .replace(/â€¦/g, "...")
+    .replace(/!\s*['’]/g, " -> ")
+    .replace(/[ï¿½�]\s*(?:->|→|â†’)\s*/g, " -> ")
+    .replace(/(?:â†’|→)/g, " -> ")
+    .replace(/\bclaim-\s*\[REDACTED_CLAIM\]/gi, "claim [REDACTED_CLAIM]")
+    .replace(/\bpolicy-\s*\[REDACTED_POLICY\]/gi, "policy [REDACTED_POLICY]")
+    .replace(/\bshould be clearly to address\b/gi, "should be clearly documented to address")
+    .replace(/\bThis supportable\b/g, "This appears supportable")
+    .replace(/\bthis supportable\b/g, "this appears supportable")
+    .replace(/\bnot fully,\s*/gi, "not fully documented, ")
+    .replace(/\bfinal uploaded documents?\b/gi, "final documentation")
+    .replace(/\buploaded documents?\s+(?:are|is)\b/gi, "documentation is")
+    .replace(/\bmounting\s*uploaded file\b/gi, "mounting documentation")
+    .replace(/\buploaded documents?\b/gi, "documentation")
+    .replace(/\buploaded file artifacts?\b/gi, "uploaded file references")
+    .replace(/\b(?:Not clearly\s+){2,}shown\b/gi, "Not clearly shown")
+    .replace(/\.{2,}/g, ".")
+    .replace(/\s+([,.;:])/g, "$1")
+    .replace(/([,;:])(?=\S)/g, "$1 ")
+    .replace(/([.!?])(?=(?:[A-Z][a-z]|\d+\.\s))/g, "$1 ")
+    .replace(READABILITY_STATUS_PATTERN, "$1\n$2")
+    .replace(MARKDOWN_HEADING_JOIN_PATTERN, "$1\n\n$2")
+    .replace(MAJOR_NUMBERED_SECTION_PATTERN, "$1\n\n$2")
+    .replace(INLINE_LABEL_JOIN_PATTERN, "$1\n\n$2")
+    .replace(SENTENCE_COMPRESSION_PATTERN, "$1.\n\n")
+    .replace(/(^|\n)(#{1,4}\s+[^\n]+)\n(?!\n)/g, "$1$2\n\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ");
+
+  if (!options.preserveMarkdown) {
+    cleaned = cleaned.replace(/\n+/g, " ");
+  }
+
+  return cleaned.trim();
 }
 
 export function sanitizeEstimateLine(value: string | null | undefined): EstimateLineSanitization {
@@ -411,7 +483,7 @@ export function sanitizeUserFacingEvidenceText(
   CMP_EVIDENCE_ID_PATTERN.lastIndex = 0;
   CMP_EVIDENCE_ID_CHAIN_PATTERN.lastIndex = 0;
 
-  let cleaned = cleanPresentationText(original);
+  let cleaned = cleanPresentationText(cleanUserFacingPresentationText(original, { preserveMarkdown: true }));
   if (!cleaned) return "";
 
   cleaned = cleaned
@@ -430,6 +502,9 @@ export function sanitizeUserFacingEvidenceText(
     .replace(/\b(?:uploaded document\s*[,;:]?\s*){2,}/gi, "supporting evidence ")
     .replace(/\buploaded document:\s*(?:uploaded document\s*,?\s*){2,}/gi, "supporting evidence: ")
     .replace(/\bSame rationale as earlier\b/gi, "Related estimate rationale")
+    .replace(/\bfinal uploaded documents?\b/gi, "final documentation")
+    .replace(/\buploaded documents?\s+(?:are|is)\b/gi, "documentation is")
+    .replace(/\buploaded documents?\b/gi, "documentation")
     .replace(/\bRepair Operation\b/gi, "Estimate item")
     .replace(/\bParser review needed\b/gi, "Estimate item")
     .replace(/\bgeneric operation labels?\b/gi, "estimate items")

@@ -39,7 +39,6 @@ import {
 import {
   canUseBrowserReadAloud,
   formatAssistantDisplayMessage,
-  formatAssistantMessage,
   toSpeechText,
 } from "@/components/chatWidget/speechUtils";
 import {
@@ -3237,7 +3236,12 @@ export default function ChatWidget({
               </div>
 
               {attachments.length > 0 && (
-                <div className="mt-2 border border-border bg-card p-2">
+                <div
+                  className={[
+                    "mt-2 border border-border bg-card",
+                    effectiveAttachmentsOpen ? "p-2" : "p-1",
+                  ].join(" ")}
+                >
                 <button
                   type="button"
                   className="flex w-full items-center justify-between gap-3 bg-muted px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-muted/70"
@@ -3264,7 +3268,7 @@ export default function ChatWidget({
                   </span>
                   <span className="flex shrink-0 items-center gap-2">
                     {effectiveAttachmentsOpen ? "Hide file list" : "Show file list"}
-                    {effectiveAttachmentsOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+                    {effectiveAttachmentsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                   </span>
                 </button>
 

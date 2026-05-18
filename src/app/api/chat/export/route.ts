@@ -9,6 +9,7 @@ import { UsageAccessError, recordUsage } from "@/lib/billing/usage";
 import { getUsageCount, incrementUsage } from "@/lib/usage";
 import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
 import { canAccessFeature } from "@/lib/featureAccess";
+import { cleanUserFacingPresentationText } from "@/lib/ui/presentationText";
 import { jsPDF } from "jspdf";
 
 export const runtime = "nodejs";
@@ -184,7 +185,8 @@ function buildChatExportPdf(text: string): ArrayBuffer {
   const pageHeight = doc.internal.pageSize.getHeight();
   const bottomMargin = 18;
   const contentBottomY = pageHeight - bottomMargin;
-  const blocks = parsePdfMessageBlocks(text);
+  const cleanedText = cleanUserFacingPresentationText(text, { preserveMarkdown: true });
+  const blocks = parsePdfMessageBlocks(cleanedText);
   const setPdfFont = (style: "normal" | "bold" = "normal") => {
     doc.setFont("helvetica", style);
   };
@@ -230,7 +232,7 @@ function buildChatExportPdf(text: string): ArrayBuffer {
 
   // Render each line safely so long chat blocks can continue across pages
   // instead of being clipped by a single oversized text call.
-  for (const block of blocks.length > 0 ? blocks : [{ role: "MESSAGE", body: text.trim() }]) {
+  for (const block of blocks.length > 0 ? blocks : [{ role: "MESSAGE", body: cleanedText.trim() }]) {
     const labelHeight = 7.5;
     const bodyLineHeight = 4.8;
     const bodyTopGap = 4;
@@ -238,7 +240,10 @@ function buildChatExportPdf(text: string): ArrayBuffer {
     const labelBoxY = y - 5;
     const labelTextY = y + 0.7;
     const labelWidth = Math.min(54, Math.max(24, doc.getTextWidth(block.role) + 10));
-    const bodyLines = doc.splitTextToSize(block.body, blockWidth - 6);
+    const bodyLines = doc.splitTextToSize(
+      cleanUserFacingPresentationText(block.body, { preserveMarkdown: true }),
+      blockWidth - 6
+    );
     ensurePageSpace(labelHeight + bodyTopGap + bodyLineHeight + blockBottomGap);
 
     doc.setFillColor(238, 241, 245);
@@ -291,7 +296,10 @@ export async function POST(req: Request) {
       );
     }
 
-    const redacted = redactExternalDocumentUrls(redactDownloadContent(exportText));
+    const redacted = cleanUserFacingPresentationText(
+      redactExternalDocumentUrls(redactDownloadContent(exportText)),
+      { preserveMarkdown: true }
+    );
     const filenameDate = new Date().toISOString().slice(0, 10);
     const pdf = buildChatExportPdf(redacted);
 

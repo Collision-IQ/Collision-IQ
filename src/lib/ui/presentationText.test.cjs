@@ -22,6 +22,7 @@ const {
   cleanEstimateLineForCustomer,
   cleanEstimateLineForTechnicalExport,
   cleanOperationDisplayText,
+  cleanUserFacingPresentationText,
   isMalformedEstimateLine,
   normalizeEstimateOperationLabel,
   sanitizeUserFacingEvidenceText,
@@ -126,6 +127,20 @@ run("user-facing evidence sanitizer removes evidence-reference lead-in without d
   );
 
   assert.equal(cleaned, "Repair path support is documented.");
+});
+
+run("presentation cleanup preserves markdown while adding readable status and section breaks", () => {
+  const cleaned = cleanUserFacingPresentationText(
+    "## Findings DOCUMENTED: bumper support is shown. 1. Appraisal Recommendation This supportable. claim-[REDACTED_CLAIM] should be clearly to address. Not clearly Not clearly Not clearly shown.",
+    { preserveMarkdown: true }
+  );
+
+  assert.match(cleaned, /^## Findings\n\nDOCUMENTED:/);
+  assert.match(cleaned, /\n\n1\. Appraisal Recommendation/);
+  assert.match(cleaned, /This appears supportable/);
+  assert.match(cleaned, /claim \[REDACTED_CLAIM\]/);
+  assert.match(cleaned, /should be clearly documented to address/);
+  assert.match(cleaned, /Not clearly shown\.$/);
 });
 
 run("review completeness uses near-complete language for 185 of 186 reviewable files", () => {

@@ -1125,12 +1125,14 @@ function formatEstimateDeltaBullet(
   bucket: EstimateDeltaBucket,
   mode: EstimateDeltaMode
 ): string {
-  const label = normalizeEstimateOperationLabel({
-    operation: row.operation,
-    partName: row.partName,
-    category: row.category,
-    label: cleanCustomerFacingEstimateLine(row.operation ?? row.partName ?? row.category ?? ""),
-  });
+  const label =
+    normalizeEstimateOperationLabel(row.operation) ||
+    normalizeEstimateOperationLabel({
+      operation: row.operation,
+      partName: row.partName,
+      category: row.category,
+      label: cleanCustomerFacingEstimateLine(row.operation ?? row.partName ?? row.category ?? ""),
+    });
 
   if (!label || /^(?:Repair Operation|Estimate item|Parser review needed)$/i.test(label)) {
     return "";

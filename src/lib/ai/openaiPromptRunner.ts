@@ -1,9 +1,5 @@
 import "server-only";
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+import { getOpenAIClient } from "@/lib/openai";
 
 const COLLISION_IQ_GPT55_PROMPT_ID =
   "pmpt_69feb16e364c8194be0fece66f6e9b710b96573b2ae95f88";
@@ -42,7 +38,7 @@ ${baseSystemPrompt}
 ${args.applicability_instruction ?? ""}
 `.trim();
 
-    const response = await openai.responses.create({
+    const response = await getOpenAIClient().responses.create({
       prompt: {
         id: COLLISION_IQ_GPT55_PROMPT_ID,
         version: "1",
