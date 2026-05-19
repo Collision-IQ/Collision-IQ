@@ -48,6 +48,9 @@ const {
 const {
   buildPolicyRightsReviewPdf,
 } = require("./builders/policyRightsReviewPdfBuilder.ts");
+const {
+  buildCollisionSnapshot,
+} = require("./builders/collisionSnapshot.ts");
 
 const TEST_VIN = "1GKKNRLS7MZ123456";
 const APPRAISAL_PROCESS_CHAT_CONTEXT = [
@@ -328,6 +331,98 @@ run("Annotated Estimate Review model exposes stable anchors and audience-safe an
     )
   );
   assert.doesNotMatch(JSON.stringify(model), /evidence-chain-\d+|debug confidence|internal reasoning/i);
+});
+
+run("Annotated Estimate Review does not anchor test-fit findings to generic option lines", () => {
+  const model = buildAnnotatedEstimateReviewModel({
+    report: {
+      ...REPORT,
+      issues: [
+        {
+          id: "issue-test-fit",
+          category: "fit",
+          title: "Test fit verification",
+          finding: "Test fit verification",
+          impact: "Panel fit should be confirmed without relying on vehicle option text.",
+          missingOperation: "Test fit",
+          severity: "medium",
+          evidenceIds: [],
+        },
+      ],
+    },
+    analysis: {
+      ...ANALYSIS,
+      operations: [
+        {
+          operation: "Test fit",
+          component: "Vehicle options",
+          rawLine: "Power Driver Seat Telescopic Wheel Traction Control PAINT.",
+        },
+      ],
+      rawEstimateText: "Power Driver Seat Telescopic Wheel Traction Control PAINT.",
+    },
+    panel: null,
+    assistantAnalysis: null,
+  });
+  const text = JSON.stringify(model.annotations);
+
+  assert.match(text, /Fit and finish clarification/);
+  assert.doesNotMatch(text, /Power Driver Seat Telescopic Wheel Traction Control PAINT/i);
+});
+
+run("Collision Snapshot favors side-impact dispute drivers over generic front-end items", () => {
+  const snapshot = buildCollisionSnapshot({
+    vehicle: REPORT.vehicle,
+    reportFields: {
+      documentedHighlights: ["Left side impact with left doors, quarter panel, wheel-area alignment, and ADAS calibration review."],
+      documentedProcedures: ["Left quarter/door fit and wheel alignment verification."],
+    },
+    supplementItems: [],
+    findingReasoning: [
+      {
+        issue: "Generic front-end structural support",
+        why_it_matters: "Front-end support can matter in some collisions.",
+        what_proves_it: "Generic front structure reference.",
+        next_action: "Review front bumper and radiator support.",
+        leverageScore: 100,
+        evidenceLevel: "REFERENCED_BUT_NOT_COMPLETED",
+        claimSpecificity: "medium",
+        confidence: 0.6,
+      },
+      {
+        issue: "Left side structure and door/quarter fit",
+        why_it_matters: "Side structure, door gaps, quarter fit, and wheel alignment are the supported dispute drivers.",
+        what_proves_it: "Left side impact and repair documentation.",
+        next_action: "Confirm side-structure measurements, door/quarter fit, wheel-area alignment, and calibration records.",
+        leverageScore: 20,
+        evidenceLevel: "DOCUMENTED",
+        claimSpecificity: "high",
+        confidence: 0.8,
+      },
+    ],
+    confidenceIntegrity: {
+      adjustedConfidence: "Moderate",
+      completenessStatus: "PARTIAL",
+      uploadedFileCount: 1,
+      indexedFileCount: 1,
+      reviewedFileCount: 1,
+      reviewableFileCount: 1,
+      excludedFromReviewCount: 0,
+      excludedFromReviewReasons: [],
+      totalKnownFileCount: 1,
+      uploadLimitReached: false,
+      userIndicatedMoreFiles: false,
+      missingCriticalEvidence: [],
+      userFacingDisclosure: "Current file set remains partial.",
+    },
+    disputeStrategy: { priorityFindings: [] },
+    pressureMode: { mode: "explanatory", rationale: "Snapshot presentation test.", itemBreakdown: [] },
+    valuation: { acvRange: null, dvRange: null, acvConfidence: null, dvConfidence: null, acvReasoning: "" },
+  });
+  const text = JSON.stringify(snapshot.topDisputeItems);
+
+  assert.match(text, /Left side structure and door\/quarter fit/);
+  assert.doesNotMatch(text, /Generic front-end structural support/);
 });
 
 run("Policy Rights Review promotes uploaded policy document evidence", () => {

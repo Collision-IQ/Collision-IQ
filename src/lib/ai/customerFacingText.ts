@@ -94,6 +94,11 @@ export function toCustomerFacingText(value?: string | null, fallback = ""): stri
     .filter((line) => line && !DEBUG_LINE_PATTERNS.some((pattern) => pattern.test(line)))
     .join(" ");
 
+  output = output.replace(
+    /\bIt\s+\[REDACTED_INSURER\]\s*,?\s+but\b[^.?!]*(?:[.?!]|$)/gi,
+    "Scan and calibration support still needs stronger file proof before it is treated as fully documented."
+  );
+
   for (const pattern of INTERNAL_PATTERNS) {
     output = output.replace(pattern, "");
   }

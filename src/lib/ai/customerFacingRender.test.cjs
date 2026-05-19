@@ -210,3 +210,12 @@ run("snapshot modal/PDF final render strips forbidden debug and parser text", ()
 run("customer-facing text removes spaced parser fragments", () => {
   assert.equal(toCustomerFacingText("Proc 2 #** Procedure research & wheelm0.1 battery primarym0.3"), "");
 });
+
+run("customer-facing text replaces malformed redaction sentence with complete scan proof language", () => {
+  const cleaned = toCustomerFacingText(
+    "It [REDACTED_INSURER], but scan and calibration proof remains unclear. Keep the repair file organized."
+  );
+
+  assert.match(cleaned, /Scan and calibration support still needs stronger file proof/i);
+  assert.doesNotMatch(cleaned, /It \[REDACTED_INSURER\], but/i);
+});

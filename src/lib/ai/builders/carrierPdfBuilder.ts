@@ -945,6 +945,7 @@ function cleanUserFacingRepairProse(value: string): string {
     .replace(/\bSafetydocumentation support\b/g, "Safety documentation support")
     .replace(/\bmountingdocumentation area\b/gi, "mounting documentation area")
     .replace(/\b(?:Not clearly\s+){2,}shown\b/gi, "Not clearly shown")
+    .replace(/\b(sensor|camera|radar|scan|calibration|module)0\.\s*\d+\b/gi, "$1")
     .replace(/\bRetrieved:\s*\d{1,2}:\d{2}(?:\.\d+)?Z\b\.?/gi, "")
     .replace(/\bJurisdiction:\s*(?:IN|Indiana)\b/gi, "Jurisdiction relevance: not established")
     .replace(/\bsource link\b\.?/gi, "")

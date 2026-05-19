@@ -155,6 +155,7 @@ export function cleanUserFacingPresentationText(
     .replace(/\bmounting\s*uploaded file\b/gi, "mounting documentation")
     .replace(/\bSafetydocumentation support\b/g, "Safety documentation support")
     .replace(/\bmountingdocumentation area\b/gi, "mounting documentation area")
+    .replace(/\b(sensor|camera|radar|scan|calibration|module)0\.\s*\d+\b/gi, "$1")
     .replace(/\buploaded file:\s*(?:source link|documentation|supporting evidence)\b/gi, "documentation")
     .replace(/\buploaded file\s+source link\b/gi, "source link")
     .replace(/\buploaded documents?\b/gi, "documentation")

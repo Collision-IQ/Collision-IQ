@@ -294,8 +294,9 @@ function buildTopDisputeItems(renderModel: SnapshotRenderModel): CollisionSnapsh
   const rankedFindings = [...renderModel.findingReasoning].sort(
     (left, right) => (right.leverageScore ?? 0) - (left.leverageScore ?? 0)
   );
+  const displayFindings = rankSnapshotFindingsForDisplay(renderModel, rankedFindings);
 
-  return rankedFindings.slice(0, 3).map((finding) => ({
+  return displayFindings.slice(0, 3).map((finding) => ({
     issue: cleanSnapshotText(finding.issue) || "Repair item to review",
     whyItMatters: cleanSnapshotText(finding.why_it_matters) || "This item may affect repair quality, safety, or final fit.",
     evidenceState: "The current file points to this concern and it should be confirmed during repair review.",
@@ -304,6 +305,50 @@ function buildTopDisputeItems(renderModel: SnapshotRenderModel): CollisionSnapsh
       "Ask the insurer or repair shop to explain whether this item is included, and if not, why.",
     pressureMode: computeItemPressureMode(finding.evidenceLevel, finding.leverageScore ?? 0),
   }));
+}
+
+function rankSnapshotFindingsForDisplay(
+  renderModel: SnapshotRenderModel,
+  rankedFindings: SnapshotRenderModel["findingReasoning"]
+): SnapshotRenderModel["findingReasoning"] {
+  if (!hasSideImpactRepairContext(renderModel)) return rankedFindings;
+
+  const sideSpecific = rankedFindings
+    .filter((finding) => !isGenericFrontEndFinding(finding))
+    .sort((left, right) => snapshotDisplayScore(right) - snapshotDisplayScore(left));
+
+  return sideSpecific.length ? sideSpecific : rankedFindings;
+}
+
+function hasSideImpactRepairContext(renderModel: SnapshotRenderModel): boolean {
+  const context = [
+    ...renderModel.reportFields.documentedHighlights,
+    ...renderModel.reportFields.documentedProcedures,
+    ...renderModel.supplementItems.map((item) => `${item.category} ${item.evidence} ${item.rationale}`),
+    ...renderModel.findingReasoning.map(
+      (finding) => `${finding.issue} ${finding.what_proves_it} ${finding.why_it_matters} ${finding.next_action}`
+    ),
+  ].join(" ");
+
+  return /\b(?:left|lt|lh|side|door|quarter|rocker|pillar|aperture|wheel|alignment|blind spot|side radar)\b/i.test(context);
+}
+
+function isGenericFrontEndFinding(finding: SnapshotRenderModel["findingReasoning"][number]): boolean {
+  const text = `${finding.issue} ${finding.what_proves_it} ${finding.why_it_matters} ${finding.next_action}`;
+  return (
+    /\b(?:front[-\s]?end|front structure|front support|tie bar|upper rail|front bumper|grille|hood|headlamp|front camera|front radar|radiator support|core support)\b/i.test(text) &&
+    !/\b(?:side|left|lt|lh|door|quarter|rocker|pillar|aperture|wheel|alignment|blind spot|side radar)\b/i.test(text)
+  );
+}
+
+function snapshotDisplayScore(finding: SnapshotRenderModel["findingReasoning"][number]): number {
+  const text = `${finding.issue} ${finding.what_proves_it} ${finding.why_it_matters} ${finding.next_action}`;
+  const base = finding.leverageScore ?? 0;
+  const sideDriverBoost =
+    /\b(?:side structure|left|door|quarter|rocker|pillar|aperture|wheel|alignment|adas|calibration|scan|repair completeness|complete repairs|fit)\b/i.test(text)
+      ? 50
+      : 0;
+  return base + sideDriverBoost;
 }
 
 function buildNextActions(renderModel: SnapshotRenderModel): string[] {

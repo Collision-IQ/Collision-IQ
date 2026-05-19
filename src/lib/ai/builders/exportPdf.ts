@@ -193,6 +193,7 @@ export function sanitizeReportText(value: string): string {
     .replace(/\bGenerated\s+([A-Z][a-z]+)\s+(\d{1,2}),\s*(\d{4})\b/g, "Generated $1 $2, $3")
     .replace(/\bSafetydocumentation support\b/g, "Safety documentation support")
     .replace(/\bmountingdocumentation area\b/gi, "mounting documentation area")
+    .replace(/\b(sensor|camera|radar|scan|calibration|module)0\.\s*\d+\b/gi, "$1")
     .replace(/\bstill needs to be clearly to avoid\b/gi, "still needs to be clearly documented to avoid")
     .replace(/\bRetrieved:\s*\d{1,2}:\d{2}(?:\.\d+)?Z\b\.?/gi, "")
     .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "documentation")

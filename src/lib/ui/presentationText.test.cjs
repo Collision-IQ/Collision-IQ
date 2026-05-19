@@ -180,6 +180,7 @@ run("presentation cleanup removes release-blocker export artifacts", () => {
       "Retrieved: 40:13.304Z.",
       "still needs to be clearly to avoid confusion.",
       "policy packet with Georgia (GA) policy indicators. Jurisdiction: Georgia (GA).",
+      "The side sensor0. 5 remains referenced.",
       "continue at source link.",
       "four-whe post-pull c alignmen confi Not clearly Not clearly shown.",
     ].join(" "),
@@ -193,7 +194,8 @@ run("presentation cleanup removes release-blocker export artifacts", () => {
   assert.match(cleaned, /still needs to be clearly documented to avoid/);
   assert.match(cleaned, /uploaded policy packet \/ appraisal-language support; jurisdiction metadata redacted or ambiguous/);
   assert.match(cleaned, /Jurisdiction metadata: redacted or ambiguous/);
-  assert.doesNotMatch(cleaned, /continue at source link|four-whe|post-pull c|alignmen|confi|Not clearly Not clearly/);
+  assert.match(cleaned, /side sensor remains referenced/i);
+  assert.doesNotMatch(cleaned, /continue at source link|sensor0|four-whe|post-pull c|alignmen|confi|Not clearly Not clearly/);
 });
 
 run("review completeness uses near-complete language for 185 of 186 reviewable files", () => {

@@ -655,7 +655,7 @@ function findEstimateAnchorForFinding(
 ): EstimateLineAnchor {
   const operationKey = normalizeDedupeKey(finding.operation);
   const bestAnchor = findBestLineAnchor(operationKey, lineAnchors);
-  if (bestAnchor) return bestAnchor;
+  if (bestAnchor && !shouldSuppressAnchorForFinding(finding, bestAnchor.text)) return bestAnchor;
 
   const bestLine = lineItems.find((line) =>
     normalizeDedupeKey(`${line.operation} ${line.component} ${line.rawLine ?? ""} ${line.carrierPosition}`).includes(operationKey) ||
@@ -669,12 +669,42 @@ function findEstimateAnchorForFinding(
   const rawLine = bestLine?.rawLine ?? bestOperation?.rawLine ?? bestLine?.operation ?? bestOperation?.operation ?? finding.operation;
   const section = bestLine?.component ?? bestOperation?.component ?? inferEstimateSection(finding.operation);
 
+  if (shouldSuppressAnchorForFinding(finding, rawLine)) {
+    return buildUnanchoredClarificationAnchor(finding);
+  }
+
   return {
     estimateId: "estimate-upload",
     lineId: `anchor-${normalizeDedupeKey(`${section} ${rawLine}`).replace(/\s+/g, "-") || "unisolated"}`,
     lineNumber: 0,
     section: cleanCustomerFacingEstimateLine(section) || "Related estimate section",
     text: cleanCustomerFacingEstimateLine(rawLine) || cleanCustomerFacingEstimateLine(finding.operation) || "Estimate line not isolated",
+    sourceRole: "unknown",
+  };
+}
+
+function shouldSuppressAnchorForFinding(finding: EstimateScrubFinding, anchorText?: string | null): boolean {
+  if (!anchorText || !/\btest\s*fit\b/i.test(finding.operation)) return false;
+  return isGenericVehicleOptionsLine(anchorText);
+}
+
+function isGenericVehicleOptionsLine(value: string): boolean {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text) return false;
+
+  const optionTerms = /\b(?:power|driver seat|passenger seat|telescopic wheel|traction control|paint|cruise|bluetooth|navigation|heated seat|intermittent|air conditioning)\b/i;
+  const repairTerms = /\b(?:repair|replace|repl|r&i|r&r|refinish|align|measure|scan|calibration|door|quarter|bumper|fender|pillar|rocker|fit|test|weld|pull|frame)\b/i;
+  return optionTerms.test(text) && !repairTerms.test(text.replace(/\bpaint\b/gi, ""));
+}
+
+function buildUnanchoredClarificationAnchor(finding: EstimateScrubFinding): EstimateLineAnchor {
+  const operation = cleanCustomerFacingEstimateLine(finding.operation) || "Estimate line not isolated";
+  return {
+    estimateId: "estimate-upload",
+    lineId: `anchor-${normalizeDedupeKey(`fit-clarification ${operation}`).replace(/\s+/g, "-") || "unanchored-clarification"}`,
+    lineNumber: 0,
+    section: "Fit and finish clarification",
+    text: operation,
     sourceRole: "unknown",
   };
 }
