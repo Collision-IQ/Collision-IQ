@@ -465,8 +465,20 @@ function formatComparisonDelta(row: EstimateComparisonRow): string | null {
   const delta = typeof row.delta === "number" ? `${row.delta > 0 ? "+" : ""}${row.delta}` : row.delta;
   const left = formatComparisonValue(row.lhsValue);
   const right = formatComparisonValue(row.rhsValue);
+  const leftSource = /shop/i.test(`${row.lhsSource ?? ""}`) ? "shop estimate" : "left estimate";
+  const rightSource = /carrier|insurer/i.test(`${row.rhsSource ?? ""}`) ? "carrier estimate" : "right estimate";
+  const rawLabel = `${row.operation ?? ""} ${row.partName ?? ""} ${row.category ?? ""}`;
 
   if (!label || row.deltaType === "same") return null;
+  if ((/^proc(?:edure)?$/i.test(label) || /\bproc(?:edure)?s?\b/i.test(rawLabel)) && right === "not shown") {
+    return "Procedure item: present only in shop estimate.";
+  }
+  if (right === "not shown" && numericValue(left) !== undefined) {
+    const unit = /hour|labor|reset|electrical|component/i.test(`${row.category ?? ""} ${row.operation ?? ""} ${row.partName ?? ""}`)
+      ? " hrs"
+      : "";
+    return `${label}: ${left}${unit} in ${leftSource}; not clearly shown in ${rightSource}.`;
+  }
   if (/body.*labor|labor/i.test(label)) return `Body labor: ${left} vs ${right}${delta ? ` (${delta})` : ""}`;
   if (/refinish|paint|material/i.test(label)) return `Refinish/materials: ${left} vs ${right}${delta ? ` (${delta})` : ""}`;
   if (/structural|measure|mechanical|calibration|scan|adas/i.test(label)) {

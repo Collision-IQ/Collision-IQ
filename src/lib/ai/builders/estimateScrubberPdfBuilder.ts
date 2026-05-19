@@ -937,6 +937,7 @@ function buildTargetEstimateMarkupBullets(params: {
   const targetRole = params.model.scrubTarget.role;
   const targetAnchors = params.model.lineAnchors
     .filter((anchor) => targetRole === "unknown" || anchor.sourceRole === targetRole || anchor.sourceRole === "unknown")
+    .filter((anchor) => !isGenericVehicleOptionsLine(anchor.text))
     .slice(0, 40);
   const annotationByLine = new Map<string, EstimateAnnotation[]>();
   for (const annotation of params.annotations) {

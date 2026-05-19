@@ -219,3 +219,32 @@ run("customer-facing text replaces malformed redaction sentence with complete sc
   assert.match(cleaned, /Scan and calibration support still needs stronger file proof/i);
   assert.doesNotMatch(cleaned, /It \[REDACTED_INSURER\], but/i);
 });
+
+run("customer-facing text completes export fragments and neutralizes unsupported Pennsylvania wording", () => {
+  const cleaned = toCustomerFacingText(
+    [
+      "some of the repair steps are still only partly.",
+      "if calibration, alignment, or hidden mounting issues were not fully.",
+      "added findings can be and sent in as a supplement",
+      "make sure the claim handling stays.",
+      "finish documentation the repair path",
+      "If you are in Pennsylvania, ask for a written explanation.",
+    ].join(" ")
+  );
+  const html = renderCustomerReportHtml({
+    report: {
+      ...dirtyReport,
+      yourOptions: ["If you are in Pennsylvania, ask for a written explanation."],
+    },
+    vehicle: "2024 Jeep Gladiator Sport 4WD",
+    generatedAt: "May 19, 2026",
+  });
+
+  assert.match(cleaned, /some of the repair steps are still only partly verified\./);
+  assert.match(cleaned, /hidden mounting issues were not fully verified\./);
+  assert.match(cleaned, /added findings can be documented and sent in as a supplement\./i);
+  assert.match(cleaned, /claim handling stays clear and documented\./);
+  assert.match(cleaned, /finish documenting the repair path\./);
+  assert.match(cleaned, /If state-specific claim-handling rules apply/);
+  assert.doesNotMatch(`${cleaned}\n${html}`, /If you are in Pennsylvania|Pennsylvania-specific/i);
+});

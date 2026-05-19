@@ -181,6 +181,12 @@ run("presentation cleanup removes release-blocker export artifacts", () => {
       "still needs to be clearly to avoid confusion.",
       "policy packet with Georgia (GA) policy indicators. Jurisdiction: Georgia (GA).",
       "The side sensor0. 5 remains referenced.",
+      "some of the repair steps are still only partly.",
+      "if calibration, alignment, or hidden mounting issues were not fully.",
+      "added findings can be and sent in as a supplement",
+      "make sure the claim handling stays.",
+      "finish documentation the repair path",
+      "Reference: source link.",
       "continue at source link.",
       "four-whe post-pull c alignmen confi Not clearly Not clearly shown.",
     ].join(" "),
@@ -195,7 +201,12 @@ run("presentation cleanup removes release-blocker export artifacts", () => {
   assert.match(cleaned, /uploaded policy packet \/ appraisal-language support; jurisdiction metadata redacted or ambiguous/);
   assert.match(cleaned, /Jurisdiction metadata: redacted or ambiguous/);
   assert.match(cleaned, /side sensor remains referenced/i);
-  assert.doesNotMatch(cleaned, /continue at source link|sensor0|four-whe|post-pull c|alignmen|confi|Not clearly Not clearly/);
+  assert.match(cleaned, /some of the repair steps are still only partly verified\./);
+  assert.match(cleaned, /if calibration, alignment, or hidden mounting issues were not fully verified\./);
+  assert.match(cleaned, /added findings can be documented and sent in as a supplement\./);
+  assert.match(cleaned, /make sure the claim handling stays clear and documented\./);
+  assert.match(cleaned, /finish documenting the repair path\./);
+  assert.doesNotMatch(cleaned, /Reference: source link|continue at source link|sensor0|\bfour-whe\b|post-pull c|\balignmen\b|\bconfi\b|Not clearly Not clearly/);
 });
 
 run("review completeness uses near-complete language for 185 of 186 reviewable files", () => {

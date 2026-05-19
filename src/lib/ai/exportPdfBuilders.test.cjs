@@ -51,6 +51,9 @@ const {
 const {
   buildCollisionSnapshot,
 } = require("./builders/collisionSnapshot.ts");
+const {
+  buildExportResearchSections,
+} = require("./builders/exportResearchSections.ts");
 
 const TEST_VIN = "1GKKNRLS7MZ123456";
 const APPRAISAL_PROCESS_CHAT_CONTEXT = [
@@ -184,6 +187,47 @@ run("legacy dispute PDF builder renders unified Repair Intelligence report", () 
     )
   );
   assert.doesNotMatch(JSON.stringify(document), /\| status |\| evidence |\| Support:/i);
+});
+
+run("Repair Intelligence research sections suppress placeholder source-link references", () => {
+  const sections = buildExportResearchSections({
+    id: "research-1",
+    reportType: "repair_intelligence",
+    generatedAt: "2026-05-19T00:00:00.000Z",
+    retrievalTimestamp: "2026-05-19T00:00:00.000Z",
+    immutableSnapshotHash: "hash",
+    agentsRun: ["OEM Procedure Agent"],
+    searchQueriesUsed: [],
+    sourcesReviewed: [],
+    sourcesRejected: [],
+    unsupportedFindings: [],
+    citationMap: [],
+    verificationSummary: {
+      uncitedLegalClaimsRejected: 0,
+      fabricatedStatutesRejected: 0,
+      staleOrSupersededRegulationsRejected: 0,
+      unsupportedOemRequirementsRejected: 0,
+      inferredPolicyRightsDowngraded: 0,
+    },
+    sourcesAccepted: [
+      {
+        id: "source-1",
+        sourceType: "web",
+        sourceTitle: "OEM calibration bulletin",
+        url: "source link",
+        locator: "source link",
+        retrievalTimestamp: "2026-05-19T00:00:00.000Z",
+        confidenceScore: 0.8,
+        supportCategory: "Verified OEM / Position Statement Support",
+        agent: "OEM Procedure Agent",
+        accepted: true,
+      },
+    ],
+  });
+  const text = JSON.stringify(sections);
+
+  assert.match(text, /OEM calibration bulletin/);
+  assert.doesNotMatch(text, /Reference: source link|Not clearly Not clearly/);
 });
 
 run("Estimate scrubber export is merged into Annotated Estimate Scrubber", () => {
@@ -334,7 +378,7 @@ run("Annotated Estimate Review model exposes stable anchors and audience-safe an
 });
 
 run("Annotated Estimate Review does not anchor test-fit findings to generic option lines", () => {
-  const model = buildAnnotatedEstimateReviewModel({
+  const params = {
     report: {
       ...REPORT,
       issues: [
@@ -363,11 +407,78 @@ run("Annotated Estimate Review does not anchor test-fit findings to generic opti
     },
     panel: null,
     assistantAnalysis: null,
-  });
+  };
+  const model = buildAnnotatedEstimateReviewModel(params);
+  const document = buildAnnotatedEstimateReviewPdf(params);
   const text = JSON.stringify(model.annotations);
+  const documentText = JSON.stringify(document);
 
   assert.match(text, /Fit and finish clarification/);
   assert.doesNotMatch(text, /Power Driver Seat Telescopic Wheel Traction Control PAINT/i);
+  assert.doesNotMatch(documentText, /Power Driver Seat Telescopic Wheel Traction Control PAINT|\[INFO\]: This line is present/i);
+});
+
+run("Collision Snapshot formats comparison deltas without parser-style labels", () => {
+  const snapshot = buildCollisionSnapshot({
+    renderModel: {
+      vehicle: REPORT.vehicle,
+      reportFields: {
+        documentedHighlights: ["Estimate comparison identifies procedure and reset differences."],
+        documentedProcedures: [],
+      },
+      supplementItems: [],
+      findingReasoning: [],
+      confidenceIntegrity: {
+        adjustedConfidence: "Moderate",
+        completenessStatus: "PARTIAL",
+        uploadedFileCount: 1,
+        indexedFileCount: 1,
+        reviewedFileCount: 1,
+        reviewableFileCount: 1,
+        excludedFromReviewCount: 0,
+        excludedFromReviewReasons: [],
+        totalKnownFileCount: 1,
+        uploadLimitReached: false,
+        userIndicatedMoreFiles: false,
+        missingCriticalEvidence: [],
+        userFacingDisclosure: "Current file set remains partial.",
+      },
+      disputeStrategy: { priorityFindings: [] },
+      pressureMode: { mode: "explanatory", rationale: "Snapshot comparison label test.", itemBreakdown: [] },
+      valuation: { acvRange: null, dvRange: null, acvConfidence: null, dvConfidence: null, acvReasoning: "" },
+    },
+    estimateComparisons: {
+      rows: [
+        {
+          id: "proc-row",
+          category: "Procedures",
+          operation: "Proc",
+          lhsSource: "Shop estimate",
+          rhsSource: "Carrier estimate",
+          lhsValue: "shown",
+          rhsValue: null,
+          delta: "Present only in shop estimate",
+          deltaType: "added",
+        },
+        {
+          id: "reset-row",
+          category: "Electrical labor",
+          operation: "Reset electrical components",
+          lhsSource: "Shop estimate",
+          rhsSource: "Carrier estimate",
+          lhsValue: "0.3",
+          rhsValue: null,
+          delta: "Only on left",
+          deltaType: "added",
+        },
+      ],
+    },
+  });
+  const text = JSON.stringify(snapshot.estimateComparison.keyDeltas);
+
+  assert.match(text, /Procedure item: present only in shop estimate\./);
+  assert.match(text, /Reset electrical components: 0\.3 hrs in shop estimate; not clearly shown in carrier estimate\./);
+  assert.doesNotMatch(text, /Proc vs not shown|Only on left/);
 });
 
 run("Collision Snapshot favors side-impact dispute drivers over generic front-end items", () => {

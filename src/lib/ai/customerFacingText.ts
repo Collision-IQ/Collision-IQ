@@ -98,6 +98,7 @@ export function toCustomerFacingText(value?: string | null, fallback = ""): stri
     /\bIt\s+\[REDACTED_INSURER\]\s*,?\s+but\b[^.?!]*(?:[.?!]|$)/gi,
     "Scan and calibration support still needs stronger file proof before it is treated as fully documented."
   );
+  output = cleanCustomerExportFragments(output);
 
   for (const pattern of INTERNAL_PATTERNS) {
     output = output.replace(pattern, "");
@@ -116,7 +117,17 @@ export function toCustomerFacingText(value?: string | null, fallback = ""): stri
 
   const sanitized = sanitizeUserFacingEvidenceText(output);
   const normalized = normalizeNarrativeProse(sanitized, "CUSTOMER_SUMMARY");
-  return normalized || normalizeNarrativeProse(sanitizeUserFacingEvidenceText(fallback), "CUSTOMER_SUMMARY") || fallback;
+  return cleanCustomerExportFragments(normalized) || cleanCustomerExportFragments(normalizeNarrativeProse(sanitizeUserFacingEvidenceText(fallback), "CUSTOMER_SUMMARY")) || fallback;
+}
+
+function cleanCustomerExportFragments(value: string): string {
+  return value
+    .replace(/\bsome of the repair steps are still only partly(?:\s+verified)?(?:\.\s*Verified\.)?/gi, "some of the repair steps are still only partly verified.")
+    .replace(/\bif calibration, alignment, or hidden mounting issues were not fully(?:\s+verified)?(?:\.\s*Verified\.)?/gi, "if calibration, alignment, or hidden mounting issues were not fully verified.")
+    .replace(/\badded findings can be and sent in as a supplement\b\.?/gi, "added findings can be documented and sent in as a supplement.")
+    .replace(/\bmake sure the claim handling stays(?:\s+clear and documented)?(?:\.\s*Clear and\.)?/gi, "make sure the claim handling stays clear and documented.")
+    .replace(/\bfinish documentation the repair path\b\.?/gi, "finish documenting the repair path.")
+    .replace(/\bIf you are in Pennsylvania\b/gi, "If state-specific claim-handling rules apply");
 }
 
 export function toCustomerFacingList(
