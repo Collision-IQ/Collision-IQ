@@ -126,3 +126,11 @@ ELEVENLABS_VOICE_ID
 google-sa*.json
 google-sa*.b64
 collision-iq-sync-*.json
+
+# Local Google service account / secret material
+*.b64
+*service-account*.json
+*sync*.json
+google-sa*.json
+google-sa*.b64
+collision-iq-sync-*.json
