@@ -155,6 +155,8 @@ export function cleanUserFacingPresentationText(
     .replace(/\bmake sure the claim handling stays\b\.?/gi, "make sure the claim handling stays clear and documented.")
     .replace(/\bfinish documentation the repair path\b\.?/gi, "finish documenting the repair path.")
     .replace(/\bfinish documentation the structural checks\b\.?/gi, "finish documenting the structural checks.")
+    .replace(/\bfinish documentation the structural measurements\b\.?/gi, "finish documenting the structural measurements.")
+    .replace(/\bIn Pennsylvania,\s*the file supports asking for written communication when the repair position or delay needs to be explained\./gi, "If state-specific claim-handling rules apply, you may also be able to request written communication when the repair position or delay needs to be explained.")
     .replace(/\bIn Pennsylvania,\s*the file also supports asking for written status updates[^.]*\./gi, "If state-specific claim-handling rules apply, you may also be able to request written status updates when the claim is delayed or when the repair position is not being explained clearly.")
     .replace(/\bPennsylvania-specific options\b/gi, "state-specific options")
     .replace(/\bIf state-specific claim \[REDACTED_CLAIM\],\s*/gi, "If state-specific claim-handling rules apply, ")

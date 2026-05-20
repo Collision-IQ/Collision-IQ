@@ -229,6 +229,8 @@ run("customer-facing text completes export fragments and neutralizes unsupported
       "make sure the claim handling stays.",
       "finish documentation the repair path",
       "finish documentation the structural checks",
+      "finish documentation the structural measurements",
+      "In Pennsylvania, the file supports asking for written communication when the repair position or delay needs to be explained.",
       "In Pennsylvania, the file also supports asking for written status updates when the claim is delayed or when the repair position is not being explained clearly.",
       "Pennsylvania-specific options should not return.",
       "If state-specific claim [REDACTED_CLAIM], you may also be able to request a written explanation.",
@@ -250,9 +252,11 @@ run("customer-facing text completes export fragments and neutralizes unsupported
   assert.match(cleaned, /claim handling stays clear and documented\./);
   assert.match(cleaned, /finish documenting the repair path\./);
   assert.match(cleaned, /finish documenting the structural checks\./);
+  assert.match(cleaned, /finish documenting the structural measurements\./);
+  assert.match(cleaned, /If state-specific claim-handling rules apply, you may also be able to request written communication when the repair position or delay needs to be explained/i);
   assert.match(cleaned, /If state-specific claim-handling rules apply, you may also be able to request written status updates/i);
   assert.match(cleaned, /state-specific options should not return/i);
   assert.match(cleaned, /If state-specific claim-handling rules apply, you may also be able to request/i);
   assert.match(cleaned, /If state-specific claim-handling rules apply/);
-  assert.doesNotMatch(`${cleaned}\n${html}`, /If you are in Pennsylvania|In Pennsylvania|Pennsylvania-specific|state-specific claim \[REDACTED_CLAIM\]/i);
+  assert.doesNotMatch(`${cleaned}\n${html}`, /If you are in Pennsylvania|In Pennsylvania|Pennsylvania-specific|state-specific claim \[REDACTED_CLAIM\]|finish documentation the structural/i);
 });
