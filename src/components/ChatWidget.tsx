@@ -39,6 +39,7 @@ import {
 import {
   canUseBrowserReadAloud,
   formatAssistantDisplayMessage,
+  splitSpeechTextIntoChunks,
   toSpeechText,
 } from "@/components/chatWidget/speechUtils";
 import {
@@ -215,6 +216,8 @@ const SERVER_TTS_ENABLED = true;
 const BROWSER_TTS_ENABLED =
   process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_BROWSER_TTS === "true";
 const SERVER_TTS_MAX_INPUT_CHARS = 4_000;
+const CHAT_SESSION_STORAGE_PREFIX = "collision-iq.chat-widget.session";
+const DRAFT_CHAT_SESSION_KEY = `${CHAT_SESSION_STORAGE_PREFIX}:draft`;
 const LARGE_UPLOAD_WARNING_BYTES = 10 * 1024 * 1024;
 type ServerTtsVoiceOptionId = "primary" | "secondary";
 type ServerTtsVoiceOption = {
@@ -232,15 +235,6 @@ const SERVER_TTS_VOICE_OPTIONS: [ServerTtsVoiceOption, ServerTtsVoiceOption] = [
     label: "Voice 2",
   },
 ];
-
-function clampServerTtsText(text: string) {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= SERVER_TTS_MAX_INPUT_CHARS) {
-    return normalized;
-  }
-
-  return normalized.slice(0, SERVER_TTS_MAX_INPUT_CHARS).trimEnd();
-}
 
 const DEFAULT_UPLOAD_LIMIT_ENTITLEMENTS: Pick<
   AccountEntitlements,
@@ -348,6 +342,58 @@ function buildReviewCompletionMessage(progress: ReviewProgress) {
     reviewed: progress.reviewedForDetermination,
     total: progress.reviewableFileCount || progress.totalKnownFiles,
   });
+}
+
+function getChatSessionStorageKey(activeCaseId: string | null | undefined) {
+  const normalized = activeCaseId?.trim();
+  return normalized
+    ? `${CHAT_SESSION_STORAGE_PREFIX}:case:${normalized}`
+    : DRAFT_CHAT_SESSION_KEY;
+}
+
+function isInitialOnlyMessages(messages: Message[]) {
+  return messages.length === 1 && messages[0]?.id === INITIAL_MESSAGE.id;
+}
+
+function readStoredChatMessages(storageKey: string): Message[] | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(storageKey) ?? "null") as unknown;
+    if (!Array.isArray(parsed)) return null;
+    const messages = parsed.filter((item): item is Message => {
+      if (!item || typeof item !== "object") return false;
+      const candidate = item as Partial<Message>;
+      return (
+        typeof candidate.id === "string" &&
+        (candidate.role === "user" || candidate.role === "assistant") &&
+        typeof candidate.content === "string"
+      );
+    });
+    return messages.length ? messages : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredChatMessages(storageKey: string, messages: Message[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.sessionStorage.setItem(storageKey, JSON.stringify(messages));
+  } catch {
+    // Session persistence is a best-effort remount guard.
+  }
+}
+
+function removeStoredChatMessages(storageKey: string) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.sessionStorage.removeItem(storageKey);
+  } catch {
+    // Ignore storage cleanup failures.
+  }
 }
 
 function isZipFile(file: Pick<File, "name" | "type">) {
@@ -475,7 +521,13 @@ export default function ChatWidget({
 }: ChatWidgetProps) {
   const router = useRouter();
   const { isLoaded: isUserLoaded, isSignedIn } = useUser();
-  const [messages, setMessages] = useState<Message[]>([INITIAL_MESSAGE]);
+  const [chatSessionStorageKey, setChatSessionStorageKey] = useState(() =>
+    getChatSessionStorageKey(activeCaseId)
+  );
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const stored = readStoredChatMessages(getChatSessionStorageKey(activeCaseId));
+    return stored ?? [INITIAL_MESSAGE];
+  });
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [isExportingChat, setIsExportingChat] = useState(false);
@@ -528,6 +580,8 @@ export default function ChatWidget({
   });
   const firstAttachmentAtRef = useRef<number | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const browserSpeechQueueRef = useRef<string[]>([]);
+  const speechPlaybackTokenRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const audioBlobCacheRef = useRef<Map<string, Blob>>(new Map());
@@ -539,6 +593,7 @@ export default function ChatWidget({
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<BlobPart[]>([]);
   const recordingMimeTypeRef = useRef("audio/webm");
+  const chatSessionStorageKeyRef = useRef(chatSessionStorageKey);
 
   const updateReviewProgress = useCallback(
     (update: SetStateAction<ReviewProgress>) => {
@@ -664,6 +719,11 @@ export default function ChatWidget({
     attachmentsRef.current = attachments;
   }, [attachments]);
 
+  useEffect(() => {
+    chatSessionStorageKeyRef.current = chatSessionStorageKey;
+    writeStoredChatMessages(chatSessionStorageKey, messages);
+  }, [chatSessionStorageKey, messages]);
+
   // Load available browser TTS voices
   useEffect(() => {
     if (!BROWSER_TTS_ENABLED) return;
@@ -693,6 +753,23 @@ export default function ChatWidget({
     });
     analysisReportIdRef.current = activeCaseId;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- messages.length is logging-only; including it would retrigger on every message
+  }, [activeCaseId]);
+
+  useEffect(() => {
+    const nextStorageKey = getChatSessionStorageKey(activeCaseId);
+    if (chatSessionStorageKeyRef.current === nextStorageKey) return;
+
+    const previousStorageKey = chatSessionStorageKeyRef.current;
+    const storedMessages = readStoredChatMessages(nextStorageKey);
+
+    setMessages((current) => {
+      if (storedMessages) return storedMessages;
+      if (previousStorageKey === DRAFT_CHAT_SESSION_KEY && !isInitialOnlyMessages(current)) {
+        return current;
+      }
+      return [INITIAL_MESSAGE];
+    });
+    setChatSessionStorageKey(nextStorageKey);
   }, [activeCaseId]);
 
   useEffect(() => {
@@ -1209,6 +1286,12 @@ export default function ChatWidget({
   }
 
   const handleEndChat = useCallback(() => {
+    removeStoredChatMessages(chatSessionStorageKeyRef.current);
+    if (analysisReportIdRef.current) {
+      removeStoredChatMessages(getChatSessionStorageKey(analysisReportIdRef.current));
+    } else {
+      removeStoredChatMessages(DRAFT_CHAT_SESSION_KEY);
+    }
     const caseIdToClose = analysisReportIdRef.current;
     if (caseIdToClose) {
       void fetch(`/api/cases/${encodeURIComponent(caseIdToClose)}/close`, {
@@ -2502,6 +2585,9 @@ export default function ChatWidget({
   }
 
   function stopSpeaking() {
+    speechPlaybackTokenRef.current += 1;
+    browserSpeechQueueRef.current = [];
+
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.src = "";
@@ -2556,10 +2642,15 @@ export default function ChatWidget({
     plainText: string,
     selectedVoice: ServerTtsVoiceOptionId = SERVER_TTS_VOICE_OPTIONS[0].id
   ) {
-    const cacheKey = `${message.id}:${selectedVoice}`;
-    let audioBlob = audioBlobCacheRef.current.get(cacheKey);
+    const playbackToken = speechPlaybackTokenRef.current;
+    const chunks = splitSpeechTextIntoChunks(plainText, SERVER_TTS_MAX_INPUT_CHARS);
 
-    if (!audioBlob) {
+    for (const [chunkIndex, chunk] of chunks.entries()) {
+      if (speechPlaybackTokenRef.current !== playbackToken) return;
+      const cacheKey = `${message.id}:${selectedVoice}:${chunkIndex}`;
+      let audioBlob = audioBlobCacheRef.current.get(cacheKey);
+
+      if (!audioBlob) {
       setTtsGeneratingMessageId(message.id);
       try {
         const response = await fetch("/api/tts", {
@@ -2569,7 +2660,7 @@ export default function ChatWidget({
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            text: plainText,
+            text: chunk,
             voice: selectedVoice,
           }),
         });
@@ -2605,29 +2696,40 @@ export default function ChatWidget({
       }
     }
 
-    const audioUrl = URL.createObjectURL(audioBlob);
-    const audio = new Audio(audioUrl);
+      if (speechPlaybackTokenRef.current !== playbackToken) return;
 
-    audioRef.current = audio;
-    audioUrlRef.current = audioUrl;
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
 
-    audio.onplay = () => {
-      setSpeakingMessageId(message.id);
-      setIsSpeaking(true);
+      audioRef.current = audio;
+      audioUrlRef.current = audioUrl;
+
+      audio.onplay = () => {
+        setSpeakingMessageId(message.id);
+        setIsSpeaking(true);
+        setIsSpeechPaused(false);
+      };
+
+      await new Promise<void>((resolve, reject) => {
+        audio.onended = () => resolve();
+        audio.onerror = () => reject(new Error("Voice playback failed."));
+        void audio.play().catch(reject);
+      });
+
+      if (audioRef.current === audio) {
+        audioRef.current = null;
+      }
+      URL.revokeObjectURL(audioUrl);
+      if (audioUrlRef.current === audioUrl) {
+        audioUrlRef.current = null;
+      }
+    }
+
+    if (speechPlaybackTokenRef.current === playbackToken) {
+      setSpeakingMessageId(null);
+      setIsSpeaking(false);
       setIsSpeechPaused(false);
-    };
-    audio.onended = () => {
-      if (audioRef.current === audio) {
-        stopSpeaking();
-      }
-    };
-    audio.onerror = () => {
-      if (audioRef.current === audio) {
-        stopSpeaking();
-      }
-    };
-
-    await audio.play();
+    }
   }
 
   function playBrowserSpeech(message: Message, plainText: string) {
@@ -2635,24 +2737,21 @@ export default function ChatWidget({
       throw new Error("Browser speech is unavailable.");
     }
 
-    // Chunk long text into paragraphs so the browser doesn't drop words mid-read
-    const chunks = plainText
-      .split(/\n{2,}/)
-      .map((c) => c.trim())
-      .filter(Boolean);
-    const speakChunks = chunks.length > 0 ? chunks : [plainText];
-
-    let chunkIndex = 0;
+    const playbackToken = speechPlaybackTokenRef.current;
+    browserSpeechQueueRef.current = splitSpeechTextIntoChunks(plainText);
 
     function speakNext() {
-      if (chunkIndex >= speakChunks.length) {
+      if (speechPlaybackTokenRef.current !== playbackToken) return;
+      const text = browserSpeechQueueRef.current.shift();
+
+      if (!text) {
         setSpeakingMessageId(null);
         setIsSpeaking(false);
         setIsSpeechPaused(false);
         utteranceRef.current = null;
         return;
       }
-      const text = speakChunks[chunkIndex++];
+
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = selectedVoicePreset.rate;
       utterance.pitch = selectedVoicePreset.pitch;
@@ -2676,10 +2775,7 @@ export default function ChatWidget({
       };
       utterance.onerror = () => {
         if (utteranceRef.current === utterance) {
-          utteranceRef.current = null;
-          setSpeakingMessageId(null);
-          setIsSpeaking(false);
-          setIsSpeechPaused(false);
+          speakNext();
         }
       };
 
@@ -2705,13 +2801,11 @@ export default function ChatWidget({
       return;
     }
 
-    const serverSpeechText = clampServerTtsText(plainText);
-
     stopSpeaking();
 
     if (SERVER_TTS_ENABLED) {
       try {
-        await playServerSpeech(message, serverSpeechText, voice.id);
+        await playServerSpeech(message, plainText, voice.id);
         return;
       } catch (error) {
         console.warn("[tts] server playback failed, falling back to browser speech", {

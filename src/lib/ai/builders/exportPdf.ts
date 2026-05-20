@@ -762,6 +762,8 @@ function sanitizeComparisonText(value: string | undefined): string {
     .replace(/(\d)([A-Za-z$])/g, "$1 $2")
     .replace(/\bshown\b/i, "Not clearly shown")
     .replace(/\bnot\s+Not clearly shown\b/gi, "not clearly shown")
+    .replace(/\bnot clearly\s+not clearly\s+shown\b/gi, "Not clearly shown")
+    .replace(/\b(Shop estimate|Carrier estimate)\.:\s*/gi, "$1: ")
     .replace(/\b([A-Za-z][A-Za-z0-9/&() -]{2,80}?)\s+\1\s+vs\s+not shown\s+Present only in shop estimate\)?\.?/gi, "$1: present only in shop estimate.")
     .replace(/\s+/g, " ")
     .trim();

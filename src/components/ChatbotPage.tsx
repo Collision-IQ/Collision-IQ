@@ -1213,8 +1213,7 @@ export function ChatbotWorkspacePage() {
                     </div>
                   </div>
                 )}
-                {isChatActive && (
-                  <div className="relative h-full min-h-0">
+                <div className={isChatActive ? "relative h-full min-h-0" : "hidden"}>
                       <div className="relative flex h-full min-h-0 flex-col overflow-hidden border border-border bg-background">
                         <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-3 py-2">
                           <div>
@@ -1314,7 +1313,6 @@ export function ChatbotWorkspacePage() {
                       </div>
                     </div>
                   </div>
-                )}
                 </section>
               </div>
             </div>

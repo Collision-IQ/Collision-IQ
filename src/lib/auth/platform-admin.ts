@@ -1,4 +1,10 @@
 const PLATFORM_ADMIN_ENV_KEY = "COLLISION_IQ_PLATFORM_ADMIN_EMAILS";
+const PLATFORM_ADMIN_ENV_KEYS = [
+  PLATFORM_ADMIN_ENV_KEY,
+  "ADMIN_EMAILS",
+  "AUTHORIZED_ADMIN_EMAILS",
+  "NEXT_PUBLIC_ADMIN_EMAILS",
+] as const;
 const BUILT_IN_FREE_ACCESS_EMAILS = [
   "vinny@collision.academy",
   "olga@collision.academy",
@@ -13,9 +19,9 @@ export function normalizeEmail(email: string | null | undefined) {
 }
 
 export function getPlatformAdminEmails() {
-  const raw = process.env[PLATFORM_ADMIN_ENV_KEY] ?? "";
-  const envEmails = raw
-    .split(",")
+  const envEmails = PLATFORM_ADMIN_ENV_KEYS.flatMap((key) => process.env[key] ?? "")
+    .join("\n")
+    .split(/[,;\n]/)
     .map((value) => normalizeEmail(value))
     .filter(Boolean);
 

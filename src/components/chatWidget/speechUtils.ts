@@ -91,6 +91,39 @@ export function toSpeechText(content: string): string {
     .trim();
 }
 
+export function splitSpeechTextIntoChunks(content: string, maxLength = 900): string[] {
+  const normalized = content.replace(/\s+/g, " ").trim();
+  if (!normalized) return [];
+
+  const sentences = normalized.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [normalized];
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const sentence of sentences.map((value) => value.trim()).filter(Boolean)) {
+    if (sentence.length > maxLength) {
+      if (current) {
+        chunks.push(current);
+        current = "";
+      }
+      for (let index = 0; index < sentence.length; index += maxLength) {
+        chunks.push(sentence.slice(index, index + maxLength).trim());
+      }
+      continue;
+    }
+
+    const next = current ? `${current} ${sentence}` : sentence;
+    if (next.length > maxLength && current) {
+      chunks.push(current);
+      current = sentence;
+    } else {
+      current = next;
+    }
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
+}
+
 export function canUseBrowserReadAloud() {
   return typeof window !== "undefined" && "speechSynthesis" in window;
 }

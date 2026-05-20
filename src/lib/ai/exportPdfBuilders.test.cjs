@@ -54,6 +54,9 @@ const {
 const {
   buildExportResearchSections,
 } = require("./builders/exportResearchSections.ts");
+const {
+  sanitizeReportText,
+} = require("./builders/exportPdf.ts");
 
 const TEST_VIN = "1GKKNRLS7MZ123456";
 const APPRAISAL_PROCESS_CHAT_CONTEXT = [
@@ -228,6 +231,29 @@ run("Repair Intelligence research sections suppress placeholder source-link refe
 
   assert.match(text, /OEM calibration bulletin/);
   assert.doesNotMatch(text, /Reference: source link|Not clearly Not clearly/);
+});
+
+run("shared PDF presentation cleanup normalizes duplicate not-clearly labels", () => {
+  const text = [
+    sanitizeReportText("Not clearly Not clearly shown"),
+    sanitizeReportText("not clearly not clearly shown"),
+    sanitizeReportText("Carrier estimate.: Not clearly Not clearly shown."),
+    sanitizeReportText("Shop estimate.: not clearly not clearly shown."),
+  ].join("\n");
+
+  assert.match(text, /Carrier estimate: Not clearly shown\./);
+  assert.match(text, /Shop estimate: Not clearly shown\./);
+  assert.doesNotMatch(text, /Not clearly Not clearly|not clearly not clearly|estimate\.:/);
+});
+
+run("customer-report presentation cleanup avoids unsupported Pennsylvania wording", () => {
+  const text = sanitizeReportText(
+    "In Pennsylvania, the file also supports asking for written status updates when the claim is delayed or when the repair position is not being explained clearly. Pennsylvania-specific options should not return."
+  );
+
+  assert.match(text, /If state-specific claim-handling rules apply, you may also be able to request written status updates/i);
+  assert.match(text, /state-specific options should not return/i);
+  assert.doesNotMatch(text, /In Pennsylvania|Pennsylvania-specific/i);
 });
 
 run("Estimate scrubber export is merged into Annotated Estimate Scrubber", () => {
