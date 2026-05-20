@@ -62,11 +62,12 @@ function formatCategoryBullets(
     ];
   }
 
-  return sources.slice(0, 8).map((source) =>
-    [
+  return sources.slice(0, 8).map((source) => {
+    const reference = formatMeaningfulReference(source.url ?? source.driveFileId ?? source.locator);
+    return [
       `Source type: ${source.sourceType}.`,
       `Source title: ${source.sourceTitle}.`,
-      `Reference: ${source.url ?? source.driveFileId ?? source.locator}.`,
+      reference ? `Reference: ${reference}.` : null,
       `Retrieved: ${source.retrievalTimestamp}.`,
       source.jurisdiction ? `Jurisdiction: ${source.jurisdiction}.` : null,
       source.effectiveDate ? `Effective date: ${source.effectiveDate}.` : null,
@@ -74,8 +75,14 @@ function formatCategoryBullets(
       `Agent: ${source.agent}.`,
     ]
       .filter(Boolean)
-      .join(" ")
-  );
+      .join(" ");
+  });
+}
+
+function formatMeaningfulReference(value: string | null | undefined): string | null {
+  const text = value?.replace(/\s+/g, " ").trim();
+  if (!text || /^source link$/i.test(text) || /^n\/?a$/i.test(text)) return null;
+  return text;
 }
 
 function isMeaningfulReportText(value: string | null | undefined): value is string {

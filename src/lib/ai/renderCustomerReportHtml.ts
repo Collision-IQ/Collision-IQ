@@ -211,7 +211,7 @@ export function renderCustomerReportHtml(input: RenderCustomerReportHtmlInput): 
 
     <div class="footer">
       <p>This report is intended to explain the repair situation in plain language for the vehicle owner.</p>
-      <p>Any policy-related or Pennsylvania-specific options should be read as practical guidance and then confirmed against the actual policy and claim record.</p>
+      <p>Any policy-related or state-specific options should be read as practical guidance and then confirmed against the actual policy and claim record.</p>
     </div>
   </div>
 </body>
