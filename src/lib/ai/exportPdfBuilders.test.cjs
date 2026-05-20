@@ -471,6 +471,17 @@ run("Collision Snapshot formats comparison deltas without parser-style labels", 
           delta: "Only on left",
           deltaType: "added",
         },
+        {
+          id: "tire-label-row",
+          category: "Labels",
+          operation: "Repl Tire info label",
+          lhsSource: "Shop estimate",
+          rhsSource: "Carrier estimate",
+          lhsValue: "Repl Tire info label",
+          rhsValue: null,
+          delta: "Present only in shop estimate",
+          deltaType: "added",
+        },
       ],
     },
   });
@@ -478,7 +489,8 @@ run("Collision Snapshot formats comparison deltas without parser-style labels", 
 
   assert.match(text, /Procedure item: present only in shop estimate\./);
   assert.match(text, /Reset electrical components: 0\.3 hrs in shop estimate; not clearly shown in carrier estimate\./);
-  assert.doesNotMatch(text, /Proc vs not shown|Only on left/);
+  assert.match(text, /Repl Tire info label: present only in shop estimate\./);
+  assert.doesNotMatch(text, /Proc vs not shown|Only on left|Repl Tire info label Repl Tire info label vs not shown Present only/i);
 });
 
 run("Collision Snapshot favors side-impact dispute drivers over generic front-end items", () => {

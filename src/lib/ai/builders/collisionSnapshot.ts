@@ -473,6 +473,9 @@ function formatComparisonDelta(row: EstimateComparisonRow): string | null {
   if ((/^proc(?:edure)?$/i.test(label) || /\bproc(?:edure)?s?\b/i.test(rawLabel)) && right === "not shown") {
     return "Procedure item: present only in shop estimate.";
   }
+  if (right === "not shown" && /present only in shop estimate/i.test(`${row.delta ?? ""}`)) {
+    return `${label}: present only in shop estimate.`;
+  }
   if (right === "not shown" && numericValue(left) !== undefined) {
     const unit = /hour|labor|reset|electrical|component/i.test(`${row.category ?? ""} ${row.operation ?? ""} ${row.partName ?? ""}`)
       ? " hrs"

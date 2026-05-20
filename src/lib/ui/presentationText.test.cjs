@@ -186,9 +186,14 @@ run("presentation cleanup removes release-blocker export artifacts", () => {
       "added findings can be and sent in as a supplement",
       "make sure the claim handling stays.",
       "finish documentation the repair path",
+      "finish documentation the structural checks",
+      "If state-specific claim [REDACTED_CLAIM], you may also be able to request a written explanation.",
       "Reference: source link.",
       "continue at source link.",
       "four-whe post-pull c alignmen confi Not clearly Not clearly shown.",
+      "battery.3 e battery.3e rt/rear r&i wheel.2 m lt/rear r&i wheel.2 m wheel.2 m wheel.2m.",
+      "windshield tesla 0. 5 windshield tesla0. 5 tesla0. 5 tesla 0. 5.",
+      "Repl Tire info label Repl Tire info label vs not shown Present only in shop estimate).",
     ].join(" "),
     { preserveMarkdown: true }
   );
@@ -206,7 +211,13 @@ run("presentation cleanup removes release-blocker export artifacts", () => {
   assert.match(cleaned, /added findings can be documented and sent in as a supplement\./);
   assert.match(cleaned, /make sure the claim handling stays clear and documented\./);
   assert.match(cleaned, /finish documenting the repair path\./);
-  assert.doesNotMatch(cleaned, /Reference: source link|continue at source link|sensor0|\bfour-whe\b|post-pull c|\balignmen\b|\bconfi\b|Not clearly Not clearly/);
+  assert.match(cleaned, /finish documenting the structural checks\./);
+  assert.match(cleaned, /If state-specific claim-handling rules apply, you may also be able to request/);
+  assert.match(cleaned, /rt\/rear r&i wheel/i);
+  assert.match(cleaned, /lt\/rear r&i wheel/i);
+  assert.match(cleaned, /windshield Tesla/);
+  assert.match(cleaned, /Repl Tire info label: present only in shop estimate\./);
+  assert.doesNotMatch(cleaned, /Reference: source link|continue at source link|sensor0|\bfour-whe\b|post-pull c|\balignmen\b|\bconfi\b|Not clearly Not clearly|battery\.3\s?e|wheel\.2\s?m|tesla0|tesla 0\. 5|vs not shown Present only/);
 });
 
 run("review completeness uses near-complete language for 185 of 186 reviewable files", () => {
