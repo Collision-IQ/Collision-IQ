@@ -36,6 +36,11 @@ import {
   type AgentRetrievalTrace,
 } from "@/lib/ai/agentRetrievalTrace";
 import {
+  buildLargeCaseChatContext,
+  countLargeCaseSummaryArtifacts,
+  resolveLargeCaseChatFallback,
+} from "@/lib/ai/chatLargeCaseContext";
+import {
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
 } from "@/lib/uploadSafety/uploadLimits";
@@ -507,15 +512,7 @@ function buildActiveCaseChatContext(params: {
     params.activeCase.estimateText.trim().length > 0 ||
     params.activeCase.evidenceRegistry.length > 0 ||
     Boolean(factualCore);
-  const newUploadSummary = params.documents.length
-    ? params.documents
-        .map((document) => {
-          const kind = document.mime?.startsWith("image/") ? "image" : "document";
-          const textLength = document.text?.trim().length ?? 0;
-          return `- ${document.filename} (${kind}, extracted text ${textLength} chars)`;
-        })
-        .join("\n")
-    : "- None in this turn";
+  const newUploadSummary = buildNewUploadSummary(params.documents);
   const issueContext = factualCore?.issueAssessments.length
     ? factualCore.issueAssessments
         .slice(0, 10)
@@ -636,6 +633,18 @@ Continuation rules:
 - Do not emit a fresh "start analysis" or first-review style response.
 - Do not imply open items were not performed just because support is incomplete.
 `.trim();
+}
+
+function buildNewUploadSummary(documents: UploadedDocument[]): string {
+  return documents.length
+    ? documents
+        .map((document) => {
+          const kind = document.mime?.startsWith("image/") ? "image" : "document";
+          const textLength = document.text?.trim().length ?? 0;
+          return `- ${document.filename} (${kind}, extracted text ${textLength} chars)`;
+        })
+        .join("\n")
+    : "- None in this turn";
 }
 
 function isLegalAdjacentNegotiationRequest(userMessage: string): boolean {
@@ -893,13 +902,20 @@ export async function POST(req: Request) {
       });
     }
 
+    const largeCaseFallback = resolveLargeCaseChatFallback(openActiveCase, documents);
     const activeCaseContext =
       openActiveCase
-        ? buildActiveCaseChatContext({
-            activeCase: openActiveCase,
-            documents,
-            conversationContext,
-          })
+        ? largeCaseFallback.useFallback
+          ? buildLargeCaseChatContext({
+              activeCase: openActiveCase,
+              conversationContext,
+              newUploadSummary: buildNewUploadSummary(documents),
+            })
+          : buildActiveCaseChatContext({
+              activeCase: openActiveCase,
+              documents,
+              conversationContext,
+            })
         : undefined;
 
     if (activeCaseContext) {
@@ -912,6 +928,17 @@ export async function POST(req: Request) {
         hasVehicleContext: activeCaseHasVehicleContext,
         hasEstimateText: activeCaseHasEstimateText,
         hasFactualCore: activeCaseHasFactualCore,
+        contextMode: largeCaseFallback.useFallback ? "large_case_summary_fallback" : "standard",
+        estimatedContextChars: largeCaseFallback.estimatedContextChars,
+        fallbackReasons: largeCaseFallback.reasons,
+      });
+    }
+    if (agentTrace && activeCaseContext && largeCaseFallback.useFallback) {
+      logAgentTraceEvent("internal summaries selected", agentTrace, {
+        artifactCount: countLargeCaseSummaryArtifacts(activeCaseContext),
+        fileCount: largeCaseFallback.fileCount,
+        estimatedContextChars: largeCaseFallback.estimatedContextChars,
+        reasons: largeCaseFallback.reasons,
       });
     }
 
@@ -941,23 +968,26 @@ export async function POST(req: Request) {
       .filter(Boolean)
       .join("\n\n");
 
+    const providerDocuments = largeCaseFallback.useFallback ? [] : documents;
     const input = buildOpenAIInput({
       userMessage,
       conversationContext,
-      documents,
+      documents: providerDocuments,
       activeCaseContext,
     });
-    const turnEstimateText = documents
+    const turnEstimateText = providerDocuments
       .map((document) => document.text?.trim())
       .filter(Boolean)
       .join("\n\n");
-    const activeCaseEstimateText = [
-      openActiveCase?.estimateText ?? "",
-      ...(openActiveCase?.files ?? []).map((file) => file.text),
-    ]
-      .map((text) => text?.trim())
-      .filter(Boolean)
-      .join("\n\n");
+    const activeCaseEstimateText = largeCaseFallback.useFallback
+      ? activeCaseContext ?? ""
+      : [
+          openActiveCase?.estimateText ?? "",
+          ...(openActiveCase?.files ?? []).map((file) => file.text),
+        ]
+          .map((text) => text?.trim())
+          .filter(Boolean)
+          .join("\n\n");
     const estimateText = turnEstimateText || activeCaseEstimateText;
     const resolvedVehicle = inferDriveVehicleContext({
       estimateText,
@@ -1024,7 +1054,7 @@ export async function POST(req: Request) {
       activeCaseId: activeCase && !activeCase.isClosed ? activeCase.id : null,
       activeCaseClosed: activeCase?.isClosed ?? null,
       attachmentCount: documents.length,
-      includedInRequest: documents.map((document, index) => ({
+      includedInRequest: providerDocuments.map((document, index) => ({
         index: index + 1,
         attachmentId: document.id ?? null,
         filename: document.filename,
@@ -1033,6 +1063,15 @@ export async function POST(req: Request) {
         hasText: Boolean(document.text?.trim()),
         hasImageDataUrl: Boolean(document.imageDataUrl),
       })),
+      omittedForLargeCaseFallback: largeCaseFallback.useFallback
+        ? documents.map((document) => ({
+            attachmentId: document.id ?? null,
+            filename: document.filename,
+            mimeType: document.mime || "unknown",
+            textLength: document.text?.length ?? 0,
+            hasImageDataUrl: Boolean(document.imageDataUrl),
+          }))
+        : [],
     });
 
     const firstPass = await createOpenAIResponseWithRetry(deps, "first-pass", {
