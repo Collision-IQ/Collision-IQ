@@ -60,6 +60,10 @@ import { buildWorkspaceDataFromReport } from "@/lib/workspace/buildWorkspaceData
 import { buildLinkedEvidence, type LinkedEvidence } from "@/lib/ingest/fetchLinkedEvidence";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import {
+  extractLinksFromFiles,
+  extractLinksFromText,
+} from "@/lib/ingest/extractLinks";
+import {
   CCC_WORKFILE_DISCLAIMER,
   isCccUploadClassification,
 } from "@/lib/ccc/cccWorkfile";
@@ -82,6 +86,14 @@ import {
   type ExcludedFromReviewReason,
 } from "@/lib/reviewCompleteness";
 import { classifyRetryableProviderError } from "@/lib/ai/providerRetryableError";
+import {
+  areInternalRetrievalPathsResolved,
+  createAgentRetrievalTrace,
+  logAgentTraceCompleted,
+  logAgentTraceEvent,
+  recordAgentRetrievalStep,
+  type AgentRetrievalTrace,
+} from "@/lib/ai/agentRetrievalTrace";
 
 export const runtime = "nodejs";
 
@@ -161,6 +173,8 @@ function assertAnalysisAllowedForEntitlements(
 }
 
 export async function POST(req: Request) {
+  let agentTrace: AgentRetrievalTrace | null = null;
+
   try {
     const { user, verifiedEmails, isPlatformAdmin } = await requireCurrentUser();
     const entitlements = await getCurrentEntitlements({
@@ -173,6 +187,11 @@ export async function POST(req: Request) {
       isPlatformAdmin: entitlements.isPlatformAdmin || isPlatformAdmin,
     });
     const body = (await req.json()) as AnalysisRequestBody;
+    agentTrace = createAgentRetrievalTrace({
+      flow: "analysis",
+      caseId: body.activeCaseId ?? null,
+      userId: user.id,
+    });
     const artifactIds = body.artifactIds ?? [];
     const profileInstruction = buildAssistanceProfileInstruction(body.assistanceProfile);
     const requestUserIntent = [body.userIntent ?? "", profileInstruction]
@@ -253,9 +272,42 @@ export async function POST(req: Request) {
       text: attachment.text,
       summary: null,
     }));
+    const detectedEstimateUrls = [
+      ...new Set([
+        ...extractLinksFromText(normalizedAttachments.map((attachment) => attachment.text).join("\n\n")),
+        ...extractLinksFromFiles(attachmentFilesForLinks),
+      ]),
+    ];
+    logAgentTraceEvent("estimate links detected", agentTrace, {
+      found: detectedEstimateUrls.length,
+    });
     const linkedEvidence = await buildLinkedEvidence({
       estimateText: normalizedAttachments.map((attachment) => attachment.text).join("\n\n"),
       files: attachmentFilesForLinks,
+    });
+    const linkedEvidenceOkCount = linkedEvidence.filter((doc) => doc.status === "ok").length;
+    recordAgentRetrievalStep(agentTrace, {
+      order: 1,
+      tool: "estimate_link_reader",
+      action: "open_estimate_links",
+      resultCount: linkedEvidenceOkCount,
+      status:
+        detectedEstimateUrls.length === 0
+          ? "skipped"
+          : linkedEvidence.some((doc) => doc.status === "ok" || doc.status === "blocked" || doc.status === "skipped")
+            ? "success"
+            : "error",
+      reason:
+        detectedEstimateUrls.length === 0
+          ? "No estimate/upload document links found."
+          : linkedEvidenceOkCount === 0
+            ? "Estimate links attempted; no retrievable document text retained."
+            : undefined,
+    });
+    logAgentTraceEvent("estimate links attempted", agentTrace, {
+      detectedCount: detectedEstimateUrls.length,
+      attemptedCount: linkedEvidence.length,
+      resultCount: linkedEvidenceOkCount,
     });
     const linkedEvidenceAttachments = linkedEvidenceToAttachments(linkedEvidence);
     const preloadedAttachments = [
@@ -291,6 +343,9 @@ export async function POST(req: Request) {
       analysis,
       hasDocuments: artifactIds.length > 0,
     });
+    logAgentTraceEvent("google drive search started", agentTrace, {
+      retrievalMode: retrievalSnapshot.taskType,
+    });
     const retrieval = await retrieveDriveSupport({
       taskType: retrievalSnapshot.taskType,
       userQuery: requestUserIntent || "repair analysis",
@@ -307,8 +362,32 @@ export async function POST(req: Request) {
       })
       .catch((error) => {
         console.error("Analysis Drive retrieval skipped:", error);
+        recordAgentRetrievalStep(agentTrace!, {
+          order: 2,
+          tool: "google_drive_search",
+          action: "search_internal_sources",
+          resultCount: 0,
+          status: "error",
+          reason: "Internal retrieval failed.",
+        });
         return null;
       });
+    if (!agentTrace.steps.some((step) => step.order === 2)) {
+      recordAgentRetrievalStep(agentTrace, {
+        order: 2,
+        tool: "google_drive_search",
+        action: "search_internal_sources",
+        resultCount: retrieval?.results.length ?? 0,
+        status: retrieval ? "success" : "skipped",
+        reason: retrieval
+          ? undefined
+          : "Google Drive/internal retrieval unavailable or no retrieval request generated.",
+      });
+    }
+    logAgentTraceEvent("google drive search completed", agentTrace, {
+      resultCount: retrieval?.results.length ?? 0,
+      status: agentTrace.steps.find((step) => step.order === 2)?.status ?? "skipped",
+    });
 
     if (retrieval?.results.length) {
       console.info("[analysis-drive-retrieval]", {
@@ -338,6 +417,7 @@ export async function POST(req: Request) {
       report,
       uploadedAttachments: normalizedAttachments,
       userIntent: requestUserIntent,
+      agentTrace,
     });
     analysis = normalizeReportToAnalysisResult(report);
 
@@ -402,6 +482,8 @@ export async function POST(req: Request) {
 
     const reviewProgress = buildReviewProgressPayload(stored.report, stored.artifactIds);
 
+    logAgentTraceCompleted(agentTrace);
+
     return NextResponse.json({
       reportId: stored.id,
       createdAt: stored.createdAt,
@@ -440,6 +522,10 @@ export async function POST(req: Request) {
       },
     });
   } catch (error) {
+    if (agentTrace) {
+      logAgentTraceCompleted(agentTrace);
+    }
+
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
@@ -593,6 +679,7 @@ async function attachMarketPreviewComparables(params: {
   report: RepairIntelligenceReport;
   uploadedAttachments: StoredAttachment[];
   userIntent: string;
+  agentTrace?: AgentRetrievalTrace | null;
 }): Promise<RepairIntelligenceReport> {
   const dateAccessed = new Date().toISOString().slice(0, 10);
   const inputs = extractMarketPreviewSearchInputs(
@@ -620,6 +707,10 @@ async function attachMarketPreviewComparables(params: {
   });
 
   if (!vehicle?.year || !vehicle.make || !vehicle.model) {
+    recordMarketPreviewTraceSkipped(
+      params.agentTrace,
+      "Vehicle identifiers unavailable after estimate links and internal sources were attempted."
+    );
     console.info("marketPreview.search.failed", {
       reason: "vehicle_identifiers_missing",
       providerConfigured,
@@ -651,6 +742,10 @@ async function attachMarketPreviewComparables(params: {
 
   const apiKey = process.env.SERPER_API_KEY?.trim();
   if (!apiKey) {
+    recordMarketPreviewTraceSkipped(
+      params.agentTrace,
+      "Internet search provider unavailable after estimate links and internal sources were attempted."
+    );
     console.info("marketPreview.search.failed", {
       reason: "provider_not_configured",
       providerConfigured: false,
@@ -682,6 +777,10 @@ async function attachMarketPreviewComparables(params: {
   }
 
   if (!inputs.zip) {
+    recordMarketPreviewTraceSkipped(
+      params.agentTrace,
+      "Location unavailable after estimate links and internal sources were attempted."
+    );
     console.info("marketPreview.search.failed", {
       reason: "location_missing",
       providerConfigured: true,
@@ -726,6 +825,14 @@ async function attachMarketPreviewComparables(params: {
     state: inputs.state,
     searchRadiusMiles: 150,
   });
+  if (params.agentTrace && areInternalRetrievalPathsResolved(params.agentTrace)) {
+    logAgentTraceEvent("web search allowed", params.agentTrace, {
+      reason: "Internal sources attempted first",
+    });
+    logAgentTraceEvent("web search started", params.agentTrace, {
+      provider: "market_preview",
+    });
+  }
 
   try {
     const searchResult = await runMarketPreviewSearchSequence({
@@ -769,6 +876,11 @@ async function attachMarketPreviewComparables(params: {
         medianValue: medianValue ?? null,
         finalStatus: "failed",
       });
+      recordMarketPreviewTraceCompleted(params.agentTrace, {
+        resultCount: selected.length,
+        status: "success",
+        reason: "Internal sources attempted first; internet search returned no usable comparable listings.",
+      });
       return {
         ...params.report,
         marketPreviewSearch: {
@@ -808,6 +920,11 @@ async function attachMarketPreviewComparables(params: {
       finalStatus: "completed",
       widened: searchResult.query !== baseQuery,
     });
+    recordMarketPreviewTraceCompleted(params.agentTrace, {
+      resultCount: selected.length,
+      status: "success",
+      reason: "Internal sources attempted first.",
+    });
 
     return {
       ...params.report,
@@ -836,6 +953,13 @@ async function attachMarketPreviewComparables(params: {
     } as MarketPreviewReport;
   } catch (error) {
     const isTimeout = error instanceof Error && error.name === "AbortError";
+    recordMarketPreviewTraceCompleted(params.agentTrace, {
+      resultCount: 0,
+      status: "error",
+      reason: isTimeout
+        ? "Internet search timed out after internal sources were attempted."
+        : "Internet search failed after internal sources were attempted.",
+    });
     console.info("marketPreview.search.failed", {
       reason: isTimeout ? "timeout" : "failed",
       providerConfigured: true,
@@ -901,6 +1025,45 @@ function buildMarketPreviewQueries(params: {
     { label: "autotrader_site", query: `site:autotrader.com ${trimIdentity} for sale ${params.zip}` },
     { label: "cargurus_site", query: `site:cargurus.com ${trimIdentity} for sale ${params.zip}` },
   ];
+}
+
+function recordMarketPreviewTraceSkipped(
+  trace: AgentRetrievalTrace | null | undefined,
+  reason: string
+) {
+  if (!trace || !areInternalRetrievalPathsResolved(trace)) return;
+
+  logAgentTraceEvent("web search allowed", trace, {
+    reason: "Internal sources attempted first",
+  });
+  recordAgentRetrievalStep(trace, {
+    order: 3,
+    tool: "web_search",
+    action: "internet_search",
+    resultCount: 0,
+    status: "skipped",
+    reason,
+  });
+}
+
+function recordMarketPreviewTraceCompleted(
+  trace: AgentRetrievalTrace | null | undefined,
+  params: {
+    resultCount: number;
+    status: "success" | "error";
+    reason: string;
+  }
+) {
+  if (!trace || !areInternalRetrievalPathsResolved(trace)) return;
+
+  recordAgentRetrievalStep(trace, {
+    order: 3,
+    tool: "web_search",
+    action: "internet_search",
+    resultCount: params.resultCount,
+    status: params.status,
+    reason: params.reason,
+  });
 }
 
 function resolveMarketPreviewCityState(zip: string, state?: string): string {

@@ -28,6 +28,14 @@ import {
   RETRYABLE_PROVIDER_USER_MESSAGE,
 } from "@/lib/ai/providerRetryableError";
 import {
+  areInternalRetrievalPathsResolved,
+  createAgentRetrievalTrace,
+  logAgentTraceCompleted,
+  logAgentTraceEvent,
+  recordAgentRetrievalStep,
+  type AgentRetrievalTrace,
+} from "@/lib/ai/agentRetrievalTrace";
+import {
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
 } from "@/lib/uploadSafety/uploadLimits";
@@ -732,6 +740,8 @@ function enforceModeResponseShape(text: string, mode: OutputMode): string {
 }
 
 export async function POST(req: Request) {
+  let agentTrace: AgentRetrievalTrace | null = null;
+
   try {
     if (!process.env.OPENAI_API_KEY?.trim()) {
       return NextResponse.json(
@@ -830,6 +840,11 @@ export async function POST(req: Request) {
         })
       : null;
     const openActiveCase = activeCase && !activeCase.isClosed ? activeCase : null;
+    agentTrace = createAgentRetrievalTrace({
+      flow: "chat",
+      caseId: openActiveCase?.id ?? body.activeCaseId ?? null,
+      userId: user.id,
+    });
     const activeCaseAttachmentCount = openActiveCase?.files.length ?? 0;
     const activeCaseHasEstimateText = Boolean(
       openActiveCase &&
@@ -983,6 +998,10 @@ export async function POST(req: Request) {
     const estimateLinks = extractEstimateLinksFromDocuments(documentsForEvidence);
     const fetchableEstimateLinks = estimateLinks.filter(isFetchableEstimateLink);
     const rejectedEstimateLinks = estimateLinks.filter((link) => !isFetchableEstimateLink(link));
+    logAgentTraceEvent("estimate links detected", agentTrace, {
+      found: estimateLinks.length,
+      fetchable: fetchableEstimateLinks.length,
+    });
     console.info("[chat-linked-docs] estimate links scanned", {
       found: estimateLinks.length,
       fetchable: fetchableEstimateLinks.length,
@@ -1034,6 +1053,32 @@ export async function POST(req: Request) {
       maxLinks: 4,
       timeoutMs: 5000,
     });
+    recordAgentRetrievalStep(agentTrace, {
+      order: 1,
+      tool: "estimate_link_reader",
+      action: "open_estimate_links",
+      resultCount: linkedProcedureDocs.keptDocs.length,
+      status:
+        estimateLinks.length === 0
+          ? "skipped"
+          : linkedProcedureDocs.fetchedCount > 0 || linkedProcedureDocs.keptDocs.length > 0
+            ? "success"
+            : "skipped",
+      reason:
+        estimateLinks.length === 0
+          ? "No estimate/upload document links found."
+          : fetchableEstimateLinks.length === 0
+            ? "Estimate links found but none were fetchable."
+            : linkedProcedureDocs.keptDocs.length === 0
+              ? "Estimate links attempted; no applicable document text retained."
+              : undefined,
+    });
+    logAgentTraceEvent("estimate links attempted", agentTrace, {
+      detectedCount: estimateLinks.length,
+      attemptedCount: fetchableEstimateLinks.slice(0, 4).length,
+      fetchedCount: linkedProcedureDocs.fetchedCount,
+      keptCount: linkedProcedureDocs.keptDocs.length,
+    });
     console.info("[chat-linked-docs] linked procedure retrieval", {
       fetchedSuccessfully: linkedProcedureDocs.fetchedCount,
       keptForRefinement: linkedProcedureDocs.keptDocs.map((doc) => ({
@@ -1057,6 +1102,9 @@ export async function POST(req: Request) {
       firstPassAnswer: firstPassText,
     });
 
+    logAgentTraceEvent("google drive search started", agentTrace, {
+      retrievalMode: retrievalAnalysis.taskType,
+    });
     const retrieval = await retrieveDriveSupport({
       taskType: retrievalAnalysis.taskType,
       userQuery: userMessage,
@@ -1068,8 +1116,45 @@ export async function POST(req: Request) {
       maxExcerptChars: 500,
     }).catch((error) => {
       console.error("Drive retrieval refinement skipped:", error);
+      recordAgentRetrievalStep(agentTrace!, {
+        order: 2,
+        tool: "google_drive_search",
+        action: "search_internal_sources",
+        resultCount: 0,
+        status: "error",
+        reason: "Internal retrieval failed.",
+      });
       return null;
     });
+    if (!agentTrace.steps.some((step) => step.order === 2)) {
+      recordAgentRetrievalStep(agentTrace, {
+        order: 2,
+        tool: "google_drive_search",
+        action: "search_internal_sources",
+        resultCount: retrieval?.results.length ?? 0,
+        status: retrieval ? "success" : "skipped",
+        reason: retrieval
+          ? undefined
+          : "Google Drive/internal retrieval unavailable or no retrieval request generated.",
+      });
+    }
+    logAgentTraceEvent("google drive search completed", agentTrace, {
+      resultCount: retrieval?.results.length ?? 0,
+      status: agentTrace.steps.find((step) => step.order === 2)?.status ?? "skipped",
+    });
+    if (areInternalRetrievalPathsResolved(agentTrace)) {
+      logAgentTraceEvent("web search allowed", agentTrace, {
+        reason: "Internal sources attempted first",
+      });
+      recordAgentRetrievalStep(agentTrace, {
+        order: 3,
+        tool: "web_search",
+        action: "internet_search",
+        resultCount: 0,
+        status: "skipped",
+        reason: "No chat internet search configured; internal sources attempted first.",
+      });
+    }
 
     const applicableRetrieval = retrieval
       ? filterDriveRetrievalByVehicleApplicability(deps, retrieval)
@@ -1124,12 +1209,18 @@ export async function POST(req: Request) {
         : modeShapedOutput
       ));
 
+    logAgentTraceCompleted(agentTrace);
+
     return new Response(cleanDisplayText(finalText), {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
       },
     });
   } catch (error) {
+    if (agentTrace) {
+      logAgentTraceCompleted(agentTrace);
+    }
+
     if (error instanceof UnauthorizedError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
