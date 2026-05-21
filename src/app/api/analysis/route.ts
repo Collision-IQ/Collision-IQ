@@ -81,6 +81,7 @@ import {
   normalizeReviewProgressCounts,
   type ExcludedFromReviewReason,
 } from "@/lib/reviewCompleteness";
+import { classifyRetryableProviderError } from "@/lib/ai/providerRetryableError";
 
 export const runtime = "nodejs";
 
@@ -454,7 +455,48 @@ export async function POST(req: Request) {
       );
     }
 
-    console.error("ANALYSIS ERROR:", error);
+    const providerError = classifyRetryableProviderError(error, {
+      provider: "openai",
+      stage: "analysis",
+    });
+
+    if (providerError.retryable) {
+      const retryableStatus =
+        providerError.status === 429 || providerError.statusCode === 429 ? 429 : 503;
+      console.warn("ANALYSIS RETRYABLE PROVIDER ERROR:", {
+        provider: providerError.provider,
+        stage: providerError.stage,
+        retryable: true,
+        status: providerError.status,
+        statusCode: providerError.statusCode,
+        code: providerError.code,
+        message: providerError.message,
+      });
+
+      return NextResponse.json(
+        {
+          ok: false,
+          retryable: true,
+          stage: providerError.stage,
+          provider: providerError.provider,
+          status: providerError.status,
+          statusCode: providerError.statusCode,
+          message: "Analysis provider is busy. Please retry shortly.",
+        },
+        { status: retryableStatus }
+      );
+    }
+
+    console.error("ANALYSIS ERROR:", {
+      provider: providerError.provider,
+      stage: providerError.stage,
+      retryable: false,
+      status: providerError.status,
+      statusCode: providerError.statusCode,
+      code: providerError.code,
+      message: providerError.message,
+      error,
+    });
     return NextResponse.json(
       { error: "Analysis failed" },
       { status: 500 }

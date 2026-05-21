@@ -70,6 +70,7 @@ import {
   type ExcludedFromReviewReason,
 } from "@/lib/reviewCompleteness";
 import { VOICE_PRESETS } from "@/lib/voicePresets";
+import { isRetryableProviderMessage } from "@/lib/ai/providerRetryableError";
 
 interface Attachment {
   attachmentId: string;
@@ -168,6 +169,44 @@ type LinkedEvidenceDebugItem = {
   textPreview?: string;
   notes?: string;
 };
+
+type AnalysisFailureResponse = {
+  retryable?: boolean;
+  stage?: string;
+  provider?: string;
+  status?: number;
+  statusCode?: number;
+  message?: string;
+  error?: string;
+};
+
+const RETRYABLE_ANALYSIS_MESSAGE = "Analysis provider is busy. Please retry shortly.";
+
+async function resolveAnalysisFailure(response: Response) {
+  let payload: AnalysisFailureResponse | null = null;
+
+  try {
+    payload = (await response.json()) as AnalysisFailureResponse;
+  } catch {
+    payload = null;
+  }
+
+  const detail = payload?.message || payload?.error || `Analysis failed (${response.status})`;
+  const retryable =
+    payload?.retryable === true ||
+    response.status === 429 ||
+    response.status === 503 ||
+    isRetryableProviderMessage(detail);
+
+  return {
+    retryable,
+    detail: retryable ? RETRYABLE_ANALYSIS_MESSAGE : detail,
+    stage: payload?.stage ?? "analysis",
+    provider: payload?.provider ?? "openai",
+    status: payload?.status ?? response.status,
+    statusCode: payload?.statusCode ?? response.status,
+  };
+}
 
 interface ChatWidgetProps {
   onUserPromptSent?: () => void;
@@ -1520,15 +1559,24 @@ export default function ChatWidget({
           sessionRef.current !== mySession ||
           analysisRunRef.current !== activeAnalysisRunId
         ) {
+          const analysisFailure = !analysisResponse.ok
+            ? await resolveAnalysisFailure(analysisResponse)
+            : null;
           console.info("[attachments] active-case reassessment failure", {
             fileCount: attachmentStats.fileCount,
             totalBytes: attachmentStats.totalBytes,
             totalPdfPages: attachmentStats.totalPdfPages,
             analysisDurationMs,
             status: analysisResponse.status,
+            retryable: analysisFailure?.retryable ?? false,
+            stage: analysisFailure?.stage ?? null,
+            provider: analysisFailure?.provider ?? null,
           });
           if (analysisRunRef.current === activeAnalysisRunId) {
-            onAnalysisStatusChange?.("error", `Analysis failed (${analysisResponse.status})`);
+            onAnalysisStatusChange?.(
+              "error",
+              analysisFailure?.detail ?? `Analysis failed (${analysisResponse.status})`
+            );
             onAnalysisLoadingChange?.(false);
           }
           return;
@@ -1800,15 +1848,24 @@ export default function ChatWidget({
               sessionRef.current !== mySession ||
               analysisRunRef.current !== activeAnalysisRunId
             ) {
+              const analysisFailure = !analysisResponse.ok
+                ? await resolveAnalysisFailure(analysisResponse)
+                : null;
               console.info("[attachments] analysis failure", {
                 fileCount: attachmentStats.fileCount,
                 totalBytes: attachmentStats.totalBytes,
                 totalPdfPages: attachmentStats.totalPdfPages,
                 analysisDurationMs,
                 status: analysisResponse.status,
+                retryable: analysisFailure?.retryable ?? false,
+                stage: analysisFailure?.stage ?? null,
+                provider: analysisFailure?.provider ?? null,
               });
               if (analysisRunRef.current === activeAnalysisRunId) {
-                onAnalysisStatusChange?.("error", `Analysis failed (${analysisResponse.status})`);
+                onAnalysisStatusChange?.(
+                  "error",
+                  analysisFailure?.detail ?? `Analysis failed (${analysisResponse.status})`
+                );
                 onAnalysisLoadingChange?.(false);
               }
               return;

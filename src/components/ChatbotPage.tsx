@@ -71,6 +71,7 @@ import { buildReportApplicability } from "@/lib/reports/applicability";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 import { toCustomerFacingText } from "@/lib/ai/customerFacingText";
+import { isRetryableProviderMessage } from "@/lib/ai/providerRetryableError";
 import type {
   AnalysisResult,
   ConfidenceIntegrity,
@@ -1611,9 +1612,13 @@ function RailContent({
   const railConfidence = hasResolvedAnalysis
     ? formatLabel(renderModel.vehicle.confidence)
     : "Pending";
+  const hasRetryableAnalysisFailure =
+    analysisStatus === "error" && isRetryableProviderMessage(analysisStatusDetail ?? "");
   const railStatus =
     analysisStatus === "error"
-      ? "Blocked"
+      ? hasRetryableAnalysisFailure
+        ? "Retry available"
+        : "Blocked"
       : analysisLoading || analysisStatus === "processing"
         ? "Processing"
         : hasResolvedAnalysis || analysisStatus === "complete"
@@ -2359,11 +2364,13 @@ function RailContent({
       {analysisStatus === "error" && !hasResolvedAnalysis && (
         <section className="mt-5 space-y-2 rounded-2xl border border-red-500/16 bg-red-500/[0.05] p-3.5">
           <div className="text-[10px] uppercase tracking-[0.22em] text-red-200/72">
-            Analysis blocked
+            {hasRetryableAnalysisFailure ? "Analysis delayed" : "Analysis blocked"}
           </div>
           <div className="text-[13px] leading-5 text-muted-foreground">
             {analysisStatusDetail ||
-              "The current file set could not be analyzed. Review access status or retry."}
+              (hasRetryableAnalysisFailure
+                ? "Analysis provider is busy. Please retry shortly."
+                : "The current file set could not be analyzed. Review access status or retry.")}
           </div>
         </section>
       )}
