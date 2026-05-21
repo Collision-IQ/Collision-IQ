@@ -1,21 +1,37 @@
 {
-    "git.ignoreLimitWarning": true,
-    "files.exclude": {
-        "**/clerk-nextjs-sample-disabled": true
-    },
-    "search.exclude": {
-        "**/clerk-nextjs-sample-disabled": true
-    },
-    "files.watcherExclude": {
-        "**/clerk-nextjs-sample-disabled/**": true
-    },
-    "chat.tools.terminal.autoApprove": {
-        "npm.cmd": true,
-        "npx tsc": true
-    },
-    "mssql.suppressConnectionErrors": true,
-    "files.associations": {
-        "*.sql": "sql"
-    },
-    "sql.lintingEnabled": false
+  "git.ignoreLimitWarning": true,
+  "editor.formatOnSave": false,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "files.exclude": {
+    "**/clerk-nextjs-sample-disabled": true,
+    "**/.next": true,
+    "**/node_modules": true,
+    "**/tsconfig.tsbuildinfo": true
+  },
+  "search.exclude": {
+    "**/clerk-nextjs-sample-disabled": true,
+    "**/.next": true,
+    "**/node_modules": true,
+    "**/tsconfig.tsbuildinfo": true
+  },
+  "files.watcherExclude": {
+    "**/clerk-nextjs-sample-disabled/**": true,
+    "**/.next/**": true,
+    "**/node_modules/**": true
+  },
+  "chat.tools.terminal.autoApprove": {
+    "npm.cmd": true,
+    "npx tsc": true
+  },
+  "mssql.suppressConnectionErrors": true,
+  "files.associations": {
+    "*.sql": "sql"
+  },
+  "sqlintingEnabled": false,
+  "git.confirmSync": true,
+  "git.autofetch": true
 }
