@@ -3,6 +3,9 @@ type RetryableProviderErrorOptions = {
   stage?: string;
 };
 
+export const RETRYABLE_PROVIDER_USER_MESSAGE =
+  "AI provider is busy or quota-limited. Please retry shortly.";
+
 export type RetryableProviderErrorDetails = {
   retryable: boolean;
   provider: string;
@@ -14,7 +17,7 @@ export type RetryableProviderErrorDetails = {
 };
 
 const RETRYABLE_PROVIDER_MESSAGE_PATTERN =
-  /(rate\s*limit|too\s*many\s*requests|quota|overloaded|temporar(?:y|ily)\s*unavailable|capacity)/i;
+  /(rate\s*limit|too\s*many\s*requests|quota|billing|overloaded|temporar(?:y|ily)\s*unavailable|capacity|try\s+again\s+later)/i;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
@@ -85,6 +88,8 @@ export function classifyRetryableProviderError(
     normalizedCode.includes("rate") ||
     normalizedCode.includes("quota") ||
     normalizedCode.includes("overload") ||
+    normalizedCode.includes("capacity") ||
+    normalizedCode.includes("temporar") ||
     isRetryableProviderMessage(message);
 
   return {

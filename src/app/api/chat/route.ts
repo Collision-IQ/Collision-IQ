@@ -24,12 +24,14 @@ import { buildProductAccessGuard } from "@/lib/featureAccess";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
 import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 import {
+  classifyRetryableProviderError,
+  RETRYABLE_PROVIDER_USER_MESSAGE,
+} from "@/lib/ai/providerRetryableError";
+import {
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
 } from "@/lib/uploadSafety/uploadLimits";
 
-const TRANSIENT_CHAT_ERROR_MESSAGE =
-  "The analysis service had a temporary issue. Please retry.";
 const OPENAI_RETRY_DELAY_MS = 400;
 const LEGAL_INFO_DISCLAIMER =
   "Informational support only — not legal advice. I'm not a lawyer, and any legal position should be reviewed by qualified counsel.";
@@ -82,12 +84,6 @@ type ChatRequestBody = {
     snapshotExport?: boolean;
   };
   assistanceProfile?: string | null;
-};
-
-type OpenAIErrorMeta = {
-  requestId?: string;
-  status?: number;
-  type?: string;
 };
 
 class AttachmentAccessError extends Error {
@@ -634,31 +630,6 @@ Continuation rules:
 `.trim();
 }
 
-function extractOpenAIErrorMeta(error: unknown): OpenAIErrorMeta {
-  if (!error || typeof error !== "object") {
-    return {};
-  }
-
-  const candidate = error as {
-    request_id?: string;
-    requestId?: string;
-    status?: number;
-    error?: { type?: string };
-    type?: string;
-  };
-
-  return {
-    requestId: candidate.request_id ?? candidate.requestId,
-    status: candidate.status,
-    type: candidate.error?.type ?? candidate.type,
-  };
-}
-
-function isTransientOpenAIError(error: unknown): boolean {
-  const meta = extractOpenAIErrorMeta(error);
-  return meta.type === "server_error" || (typeof meta.status === "number" && meta.status >= 500);
-}
-
 function isLegalAdjacentNegotiationRequest(userMessage: string): boolean {
   const lower = userMessage.toLowerCase();
 
@@ -686,14 +657,18 @@ function logOpenAIPhaseFailure(
   attempt: 1 | 2,
   error: unknown
 ) {
-  const meta = extractOpenAIErrorMeta(error);
+  const providerError = classifyRetryableProviderError(error, {
+    provider: "openai",
+    stage: `chat_${phase}`,
+  });
   console.warn("[chat-openai] upstream failure", {
     phase,
     attempt,
-    requestId: meta.requestId ?? null,
-    status: meta.status ?? null,
-    type: meta.type ?? null,
-    message: error instanceof Error ? error.message : String(error),
+    retryable: providerError.retryable,
+    status: providerError.status,
+    statusCode: providerError.statusCode,
+    code: providerError.code,
+    message: providerError.message,
   });
 }
 
@@ -710,7 +685,11 @@ async function createOpenAIResponseWithRetry(
     return await deps.openai.responses.create(input);
   } catch (error) {
     logOpenAIPhaseFailure(phase, 1, error);
-    if (!isTransientOpenAIError(error)) {
+    const providerError = classifyRetryableProviderError(error, {
+      provider: "openai",
+      stage: `chat_${phase}`,
+    });
+    if (!providerError.retryable) {
       throw error;
     }
   }
@@ -1159,10 +1138,35 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
 
-    if (isTransientOpenAIError(error)) {
+    const providerError = classifyRetryableProviderError(error, {
+      provider: "openai",
+      stage: "chat",
+    });
+
+    if (providerError.retryable) {
+      const retryableStatus =
+        providerError.status === 429 || providerError.statusCode === 429 ? 429 : 503;
+      console.warn("CHAT RETRYABLE PROVIDER ERROR:", {
+        provider: providerError.provider,
+        stage: providerError.stage,
+        retryable: true,
+        status: providerError.status,
+        statusCode: providerError.statusCode,
+        code: providerError.code,
+        message: providerError.message,
+      });
+
       return NextResponse.json(
-        { error: TRANSIENT_CHAT_ERROR_MESSAGE },
-        { status: 503 }
+        {
+          ok: false,
+          retryable: true,
+          stage: providerError.stage,
+          provider: providerError.provider,
+          status: providerError.status,
+          statusCode: providerError.statusCode,
+          message: RETRYABLE_PROVIDER_USER_MESSAGE,
+        },
+        { status: retryableStatus }
       );
     }
 
@@ -1171,10 +1175,7 @@ export async function POST(req: Request) {
     });
     console.error("Chat route error:", error);
 
-    const message =
-      error instanceof Error ? error.message : "Unexpected chat route failure.";
-
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Chat failed" }, { status: 500 });
   }
 }
 

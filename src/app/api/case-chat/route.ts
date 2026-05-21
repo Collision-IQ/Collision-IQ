@@ -7,6 +7,10 @@ import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
 import { buildAppraisalAwardEvaluatorInstruction } from "@/lib/ai/appraisalAwardEvaluator";
 import {
+  classifyRetryableProviderError,
+  RETRYABLE_PROVIDER_USER_MESSAGE,
+} from "@/lib/ai/providerRetryableError";
+import {
   UnauthorizedError,
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
@@ -498,13 +502,42 @@ ${EVIDENCE_POLICY}
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
 
+    const providerError = classifyRetryableProviderError(error, {
+      provider: "openai",
+      stage: "case_chat",
+    });
+
+    if (providerError.retryable) {
+      const retryableStatus =
+        providerError.status === 429 || providerError.statusCode === 429 ? 429 : 503;
+      console.warn("CASE CHAT RETRYABLE PROVIDER ERROR:", {
+        provider: providerError.provider,
+        stage: providerError.stage,
+        retryable: true,
+        status: providerError.status,
+        statusCode: providerError.statusCode,
+        code: providerError.code,
+        message: providerError.message,
+      });
+
+      return NextResponse.json(
+        {
+          ok: false,
+          retryable: true,
+          stage: providerError.stage,
+          provider: providerError.provider,
+          status: providerError.status,
+          statusCode: providerError.statusCode,
+          message: RETRYABLE_PROVIDER_USER_MESSAGE,
+        },
+        { status: retryableStatus }
+      );
+    }
+
     console.error("case-chat error", error);
 
     return NextResponse.json(
-      {
-        error: "Internal server error",
-        detail: error instanceof Error ? error.message : "Unknown error",
-      },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }

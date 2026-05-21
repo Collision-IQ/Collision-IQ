@@ -1,5 +1,9 @@
 import "server-only";
-import { getOpenAIClient } from "@/lib/openai";
+import {
+  classifyOpenAIProviderError,
+  getOpenAIClient,
+} from "@/lib/openai";
+import { RETRYABLE_PROVIDER_USER_MESSAGE } from "@/lib/ai/providerRetryableError";
 
 const COLLISION_IQ_GPT55_PROMPT_ID =
   "pmpt_69feb16e364c8194be0fece66f6e9b710b96573b2ae95f88";
@@ -58,6 +62,30 @@ ${args.applicability_instruction ?? ""}
 
     return response.output_text ?? "";
   } catch (error) {
+    const providerError = classifyOpenAIProviderError(error, "annotated_estimate_prompt");
+
+    if (providerError.retryable) {
+      console.warn("runCollisionIqPrompt retryable provider failure", {
+        annotation_mode: args.annotation_mode,
+        audience: args.audience,
+        provider: providerError.provider,
+        stage: providerError.stage,
+        status: providerError.status,
+        statusCode: providerError.statusCode,
+        code: providerError.code,
+      });
+
+      const retryableError = Object.assign(new Error(RETRYABLE_PROVIDER_USER_MESSAGE), {
+        retryable: true,
+        provider: providerError.provider,
+        stage: providerError.stage,
+        status: providerError.status,
+        statusCode: providerError.statusCode,
+        code: providerError.code,
+      });
+      throw retryableError;
+    }
+
     console.error("runCollisionIqPrompt failed", {
       annotation_mode: args.annotation_mode,
       audience: args.audience,

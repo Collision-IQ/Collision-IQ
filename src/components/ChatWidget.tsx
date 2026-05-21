@@ -70,7 +70,10 @@ import {
   type ExcludedFromReviewReason,
 } from "@/lib/reviewCompleteness";
 import { VOICE_PRESETS } from "@/lib/voicePresets";
-import { isRetryableProviderMessage } from "@/lib/ai/providerRetryableError";
+import {
+  isRetryableProviderMessage,
+  RETRYABLE_PROVIDER_USER_MESSAGE,
+} from "@/lib/ai/providerRetryableError";
 
 interface Attachment {
   attachmentId: string;
@@ -202,6 +205,32 @@ async function resolveAnalysisFailure(response: Response) {
     retryable,
     detail: retryable ? RETRYABLE_ANALYSIS_MESSAGE : detail,
     stage: payload?.stage ?? "analysis",
+    provider: payload?.provider ?? "openai",
+    status: payload?.status ?? response.status,
+    statusCode: payload?.statusCode ?? response.status,
+  };
+}
+
+async function resolveProviderFailure(response: Response, fallbackLabel: string) {
+  let payload: AnalysisFailureResponse | null = null;
+
+  try {
+    payload = (await response.json()) as AnalysisFailureResponse;
+  } catch {
+    payload = null;
+  }
+
+  const detail = payload?.message || payload?.error || `${fallbackLabel} failed (${response.status})`;
+  const retryable =
+    payload?.retryable === true ||
+    response.status === 429 ||
+    response.status === 503 ||
+    isRetryableProviderMessage(detail);
+
+  return {
+    retryable,
+    detail: retryable ? RETRYABLE_PROVIDER_USER_MESSAGE : detail,
+    stage: payload?.stage ?? "chat",
     provider: payload?.provider ?? "openai",
     status: payload?.status ?? response.status,
     statusCode: payload?.statusCode ?? response.status,
@@ -1483,18 +1512,8 @@ export default function ChatWidget({
         });
 
         if (!caseChatResponse.ok) {
-          let errorMessage = `Case chat failed (${caseChatResponse.status})`;
-
-          try {
-            const data = (await caseChatResponse.json()) as { error?: string };
-            if (data?.error) {
-              errorMessage = data.error;
-            }
-          } catch {
-            // Keep fallback message when JSON parsing fails.
-          }
-
-          throw new Error(errorMessage);
+          const failure = await resolveProviderFailure(caseChatResponse, "Case chat");
+          throw new Error(failure.detail);
         }
 
         const data = (await caseChatResponse.json()) as { reply?: string };
@@ -1713,18 +1732,8 @@ export default function ChatWidget({
         });
 
         if (!caseChatResponse.ok) {
-          let errorMessage = `Case chat failed (${caseChatResponse.status})`;
-
-          try {
-            const data = (await caseChatResponse.json()) as { error?: string };
-            if (data?.error) {
-              errorMessage = data.error;
-            }
-          } catch {
-            // Keep fallback message when JSON parsing fails.
-          }
-
-          throw new Error(errorMessage);
+          const failure = await resolveProviderFailure(caseChatResponse, "Case chat");
+          throw new Error(failure.detail);
         }
 
         const data = (await caseChatResponse.json()) as { reply?: string };
@@ -1778,19 +1787,14 @@ export default function ChatWidget({
       });
 
       if (!response.ok) {
-        let errorMessage = `Chat API failed (${response.status})`;
-
-        try {
-          const data = (await response.json()) as { error?: string };
-          if (data?.error) {
-            errorMessage = data.error;
-          }
-        } catch {
-          // Ignore JSON parse failures and keep the fallback message.
-        }
+        const failure = await resolveProviderFailure(response, "Chat API");
+        const errorMessage = failure.detail;
 
         console.warn("[chat] request failed", {
-          status: response.status,
+          status: failure.status,
+          retryable: failure.retryable,
+          stage: failure.stage,
+          provider: failure.provider,
           message: errorMessage,
         });
 

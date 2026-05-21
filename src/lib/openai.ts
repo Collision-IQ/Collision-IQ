@@ -1,6 +1,10 @@
 // src/lib/openai.ts
 
 import OpenAI from "openai";
+import {
+  classifyRetryableProviderError,
+  type RetryableProviderErrorDetails,
+} from "@/lib/ai/providerRetryableError";
 
 let openaiClient: OpenAI | null = null;
 
@@ -15,6 +19,16 @@ export function getOpenAIClient(): OpenAI {
   }
 
   return openaiClient;
+}
+
+export function classifyOpenAIProviderError(
+  error: unknown,
+  stage = "openai"
+): RetryableProviderErrorDetails {
+  return classifyRetryableProviderError(error, {
+    provider: "openai",
+    stage,
+  });
 }
 
 export const openai = new Proxy({} as OpenAI, {
