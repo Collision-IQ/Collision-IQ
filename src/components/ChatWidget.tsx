@@ -3377,7 +3377,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={handleDownloadRedactedChat}
                 disabled={disabled || loading || isTranscribing || isExportingChat}
-                className="order-5 min-h-10 w-full rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:flex-1 md:order-none md:w-auto md:flex-none"
+                className="hidden min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 md:inline-flex"
               >
                 {isExportingChat ? "Preparing..." : "Download Chat"}
               </button>
@@ -3401,6 +3401,19 @@ export default function ChatWidget({
                 End
               </button>
                 </div>
+
+                {(messages.length > 1 || hasAnyAttachment) && (
+                  <div className="mt-2 md:hidden">
+                    <button
+                      type="button"
+                      onClick={handleDownloadRedactedChat}
+                      disabled={disabled || loading || isTranscribing || isExportingChat}
+                      className="min-h-10 w-full rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {isExportingChat ? "Preparing..." : "Download Chat"}
+                    </button>
+                  </div>
+                )}
 
                 {(isRecording || isTranscribing || recordingError) && (
                   <div
