@@ -2974,12 +2974,12 @@ export default function ChatWidget({
         >
           {messages.length === 1 && messages[0].role === "assistant" && !introDismissed && (
             <div
-              className="flex min-h-[260px] flex-col items-center justify-center space-y-4 py-6 text-center transition-[opacity,visibility] duration-200 sm:min-h-[360px] sm:py-10"
+              className="flex min-h-[220px] flex-col items-center justify-start space-y-3 py-3 text-center transition-[opacity,visibility] duration-200 sm:min-h-[360px] sm:justify-center sm:space-y-4 sm:py-10"
             >
-              <div className="min-h-[112px] w-full sm:min-h-[136px]">
-                <div className="mx-auto max-w-[860px] border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
-                  <div className="flex items-start justify-between gap-3">
-                  <div className="leading-7">
+              <div className="min-h-[88px] w-full sm:min-h-[136px]">
+                <div className="mx-auto max-w-[860px] border border-border bg-card px-3 py-2.5 text-[12px] text-muted-foreground sm:px-4 sm:py-3 sm:text-sm">
+                  <div className="flex items-start justify-between gap-2 sm:gap-3">
+                  <div className="leading-5 sm:leading-7">
                       {OPENING_DISCLAIMER}
                     </div>
                     <button
@@ -2994,14 +2994,14 @@ export default function ChatWidget({
                   </div>
                 </div>
               </div>
-              <div className="space-y-2 text-center">
-                <div className="text-base font-semibold text-foreground">
+              <div className="space-y-1.5 text-center sm:space-y-2">
+                <div className="text-sm font-semibold text-foreground sm:text-base">
                   Start a repair analysis
                 </div>
-                <div className="text-[13px] leading-5 text-muted-foreground">
+                <div className="text-[12px] leading-4 text-muted-foreground sm:text-[13px] sm:leading-5">
                   Upload an estimate, procedure, or photo set and we&apos;ll turn it into a cleaner repair decision read.
                 </div>
-                <div className="mx-auto mt-2 max-w-[680px] text-xs leading-5 text-muted-foreground">
+                <div className="mx-auto mt-1 max-w-[680px] text-[11px] leading-4 text-muted-foreground sm:mt-2 sm:text-xs sm:leading-5">
                   {uploadBatchGuidance}
                 </div>
               </div>
@@ -3012,17 +3012,17 @@ export default function ChatWidget({
                 onDragLeave={handleUploadDragLeave}
                 onDrop={handleUploadDrop}
                 className={[
-                  "w-full max-w-[760px] border border-dashed p-3 transition",
+                  "w-full max-w-[760px] border border-dashed p-2.5 transition sm:p-3",
                   isDragActive
                     ? "border-[#b86a2d] bg-[#b86a2d]/10"
                     : "border-border bg-muted/40",
                 ].join(" ")}
               >
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={disabled}
-                  className="min-h-11 border border-border bg-card px-3 py-2.5 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
                 >
                   Upload Estimate
                 </button>
@@ -3030,7 +3030,7 @@ export default function ChatWidget({
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={disabled}
-                  className="min-h-11 border border-border bg-card px-3 py-2.5 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
                 >
                   Upload OEM Procedure
                 </button>
@@ -3038,13 +3038,13 @@ export default function ChatWidget({
                 <button
                   onClick={() => cameraInputRef.current?.click()}
                   disabled={disabled}
-                  className="min-h-11 border border-border bg-card px-3 py-2.5 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
                 >
                   Upload Photos
                 </button>
               </div>
 
-              <div className="mt-3 text-xs leading-5 text-muted-foreground">
+              <div className="mt-2 text-[11px] leading-4 text-muted-foreground sm:mt-3 sm:text-xs sm:leading-5">
                 Drop PDFs or images here, or use the upload buttons.
                 {selectedUploadNames.length > 0 && (
                   <div className="mt-2 truncate">
@@ -3296,7 +3296,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled}
-                className="min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
+                className="order-2 min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 md:order-none"
                 aria-label="Attach files"
               >
                 <Paperclip size={20} />
@@ -3306,7 +3306,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={() => cameraInputRef.current?.click()}
                 disabled={disabled}
-                className="min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
+                className="order-2 min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 md:order-none"
                 aria-label="Take photo"
               >
                 <Camera size={20} />
@@ -3316,7 +3316,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={handleMicClick}
                 disabled={isTranscribing || disabled}
-                className={`min-h-10 min-w-10 rounded-md p-2 transition ${
+                className={`order-2 min-h-10 min-w-10 rounded-md p-2 transition md:order-none ${
                   isRecording
                     ? "text-red-400 hover:text-red-300"
                     : "text-muted-foreground hover:bg-card hover:text-[#C65A2A]"
@@ -3364,7 +3364,7 @@ export default function ChatWidget({
                     ? "Ask about the attached case file or add context..."
                     : "Enter a repair analysis command or upload documentation..."
                 }
-                className="chat-composer-textarea min-h-11 max-h-[88px] min-w-0 flex-[1_1_100%] resize-none overflow-y-auto border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[#b86a2d] focus:ring-1 focus:ring-[#b86a2d]/30 disabled:cursor-not-allowed disabled:opacity-50 sm:min-w-[180px] sm:flex-1"
+                className="chat-composer-textarea order-1 min-h-11 max-h-[88px] min-w-0 flex-[1_1_100%] resize-none overflow-y-auto border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[#b86a2d] focus:ring-1 focus:ring-[#b86a2d]/30 disabled:cursor-not-allowed disabled:opacity-50 md:order-none md:min-w-[280px] md:flex-[1_1_420px]"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -3377,7 +3377,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={handleDownloadRedactedChat}
                 disabled={disabled || loading || isTranscribing || isExportingChat}
-                className="min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                className="order-5 min-h-10 w-full rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:flex-1 md:order-none md:w-auto md:flex-none"
               >
                 {isExportingChat ? "Preparing..." : "Download Chat"}
               </button>
@@ -3385,7 +3385,7 @@ export default function ChatWidget({
               <button
                 onClick={handleSend}
                 disabled={loading || isTranscribing || disabled}
-                className="min-h-10 flex-1 rounded-md border border-[#b86a2d] bg-[#b86a2d] px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#c57934] disabled:opacity-50 sm:flex-none sm:px-5"
+                className="order-3 min-h-10 flex-1 rounded-md border border-[#b86a2d] bg-[#b86a2d] px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#c57934] disabled:opacity-50 sm:px-5 md:order-none md:flex-none"
               >
                 {loading ? "..." : "Send"}
               </button>
@@ -3393,7 +3393,7 @@ export default function ChatWidget({
               <button
                 type="button"
                 onClick={handleEndChat}
-                className="min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-red-500/80 transition hover:bg-red-500/8 hover:text-red-500 disabled:opacity-50 dark:text-red-300/75 dark:hover:text-red-200"
+                className="order-4 min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-red-500/80 transition hover:bg-red-500/8 hover:text-red-500 disabled:opacity-50 md:order-none dark:text-red-300/75 dark:hover:text-red-200"
                 disabled={disabled || (loading && messages.length <= 1)}
                 aria-label="End chat"
                 title="End chat"

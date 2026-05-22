@@ -174,7 +174,7 @@ export default function ChatShell({
             {hasLeft && (
               <button
                 onClick={() => setLeftOpen(true)}
-                className="min-h-10 rounded-md border border-border bg-muted px-2.5 py-2 text-xs text-foreground hover:bg-background sm:px-3 lg:hidden"
+                className="min-h-9 rounded-md border border-border bg-muted px-2 py-1.5 text-[11px] text-foreground hover:bg-background sm:min-h-10 sm:px-3 sm:py-2 sm:text-xs lg:hidden"
               >
                 Workspace
               </button>
@@ -183,9 +183,10 @@ export default function ChatShell({
             {hasRight && (
               <button
                 onClick={() => setRightOpen(true)}
-                className="min-h-10 rounded-md border border-border bg-muted px-2.5 py-2 text-xs text-foreground hover:bg-background sm:px-3 lg:hidden"
+                className="min-h-9 rounded-md border border-border bg-muted px-2 py-1.5 text-[11px] text-foreground hover:bg-background sm:min-h-10 sm:px-3 sm:py-2 sm:text-xs lg:hidden"
               >
-                Inspector
+                <span className="sm:hidden">Rail</span>
+                <span className="hidden sm:inline">Inspector</span>
               </button>
             )}
           </div>
