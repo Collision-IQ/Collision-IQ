@@ -2974,9 +2974,9 @@ export default function ChatWidget({
         >
           {messages.length === 1 && messages[0].role === "assistant" && !introDismissed && (
             <div
-              className="flex min-h-[360px] flex-col items-center justify-center space-y-4 py-10 text-center transition-[opacity,visibility] duration-200"
+              className="flex min-h-[260px] flex-col items-center justify-center space-y-4 py-6 text-center transition-[opacity,visibility] duration-200 sm:min-h-[360px] sm:py-10"
             >
-              <div className="min-h-[136px] w-full">
+              <div className="min-h-[112px] w-full sm:min-h-[136px]">
                 <div className="mx-auto max-w-[860px] border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
                   <div className="flex items-start justify-between gap-3">
                   <div className="leading-7">
@@ -3086,7 +3086,7 @@ export default function ChatWidget({
                     : "px-3.5 py-3"
                 } ${
                   msg.role === "user"
-                    ? `${userBubble} max-w-[min(72%,820px)] overflow-hidden break-words`
+                    ? `${userBubble} max-w-[88%] overflow-hidden break-words sm:max-w-[min(72%,820px)]`
                     : msg.kind === "system_status"
                       ? ""
                       : "min-w-0 max-w-full overflow-hidden break-words border border-border bg-card sm:max-w-[860px]"
@@ -3255,7 +3255,7 @@ export default function ChatWidget({
           <div ref={bottomRef} />
         </div>
 
-        <div className="z-20 min-h-[74px] shrink-0 border-t border-border bg-card px-3 py-2">
+        <div className="z-20 min-h-[74px] shrink-0 border-t border-border bg-card px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-3">
           <div className="mx-auto w-full max-w-none">
             <div
               onDragEnter={handleUploadDragEnter}
@@ -3364,7 +3364,7 @@ export default function ChatWidget({
                     ? "Ask about the attached case file or add context..."
                     : "Enter a repair analysis command or upload documentation..."
                 }
-                className="chat-composer-textarea min-h-11 max-h-[88px] min-w-[180px] flex-[1_1_100%] resize-none overflow-y-auto border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[#b86a2d] focus:ring-1 focus:ring-[#b86a2d]/30 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-1"
+                className="chat-composer-textarea min-h-11 max-h-[88px] min-w-0 flex-[1_1_100%] resize-none overflow-y-auto border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[#b86a2d] focus:ring-1 focus:ring-[#b86a2d]/30 disabled:cursor-not-allowed disabled:opacity-50 sm:min-w-[180px] sm:flex-1"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();

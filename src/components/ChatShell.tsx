@@ -64,7 +64,7 @@ function Drawer({
 
       <div
         className={[
-          "absolute top-0 h-full w-[92vw] max-w-sm border-l border-border bg-card",
+          "absolute top-0 h-full max-h-[100svh] w-[min(92vw,390px)] max-w-sm border-l border-border bg-card",
           side === "left" ? "left-0" : "right-0",
         ].join(" ")}
       >
@@ -79,7 +79,7 @@ function Drawer({
           </button>
         </div>
 
-        <div className="h-[calc(100%-52px)] overflow-y-auto p-3">{children}</div>
+        <div className="h-[calc(100%-52px)] overflow-y-auto overscroll-contain p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:p-3">{children}</div>
       </div>
     </div>
   );
@@ -113,9 +113,9 @@ export default function ChatShell({
     <ClerkProvider>
       <div className="ci-workstation flex h-[100svh] max-w-full flex-col overflow-hidden bg-background text-foreground">
       <header className="relative z-10 min-h-[64px] shrink-0 border-b border-border bg-card">
-        <div className="relative mx-auto flex min-h-[64px] max-w-none items-center justify-between gap-2 px-3 py-2 md:gap-4 md:px-5">
+        <div className="relative mx-auto flex min-h-[64px] max-w-none items-center justify-between gap-2 px-2 py-2 sm:px-3 md:gap-4 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-8 min-w-[166px] items-center gap-2">
+            <div className="flex h-8 min-w-[136px] items-center gap-2 sm:min-w-[166px]">
               <Image
                 src="/iq/iq-favicon.png"
                 alt="Collision IQ icon"
@@ -129,7 +129,7 @@ export default function ChatShell({
                 alt={title}
                 width={150}
                 height={30}
-                className="h-[24px] w-[132px] object-contain invert dark:invert-0 sm:w-[150px]"
+                className="h-[22px] w-[112px] object-contain invert dark:invert-0 sm:h-[24px] sm:w-[150px]"
                 priority
               />
             </div>
@@ -152,7 +152,7 @@ export default function ChatShell({
             </span>
           </div>
 
-          <div className="flex min-h-10 min-w-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+          <div className="flex min-h-10 min-w-0 flex-wrap items-center justify-end gap-1 sm:gap-2">
             <Link
               href="/technical-systems"
               className="hidden min-h-10 items-center rounded-md border border-[#b86a2d] bg-[#b86a2d] px-3 py-2 text-xs font-semibold text-black transition hover:bg-[#c57934] sm:inline-flex"
@@ -174,7 +174,7 @@ export default function ChatShell({
             {hasLeft && (
               <button
                 onClick={() => setLeftOpen(true)}
-                className="min-h-10 rounded-md border border-border bg-muted px-3 py-2 text-xs text-foreground hover:bg-background lg:hidden"
+                className="min-h-10 rounded-md border border-border bg-muted px-2.5 py-2 text-xs text-foreground hover:bg-background sm:px-3 lg:hidden"
               >
                 Workspace
               </button>
@@ -183,7 +183,7 @@ export default function ChatShell({
             {hasRight && (
               <button
                 onClick={() => setRightOpen(true)}
-                className="min-h-10 rounded-md border border-border bg-muted px-3 py-2 text-xs text-foreground hover:bg-background lg:hidden"
+                className="min-h-10 rounded-md border border-border bg-muted px-2.5 py-2 text-xs text-foreground hover:bg-background sm:px-3 lg:hidden"
               >
                 Inspector
               </button>
@@ -194,8 +194,8 @@ export default function ChatShell({
 
       <div className="h-px w-full shrink-0 bg-border" />
 
-      <div className="relative z-10 min-h-0 w-full max-w-none flex-1 overflow-hidden px-2 py-2 md:px-4 md:py-3">
-        <div className="grid h-full min-h-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_410px]">
+      <div className="relative z-10 min-h-0 w-full max-w-none flex-1 overflow-hidden px-1.5 py-1.5 sm:px-2 sm:py-2 md:px-4 md:py-3">
+        <div className="grid h-full min-h-0 grid-cols-1 gap-2 sm:gap-3 lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_410px]">
           <div className="flex h-full min-h-0 min-w-0 flex-col border border-border bg-card">
             <div className="flex min-h-[45px] shrink-0 items-center justify-between gap-4 border-b border-border px-3 py-2">
               <div className="inline-flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#a35d26] dark:text-[#c57934]">
@@ -209,7 +209,7 @@ export default function ChatShell({
                 Collision IQ
               </div>
 
-              <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+              <div className="hidden font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground sm:block">
                 Analysis workspace
               </div>
             </div>

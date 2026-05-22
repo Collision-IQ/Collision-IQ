@@ -80,10 +80,10 @@ export default function WorkspacePanel({
 
   // Shorthand for readability below
   return (
-    <div className="flex h-full flex-col text-sm text-foreground">
+    <div className="flex h-full min-h-0 flex-col text-sm text-foreground">
       {/* Panel intro */}
 
-      <div className="rounded-2xl border border-border bg-card p-4 shadow-[0_14px_38px_rgba(15,23,42,0.10)] backdrop-blur-md dark:shadow-[0_14px_38px_rgba(0,0,0,0.18)]">
+      <div className="rounded-xl border border-border bg-card p-3 shadow-[0_14px_38px_rgba(15,23,42,0.10)] backdrop-blur-md sm:rounded-2xl sm:p-4 dark:shadow-[0_14px_38px_rgba(0,0,0,0.18)]">
         <h3 className="mb-2 text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
           Repair Intelligence
         </h3>
@@ -95,7 +95,7 @@ export default function WorkspacePanel({
 
       {/* Analysis output */}
 
-      <div className="mt-4 flex-1 min-h-0 overflow-y-auto rounded-2xl border border-border bg-card p-4 shadow-[0_18px_40px_rgba(15,23,42,0.10)] backdrop-blur-md dark:shadow-[0_18px_40px_rgba(0,0,0,0.18)]">
+      <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-xl border border-border bg-card p-3 shadow-[0_18px_40px_rgba(15,23,42,0.10)] backdrop-blur-md sm:mt-4 sm:rounded-2xl sm:p-4 dark:shadow-[0_18px_40px_rgba(0,0,0,0.18)]">
 
         {/* Empty state */}
 
@@ -114,7 +114,7 @@ export default function WorkspacePanel({
           <>
             {/* Risk and confidence summary */}
 
-            <div className="mb-5 grid grid-cols-2 gap-2">
+            <div className="mb-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div className="rounded-xl border border-border bg-muted px-3 py-2.5 text-xs text-muted-foreground">
                 Risk: <span className="font-semibold capitalize">{data.riskLevel}</span>
               </div>

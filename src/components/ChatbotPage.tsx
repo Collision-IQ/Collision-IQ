@@ -1000,7 +1000,7 @@ export function ChatbotWorkspacePage() {
         planLabel={trialBadgeLabel}
         center={
           <div className="relative h-full min-h-0 w-full">
-            <div className={`grid h-full min-h-0 w-full gap-3 pt-3 ${workspaceRowsClass}`}>
+            <div className={`grid h-full min-h-0 w-full gap-2 pt-2 sm:gap-3 sm:pt-3 ${workspaceRowsClass}`}>
               {hasStructuredAnalysis && (
                 <div
                   className={
@@ -1011,7 +1011,7 @@ export function ChatbotWorkspacePage() {
                 >
                   <div
                     ref={immersiveToolbarRef}
-                    className="z-20 mb-3 min-h-[86px] shrink-0 rounded-[22px] border border-border bg-card/95 px-4 py-3 shadow-[0_18px_44px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 backdrop-blur-xl dark:shadow-[0_18px_44px_rgba(0,0,0,0.28)]"
+                    className="z-20 mb-2 min-h-[72px] shrink-0 rounded-[18px] border border-border bg-card/95 px-3 py-2.5 shadow-[0_18px_44px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 backdrop-blur-xl sm:mb-3 sm:min-h-[86px] sm:rounded-[22px] sm:px-4 sm:py-3 dark:shadow-[0_18px_44px_rgba(0,0,0,0.28)]"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="min-w-0">
@@ -1028,7 +1028,7 @@ export function ChatbotWorkspacePage() {
                         <button
                           type="button"
                           onClick={isReviewActive ? handleToggleImmersiveHeader : openReviewPane}
-                          className="rounded-xl border border-border bg-muted px-3 py-2 text-xs font-medium text-foreground transition hover:bg-muted/70"
+                          className="rounded-xl border border-border bg-muted px-2.5 py-2 text-xs font-medium text-foreground transition hover:bg-muted/70 sm:px-3"
                           aria-expanded={isReviewActive}
                           aria-controls="immersive-case-header"
                         >
@@ -1043,7 +1043,7 @@ export function ChatbotWorkspacePage() {
                   {isReviewActive ? (
                     <div
                       ref={immersiveWorkspaceRef}
-                      className="max-h-[min(54svh,680px)] min-h-[220px] overflow-y-auto rounded-[26px] border border-border bg-card/80 px-1 pb-4 shadow-[0_24px_70px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 sm:min-h-[280px] dark:shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
+                      className="max-h-[min(48svh,680px)] min-h-[200px] overflow-y-auto rounded-[18px] border border-border bg-card/80 px-1 pb-3 shadow-[0_24px_70px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 sm:max-h-[min(54svh,680px)] sm:min-h-[280px] sm:rounded-[26px] sm:pb-4 dark:shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
                     >
                       <div id="immersive-case-header" data-header-change-reason={lastHeaderChangeReason}>
                         <div className="mb-2 text-right text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -1055,7 +1055,7 @@ export function ChatbotWorkspacePage() {
                           active={hasResolvedAnalysis && hasAtGlanceContent(renderModel)}
                         />
 
-                      <div className="mt-3 rounded-[24px] border border-border bg-card p-3.5">
+                      <div className="mt-3 rounded-[18px] border border-border bg-card p-2.5 sm:rounded-[24px] sm:p-3.5">
                         <WorkspacePanel
                           workspaceData={workspaceData ?? undefined}
                           evidenceModel={evidenceModel}
@@ -1086,7 +1086,7 @@ export function ChatbotWorkspacePage() {
                     }}
                   />
 
-                  <section className="mt-4 rounded-[26px] border border-border bg-card p-4 shadow-[0_20px_48px_rgba(15,23,42,0.10)] dark:shadow-[0_20px_48px_rgba(0,0,0,0.2)]">
+                  <section className="mt-3 rounded-[18px] border border-border bg-card p-3 shadow-[0_20px_48px_rgba(15,23,42,0.10)] sm:mt-4 sm:rounded-[26px] sm:p-4 dark:shadow-[0_20px_48px_rgba(0,0,0,0.2)]">
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
                       <div>
                         <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
@@ -1210,7 +1210,7 @@ export function ChatbotWorkspacePage() {
                   </div>
                 )}
                 </div>
-                <section className={isReviewActive ? "flex h-full min-h-[240px] flex-1 flex-col overflow-hidden sm:min-h-[320px]" : "h-full min-h-[360px] overflow-hidden"}>
+                <section className={isReviewActive ? "flex h-full min-h-[220px] flex-1 flex-col overflow-hidden sm:min-h-[320px]" : "h-full min-h-[280px] overflow-hidden sm:min-h-[360px]"}>
                 {!isChatActive && (
                   <div className="relative">
                     <div className="rounded-md border border-border bg-card px-3 py-2">
