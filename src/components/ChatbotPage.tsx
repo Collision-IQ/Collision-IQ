@@ -492,7 +492,9 @@ export function ChatbotWorkspacePage() {
   const isReviewActive = isReviewOpen && leftPaneMode === "review";
   const isChatActive = leftPaneMode === "chat";
   const workspaceRowsClass = hasStructuredAnalysis
-    ? "grid-rows-[auto_minmax(0,1fr)_auto]"
+    ? isReviewActive
+      ? "grid-rows-[auto_minmax(0,1fr)]"
+      : "grid-rows-[auto_minmax(0,1fr)_auto]"
     : "grid-rows-[minmax(0,1fr)]";
 
   useEffect(() => {
@@ -1003,7 +1005,7 @@ export function ChatbotWorkspacePage() {
                 <div
                   className={
                     isReviewActive
-                      ? "row-span-2 flex min-h-0 flex-col px-1"
+                      ? "flex min-h-0 flex-col px-1"
                       : "flex min-h-0 flex-col px-1"
                   }
                 >
@@ -1041,7 +1043,7 @@ export function ChatbotWorkspacePage() {
                   {isReviewActive ? (
                     <div
                       ref={immersiveWorkspaceRef}
-                      className="min-h-[420px] flex-1 overflow-y-auto rounded-[26px] border border-border bg-card/80 px-1 pb-4 shadow-[0_24px_70px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 dark:shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
+                      className="max-h-[min(54svh,680px)] min-h-[220px] overflow-y-auto rounded-[26px] border border-border bg-card/80 px-1 pb-4 shadow-[0_24px_70px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 sm:min-h-[280px] dark:shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
                     >
                       <div id="immersive-case-header" data-header-change-reason={lastHeaderChangeReason}>
                         <div className="mb-2 text-right text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -1154,7 +1156,7 @@ export function ChatbotWorkspacePage() {
                   ) : null}
                 </div>
               )}
-              <div className={isReviewActive ? "flex min-h-0 flex-col justify-end" : "flex min-h-0 flex-col"}>
+              <div className="flex min-h-0 flex-col">
                 <div className="min-h-[56px] shrink-0">
                 {trialDaysRemaining !== null && trialDaysRemaining <= 7 && isWithinTrialBadgeWindow(viewerAccess) && (
                   <div
@@ -1208,7 +1210,7 @@ export function ChatbotWorkspacePage() {
                   </div>
                 )}
                 </div>
-                <section className={isReviewActive ? "flex h-full min-h-[360px] flex-col justify-end overflow-hidden" : "h-full min-h-[360px] overflow-hidden"}>
+                <section className={isReviewActive ? "flex h-full min-h-[240px] flex-1 flex-col overflow-hidden sm:min-h-[320px]" : "h-full min-h-[360px] overflow-hidden"}>
                 {!isChatActive && (
                   <div className="relative">
                     <div className="rounded-md border border-border bg-card px-3 py-2">
@@ -1241,8 +1243,8 @@ export function ChatbotWorkspacePage() {
                     </div>
                   </div>
                 )}
-                <div className={isChatActive ? "relative h-full min-h-0 w-full" : "hidden"}>
-                      <div className={isReviewActive ? "relative flex h-[min(48svh,520px)] min-h-[300px] w-full flex-col overflow-hidden border border-border bg-background" : "relative flex h-full min-h-0 w-full flex-col overflow-hidden border border-border bg-background"}>
+                <div className={isChatActive ? "relative h-full min-h-0 w-full flex-1" : "hidden"}>
+                      <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden border border-border bg-background">
                         <div className="flex min-h-[58px] shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-3 py-2">
                           <div>
                           <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
