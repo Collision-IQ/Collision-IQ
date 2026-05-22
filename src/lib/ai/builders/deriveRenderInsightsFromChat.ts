@@ -24,7 +24,7 @@ export type DerivedValuation = {
   acvRange?: { low: number; high: number };
   acvConfidence?: "low" | "medium" | "high";
   acvCompCount?: number;
-  acvSourceType?: "comps" | "jd_power" | "fallback" | "unavailable";
+  acvSourceType?: "comps" | "jd_power" | "guide_blend" | "fallback" | "unavailable";
   acvReasoning: string;
   acvMissingInputs: string[];
   dvStatus: "provided" | "estimated_range" | "not_determinable";
@@ -153,6 +153,7 @@ function extractNarrative(text: string): string | undefined {
 
   const scored = paragraphs
     .filter((paragraph) => !looksLikeMetaCommentary(paragraph))
+    .filter((paragraph) => !looksLikeValuationOnlyNarrative(paragraph))
     .map((paragraph) => ({ paragraph, score: scoreNarrativeParagraph(paragraph) }))
     .sort((left, right) => right.score - left.score);
 
@@ -169,6 +170,17 @@ function extractNarrative(text: string): string | undefined {
       !lower.startsWith("dv")
     );
   })?.paragraph;
+}
+
+function looksLikeValuationOnlyNarrative(paragraph: string): boolean {
+  const lower = paragraph.toLowerCase();
+  const hasValuationSignal =
+    /\b(?:acv|actual cash value|market value|valuation|vehicle value|book value)\b/i.test(paragraph);
+  const hasCurrency = /\$\s?\d[\d,]*(?:\.\d{2})?/.test(paragraph);
+  const hasRepairSignal =
+    /\b(?:repair|estimate|supplement|procedure|calibration|scan|blend|refinish|replace|labor|oem|operation|documentation|teardown)\b/i.test(paragraph);
+
+  return hasValuationSignal && hasCurrency && !hasRepairSignal && lower.length < 240;
 }
 
 function extractSupplementItems(

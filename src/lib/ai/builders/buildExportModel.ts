@@ -210,6 +210,8 @@ export type ComparableListing = {
   location?: string;
   url?: string;
   dateAccessed?: string;
+  condition?: string;
+  titleStatus?: string;
 };
 
 export type JDPowerValuation = {
@@ -231,7 +233,8 @@ export type ComputedAcvResult = {
   acvValue: number;
   confidence: "low" | "medium" | "high";
   compCount: number;
-  sourceType: "comps" | "jd_power";
+  sourceType: "comps" | "jd_power" | "guide_blend";
+  label: "Guide-only directional preview" | "Limited comp preview" | "Comparable market preview";
   reasoning: string;
 };
 
@@ -3063,9 +3066,7 @@ function buildValuation(
     mileage: reportFields.mileage,
   });
   const computedAcv =
-    hasKnownVehicleMarketInputs && rawComputedAcv?.sourceType !== "comps"
-      ? null
-      : hasKnownVehicleMarketInputs && !hasCompleteSpecificVehicleInputs
+    hasKnownVehicleMarketInputs && !hasCompleteSpecificVehicleInputs && rawComputedAcv?.sourceType === "comps"
         ? null
         : rawComputedAcv;
   const likelyStructuredAcvRange = computedAcv?.acvRange ?? resolveLikelyStructuredAcvRange({
@@ -3093,7 +3094,7 @@ function buildValuation(
   )
     ? undefined
     : rawChatAcvPreviewRange;
-  const acvPreviewRange = computedAcv?.sourceType === "comps"
+  const acvPreviewRange = computedAcv
     ? computedAcv.acvRange
     : chatAcvPreviewRange;
   const dvPreviewRange = resolveValuationPreviewRange({
@@ -3147,7 +3148,7 @@ function buildValuation(
   return {
     ...chatValuation,
     acvStatus: acvPreviewRange ? "estimated_range" : "not_determinable",
-    acvValue: computedAcv?.sourceType === "comps" ? computedAcv.acvValue : undefined,
+    acvValue: computedAcv ? computedAcv.acvValue : undefined,
     acvRange: acvPreviewRange,
     acvConfidence: computedAcv
       ? computedAcv.confidence
@@ -3156,7 +3157,7 @@ function buildValuation(
           chatValuation.acvConfidence,
           canonicalAcvMissingInputs
         ),
-    acvCompCount: computedAcv?.sourceType === "comps" ? computedAcv.compCount : undefined,
+    acvCompCount: computedAcv ? computedAcv.compCount : undefined,
     acvSourceType: computedAcv?.sourceType ?? (acvPreviewRange ? "fallback" : "unavailable"),
     acvReasoning: computedAcv
       ? `${computedAcv.reasoning} This is a market preview, not a formal actual cash value appraisal.`
@@ -3401,19 +3402,27 @@ function resolveComputedAcv(params: {
   mileage?: number;
 }): ComputedAcvResult | null {
   const valuationData = extractStructuredValuationData(params.report, params.analysis);
-  const fromComps = computeACVFromComps({
+  return computeWeightedAcvPreview({
     vehicle: params.vehicle,
     mileage: params.mileage,
     comparableListings: valuationData.comparableListings,
+    jdPower: valuationData.jdPower,
   });
-  if (fromComps) return fromComps;
-  return computeACVFromJdPower(valuationData.jdPower);
 }
 
 export function computeACVFromComps(params: {
   vehicle?: VehicleIdentity;
   mileage?: number;
   comparableListings?: ComparableListing[];
+}): ComputedAcvResult | null {
+  return computeWeightedAcvPreview(params);
+}
+
+export function computeWeightedAcvPreview(params: {
+  vehicle?: VehicleIdentity;
+  mileage?: number;
+  comparableListings?: ComparableListing[];
+  jdPower?: JDPowerValuation;
 }): ComputedAcvResult | null {
   const targetVehicle = params.vehicle;
   const normalizedTargetTrim = normalizeKey(targetVehicle?.trim ?? "");
@@ -3436,19 +3445,28 @@ export function computeACVFromComps(params: {
     })
     .filter((listing) => Number.isFinite(listing.adjustedPrice) && listing.adjustedPrice > 500);
 
-  if (adjusted.length < 2) {
-    return null;
+  const guide = normalizeGuideValuation(params.jdPower);
+  if (adjusted.length === 0) {
+    return guide ? computeACVFromJdPower(params.jdPower) : null;
   }
 
   const sorted = adjusted
-    .map((listing) => listing.price)
+    .map((listing) => listing.adjustedPrice)
     .sort((left, right) => left - right);
-  const median = computeMedian(sorted);
-  const low = computePercentile(sorted, 0.25);
-  const high = computePercentile(sorted, 0.75);
+  const compAverage = Math.round(sorted.reduce((sum, value) => sum + value, 0) / sorted.length);
+  const weights = getGuideCompWeights(adjusted.length, Boolean(guide));
+  const previewValue = guide
+    ? Math.round(guide.average * weights.guide + compAverage * weights.comps)
+    : compAverage;
+  const compLow = adjusted.length === 1 ? undefined : computePercentile(sorted, 0.25);
+  const compHigh = adjusted.length === 1 ? undefined : computePercentile(sorted, 0.75);
+  const guideLow = guide?.low;
+  const guideHigh = guide?.high;
+  const lowAnchor = weightedAnchor(guideLow, compLow, previewValue, weights, "low");
+  const highAnchor = weightedAnchor(guideHigh, compHigh, previewValue, weights, "high");
   const range = {
-    low: Math.min(low, median),
-    high: Math.max(high, median),
+    low: Math.min(lowAnchor, previewValue),
+    high: Math.max(highAnchor, previewValue),
   };
 
   if (!isSaneRange(range, 250000)) {
@@ -3457,15 +3475,29 @@ export function computeACVFromComps(params: {
 
   const mileageKnownCount = adjusted.filter((listing) => typeof listing.mileage === "number").length;
   const exactTrimMatchCount = adjusted.filter((listing) => listing.exactTrimMatch).length;
-  const confidence = deriveComparableConfidence({
+  const completeness = deriveValuationCompleteness({
     compCount: adjusted.length,
     mileageKnownCount,
     exactTrimMatchCount,
+    regionKnownCount: adjusted.filter((listing) => Boolean(listing.location)).length,
+    conditionKnownCount: adjusted.filter((listing) => Boolean(listing.condition)).length,
+    titleStatusKnownCount: adjusted.filter((listing) => Boolean(listing.titleStatus)).length,
+    targetTrimKnown: Boolean(normalizedTargetTrim),
   });
+  const confidence = deriveWeightedPreviewConfidence({
+    compCount: adjusted.length,
+    completeness,
+  });
+  const label = adjusted.length === 1
+    ? "Limited comp preview"
+    : "Comparable market preview";
+  const sourceType = guide ? "guide_blend" : "comps";
   const notes = [
     `Comparable source count: ${adjusted.length}`,
+    guide ? `Guide/book anchor weight: ${Math.round(weights.guide * 100)}%` : "Guide/book anchor unavailable",
+    `Comparable listing weight: ${Math.round(weights.comps * 100)}%`,
     mileageKnownCount > 0 ? "Mileage adjustment note: mileage-normalized against the uploaded mileage" : "Mileage adjustment note: limited mileage detail",
-    "Region note: use local comparable listings when available",
+    completeness.regionUsable ? "Region note: listing region/location usable" : "Region note: use local comparable listings when available",
     normalizedTargetTrim
       ? exactTrimMatchCount > 0
         ? `${exactTrimMatchCount} trim-aligned`
@@ -3486,15 +3518,37 @@ export function computeACVFromComps(params: {
 
   return {
     acvRange: range,
-    acvValue: median,
-    confidence: adjusted.length < 3 ? "low" : confidence,
+    acvValue: previewValue,
+    confidence,
     compCount: adjusted.length,
-    sourceType: "comps",
-    reasoning: `Market preview median derived from ${notes.join("; ")}. ${compSummary ? `${compSummary}. ` : ""}Confidence level: ${adjusted.length < 3 ? "low because fewer than three valid comps were available" : confidence}.`,
+    sourceType,
+    label,
+    reasoning: `${label}: confidence-weighted valuation preview derived from ${notes.join("; ")}. ${compSummary ? `${compSummary}. ` : ""}Needs 3+ comps for stronger confidence. Confidence level: ${confidence}.`,
   };
 }
 
-function computeACVFromJdPower(jdPower?: JDPowerValuation): ComputedAcvResult | null {
+function getGuideCompWeights(compCount: number, hasGuide: boolean) {
+  if (!hasGuide) return { guide: 0, comps: 1 };
+  if (compCount <= 1) return { guide: 0.65, comps: 0.35 };
+  if (compCount === 2) return { guide: 0.5, comps: 0.5 };
+  return { guide: 0.35, comps: 0.65 };
+}
+
+function weightedAnchor(
+  guideAnchor: number | undefined,
+  compAnchor: number | undefined,
+  previewValue: number,
+  weights: { guide: number; comps: number },
+  side: "low" | "high"
+) {
+  if (typeof guideAnchor === "number" && typeof compAnchor === "number") {
+    return Math.round(guideAnchor * weights.guide + compAnchor * weights.comps);
+  }
+  const spread = Math.max(1200, Math.round(previewValue * (side === "low" ? 0.08 : 0.1)));
+  return side === "low" ? previewValue - spread : previewValue + spread;
+}
+
+function normalizeGuideValuation(jdPower?: JDPowerValuation): { low: number; high: number; average: number } | null {
   if (!jdPower) return null;
 
   const low = coerceCurrencyValue(jdPower.low ?? jdPower.cleanTradeIn);
@@ -3518,12 +3572,24 @@ function computeACVFromJdPower(jdPower?: JDPowerValuation): ComputedAcvResult | 
   }
 
   return {
-    acvRange: range,
-    acvValue: average,
-    confidence: "medium",
+    low: range.low,
+    high: range.high,
+    average,
+  };
+}
+
+function computeACVFromJdPower(jdPower?: JDPowerValuation): ComputedAcvResult | null {
+  const guide = normalizeGuideValuation(jdPower);
+  if (!guide) return null;
+
+  return {
+    acvRange: { low: guide.low, high: guide.high },
+    acvValue: guide.average,
+    confidence: "low",
     compCount: 0,
     sourceType: "jd_power",
-    reasoning: "Market preview derived from structured JD Power-style valuation data. Comparable source count: 1 valuation guide source. Mileage adjustment note: guide range used as provided. Region note: regional listings should be added when available. Confidence level: medium.",
+    label: "Guide-only directional preview",
+    reasoning: "Guide-only directional preview: market preview derived from structured guide/book valuation data only. Comparable source count: 0 usable listings. Region note: add local comparable listings before treating this as stronger valuation support. Confidence level: low.",
   };
 }
 
@@ -3539,6 +3605,8 @@ type NormalizedComparableListing = {
   location?: string;
   url?: string;
   dateAccessed?: string;
+  condition?: string;
+  titleStatus?: string;
 };
 
 function extractStructuredValuationData(
@@ -3651,6 +3719,8 @@ function normalizeComparableListing(
     location: cleanDisplayLabel(listing.location),
     url: cleanDisplayLabel(listing.url),
     dateAccessed: cleanDisplayLabel(listing.dateAccessed),
+    condition: cleanDisplayLabel(listing.condition),
+    titleStatus: cleanDisplayLabel(listing.titleStatus),
   };
 }
 
@@ -3801,31 +3871,51 @@ function trimsLookEquivalent(left: string, right: string): boolean {
   return left === right || left.includes(right) || right.includes(left);
 }
 
-function deriveComparableConfidence(params: {
+function deriveValuationCompleteness(params: {
   compCount: number;
   mileageKnownCount: number;
   exactTrimMatchCount: number;
+  regionKnownCount: number;
+  conditionKnownCount: number;
+  titleStatusKnownCount: number;
+  targetTrimKnown: boolean;
+}) {
+  return {
+    trimUsable: params.targetTrimKnown && params.exactTrimMatchCount >= 1,
+    mileageUsable: params.mileageKnownCount >= Math.ceil(params.compCount / 2),
+    regionUsable: params.regionKnownCount >= Math.ceil(params.compCount / 2),
+    conditionUsable: params.conditionKnownCount >= Math.ceil(params.compCount / 2),
+    titleStatusUsable: params.titleStatusKnownCount >= Math.ceil(params.compCount / 2),
+  };
+}
+
+function deriveWeightedPreviewConfidence(params: {
+  compCount: number;
+  completeness: ReturnType<typeof deriveValuationCompleteness>;
 }): "low" | "medium" | "high" {
+  if (params.compCount < 2) return "low";
+  if (params.compCount === 2) {
+    return params.completeness.mileageUsable && params.completeness.trimUsable ? "medium" : "low";
+  }
+  const completeCount = [
+    params.completeness.trimUsable,
+    params.completeness.mileageUsable,
+    params.completeness.regionUsable,
+    params.completeness.conditionUsable,
+    params.completeness.titleStatusUsable,
+  ].filter(Boolean).length;
   if (
     params.compCount >= 5 &&
-    params.mileageKnownCount >= Math.ceil(params.compCount / 2) &&
-    params.exactTrimMatchCount >= Math.max(1, Math.floor(params.compCount / 2))
+    completeCount === 5
   ) {
     return "high";
   }
 
-  if (
-    params.compCount >= 3 &&
-    (params.mileageKnownCount >= 2 || params.exactTrimMatchCount >= 1)
-  ) {
+  if (params.compCount >= 3 && completeCount >= 5) {
     return "medium";
   }
 
   return "low";
-}
-
-function computeMedian(values: number[]): number {
-  return computePercentile(values, 0.5);
 }
 
 function computePercentile(values: number[], percentile: number): number {

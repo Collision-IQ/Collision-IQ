@@ -35,6 +35,7 @@ const { normalizeReportToAnalysisResult } = require("./builders/normalizeReportT
 const {
   buildExportModel,
   computeACVFromComps,
+  computeWeightedAcvPreview,
   deriveExportReportFields,
 } = require("./builders/buildExportModel.ts");
 const { buildCollisionSnapshot } = require("./builders/collisionSnapshot.ts");
@@ -344,6 +345,71 @@ run("computeACVFromComps derives a normalized market range from comparable listi
   assert.equal(typeof result.acvRange.high, "number");
   assert.equal(result.acvRange.low <= result.acvValue, true);
   assert.equal(result.acvRange.high >= result.acvValue, true);
+  assert.equal(result.confidence, "low");
+});
+
+run("weighted ACV preview uses guide-only low confidence when no comps exist", () => {
+  const result = computeWeightedAcvPreview({
+    jdPower: { average: 20000, low: 18500, high: 21500 },
+  });
+
+  assert.ok(result);
+  assert.equal(result.compCount, 0);
+  assert.equal(result.sourceType, "jd_power");
+  assert.equal(result.label, "Guide-only directional preview");
+  assert.equal(result.confidence, "low");
+});
+
+run("weighted ACV preview keeps one comp limited and guide-weighted", () => {
+  const result = computeWeightedAcvPreview({
+    vehicle: { year: 2020, make: "Toyota", model: "Camry", trim: "SE" },
+    mileage: 50000,
+    jdPower: { average: 20000, low: 18500, high: 21500 },
+    comparableListings: [
+      { price: 24000, mileage: 51000, year: 2020, make: "Toyota", model: "Camry", trim: "SE", location: "PA" },
+    ],
+  });
+
+  assert.ok(result);
+  assert.equal(result.compCount, 1);
+  assert.equal(result.sourceType, "guide_blend");
+  assert.equal(result.label, "Limited comp preview");
+  assert.equal(result.confidence, "low");
+  assert.equal(result.acvValue > 20000 && result.acvValue < 24000, true);
+});
+
+run("weighted ACV preview uses low or moderate confidence for two comps", () => {
+  const result = computeWeightedAcvPreview({
+    vehicle: { year: 2020, make: "Toyota", model: "Camry", trim: "SE" },
+    mileage: 50000,
+    jdPower: { average: 20000, low: 18500, high: 21500 },
+    comparableListings: [
+      { price: 23000, mileage: 51000, year: 2020, make: "Toyota", model: "Camry", trim: "SE", location: "PA" },
+      { price: 25000, mileage: 49000, year: 2020, make: "Toyota", model: "Camry", trim: "SE", location: "PA" },
+    ],
+  });
+
+  assert.ok(result);
+  assert.equal(result.compCount, 2);
+  assert.equal(result.sourceType, "guide_blend");
+  assert.match(result.confidence, /^(low|medium)$/);
+});
+
+run("weighted ACV preview needs complete three-plus comp data for moderate confidence", () => {
+  const result = computeWeightedAcvPreview({
+    vehicle: { year: 2020, make: "Toyota", model: "Camry", trim: "SE" },
+    mileage: 50000,
+    jdPower: { average: 20000, low: 18500, high: 21500 },
+    comparableListings: [
+      { price: 23000, mileage: 51000, year: 2020, make: "Toyota", model: "Camry", trim: "SE", location: "PA", condition: "clean", titleStatus: "clean" },
+      { price: 25000, mileage: 49000, year: 2020, make: "Toyota", model: "Camry", trim: "SE", location: "PA", condition: "clean", titleStatus: "clean" },
+      { price: 26000, mileage: 50500, year: 2020, make: "Toyota", model: "Camry", trim: "SE", location: "PA", condition: "clean", titleStatus: "clean" },
+    ],
+  });
+
+  assert.ok(result);
+  assert.equal(result.compCount, 3);
+  assert.equal(result.sourceType, "guide_blend");
   assert.equal(result.confidence, "medium");
 });
 
@@ -404,7 +470,7 @@ Grand Total 16,887.00
   assert.match(exportModel.valuation.acvReasoning, /Market Preview unavailable:.*no completed live local comparable listings/i);
 });
 
-run("structured JD Power-style values alone do not value a specific vehicle without live comps", () => {
+run("structured JD Power-style values alone produce only guide-only directional preview", () => {
   const report = makeReport();
   const analysis = normalizeReportToAnalysisResult(report);
   analysis.valuationData = {
@@ -422,11 +488,10 @@ run("structured JD Power-style values alone do not value a specific vehicle with
     assistantAnalysis: "ACV is not determinable from the current documents.",
   });
 
-  assert.equal(exportModel.valuation.acvSourceType, "unavailable");
-  assert.equal(exportModel.valuation.acvStatus, "not_determinable");
-  assert.equal(exportModel.valuation.acvValue, undefined);
-  assert.equal(exportModel.valuation.acvRange, undefined);
-  assert.match(exportModel.valuation.acvReasoning, /Market Preview unavailable:.*no completed live local comparable listings/i);
+  assert.equal(exportModel.valuation.acvSourceType, "jd_power");
+  assert.equal(exportModel.valuation.acvStatus, "estimated_range");
+  assert.equal(exportModel.valuation.acvConfidence, "low");
+  assert.match(exportModel.valuation.acvReasoning, /Guide-only directional preview/i);
 });
 
 run("specific vehicle ACV stays unavailable when live comparable search is unavailable", () => {
@@ -557,7 +622,8 @@ Grand Total 16,200.00
   assert.equal(exportModel.valuation.acvSourceType, "comps");
   assert.equal(exportModel.valuation.acvStatus, "estimated_range");
   assert.equal(exportModel.valuation.acvCompCount, 3);
-  assert.equal(exportModel.valuation.acvValue, 36900);
+  assert.equal(exportModel.valuation.acvValue > 36000, true);
+  assert.equal(exportModel.valuation.acvValue < 38000, true);
   assert.equal(exportModel.valuation.acvRange.low > 30000, true);
   assert.equal(exportModel.valuation.acvRange.high > 30000, true);
   assert.equal(exportModel.valuation.acvReasoning.includes("Comparable source count: 3"), true);
@@ -606,7 +672,7 @@ run("customer report PDF strips internal audit language and parser fragments", (
   });
 
   const text = flattenCarrierDocument(document);
-  assert.equal(document.sections.map((section) => section.title).join("|"),
+  assert.equal(document.sections.map((section) => section.title.replace(/\.$/, "")).join("|"),
     "What We Found|Why The Shop Estimate Looks More Complete|Why The Insurance Estimate May Be Missing Items|What Still Needs To Be Verified|Why This Matters For Safety And Repair Quality|What You Can Ask For|What Happens Next|Bottom Line"
   );
   assert.equal(

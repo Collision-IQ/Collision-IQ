@@ -394,7 +394,27 @@ function buildSnapshotDisclosure(renderModel: SnapshotRenderModel): string {
 }
 
 function sanitizeSnapshot(snapshot: CollisionSnapshot): CollisionSnapshot {
-  return redactSensitiveData(mapSnapshotStrings(snapshot, (value) => cleanSnapshotText(value) || ""));
+  const sanitized = redactSensitiveData(mapSnapshotStrings(snapshot, (value) => cleanSnapshotText(value) || ""));
+  if (
+    sanitized.valuationSnapshot.available &&
+    !sanitized.valuationSnapshot.acvPreviewRange &&
+    !sanitized.valuationSnapshot.dvPreviewRange
+  ) {
+    const disclosure =
+      sanitized.valuationSnapshot.disclosure &&
+      !/^Market preview only\b/i.test(sanitized.valuationSnapshot.disclosure)
+        ? sanitized.valuationSnapshot.disclosure
+        : "Market Preview unavailable: no completed live local comparable listings or supported valuation data were preserved for this generation.";
+
+    return {
+      ...sanitized,
+      valuationSnapshot: {
+        available: false,
+        disclosure,
+      },
+    };
+  }
+  return sanitized;
 }
 
 function mapSnapshotStrings<T>(value: T, transform: (value: string) => string): T {

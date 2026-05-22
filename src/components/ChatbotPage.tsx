@@ -68,6 +68,7 @@ import {
   buildReviewCompletenessMessage,
 } from "@/lib/reviewCompleteness";
 import { buildReportApplicability } from "@/lib/reports/applicability";
+import { selectAcademyServiceCta, type AcademyServiceCta } from "@/lib/academy/serviceCta";
 import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeReportToAnalysisResult";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 import { toCustomerFacingText } from "@/lib/ai/customerFacingText";
@@ -1153,7 +1154,7 @@ export function ChatbotWorkspacePage() {
                   ) : null}
                 </div>
               )}
-              <div className="flex min-h-0 flex-col">
+              <div className={isReviewActive ? "flex min-h-0 flex-col justify-end" : "flex min-h-0 flex-col"}>
                 <div className="min-h-[56px] shrink-0">
                 {trialDaysRemaining !== null && trialDaysRemaining <= 7 && isWithinTrialBadgeWindow(viewerAccess) && (
                   <div
@@ -1207,7 +1208,7 @@ export function ChatbotWorkspacePage() {
                   </div>
                 )}
                 </div>
-                <section className="h-full min-h-[360px] overflow-hidden">
+                <section className={isReviewActive ? "flex h-full min-h-[360px] flex-col justify-end overflow-hidden" : "h-full min-h-[360px] overflow-hidden"}>
                 {!isChatActive && (
                   <div className="relative">
                     <div className="rounded-md border border-border bg-card px-3 py-2">
@@ -1240,8 +1241,8 @@ export function ChatbotWorkspacePage() {
                     </div>
                   </div>
                 )}
-                <div className={isChatActive ? "relative h-full min-h-0" : "hidden"}>
-                      <div className="relative flex h-full min-h-0 flex-col overflow-hidden border border-border bg-background">
+                <div className={isChatActive ? "relative h-full min-h-0 w-full" : "hidden"}>
+                      <div className={isReviewActive ? "relative flex h-[min(48svh,520px)] min-h-[300px] w-full flex-col overflow-hidden border border-border bg-background" : "relative flex h-full min-h-0 w-full flex-col overflow-hidden border border-border bg-background"}>
                         <div className="flex min-h-[58px] shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-3 py-2">
                           <div>
                           <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -1334,6 +1335,7 @@ export function ChatbotWorkspacePage() {
                             type: file.hasVision ? "image" : undefined,
                           }))}
                           followUpExports={followUpExports}
+                          layoutScrollKey={isReviewActive ? "review-open" : "chat-open"}
                           suppressedMessageIds={primaryAnalysis ? [primaryAnalysis.messageId] : []}
                           disabled={chatBlocked}
                         />
@@ -1680,10 +1682,27 @@ function RailContent({
     ...renderModel.negotiationPlaybook.suggestedSequence,
     ...renderModel.negotiationPlaybook.documentationNeeded,
   ]).slice(0, 5);
+  const reviewedEstimateCount = buildReportUploadedDocuments(analysisResult).filter(
+    (doc) => doc.kind === "estimate"
+  ).length;
+  const serviceIntentText = [
+    caseIntent,
+    primaryAnalysisContent,
+    analysisText,
+    panel.narrative,
+    renderModel.valuation.acvReasoning,
+    renderModel.valuation.dvReasoning,
+    renderModel.disputeIntelligenceReport.summary,
+    ...renderModel.disputeIntelligenceReport.topDrivers.map((item) => `${item.title} ${item.whyItMatters}`),
+  ].join("\n");
   const academyTrigger = snapshot
     ? resolveAcademyServiceTrigger({
         snapshot,
-        renderModel,
+        intentText: serviceIntentText,
+        estimateCount: reviewedEstimateCount,
+        estimateDispute:
+          Boolean(workspaceData?.estimateComparisons?.rows?.length) ||
+          (normalizedResult?.mode ?? analysisResult?.analysis?.mode) === "comparison",
         valuationLowConfidence,
         appraisalTriggered: Boolean(panel.appraisal?.triggered),
       })
@@ -2504,7 +2523,7 @@ function RailContent({
                 renderModel={renderModel}
                 lowConfidence={valuationLowConfidence}
                 checkoutLoading={serviceCheckoutLoading}
-                onStartAcvCheckout={() => void startAcademyServiceCheckout("academy_acv_review")}
+                onStartAcvCheckout={() => void startAcademyServiceCheckout("academy_value_dispute")}
               />
             </div>
           ) : null}
@@ -2935,13 +2954,25 @@ function RailContent({
                 type="button"
                 onClick={() => void startAcademyServiceCheckout()}
                 disabled={serviceCheckoutLoading}
-                className="w-full rounded-md border border-[#C65A2A]/30 bg-[#C65A2A]/10 p-3 text-left transition hover:bg-[#C65A2A]/16 disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full rounded-md border border-[#C65A2A]/30 bg-card p-3 text-left transition hover:border-[#C65A2A]/50 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <div className="text-[10px] uppercase tracking-[0.12em] text-[#b86a2d]">Academy Service</div>
+                <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Services</div>
                 <div className="mt-1 text-sm font-semibold text-foreground">
-                  {serviceCheckoutLoading ? "Opening checkout..." : academyTrigger.cta}
+                  {academyTrigger.title}
                 </div>
                 <div className="mt-1 text-xs leading-5 text-muted-foreground">Why this is showing: {academyTrigger.reason}</div>
+                {academyTrigger.chips.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {academyTrigger.chips.map((chip) => (
+                      <span key={chip} className="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+                        {chip}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="mt-3 inline-flex rounded-md bg-[#C65A2A] px-3 py-2 text-xs font-semibold text-black">
+                  {serviceCheckoutLoading ? "Opening checkout..." : academyTrigger.button}
+                </div>
               </button>
             ) : null}
             {customerReportError ? (
@@ -2989,7 +3020,7 @@ function RailContent({
           onMessageChange={setSnapshotMessage}
           onReviewedChange={setSnapshotReviewed}
           serviceCheckoutLoading={serviceCheckoutLoading}
-          onStartServiceCase={() => void startAcademyServiceCheckout()}
+          onStartServiceCase={(serviceKey) => void startAcademyServiceCheckout(serviceKey)}
           onSend={() => void sendSnapshot()}
           onCancelSend={() => { setSnapshotSendTarget(null); setSnapshotSent(false); }}
         />
@@ -3545,7 +3576,7 @@ function SnapshotPreviewModal({
   onSubjectChange: (value: string) => void;
   onMessageChange: (value: string) => void;
   onReviewedChange: (value: boolean) => void;
-  onStartServiceCase: () => void;
+  onStartServiceCase: (serviceKey: AcademyServiceCta["serviceKey"]) => void;
   onSend: () => void;
   onCancelSend: () => void;
 }) {
@@ -3638,43 +3669,36 @@ function SnapshotPreviewModal({
           } />
         </div>
 
-        {resolveAcademyServiceTrigger({
-          snapshot: safeSnapshot,
-          renderModel: buildSnapshotRenderModel(safeSnapshot),
-          valuationLowConfidence:
-            safeSnapshot.valuationSnapshot.confidence?.toLowerCase() === "low" ||
-            safeSnapshot.evidenceCompleteness.adjustedConfidence === "Low",
-          appraisalTriggered: false,
-        }) ? (
-          <div className="mt-5 rounded-2xl border border-[#C65A2A]/24 bg-gradient-to-br from-[#C65A2A]/14 via-[#C65A2A]/08 to-white/[0.02] p-4">
+        <div className="mt-5 rounded-2xl border border-[#C65A2A]/24 bg-gradient-to-br from-[#C65A2A]/14 via-[#C65A2A]/08 to-white/[0.02] p-4">
             {(() => {
               const trigger = resolveAcademyServiceTrigger({
                 snapshot: safeSnapshot,
-                renderModel: buildSnapshotRenderModel(safeSnapshot),
+                intentText: [
+                  safeSnapshot.valuationSnapshot.disclosure,
+                  safeSnapshot.topDisputeItems.map((item) => `${item.issue} ${item.whyItMatters}`).join("\n"),
+                ].join("\n"),
                 valuationLowConfidence:
                   safeSnapshot.valuationSnapshot.confidence?.toLowerCase() === "low" ||
                   safeSnapshot.evidenceCompleteness.adjustedConfidence === "Low",
                 appraisalTriggered: false,
               });
-              if (!trigger) return null;
               return (
                 <div>
-                  <div className="text-[10px] uppercase tracking-[0.22em] text-[#E8A27F]">Need Help Resolving This?</div>
-                  <div className="mt-1 text-base font-semibold text-foreground">{trigger.cta}</div>
+                  <div className="text-[10px] uppercase tracking-[0.22em] text-[#E8A27F]">Services</div>
+                  <div className="mt-1 text-base font-semibold text-foreground">{trigger.title}</div>
                   <div className="mt-1 text-sm leading-6 text-muted-foreground">Why this is showing: {trigger.reason}</div>
                   <button
                     type="button"
-                    onClick={onStartServiceCase}
+                    onClick={() => onStartServiceCase(trigger.serviceKey)}
                     disabled={serviceCheckoutLoading}
                     className="mt-3 rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {serviceCheckoutLoading ? "Opening checkout..." : "Start service case"}
+                    {serviceCheckoutLoading ? "Opening checkout..." : trigger.button}
                   </button>
                 </div>
               );
             })()}
           </div>
-        ) : null}
 
         {sendTarget ? (
           <div className="mt-5 rounded-2xl border border-[var(--border)] bg-[var(--muted)] p-4">
@@ -3780,14 +3804,12 @@ function SnapshotInput({
 
 function resolveAcademyServiceTrigger(params: {
   snapshot: CollisionSnapshot;
-  renderModel: ReturnType<typeof buildExportModel> | SnapshotTriggerRenderModel;
+  intentText?: string | null;
+  estimateCount?: number;
+  estimateDispute?: boolean;
   valuationLowConfidence: boolean;
   appraisalTriggered: boolean;
-}): {
-  serviceKey: string;
-  cta: string;
-  reason: string;
-} | null {
+}): AcademyServiceCta {
   const missingCritical = params.snapshot.evidenceCompleteness.missingCriticalEvidence;
   const missingCalibration =
     missingCritical.some((item) => /calibration|scan|adas/i.test(item)) ||
@@ -3797,48 +3819,32 @@ function resolveAcademyServiceTrigger(params: {
     params.valuationLowConfidence ||
     /market preview|DV|valuation/i.test(params.snapshot.valuationSnapshot.disclosure) ||
     params.snapshot.topDisputeItems.some((item) => /value|valuation|acv|dv/i.test(item.issue));
+  const defaultReason = missingCalibration && laborDelta
+    ? "Missing calibration documentation and reduced estimate scope may affect repair completeness."
+    : missingCalibration
+      ? "Calibration or scan documentation may be incomplete, which can affect repair completeness and verification."
+      : laborDelta
+        ? "The estimate scope appears reduced in labor-related areas, which may affect repair completeness."
+        : params.snapshot.topDisputeItems.length >= 2
+          ? "The file shows multiple unresolved estimate gaps that may benefit from assisted claim resolution."
+          : "The file has unresolved repair or documentation issues that may benefit from professional review.";
+  const intentText = [
+    params.intentText,
+    params.snapshot.valuationSnapshot.disclosure,
+    params.snapshot.valuationSnapshot.acvPreviewRange,
+    params.snapshot.valuationSnapshot.dvPreviewRange,
+    params.snapshot.topDisputeItems.map((item) => `${item.issue} ${item.whyItMatters}`).join("\n"),
+    valuationGap ? "valuation preview low confidence market preview" : "",
+    params.appraisalTriggered ? "right to appraisal estimate dispute" : "",
+    missingCalibration || laborDelta ? "estimate dispute repair estimate disagreement" : "",
+  ].join("\n");
 
-  if (params.appraisalTriggered) {
-    return {
-      serviceKey: "academy_appraisal",
-      cta: "Need help resolving this? Start an Appraisal case",
-      reason: "The claim appears to be moving beyond normal estimate negotiation and may require formal escalation.",
-    };
-  }
-
-  if (valuationGap) {
-    return {
-      serviceKey: "academy_acv_review",
-      cta: "Need help resolving this? Start a Market Preview review",
-      reason: "Valuation support may be incomplete, which could affect the total-loss or value position on the claim.",
-    };
-  }
-
-  if (missingCalibration || laborDelta || params.snapshot.topDisputeItems.length >= 2) {
-    return {
-      serviceKey: "academy_value_dispute",
-      cta: "Need help resolving this? Start a Value Dispute case",
-      reason: missingCalibration && laborDelta
-        ? "Missing calibration documentation and reduced estimate scope may affect repair completeness."
-        : missingCalibration
-          ? "Calibration or scan documentation may be incomplete, which can affect repair completeness and verification."
-          : laborDelta
-            ? "The estimate scope appears reduced in labor-related areas, which may affect repair completeness."
-            : "The file shows multiple unresolved estimate gaps that may benefit from assisted claim resolution.",
-    };
-  }
-
-  return null;
-}
-
-type SnapshotTriggerRenderModel = {
-  valuationSnapshot?: CollisionSnapshot["valuationSnapshot"];
-};
-
-function buildSnapshotRenderModel(snapshot: CollisionSnapshot): SnapshotTriggerRenderModel {
-  return {
-    valuationSnapshot: snapshot.valuationSnapshot,
-  };
+  return selectAcademyServiceCta({
+    intentText,
+    estimateCount: params.estimateCount,
+    estimateDispute: params.estimateDispute || params.appraisalTriggered || missingCalibration || laborDelta,
+    defaultReason,
+  });
 }
 
 function isValidEmail(value: string): boolean {
@@ -5137,7 +5143,7 @@ function buildSingleValuationDisplay(params: {
   reasoning: string;
   missingInputs: string[];
   maxRange: number;
-  sourceType?: "comps" | "jd_power" | "fallback" | "unavailable";
+      sourceType?: "comps" | "jd_power" | "guide_blend" | "fallback" | "unavailable";
   compCount?: number;
   includeHandoffHint?: boolean;
 }): string {
@@ -5160,6 +5166,8 @@ function buildSingleValuationDisplay(params: {
 
   if (params.sourceType === "comps" && typeof params.compCount === "number" && params.compCount > 0) {
     lines.push(`Support: ${params.compCount} comparable listing${params.compCount === 1 ? "" : "s"}`);
+  } else if (params.sourceType === "guide_blend") {
+    lines.push(`Support: guide/book anchor plus ${params.compCount ?? 0} comparable listing${params.compCount === 1 ? "" : "s"}`);
   } else if (params.sourceType === "jd_power") {
     lines.push("Support: structured market valuation data");
   }

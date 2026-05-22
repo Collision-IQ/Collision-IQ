@@ -266,6 +266,7 @@ interface ChatWidgetProps {
   exportModel?: unknown;
   followUpFiles?: Array<{ id: string; name: string; type?: string; url?: string }>;
   followUpExports?: Array<{ label: string; type?: string; url?: string }>;
+  layoutScrollKey?: string;
   disabled?: boolean;
 }
 
@@ -601,6 +602,7 @@ export default function ChatWidget({
   activeCaseId = null,
   caseIntent = "Continue with this case",
   assistanceProfile = null,
+  layoutScrollKey,
   disabled = false,
 }: ChatWidgetProps) {
   const router = useRouter();
@@ -817,6 +819,15 @@ export default function ChatWidget({
     if (!introDismissed || !isInitialOnlyMessages(messages)) return;
     scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }, [introDismissed, messages]);
+
+  useEffect(() => {
+    if (!layoutScrollKey || !shouldAutoScrollRef.current) return;
+    requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (!el) return;
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    });
+  }, [layoutScrollKey]);
 
   // Load available browser TTS voices
   useEffect(() => {
@@ -3245,7 +3256,7 @@ export default function ChatWidget({
         </div>
 
         <div className="z-20 min-h-[74px] shrink-0 border-t border-border bg-card px-3 py-2">
-          <div className="mx-auto w-full max-w-[1120px]">
+          <div className="mx-auto w-full max-w-none">
             <div
               onDragEnter={handleUploadDragEnter}
               onDragOver={handleUploadDragOver}

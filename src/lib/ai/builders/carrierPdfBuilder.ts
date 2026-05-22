@@ -814,7 +814,7 @@ function renderValuationBullet(
     confidence?: "low" | "medium" | "high";
     reasoning: string;
     missingInputs: string[];
-    sourceType?: "comps" | "jd_power" | "fallback" | "unavailable";
+    sourceType?: "comps" | "jd_power" | "guide_blend" | "fallback" | "unavailable";
     compCount?: number;
   }
 ): string {
