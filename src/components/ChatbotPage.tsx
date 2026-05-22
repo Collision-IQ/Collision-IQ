@@ -3453,6 +3453,17 @@ function ReportSendModal({
     closeButtonRef.current?.focus();
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onCancel();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onCancel]);
+
   if (typeof document === "undefined") {
     return null;
   }
@@ -3465,7 +3476,14 @@ function ReportSendModal({
       aria-labelledby="send-report-title"
     >
       <div className="fixed inset-0 z-[10000] bg-black/40 dark:bg-black/60" />
-      <div className="fixed inset-0 isolate z-[10010] flex items-center justify-center p-4 sm:p-6">
+      <div
+        className="fixed inset-0 isolate z-[10010] flex items-center justify-center p-4 sm:p-6"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) {
+            onCancel();
+          }
+        }}
+      >
       <div
         className="relative z-[10020] flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] shadow-xl"
       >
@@ -3591,6 +3609,17 @@ function SnapshotPreviewModal({
     };
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   if (typeof document === "undefined") {
     return null;
   }
@@ -3603,7 +3632,14 @@ function SnapshotPreviewModal({
       aria-labelledby="snapshot-preview-title"
     >
       <div className="fixed inset-0 z-[10000] bg-black/40 dark:bg-black/60" />
-      <div className="fixed inset-0 isolate z-[10010] flex items-center justify-center p-4 sm:p-6">
+      <div
+        className="fixed inset-0 isolate z-[10010] flex items-center justify-center p-4 sm:p-6"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) {
+            onClose();
+          }
+        }}
+      >
       <div
         className="relative z-[10020] flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] shadow-xl"
       >
