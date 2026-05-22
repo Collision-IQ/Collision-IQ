@@ -619,6 +619,7 @@ export default function ChatWidget({
   const [isExportingChat, setIsExportingChat] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentsOpen, setAttachmentsOpen] = useState(true);
+  const [mobileAttachmentsOpen, setMobileAttachmentsOpen] = useState(false);
   const [previewAttachmentId, setPreviewAttachmentId] = useState<string | null>(null);
   const [replaceAttachmentId, setReplaceAttachmentId] = useState<string | null>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
@@ -2440,6 +2441,9 @@ export default function ChatWidget({
           `${successfulUploadCount} ${successfulUploadCount === 1 ? "file" : "files"} uploaded.`
         );
       }
+      if (successfulUploadCount > 0) {
+        setMobileAttachmentsOpen(false);
+      }
     } catch (err) {
       console.error(err);
       upsertSystemStatusMessage("File upload could not start.");
@@ -2528,6 +2532,9 @@ export default function ChatWidget({
         setUploadUiMessage(
           `${successfulUploadCount} ${successfulUploadCount === 1 ? "photo" : "photos"} uploaded.`
         );
+      }
+      if (successfulUploadCount > 0) {
+        setMobileAttachmentsOpen(false);
       }
     } catch (err) {
       console.error(err);
@@ -3296,7 +3303,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled}
-                className="order-2 min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 md:order-none"
+                className="order-2 min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none"
                 aria-label="Attach files"
               >
                 <Paperclip size={20} />
@@ -3306,7 +3313,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={() => cameraInputRef.current?.click()}
                 disabled={disabled}
-                className="order-2 min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 md:order-none"
+                className="order-2 min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none"
                 aria-label="Take photo"
               >
                 <Camera size={20} />
@@ -3316,7 +3323,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={handleMicClick}
                 disabled={isTranscribing || disabled}
-                className={`order-2 min-h-10 min-w-10 rounded-md p-2 transition md:order-none ${
+                className={`order-2 min-h-10 min-w-10 rounded-md p-2 transition lg:order-none ${
                   isRecording
                     ? "text-red-400 hover:text-red-300"
                     : "text-muted-foreground hover:bg-card hover:text-[#C65A2A]"
@@ -3364,7 +3371,7 @@ export default function ChatWidget({
                     ? "Ask about the attached case file or add context..."
                     : "Enter a repair analysis command or upload documentation..."
                 }
-                className="chat-composer-textarea order-1 min-h-11 max-h-[88px] min-w-0 flex-[1_1_100%] resize-none overflow-y-auto border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[#b86a2d] focus:ring-1 focus:ring-[#b86a2d]/30 disabled:cursor-not-allowed disabled:opacity-50 md:order-none md:min-w-[280px] md:flex-[1_1_420px]"
+                className="chat-composer-textarea order-1 min-h-11 max-h-[88px] min-w-0 flex-[1_1_100%] resize-none overflow-y-auto border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[#b86a2d] focus:ring-1 focus:ring-[#b86a2d]/30 disabled:cursor-not-allowed disabled:opacity-50 lg:order-none lg:min-w-[280px] lg:flex-[1_1_420px]"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -3377,7 +3384,7 @@ export default function ChatWidget({
                 type="button"
                 onClick={handleDownloadRedactedChat}
                 disabled={disabled || loading || isTranscribing || isExportingChat}
-                className="hidden min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 md:inline-flex"
+                className="hidden min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 lg:inline-flex"
               >
                 {isExportingChat ? "Preparing..." : "Download Chat"}
               </button>
@@ -3385,7 +3392,7 @@ export default function ChatWidget({
               <button
                 onClick={handleSend}
                 disabled={loading || isTranscribing || disabled}
-                className="order-3 min-h-10 flex-1 rounded-md border border-[#b86a2d] bg-[#b86a2d] px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#c57934] disabled:opacity-50 sm:px-5 md:order-none md:flex-none"
+                className="order-3 min-h-10 flex-1 rounded-md border border-[#b86a2d] bg-[#b86a2d] px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#c57934] disabled:opacity-50 sm:px-5 lg:order-none lg:flex-none"
               >
                 {loading ? "..." : "Send"}
               </button>
@@ -3393,7 +3400,7 @@ export default function ChatWidget({
               <button
                 type="button"
                 onClick={handleEndChat}
-                className="order-4 min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-red-500/80 transition hover:bg-red-500/8 hover:text-red-500 disabled:opacity-50 md:order-none dark:text-red-300/75 dark:hover:text-red-200"
+                className="order-4 min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-red-500/80 transition hover:bg-red-500/8 hover:text-red-500 disabled:opacity-50 lg:order-none dark:text-red-300/75 dark:hover:text-red-200"
                 disabled={disabled || (loading && messages.length <= 1)}
                 aria-label="End chat"
                 title="End chat"
@@ -3403,7 +3410,7 @@ export default function ChatWidget({
                 </div>
 
                 {(messages.length > 1 || hasAnyAttachment) && (
-                  <div className="mt-2 md:hidden">
+                  <div className="mt-2 lg:hidden">
                     <button
                       type="button"
                       onClick={handleDownloadRedactedChat}
@@ -3452,9 +3459,74 @@ export default function ChatWidget({
               </div>
 
               {attachments.length > 0 && (
+                <div className="mt-2 border border-border bg-card p-1.5 lg:hidden">
+                  <div className="flex items-center justify-between gap-2 bg-muted px-2.5 py-2 text-xs text-muted-foreground">
+                    <span className="min-w-0 truncate">
+                      Uploaded: {attachments.length} {attachments.length === 1 ? "file" : "files"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setMobileAttachmentsOpen((value) => !value)}
+                      disabled={disabled}
+                      className="shrink-0 rounded-md border border-border bg-card px-2 py-1 text-[11px] font-medium text-foreground transition hover:bg-background disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {mobileAttachmentsOpen ? "Hide files" : "View files"}
+                    </button>
+                  </div>
+
+                  {mobileAttachmentsOpen && (
+                    <div className="mt-2 max-h-[132px] space-y-2 overflow-y-auto pr-1">
+                      {attachments.map((attachment) => (
+                        <div
+                          key={attachment.attachmentId}
+                          className="flex items-center justify-between gap-2 border border-border bg-card px-2.5 py-2 text-sm text-muted-foreground"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handlePreviewAttachment(attachment.attachmentId)}
+                            disabled={disabled}
+                            className="min-w-0 flex-1 text-left"
+                          >
+                            <div className="truncate pr-2 text-xs font-medium text-foreground">
+                              {attachment.filename}
+                            </div>
+                            <div className="mt-1 truncate text-[11px] text-muted-foreground">
+                              {formatAttachmentKind(attachment)} - {attachment.source === "camera" ? "Photo" : "File"}
+                              {attachment.hasVision ? " - Vision" : ""}
+                            </div>
+                          </button>
+
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handlePreviewAttachment(attachment.attachmentId)}
+                              aria-label="Preview attachment"
+                              disabled={disabled}
+                              className="rounded-lg bg-muted p-2 text-muted-foreground transition hover:bg-muted/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <Eye size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeAttachment(attachment.attachmentId)}
+                              aria-label="Remove attachment"
+                              disabled={disabled}
+                              className="rounded-lg bg-muted p-2 text-muted-foreground transition hover:bg-muted/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {attachments.length > 0 && (
                 <div
                   className={[
-                    "mt-2 border border-border bg-card",
+                    "mt-2 hidden border border-border bg-card lg:block",
                     effectiveAttachmentsOpen ? "p-2" : "p-1",
                   ].join(" ")}
                 >

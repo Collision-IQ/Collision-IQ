@@ -602,6 +602,18 @@ export function ChatbotWorkspacePage() {
   }, []);
 
   const reopenImmersiveHeaderAfterUpload = useCallback(() => {
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches) {
+      console.info("[immersive-header] auto-state skipped", {
+        reason: "mobile_chat_primary",
+        requestedState: "expanded",
+        activeCaseId: analysisReportId,
+        hasStructuredAnalysis,
+        lastHeaderChangeReason,
+      });
+      setLeftPaneMode("chat");
+      return;
+    }
+
     if (chatOnlyMode) {
       console.info("[immersive-header] auto-state skipped", {
         reason: "chat_only_mode",
@@ -1005,20 +1017,20 @@ export function ChatbotWorkspacePage() {
                 <div
                   className={
                     isReviewActive
-                      ? "flex min-h-0 flex-col px-1"
-                      : "flex min-h-0 flex-col px-1"
+                      ? "flex min-h-0 flex-col px-1 max-lg:absolute max-lg:inset-0 max-lg:z-40 max-lg:bg-card max-lg:p-2"
+                      : "flex min-h-0 flex-col px-1 max-lg:hidden"
                   }
                 >
                   <div
                     ref={immersiveToolbarRef}
-                    className="z-20 mb-2 min-h-[72px] shrink-0 rounded-[18px] border border-border bg-card/95 px-3 py-2.5 shadow-[0_18px_44px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 backdrop-blur-xl sm:mb-3 sm:min-h-[86px] sm:rounded-[22px] sm:px-4 sm:py-3 dark:shadow-[0_18px_44px_rgba(0,0,0,0.28)]"
+                    className="z-20 mb-2 min-h-[56px] shrink-0 rounded-[14px] border border-border bg-card/95 px-3 py-2 shadow-[0_18px_44px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 backdrop-blur-xl lg:mb-3 lg:min-h-[86px] lg:rounded-[22px] lg:px-4 lg:py-3 dark:shadow-[0_18px_44px_rgba(0,0,0,0.28)]"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
                           Review workspace
                         </div>
-                        <div className="mt-1 text-sm text-muted-foreground">
+                        <div className="mt-1 hidden text-sm text-muted-foreground lg:block">
                           {isReviewActive
                             ? "The case review is open. Collapse it anytime to give chat more room."
                             : "The case review is collapsed. Selecting a right-rail item will reopen it and jump to the matching section."}
@@ -1043,7 +1055,7 @@ export function ChatbotWorkspacePage() {
                   {isReviewActive ? (
                     <div
                       ref={immersiveWorkspaceRef}
-                      className="max-h-[min(48svh,680px)] min-h-[200px] overflow-y-auto rounded-[18px] border border-border bg-card/80 px-1 pb-3 shadow-[0_24px_70px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 sm:max-h-[min(54svh,680px)] sm:min-h-[280px] sm:rounded-[26px] sm:pb-4 dark:shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
+                      className="min-h-0 flex-1 overflow-y-auto rounded-[16px] border border-border bg-card/80 px-1 pb-3 shadow-[0_24px_70px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 lg:max-h-[min(54svh,680px)] lg:min-h-[280px] lg:rounded-[26px] lg:pb-4 dark:shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
                     >
                       <div id="immersive-case-header" data-header-change-reason={lastHeaderChangeReason}>
                         <div className="mb-2 text-right text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -1157,7 +1169,7 @@ export function ChatbotWorkspacePage() {
                 </div>
               )}
               <div className="flex min-h-0 flex-col">
-                <div className="min-h-[56px] shrink-0">
+                <div className="min-h-0 shrink-0 lg:min-h-[56px]">
                 {trialDaysRemaining !== null && trialDaysRemaining <= 7 && isWithinTrialBadgeWindow(viewerAccess) && (
                   <div
                     className={`mb-3 rounded-xl px-4 py-3 text-sm ${
@@ -1210,7 +1222,7 @@ export function ChatbotWorkspacePage() {
                   </div>
                 )}
                 </div>
-                <section className={isReviewActive ? "flex h-full min-h-[220px] flex-1 flex-col overflow-hidden sm:min-h-[320px]" : "h-full min-h-[280px] overflow-hidden sm:min-h-[360px]"}>
+                <section className={isReviewActive ? "flex h-full min-h-0 flex-1 flex-col overflow-hidden lg:min-h-[320px]" : "h-full min-h-0 overflow-hidden lg:min-h-[360px]"}>
                 {!isChatActive && (
                   <div className="relative">
                     <div className="rounded-md border border-border bg-card px-3 py-2">
@@ -1245,20 +1257,29 @@ export function ChatbotWorkspacePage() {
                 )}
                 <div className={isChatActive ? "relative h-full min-h-0 w-full flex-1" : "hidden"}>
                       <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden border border-border bg-background">
-                        <div className="flex min-h-[58px] shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-3 py-2">
+                        <div className="flex min-h-[44px] shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-2.5 py-1.5 lg:min-h-[58px] lg:gap-4 lg:px-3 lg:py-2">
                           <div>
                           <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
                             Command Surface
                           </div>
-                          <div className="mt-0.5 text-xs text-muted-foreground">
+                          <div className="mt-0.5 hidden text-xs text-muted-foreground lg:block">
                               Case commands, uploads, and follow-up analysis.
                             </div>
                           </div>
                           <div className="flex flex-wrap items-center justify-end gap-2">
+                            {hasStructuredAnalysis && (
+                              <button
+                                type="button"
+                                onClick={openReviewPane}
+                                className="rounded-md border border-border bg-muted px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-muted/70 lg:hidden"
+                              >
+                                Open review
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => setChatOnlyMode((value) => !value)}
-                              className={`rounded-md border px-3 py-1.5 text-xs font-medium transition ${
+                              className={`hidden rounded-md border px-3 py-1.5 text-xs font-medium transition lg:inline-flex ${
                                 chatOnlyMode
                                   ? "border-[#C65A2A]/40 bg-[#C65A2A]/15 text-[#C65A2A]"
                                   : "border-border bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground"
@@ -1270,7 +1291,7 @@ export function ChatbotWorkspacePage() {
                             <button
                               type="button"
                               onClick={collapseChatPane}
-                              className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-muted/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                              className="hidden rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:bg-muted/70 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 lg:inline-flex"
                               disabled={chatOnlyMode}
                             >
                               Collapse chat
