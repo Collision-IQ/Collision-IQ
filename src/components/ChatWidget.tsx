@@ -813,6 +813,11 @@ export default function ChatWidget({
     writeStoredChatMessages(chatSessionStorageKey, messages);
   }, [chatSessionStorageKey, messages]);
 
+  useEffect(() => {
+    if (!introDismissed || !isInitialOnlyMessages(messages)) return;
+    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [introDismissed, messages]);
+
   // Load available browser TTS voices
   useEffect(() => {
     if (!BROWSER_TTS_ENABLED) return;
@@ -2956,13 +2961,9 @@ export default function ChatWidget({
           space-y-4
         "
         >
-          {messages.length === 1 && messages[0].role === "assistant" && (
+          {messages.length === 1 && messages[0].role === "assistant" && !introDismissed && (
             <div
-              className={[
-                "flex min-h-[360px] flex-col items-center justify-center space-y-4 py-10 text-center transition-[opacity,visibility] duration-200",
-                introDismissed ? "pointer-events-none invisible opacity-0" : "visible opacity-100",
-              ].join(" ")}
-              aria-hidden={introDismissed}
+              className="flex min-h-[360px] flex-col items-center justify-center space-y-4 py-10 text-center transition-[opacity,visibility] duration-200"
             >
               <div className="min-h-[136px] w-full">
                 <div className="mx-auto max-w-[860px] border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
