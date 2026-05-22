@@ -2963,7 +2963,7 @@ export default function ChatWidget({
         />
       ) : null}
 
-      <div className="absolute inset-0 pointer-events-none bg-[url('/brand/logos/Logo-grey.png')] bg-no-repeat bg-center bg-[length:360px] opacity-[0.018] dark:opacity-[0.035] md:bg-[length:420px]" />
+      <div className="absolute inset-0 pointer-events-none bg-[url('/brand/logos/Logo-grey.png')] bg-no-repeat bg-[length:430px] bg-[position:center_58%] opacity-[0.045] dark:opacity-[0.07] sm:bg-center sm:bg-[length:360px] sm:opacity-[0.018] sm:dark:opacity-[0.035] md:bg-[length:420px]" />
       <div className="pointer-events-none absolute inset-0 bg-background/70 dark:bg-background/78" />
 
       <div className="relative z-10 flex flex-col flex-1 min-h-0">
@@ -2981,7 +2981,7 @@ export default function ChatWidget({
         >
           {messages.length === 1 && messages[0].role === "assistant" && !introDismissed && (
             <div
-              className="flex min-h-[220px] flex-col items-center justify-start space-y-3 py-3 text-center transition-[opacity,visibility] duration-200 sm:min-h-[360px] sm:justify-center sm:space-y-4 sm:py-10"
+              className="flex min-h-0 flex-col items-center justify-start space-y-0 py-2 text-center transition-[opacity,visibility] duration-200 sm:min-h-[360px] sm:justify-center sm:space-y-4 sm:py-10"
             >
               <div className="min-h-[88px] w-full sm:min-h-[136px]">
                 <div className="mx-auto max-w-[860px] border border-border bg-card px-3 py-2.5 text-[12px] text-muted-foreground sm:px-4 sm:py-3 sm:text-sm">
@@ -3001,7 +3001,7 @@ export default function ChatWidget({
                   </div>
                 </div>
               </div>
-              <div className="space-y-1.5 text-center sm:space-y-2">
+              <div className="hidden space-y-1.5 text-center sm:block sm:space-y-2">
                 <div className="text-sm font-semibold text-foreground sm:text-base">
                   Start a repair analysis
                 </div>
@@ -3019,7 +3019,7 @@ export default function ChatWidget({
                 onDragLeave={handleUploadDragLeave}
                 onDrop={handleUploadDrop}
                 className={[
-                  "w-full max-w-[760px] border border-dashed p-2.5 transition sm:p-3",
+                  "hidden w-full max-w-[760px] border border-dashed p-2.5 transition sm:block sm:p-3",
                   isDragActive
                     ? "border-[#b86a2d] bg-[#b86a2d]/10"
                     : "border-border bg-muted/40",
