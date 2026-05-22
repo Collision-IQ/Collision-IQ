@@ -198,7 +198,7 @@ export default function StructuredAnalysisCanvas({
   const sections = [
     {
       insightKey: "executive_summary",
-      title: "Executive Summary",
+      title: "Summary",
       eyebrow: "Case Read",
       summary: "Fast read of the current position, exposure, and repair posture.",
       defaultExpanded: true,
@@ -214,7 +214,7 @@ export default function StructuredAnalysisCanvas({
     },
     {
       insightKey: "support_gaps",
-      title: "What Looks Missing or Underwritten",
+      title: "Evidence Gaps",
       eyebrow: "Exposure",
       summary: "The main omissions, support gaps, or underwritten items worth pressing on.",
       bullets: missingBullets,
@@ -222,9 +222,9 @@ export default function StructuredAnalysisCanvas({
     ...retrievalSections,
     {
       insightKey: "financial_view",
-      title: "Financial / Valuation View",
+      title: "Estimate Delta",
       eyebrow: "Financial View",
-      summary: "Directional total-loss, gap, or valuation posture from the current material.",
+      summary: "Directional estimate, total-loss, gap, or valuation posture from the current material.",
       bullets: financialBullets,
       prose: buildValuationSummary(renderModel),
     },
@@ -399,7 +399,7 @@ export default function StructuredAnalysisCanvas({
         >
           <AnalysisSectionCard
             title="Ready Outputs"
-            eyebrow="Outputs"
+            eyebrow="Reports"
             summary={
               canUseFullReportExports
                 ? "Carrier-ready reports remain available in the right rail when you're ready to export."

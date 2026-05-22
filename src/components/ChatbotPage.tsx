@@ -206,6 +206,7 @@ const CHAT_CONSENT_TERMS_VERSION = "2026-03-28";
 const CHAT_CONSENT_PRIVACY_VERSION = "2026-03-28";
 const CHAT_ONLY_STORAGE_KEY = "collisionIq.chatOnlyMode";
 const ASSISTANCE_PROFILE_STORAGE_KEY = "collisionIq.assistanceProfile";
+const TRIAL_BADGE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 type AssistanceProfile =
   | "shop"
@@ -308,6 +309,27 @@ function getCurrentWorkspaceReturnUrl(): string | null {
   if (typeof window === "undefined") return null;
 
   return window.location.href;
+}
+
+function isWithinTrialBadgeWindow(access: AccountEntitlements | null) {
+  if (!access) return false;
+
+  const isTrialAccount =
+    access.plan === "trial" ||
+    access.billingPlan === "trial" ||
+    access.activeSubscriptionStatus === "TRIALING" ||
+    access.trialActive;
+
+  if (!isTrialAccount) return false;
+
+  const startedAt = access.trialStart ?? access.createdAt;
+  if (!startedAt) return false;
+
+  const startedAtMs = new Date(startedAt).getTime();
+  if (Number.isNaN(startedAtMs)) return false;
+
+  const ageMs = Date.now() - startedAtMs;
+  return ageMs >= 0 && ageMs < TRIAL_BADGE_WINDOW_MS;
 }
 
 export function ChatbotWorkspacePage() {
@@ -754,6 +776,7 @@ export function ChatbotWorkspacePage() {
 
     return days > 0 ? days : 0;
   }, [viewerAccess]);
+  const trialBadgeLabel = isWithinTrialBadgeWindow(viewerAccess) ? "30-Day Trial" : null;
 
   async function handleConsentAccept() {
     if (!consentChecked || typeof window === "undefined") return;
@@ -971,9 +994,10 @@ export function ChatbotWorkspacePage() {
     <div className="h-[100svh] overflow-hidden bg-background text-foreground">
       <ChatShell
         title="Collision-IQ"
+        planLabel={trialBadgeLabel}
         center={
           <div className="relative h-full min-h-0 w-full">
-            <div className={`grid h-full min-h-0 w-full gap-3 pt-12 ${workspaceRowsClass}`}>
+            <div className={`grid h-full min-h-0 w-full gap-3 pt-3 ${workspaceRowsClass}`}>
               {hasStructuredAnalysis && (
                 <div
                   className={
@@ -984,7 +1008,7 @@ export function ChatbotWorkspacePage() {
                 >
                   <div
                     ref={immersiveToolbarRef}
-                    className="z-20 mb-3 shrink-0 rounded-[22px] border border-border bg-card/95 px-4 py-3 shadow-[0_18px_44px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 backdrop-blur-xl dark:shadow-[0_18px_44px_rgba(0,0,0,0.28)]"
+                    className="z-20 mb-3 min-h-[86px] shrink-0 rounded-[22px] border border-border bg-card/95 px-4 py-3 shadow-[0_18px_44px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 backdrop-blur-xl dark:shadow-[0_18px_44px_rgba(0,0,0,0.28)]"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="min-w-0">
@@ -1016,7 +1040,7 @@ export function ChatbotWorkspacePage() {
                   {isReviewActive ? (
                     <div
                       ref={immersiveWorkspaceRef}
-                      className="min-h-0 flex-1 overflow-y-auto rounded-[26px] border border-border bg-card/80 px-1 pb-4 shadow-[0_24px_70px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 dark:shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
+                      className="min-h-[420px] flex-1 overflow-y-auto rounded-[26px] border border-border bg-card/80 px-1 pb-4 shadow-[0_24px_70px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 dark:shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
                     >
                       <div id="immersive-case-header" data-header-change-reason={lastHeaderChangeReason}>
                         <div className="mb-2 text-right text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -1130,7 +1154,8 @@ export function ChatbotWorkspacePage() {
                 </div>
               )}
               <div className="flex min-h-0 flex-col">
-                {trialDaysRemaining !== null && trialDaysRemaining <= 7 && (
+                <div className="min-h-[56px] shrink-0">
+                {trialDaysRemaining !== null && trialDaysRemaining <= 7 && isWithinTrialBadgeWindow(viewerAccess) && (
                   <div
                     className={`mb-3 rounded-xl px-4 py-3 text-sm ${
                       trialDaysRemaining <= 2
@@ -1168,8 +1193,8 @@ export function ChatbotWorkspacePage() {
                     )}
                   </div>
                 )}
-                {isTrialing && (
-                  <div className="mb-3 text-xs text-green-300/80">
+                {isTrialing && isWithinTrialBadgeWindow(viewerAccess) && (
+                  <div className="mb-3 min-h-4 text-xs text-green-300/80">
                     Trial active - full access enabled
                   </div>
                 )}
@@ -1181,7 +1206,8 @@ export function ChatbotWorkspacePage() {
                     </span>
                   </div>
                 )}
-                <section className="h-full min-h-0 overflow-hidden">
+                </div>
+                <section className="h-full min-h-[360px] overflow-hidden">
                 {!isChatActive && (
                   <div className="relative">
                     <div className="rounded-md border border-border bg-card px-3 py-2">
@@ -1216,7 +1242,7 @@ export function ChatbotWorkspacePage() {
                 )}
                 <div className={isChatActive ? "relative h-full min-h-0" : "hidden"}>
                       <div className="relative flex h-full min-h-0 flex-col overflow-hidden border border-border bg-background">
-                        <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-3 py-2">
+                        <div className="flex min-h-[58px] shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-3 py-2">
                           <div>
                           <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
                             Command Surface
@@ -2324,7 +2350,7 @@ function RailContent({
         <div className="mt-3 grid grid-cols-2 gap-2.5">
           <MetricCard label="Uploaded" value={String(effectiveReviewProgress.uploaded)} />
           <MetricCard label="Indexed" value={String(effectiveReviewProgress.indexed)} />
-          <MetricCard label="Vision processed" value={String(effectiveReviewProgress.visionProcessed)} />
+          <MetricCard label="Vision Processed" value={String(effectiveReviewProgress.visionProcessed)} />
           <MetricCard
             label="Reviewed"
             value={`${effectiveReviewProgress.reviewedForDetermination}/${effectiveReviewProgress.reviewableFileCount || effectiveReviewProgress.reviewedForDetermination}`}

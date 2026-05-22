@@ -286,6 +286,7 @@ const BROWSER_TTS_ENABLED =
 const SERVER_TTS_MAX_INPUT_CHARS = 4_000;
 const CHAT_SESSION_STORAGE_PREFIX = "collision-iq.chat-widget.session";
 const DRAFT_CHAT_SESSION_KEY = `${CHAT_SESSION_STORAGE_PREFIX}:draft`;
+const INTRO_DISMISSAL_SESSION_KEY = "collision-iq.chat-widget.introDismissed";
 const LARGE_UPLOAD_WARNING_BYTES = 10 * 1024 * 1024;
 type ServerTtsVoiceOptionId = "primary" | "secondary";
 type ServerTtsVoiceOption = {
@@ -464,6 +465,21 @@ function removeStoredChatMessages(storageKey: string) {
   }
 }
 
+function readIntroDismissedForSession() {
+  if (typeof window === "undefined") return false;
+  return window.sessionStorage.getItem(INTRO_DISMISSAL_SESSION_KEY) === "true";
+}
+
+function writeIntroDismissedForSession() {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.sessionStorage.setItem(INTRO_DISMISSAL_SESSION_KEY, "true");
+  } catch {
+    // Intro dismissal is a best-effort session preference.
+  }
+}
+
 function isZipFile(file: Pick<File, "name" | "type">) {
   return (
     file.name.toLowerCase().endsWith(".zip") ||
@@ -616,8 +632,7 @@ export default function ChatWidget({
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingError, setRecordingError] = useState<string | null>(null);
-  const [showOpeningDisclaimer, setShowOpeningDisclaimer] = useState(true);
-  const [openingDisclaimerDismissed, setOpeningDisclaimerDismissed] = useState(false);
+  const [introDismissed, setIntroDismissed] = useState(false);
   const [fetchedViewerAccess, setFetchedViewerAccess] = useState<AccountEntitlements | null>(null);
   const [uploadUiState, setUploadUiState] = useState<UploadUiState>("idle");
   const [selectedUploadNames, setSelectedUploadNames] = useState<string[]>([]);
@@ -786,6 +801,12 @@ export default function ChatWidget({
   useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    setIntroDismissed(readIntroDismissedForSession());
+  }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     chatSessionStorageKeyRef.current = chatSessionStorageKey;
@@ -1337,8 +1358,14 @@ export default function ChatWidget({
   }
 
   function dismissOpeningDisclaimer() {
-    setShowOpeningDisclaimer(false);
-    setOpeningDisclaimerDismissed(true);
+    writeIntroDismissedForSession();
+    setIntroDismissed(true);
+  }
+
+  function dismissIntroForComposerEngagement() {
+    if (introDismissed) return;
+    writeIntroDismissedForSession();
+    setIntroDismissed(true);
   }
 
   function openAttachmentPreview(attachmentId: string) {
@@ -1425,8 +1452,7 @@ export default function ChatWidget({
     firstAttachmentAtRef.current = null;
     currentCaseTopicRef.current = DEFAULT_CASE_TOPIC;
     activeSystemStatusMessageIdRef.current = null;
-    setShowOpeningDisclaimer(true);
-    setOpeningDisclaimerDismissed(false);
+    setIntroDismissed(readIntroDismissedForSession());
 
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (cameraInputRef.current) cameraInputRef.current.value = "";
@@ -2914,7 +2940,7 @@ export default function ChatWidget({
         />
       ) : null}
 
-      <div className="absolute inset-0 pointer-events-none bg-[url('/brand/logos/Logo-grey.png')] bg-no-repeat bg-center bg-[length:48%] opacity-[0.018] dark:opacity-[0.035]" />
+      <div className="absolute inset-0 pointer-events-none bg-[url('/brand/logos/Logo-grey.png')] bg-no-repeat bg-center bg-[length:360px] opacity-[0.018] dark:opacity-[0.035] md:bg-[length:420px]" />
       <div className="pointer-events-none absolute inset-0 bg-background/70 dark:bg-background/78" />
 
       <div className="relative z-10 flex flex-col flex-1 min-h-0">
@@ -2931,8 +2957,14 @@ export default function ChatWidget({
         "
         >
           {messages.length === 1 && messages[0].role === "assistant" && (
-            <div className="flex flex-col items-center justify-center space-y-4 py-10 text-center">
-              {showOpeningDisclaimer && !openingDisclaimerDismissed && (
+            <div
+              className={[
+                "flex min-h-[360px] flex-col items-center justify-center space-y-4 py-10 text-center transition-[opacity,visibility] duration-200",
+                introDismissed ? "pointer-events-none invisible opacity-0" : "visible opacity-100",
+              ].join(" ")}
+              aria-hidden={introDismissed}
+            >
+              <div className="min-h-[136px] w-full">
                 <div className="mx-auto max-w-[860px] border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
                   <div className="flex items-start justify-between gap-3">
                   <div className="leading-7">
@@ -2949,7 +2981,7 @@ export default function ChatWidget({
                     </button>
                   </div>
                 </div>
-              )}
+              </div>
               <div className="space-y-2 text-center">
                 <div className="text-base font-semibold text-foreground">
                   Start a repair analysis
@@ -3211,7 +3243,7 @@ export default function ChatWidget({
           <div ref={bottomRef} />
         </div>
 
-        <div className="z-20 shrink-0 border-t border-border bg-card px-3 py-2">
+        <div className="z-20 min-h-[74px] shrink-0 border-t border-border bg-card px-3 py-2">
           <div className="mx-auto w-full max-w-[1120px]">
             <div
               onDragEnter={handleUploadDragEnter}
@@ -3304,8 +3336,12 @@ export default function ChatWidget({
               <textarea
                 ref={textareaRef}
                 value={input}
-                onFocus={() => onChatEngagement?.()}
+                onFocus={() => {
+                  dismissIntroForComposerEngagement();
+                  onChatEngagement?.();
+                }}
                 onChange={(e) => {
+                  dismissIntroForComposerEngagement();
                   onChatEngagement?.();
                   setInput(e.target.value);
                 }}

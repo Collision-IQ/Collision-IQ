@@ -36,7 +36,7 @@ type Props = {
   left?: ReactNode;
   center: ReactNode;
   right?: ReactNode;
-  planLabel?: string;
+  planLabel?: string | null;
 };
 
 function Drawer({
@@ -101,7 +101,7 @@ export default function ChatShell({
   left,
   center,
   right,
-  planLabel = "30-Day Trial",
+  planLabel = null,
 }: Props) {
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
@@ -112,10 +112,10 @@ export default function ChatShell({
   return (
     <ClerkProvider>
       <div className="ci-workstation flex h-[100svh] max-w-full flex-col overflow-hidden bg-background text-foreground">
-      <header className="relative z-10 border-b border-border bg-card">
-        <div className="relative mx-auto flex min-h-[52px] max-w-none items-center justify-between gap-2 px-3 py-2 md:gap-4 md:px-5">
+      <header className="relative z-10 min-h-[64px] shrink-0 border-b border-border bg-card">
+        <div className="relative mx-auto flex min-h-[64px] max-w-none items-center justify-between gap-2 px-3 py-2 md:gap-4 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex items-center gap-2">
+            <div className="flex h-8 min-w-[166px] items-center gap-2">
               <Image
                 src="/iq/iq-favicon.png"
                 alt="Collision IQ icon"
@@ -129,7 +129,7 @@ export default function ChatShell({
                 alt={title}
                 width={150}
                 height={30}
-                className="h-[24px] w-auto max-w-[132px] invert dark:invert-0 sm:max-w-[150px]"
+                className="h-[24px] w-[132px] object-contain invert dark:invert-0 sm:w-[150px]"
                 priority
               />
             </div>
@@ -138,17 +138,21 @@ export default function ChatShell({
               Forensic repair intelligence
             </span>
 
-            <span
-              className={[
-                "hidden rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.08em] md:inline-flex",
-                getPlanTone(planLabel),
-              ].join(" ")}
-            >
-              {planLabel}
+            <span className="hidden h-6 min-w-[112px] items-center md:inline-flex">
+              {planLabel ? (
+                <span
+                  className={[
+                    "inline-flex h-6 items-center rounded-full border px-2.5 font-mono text-[10px] font-medium uppercase tracking-[0.08em]",
+                    getPlanTone(planLabel),
+                  ].join(" ")}
+                >
+                  {planLabel}
+                </span>
+              ) : null}
             </span>
           </div>
 
-          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+          <div className="flex min-h-10 min-w-0 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
             <Link
               href="/technical-systems"
               className="hidden min-h-10 items-center rounded-md border border-[#b86a2d] bg-[#b86a2d] px-3 py-2 text-xs font-semibold text-black transition hover:bg-[#c57934] sm:inline-flex"
@@ -188,19 +192,19 @@ export default function ChatShell({
         </div>
       </header>
 
-      <div className="h-px w-full bg-border" />
+      <div className="h-px w-full shrink-0 bg-border" />
 
       <div className="relative z-10 min-h-0 w-full max-w-none flex-1 overflow-hidden px-2 py-2 md:px-4 md:py-3">
         <div className="grid h-full min-h-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_410px]">
           <div className="flex h-full min-h-0 min-w-0 flex-col border border-border bg-card">
-            <div className="flex items-center justify-between gap-4 border-b border-border px-3 py-2">
+            <div className="flex min-h-[45px] shrink-0 items-center justify-between gap-4 border-b border-border px-3 py-2">
               <div className="inline-flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#a35d26] dark:text-[#c57934]">
                 <Image
                   src="/iq/iq-favicon.png"
                   alt="Collision IQ"
                   width={14}
                   height={14}
-                  className="h-3.5 w-3.5 object-contain"
+                  className="h-3.5 w-3.5 shrink-0 object-contain"
                 />
                 Collision IQ
               </div>
@@ -215,7 +219,7 @@ export default function ChatShell({
 
           {hasRight && (
             <div className="hidden h-full min-h-0 w-full flex-col border border-border bg-card lg:flex">
-              <div className="border-b border-border px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              <div className="min-h-[45px] shrink-0 border-b border-border px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                 Evidence / Exports / Audit
               </div>
               <div className="flex-1 min-h-0 overflow-y-auto p-3">{right}</div>
