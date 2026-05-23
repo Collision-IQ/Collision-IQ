@@ -10,7 +10,7 @@ const MAX_TTS_INPUT_CHARS = 4_000;
 const AUDIO_CONTENT_TYPE = "audio/mpeg";
 const ELEVENLABS_MODEL_ID = "eleven_v3";
 const ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128";
-const ELEVENLABS_TIMEOUT_MS = 30_000;
+const ELEVENLABS_TIMEOUT_MS = 60_000;
 
 type TtsRequestBody = {
   text?: unknown;
