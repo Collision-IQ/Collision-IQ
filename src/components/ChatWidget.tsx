@@ -283,8 +283,8 @@ const INITIAL_MESSAGE: Message = {
 
 const SERVER_TTS_ENABLED = true;
 const BROWSER_TTS_ENABLED =
-  process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_BROWSER_TTS === "true";
-const SERVER_TTS_MAX_INPUT_CHARS = 4_000;
+  process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_BROWSER_TTS !== "false";
+const SERVER_TTS_MAX_INPUT_CHARS = 2_000;
 const CHAT_SESSION_STORAGE_PREFIX = "collision-iq.chat-widget.session";
 const DRAFT_CHAT_SESSION_KEY = `${CHAT_SESSION_STORAGE_PREFIX}:draft`;
 const INTRO_DISMISSAL_SESSION_KEY = "collision-iq.chat-widget.introDismissed";
