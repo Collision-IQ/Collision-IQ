@@ -345,6 +345,13 @@ class ServerTtsPlaybackError extends Error {
   }
 }
 
+class StaleTtsPlaybackError extends Error {
+  constructor(message = "Stale TTS playback ignored.") {
+    super(message);
+    this.name = "StaleTtsPlaybackError";
+  }
+}
+
 function buildTtsMessageDiagnostics(message: Message) {
   return {
     messageId: message.id,
@@ -755,6 +762,7 @@ export default function ChatWidget({
   const speechPlaybackTokenRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+  const ttsFetchAbortRef = useRef<AbortController | null>(null);
   const audioBlobCacheRef = useRef<Map<string, Blob>>(new Map());
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messageCounterRef = useRef(0);
@@ -2807,45 +2815,82 @@ export default function ChatWidget({
     }
   }
 
-  function stopSpeaking() {
-    speechPlaybackTokenRef.current += 1;
+  function logTtsTransition(
+    transition:
+      | "server-start"
+      | "server-pause"
+      | "server-stop"
+      | "browser-fallback-start"
+      | "browser-pause"
+      | "browser-cancel"
+      | "stale-response-ignored",
+    details: {
+      messageId?: string | null;
+      selectedVoice?: ServerTtsVoiceOptionId | null;
+      playbackToken?: number;
+    } = {}
+  ) {
+    console.info("[tts] source transition", {
+      transition,
+      messageId: details.messageId ?? speakingMessageId,
+      selectedVoice: details.selectedVoice ?? serverTtsVoiceId,
+      playbackToken: details.playbackToken ?? speechPlaybackTokenRef.current,
+    });
+  }
+
+  function cancelBrowserSpeech(
+    transition: "browser-cancel" | "browser-pause" = "browser-cancel",
+    details?: { messageId?: string | null; selectedVoice?: ServerTtsVoiceOptionId | null; playbackToken?: number }
+  ) {
     browserSpeechQueueRef.current = [];
+
+    if (BROWSER_TTS_ENABLED && canUseBrowserReadAloud()) {
+      window.speechSynthesis.cancel();
+      logTtsTransition(transition, details);
+    }
+
+    utteranceRef.current = null;
+  }
+
+  function stopServerAudio(
+    transition: "server-stop" | "server-pause" = "server-stop",
+    details?: { messageId?: string | null; selectedVoice?: ServerTtsVoiceOptionId | null; playbackToken?: number }
+  ) {
+    const hadPendingFetch = Boolean(ttsFetchAbortRef.current);
+    ttsFetchAbortRef.current?.abort();
+    ttsFetchAbortRef.current = null;
 
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.src = "";
       audioRef.current = null;
+      logTtsTransition(transition, details);
+    } else if (hadPendingFetch) {
+      logTtsTransition(transition, details);
     }
 
     if (audioUrlRef.current) {
       URL.revokeObjectURL(audioUrlRef.current);
       audioUrlRef.current = null;
     }
+  }
 
-    if (!BROWSER_TTS_ENABLED || !canUseBrowserReadAloud()) {
-      setSpeakingMessageId(null);
-      setIsSpeaking(false);
-      utteranceRef.current = null;
-      return;
-    }
-
-    window.speechSynthesis.cancel();
-    utteranceRef.current = null;
+  function stopSpeaking() {
+    speechPlaybackTokenRef.current += 1;
+    stopServerAudio("server-stop");
+    cancelBrowserSpeech("browser-cancel");
     setSpeakingMessageId(null);
     setIsSpeaking(false);
     setIsSpeechPaused(false);
   }
 
   function pauseSpeaking() {
-    if (audioRef.current && !audioRef.current.paused) {
-      audioRef.current.pause();
-      setIsSpeechPaused(true);
-      return;
-    }
-    if (BROWSER_TTS_ENABLED && canUseBrowserReadAloud() && window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
-      window.speechSynthesis.pause();
-      setIsSpeechPaused(true);
-    }
+    speechPlaybackTokenRef.current += 1;
+    stopServerAudio("server-pause");
+    cancelBrowserSpeech("browser-pause");
+    setSpeakingMessageId(null);
+    setIsSpeaking(false);
+    setIsSpeechPaused(false);
   }
 
   function resumeSpeaking() {
@@ -2867,14 +2912,27 @@ export default function ChatWidget({
   ) {
     const playbackToken = speechPlaybackTokenRef.current;
     const chunks = splitSpeechTextIntoChunks(plainText, SERVER_TTS_MAX_INPUT_CHARS);
+    const assertFreshPlayback = () => {
+      if (speechPlaybackTokenRef.current !== playbackToken) {
+        logTtsTransition("stale-response-ignored", {
+          messageId: message.id,
+          selectedVoice,
+          playbackToken,
+        });
+        throw new StaleTtsPlaybackError();
+      }
+    };
 
     for (const [chunkIndex, chunk] of chunks.entries()) {
-      if (speechPlaybackTokenRef.current !== playbackToken) return;
+      assertFreshPlayback();
       const cacheKey = `${message.id}:${selectedVoice}:${chunkIndex}`;
       let audioBlob = audioBlobCacheRef.current.get(cacheKey);
 
       if (!audioBlob) {
         setTtsGeneratingMessageId(message.id);
+        const controller = new AbortController();
+        ttsFetchAbortRef.current?.abort();
+        ttsFetchAbortRef.current = controller;
         try {
           console.info("[tts] request", {
             ...buildTtsMessageDiagnostics(message),
@@ -2893,8 +2951,10 @@ export default function ChatWidget({
               text: chunk,
               voice: selectedVoice,
             }),
+            signal: controller.signal,
           });
 
+          assertFreshPlayback();
           const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
           let serverErrorData: { error?: string; code?: string } | null = null;
 
@@ -2940,6 +3000,7 @@ export default function ChatWidget({
           }
 
           audioBlob = await response.blob();
+          assertFreshPlayback();
           if (!audioBlob.size) {
             throw new ServerTtsPlaybackError("Voice generation returned empty audio.", {
               code: "TTS_PROVIDER_ERROR",
@@ -2947,12 +3008,35 @@ export default function ChatWidget({
             });
           }
           audioBlobCacheRef.current.set(cacheKey, audioBlob);
+        } catch (error) {
+          if (
+            error instanceof StaleTtsPlaybackError ||
+            (error instanceof DOMException && error.name === "AbortError") ||
+            (error instanceof Error && error.name === "AbortError")
+          ) {
+            logTtsTransition("stale-response-ignored", {
+              messageId: message.id,
+              selectedVoice,
+              playbackToken,
+            });
+            throw new StaleTtsPlaybackError();
+          }
+
+          throw error;
         } finally {
+          if (ttsFetchAbortRef.current === controller) {
+            ttsFetchAbortRef.current = null;
+          }
           setTtsGeneratingMessageId((current) => (current === message.id ? null : current));
         }
       }
 
-      if (speechPlaybackTokenRef.current !== playbackToken) return;
+      assertFreshPlayback();
+      cancelBrowserSpeech("browser-cancel", {
+        messageId: message.id,
+        selectedVoice,
+        playbackToken,
+      });
 
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
@@ -2961,13 +3045,15 @@ export default function ChatWidget({
       audioUrlRef.current = audioUrl;
 
       audio.onplay = () => {
-        console.info("[tts] playback", {
-          ...buildTtsMessageDiagnostics(message),
+        cancelBrowserSpeech("browser-cancel", {
+          messageId: message.id,
           selectedVoice,
-          serverTtsAttempted: true,
-          status: 200,
-          code: null,
-          playbackSource: "server",
+          playbackToken,
+        });
+        logTtsTransition("server-start", {
+          messageId: message.id,
+          selectedVoice,
+          playbackToken,
         });
         setSpeakingMessageId(message.id);
         setIsSpeaking(true);
@@ -2975,21 +3061,37 @@ export default function ChatWidget({
       };
 
       await new Promise<void>((resolve, reject) => {
-        audio.onended = () => resolve();
+        audio.onended = () => {
+          logTtsTransition("server-stop", {
+            messageId: message.id,
+            selectedVoice,
+            playbackToken,
+          });
+          cancelBrowserSpeech("browser-cancel", {
+            messageId: message.id,
+            selectedVoice,
+            playbackToken,
+          });
+          resolve();
+        };
         audio.onerror = () =>
           reject(
-            new ServerTtsPlaybackError("Voice playback failed.", {
-              code: "SERVER_AUDIO_PLAYBACK_FAILED",
-            })
+            speechPlaybackTokenRef.current !== playbackToken
+              ? new StaleTtsPlaybackError()
+              : new ServerTtsPlaybackError("Voice playback failed.", {
+                  code: "SERVER_AUDIO_PLAYBACK_FAILED",
+                })
           );
         void audio.play().catch((error) =>
           reject(
-            new ServerTtsPlaybackError(
-              error instanceof Error ? error.message : "Voice playback failed.",
-              {
-                code: "SERVER_AUDIO_PLAYBACK_FAILED",
-              }
-            )
+            speechPlaybackTokenRef.current !== playbackToken
+              ? new StaleTtsPlaybackError()
+              : new ServerTtsPlaybackError(
+                  error instanceof Error ? error.message : "Voice playback failed.",
+                  {
+                    code: "SERVER_AUDIO_PLAYBACK_FAILED",
+                  }
+                )
           )
         );
       });
@@ -3016,10 +3118,24 @@ export default function ChatWidget({
     }
 
     const playbackToken = speechPlaybackTokenRef.current;
+    stopServerAudio("server-stop", {
+      messageId: message.id,
+      playbackToken,
+    });
+    logTtsTransition("browser-fallback-start", {
+      messageId: message.id,
+      playbackToken,
+    });
     browserSpeechQueueRef.current = splitSpeechTextIntoChunks(plainText);
 
     function speakNext() {
-      if (speechPlaybackTokenRef.current !== playbackToken) return;
+      if (speechPlaybackTokenRef.current !== playbackToken) {
+        logTtsTransition("stale-response-ignored", {
+          messageId: message.id,
+          playbackToken,
+        });
+        return;
+      }
       const text = browserSpeechQueueRef.current.shift();
 
       if (!text) {
@@ -3058,6 +3174,13 @@ export default function ChatWidget({
       };
 
       utteranceRef.current = utterance;
+      if (speechPlaybackTokenRef.current !== playbackToken) {
+        logTtsTransition("stale-response-ignored", {
+          messageId: message.id,
+          playbackToken,
+        });
+        return;
+      }
       window.speechSynthesis.speak(utterance);
     }
 
@@ -3080,6 +3203,7 @@ export default function ChatWidget({
     }
 
     stopSpeaking();
+    const activePlaybackToken = speechPlaybackTokenRef.current;
 
     let fallbackServerStatus: number | null = null;
     let fallbackServerCode: ServerTtsErrorCode | string | null = null;
@@ -3089,6 +3213,10 @@ export default function ChatWidget({
         await playServerSpeech(message, plainText, voice.id);
         return;
       } catch (error) {
+        if (error instanceof StaleTtsPlaybackError) {
+          return;
+        }
+
         const shouldFallback = shouldFallbackToBrowserSpeech(error);
         fallbackServerStatus =
           error instanceof ServerTtsPlaybackError ? error.status ?? null : null;
@@ -3118,6 +3246,15 @@ export default function ChatWidget({
           ? "Voiceover is temporarily unavailable."
           : "Voiceover is disabled until premium server speech is enabled."
       );
+      return;
+    }
+
+    if (speechPlaybackTokenRef.current !== activePlaybackToken) {
+      logTtsTransition("stale-response-ignored", {
+        messageId: message.id,
+        selectedVoice: voice.id,
+        playbackToken: activePlaybackToken,
+      });
       return;
     }
 
@@ -3300,9 +3437,10 @@ export default function ChatWidget({
                       {SERVER_TTS_ENABLED && (
                         <select
                           value={serverTtsVoiceId}
-                          onChange={(event) =>
-                            setServerTtsVoiceId(event.target.value as ServerTtsVoiceOptionId)
-                          }
+                          onChange={(event) => {
+                            stopSpeaking();
+                            setServerTtsVoiceId(event.target.value as ServerTtsVoiceOptionId);
+                          }}
                           disabled={disabled || ttsGeneratingMessageId === msg.id || speakingMessageId === msg.id}
                           aria-label="Select voice"
                           title="Select voice"
