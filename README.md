@@ -28,6 +28,22 @@ GOOGLE_PA_INSURANCE_POLICIES_FOLDER_ID=1fxDcmu_anJLGRJ8qLvORWAq8kNR1vzkf
 
 The folder must be accessible to the configured Google Drive service account or impersonated subject, and Drive ingestion must be run so policy language is indexed before the bot can cite matched excerpts. If the connector/index is unavailable, the bot should say the policy folder/index needs to be checked instead of making policy-specific conclusions.
 
+## ElevenLabs TTS
+
+Voiceover is proxied through `/api/tts`; the browser never calls ElevenLabs directly and the API key must remain server-only.
+
+Required environment variables:
+
+```bash
+ELEVENLABS_API_KEY=
+ELEVENLABS_VOICE_ID_1=
+ELEVENLABS_VOICE_ID_2=
+ELEVENLABS_MODEL_ID=eleven_turbo_v2_5
+ELEVENLABS_OUTPUT_FORMAT=mp3_44100_128
+```
+
+The client sends symbolic voice values only: `voice_1` for Voice 1 and `voice_2` for Voice 2. The server resolves those symbols to `ELEVENLABS_VOICE_ID_1` and `ELEVENLABS_VOICE_ID_2`. Browser SpeechSynthesis fallback is disabled unless `NEXT_PUBLIC_TTS_ALLOW_BROWSER_FALLBACK=true`, and any fallback is visibly labeled as a browser voice.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

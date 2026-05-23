@@ -17,7 +17,6 @@ import {
   Mic,
   LoaderCircle,
   Pause,
-  Play,
   StopCircle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -37,9 +36,7 @@ import {
   summarizeAttachmentStats,
 } from "@/components/chatWidget/attachmentUtils";
 import {
-  canUseBrowserReadAloud,
   formatAssistantDisplayMessage,
-  splitSpeechTextIntoChunks,
   toSpeechText,
 } from "@/components/chatWidget/speechUtils";
 import {
@@ -69,11 +66,11 @@ import {
   buildReviewCompletenessMessage,
   type ExcludedFromReviewReason,
 } from "@/lib/reviewCompleteness";
-import { VOICE_PRESETS } from "@/lib/voicePresets";
 import {
   isRetryableProviderMessage,
   RETRYABLE_PROVIDER_USER_MESSAGE,
 } from "@/lib/ai/providerRetryableError";
+import { speak, TtsClientError, type SpeakResult, type TtsProvider, type TtsVoiceSymbol } from "@/lib/tts";
 
 interface Attachment {
   attachmentId: string;
@@ -288,62 +285,29 @@ const INITIAL_MESSAGE: Message = {
     "Hi there - upload an estimate, OEM procedure, or photo and I'll produce a structured repair analysis.",
 };
 
-const SERVER_TTS_ENABLED = true;
-const BROWSER_TTS_ENABLED =
-  process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_BROWSER_TTS !== "false";
-const SERVER_TTS_MAX_INPUT_CHARS = 2_000;
+const TTS_ALLOW_BROWSER_FALLBACK =
+  process.env.NEXT_PUBLIC_TTS_ALLOW_BROWSER_FALLBACK === "true";
 const ZIP_MAX_BYTES = 50 * 1024 * 1024;
 const CHAT_SESSION_STORAGE_PREFIX = "collision-iq.chat-widget.session";
 const DRAFT_CHAT_SESSION_KEY = `${CHAT_SESSION_STORAGE_PREFIX}:draft`;
 const INTRO_DISMISSAL_SESSION_KEY = "collision-iq.chat-widget.introDismissed";
 const LARGE_UPLOAD_WARNING_BYTES = 10 * 1024 * 1024;
-type ServerTtsVoiceOptionId = "primary" | "secondary";
+type ServerTtsVoiceOptionId = TtsVoiceSymbol;
 type ServerTtsVoiceOption = {
   id: ServerTtsVoiceOptionId;
   label: string;
 };
-type ServerTtsErrorCode =
-  | "TTS_NOT_CONFIGURED"
-  | "UNSUPPORTED_VOICE"
-  | "TTS_VOICE_UNAVAILABLE"
-  | "TTS_RATE_LIMITED"
-  | "TTS_TIMEOUT"
-  | "TTS_PROVIDER_ERROR"
-  | "SERVER_AUDIO_PLAYBACK_FAILED";
-const DEFAULT_SERVER_TTS_VOICE: ServerTtsVoiceOptionId = "primary";
+const DEFAULT_SERVER_TTS_VOICE: ServerTtsVoiceOptionId = "voice_1";
 const SERVER_TTS_VOICE_OPTIONS: [ServerTtsVoiceOption, ServerTtsVoiceOption] = [
   {
-    id: "primary",
+    id: "voice_1",
     label: "Voice 1",
   },
   {
-    id: "secondary",
+    id: "voice_2",
     label: "Voice 2",
   },
 ];
-const SERVER_TTS_BLOCKING_ERROR_CODES = new Set<ServerTtsErrorCode>([
-  "TTS_NOT_CONFIGURED",
-  "UNSUPPORTED_VOICE",
-  "TTS_VOICE_UNAVAILABLE",
-]);
-const SERVER_TTS_TRANSIENT_ERROR_CODES = new Set<ServerTtsErrorCode>([
-  "TTS_RATE_LIMITED",
-  "TTS_TIMEOUT",
-  "TTS_PROVIDER_ERROR",
-  "SERVER_AUDIO_PLAYBACK_FAILED",
-]);
-
-class ServerTtsPlaybackError extends Error {
-  code?: ServerTtsErrorCode;
-  status?: number;
-
-  constructor(message: string, options?: { code?: ServerTtsErrorCode; status?: number }) {
-    super(message);
-    this.name = "ServerTtsPlaybackError";
-    this.code = options?.code;
-    this.status = options?.status;
-  }
-}
 
 class StaleTtsPlaybackError extends Error {
   constructor(message = "Stale TTS playback ignored.") {
@@ -360,40 +324,18 @@ function buildTtsMessageDiagnostics(message: Message) {
   };
 }
 
-function normalizeServerTtsErrorCode(value: unknown): ServerTtsErrorCode | undefined {
-  if (typeof value !== "string") return undefined;
-  if (
-    value === "TTS_NOT_CONFIGURED" ||
-    value === "UNSUPPORTED_VOICE" ||
-    value === "TTS_VOICE_UNAVAILABLE" ||
-    value === "TTS_RATE_LIMITED" ||
-    value === "TTS_TIMEOUT" ||
-    value === "TTS_PROVIDER_ERROR" ||
-    value === "SERVER_AUDIO_PLAYBACK_FAILED"
-  ) {
-    return value;
-  }
-  return undefined;
-}
-
-function shouldFallbackToBrowserSpeech(error: unknown) {
-  if (error instanceof ServerTtsPlaybackError) {
-    return error.code
-      ? SERVER_TTS_TRANSIENT_ERROR_CODES.has(error.code)
-      : false;
+function resolveTtsStatusMessage(voice: ServerTtsVoiceOption, error: unknown) {
+  if (error instanceof TtsClientError) {
+    if (error.code === "TTS_NOT_CONFIGURED") {
+      return `ElevenLabs is not configured (${error.missing?.join(", ") || "missing env"}).`;
+    }
+    if (error.code === "TTS_UNKNOWN_VOICE") {
+      return `${voice.label} is not a supported ElevenLabs voice.`;
+    }
+    return `${voice.label} is unavailable (${error.code}).`;
   }
 
-  return true;
-}
-
-function resolveServerTtsStatusMessage(voice: ServerTtsVoiceOption, error: unknown) {
-  const code = error instanceof ServerTtsPlaybackError ? error.code : undefined;
-
-  if (code && SERVER_TTS_BLOCKING_ERROR_CODES.has(code)) {
-    return `${voice.label} is unavailable. Please check the ElevenLabs voice configuration.`;
-  }
-
-  return "Voiceover is temporarily unavailable.";
+  return "ElevenLabs voiceover is unavailable.";
 }
 
 const DEFAULT_UPLOAD_LIMIT_ENTITLEMENTS: Pick<
@@ -720,9 +662,8 @@ export default function ChatWidget({
   const [ttsGeneratingMessageId, setTtsGeneratingMessageId] = useState<string | null>(null);
   const [serverTtsVoiceId, setServerTtsVoiceId] =
     useState<ServerTtsVoiceOptionId>(DEFAULT_SERVER_TTS_VOICE);
-  const [ttsVoiceName, setTtsVoiceName] = useState<string | null>(null);
-  const [ttsPresetId, setTtsPresetId] = useState<string>("default");
-  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [messageVoiceSelections, setMessageVoiceSelections] = useState<Record<string, ServerTtsVoiceOptionId>>({});
+  const [ttsPlaybackProvider, setTtsPlaybackProvider] = useState<TtsProvider | null>(null);
   const [totalFilesReviewed, setTotalFilesReviewed] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -757,13 +698,10 @@ export default function ChatWidget({
     totalKnownFiles: 0,
   });
   const firstAttachmentAtRef = useRef<number | null>(null);
-  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
-  const browserSpeechQueueRef = useRef<string[]>([]);
   const speechPlaybackTokenRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const ttsFetchAbortRef = useRef<AbortController | null>(null);
-  const audioBlobCacheRef = useRef<Map<string, Blob>>(new Map());
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messageCounterRef = useRef(0);
   const activeSystemStatusMessageIdRef = useRef<string | null>(null);
@@ -871,17 +809,6 @@ export default function ChatWidget({
   const resolvedViewerAccess = isSignedIn ? viewerAccess ?? fetchedViewerAccess : null;
   const productPlan = resolvedViewerAccess?.plan ?? "none";
   const hasProChatRecommendations = canAccessFeature(productPlan, "chat_report_recommendations");
-  const selectedServerTtsVoice =
-    SERVER_TTS_VOICE_OPTIONS.find((option) => option.id === serverTtsVoiceId) ??
-    SERVER_TTS_VOICE_OPTIONS[0];
-  const selectedVoicePreset =
-    VOICE_PRESETS.find((preset) => preset.id === ttsPresetId) ?? VOICE_PRESETS[0];
-  const browserVoiceNotice =
-    BROWSER_TTS_ENABLED && canUseBrowserReadAloud() && availableVoices.length === 0
-      ? "Voice options depend on your browser/system voices."
-      : null;
-  const selectedVoiceDescription =
-    "description" in selectedVoicePreset ? selectedVoicePreset.description : "Select voice";
   const uploadPlanLimits = useMemo(
     () => resolveUploadPlanLimits(resolvedViewerAccess ?? DEFAULT_UPLOAD_LIMIT_ENTITLEMENTS),
     [resolvedViewerAccess]
@@ -923,21 +850,6 @@ export default function ChatWidget({
     });
   }, [layoutScrollKey]);
 
-  // Load available browser TTS voices
-  useEffect(() => {
-    if (!BROWSER_TTS_ENABLED) return;
-    if (!canUseBrowserReadAloud()) return;
-    function loadVoices() {
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) {
-        setAvailableVoices(voices);
-      }
-    }
-    loadVoices();
-    window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
-    return () => window.speechSynthesis.removeEventListener("voiceschanged", loadVoices);
-  }, []);
-
   useEffect(() => {
     if (!activeCaseId) return;
     if (analysisReportIdRef.current === activeCaseId) return;
@@ -971,12 +883,11 @@ export default function ChatWidget({
     setChatSessionStorageKey(nextStorageKey);
   }, [activeCaseId]);
 
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
-    const audioBlobCache = audioBlobCacheRef.current;
     return () => {
       disposeRecordingResources(true);
       stopSpeaking();
-      audioBlobCache.clear();
       for (const attachment of attachmentsRef.current) {
         if (attachment.previewUrl) {
           URL.revokeObjectURL(attachment.previewUrl);
@@ -984,7 +895,9 @@ export default function ChatWidget({
       }
     };
   }, []);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     if (!disabled) return;
 
@@ -1004,6 +917,7 @@ export default function ChatWidget({
 
     return () => window.clearTimeout(resetTimer);
   }, [disabled, isRecording]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   useEffect(() => {
     if (attachments.length < 2) return;
@@ -1531,11 +1445,10 @@ export default function ChatWidget({
       audioUrlRef.current = null;
     }
 
-    if (canUseBrowserReadAloud()) {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
 
-    utteranceRef.current = null;
     setSpeakingMessageId(null);
     setIsSpeaking(false);
     sessionRef.current += 1;
@@ -1548,7 +1461,6 @@ export default function ChatWidget({
       }
     });
     setMessages([INITIAL_MESSAGE]);
-    audioBlobCacheRef.current.clear();
     setAttachments([]);
     setTotalFilesReviewed(0);
     updateReviewProgress({
@@ -2815,376 +2727,37 @@ export default function ChatWidget({
     }
   }
 
-  function logTtsTransition(
-    transition:
-      | "server-start"
-      | "server-pause"
-      | "server-stop"
-      | "browser-fallback-start"
-      | "browser-pause"
-      | "browser-cancel"
-      | "stale-response-ignored",
-    details: {
-      messageId?: string | null;
-      selectedVoice?: ServerTtsVoiceOptionId | null;
-      playbackToken?: number;
-    } = {}
-  ) {
-    console.info("[tts] source transition", {
-      transition,
-      messageId: details.messageId ?? speakingMessageId,
-      selectedVoice: details.selectedVoice ?? serverTtsVoiceId,
-      playbackToken: details.playbackToken ?? speechPlaybackTokenRef.current,
-    });
-  }
-
-  function cancelBrowserSpeech(
-    transition: "browser-cancel" | "browser-pause" = "browser-cancel",
-    details?: { messageId?: string | null; selectedVoice?: ServerTtsVoiceOptionId | null; playbackToken?: number }
-  ) {
-    browserSpeechQueueRef.current = [];
-
-    if (BROWSER_TTS_ENABLED && canUseBrowserReadAloud()) {
+  function cancelBrowserSpeech() {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
-      logTtsTransition(transition, details);
     }
-
-    utteranceRef.current = null;
   }
 
-  function stopServerAudio(
-    transition: "server-stop" | "server-pause" = "server-stop",
-    details?: { messageId?: string | null; selectedVoice?: ServerTtsVoiceOptionId | null; playbackToken?: number }
-  ) {
-    const hadPendingFetch = Boolean(ttsFetchAbortRef.current);
+  function stopSpeaking() {
+    speechPlaybackTokenRef.current += 1;
     ttsFetchAbortRef.current?.abort();
     ttsFetchAbortRef.current = null;
+    cancelBrowserSpeech();
 
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.src = "";
       audioRef.current = null;
-      logTtsTransition(transition, details);
-    } else if (hadPendingFetch) {
-      logTtsTransition(transition, details);
     }
 
     if (audioUrlRef.current) {
       URL.revokeObjectURL(audioUrlRef.current);
       audioUrlRef.current = null;
     }
-  }
 
-  function stopSpeaking() {
-    speechPlaybackTokenRef.current += 1;
-    stopServerAudio("server-stop");
-    cancelBrowserSpeech("browser-cancel");
     setSpeakingMessageId(null);
     setIsSpeaking(false);
     setIsSpeechPaused(false);
+    setTtsPlaybackProvider(null);
   }
 
   function pauseSpeaking() {
-    speechPlaybackTokenRef.current += 1;
-    stopServerAudio("server-pause");
-    cancelBrowserSpeech("browser-pause");
-    setSpeakingMessageId(null);
-    setIsSpeaking(false);
-    setIsSpeechPaused(false);
-  }
-
-  function resumeSpeaking() {
-    if (audioRef.current && audioRef.current.paused) {
-      void audioRef.current.play();
-      setIsSpeechPaused(false);
-      return;
-    }
-    if (BROWSER_TTS_ENABLED && canUseBrowserReadAloud() && window.speechSynthesis.paused) {
-      window.speechSynthesis.resume();
-      setIsSpeechPaused(false);
-    }
-  }
-
-  async function playServerSpeech(
-    message: Message,
-    plainText: string,
-    selectedVoice: ServerTtsVoiceOptionId = SERVER_TTS_VOICE_OPTIONS[0].id
-  ) {
-    const playbackToken = speechPlaybackTokenRef.current;
-    const chunks = splitSpeechTextIntoChunks(plainText, SERVER_TTS_MAX_INPUT_CHARS);
-    const assertFreshPlayback = () => {
-      if (speechPlaybackTokenRef.current !== playbackToken) {
-        logTtsTransition("stale-response-ignored", {
-          messageId: message.id,
-          selectedVoice,
-          playbackToken,
-        });
-        throw new StaleTtsPlaybackError();
-      }
-    };
-
-    for (const [chunkIndex, chunk] of chunks.entries()) {
-      assertFreshPlayback();
-      const cacheKey = `${message.id}:${selectedVoice}:${chunkIndex}`;
-      let audioBlob = audioBlobCacheRef.current.get(cacheKey);
-
-      if (!audioBlob) {
-        setTtsGeneratingMessageId(message.id);
-        const controller = new AbortController();
-        ttsFetchAbortRef.current?.abort();
-        ttsFetchAbortRef.current = controller;
-        try {
-          console.info("[tts] request", {
-            ...buildTtsMessageDiagnostics(message),
-            selectedVoice,
-            serverTtsAttempted: true,
-            playbackSource: "server",
-          });
-
-          const response = await fetch("/api/tts", {
-            method: "POST",
-            credentials: "same-origin",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              text: chunk,
-              voice: selectedVoice,
-            }),
-            signal: controller.signal,
-          });
-
-          assertFreshPlayback();
-          const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-          let serverErrorData: { error?: string; code?: string } | null = null;
-
-          if (!response.ok) {
-            serverErrorData = (await response.json().catch(() => null)) as
-              | { error?: string; code?: string }
-              | null;
-          }
-
-          const serverErrorCode = normalizeServerTtsErrorCode(serverErrorData?.code);
-
-          console.info("[tts] response", {
-            ...buildTtsMessageDiagnostics(message),
-            selectedVoice,
-            serverTtsAttempted: true,
-            status: response.status,
-            code: serverErrorCode ?? serverErrorData?.code ?? null,
-            playbackSource: response.ok ? "server" : null,
-          });
-
-          if (!response.ok) {
-            const errorCode = serverErrorData?.code ? ` ${serverErrorData.code}` : "";
-            throw new ServerTtsPlaybackError(
-              serverErrorData?.error ??
-                `Server TTS failed (${response.status}${errorCode}; content-type=${contentType || "unknown"})`,
-              {
-                code: serverErrorCode,
-                status: response.status,
-              }
-            );
-          }
-
-          if (!contentType.includes("audio/")) {
-            const diagnosticBody = await response.text().catch(() => "");
-            const preview = diagnosticBody.slice(0, 180).replace(/\s+/g, " ").trim();
-            throw new ServerTtsPlaybackError(
-              `Server TTS returned non-audio content (status=${response.status}; content-type=${contentType || "unknown"}; body=${preview || "<empty>"})`,
-              {
-                code: "TTS_PROVIDER_ERROR",
-                status: response.status,
-              }
-            );
-          }
-
-          audioBlob = await response.blob();
-          assertFreshPlayback();
-          if (!audioBlob.size) {
-            throw new ServerTtsPlaybackError("Voice generation returned empty audio.", {
-              code: "TTS_PROVIDER_ERROR",
-              status: response.status,
-            });
-          }
-          audioBlobCacheRef.current.set(cacheKey, audioBlob);
-        } catch (error) {
-          if (
-            error instanceof StaleTtsPlaybackError ||
-            (error instanceof DOMException && error.name === "AbortError") ||
-            (error instanceof Error && error.name === "AbortError")
-          ) {
-            logTtsTransition("stale-response-ignored", {
-              messageId: message.id,
-              selectedVoice,
-              playbackToken,
-            });
-            throw new StaleTtsPlaybackError();
-          }
-
-          throw error;
-        } finally {
-          if (ttsFetchAbortRef.current === controller) {
-            ttsFetchAbortRef.current = null;
-          }
-          setTtsGeneratingMessageId((current) => (current === message.id ? null : current));
-        }
-      }
-
-      assertFreshPlayback();
-      cancelBrowserSpeech("browser-cancel", {
-        messageId: message.id,
-        selectedVoice,
-        playbackToken,
-      });
-
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-
-      audioRef.current = audio;
-      audioUrlRef.current = audioUrl;
-
-      audio.onplay = () => {
-        cancelBrowserSpeech("browser-cancel", {
-          messageId: message.id,
-          selectedVoice,
-          playbackToken,
-        });
-        logTtsTransition("server-start", {
-          messageId: message.id,
-          selectedVoice,
-          playbackToken,
-        });
-        setSpeakingMessageId(message.id);
-        setIsSpeaking(true);
-        setIsSpeechPaused(false);
-      };
-
-      await new Promise<void>((resolve, reject) => {
-        audio.onended = () => {
-          logTtsTransition("server-stop", {
-            messageId: message.id,
-            selectedVoice,
-            playbackToken,
-          });
-          cancelBrowserSpeech("browser-cancel", {
-            messageId: message.id,
-            selectedVoice,
-            playbackToken,
-          });
-          resolve();
-        };
-        audio.onerror = () =>
-          reject(
-            speechPlaybackTokenRef.current !== playbackToken
-              ? new StaleTtsPlaybackError()
-              : new ServerTtsPlaybackError("Voice playback failed.", {
-                  code: "SERVER_AUDIO_PLAYBACK_FAILED",
-                })
-          );
-        void audio.play().catch((error) =>
-          reject(
-            speechPlaybackTokenRef.current !== playbackToken
-              ? new StaleTtsPlaybackError()
-              : new ServerTtsPlaybackError(
-                  error instanceof Error ? error.message : "Voice playback failed.",
-                  {
-                    code: "SERVER_AUDIO_PLAYBACK_FAILED",
-                  }
-                )
-          )
-        );
-      });
-
-      if (audioRef.current === audio) {
-        audioRef.current = null;
-      }
-      URL.revokeObjectURL(audioUrl);
-      if (audioUrlRef.current === audioUrl) {
-        audioUrlRef.current = null;
-      }
-    }
-
-    if (speechPlaybackTokenRef.current === playbackToken) {
-      setSpeakingMessageId(null);
-      setIsSpeaking(false);
-      setIsSpeechPaused(false);
-    }
-  }
-
-  function playBrowserSpeech(message: Message, plainText: string) {
-    if (!BROWSER_TTS_ENABLED || !canUseBrowserReadAloud()) {
-      throw new Error("Browser speech is unavailable.");
-    }
-
-    const playbackToken = speechPlaybackTokenRef.current;
-    stopServerAudio("server-stop", {
-      messageId: message.id,
-      playbackToken,
-    });
-    logTtsTransition("browser-fallback-start", {
-      messageId: message.id,
-      playbackToken,
-    });
-    browserSpeechQueueRef.current = splitSpeechTextIntoChunks(plainText);
-
-    function speakNext() {
-      if (speechPlaybackTokenRef.current !== playbackToken) {
-        logTtsTransition("stale-response-ignored", {
-          messageId: message.id,
-          playbackToken,
-        });
-        return;
-      }
-      const text = browserSpeechQueueRef.current.shift();
-
-      if (!text) {
-        setSpeakingMessageId(null);
-        setIsSpeaking(false);
-        setIsSpeechPaused(false);
-        utteranceRef.current = null;
-        return;
-      }
-
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = selectedVoicePreset.rate;
-      utterance.pitch = selectedVoicePreset.pitch;
-      utterance.volume = 1;
-
-      const browserVoices = window.speechSynthesis.getVoices();
-      if (ttsVoiceName) {
-        const match = browserVoices.find((v) => v.name === ttsVoiceName);
-        if (match) utterance.voice = match;
-      }
-
-      utterance.onstart = () => {
-        setSpeakingMessageId(message.id);
-        setIsSpeaking(true);
-        setIsSpeechPaused(false);
-      };
-      utterance.onend = () => {
-        if (utteranceRef.current === utterance) {
-          speakNext();
-        }
-      };
-      utterance.onerror = () => {
-        if (utteranceRef.current === utterance) {
-          speakNext();
-        }
-      };
-
-      utteranceRef.current = utterance;
-      if (speechPlaybackTokenRef.current !== playbackToken) {
-        logTtsTransition("stale-response-ignored", {
-          messageId: message.id,
-          playbackToken,
-        });
-        return;
-      }
-      window.speechSynthesis.speak(utterance);
-    }
-
-    speakNext();
+    stopSpeaking();
   }
 
   async function handleSpeakMessage(
@@ -3198,78 +2771,78 @@ export default function ChatWidget({
     }
 
     const plainText = toSpeechText(message.content);
-    if (!plainText) {
-      return;
-    }
+    if (!plainText) return;
 
     stopSpeaking();
-    const activePlaybackToken = speechPlaybackTokenRef.current;
+    const playbackToken = speechPlaybackTokenRef.current;
+    const controller = new AbortController();
+    ttsFetchAbortRef.current = controller;
+    const audio = new Audio();
+    audioRef.current = audio;
+    setTtsGeneratingMessageId(message.id);
 
-    let fallbackServerStatus: number | null = null;
-    let fallbackServerCode: ServerTtsErrorCode | string | null = null;
-
-    if (SERVER_TTS_ENABLED) {
-      try {
-        await playServerSpeech(message, plainText, voice.id);
-        return;
-      } catch (error) {
-        if (error instanceof StaleTtsPlaybackError) {
-          return;
-        }
-
-        const shouldFallback = shouldFallbackToBrowserSpeech(error);
-        fallbackServerStatus =
-          error instanceof ServerTtsPlaybackError ? error.status ?? null : null;
-        fallbackServerCode =
-          error instanceof ServerTtsPlaybackError ? error.code ?? null : null;
-
-        console.warn("[tts] server playback failed", {
-          ...buildTtsMessageDiagnostics(message),
-          selectedVoice: voice.id,
-          serverTtsAttempted: true,
-          status: fallbackServerStatus,
-          code: fallbackServerCode,
-          playbackSource: shouldFallback ? "browser_fallback" : "server",
-          error: error instanceof Error ? error.message : String(error),
-        });
-
-        if (!shouldFallback) {
-          pushSystemStatusMessage(resolveServerTtsStatusMessage(voice, error));
-          return;
-        }
-      }
-    }
-
-    if (!BROWSER_TTS_ENABLED || !canUseBrowserReadAloud()) {
-      pushSystemStatusMessage(
-        SERVER_TTS_ENABLED
-          ? "Voiceover is temporarily unavailable."
-          : "Voiceover is disabled until premium server speech is enabled."
-      );
-      return;
-    }
-
-    if (speechPlaybackTokenRef.current !== activePlaybackToken) {
-      logTtsTransition("stale-response-ignored", {
+    try {
+      const result: SpeakResult = await speak({
         messageId: message.id,
-        selectedVoice: voice.id,
-        playbackToken: activePlaybackToken,
+        text: plainText,
+        voice: voice.id,
+        audioEl: audio,
+        signal: controller.signal,
+        allowBrowserFallback: TTS_ALLOW_BROWSER_FALLBACK,
       });
-      return;
-    }
 
-    console.info("[tts] playback", {
-      ...buildTtsMessageDiagnostics(message),
-      selectedVoice: voice.id,
-      serverTtsAttempted: SERVER_TTS_ENABLED,
-      status: fallbackServerStatus,
-      code: fallbackServerCode,
-      playbackSource: "browser_fallback",
-    });
-    playBrowserSpeech(message, plainText);
+      if (speechPlaybackTokenRef.current !== playbackToken || audioRef.current !== audio) {
+        if (result.objectUrl) {
+          URL.revokeObjectURL(result.objectUrl);
+        }
+        throw new StaleTtsPlaybackError();
+      }
+
+      audioUrlRef.current = result.objectUrl ?? null;
+      setSpeakingMessageId(message.id);
+      setIsSpeaking(true);
+      setIsSpeechPaused(false);
+      setTtsPlaybackProvider(result.provider);
+
+      console.info(
+        `[tts] msg=${message.id} role=${message.role} voice=${voice.id} voiceId=${result.voiceId ?? "n/a"} model=${result.model ?? "n/a"} server.status=${result.status} provider=${result.provider} t.firstByteMs=${Math.round(result.firstByteMs ?? -1)} t.playingMs=${Math.round(result.playingMs ?? -1)}`
+      );
+
+      audio.onended = () => {
+        if (audioRef.current === audio) {
+          stopSpeaking();
+        }
+      };
+      audio.onerror = () => {
+        if (audioRef.current === audio) {
+          stopSpeaking();
+          pushSystemStatusMessage("ElevenLabs playback failed.");
+        }
+      };
+    } catch (error) {
+      if (
+        error instanceof StaleTtsPlaybackError ||
+        (error instanceof DOMException && error.name === "AbortError") ||
+        (error instanceof Error && error.name === "AbortError")
+      ) {
+        return;
+      }
+
+      pushSystemStatusMessage(resolveTtsStatusMessage(voice, error));
+      console.warn("[tts] playback failed", {
+        ...buildTtsMessageDiagnostics(message),
+        selectedVoice: voice.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      if (ttsFetchAbortRef.current === controller) {
+        ttsFetchAbortRef.current = null;
+      }
+      setTtsGeneratingMessageId((current) => (current === message.id ? null : current));
+    }
   }
 
-  const canReadAloud = SERVER_TTS_ENABLED || (BROWSER_TTS_ENABLED && canUseBrowserReadAloud());
+  const canReadAloud = true;
 
   const userBubble = "border border-[#b86a2d]/35 bg-card text-foreground";
 
@@ -3407,7 +2980,13 @@ export default function ChatWidget({
             </div>
           )}
 
-          {messages.map((msg) => (
+          {messages.map((msg) => {
+            const selectedMessageVoiceId = messageVoiceSelections[msg.id] ?? serverTtsVoiceId;
+            const selectedMessageVoice =
+              SERVER_TTS_VOICE_OPTIONS.find((option) => option.id === selectedMessageVoiceId) ??
+              SERVER_TTS_VOICE_OPTIONS[0];
+
+            return (
             <div
               key={msg.id}
               className={`flex ${
@@ -3434,64 +3013,39 @@ export default function ChatWidget({
                 {msg.role === "assistant" && msg.kind !== "system_status" ? (
                   <div>
                     <div className="mb-3 flex items-center justify-end gap-1">
-                      {SERVER_TTS_ENABLED && (
-                        <select
-                          value={serverTtsVoiceId}
-                          onChange={(event) => {
-                            stopSpeaking();
-                            setServerTtsVoiceId(event.target.value as ServerTtsVoiceOptionId);
-                          }}
-                          disabled={disabled || ttsGeneratingMessageId === msg.id || speakingMessageId === msg.id}
-                          aria-label="Select voice"
-                          title="Select voice"
-                          className="min-h-9 max-w-[120px] rounded-xl border border-input bg-background px-2 py-1.5 text-[11px] font-medium text-foreground shadow-sm transition hover:bg-muted focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          {SERVER_TTS_VOICE_OPTIONS.map((option) => (
-                            <option key={option.id} value={option.id} className="bg-background text-foreground">
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      )}
+                      <select
+                        value={selectedMessageVoice.id}
+                        onChange={(event) => {
+                          stopSpeaking();
+                          const nextVoice = event.target.value as ServerTtsVoiceOptionId;
+                          setServerTtsVoiceId(nextVoice);
+                          setMessageVoiceSelections((current) => ({
+                            ...current,
+                            [msg.id]: nextVoice,
+                          }));
+                        }}
+                        disabled={disabled || ttsGeneratingMessageId === msg.id}
+                        aria-label="Select voice"
+                        title="Select voice"
+                        className="min-h-9 max-w-[120px] rounded-xl border border-input bg-background px-2 py-1.5 text-[11px] font-medium text-foreground shadow-sm transition hover:bg-muted focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {SERVER_TTS_VOICE_OPTIONS.map((option) => (
+                          <option key={option.id} value={option.id} className="bg-background text-foreground">
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                       {/* Browser voice selector — explicit fallback only; server TTS is the launch-quality path */}
-                      {BROWSER_TTS_ENABLED && !SERVER_TTS_ENABLED && speakingMessageId !== msg.id && (
-                        <div className="flex flex-col items-end gap-1">
-                          <select
-                            value={ttsVoiceName ? `voice:${ttsVoiceName}` : `preset:${ttsPresetId}`}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              if (value.startsWith("voice:")) {
-                                setTtsVoiceName(value.slice("voice:".length) || null);
-                                return;
-                              }
-                              setTtsPresetId(value.replace(/^preset:/, "") || "default");
-                              setTtsVoiceName(null);
-                            }}
-                            aria-label="Select voice"
-                            title={selectedVoiceDescription}
-                            className="rounded-xl border border-input bg-background px-2 py-1.5 text-[11px] font-medium text-foreground shadow-sm transition hover:bg-muted focus:border-ring focus:outline-none"
-                          >
-                            {VOICE_PRESETS.map((preset) => (
-                              <option key={preset.id} value={`preset:${preset.id}`} className="bg-background text-foreground">
-                                {preset.label}
-                              </option>
-                            ))}
-                            {availableVoices.map((v) => (
-                              <option key={v.name} value={`voice:${v.name}`} className="bg-background text-foreground">{v.name}</option>
-                            ))}
-                          </select>
-                          {browserVoiceNotice || selectedVoiceDescription ? (
-                            <span className="max-w-[220px] text-right text-[10px] leading-4 text-muted-foreground">
-                              {browserVoiceNotice ?? selectedVoiceDescription}
-                            </span>
-                          ) : null}
-                        </div>
-                      )}
+                      {speakingMessageId === msg.id && ttsPlaybackProvider === "browser" ? (
+                        <span className="text-[10px] font-medium text-amber-600">
+                          (browser voice)
+                        </span>
+                      ) : null}
                       {/* Read button — shown when not currently speaking this message */}
                       {speakingMessageId !== msg.id && (
                         <button
                           type="button"
-                          onClick={() => handleSpeakMessage(msg, selectedServerTtsVoice)}
+                          onClick={() => handleSpeakMessage(msg, selectedMessageVoice)}
                           disabled={!canReadAloud || disabled || ttsGeneratingMessageId === msg.id}
                           aria-label={ttsGeneratingMessageId === msg.id ? "Generating voice" : "Play voice"}
                           title={
@@ -3520,17 +3074,6 @@ export default function ChatWidget({
                           className="rounded-xl bg-muted p-2 text-muted-foreground transition hover:bg-muted/70 hover:text-foreground"
                         >
                           <Pause size={14} />
-                        </button>
-                      )}
-                      {speakingMessageId === msg.id && isSpeechPaused && (
-                        <button
-                          type="button"
-                          onClick={resumeSpeaking}
-                          aria-label="Resume"
-                          title="Resume"
-                          className="rounded-xl bg-muted p-2 text-orange-600 transition hover:bg-muted/70 hover:text-orange-500"
-                        >
-                          <Play size={14} />
                         </button>
                       )}
                       {/* Stop — shown whenever something is speaking */}
@@ -3590,7 +3133,8 @@ export default function ChatWidget({
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
 
           <div ref={bottomRef} />
         </div>
