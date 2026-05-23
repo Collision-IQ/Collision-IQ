@@ -41,6 +41,7 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 
 const {
   MB,
+  UNLIMITED_UPLOAD_BATCH_FILE_LIMIT,
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
   validateUploadBatchFileCount,
@@ -70,6 +71,18 @@ async function zipBuffer(entries) {
     zip.file(name, content);
   }
   return zip.generateAsync({ type: "nodebuffer" });
+}
+
+async function compressedZipBuffer(entries) {
+  const zip = new JSZip();
+  for (const [name, content] of entries) {
+    zip.file(name, content);
+  }
+  return zip.generateAsync({
+    type: "nodebuffer",
+    compression: "DEFLATE",
+    compressionOptions: { level: 9 },
+  });
 }
 
 function starterEntitlements() {
@@ -124,7 +137,7 @@ run("Starter rejects ZIP and files over 10 MB", async () => {
   });
 
   assert.equal(result.files.length, 0);
-  assert.equal(result.rejectedFiles[0].code, "ZIP_NOT_ALLOWED");
+  assert.equal(result.rejectedFiles[0].code, "ZIP_DISALLOWED_TYPE");
   assert.equal(10 * MB + 1 > limits.maxUploadBytes, true);
 });
 
@@ -247,14 +260,14 @@ run("Trial allows 6 and rejects 7 in same batch", () => {
   assert.equal(validateUploadBatchFileCount(7, limits).valid, false);
 });
 
-run("Admin/free-access allows more than 6 and caps at 50", () => {
+run("Admin/free-access allows more than 6 files", () => {
   const limits = resolveUploadPlanLimits(adminEntitlements());
 
-  assert.equal(limits.maxFilesPerReview, 50);
+  assert.equal(limits.maxFilesPerReview, UNLIMITED_UPLOAD_BATCH_FILE_LIMIT);
   assert.equal(validateUploadBatchFileCount(7, limits).valid, true);
   assert.equal(validateUploadBatchFileCount(50, limits).valid, true);
-  assert.equal(validateUploadBatchFileCount(51, limits).valid, false);
-  assert.equal(getUploadBatchLimitMessage(limits), "You can upload up to 50 files at a time.");
+  assert.equal(validateUploadBatchFileCount(51, limits).valid, true);
+  assert.equal(getUploadBatchLimitMessage(limits), "You can upload any number of files per review.");
 });
 
 run("Pro/Admin can upload screenshots within plan size limits", () => {
@@ -362,7 +375,7 @@ run("unsafe ZIP filenames rejected", () => {
   assert.equal(rejected?.code, "UNSAFE_FILENAME");
 });
 
-run("blocked extensions rejected", async () => {
+run("blocked extensions rejected inside ZIP", async () => {
   const result = await prepareZipUpload({
     filename: "docs.zip",
     buffer: await zipBuffer([["launch.exe", "nope"]]),
@@ -370,44 +383,44 @@ run("blocked extensions rejected", async () => {
   });
 
   assert.equal(result.files.length, 0);
-  assert.equal(result.rejectedFiles[0].code, "BLOCKED_EXTENSION");
+  assert.equal(result.rejectedFiles[0].code, "ZIP_DISALLOWED_TYPE");
 });
 
-run("excessive extracted file count rejected", async () => {
-  const limits = {
-    ...resolveUploadPlanLimits(proEntitlements()),
-    maxExtractedFiles: 2,
-  };
+run("excessive ZIP entry count rejects whole archive", async () => {
+  const entries = Array.from({ length: 51 }, (_, index) => [
+    `file-${index}.txt`,
+    "1",
+  ]);
   const result = await prepareZipUpload({
     filename: "docs.zip",
-    buffer: await zipBuffer([
-      ["one.pdf", "1"],
-      ["two.pdf", "2"],
-      ["three.pdf", "3"],
-    ]),
-    limits,
+    buffer: await zipBuffer(entries),
+    limits: resolveUploadPlanLimits(adminEntitlements()),
   });
 
-  assert.equal(result.files.length, 2);
-  assert.equal(result.rejectedFiles.some((file) => file.code === "ZIP_TOO_MANY_FILES"), true);
+  assert.equal(result.files.length, 0);
+  assert.equal(result.rejectedFiles[0].code, "ZIP_TOO_MANY_ENTRIES");
 });
 
-run("oversized extracted total rejected", async () => {
-  const limits = {
-    ...resolveUploadPlanLimits(proEntitlements()),
-    maxExtractedTotalBytes: 5,
-  };
+run("zip-slip entry rejects whole archive", async () => {
   const result = await prepareZipUpload({
     filename: "docs.zip",
-    buffer: await zipBuffer([
-      ["one.txt", "1234"],
-      ["two.txt", "5678"],
-    ]),
-    limits,
+    buffer: await zipBuffer([["../evil.pdf", "bad"]]),
+    limits: resolveUploadPlanLimits(proEntitlements()),
   });
 
-  assert.equal(result.files.length, 1);
-  assert.equal(result.rejectedFiles.some((file) => file.code === "ZIP_EXTRACTED_TOO_LARGE"), true);
+  assert.equal(result.files.length, 0);
+  assert.equal(result.rejectedFiles[0].code, "ZIP_UNSAFE_PATH");
+});
+
+run("high compression ratio rejects whole archive", async () => {
+  const result = await prepareZipUpload({
+    filename: "docs.zip",
+    buffer: await compressedZipBuffer([["huge.txt", "a".repeat(1024 * 1024)]]),
+    limits: resolveUploadPlanLimits(proEntitlements()),
+  });
+
+  assert.equal(result.files.length, 0);
+  assert.equal(result.rejectedFiles[0].code, "ZIP_BOMB_SUSPECTED");
 });
 
 (async () => {

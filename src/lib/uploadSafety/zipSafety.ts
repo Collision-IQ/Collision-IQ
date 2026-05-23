@@ -1,5 +1,5 @@
 import path from "node:path";
-import JSZip from "jszip";
+import yauzl, { type Entry, type ZipFile } from "yauzl";
 import {
   cccMimeTypeForFilename,
   getCccUploadClassification,
@@ -36,19 +36,62 @@ export type ZipExtractionSummary = {
   acceptedFiles: number;
   rejectedFiles: number;
   extractedBytes: number;
+  entryCount: number;
+  acceptedEntries: string[];
+  rejectedEntries: Array<{
+    filename: string;
+    reason: string;
+    code: string;
+  }>;
 };
 
 type ZipAccumulator = {
   accepted: PreparedUploadFile[];
   rejected: UploadRejectedFile[];
   extractedBytes: number;
+  entryCount: number;
+  usedFilenames: Map<string, number>;
 };
+
+type ZipErrorCode =
+  | "ZIP_TOO_LARGE"
+  | "ZIP_TOO_MANY_ENTRIES"
+  | "ZIP_BOMB_SUSPECTED"
+  | "ZIP_DISALLOWED_TYPE"
+  | "ZIP_UNSAFE_PATH"
+  | "ZIP_CORRUPT"
+  | "ZIP_ENCRYPTED";
 
 const ZIP_MIME_TYPES = new Set([
   "application/zip",
   "application/x-zip-compressed",
   "multipart/x-zip",
 ]);
+const ZIP_MAX_BYTES = 50 * 1024 * 1024;
+const ZIP_MAX_ENTRIES = 50;
+const ZIP_MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024;
+const ZIP_MAX_RATIO = 100;
+const ZIP_ALLOWED_EXTENSIONS = new Set([
+  ".pdf",
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".heic",
+  ".webp",
+  ".txt",
+]);
+
+class ZipUploadError extends Error {
+  code: ZipErrorCode;
+  filename: string;
+
+  constructor(code: ZipErrorCode, message: string, filename: string) {
+    super(message);
+    this.name = "ZipUploadError";
+    this.code = code;
+    this.filename = filename;
+  }
+}
 
 export function isZipFilename(filename: string) {
   return path.extname(filename).toLowerCase() === ".zip";
@@ -60,6 +103,35 @@ export function isZipUpload(file: Pick<File, "name" | "type">) {
 
 export function getUploadExtension(filename: string) {
   return path.extname(filename).toLowerCase();
+}
+
+export function getZipMaxBytes() {
+  return ZIP_MAX_BYTES;
+}
+
+export function checkZipBudget(params: {
+  archiveBytes?: number;
+  entryCount?: number;
+  uncompressed?: number;
+  ratio?: number;
+}) {
+  if (typeof params.archiveBytes === "number" && params.archiveBytes > ZIP_MAX_BYTES) {
+    return { ok: false as const, code: "ZIP_TOO_LARGE" as const };
+  }
+
+  if (typeof params.entryCount === "number" && params.entryCount > ZIP_MAX_ENTRIES) {
+    return { ok: false as const, code: "ZIP_TOO_MANY_ENTRIES" as const };
+  }
+
+  if (typeof params.uncompressed === "number" && params.uncompressed > ZIP_MAX_UNCOMPRESSED_BYTES) {
+    return { ok: false as const, code: "ZIP_TOO_LARGE" as const };
+  }
+
+  if (typeof params.ratio === "number" && params.ratio > ZIP_MAX_RATIO) {
+    return { ok: false as const, code: "ZIP_BOMB_SUSPECTED" as const };
+  }
+
+  return { ok: true as const, code: null };
 }
 
 export function classifyUploadFilename(filename: string): PreparedUploadFile["classification"] {
@@ -147,6 +219,7 @@ export async function prepareUploadFile(file: File, limits: UploadPlanLimits) {
     return prepareZipUpload({
       filename: file.name,
       buffer,
+      mimeType: file.type,
       limits,
     });
   }
@@ -179,58 +252,46 @@ export async function prepareUploadFile(file: File, limits: UploadPlanLimits) {
 export async function prepareZipUpload(params: {
   filename: string;
   buffer: Buffer;
+  mimeType?: string;
   limits: UploadPlanLimits;
 }) {
-  const { filename, buffer, limits } = params;
-
-  if (!limits.zipAllowed) {
-    return {
-      files: [],
-      rejectedFiles: [
-        {
-          filename,
-          reason: "ZIP uploads are not included in your current plan.",
-          code: "ZIP_NOT_ALLOWED",
-        },
-      ],
-      zipSummaries: [],
-    };
-  }
-
-  if (hasEncryptedZipEntries(buffer)) {
-    return {
-      files: [],
-      rejectedFiles: [
-        {
-          filename,
-          reason: "Password-protected ZIP files are not supported.",
-          code: "ZIP_PASSWORD_PROTECTED",
-        },
-      ],
-      zipSummaries: [],
-    };
-  }
-
+  const archive = normalizeUploadFilename(params.filename);
   const accumulator: ZipAccumulator = {
     accepted: [],
     rejected: [],
     extractedBytes: 0,
+    entryCount: 0,
+    usedFilenames: new Map(),
   };
 
   try {
+    if (!params.limits.zipAllowed) {
+      throw new ZipUploadError(
+        "ZIP_DISALLOWED_TYPE",
+        "ZIP uploads are not included in your current plan.",
+        archive
+      );
+    }
+
+    const archiveBudget = checkZipBudget({ archiveBytes: params.buffer.byteLength });
+    if (!archiveBudget.ok) {
+      throw new ZipUploadError(
+        archiveBudget.code,
+        `ZIP archive exceeds ${formatUploadLimitBytes(ZIP_MAX_BYTES)}.`,
+        archive
+      );
+    }
+
     await extractZipEntries({
-      archiveName: normalizeUploadFilename(filename),
-      buffer,
-      limits,
-      depth: 1,
+      archiveName: archive,
+      buffer: params.buffer,
+      limits: params.limits,
       accumulator,
     });
   } catch (error) {
-    accumulator.rejected.push({
-      filename,
-      reason: error instanceof Error ? error.message : "ZIP extraction failed.",
-      code: "ZIP_EXTRACTION_FAILED",
-    });
+    const rejected = toZipRejectedFile(error, archive);
+    accumulator.accepted = [];
+    accumulator.rejected = [rejected];
   }
 
   return {
@@ -238,10 +299,17 @@ export async function prepareZipUpload(params: {
     rejectedFiles: accumulator.rejected,
     zipSummaries: [
       {
-        archive: normalizeUploadFilename(filename),
+        archive,
         acceptedFiles: accumulator.accepted.length,
         rejectedFiles: accumulator.rejected.length,
         extractedBytes: accumulator.extractedBytes,
+        entryCount: accumulator.entryCount,
+        acceptedEntries: accumulator.accepted.map((entry) => entry.filename),
+        rejectedEntries: accumulator.rejected.map((entry) => ({
+          filename: entry.filename,
+          reason: entry.reason,
+          code: entry.code,
+        })),
       },
     ],
   };
@@ -251,144 +319,256 @@ async function extractZipEntries(params: {
   archiveName: string;
   buffer: Buffer;
   limits: UploadPlanLimits;
-  depth: number;
   accumulator: ZipAccumulator;
 }) {
-  const zip = await JSZip.loadAsync(params.buffer);
-  const entries = Object.values(zip.files);
+  const zip = await openZipFromBuffer(params.buffer, params.archiveName);
 
-  for (const entry of entries) {
-    if (entry.dir) {
-      continue;
-    }
-
-    const originalName = getOriginalZipEntryName(entry);
-    const nestedArchiveName = `${params.archiveName}/${originalName}`;
-
-    if (isZipFilename(originalName)) {
-      if (params.depth >= params.limits.maxZipNestingDepth) {
-        params.accumulator.rejected.push({
-          filename: nestedArchiveName,
-          reason: `Nested ZIP depth exceeds ${params.limits.maxZipNestingDepth}.`,
-          code: "ZIP_NESTING_LIMIT",
-        });
-        continue;
-      }
-
-      const nestedBuffer = await entry.async("nodebuffer");
-      if (hasEncryptedZipEntries(nestedBuffer)) {
-        params.accumulator.rejected.push({
-          filename: nestedArchiveName,
-          reason: "Password-protected ZIP files are not supported.",
-          code: "ZIP_PASSWORD_PROTECTED",
-        });
-        continue;
-      }
-
-      await extractZipEntries({
-        archiveName: nestedArchiveName,
-        buffer: nestedBuffer,
-        limits: params.limits,
-        depth: params.depth + 1,
-        accumulator: params.accumulator,
+  try {
+    await new Promise<void>((resolve, reject) => {
+      zip.on("entry", (entry: Entry) => {
+        void handleZipEntry(entry, zip, params)
+          .then(() => zip.readEntry())
+          .catch(reject);
       });
-      continue;
-    }
-
-    const rejected = validateUploadFilename(originalName, params.limits);
-    if (rejected) {
-      params.accumulator.rejected.push({
-        ...rejected,
-        filename: `${params.archiveName}/${rejected.filename}`,
-      });
-      continue;
-    }
-
-    if (params.accumulator.accepted.length >= params.limits.maxExtractedFiles) {
-      params.accumulator.rejected.push({
-        filename: nestedArchiveName,
-        reason: `ZIP contains more than ${params.limits.maxExtractedFiles} supported files.`,
-        code: "ZIP_TOO_MANY_FILES",
-      });
-      continue;
-    }
-
-    const expectedSize = getZipEntryUncompressedSize(entry);
-    const projectedTotal =
-      typeof expectedSize === "number"
-        ? params.accumulator.extractedBytes + expectedSize
-        : params.accumulator.extractedBytes;
-    if (
-      typeof expectedSize === "number" &&
-      projectedTotal > params.limits.maxExtractedTotalBytes
-    ) {
-      params.accumulator.rejected.push({
-        filename: nestedArchiveName,
-        reason: `Extracted ZIP files exceed ${formatUploadLimitBytes(params.limits.maxExtractedTotalBytes)} total.`,
-        code: "ZIP_EXTRACTED_TOO_LARGE",
-      });
-      continue;
-    }
-
-    const buffer = await entry.async("nodebuffer");
-    const nextTotal = params.accumulator.extractedBytes + buffer.byteLength;
-    if (nextTotal > params.limits.maxExtractedTotalBytes) {
-      params.accumulator.rejected.push({
-        filename: nestedArchiveName,
-        reason: `Extracted ZIP files exceed ${formatUploadLimitBytes(params.limits.maxExtractedTotalBytes)} total.`,
-        code: "ZIP_EXTRACTED_TOO_LARGE",
-      });
-      continue;
-    }
-
-    const filename = normalizeUploadFilename(originalName);
-    params.accumulator.accepted.push({
-      filename,
-      type: mimeTypeForFilename(filename),
-      buffer,
-      sizeBytes: buffer.byteLength,
-      source: "zip_extraction",
-      sourceArchive: params.archiveName,
-      classification: classifyUploadFilename(filename),
+      zip.once("end", resolve);
+      zip.once("error", (error) =>
+        reject(toZipOpenError(error, params.archiveName))
+      );
+      zip.readEntry();
     });
-    params.accumulator.extractedBytes = nextTotal;
+  } finally {
+    zip.close();
   }
 }
 
-function getOriginalZipEntryName(entry: JSZip.JSZipObject) {
-  const maybeUnsafe = entry as JSZip.JSZipObject & { unsafeOriginalName?: string };
-  return maybeUnsafe.unsafeOriginalName || entry.name;
+async function handleZipEntry(
+  entry: Entry,
+  zip: ZipFile,
+  params: {
+    archiveName: string;
+    limits: UploadPlanLimits;
+    accumulator: ZipAccumulator;
+  }
+) {
+  if (entry.fileName.endsWith("/")) {
+    return;
+  }
+
+  params.accumulator.entryCount += 1;
+  const entryBudget = checkZipBudget({ entryCount: params.accumulator.entryCount });
+  if (!entryBudget.ok) {
+    throw new ZipUploadError(
+      entryBudget.code,
+      `ZIP archive contains more than ${ZIP_MAX_ENTRIES} files.`,
+      entry.fileName
+    );
+  }
+
+  validateZipEntryPath(entry.fileName);
+
+  if (entry.isEncrypted()) {
+    throw new ZipUploadError(
+      "ZIP_ENCRYPTED",
+      "Password-protected ZIP files are not supported.",
+      entry.fileName
+    );
+  }
+
+  if (isZipFilename(entry.fileName)) {
+    throw new ZipUploadError(
+      "ZIP_DISALLOWED_TYPE",
+      "Nested ZIP files are not supported.",
+      entry.fileName
+    );
+  }
+
+  const normalizedName = normalizeUploadFilename(entry.fileName);
+  const extension = getUploadExtension(normalizedName);
+  if (!ZIP_ALLOWED_EXTENSIONS.has(extension)) {
+    throw new ZipUploadError(
+      "ZIP_DISALLOWED_TYPE",
+      `File type ${extension || "unknown"} is not supported inside ZIP archives.`,
+      entry.fileName
+    );
+  }
+
+  const entrySizeBudget = checkZipBudget({ uncompressed: entry.uncompressedSize });
+  if (!entrySizeBudget.ok) {
+    throw new ZipUploadError(
+      entrySizeBudget.code,
+      `Extracted ZIP files exceed ${formatUploadLimitBytes(ZIP_MAX_UNCOMPRESSED_BYTES)} total.`,
+      entry.fileName
+    );
+  }
+
+  const nextTotal = params.accumulator.extractedBytes + entry.uncompressedSize;
+  const totalBudget = checkZipBudget({ uncompressed: nextTotal });
+  if (!totalBudget.ok) {
+    throw new ZipUploadError(
+      totalBudget.code,
+      `Extracted ZIP files exceed ${formatUploadLimitBytes(ZIP_MAX_UNCOMPRESSED_BYTES)} total.`,
+      entry.fileName
+    );
+  }
+
+  const ratioBudget =
+    entry.compressedSize === 0 && entry.uncompressedSize > 0
+      ? { ok: false as const, code: "ZIP_BOMB_SUSPECTED" as const }
+      : checkZipBudget({
+          ratio: entry.compressedSize > 0
+            ? entry.uncompressedSize / entry.compressedSize
+            : 0,
+        });
+
+  if (!ratioBudget.ok) {
+    throw new ZipUploadError(
+      ratioBudget.code,
+      "ZIP archive looks unsafe. Try uploading the files directly.",
+      entry.fileName
+    );
+  }
+
+  const buffer = await readEntryBuffer(zip, entry);
+  if (buffer.byteLength !== entry.uncompressedSize) {
+    throw new ZipUploadError(
+      "ZIP_CORRUPT",
+      "ZIP archive entry size did not match its metadata.",
+      entry.fileName
+    );
+  }
+
+  const filename = dedupeFilename(normalizedName, params.accumulator.usedFilenames);
+  params.accumulator.accepted.push({
+    filename,
+    type: mimeTypeForFilename(filename),
+    buffer,
+    sizeBytes: buffer.byteLength,
+    source: "zip_extraction",
+    sourceArchive: params.archiveName,
+    classification: classifyUploadFilename(filename),
+  });
+  params.accumulator.extractedBytes = nextTotal;
 }
 
-function getZipEntryUncompressedSize(entry: JSZip.JSZipObject) {
-  const maybeSized = entry as JSZip.JSZipObject & {
-    _data?: { uncompressedSize?: number };
+function validateZipEntryPath(filename: string) {
+  const normalized = filename.replace(/\\/g, "/");
+  const segments = normalized.split("/");
+  const extractionRoot = path.resolve("/zip-root");
+  const resolved = path.resolve(extractionRoot, normalized);
+
+  if (
+    !normalized ||
+    normalized.startsWith("/") ||
+    /^[a-z]:/i.test(normalized) ||
+    segments.includes("..") ||
+    (resolved !== extractionRoot && !resolved.startsWith(`${extractionRoot}${path.sep}`))
+  ) {
+    throw new ZipUploadError(
+      "ZIP_UNSAFE_PATH",
+      "Unsafe archive filename was rejected.",
+      filename
+    );
+  }
+}
+
+function dedupeFilename(filename: string, usedFilenames: Map<string, number>) {
+  const extension = path.extname(filename);
+  const stem = extension ? filename.slice(0, -extension.length) : filename;
+  const key = filename.toLowerCase();
+  const count = usedFilenames.get(key) ?? 0;
+  usedFilenames.set(key, count + 1);
+
+  if (count === 0) {
+    return filename;
+  }
+
+  const candidate = `${stem}-${count}${extension}`;
+  usedFilenames.set(candidate.toLowerCase(), 1);
+  return candidate;
+}
+
+function openZipFromBuffer(buffer: Buffer, filename: string) {
+  return new Promise<ZipFile>((resolve, reject) => {
+    yauzl.fromBuffer(
+      buffer,
+      {
+        lazyEntries: true,
+        validateEntrySizes: true,
+        strictFileNames: false,
+      },
+      (error, zip) => {
+        if (error || !zip) {
+          reject(toZipOpenError(error, filename));
+          return;
+        }
+
+        resolve(zip);
+      }
+    );
+  });
+}
+
+function readEntryBuffer(zip: ZipFile, entry: Entry) {
+  return new Promise<Buffer>((resolve, reject) => {
+    zip.openReadStream(entry, (error, stream) => {
+      if (error || !stream) {
+        reject(
+          new ZipUploadError(
+            entry.isEncrypted() ? "ZIP_ENCRYPTED" : "ZIP_CORRUPT",
+            error instanceof Error ? error.message : "ZIP archive entry could not be read.",
+            entry.fileName
+          )
+        );
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      let totalBytes = 0;
+      stream
+        .on("data", (chunk: Buffer | string) => {
+          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          totalBytes += buffer.byteLength;
+          if (totalBytes > ZIP_MAX_UNCOMPRESSED_BYTES) {
+            stream.destroy(
+              new ZipUploadError(
+                "ZIP_TOO_LARGE",
+                `Extracted ZIP files exceed ${formatUploadLimitBytes(ZIP_MAX_UNCOMPRESSED_BYTES)} total.`,
+                entry.fileName
+              )
+            );
+            return;
+          }
+          chunks.push(buffer);
+        })
+        .once("error", reject)
+        .once("end", () => resolve(Buffer.concat(chunks)));
+    });
+  });
+}
+
+function toZipRejectedFile(error: unknown, archive: string): UploadRejectedFile {
+  if (error instanceof ZipUploadError) {
+    return {
+      filename: error.filename || archive,
+      reason: error.message,
+      code: error.code,
+    };
+  }
+
+  return {
+    filename: archive,
+    reason: error instanceof Error ? error.message : "ZIP archive is corrupt.",
+    code: "ZIP_CORRUPT",
   };
-  const size = maybeSized._data?.uncompressedSize;
-  return typeof size === "number" && Number.isFinite(size) ? size : null;
 }
 
-export function hasEncryptedZipEntries(buffer: Buffer) {
-  let offset = 0;
-
-  while (offset <= buffer.length - 46) {
-    if (buffer.readUInt32LE(offset) !== 0x02014b50) {
-      offset += 1;
-      continue;
-    }
-
-    const flags = buffer.readUInt16LE(offset + 8);
-    if ((flags & 0x0001) === 0x0001) {
-      return true;
-    }
-
-    const fileNameLength = buffer.readUInt16LE(offset + 28);
-    const extraLength = buffer.readUInt16LE(offset + 30);
-    const commentLength = buffer.readUInt16LE(offset + 32);
-    offset += 46 + fileNameLength + extraLength + commentLength;
+function toZipOpenError(error: unknown, filename: string) {
+  const message = error instanceof Error ? error.message : "ZIP archive is corrupt.";
+  if (/invalid relative path|absolute path|parent directory/i.test(message)) {
+    return new ZipUploadError("ZIP_UNSAFE_PATH", "Unsafe archive filename was rejected.", filename);
   }
 
-  return false;
+  return new ZipUploadError("ZIP_CORRUPT", message, filename);
 }
 
 export function mimeTypeForFilename(filename: string) {

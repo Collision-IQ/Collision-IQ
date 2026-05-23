@@ -8,14 +8,22 @@ export const runtime = "nodejs";
 
 const MAX_TTS_INPUT_CHARS = 4_000;
 const AUDIO_CONTENT_TYPE = "audio/mpeg";
-const ELEVENLABS_MODEL_ID = "eleven_v3";
-const ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128";
-const ELEVENLABS_TIMEOUT_MS = 60_000;
+const ELEVENLABS_MODEL_ID =
+  process.env.ELEVENLABS_MODEL_ID?.trim() || "eleven_turbo_v2_5";
+const ELEVENLABS_OUTPUT_FORMAT =
+  process.env.ELEVENLABS_OUTPUT_FORMAT?.trim() || "mp3_44100_128";
+
+const VOICES = {
+  voice_1: process.env.ELEVENLABS_VOICE_ID_1?.trim(),
+  voice_2: process.env.ELEVENLABS_VOICE_ID_2?.trim(),
+} as const;
+
+type TtsVoiceSymbol = keyof typeof VOICES;
 
 type TtsRequestBody = {
+  messageId?: unknown;
   text?: unknown;
   voice?: unknown;
-  voiceId?: unknown;
 };
 
 function normalizeText(value: unknown) {
@@ -24,45 +32,26 @@ function normalizeText(value: unknown) {
   return text.length > 0 ? text : null;
 }
 
-function normalizeVoiceId(value: unknown) {
-  if (value === undefined || value === null) return null;
-  if (typeof value !== "string") return undefined;
-
-  const voiceId = value.trim();
-  return voiceId.length > 0 ? voiceId : null;
+function normalizeMessageId(value: unknown) {
+  if (typeof value !== "string") return null;
+  const messageId = value.trim();
+  return messageId.length > 0 ? messageId : null;
 }
 
-function resolveVoiceId(body: TtsRequestBody): { voiceId: string | null; label: string } | null {
-  const requestedVoiceId = normalizeVoiceId(body.voiceId);
-
-  if (requestedVoiceId === undefined) {
-    return null;
-  }
-
-  if (requestedVoiceId) {
-    return {
-      voiceId: requestedVoiceId,
-      label: "custom",
-    };
-  }
-
-  const voice = body.voice === undefined ? "primary" : body.voice;
-
-  if (voice !== "primary" && voice !== "secondary") {
-    return null;
-  }
-
-  return {
-    label: voice,
-    voiceId:
-      voice === "secondary"
-        ? process.env.ELEVENLABS_VOICE_ID_SECOND?.trim() || null
-        : process.env.ELEVENLABS_VOICE_ID?.trim() || null,
-  };
+function isTtsVoiceSymbol(value: unknown): value is TtsVoiceSymbol {
+  return value === "voice_1" || value === "voice_2";
 }
 
-function jsonError(error: string, code: string, status: number) {
-  return NextResponse.json({ error, code }, { status });
+function jsonError(error: string, status: number, extra?: Record<string, unknown>) {
+  return NextResponse.json({ error, ...extra }, { status });
+}
+
+function getMissingEnv() {
+  return [
+    process.env.ELEVENLABS_API_KEY?.trim() ? null : "ELEVENLABS_API_KEY",
+    VOICES.voice_1 ? null : "ELEVENLABS_VOICE_ID_1",
+    VOICES.voice_2 ? null : "ELEVENLABS_VOICE_ID_2",
+  ].filter((value): value is string => Boolean(value));
 }
 
 async function parseJsonBody(req: Request): Promise<TtsRequestBody | null> {
@@ -79,125 +68,102 @@ export async function POST(req: Request) {
     const body = await parseJsonBody(req);
 
     if (!body) {
-      return jsonError("Request body must be valid JSON.", "INVALID_JSON", 400);
+      return jsonError("INVALID_JSON", 400);
+    }
+
+    const missing = getMissingEnv();
+    if (missing.length > 0) {
+      console.error("[tts] ElevenLabs env missing", {
+        missing,
+        ownerUserId: user.id,
+        isPlatformAdmin,
+      });
+      return jsonError("TTS_NOT_CONFIGURED", 500, { missing });
+    }
+
+    const messageId = normalizeMessageId(body.messageId);
+    if (!messageId) {
+      return jsonError("MESSAGE_ID_REQUIRED", 400);
     }
 
     const text = normalizeText(body.text);
     if (!text) {
-      return jsonError("Text is required.", "TEXT_REQUIRED", 400);
+      return jsonError("TEXT_REQUIRED", 400);
     }
 
     if (text.length > MAX_TTS_INPUT_CHARS) {
-      return NextResponse.json(
-        {
-          error: `Text must be ${MAX_TTS_INPUT_CHARS} characters or fewer.`,
-          code: "TEXT_TOO_LONG",
-          maxLength: MAX_TTS_INPUT_CHARS,
-        },
-        { status: 400 }
-      );
+      return jsonError("TEXT_TOO_LONG", 400, { maxLength: MAX_TTS_INPUT_CHARS });
     }
 
-    const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
-    const requestedVoice = body.voice === "secondary" ? "secondary" : "primary";
-    const resolvedVoice = resolveVoiceId(body);
-
-    console.log("[tts] voice selection", {
-      requestedVoice,
-      resolvedVoice: requestedVoice,
-      hasPrimary: !!process.env.ELEVENLABS_VOICE_ID,
-      hasSecondary: !!process.env.ELEVENLABS_VOICE_ID_SECOND,
-    });
-
-    if (!resolvedVoice) {
-      return jsonError(
-        'Voice must be "primary", "secondary", or a string voiceId.',
-        "UNSUPPORTED_VOICE",
-        400
-      );
+    if (!isTtsVoiceSymbol(body.voice)) {
+      return jsonError("TTS_UNKNOWN_VOICE", 400);
     }
 
-    const voiceId = resolvedVoice.voiceId;
+    const voice = body.voice;
+    const voiceId = VOICES[voice];
 
-    if (!apiKey || !voiceId) {
-      console.error("[tts] ElevenLabs is not configured", {
-        hasApiKey: Boolean(apiKey),
-        hasVoiceId: Boolean(voiceId),
-        voice: resolvedVoice.label,
+    if (!voiceId) {
+      return jsonError("TTS_NOT_CONFIGURED", 500, {
+        missing: [`ELEVENLABS_VOICE_ID_${voice === "voice_1" ? "1" : "2"}`],
       });
-      return jsonError("Voice generation is not configured.", "TTS_NOT_CONFIGURED", 503);
     }
 
-    const controller = new AbortController();
-    const timeout: ReturnType<typeof setTimeout> = setTimeout(
-      () => controller.abort(),
-      ELEVENLABS_TIMEOUT_MS
+    const upstream = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(
+        voiceId
+      )}/stream?output_format=${encodeURIComponent(ELEVENLABS_OUTPUT_FORMAT)}`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": process.env.ELEVENLABS_API_KEY!.trim(),
+          "Content-Type": "application/json",
+          Accept: AUDIO_CONTENT_TYPE,
+        },
+        body: JSON.stringify({
+          text,
+          model_id: ELEVENLABS_MODEL_ID,
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+          },
+        }),
+      }
     );
 
-    let elevenLabsResponse: Response;
-    try {
-      elevenLabsResponse = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`,
-        {
-          method: "POST",
-          headers: {
-            "xi-api-key": apiKey,
-            "Content-Type": "application/json",
-            Accept: AUDIO_CONTENT_TYPE,
-          },
-          body: JSON.stringify({
-            text,
-            model_id: ELEVENLABS_MODEL_ID,
-            output_format: ELEVENLABS_OUTPUT_FORMAT,
-            voice_settings: {
-              stability: 0.65,
-              similarity_boost: 0.9,
-              style: 0.2,
-              use_speaker_boost: true,
-            },
-          }),
-          signal: controller.signal,
-        }
-      );
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    if (!elevenLabsResponse.ok) {
-      console.warn("[tts] ElevenLabs request failed", {
+    if (!upstream.ok || !upstream.body) {
+      const upstreamBody = await upstream.text().catch(() => "");
+      console.warn("[tts] ElevenLabs upstream failed", {
         ownerUserId: user.id,
         isPlatformAdmin,
-        status: elevenLabsResponse.status,
+        messageId,
+        voice,
+        voiceId,
+        upstreamStatus: upstream.status,
       });
-
-      if (elevenLabsResponse.status === 429) {
-        return jsonError(
-          "Voice generation is temporarily rate limited. Please try again shortly.",
-          "TTS_RATE_LIMITED",
-          429
-        );
-      }
-
-      return jsonError(
-        "Voice generation failed. Please try again.",
-        "TTS_PROVIDER_ERROR",
-        502
-      );
+      return jsonError("TTS_UPSTREAM_ERROR", 502, {
+        upstreamStatus: upstream.status,
+        upstreamBody: upstreamBody.slice(0, 500),
+      });
     }
 
-    const arrayBuffer = await elevenLabsResponse.arrayBuffer();
-    if (arrayBuffer.byteLength === 0) {
-      console.warn("[tts] ElevenLabs returned empty audio", {
-        ownerUserId: user.id,
-        isPlatformAdmin,
-      });
-      return jsonError("Voice generation returned empty audio.", "TTS_EMPTY_AUDIO", 502);
-    }
+    console.info("[tts] ElevenLabs stream", {
+      ownerUserId: user.id,
+      isPlatformAdmin,
+      messageId,
+      voice,
+      voiceId,
+      model: ELEVENLABS_MODEL_ID,
+    });
 
-    return new Response(arrayBuffer, {
+    return new Response(upstream.body, {
+      status: 200,
       headers: {
         "Content-Type": AUDIO_CONTENT_TYPE,
         "Cache-Control": "no-store",
+        "X-TTS-Provider": "elevenlabs",
+        "X-TTS-Voice-Symbol": voice,
+        "X-TTS-Voice-Id": voiceId,
+        "X-TTS-Model": ELEVENLABS_MODEL_ID,
       },
     });
   } catch (error) {
@@ -205,13 +171,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
 
-    if (error instanceof Error && error.name === "AbortError") {
-      return jsonError("Voice generation timed out. Please try again.", "TTS_TIMEOUT", 504);
-    }
-
     console.error("[tts] generation failed", {
       message: error instanceof Error ? error.message : String(error),
     });
-    return jsonError("Voice generation failed. Please try again.", "TTS_FAILED", 500);
+    return jsonError("TTS_UPSTREAM_ERROR", 502);
   }
 }

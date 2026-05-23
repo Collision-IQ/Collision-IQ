@@ -39,6 +39,7 @@ import {
   resolveUploadPlanLimits,
 } from "@/lib/uploadSafety/uploadLimits";
 import {
+  getZipMaxBytes,
   isZipUpload,
   prepareUploadFile,
   type PreparedUploadFile,
@@ -47,9 +48,9 @@ import {
 
 export const runtime = "nodejs";
 
-const RUNTIME_SAFE_MULTIPART_BODY_BYTES = 20 * 1024 * 1024;
+const RUNTIME_SAFE_MULTIPART_BODY_BYTES = 50 * 1024 * 1024;
 const RUNTIME_LIMIT_MESSAGE =
-  "This file is within your plan limit, but exceeds the current platform upload limit. Direct large-file upload support is coming soon. For now, split ZIPs over 20 MB into smaller uploads.";
+  "This file is within your plan limit, but exceeds the current platform upload limit. Direct large-file upload support is coming soon. For now, keep uploads under 50 MB.";
 
 type UploadSuccess = {
   attachmentId: string;
@@ -103,7 +104,7 @@ function getFailureStatus(failedUploads: UploadFailure[]) {
     return 403;
   }
 
-  if (failedUploads.some((failure) => failure.code === "FILE_TOO_LARGE")) {
+  if (failedUploads.some((failure) => failure.code === "FILE_TOO_LARGE" || failure.code === "ZIP_TOO_LARGE")) {
     return 413;
   }
 
@@ -194,11 +195,11 @@ function buildUploadTelemetry(params: {
       plan: params.uploadLimits.plan,
       targetMaxUploadBytes: params.uploadLimits.maxUploadBytes,
       runtimeMaxUploadBytes: Math.min(
-        params.uploadLimits.maxUploadBytes,
+        Math.max(params.uploadLimits.maxUploadBytes, params.uploadLimits.zipAllowed ? getZipMaxBytes() : 0),
         RUNTIME_SAFE_MULTIPART_BODY_BYTES
       ),
       maxUploadBytes: Math.min(
-        params.uploadLimits.maxUploadBytes,
+        Math.max(params.uploadLimits.maxUploadBytes, params.uploadLimits.zipAllowed ? getZipMaxBytes() : 0),
         RUNTIME_SAFE_MULTIPART_BODY_BYTES
       ),
       maxFilesPerReview: params.uploadLimits.maxFilesPerReview,
@@ -241,7 +242,7 @@ export async function POST(req: Request) {
     // TODO(direct-to-storage): replace multipart uploads with signed object-storage URLs
     // -> object storage -> async ZIP extraction -> analysis once uploads need to exceed runtime limits.
     const runtimeMaxUploadBytes = Math.min(
-      uploadLimits.maxUploadBytes,
+      Math.max(uploadLimits.maxUploadBytes, uploadLimits.zipAllowed ? getZipMaxBytes() : 0),
       RUNTIME_SAFE_MULTIPART_BODY_BYTES
     );
 
@@ -468,17 +469,22 @@ export async function POST(req: Request) {
         continue;
       }
 
-      if (file.size > uploadLimits.maxUploadBytes) {
+      const isZip = isZipUpload(file);
+      const maxFileBytes = isZip ? getZipMaxBytes() : uploadLimits.maxUploadBytes;
+
+      if (file.size > maxFileBytes) {
         failedUploads.push({
           filename: file.name,
-          reason: `File exceeds ${formatUploadLimitBytes(uploadLimits.maxUploadBytes)} limit (${formatUploadLimitBytes(file.size)}).`,
-          code: "FILE_TOO_LARGE",
+          reason: isZip
+            ? `ZIP archive exceeds ${formatUploadLimitBytes(getZipMaxBytes())}.`
+            : `File exceeds ${formatUploadLimitBytes(uploadLimits.maxUploadBytes)} limit (${formatUploadLimitBytes(file.size)}).`,
+          code: isZip ? "ZIP_TOO_LARGE" : "FILE_TOO_LARGE",
         });
         console.info("[upload] file rejected", {
           filename: file.name,
-          code: "FILE_TOO_LARGE",
+          code: isZip ? "ZIP_TOO_LARGE" : "FILE_TOO_LARGE",
           sizeBytes: file.size,
-          maxFileBytes: uploadLimits.maxUploadBytes,
+          maxFileBytes,
           runtimeMaxFileBytes: runtimeMaxUploadBytes,
           ownerUserId: user.id,
         });
@@ -502,11 +508,11 @@ export async function POST(req: Request) {
         continue;
       }
 
-      if (isZipUpload(file) && !uploadLimits.zipAllowed) {
+      if (isZip && !uploadLimits.zipAllowed) {
         failedUploads.push({
           filename: file.name,
           reason: "ZIP uploads are not included in your current plan.",
-          code: "ZIP_NOT_ALLOWED",
+          code: "ZIP_DISALLOWED_TYPE",
         });
         continue;
       }
@@ -538,6 +544,21 @@ export async function POST(req: Request) {
         const prepared = await prepareUploadFile(file, uploadLimits);
         zipSummaries.push(...prepared.zipSummaries);
         failedUploads.push(...prepared.rejectedFiles);
+
+        if (isZip) {
+          for (const summary of prepared.zipSummaries) {
+            console.info("[upload] zip extraction", {
+              archive: summary.archive,
+              sizeBytes: file.size,
+              entryCount: summary.entryCount,
+              totalUncompressedSize: summary.extractedBytes,
+              acceptedEntries: summary.acceptedEntries,
+              acceptedEntryCount: summary.acceptedFiles,
+              rejectedEntries: summary.rejectedEntries,
+              ownerUserId: user.id,
+            });
+          }
+        }
 
         for (const preparedFile of prepared.files) {
           if (
@@ -642,7 +663,7 @@ export async function POST(req: Request) {
           ownerUserId: user.id,
           error,
         });
-        const zipProcessingFailed = isZipUpload(file);
+        const zipProcessingFailed = isZip;
         failedUploads.push({
           filename: file.name,
           reason: zipProcessingFailed
@@ -650,7 +671,7 @@ export async function POST(req: Request) {
             : error instanceof Error
               ? error.message
               : "Upload processing failed.",
-          code: zipProcessingFailed ? "ZIP_EXTRACTION_FAILED" : "FILE_PROCESSING_FAILED",
+          code: zipProcessingFailed ? "ZIP_CORRUPT" : "FILE_PROCESSING_FAILED",
         });
       }
     }
@@ -670,7 +691,8 @@ export async function POST(req: Request) {
 
       return NextResponse.json(
         {
-          error: failedUploads[0]?.reason ?? "No files could be uploaded.",
+          error: failedUploads[0]?.code ?? failedUploads[0]?.reason ?? "No files could be uploaded.",
+          message: failedUploads[0]?.reason ?? "No files could be uploaded.",
           code: failedUploads[0]?.code ?? "UPLOAD_FAILED",
           limits: {
             maxFiles: uploadLimits.maxFilesPerReview,
@@ -693,6 +715,7 @@ export async function POST(req: Request) {
         },
           successfulUploads,
           failedUploads,
+          files: [],
           documents: [],
         },
         { status: getFailureStatus(failedUploads) }
@@ -734,6 +757,12 @@ export async function POST(req: Request) {
         billingPlan: entitlements.billingPlan,
       },
       successfulUploads,
+      files: successfulUploads.map((upload) => ({
+        id: upload.attachmentId,
+        name: upload.filename,
+        size: upload.sizeBytes,
+        type: upload.type,
+      })),
       failedUploads,
       documents: successfulUploads.map((upload) => ({
         filename: upload.filename,
