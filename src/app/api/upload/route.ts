@@ -691,7 +691,8 @@ export async function POST(req: Request) {
 
       return NextResponse.json(
         {
-          error: failedUploads[0]?.reason ?? "No files could be uploaded.",
+          error: failedUploads[0]?.code ?? failedUploads[0]?.reason ?? "No files could be uploaded.",
+          message: failedUploads[0]?.reason ?? "No files could be uploaded.",
           code: failedUploads[0]?.code ?? "UPLOAD_FAILED",
           limits: {
             maxFiles: uploadLimits.maxFilesPerReview,
@@ -714,6 +715,7 @@ export async function POST(req: Request) {
         },
           successfulUploads,
           failedUploads,
+          files: [],
           documents: [],
         },
         { status: getFailureStatus(failedUploads) }
@@ -755,6 +757,12 @@ export async function POST(req: Request) {
         billingPlan: entitlements.billingPlan,
       },
       successfulUploads,
+      files: successfulUploads.map((upload) => ({
+        id: upload.attachmentId,
+        name: upload.filename,
+        size: upload.sizeBytes,
+        type: upload.type,
+      })),
       failedUploads,
       documents: successfulUploads.map((upload) => ({
         filename: upload.filename,

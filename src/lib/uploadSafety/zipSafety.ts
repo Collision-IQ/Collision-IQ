@@ -109,6 +109,31 @@ export function getZipMaxBytes() {
   return ZIP_MAX_BYTES;
 }
 
+export function checkZipBudget(params: {
+  archiveBytes?: number;
+  entryCount?: number;
+  uncompressed?: number;
+  ratio?: number;
+}) {
+  if (typeof params.archiveBytes === "number" && params.archiveBytes > ZIP_MAX_BYTES) {
+    return { ok: false as const, code: "ZIP_TOO_LARGE" as const };
+  }
+
+  if (typeof params.entryCount === "number" && params.entryCount > ZIP_MAX_ENTRIES) {
+    return { ok: false as const, code: "ZIP_TOO_MANY_ENTRIES" as const };
+  }
+
+  if (typeof params.uncompressed === "number" && params.uncompressed > ZIP_MAX_UNCOMPRESSED_BYTES) {
+    return { ok: false as const, code: "ZIP_TOO_LARGE" as const };
+  }
+
+  if (typeof params.ratio === "number" && params.ratio > ZIP_MAX_RATIO) {
+    return { ok: false as const, code: "ZIP_BOMB_SUSPECTED" as const };
+  }
+
+  return { ok: true as const, code: null };
+}
+
 export function classifyUploadFilename(filename: string): PreparedUploadFile["classification"] {
   const cccClassification = getCccUploadClassification(filename);
   if (cccClassification) return cccClassification;
@@ -248,9 +273,10 @@ export async function prepareZipUpload(params: {
       );
     }
 
-    if (params.buffer.byteLength > ZIP_MAX_BYTES) {
+    const archiveBudget = checkZipBudget({ archiveBytes: params.buffer.byteLength });
+    if (!archiveBudget.ok) {
       throw new ZipUploadError(
-        "ZIP_TOO_LARGE",
+        archiveBudget.code,
         `ZIP archive exceeds ${formatUploadLimitBytes(ZIP_MAX_BYTES)}.`,
         archive
       );
@@ -329,9 +355,10 @@ async function handleZipEntry(
   }
 
   params.accumulator.entryCount += 1;
-  if (params.accumulator.entryCount > ZIP_MAX_ENTRIES) {
+  const entryBudget = checkZipBudget({ entryCount: params.accumulator.entryCount });
+  if (!entryBudget.ok) {
     throw new ZipUploadError(
-      "ZIP_TOO_MANY_ENTRIES",
+      entryBudget.code,
       `ZIP archive contains more than ${ZIP_MAX_ENTRIES} files.`,
       entry.fileName
     );
@@ -365,29 +392,37 @@ async function handleZipEntry(
     );
   }
 
-  if (entry.uncompressedSize > ZIP_MAX_UNCOMPRESSED_BYTES) {
+  const entrySizeBudget = checkZipBudget({ uncompressed: entry.uncompressedSize });
+  if (!entrySizeBudget.ok) {
     throw new ZipUploadError(
-      "ZIP_TOO_LARGE",
+      entrySizeBudget.code,
       `Extracted ZIP files exceed ${formatUploadLimitBytes(ZIP_MAX_UNCOMPRESSED_BYTES)} total.`,
       entry.fileName
     );
   }
 
   const nextTotal = params.accumulator.extractedBytes + entry.uncompressedSize;
-  if (nextTotal > ZIP_MAX_UNCOMPRESSED_BYTES) {
+  const totalBudget = checkZipBudget({ uncompressed: nextTotal });
+  if (!totalBudget.ok) {
     throw new ZipUploadError(
-      "ZIP_TOO_LARGE",
+      totalBudget.code,
       `Extracted ZIP files exceed ${formatUploadLimitBytes(ZIP_MAX_UNCOMPRESSED_BYTES)} total.`,
       entry.fileName
     );
   }
 
-  if (
-    (entry.compressedSize === 0 && entry.uncompressedSize > 0) ||
-    (entry.compressedSize > 0 && entry.uncompressedSize / entry.compressedSize > ZIP_MAX_RATIO)
-  ) {
+  const ratioBudget =
+    entry.compressedSize === 0 && entry.uncompressedSize > 0
+      ? { ok: false as const, code: "ZIP_BOMB_SUSPECTED" as const }
+      : checkZipBudget({
+          ratio: entry.compressedSize > 0
+            ? entry.uncompressedSize / entry.compressedSize
+            : 0,
+        });
+
+  if (!ratioBudget.ok) {
     throw new ZipUploadError(
-      "ZIP_BOMB_SUSPECTED",
+      ratioBudget.code,
       "ZIP archive looks unsafe. Try uploading the files directly.",
       entry.fileName
     );
