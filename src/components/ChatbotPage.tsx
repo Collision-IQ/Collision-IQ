@@ -4520,7 +4520,7 @@ function FindingReasoningCard({
       </div>
       <div className="space-y-3">
         {findings.slice(0, 5).map((finding, index) => (
-          <div key={finding.id ?? `${finding.issue}-${index}`} className="rounded-2xl bg-muted px-3.5 py-3">
+          <div key={`${finding.id ?? finding.issue ?? "finding"}-${index}`} className="rounded-2xl bg-muted px-3.5 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm font-semibold leading-5 text-foreground">
                 {finding.priorityRank ?? index + 1}. {cleanWorkspaceDisplayText(finding.issue) || "Finding"}
