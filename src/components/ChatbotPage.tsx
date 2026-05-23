@@ -494,7 +494,7 @@ export function ChatbotWorkspacePage() {
   const workspaceRowsClass = hasStructuredAnalysis
     ? isReviewActive
       ? "grid-rows-[auto_minmax(0,1fr)]"
-      : "grid-rows-[auto_minmax(0,1fr)_auto]"
+      : "grid-rows-[auto_minmax(0,1fr)]"
     : "grid-rows-[minmax(0,1fr)]";
 
   useEffect(() => {
