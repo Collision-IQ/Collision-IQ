@@ -1,10 +1,8 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { Pool } from "pg";
+import { getOpenAIClient } from "@/lib/openai";
 
 export const runtime = "nodejs";
-
-const openai = new OpenAI();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -14,7 +12,7 @@ export async function POST(req: Request) {
   try {
     const { query } = await req.json();
 
-    const embedding = await openai.embeddings.create({
+    const embedding = await getOpenAIClient().embeddings.create({
       model: "text-embedding-3-small",
       input: query,
     });

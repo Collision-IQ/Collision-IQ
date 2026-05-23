@@ -3,15 +3,51 @@
 /* ---------------- Root theme variables ---------------- */
 
 :root {
-  --bg-primary: #000000;
+  --background: #f3f1ec;
+  --foreground: #17202a;
+  --card: #fbfaf7;
+  --card-foreground: #17202a;
+  --muted: #e9e6df;
+  --muted-foreground: #68717c;
+  --border: #cfc8bb;
+  --input: #e4e4e7;
+  --ring: #b86a2d;
+  --bg-primary: #f3f1ec;
 
+  --surface: rgba(255, 255, 255, 0.78);
+  --surface-border: rgba(15, 23, 42, 0.12);
+
+  --accent: #b86a2d;
+
+  --text-primary: #17202a;
+  --text-muted: rgba(23,32,42,0.68);
+  --color-bg: #f3f1ec;
+  --color-card: #fbfaf7;
+  --color-border: #cfc8bb;
+  --color-text: #17202a;
+  --color-muted: #5f6974;
+}
+
+.dark {
+  --background: #101214;
+  --foreground: #eef1f3;
+  --card: #15181b;
+  --card-foreground: #eef1f3;
+  --muted: #1c2024;
+  --muted-foreground: #a7b0b9;
+  --border: #30363d;
+  --input: #2b3138;
+  --ring: #c57934;
+  --bg-primary: #0b0d0f;
   --surface: rgba(255, 255, 255, 0.03);
   --surface-border: rgba(255, 255, 255, 0.10);
-
-  --accent: #C65A2A;
-
-  --text-primary: #ffffff;
-  --text-muted: rgba(255,255,255,0.65);
+  --text-primary: #eef1f3;
+  --text-muted: rgba(238,241,243,0.68);
+  --color-bg: #101214;
+  --color-card: #15181b;
+  --color-border: #30363d;
+  --color-text: #eef1f3;
+  --color-muted: #a7b0b9;
 }
 
 /* ---------------- Base layout ---------------- */
@@ -20,7 +56,7 @@ html,
 body {
   height: 100%;
   margin: 0;
-  background: #000000;
+  background: var(--bg-primary);
   color: var(--text-primary);
   font-family: 'Inter', system-ui, sans-serif;
   overflow-x: hidden;
@@ -35,45 +71,22 @@ main {
 
 /* ---------------- Cinematic vignette ---------------- */
 
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-
-  background: radial-gradient(
-    circle at center,
-    transparent 35%,
-    rgba(0, 0, 0, 0.88)
-  );
-
-  z-index: 0;
+.dark body::after {
+  display: none;
 }
 
 /* ---------------- Accent glow ---------------- */
 
 .chat-glow {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-
-  background: radial-gradient(
-    circle at 90% 10%,
-    rgba(198, 90, 42, 0.18),
-    transparent 45%
-  );
-
-  mix-blend-mode: screen;
-  opacity: 0.6;
-  z-index: 0;
+  display: none;
 }
 
 /* ---------------- Grid texture ---------------- */
 
 .chat-grid {
   background-image:
-    linear-gradient(to right, rgba(255,255,255,0.05) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255,255,255,0.05) 1px, transparent 1px);
+    linear-gradient(to right, rgba(80,87,96,0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(80,87,96,0.08) 1px, transparent 1px);
 
   background-size: 48px 48px;
 }
@@ -89,7 +102,7 @@ body::after {
 /* Apply drift only to glow layer (not body) */
 
 .chat-glow {
-  animation: subtleDrift 40s ease-in-out infinite;
+  animation: none;
 }
 
 /* ---------------- Ensure app is above overlays ---------------- */
@@ -108,4 +121,109 @@ body > * {
   margin-top: 18px;
   margin-bottom: 4px;
   font-weight: 600;
+}
+
+/* Scrollbar styling handled via webkit pseudo-elements for better browser support */
+.chat-composer-textarea::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chat-composer-textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-composer-textarea::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.18);
+  border-radius: 999px;
+}
+
+.chat-composer-textarea::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.28);
+}
+
+/* ---------------- Collision IQ enterprise workstation ---------------- */
+
+.ci-workstation {
+  background:
+    linear-gradient(to right, rgba(80, 87, 96, 0.075) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(80, 87, 96, 0.075) 1px, transparent 1px),
+    var(--background);
+  background-size: 28px 28px;
+  letter-spacing: 0;
+}
+
+.ci-workstation * {
+  letter-spacing: inherit;
+}
+
+.ci-workstation [class*="rounded-3xl"],
+.ci-workstation [class*="rounded-[30px]"],
+.ci-workstation [class*="rounded-[28px]"],
+.ci-workstation [class*="rounded-[26px]"],
+.ci-workstation [class*="rounded-[24px]"],
+.ci-workstation [class*="rounded-[22px]"],
+.ci-workstation [class*="rounded-[20px]"],
+.ci-workstation [class*="rounded-2xl"] {
+  border-radius: 8px !important;
+}
+
+.ci-workstation [class*="rounded-xl"],
+.ci-workstation [class*="rounded-[18px]"],
+.ci-workstation [class*="rounded-[17px]"] {
+  border-radius: 6px !important;
+}
+
+.ci-workstation [class*="rounded-full"] {
+  border-radius: 999px !important;
+}
+
+.ci-workstation [class*="shadow-"],
+.ci-workstation [class*="shadow_"],
+.ci-workstation [class*="shadow-["] {
+  box-shadow: none !important;
+}
+
+.ci-workstation header {
+  background: color-mix(in srgb, var(--card) 94%, transparent) !important;
+  border-color: var(--border) !important;
+}
+
+.ci-workstation h1,
+.ci-workstation h2,
+.ci-workstation h3,
+.ci-workstation .font-semibold {
+  letter-spacing: 0 !important;
+}
+
+.ci-workstation .text-muted-foreground {
+  color: var(--muted-foreground);
+}
+
+.ci-workstation [class*="uppercase"][class*="tracking"] {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  letter-spacing: 0.08em !important;
+}
+
+.ci-workstation section,
+.ci-workstation article {
+  scroll-margin-top: 12px;
+}
+
+.ci-workstation .bg-gradient-to-br,
+.ci-workstation .bg-gradient-to-r {
+  background-image: none !important;
+}
+
+.ci-workstation [class*="hover:-translate"],
+.ci-workstation [class*="active:scale"] {
+  transform: none !important;
+}
+
+.ci-workstation .analysis-report h2 {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+
+.ci-workstation .chat-composer-textarea {
+  font-family: Inter, system-ui, sans-serif;
 }

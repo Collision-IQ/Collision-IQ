@@ -1,0 +1,9 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1024" height="1024" rx="180" fill="#0F0F10"/>
+  <rect x="220" y="180" width="584" height="584" rx="140" fill="none" stroke="#F2F2F2" stroke-width="42"/>
+  <path d="M340 370 H650" stroke="#F2F2F2" stroke-width="34" stroke-linecap="round"/>
+  <path d="M340 500 H580" stroke="#F2F2F2" stroke-width="34" stroke-linecap="round"/>
+  <path d="M340 630 H700" stroke="#E4571C" stroke-width="34" stroke-linecap="round"/>
+  <path d="M650 574 L760 630 L650 686" fill="none" stroke="#E4571C" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="512" y="902" text-anchor="middle" fill="#E4571C" font-family="Arial, Helvetica, sans-serif" font-size="72" letter-spacing="5">FLOW</text>
+</svg>

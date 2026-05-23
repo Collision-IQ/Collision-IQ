@@ -1,0 +1,29 @@
+[
+  {
+    "id": "fl-parts_usage-fs-501-33",
+    "state": "FL",
+    "category": "parts_usage",
+    "rule": "When non-OEM aftermarket crash parts are used in preparing a repair estimate, the written estimate must clearly identify each such part and include the required aftermarket crash parts disclosure.",
+    "citation": "Fla. Stat. 501.33 (2025)",
+    "sourceName": "The Florida Senate",
+    "sourceUrl": "https://www.flsenate.gov/Laws/Statutes/2025/0501.33",
+    "retrievedAt": "2026-05-05T00:00:00Z",
+    "applicability": "Florida repair estimates prepared by an insurer, repair facility, or both, where nonoriginal equipment manufacturer aftermarket crash parts are used.",
+    "severity": "medium",
+    "effectiveDate": null,
+    "verifiedBy": "Collision IQ staging rollout",
+    "notes": "Verified from the Florida Senate statute page during controlled staging rollout. This is claim intelligence support, not legal advice."
+  },
+  {
+    "id": "pa-parts-usage-31-pa-code-62-3",
+    "state": "PA",
+    "category": "parts_usage",
+    "rule": "A Pennsylvania motor vehicle physical damage appraisal that includes aftermarket crash parts must include the required aftermarket crash parts disclosure.",
+    "citation": "31 Pa. Code § 62.3(10)",
+    "sourceName": "Pennsylvania Code & Bulletin",
+    "sourceUrl": "https://www.pacodeandbulletin.gov/secure/pacode/data/031/chapter62/031_0062.pdf",
+    "retrievedAt": "2026-05-05T00:00:00.000Z",
+    "applicability": "Pennsylvania motor vehicle physical damage appraisals involving aftermarket crash parts.",
+    "severity": "High"
+  }
+]

@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import type { PluginAPI } from "tailwindcss/plugin";
 import typography from "@tailwindcss/typography";
 
 export default {
@@ -9,11 +10,17 @@ export default {
   theme: {
   extend: {
     colors: {
-      bg: "#07090D",
-      card: "#0F1620",
-      border: "#1B2633",
-      text: "#E8EEF6",
-      muted: "#9FB0C3",
+      background: "var(--background)",
+      foreground: "var(--foreground)",
+      card: "var(--card)",
+      "card-foreground": "var(--card-foreground)",
+      muted: "var(--muted)",
+      "muted-foreground": "var(--muted-foreground)",
+      border: "var(--border)",
+      input: "var(--input)",
+      ring: "var(--ring)",
+      bg: "var(--color-bg)",
+      text: "var(--color-text)",
       accent: "#D65B2A",
       danger: "#EF4444",
       warning: "#F59E0B",
@@ -49,5 +56,14 @@ export default {
   },
 },
 
-  plugins: [typography],
+  plugins: [
+    typography,
+    ({ addUtilities }: PluginAPI) => {
+      addUtilities({
+        ".color-scheme-dark": {
+          colorScheme: "dark",
+        },
+      });
+    },
+  ],
 } satisfies Config;

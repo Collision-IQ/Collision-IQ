@@ -1,7 +1,6 @@
-import OpenAI from "openai";
 import type { RetrievedChunk } from "@/lib/types";
-
-const openai = new OpenAI();
+import { collisionIqModels } from "@/lib/modelConfig";
+import { openai } from "@/lib/openai";
 
 type ChunkMatch = RetrievedChunk & {
   system?: string | null;
@@ -18,7 +17,7 @@ export async function rerankChunks(
   if (!chunks.length) return [];
 
   const prompt = `
-You are ranking document passages by relevance.
+You are ranking OEM procedure excerpts by practical relevance to a real collision repair scenario.
 
 Query:
 ${query}
@@ -28,11 +27,21 @@ ${chunks
   .map((c, i) => `[${i}] ${c.content.substring(0, 500)}`)
   .join("\n\n")}
 
+Prioritize:
+- direct applicability to repair operations
+- procedures that affect calibration, safety, or required verification
+- contextually relevant systems (ADAS, structural, restraint, alignment)
+
+Deprioritize:
+- generic or overly broad procedures
+- unrelated systems
+- redundant or duplicate content
+
 Return the numbers of the ${topK} most relevant passages in order.
 `;
 
   const res = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: collisionIqModels.helper,
     messages: [{ role: "user", content: prompt }],
   });
 

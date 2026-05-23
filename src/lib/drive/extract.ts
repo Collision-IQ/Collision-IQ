@@ -1,6 +1,5 @@
 import { drive_v3 } from "googleapis";
 import pdf from "pdf-parse";
-import mammoth from "mammoth";
 import { cleanPdfText } from "../rag/cleantext";
 import vision from "@google-cloud/vision";
 
@@ -78,6 +77,7 @@ export async function extractDriveText(
       );
 
       const buffer = Buffer.from(res.data as ArrayBuffer);
+      const mammoth = await import("mammoth");
       const result = await mammoth.extractRawText({ buffer });
 
       return {

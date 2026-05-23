@@ -16,6 +16,18 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Collision IQ Drive Policy References
+
+The chat retrieval layer treats `Collision IQ > PA Law > Insurance Policies` as a policy-reference source for Pennsylvania insurance policy questions, including appraisal clauses, exclusions, limits, duties after loss, supplement procedures, and policy terms.
+
+Configure or verify:
+
+```bash
+GOOGLE_PA_INSURANCE_POLICIES_FOLDER_ID=1fxDcmu_anJLGRJ8qLvORWAq8kNR1vzkf
+```
+
+The folder must be accessible to the configured Google Drive service account or impersonated subject, and Drive ingestion must be run so policy language is indexed before the bot can cite matched excerpts. If the connector/index is unavailable, the bot should say the policy folder/index needs to be checked instead of making policy-specific conclusions.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

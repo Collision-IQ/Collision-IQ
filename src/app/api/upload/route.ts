@@ -1,87 +1,850 @@
 import { NextResponse } from "next/server";
-import pdfParse from "pdf-parse";
-import mammoth from "mammoth";
+import {
+  UnauthorizedError,
+  requireCurrentUser,
+} from "@/lib/auth/require-current-user";
+import { isPlatformAdminEmail, maskEmail, normalizeEmail } from "@/lib/auth/platform-admin";
+import {
+  canUploadFiles as resolveCanUploadFiles,
+  getCurrentProductEntitlements,
+  getCurrentSubscriptionTierForUser,
+  resolveProductTrialActive,
+} from "@/lib/billing/productEntitlements";
+import {
+  FREE_MONTHLY_UPLOAD_LIMIT,
+  FREE_UPLOAD_BATCH_MESSAGE,
+  FREE_UPLOAD_LIMIT_MESSAGE,
+  evaluateFreeUploadRequest,
+  getFreeUploadUsageCount,
+  isFreeUploadEntitlement,
+  recordFreeUploadUsage,
+} from "@/lib/billing/freeUploadEntitlements";
+import { UsageAccessError, recordUsage } from "@/lib/billing/usage";
+import { getUsageCount, incrementUsage } from "@/lib/usage";
 import { saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
+import { getAnalysisReport } from "@/lib/analysisReportStore";
+import {
+  bufferToReusableDataUrl,
+  extractPreviewDataFromBuffer,
+} from "@/lib/attachments/extractPreviewData";
+import {
+  isCccUploadClassification,
+  parseCccWorkfileArtifact,
+  type CccWorkfileMetadata,
+  type UploadClassification,
+} from "@/lib/ccc/cccWorkfile";
+import {
+  formatUploadLimitBytes,
+  getUploadBatchLimitMessage,
+  resolveUploadPlanLimits,
+} from "@/lib/uploadSafety/uploadLimits";
+import {
+  isZipUpload,
+  prepareUploadFile,
+  type PreparedUploadFile,
+  type ZipExtractionSummary,
+} from "@/lib/uploadSafety/zipSafety";
 
 export const runtime = "nodejs";
 
-async function extractPDF(buffer: Buffer): Promise<string> {
-  const result = await pdfParse(buffer);
-  const text = result.text || "";
+const RUNTIME_SAFE_MULTIPART_BODY_BYTES = 20 * 1024 * 1024;
+const RUNTIME_LIMIT_MESSAGE =
+  "This file is within your plan limit, but exceeds the current platform upload limit. Direct large-file upload support is coming soon. For now, split ZIPs over 20 MB into smaller uploads.";
 
-  console.log("PDF TEXT LENGTH:", text.length);
+type UploadSuccess = {
+  attachmentId: string;
+  filename: string;
+  type: string;
+  sizeBytes: number;
+  source: "direct_upload" | "zip_extraction";
+  sourceArchive?: string;
+  classification: UploadClassification;
+  metadata?: CccWorkfileMetadata;
+  sha256?: string;
+  text: string;
+  imageDataUrl?: string;
+  pageCount?: number;
+  hasVision: boolean;
+  caseContinuity: {
+    activeCaseId: string;
+    reportId: string;
+    sameCaseFollowUp: boolean;
+    attachmentIds: string[];
+  } | null;
+};
 
-  return text;
+type UploadFailure = {
+  filename: string;
+  reason: string;
+  code?: string;
+};
+
+type UploadTelemetry = {
+  rawUploadSize: number;
+  extractedFileCount: number;
+  rejectedFileCount: number;
+  extractedTotalSize: number;
+  planLimitUsed: {
+    plan: string;
+    targetMaxUploadBytes: number;
+    runtimeMaxUploadBytes: number;
+    maxUploadBytes: number;
+    maxFilesPerReview: number;
+    zipAllowed: boolean;
+    cccWorkfileAllowed: boolean;
+    maxExtractedFiles: number;
+    maxExtractedTotalBytes: number;
+    maxZipNestingDepth: number;
+  };
+};
+
+function getFailureStatus(failedUploads: UploadFailure[]) {
+  if (failedUploads.some((failure) => failure.code === "UPLOAD_QUOTA_REACHED")) {
+    return 403;
+  }
+
+  if (failedUploads.some((failure) => failure.code === "FILE_TOO_LARGE")) {
+    return 413;
+  }
+
+  return 400;
 }
 
-async function fileToText(file: File): Promise<string> {
-  const type = file.type || "";
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
+function getUploadFiles(formData: FormData): File[] {
+  const candidates = [
+    ...formData.getAll("file"),
+    ...formData.getAll("files"),
+  ];
 
-  if (type.includes("text")) {
-    return buffer.toString("utf8");
-  }
-
-  if (type === "application/pdf") {
-    return extractPDF(buffer);
-  }
-
-  if (
-    type ===
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-  ) {
-    const result = await mammoth.extractRawText({ buffer });
-    return result.value || "";
-  }
-
-  return `[[Unsupported file type for text extraction: ${type || "unknown type"}: ${file.name}]]`;
+  return candidates.filter((value): value is File => value instanceof File);
 }
 
-async function fileToDataUrl(file: File): Promise<string | undefined> {
-  const type = file.type || "";
+function getContentLength(req: Request) {
+  const raw = req.headers.get("content-length");
+  if (!raw) return null;
 
-  if (!type.startsWith("image/")) return undefined;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
-  const buffer = Buffer.from(await file.arrayBuffer());
-  return `data:${type};base64,${buffer.toString("base64")}`;
+async function readUploadFormData(req: Request, params: {
+  runtimeMaxBodyBytes: number;
+  planMaxUploadBytes: number;
+}) {
+  const contentLength = getContentLength(req);
+  if (contentLength !== null && contentLength > params.runtimeMaxBodyBytes) {
+    return {
+      error: NextResponse.json(
+        {
+          error: RUNTIME_LIMIT_MESSAGE,
+          code: "RUNTIME_BODY_LIMIT_EXCEEDED",
+          runtimeMaxBodyBytes: params.runtimeMaxBodyBytes,
+          planMaxUploadBytes: params.planMaxUploadBytes,
+          temporaryPlatformLimit: true,
+        },
+        { status: 413 }
+      ),
+    };
+  }
+
+  try {
+    return { formData: await req.formData() };
+  } catch (error) {
+    console.info("[upload] multipart body parse failed", {
+      code: "UPLOAD_BODY_PARSE_FAILED",
+      contentLength,
+      runtimeMaxBodyBytes: params.runtimeMaxBodyBytes,
+      planMaxUploadBytes: params.planMaxUploadBytes,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      error: NextResponse.json(
+        {
+          error:
+            "Upload body could not be read. It may exceed the current platform upload limit. Direct large-file upload support is coming soon.",
+          code: "UPLOAD_BODY_PARSE_FAILED",
+          runtimeMaxBodyBytes: params.runtimeMaxBodyBytes,
+          planMaxUploadBytes: params.planMaxUploadBytes,
+          temporaryPlatformLimit: true,
+        },
+        { status: 413 }
+      ),
+    };
+  }
+}
+
+function buildUploadTelemetry(params: {
+  rawUploadSize: number;
+  zipSummaries: ZipExtractionSummary[];
+  failedUploads: UploadFailure[];
+  uploadLimits: ReturnType<typeof resolveUploadPlanLimits>;
+}): UploadTelemetry {
+  return {
+    rawUploadSize: params.rawUploadSize,
+    extractedFileCount: params.zipSummaries.reduce(
+      (sum, summary) => sum + summary.acceptedFiles,
+      0
+    ),
+    rejectedFileCount: params.failedUploads.length,
+    extractedTotalSize: params.zipSummaries.reduce(
+      (sum, summary) => sum + summary.extractedBytes,
+      0
+    ),
+    planLimitUsed: {
+      plan: params.uploadLimits.plan,
+      targetMaxUploadBytes: params.uploadLimits.maxUploadBytes,
+      runtimeMaxUploadBytes: Math.min(
+        params.uploadLimits.maxUploadBytes,
+        RUNTIME_SAFE_MULTIPART_BODY_BYTES
+      ),
+      maxUploadBytes: Math.min(
+        params.uploadLimits.maxUploadBytes,
+        RUNTIME_SAFE_MULTIPART_BODY_BYTES
+      ),
+      maxFilesPerReview: params.uploadLimits.maxFilesPerReview,
+      zipAllowed: params.uploadLimits.zipAllowed,
+      cccWorkfileAllowed: params.uploadLimits.cccWorkfileAllowed,
+      maxExtractedFiles: params.uploadLimits.maxExtractedFiles,
+      maxExtractedTotalBytes: params.uploadLimits.maxExtractedTotalBytes,
+      maxZipNestingDepth: params.uploadLimits.maxZipNestingDepth,
+    },
+  };
 }
 
 export async function POST(req: Request) {
   try {
-    const formData = await req.formData();
+    const { user, verifiedEmails, isPlatformAdmin } = await requireCurrentUser();
+    const normalizedEmail = normalizeEmail(user.email);
+    const isEnvAdmin = isPlatformAdminEmail(normalizedEmail);
+    const effectiveIsAdmin = isPlatformAdmin || isEnvAdmin;
+    const subscriptionTier = await getCurrentSubscriptionTierForUser(user.id);
+    const trialActive = resolveProductTrialActive({
+      activeSubscriptionId: subscriptionTier ? "active-subscription" : null,
+      activeSubscriptionStatus:
+        subscriptionTier === "trial" ? "TRIALING" : subscriptionTier ? "ACTIVE" : null,
+      createdAt: user.createdAt,
+      plan: subscriptionTier ?? "pro",
+    });
+    const entitlements = await getCurrentProductEntitlements({
+      userEmail: normalizedEmail,
+      userEmails: verifiedEmails,
+      trialActive,
+      subscriptionTier,
+      isPlatformAdmin: effectiveIsAdmin,
+    });
+    const canUploadFiles = resolveCanUploadFiles(entitlements);
+    const uploadLimits = resolveUploadPlanLimits(entitlements);
+    const isFreeUploadPlan = isFreeUploadEntitlement({
+      ...entitlements,
+      isPlatformAdmin: effectiveIsAdmin,
+    });
+    // TODO(direct-to-storage): replace multipart uploads with signed object-storage URLs
+    // -> object storage -> async ZIP extraction -> analysis once uploads need to exceed runtime limits.
+    const runtimeMaxUploadBytes = Math.min(
+      uploadLimits.maxUploadBytes,
+      RUNTIME_SAFE_MULTIPART_BODY_BYTES
+    );
 
-    const file = formData.get("file");
-
-    if (!file || !(file instanceof File)) {
+    if (!canUploadFiles) {
+      console.info("[upload] request rejected", {
+        userId: user.id,
+        email: maskEmail(normalizedEmail),
+        plan: entitlements.plan,
+        trialActive: entitlements.trialActive,
+        isAdmin: effectiveIsAdmin,
+        canUploadFiles,
+        maxUploadsPerReview: entitlements.maxUploadsPerReview,
+      });
       return NextResponse.json(
-        { error: "No file received" },
-        { status: 400 }
+        {
+          error: "Uploads are not included in your current plan.",
+          code: "UNAUTHORIZED",
+          successfulUploads: [],
+          failedUploads: [],
+          documents: [],
+        },
+        { status: 403 }
       );
     }
 
-    const text = await fileToText(file);
-    const imageDataUrl = await fileToDataUrl(file);
-    const stored = saveUploadedAttachment({
-      filename: file.name,
-      type: file.type,
-      text,
-      imageDataUrl,
+    const parsedBody = await readUploadFormData(req, {
+      runtimeMaxBodyBytes: runtimeMaxUploadBytes,
+      planMaxUploadBytes: uploadLimits.maxUploadBytes,
+    });
+    if (parsedBody.error) {
+      return parsedBody.error;
+    }
+
+    const formData = parsedBody.formData;
+    const files = getUploadFiles(formData);
+    const activeCaseId = String(formData.get("activeCaseId") ?? "").trim() || null;
+    const rawUploadSize = files.reduce((sum, file) => sum + file.size, 0);
+
+    if (!files.length) {
+      return NextResponse.json({ error: "NO_FILE" }, { status: 400 });
+    }
+
+    let freeUploadsUsed: number | null = null;
+
+    if (isFreeUploadPlan) {
+      const freeFileInputs = files.map((file) => ({
+        filename: file.name,
+        type: file.type,
+      }));
+
+      const preUsageFreeRequest = evaluateFreeUploadRequest({
+        files: freeFileInputs,
+        used: 0,
+      });
+
+      if (preUsageFreeRequest.code === "FREE_UPLOAD_BATCH_LIMIT") {
+        return NextResponse.json(
+          {
+            error: FREE_UPLOAD_BATCH_MESSAGE,
+            code: "FREE_UPLOAD_BATCH_LIMIT",
+            successfulUploads: [],
+            failedUploads: files.map((file) => ({
+              filename: file.name,
+              reason: FREE_UPLOAD_BATCH_MESSAGE,
+              code: "FREE_UPLOAD_BATCH_LIMIT",
+            })),
+            documents: [],
+          },
+          { status: 400 }
+        );
+      }
+
+      const freeFile = files[0];
+      if (preUsageFreeRequest.code === "FREE_UPLOAD_FILE_TYPE_LIMIT") {
+        return NextResponse.json(
+          {
+            error: preUsageFreeRequest.message,
+            code: preUsageFreeRequest.code,
+            successfulUploads: [],
+            failedUploads: [
+              {
+                filename: freeFile.name,
+                reason: preUsageFreeRequest.message,
+                code: preUsageFreeRequest.code,
+              },
+            ],
+            documents: [],
+          },
+          { status: 400 }
+        );
+      }
+
+      try {
+        freeUploadsUsed = await getFreeUploadUsageCount({ userId: user.id });
+      } catch (error) {
+        console.error("[upload] free monthly usage read failed", {
+          userId: user.id,
+          error,
+        });
+        return NextResponse.json(
+          {
+            error: "Upload usage could not be verified. Please try again in a moment.",
+            code: "UPLOAD_USAGE_UNAVAILABLE",
+            successfulUploads: [],
+            failedUploads: [],
+            documents: [],
+          },
+          { status: 503 }
+        );
+      }
+
+      const freeQuota = evaluateFreeUploadRequest({
+        files: freeFileInputs,
+        used: freeUploadsUsed,
+      });
+
+      if (!freeQuota.allowed && freeQuota.code === "FREE_MONTHLY_UPLOAD_LIMIT_REACHED") {
+        return NextResponse.json(
+          {
+            error: FREE_UPLOAD_LIMIT_MESSAGE,
+            code: "FREE_MONTHLY_UPLOAD_LIMIT_REACHED",
+            successfulUploads: [],
+            failedUploads: [
+              {
+                filename: freeFile.name,
+                reason: FREE_UPLOAD_LIMIT_MESSAGE,
+                code: "FREE_MONTHLY_UPLOAD_LIMIT_REACHED",
+              },
+            ],
+            usage: {
+              uploadCount: freeUploadsUsed,
+              uploadCap: FREE_MONTHLY_UPLOAD_LIMIT,
+              plan: entitlements.plan,
+              billingPlan: entitlements.billingPlan,
+            },
+            documents: [],
+          },
+          { status: 403 }
+        );
+      }
+    }
+
+    const activeCase = activeCaseId
+      ? await getAnalysisReport(activeCaseId, { ownerUserId: user.id })
+      : null;
+
+    if (activeCaseId) {
+      console.info("[upload] resolved active case for follow-up upload", {
+        activeCaseId,
+        hasActiveCase: Boolean(activeCase),
+        ownerUserId: user.id,
+      });
+    }
+
+    const successfulUploads: UploadSuccess[] = [];
+    const failedUploads: UploadFailure[] = [];
+    let uploadsUsed = entitlements.uploadCount;
+    if (freeUploadsUsed !== null) {
+      uploadsUsed = freeUploadsUsed;
+    }
+
+    if (!isFreeUploadPlan && !effectiveIsAdmin && entitlements.uploadCap !== null) {
+      try {
+        uploadsUsed = await getUsageCount(user.id, "FILE_UPLOAD");
+      } catch (error) {
+        console.error("[upload] usage read failed during processing (non-blocking)", {
+          userId: user.id,
+          error,
+        });
+      }
+    }
+
+    console.info("[upload] accepted", {
+      totalBytes: rawUploadSize,
+      fileCount: files.length,
+      maxFileCount: uploadLimits.maxFilesPerReview,
+      maxFileBytes: uploadLimits.maxUploadBytes,
+      runtimeMaxFileBytes: runtimeMaxUploadBytes,
+      ownerUserId: user.id,
+      activeCaseId,
+      sameCaseFollowUp: Boolean(activeCase),
+      entitlement: {
+        plan: entitlements.plan,
+        billingPlan: entitlements.billingPlan,
+        subscriptionStatus: entitlements.subscriptionStatus,
+        canUpload: entitlements.canUpload,
+        canUploadFiles,
+        uploadCount: uploadsUsed,
+        uploadCap: isFreeUploadPlan ? FREE_MONTHLY_UPLOAD_LIMIT : entitlements.uploadCap,
+        freeRollingUploadCount: freeUploadsUsed,
+        maxUploadsPerReview: entitlements.maxUploadsPerReview,
+        uploadLimits,
+        usageStatus: entitlements.usageStatus,
+        trialActive: entitlements.trialActive,
+        isPlatformAdmin,
+        isEnvAdmin,
+        effectiveIsAdmin,
+      },
+      files: files.map((file, index) => ({
+        index,
+        filename: file.name,
+        mimeType: file.type || "unknown",
+        sizeBytes: file.size,
+      })),
     });
 
-    return NextResponse.json({
-      attachmentId: stored.id,
-      filename: stored.filename,
-      type: stored.type,
-      text: stored.text,
-      imageDataUrl: stored.imageDataUrl,
-      hasVision: Boolean(stored.imageDataUrl),
+    const zipSummaries: ZipExtractionSummary[] = [];
+
+    for (const [index, file] of files.entries()) {
+      const maxFilesPerReview = uploadLimits.maxFilesPerReview;
+      if (index >= maxFilesPerReview) {
+        failedUploads.push({
+          filename: file.name,
+          reason: getUploadBatchLimitMessage(uploadLimits),
+          code: "MAX_FILES_REACHED",
+        });
+        console.info("[upload] file rejected", {
+          filename: file.name,
+          code: "MAX_FILES_REACHED",
+          fileIndex: index,
+          maxFileCount: maxFilesPerReview,
+          ownerUserId: user.id,
+        });
+        continue;
+      }
+
+      if (file.size > uploadLimits.maxUploadBytes) {
+        failedUploads.push({
+          filename: file.name,
+          reason: `File exceeds ${formatUploadLimitBytes(uploadLimits.maxUploadBytes)} limit (${formatUploadLimitBytes(file.size)}).`,
+          code: "FILE_TOO_LARGE",
+        });
+        console.info("[upload] file rejected", {
+          filename: file.name,
+          code: "FILE_TOO_LARGE",
+          sizeBytes: file.size,
+          maxFileBytes: uploadLimits.maxUploadBytes,
+          runtimeMaxFileBytes: runtimeMaxUploadBytes,
+          ownerUserId: user.id,
+        });
+        continue;
+      }
+
+      if (file.size > runtimeMaxUploadBytes) {
+        failedUploads.push({
+          filename: file.name,
+          reason: RUNTIME_LIMIT_MESSAGE,
+          code: "RUNTIME_BODY_LIMIT_EXCEEDED",
+        });
+        console.info("[upload] file rejected", {
+          filename: file.name,
+          code: "RUNTIME_BODY_LIMIT_EXCEEDED",
+          sizeBytes: file.size,
+          runtimeMaxFileBytes: runtimeMaxUploadBytes,
+          planMaxFileBytes: uploadLimits.maxUploadBytes,
+          ownerUserId: user.id,
+        });
+        continue;
+      }
+
+      if (isZipUpload(file) && !uploadLimits.zipAllowed) {
+        failedUploads.push({
+          filename: file.name,
+          reason: "ZIP uploads are not included in your current plan.",
+          code: "ZIP_NOT_ALLOWED",
+        });
+        continue;
+      }
+
+      if (
+        !effectiveIsAdmin &&
+        entitlements.uploadCap !== null &&
+        uploadsUsed + successfulUploads.length >= entitlements.uploadCap
+      ) {
+        failedUploads.push({
+          filename: file.name,
+          reason: "Upload quota reached for your plan.",
+          code: "UPLOAD_QUOTA_REACHED",
+        });
+        console.info("[upload] file rejected", {
+          filename: file.name,
+          code: "UPLOAD_QUOTA_REACHED",
+          uploadCount: uploadsUsed,
+          uploadCap: entitlements.uploadCap,
+          successfulInRequest: successfulUploads.length,
+          ownerUserId: user.id,
+          plan: entitlements.plan,
+          billingPlan: entitlements.billingPlan,
+        });
+        continue;
+      }
+
+      try {
+        const prepared = await prepareUploadFile(file, uploadLimits);
+        zipSummaries.push(...prepared.zipSummaries);
+        failedUploads.push(...prepared.rejectedFiles);
+
+        for (const preparedFile of prepared.files) {
+          if (
+            !effectiveIsAdmin &&
+            entitlements.uploadCap !== null &&
+            uploadsUsed + successfulUploads.length >= entitlements.uploadCap
+          ) {
+            failedUploads.push({
+              filename: preparedFile.filename,
+              reason: "Upload quota reached for your plan.",
+              code: "UPLOAD_QUOTA_REACHED",
+            });
+            continue;
+          }
+
+          const storedUpload = await processPreparedUpload({
+            file: preparedFile,
+            ownerUserId: user.id,
+            activeCaseId,
+            activeCase,
+            maxImageDataUrlBytes: uploadLimits.maxUploadBytes,
+          });
+
+          if (isFreeUploadPlan) {
+            await recordFreeUploadUsage({
+              userId: user.id,
+              metadataJson: {
+                source: "free_upload",
+                fileName: preparedFile.filename,
+                fileSize: preparedFile.buffer.byteLength,
+                classification: preparedFile.classification,
+                attachmentId: storedUpload.attachmentId,
+              },
+            });
+          }
+
+          successfulUploads.push(storedUpload);
+
+          console.info("[upload] attachment stored", {
+            attachmentId: storedUpload.attachmentId,
+            filename: storedUpload.filename,
+            mimeType: storedUpload.type || "unknown",
+            textLength: storedUpload.text.length,
+            pageCount: storedUpload.pageCount ?? null,
+            hasImageDataUrl: Boolean(storedUpload.imageDataUrl),
+            ownerUserId: user.id,
+            activeCaseId,
+            sameCaseFollowUp: Boolean(activeCase),
+            sourceArchive: preparedFile.sourceArchive ?? null,
+            classification: preparedFile.classification,
+          });
+
+          if (activeCase) {
+            console.info("[upload] returned same-case continuity", {
+              activeCaseId: activeCase.id,
+              reportId: activeCase.id,
+              attachmentIds: [storedUpload.attachmentId],
+              sameCaseFollowUp: true,
+            });
+          }
+
+          if (!effectiveIsAdmin && !isFreeUploadPlan) {
+            try {
+              await recordUsage({
+                userId: user.id,
+                kind: "FILE_UPLOAD",
+                metadataJson: {
+                  source: preparedFile.sourceArchive ? "zip_upload" : "upload",
+                  fileName: preparedFile.filename,
+                  fileSize: preparedFile.buffer.byteLength,
+                  classification: preparedFile.classification,
+                  attachmentId: storedUpload.attachmentId,
+                  sourceArchive: preparedFile.sourceArchive,
+                },
+              });
+            } catch (error) {
+              console.error("[upload] usage tracking failed (non-blocking)", {
+                phase: "recordUsage",
+                userId: user.id,
+                fileName: preparedFile.filename,
+                error,
+              });
+            }
+
+            try {
+              await incrementUsage(user.id, "FILE_UPLOAD");
+            } catch (error) {
+              console.error("[upload] usage tracking failed (non-blocking)", {
+                phase: "incrementUsage",
+                userId: user.id,
+                fileName: preparedFile.filename,
+                error,
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.error("[upload] file processing failed", {
+          filename: file.name,
+          mimeType: file.type || "unknown",
+          sizeBytes: file.size,
+          ownerUserId: user.id,
+          error,
+        });
+        const zipProcessingFailed = isZipUpload(file);
+        failedUploads.push({
+          filename: file.name,
+          reason: zipProcessingFailed
+            ? "ZIP could not be extracted safely. Check that it is not corrupted, encrypted, or too large."
+            : error instanceof Error
+              ? error.message
+              : "Upload processing failed.",
+          code: zipProcessingFailed ? "ZIP_EXTRACTION_FAILED" : "FILE_PROCESSING_FAILED",
+        });
+      }
+    }
+
+    if (!successfulUploads.length) {
+      const telemetry = buildUploadTelemetry({
+        rawUploadSize,
+        zipSummaries,
+        failedUploads,
+        uploadLimits,
+      });
+      console.info("[upload] completed", {
+        ownerUserId: user.id,
+        successfulCount: successfulUploads.length,
+        ...telemetry,
+      });
+
+      return NextResponse.json(
+        {
+          error: failedUploads[0]?.reason ?? "No files could be uploaded.",
+          code: failedUploads[0]?.code ?? "UPLOAD_FAILED",
+          limits: {
+            maxFiles: uploadLimits.maxFilesPerReview,
+            maxFileBytes: uploadLimits.maxUploadBytes,
+            runtimeMaxFileBytes: runtimeMaxUploadBytes,
+            temporaryPlatformLimit: true,
+            zipAllowed: uploadLimits.zipAllowed,
+            maxExtractedFiles: uploadLimits.maxExtractedFiles,
+            maxExtractedTotalBytes: uploadLimits.maxExtractedTotalBytes,
+            maxZipNestingDepth: uploadLimits.maxZipNestingDepth,
+            cccWorkfileAllowed: uploadLimits.cccWorkfileAllowed,
+          },
+          zipSummaries,
+          telemetry,
+          usage: {
+          uploadCount: uploadsUsed,
+          uploadCap: isFreeUploadPlan ? FREE_MONTHLY_UPLOAD_LIMIT : entitlements.uploadCap,
+          plan: entitlements.plan,
+          billingPlan: entitlements.billingPlan,
+        },
+          successfulUploads,
+          failedUploads,
+          documents: [],
+        },
+        { status: getFailureStatus(failedUploads) }
+      );
+    }
+
+    const firstUpload = successfulUploads[0];
+    const telemetry = buildUploadTelemetry({
+      rawUploadSize,
+      zipSummaries,
+      failedUploads,
+      uploadLimits,
+    });
+    console.info("[upload] completed", {
+      ownerUserId: user.id,
+      successfulCount: successfulUploads.length,
+      ...telemetry,
+    });
+
+    const responseBody = {
+      ...firstUpload,
+      limits: {
+        maxFiles: uploadLimits.maxFilesPerReview,
+        maxFileBytes: uploadLimits.maxUploadBytes,
+        runtimeMaxFileBytes: runtimeMaxUploadBytes,
+        temporaryPlatformLimit: true,
+        zipAllowed: uploadLimits.zipAllowed,
+        cccWorkfileAllowed: uploadLimits.cccWorkfileAllowed,
+        maxExtractedFiles: uploadLimits.maxExtractedFiles,
+        maxExtractedTotalBytes: uploadLimits.maxExtractedTotalBytes,
+        maxZipNestingDepth: uploadLimits.maxZipNestingDepth,
+      },
+      zipSummaries,
+      telemetry,
+      usage: {
+        uploadCount: uploadsUsed + successfulUploads.length,
+        uploadCap: isFreeUploadPlan ? FREE_MONTHLY_UPLOAD_LIMIT : entitlements.uploadCap,
+        plan: entitlements.plan,
+        billingPlan: entitlements.billingPlan,
+      },
+      successfulUploads,
+      failedUploads,
+      documents: successfulUploads.map((upload) => ({
+        filename: upload.filename,
+        type: upload.type,
+        sizeBytes: upload.sizeBytes,
+        source: upload.source,
+        sourceArchive: upload.sourceArchive,
+        classification: upload.classification,
+        metadata: upload.metadata,
+        sha256: upload.sha256,
+        text: upload.text,
+        pageCount: upload.pageCount,
+        attachmentId: upload.attachmentId,
+      })),
+    };
+
+    return NextResponse.json(responseBody, {
+      status: failedUploads.length ? 207 : 200,
     });
   } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
+    if (error instanceof UsageAccessError) {
+      return NextResponse.json(
+        { error: error.message, code: error.code },
+        { status: error.status }
+      );
+    }
+
     console.error("UPLOAD ERROR:", error);
-    return NextResponse.json(
-      { error: "Upload failed" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "SERVER_ERROR" }, { status: 500 });
   }
+}
+
+async function processPreparedUpload(params: {
+  file: PreparedUploadFile;
+  ownerUserId: string;
+  activeCaseId: string | null;
+  activeCase: Awaited<ReturnType<typeof getAnalysisReport>>;
+  maxImageDataUrlBytes: number;
+}): Promise<UploadSuccess> {
+  const cccParsed = isCccUploadClassification(params.file.classification)
+    ? parseCccWorkfileArtifact({
+        filename: params.file.filename,
+        mimeType: params.file.type,
+        buffer: params.file.buffer,
+        classification: params.file.classification,
+      })
+    : null;
+  const previewData = cccParsed
+    ? { text: cccParsed.text }
+    : await extractPreviewDataFromBuffer({
+        buffer: params.file.buffer,
+        mimeType: params.file.type,
+        filename: params.file.filename,
+      });
+  const imageDataUrl = bufferToReusableDataUrl({
+    buffer: params.file.buffer,
+    mimeType: params.file.type,
+    maxBytes: params.file.classification === "image"
+      ? params.maxImageDataUrlBytes
+      : undefined,
+  });
+
+  const stored = await saveUploadedAttachment({
+    ownerUserId: params.ownerUserId,
+    filename: params.file.filename,
+    type: params.file.type,
+    text: previewData.text,
+    imageDataUrl,
+    pageCount: previewData.pageCount,
+    classification: params.file.classification,
+    sizeBytes: params.file.sizeBytes,
+    sha256: cccParsed?.metadata.sha256,
+    metadata: cccParsed?.metadata,
+    source: params.file.source,
+    sourceArchive: params.file.sourceArchive,
+  });
+
+  const caseContinuity = params.activeCase
+    ? {
+        activeCaseId: params.activeCase.id,
+        reportId: params.activeCase.id,
+        sameCaseFollowUp: true,
+        attachmentIds: [stored.id],
+      }
+    : params.activeCaseId
+      ? {
+          activeCaseId: params.activeCaseId,
+          reportId: params.activeCaseId,
+          sameCaseFollowUp: false,
+          attachmentIds: [stored.id],
+        }
+      : null;
+
+  return {
+    attachmentId: stored.id,
+    filename: stored.filename,
+    type: stored.type,
+    sizeBytes: params.file.sizeBytes,
+    source: params.file.source,
+    sourceArchive: params.file.sourceArchive,
+    classification: params.file.classification,
+    metadata: cccParsed?.metadata,
+    sha256: cccParsed?.metadata.sha256,
+    text: stored.text,
+    imageDataUrl: stored.imageDataUrl,
+    pageCount: stored.pageCount,
+    hasVision: Boolean(stored.imageDataUrl),
+    caseContinuity,
+  };
 }

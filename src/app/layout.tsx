@@ -1,5 +1,10 @@
 import "./globals.css";
 import type { Metadata } from "next";
+import { ClerkProvider } from "@clerk/nextjs";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
+import { ThemeProvider } from "@/components/theme-provider";
+import { hasClerkPublishableKey } from "@/lib/auth/config";
 
 function getSiteUrl() {
   const rawUrl =
@@ -57,59 +62,71 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return (
-    <html lang="en" className="h-full">
-      <head>
-        {/* Safe-area support for mobile */}
-        <meta
-          name="viewport"
-          content="width=device-width, initial-scale=1, viewport-fit=cover"
-        />
-      </head>
+  const content = (
+    <>
+      {/* Cinematic overlays (non-interactive) */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-0 z-0 bg-background"
+      >
+        {/* Base tone */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_8%,rgba(198,90,42,0.10),transparent_34%)] dark:bg-background/70" />
 
-      <body
+        {/* Directional lighting */}
+        <div className="absolute inset-0 bg-gradient-to-tr from-white via-zinc-50/72 to-orange-50/45 dark:from-background dark:via-background/70 dark:to-background/30" />
+
+        {/* Strong vignette */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_35%,rgba(255,255,255,0.38))] dark:bg-[radial-gradient(circle_at_center,transparent_35%,rgba(0,0,0,0.92))]" />
+
+        {/* Orange glow accent */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_10%,rgba(198,90,42,0.16),transparent_45%)] dark:bg-[radial-gradient(circle_at_80%_10%,rgba(198,90,42,0.22),transparent_45%)]" />
+
+        {/* Subtle grain */}
+        <div className="absolute inset-0 opacity-[0.06] mix-blend-overlay bg-[url('/brand/logos/Background.png')]" />
+      </div>
+
+      {/* App layer */}
+      <div
         className="
-          h-full
-          bg-black
-          text-white antialiased
-          overflow-x-hidden
-          root-layout-body
+          relative
+          z-10
+          min-h-screen
+          flex
+          flex-col
         "
       >
-        {/* Cinematic overlays (non-interactive) */}
-        <div
-          aria-hidden
-          className="pointer-events-none fixed inset-0 z-0"
-        >
-          {/* Deep base */}
-          <div className="absolute inset-0 bg-black/70" />
+        {children}
+      </div>
+    </>
+  );
 
-          {/* Directional lighting */}
-          <div className="absolute inset-0 bg-gradient-to-tr from-black via-black/60 to-black/25" />
+  return (
+    <ClerkProvider>
+      <html lang="en" className="h-full" suppressHydrationWarning>
+        <head>
+          {/* Safe-area support for mobile */}
+          <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1, viewport-fit=cover"
+          />
+        </head>
 
-          {/* Strong vignette */}
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_35%,rgba(0,0,0,0.92))]" />
-
-          {/* Orange glow accent */}
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_10%,rgba(198,90,42,0.22),transparent_45%)]" />
-
-          {/* Subtle grain */}
-          <div className="absolute inset-0 opacity-[0.06] mix-blend-overlay bg-[url('/brand/logos/Background.png')]" />
-        </div>
-
-        {/* App layer */}
-        <div
+        <body
           className="
-            relative
-            z-10
-            min-h-screen
-            flex
-            flex-col
+            h-full
+            bg-background
+            text-foreground antialiased
+            overflow-x-hidden
+            root-layout-body
           "
         >
-          {children}
-        </div>
-      </body>
-    </html>
+          <ThemeProvider>
+            {content}
+          </ThemeProvider>
+          <SpeedInsights />
+          <Analytics />
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

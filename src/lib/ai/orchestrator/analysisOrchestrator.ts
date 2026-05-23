@@ -1,76 +1,598 @@
-import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
+import {
+  getUploadedAttachments,
+  type StoredAttachment,
+} from "@/lib/uploadedAttachmentStore";
 import { orchestrateRetrieval } from "../retrievalOrchestrator";
+import { buildComparisonAnalysis } from "../builders/comparisonEngine";
+import { extractEstimateFacts } from "../extractors/extractEstimateFacts";
 import { runRepairPipeline } from "../pipeline/repairPipeline";
 import { computeConfidenceScore } from "../scoring/confidenceScore";
 import { computeEvidenceQuality } from "../scoring/evidenceScore";
 import { computeRiskScore } from "../scoring/riskScore";
+import {
+  extractVehicleIdentityFromText,
+  mergeVehicleIdentity,
+  normalizeVehicleIdentity,
+} from "../vehicleContext";
+import { summarizeVehicleForLog } from "../safeVehicleLog";
 import type {
   AnalysisIssue,
   RepairIntelligenceReport,
   RequiredProcedureRecord,
+  VehicleIdentity,
   Severity,
 } from "../types/analysis";
 import type { EvidenceRecord } from "../types/evidence";
 
+type VehicleSessionContext = {
+  vehicleMake?: string | null;
+  system?: string | null;
+  component?: string | null;
+  procedure?: string | null;
+} | null | undefined;
+
 type RunRepairAnalysisParams = {
   artifactIds: string[];
-  sessionContext?: {
-    vehicleMake?: string | null;
-    system?: string | null;
-    component?: string | null;
-    procedure?: string | null;
-  } | null;
+  preloadedAttachments?: StoredAttachment[];
+  sessionContext?: VehicleSessionContext;
   userIntent?: string | null;
 };
 
+type AnalysisIntentProfile = {
+  repairability: number;
+  supplementReview: number;
+  disputeReview: number;
+  estimateCompleteness: number;
+};
+
+type RepairabilityAssessment = {
+  visibleDamageSummary: string;
+  estimateScopeSummary: string;
+  physicalRepairability: "yes" | "no" | "uncertain";
+  economicRepairability: "favorable" | "borderline" | "unlikely" | "unknown";
+  finalDetermination: string;
+  grade: string;
+  teardownDependencies: string[];
+};
+
+type RepairabilityFocusedReport = RepairIntelligenceReport & {
+  repairabilityAssessment?: RepairabilityAssessment;
+};
+
+function scoreAnalysisIntent(userIntent?: string | null): AnalysisIntentProfile {
+  const lower = (userIntent ?? "").toLowerCase();
+
+  let repairability = 0;
+  let supplementReview = 0;
+  let disputeReview = 0;
+  let estimateCompleteness = 0;
+
+  if (
+    lower.includes("repairability") ||
+    lower.includes("repairable") ||
+    lower.includes("total loss") ||
+    lower.includes("total-loss") ||
+    lower.includes("totaled")
+  ) {
+    repairability += 4;
+  }
+
+  if (
+    lower.includes("grade") ||
+    lower.includes("graded") ||
+    lower.includes("score")
+  ) {
+    repairability += 2;
+    estimateCompleteness += 2;
+  }
+
+  if (
+    lower.includes("supplement") ||
+    lower.includes("missing line") ||
+    lower.includes("add line") ||
+    lower.includes("operations missing")
+  ) {
+    supplementReview += 3;
+  }
+
+  if (
+    lower.includes("carrier") ||
+    lower.includes("rebuttal") ||
+    lower.includes("negotiation") ||
+    lower.includes("dispute")
+  ) {
+    disputeReview += 3;
+  }
+
+  if (
+    lower.includes("review") ||
+    lower.includes("complete") ||
+    lower.includes("completeness") ||
+    lower.includes("scope")
+  ) {
+    estimateCompleteness += 2;
+  }
+
+  return {
+    repairability,
+    supplementReview,
+    disputeReview,
+    estimateCompleteness,
+  };
+}
+
+function shouldPrioritizeRepairability(profile: AnalysisIntentProfile): boolean {
+  return (
+    profile.repairability >= 4 &&
+    profile.repairability >= profile.supplementReview &&
+    profile.repairability >= profile.disputeReview
+  );
+}
+
+function inferPhotoVisibleDamageSummary(
+  documents: Array<{
+    filename?: string | null;
+    mime?: string | null;
+    text?: string | null;
+    imageDataUrl?: string | null;
+  }>
+): string {
+  const photoCount = documents.filter((document) => Boolean(document.imageDataUrl)).length;
+
+  if (photoCount === 0) {
+    return "No photo set was available, so visible damage could not be independently confirmed from images.";
+  }
+
+  return "Photo set is present. Visible damage appears concentrated in the documented impact area, but teardown-only damage cannot be confirmed from photos alone.";
+}
+
+type ImageValidationSignal = {
+  issue?: AnalysisIssue;
+  missingProcedures: string[];
+  supplementOpportunities: string[];
+  recommendedActions: string[];
+};
+
+function inferImageValidationSignal(
+  documents: Array<{
+    filename?: string | null;
+    mime?: string | null;
+    text?: string | null;
+    imageDataUrl?: string | null;
+  }>
+): ImageValidationSignal {
+  const imageTexts = documents
+    .filter((document) => Boolean(document.imageDataUrl))
+    .map((document) => document.text ?? "")
+    .filter(Boolean);
+
+  if (imageTexts.length === 0) {
+    return {
+      missingProcedures: [],
+      supplementOpportunities: [],
+      recommendedActions: [],
+    };
+  }
+
+  const lower = imageTexts.join("\n").toLowerCase();
+  const hasStructuralCue = includesAny(lower, [
+    "quarter panel",
+    "rear body",
+    "pillar",
+    "rocker",
+    "rail",
+    "unibody",
+    "structural",
+    "heavy",
+    "severe",
+  ]);
+  const hasSuspensionCue = includesAny(lower, [
+    "wheel opening",
+    "wheelhouse",
+    "wheel house",
+    "suspension",
+    "rear wheel",
+    "tire",
+    "rim",
+    "alignment",
+  ]);
+
+  if (!hasStructuralCue && !hasSuspensionCue) {
+    return {
+      missingProcedures: [],
+      supplementOpportunities: [],
+      recommendedActions: [],
+    };
+  }
+
+  const procedures = dedupeFindings([
+    hasStructuralCue ? "Structural measurement" : "",
+    hasSuspensionCue ? "Suspension component inspection" : "",
+  ]);
+
+  return {
+    issue: {
+      id: "image-validation-structural-suspension",
+      category: "safety",
+      title: "Photo damage raises open verification needs",
+      finding:
+        "Visible damage may support structural verification and suspension component inspection, pending teardown and documentation.",
+      impact:
+        "Visible damage cues raise concern for structural, wheelhouse, or suspension involvement, but hidden damage is not established from photos alone. Final confirmation depends on measurement, inspection, and teardown documentation.",
+      missingOperation: procedures.join(", "),
+      evidenceStatus: "VISIBLE_IN_IMAGES",
+      severity: hasStructuralCue ? "high" : "medium",
+      evidenceIds: [],
+    },
+    missingProcedures: procedures,
+    supplementOpportunities: dedupeFindings([
+      hasStructuralCue ? "Confirm whether structural measurement verification is required based on visible impact severity and teardown results." : "",
+      hasSuspensionCue ? "Confirm whether suspension and wheel-opening inspection is required based on visible impact severity and teardown results." : "",
+    ]),
+    recommendedActions: [
+      "Use the photo observations as visible-condition evidence, then confirm structural measurement and suspension inspection needs through teardown and documentation.",
+    ],
+  };
+}
+
+function inferEstimateScopeSummary(params: {
+  estimateTotal?: number | null;
+  rawEstimateText?: string | null;
+}): string {
+  const lower = (params.rawEstimateText ?? "").toLowerCase();
+  const estimateTotal =
+    typeof params.estimateTotal === "number" ? `$${params.estimateTotal.toFixed(2)}` : "unknown";
+
+  const hasStructuralLines =
+    lower.includes("frame") ||
+    lower.includes("rail") ||
+    lower.includes("apron") ||
+    lower.includes("core support") ||
+    lower.includes("structural labor") ||
+    lower.includes("pull");
+
+  if (hasStructuralLines) {
+    return `The current estimate carries documented repair scope totaling ${estimateTotal}, including at least some structural or support-area indicators.`;
+  }
+
+  return `The current estimate carries documented repair scope totaling ${estimateTotal}, but does not clearly show frame, rail, apron, core-support, pull, or structural labor lines.`;
+}
+
+function inferEconomicRepairabilityBand(params: {
+  estimateTotal?: number | null;
+  inferredAcv?: number | null;
+}): RepairabilityAssessment["economicRepairability"] {
+  const estimateTotal = params.estimateTotal;
+  const inferredAcv = params.inferredAcv;
+
+  if (
+    typeof estimateTotal !== "number" ||
+    !Number.isFinite(estimateTotal) ||
+    estimateTotal <= 0 ||
+    typeof inferredAcv !== "number" ||
+    !Number.isFinite(inferredAcv) ||
+    inferredAcv <= 0
+  ) {
+    return "unknown";
+  }
+
+  const ratio = estimateTotal / inferredAcv;
+
+  if (ratio < 0.45) return "favorable";
+  if (ratio <= 0.7) return "borderline";
+  return "unlikely";
+}
+
+function computeRepairGrade(params: {
+  estimateTotal?: number | null;
+  inferredAcv?: number | null;
+  issueCount: number;
+  highSeverityIssues: number;
+  hasStructuralUnknowns: boolean;
+}): string {
+  const economicBand = inferEconomicRepairabilityBand({
+    estimateTotal: params.estimateTotal,
+    inferredAcv: params.inferredAcv,
+  });
+
+  if (economicBand === "unlikely") return "D";
+  if (params.highSeverityIssues >= 3 || params.hasStructuralUnknowns) return "C-";
+  if (economicBand === "borderline") return "C";
+  if (params.issueCount >= 4) return "B-";
+  return "B";
+}
+
+function buildRepairabilityAssessment(params: {
+  report: RepairIntelligenceReport;
+  estimateFacts?: RepairIntelligenceReport["estimateFacts"];
+  documents: Array<{
+    filename?: string | null;
+    mime?: string | null;
+    text?: string | null;
+    imageDataUrl?: string | null;
+  }>;
+}): RepairabilityAssessment {
+  const estimateTotal = params.estimateFacts?.estimateTotal ?? null;
+  const inferredAcv = inferAcvFromDocuments(params.documents);
+  const lowerEstimate = (params.report.sourceEstimateText ?? "").toLowerCase();
+
+  const hasStructuralUnknowns =
+    !lowerEstimate.includes("frame") &&
+    !lowerEstimate.includes("rail") &&
+    !lowerEstimate.includes("apron") &&
+    !lowerEstimate.includes("core support") &&
+    !lowerEstimate.includes("structural labor");
+
+  const economicRepairability = inferEconomicRepairabilityBand({
+    estimateTotal,
+    inferredAcv,
+  });
+
+  const physicalRepairability: RepairabilityAssessment["physicalRepairability"] =
+    hasStructuralUnknowns ? "uncertain" : "yes";
+
+  const issueCount = params.report.issues.length;
+  const highSeverityIssues = params.report.issues.filter(
+    (issue) => issue.severity === "high"
+  ).length;
+
+  const grade = computeRepairGrade({
+    estimateTotal,
+    inferredAcv,
+    issueCount,
+    highSeverityIssues,
+    hasStructuralUnknowns,
+  });
+
+  const finalDetermination =
+    physicalRepairability === "yes" && economicRepairability === "favorable"
+      ? "Vehicle appears physically repairable and economically more favorable to repair from the current file set."
+      : physicalRepairability === "yes" && economicRepairability === "borderline"
+        ? "Vehicle appears physically repairable, but economic repairability is borderline and teardown could materially change the decision."
+        : physicalRepairability === "uncertain" && economicRepairability === "unlikely"
+          ? "Repairability remains uncertain from the current file set, and the economics trend against repair unless teardown stays limited."
+          : "Vehicle may be physically repairable from visible/documented scope, but final determination should wait for teardown, structure verification, and value confirmation.";
+
+  return {
+    visibleDamageSummary: inferPhotoVisibleDamageSummary(params.documents),
+    estimateScopeSummary: inferEstimateScopeSummary({
+      estimateTotal,
+      rawEstimateText: params.report.sourceEstimateText ?? "",
+    }),
+    physicalRepairability,
+    economicRepairability,
+    finalDetermination,
+    grade,
+    teardownDependencies: [
+      "Confirm hidden front structure or support-area damage after teardown.",
+      "Verify whether rail, apron, tie-bar, lock-support, or adjacent support scope expands.",
+      "Confirm final market value / ACV before making the economic repair-vs-total-loss decision.",
+    ],
+  };
+}
+
+function mergeRepairabilityAssessmentIntoReport(params: {
+  report: RepairIntelligenceReport;
+  assessment: RepairabilityAssessment;
+}): RepairabilityFocusedReport {
+  const economicLabel =
+    params.assessment.economicRepairability === "favorable"
+      ? "favorable"
+      : params.assessment.economicRepairability === "borderline"
+        ? "borderline"
+        : params.assessment.economicRepairability === "unlikely"
+          ? "unlikely"
+          : "unknown";
+
+  const leadingActions = [
+    `Physical repairability: ${params.assessment.physicalRepairability.toUpperCase()}.`,
+    `Economic repairability: ${economicLabel.toUpperCase()}.`,
+    `Final determination: ${params.assessment.finalDetermination}`,
+    `Grade: ${params.assessment.grade}`,
+    ...params.assessment.teardownDependencies.map(
+      (item) => `Teardown dependency: ${item}`
+    ),
+  ];
+
+  return {
+    ...params.report,
+    repairabilityAssessment: params.assessment,
+    recommendedActions: dedupeStrings([
+      ...leadingActions,
+      ...params.report.recommendedActions,
+    ]).slice(0, 8),
+  };
+}
+
+function inferAcvFromDocuments(
+  documents: Array<{
+    filename?: string | null;
+    mime?: string | null;
+    text?: string | null;
+  }>
+): number | null {
+  const valuationDoc = documents.find((document) =>
+    `${document.filename ?? ""}`.toLowerCase().includes("value")
+  );
+
+  const text = valuationDoc?.text ?? "";
+  if (!text.trim()) return null;
+
+  const matches = [...text.matchAll(/\$?\s*([\d,]+\.\d{2}|\d{1,3}(?:,\d{3})+|\d{3,6})/g)]
+    .map((match) => Number.parseFloat(match[1].replace(/,/g, "")))
+    .filter((value) => Number.isFinite(value) && value >= 500 && value <= 50000);
+
+  if (matches.length === 0) return null;
+
+  const sorted = [...matches].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)] ?? null;
+}
+
 export async function runRepairAnalysis({
   artifactIds,
+  preloadedAttachments,
   sessionContext,
   userIntent,
 }: RunRepairAnalysisParams): Promise<RepairIntelligenceReport> {
-  const attachments = getUploadedAttachments(artifactIds);
+  const attachments = preloadedAttachments ?? (await getUploadedAttachments(artifactIds));
   const documents = attachments.map((attachment) => ({
     filename: attachment.filename,
     mime: attachment.type,
     text: attachment.text,
+    imageDataUrl: attachment.imageDataUrl,
   }));
+  const intentProfile = scoreAnalysisIntent(userIntent);
+
+  console.info("[analysis-attachments] orchestrator received", {
+    attachmentCount: documents.length,
+    attachments: documents.map((document) => ({
+      filename: document.filename,
+      mimeType: document.mime || "unknown",
+      textLength: document.text?.length ?? 0,
+      hasImageDataUrl: Boolean(document.imageDataUrl),
+    })),
+  });
+
+  const shopText =
+    findDocumentText(documents, ["shop", "body shop", "repair facility"]) ?? null;
+  const insurerText =
+    findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"]) ?? null;
+  const estimateVersionPair =
+    shopText && insurerText ? null : findEstimateVersionPair(documents);
+  const shopVehicle = inferVehicleFromDocument(documents, ["shop", "body shop", "repair facility"]);
+  const insurerVehicle = inferVehicleFromDocument(documents, ["insurer", "insurance", "carrier", "sor"]);
+  const sessionVehicle =
+    sessionContext?.vehicleMake
+      ? {
+          make: sessionContext.vehicleMake,
+          confidence: 0.6,
+          source: "session" as const,
+        }
+      : null;
+  const comparisonInput =
+    shopText && insurerText
+      ? {
+          olderText: shopText,
+          newerText: insurerText,
+          olderLabel: "Shop estimate",
+          newerLabel: "Carrier estimate",
+          olderVehicle: shopVehicle,
+          newerVehicle: insurerVehicle,
+        }
+      : estimateVersionPair
+        ? {
+            olderText: estimateVersionPair.older.text,
+            newerText: estimateVersionPair.newer.text,
+            olderLabel: estimateVersionPair.older.label,
+            newerLabel: estimateVersionPair.newer.label,
+            olderVehicle: extractVehicleIdentityFromText(
+              estimateVersionPair.older.text,
+              "attachment"
+            ),
+            newerVehicle: extractVehicleIdentityFromText(
+              estimateVersionPair.newer.text,
+              "attachment"
+            ),
+          }
+        : null;
+
+  if (comparisonInput) {
+    const analysis = buildComparisonAnalysis({
+      shopEstimateText: comparisonInput.olderText,
+      insurerEstimateText: comparisonInput.newerText,
+      shopEstimateLabel: comparisonInput.olderLabel,
+      insurerEstimateLabel: comparisonInput.newerLabel,
+    });
+    const comparisonVehicle = resolveComparisonVehicleIdentity(
+      sessionVehicle,
+      comparisonInput.olderVehicle,
+      comparisonInput.newerVehicle,
+      analysis.vehicle
+    );
+    const comparisonAnalysis = {
+      ...analysis,
+      vehicle: comparisonVehicle,
+    };
+
+    return {
+      summary: {
+        riskScore:
+          comparisonAnalysis.summary.riskScore === "unknown"
+            ? "moderate"
+            : comparisonAnalysis.summary.riskScore,
+        confidence:
+          comparisonAnalysis.summary.confidence === "moderate"
+            ? "moderate"
+            : comparisonAnalysis.summary.confidence,
+        criticalIssues: comparisonAnalysis.summary.criticalIssues,
+        evidenceQuality: comparisonAnalysis.summary.evidenceQuality,
+      },
+      vehicle: comparisonVehicle,
+      issues: comparisonAnalysis.findings
+        .filter((finding) => finding.status !== "present")
+        .map((finding, index) => ({
+          id: finding.id || `comparison-issue-${index + 1}`,
+          category:
+            finding.category === "structural_difference"
+              ? "safety"
+              : finding.category === "scope_difference"
+                ? "documentation"
+                : "parts",
+          title: finding.title,
+          finding: finding.title,
+          impact: finding.detail,
+          evidenceStatus:
+            finding.status === "unclear"
+              ? "OPEN_PENDING_FURTHER_DOCUMENTATION"
+              : "NOT_ESTABLISHED",
+          severity: finding.severity,
+          evidenceIds: [],
+        })),
+      requiredProcedures: [],
+      presentProcedures: comparisonAnalysis.findings
+        .filter((finding) => finding.status === "present")
+        .map((finding) => finding.title),
+      missingProcedures: [],
+      supplementOpportunities: comparisonAnalysis.supplements.map((finding) => finding.title),
+      evidence: comparisonAnalysis.evidence.map((entry, index) => ({
+        id: `comparison-evidence-${index + 1}`,
+        title: entry.source,
+        snippet: entry.quote ?? "",
+        source: entry.source,
+        authority: "inferred",
+      })),
+      recommendedActions: [comparisonAnalysis.narrative],
+      analysis: comparisonAnalysis,
+    };
+  }
 
   const pipeline = runRepairPipeline(documents);
+  const estimateText = documents.map((document) => document.text ?? "").join("\n\n");
+  const inferredVehicle = mergeVehicleIdentity(
+    sessionVehicle,
+    ...documents.map((document) =>
+      extractVehicleIdentityFromText(document.text ?? "", "attachment")
+    ),
+    extractVehicleIdentityFromText(userIntent ?? "", "user")
+  );
+  const estimateFacts = extractEstimateFacts({
+    text: estimateText,
+    vehicle: inferredVehicle,
+  });
+
+  console.info("[vehicle-reconciliation:analysis]", {
+    documentCount: documents.length,
+    sessionVehicleMake: sessionContext?.vehicleMake ?? null,
+    extractedVehicle: summarizeVehicleForLog(inferredVehicle),
+  });
 
   const retrievedEvidence = await orchestrateRetrieval({
     userQuery: userIntent || "repair analysis",
-    activeContext: sessionContext
-      ? {
-          vehicle: {
-            year: null,
-            make: sessionContext.vehicleMake ?? null,
-            model: null,
-            vin: null,
-            confidence: sessionContext.vehicleMake ? 0.6 : 0,
-            source: sessionContext.vehicleMake ? "inferred" : "none",
-            updatedAt: new Date().toISOString(),
-          },
-          repair: {
-            system: sessionContext.system ?? null,
-            component: sessionContext.component ?? null,
-            procedure: sessionContext.procedure ?? null,
-            confidence:
-              sessionContext.system || sessionContext.component || sessionContext.procedure
-                ? 0.5
-                : 0,
-            source:
-              sessionContext.system || sessionContext.component || sessionContext.procedure
-                ? "inferred"
-                : "none",
-            updatedAt: new Date().toISOString(),
-          },
-        }
-      : null,
+    activeContext: buildActiveContext(sessionContext, inferredVehicle),
     intelligence: pipeline,
     limit: 5,
   });
 
-  const estimateText = documents.map((document) => document.text ?? "").join("\n\n");
   const ragProcedures = inferProceduresFromRag({
     estimateText,
     retrievedEvidence,
@@ -78,33 +600,43 @@ export async function runRepairAnalysis({
   });
 
   const evidence = buildEvidenceRecords(pipeline.evidenceReferences, retrievedEvidence);
-  const issues = buildIssues(pipeline, evidence, ragProcedures);
+  const imageValidation = inferImageValidationSignal(documents);
+  const issues = buildIssues(pipeline, evidence, ragProcedures, imageValidation.issue);
   const requiredProcedures = mergeRequiredProcedures(
     buildRequiredProcedures(pipeline),
     ragProcedures
   );
-  const presentProcedures = dedupeStrings([
-    ...pipeline.requiredProcedures
-    .map((procedure) => procedure.procedure)
-    .filter((procedure) => !pipeline.missingProcedures.some((missing) => missing.procedure === procedure)),
+  const presentProcedures = dedupeFindings([
+    ...pipeline.observations
+      .filter((observation) => observation.status === "present")
+      .map((observation) => observation.procedure ?? "")
+      .filter(Boolean),
     ...ragProcedures.filter((procedure) => !procedure.isMissing).map((procedure) => procedure.procedure),
   ]);
-  const missingProcedures = dedupeStrings([
-    ...pipeline.missingProcedures.map((procedure) => procedure.procedure),
+  const missingProcedures = dedupeFindings([
+    ...pipeline.observations
+      .filter(
+        (observation) =>
+          observation.status === "unclear" || observation.status === "not_detected"
+      )
+      .map((observation) => observation.procedure ?? "")
+      .filter(Boolean),
     ...ragProcedures.filter((procedure) => procedure.isMissing).map((procedure) => procedure.procedure),
+    ...imageValidation.missingProcedures,
   ]);
-  const supplementOpportunities = dedupeStrings([
+  const supplementOpportunities = dedupeFindings([
     ...pipeline.supplementOpportunities.map((issue) => issue.issue),
     ...ragProcedures
       .filter((procedure) => procedure.isMissing && procedure.category === "supplement")
       .map((procedure) => `Add and document ${procedure.procedure}.`),
+    ...imageValidation.supplementOpportunities,
   ]);
 
   const highSeverityIssues = issues.filter((issue) => issue.severity === "high").length;
   const mediumSeverityIssues = issues.filter((issue) => issue.severity === "medium").length;
   const lowSeverityIssues = issues.filter((issue) => issue.severity === "low").length;
 
-  return {
+  const report: RepairIntelligenceReport = {
     summary: {
       riskScore: computeRiskScore({
         highSeverityIssues,
@@ -122,14 +654,229 @@ export async function runRepairAnalysis({
         totalEvidenceCount: evidence.length,
       }),
     },
-    vehicle: undefined,
+    vehicle: estimateFacts.vehicle ?? inferredVehicle,
     issues,
     requiredProcedures,
     presentProcedures,
     missingProcedures,
     supplementOpportunities,
     evidence,
-    recommendedActions: buildRecommendedActions(missingProcedures, supplementOpportunities),
+    recommendedActions: dedupeFindings([
+      ...imageValidation.recommendedActions,
+      ...buildRecommendedActions(missingProcedures, supplementOpportunities),
+    ]),
+    analysis: undefined,
+    sourceEstimateText: estimateText,
+    estimateFacts,
+  };
+
+  console.info("[analysis-intent-profile]", {
+    userIntent: userIntent ?? null,
+    intentProfile,
+  });
+
+  if (shouldPrioritizeRepairability(intentProfile)) {
+    const repairabilityAssessment = buildRepairabilityAssessment({
+      report,
+      estimateFacts,
+      documents,
+    });
+
+    return mergeRepairabilityAssessmentIntoReport({
+      report,
+      assessment: repairabilityAssessment,
+    });
+  }
+
+  return report;
+}
+
+function findDocumentText(
+  documents: Array<{
+    filename?: string | null;
+    mime?: string | null;
+    text?: string | null;
+  }>,
+  keywords: string[]
+): string | undefined {
+  const match = documents.find((document) => {
+    const haystack = `${document.filename ?? ""} ${document.mime ?? ""}`.toLowerCase();
+    return keywords.some((keyword) => haystack.includes(keyword));
+  });
+
+  return match?.text ?? undefined;
+}
+
+function findEstimateVersionPair(
+  documents: Array<{
+    filename?: string | null;
+    mime?: string | null;
+    text?: string | null;
+  }>
+): {
+  older: { text: string; label: string };
+  newer: { text: string; label: string };
+} | null {
+  const candidates = documents
+    .map((document, index) => ({
+      index,
+      filename: document.filename ?? "",
+      mime: document.mime ?? "",
+      text: document.text?.trim() ?? "",
+    }))
+    .filter((document) => document.text && looksLikeEstimateVersionDocument(document));
+
+  if (candidates.length < 2) {
+    return null;
+  }
+
+  const sorted = [...candidates].sort((left, right) => {
+    const leftVersion = inferEstimateVersionNumber(left.filename);
+    const rightVersion = inferEstimateVersionNumber(right.filename);
+
+    if (leftVersion !== null && rightVersion !== null && leftVersion !== rightVersion) {
+      return leftVersion - rightVersion;
+    }
+
+    return left.index - right.index;
+  });
+  const older = sorted[0];
+  const newer = sorted[1];
+
+  if (!older || !newer) {
+    return null;
+  }
+
+  return {
+    older: {
+      text: older.text,
+      label: buildEstimateVersionLabel(older.filename, "Estimate 1"),
+    },
+    newer: {
+      text: newer.text,
+      label: buildEstimateVersionLabel(newer.filename, "Estimate 2"),
+    },
+  };
+}
+
+function looksLikeEstimateVersionDocument(document: {
+  filename: string;
+  mime: string;
+  text: string;
+}) {
+  const filename = document.filename.toLowerCase();
+  const text = document.text;
+
+  if (/\b(oem|procedure|position statement|adas report|scan report|invoice|photo)\b/i.test(filename)) {
+    return false;
+  }
+
+  return (
+    /\b(estimate|supplement|supp|ccc|mitchell)\b/i.test(filename) ||
+    /\b(grand total|body labor|paint labor|estimate total)\b/i.test(text) ||
+    /(?:^|\n)\s*#?\s*\d*\s*(?:R&I|Repl|Rpr|Blnd|Subl|Algn|Proc)\s+/i.test(text)
+  );
+}
+
+function inferEstimateVersionNumber(filename: string): number | null {
+  const match = filename.match(/\b(?:estimate|supplement|supp|version|rev(?:ision)?)\s*[-_# ]*\s*(\d{1,2})\b/i);
+  if (!match) {
+    return null;
+  }
+
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function buildEstimateVersionLabel(filename: string, fallback: string) {
+  const version = inferEstimateVersionNumber(filename);
+  return version ? `Estimate ${version}` : fallback;
+}
+
+function inferVehicleFromDocument(
+  documents: Array<{
+    filename?: string | null;
+    mime?: string | null;
+    text?: string | null;
+  }>,
+  keywords: string[]
+) {
+  const match = documents.find((document) => {
+    const haystack = `${document.filename ?? ""} ${document.mime ?? ""}`.toLowerCase();
+    return keywords.some((keyword) => haystack.includes(keyword));
+  });
+
+  return match?.text ? extractVehicleIdentityFromText(match.text, "attachment") : null;
+}
+
+function resolveComparisonVehicleIdentity(
+  sessionVehicle: VehicleIdentity | null | undefined,
+  shopVehicle: VehicleIdentity | null | undefined,
+  insurerVehicle: VehicleIdentity | null | undefined,
+  analysisVehicle: VehicleIdentity | null | undefined
+) {
+  // Keep the strongest structured identity first; later sources only fill gaps or add better-supported fields.
+  return mergeVehicleIdentity(
+    normalizeVehicleIdentity(sessionVehicle),
+    normalizeVehicleIdentity(shopVehicle),
+    normalizeVehicleIdentity(insurerVehicle),
+    normalizeVehicleIdentity(analysisVehicle)
+  );
+}
+
+function buildActiveContext(
+  sessionContext: VehicleSessionContext,
+  inferredVehicle: VehicleIdentity | undefined
+) {
+  if (!sessionContext && !inferredVehicle) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const normalizedVehicle = normalizeVehicleIdentity(inferredVehicle);
+  const hasRepairContext = Boolean(
+    sessionContext?.system || sessionContext?.component || sessionContext?.procedure
+  );
+  const hasVehicleContext = Boolean(
+    normalizedVehicle?.vin ||
+      normalizedVehicle?.year ||
+      normalizedVehicle?.make ||
+      normalizedVehicle?.model ||
+      normalizedVehicle?.trim ||
+      sessionContext?.vehicleMake
+  );
+
+  if (!hasVehicleContext && !hasRepairContext) {
+    return null;
+  }
+
+  const vehicleSource: "explicit" | "inferred" | "none" =
+    normalizedVehicle?.source && normalizedVehicle.source !== "unknown"
+      ? "explicit"
+      : sessionContext?.vehicleMake
+        ? "inferred"
+        : "none";
+  const repairSource: "explicit" | "inferred" | "none" = hasRepairContext ? "inferred" : "none";
+
+  return {
+    vehicle: {
+      vin: normalizedVehicle?.vin ?? null,
+      year: normalizedVehicle?.year ?? null,
+      make: normalizedVehicle?.make ?? sessionContext?.vehicleMake ?? null,
+      model: normalizedVehicle?.model ?? null,
+      trim: normalizedVehicle?.trim ?? null,
+      confidence: normalizedVehicle?.confidence ?? (sessionContext?.vehicleMake ? 0.6 : 0),
+      source: vehicleSource,
+      updatedAt: now,
+    },
+    repair: {
+      system: sessionContext?.system ?? null,
+      component: sessionContext?.component ?? null,
+      procedure: sessionContext?.procedure ?? null,
+      confidence: hasRepairContext ? 0.5 : 0,
+      source: repairSource,
+      updatedAt: now,
+    },
   };
 }
 
@@ -150,21 +897,34 @@ function buildEvidenceRecords(
 
   const retrieved = retrievalEvidence.map((item, index) => ({
     id: `retrieved-${index + 1}`,
-    title: item.file_id || `Retrieved Evidence ${index + 1}`,
+    title: toHumanReadableRetrievedSource(item.file_id) || `Retrieved Evidence ${index + 1}`,
     snippet: item.content.slice(0, 280),
-    source: item.file_id || "drive-knowledge-base",
+    source: toHumanReadableRetrievedSource(item.file_id) || "Linked external-document knowledge base",
     authority: "internal" as const,
   }));
 
   return [...inline, ...retrieved].slice(0, 8);
 }
 
+function toHumanReadableRetrievedSource(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (/^[A-Za-z0-9_-]{16,}$/.test(trimmed)) {
+    return undefined;
+  }
+  return trimmed;
+}
+
 function buildIssues(
   pipeline: ReturnType<typeof runRepairPipeline>,
   evidence: EvidenceRecord[],
-  ragProcedures: RAGProcedure[]
+  ragProcedures: RAGProcedure[],
+  imageIssue?: AnalysisIssue
 ): AnalysisIssue[] {
-  const pipelineIssues: AnalysisIssue[] = pipeline.complianceIssues.map((issue, index) => ({
+  const pipelineIssues: AnalysisIssue[] = pipeline.observations
+    .filter((issue) => issue.status !== "present")
+    .map((issue, index) => ({
     id: `issue-${index + 1}`,
     category:
       issue.category === "calibration_requirement"
@@ -178,8 +938,12 @@ function buildIssues(
               : "scan",
     title: issue.issue,
     finding: issue.issue,
-    impact: issue.reference,
-    missingOperation: extractMissingOperation(issue.reference),
+    impact: buildIssueImpact(issue.procedure ?? issue.issue, issue.reference),
+    missingOperation: issue.procedure ?? extractMissingOperation(issue.reference),
+    evidenceStatus:
+      issue.status === "unclear"
+        ? "OPEN_PENDING_FURTHER_DOCUMENTATION"
+        : "NOT_ESTABLISHED",
     severity: issue.severity,
     evidenceIds: evidence.slice(0, 2).map((item) => item.id),
   }));
@@ -198,17 +962,43 @@ function buildIssues(
               : procedure.procedure.toLowerCase().includes("scan")
                 ? "scan"
                 : "documentation",
-      title: `Missing required procedure: ${procedure.procedure}`,
-      finding: `Missing required procedure: ${procedure.procedure}`,
-      impact: `${procedure.reason} OEM context: ${procedure.evidenceSnippet}`,
+      title: `${procedure.procedure} function not clearly represented`,
+      finding: `${procedure.procedure} function not clearly represented`,
+      impact: buildIssueImpact(
+        procedure.procedure,
+        `${procedure.reason} OEM context: ${procedure.evidenceSnippet}`
+      ),
       missingOperation: procedure.procedure,
+      evidenceStatus: "SUPPORTABLE_BUT_UNCONFIRMED",
       severity: procedure.severity,
       evidenceIds: evidence
         .filter((item) => item.id === procedure.evidenceId)
         .map((item) => item.id),
     }));
 
-  return dedupeIssuesByTitle([...pipelineIssues, ...ragIssues]);
+  return dedupeIssuesByTitle([
+    ...pipelineIssues,
+    ...ragIssues,
+    ...(imageIssue ? [imageIssue] : []),
+  ]);
+}
+
+function buildIssueImpact(procedure: string, fallback: string): string {
+  const lower = procedure.toLowerCase();
+
+  if (lower.includes("structural measurement") || lower.includes("measure structure")) {
+    return "Structural measurement verification remains open in the current file. If not confirmed, improper geometry restoration can affect ADAS calibration accuracy and crashworthiness.";
+  }
+
+  if (lower.includes("suspension") || lower.includes("alignment")) {
+    return "Suspension or alignment verification remains open in the current file. If not confirmed, wheel geometry, tire tracking, and ADAS-dependent steering inputs may remain unsupported after impact repair.";
+  }
+
+  if (lower.includes("calibration") || lower.includes("adas")) {
+    return "ADAS verification remains open in the current file. If not confirmed, sensor aim, calibration status, and system readiness may remain unsupported after the repair.";
+  }
+
+  return fallback;
 }
 
 function buildRequiredProcedures(
@@ -230,12 +1020,34 @@ function buildRecommendedActions(
     ...missingProcedures.map(
       (procedure) => `Add and document ${procedure} before final repair delivery.`
     ),
-    ...supplementOpportunities.map(
-      (issue) => `Review supplement line item: ${issue}.`
+    ...supplementOpportunities.map((issue) =>
+      buildSupplementOpportunityAction(issue)
     ),
   ];
 
   return [...new Set(actions)].slice(0, 6);
+}
+
+function buildSupplementOpportunityAction(issue: string): string {
+  const cleaned = issue.trim().replace(/\.$/, "");
+  if (!cleaned) {
+    return "Please review the current estimate support and document any remaining open repair items.";
+  }
+
+  if (/^add and document\b/i.test(cleaned)) {
+    return `${cleaned} before final repair delivery.`;
+  }
+
+  if (/oem support in\b/i.test(cleaned)) {
+    const normalized = cleaned
+      .replace(/^OEM support in\s+/i, "")
+      .replace(/\s+indicates\s+/i, " indicates ")
+      .replace(/\s+adds\s+/i, " adds ");
+
+    return `Please review whether ${normalized} is already represented in the estimate, what support remains open, and what should likely be added or documented more clearly.`;
+  }
+
+  return `Please review whether ${cleaned} is already represented in the estimate and what should be added or documented more clearly if it remains part of the repair path.`;
 }
 
 type RAGProcedure = {
@@ -413,8 +1225,12 @@ function mergeRequiredProcedures(
   return [...merged.values()];
 }
 
+function dedupeFindings(items: string[]): string[] {
+  return Array.from(new Set(items.map((item) => item.trim()))).filter(Boolean);
+}
+
 function dedupeStrings(values: string[]): string[] {
-  return [...new Set(values.filter(Boolean))];
+  return dedupeFindings(values);
 }
 
 function dedupeIssuesByTitle(issues: AnalysisIssue[]): AnalysisIssue[] {
@@ -447,4 +1263,8 @@ function dedupeIssuesByTitle(issues: AnalysisIssue[]): AnalysisIssue[] {
 function extractMissingOperation(reference: string): string | undefined {
   const [operation] = reference.split("->");
   return operation?.trim() || undefined;
+}
+
+function includesAny(text: string, terms: string[]) {
+  return terms.some((term) => text.includes(term));
 }

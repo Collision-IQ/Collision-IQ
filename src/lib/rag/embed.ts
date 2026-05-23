@@ -1,8 +1,4 @@
-import OpenAI from "openai";
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
+import { getOpenAIClient } from "@/lib/openai";
 
 if (!process.env.OPENAI_API_KEY) {
   console.error("❌ Missing OPENAI_API_KEY (rag/embed.ts)");
@@ -16,7 +12,7 @@ export async function embedText(text: string): Promise<number[]> {
   const cleaned = (text || "").trim();
   if (!cleaned) return [];
 
-  const res = await openai.embeddings.create({
+  const res = await getOpenAIClient().embeddings.create({
     model: "text-embedding-3-small",
     input: cleaned.slice(0, 20000)
   });
@@ -36,7 +32,7 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
 
   if (!cleaned.length) return [];
 
-  const res = await openai.embeddings.create({
+  const res = await getOpenAIClient().embeddings.create({
     model: "text-embedding-3-small",
     input: cleaned
   });

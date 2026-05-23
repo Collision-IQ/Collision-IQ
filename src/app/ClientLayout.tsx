@@ -1,5 +1,6 @@
 'use client';
 
+import '@/lib/auth/assertClientClerk';
 import { usePathname } from 'next/navigation';
 import FloatingWidget from '@/components/FloatingWidget';
 

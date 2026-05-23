@@ -1,44 +1,40 @@
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
-
 generator client {
   provider = "prisma-client-js"
 }
 
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
 model SyncJob {
-  id           String   @id @default(cuid())
-
-  type         String   // BACKFILL | WEBHOOK
-  status       String   @default("pending")
-
-  stage        String?  // LIST | MIRROR_FOLDERS | MIRROR_FILES
-  cursor       Json?
-
+  id           String    @id @default(cuid())
   egnytePath   String?
   egnyteId     String?
-
-  attempts     Int      @default(0)
+  status       String    @default("pending")
+  attempts     Int       @default(0)
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  cursor       Json?
   lockedAt     DateTime?
   lockedBy     String?
-  errorMessage String?
-
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  stage        String?
+  type         String
 }
 
 model FileMap {
-  id            String   @id @default(cuid())
-  egnyteId      String   @unique
+  id            String    @id @default(cuid())
+  egnyteId      String    @unique
   egnytePath    String
   driveFileId   String
   driveParentId String?
   lastModified  DateTime?
   contentHash   String?
-  tombstoned    Boolean  @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  tombstoned    Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 
 model FileMirrorMap {
@@ -51,4 +47,426 @@ model FileMirrorMap {
   lastSyncedAt DateTime @default(now())
 
   @@index([driveFileId])
+}
+
+model User {
+  id               String               @id @default(cuid())
+  clerkUserId      String               @unique
+  email            String?              @unique
+  firstName        String?
+  lastName         String?
+  imageUrl         String?
+  isPlatformAdmin  Boolean              @default(false)
+  defaultShopId    String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  consents         ChatConsent[]
+  featureOverrides FeatureOverride[]
+  ownedShops       Shop[]               @relation("ShopOwner")
+  memberships      ShopMembership[]
+  subscriptions    Subscription[]
+  serviceCases     AcademyServiceCase[]
+  UsageCounter     UsageCounter[]
+  usageRecords     UsageRecord[]
+  defaultShop      Shop?                @relation("UserDefaultShop", fields: [defaultShopId], references: [id])
+}
+
+model Shop {
+  id               String            @id @default(cuid())
+  name             String
+  slug             String            @unique
+  ownerId          String
+  stripeCustomerId String?           @unique
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  featureOverrides FeatureOverride[]
+  owner            User              @relation("ShopOwner", fields: [ownerId], references: [id])
+  memberships      ShopMembership[]
+  subscriptions    Subscription[]
+  usageRecords     UsageRecord[]
+  defaultUsers     User[]            @relation("UserDefaultShop")
+}
+
+model ShopMembership {
+  id           String   @id @default(cuid())
+  shopId       String
+  userId       String
+  role         ShopRole @default(MEMBER)
+  isSeatActive Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  shop         Shop     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, userId])
+  @@index([userId])
+}
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  userId               String?
+  shopId               String?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?            @unique
+  stripePriceId        String?
+  plan                 SubscriptionPlan   @default(STARTER)
+  status               SubscriptionStatus @default(INCOMPLETE)
+  currentPeriodStart   DateTime?
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean            @default(false)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  shop                 Shop?              @relation(fields: [shopId], references: [id])
+  user                 User?              @relation(fields: [userId], references: [id])
+  usageRecords         UsageRecord[]
+
+  @@index([userId])
+  @@index([shopId])
+  @@index([status])
+}
+
+model UsageRecord {
+  id             String        @id @default(cuid())
+  userId         String?
+  shopId         String?
+  subscriptionId String?
+  kind           UsageKind
+  periodKey      String
+  quantity       Int           @default(1)
+  metadata       Json?
+  createdAt      DateTime      @default(now())
+  shop           Shop?         @relation(fields: [shopId], references: [id])
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+  user           User?         @relation(fields: [userId], references: [id])
+
+  @@index([userId, kind, periodKey])
+  @@index([shopId, kind, periodKey])
+}
+
+model ChatConsent {
+  id              String        @id @default(cuid())
+  userId          String
+  status          ConsentStatus @default(ACCEPTED)
+  acceptedAt      DateTime
+  termsVersion    String
+  privacyVersion  String
+  checkboxChecked Boolean
+  ipAddress       String?
+  userAgent       String?
+  sessionId       String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, acceptedAt])
+}
+
+model FeatureOverride {
+  id         String    @id @default(cuid())
+  userId     String?
+  shopId     String?
+  featureKey String
+  enabled    Boolean
+  notes      String?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  shop       Shop?     @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  user       User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, featureKey])
+  @@index([shopId, featureKey])
+}
+
+model UploadedAttachment {
+  id           String                   @id @default(cuid())
+  filename     String
+  type         String
+  text         String
+  imageDataUrl String?
+  pageCount    Int?
+  classification String?
+  sizeBytes    Int?
+  sha256       String?
+  metadata     Json?
+  source       String?
+  sourceArchive String?
+  ownerType    ArtifactOwnerType
+  ownerId      String
+  sessionId    String?
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+  reports      AnalysisReportArtifact[]
+
+  @@index([ownerType, ownerId, createdAt])
+  @@index([sessionId, createdAt])
+  @@index([classification])
+  @@index([sha256])
+}
+
+model AnalysisReport {
+  id        String                   @id @default(cuid())
+  ownerType ArtifactOwnerType
+  ownerId   String
+  sessionId String?
+  report    Json
+  createdAt DateTime                 @default(now())
+  updatedAt DateTime                 @updatedAt
+  artifacts AnalysisReportArtifact[]
+
+  @@index([ownerType, ownerId, createdAt])
+  @@index([sessionId, createdAt])
+}
+
+model AnalysisReportArtifact {
+  reportId     String
+  attachmentId String
+  attachment   UploadedAttachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  report       AnalysisReport     @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@id([reportId, attachmentId])
+  @@index([attachmentId])
+}
+
+model UsageCounter {
+  id        String    @id
+  userId    String
+  kind      UsageKind
+  count     Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @default(now())
+  User      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind])
+}
+
+model ServicePriceConfig {
+  serviceType   String   @id
+  stripePriceId String
+  label         String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model AcademyServiceCase {
+  id                    String                   @id @default(cuid())
+  userId                String?
+  claimId               String?
+  serviceType           String
+  stripeSessionId       String?                  @unique
+  stripePaymentIntentId String?
+  stripeEventId         String?
+  status                AcademyServiceCaseStatus @default(PENDING_INTAKE)
+  attachmentIds         Json?
+  reviewSnapshot        Json?
+  checkoutMetadata      Json?
+  intakeNotes           String?
+  internalNotes         String?
+  lastUpdate            String?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  user                  User?                    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([claimId])
+  @@index([status])
+  @@index([serviceType])
+}
+
+model ReportSend {
+  id              String    @id @default(cuid())
+  caseId          String?
+  reportType      String
+  destinationType String
+  recipient       String
+  subject         String?
+  resendId        String?
+  status          String    @default("sent")
+  sentAt          DateTime  @default(now())
+  deliveredAt     DateTime?
+  bouncedAt       DateTime?
+  failedAt        DateTime?
+  openedAt        DateTime?
+  rawEvent        Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([caseId])
+  @@index([resendId])
+  @@index([reportType])
+  @@index([destinationType])
+  @@index([status])
+}
+
+model Regulation {
+  id            String    @id
+  state         String
+  category      String
+  rule          String
+  citation      String
+  sourceUrl     String?   @map("source_url")
+  sourceName    String?   @map("source_name")
+  applicability String?
+  severity      String?
+  effectiveDate DateTime? @map("effective_date")
+  retrievedAt   DateTime? @map("retrieved_at")
+  verifiedBy    String?   @map("verified_by")
+  notes         String?
+
+  @@index([state])
+  @@index([category])
+  @@map("Regulation")
+}
+
+model RegulationVersion {
+  id                    String    @id @default(cuid())
+  regulationId          String    @map("regulation_id")
+  jurisdiction          String
+  effectiveDate         DateTime? @map("effective_date")
+  supersededDate        DateTime? @map("superseded_date")
+  sourcePublicationDate DateTime? @map("source_publication_date")
+  versionHash           String    @map("version_hash")
+  verificationStatus    String    @map("verification_status")
+  citationSource        String    @map("citation_source")
+  retrievalTimestamp    DateTime  @map("retrieval_timestamp")
+  snapshot              Json
+  createdAt             DateTime  @default(now()) @map("created_at")
+
+  @@unique([regulationId, versionHash])
+  @@index([regulationId])
+  @@index([jurisdiction])
+  @@index([effectiveDate])
+  @@index([retrievalTimestamp])
+  @@map("RegulationVersion")
+}
+
+model PolicyLegalRegulationAccessLog {
+  id               String   @id @default(cuid())
+  userId           String?
+  state            String?
+  requestId        String?
+  cacheStatus      String?
+  status           Int
+  totalCount       Int      @default(0)
+  verifiedCount    Int      @default(0)
+  placeholderCount Int      @default(0)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([state])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("PolicyLegalRegulationAccessLog")
+}
+
+model PolicyLegalReviewSnapshot {
+  id                         String   @id @default(cuid())
+  caseId                     String?  @map("case_id")
+  claimId                    String?  @map("claim_id")
+  claimState                 String?  @map("claim_state")
+  regulationIdsUsed          Json     @map("regulation_ids_used")
+  regulationSourcesUsed      Json     @map("regulation_sources_used")
+  citationsUsed              Json     @map("citations_used")
+  oemSourcesUsed             Json     @map("oem_sources_used")
+  carrierSourcesUsed         Json     @map("carrier_sources_used")
+  placeholderCitations       Json     @map("placeholder_citations")
+  policyLegalConfidenceScore Int      @map("policy_legal_confidence_score")
+  generatedAt                DateTime @map("generated_at")
+  createdAt                  DateTime @default(now()) @map("created_at")
+
+  @@index([caseId])
+  @@index([claimId])
+  @@index([claimState])
+  @@index([generatedAt])
+  @@map("PolicyLegalReviewSnapshot")
+}
+
+model CarrierTrendEvent {
+  id                         String   @id @default(cuid())
+  carrierKey                 String   @map("carrier_key")
+  carrierName                String   @map("carrier_name")
+  sourceReportHash           String   @unique @map("source_report_hash")
+  eventDate                  DateTime @default(now()) @map("event_date")
+  deniedOperationCount       Int      @default(0) @map("denied_operation_count")
+  calibrationDisputeCount    Int      @default(0) @map("calibration_dispute_count")
+  laborSuppressionCount      Int      @default(0) @map("labor_suppression_count")
+  recurringOmissionCount     Int      @default(0) @map("recurring_omission_count")
+  supplementOpportunityCount Int      @default(0) @map("supplement_opportunity_count")
+  supplementApprovedCount    Int      @default(0) @map("supplement_approved_count")
+  deniedOperations           Json     @map("denied_operations")
+  calibrationOperations      Json     @map("calibration_operations")
+  laborSuppressionOperations Json     @map("labor_suppression_operations")
+  omittedOperations          Json     @map("omitted_operations")
+  metadata                   Json?
+  createdAt                  DateTime @default(now()) @map("created_at")
+
+  @@index([carrierKey])
+  @@index([eventDate])
+  @@map("CarrierTrendEvent")
+}
+
+model ExportResearchAuditSnapshot {
+  id           String   @id @default(cuid())
+  caseId       String?  @map("case_id")
+  reportType   String   @map("report_type")
+  snapshotHash String   @map("snapshot_hash")
+  snapshot     Json
+  generatedAt  DateTime @map("generated_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([caseId])
+  @@index([reportType])
+  @@index([generatedAt])
+  @@map("ExportResearchAuditSnapshot")
+}
+
+enum SubscriptionPlan {
+  STARTER
+  PRO
+  TEAM
+}
+
+enum SubscriptionStatus {
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+  PAUSED
+}
+
+enum ShopRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ConsentStatus {
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+enum UsageKind {
+  ANALYSIS_COMPLETED
+  FILE_UPLOAD
+  REPORT_EXPORT
+  CHAT_EXPORT
+}
+
+enum ArtifactOwnerType {
+  ANONYMOUS
+  USER
+  SHOP
+}
+
+enum AcademyServiceCaseStatus {
+  PENDING_INTAKE
+  IN_REVIEW
+  IN_PROGRESS
+  AWAITING_INFO
+  COMPLETE
+  CANCELLED
 }

@@ -1,11 +1,10 @@
 import { google } from "googleapis";
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
 import { Pool } from "pg";
+import { collisionIqModels } from "@/lib/modelConfig";
+import { openai } from "@/lib/openai";
 
 export const runtime = "nodejs";
-
-const openai = new OpenAI();
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -52,7 +51,7 @@ export async function POST(req: Request) {
     const base64 = Buffer.from(file.data as ArrayBuffer).toString("base64");
 
     const extraction = await openai.responses.create({
-      model: "gpt-4.1",
+      model: collisionIqModels.primary,
       input: [
         {
           role: "user",

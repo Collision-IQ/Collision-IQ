@@ -15,6 +15,24 @@ dist/
 .env.development
 .env.production
 .env*.local
+.env.off
+
+# ===============================
+# Third-party API Keys
+# ===============================
+# Clerk Authentication
+CLERK_SECRET_KEY
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+
+# Plaid API
+PLAID_CLIENT_ID
+PLAID_SECRET
+PLAID_ENV
+
+# Stripe API
+STRIPE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET
+STRIPE_*
 
 # ===============================
 # Logs
@@ -73,10 +91,46 @@ service-account.json
 *.key
 
 # ===============================
+# Zip files
+# ===============================
+*.zip
+
+# ===============================
 # Misc
 # ===============================
 coverage/
-*.zip
 
 /generated/prisma
 .vercel
+
+# ===============================
+# Local scratch / key files
+# ===============================
+good_keys.txt
+work_keys.txt
+Collision-IQ/
+t-Path*
+
+# HubSpot config file
+hubspot.config.yml
+
+# ELEVENLABS config file
+elevenlabs.config.yml
+ELVEENLABS_API_KEY
+ELEVENLABS_VOICE_ID
+
+# Local Google service account / secret material
+*.b64
+*service-account*.json
+*sync*.json
+google-sa*.json
+google-sa*.b64
+collision-iq-sync-*.json
+
+# Local Google service account / secret material
+*.b64
+*service-account*.json
+*sync*.json
+google-sa*.json
+google-sa*.b64
+collision-iq-sync-*.json

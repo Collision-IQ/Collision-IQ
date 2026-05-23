@@ -1,0 +1,1387 @@
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+PASS extractEstimateFacts captures Shop 21733 hard facts and documented positives
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+PASS vehicle extraction resolves TESL header text and Tesla 5YJ VIN decoding
+PASS presentation cleanup preserves canonical vehicle labels and trims
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:raw-extraction] {
+  reportVehicle: null,
+  analysisVehicle: null,
+  extractedFromEstimateText: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  estimateEvidenceText: { present: true, length: 791, containsVin: true }
+}
+[vehicle-label-trace:normalized-analysis] {
+  structuredVehicle: null,
+  guardedInferredVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  normalizedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+PASS deriveExportReportFields prefers estimateFacts and suppresses placeholder fallbacks
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:raw-extraction] {
+  reportVehicle: null,
+  analysisVehicle: null,
+  extractedFromEstimateText: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  estimateEvidenceText: { present: true, length: 791, containsVin: true }
+}
+[vehicle-label-trace:normalized-analysis] {
+  structuredVehicle: null,
+  guardedInferredVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  normalizedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+PASS normalized analysis preserves estimate facts for Shop 21733
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:raw-extraction] {
+  reportVehicle: null,
+  analysisVehicle: null,
+  extractedFromEstimateText: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  estimateEvidenceText: { present: true, length: 791, containsVin: true }
+}
+[vehicle-label-trace:normalized-analysis] {
+  structuredVehicle: null,
+  guardedInferredVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  normalizedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-reconciliation:report] {
+  structuredVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  decodedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: null,
+    trimPresent: false,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  inferredVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  resolvedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  resolvedVinTail: '*****4319',
+  hasDocumentVehicleText: true
+}
+[export-vehicle-selection] {
+  vinPresent: true,
+  decodedVehiclePresent: true,
+  structuredFieldsPresent: true,
+  rawVehicleLabelPresent: true,
+  finalVehicle: '2018 Tesla Model S 75D AWD'
+}
+[vehicle-label-trace:display-helper] {
+  vehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 'supported',
+    source: null,
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  fullIdentity: '2018 Tesla Model S 75D AWD',
+  resolvedLabel: '2018 Tesla Model S 75D AWD',
+  source: 'full_identity'
+}
+[vehicle-label-trace:shared-export-model] {
+  sourceVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 'supported',
+    source: null,
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  exportVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 'supported',
+    source: null,
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+PASS export model removes placeholder text and keeps documented scans as positives
+PASS computeACVFromComps derives a normalized market range from comparable listings
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:raw-extraction] {
+  reportVehicle: null,
+  analysisVehicle: null,
+  extractedFromEstimateText: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  estimateEvidenceText: { present: true, length: 791, containsVin: true }
+}
+[vehicle-label-trace:normalized-analysis] {
+  structuredVehicle: null,
+  guardedInferredVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  normalizedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-reconciliation:report] {
+  structuredVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  decodedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: null,
+    trimPresent: false,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  inferredVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  resolvedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  resolvedVinTail: '*****4319',
+  hasDocumentVehicleText: true
+}
+[export-vehicle-selection] {
+  vinPresent: true,
+  decodedVehiclePresent: true,
+  structuredFieldsPresent: true,
+  rawVehicleLabelPresent: true,
+  finalVehicle: '2018 Tesla Model S 75D AWD'
+}
+[vehicle-label-trace:display-helper] {
+  vehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 'supported',
+    source: null,
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  fullIdentity: '2018 Tesla Model S 75D AWD',
+  resolvedLabel: '2018 Tesla Model S 75D AWD',
+  source: 'full_identity'
+}
+[vehicle-label-trace:shared-export-model] {
+  sourceVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 'supported',
+    source: null,
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  exportVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 'supported',
+    source: null,
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+PASS structured comparable listings override chat-derived ACV in the export model
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 27, containsVin: false },
+  parsedVehicleLine: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true
+  },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 2
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 27, containsVin: false },
+  parsedVehicleLine: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true
+  },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 2
+  }
+}
+[vehicle-label-trace:raw-extraction] {
+  reportVehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 0.98,
+    source: 'unknown',
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 0
+  },
+  analysisVehicle: null,
+  extractedFromEstimateText: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 2
+  },
+  estimateEvidenceText: { present: true, length: 492, containsVin: true }
+}
+[vehicle-label-trace:normalized-analysis] {
+  structuredVehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 0.98,
+    source: 'unknown',
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 0
+  },
+  guardedInferredVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 2
+  },
+  normalizedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 4
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 27, containsVin: false },
+  parsedVehicleLine: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true
+  },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 2
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 27, containsVin: false },
+  parsedVehicleLine: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true
+  },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 2
+  }
+}
+[vehicle-reconciliation:report] {
+  structuredVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 4
+  },
+  decodedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: null,
+    trimPresent: false,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  inferredVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 2
+  },
+  resolvedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  resolvedVinTail: '*****4319',
+  hasDocumentVehicleText: true
+}
+[export-vehicle-selection] {
+  vinPresent: true,
+  decodedVehiclePresent: true,
+  structuredFieldsPresent: true,
+  rawVehicleLabelPresent: true,
+  finalVehicle: '2018 Tesla Gladiator Sport S'
+}
+[vehicle-label-trace:display-helper] {
+  vehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 'supported',
+    source: null,
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  fullIdentity: '2018 Tesla Gladiator Sport S',
+  resolvedLabel: '2018 Tesla Gladiator Sport S',
+  source: 'full_identity'
+}
+[vehicle-label-trace:shared-export-model] {
+  sourceVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 'supported',
+    source: null,
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  exportVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 'supported',
+    source: null,
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+PASS specific late-model Gladiator valuation suppresses unreliable fallback preview
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:raw-extraction] {
+  reportVehicle: null,
+  analysisVehicle: null,
+  extractedFromEstimateText: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  estimateEvidenceText: { present: true, length: 791, containsVin: true }
+}
+[vehicle-label-trace:normalized-analysis] {
+  structuredVehicle: null,
+  guardedInferredVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  normalizedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 25, containsVin: false },
+  parsedVehicleLine: { year: 2018, make: 'Tesla', model: 'Model S', trimPresent: true },
+  extractedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-reconciliation:report] {
+  structuredVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  decodedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: null,
+    trimPresent: false,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  inferredVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  resolvedVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 0.99,
+    source: 'vin_decoded',
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  resolvedVinTail: '*****4319',
+  hasDocumentVehicleText: true
+}
+[export-vehicle-selection] {
+  vinPresent: true,
+  decodedVehiclePresent: true,
+  structuredFieldsPresent: true,
+  rawVehicleLabelPresent: true,
+  finalVehicle: '2018 Tesla Model S 75D AWD'
+}
+[vehicle-label-trace:display-helper] {
+  vehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 'supported',
+    source: null,
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  fullIdentity: '2018 Tesla Model S 75D AWD',
+  resolvedLabel: '2018 Tesla Model S 75D AWD',
+  source: 'full_identity'
+}
+[vehicle-label-trace:shared-export-model] {
+  sourceVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 'supported',
+    source: null,
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  },
+  exportVehicle: {
+    year: 2018,
+    make: 'Tesla',
+    model: 'Model S',
+    trimPresent: true,
+    manufacturerPresent: true,
+    vinTail: '*****4319',
+    confidence: 'supported',
+    source: null,
+    fieldSourceKeys: [ 'make', 'manufacturer', 'model', 'trim', 'vin', 'year' ],
+    mismatchCount: 0
+  }
+}
+PASS structured JD Power-style values are used when comps are unavailable
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 29, containsVin: false },
+  parsedVehicleLine: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true
+  },
+  extractedVehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 0.88,
+    source: 'attachment',
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 29, containsVin: false },
+  parsedVehicleLine: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true
+  },
+  extractedVehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 0.88,
+    source: 'attachment',
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:raw-extraction] {
+  reportVehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 0.95,
+    source: 'unknown',
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 0
+  },
+  analysisVehicle: null,
+  extractedFromEstimateText: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 0.88,
+    source: 'attachment',
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 0
+  },
+  estimateEvidenceText: { present: true, length: 191, containsVin: false }
+}
+[vehicle-label-trace:normalized-analysis] {
+  structuredVehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 0.95,
+    source: 'unknown',
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 0
+  },
+  guardedInferredVehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 0.88,
+    source: 'attachment',
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 0
+  },
+  normalizedVehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 0.95,
+    source: 'attachment',
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 2
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 29, containsVin: false },
+  parsedVehicleLine: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true
+  },
+  extractedVehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 0.88,
+    source: 'attachment',
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-label-trace:estimate-parse] {
+  source: 'attachment',
+  vehicleLine: { present: true, length: 29, containsVin: false },
+  parsedVehicleLine: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true
+  },
+  extractedVehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 0.88,
+    source: 'attachment',
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 0
+  }
+}
+[vehicle-reconciliation:report] {
+  structuredVehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 0.95,
+    source: 'attachment',
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 2
+  },
+  decodedVehicle: null,
+  inferredVehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 0.88,
+    source: 'attachment',
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 0
+  },
+  resolvedVehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 0.95,
+    source: 'attachment',
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 0
+  },
+  resolvedVinTail: null,
+  hasDocumentVehicleText: true
+}
+[export-vehicle-selection] {
+  vinPresent: false,
+  decodedVehiclePresent: true,
+  structuredFieldsPresent: true,
+  rawVehicleLabelPresent: true,
+  finalVehicle: '2024 Jeep Gladiator Sport 4WD'
+}
+[vehicle-label-trace:display-helper] {
+  vehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 'supported',
+    source: null,
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 0
+  },
+  fullIdentity: '2024 Jeep Gladiator Sport 4WD',
+  resolvedLabel: '2024 Jeep Gladiator Sport 4WD',
+  source: 'full_identity'
+}
+[vehicle-label-trace:shared-export-model] {
+  sourceVehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 'supported',
+    source: null,
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 0
+  },
+  exportVehicle: {
+    year: 2024,
+    make: 'Jeep',
+    model: 'Gladiator Sport',
+    trimPresent: true,
+    manufacturerPresent: false,
+    vinTail: null,
+    confidence: 'supported',
+    source: null,
+    fieldSourceKeys: [ 'make', 'model', 'trim', 'year' ],
+    mismatchCount: 0
+  }
+}
+FAIL specific vehicle ACV stays unavailable when live comparable search is unavailable
+C:\dev\collision-iq\src\lib\ai\estimateExportQuality.test.cjs:84
+    throw error;
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
++ actual - expected
+
++ 'Market preview unavailable because live comparable search did not complete.'
+- 'Market value preview unavailable because live comparable search did not complete.'
+    at C:\dev\collision-iq\src\lib\ai\estimateExportQuality.test.cjs:469:10
+    at run (C:\dev\collision-iq\src\lib\ai\estimateExportQuality.test.cjs:80:5)
+    at Object.<anonymous> (C:\dev\collision-iq\src\lib\ai\estimateExportQuality.test.cjs:435:1)
+    at Module._compile (node:internal/modules/cjs/loader:1529:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1613:10)
+    at Module.load (node:internal/modules/cjs/loader:1275:32)
+    at Module._load (node:internal/modules/cjs/loader:1096:12)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:164:12)
+    at node:internal/main/run_main_module:28:49 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 'Market preview unavailable because live comparable search did not complete.',
+  expected: 'Market value preview unavailable because live comparable search did not complete.',
+  operator: 'strictEqual'
+}
+
+Node.js v20.19.3

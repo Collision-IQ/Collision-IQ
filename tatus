@@ -1,0 +1,350 @@
+warning: in the working copy of 'src/components/ChatbotPage.tsx', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/src/components/ChatbotPage.tsx b/src/components/ChatbotPage.tsx[m
+[1mindex 740bc6e..60431a5 100644[m
+[1m--- a/src/components/ChatbotPage.tsx[m
+[1m+++ b/src/components/ChatbotPage.tsx[m
+[36m@@ -39,7 +39,15 @@[m [mimport {[m
+ } from "@/lib/ai/builders/collisionSnapshotPdfBuilder";[m
+ import { buildCustomerReportPdf } from "@/lib/ai/builders/customerReportPdfBuilder";[m
+ import { buildDoiComplaintPacketPdf } from "@/lib/ai/builders/doiComplaintPacketPdfBuilder";[m
+[31m-import { buildEstimateScrubberPdf } from "@/lib/ai/builders/estimateScrubberPdfBuilder";[m
+[32m+[m[32mimport {[m
+[32m+[m[32m  buildAnnotatedEstimateReviewModel,[m
+[32m+[m[32m  buildAnnotatedEstimateReviewPdf,[m
+[32m+[m[32m  buildEstimatorChangeRequestListPdf,[m
+[32m+[m[32m  buildEstimateScrubberPdf,[m
+[32m+[m[32m  buildSideBySideEstimateComparisonPdf,[m
+[32m+[m[32m  buildSupplementRequestChecklistPdf,[m
+[32m+[m[32m  type AnnotatedEstimateReviewModel,[m
+[32m+[m[32m} from "@/lib/ai/builders/estimateScrubberPdfBuilder";[m
+ import { buildPolicyRightsReviewPdf } from "@/lib/ai/builders/policyRightsReviewPdfBuilder";[m
+ import { buildCarrierPdfBlob, exportCarrierPDF } from "@/lib/ai/builders/exportPdf";[m
+ import { toStableClaimId } from "@/lib/claims/claimIdentity";[m
+[36m@@ -83,6 +91,10 @@[m [mexport type ReportKind =[m
+   | "customer_report"[m
+   | "repair_intelligence"[m
+   | "estimate_scrubber"[m
+[32m+[m[32m  | "annotated_estimate_review"[m
+[32m+[m[32m  | "side_by_side_estimate_comparison"[m
+[32m+[m[32m  | "supplement_request_checklist"[m
+[32m+[m[32m  | "estimator_change_request_list"[m
+   | "policy_rights_review"[m
+   | "doi_complaint_packet";[m
+ type ReportDestinationType = "customer" | "carrier" | "internal";[m
+[36m@@ -743,6 +755,11 @@[m [mexport function ChatbotWorkspacePage() {[m
+       : hasResolvedAnalysis[m
+         ? { label: "Estimate Scrubber Report (Pro)", type: "locked" }[m
+       : null,[m
+[32m+[m[32m    canUseEstimateScrubberExport[m
+[32m+[m[32m      ? { label: "Annotated Estimate Review", type: "pdf" }[m
+[32m+[m[32m      : hasResolvedAnalysis[m
+[32m+[m[32m        ? { label: "Annotated Estimate Review (Pro)", type: "locked" }[m
+[32m+[m[32m      : null,[m
+     canUsePolicyRightsReviewExport[m
+       ? { label: "Policy & Rights Review", type: "pdf" }[m
+       : hasResolvedAnalysis[m
+[36m@@ -1612,6 +1629,10 @@[m [mfunction RailContent({[m
+     const needsResearch =[m
+       reportType === "policy_rights_review" ||[m
+       reportType === "estimate_scrubber" ||[m
+[32m+[m[32m      reportType === "annotated_estimate_review" ||[m
+[32m+[m[32m      reportType === "side_by_side_estimate_comparison" ||[m
+[32m+[m[32m      reportType === "supplement_request_checklist" ||[m
+[32m+[m[32m      reportType === "estimator_change_request_list" ||[m
+       reportType === "doi_complaint_packet" ||[m
+       (reportType === "repair_intelligence" && renderModel.oemContradictions.length > 0);[m
+ [m
+[36m@@ -1622,7 +1643,15 @@[m [mfunction RailContent({[m
+     setReportSendStatus("Running Drive and internet source research...");[m
+ [m
+     const researchReportType =[m
+[31m-      reportType === "repair_intelligence" ? "oem_contradiction_detection" : reportType;[m
+[32m+[m[32m      reportType === "repair_intelligence"[m
+[32m+[m[32m        ? "oem_contradiction_detection"[m
+[32m+[m[32m        : reportType === "annotated_estimate_review"[m
+[32m+[m[32m          ? "estimate_scrubber"[m
+[32m+[m[32m          : reportType === "side_by_side_estimate_comparison" ||[m
+[32m+[m[32m              reportType === "supplement_request_checklist" ||[m
+[32m+[m[32m              reportType === "estimator_change_request_list"[m
+[32m+[m[32m            ? "estimate_scrubber"[m
+[32m+[m[32m          : reportType;[m
+     const response = await fetch("/api/reports/research", {[m
+       method: "POST",[m
+       headers: { "Content-Type": "application/json" },[m
+[36m@@ -1647,6 +1676,56 @@[m [mfunction RailContent({[m
+     return payload.snapshot;[m
+   }[m
+ [m
+[32m+[m[32m  async function prepareAnnotatedEstimatePromptText([m
+[32m+[m[32m    reportType: ReportKind,[m
+[32m+[m[32m    input: {[m
+[32m+[m[32m      renderModel: ReturnType<typeof buildExportModel>;[m
+[32m+[m[32m      report: RepairIntelligenceReport | null;[m
+[32m+[m[32m      analysis: AnalysisResult | null;[m
+[32m+[m[32m      panel: DecisionPanel;[m
+[32m+[m[32m      assistantAnalysis: string;[m
+[32m+[m[32m      workspaceData: WorkspaceData | null;[m
+[32m+[m[32m      exportResearchSnapshot: ExportResearchSnapshot | null;[m
+[32m+[m[32m    }[m
+[32m+[m[32m  ): Promise<string | null> {[m
+[32m+[m[32m    const annotationMode = mapReportKindToAnnotationMode(reportType);[m
+[32m+[m[32m    if (!annotationMode) {[m
+[32m+[m[32m      return null;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    const model = buildAnnotatedEstimateReviewModel(input);[m
+[32m+[m[32m    setReportSendStatus("Generating annotated estimate review with Collision IQ prompt...");[m
+[32m+[m
+[32m+[m[32m    const response = await fetch("/api/reports/annotated-estimate-prompt", {[m
+[32m+[m[32m      method: "POST",[m
+[32m+[m[32m      headers: { "Content-Type": "application/json" },[m
+[32m+[m[32m      credentials: "same-origin",[m
+[32m+[m[32m      body: JSON.stringify({[m
+[32m+[m[32m        user_request:[m
+[32m+[m[32m          "Generate an annotated estimate review. Show missing, under-documented, reduced, and proof-needed items directly against the relevant estimate lines or sections.",[m
+[32m+[m[32m        case_context: buildAnnotatedPromptCaseContext(input, model),[m
+[32m+[m[32m        uploaded_documents: buildAnnotatedPromptUploadedDocuments(input),[m
+[32m+[m[32m        carrier_estimate_text: buildAnnotatedPromptCarrierEstimateText(input, model),[m
+[32m+[m[32m        shop_estimate_text: buildAnnotatedPromptShopEstimateText(model),[m
+[32m+[m[32m        scrubber_findings: buildAnnotatedPromptScrubberFindings(model),[m
+[32m+[m[32m        audience: "estimator",[m
+[32m+[m[32m        annotation_mode: annotationMode,[m
+[32m+[m[32m      }),[m
+[32m+[m[32m    });[m
+[32m+[m[32m    const payload = (await response.json().catch(() => null)) as {[m
+[32m+[m[32m      output_text?: string;[m
+[32m+[m[32m      error?: string;[m
+[32m+[m[32m    } | null;[m
+[32m+[m
+[32m+[m[32m    if (!response.ok) {[m
+[32m+[m[32m      setReportSendStatus(payload?.error || "Stored prompt generation failed; using deterministic annotations.");[m
+[32m+[m[32m      return null;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    setReportSendStatus(null);[m
+[32m+[m[32m    return payload?.output_text?.trim() || null;[m
+[32m+[m[32m  }[m
+[32m+[m
+   async function downloadReportDocument(reportType: ReportKind) {[m
+     if (reportType !== "snapshot" && !canRenderExports) {[m
+       setReportSendStatus("Report is not ready to download yet.");[m
+[36m@@ -1681,6 +1760,11 @@[m [mfunction RailContent({[m
+       workspaceData,[m
+       exportResearchSnapshot,[m
+     };[m
+[32m+[m[32m    const promptGeneratedText = await prepareAnnotatedEstimatePromptText(reportType, sharedInput);[m
+[32m+[m[32m    const annotatedInput = {[m
+[32m+[m[32m      ...sharedInput,[m
+[32m+[m[32m      promptGeneratedText,[m
+[32m+[m[32m    };[m
+ [m
+     if (reportType === "repair_intelligence") {[m
+       return buildCarrierReport(sharedInput);[m
+[36m@@ -1688,6 +1772,18 @@[m [mfunction RailContent({[m
+     if (reportType === "estimate_scrubber") {[m
+       return buildEstimateScrubberPdf(sharedInput);[m
+     }[m
+[32m+[m[32m    if (reportType === "annotated_estimate_review") {[m
+[32m+[m[32m      return buildAnnotatedEstimateReviewPdf(annotatedInput);[m
+[32m+[m[32m    }[m
+[32m+[m[32m    if (reportType === "side_by_side_estimate_comparison") {[m
+[32m+[m[32m      return buildSideBySideEstimateComparisonPdf(annotatedInput);[m
+[32m+[m[32m    }[m
+[32m+[m[32m    if (reportType === "supplement_request_checklist") {[m
+[32m+[m[32m      return buildSupplementRequestChecklistPdf(annotatedInput);[m
+[32m+[m[32m    }[m
+[32m+[m[32m    if (reportType === "estimator_change_request_list") {[m
+[32m+[m[32m      return buildEstimatorChangeRequestListPdf(annotatedInput);[m
+[32m+[m[32m    }[m
+     if (reportType === "policy_rights_review") {[m
+       return buildPolicyRightsReviewPdf(sharedInput);[m
+     }[m
+[36m@@ -2392,6 +2488,45 @@[m [mfunction RailContent({[m
+                     <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>[m
+                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />[m
+                   </button>[m
+[32m+[m[32m                  <button[m
+[32m+[m[32m                    type="button"[m
+[32m+[m[32m                    onClick={() => {[m
+[32m+[m[32m                      void downloadReportDocument("annotated_estimate_review");[m
+[32m+[m[32m                      emitSafeCrmEventFromClient({[m
+[32m+[m[32m                        event: "report_generated",[m
+[32m+[m[32m                        plan,[m
+[32m+[m[32m                        exportType: "annotated_estimate_review",[m
+[32m+[m[32m                      });[m
+[32m+[m[32m                    }}[m
+[32m+[m[32m                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 sm:col-span-2"[m
+[32m+[m[32m                  >[m
+[32m+[m[32m                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download annotated estimate</span>[m
+[32m+[m[32m                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />[m
+[32m+[m[32m                  </button>[m
+[32m+[m[32m                  <button[m
+[32m+[m[32m                    type="button"[m
+[32m+[m[32m                    onClick={() => void downloadReportDocument("side_by_side_estimate_comparison")}[m
+[32m+[m[32m                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"[m
+[32m+[m[32m                  >[m
+[32m+[m[32m                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Side-by-side PDF</span>[m
+[32m+[m[32m                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />[m
+[32m+[m[32m                  </button>[m
+[32m+[m[32m                  <button[m
+[32m+[m[32m                    type="button"[m
+[32m+[m[32m                    onClick={() => void downloadReportDocument("supplement_request_checklist")}[m
+[32m+[m[32m                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"[m
+[32m+[m[32m                  >[m
+[32m+[m[32m                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Supplement checklist</span>[m
+[32m+[m[32m                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />[m
+[32m+[m[32m                  </button>[m
+[32m+[m[32m                  <button[m
+[32m+[m[32m                    type="button"[m
+[32m+[m[32m                    onClick={() => void downloadReportDocument("estimator_change_request_list")}[m
+[32m+[m[32m                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 sm:col-span-2"[m
+[32m+[m[32m                  >[m
+[32m+[m[32m                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Estimator change list</span>[m
+[32m+[m[32m                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />[m
+[32m+[m[32m                  </button>[m
+                 </div>[m
+                 <ReportSendStatusLine[m
+                   send={getLastSendFor("estimate_scrubber")}[m
+[36m@@ -2653,6 +2788,112 @@[m [mfunction RailContent({[m
+   );[m
+ }[m
+ [m
+[32m+[m[32mfunction mapReportKindToAnnotationMode([m
+[32m+[m[32m  reportType: ReportKind[m
+[32m+[m[32m):[m
+[32m+[m[32m  | "annotated_estimate_review"[m
+[32m+[m[32m  | "side_by_side_comparison"[m
+[32m+[m[32m  | "supplement_checklist"[m
+[32m+[m[32m  | "estimator_change_request_list"[m
+[32m+[m[32m  | null {[m
+[32m+[m[32m  switch (reportType) {[m
+[32m+[m[32m    case "annotated_estimate_review":[m
+[32m+[m[32m      return "annotated_estimate_review";[m
+[32m+[m[32m    case "side_by_side_estimate_comparison":[m
+[32m+[m[32m      return "side_by_side_comparison";[m
+[32m+[m[32m    case "supplement_request_checklist":[m
+[32m+[m[32m      return "supplement_checklist";[m
+[32m+[m[32m    case "estimator_change_request_list":[m
+[32m+[m[32m      return "estimator_change_request_list";[m
+[32m+[m[32m    default:[m
+[32m+[m[32m      return null;[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction buildAnnotatedPromptCaseContext([m
+[32m+[m[32m  input: {[m
+[32m+[m[32m    renderModel: ReturnType<typeof buildExportModel>;[m
+[32m+[m[32m    report: RepairIntelligenceReport | null;[m
+[32m+[m[32m    analysis: AnalysisResult | null;[m
+[32m+[m[32m    assistantAnalysis: string;[m
+[32m+[m[32m  },[m
+[32m+[m[32m  model: AnnotatedEstimateReviewModel[m
+[32m+[m[32m): string {[m
+[32m+[m[32m  return compactTextLines([[m
+[32m+[m[32m    `Vehicle: ${model.vehicleIdentity}`,[m
+[32m+[m[32m    `VIN: ${model.vin}`,[m
+[32m+[m[32m    model.insurer ? `Insurer: ${model.insurer}` : null,[m
+[32m+[m[32m    `Repair position: ${input.renderModel.repairPosition}`,[m
+[32m+[m[32m    `Current position statement: ${input.renderModel.positionStatement}`,[m
+[32m+[m[32m    input.analysis?.narrative ? `Analysis narrative: ${input.analysis.narrative}` : null,[m
+[32m+[m[32m    input.report?.summary ? `Risk: ${input.report.summary.riskScore}; Confidence: ${input.report.summary.confidence}` : null,[m
+[32m+[m[32m    input.assistantAnalysis ? `Assistant analysis: ${input.assistantAnalysis}` : null,[m
+[32m+[m[32m  ]);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction buildAnnotatedPromptUploadedDocuments(input: {[m
+[32m+[m[32m  renderModel: ReturnType<typeof buildExportModel>;[m
+[32m+[m[32m  report: RepairIntelligenceReport | null;[m
+[32m+[m[32m}): string {[m
+[32m+[m[32m  return compactTextLines([[m
+[32m+[m[32m    ...input.renderModel.reportFields.documentedProcedures.map((item) => `Documented procedure: ${item}`),[m
+[32m+[m[32m    ...input.renderModel.reportFields.documentedHighlights.map((item) => `Documented highlight: ${item}`),[m
+[32m+[m[32m    ...(input.report?.evidence ?? []).slice(0, 10).map((item) =>[m
+[32m+[m[32m      `Evidence: ${item.title ?? "Untitled"} - ${item.snippet ?? item.source ?? ""}`[m
+[32m+[m[32m    ),[m
+[32m+[m[32m  ]);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction buildAnnotatedPromptCarrierEstimateText([m
+[32m+[m[32m  input: { analysis: AnalysisResult | null },[m
+[32m+[m[32m  model: AnnotatedEstimateReviewModel[m
+[32m+[m[32m): string {[m
+[32m+[m[32m  return compactTextLines([[m
+[32m+[m[32m    input.analysis?.rawEstimateText ?? null,[m
+[32m+[m[32m    ...model.lineAnchors[m
+[32m+[m[32m      .filter((anchor) => anchor.sourceRole !== "shop")[m
+[32m+[m[32m      .map((anchor) => `${anchor.lineId}: ${anchor.text}`),[m
+[32m+[m[32m  ]);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction buildAnnotatedPromptShopEstimateText(model: AnnotatedEstimateReviewModel): string {[m
+[32m+[m[32m  return compactTextLines([[m
+[32m+[m[32m    ...model.lineAnchors[m
+[32m+[m[32m      .filter((anchor) => anchor.sourceRole === "shop")[m
+[32m+[m[32m      .map((anchor) => `${anchor.lineId}: ${anchor.text}`),[m
+[32m+[m[32m    ...model.comparisonRows.map((row) =>[m
+[32m+[m[32m      row.lhsValue ? `${row.lhsSource ?? "Shop"} ${row.operation ?? row.partName ?? "line"}: ${row.lhsValue}` : null[m
+[32m+[m[32m    ),[m
+[32m+[m[32m  ]);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction buildAnnotatedPromptScrubberFindings(model: AnnotatedEstimateReviewModel): string {[m
+[32m+[m[32m  return compactTextLines([m
+[32m+[m[32m    model.annotations.map((annotation) =>[m
+[32m+[m[32m      [[m
+[32m+[m[32m        `ID: ${annotation.id}`,[m
+[32m+[m[32m        `Anchor: ${annotation.lineId ?? annotation.section ?? "section"}`,[m
+[32m+[m[32m        `Category: ${annotation.category}`,[m
+[32m+[m[32m        `Severity: ${annotation.severity}`,[m
+[32m+[m[32m        `Title: ${annotation.title}`,[m
+[32m+[m[32m        `Explanation: ${annotation.explanation}`,[m
+[32m+[m[32m        `Support status: ${annotation.supportStatus}`,[m
+[32m+[m[32m        `Estimator text: ${annotation.estimatorText}`,[m
+[32m+[m[32m        annotation.carrierLine ? `Carrier line: ${annotation.carrierLine}` : null,[m
+[32m+[m[32m        annotation.shopLine ? `Shop line: ${annotation.shopLine}` : null,[m
+[32m+[m[32m        annotation.difference ? `Difference: ${annotation.difference}` : null,[m
+[32m+[m[32m      ].filter(Boolean).join(" | ")[m
+[32m+[m[32m    )[m
+[32m+[m[32m  );[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction compactTextLines(values: Array<string | null | undefined>): string {[m
+[32m+[m[32m  return values[m
+[32m+[m[32m    .filter((value): value is string => Boolean(value && value.trim()))[m
+[32m+[m[32m    .join("\n")[m
+[32m+[m[32m    .slice(0, 24000);[m
+[32m+[m[32m}[m
+[32m+[m
+ function getDefaultReportSubject(reportType: ReportKind): string {[m
+   switch (reportType) {[m
+     case "snapshot":[m
+[36m@@ -2661,6 +2902,14 @@[m [mfunction getDefaultReportSubject(reportType: ReportKind): string {[m
+       return "[Collision IQ] Repair Intelligence Report";[m
+     case "estimate_scrubber":[m
+       return "[Collision IQ] Estimate Scrubber Report";[m
+[32m+[m[32m    case "annotated_estimate_review":[m
+[32m+[m[32m      return "[Collision IQ] Annotated Estimate Review";[m
+[32m+[m[32m    case "side_by_side_estimate_comparison":[m
+[32m+[m[32m      return "[Collision IQ] Side-By-Side Estimate Comparison";[m
+[32m+[m[32m    case "supplement_request_checklist":[m
+[32m+[m[32m      return "[Collision IQ] Supplement Request Checklist";[m
+[32m+[m[32m    case "estimator_change_request_list":[m
+[32m+[m[32m      return "[Collision IQ] Estimator Change Request List";[m
+     case "policy_rights_review":[m
+       return "[Collision IQ] Policy & Rights Review";[m
+     case "doi_complaint_packet":[m
+[36m@@ -2678,6 +2927,14 @@[m [mfunction getDefaultReportFilename(reportType: ReportKind): string {[m
+       return "repair-intelligence-report.pdf";[m
+     case "estimate_scrubber":[m
+       return "estimate-scrubber-report.pdf";[m
+[32m+[m[32m    case "annotated_estimate_review":[m
+[32m+[m[32m      return "annotated-estimate-review.pdf";[m
+[32m+[m[32m    case "side_by_side_estimate_comparison":[m
+[32m+[m[32m      return "side-by-side-estimate-comparison.pdf";[m
+[32m+[m[32m    case "supplement_request_checklist":[m
+[32m+[m[32m      return "supplement-request-checklist.pdf";[m
+[32m+[m[32m    case "estimator_change_request_list":[m
+[32m+[m[32m      return "estimator-change-request-list.pdf";[m
+     case "policy_rights_review":[m
+       return "policy-rights-review.pdf";[m
+     case "doi_complaint_packet":[m

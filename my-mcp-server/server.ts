@@ -140,7 +140,7 @@ server.setRequestHandler(
         ],
         repair_procedure: [
           "Confirm applicability (model/trim/year/section)",
-          "Extract MUST requirements (materials, weld type/count, adhesives, cure times)",
+          "Extract key requirements (materials, weld type/count, adhesives, cure times)",
           "Identify calibrations, inspections, post-repair checks",
         ],
         policy: [
