@@ -85,8 +85,8 @@ export function resolveUploadPlanLimits(
       maxFilesPerReview: entitlements.maxUploadsPerReview ?? UNLIMITED_UPLOAD_BATCH_FILE_LIMIT,
       zipAllowed: true,
       maxExtractedFiles: 50,
-      maxExtractedTotalBytes: 150 * MB,
-      maxZipNestingDepth: 2,
+      maxExtractedTotalBytes: 200 * MB,
+      maxZipNestingDepth: 0,
       cccWorkfileAllowed: true,
     };
   }
@@ -107,9 +107,9 @@ export function resolveUploadPlanLimits(
       maxUploadBytes: 30 * MB,
       maxFilesPerReview: entitlements.maxUploadsPerReview ?? PRO_UPLOAD_BATCH_FILE_LIMIT,
       zipAllowed: true,
-      maxExtractedFiles: 25,
-      maxExtractedTotalBytes: 75 * MB,
-      maxZipNestingDepth: 2,
+      maxExtractedFiles: 50,
+      maxExtractedTotalBytes: 200 * MB,
+      maxZipNestingDepth: 0,
       cccWorkfileAllowed: plan === "pro",
     };
   }

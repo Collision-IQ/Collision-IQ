@@ -130,6 +130,13 @@ type UploadResponse = UploadSuccessResult & {
     acceptedFiles?: number;
     rejectedFiles?: number;
     extractedBytes?: number;
+    entryCount?: number;
+    acceptedEntries?: string[];
+    rejectedEntries?: Array<{
+      filename?: string;
+      reason?: string;
+      code?: string;
+    }>;
   }>;
   telemetry?: {
     extractedFileCount?: number;
@@ -285,6 +292,7 @@ const SERVER_TTS_ENABLED = true;
 const BROWSER_TTS_ENABLED =
   process.env.NEXT_PUBLIC_COLLISION_IQ_ENABLE_BROWSER_TTS !== "false";
 const SERVER_TTS_MAX_INPUT_CHARS = 2_000;
+const ZIP_MAX_BYTES = 50 * 1024 * 1024;
 const CHAT_SESSION_STORAGE_PREFIX = "collision-iq.chat-widget.session";
 const DRAFT_CHAT_SESSION_KEY = `${CHAT_SESSION_STORAGE_PREFIX}:draft`;
 const INTRO_DISMISSAL_SESSION_KEY = "collision-iq.chat-widget.introDismissed";
@@ -584,8 +592,10 @@ function isSupportedDropUploadFile(file: File) {
   const name = file.name.toLowerCase();
   return (
     file.type === "application/pdf" ||
+    file.type === "application/zip" ||
+    file.type === "application/x-zip-compressed" ||
     file.type.startsWith("image/") ||
-    /\.(pdf|jpe?g|png|webp|heic)$/i.test(name)
+    /\.(pdf|jpe?g|png|webp|heic|zip)$/i.test(name)
   );
 }
 
@@ -1418,8 +1428,17 @@ export default function ChatWidget({
       if (!isSupportedDropUploadFile(file)) {
         rejectedFiles.push({
           filename: file.name,
-          reason: "Only PDF and image uploads are supported here.",
+          reason: "Only PDF, image, and ZIP archive uploads are supported here.",
           code: "UNSUPPORTED_EXTENSION",
+        });
+        return false;
+      }
+
+      if (isZipFile(file) && file.size > ZIP_MAX_BYTES) {
+        rejectedFiles.push({
+          filename: file.name,
+          reason: `ZIP archive is ${formatBytes(file.size)}. Max size is ${formatBytes(ZIP_MAX_BYTES)}.`,
+          code: "ZIP_TOO_LARGE",
         });
         return false;
       }
@@ -2230,8 +2249,8 @@ export default function ChatWidget({
     source: "file" | "camera",
     replaceId?: string | null,
     options?: { openPreview?: boolean }
-  ): Promise<string> {
-    if (disabled) return "";
+  ): Promise<{ attachmentIds: string[]; filenames: string[] }> {
+    if (disabled) return { attachmentIds: [], filenames: [] };
     if (!isUserLoaded || !isSignedIn) {
       router.push("/sign-in?next=/chatbot");
       throw new Error("Please sign in before uploading.");
@@ -2298,6 +2317,12 @@ export default function ChatWidget({
       analysisReportIdRef.current = returnedActiveCaseId;
     }
     const returnedUploads = data?.successfulUploads?.length ? data.successfulUploads : [upload];
+    const returnedAttachmentIds = returnedUploads
+      .map((item) => item?.attachmentId)
+      .filter((id): id is string => typeof id === "string");
+    const returnedFilenames = returnedUploads
+      .map((item) => item?.filename)
+      .filter((name): name is string => typeof name === "string" && name.length > 0);
     const indexedCount = returnedUploads.filter((item) => typeof item.attachmentId === "string").length;
     const visionProcessedCount = returnedUploads.filter((item) => Boolean(item.hasVision)).length;
     const knownFileCount = countKnownFilesFromUploadResponse(data, returnedUploads);
@@ -2434,7 +2459,10 @@ export default function ChatWidget({
     }
     setReplaceAttachmentId(null);
     firstAttachmentAtRef.current ??= Date.now();
-    return attachmentId;
+    return {
+      attachmentIds: returnedAttachmentIds.length ? returnedAttachmentIds : [attachmentId],
+      filenames: returnedFilenames.length ? returnedFilenames : [filename],
+    };
   }
 
   async function handleFilesSelected(fileList: FileList | File[] | null) {
@@ -2476,18 +2504,20 @@ export default function ChatWidget({
         upsertSystemStatusMessage(zipProgressStatus);
       }
       const newAttachmentIds: string[] = [];
+      const uploadedDisplayNames: string[] = [];
       const replacementTargetId = replaceAttachmentId;
       const uploadFailures = [...rejectedFiles];
       let successfulUploadCount = 0;
 
       for (const file of files) {
         try {
-          const attachmentId = await uploadSingleFile(file, "file", replacementTargetId, {
+          const uploadResult = await uploadSingleFile(file, "file", replacementTargetId, {
             openPreview: Boolean(replacementTargetId) || files.length === 1,
           });
-          successfulUploadCount += 1;
+          successfulUploadCount += uploadResult.attachmentIds.length || 1;
+          uploadedDisplayNames.push(...uploadResult.filenames);
           if (!replacementTargetId) {
-            newAttachmentIds.push(attachmentId);
+            newAttachmentIds.push(...uploadResult.attachmentIds);
           }
         } catch (error) {
           console.error(error);
@@ -2496,6 +2526,9 @@ export default function ChatWidget({
             reason: error instanceof Error ? error.message : "Upload failed.",
           });
         }
+      }
+      if (uploadedDisplayNames.length) {
+        setSelectedUploadNames(uploadedDisplayNames);
       }
       if (!replacementTargetId && newAttachmentIds[0]) {
         openAttachmentPreview(newAttachmentIds[0]);
@@ -2568,18 +2601,20 @@ export default function ChatWidget({
         upsertSystemStatusMessage(zipProgressStatus);
       }
       const newAttachmentIds: string[] = [];
+      const uploadedDisplayNames: string[] = [];
       const replacementTargetId = replaceAttachmentId;
       const uploadFailures = [...rejectedFiles];
       let successfulUploadCount = 0;
 
       for (const file of files) {
         try {
-          const attachmentId = await uploadSingleFile(file, "camera", replacementTargetId, {
+          const uploadResult = await uploadSingleFile(file, "camera", replacementTargetId, {
             openPreview: Boolean(replacementTargetId) || files.length === 1,
           });
-          successfulUploadCount += 1;
+          successfulUploadCount += uploadResult.attachmentIds.length || 1;
+          uploadedDisplayNames.push(...uploadResult.filenames);
           if (!replacementTargetId) {
-            newAttachmentIds.push(attachmentId);
+            newAttachmentIds.push(...uploadResult.attachmentIds);
           }
         } catch (error) {
           console.error(error);
@@ -2588,6 +2623,9 @@ export default function ChatWidget({
             reason: error instanceof Error ? error.message : "Upload failed.",
           });
         }
+      }
+      if (uploadedDisplayNames.length) {
+        setSelectedUploadNames(uploadedDisplayNames);
       }
       if (!replacementTargetId && newAttachmentIds[0]) {
         openAttachmentPreview(newAttachmentIds[0]);
@@ -3209,7 +3247,7 @@ export default function ChatWidget({
               </div>
 
               <div className="mt-2 text-[11px] leading-4 text-muted-foreground sm:mt-3 sm:text-xs sm:leading-5">
-                Drop PDFs or images here, or use the upload buttons.
+                Drop PDFs, images, or ZIP archives here, or use the upload buttons.
                 {selectedUploadNames.length > 0 && (
                   <div className="mt-2 truncate">
                     Selected: {selectedUploadNames.join(", ")}
@@ -3438,10 +3476,10 @@ export default function ChatWidget({
                 type="file"
                 ref={fileInputRef}
                 className="hidden"
-                accept=".pdf,image/*"
+                accept=".pdf,image/*,application/zip,application/x-zip-compressed,.zip"
                 multiple
                 disabled={disabled}
-                title="Attach files"
+                title="Attach PDF, image, or ZIP archive"
                 onChange={(e) => handleFilesSelected(e.target.files)}
               />
 
@@ -3461,7 +3499,7 @@ export default function ChatWidget({
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled}
                 className="order-2 min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none"
-                aria-label="Attach files"
+                aria-label="Attach PDF, image, or ZIP archive"
               >
                 <Paperclip size={20} />
               </button>
