@@ -65,6 +65,28 @@ function jsonError(error: string, code: string, status: number) {
   return NextResponse.json({ error, code }, { status });
 }
 
+function resolveProviderErrorCode(status: number) {
+  if (status === 429) return "TTS_RATE_LIMITED";
+  if ([400, 401, 403, 404, 422].includes(status)) return "TTS_VOICE_UNAVAILABLE";
+  return "TTS_PROVIDER_ERROR";
+}
+
+function resolveProviderErrorMessage(status: number) {
+  if (status === 429) {
+    return "Voice generation is temporarily rate limited. Please try again shortly.";
+  }
+
+  if ([400, 401, 403, 404, 422].includes(status)) {
+    return "The selected voice is unavailable. Please check the ElevenLabs voice configuration.";
+  }
+
+  return "Voice generation failed. Please try again.";
+}
+
+function resolveProviderErrorStatus(code: string) {
+  return code === "TTS_RATE_LIMITED" ? 429 : 502;
+}
+
 async function parseJsonBody(req: Request): Promise<TtsRequestBody | null> {
   try {
     return (await req.json()) as TtsRequestBody;
@@ -99,12 +121,11 @@ export async function POST(req: Request) {
     }
 
     const apiKey = process.env.ELEVENLABS_API_KEY?.trim();
-    const requestedVoice = body.voice === "secondary" ? "secondary" : "primary";
     const resolvedVoice = resolveVoiceId(body);
 
     console.log("[tts] voice selection", {
-      requestedVoice,
-      resolvedVoice: requestedVoice,
+      requestedVoice: body.voice ?? "primary",
+      resolvedVoice: resolvedVoice?.label ?? null,
       hasPrimary: !!process.env.ELEVENLABS_VOICE_ID,
       hasSecondary: !!process.env.ELEVENLABS_VOICE_ID_SECOND,
     });
@@ -164,24 +185,20 @@ export async function POST(req: Request) {
     }
 
     if (!elevenLabsResponse.ok) {
+      const code = resolveProviderErrorCode(elevenLabsResponse.status);
+
       console.warn("[tts] ElevenLabs request failed", {
         ownerUserId: user.id,
         isPlatformAdmin,
+        voice: resolvedVoice.label,
         status: elevenLabsResponse.status,
+        code,
       });
 
-      if (elevenLabsResponse.status === 429) {
-        return jsonError(
-          "Voice generation is temporarily rate limited. Please try again shortly.",
-          "TTS_RATE_LIMITED",
-          429
-        );
-      }
-
       return jsonError(
-        "Voice generation failed. Please try again.",
-        "TTS_PROVIDER_ERROR",
-        502
+        resolveProviderErrorMessage(elevenLabsResponse.status),
+        code,
+        resolveProviderErrorStatus(code)
       );
     }
 
@@ -190,8 +207,9 @@ export async function POST(req: Request) {
       console.warn("[tts] ElevenLabs returned empty audio", {
         ownerUserId: user.id,
         isPlatformAdmin,
+        voice: resolvedVoice.label,
       });
-      return jsonError("Voice generation returned empty audio.", "TTS_EMPTY_AUDIO", 502);
+      return jsonError("Voice generation returned empty audio.", "TTS_PROVIDER_ERROR", 502);
     }
 
     return new Response(arrayBuffer, {
@@ -212,6 +230,6 @@ export async function POST(req: Request) {
     console.error("[tts] generation failed", {
       message: error instanceof Error ? error.message : String(error),
     });
-    return jsonError("Voice generation failed. Please try again.", "TTS_FAILED", 500);
+    return jsonError("Voice generation failed. Please try again.", "TTS_PROVIDER_ERROR", 502);
   }
 }

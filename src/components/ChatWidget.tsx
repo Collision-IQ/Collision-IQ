@@ -294,6 +294,14 @@ type ServerTtsVoiceOption = {
   id: ServerTtsVoiceOptionId;
   label: string;
 };
+type ServerTtsErrorCode =
+  | "TTS_NOT_CONFIGURED"
+  | "UNSUPPORTED_VOICE"
+  | "TTS_VOICE_UNAVAILABLE"
+  | "TTS_RATE_LIMITED"
+  | "TTS_TIMEOUT"
+  | "TTS_PROVIDER_ERROR"
+  | "SERVER_AUDIO_PLAYBACK_FAILED";
 const DEFAULT_SERVER_TTS_VOICE: ServerTtsVoiceOptionId = "primary";
 const SERVER_TTS_VOICE_OPTIONS: [ServerTtsVoiceOption, ServerTtsVoiceOption] = [
   {
@@ -305,6 +313,65 @@ const SERVER_TTS_VOICE_OPTIONS: [ServerTtsVoiceOption, ServerTtsVoiceOption] = [
     label: "Voice 2",
   },
 ];
+const SERVER_TTS_BLOCKING_ERROR_CODES = new Set<ServerTtsErrorCode>([
+  "TTS_NOT_CONFIGURED",
+  "UNSUPPORTED_VOICE",
+  "TTS_VOICE_UNAVAILABLE",
+]);
+const SERVER_TTS_TRANSIENT_ERROR_CODES = new Set<ServerTtsErrorCode>([
+  "TTS_RATE_LIMITED",
+  "TTS_TIMEOUT",
+  "TTS_PROVIDER_ERROR",
+  "SERVER_AUDIO_PLAYBACK_FAILED",
+]);
+
+class ServerTtsPlaybackError extends Error {
+  code?: ServerTtsErrorCode;
+  status?: number;
+
+  constructor(message: string, options?: { code?: ServerTtsErrorCode; status?: number }) {
+    super(message);
+    this.name = "ServerTtsPlaybackError";
+    this.code = options?.code;
+    this.status = options?.status;
+  }
+}
+
+function normalizeServerTtsErrorCode(value: unknown): ServerTtsErrorCode | undefined {
+  if (typeof value !== "string") return undefined;
+  if (
+    value === "TTS_NOT_CONFIGURED" ||
+    value === "UNSUPPORTED_VOICE" ||
+    value === "TTS_VOICE_UNAVAILABLE" ||
+    value === "TTS_RATE_LIMITED" ||
+    value === "TTS_TIMEOUT" ||
+    value === "TTS_PROVIDER_ERROR" ||
+    value === "SERVER_AUDIO_PLAYBACK_FAILED"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function shouldFallbackToBrowserSpeech(error: unknown) {
+  if (error instanceof ServerTtsPlaybackError) {
+    return error.code
+      ? SERVER_TTS_TRANSIENT_ERROR_CODES.has(error.code)
+      : false;
+  }
+
+  return true;
+}
+
+function resolveServerTtsStatusMessage(voice: ServerTtsVoiceOption, error: unknown) {
+  const code = error instanceof ServerTtsPlaybackError ? error.code : undefined;
+
+  if (code && SERVER_TTS_BLOCKING_ERROR_CODES.has(code)) {
+    return `${voice.label} is unavailable. Please check the ElevenLabs voice configuration.`;
+  }
+
+  return "Voiceover is temporarily unavailable.";
+}
 
 const DEFAULT_UPLOAD_LIMIT_ENTITLEMENTS: Pick<
   AccountEntitlements,
@@ -2761,50 +2828,81 @@ export default function ChatWidget({
       let audioBlob = audioBlobCacheRef.current.get(cacheKey);
 
       if (!audioBlob) {
-      setTtsGeneratingMessageId(message.id);
-      try {
-        const response = await fetch("/api/tts", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            text: chunk,
-            voice: selectedVoice,
-          }),
-        });
+        setTtsGeneratingMessageId(message.id);
+        try {
+          console.info("[tts] request", {
+            messageId: message.id,
+            selectedVoice,
+            playbackSource: "server",
+          });
 
-        const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+          const response = await fetch("/api/tts", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              text: chunk,
+              voice: selectedVoice,
+            }),
+          });
 
-        if (!response.ok) {
-          const data = (await response.json().catch(() => null)) as
-            | { error?: string; code?: string }
-            | null;
-          const errorCode = data?.code ? ` ${data.code}` : "";
-          throw new Error(
-            data?.error ??
-              `Server TTS failed (${response.status}${errorCode}; content-type=${contentType || "unknown"})`
-          );
+          const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+          let serverErrorData: { error?: string; code?: string } | null = null;
+
+          if (!response.ok) {
+            serverErrorData = (await response.json().catch(() => null)) as
+              | { error?: string; code?: string }
+              | null;
+          }
+
+          const serverErrorCode = normalizeServerTtsErrorCode(serverErrorData?.code);
+
+          console.info("[tts] response", {
+            messageId: message.id,
+            selectedVoice,
+            status: response.status,
+            code: serverErrorCode ?? serverErrorData?.code ?? null,
+            playbackSource: response.ok ? "server" : null,
+          });
+
+          if (!response.ok) {
+            const errorCode = serverErrorData?.code ? ` ${serverErrorData.code}` : "";
+            throw new ServerTtsPlaybackError(
+              serverErrorData?.error ??
+                `Server TTS failed (${response.status}${errorCode}; content-type=${contentType || "unknown"})`,
+              {
+                code: serverErrorCode,
+                status: response.status,
+              }
+            );
+          }
+
+          if (!contentType.includes("audio/")) {
+            const diagnosticBody = await response.text().catch(() => "");
+            const preview = diagnosticBody.slice(0, 180).replace(/\s+/g, " ").trim();
+            throw new ServerTtsPlaybackError(
+              `Server TTS returned non-audio content (status=${response.status}; content-type=${contentType || "unknown"}; body=${preview || "<empty>"})`,
+              {
+                code: "TTS_PROVIDER_ERROR",
+                status: response.status,
+              }
+            );
+          }
+
+          audioBlob = await response.blob();
+          if (!audioBlob.size) {
+            throw new ServerTtsPlaybackError("Voice generation returned empty audio.", {
+              code: "TTS_PROVIDER_ERROR",
+              status: response.status,
+            });
+          }
+          audioBlobCacheRef.current.set(cacheKey, audioBlob);
+        } finally {
+          setTtsGeneratingMessageId((current) => (current === message.id ? null : current));
         }
-
-        if (!contentType.includes("audio/")) {
-          const diagnosticBody = await response.text().catch(() => "");
-          const preview = diagnosticBody.slice(0, 180).replace(/\s+/g, " ").trim();
-          throw new Error(
-            `Server TTS returned non-audio content (status=${response.status}; content-type=${contentType || "unknown"}; body=${preview || "<empty>"})`
-          );
-        }
-
-        audioBlob = await response.blob();
-        if (!audioBlob.size) {
-          throw new Error("Voice generation returned empty audio.");
-        }
-        audioBlobCacheRef.current.set(cacheKey, audioBlob);
-      } finally {
-        setTtsGeneratingMessageId((current) => (current === message.id ? null : current));
       }
-    }
 
       if (speechPlaybackTokenRef.current !== playbackToken) return;
 
@@ -2815,6 +2913,13 @@ export default function ChatWidget({
       audioUrlRef.current = audioUrl;
 
       audio.onplay = () => {
+        console.info("[tts] playback", {
+          messageId: message.id,
+          selectedVoice,
+          status: 200,
+          code: null,
+          playbackSource: "server",
+        });
         setSpeakingMessageId(message.id);
         setIsSpeaking(true);
         setIsSpeechPaused(false);
@@ -2822,8 +2927,22 @@ export default function ChatWidget({
 
       await new Promise<void>((resolve, reject) => {
         audio.onended = () => resolve();
-        audio.onerror = () => reject(new Error("Voice playback failed."));
-        void audio.play().catch(reject);
+        audio.onerror = () =>
+          reject(
+            new ServerTtsPlaybackError("Voice playback failed.", {
+              code: "SERVER_AUDIO_PLAYBACK_FAILED",
+            })
+          );
+        void audio.play().catch((error) =>
+          reject(
+            new ServerTtsPlaybackError(
+              error instanceof Error ? error.message : "Voice playback failed.",
+              {
+                code: "SERVER_AUDIO_PLAYBACK_FAILED",
+              }
+            )
+          )
+        );
       });
 
       if (audioRef.current === audio) {
@@ -2918,10 +3037,21 @@ export default function ChatWidget({
         await playServerSpeech(message, plainText, voice.id);
         return;
       } catch (error) {
-        console.warn("[tts] server playback failed, falling back to browser speech", {
+        const shouldFallback = shouldFallbackToBrowserSpeech(error);
+
+        console.warn("[tts] server playback failed", {
           messageId: message.id,
+          selectedVoice: voice.id,
+          status: error instanceof ServerTtsPlaybackError ? error.status ?? null : null,
+          code: error instanceof ServerTtsPlaybackError ? error.code ?? null : null,
+          playbackSource: shouldFallback ? "browser_fallback" : "server",
           error: error instanceof Error ? error.message : String(error),
         });
+
+        if (!shouldFallback) {
+          pushSystemStatusMessage(resolveServerTtsStatusMessage(voice, error));
+          return;
+        }
       }
     }
 
@@ -2934,6 +3064,13 @@ export default function ChatWidget({
       return;
     }
 
+    console.info("[tts] playback", {
+      messageId: message.id,
+      selectedVoice: voice.id,
+      status: null,
+      code: null,
+      playbackSource: "browser_fallback",
+    });
     playBrowserSpeech(message, plainText);
   }
 
