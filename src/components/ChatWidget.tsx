@@ -337,6 +337,14 @@ class ServerTtsPlaybackError extends Error {
   }
 }
 
+function buildTtsMessageDiagnostics(message: Message) {
+  return {
+    messageId: message.id,
+    messageRole: message.role,
+    messageKind: message.kind ?? "analysis",
+  };
+}
+
 function normalizeServerTtsErrorCode(value: unknown): ServerTtsErrorCode | undefined {
   if (typeof value !== "string") return undefined;
   if (
@@ -2831,8 +2839,9 @@ export default function ChatWidget({
         setTtsGeneratingMessageId(message.id);
         try {
           console.info("[tts] request", {
-            messageId: message.id,
+            ...buildTtsMessageDiagnostics(message),
             selectedVoice,
+            serverTtsAttempted: true,
             playbackSource: "server",
           });
 
@@ -2860,8 +2869,9 @@ export default function ChatWidget({
           const serverErrorCode = normalizeServerTtsErrorCode(serverErrorData?.code);
 
           console.info("[tts] response", {
-            messageId: message.id,
+            ...buildTtsMessageDiagnostics(message),
             selectedVoice,
+            serverTtsAttempted: true,
             status: response.status,
             code: serverErrorCode ?? serverErrorData?.code ?? null,
             playbackSource: response.ok ? "server" : null,
@@ -2914,8 +2924,9 @@ export default function ChatWidget({
 
       audio.onplay = () => {
         console.info("[tts] playback", {
-          messageId: message.id,
+          ...buildTtsMessageDiagnostics(message),
           selectedVoice,
+          serverTtsAttempted: true,
           status: 200,
           code: null,
           playbackSource: "server",
@@ -3032,18 +3043,26 @@ export default function ChatWidget({
 
     stopSpeaking();
 
+    let fallbackServerStatus: number | null = null;
+    let fallbackServerCode: ServerTtsErrorCode | string | null = null;
+
     if (SERVER_TTS_ENABLED) {
       try {
         await playServerSpeech(message, plainText, voice.id);
         return;
       } catch (error) {
         const shouldFallback = shouldFallbackToBrowserSpeech(error);
+        fallbackServerStatus =
+          error instanceof ServerTtsPlaybackError ? error.status ?? null : null;
+        fallbackServerCode =
+          error instanceof ServerTtsPlaybackError ? error.code ?? null : null;
 
         console.warn("[tts] server playback failed", {
-          messageId: message.id,
+          ...buildTtsMessageDiagnostics(message),
           selectedVoice: voice.id,
-          status: error instanceof ServerTtsPlaybackError ? error.status ?? null : null,
-          code: error instanceof ServerTtsPlaybackError ? error.code ?? null : null,
+          serverTtsAttempted: true,
+          status: fallbackServerStatus,
+          code: fallbackServerCode,
           playbackSource: shouldFallback ? "browser_fallback" : "server",
           error: error instanceof Error ? error.message : String(error),
         });
@@ -3065,10 +3084,11 @@ export default function ChatWidget({
     }
 
     console.info("[tts] playback", {
-      messageId: message.id,
+      ...buildTtsMessageDiagnostics(message),
       selectedVoice: voice.id,
-      status: null,
-      code: null,
+      serverTtsAttempted: SERVER_TTS_ENABLED,
+      status: fallbackServerStatus,
+      code: fallbackServerCode,
       playbackSource: "browser_fallback",
     });
     playBrowserSpeech(message, plainText);
@@ -3239,13 +3259,13 @@ export default function ChatWidget({
                 {msg.role === "assistant" && msg.kind !== "system_status" ? (
                   <div>
                     <div className="mb-3 flex items-center justify-end gap-1">
-                      {SERVER_TTS_ENABLED && speakingMessageId !== msg.id && (
+                      {SERVER_TTS_ENABLED && (
                         <select
                           value={serverTtsVoiceId}
                           onChange={(event) =>
                             setServerTtsVoiceId(event.target.value as ServerTtsVoiceOptionId)
                           }
-                          disabled={disabled || ttsGeneratingMessageId === msg.id}
+                          disabled={disabled || ttsGeneratingMessageId === msg.id || speakingMessageId === msg.id}
                           aria-label="Select voice"
                           title="Select voice"
                           className="min-h-9 max-w-[120px] rounded-xl border border-input bg-background px-2 py-1.5 text-[11px] font-medium text-foreground shadow-sm transition hover:bg-muted focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
