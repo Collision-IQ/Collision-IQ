@@ -33,7 +33,7 @@ export function buildExportResearchSections(
       : []),
     ...SUPPORT_CATEGORIES.flatMap((category) => {
       const bullets = formatCategoryBullets(snapshot, category).filter(isMeaningfulReportText);
-      return bullets.length > 0 ? [{ title: category, bullets }] : [];
+      return bullets.length > 0 ? [{ title: resolveCategoryTitle(snapshot, category), bullets }] : [];
     }),
     ...(options.includeInternalAudit
       ? [{
@@ -49,6 +49,24 @@ export function buildExportResearchSections(
         }]
       : []),
   ].filter((section) => section.bullets && section.bullets.length > 0);
+}
+
+function resolveCategoryTitle(
+  snapshot: ExportResearchSnapshot,
+  category: ExportResearchSupportCategory
+): string {
+  if (category !== "Verified Law") {
+    return category;
+  }
+
+  const lawSources = snapshot.sourcesAccepted.filter(
+    (source) => source.supportCategory === "Verified Law"
+  );
+  const hasJurisdictionRelevance = lawSources.some((source) =>
+    Boolean(source.jurisdiction?.trim())
+  );
+
+  return hasJurisdictionRelevance ? "Verified Law" : "Legal Support - Jurisdiction Not Established";
 }
 
 function formatCategoryBullets(
@@ -69,7 +87,11 @@ function formatCategoryBullets(
       `Source title: ${source.sourceTitle}.`,
       reference ? `Reference: ${reference}.` : null,
       `Retrieved: ${source.retrievalTimestamp}.`,
-      source.jurisdiction ? `Jurisdiction: ${source.jurisdiction}.` : null,
+      source.jurisdiction
+        ? `Jurisdiction: ${source.jurisdiction}.`
+        : category === "Verified Law"
+          ? "Jurisdiction relevance: Not established."
+          : null,
       source.effectiveDate ? `Effective date: ${source.effectiveDate}.` : null,
       `Confidence score: ${Math.round(source.confidenceScore * 100)}%.`,
       `Agent: ${source.agent}.`,
