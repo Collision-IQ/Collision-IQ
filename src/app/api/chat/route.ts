@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import type { ChatAnalysisOutput } from "@/lib/ai/contracts/chatAnalysisSchema";
 import type { DriveRetrievalResponse } from "@/lib/ai/contracts/driveRetrievalContract";
 import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
+import { JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT } from "@/lib/ai/jurisdictionalInsurancePrompt";
 import { buildAppraisalAwardEvaluatorInstruction } from "@/lib/ai/appraisalAwardEvaluator";
 import { buildAssistanceProfileInstruction } from "@/lib/ai/assistanceProfile";
 import {
@@ -237,6 +238,8 @@ Use bullets only when they genuinely improve comparison, negotiation, or rebutta
 Avoid rigid templates.
 
 ${NON_BIAS_ACCURACY_DIRECTIVE}
+
+${JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT}
 
 ${adasPolicy}
 

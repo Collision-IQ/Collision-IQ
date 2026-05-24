@@ -4,6 +4,7 @@ import { EVIDENCE_POLICY } from "@/lib/analysis/buildEvidenceCorpus";
 import { generateChatCompletion } from "@/lib/ai/generateChatCompletion";
 import { buildAssistanceProfileInstruction } from "@/lib/ai/assistanceProfile";
 import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
+import { JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT } from "@/lib/ai/jurisdictionalInsurancePrompt";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
 import { buildAppraisalAwardEvaluatorInstruction } from "@/lib/ai/appraisalAwardEvaluator";
 import {
@@ -336,6 +337,8 @@ You are Collision IQ, an expert collision analysis assistant.
 You are continuing an active case. Use the accumulated case evidence below before answering.
 
 ${NON_BIAS_ACCURACY_DIRECTIVE}
+
+${JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT}
 
 ${buildAssistanceProfileInstruction(assistanceProfile)}
 
