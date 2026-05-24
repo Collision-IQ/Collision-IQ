@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { ProductScreenshotFrame } from "@/components/technical-systems/ProductScreenshotFrame";
 import { TechnicalSystemCheckoutButton } from "@/components/technical-systems/TechnicalSystemCheckoutButton";
 
+export const dynamic = "force-dynamic";
+
 type SystemSlug = "shop-flow" | "parts-app" | "shop-hub";
 type SystemCheckoutPlan = "shop_flow" | "parts_app" | "shop_hub";
 
@@ -187,10 +189,6 @@ const SYSTEM_PAGES: Record<SystemSlug, SystemPage> = {
     ],
   },
 };
-
-export function generateStaticParams() {
-  return Object.keys(SYSTEM_PAGES).map((system) => ({ system }));
-}
 
 type PageProps = {
   params: Promise<{ system: string }>;
