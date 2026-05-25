@@ -14,8 +14,13 @@ const ELEVENLABS_OUTPUT_FORMAT =
   process.env.ELEVENLABS_OUTPUT_FORMAT?.trim() || "mp3_44100_128";
 
 const VOICES = {
-  voice_1: process.env.ELEVENLABS_VOICE_ID_1?.trim(),
-  voice_2: process.env.ELEVENLABS_VOICE_ID_2?.trim(),
+  voice_1:
+    process.env.ELEVENLABS_VOICE_ID_1?.trim() ||
+    process.env.ELEVENLABS_VOICE_ID?.trim(),
+
+  voice_2:
+    process.env.ELEVENLABS_VOICE_ID_2?.trim() ||
+    process.env.ELEVENLABS_VOICE_ID_SECOND?.trim(),
 } as const;
 
 type TtsVoiceSymbol = keyof typeof VOICES;
@@ -49,8 +54,10 @@ function jsonError(error: string, status: number, extra?: Record<string, unknown
 function getMissingEnv() {
   return [
     process.env.ELEVENLABS_API_KEY?.trim() ? null : "ELEVENLABS_API_KEY",
-    VOICES.voice_1 ? null : "ELEVENLABS_VOICE_ID_1",
-    VOICES.voice_2 ? null : "ELEVENLABS_VOICE_ID_2",
+    VOICES.voice_1 ? null : "ELEVENLABS_VOICE_ID_1 or ELEVENLABS_VOICE_ID",
+    VOICES.voice_2
+      ? null
+      : "ELEVENLABS_VOICE_ID_2 or ELEVENLABS_VOICE_ID_SECOND",
   ].filter((value): value is string => Boolean(value));
 }
 
