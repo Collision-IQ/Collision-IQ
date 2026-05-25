@@ -1411,12 +1411,12 @@ export function ChatbotWorkspacePage() {
 
       {chatBlocked && (
         <div
-          className="fixed inset-0 z-[80] bg-background/82 backdrop-blur-xl"
+          className="fixed inset-0 z-[80] overflow-y-auto bg-background/82 backdrop-blur-xl"
           role="dialog"
           aria-modal="true"
           aria-labelledby="chat-consent-title"
         >
-          <div className="flex min-h-full items-center justify-center p-6">
+          <div className="flex min-h-full items-center justify-center p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
             <div className="w-full max-w-2xl rounded-3xl border border-border bg-card/95 p-6 text-card-foreground shadow-[0_30px_90px_rgba(15,23,42,0.20)] dark:shadow-[0_30px_90px_rgba(0,0,0,0.6)] md:p-8">
               <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
                 Collision IQ Consent
