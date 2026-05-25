@@ -1,6 +1,7 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { hasClerkConfig } from "@/lib/auth/config";
+import { getOrCreateUser } from "@/lib/getOrCreateUser";
 import {
   getDefaultPlatformAdminEmail,
   isPlatformAdminEmail,
@@ -39,47 +40,6 @@ function getVerifiedClerkEmails(clerkUser: Awaited<ReturnType<typeof currentUser
   );
 }
 
-async function upsertAppUser(params: {
-  clerkUserId: string;
-  email: string | null;
-  firstName?: string | null;
-  lastName?: string | null;
-  imageUrl?: string | null;
-  isPlatformAdmin: boolean;
-}) {
-  try {
-    const user = await prisma.user.upsert({
-      where: {
-        clerkUserId: params.clerkUserId,
-      },
-      update: {
-        email: params.email,
-        firstName: params.firstName ?? null,
-        lastName: params.lastName ?? null,
-        imageUrl: params.imageUrl ?? null,
-        isPlatformAdmin: params.isPlatformAdmin,
-      },
-      create: {
-        clerkUserId: params.clerkUserId,
-        email: params.email,
-        firstName: params.firstName ?? null,
-        lastName: params.lastName ?? null,
-        imageUrl: params.imageUrl ?? null,
-        isPlatformAdmin: params.isPlatformAdmin,
-      },
-    });
-
-    return user;
-  } catch (err) {
-    console.error("[auth] upsertAppUser failed", {
-      clerkUserId: params.clerkUserId,
-      errorName: err instanceof Error ? err.name : typeof err,
-      errorMessage: err instanceof Error ? err.message : String(err),
-    });
-    throw err;
-  }
-}
-
 export async function requireCurrentUser() {
   if (!hasClerkConfig()) {
     if (!isDevelopment) {
@@ -93,13 +53,12 @@ export async function requireCurrentUser() {
       email: maskEmailForLog(fallbackEmail),
       isPlatformAdmin,
     });
-    const user = await upsertAppUser({
+    const user = await getOrCreateUser({
       clerkUserId: "local-dev-user",
       email: fallbackEmail || null,
       firstName: "Local",
       lastName: "Developer",
       imageUrl: null,
-      isPlatformAdmin,
     });
 
     return {
@@ -162,10 +121,17 @@ export async function requireCurrentUser() {
   }
 
   const primaryEmail =
-    clerkUser?.emailAddresses.find(
-      (emailAddress) => emailAddress.id === clerkUser?.primaryEmailAddressId
-    )?.emailAddress ?? clerkUser?.emailAddresses[0]?.emailAddress;
+    clerkUser?.primaryEmailAddress?.emailAddress ??
+    clerkUser?.emailAddresses[0]?.emailAddress;
   const normalizedEmail = normalizeEmail(primaryEmail) || null;
+  if (!state.userId || !normalizedEmail) {
+    console.warn("[auth] missing Clerk identity for user bootstrap", {
+      clerkUserIdPresent: Boolean(state.userId),
+      emailPresent: Boolean(normalizedEmail),
+    });
+    throw new UnauthorizedError("Missing authenticated user identity.");
+  }
+
   const verifiedEmails = getVerifiedClerkEmails(clerkUser);
   const adminCandidateEmails = verifiedEmails.length ? verifiedEmails : [normalizedEmail];
   const isPlatformAdmin = isPlatformAdminEmailList(adminCandidateEmails);
@@ -177,18 +143,17 @@ export async function requireCurrentUser() {
     verifiedEmails: verifiedEmails.map((email) => maskEmailForLog(email)),
     isPlatformAdmin,
   });
-  let user: Awaited<ReturnType<typeof upsertAppUser>>;
+  let user: Awaited<ReturnType<typeof getOrCreateUser>>;
   try {
-    user = await upsertAppUser({
+    user = await getOrCreateUser({
       clerkUserId: state.userId,
       email: normalizedEmail,
       firstName: clerkUser?.firstName ?? null,
       lastName: clerkUser?.lastName ?? null,
       imageUrl: clerkUser?.imageUrl ?? null,
-      isPlatformAdmin,
     });
   } catch (err) {
-    console.error("[auth] upsertAppUser failed", {
+    console.error("[auth] getOrCreateUser failed", {
       clerkUserId: state.userId,
       errorName: err instanceof Error ? err.name : typeof err,
       errorMessage: err instanceof Error ? err.message : String(err),
