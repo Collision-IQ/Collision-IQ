@@ -133,6 +133,12 @@ function normalizeExportComparisonText(value: string): string {
 
 function cleanProfessionalChatExportText(value: string): string {
   return cleanUserFacingPresentationText(value, { preserveMarkdown: true })
+    .replace(
+      /\bState confirmed:\s*\[REDACTED_INSURER\]\s*(?:[-=]>|\u2192|->)\s*Jurisdiction:\s*Pennsylvania\s*\(PA\)/gi,
+      "Jurisdiction: Pennsylvania (PA)"
+    )
+    .replace(/\bState confirmed:\s*\[REDACTED_INSURER\]\b/gi, "Jurisdiction: Pennsylvania (PA)")
+    .replace(/\bState confirmed:\s*Pennsylvania\s*\(PA\)/gi, "Jurisdiction: Pennsylvania (PA)")
     .replace(/\bNice try,\s*but no\.?\s*/gi, "")
     .replace(/\bThat trick gets old fast\.?\s*/gi, "")
     .replace(/\ba neat trick\b\.?\s*/gi, "")

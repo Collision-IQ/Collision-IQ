@@ -50,6 +50,9 @@ const OPENAI_RETRY_DELAY_MS = 400;
 const LEGAL_INFO_DISCLAIMER =
   "Informational support only — not legal advice. I'm not a lawyer, and any legal position should be reviewed by qualified counsel.";
 
+const PENNSYLVANIA_COUNSEL_REVIEW_FALLBACK =
+  "Counsel should review applicable Pennsylvania claim-handling and bad-faith law.";
+
 function limitText(text: string, max = 12000) {
   if (!text) return "";
   return text.length > max ? `${text.slice(0, max)}\n...[truncated]` : text;
@@ -751,6 +754,81 @@ function enforceModeResponseShape(text: string, mode: OutputMode): string {
   ].join("\n");
 }
 
+function countVerifiedLegalCitations(
+  retrieval: DriveRetrievalResponse | null | undefined,
+  jurisdiction: { stateCode?: string } | undefined
+): number {
+  if (!retrieval?.results.length) return 0;
+
+  const stateCode = jurisdiction?.stateCode?.trim().toUpperCase();
+  return retrieval.results.filter((result) => {
+    const isLegalResult =
+      result.sourceBucket === "pa_law" ||
+      result.documentClass === "state_law_pa" ||
+      result.metadata.sourceLane === "pa_law_lane";
+    const jurisdictionText = `${result.metadata.jurisdictionRelevance ?? ""} ${result.filename}`;
+    const jurisdictionMatches =
+      !stateCode ||
+      (stateCode === "PA" && /\b(PA|Pennsylvania)\b/i.test(jurisdictionText));
+
+    return isLegalResult && jurisdictionMatches && result.confidence !== "low";
+  }).length;
+}
+
+function containsNamedLegalCitation(value: string): boolean {
+  return (
+    /\u00a7|\u00c2\u00a7|P\.?\s*S\.?|Pa\.?\s*C\.?\s*S\.?|Fla\.?\s*Stat\.?|Insurance\s+Code|C\.R\.S\.|G\.L\.?\s+c\.|La\.?\s*R\.?\s*S\.?|RCW|WAC|Chapters?\s+\d{2,}/i.test(
+      value
+    ) ||
+    /\b(?:statute|statutory|code section|administrative code|regulation citation)\b/i.test(value)
+  );
+}
+
+function applyLegalCitationGate(params: {
+  text: string;
+  verifiedLegalCitationCount: number;
+  jurisdiction?: { stateCode?: string };
+  applies: boolean;
+}): string {
+  if (!params.applies || params.verifiedLegalCitationCount > 0) {
+    return params.text;
+  }
+
+  const stateCode = params.jurisdiction?.stateCode?.trim().toUpperCase();
+  const fallback =
+    stateCode === "PA" || !stateCode
+      ? PENNSYLVANIA_COUNSEL_REVIEW_FALLBACK
+      : "Counsel should review applicable claim-handling and bad-faith law in the confirmed jurisdiction.";
+  const lines = params.text.split("\n");
+  let insertedFallback = false;
+  const scrubbedLines = lines.map((line) => {
+    if (!containsNamedLegalCitation(line)) {
+      return line;
+    }
+
+    if (insertedFallback) {
+      return "";
+    }
+
+    insertedFallback = true;
+    return fallback;
+  });
+
+  if (!insertedFallback) {
+    scrubbedLines.push("", fallback);
+  }
+
+  return scrubbedLines
+    .join("\n")
+    .replace(new RegExp(`(?:${escapeRegExp(fallback)}\\s*){2,}`, "g"), fallback)
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export async function POST(req: Request) {
   let agentTrace: AgentRetrievalTrace | null = null;
 
@@ -1234,7 +1312,17 @@ export async function POST(req: Request) {
           retrievalContext,
         })
       : firstPassText;
-    const modeShapedOutput = enforceModeResponseShape(outputText, outputMode.mode);
+    const needsLegalDisclaimer = isLegalAdjacentNegotiationRequest(userMessage);
+    const verifiedLegalCitationCount = countVerifiedLegalCitations(
+      applicableRetrieval,
+      explicitJurisdiction ?? retrieval?.request.jurisdiction
+    );
+    const modeShapedOutput = applyLegalCitationGate({
+      text: enforceModeResponseShape(outputText, outputMode.mode),
+      verifiedLegalCitationCount,
+      jurisdiction: explicitJurisdiction ?? retrieval?.request.jurisdiction,
+      applies: needsLegalDisclaimer,
+    });
 
     console.info("[chat-attachments] analysis complete", {
       ownerUserId: user.id,
@@ -1242,8 +1330,6 @@ export async function POST(req: Request) {
       totalPdfPages: documents.reduce((sum, document) => sum + (document.pageCount ?? 0), 0),
       durationMs: Date.now() - requestStartedAt,
     });
-
-    const needsLegalDisclaimer = isLegalAdjacentNegotiationRequest(userMessage);
 
     const finalText = sanitizeUserFacingEvidenceText(redactExternalDocumentUrls(
       needsLegalDisclaimer
