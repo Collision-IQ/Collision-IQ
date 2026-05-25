@@ -8,6 +8,7 @@ const config: CapacitorConfig = {
     url: 'https://www.collision-iq.ai',
     cleartext: false,
     androidScheme: 'https',
+    allowNavigation: ['www.collision-iq.ai', 'collision-iq.ai'],
   },
   android: {
     allowMixedContent: false,
