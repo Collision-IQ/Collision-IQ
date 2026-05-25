@@ -71,9 +71,7 @@ const created = existingPrisma ? null : createPrismaClient()
 
 export const prisma = existingPrisma ?? created!.prisma
 
-if (process.env.NODE_ENV !== "production") {
-  installPrismaClient(prisma, existingInstanceId ?? created!.instanceId)
-}
+installPrismaClient(prisma, existingInstanceId ?? created!.instanceId)
 
 export function ensureSingleWorker(name: string) {
   globalForPrisma.backgroundTaskPromises ??= new Map()
