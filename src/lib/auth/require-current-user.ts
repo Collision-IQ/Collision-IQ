@@ -118,7 +118,40 @@ export async function requireCurrentUser() {
     throw new UnauthorizedError("No authenticated Clerk session was found for this request.");
   }
 
-  const clerkUser = await currentUser();
+  let clerkUser: Awaited<ReturnType<typeof currentUser>> = null;
+  let clerkUserFetchFailed = false;
+  try {
+    clerkUser = await currentUser();
+  } catch (err) {
+    clerkUserFetchFailed = true;
+    console.warn("[auth] currentUser API call failed", {
+      clerkUserId: state.userId,
+      errorName: err instanceof Error ? err.name : typeof err,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    // Fall back to existing DB record so returning users don't get a hard 500
+    const existingUser = await prisma.user.findUnique({
+      where: { clerkUserId: state.userId },
+    });
+    if (existingUser) {
+      console.info("[auth] currentUser fallback: using existing DB user", {
+        clerkUserId: state.userId,
+        hasEmail: Boolean(existingUser.email),
+        isPlatformAdmin: existingUser.isPlatformAdmin,
+      });
+      return {
+        user: existingUser,
+        clerkUserId: existingUser.clerkUserId,
+        orgId: state.orgId ?? null,
+        email: existingUser.email,
+        verifiedEmails: existingUser.email ? [existingUser.email] : [],
+        isPlatformAdmin: existingUser.isPlatformAdmin,
+      };
+    }
+    // New user with no DB record and currentUser() failed — re-throw so the caller sees the real error
+    throw err;
+  }
+
   const primaryEmail =
     clerkUser?.emailAddresses.find(
       (emailAddress) => emailAddress.id === clerkUser?.primaryEmailAddressId
@@ -129,6 +162,8 @@ export async function requireCurrentUser() {
   const isPlatformAdmin = isPlatformAdminEmailList(adminCandidateEmails);
   console.info("[auth] resolved clerk user", {
     clerkUserId: state.userId,
+    clerkUserNull: clerkUser === null,
+    clerkUserFetchFailed,
     email: maskEmailForLog(normalizedEmail),
     verifiedEmails: verifiedEmails.map((email) => maskEmailForLog(email)),
     isPlatformAdmin,

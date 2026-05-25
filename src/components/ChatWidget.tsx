@@ -2845,6 +2845,7 @@ export default function ChatWidget({
   const canReadAloud = true;
 
   const userBubble = "border border-[#b86a2d]/35 bg-card text-foreground";
+  const hideInitialGreetingOnMobile = isInitialOnlyMessages(messages);
 
   return (
     <div
@@ -2989,7 +2990,7 @@ export default function ChatWidget({
             return (
             <div
               key={msg.id}
-              className={`flex ${
+              className={`${hideInitialGreetingOnMobile && msg.id === INITIAL_MESSAGE.id ? "hidden sm:flex" : "flex"} ${
                 msg.role === "user"
                   ? "justify-end"
                   : msg.kind === "system_status"
