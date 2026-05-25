@@ -42,6 +42,7 @@ import {
   splitSpeechTextIntoChunks,
   toSpeechText,
 } from "@/components/chatWidget/speechUtils";
+import { bindAudioToAppLifecycle, isNative } from "@/lib/native";
 import {
   buildChatExportPayload,
   buildExportMessages,
@@ -680,6 +681,12 @@ export default function ChatWidget({
   const audioChunksRef = useRef<BlobPart[]>([]);
   const recordingMimeTypeRef = useRef("audio/webm");
   const chatSessionStorageKeyRef = useRef(chatSessionStorageKey);
+
+  useEffect(() => {
+    if (!isNative()) return;
+    const unbind = bindAudioToAppLifecycle(audioRef);
+    return unbind;
+  }, []);
 
   const updateReviewProgress = useCallback(
     (update: SetStateAction<ReviewProgress>) => {
