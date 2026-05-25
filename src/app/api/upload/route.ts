@@ -213,12 +213,16 @@ function buildUploadTelemetry(params: {
 }
 
 export async function POST(req: Request) {
+  let _debugStep = "requireCurrentUser";
   try {
+    // _debugStep tracks where a throw occurred for debug logging
     const { user, verifiedEmails, isPlatformAdmin } = await requireCurrentUser();
+    _debugStep = "subscriptionTier";
     const normalizedEmail = normalizeEmail(user.email);
     const isEnvAdmin = isPlatformAdminEmail(normalizedEmail);
     const effectiveIsAdmin = isPlatformAdmin || isEnvAdmin;
     const subscriptionTier = await getCurrentSubscriptionTierForUser(user.id);
+    _debugStep = "entitlements";
     const trialActive = resolveProductTrialActive({
       activeSubscriptionId: subscriptionTier ? "active-subscription" : null,
       activeSubscriptionStatus:
@@ -235,6 +239,7 @@ export async function POST(req: Request) {
     });
     const canUploadFiles = resolveCanUploadFiles(entitlements);
     const uploadLimits = resolveUploadPlanLimits(entitlements);
+    _debugStep = "formData";
     const isFreeUploadPlan = isFreeUploadEntitlement({
       ...entitlements,
       isPlatformAdmin: effectiveIsAdmin,
@@ -794,8 +799,15 @@ export async function POST(req: Request) {
       );
     }
 
-    console.error("UPLOAD ERROR:", error);
-    return NextResponse.json({ error: "SERVER_ERROR" }, { status: 500 });
+    const _errName = error instanceof Error ? error.name : typeof error;
+    const _errMsg = error instanceof Error ? error.message : String(error);
+    const _errStack = error instanceof Error ? (error.stack ?? "").slice(0, 800) : "";
+    console.error("[upload] fatal", { step: _debugStep, errorName: _errName, errorMessage: _errMsg, stack: _errStack });
+    return NextResponse.json({
+      error: "SERVER_ERROR",
+      _debug: `[${_debugStep}] ${_errName}: ${_errMsg}`,
+      _stack: _errStack,
+    }, { status: 500 });
   }
 }
 
