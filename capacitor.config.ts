@@ -5,9 +5,10 @@ const config: CapacitorConfig = {
   appName: 'Collision IQ',
   webDir: 'out',
   server: {
-    url: 'https://collision-academy-new.vercel.app',
+    url: 'https://www.collision-iq.ai',
     cleartext: false,
     androidScheme: 'https',
+    allowNavigation: ['www.collision-iq.ai', 'collision-iq.ai'],
   },
   android: {
     allowMixedContent: false,
