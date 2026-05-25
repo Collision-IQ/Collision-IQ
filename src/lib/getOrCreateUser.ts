@@ -14,28 +14,67 @@ type ClerkUserSeed = {
  * Does NOT create subscriptions automatically.
  */
 export async function getOrCreateUser(input: ClerkUserSeed) {
-  const normalizedEmail = input.email?.trim().toLowerCase() ?? null;
-  const platformAdmin = isPlatformAdminEmail(normalizedEmail);
+  const clerkUserId = input.clerkUserId?.trim();
+  const normalizedEmail = input.email?.trim().toLowerCase() || null;
 
-  return prisma.user.upsert({
-    where: { clerkUserId: input.clerkUserId },
-    update: {
+  if (!clerkUserId || !normalizedEmail) {
+    throw new Error("Missing authenticated user identity");
+  }
+
+  const platformAdmin = isPlatformAdminEmail(normalizedEmail);
+  const profileData = {
+    firstName: input.firstName ?? null,
+    lastName: input.lastName ?? null,
+    imageUrl: input.imageUrl ?? null,
+    isPlatformAdmin: platformAdmin,
+  };
+
+  const existingByClerkId = await prisma.user.findUnique({
+    where: { clerkUserId },
+    include: { subscriptions: true },
+  });
+
+  if (existingByClerkId) {
+    const emailOwner =
+      existingByClerkId.email === normalizedEmail
+        ? null
+        : await prisma.user.findUnique({ where: { email: normalizedEmail } });
+
+    return prisma.user.update({
+      where: { id: existingByClerkId.id },
+      data: {
+        ...profileData,
+        ...(emailOwner && emailOwner.id !== existingByClerkId.id
+          ? {}
+          : { email: normalizedEmail }),
+      },
+      include: { subscriptions: true },
+    });
+  }
+
+  const existingByEmail = await prisma.user.findUnique({
+    where: { email: normalizedEmail },
+    include: { subscriptions: true },
+  });
+
+  if (existingByEmail) {
+    return prisma.user.update({
+      where: { id: existingByEmail.id },
+      data: {
+        clerkUserId,
+        email: normalizedEmail,
+        ...profileData,
+      },
+      include: { subscriptions: true },
+    });
+  }
+
+  return prisma.user.create({
+    data: {
+      clerkUserId,
       email: normalizedEmail,
-      firstName: input.firstName ?? undefined,
-      lastName: input.lastName ?? undefined,
-      imageUrl: input.imageUrl ?? undefined,
-      isPlatformAdmin: platformAdmin,
+      ...profileData,
     },
-    create: {
-      clerkUserId: input.clerkUserId,
-      email: normalizedEmail,
-      firstName: input.firstName ?? null,
-      lastName: input.lastName ?? null,
-      imageUrl: input.imageUrl ?? null,
-      isPlatformAdmin: platformAdmin,
-    },
-    include: {
-      subscriptions: true,
-    },
+    include: { subscriptions: true },
   });
 }
