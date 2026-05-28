@@ -134,3 +134,5 @@ collision-iq-sync-*.json
 google-sa*.json
 google-sa*.b64
 collision-iq-sync-*.json
+android/*.keystore
+android/*.jks

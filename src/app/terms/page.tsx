@@ -262,6 +262,10 @@ export default function TermsPage() {
             Privacy Policy
           </Link>
           <span className="opacity-30">•</span>
+          <Link href="/delete-account" className="hover:text-white transition">
+            Account &amp; Data Deletion
+          </Link>
+          <span className="opacity-30">•</span>
           <Link href="/" className="hover:text-white transition">
             Collision IQ
           </Link>

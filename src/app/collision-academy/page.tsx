@@ -206,6 +206,9 @@ export default function CollisionAcademyPage() {
             <Link href="/privacy" className="transition hover:text-white">
               Privacy
             </Link>
+            <Link href="/delete-account" className="transition hover:text-white">
+              Account &amp; Data Deletion
+            </Link>
             <Link href="/" className="transition hover:text-white">
               Collision IQ
             </Link>
