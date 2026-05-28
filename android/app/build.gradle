@@ -1,5 +1,26 @@
 apply plugin: 'com.android.application'
 
+def ciqSecret = { String name ->
+    def value = project.findProperty(name)
+    if (value == null || value.toString().trim().isEmpty()) {
+        value = System.getenv(name)
+    }
+    return value == null ? null : value.toString().trim()
+}
+
+def ciqReleaseStorePassword = ciqSecret("CIQ_RELEASE_STORE_PASSWORD")
+def ciqReleaseKeyPassword = ciqSecret("CIQ_RELEASE_KEY_PASSWORD")
+def ciqReleaseKeyAlias = ciqSecret("CIQ_RELEASE_KEY_ALIAS") ?: "collisioniq"
+
+// Keystore lives at android/collisioniq-release.keystore.
+// app/build.gradle is inside android/app, so use rootProject.file(...)
+def ciqReleaseStoreFile = rootProject.file("collisioniq-release.keystore")
+
+def ciqHasReleaseSigning =
+        ciqReleaseStoreFile.exists() &&
+        ciqReleaseStorePassword &&
+        ciqReleaseKeyPassword
+
 android {
     namespace "com.collisionacademy.collisioniq"
     compileSdk rootProject.ext.compileSdkVersion
@@ -18,18 +39,62 @@ android {
     }
     signingConfigs {
         release {
-            storeFile file("../collisioniq-release.keystore")
-            storePassword "090402"
-            keyAlias "collisioniq"
-            keyPassword "090402"
+            storeFile ciqReleaseStoreFile
+            keyAlias ciqReleaseKeyAlias
+
+            if (ciqReleaseStorePassword) {
+                storePassword ciqReleaseStorePassword
+            }
+
+            if (ciqReleaseKeyPassword) {
+                keyPassword ciqReleaseKeyPassword
+            }
         }
     }
     buildTypes {
         release {
-            signingConfig signingConfigs.release
+            if (ciqHasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    def releaseBuildRequested = graph.allTasks.any { task ->
+        def name = task.name.toLowerCase()
+        def path = task.path.toLowerCase()
+
+        path.startsWith(":app:") &&
+                name.contains("release") &&
+                (
+                        name.contains("assemble") ||
+                        name.contains("bundle") ||
+                        name.contains("package") ||
+                        name.contains("sign")
+                )
+    }
+
+    if (releaseBuildRequested && !ciqHasReleaseSigning) {
+        def missing = []
+
+        if (!ciqReleaseStoreFile.exists()) {
+            missing << "android/collisioniq-release.keystore"
+        }
+
+        if (!ciqReleaseStorePassword) {
+            missing << "CIQ_RELEASE_STORE_PASSWORD"
+        }
+
+        if (!ciqReleaseKeyPassword) {
+            missing << "CIQ_RELEASE_KEY_PASSWORD"
+        }
+
+        throw new GradleException(
+                "Missing release signing credentials. Set ${missing.join(', ')} in local Gradle properties or environment variables."
+        )
     }
 }
 
