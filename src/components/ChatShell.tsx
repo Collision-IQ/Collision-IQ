@@ -198,7 +198,7 @@ export default function ChatShell({
       <div className="relative z-10 min-h-0 w-full max-w-none flex-1 overflow-hidden px-1.5 py-1.5 sm:px-2 sm:py-2 md:px-4 md:py-3">
         <div className="grid h-full min-h-0 grid-cols-1 gap-2 sm:gap-3 lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_410px]">
           <div className="flex h-full min-h-0 min-w-0 flex-col border border-border bg-card">
-            <div className="flex min-h-[45px] shrink-0 items-center justify-between gap-4 border-b border-border px-3 py-2">
+            <div className="hidden min-h-[45px] shrink-0 items-center justify-between gap-4 border-b border-border px-3 py-2 lg:flex">
               <div className="inline-flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#a35d26] dark:text-[#c57934]">
                 <Image
                   src="/iq/iq-favicon.png"

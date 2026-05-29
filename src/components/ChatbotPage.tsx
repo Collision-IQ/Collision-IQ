@@ -1012,7 +1012,7 @@ export function ChatbotWorkspacePage() {
         planLabel={trialBadgeLabel}
         center={
           <div className="relative h-full min-h-0 w-full">
-            <div className={`grid h-full min-h-0 w-full gap-2 pt-2 sm:gap-3 sm:pt-3 ${workspaceRowsClass}`}>
+            <div className={`grid h-full min-h-0 w-full gap-1 pt-1 sm:gap-3 sm:pt-3 ${workspaceRowsClass}`}>
               {hasStructuredAnalysis && (
                 <div
                   className={
@@ -1257,9 +1257,9 @@ export function ChatbotWorkspacePage() {
                 )}
                 <div className={isChatActive ? "relative h-full min-h-0 w-full flex-1" : "hidden"}>
                       <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden border border-border bg-background">
-                        <div className="flex min-h-[44px] shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-2.5 py-1.5 lg:min-h-[58px] lg:gap-4 lg:px-3 lg:py-2">
+                        <div className="flex min-h-9 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-2.5 py-1 lg:min-h-[58px] lg:gap-4 lg:px-3 lg:py-2">
                           <div>
-                          <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                          <div className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground lg:text-[10px]">
                             Command Surface
                           </div>
                           <div className="mt-0.5 hidden text-xs text-muted-foreground lg:block">
@@ -1271,7 +1271,7 @@ export function ChatbotWorkspacePage() {
                               <button
                                 type="button"
                                 onClick={openReviewPane}
-                                className="rounded-md border border-border bg-muted px-2.5 py-1.5 text-xs font-medium text-foreground transition hover:bg-muted/70 lg:hidden"
+                                className="rounded-md border border-border bg-muted px-2.5 py-1 text-[11px] font-medium text-foreground transition hover:bg-muted/70 lg:hidden"
                               >
                                 Open review
                               </button>

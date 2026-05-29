@@ -766,6 +766,9 @@ export default function ChatWidget({
     selectedUploadNames.length > 20
       ? `${selectedUploadNames.length} files selected`
       : selectedUploadNames.join(", ");
+  const hasUploadStatus = selectedUploadNames.length > 0 || uploadUiState !== "idle";
+  const showMobileUploadStatus =
+    uploadUiState === "uploading" || uploadUiState === "error";
   const previousAttachmentCountRef = useRef(0);
   useEffect(() => {
     const previousCount = previousAttachmentCountRef.current;
@@ -774,6 +777,9 @@ export default function ChatWidget({
     }
     previousAttachmentCountRef.current = attachments.length;
   }, [attachments.length]);
+  useEffect(() => {
+    setMobileAttachmentsOpen(false);
+  }, [loading]);
   useEffect(() => {
     if (viewerAccess) {
       return;
@@ -1056,6 +1062,9 @@ export default function ChatWidget({
 
   function setWorkspaceData(data: WorkspaceData | null) {
     workspaceDataRef.current = data;
+    if (data) {
+      setMobileAttachmentsOpen(false);
+    }
     onWorkspaceDataChange?.(data);
   }
 
@@ -1523,6 +1532,7 @@ export default function ChatWidget({
     onUserPromptSent?.();
     onChatEngagement?.();
     stopSpeaking();
+    setMobileAttachmentsOpen(false);
     setLoading(true);
     shouldAutoScrollRef.current = true;
 
@@ -3287,14 +3297,14 @@ export default function ChatWidget({
                 </div>
 
                 {(messages.length > 1 || hasAnyAttachment) && (
-                  <div className="mt-2 lg:hidden">
+                  <div className="mt-2 flex justify-end lg:hidden">
                     <button
                       type="button"
                       onClick={handleDownloadRedactedChat}
                       disabled={disabled || loading || isTranscribing || isExportingChat}
-                      className="min-h-10 w-full rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                      className="min-h-9 rounded-md border border-border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      {isExportingChat ? "Preparing..." : "Download Chat"}
+                      {isExportingChat ? "Preparing..." : "Download"}
                     </button>
                   </div>
                 )}
@@ -3312,9 +3322,23 @@ export default function ChatWidget({
                         : "Recording... click the mic again to stop."}
                   </div>
                 )}
-                {(selectedUploadNames.length > 0 || uploadUiState !== "idle") && (
+                {showMobileUploadStatus && (
                   <div
-                    className={`mt-3 px-1 text-xs ${
+                    className={`mt-2 px-1 text-xs lg:hidden ${
+                      uploadUiState === "error"
+                        ? "text-red-500"
+                        : "text-muted-foreground"
+                    }`}
+                  >
+                    <span className="font-mono uppercase tracking-[0.08em]">
+                      {uploadUiState}
+                    </span>
+                    {uploadUiMessage ? ` - ${uploadUiMessage}` : ""}
+                  </div>
+                )}
+                {hasUploadStatus && (
+                  <div
+                    className={`mt-3 hidden px-1 text-xs lg:block ${
                       uploadUiState === "error"
                         ? "text-red-500"
                         : uploadUiState === "uploaded"
