@@ -7,6 +7,9 @@ export const ADMIN_UPLOAD_BATCH_FILE_LIMIT = 50;
 export const UNLIMITED_UPLOAD_BATCH_FILE_LIMIT = Number.MAX_SAFE_INTEGER;
 export const FREE_UPLOAD_BATCH_LIMIT_MESSAGE =
   "Free accounts can upload 1 file per analysis. Please remove extra files and try again.";
+export const VIDEO_UPLOAD_HINT = "Short videos up to 5 seconds are accepted for damage documentation.";
+export const VIDEO_UPLOAD_ACCEPT =
+  ".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm";
 
 export const ALLOWED_UPLOAD_EXTENSIONS = new Set([
   ".pdf",
@@ -17,6 +20,9 @@ export const ALLOWED_UPLOAD_EXTENSIONS = new Set([
   ".heic",
   ".txt",
   ".docx",
+  ".mp4",
+  ".mov",
+  ".webm",
 ]);
 
 export const CCC_UPLOAD_EXTENSIONS = new Set([
@@ -56,6 +62,8 @@ export const SCREENSHOT_IMAGE_EXTENSIONS = new Set([
   ".webp",
   ".heic",
 ]);
+
+export const VIDEO_UPLOAD_EXTENSIONS = new Set([".mp4", ".mov", ".webm"]);
 
 export type UploadPlanLimits = {
   plan: "free" | "starter" | "trial" | "pro" | "admin";

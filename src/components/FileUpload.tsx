@@ -8,11 +8,15 @@ import type { UploadedDocument } from "@/lib/sessionStore";
 import {
   formatBytes,
   MAX_UPLOAD_FILE_BYTES,
+  validateSelectedVideoDurations,
 } from "@/components/chatWidget/attachmentUtils";
 import {
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
+  VIDEO_UPLOAD_ACCEPT,
+  VIDEO_UPLOAD_HINT,
 } from "@/lib/uploadSafety/uploadLimits";
+import { VIDEO_MAX_BYTES } from "@/lib/uploadSafety/videoSafety";
 
 type Props = {
   onUploadComplete: (docs: UploadedDocument[]) => void;
@@ -67,7 +71,7 @@ export default function FileUpload({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploaded, setUploaded] = useState<string[]>([]);
-  const [uploadHint, setUploadHint] = useState("You can upload PDFs, photos, screenshots, or ZIP files.");
+  const [uploadHint, setUploadHint] = useState(`You can upload PDFs, photos, screenshots, ZIP files, or short videos. ${VIDEO_UPLOAD_HINT}`);
   const [maxUploadBatchFiles, setMaxUploadBatchFiles] = useState(
     STARTER_UPLOAD_LIMITS.maxFilesPerReview
   );
@@ -104,13 +108,13 @@ export default function FileUpload({
         setUploadPlanName(uploadLimits.plan);
 
         if (uploadLimits.plan === "admin") {
-          setUploadHint(`You can upload PDFs, photos, screenshots, or ZIP files. ${getUploadBatchLimitMessage(uploadLimits)} Admin target: 50 MB per file; temporary platform upload limit: 20 MB.`);
+          setUploadHint(`You can upload PDFs, photos, screenshots, ZIP files, or short videos. ${getUploadBatchLimitMessage(uploadLimits)} Admin target: 50 MB per file; videos: 25 MB and 5 seconds max.`);
         } else if (uploadLimits.plan === "pro" || uploadLimits.plan === "trial") {
-          setUploadHint(`You can upload PDFs, photos, screenshots, or ZIP files. ${getUploadBatchLimitMessage(uploadLimits)} Pro trial/Pro target: 30 MB; temporary platform upload limit: 20 MB.`);
+          setUploadHint(`You can upload PDFs, photos, screenshots, ZIP files, or short videos. ${getUploadBatchLimitMessage(uploadLimits)} Pro trial/Pro target: 30 MB; videos: 25 MB and 5 seconds max.`);
         } else if (uploadLimits.plan === "free") {
-          setUploadHint(`Free accounts can upload PDFs or photos. ${getUploadBatchLimitMessage(uploadLimits)} Monthly limit: 5 uploads.`);
+          setUploadHint(`Free accounts can upload PDFs, photos, or short videos. ${getUploadBatchLimitMessage(uploadLimits)} Monthly limit: 5 uploads.`);
         } else {
-          setUploadHint(`You can upload PDFs, photos, screenshots, or ZIP files. ${getUploadBatchLimitMessage(uploadLimits)} Starter: 10 MB; ZIP files are not included.`);
+          setUploadHint(`You can upload PDFs, photos, screenshots, ZIP files, or short videos. ${getUploadBatchLimitMessage(uploadLimits)} Starter: 10 MB; ZIP files are not included.`);
         }
         setUploadLimitsLoaded(true);
       } catch {
@@ -156,20 +160,36 @@ export default function FileUpload({
         setUploadStage("extracting_zip");
       }
 
+      const videoFailures = await validateSelectedVideoDurations(
+        selectedFiles.slice(0, maxUploadBatchFiles)
+      );
+      const videoRejectedNames = new Set(videoFailures.map((failure) => failure.filename));
       const acceptedFiles = selectedFiles
         .slice(0, maxUploadBatchFiles)
-        .filter((file) => file.size <= MAX_UPLOAD_FILE_BYTES);
+        .filter((file) => {
+          const isVideo = /\.(?:mp4|mov|webm)$/i.test(file.name) || file.type.startsWith("video/");
+          const maxFileBytes = isVideo ? Math.min(MAX_UPLOAD_FILE_BYTES, VIDEO_MAX_BYTES) : MAX_UPLOAD_FILE_BYTES;
+          return file.size <= maxFileBytes && !videoRejectedNames.has(file.name);
+        });
       const failures = [
         ...selectedFiles.slice(maxUploadBatchFiles).map(
           (file) => `${file.name}: ${getUploadBatchLimitMessage({ maxFilesPerReview: maxUploadBatchFiles, plan: uploadPlanName })}`
         ),
         ...selectedFiles
           .slice(0, maxUploadBatchFiles)
-          .filter((file) => file.size > MAX_UPLOAD_FILE_BYTES)
+          .filter((file) => {
+            const isVideo = /\.(?:mp4|mov|webm)$/i.test(file.name) || file.type.startsWith("video/");
+            const maxFileBytes = isVideo ? Math.min(MAX_UPLOAD_FILE_BYTES, VIDEO_MAX_BYTES) : MAX_UPLOAD_FILE_BYTES;
+            return file.size > maxFileBytes;
+          })
           .map(
-            (file) =>
-              `${file.name}: ${formatBytes(file.size)} exceeds ${formatBytes(MAX_UPLOAD_FILE_BYTES)}.`
+            (file) => {
+              const isVideo = /\.(?:mp4|mov|webm)$/i.test(file.name) || file.type.startsWith("video/");
+              const maxFileBytes = isVideo ? Math.min(MAX_UPLOAD_FILE_BYTES, VIDEO_MAX_BYTES) : MAX_UPLOAD_FILE_BYTES;
+              return `${file.name}: ${formatBytes(file.size)} exceeds ${formatBytes(maxFileBytes)}.`;
+            }
           ),
+        ...videoFailures.map((failure) => `${failure.filename}: ${failure.reason}`),
       ];
 
       const docs: UploadedDocument[] = [];
@@ -307,6 +327,7 @@ export default function FileUpload({
         className="hidden"
         disabled={uploadDisabled}
         onChange={(e) => void uploadFiles(e.target.files)}
+        accept={`.pdf,image/*,application/zip,application/x-zip-compressed,.zip,${VIDEO_UPLOAD_ACCEPT}`}
       />
 
       <div

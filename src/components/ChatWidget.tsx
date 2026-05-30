@@ -32,8 +32,10 @@ import {
   formatBytes,
   formatAttachmentKind,
   isLikelyImageFile,
+  isLikelyVideoFile,
   MAX_UPLOAD_FILE_BYTES,
   summarizeAttachmentStats,
+  validateSelectedVideoDurations,
 } from "@/components/chatWidget/attachmentUtils";
 import {
   formatAssistantDisplayMessage,
@@ -61,7 +63,9 @@ import { buildNextBatchPrompt, buildUploadBatchGuidance } from "@/lib/uploadBatc
 import {
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
+  VIDEO_UPLOAD_ACCEPT,
 } from "@/lib/uploadSafety/uploadLimits";
+import { VIDEO_MAX_BYTES } from "@/lib/uploadSafety/videoSafety";
 import {
   buildReviewCompletenessMessage,
   type ExcludedFromReviewReason,
@@ -84,7 +88,7 @@ interface Attachment {
   source: "file" | "camera";
   uploadSource?: "direct_upload" | "zip_extraction";
   sourceArchive?: string;
-  classification?: "image" | "pdf" | "text" | "docx";
+  classification?: "image" | "video" | "pdf" | "text" | "docx";
   hasVision: boolean;
   usedInAnalysis?: boolean;
 }
@@ -108,7 +112,7 @@ type UploadSuccessResult = {
   sizeBytes?: number;
   source?: "direct_upload" | "zip_extraction";
   sourceArchive?: string;
-  classification?: "image" | "pdf" | "text" | "docx";
+  classification?: "image" | "video" | "pdf" | "text" | "docx";
   text?: string;
   imageDataUrl?: string;
   pageCount?: number;
@@ -543,8 +547,11 @@ function isSupportedDropUploadFile(file: File) {
     file.type === "application/pdf" ||
     file.type === "application/zip" ||
     file.type === "application/x-zip-compressed" ||
+    file.type === "video/mp4" ||
+    file.type === "video/quicktime" ||
+    file.type === "video/webm" ||
     file.type.startsWith("image/") ||
-    /\.(pdf|jpe?g|png|webp|heic|zip)$/i.test(name)
+    /\.(pdf|jpe?g|png|webp|heic|zip|mp4|mov|webm)$/i.test(name)
   );
 }
 
@@ -1338,7 +1345,7 @@ export default function ChatWidget({
     void startRecording();
   }
 
-  function prepareFilesForUpload(fileList: FileList | File[] | null, source: "file" | "camera") {
+  async function prepareFilesForUpload(fileList: FileList | File[] | null, source: "file" | "camera") {
     const selectedFiles = Array.from(fileList ?? []);
     const rejectedFiles: UploadFailureResult[] = [];
 
@@ -1359,7 +1366,7 @@ export default function ChatWidget({
       if (!isSupportedDropUploadFile(file)) {
         rejectedFiles.push({
           filename: file.name,
-          reason: "Only PDF, image, and ZIP archive uploads are supported here.",
+          reason: "Only PDF, image, short video, and ZIP archive uploads are supported here.",
           code: "UNSUPPORTED_EXTENSION",
         });
         return false;
@@ -1374,29 +1381,43 @@ export default function ChatWidget({
         return false;
       }
 
-      if (file.size <= MAX_UPLOAD_FILE_BYTES) {
+      const maxFileBytes = isLikelyVideoFile(file)
+        ? Math.min(MAX_UPLOAD_FILE_BYTES, VIDEO_MAX_BYTES)
+        : MAX_UPLOAD_FILE_BYTES;
+
+      if (file.size <= maxFileBytes) {
         return true;
       }
 
       rejectedFiles.push({
         filename: file.name,
-        reason: `File is ${formatBytes(file.size)}. Max size is ${formatBytes(MAX_UPLOAD_FILE_BYTES)}.`,
+        reason: `File is ${formatBytes(file.size)}. Max size is ${formatBytes(maxFileBytes)}.`,
         code: "FILE_TOO_LARGE",
       });
       return false;
     });
 
+    const videoFailures = await validateSelectedVideoDurations(acceptedFiles);
+    if (videoFailures.length) {
+      for (const failure of videoFailures) {
+        rejectedFiles.push(failure);
+      }
+    }
+
+    const videoRejectedNames = new Set(videoFailures.map((failure) => failure.filename));
+    const durationValidatedFiles = acceptedFiles.filter((file) => !videoRejectedNames.has(file.name));
+
     if (rejectedFiles.length) {
       console.info("[attachments] files rejected before upload", {
         source,
         selectedCount: selectedFiles.length,
-        acceptedCount: acceptedFiles.length,
+        acceptedCount: durationValidatedFiles.length,
         rejectedFiles,
       });
       upsertSystemStatusMessage(buildUploadFailureStatus(rejectedFiles));
     }
 
-    return { acceptedFiles, rejectedFiles };
+    return { acceptedFiles: durationValidatedFiles, rejectedFiles };
   }
 
   function dismissOpeningDisclaimer() {
@@ -2264,7 +2285,7 @@ export default function ChatWidget({
       typeof upload?.pageCount === "number" ? upload.pageCount : undefined;
     const hasVision: boolean = Boolean(upload?.hasVision) && mime.startsWith("image/");
     const previewUrl =
-      returnedUploads.length === 1 && (mime === "application/pdf" || isLikelyImageFile(file))
+      returnedUploads.length === 1 && (mime === "application/pdf" || isLikelyImageFile(file) || isLikelyVideoFile(file))
         ? URL.createObjectURL(file)
         : undefined;
 
@@ -2407,7 +2428,7 @@ export default function ChatWidget({
         `Uploading ${selectedFiles.length} ${selectedFiles.length === 1 ? "file" : "files"}...`
       );
 
-      const { acceptedFiles, rejectedFiles } = prepareFilesForUpload(fileList, "file");
+      const { acceptedFiles, rejectedFiles } = await prepareFilesForUpload(fileList, "file");
       if (!acceptedFiles.length) {
         if (rejectedFiles.length) {
           upsertSystemStatusMessage(buildUploadFailureStatus(rejectedFiles));
@@ -2504,7 +2525,7 @@ export default function ChatWidget({
         `Uploading ${selectedFiles.length} ${selectedFiles.length === 1 ? "photo" : "photos"}...`
       );
 
-      const { acceptedFiles, rejectedFiles } = prepareFilesForUpload(fileList, "camera");
+      const { acceptedFiles, rejectedFiles } = await prepareFilesForUpload(fileList, "camera");
       if (!acceptedFiles.length) {
         if (rejectedFiles.length) {
           upsertSystemStatusMessage(buildUploadFailureStatus(rejectedFiles));
@@ -3168,10 +3189,10 @@ export default function ChatWidget({
                 type="file"
                 ref={fileInputRef}
                 className="hidden"
-                accept=".pdf,image/*,application/zip,application/x-zip-compressed,.zip"
+                accept={`.pdf,image/*,application/zip,application/x-zip-compressed,.zip,${VIDEO_UPLOAD_ACCEPT}`}
                 multiple
                 disabled={disabled}
-                title="Attach PDF, image, or ZIP archive"
+                title="Attach PDF, image, short video, or ZIP archive"
                 onChange={(e) => handleFilesSelected(e.target.files)}
               />
 
@@ -3191,7 +3212,7 @@ export default function ChatWidget({
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled}
                 className="order-2 min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none"
-                aria-label="Attach PDF, image, or ZIP archive"
+                aria-label="Attach PDF, image, short video, or ZIP archive"
               >
                 <Paperclip size={20} />
               </button>

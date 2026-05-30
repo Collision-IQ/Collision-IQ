@@ -39,7 +39,12 @@ import {
   resolveUploadPlanLimits,
 } from "@/lib/uploadSafety/uploadLimits";
 import {
+  isVideoExtension,
+  VIDEO_MAX_BYTES,
+} from "@/lib/uploadSafety/videoSafety";
+import {
   getZipMaxBytes,
+  getUploadExtension,
   isZipUpload,
   prepareUploadFile,
   type PreparedUploadFile,
@@ -475,14 +480,19 @@ export async function POST(req: Request) {
       }
 
       const isZip = isZipUpload(file);
-      const maxFileBytes = isZip ? getZipMaxBytes() : uploadLimits.maxUploadBytes;
+      const isVideo = isVideoExtension(getUploadExtension(file.name));
+      const maxFileBytes = isZip
+        ? getZipMaxBytes()
+        : isVideo
+          ? Math.min(uploadLimits.maxUploadBytes, VIDEO_MAX_BYTES)
+          : uploadLimits.maxUploadBytes;
 
       if (file.size > maxFileBytes) {
         failedUploads.push({
           filename: file.name,
           reason: isZip
             ? `ZIP archive exceeds ${formatUploadLimitBytes(getZipMaxBytes())}.`
-            : `File exceeds ${formatUploadLimitBytes(uploadLimits.maxUploadBytes)} limit (${formatUploadLimitBytes(file.size)}).`,
+            : `File exceeds ${formatUploadLimitBytes(maxFileBytes)} limit (${formatUploadLimitBytes(file.size)}).`,
           code: isZip ? "ZIP_TOO_LARGE" : "FILE_TOO_LARGE",
         });
         console.info("[upload] file rejected", {
@@ -507,7 +517,7 @@ export async function POST(req: Request) {
           code: "RUNTIME_BODY_LIMIT_EXCEEDED",
           sizeBytes: file.size,
           runtimeMaxFileBytes: runtimeMaxUploadBytes,
-          planMaxFileBytes: uploadLimits.maxUploadBytes,
+          planMaxFileBytes: maxFileBytes,
           ownerUserId: user.id,
         });
         continue;
@@ -780,6 +790,7 @@ export async function POST(req: Request) {
         sha256: upload.sha256,
         text: upload.text,
         pageCount: upload.pageCount,
+        imageDataUrl: upload.imageDataUrl,
         attachmentId: upload.attachmentId,
       })),
     };
@@ -885,7 +896,7 @@ async function processPreparedUpload(params: {
     text: stored.text,
     imageDataUrl: stored.imageDataUrl,
     pageCount: stored.pageCount,
-    hasVision: Boolean(stored.imageDataUrl),
+    hasVision: params.file.classification === "image" && Boolean(stored.imageDataUrl),
     caseContinuity,
   };
 }

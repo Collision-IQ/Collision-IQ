@@ -9,6 +9,7 @@ import {
   FileText,
   Image as ImageIcon,
   RotateCcw,
+  Video,
   X,
   ZoomIn,
   ZoomOut,
@@ -80,6 +81,7 @@ export default function AttachmentPreviewModal({
     if (!attachment) return "text";
     if (attachment.mime === "application/pdf") return "pdf";
     if (attachment.mime.startsWith("image/")) return "image";
+    if (attachment.mime.startsWith("video/")) return "video";
     return "text";
   }, [attachment]);
 
@@ -243,6 +245,23 @@ export default function AttachmentPreviewModal({
                     body="This upload does not include an image preview, but it remains attached for chat and analysis."
                   />
                 )
+              ) : previewKind === "video" ? (
+                attachment.previewUrl ? (
+                  <div className="flex h-full min-h-0 items-center justify-center p-4">
+                    <video
+                      src={attachment.previewUrl}
+                      controls
+                      preload="metadata"
+                      className="max-h-full max-w-full rounded-xl border border-white/10 bg-black shadow-xl"
+                    />
+                  </div>
+                ) : (
+                  <EmptyPreviewState
+                    icon={<Video size={28} />}
+                    title="Video preview unavailable"
+                    body="This short video is attached as damage documentation. Still images remain preferred for direct AI visual analysis."
+                  />
+                )
               ) : (
                 <div className="h-full overflow-auto p-6">
                   <TextPreview paragraphs={structuredTextPreview} />
@@ -372,6 +391,7 @@ function EmptyPreviewState({
 function formatMimeLabel(mime: string): string {
   if (mime === "application/pdf") return "PDF";
   if (mime.startsWith("image/")) return mime.replace("image/", "").toUpperCase();
+  if (mime.startsWith("video/")) return mime.replace("video/", "").toUpperCase();
   if (mime.startsWith("text/")) return "Text";
   return mime || "Unknown";
 }

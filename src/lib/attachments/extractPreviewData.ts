@@ -22,6 +22,12 @@ export async function extractPreviewDataFromBuffer(params: {
     };
   }
 
+  if (mimeType.startsWith("video/")) {
+    return {
+      text: `[[Short video accepted for damage documentation: ${params.filename || "uploaded video"}. Video files are stored as evidence; still images remain preferred for direct AI visual analysis.]]`,
+    };
+  }
+
   if (mimeType === "application/pdf") {
     const result = await pdfParse(params.buffer);
     return {
