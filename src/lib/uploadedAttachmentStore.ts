@@ -200,6 +200,7 @@ export async function saveUploadedAttachmentWithDelegate(
 function isUploadClassification(value: unknown): value is UploadClassification {
   return (
     value === "image" ||
+    value === "video" ||
     value === "pdf" ||
     value === "text" ||
     value === "docx" ||

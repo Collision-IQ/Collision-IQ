@@ -11,9 +11,16 @@ import {
   BLOCKED_UPLOAD_EXTENSIONS,
   CCC_UPLOAD_EXTENSIONS,
   SCREENSHOT_IMAGE_EXTENSIONS,
+  VIDEO_UPLOAD_EXTENSIONS,
   formatUploadLimitBytes,
   type UploadPlanLimits,
 } from "@/lib/uploadSafety/uploadLimits";
+import {
+  isSupportedVideoUpload,
+  isVideoExtension,
+  validateVideoDurationFromBuffer,
+  VIDEO_DURATION_LIMIT_MESSAGE,
+} from "@/lib/uploadSafety/videoSafety";
 
 export type PreparedUploadFile = {
   filename: string;
@@ -140,6 +147,7 @@ export function classifyUploadFilename(filename: string): PreparedUploadFile["cl
 
   const extension = getUploadExtension(filename);
   if (SCREENSHOT_IMAGE_EXTENSIONS.has(extension)) return "image";
+  if (VIDEO_UPLOAD_EXTENSIONS.has(extension)) return "video";
   if (extension === ".pdf") return "pdf";
   if (extension === ".docx") return "docx";
   return "text";
@@ -153,7 +161,7 @@ export function normalizeUploadFilename(filename: string) {
 
 export function validateUploadFilename(
   filename: string,
-  limits?: Pick<UploadPlanLimits, "cccWorkfileAllowed">
+  limits?: Pick<UploadPlanLimits, "cccWorkfileAllowed"> & { mimeType?: string | null }
 ): UploadRejectedFile | null {
   const normalized = filename.replace(/\\/g, "/");
   const segments = normalized.split("/");
@@ -173,6 +181,7 @@ export function validateUploadFilename(
   }
 
   const extension = getUploadExtension(safeName);
+  const normalizedMimeType = limits?.mimeType ?? null;
   if (BLOCKED_UPLOAD_EXTENSIONS.has(extension)) {
     return {
       filename: safeName,
@@ -209,6 +218,14 @@ export function validateUploadFilename(
     };
   }
 
+  if (isVideoExtension(extension) && !isSupportedVideoUpload({ extension, mimeType: normalizedMimeType })) {
+    return {
+      filename: safeName,
+      reason: `File type ${extension || "unknown"} is not supported.`,
+      code: "UNSUPPORTED_EXTENSION",
+    };
+  }
+
   return null;
 }
 
@@ -224,13 +241,33 @@ export async function prepareUploadFile(file: File, limits: UploadPlanLimits) {
     });
   }
 
-  const rejected = validateUploadFilename(file.name, limits);
+  const rejected = validateUploadFilename(file.name, {
+    ...limits,
+    mimeType: file.type,
+  });
   if (rejected) {
     return {
       files: [],
       rejectedFiles: [rejected],
       zipSummaries: [],
     };
+  }
+
+  if (isVideoExtension(getUploadExtension(file.name))) {
+    const videoDuration = validateVideoDurationFromBuffer(buffer, file.type || mimeTypeForFilename(file.name));
+    if (!videoDuration.valid) {
+      return {
+        files: [],
+        rejectedFiles: [
+          {
+            filename: normalizeUploadFilename(file.name),
+            reason: VIDEO_DURATION_LIMIT_MESSAGE,
+            code: videoDuration.code,
+          },
+        ],
+        zipSummaries: [],
+      };
+    }
   }
 
   return {
@@ -592,6 +629,12 @@ export function mimeTypeForFilename(filename: string) {
       return "text/plain";
     case ".docx":
       return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    case ".mp4":
+      return "video/mp4";
+    case ".mov":
+      return "video/quicktime";
+    case ".webm":
+      return "video/webm";
     default:
       return "application/octet-stream";
   }

@@ -1,3 +1,10 @@
+import {
+  VIDEO_DURATION_LIMIT_MESSAGE,
+  VIDEO_MAX_BYTES,
+  VIDEO_MAX_DURATION_SECONDS,
+  isVideoMimeType,
+} from "@/lib/uploadSafety/videoSafety";
+
 export const MAX_UPLOAD_FILE_BYTES = 50 * 1024 * 1024;
 
 export type AttachmentSummaryItem = {
@@ -33,6 +40,13 @@ export function isLikelyImageFile(file: Pick<File, "type">) {
   return file.type.startsWith("image/");
 }
 
+export function isLikelyVideoFile(file: Pick<File, "name" | "type">) {
+  return (
+    isVideoMimeType(file.type) ||
+    /\.(?:mp4|mov|webm)$/i.test(file.name)
+  );
+}
+
 export function summarizeAttachmentStats(list: AttachmentSummaryItem[]) {
   return {
     fileCount: list.length,
@@ -44,11 +58,13 @@ export function buildCompactAttachmentSummary(list: AttachmentCompactSummaryItem
   const totalCount = list.length;
   const pdfCount = list.filter(isPdfAttachment).length;
   const photoCount = list.filter((attachment) => !isPdfAttachment(attachment) && isPhotoAttachment(attachment)).length;
-  const otherCount = Math.max(0, totalCount - photoCount - pdfCount);
+  const videoCount = list.filter(isVideoAttachment).length;
+  const otherCount = Math.max(0, totalCount - photoCount - pdfCount - videoCount);
   const parts = [
     `${totalCount} ${totalCount === 1 ? "file" : "files"} uploaded`,
     photoCount > 0 ? `${photoCount} ${photoCount === 1 ? "photo" : "photos"}` : null,
     pdfCount > 0 ? `${pdfCount} ${pdfCount === 1 ? "PDF" : "PDFs"}` : null,
+    videoCount > 0 ? `${videoCount} ${videoCount === 1 ? "video" : "videos"}` : null,
     otherCount > 0 ? `${otherCount} ${otherCount === 1 ? "other file" : "other files"}` : null,
   ].filter(Boolean);
 
@@ -108,6 +124,68 @@ export function validateUploadBatch(files: File[]) {
   };
 }
 
+function isVideoAttachment(attachment: AttachmentCompactSummaryItem) {
+  const mime = attachment.mime ?? "";
+  const filename = attachment.filename ?? "";
+  return mime.startsWith("video/") || /\.(?:mp4|mov|webm)$/i.test(filename);
+}
+
+export async function validateSelectedVideoDurations(files: File[]) {
+  const failures: Array<{ filename: string; reason: string; code: string }> = [];
+
+  await Promise.all(
+    files.filter(isLikelyVideoFile).map(async (file) => {
+      if (file.size > VIDEO_MAX_BYTES) {
+        failures.push({
+          filename: file.name,
+          reason: `Video is ${formatBytes(file.size)}. Max size is ${formatBytes(VIDEO_MAX_BYTES)} unless your plan limit is lower.`,
+          code: "FILE_TOO_LARGE",
+        });
+        return;
+      }
+
+      const duration = await readBrowserVideoDuration(file);
+      if (duration !== null && duration > VIDEO_MAX_DURATION_SECONDS) {
+        failures.push({
+          filename: file.name,
+          reason: VIDEO_DURATION_LIMIT_MESSAGE,
+          code: "VIDEO_TOO_LONG",
+        });
+      }
+    })
+  );
+
+  return failures;
+}
+
+function readBrowserVideoDuration(file: File): Promise<number | null> {
+  if (typeof document === "undefined" || typeof URL === "undefined") {
+    return Promise.resolve(null);
+  }
+
+  return new Promise((resolve) => {
+    const video = document.createElement("video");
+    const objectUrl = URL.createObjectURL(file);
+    let settled = false;
+
+    const finish = (duration: number | null) => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(objectUrl);
+      video.removeAttribute("src");
+      video.load();
+      resolve(duration);
+    };
+
+    video.preload = "metadata";
+    video.onloadedmetadata = () => {
+      finish(Number.isFinite(video.duration) ? video.duration : null);
+    };
+    video.onerror = () => finish(null);
+    video.src = objectUrl;
+  });
+}
+
 export function formatAttachmentKind(attachment: AttachmentKindInput): string {
   if (attachment.mime === "application/pdf") {
     return attachment.pageCount
@@ -115,6 +193,7 @@ export function formatAttachmentKind(attachment: AttachmentKindInput): string {
       : "PDF";
   }
   if (attachment.mime.startsWith("image/")) return "Image";
+  if (attachment.mime.startsWith("video/")) return "Video";
   if (attachment.text?.trim()) return "Text";
   return attachment.mime || "Unknown";
 }
@@ -125,10 +204,12 @@ export function buildAttachmentBatchStatus(
 ): string {
   const imageCount = files.filter((file) => file.type.startsWith("image/")).length;
   const pdfCount = files.filter((file) => file.type === "application/pdf").length;
-  const otherCount = files.length - imageCount - pdfCount;
+  const videoCount = files.filter((file) => file.type.startsWith("video/")).length;
+  const otherCount = files.length - imageCount - pdfCount - videoCount;
   const parts = [
     imageCount > 0 ? `${imageCount} ${imageCount === 1 ? "photo" : "photos"}` : null,
     pdfCount > 0 ? `${pdfCount} ${pdfCount === 1 ? "PDF" : "PDFs"}` : null,
+    videoCount > 0 ? `${videoCount} ${videoCount === 1 ? "video" : "videos"}` : null,
     otherCount > 0 ? `${otherCount} ${otherCount === 1 ? "file" : "files"}` : null,
   ].filter(Boolean) as string[];
 

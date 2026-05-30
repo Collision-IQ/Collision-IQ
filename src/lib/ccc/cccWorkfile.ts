@@ -7,6 +7,7 @@ export { CCC_WORKFILE_DISCLAIMER };
 
 export type UploadClassification =
   | "image"
+  | "video"
   | "pdf"
   | "text"
   | "docx"

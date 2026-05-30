@@ -125,6 +125,29 @@ function makeFile(name, type, content = "image-bytes") {
   return new File([Buffer.from(content)], name, { type });
 }
 
+function box(type, payload) {
+  const buffer = Buffer.alloc(8 + payload.length);
+  buffer.writeUInt32BE(buffer.length, 0);
+  buffer.write(type, 4, 4, "ascii");
+  payload.copy(buffer, 8);
+  return buffer;
+}
+
+function mp4WithDuration(seconds) {
+  const timescale = 1000;
+  const mvhd = Buffer.alloc(20);
+  mvhd[0] = 0;
+  mvhd.writeUInt32BE(0, 4);
+  mvhd.writeUInt32BE(0, 8);
+  mvhd.writeUInt32BE(timescale, 12);
+  mvhd.writeUInt32BE(Math.round(seconds * timescale), 16);
+
+  return Buffer.concat([
+    box("ftyp", Buffer.from("isom0000", "ascii")),
+    box("moov", box("mvhd", mvhd)),
+  ]);
+}
+
 run("Starter rejects ZIP and files over 10 MB", async () => {
   const limits = resolveUploadPlanLimits(starterEntitlements());
   assert.equal(limits.maxUploadBytes, 10 * MB);
@@ -181,6 +204,70 @@ run("direct JPG screenshot accepted", async () => {
   assert.equal(result.files[0].filename, "screen.jpg");
   assert.equal(result.files[0].type, "image/jpeg");
   assert.equal(result.files[0].classification, "image");
+});
+
+run("5-second MP4 video accepted", async () => {
+  const result = await prepareUploadFile(
+    makeFile("damage.mp4", "video/mp4", mp4WithDuration(5)),
+    resolveUploadPlanLimits(proEntitlements())
+  );
+
+  assert.equal(result.files.length, 1);
+  assert.equal(result.files[0].filename, "damage.mp4");
+  assert.equal(result.files[0].type, "video/mp4");
+  assert.equal(result.files[0].classification, "video");
+});
+
+run("video over 5 seconds rejected", async () => {
+  const result = await prepareUploadFile(
+    makeFile("damage.mp4", "video/mp4", mp4WithDuration(5.001)),
+    resolveUploadPlanLimits(proEntitlements())
+  );
+
+  assert.equal(result.files.length, 0);
+  assert.equal(result.rejectedFiles[0].code, "VIDEO_TOO_LONG");
+  assert.equal(result.rejectedFiles[0].reason, "Videos must be 5 seconds or shorter.");
+});
+
+run(".mp4 accepted", async () => {
+  const result = await prepareUploadFile(
+    makeFile("clip.mp4", "video/mp4", mp4WithDuration(4)),
+    resolveUploadPlanLimits(proEntitlements())
+  );
+
+  assert.equal(result.files.length, 1);
+  assert.equal(result.files[0].type, "video/mp4");
+});
+
+run(".mov accepted", async () => {
+  const result = await prepareUploadFile(
+    makeFile("clip.mov", "video/quicktime", mp4WithDuration(4)),
+    resolveUploadPlanLimits(proEntitlements())
+  );
+
+  assert.equal(result.files.length, 1);
+  assert.equal(result.files[0].type, "video/quicktime");
+});
+
+run(".webm accepted", async () => {
+  const result = await prepareUploadFile(
+    makeFile("clip.webm", "video/webm", "webm-bytes-without-duration"),
+    resolveUploadPlanLimits(proEntitlements())
+  );
+
+  assert.equal(result.files.length, 1);
+  assert.equal(result.files[0].type, "video/webm");
+});
+
+run("missing MIME but valid video extension accepted", async () => {
+  const result = await prepareUploadFile(
+    makeFile("clip.mp4", "", mp4WithDuration(4)),
+    resolveUploadPlanLimits(proEntitlements())
+  );
+
+  assert.equal(result.files.length, 1);
+  assert.equal(result.files[0].type, "video/mp4");
+  assert.equal(result.files[0].classification, "video");
 });
 
 run("screenshot inside ZIP accepted", async () => {
