@@ -555,6 +555,21 @@ function isSupportedDropUploadFile(file: File) {
   );
 }
 
+function isVideoAttachment(attachment: Pick<Attachment, "mime" | "filename" | "classification">) {
+  return (
+    attachment.classification === "video" ||
+    attachment.mime.startsWith("video/") ||
+    /\.(?:mp4|mov|webm)$/i.test(attachment.filename)
+  );
+}
+
+function buildVideoDocumentationStatus(attachments: Array<Pick<Attachment, "filename">>) {
+  const count = attachments.length;
+  const names = attachments.map((attachment) => attachment.filename).join(", ");
+
+  return `${count} short ${count === 1 ? "video was" : "videos were"} attached as damage documentation${names ? `: ${names}` : ""}. Still images remain preferred for direct AI visual analysis.`;
+}
+
 function buildUploadCompletionStatus(successCount: number, failures: UploadFailureResult[]) {
   if (!failures.length) {
     return null;
@@ -1546,8 +1561,28 @@ export default function ChatWidget({
   async function handleSend() {
     if (disabled) return;
     if (loading) return;
-    const attachmentsForTurn = attachments.filter((attachment) => !attachment.usedInAnalysis);
-    if (!input.trim() && attachmentsForTurn.length === 0) return;
+    const pendingAttachmentsForTurn = attachments.filter((attachment) => !attachment.usedInAnalysis);
+    const documentationVideoAttachments = pendingAttachmentsForTurn.filter(isVideoAttachment);
+    const attachmentsForTurn = pendingAttachmentsForTurn.filter(
+      (attachment) => !isVideoAttachment(attachment)
+    );
+    const trimmedInput = input.trim();
+    if (!trimmedInput && pendingAttachmentsForTurn.length === 0) return;
+
+    if (documentationVideoAttachments.length > 0) {
+      upsertSystemStatusMessage(buildVideoDocumentationStatus(documentationVideoAttachments));
+      setAttachments((prev) =>
+        prev.map((attachment) =>
+          documentationVideoAttachments.some((video) => video.attachmentId === attachment.attachmentId)
+            ? { ...attachment, usedInAnalysis: true }
+            : attachment
+        )
+      );
+    }
+
+    if (!trimmedInput && attachmentsForTurn.length === 0) {
+      return;
+    }
 
     // Collapse the review workspace from the real send path so typed prompts always focus chat.
     onUserPromptSent?.();
@@ -1558,7 +1593,7 @@ export default function ChatWidget({
     shouldAutoScrollRef.current = true;
 
     const mySession = sessionRef.current;
-    const messageToSend = input.trim() || buildAttachmentSummary(attachmentsForTurn);
+    const messageToSend = trimmedInput || buildAttachmentSummary(attachmentsForTurn);
     const activeCaseTopic = updateCaseTopic(messageToSend);
     const hasAttachmentsInTurn = attachmentsForTurn.length > 0;
     const activeAnalysisRunId = hasAttachmentsInTurn ? beginStructuredAnalysisRun() : null;

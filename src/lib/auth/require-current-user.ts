@@ -75,9 +75,8 @@ export async function requireCurrentUser() {
   console.info("[auth] clerk session check", {
     hasUserId: Boolean(state.userId),
     hasOrgId: Boolean(state.orgId),
-    publishableKeyPrefix:
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.slice(0, 8) ?? null,
-    secretKeyPrefix: process.env.CLERK_SECRET_KEY?.slice(0, 8) ?? null,
+    hasPublishableKey: Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY),
+    hasSecretKey: Boolean(process.env.CLERK_SECRET_KEY),
     vercelEnv: process.env.VERCEL_ENV ?? null,
     nodeEnv: process.env.NODE_ENV ?? null,
   });
@@ -133,7 +132,7 @@ export async function requireCurrentUser() {
   }
 
   const verifiedEmails = getVerifiedClerkEmails(clerkUser);
-  const adminCandidateEmails = verifiedEmails.length ? verifiedEmails : [normalizedEmail];
+  const adminCandidateEmails = [...new Set([normalizedEmail, ...verifiedEmails].filter(Boolean))];
   const isPlatformAdmin = isPlatformAdminEmailList(adminCandidateEmails);
   console.info("[auth] resolved clerk user", {
     clerkUserId: state.userId,

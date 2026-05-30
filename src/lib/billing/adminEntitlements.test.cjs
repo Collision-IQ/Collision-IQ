@@ -32,6 +32,9 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 
 process.env.COLLISION_IQ_PLATFORM_ADMIN_EMAILS =
   "Admin.One@example.com, second-admin@example.com ; CollisionAcademy@outlook.com\nspaced-admin@example.com ";
+process.env.ADMIN_EMAILS = "legacy-admin@example.com";
+process.env.AUTHORIZED_ADMIN_EMAILS = "legacy-authorized@example.com";
+process.env.NEXT_PUBLIC_ADMIN_EMAILS = "legacy-public@example.com";
 
 const {
   getPlatformAdminEntitlementSource,
@@ -142,10 +145,14 @@ run("env admin emails are the source of truth", () => {
   assert.equal(isPlatformAdminEmail("collisionacademy@outlook.com"), true);
   assert.equal(isPlatformAdminEmail(" spaced-admin@example.com "), true);
   assert.equal(isPlatformAdminEmail("not-admin@example.com"), false);
+  assert.equal(isPlatformAdminEmail("legacy-admin@example.com"), false);
+  assert.equal(isPlatformAdminEmail("legacy-authorized@example.com"), false);
+  assert.equal(isPlatformAdminEmail("legacy-public@example.com"), false);
   assert.equal(isAdminEmail("admin.one@example.com"), true);
   assert.deepEqual(getPlatformAdminEntitlementSource(), {
     envKey: "COLLISION_IQ_PLATFORM_ADMIN_EMAILS",
     configuredAdminCount: 10,
+    usesLegacyAdminEnv: false,
   });
 });
 
@@ -206,7 +213,7 @@ run("env admins receive Pro-level entitlements", () => {
     buildAccess({
       canRunAnalysis: false,
     }),
-    { userEmail: "admin.one@example.com" }
+    { userEmail: "  COLLISIONACADEMY@OUTLOOK.COM  " }
   );
 
   assert.equal(entitlements.plan, "admin");
