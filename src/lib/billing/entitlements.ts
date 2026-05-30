@@ -5,7 +5,7 @@ import {
   type ViewerAccess,
 } from "@/lib/entitlements";
 import { getUsageCount as getMeteredUsageCount } from "@/lib/usage";
-import { isPlatformAdminEmailList, maskEmail } from "@/lib/auth/platform-admin";
+import { isPlatformAdminEmailList, maskEmail, normalizeEmail } from "@/lib/auth/platform-admin";
 
 const TRIAL_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -132,7 +132,9 @@ export function toAccountEntitlements(
   const resolvedEmails = [
     ...(params?.userEmails ?? []),
     params?.userEmail,
-  ].filter(Boolean);
+  ]
+    .map((email) => normalizeEmail(email))
+    .filter(Boolean);
   const isEnvAdmin = isPlatformAdminEmailList(resolvedEmails);
   const trialActive = resolveEffectiveTrialActive(access, params?.trialActive);
   const contextAdmin = Boolean(params?.isPlatformAdmin);
@@ -396,21 +398,13 @@ function logEntitlementDiagnostics(
   entitlements: AccountEntitlements,
   params?: { userEmail?: string | null; userEmails?: Array<string | null | undefined> }
 ) {
-  const shouldLog =
-    process.env.NODE_ENV !== "production" ||
-    (Boolean(process.env.VERCEL_ENV) && process.env.VERCEL_ENV !== "production") ||
-    entitlements.isPlatformAdmin;
-
-  if (!shouldLog) {
-    return;
-  }
-
   console.info("[entitlements] resolved", {
     userId: entitlements.dbUserId ?? entitlements.userId,
-    email: maskEmail(params?.userEmail ?? null),
-    verifiedEmails: (params?.userEmails ?? []).map((email) => maskEmail(email)),
+    email: maskEmail(normalizeEmail(params?.userEmail ?? null) || null),
+    verifiedEmails: (params?.userEmails ?? []).map((email) => maskEmail(normalizeEmail(email))),
     isFreeAccessAdmin: entitlements.entitlementSource === "free_access_admin",
     subscriptionTier: entitlements.billingPlan,
+    entitlementTier: entitlements.plan,
     trialStart: entitlements.trialStart,
     trialEnd: entitlements.trialEnd,
     trialActive: entitlements.trialActive,

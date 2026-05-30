@@ -468,6 +468,10 @@ function isImageDocument(document: UploadedDocument): boolean {
   return Boolean(document.imageDataUrl) && Boolean(document.mime?.startsWith("image/"));
 }
 
+function isVideoDocument(document: UploadedDocument): boolean {
+  return Boolean(document.mime?.startsWith("video/")) || /\.(?:mp4|mov|webm)$/i.test(document.filename);
+}
+
 function buildOpenAIInput(params: {
   userMessage: string;
   conversationContext: string;
@@ -1049,7 +1053,8 @@ export async function POST(req: Request) {
       .filter(Boolean)
       .join("\n\n");
 
-    const providerDocuments = largeCaseFallback.useFallback ? [] : documents;
+    const modelEligibleDocuments = documents.filter((document) => !isVideoDocument(document));
+    const providerDocuments = largeCaseFallback.useFallback ? [] : modelEligibleDocuments;
     const input = buildOpenAIInput({
       userMessage,
       conversationContext,
@@ -1105,7 +1110,11 @@ export async function POST(req: Request) {
       mime: file.type,
       text: file.text,
     }));
-    const documentsForEvidence = documents.length > 0 ? documents : activeCaseDocuments;
+    const activeCaseModelEligibleDocuments = activeCaseDocuments.filter(
+      (document) => !isVideoDocument(document)
+    );
+    const documentsForEvidence =
+      modelEligibleDocuments.length > 0 ? modelEligibleDocuments : activeCaseModelEligibleDocuments;
     const estimateLinks = extractEstimateLinksFromDocuments(documentsForEvidence);
     const fetchableEstimateLinks = estimateLinks.filter(isFetchableEstimateLink);
     const rejectedEstimateLinks = estimateLinks.filter((link) => !isFetchableEstimateLink(link));
@@ -1153,6 +1162,13 @@ export async function POST(req: Request) {
             hasImageDataUrl: Boolean(document.imageDataUrl),
           }))
         : [],
+      omittedDocumentationOnly: documents
+        .filter(isVideoDocument)
+        .map((document) => ({
+          attachmentId: document.id ?? null,
+          filename: document.filename,
+          mimeType: document.mime || "unknown",
+        })),
     });
 
     const firstPass = await createOpenAIResponseWithRetry(deps, "first-pass", {
