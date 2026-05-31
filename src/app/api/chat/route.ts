@@ -12,7 +12,7 @@ import {
   UnauthorizedError,
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
-import { isPlatformAdminEmail, normalizeEmail } from "@/lib/auth/platform-admin";
+import { normalizeEmail } from "@/lib/auth/platform-admin";
 import {
   getCurrentProductEntitlements,
   getCurrentSubscriptionTierForUser,
@@ -45,6 +45,7 @@ import {
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
 } from "@/lib/uploadSafety/uploadLimits";
+import { isOpenAiVisionCompatibleImage } from "@/lib/ai/openAiVisionInput";
 
 const OPENAI_RETRY_DELAY_MS = 400;
 const LEGAL_INFO_DISCLAIMER =
@@ -465,7 +466,10 @@ function buildTextContext(params: {
 }
 
 function isImageDocument(document: UploadedDocument): boolean {
-  return Boolean(document.imageDataUrl) && Boolean(document.mime?.startsWith("image/"));
+  return isOpenAiVisionCompatibleImage({
+    mime: document.mime,
+    imageDataUrl: document.imageDataUrl,
+  });
 }
 
 function buildOpenAIInput(params: {
@@ -867,8 +871,7 @@ export async function POST(req: Request) {
         : 0;
 
     const normalizedEmail = normalizeEmail(user.email);
-    const isEnvAdmin = isPlatformAdminEmail(normalizedEmail);
-    const effectiveIsAdmin = isPlatformAdmin || isEnvAdmin;
+    let effectiveIsAdmin = isPlatformAdmin;
     const subscriptionTier = await getCurrentSubscriptionTierForUser(user.id);
     const trialActive = resolveProductTrialActive({
       activeSubscriptionId: subscriptionTier ? "active-subscription" : null,
@@ -884,6 +887,7 @@ export async function POST(req: Request) {
       subscriptionTier,
       isPlatformAdmin: effectiveIsAdmin,
     });
+    effectiveIsAdmin = entitlements.isPlatformAdmin;
     const uploadLimits = resolveUploadPlanLimits(entitlements);
 
     if (incomingAttachmentCount > uploadLimits.maxFilesPerReview) {
