@@ -473,11 +473,7 @@ function isImageDocument(document: UploadedDocument): boolean {
 }
 
 function isVideoDocument(document: UploadedDocument): boolean {
-  return Boolean(document.mime?.startsWith("video/")) || /\.(?:mp4|mov|webm)$/i.test(document.filename);
-}
-
-function isVideoDocument(document: UploadedDocument): boolean {
-  return Boolean(document.mime?.startsWith("video/")) || /\.(?:mp4|mov|webm)$/i.test(document.filename);
+  return Boolean(document.mime?.startsWith("video/")) || /\.(?:mp4|mov|webm)$/i.test(document.filename ?? "");
 }
 
 function buildOpenAIInput(params: {
