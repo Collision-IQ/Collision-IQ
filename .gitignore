@@ -136,3 +136,6 @@ google-sa*.b64
 collision-iq-sync-*.json
 android/*.keystore
 android/*.jks
+
+# Local Google OAuth client secret files
+android/app/client_secret_*.json

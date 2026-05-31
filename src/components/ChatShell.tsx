@@ -4,17 +4,17 @@ import Image from "next/image";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { ClerkProvider, Show, SignInButton, UserButton } from "@clerk/nextjs";
+import { ClerkProvider, SignInButton, UserButton, useUser } from "@clerk/nextjs";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 function HeaderAuth() {
-  return (
-    <div className="flex items-center gap-2">
-      <Show when="signed-in">
-        <UserButton />
-      </Show>
+  const { isLoaded, isSignedIn } = useUser();
 
-      <Show when="signed-out">
+  return (
+    <div className="flex min-h-10 shrink-0 items-center gap-2">
+      {isLoaded && isSignedIn ? (
+        <UserButton />
+      ) : isLoaded ? (
         <SignInButton
           mode="modal"
           forceRedirectUrl={typeof window !== "undefined" ? window.location.href : "/"}
@@ -26,7 +26,9 @@ function HeaderAuth() {
             Sign in
           </button>
         </SignInButton>
-      </Show>
+      ) : (
+        <div className="h-8 w-[62px] shrink-0" aria-hidden />
+      )}
     </div>
   );
 }
