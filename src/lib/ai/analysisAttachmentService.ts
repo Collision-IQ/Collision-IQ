@@ -10,6 +10,7 @@ import {
   extractDriveFileIdFromUrl,
   isDriveEnabled,
 } from "@/lib/drive/download";
+import { isOpenAiVisionCompatibleImage } from "@/lib/ai/openAiVisionInput";
 
 type AttachmentVisionDeps = {
   summarizeImageAttachment?: (attachment: StoredAttachment) => Promise<string>;
@@ -153,6 +154,15 @@ async function fetchDriveLinkedAttachments(params: {
 
 async function summarizeImageAttachment(attachment: StoredAttachment) {
   if (!attachment.imageDataUrl) {
+    return "";
+  }
+
+  if (
+    !isOpenAiVisionCompatibleImage({
+      mime: attachment.type,
+      imageDataUrl: attachment.imageDataUrl,
+    })
+  ) {
     return "";
   }
 
