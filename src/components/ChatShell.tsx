@@ -2,10 +2,11 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { ClerkProvider, SignInButton, UserButton, useUser } from "@clerk/nextjs";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { getPlatform, isNative } from "@/lib/native";
 
 function HeaderAuth() {
   const { isLoaded, isSignedIn } = useUser();
@@ -107,9 +108,33 @@ export default function ChatShell({
 }: Props) {
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
+  const [isNativeAndroid, setIsNativeAndroid] = useState(false);
+
+  useEffect(() => {
+    setIsNativeAndroid(isNative() && getPlatform() === "android");
+  }, []);
+
+  async function openProductionSite() {
+    const url = "https://www.collision-iq.ai";
+
+    try {
+      if (isNative()) {
+        const { Browser } = await import("@capacitor/browser");
+        await Browser.open({ url });
+        return;
+      }
+    } catch (error) {
+      console.warn("[native-site-open] Browser.open failed; falling back", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
 
   const hasLeft = useMemo(() => Boolean(left), [left]);
-  const hasRight = useMemo(() => Boolean(right), [right]);
+  const effectiveRight = isNativeAndroid ? null : right;
+  const hasRight = useMemo(() => Boolean(effectiveRight), [effectiveRight]);
 
   return (
     <ClerkProvider>
@@ -155,21 +180,35 @@ export default function ChatShell({
           </div>
 
           <div className="flex min-h-10 min-w-0 flex-wrap items-center justify-end gap-1 sm:gap-2">
-            <Link
-              href="/technical-systems"
-              className="hidden min-h-10 items-center rounded-md border border-[#b86a2d] bg-[#b86a2d] px-3 py-2 text-xs font-semibold text-black transition hover:bg-[#c57934] sm:inline-flex"
-            >
-              Technical Systems
-            </Link>
+            {!isNativeAndroid && (
+              <>
+                <Link
+                  href="/technical-systems"
+                  className="hidden min-h-10 items-center rounded-md border border-[#b86a2d] bg-[#b86a2d] px-3 py-2 text-xs font-semibold text-black transition hover:bg-[#c57934] sm:inline-flex"
+                >
+                  Technical Systems
+                </Link>
 
-            <Link
-              href="/the-academy"
-              className="hidden min-h-10 items-center rounded-md border border-border bg-muted px-3 py-2 text-xs font-medium text-foreground transition hover:bg-background md:inline-flex"
-            >
-              Professional Services
-            </Link>
+                <Link
+                  href="/the-academy"
+                  className="hidden min-h-10 items-center rounded-md border border-border bg-muted px-3 py-2 text-xs font-medium text-foreground transition hover:bg-background md:inline-flex"
+                >
+                  Professional Services
+                </Link>
+              </>
+            )}
 
             <ThemeToggle />
+
+            {isNativeAndroid && (
+              <button
+                type="button"
+                onClick={openProductionSite}
+                className="min-h-9 shrink-0 rounded-md border border-border bg-muted px-2.5 py-1.5 text-[11px] font-medium text-foreground transition hover:bg-background sm:min-h-10 sm:px-3 sm:py-2 sm:text-xs"
+              >
+                Site
+              </button>
+            )}
 
             <HeaderAuth />
 
@@ -225,7 +264,7 @@ export default function ChatShell({
               <div className="min-h-[45px] shrink-0 border-b border-border px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                 Evidence / Exports / Audit
               </div>
-              <div className="flex-1 min-h-0 overflow-y-auto p-3">{right}</div>
+              <div className="flex-1 min-h-0 overflow-y-auto p-3">{effectiveRight}</div>
             </div>
           )}
         </div>
@@ -249,7 +288,7 @@ export default function ChatShell({
           side="right"
           title="Inspector"
         >
-          {right}
+          {effectiveRight}
         </Drawer>
       )}
     </div>
