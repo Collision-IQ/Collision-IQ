@@ -86,6 +86,7 @@ const ZIP_ALLOWED_EXTENSIONS = new Set([
   ".heic",
   ".webp",
   ".txt",
+  ".awf",
 ]);
 
 class ZipUploadError extends Error {

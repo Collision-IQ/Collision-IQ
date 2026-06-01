@@ -510,14 +510,25 @@ run("high compression ratio rejects whole archive", async () => {
   assert.equal(result.rejectedFiles[0].code, "ZIP_BOMB_SUSPECTED");
 });
 
-(async () => {
-  for (const { name, test } of tests) {
-    try {
-      await test();
-      console.log(`PASS ${name}`);
-    } catch (error) {
-      console.error(`FAIL ${name}`);
-      throw error;
-    }
+if (process.env.VITEST) {
+  const vitestTest = globalThis.__vitest_index__?.test;
+  if (typeof vitestTest !== "function") {
+    throw new Error("Vitest test API was not available for zipSafety.test.cjs");
   }
-})();
+
+  for (const { name, test } of tests) {
+    vitestTest(name, test);
+  }
+} else {
+  (async () => {
+    for (const { name, test } of tests) {
+      try {
+        await test();
+        console.log(`PASS ${name}`);
+      } catch (error) {
+        console.error(`FAIL ${name}`);
+        throw error;
+      }
+    }
+  })();
+}
