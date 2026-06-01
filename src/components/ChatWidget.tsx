@@ -1551,6 +1551,17 @@ export default function ChatWidget({
     updateReviewProgress,
   ]);
 
+  const handleEndChatRequest = useCallback(() => {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm("End this chat? This will clear the current conversation.")
+    ) {
+      return;
+    }
+
+    handleEndChat();
+  }, [handleEndChat]);
+
   useEffect(() => {
     onSessionControlsReady?.({
       focusComposer: () => textareaRef.current?.focus(),
@@ -3342,8 +3353,8 @@ export default function ChatWidget({
 
               <button
                 type="button"
-                onClick={handleEndChat}
-                className="order-4 min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-red-500/80 transition hover:bg-red-500/8 hover:text-red-500 disabled:opacity-50 lg:order-none dark:text-red-300/75 dark:hover:text-red-200"
+                onClick={handleEndChatRequest}
+                className="hidden min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-red-500/80 transition hover:bg-red-500/8 hover:text-red-500 disabled:opacity-50 lg:inline-flex dark:text-red-300/75 dark:hover:text-red-200"
                 disabled={disabled || (loading && messages.length <= 1)}
                 aria-label="End chat"
                 title="End chat"
@@ -3353,7 +3364,7 @@ export default function ChatWidget({
                 </div>
 
                 {(messages.length > 1 || hasAnyAttachment) && (
-                  <div className="mt-2 flex justify-end lg:hidden">
+                  <div className="mt-2 flex justify-end gap-2 lg:hidden">
                     <button
                       type="button"
                       onClick={handleDownloadRedactedChat}
@@ -3361,6 +3372,16 @@ export default function ChatWidget({
                       className="min-h-9 rounded-md border border-border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {isExportingChat ? "Preparing..." : "Download"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleEndChatRequest}
+                      disabled={disabled || (loading && messages.length <= 1)}
+                      className="min-h-9 rounded-md border border-red-500/30 bg-card px-3 py-1.5 text-[11px] font-medium text-red-500/80 transition hover:bg-red-500/8 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-300/75 dark:hover:text-red-200"
+                      aria-label="End chat"
+                      title="End chat"
+                    >
+                      End
                     </button>
                   </div>
                 )}
