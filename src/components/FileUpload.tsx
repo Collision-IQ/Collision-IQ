@@ -13,6 +13,7 @@ import {
 import {
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
+  type UploadPlanLimits,
   VIDEO_UPLOAD_ACCEPT,
   VIDEO_UPLOAD_HINT,
 } from "@/lib/uploadSafety/uploadLimits";
@@ -26,13 +27,6 @@ type Props = {
 type UploadStage = "idle" | "uploading" | "extracting_zip" | "preparing_analysis";
 
 const LARGE_UPLOAD_WARNING_BYTES = 10 * 1024 * 1024;
-const STARTER_UPLOAD_LIMITS = resolveUploadPlanLimits({
-  plan: "starter",
-  billingPlan: "starter",
-  isPlatformAdmin: false,
-  entitlementSource: "starter_subscription",
-  maxUploadsPerReview: 1,
-});
 
 function isZipFile(file: Pick<File, "name" | "type">) {
   return (
@@ -72,10 +66,8 @@ export default function FileUpload({
   const [error, setError] = useState<string | null>(null);
   const [uploaded, setUploaded] = useState<string[]>([]);
   const [uploadHint, setUploadHint] = useState(`You can upload PDFs, photos, screenshots, ZIP files, or short videos. ${VIDEO_UPLOAD_HINT}`);
-  const [maxUploadBatchFiles, setMaxUploadBatchFiles] = useState(
-    STARTER_UPLOAD_LIMITS.maxFilesPerReview
-  );
-  const [uploadPlanName, setUploadPlanName] = useState(STARTER_UPLOAD_LIMITS.plan);
+  const [maxUploadBatchFiles, setMaxUploadBatchFiles] = useState<number>(0);
+  const [uploadPlanName, setUploadPlanName] = useState<UploadPlanLimits["plan"] | undefined>(undefined);
   const [uploadLimitsLoaded, setUploadLimitsLoaded] = useState(false);
   const [zipSummary, setZipSummary] = useState<string | null>(null);
   const [largeUploadWarning, setLargeUploadWarning] = useState<string | null>(null);
@@ -95,8 +87,6 @@ export default function FileUpload({
           credentials: "same-origin",
         });
         if (!response.ok) {
-          if (cancelled) return;
-          setUploadLimitsLoaded(true);
           return;
         }
 
@@ -118,10 +108,7 @@ export default function FileUpload({
         }
         setUploadLimitsLoaded(true);
       } catch {
-        // Server-side upload limits remain authoritative.
-        if (!cancelled) {
-          setUploadLimitsLoaded(true);
-        }
+        // Keep fail closed / loading state on error
       }
     }
 

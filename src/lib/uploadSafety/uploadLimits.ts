@@ -79,12 +79,12 @@ export type UploadPlanLimits = {
 export function resolveUploadPlanLimits(
   entitlements: Pick<
     AccountEntitlements,
-    "plan" | "billingPlan" | "isPlatformAdmin" | "entitlementSource"
-  > & { maxUploadsPerReview?: number | null }
+    "billingPlan" | "isPlatformAdmin" | "entitlementSource"
+  > & { maxUploadsPerReview?: number | null; plan?: string; uploadCap?: number | null }
 ): UploadPlanLimits {
   if (
     entitlements.isPlatformAdmin ||
-    entitlements.plan === "admin" ||
+    entitlements.uploadCap === null ||
     entitlements.entitlementSource === "free_access_admin"
   ) {
     return {

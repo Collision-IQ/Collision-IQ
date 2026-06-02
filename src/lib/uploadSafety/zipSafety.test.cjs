@@ -357,6 +357,30 @@ run("Admin/free-access allows more than 6 files", () => {
   assert.equal(getUploadBatchLimitMessage(limits), "You can upload any number of files per review.");
 });
 
+run("Admin/unlimited resolves correctly via isPlatformAdmin or uploadCap: null", () => {
+  const limits1 = resolveUploadPlanLimits({
+    isPlatformAdmin: true,
+    billingPlan: "none",
+    entitlementSource: "locked",
+    uploadCap: 10,
+  });
+
+  const limits2 = resolveUploadPlanLimits({
+    isPlatformAdmin: false,
+    billingPlan: "free",
+    entitlementSource: "free",
+    uploadCap: null,
+  });
+
+  assert.equal(limits1.plan, "admin");
+  assert.equal(limits1.maxFilesPerReview, UNLIMITED_UPLOAD_BATCH_FILE_LIMIT);
+  assert.equal(validateUploadBatchFileCount(7, limits1).valid, true);
+
+  assert.equal(limits2.plan, "admin");
+  assert.equal(limits2.maxFilesPerReview, UNLIMITED_UPLOAD_BATCH_FILE_LIMIT);
+  assert.equal(validateUploadBatchFileCount(7, limits2).valid, true);
+});
+
 run("Pro/Admin can upload screenshots within plan size limits", () => {
   const proLimits = resolveUploadPlanLimits(proEntitlements());
   const adminLimits = resolveUploadPlanLimits(adminEntitlements());

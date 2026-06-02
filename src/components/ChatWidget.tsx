@@ -841,13 +841,16 @@ export default function ChatWidget({
     () => resolveUploadPlanLimits(resolvedViewerAccess ?? DEFAULT_UPLOAD_LIMIT_ENTITLEMENTS),
     [resolvedViewerAccess]
   );
-  const maxUploadBatchFiles = uploadPlanLimits.maxFilesPerReview;
-  const uploadBatchGuidance = buildUploadBatchGuidance(
-    totalFilesReviewed,
-    attachments.length,
-    maxUploadBatchFiles,
-    uploadPlanLimits.plan
-  );
+  const uploadLimitsLoading = isSignedIn && !resolvedViewerAccess;
+  const maxUploadBatchFiles = uploadLimitsLoading ? 0 : uploadPlanLimits.maxFilesPerReview;
+  const uploadBatchGuidance = uploadLimitsLoading
+    ? "Loading upload limits..."
+    : buildUploadBatchGuidance(
+        totalFilesReviewed,
+        attachments.length,
+        maxUploadBatchFiles,
+        uploadPlanLimits.plan
+      );
 
   useEffect(() => {
     attachmentsRef.current = attachments;
@@ -2463,7 +2466,7 @@ export default function ChatWidget({
   }
 
   async function handleFilesSelected(fileList: FileList | File[] | null) {
-    if (disabled) return;
+    if (disabled || uploadLimitsLoading) return;
     if (!fileList || fileList.length === 0) return;
 
     try {
@@ -2560,7 +2563,7 @@ export default function ChatWidget({
   }
 
   async function handleCameraSelected(fileList: FileList | null) {
-    if (disabled) return;
+    if (disabled || uploadLimitsLoading) return;
     if (!fileList || fileList.length === 0) return;
 
     try {
@@ -2667,7 +2670,7 @@ export default function ChatWidget({
   }
 
   function handleUploadDragOver(event: React.DragEvent<HTMLElement>) {
-    if (disabled) return;
+    if (disabled || uploadLimitsLoading) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
     setIsDragActive(true);
@@ -2683,7 +2686,7 @@ export default function ChatWidget({
   }
 
   function handleUploadDrop(event: React.DragEvent<HTMLElement>) {
-    if (disabled) return;
+    if (disabled || uploadLimitsLoading) return;
     event.preventDefault();
     setIsDragActive(false);
     void handleFilesSelected(Array.from(event.dataTransfer.files));
@@ -2742,7 +2745,7 @@ export default function ChatWidget({
   }
 
   function handleReplaceAttachment(attachmentId: string) {
-    if (disabled) return;
+    if (disabled || uploadLimitsLoading) return;
     invalidateStructuredAnalysis();
     setReplaceAttachmentId(attachmentId);
     fileInputRef.current?.click();
@@ -3010,7 +3013,7 @@ export default function ChatWidget({
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={disabled}
+                  disabled={disabled || uploadLimitsLoading}
                   className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
                 >
                   Upload Estimate
@@ -3018,7 +3021,7 @@ export default function ChatWidget({
 
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={disabled}
+                  disabled={disabled || uploadLimitsLoading}
                   className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
                 >
                   Upload OEM Procedure
@@ -3026,7 +3029,7 @@ export default function ChatWidget({
 
                 <button
                   onClick={() => cameraInputRef.current?.click()}
-                  disabled={disabled}
+                  disabled={disabled || uploadLimitsLoading}
                   className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
                 >
                   Upload Photos
@@ -3237,7 +3240,7 @@ export default function ChatWidget({
                 className="hidden"
                 accept={`.pdf,image/*,application/zip,application/x-zip-compressed,.zip,${VIDEO_UPLOAD_ACCEPT}`}
                 multiple
-                disabled={disabled}
+                disabled={disabled || uploadLimitsLoading}
                 title="Attach PDF, image, short video, or ZIP archive"
                 onChange={(e) => handleFilesSelected(e.target.files)}
               />
@@ -3248,7 +3251,7 @@ export default function ChatWidget({
                 className="hidden"
                 accept="image/*"
                 {...(isLikelyMobileCaptureDevice && { capture: "environment" })}
-                disabled={disabled}
+                disabled={disabled || uploadLimitsLoading}
                 title="Take photo"
                 onChange={(e) => handleCameraSelected(e.target.files)}
               />
@@ -3256,7 +3259,7 @@ export default function ChatWidget({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={disabled}
+                disabled={disabled || uploadLimitsLoading}
                 className="order-2 min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none"
                 aria-label="Attach PDF, image, short video, or ZIP archive"
               >
@@ -3266,7 +3269,7 @@ export default function ChatWidget({
               <button
                 type="button"
                 onClick={() => cameraInputRef.current?.click()}
-                disabled={disabled}
+                disabled={disabled || uploadLimitsLoading}
                 className="order-2 min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none"
                 aria-label="Take photo"
               >
