@@ -6,6 +6,7 @@ import { buildAssistanceProfileInstruction } from "@/lib/ai/assistanceProfile";
 import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
 import { JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT } from "@/lib/ai/jurisdictionalInsurancePrompt";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
+import { buildResponseModeInstruction, determineResponseMode } from "@/lib/ai/responseMode";
 import { buildAppraisalAwardEvaluatorInstruction } from "@/lib/ai/appraisalAwardEvaluator";
 import {
   classifyRetryableProviderError,
@@ -310,6 +311,11 @@ CHAT/UI ONLY: ${artifactRefreshPolicy.chatSummaryOnly.shouldRefresh ? "yes" : "n
       : "No artifact refresh policy stored.";
     const currentTopic = extractCurrentTopic(message, history);
     const outputMode = buildModeContext(`${message}\n\n${currentTopic}\n\n${transcriptSummary}`);
+    const responseMode = determineResponseMode({
+      userMessage: message,
+      hasUploadedFiles: false,
+      isFollowup: history.some((entry) => entry.role === "user"),
+    });
 
     console.info("[chat] evidence context attached", {
       activeCaseId: caseId,
@@ -343,6 +349,8 @@ ${JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT}
 ${buildAssistanceProfileInstruction(assistanceProfile)}
 
 ${outputMode.instruction}
+
+${buildResponseModeInstruction(responseMode)}
 
 --------------------
 VEHICLE

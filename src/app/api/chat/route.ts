@@ -23,6 +23,7 @@ import type { StoredCaseData } from "@/lib/cases/getCaseById";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { buildProductAccessGuard } from "@/lib/featureAccess";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
+import { buildResponseModeInstruction, determineResponseMode } from "@/lib/ai/responseMode";
 import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 import {
   classifyRetryableProviderError,
@@ -328,6 +329,15 @@ function extractLatestUserMessage(messages: IncomingMessage[] = []): string {
     .find((message) => message?.role === "user");
 
   return lastUserMessage ? extractTextContent(lastUserMessage.content).trim() : "";
+}
+
+function isFollowupTurn(messages: IncomingMessage[] = []): boolean {
+  const conversationalMessages = messages.filter(
+    (message) => message?.role === "user" || message?.role === "assistant"
+  );
+  const userMessages = conversationalMessages.filter((message) => message.role === "user");
+
+  return conversationalMessages.length > 2 && userMessages.length > 1;
 }
 
 function resolveJurisdictionFromBody(
@@ -932,6 +942,11 @@ export async function POST(req: Request) {
     const userMessage = extractLatestUserMessage(body.messages || []);
     const conversationContext = formatRecentConversation(body.messages || []);
     const outputMode = buildModeContext(`${userMessage}\n\n${conversationContext}`);
+    const responseMode = determineResponseMode({
+      userMessage,
+      hasUploadedFiles: documents.length > 0,
+      isFollowup: isFollowupTurn(body.messages || []),
+    });
     const activeCase = body.activeCaseId
       ? await getCaseById(body.activeCaseId, {
           ownerUserId: user.id,
@@ -1047,6 +1062,7 @@ export async function POST(req: Request) {
       buildProductAccessGuard(body.productAccess),
       buildAssistanceProfileInstruction(body.assistanceProfile),
       outputMode.instruction,
+      buildResponseModeInstruction(responseMode),
       buildActiveCaseSystemGuard({
         hasStoredEvidence: activeCaseHasStoredEvidence,
         hasVehicleContext: activeCaseHasVehicleContext,

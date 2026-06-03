@@ -17,9 +17,11 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     "clerk-nextjs/**",
     "clerk-nextjs-sample-disabled/**",
+    "Collision-IQ/**",
     "android/**",
     "my-mcp-server/build/**",
     ".tmp/**",
+    "prisma/seed.js",
     "scripts/run-vehicle-identity-tests.cjs",
   ]),
 ]);
