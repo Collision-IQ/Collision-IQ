@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { useUser } from "@clerk/nextjs";
+import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import {
   Paperclip,
@@ -57,6 +57,7 @@ import AttachmentPreviewModal, {
   type PreviewAttachment,
 } from "@/components/AttachmentPreviewModal";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
+import { isNative, saveAndShareBlob } from "@/lib/native";
 import { buildPlanRecommendationGuard, canAccessFeature } from "@/lib/featureAccess";
 import { emitSafeCrmEventFromClient } from "@/lib/crm/events";
 import { buildNextBatchPrompt, buildUploadBatchGuidance } from "@/lib/uploadBatching";
@@ -351,6 +352,7 @@ const DEFAULT_UPLOAD_LIMIT_ENTITLEMENTS: Pick<
   isPlatformAdmin: false,
   entitlementSource: "starter_subscription",
 };
+const FALLBACK_UPLOAD_BATCH_FILE_LIMIT = 50;
 
 function formatCaseUpdateStatus(
   delta: RepairIntelligenceReport["reassessmentDelta"] | undefined,
@@ -663,6 +665,7 @@ export default function ChatWidget({
 }: ChatWidgetProps) {
   const router = useRouter();
   const { isLoaded: isUserLoaded, isSignedIn } = useUser();
+  const { getToken } = useAuth();
   const [chatSessionStorageKey, setChatSessionStorageKey] = useState(() =>
     getChatSessionStorageKey(activeCaseId)
   );
@@ -675,7 +678,9 @@ export default function ChatWidget({
   const [isExportingChat, setIsExportingChat] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentsOpen, setAttachmentsOpen] = useState(true);
-  const [mobileAttachmentsOpen, setMobileAttachmentsOpen] = useState(false);
+  const [mobileAttachmentsOpen, setMobileAttachmentsOpen] = useState(true);
+  const [isNativeClient, setIsNativeClient] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [previewAttachmentId, setPreviewAttachmentId] = useState<string | null>(null);
   const [replaceAttachmentId, setReplaceAttachmentId] = useState<string | null>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
@@ -692,6 +697,7 @@ export default function ChatWidget({
   const [recordingError, setRecordingError] = useState<string | null>(null);
   const [introDismissed, setIntroDismissed] = useState(false);
   const [fetchedViewerAccess, setFetchedViewerAccess] = useState<AccountEntitlements | null>(null);
+  const [entitlementLoadAttempted, setEntitlementLoadAttempted] = useState(false);
   const [uploadUiState, setUploadUiState] = useState<UploadUiState>("idle");
   const [selectedUploadNames, setSelectedUploadNames] = useState<string[]>([]);
   const [uploadUiMessage, setUploadUiMessage] = useState<string | null>(null);
@@ -733,6 +739,7 @@ export default function ChatWidget({
   const audioChunksRef = useRef<BlobPart[]>([]);
   const recordingMimeTypeRef = useRef("audio/webm");
   const chatSessionStorageKeyRef = useRef(chatSessionStorageKey);
+  const mobileAttachmentsUserToggledRef = useRef(false);
 
   const updateReviewProgress = useCallback(
     (update: SetStateAction<ReviewProgress>) => {
@@ -748,13 +755,18 @@ export default function ChatWidget({
   );
 
   const hasAnyAttachment = useMemo(() => attachments.length > 0, [attachments]);
-  const isLikelyMobileCaptureDevice = useMemo(() => {
-    if (typeof navigator === "undefined") return false;
-
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-      navigator.userAgent
-    );
-  }, []);
+  const hasAssistantResponse = useMemo(
+    () =>
+      messages.some(
+        (message) =>
+          message.role === "assistant" &&
+          message.id !== INITIAL_MESSAGE.id &&
+          !isSystemStatusMessage(message)
+      ),
+    [messages]
+  );
+  const shouldCompactMobileChat =
+    (isNativeClient || isMobileViewport) && hasAssistantResponse;
   const visionAttachmentCount = useMemo(
     () => attachments.filter((attachment) => attachment.hasVision).length,
     [attachments]
@@ -792,6 +804,24 @@ export default function ChatWidget({
   const showMobileUploadStatus =
     uploadUiState === "uploading" || uploadUiState === "error";
   const previousAttachmentCountRef = useRef(0);
+
+  useEffect(() => {
+    const mobileQuery = window.matchMedia("(max-width: 1023px)");
+
+    function syncMobileRuntime() {
+      setIsNativeClient(isNative());
+      setIsMobileViewport(mobileQuery.matches);
+    }
+
+    const frame = window.requestAnimationFrame(syncMobileRuntime);
+    mobileQuery.addEventListener("change", syncMobileRuntime);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      mobileQuery.removeEventListener("change", syncMobileRuntime);
+    };
+  }, []);
+
   useEffect(() => {
     const previousCount = previousAttachmentCountRef.current;
     if (attachments.length > 20 && previousCount <= 20) {
@@ -799,9 +829,16 @@ export default function ChatWidget({
     }
     previousAttachmentCountRef.current = attachments.length;
   }, [attachments.length]);
+
   useEffect(() => {
+    if (!attachments.length || mobileAttachmentsUserToggledRef.current) return;
+    setMobileAttachmentsOpen(!shouldCompactMobileChat);
+  }, [attachments.length, shouldCompactMobileChat]);
+
+  useEffect(() => {
+    if (!loading || !shouldCompactMobileChat || mobileAttachmentsUserToggledRef.current) return;
     setMobileAttachmentsOpen(false);
-  }, [loading]);
+  }, [loading, shouldCompactMobileChat]);
   useEffect(() => {
     if (viewerAccess) {
       return;
@@ -814,17 +851,38 @@ export default function ChatWidget({
     let cancelled = false;
     async function loadViewerAccess() {
       try {
+        const token = await getToken();
+        const API_BASE_URL =
+          process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+          (typeof window !== "undefined" ? window.location.origin : "");
+        console.log("API_BASE_URL", API_BASE_URL);
+        console.log("isNative", isNative());
+        console.log("HAS_CLERK_TOKEN", !!token);
+
         const response = await fetch("/api/account/entitlements", {
           credentials: "same-origin",
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         });
-        if (!response.ok) return;
+        if (!response.ok) {
+          console.warn("ENTITLEMENTS_RESPONSE_FAILED", response.status);
+          return;
+        }
 
         const entitlements = (await response.json()) as AccountEntitlements;
+        console.log("ENTITLEMENTS_RESPONSE", entitlements);
+        console.log("DERIVED_UPLOAD_CAP", entitlements.uploadCap);
+        console.log("DERIVED_IS_ADMIN", entitlements.isPlatformAdmin === true);
         if (!cancelled) {
           setFetchedViewerAccess(entitlements);
+          setEntitlementLoadAttempted(true);
         }
-      } catch {
+      } catch (error) {
+        console.warn("ENTITLEMENTS_LOAD_FAILED", error);
         // Server-side upload limits remain authoritative if entitlement loading fails.
+      } finally {
+        if (!cancelled) {
+          setEntitlementLoadAttempted(true);
+        }
       }
     }
 
@@ -832,7 +890,7 @@ export default function ChatWidget({
     return () => {
       cancelled = true;
     };
-  }, [isSignedIn, isUserLoaded, viewerAccess]);
+  }, [getToken, isSignedIn, isUserLoaded, viewerAccess]);
 
   const resolvedViewerAccess = isSignedIn ? viewerAccess ?? fetchedViewerAccess : null;
   const productPlan = resolvedViewerAccess?.plan ?? "none";
@@ -841,16 +899,32 @@ export default function ChatWidget({
     () => resolveUploadPlanLimits(resolvedViewerAccess ?? DEFAULT_UPLOAD_LIMIT_ENTITLEMENTS),
     [resolvedViewerAccess]
   );
-  const uploadLimitsLoading = isSignedIn && !resolvedViewerAccess;
-  const maxUploadBatchFiles = uploadLimitsLoading ? 0 : uploadPlanLimits.maxFilesPerReview;
+  const uploadLimitsLoading = isSignedIn && !resolvedViewerAccess && !entitlementLoadAttempted;
+  const uploadLimitsUnavailable = isSignedIn && !resolvedViewerAccess && entitlementLoadAttempted;
+  const effectiveUploadPlanLimits = uploadLimitsUnavailable
+    ? {
+        ...uploadPlanLimits,
+        maxFilesPerReview: FALLBACK_UPLOAD_BATCH_FILE_LIMIT,
+      }
+    : uploadPlanLimits;
+  const maxUploadBatchFiles = uploadLimitsLoading ? 0 : effectiveUploadPlanLimits.maxFilesPerReview;
   const uploadBatchGuidance = uploadLimitsLoading
     ? "Loading upload limits..."
+    : uploadLimitsUnavailable
+      ? "Upload limits are unavailable; the server will validate your upload access."
     : buildUploadBatchGuidance(
         totalFilesReviewed,
         attachments.length,
         maxUploadBatchFiles,
-        uploadPlanLimits.plan
+        effectiveUploadPlanLimits.plan
       );
+
+  useEffect(() => {
+    if (!isSignedIn || uploadLimitsLoading) return;
+    console.log("FINAL_DERIVED_UPLOAD_CAP", resolvedViewerAccess?.uploadCap);
+    console.log("FINAL_DERIVED_IS_ADMIN", resolvedViewerAccess?.isPlatformAdmin === true);
+    console.log("FINAL_MAX_UPLOAD_BATCH_FILES", maxUploadBatchFiles);
+  }, [isSignedIn, maxUploadBatchFiles, resolvedViewerAccess, uploadLimitsLoading]);
 
   useEffect(() => {
     attachmentsRef.current = attachments;
@@ -1087,7 +1161,7 @@ export default function ChatWidget({
 
   function setWorkspaceData(data: WorkspaceData | null) {
     workspaceDataRef.current = data;
-    if (data) {
+    if (data && shouldCompactMobileChat && !mobileAttachmentsUserToggledRef.current) {
       setMobileAttachmentsOpen(false);
     }
     onWorkspaceDataChange?.(data);
@@ -1374,7 +1448,7 @@ export default function ChatWidget({
 
       rejectedFiles.push({
         filename: file.name,
-        reason: getUploadBatchLimitMessage(uploadPlanLimits),
+        reason: getUploadBatchLimitMessage(effectiveUploadPlanLimits),
         code: "MAX_FILES_REACHED",
       });
       return false;
@@ -1602,7 +1676,9 @@ export default function ChatWidget({
     onUserPromptSent?.();
     onChatEngagement?.();
     stopSpeaking();
-    setMobileAttachmentsOpen(false);
+    if (shouldCompactMobileChat && !mobileAttachmentsUserToggledRef.current) {
+      setMobileAttachmentsOpen(false);
+    }
     setLoading(true);
     shouldAutoScrollRef.current = true;
 
@@ -2263,9 +2339,12 @@ export default function ChatWidget({
       formData.append("activeCaseId", analysisReportIdRef.current);
     }
 
+    const token = await getToken();
+    console.log("UPLOAD_HAS_CLERK_TOKEN", !!token);
     const res = await fetch("/api/upload", {
       method: "POST",
       credentials: "include",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       body: formData,
     });
     if (res.status === 401) {
@@ -2549,7 +2628,7 @@ export default function ChatWidget({
           `${successfulUploadCount} ${successfulUploadCount === 1 ? "file" : "files"} uploaded.`
         );
       }
-      if (successfulUploadCount > 0) {
+      if (successfulUploadCount > 0 && shouldCompactMobileChat && !mobileAttachmentsUserToggledRef.current) {
         setMobileAttachmentsOpen(false);
       }
     } catch (err) {
@@ -2646,7 +2725,7 @@ export default function ChatWidget({
           `${successfulUploadCount} ${successfulUploadCount === 1 ? "photo" : "photos"} uploaded.`
         );
       }
-      if (successfulUploadCount > 0) {
+      if (successfulUploadCount > 0 && shouldCompactMobileChat && !mobileAttachmentsUserToggledRef.current) {
         setMobileAttachmentsOpen(false);
       }
     } catch (err) {
@@ -2775,28 +2854,63 @@ export default function ChatWidget({
     setIsExportingChat(true);
 
     try {
+      console.info("[native-pdf-export] handleDownloadRedactedChat before await fetch", {
+        native: isNative(),
+        messageCount: exportMessages.length,
+        analysisTextLength: analysisText.length,
+      });
       const response = await fetch("/api/chat/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(buildChatExportPayload(exportMessages, analysisText)),
       });
+      console.info("[native-pdf-export] handleDownloadRedactedChat after await fetch", {
+        native: isNative(),
+        ok: response.ok,
+        status: response.status,
+        contentType: response.headers.get("Content-Type"),
+        contentDisposition: response.headers.get("Content-Disposition"),
+      });
 
       if (!response.ok) {
+        console.info("[native-pdf-export] handleDownloadRedactedChat before await response.json");
         const data = (await response.json().catch(() => null)) as { error?: string } | null;
+        console.info("[native-pdf-export] handleDownloadRedactedChat after await response.json", {
+          status: response.status,
+          hasError: Boolean(data?.error),
+        });
         pushSystemStatusMessage(resolveExportErrorMessage(response.status, data?.error));
         return;
       }
 
+      console.info("[native-pdf-export] handleDownloadRedactedChat before await response.blob");
       const blob = await response.blob();
-      const downloadUrl = URL.createObjectURL(blob);
+      console.info("[native-pdf-export] handleDownloadRedactedChat after await response.blob", {
+        blobSize: blob.size,
+        blobType: blob.type || "unknown",
+      });
       const filename = getDownloadFilename(response.headers.get("Content-Disposition"));
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(downloadUrl);
+      if (isNative()) {
+        console.info("[native-pdf-export] handleDownloadRedactedChat before await saveAndShareBlob", {
+          filename,
+          blobSize: blob.size,
+        });
+        const shared = await saveAndShareBlob(blob, filename, "Download Chat");
+        console.info("[native-pdf-export] handleDownloadRedactedChat after await saveAndShareBlob", {
+          filename,
+          blobSize: blob.size,
+          shared,
+        });
+      } else {
+        const downloadUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(downloadUrl);
+      }
     } catch (error) {
       console.warn("[chat-export] download failed", {
         message: error instanceof Error ? error.message : String(error),
@@ -3219,7 +3333,12 @@ export default function ChatWidget({
           <div ref={bottomRef} />
         </div>
 
-        <div className="z-20 min-h-[74px] shrink-0 border-t border-border bg-card px-2 py-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-3">
+        <div
+          className={[
+            "z-20 shrink-0 border-t border-border bg-card px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] sm:px-3",
+            shouldCompactMobileChat ? "min-h-[56px] py-1.5 lg:min-h-[74px] lg:py-2" : "min-h-[74px] py-2",
+          ].join(" ")}
+        >
           <div className="mx-auto w-full max-w-none">
             <div
               onDragEnter={handleUploadDragEnter}
@@ -3227,13 +3346,19 @@ export default function ChatWidget({
               onDragLeave={handleUploadDragLeave}
               onDrop={handleUploadDrop}
               className={[
-                "border px-2 py-2 transition",
+                "border transition",
+                shouldCompactMobileChat ? "px-1.5 py-1.5 lg:px-2 lg:py-2" : "px-2 py-2",
                 isDragActive
                   ? "border-[#b86a2d] bg-[#b86a2d]/10"
                   : "border-border bg-muted",
               ].join(" ")}
             >
-                <div className="flex flex-wrap items-center gap-2">
+                <div
+                  className={[
+                    "flex items-center",
+                    shouldCompactMobileChat ? "flex-nowrap gap-1.5 lg:flex-wrap lg:gap-2" : "flex-wrap gap-2",
+                  ].join(" ")}
+                >
               <input
                 type="file"
                 ref={fileInputRef}
@@ -3250,9 +3375,8 @@ export default function ChatWidget({
                 ref={cameraInputRef}
                 className="hidden"
                 accept="image/*"
-                {...(isLikelyMobileCaptureDevice && { capture: "environment" })}
                 disabled={disabled || uploadLimitsLoading}
-                title="Take photo"
+                title="Take or choose photo"
                 onChange={(e) => handleCameraSelected(e.target.files)}
               />
 
@@ -3260,7 +3384,10 @@ export default function ChatWidget({
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled || uploadLimitsLoading}
-                className="order-2 min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none"
+                className={[
+                  "order-2 min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none",
+                  shouldCompactMobileChat ? "hidden lg:inline-flex lg:items-center lg:justify-center" : "",
+                ].join(" ")}
                 aria-label="Attach PDF, image, short video, or ZIP archive"
               >
                 <Paperclip size={20} />
@@ -3270,17 +3397,22 @@ export default function ChatWidget({
                 type="button"
                 onClick={() => cameraInputRef.current?.click()}
                 disabled={disabled || uploadLimitsLoading}
-                className="order-2 min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none"
-                aria-label="Take photo"
+                className={[
+                  "order-2 rounded-md text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none",
+                  shouldCompactMobileChat ? "min-h-9 min-w-9 p-1.5 lg:min-h-10 lg:min-w-10 lg:p-2" : "min-h-10 min-w-10 p-2",
+                ].join(" ")}
+                aria-label="Take or choose photo"
               >
-                <Camera size={20} />
+                <Camera size={shouldCompactMobileChat ? 18 : 20} />
               </button>
 
               <button
                 type="button"
                 onClick={handleMicClick}
                 disabled={isTranscribing || disabled}
-                className={`order-2 min-h-10 min-w-10 rounded-md p-2 transition lg:order-none ${
+                className={`order-2 rounded-md transition lg:order-none ${
+                  shouldCompactMobileChat ? "min-h-9 min-w-9 p-1.5 lg:min-h-10 lg:min-w-10 lg:p-2" : "min-h-10 min-w-10 p-2"
+                } ${
                   isRecording
                     ? "text-red-400 hover:text-red-300"
                     : "text-muted-foreground hover:bg-card hover:text-[#C65A2A]"
@@ -3301,11 +3433,11 @@ export default function ChatWidget({
                 }
               >
                 {isTranscribing ? (
-                  <LoaderCircle size={20} className="animate-spin" />
+                  <LoaderCircle size={shouldCompactMobileChat ? 18 : 20} className="animate-spin" />
                 ) : isRecording ? (
-                  <Square size={20} />
+                  <Square size={shouldCompactMobileChat ? 18 : 20} />
                 ) : (
-                  <Mic size={20} />
+                  <Mic size={shouldCompactMobileChat ? 18 : 20} />
                 )}
               </button>
 
@@ -3325,10 +3457,17 @@ export default function ChatWidget({
                 rows={1}
                 placeholder={
                   hasAnyAttachment
-                    ? "Ask about the attached case file or add context..."
+                    ? shouldCompactMobileChat
+                      ? "Ask about files..."
+                      : "Ask about the attached case file or add context..."
                     : "Enter a repair analysis command or upload documentation..."
                 }
-                className="chat-composer-textarea order-1 min-h-11 max-h-[88px] min-w-0 flex-[1_1_100%] resize-none overflow-y-auto border border-input bg-background px-3 py-2 text-sm leading-5 text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[#b86a2d] focus:ring-1 focus:ring-[#b86a2d]/30 disabled:cursor-not-allowed disabled:opacity-50 lg:order-none lg:min-w-[280px] lg:flex-[1_1_420px]"
+                className={[
+                  "chat-composer-textarea min-w-0 resize-none overflow-y-auto border border-input bg-background text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[#b86a2d] focus:ring-1 focus:ring-[#b86a2d]/30 disabled:cursor-not-allowed disabled:opacity-50 lg:order-none lg:min-w-[280px] lg:flex-[1_1_420px]",
+                  shouldCompactMobileChat
+                    ? "order-2 min-h-9 max-h-16 flex-1 px-2.5 py-1.5 leading-5 lg:min-h-11 lg:max-h-[88px] lg:px-3 lg:py-2"
+                    : "order-1 min-h-11 max-h-[88px] flex-[1_1_100%] px-3 py-2 leading-5",
+                ].join(" ")}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -3349,7 +3488,10 @@ export default function ChatWidget({
               <button
                 onClick={handleSend}
                 disabled={loading || isTranscribing || disabled}
-                className="order-3 min-h-10 flex-1 rounded-md border border-[#b86a2d] bg-[#b86a2d] px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#c57934] disabled:opacity-50 sm:px-5 lg:order-none lg:flex-none"
+                className={[
+                  "order-3 rounded-md border border-[#b86a2d] bg-[#b86a2d] text-sm font-semibold text-black transition hover:bg-[#c57934] disabled:opacity-50 lg:order-none lg:flex-none",
+                  shouldCompactMobileChat ? "min-h-9 flex-none px-3 py-1.5 lg:min-h-10 lg:px-4 lg:py-2" : "min-h-10 flex-1 px-4 py-2 sm:px-5",
+                ].join(" ")}
               >
                 {loading ? "..." : "Send"}
               </button>
@@ -3440,20 +3582,32 @@ export default function ChatWidget({
               </div>
 
               {attachments.length > 0 && (
-                <div className="mt-2 border border-border bg-card p-1.5 lg:hidden">
-                  <div className="flex items-center justify-between gap-2 bg-muted px-2.5 py-2 text-xs text-muted-foreground">
+                <div
+                  className={[
+                    "border border-border bg-card p-1.5 lg:hidden",
+                    shouldCompactMobileChat ? "mt-1" : "mt-2",
+                  ].join(" ")}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      mobileAttachmentsUserToggledRef.current = true;
+                      setMobileAttachmentsOpen((value) => !value);
+                    }}
+                    disabled={disabled}
+                    className="flex w-full items-center justify-between gap-2 bg-muted px-2.5 py-2 text-left text-xs text-muted-foreground transition hover:bg-muted/70 disabled:cursor-not-allowed disabled:opacity-40"
+                    aria-expanded={mobileAttachmentsOpen}
+                    aria-label="Toggle uploaded files"
+                  >
                     <span className="min-w-0 truncate">
-                      Uploaded: {attachments.length} {attachments.length === 1 ? "file" : "files"}
+                      {attachments.length} {attachments.length === 1 ? "file uploaded" : "files uploaded"}
+                      {visionAttachmentCount > 0 ? ` - Vision: ${visionAttachmentCount}` : ""}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => setMobileAttachmentsOpen((value) => !value)}
-                      disabled={disabled}
-                      className="shrink-0 rounded-md border border-border bg-card px-2 py-1 text-[11px] font-medium text-foreground transition hover:bg-background disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      {mobileAttachmentsOpen ? "Hide files" : "View files"}
-                    </button>
-                  </div>
+                    <span className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-foreground">
+                      {mobileAttachmentsOpen ? "Hide" : "View"}
+                      {mobileAttachmentsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    </span>
+                  </button>
 
                   {mobileAttachmentsOpen && (
                     <div className="mt-2 max-h-[132px] space-y-2 overflow-y-auto pr-1">

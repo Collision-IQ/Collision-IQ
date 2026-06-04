@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { useUser } from "@clerk/nextjs";
+import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import type { UploadedDocument } from "@/lib/sessionStore";
@@ -17,6 +17,7 @@ import {
   VIDEO_UPLOAD_ACCEPT,
   VIDEO_UPLOAD_HINT,
 } from "@/lib/uploadSafety/uploadLimits";
+import { isNative } from "@/lib/native";
 import { VIDEO_MAX_BYTES } from "@/lib/uploadSafety/videoSafety";
 
 type Props = {
@@ -27,6 +28,7 @@ type Props = {
 type UploadStage = "idle" | "uploading" | "extracting_zip" | "preparing_analysis";
 
 const LARGE_UPLOAD_WARNING_BYTES = 10 * 1024 * 1024;
+const FALLBACK_UPLOAD_BATCH_FILE_LIMIT = 50;
 
 function isZipFile(file: Pick<File, "name" | "type">) {
   return (
@@ -61,6 +63,7 @@ export default function FileUpload({
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const { isLoaded, isSignedIn } = useUser();
+  const { getToken } = useAuth();
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,17 +86,41 @@ export default function FileUpload({
     let cancelled = false;
     async function loadEntitlements() {
       try {
+        const token = await getToken();
+        const API_BASE_URL =
+          process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+          (typeof window !== "undefined" ? window.location.origin : "");
+        console.log("API_BASE_URL", API_BASE_URL);
+        console.log("isNative", isNative());
+        console.log("HAS_CLERK_TOKEN", !!token);
+
         const response = await fetch("/api/account/entitlements", {
           credentials: "same-origin",
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         });
         if (!response.ok) {
+          console.warn("ENTITLEMENTS_RESPONSE_FAILED", response.status);
+          if (cancelled) return;
+          setMaxUploadBatchFiles(FALLBACK_UPLOAD_BATCH_FILE_LIMIT);
+          setUploadPlanName("starter");
+          setUploadHint("Upload limits are unavailable; the server will validate your upload access.");
+          console.log("FINAL_DERIVED_UPLOAD_CAP", undefined);
+          console.log("FINAL_DERIVED_IS_ADMIN", false);
+          console.log("FINAL_MAX_UPLOAD_BATCH_FILES", FALLBACK_UPLOAD_BATCH_FILE_LIMIT);
+          setUploadLimitsLoaded(true);
           return;
         }
 
         const entitlements = (await response.json()) as AccountEntitlements;
+        console.log("ENTITLEMENTS_RESPONSE", entitlements);
         if (cancelled) return;
 
         const uploadLimits = resolveUploadPlanLimits(entitlements);
+        console.log("DERIVED_UPLOAD_CAP", entitlements.uploadCap);
+        console.log("DERIVED_IS_ADMIN", entitlements.isPlatformAdmin === true);
+        console.log("FINAL_DERIVED_UPLOAD_CAP", entitlements.uploadCap);
+        console.log("FINAL_DERIVED_IS_ADMIN", entitlements.isPlatformAdmin === true);
+        console.log("FINAL_MAX_UPLOAD_BATCH_FILES", uploadLimits.maxFilesPerReview);
         setMaxUploadBatchFiles(uploadLimits.maxFilesPerReview);
         setUploadPlanName(uploadLimits.plan);
 
@@ -107,8 +134,16 @@ export default function FileUpload({
           setUploadHint(`You can upload PDFs, photos, screenshots, ZIP files, or short videos. ${getUploadBatchLimitMessage(uploadLimits)} Starter: 10 MB; ZIP files are not included.`);
         }
         setUploadLimitsLoaded(true);
-      } catch {
-        // Keep fail closed / loading state on error
+      } catch (error) {
+        console.warn("ENTITLEMENTS_LOAD_FAILED", error);
+        if (cancelled) return;
+        setMaxUploadBatchFiles(FALLBACK_UPLOAD_BATCH_FILE_LIMIT);
+        setUploadPlanName("starter");
+        setUploadHint("Upload limits are unavailable; the server will validate your upload access.");
+        console.log("FINAL_DERIVED_UPLOAD_CAP", undefined);
+        console.log("FINAL_DERIVED_IS_ADMIN", false);
+        console.log("FINAL_MAX_UPLOAD_BATCH_FILES", FALLBACK_UPLOAD_BATCH_FILE_LIMIT);
+        setUploadLimitsLoaded(true);
       }
     }
 
@@ -116,7 +151,7 @@ export default function FileUpload({
     return () => {
       cancelled = true;
     };
-  }, [isSignedIn]);
+  }, [getToken, isSignedIn]);
 
   async function uploadFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -185,9 +220,12 @@ export default function FileUpload({
         const formData = new FormData();
         formData.append("file", file);
 
+        const token = await getToken();
+        console.log("UPLOAD_HAS_CLERK_TOKEN", !!token);
         const res = await fetch("/api/upload", {
           method: "POST",
           credentials: "include",
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
           body: formData,
         });
 

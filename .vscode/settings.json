@@ -33,5 +33,6 @@
   },
   "sqlintingEnabled": false,
   "git.confirmSync": true,
-  "git.autofetch": true
+  "git.autofetch": true,
+  "prisma.pinToPrisma6": true
 }

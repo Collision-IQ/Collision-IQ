@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import { ArrowRight, Download, FileText, Mail } from "lucide-react";
 import ChatShell from "@/components/ChatShell";
 import ChatWidget from "@/components/ChatWidget";
@@ -73,6 +74,7 @@ import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeRepo
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 import { toCustomerFacingText } from "@/lib/ai/customerFacingText";
 import { isRetryableProviderMessage } from "@/lib/ai/providerRetryableError";
+import { isNative } from "@/lib/native";
 import type {
   AnalysisResult,
   ConfidenceIntegrity,
@@ -335,6 +337,7 @@ function isWithinTrialBadgeWindow(access: AccountEntitlements | null) {
 
 export function ChatbotWorkspacePage() {
   const router = useRouter();
+  const { getToken } = useAuth();
   const centerScrollRequestRef = useRef<((key: InsightKey) => void) | null>(null);
   const immersiveWorkspaceRef = useRef<HTMLDivElement | null>(null);
   const immersiveToolbarRef = useRef<HTMLDivElement | null>(null);
@@ -526,12 +529,26 @@ export function ChatbotWorkspacePage() {
 
     async function loadViewerAccess() {
       try {
+        const token = await getToken();
+        const API_BASE_URL =
+          process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+          (typeof window !== "undefined" ? window.location.origin : "");
+        console.log("API_BASE_URL", API_BASE_URL);
+        console.log("isNative", isNative());
+        console.log("HAS_CLERK_TOKEN", !!token);
+
         const response = await fetch("/api/account/entitlements", {
           credentials: "same-origin",
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         });
         if (!response.ok) return;
 
         const data = (await response.json()) as AccountEntitlements;
+        console.log("ENTITLEMENTS_RESPONSE", data);
+        console.log("DERIVED_UPLOAD_CAP", data.uploadCap);
+        console.log("DERIVED_IS_ADMIN", data.isPlatformAdmin === true);
+        console.log("FINAL_DERIVED_UPLOAD_CAP", data.uploadCap);
+        console.log("FINAL_DERIVED_IS_ADMIN", data.isPlatformAdmin === true);
         if (!cancelled) {
           setViewerAccess(data);
         }
@@ -546,7 +563,7 @@ export function ChatbotWorkspacePage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [getToken]);
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {

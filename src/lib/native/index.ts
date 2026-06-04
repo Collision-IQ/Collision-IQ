@@ -6,6 +6,7 @@ export {
   takeCameraPhoto,
   pickPhotoFromGallery,
   saveFileToDownloads,
+  saveAndShareBlob,
   readFileAsBase64,
   nativeShare,
   bindAudioToAppLifecycle,

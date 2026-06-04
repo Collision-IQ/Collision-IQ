@@ -1,5 +1,6 @@
 import jsPDF from "jspdf";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
+import { isNative, saveAndShareBlob } from "@/lib/native";
 import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
 import {
   cleanUserFacingPresentationText,
@@ -52,7 +53,14 @@ export async function buildCarrierPdfBlob(input: CarrierReportDocument): Promise
   });
 
   const layout = createPdfPageLayout(doc);
+  console.info("[native-pdf-export] buildCarrierPdfBlob before await loadLogoDataUrl", {
+    logoPath: redactedInput.brand.logoPath,
+  });
   const logoDataUrl = await loadLogoDataUrl(redactedInput.brand.logoPath).catch(() => null);
+  console.info("[native-pdf-export] buildCarrierPdfBlob after await loadLogoDataUrl", {
+    logoLoaded: Boolean(logoDataUrl),
+    logoDataUrlLength: logoDataUrl?.length ?? 0,
+  });
   const state: PdfRenderState = {
     y: layout.topMargin,
     lastPageNumber: doc.getCurrentPageInfo().pageNumber,
@@ -123,15 +131,39 @@ export async function buildCarrierPdfBlob(input: CarrierReportDocument): Promise
 }
 
 export async function exportCarrierPDF(input: CarrierReportDocument) {
+  console.info("[native-pdf-export] exportCarrierPDF before await buildCarrierPdfBlob", {
+    filename: input.filename || "collision-academy-report.pdf",
+    native: isNative(),
+  });
   const blob = await buildCarrierPdfBlob(input);
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = input.filename || "collision-academy-report.pdf";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  console.info("[native-pdf-export] exportCarrierPDF after await buildCarrierPdfBlob", {
+    filename: input.filename || "collision-academy-report.pdf",
+    native: isNative(),
+    blobSize: blob.size,
+    blobType: blob.type || "unknown",
+  });
+  const filename = input.filename || "collision-academy-report.pdf";
+  if (isNative()) {
+    console.info("[native-pdf-export] exportCarrierPDF before await saveAndShareBlob", {
+      filename,
+      blobSize: blob.size,
+    });
+    const shared = await saveAndShareBlob(blob, filename, "Download Carrier PDF");
+    console.info("[native-pdf-export] exportCarrierPDF after await saveAndShareBlob", {
+      filename,
+      blobSize: blob.size,
+      shared,
+    });
+  } else {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
 }
 
 function redactCarrierReportDocument(input: CarrierReportDocument): CarrierReportDocument {
@@ -283,13 +315,30 @@ export function ensurePdfSpace(
 }
 
 async function loadLogoDataUrl(path: string): Promise<string> {
+  console.info("[native-pdf-export] loadLogoDataUrl before await fetch", { path });
   const response = await fetch(path);
+  console.info("[native-pdf-export] loadLogoDataUrl after await fetch", {
+    path,
+    ok: response.ok,
+    status: response.status,
+  });
+  console.info("[native-pdf-export] loadLogoDataUrl before await response.blob", { path });
   const blob = await response.blob();
+  console.info("[native-pdf-export] loadLogoDataUrl after await response.blob", {
+    path,
+    blobSize: blob.size,
+    blobType: blob.type || "unknown",
+  });
 
-  return await new Promise<string>((resolve, reject) => {
+  console.info("[native-pdf-export] loadLogoDataUrl before await FileReader");
+  const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => {
       if (typeof reader.result === "string") {
+        console.info("[native-pdf-export] loadLogoDataUrl FileReader success", {
+          path,
+          dataUrlLength: reader.result.length,
+        });
         resolve(reader.result);
       } else {
         reject(new Error("Unable to read logo asset."));
@@ -298,6 +347,11 @@ async function loadLogoDataUrl(path: string): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("Unable to read logo asset."));
     reader.readAsDataURL(blob);
   });
+  console.info("[native-pdf-export] loadLogoDataUrl after await FileReader", {
+    path,
+    dataUrlLength: dataUrl.length,
+  });
+  return dataUrl;
 }
 
 function drawPageFrame(doc: jsPDF, pageWidth: number, pageHeight: number) {

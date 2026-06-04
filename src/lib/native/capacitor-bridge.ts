@@ -139,6 +139,119 @@ export async function saveFileToDownloads(
   }
 }
 
+export async function saveAndShareBlob(
+  blob: Blob,
+  filename: string,
+  title?: string
+): Promise<boolean> {
+  if (!isNative()) return false;
+  let step = "start";
+  try {
+    console.info("[native-pdf-export] saveAndShareBlob start", {
+      filename,
+      title: title || "Download File",
+      blobSize: blob.size,
+      blobType: blob.type || "unknown",
+    });
+
+    step = "blob-to-base64";
+    console.info("[native-pdf-export] before await blob-to-base64", {
+      blobSize: blob.size,
+    });
+    const base64Data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = reader.result as string;
+        const base64 = dataUrl.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    console.info("[native-pdf-export] after await blob-to-base64", {
+      blobSize: blob.size,
+      base64Length: base64Data.length,
+    });
+
+    step = "import-filesystem";
+    console.info("[native-pdf-export] before await import @capacitor/filesystem");
+    const { Filesystem, Directory } = await import('@capacitor/filesystem');
+    console.info("[native-pdf-export] after await import @capacitor/filesystem");
+
+    const directory = Directory.Cache;
+
+    step = "Filesystem.writeFile";
+    console.info("[native-pdf-export] before await Filesystem.writeFile", {
+      filename,
+      directory: "Cache",
+      blobSize: blob.size,
+      base64Length: base64Data.length,
+    });
+    await Filesystem.writeFile({
+      path: filename,
+      data: base64Data,
+      directory,
+      recursive: true,
+    });
+    console.info("[native-pdf-export] Filesystem.writeFile success", {
+      filename,
+      directory: "Cache",
+    });
+
+    step = "Filesystem.getUri";
+    console.info("[native-pdf-export] before await Filesystem.getUri", {
+      filename,
+      directory: "Cache",
+    });
+    const uriResult = await Filesystem.getUri({
+      path: filename,
+      directory,
+    });
+    console.info("[native-pdf-export] after await Filesystem.getUri", {
+      filename,
+      directory: "Cache",
+      uri: uriResult.uri,
+    });
+
+    step = "import-share";
+    console.info("[native-pdf-export] before await import @capacitor/share");
+    const { Share } = await import('@capacitor/share');
+    console.info("[native-pdf-export] after await import @capacitor/share");
+
+    const shareOptions = {
+      title: title || 'Download File',
+      url: uriResult.uri,
+    };
+    step = "Share.share";
+    console.info("[native-pdf-export] before await Share.share", {
+      title: shareOptions.title,
+      url: shareOptions.url,
+    });
+    console.info("[native-pdf-export] Share.share invocation", shareOptions);
+    await Share.share({
+      title: shareOptions.title,
+      url: shareOptions.url,
+    });
+    console.info("[native-pdf-export] Share.share success", {
+      filename,
+      directory: "Cache",
+      uri: uriResult.uri,
+    });
+    return true;
+  } catch (err) {
+    console.warn('[native] saveAndShareBlob failed', err);
+    console.error("[native-pdf-export] failed", {
+      step,
+      filename,
+      blobSize: blob.size,
+      message: err instanceof Error ? err.message : String(err),
+      error: err,
+    });
+    return false;
+  }
+}
+
+
 export async function readFileAsBase64(path: string): Promise<string | null> {
   if (!isNative()) return null;
   try {

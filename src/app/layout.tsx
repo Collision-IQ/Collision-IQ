@@ -3,8 +3,8 @@ import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import NativeAuthBridge from "@/components/NativeAuthBridge";
 import { ThemeProvider } from "@/components/theme-provider";
-import { hasClerkPublishableKey } from "@/lib/auth/config";
 
 function getSiteUrl() {
   const rawUrl =
@@ -101,7 +101,12 @@ export default function RootLayout({
   );
 
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      signInUrl="/sign-in"
+      signUpUrl="/sign-up"
+      signInFallbackRedirectUrl="/chatbot"
+      signUpFallbackRedirectUrl="/chatbot"
+    >
       <html lang="en" className="h-full" suppressHydrationWarning>
         <head>
           {/* Safe-area support for mobile */}
@@ -123,6 +128,7 @@ export default function RootLayout({
           <ThemeProvider>
             {content}
           </ThemeProvider>
+          <NativeAuthBridge />
           <SpeedInsights />
           <Analytics />
         </body>

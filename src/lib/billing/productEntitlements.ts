@@ -32,8 +32,14 @@ export function resolveProductEntitlements(
   return toAccountEntitlements(access, params);
 }
 
-export function canUploadFiles(entitlements: Pick<ProductEntitlements, "canUpload">) {
-  return entitlements.canUpload;
+export function canUploadFiles(
+  entitlements: Pick<ProductEntitlements, "canUpload" | "isPlatformAdmin"> | null | undefined
+) {
+  if (entitlements?.isPlatformAdmin === true) {
+    return true;
+  }
+
+  return entitlements?.canUpload === true;
 }
 
 export function getMaxUploadsPerReview(plan: BillingPlan) {

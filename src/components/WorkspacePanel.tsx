@@ -6,6 +6,7 @@ import {
 } from "@/components/workspace/estimateComparisonPresentation";
 import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 import type { EvidenceLinkModel } from "@/components/chatbot/evidenceLinks";
+import { isNative, saveAndShareBlob } from "@/lib/native";
 
 interface Props {
   workspaceData?: Partial<WorkspaceData> | null;
@@ -144,16 +145,20 @@ export default function WorkspacePanel({
             {data.supplementLetter && (
               <>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     const blob = new Blob([data.supplementLetter], { type: "text/plain" });
-                    const url = URL.createObjectURL(blob);
+                    if (isNative()) {
+                      await saveAndShareBlob(blob, "collision-iq-supplement.txt", "Generate Supplement Letter");
+                    } else {
+                      const url = URL.createObjectURL(blob);
 
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = "collision-iq-supplement.txt";
-                    a.click();
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = "collision-iq-supplement.txt";
+                      a.click();
 
-                    URL.revokeObjectURL(url);
+                      URL.revokeObjectURL(url);
+                    }
                   }}
                   className="mt-5 w-full rounded-xl bg-[#C65A2A]/18 p-3 text-xs text-foreground transition hover:bg-[#C65A2A]/26"
                 >

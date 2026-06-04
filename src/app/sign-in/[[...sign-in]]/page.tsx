@@ -1,4 +1,4 @@
-import { SignIn } from "@clerk/nextjs";
+import ClerkAuthForm from "@/components/ClerkAuthForm";
 import { hasClerkPublishableKey } from "@/lib/auth/config";
 
 export default function SignInPage() {
@@ -17,7 +17,7 @@ export default function SignInPage() {
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-5xl items-center justify-center px-6 py-16">
-      <SignIn />
+      <ClerkAuthForm mode="sign-in" />
     </main>
   );
 }

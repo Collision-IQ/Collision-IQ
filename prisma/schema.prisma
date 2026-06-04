@@ -50,25 +50,24 @@ model FileMirrorMap {
 }
 
 model User {
-  id               String               @id @default(cuid())
-  clerkUserId      String               @unique
-  email            String?              @unique
+  id               String            @id @default(cuid())
+  clerkUserId      String            @unique
+  email            String?           @unique
   firstName        String?
   lastName         String?
   imageUrl         String?
-  isPlatformAdmin  Boolean              @default(false)
+  isPlatformAdmin  Boolean           @default(false)
   defaultShopId    String?
-  createdAt        DateTime             @default(now())
-  updatedAt        DateTime             @updatedAt
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
   consents         ChatConsent[]
   featureOverrides FeatureOverride[]
-  ownedShops       Shop[]               @relation("ShopOwner")
+  ownedShops       Shop[]            @relation("ShopOwner")
   memberships      ShopMembership[]
   subscriptions    Subscription[]
-  serviceCases     AcademyServiceCase[]
   UsageCounter     UsageCounter[]
   usageRecords     UsageRecord[]
-  defaultShop      Shop?                @relation("UserDefaultShop", fields: [defaultShopId], references: [id])
+  defaultShop      Shop?             @relation("UserDefaultShop", fields: [defaultShopId], references: [id])
 }
 
 model Shop {
@@ -179,24 +178,24 @@ model FeatureOverride {
 }
 
 model UploadedAttachment {
-  id           String                   @id @default(cuid())
-  filename     String
-  type         String
-  text         String
-  imageDataUrl String?
-  pageCount    Int?
+  id             String                   @id @default(cuid())
+  filename       String
+  type           String
+  text           String
+  imageDataUrl   String?
+  pageCount      Int?
+  ownerType      ArtifactOwnerType
+  ownerId        String
+  sessionId      String?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
   classification String?
-  sizeBytes    Int?
-  sha256       String?
-  metadata     Json?
-  source       String?
-  sourceArchive String?
-  ownerType    ArtifactOwnerType
-  ownerId      String
-  sessionId    String?
-  createdAt    DateTime                 @default(now())
-  updatedAt    DateTime                 @updatedAt
-  reports      AnalysisReportArtifact[]
+  sizeBytes      Int?
+  sha256         String?
+  metadata       Json?
+  source         String?
+  sourceArchive  String?
+  reports        AnalysisReportArtifact[]
 
   @@index([ownerType, ownerId, createdAt])
   @@index([sessionId, createdAt])
@@ -253,20 +252,19 @@ model AcademyServiceCase {
   id                    String                   @id @default(cuid())
   userId                String?
   claimId               String?
-  serviceType           String
   stripeSessionId       String?                  @unique
   stripePaymentIntentId String?
-  stripeEventId         String?
-  status                AcademyServiceCaseStatus @default(PENDING_INTAKE)
-  attachmentIds         Json?
-  reviewSnapshot        Json?
-  checkoutMetadata      Json?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
   intakeNotes           String?
   internalNotes         String?
   lastUpdate            String?
-  createdAt             DateTime                 @default(now())
-  updatedAt             DateTime                 @updatedAt
-  user                  User?                    @relation(fields: [userId], references: [id])
+  serviceType           String
+  status                AcademyServiceCaseStatus @default(PENDING_INTAKE)
+  stripeEventId         String?
+  attachmentIds         Json?
+  reviewSnapshot        Json?
+  checkoutMetadata      Json?
 
   @@index([userId])
   @@index([claimId])
@@ -290,7 +288,7 @@ model ReportSend {
   openedAt        DateTime?
   rawEvent        Json?
   createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  updatedAt       DateTime  @default(now()) @updatedAt
 
   @@index([caseId])
   @@index([resendId])
@@ -306,16 +304,14 @@ model Regulation {
   rule          String
   citation      String
   sourceUrl     String?   @map("source_url")
-  sourceName    String?   @map("source_name")
   applicability String?
   severity      String?
   effectiveDate DateTime? @map("effective_date")
+  sourceName    String?   @map("source_name")
   retrievedAt   DateTime? @map("retrieved_at")
   verifiedBy    String?   @map("verified_by")
   notes         String?
 
-  @@index([state])
-  @@index([category])
   @@map("Regulation")
 }
 
@@ -365,7 +361,6 @@ model PolicyLegalReviewSnapshot {
   claimId                    String?  @map("claim_id")
   claimState                 String?  @map("claim_state")
   regulationIdsUsed          Json     @map("regulation_ids_used")
-  regulationSourcesUsed      Json     @map("regulation_sources_used")
   citationsUsed              Json     @map("citations_used")
   oemSourcesUsed             Json     @map("oem_sources_used")
   carrierSourcesUsed         Json     @map("carrier_sources_used")
@@ -373,6 +368,7 @@ model PolicyLegalReviewSnapshot {
   policyLegalConfidenceScore Int      @map("policy_legal_confidence_score")
   generatedAt                DateTime @map("generated_at")
   createdAt                  DateTime @default(now()) @map("created_at")
+  regulationSourcesUsed      Json     @default("[]") @map("regulation_sources_used")
 
   @@index([caseId])
   @@index([claimId])
@@ -418,6 +414,27 @@ model ExportResearchAuditSnapshot {
   @@index([reportType])
   @@index([generatedAt])
   @@map("ExportResearchAuditSnapshot")
+}
+
+model document_chunks {
+  id        Int                    @id @default(autoincrement())
+  content   String?
+  embedding Unsupported("vector")?
+  file_id   String?
+}
+
+model drive_watch_state {
+  id              String    @id
+  last_page_token String
+  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model rag_chunks {
+  id         String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  drive_path String?
+  text       String?
+  embedding  Unsupported("vector")?
+  created_at DateTime?              @default(now()) @db.Timestamp(6)
 }
 
 enum SubscriptionPlan {

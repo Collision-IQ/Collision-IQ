@@ -82,11 +82,7 @@ export function resolveUploadPlanLimits(
     "billingPlan" | "isPlatformAdmin" | "entitlementSource"
   > & { maxUploadsPerReview?: number | null; plan?: string; uploadCap?: number | null }
 ): UploadPlanLimits {
-  if (
-    entitlements.isPlatformAdmin ||
-    entitlements.uploadCap === null ||
-    entitlements.entitlementSource === "free_access_admin"
-  ) {
+  if (entitlements.isPlatformAdmin === true) {
     return {
       plan: "admin",
       maxUploadBytes: 50 * MB,

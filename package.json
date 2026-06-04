@@ -10,6 +10,9 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint .",
+    "cap:sync:prod": "cross-env CAP_SERVER_URL= npx cap sync android",
+    "cap:sync:debug": "cross-env CAP_SERVER_URL=http://10.0.2.2:3000 npx cap sync android",
+    "android:debug": "npm run cap:sync:debug && cd android && gradlew.bat assembleDebug",
     "test:zip-fixtures": "node tests/fixtures/zip/generate-fixtures.mjs",
     "test:vehicle-identity": "node scripts/run-vehicle-identity-tests.cjs",
     "test:claim-specific-reports": "node src/lib/ai/claimSpecificReportRegression.test.cjs"

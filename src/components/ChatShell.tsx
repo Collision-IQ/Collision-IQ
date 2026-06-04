@@ -4,12 +4,24 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { ClerkProvider, SignInButton, UserButton, useUser } from "@clerk/nextjs";
+import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
+import { ShoppingCart } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getPlatform, isNative } from "@/lib/native";
 
 function HeaderAuth() {
   const { isLoaded, isSignedIn } = useUser();
+  const [isNativeClient, setIsNativeClient] = useState(false);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setIsNativeClient(isNative());
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, []);
 
   return (
     <div className="flex min-h-10 shrink-0 items-center gap-2">
@@ -17,8 +29,10 @@ function HeaderAuth() {
         <UserButton />
       ) : isLoaded ? (
         <SignInButton
-          mode="modal"
-          forceRedirectUrl={typeof window !== "undefined" ? window.location.href : "/"}
+          mode={isNativeClient ? "redirect" : "modal"}
+          forceRedirectUrl="/chatbot"
+          fallbackRedirectUrl="/chatbot"
+          oauthFlow={isNativeClient ? "redirect" : "auto"}
         >
           <button
             type="button"
@@ -111,11 +125,17 @@ export default function ChatShell({
   const [isNativeAndroid, setIsNativeAndroid] = useState(false);
 
   useEffect(() => {
-    setIsNativeAndroid(isNative() && getPlatform() === "android");
+    const frame = window.requestAnimationFrame(() => {
+      setIsNativeAndroid(isNative() && getPlatform() === "android");
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
   }, []);
 
   async function openProductionSite() {
-    const url = "https://www.collision-iq.ai";
+    const url = "https://www.collision-iq.ai/technical-systems";
 
     try {
       if (isNative()) {
@@ -137,8 +157,7 @@ export default function ChatShell({
   const hasRight = useMemo(() => Boolean(effectiveRight), [effectiveRight]);
 
   return (
-    <ClerkProvider>
-      <div className="ci-workstation flex h-[100svh] max-w-full flex-col overflow-hidden bg-background text-foreground">
+    <div className="ci-workstation flex h-[100svh] max-w-full flex-col overflow-hidden bg-background text-foreground">
       <header className="relative z-10 min-h-[64px] shrink-0 border-b border-border bg-card">
         <div className="relative mx-auto flex min-h-[64px] max-w-none items-center justify-between gap-2 px-2 py-2 sm:px-3 md:gap-4 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
@@ -204,9 +223,10 @@ export default function ChatShell({
               <button
                 type="button"
                 onClick={openProductionSite}
-                className="min-h-9 shrink-0 rounded-md border border-border bg-muted px-2.5 py-1.5 text-[11px] font-medium text-foreground transition hover:bg-background sm:min-h-10 sm:px-3 sm:py-2 sm:text-xs"
+                className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border border-border bg-muted px-2.5 py-1.5 text-[11px] font-medium text-foreground transition hover:bg-background sm:min-h-10 sm:px-3 sm:py-2 sm:text-xs"
               >
-                Site
+                <ShoppingCart size={14} />
+                Shop
               </button>
             )}
 
@@ -292,6 +312,5 @@ export default function ChatShell({
         </Drawer>
       )}
     </div>
-  </ClerkProvider>
   );
 }
