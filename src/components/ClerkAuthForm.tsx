@@ -1,7 +1,7 @@
 "use client";
 
 import { SignIn, SignUp, useAuth, useUser } from "@clerk/nextjs";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { isNative } from "@/lib/native";
 
 const AUTH_REDIRECT_PATH = "/chatbot";
@@ -13,12 +13,10 @@ type Props = {
 export default function ClerkAuthForm({ mode }: Props) {
   const { getToken, isLoaded, isSignedIn, userId } = useAuth();
   const { user } = useUser();
-  const [isNativeClient, setIsNativeClient] = useState(false);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       const native = isNative();
-      setIsNativeClient(native);
       console.log("[auth] page loaded", {
         href: window.location.href,
         mode,
@@ -63,7 +61,6 @@ export default function ClerkAuthForm({ mode }: Props) {
   const redirectProps = {
     fallbackRedirectUrl: AUTH_REDIRECT_PATH,
     forceRedirectUrl: AUTH_REDIRECT_PATH,
-    oauthFlow: isNativeClient ? "redirect" as const : "auto" as const,
   };
 
   return mode === "sign-in" ? (
