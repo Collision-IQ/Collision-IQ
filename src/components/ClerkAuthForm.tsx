@@ -1,6 +1,7 @@
 "use client";
 
 import { SignIn, SignUp, useAuth, useSignIn, useUser } from "@clerk/nextjs";
+import { Capacitor } from "@capacitor/core";
 import { useEffect, useState } from "react";
 import { isNative } from "@/lib/native";
 
@@ -11,21 +12,33 @@ type Props = {
   mode: "sign-in" | "sign-up";
 };
 
+function isCapacitorAndroidNative(): boolean {
+  try {
+    return Capacitor.isNativePlatform() && Capacitor.getPlatform() === "android";
+  } catch {
+    return false;
+  }
+}
+
 export default function ClerkAuthForm({ mode }: Props) {
   const { getToken, isLoaded, isSignedIn, userId } = useAuth();
   const { signIn } = useSignIn();
   const { user } = useUser();
   const [isNativeClient, setIsNativeClient] = useState(false);
+  const [isNativeAndroidClient, setIsNativeAndroidClient] = useState(false);
   const isSignInLoaded = Boolean(signIn);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       const native = isNative();
+      const nativeAndroid = isCapacitorAndroidNative();
       setIsNativeClient(native);
+      setIsNativeAndroidClient(nativeAndroid);
       console.log("[auth] page loaded", {
         href: window.location.href,
         mode,
         isNative: native,
+        isNativeAndroid: nativeAndroid,
       });
     });
 
@@ -35,14 +48,21 @@ export default function ClerkAuthForm({ mode }: Props) {
   }, [mode]);
 
   useEffect(() => {
-    if (mode === "sign-in" && isNativeClient) {
+    if (mode === "sign-in" && isNativeClient && !isNativeAndroidClient) {
       console.log("[clerk-google-mobile] custom Google button rendered", {
         isNativeClient,
+        isNativeAndroidClient,
         isSignInLoaded,
         hasSignIn: Boolean(signIn),
       });
     }
-  }, [isNativeClient, isSignInLoaded, mode, signIn]);
+  }, [isNativeAndroidClient, isNativeClient, isSignInLoaded, mode, signIn]);
+
+  useEffect(() => {
+    if (mode === "sign-in" && isNativeAndroidClient) {
+      console.log("[clerk-google-mobile] Google sign-in hidden for Capacitor Android v1 release");
+    }
+  }, [isNativeAndroidClient, mode]);
 
   useEffect(() => {
     if (!isLoaded) {
@@ -132,7 +152,7 @@ export default function ClerkAuthForm({ mode }: Props) {
 
   return mode === "sign-in" ? (
     <div className="w-full max-w-md">
-      {isNativeClient ? (
+      {isNativeClient && !isNativeAndroidClient ? (
         <button
           type="button"
           onClick={handleGoogleSignIn}
@@ -140,6 +160,11 @@ export default function ClerkAuthForm({ mode }: Props) {
         >
           Continue with Google
         </button>
+      ) : null}
+      {isNativeAndroidClient ? (
+        <p className="mb-4 rounded-xl border border-amber-300/30 bg-amber-300/10 px-4 py-3 text-sm text-amber-50">
+          Google sign-in is temporarily unavailable in the mobile app. Please continue with email and password.
+        </p>
       ) : null}
       <div className={isNativeClient ? "native-email-signin-only" : undefined}>
         <SignIn
