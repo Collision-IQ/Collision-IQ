@@ -79,24 +79,10 @@ export default function ClerkAuthForm({ mode }: Props) {
   };
 
   const handleGoogleSignIn = async () => {
-    const signInWithLegacyRedirect = signIn as
-      | (typeof signIn & {
-          authenticateWithRedirect?: (params: {
-            strategy: "oauth_google";
-            redirectUrl: string;
-            redirectUrlComplete: string;
-          }) => Promise<void>;
-        })
-      | null;
-
     console.log("[clerk-google-mobile] custom Google button clicked", {
       isSignInLoaded,
       hasSignIn: Boolean(signIn),
       hasSso: Boolean(signIn && typeof signIn.sso === "function"),
-      hasAuthenticateWithRedirect: Boolean(
-        signInWithLegacyRedirect &&
-          typeof signInWithLegacyRedirect.authenticateWithRedirect === "function",
-      ),
     });
 
     if (!isSignInLoaded || !signIn) {
@@ -108,22 +94,22 @@ export default function ClerkAuthForm({ mode }: Props) {
       console.log("[clerk-google-mobile] starting Clerk SSO flow");
 
       if (typeof signIn.sso === "function") {
+        const appOrigin =
+          typeof window !== "undefined"
+            ? window.location.origin
+            : "https://www.collision-iq.ai";
+        const redirectCallbackUrl = `${appOrigin}${GOOGLE_SSO_CALLBACK_PATH}`;
+        const redirectUrl = `${appOrigin}${AUTH_REDIRECT_PATH}`;
+
+        console.log("[clerk-google-mobile] SSO redirect URLs", {
+          redirectCallbackUrl,
+          redirectUrl,
+        });
+
         await signIn.sso({
           strategy: "oauth_google",
-          redirectCallbackUrl: GOOGLE_SSO_CALLBACK_PATH,
-          redirectUrl: AUTH_REDIRECT_PATH,
-        });
-        return;
-      }
-
-      if (
-        signInWithLegacyRedirect &&
-        typeof signInWithLegacyRedirect.authenticateWithRedirect === "function"
-      ) {
-        await signInWithLegacyRedirect.authenticateWithRedirect({
-          strategy: "oauth_google",
-          redirectUrl: GOOGLE_SSO_CALLBACK_PATH,
-          redirectUrlComplete: AUTH_REDIRECT_PATH,
+          redirectCallbackUrl,
+          redirectUrl,
         });
         return;
       }
