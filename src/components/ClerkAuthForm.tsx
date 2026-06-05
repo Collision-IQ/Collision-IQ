@@ -36,7 +36,7 @@ export default function ClerkAuthForm({ mode }: Props) {
 
   useEffect(() => {
     if (mode === "sign-in" && isNativeClient) {
-      console.warn("[clerk-google-mobile] Use custom Google button on native");
+      console.log("[clerk-google-mobile] custom Google button rendered");
     }
   }, [isNativeClient, mode]);
 
@@ -77,14 +77,17 @@ export default function ClerkAuthForm({ mode }: Props) {
   const handleGoogleSignIn = async () => {
     if (!isSignInLoaded || !signIn) return;
 
+    console.log("[clerk-google-mobile] custom Google button clicked");
+
     try {
+      console.log("[clerk-google-mobile] starting Clerk SSO flow");
       await signIn.sso({
         strategy: "oauth_google",
         redirectCallbackUrl: GOOGLE_SSO_CALLBACK_PATH,
         redirectUrl: AUTH_REDIRECT_PATH,
       });
     } catch (err) {
-      console.error("[clerk-google-mobile] Google sign-in failed", err);
+      console.error("[clerk-google-mobile] custom Google failed", err);
     }
   };
 
@@ -110,11 +113,26 @@ export default function ClerkAuthForm({ mode }: Props) {
           Continue with Google
         </button>
       ) : null}
-      <SignIn
-        {...redirectProps}
-        signUpFallbackRedirectUrl={AUTH_REDIRECT_PATH}
-        appearance={appearance}
-      />
+      <div className={isNativeClient ? "native-email-signin-only" : undefined}>
+        <SignIn
+          {...redirectProps}
+          signUpFallbackRedirectUrl={AUTH_REDIRECT_PATH}
+          appearance={appearance}
+        />
+      </div>
+      {isNativeClient ? (
+        <style jsx global>{`
+          .native-email-signin-only .cl-socialButtons,
+          .native-email-signin-only .cl-socialButtonsBlockButton,
+          .native-email-signin-only .cl-socialButtonsBlockButtonText,
+          .native-email-signin-only [data-provider="google"],
+          .native-email-signin-only [data-provider-id="google"],
+          .native-email-signin-only button[aria-label*="Google"],
+          .native-email-signin-only button:has(svg) {
+            display: none !important;
+          }
+        `}</style>
+      ) : null}
     </div>
   ) : (
     <SignUp
