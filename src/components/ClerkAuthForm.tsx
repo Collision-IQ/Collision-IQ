@@ -36,9 +36,13 @@ export default function ClerkAuthForm({ mode }: Props) {
 
   useEffect(() => {
     if (mode === "sign-in" && isNativeClient) {
-      console.log("[clerk-google-mobile] custom Google button rendered");
+      console.log("[clerk-google-mobile] custom Google button rendered", {
+        isNativeClient,
+        isSignInLoaded,
+        hasSignIn: Boolean(signIn),
+      });
     }
-  }, [isNativeClient, mode]);
+  }, [isNativeClient, isSignInLoaded, mode, signIn]);
 
   useEffect(() => {
     if (!isLoaded) {
@@ -75,17 +79,56 @@ export default function ClerkAuthForm({ mode }: Props) {
   };
 
   const handleGoogleSignIn = async () => {
-    if (!isSignInLoaded || !signIn) return;
+    const signInWithLegacyRedirect = signIn as
+      | (typeof signIn & {
+          authenticateWithRedirect?: (params: {
+            strategy: "oauth_google";
+            redirectUrl: string;
+            redirectUrlComplete: string;
+          }) => Promise<void>;
+        })
+      | null;
 
-    console.log("[clerk-google-mobile] custom Google button clicked");
+    console.log("[clerk-google-mobile] custom Google button clicked", {
+      isSignInLoaded,
+      hasSignIn: Boolean(signIn),
+      hasSso: Boolean(signIn && typeof signIn.sso === "function"),
+      hasAuthenticateWithRedirect: Boolean(
+        signInWithLegacyRedirect &&
+          typeof signInWithLegacyRedirect.authenticateWithRedirect === "function",
+      ),
+    });
+
+    if (!isSignInLoaded || !signIn) {
+      console.error("[clerk-google-mobile] signIn not ready");
+      return;
+    }
 
     try {
       console.log("[clerk-google-mobile] starting Clerk SSO flow");
-      await signIn.sso({
-        strategy: "oauth_google",
-        redirectCallbackUrl: GOOGLE_SSO_CALLBACK_PATH,
-        redirectUrl: AUTH_REDIRECT_PATH,
-      });
+
+      if (typeof signIn.sso === "function") {
+        await signIn.sso({
+          strategy: "oauth_google",
+          redirectCallbackUrl: GOOGLE_SSO_CALLBACK_PATH,
+          redirectUrl: AUTH_REDIRECT_PATH,
+        });
+        return;
+      }
+
+      if (
+        signInWithLegacyRedirect &&
+        typeof signInWithLegacyRedirect.authenticateWithRedirect === "function"
+      ) {
+        await signInWithLegacyRedirect.authenticateWithRedirect({
+          strategy: "oauth_google",
+          redirectUrl: GOOGLE_SSO_CALLBACK_PATH,
+          redirectUrlComplete: AUTH_REDIRECT_PATH,
+        });
+        return;
+      }
+
+      console.error("[clerk-google-mobile] no supported Google SSO method");
     } catch (err) {
       console.error("[clerk-google-mobile] custom Google failed", err);
     }
@@ -107,8 +150,7 @@ export default function ClerkAuthForm({ mode }: Props) {
         <button
           type="button"
           onClick={handleGoogleSignIn}
-          disabled={!isSignInLoaded}
-          className="mb-4 flex w-full items-center justify-center rounded-lg border border-white/15 bg-white px-4 py-3 text-sm font-semibold text-neutral-950 shadow-[0_12px_32px_rgba(0,0,0,0.24)] transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+          className="relative z-50 mb-4 flex w-full items-center justify-center rounded-xl border border-white/20 bg-white px-4 py-3 text-sm font-semibold text-black shadow-sm pointer-events-auto disabled:opacity-60"
         >
           Continue with Google
         </button>
@@ -127,8 +169,7 @@ export default function ClerkAuthForm({ mode }: Props) {
           .native-email-signin-only .cl-socialButtonsBlockButtonText,
           .native-email-signin-only [data-provider="google"],
           .native-email-signin-only [data-provider-id="google"],
-          .native-email-signin-only button[aria-label*="Google"],
-          .native-email-signin-only button:has(svg) {
+          .native-email-signin-only button[aria-label*="Google"] {
             display: none !important;
           }
         `}</style>
