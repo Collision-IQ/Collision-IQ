@@ -61,7 +61,6 @@ export default function ClerkAuthForm({ mode }: Props) {
   const redirectProps = {
     fallbackRedirectUrl: AUTH_REDIRECT_PATH,
     forceRedirectUrl: AUTH_REDIRECT_PATH,
-    oauthFlow: "popup" as const,
   };
 
   return mode === "sign-in" ? (
