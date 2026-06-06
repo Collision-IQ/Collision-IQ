@@ -28,7 +28,6 @@ import type { WorkspaceData } from "@/types/workspaceTypes";
 import {
   buildAttachmentBatchStatus,
   buildAttachmentSummary,
-  buildCompactAttachmentSummary,
   formatBytes,
   formatAttachmentKind,
   isLikelyImageFile,
@@ -407,20 +406,40 @@ function isAttachmentSummaryMessage(value: string) {
 
 function buildUploadFailureStatus(failures: UploadFailureResult[]) {
   const namedFailures = failures.filter((failure) => failure.filename);
+  const maxFileFailures = namedFailures.filter(
+    (failure) => failure.code === "MAX_FILES_REACHED"
+  );
+  const otherFailures = namedFailures.filter(
+    (failure) => failure.code !== "MAX_FILES_REACHED"
+  );
 
   if (!namedFailures.length) {
     return "No files could be attached.";
   }
 
-  return `Could not attach ${namedFailures
-    .map((failure) => {
-      if (failure.code === "RUNTIME_BODY_LIMIT_EXCEEDED") {
-        return `${failure.filename}: This file is within your plan limit, but exceeds the current platform upload limit. Direct large-file upload support is coming soon. For now, split ZIPs over 20 MB into smaller uploads.`;
-      }
+  const parts: string[] = [];
 
-      return `${failure.filename}: ${failure.reason ?? "Upload failed."}`;
-    })
-    .join("; ")}`;
+  if (maxFileFailures.length) {
+    parts.push(
+      `${maxFileFailures.length} files were skipped because you can upload up to 6 files at a time.`
+    );
+  }
+
+  if (otherFailures.length) {
+    parts.push(
+      `Could not attach ${otherFailures
+        .map((failure) => {
+          if (failure.code === "RUNTIME_BODY_LIMIT_EXCEEDED") {
+            return `${failure.filename}: This file is within your plan limit, but exceeds the current platform upload limit. Direct large-file upload support is coming soon. For now, split ZIPs over 20 MB into smaller uploads.`;
+          }
+
+          return `${failure.filename}: ${failure.reason ?? "Upload failed."}`;
+        })
+        .join("; ")}`
+    );
+  }
+
+  return parts.join(" ");
 }
 
 function buildZipExtractionStatus(summaries: NonNullable<UploadResponse["zipSummaries"]>) {
@@ -783,19 +802,14 @@ export default function ChatWidget({
     [attachments, previewAttachmentId]
   );
   const effectiveAttachmentsOpen = attachments.length === 0 ? true : attachmentsOpen;
-  const compactAttachmentSummary = useMemo(
-    () => buildCompactAttachmentSummary(attachments),
-    [attachments]
-  );
-  const isLargeAttachmentTray = attachments.length > 20;
   const attachmentTraySummary = useMemo(() => {
     const parts = [
-      compactAttachmentSummary,
+      `Attachments (${attachments.length})`,
       visionAttachmentCount > 0 ? `Vision: ${visionAttachmentCount}` : null,
       `Files reviewed so far: ${totalFilesReviewed}`,
     ].filter(Boolean);
     return parts.join(" · ");
-  }, [compactAttachmentSummary, totalFilesReviewed, visionAttachmentCount]);
+  }, [attachments.length, totalFilesReviewed, visionAttachmentCount]);
   const selectedUploadStatusText =
     selectedUploadNames.length > 20
       ? `${selectedUploadNames.length} files selected`
@@ -1506,7 +1520,6 @@ export default function ChatWidget({
         acceptedCount: durationValidatedFiles.length,
         rejectedFiles,
       });
-      upsertSystemStatusMessage(buildUploadFailureStatus(rejectedFiles));
     }
 
     return { acceptedFiles: durationValidatedFiles, rejectedFiles };
@@ -1888,6 +1901,8 @@ export default function ChatWidget({
           };
         });
         setTotalFilesReviewed(nextReviewProgress.reviewedForDetermination);
+        setAttachmentsOpen(false);
+        setMobileAttachmentsOpen(false);
         emitSafeCrmEventFromClient({
           event: "upload_batch_completed",
           plan: productPlan,
@@ -2156,6 +2171,8 @@ export default function ChatWidget({
               };
             });
             setTotalFilesReviewed(nextReviewProgress.reviewedForDetermination);
+            setAttachmentsOpen(false);
+            setMobileAttachmentsOpen(false);
             console.info("[attachments] upload completion case state", {
               activeCaseId: analysisReportIdRef.current,
               reportId: analysisData.reportId ?? null,
@@ -2567,6 +2584,10 @@ export default function ChatWidget({
       }
 
       const files = acceptedFiles;
+      setSelectedUploadNames(files.map((file) => file.name));
+      setUploadUiMessage(
+        `Uploading ${files.length} ${files.length === 1 ? "file" : "files"}...`
+      );
       console.info("[attachments] upload batch selected", {
         source: "file",
         fileCount: files.length,
@@ -2628,7 +2649,9 @@ export default function ChatWidget({
           `${successfulUploadCount} ${successfulUploadCount === 1 ? "file" : "files"} uploaded.`
         );
       }
-      if (successfulUploadCount > 0 && shouldCompactMobileChat && !mobileAttachmentsUserToggledRef.current) {
+      if (successfulUploadCount > 0) {
+        setSelectedUploadNames([]);
+        setAttachmentsOpen(false);
         setMobileAttachmentsOpen(false);
       }
     } catch (err) {
@@ -2664,6 +2687,10 @@ export default function ChatWidget({
       }
 
       const files = acceptedFiles;
+      setSelectedUploadNames(files.map((file) => file.name));
+      setUploadUiMessage(
+        `Uploading ${files.length} ${files.length === 1 ? "photo" : "photos"}...`
+      );
       console.info("[attachments] upload batch selected", {
         source: "camera",
         fileCount: files.length,
@@ -2725,7 +2752,9 @@ export default function ChatWidget({
           `${successfulUploadCount} ${successfulUploadCount === 1 ? "photo" : "photos"} uploaded.`
         );
       }
-      if (successfulUploadCount > 0 && shouldCompactMobileChat && !mobileAttachmentsUserToggledRef.current) {
+      if (successfulUploadCount > 0) {
+        setSelectedUploadNames([]);
+        setAttachmentsOpen(false);
         setMobileAttachmentsOpen(false);
       }
     } catch (err) {
@@ -3600,11 +3629,10 @@ export default function ChatWidget({
                     aria-label="Toggle uploaded files"
                   >
                     <span className="min-w-0 truncate">
-                      {attachments.length} {attachments.length === 1 ? "file uploaded" : "files uploaded"}
-                      {visionAttachmentCount > 0 ? ` - Vision: ${visionAttachmentCount}` : ""}
+                      {attachmentTraySummary}
                     </span>
                     <span className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-foreground">
-                      {mobileAttachmentsOpen ? "Hide" : "View"}
+                      {mobileAttachmentsOpen ? "Hide file list" : "Show file list"}
                       {mobileAttachmentsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                     </span>
                   </button>
@@ -3673,21 +3701,7 @@ export default function ChatWidget({
                   aria-label="Toggle attachments"
                 >
                   <span className="min-w-0 truncate text-left">
-                    {isLargeAttachmentTray ? (
-                      attachmentTraySummary
-                    ) : (
-                      <>
-                        Attachments ({attachments.length})
-                        <span className="ml-2 text-muted-foreground">
-                          {visionAttachmentCount > 0
-                            ? `- Vision: ${visionAttachmentCount}`
-                            : ""}
-                        </span>
-                        <span className="ml-2 text-muted-foreground">
-                          Files reviewed so far: {totalFilesReviewed}
-                        </span>
-                      </>
-                    )}
+                    {attachmentTraySummary}
                   </span>
                   <span className="flex shrink-0 items-center gap-2">
                     {effectiveAttachmentsOpen ? "Hide file list" : "Show file list"}

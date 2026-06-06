@@ -27,7 +27,7 @@ export function buildUploadBatchGuidance(
       ? "Free accounts can upload 1 file per analysis."
       : maxBatchFiles === 1
       ? "You can upload 1 file per review."
-      : `You can upload up to ${maxBatchFiles} files at a time.`;
+      : `You can upload up to ${maxBatchFiles} files at a time. Start with the ${maxBatchFiles} most important files. After this review, upload the next set if needed.`;
 
   return [
     plan === "free"
