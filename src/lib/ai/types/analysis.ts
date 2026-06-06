@@ -361,6 +361,7 @@ export type ExportResearchSupportCategory =
   | "Research Leads - Not Jurisdiction Verified"
   | "Verified Policy Language"
   | "Verified OEM / Position Statement Support"
+  | "General Research Leads - Not Make-Specific"
   | "Internet-Sourced Industry Support"
   | "Inferred Repair Intelligence"
   | "Unsupported / Needs Review";

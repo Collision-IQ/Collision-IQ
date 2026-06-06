@@ -6,6 +6,7 @@ const SUPPORT_CATEGORIES: ExportResearchSupportCategory[] = [
   "Research Leads - Not Jurisdiction Verified",
   "Verified Policy Language",
   "Verified OEM / Position Statement Support",
+  "General Research Leads - Not Make-Specific",
   "Internet-Sourced Industry Support",
   "Inferred Repair Intelligence",
   "Unsupported / Needs Review",
@@ -57,9 +58,13 @@ function resolveCategoryTitle(
   category: ExportResearchSupportCategory
 ): string {
   if (category !== "Verified Law") {
-    return category === "Research Leads - Not Jurisdiction Verified"
-      ? "Research Leads — Not Jurisdiction Verified"
-      : category;
+    if (category === "Research Leads - Not Jurisdiction Verified") {
+      return "Research Leads — Not Jurisdiction Verified";
+    }
+    if (category === "General Research Leads - Not Make-Specific") {
+      return "General Research Leads — Not Make-Specific";
+    }
+    return category;
   }
 
   const lawSources = snapshot.sourcesAccepted.filter(

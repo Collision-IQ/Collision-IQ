@@ -2,6 +2,11 @@ import { createHash, randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { retrieveDriveSupport } from "@/lib/ai/driveRetrievalService";
 import { resolveJurisdiction, type ResolvedJurisdiction } from "@/lib/ai/jurisdictionResolver";
+import {
+  assessRetrievedDocumentApplicability,
+  resolveVehicleApplicabilityContext,
+  type VehicleApplicabilityContext,
+} from "@/lib/ai/vehicleApplicability";
 import type {
   ExportResearchAgentName,
   ExportResearchSnapshot,
@@ -36,13 +41,19 @@ export async function buildExportResearchSnapshot(params: {
 }): Promise<ExportResearchSnapshot> {
   const generatedAt = new Date().toISOString();
   const resolvedJurisdiction = resolveJurisdiction({ report: params.report });
+  const vehicleContext = resolveVehicleApplicabilityContext(
+    params.report.vehicle,
+    params.report.analysis?.vehicle,
+    params.report.estimateFacts?.vehicle,
+    params.report.analysis?.estimateFacts?.vehicle
+  );
   const queries = buildResearchQueries(params.reportType, params.report, resolvedJurisdiction);
   const driveQueries = queries.filter((query) => query.sourceTarget === "drive");
   const internetQueries = queries.filter((query) => query.sourceTarget === "internet");
-  const driveSources = await runDriveResearch(driveQueries, params.report, resolvedJurisdiction);
-  const internetSources = await runInternetResearch(internetQueries, params.report, resolvedJurisdiction);
+  const driveSources = await runDriveResearch(driveQueries, params.report, resolvedJurisdiction, vehicleContext);
+  const internetSources = await runInternetResearch(internetQueries, params.report, resolvedJurisdiction, vehicleContext);
   const reviewed = [...driveSources, ...internetSources];
-  const verified = verifyResearchSources(reviewed, resolvedJurisdiction.state ?? undefined);
+  const verified = verifyResearchSources(reviewed, resolvedJurisdiction.state ?? undefined, vehicleContext);
   const citationMap = buildCitationMap(verified.accepted);
   const unsupportedFindings = buildUnsupportedFindings(citationMap, verified.rejected, params.reportType);
   const snapshotBase = {
@@ -153,7 +164,8 @@ function buildResearchQueries(
 async function runDriveResearch(
   queries: ResearchQuery[],
   report: RepairIntelligenceReport,
-  resolvedJurisdiction: ResolvedJurisdiction
+  resolvedJurisdiction: ResolvedJurisdiction,
+  vehicleContext: VehicleApplicabilityContext
 ): Promise<ExportResearchSource[]> {
   const results: ExportResearchSource[] = [];
 
@@ -193,6 +205,8 @@ async function runDriveResearch(
           sourceJurisdiction: item.metadata.jurisdictionRelevance,
           detectedJurisdiction: resolvedJurisdiction.state ?? undefined,
           confidenceScore: confidenceToScore(item.confidence),
+          sourceText: `${item.filename} ${item.excerpt.pageLabel ?? ""} ${item.metadata.pageHint ?? ""}`,
+          vehicleContext,
         }),
         accepted: true,
       });
@@ -205,7 +219,8 @@ async function runDriveResearch(
 async function runInternetResearch(
   queries: ResearchQuery[],
   report: RepairIntelligenceReport,
-  resolvedJurisdiction: ResolvedJurisdiction
+  resolvedJurisdiction: ResolvedJurisdiction,
+  vehicleContext: VehicleApplicabilityContext
 ): Promise<ExportResearchSource[]> {
   const apiKey = process.env.SERPER_API_KEY || process.env.GOOGLE_SERPER_API_KEY;
   if (!apiKey) {
@@ -257,6 +272,8 @@ async function runInternetResearch(
           sourceJurisdiction: inferSourceJurisdiction(`${item.title} ${item.link}`),
           detectedJurisdiction: resolvedJurisdiction.state ?? undefined,
           confidenceScore: sourceType === "law" ? 0.72 : sourceType === "oem" ? 0.68 : 0.55,
+          sourceText: `${item.title} ${item.link} ${item.snippet ?? ""}`,
+          vehicleContext,
         }),
         accepted: true,
       });
@@ -275,7 +292,11 @@ type SerperPayload = {
   }>;
 };
 
-function verifyResearchSources(sources: ExportResearchSource[], detectedJurisdiction?: string) {
+function verifyResearchSources(
+  sources: ExportResearchSource[],
+  detectedJurisdiction?: string,
+  vehicleContext?: VehicleApplicabilityContext
+) {
   const accepted: ExportResearchSource[] = [];
   const rejected: ExportResearchSource[] = [];
   let uncitedLegalClaimsRejected = 0;
@@ -301,6 +322,31 @@ function verifyResearchSources(sources: ExportResearchSource[], detectedJurisdic
         confidenceScore: Math.min(source.confidenceScore, 0.55),
       });
       continue;
+    }
+
+    if (
+      source.sourceType === "oem" &&
+      source.supportCategory === "Verified OEM / Position Statement Support"
+    ) {
+      const oemRelevance = classifyOemSourceRelevance(
+        `${source.sourceTitle} ${source.locator} ${source.url ?? ""}`,
+        vehicleContext
+      );
+      if (oemRelevance !== "make_specific") {
+        accepted.push({
+          ...source,
+          supportCategory:
+            oemRelevance === "mismatched"
+              ? "Unsupported / Needs Review"
+              : "General Research Leads - Not Make-Specific",
+          confidenceScore: Math.min(source.confidenceScore, 0.55),
+          rejectionReason:
+            oemRelevance === "mismatched"
+              ? "OEM source names a different manufacturer family than the estimate vehicle."
+              : undefined,
+        });
+        continue;
+      }
     }
 
     if (source.supportCategory === "Verified Law" && !source.url && !source.driveFileId) {
@@ -361,6 +407,7 @@ function buildCitationMap(sources: ExportResearchSource[]): ExportResearchSnapsh
     "Research Leads - Not Jurisdiction Verified",
     "Verified Policy Language",
     "Verified OEM / Position Statement Support",
+    "General Research Leads - Not Make-Specific",
     "Internet-Sourced Industry Support",
     "Inferred Repair Intelligence",
     "Unsupported / Needs Review",
@@ -419,6 +466,8 @@ function mapSupportCategory(
     sourceJurisdiction?: string | null;
     detectedJurisdiction?: string;
     confidenceScore?: number;
+    sourceText?: string;
+    vehicleContext?: VehicleApplicabilityContext;
   }
 ): ExportResearchSupportCategory {
   if (sourceType === "law") {
@@ -431,10 +480,38 @@ function mapSupportCategory(
       : "Research Leads - Not Jurisdiction Verified";
   }
   if (sourceType === "policy") return "Verified Policy Language";
-  if (sourceType === "oem") return "Verified OEM / Position Statement Support";
+  if (sourceType === "oem") {
+    const relevance = classifyOemSourceRelevance(options?.sourceText ?? title, options?.vehicleContext);
+    if (relevance === "make_specific") return "Verified OEM / Position Statement Support";
+    if (relevance === "mismatched") return "Unsupported / Needs Review";
+    return "General Research Leads - Not Make-Specific";
+  }
   if (sourceType === "industry") return "Internet-Sourced Industry Support";
   if (/inferred|runtime|analysis/i.test(title)) return "Inferred Repair Intelligence";
   return "Unsupported / Needs Review";
+}
+
+type OemSourceRelevance = "make_specific" | "generic" | "mismatched";
+
+function classifyOemSourceRelevance(
+  text: string,
+  vehicleContext: VehicleApplicabilityContext | null | undefined
+): OemSourceRelevance {
+  const hasVehicleMake = Boolean(vehicleContext?.make || vehicleContext?.manufacturer || vehicleContext?.canonicalMake);
+  const applicability = assessRetrievedDocumentApplicability({
+    title: text,
+    vehicle: vehicleContext,
+  });
+
+  if (hasVehicleMake && applicability.keep && applicability.matchLevel !== "generic") {
+    return "make_specific";
+  }
+
+  if (applicability.matchLevel === "mismatched_vehicle" || !applicability.keep) {
+    return "mismatched";
+  }
+
+  return "generic";
 }
 
 function isVerifiedLawJurisdictionMatch(params: {
@@ -510,6 +587,12 @@ function stableSourceId(value: string): string {
 function hashSnapshot(value: unknown): string {
   return createHash("sha256").update(stableStringify(value)).digest("hex");
 }
+
+export const __exportResearchTestHooks = {
+  classifyOemSourceRelevance,
+  mapSupportCategory,
+  verifyResearchSources,
+};
 
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map((entry) => stableStringify(entry)).join(",")}]`;

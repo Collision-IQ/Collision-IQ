@@ -40,6 +40,51 @@ type VehicleTermGroup = {
 
 const VEHICLE_TERM_GROUPS: VehicleTermGroup[] = [
   {
+    family: "tesla",
+    canonicalMake: "Tesla",
+    manufacturerTerms: ["tesla", "tesla motors"],
+    modelTerms: ["model 3", "model s", "model x", "model y", "cybertruck"],
+  },
+  {
+    family: "stellantis",
+    canonicalMake: "Chrysler",
+    manufacturerTerms: [
+      "chrysler",
+      "dodge",
+      "jeep",
+      "ram",
+      "fca",
+      "fiat chrysler",
+      "stellantis",
+      "mopar",
+    ],
+    modelTerms: [
+      "grand wagoneer",
+      "wagoneer",
+      "pacifica",
+      "300",
+      "charger",
+      "challenger",
+      "durango",
+      "wrangler",
+      "grand cherokee",
+      "ram 1500",
+      "ram 2500",
+    ],
+  },
+  {
+    family: "honda",
+    canonicalMake: "Honda",
+    manufacturerTerms: ["honda", "acura", "american honda", "honda acura"],
+    modelTerms: ["accord", "civic", "cr v", "cr-v", "pilot", "odyssey", "tlx", "rdx", "mdx"],
+  },
+  {
+    family: "hyundai",
+    canonicalMake: "Hyundai",
+    manufacturerTerms: ["hyundai", "hyundai motor", "genesis", "kia"],
+    modelTerms: ["elantra", "sonata", "tucson", "santa fe", "palisade", "ioniq", "telluride", "sportage"],
+  },
+  {
     family: "bmw_group",
     canonicalMake: "BMW",
     manufacturerTerms: [
@@ -81,6 +126,12 @@ const VEHICLE_TERM_GROUPS: VehicleTermGroup[] = [
     canonicalMake: "GMC",
     manufacturerTerms: ["gmc"],
     modelTerms: ["sierra", "yukon", "acadia", "terrain", "canyon"],
+  },
+  {
+    family: "general_motors",
+    canonicalMake: "Cadillac",
+    manufacturerTerms: ["cadillac", "buick"],
+    modelTerms: ["escalade", "xt4", "xt5", "enclave", "envision"],
   },
 ];
 
