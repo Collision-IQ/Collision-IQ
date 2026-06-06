@@ -3,6 +3,7 @@ import type { ExportResearchSnapshot, ExportResearchSupportCategory } from "@/li
 
 const SUPPORT_CATEGORIES: ExportResearchSupportCategory[] = [
   "Verified Law",
+  "Research Leads - Not Jurisdiction Verified",
   "Verified Policy Language",
   "Verified OEM / Position Statement Support",
   "Internet-Sourced Industry Support",
@@ -56,7 +57,9 @@ function resolveCategoryTitle(
   category: ExportResearchSupportCategory
 ): string {
   if (category !== "Verified Law") {
-    return category;
+    return category === "Research Leads - Not Jurisdiction Verified"
+      ? "Research Leads — Not Jurisdiction Verified"
+      : category;
   }
 
   const lawSources = snapshot.sourcesAccepted.filter(

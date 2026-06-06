@@ -56,7 +56,7 @@ export function buildReviewCompletenessMessage(input: ReviewCompletenessInput): 
   );
 
   if (state === "FULL_FILE_REVIEW_COMPLETE") {
-    return `Reviewed ${reviewed} of ${total} reviewable files. Full reviewable-file review complete.`;
+    return "All uploaded reviewable files were reviewed. This does not mean the claim file is complete. Key proof documents are still missing.";
   }
 
   if (state === "NEAR_COMPLETE_REVIEW") {

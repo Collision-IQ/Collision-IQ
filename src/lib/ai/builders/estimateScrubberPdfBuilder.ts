@@ -999,25 +999,29 @@ function buildEstimateDeltaSections(comparisonRows: EstimateComparisonRow[]): Ca
   const mode = detectEstimateDeltaMode(comparisonRows);
   const titles = getEstimateDeltaSectionTitles(mode);
   const sections: CarrierReportDocument["sections"] = [
-    {
-      title: titles.onlyFirst,
-      bullets: buildEstimateDeltaBullets(comparisonRows, "only_first", mode),
-    },
-    {
-      title: titles.onlySecond,
-      bullets: buildEstimateDeltaBullets(comparisonRows, "only_second", mode),
-    },
-    {
-      title: titles.changed,
-      bullets: buildEstimateDeltaBullets(comparisonRows, "changed", mode),
-    },
-    {
-      title: "Possible Rekey / Lock / Supplement Gaps",
-      bullets: buildEstimateDeltaBullets(comparisonRows, "gap", mode),
-    },
+    buildEstimateDeltaSection(comparisonRows, "only_first", mode, titles.onlyFirst),
+    buildEstimateDeltaSection(comparisonRows, "only_second", mode, titles.onlySecond),
+    buildEstimateDeltaSection(comparisonRows, "changed", mode, titles.changed),
+    buildEstimateDeltaSection(comparisonRows, "gap", mode, "Possible Rekey / Lock / Supplement Gaps"),
   ];
 
   return sections.filter((section) => (section.bullets?.length ?? 0) > 0);
+}
+
+function buildEstimateDeltaSection(
+  comparisonRows: EstimateComparisonRow[],
+  bucket: EstimateDeltaBucket,
+  mode: EstimateDeltaMode,
+  title: string
+): NonNullable<CarrierReportDocument["sections"]>[number] {
+  const result = buildEstimateDeltaBullets(comparisonRows, bucket, mode);
+
+  return {
+    title: result.truncated ? `Top ${title.toLowerCase()}` : title,
+    bullets: result.truncated
+      ? [`Showing ${result.visibleCount} of ${result.totalCount} matching items.`, ...result.bullets]
+      : result.bullets,
+  };
 }
 
 function getEstimateDeltaSectionTitles(mode: EstimateDeltaMode): {
@@ -1087,9 +1091,9 @@ function buildEstimateDeltaBullets(
   comparisonRows: EstimateComparisonRow[],
   bucket: EstimateDeltaBucket,
   mode: EstimateDeltaMode
-): string[] {
+): { bullets: string[]; totalCount: number; visibleCount: number; truncated: boolean } {
   const seenLabels = new Set<string>();
-  const bullets = comparisonRows
+  const allBullets = comparisonRows
     .filter((row) => !isEstimateDeltaExcludedRow(row))
     .filter((row) => rowMatchesEstimateDeltaBucket(row, bucket, mode))
     .map((row) => formatEstimateDeltaBullet(row, bucket, mode))
@@ -1101,25 +1105,35 @@ function buildEstimateDeltaBullets(
       }
       seenLabels.add(label);
       return true;
-    })
-    .slice(0, 8);
+    });
+  const bullets = allBullets.slice(0, 8);
 
   if (bullets.length > 0) {
-    return bullets;
+    return {
+      bullets,
+      totalCount: allBullets.length,
+      visibleCount: bullets.length,
+      truncated: allBullets.length > bullets.length,
+    };
   }
 
+  let fallback: string[];
   switch (bucket) {
     case "only_first":
-      return ["No added items isolated from the newer estimate."];
+      fallback = ["No added items isolated from the newer estimate."];
+      break;
     case "only_second":
-      return ["No items missing from the newer estimate were isolated."];
+      fallback = ["No items missing from the newer estimate were isolated."];
+      break;
     case "changed":
-      return ["No changed labor, quantity, or price lines were isolated."];
+      fallback = ["No changed labor, quantity, or price lines were isolated."];
+      break;
     case "gap":
-      return ["No rekey, lock, or supplement gap was detectable."];
-    default:
-      return [];
+      fallback = ["No rekey, lock, or supplement gap was detectable."];
+      break;
   }
+
+  return { bullets: fallback, totalCount: 0, visibleCount: fallback.length, truncated: false };
 }
 
 function rowMatchesEstimateDeltaBucket(

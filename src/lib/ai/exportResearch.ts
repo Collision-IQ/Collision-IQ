@@ -9,6 +9,8 @@ import type {
   RepairIntelligenceReport,
 } from "@/lib/ai/types/analysis";
 
+const VERIFIED_LAW_CONFIDENCE_THRESHOLD = 0.7;
+
 export type ResearchableExportType = ExportResearchSnapshot["reportType"];
 
 type ResearchQuery = {
@@ -38,7 +40,7 @@ export async function buildExportResearchSnapshot(params: {
   const driveSources = await runDriveResearch(driveQueries, params.report);
   const internetSources = await runInternetResearch(internetQueries, params.report);
   const reviewed = [...driveSources, ...internetSources];
-  const verified = verifyResearchSources(reviewed);
+  const verified = verifyResearchSources(reviewed, inferJurisdiction(params.report));
   const citationMap = buildCitationMap(verified.accepted);
   const unsupportedFindings = buildUnsupportedFindings(citationMap, verified.rejected, params.reportType);
   const snapshotBase = {
@@ -179,7 +181,11 @@ async function runDriveResearch(
         jurisdiction: item.metadata.jurisdictionRelevance ?? inferJurisdiction(report),
         confidenceScore: confidenceToScore(item.confidence),
         agent: query.agent,
-        supportCategory: mapSupportCategory(sourceType, item.filename),
+        supportCategory: mapSupportCategory(sourceType, item.filename, {
+          sourceJurisdiction: item.metadata.jurisdictionRelevance,
+          detectedJurisdiction: inferJurisdiction(report),
+          confidenceScore: confidenceToScore(item.confidence),
+        }),
         accepted: true,
       });
     }
@@ -238,7 +244,11 @@ async function runInternetResearch(
         jurisdiction: inferJurisdiction(report),
         confidenceScore: sourceType === "law" ? 0.72 : sourceType === "oem" ? 0.68 : 0.55,
         agent: query.agent,
-        supportCategory: mapSupportCategory(sourceType, item.title),
+        supportCategory: mapSupportCategory(sourceType, item.title, {
+          sourceJurisdiction: inferJurisdiction(report),
+          detectedJurisdiction: inferJurisdiction(report),
+          confidenceScore: sourceType === "law" ? 0.72 : sourceType === "oem" ? 0.68 : 0.55,
+        }),
         accepted: true,
       });
     }
@@ -256,7 +266,7 @@ type SerperPayload = {
   }>;
 };
 
-function verifyResearchSources(sources: ExportResearchSource[]) {
+function verifyResearchSources(sources: ExportResearchSource[], detectedJurisdiction?: string) {
   const accepted: ExportResearchSource[] = [];
   const rejected: ExportResearchSource[] = [];
   let uncitedLegalClaimsRejected = 0;
@@ -267,6 +277,22 @@ function verifyResearchSources(sources: ExportResearchSource[]) {
 
   for (const source of sources) {
     let rejectionReason: string | null = null;
+    const lawJurisdictionVerified =
+      source.sourceType !== "law" ||
+      isVerifiedLawJurisdictionMatch({
+        sourceJurisdiction: source.jurisdiction,
+        detectedJurisdiction,
+        confidenceScore: source.confidenceScore,
+      });
+
+    if (source.sourceType === "law" && !lawJurisdictionVerified) {
+      accepted.push({
+        ...source,
+        supportCategory: "Research Leads - Not Jurisdiction Verified",
+        confidenceScore: Math.min(source.confidenceScore, 0.55),
+      });
+      continue;
+    }
 
     if (source.supportCategory === "Verified Law" && !source.url && !source.driveFileId) {
       rejectionReason = "Legal support has no URL or Drive file reference.";
@@ -323,6 +349,7 @@ function verifyResearchSources(sources: ExportResearchSource[]) {
 function buildCitationMap(sources: ExportResearchSource[]): ExportResearchSnapshot["citationMap"] {
   const categories: ExportResearchSupportCategory[] = [
     "Verified Law",
+    "Research Leads - Not Jurisdiction Verified",
     "Verified Policy Language",
     "Verified OEM / Position Statement Support",
     "Internet-Sourced Industry Support",
@@ -378,14 +405,78 @@ function mapWebSourceType(title: string, url: string): ExportResearchSource["sou
 
 function mapSupportCategory(
   sourceType: ExportResearchSource["sourceType"],
-  title: string
+  title: string,
+  options?: {
+    sourceJurisdiction?: string | null;
+    detectedJurisdiction?: string;
+    confidenceScore?: number;
+  }
 ): ExportResearchSupportCategory {
-  if (sourceType === "law") return "Verified Law";
+  if (sourceType === "law") {
+    return isVerifiedLawJurisdictionMatch({
+      sourceJurisdiction: options?.sourceJurisdiction,
+      detectedJurisdiction: options?.detectedJurisdiction,
+      confidenceScore: options?.confidenceScore ?? 0,
+    })
+      ? "Verified Law"
+      : "Research Leads - Not Jurisdiction Verified";
+  }
   if (sourceType === "policy") return "Verified Policy Language";
   if (sourceType === "oem") return "Verified OEM / Position Statement Support";
   if (sourceType === "industry") return "Internet-Sourced Industry Support";
   if (/inferred|runtime|analysis/i.test(title)) return "Inferred Repair Intelligence";
   return "Unsupported / Needs Review";
+}
+
+function isVerifiedLawJurisdictionMatch(params: {
+  sourceJurisdiction?: string | null;
+  detectedJurisdiction?: string;
+  confidenceScore: number;
+}) {
+  if (params.confidenceScore < VERIFIED_LAW_CONFIDENCE_THRESHOLD) {
+    return false;
+  }
+
+  const detected = normalizeJurisdictionToken(params.detectedJurisdiction);
+  const source = `${params.sourceJurisdiction ?? ""}`.trim();
+  if (!source) return false;
+
+  if (/\b(national|federal|us|u\.s\.|united states)\b/i.test(source)) {
+    return true;
+  }
+
+  if (!detected) return false;
+
+  const sourceTokens = extractJurisdictionTokens(source);
+  return sourceTokens.has(detected);
+}
+
+function extractJurisdictionTokens(value: string) {
+  const tokens = new Set<string>();
+  const normalized = value.toUpperCase();
+  const stateCodes = normalized.match(/\b(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY)\b/g) ?? [];
+  for (const code of stateCodes) tokens.add(code);
+
+  const stateNameMap: Record<string, string> = {
+    PENNSYLVANIA: "PA",
+    TEXAS: "TX",
+    GEORGIA: "GA",
+    NEW_YORK: "NY",
+    NEW_JERSEY: "NJ",
+    CALIFORNIA: "CA",
+    FLORIDA: "FL",
+  };
+
+  const nameKey = normalized.replace(/[^A-Z]+/g, "_");
+  for (const [name, code] of Object.entries(stateNameMap)) {
+    if (nameKey.includes(name)) tokens.add(code);
+  }
+
+  return tokens;
+}
+
+function normalizeJurisdictionToken(value: string | null | undefined) {
+  return extractJurisdictionTokens(value ?? "").values().next().value ?? "";
 }
 
 function inferJurisdiction(report: RepairIntelligenceReport): string | undefined {

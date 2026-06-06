@@ -253,7 +253,14 @@ run("review completeness treats indexed non-reviewable item as excluded, not ski
   const note = buildIndexedExclusionAuditNote(counts);
 
   assert.equal(counts.excludedFromReviewCount, 1);
-  assert.match(message, /^Reviewed 185 of 185 reviewable files\. Full reviewable-file review complete\.$/);
+  assert.equal(
+    message,
+    "All uploaded reviewable files were reviewed. This does not mean the claim file is complete. Key proof documents are still missing."
+  );
+  assert.match(message, /uploaded reviewable files were reviewed/i);
+  assert.match(message, /does not mean the claim file is complete/i);
+  assert.match(message, /Key proof documents are still missing/i);
+  assert.doesNotMatch(message, /Full reviewable-file review complete|final file-complete conclusion/i);
   assert.equal(/Only 185 of 186 files reviewed/i.test(message), false);
   assert.equal(
     note,

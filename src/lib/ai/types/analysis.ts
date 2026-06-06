@@ -358,6 +358,7 @@ export type ExportResearchAgentName =
 
 export type ExportResearchSupportCategory =
   | "Verified Law"
+  | "Research Leads - Not Jurisdiction Verified"
   | "Verified Policy Language"
   | "Verified OEM / Position Statement Support"
   | "Internet-Sourced Industry Support"

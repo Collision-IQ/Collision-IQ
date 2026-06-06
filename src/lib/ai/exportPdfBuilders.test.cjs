@@ -233,6 +233,78 @@ run("Repair Intelligence research sections suppress placeholder source-link refe
   assert.doesNotMatch(text, /Reference: source link|Not clearly Not clearly/);
 });
 
+run("Repair Intelligence research sections keep non-jurisdiction law leads out of Verified Law", () => {
+  const sections = buildExportResearchSections({
+    id: "research-law-jurisdiction",
+    reportType: "repair_intelligence",
+    generatedAt: "2026-05-19T00:00:00.000Z",
+    retrievalTimestamp: "2026-05-19T00:00:00.000Z",
+    immutableSnapshotHash: "hash",
+    agentsRun: ["Legal / Regulation Agent"],
+    searchQueriesUsed: [],
+    sourcesReviewed: [],
+    sourcesRejected: [],
+    unsupportedFindings: [],
+    citationMap: [],
+    verificationSummary: {
+      uncitedLegalClaimsRejected: 0,
+      fabricatedStatutesRejected: 0,
+      staleOrSupersededRegulationsRejected: 0,
+      unsupportedOemRequirementsRejected: 0,
+      inferredPolicyRightsDowngraded: 0,
+    },
+    sourcesAccepted: [
+      {
+        id: "pa-law",
+        sourceType: "law",
+        sourceTitle: "Pennsylvania unfair claim handling regulation",
+        url: "https://www.insurance.pa.gov/example",
+        locator: "PA DOI",
+        jurisdiction: "PA",
+        retrievalTimestamp: "2026-05-19T00:00:00.000Z",
+        confidenceScore: 0.86,
+        supportCategory: "Verified Law",
+        agent: "Legal / Regulation Agent",
+        accepted: true,
+      },
+      {
+        id: "tx-law",
+        sourceType: "law",
+        sourceTitle: "Texas claim handling bulletin",
+        url: "https://www.tdi.texas.gov/example",
+        locator: "TX DOI",
+        jurisdiction: "TX",
+        retrievalTimestamp: "2026-05-19T00:00:00.000Z",
+        confidenceScore: 0.86,
+        supportCategory: "Research Leads - Not Jurisdiction Verified",
+        agent: "Legal / Regulation Agent",
+        accepted: true,
+      },
+      {
+        id: "unknown-law",
+        sourceType: "law",
+        sourceTitle: "Generic claim handling article",
+        url: "https://example.test/law",
+        locator: "unknown jurisdiction",
+        jurisdiction: "not established",
+        retrievalTimestamp: "2026-05-19T00:00:00.000Z",
+        confidenceScore: 0.5,
+        supportCategory: "Research Leads - Not Jurisdiction Verified",
+        agent: "Legal / Regulation Agent",
+        accepted: true,
+      },
+    ],
+  });
+  const verifiedLaw = sections.find((section) => section.title === "Verified Law");
+  const researchLeads = sections.find((section) => section.title === "Research Leads — Not Jurisdiction Verified");
+
+  assert.ok(verifiedLaw);
+  assert.ok(researchLeads);
+  assert.match(JSON.stringify(verifiedLaw), /Pennsylvania unfair claim handling regulation/);
+  assert.doesNotMatch(JSON.stringify(verifiedLaw), /Texas claim handling bulletin|Generic claim handling article|not established/i);
+  assert.match(JSON.stringify(researchLeads), /Texas claim handling bulletin|Generic claim handling article/i);
+});
+
 run("shared PDF presentation cleanup normalizes duplicate not-clearly labels", () => {
   const text = [
     sanitizeReportText("Not clearly Not clearly shown"),
@@ -674,6 +746,40 @@ run("Policy Rights Review labels redacted policy metadata neutrally without impl
   assert.doesNotMatch(text, /Georgia \(GA\) policy indicators|Jurisdiction: Georgia \(GA\)/i);
 });
 
+run("Estimate Delta labels visible subset as top items when count is larger", () => {
+  const addedRows = Array.from({ length: 25 }, (_, index) => ({
+    id: `added-${index + 1}`,
+    category: "Operations",
+    operation: `Added operation ${index + 1}`,
+    lhsSource: "Original estimate",
+    rhsSource: "Newer estimate",
+    lhsValue: null,
+    rhsValue: `Added labor ${index + 1}`,
+    delta: "Added in newer estimate",
+    deltaType: "removed",
+  }));
+  const document = buildEstimatorChangeRequestListPdf({
+    report: REPORT,
+    analysis: {
+      ...ANALYSIS,
+      estimateComparisons: {
+        rows: addedRows,
+      },
+    },
+    panel: null,
+    assistantAnalysis: null,
+  });
+  const addedSummary = document.summary.find((item) => item.label === "Added");
+  const addedSection = document.sections.find((section) => /added in newer estimate/i.test(section.title));
+
+  assert.equal(addedSummary?.value, "25");
+  assert.ok(addedSection);
+  assert.match(addedSection.title, /^Top added in newer estimate$/i);
+  assert.equal(addedSection.bullets?.[0], "Showing 8 of 25 matching items.");
+  assert.equal((addedSection.bullets ?? []).filter((bullet) => /^Added operation \d+:/i.test(bullet)).length, 8);
+  assert.doesNotMatch(addedSection.title, /^Added In Newer Estimate$/i);
+});
+
 run("Annotated Estimate Review selects lower-cost carrier estimate and keeps comparison internal", () => {
   const comparisonAnalysis = {
     ...ANALYSIS,
@@ -780,7 +886,7 @@ run("Annotated Estimate Review selects lower-cost carrier estimate and keeps com
   assert.match(text, /Estimate Selected For Scrub/);
   assert.equal(estimatorList.header.title, "Estimate Delta / Change Requests");
   assert.equal(estimatorList.filename, "estimate-delta-change-requests.pdf");
-  assert.ok(estimatorList.sections.some((section) => /^(Added In Newer Estimate|ONLY IN ESTIMATE 1|ONLY IN SHOP ESTIMATE)$/i.test(section.title)));
+  assert.ok(estimatorList.sections.some((section) => /^(Added In Newer Estimate|Top added in newer estimate|ONLY IN ESTIMATE 1|Top only in estimate 1|ONLY IN SHOP ESTIMATE|Top only in shop estimate)$/i.test(section.title)));
   assert.ok(estimatorList.sections.some((section) => /^(Missing From Newer Estimate|ONLY IN ESTIMATE 2|ONLY IN CARRIER ESTIMATE|REMOVED FROM NEWER ESTIMATE)$/i.test(section.title)));
   assert.ok(estimatorList.sections.some((section) => /^(Changed Labor \/ Qty \/ Price|CHANGED FROM PRIOR ESTIMATE|CHANGED BETWEEN ESTIMATES)$/i.test(section.title)));
   assert.ok(estimatorList.sections.some((section) => section.title === "Possible Rekey / Lock / Supplement Gaps"));
