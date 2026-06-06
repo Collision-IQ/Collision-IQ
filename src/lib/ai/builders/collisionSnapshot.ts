@@ -206,24 +206,28 @@ function buildDamageSummary(renderModel: SnapshotRenderModel): string[] {
 }
 
 function buildRepairPlanVerdict(renderModel: SnapshotRenderModel): CollisionSnapshot["repairPlanVerdict"] {
-  const priorityCount = renderModel.disputeStrategy?.priorityFindings.length ?? 0;
-  const highSpecificFindings = renderModel.findingReasoning.filter(
-    (finding) => finding.claimSpecificity === "high" && finding.confidence >= 0.7
-  ).length;
   const incomplete = renderModel.confidenceIntegrity.completenessStatus !== "COMPLETE";
-  const hasDisputes = priorityCount > 0 || highSpecificFindings > 0 || renderModel.supplementItems.length > 0;
-  const moreCompletePlan = hasDisputes ? "SHOP" : incomplete ? "INCONCLUSIVE" : "CARRIER";
+  const posture = renderModel.selectedEstimatePosture ?? {
+    selectedEstimateLabel: "inconclusive",
+    selectedEstimateReason: "The shared estimate posture is not available for this snapshot.",
+    confidence: "low",
+    limitations: [],
+  };
+  const moreCompletePlan =
+    posture.selectedEstimateLabel === "shop"
+      ? "SHOP"
+      : posture.selectedEstimateLabel === "carrier"
+        ? "CARRIER"
+        : "INCONCLUSIVE";
   const carrierPlanStatus =
-    hasDisputes && renderModel.confidenceIntegrity.adjustedConfidence === "High"
+    moreCompletePlan !== "CARRIER" && renderModel.confidenceIntegrity.adjustedConfidence === "High"
       ? "PARTIAL"
-      : hasDisputes
+      : moreCompletePlan !== "CARRIER" && moreCompletePlan !== "INCONCLUSIVE"
         ? "LIGHT"
         : incomplete
           ? "INCONCLUSIVE"
           : "COMPLETE";
-  const reasonBase = hasDisputes
-    ? "The current file shows items that may need to be added, clarified, or explained before the estimate is treated as complete."
-    : "The current file does not clearly show a stronger competing repair-plan gap.";
+  const reasonBase = posture.selectedEstimateReason;
   const reason = incomplete
     ? `${reasonBase} Because the file set is not complete, this snapshot is not a final repair conclusion.`
     : reasonBase;

@@ -4115,6 +4115,7 @@ function buildCustomerReportRequest(params: {
     supportGaps: supportGaps.length > 0 ? supportGaps : findings,
     estimateSummary,
     imageSummary,
+    selectedEstimatePosture: params.renderModel.selectedEstimatePosture,
   };
 }
 
@@ -4150,6 +4151,7 @@ function createCustomerReportDocument(report: CustomerReport, params: {
     confidenceIntegrity: params.renderModel.confidenceIntegrity,
     findingReasoning: params.renderModel.findingReasoning,
     oemContradictions: params.renderModel.oemContradictions,
+    selectedEstimatePosture: params.renderModel.selectedEstimatePosture,
   });
 }
 

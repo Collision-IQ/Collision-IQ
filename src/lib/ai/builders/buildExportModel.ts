@@ -65,6 +65,10 @@ import {
 } from "@/lib/ui/presentationText";
 import { classifyOutputMode, type OutputMode } from "@/lib/ai/outputMode";
 import { normalizeReviewProgressCounts } from "@/lib/reviewCompleteness";
+import {
+  resolveEstimatePosture,
+  type EstimatePostureDecision,
+} from "@/lib/ai/estimatePosture";
 
 export const COLLISION_ACADEMY_HANDOFF_URL = "https://www.collision.academy/";
 export const REDACTED_INSURER_TOKEN = "[REDACTED_INSURER]";
@@ -105,6 +109,7 @@ export type ExportModel = {
   estimateFacts: EstimateFacts;
   reportFields: ExportReportFields;
   repairPosition: string;
+  selectedEstimatePosture: EstimatePostureDecision;
   positionStatement: string;
   supplementItems: ExportSupplementItem[];
   request: string;
@@ -306,6 +311,12 @@ export function buildExportModel(params: {
     supplementItems,
     reportFields
   );
+  const selectedEstimatePosture = resolveEstimatePosture({
+    report: params.report,
+    analysis: params.analysis,
+    estimateComparisons: params.analysis?.estimateComparisons,
+    narrative: repairPosition,
+  });
   const positionStatement = buildPositionStatement(params.report, params.analysis, supplementItems);
   const request = buildRequest(params.report, params.panel, supplementItems, chatInsights.request);
   const valuation = buildValuation(
@@ -432,6 +443,7 @@ export function buildExportModel(params: {
             allowUnsupportedSeamSealerNarrative
           )
         ),
+    selectedEstimatePosture,
     positionStatement: allLabelsSuppressed
       ? "The main dispute areas remain supportable, but low-quality extracted labels were removed before rendering."
       : cleanFormalExportText(

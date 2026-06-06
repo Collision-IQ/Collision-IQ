@@ -2,6 +2,11 @@ import type { CustomerReport } from "@/lib/ai/generateCustomerReport";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
 import type { ConfidenceIntegrity, OEMContradiction, ReportFindingReasoning } from "@/lib/ai/types/analysis";
 import {
+  alignCustomerEstimatePostureText,
+  buildCustomerEstimatePostureHeading,
+  type EstimatePostureDecision,
+} from "@/lib/ai/estimatePosture";
+import {
   containsCccWorkfileSignal,
   sanitizeCustomerFacingDocument,
   sanitizeCustomerReportForRender,
@@ -21,6 +26,7 @@ type BuildCustomerReportPdfParams = {
   confidenceIntegrity?: ConfidenceIntegrity;
   findingReasoning?: ReportFindingReasoning[];
   oemContradictions?: OEMContradiction[];
+  selectedEstimatePosture?: EstimatePostureDecision;
 };
 
 export function buildCustomerReportPdf({
@@ -35,8 +41,15 @@ export function buildCustomerReportPdf({
   confidenceIntegrity,
   findingReasoning = [],
   oemContradictions = [],
+  selectedEstimatePosture,
 }: BuildCustomerReportPdfParams): CarrierReportDocument {
   const sanitizedReport = sanitizeCustomerReportForRender(report);
+  const estimatePostureHeading = selectedEstimatePosture
+    ? buildCustomerEstimatePostureHeading(selectedEstimatePosture)
+    : "Why The Shop Estimate Looks More Complete";
+  const estimatePostureBody = selectedEstimatePosture
+    ? alignCustomerEstimatePostureText(sanitizedReport.whichRepairPlanLooksStronger, selectedEstimatePosture)
+    : sanitizedReport.whichRepairPlanLooksStronger;
   const cccDisclosure = buildCccDisclosure(report, findingReasoning, oemContradictions);
   const possibleMissingItems = buildPossibleMissingItems({
     report: sanitizedReport,
@@ -89,9 +102,9 @@ export function buildCustomerReportPdf({
         ].filter(Boolean).join(" "),
       },
       {
-        title: "Why The Shop Estimate Looks More Complete",
+        title: estimatePostureHeading,
         body: toCustomerFacingText(
-          sanitizedReport.whichRepairPlanLooksStronger,
+          estimatePostureBody,
           "The shop estimate appears to account for more of the inspection, repair, and verification steps that may be needed."
         ),
       },

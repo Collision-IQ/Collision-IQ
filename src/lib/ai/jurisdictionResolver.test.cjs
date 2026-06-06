@@ -174,6 +174,31 @@ run("owner and insured name proximity does not classify inspection ZIP as owner 
   assert.notEqual(resolved.confidence, "high");
 });
 
+run("Policy Rights and DOI render inspection-site jurisdiction source consistently", () => {
+  const report = buildReport([
+    "Owner: ANNEGAYL",
+    "Insured: ANNEGAYL",
+    "Inspection Site:",
+    "Conestoga Autobody",
+    "961 Lancaster Ave",
+    "Berwyn, PA 19312",
+  ].join("\n"));
+  const params = { report, analysis: ANALYSIS, panel: null, assistantAnalysis: null };
+  const policy = buildPolicyRightsReviewPdf(params);
+  const doi = buildDoiComplaintPacketPdf(params);
+  const policySummary = Object.fromEntries(policy.summary.map((item) => [item.label, item.value]));
+  const doiSummary = Object.fromEntries(doi.summary.map((item) => [item.label, item.value]));
+  const combined = JSON.stringify({ policy, doi });
+
+  assert.equal(policySummary.Jurisdiction, "Pennsylvania (PA)");
+  assert.equal(policySummary["Jurisdiction Source"], "inspection_site_zip_fallback");
+  assert.equal(policySummary["Jurisdiction Confidence"], "Medium");
+  assert.equal(doiSummary.Jurisdiction, policySummary.Jurisdiction);
+  assert.equal(doiSummary["Jurisdiction Source"], policySummary["Jurisdiction Source"]);
+  assert.equal(doiSummary["Jurisdiction Confidence"], policySummary["Jurisdiction Confidence"]);
+  assert.doesNotMatch(combined, /owner_zip|Jurisdiction Confidence","value":"High|Detection confidence: High/i);
+});
+
 run("Repair Intelligence, Policy Rights, and DOI use same resolved jurisdiction", () => {
   const report = buildReport([
     "Owner address: 123 Market Street, Philadelphia, PA 19103",

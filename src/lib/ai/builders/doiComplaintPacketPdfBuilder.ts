@@ -87,6 +87,8 @@ export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierR
       ...(insurer ? [{ label: "Insurer", value: insurer }] : []),
       { label: "DOI Readiness State", value: readiness.state },
       { label: "Jurisdiction", value: rightsReview.jurisdiction.state },
+      { label: "Jurisdiction Confidence", value: capitalize(rightsReview.jurisdiction.confidence) },
+      ...(rightsReview.jurisdiction.source ? [{ label: "Jurisdiction Source", value: rightsReview.jurisdiction.source }] : []),
       { label: "Evidence Items", value: String(evidenceIndex.length) },
       { label: "Repair/Estimate Attachments", value: String(exportModel.supplementItems.length) },
       { label: "Verified Regulation Sources", value: String(verifiedRegulationSources.length) },
@@ -252,6 +254,8 @@ function buildDoiReadinessReviewDocument(params: {
       ...(params.insurer ? [{ label: "Insurer", value: params.insurer }] : []),
       { label: "DOI Readiness State", value: params.readiness.state },
       { label: "Jurisdiction", value: params.rightsReview.jurisdiction.state },
+      { label: "Jurisdiction Confidence", value: capitalize(params.rightsReview.jurisdiction.confidence) },
+      ...(params.rightsReview.jurisdiction.source ? [{ label: "Jurisdiction Source", value: params.rightsReview.jurisdiction.source }] : []),
       { label: "Jurisdiction Confirmed", value: params.readiness.jurisdictionConfirmed ? "Yes" : "No" },
       { label: "Verified Regulation Sources", value: String(params.readiness.verifiedRegulationSourceCount) },
       { label: "Documented Conduct Items", value: String(params.readiness.documentedConduct.length) },
@@ -798,6 +802,10 @@ function formatPolicyCitation(citation: { title: string; source: string; sourceT
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function capitalize(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function dedupePolicyCitations<T extends { id?: string; title: string; source: string }>(citations: T[]): T[] {

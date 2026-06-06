@@ -59,6 +59,8 @@ export type PolicyRightsReviewModel = {
     state: string;
     confidence: "low" | "medium" | "high";
     basis: string;
+    source?: string;
+    evidenceLabel?: string;
   };
   appraisalRights: {
     detected: boolean;

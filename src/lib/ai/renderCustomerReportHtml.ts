@@ -4,6 +4,11 @@ import {
   toCustomerFacingList,
   toCustomerFacingText,
 } from "./customerFacingText";
+import {
+  alignCustomerEstimatePostureText,
+  buildCustomerEstimatePostureHeading,
+  type EstimatePostureDecision,
+} from "./estimatePosture";
 
 type RenderCustomerReportHtmlInput = {
   report: CustomerReport;
@@ -13,6 +18,7 @@ type RenderCustomerReportHtmlInput = {
   mileage?: string | null;
   estimateTotal?: string | null;
   generatedAt: string;
+  selectedEstimatePosture?: EstimatePostureDecision;
 };
 
 function renderList(items: string[]) {
@@ -35,7 +41,14 @@ function escapeHtml(value: string): string {
 export function renderCustomerReportHtml(input: RenderCustomerReportHtmlInput): string {
   const report = sanitizeCustomerReportForRender(input.report);
   const openingSummary = toCustomerFacingText(report.openingSummary);
-  const strongerPlan = toCustomerFacingText(report.whichRepairPlanLooksStronger);
+  const estimatePostureHeading = input.selectedEstimatePosture
+    ? buildCustomerEstimatePostureHeading(input.selectedEstimatePosture)
+    : "Why The Shop Estimate Looks More Complete";
+  const strongerPlan = toCustomerFacingText(
+    input.selectedEstimatePosture
+      ? alignCustomerEstimatePostureText(report.whichRepairPlanLooksStronger, input.selectedEstimatePosture)
+      : report.whichRepairPlanLooksStronger
+  );
   const safetyFirst = toCustomerFacingText(report.safetyFirst);
   const bottomLine = toCustomerFacingText(report.bottomLine);
 
@@ -171,7 +184,7 @@ export function renderCustomerReportHtml(input: RenderCustomerReportHtmlInput): 
     </div>
 
     <div class="section">
-      <h2>Why The Shop Estimate Looks More Complete</h2>
+      <h2>${escapeHtml(estimatePostureHeading)}</h2>
       <p>${escapeHtml(strongerPlan)}</p>
     </div>
 

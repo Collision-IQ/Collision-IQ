@@ -9,6 +9,7 @@ import { incrementUsage } from "@/lib/usage";
 import { generateCustomerReport } from "@/lib/ai/generateCustomerReport";
 import { sanitizeCustomerReportForRender } from "@/lib/ai/customerFacingText";
 import { renderCustomerReportHtml } from "@/lib/ai/renderCustomerReportHtml";
+import type { EstimatePostureDecision } from "@/lib/ai/estimatePosture";
 import { finalizeExportPayload } from "@/lib/ai/policy/finalizeExportPayload";
 import { collisionIqModels } from "@/lib/modelConfig";
 import { openai } from "@/lib/openai";
@@ -28,6 +29,7 @@ type CustomerReportRequestBody = {
   supportGaps?: unknown;
   estimateSummary?: unknown;
   imageSummary?: unknown;
+  selectedEstimatePosture?: unknown;
 };
 
 export async function POST(req: Request) {
@@ -105,6 +107,7 @@ export async function POST(req: Request) {
       mileage: coerceNullableText(body.mileage),
       estimateTotal: input.estimateTotal,
       generatedAt,
+      selectedEstimatePosture: coerceEstimatePosture(body.selectedEstimatePosture),
     });
 
     if (!isPlatformAdmin) {
@@ -135,6 +138,30 @@ export async function POST(req: Request) {
     console.error("CUSTOMER_REPORT_ERROR", error);
     return NextResponse.json({ error: "SERVER_ERROR" }, { status: 500 });
   }
+}
+
+function coerceEstimatePosture(value: unknown): EstimatePostureDecision | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const selectedEstimateLabel = record.selectedEstimateLabel;
+  const selectedEstimateReason = record.selectedEstimateReason;
+  const confidence = record.confidence;
+  const limitations = record.limitations;
+  if (
+    (selectedEstimateLabel !== "shop" && selectedEstimateLabel !== "carrier" && selectedEstimateLabel !== "inconclusive") ||
+    typeof selectedEstimateReason !== "string" ||
+    (confidence !== "high" && confidence !== "medium" && confidence !== "low")
+  ) {
+    return undefined;
+  }
+  return {
+    selectedEstimateLabel,
+    selectedEstimateReason,
+    confidence,
+    limitations: Array.isArray(limitations)
+      ? limitations.filter((item): item is string => typeof item === "string")
+      : [],
+  };
 }
 
 function coerceInputText(value: unknown): string {

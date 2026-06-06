@@ -129,6 +129,7 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
       ...(insurer ? [{ label: "Insurer", value: insurer }] : []),
       { label: "Jurisdiction", value: review.jurisdiction.state },
       { label: "Jurisdiction Confidence", value: capitalize(review.jurisdiction.confidence) },
+      ...(review.jurisdiction.source ? [{ label: "Jurisdiction Source", value: review.jurisdiction.source }] : []),
       {
         label: "Appraisal Rights",
         value: `${review.appraisalRights.detected ? "Detected" : "Not confirmed"} (${capitalize(
@@ -185,8 +186,9 @@ export function buildPolicyRightsReviewPdf(params: ExportBuilderInput): CarrierR
         bullets: [
           `Detected jurisdiction: ${review.jurisdiction.state}.`,
           `Detection confidence: ${capitalize(review.jurisdiction.confidence)}.`,
+          review.jurisdiction.source ? `Source: ${review.jurisdiction.source}.` : null,
           `Basis: ${humanizePolicyText(review.jurisdiction.basis)}`,
-        ],
+        ].filter((item): item is string => Boolean(item)),
       },
       {
         title: "Verified Regulation Support",
@@ -617,7 +619,9 @@ function toPolicyRightsJurisdiction(
   return {
     state: formatResolvedJurisdictionForReport(resolution),
     confidence: resolution.confidence === "unknown" ? "low" : resolution.confidence,
-    basis: `${resolution.evidenceLabel} Source: ${resolution.source}.`,
+    source: resolution.source,
+    evidenceLabel: resolution.evidenceLabel,
+    basis: resolution.evidenceLabel,
   };
 }
 
