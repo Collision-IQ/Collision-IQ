@@ -63,7 +63,7 @@ function resolveCategoryTitle(
   }
 
   const lawSources = snapshot.sourcesAccepted.filter(
-    (source) => source.supportCategory === "Verified Law"
+    (source) => source.supportCategory === "Verified Law" && hasVerifiedLawJurisdiction(source.jurisdiction)
   );
   const hasJurisdictionRelevance = lawSources.some((source) =>
     Boolean(source.jurisdiction?.trim())
@@ -76,7 +76,11 @@ function formatCategoryBullets(
   snapshot: ExportResearchSnapshot,
   category: ExportResearchSupportCategory
 ): string[] {
-  const sources = snapshot.sourcesAccepted.filter((source) => source.supportCategory === category);
+  const sources = snapshot.sourcesAccepted.filter(
+    (source) =>
+      source.supportCategory === category &&
+      (category !== "Verified Law" || hasVerifiedLawJurisdiction(source.jurisdiction))
+  );
   if (sources.length === 0) {
     return [
       `Unverified / Needs Source: No accepted ${category.toLowerCase()} source was available in the research snapshot.`,
@@ -102,6 +106,12 @@ function formatCategoryBullets(
       .filter(Boolean)
       .join(" ");
   });
+}
+
+function hasVerifiedLawJurisdiction(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text) return false;
+  return !/^(not established|unknown|false|null|n\/?a)$/i.test(text);
 }
 
 function formatMeaningfulReference(value: string | null | undefined): string | null {

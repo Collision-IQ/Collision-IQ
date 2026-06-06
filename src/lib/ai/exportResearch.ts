@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { retrieveDriveSupport } from "@/lib/ai/driveRetrievalService";
+import { resolveJurisdiction, type ResolvedJurisdiction } from "@/lib/ai/jurisdictionResolver";
 import type {
   ExportResearchAgentName,
   ExportResearchSnapshot,
@@ -34,13 +35,14 @@ export async function buildExportResearchSnapshot(params: {
   caseId?: string | null;
 }): Promise<ExportResearchSnapshot> {
   const generatedAt = new Date().toISOString();
-  const queries = buildResearchQueries(params.reportType, params.report);
+  const resolvedJurisdiction = resolveJurisdiction({ report: params.report });
+  const queries = buildResearchQueries(params.reportType, params.report, resolvedJurisdiction);
   const driveQueries = queries.filter((query) => query.sourceTarget === "drive");
   const internetQueries = queries.filter((query) => query.sourceTarget === "internet");
-  const driveSources = await runDriveResearch(driveQueries, params.report);
-  const internetSources = await runInternetResearch(internetQueries, params.report);
+  const driveSources = await runDriveResearch(driveQueries, params.report, resolvedJurisdiction);
+  const internetSources = await runInternetResearch(internetQueries, params.report, resolvedJurisdiction);
   const reviewed = [...driveSources, ...internetSources];
-  const verified = verifyResearchSources(reviewed, inferJurisdiction(params.report));
+  const verified = verifyResearchSources(reviewed, resolvedJurisdiction.state ?? undefined);
   const citationMap = buildCitationMap(verified.accepted);
   const unsupportedFindings = buildUnsupportedFindings(citationMap, verified.rejected, params.reportType);
   const snapshotBase = {
@@ -82,9 +84,10 @@ export async function persistExportResearchAuditSnapshot(params: {
 
 function buildResearchQueries(
   reportType: ResearchableExportType,
-  report: RepairIntelligenceReport
+  report: RepairIntelligenceReport,
+  resolvedJurisdiction: ResolvedJurisdiction
 ): ResearchQuery[] {
-  const state = inferJurisdiction(report);
+  const state = resolvedJurisdiction.state;
   const vehicle = [report.vehicle?.year, report.vehicle?.make, report.vehicle?.model]
     .filter(Boolean)
     .join(" ");
@@ -149,7 +152,8 @@ function buildResearchQueries(
 
 async function runDriveResearch(
   queries: ResearchQuery[],
-  report: RepairIntelligenceReport
+  report: RepairIntelligenceReport,
+  resolvedJurisdiction: ResolvedJurisdiction
 ): Promise<ExportResearchSource[]> {
   const results: ExportResearchSource[] = [];
 
@@ -160,9 +164,13 @@ async function runDriveResearch(
       estimateText: report.sourceEstimateText ?? report.analysis?.rawEstimateText ?? "",
       firstPassAnswer: report.analysis?.narrative ?? report.recommendedActions.join("\n"),
       jurisdiction: {
-        stateCode: inferJurisdiction(report),
-        confidence: inferJurisdiction(report) ? "medium" : "low",
-        source: inferJurisdiction(report) ? "query_inferred" : "unknown",
+        stateCode: resolvedJurisdiction.state ?? undefined,
+        confidence: resolvedJurisdiction.state
+          ? resolvedJurisdiction.confidence === "unknown"
+            ? "low"
+            : resolvedJurisdiction.confidence
+          : "low",
+        source: resolvedJurisdiction.state ? "client_input" : "unknown",
       },
       analysis: null,
       maxResults: 5,
@@ -178,12 +186,12 @@ async function runDriveResearch(
         locator: item.excerpt.pageLabel ?? item.metadata.pageHint ?? item.id,
         driveFileId: item.metadata.fileId,
         retrievalTimestamp: new Date().toISOString(),
-        jurisdiction: item.metadata.jurisdictionRelevance ?? inferJurisdiction(report),
+        jurisdiction: item.metadata.jurisdictionRelevance,
         confidenceScore: confidenceToScore(item.confidence),
         agent: query.agent,
         supportCategory: mapSupportCategory(sourceType, item.filename, {
           sourceJurisdiction: item.metadata.jurisdictionRelevance,
-          detectedJurisdiction: inferJurisdiction(report),
+          detectedJurisdiction: resolvedJurisdiction.state ?? undefined,
           confidenceScore: confidenceToScore(item.confidence),
         }),
         accepted: true,
@@ -196,7 +204,8 @@ async function runDriveResearch(
 
 async function runInternetResearch(
   queries: ResearchQuery[],
-  report: RepairIntelligenceReport
+  report: RepairIntelligenceReport,
+  resolvedJurisdiction: ResolvedJurisdiction
 ): Promise<ExportResearchSource[]> {
   const apiKey = process.env.SERPER_API_KEY || process.env.GOOGLE_SERPER_API_KEY;
   if (!apiKey) {
@@ -206,7 +215,7 @@ async function runInternetResearch(
       sourceTitle: `Internet deep search not configured: ${query.query}`,
       locator: "SERPER_API_KEY missing",
       retrievalTimestamp: new Date().toISOString(),
-      jurisdiction: inferJurisdiction(report),
+      jurisdiction: resolvedJurisdiction.state ?? undefined,
       confidenceScore: 0,
       agent: query.agent,
       supportCategory: "Unsupported / Needs Review",
@@ -241,12 +250,12 @@ async function runInternetResearch(
         locator: item.link,
         url: item.link,
         retrievalTimestamp: new Date().toISOString(),
-        jurisdiction: inferJurisdiction(report),
+        jurisdiction: undefined,
         confidenceScore: sourceType === "law" ? 0.72 : sourceType === "oem" ? 0.68 : 0.55,
         agent: query.agent,
         supportCategory: mapSupportCategory(sourceType, item.title, {
-          sourceJurisdiction: inferJurisdiction(report),
-          detectedJurisdiction: inferJurisdiction(report),
+          sourceJurisdiction: inferSourceJurisdiction(`${item.title} ${item.link}`),
+          detectedJurisdiction: resolvedJurisdiction.state ?? undefined,
           confidenceScore: sourceType === "law" ? 0.72 : sourceType === "oem" ? 0.68 : 0.55,
         }),
         accepted: true,
@@ -479,14 +488,9 @@ function normalizeJurisdictionToken(value: string | null | undefined) {
   return extractJurisdictionTokens(value ?? "").values().next().value ?? "";
 }
 
-function inferJurisdiction(report: RepairIntelligenceReport): string | undefined {
-  const text = [
-    report.analysis?.narrative,
-    report.recommendedActions.join(" "),
-    report.factualCore?.currentCaseSummary,
-  ].filter(Boolean).join(" ");
-  const match = text.match(/\b(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY)\b/i);
-  return match?.[1]?.toUpperCase();
+function inferSourceJurisdiction(text: string): string | undefined {
+  const tokens = extractJurisdictionTokens(text);
+  return tokens.values().next().value;
 }
 
 function confidenceToScore(confidence: "low" | "medium" | "high") {

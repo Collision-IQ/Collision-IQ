@@ -11,6 +11,11 @@ import { buildClaimHandlingDisputeContext } from "./claimHandlingDisputeContext"
 import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 import { buildReviewCompletenessMessage } from "@/lib/reviewCompleteness";
 import {
+  formatResolvedJurisdictionForReport,
+  resolveJurisdiction,
+  type ResolvedJurisdiction,
+} from "@/lib/ai/jurisdictionResolver";
+import {
   buildJurisdictionUnavailableMessage,
   classifySourceAuthorityTier,
   getClaimStateCodeFromJurisdiction,
@@ -271,7 +276,7 @@ export function buildPolicyRightsReviewModel(
     ["DrivePolicyFolder", "UploadedPolicyDocument"].includes(citation.source)
   );
   const oemCitations = citations.filter((citation) => citation.source === "OEMPositionStatement");
-  const jurisdiction = detectJurisdiction(uploadedJurisdictionText, sourceText, legalCitations);
+  const jurisdiction = toPolicyRightsJurisdiction(resolveJurisdiction(params));
   const claimStateCode = getClaimStateCodeFromJurisdiction(jurisdiction);
   const verifiedLegalCitations = legalCitations.filter((citation) =>
     isVerifiedLegalCitation(citation, claimStateCode)
@@ -606,41 +611,13 @@ function buildUploadedJurisdictionText(params: ExportBuilderInput): string {
   return [...registryText, ...evidenceText].join("\n");
 }
 
-function detectJurisdiction(
-  uploadedPolicyText: string,
-  text: string,
-  citations: ImmutablePolicyCitation[]
+function toPolicyRightsJurisdiction(
+  resolution: ResolvedJurisdiction
 ): PolicyRightsReviewModel["jurisdiction"] {
-  const uploadedPolicyJurisdiction = detectUploadedPolicyJurisdiction(uploadedPolicyText);
-  if (uploadedPolicyJurisdiction) {
-    return uploadedPolicyJurisdiction;
-  }
-
-  const haystack = `${text}\n${citations.map((citation) => citation.title).join("\n")}`;
-
-  for (const [code, name] of Object.entries(STATE_NAMES)) {
-    const codePattern = new RegExp(`\\b${code}\\b`);
-    const namePattern = new RegExp(`\\b${escapeRegExp(name)}\\b`, "i");
-    if (namePattern.test(haystack) || codePattern.test(haystack)) {
-      const citationBacked = citations.some((citation) =>
-        namePattern.test(`${citation.title} ${citation.locator ?? ""}`) ||
-        codePattern.test(`${citation.title} ${citation.locator ?? ""}`)
-      );
-
-      return {
-        state: `${name} (${code})`,
-        confidence: citationBacked ? "high" : "medium",
-        basis: citationBacked
-          ? "Jurisdiction appears in source citation metadata."
-          : "Jurisdiction appears in claim analysis runtime text but was not independently citation-backed.",
-      };
-    }
-  }
-
   return {
-    state: "Not confirmed",
-    confidence: "low",
-    basis: "No state-specific citation or policy jurisdiction marker was isolated from the current source set.",
+    state: formatResolvedJurisdictionForReport(resolution),
+    confidence: resolution.confidence === "unknown" ? "low" : resolution.confidence,
+    basis: `${resolution.evidenceLabel} Source: ${resolution.source}.`,
   };
 }
 
@@ -872,78 +849,6 @@ function countAssertionsByConfidence(
   confidence: PolicyRightsConfidenceBand
 ): number {
   return getAllAssertions(review).filter((assertion) => assertion.confidence === confidence).length;
-}
-
-function detectUploadedPolicyJurisdiction(text: string): PolicyRightsReviewModel["jurisdiction"] | null {
-  if (!text.trim()) {
-    return null;
-  }
-
-  const detectors: Array<{
-    basis: string;
-    matches: (code: string, name: string, haystack: string) => boolean;
-  }> = [
-    {
-      basis: "policy governing-law clause",
-      matches: (code, name, haystack) => {
-        const namePattern = escapeRegExp(name);
-        return new RegExp(`\\b(?:${namePattern}|${code})\\s+law\\s+(?:applies|governs)\\b`, "i").test(haystack) ||
-          new RegExp(`\\b(?:governed by|subject to|construed under|in accordance with)\\s+(?:the\\s+)?(?:laws?\\s+of\\s+)?(?:the\\s+Commonwealth\\s+of\\s+)?${namePattern}\\b`, "i").test(haystack) ||
-          new RegExp(`\\blaws?\\s+of\\s+(?:the\\s+Commonwealth\\s+of\\s+)?${namePattern}\\b`, "i").test(haystack);
-      },
-    },
-    {
-      basis: "policy declarations/form state",
-      matches: (code, name, haystack) => {
-        const namePattern = escapeRegExp(name);
-        return new RegExp(`\\b(?:declarations?|policy\\s+form|form\\s+state|policy\\s+state|rated\\s+state|risk\\s+state)\\b(?:(?!\\n).){0,120}\\b(?:${namePattern}|${code})\\b`, "i").test(haystack) ||
-          new RegExp(`\\b(?:${namePattern}|${code})\\b(?:(?!\\n).){0,80}\\b(?:policy\\s+form|declarations?)\\b`, "i").test(haystack);
-      },
-    },
-    {
-      basis: "insurance ID card",
-      matches: (code, name, haystack) => {
-        const namePattern = escapeRegExp(name);
-        return new RegExp(`\\b(?:${namePattern}|${code})\\b(?:(?!\\n).){0,100}\\b(?:financial\\s+responsibility|identification\\s+card|insurance\\s+id\\s+card|id\\s+card)\\b`, "i").test(haystack) ||
-          new RegExp(`\\b(?:financial\\s+responsibility|identification\\s+card|insurance\\s+id\\s+card|id\\s+card)\\b(?:(?!\\n).){0,100}\\b(?:${namePattern}|${code})\\b`, "i").test(haystack);
-      },
-    },
-    {
-      basis: "named insured address",
-      matches: (code, name, haystack) => {
-        const namePattern = escapeRegExp(name);
-        return new RegExp(`\\b(?:named\\s+insured|mailing\\s+address|insured\\s+address|address)\\b(?:(?!\\n).){0,160}\\b(?:${namePattern}|${code})\\b\\s+\\d{5}(?:-\\d{4})?\\b`, "i").test(haystack);
-      },
-    },
-    {
-      basis: "vehicle garaging/registration state",
-      matches: (code, name, haystack) => {
-        const namePattern = escapeRegExp(name);
-        return new RegExp(`\\b(?:garag(?:ed|ing)|registration|registered|principally\\s+garaged)\\b(?:(?!\\n).){0,120}\\b(?:${namePattern}|${code})\\b`, "i").test(haystack);
-      },
-    },
-    {
-      basis: "claim/loss location",
-      matches: (code, name, haystack) => {
-        const namePattern = escapeRegExp(name);
-        return new RegExp(`\\b(?:claim|loss|accident|date\\s+of\\s+loss|loss\\s+location)\\b(?:(?!\\n).){0,120}\\b(?:${namePattern}|${code})\\b`, "i").test(haystack);
-      },
-    },
-  ];
-
-  for (const detector of detectors) {
-    for (const [code, name] of Object.entries(STATE_NAMES)) {
-      if (detector.matches(code, name, text)) {
-        return {
-          state: code,
-          confidence: "high",
-          basis: `Jurisdiction established from uploaded policy package: ${detector.basis}.`,
-        };
-      }
-    }
-  }
-
-  return null;
 }
 
 function getVerifiedLegalCitationCount(review: PolicyRightsReviewModel): number {
