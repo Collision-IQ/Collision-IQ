@@ -33,21 +33,21 @@ describe("determineResponseMode", () => {
     ).toBe("standard");
   });
 
-  it("uses analysis for uploaded files", () => {
+  it("keeps uploaded-file questions concise by default", () => {
     expect(
       determineResponseMode({
         userMessage: "What do you see?",
         hasUploadedFiles: true,
         isFollowup: false,
       })
-    ).toBe("analysis");
+    ).toBe("concise");
   });
 
-  it("uses analysis for estimates, insurance/legal implications, and explicit detail", () => {
+  it("uses analysis only for explicit long-form requests", () => {
     for (const userMessage of [
-      "Review this estimate for missed operations.",
-      "Explain the insurance implications in detail.",
-      "Give me a full analysis with confidence scoring.",
+      "Give me a full review with confidence scoring.",
+      "Draft a formal rebuttal letter.",
+      "Write a DOI complaint from this file.",
     ]) {
       expect(
         determineResponseMode({
@@ -63,7 +63,7 @@ describe("determineResponseMode", () => {
 describe("buildResponseModeInstruction", () => {
   it("injects the exact concise instruction", () => {
     expect(buildResponseModeInstruction("concise")).toContain(
-      "Answer in 1-4 sentences. Answer the user's question first."
+      "Default to concise answers. Answer the user's question first."
     );
   });
 });

@@ -5,8 +5,10 @@ import { generateChatCompletion } from "@/lib/ai/generateChatCompletion";
 import { buildAssistanceProfileInstruction } from "@/lib/ai/assistanceProfile";
 import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
 import { JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT } from "@/lib/ai/jurisdictionalInsurancePrompt";
+import { DOCUMENT_REVIEW_TWO_PASS_PROTOCOL } from "@/lib/ai/documentReviewProtocol";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
 import { buildResponseModeInstruction, determineResponseMode } from "@/lib/ai/responseMode";
+import { buildReviewResponseShapeInstruction } from "@/lib/ai/reviewResponseShape";
 import { buildAppraisalAwardEvaluatorInstruction } from "@/lib/ai/appraisalAwardEvaluator";
 import {
   classifyRetryableProviderError,
@@ -313,9 +315,10 @@ CHAT/UI ONLY: ${artifactRefreshPolicy.chatSummaryOnly.shouldRefresh ? "yes" : "n
     const outputMode = buildModeContext(`${message}\n\n${currentTopic}\n\n${transcriptSummary}`);
     const responseMode = determineResponseMode({
       userMessage: message,
-      hasUploadedFiles: false,
+      hasUploadedFiles: files.length > 0,
       isFollowup: history.some((entry) => entry.role === "user"),
     });
+    const responseShapeInstruction = buildReviewResponseShapeInstruction(message);
 
     console.info("[chat] evidence context attached", {
       activeCaseId: caseId,
@@ -351,6 +354,8 @@ ${buildAssistanceProfileInstruction(assistanceProfile)}
 ${outputMode.instruction}
 
 ${buildResponseModeInstruction(responseMode)}
+
+${responseShapeInstruction}
 
 --------------------
 VEHICLE
@@ -482,6 +487,8 @@ RULES
 - Never leak OEM-specific systems across brands (e.g., BMW KAFAS on Chevrolet).
 - If a document was blocked, explicitly state that it was not accessible.
 - Be precise, concise, and evidence-driven.
+
+${DOCUMENT_REVIEW_TWO_PASS_PROTOCOL}
 
 ${EVIDENCE_POLICY}
 `;

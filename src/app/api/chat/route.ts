@@ -6,6 +6,7 @@ import type { ChatAnalysisOutput } from "@/lib/ai/contracts/chatAnalysisSchema";
 import type { DriveRetrievalResponse } from "@/lib/ai/contracts/driveRetrievalContract";
 import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
 import { JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT } from "@/lib/ai/jurisdictionalInsurancePrompt";
+import { DOCUMENT_REVIEW_TWO_PASS_PROTOCOL } from "@/lib/ai/documentReviewProtocol";
 import { buildAppraisalAwardEvaluatorInstruction } from "@/lib/ai/appraisalAwardEvaluator";
 import { buildAssistanceProfileInstruction } from "@/lib/ai/assistanceProfile";
 import {
@@ -24,6 +25,7 @@ import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { buildProductAccessGuard } from "@/lib/featureAccess";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
 import { buildResponseModeInstruction, determineResponseMode } from "@/lib/ai/responseMode";
+import { buildReviewResponseShapeInstruction } from "@/lib/ai/reviewResponseShape";
 import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 import {
   classifyRetryableProviderError,
@@ -241,6 +243,8 @@ For Market Preview, actual cash value, or diminished value answers:
 Write in short paragraphs.
 Use bullets only when they genuinely improve comparison, negotiation, or rebuttal clarity.
 Avoid rigid templates.
+
+${DOCUMENT_REVIEW_TWO_PASS_PROTOCOL}
 
 ${NON_BIAS_ACCURACY_DIRECTIVE}
 
@@ -947,6 +951,7 @@ export async function POST(req: Request) {
       hasUploadedFiles: documents.length > 0,
       isFollowup: isFollowupTurn(body.messages || []),
     });
+    const responseShapeInstruction = buildReviewResponseShapeInstruction(userMessage);
     const activeCase = body.activeCaseId
       ? await getCaseById(body.activeCaseId, {
           ownerUserId: user.id,
@@ -1063,6 +1068,7 @@ export async function POST(req: Request) {
       buildAssistanceProfileInstruction(body.assistanceProfile),
       outputMode.instruction,
       buildResponseModeInstruction(responseMode),
+      responseShapeInstruction,
       buildActiveCaseSystemGuard({
         hasStoredEvidence: activeCaseHasStoredEvidence,
         hasVehicleContext: activeCaseHasVehicleContext,

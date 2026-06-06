@@ -8,18 +8,18 @@ type ResponseModeContext = {
 
 export const RESPONSE_MODE_INSTRUCTIONS: Record<ResponseMode, string> = {
   concise:
-    "Answer in 1-4 sentences. Answer the user's question first. Do not provide extended analysis unless required. Avoid recap, padding, or repeating prior context.",
+    "Default to concise answers. Answer the user's question first. Use brief evidence-grounded structure and avoid recap, padding, or repeating prior context.",
   standard:
-    "Answer directly, then provide brief reasoning. Keep the response under about 200 words when possible.",
+    "Answer directly, then provide brief reasoning. Keep the response short and practical unless the user requests deeper detail.",
   analysis:
-    "Provide a full professional analysis with findings, evidence, confidence, recommendations, and next steps.",
+    "Provide a full professional analysis with findings, evidence, confidence, recommendations, and next steps only when explicitly requested.",
 };
 
 export function determineResponseMode(context: ResponseModeContext): ResponseMode {
   const text = context.userMessage.toLowerCase();
 
   const explicitlyDetailed =
-    /\b(detail|detailed|explain|full analysis|report|breakdown|why|confidence|estimate|insurance|legal|liability|damage analysis)\b/.test(
+    /\b(full analysis|full review|formal rebuttal|rebuttal letter|doi complaint|department of insurance complaint|report|demand letter|appeal letter|in detail|comprehensive)\b/.test(
       text
     );
   const quickQuestion =
@@ -28,10 +28,10 @@ export function determineResponseMode(context: ResponseModeContext): ResponseMod
   const recommendation =
     /\b(recommend|compare|best|should i|which|workflow|process|repair)\b/.test(text);
 
-  if (context.hasUploadedFiles) return "analysis";
   if (explicitlyDetailed) return "analysis";
   if (context.isFollowup) return "concise";
   if (recommendation) return "standard";
+  if (context.hasUploadedFiles) return "concise";
   if (quickQuestion) return "concise";
 
   return "concise";
