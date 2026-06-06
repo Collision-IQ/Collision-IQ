@@ -12,6 +12,8 @@ export type ResolvedJurisdiction = {
     | "insured_address"
     | "shop_zip_fallback"
     | "shop_address_fallback"
+    | "inspection_site_zip_fallback"
+    | "inspection_site_address_fallback"
     | "unknown";
   evidenceLabel: string;
 };
@@ -152,45 +154,65 @@ export function resolveJurisdiction(input: JurisdictionResolverInput): ResolvedJ
   if (policy) return policy;
 
   const allText = buildEvidenceText(input);
-  const ownerZip = findLabeledZip(allText, [
+  const ownerLabels = [
     /owner/i,
     /vehicle\s+owner/i,
     /claimant/i,
-  ]);
-  if (ownerZip) return buildZipResult(ownerZip, "owner_zip", "Owner ZIP from uploaded claim documents.");
-
-  const ownerAddress = findLabeledState(allText, [/owner/i, /vehicle\s+owner/i, /claimant/i]);
-  if (ownerAddress) {
-    return buildResult(ownerAddress, "high", "owner_address", "Owner address state from uploaded claim documents.");
-  }
-
-  const insuredZip = findLabeledZip(allText, [/insured/i, /named\s+insured/i, /policyholder/i]);
-  if (insuredZip) return buildZipResult(insuredZip, "insured_zip", "Insured ZIP from uploaded claim documents.");
-
-  const insuredAddress = findLabeledState(allText, [/insured/i, /named\s+insured/i, /policyholder/i]);
-  if (insuredAddress) {
-    return buildResult(insuredAddress, "high", "insured_address", "Insured address state from uploaded claim documents.");
-  }
-
-  const shopZip = findLabeledZip(allText, [
+  ];
+  const insuredLabels = [/insured/i, /named\s+insured/i, /policyholder/i];
+  const inspectionLabels = [
+    /inspection\s+site/i,
+    /inspection\s+location/i,
+    /appraiser\s+location/i,
+    /estimator\s+location/i,
+  ];
+  const shopLabels = [
     /repair\s+facility/i,
     /repair\s+shop/i,
     /body\s+shop/i,
     /\bshop\b/i,
     /facility/i,
-  ]);
+  ];
+  const nonOwnerAddressLabels = [...inspectionLabels, ...shopLabels];
+  const ownerStopLabels = [...insuredLabels, ...nonOwnerAddressLabels];
+  const insuredStopLabels = [...ownerLabels, ...nonOwnerAddressLabels];
+
+  const ownerZip = findAddressBlockZip(allText, ownerLabels, ownerStopLabels);
+  if (ownerZip) return buildZipResult(ownerZip, "owner_zip", "Owner ZIP from uploaded claim documents.");
+
+  const ownerAddress = findAddressBlockState(allText, ownerLabels, ownerStopLabels);
+  if (ownerAddress) {
+    return buildResult(ownerAddress, "high", "owner_address", "Owner address state from uploaded claim documents.");
+  }
+
+  const insuredZip = findAddressBlockZip(allText, insuredLabels, insuredStopLabels);
+  if (insuredZip) return buildZipResult(insuredZip, "insured_zip", "Insured ZIP from uploaded claim documents.");
+
+  const insuredAddress = findAddressBlockState(allText, insuredLabels, insuredStopLabels);
+  if (insuredAddress) {
+    return buildResult(insuredAddress, "high", "insured_address", "Insured address state from uploaded claim documents.");
+  }
+
+  const inspectionStopLabels = [...ownerLabels, ...insuredLabels, ...shopLabels];
+  const shopStopLabels = [...ownerLabels, ...insuredLabels, ...inspectionLabels];
+  const inspectionZip = findAddressBlockZip(allText, inspectionLabels, inspectionStopLabels) ?? findLabeledZip(allText, inspectionLabels);
+  if (inspectionZip) {
+    const state = stateFromZip(inspectionZip);
+    if (state) return buildResult(state, "medium", "inspection_site_zip_fallback", "Inspection site ZIP fallback from uploaded claim documents.");
+  }
+
+  const inspectionAddress = findAddressBlockState(allText, inspectionLabels, inspectionStopLabels) ?? findLabeledState(allText, inspectionLabels);
+  if (inspectionAddress) {
+    return buildResult(inspectionAddress, "medium", "inspection_site_address_fallback", "Inspection site address fallback from uploaded claim documents.");
+  }
+
+  const shopZip = findAddressBlockZip(allText, shopLabels, shopStopLabels) ?? findLabeledZip(allText, shopLabels);
   if (shopZip) {
     const state = stateFromZip(shopZip);
     if (state) return buildResult(state, "medium", "shop_zip_fallback", "Repair shop ZIP fallback from uploaded claim documents.");
   }
 
-  const shopAddress = findLabeledState(allText, [
-    /repair\s+facility/i,
-    /repair\s+shop/i,
-    /body\s+shop/i,
-    /\bshop\b/i,
-    /facility/i,
-  ]);
+  const shopAddress = findAddressBlockState(allText, shopLabels, shopStopLabels) ?? findLabeledState(allText, shopLabels);
   if (shopAddress) {
     return buildResult(shopAddress, "medium", "shop_address_fallback", "Repair shop address fallback from uploaded claim documents.");
   }
@@ -303,6 +325,24 @@ function findLabeledZip(text: string, labels: RegExp[]): string | null {
   return null;
 }
 
+function findAddressBlockZip(text: string, labels: RegExp[], stopLabels: RegExp[]): string | null {
+  for (const block of getLabeledBlocks(text, labels, stopLabels)) {
+    if (!hasAddressEvidence(block)) continue;
+    const zip = extractZip(block.join(" "));
+    if (zip) return zip;
+  }
+  return null;
+}
+
+function findAddressBlockState(text: string, labels: RegExp[], stopLabels: RegExp[]): string | null {
+  for (const block of getLabeledBlocks(text, labels, stopLabels)) {
+    if (!hasAddressEvidence(block)) continue;
+    const state = normalizeStateCode(block.join(" "));
+    if (state) return state;
+  }
+  return null;
+}
+
 function findLabeledState(text: string, labels: RegExp[]): string | null {
   for (const line of getRelevantLines(text, labels)) {
     const state = normalizeStateCode(line);
@@ -311,12 +351,23 @@ function findLabeledState(text: string, labels: RegExp[]): string | null {
   return null;
 }
 
+function getLabeledBlocks(text: string, labels: RegExp[], stopLabels: RegExp[]): string[][] {
+  const lines = normalizeEvidenceLines(text);
+  const blocks: string[][] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!labels.some((label) => label.test(lines[index]))) continue;
+    const block = [lines[index]];
+    for (let next = index + 1; next < lines.length && block.length < 6; next += 1) {
+      if (stopLabels.some((label) => label.test(lines[next]))) break;
+      block.push(lines[next]);
+    }
+    blocks.push(block);
+  }
+  return blocks;
+}
+
 function getRelevantLines(text: string, labels: RegExp[]): string[] {
-  const lines = text
-    .replace(/\r/g, "\n")
-    .split(/\n+/)
-    .map((line) => line.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
+  const lines = normalizeEvidenceLines(text);
   const relevant: string[] = [];
   for (let index = 0; index < lines.length; index += 1) {
     if (!labels.some((label) => label.test(lines[index]))) continue;
@@ -326,6 +377,22 @@ function getRelevantLines(text: string, labels: RegExp[]): string[] {
   }
   return relevant;
 }
+
+function normalizeEvidenceLines(text: string): string[] {
+  return text
+    .replace(/\r/g, "\n")
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+function hasAddressEvidence(lines: string[]): boolean {
+  const block = lines.join(" ");
+  return /\b(address|mailing|garag(?:e|ing)|postal|zip)\b/i.test(block) ||
+    /\b(street|st\.?|avenue|ave\.?|road|rd\.?|drive|dr\.?|lane|ln\.?|boulevard|blvd\.?|highway|hwy\.?|court|ct\.?|circle|cir\.?|place|pl\.?)\b/i.test(block) ||
+    /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY)\s+\d{5}(?:-\d{4})?\b/.test(block);
+}
+
 
 function extractZip(value: string): string | null {
   ZIP_PATTERN.lastIndex = 0;

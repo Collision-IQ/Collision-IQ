@@ -142,6 +142,38 @@ run("missing jurisdiction evidence resolves unknown", () => {
   assert.equal(resolved.confidence, "unknown");
 });
 
+run("inspection site ZIP resolves as medium-confidence fallback, not owner ZIP", () => {
+  const report = buildReport([
+    "Owner: ANNEGAYL",
+    "Insured: ANNEGAYL",
+    "Inspection Site:",
+    "Conestoga Autobody",
+    "961 Lancaster Ave",
+    "Berwyn, PA 19312",
+  ].join("\n"));
+  const resolved = resolveJurisdiction({ report });
+
+  assert.equal(resolved.state, "PA");
+  assert.equal(resolved.source, "inspection_site_zip_fallback");
+  assert.equal(resolved.confidence, "medium");
+});
+
+run("owner and insured name proximity does not classify inspection ZIP as owner ZIP", () => {
+  const report = buildReport([
+    "Owner: ANNEGAYL",
+    "Insured: ANNEGAYL",
+    "Inspection Site:",
+    "Conestoga Autobody",
+    "961 Lancaster Ave",
+    "Berwyn, PA 19312",
+  ].join("\n"));
+  const resolved = resolveJurisdiction({ report });
+
+  assert.notEqual(resolved.state, "MD");
+  assert.notEqual(resolved.source, "owner_zip");
+  assert.notEqual(resolved.confidence, "high");
+});
+
 run("Repair Intelligence, Policy Rights, and DOI use same resolved jurisdiction", () => {
   const report = buildReport([
     "Owner address: 123 Market Street, Philadelphia, PA 19103",
