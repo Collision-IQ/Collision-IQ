@@ -1,4 +1,10 @@
 const PLATFORM_ADMIN_ENV_KEY = "COLLISION_IQ_PLATFORM_ADMIN_EMAILS";
+const PLATFORM_ADMIN_ENV_KEYS = [
+  PLATFORM_ADMIN_ENV_KEY,
+  "PLATFORM_ADMIN_EMAILS",
+  "ADMIN_EMAILS",
+  "ADMIN_EMAIL",
+];
 const BUILT_IN_FREE_ACCESS_EMAILS = [
   "vinny@collision.academy",
   "olga@collision.academy",
@@ -13,10 +19,12 @@ export function normalizeEmail(email: string | null | undefined) {
 }
 
 export function getPlatformAdminEmails() {
-  const envEmails = (process.env[PLATFORM_ADMIN_ENV_KEY] ?? "")
-    .split(/[,;\n]/)
-    .map((value) => normalizeEmail(value))
-    .filter(Boolean);
+  const envEmails = PLATFORM_ADMIN_ENV_KEYS.flatMap((key) =>
+    (process.env[key] ?? "")
+      .split(/[,;\n]/)
+      .map((value) => normalizeEmail(value))
+      .filter(Boolean)
+  );
 
   return new Set([...BUILT_IN_FREE_ACCESS_EMAILS, ...envEmails]);
 }
@@ -24,8 +32,11 @@ export function getPlatformAdminEmails() {
 export function getPlatformAdminEntitlementSource() {
   return {
     envKey: PLATFORM_ADMIN_ENV_KEY,
+    envKeys: PLATFORM_ADMIN_ENV_KEYS,
     configuredAdminCount: getPlatformAdminEmails().size,
-    usesLegacyAdminEnv: false,
+    usesLegacyAdminEnv: PLATFORM_ADMIN_ENV_KEYS.slice(1).some((key) =>
+      Boolean(process.env[key]?.trim())
+    ),
   };
 }
 

@@ -31,8 +31,10 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 };
 
 process.env.COLLISION_IQ_PLATFORM_ADMIN_EMAILS =
-  "Admin.One@example.com, second-admin@example.com ; CollisionAcademy@outlook.com\nspaced-admin@example.com ";
-process.env.ADMIN_EMAILS = "legacy-admin@example.com";
+  "Admin.One@example.com, second-admin@example.com ; CollisionAcademy@outlook.com\nspaced-admin@example.com, , PLAY-REVIEW@collision-iq.ai ";
+process.env.PLATFORM_ADMIN_EMAILS = "platform-alias@example.com";
+process.env.ADMIN_EMAILS = "legacy-admin@example.com, alias-admin@example.com";
+process.env.ADMIN_EMAIL = "single-admin@example.com";
 process.env.AUTHORIZED_ADMIN_EMAILS = "legacy-authorized@example.com";
 process.env.NEXT_PUBLIC_ADMIN_EMAILS = "legacy-public@example.com";
 
@@ -144,16 +146,26 @@ run("env admin emails are the source of truth", () => {
   assert.equal(isPlatformAdminEmail("CollisionAcademy@outlook.com"), true);
   assert.equal(isPlatformAdminEmail("collisionacademy@outlook.com"), true);
   assert.equal(isPlatformAdminEmail(" spaced-admin@example.com "), true);
+  assert.equal(isPlatformAdminEmail("play-review@collision-iq.ai"), true);
+  assert.equal(isPlatformAdminEmail("PLAY-REVIEW@COLLISION-IQ.AI"), true);
+  assert.equal(isPlatformAdminEmail("platform-alias@example.com"), true);
+  assert.equal(isPlatformAdminEmail("legacy-admin@example.com"), true);
+  assert.equal(isPlatformAdminEmail("alias-admin@example.com"), true);
+  assert.equal(isPlatformAdminEmail("single-admin@example.com"), true);
   assert.equal(isPlatformAdminEmail("not-admin@example.com"), false);
-  assert.equal(isPlatformAdminEmail("legacy-admin@example.com"), false);
   assert.equal(isPlatformAdminEmail("legacy-authorized@example.com"), false);
   assert.equal(isPlatformAdminEmail("legacy-public@example.com"), false);
   assert.equal(isAdminEmail("admin.one@example.com"), true);
-  assert.deepEqual(getPlatformAdminEntitlementSource(), {
-    envKey: "COLLISION_IQ_PLATFORM_ADMIN_EMAILS",
-    configuredAdminCount: 10,
-    usesLegacyAdminEnv: false,
-  });
+  const source = getPlatformAdminEntitlementSource();
+  assert.equal(source.envKey, "COLLISION_IQ_PLATFORM_ADMIN_EMAILS");
+  assert.deepEqual(source.envKeys, [
+    "COLLISION_IQ_PLATFORM_ADMIN_EMAILS",
+    "PLATFORM_ADMIN_EMAILS",
+    "ADMIN_EMAILS",
+    "ADMIN_EMAIL",
+  ]);
+  assert.equal(source.configuredAdminCount, 15);
+  assert.equal(source.usesLegacyAdminEnv, true);
 });
 
 run("built-in free-access emails receive full access without subscription", () => {
@@ -231,6 +243,18 @@ run("env admins receive Pro-level entitlements", () => {
   assert.equal(entitlements.canUseRedactedChatExport, true);
   assert.equal(entitlements.canUseChatExport, true);
   assert.equal(entitlements.canUseRebuttalEmail, true);
+});
+
+run("play review email receives admin entitlements from env list", () => {
+  const entitlements = toAccountEntitlements(
+    buildAccess({
+      canRunAnalysis: false,
+    }),
+    { userEmail: " play-review@collision-iq.ai " }
+  );
+
+  assertFullAccess(entitlements);
+  assert.equal(entitlements.maxUploadsPerReview, null);
 });
 
 run("env admin can upload even without subscription", () => {
