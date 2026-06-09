@@ -401,6 +401,34 @@ model CarrierTrendEvent {
   @@map("CarrierTrendEvent")
 }
 
+model CccSecureShareWebhookEvent {
+  id                String   @id @default(cuid())
+  environment       String
+  environmentSource String   @map("environment_source")
+  requestKind       String   @map("request_kind")
+  appId             String?  @map("app_id")
+  trigger           String?
+  rqUid             String?  @map("rq_uid")
+  rawXmlSha256      String?  @map("raw_xml_sha256")
+  bodyLength        Int      @default(0) @map("body_length")
+  contentType       String?  @map("content_type")
+  sourceIp          String?  @map("source_ip")
+  headerNamesJson   Json     @default("[]") @map("header_names_json")
+  secretPresent     Boolean  @default(false) @map("secret_present")
+  secretMatched     Boolean  @default(false) @map("secret_matched")
+  duplicate         Boolean  @default(false)
+  receivedAt        DateTime @default(now()) @map("received_at")
+  processingStatus  String   @default("received") @map("processing_status")
+  parseError        String?  @map("parse_error")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([environment, rqUid])
+  @@index([environment, receivedAt])
+  @@index([requestKind])
+  @@index([processingStatus])
+  @@map("CccSecureShareWebhookEvent")
+}
+
 model ExportResearchAuditSnapshot {
   id           String   @id @default(cuid())
   caseId       String?  @map("case_id")

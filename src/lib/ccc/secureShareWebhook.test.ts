@@ -1,13 +1,38 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   GET,
   POST,
 } from "@/app/api/integrations/ccc/secure-share/webhook/[[...segments]]/route";
 import {
+  type CccSecureShareEventRecord,
   extractRqUid,
   isValidCccSecureShareEnvironment,
   resolveCccSecureShareEnvironment,
+  setCccSecureShareEventRecorderForTest,
 } from "./secureShareWebhook";
+
+const recordedEvents: Array<CccSecureShareEventRecord & { duplicate: boolean }> = [];
+
+beforeEach(() => {
+  recordedEvents.length = 0;
+  setCccSecureShareEventRecorderForTest(async (event) => {
+    const duplicate = Boolean(
+      event.rqUid &&
+        recordedEvents.some(
+          (recorded) =>
+            recorded.environment === event.environment &&
+            recorded.rqUid === event.rqUid
+        )
+    );
+    recordedEvents.push({ ...event, duplicate });
+    return { duplicate };
+  });
+});
+
+afterEach(() => {
+  setCccSecureShareEventRecorderForTest(null);
+  vi.restoreAllMocks();
+});
 
 describe("CCC Secure Share webhook helpers", () => {
   it("extracts RqUID from CIECA BMS XML", () => {
@@ -115,6 +140,18 @@ describe("CCC Secure Share webhook route", () => {
       duplicate: false,
       message: "CCC manual webhook validation accepted without BMS XML body",
     });
+    expect(recordedEvents).toHaveLength(1);
+    expect(recordedEvents[0]).toMatchObject({
+      environment: "sandbox",
+      environmentSource: "path_segment",
+      requestKind: "manual_validation",
+      appId: "1686",
+      trigger: "manual",
+      rqUid: null,
+      bodyLength: 0,
+      duplicate: false,
+      processingStatus: "validation_accepted",
+    });
   });
 
   it("accepts empty manual validation POST /webhook", async () => {
@@ -157,6 +194,48 @@ describe("CCC Secure Share webhook route", () => {
       rqUid: "abc",
       duplicate: false,
     });
+  });
+
+  it("stores metadata for the first BMS estimate event", async () => {
+    const response = await postXml({ segments: ["sandbox"] });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.duplicate).toBe(false);
+    expect(recordedEvents).toHaveLength(1);
+    expect(recordedEvents[0]).toMatchObject({
+      environment: "sandbox",
+      environmentSource: "path_segment",
+      requestKind: "bms_estimate",
+      appId: null,
+      trigger: null,
+      rqUid: "abc",
+      rawXmlSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      bodyLength: 75,
+      contentType: "application/xml",
+      sourceIp: "52.252.194.193",
+      headerNames: ["content-type", "x-forwarded-for"],
+      secretPresent: false,
+      secretMatched: false,
+      duplicate: false,
+      processingStatus: "received",
+      parseError: null,
+    });
+  });
+
+  it("marks duplicate RqUID events as duplicate", async () => {
+    const first = await postXml({ segments: ["sandbox"] });
+    const second = await postXml({ segments: ["sandbox"] });
+    const firstBody = await first.json();
+    const secondBody = await second.json();
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(firstBody.duplicate).toBe(false);
+    expect(secondBody.duplicate).toBe(true);
+    expect(recordedEvents).toHaveLength(2);
+    expect(recordedEvents[0]).toMatchObject({ rqUid: "abc", duplicate: false });
+    expect(recordedEvents[1]).toMatchObject({ rqUid: "abc", duplicate: true });
   });
 
   it("accepts POST /webhook/sandbox", async () => {
@@ -256,6 +335,33 @@ describe("CCC Secure Share webhook route", () => {
       rqUid: null,
       duplicate: false,
     });
+    expect(recordedEvents[0]).toMatchObject({
+      requestKind: "unknown_monitor",
+      rqUid: null,
+      processingStatus: "metadata_only",
+      parseError: "RqUID not found in webhook body.",
+    });
+  });
+
+  it("does not log raw XML", async () => {
+    const rawXml = "<VehicleDamageEstimateAddRq><RqUID>secret-rq</RqUID><Owner>Do not log</Owner></VehicleDamageEstimateAddRq>";
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const response = await POST(
+      new Request("https://example.test/api/integrations/ccc/secure-share/webhook/sandbox", {
+        method: "POST",
+        body: rawXml,
+        headers: {
+          "content-type": "application/xml",
+        },
+      }),
+      { params: Promise.resolve({ segments: ["sandbox"] }) }
+    );
+
+    expect(response.status).toBe(200);
+    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(rawXml);
+    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("Do not log");
+    expect(JSON.stringify(infoSpy.mock.calls)).toContain("secret-rq");
   });
 
   it("rejects invalid query param env", async () => {

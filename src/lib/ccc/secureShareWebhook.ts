@@ -6,13 +6,21 @@ export type CccSecureShareEnvironment = (typeof CCC_SECURE_SHARE_ENVIRONMENTS)[n
 
 export type CccSecureShareEventRecord = {
   environment: CccSecureShareEnvironment;
+  environmentSource: CccSecureShareEnvironmentSource;
+  requestKind: CccSecureShareRequestKind;
+  appId: string | null;
+  trigger: string | null;
   rqUid: string | null;
-  rawXmlSha256: string;
+  rawXmlSha256: string | null;
   bodyLength: number;
   contentType: string | null;
   receivedAt: string;
   sourceIp: string | null;
-  status: "received";
+  headerNames: string[];
+  secretPresent: boolean;
+  secretMatched: boolean;
+  processingStatus: CccSecureShareProcessingStatus;
+  parseError: string | null;
 };
 
 export type SecretCheckResult = {
@@ -26,6 +34,16 @@ export type CccSecureShareEnvironmentSource =
   | "path_segment"
   | "query_param"
   | "monitor_default_sandbox";
+
+export type CccSecureShareRequestKind =
+  | "bms_estimate"
+  | "manual_validation"
+  | "unknown_monitor";
+
+export type CccSecureShareProcessingStatus =
+  | "received"
+  | "validation_accepted"
+  | "metadata_only";
 
 export type CccSecureShareEnvironmentResolution =
   | {
@@ -61,6 +79,18 @@ const CLEARLY_INVALID_ENVIRONMENT_SEGMENTS = new Set([
   "stage",
   "test",
 ]);
+
+type CccSecureShareEventRecorder = (
+  event: CccSecureShareEventRecord
+) => Promise<{ duplicate: boolean }>;
+
+let customEventRecorder: CccSecureShareEventRecorder | null = null;
+
+export function setCccSecureShareEventRecorderForTest(
+  recorder: CccSecureShareEventRecorder | null
+) {
+  customEventRecorder = recorder;
+}
 
 export function isValidCccSecureShareEnvironment(
   value: string
@@ -187,25 +217,77 @@ export function isIpAllowed(sourceIp: string | null): boolean {
 
 export function buildEventRecord(params: {
   environment: CccSecureShareEnvironment;
+  environmentSource: CccSecureShareEnvironmentSource;
+  requestKind: CccSecureShareRequestKind;
+  appId: string | null;
+  trigger: string | null;
   rqUid: string | null;
-  rawXmlSha256: string;
+  rawXmlSha256: string | null;
   bodyLength: number;
   contentType: string | null;
   receivedAt: string;
   sourceIp: string | null;
+  headerNames: string[];
+  secretPresent: boolean;
+  secretMatched: boolean;
+  processingStatus: CccSecureShareProcessingStatus;
+  parseError?: string | null;
 }): CccSecureShareEventRecord {
   return {
     ...params,
-    status: "received",
+    parseError: params.parseError ?? null,
   };
 }
 
 export async function recordCccSecureShareEvent(
   event: CccSecureShareEventRecord
 ): Promise<{ duplicate: boolean }> {
-  // TODO: Persist inbound CCC events and enforce idempotency by RqUID once a dedicated integration-event table exists.
-  void event;
-  return { duplicate: false };
+  if (customEventRecorder) {
+    return customEventRecorder(event);
+  }
+
+  return recordCccSecureShareEventWithPrisma(event);
+}
+
+async function recordCccSecureShareEventWithPrisma(
+  event: CccSecureShareEventRecord
+): Promise<{ duplicate: boolean }> {
+  const { prisma } = await import("@/lib/prisma");
+  const duplicate = event.rqUid
+    ? Boolean(
+        await prisma.cccSecureShareWebhookEvent.findFirst({
+          where: {
+            environment: event.environment,
+            rqUid: event.rqUid,
+          },
+          select: { id: true },
+        })
+      )
+    : false;
+
+  await prisma.cccSecureShareWebhookEvent.create({
+    data: {
+      environment: event.environment,
+      environmentSource: event.environmentSource,
+      requestKind: event.requestKind,
+      appId: event.appId,
+      trigger: event.trigger,
+      rqUid: event.rqUid,
+      rawXmlSha256: event.rawXmlSha256,
+      bodyLength: event.bodyLength,
+      contentType: event.contentType,
+      sourceIp: event.sourceIp,
+      headerNamesJson: event.headerNames,
+      secretPresent: event.secretPresent,
+      secretMatched: event.secretMatched,
+      duplicate,
+      receivedAt: new Date(event.receivedAt),
+      processingStatus: event.processingStatus,
+      parseError: event.parseError,
+    },
+  });
+
+  return { duplicate };
 }
 
 function getExpectedSecret(

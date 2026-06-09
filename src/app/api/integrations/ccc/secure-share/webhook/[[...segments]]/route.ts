@@ -83,6 +83,7 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
   const allowlistEnforced = shouldEnforceIpAllowlist();
   const ipAllowed = isIpAllowed(sourceIp);
   const contentType = req.headers.get("content-type");
+  const headerNames = getHeaderNames(req.headers);
 
   if (allowlistEnforced && !ipAllowed) {
     console.warn("[ccc-secure-share-webhook] rejected ip", {
@@ -91,7 +92,7 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
       sourceIp,
       allowlistEnforced,
       ipAllowed,
-      headerNames: getHeaderNames(req.headers),
+      headerNames,
     });
     return NextResponse.json({ ok: false, error: "Source IP not allowed" }, { status: 403 });
   }
@@ -105,13 +106,32 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
       secretConfigured: secretCheck.configured,
       secretPresent: secretCheck.present,
       secretMatched: secretCheck.matched,
-      headerNames: getHeaderNames(req.headers),
+      headerNames,
     });
     return NextResponse.json({ ok: false, error: "Invalid webhook secret" }, { status: 401 });
   }
 
   if (!rawXml.trim()) {
     if (isManualValidation) {
+      const eventRecord = buildEventRecord({
+        environment,
+        environmentSource,
+        requestKind: "manual_validation",
+        appId,
+        trigger,
+        rqUid: null,
+        rawXmlSha256: sha256Hex(rawXml),
+        bodyLength: rawXml.length,
+        contentType,
+        receivedAt: new Date().toISOString(),
+        sourceIp,
+        headerNames,
+        secretPresent: secretCheck.present,
+        secretMatched: secretCheck.matched,
+        processingStatus: "validation_accepted",
+      });
+      const { duplicate } = await recordCccSecureShareEvent(eventRecord);
+
       console.info("[ccc-secure-share-webhook] manual validation accepted", {
         environment,
         environmentSource,
@@ -122,7 +142,7 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
         bodyLength: rawXml.length,
         contentType,
         sourceIp,
-        headerNames: getHeaderNames(req.headers),
+        headerNames,
         trigger,
         appId,
         secretConfigured: secretCheck.configured,
@@ -131,6 +151,7 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
         secretMode: secretCheck.mode,
         allowlistEnforced,
         ipAllowed,
+        duplicate,
       });
 
       return NextResponse.json({
@@ -141,7 +162,7 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
         environment,
         environmentSource,
         rqUid: null,
-        duplicate: false,
+        duplicate,
         message: "CCC manual webhook validation accepted without BMS XML body",
       });
     }
@@ -165,7 +186,7 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
       rawXmlSha256,
       contentType,
       sourceIp,
-      headerNames: getHeaderNames(req.headers),
+      headerNames,
       trigger,
       appId,
       secretConfigured: secretCheck.configured,
@@ -184,12 +205,21 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
 
   const eventRecord = buildEventRecord({
     environment,
+    environmentSource,
+    requestKind,
+    appId,
+    trigger,
     rqUid,
     rawXmlSha256,
     bodyLength: rawXml.length,
     contentType,
     receivedAt,
     sourceIp,
+    headerNames,
+    secretPresent: secretCheck.present,
+    secretMatched: secretCheck.matched,
+    processingStatus: rqUid ? "received" : "metadata_only",
+    parseError: rqUid ? null : "RqUID not found in webhook body.",
   });
   const { duplicate } = await recordCccSecureShareEvent(eventRecord);
 
@@ -203,7 +233,7 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
     rawXmlSha256,
     contentType,
     sourceIp,
-    headerNames: getHeaderNames(req.headers),
+    headerNames,
     trigger,
     appId,
     secretConfigured: secretCheck.configured,
