@@ -194,6 +194,72 @@ describe("bmsEstimateNormalizer", () => {
     });
   });
 
+  it("tolerantly normalizes varied CIECA/BMS line-like structures", () => {
+    const estimate = normalizeCccBmsEstimate(`<VehicleDamageEstimateAddRq>
+      <RqUID>rq</RqUID>
+      <EstimateLineCollection>
+        <LaborOperation>
+          <LineNo>21</LineNo>
+          <OperationCode>Repair</OperationCode>
+          <LineDescription>Quarter panel repair</LineDescription>
+          <LaborType>Body</LaborType>
+          <BodyLaborHours>3.2</BodyLaborHours>
+          <RefinishHours>1.4</RefinishHours>
+          <Category>Body</Category>
+          <ExtendedAmount>420.50</ExtendedAmount>
+        </LaborOperation>
+        <Part>
+          <SequenceNumber>22</SequenceNumber>
+          <Description>Outer panel</Description>
+          <PartNumber>OP-42</PartNumber>
+          <PartType>Aftermarket</PartType>
+          <Quantity>1</Quantity>
+          <UnitPrice>210.25</UnitPrice>
+          <ExtendedAmount>210.25</ExtendedAmount>
+        </Part>
+        <OtherCharge>
+          <Amount>25.00</Amount>
+        </OtherCharge>
+      </EstimateLineCollection>
+    </VehicleDamageEstimateAddRq>`);
+
+    expect(estimate.lineItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          lineNumber: "21",
+          section: "Body",
+          operation: "Repair",
+          description: "Quarter panel repair",
+          laborType: "Body",
+          bodyLaborHours: 3.2,
+          paintLaborHours: 1.4,
+          refinishHours: 1.4,
+          extendedAmount: 420.5,
+          sourcePath: "/VehicleDamageEstimateAddRq/LaborOperation[1]",
+          parseWarnings: [],
+        }),
+        expect.objectContaining({
+          lineNumber: "22",
+          description: "Outer panel",
+          partNumber: "OP-42",
+          partType: "Aftermarket",
+          quantity: 1,
+          unitPrice: 210.25,
+          extendedAmount: 210.25,
+          sourcePath: "/VehicleDamageEstimateAddRq/Part[1]",
+        }),
+        expect.objectContaining({
+          extendedAmount: 25,
+          sourcePath: "/VehicleDamageEstimateAddRq/OtherCharge[1]",
+          parseWarnings: [
+            "Line item operation was not found.",
+            "Line item description was not found.",
+          ],
+        }),
+      ])
+    );
+  });
+
   it("does not throw on missing optional fields and returns parseWarnings and limitations", () => {
     const estimate = normalizeCccBmsEstimate(
       "<VehicleDamageEstimateAddRq><RqUID>rq</RqUID></VehicleDamageEstimateAddRq>"

@@ -228,6 +228,7 @@ const LINE_ITEM_FIELD_ALIASES = {
   mechanicalLaborHours: ["MechLaborHours", "MechanicalLaborHours"],
   frameLaborHours: ["FrameLaborHours"],
   unitPrice: ["UnitPrice", "UnitAmt"],
+  extendedAmount: ["ExtendedAmount", "ExtendedAmt", "Amount", "LineTotal", "TotalAmount"],
   tax: ["Tax", "TaxAmt", "TaxAmount"],
   includedFlag: ["IncludedFlag", "IncludedInd", "Included"],
   manualEntry: ["ManualEntry", "ManualEntryInd", "ManualInd"],
@@ -759,7 +760,12 @@ function normalizeLineItem(
     frameLaborHours: parseNumber(firstText(sourceBlock, LINE_ITEM_FIELD_ALIASES.frameLaborHours)),
     refinishHours: line.paintHours,
     unitPrice: parseNumber(firstText(sourceBlock, LINE_ITEM_FIELD_ALIASES.unitPrice)),
-    extendedAmount: line.totalAmount ?? line.laborAmount ?? line.paintAmount ?? line.partAmount,
+    extendedAmount:
+      line.totalAmount ??
+      parseNumber(firstText(sourceBlock, LINE_ITEM_FIELD_ALIASES.extendedAmount)) ??
+      line.laborAmount ??
+      line.paintAmount ??
+      line.partAmount,
     tax: parseNumber(firstText(sourceBlock, LINE_ITEM_FIELD_ALIASES.tax)),
     includedFlag: parseBoolean(firstText(sourceBlock, LINE_ITEM_FIELD_ALIASES.includedFlag)),
     manualEntry: parseBoolean(firstText(sourceBlock, LINE_ITEM_FIELD_ALIASES.manualEntry)),
@@ -910,11 +916,11 @@ function stripLegalSearchResultBlocks(xml: string) {
 }
 
 function findSourceBlock(xml: string, sourcePath: string | null) {
-  const tag = sourcePath?.match(/\/([A-Za-z]+)\[\d+\]$/)?.[1];
+  const tag = sourcePath?.match(/\/([\w.-]+)\[\d+\]$/)?.[1];
   if (!tag) return "";
 
   const pattern = new RegExp(
-    `<(?:[\\w.-]+:)?${tag}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?${tag}>`,
+    `<(?:[\\w.-]+:)?${escapeRegExp(tag)}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?${escapeRegExp(tag)}>`,
     "i"
   );
   return pattern.exec(xml)?.[1] ?? "";
@@ -969,4 +975,8 @@ function decodeXmlEntities(value: string) {
 
 function dedupeMessages(messages: string[]) {
   return [...new Set(messages.filter(Boolean))];
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -80,6 +80,7 @@ export type CccBmsAiEstimateEvidenceContext = {
 type XmlBlock = {
   localName: string;
   content: string;
+  sourcePath: string;
 };
 
 const HEADER_FIELD_ALIASES = {
@@ -107,15 +108,14 @@ const VEHICLE_FIELD_ALIASES = {
   bodyStyle: ["BodyStyle", "BodyType"],
 } as const;
 
-const LINE_ITEM_TAGS = [
-  "LineItem",
-  "EstimateLineItem",
-  "VehicleDamageLineItem",
-  "DamageLineItem",
-  "EstimateLine",
-  "DamageLine",
-  "LaborLine",
-  "PartLine",
+const LINE_ITEM_TAG_NAME_PATTERNS = [
+  /EstimateLine/i,
+  /LineItem/i,
+  /DamageLine/i,
+  /Operation/i,
+  /Part/i,
+  /Labor/i,
+  /OtherCharge/i,
 ] as const;
 
 const LINE_FIELD_ALIASES = {
@@ -130,7 +130,7 @@ const LINE_FIELD_ALIASES = {
   paintHours: ["PaintHours", "RefinishHours"],
   paintAmount: ["PaintAmt", "PaintAmount", "RefinishAmount"],
   partAmount: ["PartAmt", "PartAmount"],
-  totalAmount: ["TotalAmt", "TotalAmount", "LineTotal"],
+  totalAmount: ["TotalAmt", "TotalAmount", "LineTotal", "ExtendedAmount", "ExtendedAmt", "Amount"],
 } as const;
 
 const JURISDICTION_FIELD_ALIASES = {
@@ -282,7 +282,7 @@ function buildLineItem(block: XmlBlock, index: number): CccBmsNormalizedLineItem
     paintAmount: parseNumber(firstText(block.content, LINE_FIELD_ALIASES.paintAmount)),
     partAmount: parseNumber(firstText(block.content, LINE_FIELD_ALIASES.partAmount)),
     totalAmount: parseNumber(firstText(block.content, LINE_FIELD_ALIASES.totalAmount)),
-    sourcePath: `/VehicleDamageEstimateAddRq/${block.localName}[${index + 1}]`,
+    sourcePath: block.sourcePath || `/VehicleDamageEstimateAddRq/${block.localName}[${index + 1}]`,
     evidenceCapabilities: ["line_item_exists", "line_item_changed"],
   };
 }
@@ -331,19 +331,68 @@ function buildJurisdictionEvidenceCandidates(
 
 function extractLineItemBlocks(xml: string): XmlBlock[] {
   const blocks: XmlBlock[] = [];
+  const seen = new Set<string>();
+  const occurrenceByTag = new Map<string, number>();
+  const candidateLocalNames = collectCandidateLineTagNames(xml);
 
-  for (const tag of LINE_ITEM_TAGS) {
+  for (const localName of candidateLocalNames) {
     const pattern = new RegExp(
-      `<(?:[\\w.-]+:)?${tag}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?${tag}>`,
+      `<(?:[\\w.-]+:)?${escapeRegExp(localName)}\\b[^>]*>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?${escapeRegExp(localName)}>`,
       "gi"
     );
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(xml))) {
-      blocks.push({ localName: tag, content: match[1] ?? "" });
+      const content = match[1] ?? "";
+      if (!isLineLikeElement(localName, content)) continue;
+
+      const occurrence = (occurrenceByTag.get(localName) ?? 0) + 1;
+      occurrenceByTag.set(localName, occurrence);
+      const sourcePath = `/VehicleDamageEstimateAddRq/${localName}[${occurrence}]`;
+      const key = `${localName}:${match.index}:${content.length}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      blocks.push({ localName, content, sourcePath });
     }
   }
 
   return blocks;
+}
+
+function collectCandidateLineTagNames(xml: string) {
+  const names = new Set<string>();
+  const pattern = /<(?<tag>(?:[\w.-]+:)?(?<localName>[\w.-]+))\b(?![^>]*\/>)[^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(xml))) {
+    const localName = match.groups?.localName ?? "";
+    if (LINE_ITEM_TAG_NAME_PATTERNS.some((linePattern) => linePattern.test(localName))) {
+      names.add(localName);
+    }
+  }
+  return [...names];
+}
+
+function isLineLikeElement(localName: string, content: string) {
+  if (!LINE_ITEM_TAG_NAME_PATTERNS.some((pattern) => pattern.test(localName))) {
+    return false;
+  }
+
+  if (!/<(?:[\w.-]+:)?[\w.-]+\b[^>]*>/.test(content)) {
+    return false;
+  }
+
+  const lineSignals = [
+    LINE_FIELD_ALIASES.lineNumber,
+    LINE_FIELD_ALIASES.operation,
+    LINE_FIELD_ALIASES.component,
+    LINE_FIELD_ALIASES.description,
+    LINE_FIELD_ALIASES.partNumber,
+    LINE_FIELD_ALIASES.laborType,
+    LINE_FIELD_ALIASES.laborHours,
+    LINE_FIELD_ALIASES.paintHours,
+    LINE_FIELD_ALIASES.totalAmount,
+  ].filter((aliases) => firstText(content, aliases));
+
+  return lineSignals.length > 0;
 }
 
 function firstText(xml: string, localNames: readonly string[]): string | null {
@@ -384,4 +433,8 @@ function parseNumber(value: string | null): number | null {
 function parseInteger(value: string | null): number | undefined {
   const parsed = parseNumber(value);
   return typeof parsed === "number" ? Math.trunc(parsed) : undefined;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
