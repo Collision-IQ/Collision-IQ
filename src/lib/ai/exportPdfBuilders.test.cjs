@@ -328,7 +328,7 @@ run("customer-report presentation cleanup avoids unsupported Pennsylvania wordin
   assert.doesNotMatch(text, /In Pennsylvania|Pennsylvania-specific/i);
 });
 
-run("Estimate scrubber export is merged into Annotated Estimate Scrubber", () => {
+run("Estimate scrubber export is replaced by Citation Density Gap Report", () => {
   const document = buildEstimateScrubberPdf({
     report: REPORT,
     analysis: ANALYSIS,
@@ -336,13 +336,14 @@ run("Estimate scrubber export is merged into Annotated Estimate Scrubber", () =>
     assistantAnalysis: null,
   });
 
-  assert.equal(document.header.title, "Annotated Estimate Scrubber");
-  assert.equal(document.filename, "annotated-estimate-scrubber.pdf");
-  assert.ok(document.sections.some((section) => section.title === "Annotated Estimate Lines"));
+  assert.equal(document.header.title, "Citation Density Gap Report");
+  assert.equal(document.filename, "citation-density-gap-report.pdf");
+  assert.ok(document.sections.some((section) => section.title === "Citation Gaps By Estimate Line"));
+  assert.ok(document.sections.some((section) => section.title === "Citation Density Method"));
   assert.ok(!document.sections.some((section) => section.title === "Estimate QA Findings"));
 });
 
-run("Annotated Estimate Review shows scrubber findings beside estimate anchors", () => {
+run("Citation Density Gap Report shows citation gaps beside estimate anchors", () => {
   const annotatedReport = {
     ...REPORT,
     issues: [
@@ -386,18 +387,21 @@ run("Annotated Estimate Review shows scrubber findings beside estimate anchors",
   });
   const text = JSON.stringify(document);
 
-  assert.equal(document.header.title, "Annotated Estimate Scrubber");
-  assert.equal(document.filename, "annotated-estimate-scrubber.pdf");
-  assert.ok(document.sections.some((section) => section.title === "Annotated Estimate Lines"));
+  assert.equal(document.header.title, "Citation Density Gap Report");
+  assert.equal(document.filename, "citation-density-gap-report.pdf");
+  assert.ok(document.sections.some((section) => section.title === "Citation Gaps By Estimate Line"));
+  assert.ok(document.summary.some((item) => item.label === "Needs Authority / Proof" && Number(item.value) > 0));
   assert.match(text, /Line \d+:/i);
-  assert.match(text, /Ask the insurer or repair shop to confirm whether adas calibration procedure support is included and documented/i);
-  assert.match(text, /Requested Clarifications/);
+  assert.match(text, /Ask for written confirmation that adas calibration procedure support was completed and documented/i);
+  assert.match(text, /Missing Authority \/ Proof Checklist/);
+  assert.match(text, /Citation density/i);
+  assert.match(text, /Estimate evidence is not authority evidence/i);
   assert.doesNotMatch(text, /Support Confidence|Confidence:|evidence-chain-12345|Parser fragment/);
   assert.doesNotMatch(text, /Operation: .* \| Status:/i);
   assert.doesNotMatch(text, /DOI violation|violated law/i);
 });
 
-run("Annotated Estimate Review model exposes stable anchors and audience-safe annotation fields", () => {
+run("Citation Density Gap model exposes stable anchors and citation readiness fields", () => {
   const model = buildAnnotatedEstimateReviewModel({
     report: {
       ...REPORT,
@@ -464,6 +468,9 @@ run("Annotated Estimate Review model exposes stable anchors and audience-safe an
   assert.ok(annotation.category);
   assert.ok(["red", "yellow", "blue", "green", "gray"].includes(annotation.severity));
   assert.ok(["verified", "referenced", "inferred", "missing"].includes(annotation.supportStatus));
+  assert.ok(annotation.citationGapBucket);
+  assert.ok(Number.isFinite(annotation.citationDensityScore));
+  assert.ok(["citation_ready", "estimate_evidence_only", "needs_authority", "needs_completion_proof", "weak_do_not_lead"].includes(annotation.citationReadiness));
   assert.equal(annotation.visibility.customer, true);
   assert.equal(annotation.visibility.estimator, true);
   assert.ok(
@@ -472,10 +479,16 @@ run("Annotated Estimate Review model exposes stable anchors and audience-safe an
       item.supportStatus !== "inferred"
     )
   );
+  assert.ok(model.annotations.some((item) =>
+    item.citationReadiness === "needs_completion_proof" ||
+    item.citationReadiness === "needs_authority" ||
+    item.category === "Needs invoice/proof" ||
+    item.category === "Needs OEM procedure support"
+  ));
   assert.doesNotMatch(JSON.stringify(model), /evidence-chain-\d+|debug confidence|internal reasoning/i);
 });
 
-run("Annotated Estimate Review does not anchor test-fit findings to generic option lines", () => {
+run("Citation Density Gap Report does not anchor test-fit findings to generic option lines", () => {
   const params = {
     report: {
       ...REPORT,
@@ -882,8 +895,8 @@ run("Annotated Estimate Review selects lower-cost carrier estimate and keeps com
   assert.equal(model.scrubTarget.role, "carrier");
   assert.equal(model.scrubTarget.lowerCostTotal, 8250);
   assert.match(model.scrubTarget.label, /Lower-cost carrier estimate/i);
-  assert.equal(annotated.header.title, "Annotated Estimate Scrubber");
-  assert.match(text, /Estimate Selected For Scrub/);
+  assert.equal(annotated.header.title, "Citation Density Gap Report");
+  assert.match(text, /Estimate Selected For Review/);
   assert.equal(estimatorList.header.title, "Estimate Delta / Change Requests");
   assert.equal(estimatorList.filename, "estimate-delta-change-requests.pdf");
   assert.ok(estimatorList.sections.some((section) => /^(Added In Newer Estimate|Top added in newer estimate|ONLY IN ESTIMATE 1|Top only in estimate 1|ONLY IN SHOP ESTIMATE|Top only in shop estimate)$/i.test(section.title)));

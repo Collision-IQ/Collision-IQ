@@ -967,7 +967,7 @@ function cleanUserFacingRepairProse(value: string): string {
     .replace(/\bsource link\b\.?/gi, "")
     .replace(/\buploaded document\b(?:\s*,\s*\buploaded document\b)+/gi, "documentation")
     .replace(/\buploaded document\b/gi, "documentation")
-    .replace(/\b(Repair Intelligence Report|Estimate Delta \/ Change Requests|Annotated Estimate Scrubber)\s*:\s*\1\b/gi, "$1")
+    .replace(/\b(Repair Intelligence Report|Estimate Delta \/ Change Requests|Annotated Estimate Scrubber|Citation Density Gap Report)\s*:\s*\1\b/gi, "$1")
     .replace(/\b(?:[A-Z]*\d[A-Z0-9-]{5,}|\d{6,}[A-Za-z]{0,3})\b/g, "")
     .replace(/\s{2,}/g, " ")
     .replace(/\s+([,.;:])/g, "$1")

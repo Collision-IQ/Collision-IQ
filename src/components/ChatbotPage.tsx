@@ -938,9 +938,9 @@ export function ChatbotWorkspacePage() {
         ? { label: "Repair Intelligence Report (Pro)", type: "locked" }
       : null,
     canUseEstimateScrubberExport
-      ? { label: "Annotated Estimate Scrubber", type: "pdf" }
+      ? { label: "Citation Density Gap Report", type: "pdf" }
       : hasResolvedAnalysis
-        ? { label: "Annotated Estimate Scrubber (Pro)", type: "locked" }
+        ? { label: "Citation Density Gap Report (Pro)", type: "locked" }
       : null,
     canUsePolicyRightsReviewExport
       ? { label: "Policy & Rights Review", type: "pdf" }
@@ -2782,10 +2782,10 @@ function RailContent({
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[#C65A2A]" aria-hidden />
-                    Annotated Estimate Scrubber
+                    Citation Density Gap Report
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                    Markup of the lowest uploaded estimate with missing, reduced, and proof-needed items attached to estimate lines.
+                    Estimate gaps ranked by repair impact, citation readiness, and missing proof.
                   </div>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -2801,7 +2801,7 @@ function RailContent({
                     }}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download scrubber</span>
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download gap report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
@@ -3306,7 +3306,7 @@ function getDefaultReportSubject(reportType: ReportKind): string {
     case "repair_intelligence":
       return "[Collision IQ] Repair Intelligence Report";
     case "estimate_scrubber":
-      return "[Collision IQ] Annotated Estimate Scrubber";
+      return "[Collision IQ] Citation Density Gap Report";
     case "estimator_change_request_list":
       return "[Collision IQ] Estimate Delta / Change Requests";
     case "policy_rights_review":
@@ -3325,7 +3325,7 @@ function getDefaultReportFilename(reportType: ReportKind): string {
     case "repair_intelligence":
       return "repair-intelligence-report.pdf";
     case "estimate_scrubber":
-      return "annotated-estimate-scrubber.pdf";
+      return "citation-density-gap-report.pdf";
     case "estimator_change_request_list":
       return "estimate-delta-change-requests.pdf";
     case "policy_rights_review":
