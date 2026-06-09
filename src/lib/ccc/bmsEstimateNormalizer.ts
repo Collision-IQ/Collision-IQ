@@ -5,6 +5,11 @@ import {
   stateFromZip,
   type ResolvedJurisdiction,
 } from "@/lib/ai/jurisdictionResolver";
+import type { VehicleIdentity } from "@/lib/ai/types/analysis";
+import {
+  decodeVinVehicleIdentity,
+  normalizeVehicleIdentity,
+} from "@/lib/ai/vehicleContext";
 import {
   normalizeCccBmsEstimate as normalizeCccBmsEstimateCore,
   type CccBmsNormalizedLineItem,
@@ -289,24 +294,115 @@ function buildVehicle(
   xml: string,
   vehicle: ReturnType<typeof normalizeCccBmsEstimateCore>["vehicle"]
 ): NormalizedCccEstimate["vehicle"] {
-  const vin = vehicle?.vin ?? null;
+  const structuredVehicle = normalizeCccStructuredVehicle(vehicle);
+  const vin = structuredVehicle.vin ?? vehicle?.vin ?? null;
+  const decodedVehicle = vin ? decodeVinVehicleIdentity(vin) : undefined;
+  const decodeLimitations = buildVinDecodeLimitations(structuredVehicle, decodedVehicle, vin);
 
   return {
     vin,
     vinRedacted: redactVin(vin),
-    vinTail: vin ? vin.slice(-6) : null,
-    year: vehicle?.year ?? null,
-    make: vehicle?.make ?? null,
-    model: vehicle?.model ?? null,
-    trim: vehicle?.trim ?? null,
+    vinTail: deriveVinTail(vin),
+    year: structuredVehicle.year ?? decodedVehicle?.year ?? null,
+    make: structuredVehicle.make ?? decodedVehicle?.make ?? null,
+    model: structuredVehicle.model ?? decodedVehicle?.model ?? null,
+    trim: structuredVehicle.trim ?? decodedVehicle?.trim ?? null,
     mileage: parseNumber(firstText(xml, ["Mileage", "Odometer", "OdometerReading"])),
     decoded: {
       attempted: Boolean(vin),
-      source: vin ? "ccc_bms" : "not_attempted",
-      confidence: vehicle ? "high" : "unknown",
-      limitations: vehicle ? [] : ["Vehicle identity fields were not found in the CCC BMS XML."],
+      source: vin ? "existing_vin_decoder" : "not_attempted",
+      confidence: decodeVehicleConfidence(decodedVehicle),
+      limitations: decodeLimitations,
     },
   };
+}
+
+function normalizeCccStructuredVehicle(
+  vehicle: ReturnType<typeof normalizeCccBmsEstimateCore>["vehicle"]
+): VehicleIdentity {
+  const normalized = normalizeVehicleIdentity({
+    vin: vehicle?.vin ?? undefined,
+    year: vehicle?.year ?? undefined,
+    make: vehicle?.make ?? undefined,
+    model: vehicle?.model ?? undefined,
+    trim: vehicle?.trim ?? undefined,
+    confidence: 0.98,
+    source: "attachment",
+    fieldSources: {
+      vin: "attachment",
+      year: "attachment",
+      make: "attachment",
+      model: "attachment",
+      trim: "attachment",
+    },
+  });
+
+  return {
+    vin: normalized?.vin ?? vehicle?.vin ?? undefined,
+    year: vehicle?.year ?? normalized?.year,
+    make: vehicle?.make ?? normalized?.make,
+    model: vehicle?.model ?? normalized?.model,
+    trim: vehicle?.trim ?? normalized?.trim,
+    confidence: 0.98,
+    source: "attachment",
+    fieldSources: {
+      vin: "attachment",
+      year: "attachment",
+      make: "attachment",
+      model: "attachment",
+      trim: "attachment",
+    },
+  };
+}
+
+function decodeVehicleConfidence(
+  decodedVehicle: VehicleIdentity | undefined
+): "low" | "medium" | "high" | "unknown" {
+  if (!decodedVehicle) return "unknown";
+  const decodedFields = [
+    decodedVehicle.vin,
+    decodedVehicle.year,
+    decodedVehicle.make,
+    decodedVehicle.model,
+    decodedVehicle.trim,
+  ].filter(Boolean).length;
+  if (decodedFields >= 4) return "high";
+  if (decodedFields >= 2) return "medium";
+  return decodedFields >= 1 ? "low" : "unknown";
+}
+
+function buildVinDecodeLimitations(
+  structuredVehicle: VehicleIdentity,
+  decodedVehicle: VehicleIdentity | undefined,
+  vin: string | null
+) {
+  const limitations: string[] = [];
+
+  if (!vin) {
+    limitations.push("VIN was not present in the CCC BMS XML; local VIN decode was not attempted.");
+  } else if (!decodedVehicle) {
+    limitations.push("Local VIN decoder could not decode this VIN without an external lookup.");
+  } else {
+    for (const field of ["year", "make", "model", "trim"] as const) {
+      const structuredValue = structuredVehicle[field];
+      const decodedValue = decodedVehicle[field];
+      if (
+        structuredValue !== undefined &&
+        decodedValue !== undefined &&
+        `${structuredValue}`.toLowerCase() !== `${decodedValue}`.toLowerCase()
+      ) {
+        limitations.push(
+          `CCC BMS structured ${field} was preserved over local VIN decode value.`
+        );
+      }
+    }
+
+    if (!decodedVehicle.model || !decodedVehicle.trim) {
+      limitations.push("Local VIN decode is partial; no external VIN API was called.");
+    }
+  }
+
+  return dedupeMessages(limitations);
 }
 
 function buildParties(
@@ -827,6 +923,11 @@ function findSourceBlock(xml: string, sourcePath: string | null) {
 function redactVin(vin: string | null | undefined) {
   if (!vin) return null;
   return `${"*".repeat(Math.max(vin.length - 6, 0))}${vin.slice(-6)}`;
+}
+
+function deriveVinTail(vin: string | null | undefined) {
+  if (!vin) return null;
+  return vin.length >= 6 ? vin.slice(-6) : vin;
 }
 
 function redactClaimNumber(value: string | null | undefined) {

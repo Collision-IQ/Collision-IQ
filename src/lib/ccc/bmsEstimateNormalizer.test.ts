@@ -92,9 +92,39 @@ describe("bmsEstimateNormalizer", () => {
       mileage: 12345,
       decoded: {
         attempted: true,
-        source: "ccc_bms",
-        confidence: "high",
-        limitations: [],
+        source: "existing_vin_decoder",
+        confidence: "medium",
+        limitations: [
+          "CCC BMS structured year was preserved over local VIN decode value.",
+          "Local VIN decode is partial; no external VIN API was called.",
+        ],
+      },
+    });
+  });
+
+  it("returns decode limitations when local VIN decode is unavailable", () => {
+    const estimate = normalizeCccBmsEstimate(`<VehicleDamageEstimateAddRq>
+      <RqUID>rq</RqUID>
+      <VIN>BADVIN123</VIN>
+      <ModelYear>2025</ModelYear>
+      <Make>Tesla</Make>
+      <Model>Model 3</Model>
+      <Trim>RWD</Trim>
+    </VehicleDamageEstimateAddRq>`);
+
+    expect(estimate.vehicle).toMatchObject({
+      vin: "BADVIN123",
+      vinRedacted: "***VIN123",
+      vinTail: "VIN123",
+      year: 2025,
+      make: "Tesla",
+      model: "Model 3",
+      trim: "RWD",
+      decoded: {
+        attempted: true,
+        source: "existing_vin_decoder",
+        confidence: "unknown",
+        limitations: ["Local VIN decoder could not decode this VIN without an external lookup."],
       },
     });
   });
@@ -231,6 +261,39 @@ describe("bmsEstimateNormalizer", () => {
     );
   });
 
+  it("ccc-sor-fixture-001 resolves PA from inspection/shop ZIP fallback and never owner_zip", () => {
+    const estimate = normalizeCccBmsEstimate(`<VehicleDamageEstimateAddRq>
+      <RqUID>ccc-sor-fixture-001</RqUID>
+      <OwnerName>ANNEGAYL</OwnerName>
+      <InsuredName>ANNEGAYL</InsuredName>
+      <InspectionSiteName>Conestoga Autobody</InspectionSiteName>
+      <InspectionSiteAddress1>961 Lancaster Ave</InspectionSiteAddress1>
+      <InspectionSiteCity>Berwyn</InspectionSiteCity>
+      <InspectionSiteState>PA</InspectionSiteState>
+      <InspectionSiteZip>19312</InspectionSiteZip>
+      <RepairFacilityName>Conestoga Autobody</RepairFacilityName>
+      <RepairFacilityAddress1>961 Lancaster Ave</RepairFacilityAddress1>
+      <RepairFacilityCity>Berwyn</RepairFacilityCity>
+      <RepairFacilityState>PA</RepairFacilityState>
+      <RepairFacilityZip>19312</RepairFacilityZip>
+    </VehicleDamageEstimateAddRq>`);
+
+    expect(estimate.jurisdictionResolution).toMatchObject({
+      state: "PA",
+      stateCode: "PA",
+      confidence: "medium",
+    });
+    expect([
+      "inspection_site_zip_fallback",
+      "shop_zip_fallback",
+    ]).toContain(estimate.jurisdictionResolution?.source);
+    expect(estimate.jurisdictionResolution?.basis).toContain(
+      "Inspection Site ZIP from CCC Secure Share estimate data"
+    );
+    expect(estimate.jurisdictionResolution?.source).not.toBe("owner_zip");
+    expect(JSON.stringify(estimate.jurisdictionResolution)).not.toContain("owner_zip");
+  });
+
   it("does not let legal search result XML set jurisdiction", () => {
     const estimate = normalizeCccBmsEstimate(`<VehicleDamageEstimateAddRq>
       <RqUID>rq</RqUID>
@@ -258,6 +321,8 @@ describe("bmsEstimateNormalizer", () => {
 
     expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(rawXml);
     expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(rawXml);
+    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("1HGCM82633A004352");
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("1HGCM82633A004352");
     expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("Do Not Log");
     expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("Do Not Log");
 
