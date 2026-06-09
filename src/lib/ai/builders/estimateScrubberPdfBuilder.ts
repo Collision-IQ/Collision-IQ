@@ -1382,6 +1382,8 @@ function buildSourceBoundaryBullets(): string[] {
   return [
     "This report separates estimate gaps from citation support. A line-item difference may be real, but it is not supplement-ready until the file shows the authority or documentation needed to defend it.",
     "Estimate evidence supports the existence of a difference. It does not automatically prove OEM, P-page, DEG, legal, policy, or carrier-violation authority.",
+    "CCC Secure Share source confirms this estimate line was present in the structured estimate data.",
+    "The CCC estimate data supports the existence of this line-item difference. OEM/P-page/DEG/legal support has not yet been verified.",
     "Use estimate lines, CCC/workfile data, uploaded PDFs, and estimate deltas to show line presence, omission, reduced amount, changed labor hours, or source metadata.",
     "Use separate authority or completion proof for OEM procedures, P-pages, SCRS, DEG, NHTSA, state regulation, policy language, invoices, scans, calibration records, photos, teardown, and measurement support.",
   ];
