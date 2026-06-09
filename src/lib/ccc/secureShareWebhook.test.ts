@@ -1,8 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
 import {
   GET,
   POST,
 } from "@/app/api/integrations/ccc/secure-share/webhook/[[...segments]]/route";
+import { GET as GET_CCC_ADMIN_EVENTS } from "@/app/api/admin/ccc-secure-share/events/route";
+import { GET as GET_CCC_ADMIN_EVENT_DETAIL } from "@/app/api/admin/ccc-secure-share/events/[id]/route";
+import { normalizeCccBmsEstimate } from "./bmsEstimateNormalizer";
+import {
+  buildSanitizedCccSecureSharePreview,
+  CCC_SECURE_SHARE_HIGH_CONFIDENCE_BOUNDARY,
+  setCccSecureSharePreviewAdminAccessResolverForTest,
+  setCccSecureSharePreviewReaderForTest,
+} from "./secureSharePreview";
 import {
   type CccSecureShareEventRecord,
   checkWebhookSecret,
@@ -32,6 +42,8 @@ beforeEach(() => {
 
 afterEach(() => {
   setCccSecureShareEventRecorderForTest(null);
+  setCccSecureSharePreviewAdminAccessResolverForTest(null);
+  setCccSecureSharePreviewReaderForTest(null);
   vi.restoreAllMocks();
 });
 
@@ -103,6 +115,204 @@ describe("CCC Secure Share webhook helpers", () => {
       environment: "sandbox",
       environmentSource: "monitor_default_sandbox",
     });
+  });
+});
+
+describe("CCC Secure Share sanitized normalized preview", () => {
+  it("strips raw XML and sensitive party identifiers while preserving VIN tail/hash", () => {
+    const rawXml = `
+      <VehicleDamageEstimateAddRq>
+        <RqUID>preview-rq</RqUID>
+        <ClaimNumber>CLAIM-987654321</ClaimNumber>
+        <VIN>1HGCM82633A004352</VIN>
+        <ModelYear>2024</ModelYear>
+        <Make>Honda</Make>
+        <Model>Accord</Model>
+        <OwnerName>Jane Owner</OwnerName>
+        <OwnerAddress1>123 Main Street</OwnerAddress1>
+        <OwnerPhone>555-111-2222</OwnerPhone>
+        <OwnerEmail>jane.owner@example.test</OwnerEmail>
+        <EstimateLineItem>
+          <LineNumber>7</LineNumber>
+          <Section>Front Lamps</Section>
+          <Operation>Replace</Operation>
+          <PartDescription>Headlamp assembly</PartDescription>
+          <LaborType>Body</LaborType>
+          <PartType>OEM</PartType>
+          <Quantity>1</Quantity>
+          <LaborHours>0.8</LaborHours>
+          <TotalAmount>245.50</TotalAmount>
+        </EstimateLineItem>
+      </VehicleDamageEstimateAddRq>
+    `;
+
+    const normalized = normalizeCccBmsEstimate(rawXml);
+    const preview = buildSanitizedCccSecureSharePreview(normalized);
+    const serialized = JSON.stringify(preview);
+
+    expect(serialized).not.toContain(rawXml);
+    expect(serialized).not.toContain("1HGCM82633A004352");
+    expect(serialized).not.toContain("CLAIM-987654321");
+    expect(serialized).not.toContain("Jane Owner");
+    expect(serialized).not.toContain("123 Main Street");
+    expect(serialized).not.toContain("555-111-2222");
+    expect(serialized).not.toContain("jane.owner@example.test");
+    expect(preview.vehicleVinTail).toBe("004352");
+    expect(preview.vehicleVinHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(preview.normalizedHeaderJson).toMatchObject({
+      identifiers: {
+        claimNumberRedacted: "***********4321",
+        claimNumberHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      },
+      evidenceBoundary: CCC_SECURE_SHARE_HIGH_CONFIDENCE_BOUNDARY,
+    });
+  });
+
+  it("keeps line item preview to allowed fields only", () => {
+    const preview = buildSanitizedCccSecureSharePreview(
+      normalizeCccBmsEstimate(`
+        <VehicleDamageEstimateAddRq>
+          <RqUID>line-preview-rq</RqUID>
+          <EstimateLineItem>
+            <LineNumber>9</LineNumber>
+            <Section>Body</Section>
+            <Operation>Repair</Operation>
+            <PartDescription>Quarter panel</PartDescription>
+            <PartNumber>PRIVATE-PART-NUMBER</PartNumber>
+            <LaborType>Body</LaborType>
+            <Quantity>2</Quantity>
+            <LaborHours>3.5</LaborHours>
+            <BodyLaborHours>3.5</BodyLaborHours>
+            <RefinishHours>1.2</RefinishHours>
+            <UnitPrice>100.25</UnitPrice>
+            <TotalAmount>200.50</TotalAmount>
+          </EstimateLineItem>
+        </VehicleDamageEstimateAddRq>
+      `)
+    );
+
+    expect(preview.normalizedLineItemsPreviewJson[0]).toEqual({
+      lineNumber: "9",
+      section: "Body",
+      operation: "Repair",
+      description: "Quarter panel",
+      laborType: "Body",
+      partType: null,
+      quantity: 2,
+      laborHours: 3.5,
+      bodyLaborHours: 3.5,
+      paintLaborHours: 1.2,
+      refinishHours: 1.2,
+      unitPrice: 100.25,
+      extendedAmount: 200.5,
+      parseWarnings: [],
+    });
+    expect(JSON.stringify(preview.normalizedLineItemsPreviewJson)).not.toContain(
+      "PRIVATE-PART-NUMBER"
+    );
+  });
+
+  it("admin list and detail endpoints reject non-admin preview access", async () => {
+    setCccSecureSharePreviewAdminAccessResolverForTest(async () => ({ isPlatformAdmin: false }));
+    setCccSecureSharePreviewReaderForTest({
+      list: async () => {
+        throw new Error("non-admin should not read CCC preview list");
+      },
+      get: async () => {
+        throw new Error("non-admin should not read CCC preview detail");
+      },
+    });
+
+    const listResponse = await GET_CCC_ADMIN_EVENTS(
+      new NextRequest("https://example.test/api/admin/ccc-secure-share/events")
+    );
+    const detailResponse = await GET_CCC_ADMIN_EVENT_DETAIL(
+      new Request("https://example.test/api/admin/ccc-secure-share/events/event-1"),
+      { params: Promise.resolve({ id: "event-1" }) }
+    );
+
+    expect(listResponse.status).toBe(403);
+    expect(detailResponse.status).toBe(403);
+  });
+
+  it("admin detail preview includes CCC evidence boundaries without prohibited authority claims", async () => {
+    const normalized = normalizeCccBmsEstimate(
+      "<VehicleDamageEstimateAddRq><RqUID>admin-preview-rq</RqUID><EstimateLineItem><LineNumber>1</LineNumber><Operation>Replace</Operation><PartDescription>Headlamp</PartDescription></EstimateLineItem></VehicleDamageEstimateAddRq>"
+    );
+    const preview = buildSanitizedCccSecureSharePreview(normalized);
+    setCccSecureSharePreviewAdminAccessResolverForTest(async () => ({ isPlatformAdmin: true }));
+    setCccSecureSharePreviewReaderForTest({
+      list: async () => [],
+      get: async (id) => ({
+        id,
+        receivedAt: "2026-06-09T00:00:00.000Z",
+        environment: "sandbox",
+        requestKind: "bms_estimate",
+        rqUid: "admin-preview-rq",
+        appId: "1686",
+        trigger: null,
+        bodyLength: 100,
+        contentType: "application/xml",
+        sourceIp: "52.252.194.193",
+        signaturePresent: true,
+        secretMatched: false,
+        duplicate: false,
+        normalizationStatus: preview.normalizationStatus,
+        normalizedLineItemCount: preview.normalizedLineItemCount,
+        vehicle: {
+          year: preview.vehicleYear,
+          make: preview.vehicleMake,
+          model: preview.vehicleModel,
+          vinTail: preview.vehicleVinTail,
+        },
+        jurisdiction: {
+          stateCode: preview.jurisdictionStateCode,
+          source: preview.jurisdictionSource,
+          confidence: preview.jurisdictionConfidence,
+        },
+        warningCount: preview.normalizationWarningsJson.length,
+        normalizedHeader: preview.normalizedHeaderJson,
+        jurisdictionEvidence: preview.normalizedHeaderJson.jurisdictionEvidence,
+        jurisdictionResolution: preview.normalizedHeaderJson.jurisdictionResolution,
+        totals: preview.normalizedHeaderJson.totals,
+        lineItemPreview: preview.normalizedLineItemsPreviewJson,
+        parseWarnings: [],
+        normalizationWarnings: preview.normalizationWarningsJson,
+        aiSafeContextPreview: [
+          "CCC Secure Share source confirms this estimate line was present in the structured estimate data.",
+          "The CCC estimate data supports the existence of this line-item difference. OEM/P-page/DEG/legal support has not yet been verified.",
+          CCC_SECURE_SHARE_HIGH_CONFIDENCE_BOUNDARY,
+        ].join("\n"),
+        evidenceBoundaries: {
+          linePresence:
+            "CCC Secure Share source confirms this estimate line was present in the structured estimate data.",
+          citationGap:
+            "The CCC estimate data supports the existence of this line-item difference. OEM/P-page/DEG/legal support has not yet been verified.",
+          authority: CCC_SECURE_SHARE_HIGH_CONFIDENCE_BOUNDARY,
+        },
+      }),
+    });
+
+    const response = await GET_CCC_ADMIN_EVENT_DETAIL(
+      new Request("https://example.test/api/admin/ccc-secure-share/events/event-1"),
+      { params: Promise.resolve({ id: "event-1" }) }
+    );
+    const body = await response.json();
+    const serialized = JSON.stringify(body);
+
+    expect(response.status).toBe(200);
+    expect(serialized).toContain(
+      "CCC Secure Share source confirms this estimate line was present in the structured estimate data."
+    );
+    expect(serialized).toContain(
+      "The CCC estimate data supports the existence of this line-item difference. OEM/P-page/DEG/legal support has not yet been verified."
+    );
+    expect(serialized).toContain(CCC_SECURE_SHARE_HIGH_CONFIDENCE_BOUNDARY);
+    expect(serialized).not.toContain("CCC confirms this operation is required");
+    expect(serialized).not.toContain("CCC proves OEM");
+    expect(serialized).not.toContain("CCC proves P-page");
+    expect(serialized).not.toContain("CCC proves legal violation");
+    expect(serialized).not.toContain("CCC proves policy coverage");
   });
 });
 

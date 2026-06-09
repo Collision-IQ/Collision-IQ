@@ -12,6 +12,10 @@ import {
   shouldEnforceIpAllowlist,
 } from "@/lib/ccc/secureShareWebhook";
 import { normalizeCccBmsEstimate } from "@/lib/ccc/bmsEstimateNormalizer";
+import {
+  buildSanitizedCccSecureSharePreview,
+  persistCccSecureShareNormalizedPreview,
+} from "@/lib/ccc/secureSharePreview";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -129,6 +133,7 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
         sourceIp,
         headerNames,
         secretPresent: secretCheck.present,
+        signaturePresent: secretCheck.signaturePresent,
         secretMatched: secretCheck.matched,
         processingStatus: "validation_accepted",
       });
@@ -221,17 +226,19 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
     sourceIp,
     headerNames,
     secretPresent: secretCheck.present,
+    signaturePresent: secretCheck.signaturePresent,
     secretMatched: secretCheck.matched,
     processingStatus: rqUid ? "received" : "metadata_only",
     parseError: rqUid ? null : "RqUID not found in webhook body.",
   });
-  const { duplicate } = await recordCccSecureShareEvent(eventRecord);
+  const { duplicate, eventId } = await recordCccSecureShareEvent(eventRecord);
 
-  tryNormalizeAndLogCccBmsMetadata({
+  await tryNormalizeAndLogCccBmsMetadata({
     rawXml,
     environment,
     rqUid,
     appId,
+    eventId,
   });
 
   console.info("[ccc-secure-share-webhook] received", {
@@ -271,11 +278,12 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
   );
 }
 
-function tryNormalizeAndLogCccBmsMetadata(params: {
+async function tryNormalizeAndLogCccBmsMetadata(params: {
   rawXml: string;
   environment: "sandbox" | "production";
   rqUid: string | null;
   appId: string | null;
+  eventId?: string;
 }) {
   if (!params.rawXml.trim()) return;
 
@@ -284,7 +292,10 @@ function tryNormalizeAndLogCccBmsMetadata(params: {
       environment: params.environment,
       rqUid: params.rqUid,
       appId: params.appId,
+      sourceEventId: params.eventId ?? null,
     });
+    const preview = buildSanitizedCccSecureSharePreview(normalized);
+    await persistCccSecureShareNormalizedPreview(params.eventId, preview);
 
     console.info("[ccc-secure-share-webhook] normalized BMS metadata", {
       rqUid: normalized.rqUid,

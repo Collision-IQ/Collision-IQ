@@ -18,6 +18,7 @@ export type CccSecureShareEventRecord = {
   sourceIp: string | null;
   headerNames: string[];
   secretPresent: boolean;
+  signaturePresent: boolean;
   secretMatched: boolean;
   processingStatus: CccSecureShareProcessingStatus;
   parseError: string | null;
@@ -88,6 +89,7 @@ type CccSecureShareEventRecorder = (
 ) => Promise<Partial<CccSecureShareEventRecordResult> & { duplicate: boolean }>;
 
 export type CccSecureShareEventRecordResult = {
+  eventId?: string;
   duplicate: boolean;
   persisted: boolean;
   persistenceUnavailable: boolean;
@@ -243,6 +245,7 @@ export function buildEventRecord(params: {
   sourceIp: string | null;
   headerNames: string[];
   secretPresent: boolean;
+  signaturePresent: boolean;
   secretMatched: boolean;
   processingStatus: CccSecureShareProcessingStatus;
   parseError?: string | null;
@@ -289,8 +292,9 @@ async function recordCccSecureShareEventWithPrisma(
     }
   }
 
+  let eventId: string;
   try {
-    await prisma.cccSecureShareWebhookEvent.create({
+    const created = await prisma.cccSecureShareWebhookEvent.create({
       data: {
         environment: event.environment,
         environmentSource: event.environmentSource,
@@ -304,6 +308,7 @@ async function recordCccSecureShareEventWithPrisma(
         sourceIp: event.sourceIp,
         headerNamesJson: event.headerNames,
         secretPresent: event.secretPresent,
+        signaturePresent: event.signaturePresent,
         secretMatched: event.secretMatched,
         duplicate,
         receivedAt: new Date(event.receivedAt),
@@ -311,11 +316,13 @@ async function recordCccSecureShareEventWithPrisma(
         parseError: event.parseError,
       },
     });
+    eventId = created.id;
   } catch (error) {
     return handleCccPersistenceError(error, event, duplicate);
   }
 
   return {
+    eventId,
     duplicate,
     persisted: true,
     persistenceUnavailable: false,
@@ -326,6 +333,7 @@ function normalizeEventRecordResult(
   result: Partial<CccSecureShareEventRecordResult> & { duplicate: boolean }
 ): CccSecureShareEventRecordResult {
   return {
+    eventId: result.eventId,
     duplicate: result.duplicate,
     persisted: result.persisted ?? true,
     persistenceUnavailable: result.persistenceUnavailable ?? false,
@@ -353,6 +361,7 @@ function handleCccPersistenceError(
     sourceIp: event.sourceIp,
     headerNames: event.headerNames,
     secretPresent: event.secretPresent,
+    signaturePresent: event.signaturePresent,
     secretMatched: event.secretMatched,
     duplicate,
     persisted: false,
