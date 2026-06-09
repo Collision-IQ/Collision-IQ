@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
 import {
+  normalizeStateCode,
+  resolveJurisdiction,
+  stateFromZip,
+  type ResolvedJurisdiction,
+} from "@/lib/ai/jurisdictionResolver";
+import {
   normalizeCccBmsEstimate as normalizeCccBmsEstimateCore,
   type CccBmsNormalizedLineItem,
 } from "./cccBmsNormalizer";
@@ -10,6 +16,10 @@ export type CccBmsEstimateNormalizerOptions = {
   appId?: string | null;
   sourceEventId?: string | null;
 };
+
+type NormalizedCccJurisdictionResolution = NonNullable<
+  NormalizedCccEstimate["jurisdictionResolution"]
+>;
 
 export type AddressParty = {
   name?: string | null;
@@ -201,7 +211,7 @@ const TOTAL_ALIASES = {
 } as const;
 
 const JURISDICTION_ALIASES = {
-  explicitState: ["LossState", "LossStateProvince", "AccidentState", "JurisdictionState"],
+  explicitState: ["LossState", "LossStateProvince", "AccidentState"],
   policyState: ["PolicyState", "PolicyStateProvince"],
 } as const;
 
@@ -329,7 +339,7 @@ function buildAddressParty(
     address1: firstText(xml, aliases.address1),
     address2: firstText(xml, aliases.address2),
     city: firstText(xml, aliases.city),
-    state: normalizeState(firstText(xml, aliases.state)),
+    state: normalizeStateCode(firstText(xml, aliases.state)),
     zip: firstText(xml, aliases.zip),
     rawLabel: null,
     hasRealAddressBlock: false,
@@ -368,9 +378,12 @@ function buildJurisdictionEvidence(
   xml: string,
   parties: NormalizedCccEstimate["parties"]
 ): NormalizedCccEstimate["jurisdictionEvidence"] {
+  const jurisdictionXml = stripLegalSearchResultBlocks(xml);
   const evidence = {
-    explicitState: normalizeState(firstText(xml, JURISDICTION_ALIASES.explicitState)),
-    policyState: normalizeState(firstText(xml, JURISDICTION_ALIASES.policyState)),
+    explicitState: normalizeStateCode(
+      firstText(jurisdictionXml, JURISDICTION_ALIASES.explicitState)
+    ),
+    policyState: normalizeStateCode(firstText(jurisdictionXml, JURISDICTION_ALIASES.policyState)),
     ownerAddressState: parties.owner?.state ?? null,
     ownerAddressZip: parties.owner?.zip ?? null,
     ownerAddressIsRealBlock: Boolean(parties.owner?.hasRealAddressBlock),
@@ -401,33 +414,220 @@ function buildJurisdictionEvidence(
 function buildJurisdictionResolution(
   evidence: NormalizedCccEstimate["jurisdictionEvidence"]
 ): NormalizedCccEstimate["jurisdictionResolution"] {
-  const state =
-    evidence.explicitState ??
-    evidence.policyState ??
-    evidence.repairFacilityState ??
-    evidence.inspectionSiteState ??
-    evidence.ownerAddressState ??
-    null;
-  const source = evidence.explicitState
-    ? "ccc_bms_explicit_state"
-    : evidence.policyState
-      ? "ccc_bms_policy_state"
-      : evidence.repairFacilityState
-        ? "ccc_bms_repair_facility_address"
-        : evidence.inspectionSiteState
-          ? "ccc_bms_inspection_site_address"
-          : evidence.ownerAddressState
-            ? "ccc_bms_owner_address"
-            : null;
+  const sharedResolution = resolveJurisdiction({
+    analysis: { rawEstimateText: buildJurisdictionResolverEvidenceText(evidence) },
+  });
+  const fallbackResolution = resolveCccJurisdictionFallback(evidence);
+  const resolution = chooseCccJurisdictionResolution(sharedResolution, fallbackResolution);
 
+  return {
+    state: resolution.state,
+    stateCode: resolution.stateCode,
+    source: resolution.source,
+    confidence: resolution.confidence,
+    basis: resolution.basis,
+    limitations: dedupeMessages([...(resolution.limitations ?? []), ...evidence.limitations]),
+  };
+}
+
+function buildJurisdictionResolverEvidenceText(
+  evidence: NormalizedCccEstimate["jurisdictionEvidence"]
+) {
+  const blocks: string[] = [];
+
+  if (evidence.ownerAddressIsRealBlock) {
+    blocks.push(
+      [
+        "Owner Address",
+        evidence.ownerAddressState ? `State: ${evidence.ownerAddressState}` : null,
+        evidence.ownerAddressZip ? `ZIP: ${evidence.ownerAddressZip}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    );
+  }
+
+  if (evidence.inspectionSiteState || evidence.inspectionSiteZip) {
+    blocks.push(
+      [
+        "Inspection Site",
+        evidence.inspectionSiteState ? `State: ${evidence.inspectionSiteState}` : null,
+        evidence.inspectionSiteZip ? `ZIP: ${evidence.inspectionSiteZip}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    );
+  }
+
+  if (evidence.repairFacilityState || evidence.repairFacilityZip) {
+    blocks.push(
+      [
+        "Repair Facility",
+        evidence.repairFacilityState ? `State: ${evidence.repairFacilityState}` : null,
+        evidence.repairFacilityZip ? `ZIP: ${evidence.repairFacilityZip}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    );
+  }
+
+  return blocks.join("\n\n");
+}
+
+function resolveCccJurisdictionFallback(
+  evidence: NormalizedCccEstimate["jurisdictionEvidence"]
+): NormalizedCccJurisdictionResolution {
+  if (evidence.explicitState) {
+    return buildCccJurisdictionResult(
+      evidence.explicitState,
+      "ccc_bms_explicit_state",
+      "Explicit state from CCC Secure Share estimate data",
+      "medium",
+      evidence.limitations
+    );
+  }
+
+  if (evidence.policyState) {
+    return buildCccJurisdictionResult(
+      evidence.policyState,
+      "ccc_bms_policy_state",
+      "Policy state from CCC Secure Share estimate data",
+      "medium",
+      evidence.limitations
+    );
+  }
+
+  if (evidence.ownerAddressIsRealBlock && evidence.ownerAddressState) {
+    return buildCccJurisdictionResult(
+      evidence.ownerAddressState,
+      evidence.ownerAddressZip ? "owner_zip" : "owner_address",
+      evidence.ownerAddressZip
+        ? "Owner ZIP from CCC Secure Share estimate data"
+        : "Owner address state from CCC Secure Share estimate data",
+      "high",
+      evidence.limitations
+    );
+  }
+
+  const inspectionState = stateFromStructuredZipFallback(
+    evidence.inspectionSiteZip,
+    evidence.inspectionSiteState
+  );
+  if (inspectionState) {
+    return buildCccJurisdictionResult(
+      inspectionState,
+      "inspection_site_zip_fallback",
+      "Inspection Site ZIP from CCC Secure Share estimate data",
+      "medium",
+      [
+        ...evidence.limitations,
+        "Jurisdiction is inferred from inspection-site estimate metadata, not from an owner mailing address or policy governing-law clause.",
+      ]
+    );
+  }
+
+  const shopState = stateFromStructuredZipFallback(
+    evidence.repairFacilityZip,
+    evidence.repairFacilityState
+  );
+  if (shopState) {
+    return buildCccJurisdictionResult(
+      shopState,
+      "shop_zip_fallback",
+      "Repair Facility ZIP from CCC Secure Share estimate data",
+      "medium",
+      [
+        ...evidence.limitations,
+        "Jurisdiction is inferred from repair-facility estimate metadata, not from an owner mailing address or policy governing-law clause.",
+      ]
+    );
+  }
+
+  if (evidence.inspectionSiteState) {
+    return buildCccJurisdictionResult(
+      evidence.inspectionSiteState,
+      "inspection_site_address_fallback",
+      "Inspection Site state from CCC Secure Share estimate data",
+      "medium",
+      evidence.limitations
+    );
+  }
+
+  if (evidence.repairFacilityState) {
+    return buildCccJurisdictionResult(
+      evidence.repairFacilityState,
+      "shop_address_fallback",
+      "Repair Facility state from CCC Secure Share estimate data",
+      "medium",
+      evidence.limitations
+    );
+  }
+
+  return buildCccUnknownJurisdiction(evidence.limitations);
+}
+
+function chooseCccJurisdictionResolution(
+  sharedResolution: ResolvedJurisdiction,
+  fallbackResolution: NormalizedCccJurisdictionResolution
+): NormalizedCccJurisdictionResolution {
+  if (
+    sharedResolution.state &&
+    sharedResolution.source !== "policy_governing_law" &&
+    sharedResolution.source !== "explicit_user"
+  ) {
+    return {
+      state: sharedResolution.state,
+      stateCode: sharedResolution.stateCode,
+      source: sharedResolution.source,
+      confidence: sharedResolution.confidence,
+      basis: sharedResolution.basis.replace("uploaded estimate", "CCC Secure Share estimate data"),
+      limitations: sharedResolution.limitations,
+    };
+  }
+
+  return fallbackResolution;
+}
+
+function buildCccJurisdictionResult(
+  state: string,
+  source: string,
+  basis: string,
+  confidence: "low" | "medium" | "high" | "unknown",
+  limitations: string[]
+): NormalizedCccJurisdictionResolution {
   return {
     state,
     stateCode: state,
     source,
-    confidence: state ? "medium" : "unknown",
-    basis: state ? "Structured CCC BMS estimate metadata." : null,
-    limitations: evidence.limitations,
+    confidence,
+    basis,
+    limitations: dedupeMessages(limitations),
   };
+}
+
+function buildCccUnknownJurisdiction(
+  limitations: string[]
+): NormalizedCccJurisdictionResolution {
+  return {
+    state: null,
+    stateCode: null,
+    source: "unknown",
+    confidence: "unknown",
+    basis: null,
+    limitations: dedupeMessages([
+      ...limitations,
+      "State-specific legal and policy conclusions should remain pending until jurisdiction evidence is supplied.",
+    ]),
+  };
+}
+
+function stateFromStructuredZipFallback(
+  zip: string | null | undefined,
+  state: string | null | undefined
+) {
+  if (!zip || !state) return null;
+  const zipState = stateFromZip(zip);
+  return zipState === state ? state : null;
 }
 
 function normalizeLineItem(
@@ -596,6 +796,23 @@ function firstText(xml: string, localNames: readonly string[]): string | null {
   return null;
 }
 
+function stripLegalSearchResultBlocks(xml: string) {
+  return [
+    "LegalSearchResult",
+    "LegalSearchResults",
+    "LegalResult",
+    "LegalResults",
+    "RegulatorySearchResult",
+    "RegulatorySearchResults",
+  ].reduce((nextXml, localName) => {
+    const pattern = new RegExp(
+      `<(?:[\\w.-]+:)?${localName}\\b[^>]*>[\\s\\S]*?<\\/(?:[\\w.-]+:)?${localName}>`,
+      "gi"
+    );
+    return nextXml.replace(pattern, "");
+  }, xml);
+}
+
 function findSourceBlock(xml: string, sourcePath: string | null) {
   const tag = sourcePath?.match(/\/([A-Za-z]+)\[\d+\]$/)?.[1];
   if (!tag) return "";
@@ -605,11 +822,6 @@ function findSourceBlock(xml: string, sourcePath: string | null) {
     "i"
   );
   return pattern.exec(xml)?.[1] ?? "";
-}
-
-function normalizeState(value: string | null) {
-  const trimmed = value?.trim().toUpperCase() ?? "";
-  return /^[A-Z]{2}$/.test(trimmed) ? trimmed : value;
 }
 
 function redactVin(vin: string | null | undefined) {

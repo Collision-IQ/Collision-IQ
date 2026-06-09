@@ -132,8 +132,8 @@ describe("bmsEstimateNormalizer", () => {
     expect(estimate.jurisdictionResolution).toMatchObject({
       state: "CA",
       stateCode: "CA",
-      source: "ccc_bms_explicit_state",
-      confidence: "medium",
+      source: "owner_zip",
+      confidence: "high",
     });
   });
 
@@ -182,6 +182,69 @@ describe("bmsEstimateNormalizer", () => {
     expect(estimate.vehicle.decoded).toMatchObject({
       attempted: false,
       source: "not_attempted",
+      confidence: "unknown",
+    });
+  });
+
+  it("does not classify owner name alone as an owner address ZIP", () => {
+    const estimate = normalizeCccBmsEstimate(`<VehicleDamageEstimateAddRq>
+      <RqUID>rq</RqUID>
+      <OwnerName>Owner Name Only</OwnerName>
+      <OwnerZip>90002</OwnerZip>
+      <RepairFacilityName>Example Collision</RepairFacilityName>
+      <RepairFacilityState>CA</RepairFacilityState>
+      <RepairFacilityZip>90001</RepairFacilityZip>
+    </VehicleDamageEstimateAddRq>`);
+
+    expect(estimate.parties.owner).toMatchObject({
+      name: "Owner Name Only",
+      zip: "90002",
+      hasRealAddressBlock: false,
+    });
+    expect(estimate.jurisdictionEvidence.ownerAddressIsRealBlock).toBe(false);
+    expect(estimate.jurisdictionResolution).toMatchObject({
+      state: "CA",
+      source: "shop_zip_fallback",
+      confidence: "medium",
+    });
+    expect(estimate.jurisdictionResolution?.basis).toContain(
+      "CCC Secure Share estimate data"
+    );
+  });
+
+  it("uses inspection site ZIP only as a medium-confidence fallback", () => {
+    const estimate = normalizeCccBmsEstimate(`<VehicleDamageEstimateAddRq>
+      <RqUID>rq</RqUID>
+      <InspectionSiteName>Inspection Yard</InspectionSiteName>
+      <InspectionSiteState>IL</InspectionSiteState>
+      <InspectionSiteZip>60601</InspectionSiteZip>
+    </VehicleDamageEstimateAddRq>`);
+
+    expect(estimate.jurisdictionResolution).toMatchObject({
+      state: "IL",
+      stateCode: "IL",
+      source: "inspection_site_zip_fallback",
+      confidence: "medium",
+    });
+    expect(estimate.jurisdictionResolution?.basis).toContain(
+      "Inspection Site ZIP from CCC Secure Share estimate data"
+    );
+  });
+
+  it("does not let legal search result XML set jurisdiction", () => {
+    const estimate = normalizeCccBmsEstimate(`<VehicleDamageEstimateAddRq>
+      <RqUID>rq</RqUID>
+      <LegalSearchResult>
+        <PolicyState>TX</PolicyState>
+        <LossState>TX</LossState>
+      </LegalSearchResult>
+    </VehicleDamageEstimateAddRq>`);
+
+    expect(estimate.jurisdictionEvidence.explicitState).toBeNull();
+    expect(estimate.jurisdictionEvidence.policyState).toBeNull();
+    expect(estimate.jurisdictionResolution).toMatchObject({
+      state: null,
+      source: "unknown",
       confidence: "unknown",
     });
   });
