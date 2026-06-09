@@ -187,6 +187,52 @@ describe("CCC Secure Share webhook route", () => {
     infoSpy.mockRestore();
   });
 
+  it("accepts manual validation when persistence table is missing", async () => {
+    const tableMissingError = Object.assign(new Error("Missing CCC webhook event table"), {
+      code: "P2021",
+    });
+    setCccSecureShareEventRecorderForTest(async () => {
+      throw tableMissingError;
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const response = await POST(
+      new Request(
+        "https://example.test/api/integrations/ccc/secure-share/webhook/estimate?appId=1686&trigger=manual",
+        {
+          method: "POST",
+          body: "",
+        }
+      ),
+      { params: Promise.resolve({ segments: ["estimate"] }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      received: true,
+      validationOnly: true,
+      requestKind: "manual_validation",
+      rqUid: null,
+      duplicate: false,
+    });
+    expect(warnSpy.mock.calls).toEqual([
+      [
+        "[ccc-secure-share-webhook] persistence unavailable",
+        expect.objectContaining({
+          persisted: false,
+          persistenceUnavailable: true,
+          reason: "table_missing",
+          requestKind: "manual_validation",
+          appId: "1686",
+          trigger: "manual",
+          rqUid: null,
+        }),
+      ],
+    ]);
+  });
+
   it("accepts POST /webhook", async () => {
     const response = await postXml({ segments: undefined });
     const body = await response.json();
@@ -201,6 +247,45 @@ describe("CCC Secure Share webhook route", () => {
       rqUid: "abc",
       duplicate: false,
     });
+  });
+
+  it("accepts BMS estimate XML when persistence table is missing", async () => {
+    const rawXml =
+      "<VehicleDamageEstimateAddRq><RqUID>p2021-rq</RqUID><VIN>1HGCM82633A004352</VIN><ClaimNumber>CLAIM-123456</ClaimNumber><OwnerName>Jane Owner</OwnerName></VehicleDamageEstimateAddRq>";
+    const tableMissingError = Object.assign(new Error("Missing CCC webhook event table"), {
+      code: "P2021",
+    });
+    setCccSecureShareEventRecorderForTest(async () => {
+      throw tableMissingError;
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const response = await POST(
+      new Request("https://example.test/api/integrations/ccc/secure-share/webhook/sandbox", {
+        method: "POST",
+        body: rawXml,
+        headers: {
+          "content-type": "application/xml",
+        },
+      }),
+      { params: Promise.resolve({ segments: ["sandbox"] }) }
+    );
+    const body = await response.json();
+    const logged = JSON.stringify(warnSpy.mock.calls);
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      received: true,
+      requestKind: "bms_estimate",
+      rqUid: "p2021-rq",
+      duplicate: false,
+    });
+    expect(logged).toContain("table_missing");
+    expect(logged).not.toContain(rawXml);
+    expect(logged).not.toContain("1HGCM82633A004352");
+    expect(logged).not.toContain("CLAIM-123456");
+    expect(logged).not.toContain("Jane Owner");
   });
 
   it("stores metadata for the first BMS estimate event", async () => {

@@ -82,7 +82,14 @@ const CLEARLY_INVALID_ENVIRONMENT_SEGMENTS = new Set([
 
 type CccSecureShareEventRecorder = (
   event: CccSecureShareEventRecord
-) => Promise<{ duplicate: boolean }>;
+) => Promise<Partial<CccSecureShareEventRecordResult> & { duplicate: boolean }>;
+
+export type CccSecureShareEventRecordResult = {
+  duplicate: boolean;
+  persisted: boolean;
+  persistenceUnavailable: boolean;
+  reason?: "table_missing" | "persistence_error";
+};
 
 let customEventRecorder: CccSecureShareEventRecorder | null = null;
 
@@ -241,20 +248,27 @@ export function buildEventRecord(params: {
 
 export async function recordCccSecureShareEvent(
   event: CccSecureShareEventRecord
-): Promise<{ duplicate: boolean }> {
-  if (customEventRecorder) {
-    return customEventRecorder(event);
-  }
+): Promise<CccSecureShareEventRecordResult> {
+  try {
+    if (customEventRecorder) {
+      return normalizeEventRecordResult(await customEventRecorder(event));
+    }
 
-  return recordCccSecureShareEventWithPrisma(event);
+    return recordCccSecureShareEventWithPrisma(event);
+  } catch (error) {
+    return handleCccPersistenceError(error, event, false);
+  }
 }
 
 async function recordCccSecureShareEventWithPrisma(
   event: CccSecureShareEventRecord
-): Promise<{ duplicate: boolean }> {
+): Promise<CccSecureShareEventRecordResult> {
   const { prisma } = await import("@/lib/prisma");
-  const duplicate = event.rqUid
-    ? Boolean(
+
+  let duplicate = false;
+  if (event.rqUid) {
+    try {
+      duplicate = Boolean(
         await prisma.cccSecureShareWebhookEvent.findFirst({
           where: {
             environment: event.environment,
@@ -262,32 +276,98 @@ async function recordCccSecureShareEventWithPrisma(
           },
           select: { id: true },
         })
-      )
-    : false;
+      );
+    } catch (error) {
+      return handleCccPersistenceError(error, event, false);
+    }
+  }
 
-  await prisma.cccSecureShareWebhookEvent.create({
-    data: {
-      environment: event.environment,
-      environmentSource: event.environmentSource,
-      requestKind: event.requestKind,
-      appId: event.appId,
-      trigger: event.trigger,
-      rqUid: event.rqUid,
-      rawXmlSha256: event.rawXmlSha256,
-      bodyLength: event.bodyLength,
-      contentType: event.contentType,
-      sourceIp: event.sourceIp,
-      headerNamesJson: event.headerNames,
-      secretPresent: event.secretPresent,
-      secretMatched: event.secretMatched,
-      duplicate,
-      receivedAt: new Date(event.receivedAt),
-      processingStatus: event.processingStatus,
-      parseError: event.parseError,
-    },
+  try {
+    await prisma.cccSecureShareWebhookEvent.create({
+      data: {
+        environment: event.environment,
+        environmentSource: event.environmentSource,
+        requestKind: event.requestKind,
+        appId: event.appId,
+        trigger: event.trigger,
+        rqUid: event.rqUid,
+        rawXmlSha256: event.rawXmlSha256,
+        bodyLength: event.bodyLength,
+        contentType: event.contentType,
+        sourceIp: event.sourceIp,
+        headerNamesJson: event.headerNames,
+        secretPresent: event.secretPresent,
+        secretMatched: event.secretMatched,
+        duplicate,
+        receivedAt: new Date(event.receivedAt),
+        processingStatus: event.processingStatus,
+        parseError: event.parseError,
+      },
+    });
+  } catch (error) {
+    return handleCccPersistenceError(error, event, duplicate);
+  }
+
+  return {
+    duplicate,
+    persisted: true,
+    persistenceUnavailable: false,
+  };
+}
+
+function normalizeEventRecordResult(
+  result: Partial<CccSecureShareEventRecordResult> & { duplicate: boolean }
+): CccSecureShareEventRecordResult {
+  return {
+    duplicate: result.duplicate,
+    persisted: result.persisted ?? true,
+    persistenceUnavailable: result.persistenceUnavailable ?? false,
+    reason: result.reason,
+  };
+}
+
+function handleCccPersistenceError(
+  error: unknown,
+  event: CccSecureShareEventRecord,
+  duplicate: boolean
+): CccSecureShareEventRecordResult {
+  const reason = isPrismaTableMissingError(error) ? "table_missing" : "persistence_error";
+
+  console.warn("[ccc-secure-share-webhook] persistence unavailable", {
+    environment: event.environment,
+    environmentSource: event.environmentSource,
+    requestKind: event.requestKind,
+    appId: event.appId,
+    trigger: event.trigger,
+    rqUid: event.rqUid,
+    bodyLength: event.bodyLength,
+    rawXmlSha256: event.rawXmlSha256,
+    contentType: event.contentType,
+    sourceIp: event.sourceIp,
+    headerNames: event.headerNames,
+    secretPresent: event.secretPresent,
+    secretMatched: event.secretMatched,
+    duplicate,
+    persisted: false,
+    persistenceUnavailable: true,
+    reason,
   });
 
-  return { duplicate };
+  return {
+    duplicate,
+    persisted: false,
+    persistenceUnavailable: true,
+    reason,
+  };
+}
+
+function isPrismaTableMissingError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "P2021"
+  );
 }
 
 function getExpectedSecret(
