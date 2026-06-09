@@ -34,6 +34,8 @@ const { resolveJurisdiction } = require("./jurisdictionResolver.ts");
 const { buildPolicyRightsReviewPdf } = require("./builders/policyRightsReviewPdfBuilder.ts");
 const { buildDoiComplaintPacketPdf } = require("./builders/doiComplaintPacketPdfBuilder.ts");
 const { buildDisputeIntelligencePdf } = require("./builders/disputeIntelligencePdfBuilder.ts");
+const { classifyEstimateScrubCitationGapBucket } = require("./builders/estimateScrubberPdfBuilder.ts");
+const { formatRepairIntelligenceSourceStatus } = require("./builders/carrierPdfBuilder.ts");
 
 function run(name, test) {
   try {
@@ -202,6 +204,46 @@ run("Policy Rights and DOI render inspection-site jurisdiction source consistent
   assert.doesNotMatch(combined, /owner_zip|Jurisdiction Confidence","value":"High|Detection confidence: High/i);
 });
 
+run("Policy Rights and DOI do not rewrite owner zip without real owner address block", () => {
+  const report = buildReport([
+    "Owner: ANNEGAYL",
+    "OwnerZip: 19312",
+    "Insured: ANNEGAYL",
+    "Inspection Site",
+    "Conestoga Autobody",
+    "961 Lancaster Ave",
+    "Berwyn, PA 19312",
+  ].join("\n"));
+  const resolved = resolveJurisdiction({ report });
+  const policy = buildPolicyRightsReviewPdf({ report, narrative: "Claim file review." });
+  const doi = buildDoiComplaintPacketPdf({ report, narrative: "Claim file review." });
+  const policySummary = Object.fromEntries(policy.summary.map((item) => [item.label, item.value]));
+  const doiSummary = Object.fromEntries(doi.summary.map((item) => [item.label, item.value]));
+
+  assert.equal(resolved.source, "inspection_site_zip_fallback");
+  assert.equal(resolved.confidence, "medium");
+  assert.equal(policySummary["Jurisdiction Source"], resolved.source);
+  assert.equal(doiSummary["Jurisdiction Source"], resolved.source);
+  assert.equal(policySummary["Jurisdiction Confidence"], doiSummary["Jurisdiction Confidence"]);
+  assert.equal(policySummary["Jurisdiction Source"], doiSummary["Jurisdiction Source"]);
+  assert.doesNotMatch(JSON.stringify({ policy, doi }), /owner_zip|Owner ZIP from uploaded claim documents|Detection confidence: High/i);
+});
+
+run("real owner address block may still resolve owner_zip", () => {
+  const report = buildReport([
+    "Owner address: 123 Market Street",
+    "Philadelphia, PA 19103",
+    "Inspection Site",
+    "Conestoga Autobody",
+    "961 Lancaster Ave",
+    "Berwyn, PA 19312",
+  ].join("\n"));
+  const resolved = resolveJurisdiction({ report });
+
+  assert.equal(resolved.source, "owner_zip");
+  assert.equal(resolved.confidence, "high");
+});
+
 run("Repair Intelligence, Policy Rights, and DOI use same resolved jurisdiction", () => {
   const report = buildReport([
     "Owner address: 123 Market Street, Philadelphia, PA 19103",
@@ -217,6 +259,31 @@ run("Repair Intelligence, Policy Rights, and DOI use same resolved jurisdiction"
   assert.equal(policyJurisdiction, "Pennsylvania (PA)");
   assert.equal(doiJurisdiction, "Pennsylvania (PA)");
   assert.doesNotMatch(JSON.stringify({ repair, policy, doi }), /Texas \(TX\)|Jurisdiction: TX|Detected jurisdiction: Texas/i);
+});
+
+run("scrubber buckets proof gaps separately from missing and reduced", () => {
+  assert.equal(classifyEstimateScrubCitationGapBucket({
+    text: "Pre repair scan missing from carrier estimate; OEM procedure referenced but not produced",
+    estimatePresence: "missing",
+    sources: [],
+  }), "needs_oem_procedure");
+  assert.equal(classifyEstimateScrubCitationGapBucket({
+    text: "Calibration completed pending invoice and completion record",
+    estimatePresence: "present",
+    sources: [],
+  }), "needs_invoice_or_completion_proof");
+  assert.equal(classifyEstimateScrubCitationGapBucket({
+    text: "Refinish labor allowance reduced by carrier",
+    estimatePresence: "under-documented",
+    sources: [],
+  }), "reduced_by_carrier");
+});
+
+run("Repair Intelligence does not verify referenced-but-missing Toyota procedure pages", () => {
+  const status = formatRepairIntelligenceSourceStatus("Toyota repair procedure pages referenced but not produced");
+
+  assert.equal(status, "Referenced but not produced");
+  assert.doesNotMatch(status, /Verified/i);
 });
 
 run("Chrysler Grand Wagoneer PA fixture has no verified legal citations without PA legal source", () => {

@@ -557,10 +557,25 @@ function buildEvidenceBasisLabel(
 }
 
 function formatExplainabilityStatus(value: string): string {
-  if (/verified|documented/i.test(value)) return "Verified";
-  if (/missing|unsupported|not established/i.test(value)) return "Missing";
-  if (/inferred/i.test(value)) return "Inferred";
-  if (/referenced/i.test(value)) return "Referenced";
+  return formatRepairIntelligenceSourceStatus(value);
+}
+
+export function formatRepairIntelligenceSourceStatus(value: string): string {
+  if (/referenced but not produced|not produced|referenced[-\s]?only|not attached|not supplied|not provided/i.test(value)) {
+    return "Referenced but not produced";
+  }
+  if (/general|non[-\s]?make[-\s]?specific|research lead|internet lead|not vehicle specific|broad/i.test(value)) {
+    return "General/non-make-specific research lead";
+  }
+  if (/missing|unsupported|not established|needs review|unverified|not verified/i.test(value)) {
+    return "Unsupported / needs review";
+  }
+  if (/verified|documented/i.test(value)) {
+    return /oem|procedure|repair manual|position statement/i.test(value)
+      ? "Verified OEM/procedure support"
+      : "Verified support";
+  }
+  if (/inferred|referenced/i.test(value)) return "Referenced but not produced";
   return formatSupportStatus(value);
 }
 
@@ -596,7 +611,7 @@ function buildOemContradictionBullets(exportModel: ExportModel): string[] {
     [
       `${displayOperationLabel(contradiction.affectedOperation)}`,
       `${contradiction.conflictSummary}`,
-      `OEM support status: ${contradiction.oemSupportCitation ?? "not yet verified from an attached OEM procedure"}. Severity is ${formatSupportStatus(contradiction.contradictionSeverity)} and support is ${formatSupportStatus(contradiction.supportStatus)}.`,
+      `OEM support status: ${contradiction.oemSupportCitation ?? "not yet verified from an attached OEM procedure"} (${formatRepairIntelligenceSourceStatus(`${contradiction.oemSupportCitation ?? ""} ${contradiction.supportStatus}`)}). Severity is ${formatSupportStatus(contradiction.contradictionSeverity)}.`,
       `Recommended follow-up: ${contradiction.recommendedFollowUp}`,
     ].join("\n\n")
   ));
@@ -608,7 +623,7 @@ function buildOemProcedureSupportBullets(
 ): string[] {
   const retrievalSupport = exportModel.retrievalSummary?.sourcesInfluencingFindings
     .filter((source) => /oem|procedure|position/i.test(`${source.title} ${source.sourceType}`))
-    .map((source) => `${source.title} (${source.sourceType}).`) ?? [];
+    .map((source) => `${source.title} (${source.sourceType}; ${formatRepairIntelligenceSourceStatus(`${source.title} ${source.sourceType}`)}).`) ?? [];
   const procedureSupport = [
     ...exportModel.reportFields.documentedProcedures,
     ...exportModel.reportFields.documentedHighlights,

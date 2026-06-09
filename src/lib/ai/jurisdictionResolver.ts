@@ -180,18 +180,18 @@ export function resolveJurisdiction(input: JurisdictionResolverInput): ResolvedJ
   const ownerStopLabels = [...insuredLabels, ...nonOwnerAddressLabels];
   const insuredStopLabels = [...ownerLabels, ...nonOwnerAddressLabels];
 
-  const ownerZip = findAddressBlockZip(allText, ownerLabels, ownerStopLabels);
+  const ownerZip = findVerifiedPartyAddressBlockZip(allText, ownerLabels, ownerStopLabels);
   if (ownerZip) return buildZipResult(ownerZip, "owner_zip", "Owner ZIP from uploaded claim documents.");
 
-  const ownerAddress = findAddressBlockState(allText, ownerLabels, ownerStopLabels);
+  const ownerAddress = findVerifiedPartyAddressBlockState(allText, ownerLabels, ownerStopLabels);
   if (ownerAddress) {
     return buildResult(ownerAddress, "high", "owner_address", "Owner address state from uploaded claim documents.");
   }
 
-  const insuredZip = findAddressBlockZip(allText, insuredLabels, insuredStopLabels);
+  const insuredZip = findVerifiedPartyAddressBlockZip(allText, insuredLabels, insuredStopLabels);
   if (insuredZip) return buildZipResult(insuredZip, "insured_zip", "Insured ZIP from uploaded claim documents.");
 
-  const insuredAddress = findAddressBlockState(allText, insuredLabels, insuredStopLabels);
+  const insuredAddress = findVerifiedPartyAddressBlockState(allText, insuredLabels, insuredStopLabels);
   if (insuredAddress) {
     return buildResult(insuredAddress, "high", "insured_address", "Insured address state from uploaded claim documents.");
   }
@@ -349,6 +349,24 @@ function findAddressBlockState(text: string, labels: RegExp[], stopLabels: RegEx
   return null;
 }
 
+function findVerifiedPartyAddressBlockZip(text: string, labels: RegExp[], stopLabels: RegExp[]): string | null {
+  for (const block of getLabeledBlocks(text, labels, stopLabels)) {
+    if (!hasRealPartyAddressEvidence(block)) continue;
+    const zip = extractZip(block.join(" "));
+    if (zip) return zip;
+  }
+  return null;
+}
+
+function findVerifiedPartyAddressBlockState(text: string, labels: RegExp[], stopLabels: RegExp[]): string | null {
+  for (const block of getLabeledBlocks(text, labels, stopLabels)) {
+    if (!hasRealPartyAddressEvidence(block)) continue;
+    const state = normalizeStateCode(block.join(" "));
+    if (state) return state;
+  }
+  return null;
+}
+
 function findLabeledState(text: string, labels: RegExp[]): string | null {
   for (const line of getRelevantLines(text, labels)) {
     const state = normalizeStateCode(line);
@@ -397,6 +415,15 @@ function hasAddressEvidence(lines: string[]): boolean {
   return /\b(address|mailing|garag(?:e|ing)|postal|zip)\b/i.test(block) ||
     /\b(street|st\.?|avenue|ave\.?|road|rd\.?|drive|dr\.?|lane|ln\.?|boulevard|blvd\.?|highway|hwy\.?|court|ct\.?|circle|cir\.?|place|pl\.?)\b/i.test(block) ||
     /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY)\s+\d{5}(?:-\d{4})?\b/.test(block);
+}
+
+function hasRealPartyAddressEvidence(lines: string[]): boolean {
+  const block = lines.join(" ");
+  const hasStreet = /\b(?:\d{1,6}\s+)?[A-Z0-9][A-Za-z0-9.'-]*(?:\s+[A-Z0-9][A-Za-z0-9.'-]*)*\s+(?:street|st\.?|avenue|ave\.?|road|rd\.?|drive|dr\.?|lane|ln\.?|boulevard|blvd\.?|highway|hwy\.?|court|ct\.?|circle|cir\.?|place|pl\.?|way|terrace|ter\.?|pike)\b/i.test(block);
+  const hasCityStateZip = /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*,\s*(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY)\s+\d{5}(?:-\d{4})?\b/.test(block);
+  const hasAddressLabel = /\b(address|mailing|garag(?:e|ing)|postal)\b/i.test(block);
+  const hasStateAndZip = /\b(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|IA|ID|IL|IN|KS|KY|LA|MA|MD|ME|MI|MN|MO|MS|MT|NC|ND|NE|NH|NJ|NM|NV|NY|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VA|VT|WA|WI|WV|WY)\b\s+\d{5}(?:-\d{4})?\b/.test(block);
+  return hasStreet || hasCityStateZip || (hasAddressLabel && hasStateAndZip);
 }
 
 

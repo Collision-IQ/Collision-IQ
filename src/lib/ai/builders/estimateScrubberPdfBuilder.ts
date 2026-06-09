@@ -10,7 +10,7 @@ import {
   type ExportBuilderInput,
   type ExportLineComparison,
 } from "./exportTemplates";
-import type { EstimateScrubFinding, SourceCitation } from "@/lib/ai/types/estimateScrubber";
+import type { EstimateScrubCitationGapBucket, EstimateScrubFinding, SourceCitation } from "@/lib/ai/types/estimateScrubber";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 import type { EstimateComparisonRow } from "@/types/workspaceTypes";
 import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
@@ -29,6 +29,7 @@ export type EstimateAnnotationCategory =
   | "Reduced labor/material"
   | "Alternate/aftermarket part concern"
   | "Needs OEM procedure support"
+  | "Needs P-page support"
   | "Needs invoice/proof"
   | "Needs supplement review"
   | "Informational repair-planning reminder";
@@ -467,7 +468,7 @@ function buildComparisonOnlyAnnotations(
       const targetLine = lowerLine || "Not clearly shown";
       const title = cleanCustomerFacingEstimateLine(comparisonRow.operation ?? comparisonRow.partName ?? comparisonRow.category ?? "Estimate comparison item");
       const category = classifyComparisonAnnotationCategory(comparisonRow);
-      const severity = category === "Informational repair-planning reminder" ? "gray" : "red";
+      const severity = classifyComparisonAnnotationSeverity(category);
       const anchor = findBestLineAnchor(normalizeDedupeKey(`${targetLine} ${higherLine ?? ""} ${title}`), lineAnchors);
       const explanation = buildComparisonExplanation(comparisonRow, lowerLine, higherLine);
 
@@ -542,9 +543,20 @@ function scoreComparisonRowForAnnotation(row: EstimateComparisonRow): number {
 function classifyComparisonAnnotationCategory(row: EstimateComparisonRow): EstimateAnnotationCategory {
   const combined = `${row.category ?? ""} ${row.operation ?? ""} ${row.partName ?? ""} ${row.lhsValue ?? ""} ${row.rhsValue ?? ""} ${row.notes?.join(" ") ?? ""}`;
   if (/aftermarket|a\/m|alternate|used|lkq|recycled/i.test(combined)) return "Alternate/aftermarket part concern";
-  if (/labor|rate|material|refinish|reduced|allowance|price|pricing/i.test(combined)) return "Reduced labor/material";
   if (/scan|calibration|alignment|invoice|printout|record/i.test(combined)) return "Needs invoice/proof";
+  if (/p-?page|included|not included|estimating guide|database/i.test(combined)) return "Needs P-page support";
+  if (/oem|procedure|position statement|repair manual|adas/i.test(combined)) return "Needs OEM procedure support";
+  if (/labor|rate|material|refinish|reduced|allowance|price|pricing/i.test(combined)) return "Reduced labor/material";
   return row.deltaType === "same" ? "Informational repair-planning reminder" : "Needs supplement review";
+}
+
+function classifyComparisonAnnotationSeverity(category: EstimateAnnotationCategory): EstimateAnnotationSeverity {
+  if (category === "Informational repair-planning reminder") return "gray";
+  if (category === "Needs invoice/proof" || category === "Needs OEM procedure support" || category === "Needs P-page support") {
+    return "blue";
+  }
+  if (category === "Needs supplement review" || category === "Under-documented operation") return "yellow";
+  return "red";
 }
 
 function buildComparisonExplanation(
@@ -711,7 +723,13 @@ function buildUnanchoredClarificationAnchor(finding: EstimateScrubFinding): Esti
 
 function classifyAnnotationCategory(finding: EstimateScrubFinding): EstimateAnnotationCategory {
   const text = `${finding.operation} ${finding.status} ${finding.whyItMatters} ${finding.recommendedRevision}`;
-  if (finding.estimatePresence === "missing") return "Missing operation";
+  if (finding.citationGapBucket === "needs_invoice_or_completion_proof") return "Needs invoice/proof";
+  if (finding.citationGapBucket === "needs_oem_procedure") return "Needs OEM procedure support";
+  if (finding.citationGapBucket === "needs_p_page_support") return "Needs P-page support";
+  if (finding.citationGapBucket === "present_but_under_documented") return "Under-documented operation";
+  if (finding.citationGapBucket === "reduced_by_carrier") return "Reduced labor/material";
+  if (finding.citationGapBucket === "missing_from_carrier") return "Missing operation";
+  if (finding.citationGapBucket === "weak_do_not_lead") return "Informational repair-planning reminder";
   if (/invoice|receipt|proof|completion record|pending invoice|scan report/i.test(text)) return "Needs invoice/proof";
   if (/a\/m|aftermarket|alternate|used|lkq|recycled/i.test(text)) return "Alternate/aftermarket part concern";
   if (/reduced|alternate|aftermarket|rate|labor|material|refinish allowance|underwrit/i.test(text)) {
@@ -727,12 +745,14 @@ function classifyAnnotationSeverity(
   category: EstimateAnnotationCategory,
   finding: EstimateScrubFinding
 ): EstimateAnnotationSeverity {
+  if (category === "Needs invoice/proof" || category === "Needs OEM procedure support" || category === "Needs P-page support") {
+    return "blue";
+  }
   if (
     finding.estimatePresence === "missing" ||
     category === "Reduced labor/material" ||
     category === "Alternate/aftermarket part concern"
   ) return "red";
-  if (category === "Needs invoice/proof" || category === "Needs OEM procedure support") return "blue";
   if (finding.estimatePresence === "under-documented" || category === "Needs supplement review") return "yellow";
   if (finding.estimatePresence === "present") return "green";
   return "gray";
@@ -747,6 +767,9 @@ function buildCustomerFacingRequest(
   }
   if (category === "Needs OEM procedure support") {
     return `Ask the insurer or repair shop to confirm whether ${cleanCustomerFacingEstimateLine(finding.operation).toLowerCase()} is included and documented.`;
+  }
+  if (category === "Needs P-page support") {
+    return `Ask for the estimating-guide or P-page support showing whether ${cleanCustomerFacingEstimateLine(finding.operation).toLowerCase()} is included or separately billable.`;
   }
   if (category === "Alternate/aftermarket part concern") {
     return "Ask for written confirmation that the selected part is appropriate for the repair, policy, fit, safety, warranty, and repair-procedure requirements.";
@@ -767,6 +790,9 @@ function buildEstimatorFacingRequest(
   }
   if (category === "Needs OEM procedure support") {
     return `Add or document ${operation} if OEM procedure applies; attach procedure-backed scan, calibration, fit-verification, or repair-method support.`;
+  }
+  if (category === "Needs P-page support") {
+    return `Add P-page or estimating-guide support for ${operation}; do not present the estimate line alone as included/not-included authority.`;
   }
   if (category === "Alternate/aftermarket part concern") {
     return "Alternate part difference. Confirm whether the selected part complies with policy, fit, safety, warranty, and repair-procedure requirements.";
@@ -882,6 +908,9 @@ function buildWhyAnnotationMatters(annotation: EstimateAnnotation): string {
   }
   if (annotation.category === "Needs OEM procedure support") {
     return "procedure support controls whether the repair step is documented as applicable to this vehicle and damage path.";
+  }
+  if (annotation.category === "Needs P-page support") {
+    return "P-page or estimating-guide support controls whether the line is documented as included or separately chargeable.";
   }
   if (annotation.category === "Reduced labor/material") {
     return "a reduced allowance can change whether the estimate carries the labor, material, refinish, or pricing support reflected elsewhere in the file.";
@@ -1424,6 +1453,12 @@ function buildEstimateScrubFindings(
         : item.kind === "underwritten_operation"
           ? "under-documented"
           : "present";
+    const sources = buildFindingSources(item.source, item.evidence, sourceFallback);
+    const citationGapBucket = classifyEstimateScrubCitationGapBucket({
+      text: `${item.title} ${item.category} ${item.rationale} ${item.source ?? ""} ${item.evidence ?? ""}`,
+      estimatePresence,
+      sources,
+    });
 
     return {
       operation,
@@ -1431,8 +1466,9 @@ function buildEstimateScrubFindings(
       supportType: inferSupportType(`${item.title} ${item.category} ${item.rationale}`),
       severity: mapSeverity(item.priority, item.leverageScore),
       whyItMatters: cleanScrubberText(item.rationale),
+      citationGapBucket,
       estimatePresence,
-      sources: buildFindingSources(item.source, item.evidence, sourceFallback),
+      sources,
       recommendedRevision: buildRecommendedRevision(operation, estimatePresence, item.rationale),
     } satisfies Omit<
       EstimateScrubFinding,
@@ -1441,6 +1477,42 @@ function buildEstimateScrubFindings(
   });
 
   return dedupeFindings(findings.map(enrichEstimateScrubFinding)).slice(0, 12);
+}
+
+export function classifyEstimateScrubCitationGapBucket(params: {
+  text: string;
+  estimatePresence: EstimateScrubFinding["estimatePresence"];
+  sources?: SourceCitation[];
+}): EstimateScrubCitationGapBucket {
+  const text = params.text;
+  const hasVerifiedProcedureSource = params.sources?.some((source) =>
+    source.verified && /DriveOEM|PositionStatement/i.test(source.sourceType)
+  ) ?? false;
+  const hasVerifiedProofSource = params.sources?.some((source) =>
+    source.verified && /invoice|receipt|completion|final scan|scan report|calibration certificate|alignment printout/i.test(`${source.title} ${source.note ?? ""}`)
+  ) ?? false;
+  const hasVerifiedPPageSource = params.sources?.some((source) =>
+    source.verified && /p-?page|estimating guide|database/i.test(`${source.title} ${source.note ?? ""}`)
+  ) ?? false;
+
+  if (/general|non[-\s]?make[-\s]?specific|research lead|internet lead|not vehicle specific|weak/i.test(text)) {
+    return "weak_do_not_lead";
+  }
+  if (/invoice|receipt|proof|completion record|final scan|scan report|calibration certificate|alignment printout|completed/i.test(text) && !hasVerifiedProofSource) {
+    return "needs_invoice_or_completion_proof";
+  }
+  if (/p-?page|included operation|not included|estimating guide|database/i.test(text) && !hasVerifiedPPageSource) {
+    return "needs_p_page_support";
+  }
+  if (/oem|procedure|position statement|repair manual|adas|calibration|scan/i.test(text) && !hasVerifiedProcedureSource) {
+    return "needs_oem_procedure";
+  }
+  if (/reduced|rate|labor|material|refinish allowance|underwrit|price|pricing|alternate allowance/i.test(text)) {
+    return "reduced_by_carrier";
+  }
+  if (params.estimatePresence === "under-documented") return "present_but_under_documented";
+  if (params.estimatePresence === "missing") return "missing_from_carrier";
+  return "present_but_under_documented";
 }
 
 function inferSupportType(value: string): EstimateScrubFinding["supportType"] {
@@ -1625,7 +1697,7 @@ function cleanScrubberText(value: string): string {
 }
 
 function isVerifiedScrubberSource(value: string): boolean {
-  if (/inferred|pending invoice|procedure support/i.test(value)) {
+  if (/inferred|pending invoice|procedure support|referenced but not produced|not produced|referenced[-\s]?only|missing|needs review|research lead|general|non[-\s]?make[-\s]?specific/i.test(value)) {
     return false;
   }
   return /\b(oem procedure|official procedure|position statement|invoice|final scan report|scan report|calibration certificate|alignment printout|uploaded procedure|repair procedure document|estimate excerpt|carrier estimate|shop estimate|current estimate|estimate parser|uploaded claim documents?)\b/i.test(value);
