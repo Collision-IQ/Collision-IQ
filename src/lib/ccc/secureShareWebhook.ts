@@ -26,6 +26,7 @@ export type CccSecureShareEventRecord = {
 export type SecretCheckResult = {
   configured: boolean;
   present: boolean;
+  signaturePresent: boolean;
   matched: boolean;
   mode: "monitor" | "strict";
 };
@@ -70,6 +71,8 @@ const SECRET_HEADER_NAMES = [
   "x-ccc-secureshare-secret",
   "x-webhook-secret",
 ] as const;
+
+const SIGNATURE_HEADER_NAMES = ["x-secureshare-signature"] as const;
 
 const CLEARLY_INVALID_ENVIRONMENT_SEGMENTS = new Set([
   "dev",
@@ -194,21 +197,25 @@ export function checkWebhookSecret(
 ): SecretCheckResult {
   const expectedSecret = getExpectedSecret(environment, env);
   const mode = env.CCC_SECURE_SHARE_SECRET_MODE === "strict" ? "strict" : "monitor";
+  const secretCandidates = getSecretCandidates(headers);
+  const signaturePresent = hasAnySignatureCandidate(headers);
 
   if (!expectedSecret) {
     return {
       configured: false,
-      present: hasAnySecretCandidate(headers),
+      present: secretCandidates.length > 0 || signaturePresent,
+      signaturePresent,
       matched: false,
       mode,
     };
   }
 
-  const candidates = getSecretCandidates(headers);
+  // TODO: Strict CCC Secure Share signature verification requires confirmation of CCC's signature algorithm and signed payload format.
   return {
     configured: true,
-    present: candidates.length > 0,
-    matched: candidates.includes(expectedSecret),
+    present: secretCandidates.length > 0 || signaturePresent,
+    signaturePresent,
+    matched: secretCandidates.includes(expectedSecret),
     mode,
   };
 }
@@ -381,10 +388,6 @@ function getExpectedSecret(
   return env[key]?.trim() ?? "";
 }
 
-function hasAnySecretCandidate(headers: Headers): boolean {
-  return getSecretCandidates(headers).length > 0;
-}
-
 function getSecretCandidates(headers: Headers): string[] {
   const values: string[] = [];
 
@@ -404,6 +407,10 @@ function getSecretCandidates(headers: Headers): string[] {
   }
 
   return values;
+}
+
+function hasAnySignatureCandidate(headers: Headers): boolean {
+  return SIGNATURE_HEADER_NAMES.some((headerName) => Boolean(headers.get(headerName)?.trim()));
 }
 
 function decodeBasicXmlEntities(value: string): string {

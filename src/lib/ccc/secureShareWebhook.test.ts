@@ -5,6 +5,7 @@ import {
 } from "@/app/api/integrations/ccc/secure-share/webhook/[[...segments]]/route";
 import {
   type CccSecureShareEventRecord,
+  checkWebhookSecret,
   extractRqUid,
   isValidCccSecureShareEnvironment,
   resolveCccSecureShareEnvironment,
@@ -53,6 +54,43 @@ describe("CCC Secure Share webhook helpers", () => {
     expect(isValidCccSecureShareEnvironment("sandbox")).toBe(true);
     expect(isValidCccSecureShareEnvironment("production")).toBe(true);
     expect(isValidCccSecureShareEnvironment("staging")).toBe(false);
+  });
+
+  it("recognizes x-secureshare-signature as present without matching it as a secret", () => {
+    const result = checkWebhookSecret(
+      new Headers({
+        "x-secureshare-signature": "signature-value-that-must-not-be-logged",
+      }),
+      "sandbox",
+      {
+        CCC_SECURE_SHARE_SANDBOX_WEBHOOK_SECRET: "configured-secret",
+        CCC_SECURE_SHARE_SECRET_MODE: "monitor",
+      } as NodeJS.ProcessEnv
+    );
+
+    expect(result).toEqual({
+      configured: true,
+      present: true,
+      signaturePresent: true,
+      matched: false,
+      mode: "monitor",
+    });
+  });
+
+  it("does not enable strict mode when only x-secureshare-signature is present", () => {
+    const result = checkWebhookSecret(
+      new Headers({
+        "x-secureshare-signature": "ccc-signature",
+      }),
+      "sandbox",
+      {
+        CCC_SECURE_SHARE_SANDBOX_WEBHOOK_SECRET: "configured-secret",
+      } as NodeJS.ProcessEnv
+    );
+
+    expect(result.mode).toBe("monitor");
+    expect(result.signaturePresent).toBe(true);
+    expect(result.matched).toBe(false);
   });
 
   it("defaults base-path requests to sandbox in monitor mode", () => {
@@ -231,6 +269,68 @@ describe("CCC Secure Share webhook route", () => {
         }),
       ],
     ]);
+  });
+
+  it("logs x-secureshare-signature presence in monitor mode without logging the value", async () => {
+    const originalSecret = process.env.CCC_SECURE_SHARE_SANDBOX_WEBHOOK_SECRET;
+    const originalMode = process.env.CCC_SECURE_SHARE_SECRET_MODE;
+    const signatureValue = "ccc-signature-value-that-must-not-be-logged";
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    try {
+      process.env.CCC_SECURE_SHARE_SANDBOX_WEBHOOK_SECRET = "configured-secret";
+      process.env.CCC_SECURE_SHARE_SECRET_MODE = "monitor";
+
+      const response = await POST(
+        new Request(
+          "https://example.test/api/integrations/ccc/secure-share/webhook/estimate?appId=1686&trigger=manual",
+          {
+            method: "POST",
+            body: "",
+            headers: {
+              "x-secureshare-signature": signatureValue,
+            },
+          }
+        ),
+        { params: Promise.resolve({ segments: ["estimate"] }) }
+      );
+      const body = await response.json();
+      const manualLog = infoSpy.mock.calls.find(
+        ([message]) => message === "[ccc-secure-share-webhook] manual validation accepted"
+      );
+      const logged = JSON.stringify(infoSpy.mock.calls);
+
+      expect(response.status).toBe(200);
+      expect(body).toMatchObject({
+        ok: true,
+        received: true,
+        validationOnly: true,
+        requestKind: "manual_validation",
+        duplicate: false,
+      });
+      expect(manualLog?.[1]).toEqual(
+        expect.objectContaining({
+          secretConfigured: true,
+          secretPresent: true,
+          signaturePresent: true,
+          secretMatched: false,
+          secretMode: "monitor",
+        })
+      );
+      expect(logged).not.toContain(signatureValue);
+    } finally {
+      if (originalSecret === undefined) {
+        delete process.env.CCC_SECURE_SHARE_SANDBOX_WEBHOOK_SECRET;
+      } else {
+        process.env.CCC_SECURE_SHARE_SANDBOX_WEBHOOK_SECRET = originalSecret;
+      }
+
+      if (originalMode === undefined) {
+        delete process.env.CCC_SECURE_SHARE_SECRET_MODE;
+      } else {
+        process.env.CCC_SECURE_SHARE_SECRET_MODE = originalMode;
+      }
+    }
   });
 
   it("accepts POST /webhook", async () => {
