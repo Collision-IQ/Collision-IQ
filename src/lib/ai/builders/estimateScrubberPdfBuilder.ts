@@ -10,7 +10,13 @@ import {
   type ExportBuilderInput,
   type ExportLineComparison,
 } from "./exportTemplates";
-import type { EstimateScrubCitationGapBucket, EstimateScrubFinding, SourceCitation } from "@/lib/ai/types/estimateScrubber";
+import type {
+  CitationDensityFinding,
+  CitationSupportStatus,
+  EstimateScrubCitationGapBucket,
+  EstimateScrubFinding,
+  SourceCitation,
+} from "@/lib/ai/types/estimateScrubber";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 import type { EstimateComparisonRow } from "@/types/workspaceTypes";
 import { normalizeWorkspaceEstimateComparisons } from "@/lib/workspace/estimateComparisons";
@@ -68,6 +74,7 @@ export type EstimateAnnotation = {
   citationGapBucket: EstimateScrubCitationGapBucket;
   citationDensityScore: number;
   citationReadiness: CitationReadiness;
+  citationFinding: CitationDensityFinding;
   sourceRefs: string[];
   visibility: {
     customer: boolean;
@@ -82,6 +89,7 @@ export type EstimateAnnotation = {
 
 export type AnnotatedEstimateReviewModel = {
   estimateId: string;
+  citationDensityFindings: CitationDensityFinding[];
   lineAnchors: EstimateLineAnchor[];
   annotations: EstimateAnnotation[];
   comparisonRows: EstimateComparisonRow[];
@@ -221,6 +229,7 @@ export function buildAnnotatedEstimateReviewModel(params: ExportBuilderInput): A
 
   return {
     estimateId: buildEstimateId(vehicleIdentity, vin),
+    citationDensityFindings: annotations.map((annotation) => annotation.citationFinding),
     lineAnchors,
     annotations,
     comparisonRows,
@@ -378,6 +387,18 @@ function parseMoney(value: string | number | null | undefined): number | undefin
   const cleaned = value.replace(/[$,\s]/g, "");
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function extractLineNumberFromText(value: string): string | null {
+  const match = value.match(/\b(?:line|ln)\s*#?\s*(\d+[A-Za-z]?)\b/i) ?? value.match(/^\s*(\d+[A-Za-z]?)\s*[-.)]/);
+  return match?.[1] ?? null;
+}
+
+function extractLaborHours(value: string): number | null {
+  const match = value.match(/\b(\d+(?:\.\d+)?)\s*(?:hr|hrs|hour|hours|labor\s*hours?)\b/i);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function filterAnnotationsForAudience(
@@ -547,6 +568,17 @@ function buildComparisonOnlyAnnotations(
       const citationReadiness = classifyComparisonCitationReadiness(citationGapBucket, citationDensityScore);
       const anchor = findBestLineAnchor(normalizeDedupeKey(`${targetLine} ${higherLine ?? ""} ${title}`), lineAnchors);
       const explanation = buildComparisonExplanation(comparisonRow, lowerLine, higherLine);
+      const citationFinding = buildCitationDensityFindingFromComparison({
+        id: `citation-density-${offset + index + 1}-comparison-${normalizeDedupeKey(title).replace(/\s+/g, "-") || "item"}`,
+        row: comparisonRow,
+        title,
+        category,
+        citationGapBucket,
+        citationDensityScore,
+        anchor: anchor ?? undefined,
+        lowerLine,
+        higherLine,
+      });
 
       return {
         id: `estimate-annotation-${offset + index + 1}-comparison-${normalizeDedupeKey(title).replace(/\s+/g, "-") || "item"}`,
@@ -564,6 +596,7 @@ function buildComparisonOnlyAnnotations(
         citationGapBucket,
         citationDensityScore,
         citationReadiness,
+        citationFinding,
         sourceRefs: [],
         visibility: {
           customer: true,
@@ -670,6 +703,248 @@ function classifyComparisonCitationReadiness(
   return score >= 70 ? "citation_ready" : "estimate_evidence_only";
 }
 
+function buildCitationDensityFindingFromScrubFinding(params: {
+  id: string;
+  finding: EstimateScrubFinding;
+  category: EstimateAnnotationCategory;
+  supportStatus: EstimateAnnotationSupportStatus;
+  citationDensityScore: number;
+  anchor: EstimateLineAnchor;
+  comparison: { shopLine?: string; carrierLine?: string; difference?: string } | null;
+  sourceRefs: string[];
+}): CitationDensityFinding {
+  const text = `${params.finding.operation} ${params.finding.status} ${params.finding.whyItMatters} ${params.finding.recommendedRevision}`;
+  const citationStatus = buildCitationSupportStatus(params.finding.sources, params.finding.citationGapBucket, text);
+  const verifiedAuthorityCount = countVerifiedAuthoritySources(params.finding.sources);
+  const missingAuthorityTypes = buildMissingAuthorityTypes(citationStatus);
+  const limitations = buildCitationFindingLimitations(params.finding, citationStatus);
+
+  return {
+    id: params.id,
+    operationLabel: cleanCustomerFacingEstimateLine(params.finding.operation) || "Estimate review item",
+    category: classifyCitationDensityCategory(text),
+    estimateGapType: mapEstimateGapType(params.finding.citationGapBucket, params.supportStatus),
+    shopEvidence: params.comparison?.shopLine
+      ? buildCitationEvidence(params.comparison.shopLine, "Shop estimate")
+      : undefined,
+    carrierEvidence: buildCitationEvidence(params.comparison?.carrierLine ?? params.anchor.text, "Carrier or selected estimate"),
+    impact: buildCitationImpact(text, params.finding.severity),
+    citationStatus,
+    citationDensityScore: params.citationDensityScore,
+    verifiedAuthorityCount,
+    missingAuthorityTypes,
+    currentSupportSummary: formatCitationCurrentSupport(params.sourceRefs, params.supportStatus),
+    missingProofSummary: summarizeMissingProofTypes(missingAuthorityTypes, params.finding.citationGapBucket),
+    recommendedNextAction: buildEstimatorFacingRequest(params.finding, params.category),
+    supplementReadyLanguage: verifiedAuthorityCount > 0
+      ? `${cleanCustomerFacingEstimateLine(params.finding.operation)} has attached authority support and may be stronger for supplement review, subject to final estimate and repair-file verification.`
+      : undefined,
+    confidence: classifyCitationFindingConfidence(params.citationDensityScore, params.supportStatus),
+    limitations,
+  };
+}
+
+function buildCitationDensityFindingFromComparison(params: {
+  id: string;
+  row: EstimateComparisonRow;
+  title: string;
+  category: EstimateAnnotationCategory;
+  citationGapBucket: EstimateScrubCitationGapBucket;
+  citationDensityScore: number;
+  anchor?: EstimateLineAnchor;
+  lowerLine?: string;
+  higherLine?: string;
+}): CitationDensityFinding {
+  const text = `${params.title} ${params.row.category ?? ""} ${params.row.operation ?? ""} ${params.row.partName ?? ""} ${params.row.delta ?? ""} ${params.row.notes?.join(" ") ?? ""}`;
+  const citationStatus = buildCitationSupportStatus([], params.citationGapBucket, text);
+  const missingAuthorityTypes = buildMissingAuthorityTypes(citationStatus);
+
+  return {
+    id: params.id,
+    operationLabel: params.title,
+    category: classifyCitationDensityCategory(text),
+    estimateGapType: mapEstimateGapType(params.citationGapBucket, "referenced"),
+    shopEvidence: buildCitationEvidence(params.higherLine ?? formatComparisonValue(params.row.lhsValue), params.row.lhsSource ?? "Shop estimate"),
+    carrierEvidence: buildCitationEvidence(params.lowerLine ?? params.anchor?.text ?? formatComparisonValue(params.row.rhsValue), params.row.rhsSource ?? "Carrier or selected estimate"),
+    impact: buildCitationImpact(text, mapCategoryPriority(params.category)),
+    citationStatus,
+    citationDensityScore: params.citationDensityScore,
+    verifiedAuthorityCount: 0,
+    missingAuthorityTypes,
+    currentSupportSummary: "Estimate comparison evidence only; no authority source is attached to this comparison row.",
+    missingProofSummary: summarizeMissingProofTypes(missingAuthorityTypes, params.citationGapBucket),
+    recommendedNextAction: buildComparisonEstimatorText(params.row, params.category),
+    confidence: classifyCitationFindingConfidence(params.citationDensityScore, "referenced"),
+    limitations: [
+      "Comparison rows support the existence of an estimate difference only.",
+      "Authority, policy, legal, invoice, scan, calibration, and completion support must be verified from separate sources.",
+    ],
+  };
+}
+
+function classifyCitationDensityCategory(value: string): CitationDensityFinding["category"] {
+  if (/adas|calibration|radar|camera|aim|blind spot|sensor/i.test(value)) return "adas_calibration";
+  if (/scan|diagnostic|dtc|pre[-\s]?scan|post[-\s]?scan/i.test(value)) return "scan_diagnostic";
+  if (/refinish|paint|blend|clear coat|color/i.test(value)) return "refinish";
+  if (/\br[&\s-]?i\b|remove and install|remove\/install/i.test(value)) return "r_and_i";
+  if (/aftermarket|a\/m|lkq|used|recycled|alternate|parts downgrade/i.test(value)) return "parts_downgrade";
+  if (/fastener|clip|bolt|nut|rivet|hardware/i.test(value)) return "hardware_fasteners";
+  if (/one[-\s]?time|single use|non[-\s]?reusable/i.test(value)) return "one_time_use_parts";
+  if (/not included|included operation|p-?page|database/i.test(value)) return "not_included_operation";
+  if (/labor|hour|rate|allowance/i.test(value)) return "labor_difference";
+  if (/rental|loss of use/i.test(value)) return "rental";
+  if (/tow|towing|storage/i.test(value)) return "towing_storage";
+  if (/policy|coverage|deductible|endorsement/i.test(value)) return "policy_coverage";
+  if (/state regulation|doi|statute|regulation|unfair claims/i.test(value)) return "state_regulation";
+  if (/structural|measure|frame|fit|test fit|aperture|pull|alignment/i.test(value)) return "structural_or_fit_verification";
+  return "other";
+}
+
+function mapEstimateGapType(
+  bucket: EstimateScrubCitationGapBucket,
+  supportStatus: EstimateAnnotationSupportStatus
+): CitationDensityFinding["estimateGapType"] {
+  if (bucket === "missing_from_carrier") return "missing_from_carrier";
+  if (bucket === "reduced_by_carrier") return "reduced_by_carrier";
+  if (bucket === "present_but_under_documented") return "present_but_under_documented";
+  if (bucket === "weak_do_not_lead") return "weak_do_not_lead";
+  if (supportStatus === "referenced") return "referenced_not_produced";
+  return "needs_proof";
+}
+
+function buildCitationSupportStatus(
+  sources: SourceCitation[],
+  bucket: EstimateScrubCitationGapBucket,
+  text: string
+): CitationDensityFinding["citationStatus"] {
+  return {
+    oem: resolveCitationSupportStatus(sources, /DriveOEM|PositionStatement|oem|procedure|repair manual|position statement/i, bucket === "needs_oem_procedure"),
+    pPages: resolveCitationSupportStatus(sources, /p-?page|estimating guide|included|not included|database/i, bucket === "needs_p_page_support"),
+    scrs: resolveCitationSupportStatus(sources, /SCRS|guide to complete repair planning/i, /scrs|guide to complete repair planning/i.test(text)),
+    deg: resolveCitationSupportStatus(sources, /DEG|database enhancement gateway/i, /deg|database/i.test(text)),
+    nhtsa: resolveCitationSupportStatus(sources, /NHTSA|federal|safety recall/i, /nhtsa|federal|safety/i.test(text)),
+    stateRegulation: resolveCitationSupportStatus(sources, /state regulation|DOI|statute|regulation|unfair claims/i, /state regulation|doi|statute|regulation/i.test(text)),
+    policy: resolveCitationSupportStatus(sources, /policy|coverage|endorsement|declaration/i, /policy|coverage|endorsement/i.test(text)),
+    invoiceOrCompletionProof: resolveCitationSupportStatus(sources, /invoice|receipt|completion|final scan|scan report|calibration certificate|alignment printout/i, bucket === "needs_invoice_or_completion_proof"),
+    photoOrTeardownProof: resolveCitationSupportStatus(sources, /photo|teardown|measurement|measure|frame printout/i, /photo|teardown|measurement|measure|frame/i.test(text)),
+  };
+}
+
+function resolveCitationSupportStatus(
+  sources: SourceCitation[],
+  pattern: RegExp,
+  needed: boolean
+): CitationSupportStatus {
+  const matching = sources.filter((source) => pattern.test(`${source.sourceType} ${source.title} ${source.note ?? ""}`));
+  if (matching.some((source) => source.verified && isAuthoritySource(source))) return "verified";
+  if (matching.length > 0) return "referenced_not_produced";
+  return needed ? "needed" : "not_applicable";
+}
+
+function countVerifiedAuthoritySources(sources: SourceCitation[]): number {
+  return sources.filter((source) => source.verified && isAuthoritySource(source)).length;
+}
+
+function buildMissingAuthorityTypes(status: CitationDensityFinding["citationStatus"]): string[] {
+  return Object.entries(status)
+    .filter(([, value]) => value === "needed" || value === "not_found" || value === "referenced_not_produced")
+    .map(([key]) => key);
+}
+
+function buildCitationFindingLimitations(
+  finding: EstimateScrubFinding,
+  status: CitationDensityFinding["citationStatus"]
+): string[] {
+  const limitations = [
+    "Estimate evidence supports line presence, omission, reduction, or changed value only.",
+  ];
+  if (Object.values(status).some((value) => value === "needed" || value === "referenced_not_produced")) {
+    limitations.push("Authority or completion proof must be attached before this item is treated as citation-ready.");
+  }
+  if (finding.sources.every((source) => isEstimateEvidenceSource(source))) {
+    limitations.push("Current support is estimate evidence only and is not OEM, P-page, DEG, legal, policy, or completion authority.");
+  }
+  return limitations;
+}
+
+function buildCitationEvidence(
+  description: string | null | undefined,
+  sourceLabel: string | null | undefined
+): NonNullable<CitationDensityFinding["shopEvidence"]> | undefined {
+  const cleaned = cleanCustomerFacingEstimateLine(description);
+  if (!cleaned) return undefined;
+  return {
+    lineNumber: extractLineNumberFromText(cleaned),
+    description: cleaned,
+    amount: parseMoney(cleaned) ?? null,
+    laborHours: extractLaborHours(cleaned),
+    sourceLabel: sourceLabel ?? null,
+  };
+}
+
+function buildCitationImpact(
+  text: string,
+  severity: EstimateScrubFinding["severity"]
+): CitationDensityFinding["impact"] {
+  const dollarImpact = parseMoney(text) ?? null;
+  const laborHoursImpact = extractLaborHours(text);
+  const safetyImpact = /adas|calibration|scan|srs|restraint|structural|frame|alignment|sensor/i.test(text)
+    ? "high"
+    : /refinish|r&i|one[-\s]?time|fastener|fit|measure/i.test(text)
+      ? "medium"
+      : "low";
+  const supplementPriority = severity === "critical" || safetyImpact === "high"
+    ? "high"
+    : severity === "high" || severity === "moderate" || dollarImpact !== null || laborHoursImpact !== null
+      ? "medium"
+      : "low";
+  return {
+    dollarImpact,
+    laborHoursImpact,
+    safetyImpact,
+    supplementPriority,
+  };
+}
+
+function mapCategoryPriority(category: EstimateAnnotationCategory): EstimateScrubFinding["severity"] {
+  if (category === "Needs OEM procedure support" || category === "Needs invoice/proof" || category === "Needs P-page support") return "high";
+  if (category === "Missing operation" || category === "Reduced labor/material" || category === "Alternate/aftermarket part concern") return "moderate";
+  return "informational";
+}
+
+function formatCitationCurrentSupport(
+  sourceRefs: string[],
+  supportStatus: EstimateAnnotationSupportStatus
+): string {
+  if (sourceRefs.length > 0) return sourceRefs.join("; ");
+  if (supportStatus === "verified") return "Verified supporting source is attached.";
+  if (supportStatus === "referenced") return "Referenced in file, but final authority or proof is not fully produced.";
+  if (supportStatus === "inferred") return "Inferred from estimate review and not independently verified.";
+  return "No usable support source was isolated.";
+}
+
+function summarizeMissingProofTypes(
+  missingAuthorityTypes: string[],
+  bucket: EstimateScrubCitationGapBucket
+): string {
+  if (missingAuthorityTypes.length > 0) {
+    return `Missing or unresolved support: ${missingAuthorityTypes.map((item) => item.replace(/([A-Z])/g, " $1").toLowerCase()).join(", ")}.`;
+  }
+  if (bucket === "missing_from_carrier" || bucket === "reduced_by_carrier") {
+    return "Estimate gap is visible; no additional authority type was inferred from the current text.";
+  }
+  return "No missing proof type was isolated.";
+}
+
+function classifyCitationFindingConfidence(
+  score: number,
+  supportStatus: EstimateAnnotationSupportStatus
+): CitationDensityFinding["confidence"] {
+  if (score >= 70 && supportStatus === "verified") return "high";
+  if (score >= 30 || supportStatus === "referenced") return "medium";
+  return "low";
+}
+
 function buildComparisonExplanation(
   row: EstimateComparisonRow,
   lowerLine?: string,
@@ -731,6 +1006,16 @@ function buildEstimateAnnotations(params: {
     const sourceRefs = buildAnnotationSourceRefs(finding);
     const citationDensityScore = calculateCitationDensityScore(finding, supportStatus);
     const citationReadiness = classifyCitationReadiness(finding, supportStatus, citationDensityScore);
+    const citationFinding = buildCitationDensityFindingFromScrubFinding({
+      id: `citation-density-${index + 1}-${normalizeDedupeKey(title).replace(/\s+/g, "-") || "item"}`,
+      finding,
+      category,
+      supportStatus,
+      citationDensityScore,
+      anchor,
+      comparison,
+      sourceRefs,
+    });
 
     return {
       id: `estimate-annotation-${index + 1}-${normalizeDedupeKey(title).replace(/\s+/g, "-") || "item"}`,
@@ -748,6 +1033,7 @@ function buildEstimateAnnotations(params: {
       citationGapBucket: finding.citationGapBucket,
       citationDensityScore,
       citationReadiness,
+      citationFinding,
       sourceRefs,
       visibility: {
         customer: true,

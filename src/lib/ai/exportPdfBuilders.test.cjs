@@ -485,6 +485,43 @@ run("Citation Density Gap model exposes stable anchors and citation readiness fi
     item.category === "Needs invoice/proof" ||
     item.category === "Needs OEM procedure support"
   ));
+  assert.ok(model.citationDensityFindings.length >= model.annotations.length);
+  const densityFinding = model.citationDensityFindings[0];
+  assert.ok(densityFinding.id);
+  assert.ok(densityFinding.operationLabel);
+  assert.ok([
+    "adas_calibration",
+    "scan_diagnostic",
+    "refinish",
+    "r_and_i",
+    "parts_downgrade",
+    "hardware_fasteners",
+    "one_time_use_parts",
+    "not_included_operation",
+    "labor_difference",
+    "rental",
+    "towing_storage",
+    "policy_coverage",
+    "state_regulation",
+    "structural_or_fit_verification",
+    "other",
+  ].includes(densityFinding.category));
+  assert.ok([
+    "missing_from_carrier",
+    "reduced_by_carrier",
+    "present_but_under_documented",
+    "referenced_not_produced",
+    "needs_proof",
+    "weak_do_not_lead",
+  ].includes(densityFinding.estimateGapType));
+  assert.ok(Number.isFinite(densityFinding.citationDensityScore));
+  assert.ok(Number.isInteger(densityFinding.verifiedAuthorityCount));
+  assert.ok(Array.isArray(densityFinding.missingAuthorityTypes));
+  assert.ok(densityFinding.currentSupportSummary);
+  assert.ok(densityFinding.missingProofSummary);
+  assert.ok(densityFinding.recommendedNextAction);
+  assert.ok(["low", "medium", "high"].includes(densityFinding.confidence));
+  assert.ok(Array.isArray(densityFinding.limitations));
   assert.doesNotMatch(JSON.stringify(model), /evidence-chain-\d+|debug confidence|internal reasoning/i);
 });
 
