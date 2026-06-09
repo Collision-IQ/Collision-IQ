@@ -417,9 +417,28 @@ describe("CCC Secure Share webhook route", () => {
     });
   });
 
-  it("does not log raw XML", async () => {
-    const rawXml = "<VehicleDamageEstimateAddRq><RqUID>secret-rq</RqUID><Owner>Do not log</Owner></VehicleDamageEstimateAddRq>";
+  it("does not log raw XML or sensitive CCC estimate fields", async () => {
+    const rawXml = `
+      <VehicleDamageEstimateAddRq>
+        <RqUID>secret-rq</RqUID>
+        <ClaimNumber>CLAIM-123456789</ClaimNumber>
+        <VIN>1HGCM82633A004352</VIN>
+        <OwnerName>Jane Owner</OwnerName>
+        <OwnerAddress1>123 Main Street</OwnerAddress1>
+        <OwnerCity>Los Angeles</OwnerCity>
+        <OwnerState>CA</OwnerState>
+        <OwnerZip>90002</OwnerZip>
+        <OwnerPhone>555-111-2222</OwnerPhone>
+        <OwnerEmail>jane.owner@example.test</OwnerEmail>
+        <EstimateLineItem>
+          <LineNumber>1</LineNumber>
+          <Operation>Replace</Operation>
+          <Description>Front bumper cover</Description>
+        </EstimateLineItem>
+      </VehicleDamageEstimateAddRq>
+    `;
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     const response = await POST(
       new Request("https://example.test/api/integrations/ccc/secure-share/webhook/sandbox", {
@@ -433,9 +452,17 @@ describe("CCC Secure Share webhook route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(rawXml);
-    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("Do not log");
-    expect(JSON.stringify(infoSpy.mock.calls)).toContain("secret-rq");
+    const logged = JSON.stringify([...infoSpy.mock.calls, ...warnSpy.mock.calls]);
+
+    expect(logged).not.toContain(rawXml);
+    expect(logged).not.toContain("1HGCM82633A004352");
+    expect(logged).not.toContain("CLAIM-123456789");
+    expect(logged).not.toContain("Jane Owner");
+    expect(logged).not.toContain("123 Main Street");
+    expect(logged).not.toContain("555-111-2222");
+    expect(logged).not.toContain("jane.owner@example.test");
+    expect(logged).not.toContain("Front bumper cover");
+    expect(logged).toContain("secret-rq");
   });
 
   it("rejects invalid query param env", async () => {

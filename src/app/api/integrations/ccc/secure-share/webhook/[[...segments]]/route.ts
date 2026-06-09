@@ -297,6 +297,7 @@ function tryNormalizeAndLogCccBmsMetadata(params: {
       warningCount: normalized.parseWarnings.length,
     });
   } catch (error) {
+    void error;
     console.warn("[ccc-secure-share-webhook] BMS normalization skipped", {
       rqUid: params.rqUid,
       lineItemCount: 0,
@@ -304,7 +305,6 @@ function tryNormalizeAndLogCccBmsMetadata(params: {
       jurisdictionSource: "unknown",
       jurisdictionConfidence: "unknown",
       warningCount: 1,
-      error: error instanceof Error ? error.message : "Unknown normalization error",
     });
   }
 }
