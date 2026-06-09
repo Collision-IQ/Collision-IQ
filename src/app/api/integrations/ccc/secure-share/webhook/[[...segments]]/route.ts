@@ -11,6 +11,7 @@ import {
   sha256Hex,
   shouldEnforceIpAllowlist,
 } from "@/lib/ccc/secureShareWebhook";
+import { normalizeCccBmsEstimateForAi } from "@/lib/ccc/cccBmsNormalizer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -174,6 +175,33 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
   const rawXmlSha256 = sha256Hex(rawXml);
   const receivedAt = new Date().toISOString();
   const requestKind = rqUid ? "bms_estimate" : "unknown_monitor";
+
+  if (requestKind === "bms_estimate") {
+    try {
+      const normalizedEstimateContext = normalizeCccBmsEstimateForAi(rawXml);
+      console.info("[ccc-secure-share-webhook] normalized BMS metadata", {
+        environment,
+        environmentSource,
+        requestKind,
+        rqUid,
+        lineItemCount: normalizedEstimateContext.lineItems.length,
+        jurisdictionCandidateCount:
+          normalizedEstimateContext.jurisdictionEvidenceCandidates.length,
+        hasVehicleReconciliationInput: Boolean(
+          normalizedEstimateContext.vehicleReconciliationInput
+        ),
+        parseWarningCount: normalizedEstimateContext.parseWarnings.length,
+      });
+    } catch (error) {
+      console.warn("[ccc-secure-share-webhook] BMS normalization skipped", {
+        environment,
+        environmentSource,
+        requestKind,
+        rqUid,
+        error: error instanceof Error ? error.message : "Unknown normalization error",
+      });
+    }
+  }
 
   if (!rqUid && secretCheck.mode === "strict") {
     console.warn("[ccc-secure-share-webhook] rejected missing rqUid", {
