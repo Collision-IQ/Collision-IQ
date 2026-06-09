@@ -65,6 +65,55 @@ describe("bmsEstimateNormalizer", () => {
     });
   });
 
+  it("extracts RqUID, vehicle, VIN, totals, parties, and line items from a minimal BMS fixture", () => {
+    const estimate = normalizeCccBmsEstimate(SAMPLE_XML);
+
+    expect(estimate.rqUid).toBe("xml-rq");
+    expect(estimate.vehicle).toMatchObject({
+      vin: "1HGCM82633A004352",
+      vinRedacted: "***********004352",
+      vinTail: "004352",
+      year: 2024,
+      make: "Honda",
+      model: "Accord",
+      mileage: 12345,
+    });
+    expect(estimate.totals).toMatchObject({
+      grossTotal: 245.5,
+      tax: 15.25,
+    });
+    expect(estimate.parties).toMatchObject({
+      repairFacility: {
+        name: "Example Collision",
+        state: "CA",
+        zip: "90001",
+        hasRealAddressBlock: true,
+      },
+      owner: {
+        name: "Example Owner",
+        state: "CA",
+        zip: "90002",
+        hasRealAddressBlock: true,
+      },
+      insurer: {
+        name: "Example Carrier",
+      },
+    });
+    expect(estimate.lineItems).toEqual([
+      expect.objectContaining({
+        lineNumber: "10",
+        section: "Front Lamps",
+        operation: "Replace",
+        description: "Headlamp assembly",
+        partNumber: "HL-123",
+        quantity: 1,
+        laborHours: 0.8,
+        unitPrice: 245.5,
+        extendedAmount: 245.5,
+      }),
+    ]);
+  });
+
   it("normalizes identifiers with redacted and hashed claim number fields", () => {
     const estimate = normalizeCccBmsEstimate(SAMPLE_XML);
 

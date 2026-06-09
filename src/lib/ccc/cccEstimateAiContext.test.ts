@@ -59,6 +59,23 @@ describe("CCC estimate AI context adapter", () => {
     );
   });
 
+  it("states CCC source confidence is high for estimate data only", () => {
+    const context = buildCccEstimateEvidenceContext(normalizeCccBmsEstimate(SAMPLE_XML));
+
+    expect(context).toContain(
+      "Source confidence: high for estimate structure and line-item extraction"
+    );
+    expect(context).toContain("Evidence lane: estimate_evidence");
+    expect(context).toContain(
+      "Do not use CCC Secure Share BMS as OEM, P-page, DEG, legal, policy, or carrier-violation authority."
+    );
+    const confidenceLines = context
+      .split("\n")
+      .filter((line) => /confidence/i.test(line))
+      .join("\n");
+    expect(confidenceLines).not.toMatch(/OEM|required|P-page|DEG|legal|policy|coverage/i);
+  });
+
   it("caps top normalized line items", () => {
     const manyLines = Array.from({ length: 14 }, (_, index) => {
       const lineNumber = index + 1;
