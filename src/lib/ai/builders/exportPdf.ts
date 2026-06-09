@@ -205,6 +205,9 @@ export function sanitizeReportText(value: string): string {
   });
 
   return cleanUserFacingPresentationText(normalizeNarrativeProse(normalized
+    .replace(/\bCCC(?:\s+Secure\s+Share)?\s+confirms\s+this\s+operation\s+is\s+required\.?/gi, "CCC Secure Share source confirms this estimate line was present in the structured estimate data.")
+    .replace(/\bCCC\s+Secure\s+Share\s+documentation\s+this\s+estimate\s+line\s+was\s+present\s+in\s+the\s+structured\s+estimate\s+data\.?/gi, "CCC Secure Share source confirms this estimate line was present in the structured estimate data.")
+    .replace(/\bCCC\s+Secure\s+Share\s+may\s+identify\s+estimate\s+differences\s+that\s+need\s+citations,\s+but\s+it\s+cannot\s+supply\s+the\s+required\s+citation\s+authority\.?/gi, "The CCC estimate data supports the existence of this line-item difference. OEM/P-page/DEG/legal support has not yet been verified.")
     .replace(/\bcm[a-z0-9]{20,}\b/gi, "Uploaded document")
     .replace(/\bEvidence references?:\s*(?:cmp[\w-]+(?:\s*,\s*)?)+\b/gi, "")
     .replace(/\bcmp[\w-]{4,}\b/gi, "uploaded file")

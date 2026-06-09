@@ -219,6 +219,6 @@ function buildCccDisclosure(
   ]);
 
   return hasCcc
-    ? "A CCC workfile was provided, but only supported estimate data was used for this review."
+    ? "CCC Secure Share source confirms this estimate line was present in the structured estimate data."
     : "";
 }

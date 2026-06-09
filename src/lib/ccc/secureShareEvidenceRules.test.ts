@@ -44,8 +44,8 @@ describe("CCC Secure Share evidence rules", () => {
     expect(CCC_SECURE_SHARE_EVIDENCE_RULE.sourceConfidence).toBe(
       "high_confidence_estimate_source"
     );
-    expect(CCC_SECURE_SHARE_EVIDENCE_RULE.citationGapBoundary).toContain(
-      "cannot supply the required citation authority"
+    expect(CCC_SECURE_SHARE_EVIDENCE_RULE.citationGapBoundary).toBe(
+      "The CCC estimate data supports the existence of this line-item difference. OEM/P-page/DEG/legal support has not yet been verified."
     );
   });
 

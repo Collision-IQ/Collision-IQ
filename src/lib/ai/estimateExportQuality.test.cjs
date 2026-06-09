@@ -679,10 +679,7 @@ run("customer report PDF strips internal audit language and parser fragments", (
     text.includes("Possible hidden mounting or structural damage may still need inspection after teardown"),
     true
   );
-  assert.equal(
-    text.includes("A CCC workfile was provided, but only supported estimate data was used for this review."),
-    true
-  );
+  assert.ok(/CCC Secure Share source confirms this estimate line was present in the structured estimate data\.?/i.test(text));
   assertNoCustomerDebugText(text);
 });
 

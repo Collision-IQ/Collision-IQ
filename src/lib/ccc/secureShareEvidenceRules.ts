@@ -63,14 +63,15 @@ export const CCC_SECURE_SHARE_EVIDENCE_RULE = {
   authorityBoundary:
     "CCC Secure Share is estimate-source evidence only. It is not OEM, P-page, DEG, legal, policy, or carrier-violation authority.",
   citationGapBoundary:
-    "CCC Secure Share may identify estimate differences that need citations, but it cannot supply the required citation authority.",
+    "The CCC estimate data supports the existence of this line-item difference. OEM/P-page/DEG/legal support has not yet been verified.",
   mayProve: CCC_SECURE_SHARE_ALLOWED_PROOF_CAPABILITIES,
   mayNotProve: CCC_SECURE_SHARE_PROHIBITED_PROOF_CATEGORIES,
   downstreamUses: CCC_SECURE_SHARE_DOWNSTREAM_USES,
 } as const;
 
 const ALLOWED_PROOF_REASONS = {
-  line_item_exists: "CCC Secure Share can prove that a line item exists in the CCC estimate payload.",
+  line_item_exists:
+    "CCC Secure Share source confirms this estimate line was present in the structured estimate data.",
   line_item_missing_from_compared_estimate:
     "CCC Secure Share can prove that a line item from one estimate is missing from another estimate being compared.",
   line_item_changed:

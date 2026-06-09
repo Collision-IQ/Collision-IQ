@@ -122,6 +122,7 @@ export function toCustomerFacingText(value?: string | null, fallback = ""): stri
 
 function cleanCustomerExportFragments(value: string): string {
   return value
+    .replace(/\bCCC\s+Secure\s+Share\s+documentation\s+this\s+estimate\s+line\s+was\s+present\s+in\s+the\s+structured\s+estimate\s+data\.?/gi, "CCC Secure Share source confirms this estimate line was present in the structured estimate data.")
     .replace(/\bsome of the repair steps are still only partly(?:\s+verified)?(?:\.\s*Verified\.)?/gi, "some of the repair steps are still only partly verified.")
     .replace(/\bif calibration, alignment, or hidden mounting issues were not fully(?:\s+verified)?(?:\.\s*Verified\.)?/gi, "if calibration, alignment, or hidden mounting issues were not fully verified.")
     .replace(/\badded findings can be and sent in as a supplement\b\.?/gi, "added findings can be documented and sent in as a supplement.")

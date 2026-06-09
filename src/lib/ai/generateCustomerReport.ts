@@ -119,7 +119,7 @@ Important rules:
 - You may explain that referenced procedure material tends to support operations like calibration, scan, alignment, fit-check, or structural verification when that is consistent with the damage path.
 - Do not use legal language. Translate everything into everyday speech.
 - Do not include clipped placeholders or partial policy fragments in the final prose.
-- If a CCC workfile is mentioned, say only: "A CCC workfile was provided, but only supported estimate data was used for this review."
+- If a CCC workfile is mentioned, say only: "CCC Secure Share source confirms this estimate line was present in the structured estimate data."
 
 Ranking rules for "yourOptions":
 - Return the options in priority order, strongest and most meaningful first.

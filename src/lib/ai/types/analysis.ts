@@ -50,10 +50,38 @@ export type FindingBucket =
   | "parts"
   | "adas";
 
+export type EvidenceLane =
+  | "estimate_evidence"
+  | "procedure_authority"
+  | "estimating_guide_authority"
+  | "industry_authority"
+  | "regulatory_authority"
+  | "policy_authority"
+  | "claim_conduct_evidence";
+
+export type SourceSystem =
+  | "ccc_secure_share_bms"
+  | "uploaded_pdf"
+  | "uploaded_image"
+  | "oem_procedure"
+  | "p_page"
+  | "scrs_guide"
+  | "deg"
+  | "nhtsa"
+  | "state_regulation"
+  | "insurance_policy"
+  | "carrier_correspondence";
+
 export interface EvidenceRef {
+  // Legacy display source retained for existing renderers.
   source: string;
   page?: number;
   quote?: string;
+  sourceSystem?: SourceSystem;
+  evidenceLane?: EvidenceLane;
+  confidence?: "low" | "medium" | "high";
+  supports?: string;
+  limitations?: string[];
 }
 
 export type Evidence = {
