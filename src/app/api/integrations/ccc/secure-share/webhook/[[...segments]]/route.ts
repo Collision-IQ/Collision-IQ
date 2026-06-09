@@ -6,8 +6,8 @@ import {
   getHeaderNames,
   getSourceIp,
   isIpAllowed,
-  isValidCccSecureShareEnvironment,
   recordCccSecureShareEvent,
+  resolveCccSecureShareEnvironment,
   sha256Hex,
   shouldEnforceIpAllowlist,
 } from "@/lib/ccc/secureShareWebhook";
@@ -16,31 +16,63 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type RouteContext = {
-  params: Promise<{ env: string }>;
+  params: Promise<{ segments?: string[] }>;
 };
 
-export async function GET(_req: Request, context: RouteContext) {
-  const { env } = await context.params;
+export async function GET(req: Request, context: RouteContext) {
+  return handleWebhookGet(req, context);
+}
 
-  if (!isValidCccSecureShareEnvironment(env)) {
-    return NextResponse.json({ ok: false, error: "Invalid environment" }, { status: 400 });
+export async function POST(req: Request, context: RouteContext) {
+  return handleWebhookPost(req, context);
+}
+
+async function handleWebhookGet(req: Request, context: RouteContext) {
+  const { segments } = await context.params;
+  const environmentResolution = resolveCccSecureShareEnvironment({
+    segments,
+    url: req.url,
+  });
+
+  if (!environmentResolution.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: environmentResolution.error,
+        invalidEnvironment: environmentResolution.invalidEnvironment,
+      },
+      { status: 400 }
+    );
   }
 
   return NextResponse.json({
     ok: true,
     endpoint: "ccc-secure-share-webhook",
-    environment: env,
+    environment: environmentResolution.environment,
+    environmentSource: environmentResolution.environmentSource,
     accepts: "POST XML",
   });
 }
 
-export async function POST(req: Request, context: RouteContext) {
-  const { env } = await context.params;
+async function handleWebhookPost(req: Request, context: RouteContext) {
+  const { segments } = await context.params;
+  const environmentResolution = resolveCccSecureShareEnvironment({
+    segments,
+    url: req.url,
+  });
 
-  if (!isValidCccSecureShareEnvironment(env)) {
-    return NextResponse.json({ ok: false, error: "Invalid environment" }, { status: 400 });
+  if (!environmentResolution.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: environmentResolution.error,
+        invalidEnvironment: environmentResolution.invalidEnvironment,
+      },
+      { status: 400 }
+    );
   }
 
+  const { environment, environmentSource } = environmentResolution;
   const rawXml = await req.text();
   if (!rawXml.trim()) {
     return NextResponse.json({ ok: false, error: "Empty body" }, { status: 400 });
@@ -52,7 +84,8 @@ export async function POST(req: Request, context: RouteContext) {
 
   if (allowlistEnforced && !ipAllowed) {
     console.warn("[ccc-secure-share-webhook] rejected ip", {
-      env,
+      environment,
+      environmentSource,
       sourceIp,
       allowlistEnforced,
       ipAllowed,
@@ -61,11 +94,12 @@ export async function POST(req: Request, context: RouteContext) {
     return NextResponse.json({ ok: false, error: "Source IP not allowed" }, { status: 403 });
   }
 
-  const secretCheck = checkWebhookSecret(req.headers, env);
+  const secretCheck = checkWebhookSecret(req.headers, environment);
   // TODO: Switch production CCC Secure Share validation to strict mode after confirming CCC's actual header/signature behavior in sandbox traffic.
   if (secretCheck.mode === "strict" && secretCheck.configured && !secretCheck.matched) {
     console.warn("[ccc-secure-share-webhook] rejected secret", {
-      env,
+      environment,
+      environmentSource,
       secretConfigured: secretCheck.configured,
       secretPresent: secretCheck.present,
       secretMatched: secretCheck.matched,
@@ -79,7 +113,7 @@ export async function POST(req: Request, context: RouteContext) {
   const receivedAt = new Date().toISOString();
   const contentType = req.headers.get("content-type");
   const eventRecord = buildEventRecord({
-    environment: env,
+    environment,
     rqUid,
     rawXmlSha256,
     bodyLength: rawXml.length,
@@ -90,7 +124,8 @@ export async function POST(req: Request, context: RouteContext) {
   const { duplicate } = await recordCccSecureShareEvent(eventRecord);
 
   console.info("[ccc-secure-share-webhook] received", {
-    env,
+    environment,
+    environmentSource,
     rqUid,
     bodyLength: rawXml.length,
     rawXmlSha256,
@@ -110,7 +145,8 @@ export async function POST(req: Request, context: RouteContext) {
     {
       ok: true,
       received: true,
-      environment: env,
+      environment,
+      environmentSource,
       rqUid,
       duplicate,
     },

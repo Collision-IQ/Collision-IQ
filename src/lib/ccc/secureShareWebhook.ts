@@ -22,6 +22,23 @@ export type SecretCheckResult = {
   mode: "monitor" | "strict";
 };
 
+export type CccSecureShareEnvironmentSource =
+  | "path_segment"
+  | "query_param"
+  | "monitor_default_sandbox";
+
+export type CccSecureShareEnvironmentResolution =
+  | {
+      ok: true;
+      environment: CccSecureShareEnvironment;
+      environmentSource: CccSecureShareEnvironmentSource;
+    }
+  | {
+      ok: false;
+      error: "Invalid environment";
+      invalidEnvironment: string;
+    };
+
 export const CCC_SECURE_SHARE_IP_ALLOWLIST = [
   "52.252.194.192/26",
   "52.249.38.64/26",
@@ -36,10 +53,69 @@ const SECRET_HEADER_NAMES = [
   "x-webhook-secret",
 ] as const;
 
+const CLEARLY_INVALID_ENVIRONMENT_SEGMENTS = new Set([
+  "dev",
+  "development",
+  "prod",
+  "staging",
+  "stage",
+  "test",
+]);
+
 export function isValidCccSecureShareEnvironment(
   value: string
 ): value is CccSecureShareEnvironment {
   return CCC_SECURE_SHARE_ENVIRONMENTS.includes(value as CccSecureShareEnvironment);
+}
+
+export function resolveCccSecureShareEnvironment(params: {
+  segments?: string[];
+  url: string;
+  env?: NodeJS.ProcessEnv;
+}): CccSecureShareEnvironmentResolution {
+  const { segments = [], url } = params;
+  const queryEnv = new URL(url).searchParams.get("env")?.trim().toLowerCase() ?? "";
+
+  if (queryEnv) {
+    if (!isValidCccSecureShareEnvironment(queryEnv)) {
+      return {
+        ok: false,
+        error: "Invalid environment",
+        invalidEnvironment: queryEnv,
+      };
+    }
+
+    return {
+      ok: true,
+      environment: queryEnv,
+      environmentSource: "query_param",
+    };
+  }
+
+  const firstSegment = segments[0]?.trim().toLowerCase() ?? "";
+  if (firstSegment) {
+    if (isValidCccSecureShareEnvironment(firstSegment)) {
+      return {
+        ok: true,
+        environment: firstSegment,
+        environmentSource: "path_segment",
+      };
+    }
+
+    if (CLEARLY_INVALID_ENVIRONMENT_SEGMENTS.has(firstSegment)) {
+      return {
+        ok: false,
+        error: "Invalid environment",
+        invalidEnvironment: firstSegment,
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    environment: "sandbox",
+    environmentSource: "monitor_default_sandbox",
+  };
 }
 
 export function extractRqUid(xml: string): string | null {

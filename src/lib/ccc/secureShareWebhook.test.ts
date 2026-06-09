@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { POST } from "@/app/api/integrations/ccc/secure-share/webhook/[env]/route";
-import { extractRqUid, isValidCccSecureShareEnvironment } from "./secureShareWebhook";
+import {
+  GET,
+  POST,
+} from "@/app/api/integrations/ccc/secure-share/webhook/[[...segments]]/route";
+import {
+  extractRqUid,
+  isValidCccSecureShareEnvironment,
+  resolveCccSecureShareEnvironment,
+} from "./secureShareWebhook";
 
 describe("CCC Secure Share webhook helpers", () => {
   it("extracts RqUID from CIECA BMS XML", () => {
@@ -22,33 +29,69 @@ describe("CCC Secure Share webhook helpers", () => {
     expect(isValidCccSecureShareEnvironment("production")).toBe(true);
     expect(isValidCccSecureShareEnvironment("staging")).toBe(false);
   });
+
+  it("defaults base-path requests to sandbox in monitor mode", () => {
+    expect(
+      resolveCccSecureShareEnvironment({
+        url: "https://example.test/api/integrations/ccc/secure-share/webhook",
+      })
+    ).toMatchObject({
+      ok: true,
+      environment: "sandbox",
+      environmentSource: "monitor_default_sandbox",
+    });
+  });
 });
 
 describe("CCC Secure Share webhook route", () => {
+  it("returns endpoint metadata for GET /webhook", async () => {
+    const response = await GET(
+      new Request("https://example.test/api/integrations/ccc/secure-share/webhook"),
+      { params: Promise.resolve({}) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      endpoint: "ccc-secure-share-webhook",
+      environment: "sandbox",
+      environmentSource: "monitor_default_sandbox",
+      accepts: "POST XML",
+    });
+  });
+
+  it("returns endpoint metadata for GET /webhook/sandbox", async () => {
+    const response = await GET(
+      new Request("https://example.test/api/integrations/ccc/secure-share/webhook/sandbox"),
+      { params: Promise.resolve({ segments: ["sandbox"] }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      endpoint: "ccc-secure-share-webhook",
+      environment: "sandbox",
+      environmentSource: "path_segment",
+      accepts: "POST XML",
+    });
+  });
+
   it("returns 400 for an empty body", async () => {
     const response = await POST(
       new Request("https://example.test/api/integrations/ccc/secure-share/webhook/sandbox", {
         method: "POST",
         body: "",
       }),
-      { params: Promise.resolve({ env: "sandbox" }) }
+      { params: Promise.resolve({ segments: ["sandbox"] }) }
     );
 
     expect(response.status).toBe(400);
   });
 
-  it("accepts valid XML posts", async () => {
-    const response = await POST(
-      new Request("https://example.test/api/integrations/ccc/secure-share/webhook/sandbox", {
-        method: "POST",
-        body: "<VehicleDamageEstimateAddRq><RqUID>abc</RqUID></VehicleDamageEstimateAddRq>",
-        headers: {
-          "content-type": "application/xml",
-          "x-forwarded-for": "52.252.194.193",
-        },
-      }),
-      { params: Promise.resolve({ env: "sandbox" }) }
-    );
+  it("accepts POST /webhook", async () => {
+    const response = await postXml({ segments: undefined });
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -56,8 +99,130 @@ describe("CCC Secure Share webhook route", () => {
       ok: true,
       received: true,
       environment: "sandbox",
+      environmentSource: "monitor_default_sandbox",
       rqUid: "abc",
       duplicate: false,
     });
   });
+
+  it("accepts POST /webhook/sandbox", async () => {
+    const response = await postXml({ segments: ["sandbox"] });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      received: true,
+      environment: "sandbox",
+      environmentSource: "path_segment",
+      rqUid: "abc",
+      duplicate: false,
+    });
+  });
+
+  it("accepts POST /webhook/production", async () => {
+    const response = await postXml({ segments: ["production"] });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      received: true,
+      environment: "production",
+      environmentSource: "path_segment",
+      rqUid: "abc",
+      duplicate: false,
+    });
+  });
+
+  it("accepts POST /webhook/sandbox/anything-extra", async () => {
+    const response = await postXml({ segments: ["sandbox", "anything-extra"] });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      received: true,
+      environment: "sandbox",
+      environmentSource: "path_segment",
+      rqUid: "abc",
+      duplicate: false,
+    });
+  });
+
+  it("uses query param env when present", async () => {
+    const response = await POST(
+      new Request("https://example.test/api/integrations/ccc/secure-share/webhook?env=production", {
+        method: "POST",
+        body: "<VehicleDamageEstimateAddRq><RqUID>abc</RqUID></VehicleDamageEstimateAddRq>",
+        headers: {
+          "content-type": "application/xml",
+          "x-forwarded-for": "52.252.194.193",
+        },
+      }),
+      { params: Promise.resolve({}) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      received: true,
+      environment: "production",
+      environmentSource: "query_param",
+      rqUid: "abc",
+      duplicate: false,
+    });
+  });
+
+  it("rejects invalid query param env", async () => {
+    const response = await POST(
+      new Request("https://example.test/api/integrations/ccc/secure-share/webhook?env=bad", {
+        method: "POST",
+        body: "<VehicleDamageEstimateAddRq><RqUID>abc</RqUID></VehicleDamageEstimateAddRq>",
+      }),
+      { params: Promise.resolve({}) }
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects a clearly invalid first environment segment", async () => {
+    const response = await POST(
+      new Request("https://example.test/api/integrations/ccc/secure-share/webhook/staging", {
+        method: "POST",
+        body: "<VehicleDamageEstimateAddRq><RqUID>abc</RqUID></VehicleDamageEstimateAddRq>",
+      }),
+      { params: Promise.resolve({ segments: ["staging"] }) }
+    );
+
+    expect(response.status).toBe(400);
+  });
+
+  it("defaults unknown CCC-appended path segments to sandbox", async () => {
+    const response = await postXml({ segments: ["test-connection"] });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      environment: "sandbox",
+      environmentSource: "monitor_default_sandbox",
+      rqUid: "abc",
+    });
+  });
 });
+
+function postXml({ segments }: { segments?: string[] }) {
+  const suffix = segments?.length ? `/${segments.join("/")}` : "";
+  return POST(
+    new Request(`https://example.test/api/integrations/ccc/secure-share/webhook${suffix}`, {
+      method: "POST",
+      body: "<VehicleDamageEstimateAddRq><RqUID>abc</RqUID></VehicleDamageEstimateAddRq>",
+      headers: {
+        "content-type": "application/xml",
+        "x-forwarded-for": "52.252.194.193",
+      },
+    }),
+    { params: Promise.resolve({ segments }) }
+  );
+}
