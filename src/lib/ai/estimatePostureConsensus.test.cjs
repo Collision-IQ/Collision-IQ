@@ -158,6 +158,25 @@ run("snapshot uses the same selected estimate posture", () => {
   assert.match(snapshot.repairPlanVerdict.reason, /shared estimate posture favors the carrier estimate/i);
 });
 
+run("customer report uses neutral heading for undetermined posture", () => {
+  const posture = {
+    selectedEstimateLabel: "undetermined",
+    selectedEstimateReason: "The shared estimate posture is undetermined.",
+    confidence: "low",
+    limitations: [],
+  };
+  const document = buildCustomerReportPdf({
+    report: customerReport("The shop estimate appears materially more complete."),
+    vehicle: "2020 Tesla Model 3",
+    selectedEstimatePosture: posture,
+  });
+  const section = document.sections.find((item) => /estimates differ/i.test(item.title));
+
+  assert.match(section?.title ?? "", /Where The Estimates Differ/i);
+  assert.doesNotMatch(JSON.stringify(section), /shop estimate appears materially more complete/i);
+  assert.match(JSON.stringify(section), /estimate posture is not yet clear/i);
+});
+
 run("shared posture resolver selects shop when shop-only gaps dominate", () => {
   const posture = resolveEstimatePosture({
     estimateComparisons: {

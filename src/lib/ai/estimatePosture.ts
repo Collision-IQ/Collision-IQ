@@ -2,7 +2,7 @@ import type { AnalysisResult, RepairIntelligenceReport } from "@/lib/ai/types/an
 import type { WorkspaceEstimateComparisons } from "@/types/workspaceTypes";
 
 export type EstimatePostureDecision = {
-  selectedEstimateLabel: "shop" | "carrier" | "inconclusive";
+  selectedEstimateLabel: "shop" | "carrier" | "insurer" | "mixed" | "undetermined";
   selectedEstimateReason: string;
   confidence: "high" | "medium" | "low";
   limitations: string[];
@@ -59,9 +59,9 @@ export function resolveEstimatePosture(input: EstimatePostureInput): EstimatePos
   }
 
   return {
-    selectedEstimateLabel: "inconclusive",
+    selectedEstimateLabel: "undetermined",
     selectedEstimateReason:
-      "The shared estimate posture is inconclusive because the current structured comparison does not establish one estimate as more complete.",
+      "The shared estimate posture is undetermined because the current structured comparison does not establish one estimate as more complete.",
     confidence: "low",
     limitations: [
       "The file still needs clearer line-item, teardown, repair procedure, and verification support before selecting an estimate posture.",
@@ -71,14 +71,15 @@ export function resolveEstimatePosture(input: EstimatePostureInput): EstimatePos
 
 export function formatEstimatePostureLabel(posture: EstimatePostureDecision): string {
   if (posture.selectedEstimateLabel === "shop") return "shop estimate";
-  if (posture.selectedEstimateLabel === "carrier") return "carrier estimate";
-  return "inconclusive estimate posture";
+  if (isCarrierSelectedPosture(posture)) return "carrier estimate";
+  if (posture.selectedEstimateLabel === "mixed") return "mixed estimate posture";
+  return "undetermined estimate posture";
 }
 
 export function buildCustomerEstimatePostureHeading(posture: EstimatePostureDecision): string {
   if (posture.selectedEstimateLabel === "shop") return "Why The Shop Estimate Looks More Complete";
-  if (posture.selectedEstimateLabel === "carrier") return "Why The Insurance Estimate Looks More Complete";
-  return "Why The Estimate Posture Is Not Yet Clear";
+  if (isCarrierSelectedPosture(posture)) return "Why The Insurance Estimate Looks More Complete";
+  return "Where The Estimates Differ";
 }
 
 export function alignCustomerEstimatePostureText(
@@ -87,7 +88,7 @@ export function alignCustomerEstimatePostureText(
 ): string {
   const fallback = posture.selectedEstimateReason;
   const value = text.trim() || fallback;
-  if (posture.selectedEstimateLabel === "carrier") {
+  if (isCarrierSelectedPosture(posture)) {
     return value
       .replace(/\bthe shop estimate (?:appears|looks|is) (?:materially )?more complete\b/gi, "the insurance estimate appears more complete")
       .replace(/\bshop estimate looks more complete\b/gi, "insurance estimate looks more complete");
@@ -100,6 +101,10 @@ export function alignCustomerEstimatePostureText(
   return value
     .replace(/\bthe shop estimate (?:appears|looks|is) (?:materially )?more complete\b/gi, "the estimate posture is not yet clear")
     .replace(/\bthe (?:insurance|insurer|carrier) estimate (?:appears|looks|is) (?:materially )?more complete\b/gi, "the estimate posture is not yet clear");
+}
+
+export function isCarrierSelectedPosture(posture: EstimatePostureDecision): boolean {
+  return posture.selectedEstimateLabel === "carrier" || posture.selectedEstimateLabel === "insurer";
 }
 
 function isOnlyOnLeft(row: WorkspaceEstimateComparisons["rows"][number]) {

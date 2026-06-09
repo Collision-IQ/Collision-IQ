@@ -2,6 +2,7 @@ import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 
 export type ResolvedJurisdiction = {
   state: string | null;
+  stateCode: string | null;
   confidence: "high" | "medium" | "low" | "unknown";
   source:
     | "explicit_user"
@@ -15,7 +16,9 @@ export type ResolvedJurisdiction = {
     | "inspection_site_zip_fallback"
     | "inspection_site_address_fallback"
     | "unknown";
+  basis: string;
   evidenceLabel: string;
+  limitations: string[];
 };
 
 type JurisdictionResolverInput = {
@@ -198,30 +201,33 @@ export function resolveJurisdiction(input: JurisdictionResolverInput): ResolvedJ
   const inspectionZip = findAddressBlockZip(allText, inspectionLabels, inspectionStopLabels) ?? findLabeledZip(allText, inspectionLabels);
   if (inspectionZip) {
     const state = stateFromZip(inspectionZip);
-    if (state) return buildResult(state, "medium", "inspection_site_zip_fallback", "Inspection site ZIP fallback from uploaded claim documents.");
+    if (state) return buildResult(state, "medium", "inspection_site_zip_fallback", "Inspection Site ZIP from uploaded estimate.");
   }
 
   const inspectionAddress = findAddressBlockState(allText, inspectionLabels, inspectionStopLabels) ?? findLabeledState(allText, inspectionLabels);
   if (inspectionAddress) {
-    return buildResult(inspectionAddress, "medium", "inspection_site_address_fallback", "Inspection site address fallback from uploaded claim documents.");
+    return buildResult(inspectionAddress, "medium", "inspection_site_address_fallback", "Inspection Site address from uploaded estimate.");
   }
 
   const shopZip = findAddressBlockZip(allText, shopLabels, shopStopLabels) ?? findLabeledZip(allText, shopLabels);
   if (shopZip) {
     const state = stateFromZip(shopZip);
-    if (state) return buildResult(state, "medium", "shop_zip_fallback", "Repair shop ZIP fallback from uploaded claim documents.");
+    if (state) return buildResult(state, "medium", "shop_zip_fallback", "Repair shop ZIP from uploaded estimate.");
   }
 
   const shopAddress = findAddressBlockState(allText, shopLabels, shopStopLabels) ?? findLabeledState(allText, shopLabels);
   if (shopAddress) {
-    return buildResult(shopAddress, "medium", "shop_address_fallback", "Repair shop address fallback from uploaded claim documents.");
+    return buildResult(shopAddress, "medium", "shop_address_fallback", "Repair shop address from uploaded estimate.");
   }
 
   return {
     state: null,
+    stateCode: null,
     confidence: "unknown",
     source: "unknown",
+    basis: "No user, policy, owner/insured, or repair-shop jurisdiction evidence was isolated.",
     evidenceLabel: "No user, policy, owner/insured, or repair-shop jurisdiction evidence was isolated.",
+    limitations: ["State-specific legal and policy conclusions should remain pending until jurisdiction evidence is supplied."],
   };
 }
 
@@ -423,9 +429,12 @@ function buildZipResult(
     ? buildResult(state, "high", source, evidenceLabel)
     : {
         state: null,
+        stateCode: null,
         confidence: "unknown",
         source: "unknown",
+        basis: "ZIP evidence was malformed or outside supported state ranges.",
         evidenceLabel: "ZIP evidence was malformed or outside supported state ranges.",
+        limitations: ["State-specific legal and policy conclusions should remain pending until jurisdiction evidence is supplied."],
       };
 }
 
@@ -435,7 +444,29 @@ function buildResult(
   source: ResolvedJurisdiction["source"],
   evidenceLabel: string
 ): ResolvedJurisdiction {
-  return { state, confidence, source, evidenceLabel };
+  return {
+    state,
+    stateCode: state,
+    confidence,
+    source,
+    basis: evidenceLabel,
+    evidenceLabel,
+    limitations: buildJurisdictionLimitations(confidence, source),
+  };
+}
+
+function buildJurisdictionLimitations(
+  confidence: ResolvedJurisdiction["confidence"],
+  source: ResolvedJurisdiction["source"]
+): string[] {
+  if (confidence === "high") return [];
+  if (source === "inspection_site_zip_fallback" || source === "inspection_site_address_fallback") {
+    return ["Jurisdiction is inferred from inspection-site estimate metadata, not from an owner mailing address or policy governing-law clause."];
+  }
+  if (source === "shop_zip_fallback" || source === "shop_address_fallback") {
+    return ["Jurisdiction is inferred from repair-facility estimate metadata, not from an owner mailing address or policy governing-law clause."];
+  }
+  return ["State-specific legal and policy conclusions should remain pending until stronger jurisdiction evidence is supplied."];
 }
 
 function getNestedString(value: unknown, key: string): string | null {

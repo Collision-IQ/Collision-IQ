@@ -618,10 +618,12 @@ function toPolicyRightsJurisdiction(
 ): PolicyRightsReviewModel["jurisdiction"] {
   return {
     state: formatResolvedJurisdictionForReport(resolution),
+    stateCode: resolution.stateCode,
     confidence: resolution.confidence === "unknown" ? "low" : resolution.confidence,
     source: resolution.source,
     evidenceLabel: resolution.evidenceLabel,
-    basis: resolution.evidenceLabel,
+    basis: resolution.basis,
+    limitations: resolution.limitations,
   };
 }
 

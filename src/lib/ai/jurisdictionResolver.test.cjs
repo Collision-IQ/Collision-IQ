@@ -154,8 +154,10 @@ run("inspection site ZIP resolves as medium-confidence fallback, not owner ZIP",
   const resolved = resolveJurisdiction({ report });
 
   assert.equal(resolved.state, "PA");
+  assert.equal(resolved.stateCode, "PA");
   assert.equal(resolved.source, "inspection_site_zip_fallback");
   assert.equal(resolved.confidence, "medium");
+  assert.equal(resolved.basis, "Inspection Site ZIP from uploaded estimate.");
 });
 
 run("owner and insured name proximity does not classify inspection ZIP as owner ZIP", () => {
@@ -193,6 +195,7 @@ run("Policy Rights and DOI render inspection-site jurisdiction source consistent
   assert.equal(policySummary.Jurisdiction, "Pennsylvania (PA)");
   assert.equal(policySummary["Jurisdiction Source"], "inspection_site_zip_fallback");
   assert.equal(policySummary["Jurisdiction Confidence"], "Medium");
+  assert.match(JSON.stringify(policy), /Inspection Site ZIP from uploaded estimate/i);
   assert.equal(doiSummary.Jurisdiction, policySummary.Jurisdiction);
   assert.equal(doiSummary["Jurisdiction Source"], policySummary["Jurisdiction Source"]);
   assert.equal(doiSummary["Jurisdiction Confidence"], policySummary["Jurisdiction Confidence"]);

@@ -143,12 +143,20 @@ export async function POST(req: Request) {
 function coerceEstimatePosture(value: unknown): EstimatePostureDecision | undefined {
   if (!value || typeof value !== "object") return undefined;
   const record = value as Record<string, unknown>;
-  const selectedEstimateLabel = record.selectedEstimateLabel;
+  const rawSelectedEstimateLabel = record.selectedEstimateLabel;
+  const selectedEstimateLabel =
+    rawSelectedEstimateLabel === "inconclusive" ? "undetermined" : rawSelectedEstimateLabel;
   const selectedEstimateReason = record.selectedEstimateReason;
   const confidence = record.confidence;
   const limitations = record.limitations;
   if (
-    (selectedEstimateLabel !== "shop" && selectedEstimateLabel !== "carrier" && selectedEstimateLabel !== "inconclusive") ||
+    (
+      selectedEstimateLabel !== "shop" &&
+      selectedEstimateLabel !== "carrier" &&
+      selectedEstimateLabel !== "insurer" &&
+      selectedEstimateLabel !== "mixed" &&
+      selectedEstimateLabel !== "undetermined"
+    ) ||
     typeof selectedEstimateReason !== "string" ||
     (confidence !== "high" && confidence !== "medium" && confidence !== "low")
   ) {

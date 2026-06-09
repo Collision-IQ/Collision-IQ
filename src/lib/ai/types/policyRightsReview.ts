@@ -57,10 +57,12 @@ export type PolicyRightsAssertion = {
 export type PolicyRightsReviewModel = {
   jurisdiction: {
     state: string;
+    stateCode?: string | null;
     confidence: "low" | "medium" | "high";
     basis: string;
     source?: string;
     evidenceLabel?: string;
+    limitations?: string[];
   };
   appraisalRights: {
     detected: boolean;

@@ -1,4 +1,5 @@
 import type { ExportModel } from "./buildExportModel";
+import { isCarrierSelectedPosture } from "@/lib/ai/estimatePosture";
 import { type PressureMode, computeItemPressureMode } from "./pressureMode";
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 import type { EstimateComparisonRow, WorkspaceEstimateComparisons } from "@/types/workspaceTypes";
@@ -208,7 +209,7 @@ function buildDamageSummary(renderModel: SnapshotRenderModel): string[] {
 function buildRepairPlanVerdict(renderModel: SnapshotRenderModel): CollisionSnapshot["repairPlanVerdict"] {
   const incomplete = renderModel.confidenceIntegrity.completenessStatus !== "COMPLETE";
   const posture = renderModel.selectedEstimatePosture ?? {
-    selectedEstimateLabel: "inconclusive",
+    selectedEstimateLabel: "undetermined",
     selectedEstimateReason: "The shared estimate posture is not available for this snapshot.",
     confidence: "low",
     limitations: [],
@@ -216,7 +217,7 @@ function buildRepairPlanVerdict(renderModel: SnapshotRenderModel): CollisionSnap
   const moreCompletePlan =
     posture.selectedEstimateLabel === "shop"
       ? "SHOP"
-      : posture.selectedEstimateLabel === "carrier"
+      : isCarrierSelectedPosture(posture)
         ? "CARRIER"
         : "INCONCLUSIVE";
   const carrierPlanStatus =
