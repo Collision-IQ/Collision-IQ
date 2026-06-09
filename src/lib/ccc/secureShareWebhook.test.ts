@@ -90,6 +90,59 @@ describe("CCC Secure Share webhook route", () => {
     expect(response.status).toBe(400);
   });
 
+  it("accepts empty manual validation POST /webhook/sandbox/estimate", async () => {
+    const response = await POST(
+      new Request(
+        "https://example.test/api/integrations/ccc/secure-share/webhook/sandbox/estimate?appId=1686&trigger=manual",
+        {
+          method: "POST",
+          body: "",
+        }
+      ),
+      { params: Promise.resolve({ segments: ["sandbox", "estimate"] }) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      received: true,
+      validationOnly: true,
+      requestKind: "manual_validation",
+      environment: "sandbox",
+      environmentSource: "path_segment",
+      rqUid: null,
+      duplicate: false,
+      message: "CCC manual webhook validation accepted without BMS XML body",
+    });
+  });
+
+  it("accepts empty manual validation POST /webhook", async () => {
+    const response = await POST(
+      new Request(
+        "https://example.test/api/integrations/ccc/secure-share/webhook?appId=1686&trigger=manual",
+        {
+          method: "POST",
+          body: "",
+        }
+      ),
+      { params: Promise.resolve({}) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({
+      ok: true,
+      received: true,
+      validationOnly: true,
+      requestKind: "manual_validation",
+      environment: "sandbox",
+      environmentSource: "monitor_default_sandbox",
+      rqUid: null,
+      duplicate: false,
+    });
+  });
+
   it("accepts POST /webhook", async () => {
     const response = await postXml({ segments: undefined });
     const body = await response.json();
@@ -100,6 +153,7 @@ describe("CCC Secure Share webhook route", () => {
       received: true,
       environment: "sandbox",
       environmentSource: "monitor_default_sandbox",
+      requestKind: "bms_estimate",
       rqUid: "abc",
       duplicate: false,
     });
@@ -115,6 +169,7 @@ describe("CCC Secure Share webhook route", () => {
       received: true,
       environment: "sandbox",
       environmentSource: "path_segment",
+      requestKind: "bms_estimate",
       rqUid: "abc",
       duplicate: false,
     });
@@ -130,6 +185,7 @@ describe("CCC Secure Share webhook route", () => {
       received: true,
       environment: "production",
       environmentSource: "path_segment",
+      requestKind: "bms_estimate",
       rqUid: "abc",
       duplicate: false,
     });
@@ -145,6 +201,7 @@ describe("CCC Secure Share webhook route", () => {
       received: true,
       environment: "sandbox",
       environmentSource: "path_segment",
+      requestKind: "bms_estimate",
       rqUid: "abc",
       duplicate: false,
     });
@@ -170,7 +227,33 @@ describe("CCC Secure Share webhook route", () => {
       received: true,
       environment: "production",
       environmentSource: "query_param",
+      requestKind: "bms_estimate",
       rqUid: "abc",
+      duplicate: false,
+    });
+  });
+
+  it("returns 202 for non-empty monitor-mode body without RqUID", async () => {
+    const response = await POST(
+      new Request("https://example.test/api/integrations/ccc/secure-share/webhook", {
+        method: "POST",
+        body: "<ManualValidation><Status>ok</Status></ManualValidation>",
+        headers: {
+          "content-type": "application/xml",
+        },
+      }),
+      { params: Promise.resolve({}) }
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(202);
+    expect(body).toMatchObject({
+      ok: true,
+      received: true,
+      environment: "sandbox",
+      environmentSource: "monitor_default_sandbox",
+      requestKind: "unknown_monitor",
+      rqUid: null,
       duplicate: false,
     });
   });

@@ -74,13 +74,15 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
 
   const { environment, environmentSource } = environmentResolution;
   const rawXml = await req.text();
-  if (!rawXml.trim()) {
-    return NextResponse.json({ ok: false, error: "Empty body" }, { status: 400 });
-  }
+  const url = new URL(req.url);
+  const trigger = url.searchParams.get("trigger");
+  const appId = url.searchParams.get("appId");
+  const isManualValidation = trigger === "manual" && Boolean(appId?.trim());
 
   const sourceIp = getSourceIp(req.headers);
   const allowlistEnforced = shouldEnforceIpAllowlist();
   const ipAllowed = isIpAllowed(sourceIp);
+  const contentType = req.headers.get("content-type");
 
   if (allowlistEnforced && !ipAllowed) {
     console.warn("[ccc-secure-share-webhook] rejected ip", {
@@ -108,10 +110,78 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
     return NextResponse.json({ ok: false, error: "Invalid webhook secret" }, { status: 401 });
   }
 
+  if (!rawXml.trim()) {
+    if (isManualValidation) {
+      console.info("[ccc-secure-share-webhook] manual validation accepted", {
+        environment,
+        environmentSource,
+        requestKind: "manual_validation",
+        validationOnly: true,
+        rqUid: null,
+        rqUidMissing: true,
+        bodyLength: rawXml.length,
+        contentType,
+        sourceIp,
+        headerNames: getHeaderNames(req.headers),
+        trigger,
+        appId,
+        secretConfigured: secretCheck.configured,
+        secretPresent: secretCheck.present,
+        secretMatched: secretCheck.matched,
+        secretMode: secretCheck.mode,
+        allowlistEnforced,
+        ipAllowed,
+      });
+
+      return NextResponse.json({
+        ok: true,
+        received: true,
+        validationOnly: true,
+        requestKind: "manual_validation",
+        environment,
+        environmentSource,
+        rqUid: null,
+        duplicate: false,
+        message: "CCC manual webhook validation accepted without BMS XML body",
+      });
+    }
+
+    return NextResponse.json({ ok: false, error: "Empty body" }, { status: 400 });
+  }
+
   const rqUid = extractRqUid(rawXml);
   const rawXmlSha256 = sha256Hex(rawXml);
   const receivedAt = new Date().toISOString();
-  const contentType = req.headers.get("content-type");
+  const requestKind = rqUid ? "bms_estimate" : "unknown_monitor";
+
+  if (!rqUid && secretCheck.mode === "strict") {
+    console.warn("[ccc-secure-share-webhook] rejected missing rqUid", {
+      environment,
+      environmentSource,
+      requestKind: "unknown_monitor",
+      rqUid: null,
+      rqUidMissing: true,
+      bodyLength: rawXml.length,
+      rawXmlSha256,
+      contentType,
+      sourceIp,
+      headerNames: getHeaderNames(req.headers),
+      trigger,
+      appId,
+      secretConfigured: secretCheck.configured,
+      secretPresent: secretCheck.present,
+      secretMatched: secretCheck.matched,
+      secretMode: secretCheck.mode,
+      allowlistEnforced,
+      ipAllowed,
+    });
+
+    return NextResponse.json(
+      { ok: false, error: "Missing RqUID", requestKind: "unknown_monitor" },
+      { status: 400 }
+    );
+  }
+
   const eventRecord = buildEventRecord({
     environment,
     rqUid,
@@ -126,12 +196,16 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
   console.info("[ccc-secure-share-webhook] received", {
     environment,
     environmentSource,
+    requestKind,
     rqUid,
+    rqUidMissing: !rqUid,
     bodyLength: rawXml.length,
     rawXmlSha256,
     contentType,
     sourceIp,
     headerNames: getHeaderNames(req.headers),
+    trigger,
+    appId,
     secretConfigured: secretCheck.configured,
     secretPresent: secretCheck.present,
     secretMatched: secretCheck.matched,
@@ -147,6 +221,7 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
       received: true,
       environment,
       environmentSource,
+      requestKind,
       rqUid,
       duplicate,
     },
