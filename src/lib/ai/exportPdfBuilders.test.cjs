@@ -342,6 +342,13 @@ run("Estimate scrubber export is replaced by Citation Density Gap Report", () =>
   assert.ok(document.sections.some((section) => section.title === "4. Authority Matrix"));
   assert.ok(document.sections.some((section) => section.title === "8. Source Boundary"));
   assert.ok(!document.sections.some((section) => section.title === "Estimate QA Findings"));
+  const chatbotSource = fs.readFileSync(path.join(process.cwd(), "src", "components", "ChatbotPage.tsx"), "utf8");
+  assert.match(chatbotSource, /Citation Density Gap Report/i);
+  assert.match(chatbotSource, /downloadReportDocument\("estimate_scrubber"\)/i);
+  assert.match(
+    fs.readFileSync(path.join(process.cwd(), "src", "app", "api", "reports", "send", "route.ts"), "utf8"),
+    /case "estimate_scrubber":[\s\S]*Citation Density Gap Report/i
+  );
 });
 
 run("Citation Density Gap Report shows citation gaps beside estimate anchors", () => {
@@ -489,6 +496,10 @@ run("Citation Density Gap model exposes stable anchors and citation readiness fi
     item.category === "Needs invoice/proof" ||
     item.category === "Needs OEM procedure support"
   ));
+  assert.ok(model.annotations.some((item) =>
+    item.citationGapBucket === "needs_oem_procedure" ||
+    item.citationGapBucket === "needs_invoice_or_completion_proof"
+  ));
   assert.ok(model.citationDensityFindings.length >= model.annotations.length);
   const densityFinding = model.citationDensityFindings[0];
   assert.ok(densityFinding.id);
@@ -526,7 +537,170 @@ run("Citation Density Gap model exposes stable anchors and citation readiness fi
   assert.ok(densityFinding.recommendedNextAction);
   assert.ok(["low", "medium", "high"].includes(densityFinding.confidence));
   assert.ok(Array.isArray(densityFinding.limitations));
+  assert.ok(model.citationDensityFindings.some((item) =>
+    item.estimateGapType === "needs_proof" ||
+    item.estimateGapType === "present_but_under_documented" ||
+    item.estimateGapType === "referenced_not_produced"
+  ));
+  assert.ok(!model.citationDensityFindings.every((item) =>
+    item.estimateGapType === "missing_from_carrier" ||
+    item.estimateGapType === "reduced_by_carrier"
+  ));
   assert.doesNotMatch(JSON.stringify(model), /evidence-chain-\d+|debug confidence|internal reasoning/i);
+});
+
+run("Citation Density Gap Report classifies proof gaps and referenced Toyota links", () => {
+  const model = buildAnnotatedEstimateReviewModel({
+    report: {
+      ...REPORT,
+      issues: [
+        {
+          id: "issue-toyota-procedure",
+          category: "calibration",
+          title: "Toyota blind spot monitor calibration procedure",
+          finding: "Toyota blind spot monitor calibration procedure",
+          impact: "Toyota OEM procedure link is referenced, but the actual procedure text is not produced in the file.",
+          missingOperation: "Blind spot monitor calibration",
+          severity: "high",
+          evidenceIds: ["toyota-link"],
+        },
+        {
+          id: "issue-calibration-completion",
+          category: "documentation",
+          title: "Final invoice completion record",
+          finding: "Final invoice completion record",
+          impact: "The operation may be valid, but final invoice or completion proof is absent.",
+          missingOperation: "Final invoice completion record",
+          severity: "medium",
+          evidenceIds: [],
+        },
+        {
+          id: "issue-cosmetic-soft",
+          category: "cosmetic",
+          title: "General cosmetic research lead",
+          finding: "General cosmetic research lead",
+          impact: "General non-make-specific internet lead is too soft to lead the supplement package.",
+          missingOperation: "Cosmetic refinish blend note",
+          severity: "low",
+          evidenceIds: [],
+        },
+      ],
+      evidence: [
+        {
+          id: "toyota-link",
+          title: "Toyota OEM procedure link referenced but not produced",
+          snippet: "Toyota OEM procedure link referenced but not produced; actual procedure text is not attached.",
+          source: "Toyota OEM procedure referenced but not produced",
+          authority: "referenced",
+        },
+        {
+          id: "evidence-ccc",
+          title: "CCC Secure Share workfile",
+          snippet: "CCC Secure Share source confirms estimate line presence only.",
+          source: "CCC workfile artifact",
+          authority: "estimate evidence",
+        },
+      ],
+      estimateFacts: {
+        documentedHighlights: [
+          "CCC Secure Share workfile artifact",
+        ],
+        documentedProcedures: [],
+      },
+      rawEstimateText: "Toyota blind spot monitor calibration procedure referenced but not produced\nFinal invoice completion record missing\nGeneral non-make-specific research lead",
+    },
+    analysis: {
+      ...ANALYSIS,
+      rawEstimateText: "Toyota blind spot monitor calibration procedure referenced but not produced\nFinal invoice completion record missing\nGeneral non-make-specific research lead",
+    },
+    panel: null,
+    assistantAnalysis: null,
+  });
+  const document = buildAnnotatedEstimateReviewPdf({
+    report: {
+      ...REPORT,
+      issues: [
+        {
+          id: "issue-toyota-procedure",
+          category: "calibration",
+          title: "Toyota blind spot monitor calibration procedure",
+          finding: "Toyota blind spot monitor calibration procedure",
+          impact: "Toyota OEM procedure link is referenced, but the actual procedure text is not produced in the file.",
+          missingOperation: "Blind spot monitor calibration",
+          severity: "high",
+          evidenceIds: ["toyota-link"],
+        },
+        {
+          id: "issue-calibration-completion",
+          category: "documentation",
+          title: "Final invoice completion record",
+          finding: "Final invoice completion record",
+          impact: "The operation may be valid, but final invoice or completion proof is absent.",
+          missingOperation: "Final invoice completion record",
+          severity: "medium",
+          evidenceIds: [],
+        },
+        {
+          id: "issue-cosmetic-soft",
+          category: "cosmetic",
+          title: "General cosmetic research lead",
+          finding: "General cosmetic research lead",
+          impact: "General non-make-specific internet lead is too soft to lead the supplement package.",
+          missingOperation: "Cosmetic refinish blend note",
+          severity: "low",
+          evidenceIds: [],
+        },
+      ],
+      evidence: [
+        {
+          id: "toyota-link",
+          title: "Toyota OEM procedure link referenced but not produced",
+          snippet: "Toyota OEM procedure link referenced but not produced; actual procedure text is not attached.",
+          source: "Toyota OEM procedure referenced but not produced",
+          authority: "referenced",
+        },
+        {
+          id: "evidence-ccc",
+          title: "CCC Secure Share workfile",
+          snippet: "CCC Secure Share source confirms estimate line presence only.",
+          source: "CCC workfile artifact",
+          authority: "estimate evidence",
+        },
+      ],
+      estimateFacts: {
+        documentedHighlights: [
+          "CCC Secure Share workfile artifact",
+        ],
+        documentedProcedures: [],
+      },
+      rawEstimateText: "Toyota blind spot monitor calibration procedure referenced but not produced\nFinal invoice completion record missing\nGeneral non-make-specific research lead",
+    },
+    analysis: {
+      ...ANALYSIS,
+      rawEstimateText: "Toyota blind spot monitor calibration procedure referenced but not produced\nFinal invoice completion record missing\nGeneral non-make-specific research lead",
+    },
+    panel: null,
+    assistantAnalysis: null,
+  });
+  const text = JSON.stringify(document);
+
+  assert.ok(model.annotations.some((item) =>
+    item.citationGapBucket === "needs_oem_procedure" ||
+    item.citationGapBucket === "needs_invoice_or_completion_proof"
+  ));
+  assert.ok(model.citationDensityFindings.some((item) =>
+    /ADAS Calibration Procedure Support|Toyota blind spot monitor calibration procedure/i.test(item.operationLabel) &&
+    item.citationStatus.oem === "referenced_not_produced" &&
+    item.verifiedAuthorityCount === 0
+  ));
+  assert.ok(model.citationDensityFindings.some((item) => item.estimateGapType === "weak_do_not_lead"));
+  assert.ok(document.sections.some((section) => section.title === "2. Citation Density Score"));
+  assert.ok(document.sections.some((section) => section.title === "6. Proof Needed Before Leading With This"));
+  assert.ok(document.sections.some((section) => section.title === "7. Weak / Do Not Lead"));
+  assert.match(text, /CCC Secure Share source confirms this estimate line was present in the structured estimate data/i);
+  assert.match(text, /estimate evidence/i);
+  assert.doesNotMatch(text, /verified OEM support|verified OEM procedure|CCC proves|CCC confirms this operation is required/i);
+  assert.doesNotMatch(text, /Find every line item the insurer left off|Every finding ships with the documentation your adjuster needs|One workflow, one source of truth|Gaps surfaced before the repair starts|GuideCoat|Bainbridge/i);
 });
 
 run("Citation Density Gap Report does not anchor test-fit findings to generic option lines", () => {
@@ -947,6 +1121,15 @@ run("Annotated Estimate Review selects lower-cost carrier estimate and keeps com
   assert.match(JSON.stringify(estimatorList), /Additional refinish labor|Refinish labor 1\.5/i);
   assert.match(JSON.stringify(estimatorList), /Wheel opening molding/i);
   assert.match(JSON.stringify(estimatorList), /Lock support price/i);
+  assert.ok(model.citationDensityFindings.some((finding) =>
+    /refinish|labor/i.test(finding.operationLabel) &&
+    ["missing_from_carrier", "reduced_by_carrier", "present_but_under_documented", "referenced_not_produced", "needs_proof"].includes(finding.estimateGapType) &&
+    finding.verifiedAuthorityCount === 0
+  ));
+  assert.ok(!model.citationDensityFindings.some((finding) =>
+    /refinish|labor/i.test(finding.operationLabel) &&
+    Object.values(finding.citationStatus).includes("verified")
+  ));
   assert.match(text, /A\/M hood/);
   assert.match(text, /OEM hood/);
   assert.match(text, /Alternate part difference/);
