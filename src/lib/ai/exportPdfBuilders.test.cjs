@@ -338,8 +338,9 @@ run("Estimate scrubber export is replaced by Citation Density Gap Report", () =>
 
   assert.equal(document.header.title, "Citation Density Gap Report");
   assert.equal(document.filename, "citation-density-gap-report.pdf");
-  assert.ok(document.sections.some((section) => section.title === "Citation Gaps By Estimate Line"));
-  assert.ok(document.sections.some((section) => section.title === "Citation Density Method"));
+  assert.ok(document.sections.some((section) => section.title === "1. Bottom Line"));
+  assert.ok(document.sections.some((section) => section.title === "4. Authority Matrix"));
+  assert.ok(document.sections.some((section) => section.title === "8. Source Boundary"));
   assert.ok(!document.sections.some((section) => section.title === "Estimate QA Findings"));
 });
 
@@ -389,13 +390,14 @@ run("Citation Density Gap Report shows citation gaps beside estimate anchors", (
 
   assert.equal(document.header.title, "Citation Density Gap Report");
   assert.equal(document.filename, "citation-density-gap-report.pdf");
-  assert.ok(document.sections.some((section) => section.title === "Citation Gaps By Estimate Line"));
+  assert.ok(document.sections.some((section) => section.title === "3. Highest-Priority Gaps"));
+  assert.ok(document.sections.some((section) => section.title === "6. Proof Needed Before Leading With This"));
   assert.ok(document.summary.some((item) => item.label === "Needs Authority / Proof" && Number(item.value) > 0));
-  assert.match(text, /Line \d+:/i);
-  assert.match(text, /Ask for written confirmation that adas calibration procedure support was completed and documented/i);
-  assert.match(text, /Missing Authority \/ Proof Checklist/);
+  assert.match(text, /Gap \/ operation \| Carrier issue \| Estimate impact \| Authority status \| Missing proof \| Priority \| Next action/i);
+  assert.match(text, /Needs proof: ADAS Calibration Procedure Support is referenced but final invoice-backed completion is not shown/i);
+  assert.match(text, /Proof Needed Before Leading With This/);
   assert.match(text, /Citation density/i);
-  assert.match(text, /Estimate evidence is not authority evidence/i);
+  assert.match(text, /Estimate evidence supports the existence of a difference/i);
   assert.doesNotMatch(text, /Support Confidence|Confidence:|evidence-chain-12345|Parser fragment/);
   assert.doesNotMatch(text, /Operation: .* \| Status:/i);
   assert.doesNotMatch(text, /DOI violation|violated law/i);
@@ -933,7 +935,7 @@ run("Annotated Estimate Review selects lower-cost carrier estimate and keeps com
   assert.equal(model.scrubTarget.lowerCostTotal, 8250);
   assert.match(model.scrubTarget.label, /Lower-cost carrier estimate/i);
   assert.equal(annotated.header.title, "Citation Density Gap Report");
-  assert.match(text, /Estimate Selected For Review/);
+  assert.match(text, /1\. Bottom Line/);
   assert.equal(estimatorList.header.title, "Estimate Delta / Change Requests");
   assert.equal(estimatorList.filename, "estimate-delta-change-requests.pdf");
   assert.ok(estimatorList.sections.some((section) => /^(Added In Newer Estimate|Top added in newer estimate|ONLY IN ESTIMATE 1|Top only in estimate 1|ONLY IN SHOP ESTIMATE|Top only in shop estimate)$/i.test(section.title)));

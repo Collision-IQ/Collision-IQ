@@ -132,45 +132,36 @@ export function buildAnnotatedEstimateReviewPdf(
       "Estimate gaps ranked by repair impact, citation readiness, and missing proof.",
     sections: [
       {
-        title: "Citation Density Method",
-        bullets: buildCitationDensityMethodBullets(),
+        title: "1. Bottom Line",
+        bullets: buildCitationBottomLineBullets(model),
       },
       {
-        title: "Estimate Selected For Review",
-        body: `${model.scrubTarget.label} was selected for citation-density review. ${model.scrubTarget.basis}`,
+        title: "2. Citation Density Score",
+        bullets: buildCitationDensityScoreBullets(model.citationDensityFindings),
       },
       {
-        title: "Strongest Supplement / Dispute Items",
-        bullets: buildRankedCitationGapBullets({
-          annotations,
-          audience,
-          mode: "strong",
-        }),
+        title: "3. Highest-Priority Gaps",
+        bullets: buildHighestPriorityGapRows(model.citationDensityFindings),
       },
       {
-        title: "Citation Gaps By Estimate Line",
-        bullets: buildTargetEstimateMarkupBullets({
-          model,
-          annotations,
-          audience,
-          promptGeneratedText: params.promptGeneratedText,
-        }),
+        title: "4. Authority Matrix",
+        bullets: buildAuthorityMatrixRows(model.citationDensityFindings),
       },
       {
-        title: "Missing Authority / Proof Checklist",
-        bullets: buildProofChecklistBullets({
-          annotations,
-          audience,
-          promptGeneratedText: params.promptGeneratedText,
-        }),
+        title: "5. Supplement-Ready Items",
+        bullets: buildSupplementReadyBullets(model.citationDensityFindings),
       },
       {
-        title: "Weak Items Not To Lead With",
-        bullets: buildRankedCitationGapBullets({
-          annotations,
-          audience,
-          mode: "weak",
-        }),
+        title: "6. Proof Needed Before Leading With This",
+        bullets: buildProofNeededBeforeLeadingBullets(model.citationDensityFindings),
+      },
+      {
+        title: "7. Weak / Do Not Lead",
+        bullets: buildWeakDoNotLeadBullets(model.citationDensityFindings),
+      },
+      {
+        title: "8. Source Boundary",
+        bullets: buildSourceBoundaryBullets(),
       },
     ],
     redCount,
@@ -1229,25 +1220,6 @@ function classifyScrubberSource(sourceType: string | undefined, title: string): 
   return "ESTIMATE_EVIDENCE";
 }
 
-function formatAnnotationEvidence(
-  annotation: EstimateAnnotation,
-  audience: AnnotatedEstimateAudience
-): string {
-  if (annotation.sourceRefs.length > 0) {
-    return annotation.sourceRefs.join("; ");
-  }
-  if (audience === "customer") {
-    return "Current estimate review; supporting document still needs to be attached or confirmed";
-  }
-  return annotation.supportStatus === "verified"
-    ? "Verified support attached"
-    : annotation.supportStatus === "referenced"
-      ? "Referenced estimate comparison or source; confirm final document"
-      : annotation.supportStatus === "inferred"
-        ? "Inferred from current estimate review; verify before treating as procedure support"
-        : "No support document attached";
-}
-
 function formatComparisonValue(value: EstimateComparisonRow["lhsValue"]): string | undefined {
   if (value === null || value === undefined) return undefined;
   const cleaned = cleanCustomerFacingEstimateLine(String(value));
@@ -1280,242 +1252,243 @@ function buildAnnotationExplanation(
   return `${cleanCustomerFacingEstimateLine(finding.whyItMatters)} ${supportPhrase}`;
 }
 
-function formatAnnotatedIssue(
-  annotation: EstimateAnnotation,
-  audience: AnnotatedEstimateAudience
-): string {
-  const evidenceBasis = formatAnnotationEvidence(annotation, audience);
-  const request = audience === "customer" ? annotation.customerText : annotation.estimatorText;
-  const lineLabel = annotation.lineId ? `Line ${extractDisplayLineNumber(annotation.lineId)}` : annotation.section ?? "The selected estimate section";
-  const status = formatStatusToken(annotation.severity);
-  const support = formatSupportPosture(annotation.supportStatus);
+function buildCitationBottomLineBullets(model: AnnotatedEstimateReviewModel): string[] {
+  const findings = model.citationDensityFindings;
+  const supplementReadyCount = findings.filter(isSupplementReadyFinding).length;
+  const proofNeededCount = findings.filter(isProofNeededFinding).length;
+  const weakCount = findings.filter(isWeakFinding).length;
+  const highestRisk = selectHighestRiskMissingProof(findings);
+  const broaderEstimate = model.scrubTarget.higherCostTotal && model.scrubTarget.lowerCostTotal
+    ? model.scrubTarget.role === "carrier"
+      ? "The shop estimate appears broader or more complete based on the isolated total comparison."
+      : "The carrier estimate appears broader or more complete based on the isolated total comparison."
+    : "The available file does not isolate two complete estimate totals, so completeness is based on line-level gaps and proof status.";
+  const finalAwardReady = proofNeededCount === 0 && weakCount === 0 && supplementReadyCount > 0
+    ? "Potentially closer to final-award ready for the isolated items, subject to final file review."
+    : "Not final-award ready yet; authority or completion proof remains open for one or more items.";
 
   return [
-    `${status}: ${annotation.title}`,
-    `${lineLabel} currently shows ${annotation.anchorText}. ${annotation.explanation}`,
-    `This matters because ${lowercaseFirst(buildWhyAnnotationMatters(annotation))}`,
-    `Citation density is ${annotation.citationDensityScore}/100 (${formatCitationReadiness(annotation.citationReadiness)}). Current support is ${support}: ${evidenceBasis}. Missing proof: ${describeMissingProof(annotation)}. ${request}`,
-    audience === "admin" ? `Internal annotation reference: ${annotation.id}.` : null,
-  ].filter(Boolean).join("\n\n");
-}
-
-function extractDisplayLineNumber(lineId: string): string {
-  const match = lineId.match(/^line-(\d+)/);
-  return match?.[1] ?? "item";
-}
-
-function buildWhyAnnotationMatters(annotation: EstimateAnnotation): string {
-  if (annotation.category === "Needs invoice/proof") {
-    return "completion proof affects whether the estimate can be treated as documented and closed.";
-  }
-  if (annotation.category === "Needs OEM procedure support") {
-    return "procedure support controls whether the repair step is documented as applicable to this vehicle and damage path.";
-  }
-  if (annotation.category === "Needs P-page support") {
-    return "P-page or estimating-guide support controls whether the line is documented as included or separately chargeable.";
-  }
-  if (annotation.category === "Reduced labor/material") {
-    return "a reduced allowance can change whether the estimate carries the labor, material, refinish, or pricing support reflected elsewhere in the file.";
-  }
-  if (annotation.category === "Alternate/aftermarket part concern") {
-    return "alternate part selection can affect fit, safety, warranty, repair procedure compliance, and policy review.";
-  }
-  if (annotation.category === "Missing operation") {
-    return "an omitted operation may leave the repair plan incomplete unless another line clearly includes the work.";
-  }
-  return "the estimate item needs enough attached support to show both the estimate gap and the authority or proof behind the requested change.";
-}
-
-function formatSupportPosture(status: EstimateAnnotationSupportStatus): string {
-  switch (status) {
-    case "verified":
-      return "verified";
-    case "referenced":
-      return "referenced but not fully closed";
-    case "inferred":
-      return "inferred and not yet verified";
-    case "missing":
-      return "not established";
-  }
-}
-
-function isPriorityEstimateLine(text: string): boolean {
-  return /scan|calibration|adas|test fit|alignment|frame|structural|measure|corrosion|cavity|wax|refinish|material|aftermarket|a\/m|manual|included|labor|rate|pricing|one[- ]?time|supplement|seat belt|road test/i.test(text);
-}
-
-function buildCitationDensityMethodBullets(): string[] {
-  return [
-    "Citation density measures how much usable support is attached to a disputed estimate item.",
-    "Authority categories checked: OEM procedure or position statement; estimating platform P-page or included/not-included support; SCRS; DEG; NHTSA or federal safety material; state regulation or DOI source; policy language; invoice, scan, calibration, completion, photo, teardown, or measurement proof.",
-    "Estimate evidence is not authority evidence. CCC, uploaded PDFs, parsed estimate lines, and estimate deltas may show that a line exists, is missing, or changed, but they do not prove OEM procedure, P-page, DEG, legal, policy, coverage, or violation support.",
-    "Lead with items that have estimate impact plus attached authority or completion proof. Treat weak or general research leads as follow-up work, not the headline of a supplement package.",
+    broaderEstimate,
+    finalAwardReady,
+    `Main proof gaps: ${highestRisk ?? "No high-risk missing proof type was isolated."}`,
+    `Ready to raise: ${supplementReadyCount}. Needs proof before leading: ${proofNeededCount}. Weak/do-not-lead: ${weakCount}.`,
   ];
 }
 
-function buildRankedCitationGapBullets(params: {
-  annotations: EstimateAnnotation[];
-  audience: AnnotatedEstimateAudience;
-  mode: "strong" | "weak";
-}): string[] {
-  const candidates = params.mode === "weak"
-    ? params.annotations.filter((annotation) =>
-        annotation.citationReadiness === "weak_do_not_lead" ||
-        annotation.citationGapBucket === "weak_do_not_lead"
+function buildCitationDensityScoreBullets(findings: CitationDensityFinding[]): string[] {
+  const verifiedAuthorityCount = findings.reduce((sum, finding) => sum + finding.verifiedAuthorityCount, 0);
+  const missingAuthorityTypes = new Set(findings.flatMap((finding) => finding.missingAuthorityTypes));
+  const highestRisk = selectHighestRiskMissingProof(findings);
+  const averageScore = findings.length
+    ? Math.round(findings.reduce((sum, finding) => sum + finding.citationDensityScore, 0) / findings.length)
+    : 0;
+
+  return [
+    `Average citation density score: ${averageScore}/100.`,
+    `Verified authority count: ${verifiedAuthorityCount}.`,
+    `Missing authority count: ${missingAuthorityTypes.size}.`,
+    `Highest-risk missing proof: ${highestRisk ?? "none isolated"}.`,
+  ];
+}
+
+function buildHighestPriorityGapRows(findings: CitationDensityFinding[]): string[] {
+  const rows = findings
+    .filter((finding) => !isWeakFinding(finding))
+    .sort((a, b) => rankCitationDensityFinding(b) - rankCitationDensityFinding(a))
+    .slice(0, 12);
+
+  if (rows.length === 0) return ["No highest-priority citation gaps were isolated from the current estimate review."];
+
+  return [
+    "Gap / operation | Carrier issue | Estimate impact | Authority status | Missing proof | Priority | Next action",
+    ...rows.map((finding) => [
+      finding.operationLabel,
+      formatEstimateGapType(finding.estimateGapType),
+      formatFindingImpact(finding),
+      formatAuthorityStatusSummary(finding),
+      finding.missingProofSummary,
+      finding.impact.supplementPriority,
+      finding.recommendedNextAction,
+    ].join(" | ")),
+  ];
+}
+
+function buildAuthorityMatrixRows(findings: CitationDensityFinding[]): string[] {
+  const rows: Array<{ label: string; key: keyof CitationDensityFinding["citationStatus"] }> = [
+    { label: "OEM", key: "oem" },
+    { label: "P-page", key: "pPages" },
+    { label: "SCRS", key: "scrs" },
+    { label: "DEG", key: "deg" },
+    { label: "NHTSA", key: "nhtsa" },
+    { label: "State regulation", key: "stateRegulation" },
+    { label: "Policy", key: "policy" },
+    { label: "Invoice/completion", key: "invoiceOrCompletionProof" },
+    { label: "Photos/teardown", key: "photoOrTeardownProof" },
+  ];
+
+  return [
+    "Authority | Verified | Referenced but not produced | Needed | Not found | Not applicable",
+    ...rows.map(({ label, key }) => {
+      const counts = countCitationStatuses(findings, key);
+      return [
+        label,
+        String(counts.verified),
+        String(counts.referenced_not_produced),
+        String(counts.needed),
+        String(counts.not_found),
+        String(counts.not_applicable),
+      ].join(" | ");
+    }),
+  ];
+}
+
+function buildSupplementReadyBullets(findings: CitationDensityFinding[]): string[] {
+  const ready = findings
+    .filter(isSupplementReadyFinding)
+    .sort((a, b) => rankCitationDensityFinding(b) - rankCitationDensityFinding(a))
+    .slice(0, 10);
+
+  return ready.length
+    ? ready.map((finding) =>
+        `${finding.operationLabel}: ${finding.supplementReadyLanguage ?? "Enough estimate and authority support is attached to raise this item safely, subject to final review."} Next action: ${finding.recommendedNextAction}`
       )
-    : params.annotations.filter((annotation) =>
-        annotation.citationReadiness !== "weak_do_not_lead" &&
-        annotation.severity !== "gray"
-      );
-  const sorted = candidates
-    .sort((a, b) => rankCitationGapAnnotation(b) - rankCitationGapAnnotation(a))
-    .slice(0, params.mode === "weak" ? 8 : 10);
-
-  if (sorted.length === 0) {
-    return params.mode === "weak"
-      ? ["No weak lead items were isolated from the current estimate review."]
-      : ["No ranked citation gap items were isolated from the current estimate review."];
-  }
-
-  return sorted.map((annotation) => formatCitationGapSummary(annotation, params.audience));
+    : ["No items currently have enough verified authority or completion proof to be treated as supplement-ready without more support."];
 }
 
-function buildProofChecklistBullets(params: {
-  annotations: EstimateAnnotation[];
-  audience: AnnotatedEstimateAudience;
-  promptGeneratedText?: string | null;
-}): string[] {
-  const proofItems = params.annotations
-    .filter((annotation) =>
-      annotation.citationReadiness === "needs_authority" ||
-      annotation.citationReadiness === "needs_completion_proof" ||
-      annotation.citationGapBucket === "needs_p_page_support" ||
-      annotation.citationGapBucket === "present_but_under_documented"
-    )
-    .sort((a, b) => rankCitationGapAnnotation(b) - rankCitationGapAnnotation(a))
-    .slice(0, 14);
+function buildProofNeededBeforeLeadingBullets(findings: CitationDensityFinding[]): string[] {
+  const proofNeeded = findings
+    .filter(isProofNeededFinding)
+    .sort((a, b) => rankCitationDensityFinding(b) - rankCitationDensityFinding(a))
+    .slice(0, 12);
 
+  return proofNeeded.length
+    ? proofNeeded.map((finding) =>
+        `${finding.operationLabel}: ${finding.missingProofSummary} Current support: ${finding.currentSupportSummary}. Next action: ${finding.recommendedNextAction}`
+      )
+    : ["No items were isolated that need proof before leading."];
+}
+
+function buildWeakDoNotLeadBullets(findings: CitationDensityFinding[]): string[] {
+  const weak = findings.filter(isWeakFinding).slice(0, 10);
+
+  return weak.length
+    ? weak.map((finding) =>
+        `${finding.operationLabel}: ${finding.currentSupportSummary}. Limitation: ${finding.limitations.join(" ")}`
+      )
+    : ["No weak or distracting lead items were isolated from the current estimate review."];
+}
+
+function buildSourceBoundaryBullets(): string[] {
   return [
-    ...formatPromptGeneratedBullets(params.promptGeneratedText, "Stored prompt proof note"),
-    ...(proofItems.length
-      ? proofItems.map((annotation) => formatCitationProofChecklistItem(annotation, params.audience))
-      : ["No authority or completion-proof gaps were isolated from the current estimate review."]),
+    "Estimate evidence supports the existence of a difference. It does not automatically prove OEM, P-page, DEG, legal, policy, or carrier-violation authority.",
+    "Use estimate lines, CCC/workfile data, uploaded PDFs, and estimate deltas to show line presence, omission, reduced amount, changed labor hours, or source metadata.",
+    "Use separate authority or completion proof for OEM procedures, P-pages, SCRS, DEG, NHTSA, state regulation, policy language, invoices, scans, calibration records, photos, teardown, and measurement support.",
   ];
 }
 
-function formatCitationGapSummary(
-  annotation: EstimateAnnotation,
-  audience: AnnotatedEstimateAudience
-): string {
-  const proofNeed = describeMissingProof(annotation);
-  const density = `${annotation.citationDensityScore}/100`;
-  const support = formatSupportPosture(annotation.supportStatus);
-  const action = audience === "customer" ? annotation.customerText : annotation.estimatorText;
-  return [
-    `${getVisibleAnnotationBadge(annotation)} ${annotation.title}`,
-    `Citation density: ${density}. Readiness: ${formatCitationReadiness(annotation.citationReadiness)}. Category: ${formatCitationGapBucket(annotation.citationGapBucket)}.`,
-    `Estimate gap: ${annotation.difference ?? annotation.explanation}`,
-    `Current support: ${support}. ${formatAnnotationEvidence(annotation, audience)}.`,
-    `Missing proof: ${proofNeed}.`,
-    `Next action: ${action}`,
-  ].join("\n\n");
+function isSupplementReadyFinding(finding: CitationDensityFinding): boolean {
+  return finding.verifiedAuthorityCount > 0 &&
+    finding.citationDensityScore >= 60 &&
+    !isWeakFinding(finding) &&
+    finding.missingAuthorityTypes.length === 0;
 }
 
-function formatCitationProofChecklistItem(
-  annotation: EstimateAnnotation,
-  audience: AnnotatedEstimateAudience
-): string {
-  const action = audience === "customer" ? annotation.customerText : annotation.estimatorText;
-  return `${annotation.title}: ${describeMissingProof(annotation)}. Current support: ${formatAnnotationEvidence(annotation, audience)}. ${action}`;
+function isProofNeededFinding(finding: CitationDensityFinding): boolean {
+  return !isWeakFinding(finding) &&
+    (finding.estimateGapType === "needs_proof" ||
+      finding.estimateGapType === "referenced_not_produced" ||
+      finding.estimateGapType === "present_but_under_documented" ||
+      finding.missingAuthorityTypes.length > 0 ||
+      finding.verifiedAuthorityCount === 0);
 }
 
-function rankCitationGapAnnotation(annotation: EstimateAnnotation): number {
-  const severityWeight = annotation.severity === "red" ? 30 :
-    annotation.severity === "blue" ? 28 :
-    annotation.severity === "yellow" ? 18 :
-    annotation.severity === "green" ? 12 :
+function isWeakFinding(finding: CitationDensityFinding): boolean {
+  return finding.estimateGapType === "weak_do_not_lead" ||
+    finding.confidence === "low" ||
+    finding.impact.supplementPriority === "low";
+}
+
+function selectHighestRiskMissingProof(findings: CitationDensityFinding[]): string | null {
+  const proofTypes = findings.flatMap((finding) => finding.missingAuthorityTypes);
+  const priority = [
+    "oem",
+    "invoiceOrCompletionProof",
+    "photoOrTeardownProof",
+    "pPages",
+    "deg",
+    "nhtsa",
+    "stateRegulation",
+    "policy",
+    "scrs",
+  ];
+  const found = priority.find((item) => proofTypes.includes(item));
+  return found ? formatAuthorityKey(found) : null;
+}
+
+function rankCitationDensityFinding(finding: CitationDensityFinding): number {
+  const priority = finding.impact.supplementPriority === "high" ? 40 :
+    finding.impact.supplementPriority === "medium" ? 22 :
+    5;
+  const safety = finding.impact.safetyImpact === "high" ? 30 :
+    finding.impact.safetyImpact === "medium" ? 15 :
     0;
-  const readinessWeight = annotation.citationReadiness === "citation_ready" ? 35 :
-    annotation.citationReadiness === "estimate_evidence_only" ? 22 :
-    annotation.citationReadiness === "needs_authority" ? 20 :
-    annotation.citationReadiness === "needs_completion_proof" ? 20 :
-    -20;
-  return severityWeight + readinessWeight + annotation.citationDensityScore;
+  const proofPenalty = finding.missingAuthorityTypes.length * 6;
+  const weakPenalty = isWeakFinding(finding) ? 45 : 0;
+  return priority + safety + finding.citationDensityScore + (finding.verifiedAuthorityCount * 10) - proofPenalty - weakPenalty;
 }
 
-function describeMissingProof(annotation: EstimateAnnotation): string {
-  switch (annotation.citationGapBucket) {
-    case "needs_oem_procedure":
-      return "OEM procedure or position-statement support has not been attached";
-    case "needs_p_page_support":
-      return "estimating platform P-page or included/not-included support has not been attached";
-    case "needs_invoice_or_completion_proof":
-      return "invoice, scan, calibration, alignment, or completion proof has not been attached";
-    case "present_but_under_documented":
-      return "the line appears present but still needs stronger document support";
-    case "reduced_by_carrier":
-      return "the reduction is visible as estimate evidence; authority or proof may still be needed before leading with it";
-    case "missing_from_carrier":
-      return "the missing line is visible as estimate evidence; authority or completion proof may still be needed";
-    case "weak_do_not_lead":
-      return "support is too general or thin to lead the supplement package";
-  }
-}
-
-function formatCitationGapBucket(bucket: EstimateScrubCitationGapBucket): string {
-  return bucket.replace(/_/g, " ");
-}
-
-function formatCitationReadiness(readiness: CitationReadiness): string {
-  return readiness.replace(/_/g, " ");
-}
-
-function buildTargetEstimateMarkupBullets(params: {
-  model: AnnotatedEstimateReviewModel;
-  annotations: EstimateAnnotation[];
-  audience: AnnotatedEstimateAudience;
-  promptGeneratedText?: string | null;
-}): string[] {
-  const targetRole = params.model.scrubTarget.role;
-  const targetAnchors = params.model.lineAnchors
-    .filter((anchor) => targetRole === "unknown" || anchor.sourceRole === targetRole || anchor.sourceRole === "unknown")
-    .filter((anchor) => !isGenericVehicleOptionsLine(anchor.text))
-    .slice(0, 40);
-  const annotationByLine = new Map<string, EstimateAnnotation[]>();
-  for (const annotation of params.annotations) {
-    const key = annotation.lineId ?? normalizeDedupeKey(annotation.anchorText);
-    annotationByLine.set(key, [...(annotationByLine.get(key) ?? []), annotation]);
-  }
-  const lineBlocks = targetAnchors.flatMap((anchor) => {
-    const direct = annotationByLine.get(anchor.lineId) ?? [];
-    const fuzzy = direct.length
-      ? []
-      : params.annotations.filter((annotation) =>
-          normalizeDedupeKey(annotation.anchorText) === normalizeDedupeKey(anchor.text) ||
-          normalizeDedupeKey(anchor.text).includes(normalizeDedupeKey(annotation.title))
-        );
-    const attached = [...direct, ...fuzzy].slice(0, 2);
-    if (attached.length === 0 && !isPriorityEstimateLine(anchor.text)) {
-      return [];
-    }
-    return [
-      [
-        `Line ${anchor.lineNumber}: ${anchor.text}`,
-        ...(attached.length
-          ? attached.map((annotation) => formatAnnotatedIssue(annotation, params.audience))
-          : ["[INFO]: This line is present in the selected estimate and is retained as estimate context. No citation-density gap was generated for this line from the current structured review model."]),
-      ].join("\n\n"),
-    ];
+function countCitationStatuses(
+  findings: CitationDensityFinding[],
+  key: keyof CitationDensityFinding["citationStatus"]
+): Record<CitationSupportStatus, number> {
+  return findings.reduce<Record<CitationSupportStatus, number>>((counts, finding) => {
+    counts[finding.citationStatus[key]] += 1;
+    return counts;
+  }, {
+    verified: 0,
+    referenced_not_produced: 0,
+    needed: 0,
+    not_found: 0,
+    not_applicable: 0,
   });
+}
 
-  return [
-    ...formatPromptGeneratedBullets(params.promptGeneratedText, "Stored prompt markup summary"),
-    ...(lineBlocks.length
-      ? lineBlocks
-      : params.annotations.map((annotation) => formatAnnotatedIssue(annotation, params.audience))),
-    ...(lineBlocks.length || params.annotations.length
-      ? []
-      : ["No line-level citation gaps were available from the current structured estimate model."]),
-  ];
+function formatEstimateGapType(value: CitationDensityFinding["estimateGapType"]): string {
+  return value.replace(/_/g, " ");
+}
+
+function formatFindingImpact(finding: CitationDensityFinding): string {
+  const parts = [
+    finding.impact.dollarImpact !== null && finding.impact.dollarImpact !== undefined
+      ? formatMoney(finding.impact.dollarImpact)
+      : null,
+    finding.impact.laborHoursImpact !== null && finding.impact.laborHoursImpact !== undefined
+      ? `${finding.impact.laborHoursImpact} labor hrs`
+      : null,
+    `safety ${finding.impact.safetyImpact}`,
+  ].filter(Boolean);
+  return parts.join(", ");
+}
+
+function formatAuthorityStatusSummary(finding: CitationDensityFinding): string {
+  if (finding.verifiedAuthorityCount > 0) return `${finding.verifiedAuthorityCount} verified`;
+  if (finding.missingAuthorityTypes.length > 0) return `missing ${finding.missingAuthorityTypes.map(formatAuthorityKey).join(", ")}`;
+  return "estimate evidence only";
+}
+
+function formatAuthorityKey(value: string): string {
+  const labels: Record<string, string> = {
+    oem: "OEM",
+    pPages: "P-page",
+    scrs: "SCRS",
+    deg: "DEG",
+    nhtsa: "NHTSA",
+    stateRegulation: "state regulation",
+    policy: "policy",
+    invoiceOrCompletionProof: "invoice/completion",
+    photoOrTeardownProof: "photos/teardown",
+  };
+  return labels[value] ?? value.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
 }
 
 type EstimateDeltaBucket = "only_first" | "only_second" | "changed" | "gap";
@@ -1858,21 +1831,6 @@ function looksSameEstimateFamily(lhsSource: string, rhsSource: string): boolean 
   return overlap >= Math.max(1, Math.min(leftTokens.size, rightTokens.length));
 }
 
-function getVisibleAnnotationBadge(annotation: EstimateAnnotation): string {
-  switch (annotation.severity) {
-    case "green":
-      return "[SUPPORTED]";
-    case "yellow":
-      return "[UNDER-DOCUMENTED]";
-    case "red":
-      return "[MISSING / REDUCED]";
-    case "blue":
-      return "[NEEDS PROOF / OEM]";
-    case "gray":
-      return "[INFO]";
-  }
-}
-
 function isEstimateDeltaExcludedRow(row: EstimateComparisonRow): boolean {
   return /\b(total|subtotal|tax|deductible|betterment)\b/i.test(
     `${row.category ?? ""} ${row.operation ?? ""} ${row.partName ?? ""}`
@@ -1897,36 +1855,6 @@ function buildEstimateDeltaSummary(
     { label: "Changed", value: String(changedCount) },
     { label: "Possible Gaps", value: String(gapCount) },
   ];
-}
-
-function formatPromptGeneratedBullets(value: string | null | undefined, label: string): string[] {
-  const cleaned = cleanPromptGeneratedText(value);
-  if (!cleaned) return [];
-
-  const bullets = cleaned
-    .split(/\n+/)
-    .map((line) => line.replace(/^[-*\d. )]+/, "").trim())
-    .filter(Boolean)
-    .slice(0, 8);
-
-  return bullets.length
-    ? bullets.map((line, index) => `${index === 0 ? label : "Stored prompt detail"}: ${line}`)
-    : [`${label}: ${cleaned}`];
-}
-
-function formatStatusToken(status: EstimateAnnotationSeverity): string {
-  switch (status) {
-    case "green":
-      return "[SUPPORTED]";
-    case "yellow":
-      return "[UNDER-DOCUMENTED]";
-    case "red":
-      return "[MISSING / REDUCED]";
-    case "blue":
-      return "[NEEDS PROOF]";
-    case "gray":
-      return "[INFO]";
-  }
 }
 
 function inferEstimateSection(operation: string): string {
@@ -2119,10 +2047,6 @@ function formatMoney(value: number): string {
   })}`;
 }
 
-function lowercaseFirst(value: string): string {
-  return value ? value.charAt(0).toLowerCase() + value.slice(1) : value;
-}
-
 function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
@@ -2240,22 +2164,6 @@ function resolveStructuralParserFallback(value: string): string {
     return "Structural frame and measurement verification";
   }
   return "";
-}
-
-function cleanPromptGeneratedText(value: string | null | undefined): string {
-  if (!value) return "";
-  return value
-    .replace(/\b(?:evidence|chain|source|finding|issue|doc|line)[-_ ]?[a-z0-9]{4,}\b/gi, "")
-    .replace(/\b[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\b/gi, "")
-    .replace(/\b(?:debug confidence|internal reasoning|parser fragment)\b/gi, "")
-    .replace(/[{}[\]<>]/g, "")
-    .replace(/\b(?:undefined|null|NaN)\b/gi, "")
-    .replace(/\r\n/g, "\n")
-    .replace(/\r/g, "\n")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim()
-    .slice(0, 1800);
 }
 
 function dedupeFindings(findings: EstimateScrubFinding[]): EstimateScrubFinding[] {
