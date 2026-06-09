@@ -155,6 +155,7 @@ describe("CCC Secure Share webhook route", () => {
   });
 
   it("accepts empty manual validation POST /webhook", async () => {
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const response = await POST(
       new Request(
         "https://example.test/api/integrations/ccc/secure-share/webhook?appId=1686&trigger=manual",
@@ -178,6 +179,12 @@ describe("CCC Secure Share webhook route", () => {
       rqUid: null,
       duplicate: false,
     });
+    expect(
+      infoSpy.mock.calls.some(
+        ([message]) => message === "[ccc-secure-share-webhook] normalized BMS metadata"
+      )
+    ).toBe(false);
+    infoSpy.mockRestore();
   });
 
   it("accepts POST /webhook", async () => {
@@ -221,6 +228,73 @@ describe("CCC Secure Share webhook route", () => {
       processingStatus: "received",
       parseError: null,
     });
+  });
+
+  it("normalizes only after webhook metadata persistence", async () => {
+    const order: string[] = [];
+    setCccSecureShareEventRecorderForTest(async (event) => {
+      order.push("persist");
+      recordedEvents.push({ ...event, duplicate: false });
+      return { duplicate: false };
+    });
+    const infoSpy = vi.spyOn(console, "info").mockImplementation((message) => {
+      if (message === "[ccc-secure-share-webhook] normalized BMS metadata") {
+        order.push("normalize-log");
+      }
+    });
+
+    const response = await postXml({ segments: ["sandbox"] });
+
+    expect(response.status).toBe(200);
+    expect(order).toEqual(["persist", "normalize-log"]);
+    infoSpy.mockRestore();
+  });
+
+  it("logs only safe normalization metadata for non-empty bodies", async () => {
+    const rawXml = [
+      "<VehicleDamageEstimateAddRq>",
+      "<RqUID>safe-rq</RqUID>",
+      "<VIN>1HGCM82633A004352</VIN>",
+      "<ModelYear>2024</ModelYear>",
+      "<Make>Honda</Make>",
+      "<Model>Accord</Model>",
+      "<EstimateLineItem>",
+      "<LineNumber>1</LineNumber>",
+      "<Operation>Replace</Operation>",
+      "<PartDescription>Headlamp assembly</PartDescription>",
+      "<TotalAmount>245.50</TotalAmount>",
+      "</EstimateLineItem>",
+      "</VehicleDamageEstimateAddRq>",
+    ].join("");
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const response = await POST(
+      new Request("https://example.test/api/integrations/ccc/secure-share/webhook/sandbox", {
+        method: "POST",
+        body: rawXml,
+        headers: {
+          "content-type": "application/xml",
+        },
+      }),
+      { params: Promise.resolve({ segments: ["sandbox"] }) }
+    );
+    const normalizedCall = infoSpy.mock.calls.find(
+      ([message]) => message === "[ccc-secure-share-webhook] normalized BMS metadata"
+    );
+
+    expect(response.status).toBe(200);
+    expect(normalizedCall?.[1]).toEqual({
+      rqUid: "safe-rq",
+      lineItemCount: 1,
+      vehiclePresent: true,
+      jurisdictionSource: "unknown",
+      jurisdictionConfidence: "unknown",
+      warningCount: 0,
+    });
+    expect(JSON.stringify(normalizedCall)).not.toContain(rawXml);
+    expect(JSON.stringify(normalizedCall)).not.toContain("1HGCM82633A004352");
+    expect(JSON.stringify(normalizedCall)).not.toContain("Headlamp assembly");
+    infoSpy.mockRestore();
   });
 
   it("marks duplicate RqUID events as duplicate", async () => {

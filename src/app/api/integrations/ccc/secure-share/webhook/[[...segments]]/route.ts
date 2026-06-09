@@ -11,7 +11,7 @@ import {
   sha256Hex,
   shouldEnforceIpAllowlist,
 } from "@/lib/ccc/secureShareWebhook";
-import { normalizeCccBmsEstimateForAi } from "@/lib/ccc/cccBmsNormalizer";
+import { normalizeCccBmsEstimate } from "@/lib/ccc/bmsEstimateNormalizer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -176,33 +176,6 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
   const receivedAt = new Date().toISOString();
   const requestKind = rqUid ? "bms_estimate" : "unknown_monitor";
 
-  if (requestKind === "bms_estimate") {
-    try {
-      const normalizedEstimateContext = normalizeCccBmsEstimateForAi(rawXml);
-      console.info("[ccc-secure-share-webhook] normalized BMS metadata", {
-        environment,
-        environmentSource,
-        requestKind,
-        rqUid,
-        lineItemCount: normalizedEstimateContext.lineItems.length,
-        jurisdictionCandidateCount:
-          normalizedEstimateContext.jurisdictionEvidenceCandidates.length,
-        hasVehicleReconciliationInput: Boolean(
-          normalizedEstimateContext.vehicleReconciliationInput
-        ),
-        parseWarningCount: normalizedEstimateContext.parseWarnings.length,
-      });
-    } catch (error) {
-      console.warn("[ccc-secure-share-webhook] BMS normalization skipped", {
-        environment,
-        environmentSource,
-        requestKind,
-        rqUid,
-        error: error instanceof Error ? error.message : "Unknown normalization error",
-      });
-    }
-  }
-
   if (!rqUid && secretCheck.mode === "strict") {
     console.warn("[ccc-secure-share-webhook] rejected missing rqUid", {
       environment,
@@ -251,6 +224,13 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
   });
   const { duplicate } = await recordCccSecureShareEvent(eventRecord);
 
+  tryNormalizeAndLogCccBmsMetadata({
+    rawXml,
+    environment,
+    rqUid,
+    appId,
+  });
+
   console.info("[ccc-secure-share-webhook] received", {
     environment,
     environmentSource,
@@ -285,4 +265,46 @@ async function handleWebhookPost(req: Request, context: RouteContext) {
     },
     { status: rqUid ? 200 : 202 }
   );
+}
+
+function tryNormalizeAndLogCccBmsMetadata(params: {
+  rawXml: string;
+  environment: "sandbox" | "production";
+  rqUid: string | null;
+  appId: string | null;
+}) {
+  if (!params.rawXml.trim()) return;
+
+  try {
+    const normalized = normalizeCccBmsEstimate(params.rawXml, {
+      environment: params.environment,
+      rqUid: params.rqUid,
+      appId: params.appId,
+    });
+
+    console.info("[ccc-secure-share-webhook] normalized BMS metadata", {
+      rqUid: normalized.rqUid,
+      lineItemCount: normalized.lineItems.length,
+      vehiclePresent: Boolean(
+        normalized.vehicle.vin ||
+          normalized.vehicle.year ||
+          normalized.vehicle.make ||
+          normalized.vehicle.model ||
+          normalized.vehicle.trim
+      ),
+      jurisdictionSource: normalized.jurisdictionResolution?.source ?? "unknown",
+      jurisdictionConfidence: normalized.jurisdictionResolution?.confidence ?? "unknown",
+      warningCount: normalized.parseWarnings.length,
+    });
+  } catch (error) {
+    console.warn("[ccc-secure-share-webhook] BMS normalization skipped", {
+      rqUid: params.rqUid,
+      lineItemCount: 0,
+      vehiclePresent: false,
+      jurisdictionSource: "unknown",
+      jurisdictionConfidence: "unknown",
+      warningCount: 1,
+      error: error instanceof Error ? error.message : "Unknown normalization error",
+    });
+  }
 }
