@@ -3,24 +3,50 @@ import { normalizeCccBmsEstimate } from "./bmsEstimateNormalizer";
 
 const SAMPLE_XML = `<ns:VehicleDamageEstimateAddRq xmlns:ns="urn:cieca:bms">
   <ns:RqUID>xml-rq</ns:RqUID>
+  <ns:DocumentID>DOC-7</ns:DocumentID>
+  <ns:WorkfileID>WF-7</ns:WorkfileID>
   <ns:EstimateNumber>EST-7</ns:EstimateNumber>
-  <ns:ClaimNumber>CLAIM-7</ns:ClaimNumber>
+  <ns:EstimateVersion>2</ns:EstimateVersion>
+  <ns:SupplementNumber>1</ns:SupplementNumber>
+  <ns:ClaimNumber>CLAIM-123456</ns:ClaimNumber>
   <ns:LossState>CA</ns:LossState>
+  <ns:RepairFacilityName>Example Collision</ns:RepairFacilityName>
+  <ns:RepairFacilityAddress1>10 Shop Way</ns:RepairFacilityAddress1>
+  <ns:RepairFacilityCity>Los Angeles</ns:RepairFacilityCity>
+  <ns:RepairFacilityState>CA</ns:RepairFacilityState>
+  <ns:RepairFacilityZip>90001</ns:RepairFacilityZip>
+  <ns:OwnerName>Example Owner</ns:OwnerName>
+  <ns:OwnerAddress1>20 Owner St</ns:OwnerAddress1>
+  <ns:OwnerCity>Los Angeles</ns:OwnerCity>
+  <ns:OwnerState>CA</ns:OwnerState>
+  <ns:OwnerZip>90002</ns:OwnerZip>
+  <ns:InsuranceCompanyName>Example Carrier</ns:InsuranceCompanyName>
   <ns:VIN>1HGCM82633A004352</ns:VIN>
   <ns:ModelYear>2024</ns:ModelYear>
   <ns:Make>Honda</ns:Make>
   <ns:Model>Accord</ns:Model>
+  <ns:Mileage>12345</ns:Mileage>
+  <ns:GrossTotal>245.50</ns:GrossTotal>
+  <ns:Tax>15.25</ns:Tax>
   <ns:EstimateLineItem>
     <ns:LineNumber>10</ns:LineNumber>
+    <ns:Section>Front Lamps</ns:Section>
     <ns:Operation>Replace</ns:Operation>
     <ns:PartDescription>Headlamp assembly</ns:PartDescription>
+    <ns:PartNumber>HL-123</ns:PartNumber>
+    <ns:PartType>OEM</ns:PartType>
+    <ns:Quantity>1</ns:Quantity>
     <ns:LaborHours>0.8</ns:LaborHours>
+    <ns:UnitPrice>245.50</ns:UnitPrice>
+    <ns:Tax>15.25</ns:Tax>
+    <ns:IncludedFlag>false</ns:IncludedFlag>
+    <ns:ManualEntry>true</ns:ManualEntry>
     <ns:TotalAmount>245.50</ns:TotalAmount>
   </ns:EstimateLineItem>
 </ns:VehicleDamageEstimateAddRq>`;
 
 describe("bmsEstimateNormalizer", () => {
-  it("exports the requested normalizer API and preserves source options", () => {
+  it("returns the requested normalized estimate envelope and source options", () => {
     const estimate = normalizeCccBmsEstimate(SAMPLE_XML, {
       environment: "sandbox",
       rqUid: "option-rq",
@@ -30,39 +56,122 @@ describe("bmsEstimateNormalizer", () => {
 
     expect(estimate).toMatchObject({
       sourceSystem: "ccc_secure_share_bms",
-      sourceConfidence: "high_confidence_estimate_source",
+      evidenceLane: "estimate_evidence",
+      sourceConfidence: "high",
       environment: "sandbox",
       appId: "1686",
       sourceEventId: "event-1",
       rqUid: "option-rq",
     });
-    expect(estimate.header.rqUid).toBe("option-rq");
   });
 
-  it("handles XML namespaces and CCC/CIECA line item variation", () => {
+  it("normalizes identifiers with redacted and hashed claim number fields", () => {
     const estimate = normalizeCccBmsEstimate(SAMPLE_XML);
 
-    expect(estimate.header).toMatchObject({
-      rqUid: "xml-rq",
-      estimateNumber: "EST-7",
-      claimNumber: "CLAIM-7",
+    expect(estimate.identifiers).toMatchObject({
+      documentId: "DOC-7",
+      workfileId: "WF-7",
+      estimateVersion: "2",
+      supplementNumber: "1",
+      claimNumber: "CLAIM-123456",
+      claimNumberRedacted: "********3456",
     });
-    expect(estimate.lineItems[0]).toMatchObject({
-      lineNumber: "10",
-      operation: "Replace",
-      component: "Headlamp assembly",
-      laborHours: 0.8,
-      totalAmount: 245.5,
+    expect(estimate.identifiers.claimNumberHash).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("normalizes vehicle fields with VIN redaction and decode metadata", () => {
+    const estimate = normalizeCccBmsEstimate(SAMPLE_XML);
+
+    expect(estimate.vehicle).toMatchObject({
+      vin: "1HGCM82633A004352",
+      vinRedacted: "***********004352",
+      vinTail: "004352",
+      year: 2024,
+      make: "Honda",
+      model: "Accord",
+      mileage: 12345,
+      decoded: {
+        attempted: true,
+        source: "ccc_bms",
+        confidence: "high",
+        limitations: [],
+      },
     });
   });
 
-  it("does not throw on missing optional fields and returns warnings and limitations", () => {
-    const estimate = normalizeCccBmsEstimate("<VehicleDamageEstimateAddRq><RqUID>rq</RqUID></VehicleDamageEstimateAddRq>");
+  it("normalizes parties, totals, jurisdiction evidence, and jurisdiction resolution", () => {
+    const estimate = normalizeCccBmsEstimate(SAMPLE_XML);
+
+    expect(estimate.parties.repairFacility).toMatchObject({
+      name: "Example Collision",
+      address1: "10 Shop Way",
+      city: "Los Angeles",
+      state: "CA",
+      zip: "90001",
+      hasRealAddressBlock: true,
+    });
+    expect(estimate.parties.owner).toMatchObject({
+      name: "Example Owner",
+      state: "CA",
+      zip: "90002",
+      hasRealAddressBlock: true,
+    });
+    expect(estimate.parties.insurer).toMatchObject({ name: "Example Carrier" });
+    expect(estimate.totals).toMatchObject({
+      grossTotal: 245.5,
+      tax: 15.25,
+    });
+    expect(estimate.jurisdictionEvidence).toMatchObject({
+      explicitState: "CA",
+      ownerAddressState: "CA",
+      ownerAddressZip: "90002",
+      ownerAddressIsRealBlock: true,
+      repairFacilityState: "CA",
+      repairFacilityZip: "90001",
+    });
+    expect(estimate.jurisdictionResolution).toMatchObject({
+      state: "CA",
+      stateCode: "CA",
+      source: "ccc_bms_explicit_state",
+      confidence: "medium",
+    });
+  });
+
+  it("normalizes line items into estimate evidence only", () => {
+    const estimate = normalizeCccBmsEstimate(SAMPLE_XML);
+
+    expect(estimate.lineItems).toHaveLength(1);
+    expect(estimate.lineItems[0]).toMatchObject({
+      sourceSystem: "ccc_secure_share_bms",
+      evidenceLane: "estimate_evidence",
+      sourceConfidence: "high",
+      lineNumber: "10",
+      section: "Front Lamps",
+      operation: "Replace",
+      description: "Headlamp assembly",
+      partNumber: "HL-123",
+      partType: "OEM",
+      quantity: 1,
+      laborHours: 0.8,
+      unitPrice: 245.5,
+      extendedAmount: 245.5,
+      tax: 15.25,
+      includedFlag: false,
+      manualEntry: true,
+      rawCategory: "Front Lamps",
+      sourcePath: "/VehicleDamageEstimateAddRq/EstimateLineItem[1]",
+      parseWarnings: [],
+    });
+  });
+
+  it("does not throw on missing optional fields and returns parseWarnings and limitations", () => {
+    const estimate = normalizeCccBmsEstimate(
+      "<VehicleDamageEstimateAddRq><RqUID>rq</RqUID></VehicleDamageEstimateAddRq>"
+    );
 
     expect(estimate.rqUid).toBe("rq");
-    expect(estimate.vehicleReconciliationInput).toBeNull();
     expect(estimate.lineItems).toEqual([]);
-    expect(estimate.warnings).toContain("No CCC BMS line item blocks were found.");
+    expect(estimate.parseWarnings).toContain("No CCC BMS line item blocks were found.");
     expect(estimate.limitations).toEqual(
       expect.arrayContaining([
         "Claim number was not found in the CCC BMS XML.",
@@ -70,24 +179,11 @@ describe("bmsEstimateNormalizer", () => {
         "Line items were not found in recognized CCC/CIECA BMS line item blocks.",
       ])
     );
-  });
-
-  it("returns AI-safe context that does not treat CCC as citation authority", () => {
-    const estimate = normalizeCccBmsEstimate(SAMPLE_XML);
-
-    expect(estimate.evidenceBoundary.authorityBoundary).toContain(
-      "estimate-source evidence only"
-    );
-    expect(estimate.aiContext.prohibitedProofCategories).toEqual(
-      expect.arrayContaining([
-        "oem_required_procedure",
-        "p_page_inclusion_exclusion",
-        "deg_inquiry_support",
-        "legal_or_regulatory_obligation",
-        "policy_coverage_or_exclusion",
-        "carrier_violation",
-      ])
-    );
+    expect(estimate.vehicle.decoded).toMatchObject({
+      attempted: false,
+      source: "not_attempted",
+      confidence: "unknown",
+    });
   });
 
   it("never logs raw XML", () => {
