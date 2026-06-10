@@ -135,6 +135,18 @@ export async function POST(request: Request) {
         : [];
 
     if (!resolvedSelections.length) {
+      if (!sourceDocumentId && sourceDocuments.filter((document) =>
+        isPdfDocument(document.type, document.filename) && Boolean(document.imageDataUrl)
+      ).length > 1) {
+        return NextResponse.json(
+          {
+            error: "Estimate source selection is ambiguous.",
+            userMessage: "Please choose the carrier or shop source PDF for the annotated Citation Density estimate.",
+            targetEstimate,
+          },
+          { status: 400 }
+        );
+      }
       return missingSourcePdfResponse();
     }
 

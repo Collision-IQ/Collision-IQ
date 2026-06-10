@@ -63,6 +63,24 @@ export type CitationDensityAuthority = {
   note?: string;
 };
 
+export type CitationDensityEmbeddedEstimateLink = {
+  sourceDocumentId?: string;
+  pageNumber?: number | null;
+  lineNumber?: string | null;
+  estimateRole: CitationDensityEstimateRole | "unknown";
+  nearbyOperation?: string | null;
+  redactedUrl: string;
+  retrievalStatus:
+    | "retrieved"
+    | "parsed"
+    | "inaccessible"
+    | "skipped"
+    | "expired"
+    | "blocked"
+    | "not_fetched";
+  authorityStatus: "reviewed_authority" | "referenced_not_produced";
+};
+
 export type CitationDensityFinding = {
   id: string;
   operationLabel: string;
@@ -132,6 +150,7 @@ export type CitationDensityFinding = {
   verifiedAuthorityCount: number;
   missingAuthorityTypes: string[];
   bestAvailableAuthority?: CitationDensityAuthority;
+  embeddedEstimateLinks?: CitationDensityEmbeddedEstimateLink[];
   missingAuthority?: string[];
   citationLabel?: string;
   currentSupportSummary: string;

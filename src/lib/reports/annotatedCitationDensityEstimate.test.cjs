@@ -34,6 +34,9 @@ const {
   buildAnnotatedCitationDensityEstimatePdf,
   dataUrlToPdfBytes,
 } = require("./annotatedCitationDensityEstimate.ts");
+const {
+  detectEmbeddedEstimateLinks,
+} = require("../ai/builders/estimateScrubberPdfBuilder.ts");
 
 async function createSourcePdf() {
   const doc = await PDFDocument.create();
@@ -136,6 +139,47 @@ async function run(name, test) {
     assert.equal(dataUrlToPdfBytes("data:text/plain;base64,SGVsbG8="), null);
   });
 
+  await run("Conestoga Audi line 2 OE docs link is detected", async () => {
+    const links = detectEmbeddedEstimateLinks({
+      text: "Line 2 OE docs https://secure.example.com/oe-docs/audi/procedure?id=2",
+      estimateRole: "carrier",
+      lineNumber: "2",
+      nearbyOperation: "OE docs",
+    });
+
+    assert.equal(links.length, 1);
+    assert.equal(links[0].lineNumber, "2");
+    assert.equal(links[0].estimateRole, "carrier");
+    assert.match(links[0].redactedUrl, /secure\.example\.com\/oe-docs\/audi\/procedure/);
+  });
+
+  await run("Conestoga Audi line 39 REVVAdas link is detected", async () => {
+    const links = detectEmbeddedEstimateLinks({
+      text: "Line 39 REVVAdas Report https://reports.example.com/revvadas/adas-report/39?token=secret",
+      estimateRole: "shop",
+      lineNumber: "39",
+      nearbyOperation: "REVVAdas Report",
+    });
+
+    assert.equal(links.length, 1);
+    assert.equal(links[0].lineNumber, "39");
+    assert.equal(links[0].estimateRole, "shop");
+    assert.match(links[0].nearbyOperation, /REVVAdas Report/);
+    assert.doesNotMatch(links[0].redactedUrl, /token=secret/);
+  });
+
+  await run("link-present-but-not-retrieved becomes referenced_not_produced", async () => {
+    const links = detectEmbeddedEstimateLinks({
+      text: "Line 2 OE docs https://secure.example.com/oe-docs/audi/procedure?id=2",
+      estimateRole: "carrier",
+      lineNumber: "2",
+      nearbyOperation: "OE docs",
+    });
+
+    assert.equal(links[0].retrievalStatus, "not_fetched");
+    assert.equal(links[0].authorityStatus, "referenced_not_produced");
+  });
+
   await run("annotated estimate matches anchors, adds only legend pages, and labels proof buckets", async () => {
     const sourcePdfBytes = await createSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
@@ -154,7 +198,7 @@ async function run(name, test) {
     assert.match(text, /Finding #:/);
     assert.match(text, /Label:/);
     assert.match(text, /Citation Density:/);
-    assert.match(text, /Carrier issue:/);
+    assert.match(text, /Estimate line:/);
     assert.match(text, /Current support:/);
     assert.match(text, /Missing proof:/);
     assert.match(text, /Next action:/);
@@ -343,5 +387,45 @@ async function run(name, test) {
     assert.match(text, /Best authority:/);
     assert.match(text, /Reviewed calibration certificate/);
     assert.match(text, /Missing authority:/);
+  });
+
+  await run("non-ADAS operations are not labeled NEEDS ADAS by default", async () => {
+    const sourcePdfBytes = await createSourcePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      findings: [
+        baseFinding({
+          id: "base-coat",
+          operationLabel: "Base Coat tint and blend",
+          category: "refinish",
+          citationLabel: undefined,
+          carrierEvidence: {
+            lineNumber: "13",
+            description: "Refinish labor 2.0 hrs $180.00",
+            amount: 180,
+            laborHours: 2,
+            sourceLabel: "Carrier estimate",
+          },
+          citationStatus: {
+            oem: "not_applicable",
+            adas: "needed",
+            pPages: "not_found",
+            scrs: "not_applicable",
+            deg: "not_applicable",
+            nhtsa: "not_applicable",
+            stateRegulation: "not_applicable",
+            policy: "not_applicable",
+            invoiceOrCompletionProof: "needed",
+            photoOrTeardownProof: "not_applicable",
+          },
+          missingAuthorityTypes: ["invoiceOrCompletionProof"],
+        }),
+      ],
+      request: { includeLegend: false, annotationMode: "both" },
+    });
+    const text = await extractPdfText(result.bytes);
+
+    assert.doesNotMatch(text, /Label:\s*NEEDS ADAS/);
+    assert.match(text, /Label:\s*NEEDS INVOICE/);
   });
 })();

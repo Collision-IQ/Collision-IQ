@@ -11,6 +11,7 @@ import {
   type ExportLineComparison,
 } from "./exportTemplates";
 import type {
+  CitationDensityEmbeddedEstimateLink,
   CitationDensityFinding,
   CitationSupportStatus,
   EstimateScrubCitationGapBucket,
@@ -704,13 +705,21 @@ function buildCitationDensityFindingFromScrubFinding(params: {
   comparison: { shopLine?: string; carrierLine?: string; difference?: string } | null;
   sourceRefs: string[];
 }): CitationDensityFinding {
-  const text = `${params.finding.operation} ${params.finding.status} ${params.finding.whyItMatters} ${params.finding.recommendedRevision}`;
-  const citationStatus = buildCitationSupportStatus(params.finding.sources, params.finding.citationGapBucket, text);
-  const verifiedAuthorityCount = countVerifiedAuthoritySources(params.finding.sources);
+  const sourceText = `${params.sourceRefs.join(" ")} ${params.comparison?.shopLine ?? ""} ${params.comparison?.carrierLine ?? ""} ${params.anchor.text}`;
+  const text = `${params.finding.operation} ${params.finding.status} ${params.finding.whyItMatters} ${params.finding.recommendedRevision} ${sourceText}`;
+  const embeddedEstimateLinks = detectEmbeddedEstimateLinks({
+    text: sourceText,
+    estimateRole: params.anchor.sourceRole === "shop" || params.anchor.sourceRole === "carrier" ? params.anchor.sourceRole : "unknown",
+    lineNumber: params.anchor.lineNumber > 0 ? String(params.anchor.lineNumber) : extractLineNumberFromText(params.anchor.text),
+    nearbyOperation: params.finding.operation,
+  });
+  const sources = mergeEmbeddedLinkSources(params.finding.sources, embeddedEstimateLinks);
+  const citationStatus = buildCitationSupportStatus(sources, params.finding.citationGapBucket, text);
+  const verifiedAuthorityCount = countVerifiedAuthoritySources(sources);
   const missingAuthorityTypes = buildMissingAuthorityTypes(citationStatus);
-  const bestAvailableAuthority = resolveBestAvailableAuthority(params.finding.sources, citationStatus);
+  const bestAvailableAuthority = resolveBestAvailableAuthority(sources, citationStatus);
   const limitations = buildCitationFindingLimitations(params.finding, citationStatus);
-  const citationLabel = resolveCitationLabel(citationStatus, missingAuthorityTypes, params.finding.citationGapBucket);
+  const citationLabel = resolveCitationLabel(citationStatus, missingAuthorityTypes, params.finding.citationGapBucket, text);
 
   return {
     id: params.id,
@@ -747,6 +756,7 @@ function buildCitationDensityFindingFromScrubFinding(params: {
     verifiedAuthorityCount,
     missingAuthorityTypes,
     bestAvailableAuthority,
+    embeddedEstimateLinks,
     missingAuthority: missingAuthorityTypes,
     citationLabel,
     currentSupportSummary: formatCitationCurrentSupport(params.sourceRefs, params.supportStatus),
@@ -772,10 +782,16 @@ function buildCitationDensityFindingFromComparison(params: {
   higherLine?: string;
 }): CitationDensityFinding {
   const text = `${params.title} ${params.row.category ?? ""} ${params.row.operation ?? ""} ${params.row.partName ?? ""} ${params.row.delta ?? ""} ${params.row.notes?.join(" ") ?? ""}`;
-  const citationStatus = buildCitationSupportStatus([], params.citationGapBucket, text);
+  const embeddedEstimateLinks = detectEmbeddedEstimateLinks({
+    text: `${text} ${formatComparisonValue(params.row.lhsValue)} ${formatComparisonValue(params.row.rhsValue)} ${params.lowerLine ?? ""} ${params.higherLine ?? ""}`,
+    estimateRole: "unknown",
+    nearbyOperation: params.title,
+  });
+  const sources = mergeEmbeddedLinkSources([], embeddedEstimateLinks);
+  const citationStatus = buildCitationSupportStatus(sources, params.citationGapBucket, text);
   const missingAuthorityTypes = buildMissingAuthorityTypes(citationStatus);
-  const bestAvailableAuthority = resolveBestAvailableAuthority([], citationStatus);
-  const citationLabel = resolveCitationLabel(citationStatus, missingAuthorityTypes, params.citationGapBucket);
+  const bestAvailableAuthority = resolveBestAvailableAuthority(sources, citationStatus);
+  const citationLabel = resolveCitationLabel(citationStatus, missingAuthorityTypes, params.citationGapBucket, text);
 
   return {
     id: params.id,
@@ -806,6 +822,7 @@ function buildCitationDensityFindingFromComparison(params: {
     verifiedAuthorityCount: 0,
     missingAuthorityTypes,
     bestAvailableAuthority,
+    embeddedEstimateLinks,
     missingAuthority: missingAuthorityTypes,
     citationLabel,
     currentSupportSummary: "Estimate comparison evidence only; no authority source is attached to this comparison row.",
@@ -854,8 +871,7 @@ function buildCitationSupportStatus(
   bucket: EstimateScrubCitationGapBucket,
   text: string
 ): CitationDensityFinding["citationStatus"] {
-  const adasNeeded = /adas|calibration|scan|radar|camera|aim|blind spot|sensor/i.test(text) ||
-    bucket === "needs_invoice_or_completion_proof";
+  const adasNeeded = isAdasRelatedCitationText(text);
   return {
     oem: resolveCitationSupportStatus(sources, /DriveOEM|oem|oe\b|procedure|repair manual/i, bucket === "needs_oem_procedure"),
     oemPositionStatement: resolveCitationSupportStatus(sources, /PositionStatement|position statement/i, /position statement/i.test(text)),
@@ -939,19 +955,93 @@ function resolveBestAvailableAuthority(
 function resolveCitationLabel(
   status: CitationDensityFinding["citationStatus"],
   missingAuthorityTypes: string[],
-  bucket: EstimateScrubCitationGapBucket
+  bucket: EstimateScrubCitationGapBucket,
+  text = ""
 ) {
   if (bucket === "weak_do_not_lead") return "WEAK — DO NOT LEAD";
   if (status.oem === "verified") return "VERIFIED OEM";
-  if (status.adas === "verified" || status.invoiceOrCompletionProof === "verified" && status.oem === "not_applicable") return "VERIFIED ADAS";
+  if (status.adas === "verified" || status.invoiceOrCompletionProof === "verified" && status.oem === "not_applicable" && isAdasRelatedCitationText(text)) return "VERIFIED ADAS";
   if (status.stateRegulation === "verified" || status.policy === "verified") return "VERIFIED LEGAL";
   if (Object.values(status).some((value) => value === "referenced_not_produced")) return "REFERENCED / NOT PRODUCED";
-  if (status.adas === "needed") return "NEEDS ADAS";
+  if (status.adas === "needed" && isAdasRelatedCitationText(text)) return "NEEDS ADAS";
   if (status.oem === "needed") return "NEEDS OEM";
   if (status.pPages === "needed") return "NEEDS P-PAGE";
   if (status.invoiceOrCompletionProof === "needed") return "NEEDS INVOICE";
   if (missingAuthorityTypes.length > 0) return "REFERENCED / NOT PRODUCED";
   return "ESTIMATE GAP ONLY";
+}
+
+function isAdasRelatedCitationText(value: string): boolean {
+  return /\b(?:adas|calibration|calibrate|aim|scan|diagnostic|dtc|radar|camera|sensor|blind spot|lane|aeb|srs|airbag|restraint|electrical|module|pre[-\s]?scan|post[-\s]?scan)\b/i.test(value);
+}
+
+export function detectEmbeddedEstimateLinks(params: {
+  text: string;
+  estimateRole: CitationDensityEmbeddedEstimateLink["estimateRole"];
+  sourceDocumentId?: string;
+  pageNumber?: number | null;
+  lineNumber?: string | null;
+  nearbyOperation?: string | null;
+}): CitationDensityEmbeddedEstimateLink[] {
+  const links: CitationDensityEmbeddedEstimateLink[] = [];
+  const seen = new Set<string>();
+  for (const match of params.text.matchAll(/\bhttps?:\/\/[^\s<>"')\]]+/gi)) {
+    const rawUrl = match[0].replace(/[.,;:!?]+$/g, "");
+    if (!rawUrl || seen.has(rawUrl)) continue;
+    seen.add(rawUrl);
+    const retrievalStatus = inferEmbeddedLinkRetrievalStatus(params.text, rawUrl);
+    links.push({
+      sourceDocumentId: params.sourceDocumentId,
+      pageNumber: params.pageNumber ?? null,
+      lineNumber: params.lineNumber ?? null,
+      estimateRole: params.estimateRole,
+      nearbyOperation: cleanCustomerFacingEstimateLine(params.nearbyOperation) || null,
+      redactedUrl: redactEmbeddedEstimateUrl(rawUrl),
+      retrievalStatus,
+      authorityStatus: retrievalStatus === "retrieved" || retrievalStatus === "parsed"
+        ? "reviewed_authority"
+        : "referenced_not_produced",
+    });
+  }
+  return links;
+}
+
+function inferEmbeddedLinkRetrievalStatus(
+  surroundingText: string,
+  url: string
+): CitationDensityEmbeddedEstimateLink["retrievalStatus"] {
+  const window = surroundingText.slice(Math.max(0, surroundingText.indexOf(url) - 90), surroundingText.indexOf(url) + url.length + 120);
+  if (/retrieved|parsed|reviewed|extracted content|content retrieved/i.test(window)) return "retrieved";
+  if (/expired/i.test(window)) return "expired";
+  if (/blocked|forbidden|access denied/i.test(window)) return "blocked";
+  if (/inaccessible|unavailable|failed|not accessible/i.test(window)) return "inaccessible";
+  if (/skipped/i.test(window)) return "skipped";
+  return "not_fetched";
+}
+
+function mergeEmbeddedLinkSources(
+  sources: SourceCitation[],
+  links: CitationDensityEmbeddedEstimateLink[]
+): SourceCitation[] {
+  if (!links.length) return sources;
+  const linkSources = links.map((link, index) => ({
+    title: `Estimate embedded link ${index + 1}`,
+    sourceType: "UploadedDocument" as const,
+    url: link.redactedUrl,
+    note: `embedded link; ${link.authorityStatus}; retrievalStatus=${link.retrievalStatus}; nearby=${link.nearbyOperation ?? "estimate line"}`,
+    verified: link.authorityStatus === "reviewed_authority",
+  }));
+  return [...sources, ...linkSources];
+}
+
+function redactEmbeddedEstimateUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const path = url.pathname.length > 80 ? `${url.pathname.slice(0, 77)}...` : url.pathname;
+    return `${url.protocol}//${url.host}${path}`;
+  } catch {
+    return value.replace(/([?&][^=]+)=([^&]+)/g, "$1=[REDACTED]");
+  }
 }
 
 function buildAuthorityNote(
@@ -968,7 +1058,11 @@ function buildAuthorityNote(
 function isReviewedAuthoritySource(source: SourceCitation): boolean {
   if (!source.verified) return false;
   if (!isAuthoritySource(source)) return false;
-  if (/EstimateParser|CCC|BMS|Mitchell|Audatex|estimate link|embedded link/i.test(`${source.sourceType} ${source.title} ${source.note ?? ""}`)) return false;
+  const sourceText = `${source.sourceType} ${source.title} ${source.note ?? ""}`;
+  if (/EstimateParser|CCC|BMS|Mitchell|Audatex|estimate link|embedded link/i.test(sourceText) &&
+    !/reviewed_authority|retrievalStatus=(?:retrieved|parsed)/i.test(sourceText)) {
+    return false;
+  }
   if (source.sourceType === "InternetOEM") return false;
   if (source.sourceType === "UploadedDocument" && !hasParsedAuthorityContent(source)) return false;
   if (/legal|state regulation|DOI|statute|regulation|policy/i.test(`${source.title} ${source.note ?? ""}`) &&

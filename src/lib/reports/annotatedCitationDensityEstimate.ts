@@ -657,8 +657,9 @@ function buildCalloutLines(
     `Finding #: ${number}`,
     `Label: ${label}`,
     `Citation Density: ${finding.citationDensityScore}/100`,
-    `Carrier issue: ${sanitize(finding.operationLabel)}`,
+    `Estimate line: ${sanitize(formatEstimateLineForCallout(finding, estimateRole))}`,
     `Best authority: ${sanitize(formatBestAuthority(finding))}`,
+    ...formatEmbeddedLinkLines(finding).map((line) => `Estimate link: ${sanitize(line)}`),
     `Missing authority: ${sanitize(formatMissingAuthority(finding))}`,
     `Estimate note: ${sanitize(buildRoleCalloutNote(finding, estimateRole))}`,
     `Current support: ${sanitize(finding.currentSupportSummary)}`,
@@ -667,19 +668,51 @@ function buildCalloutLines(
   ];
 }
 
+function formatEstimateLineForCallout(
+  finding: CitationDensityFinding,
+  estimateRole: "carrier" | "shop" | "selected"
+) {
+  const evidence = estimateRole === "shop"
+    ? finding.shopEvidence ?? finding.carrierEvidence
+    : estimateRole === "carrier"
+      ? finding.carrierEvidence ?? finding.shopEvidence
+      : finding.carrierEvidence ?? finding.shopEvidence;
+  const linePrefix = evidence?.lineNumber ? `Line ${evidence.lineNumber}: ` : "";
+  return `${linePrefix}${evidence?.description ?? finding.operationLabel}`;
+}
+
+function formatEmbeddedLinkLines(finding: CitationDensityFinding) {
+  return (finding.embeddedEstimateLinks ?? [])
+    .slice(0, 2)
+    .map((link) => `${link.redactedUrl} (${link.retrievalStatus}; ${link.authorityStatus})`);
+}
+
 function getProofBucketLabel(finding: CitationDensityFinding): string {
   if (finding.citationLabel) return finding.citationLabel;
   if (finding.citationStatus.oem === "verified") return "VERIFIED OEM";
   if (finding.citationStatus.adas === "verified") return "VERIFIED ADAS";
   if (finding.citationStatus.stateRegulation === "verified" || finding.citationStatus.policy === "verified") return "VERIFIED LEGAL";
   if (Object.values(finding.citationStatus).some((value) => value === "referenced_not_produced")) return "REFERENCED / NOT PRODUCED";
-  if (finding.citationStatus.adas === "needed") return "NEEDS ADAS";
+  if (finding.citationStatus.adas === "needed" && isAdasRelatedFinding(finding)) return "NEEDS ADAS";
   if (finding.estimateGapType === "weak_do_not_lead") return "WEAK — DO NOT LEAD";
   if (finding.estimateGapType === "referenced_not_produced") return "REFERENCED / NOT PRODUCED";
   if (finding.citationStatus.invoiceOrCompletionProof === "needed") return "NEEDS INVOICE";
   if (finding.citationStatus.oem === "needed" || finding.missingAuthorityTypes.some((item) => /oem/i.test(item))) return "NEEDS OEM";
   if (finding.citationStatus.pPages === "needed" || finding.missingAuthorityTypes.some((item) => /p-?page/i.test(item))) return "NEEDS P-PAGE";
   return "ESTIMATE GAP ONLY";
+}
+
+function isAdasRelatedFinding(finding: CitationDensityFinding) {
+  const text = [
+    finding.category,
+    finding.operationLabel,
+    finding.carrierEvidence?.description,
+    finding.shopEvidence?.description,
+    finding.currentSupportSummary,
+    finding.missingProofSummary,
+    finding.recommendedNextAction,
+  ].join(" ");
+  return /\b(?:adas|calibration|calibrate|aim|scan|diagnostic|dtc|radar|camera|sensor|blind spot|lane|aeb|srs|airbag|restraint|electrical|module|pre[-\s]?scan|post[-\s]?scan)\b/i.test(text);
 }
 
 function formatBestAuthority(finding: CitationDensityFinding) {
