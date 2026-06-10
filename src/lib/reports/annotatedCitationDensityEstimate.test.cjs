@@ -303,4 +303,45 @@ async function run(name, test) {
     assert.match(text, /WEAK — DO NOT LEAD/);
     assert.doesNotMatch(text, /WEAK - DO NOT LEAD/);
   });
+
+  await run("verified and ADAS labels come from authority status, not estimate gaps", async () => {
+    const sourcePdfBytes = await createSourcePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      findings: [
+        baseFinding({
+          id: "verified-adas",
+          citationLabel: "VERIFIED ADAS",
+          bestAvailableAuthority: {
+            type: "adas_procedure",
+            status: "verified",
+            title: "Reviewed calibration certificate",
+            sourceType: "UploadedDocument",
+            confidence: "high",
+          },
+          missingAuthority: [],
+          citationStatus: {
+            oem: "not_applicable",
+            adas: "verified",
+            pPages: "not_applicable",
+            scrs: "not_applicable",
+            deg: "not_applicable",
+            nhtsa: "not_applicable",
+            stateRegulation: "not_applicable",
+            policy: "not_applicable",
+            invoiceOrCompletionProof: "verified",
+            photoOrTeardownProof: "not_applicable",
+          },
+          missingAuthorityTypes: [],
+        }),
+      ],
+      request: { includeLegend: true, annotationMode: "both" },
+    });
+    const text = await extractPdfText(result.bytes);
+
+    assert.match(text, /VERIFIED ADAS/);
+    assert.match(text, /Best authority:/);
+    assert.match(text, /Reviewed calibration certificate/);
+    assert.match(text, /Missing authority:/);
+  });
 })();

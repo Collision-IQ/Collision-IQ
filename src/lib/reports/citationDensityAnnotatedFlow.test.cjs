@@ -344,3 +344,12 @@ run("missing source PDF returns clear user-facing missing-source message data", 
   assert.equal(NO_SOURCE_PDF_ERROR, "No original estimate PDF was found for annotation.");
   assert.match(NO_SOURCE_PDF_USER_MESSAGE, /select or upload the estimate PDF/i);
 });
+
+run("authority priority model does not treat estimate parser, CCC, or internet fallback as verified authority", () => {
+  const source = fs.readFileSync(path.join(process.cwd(), "src/lib/ai/builders/estimateScrubberPdfBuilder.ts"), "utf8");
+
+  assert.match(source, /function isReviewedAuthoritySource/);
+  assert.match(source, /EstimateParser\|CCC\|BMS\|Mitchell\|Audatex/);
+  assert.match(source, /source\.sourceType === "InternetOEM"\)\s+return false/);
+  assert.match(source, /Estimate evidence identifies the dispute; it is not OEM, P-page, DEG, legal, policy, or completion authority/);
+});

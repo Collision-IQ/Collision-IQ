@@ -58,7 +58,11 @@ const CCC_LIMITATION_TEXT =
   "The CCC estimate data supports the existence of this line-item difference. OEM/P-page/DEG/legal support has not yet been verified.";
 
 const LABELS = [
+  "VERIFIED OEM",
+  "VERIFIED ADAS",
+  "VERIFIED LEGAL",
   "NEEDS OEM",
+  "NEEDS ADAS",
   "NEEDS P-PAGE",
   "NEEDS INVOICE",
   "REFERENCED / NOT PRODUCED",
@@ -453,10 +457,10 @@ function drawFindingAnnotation(
         ? anchor.x - boxWidth - 8
         : 18;
     const boxY = hasRightMargin || hasLeftMargin
-      ? clamp(highlightY - 74, 26, pageHeight - 120)
+      ? clamp(highlightY - 86, 26, pageHeight - 142)
       : 26;
     const finalBoxWidth = hasRightMargin || hasLeftMargin ? boxWidth : pageWidth - 36;
-    const boxHeight = hasRightMargin || hasLeftMargin ? 108 : 96;
+    const boxHeight = hasRightMargin || hasLeftMargin ? 130 : 110;
     const label = getProofBucketLabel(finding);
     const lines = buildCalloutLines(finding, number, label, options.redactSensitive, options.estimateRole);
 
@@ -485,7 +489,7 @@ function drawFindingAnnotation(
       boldFont: options.boldFont,
       size: 6.7,
       lineHeight: 8,
-      maxLines: 12,
+      maxLines: 15,
     });
   }
 }
@@ -654,6 +658,8 @@ function buildCalloutLines(
     `Label: ${label}`,
     `Citation Density: ${finding.citationDensityScore}/100`,
     `Carrier issue: ${sanitize(finding.operationLabel)}`,
+    `Best authority: ${sanitize(formatBestAuthority(finding))}`,
+    `Missing authority: ${sanitize(formatMissingAuthority(finding))}`,
     `Estimate note: ${sanitize(buildRoleCalloutNote(finding, estimateRole))}`,
     `Current support: ${sanitize(finding.currentSupportSummary)}`,
     `Missing proof: ${sanitize(finding.missingProofSummary)}`,
@@ -662,12 +668,31 @@ function buildCalloutLines(
 }
 
 function getProofBucketLabel(finding: CitationDensityFinding): string {
+  if (finding.citationLabel) return finding.citationLabel;
+  if (finding.citationStatus.oem === "verified") return "VERIFIED OEM";
+  if (finding.citationStatus.adas === "verified") return "VERIFIED ADAS";
+  if (finding.citationStatus.stateRegulation === "verified" || finding.citationStatus.policy === "verified") return "VERIFIED LEGAL";
+  if (Object.values(finding.citationStatus).some((value) => value === "referenced_not_produced")) return "REFERENCED / NOT PRODUCED";
+  if (finding.citationStatus.adas === "needed") return "NEEDS ADAS";
   if (finding.estimateGapType === "weak_do_not_lead") return "WEAK — DO NOT LEAD";
   if (finding.estimateGapType === "referenced_not_produced") return "REFERENCED / NOT PRODUCED";
   if (finding.citationStatus.invoiceOrCompletionProof === "needed") return "NEEDS INVOICE";
   if (finding.citationStatus.oem === "needed" || finding.missingAuthorityTypes.some((item) => /oem/i.test(item))) return "NEEDS OEM";
   if (finding.citationStatus.pPages === "needed" || finding.missingAuthorityTypes.some((item) => /p-?page/i.test(item))) return "NEEDS P-PAGE";
   return "ESTIMATE GAP ONLY";
+}
+
+function formatBestAuthority(finding: CitationDensityFinding) {
+  const authority = finding.bestAvailableAuthority;
+  if (!authority) {
+    return "Estimate evidence only; no reviewed authority attached.";
+  }
+  return `${authority.title} (${authority.status}; ${authority.type}; ${authority.confidence} confidence)`;
+}
+
+function formatMissingAuthority(finding: CitationDensityFinding) {
+  const missing = finding.missingAuthority?.length ? finding.missingAuthority : finding.missingAuthorityTypes;
+  return missing.length ? missing.join(", ") : "None identified from current Citation Density review.";
 }
 
 function buildRoleCalloutNote(

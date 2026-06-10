@@ -708,7 +708,9 @@ function buildCitationDensityFindingFromScrubFinding(params: {
   const citationStatus = buildCitationSupportStatus(params.finding.sources, params.finding.citationGapBucket, text);
   const verifiedAuthorityCount = countVerifiedAuthoritySources(params.finding.sources);
   const missingAuthorityTypes = buildMissingAuthorityTypes(citationStatus);
+  const bestAvailableAuthority = resolveBestAvailableAuthority(params.finding.sources, citationStatus);
   const limitations = buildCitationFindingLimitations(params.finding, citationStatus);
+  const citationLabel = resolveCitationLabel(citationStatus, missingAuthorityTypes, params.finding.citationGapBucket);
 
   return {
     id: params.id,
@@ -744,6 +746,9 @@ function buildCitationDensityFindingFromScrubFinding(params: {
     citationDensityScore: params.citationDensityScore,
     verifiedAuthorityCount,
     missingAuthorityTypes,
+    bestAvailableAuthority,
+    missingAuthority: missingAuthorityTypes,
+    citationLabel,
     currentSupportSummary: formatCitationCurrentSupport(params.sourceRefs, params.supportStatus),
     missingProofSummary: summarizeMissingProofTypes(missingAuthorityTypes, params.finding.citationGapBucket),
     recommendedNextAction: buildEstimatorFacingRequest(params.finding, params.category),
@@ -769,6 +774,8 @@ function buildCitationDensityFindingFromComparison(params: {
   const text = `${params.title} ${params.row.category ?? ""} ${params.row.operation ?? ""} ${params.row.partName ?? ""} ${params.row.delta ?? ""} ${params.row.notes?.join(" ") ?? ""}`;
   const citationStatus = buildCitationSupportStatus([], params.citationGapBucket, text);
   const missingAuthorityTypes = buildMissingAuthorityTypes(citationStatus);
+  const bestAvailableAuthority = resolveBestAvailableAuthority([], citationStatus);
+  const citationLabel = resolveCitationLabel(citationStatus, missingAuthorityTypes, params.citationGapBucket);
 
   return {
     id: params.id,
@@ -798,6 +805,9 @@ function buildCitationDensityFindingFromComparison(params: {
     citationDensityScore: params.citationDensityScore,
     verifiedAuthorityCount: 0,
     missingAuthorityTypes,
+    bestAvailableAuthority,
+    missingAuthority: missingAuthorityTypes,
+    citationLabel,
     currentSupportSummary: "Estimate comparison evidence only; no authority source is attached to this comparison row.",
     missingProofSummary: summarizeMissingProofTypes(missingAuthorityTypes, params.citationGapBucket),
     recommendedNextAction: buildComparisonEstimatorText(params.row, params.category),
@@ -844,8 +854,12 @@ function buildCitationSupportStatus(
   bucket: EstimateScrubCitationGapBucket,
   text: string
 ): CitationDensityFinding["citationStatus"] {
+  const adasNeeded = /adas|calibration|scan|radar|camera|aim|blind spot|sensor/i.test(text) ||
+    bucket === "needs_invoice_or_completion_proof";
   return {
-    oem: resolveCitationSupportStatus(sources, /DriveOEM|PositionStatement|oem|procedure|repair manual|position statement/i, bucket === "needs_oem_procedure"),
+    oem: resolveCitationSupportStatus(sources, /DriveOEM|oem|oe\b|procedure|repair manual/i, bucket === "needs_oem_procedure"),
+    oemPositionStatement: resolveCitationSupportStatus(sources, /PositionStatement|position statement/i, /position statement/i.test(text)),
+    adas: resolveCitationSupportStatus(sources, /adas|calibration requirement|scan requirement|radar|camera|aim|blind spot|calibration certificate|scan report/i, adasNeeded),
     pPages: resolveCitationSupportStatus(sources, /p-?page|estimating guide|included|not included|database/i, bucket === "needs_p_page_support"),
     scrs: resolveCitationSupportStatus(sources, /SCRS|guide to complete repair planning/i, /scrs|guide to complete repair planning/i.test(text)),
     deg: resolveCitationSupportStatus(sources, /DEG|database enhancement gateway/i, /deg|database/i.test(text)),
@@ -863,13 +877,114 @@ function resolveCitationSupportStatus(
   needed: boolean
 ): CitationSupportStatus {
   const matching = sources.filter((source) => pattern.test(`${source.sourceType} ${source.title} ${source.note ?? ""}`));
-  if (matching.some((source) => source.verified && isAuthoritySource(source))) return "verified";
+  if (matching.some((source) => isReviewedAuthoritySource(source))) return "verified";
   if (matching.length > 0) return "referenced_not_produced";
   return needed ? "needed" : "not_applicable";
 }
 
 function countVerifiedAuthoritySources(sources: SourceCitation[]): number {
-  return sources.filter((source) => source.verified && isAuthoritySource(source)).length;
+  return sources.filter(isReviewedAuthoritySource).length;
+}
+
+function resolveBestAvailableAuthority(
+  sources: SourceCitation[],
+  status: CitationDensityFinding["citationStatus"]
+): CitationDensityFinding["bestAvailableAuthority"] {
+  const priority: Array<{
+    type: NonNullable<CitationDensityFinding["bestAvailableAuthority"]>["type"];
+    key?: keyof CitationDensityFinding["citationStatus"];
+    pattern: RegExp;
+  }> = [
+    { type: "oem_procedure", key: "oem", pattern: /DriveOEM|oem|oe\b|procedure|repair manual/i },
+    { type: "oem_position_statement", key: "oemPositionStatement", pattern: /PositionStatement|position statement/i },
+    { type: "adas_procedure", key: "adas", pattern: /adas|calibration|scan|radar|camera|aim|blind spot|sensor/i },
+    { type: "p_page", key: "pPages", pattern: /p-?page|estimating guide|included|not included/i },
+    { type: "scrs", key: "scrs", pattern: /SCRS|guide to complete repair planning/i },
+    { type: "deg", key: "deg", pattern: /DEG|database enhancement gateway|database/i },
+    { type: "legal", key: "stateRegulation", pattern: /resolved jurisdiction|state regulation|DOI|statute|regulation|unfair claims/i },
+    { type: "invoice_completion", key: "invoiceOrCompletionProof", pattern: /invoice|receipt|completion|final scan|scan report|calibration certificate|alignment printout/i },
+    { type: "online_fallback", pattern: /InternetOEM|internet|online/i },
+  ];
+
+  for (const item of priority) {
+    const source = sources.find((candidate) =>
+      item.pattern.test(`${candidate.sourceType} ${candidate.title} ${candidate.note ?? ""}`) &&
+      (isReviewedAuthoritySource(candidate) || isReferencedAuthoritySource(candidate))
+    );
+    const statusValue: CitationSupportStatus = item.key
+      ? status[item.key] ?? "not_applicable"
+      : source ? "referenced_not_produced" : "not_applicable";
+    if (source && statusValue !== "not_applicable") {
+      return {
+        type: item.type,
+        status: statusValue,
+        title: source.title,
+        sourceType: source.sourceType,
+        confidence: statusValue === "verified" ? "high" : item.type === "online_fallback" ? "low" : "medium",
+        note: buildAuthorityNote(source, item.type, statusValue),
+      };
+    }
+  }
+
+  return {
+    type: "estimate_evidence",
+    status: "referenced_not_produced",
+    title: "Estimate gap evidence",
+    sourceType: "EstimateParser",
+    confidence: "low",
+    note: "Estimate evidence identifies the dispute; it is not OEM, P-page, DEG, legal, policy, or completion authority.",
+  };
+}
+
+function resolveCitationLabel(
+  status: CitationDensityFinding["citationStatus"],
+  missingAuthorityTypes: string[],
+  bucket: EstimateScrubCitationGapBucket
+) {
+  if (bucket === "weak_do_not_lead") return "WEAK — DO NOT LEAD";
+  if (status.oem === "verified") return "VERIFIED OEM";
+  if (status.adas === "verified" || status.invoiceOrCompletionProof === "verified" && status.oem === "not_applicable") return "VERIFIED ADAS";
+  if (status.stateRegulation === "verified" || status.policy === "verified") return "VERIFIED LEGAL";
+  if (Object.values(status).some((value) => value === "referenced_not_produced")) return "REFERENCED / NOT PRODUCED";
+  if (status.adas === "needed") return "NEEDS ADAS";
+  if (status.oem === "needed") return "NEEDS OEM";
+  if (status.pPages === "needed") return "NEEDS P-PAGE";
+  if (status.invoiceOrCompletionProof === "needed") return "NEEDS INVOICE";
+  if (missingAuthorityTypes.length > 0) return "REFERENCED / NOT PRODUCED";
+  return "ESTIMATE GAP ONLY";
+}
+
+function buildAuthorityNote(
+  source: SourceCitation,
+  type: NonNullable<CitationDensityFinding["bestAvailableAuthority"]>["type"],
+  status: CitationSupportStatus
+) {
+  if (type === "online_fallback") return "Internet-derived fallback; do not treat as stronger than case evidence.";
+  if (source.sourceType === "EstimateParser") return "Estimate parser evidence identifies the dispute only; it is not authority.";
+  if (status === "referenced_not_produced") return "Referenced but not produced or not reviewed as parsed content.";
+  return "Reviewed case authority source.";
+}
+
+function isReviewedAuthoritySource(source: SourceCitation): boolean {
+  if (!source.verified) return false;
+  if (!isAuthoritySource(source)) return false;
+  if (/EstimateParser|CCC|BMS|Mitchell|Audatex|estimate link|embedded link/i.test(`${source.sourceType} ${source.title} ${source.note ?? ""}`)) return false;
+  if (source.sourceType === "InternetOEM") return false;
+  if (source.sourceType === "UploadedDocument" && !hasParsedAuthorityContent(source)) return false;
+  if (/legal|state regulation|DOI|statute|regulation|policy/i.test(`${source.title} ${source.note ?? ""}`) &&
+    !/resolved jurisdiction|jurisdiction resolved|verified state|policy\/legal source/i.test(`${source.title} ${source.note ?? ""}`)) {
+    return false;
+  }
+  return true;
+}
+
+function isReferencedAuthoritySource(source: SourceCitation): boolean {
+  return isAuthoritySource(source) || /InternetOEM|internet|online|estimate link|embedded link/i.test(`${source.sourceType} ${source.title} ${source.note ?? ""}`);
+}
+
+function hasParsedAuthorityContent(source: SourceCitation) {
+  return /parsed|retrieved|reviewed|content|procedure|repair manual|invoice|receipt|scan report|calibration certificate|measurement record|teardown|photo|p-?page|SCRS|DEG/i
+    .test(`${source.title} ${source.note ?? ""}`);
 }
 
 function buildMissingAuthorityTypes(status: CitationDensityFinding["citationStatus"]): string[] {
@@ -1522,7 +1637,7 @@ function countCitationStatuses(
   key: keyof CitationDensityFinding["citationStatus"]
 ): Record<CitationSupportStatus, number> {
   return findings.reduce<Record<CitationSupportStatus, number>>((counts, finding) => {
-    counts[finding.citationStatus[key]] += 1;
+    counts[finding.citationStatus[key] ?? "not_applicable"] += 1;
     return counts;
   }, {
     verified: 0,

@@ -44,6 +44,25 @@ export type CitationDensityEstimateLineAnchor = {
   paintHours?: number | null;
 };
 
+export type CitationDensityAuthority = {
+  type:
+    | "oem_procedure"
+    | "adas_procedure"
+    | "oem_position_statement"
+    | "p_page"
+    | "scrs"
+    | "deg"
+    | "legal"
+    | "invoice_completion"
+    | "online_fallback"
+    | "estimate_evidence";
+  status: CitationSupportStatus;
+  title: string;
+  sourceType?: SourceCitation["sourceType"];
+  confidence: "low" | "medium" | "high";
+  note?: string;
+};
+
 export type CitationDensityFinding = {
   id: string;
   operationLabel: string;
@@ -98,6 +117,8 @@ export type CitationDensityFinding = {
   };
   citationStatus: {
     oem: CitationSupportStatus;
+    oemPositionStatement?: CitationSupportStatus;
+    adas?: CitationSupportStatus;
     pPages: CitationSupportStatus;
     scrs: CitationSupportStatus;
     deg: CitationSupportStatus;
@@ -110,6 +131,9 @@ export type CitationDensityFinding = {
   citationDensityScore: number;
   verifiedAuthorityCount: number;
   missingAuthorityTypes: string[];
+  bestAvailableAuthority?: CitationDensityAuthority;
+  missingAuthority?: string[];
+  citationLabel?: string;
   currentSupportSummary: string;
   missingProofSummary: string;
   recommendedNextAction: string;
