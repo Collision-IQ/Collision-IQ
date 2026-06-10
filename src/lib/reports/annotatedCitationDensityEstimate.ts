@@ -46,6 +46,10 @@ type MatchedFinding = {
 
 const SOURCE_BOUNDARY_TEXT =
   "Estimate evidence supports the existence of a difference. It does not automatically prove OEM, P-page, DEG, legal, policy, or carrier-violation authority.";
+const CCC_SOURCE_BOUNDARY_TEXT =
+  "CCC Secure Share source confirms this estimate line was present in the structured estimate data.";
+const CCC_LIMITATION_TEXT =
+  "The CCC estimate data supports the existence of this line-item difference. OEM/P-page/DEG/legal support has not yet been verified.";
 
 const LABELS = [
   "NEEDS OEM",
@@ -53,7 +57,7 @@ const LABELS = [
   "NEEDS INVOICE",
   "REFERENCED / NOT PRODUCED",
   "ESTIMATE GAP ONLY",
-  "WEAK - DO NOT LEAD",
+  "WEAK — DO NOT LEAD",
 ] as const;
 
 const exportCache = new Map<string, { bytes: Uint8Array; filename: string; createdAt: number }>();
@@ -339,7 +343,11 @@ function addLegendPage(pdfDoc: PDFDocument, options: { font: PDFFont; boldFont: 
     font: options.boldFont,
     color: rgb(0.12, 0.14, 0.18),
   });
-  drawWrappedLines(page, [SOURCE_BOUNDARY_TEXT], {
+  drawWrappedLines(page, [
+    SOURCE_BOUNDARY_TEXT,
+    CCC_SOURCE_BOUNDARY_TEXT,
+    CCC_LIMITATION_TEXT,
+  ], {
     x: 48,
     y: height - 84,
     width: width - 96,
@@ -347,10 +355,10 @@ function addLegendPage(pdfDoc: PDFDocument, options: { font: PDFFont; boldFont: 
     boldFont: options.boldFont,
     size: 10,
     lineHeight: 13,
-    maxLines: 4,
+    maxLines: 8,
   });
 
-  let y = height - 145;
+  let y = height - 178;
   for (const label of LABELS) {
     page.drawRectangle({
       x: 48,
@@ -412,7 +420,7 @@ function addUnanchoredAppendix(
 ) {
   let page = pdfDoc.addPage();
   let y = page.getHeight() - 54;
-  page.drawText("Unanchored Findings", {
+  page.drawText("Unanchored Citation Density Findings", {
     x: 48,
     y,
     size: 18,
@@ -447,7 +455,7 @@ function buildCalloutLines(
   redactSensitive: boolean
 ) {
   const sanitize = (value: string) => {
-    const text = value.replace(/\s+/g, " ").trim();
+    const text = normalizeSourceBoundaryText(value.replace(/\s+/g, " ").trim());
     return redactSensitive ? redactAnnotationText(text) : text;
   };
 
@@ -463,7 +471,7 @@ function buildCalloutLines(
 }
 
 function getProofBucketLabel(finding: CitationDensityFinding): string {
-  if (finding.estimateGapType === "weak_do_not_lead") return "WEAK - DO NOT LEAD";
+  if (finding.estimateGapType === "weak_do_not_lead") return "WEAK — DO NOT LEAD";
   if (finding.estimateGapType === "referenced_not_produced") return "REFERENCED / NOT PRODUCED";
   if (finding.citationStatus.invoiceOrCompletionProof === "needed") return "NEEDS INVOICE";
   if (finding.citationStatus.oem === "needed" || finding.missingAuthorityTypes.some((item) => /oem/i.test(item))) return "NEEDS OEM";
@@ -472,12 +480,19 @@ function getProofBucketLabel(finding: CitationDensityFinding): string {
 }
 
 function redactAnnotationText(value: string): string {
-  return redactDownloadContent(value)
+  return normalizeSourceBoundaryText(redactDownloadContent(value))
     .replace(/\b[A-HJ-NPR-Z0-9]{11}\*{6}\b/g, "[REDACTED_VIN]")
     .replace(/\b[A-HJ-NPR-Z0-9]{17}\b/g, "[REDACTED_VIN]")
     .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, "[REDACTED_EMAIL]")
     .replace(/\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g, "[REDACTED_PHONE]")
     .replace(/\b\d{1,6}\s+[A-Za-z0-9 .'-]+\s+(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Ln|Lane|Blvd|Boulevard|Ct|Court)\b\.?/gi, "[REDACTED_ADDRESS]");
+}
+
+function normalizeSourceBoundaryText(value: string) {
+  return value
+    .replace(/\bEstimate documentation the existence of a difference\.?/gi, "Estimate evidence supports the existence of a difference.")
+    .replace(/\bCCC Secure Share documentation this estimate line was present in the structured estimate data\.?/gi, CCC_SOURCE_BOUNDARY_TEXT)
+    .replace(/\bOEMdocumentation support\b/gi, "OEM/P-page/DEG/legal support");
 }
 
 function drawWrappedLines(

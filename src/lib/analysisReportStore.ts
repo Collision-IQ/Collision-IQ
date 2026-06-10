@@ -196,3 +196,34 @@ export async function getAnalysisReport(
 
   return record ? toStoredAnalysisReport(record) : null;
 }
+
+export async function getLatestActiveAnalysisReport(
+  scope: ReportOwnerScope
+): Promise<StoredAnalysisReport | null> {
+  const owner = resolveOwner(scope);
+  const records = await prisma.analysisReport.findMany({
+    where: {
+      ownerType: owner.ownerType,
+      ownerId: owner.ownerId,
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
+    take: 10,
+    include: {
+      artifacts: {
+        select: {
+          attachmentId: true,
+        },
+      },
+    },
+  });
+
+  const activeRecord =
+    records.find((record) => {
+      const report = record.report as RepairIntelligenceReport | null | undefined;
+      return report?.ingestionMeta?.active !== false;
+    }) ?? records[0];
+
+  return activeRecord ? toStoredAnalysisReport(activeRecord) : null;
+}

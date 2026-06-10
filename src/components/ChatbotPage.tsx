@@ -94,6 +94,13 @@ type AttachmentTrayItem = {
   filename: string;
   hasVision?: boolean;
 };
+type AnnotatedEstimateExportResult = {
+  blob: Blob;
+  filename: string;
+  annotatedFindingCount: number;
+  unresolvedAnchorCount: number;
+  warnings: string[];
+};
 
 type LeftPaneMode = "chat" | "review";
 export type ReportKind =
@@ -1414,6 +1421,7 @@ export function ChatbotWorkspacePage() {
             canUseCustomerReport={canUseCustomerReport}
             analysisReportId={analysisReportId}
             attachmentIds={attachmentsState.map((file) => file.attachmentId)}
+            attachments={attachmentsState}
             onCustomerReportLocked={() => setUpgradeModalOpen(true)}
             activeInsightKey={activeInsightKey}
             evidenceModel={evidenceModel}
@@ -1582,6 +1590,7 @@ function RailContent({
   canUseCustomerReport,
   analysisReportId,
   attachmentIds,
+  attachments,
   onCustomerReportLocked,
   activeInsightKey,
   evidenceModel,
@@ -1614,6 +1623,7 @@ function RailContent({
   canUseCustomerReport: boolean;
   analysisReportId: string | null;
   attachmentIds: string[];
+  attachments: AttachmentTrayItem[];
   onCustomerReportLocked: () => void;
   activeInsightKey: InsightKey | null;
   evidenceModel: EvidenceLinkModel | null;
@@ -1672,6 +1682,9 @@ function RailContent({
       ? formatCurrency(renderModel.reportFields.estimateTotal, true)
       : null;
   const canRenderExports = hasResolvedAnalysis && Boolean(analysisText || panel.narrative);
+  const annotatedEstimateSourcePdf = selectAnnotatedCitationDensitySourcePdf(attachments);
+  const canGenerateCitationDensityAnnotatedEstimate =
+    hasResolvedAnalysis && Boolean(analysisReportId && annotatedEstimateSourcePdf);
   const railRisk = hasResolvedAnalysis
     ? renderModel.supplementItems.length > 0
       ? "Review"
@@ -1884,7 +1897,11 @@ function RailContent({
       setSnapshotStatus("Snapshot could not be generated from the current report.");
       return;
     }
-    if (reportType !== "snapshot" && !canRenderExports) {
+    if (reportType === "estimate_scrubber" && !canGenerateCitationDensityAnnotatedEstimate) {
+      setReportSendStatus("Upload an original estimate PDF before sending the annotated Citation Density estimate.");
+      return;
+    }
+    if (reportType !== "snapshot" && reportType !== "estimate_scrubber" && !canRenderExports) {
       setReportSendStatus("Report is not ready to send yet.");
       return;
     }
@@ -1997,6 +2014,17 @@ function RailContent({
   }
 
   async function downloadReportDocument(reportType: ReportKind) {
+    if (reportType === "estimate_scrubber") {
+      try {
+        const exportResult = await generateAnnotatedCitationDensityEstimate();
+        downloadBlob(exportResult.blob, exportResult.filename);
+        setReportSendStatus(buildAnnotatedCitationDensityStatus(exportResult));
+      } catch (error) {
+        setReportSendStatus(error instanceof Error ? error.message : "Annotated estimate download failed.");
+      }
+      return;
+    }
+
     if (reportType !== "snapshot" && !canRenderExports) {
       setReportSendStatus("Report is not ready to download yet.");
       return;
@@ -2008,6 +2036,58 @@ function RailContent({
     } catch (error) {
       setReportSendStatus(error instanceof Error ? error.message : "Report download failed.");
     }
+  }
+
+  async function generateAnnotatedCitationDensityEstimate(): Promise<AnnotatedEstimateExportResult> {
+    if (!analysisReportId) {
+      throw new Error("Citation Density annotated export needs an active case.");
+    }
+
+    const sourcePdf = selectAnnotatedCitationDensitySourcePdf(attachments);
+    if (!sourcePdf) {
+      throw new Error("Upload an original estimate PDF before generating the annotated Citation Density estimate.");
+    }
+
+    setReportSendStatus("Generating annotated Citation Density estimate PDF...");
+    const response = await fetch("/api/reports/citation-density/annotated-estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        caseId: analysisReportId,
+        targetEstimate: "carrier",
+        annotationMode: "both",
+        includeLegend: true,
+        includeSummaryPage: false,
+        redactSensitive: true,
+      }),
+    });
+
+    const data = (await response.json().catch(() => null)) as {
+      downloadUrl?: unknown;
+      annotatedFindingCount?: unknown;
+      unresolvedAnchorCount?: unknown;
+      warnings?: unknown;
+      error?: string;
+      userMessage?: string;
+    } | null;
+
+    if (!response.ok || typeof data?.downloadUrl !== "string") {
+      throw new Error(data?.userMessage || data?.error || "Annotated estimate export failed.");
+    }
+
+    const blob = await fetchAnnotatedCitationDensityPdfBlob(data.downloadUrl);
+    return {
+      blob,
+      filename: "citation-density-annotated-estimate.pdf",
+      annotatedFindingCount:
+        typeof data.annotatedFindingCount === "number" ? data.annotatedFindingCount : 0,
+      unresolvedAnchorCount:
+        typeof data.unresolvedAnchorCount === "number" ? data.unresolvedAnchorCount : 0,
+      warnings: Array.isArray(data.warnings)
+        ? data.warnings.filter((warning): warning is string => typeof warning === "string")
+        : [],
+    };
   }
 
   async function buildReportDocument(reportType: ReportKind): Promise<CarrierReportDocument> {
@@ -2108,6 +2188,61 @@ function RailContent({
     setCustomerReportError(null);
 
     try {
+      if (activeReportToSend === "estimate_scrubber") {
+        const exportResult = await generateAnnotatedCitationDensityEstimate();
+        const pdfBase64 = await blobToBase64(exportResult.blob);
+        const response = await fetch("/api/reports/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            reportType: activeReportToSend,
+            destinationType: reportSendTarget,
+            recipientEmail: reportRecipientEmail,
+            subject: reportSubject,
+            message: reportMessage,
+            pdfBase64,
+            filename: exportResult.filename,
+            metadata: {
+              caseId: analysisReportId ?? undefined,
+              vehicle: vehicleIdentity ?? undefined,
+              vin: vehicleVin ?? undefined,
+              customerEmail: undefined,
+            },
+          }),
+        });
+
+        const result = (await response.json().catch(() => null)) as {
+          deliveryMode?: "email" | "manual";
+          message?: string;
+          error?: string;
+          id?: string | null;
+          sentAt?: string;
+          reportSendId?: string | null;
+        } | null;
+
+        if (!response.ok) {
+          throw new Error(result?.error || "Annotated estimate email failed.");
+        }
+
+        if (result?.deliveryMode === "manual") {
+          setReportSendStatus(result.message || "Email provider is not configured. Download the annotated PDF and send manually.");
+        } else {
+          setReportSent(true);
+          setReportSendStatus(buildAnnotatedCitationDensityStatus(exportResult, "Sent successfully."));
+        }
+        emitSafeCrmEventFromClient({
+          event: "report_sent",
+          plan,
+          exportType: activeReportToSend,
+          destinationType: reportSendTarget,
+        });
+        if (analysisReportId) {
+          void fetchReportSendHistory();
+        }
+        return;
+      }
+
       const document = await buildReportDocument(activeReportToSend);
       const pdfBlob = await buildCarrierPdfBlob(document);
       const pdfBase64 = await blobToBase64(pdfBlob);
@@ -2697,7 +2832,7 @@ function RailContent({
 
       <RailGroup label="Output" compact />
 
-      {canRenderExports ? (
+      {canRenderExports || canGenerateCitationDensityAnnotatedEstimate ? (
         <RailInsightSection
           insightKey="exports"
           activeInsightKey={activeInsightKey}
@@ -2801,7 +2936,7 @@ function RailContent({
                     }}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download gap report</span>
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download annotated estimate</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
@@ -4117,6 +4252,40 @@ function buildCustomerReportRequest(params: {
     imageSummary,
     selectedEstimatePosture: params.renderModel.selectedEstimatePosture,
   };
+}
+
+function selectAnnotatedCitationDensitySourcePdf(attachments: AttachmentTrayItem[]) {
+  return attachments.find((attachment) => /\.pdf$/i.test(attachment.filename)) ?? null;
+}
+
+function buildAnnotatedCitationDensityStatus(
+  result: Pick<AnnotatedEstimateExportResult, "annotatedFindingCount" | "unresolvedAnchorCount" | "warnings">,
+  prefix = "Annotated estimate PDF is ready."
+) {
+  const warnings = result.warnings.length ? ` Warnings: ${result.warnings.join(" ")}` : "";
+  return `${prefix} Annotated findings: ${result.annotatedFindingCount}. Unanchored findings: ${result.unresolvedAnchorCount}.${warnings}`;
+}
+
+async function fetchAnnotatedCitationDensityPdfBlob(downloadUrl: string): Promise<Blob> {
+  const response = await fetch(downloadUrl, {
+    method: "GET",
+    credentials: "same-origin",
+  });
+  if (!response.ok) {
+    throw new Error(`Annotated estimate download failed (${response.status}).`);
+  }
+  return await response.blob();
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function exportCustomerReportPdf(report: CustomerReport, params: {

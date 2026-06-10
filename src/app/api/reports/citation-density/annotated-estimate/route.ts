@@ -3,7 +3,10 @@ import {
   UnauthorizedError,
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
-import { getAnalysisReport } from "@/lib/analysisReportStore";
+import {
+  getAnalysisReport,
+  getLatestActiveAnalysisReport,
+} from "@/lib/analysisReportStore";
 import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
 import { buildAnnotatedEstimateReviewModel } from "@/lib/ai/builders/estimateScrubberPdfBuilder";
 import {
@@ -12,6 +15,14 @@ import {
   getAnnotatedEstimateExport,
   type AnnotationMode,
 } from "@/lib/reports/annotatedCitationDensityEstimate";
+import type { CitationDensityTargetEstimate } from "@/lib/reports/citationDensityIntent";
+import {
+  NO_SOURCE_PDF_ERROR,
+  NO_SOURCE_PDF_USER_MESSAGE,
+  describeReviewTarget,
+  isPdfDocument,
+  resolveSourceEstimatePdf,
+} from "@/lib/reports/citationDensitySourcePdf";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +40,7 @@ type RequestBody = {
 
 const VALID_TARGET_ESTIMATES = new Set(["carrier", "shop", "selected"]);
 const VALID_ANNOTATION_MODES = new Set(["margin_callouts", "inline_highlight", "both"]);
+const NO_ACTIVE_CASE_ERROR = "No active review was found. Open the case or run analysis before requesting an annotated estimate PDF.";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -57,41 +69,43 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => ({}))) as RequestBody;
     const caseId = coerceString(body.caseId);
     const sourceDocumentId = coerceString(body.sourceDocumentId);
-    const targetEstimate = coerceString(body.targetEstimate);
+    const targetEstimate = coerceTargetEstimate(body.targetEstimate);
 
-    if (!caseId) {
-      return NextResponse.json({ error: "caseId is required." }, { status: 400 });
-    }
-
-    if (!sourceDocumentId) {
-      return NextResponse.json({ error: "sourceDocumentId is required." }, { status: 400 });
-    }
-
-    if (!VALID_TARGET_ESTIMATES.has(targetEstimate)) {
+    const report = caseId
+      ? await getAnalysisReport(caseId, { ownerUserId: user.id })
+      : await getLatestActiveAnalysisReport({ ownerUserId: user.id });
+    if (!report) {
       return NextResponse.json(
-        { error: "targetEstimate must be carrier, shop, or selected." },
-        { status: 400 }
+        { error: caseId ? "Case was not found." : NO_ACTIVE_CASE_ERROR },
+        { status: caseId ? 404 : 400 }
       );
     }
 
-    const report = await getAnalysisReport(caseId, { ownerUserId: user.id });
-    if (!report) {
-      return NextResponse.json({ error: "Case was not found." }, { status: 404 });
-    }
-
-    const [sourceDocument] = await getUploadedAttachments([sourceDocumentId], {
+    const candidateIds = sourceDocumentId ? [sourceDocumentId] : report.artifactIds;
+    const sourceDocuments = await getUploadedAttachments(candidateIds, {
       ownerUserId: user.id,
     });
+    const model = buildAnnotatedEstimateReviewModel({
+      report: report.report,
+      analysis: report.report.analysis ?? null,
+      panel: null,
+      renderModel: undefined,
+    });
+    const sourceDocument = sourceDocumentId
+      ? sourceDocuments[0] ?? null
+      : resolveSourceEstimatePdf({
+          attachments: sourceDocuments,
+          report: report.report,
+          targetEstimate,
+          findings: model.citationDensityFindings,
+        });
 
     if (!sourceDocument) {
-      return NextResponse.json({ error: "Source document was not found." }, { status: 404 });
+      return missingSourcePdfResponse();
     }
 
     if (!isPdfDocument(sourceDocument.type, sourceDocument.filename)) {
-      return NextResponse.json(
-        { error: "sourceDocumentId must reference a PDF upload." },
-        { status: 415 }
-      );
+      return missingSourcePdfResponse();
     }
 
     const sourcePdfBytes = sourceDocument.imageDataUrl
@@ -99,20 +113,8 @@ export async function POST(request: Request) {
       : null;
 
     if (!sourcePdfBytes) {
-      return NextResponse.json(
-        {
-          error: "Original PDF bytes are unavailable for this upload. Re-upload the estimate PDF before requesting an annotated export.",
-        },
-        { status: 422 }
-      );
+      return missingSourcePdfResponse();
     }
-
-    const model = buildAnnotatedEstimateReviewModel({
-      report: report.report,
-      analysis: report.report.analysis ?? null,
-      panel: null,
-      renderModel: undefined,
-    });
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
       sourcePdfBytes,
@@ -135,6 +137,7 @@ export async function POST(request: Request) {
       annotatedFindingCount: result.annotatedFindingCount,
       unresolvedAnchorCount: result.unresolvedAnchorCount,
       warnings: result.warnings,
+      reviewTarget: describeReviewTarget(sourceDocument, targetEstimate, sourceDocuments),
     });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
@@ -152,6 +155,11 @@ function coerceString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function coerceTargetEstimate(value: unknown): CitationDensityTargetEstimate {
+  const target = coerceString(value);
+  return VALID_TARGET_ESTIMATES.has(target) ? target as CitationDensityTargetEstimate : "selected";
+}
+
 function coerceStringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
@@ -163,6 +171,12 @@ function coerceAnnotationMode(value: unknown): AnnotationMode {
     : "both";
 }
 
-function isPdfDocument(type: string, filename: string) {
-  return type === "application/pdf" || /\.pdf$/i.test(filename);
+function missingSourcePdfResponse() {
+  return NextResponse.json(
+    {
+      error: NO_SOURCE_PDF_ERROR,
+      userMessage: NO_SOURCE_PDF_USER_MESSAGE,
+    },
+    { status: 400 }
+  );
 }

@@ -74,6 +74,10 @@ import {
   isRetryableProviderMessage,
   RETRYABLE_PROVIDER_USER_MESSAGE,
 } from "@/lib/ai/providerRetryableError";
+import {
+  resolveAnnotatedCitationDensityTarget,
+  shouldGenerateAnnotatedCitationDensityEstimate,
+} from "@/lib/reports/citationDensityIntent";
 import { speak, TtsClientError, type SpeakResult, type TtsProvider, type TtsVoiceSymbol } from "@/lib/tts";
 
 interface Attachment {
@@ -581,29 +585,6 @@ function isVideoAttachment(attachment: Pick<Attachment, "mime" | "filename" | "c
     attachment.classification === "video" ||
     attachment.mime.startsWith("video/") ||
     /\.(?:mp4|mov|webm)$/i.test(attachment.filename)
-  );
-}
-
-function shouldGenerateAnnotatedCitationDensityEstimate(message: string) {
-  const normalized = message.toLowerCase().replace(/\s+/g, " ").trim();
-  if (!normalized) return false;
-  if (/\bsummary report\b|\bgap report\b|\bstandalone report\b/.test(normalized)) {
-    return false;
-  }
-
-  return (
-    /\bannotated estimate\b/.test(normalized) ||
-    /\bmark\s*up the estimate\b/.test(normalized) ||
-    /\bshow this on the estimate\b/.test(normalized) ||
-    /\bcitation density markup\b/.test(normalized) ||
-    /\bexport annotated carrier estimate\b/.test(normalized) ||
-    /\bregenerate the estimate pdf with annotations\b/.test(normalized)
-  );
-}
-
-function selectAnnotatedEstimateSourcePdf(attachments: Attachment[]) {
-  return attachments.find((attachment) =>
-    attachment.mime === "application/pdf" || /\.pdf$/i.test(attachment.filename)
   );
 }
 
@@ -1743,9 +1724,8 @@ export default function ChatWidget({
     try {
       if (shouldGenerateAnnotatedCitationDensityEstimate(messageToSend)) {
         const activeCaseId = analysisReportIdRef.current;
-        const sourcePdf = selectAnnotatedEstimateSourcePdf(attachments);
 
-        if (activeCaseId && sourcePdf) {
+        if (activeCaseId) {
           upsertSystemStatusMessage("Generating annotated citation density estimate PDF...");
           const exportResponse = await fetch("/api/reports/citation-density/annotated-estimate", {
             method: "POST",
@@ -1753,8 +1733,7 @@ export default function ChatWidget({
             signal: controller.signal,
             body: JSON.stringify({
               caseId: activeCaseId,
-              sourceDocumentId: sourcePdf.attachmentId,
-              targetEstimate: "selected",
+              targetEstimate: resolveAnnotatedCitationDensityTarget(messageToSend),
               annotationMode: "both",
               includeLegend: true,
               includeSummaryPage: false,
@@ -1763,8 +1742,11 @@ export default function ChatWidget({
           });
 
           if (!exportResponse.ok) {
-            const data = (await exportResponse.json().catch(() => null)) as { error?: string } | null;
-            throw new Error(data?.error || "Annotated estimate export failed.");
+            const data = (await exportResponse.json().catch(() => null)) as {
+              error?: string;
+              userMessage?: string;
+            } | null;
+            throw new Error(data?.userMessage || data?.error || "Annotated estimate export failed.");
           }
 
           const data = (await exportResponse.json()) as {
@@ -1773,15 +1755,14 @@ export default function ChatWidget({
             unresolvedAnchorCount?: number;
             warnings?: string[];
           };
-          const warningText = data.warnings?.length
-            ? `\n\nWarnings: ${data.warnings.join(" ")}`
-            : "";
-          const reply = [
-            `Annotated estimate PDF is ready: [Download annotated estimate](${data.downloadUrl ?? "#"})`,
-            `Annotated findings: ${data.annotatedFindingCount ?? 0}.`,
-            `Unanchored findings: ${data.unresolvedAnchorCount ?? 0}.`,
-            warningText,
-          ].filter(Boolean).join("\n");
+          const unanchoredText =
+            (data.unresolvedAnchorCount ?? 0) > 0
+              ? " Unanchored items were placed in the appendix."
+              : "";
+          const warningText = data.warnings?.length ? `\n\nWarnings: ${data.warnings.join(" ")}` : "";
+          const reply =
+            `Done — I generated the annotated citation-density estimate PDF. It preserves the original estimate layout and overlays citation/proof callouts.${unanchoredText}\n\n` +
+            `[Download annotated estimate](${data.downloadUrl ?? "#"})${warningText}`;
 
           if (sessionRef.current === mySession) {
             clearActiveSystemStatusMessage();
