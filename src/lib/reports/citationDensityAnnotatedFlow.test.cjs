@@ -38,6 +38,7 @@ const {
   NO_SOURCE_PDF_USER_MESSAGE,
   describeReviewTarget,
   resolveSourceEstimatePdf,
+  resolveSourceEstimatePdfSelection,
 } = require("./citationDensitySourcePdf.ts");
 
 function pdfAttachment(overrides = {}) {
@@ -162,6 +163,8 @@ run("export card primary Citation Density action calls annotated route, not stan
   const standaloneBuilderIndex = source.indexOf("buildAnnotatedEstimateReviewPdf", downloadIndex);
 
   assert.match(source, /Download annotated estimate/);
+  assert.match(source, /Download summary report/);
+  assert.match(source, /downloadCitationDensitySummaryReport/);
   assert.ok(annotatedFetchIndex > downloadIndex);
   assert.ok(standaloneBuilderIndex === -1 || annotatedFetchIndex < standaloneBuilderIndex);
 });
@@ -198,6 +201,60 @@ run("carrier target selects carrier or lower-cost PDF over shop PDF", () => {
   });
 
   assert.equal(selected.id, "carrier");
+});
+
+run("carrier target avoids appraisal, academy, and higher-cost preliminary PDFs", () => {
+  const carrier = pdfAttachment({
+    id: "carrier",
+    filename: "Insurer lower-cost estimate.pdf",
+    text: "Insurer estimate lower cost total $3,200.00 ADAS calibration",
+  });
+  const appraisal = pdfAttachment({
+    id: "appraisal",
+    filename: "RTA appraisal report.pdf",
+    text: "Collision Academy right to appraisal higher cost preliminary total $7,800.00",
+  });
+  const shop = pdfAttachment({
+    id: "shop",
+    filename: "Shop Estimate.pdf",
+    text: "Shop repair facility estimate higher cost total $7,600.00 ADAS calibration",
+  });
+
+  const selection = resolveSourceEstimatePdfSelection({
+    attachments: [appraisal, shop, carrier],
+    report: reportWithEvidenceRegistry(),
+    targetEstimate: "carrier",
+    findings: [finding()],
+  });
+
+  assert.equal(selection.attachment.id, "carrier");
+  assert.equal(selection.selectedEstimateRole, "carrier");
+  assert.equal(selection.selectedEstimateTotal, 3200);
+  assert.match(selection.selectionReason, /carrier\/lower-cost estimate PDF/i);
+});
+
+run("shop target selects shop PDF when both carrier and shop estimates are uploaded", () => {
+  const carrier = pdfAttachment({
+    id: "carrier",
+    filename: "Carrier Estimate.pdf",
+    text: "Carrier insurance estimate lower cost total $3,200.00 ADAS calibration",
+  });
+  const shop = pdfAttachment({
+    id: "shop",
+    filename: "Shop Estimate.pdf",
+    text: "Shop repair facility estimate higher cost total $7,600.00 ADAS calibration",
+  });
+
+  const selection = resolveSourceEstimatePdfSelection({
+    attachments: [carrier, shop],
+    report: reportWithEvidenceRegistry(),
+    targetEstimate: "shop",
+    findings: [finding()],
+  });
+
+  assert.equal(selection.attachment.id, "shop");
+  assert.equal(selection.selectedEstimateRole, "shop");
+  assert.equal(selection.selectedEstimateTotal, 7600);
 });
 
 run("missing source PDF returns clear user-facing missing-source message data", () => {

@@ -2038,6 +2038,20 @@ function RailContent({
     }
   }
 
+  async function downloadCitationDensitySummaryReport() {
+    if (!canRenderExports) {
+      setReportSendStatus("Citation Density summary report is not ready to download yet.");
+      return;
+    }
+
+    try {
+      const document = await buildReportDocument("estimate_scrubber");
+      void exportCarrierPDF(document);
+    } catch (error) {
+      setReportSendStatus(error instanceof Error ? error.message : "Citation Density summary download failed.");
+    }
+  }
+
   async function generateAnnotatedCitationDensityEstimate(): Promise<AnnotatedEstimateExportResult> {
     if (!analysisReportId) {
       throw new Error("Citation Density annotated export needs an active case.");
@@ -2945,6 +2959,14 @@ function RailContent({
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[#C65A2A] bg-[#C65A2A] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
                     <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>
+                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void downloadCitationDensitySummaryReport()}
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 sm:col-span-2"
+                  >
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download summary report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button

@@ -188,12 +188,14 @@ async function run(name, test) {
 
     assert.equal(result.annotatedFindingCount, 0);
     assert.equal(result.unresolvedAnchorCount, 1);
+    assert.match(result.warnings.join(" "), /No line-level anchors could be placed/);
+    assert.match(text, /No line-level anchors could be placed/);
     assert.match(text, /Unanchored Citation Density Findings/);
     assert.match(text, /Finding #:/);
     assert.doesNotMatch(text, /555-123-4567|test@example\.com|123 Main St/i);
   });
 
-  await run("anchor fallback keeps original pages and appends legend plus appendix", async () => {
+  await run("anchor fallback keeps original pages and appends warning, legend, plus appendix", async () => {
     const sourcePdfBytes = await createTwoPageSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
       sourcePdfBytes,
@@ -217,11 +219,44 @@ async function run(name, test) {
 
     assert.equal(result.originalPageCount, 2);
     assert.equal(result.unresolvedAnchorCount, 1);
-    assert.equal(loaded.getPageCount(), 4);
+    assert.equal(loaded.getPageCount(), 5);
     assert.match(text, /Original estimate page one sentinel/);
     assert.match(text, /Original estimate page two sentinel/);
+    assert.match(text, /No line-level anchors could be placed/);
     assert.match(text, /Citation Density Annotation Legend/);
     assert.match(text, /Unanchored Citation Density Findings/);
+  });
+
+  await run("section-level fallback places callouts on original pages before appendix", async () => {
+    const sourcePdfBytes = await createTwoPageSourcePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      findings: [
+        baseFinding({
+          id: "page-level",
+          operationLabel: "ADAS calibration OEM procedure",
+          carrierEvidence: {
+            lineNumber: "9999",
+            description: "Calibration proof missing",
+            amount: 999,
+            laborHours: 9.9,
+            sourceLabel: "Carrier estimate",
+          },
+        }),
+      ],
+      request: { includeLegend: true, includeSummaryPage: false, annotationMode: "both" },
+    });
+    const loaded = await PDFDocument.load(result.bytes);
+    const text = await extractPdfText(result.bytes);
+
+    assert.equal(result.originalPageCount, 2);
+    assert.equal(result.annotatedFindingCount, 1);
+    assert.equal(result.unresolvedAnchorCount, 0);
+    assert.equal(loaded.getPageCount(), 4);
+    assert.match(text, /Original estimate page one sentinel/);
+    assert.match(text, /No line-level anchors could be placed/);
+    assert.match(text, /Citation Density Annotation Legend/);
+    assert.doesNotMatch(text, /Unanchored Citation Density Findings/);
   });
 
   await run("visual page behavior uses original PDF as base with optional legend only", async () => {

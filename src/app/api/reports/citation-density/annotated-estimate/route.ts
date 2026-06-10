@@ -21,7 +21,8 @@ import {
   NO_SOURCE_PDF_USER_MESSAGE,
   describeReviewTarget,
   isPdfDocument,
-  resolveSourceEstimatePdf,
+  resolveSourceEstimatePdfSelection,
+  type SourceEstimatePdfSelection,
 } from "@/lib/reports/citationDensitySourcePdf";
 
 export const runtime = "nodejs";
@@ -91,25 +92,45 @@ export async function POST(request: Request) {
       panel: null,
       renderModel: undefined,
     });
-    const sourceDocument = sourceDocumentId
-      ? sourceDocuments[0] ?? null
-      : resolveSourceEstimatePdf({
+    const sourceSelection: SourceEstimatePdfSelection | null = sourceDocumentId
+      ? sourceDocuments[0]
+        ? {
+            attachment: sourceDocuments[0],
+            selectedSourceDocumentId: sourceDocuments[0].id,
+            selectedSourceLabel: sourceDocuments[0].filename || "Selected estimate",
+            selectedEstimateRole: "selected",
+            selectedEstimateTotal: null,
+            targetEstimate,
+            selectionReason: "The client supplied a source document ID.",
+          }
+        : null
+      : resolveSourceEstimatePdfSelection({
           attachments: sourceDocuments,
           report: report.report,
           targetEstimate,
           findings: model.citationDensityFindings,
         });
+    const sourceDocument = sourceSelection?.attachment ?? null;
 
-    if (!sourceDocument) {
+    /*
+     * Backward compatibility: if a caller still sends sourceDocumentId, honor it.
+     * New chat/export flows should omit it and let the server choose the source PDF.
+     */
+    const legacySourceDocument = sourceDocumentId
+      ? sourceDocuments[0] ?? null
+      : null;
+    const resolvedSourceDocument = sourceDocument ?? legacySourceDocument;
+
+    if (!resolvedSourceDocument) {
       return missingSourcePdfResponse();
     }
 
-    if (!isPdfDocument(sourceDocument.type, sourceDocument.filename)) {
+    if (!isPdfDocument(resolvedSourceDocument.type, resolvedSourceDocument.filename)) {
       return missingSourcePdfResponse();
     }
 
-    const sourcePdfBytes = sourceDocument.imageDataUrl
-      ? dataUrlToPdfBytes(sourceDocument.imageDataUrl)
+    const sourcePdfBytes = resolvedSourceDocument.imageDataUrl
+      ? dataUrlToPdfBytes(resolvedSourceDocument.imageDataUrl)
       : null;
 
     if (!sourcePdfBytes) {
@@ -137,7 +158,13 @@ export async function POST(request: Request) {
       annotatedFindingCount: result.annotatedFindingCount,
       unresolvedAnchorCount: result.unresolvedAnchorCount,
       warnings: result.warnings,
-      reviewTarget: describeReviewTarget(sourceDocument, targetEstimate, sourceDocuments),
+      reviewTarget: describeReviewTarget(resolvedSourceDocument, targetEstimate, sourceDocuments),
+      selectedSourceDocumentId: sourceSelection?.selectedSourceDocumentId ?? resolvedSourceDocument.id,
+      selectedSourceLabel: sourceSelection?.selectedSourceLabel ?? resolvedSourceDocument.filename,
+      selectedEstimateRole: sourceSelection?.selectedEstimateRole ?? "selected",
+      selectedEstimateTotal: sourceSelection?.selectedEstimateTotal ?? null,
+      targetEstimate,
+      selectionReason: sourceSelection?.selectionReason ?? "The client supplied a source document ID.",
     });
   } catch (error) {
     if (error instanceof UnauthorizedError) {

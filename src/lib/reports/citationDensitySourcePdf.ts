@@ -7,6 +7,16 @@ export const NO_SOURCE_PDF_ERROR = "No original estimate PDF was found for annot
 export const NO_SOURCE_PDF_USER_MESSAGE =
   "No original estimate PDF was found for annotation. Please select or upload the estimate PDF you want annotated.";
 
+export type SourceEstimatePdfSelection = {
+  attachment: StoredAttachment;
+  selectedSourceDocumentId: string;
+  selectedSourceLabel: string;
+  selectedEstimateRole: "carrier" | "shop" | "uploaded" | "selected" | "unknown";
+  selectedEstimateTotal: number | null;
+  targetEstimate: CitationDensityTargetEstimate;
+  selectionReason: string;
+};
+
 export function isPdfDocument(type: string, filename: string) {
   return type === "application/pdf" || /\.pdf$/i.test(filename);
 }
@@ -17,11 +27,27 @@ export function resolveSourceEstimatePdf(params: {
   targetEstimate: CitationDensityTargetEstimate;
   findings: CitationDensityFinding[];
 }) {
+  return resolveSourceEstimatePdfSelection(params)?.attachment ?? null;
+}
+
+export function resolveSourceEstimatePdfSelection(params: {
+  attachments: StoredAttachment[];
+  report: RepairIntelligenceReport;
+  targetEstimate: CitationDensityTargetEstimate;
+  findings: CitationDensityFinding[];
+}): SourceEstimatePdfSelection | null {
   const pdfs = params.attachments.filter((attachment) =>
     isPdfDocument(attachment.type, attachment.filename) && Boolean(attachment.imageDataUrl)
   );
   if (pdfs.length === 0) return null;
-  if (pdfs.length === 1) return pdfs[0];
+  if (pdfs.length === 1) {
+    return buildSelectionResult({
+      attachment: pdfs[0],
+      targetEstimate: params.targetEstimate,
+      selectedEstimateRole: "uploaded",
+      selectionReason: "Only one uploaded estimate PDF was available.",
+    });
+  }
 
   const evidenceTypeByLabel = new Map<string, string>();
   for (const item of params.report.evidenceRegistry ?? []) {
@@ -30,19 +56,36 @@ export function resolveSourceEstimatePdf(params: {
   }
 
   const scored = pdfs
-    .map((attachment, index) => ({
-      attachment,
-      index,
-      score: scoreEstimatePdfCandidate({
+    .map((attachment, index) => {
+      const score = scoreEstimatePdfCandidate({
         attachment,
         targetEstimate: params.targetEstimate,
         findings: params.findings,
         evidenceTypeByLabel,
-      }),
-    }))
+      });
+      return {
+        attachment,
+        index,
+        score,
+        role: inferEstimateRole(attachment, evidenceTypeByLabel),
+        total: extractEstimateTotal(attachment),
+      };
+    })
     .sort((a, b) => b.score - a.score || a.index - b.index);
 
-  return scored[0]?.attachment ?? null;
+  const best = scored[0];
+  if (!best) return null;
+  if (!isCompatibleSelection(best.role, params.targetEstimate, best.score)) {
+    return null;
+  }
+
+  return buildSelectionResult({
+    attachment: best.attachment,
+    targetEstimate: params.targetEstimate,
+    selectedEstimateRole: best.role === "unknown" && params.targetEstimate === "selected" ? "selected" : best.role,
+    selectedEstimateTotal: best.total,
+    selectionReason: buildSelectionReason(best.role, params.targetEstimate, best.score),
+  });
 }
 
 export function scoreEstimatePdfCandidate(params: {
@@ -56,9 +99,12 @@ export function scoreEstimatePdfCandidate(params: {
 
   if (/\bestimate\b|supplement|preliminary estimate|repair estimate/.test(text)) score += 30;
   if (/citation density|gap report|annotation legend|unanchored citation density/.test(text)) score -= 120;
-  if (/carrier|insurer|insurance|appraiser|adjuster/.test(text)) score += params.targetEstimate === "shop" ? -10 : 45;
-  if (/shop|repair facility|body shop|repairer/.test(text)) score += params.targetEstimate === "shop" ? 45 : -8;
+  if (/carrier|insurer|insurance|appraiser|adjuster/.test(text)) score += params.targetEstimate === "shop" ? -18 : 45;
+  if (/shop|repair facility|body shop|repairer/.test(text)) score += params.targetEstimate === "shop" ? 45 : -28;
   if (/lower cost|lower cost|carrier estimate|insurer estimate/.test(text)) score += params.targetEstimate === "shop" ? -12 : 35;
+  if (/rta|right to apprais|appraisal|appraiser report|collision academy|academy report|higher cost preliminary/.test(text)) {
+    score += params.targetEstimate === "carrier" ? -45 : -10;
+  }
   if (/customer|invoice|repair order|policy|declarations|photo|image|scan report/.test(text)) score -= 14;
 
   const matchingEvidenceType = [...params.evidenceTypeByLabel.entries()]
@@ -78,6 +124,73 @@ export function scoreEstimatePdfCandidate(params: {
   }
 
   return score;
+}
+
+function buildSelectionResult(params: {
+  attachment: StoredAttachment;
+  targetEstimate: CitationDensityTargetEstimate;
+  selectedEstimateRole: SourceEstimatePdfSelection["selectedEstimateRole"];
+  selectedEstimateTotal?: number | null;
+  selectionReason: string;
+}): SourceEstimatePdfSelection {
+  return {
+    attachment: params.attachment,
+    selectedSourceDocumentId: params.attachment.id,
+    selectedSourceLabel: params.attachment.filename || "Uploaded estimate",
+    selectedEstimateRole: params.selectedEstimateRole,
+    selectedEstimateTotal: params.selectedEstimateTotal ?? extractEstimateTotal(params.attachment),
+    targetEstimate: params.targetEstimate,
+    selectionReason: params.selectionReason,
+  };
+}
+
+function inferEstimateRole(
+  attachment: StoredAttachment,
+  evidenceTypeByLabel: Map<string, string>
+): SourceEstimatePdfSelection["selectedEstimateRole"] {
+  const text = normalizeRoleText(`${attachment.filename}\n${attachment.text}`);
+  const matchingEvidenceType = [...evidenceTypeByLabel.entries()]
+    .find(([label]) => label && text.includes(label))?.[1];
+  if (matchingEvidenceType === "carrier_estimate") return "carrier";
+  if (matchingEvidenceType === "shop_estimate") return "shop";
+  if (/carrier estimate|insurer estimate|carrier|insurer|insurance|lower cost/.test(text)) return "carrier";
+  if (/shop estimate|repair facility|body shop|repairer|higher cost/.test(text)) return "shop";
+  return "unknown";
+}
+
+function extractEstimateTotal(attachment: StoredAttachment): number | null {
+  const text = `${attachment.filename}\n${attachment.text ?? ""}`;
+  const matches = [...text.matchAll(/(?:estimate|net|grand|repair)?\s*total\s*[:#-]?\s*\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.\d{2})?|[0-9]+(?:\.\d{2})?)/gi)];
+  const raw = matches.at(-1)?.[1];
+  if (!raw) return null;
+  const value = Number(raw.replace(/,/g, ""));
+  return Number.isFinite(value) ? value : null;
+}
+
+function isCompatibleSelection(
+  role: SourceEstimatePdfSelection["selectedEstimateRole"],
+  targetEstimate: CitationDensityTargetEstimate,
+  score: number
+) {
+  if (targetEstimate === "selected") return score > -80;
+  if (targetEstimate === "carrier") return role === "carrier" && score > 0;
+  if (targetEstimate === "shop") return role === "shop" && score > 0;
+  return false;
+}
+
+function buildSelectionReason(
+  role: SourceEstimatePdfSelection["selectedEstimateRole"],
+  targetEstimate: CitationDensityTargetEstimate,
+  score: number
+) {
+  if (targetEstimate === "carrier") {
+    return `Selected the carrier/lower-cost estimate PDF based on document role signals (score ${score}).`;
+  }
+  if (targetEstimate === "shop") {
+    return `Selected the shop estimate PDF based on document role signals (score ${score}).`;
+  }
+  if (role === "selected") return "Selected the active review estimate PDF.";
+  return `Selected the best matching uploaded estimate PDF based on document role signals (score ${score}).`;
 }
 
 export function describeReviewTarget(

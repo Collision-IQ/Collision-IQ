@@ -230,6 +230,8 @@ export function sanitizeReportText(value: string): string {
     .replace(/\bEstimate documentation the existence of a difference\.?/gi, "Estimate evidence supports the existence of a difference.")
     .replace(/\bCCC Secure Share documentation this estimate line was present in the structured estimate data\.?/gi, "CCC Secure Share source confirms this estimate line was present in the structured estimate data.")
     .replace(/\bOEMdocumentation support\b/gi, "OEM/P-page/DEG/legal support")
+    .replace(/\bBase Coatdocumentation\b/gi, "Base Coat support")
+    .replace(/\b(OEM|P-page|DEG|legal)documentation\b/gi, "$1 support")
     .replace(/\bmountingdocumentation area\b/gi, "mounting documentation area")
     .replace(/\b(sensor|camera|radar|scan|calibration|module)0\.\s*\d+\b/gi, "$1")
     .replace(/\bReference:\s*source link\b\.?/gi, "")

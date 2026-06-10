@@ -37,11 +37,15 @@ type TextAnchor = {
   y: number;
   width: number;
   height: number;
+  pageWidth: number;
+  pageHeight: number;
+  synthetic?: boolean;
 };
 
 type MatchedFinding = {
   finding: CitationDensityFinding;
   anchor: TextAnchor;
+  matchKind: "line" | "page";
 };
 
 const SOURCE_BOUNDARY_TEXT =
@@ -59,6 +63,8 @@ const LABELS = [
   "ESTIMATE GAP ONLY",
   "WEAK — DO NOT LEAD",
 ] as const;
+
+const NO_LINE_ANCHORS_WARNING = "No line-level anchors could be placed.";
 
 const exportCache = new Map<string, { bytes: Uint8Array; filename: string; createdAt: number }>();
 const EXPORT_TTL_MS = 30 * 60 * 1000;
@@ -113,12 +119,27 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
 
   for (const finding of findings) {
     const anchor = findBestAnchorForFinding(finding, anchors, usedAnchors);
-    if (!anchor) {
+    if (anchor) {
+      usedAnchors.add(anchor);
+      matches.push({ finding, anchor, matchKind: "line" });
+      continue;
+    }
+
+    const pageAnchor = findBestPageAnchorForFinding(finding, anchors, usedAnchors, pdfDoc);
+    if (!pageAnchor) {
       unmatched.push(finding);
       continue;
     }
-    usedAnchors.add(anchor);
-    matches.push({ finding, anchor });
+
+    if (!pageAnchor.synthetic) usedAnchors.add(pageAnchor);
+    matches.push({ finding, anchor: pageAnchor, matchKind: "page" });
+  }
+
+  const lineMatchCount = matches.filter((match) => match.matchKind === "line").length;
+  if (findings.length > 0 && lineMatchCount === 0) {
+    warnings.push(
+      `${NO_LINE_ANCHORS_WARNING} Findings were placed as page-level callouts and/or appendix entries.`
+    );
   }
 
   matches.forEach((match, index) => {
@@ -130,6 +151,15 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       redactSensitive: request.redactSensitive !== false,
     });
   });
+
+  if (findings.length > 0 && lineMatchCount === 0) {
+    addNoLineAnchorWarningPage(pdfDoc, {
+      font,
+      boldFont,
+      pageCalloutCount: matches.length,
+      appendixCount: unmatched.length,
+    });
+  }
 
   if (request.includeLegend !== false) {
     addLegendPage(pdfDoc, { font, boldFont });
@@ -197,6 +227,8 @@ async function extractPdfTextAnchors(bytes: Uint8Array): Promise<TextAnchor[]> {
         y: viewport.height - pdfJsY - height * 0.4,
         width,
         height,
+        pageWidth: viewport.width,
+        pageHeight: viewport.height,
       });
     }
   }
@@ -219,6 +251,98 @@ function findBestAnchorForFinding(
   }
 
   return best && best.score >= 28 ? best.anchor : null;
+}
+
+function findBestPageAnchorForFinding(
+  finding: CitationDensityFinding,
+  anchors: TextAnchor[],
+  usedAnchors: Set<TextAnchor>,
+  pdfDoc: PDFDocument
+): TextAnchor | null {
+  if (!anchors.length) return null;
+
+  const pageScores = new Map<number, { score: number; anchor: TextAnchor | null }>();
+  for (const anchor of anchors) {
+    if (usedAnchors.has(anchor)) continue;
+    const score = scorePageAnchor(finding, anchor);
+    if (score <= 0) continue;
+    const current = pageScores.get(anchor.pageIndex);
+    if (!current || score > current.score) {
+      pageScores.set(anchor.pageIndex, { score, anchor });
+    }
+  }
+
+  const best = [...pageScores.entries()].sort((a, b) => b[1].score - a[1].score)[0];
+  if (!best || best[1].score < 12 || !best[1].anchor) return null;
+
+  const page = pdfDoc.getPage(best[0]);
+  const pageWidth = page.getWidth();
+  const pageHeight = page.getHeight();
+  const anchor = best[1].anchor;
+  const desiredY = clamp(pageHeight - 96 - (best[0] % 4) * 36, 132, pageHeight - 76);
+
+  return {
+    pageIndex: best[0],
+    text: `Page-level citation density callout: ${finding.operationLabel}`,
+    normalizedText: normalizeMatchText(finding.operationLabel),
+    x: clamp(anchor.x, 42, Math.max(42, pageWidth - 210)),
+    y: pageHeight - desiredY - 12,
+    width: Math.min(Math.max(anchor.width, 150), pageWidth - 84),
+    height: 12,
+    pageWidth,
+    pageHeight,
+    synthetic: true,
+  };
+}
+
+function scorePageAnchor(finding: CitationDensityFinding, anchor: TextAnchor): number {
+  const anchorText = anchor.normalizedText;
+  const keywords = buildFindingKeywords(finding);
+  let score = 0;
+
+  for (const keyword of keywords) {
+    if (keyword.length > 2 && anchorText.includes(keyword)) score += keyword.length > 5 ? 8 : 4;
+  }
+
+  for (const item of [finding.carrierEvidence, finding.shopEvidence].filter(Boolean)) {
+    if (typeof item?.amount === "number" && anchorText.includes(normalizeMoney(item.amount))) score += 8;
+    if (typeof item?.laborHours === "number" && anchorText.includes(String(item.laborHours))) score += 7;
+  }
+
+  return score;
+}
+
+function buildFindingKeywords(finding: CitationDensityFinding) {
+  const source = [
+    finding.operationLabel,
+    finding.carrierEvidence?.description,
+    finding.shopEvidence?.description,
+    finding.currentSupportSummary,
+    finding.missingProofSummary,
+    finding.recommendedNextAction,
+    ...finding.missingAuthorityTypes,
+  ].join(" ");
+  const normalized = normalizeMatchText(source);
+  const terms = normalized.split(" ").filter((term) =>
+    term.length > 3 &&
+    !/^\d+$/.test(term) &&
+    !COMMON_MATCH_TERMS.has(term)
+  );
+  const extras: string[] = [];
+
+  if (/struct|frame|unibody|apron|rail|measure|dimension|pull|set up|setup/.test(normalized)) {
+    extras.push("structural", "frame", "measure", "dimension", "set", "setup", "apron", "rail");
+  }
+  if (/door|shell/.test(normalized)) extras.push("door", "shell");
+  if (/steer|suspension|align/.test(normalized)) extras.push("steering", "suspension", "align");
+  if (/calibration|adas|scan|radar|camera|module/.test(normalized)) {
+    extras.push("calibration", "adas", "scan", "radar", "camera", "module");
+  }
+  if (/refinish|paint|blend|base coat|clear coat/.test(normalized)) {
+    extras.push("refinish", "paint", "blend", "base", "coat");
+  }
+
+  return [...new Set([...terms.slice(0, 18), ...extras])];
 }
 
 function scoreAnchor(finding: CitationDensityFinding, anchor: TextAnchor): number {
@@ -296,16 +420,24 @@ function drawFindingAnnotation(
 
   if (options.mode === "margin_callouts" || options.mode === "both") {
     const boxWidth = Math.min(185, Math.max(135, pageWidth * 0.32));
-    const boxX = anchor.x + highlightWidth + boxWidth + 18 < pageWidth
+    const hasRightMargin = anchor.x + highlightWidth + boxWidth + 18 < pageWidth;
+    const hasLeftMargin = anchor.x - boxWidth - 18 > 18;
+    const boxX = hasRightMargin
       ? anchor.x + highlightWidth + 8
-      : Math.max(pageWidth - boxWidth - 18, 18);
-    const boxY = clamp(highlightY - 64, 26, pageHeight - 104);
+      : hasLeftMargin
+        ? anchor.x - boxWidth - 8
+        : 18;
+    const boxY = hasRightMargin || hasLeftMargin
+      ? clamp(highlightY - 64, 26, pageHeight - 104)
+      : 26;
+    const finalBoxWidth = hasRightMargin || hasLeftMargin ? boxWidth : pageWidth - 36;
+    const boxHeight = hasRightMargin || hasLeftMargin ? 92 : 84;
     const label = getProofBucketLabel(finding);
     const lines = buildCalloutLines(finding, number, label, options.redactSensitive);
 
     page.drawLine({
       start: { x: Math.min(anchor.x + highlightWidth + 2, pageWidth - 20), y: highlightY + 4 },
-      end: { x: boxX, y: boxY + 74 },
+      end: { x: boxX, y: boxY + boxHeight - 18 },
       thickness: 0.7,
       color: rgb(0.68, 0.2, 0.16),
       opacity: 0.85,
@@ -313,8 +445,8 @@ function drawFindingAnnotation(
     page.drawRectangle({
       x: boxX,
       y: boxY,
-      width: boxWidth,
-      height: 92,
+      width: finalBoxWidth,
+      height: boxHeight,
       color: rgb(1, 0.98, 0.9),
       borderColor: rgb(0.68, 0.2, 0.16),
       borderWidth: 0.8,
@@ -322,8 +454,8 @@ function drawFindingAnnotation(
     });
     drawWrappedLines(page, lines, {
       x: boxX + 6,
-      y: boxY + 79,
-      width: boxWidth - 12,
+      y: boxY + boxHeight - 13,
+      width: finalBoxWidth - 12,
       font: options.font,
       boldFont: options.boldFont,
       size: 6.7,
@@ -377,6 +509,36 @@ function addLegendPage(pdfDoc: PDFDocument, options: { font: PDFFont; boldFont: 
     });
     y -= 24;
   }
+}
+
+function addNoLineAnchorWarningPage(
+  pdfDoc: PDFDocument,
+  options: { font: PDFFont; boldFont: PDFFont; pageCalloutCount: number; appendixCount: number }
+) {
+  const page = pdfDoc.addPage();
+  const { width, height } = page.getSize();
+  page.drawText(NO_LINE_ANCHORS_WARNING, {
+    x: 48,
+    y: height - 58,
+    size: 18,
+    font: options.boldFont,
+    color: rgb(0.68, 0.2, 0.16),
+  });
+  drawWrappedLines(page, [
+    "The original estimate pages were preserved. Collision IQ could not place exact line-level anchors from the extracted PDF text.",
+    `Page-level callouts placed on original estimate pages: ${options.pageCalloutCount}.`,
+    `Findings appended in the unanchored appendix: ${options.appendixCount}.`,
+    "Review the highlighted sections and appendix before relying on these findings.",
+  ], {
+    x: 48,
+    y: height - 92,
+    width: width - 96,
+    font: options.font,
+    boldFont: options.boldFont,
+    size: 10,
+    lineHeight: 14,
+    maxLines: 16,
+  });
 }
 
 function addSummaryPage(
@@ -492,7 +654,9 @@ function normalizeSourceBoundaryText(value: string) {
   return value
     .replace(/\bEstimate documentation the existence of a difference\.?/gi, "Estimate evidence supports the existence of a difference.")
     .replace(/\bCCC Secure Share documentation this estimate line was present in the structured estimate data\.?/gi, CCC_SOURCE_BOUNDARY_TEXT)
-    .replace(/\bOEMdocumentation support\b/gi, "OEM/P-page/DEG/legal support");
+    .replace(/\bOEMdocumentation support\b/gi, "OEM/P-page/DEG/legal support")
+    .replace(/\bBase Coatdocumentation\b/gi, "Base Coat support")
+    .replace(/\b(OEM|P-page|DEG|legal)documentation\b/gi, "$1 support");
 }
 
 function drawWrappedLines(
@@ -583,6 +747,25 @@ function sharedTermScore(a: string, b: string, max: number) {
   const matches = terms.filter((term) => b.includes(term)).length;
   return Math.min(max, Math.round((matches / terms.length) * max));
 }
+
+const COMMON_MATCH_TERMS = new Set([
+  "line",
+  "item",
+  "estimate",
+  "carrier",
+  "shop",
+  "proof",
+  "needed",
+  "needs",
+  "support",
+  "current",
+  "missing",
+  "action",
+  "attach",
+  "procedure",
+  "invoice",
+  "present",
+]);
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
