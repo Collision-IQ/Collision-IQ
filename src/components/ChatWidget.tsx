@@ -584,6 +584,29 @@ function isVideoAttachment(attachment: Pick<Attachment, "mime" | "filename" | "c
   );
 }
 
+function shouldGenerateAnnotatedCitationDensityEstimate(message: string) {
+  const normalized = message.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+  if (/\bsummary report\b|\bgap report\b|\bstandalone report\b/.test(normalized)) {
+    return false;
+  }
+
+  return (
+    /\bannotated estimate\b/.test(normalized) ||
+    /\bmark\s*up the estimate\b/.test(normalized) ||
+    /\bshow this on the estimate\b/.test(normalized) ||
+    /\bcitation density markup\b/.test(normalized) ||
+    /\bexport annotated carrier estimate\b/.test(normalized) ||
+    /\bregenerate the estimate pdf with annotations\b/.test(normalized)
+  );
+}
+
+function selectAnnotatedEstimateSourcePdf(attachments: Attachment[]) {
+  return attachments.find((attachment) =>
+    attachment.mime === "application/pdf" || /\.pdf$/i.test(attachment.filename)
+  );
+}
+
 function buildVideoDocumentationStatus(attachments: Array<Pick<Attachment, "filename">>) {
   const count = attachments.length;
   const names = attachments.map((attachment) => attachment.filename).join(", ");
@@ -1718,6 +1741,65 @@ export default function ChatWidget({
     onCaseIntentChange?.(messageToSend || caseIntent);
 
     try {
+      if (shouldGenerateAnnotatedCitationDensityEstimate(messageToSend)) {
+        const activeCaseId = analysisReportIdRef.current;
+        const sourcePdf = selectAnnotatedEstimateSourcePdf(attachments);
+
+        if (activeCaseId && sourcePdf) {
+          upsertSystemStatusMessage("Generating annotated citation density estimate PDF...");
+          const exportResponse = await fetch("/api/reports/citation-density/annotated-estimate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: controller.signal,
+            body: JSON.stringify({
+              caseId: activeCaseId,
+              sourceDocumentId: sourcePdf.attachmentId,
+              targetEstimate: "selected",
+              annotationMode: "both",
+              includeLegend: true,
+              includeSummaryPage: false,
+              redactSensitive: true,
+            }),
+          });
+
+          if (!exportResponse.ok) {
+            const data = (await exportResponse.json().catch(() => null)) as { error?: string } | null;
+            throw new Error(data?.error || "Annotated estimate export failed.");
+          }
+
+          const data = (await exportResponse.json()) as {
+            downloadUrl?: string;
+            annotatedFindingCount?: number;
+            unresolvedAnchorCount?: number;
+            warnings?: string[];
+          };
+          const warningText = data.warnings?.length
+            ? `\n\nWarnings: ${data.warnings.join(" ")}`
+            : "";
+          const reply = [
+            `Annotated estimate PDF is ready: [Download annotated estimate](${data.downloadUrl ?? "#"})`,
+            `Annotated findings: ${data.annotatedFindingCount ?? 0}.`,
+            `Unanchored findings: ${data.unresolvedAnchorCount ?? 0}.`,
+            warningText,
+          ].filter(Boolean).join("\n");
+
+          if (sessionRef.current === mySession) {
+            clearActiveSystemStatusMessage();
+            stopSpeaking();
+            messageCounterRef.current += 1;
+            const assistantMessage = createMessage(messageCounterRef.current, "assistant", reply);
+            setMessages((prev) => [...prev, assistantMessage]);
+            updateAnalysisText(reply);
+            onPrimaryAnalysisChange?.({
+              messageId: assistantMessage.id,
+              content: reply,
+            });
+          }
+
+          return;
+        }
+      }
+
       const shouldUseCaseChat =
         !hasAttachmentsInTurn && caseChatEnabled && Boolean(analysisReportIdRef.current);
 

@@ -407,6 +407,9 @@ run("Citation Density Gap Report shows citation gaps beside estimate anchors", (
   assert.match(text, /Estimate evidence supports the existence of a difference/i);
   assert.match(text, /CCC Secure Share source confirms this estimate line was present in the structured estimate data/i);
   assert.match(text, /The CCC estimate data supports the existence of this line-item difference\. OEM\/P-page\/DEG\/legal support has not yet been verified/i);
+  assert.doesNotMatch(text, /Estimate documentation the existence/i);
+  assert.doesNotMatch(text, /CCC Secure Share documentation this estimate line/i);
+  assert.doesNotMatch(text, /OEMdocumentation/i);
   assert.doesNotMatch(text, /Support Confidence|Confidence:|evidence-chain-12345|Parser fragment/);
   assert.doesNotMatch(text, /Operation: .* \| Status:/i);
   assert.doesNotMatch(text, /DOI violation|violated law/i);

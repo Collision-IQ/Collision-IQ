@@ -282,7 +282,7 @@ function buildAnnotatedEstimateDocument(params: {
     footer: params.footer ?? [
       "This Citation Density Gap Report is an estimate and support-readiness review, not a DOI complaint or legal-violation analysis.",
       "Estimate changes are framed as repair-scope, documentation, supplement, or proof requests.",
-      "Estimate evidence can show that a line exists, is missing, or changed. It is not treated as OEM, P-page, DEG, legal, policy, invoice, scan, calibration, or completion proof.",
+      "Estimate evidence supports the existence of a difference. It does not automatically prove OEM, P-page, DEG, legal, policy, or carrier-violation authority.",
       "Attach the controlling procedure, estimating guide, citation, invoice, scan, calibration, photo, measurement, or completion record before treating a support item as verified authority.",
       "Customer-facing exports omit confidence scoring and evidence-chain identifiers.",
     ],
