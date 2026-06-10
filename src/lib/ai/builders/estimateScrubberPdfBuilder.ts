@@ -719,6 +719,26 @@ function buildCitationDensityFindingFromScrubFinding(params: {
       ? buildCitationEvidence(params.comparison.shopLine, "Shop estimate")
       : undefined,
     carrierEvidence: buildCitationEvidence(params.comparison?.carrierLine ?? params.anchor.text, "Carrier or selected estimate"),
+    applicableEstimateRoles: inferApplicableEstimateRoles(
+      mapEstimateGapType(params.finding.citationGapBucket, params.supportStatus),
+      Boolean(params.comparison?.shopLine),
+      true
+    ),
+    primaryAnnotationRole: inferPrimaryAnnotationRole(
+      mapEstimateGapType(params.finding.citationGapBucket, params.supportStatus),
+      Boolean(params.comparison?.shopLine),
+      true
+    ),
+    carrierAnchor: buildCitationLineAnchor(
+      buildCitationEvidence(params.comparison?.carrierLine ?? params.anchor.text, "Carrier or selected estimate"),
+      "carrier",
+      cleanCustomerFacingEstimateLine(params.finding.operation)
+    ),
+    shopAnchor: params.comparison?.shopLine
+      ? buildCitationLineAnchor(buildCitationEvidence(params.comparison.shopLine, "Shop estimate"), "shop", cleanCustomerFacingEstimateLine(params.finding.operation))
+      : undefined,
+    crossEstimateIssue: Boolean(params.comparison?.shopLine && params.comparison?.carrierLine),
+    counterpartSummary: params.comparison?.difference ?? undefined,
     impact: buildCitationImpact(text, params.finding.severity),
     citationStatus,
     citationDensityScore: params.citationDensityScore,
@@ -757,6 +777,22 @@ function buildCitationDensityFindingFromComparison(params: {
     estimateGapType: mapEstimateGapType(params.citationGapBucket, "referenced"),
     shopEvidence: buildCitationEvidence(params.higherLine ?? formatComparisonValue(params.row.lhsValue), params.row.lhsSource ?? "Shop estimate"),
     carrierEvidence: buildCitationEvidence(params.lowerLine ?? params.anchor?.text ?? formatComparisonValue(params.row.rhsValue), params.row.rhsSource ?? "Carrier or selected estimate"),
+    applicableEstimateRoles: ["carrier", "shop"],
+    primaryAnnotationRole: "both",
+    carrierAnchor: buildCitationLineAnchor(
+      buildCitationEvidence(params.lowerLine ?? params.anchor?.text ?? formatComparisonValue(params.row.rhsValue), params.row.rhsSource ?? "Carrier or selected estimate"),
+      "carrier",
+      params.title
+    ),
+    shopAnchor: buildCitationLineAnchor(
+      buildCitationEvidence(params.higherLine ?? formatComparisonValue(params.row.lhsValue), params.row.lhsSource ?? "Shop estimate"),
+      "shop",
+      params.title
+    ),
+    crossEstimateIssue: true,
+    counterpartSummary: params.row.delta !== undefined && params.row.delta !== null
+      ? String(params.row.delta)
+      : params.row.notes?.join("; ") ?? undefined,
     impact: buildCitationImpact(text, mapCategoryPriority(params.category)),
     citationStatus,
     citationDensityScore: params.citationDensityScore,
@@ -871,6 +907,47 @@ function buildCitationEvidence(
     laborHours: extractLaborHours(cleaned),
     sourceLabel: sourceLabel ?? null,
   };
+}
+
+function buildCitationLineAnchor(
+  evidence: NonNullable<CitationDensityFinding["shopEvidence"]> | undefined,
+  estimateRole: "carrier" | "shop",
+  operation: string | null | undefined
+): CitationDensityFinding["carrierAnchor"] {
+  if (!evidence && !operation) return undefined;
+  return {
+    estimateRole,
+    lineNumber: evidence?.lineNumber ?? null,
+    operation: cleanCustomerFacingEstimateLine(operation) || evidence?.description || null,
+    description: evidence?.description ?? cleanCustomerFacingEstimateLine(operation) ?? null,
+    amount: evidence?.amount ?? null,
+    laborHours: evidence?.laborHours ?? null,
+  };
+}
+
+function inferApplicableEstimateRoles(
+  estimateGapType: CitationDensityFinding["estimateGapType"],
+  hasShopEvidence: boolean,
+  hasCarrierEvidence: boolean
+): Array<"carrier" | "shop"> {
+  if (estimateGapType === "reduced_by_carrier") return ["carrier", "shop"];
+  if (estimateGapType === "missing_from_carrier") return hasShopEvidence ? ["shop", "carrier"] : ["carrier"];
+  if (estimateGapType === "present_but_under_documented" && hasCarrierEvidence && !hasShopEvidence) return ["carrier"];
+  if (hasShopEvidence && hasCarrierEvidence) return ["carrier", "shop"];
+  if (hasShopEvidence) return ["shop"];
+  return ["carrier"];
+}
+
+function inferPrimaryAnnotationRole(
+  estimateGapType: CitationDensityFinding["estimateGapType"],
+  hasShopEvidence: boolean,
+  hasCarrierEvidence: boolean
+): "carrier" | "shop" | "both" {
+  const roles = inferApplicableEstimateRoles(estimateGapType, hasShopEvidence, hasCarrierEvidence);
+  if (roles.length > 1 && (estimateGapType === "reduced_by_carrier" || hasShopEvidence && hasCarrierEvidence)) {
+    return "both";
+  }
+  return roles[0] ?? "carrier";
 }
 
 function buildCitationImpact(

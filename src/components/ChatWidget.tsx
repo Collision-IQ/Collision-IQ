@@ -1751,6 +1751,7 @@ export default function ChatWidget({
 
           const data = (await exportResponse.json()) as {
             downloadUrl?: string;
+            outputs?: Array<{ estimateRole?: string; downloadUrl?: string; unresolvedAnchorCount?: number }>;
             annotatedFindingCount?: number;
             unresolvedAnchorCount?: number;
             warnings?: string[];
@@ -1760,9 +1761,15 @@ export default function ChatWidget({
               ? " Unanchored items were placed in the appendix."
               : "";
           const warningText = data.warnings?.length ? `\n\nWarnings: ${data.warnings.join(" ")}` : "";
+          const downloadLinks = data.outputs?.length
+            ? data.outputs
+                .filter((output) => typeof output.downloadUrl === "string")
+                .map((output) => `[Download ${output.estimateRole ?? "annotated"} estimate](${output.downloadUrl})`)
+                .join("\n")
+            : `[Download annotated estimate](${data.downloadUrl ?? "#"})`;
           const reply =
             `Done — I generated the annotated citation-density estimate PDF. It preserves the original estimate layout and overlays citation/proof callouts.${unanchoredText}\n\n` +
-            `[Download annotated estimate](${data.downloadUrl ?? "#"})${warningText}`;
+            `${downloadLinks}${warningText}`;
 
           if (sessionRef.current === mySession) {
             clearActiveSystemStatusMessage();

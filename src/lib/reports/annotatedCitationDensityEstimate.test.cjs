@@ -189,7 +189,9 @@ async function run(name, test) {
     assert.equal(result.annotatedFindingCount, 0);
     assert.equal(result.unresolvedAnchorCount, 1);
     assert.match(result.warnings.join(" "), /No line-level anchors could be placed/);
+    assert.match(result.warnings.join(" "), /all_findings_unanchored/);
     assert.match(text, /No line-level anchors could be placed/);
+    assert.match(text, /Findings are listed in the appendix/);
     assert.match(text, /Unanchored Citation Density Findings/);
     assert.match(text, /Finding #:/);
     assert.doesNotMatch(text, /555-123-4567|test@example\.com|123 Main St/i);

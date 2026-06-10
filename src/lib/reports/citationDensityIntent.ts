@@ -1,4 +1,4 @@
-export type CitationDensityTargetEstimate = "carrier" | "shop" | "selected";
+export type CitationDensityTargetEstimate = "carrier" | "shop" | "selected" | "both" | "auto";
 
 export function shouldGenerateAnnotatedCitationDensityEstimate(message: string) {
   const normalized = message.toLowerCase().replace(/\s+/g, " ").trim();
@@ -9,6 +9,8 @@ export function shouldGenerateAnnotatedCitationDensityEstimate(message: string) 
 
   return (
     /\bannotated estimate\b/.test(normalized) ||
+    /\bannotate both estimates\b/.test(normalized) ||
+    /\bboth estimates\b.*\bcitation density\b/.test(normalized) ||
     /\bannotate the estimate\b/.test(normalized) ||
     /\bannotated citation density estimate(?: pdf)?\b/.test(normalized) ||
     /\bcitation density estimate pdf\b/.test(normalized) ||
@@ -24,7 +26,8 @@ export function shouldGenerateAnnotatedCitationDensityEstimate(message: string) 
 
 export function resolveAnnotatedCitationDensityTarget(message: string): CitationDensityTargetEstimate {
   const normalized = message.toLowerCase();
+  if (/\bboth estimates\b|\bannotate both\b|carrier and shop|shop and carrier/.test(normalized)) return "both";
   if (/\bshop\b|repair facility|body shop/.test(normalized)) return "shop";
   if (/\bcarrier\b|insurer|insurance|lower-cost|lower cost/.test(normalized)) return "carrier";
-  return "selected";
+  return "auto";
 }

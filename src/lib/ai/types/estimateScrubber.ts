@@ -29,6 +29,21 @@ export type CitationSupportStatus =
   | "not_found"
   | "not_applicable";
 
+export type CitationDensityEstimateRole = "carrier" | "shop";
+
+export type CitationDensityEstimateLineAnchor = {
+  sourceDocumentId?: string;
+  estimateRole: CitationDensityEstimateRole;
+  lineNumber?: string | null;
+  pageNumber?: number | null;
+  section?: string | null;
+  operation?: string | null;
+  description?: string | null;
+  amount?: number | null;
+  laborHours?: number | null;
+  paintHours?: number | null;
+};
+
 export type CitationDensityFinding = {
   id: string;
   operationLabel: string;
@@ -69,6 +84,12 @@ export type CitationDensityFinding = {
     laborHours?: number | null;
     sourceLabel?: string | null;
   };
+  applicableEstimateRoles?: CitationDensityEstimateRole[];
+  primaryAnnotationRole?: CitationDensityEstimateRole | "both";
+  carrierAnchor?: CitationDensityEstimateLineAnchor;
+  shopAnchor?: CitationDensityEstimateLineAnchor;
+  crossEstimateIssue?: boolean;
+  counterpartSummary?: string;
   impact: {
     dollarImpact?: number | null;
     laborHoursImpact?: number | null;

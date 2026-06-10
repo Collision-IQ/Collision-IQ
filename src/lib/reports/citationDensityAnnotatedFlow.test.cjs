@@ -39,6 +39,7 @@ const {
   describeReviewTarget,
   resolveSourceEstimatePdf,
   resolveSourceEstimatePdfSelection,
+  resolveSourceEstimatePdfSelections,
 } = require("./citationDensitySourcePdf.ts");
 
 function pdfAttachment(overrides = {}) {
@@ -151,6 +152,17 @@ run("chat intent routes annotated citation density carrier estimate requests to 
   assert.doesNotMatch(chatSource, /annotation map/i);
 });
 
+run("chat intent routes annotate both estimates requests to both-target export", () => {
+  const input = "Annotate both estimates with citation density findings.";
+
+  assert.equal(shouldGenerateAnnotatedCitationDensityEstimate(input), true);
+  assert.equal(resolveAnnotatedCitationDensityTarget(input), "both");
+
+  const chatSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatWidget.tsx"), "utf8");
+  assert.match(chatSource, /outputs\?: Array/);
+  assert.match(chatSource, /Download \$\{output\.estimateRole/);
+});
+
 run("explicit standalone summary requests do not trigger annotated estimate intent", () => {
   assert.equal(shouldGenerateAnnotatedCitationDensityEstimate("Download the Citation Density summary report."), false);
   assert.equal(shouldGenerateAnnotatedCitationDensityEstimate("Generate the standalone Citation Density Gap Report."), false);
@@ -255,6 +267,59 @@ run("shop target selects shop PDF when both carrier and shop estimates are uploa
   assert.equal(selection.attachment.id, "shop");
   assert.equal(selection.selectedEstimateRole, "shop");
   assert.equal(selection.selectedEstimateTotal, 7600);
+});
+
+run("shop target treats RTA appraisal PDFs as shop-side estimates", () => {
+  const carrier = pdfAttachment({
+    id: "carrier",
+    filename: "Carrier Estimate.pdf",
+    text: "Carrier insurance estimate lower cost total $3,200.00 ADAS calibration",
+  });
+  const rta = pdfAttachment({
+    id: "rta",
+    filename: "RTA Appraisal Estimate.pdf",
+    text: "Right to appraisal repair facility higher cost total $7,600.00 ADAS calibration",
+  });
+
+  const selection = resolveSourceEstimatePdfSelection({
+    attachments: [carrier, rta],
+    report: reportWithEvidenceRegistry(),
+    targetEstimate: "shop",
+    findings: [finding()],
+  });
+
+  assert.equal(selection.attachment.id, "rta");
+  assert.equal(selection.selectedEstimateRole, "shop");
+});
+
+run("both target returns carrier and shop source selections", () => {
+  const carrier = pdfAttachment({
+    id: "carrier",
+    filename: "Carrier Estimate.pdf",
+    text: "Carrier insurance estimate lower cost total $3,200.00 ADAS calibration",
+  });
+  const shop = pdfAttachment({
+    id: "shop",
+    filename: "Shop Estimate.pdf",
+    text: "Shop repair facility estimate higher cost total $7,600.00 ADAS calibration",
+  });
+
+  const selections = resolveSourceEstimatePdfSelection({
+    attachments: [carrier, shop],
+    report: reportWithEvidenceRegistry(),
+    targetEstimate: "both",
+    findings: [finding({ primaryAnnotationRole: "both", crossEstimateIssue: true })],
+  });
+
+  assert.equal(selections.selectedEstimateRole, "carrier");
+
+  const bothSelections = resolveSourceEstimatePdfSelections({
+    attachments: [carrier, shop],
+    report: reportWithEvidenceRegistry(),
+    targetEstimate: "both",
+    findings: [finding({ primaryAnnotationRole: "both", crossEstimateIssue: true })],
+  });
+  assert.deepEqual(bothSelections.map((selection) => selection.selectedEstimateRole).sort(), ["carrier", "shop"]);
 });
 
 run("missing source PDF returns clear user-facing missing-source message data", () => {

@@ -36,6 +36,10 @@ export function resolveSourceEstimatePdfSelection(params: {
   targetEstimate: CitationDensityTargetEstimate;
   findings: CitationDensityFinding[];
 }): SourceEstimatePdfSelection | null {
+  if (params.targetEstimate === "both" || params.targetEstimate === "auto") {
+    return resolveSourceEstimatePdfSelections(params)[0] ?? null;
+  }
+
   const pdfs = params.attachments.filter((attachment) =>
     isPdfDocument(attachment.type, attachment.filename) && Boolean(attachment.imageDataUrl)
   );
@@ -88,6 +92,66 @@ export function resolveSourceEstimatePdfSelection(params: {
   });
 }
 
+export function resolveSourceEstimatePdfSelections(params: {
+  attachments: StoredAttachment[];
+  report: RepairIntelligenceReport;
+  targetEstimate: CitationDensityTargetEstimate;
+  findings: CitationDensityFinding[];
+}): SourceEstimatePdfSelection[] {
+  const pdfs = params.attachments.filter((attachment) =>
+    isPdfDocument(attachment.type, attachment.filename) && Boolean(attachment.imageDataUrl)
+  );
+  if (pdfs.length === 0) return [];
+  if (pdfs.length === 1) {
+    const only = buildSelectionResult({
+      attachment: pdfs[0],
+      targetEstimate: params.targetEstimate,
+      selectedEstimateRole: "uploaded",
+      selectionReason: "Only one uploaded estimate PDF was available.",
+    });
+    return [only];
+  }
+
+  if (params.targetEstimate === "both") {
+    return [
+      resolveSourceEstimatePdfSelection({ ...params, targetEstimate: "carrier" }),
+      resolveSourceEstimatePdfSelection({ ...params, targetEstimate: "shop" }),
+    ].filter((selection): selection is SourceEstimatePdfSelection => Boolean(selection));
+  }
+
+  if (params.targetEstimate === "auto") {
+    if (params.findings.some((finding) => finding.primaryAnnotationRole === "both" || finding.crossEstimateIssue)) {
+      const bothSelections = resolveSourceEstimatePdfSelections({ ...params, targetEstimate: "both" });
+      if (bothSelections.length > 1) return bothSelections;
+    }
+
+    const roleCounts = params.findings.reduce(
+      (counts, finding) => {
+        const roles = finding.applicableEstimateRoles?.length
+          ? finding.applicableEstimateRoles
+          : inferFindingRoles(finding);
+        roles.forEach((role) => {
+          counts[role] += 1;
+        });
+        return counts;
+      },
+      { carrier: 0, shop: 0 }
+    );
+    const targetEstimate: CitationDensityTargetEstimate = roleCounts.shop > roleCounts.carrier ? "shop" : "carrier";
+    const selection = resolveSourceEstimatePdfSelection({ ...params, targetEstimate });
+    if (selection) {
+      return [{
+        ...selection,
+        targetEstimate: "auto",
+        selectionReason: `Auto-selected ${selection.selectedEstimateRole} estimate because most findings apply there.`,
+      }];
+    }
+  }
+
+  const selection = resolveSourceEstimatePdfSelection(params);
+  return selection ? [selection] : [];
+}
+
 export function scoreEstimatePdfCandidate(params: {
   attachment: StoredAttachment;
   targetEstimate: CitationDensityTargetEstimate;
@@ -100,10 +164,12 @@ export function scoreEstimatePdfCandidate(params: {
   if (/\bestimate\b|supplement|preliminary estimate|repair estimate/.test(text)) score += 30;
   if (/citation density|gap report|annotation legend|unanchored citation density/.test(text)) score -= 120;
   if (/carrier|insurer|insurance|appraiser|adjuster/.test(text)) score += params.targetEstimate === "shop" ? -18 : 45;
-  if (/shop|repair facility|body shop|repairer/.test(text)) score += params.targetEstimate === "shop" ? 45 : -28;
+  if (/shop|repair facility|body shop|repairer|rta|right to apprais|appraisal|appraiser report/.test(text)) {
+    score += params.targetEstimate === "shop" ? 45 : -28;
+  }
   if (/lower cost|lower cost|carrier estimate|insurer estimate/.test(text)) score += params.targetEstimate === "shop" ? -12 : 35;
   if (/rta|right to apprais|appraisal|appraiser report|collision academy|academy report|higher cost preliminary/.test(text)) {
-    score += params.targetEstimate === "carrier" ? -45 : -10;
+    score += params.targetEstimate === "carrier" ? -45 : 10;
   }
   if (/customer|invoice|repair order|policy|declarations|photo|image|scan report/.test(text)) score -= 14;
 
@@ -154,7 +220,7 @@ function inferEstimateRole(
   if (matchingEvidenceType === "carrier_estimate") return "carrier";
   if (matchingEvidenceType === "shop_estimate") return "shop";
   if (/carrier estimate|insurer estimate|carrier|insurer|insurance|lower cost/.test(text)) return "carrier";
-  if (/shop estimate|repair facility|body shop|repairer|higher cost/.test(text)) return "shop";
+  if (/shop estimate|repair facility|body shop|repairer|higher cost|rta|right to apprais|appraisal|appraiser report/.test(text)) return "shop";
   return "unknown";
 }
 
@@ -172,9 +238,10 @@ function isCompatibleSelection(
   targetEstimate: CitationDensityTargetEstimate,
   score: number
 ) {
-  if (targetEstimate === "selected") return score > -80;
+  if (targetEstimate === "selected" || targetEstimate === "auto") return score > -80;
   if (targetEstimate === "carrier") return role === "carrier" && score > 0;
   if (targetEstimate === "shop") return role === "shop" && score > 0;
+  if (targetEstimate === "both") return (role === "carrier" || role === "shop") && score > 0;
   return false;
 }
 
@@ -189,8 +256,23 @@ function buildSelectionReason(
   if (targetEstimate === "shop") {
     return `Selected the shop estimate PDF based on document role signals (score ${score}).`;
   }
+  if (targetEstimate === "both") return `Selected ${role} estimate PDF for a both-estimates annotation request.`;
+  if (targetEstimate === "auto") return `Auto-selected ${role} estimate PDF based on finding assignment and document role signals.`;
   if (role === "selected") return "Selected the active review estimate PDF.";
   return `Selected the best matching uploaded estimate PDF based on document role signals (score ${score}).`;
+}
+
+function inferFindingRoles(finding: CitationDensityFinding): Array<"carrier" | "shop"> {
+  if (finding.primaryAnnotationRole === "both") return ["carrier", "shop"];
+  if (finding.primaryAnnotationRole === "carrier" || finding.primaryAnnotationRole === "shop") {
+    return [finding.primaryAnnotationRole];
+  }
+  if (finding.estimateGapType === "reduced_by_carrier") return ["carrier", "shop"];
+  if (finding.estimateGapType === "missing_from_carrier") return finding.shopEvidence ? ["shop", "carrier"] : ["carrier"];
+  if (finding.shopEvidence && !finding.carrierEvidence) return ["shop"];
+  if (finding.carrierEvidence && !finding.shopEvidence) return ["carrier"];
+  if (finding.shopEvidence && finding.carrierEvidence) return ["carrier", "shop"];
+  return ["carrier"];
 }
 
 export function describeReviewTarget(

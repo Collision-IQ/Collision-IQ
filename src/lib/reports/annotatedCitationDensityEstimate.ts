@@ -14,8 +14,10 @@ export type AnnotationMode = "margin_callouts" | "inline_highlight" | "both";
 export type AnnotatedEstimateRequest = {
   findingIds?: string[];
   annotationMode?: AnnotationMode;
+  estimateRole?: "carrier" | "shop" | "selected";
   includeLegend?: boolean;
   includeSummaryPage?: boolean;
+  includeUnanchoredAppendix?: boolean;
   redactSensitive?: boolean;
 };
 
@@ -94,6 +96,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
 }): Promise<AnnotatedEstimateResult> {
   const request = params.request ?? {};
   const mode = request.annotationMode ?? "both";
+  const estimateRole = request.estimateRole ?? "selected";
   const selectedIds = new Set(request.findingIds?.filter(Boolean) ?? []);
   const findings = params.findings.filter((finding) => !selectedIds.size || selectedIds.has(finding.id));
   const warnings: string[] = [];
@@ -118,14 +121,14 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   const usedAnchors = new Set<TextAnchor>();
 
   for (const finding of findings) {
-    const anchor = findBestAnchorForFinding(finding, anchors, usedAnchors);
+    const anchor = findBestAnchorForFinding(finding, anchors, usedAnchors, estimateRole);
     if (anchor) {
       usedAnchors.add(anchor);
       matches.push({ finding, anchor, matchKind: "line" });
       continue;
     }
 
-    const pageAnchor = findBestPageAnchorForFinding(finding, anchors, usedAnchors, pdfDoc);
+    const pageAnchor = findBestPageAnchorForFinding(finding, anchors, usedAnchors, pdfDoc, estimateRole);
     if (!pageAnchor) {
       unmatched.push(finding);
       continue;
@@ -140,6 +143,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     warnings.push(
       `${NO_LINE_ANCHORS_WARNING} Findings were placed as page-level callouts and/or appendix entries.`
     );
+    if (matches.length === 0) warnings.push("all_findings_unanchored");
   }
 
   matches.forEach((match, index) => {
@@ -148,6 +152,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       mode,
       font,
       boldFont,
+      estimateRole,
       redactSensitive: request.redactSensitive !== false,
     });
   });
@@ -175,10 +180,11 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     });
   }
 
-  if (unmatched.length > 0) {
+  if (unmatched.length > 0 && request.includeUnanchoredAppendix !== false) {
     addUnanchoredAppendix(pdfDoc, unmatched, {
       font,
       boldFont,
+      estimateRole,
       redactSensitive: request.redactSensitive !== false,
     });
   }
@@ -239,12 +245,13 @@ async function extractPdfTextAnchors(bytes: Uint8Array): Promise<TextAnchor[]> {
 function findBestAnchorForFinding(
   finding: CitationDensityFinding,
   anchors: TextAnchor[],
-  usedAnchors: Set<TextAnchor>
+  usedAnchors: Set<TextAnchor>,
+  estimateRole: "carrier" | "shop" | "selected"
 ): TextAnchor | null {
   let best: { anchor: TextAnchor; score: number } | null = null;
   for (const anchor of anchors) {
     if (usedAnchors.has(anchor)) continue;
-    const score = scoreAnchor(finding, anchor);
+    const score = scoreAnchor(finding, anchor, estimateRole);
     if (score > (best?.score ?? 0)) {
       best = { anchor, score };
     }
@@ -257,14 +264,15 @@ function findBestPageAnchorForFinding(
   finding: CitationDensityFinding,
   anchors: TextAnchor[],
   usedAnchors: Set<TextAnchor>,
-  pdfDoc: PDFDocument
+  pdfDoc: PDFDocument,
+  estimateRole: "carrier" | "shop" | "selected"
 ): TextAnchor | null {
   if (!anchors.length) return null;
 
   const pageScores = new Map<number, { score: number; anchor: TextAnchor | null }>();
   for (const anchor of anchors) {
     if (usedAnchors.has(anchor)) continue;
-    const score = scorePageAnchor(finding, anchor);
+    const score = scorePageAnchor(finding, anchor, estimateRole);
     if (score <= 0) continue;
     const current = pageScores.get(anchor.pageIndex);
     if (!current || score > current.score) {
@@ -295,9 +303,13 @@ function findBestPageAnchorForFinding(
   };
 }
 
-function scorePageAnchor(finding: CitationDensityFinding, anchor: TextAnchor): number {
+function scorePageAnchor(
+  finding: CitationDensityFinding,
+  anchor: TextAnchor,
+  estimateRole: "carrier" | "shop" | "selected"
+): number {
   const anchorText = anchor.normalizedText;
-  const keywords = buildFindingKeywords(finding);
+  const keywords = buildFindingKeywords(finding, estimateRole);
   let score = 0;
 
   for (const keyword of keywords) {
@@ -312,11 +324,17 @@ function scorePageAnchor(finding: CitationDensityFinding, anchor: TextAnchor): n
   return score;
 }
 
-function buildFindingKeywords(finding: CitationDensityFinding) {
+function buildFindingKeywords(finding: CitationDensityFinding, estimateRole: "carrier" | "shop" | "selected") {
+  const roleEvidence = estimateRole === "shop" ? finding.shopEvidence : estimateRole === "carrier" ? finding.carrierEvidence : null;
+  const fallbackEvidence = estimateRole === "shop" ? finding.carrierEvidence : finding.shopEvidence;
+  const roleAnchor = estimateRole === "shop" ? finding.shopAnchor : estimateRole === "carrier" ? finding.carrierAnchor : null;
   const source = [
     finding.operationLabel,
-    finding.carrierEvidence?.description,
-    finding.shopEvidence?.description,
+    roleAnchor?.operation,
+    roleAnchor?.section,
+    roleAnchor?.description,
+    roleEvidence?.description,
+    fallbackEvidence?.description,
     finding.currentSupportSummary,
     finding.missingProofSummary,
     finding.recommendedNextAction,
@@ -345,19 +363,25 @@ function buildFindingKeywords(finding: CitationDensityFinding) {
   return [...new Set([...terms.slice(0, 18), ...extras])];
 }
 
-function scoreAnchor(finding: CitationDensityFinding, anchor: TextAnchor): number {
-  const evidence = [finding.carrierEvidence, finding.shopEvidence].filter(Boolean);
+function scoreAnchor(
+  finding: CitationDensityFinding,
+  anchor: TextAnchor,
+  estimateRole: "carrier" | "shop" | "selected"
+): number {
+  const primaryEvidence = estimateRole === "shop" ? finding.shopEvidence : estimateRole === "carrier" ? finding.carrierEvidence : null;
+  const secondaryEvidence = estimateRole === "shop" ? finding.carrierEvidence : finding.shopEvidence;
+  const evidence = [primaryEvidence, secondaryEvidence].filter(Boolean);
   const anchorText = anchor.normalizedText;
   let score = 0;
 
   for (const item of evidence) {
     if (item?.lineNumber && new RegExp(`(^|\\D)${escapeRegex(item.lineNumber)}(\\D|$)`).test(anchor.text)) {
-      score += 90;
+      score += item === primaryEvidence ? 110 : 70;
     }
     if (item?.description) {
       const description = normalizeMatchText(item.description);
       if (description && (anchorText.includes(description) || description.includes(anchorText))) {
-        score += 80;
+        score += item === primaryEvidence ? 95 : 55;
       }
       score += sharedTermScore(description, anchorText, 36);
     }
@@ -383,6 +407,7 @@ function drawFindingAnnotation(
     mode: AnnotationMode;
     font: PDFFont;
     boldFont: PDFFont;
+    estimateRole: "carrier" | "shop" | "selected";
     redactSensitive: boolean;
   }
 ) {
@@ -428,12 +453,12 @@ function drawFindingAnnotation(
         ? anchor.x - boxWidth - 8
         : 18;
     const boxY = hasRightMargin || hasLeftMargin
-      ? clamp(highlightY - 64, 26, pageHeight - 104)
+      ? clamp(highlightY - 74, 26, pageHeight - 120)
       : 26;
     const finalBoxWidth = hasRightMargin || hasLeftMargin ? boxWidth : pageWidth - 36;
-    const boxHeight = hasRightMargin || hasLeftMargin ? 92 : 84;
+    const boxHeight = hasRightMargin || hasLeftMargin ? 108 : 96;
     const label = getProofBucketLabel(finding);
-    const lines = buildCalloutLines(finding, number, label, options.redactSensitive);
+    const lines = buildCalloutLines(finding, number, label, options.redactSensitive, options.estimateRole);
 
     page.drawLine({
       start: { x: Math.min(anchor.x + highlightWidth + 2, pageWidth - 20), y: highlightY + 4 },
@@ -460,7 +485,7 @@ function drawFindingAnnotation(
       boldFont: options.boldFont,
       size: 6.7,
       lineHeight: 8,
-      maxLines: 10,
+      maxLines: 12,
     });
   }
 }
@@ -525,7 +550,9 @@ function addNoLineAnchorWarningPage(
     color: rgb(0.68, 0.2, 0.16),
   });
   drawWrappedLines(page, [
-    "The original estimate pages were preserved. Collision IQ could not place exact line-level anchors from the extracted PDF text.",
+    options.pageCalloutCount === 0
+      ? "Findings are listed in the appendix."
+      : "The original estimate pages were preserved. Collision IQ could not place exact line-level anchors from the extracted PDF text.",
     `Page-level callouts placed on original estimate pages: ${options.pageCalloutCount}.`,
     `Findings appended in the unanchored appendix: ${options.appendixCount}.`,
     "Review the highlighted sections and appendix before relying on these findings.",
@@ -578,7 +605,7 @@ function addSummaryPage(
 function addUnanchoredAppendix(
   pdfDoc: PDFDocument,
   findings: CitationDensityFinding[],
-  options: { font: PDFFont; boldFont: PDFFont; redactSensitive: boolean }
+  options: { font: PDFFont; boldFont: PDFFont; estimateRole: "carrier" | "shop" | "selected"; redactSensitive: boolean }
 ) {
   let page = pdfDoc.addPage();
   let y = page.getHeight() - 54;
@@ -591,7 +618,7 @@ function addUnanchoredAppendix(
   y -= 28;
 
   findings.forEach((finding, index) => {
-    const lines = buildCalloutLines(finding, index + 1, getProofBucketLabel(finding), options.redactSensitive);
+    const lines = buildCalloutLines(finding, index + 1, getProofBucketLabel(finding), options.redactSensitive, options.estimateRole);
     if (y < 118) {
       page = pdfDoc.addPage();
       y = page.getHeight() - 54;
@@ -614,7 +641,8 @@ function buildCalloutLines(
   finding: CitationDensityFinding,
   number: number,
   label: string,
-  redactSensitive: boolean
+  redactSensitive: boolean,
+  estimateRole: "carrier" | "shop" | "selected" = "selected"
 ) {
   const sanitize = (value: string) => {
     const text = normalizeSourceBoundaryText(value.replace(/\s+/g, " ").trim());
@@ -626,6 +654,7 @@ function buildCalloutLines(
     `Label: ${label}`,
     `Citation Density: ${finding.citationDensityScore}/100`,
     `Carrier issue: ${sanitize(finding.operationLabel)}`,
+    `Estimate note: ${sanitize(buildRoleCalloutNote(finding, estimateRole))}`,
     `Current support: ${sanitize(finding.currentSupportSummary)}`,
     `Missing proof: ${sanitize(finding.missingProofSummary)}`,
     `Next action: ${sanitize(finding.recommendedNextAction)}`,
@@ -639,6 +668,47 @@ function getProofBucketLabel(finding: CitationDensityFinding): string {
   if (finding.citationStatus.oem === "needed" || finding.missingAuthorityTypes.some((item) => /oem/i.test(item))) return "NEEDS OEM";
   if (finding.citationStatus.pPages === "needed" || finding.missingAuthorityTypes.some((item) => /p-?page/i.test(item))) return "NEEDS P-PAGE";
   return "ESTIMATE GAP ONLY";
+}
+
+function buildRoleCalloutNote(
+  finding: CitationDensityFinding,
+  estimateRole: "carrier" | "shop" | "selected"
+) {
+  const delta = buildEstimateDeltaText(finding);
+  if (finding.crossEstimateIssue || finding.primaryAnnotationRole === "both" || finding.estimateGapType === "reduced_by_carrier") {
+    return `Cross-estimate conflict. Carrier and shop estimates carry different labor/amount/scope. Reconcile with procedure support and completion proof.${delta}`;
+  }
+  if (estimateRole === "carrier") {
+    if (finding.estimateGapType === "missing_from_carrier") {
+      return "Missing or not located compared with shop estimate. Estimate evidence shows a difference, but OEM/P-page/invoice support has not yet been verified.";
+    }
+    return `Reduced or missing compared with shop estimate. Estimate evidence shows a difference, but OEM/P-page/invoice support has not yet been verified.${delta}`;
+  }
+  if (estimateRole === "shop") {
+    if (finding.estimateGapType === "missing_from_carrier") {
+      return "Not clearly carried on carrier estimate. Do not lead with this line until the missing OEM/P-page/invoice support is attached.";
+    }
+    return "Shop-added item. Do not lead with this line until the missing OEM/P-page/invoice support is attached.";
+  }
+  return "Estimate evidence shows a Citation Density issue. Verify authority and completion proof before leading with this item.";
+}
+
+function buildEstimateDeltaText(finding: CitationDensityFinding) {
+  const amountDelta =
+    typeof finding.shopEvidence?.amount === "number" && typeof finding.carrierEvidence?.amount === "number"
+      ? ` Amount delta: ${formatSignedNumber(finding.shopEvidence.amount - finding.carrierEvidence.amount)}.`
+      : "";
+  const laborDelta =
+    typeof finding.shopEvidence?.laborHours === "number" && typeof finding.carrierEvidence?.laborHours === "number"
+      ? ` Labor delta: ${formatSignedNumber(finding.shopEvidence.laborHours - finding.carrierEvidence.laborHours)} hrs.`
+      : "";
+  const counterpart = finding.counterpartSummary ? ` ${finding.counterpartSummary}` : "";
+  return `${amountDelta}${laborDelta}${counterpart}`;
+}
+
+function formatSignedNumber(value: number) {
+  const rounded = Math.round(value * 100) / 100;
+  return rounded > 0 ? `+${rounded}` : String(rounded);
 }
 
 function redactAnnotationText(value: string): string {
