@@ -222,7 +222,7 @@ function safeReportLabel(reportType: ReportKind): string {
     case "repair_intelligence":
       return "Repair Intelligence Report";
     case "estimate_scrubber":
-      return "Citation Density Gap Report";
+      return "Citation Density Annotated Estimate";
     case "policy_rights_review":
       return "Policy & Rights Review";
     case "customer_report":

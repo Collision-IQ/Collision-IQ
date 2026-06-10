@@ -175,6 +175,8 @@ run("export card primary Citation Density action calls annotated route, not stan
   const standaloneBuilderIndex = source.indexOf("buildAnnotatedEstimateReviewPdf", downloadIndex);
 
   assert.match(source, /Download annotated estimate/);
+  assert.match(source, /Citation Density Estimate Annotations/);
+  assert.doesNotMatch(source, /<FileText[\s\S]{0,300}Citation Density Gap Report/);
   assert.match(source, /Download summary report/);
   assert.match(source, /downloadCitationDensitySummaryReport/);
   assert.ok(annotatedFetchIndex > downloadIndex);

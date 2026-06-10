@@ -945,9 +945,9 @@ export function ChatbotWorkspacePage() {
         ? { label: "Repair Intelligence Report (Pro)", type: "locked" }
       : null,
     canUseEstimateScrubberExport
-      ? { label: "Citation Density Gap Report", type: "pdf" }
+      ? { label: "Citation Density Estimate Annotations", type: "pdf" }
       : hasResolvedAnalysis
-        ? { label: "Citation Density Gap Report (Pro)", type: "locked" }
+        ? { label: "Citation Density Estimate Annotations (Pro)", type: "locked" }
       : null,
     canUsePolicyRightsReviewExport
       ? { label: "Policy & Rights Review", type: "pdf" }
@@ -2931,10 +2931,10 @@ function RailContent({
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[#C65A2A]" aria-hidden />
-                    Citation Density Gap Report
+                    Citation Density Estimate Annotations
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                    Estimate gaps ranked by repair impact, citation readiness, and missing proof.
+                    Mark citation/proof gaps on the estimate document or documents that contain the disputed lines.
                   </div>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -2958,7 +2958,7 @@ function RailContent({
                     onClick={() => openReportSend("estimate_scrubber", "carrier")}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[#C65A2A] bg-[#C65A2A] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
-                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>
+                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email annotated estimate</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
@@ -3463,7 +3463,7 @@ function getDefaultReportSubject(reportType: ReportKind): string {
     case "repair_intelligence":
       return "[Collision IQ] Repair Intelligence Report";
     case "estimate_scrubber":
-      return "[Collision IQ] Citation Density Gap Report";
+      return "[Collision IQ] Citation Density Annotated Estimate";
     case "estimator_change_request_list":
       return "[Collision IQ] Estimate Delta / Change Requests";
     case "policy_rights_review":
