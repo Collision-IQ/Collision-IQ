@@ -58,6 +58,7 @@ const CCC_LIMITATION_TEXT =
   "The CCC estimate data supports the existence of this line-item difference. OEM/P-page/DEG/legal support has not yet been verified.";
 
 const LABELS = [
+  "VERIFIED DOCUMENTATION",
   "VERIFIED OEM",
   "VERIFIED ADAS",
   "VERIFIED LEGAL",
@@ -67,6 +68,7 @@ const LABELS = [
   "NEEDS INVOICE",
   "REFERENCED / NOT PRODUCED",
   "ESTIMATE GAP ONLY",
+  "ONLINE FALLBACK",
   "WEAK — DO NOT LEAD",
 ] as const;
 
@@ -558,7 +560,7 @@ function addNoLineAnchorWarningPage(
   });
   drawWrappedLines(page, [
     options.pageCalloutCount === 0
-      ? "Findings are listed in the appendix."
+      ? "No estimate-page anchors were placed. Findings are listed in the appendix."
       : "The original estimate pages were preserved. Collision IQ could not place exact line-level anchors from the extracted PDF text.",
     `Page-level callouts placed on original estimate pages: ${options.pageCalloutCount}.`,
     `Findings appended in the unanchored appendix: ${options.appendixCount}.`,
@@ -692,9 +694,16 @@ function formatEmbeddedLinkLines(finding: CitationDensityFinding) {
 
 function getProofBucketLabel(finding: CitationDensityFinding): string {
   if (finding.citationLabel) return finding.citationLabel;
+  if (finding.bestAvailableAuthority?.type === "online_fallback") return "ONLINE FALLBACK";
   if (finding.citationStatus.oem === "verified") return "VERIFIED OEM";
   if (finding.citationStatus.adas === "verified") return "VERIFIED ADAS";
   if (finding.citationStatus.stateRegulation === "verified" || finding.citationStatus.policy === "verified") return "VERIFIED LEGAL";
+  if (
+    finding.citationStatus.invoiceOrCompletionProof === "verified" ||
+    finding.citationStatus.photoOrTeardownProof === "verified"
+  ) {
+    return "VERIFIED DOCUMENTATION";
+  }
   if (Object.values(finding.citationStatus).some((value) => value === "referenced_not_produced")) return "REFERENCED / NOT PRODUCED";
   if (finding.citationStatus.adas === "needed" && isAdasRelatedFinding(finding)) return "NEEDS ADAS";
   if (finding.estimateGapType === "weak_do_not_lead") return "WEAK — DO NOT LEAD";

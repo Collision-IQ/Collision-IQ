@@ -149,8 +149,8 @@ run("chat intent routes annotated citation density carrier estimate requests to 
 
   const chatSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatWidget.tsx"), "utf8");
   assert.match(chatSource, /\/api\/reports\/citation-density\/annotated-estimate/);
-  assert.match(chatSource, /sourceDocumentId:\s*sourcePdf\.attachmentId/);
-  assert.match(chatSource, /Download annotated estimate/);
+  assert.doesNotMatch(chatSource, /sourceDocumentId:\s*sourcePdf\.attachmentId/);
+  assert.match(chatSource, /Download Citation Density PDF/);
   assert.doesNotMatch(chatSource, /I can't generate a PDF|I can only give you the annotation set|use this in Adobe|use this in Bluebeam/i);
   assert.doesNotMatch(chatSource, /annotation set|line-by-documentation map|ready-to-apply|annotation table|annotation map/i);
 });
@@ -172,7 +172,8 @@ run("chat intent routes annotate both estimates requests to both-target export",
 
   const chatSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatWidget.tsx"), "utf8");
   assert.match(chatSource, /outputs\?: Array/);
-  assert.match(chatSource, /Download \$\{output\.estimateRole/);
+  assert.match(chatSource, /Download Citation Density PDF/);
+  assert.match(chatSource, /output\.estimateRole/);
 });
 
 run("explicit standalone summary requests do not trigger annotated estimate intent", () => {
@@ -186,12 +187,15 @@ run("export card primary Citation Density action calls annotated route, not stan
   const annotatedFetchIndex = source.indexOf('"/api/reports/citation-density/annotated-estimate"', downloadIndex);
   const standaloneBuilderIndex = source.indexOf("buildAnnotatedEstimateReviewPdf", downloadIndex);
 
-  assert.match(source, /Download annotated estimate/);
-  assert.match(source, /Citation Density Estimate Annotations/);
+  assert.match(source, /Download Citation Density PDF/);
+  assert.match(source, /Email Citation Density PDF/);
+  assert.match(source, /Citation Density PDF/);
   assert.doesNotMatch(source, /<FileText[\s\S]{0,300}Citation Density Gap Report/);
   assert.doesNotMatch(source, /Download summary report/);
+  assert.doesNotMatch(source, /Estimate delta/);
   assert.doesNotMatch(source, /downloadCitationDensitySummaryReport/);
-  assert.match(source, /sourceDocumentId:\s*sourcePdf\.attachmentId/);
+  assert.doesNotMatch(source, /sourceDocumentId:\s*sourcePdf\.attachmentId/);
+  assert.match(source, /targetEstimate:\s*"auto"/);
   assert.match(source, /Citation Density annotated export requires an original estimate PDF/);
   assert.ok(annotatedFetchIndex > downloadIndex);
   assert.ok(standaloneBuilderIndex === -1 || annotatedFetchIndex < standaloneBuilderIndex);
@@ -254,6 +258,31 @@ run("carrier target selects carrier or lower-cost PDF over shop PDF", () => {
   });
 
   assert.equal(selected.id, "carrier");
+});
+
+run("auto target defaults to the lower estimate PDF in a two-estimate dispute", () => {
+  const carrier = pdfAttachment({
+    id: "carrier",
+    filename: "Carrier Estimate.pdf",
+    text: "Carrier insurance estimate lower cost total $3,200.00 ADAS calibration",
+  });
+  const shop = pdfAttachment({
+    id: "shop",
+    filename: "Shop Estimate.pdf",
+    text: "Shop repair facility estimate higher cost total $7,600.00 ADAS calibration",
+  });
+
+  const selections = resolveSourceEstimatePdfSelections({
+    attachments: [shop, carrier],
+    report: reportWithEvidenceRegistry(),
+    targetEstimate: "auto",
+    findings: [finding({ primaryAnnotationRole: "both", crossEstimateIssue: true })],
+  });
+
+  assert.equal(selections.length, 1);
+  assert.equal(selections[0].attachment.id, "carrier");
+  assert.equal(selections[0].selectedEstimateTotal, 3200);
+  assert.match(selections[0].selectionReason, /lower estimate PDF/i);
 });
 
 run("carrier target avoids appraisal, academy, and higher-cost preliminary PDFs", () => {

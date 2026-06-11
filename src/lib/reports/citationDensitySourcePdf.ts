@@ -125,10 +125,8 @@ export function resolveSourceEstimatePdfSelections(params: {
   }
 
   if (params.targetEstimate === "auto") {
-    if (params.findings.some((finding) => finding.primaryAnnotationRole === "both" || finding.crossEstimateIssue)) {
-      const bothSelections = resolveSourceEstimatePdfSelections({ ...params, targetEstimate: "both" });
-      if (bothSelections.length > 1) return bothSelections;
-    }
+    const lowerEstimateSelection = resolveLowerEstimatePdfSelection(params);
+    if (lowerEstimateSelection) return [lowerEstimateSelection];
 
     const roleCounts = params.findings.reduce(
       (counts, finding) => {
@@ -155,6 +153,48 @@ export function resolveSourceEstimatePdfSelections(params: {
 
   const selection = resolveSourceEstimatePdfSelection(params);
   return selection ? [selection] : [];
+}
+
+function resolveLowerEstimatePdfSelection(params: {
+  attachments: StoredAttachment[];
+  report: RepairIntelligenceReport;
+  targetEstimate: CitationDensityTargetEstimate;
+  findings: CitationDensityFinding[];
+}): SourceEstimatePdfSelection | null {
+  const pdfs = params.attachments.filter(isAnnotatableEstimatePdf);
+  if (pdfs.length < 2) return null;
+
+  const evidenceTypeByLabel = new Map<string, string>();
+  for (const item of params.report.evidenceRegistry ?? []) {
+    const label = normalizeRoleText(item.label);
+    if (label) evidenceTypeByLabel.set(label, item.sourceType);
+  }
+
+  const candidates = pdfs
+    .map((attachment, index) => ({
+      attachment,
+      index,
+      role: inferEstimateRole(attachment, evidenceTypeByLabel),
+      total: extractEstimateTotal(attachment),
+    }))
+    .filter((candidate): candidate is {
+      attachment: StoredAttachment;
+      index: number;
+      role: SourceEstimatePdfSelection["selectedEstimateRole"];
+      total: number;
+    } => typeof candidate.total === "number" && Number.isFinite(candidate.total))
+    .sort((a, b) => a.total - b.total || a.index - b.index);
+
+  const lowest = candidates[0];
+  if (!lowest) return null;
+
+  return buildSelectionResult({
+    attachment: lowest.attachment,
+    targetEstimate: "auto",
+    selectedEstimateRole: lowest.role === "unknown" ? "selected" : lowest.role,
+    selectedEstimateTotal: lowest.total,
+    selectionReason: `Auto-selected the lower estimate PDF as the Citation Density annotation base (total ${lowest.total}).`,
+  });
 }
 
 export function scoreEstimatePdfCandidate(params: {

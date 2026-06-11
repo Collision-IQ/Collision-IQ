@@ -268,7 +268,7 @@ function coerceString(value: unknown): string {
 
 function coerceTargetEstimate(value: unknown): CitationDensityTargetEstimate {
   const target = coerceString(value);
-  return VALID_TARGET_ESTIMATES.has(target) ? target as CitationDensityTargetEstimate : "selected";
+  return VALID_TARGET_ESTIMATES.has(target) ? target as CitationDensityTargetEstimate : "auto";
 }
 
 function coerceStringArray(value: unknown): string[] | undefined {

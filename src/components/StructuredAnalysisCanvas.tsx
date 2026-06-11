@@ -407,7 +407,7 @@ export default function StructuredAnalysisCanvas({
             }
             preview={
               canUseFullReportExports
-                ? "Repair Intelligence Report, Citation Density Estimate Annotations, and Policy & Rights Review remain available in the rail."
+                ? "Repair Intelligence Report, Citation Density PDF, and Policy & Rights Review remain available in the rail."
                 : "Use the 1-Page Snapshot for the shareable export. Repair Intelligence, Estimate Scrubber, and Policy & Rights Review are Pro-only upgrades."
             }
             expanded={activeInsightKey === "exports"}
@@ -420,7 +420,7 @@ export default function StructuredAnalysisCanvas({
           >
             <div className="border border-border bg-muted px-3 py-2.5 text-[13px] leading-5 text-muted-foreground">
               {canUseFullReportExports
-                ? "Use the rail to generate the Repair Intelligence Report, Citation Density Estimate Annotations, or Policy & Rights Review."
+                ? "Use the rail to generate the Repair Intelligence Report, Citation Density PDF, or Policy & Rights Review."
                 : "Use the rail to download the 1-Page Snapshot. Repair Intelligence, Estimate Scrubber, Policy & Rights Review, and Customer Report are available on Pro."}
             </div>
           </AnalysisSectionCard>

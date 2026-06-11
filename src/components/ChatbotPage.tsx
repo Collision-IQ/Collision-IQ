@@ -944,9 +944,9 @@ export function ChatbotWorkspacePage() {
         ? { label: "Repair Intelligence Report (Pro)", type: "locked" }
       : null,
     canUseEstimateScrubberExport
-      ? { label: "Citation Density Estimate Annotations", type: "pdf" }
+      ? { label: "Citation Density PDF", type: "pdf" }
       : hasResolvedAnalysis
-        ? { label: "Citation Density Estimate Annotations (Pro)", type: "locked" }
+        ? { label: "Citation Density PDF (Pro)", type: "locked" }
       : null,
     canUsePolicyRightsReviewExport
       ? { label: "Policy & Rights Review", type: "pdf" }
@@ -2042,8 +2042,7 @@ function RailContent({
       throw new Error("Citation Density annotated export needs an active case.");
     }
 
-    const sourcePdf = selectAnnotatedCitationDensitySourcePdf(attachments);
-    if (!sourcePdf) {
+    if (!selectAnnotatedCitationDensitySourcePdf(attachments)) {
       throw new Error("Upload an original estimate PDF before generating the annotated Citation Density estimate.");
     }
 
@@ -2054,8 +2053,7 @@ function RailContent({
       credentials: "same-origin",
       body: JSON.stringify({
         caseId: analysisReportId,
-        sourceDocumentId: sourcePdf.attachmentId,
-        targetEstimate: "carrier",
+        targetEstimate: "auto",
         annotationMode: "both",
         includeLegend: true,
         includeSummaryPage: false,
@@ -2917,10 +2915,10 @@ function RailContent({
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[#C65A2A]" aria-hidden />
-                    Citation Density Estimate Annotations
+                    Citation Density PDF
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                    Mark citation/proof gaps on the estimate document or documents that contain the disputed lines.
+                    Annotates the actual estimate PDF with supported missed, reduced, or under-documented operations.
                   </div>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -2936,7 +2934,7 @@ function RailContent({
                     }}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download annotated estimate</span>
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download Citation Density PDF</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
@@ -2944,15 +2942,7 @@ function RailContent({
                     onClick={() => openReportSend("estimate_scrubber", "carrier")}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[#C65A2A] bg-[#C65A2A] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
-                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email annotated estimate</span>
-                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void downloadReportDocument("estimator_change_request_list")}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 sm:col-span-2"
-                  >
-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Estimate delta</span>
+                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email Citation Density PDF</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </div>

@@ -588,20 +588,6 @@ function isVideoAttachment(attachment: Pick<Attachment, "mime" | "filename" | "c
   );
 }
 
-function selectAnnotatedCitationDensitySourcePdf(attachments: Attachment[]) {
-  return attachments.find((attachment) => {
-    const text = attachment.filename.toLowerCase();
-    const isPdf = attachment.classification === "pdf" ||
-      attachment.mime === "application/pdf" ||
-      /\.pdf$/i.test(attachment.filename);
-    if (!isPdf) return false;
-    if (/citation density|gap report|annotation legend|annotated estimate|repair intelligence|policy rights|doi complaint|snapshot/.test(text)) {
-      return false;
-    }
-    return /estimate|supplement|ccc|mitchell|audatex|carrier|insurer|insurance|shop|repair facility|appraisal/.test(text);
-  }) ?? null;
-}
-
 function buildVideoDocumentationStatus(attachments: Array<Pick<Attachment, "filename">>) {
   const count = attachments.length;
   const names = attachments.map((attachment) => attachment.filename).join(", ");
@@ -1738,12 +1724,9 @@ export default function ChatWidget({
     try {
       if (shouldGenerateAnnotatedCitationDensityEstimate(messageToSend)) {
         const activeCaseId = analysisReportIdRef.current;
-        const sourcePdf = selectAnnotatedCitationDensitySourcePdf(attachments);
 
-        if (!activeCaseId || !sourcePdf) {
-          const reply = !activeCaseId
-            ? "I need an active analyzed case before I can generate an annotated Citation Density estimate PDF."
-            : "Upload or select the original carrier/shop estimate PDF before generating the annotated Citation Density estimate. Citation Density annotation exports must use original estimate pages with visible callouts.";
+        if (!activeCaseId) {
+          const reply = "I need an active analyzed case before I can generate an annotated Citation Density estimate PDF.";
 
           if (sessionRef.current === mySession) {
             clearActiveSystemStatusMessage();
@@ -1769,7 +1752,6 @@ export default function ChatWidget({
             signal: controller.signal,
             body: JSON.stringify({
               caseId: activeCaseId,
-              sourceDocumentId: sourcePdf.attachmentId,
               targetEstimate: resolveAnnotatedCitationDensityTarget(messageToSend),
               annotationMode: "both",
               includeLegend: true,
@@ -1801,9 +1783,9 @@ export default function ChatWidget({
           const downloadLinks = data.outputs?.length
             ? data.outputs
                 .filter((output) => typeof output.downloadUrl === "string")
-                .map((output) => `[Download ${output.estimateRole ?? "annotated"} estimate](${output.downloadUrl})`)
+                .map((output) => `[Download Citation Density PDF${output.estimateRole ? ` (${output.estimateRole})` : ""}](${output.downloadUrl})`)
                 .join("\n")
-            : `[Download annotated estimate](${data.downloadUrl ?? "#"})`;
+            : `[Download Citation Density PDF](${data.downloadUrl ?? "#"})`;
           const allUnanchored = data.warnings?.includes("all_findings_unanchored") ?? false;
           const reply = allUnanchored
             ? `The annotated Citation Density estimate PDF was generated with a warning: no line-level or page-level anchors were placed. Do not treat this as a fully successful markup.${unanchoredText}\n\n${downloadLinks}${warningText}`

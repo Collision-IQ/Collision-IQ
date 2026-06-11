@@ -424,6 +424,61 @@ async function run(name, test) {
     assert.match(text, /Missing authority:/);
   });
 
+  await run("uploaded documentation support uses VERIFIED DOCUMENTATION label", async () => {
+    const sourcePdfBytes = await createSourcePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      findings: [
+        baseFinding({
+          id: "verified-documentation",
+          citationLabel: undefined,
+          citationStatus: {
+            oem: "not_applicable",
+            adas: "not_applicable",
+            pPages: "not_applicable",
+            scrs: "not_applicable",
+            deg: "not_applicable",
+            nhtsa: "not_applicable",
+            stateRegulation: "not_applicable",
+            policy: "not_applicable",
+            invoiceOrCompletionProof: "verified",
+            photoOrTeardownProof: "not_applicable",
+          },
+          missingAuthorityTypes: [],
+        }),
+      ],
+      request: { includeLegend: true, annotationMode: "both" },
+    });
+    const text = await extractPdfText(result.bytes);
+
+    assert.match(text, /VERIFIED DOCUMENTATION/);
+  });
+
+  await run("online fallback support is labeled ONLINE FALLBACK", async () => {
+    const sourcePdfBytes = await createSourcePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      findings: [
+        baseFinding({
+          id: "online-fallback",
+          citationLabel: undefined,
+          bestAvailableAuthority: {
+            type: "online_fallback",
+            status: "referenced",
+            title: "Online repair article",
+            sourceType: "InternetOEM",
+            confidence: "medium",
+          },
+        }),
+      ],
+      request: { includeLegend: true, annotationMode: "both" },
+    });
+    const text = await extractPdfText(result.bytes);
+
+    assert.match(text, /ONLINE FALLBACK/);
+    assert.doesNotMatch(text, /Label:\s*VERIFIED OEM/);
+  });
+
   await run("non-ADAS operations are not labeled NEEDS ADAS by default", async () => {
     const sourcePdfBytes = await createSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
