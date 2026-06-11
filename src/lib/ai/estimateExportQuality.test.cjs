@@ -676,7 +676,7 @@ run("customer report PDF strips internal audit language and parser fragments", (
     "What We Found|Why The Shop Estimate Looks More Complete|Why The Insurance Estimate May Be Missing Items|What Still Needs To Be Verified|Why This Matters For Safety And Repair Quality|What You Can Ask For|What Happens Next|Bottom Line"
   );
   assert.equal(
-    text.includes("Possible hidden mounting or structural damage may still need inspection after teardown"),
+    text.includes("Hidden mounting or structural damage is not verified from the reviewed file"),
     true
   );
   assert.ok(/CCC Secure Share source confirms this estimate line was present in the structured estimate data\.?/i.test(text));

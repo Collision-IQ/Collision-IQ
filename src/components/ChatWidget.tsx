@@ -161,6 +161,7 @@ type UploadUiState = "idle" | "uploading" | "uploaded" | "error";
 type ChatSessionControls = {
   focusComposer: () => void;
   resetSession: () => void;
+  sendPrompt: (prompt: string) => Promise<void>;
 };
 
 export type ReviewProgress = {
@@ -763,6 +764,7 @@ export default function ChatWidget({
   const audioUrlRef = useRef<string | null>(null);
   const ttsFetchAbortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const handleSendRef = useRef<(promptOverride?: string) => Promise<void>>(async () => {});
   const messageCounterRef = useRef(0);
   const activeSystemStatusMessageIdRef = useRef<string | null>(null);
   const currentCaseTopicRef = useRef(DEFAULT_CASE_TOPIC);
@@ -1665,14 +1667,17 @@ export default function ChatWidget({
     handleEndChat();
   }, [handleEndChat]);
 
+  handleSendRef.current = handleSend;
+
   useEffect(() => {
     onSessionControlsReady?.({
       focusComposer: () => textareaRef.current?.focus(),
       resetSession: handleEndChat,
+      sendPrompt: (prompt) => handleSendRef.current(prompt),
     });
   }, [onSessionControlsReady, handleEndChat]);
 
-  async function handleSend() {
+  async function handleSend(promptOverride?: string) {
     if (disabled) return;
     if (loading) return;
     const pendingAttachmentsForTurn = attachments.filter((attachment) => !attachment.usedInAnalysis);
@@ -1680,7 +1685,7 @@ export default function ChatWidget({
     const attachmentsForTurn = pendingAttachmentsForTurn.filter(
       (attachment) => !isVideoAttachment(attachment)
     );
-    const trimmedInput = input.trim();
+    const trimmedInput = (promptOverride ?? input).trim();
     if (!trimmedInput && pendingAttachmentsForTurn.length === 0) return;
 
     if (documentationVideoAttachments.length > 0) {
@@ -3612,7 +3617,7 @@ export default function ChatWidget({
               </button>
 
               <button
-                onClick={handleSend}
+                onClick={() => void handleSend()}
                 disabled={loading || isTranscribing || disabled}
                 className={[
                   "order-3 rounded-md border border-[#b86a2d] bg-[#b86a2d] text-sm font-semibold text-black transition hover:bg-[#c57934] disabled:opacity-50 lg:order-none lg:flex-none",

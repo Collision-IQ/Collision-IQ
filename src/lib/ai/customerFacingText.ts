@@ -6,11 +6,11 @@ import { normalizeNarrativeProse } from "@/lib/ai/narrativeNormalization";
 const TECHNICAL_TRANSLATIONS: Array<[RegExp, string]> = [
   [
     /\bHidden\s+Mounting\s+Geometry\s*\/?\s*Teardown\s+Growth\b/gi,
-    "Possible hidden mounting or structural damage may still need inspection after teardown",
+    "Hidden mounting or structural damage is not verified from the reviewed file",
   ],
   [
     /\bADAS\s+Calibration\s+Procedure\s+Support\b/gi,
-    "The vehicle may need scan and calibration work after repairs",
+    "Scan and calibration documentation is not verified from the reviewed file",
   ],
   [
     /\bSide\s+Structure\s+Aperture\s+Door-?Shell\s+Fit\s+Verification\b/gi,
@@ -18,11 +18,11 @@ const TECHNICAL_TRANSLATIONS: Array<[RegExp, string]> = [
   ],
   [
     /\bFit\s+And\s+Finish\s+Validation\b/gi,
-    "The repaired panels, lights, bumper, and trim should be checked for proper fit before the job is finished",
+    "Fit and finish proof is not produced in the reviewed file",
   ],
   [
     /\bStructural\s+Measurement\s+Verification\b/gi,
-    "The structure may need measurement or alignment checks before repairs are finalized",
+    "Structural measurement or alignment proof is not produced in the reviewed file",
   ],
   [
     /\bFront\s+Structure\s+Scope\s*\/\s*Tie\s+Bar\s*\/\s*Upper\s+Rail\s+Reconciliation\b/gi,
@@ -30,7 +30,7 @@ const TECHNICAL_TRANSLATIONS: Array<[RegExp, string]> = [
   ],
   [
     /\bOEM\s+Fit-?Sensitive\s+Part\s+Posture\b/gi,
-    "Fit-sensitive replacement parts should be reviewed carefully before final repairs",
+    "Fit-sensitive replacement part support is not verified from the reviewed file",
   ],
   [
     /\bRequest\s+the\s+missing\s+supporting\s+documentation\s+or\s+a\s+written\s+estimate\s+explanation\b/gi,
@@ -125,6 +125,10 @@ function cleanCustomerExportFragments(value: string): string {
     .replace(/\bCCC\s+Secure\s+Share\s+documentation\s+this\s+estimate\s+line\s+was\s+present\s+in\s+the\s+structured\s+estimate\s+data\.?/gi, "CCC Secure Share source confirms this estimate line was present in the structured estimate data.")
     .replace(/\bsome of the repair steps are still only partly(?:\s+verified)?(?:\.\s*Verified\.)?/gi, "some of the repair steps are still only partly verified.")
     .replace(/\bif calibration, alignment, or hidden mounting issues were not fully(?:\s+verified)?(?:\.\s*Verified\.)?/gi, "if calibration, alignment, or hidden mounting issues were not fully verified.")
+    .replace(/\brepairs are not complete\b|\brepair is unfinished\b|\bvehicle is still in teardown\b/gi, "repair completion status is not established from the reviewed file")
+    .replace(/\bfinal repair path still depends on\b/gi, "the estimate comparison supports a documentation gap, not a repair-stage conclusion about")
+    .replace(/\bif more damage shows up during teardown\b/gi, "if repairs are ongoing")
+    .replace(/\bthe repair shop can inspect further\b/gi, "the reviewed file does not include completion proof for this item")
     .replace(/\badded findings can be and sent in as a supplement\b\.?/gi, "added findings can be documented and sent in as a supplement.")
     .replace(/\bmake sure the claim handling stays(?:\s+clear and documented)?(?:\.\s*Clear and\.)?/gi, "make sure the claim handling stays clear and documented.")
     .replace(/\bfinish documentation the repair path\b\.?/gi, "finish documenting the repair path.")

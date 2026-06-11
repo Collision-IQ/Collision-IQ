@@ -909,4 +909,69 @@ async function run(name, test) {
     assert.match(text, /NEEDS INVOICE/);
     assert.match(result.annotationMetadata[0].comment, /Label:\s*NEEDS INVOICE/);
   });
+
+  await run("annotation metadata exposes stable PDF coordinate context", async () => {
+    const sourcePdfBytes = await createSourcePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      findings: [baseFinding()],
+      request: { includeLegend: false, annotationMode: "both" },
+    });
+    const metadata = result.annotationMetadata[0];
+
+    assert.equal(metadata.coordinateSpace, "pdf-points");
+    assert.equal(metadata.pdfPageWidth, 612);
+    assert.equal(metadata.pdfPageHeight, 792);
+    assert.equal(metadata.rotation, 0);
+    assert.equal(metadata.targetLineNumber, "12");
+    assert.match(metadata.targetRawText, /Line 12 ADAS calibration/);
+    assert.ok(metadata.xPct > 0 && metadata.xPct < 1);
+    assert.ok(metadata.yPct > 0 && metadata.yPct < 1);
+    assert.ok(metadata.wPct > 0 && metadata.wPct < 1);
+    assert.ok(metadata.hPct > 0 && metadata.hPct < 1);
+    assert.ok(["exact_line", "description", "amount", "section"].includes(metadata.anchorType));
+    assert.ok(["high", "medium", "low"].includes(metadata.matchConfidence));
+  });
+
+  await run("finish sand and paint deltas are not OEM or ADAS by default", async () => {
+    const sourcePdfBytes = await createSourcePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceText: "Line 119 finish sand and polish\nTotals paint/refinish labor delta paint supplies",
+      findings: [
+        baseFinding({
+          id: "finish-sand",
+          operationLabel: "Finish sand and polish",
+          category: "refinish",
+          citationLabel: undefined,
+          carrierEvidence: {
+            lineNumber: "119",
+            description: "finish sand and polish",
+            amount: 80,
+            laborHours: 0.8,
+            sourceLabel: "Shop estimate",
+          },
+          citationStatus: {
+            oem: "needed",
+            adas: "needed",
+            pPages: "needed",
+            scrs: "not_applicable",
+            deg: "not_applicable",
+            nhtsa: "not_applicable",
+            stateRegulation: "not_applicable",
+            policy: "not_applicable",
+            invoiceOrCompletionProof: "not_applicable",
+            photoOrTeardownProof: "not_applicable",
+          },
+          missingAuthorityTypes: ["OEM procedure", "P-page"],
+        }),
+      ],
+      request: { includeLegend: false, annotationMode: "both" },
+    });
+    const text = await extractPdfText(result.bytes);
+
+    assert.doesNotMatch(text, /Label:\s*NEEDS ADAS/);
+    assert.doesNotMatch(text, /Label:\s*NEEDS OEM/);
+    assert.match(text, /NEEDS P-PAGE/);
+  });
 })();

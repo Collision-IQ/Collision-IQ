@@ -95,7 +95,7 @@ Important rules:
 - Do not mention internal confidence scores, structured analysis engines, or AI systems.
 - Do not include evidence chain IDs, immutable keys, runtime context, parser terms, support basis, support confidence, inferred support, verified percentages, citation metadata, source conflicts, or debug identifiers.
 - Do not use internal terms like "underwritten operation", "risk if omitted", or "documented evidence at 86%".
-- Translate technical labels into plain owner language. For example, say "Possible hidden mounting or structural damage may still need inspection after teardown" instead of "Hidden Mounting Geometry Teardown Growth".
+- Translate technical labels into plain owner language without assuming repair stage. For example, say "Hidden mounting or structural damage is not verified from the reviewed file" instead of "Hidden Mounting Geometry Teardown Growth".
 - Do not use labels like DOCUMENTED, SUPPORTABLE_BUT_UNCONFIRMED, OPEN, or REFERENCED_NOT_PRODUCED.
 - Do not sound like a claim note, appraiser memo, or internal technical export.
 - Do not tell the customer to "ask for" things as a list of demands.

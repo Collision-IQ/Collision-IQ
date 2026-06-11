@@ -134,8 +134,8 @@ run("customer report PDF final render strips forbidden debug and parser text", (
   });
 
   const text = flattenDocument(document);
-  assert.equal(text.includes("Possible hidden mounting or structural damage may still need inspection after teardown"), true);
-  assert.equal(text.includes("The vehicle may need scan and calibration work after repairs"), true);
+  assert.equal(text.includes("Hidden mounting or structural damage is not verified from the reviewed file"), true);
+  assert.equal(text.includes("Scan and calibration documentation is not verified from the reviewed file"), true);
   assertNoForbiddenCustomerText(text);
 });
 
@@ -146,7 +146,7 @@ run("customer report HTML final render strips forbidden debug and parser text", 
     generatedAt: "May 8, 2026",
   });
 
-  assert.equal(html.includes("The repaired panels, lights, bumper, and trim should be checked for proper fit before the job is finished"), true);
+  assert.equal(html.includes("Fit and finish proof is not produced in the reviewed file"), true);
   assertNoForbiddenCustomerText(html);
 });
 
@@ -201,7 +201,7 @@ run("snapshot modal/PDF final render strips forbidden debug and parser text", ()
   const modalText = JSON.stringify(cleanSnapshot);
   const pdfText = flattenDocument(buildCollisionSnapshotPdfFromSnapshot(dirtySnapshot));
 
-  assert.equal(modalText.includes("Possible hidden mounting or structural damage may still need inspection after teardown"), true);
+  assert.equal(modalText.includes("Hidden mounting or structural damage is not verified from the reviewed file"), true);
   assert.equal(modalText.includes("The current file appears to support this item."), true);
   assertNoForbiddenCustomerText(modalText);
   assertNoForbiddenCustomerText(pdfText);

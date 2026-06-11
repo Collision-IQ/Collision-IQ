@@ -41,10 +41,23 @@ export type CitationDensityAnnotationMetadata = {
   findingId: string;
   markerNumber: number;
   pageNumber: number;
+  pdfPageWidth: number;
+  pdfPageHeight: number;
+  rotation: number;
   x: number;
   y: number;
   width: number;
   height: number;
+  xPct: number;
+  yPct: number;
+  wPct: number;
+  hPct: number;
+  coordinateSpace: "pdf-points" | "normalized";
+  targetLineNumber?: string;
+  targetSection?: string;
+  targetRawText: string;
+  matchConfidence: "high" | "medium" | "low";
+  anchorType: "exact_line" | "description" | "note" | "amount" | "section" | "totals" | "supplier" | "page_fallback";
   label: string;
   shortTitle: string;
   estimateLine: string;
@@ -636,6 +649,9 @@ function drawFindingAnnotation(
     y: highlightY - 2,
     width: highlightWidth + 4,
     height: highlightHeight,
+    pageWidth,
+    pageHeight,
+    matchKind: match.matchKind,
     estimateRole: options.estimateRole,
     redactSensitive: options.redactSensitive,
   });
@@ -796,6 +812,9 @@ function buildAnnotationMetadata(
     y: number;
     width: number;
     height: number;
+    pageWidth: number;
+    pageHeight: number;
+    matchKind: MatchedFinding["matchKind"];
     estimateRole: "carrier" | "shop" | "selected";
     redactSensitive: boolean;
   }
@@ -810,10 +829,23 @@ function buildAnnotationMetadata(
     findingId: finding.id,
     markerNumber: number,
     pageNumber: anchor.pageIndex + 1,
+    pdfPageWidth: roundCoordinate(options.pageWidth),
+    pdfPageHeight: roundCoordinate(options.pageHeight),
+    rotation: 0,
     x: roundCoordinate(options.x),
     y: roundCoordinate(options.y),
     width: roundCoordinate(options.width),
     height: roundCoordinate(options.height),
+    xPct: roundRatio(options.x / Math.max(1, options.pageWidth)),
+    yPct: roundRatio(options.y / Math.max(1, options.pageHeight)),
+    wPct: roundRatio(options.width / Math.max(1, options.pageWidth)),
+    hPct: roundRatio(options.height / Math.max(1, options.pageHeight)),
+    coordinateSpace: "pdf-points",
+    targetLineNumber: getTargetLineNumber(finding, options.estimateRole),
+    targetSection: getTargetSection(finding, options.estimateRole),
+    targetRawText: sanitize(anchor.text || formatEstimateLineForCallout(finding, options.estimateRole)),
+    matchConfidence: getMatchConfidence(anchor, options.matchKind),
+    anchorType: getAnchorType(finding, anchor, options.matchKind, options.estimateRole),
     label,
     shortTitle,
     estimateLine: sanitize(formatEstimateLineForCallout(finding, options.estimateRole)),
@@ -826,6 +858,54 @@ function buildAnnotationMetadata(
   };
   metadata.comment = buildPdfCommentBody(metadata, finding, options.estimateRole, options.redactSensitive);
   return metadata;
+}
+
+function getTargetLineNumber(
+  finding: CitationDensityFinding,
+  estimateRole: "carrier" | "shop" | "selected"
+) {
+  const evidence = estimateRole === "shop"
+    ? finding.shopEvidence ?? finding.carrierEvidence
+    : estimateRole === "carrier"
+      ? finding.carrierEvidence ?? finding.shopEvidence
+      : finding.carrierEvidence ?? finding.shopEvidence;
+  return evidence?.lineNumber || undefined;
+}
+
+function getTargetSection(
+  finding: CitationDensityFinding,
+  estimateRole: "carrier" | "shop" | "selected"
+) {
+  const anchor = estimateRole === "shop"
+    ? finding.shopAnchor ?? finding.carrierAnchor
+    : estimateRole === "carrier"
+      ? finding.carrierAnchor ?? finding.shopAnchor
+      : finding.carrierAnchor ?? finding.shopAnchor;
+  return anchor?.section || undefined;
+}
+
+function getMatchConfidence(anchor: TextAnchor, matchKind: MatchedFinding["matchKind"]): "high" | "medium" | "low" {
+  if (matchKind === "page" || anchor.synthetic) return "low";
+  if (anchor.groupedLine) return "high";
+  return "medium";
+}
+
+function getAnchorType(
+  finding: CitationDensityFinding,
+  anchor: TextAnchor,
+  matchKind: MatchedFinding["matchKind"],
+  estimateRole: "carrier" | "shop" | "selected"
+): CitationDensityAnnotationMetadata["anchorType"] {
+  if (matchKind === "page") return "page_fallback";
+  const lineNumber = getTargetLineNumber(finding, estimateRole);
+  if (lineNumber && matchesLineNumber(anchor.text, lineNumber)) return "exact_line";
+  const text = normalizeMatchText(anchor.text);
+  if (/\btotal|subtotal|net cost|grand total|paint supplies|labor summary|body labor|paint labor|mechanical labor\b/.test(text)) return "totals";
+  if (/\bsupplier|alternate|a m|aftermarket|part|oem\b/.test(text)) return "supplier";
+  if (/\bnote|remark|message\b/.test(text)) return "note";
+  if (/\$?\d[\d,.]*|\b\d+(?:\.\d+)?\s*(?:hrs?|hours)\b/.test(anchor.text)) return "amount";
+  if (getTargetSection(finding, estimateRole)) return "section";
+  return "description";
 }
 
 function buildPdfCommentBody(
@@ -864,6 +944,10 @@ function formatPdfDate(date: Date) {
 
 function roundCoordinate(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function roundRatio(value: number) {
+  return Math.round(value * 10000) / 10000;
 }
 
 function truncateText(value: string, maxLength: number) {
@@ -1082,7 +1166,11 @@ function getProofBucketLabel(finding: CitationDensityFinding): string {
   if (finding.estimateGapType === "weak_do_not_lead") return "WEAK — DO NOT LEAD";
   if (finding.estimateGapType === "referenced_not_produced") return "REFERENCED / NOT PRODUCED";
   if (finding.citationStatus.invoiceOrCompletionProof === "needed") return "NEEDS INVOICE";
-  if (finding.citationStatus.oem === "needed" || finding.missingAuthorityTypes.some((item) => /oem/i.test(item))) return "NEEDS OEM";
+  if (isPPageDegMotorFinding(finding)) return "NEEDS P-PAGE";
+  if (
+    (finding.citationStatus.oem === "needed" || finding.missingAuthorityTypes.some((item) => /oem|high[-\s]?voltage|hv/i.test(item))) &&
+    isOemHvRelatedFinding(finding)
+  ) return "NEEDS OEM";
   if (finding.citationStatus.pPages === "needed" || finding.missingAuthorityTypes.some((item) => /p-?page/i.test(item))) return "NEEDS P-PAGE";
   return "ESTIMATE GAP ONLY";
 }
@@ -1097,7 +1185,37 @@ function isAdasRelatedFinding(finding: CitationDensityFinding) {
     finding.missingProofSummary,
     finding.recommendedNextAction,
   ].join(" ");
-  return /\b(?:adas|calibration|calibrate|aim|scan|diagnostic|dtc|radar|camera|sensor|blind spot|lane|aeb|srs|airbag|restraint|electrical|module|pre[-\s]?scan|post[-\s]?scan)\b/i.test(text);
+  if (isPPageDegMotorFinding(finding)) return false;
+  return /\b(?:adas|calibration|calibrate|aim|scan|diagnostic|dtc|radar|camera|sensor|blind spot|lane|aeb|srs|airbag|restraint|initiali[sz]ation|programming|module|pre[-\s]?scan|post[-\s]?scan)\b/i.test(text);
+}
+
+function isOemHvRelatedFinding(finding: CitationDensityFinding) {
+  const text = [
+    finding.category,
+    finding.operationLabel,
+    finding.carrierEvidence?.description,
+    finding.shopEvidence?.description,
+    finding.currentSupportSummary,
+    finding.missingProofSummary,
+    finding.recommendedNextAction,
+    ...finding.missingAuthorityTypes,
+  ].join(" ");
+  if (isPPageDegMotorFinding(finding)) return false;
+  return /\b(?:high[-\s]?voltage|hv\b|ev battery|battery charge|isolation|deactivate|activate|oem procedure|position statement|one[-\s]?time[-\s]?use|structural|substrate|aluminum|material rule|repair method|fit[-\s]?sensitive)\b/i.test(text);
+}
+
+function isPPageDegMotorFinding(finding: CitationDensityFinding) {
+  const text = [
+    finding.category,
+    finding.operationLabel,
+    finding.carrierEvidence?.description,
+    finding.shopEvidence?.description,
+    finding.currentSupportSummary,
+    finding.missingProofSummary,
+    finding.recommendedNextAction,
+    ...finding.missingAuthorityTypes,
+  ].join(" ");
+  return /\b(?:finish sand|de[-\s]?nib|polish|mask|primer|refinish|paint|color|tint|pre[-\s]?wash|clean for delivery|adhesive|feather|prime|block|overlap|included|not included|database|manual entr|p-?page|deg|motor)\b/i.test(text);
 }
 
 function formatBestAuthority(finding: CitationDensityFinding) {

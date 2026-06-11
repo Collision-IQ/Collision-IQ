@@ -8,10 +8,23 @@ export type CitationDensityAnnotationMetadata = {
   findingId: string;
   markerNumber: number;
   pageNumber: number;
+  pdfPageWidth?: number;
+  pdfPageHeight?: number;
+  rotation?: number;
   x: number;
   y: number;
   width: number;
   height: number;
+  xPct?: number;
+  yPct?: number;
+  wPct?: number;
+  hPct?: number;
+  coordinateSpace?: "pdf-points" | "normalized";
+  targetLineNumber?: string;
+  targetSection?: string;
+  targetRawText?: string;
+  matchConfidence?: "high" | "medium" | "low";
+  anchorType?: "exact_line" | "description" | "note" | "amount" | "section" | "totals" | "supplier" | "page_fallback";
   label: string;
   shortTitle: string;
   estimateLine: string;
@@ -29,7 +42,49 @@ type RenderedPage = {
   height: number;
   pdfWidth: number;
   pdfHeight: number;
+  rotation: number;
 };
+
+export const PDF_VIEWER_INITIALIZATION_ERROR =
+  "PDF viewer failed to initialize. Download the PDF instead.";
+
+export function configureCitationDensityPdfWorker(
+  pdfjs: typeof import("pdfjs-dist/legacy/build/pdf.mjs")
+) {
+  if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+      "pdfjs-dist/build/pdf.worker.mjs",
+      import.meta.url
+    ).toString();
+  }
+}
+
+export function getAnnotationOverlayRect(
+  annotation: CitationDensityAnnotationMetadata,
+  page: RenderedPage
+) {
+  const pdfWidth = annotation.pdfPageWidth || page.pdfWidth;
+  const pdfHeight = annotation.pdfPageHeight || page.pdfHeight;
+  const scaleX = page.width / pdfWidth;
+  const scaleY = page.height / pdfHeight;
+  const source =
+    annotation.coordinateSpace === "normalized" ||
+    (typeof annotation.xPct === "number" && typeof annotation.yPct === "number")
+      ? {
+          x: (annotation.xPct ?? 0) * pdfWidth,
+          y: (annotation.yPct ?? 0) * pdfHeight,
+          width: (annotation.wPct ?? 0) * pdfWidth,
+          height: (annotation.hPct ?? 0) * pdfHeight,
+        }
+      : annotation;
+
+  return {
+    left: source.x * scaleX,
+    top: (pdfHeight - source.y - source.height) * scaleY,
+    width: Math.max(22, source.width * scaleX),
+    height: Math.max(16, source.height * scaleY),
+  };
+}
 
 export default function CitationDensityAnnotationViewer({
   pdfUrl,
@@ -56,9 +111,9 @@ export default function CitationDensityAnnotationViewer({
     async function renderPdf() {
       setError(null);
       const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+      configureCitationDensityPdfWorker(pdfjs);
       const pdf = await pdfjs.getDocument({
         url: pdfUrl,
-        disableWorker: true,
         useSystemFonts: true,
       } as unknown as Parameters<typeof pdfjs.getDocument>[0]).promise;
       const nextPages: RenderedPage[] = [];
@@ -73,6 +128,7 @@ export default function CitationDensityAnnotationViewer({
           height: viewport.height,
           pdfWidth: viewport.width / 1.25,
           pdfHeight: viewport.height / 1.25,
+          rotation: viewport.rotation,
         });
       }
 
@@ -96,7 +152,8 @@ export default function CitationDensityAnnotationViewer({
 
     renderPdf().catch((renderError) => {
       if (!cancelled) {
-        setError(renderError instanceof Error ? renderError.message : "PDF preview failed.");
+        console.error("[citation-density-viewer] PDF preview failed", renderError);
+        setError(PDF_VIEWER_INITIALIZATION_ERROR);
       }
     });
 
@@ -157,10 +214,7 @@ export default function CitationDensityAnnotationViewer({
                       className="block h-full w-full"
                     />
                     {page ? pageAnnotations.map((annotation) => {
-                      const scaleX = page.width / page.pdfWidth;
-                      const scaleY = page.height / page.pdfHeight;
-                      const left = annotation.x * scaleX;
-                      const top = (page.pdfHeight - annotation.y - annotation.height) * scaleY;
+                      const rect = getAnnotationOverlayRect(annotation, page);
                       return (
                         <button
                           key={annotation.findingId}
@@ -168,10 +222,10 @@ export default function CitationDensityAnnotationViewer({
                           onClick={() => setSelectedId(annotation.findingId)}
                           className="absolute rounded-[3px] border border-amber-600/80 bg-amber-300/25 text-left outline-none ring-offset-2 ring-offset-neutral-900 transition hover:bg-amber-300/40 focus-visible:ring-2 focus-visible:ring-amber-300"
                           style={{
-                            left,
-                            top,
-                            width: Math.max(22, annotation.width * scaleX),
-                            height: Math.max(16, annotation.height * scaleY),
+                            left: rect.left,
+                            top: rect.top,
+                            width: rect.width,
+                            height: rect.height,
                           }}
                           aria-label={`Open Citation Density finding ${annotation.markerNumber}`}
                         >

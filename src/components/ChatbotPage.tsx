@@ -99,6 +99,7 @@ type AttachmentTrayItem = {
 type AnnotatedEstimateExportResult = {
   blob: Blob;
   filename: string;
+  artifactId: string;
   downloadUrl: string;
   annotationMetadata: CitationDensityAnnotationMetadata[];
   annotatedFindingCount: number;
@@ -362,6 +363,7 @@ export function ChatbotWorkspacePage() {
   const chatSessionControlsRef = useRef<{
     focusComposer: () => void;
     resetSession: () => void;
+    sendPrompt: (prompt: string) => Promise<void>;
   } | null>(null);
   const [attachment, setAttachment] = useState<string | null>(null);
   const [attachmentsState, setAttachmentsState] = useState<AttachmentTrayItem[]>([]);
@@ -920,6 +922,16 @@ export function ChatbotWorkspacePage() {
     handleSessionReset();
   }
 
+  async function sendCitationDensityFindingPrompt(prompt: string) {
+    if (!analysisReportId || !chatSessionControlsRef.current) {
+      return false;
+    }
+
+    setLeftPaneMode("chat");
+    await chatSessionControlsRef.current.sendPrompt(prompt);
+    return true;
+  }
+
   const chatBlocked = !consentAccepted;
   const featureFlags = viewerAccess?.featureFlags;
   const remainingAnalyses = viewerAccess?.usage?.remaining ?? null;
@@ -1439,6 +1451,7 @@ export function ChatbotWorkspacePage() {
               revealImmersiveSection(insightKey);
             }}
             onEvidenceSelect={handleEvidenceSelect}
+            onAskAboutCitationDensityFinding={sendCitationDensityFindingPrompt}
           />
         }
       />
@@ -1606,6 +1619,7 @@ function RailContent({
   activeEvidenceTargetId,
   onInsightSelect,
   onEvidenceSelect,
+  onAskAboutCitationDensityFinding,
 }: {
   attachment: string | null;
   analysisText: string;
@@ -1639,6 +1653,7 @@ function RailContent({
   activeEvidenceTargetId: string | null;
   onInsightSelect: (insightKey: InsightKey) => void;
   onEvidenceSelect: (link: EvidenceLink) => void;
+  onAskAboutCitationDensityFinding: (prompt: string) => Promise<boolean>;
 }) {
   const sectionRefs = useRef<Partial<Record<InsightKey, HTMLDivElement | null>>>({});
   const [isGeneratingCustomerReport, setIsGeneratingCustomerReport] = useState(false);
@@ -2080,6 +2095,8 @@ function RailContent({
 
     const data = (await response.json().catch(() => null)) as {
       downloadUrl?: unknown;
+      artifactId?: unknown;
+      exportId?: unknown;
       annotationMetadata?: unknown;
       annotatedFindingCount?: unknown;
       unresolvedAnchorCount?: unknown;
@@ -2096,6 +2113,11 @@ function RailContent({
     return {
       blob,
       filename: "citation-density-annotated-estimate.pdf",
+      artifactId: typeof data.artifactId === "string"
+        ? data.artifactId
+        : typeof data.exportId === "string"
+          ? data.exportId
+          : "",
       downloadUrl: data.downloadUrl,
       annotationMetadata: Array.isArray(data.annotationMetadata)
         ? data.annotationMetadata.filter(isCitationDensityAnnotationMetadata)
@@ -2108,6 +2130,23 @@ function RailContent({
         ? data.warnings.filter((warning): warning is string => typeof warning === "string")
         : [],
     };
+  }
+
+  async function askAboutCitationDensityFinding(annotation: CitationDensityAnnotationMetadata) {
+    if (!analysisReportId) {
+      setReportSendStatus("Open or continue this case before asking about a finding.");
+      return;
+    }
+
+    setCitationDensityViewer(null);
+    const prompt = buildCitationDensityFindingPrompt(annotation);
+    setReportSendStatus(`Asking about Citation Density finding ${annotation.markerNumber}...`);
+    const sent = await onAskAboutCitationDensityFinding(prompt);
+    if (!sent) {
+      setReportSendStatus("Open or continue this case before asking about a finding.");
+      return;
+    }
+    setReportSendStatus(null);
   }
 
   async function buildReportDocument(reportType: ReportKind): Promise<CarrierReportDocument> {
@@ -3242,12 +3281,30 @@ function RailContent({
           annotations={citationDensityViewer.annotations}
           onClose={() => setCitationDensityViewer(null)}
           onAsk={(annotation) => {
-            setReportSendStatus(`Ask about Citation Density finding ${annotation.markerNumber}: ${annotation.shortTitle}`);
+            void askAboutCitationDensityFinding(annotation);
           }}
         />
       ) : null}
     </div>
   );
+}
+
+function buildCitationDensityFindingPrompt(annotation: CitationDensityAnnotationMetadata) {
+  return [
+    `Explain Citation Density finding #${annotation.markerNumber} and what documentation would strengthen or weaken it.`,
+    "",
+    `Finding id: ${annotation.findingId}`,
+    `Page: ${annotation.pageNumber}`,
+    annotation.targetLineNumber ? `Estimate line: ${annotation.targetLineNumber}` : `Estimate line: ${annotation.estimateLine}`,
+    annotation.targetSection ? `Target section: ${annotation.targetSection}` : "",
+    annotation.targetRawText ? `Target text: ${annotation.targetRawText}` : "",
+    `Label: ${annotation.label}`,
+    `Best authority: ${annotation.bestAuthority}`,
+    `Authority status: ${annotation.authorityStatus}`,
+    `Missing proof: ${annotation.missingProof}`,
+    `Next action: ${annotation.nextAction}`,
+    annotation.sourceRefs.length ? `Source refs: ${annotation.sourceRefs.join("; ")}` : "Source refs: none listed",
+  ].filter(Boolean).join("\n");
 }
 
 function isCitationDensityAnnotationMetadata(value: unknown): value is CitationDensityAnnotationMetadata {

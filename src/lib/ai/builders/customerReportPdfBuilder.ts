@@ -130,7 +130,9 @@ export function buildCustomerReportPdf({
       {
         title: "What Happens Next",
         bullets: [
-          "The repair shop can inspect the vehicle further and document any additional damage or repair steps found during teardown.",
+          "Repair completion status is not established from the reviewed file.",
+          "If repairs are ongoing, this should remain open for supplement review.",
+          "If repairs are complete, request the final invoice, scan, calibration, alignment, and delivery documentation.",
           "The insurer or repair shop should be able to explain whether each concern is already included in the estimate.",
           "If something is not included, ask why it was left out and whether it will be reviewed as a supplement.",
         ],
@@ -167,7 +169,7 @@ function buildPossibleMissingItems(params: {
       ...(params.confidenceIntegrity?.missingCriticalEvidence ?? []),
     ],
     [
-      "The insurance estimate may not yet include every inspection, fit, scan, calibration, or repair step needed after teardown.",
+      "The reviewed file does not include completion proof for every inspection, fit, scan, calibration, or repair step.",
     ]
   ).slice(0, 6);
 }
@@ -184,7 +186,7 @@ function buildVerificationItems(params: {
       ...params.findingReasoning.slice(0, 5).map((finding) => finding.next_action),
     ],
     [
-      "The vehicle should be checked after teardown to confirm whether additional repair, alignment, scan, calibration, or fit items are needed.",
+      "Not verified from the reviewed file. Request final invoice, scan, calibration, alignment, and delivery documentation if repairs are complete.",
     ]
   ).slice(0, 6);
 }
@@ -194,7 +196,7 @@ function buildAskForItems(report: CustomerReport) {
     [
       ...report.yourOptions,
       "Ask the insurer or repair shop to explain whether this item is included, and if not, why.",
-      "Ask what will be rechecked after teardown and what would be handled as a supplement.",
+      "Ask what documentation is not produced in the reviewed file and what would be handled as a supplement if repairs are ongoing.",
     ],
     [
       "Ask the insurer or repair shop to explain whether each item is included, and if not, why.",

@@ -210,6 +210,46 @@ run("export card primary Citation Density action calls annotated route, not stan
   assert.ok(standaloneBuilderIndex === -1 || annotatedFetchIndex < standaloneBuilderIndex);
 });
 
+run("Citation Density viewer configures worker and converts PDF coordinates", () => {
+  const source = fs.readFileSync(path.join(process.cwd(), "src/components/CitationDensityAnnotationViewer.tsx"), "utf8");
+
+  assert.match(source, /GlobalWorkerOptions\.workerSrc/);
+  assert.match(source, /pdfjs-dist\/build\/pdf\.worker\.mjs/);
+  assert.doesNotMatch(source, /disableWorker:\s*true/);
+  assert.match(source, /PDF viewer failed to initialize\. Download the PDF instead\./);
+  assert.match(source, /coordinateSpace/);
+  assert.match(source, /getAnnotationOverlayRect/);
+  assert.match(source, /pdfHeight - source\.y - source\.height/);
+});
+
+run("annotated export uses persisted artifact id for download and metadata", () => {
+  const routeSource = fs.readFileSync(
+    path.join(process.cwd(), "src/app/api/reports/citation-density/annotated-estimate/route.ts"),
+    "utf8"
+  );
+  const pageSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
+
+  assert.match(routeSource, /artifactId/);
+  assert.match(routeSource, /metadata=1&artifactId=/);
+  assert.match(routeSource, /This export is no longer available\. Regenerate Citation Density PDF\./);
+  assert.match(pageSource, /artifactId/);
+  assert.match(pageSource, /fetchAnnotatedCitationDensityPdfBlob\(data\.downloadUrl\)/);
+});
+
+run("Ask about finding sends selected finding context into active chat", () => {
+  const pageSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
+  const widgetSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatWidget.tsx"), "utf8");
+
+  assert.match(widgetSource, /sendPrompt:\s*\(prompt:\s*string\)\s*=>\s*Promise<void>/);
+  assert.match(widgetSource, /handleSendRef\.current\s*=\s*handleSend/);
+  assert.match(widgetSource, /sendPrompt:\s*\(prompt\)\s*=>\s*handleSendRef\.current\(prompt\)/);
+  assert.match(pageSource, /Open or continue this case before asking about a finding\./);
+  assert.match(pageSource, /Explain Citation Density finding #\$\{annotation\.markerNumber\}/);
+  assert.match(pageSource, /Finding id: \$\{annotation\.findingId\}/);
+  assert.match(pageSource, /Best authority: \$\{annotation\.bestAuthority\}/);
+  assert.match(pageSource, /chatSessionControlsRef\.current\.sendPrompt\(prompt\)/);
+});
+
 run("Citation Density annotated export cannot use generated report PDFs as source pages", () => {
   const generatedReport = pdfAttachment({
     id: "gap-report",

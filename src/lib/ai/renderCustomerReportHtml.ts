@@ -211,7 +211,9 @@ export function renderCustomerReportHtml(input: RenderCustomerReportHtmlInput): 
     <div class="section">
       <h2>What Happens Next</h2>
       <ul>${renderList([
-        "The repair shop can inspect the vehicle further and document any added repair needs.",
+        "Repair completion status is not established from the reviewed file.",
+        "If repairs are ongoing, this should remain open for supplement review.",
+        "If repairs are complete, request the final invoice, scan, calibration, alignment, and delivery documentation.",
         "The insurer or repair shop should explain whether each concern is already included.",
         "If something is not included, ask why and whether it will be reviewed as a supplement.",
       ])}</ul>

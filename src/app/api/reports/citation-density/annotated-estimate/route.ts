@@ -48,20 +48,23 @@ const NO_ACTIVE_CASE_ERROR = "No active review was found. Open the case or run a
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const exportId = url.searchParams.get("exportId")?.trim();
-  if (!exportId) {
-    return NextResponse.json({ error: "exportId is required." }, { status: 400 });
+  const artifactId = url.searchParams.get("artifactId")?.trim() || url.searchParams.get("exportId")?.trim();
+  if (!artifactId) {
+    return NextResponse.json({ error: "artifactId is required." }, { status: 400 });
   }
 
-  const entry = getAnnotatedEstimateExport(exportId);
+  const entry = getAnnotatedEstimateExport(artifactId);
   if (!entry) {
-    return NextResponse.json({ error: "Export not found or expired." }, { status: 404 });
+    return NextResponse.json({
+      error: "This export is no longer available. Regenerate Citation Density PDF.",
+    }, { status: 404 });
   }
 
   if (url.searchParams.get("metadata") === "1") {
     return NextResponse.json({
       ok: true,
-      exportId,
+      artifactId,
+      exportId: artifactId,
       filename: entry.filename,
       annotationMetadata: entry.annotationMetadata,
     }, {
@@ -223,12 +226,14 @@ export async function POST(request: Request) {
           redactSensitive: body.redactSensitive !== false,
         },
       });
-      const downloadUrl = `/api/reports/citation-density/annotated-estimate?exportId=${encodeURIComponent(result.exportId)}`;
+      const artifactId = result.exportId;
+      const downloadUrl = `/api/reports/citation-density/annotated-estimate?artifactId=${encodeURIComponent(artifactId)}`;
       result.warnings.forEach((warning) => aggregateWarnings.add(warning));
       annotatedFindingCount += result.annotatedFindingCount;
       unresolvedAnchorCount += result.unresolvedAnchorCount;
       outputs.push({
-        exportId: result.exportId,
+        artifactId,
+        exportId: artifactId,
         estimateRole,
         sourceDocumentId: selection.selectedSourceDocumentId,
         downloadUrl,
@@ -236,7 +241,7 @@ export async function POST(request: Request) {
         unresolvedAnchorCount: result.unresolvedAnchorCount,
         warnings: result.warnings,
         annotationMetadata: result.annotationMetadata,
-        annotationMetadataUrl: `/api/reports/citation-density/annotated-estimate?exportId=${encodeURIComponent(result.exportId)}&metadata=1`,
+        annotationMetadataUrl: `/api/reports/citation-density/annotated-estimate?metadata=1&artifactId=${encodeURIComponent(artifactId)}`,
         selectedSourceLabel: selection.selectedSourceLabel,
         selectedEstimateTotal: selection.selectedEstimateTotal,
         selectionReason: selection.selectionReason,
@@ -247,7 +252,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      exportId: primaryOutput?.exportId ?? "",
+      artifactId: primaryOutput?.artifactId ?? "",
+      exportId: primaryOutput?.artifactId ?? "",
       downloadUrl: primaryOutput?.downloadUrl,
       outputs,
       combinedPdfUrl: outputs.length > 1 ? undefined : primaryOutput?.downloadUrl,
