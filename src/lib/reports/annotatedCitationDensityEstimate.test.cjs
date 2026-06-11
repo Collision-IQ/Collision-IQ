@@ -120,6 +120,22 @@ async function extractPdfText(bytes) {
   return chunks.join(" ");
 }
 
+async function extractPdfPageTexts(bytes) {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const pdf = await pdfjs.getDocument({
+    data: bytes.slice ? bytes.slice() : new Uint8Array(bytes),
+    disableWorker: true,
+    useSystemFonts: true,
+  }).promise;
+  const pages = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    pages.push(content.items.map((item) => ("str" in item ? item.str : "")).join(" "));
+  }
+  return pages;
+}
+
 async function run(name, test) {
   try {
     await test();
@@ -207,6 +223,25 @@ async function run(name, test) {
     assert.match(text, /The CCC estimate data supports the existence of this line-item difference\. OEM\/P-page\/DEG\/legal support has not yet been verified/);
     assert.doesNotMatch(text, /Estimate documentation the existence|CCC Secure Share documentation this estimate line|OEMdocumentation/i);
     assert.doesNotMatch(text, /verified OEM support|CCC proves|carrier-violation proof/i);
+  });
+
+  await run("carrier annotated export keeps original estimate page and places visible callout on that page", async () => {
+    const sourcePdfBytes = await createSourcePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      findings: [baseFinding()],
+      request: { includeLegend: false, includeSummaryPage: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+    const pages = await extractPdfPageTexts(result.bytes);
+
+    assert.equal(result.originalPageCount, 1);
+    assert.equal(result.annotatedFindingCount, 1);
+    assert.equal(result.unresolvedAnchorCount, 0);
+    assert.match(pages[0], /Estimate 123/);
+    assert.match(pages[0], /Line 12 ADAS calibration 1\.5 hrs \$250\.00/);
+    assert.match(pages[0], /Finding #:/);
+    assert.match(pages[0], /Estimate line:/);
+    assert.doesNotMatch(pages.join(" "), /Citation Density Gap Report|Estimate gaps ranked by repair impact/i);
   });
 
   await run("unmatched findings are placed in appendix and sensitive callout values are redacted", async () => {

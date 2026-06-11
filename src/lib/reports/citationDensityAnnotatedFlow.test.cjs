@@ -150,9 +150,18 @@ run("chat intent routes annotated citation density carrier estimate requests to 
   const chatSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatWidget.tsx"), "utf8");
   assert.match(chatSource, /\/api\/reports\/citation-density\/annotated-estimate/);
   assert.match(chatSource, /sourceDocumentId:\s*sourcePdf\.attachmentId/);
-  assert.match(chatSource, /will not return a gap report, annotation table, or ready-to-apply map as a substitute/);
+  assert.match(chatSource, /Download annotated estimate/);
   assert.doesNotMatch(chatSource, /I can't generate a PDF|I can only give you the annotation set|use this in Adobe|use this in Bluebeam/i);
-  assert.doesNotMatch(chatSource, /annotation map/i);
+  assert.doesNotMatch(chatSource, /annotation set|line-by-documentation map|ready-to-apply|annotation table|annotation map/i);
+});
+
+run("server chat routes block annotated estimate text/table fallback", () => {
+  const chatRoute = fs.readFileSync(path.join(process.cwd(), "src/app/api/chat/route.ts"), "utf8");
+  const caseChatRoute = fs.readFileSync(path.join(process.cwd(), "src/app/api/case-chat/route.ts"), "utf8");
+
+  assert.match(chatRoute, /shouldGenerateAnnotatedCitationDensityEstimate/);
+  assert.match(caseChatRoute, /shouldGenerateAnnotatedCitationDensityEstimate/);
+  assert.doesNotMatch(`${chatRoute}\n${caseChatRoute}`, /annotation set|line-by-documentation map|ready-to-apply|annotation table/i);
 });
 
 run("chat intent routes annotate both estimates requests to both-target export", () => {

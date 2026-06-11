@@ -107,6 +107,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   const sourcePdfBytes = params.sourcePdfBytes.slice();
   const pdfDoc = await PDFDocument.load(sourcePdfBytes);
   const originalPageCount = pdfDoc.getPageCount();
+  if (originalPageCount === 0) {
+    throw new Error("Annotated Citation Density export requires an original estimate PDF with source pages.");
+  }
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const anchors = await extractPdfTextAnchors(sourcePdfBytes).catch((error) => {

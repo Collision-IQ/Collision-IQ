@@ -44,6 +44,7 @@ import {
   countLargeCaseSummaryArtifacts,
   resolveLargeCaseChatFallback,
 } from "@/lib/ai/chatLargeCaseContext";
+import { shouldGenerateAnnotatedCitationDensityEstimate } from "@/lib/reports/citationDensityIntent";
 import {
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
@@ -944,6 +945,17 @@ export async function POST(req: Request) {
     });
 
     const userMessage = extractLatestUserMessage(body.messages || []);
+    if (shouldGenerateAnnotatedCitationDensityEstimate(userMessage)) {
+      return new Response(
+        "Annotated Citation Density estimate PDFs must be generated through the annotated-estimate export. Select the original carrier or shop estimate PDF and run the Citation Density annotated estimate export so original estimate pages are copied and visibly marked up.",
+        {
+          status: 409,
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+          },
+        }
+      );
+    }
     const conversationContext = formatRecentConversation(body.messages || []);
     const outputMode = buildModeContext(`${userMessage}\n\n${conversationContext}`);
     const responseMode = determineResponseMode({

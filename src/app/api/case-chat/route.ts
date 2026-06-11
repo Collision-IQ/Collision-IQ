@@ -22,6 +22,7 @@ import { getCaseById } from "@/lib/cases/getCaseById";
 import { cleanResponse } from "@/lib/vehicle/oemGuardrails";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
+import { shouldGenerateAnnotatedCitationDensityEstimate } from "@/lib/reports/citationDensityIntent";
 
 export const runtime = "nodejs";
 
@@ -121,6 +122,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "Missing caseId or message" },
         { status: 400 }
+      );
+    }
+
+    if (shouldGenerateAnnotatedCitationDensityEstimate(message)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Annotated Citation Density estimate PDFs must be generated through the annotated-estimate export. Select the original carrier or shop estimate PDF and run the Citation Density annotated estimate export so original estimate pages are copied and visibly marked up.",
+        },
+        { status: 409 }
       );
     }
 

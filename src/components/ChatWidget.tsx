@@ -1743,7 +1743,7 @@ export default function ChatWidget({
         if (!activeCaseId || !sourcePdf) {
           const reply = !activeCaseId
             ? "I need an active analyzed case before I can generate an annotated Citation Density estimate PDF."
-            : "Upload or select the original carrier/shop estimate PDF before generating the annotated Citation Density estimate. I will not return a gap report, annotation table, or ready-to-apply map as a substitute.";
+            : "Upload or select the original carrier/shop estimate PDF before generating the annotated Citation Density estimate. Citation Density annotation exports must use original estimate pages with visible callouts.";
 
           if (sessionRef.current === mySession) {
             clearActiveSystemStatusMessage();
@@ -1804,9 +1804,10 @@ export default function ChatWidget({
                 .map((output) => `[Download ${output.estimateRole ?? "annotated"} estimate](${output.downloadUrl})`)
                 .join("\n")
             : `[Download annotated estimate](${data.downloadUrl ?? "#"})`;
-          const reply =
-            `Done — I generated the annotated citation-density estimate PDF. It preserves the original estimate layout and overlays citation/proof callouts.${unanchoredText}\n\n` +
-            `${downloadLinks}${warningText}`;
+          const allUnanchored = data.warnings?.includes("all_findings_unanchored") ?? false;
+          const reply = allUnanchored
+            ? `The annotated Citation Density estimate PDF was generated with a warning: no line-level or page-level anchors were placed. Do not treat this as a fully successful markup.${unanchoredText}\n\n${downloadLinks}${warningText}`
+            : `Done — I generated the annotated citation-density estimate PDF. It preserves the original estimate layout and overlays citation/proof callouts.${unanchoredText}\n\n${downloadLinks}${warningText}`;
 
           if (sessionRef.current === mySession) {
             clearActiveSystemStatusMessage();

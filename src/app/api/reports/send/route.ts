@@ -70,6 +70,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Report email request is incomplete." }, { status: 400 });
   }
 
+  if (reportType === "estimate_scrubber" && !/^citation-density-annotated-estimate\.pdf$/i.test(filename)) {
+    return NextResponse.json(
+      { error: "Citation Density annotated estimate email requires the annotated original-estimate PDF artifact." },
+      { status: 400 }
+    );
+  }
+
   const resendApiKey = process.env.RESEND_API_KEY;
   const fromEmail = process.env.SNAPSHOT_FROM_EMAIL;
 
