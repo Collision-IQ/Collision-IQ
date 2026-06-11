@@ -139,3 +139,4 @@ android/*.jks
 
 # Local Google OAuth client secret files
 android/app/client_secret_*.json
+*.tsbuildinfo
