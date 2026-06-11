@@ -608,6 +608,15 @@ function buildUploadCompletionStatus(successCount: number, failures: UploadFailu
   return `${successCount} ${successCount === 1 ? "file" : "files"} attached. ${failureMessage}`;
 }
 
+function buildUploadSuccessStatus(count: number, filenames: string[], label: "file" | "photo") {
+  const noun = count === 1 ? label : label === "photo" ? "photos" : "files";
+  const visibleNames = filenames.filter(Boolean).slice(0, 3);
+  const namesText = visibleNames.length
+    ? `: ${visibleNames.join(", ")}${filenames.length > visibleNames.length ? `, +${filenames.length - visibleNames.length} more` : ""}`
+    : "";
+  return `${count} ${noun} uploaded${namesText}.`;
+}
+
 function resolveCaseTopic(message: string, previousTopic: string) {
   const normalized = message.trim();
   const lower = normalized.toLowerCase();
@@ -2732,12 +2741,11 @@ export default function ChatWidget({
         setUploadUiState(successfulUploadCount > 0 ? "uploaded" : "error");
         setUploadUiMessage(completionStatus);
       } else {
-        upsertSystemStatusMessage("Upload processing complete. Preparing files for analysis.");
+        const successStatus = buildUploadSuccessStatus(successfulUploadCount, uploadedDisplayNames, "file");
+        upsertSystemStatusMessage(successStatus);
         upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
         setUploadUiState("uploaded");
-        setUploadUiMessage(
-          `${successfulUploadCount} ${successfulUploadCount === 1 ? "file" : "files"} uploaded.`
-        );
+        setUploadUiMessage(successStatus);
       }
       if (successfulUploadCount > 0) {
         setSelectedUploadNames([]);
@@ -2835,12 +2843,11 @@ export default function ChatWidget({
         setUploadUiState(successfulUploadCount > 0 ? "uploaded" : "error");
         setUploadUiMessage(completionStatus);
       } else {
-        upsertSystemStatusMessage("Upload processing complete. Preparing files for analysis.");
+        const successStatus = buildUploadSuccessStatus(successfulUploadCount, uploadedDisplayNames, "photo");
+        upsertSystemStatusMessage(successStatus);
         upsertSystemStatusMessage(buildAttachmentBatchStatus(files, "analysis_starting"));
         setUploadUiState("uploaded");
-        setUploadUiMessage(
-          `${successfulUploadCount} ${successfulUploadCount === 1 ? "photo" : "photos"} uploaded.`
-        );
+        setUploadUiMessage(successStatus);
       }
       if (successfulUploadCount > 0) {
         setSelectedUploadNames([]);

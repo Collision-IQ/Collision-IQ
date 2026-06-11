@@ -164,6 +164,15 @@ run("server chat routes block annotated estimate text/table fallback", () => {
   assert.doesNotMatch(`${chatRoute}\n${caseChatRoute}`, /annotation set|line-by-documentation map|ready-to-apply|annotation table/i);
 });
 
+run("upload success status includes visible file names", () => {
+  const chatSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatWidget.tsx"), "utf8");
+
+  assert.match(chatSource, /function buildUploadSuccessStatus/);
+  assert.match(chatSource, /uploadedDisplayNames/);
+  assert.match(chatSource, /setUploadUiMessage\(successStatus\)/);
+  assert.doesNotMatch(chatSource, /setUploadUiMessage\(\s*`\$\{successfulUploadCount\} \$\{successfulUploadCount === 1 \? "file"/);
+});
+
 run("chat intent routes annotate both estimates requests to both-target export", () => {
   const input = "Annotate both estimates with citation density findings.";
 

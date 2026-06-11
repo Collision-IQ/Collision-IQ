@@ -89,6 +89,35 @@ async function createKiaLikeEstimatePdf() {
   return await doc.save();
 }
 
+async function createBlankSourcePdf(pageCount = 2) {
+  const doc = await PDFDocument.create();
+  for (let index = 0; index < pageCount; index += 1) {
+    doc.addPage([612, 792]);
+  }
+  return await doc.save();
+}
+
+function ramEstimateStoredText() {
+  return [
+    "RAM lower estimate",
+    "Parts",
+    "23 LKQ grille Note: not correct style for vehicle $185.00",
+    "Diagnostics and Calibration",
+    "39 Pre-repair scan 0.5 $75.00",
+    "40 In-process scan 0.5 $75.00",
+    "41 Seat belt dynamic function test 0.4 $52.00",
+    "42 Post-repair scan 0.5 $75.00",
+    "43 Final road test 0.3 $40.00",
+    "44 REVVAdas Report ADAS report available upon request and via this link https://egnyte.example.com/revvadas/ram-report?token=secret",
+    "Totals / Labor / Paint / Paint Materials",
+    "Body labor total $1,240.00 Paint materials total $385.00 Paint labor rate $58.00",
+    "\fAlternate Parts Supplier",
+    "LKQ grille alternate supplier page lists used grille not correct style for vehicle",
+    "CCC MOTOR Guide Pages",
+    "MOTOR database included-not-included guide scan operations paint materials labor indicators",
+  ].join("\n");
+}
+
 function drawFragmentedEstimateRow(page, font, line, description, labor, amount, y) {
   page.drawText(String(line), { x: 48, y, size: 8, font });
   page.drawText(description, { x: 82, y, size: 8, font });
@@ -577,6 +606,118 @@ async function run(name, test) {
     assert.equal(links[0].retrievalStatus, "not_fetched");
     assert.equal(links[0].authorityStatus, "referenced_not_produced");
     assert.match(links[0].redactedUrl, /URL not extracted/);
+  });
+
+  await run("stored estimate text anchors Ram lines onto original pages when PDF coordinates are unavailable", async () => {
+    const sourcePdfBytes = await createBlankSourcePdf(2);
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceText: ramEstimateStoredText(),
+      findings: [
+        baseFinding({
+          id: "ram-line-23",
+          operationLabel: "LKQ grille not correct style",
+          category: "parts_downgrade",
+          carrierEvidence: {
+            lineNumber: "23",
+            description: "LKQ grille Note: not correct style for vehicle",
+            amount: 185,
+            laborHours: null,
+            sourceLabel: "Carrier estimate",
+          },
+        }),
+        baseFinding({
+          id: "ram-line-39",
+          operationLabel: "Pre-repair scan",
+          category: "scan_diagnostic",
+          carrierEvidence: {
+            lineNumber: "39",
+            description: "Pre-repair scan",
+            amount: 75,
+            laborHours: 0.5,
+            sourceLabel: "Carrier estimate",
+          },
+        }),
+        baseFinding({
+          id: "ram-line-40",
+          operationLabel: "In-process scan",
+          category: "scan_diagnostic",
+          carrierEvidence: {
+            lineNumber: "40",
+            description: "In-process scan",
+            amount: 75,
+            laborHours: 0.5,
+            sourceLabel: "Carrier estimate",
+          },
+        }),
+        baseFinding({
+          id: "ram-line-41",
+          operationLabel: "Seat belt dynamic function test",
+          category: "scan_diagnostic",
+          carrierEvidence: {
+            lineNumber: "41",
+            description: "Seat belt dynamic function test",
+            amount: 52,
+            laborHours: 0.4,
+            sourceLabel: "Carrier estimate",
+          },
+        }),
+        baseFinding({
+          id: "ram-totals",
+          operationLabel: "Paint materials and labor total difference",
+          category: "labor_difference",
+          carrierEvidence: {
+            lineNumber: null,
+            description: "Paint materials total $385.00 Paint labor rate $58.00",
+            amount: 385,
+            laborHours: null,
+            sourceLabel: "Carrier estimate",
+          },
+        }),
+        baseFinding({
+          id: "ram-supplier",
+          operationLabel: "Alternate parts supplier LKQ grille",
+          category: "parts_downgrade",
+          carrierEvidence: {
+            lineNumber: null,
+            description: "Alternate Parts Supplier LKQ grille not correct style",
+            amount: null,
+            laborHours: null,
+            sourceLabel: "Carrier estimate",
+          },
+        }),
+      ],
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+    const pages = await extractPdfPageTexts(result.bytes);
+
+    assert.equal(result.originalPageCount, 2);
+    assert.equal(result.annotatedFindingCount, 6);
+    assert.equal(result.unresolvedAnchorCount, 0);
+    assert.doesNotMatch(result.warnings.join(" "), /all_findings_unanchored/);
+    assert.match(result.warnings.join(" "), /stored extracted text/i);
+    assert.match(pages.join(" "), /Finding #:/);
+    assert.match(pages.join(" "), /Line 23: LKQ grille Note/);
+    assert.match(pages.join(" "), /Line 39: Pre-repair scan/);
+    assert.match(pages.join(" "), /Line 40: In-process scan/);
+    assert.match(pages.join(" "), /Line 41: Seat belt dynamic function test/);
+    assert.match(pages.join(" "), /Paint materials total/);
+    assert.match(pages.join(" "), /Alternate Parts Supplier/);
+    assert.doesNotMatch(pages.join(" "), /Unanchored Citation Density Findings/);
+  });
+
+  await run("Ram line 44 Egnyte REVVAdas link is detected and redacted", async () => {
+    const links = detectEmbeddedEstimateLinks({
+      text: "Line 44 REVVAdas Report ADAS report available upon request and via this link https://egnyte.example.com/revvadas/ram-report?token=secret",
+      estimateRole: "carrier",
+      nearbyOperation: "REVVAdas Report",
+    });
+
+    assert.equal(links.length, 1);
+    assert.equal(links[0].lineNumber, "44");
+    assert.match(links[0].redactedUrl, /egnyte\.example\.com\/revvadas\/ram-report/);
+    assert.doesNotMatch(links[0].redactedUrl, /token=secret/);
+    assert.equal(links[0].authorityStatus, "referenced_not_produced");
   });
 
   await run("weak findings use the required label text", async () => {

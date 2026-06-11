@@ -993,7 +993,7 @@ export function detectEmbeddedEstimateLinks(params: {
     links.push({
       sourceDocumentId: params.sourceDocumentId,
       pageNumber: params.pageNumber ?? null,
-      lineNumber: params.lineNumber ?? null,
+      lineNumber: params.lineNumber ?? extractLineNumberFromText(params.text),
       estimateRole: params.estimateRole,
       nearbyOperation: cleanCustomerFacingEstimateLine(params.nearbyOperation) || null,
       redactedUrl: redactEmbeddedEstimateUrl(rawUrl),

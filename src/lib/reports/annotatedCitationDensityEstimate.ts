@@ -98,6 +98,7 @@ export function dataUrlToPdfBytes(dataUrl: string): Uint8Array | null {
 
 export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   sourcePdfBytes: Uint8Array;
+  sourceText?: string | null;
   findings: CitationDensityFinding[];
   request?: AnnotatedEstimateRequest;
 }): Promise<AnnotatedEstimateResult> {
@@ -115,15 +116,19 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   }
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const anchors = await extractPdfTextAnchors(sourcePdfBytes).catch((error) => {
+  const pdfAnchors = await extractPdfTextAnchors(sourcePdfBytes).catch((error) => {
     warnings.push(
       `Text-coordinate extraction failed; findings were placed in the appendix. ${error instanceof Error ? error.message : "Unknown PDF text extraction error."}`
     );
     return [] as TextAnchor[];
   });
+  const fallbackAnchors = buildStoredTextAnchors(params.sourceText, pdfDoc);
+  const anchors = [...pdfAnchors, ...fallbackAnchors];
 
   if (!anchors.length) {
     warnings.push("No text coordinates were extracted from the source PDF. The PDF may be image-only.");
+  } else if (!pdfAnchors.length && fallbackAnchors.length) {
+    warnings.push("Used stored extracted text to place approximate estimate-page anchors.");
   }
 
   const matches: MatchedFinding[] = [];
@@ -298,6 +303,98 @@ function buildGroupedLineAnchors(anchors: TextAnchor[]): TextAnchor[] {
     }
   }
   return grouped;
+}
+
+function buildStoredTextAnchors(sourceText: string | null | undefined, pdfDoc: PDFDocument): TextAnchor[] {
+  const text = sourceText?.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+  if (!text) return [];
+
+  const pageCount = Math.max(1, pdfDoc.getPageCount());
+  const pages = splitStoredTextIntoPages(text, pageCount);
+  const anchors: TextAnchor[] = [];
+
+  pages.forEach((pageText, pageIndex) => {
+    const page = pdfDoc.getPage(Math.min(pageIndex, pageCount - 1));
+    const pageWidth = page.getWidth();
+    const pageHeight = page.getHeight();
+    const rawLines = pageText
+      .split("\n")
+      .map((line) => line.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    const lines = mergeContinuationLines(rawLines);
+    const usableLines = lines.length ? lines : rawLines;
+    const topY = pageHeight - 72;
+    const rowHeight = Math.max(8, Math.min(13, (pageHeight - 120) / Math.max(1, usableLines.length)));
+
+    usableLines.forEach((line, index) => {
+      const lineY = clamp(topY - index * rowHeight, 42, pageHeight - 42);
+      anchors.push({
+        pageIndex: Math.min(pageIndex, pageCount - 1),
+        text: line,
+        normalizedText: normalizeMatchText(line),
+        x: 42,
+        y: pageHeight - lineY - 9,
+        width: Math.min(pageWidth - 84, Math.max(180, line.length * 4.8)),
+        height: 9,
+        pageWidth,
+        pageHeight,
+        synthetic: true,
+        groupedLine: true,
+      });
+    });
+  });
+
+  return anchors;
+}
+
+function splitStoredTextIntoPages(text: string, pageCount: number) {
+  const formFeedPages = text.split(/\f+/).map((page) => page.trim()).filter(Boolean);
+  if (formFeedPages.length > 1) return padPages(formFeedPages, pageCount);
+
+  const markerPages = text
+    .split(/\n\s*(?:-{2,}\s*)?(?:page|pg)\s+\d+(?:\s+of\s+\d+)?\s*(?:-{2,})?\s*\n/gi)
+    .map((page) => page.trim())
+    .filter(Boolean);
+  if (markerPages.length > 1) return padPages(markerPages, pageCount);
+
+  return distributeLinesAcrossPages(text, pageCount);
+}
+
+function padPages(pages: string[], pageCount: number) {
+  if (pages.length >= pageCount) return pages.slice(0, pageCount);
+  return [...pages, ...Array.from({ length: pageCount - pages.length }, () => "")];
+}
+
+function distributeLinesAcrossPages(text: string, pageCount: number) {
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (pageCount <= 1 || lines.length <= 1) return [text];
+  const perPage = Math.ceil(lines.length / pageCount);
+  return Array.from({ length: pageCount }, (_, index) =>
+    lines.slice(index * perPage, (index + 1) * perPage).join("\n")
+  );
+}
+
+function mergeContinuationLines(lines: string[]) {
+  const merged: string[] = [];
+  for (const line of lines) {
+    const startsEstimateRow = /^\s*(?:line\s*)?\d{1,4}\b/i.test(line);
+    const startsSection = /^(?:parts|body|paint|refinish|electrical|diagnostic|calibration|totals?|summary|alternate parts supplier|ccc|motor|p-?pages?|included|not included)\b/i.test(line);
+    if (!merged.length || startsEstimateRow || startsSection) {
+      merged.push(line);
+      continue;
+    }
+
+    const previous = merged[merged.length - 1];
+    if (
+      /(?:note|available|via this link|not correct|supplier|guide|database|included|not included|paint materials?|labor|total)/i.test(line) ||
+      /^\$?\d+(?:\.\d+)?\b/.test(line)
+    ) {
+      merged[merged.length - 1] = `${previous} ${line}`;
+    } else {
+      merged.push(line);
+    }
+  }
+  return merged;
 }
 
 function findBestAnchorForFinding(
