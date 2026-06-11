@@ -1,4 +1,4 @@
-const PRIMARY_MODEL_FALLBACK = "gpt-5.4";
+const PRIMARY_MODEL_FALLBACK = "claude-5-fable";
 const HELPER_MODEL_FALLBACK = "gpt-5.4-mini";
 const TTS_MODEL_FALLBACK = "gpt-4o-mini-tts";
 
