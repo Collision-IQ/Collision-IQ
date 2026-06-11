@@ -22,6 +22,9 @@ import type { InsightKey } from "@/components/chatbot/insightSync";
 import StructuredAnalysisCanvas from "@/components/StructuredAnalysisCanvas";
 import UpgradeModal from "@/components/UpgradeModal";
 import WorkspacePanel from "@/components/WorkspacePanel";
+import CitationDensityAnnotationViewer, {
+  type CitationDensityAnnotationMetadata,
+} from "@/components/CitationDensityAnnotationViewer";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import { getNormalizedDetermination } from "@/lib/analysis/getNormalizedDetermination";
@@ -96,10 +99,17 @@ type AttachmentTrayItem = {
 type AnnotatedEstimateExportResult = {
   blob: Blob;
   filename: string;
+  downloadUrl: string;
+  annotationMetadata: CitationDensityAnnotationMetadata[];
   annotatedFindingCount: number;
   unresolvedAnchorCount: number;
   warnings: string[];
 };
+
+type CitationDensityViewerState = {
+  pdfUrl: string;
+  annotations: CitationDensityAnnotationMetadata[];
+} | null;
 
 type LeftPaneMode = "chat" | "review";
 export type ReportKind =
@@ -1654,6 +1664,7 @@ function RailContent({
   const [reportSendHistory, setReportSendHistory] = useState<ReportSendHistoryItem[]>([]);
   const [reportSendHistoryLoading, setReportSendHistoryLoading] = useState(false);
   const [serviceCheckoutLoading, setServiceCheckoutLoading] = useState(false);
+  const [citationDensityViewer, setCitationDensityViewer] = useState<CitationDensityViewerState>(null);
   function registerSectionRef(insightKey: InsightKey, node: HTMLDivElement | null) {
     sectionRefs.current[insightKey] = node;
   }
@@ -2017,6 +2028,12 @@ function RailContent({
       try {
         const exportResult = await generateAnnotatedCitationDensityEstimate();
         downloadBlob(exportResult.blob, exportResult.filename);
+        if (exportResult.annotationMetadata.length > 0) {
+          setCitationDensityViewer({
+            pdfUrl: exportResult.downloadUrl,
+            annotations: exportResult.annotationMetadata,
+          });
+        }
         setReportSendStatus(buildAnnotatedCitationDensityStatus(exportResult));
       } catch (error) {
         setReportSendStatus(error instanceof Error ? error.message : "Annotated estimate download failed.");
@@ -2063,6 +2080,7 @@ function RailContent({
 
     const data = (await response.json().catch(() => null)) as {
       downloadUrl?: unknown;
+      annotationMetadata?: unknown;
       annotatedFindingCount?: unknown;
       unresolvedAnchorCount?: unknown;
       warnings?: unknown;
@@ -2078,6 +2096,10 @@ function RailContent({
     return {
       blob,
       filename: "citation-density-annotated-estimate.pdf",
+      downloadUrl: data.downloadUrl,
+      annotationMetadata: Array.isArray(data.annotationMetadata)
+        ? data.annotationMetadata.filter(isCitationDensityAnnotationMetadata)
+        : [],
       annotatedFindingCount:
         typeof data.annotatedFindingCount === "number" ? data.annotatedFindingCount : 0,
       unresolvedAnchorCount:
@@ -3214,7 +3236,41 @@ function RailContent({
           }}
         />
       ) : null}
+      {citationDensityViewer ? (
+        <CitationDensityAnnotationViewer
+          pdfUrl={citationDensityViewer.pdfUrl}
+          annotations={citationDensityViewer.annotations}
+          onClose={() => setCitationDensityViewer(null)}
+          onAsk={(annotation) => {
+            setReportSendStatus(`Ask about Citation Density finding ${annotation.markerNumber}: ${annotation.shortTitle}`);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function isCitationDensityAnnotationMetadata(value: unknown): value is CitationDensityAnnotationMetadata {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Partial<CitationDensityAnnotationMetadata>;
+  return (
+    typeof record.findingId === "string" &&
+    typeof record.markerNumber === "number" &&
+    typeof record.pageNumber === "number" &&
+    typeof record.x === "number" &&
+    typeof record.y === "number" &&
+    typeof record.width === "number" &&
+    typeof record.height === "number" &&
+    typeof record.label === "string" &&
+    typeof record.shortTitle === "string" &&
+    typeof record.estimateLine === "string" &&
+    typeof record.bestAuthority === "string" &&
+    typeof record.authorityStatus === "string" &&
+    typeof record.missingProof === "string" &&
+    typeof record.nextAction === "string" &&
+    Array.isArray(record.sourceRefs) &&
+    record.sourceRefs.every((sourceRef) => typeof sourceRef === "string") &&
+    typeof record.comment === "string"
   );
 }
 

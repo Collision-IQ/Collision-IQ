@@ -6,6 +6,11 @@ import {
   type PDFPage,
   type PDFFont,
 } from "pdf-lib";
+import {
+  PDFHexString,
+  PDFName,
+  type PDFRef,
+} from "pdf-lib/cjs/core";
 import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
 import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
 
@@ -29,6 +34,26 @@ export type AnnotatedEstimateResult = {
   originalPageCount: number;
   finalPageCount: number;
   warnings: string[];
+  annotationMetadata: CitationDensityAnnotationMetadata[];
+};
+
+export type CitationDensityAnnotationMetadata = {
+  findingId: string;
+  markerNumber: number;
+  pageNumber: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: string;
+  shortTitle: string;
+  estimateLine: string;
+  bestAuthority: string;
+  authorityStatus: string;
+  missingProof: string;
+  nextAction: string;
+  sourceRefs: string[];
+  comment: string;
 };
 
 type TextAnchor = {
@@ -75,13 +100,22 @@ const LABELS = [
 
 const NO_LINE_ANCHORS_WARNING = "No line-level anchors could be placed.";
 
-const exportCache = new Map<string, { bytes: Uint8Array; filename: string; createdAt: number }>();
+const exportCache = new Map<string, {
+  bytes: Uint8Array;
+  filename: string;
+  createdAt: number;
+  annotationMetadata: CitationDensityAnnotationMetadata[];
+}>();
 const EXPORT_TTL_MS = 30 * 60 * 1000;
 
-export function putAnnotatedEstimateExport(bytes: Uint8Array, filename: string) {
+export function putAnnotatedEstimateExport(
+  bytes: Uint8Array,
+  filename: string,
+  annotationMetadata: CitationDensityAnnotationMetadata[] = []
+) {
   pruneExportCache();
   const exportId = randomUUID();
-  exportCache.set(exportId, { bytes, filename, createdAt: Date.now() });
+  exportCache.set(exportId, { bytes, filename, createdAt: Date.now(), annotationMetadata });
   return exportId;
 }
 
@@ -161,15 +195,17 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     if (matches.length === 0) warnings.push("all_findings_unanchored");
   }
 
+  const annotationMetadata: CitationDensityAnnotationMetadata[] = [];
   matches.forEach((match, index) => {
     const page = pdfDoc.getPage(match.anchor.pageIndex);
-    drawFindingAnnotation(page, match, index + 1, {
+    const metadata = drawFindingAnnotation(pdfDoc, page, match, index + 1, {
       mode,
       font,
       boldFont,
       estimateRole,
       redactSensitive: request.redactSensitive !== false,
     });
+    annotationMetadata.push(metadata);
   });
 
   if (findings.length > 0 && lineMatchCount === 0) {
@@ -205,7 +241,11 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   }
 
   const bytes = await pdfDoc.save();
-  const exportId = putAnnotatedEstimateExport(bytes, "citation-density-annotated-estimate.pdf");
+  const exportId = putAnnotatedEstimateExport(
+    bytes,
+    "citation-density-annotated-estimate.pdf",
+    annotationMetadata
+  );
   return {
     exportId,
     bytes,
@@ -214,6 +254,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     originalPageCount,
     finalPageCount: pdfDoc.getPageCount(),
     warnings,
+    annotationMetadata,
   };
 }
 
@@ -569,6 +610,7 @@ function scoreAnchor(
 }
 
 function drawFindingAnnotation(
+  pdfDoc: PDFDocument,
   page: PDFPage,
   match: MatchedFinding,
   number: number,
@@ -585,78 +627,249 @@ function drawFindingAnnotation(
   const pageHeight = page.getHeight();
   const highlightWidth = Math.min(Math.max(anchor.width, 120), pageWidth - anchor.x - 18);
   const highlightY = clamp(pageHeight - anchor.y - anchor.height, 16, pageHeight - 20);
+  const highlightX = Math.max(anchor.x - 2, 8);
+  const highlightHeight = Math.max(anchor.height + 5, 12);
+  const label = getProofBucketLabel(finding);
+  const shortTitle = formatShortIssueTitle(finding);
+  const metadata = buildAnnotationMetadata(finding, anchor, number, label, shortTitle, {
+    x: highlightX,
+    y: highlightY - 2,
+    width: highlightWidth + 4,
+    height: highlightHeight,
+    estimateRole: options.estimateRole,
+    redactSensitive: options.redactSensitive,
+  });
 
   if (options.mode === "inline_highlight" || options.mode === "both") {
     page.drawRectangle({
-      x: Math.max(anchor.x - 2, 8),
+      x: highlightX,
       y: highlightY - 2,
       width: highlightWidth + 4,
-      height: Math.max(anchor.height + 5, 12),
+      height: highlightHeight,
       color: rgb(1, 0.9, 0.3),
-      opacity: 0.28,
-    });
-    page.drawEllipse({
-      x: Math.max(anchor.x - 10, 10),
-      y: highlightY + 4,
-      xScale: 8,
-      yScale: 8,
-      color: rgb(0.86, 0.18, 0.15),
-      opacity: 0.92,
-    });
-    page.drawText(String(number), {
-      x: Math.max(anchor.x - 14, 6),
-      y: highlightY + 1,
-      size: 8,
-      font: options.boldFont,
-      color: rgb(1, 1, 1),
+      opacity: 0.22,
     });
   }
 
   if (options.mode === "margin_callouts" || options.mode === "both") {
-    const boxWidth = Math.min(185, Math.max(135, pageWidth * 0.32));
-    const hasRightMargin = anchor.x + highlightWidth + boxWidth + 18 < pageWidth;
-    const hasLeftMargin = anchor.x - boxWidth - 18 > 18;
-    const boxX = hasRightMargin
-      ? anchor.x + highlightWidth + 8
-      : hasLeftMargin
-        ? anchor.x - boxWidth - 8
-        : 18;
-    const boxY = hasRightMargin || hasLeftMargin
-      ? clamp(highlightY - 86, 26, pageHeight - 142)
-      : 26;
-    const finalBoxWidth = hasRightMargin || hasLeftMargin ? boxWidth : pageWidth - 36;
-    const boxHeight = hasRightMargin || hasLeftMargin ? 130 : 110;
-    const label = getProofBucketLabel(finding);
-    const lines = buildCalloutLines(finding, number, label, options.redactSensitive, options.estimateRole);
-
-    page.drawLine({
-      start: { x: Math.min(anchor.x + highlightWidth + 2, pageWidth - 20), y: highlightY + 4 },
-      end: { x: boxX, y: boxY + boxHeight - 18 },
-      thickness: 0.7,
-      color: rgb(0.68, 0.2, 0.16),
-      opacity: 0.85,
-    });
-    page.drawRectangle({
-      x: boxX,
-      y: boxY,
-      width: finalBoxWidth,
-      height: boxHeight,
-      color: rgb(1, 0.98, 0.9),
-      borderColor: rgb(0.68, 0.2, 0.16),
-      borderWidth: 0.8,
-      opacity: 0.96,
-    });
-    drawWrappedLines(page, lines, {
-      x: boxX + 6,
-      y: boxY + boxHeight - 13,
-      width: finalBoxWidth - 12,
+    drawCompactMarker(page, {
+      number,
+      label,
+      shortTitle,
+      anchorX: anchor.x,
+      highlightX,
+      highlightY,
+      pageWidth,
       font: options.font,
       boldFont: options.boldFont,
-      size: 6.7,
-      lineHeight: 8,
-      maxLines: 15,
     });
   }
+
+  attachPdfFindingAnnotations(pdfDoc, page, metadata);
+  return metadata;
+}
+
+function drawCompactMarker(
+  page: PDFPage,
+  options: {
+    number: number;
+    label: string;
+    shortTitle: string;
+    anchorX: number;
+    highlightX: number;
+    highlightY: number;
+    pageWidth: number;
+    font: PDFFont;
+    boldFont: PDFFont;
+  }
+) {
+  const markerX = options.anchorX > 56
+    ? clamp(options.highlightX - 18, 8, options.pageWidth - 28)
+    : clamp(options.highlightX + 4, 8, options.pageWidth - 28);
+  const markerY = options.highlightY + 2;
+  page.drawEllipse({
+    x: markerX + 7,
+    y: markerY + 7,
+    xScale: 7,
+    yScale: 7,
+    color: rgb(0.72, 0.12, 0.1),
+    opacity: 0.95,
+  });
+  page.drawText(String(options.number), {
+    x: markerX + (options.number < 10 ? 4.6 : 2.2),
+    y: markerY + 3.2,
+    size: 7,
+    font: options.boldFont,
+    color: rgb(1, 1, 1),
+  });
+
+  const text = `${options.number}. ${options.label}: ${options.shortTitle}`;
+  const textX = clamp(options.highlightX + 4, 28, options.pageWidth - 210);
+  page.drawText(truncateText(text, 58), {
+    x: textX,
+    y: markerY + 3,
+    size: 6.4,
+    font: options.boldFont,
+    color: rgb(0.45, 0.1, 0.08),
+  });
+}
+
+function attachPdfFindingAnnotations(
+  pdfDoc: PDFDocument,
+  page: PDFPage,
+  metadata: CitationDensityAnnotationMetadata
+) {
+  const annots = page.node.Annots() ?? pdfDoc.context.obj([]);
+  page.node.set(PDFName.Annots, annots);
+  const pageRef = page.ref;
+  const rect = [
+    metadata.x,
+    metadata.y,
+    metadata.x + metadata.width,
+    metadata.y + metadata.height,
+  ];
+  const quadPoints = [
+    metadata.x,
+    metadata.y + metadata.height,
+    metadata.x + metadata.width,
+    metadata.y + metadata.height,
+    metadata.x,
+    metadata.y,
+    metadata.x + metadata.width,
+    metadata.y,
+  ];
+  const highlightRef = addPdfAnnotation(pdfDoc, pageRef, {
+    Type: "Annot",
+    Subtype: "Highlight",
+    Rect: rect,
+    QuadPoints: quadPoints,
+    C: [1, 0.88, 0.22],
+    CA: 0.36,
+    T: PDFHexString.fromText("Collision IQ Citation Density"),
+    Contents: PDFHexString.fromText(metadata.comment),
+    NM: PDFHexString.fromText(`citation-density-${metadata.findingId}-highlight`),
+    M: PDFHexString.fromText(formatPdfDate(new Date())),
+    F: 4,
+  });
+  const noteRef = addPdfAnnotation(pdfDoc, pageRef, {
+    Type: "Annot",
+    Subtype: "Text",
+    Rect: [
+      clamp(metadata.x - 18, 4, page.getWidth() - 24),
+      clamp(metadata.y + metadata.height - 2, 4, page.getHeight() - 24),
+      clamp(metadata.x - 2, 20, page.getWidth() - 8),
+      clamp(metadata.y + metadata.height + 14, 20, page.getHeight() - 8),
+    ],
+    Name: "Comment",
+    Open: false,
+    T: PDFHexString.fromText("Collision IQ Citation Density"),
+    Contents: PDFHexString.fromText(metadata.comment),
+    NM: PDFHexString.fromText(`citation-density-${metadata.findingId}-note`),
+    M: PDFHexString.fromText(formatPdfDate(new Date())),
+    C: [1, 0.84, 0.2],
+    F: 4,
+  });
+  annots.push(highlightRef);
+  annots.push(noteRef);
+}
+
+function addPdfAnnotation(
+  pdfDoc: PDFDocument,
+  pageRef: PDFRef,
+  values: Record<string, unknown>
+) {
+  const dict = pdfDoc.context.obj({
+    ...values,
+    P: pageRef,
+  });
+  return pdfDoc.context.register(dict);
+}
+
+function buildAnnotationMetadata(
+  finding: CitationDensityFinding,
+  anchor: TextAnchor,
+  number: number,
+  label: string,
+  shortTitle: string,
+  options: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    estimateRole: "carrier" | "shop" | "selected";
+    redactSensitive: boolean;
+  }
+): CitationDensityAnnotationMetadata {
+  const sanitize = (value: string) => {
+    const text = normalizeSourceBoundaryText(value.replace(/\s+/g, " ").trim());
+    return options.redactSensitive ? redactAnnotationText(text) : text;
+  };
+  const sourceRefs = formatAnnotationSourceRefs(finding).map(sanitize);
+  const bestAuthority = sanitize(formatBestAuthority(finding));
+  const metadata: CitationDensityAnnotationMetadata = {
+    findingId: finding.id,
+    markerNumber: number,
+    pageNumber: anchor.pageIndex + 1,
+    x: roundCoordinate(options.x),
+    y: roundCoordinate(options.y),
+    width: roundCoordinate(options.width),
+    height: roundCoordinate(options.height),
+    label,
+    shortTitle,
+    estimateLine: sanitize(formatEstimateLineForCallout(finding, options.estimateRole)),
+    bestAuthority,
+    authorityStatus: finding.bestAvailableAuthority?.status ?? label,
+    missingProof: sanitize(finding.missingProofSummary),
+    nextAction: sanitize(finding.recommendedNextAction),
+    sourceRefs,
+    comment: "",
+  };
+  metadata.comment = buildPdfCommentBody(metadata, finding, options.estimateRole, options.redactSensitive);
+  return metadata;
+}
+
+function buildPdfCommentBody(
+  metadata: CitationDensityAnnotationMetadata,
+  finding: CitationDensityFinding,
+  estimateRole: "carrier" | "shop" | "selected",
+  redactSensitive: boolean
+) {
+  const lines = buildCalloutLines(finding, metadata.markerNumber, metadata.label, redactSensitive, estimateRole);
+  return [
+    `Finding #${metadata.markerNumber}: ${metadata.shortTitle}`,
+    ...lines.slice(1),
+    metadata.sourceRefs.length ? `Source refs: ${metadata.sourceRefs.join("; ")}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function formatShortIssueTitle(finding: CitationDensityFinding) {
+  const evidence = finding.carrierEvidence ?? finding.shopEvidence;
+  return truncateText(evidence?.description || finding.operationLabel || "Citation Density finding", 48);
+}
+
+function formatAnnotationSourceRefs(finding: CitationDensityFinding) {
+  const refs = [
+    finding.carrierEvidence?.sourceLabel,
+    finding.shopEvidence?.sourceLabel,
+    finding.bestAvailableAuthority?.title,
+    ...formatEmbeddedLinkLines(finding),
+  ].filter((value): value is string => Boolean(value && value.trim()));
+  return [...new Set(refs)].slice(0, 6);
+}
+
+function formatPdfDate(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `D:${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`;
+}
+
+function roundCoordinate(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function truncateText(value: string, maxLength: number) {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 1)).trim()}...`;
 }
 
 function addLegendPage(pdfDoc: PDFDocument, options: { font: PDFFont; boldFont: PDFFont }) {

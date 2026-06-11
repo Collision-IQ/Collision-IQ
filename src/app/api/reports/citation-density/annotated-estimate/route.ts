@@ -58,6 +58,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Export not found or expired." }, { status: 404 });
   }
 
+  if (url.searchParams.get("metadata") === "1") {
+    return NextResponse.json({
+      ok: true,
+      exportId,
+      filename: entry.filename,
+      annotationMetadata: entry.annotationMetadata,
+    }, {
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
+
   return new Response(Buffer.from(entry.bytes), {
     headers: {
       "Content-Type": "application/pdf",
@@ -224,6 +235,8 @@ export async function POST(request: Request) {
         annotatedFindingCount: result.annotatedFindingCount,
         unresolvedAnchorCount: result.unresolvedAnchorCount,
         warnings: result.warnings,
+        annotationMetadata: result.annotationMetadata,
+        annotationMetadataUrl: `/api/reports/citation-density/annotated-estimate?exportId=${encodeURIComponent(result.exportId)}&metadata=1`,
         selectedSourceLabel: selection.selectedSourceLabel,
         selectedEstimateTotal: selection.selectedEstimateTotal,
         selectionReason: selection.selectionReason,
@@ -240,6 +253,8 @@ export async function POST(request: Request) {
       combinedPdfUrl: outputs.length > 1 ? undefined : primaryOutput?.downloadUrl,
       annotatedFindingCount,
       unresolvedAnchorCount,
+      annotationMetadata: primaryOutput?.annotationMetadata ?? [],
+      annotationMetadataUrl: primaryOutput?.annotationMetadataUrl,
       warnings: [...aggregateWarnings],
       reviewTarget: primaryOutput
         ? describeReviewTarget(resolvedSelections[0].attachment, targetEstimate, sourceDocuments)

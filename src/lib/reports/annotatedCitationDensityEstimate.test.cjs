@@ -5,6 +5,7 @@ const path = require("node:path");
 const Module = require("node:module");
 const ts = require("typescript");
 const { PDFDocument, StandardFonts } = require("pdf-lib");
+const { PDFName, PDFString, PDFHexString } = require("pdf-lib/cjs/core");
 
 const originalResolveFilename = Module._resolveFilename;
 Module._resolveFilename = function resolveFilenameWithAlias(request, parent, isMain, options) {
@@ -201,6 +202,25 @@ async function extractPdfPageTexts(bytes) {
   return pages;
 }
 
+async function getOriginalPageAnnotationCount(bytes, pageIndex = 0) {
+  const doc = await PDFDocument.load(bytes);
+  return doc.getPage(pageIndex).node.Annots()?.size() ?? 0;
+}
+
+async function extractOriginalPageAnnotationText(bytes, pageIndex = 0) {
+  const doc = await PDFDocument.load(bytes);
+  const page = doc.getPage(pageIndex);
+  const annots = page.node.Annots();
+  if (!annots) return "";
+  const chunks = [];
+  for (let index = 0; index < annots.size(); index += 1) {
+    const annot = annots.lookup(index);
+    const contents = annot?.lookupMaybe?.(PDFName.of("Contents"), PDFString, PDFHexString);
+    if (contents?.decodeText) chunks.push(contents.decodeText());
+  }
+  return chunks.join("\n");
+}
+
 async function run(name, test) {
   try {
     await test();
@@ -275,14 +295,18 @@ async function run(name, test) {
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.equal(result.originalPageCount, 1);
     assert.equal(loaded.getPageCount(), 2);
+    assert.equal(result.annotationMetadata.length, 1);
+    assert.equal(await getOriginalPageAnnotationCount(result.bytes), 2);
+    const comments = await extractOriginalPageAnnotationText(result.bytes);
     assert.match(text, /NEEDS INVOICE|NEEDS OEM/);
-    assert.match(text, /Finding #:/);
-    assert.match(text, /Label:/);
-    assert.match(text, /Citation Density:/);
-    assert.match(text, /Estimate line:/);
-    assert.match(text, /Current support:/);
-    assert.match(text, /Missing proof:/);
-    assert.match(text, /Next action:/);
+    assert.doesNotMatch((await extractPdfPageTexts(result.bytes))[0], /Estimate line:|Current support:|Missing proof:|Next action:/);
+    assert.match(result.annotationMetadata[0].comment, /Label:/);
+    assert.match(result.annotationMetadata[0].comment, /Citation Density:/);
+    assert.match(result.annotationMetadata[0].comment, /Estimate line:/);
+    assert.match(result.annotationMetadata[0].comment, /Current support:/);
+    assert.match(result.annotationMetadata[0].comment, /Missing proof:/);
+    assert.match(result.annotationMetadata[0].comment, /Next action:/);
+    assert.match(comments, /Finding #1/);
     assert.match(text, /Estimate evidence supports the existence of a difference/);
     assert.match(text, /CCC Secure Share source confirms this estimate line was present in the structured estimate data/);
     assert.match(text, /The CCC estimate data supports the existence of this line-item difference\. OEM\/P-page\/DEG\/legal support has not yet been verified/);
@@ -304,8 +328,11 @@ async function run(name, test) {
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.match(pages[0], /Estimate 123/);
     assert.match(pages[0], /Line 12 ADAS calibration 1\.5 hrs \$250\.00/);
-    assert.match(pages[0], /Finding #:/);
-    assert.match(pages[0], /Estimate line:/);
+    assert.match(pages[0], /1\.\s+(NEEDS INVOICE|NEEDS OEM)/);
+    assert.doesNotMatch(pages[0], /Estimate line:|Current support:|Missing proof:|Next action:/);
+    assert.equal(result.annotationMetadata[0].findingId, "finding-1");
+    assert.equal(result.annotationMetadata[0].pageNumber, 1);
+    assert.match(result.annotationMetadata[0].estimateLine, /Line 12: ADAS calibration/);
     assert.doesNotMatch(pages.join(" "), /Citation Density Gap Report|Estimate gaps ranked by repair impact/i);
   });
 
@@ -459,8 +486,9 @@ async function run(name, test) {
     assert.equal(result.annotatedFindingCount, 1);
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.match(pages[0], /49\s+A\/M bumper cover/);
-    assert.match(pages[0], /Finding #:/);
+    assert.match(pages[0], /1\.\s+NEEDS/);
     assert.match(pages[0], /A\/M bumper cover/);
+    assert.match(result.annotationMetadata[0].comment, /Estimate line:/);
   });
 
   await run("note text produces an on-page referenced-not-produced annotation", async () => {
@@ -536,7 +564,7 @@ async function run(name, test) {
     assert.equal(result.annotatedFindingCount, 1);
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.match(pages[0], /Refinish/);
-    assert.match(pages[0], /Finding #:/);
+    assert.match(pages[0], /1\.\s+NEEDS/);
   });
 
   await run("mutated finding text maps back to original estimate text", async () => {
@@ -696,11 +724,11 @@ async function run(name, test) {
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.doesNotMatch(result.warnings.join(" "), /all_findings_unanchored/);
     assert.match(result.warnings.join(" "), /stored extracted text/i);
-    assert.match(pages.join(" "), /Finding #:/);
-    assert.match(pages.join(" "), /Line 23: LKQ grille Note/);
-    assert.match(pages.join(" "), /Line 39: Pre-repair scan/);
-    assert.match(pages.join(" "), /Line 40: In-process scan/);
-    assert.match(pages.join(" "), /Line 41: Seat belt dynamic function test/);
+    assert.match(pages.join(" "), /1\.\s+NEEDS/);
+    assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 23: LKQ grille Note/);
+    assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 39: Pre-repair scan/);
+    assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 40: In-process scan/);
+    assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 41: Seat belt dynamic function test/);
     assert.match(pages.join(" "), /Paint materials total/);
     assert.match(pages.join(" "), /Alternate Parts Supplier/);
     assert.doesNotMatch(pages.join(" "), /Unanchored Citation Density Findings/);
@@ -781,9 +809,9 @@ async function run(name, test) {
     const text = await extractPdfText(result.bytes);
 
     assert.match(text, /VERIFIED ADAS/);
-    assert.match(text, /Best authority:/);
-    assert.match(text, /Reviewed calibration certificate/);
-    assert.match(text, /Missing authority:/);
+    assert.match(result.annotationMetadata[0].comment, /Best authority:/);
+    assert.match(result.annotationMetadata[0].comment, /Reviewed calibration certificate/);
+    assert.match(result.annotationMetadata[0].comment, /Missing authority:/);
   });
 
   await run("uploaded documentation support uses VERIFIED DOCUMENTATION label", async () => {
@@ -878,6 +906,7 @@ async function run(name, test) {
     const text = await extractPdfText(result.bytes);
 
     assert.doesNotMatch(text, /Label:\s*NEEDS ADAS/);
-    assert.match(text, /Label:\s*NEEDS INVOICE/);
+    assert.match(text, /NEEDS INVOICE/);
+    assert.match(result.annotationMetadata[0].comment, /Label:\s*NEEDS INVOICE/);
   });
 })();
