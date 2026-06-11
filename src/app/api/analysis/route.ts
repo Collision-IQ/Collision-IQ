@@ -56,6 +56,10 @@ import {
 import type { EvidenceRecord } from "@/lib/ai/types/evidence";
 import { collisionIqModels } from "@/lib/modelConfig";
 import { openai } from "@/lib/openai";
+import {
+  generatePrimaryText,
+  generateSupplementText,
+} from "@/lib/ai/providerTextGeneration";
 import { buildWorkspaceDataFromReport } from "@/lib/workspace/buildWorkspaceData";
 import { buildLinkedEvidence, type LinkedEvidence } from "@/lib/ingest/fetchLinkedEvidence";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
@@ -99,8 +103,6 @@ export const runtime = "nodejs";
 
 const SUPPLEMENT_MODEL =
   process.env.COLLISION_IQ_SUPPLEMENT_MODEL?.trim() ||
-  process.env.COLLISION_IQ_MODEL_PRIMARY?.trim() ||
-  process.env.COLLISION_IQ_MODEL?.trim() ||
   collisionIqModels.helper;
 
 type AnalysisRequestBody = {
@@ -3213,16 +3215,11 @@ async function generateDriveRefinedAnalysis(params: {
   retrievalContext: string;
   userMessage: string;
 }): Promise<{ narrative: string; recommendedActions: string[] }> {
-  const response = await openai.responses.create({
-    model: collisionIqModels.primary,
+  const response = await generatePrimaryText({
+    openai,
+    stage: "analysis_drive_refinement",
     temperature: 0.2,
-    input: [
-      {
-        role: "system",
-        content: [
-          {
-            type: "input_text",
-            text: `You are a collision repair decision engine.
+    instructions: `You are a collision repair decision engine.
 
 ${NON_BIAS_ACCURACY_DIRECTIVE}
 
@@ -3252,9 +3249,7 @@ Rules:
   "narrative": "string",
   "recommendedActions": ["string"]
 }`,
-          },
-        ],
-      },
+    input: [
       {
         role: "user",
         content: [
@@ -3785,8 +3780,10 @@ async function generateSupplementCandidates(
     .join("\n");
   const linkedProcedureSupport = summarizeReferencedProcedureSupport(linkedEvidence);
 
-  const response = await openai.responses.create({
-    model: SUPPLEMENT_MODEL,
+  const response = await generateSupplementText({
+    openai,
+    stage: "analysis_supplement_candidates",
+    openAiModel: SUPPLEMENT_MODEL,
     temperature: 0.2,
     input: [
       {

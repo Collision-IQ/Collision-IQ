@@ -71,6 +71,7 @@ async function verifyOpenAi(): Promise<VerificationResult> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   const baseMetadata = {
     OPENAI_API_KEY: maskSecret(apiKey),
+    COLLISION_IQ_PRIMARY_PROVIDER: process.env.COLLISION_IQ_PRIMARY_PROVIDER ?? null,
     COLLISION_IQ_MODEL_PRIMARY: process.env.COLLISION_IQ_MODEL_PRIMARY ?? null,
     COLLISION_IQ_MODEL: process.env.COLLISION_IQ_MODEL ?? null,
   };
@@ -97,7 +98,9 @@ async function verifyAnthropic(): Promise<VerificationResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   const metadata = {
     ANTHROPIC_API_KEY: maskSecret(apiKey),
-    ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL ?? null,
+    COLLISION_IQ_PRIMARY_PROVIDER: process.env.COLLISION_IQ_PRIMARY_PROVIDER ?? null,
+    ANTHROPIC_MODEL_PRIMARY: process.env.ANTHROPIC_MODEL_PRIMARY ?? null,
+    ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL ?? null,
   };
 
   if (!apiKey) {

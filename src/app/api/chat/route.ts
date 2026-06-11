@@ -31,6 +31,7 @@ import {
   classifyRetryableProviderError,
   RETRYABLE_PROVIDER_USER_MESSAGE,
 } from "@/lib/ai/providerRetryableError";
+import { generatePrimaryText } from "@/lib/ai/providerTextGeneration";
 import {
   areInternalRetrievalPathsResolved,
   createAgentRetrievalTrace,
@@ -727,8 +728,19 @@ async function createOpenAIResponseWithRetry(
   phase: "first-pass" | "second-pass",
   input: Parameters<ChatRouteDeps["openai"]["responses"]["create"]>[0]
 ) {
+  const generationInput = input as {
+    instructions?: string;
+    input: Parameters<typeof generatePrimaryText>[0]["input"];
+    temperature?: number;
+  };
   try {
-    return await deps.openai.responses.create(input);
+    return await generatePrimaryText({
+      openai: deps.openai,
+      stage: `chat_${phase}`,
+      instructions: generationInput.instructions,
+      input: generationInput.input,
+      temperature: generationInput.temperature,
+    });
   } catch (error) {
     logOpenAIPhaseFailure(phase, 1, error);
     const providerError = classifyRetryableProviderError(error, {
@@ -743,7 +755,13 @@ async function createOpenAIResponseWithRetry(
   await delay(OPENAI_RETRY_DELAY_MS);
 
   try {
-    return await deps.openai.responses.create(input);
+    return await generatePrimaryText({
+      openai: deps.openai,
+      stage: `chat_${phase}`,
+      instructions: generationInput.instructions,
+      input: generationInput.input,
+      temperature: generationInput.temperature,
+    });
   } catch (error) {
     logOpenAIPhaseFailure(phase, 2, error);
     throw error;
