@@ -37,6 +37,7 @@ const {
   NO_SOURCE_PDF_ERROR,
   NO_SOURCE_PDF_USER_MESSAGE,
   describeReviewTarget,
+  isAnnotatableEstimatePdf,
   resolveSourceEstimatePdf,
   resolveSourceEstimatePdfSelection,
   resolveSourceEstimatePdfSelections,
@@ -148,6 +149,8 @@ run("chat intent routes annotated citation density carrier estimate requests to 
 
   const chatSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatWidget.tsx"), "utf8");
   assert.match(chatSource, /\/api\/reports\/citation-density\/annotated-estimate/);
+  assert.match(chatSource, /sourceDocumentId:\s*sourcePdf\.attachmentId/);
+  assert.match(chatSource, /will not return a gap report, annotation table, or ready-to-apply map as a substitute/);
   assert.doesNotMatch(chatSource, /I can't generate a PDF|I can only give you the annotation set|use this in Adobe|use this in Bluebeam/i);
   assert.doesNotMatch(chatSource, /annotation map/i);
 });
@@ -177,10 +180,37 @@ run("export card primary Citation Density action calls annotated route, not stan
   assert.match(source, /Download annotated estimate/);
   assert.match(source, /Citation Density Estimate Annotations/);
   assert.doesNotMatch(source, /<FileText[\s\S]{0,300}Citation Density Gap Report/);
-  assert.match(source, /Download summary report/);
-  assert.match(source, /downloadCitationDensitySummaryReport/);
+  assert.doesNotMatch(source, /Download summary report/);
+  assert.doesNotMatch(source, /downloadCitationDensitySummaryReport/);
+  assert.match(source, /sourceDocumentId:\s*sourcePdf\.attachmentId/);
+  assert.match(source, /Citation Density annotated export requires an original estimate PDF/);
   assert.ok(annotatedFetchIndex > downloadIndex);
   assert.ok(standaloneBuilderIndex === -1 || annotatedFetchIndex < standaloneBuilderIndex);
+});
+
+run("Citation Density annotated export cannot use generated report PDFs as source pages", () => {
+  const generatedReport = pdfAttachment({
+    id: "gap-report",
+    filename: "citation-density-gap-report.pdf",
+    text: "Citation Density Gap Report Annotation Legend Unanchored Citation Density Findings",
+  });
+  const estimate = pdfAttachment({
+    id: "carrier-estimate",
+    filename: "carrier-estimate.pdf",
+    text: "Carrier estimate line 12 ADAS calibration net total $3,200.00",
+  });
+
+  assert.equal(isAnnotatableEstimatePdf(generatedReport), false);
+  assert.equal(isAnnotatableEstimatePdf(estimate), true);
+
+  const selected = resolveSourceEstimatePdf({
+    attachments: [generatedReport, estimate],
+    report: reportWithEvidenceRegistry(),
+    targetEstimate: "carrier",
+    findings: [finding()],
+  });
+
+  assert.equal(selected.id, "carrier-estimate");
 });
 
 run("one uploaded estimate PDF is selected as the annotated source base", () => {

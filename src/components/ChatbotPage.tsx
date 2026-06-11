@@ -43,7 +43,6 @@ import { buildCustomerReportPdf } from "@/lib/ai/builders/customerReportPdfBuild
 import { buildDoiComplaintPacketPdf } from "@/lib/ai/builders/doiComplaintPacketPdfBuilder";
 import {
   buildAnnotatedEstimateReviewModel,
-  buildAnnotatedEstimateReviewPdf,
   buildEstimatorChangeRequestListPdf,
   type AnnotatedEstimateReviewModel,
 } from "@/lib/ai/builders/estimateScrubberPdfBuilder";
@@ -2038,20 +2037,6 @@ function RailContent({
     }
   }
 
-  async function downloadCitationDensitySummaryReport() {
-    if (!canRenderExports) {
-      setReportSendStatus("Citation Density summary report is not ready to download yet.");
-      return;
-    }
-
-    try {
-      const document = await buildReportDocument("estimate_scrubber");
-      void exportCarrierPDF(document);
-    } catch (error) {
-      setReportSendStatus(error instanceof Error ? error.message : "Citation Density summary download failed.");
-    }
-  }
-
   async function generateAnnotatedCitationDensityEstimate(): Promise<AnnotatedEstimateExportResult> {
     if (!analysisReportId) {
       throw new Error("Citation Density annotated export needs an active case.");
@@ -2069,6 +2054,7 @@ function RailContent({
       credentials: "same-origin",
       body: JSON.stringify({
         caseId: analysisReportId,
+        sourceDocumentId: sourcePdf.attachmentId,
         targetEstimate: "carrier",
         annotationMode: "both",
         includeLegend: true,
@@ -2110,6 +2096,9 @@ function RailContent({
         throw new Error("Snapshot could not be generated from the current report.");
       }
       return buildCollisionSnapshotPdfFromSnapshot(snapshot);
+    }
+    if (reportType === "estimate_scrubber") {
+      throw new Error("Citation Density annotated export requires an original estimate PDF and must use the annotated-estimate PDF route.");
     }
 
     const resolvedAnalysis =
@@ -2160,9 +2149,6 @@ function RailContent({
 
     if (reportType === "repair_intelligence") {
       return buildCarrierReport(sharedInput);
-    }
-    if (reportType === "estimate_scrubber") {
-      return buildAnnotatedEstimateReviewPdf(annotatedInput);
     }
     if (reportType === "estimator_change_request_list") {
       return buildEstimatorChangeRequestListPdf(annotatedInput);
@@ -2963,14 +2949,6 @@ function RailContent({
                   </button>
                   <button
                     type="button"
-                    onClick={() => void downloadCitationDensitySummaryReport()}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 sm:col-span-2"
-                  >
-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download summary report</span>
-                    <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => void downloadReportDocument("estimator_change_request_list")}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 sm:col-span-2"
                   >
@@ -3482,7 +3460,7 @@ function getDefaultReportFilename(reportType: ReportKind): string {
     case "repair_intelligence":
       return "repair-intelligence-report.pdf";
     case "estimate_scrubber":
-      return "citation-density-gap-report.pdf";
+      return "citation-density-annotated-estimate.pdf";
     case "estimator_change_request_list":
       return "estimate-delta-change-requests.pdf";
     case "policy_rights_review":
@@ -4277,7 +4255,14 @@ function buildCustomerReportRequest(params: {
 }
 
 function selectAnnotatedCitationDensitySourcePdf(attachments: AttachmentTrayItem[]) {
-  return attachments.find((attachment) => /\.pdf$/i.test(attachment.filename)) ?? null;
+  return attachments.find((attachment) => {
+    const text = attachment.filename.toLowerCase();
+    if (!/\.pdf$/i.test(attachment.filename)) return false;
+    if (/citation density|gap report|annotation legend|annotated estimate|repair intelligence|policy rights|doi complaint|snapshot/.test(text)) {
+      return false;
+    }
+    return /estimate|supplement|ccc|mitchell|audatex|carrier|insurer|insurance|shop|repair facility|appraisal/.test(text);
+  }) ?? null;
 }
 
 function buildAnnotatedCitationDensityStatus(

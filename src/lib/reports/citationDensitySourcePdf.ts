@@ -21,6 +21,15 @@ export function isPdfDocument(type: string, filename: string) {
   return type === "application/pdf" || /\.pdf$/i.test(filename);
 }
 
+export function isAnnotatableEstimatePdf(attachment: StoredAttachment) {
+  if (!isPdfDocument(attachment.type, attachment.filename) || !attachment.imageDataUrl) return false;
+  const text = normalizeRoleText(`${attachment.filename}\n${attachment.text ?? ""}`);
+  if (/\b(citation density|gap report|annotation legend|unanchored citation density|repair intelligence report|policy rights review|doi complaint|collision snapshot|customer report)\b/.test(text)) {
+    return false;
+  }
+  return /\b(estimate|supplement|ccc|mitchell|audatex|carrier|insurer|insurance|shop|repair facility|appraisal|net total|grand total|labor|refinish)\b/.test(text);
+}
+
 export function resolveSourceEstimatePdf(params: {
   attachments: StoredAttachment[];
   report: RepairIntelligenceReport;
@@ -40,9 +49,7 @@ export function resolveSourceEstimatePdfSelection(params: {
     return resolveSourceEstimatePdfSelections(params)[0] ?? null;
   }
 
-  const pdfs = params.attachments.filter((attachment) =>
-    isPdfDocument(attachment.type, attachment.filename) && Boolean(attachment.imageDataUrl)
-  );
+  const pdfs = params.attachments.filter(isAnnotatableEstimatePdf);
   if (pdfs.length === 0) return null;
   if (pdfs.length === 1) {
     return buildSelectionResult({
@@ -98,9 +105,7 @@ export function resolveSourceEstimatePdfSelections(params: {
   targetEstimate: CitationDensityTargetEstimate;
   findings: CitationDensityFinding[];
 }): SourceEstimatePdfSelection[] {
-  const pdfs = params.attachments.filter((attachment) =>
-    isPdfDocument(attachment.type, attachment.filename) && Boolean(attachment.imageDataUrl)
-  );
+  const pdfs = params.attachments.filter(isAnnotatableEstimatePdf);
   if (pdfs.length === 0) return [];
   if (pdfs.length === 1) {
     const only = buildSelectionResult({

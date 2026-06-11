@@ -588,6 +588,20 @@ function isVideoAttachment(attachment: Pick<Attachment, "mime" | "filename" | "c
   );
 }
 
+function selectAnnotatedCitationDensitySourcePdf(attachments: Attachment[]) {
+  return attachments.find((attachment) => {
+    const text = attachment.filename.toLowerCase();
+    const isPdf = attachment.classification === "pdf" ||
+      attachment.mime === "application/pdf" ||
+      /\.pdf$/i.test(attachment.filename);
+    if (!isPdf) return false;
+    if (/citation density|gap report|annotation legend|annotated estimate|repair intelligence|policy rights|doi complaint|snapshot/.test(text)) {
+      return false;
+    }
+    return /estimate|supplement|ccc|mitchell|audatex|carrier|insurer|insurance|shop|repair facility|appraisal/.test(text);
+  }) ?? null;
+}
+
 function buildVideoDocumentationStatus(attachments: Array<Pick<Attachment, "filename">>) {
   const count = attachments.length;
   const names = attachments.map((attachment) => attachment.filename).join(", ");
@@ -1724,6 +1738,28 @@ export default function ChatWidget({
     try {
       if (shouldGenerateAnnotatedCitationDensityEstimate(messageToSend)) {
         const activeCaseId = analysisReportIdRef.current;
+        const sourcePdf = selectAnnotatedCitationDensitySourcePdf(attachments);
+
+        if (!activeCaseId || !sourcePdf) {
+          const reply = !activeCaseId
+            ? "I need an active analyzed case before I can generate an annotated Citation Density estimate PDF."
+            : "Upload or select the original carrier/shop estimate PDF before generating the annotated Citation Density estimate. I will not return a gap report, annotation table, or ready-to-apply map as a substitute.";
+
+          if (sessionRef.current === mySession) {
+            clearActiveSystemStatusMessage();
+            stopSpeaking();
+            messageCounterRef.current += 1;
+            const assistantMessage = createMessage(messageCounterRef.current, "assistant", reply);
+            setMessages((prev) => [...prev, assistantMessage]);
+            updateAnalysisText(reply);
+            onPrimaryAnalysisChange?.({
+              messageId: assistantMessage.id,
+              content: reply,
+            });
+          }
+
+          return;
+        }
 
         if (activeCaseId) {
           upsertSystemStatusMessage("Generating annotated citation density estimate PDF...");
@@ -1733,6 +1769,7 @@ export default function ChatWidget({
             signal: controller.signal,
             body: JSON.stringify({
               caseId: activeCaseId,
+              sourceDocumentId: sourcePdf.attachmentId,
               targetEstimate: resolveAnnotatedCitationDensityTarget(messageToSend),
               annotationMode: "both",
               includeLegend: true,

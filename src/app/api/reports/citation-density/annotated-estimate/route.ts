@@ -20,6 +20,7 @@ import {
   NO_SOURCE_PDF_ERROR,
   NO_SOURCE_PDF_USER_MESSAGE,
   describeReviewTarget,
+  isAnnotatableEstimatePdf,
   isPdfDocument,
   resolveSourceEstimatePdfSelections,
   type SourceEstimatePdfSelection,
@@ -95,12 +96,12 @@ export async function POST(request: Request) {
       renderModel: undefined,
     });
     const sourceSelections: SourceEstimatePdfSelection[] = sourceDocumentId
-      ? sourceDocuments[0]
+      ? sourceDocuments[0] && isAnnotatableEstimatePdf(sourceDocuments[0])
         ? [{
             attachment: sourceDocuments[0],
             selectedSourceDocumentId: sourceDocuments[0].id,
             selectedSourceLabel: sourceDocuments[0].filename || "Selected estimate",
-            selectedEstimateRole: "selected",
+            selectedEstimateRole: targetEstimate === "carrier" || targetEstimate === "shop" ? targetEstimate : "selected",
             selectedEstimateTotal: null,
             targetEstimate,
             selectionReason: "The client supplied a source document ID.",
@@ -115,10 +116,10 @@ export async function POST(request: Request) {
 
     /*
      * Backward compatibility: if a caller still sends sourceDocumentId, honor it.
-     * New chat/export flows should omit it and let the server choose the source PDF.
+     * New chat/export flows should send it after the user selects an original estimate PDF.
      */
     const legacySourceDocument = sourceDocumentId
-      ? sourceDocuments[0] ?? null
+      ? sourceDocuments[0] && isAnnotatableEstimatePdf(sourceDocuments[0]) ? sourceDocuments[0] : null
       : null;
     const resolvedSelections = sourceSelections.length
       ? sourceSelections
@@ -127,7 +128,7 @@ export async function POST(request: Request) {
             attachment: legacySourceDocument,
             selectedSourceDocumentId: legacySourceDocument.id,
             selectedSourceLabel: legacySourceDocument.filename || "Selected estimate",
-            selectedEstimateRole: "selected" as const,
+            selectedEstimateRole: targetEstimate === "carrier" || targetEstimate === "shop" ? targetEstimate : "selected" as const,
             selectedEstimateTotal: null,
             targetEstimate,
             selectionReason: "The client supplied a source document ID.",
@@ -135,8 +136,17 @@ export async function POST(request: Request) {
         : [];
 
     if (!resolvedSelections.length) {
+      if (sourceDocumentId) {
+        return NextResponse.json(
+          {
+            error: "Selected source PDF is not an original estimate PDF.",
+            userMessage: "Select the original carrier or shop estimate PDF. Citation Density annotated export will not annotate a report-only PDF.",
+          },
+          { status: 400 }
+        );
+      }
       if (!sourceDocumentId && sourceDocuments.filter((document) =>
-        isPdfDocument(document.type, document.filename) && Boolean(document.imageDataUrl)
+        isAnnotatableEstimatePdf(document)
       ).length > 1) {
         return NextResponse.json(
           {
@@ -150,9 +160,7 @@ export async function POST(request: Request) {
       return missingSourcePdfResponse();
     }
 
-    const availablePdfCount = sourceDocuments.filter((document) =>
-      isPdfDocument(document.type, document.filename) && Boolean(document.imageDataUrl)
-    ).length;
+    const availablePdfCount = sourceDocuments.filter(isAnnotatableEstimatePdf).length;
     if (
       targetEstimate === "both" &&
       availablePdfCount > 1 &&
