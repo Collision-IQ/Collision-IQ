@@ -1003,6 +1003,22 @@ export function detectEmbeddedEstimateLinks(params: {
         : "referenced_not_produced",
     });
   }
+  if (
+    links.length === 0 &&
+    /\b(?:revv?adas|adas|calibration|scan)\s+report\b/i.test(params.text) &&
+    /\b(?:available\s+(?:upon request|via)|via\s+this\s+link|link)\b/i.test(params.text)
+  ) {
+    links.push({
+      sourceDocumentId: params.sourceDocumentId,
+      pageNumber: params.pageNumber ?? null,
+      lineNumber: params.lineNumber ?? extractLineNumberFromText(params.text),
+      estimateRole: params.estimateRole,
+      nearbyOperation: cleanCustomerFacingEstimateLine(params.nearbyOperation) || "Referenced ADAS report",
+      redactedUrl: "referenced estimate link (URL not extracted)",
+      retrievalStatus: "not_fetched",
+      authorityStatus: "referenced_not_produced",
+    });
+  }
   return links;
 }
 

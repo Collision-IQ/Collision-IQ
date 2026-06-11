@@ -42,6 +42,7 @@ type TextAnchor = {
   pageWidth: number;
   pageHeight: number;
   synthetic?: boolean;
+  groupedLine?: boolean;
 };
 
 type MatchedFinding = {
@@ -248,7 +249,55 @@ async function extractPdfTextAnchors(bytes: Uint8Array): Promise<TextAnchor[]> {
     }
   }
 
-  return anchors;
+  return [...anchors, ...buildGroupedLineAnchors(anchors)];
+}
+
+function buildGroupedLineAnchors(anchors: TextAnchor[]): TextAnchor[] {
+  const byPage = new Map<number, TextAnchor[]>();
+  for (const anchor of anchors) {
+    const pageAnchors = byPage.get(anchor.pageIndex) ?? [];
+    pageAnchors.push(anchor);
+    byPage.set(anchor.pageIndex, pageAnchors);
+  }
+
+  const grouped: TextAnchor[] = [];
+  for (const [, pageAnchors] of byPage.entries()) {
+    const rows: TextAnchor[][] = [];
+    for (const anchor of [...pageAnchors].sort((a, b) => a.y - b.y || a.x - b.x)) {
+      const row = rows.find((candidate) =>
+        Math.abs(average(candidate.map((item) => item.y)) - anchor.y) <= Math.max(3.5, anchor.height * 0.55)
+      );
+      if (row) {
+        row.push(anchor);
+      } else {
+        rows.push([anchor]);
+      }
+    }
+
+    for (const row of rows) {
+      if (row.length < 2) continue;
+      const ordered = [...row].sort((a, b) => a.x - b.x);
+      const text = ordered.map((item) => item.text).join(" ").replace(/\s+/g, " ").trim();
+      if (text.length < 8) continue;
+      const minX = Math.min(...ordered.map((item) => item.x));
+      const minY = Math.min(...ordered.map((item) => item.y));
+      const maxX = Math.max(...ordered.map((item) => item.x + item.width));
+      const maxY = Math.max(...ordered.map((item) => item.y + item.height));
+      grouped.push({
+        pageIndex: ordered[0].pageIndex,
+        text,
+        normalizedText: normalizeMatchText(text),
+        x: minX,
+        y: minY,
+        width: Math.max(40, maxX - minX),
+        height: Math.max(8, maxY - minY),
+        pageWidth: ordered[0].pageWidth,
+        pageHeight: ordered[0].pageHeight,
+        groupedLine: true,
+      });
+    }
+  }
+  return grouped;
 }
 
 function findBestAnchorForFinding(
@@ -266,7 +315,7 @@ function findBestAnchorForFinding(
     }
   }
 
-  return best && best.score >= 28 ? best.anchor : null;
+  return best && best.score >= 24 ? best.anchor : null;
 }
 
 function findBestPageAnchorForFinding(
@@ -330,7 +379,7 @@ function scorePageAnchor(
     if (typeof item?.laborHours === "number" && anchorText.includes(String(item.laborHours))) score += 7;
   }
 
-  return score;
+  return score + scoreSectionAffinity(finding, anchor, estimateRole);
 }
 
 function buildFindingKeywords(finding: CitationDensityFinding, estimateRole: "carrier" | "shop" | "selected") {
@@ -347,6 +396,7 @@ function buildFindingKeywords(finding: CitationDensityFinding, estimateRole: "ca
     finding.currentSupportSummary,
     finding.missingProofSummary,
     finding.recommendedNextAction,
+    finding.counterpartSummary,
     ...finding.missingAuthorityTypes,
   ].join(" ");
   const normalized = normalizeMatchText(source);
@@ -368,8 +418,17 @@ function buildFindingKeywords(finding: CitationDensityFinding, estimateRole: "ca
   if (/refinish|paint|blend|base coat|clear coat/.test(normalized)) {
     extras.push("refinish", "paint", "blend", "base", "coat");
   }
+  if (/aftermarket|a m|a\/m|non oem|alternate|lkq|bumper|reflector|molding/.test(normalized)) {
+    extras.push("aftermarket", "non", "oem", "alternate", "bumper", "cover", "reflector", "molding");
+  }
+  if (/corrosion|cavity|seam|weld|protection/.test(normalized)) {
+    extras.push("corrosion", "protection", "cavity", "seam", "weld");
+  }
+  if (/mask|jamb|sand|polish|material|suppl|supplies/.test(normalized)) {
+    extras.push("mask", "jamb", "sand", "polish", "material", "supplies");
+  }
 
-  return [...new Set([...terms.slice(0, 18), ...extras])];
+  return [...new Set([...terms.map(canonicalMatchToken).slice(0, 22), ...extras].filter((term) => term.length > 2))];
 }
 
 function scoreAnchor(
@@ -384,15 +443,16 @@ function scoreAnchor(
   let score = 0;
 
   for (const item of evidence) {
-    if (item?.lineNumber && new RegExp(`(^|\\D)${escapeRegex(item.lineNumber)}(\\D|$)`).test(anchor.text)) {
-      score += item === primaryEvidence ? 110 : 70;
+    if (item?.lineNumber && matchesLineNumber(anchor.text, item.lineNumber)) {
+      score += item === primaryEvidence ? 125 : 82;
     }
     if (item?.description) {
       const description = normalizeMatchText(item.description);
       if (description && (anchorText.includes(description) || description.includes(anchorText))) {
         score += item === primaryEvidence ? 95 : 55;
       }
-      score += sharedTermScore(description, anchorText, 36);
+      score += sharedTermScore(description, anchorText, 42);
+      score += keyTokenScore(description, anchorText, 34);
     }
     if (typeof item?.amount === "number" && anchorText.includes(normalizeMoney(item.amount))) {
       score += 18;
@@ -403,8 +463,11 @@ function scoreAnchor(
   }
 
   const operation = normalizeMatchText(finding.operationLabel);
-  score += sharedTermScore(operation, anchorText, 30);
+  score += sharedTermScore(operation, anchorText, 34);
+  score += keyTokenScore(operation, anchorText, 38);
   if (anchorText.includes(operation) || operation.includes(anchorText)) score += 50;
+  score += scoreSectionAffinity(finding, anchor, estimateRole);
+  if (anchor.groupedLine) score += 8;
   return score;
 }
 
@@ -872,6 +935,8 @@ function wrapText(text: string, font: PDFFont, size: number, maxWidth: number) {
 function normalizeMatchText(value: string) {
   return value
     .toLowerCase()
+    .replace(/\ba\/m\b/g, " aftermarket ")
+    .replace(/\bnon[-\s]?oem\b/g, " non oem ")
     .replace(/[^a-z0-9.$]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -882,10 +947,146 @@ function normalizeMoney(value: number) {
 }
 
 function sharedTermScore(a: string, b: string, max: number) {
-  const terms = a.split(" ").filter((term) => term.length > 2 && !/^\d+$/.test(term));
+  const terms = a.split(" ")
+    .map(canonicalMatchToken)
+    .filter((term) => term.length > 2 && !/^\d+$/.test(term) && !COMMON_MATCH_TERMS.has(term));
   if (!terms.length) return 0;
-  const matches = terms.filter((term) => b.includes(term)).length;
+  const haystack = new Set(b.split(" ").map(canonicalMatchToken));
+  const matches = terms.filter((term) => haystack.has(term) || b.includes(term)).length;
   return Math.min(max, Math.round((matches / terms.length) * max));
+}
+
+function keyTokenScore(a: string, b: string, max: number) {
+  const sourceTokens = buildKeyTokens(a);
+  if (!sourceTokens.size) return 0;
+  const targetTokens = buildKeyTokens(b);
+  const sourceList = [...sourceTokens];
+  const targetList = [...targetTokens];
+  const matches = sourceList.filter((token) =>
+    targetTokens.has(token) ||
+    targetList.some((target) => token.length > 4 && (target.includes(token) || token.includes(target)))
+  ).length;
+  return Math.min(max, Math.round((matches / sourceList.length) * max));
+}
+
+function buildKeyTokens(value: string) {
+  return new Set(
+    normalizeMatchText(value)
+      .split(" ")
+      .map(canonicalMatchToken)
+      .filter((term) =>
+        term.length > 2 &&
+        !/^\d+$/.test(term) &&
+        !COMMON_MATCH_TERMS.has(term)
+      )
+  );
+}
+
+function canonicalMatchToken(value: string) {
+  const token = value.toLowerCase().replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "");
+  if (!token) return "";
+  const known = [
+    "aftermarket",
+    "alternate",
+    "bumper",
+    "cover",
+    "reflector",
+    "molding",
+    "blind",
+    "spot",
+    "radar",
+    "calibration",
+    "initialization",
+    "pre",
+    "post",
+    "repair",
+    "scan",
+    "adas",
+    "revvadas",
+    "corrosion",
+    "protection",
+    "mask",
+    "jamb",
+    "jambs",
+    "color",
+    "sand",
+    "polish",
+    "paint",
+    "supplies",
+    "materials",
+    "refinish",
+    "labor",
+    "rate",
+    "manual",
+    "motor",
+    "database",
+    "included",
+    "section",
+    "note",
+    "total",
+  ];
+  const directAlias: Record<string, string> = {
+    "a": "",
+    "m": "",
+    "am": "aftermarket",
+    "scanm": "scan",
+    "spre": "pre",
+    "spost": "post",
+    "proc": "",
+    "hrs": "hours",
+    "lt": "left",
+    "rt": "right",
+  };
+  if (directAlias[token] !== undefined) return directAlias[token];
+  const embedded = known.find((item) =>
+    token !== item &&
+    token.length <= item.length + 3 &&
+    token.includes(item)
+  );
+  return embedded ?? token.replace(/s$/, "");
+}
+
+function scoreSectionAffinity(
+  finding: CitationDensityFinding,
+  anchor: TextAnchor,
+  estimateRole: "carrier" | "shop" | "selected"
+) {
+  const roleAnchor = estimateRole === "shop" ? finding.shopAnchor : estimateRole === "carrier" ? finding.carrierAnchor : null;
+  const text = anchor.normalizedText;
+  let score = 0;
+  const section = normalizeMatchText(roleAnchor?.section ?? "");
+  if (section) {
+    if (text.includes(section) || section.includes(text)) score += 36;
+    score += keyTokenScore(section, text, 22);
+  }
+
+  const operation = normalizeMatchText(`${finding.operationLabel} ${roleAnchor?.operation ?? ""}`);
+  if (/scan|calibration|radar|initialization|adas/.test(operation) && /scan|calibration|diagnostic|adas|radar|electrical/.test(text)) {
+    score += 22;
+  }
+  if (/aftermarket|bumper|cover|reflector|molding|part/.test(operation) && /parts|part|bumper|cover|reflector|molding|aftermarket|a m/.test(text)) {
+    score += 22;
+  }
+  if (/refinish|paint|mask|jamb|sand|polish|material|suppl/.test(operation) && /refinish|paint|mask|jamb|sand|polish|material|suppl/.test(text)) {
+    score += 22;
+  }
+  if (/corrosion|protection|seam|cavity|weld/.test(operation) && /corrosion|protection|seam|cavity|weld/.test(text)) {
+    score += 22;
+  }
+  if (/total|labor|rate|paint/.test(operation) && /total|labor|rate|paint|suppl|material/.test(text)) {
+    score += 18;
+  }
+  return score;
+}
+
+function matchesLineNumber(text: string, lineNumber: string) {
+  const escaped = escapeRegex(lineNumber.trim());
+  if (!escaped) return false;
+  return new RegExp(`(^|\\D)${escaped}(\\D|$)`).test(text);
+}
+
+function average(values: number[]) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 }
 
 const COMMON_MATCH_TERMS = new Set([

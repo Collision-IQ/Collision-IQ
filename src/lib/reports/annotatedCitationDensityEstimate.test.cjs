@@ -60,6 +60,42 @@ async function createTwoPageSourcePdf() {
   return await doc.save();
 }
 
+async function createKiaLikeEstimatePdf() {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([612, 792]);
+  page.drawText("GEICO lower estimate", { x: 42, y: 746, size: 10, font });
+  page.drawText("Parts", { x: 42, y: 716, size: 10, font });
+  drawFragmentedEstimateRow(page, font, 49, "A/M bumper cover", "1", "$312.40", 690);
+  drawFragmentedEstimateRow(page, font, 54, "A/M LT reflector", "1", "$42.10", 672);
+  drawFragmentedEstimateRow(page, font, 55, "A/M molding", "1", "$66.75", 654);
+  page.drawText("Electrical / Diagnostics", { x: 42, y: 628, size: 10, font });
+  drawFragmentedEstimateRow(page, font, 56, "R&I blind spot radar", "0.6", "$0.00", 604);
+  drawFragmentedEstimateRow(page, font, 57, "R&I blind spot radar bracket", "0.4", "$0.00", 586);
+  drawFragmentedEstimateRow(page, font, 62, "Pre-repair scan", "0.5", "$75.00", 560);
+  drawFragmentedEstimateRow(page, font, 63, "In-process scan", "0.5", "$75.00", 542);
+  drawFragmentedEstimateRow(page, font, 64, "Blind spot radar calibration", "1.2", "$210.00", 524);
+  drawFragmentedEstimateRow(page, font, 65, "Power window initialization", "0.3", "$42.00", 506);
+  drawFragmentedEstimateRow(page, font, 66, "Post-repair scan", "0.5", "$75.00", 488);
+  drawFragmentedEstimateRow(page, font, 68, "REVVDAdas Report", "", "$0.00", 462);
+  page.drawText("ADAS report available upon request and via this link", { x: 86, y: 448, size: 8, font });
+  page.drawText("Refinish", { x: 42, y: 420, size: 10, font });
+  drawFragmentedEstimateRow(page, font, 70, "Restore corrosion protection", "0.7", "$63.00", 396);
+  drawFragmentedEstimateRow(page, font, 76, "Mask for refinishing", "0.5", "$45.00", 378);
+  drawFragmentedEstimateRow(page, font, 77, "Mask jambs", "0.4", "$36.00", 360);
+  drawFragmentedEstimateRow(page, font, 79, "Color sand polish", "0.8", "$72.00", 342);
+  page.drawText("Totals / Labor Rates / Paint Supplies", { x: 42, y: 304, size: 10, font });
+  page.drawText("Paint supplies total $185.00 Labor rate body $58.00 refinish $58.00", { x: 42, y: 286, size: 8, font });
+  return await doc.save();
+}
+
+function drawFragmentedEstimateRow(page, font, line, description, labor, amount, y) {
+  page.drawText(String(line), { x: 48, y, size: 8, font });
+  page.drawText(description, { x: 82, y, size: 8, font });
+  if (labor) page.drawText(labor, { x: 330, y, size: 8, font });
+  page.drawText(amount, { x: 412, y, size: 8, font });
+}
+
 function baseFinding(overrides = {}) {
   return {
     id: overrides.id ?? "finding-1",
@@ -333,9 +369,8 @@ async function run(name, test) {
     assert.equal(result.originalPageCount, 2);
     assert.equal(result.annotatedFindingCount, 1);
     assert.equal(result.unresolvedAnchorCount, 0);
-    assert.equal(loaded.getPageCount(), 4);
+    assert.equal(loaded.getPageCount(), 3);
     assert.match(text, /Original estimate page one sentinel/);
-    assert.match(text, /No line-level anchors could be placed/);
     assert.match(text, /Citation Density Annotation Legend/);
     assert.doesNotMatch(text, /Unanchored Citation Density Findings/);
   });
@@ -356,6 +391,192 @@ async function run(name, test) {
     assert.match(text, /Original estimate page one sentinel/);
     assert.match(text, /Original estimate page two sentinel/);
     assert.doesNotMatch(text, /Citation Density Gap Report|Report Summary|Executive Summary/i);
+  });
+
+  await run("fragmented estimate rows produce on-page annotations", async () => {
+    const sourcePdfBytes = await createKiaLikeEstimatePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      findings: [
+        baseFinding({
+          id: "kia-line-49",
+          operationLabel: "A/M bumper cover",
+          category: "parts_downgrade",
+          carrierEvidence: {
+            lineNumber: "49",
+            description: "A/M bumper cover",
+            amount: 312.4,
+            laborHours: null,
+            sourceLabel: "Carrier estimate",
+          },
+          citationStatus: {
+            oem: "needed",
+            pPages: "not_found",
+            scrs: "not_applicable",
+            deg: "not_applicable",
+            nhtsa: "not_applicable",
+            stateRegulation: "not_applicable",
+            policy: "not_applicable",
+            invoiceOrCompletionProof: "not_applicable",
+            photoOrTeardownProof: "not_applicable",
+          },
+          missingAuthorityTypes: ["OEM or fit documentation"],
+        }),
+      ],
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+    const pages = await extractPdfPageTexts(result.bytes);
+
+    assert.equal(result.annotatedFindingCount, 1);
+    assert.equal(result.unresolvedAnchorCount, 0);
+    assert.match(pages[0], /49\s+A\/M bumper cover/);
+    assert.match(pages[0], /Finding #:/);
+    assert.match(pages[0], /A\/M bumper cover/);
+  });
+
+  await run("note text produces an on-page referenced-not-produced annotation", async () => {
+    const sourcePdfBytes = await createKiaLikeEstimatePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      findings: [
+        baseFinding({
+          id: "kia-line-68",
+          operationLabel: "REVVDAdas Report",
+          category: "adas_calibration",
+          citationLabel: "REFERENCED / NOT PRODUCED",
+          embeddedEstimateLinks: [{
+            lineNumber: "68",
+            estimateRole: "carrier",
+            nearbyOperation: "REVVDAdas Report",
+            redactedUrl: "referenced estimate link (URL not extracted)",
+            retrievalStatus: "not_fetched",
+            authorityStatus: "referenced_not_produced",
+          }],
+          carrierEvidence: {
+            lineNumber: "68",
+            description: "ADAS report available upon request and via this link",
+            amount: 0,
+            laborHours: null,
+            sourceLabel: "Carrier estimate",
+          },
+          missingAuthorityTypes: ["linked ADAS report"],
+        }),
+      ],
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+    const pages = await extractPdfPageTexts(result.bytes);
+
+    assert.equal(result.annotatedFindingCount, 1);
+    assert.equal(result.unresolvedAnchorCount, 0);
+    assert.match(pages[0], /ADAS report available upon request and via this link/);
+    assert.match(pages[0], /REFERENCED \/ NOT PRODUCED/);
+  });
+
+  await run("section heading fallback places missing lower-estimate item on original page", async () => {
+    const sourcePdfBytes = await createKiaLikeEstimatePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      findings: [
+        baseFinding({
+          id: "missing-refinish",
+          operationLabel: "Missing refinish labor feather prime block",
+          category: "refinish",
+          estimateGapType: "missing_from_carrier",
+          carrierEvidence: undefined,
+          carrierAnchor: {
+            estimateRole: "carrier",
+            lineNumber: null,
+            pageNumber: 1,
+            section: "Refinish",
+            operation: "Feather prime block",
+            description: "Missing refinish labor belongs in refinish section",
+          },
+          shopEvidence: {
+            lineNumber: "120",
+            description: "Feather prime block",
+            amount: 100,
+            laborHours: 1,
+            sourceLabel: "Shop estimate",
+          },
+        }),
+      ],
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+    const pages = await extractPdfPageTexts(result.bytes);
+
+    assert.equal(result.annotatedFindingCount, 1);
+    assert.equal(result.unresolvedAnchorCount, 0);
+    assert.match(pages[0], /Refinish/);
+    assert.match(pages[0], /Finding #:/);
+  });
+
+  await run("mutated finding text maps back to original estimate text", async () => {
+    const sourcePdfBytes = await createKiaLikeEstimatePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      findings: [
+        baseFinding({
+          id: "mutated-scan",
+          operationLabel: "Proc SPre-repair scanm",
+          category: "scan_diagnostic",
+          carrierEvidence: {
+            lineNumber: null,
+            description: "Proc SPre-repair scanm",
+            amount: 75,
+            laborHours: 0.5,
+            sourceLabel: "Carrier estimate",
+          },
+        }),
+        baseFinding({
+          id: "mutated-jambs",
+          operationLabel: "Proc jambs Hours and",
+          category: "refinish",
+          citationLabel: undefined,
+          carrierEvidence: {
+            lineNumber: null,
+            description: "Proc jambs Hours and",
+            amount: 36,
+            laborHours: 0.4,
+            sourceLabel: "Carrier estimate",
+          },
+          citationStatus: {
+            oem: "not_applicable",
+            adas: "not_applicable",
+            pPages: "needed",
+            scrs: "not_applicable",
+            deg: "not_applicable",
+            nhtsa: "not_applicable",
+            stateRegulation: "not_applicable",
+            policy: "not_applicable",
+            invoiceOrCompletionProof: "not_applicable",
+            photoOrTeardownProof: "not_applicable",
+          },
+          missingAuthorityTypes: ["pPages"],
+        }),
+      ],
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+    const pages = await extractPdfPageTexts(result.bytes);
+
+    assert.equal(result.annotatedFindingCount, 2);
+    assert.equal(result.unresolvedAnchorCount, 0);
+    assert.match(pages[0], /Pre-repair scan/);
+    assert.match(pages[0], /Mask jambs/);
+    assert.doesNotMatch(pages[0], /Label:\s*NEEDS ADAS[\s\S]*Mask jambs/);
+  });
+
+  await run("KIA line 68 referenced ADAS report without extracted URL is detected", async () => {
+    const links = detectEmbeddedEstimateLinks({
+      text: "Line 68 REVVDAdas Report ADAS report available upon request and via this link",
+      estimateRole: "carrier",
+      nearbyOperation: "REVVDAdas Report",
+    });
+
+    assert.equal(links.length, 1);
+    assert.equal(links[0].lineNumber, "68");
+    assert.equal(links[0].retrievalStatus, "not_fetched");
+    assert.equal(links[0].authorityStatus, "referenced_not_produced");
+    assert.match(links[0].redactedUrl, /URL not extracted/);
   });
 
   await run("weak findings use the required label text", async () => {
