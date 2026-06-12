@@ -285,6 +285,8 @@ export function gateVisibleCitationDensityAnnotation(
   anchor: EstimateRowAnchor,
   estimateRole: "carrier" | "shop" | "selected"
 ) {
+  if (!anchor.anchorId || anchor.pageNumber < 1 || anchor.width <= 0 || anchor.height <= 0) return false;
+  if (anchor.confidence < 0.82) return false;
   if (isGenericOrMalformedAnchorText(anchor.rowText)) return false;
   const lineNumber = getTargetLineNumber(finding, estimateRole);
   if (lineNumber) return anchor.lineNumber === String(lineNumber).trim();
@@ -435,7 +437,7 @@ function isGenericOrMalformedAnchorText(value: string): boolean {
   return (
     /^\s*(?:repair operation|proc report|comparison or screenshot cues)\s*$/i.test(value) ||
     /\bproc\s+(?:pre|post)[-\s]?repair scanm\b/i.test(value) ||
-    /\b(?:citation density gap report|annotation legend|unanchored citation density|disclosure|privacy|estimate summary only)\b/i.test(value)
+    /\b(?:citation density gap report|annotation legend|unanchored citation density|disclosure|privacy|estimate summary only|disclaimer|abbreviations?|motor guide|guide pages)\b/i.test(value)
   );
 }
 

@@ -52,8 +52,14 @@ export type AnnotatedEstimateResult = {
 export type CitationDensityAnnotationMetadata = {
   findingId: string;
   anchorId: string;
+  sourceAnchorId: string;
   sourceDocumentId: string;
   sourceDocumentRole: "carrier" | "shop";
+  sourcePageNumber: number;
+  sourceLineNumber?: string;
+  sourceAnchorType: "estimate_line" | "line_note" | "supplier_row" | "totals_row" | "section_row";
+  sourceAnchorText: string;
+  sourceAnchorNormalizedText: string;
   markerNumber: number;
   pageNumber: number;
   pdfPageWidth: number;
@@ -103,6 +109,11 @@ type TextAnchor = {
 type MatchedFinding = {
   finding: CitationDensityFinding;
   anchor: EstimateRowAnchor;
+};
+
+type FindingDetail = {
+  finding: CitationDensityFinding;
+  metadata: CitationDensityAnnotationMetadata;
 };
 
 const SOURCE_BOUNDARY_TEXT =
@@ -223,6 +234,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   }
 
   const annotationMetadata: CitationDensityAnnotationMetadata[] = [];
+  const findingDetails: FindingDetail[] = [];
   matches.forEach((match, index) => {
     const page = pdfDoc.getPage(match.anchor.pageNumber - 1);
     const metadata = drawFindingAnnotation(pdfDoc, page, match, index + 1, {
@@ -233,7 +245,15 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       redactSensitive: request.redactSensitive !== false,
     });
     annotationMetadata.push(metadata);
+    findingDetails.push({ finding: match.finding, metadata });
   });
+
+  if (findingDetails.length > 0) {
+    addCitationDensityFindingDetailPages(pdfDoc, findingDetails, {
+      font,
+      boldFont,
+    });
+  }
 
   if (findings.length > 0 && lineMatchCount === 0) {
     addNoLineAnchorWarningPage(pdfDoc, {
@@ -526,6 +546,7 @@ function isVisibleCitationDensityFinding(finding: CitationDensityFinding): boole
 
   if (!normalized.trim()) return false;
   if (/\brepair operation\b|\bproc report\b|\bcomparison or screenshot cues\b/i.test(text)) return false;
+  if (/\bgeneric visible damage photo observations\b|\bgeneric key visible estimate facts\b/i.test(text)) return false;
   if (/\bproc\s+(?:pre|post)[-\s]?repair scanm\b/i.test(text)) return false;
   if (/\bstructural frame and measurement verification\b/i.test(text) && !hasConcreteFindingAnchor(finding)) return false;
   if (/\bside structure aperture door[-\s]?shell fit verification\b/i.test(text) && !hasConcreteFindingAnchor(finding)) return false;
@@ -682,15 +703,13 @@ function drawFindingAnnotation(
       width: pdfLibRect.width,
       height: pdfLibRect.height,
       color: rgb(1, 0.9, 0.3),
-      opacity: 0.22,
+      opacity: 0.1,
     });
   }
 
   if (options.mode === "margin_callouts" || options.mode === "both") {
     drawCompactMarker(page, {
       number,
-      label,
-      shortTitle,
       anchorX: anchor.x,
       highlightX: pdfLibRect.x,
       highlightY: pdfLibRect.y,
@@ -708,8 +727,6 @@ function drawCompactMarker(
   page: PDFPage,
   options: {
     number: number;
-    label: string;
-    shortTitle: string;
     anchorX: number;
     highlightX: number;
     highlightY: number;
@@ -736,16 +753,6 @@ function drawCompactMarker(
     size: 7,
     font: options.boldFont,
     color: rgb(1, 1, 1),
-  });
-
-  const text = `${options.number}. ${options.label}: ${options.shortTitle}`;
-  const textX = clamp(options.highlightX + 4, 28, options.pageWidth - 210);
-  page.drawText(truncateText(text, 58), {
-    x: textX,
-    y: markerY + 3,
-    size: 6.4,
-    font: options.boldFont,
-    color: rgb(0.45, 0.1, 0.08),
   });
 }
 
@@ -791,26 +798,7 @@ function attachPdfFindingAnnotations(
     M: PDFHexString.fromText(formatPdfDate(new Date())),
     F: 4,
   });
-  const noteRef = addPdfAnnotation(pdfDoc, pageRef, {
-    Type: "Annot",
-    Subtype: "Text",
-    Rect: [
-      clamp(metadata.x - 18, 4, page.getWidth() - 24),
-      clamp(pdfLibRect.y + pdfLibRect.height - 2, 4, page.getHeight() - 24),
-      clamp(metadata.x - 2, 20, page.getWidth() - 8),
-      clamp(pdfLibRect.y + pdfLibRect.height + 14, 20, page.getHeight() - 8),
-    ],
-    Name: "Comment",
-    Open: false,
-    T: PDFHexString.fromText("Collision IQ Citation Density"),
-    Contents: PDFHexString.fromText(metadata.comment),
-    NM: PDFHexString.fromText(`citation-density-${metadata.findingId}-note`),
-    M: PDFHexString.fromText(formatPdfDate(new Date())),
-    C: [1, 0.84, 0.2],
-    F: 4,
-  });
   annots.push(highlightRef);
-  annots.push(noteRef);
 }
 
 function addPdfAnnotation(
@@ -860,8 +848,14 @@ function buildAnnotationMetadata(
   const metadata: CitationDensityAnnotationMetadata = {
     findingId: finding.id,
     anchorId: anchor.anchorId,
+    sourceAnchorId: anchor.anchorId,
     sourceDocumentId,
     sourceDocumentRole,
+    sourcePageNumber: anchor.pageNumber,
+    sourceLineNumber: anchor.lineNumber ?? undefined,
+    sourceAnchorType: anchor.anchorType,
+    sourceAnchorText: targetRawText,
+    sourceAnchorNormalizedText: anchor.normalizedRowText,
     markerNumber: number,
     pageNumber: anchor.pageNumber,
     pdfPageWidth: normalizePdfRect({ x: 0, y: 0, width: options.pageWidth, height: options.pageHeight }, { pdfWidth: options.pageWidth, pdfHeight: options.pageHeight }).width,
@@ -1105,6 +1099,92 @@ function addSummaryPage(
     lineHeight: 14,
     maxLines: 30,
   });
+}
+
+function addCitationDensityFindingDetailPages(
+  pdfDoc: PDFDocument,
+  details: FindingDetail[],
+  options: {
+    font: PDFFont;
+    boldFont: PDFFont;
+  }
+) {
+  let page = pdfDoc.addPage();
+  let y = page.getHeight() - 54;
+  page.drawText("Citation Density Finding Details", {
+    x: 48,
+    y,
+    size: 18,
+    font: options.boldFont,
+    color: rgb(0.12, 0.14, 0.18),
+  });
+  y -= 30;
+
+  details.forEach(({ finding, metadata }) => {
+    const lines = buildFindingDetailLines(finding, metadata);
+    const estimatedHeight = Math.min(lines.length, 14) * 12 + 30;
+    if (y < Math.max(170, estimatedHeight)) {
+      page = pdfDoc.addPage();
+      y = page.getHeight() - 54;
+      page.drawText("Citation Density Finding Details", {
+        x: 48,
+        y,
+        size: 18,
+        font: options.boldFont,
+        color: rgb(0.12, 0.14, 0.18),
+      });
+      y -= 30;
+    }
+
+    page.drawText(`Finding ${metadata.markerNumber}`, {
+      x: 48,
+      y,
+      size: 12,
+      font: options.boldFont,
+      color: rgb(0.45, 0.1, 0.08),
+    });
+    page.drawText(`Source: page ${metadata.sourcePageNumber}, line ${metadata.sourceLineNumber ?? "section"}`, {
+      x: 126,
+      y,
+      size: 9,
+      font: options.boldFont,
+      color: rgb(0.28, 0.32, 0.38),
+    });
+    y -= 16;
+
+    drawWrappedLines(page, lines, {
+      x: 48,
+      y,
+      width: page.getWidth() - 96,
+      font: options.font,
+      boldFont: options.boldFont,
+      size: 9,
+      lineHeight: 12,
+      maxLines: 18,
+    });
+    y -= Math.min(lines.length, 18) * 12 + 18;
+  });
+}
+
+function buildFindingDetailLines(
+  finding: CitationDensityFinding,
+  metadata: CitationDensityAnnotationMetadata
+) {
+  return [
+    `Finding number: ${metadata.markerNumber}`,
+    `Label: ${metadata.label}`,
+    `Citation Density score: ${finding.citationDensityScore}/100`,
+    `Source estimate: ${metadata.sourceDocumentRole} estimate`,
+    `Source page: ${metadata.sourcePageNumber}`,
+    `Source line: ${metadata.sourceLineNumber ?? "section"}`,
+    `Source row text: ${metadata.sourceAnchorText}`,
+    `Best authority: ${metadata.bestAuthority}`,
+    `Missing proof: ${metadata.missingProof}`,
+    `Why it matters: ${metadata.whyItMatters}`,
+    `Next action: ${metadata.nextAction}`,
+    metadata.sourceRefs.length ? `Support refs: ${metadata.sourceRefs.join("; ")}` : "Support refs: none listed",
+    `Source: page ${metadata.sourcePageNumber}, line ${metadata.sourceLineNumber ?? "section"}`,
+  ];
 }
 
 function addUnanchoredAppendix(

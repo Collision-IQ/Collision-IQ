@@ -324,12 +324,14 @@ async function run(name, test) {
     assert.equal(result.annotatedFindingCount, 1);
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.equal(result.originalPageCount, 1);
-    assert.equal(loaded.getPageCount(), 2);
+    assert.equal(loaded.getPageCount(), 3);
     assert.equal(result.annotationMetadata.length, 1);
-    assert.equal(await getOriginalPageAnnotationCount(result.bytes), 2);
+    assert.equal(await getOriginalPageAnnotationCount(result.bytes), 1);
     const comments = await extractOriginalPageAnnotationText(result.bytes);
-    assert.match(text, /NEEDS INVOICE|NEEDS OEM/);
-    assert.doesNotMatch((await extractPdfPageTexts(result.bytes))[0], /Estimate line:|Current support:|Missing proof:|Next action:/);
+    const pageTexts = await extractPdfPageTexts(result.bytes);
+    assert.doesNotMatch(pageTexts[0], /NEEDS INVOICE|NEEDS OEM|Estimate line:|Current support:|Missing proof:|Next action:/);
+    assert.match(pageTexts.slice(1).join(" "), /Citation Density Finding Details/);
+    assert.match(pageTexts.slice(1).join(" "), /NEEDS INVOICE|NEEDS OEM/);
     assert.match(result.annotationMetadata[0].comment, /Label:/);
     assert.match(result.annotationMetadata[0].comment, /Citation Density:/);
     assert.match(result.annotationMetadata[0].comment, /Estimate line:/);
@@ -358,7 +360,9 @@ async function run(name, test) {
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.match(pages[0], /Estimate 123/);
     assert.match(pages[0], /Line 12 ADAS calibration 1\.5 hrs \$250\.00/);
-    assert.match(pages[0], /1\.\s+(NEEDS INVOICE|NEEDS OEM)/);
+    assert.doesNotMatch(pages[0], /NEEDS INVOICE|NEEDS OEM|Finding Details|Missing proof|Next action/);
+    assert.match(pages.slice(1).join(" "), /Citation Density Finding Details/);
+    assert.match(pages.slice(1).join(" "), /Finding number:\s*1/);
     assert.doesNotMatch(pages[0], /Estimate line:|Current support:|Missing proof:|Next action:/);
     assert.equal(result.annotationMetadata[0].findingId, "finding-1");
     assert.equal(result.annotationMetadata[0].pageNumber, 1);
@@ -496,7 +500,7 @@ async function run(name, test) {
 
     assert.equal(result.originalPageCount, 2);
     assert.equal(result.unresolvedAnchorCount, 0);
-    assert.equal(loaded.getPageCount(), 3);
+    assert.equal(loaded.getPageCount(), 4);
     assert.match(text, /Original estimate page one sentinel/);
     assert.match(text, /Original estimate page two sentinel/);
     assert.doesNotMatch(text, /Citation Density Gap Report|Report Summary|Executive Summary/i);
@@ -539,7 +543,8 @@ async function run(name, test) {
     assert.equal(result.annotatedFindingCount, 1);
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.match(pages[0], /49\s+A\/M bumper cover/);
-    assert.match(pages[0], /1\.\s+NEEDS/);
+    assert.doesNotMatch(pages[0], /NEEDS ADAS|NEEDS OEM|NEEDS INVOICE|REFERENCED \/ NOT PRODUCED/);
+    assert.match(pages.slice(1).join(" "), /Citation Density Finding Details/);
     assert.match(pages[0], /A\/M bumper cover/);
     assert.match(result.annotationMetadata[0].comment, /Estimate line:/);
   });
@@ -579,7 +584,8 @@ async function run(name, test) {
     assert.equal(result.annotatedFindingCount, 1);
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.match(pages[0], /ADAS report available upon request and via this link/);
-    assert.match(pages[0], /REFERENCED \/ NOT PRODUCED/);
+    assert.doesNotMatch(pages[0], /REFERENCED \/ NOT PRODUCED/);
+    assert.match(pages.slice(1).join(" "), /REFERENCED \/ NOT PRODUCED/);
   });
 
   await run("section heading fallback places missing lower-estimate item on original page", async () => {
@@ -617,7 +623,8 @@ async function run(name, test) {
     assert.equal(result.annotatedFindingCount, 1);
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.match(pages[0], /Refinish/);
-    assert.match(pages[0], /1\.\s+NEEDS/);
+    assert.doesNotMatch(pages[0], /NEEDS ADAS|NEEDS OEM|NEEDS INVOICE|ESTIMATE GAP ONLY/);
+    assert.match(pages.slice(1).join(" "), /Citation Density Finding Details/);
   });
 
   await run("mutated finding text maps back to original estimate text", async () => {
@@ -756,6 +763,32 @@ async function run(name, test) {
           },
         }),
         baseFinding({
+          id: "ram-line-43",
+          operationLabel: "Final road test",
+          category: "road_test",
+          citationLabel: undefined,
+          carrierEvidence: {
+            lineNumber: "43",
+            description: "Final road test",
+            amount: 40,
+            laborHours: 0.3,
+            sourceLabel: "Carrier estimate",
+          },
+          citationStatus: {
+            oem: "not_applicable",
+            adas: "needed",
+            pPages: "needed",
+            scrs: "not_applicable",
+            deg: "not_applicable",
+            nhtsa: "not_applicable",
+            stateRegulation: "not_applicable",
+            policy: "not_applicable",
+            invoiceOrCompletionProof: "not_applicable",
+            photoOrTeardownProof: "not_applicable",
+          },
+          missingAuthorityTypes: ["pPages"],
+        }),
+        baseFinding({
           id: "ram-line-44",
           operationLabel: "REVVAdas Report",
           category: "adas_calibration",
@@ -818,18 +851,25 @@ async function run(name, test) {
     const pages = await extractPdfPageTexts(result.bytes);
 
     assert.equal(result.originalPageCount, 12);
-    assert.equal(result.annotatedFindingCount, 8);
+    assert.equal(result.annotatedFindingCount, 9);
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.doesNotMatch(result.warnings.join(" "), /all_findings_unanchored/);
     assert.match(result.warnings.join(" "), /stored extracted text/i);
-    assert.match(pages.join(" "), /1\.\s+NEEDS/);
+    assert.doesNotMatch(pages.slice(0, result.originalPageCount).join(" "), /NEEDS ADAS|NEEDS OEM|NEEDS INVOICE|REFERENCED \/ NOT PRODUCED|ESTIMATE GAP ONLY/);
+    assert.match(pages.slice(result.originalPageCount).join(" "), /Citation Density Finding Details/);
     assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 23: LKQ grille Note/);
     assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 39: Pre-repair scan/);
     assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 40: In-process scan/);
     assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 41: Seat belt dynamic function test/);
     assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 42: Post-repair scan/);
+    assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 43: Final road test/);
     assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 44: REVVAdas Report/);
     const line23 = result.annotationMetadata.find((item) => item.findingId === "ram-line-23");
+    const line39 = result.annotationMetadata.find((item) => item.findingId === "ram-line-39");
+    const line40 = result.annotationMetadata.find((item) => item.findingId === "ram-line-40");
+    const line41 = result.annotationMetadata.find((item) => item.findingId === "ram-line-41");
+    const line42 = result.annotationMetadata.find((item) => item.findingId === "ram-line-42");
+    const line43 = result.annotationMetadata.find((item) => item.findingId === "ram-line-43");
     const line44 = result.annotationMetadata.find((item) => item.findingId === "ram-line-44");
     const totals = result.annotationMetadata.find((item) => item.findingId === "ram-totals");
     const supplier = result.annotationMetadata.find((item) => item.findingId === "ram-supplier");
@@ -837,18 +877,48 @@ async function run(name, test) {
     assert.equal(line23.targetLineNumber, "23");
     assert.equal(line23.pageNumber, 2);
     assert.equal(line23.sourceDocumentRole, "carrier");
+    assert.equal(line39.pageNumber, 3);
+    assert.equal(line39.sourcePageNumber, 3);
+    assert.equal(line39.targetLineNumber, "39");
+    assert.equal(line39.sourceLineNumber, "39");
+    assert.match(line39.sourceAnchorText, /Pre-repair scan/);
+    assert.equal(line40.pageNumber, 3);
+    assert.equal(line40.sourceLineNumber, "40");
+    assert.match(line40.sourceAnchorText, /In-process scan/);
+    assert.equal(line41.pageNumber, 3);
+    assert.equal(line41.sourceLineNumber, "41");
+    assert.match(line41.sourceAnchorText, /Seat belt dynamic function test/);
+    assert.equal(line42.pageNumber, 3);
+    assert.equal(line42.sourceLineNumber, "42");
+    assert.match(line42.sourceAnchorText, /Post-repair scan/);
+    assert.equal(line43.pageNumber, 3);
+    assert.equal(line43.sourceLineNumber, "43");
+    assert.notEqual(line43.label, "NEEDS ADAS");
     assert.equal(line44.anchorType, "line_note");
     assert.equal(line44.targetLineNumber, "44");
     assert.equal(line44.pageNumber, 3);
+    assert.equal(line44.sourcePageNumber, 3);
+    assert.equal(line44.sourceLineNumber, "44");
+    assert.match(line44.sourceAnchorText, /REVVAdas Report/);
     assert.equal(line44.label, "REFERENCED / NOT PRODUCED");
     assert.equal(line44.sourceDocumentId, "carrier-21975");
     assert.equal(totals.anchorType, "totals_row");
     assert.equal(totals.pageNumber, 4);
     assert.equal(supplier.anchorType, "supplier_row");
     assert.equal(supplier.pageNumber, 12);
+    const scanLike = result.annotationMetadata.filter((item) => /scan|seat belt|road test|revvadas|adas/i.test(`${item.estimateLine} ${item.sourceAnchorText}`));
+    assert.deepEqual(scanLike.map((item) => item.pageNumber).sort((a, b) => a - b), [3, 3, 3, 3, 3, 3]);
+    assert.equal(result.annotationMetadata.some((item) => item.pageNumber === 4 && /scan|seat belt|road test|adas/i.test(item.sourceAnchorText)), false);
+    assert.equal(result.annotationMetadata.some((item) => item.pageNumber === 7 && /scan|seat belt|adas/i.test(item.sourceAnchorText)), false);
+    assert.equal(result.annotationMetadata.some((item) => item.pageNumber === 9 && /scan|adas/i.test(item.sourceAnchorText)), false);
     for (const metadata of result.annotationMetadata) {
       assert.ok(metadata.findingId);
       assert.ok(metadata.anchorId);
+      assert.equal(metadata.sourceAnchorId, metadata.anchorId);
+      assert.equal(metadata.sourcePageNumber, metadata.pageNumber);
+      assert.equal(metadata.sourceAnchorType, metadata.anchorType);
+      assert.ok(metadata.sourceAnchorText);
+      assert.ok(metadata.sourceAnchorNormalizedText);
       assert.ok(metadata.sourceDocumentId);
       assert.ok(["carrier", "shop"].includes(metadata.sourceDocumentRole));
       assert.equal(typeof metadata.targetNormalizedText, "string");

@@ -8,8 +8,14 @@ import { pdfRectToViewportRect } from "@/lib/reports/citationDensityCoordinates"
 export type CitationDensityAnnotationMetadata = {
   findingId: string;
   anchorId?: string;
+  sourceAnchorId?: string;
   sourceDocumentId?: string;
   sourceDocumentRole?: "carrier" | "shop" | "both";
+  sourcePageNumber?: number;
+  sourceLineNumber?: string;
+  sourceAnchorType?: "estimate_line" | "line_note" | "supplier_row" | "totals_row" | "section_row";
+  sourceAnchorText?: string;
+  sourceAnchorNormalizedText?: string;
   markerNumber: number;
   pageNumber: number;
   pdfPageWidth?: number;
