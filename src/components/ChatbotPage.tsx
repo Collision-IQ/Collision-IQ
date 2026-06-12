@@ -3290,18 +3290,26 @@ function RailContent({
 }
 
 function buildCitationDensityFindingPrompt(annotation: CitationDensityAnnotationMetadata) {
+  const sourceEstimate = annotation.sourceDocumentRole === "both"
+    ? "both estimates"
+    : `${annotation.sourceDocumentRole ?? "carrier"} estimate`;
+  const lineLabel = annotation.targetLineNumber ?? annotation.estimateLine;
   return [
-    `Explain Citation Density finding #${annotation.markerNumber} and what documentation would strengthen or weaken it.`,
+    `Explain Citation Density finding #${annotation.markerNumber} for ${sourceEstimate}, page ${annotation.pageNumber}, line ${lineLabel}. Explain what supports it, what proof is missing, why it matters, and what would strengthen or weaken it.`,
     "",
     `Finding id: ${annotation.findingId}`,
+    annotation.sourceDocumentId ? `Source document id: ${annotation.sourceDocumentId}` : "",
+    annotation.sourceDocumentRole ? `Source estimate: ${annotation.sourceDocumentRole}` : "",
     `Page: ${annotation.pageNumber}`,
     annotation.targetLineNumber ? `Estimate line: ${annotation.targetLineNumber}` : `Estimate line: ${annotation.estimateLine}`,
     annotation.targetSection ? `Target section: ${annotation.targetSection}` : "",
     annotation.targetRawText ? `Target text: ${annotation.targetRawText}` : "",
+    annotation.targetNormalizedText ? `Normalized target text: ${annotation.targetNormalizedText}` : "",
     `Label: ${annotation.label}`,
     `Best authority: ${annotation.bestAuthority}`,
     `Authority status: ${annotation.authorityStatus}`,
     `Missing proof: ${annotation.missingProof}`,
+    annotation.whyItMatters ? `Why it matters: ${annotation.whyItMatters}` : "",
     `Next action: ${annotation.nextAction}`,
     annotation.sourceRefs.length ? `Source refs: ${annotation.sourceRefs.join("; ")}` : "Source refs: none listed",
   ].filter(Boolean).join("\n");

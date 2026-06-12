@@ -3,9 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Download, MessageSquareText, X } from "lucide-react";
+import { pdfRectToViewportRect } from "@/lib/reports/citationDensityCoordinates";
 
 export type CitationDensityAnnotationMetadata = {
   findingId: string;
+  sourceDocumentId?: string;
+  sourceDocumentRole?: "carrier" | "shop" | "both";
   markerNumber: number;
   pageNumber: number;
   pdfPageWidth?: number;
@@ -23,6 +26,7 @@ export type CitationDensityAnnotationMetadata = {
   targetLineNumber?: string;
   targetSection?: string;
   targetRawText?: string;
+  targetNormalizedText?: string;
   matchConfidence?: "high" | "medium" | "low";
   anchorType?: "exact_line" | "description" | "note" | "amount" | "section" | "totals" | "supplier" | "page_fallback";
   label: string;
@@ -31,6 +35,7 @@ export type CitationDensityAnnotationMetadata = {
   bestAuthority: string;
   authorityStatus: string;
   missingProof: string;
+  whyItMatters?: string;
   nextAction: string;
   sourceRefs: string[];
   comment: string;
@@ -63,27 +68,23 @@ export function getAnnotationOverlayRect(
   annotation: CitationDensityAnnotationMetadata,
   page: RenderedPage
 ) {
-  const pdfWidth = annotation.pdfPageWidth || page.pdfWidth;
-  const pdfHeight = annotation.pdfPageHeight || page.pdfHeight;
-  const scaleX = page.width / pdfWidth;
-  const scaleY = page.height / pdfHeight;
-  const source =
-    annotation.coordinateSpace === "normalized" ||
-    (typeof annotation.xPct === "number" && typeof annotation.yPct === "number")
+  return pdfRectToViewportRect(
+    annotation.coordinateSpace === "normalized"
       ? {
-          x: (annotation.xPct ?? 0) * pdfWidth,
-          y: (annotation.yPct ?? 0) * pdfHeight,
-          width: (annotation.wPct ?? 0) * pdfWidth,
-          height: (annotation.hPct ?? 0) * pdfHeight,
+          xPct: annotation.xPct,
+          yPct: annotation.yPct,
+          wPct: annotation.wPct,
+          hPct: annotation.hPct,
         }
-      : annotation;
-
-  return {
-    left: source.x * scaleX,
-    top: (pdfHeight - source.y - source.height) * scaleY,
-    width: Math.max(22, source.width * scaleX),
-    height: Math.max(16, source.height * scaleY),
-  };
+      : annotation,
+    {
+      width: page.width,
+      height: page.height,
+      pdfWidth: annotation.pdfPageWidth || page.pdfWidth,
+      pdfHeight: annotation.pdfPageHeight || page.pdfHeight,
+      rotation: annotation.rotation ?? page.rotation,
+    }
+  );
 }
 
 export default function CitationDensityAnnotationViewer({
@@ -219,8 +220,16 @@ export default function CitationDensityAnnotationViewer({
                         <button
                           key={annotation.findingId}
                           type="button"
-                          onClick={() => setSelectedId(annotation.findingId)}
-                          className="absolute rounded-[3px] border border-amber-600/80 bg-amber-300/25 text-left outline-none ring-offset-2 ring-offset-neutral-900 transition hover:bg-amber-300/40 focus-visible:ring-2 focus-visible:ring-amber-300"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setSelectedId(annotation.findingId);
+                          }}
+                          className={[
+                            "absolute rounded-[3px] border text-left outline-none ring-offset-2 ring-offset-neutral-900 transition focus-visible:ring-2 focus-visible:ring-amber-300",
+                            selectedId === annotation.findingId
+                              ? "border-red-500 bg-amber-300/45 ring-2 ring-red-500/70"
+                              : "border-amber-600/80 bg-amber-300/25 hover:bg-amber-300/40",
+                          ].join(" ")}
                           style={{
                             left: rect.left,
                             top: rect.top,
@@ -252,9 +261,13 @@ export default function CitationDensityAnnotationViewer({
                   </div>
                 </div>
                 <Detail label="Estimate line" value={selected.estimateLine} />
+                <Detail label="Page" value={String(selected.pageNumber)} />
+                <Detail label="Source estimate" value={formatSourceEstimate(selected)} />
+                <Detail label="Anchor" value={selected.targetLineNumber ? `Line ${selected.targetLineNumber}` : selected.targetSection || selected.anchorType || "Estimate row"} />
                 <Detail label="Best authority" value={selected.bestAuthority} />
                 <Detail label="Authority status" value={selected.authorityStatus} />
                 <Detail label="Missing proof" value={selected.missingProof} />
+                <Detail label="Why it matters" value={selected.whyItMatters || selected.comment} />
                 <Detail label="Next action" value={selected.nextAction} />
                 {selected.sourceRefs.length ? (
                   <div>
@@ -292,4 +305,11 @@ function Detail({ label, value }: { label: string; value: string }) {
       <div className="mt-1 text-sm leading-6 text-white/82">{value || "Not specified"}</div>
     </div>
   );
+}
+
+function formatSourceEstimate(annotation: CitationDensityAnnotationMetadata) {
+  const role = annotation.sourceDocumentRole || "carrier";
+  const id = annotation.sourceDocumentId ? ` (${annotation.sourceDocumentId})` : "";
+  if (role === "both") return `Both estimates${id}`;
+  return `${role[0].toUpperCase()}${role.slice(1)} estimate${id}`;
 }

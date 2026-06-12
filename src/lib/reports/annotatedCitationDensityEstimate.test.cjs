@@ -119,6 +119,24 @@ function ramEstimateStoredText() {
   ].join("\n");
 }
 
+function shop21975StoredText() {
+  return [
+    "Shop 21975 estimate",
+    "Parts",
+    "25 Test fit front bumper 0.5 $37.50",
+    "27 OEM style grille chrome horizontal bars $410.00",
+    "29 Radiator support front end $520.00",
+    "Diagnostics and Sublet",
+    "43 Pre-repair scan sublet $201.00 +34%",
+    "44 Post-repair scan sublet $201.00 +34%",
+    "45 Final road test 0.3 $22.50",
+    "Refinish",
+    "50 Finish sand and polish 0.8 $60.00",
+    "Totals / Labor / Paint Supplies",
+    "Body labor rate $75.00 Paint labor rate $75.00 Paint supplies 3.7 @ $60.00",
+  ].join("\n");
+}
+
 function drawFragmentedEstimateRow(page, font, line, description, labor, amount, y) {
   page.drawText(String(line), { x: 48, y, size: 8, font });
   page.drawText(description, { x: 82, y, size: 8, font });
@@ -400,7 +418,7 @@ async function run(name, test) {
     assert.match(text, /Unanchored Citation Density Findings/);
   });
 
-  await run("section-level fallback places callouts on original pages before appendix", async () => {
+  await run("unmatched page-level cues are suppressed from visible estimate annotations", async () => {
     const sourcePdfBytes = await createTwoPageSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
       sourcePdfBytes,
@@ -423,12 +441,35 @@ async function run(name, test) {
     const text = await extractPdfText(result.bytes);
 
     assert.equal(result.originalPageCount, 2);
-    assert.equal(result.annotatedFindingCount, 1);
-    assert.equal(result.unresolvedAnchorCount, 0);
-    assert.equal(loaded.getPageCount(), 3);
+    assert.equal(result.annotatedFindingCount, 0);
+    assert.equal(result.unresolvedAnchorCount, 1);
+    assert.equal(loaded.getPageCount(), 5);
     assert.match(text, /Original estimate page one sentinel/);
+    assert.match(text, /No line-level anchors could be placed/);
     assert.match(text, /Citation Density Annotation Legend/);
-    assert.doesNotMatch(text, /Unanchored Citation Density Findings/);
+    assert.match(text, /Unanchored Citation Density Findings/);
+    assert.equal(result.annotationMetadata.length, 0);
+  });
+
+  await run("generic and corrupted finding labels are suppressed before visible annotation metadata", async () => {
+    const sourcePdfBytes = await createSourcePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      findings: [
+        baseFinding({ id: "generic-repair", operationLabel: "Repair Operation" }),
+        baseFinding({ id: "proc-report", operationLabel: "Proc Report" }),
+        baseFinding({ id: "screenshot-cue", operationLabel: "Comparison or screenshot cues" }),
+        baseFinding({ id: "bad-pre-scan", operationLabel: "Proc Pre-repair scanm" }),
+      ],
+      request: { includeLegend: false, includeUnanchoredAppendix: true, annotationMode: "both" },
+    });
+    const text = await extractPdfText(result.bytes);
+
+    assert.equal(result.annotatedFindingCount, 0);
+    assert.equal(result.unresolvedAnchorCount, 0);
+    assert.equal(result.annotationMetadata.length, 0);
+    assert.match(result.warnings.join(" "), /suppressed from the visible estimate layer/i);
+    assert.doesNotMatch(text, /Repair Operation|Proc Report|Comparison or screenshot cues|Proc Pre-repair scanm/i);
   });
 
   await run("visual page behavior uses original PDF as base with optional legend only", async () => {
@@ -691,6 +732,51 @@ async function run(name, test) {
           },
         }),
         baseFinding({
+          id: "ram-line-42",
+          operationLabel: "Post-repair scan",
+          category: "scan_diagnostic",
+          carrierEvidence: {
+            lineNumber: "42",
+            description: "Post-repair scan",
+            amount: 75,
+            laborHours: 0.5,
+            sourceLabel: "Carrier estimate",
+          },
+        }),
+        baseFinding({
+          id: "ram-line-44",
+          operationLabel: "REVVAdas Report",
+          category: "adas_calibration",
+          estimateGapType: "referenced_not_produced",
+          citationLabel: "REFERENCED / NOT PRODUCED",
+          embeddedEstimateLinks: [{
+            sourceDocumentId: "carrier-21975",
+            lineNumber: "44",
+            estimateRole: "carrier",
+            nearbyOperation: "REVVAdas Report",
+            redactedUrl: "https://egnyte.example.com/revvadas/ram-report",
+            retrievalStatus: "not_fetched",
+            authorityStatus: "referenced_not_produced",
+          }],
+          carrierAnchor: {
+            sourceDocumentId: "carrier-21975",
+            estimateRole: "carrier",
+            lineNumber: "44",
+            pageNumber: 1,
+            section: "Diagnostics and Calibration",
+            operation: "REVVAdas Report",
+            description: "REVVAdas Report ADAS report available upon request and via this link",
+          },
+          carrierEvidence: {
+            lineNumber: "44",
+            description: "REVVAdas Report ADAS report available upon request and via this link",
+            amount: 0,
+            laborHours: null,
+            sourceLabel: "Carrier estimate",
+          },
+          missingAuthorityTypes: ["linked ADAS report"],
+        }),
+        baseFinding({
           id: "ram-totals",
           operationLabel: "Paint materials and labor total difference",
           category: "labor_difference",
@@ -720,7 +806,7 @@ async function run(name, test) {
     const pages = await extractPdfPageTexts(result.bytes);
 
     assert.equal(result.originalPageCount, 2);
-    assert.equal(result.annotatedFindingCount, 6);
+    assert.equal(result.annotatedFindingCount, 8);
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.doesNotMatch(result.warnings.join(" "), /all_findings_unanchored/);
     assert.match(result.warnings.join(" "), /stored extracted text/i);
@@ -729,9 +815,133 @@ async function run(name, test) {
     assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 39: Pre-repair scan/);
     assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 40: In-process scan/);
     assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 41: Seat belt dynamic function test/);
+    assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 42: Post-repair scan/);
+    assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 44: REVVAdas Report/);
+    const line23 = result.annotationMetadata.find((item) => item.findingId === "ram-line-23");
+    const line44 = result.annotationMetadata.find((item) => item.findingId === "ram-line-44");
+    const totals = result.annotationMetadata.find((item) => item.findingId === "ram-totals");
+    const supplier = result.annotationMetadata.find((item) => item.findingId === "ram-supplier");
+    assert.equal(line23.anchorType, "exact_line");
+    assert.equal(line23.targetLineNumber, "23");
+    assert.equal(line23.sourceDocumentRole, "carrier");
+    assert.equal(line44.anchorType, "exact_line");
+    assert.equal(line44.targetLineNumber, "44");
+    assert.equal(line44.label, "REFERENCED / NOT PRODUCED");
+    assert.equal(line44.sourceDocumentId, "carrier-21975");
+    assert.equal(totals.anchorType, "totals");
+    assert.equal(supplier.anchorType, "supplier");
+    for (const metadata of result.annotationMetadata) {
+      assert.ok(metadata.findingId);
+      assert.ok(metadata.sourceDocumentId);
+      assert.ok(["carrier", "shop", "both"].includes(metadata.sourceDocumentRole));
+      assert.equal(typeof metadata.targetNormalizedText, "string");
+      assert.ok(metadata.targetNormalizedText.length > 0);
+      assert.ok(metadata.xPct > 0 && metadata.xPct < 1);
+      assert.ok(metadata.yPct > 0 && metadata.yPct < 1);
+      assert.ok(metadata.wPct > 0 && metadata.wPct < 1);
+      assert.ok(metadata.hPct > 0 && metadata.hPct < 1);
+    }
     assert.match(pages.join(" "), /Paint materials total/);
     assert.match(pages.join(" "), /Alternate Parts Supplier/);
     assert.doesNotMatch(pages.join(" "), /Unanchored Citation Density Findings/);
+  });
+
+  await run("shop 21975 scan sublets and finish sand anchor to concrete rows", async () => {
+    const sourcePdfBytes = await createBlankSourcePdf(1);
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceText: shop21975StoredText(),
+      findings: [
+        baseFinding({
+          id: "shop-line-43",
+          operationLabel: "Pre-repair scan sublet +34%",
+          category: "scan_diagnostic",
+          shopEvidence: {
+            lineNumber: "43",
+            description: "Pre-repair scan sublet $201.00 +34%",
+            amount: 201,
+            laborHours: null,
+            sourceLabel: "Shop estimate",
+          },
+          carrierEvidence: undefined,
+        }),
+        baseFinding({
+          id: "shop-line-44",
+          operationLabel: "Post-repair scan sublet +34%",
+          category: "scan_diagnostic",
+          shopEvidence: {
+            lineNumber: "44",
+            description: "Post-repair scan sublet $201.00 +34%",
+            amount: 201,
+            laborHours: null,
+            sourceLabel: "Shop estimate",
+          },
+          carrierEvidence: undefined,
+        }),
+        baseFinding({
+          id: "shop-line-50",
+          operationLabel: "Finish sand and polish",
+          category: "refinish",
+          citationLabel: "NEEDS ADAS",
+          shopEvidence: {
+            lineNumber: "50",
+            description: "Finish sand and polish",
+            amount: 60,
+            laborHours: 0.8,
+            sourceLabel: "Shop estimate",
+          },
+          carrierEvidence: undefined,
+          citationStatus: {
+            oem: "needed",
+            adas: "needed",
+            pPages: "needed",
+            scrs: "not_applicable",
+            deg: "not_applicable",
+            nhtsa: "not_applicable",
+            stateRegulation: "not_applicable",
+            policy: "not_applicable",
+            invoiceOrCompletionProof: "not_applicable",
+            photoOrTeardownProof: "not_applicable",
+          },
+          missingAuthorityTypes: ["pPages"],
+        }),
+        baseFinding({
+          id: "shop-totals",
+          operationLabel: "Body labor and paint supplies rate delta",
+          category: "labor_difference",
+          shopEvidence: {
+            lineNumber: null,
+            description: "Body labor rate $75.00 Paint supplies 3.7 @ $60.00",
+            amount: 75,
+            laborHours: null,
+            sourceLabel: "Shop estimate",
+          },
+          carrierEvidence: undefined,
+          citationStatus: {
+            oem: "not_applicable",
+            adas: "needed",
+            pPages: "needed",
+            scrs: "not_applicable",
+            deg: "not_applicable",
+            nhtsa: "not_applicable",
+            stateRegulation: "not_applicable",
+            policy: "not_applicable",
+            invoiceOrCompletionProof: "not_applicable",
+            photoOrTeardownProof: "not_applicable",
+          },
+          missingAuthorityTypes: ["pPages"],
+        }),
+      ],
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "shop" },
+    });
+
+    assert.equal(result.annotatedFindingCount, 4);
+    assert.equal(result.unresolvedAnchorCount, 0);
+    assert.equal(result.annotationMetadata.find((item) => item.findingId === "shop-line-43").targetLineNumber, "43");
+    assert.equal(result.annotationMetadata.find((item) => item.findingId === "shop-line-44").targetLineNumber, "44");
+    assert.equal(result.annotationMetadata.find((item) => item.findingId === "shop-line-50").label, "NEEDS P-PAGE");
+    assert.equal(result.annotationMetadata.find((item) => item.findingId === "shop-totals").anchorType, "totals");
+    assert.equal(result.annotationMetadata.every((item) => item.sourceDocumentRole === "shop"), true);
   });
 
   await run("Ram line 44 Egnyte REVVAdas link is detected and redacted", async () => {

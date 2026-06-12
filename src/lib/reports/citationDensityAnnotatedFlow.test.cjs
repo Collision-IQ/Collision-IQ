@@ -34,6 +34,10 @@ const {
   shouldGenerateAnnotatedCitationDensityEstimate,
 } = require("./citationDensityIntent.ts");
 const {
+  buildPdfRectFromTopLeftAnchor,
+  pdfRectToViewportRect,
+} = require("./citationDensityCoordinates.ts");
+const {
   NO_SOURCE_PDF_ERROR,
   NO_SOURCE_PDF_USER_MESSAGE,
   describeReviewTarget,
@@ -217,9 +221,41 @@ run("Citation Density viewer configures worker and converts PDF coordinates", ()
   assert.match(source, /pdfjs-dist\/build\/pdf\.worker\.mjs/);
   assert.doesNotMatch(source, /disableWorker:\s*true/);
   assert.match(source, /PDF viewer failed to initialize\. Download the PDF instead\./);
-  assert.match(source, /coordinateSpace/);
+  assert.match(source, /pdfRectToViewportRect/);
   assert.match(source, /getAnnotationOverlayRect/);
-  assert.match(source, /pdfHeight - source\.y - source\.height/);
+  assert.doesNotMatch(source, /pdfHeight - source\.y - source\.height/);
+  assert.match(source, /event\.stopPropagation\(\)/);
+  assert.match(source, /setSelectedId\(annotation\.findingId\)/);
+  assert.match(source, /selectedId === annotation\.findingId/);
+  assert.match(source, /ring-2 ring-red-500/);
+});
+
+run("shared Citation Density coordinate utility normalizes PDF and viewport rectangles", () => {
+  const pdfRect = buildPdfRectFromTopLeftAnchor(
+    { x: 50, y: 92, width: 180, height: 10 },
+    { pdfWidth: 612, pdfHeight: 792, rotation: 0 },
+    2
+  );
+  const overlay = pdfRectToViewportRect(pdfRect, {
+    width: 765,
+    height: 990,
+    pdfWidth: 612,
+    pdfHeight: 792,
+    rotation: 0,
+  });
+  const rotated = pdfRectToViewportRect(pdfRect, {
+    width: 990,
+    height: 765,
+    pdfWidth: 612,
+    pdfHeight: 792,
+    rotation: 90,
+  });
+
+  assert.ok(pdfRect.xPct > 0 && pdfRect.xPct < 1);
+  assert.ok(pdfRect.yPct > 0 && pdfRect.yPct < 1);
+  assert.ok(overlay.left > 0);
+  assert.ok(overlay.top > 0);
+  assert.notEqual(rotated.left, overlay.left);
 });
 
 run("annotated export uses persisted artifact id for download and metadata", () => {
@@ -245,7 +281,11 @@ run("Ask about finding sends selected finding context into active chat", () => {
   assert.match(widgetSource, /sendPrompt:\s*\(prompt\)\s*=>\s*handleSendRef\.current\(prompt\)/);
   assert.match(pageSource, /Open or continue this case before asking about a finding\./);
   assert.match(pageSource, /Explain Citation Density finding #\$\{annotation\.markerNumber\}/);
+  assert.match(pageSource, /for \$\{sourceEstimate\}, page \$\{annotation\.pageNumber\}, line \$\{lineLabel\}/);
   assert.match(pageSource, /Finding id: \$\{annotation\.findingId\}/);
+  assert.match(pageSource, /Source estimate: \$\{annotation\.sourceDocumentRole\}/);
+  assert.match(pageSource, /Normalized target text: \$\{annotation\.targetNormalizedText\}/);
+  assert.match(pageSource, /Why it matters: \$\{annotation\.whyItMatters\}/);
   assert.match(pageSource, /Best authority: \$\{annotation\.bestAuthority\}/);
   assert.match(pageSource, /chatSessionControlsRef\.current\.sendPrompt\(prompt\)/);
 });

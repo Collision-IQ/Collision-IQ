@@ -13,6 +13,11 @@ import {
 } from "pdf-lib/cjs/core";
 import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
 import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
+import {
+  buildPdfRectFromTopLeftAnchor,
+  normalizePdfRect,
+  normalizeRotation,
+} from "./citationDensityCoordinates";
 
 export type AnnotationMode = "margin_callouts" | "inline_highlight" | "both";
 
@@ -39,6 +44,8 @@ export type AnnotatedEstimateResult = {
 
 export type CitationDensityAnnotationMetadata = {
   findingId: string;
+  sourceDocumentId: string;
+  sourceDocumentRole: "carrier" | "shop" | "both";
   markerNumber: number;
   pageNumber: number;
   pdfPageWidth: number;
@@ -56,6 +63,7 @@ export type CitationDensityAnnotationMetadata = {
   targetLineNumber?: string;
   targetSection?: string;
   targetRawText: string;
+  targetNormalizedText: string;
   matchConfidence: "high" | "medium" | "low";
   anchorType: "exact_line" | "description" | "note" | "amount" | "section" | "totals" | "supplier" | "page_fallback";
   label: string;
@@ -64,6 +72,7 @@ export type CitationDensityAnnotationMetadata = {
   bestAuthority: string;
   authorityStatus: string;
   missingProof: string;
+  whyItMatters: string;
   nextAction: string;
   sourceRefs: string[];
   comment: string;
@@ -153,7 +162,8 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   const mode = request.annotationMode ?? "both";
   const estimateRole = request.estimateRole ?? "selected";
   const selectedIds = new Set(request.findingIds?.filter(Boolean) ?? []);
-  const findings = params.findings.filter((finding) => !selectedIds.size || selectedIds.has(finding.id));
+  const selectedFindings = params.findings.filter((finding) => !selectedIds.size || selectedIds.has(finding.id));
+  const { findings, suppressed } = sanitizeCitationDensityFindingsForVisibleLayer(selectedFindings);
   const warnings: string[] = [];
   const sourcePdfBytes = params.sourcePdfBytes.slice();
   const pdfDoc = await PDFDocument.load(sourcePdfBytes);
@@ -190,14 +200,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       continue;
     }
 
-    const pageAnchor = findBestPageAnchorForFinding(finding, anchors, usedAnchors, pdfDoc, estimateRole);
-    if (!pageAnchor) {
-      unmatched.push(finding);
-      continue;
-    }
-
-    if (!pageAnchor.synthetic) usedAnchors.add(pageAnchor);
-    matches.push({ finding, anchor: pageAnchor, matchKind: "page" });
+    unmatched.push(finding);
   }
 
   const lineMatchCount = matches.filter((match) => match.matchKind === "line").length;
@@ -206,6 +209,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       `${NO_LINE_ANCHORS_WARNING} Findings were placed as page-level callouts and/or appendix entries.`
     );
     if (matches.length === 0) warnings.push("all_findings_unanchored");
+  }
+  if (suppressed.length > 0) {
+    warnings.push(`${suppressed.length} generic or malformed Citation Density finding(s) were suppressed from the visible estimate layer.`);
   }
 
   const annotationMetadata: CitationDensityAnnotationMetadata[] = [];
@@ -466,120 +472,104 @@ function findBestAnchorForFinding(
     }
   }
 
-  return best && best.score >= 24 ? best.anchor : null;
+  return best && best.score >= 24 && isConcreteAnchorMatch(finding, best.anchor, estimateRole)
+    ? best.anchor
+    : null;
 }
 
-function findBestPageAnchorForFinding(
-  finding: CitationDensityFinding,
-  anchors: TextAnchor[],
-  usedAnchors: Set<TextAnchor>,
-  pdfDoc: PDFDocument,
-  estimateRole: "carrier" | "shop" | "selected"
-): TextAnchor | null {
-  if (!anchors.length) return null;
+function sanitizeCitationDensityFindingsForVisibleLayer(findings: CitationDensityFinding[]) {
+  const kept: CitationDensityFinding[] = [];
+  const suppressed: CitationDensityFinding[] = [];
+  const seen = new Set<string>();
 
-  const pageScores = new Map<number, { score: number; anchor: TextAnchor | null }>();
-  for (const anchor of anchors) {
-    if (usedAnchors.has(anchor)) continue;
-    const score = scorePageAnchor(finding, anchor, estimateRole);
-    if (score <= 0) continue;
-    const current = pageScores.get(anchor.pageIndex);
-    if (!current || score > current.score) {
-      pageScores.set(anchor.pageIndex, { score, anchor });
+  for (const finding of findings) {
+    const displayText = [
+      finding.operationLabel,
+      finding.carrierEvidence?.description,
+      finding.shopEvidence?.description,
+      finding.carrierAnchor?.description,
+      finding.shopAnchor?.description,
+    ].join(" ");
+    const key = normalizeMatchText(displayText);
+
+    if (!isVisibleCitationDensityFinding(finding) || (key && seen.has(key))) {
+      suppressed.push(finding);
+      continue;
     }
+
+    if (key) seen.add(key);
+    kept.push(finding);
   }
 
-  const best = [...pageScores.entries()].sort((a, b) => b[1].score - a[1].score)[0];
-  if (!best || best[1].score < 12 || !best[1].anchor) return null;
-
-  const page = pdfDoc.getPage(best[0]);
-  const pageWidth = page.getWidth();
-  const pageHeight = page.getHeight();
-  const anchor = best[1].anchor;
-  const desiredY = clamp(pageHeight - 96 - (best[0] % 4) * 36, 132, pageHeight - 76);
-
-  return {
-    pageIndex: best[0],
-    text: `Page-level citation density callout: ${finding.operationLabel}`,
-    normalizedText: normalizeMatchText(finding.operationLabel),
-    x: clamp(anchor.x, 42, Math.max(42, pageWidth - 210)),
-    y: pageHeight - desiredY - 12,
-    width: Math.min(Math.max(anchor.width, 150), pageWidth - 84),
-    height: 12,
-    pageWidth,
-    pageHeight,
-    synthetic: true,
-  };
+  return { findings: kept, suppressed };
 }
 
-function scorePageAnchor(
-  finding: CitationDensityFinding,
-  anchor: TextAnchor,
-  estimateRole: "carrier" | "shop" | "selected"
-): number {
-  const anchorText = anchor.normalizedText;
-  const keywords = buildFindingKeywords(finding, estimateRole);
-  let score = 0;
-
-  for (const keyword of keywords) {
-    if (keyword.length > 2 && anchorText.includes(keyword)) score += keyword.length > 5 ? 8 : 4;
-  }
-
-  for (const item of [finding.carrierEvidence, finding.shopEvidence].filter(Boolean)) {
-    if (typeof item?.amount === "number" && anchorText.includes(normalizeMoney(item.amount))) score += 8;
-    if (typeof item?.laborHours === "number" && anchorText.includes(String(item.laborHours))) score += 7;
-  }
-
-  return score + scoreSectionAffinity(finding, anchor, estimateRole);
-}
-
-function buildFindingKeywords(finding: CitationDensityFinding, estimateRole: "carrier" | "shop" | "selected") {
-  const roleEvidence = estimateRole === "shop" ? finding.shopEvidence : estimateRole === "carrier" ? finding.carrierEvidence : null;
-  const fallbackEvidence = estimateRole === "shop" ? finding.carrierEvidence : finding.shopEvidence;
-  const roleAnchor = estimateRole === "shop" ? finding.shopAnchor : estimateRole === "carrier" ? finding.carrierAnchor : null;
-  const source = [
+function isVisibleCitationDensityFinding(finding: CitationDensityFinding): boolean {
+  const text = [
     finding.operationLabel,
-    roleAnchor?.operation,
-    roleAnchor?.section,
-    roleAnchor?.description,
-    roleEvidence?.description,
-    fallbackEvidence?.description,
+    finding.category,
+    finding.carrierEvidence?.description,
+    finding.shopEvidence?.description,
     finding.currentSupportSummary,
     finding.missingProofSummary,
     finding.recommendedNextAction,
-    finding.counterpartSummary,
-    ...finding.missingAuthorityTypes,
   ].join(" ");
-  const normalized = normalizeMatchText(source);
-  const terms = normalized.split(" ").filter((term) =>
-    term.length > 3 &&
-    !/^\d+$/.test(term) &&
-    !COMMON_MATCH_TERMS.has(term)
+  const normalized = normalizeMatchText(text);
+
+  if (!normalized.trim()) return false;
+  if (/\brepair operation\b|\bproc report\b|\bcomparison or screenshot cues\b/i.test(text)) return false;
+  if (/\bproc\s+(?:pre|post)[-\s]?repair scanm\b/i.test(text)) return false;
+  if (/\bstructural frame and measurement verification\b/i.test(text) && !hasConcreteFindingAnchor(finding)) return false;
+  if (/\bside structure aperture door[-\s]?shell fit verification\b/i.test(text) && !hasConcreteFindingAnchor(finding)) return false;
+  if (/^note required prior to final refinish/i.test(text) && !/test\s*fit/i.test(text)) return false;
+
+  return true;
+}
+
+function hasConcreteFindingAnchor(finding: CitationDensityFinding): boolean {
+  return Boolean(
+    finding.carrierEvidence?.lineNumber ||
+    finding.shopEvidence?.lineNumber ||
+    finding.carrierAnchor?.lineNumber ||
+    finding.shopAnchor?.lineNumber ||
+    finding.carrierAnchor?.section ||
+    finding.shopAnchor?.section
   );
-  const extras: string[] = [];
+}
 
-  if (/struct|frame|unibody|apron|rail|measure|dimension|pull|set up|setup/.test(normalized)) {
-    extras.push("structural", "frame", "measure", "dimension", "set", "setup", "apron", "rail");
-  }
-  if (/door|shell/.test(normalized)) extras.push("door", "shell");
-  if (/steer|suspension|align/.test(normalized)) extras.push("steering", "suspension", "align");
-  if (/calibration|adas|scan|radar|camera|module/.test(normalized)) {
-    extras.push("calibration", "adas", "scan", "radar", "camera", "module");
-  }
-  if (/refinish|paint|blend|base coat|clear coat/.test(normalized)) {
-    extras.push("refinish", "paint", "blend", "base", "coat");
-  }
-  if (/aftermarket|a m|a\/m|non oem|alternate|lkq|bumper|reflector|molding/.test(normalized)) {
-    extras.push("aftermarket", "non", "oem", "alternate", "bumper", "cover", "reflector", "molding");
-  }
-  if (/corrosion|cavity|seam|weld|protection/.test(normalized)) {
-    extras.push("corrosion", "protection", "cavity", "seam", "weld");
-  }
-  if (/mask|jamb|sand|polish|material|suppl|supplies/.test(normalized)) {
-    extras.push("mask", "jamb", "sand", "polish", "material", "supplies");
+function isConcreteAnchorMatch(
+  finding: CitationDensityFinding,
+  anchor: TextAnchor,
+  estimateRole: "carrier" | "shop" | "selected"
+): boolean {
+  if (anchor.synthetic && /^page-level citation density callout/i.test(anchor.text)) return false;
+  if (isGenericOrMalformedAnchorText(anchor.text)) return false;
+
+  const lineNumber = getTargetLineNumber(finding, estimateRole);
+  if (lineNumber) return matchesLineNumber(anchor.text, lineNumber);
+
+  const anchorType = getAnchorType(finding, anchor, "line", estimateRole);
+  if (anchorType === "page_fallback") return false;
+  if (anchorType === "totals") return /total|labor rate|paint supplies|paint materials|body labor|paint labor/i.test(anchor.text);
+  if (anchorType === "supplier") return /supplier|alternate|a\/m|aftermarket|capa|lkq|oem/i.test(anchor.text);
+  if (anchorType === "note") return /note|required|not correct|available upon request|via this link|report/i.test(anchor.text);
+  if (anchorType === "section") return Boolean(getTargetSection(finding, estimateRole));
+  if (
+    (finding.carrierEvidence?.amount && anchor.normalizedText.includes(normalizeMoney(finding.carrierEvidence.amount))) ||
+    (finding.shopEvidence?.amount && anchor.normalizedText.includes(normalizeMoney(finding.shopEvidence.amount)))
+  ) {
+    return sharedTermScore(normalizeMatchText(finding.operationLabel), anchor.normalizedText, 10) >= 3;
   }
 
-  return [...new Set([...terms.map(canonicalMatchToken).slice(0, 22), ...extras].filter((term) => term.length > 2))];
+  return sharedTermScore(normalizeMatchText(finding.operationLabel), anchor.normalizedText, 10) >= 8;
+}
+
+function isGenericOrMalformedAnchorText(value: string): boolean {
+  return (
+    /^\s*(?:repair operation|proc report|comparison or screenshot cues)\s*$/i.test(value) ||
+    /\bproc\s+(?:pre|post)[-\s]?repair scanm\b/i.test(value) ||
+    /\b(?:citation density gap report|annotation legend|unanchored citation density|disclosure|privacy|estimate summary only)\b/i.test(value)
+  );
 }
 
 function scoreAnchor(
@@ -587,8 +577,26 @@ function scoreAnchor(
   anchor: TextAnchor,
   estimateRole: "carrier" | "shop" | "selected"
 ): number {
-  const primaryEvidence = estimateRole === "shop" ? finding.shopEvidence : estimateRole === "carrier" ? finding.carrierEvidence : null;
-  const secondaryEvidence = estimateRole === "shop" ? finding.carrierEvidence : finding.shopEvidence;
+  const roleAnchor =
+    estimateRole === "shop"
+      ? finding.shopAnchor
+      : estimateRole === "carrier"
+        ? finding.carrierAnchor
+        : finding.carrierAnchor ?? finding.shopAnchor;
+  const roleEvidence =
+    estimateRole === "shop"
+      ? finding.shopEvidence
+      : estimateRole === "carrier"
+        ? finding.carrierEvidence
+        : finding.carrierEvidence ?? finding.shopEvidence;
+  const primaryEvidence = roleEvidence ?? roleAnchor;
+  const secondaryEvidence = roleAnchor
+    ? null
+    : estimateRole === "shop"
+      ? finding.carrierEvidence
+      : estimateRole === "carrier"
+        ? finding.shopEvidence
+        : finding.shopEvidence ?? finding.carrierEvidence;
   const evidence = [primaryEvidence, secondaryEvidence].filter(Boolean);
   const anchorText = anchor.normalizedText;
   let score = 0;
@@ -638,19 +646,31 @@ function drawFindingAnnotation(
   const { anchor, finding } = match;
   const pageWidth = page.getWidth();
   const pageHeight = page.getHeight();
-  const highlightWidth = Math.min(Math.max(anchor.width, 120), pageWidth - anchor.x - 18);
-  const highlightY = clamp(pageHeight - anchor.y - anchor.height, 16, pageHeight - 20);
-  const highlightX = Math.max(anchor.x - 2, 8);
-  const highlightHeight = Math.max(anchor.height + 5, 12);
+  const rotation = normalizeRotation(page.getRotation().angle);
+  const highlightRect = buildPdfRectFromTopLeftAnchor(
+    {
+      x: anchor.x,
+      y: anchor.y,
+      width: clamp(anchor.width, 42, Math.max(42, pageWidth - anchor.x - 18)),
+      height: anchor.height,
+    },
+    { pdfWidth: pageWidth, pdfHeight: pageHeight, rotation },
+    2
+  );
   const label = getProofBucketLabel(finding);
   const shortTitle = formatShortIssueTitle(finding);
   const metadata = buildAnnotationMetadata(finding, anchor, number, label, shortTitle, {
-    x: highlightX,
-    y: highlightY - 2,
-    width: highlightWidth + 4,
-    height: highlightHeight,
+    x: highlightRect.x,
+    y: highlightRect.y,
+    width: highlightRect.width,
+    height: highlightRect.height,
+    xPct: highlightRect.xPct,
+    yPct: highlightRect.yPct,
+    wPct: highlightRect.wPct,
+    hPct: highlightRect.hPct,
     pageWidth,
     pageHeight,
+    rotation,
     matchKind: match.matchKind,
     estimateRole: options.estimateRole,
     redactSensitive: options.redactSensitive,
@@ -658,10 +678,10 @@ function drawFindingAnnotation(
 
   if (options.mode === "inline_highlight" || options.mode === "both") {
     page.drawRectangle({
-      x: highlightX,
-      y: highlightY - 2,
-      width: highlightWidth + 4,
-      height: highlightHeight,
+      x: highlightRect.x,
+      y: highlightRect.y,
+      width: highlightRect.width,
+      height: highlightRect.height,
       color: rgb(1, 0.9, 0.3),
       opacity: 0.22,
     });
@@ -673,8 +693,8 @@ function drawFindingAnnotation(
       label,
       shortTitle,
       anchorX: anchor.x,
-      highlightX,
-      highlightY,
+      highlightX: highlightRect.x,
+      highlightY: highlightRect.y,
       pageWidth,
       font: options.font,
       boldFont: options.boldFont,
@@ -812,8 +832,13 @@ function buildAnnotationMetadata(
     y: number;
     width: number;
     height: number;
+    xPct: number;
+    yPct: number;
+    wPct: number;
+    hPct: number;
     pageWidth: number;
     pageHeight: number;
+    rotation: 0 | 90 | 180 | 270;
     matchKind: MatchedFinding["matchKind"];
     estimateRole: "carrier" | "shop" | "selected";
     redactSensitive: boolean;
@@ -825,25 +850,31 @@ function buildAnnotationMetadata(
   };
   const sourceRefs = formatAnnotationSourceRefs(finding).map(sanitize);
   const bestAuthority = sanitize(formatBestAuthority(finding));
+  const sourceDocumentRole = getSourceDocumentRole(finding, options.estimateRole);
+  const sourceDocumentId = getSourceDocumentId(finding, sourceDocumentRole);
+  const targetRawText = sanitize(anchor.text || formatEstimateLineForCallout(finding, options.estimateRole));
   const metadata: CitationDensityAnnotationMetadata = {
     findingId: finding.id,
+    sourceDocumentId,
+    sourceDocumentRole,
     markerNumber: number,
     pageNumber: anchor.pageIndex + 1,
-    pdfPageWidth: roundCoordinate(options.pageWidth),
-    pdfPageHeight: roundCoordinate(options.pageHeight),
-    rotation: 0,
-    x: roundCoordinate(options.x),
-    y: roundCoordinate(options.y),
-    width: roundCoordinate(options.width),
-    height: roundCoordinate(options.height),
-    xPct: roundRatio(options.x / Math.max(1, options.pageWidth)),
-    yPct: roundRatio(options.y / Math.max(1, options.pageHeight)),
-    wPct: roundRatio(options.width / Math.max(1, options.pageWidth)),
-    hPct: roundRatio(options.height / Math.max(1, options.pageHeight)),
+    pdfPageWidth: normalizePdfRect({ x: 0, y: 0, width: options.pageWidth, height: options.pageHeight }, { pdfWidth: options.pageWidth, pdfHeight: options.pageHeight }).width,
+    pdfPageHeight: normalizePdfRect({ x: 0, y: 0, width: options.pageWidth, height: options.pageHeight }, { pdfWidth: options.pageWidth, pdfHeight: options.pageHeight }).height,
+    rotation: options.rotation,
+    x: options.x,
+    y: options.y,
+    width: options.width,
+    height: options.height,
+    xPct: options.xPct,
+    yPct: options.yPct,
+    wPct: options.wPct,
+    hPct: options.hPct,
     coordinateSpace: "pdf-points",
     targetLineNumber: getTargetLineNumber(finding, options.estimateRole),
     targetSection: getTargetSection(finding, options.estimateRole),
-    targetRawText: sanitize(anchor.text || formatEstimateLineForCallout(finding, options.estimateRole)),
+    targetRawText,
+    targetNormalizedText: normalizeMatchText(targetRawText),
     matchConfidence: getMatchConfidence(anchor, options.matchKind),
     anchorType: getAnchorType(finding, anchor, options.matchKind, options.estimateRole),
     label,
@@ -852,6 +883,7 @@ function buildAnnotationMetadata(
     bestAuthority,
     authorityStatus: finding.bestAvailableAuthority?.status ?? label,
     missingProof: sanitize(finding.missingProofSummary),
+    whyItMatters: sanitize(finding.currentSupportSummary || buildRoleCalloutNote(finding, options.estimateRole)),
     nextAction: sanitize(finding.recommendedNextAction),
     sourceRefs,
     comment: "",
@@ -864,12 +896,9 @@ function getTargetLineNumber(
   finding: CitationDensityFinding,
   estimateRole: "carrier" | "shop" | "selected"
 ) {
-  const evidence = estimateRole === "shop"
-    ? finding.shopEvidence ?? finding.carrierEvidence
-    : estimateRole === "carrier"
-      ? finding.carrierEvidence ?? finding.shopEvidence
-      : finding.carrierEvidence ?? finding.shopEvidence;
-  return evidence?.lineNumber || undefined;
+  if (estimateRole === "shop") return finding.shopEvidence?.lineNumber || finding.shopAnchor?.lineNumber || undefined;
+  if (estimateRole === "carrier") return finding.carrierEvidence?.lineNumber || finding.carrierAnchor?.lineNumber || undefined;
+  return finding.carrierEvidence?.lineNumber || finding.carrierAnchor?.lineNumber || finding.shopEvidence?.lineNumber || finding.shopAnchor?.lineNumber || undefined;
 }
 
 function getTargetSection(
@@ -877,11 +906,41 @@ function getTargetSection(
   estimateRole: "carrier" | "shop" | "selected"
 ) {
   const anchor = estimateRole === "shop"
-    ? finding.shopAnchor ?? finding.carrierAnchor
+    ? finding.shopAnchor
     : estimateRole === "carrier"
-      ? finding.carrierAnchor ?? finding.shopAnchor
+      ? finding.carrierAnchor
       : finding.carrierAnchor ?? finding.shopAnchor;
   return anchor?.section || undefined;
+}
+
+function getSourceDocumentRole(
+  finding: CitationDensityFinding,
+  estimateRole: "carrier" | "shop" | "selected"
+): CitationDensityAnnotationMetadata["sourceDocumentRole"] {
+  if (finding.primaryAnnotationRole === "both" || finding.crossEstimateIssue) return "both";
+  if (estimateRole === "carrier" || estimateRole === "shop") return estimateRole;
+  if (finding.primaryAnnotationRole === "carrier" || finding.primaryAnnotationRole === "shop") return finding.primaryAnnotationRole;
+  if (finding.carrierEvidence && finding.shopEvidence) return "both";
+  if (finding.shopEvidence || finding.shopAnchor) return "shop";
+  return "carrier";
+}
+
+function getSourceDocumentId(
+  finding: CitationDensityFinding,
+  sourceDocumentRole: CitationDensityAnnotationMetadata["sourceDocumentRole"]
+) {
+  if (sourceDocumentRole === "carrier") {
+    return finding.carrierAnchor?.sourceDocumentId || finding.embeddedEstimateLinks?.find((link) => link.estimateRole === "carrier")?.sourceDocumentId || "carrier-estimate";
+  }
+  if (sourceDocumentRole === "shop") {
+    return finding.shopAnchor?.sourceDocumentId || finding.embeddedEstimateLinks?.find((link) => link.estimateRole === "shop")?.sourceDocumentId || "shop-estimate";
+  }
+  return (
+    finding.carrierAnchor?.sourceDocumentId ||
+    finding.shopAnchor?.sourceDocumentId ||
+    finding.embeddedEstimateLinks?.find((link) => link.sourceDocumentId)?.sourceDocumentId ||
+    "both-estimates"
+  );
 }
 
 function getMatchConfidence(anchor: TextAnchor, matchKind: MatchedFinding["matchKind"]): "high" | "medium" | "low" {
@@ -940,14 +999,6 @@ function formatAnnotationSourceRefs(finding: CitationDensityFinding) {
 function formatPdfDate(date: Date) {
   const pad = (value: number) => String(value).padStart(2, "0");
   return `D:${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`;
-}
-
-function roundCoordinate(value: number) {
-  return Math.round(value * 100) / 100;
-}
-
-function roundRatio(value: number) {
-  return Math.round(value * 10000) / 10000;
 }
 
 function truncateText(value: string, maxLength: number) {
@@ -1135,10 +1186,10 @@ function formatEstimateLineForCallout(
   estimateRole: "carrier" | "shop" | "selected"
 ) {
   const evidence = estimateRole === "shop"
-    ? finding.shopEvidence ?? finding.carrierEvidence
+    ? finding.shopEvidence ?? finding.shopAnchor ?? finding.carrierEvidence
     : estimateRole === "carrier"
-      ? finding.carrierEvidence ?? finding.shopEvidence
-      : finding.carrierEvidence ?? finding.shopEvidence;
+      ? finding.carrierEvidence ?? finding.carrierAnchor ?? finding.shopEvidence
+      : finding.carrierEvidence ?? finding.carrierAnchor ?? finding.shopEvidence ?? finding.shopAnchor;
   const linePrefix = evidence?.lineNumber ? `Line ${evidence.lineNumber}: ` : "";
   return `${linePrefix}${evidence?.description ?? finding.operationLabel}`;
 }
@@ -1150,7 +1201,11 @@ function formatEmbeddedLinkLines(finding: CitationDensityFinding) {
 }
 
 function getProofBucketLabel(finding: CitationDensityFinding): string {
-  if (finding.citationLabel) return finding.citationLabel;
+  if (finding.citationLabel) {
+    if (/^NEEDS ADAS$/i.test(finding.citationLabel) && !isAdasRelatedFinding(finding)) return fallbackNonAdasOemLabel(finding);
+    if (/^NEEDS OEM$/i.test(finding.citationLabel) && !isOemHvRelatedFinding(finding)) return fallbackNonAdasOemLabel(finding);
+    return finding.citationLabel;
+  }
   if (finding.bestAvailableAuthority?.type === "online_fallback") return "ONLINE FALLBACK";
   if (finding.citationStatus.oem === "verified") return "VERIFIED OEM";
   if (finding.citationStatus.adas === "verified") return "VERIFIED ADAS";
@@ -1175,6 +1230,15 @@ function getProofBucketLabel(finding: CitationDensityFinding): string {
   return "ESTIMATE GAP ONLY";
 }
 
+function fallbackNonAdasOemLabel(finding: CitationDensityFinding) {
+  if (Object.values(finding.citationStatus).some((value) => value === "referenced_not_produced")) return "REFERENCED / NOT PRODUCED";
+  if (finding.estimateGapType === "referenced_not_produced") return "REFERENCED / NOT PRODUCED";
+  if (finding.citationStatus.invoiceOrCompletionProof === "needed") return "NEEDS INVOICE";
+  if (isPPageDegMotorFinding(finding)) return "NEEDS P-PAGE";
+  if (finding.citationStatus.pPages === "needed" || finding.missingAuthorityTypes.some((item) => /p-?page|deg|motor/i.test(item))) return "NEEDS P-PAGE";
+  return "ESTIMATE GAP ONLY";
+}
+
 function isAdasRelatedFinding(finding: CitationDensityFinding) {
   const text = [
     finding.category,
@@ -1185,8 +1249,9 @@ function isAdasRelatedFinding(finding: CitationDensityFinding) {
     finding.missingProofSummary,
     finding.recommendedNextAction,
   ].join(" ");
+  const canonicalText = normalizeMatchText(text).split(" ").map(canonicalMatchToken).join(" ");
   if (isPPageDegMotorFinding(finding)) return false;
-  return /\b(?:adas|calibration|calibrate|aim|scan|diagnostic|dtc|radar|camera|sensor|blind spot|lane|aeb|srs|airbag|restraint|initiali[sz]ation|programming|module|pre[-\s]?scan|post[-\s]?scan)\b/i.test(text);
+  return /\b(?:adas|calibration|calibrate|aim|scan|diagnostic|dtc|radar|camera|sensor|blind spot|lane|aeb|srs|airbag|restraint|initiali[sz]ation|programming|module|pre[-\s]?scan|post[-\s]?scan)\b/i.test(`${text} ${canonicalText}`);
 }
 
 function isOemHvRelatedFinding(finding: CitationDensityFinding) {
