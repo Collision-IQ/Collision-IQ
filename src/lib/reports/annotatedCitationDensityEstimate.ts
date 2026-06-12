@@ -20,7 +20,6 @@ import {
   topLeftRectToPdfLibRect,
 } from "./citationDensityCoordinates";
 import {
-  buildStoredTextRowAnchors,
   extractPdfRowAnchors,
   findBestEstimateRowAnchorForFinding,
   type EstimateRowAnchor,
@@ -55,6 +54,7 @@ export type CitationDensityAnnotationMetadata = {
   sourceAnchorId: string;
   sourceDocumentId: string;
   sourceDocumentRole: "carrier" | "shop";
+  sourcePdfPageNumber: number;
   sourcePageNumber: number;
   sourceLineNumber?: string;
   sourceAnchorType: "estimate_line" | "line_note" | "supplier_row" | "totals_row" | "section_row";
@@ -198,13 +198,10 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     );
     return [] as EstimateRowAnchor[];
   });
-  const fallbackAnchors = buildStoredTextRowAnchors(params.sourceText, pdfDoc, { sourceDocumentRole });
-  const anchors = pdfAnchors.length ? pdfAnchors : fallbackAnchors;
+  const anchors = pdfAnchors;
 
   if (!anchors.length) {
     warnings.push("No text coordinates were extracted from the source PDF. The PDF may be image-only.");
-  } else if (!pdfAnchors.length && fallbackAnchors.length) {
-    warnings.push("Used stored extracted text to place deterministic estimate-row anchors.");
   }
 
   const matches: MatchedFinding[] = [];
@@ -236,7 +233,8 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   const annotationMetadata: CitationDensityAnnotationMetadata[] = [];
   const findingDetails: FindingDetail[] = [];
   matches.forEach((match, index) => {
-    const page = pdfDoc.getPage(match.anchor.pageNumber - 1);
+    const sourcePdfPageNumber = match.anchor.pageNumber;
+    const page = pdfDoc.getPage(toSourcePdfPageIndex(sourcePdfPageNumber));
     const metadata = drawFindingAnnotation(pdfDoc, page, match, index + 1, {
       mode,
       font,
@@ -303,6 +301,10 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     warnings,
     annotationMetadata,
   };
+}
+
+function toSourcePdfPageIndex(sourcePdfPageNumber: number) {
+  return Math.max(0, sourcePdfPageNumber - 1);
 }
 
 async function extractPdfTextAnchors(bytes: Uint8Array): Promise<TextAnchor[]> {
@@ -851,6 +853,7 @@ function buildAnnotationMetadata(
     sourceAnchorId: anchor.anchorId,
     sourceDocumentId,
     sourceDocumentRole,
+    sourcePdfPageNumber: anchor.pageNumber,
     sourcePageNumber: anchor.pageNumber,
     sourceLineNumber: anchor.lineNumber ?? undefined,
     sourceAnchorType: anchor.anchorType,

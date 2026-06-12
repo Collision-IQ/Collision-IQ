@@ -286,14 +286,22 @@ export function gateVisibleCitationDensityAnnotation(
   estimateRole: "carrier" | "shop" | "selected"
 ) {
   if (!anchor.anchorId || anchor.pageNumber < 1 || anchor.width <= 0 || anchor.height <= 0) return false;
+  if (anchor.synthetic) return false;
   if (anchor.confidence < 0.82) return false;
   if (isGenericOrMalformedAnchorText(anchor.rowText)) return false;
   const lineNumber = getTargetLineNumber(finding, estimateRole);
-  if (lineNumber) return anchor.lineNumber === String(lineNumber).trim();
-
   const evidence = getRoleEvidence(finding, estimateRole);
   const evidenceText = normalizeMatchText(`${evidence?.description ?? ""} ${finding.operationLabel ?? ""}`);
   const rowText = [anchor.normalizedRowText, anchor.normalizedNoteText, anchor.normalizedSupplierText].filter(Boolean).join(" ");
+  if (lineNumber) {
+    if (anchor.lineNumber !== String(lineNumber).trim()) return false;
+    return (
+      sharedTermScore(evidenceText, rowText, 10) >= 4 ||
+      keyTokenScore(evidenceText, rowText, 10) >= 4 ||
+      (typeof evidence?.amount === "number" && rowText.includes(normalizeMoney(evidence.amount))) ||
+      (typeof evidence?.laborHours === "number" && rowText.includes(String(evidence.laborHours)))
+    );
+  }
   if (anchor.anchorType === "totals_row") {
     return /total|rate|paint|material|labor|net cost/.test(evidenceText) && /total|rate|paint|material|labor|net cost/.test(rowText);
   }

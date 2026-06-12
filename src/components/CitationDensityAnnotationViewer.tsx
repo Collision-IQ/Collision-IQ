@@ -11,6 +11,7 @@ export type CitationDensityAnnotationMetadata = {
   sourceAnchorId?: string;
   sourceDocumentId?: string;
   sourceDocumentRole?: "carrier" | "shop" | "both";
+  sourcePdfPageNumber?: number;
   sourcePageNumber?: number;
   sourceLineNumber?: string;
   sourceAnchorType?: "estimate_line" | "line_note" | "supplier_row" | "totals_row" | "section_row";

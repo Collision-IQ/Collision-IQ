@@ -272,6 +272,8 @@ run("annotated export uses persisted artifact id for download and metadata", () 
   assert.match(routeSource, /artifactId/);
   assert.match(routeSource, /metadata=1&artifactId=/);
   assert.match(routeSource, /This export is no longer available\. Regenerate Citation Density PDF\./);
+  assert.match(fs.readFileSync(path.join(process.cwd(), "src/lib/reports/annotatedCitationDensityEstimate.ts"), "utf8"), /toSourcePdfPageIndex\(sourcePdfPageNumber\)/);
+  assert.match(fs.readFileSync(path.join(process.cwd(), "src/lib/reports/annotatedCitationDensityEstimate.ts"), "utf8"), /sourcePdfPageNumber - 1/);
   assert.match(pageSource, /artifactId/);
   assert.match(pageSource, /fetchAnnotatedCitationDensityPdfBlob\(data\.downloadUrl\)/);
 });

@@ -98,55 +98,70 @@ async function createBlankSourcePdf(pageCount = 2) {
   return await doc.save();
 }
 
-function ramEstimateStoredText() {
-  return [
-    ["RAM lower estimate", "Parts"].join("\n"),
-    ["Parts continued", "23 LKQ grille Note: not correct style for vehicle $185.00"].join("\n"),
-    [
-      "Diagnostics and Calibration",
-      "39 Pre-repair scan 0.5 $75.00",
-      "40 In-process scan 0.5 $75.00",
-      "41 Seat belt dynamic function test 0.4 $52.00",
-      "42 Post-repair scan 0.5 $75.00",
-      "43 Final road test 0.3 $40.00",
-      "44 REVVAdas Report ADAS report available upon request and via this link https://egnyte.example.com/revvadas/ram-report?token=secret",
-    ].join("\n"),
-    [
-      "Totals / Labor / Paint / Paint Materials",
-      "Body labor total $1,240.00 Paint materials total $385.00 Paint labor rate $58.00",
-    ].join("\n"),
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    "",
-    [
-      "Alternate Parts Supplier",
-      "LKQ grille alternate supplier page lists used grille not correct style for vehicle",
-      "CCC MOTOR Guide Pages",
-      "MOTOR database included-not-included guide scan operations paint materials labor indicators",
-    ].join("\n"),
-  ].join("\f");
+async function createRam21975SourcePdf() {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  for (let index = 0; index < 12; index += 1) {
+    const page = doc.addPage([612, 792]);
+    page.drawText(`Carrier 21975 source page ${index + 1}`, { x: 42, y: 746, size: 10, font });
+  }
+  const page2 = doc.getPage(1);
+  page2.drawText("Parts continued", { x: 42, y: 716, size: 10, font });
+  drawFragmentedEstimateRow(page2, font, 23, "LKQ grille Note: not correct style for vehicle", "", "$185.00", 690);
+
+  const page3 = doc.getPage(2);
+  page3.drawText("Vehicle Diagnostics", { x: 42, y: 716, size: 10, font });
+  drawFragmentedEstimateRow(page3, font, 39, "Pre-repair scan", "0.5", "$75.00", 690);
+  drawFragmentedEstimateRow(page3, font, 40, "In-proc repair scan", "0.5", "$75.00", 672);
+  drawFragmentedEstimateRow(page3, font, 41, "Seat belt dynamic function test", "0.4", "$52.00", 654);
+  drawFragmentedEstimateRow(page3, font, 42, "Post-repair scan", "0.5", "$75.00", 636);
+  drawFragmentedEstimateRow(page3, font, 43, "Final road test", "0.3", "$40.00", 618);
+  drawFragmentedEstimateRow(page3, font, 44, "REVVAdas Report", "", "$0.00", 600);
+  page3.drawText("ADAS report available upon request and via this link", { x: 86, y: 586, size: 8, font });
+
+  const page4 = doc.getPage(3);
+  page4.drawText("Totals / Labor / Paint / Paint Materials", { x: 42, y: 716, size: 10, font });
+  page4.drawText("Body labor total $1,240.00 Paint materials total $385.00 Paint labor rate $58.00", { x: 42, y: 696, size: 8, font });
+
+  const page7 = doc.getPage(6);
+  page7.drawText("GEICO disclaimer: scan entries may be abbreviations and are not authorization.", { x: 42, y: 716, size: 8, font });
+  page7.drawText("Line 40 disclaimer reference only. Line 41 disclaimer reference only.", { x: 42, y: 700, size: 8, font });
+
+  const page8 = doc.getPage(7);
+  page8.drawText("Abbreviations and disclaimer page: ADAS, scan, SRS terms are glossary only.", { x: 42, y: 716, size: 8, font });
+
+  const page9 = doc.getPage(8);
+  page9.drawText("CCC MOTOR Guide Pages", { x: 42, y: 716, size: 10, font });
+  page9.drawText("MOTOR database included-not-included guide scan operations paint materials labor indicators", { x: 42, y: 696, size: 8, font });
+
+  const page10 = doc.getPage(9);
+  page10.drawText("Photo and diagnostic disclaimer: asTech diagnostic terms are not estimate rows.", { x: 42, y: 716, size: 8, font });
+
+  const page12 = doc.getPage(11);
+  page12.drawText("Alternate Parts Supplier", { x: 42, y: 716, size: 10, font });
+  page12.drawText("LKQ grille alternate supplier page lists used grille not correct style for vehicle", { x: 42, y: 696, size: 8, font });
+
+  return await doc.save();
 }
 
-function shop21975StoredText() {
-  return [
-    "Shop 21975 estimate",
-    "Parts",
-    "25 Test fit front bumper 0.5 $37.50",
-    "27 OEM style grille chrome horizontal bars $410.00",
-    "29 Radiator support front end $520.00",
-    "Diagnostics and Sublet",
-    "43 Pre-repair scan sublet $201.00 +34%",
-    "44 Post-repair scan sublet $201.00 +34%",
-    "45 Final road test 0.3 $22.50",
-    "Refinish",
-    "50 Finish sand and polish 0.8 $60.00",
-    "Totals / Labor / Paint Supplies",
-    "Body labor rate $75.00 Paint labor rate $75.00 Paint supplies 3.7 @ $60.00",
-  ].join("\n");
+async function createShop21975SourcePdf() {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([612, 792]);
+  page.drawText("Shop 21975 estimate", { x: 42, y: 746, size: 10, font });
+  page.drawText("Parts", { x: 42, y: 716, size: 10, font });
+  drawFragmentedEstimateRow(page, font, 25, "Test fit front bumper", "0.5", "$37.50", 692);
+  drawFragmentedEstimateRow(page, font, 27, "OEM style grille chrome horizontal bars", "", "$410.00", 674);
+  drawFragmentedEstimateRow(page, font, 29, "Radiator support front end", "", "$520.00", 656);
+  page.drawText("Diagnostics and Sublet", { x: 42, y: 630, size: 10, font });
+  drawFragmentedEstimateRow(page, font, 43, "Pre-repair scan sublet +34%", "", "$201.00", 606);
+  drawFragmentedEstimateRow(page, font, 44, "Post-repair scan sublet +34%", "", "$201.00", 588);
+  drawFragmentedEstimateRow(page, font, 45, "Final road test", "0.3", "$22.50", 570);
+  page.drawText("Refinish", { x: 42, y: 544, size: 10, font });
+  drawFragmentedEstimateRow(page, font, 50, "Finish sand and polish", "0.8", "$60.00", 520);
+  page.drawText("Totals / Labor / Paint Supplies", { x: 42, y: 490, size: 10, font });
+  page.drawText("Body labor rate $75.00 Paint labor rate $75.00 Paint supplies 3.7 @ $60.00", { x: 42, y: 472, size: 8, font });
+  return await doc.save();
 }
 
 function drawFragmentedEstimateRow(page, font, line, description, labor, amount, y) {
@@ -467,6 +482,23 @@ async function run(name, test) {
     assert.equal(result.annotationMetadata.length, 0);
   });
 
+  await run("stored text fallback does not create visible source annotations", async () => {
+    const sourcePdfBytes = await createBlankSourcePdf(1);
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceText: "Line 12 ADAS calibration 1.5 hrs $250.00",
+      findings: [baseFinding()],
+      request: { includeLegend: false, includeSummaryPage: false, annotationMode: "both" },
+    });
+    const pages = await extractPdfPageTexts(result.bytes);
+
+    assert.equal(result.annotatedFindingCount, 0);
+    assert.equal(result.unresolvedAnchorCount, 1);
+    assert.equal(result.annotationMetadata.length, 0);
+    assert.match(pages.join(" "), /Unanchored Citation Density Findings/);
+    assert.doesNotMatch(pages[0], /NEEDS ADAS|NEEDS OEM|NEEDS INVOICE|REFERENCED \/ NOT PRODUCED|ESTIMATE GAP ONLY/);
+  });
+
   await run("generic and corrupted finding labels are suppressed before visible annotation metadata", async () => {
     const sourcePdfBytes = await createSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
@@ -696,11 +728,10 @@ async function run(name, test) {
     assert.match(links[0].redactedUrl, /URL not extracted/);
   });
 
-  await run("stored estimate text anchors Ram lines onto original pages when PDF coordinates are unavailable", async () => {
-    const sourcePdfBytes = await createBlankSourcePdf(12);
+  await run("extracted PDF rows anchor Ram diagnostic lines only on their source pages", async () => {
+    const sourcePdfBytes = await createRam21975SourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
       sourcePdfBytes,
-      sourceText: ramEstimateStoredText(),
       findings: [
         baseFinding({
           id: "ram-line-23",
@@ -732,7 +763,7 @@ async function run(name, test) {
           category: "scan_diagnostic",
           carrierEvidence: {
             lineNumber: "40",
-            description: "In-process scan",
+            description: "In-proc repair scan",
             amount: 75,
             laborHours: 0.5,
             sourceLabel: "Carrier estimate",
@@ -854,12 +885,11 @@ async function run(name, test) {
     assert.equal(result.annotatedFindingCount, 9);
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.doesNotMatch(result.warnings.join(" "), /all_findings_unanchored/);
-    assert.match(result.warnings.join(" "), /stored extracted text/i);
     assert.doesNotMatch(pages.slice(0, result.originalPageCount).join(" "), /NEEDS ADAS|NEEDS OEM|NEEDS INVOICE|REFERENCED \/ NOT PRODUCED|ESTIMATE GAP ONLY/);
     assert.match(pages.slice(result.originalPageCount).join(" "), /Citation Density Finding Details/);
     assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 23: LKQ grille Note/);
     assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 39: Pre-repair scan/);
-    assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 40: In-process scan/);
+    assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 40: In-proc repair scan/);
     assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 41: Seat belt dynamic function test/);
     assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 42: Post-repair scan/);
     assert.match(result.annotationMetadata.map((item) => item.estimateLine).join(" "), /Line 43: Final road test/);
@@ -878,25 +908,31 @@ async function run(name, test) {
     assert.equal(line23.pageNumber, 2);
     assert.equal(line23.sourceDocumentRole, "carrier");
     assert.equal(line39.pageNumber, 3);
+    assert.equal(line39.sourcePdfPageNumber, 3);
     assert.equal(line39.sourcePageNumber, 3);
     assert.equal(line39.targetLineNumber, "39");
     assert.equal(line39.sourceLineNumber, "39");
     assert.match(line39.sourceAnchorText, /Pre-repair scan/);
     assert.equal(line40.pageNumber, 3);
+    assert.equal(line40.sourcePdfPageNumber, 3);
     assert.equal(line40.sourceLineNumber, "40");
-    assert.match(line40.sourceAnchorText, /In-process scan/);
+    assert.match(line40.sourceAnchorText, /In-proc repair scan/);
     assert.equal(line41.pageNumber, 3);
+    assert.equal(line41.sourcePdfPageNumber, 3);
     assert.equal(line41.sourceLineNumber, "41");
     assert.match(line41.sourceAnchorText, /Seat belt dynamic function test/);
     assert.equal(line42.pageNumber, 3);
+    assert.equal(line42.sourcePdfPageNumber, 3);
     assert.equal(line42.sourceLineNumber, "42");
     assert.match(line42.sourceAnchorText, /Post-repair scan/);
     assert.equal(line43.pageNumber, 3);
+    assert.equal(line43.sourcePdfPageNumber, 3);
     assert.equal(line43.sourceLineNumber, "43");
     assert.notEqual(line43.label, "NEEDS ADAS");
     assert.equal(line44.anchorType, "line_note");
     assert.equal(line44.targetLineNumber, "44");
     assert.equal(line44.pageNumber, 3);
+    assert.equal(line44.sourcePdfPageNumber, 3);
     assert.equal(line44.sourcePageNumber, 3);
     assert.equal(line44.sourceLineNumber, "44");
     assert.match(line44.sourceAnchorText, /REVVAdas Report/);
@@ -915,6 +951,7 @@ async function run(name, test) {
       assert.ok(metadata.findingId);
       assert.ok(metadata.anchorId);
       assert.equal(metadata.sourceAnchorId, metadata.anchorId);
+      assert.equal(metadata.sourcePdfPageNumber, metadata.pageNumber);
       assert.equal(metadata.sourcePageNumber, metadata.pageNumber);
       assert.equal(metadata.sourceAnchorType, metadata.anchorType);
       assert.ok(metadata.sourceAnchorText);
@@ -934,10 +971,9 @@ async function run(name, test) {
   });
 
   await run("shop 21975 scan sublets and finish sand anchor to concrete rows", async () => {
-    const sourcePdfBytes = await createBlankSourcePdf(1);
+    const sourcePdfBytes = await createShop21975SourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
       sourcePdfBytes,
-      sourceText: shop21975StoredText(),
       findings: [
         baseFinding({
           id: "shop-line-43",
