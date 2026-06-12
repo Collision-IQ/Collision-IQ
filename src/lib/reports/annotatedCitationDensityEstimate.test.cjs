@@ -36,6 +36,9 @@ const {
   dataUrlToPdfBytes,
 } = require("./annotatedCitationDensityEstimate.ts");
 const {
+  extractPdfRowAnchors,
+} = require("./citationDensityRowAnchors.ts");
+const {
   detectEmbeddedEstimateLinks,
 } = require("../ai/builders/estimateScrubberPdfBuilder.ts");
 
@@ -139,7 +142,7 @@ async function createRam21975SourcePdf() {
 
   const page12 = doc.getPage(11);
   page12.drawText("Alternate Parts Supplier", { x: 42, y: 716, size: 10, font });
-  page12.drawText("LKQ grille alternate supplier page lists used grille not correct style for vehicle", { x: 42, y: 696, size: 8, font });
+  drawFragmentedEstimateRow(page12, font, 23, "LKQ grille alternate supplier page lists used grille not correct style for vehicle", "", "$185.00", 696);
 
   return await doc.save();
 }
@@ -408,10 +411,9 @@ async function run(name, test) {
 
     assert.equal(result.annotatedFindingCount, 0);
     assert.equal(result.unresolvedAnchorCount, 1);
-    assert.match(result.warnings.join(" "), /No line-level anchors could be placed/);
+    assert.match(result.warnings.join(" "), /Estimate rows were extracted, but no generated finding could be safely tied to a row/);
     assert.match(result.warnings.join(" "), /all_findings_unanchored/);
-    assert.match(text, /No line-level anchors could be placed/);
-    assert.match(text, /Findings are listed in the appendix/);
+    assert.match(text, /Estimate rows were extracted, but no generated finding could be safely tied to a row/);
     assert.match(text, /Unanchored Citation Density Findings/);
     assert.match(text, /Finding #:/);
     assert.doesNotMatch(text, /555-123-4567|test@example\.com|123 Main St/i);
@@ -444,7 +446,7 @@ async function run(name, test) {
     assert.equal(loaded.getPageCount(), 5);
     assert.match(text, /Original estimate page one sentinel/);
     assert.match(text, /Original estimate page two sentinel/);
-    assert.match(text, /No line-level anchors could be placed/);
+    assert.match(text, /Estimate rows were extracted, but no generated finding could be safely tied to a row/);
     assert.match(text, /Citation Density Annotation Legend/);
     assert.match(text, /Unanchored Citation Density Findings/);
   });
@@ -476,7 +478,7 @@ async function run(name, test) {
     assert.equal(result.unresolvedAnchorCount, 1);
     assert.equal(loaded.getPageCount(), 5);
     assert.match(text, /Original estimate page one sentinel/);
-    assert.match(text, /No line-level anchors could be placed/);
+    assert.match(text, /Estimate rows were extracted, but no generated finding could be safely tied to a row/);
     assert.match(text, /Citation Density Annotation Legend/);
     assert.match(text, /Unanchored Citation Density Findings/);
     assert.equal(result.annotationMetadata.length, 0);
@@ -726,6 +728,80 @@ async function run(name, test) {
     assert.equal(links[0].retrievalStatus, "not_fetched");
     assert.equal(links[0].authorityStatus, "referenced_not_produced");
     assert.match(links[0].redactedUrl, /URL not extracted/);
+  });
+
+  await run("row anchor index extracts 21975 carrier rows and restores exact row-backed markers", async () => {
+    const sourcePdfBytes = await createRam21975SourcePdf();
+    const anchors = await extractPdfRowAnchors(sourcePdfBytes, { sourceDocumentRole: "carrier", sourceDocumentId: "carrier-21975" });
+    const anchorFor = (pageNumber, lineNumber) =>
+      anchors.find((anchor) => anchor.pageNumber === pageNumber && anchor.lineNumber === lineNumber);
+
+    assert.ok(anchorFor(2, "23"));
+    for (const lineNumber of ["39", "40", "41", "42", "43", "44"]) {
+      assert.ok(anchorFor(3, lineNumber), `expected page 3 line ${lineNumber}`);
+    }
+    assert.ok(anchors.some((anchor) => anchor.pageNumber === 4 && anchor.anchorType === "totals_row" && /paint materials|body labor/i.test(anchor.rowText)));
+    assert.ok(anchorFor(12, "23"));
+
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      findings: [
+        baseFinding({
+          id: "generic-parts",
+          operationLabel: "Parts correctness support",
+          category: "parts_downgrade",
+          carrierEvidence: undefined,
+          missingAuthorityTypes: ["parts correctness support"],
+        }),
+        baseFinding({
+          id: "generic-diagnostics",
+          operationLabel: "Diagnostic and ADAS report support",
+          category: "scan_diagnostic",
+          carrierEvidence: undefined,
+          missingAuthorityTypes: ["ADAS report", "scan report"],
+        }),
+        baseFinding({
+          id: "generic-totals",
+          operationLabel: "Labor Rate and Paint-Material Delta",
+          category: "labor_difference",
+          carrierEvidence: undefined,
+          missingAuthorityTypes: ["P-page/DEG"],
+        }),
+        baseFinding({
+          id: "generic-supplier",
+          operationLabel: "Supplier parts evidence",
+          category: "parts_downgrade",
+          carrierEvidence: undefined,
+          missingAuthorityTypes: ["supplier evidence"],
+        }),
+      ],
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+    const pages = await extractPdfPageTexts(result.bytes);
+    const metadataFor = (pageNumber, lineNumber) =>
+      result.annotationMetadata.find((item) => item.pageNumber === pageNumber && item.sourceLineNumber === lineNumber);
+
+    assert.ok(result.debugMetadata.extractedRowAnchorCount > 0);
+    assert.ok(result.debugMetadata.visibleAnnotationCount > 0);
+    assert.ok(result.debugMetadata.anchorsByPage["2"].includes("line 23"));
+    for (const lineNumber of ["39", "40", "41", "42", "43", "44"]) {
+      assert.ok(result.debugMetadata.anchorsByPage["3"].includes(`line ${lineNumber}`));
+    }
+    assert.ok(metadataFor(2, "23"));
+    assert.ok(metadataFor(3, "39"));
+    assert.ok(metadataFor(3, "40"));
+    assert.ok(metadataFor(3, "42"));
+    assert.ok(metadataFor(3, "44"));
+    assert.equal(metadataFor(3, "44").label, "REFERENCED / NOT PRODUCED");
+    assert.notEqual(metadataFor(3, "43").label, "NEEDS ADAS");
+    assert.notEqual(metadataFor(2, "23").label, "NEEDS ADAS");
+    assert.equal(result.annotationMetadata.find((item) => item.anchorType === "totals_row").label, "ESTIMATE GAP ONLY");
+    assert.equal(result.annotationMetadata.some((item) => item.pageNumber === 4 && /scan|adas|seat belt/i.test(item.sourceAnchorText)), false);
+    assert.equal(result.annotationMetadata.some((item) => item.pageNumber === 7 && /scan|adas|seat belt/i.test(item.sourceAnchorText)), false);
+    assert.equal(result.annotationMetadata.some((item) => item.pageNumber === 9 && /scan|adas/i.test(item.sourceAnchorText)), false);
+    assert.doesNotMatch(result.warnings.join(" "), /No line-level anchors could be placed/);
+    assert.doesNotMatch(pages.join(" "), /No line-level anchors could be placed/);
+    assert.doesNotMatch(pages.slice(0, result.originalPageCount).join(" "), /NEEDS ADAS|REFERENCED \/ NOT PRODUCED|Missing proof|Next action/);
   });
 
   await run("extracted PDF rows anchor Ram diagnostic lines only on their source pages", async () => {

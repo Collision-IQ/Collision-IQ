@@ -380,7 +380,12 @@ function classifyLine(
   currentSection: string
 ): EstimateRowAnchor["anchorType"] | null {
   const normalized = normalizeMatchText(text);
-  if (lineNumber) return /note|available|via this link|not correct|supplier|report/.test(normalized) ? "line_note" : "estimate_line";
+  if (
+    lineNumber &&
+    (/\b(?:supplier|alternate parts supplier)\b/.test(normalizeMatchText(currentSection)) ||
+      /\b(?:supplier|alternate parts supplier|alternate supplier)\b/.test(normalized))
+  ) return "supplier_row";
+  if (lineNumber) return /note|available|via this link|not correct|report/.test(normalized) ? "line_note" : "estimate_line";
   if (/\btotal|subtotal|net cost|grand total|paint supplies|paint materials|body labor|paint labor|labor rate\b/.test(normalized)) return "totals_row";
   if (/\bsupplier|alternate|aftermarket|lkq|used part|capa\b/.test(`${normalized} ${normalizeMatchText(currentSection)}`)) return "supplier_row";
   if (sectionName) return "section_row";
@@ -445,7 +450,8 @@ function isGenericOrMalformedAnchorText(value: string): boolean {
   return (
     /^\s*(?:repair operation|proc report|comparison or screenshot cues)\s*$/i.test(value) ||
     /\bproc\s+(?:pre|post)[-\s]?repair scanm\b/i.test(value) ||
-    /\b(?:citation density gap report|annotation legend|unanchored citation density|disclosure|privacy|estimate summary only|disclaimer|abbreviations?|motor guide|guide pages)\b/i.test(value)
+    /\b(?:citation density gap report|annotation legend|unanchored citation density|disclosure|privacy|estimate summary only|disclaimer|abbreviations?|motor guide|guide pages)\b/i.test(value) ||
+    /\bmotor\b.*\b(?:database|guide|included|not included)\b/i.test(value)
   );
 }
 

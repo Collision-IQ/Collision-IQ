@@ -46,6 +46,7 @@ export type AnnotatedEstimateResult = {
   finalPageCount: number;
   warnings: string[];
   annotationMetadata: CitationDensityAnnotationMetadata[];
+  debugMetadata?: CitationDensityAnnotationDebugMetadata;
 };
 
 export type CitationDensityAnnotationMetadata = {
@@ -90,6 +91,39 @@ export type CitationDensityAnnotationMetadata = {
   nextAction: string;
   sourceRefs: string[];
   comment: string;
+};
+
+export type CitationDensityAnnotationDebugMetadata = {
+  extractedRowAnchorCount: number;
+  visibleAnnotationCount: number;
+  appendixOnlyCount: number;
+  suppressedGenericCount: number;
+  suppressedPageMismatchCount: number;
+  anchorsByPage: Record<string, string[]>;
+  findingsWithoutAnchorId: string[];
+};
+
+export type AnchoredCitationCandidate = {
+  candidateId: string;
+  anchorId: string;
+  sourceDocumentRole: "carrier" | "shop";
+  sourcePdfPageNumber: number;
+  sourcePdfPageIndex: number;
+  sourceLineNumber?: string;
+  sourceAnchorType: "estimate_line" | "line_note" | "supplier_row" | "totals_row" | "section_row";
+  sourceAnchorText: string;
+  sourceAnchorNormalizedText: string;
+  label: string;
+  estimateLineDisplay: string;
+  bestAuthority: string;
+  missingProof: string;
+  whyItMatters: string;
+  nextAction: string;
+  supportRefs: string[];
+  confidence: "low" | "medium" | "high";
+  finding: CitationDensityFinding;
+  anchor: EstimateRowAnchor;
+  derivedFromFindingId?: string;
 };
 
 type TextAnchor = {
@@ -138,7 +172,9 @@ const LABELS = [
   "WEAK — DO NOT LEAD",
 ] as const;
 
-const NO_LINE_ANCHORS_WARNING = "No line-level anchors could be placed.";
+const NO_ROWS_EXTRACTED_WARNING = "No estimate rows could be extracted from the source PDF.";
+const NO_SAFE_ROW_FINDINGS_WARNING =
+  "Estimate rows were extracted, but no generated finding could be safely tied to a row. Findings are appendix-only.";
 
 const exportCache = new Map<string, {
   bytes: Uint8Array;
@@ -200,31 +236,44 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   });
   const anchors = pdfAnchors;
 
+  const debugMetadata: CitationDensityAnnotationDebugMetadata = {
+    extractedRowAnchorCount: anchors.length,
+    visibleAnnotationCount: 0,
+    appendixOnlyCount: 0,
+    suppressedGenericCount: suppressed.length,
+    suppressedPageMismatchCount: 0,
+    anchorsByPage: buildAnchorsByPage(anchors),
+    findingsWithoutAnchorId: [],
+  };
+
   if (!anchors.length) {
-    warnings.push("No text coordinates were extracted from the source PDF. The PDF may be image-only.");
+    warnings.push(NO_ROWS_EXTRACTED_WARNING);
   }
 
-  const matches: MatchedFinding[] = [];
-  const unmatched: CitationDensityFinding[] = [];
-  const usedAnchors = new Set<string>();
+  const candidateResult = buildAnchoredCitationCandidates({
+    anchors,
+    findings,
+    topicFindings: selectedFindings,
+    estimateRole,
+    sourceDocumentRole,
+  });
+  debugMetadata.suppressedPageMismatchCount = candidateResult.suppressedPageMismatchCount;
+  debugMetadata.findingsWithoutAnchorId = [
+    ...suppressed.map((finding) => finding.id),
+    ...candidateResult.findingsWithoutAnchorId,
+  ];
 
-  for (const finding of findings) {
-    const anchor = findBestEstimateRowAnchorForFinding(finding, anchors, usedAnchors, estimateRole);
-    if (anchor) {
-      usedAnchors.add(anchor.anchorId);
-      matches.push({ finding, anchor });
-      continue;
-    }
-
-    unmatched.push(finding);
-  }
+  const matches: MatchedFinding[] = candidateResult.candidates.map((candidate) => ({
+    finding: candidate.finding,
+    anchor: candidate.anchor,
+  }));
+  const matchedFindingIds = new Set(candidateResult.candidates.map((candidate) => candidate.derivedFromFindingId).filter(Boolean));
+  const unmatched: CitationDensityFinding[] = findings.filter((finding) => !matchedFindingIds.has(finding.id));
 
   const lineMatchCount = matches.length;
   if (findings.length > 0 && lineMatchCount === 0) {
-    warnings.push(
-      `${NO_LINE_ANCHORS_WARNING} Findings were placed as page-level callouts and/or appendix entries.`
-    );
-    if (matches.length === 0) warnings.push("all_findings_unanchored");
+    warnings.push(anchors.length ? NO_SAFE_ROW_FINDINGS_WARNING : NO_ROWS_EXTRACTED_WARNING);
+    warnings.push("all_findings_unanchored");
   }
   if (suppressed.length > 0) {
     warnings.push(`${suppressed.length} generic or malformed Citation Density finding(s) were suppressed from the visible estimate layer.`);
@@ -257,6 +306,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     addNoLineAnchorWarningPage(pdfDoc, {
       font,
       boldFont,
+      message: anchors.length ? NO_SAFE_ROW_FINDINGS_WARNING : NO_ROWS_EXTRACTED_WARNING,
       pageCalloutCount: matches.length,
       appendixCount: unmatched.length,
     });
@@ -286,6 +336,8 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   }
 
   const bytes = await pdfDoc.save();
+  debugMetadata.visibleAnnotationCount = annotationMetadata.length;
+  debugMetadata.appendixOnlyCount = unmatched.length;
   const exportId = putAnnotatedEstimateExport(
     bytes,
     "citation-density-annotated-estimate.pdf",
@@ -300,11 +352,390 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     finalPageCount: pdfDoc.getPageCount(),
     warnings,
     annotationMetadata,
+    debugMetadata,
   };
 }
 
 function toSourcePdfPageIndex(sourcePdfPageNumber: number) {
   return Math.max(0, sourcePdfPageNumber - 1);
+}
+
+function buildAnchoredCitationCandidates(params: {
+  anchors: EstimateRowAnchor[];
+  findings: CitationDensityFinding[];
+  topicFindings: CitationDensityFinding[];
+  estimateRole: "carrier" | "shop" | "selected";
+  sourceDocumentRole: "carrier" | "shop";
+}): {
+  candidates: AnchoredCitationCandidate[];
+  suppressedPageMismatchCount: number;
+  findingsWithoutAnchorId: string[];
+} {
+  const anchorIndex = new Map(params.anchors.map((anchor) => [anchor.anchorId, anchor]));
+  const candidates: AnchoredCitationCandidate[] = [];
+  const usedAnchorIds = new Set<string>();
+  const matchedFindingIds = new Set<string>();
+  let suppressedPageMismatchCount = 0;
+
+  for (const finding of params.findings) {
+    if (!hasConcreteFindingAnchor(finding)) continue;
+    const anchor = findBestEstimateRowAnchorForFinding(finding, params.anchors, usedAnchorIds, params.estimateRole);
+    if (!anchor) {
+      continue;
+    }
+    const candidate = buildCandidateFromFinding(finding, anchor, params.estimateRole);
+    const gate = gateAnchoredCitationCandidate(candidate, anchorIndex);
+    if (gate === "allowed") {
+      candidates.push(candidate);
+      usedAnchorIds.add(anchor.anchorId);
+      matchedFindingIds.add(finding.id);
+    } else if (gate === "page_mismatch") {
+      suppressedPageMismatchCount += 1;
+    }
+  }
+
+  const hasConcreteRequestedFinding = params.findings.some(hasConcreteFindingAnchor);
+  const rowBackedTopics = buildRowBackedCandidateTopics(params.topicFindings);
+  if (!hasConcreteRequestedFinding && candidates.length === 0 && rowBackedTopics.size > 0) {
+    for (const anchor of params.anchors) {
+      if (usedAnchorIds.has(anchor.anchorId)) continue;
+      const candidate = buildCandidateFromAnchor(anchor, params.sourceDocumentRole, rowBackedTopics);
+      if (!candidate) continue;
+      const gate = gateAnchoredCitationCandidate(candidate, anchorIndex);
+      if (gate === "allowed") {
+        candidates.push(candidate);
+        usedAnchorIds.add(anchor.anchorId);
+      } else if (gate === "page_mismatch") {
+        suppressedPageMismatchCount += 1;
+      }
+    }
+  }
+
+  return {
+    candidates,
+    suppressedPageMismatchCount,
+    findingsWithoutAnchorId: params.findings.filter((finding) => !matchedFindingIds.has(finding.id)).map((finding) => finding.id),
+  };
+}
+
+function buildCandidateFromFinding(
+  finding: CitationDensityFinding,
+  anchor: EstimateRowAnchor,
+  estimateRole: "carrier" | "shop" | "selected"
+): AnchoredCitationCandidate {
+  const rowText = getAnchorSourceText(anchor);
+  return {
+    candidateId: `finding:${finding.id}:${anchor.anchorId}`,
+    anchorId: anchor.anchorId,
+    sourceDocumentRole: anchor.sourceDocumentRole,
+    sourcePdfPageNumber: anchor.pageNumber,
+    sourcePdfPageIndex: toSourcePdfPageIndex(anchor.pageNumber),
+    sourceLineNumber: anchor.lineNumber ?? undefined,
+    sourceAnchorType: anchor.anchorType,
+    sourceAnchorText: rowText,
+    sourceAnchorNormalizedText: normalizeMatchText(rowText),
+    label: getProofBucketLabel(finding),
+    estimateLineDisplay: formatEstimateLineForCallout(finding, estimateRole),
+    bestAuthority: formatBestAuthority(finding),
+    missingProof: formatMissingAuthority(finding),
+    whyItMatters: finding.currentSupportSummary || buildRoleCalloutNote(finding, estimateRole),
+    nextAction: finding.recommendedNextAction,
+    supportRefs: formatAnnotationSourceRefs(finding),
+    confidence: getMatchConfidence(anchor),
+    finding,
+    anchor,
+    derivedFromFindingId: finding.id,
+  };
+}
+
+function buildCandidateFromAnchor(
+  anchor: EstimateRowAnchor,
+  sourceDocumentRole: "carrier" | "shop",
+  topics: Set<RowBackedCandidateTopic>
+): AnchoredCitationCandidate | null {
+  if (anchor.synthetic || anchor.confidence < 0.82) return null;
+  const sourceText = getAnchorSourceText(anchor);
+  const normalized = normalizeMatchText(sourceText);
+  if (!normalized || isGenericOrMalformedAnchorText(sourceText)) return null;
+
+  const kind = classifyRowBackedCandidate(anchor, normalized);
+  if (!kind) return null;
+  if (!topics.has(kind.topic)) return null;
+
+  const label = kind.label;
+  const finding = buildRowBackedFinding(anchor, kind);
+  return {
+    candidateId: `row:${anchor.anchorId}:${kind.type}`,
+    anchorId: anchor.anchorId,
+    sourceDocumentRole,
+    sourcePdfPageNumber: anchor.pageNumber,
+    sourcePdfPageIndex: toSourcePdfPageIndex(anchor.pageNumber),
+    sourceLineNumber: anchor.lineNumber ?? undefined,
+    sourceAnchorType: anchor.anchorType,
+    sourceAnchorText: sourceText,
+    sourceAnchorNormalizedText: normalized,
+    label,
+    estimateLineDisplay: formatEstimateLineForCallout(finding, sourceDocumentRole),
+    bestAuthority: formatBestAuthority(finding),
+    missingProof: formatMissingAuthority(finding),
+    whyItMatters: finding.currentSupportSummary,
+    nextAction: finding.recommendedNextAction,
+    supportRefs: formatAnnotationSourceRefs(finding),
+    confidence: getMatchConfidence(anchor),
+    finding,
+    anchor,
+  };
+}
+
+type RowBackedCandidateTopic = "parts" | "diagnostic" | "totals" | "supplier";
+
+function classifyRowBackedCandidate(
+  anchor: EstimateRowAnchor,
+  normalized: string
+): {
+  type: "parts_correctness" | "diagnostic_support" | "adas_report_reference" | "process_verification" | "totals_delta" | "supplier_parts";
+  topic: RowBackedCandidateTopic;
+  label: string;
+  category: CitationDensityFinding["category"];
+  estimateGapType: CitationDensityFinding["estimateGapType"];
+  adasStatus?: "needed" | "referenced_not_produced" | "not_applicable";
+  missingAuthorityTypes: string[];
+} | null {
+  if (anchor.anchorType === "totals_row") {
+    return {
+      type: "totals_delta",
+      topic: "totals",
+      label: "ESTIMATE GAP ONLY",
+      category: "labor_difference",
+      estimateGapType: "present_but_under_documented",
+      adasStatus: "not_applicable",
+      missingAuthorityTypes: ["P-page/DEG or rate/material support"],
+    };
+  }
+  if (anchor.anchorType === "supplier_row") {
+    return {
+      type: "supplier_parts",
+      topic: "supplier",
+      label: "ESTIMATE GAP ONLY",
+      category: "parts_downgrade",
+      estimateGapType: "present_but_under_documented",
+      adasStatus: "not_applicable",
+      missingAuthorityTypes: ["parts correctness support"],
+    };
+  }
+  if (/\bnot correct style\b/.test(normalized)) {
+    return {
+      type: "parts_correctness",
+      topic: "parts",
+      label: "ESTIMATE GAP ONLY",
+      category: "parts_downgrade",
+      estimateGapType: "present_but_under_documented",
+      adasStatus: "not_applicable",
+      missingAuthorityTypes: ["parts correctness support"],
+    };
+  }
+  if (/\bfinal road test\b/.test(normalized)) {
+    return {
+      type: "process_verification",
+      topic: "diagnostic",
+      label: "ESTIMATE GAP ONLY",
+      category: "other",
+      estimateGapType: "needs_proof",
+      adasStatus: "not_applicable",
+      missingAuthorityTypes: ["verification or completion proof"],
+    };
+  }
+  if (/\brevv\s*adas\b|\brevvadas\b|\badas report\b|\begnyte\b|\bvia this link\b/.test(normalized)) {
+    return {
+      type: "adas_report_reference",
+      topic: "diagnostic",
+      label: "REFERENCED / NOT PRODUCED",
+      category: "adas_calibration",
+      estimateGapType: "referenced_not_produced",
+      adasStatus: "referenced_not_produced",
+      missingAuthorityTypes: ["linked ADAS report"],
+    };
+  }
+  if (/\b(?:pre repair scan|pre scan|in proc repair scan|in process scan|post repair scan|calibration|adas|srs|seat belt dynamic function test|aiming|initialization|programming|radar|camera|sensor|diagnostic|scan)\b/.test(normalized)) {
+    return {
+      type: "diagnostic_support",
+      topic: "diagnostic",
+      label: "NEEDS ADAS",
+      category: "scan_diagnostic",
+      estimateGapType: "needs_proof",
+      adasStatus: "needed",
+      missingAuthorityTypes: ["ADAS/diagnostic report or completion proof"],
+    };
+  }
+  return null;
+}
+
+function buildRowBackedCandidateTopics(findings: CitationDensityFinding[]) {
+  const topics = new Set<RowBackedCandidateTopic>();
+  for (const finding of findings) {
+    if (hasConcreteFindingAnchor(finding)) continue;
+    const text = normalizeMatchText([
+      finding.operationLabel,
+      finding.category,
+      finding.carrierEvidence?.description,
+      finding.shopEvidence?.description,
+      finding.currentSupportSummary,
+      finding.missingProofSummary,
+      finding.recommendedNextAction,
+      ...finding.missingAuthorityTypes,
+    ].join(" "));
+    if (/\b(?:not correct style|grille|lkq|part|parts|style|oem style)\b/.test(text)) topics.add("parts");
+    if (/\b(?:supplier|alternate|aftermarket|used part|lkq)\b/.test(text)) topics.add("supplier");
+    if (/\b(?:labor rate|rate|paint material|paint supplies|materials|total|net cost|body labor|paint labor|deg|p page)\b/.test(text)) topics.add("totals");
+    if (/\b(?:adas|scan|diagnostic|calibration|srs|seat belt|road test|revvadas|report|radar|camera|sensor|programming|initialization|aiming)\b/.test(text)) topics.add("diagnostic");
+  }
+  return topics;
+}
+
+function buildRowBackedFinding(
+  anchor: EstimateRowAnchor,
+  kind: NonNullable<ReturnType<typeof classifyRowBackedCandidate>>
+): CitationDensityFinding {
+  const sourceText = getAnchorSourceText(anchor);
+  const evidence = {
+    lineNumber: anchor.lineNumber,
+    description: sourceText,
+    amount: null,
+    laborHours: null,
+    sourceLabel: `${anchor.sourceDocumentRole === "shop" ? "Shop" : "Carrier"} estimate`,
+  };
+  const isReferenced = kind.estimateGapType === "referenced_not_produced";
+  return {
+    id: `row-backed-${anchor.anchorId.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}`,
+    operationLabel: sourceText,
+    category: kind.category,
+    estimateGapType: kind.estimateGapType,
+    carrierEvidence: anchor.sourceDocumentRole === "carrier" ? evidence : undefined,
+    shopEvidence: anchor.sourceDocumentRole === "shop" ? evidence : undefined,
+    applicableEstimateRoles: [anchor.sourceDocumentRole],
+    primaryAnnotationRole: anchor.sourceDocumentRole,
+    carrierAnchor: anchor.sourceDocumentRole === "carrier" ? buildFindingLineAnchor(anchor) : undefined,
+    shopAnchor: anchor.sourceDocumentRole === "shop" ? buildFindingLineAnchor(anchor) : undefined,
+    impact: {
+      dollarImpact: null,
+      laborHoursImpact: null,
+      safetyImpact: kind.adasStatus === "needed" ? "high" : "medium",
+      supplementPriority: kind.adasStatus === "needed" ? "high" : "medium",
+    },
+    citationStatus: {
+      oem: "not_applicable",
+      adas: kind.adasStatus ?? "not_applicable",
+      pPages: kind.type === "totals_delta" ? "needed" : "not_applicable",
+      scrs: "not_applicable",
+      deg: kind.type === "totals_delta" ? "needed" : "not_applicable",
+      nhtsa: "not_applicable",
+      stateRegulation: "not_applicable",
+      policy: "not_applicable",
+      invoiceOrCompletionProof: kind.adasStatus === "needed" || isReferenced ? "needed" : "not_found",
+      photoOrTeardownProof: "not_found",
+    },
+    citationDensityScore: kind.adasStatus === "needed" ? 38 : 52,
+    verifiedAuthorityCount: 0,
+    missingAuthorityTypes: kind.missingAuthorityTypes,
+    missingAuthority: kind.missingAuthorityTypes,
+    citationLabel: kind.label,
+    currentSupportSummary: buildRowBackedSupportSummary(kind.type, sourceText),
+    missingProofSummary: buildRowBackedMissingProof(kind.type),
+    recommendedNextAction: buildRowBackedNextAction(kind.type),
+    confidence: "high",
+    limitations: ["Generated only from an exact extracted estimate row anchor."],
+  };
+}
+
+function buildFindingLineAnchor(anchor: EstimateRowAnchor) {
+  return {
+    sourceDocumentId: anchor.sourceDocumentId,
+    estimateRole: anchor.sourceDocumentRole,
+    lineNumber: anchor.lineNumber,
+    pageNumber: anchor.pageNumber,
+    section: anchor.section,
+    operation: anchor.rowText,
+    description: getAnchorSourceText(anchor),
+  };
+}
+
+function buildRowBackedSupportSummary(type: string, sourceText: string) {
+  if (type === "adas_report_reference") return "The estimate references an ADAS report/link, but the report content has not been retrieved or reviewed.";
+  if (type === "diagnostic_support") return "The estimate contains an exact diagnostic/ADAS-related row that needs supporting report or completion proof.";
+  if (type === "process_verification") return "The estimate contains a verification/process row; treat it as process evidence, not an automatic ADAS deficiency.";
+  if (type === "totals_delta") return "The estimate contains exact totals/rate/material rows that can support a rate or material delta review.";
+  if (type === "supplier_parts") return "The supplier evidence is tied to an exact supplier/parts row.";
+  return `The estimate row itself contains the parts correctness issue: ${sourceText}`;
+}
+
+function buildRowBackedMissingProof(type: string) {
+  if (type === "adas_report_reference") return "Referenced report/link was not produced in the reviewed evidence.";
+  if (type === "diagnostic_support") return "Diagnostic/ADAS report, calibration output, or completion proof was not produced in the reviewed evidence.";
+  if (type === "totals_delta") return "Rate/material support, P-page, DEG, or agreed-rate proof is still needed before leading.";
+  if (type === "supplier_parts") return "Supplier invoice, parts evidence, or style-correctness support is still needed.";
+  if (type === "process_verification") return "Completion or verification proof is still needed if this row is being used as a claim support item.";
+  return "Parts correctness support is still needed.";
+}
+
+function buildRowBackedNextAction(type: string) {
+  if (type === "adas_report_reference") return "Retrieve and review the referenced ADAS report before presenting it as verified support.";
+  if (type === "diagnostic_support") return "Attach the scan/report output or completion proof before leading with this item.";
+  if (type === "totals_delta") return "Tie the totals/rate/material difference to P-page, DEG, rate, or invoice support.";
+  if (type === "supplier_parts") return "Attach supplier evidence and reconcile it with the estimate parts row.";
+  if (type === "process_verification") return "Attach completion proof if this verification row is material to the supplement request.";
+  return "Attach parts correctness evidence before leading.";
+}
+
+function gateAnchoredCitationCandidate(
+  candidate: AnchoredCitationCandidate,
+  anchorIndex: Map<string, EstimateRowAnchor>
+): "allowed" | "blocked" | "page_mismatch" {
+  if (!candidate.anchorId) return "blocked";
+  const anchor = anchorIndex.get(candidate.anchorId);
+  if (!anchor) return "blocked";
+  if (candidate.sourcePdfPageNumber !== anchor.pageNumber) return "page_mismatch";
+  if (candidate.sourceLineNumber && anchor.lineNumber !== candidate.sourceLineNumber) return "blocked";
+  if (candidate.sourceAnchorText !== getAnchorSourceText(anchor)) return "blocked";
+  if (!isClassificationAllowedForRow(candidate.label, anchor)) return "blocked";
+  if (isRestrictedSourcePageForCandidate(candidate, anchor)) return "blocked";
+  return "allowed";
+}
+
+function isClassificationAllowedForRow(label: string, anchor: EstimateRowAnchor) {
+  if (/NEEDS ADAS/i.test(label)) {
+    return anchor.anchorType !== "totals_row" &&
+      anchor.anchorType !== "supplier_row" &&
+      !/\b(?:final road test|not correct style|total|paint supplies|paint materials|body labor|paint labor|net cost|supplier|lkq)\b/i.test(getAnchorSourceText(anchor));
+  }
+  return true;
+}
+
+function isRestrictedSourcePageForCandidate(candidate: AnchoredCitationCandidate, anchor: EstimateRowAnchor) {
+  const text = getAnchorSourceText(anchor);
+  if (/\b(?:disclaimer|abbreviations?|motor guide|ccc motor guide|guide pages|asTech diagnostic terms)\b/i.test(text)) {
+    return !/\b(?:disclaimer|abbreviations?|motor guide|astech)\b/i.test(candidate.estimateLineDisplay);
+  }
+  if (anchor.anchorType === "totals_row") return !/total|rate|paint|material|labor|net cost/i.test(candidate.estimateLineDisplay);
+  if (anchor.anchorType === "supplier_row") return !/supplier|alternate|aftermarket|lkq|part|grille/i.test(candidate.estimateLineDisplay);
+  return false;
+}
+
+function getAnchorSourceText(anchor: EstimateRowAnchor) {
+  return [anchor.rowText, anchor.noteText, anchor.supplierText]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildAnchorsByPage(anchors: EstimateRowAnchor[]) {
+  const byPage: Record<string, string[]> = {};
+  for (const anchor of anchors) {
+    const key = String(anchor.pageNumber);
+    byPage[key] = byPage[key] ?? [];
+    byPage[key].push(anchor.lineNumber ? `line ${anchor.lineNumber}` : anchor.anchorType);
+  }
+  return byPage;
 }
 
 async function extractPdfTextAnchors(bytes: Uint8Array): Promise<TextAnchor[]> {
@@ -561,6 +992,12 @@ function hasConcreteFindingAnchor(finding: CitationDensityFinding): boolean {
   return Boolean(
     finding.carrierEvidence?.lineNumber ||
     finding.shopEvidence?.lineNumber ||
+    finding.carrierEvidence?.description ||
+    finding.shopEvidence?.description ||
+    typeof finding.carrierEvidence?.amount === "number" ||
+    typeof finding.shopEvidence?.amount === "number" ||
+    typeof finding.carrierEvidence?.laborHours === "number" ||
+    typeof finding.shopEvidence?.laborHours === "number" ||
     finding.carrierAnchor?.lineNumber ||
     finding.shopAnchor?.lineNumber ||
     finding.carrierAnchor?.section ||
@@ -599,7 +1036,8 @@ function isGenericOrMalformedAnchorText(value: string): boolean {
   return (
     /^\s*(?:repair operation|proc report|comparison or screenshot cues)\s*$/i.test(value) ||
     /\bproc\s+(?:pre|post)[-\s]?repair scanm\b/i.test(value) ||
-    /\b(?:citation density gap report|annotation legend|unanchored citation density|disclosure|privacy|estimate summary only)\b/i.test(value)
+    /\b(?:citation density gap report|annotation legend|unanchored citation density|disclosure|privacy|estimate summary only|disclaimer|abbreviations?|motor guide|guide pages)\b/i.test(value) ||
+    /\bmotor\b.*\b(?:database|guide|included|not included)\b/i.test(value)
   );
 }
 
@@ -1040,21 +1478,19 @@ function addLegendPage(pdfDoc: PDFDocument, options: { font: PDFFont; boldFont: 
 
 function addNoLineAnchorWarningPage(
   pdfDoc: PDFDocument,
-  options: { font: PDFFont; boldFont: PDFFont; pageCalloutCount: number; appendixCount: number }
+  options: { font: PDFFont; boldFont: PDFFont; message: string; pageCalloutCount: number; appendixCount: number }
 ) {
   const page = pdfDoc.addPage();
   const { width, height } = page.getSize();
-  page.drawText(NO_LINE_ANCHORS_WARNING, {
+  page.drawText(options.message, {
     x: 48,
     y: height - 58,
-    size: 18,
+    size: 14,
     font: options.boldFont,
     color: rgb(0.68, 0.2, 0.16),
   });
   drawWrappedLines(page, [
-    options.pageCalloutCount === 0
-      ? "No estimate-page anchors were placed. Findings are listed in the appendix."
-      : "The original estimate pages were preserved. Collision IQ could not place exact line-level anchors from the extracted PDF text.",
+    options.message,
     `Page-level callouts placed on original estimate pages: ${options.pageCalloutCount}.`,
     `Findings appended in the unanchored appendix: ${options.appendixCount}.`,
     "Review the highlighted sections and appendix before relying on these findings.",
