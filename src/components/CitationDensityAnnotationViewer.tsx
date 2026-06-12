@@ -7,6 +7,7 @@ import { pdfRectToViewportRect } from "@/lib/reports/citationDensityCoordinates"
 
 export type CitationDensityAnnotationMetadata = {
   findingId: string;
+  anchorId?: string;
   sourceDocumentId?: string;
   sourceDocumentRole?: "carrier" | "shop" | "both";
   markerNumber: number;
@@ -28,7 +29,7 @@ export type CitationDensityAnnotationMetadata = {
   targetRawText?: string;
   targetNormalizedText?: string;
   matchConfidence?: "high" | "medium" | "low";
-  anchorType?: "exact_line" | "description" | "note" | "amount" | "section" | "totals" | "supplier" | "page_fallback";
+  anchorType?: "estimate_line" | "line_note" | "supplier_row" | "totals_row" | "section_row" | "exact_line" | "description" | "note" | "amount" | "section" | "totals" | "supplier" | "page_fallback";
   label: string;
   shortTitle: string;
   estimateLine: string;
@@ -102,9 +103,15 @@ export default function CitationDensityAnnotationViewer({
   const [pages, setPages] = useState<RenderedPage[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(annotations[0]?.findingId ?? null);
   const [error, setError] = useState<string | null>(null);
-  const selected = useMemo(
-    () => annotations.find((annotation) => annotation.findingId === selectedId) ?? annotations[0] ?? null,
+  const effectiveSelectedId = useMemo(
+    () => selectedId && annotations.some((annotation) => annotation.findingId === selectedId)
+      ? selectedId
+      : annotations[0]?.findingId ?? null,
     [annotations, selectedId]
+  );
+  const selected = useMemo(
+    () => annotations.find((annotation) => annotation.findingId === effectiveSelectedId) ?? annotations[0] ?? null,
+    [annotations, effectiveSelectedId]
   );
 
   useEffect(() => {
@@ -226,7 +233,7 @@ export default function CitationDensityAnnotationViewer({
                           }}
                           className={[
                             "absolute rounded-[3px] border text-left outline-none ring-offset-2 ring-offset-neutral-900 transition focus-visible:ring-2 focus-visible:ring-amber-300",
-                            selectedId === annotation.findingId
+                            effectiveSelectedId === annotation.findingId
                               ? "border-red-500 bg-amber-300/45 ring-2 ring-red-500/70"
                               : "border-amber-600/80 bg-amber-300/25 hover:bg-amber-300/40",
                           ].join(" ")}
@@ -236,9 +243,15 @@ export default function CitationDensityAnnotationViewer({
                             width: rect.width,
                             height: rect.height,
                           }}
+                          data-finding-id={annotation.findingId}
+                          data-anchor-id={annotation.anchorId}
                           aria-label={`Open Citation Density finding ${annotation.markerNumber}`}
                         >
-                          <span className="absolute -left-2 -top-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-700 px-1 text-[10px] font-bold leading-none text-white">
+                          <span
+                            className="absolute -left-2 -top-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-700 px-1 text-[10px] font-bold leading-none text-white"
+                            data-finding-id={annotation.findingId}
+                            data-anchor-id={annotation.anchorId}
+                          >
                             {annotation.markerNumber}
                           </span>
                         </button>

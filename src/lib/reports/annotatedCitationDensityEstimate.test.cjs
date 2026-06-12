@@ -100,23 +100,35 @@ async function createBlankSourcePdf(pageCount = 2) {
 
 function ramEstimateStoredText() {
   return [
-    "RAM lower estimate",
-    "Parts",
-    "23 LKQ grille Note: not correct style for vehicle $185.00",
-    "Diagnostics and Calibration",
-    "39 Pre-repair scan 0.5 $75.00",
-    "40 In-process scan 0.5 $75.00",
-    "41 Seat belt dynamic function test 0.4 $52.00",
-    "42 Post-repair scan 0.5 $75.00",
-    "43 Final road test 0.3 $40.00",
-    "44 REVVAdas Report ADAS report available upon request and via this link https://egnyte.example.com/revvadas/ram-report?token=secret",
-    "Totals / Labor / Paint / Paint Materials",
-    "Body labor total $1,240.00 Paint materials total $385.00 Paint labor rate $58.00",
-    "\fAlternate Parts Supplier",
-    "LKQ grille alternate supplier page lists used grille not correct style for vehicle",
-    "CCC MOTOR Guide Pages",
-    "MOTOR database included-not-included guide scan operations paint materials labor indicators",
-  ].join("\n");
+    ["RAM lower estimate", "Parts"].join("\n"),
+    ["Parts continued", "23 LKQ grille Note: not correct style for vehicle $185.00"].join("\n"),
+    [
+      "Diagnostics and Calibration",
+      "39 Pre-repair scan 0.5 $75.00",
+      "40 In-process scan 0.5 $75.00",
+      "41 Seat belt dynamic function test 0.4 $52.00",
+      "42 Post-repair scan 0.5 $75.00",
+      "43 Final road test 0.3 $40.00",
+      "44 REVVAdas Report ADAS report available upon request and via this link https://egnyte.example.com/revvadas/ram-report?token=secret",
+    ].join("\n"),
+    [
+      "Totals / Labor / Paint / Paint Materials",
+      "Body labor total $1,240.00 Paint materials total $385.00 Paint labor rate $58.00",
+    ].join("\n"),
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    [
+      "Alternate Parts Supplier",
+      "LKQ grille alternate supplier page lists used grille not correct style for vehicle",
+      "CCC MOTOR Guide Pages",
+      "MOTOR database included-not-included guide scan operations paint materials labor indicators",
+    ].join("\n"),
+  ].join("\f");
 }
 
 function shop21975StoredText() {
@@ -678,7 +690,7 @@ async function run(name, test) {
   });
 
   await run("stored estimate text anchors Ram lines onto original pages when PDF coordinates are unavailable", async () => {
-    const sourcePdfBytes = await createBlankSourcePdf(2);
+    const sourcePdfBytes = await createBlankSourcePdf(12);
     const result = await buildAnnotatedCitationDensityEstimatePdf({
       sourcePdfBytes,
       sourceText: ramEstimateStoredText(),
@@ -805,7 +817,7 @@ async function run(name, test) {
     });
     const pages = await extractPdfPageTexts(result.bytes);
 
-    assert.equal(result.originalPageCount, 2);
+    assert.equal(result.originalPageCount, 12);
     assert.equal(result.annotatedFindingCount, 8);
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.doesNotMatch(result.warnings.join(" "), /all_findings_unanchored/);
@@ -821,19 +833,24 @@ async function run(name, test) {
     const line44 = result.annotationMetadata.find((item) => item.findingId === "ram-line-44");
     const totals = result.annotationMetadata.find((item) => item.findingId === "ram-totals");
     const supplier = result.annotationMetadata.find((item) => item.findingId === "ram-supplier");
-    assert.equal(line23.anchorType, "exact_line");
+    assert.equal(line23.anchorType, "line_note");
     assert.equal(line23.targetLineNumber, "23");
+    assert.equal(line23.pageNumber, 2);
     assert.equal(line23.sourceDocumentRole, "carrier");
-    assert.equal(line44.anchorType, "exact_line");
+    assert.equal(line44.anchorType, "line_note");
     assert.equal(line44.targetLineNumber, "44");
+    assert.equal(line44.pageNumber, 3);
     assert.equal(line44.label, "REFERENCED / NOT PRODUCED");
     assert.equal(line44.sourceDocumentId, "carrier-21975");
-    assert.equal(totals.anchorType, "totals");
-    assert.equal(supplier.anchorType, "supplier");
+    assert.equal(totals.anchorType, "totals_row");
+    assert.equal(totals.pageNumber, 4);
+    assert.equal(supplier.anchorType, "supplier_row");
+    assert.equal(supplier.pageNumber, 12);
     for (const metadata of result.annotationMetadata) {
       assert.ok(metadata.findingId);
+      assert.ok(metadata.anchorId);
       assert.ok(metadata.sourceDocumentId);
-      assert.ok(["carrier", "shop", "both"].includes(metadata.sourceDocumentRole));
+      assert.ok(["carrier", "shop"].includes(metadata.sourceDocumentRole));
       assert.equal(typeof metadata.targetNormalizedText, "string");
       assert.ok(metadata.targetNormalizedText.length > 0);
       assert.ok(metadata.xPct > 0 && metadata.xPct < 1);
@@ -940,7 +957,7 @@ async function run(name, test) {
     assert.equal(result.annotationMetadata.find((item) => item.findingId === "shop-line-43").targetLineNumber, "43");
     assert.equal(result.annotationMetadata.find((item) => item.findingId === "shop-line-44").targetLineNumber, "44");
     assert.equal(result.annotationMetadata.find((item) => item.findingId === "shop-line-50").label, "NEEDS P-PAGE");
-    assert.equal(result.annotationMetadata.find((item) => item.findingId === "shop-totals").anchorType, "totals");
+    assert.equal(result.annotationMetadata.find((item) => item.findingId === "shop-totals").anchorType, "totals_row");
     assert.equal(result.annotationMetadata.every((item) => item.sourceDocumentRole === "shop"), true);
   });
 
@@ -1139,7 +1156,7 @@ async function run(name, test) {
     assert.ok(metadata.yPct > 0 && metadata.yPct < 1);
     assert.ok(metadata.wPct > 0 && metadata.wPct < 1);
     assert.ok(metadata.hPct > 0 && metadata.hPct < 1);
-    assert.ok(["exact_line", "description", "amount", "section"].includes(metadata.anchorType));
+    assert.ok(["estimate_line", "line_note", "supplier_row", "totals_row", "section_row"].includes(metadata.anchorType));
     assert.ok(["high", "medium", "low"].includes(metadata.matchConfidence));
   });
 

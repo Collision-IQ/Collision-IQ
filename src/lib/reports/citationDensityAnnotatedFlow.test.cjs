@@ -225,8 +225,11 @@ run("Citation Density viewer configures worker and converts PDF coordinates", ()
   assert.match(source, /getAnnotationOverlayRect/);
   assert.doesNotMatch(source, /pdfHeight - source\.y - source\.height/);
   assert.match(source, /event\.stopPropagation\(\)/);
+  assert.match(source, /data-finding-id=\{annotation\.findingId\}/);
+  assert.match(source, /data-anchor-id=\{annotation\.anchorId\}/);
+  assert.match(source, /effectiveSelectedId/);
   assert.match(source, /setSelectedId\(annotation\.findingId\)/);
-  assert.match(source, /selectedId === annotation\.findingId/);
+  assert.match(source, /effectiveSelectedId === annotation\.findingId/);
   assert.match(source, /ring-2 ring-red-500/);
 });
 
@@ -255,6 +258,7 @@ run("shared Citation Density coordinate utility normalizes PDF and viewport rect
   assert.ok(pdfRect.yPct > 0 && pdfRect.yPct < 1);
   assert.ok(overlay.left > 0);
   assert.ok(overlay.top > 0);
+  assert.ok(Math.abs(overlay.top - pdfRect.y * 1.25) < 0.01);
   assert.notEqual(rotated.left, overlay.left);
 });
 
@@ -280,7 +284,8 @@ run("Ask about finding sends selected finding context into active chat", () => {
   assert.match(widgetSource, /handleSendRef\.current\s*=\s*handleSend/);
   assert.match(widgetSource, /sendPrompt:\s*\(prompt\)\s*=>\s*handleSendRef\.current\(prompt\)/);
   assert.match(pageSource, /Open or continue this case before asking about a finding\./);
-  assert.match(pageSource, /Explain Citation Density finding #\$\{annotation\.markerNumber\}/);
+  assert.match(pageSource, /Explain Citation Density finding #\$\{annotation\.findingId\}/);
+  assert.match(pageSource, /Marker: \$\{annotation\.markerNumber\}/);
   assert.match(pageSource, /for \$\{sourceEstimate\}, page \$\{annotation\.pageNumber\}, line \$\{lineLabel\}/);
   assert.match(pageSource, /Finding id: \$\{annotation\.findingId\}/);
   assert.match(pageSource, /Source estimate: \$\{annotation\.sourceDocumentRole\}/);

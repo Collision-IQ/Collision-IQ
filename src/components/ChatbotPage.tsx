@@ -3295,8 +3295,9 @@ function buildCitationDensityFindingPrompt(annotation: CitationDensityAnnotation
     : `${annotation.sourceDocumentRole ?? "carrier"} estimate`;
   const lineLabel = annotation.targetLineNumber ?? annotation.estimateLine;
   return [
-    `Explain Citation Density finding #${annotation.markerNumber} for ${sourceEstimate}, page ${annotation.pageNumber}, line ${lineLabel}. Explain what supports it, what proof is missing, why it matters, and what would strengthen or weaken it.`,
+    `Explain Citation Density finding #${annotation.findingId} for ${sourceEstimate}, page ${annotation.pageNumber}, line ${lineLabel}. Explain what supports it, what proof is missing, why it matters, and what would strengthen or weaken it.`,
     "",
+    `Marker: ${annotation.markerNumber}`,
     `Finding id: ${annotation.findingId}`,
     annotation.sourceDocumentId ? `Source document id: ${annotation.sourceDocumentId}` : "",
     annotation.sourceDocumentRole ? `Source estimate: ${annotation.sourceDocumentRole}` : "",

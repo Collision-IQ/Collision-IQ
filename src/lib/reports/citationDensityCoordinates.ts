@@ -23,6 +23,8 @@ export type NormalizedPdfRect = PdfRect & {
   hPct: number;
 };
 
+// Citation Density stores row boxes in top-left PDF page coordinates. Convert
+// to pdf-lib's bottom-left coordinate system only at PDF draw/annotation time.
 export function buildPdfRectFromTopLeftAnchor(
   anchor: PdfRect,
   page: PdfPageGeometry,
@@ -31,7 +33,7 @@ export function buildPdfRectFromTopLeftAnchor(
   const width = clamp(anchor.width + padding * 2, 10, page.pdfWidth - anchor.x - padding);
   const height = Math.max(8, anchor.height + padding * 2);
   const x = clamp(anchor.x - padding, 0, Math.max(0, page.pdfWidth - width));
-  const y = clamp(page.pdfHeight - anchor.y - anchor.height - padding, 0, Math.max(0, page.pdfHeight - height));
+  const y = clamp(anchor.y - padding, 0, Math.max(0, page.pdfHeight - height));
   return normalizePdfRect({ x, y, width, height }, page);
 }
 
@@ -74,55 +76,68 @@ export function denormalizePdfRect(
   };
 }
 
+export function topLeftRectToPdfLibRect(
+  rect: Partial<PdfRect & Pick<NormalizedPdfRect, "xPct" | "yPct" | "wPct" | "hPct">>,
+  page: PdfPageGeometry
+): PdfRect {
+  const topLeftRect = denormalizePdfRect(rect, page);
+  return {
+    x: topLeftRect.x,
+    y: clamp(page.pdfHeight - topLeftRect.y - topLeftRect.height, 0, Math.max(0, page.pdfHeight - topLeftRect.height)),
+    width: topLeftRect.width,
+    height: topLeftRect.height,
+  };
+}
+
 export function pdfRectToViewportRect(
   rect: Partial<PdfRect & Pick<NormalizedPdfRect, "xPct" | "yPct" | "wPct" | "hPct">>,
   page: RenderedPageGeometry
 ): PdfRect & { left: number; top: number } {
   const rotation = normalizeRotation(page.rotation);
-  const pdfRect = denormalizePdfRect(rect, page);
+  const topLeftRect = denormalizePdfRect(rect, page);
   const scaleX = page.width / Math.max(1, page.pdfWidth);
   const scaleY = page.height / Math.max(1, page.pdfHeight);
 
   if (rotation === 90) {
     return {
-      left: (page.pdfHeight - pdfRect.y - pdfRect.height) * scaleX,
-      top: (page.pdfWidth - pdfRect.x - pdfRect.width) * scaleY,
-      x: pdfRect.x,
-      y: pdfRect.y,
-      width: Math.max(22, pdfRect.height * scaleX),
-      height: Math.max(16, pdfRect.width * scaleY),
+      left: topLeftRect.y * scaleX,
+      top: (page.pdfWidth - topLeftRect.x - topLeftRect.width) * scaleY,
+      x: topLeftRect.x,
+      y: topLeftRect.y,
+      width: Math.max(22, topLeftRect.height * scaleX),
+      height: Math.max(16, topLeftRect.width * scaleY),
     };
   }
 
   if (rotation === 180) {
     return {
-      left: (page.pdfWidth - pdfRect.x - pdfRect.width) * scaleX,
-      top: pdfRect.y * scaleY,
-      x: pdfRect.x,
-      y: pdfRect.y,
-      width: Math.max(22, pdfRect.width * scaleX),
-      height: Math.max(16, pdfRect.height * scaleY),
+      left: (page.pdfWidth - topLeftRect.x - topLeftRect.width) * scaleX,
+      top: (page.pdfHeight - topLeftRect.y - topLeftRect.height) * scaleY,
+      x: topLeftRect.x,
+      y: topLeftRect.y,
+      width: Math.max(22, topLeftRect.width * scaleX),
+      height: Math.max(16, topLeftRect.height * scaleY),
     };
   }
 
   if (rotation === 270) {
     return {
-      left: pdfRect.y * scaleX,
-      top: pdfRect.x * scaleY,
-      x: pdfRect.x,
-      y: pdfRect.y,
-      width: Math.max(22, pdfRect.height * scaleX),
-      height: Math.max(16, pdfRect.width * scaleY),
+      left: (page.pdfHeight - topLeftRect.y - topLeftRect.height) * scaleX,
+      top: topLeftRect.x * scaleY,
+      x: topLeftRect.x,
+      y: topLeftRect.y,
+      width: Math.max(22, topLeftRect.height * scaleX),
+      height: Math.max(16, topLeftRect.width * scaleY),
     };
   }
 
   return {
-    left: pdfRect.x * scaleX,
-    top: (page.pdfHeight - pdfRect.y - pdfRect.height) * scaleY,
-    x: pdfRect.x,
-    y: pdfRect.y,
-    width: Math.max(22, pdfRect.width * scaleX),
-    height: Math.max(16, pdfRect.height * scaleY),
+    left: topLeftRect.x * scaleX,
+    top: topLeftRect.y * scaleY,
+    x: topLeftRect.x,
+    y: topLeftRect.y,
+    width: Math.max(22, topLeftRect.width * scaleX),
+    height: Math.max(16, topLeftRect.height * scaleY),
   };
 }
 

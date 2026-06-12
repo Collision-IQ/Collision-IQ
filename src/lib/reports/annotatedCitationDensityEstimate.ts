@@ -17,7 +17,14 @@ import {
   buildPdfRectFromTopLeftAnchor,
   normalizePdfRect,
   normalizeRotation,
+  topLeftRectToPdfLibRect,
 } from "./citationDensityCoordinates";
+import {
+  buildStoredTextRowAnchors,
+  extractPdfRowAnchors,
+  findBestEstimateRowAnchorForFinding,
+  type EstimateRowAnchor,
+} from "./citationDensityRowAnchors";
 
 export type AnnotationMode = "margin_callouts" | "inline_highlight" | "both";
 
@@ -44,8 +51,9 @@ export type AnnotatedEstimateResult = {
 
 export type CitationDensityAnnotationMetadata = {
   findingId: string;
+  anchorId: string;
   sourceDocumentId: string;
-  sourceDocumentRole: "carrier" | "shop" | "both";
+  sourceDocumentRole: "carrier" | "shop";
   markerNumber: number;
   pageNumber: number;
   pdfPageWidth: number;
@@ -65,7 +73,7 @@ export type CitationDensityAnnotationMetadata = {
   targetRawText: string;
   targetNormalizedText: string;
   matchConfidence: "high" | "medium" | "low";
-  anchorType: "exact_line" | "description" | "note" | "amount" | "section" | "totals" | "supplier" | "page_fallback";
+  anchorType: "estimate_line" | "line_note" | "supplier_row" | "totals_row" | "section_row";
   label: string;
   shortTitle: string;
   estimateLine: string;
@@ -94,8 +102,7 @@ type TextAnchor = {
 
 type MatchedFinding = {
   finding: CitationDensityFinding;
-  anchor: TextAnchor;
-  matchKind: "line" | "page";
+  anchor: EstimateRowAnchor;
 };
 
 const SOURCE_BOUNDARY_TEXT =
@@ -173,37 +180,38 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   }
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const pdfAnchors = await extractPdfTextAnchors(sourcePdfBytes).catch((error) => {
+  const sourceDocumentRole = estimateRole === "shop" ? "shop" : "carrier";
+  const pdfAnchors = await extractPdfRowAnchors(sourcePdfBytes, { sourceDocumentRole }).catch((error) => {
     warnings.push(
       `Text-coordinate extraction failed; findings were placed in the appendix. ${error instanceof Error ? error.message : "Unknown PDF text extraction error."}`
     );
-    return [] as TextAnchor[];
+    return [] as EstimateRowAnchor[];
   });
-  const fallbackAnchors = buildStoredTextAnchors(params.sourceText, pdfDoc);
-  const anchors = [...pdfAnchors, ...fallbackAnchors];
+  const fallbackAnchors = buildStoredTextRowAnchors(params.sourceText, pdfDoc, { sourceDocumentRole });
+  const anchors = pdfAnchors.length ? pdfAnchors : fallbackAnchors;
 
   if (!anchors.length) {
     warnings.push("No text coordinates were extracted from the source PDF. The PDF may be image-only.");
   } else if (!pdfAnchors.length && fallbackAnchors.length) {
-    warnings.push("Used stored extracted text to place approximate estimate-page anchors.");
+    warnings.push("Used stored extracted text to place deterministic estimate-row anchors.");
   }
 
   const matches: MatchedFinding[] = [];
   const unmatched: CitationDensityFinding[] = [];
-  const usedAnchors = new Set<TextAnchor>();
+  const usedAnchors = new Set<string>();
 
   for (const finding of findings) {
-    const anchor = findBestAnchorForFinding(finding, anchors, usedAnchors, estimateRole);
+    const anchor = findBestEstimateRowAnchorForFinding(finding, anchors, usedAnchors, estimateRole);
     if (anchor) {
-      usedAnchors.add(anchor);
-      matches.push({ finding, anchor, matchKind: "line" });
+      usedAnchors.add(anchor.anchorId);
+      matches.push({ finding, anchor });
       continue;
     }
 
     unmatched.push(finding);
   }
 
-  const lineMatchCount = matches.filter((match) => match.matchKind === "line").length;
+  const lineMatchCount = matches.length;
   if (findings.length > 0 && lineMatchCount === 0) {
     warnings.push(
       `${NO_LINE_ANCHORS_WARNING} Findings were placed as page-level callouts and/or appendix entries.`
@@ -216,7 +224,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
 
   const annotationMetadata: CitationDensityAnnotationMetadata[] = [];
   matches.forEach((match, index) => {
-    const page = pdfDoc.getPage(match.anchor.pageIndex);
+    const page = pdfDoc.getPage(match.anchor.pageNumber - 1);
     const metadata = drawFindingAnnotation(pdfDoc, page, match, index + 1, {
       mode,
       font,
@@ -647,16 +655,8 @@ function drawFindingAnnotation(
   const pageWidth = page.getWidth();
   const pageHeight = page.getHeight();
   const rotation = normalizeRotation(page.getRotation().angle);
-  const highlightRect = buildPdfRectFromTopLeftAnchor(
-    {
-      x: anchor.x,
-      y: anchor.y,
-      width: clamp(anchor.width, 42, Math.max(42, pageWidth - anchor.x - 18)),
-      height: anchor.height,
-    },
-    { pdfWidth: pageWidth, pdfHeight: pageHeight, rotation },
-    2
-  );
+  const highlightRect = buildPdfRectFromTopLeftAnchor(anchor, { pdfWidth: pageWidth, pdfHeight: pageHeight, rotation }, 0);
+  const pdfLibRect = topLeftRectToPdfLibRect(highlightRect, { pdfWidth: pageWidth, pdfHeight: pageHeight, rotation });
   const label = getProofBucketLabel(finding);
   const shortTitle = formatShortIssueTitle(finding);
   const metadata = buildAnnotationMetadata(finding, anchor, number, label, shortTitle, {
@@ -671,17 +671,16 @@ function drawFindingAnnotation(
     pageWidth,
     pageHeight,
     rotation,
-    matchKind: match.matchKind,
     estimateRole: options.estimateRole,
     redactSensitive: options.redactSensitive,
   });
 
   if (options.mode === "inline_highlight" || options.mode === "both") {
     page.drawRectangle({
-      x: highlightRect.x,
-      y: highlightRect.y,
-      width: highlightRect.width,
-      height: highlightRect.height,
+      x: pdfLibRect.x,
+      y: pdfLibRect.y,
+      width: pdfLibRect.width,
+      height: pdfLibRect.height,
       color: rgb(1, 0.9, 0.3),
       opacity: 0.22,
     });
@@ -693,8 +692,8 @@ function drawFindingAnnotation(
       label,
       shortTitle,
       anchorX: anchor.x,
-      highlightX: highlightRect.x,
-      highlightY: highlightRect.y,
+      highlightX: pdfLibRect.x,
+      highlightY: pdfLibRect.y,
       pageWidth,
       font: options.font,
       boldFont: options.boldFont,
@@ -758,21 +757,26 @@ function attachPdfFindingAnnotations(
   const annots = page.node.Annots() ?? pdfDoc.context.obj([]);
   page.node.set(PDFName.Annots, annots);
   const pageRef = page.ref;
+  const pdfLibRect = topLeftRectToPdfLibRect(metadata, {
+    pdfWidth: metadata.pdfPageWidth,
+    pdfHeight: metadata.pdfPageHeight,
+    rotation: metadata.rotation,
+  });
   const rect = [
-    metadata.x,
-    metadata.y,
-    metadata.x + metadata.width,
-    metadata.y + metadata.height,
+    pdfLibRect.x,
+    pdfLibRect.y,
+    pdfLibRect.x + pdfLibRect.width,
+    pdfLibRect.y + pdfLibRect.height,
   ];
   const quadPoints = [
-    metadata.x,
-    metadata.y + metadata.height,
-    metadata.x + metadata.width,
-    metadata.y + metadata.height,
-    metadata.x,
-    metadata.y,
-    metadata.x + metadata.width,
-    metadata.y,
+    pdfLibRect.x,
+    pdfLibRect.y + pdfLibRect.height,
+    pdfLibRect.x + pdfLibRect.width,
+    pdfLibRect.y + pdfLibRect.height,
+    pdfLibRect.x,
+    pdfLibRect.y,
+    pdfLibRect.x + pdfLibRect.width,
+    pdfLibRect.y,
   ];
   const highlightRef = addPdfAnnotation(pdfDoc, pageRef, {
     Type: "Annot",
@@ -792,9 +796,9 @@ function attachPdfFindingAnnotations(
     Subtype: "Text",
     Rect: [
       clamp(metadata.x - 18, 4, page.getWidth() - 24),
-      clamp(metadata.y + metadata.height - 2, 4, page.getHeight() - 24),
+      clamp(pdfLibRect.y + pdfLibRect.height - 2, 4, page.getHeight() - 24),
       clamp(metadata.x - 2, 20, page.getWidth() - 8),
-      clamp(metadata.y + metadata.height + 14, 20, page.getHeight() - 8),
+      clamp(pdfLibRect.y + pdfLibRect.height + 14, 20, page.getHeight() - 8),
     ],
     Name: "Comment",
     Open: false,
@@ -823,7 +827,7 @@ function addPdfAnnotation(
 
 function buildAnnotationMetadata(
   finding: CitationDensityFinding,
-  anchor: TextAnchor,
+  anchor: EstimateRowAnchor,
   number: number,
   label: string,
   shortTitle: string,
@@ -839,7 +843,6 @@ function buildAnnotationMetadata(
     pageWidth: number;
     pageHeight: number;
     rotation: 0 | 90 | 180 | 270;
-    matchKind: MatchedFinding["matchKind"];
     estimateRole: "carrier" | "shop" | "selected";
     redactSensitive: boolean;
   }
@@ -850,15 +853,17 @@ function buildAnnotationMetadata(
   };
   const sourceRefs = formatAnnotationSourceRefs(finding).map(sanitize);
   const bestAuthority = sanitize(formatBestAuthority(finding));
-  const sourceDocumentRole = getSourceDocumentRole(finding, options.estimateRole);
-  const sourceDocumentId = getSourceDocumentId(finding, sourceDocumentRole);
-  const targetRawText = sanitize(anchor.text || formatEstimateLineForCallout(finding, options.estimateRole));
+  const sourceDocumentRole = anchor.sourceDocumentRole;
+  const findingSourceDocumentId = getSourceDocumentId(finding, sourceDocumentRole);
+  const sourceDocumentId = findingSourceDocumentId || anchor.sourceDocumentId;
+  const targetRawText = sanitize(anchor.rowText || formatEstimateLineForCallout(finding, options.estimateRole));
   const metadata: CitationDensityAnnotationMetadata = {
     findingId: finding.id,
+    anchorId: anchor.anchorId,
     sourceDocumentId,
     sourceDocumentRole,
     markerNumber: number,
-    pageNumber: anchor.pageIndex + 1,
+    pageNumber: anchor.pageNumber,
     pdfPageWidth: normalizePdfRect({ x: 0, y: 0, width: options.pageWidth, height: options.pageHeight }, { pdfWidth: options.pageWidth, pdfHeight: options.pageHeight }).width,
     pdfPageHeight: normalizePdfRect({ x: 0, y: 0, width: options.pageWidth, height: options.pageHeight }, { pdfWidth: options.pageWidth, pdfHeight: options.pageHeight }).height,
     rotation: options.rotation,
@@ -871,12 +876,12 @@ function buildAnnotationMetadata(
     wPct: options.wPct,
     hPct: options.hPct,
     coordinateSpace: "pdf-points",
-    targetLineNumber: getTargetLineNumber(finding, options.estimateRole),
-    targetSection: getTargetSection(finding, options.estimateRole),
+    targetLineNumber: anchor.lineNumber ?? getTargetLineNumber(finding, options.estimateRole),
+    targetSection: anchor.section || getTargetSection(finding, options.estimateRole),
     targetRawText,
-    targetNormalizedText: normalizeMatchText(targetRawText),
-    matchConfidence: getMatchConfidence(anchor, options.matchKind),
-    anchorType: getAnchorType(finding, anchor, options.matchKind, options.estimateRole),
+    targetNormalizedText: anchor.normalizedRowText,
+    matchConfidence: getMatchConfidence(anchor),
+    anchorType: anchor.anchorType,
     label,
     shortTitle,
     estimateLine: sanitize(formatEstimateLineForCallout(finding, options.estimateRole)),
@@ -913,18 +918,6 @@ function getTargetSection(
   return anchor?.section || undefined;
 }
 
-function getSourceDocumentRole(
-  finding: CitationDensityFinding,
-  estimateRole: "carrier" | "shop" | "selected"
-): CitationDensityAnnotationMetadata["sourceDocumentRole"] {
-  if (finding.primaryAnnotationRole === "both" || finding.crossEstimateIssue) return "both";
-  if (estimateRole === "carrier" || estimateRole === "shop") return estimateRole;
-  if (finding.primaryAnnotationRole === "carrier" || finding.primaryAnnotationRole === "shop") return finding.primaryAnnotationRole;
-  if (finding.carrierEvidence && finding.shopEvidence) return "both";
-  if (finding.shopEvidence || finding.shopAnchor) return "shop";
-  return "carrier";
-}
-
 function getSourceDocumentId(
   finding: CitationDensityFinding,
   sourceDocumentRole: CitationDensityAnnotationMetadata["sourceDocumentRole"]
@@ -935,26 +928,21 @@ function getSourceDocumentId(
   if (sourceDocumentRole === "shop") {
     return finding.shopAnchor?.sourceDocumentId || finding.embeddedEstimateLinks?.find((link) => link.estimateRole === "shop")?.sourceDocumentId || "shop-estimate";
   }
-  return (
-    finding.carrierAnchor?.sourceDocumentId ||
-    finding.shopAnchor?.sourceDocumentId ||
-    finding.embeddedEstimateLinks?.find((link) => link.sourceDocumentId)?.sourceDocumentId ||
-    "both-estimates"
-  );
+  return finding.carrierAnchor?.sourceDocumentId || finding.embeddedEstimateLinks?.find((link) => link.estimateRole === "carrier")?.sourceDocumentId || "carrier-estimate";
 }
 
-function getMatchConfidence(anchor: TextAnchor, matchKind: MatchedFinding["matchKind"]): "high" | "medium" | "low" {
-  if (matchKind === "page" || anchor.synthetic) return "low";
-  if (anchor.groupedLine) return "high";
-  return "medium";
+function getMatchConfidence(anchor: EstimateRowAnchor): "high" | "medium" | "low" {
+  if (anchor.synthetic) return "medium";
+  if (anchor.confidence >= 0.9) return "high";
+  return anchor.confidence >= 0.82 ? "medium" : "low";
 }
 
 function getAnchorType(
   finding: CitationDensityFinding,
   anchor: TextAnchor,
-  matchKind: MatchedFinding["matchKind"],
+  matchKind: "line" | "page",
   estimateRole: "carrier" | "shop" | "selected"
-): CitationDensityAnnotationMetadata["anchorType"] {
+): "exact_line" | "description" | "note" | "amount" | "section" | "totals" | "supplier" | "page_fallback" {
   if (matchKind === "page") return "page_fallback";
   const lineNumber = getTargetLineNumber(finding, estimateRole);
   if (lineNumber && matchesLineNumber(anchor.text, lineNumber)) return "exact_line";
