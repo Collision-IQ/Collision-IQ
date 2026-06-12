@@ -388,10 +388,10 @@ function buildUserProvidedContextBullets(value: string | null | undefined, repor
   if (!combined.length) return [];
 
   return [
-    "User-provided context reports an appraisal-process dispute, including a disputed demand about award-letter timing before repairs continue. This context is not treated as verified insurer misconduct by itself.",
+    "prior_chat_context may mention an appraisal-process dispute, but it is not promoted to a verified or user-reported fact unless the current upload continues and documents that issue.",
     `Reported issue category: ${combined.join("; ")}.`,
-    "Policy/appraisal language must be reviewed before making any policy-rights conclusion.",
-    "Written carrier or IA demand, date-stamped correspondence, appraisal invocation, inspection records, and the applicable policy clause are needed before the DOI readiness gate can treat the conduct as documented.",
+    "Policy/appraisal language and written carrier or IA correspondence must be reviewed before making any policy-rights conclusion.",
+    "Written demand, date-stamped correspondence, appraisal invocation, inspection records, and the applicable policy clause are needed before the DOI readiness gate can treat the conduct as documented.",
   ];
 }
 

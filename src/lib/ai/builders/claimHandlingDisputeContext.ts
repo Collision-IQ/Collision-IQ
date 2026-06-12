@@ -18,8 +18,7 @@ export function buildClaimHandlingDisputeContext(
   params: ExportBuilderInput,
   exportModel: ExportModel
 ): ClaimHandlingDisputeContext {
-  const text = normalizeText([
-    params.assistantAnalysis,
+  const currentUploadText = normalizeText([
     params.analysis?.narrative,
     params.report?.analysis?.narrative,
     params.report?.summary,
@@ -28,22 +27,36 @@ export function buildClaimHandlingDisputeContext(
     ...(params.report?.evidenceRegistry ?? []).map((item) =>
       `${item.label} ${item.extractedText ?? ""} ${item.extractedSummary ?? ""} ${Object.values(item.structuredFacts ?? {}).join(" ")}`
     ),
+  ].filter(Boolean).join("\n"));
+  const priorChatText = normalizeText([
+    params.assistantAnalysis,
     exportModel.repairPosition,
     exportModel.positionStatement,
     exportModel.request,
     params.panel?.appraisal?.reasoning,
     ...(params.panel?.stateLeverage ?? []),
   ].filter(Boolean).join("\n"));
+  const currentHasPolicyOrClaimHandlingEvidence = hasCurrentPolicyOrClaimHandlingEvidence(currentUploadText);
+  const priorHasPolicyOrClaimHandlingContext = hasPolicyOrClaimHandlingSignals(priorChatText);
+
+  if (!currentHasPolicyOrClaimHandlingEvidence) {
+    return buildNeutralEstimateOnlyContext(exportModel, priorHasPolicyOrClaimHandlingContext);
+  }
+
+  const currentSignalsText = normalizeText([
+    currentUploadText,
+    params.analysis?.narrative,
+  ].filter(Boolean).join("\n"));
 
   const signals = {
-    appraisal: /\bappraisal|independent appraiser|\bia\b|award letter|amount of loss|loss amount/i.test(text),
-    prematureAward: /award letter|signed after supplement 1|before (?:the )?shop can continue|before repairs? (?:can )?(?:continue|complete)|premature/i.test(text),
-    repairRestriction: /before (?:the )?shop can continue|cannot continue|stop repairs|restrict(?:ed|ion)? on continuing repairs|continue repairs/i.test(text),
-    postRepairDenial: /post[- ]?repair|repairs? complete|den(?:y|ied|ial).{0,80}appraisal|appraisal.{0,80}den(?:y|ied|ial)/i.test(text),
-    supplement: /supplement|reinspect|reinspection|supplement 1|supplemental/i.test(text),
-    maturity: /amount[- ]of[- ]loss|amount of loss|matur(?:e|ity)|final award|interim award|final documents|all documents/i.test(text),
-    hiddenDamage: /hidden damage|teardown|tear[- ]?down|scope may still|evolving|developing|not fully documented|incomplete/i.test(text),
-    writtenPosition: /written|policy basis|carrier position|claim position|legal team|correspondence|demand/i.test(text),
+    appraisal: /\bappraisal|independent appraiser|\bia\b|award letter|amount of loss|loss amount/i.test(currentSignalsText),
+    prematureAward: /award letter|signed after supplement 1|before (?:the )?shop can continue|before repairs? (?:can )?(?:continue|complete)|premature/i.test(currentSignalsText),
+    repairRestriction: /before (?:the )?shop can continue|cannot continue|stop repairs|restrict(?:ed|ion)? on continuing repairs|continue repairs/i.test(currentSignalsText),
+    postRepairDenial: /post[- ]?repair|repairs? complete|den(?:y|ied|ial).{0,80}appraisal|appraisal.{0,80}den(?:y|ied|ial)/i.test(currentSignalsText),
+    supplement: /supplement|reinspect|reinspection|supplement 1|supplemental/i.test(currentSignalsText),
+    maturity: /amount[- ]of[- ]loss|amount of loss|matur(?:e|ity)|final award|interim award|final documents|all documents/i.test(currentSignalsText),
+    hiddenDamage: /hidden damage|teardown|tear[- ]?down|scope may still|evolving|developing|not fully documented|incomplete/i.test(currentSignalsText),
+    writtenPosition: /written|policy basis|carrier position|claim position|legal team|correspondence|demand/i.test(currentSignalsText),
   };
   const hasContext = Object.values(signals).some(Boolean);
 
@@ -139,6 +152,69 @@ export function buildClaimHandlingDisputeContext(
       },
     ],
   };
+}
+
+function buildNeutralEstimateOnlyContext(
+  exportModel: ExportModel,
+  priorHasPolicyOrClaimHandlingContext: boolean
+): ClaimHandlingDisputeContext {
+  const repairAttachments = buildRepairAttachmentBullets(exportModel);
+  return {
+    hasContext: false,
+    summary: [
+      "Current upload evidence source: current_upload estimates only.",
+      "DOI readiness is insufficient because the current file does not establish claim-handling conduct, a written carrier position, or jurisdiction-specific authority.",
+      "Policy rights are insufficient because the current file does not include policy language, appraisal language, or a written carrier policy position.",
+      "No verified legal or regulatory issue is identified from the two estimates alone.",
+      priorHasPolicyOrClaimHandlingContext
+        ? "prior_chat_context was detected but was not promoted to a user-reported fact because the current upload does not continue or document that policy/appraisal dispute."
+        : "No active policy/appraisal context was established from the current upload.",
+    ],
+    userReports: [],
+    documentSupport: [
+      "current_upload supports estimate-line disputes only; it does not establish insurer claim-handling conduct.",
+    ],
+    unverified: [
+      "prior_chat_context cannot be treated as verified insurer conduct without explicit continuation and current supporting documents.",
+      "Policy language, written carrier correspondence, appraisal invocation, and date-stamped claim communications were not established by the current upload.",
+    ],
+    timingConcerns: [
+      "No appraisal timing concern is established from the current upload.",
+      "Do not infer award timing, repair-continuation restrictions, or post-repair appraisal denial without current written support.",
+    ],
+    documentsNeeded: [
+      "Policy jacket, declarations, endorsements, and the appraisal/disagreement-resolution clause.",
+      "Written carrier or IA correspondence stating any policy basis, appraisal position, repair-continuation position, or denial posture.",
+      "Date-stamped claim communications if a DOI or policy-rights review is requested.",
+    ],
+    repairAttachments,
+    nextDocumentation: [
+      "If a policy/appraisal issue is intended, upload the policy language and written carrier or IA communications.",
+      "If this is only an estimate comparison, keep DOI and policy-rights conclusions neutral.",
+      "Separate current_upload estimate evidence from prior_chat_context before stating any user-reported claim-handling fact.",
+    ],
+    explicitSections: [
+      {
+        title: "Current Upload Provenance",
+        bullets: [
+          "current_upload: estimate evidence only.",
+          "prior_chat_context: not promoted to verified or user-reported facts in this report.",
+        ],
+      },
+    ],
+  };
+}
+
+function hasCurrentPolicyOrClaimHandlingEvidence(value: string): boolean {
+  if (!value.trim()) return false;
+  const hasPolicyDocumentSignal = /\b(policy jacket|declarations?|endorsement|appraisal clause|disagreement-resolution|duties after loss|payment of loss|loss payable|coverage form)\b/i.test(value);
+  const hasWrittenClaimPosition = /\b(?:written carrier|carrier letter|ia letter|denial letter|reservation of rights|coverage position|policy basis|claim-handling|doi|department of insurance)\b/i.test(value);
+  const hasAppraisalDocument = /\b(?:appraisal invocation|appraisal demand|award letter|independent appraiser|umpire)\b/i.test(value);
+  return hasPolicyDocumentSignal || hasWrittenClaimPosition || hasAppraisalDocument;
+}
+
+function hasPolicyOrClaimHandlingSignals(value: string): boolean {
+  return /\b(appraisal|award letter|independent appraiser|\bia\b|policy basis|carrier position|claim position|legal team|doi|department of insurance|denied right to appraisal)\b/i.test(value);
 }
 
 function buildRepairAttachmentBullets(exportModel: ExportModel): string[] {

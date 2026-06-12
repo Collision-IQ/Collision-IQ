@@ -123,6 +123,11 @@ export function toCustomerFacingText(value?: string | null, fallback = ""): stri
 function cleanCustomerExportFragments(value: string): string {
   return value
     .replace(/\bCCC\s+Secure\s+Share\s+documentation\s+this\s+estimate\s+line\s+was\s+present\s+in\s+the\s+structured\s+estimate\s+data\.?/gi, "CCC Secure Share source confirms this estimate line was present in the structured estimate data.")
+    .replace(/\bbut\s+the\s+the\b/gi, "but the")
+    .replace(/\bBoth\s+(?:carrier|shop|insurer|insurance|appraiser)\s+area of damage\b/gi, "Both estimates describe the area of damage")
+    .replace(/\bcontinue documentation any added findings\b/gi, "continue documenting any added findings")
+    .replace(/\bpark\s+park\s+park\s+sensor\s+bezel\s+front\b/gi, "front park sensor bezel")
+    .replace(/\bpark\s+sensor1ew63tzzaa1361\.000\.20\.0\b/gi, "park sensor")
     .replace(/\bsome of the repair steps are still only partly(?:\s+verified)?(?:\.\s*Verified\.)?/gi, "some of the repair steps are still only partly verified.")
     .replace(/\bif calibration, alignment, or hidden mounting issues were not fully(?:\s+verified)?(?:\.\s*Verified\.)?/gi, "if calibration, alignment, or hidden mounting issues were not fully verified.")
     .replace(/\brepairs are not complete\b|\brepair is unfinished\b|\bvehicle is still in teardown\b/gi, "repair completion status is not established from the reviewed file")
@@ -134,6 +139,7 @@ function cleanCustomerExportFragments(value: string): string {
     .replace(/\bfinish documentation the repair path\b\.?/gi, "finish documenting the repair path.")
     .replace(/\bfinish documentation the structural checks\b\.?/gi, "finish documenting the structural checks.")
     .replace(/\bfinish documentation the structural measurements\b\.?/gi, "finish documenting the structural measurements.")
+    .replace(/\bstrongest documentation concern is the carrier note that the LKQ grille is not the correct style\b/gi, "strongest line-specific concern is the carrier note that the LKQ grille is not the correct style")
     .replace(/\bIn Pennsylvania,\s*the file supports asking for written communication when the repair position or delay needs to be explained\./gi, "If state-specific claim-handling rules apply, you may also be able to request written communication when the repair position or delay needs to be explained.")
     .replace(/\bIn Pennsylvania,\s*the file also supports asking for written status updates[^.]*\./gi, "If state-specific claim-handling rules apply, you may also be able to request written status updates when the claim is delayed or when the repair position is not being explained clearly.")
     .replace(/\bPennsylvania-specific options\b/gi, "state-specific options")

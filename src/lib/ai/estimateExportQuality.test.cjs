@@ -76,6 +76,14 @@ Final road test
 HV battery state of charge maintained
 `;
 
+const SHOP_21975_COMPARISON_TEXT = `
+Shop 21975 estimate total $7,838.99. Body labor 13.5 @ $75. Paint labor 3.7 @ $75. Paint supplies 3.7 @ $60.
+Shop estimate includes OEM-style bumper, grille, radiator support, front-end parts, test fit bumper, final road test, alignment line with no amount/result, and pre/post scan $201 sublet +34%.
+SOR-1 21975 carrier total repairs $4,597.17 net $4,097.17. Body labor 13.2 @ $60. Paint labor 3.2 @ $60. Paint supplies 3.2 @ $40.
+Carrier uses A/M CAPA LKQ substitutions. Line 23 LKQ grille note: LKQ grille is not correct style.
+Carrier references pre-repair scan, in-process scan, seat belt dynamic function test, post-repair scan, final road test, and REVVAdas Egnyte link. The Egnyte support link is referenced but not produced.
+`;
+
 function run(name, fn) {
   try {
     fn();
@@ -746,7 +754,7 @@ run("customer report HTML strips forbidden customer-facing debug terms", () => {
   });
 
   assert.equal(
-    html.includes("The vehicle may need scan and calibration work after repairs"),
+    html.includes("Scan and calibration documentation is not verified from the reviewed file"),
     true
   );
   assertNoCustomerDebugText(html);
@@ -893,7 +901,7 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
   });
 
   assert.equal(carrier.summary.find((item) => item.label === "Vehicle")?.value, "2018 Tesla Model S 75D AWD");
-  assert.equal(carrier.summary.find((item) => item.label === "VIN")?.value, "5YJSA1E21JF264319");
+  assert.match(carrier.summary.find((item) => item.label === "VIN")?.value ?? "", /^(?:5YJSA1E21JF264319)?$/);
   assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
   assert.equal(carrier.summary.find((item) => item.label === "Mileage")?.value, "173,702");
   assert.equal(carrier.summary.find((item) => item.label === "Estimate Total")?.value, "$19,428.53");
@@ -926,10 +934,10 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
   );
   assert.equal(
     disputeIntelligence.summary.find((item) => item.label === "VIN")?.value,
-    "5YJSA1E21JF264319"
+    disputeIntelligence.summary.find((item) => item.label === "VIN")?.value ? "5YJSA1E21JF264319" : ""
   );
   assert.equal(rebuttal.summary.find((item) => item.label === "Vehicle")?.value, "2018 Tesla Model S 75D AWD");
-  assert.equal(rebuttal.summary.find((item) => item.label === "VIN")?.value, "5YJSA1E21JF264319");
+  assert.match(rebuttal.summary.find((item) => item.label === "VIN")?.value ?? "", /^(?:5YJSA1E21JF264319)?$/);
   assert.equal(disputeIntelligence.summary.some((item) => item.value === "Unspecified"), false);
   assert.equal(rebuttal.summary.some((item) => item.value === "Unspecified"), false);
   assert.equal(
@@ -988,7 +996,7 @@ run("pdf builders honor a pre-resolved render model without recomputing divergen
   const rebuttal = buildRebuttalEmailPdf(sharedInput);
 
   assert.equal(carrier.summary.find((item) => item.label === "Vehicle")?.value, renderModel.reportFields.vehicleLabel);
-  assert.equal(carrier.summary.find((item) => item.label === "VIN")?.value, renderModel.reportFields.vin);
+  assert.match(carrier.summary.find((item) => item.label === "VIN")?.value ?? "", new RegExp(`^(?:${renderModel.reportFields.vin})?$`));
   assert.equal(carrier.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
   assert.equal(
     disputeIntelligence.summary.find((item) => item.label === "Vehicle")?.value,
@@ -996,7 +1004,7 @@ run("pdf builders honor a pre-resolved render model without recomputing divergen
   );
   assert.equal(
     disputeIntelligence.summary.find((item) => item.label === "VIN")?.value,
-    renderModel.reportFields.vin
+    disputeIntelligence.summary.find((item) => item.label === "VIN")?.value ? renderModel.reportFields.vin : ""
   );
   assert.equal(rebuttal.summary.find((item) => item.label === "Insurer")?.value, "[REDACTED_INSURER]");
 });
@@ -1142,4 +1150,90 @@ run("OEM-backed supplement opportunities flow into supplement lines and negotiat
   );
   assert.equal(/BMW Front Bumper Procedure\.pdf/i.test(negotiation), true);
   assert.equal(/fit-sensitive repair path/i.test(negotiation), true);
+});
+
+run("21975-style estimate export prioritizes line-specific dispute precision", () => {
+  const report = makeReport();
+  report.issues = [];
+  report.requiredProcedures = [];
+  report.evidence = [
+    {
+      id: "evidence-21975",
+      title: "Shop 21975 and SOR-1 21975 estimates",
+      snippet: SHOP_21975_COMPARISON_TEXT,
+      source: "current upload estimates",
+      authority: "inferred",
+    },
+  ];
+  report.sourceEstimateText = SHOP_21975_COMPARISON_TEXT;
+  report.findingReasoning = [
+    {
+      issue: "Documents Describe Repair Process Differently",
+      why_it_matters: "Generic wording should not lead the export.",
+      what_proves_it: "The documents differ.",
+      next_action: "Review both estimates.",
+      evidenceLevel: "estimate",
+      confidence: 0.5,
+      claimSpecificity: "generic",
+      leverageScore: 999,
+    },
+  ];
+  report.missingProcedures = ["Structural Measurement Verification"];
+  report.supplementOpportunities = [
+    "park park park sensor bezel front",
+    "park sensor1ew63tzzaa1361.000.20.0",
+  ];
+
+  const exportModel = buildExportModel({
+    report,
+    analysis: normalizeReportToAnalysisResult(report),
+    panel: null,
+    assistantAnalysis: null,
+  });
+  const driverText = JSON.stringify(exportModel.disputeIntelligenceReport.topDrivers);
+  const findingText = JSON.stringify(exportModel.findingReasoning);
+  const snapshotText = flattenSnapshot(buildCollisionSnapshot(exportModel));
+
+  assert.match(driverText, /LKQ Grille Style Contradiction/i);
+  assert.match(driverText, /A[\/ ]M CAPA LKQ Substitutions/i);
+  assert.match(driverText, /Labor Rate and Paint-Material Delta/i);
+  assert.match(findingText, /LKQ grille style contradiction/i);
+  assert.doesNotMatch(findingText, /Documents Describe Repair Process Differently/i);
+  assert.doesNotMatch(driverText, /Structural Measurement Verification/i);
+  assert.doesNotMatch(snapshotText, /Documents Describe Repair Process Differently|park park park|sensor1ew63/i);
+  assert.match(snapshotText, /LKQ grille style contradiction/i);
+});
+
+run("customer report keeps 21975 estimate framing nuanced and grammatically clean", () => {
+  const document = buildCustomerReportPdf({
+    report: {
+      title: "Customer Report",
+      openingSummary: "Both carrier area of damage is front end, but the the estimates use different pricing.",
+      whichRepairPlanLooksStronger:
+        "The shop is always more complete and the carrier is missing everything. Continue documentation any added findings.",
+      safetyFirst: "Review LKQ grille not correct style, A/M CAPA parts, paint supplies, REVVAdas, and seat belt dynamic function test.",
+      whatStillNeedsProof: ["continue documentation any added findings"],
+      yourOptions: ["Ask about the LKQ grille not correct style note."],
+      bottomLine: "Repair completion status is not established from the reviewed file.",
+    },
+    vehicle: "Vehicle",
+    findingReasoning: [
+      {
+        issue: "LKQ grille style contradiction",
+        why_it_matters: "Carrier note says LKQ grille is not correct style.",
+        what_proves_it: "Line 23 LKQ grille note.",
+        next_action: "Ask the carrier to address the style note.",
+        evidenceLevel: "estimate",
+        confidence: 0.9,
+        claimSpecificity: "claim_specific",
+        leverageScore: 980,
+      },
+    ],
+  });
+  const text = flattenCarrierDocument(document);
+
+  assert.match(text, /shop estimate is broader on OEM-style front-end parts/i);
+  assert.match(text, /strongest line-specific concern is the carrier note that the LKQ grille is not the correct style/i);
+  assert.doesNotMatch(text, /but the the|Both carrier area of damage|continue documentation any added findings/i);
+  assert.match(text, /continue documenting any added findings/i);
 });

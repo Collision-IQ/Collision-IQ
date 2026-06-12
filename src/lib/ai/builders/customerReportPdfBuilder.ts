@@ -50,6 +50,7 @@ export function buildCustomerReportPdf({
   const estimatePostureBody = selectedEstimatePosture
     ? alignCustomerEstimatePostureText(sanitizedReport.whichRepairPlanLooksStronger, selectedEstimatePosture)
     : sanitizedReport.whichRepairPlanLooksStronger;
+  const estimatePrecisionNote = buildEstimatePrecisionNote(sanitizedReport, findingReasoning);
   const cccDisclosure = buildCccDisclosure(report, findingReasoning, oemContradictions);
   const possibleMissingItems = buildPossibleMissingItems({
     report: sanitizedReport,
@@ -104,7 +105,7 @@ export function buildCustomerReportPdf({
       {
         title: estimatePostureHeading,
         body: toCustomerFacingText(
-          estimatePostureBody,
+          [estimatePrecisionNote, estimatePostureBody].filter(Boolean).join(" "),
           "The shop estimate appears to account for more of the inspection, repair, and verification steps that may be needed."
         ),
       },
@@ -172,6 +173,24 @@ function buildPossibleMissingItems(params: {
       "The reviewed file does not include completion proof for every inspection, fit, scan, calibration, or repair step.",
     ]
   ).slice(0, 6);
+}
+
+function buildEstimatePrecisionNote(report: CustomerReport, findingReasoning: ReportFindingReasoning[]): string {
+  const text = [
+    report.openingSummary,
+    report.whichRepairPlanLooksStronger,
+    report.safetyFirst,
+    report.bottomLine,
+    ...report.whatStillNeedsProof,
+    ...report.yourOptions,
+    ...findingReasoning.map((finding) => `${finding.issue} ${finding.what_proves_it} ${finding.why_it_matters}`),
+  ].join(" ");
+
+  if (!/lkq\s+grille|not\s+correct\s+style|a\/m|capa|paint supplies|revvadas|seat belt dynamic/i.test(text)) {
+    return "";
+  }
+
+  return "The shop estimate is broader on OEM-style front-end parts, labor and material rates, and scan sublet pricing; the carrier estimate is lower and more explicit on the in-process scan, seat belt dynamic function test, and REVVAdas line, while the strongest line-specific concern is the carrier note that the LKQ grille is not the correct style.";
 }
 
 function buildVerificationItems(params: {

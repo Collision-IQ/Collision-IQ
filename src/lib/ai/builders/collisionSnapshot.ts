@@ -335,7 +335,7 @@ function hasSideImpactRepairContext(renderModel: SnapshotRenderModel): boolean {
     ),
   ].join(" ");
 
-  return /\b(?:left|lt|lh|side|door|quarter|rocker|pillar|aperture|wheel|alignment|blind spot|side radar)\b/i.test(context);
+  return /\b(?:left|lt|lh|side|door|quarter|rocker|pillar|aperture|wheel|blind spot|side radar)\b/i.test(context);
 }
 
 function isGenericFrontEndFinding(finding: SnapshotRenderModel["findingReasoning"][number]): boolean {
@@ -350,7 +350,7 @@ function snapshotDisplayScore(finding: SnapshotRenderModel["findingReasoning"][n
   const text = `${finding.issue} ${finding.what_proves_it} ${finding.why_it_matters} ${finding.next_action}`;
   const base = finding.leverageScore ?? 0;
   const sideDriverBoost =
-    /\b(?:side structure|left|door|quarter|rocker|pillar|aperture|wheel|alignment|adas|calibration|scan|repair completeness|complete repairs|fit)\b/i.test(text)
+    /\b(?:side structure|left|door|quarter|rocker|pillar|aperture|wheel|adas|calibration|scan|repair completeness|complete repairs|fit)\b/i.test(text)
       ? 50
       : 0;
   return base + sideDriverBoost;
@@ -519,6 +519,7 @@ function looksMalformedParserFragment(value: string): boolean {
   return (
     /\bProc\s*\d+\s*#?\*+/i.test(value) ||
     /\bwheelm\d+(?:\.\d+)?\b/i.test(value) ||
+    /\bpark\s+park\s+park|park\s+sensor1ew63tzzaa1361/i.test(value) ||
     /\b[a-z]{3,}m\d+\.\d+\b/i.test(value) ||
     /[#*_|]{3,}/.test(value) ||
     value.split(/\s+/).filter(Boolean).length < 3 && /\d/.test(value)

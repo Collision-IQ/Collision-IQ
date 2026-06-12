@@ -1160,31 +1160,13 @@ run("DOI packet is blocked when complaint prerequisites are missing", () => {
     document.sections.some((section) =>
       section.title === "DOI Readiness Status" &&
       section.bullets.some((bullet) =>
-        bullet.includes("The file currently supports an appraisal-process and repair-scope dispute. It does not yet establish a verified unfair claims handling violation because no confirmed regulatory citation, written denial, delay log, refusal-to-review documentation, or communication timeline has been isolated.")
+        bullet.includes("No verified legal violation is asserted unless verified legal authority and documented claim-handling conduct are both present.")
       )
     )
   );
-  assert.deepEqual(
-    document.sections.map((section) => section.title),
-    [
-      "Claim Handling / Appraisal Dispute Summary",
-      "What The User Reports",
-      "Reported Premature Appraisal Award Demand",
-      "Reported Restriction On Continuing Repairs",
-      "Reported Post-Repair Appraisal Denial Concerns",
-      "What Uploaded Documents Support",
-      "What Is Not Yet Verified",
-      "Why The Timing Dispute Matters",
-      "Documents Needed Before Filing",
-      "Supporting Repair/Scope Attachments",
-      "Recommended Next Documentation",
-      "DOI Readiness Status",
-      "User-Provided Chat Context",
-      "What Is Not Yet Proven",
-      "Missing Complaint Evidence",
-      "Documents Needed Before Filing",
-    ]
-  );
+  assert.ok(document.sections.some((section) => section.title === "Current Upload Provenance"));
+  assert.ok(document.sections.some((section) => section.title === "User-Provided Chat Context"));
+  assert.doesNotMatch(JSON.stringify(document), /Reported Premature Appraisal Award Demand|Reported Restriction On Continuing Repairs|Reported Post-Repair Appraisal Denial Concerns/i);
   assert.doesNotMatch(JSON.stringify(document), /insurer violated law/i);
 });
 
@@ -1235,7 +1217,7 @@ run("DOI readiness does not treat technical repair disputes as regulatory miscon
   assert.ok(!document.sections.some((section) => section.title === "Optional Draft Complaint"));
 });
 
-run("DOI and Policy reviews include appraisal-process chat context without treating it as verified misconduct", () => {
+run("DOI and Policy reviews disclose stale appraisal chat context without promoting it", () => {
   const doiDocument = buildDoiComplaintPacketPdf({
     report: REPORT,
     analysis: ANALYSIS,
@@ -1257,13 +1239,11 @@ run("DOI and Policy reviews include appraisal-process chat context without treat
   assert.ok(policyContext);
   assert.ok(doiDisputeSummary);
   assert.ok(policyDisputeFocus);
-  assert.match(JSON.stringify(doiContext), /appraisal-process dispute/i);
-  assert.match(JSON.stringify(doiContext), /written carrier or IA demand/i);
-  assert.match(JSON.stringify(policyContext), /Policy\/appraisal language/i);
-  assert.match(JSON.stringify(doiDocument), /Reported Premature Appraisal Award Demand/i);
-  assert.match(JSON.stringify(doiDocument), /Reported Restriction On Continuing Repairs/i);
-  assert.match(JSON.stringify(doiDocument), /Reported Post-Repair Appraisal Denial Concerns/i);
-  assert.match(JSON.stringify(policyDocument), /amount-of-loss timing/i);
+  assert.match(JSON.stringify(doiContext), /prior_chat_context may mention an appraisal-process dispute/i);
+  assert.match(JSON.stringify(policyContext), /prior_chat_context may mention an appraisal-process or claim-handling concern/i);
+  assert.match(JSON.stringify(policyDisputeFocus), /Policy rights are insufficient because the current file does not include policy language/i);
+  assert.match(JSON.stringify(doiDocument), /Current upload evidence source: current_upload estimates only/i);
+  assert.doesNotMatch(JSON.stringify({ doiDocument, policyDocument }), /The user reports|appraisal may later be resisted|before the shop can continue|premature demand|repair-continuation restriction/i);
   assert.doesNotMatch(
     JSON.stringify({ doiDocument, policyDocument }),
     /insurer violated law|verified legal violation|claim-\[REDACTED_CLAIM\]|policy-\[REDACTED_POLICY\]|\buploaded document\b|Same rationale as earlier|Current estimate analysis; citation still needed|Calibration Verification Open/i

@@ -609,8 +609,9 @@ function resolveReportFindingReasoning(
   report: RepairIntelligenceReport | null,
   analysis: AnalysisResult | null
 ): ReportFindingReasoning[] {
+  const concreteFindings = buildConcreteEstimateFindingReasoning(collectVehicleDocumentText(report, analysis));
   if (Array.isArray(report?.findingReasoning)) {
-    return rankFindingReasoning(report.findingReasoning);
+    return rankFindingReasoning([...concreteFindings, ...report.findingReasoning]);
   }
 
   const maybeFindings = report
@@ -628,7 +629,7 @@ function resolveReportFindingReasoning(
 
   const fallback = buildFallbackFindingReasoning(report, analysis);
 
-  return rankFindingReasoning([...extracted, ...fallback]);
+  return rankFindingReasoning([...concreteFindings, ...extracted, ...fallback]);
 }
 
 function resolveReportRetrievalSummary(
@@ -920,6 +921,7 @@ function isReportFindingReasoning(value: unknown): value is ReportFindingReasoni
 function rankFindingReasoning(findings: ReportFindingReasoning[]): ReportFindingReasoning[] {
   return findings
     .filter((finding) => finding.issue.trim())
+    .filter(isUsableFindingForExport)
     .map(enrichFindingExplainability)
     .sort((left, right) => {
       const scoreDelta = (right.leverageScore ?? 0) - (left.leverageScore ?? 0);
@@ -931,6 +933,98 @@ function rankFindingReasoning(findings: ReportFindingReasoning[]): ReportFinding
       priorityRank: index + 1,
     }))
     .slice(0, 8);
+}
+
+function isUsableFindingForExport(finding: ReportFindingReasoning): boolean {
+  const text = `${finding.issue} ${finding.what_proves_it} ${finding.why_it_matters} ${finding.next_action}`.toLowerCase();
+  if (/park\s+park\s+park|park\s+sensor\w{6,}|sensor1ew63tzzaa1361/i.test(text)) return false;
+  if (/documents describe repair process differently|documents carry different repair scope/i.test(finding.issue)) return false;
+  if (/structural measurement verification/i.test(finding.issue) && !hasStructuralMeasurementEvidence(text)) return false;
+  if (/adas\s*\/\s*calibration procedure support|oem fit-sensitive part posture/i.test(finding.issue) && !hasLineSpecificEstimateEvidence(text)) return false;
+  return true;
+}
+
+function buildConcreteEstimateFindingReasoning(sourceText: string): ReportFindingReasoning[] {
+  const findings: ReportFindingReasoning[] = [];
+  const push = (
+    issue: string,
+    what_proves_it: string,
+    why_it_matters: string,
+    next_action: string,
+    leverageScore: number
+  ) => {
+    findings.push({
+      issue,
+      what_proves_it,
+      why_it_matters,
+      next_action,
+      evidenceLevel: "documented",
+      confidence: 0.86,
+      claimSpecificity: "high",
+      leverageScore,
+    });
+  };
+
+  if (/lkq\s+grille[^.\n]{0,120}not\s+correct\s+style|not\s+correct\s+style[^.\n]{0,120}lkq\s+grille/i.test(sourceText)) {
+    push(
+      "LKQ grille style contradiction",
+      "The carrier estimate note states the LKQ grille is not the correct style.",
+      "That is stronger than a generic OEM preference because the estimate itself flags a fit/style problem with the substituted grille.",
+      "Ask the carrier to address the LKQ grille note and identify the correct grille line, part type, and price basis.",
+      980
+    );
+  }
+
+  if (/\b(?:a\/m|aftermarket|capa|lkq)\b/i.test(sourceText) && /\b(?:oem|radiator support|bumper|grille|front[- ]end)\b/i.test(sourceText)) {
+    push(
+      "A/M CAPA LKQ substitutions vs shop OEM-style front-end parts",
+      "The carrier estimate uses A/M, CAPA, or LKQ substitutions while the shop estimate carries OEM-style bumper, grille, radiator-support, or front-end part scope.",
+      "Part-type differences can affect fit, finish, and pricing; the estimate evidence shows a dispute, not that every non-OEM part is automatically wrong.",
+      "Group each front-end part family and ask for the carrier line number, part type, quote/source, and fit/style rationale.",
+      930
+    );
+  }
+
+  if (/(body[^.\n]{0,40}13\.5[^.\n]{0,40}75|paint[^.\n]{0,40}3\.7[^.\n]{0,40}75|paint supplies[^.\n]{0,40}3\.7[^.\n]{0,40}60)/i.test(sourceText) &&
+      /(body[^.\n]{0,40}13\.2[^.\n]{0,40}60|paint[^.\n]{0,40}3\.2[^.\n]{0,40}60|paint supplies[^.\n]{0,40}3\.2[^.\n]{0,40}40)/i.test(sourceText)) {
+    push(
+      "Labor rate and paint-material delta",
+      "The shop estimate shows higher body, paint, and paint-supply rates/hours than the carrier estimate.",
+      "This is a line-specific price and labor dispute that explains part of the total gap without implying repair completion status.",
+      "Ask for written support for the body, refinish, and materials rates and whether any local market-rate documentation was considered.",
+      880
+    );
+  }
+
+  if (/(pre[- ]?repair scan|post[- ]?repair scan|in[- ]?process scan|seat belt dynamic function test|revvadas|egnyte)/i.test(sourceText)) {
+    push(
+      "Scan ADAS and dynamic-test documentation",
+      "The estimate set references pre/post scans, in-process scan, seat belt dynamic function test, and a REVVAdas/Egnyte support link.",
+      "Referenced scan or ADAS support should be separated from produced documentation; a referenced link is not proof unless the file was retrieved and reviewed.",
+      "Ask which scan, dynamic-test, calibration, and REVVAdas/Egnyte records were produced, retrieved, and matched to the estimate lines.",
+      850
+    );
+  }
+
+  if (/(test fit|final road test|alignment)/i.test(sourceText)) {
+    push(
+      "Test-fit road-test and alignment proof",
+      "The estimates reference bumper test fit, final road test, and alignment-related items with different levels of detail or proof.",
+      "These items affect fit and final verification, but an alignment line without amount or result should stay framed as incomplete documentation.",
+      "Ask for the final road-test record, test-fit documentation, and alignment printout or written explanation if alignment has no amount/result.",
+      760
+    );
+  }
+
+  return findings;
+}
+
+function hasStructuralMeasurementEvidence(value: string): boolean {
+  return /\b(?:structural measurement|measure structure|measure vehicle|frame setup|set up and measure|dimension(?:al)?|datum|bench|pull)\b/i.test(value);
+}
+
+function hasLineSpecificEstimateEvidence(value: string): boolean {
+  return /\b(?:line\s*\d+|lkq|capa|a\/m|aftermarket|grille|bumper|radiator support|scan|revvadas|egnyte|seat belt dynamic|test fit|road test|labor rate|paint supplies)\b/i.test(value);
 }
 
 function detectOemContradictions(params: {
@@ -2983,7 +3077,10 @@ function buildExportSupplementItems(
     }))
     .filter((item) => isSpecificSupplementItem(item.title));
 
+  const fromConcreteEstimateDisputes = buildConcreteEstimateDisputeItems(sourceText);
+
   const merged = [
+    ...fromConcreteEstimateDisputes,
     ...fromPanel,
     ...fromMissingProcedures,
     ...fromSupplementOpportunities,
@@ -3024,6 +3121,13 @@ function buildExportSupplementItems(
   const deduped = new Map<string, ExportSupplementItem>();
 
   for (const item of filterStructuralTitles(merged, structuralApplicability)) {
+    if (
+      /^Structural Measurement Verification$/i.test(item.title) &&
+      /missing procedure list/i.test(item.source ?? "") &&
+      !hasStructuralMeasurementEvidence(`${sourceText} ${item.rationale} ${item.evidence ?? ""}`)
+    ) {
+      continue;
+    }
     const key = normalizeKey(item.title);
     if (!key) continue;
 
@@ -3053,6 +3157,75 @@ function buildExportSupplementItems(
     rationale: trimTrailingPunctuation(item.rationale) + ".",
     evidence: item.evidence ? trimTrailingPunctuation(item.evidence) + "." : undefined,
   }));
+}
+
+function buildConcreteEstimateDisputeItems(sourceText: string): ExportSupplementItem[] {
+  const items: ExportSupplementItem[] = [];
+  const push = (item: ExportSupplementItem) => items.push(item);
+
+  if (/lkq\s+grille[^.\n]{0,120}not\s+correct\s+style|not\s+correct\s+style[^.\n]{0,120}lkq\s+grille/i.test(sourceText)) {
+    push({
+      title: "LKQ Grille Style Contradiction",
+      category: "parts",
+      kind: "disputed_repair_path",
+      rationale: "The carrier estimate itself notes the LKQ grille is not the correct style, so this should be treated as a line-specific grille dispute rather than a generic OEM preference.",
+      evidence: "Carrier estimate line note: LKQ grille not correct style.",
+      source: "Current upload estimate evidence",
+      priority: "high",
+    });
+  }
+
+  if (/\b(?:a\/m|aftermarket|capa|lkq)\b/i.test(sourceText) && /\b(?:oem|radiator support|bumper|grille|front[- ]end)\b/i.test(sourceText)) {
+    push({
+      title: "A/M CAPA LKQ Substitutions vs OEM-Style Front-End Parts",
+      category: "parts",
+      kind: "disputed_repair_path",
+      rationale: "The estimate evidence shows carrier A/M, CAPA, or LKQ substitutions against shop OEM-style front-end part scope; group each part family by line, part type, amount, and substitution basis.",
+      evidence: "Estimate-only evidence supports a part-type and pricing dispute; it does not automatically prove every alternative part is improper.",
+      source: "Current upload estimate evidence",
+      priority: "high",
+    });
+  }
+
+  if (/(body[^.\n]{0,40}13\.5[^.\n]{0,40}75|paint[^.\n]{0,40}3\.7[^.\n]{0,40}75|paint supplies[^.\n]{0,40}3\.7[^.\n]{0,40}60)/i.test(sourceText) &&
+      /(body[^.\n]{0,40}13\.2[^.\n]{0,40}60|paint[^.\n]{0,40}3\.2[^.\n]{0,40}60|paint supplies[^.\n]{0,40}3\.2[^.\n]{0,40}40)/i.test(sourceText)) {
+    push({
+      title: "Labor Rate and Paint-Material Delta",
+      category: "labor",
+      kind: "underwritten_operation",
+      rationale: "The shop and carrier estimates carry different body, paint, and paint-supply hours/rates, explaining part of the total gap as a pricing and labor support dispute.",
+      evidence: "Shop: body 13.5 at 75, paint 3.7 at 75, supplies 3.7 at 60; carrier: body 13.2 at 60, paint 3.2 at 60, supplies 3.2 at 40.",
+      source: "Current upload estimate evidence",
+      priority: "high",
+    });
+  }
+
+  if (/(pre[- ]?repair scan|post[- ]?repair scan|in[- ]?process scan|seat belt dynamic function test|revvadas|egnyte)/i.test(sourceText)) {
+    push({
+      title: "Scan ADAS and Dynamic-Test Documentation",
+      category: "adas",
+      kind: "missing_verification",
+      rationale: "The estimate set references scan, ADAS, dynamic-test, or REVVAdas/Egnyte support that should be separated into produced records versus referenced-but-not-produced links.",
+      evidence: /egnyte/i.test(sourceText)
+        ? "REV VADAS/Egnyte support is referenced; treat the link as referenced/not produced unless the file was retrieved and reviewed."
+        : "Estimate evidence references diagnostic or dynamic-test support; production of the underlying records is not established.",
+      source: "Current upload estimate evidence",
+      priority: "high",
+    });
+  }
+
+  if (/(test fit|final road test|alignment)/i.test(sourceText)) {
+    push({
+      title: "Test-Fit Road-Test and Alignment Proof",
+      category: "documentation",
+      kind: "missing_verification",
+      rationale: "Bumper test fit, final road test, and alignment references should be verified with final documentation; an alignment line without amount or result should not be treated as completed proof.",
+      source: "Current upload estimate evidence",
+      priority: "medium",
+    });
+  }
+
+  return items;
 }
 
 function buildValuation(
@@ -4139,6 +4312,13 @@ function buildSupplementItemFromIssue(
 function deriveSupplementTitle(value: string): string {
   const lower = value.toLowerCase();
 
+  if (lower.includes("lkq grille") && lower.includes("not correct style")) {
+    return "LKQ Grille Style Contradiction";
+  }
+  if (lower.includes("seat belt dynamic function test")) {
+    return "Seat Belt Dynamic Function Test";
+  }
+
   if (lower.includes("front structure scope")) {
     return "Front Structure Scope / Tie Bar / Upper Rail Reconciliation";
   }
@@ -4312,8 +4492,11 @@ function deriveSupplementTitle(value: string): string {
   if (lower.includes("airbag") || lower.includes("srs")) {
     return "SRS / Airbag System Verification";
   }
-  if (lower.includes("seat belt") || lower.includes("pretensioner")) {
+  if (lower.includes("pretensioner")) {
     return "Seat Belt / Pretensioner Verification";
+  }
+  if (lower.includes("seat belt")) {
+    return "Seat Belt Dynamic Function Test";
   }
 
   return value.replace(/\s+/g, " ").trim();

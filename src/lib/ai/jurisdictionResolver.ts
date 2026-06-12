@@ -313,6 +313,7 @@ function resolvePolicyGoverningLaw(text: string): ResolvedJurisdiction | null {
       new RegExp(`\\blaws?\\s+of\\s+(?:the\\s+Commonwealth\\s+of\\s+)?${state}\\b`, "i"),
       new RegExp(`\\b(?:${state}|${code})\\s+law\\s+(?:applies|governs)\\b`, "i"),
       new RegExp(`\\b(?:declarations?|policy\\s+form|form\\s+state|policy\\s+state|rated\\s+state|risk\\s+state)\\b(?:(?!\\n).){0,140}\\b(?:${state}|${code})\\b`, "i"),
+      new RegExp(`\\b(?:${state}|${code})\\b(?:(?!\\n).){0,120}\\b(?:financial\\s+responsibility|identification\\s+card|insurance\\s+id\\s+card|id\\s+card|policy\\s+declarations?)\\b`, "i"),
       new RegExp(`\\b(?:financial\\s+responsibility|identification\\s+card|insurance\\s+id\\s+card|id\\s+card)\\b(?:(?!\\n).){0,120}\\b(?:${state}|${code})\\b`, "i"),
     ];
     if (patterns.some((pattern) => pattern.test(text))) {

@@ -476,10 +476,10 @@ function buildUserProvidedContextBullets(value: string | null | undefined, repor
   }
 
   return [
-    "User-provided context reports an appraisal-process dispute or claim-handling concern. This is treated as user-provided context, not verified document evidence.",
+    "prior_chat_context may mention an appraisal-process or claim-handling concern, but it is not promoted to a verified or user-reported fact unless the current upload continues and documents that issue.",
     ...(reportedIssues.length ? [`Reported issue category: ${dedupeStrings(reportedIssues).join("; ")}.`] : []),
-    "The context should be used to identify what policy issue to review, including appraisal language, disagreement-resolution terms, repair-completion posture, award-letter timing, amount-of-loss maturity, and any written carrier or IA demand.",
-    "Policy/appraisal language, written carrier or IA correspondence, appraisal invocation, inspection notes, and any legal-team correspondence must be reviewed before stating a policy position.",
+    "Policy rights remain insufficient without policy language, written carrier or IA correspondence, appraisal invocation, inspection notes, and any current legal-team correspondence.",
+    "Do not state award timing, repair-continuation restrictions, or post-repair appraisal denial unless those facts are established by current_upload or explicit active_case_context.",
   ];
 }
 
