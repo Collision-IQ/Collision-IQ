@@ -11,6 +11,7 @@ import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
 import { buildAnnotatedEstimateReviewModel } from "@/lib/ai/builders/estimateScrubberPdfBuilder";
 import {
   buildAnnotatedCitationDensityEstimatePdf,
+  CitationDensityAnnotationError,
   dataUrlToPdfBytes,
   getAnnotatedEstimateExport,
   type AnnotationMode,
@@ -66,6 +67,7 @@ export async function GET(request: Request) {
       artifactId,
       exportId: artifactId,
       filename: entry.filename,
+      citationDensityArtifactVersion: entry.citationDensityArtifactVersion,
       annotationMetadata: entry.annotationMetadata,
     }, {
       headers: { "Cache-Control": "no-store" },
@@ -217,6 +219,7 @@ export async function POST(request: Request) {
         sourceDocumentId: selection.selectedSourceDocumentId,
         sourcePdfName: selection.selectedSourceLabel,
         selectedEstimateTotal: selection.selectedEstimateTotal,
+        uploadedFileNames: sourceDocuments.map((document) => document.filename).filter(Boolean),
         sourceText: sourceDocument.text,
         findings: roleFindings,
         request: {
@@ -254,6 +257,14 @@ export async function POST(request: Request) {
     }
 
     const primaryOutput = outputs[0];
+    const responseDebugCounts = buildAnnotationDebugCounts(outputs[0]?.debugTrace);
+    logAnnotatedEstimateRoute({
+      ok: true,
+      targetEstimate,
+      selectedSourceDocumentId: primaryOutput?.sourceDocumentId,
+      debugCounts: responseDebugCounts,
+      outputCount: outputs.length,
+    });
 
     return NextResponse.json({
       ok: true,
@@ -266,7 +277,7 @@ export async function POST(request: Request) {
       unresolvedAnchorCount,
       annotationMetadata: primaryOutput?.annotationMetadata ?? [],
       debugTrace: outputs[0]?.debugTrace,
-      debugCounts: buildAnnotationDebugCounts(outputs[0]?.debugTrace),
+      debugCounts: responseDebugCounts,
       annotationMetadataUrl: primaryOutput?.annotationMetadataUrl,
       warnings: [...aggregateWarnings],
       reviewTarget: primaryOutput
@@ -284,7 +295,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
 
-    console.error("[citation-density-annotated-estimate] failed", {
+    if (error instanceof CitationDensityAnnotationError) {
+      const debugCounts = buildAnnotationDebugCounts(error.debugTrace);
+      logAnnotatedEstimateRoute({
+        ok: false,
+        error: error.message,
+        debugCounts,
+      });
+      return NextResponse.json({
+        ok: false,
+        error: error.message,
+        userMessage: error.userMessage,
+        debugCounts,
+      }, { status: error.status });
+    }
+
+    logAnnotatedEstimateRoute({
+      ok: false,
       error: error instanceof Error ? error.message : String(error),
     });
     return NextResponse.json({ error: "SERVER_ERROR" }, { status: 500 });
@@ -294,8 +321,16 @@ export async function POST(request: Request) {
 function buildAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof buildAnnotatedCitationDensityEstimatePdf>>["debugTrace"] | undefined) {
   if (!debugTrace) return undefined;
   return {
+    buildCommit: debugTrace.buildCommit,
+    citationDensityArtifactVersion: debugTrace.citationDensityArtifactVersion,
+    uploadedFileNames: debugTrace.uploadedFileNames,
     selectedEstimateFileName: debugTrace.selectedEstimateFileName,
     selectedEstimateTotal: debugTrace.selectedEstimateTotal,
+    actualSourcePdfName: debugTrace.actualSourcePdfName,
+    actualSourcePdfByteLength: debugTrace.actualSourcePdfByteLength,
+    actualSourcePdfPageCount: debugTrace.actualSourcePdfPageCount,
+    extractedTextPageCount: debugTrace.extractedTextPageCount,
+    firstPageTextSample: debugTrace.firstPageTextSample,
     extractedAnchorCount: debugTrace.extractedAnchorCount,
     findingCount: debugTrace.findingCount,
     anchoredFindingCount: debugTrace.anchoredFindingCount,
@@ -310,6 +345,10 @@ function buildAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof buildA
     droppedFindings: debugTrace.droppedFindings,
     rendererDrops: debugTrace.rendererDrops,
   };
+}
+
+function logAnnotatedEstimateRoute(payload: Record<string, unknown>) {
+  console.log(`[citation-density.annotated-estimate] ${JSON.stringify(payload)}`);
 }
 
 function coerceString(value: unknown): string {

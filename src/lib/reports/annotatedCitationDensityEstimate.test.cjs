@@ -102,6 +102,15 @@ async function createBlankSourcePdf(pageCount = 2) {
   return await doc.save();
 }
 
+async function createNoEstimateRowsPdf() {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([612, 792]);
+  page.drawText("Selected PDF cover sheet", { x: 50, y: 730, size: 12, font });
+  page.drawText("This document has extractable text but no deterministic row content.", { x: 50, y: 700, size: 10, font });
+  return await doc.save();
+}
+
 async function createRam21975SourcePdf() {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -636,21 +645,17 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     );
   });
 
-  await run("stored text fallback does not create visible source annotations", async () => {
+  await run("zero extracted PDF anchors fail closed instead of producing appendix-only output", async () => {
     const sourcePdfBytes = await createBlankSourcePdf(1);
-    const result = await buildAnnotatedCitationDensityEstimatePdf({
-      sourcePdfBytes,
-      sourceText: "Line 12 ADAS calibration 1.5 hrs $250.00",
-      findings: [baseFinding()],
-      request: { includeLegend: false, includeSummaryPage: false, annotationMode: "both" },
-    });
-    const pages = await extractPdfPageTexts(result.bytes);
-
-    assert.equal(result.annotatedFindingCount, 0);
-    assert.equal(result.unresolvedAnchorCount, 1);
-    assert.equal(result.annotationMetadata.length, 0);
-    assert.match(pages.join(" "), /Unanchored Citation Density Findings/);
-    assert.doesNotMatch(pages[0], /NEEDS ADAS|NEEDS OEM|NEEDS INVOICE|REFERENCED \/ NOT PRODUCED|ESTIMATE GAP ONLY/);
+    await assert.rejects(
+      buildAnnotatedCitationDensityEstimatePdf({
+        sourcePdfBytes,
+        sourceText: "Line 12 ADAS calibration 1.5 hrs $250.00",
+        findings: [baseFinding()],
+        request: { includeLegend: false, includeSummaryPage: false, annotationMode: "both" },
+      }),
+      /Citation Density could not extract estimate row anchors from the selected estimate PDF/
+    );
   });
 
   await run("generic and corrupted finding labels are suppressed before visible annotation metadata", async () => {
@@ -1087,8 +1092,17 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     assert.equal(json.ok, true);
     assert.equal(json.selectedSourceDocumentId, "carrier-21975");
     assert.equal(json.selectedSourceLabel, "SOR-1 21975.pdf");
+    assert.deepEqual(json.debugCounts.uploadedFileNames, ["Shop 21975.pdf", "SOR-1 21975.pdf"]);
     assert.equal(json.debugCounts.selectedEstimateFileName, "SOR-1 21975.pdf");
     assert.equal(json.debugCounts.selectedEstimateTotal, 4097.17);
+    assert.equal(json.debugCounts.actualSourcePdfName, "SOR-1 21975.pdf");
+    assert.equal(json.debugCounts.actualSourcePdfByteLength, carrierPdfBytes.byteLength);
+    assert.notEqual(json.debugCounts.actualSourcePdfByteLength, shopPdfBytes.byteLength);
+    assert.equal(json.debugCounts.actualSourcePdfPageCount, 12);
+    assert.ok(json.debugCounts.extractedTextPageCount >= 12);
+    assert.match(json.debugCounts.firstPageTextSample, /Carrier 21975 source page 1/);
+    assert.equal(json.debugCounts.citationDensityArtifactVersion, "citation-density-anchors-v3");
+    assert.ok(json.debugCounts.buildCommit);
     assert.ok(json.debugCounts.extractedAnchorCount > 40);
     assert.equal(json.debugCounts.findingCount, 4);
     assert.equal(json.debugCounts.anchoredFindingCount, 4);
@@ -1121,6 +1135,68 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
       .reduce((sum, count) => sum + count, 0);
     assert.equal(originalPageAnnotationCount, 4);
     assert.doesNotMatch(outputPages.join(" "), /No estimate rows could be extracted|Unanchored Citation Density Findings|Repair Operation|Proc Report/);
+  });
+
+  await run("annotated-estimate route fails closed when selected PDF yields zero row anchors", async () => {
+    const noRowsPdfBytes = await createNoEstimateRowsPdf();
+    const dataUrl = `data:application/pdf;base64,${Buffer.from(noRowsPdfBytes).toString("base64")}`;
+    const route = loadAnnotatedEstimateRouteWithMocks({
+      report: {
+        id: "case-no-anchors",
+        artifactIds: ["carrier-no-anchors"],
+        createdAt: new Date().toISOString(),
+        report: { analysis: null, evidenceRegistry: [] },
+      },
+      attachments: [{
+        id: "carrier-no-anchors",
+        filename: "SOR-1 21975.pdf",
+        type: "application/pdf",
+        text: "Carrier estimate total $100.00",
+        imageDataUrl: dataUrl,
+        pageCount: 1,
+      }],
+      findings: [baseFinding({
+        id: "no-anchor-finding",
+        operationLabel: "ADAS calibration",
+        carrierEvidence: {
+          lineNumber: "44",
+          description: "REVVAdas Report",
+          amount: 0,
+          laborHours: null,
+          sourceLabel: "Carrier estimate",
+        },
+      })],
+    });
+
+    const response = await route.POST(new Request("http://localhost/api/reports/citation-density/annotated-estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ caseId: "case-no-anchors", targetEstimate: "auto", includeLegend: false }),
+    }));
+    assert.equal(response.status, 422);
+    const json = await response.json();
+
+    assert.equal(json.ok, false);
+    assert.equal(json.error, "Citation Density could not extract estimate row anchors from the selected estimate PDF. No annotation PDF was produced.");
+    assert.equal(json.userMessage, json.error);
+    assert.equal(json.artifactId, undefined);
+    assert.deepEqual(json.debugCounts.uploadedFileNames, ["SOR-1 21975.pdf"]);
+    assert.equal(json.debugCounts.selectedEstimateFileName, "SOR-1 21975.pdf");
+    assert.equal(json.debugCounts.actualSourcePdfName, "SOR-1 21975.pdf");
+    assert.equal(json.debugCounts.actualSourcePdfByteLength, noRowsPdfBytes.byteLength);
+    assert.equal(json.debugCounts.actualSourcePdfPageCount, 1);
+    assert.equal(json.debugCounts.extractedTextPageCount, 1);
+    assert.match(json.debugCounts.firstPageTextSample, /Selected PDF cover sheet/);
+    assert.equal(json.debugCounts.extractedAnchorCount, 0);
+    assert.equal(json.debugCounts.findingCount, 1);
+    assert.equal(json.debugCounts.anchoredFindingCount, 0);
+    assert.equal(json.debugCounts.unanchoredFindingCount, 1);
+    assert.equal(json.debugCounts.renderedPdfAnnotationCount, 0);
+    assert.equal(json.debugCounts.viewerAnnotationCount, undefined);
+    assert.equal(json.debugCounts.artifactId, undefined);
+    assert.equal(json.debugCounts.renderedPdfArtifactId, undefined);
+    assert.equal(json.debugCounts.metadataArtifactId, undefined);
+    assert.match(json.debugCounts.droppedFindings.map((item) => item.reason).join(" "), /no estimate row anchors extracted/);
   });
 
   await run("extracted PDF rows anchor Ram diagnostic lines only on their source pages", async () => {
