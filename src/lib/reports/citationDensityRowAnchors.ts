@@ -140,12 +140,38 @@ export async function extractPdfWordsWithDiagnostics(bytes: Uint8Array): Promise
   words: PdfWord[];
   diagnostics: PdfTextExtractionDiagnostics;
 }> {
+  const warnings: string[] = [];
+  const polyfillError = await ensurePdfJsNodePolyfills(warnings);
+  if (polyfillError) {
+    return {
+      words: [],
+      diagnostics: {
+        method: "pdfjs-legacy-primary",
+        error: polyfillError,
+        warnings,
+        pageCount: 0,
+        perPageTextLengths: [],
+        perPageTextItemCounts: [],
+        firstNonEmptyTextPage: null,
+        firstNonEmptyTextSample: "",
+      },
+    };
+  }
+
   const primary = await extractPdfWordsWithPdfjs(bytes, "pdfjs-legacy-primary", {
     data: bytes.slice(),
     disableWorker: true,
     useSystemFonts: true,
   }).catch((error) => emptyExtractionDiagnostics("pdfjs-legacy-primary", error));
-  if (primary.words.length > 0) return primary;
+  if (primary.words.length > 0) {
+    return {
+      words: primary.words,
+      diagnostics: {
+        ...primary.diagnostics,
+        warnings: [...warnings, ...primary.diagnostics.warnings],
+      },
+    };
+  }
 
   const fallback = await extractPdfWordsWithPdfjs(bytes, "pdfjs-legacy-node-fallback", {
     data: Uint8Array.from(Buffer.from(bytes)),
@@ -162,6 +188,7 @@ export async function extractPdfWordsWithDiagnostics(bytes: Uint8Array): Promise
     diagnostics: {
       ...fallback.diagnostics,
       warnings: [
+        ...warnings,
         ...primary.diagnostics.warnings,
         primary.diagnostics.error
           ? `Primary pdfjs extraction failed: ${primary.diagnostics.error}; retried with Node fallback options.`
@@ -170,6 +197,41 @@ export async function extractPdfWordsWithDiagnostics(bytes: Uint8Array): Promise
       ],
     },
   };
+}
+
+export async function ensurePdfJsNodePolyfills(warnings: string[]) {
+  if (
+    typeof globalThis.DOMMatrix !== "undefined" &&
+    typeof globalThis.ImageData !== "undefined" &&
+    typeof globalThis.Path2D !== "undefined"
+  ) {
+    return null;
+  }
+
+  try {
+    const canvas = await import("@napi-rs/canvas");
+    const maybeCanvas = canvas as unknown as {
+      DOMMatrix?: unknown;
+      ImageData?: unknown;
+      Path2D?: unknown;
+    };
+    const target = globalThis as unknown as Record<"DOMMatrix" | "ImageData" | "Path2D", unknown>;
+
+    if (typeof globalThis.DOMMatrix === "undefined" && maybeCanvas.DOMMatrix) {
+      target.DOMMatrix = maybeCanvas.DOMMatrix;
+    }
+    if (typeof globalThis.ImageData === "undefined" && maybeCanvas.ImageData) {
+      target.ImageData = maybeCanvas.ImageData;
+    }
+    if (typeof globalThis.Path2D === "undefined" && maybeCanvas.Path2D) {
+      target.Path2D = maybeCanvas.Path2D;
+    }
+
+    warnings.push("Loaded @napi-rs/canvas PDF.js Node polyfills.");
+    return null;
+  } catch (error) {
+    return `Missing PDF.js Node polyfill dependency @napi-rs/canvas: ${error instanceof Error ? error.message : String(error)}`;
+  }
 }
 
 function emptyExtractionDiagnostics(

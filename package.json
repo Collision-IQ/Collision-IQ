@@ -33,6 +33,7 @@
     "@langchain/core": "^1.1.17",
     "@langchain/openai": "^1.2.3",
     "@modelcontextprotocol/sdk": "^1.25.2",
+    "@napi-rs/canvas": "^1.0.0",
     "@prisma/client": "^6.19.0",
     "@tailwindcss/typography": "^0.5.19",
     "@vercel/analytics": "^2.0.1",

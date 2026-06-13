@@ -22,6 +22,7 @@ import {
 import {
   buildEstimateRowAnchorsFromLines,
   buildPdfTextLines,
+  ensurePdfJsNodePolyfills,
   extractPdfWordsWithDiagnostics,
   findBestEstimateRowAnchorForFinding,
   type PdfTextExtractionMethod,
@@ -252,6 +253,8 @@ export const NO_ANCHOR_EXTRACTION_ERROR =
   "Citation Density could not extract estimate row anchors from the selected estimate PDF. No annotation PDF was produced.";
 export const NO_SELECTABLE_TEXT_ERROR =
   "Citation Density could not extract selectable text from the selected estimate PDF. Upload the original CCC estimate PDF or enable OCR/CCC structured estimate extraction.";
+export const PDF_TEXT_EXTRACTION_INFRASTRUCTURE_ERROR =
+  "Citation Density PDF text extraction failed in production because the PDF parser polyfill is unavailable. No annotation PDF was produced.";
 
 const exportCache = new Map<string, {
   bytes: Uint8Array;
@@ -439,6 +442,16 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
 
   if (!anchors.length) {
     warnings.push(NO_ROWS_EXTRACTED_WARNING);
+  }
+
+  if (trace.findingCount > 0 && trace.textExtractionError) {
+    trace.unanchoredFindingCount = trace.findingCount;
+    trace.droppedFindings.push({
+      findingId: "*",
+      reason: "pdf text extraction parser infrastructure error",
+      anchorId: null,
+    });
+    throw new CitationDensityAnnotationError(PDF_TEXT_EXTRACTION_INFRASTRUCTURE_ERROR, trace);
   }
 
   if (trace.findingCount > 0 && trace.extractedTextPageCount === 0) {
@@ -1074,6 +1087,11 @@ function buildAnchorsByPage(anchors: EstimateRowAnchor[]) {
 }
 
 async function extractPdfTextAnchors(bytes: Uint8Array): Promise<TextAnchor[]> {
+  const polyfillError = await ensurePdfJsNodePolyfills([]);
+  if (polyfillError) {
+    throw new Error(polyfillError);
+  }
+
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const loadingTask = pdfjs.getDocument({
     data: bytes.slice(),
