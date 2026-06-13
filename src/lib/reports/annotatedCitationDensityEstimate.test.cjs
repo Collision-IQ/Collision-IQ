@@ -110,22 +110,66 @@ async function createRam21975SourcePdf() {
     page.drawText(`Carrier 21975 source page ${index + 1}`, { x: 42, y: 746, size: 10, font });
   }
   const page2 = doc.getPage(1);
-  page2.drawText("Parts continued", { x: 42, y: 716, size: 10, font });
-  drawFragmentedEstimateRow(page2, font, 23, "LKQ grille Note: not correct style for vehicle", "", "$185.00", 690);
+  page2.drawText("FRONT BUMPER", { x: 42, y: 716, size: 10, font });
+  drawCccEstimateRow(page2, font, 5, "#", "Repl", "A/M CAPA Bumper chrome, w/prk snsr", "1.0", "$487.50", 696);
+  drawCccEstimateRow(page2, font, 8, "*", "Repl", "A/M Side retainer", "0.2", "$24.75", 680);
+  drawCccEstimateRow(page2, font, 10, "**", "Repl", "A/M CAPA Lamp bracket", "0.3", "$38.20", 664);
+  drawCccEstimateRow(page2, font, 11, "<>", "Repl", "A/M Upper cover primed", "0.4", "$112.00", 648);
+  drawCccEstimateRow(page2, font, 13, "S01", "Repl", "A/M Lower deflector", "0.3", "$64.15", 632);
+  drawCccEstimateRow(page2, font, 14, "S01", "Repl", "A/M Filler panel", "0.2", "$42.10", 616);
+  drawCccEstimateRow(page2, font, 15, "", "Repl", "Park sensor outer", "0.2", "$71.25", 600);
+  drawCccEstimateRow(page2, font, 16, "", "Repl", "Park sensor inner", "0.2", "$71.25", 584);
+  drawCccEstimateRow(page2, font, 17, "", "Repl", "Sensor ring", "0.1", "$13.40", 568);
+  drawCccEstimateRow(page2, font, 18, "", "Repl", "Sensor bezels", "0.1", "$18.90", 552);
+  drawCccEstimateRow(page2, font, 21, "Subl", "Rpr", "Test fit-Front bumper", "0.5", "$30.00", 536);
+  page2.drawText("GRILLE", { x: 42, y: 512, size: 10, font });
+  drawCccEstimateRow(page2, font, 23, "LKQ", "Repl", "Grille chrome horizontal bars", "", "$185.00", 492);
+  page2.drawText("NOTE: not correct style for vehicle", { x: 100, y: 478, size: 8, font });
+  drawCccEstimateRow(page2, font, 25, "LKQ", "Repl", "Radiator support", "1.1", "$255.00", 462);
+  drawCccEstimateRow(page2, font, 26, "", "R&I", "Aim headlamps", "0.4", "$24.00", 446);
 
   const page3 = doc.getPage(2);
-  page3.drawText("Vehicle Diagnostics", { x: 42, y: 716, size: 10, font });
-  drawFragmentedEstimateRow(page3, font, 39, "Pre-repair scan", "0.5", "$75.00", 690);
-  drawFragmentedEstimateRow(page3, font, 40, "In-proc repair scan", "0.5", "$75.00", 672);
-  drawFragmentedEstimateRow(page3, font, 41, "Seat belt dynamic function test", "0.4", "$52.00", 654);
-  drawFragmentedEstimateRow(page3, font, 42, "Post-repair scan", "0.5", "$75.00", 636);
-  drawFragmentedEstimateRow(page3, font, 43, "Final road test", "0.3", "$40.00", 618);
-  drawFragmentedEstimateRow(page3, font, 44, "REVVAdas Report", "", "$0.00", 600);
-  page3.drawText("ADAS report available upon request and via this link", { x: 86, y: 586, size: 8, font });
+  page3.drawText("VEHICLE DIAGNOSTICS", { x: 42, y: 716, size: 10, font });
+  drawCccEstimateRow(page3, font, 39, "", "Subl", "Pre-repair scan", "0.5", "$75.00", 696);
+  drawCccEstimateRow(page3, font, 40, "", "Subl", "In-proc repair scan", "0.5", "$75.00", 680);
+  drawCccEstimateRow(page3, font, 41, "", "Subl", "Seat belt dynamic function test", "0.4", "$52.00", 664);
+  drawCccEstimateRow(page3, font, 42, "", "Subl", "Post-repair scan", "0.5", "$75.00", 648);
+  drawCccEstimateRow(page3, font, 43, "", "Subl", "Final road test", "0.3", "$40.00", 632);
+  drawCccEstimateRow(page3, font, 44, "", "Subl", "REVVAdas Report", "", "$0.00", 616);
+  page3.drawText("Egnyte link: https://example.egnyte.com/21975/revvadas-report", { x: 100, y: 602, size: 8, font });
+  page3.drawText("MISCELLANEOUS OPERATIONS", { x: 42, y: 576, size: 10, font });
+  drawCccEstimateRow(page3, font, 46, "", "Rpr", "Color sand polish", "0.5", "$30.00", 556);
+  drawCccEstimateRow(page3, font, 47, "", "Rpr", "Pre-wash vehicle", "0.2", "$12.00", 540);
+  drawCccEstimateRow(page3, font, 48, "", "Rpr", "Clean for delivery", "0.3", "$18.00", 524);
+  drawCccEstimateRow(page3, font, 49, "", "Rpr", "Hazardous waste disposal", "", "$8.00", 508);
+  drawCccEstimateRow(page3, font, 50, "", "R&I", "Battery reset", "0.2", "$12.00", 492);
+  drawCccEstimateRow(page3, font, 51, "", "Rpr", "Corrosion protection", "0.4", "$24.00", 476);
+  drawCccEstimateRow(page3, font, 52, "", "Rpr", "Feather prime block", "0.6", "$36.00", 460);
+  page3.drawText("Subtotal $3,112.75", { x: 42, y: 430, size: 8, font });
 
   const page4 = doc.getPage(3);
-  page4.drawText("Totals / Labor / Paint / Paint Materials", { x: 42, y: 716, size: 10, font });
-  page4.drawText("Body labor total $1,240.00 Paint materials total $385.00 Paint labor rate $58.00", { x: 42, y: 696, size: 8, font });
+  page4.drawText("ESTIMATE TOTALS", { x: 42, y: 716, size: 10, font });
+  page4.drawText("Parts 3,214.95", { x: 42, y: 696, size: 8, font });
+  page4.drawText("Body Labor 13.2 hrs @ $60/hr 792.00", { x: 42, y: 680, size: 8, font });
+  page4.drawText("Paint Labor 3.2 hrs @ $60/hr 192.00", { x: 42, y: 664, size: 8, font });
+  page4.drawText("Paint Supplies 3.2 hrs @ $40/hr 128.00", { x: 42, y: 648, size: 8, font });
+  page4.drawText("Total Cost of Repairs 4,597.17", { x: 42, y: 632, size: 8, font });
+  page4.drawText("Net Cost of Repairs 4,097.17", { x: 42, y: 616, size: 8, font });
+
+  const page5 = doc.getPage(4);
+  page5.drawText("SUPPLEMENT SUMMARY", { x: 42, y: 716, size: 10, font });
+  drawCccEstimateRow(page5, font, 23, "LKQ", "Repl", "Grille chrome horizontal bars deleted/added", "", "$185.00", 696);
+  page5.drawText("NOTE: not correct style for vehicle", { x: 100, y: 682, size: 8, font });
+  drawCccEstimateRow(page5, font, 40, "", "Subl", "In-proc repair scan", "0.5", "$75.00", 666);
+  drawCccEstimateRow(page5, font, 41, "", "Subl", "Seat belt dynamic function test", "0.4", "$52.00", 650);
+  drawCccEstimateRow(page5, font, 43, "", "Subl", "Final road test", "0.3", "$40.00", 634);
+
+  const page6 = doc.getPage(5);
+  page6.drawText("SUPPLEMENT SUMMARY CONTINUED", { x: 42, y: 716, size: 10, font });
+  drawCccEstimateRow(page6, font, 44, "", "Subl", "REVVAdas Report", "", "$0.00", 696);
+  page6.drawText("Egnyte link: https://example.egnyte.com/21975/supplement-revvadas", { x: 100, y: 682, size: 8, font });
+  page6.drawText("Parts total 3,214.95", { x: 42, y: 652, size: 8, font });
+  page6.drawText("Net Cost of Repairs 4,097.17", { x: 42, y: 636, size: 8, font });
 
   const page7 = doc.getPage(6);
   page7.drawText("GEICO disclaimer: scan entries may be abbreviations and are not authorization.", { x: 42, y: 716, size: 8, font });
@@ -141,9 +185,14 @@ async function createRam21975SourcePdf() {
   const page10 = doc.getPage(9);
   page10.drawText("Photo and diagnostic disclaimer: asTech diagnostic terms are not estimate rows.", { x: 42, y: 716, size: 8, font });
 
+  const page11 = doc.getPage(10);
+  page11.drawText("ALTERNATE PARTS SUPPLIERS", { x: 42, y: 716, size: 10, font });
+  drawCccEstimateRow(page11, font, 23, "LKQ", "Supp", "Fenix Parts LKQ grille chrome horizontal bars", "", "$185.00", 696);
+  page11.drawText("NOTE: not correct style for vehicle", { x: 100, y: 682, size: 8, font });
+
   const page12 = doc.getPage(11);
-  page12.drawText("Alternate Parts Supplier", { x: 42, y: 716, size: 10, font });
-  drawFragmentedEstimateRow(page12, font, 23, "LKQ grille alternate supplier page lists used grille not correct style for vehicle", "", "$185.00", 696);
+  page12.drawText("ALTERNATE PARTS SUPPLIERS", { x: 42, y: 716, size: 10, font });
+  drawCccEstimateRow(page12, font, 25, "LKQ", "Supp", "Lentini LKQ radiator support", "", "$255.00", 696);
 
   return await doc.save();
 }
@@ -173,6 +222,15 @@ function drawFragmentedEstimateRow(page, font, line, description, labor, amount,
   page.drawText(description, { x: 82, y, size: 8, font });
   if (labor) page.drawText(labor, { x: 330, y, size: 8, font });
   page.drawText(amount, { x: 412, y, size: 8, font });
+}
+
+function drawCccEstimateRow(page, font, line, symbol, operation, description, labor, amount, y) {
+  page.drawText(String(line), { x: 48, y, size: 8, font });
+  if (symbol) page.drawText(symbol, { x: 66, y, size: 8, font });
+  if (operation) page.drawText(operation, { x: 88, y, size: 8, font });
+  page.drawText(description, { x: 126, y, size: 8, font });
+  if (labor) page.drawText(labor, { x: 350, y, size: 8, font });
+  if (amount) page.drawText(amount, { x: 430, y, size: 8, font });
 }
 
 function baseFinding(overrides = {}) {
@@ -783,14 +841,26 @@ async function run(name, test) {
     const anchorFor = (pageNumber, lineNumber) =>
       anchors.find((anchor) => anchor.pageNumber === pageNumber && anchor.lineNumber === lineNumber);
 
+    assert.ok(anchors.length > 40, `expected more than 40 SOR-1 anchors, got ${anchors.length}`);
+    for (const lineNumber of ["5", "8", "10", "11", "13", "14", "15", "16", "17", "18", "21", "23", "25", "26"]) {
+      assert.ok(anchorFor(2, lineNumber), `expected page 2 line ${lineNumber}`);
+    }
     assert.ok(anchorFor(2, "23"));
+    assert.match(anchorFor(2, "23").noteText, /not correct style for vehicle/i);
     for (const lineNumber of ["39", "40", "41", "42", "43", "44"]) {
       assert.ok(anchorFor(3, lineNumber), `expected page 3 line ${lineNumber}`);
     }
     assert.equal(anchorFor(3, "44").anchorType, "embedded_link_row");
-    assert.ok(anchors.some((anchor) => anchor.pageNumber === 4 && anchor.anchorType === "totals_row" && /paint materials|body labor/i.test(anchor.rowText)));
+    assert.match(anchorFor(3, "44").rowText, /egnyte/i);
+    assert.ok(anchors.some((anchor) => anchor.pageNumber === 4 && anchor.anchorType === "totals_row" && /Parts 3,214\.95/i.test(anchor.rowText)));
+    assert.ok(anchors.some((anchor) => anchor.pageNumber === 4 && anchor.anchorType === "totals_row" && /Body Labor 13\.2 hrs @ \$60\/hr/i.test(anchor.rowText)));
+    assert.ok(anchors.some((anchor) => anchor.pageNumber === 4 && anchor.anchorType === "totals_row" && /Paint Supplies 3\.2 hrs @ \$40\/hr/i.test(anchor.rowText)));
+    assert.ok(anchors.some((anchor) => anchor.pageNumber === 4 && anchor.anchorType === "totals_row" && /Net Cost of Repairs 4,097\.17/i.test(anchor.rowText)));
     assert.ok(anchors.some((anchor) => anchor.pageNumber === 9 && anchor.anchorType === "guide_row" && /MOTOR database/i.test(anchor.rowText)));
-    assert.ok(anchorFor(12, "23"));
+    assert.ok(anchorFor(11, "23"));
+    assert.equal(anchorFor(11, "23").anchorType, "supplier_row");
+    assert.ok(anchorFor(12, "25"));
+    assert.equal(anchorFor(12, "25").anchorType, "supplier_row");
     assert.equal(anchors.some((anchor) => /Repair Operation|Proc Report/i.test(anchor.rowText)), false);
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
@@ -824,6 +894,13 @@ async function run(name, test) {
           carrierEvidence: undefined,
           missingAuthorityTypes: ["supplier evidence"],
         }),
+        baseFinding({
+          id: "generic-structural-frame",
+          operationLabel: "Structural frame and measurement verification",
+          category: "structural_or_fit_verification",
+          carrierEvidence: undefined,
+          missingAuthorityTypes: ["measurement support"],
+        }),
       ],
       request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
     });
@@ -831,8 +908,9 @@ async function run(name, test) {
     const metadataFor = (pageNumber, lineNumber) =>
       result.annotationMetadata.find((item) => item.pageNumber === pageNumber && item.sourceLineNumber === lineNumber);
 
-    assert.ok(result.debugMetadata.extractedRowAnchorCount > 0);
+    assert.ok(result.debugMetadata.extractedRowAnchorCount > 40);
     assert.ok(result.debugMetadata.visibleAnnotationCount > 0);
+    assert.doesNotMatch(result.warnings.join(" "), /No estimate rows could be extracted from the source PDF/);
     assert.ok(result.debugMetadata.anchorsByPage["2"].includes("line 23"));
     for (const lineNumber of ["39", "40", "41", "42", "43", "44"]) {
       assert.ok(result.debugMetadata.anchorsByPage["3"].includes(`line ${lineNumber}`));
@@ -850,7 +928,9 @@ async function run(name, test) {
     assert.equal(result.annotationMetadata.some((item) => item.pageNumber === 4 && /scan|adas|seat belt/i.test(item.sourceAnchorText)), false);
     assert.equal(result.annotationMetadata.some((item) => item.pageNumber === 7 && /scan|adas|seat belt/i.test(item.sourceAnchorText)), false);
     assert.equal(result.annotationMetadata.some((item) => item.pageNumber === 9 && /scan|adas/i.test(item.sourceAnchorText)), false);
+    assert.equal(result.annotationMetadata.some((item) => item.findingId === "generic-structural-frame"), false);
     assert.doesNotMatch(result.warnings.join(" "), /No line-level anchors could be placed/);
+    assert.doesNotMatch(pages.join(" "), /No estimate rows could be extracted from the source PDF/);
     assert.doesNotMatch(pages.join(" "), /No line-level anchors could be placed/);
     assert.doesNotMatch(pages.slice(0, result.originalPageCount).join(" "), /NEEDS ADAS|REFERENCED \/ NOT PRODUCED|Missing proof|Next action/);
   });
@@ -1030,7 +1110,8 @@ async function run(name, test) {
     const line44 = result.annotationMetadata.find((item) => item.findingId === "ram-line-44");
     const totals = result.annotationMetadata.find((item) => item.findingId === "ram-totals");
     const supplier = result.annotationMetadata.find((item) => item.findingId === "ram-supplier");
-    assert.equal(line23.anchorType, "line_note");
+    assert.equal(line23.anchorType, "estimate_line");
+    assert.match(line23.sourceAnchorText, /not correct style for vehicle/i);
     assert.equal(line23.targetLineNumber, "23");
     assert.equal(line23.pageNumber, 2);
     assert.equal(line23.sourceDocumentRole, "carrier");
@@ -1068,7 +1149,7 @@ async function run(name, test) {
     assert.equal(totals.anchorType, "totals_row");
     assert.equal(totals.pageNumber, 4);
     assert.equal(supplier.anchorType, "supplier_row");
-    assert.equal(supplier.pageNumber, 12);
+    assert.equal(supplier.pageNumber, 11);
     const scanLike = result.annotationMetadata.filter((item) => /scan|seat belt|road test|revvadas|adas/i.test(`${item.estimateLine} ${item.sourceAnchorText}`));
     assert.deepEqual(scanLike.map((item) => item.pageNumber).sort((a, b) => a - b), [3, 3, 3, 3, 3, 3]);
     assert.equal(result.annotationMetadata.some((item) => item.pageNumber === 4 && /scan|seat belt|road test|adas/i.test(item.sourceAnchorText)), false);
@@ -1092,8 +1173,8 @@ async function run(name, test) {
       assert.ok(metadata.wPct > 0 && metadata.wPct < 1);
       assert.ok(metadata.hPct > 0 && metadata.hPct < 1);
     }
-    assert.match(pages.join(" "), /Paint materials total/);
-    assert.match(pages.join(" "), /Alternate Parts Supplier/);
+    assert.match(pages.join(" "), /Paint Supplies 3\.2 hrs @ \$40\/hr|Paint materials total/);
+    assert.match(pages.join(" "), /Alternate Parts Suppliers/i);
     assert.doesNotMatch(pages.join(" "), /Unanchored Citation Density Findings/);
   });
 

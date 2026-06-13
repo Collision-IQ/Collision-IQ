@@ -761,8 +761,9 @@ function isRestrictedSourcePageForCandidate(candidate: AnchoredCitationCandidate
 }
 
 function getAnchorSourceText(anchor: EstimateRowAnchor) {
-  return [anchor.rowText, anchor.noteText, anchor.supplierText]
+  return [...new Set([anchor.rowText, anchor.noteText, anchor.supplierText]
     .filter((value): value is string => Boolean(value && value.trim()))
+    .map((value) => value.replace(/\s+/g, " ").trim()))]
     .join(" ")
     .replace(/\s+/g, " ")
     .trim();
@@ -1324,7 +1325,7 @@ function buildAnnotationMetadata(
   const sourceDocumentRole = anchor.sourceDocumentRole;
   const findingSourceDocumentId = getSourceDocumentId(finding, sourceDocumentRole);
   const sourceDocumentId = findingSourceDocumentId || anchor.sourceDocumentId;
-  const targetRawText = sanitize(anchor.rowText || formatEstimateLineForCallout(finding, options.estimateRole));
+  const targetRawText = sanitize(getAnchorSourceText(anchor) || formatEstimateLineForCallout(finding, options.estimateRole));
   const metadata: CitationDensityAnnotationMetadata = {
     findingId: finding.id,
     anchorId: anchor.anchorId,

@@ -292,14 +292,10 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
     const type = classifyLine(line.text, lineNumber, sectionName, section);
     if (sectionName) section = sectionName;
 
-    if (type === "line_note" && !lineNumber && previousEstimateRow && line.pageNumber === previousEstimateRow.pageNumber) {
-      previousEstimateRow.noteText = `${previousEstimateRow.noteText ? `${previousEstimateRow.noteText} ` : ""}${line.text}`;
-      previousEstimateRow.normalizedNoteText = normalizeMatchText(previousEstimateRow.noteText);
-      previousEstimateRow.height = Math.max(previousEstimateRow.height, line.y + line.height - previousEstimateRow.y);
-      const normalized = buildPdfRectFromTopLeftAnchor(previousEstimateRow, getAnchorPageGeometry(previousEstimateRow), 0);
-      Object.assign(previousEstimateRow, buildAnchorGeometry(normalized), {
-        anchorType: detectEmbeddedLinkRow(line.text) ? "embedded_link_row" : "line_note",
-        confidence: Math.max(previousEstimateRow.confidence, 0.92),
+    if (!lineNumber && previousEstimateRow && line.pageNumber === previousEstimateRow.pageNumber && shouldAttachContinuationLine(line, type)) {
+      attachContinuationLine(previousEstimateRow, line, {
+        asNote: type === "line_note" || isNoteContinuation(line.text),
+        forceType: detectEmbeddedLinkRow(line.text) ? "embedded_link_row" : undefined,
       });
       continue;
     }
@@ -351,10 +347,54 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       anchor.normalizedSupplierText = line.normalizedText;
     }
     anchors.push(anchor);
-    previousEstimateRow = type === "estimate_line" || type === "line_note" ? anchor : previousEstimateRow;
+    previousEstimateRow = type === "estimate_line" || type === "line_note" || type === "embedded_link_row" ? anchor : previousEstimateRow;
   }
 
   return anchors;
+}
+
+function shouldAttachContinuationLine(line: PdfTextLine, type: EstimateRowAnchorType | null) {
+  if (type === "section_row" || type === "totals_row" || type === "supplier_row" || type === "guide_row") return false;
+  if (type === "line_note" || type === "embedded_link_row") return true;
+  if (detectSection(line.text)) return false;
+  if (isGenericOrMalformedAnchorText(line.text)) return false;
+  const normalized = normalizeMatchText(line.text);
+  if (!normalized) return false;
+  if (/^\d{1,4}\b/.test(normalized)) return false;
+  return /[a-z]/.test(normalized) && !/^(?:page|estimate|claim|vehicle)\b/.test(normalized);
+}
+
+function attachContinuationLine(
+  anchor: EstimateRowAnchor,
+  line: PdfTextLine,
+  options: { asNote: boolean; forceType?: EstimateRowAnchorType }
+) {
+  if (options.asNote) {
+    anchor.noteText = `${anchor.noteText ? `${anchor.noteText} ` : ""}${line.text}`;
+    anchor.normalizedNoteText = normalizeMatchText(anchor.noteText);
+  } else {
+    anchor.rowText = `${anchor.rowText} ${line.text}`.replace(/\s+/g, " ").trim();
+    anchor.normalizedRowText = normalizeMatchText(anchor.rowText);
+    const parsed = parseEstimateRowFields(anchor.rowText, anchor.lineNumber);
+    anchor.operation = parsed.operation;
+    anchor.description = parsed.description;
+    anchor.partNumber = parsed.partNumber;
+    anchor.qty = parsed.qty;
+    anchor.price = parsed.price;
+    anchor.labor = parsed.labor;
+    anchor.paint = parsed.paint;
+  }
+  anchor.width = Math.max(anchor.width, line.x + line.width - anchor.x);
+  anchor.height = Math.max(anchor.height, line.y + line.height - anchor.y);
+  const normalized = buildPdfRectFromTopLeftAnchor(anchor, getAnchorPageGeometry(anchor), 0);
+  Object.assign(anchor, buildAnchorGeometry(normalized), {
+    anchorType: options.forceType ?? anchor.anchorType,
+    confidence: Math.max(anchor.confidence, options.asNote ? 0.92 : 0.9),
+  });
+}
+
+function isNoteContinuation(text: string) {
+  return /^\s*(?:note|notes?)\b/i.test(text) || /\b(?:not correct style|available upon request|via this link|see estimate note)\b/i.test(text);
 }
 
 function getModelVisibleAnchorText(anchor: EstimateRowAnchor) {
@@ -636,15 +676,27 @@ function classifyLine(
   if (detectEmbeddedLinkRow(text)) return "embedded_link_row";
   if (
     lineNumber &&
-    (/\b(?:supplier|alternate parts supplier)\b/.test(normalizeMatchText(currentSection)) ||
-      /\b(?:supplier|alternate parts supplier|alternate supplier)\b/.test(normalized))
+    (/\b(?:suppliers?|alternate parts suppliers?)\b/.test(normalizeMatchText(currentSection)) ||
+      /\b(?:suppliers?|alternate parts suppliers?|alternate suppliers?)\b/.test(normalized))
   ) return "supplier_row";
   if (lineNumber) return /note|available|not correct|report/.test(normalized) ? "line_note" : "estimate_line";
-  if (/\btotal|subtotal|net cost|grand total|paint supplies|paint materials|body labor|paint labor|labor rate\b/.test(normalized)) return "totals_row";
+  if (isTotalsRow(normalized, currentSection)) return "totals_row";
   if (/\bsupplier|alternate|aftermarket|lkq|used part|capa\b/.test(`${normalized} ${normalizeMatchText(currentSection)}`)) return "supplier_row";
   if (sectionName) return "section_row";
   if (/\bnote|available upon request|not correct|report\b/.test(normalized)) return "line_note";
   return null;
+}
+
+function isTotalsRow(normalized: string, currentSection: string) {
+  const section = normalizeMatchText(currentSection);
+  if (/\btotal|subtotal|net cost|grand total|paint supplies|paint materials|body labor|paint labor|labor rate|total cost of repairs|net cost of repairs\b/.test(normalized)) {
+    return true;
+  }
+  if (/\bestimate totals?\b/.test(section)) {
+    return /\b(?:parts|body labor|paint labor|paint supplies|total cost of repairs|net cost of repairs|sales tax|deductible)\b/.test(normalized) &&
+      /(?:\$?\d[\d,.]*|\d+(?:\.\d+)?\s*(?:hrs?|@))/.test(normalized);
+  }
+  return false;
 }
 
 function detectEmbeddedLinkRow(text: string) {
@@ -663,7 +715,7 @@ function extractLineNumber(text: string) {
 
 function detectSection(text: string) {
   const normalized = normalizeMatchText(text);
-  const match = normalized.match(/^(parts|body|paint|refinish|electrical|diagnostics?|calibration|totals?|summary|alternate parts supplier|ccc|motor|p pages|included|not included)\b/);
+  const match = normalized.match(/^(front bumper|grille|radiator support|fender|electrical|windshield|vehicle diagnostics|miscellaneous operations|estimate totals?|supplement summary|alternate parts suppliers?|parts|body|paint|refinish|diagnostics?|calibration|totals?|summary|ccc|motor|p pages|included|not included)\b/);
   return match?.[1] ?? null;
 }
 
