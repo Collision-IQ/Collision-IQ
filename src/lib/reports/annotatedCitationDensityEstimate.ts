@@ -48,6 +48,34 @@ export type AnnotatedEstimateResult = {
   warnings: string[];
   annotationMetadata: CitationDensityAnnotationMetadata[];
   debugMetadata?: CitationDensityAnnotationDebugMetadata;
+  debugTrace?: CitationDensityDebugTrace;
+};
+
+export type CitationDensityDebugTrace = {
+  artifactId?: string;
+  sourcePdfName?: string;
+  selectedEstimateFileName?: string;
+  selectedEstimateTotal?: number | null;
+  extractedAnchorCount: number;
+  findingCount: number;
+  anchoredFindingCount: number;
+  unanchoredFindingCount: number;
+  renderedPdfAnnotationCount: number;
+  viewerAnnotationCount?: number;
+  firstAnchorIds: string[];
+  firstFindingAnchorIds: Array<string | null>;
+  droppedFindings: Array<{
+    findingId: string;
+    reason: string;
+    anchorId?: string | null;
+  }>;
+  rendererDrops: Array<{
+    findingId: string;
+    anchorId?: string | null;
+    reason: string;
+  }>;
+  metadataArtifactId?: string;
+  renderedPdfArtifactId?: string;
 };
 
 export type CitationDensityAnnotationMetadata = {
@@ -220,6 +248,8 @@ export function dataUrlToPdfBytes(dataUrl: string): Uint8Array | null {
 export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   sourcePdfBytes: Uint8Array;
   sourceDocumentId?: string;
+  sourcePdfName?: string;
+  selectedEstimateTotal?: number | null;
   sourceText?: string | null;
   findings: CitationDensityFinding[];
   request?: AnnotatedEstimateRequest;
@@ -250,6 +280,26 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     return [] as EstimateRowAnchor[];
   });
   const anchors = pdfAnchors;
+  const sourcePdfName = params.sourcePdfName ?? params.sourceDocumentId ?? "citation-density-source.pdf";
+  const anchorIndex = new Map(anchors.map((anchor) => [anchor.anchorId, anchor]));
+  const trace: CitationDensityDebugTrace = {
+    artifactId: undefined,
+    sourcePdfName,
+    selectedEstimateFileName: sourcePdfName,
+    selectedEstimateTotal: params.selectedEstimateTotal ?? null,
+    extractedAnchorCount: anchors.length,
+    findingCount: findings.length,
+    anchoredFindingCount: 0,
+    unanchoredFindingCount: 0,
+    renderedPdfAnnotationCount: 0,
+    viewerAnnotationCount: undefined,
+    firstAnchorIds: anchors.slice(0, 10).map((anchor) => anchor.anchorId),
+    firstFindingAnchorIds: findings.slice(0, 10).map((finding) => getFindingAnchorId(finding)),
+    droppedFindings: [],
+    rendererDrops: [],
+    metadataArtifactId: undefined,
+    renderedPdfArtifactId: undefined,
+  };
 
   const debugMetadata: CitationDensityAnnotationDebugMetadata = {
     extractedRowAnchorCount: anchors.length,
@@ -271,12 +321,22 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     topicFindings: selectedFindings,
     estimateRole,
     sourceDocumentRole,
+    anchorIndex,
+    trace,
   });
   debugMetadata.suppressedPageMismatchCount = candidateResult.suppressedPageMismatchCount;
   debugMetadata.findingsWithoutAnchorId = [
     ...suppressed.map((finding) => finding.id),
     ...candidateResult.findingsWithoutAnchorId,
   ];
+  trace.anchoredFindingCount = candidateResult.candidates.length;
+  trace.unanchoredFindingCount = Math.max(0, findings.length - candidateResult.candidates.length);
+
+  if (trace.extractedAnchorCount > 0 && trace.findingCount > 0 && trace.anchoredFindingCount === 0) {
+    throw new Error(
+      `Findings generated but no findings matched extracted anchors. ${JSON.stringify(trace, null, 2)}`
+    );
+  }
 
   const matches: MatchedFinding[] = candidateResult.candidates.map((candidate) => ({
     finding: candidate.finding,
@@ -296,19 +356,32 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
 
   const annotationMetadata: CitationDensityAnnotationMetadata[] = [];
   const findingDetails: FindingDetail[] = [];
+  let renderedPdfAnnotationCount = 0;
   matches.forEach((match, index) => {
     const sourcePdfPageNumber = match.anchor.pageNumber;
     const page = pdfDoc.getPage(toSourcePdfPageIndex(sourcePdfPageNumber));
-    const metadata = drawFindingAnnotation(pdfDoc, page, match, index + 1, {
+    const renderResult = drawFindingAnnotation(pdfDoc, page, match, index + 1, {
       mode,
       font,
       boldFont,
       estimateRole,
       redactSensitive: request.redactSensitive !== false,
+      trace,
     });
-    annotationMetadata.push(metadata);
-    findingDetails.push({ finding: match.finding, metadata });
+    if (renderResult.written) {
+      renderedPdfAnnotationCount += 1;
+      annotationMetadata.push(renderResult.metadata);
+      findingDetails.push({ finding: match.finding, metadata: renderResult.metadata });
+    }
   });
+
+  trace.renderedPdfAnnotationCount = renderedPdfAnnotationCount;
+
+  if (trace.extractedAnchorCount > 0 && trace.findingCount > 0 && trace.renderedPdfAnnotationCount === 0) {
+    throw new Error(
+      `Anchors extracted but no annotations rendered. ${JSON.stringify(trace, null, 2)}`
+    );
+  }
 
   if (findingDetails.length > 0) {
     addCitationDensityFindingDetailPages(pdfDoc, findingDetails, {
@@ -353,11 +426,20 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   const bytes = await pdfDoc.save();
   debugMetadata.visibleAnnotationCount = annotationMetadata.length;
   debugMetadata.appendixOnlyCount = unmatched.length;
+  trace.viewerAnnotationCount = annotationMetadata.length;
   const exportId = putAnnotatedEstimateExport(
     bytes,
     "citation-density-annotated-estimate.pdf",
     annotationMetadata
   );
+  trace.artifactId = exportId;
+  trace.metadataArtifactId = exportId;
+  trace.renderedPdfArtifactId = exportId;
+  if (trace.metadataArtifactId !== trace.renderedPdfArtifactId) {
+    throw new Error(
+      `Rendered PDF and annotation metadata artifact mismatch. ${JSON.stringify(trace, null, 2)}`
+    );
+  }
   return {
     exportId,
     bytes,
@@ -368,6 +450,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     warnings,
     annotationMetadata,
     debugMetadata,
+    debugTrace: trace,
   };
 }
 
@@ -381,42 +464,79 @@ function buildAnchoredCitationCandidates(params: {
   topicFindings: CitationDensityFinding[];
   estimateRole: "carrier" | "shop" | "selected";
   sourceDocumentRole: "carrier" | "shop";
+  anchorIndex: Map<string, EstimateRowAnchor>;
+  trace: CitationDensityDebugTrace;
 }): {
   candidates: AnchoredCitationCandidate[];
   suppressedPageMismatchCount: number;
   findingsWithoutAnchorId: string[];
 } {
-  const anchorIndex = new Map(params.anchors.map((anchor) => [anchor.anchorId, anchor]));
   const candidates: AnchoredCitationCandidate[] = [];
   const usedAnchorIds = new Set<string>();
   const matchedFindingIds = new Set<string>();
   let suppressedPageMismatchCount = 0;
+  const orderedFindings = [
+    ...params.findings.filter((finding) => Boolean(getFindingAnchorId(finding))),
+    ...params.findings.filter((finding) => !getFindingAnchorId(finding) && isReferencedNotProducedFinding(finding)),
+    ...params.findings.filter((finding) => !getFindingAnchorId(finding) && hasConcreteFindingAnchor(finding)),
+    ...params.findings.filter((finding) => !getFindingAnchorId(finding) && !isReferencedNotProducedFinding(finding) && !hasConcreteFindingAnchor(finding)),
+  ];
 
-  for (const finding of params.findings) {
-    if (!hasConcreteFindingAnchor(finding)) continue;
-    const anchor = findBestEstimateRowAnchorForFinding(finding, params.anchors, usedAnchorIds, params.estimateRole);
+  for (const finding of orderedFindings) {
+    const anchorId = getFindingAnchorId(finding);
+    const exactAnchor = anchorId ? params.anchorIndex.get(anchorId) : null;
+    if (anchorId && !exactAnchor) {
+      params.trace.droppedFindings.push({
+        findingId: finding.id,
+        reason: "finding anchorId not found in extracted anchors; trying deterministic fallback",
+        anchorId,
+      });
+    }
+    const anchor = exactAnchor ?? findBestEstimateRowAnchorForFinding(finding, params.anchors, usedAnchorIds, params.estimateRole);
     if (!anchor) {
+      params.trace.droppedFindings.push({
+        findingId: finding.id,
+        reason: anchorId ? "finding anchorId not found and fallback did not match" : "missing finding anchorId and fallback did not match",
+        anchorId,
+      });
+      continue;
+    }
+    const resolvedAnchorId = anchor.anchorId;
+    if (!anchor.pdfBoundingBox?.width || !anchor.pdfBoundingBox?.height) {
+      params.trace.droppedFindings.push({ findingId: finding.id, reason: "matched anchor has no rects", anchorId: resolvedAnchorId });
+      continue;
+    }
+    if (usedAnchorIds.has(anchor.anchorId)) {
+      params.trace.droppedFindings.push({ findingId: finding.id, reason: "anchor already used", anchorId: resolvedAnchorId });
       continue;
     }
     const candidate = buildCandidateFromFinding(finding, anchor, params.estimateRole);
-    const gate = gateAnchoredCitationCandidate(candidate, anchorIndex);
+    const gate = gateAnchoredCitationCandidate(candidate, params.anchorIndex);
     if (gate === "allowed") {
       candidates.push(candidate);
       usedAnchorIds.add(anchor.anchorId);
       matchedFindingIds.add(finding.id);
+      params.trace.droppedFindings.push({
+        findingId: finding.id,
+        reason: exactAnchor ? "exact anchorId matched" : "deterministic fallback matched",
+        anchorId: resolvedAnchorId,
+      });
     } else if (gate === "page_mismatch") {
       suppressedPageMismatchCount += 1;
+      params.trace.droppedFindings.push({ findingId: finding.id, reason: "page mismatch", anchorId: resolvedAnchorId });
+    } else {
+      params.trace.droppedFindings.push({ findingId: finding.id, reason: "anchor gate blocked finding", anchorId: resolvedAnchorId });
     }
   }
 
-  const hasConcreteRequestedFinding = params.findings.some(hasConcreteFindingAnchor);
+  const hasExplicitFindingAnchorId = params.findings.some((finding) => Boolean(getFindingAnchorId(finding)));
   const rowBackedTopics = buildRowBackedCandidateTopics(params.topicFindings);
-  if (!hasConcreteRequestedFinding && candidates.length === 0 && rowBackedTopics.size > 0) {
+  if (!hasExplicitFindingAnchorId && rowBackedTopics.size > 0) {
     for (const anchor of params.anchors) {
       if (usedAnchorIds.has(anchor.anchorId)) continue;
       const candidate = buildCandidateFromAnchor(anchor, params.sourceDocumentRole, rowBackedTopics);
       if (!candidate) continue;
-      const gate = gateAnchoredCitationCandidate(candidate, anchorIndex);
+      const gate = gateAnchoredCitationCandidate(candidate, params.anchorIndex);
       if (gate === "allowed") {
         candidates.push(candidate);
         usedAnchorIds.add(anchor.anchorId);
@@ -431,6 +551,30 @@ function buildAnchoredCitationCandidates(params: {
     suppressedPageMismatchCount,
     findingsWithoutAnchorId: params.findings.filter((finding) => !matchedFindingIds.has(finding.id)).map((finding) => finding.id),
   };
+}
+
+function getFindingAnchorId(finding: CitationDensityFinding) {
+  const record = finding as CitationDensityFinding & {
+    anchorId?: string | null;
+    sourceAnchorId?: string | null;
+    estimateAnchorId?: string | null;
+    source?: { anchorId?: string | null };
+  };
+  return (
+    record.anchorId ??
+    record.sourceAnchorId ??
+    record.estimateAnchorId ??
+    record.source?.anchorId ??
+    null
+  );
+}
+
+function isReferencedNotProducedFinding(finding: CitationDensityFinding) {
+  return (
+    finding.estimateGapType === "referenced_not_produced" ||
+    finding.citationLabel === "REFERENCED / NOT PRODUCED" ||
+    Object.values(finding.citationStatus).some((value) => value === "referenced_not_produced")
+  );
 }
 
 function buildCandidateFromFinding(
@@ -1151,6 +1295,7 @@ function drawFindingAnnotation(
     boldFont: PDFFont;
     estimateRole: "carrier" | "shop" | "selected";
     redactSensitive: boolean;
+    trace: CitationDensityDebugTrace;
   }
 ) {
   const { anchor, finding } = match;
@@ -1159,6 +1304,16 @@ function drawFindingAnnotation(
   const rotation = normalizeRotation(page.getRotation().angle);
   const highlightRect = buildPdfRectFromTopLeftAnchor(anchor, { pdfWidth: pageWidth, pdfHeight: pageHeight, rotation }, 0);
   const pdfLibRect = topLeftRectToPdfLibRect(highlightRect, { pdfWidth: pageWidth, pdfHeight: pageHeight, rotation });
+  if (highlightRect.width <= 0 || highlightRect.height <= 0 || Number.isNaN(pdfLibRect.x) || Number.isNaN(pdfLibRect.y)) {
+    const reason = `invalid render rect for anchor ${anchor.anchorId}`;
+    options.trace.rendererDrops.push({ findingId: finding.id, anchorId: anchor.anchorId, reason });
+    return { written: false as const, reason };
+  }
+  if (anchor.pageNumber < 1 || anchor.pageNumber > pdfDoc.getPageCount()) {
+    const reason = `invalid pageIndex ${anchor.pageNumber - 1}`;
+    options.trace.rendererDrops.push({ findingId: finding.id, anchorId: anchor.anchorId, reason });
+    return { written: false as const, reason };
+  }
   const label = getProofBucketLabel(finding);
   const shortTitle = formatShortIssueTitle(finding);
   const metadata = buildAnnotationMetadata(finding, anchor, number, label, shortTitle, {
@@ -1201,7 +1356,7 @@ function drawFindingAnnotation(
   }
 
   attachPdfFindingAnnotations(pdfDoc, page, metadata);
-  return metadata;
+  return { written: true as const, metadata };
 }
 
 function drawCompactMarker(
@@ -1781,9 +1936,9 @@ function getProofBucketLabel(finding: CitationDensityFinding): string {
     return "VERIFIED DOCUMENTATION";
   }
   if (Object.values(finding.citationStatus).some((value) => value === "referenced_not_produced")) return "REFERENCED / NOT PRODUCED";
+  if (finding.estimateGapType === "referenced_not_produced") return "REFERENCED / NOT PRODUCED";
   if (finding.citationStatus.adas === "needed" && isAdasRelatedFinding(finding)) return "NEEDS ADAS";
   if (finding.estimateGapType === "weak_do_not_lead") return "WEAK — DO NOT LEAD";
-  if (finding.estimateGapType === "referenced_not_produced") return "REFERENCED / NOT PRODUCED";
   if (finding.citationStatus.invoiceOrCompletionProof === "needed") return "NEEDS INVOICE";
   if (isPPageDegMotorFinding(finding)) return "NEEDS P-PAGE";
   if (

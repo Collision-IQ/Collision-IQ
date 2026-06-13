@@ -215,6 +215,8 @@ export async function POST(request: Request) {
       const result = await buildAnnotatedCitationDensityEstimatePdf({
         sourcePdfBytes,
         sourceDocumentId: selection.selectedSourceDocumentId,
+        sourcePdfName: selection.selectedSourceLabel,
+        selectedEstimateTotal: selection.selectedEstimateTotal,
         sourceText: sourceDocument.text,
         findings: roleFindings,
         request: {
@@ -242,6 +244,8 @@ export async function POST(request: Request) {
         unresolvedAnchorCount: result.unresolvedAnchorCount,
         warnings: result.warnings,
         annotationMetadata: result.annotationMetadata,
+        debugTrace: result.debugTrace,
+        debugCounts: buildAnnotationDebugCounts(result.debugTrace),
         annotationMetadataUrl: `/api/reports/citation-density/annotated-estimate?metadata=1&artifactId=${encodeURIComponent(artifactId)}`,
         selectedSourceLabel: selection.selectedSourceLabel,
         selectedEstimateTotal: selection.selectedEstimateTotal,
@@ -261,6 +265,8 @@ export async function POST(request: Request) {
       annotatedFindingCount,
       unresolvedAnchorCount,
       annotationMetadata: primaryOutput?.annotationMetadata ?? [],
+      debugTrace: outputs[0]?.debugTrace,
+      debugCounts: buildAnnotationDebugCounts(outputs[0]?.debugTrace),
       annotationMetadataUrl: primaryOutput?.annotationMetadataUrl,
       warnings: [...aggregateWarnings],
       reviewTarget: primaryOutput
@@ -283,6 +289,27 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ error: "SERVER_ERROR" }, { status: 500 });
   }
+}
+
+function buildAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof buildAnnotatedCitationDensityEstimatePdf>>["debugTrace"] | undefined) {
+  if (!debugTrace) return undefined;
+  return {
+    selectedEstimateFileName: debugTrace.selectedEstimateFileName,
+    selectedEstimateTotal: debugTrace.selectedEstimateTotal,
+    extractedAnchorCount: debugTrace.extractedAnchorCount,
+    findingCount: debugTrace.findingCount,
+    anchoredFindingCount: debugTrace.anchoredFindingCount,
+    unanchoredFindingCount: debugTrace.unanchoredFindingCount,
+    renderedPdfAnnotationCount: debugTrace.renderedPdfAnnotationCount,
+    viewerAnnotationCount: debugTrace.viewerAnnotationCount,
+    artifactId: debugTrace.artifactId,
+    renderedPdfArtifactId: debugTrace.renderedPdfArtifactId,
+    metadataArtifactId: debugTrace.metadataArtifactId,
+    firstExtractedAnchorIds: debugTrace.firstAnchorIds,
+    firstFindingAnchorIds: debugTrace.firstFindingAnchorIds,
+    droppedFindings: debugTrace.droppedFindings,
+    rendererDrops: debugTrace.rendererDrops,
+  };
 }
 
 function coerceString(value: unknown): string {

@@ -573,6 +573,9 @@ export function gateVisibleCitationDensityAnnotation(
   if (isGenericOrMalformedAnchorText(anchor.rowText)) return false;
   const lineNumber = getTargetLineNumber(finding, estimateRole);
   const evidence = getRoleEvidence(finding, estimateRole);
+  const roleAnchor = getRoleAnchor(finding, estimateRole);
+  if (roleAnchor?.sourceDocumentId && roleAnchor.sourceDocumentId !== anchor.sourceDocumentId) return false;
+  if (roleAnchor?.pageNumber && roleAnchor.pageNumber !== anchor.pageNumber) return false;
   const evidenceText = normalizeMatchText(`${evidence?.description ?? ""} ${finding.operationLabel ?? ""}`);
   const rowText = [anchor.normalizedRowText, anchor.normalizedNoteText, anchor.normalizedSupplierText].filter(Boolean).join(" ");
   if (lineNumber) {
@@ -649,6 +652,12 @@ function getRoleEvidence(finding: CitationDensityFinding, estimateRole: "carrier
   if (estimateRole === "shop") return finding.shopEvidence ?? finding.shopAnchor;
   if (estimateRole === "carrier") return finding.carrierEvidence ?? finding.carrierAnchor;
   return finding.carrierEvidence ?? finding.carrierAnchor ?? finding.shopEvidence ?? finding.shopAnchor;
+}
+
+function getRoleAnchor(finding: CitationDensityFinding, estimateRole: "carrier" | "shop" | "selected") {
+  if (estimateRole === "shop") return finding.shopAnchor;
+  if (estimateRole === "carrier") return finding.carrierAnchor;
+  return finding.carrierAnchor ?? finding.shopAnchor;
 }
 
 function getTargetLineNumber(finding: CitationDensityFinding, estimateRole: "carrier" | "shop" | "selected") {
