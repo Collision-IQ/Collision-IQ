@@ -355,6 +355,26 @@ async function extractOriginalPageAnnotationText(bytes, pageIndex = 0) {
   return chunks.join("\n");
 }
 
+function assertNoDetailLayoutOverlap(blocks) {
+  const byPage = new Map();
+  for (const block of blocks) {
+    if (block.blockType === "footer") continue;
+    const pageBlocks = byPage.get(block.pageIndex) ?? [];
+    pageBlocks.push(block);
+    byPage.set(block.pageIndex, pageBlocks);
+  }
+
+  for (const [pageIndex, pageBlocks] of byPage.entries()) {
+    const sorted = pageBlocks.sort((a, b) => b.topY - a.topY || b.bottomY - a.bottomY);
+    for (let index = 1; index < sorted.length; index += 1) {
+      assert.ok(
+        sorted[index].topY <= sorted[index - 1].bottomY,
+        `detail layout overlap on page ${pageIndex}: ${sorted[index - 1].blockType} and ${sorted[index].blockType}`
+      );
+    }
+  }
+}
+
 function sha256(bytes) {
   return crypto.createHash("sha256").update(Buffer.from(bytes)).digest("hex");
 }
@@ -635,11 +655,26 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     assert.equal(await getOriginalPageAnnotationCount(result.bytes), result.annotatedFindingCount);
     assert.ok(result.debugTrace.renderedPdfAnnotationCount > 0);
     assert.equal(result.debugTrace.renderedPdfAnnotationCount, findings.length);
-    assert.ok(loaded.getPageCount() > result.originalPageCount + 1);
+    assert.ok(loaded.getPageCount() >= result.originalPageCount + findings.length + 1);
     for (let index = 1; index <= findings.length; index += 1) {
       assert.match(detailText, new RegExp(`Finding number:\\s*${index}`));
       assert.match(detailText, new RegExp(`long-detail-${index}`));
     }
+    const detailLayoutBlocks = result.debugTrace.detailLayoutBlocks;
+    assert.ok(detailLayoutBlocks.length > 0);
+    assertNoDetailLayoutOverlap(detailLayoutBlocks);
+    const findingHeaderPages = detailLayoutBlocks
+      .filter((block) => block.blockType === "finding-header")
+      .map((block) => ({ findingNumber: block.findingNumber, pageIndex: block.pageIndex }));
+    assert.equal(findingHeaderPages.length, findings.length);
+    assert.equal(new Set(findingHeaderPages.map((block) => block.pageIndex)).size, findings.length);
+    for (let index = 1; index < findingHeaderPages.length; index += 1) {
+      assert.ok(findingHeaderPages[index].pageIndex > findingHeaderPages[index - 1].pageIndex);
+    }
+    const continuationPages = detailLayoutBlocks
+      .filter((block) => block.blockType === "continuation-header")
+      .map((block) => block.findingNumber);
+    assert.ok(continuationPages.includes(1));
     assert.match(detailText, /LONG SOURCE ROW SENTINEL ALPHA/);
     assert.match(detailText, /LONG SOURCE ROW SENTINEL OMEGA/);
     assert.match(detailText, /WHY SENTINEL ALPHA/);
@@ -1217,7 +1252,7 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     assert.equal(json.debugCounts.perPageTextLengths.length, 12);
     assert.equal(json.debugCounts.perPageTextItemCounts.length, 12);
     assert.ok(json.debugCounts.perPageTextItemCounts.some((count) => count > 0));
-    assert.equal(json.debugCounts.citationDensityArtifactVersion, "citation-density-anchors-v3");
+    assert.equal(json.debugCounts.citationDensityArtifactVersion, "citation-density-details-one-finding-pages-v1");
     assert.ok(json.debugCounts.buildCommit);
     assert.ok(json.debugCounts.extractedAnchorCount > 40);
     assert.equal(json.debugCounts.findingCount, 4);
