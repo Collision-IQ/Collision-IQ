@@ -574,6 +574,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     addCitationDensityFindingDetailPages(pdfDoc, findingDetails, {
       font,
       boldFont,
+      sourcePdfName,
+      sourcePdfHash: trace.sourcePdfHash,
+      buildCommit: trace.buildCommit,
     });
   }
 
@@ -1962,84 +1965,309 @@ function addCitationDensityFindingDetailPages(
   options: {
     font: PDFFont;
     boldFont: PDFFont;
+    sourcePdfName?: string;
+    sourcePdfHash?: string;
+    buildCommit?: string;
   }
 ) {
-  let page = pdfDoc.addPage();
-  let y = page.getHeight() - 54;
-  page.drawText("Citation Density Finding Details", {
-    x: 48,
-    y,
-    size: 18,
-    font: options.boldFont,
-    color: rgb(0.12, 0.14, 0.18),
-  });
-  y -= 30;
+  let context = createFindingDetailLayoutContext(pdfDoc, options, 1);
 
-  details.forEach(({ finding, metadata }) => {
-    const lines = buildFindingDetailLines(finding, metadata);
-    const estimatedHeight = Math.min(lines.length, 14) * 12 + 30;
-    if (y < Math.max(170, estimatedHeight)) {
-      page = pdfDoc.addPage();
-      y = page.getHeight() - 54;
-      page.drawText("Citation Density Finding Details", {
-        x: 48,
-        y,
-        size: 18,
-        font: options.boldFont,
-        color: rgb(0.12, 0.14, 0.18),
-      });
-      y -= 30;
-    }
+  details.forEach(({ finding, metadata }, index) => {
+    context = ensureDetailSpace(
+      context,
+      measureFindingDetailMinimumHeight(finding, metadata, context),
+      `Finding ${metadata.markerNumber} continued`
+    );
 
-    page.drawText(`Finding ${metadata.markerNumber}`, {
-      x: 48,
-      y,
-      size: 12,
+    context.page.drawText(`Finding ${metadata.markerNumber}`, {
+      x: context.marginLeft,
+      y: context.currentY,
+      size: context.findingHeaderSize,
       font: options.boldFont,
       color: rgb(0.45, 0.1, 0.08),
     });
-    page.drawText(`Source: page ${metadata.sourcePageNumber}, line ${metadata.sourceLineNumber ?? "section"}`, {
-      x: 126,
-      y,
-      size: 9,
+    context.page.drawText(`Source: page ${metadata.sourcePageNumber}, line ${metadata.sourceLineNumber ?? "section"}`, {
+      x: context.marginLeft + 96,
+      y: context.currentY + 1,
+      size: context.bodySize,
       font: options.boldFont,
       color: rgb(0.28, 0.32, 0.38),
     });
-    y -= 16;
+    context.currentY -= context.lineHeight + 5;
 
-    drawWrappedLines(page, lines, {
-      x: 48,
-      y,
-      width: page.getWidth() - 96,
-      font: options.font,
-      boldFont: options.boldFont,
-      size: 9,
-      lineHeight: 12,
-      maxLines: 18,
-    });
-    y -= Math.min(lines.length, 18) * 12 + 18;
+    for (const field of buildFindingDetailFields(finding, metadata)) {
+      context = drawWrappedDetailField(field.label, field.value, {
+        ...context,
+        continuationLabel: `Finding ${metadata.markerNumber} continued`,
+      });
+    }
+
+    if (index < details.length - 1) {
+      context.currentY -= context.findingGap;
+    }
   });
 }
 
-function buildFindingDetailLines(
+type FindingDetailField = {
+  label: string;
+  value: string;
+};
+
+function buildFindingDetailFields(
   finding: CitationDensityFinding,
   metadata: CitationDensityAnnotationMetadata
-) {
+): FindingDetailField[] {
   return [
-    `Finding number: ${metadata.markerNumber}`,
-    `Label: ${metadata.label}`,
-    `Citation Density score: ${finding.citationDensityScore}/100`,
-    `Source estimate: ${metadata.sourceDocumentRole} estimate`,
-    `Source page: ${metadata.sourcePageNumber}`,
-    `Source line: ${metadata.sourceLineNumber ?? "section"}`,
-    `Source row text: ${metadata.sourceAnchorText}`,
-    `Best authority: ${metadata.bestAuthority}`,
-    `Missing proof: ${metadata.missingProof}`,
-    `Why it matters: ${metadata.whyItMatters}`,
-    `Next action: ${metadata.nextAction}`,
-    metadata.sourceRefs.length ? `Support refs: ${metadata.sourceRefs.join("; ")}` : "Support refs: none listed",
-    `Source: page ${metadata.sourcePageNumber}, line ${metadata.sourceLineNumber ?? "section"}`,
+    { label: "Finding number", value: String(metadata.markerNumber) },
+    { label: "Finding id", value: metadata.findingId },
+    { label: "Anchor id", value: metadata.anchorId },
+    { label: "Label", value: metadata.label },
+    { label: "Citation Density score", value: `${finding.citationDensityScore}/100` },
+    { label: "Source estimate", value: `${metadata.sourceDocumentRole} estimate` },
+    { label: "Source page", value: String(metadata.sourcePageNumber) },
+    { label: "Source line", value: metadata.sourceLineNumber ?? "section" },
+    { label: "Source row text", value: metadata.sourceAnchorText },
+    { label: "Best authority", value: metadata.bestAuthority },
+    { label: "Missing proof", value: metadata.missingProof },
+    { label: "Why it matters", value: metadata.whyItMatters },
+    { label: "Next action", value: metadata.nextAction },
+    { label: "Support refs", value: metadata.sourceRefs.length ? metadata.sourceRefs.join("; ") : "none listed" },
+    { label: "Source", value: `page ${metadata.sourcePageNumber}, line ${metadata.sourceLineNumber ?? "section"}` },
   ];
+}
+
+type FindingDetailLayoutContext = {
+  pdfDoc: PDFDocument;
+  page: PDFPage;
+  detailPageNumber: number;
+  currentY: number;
+  marginLeft: number;
+  marginRight: number;
+  topY: number;
+  bottomY: number;
+  fieldWidth: number;
+  headingSize: number;
+  findingHeaderSize: number;
+  labelSize: number;
+  bodySize: number;
+  lineHeight: number;
+  fieldGap: number;
+  findingGap: number;
+  font: PDFFont;
+  boldFont: PDFFont;
+  sourcePdfName?: string;
+  sourcePdfHash?: string;
+  buildCommit?: string;
+};
+
+function createFindingDetailLayoutContext(
+  pdfDoc: PDFDocument,
+  options: {
+    font: PDFFont;
+    boldFont: PDFFont;
+    sourcePdfName?: string;
+    sourcePdfHash?: string;
+    buildCommit?: string;
+  },
+  detailPageNumber: number,
+  continuationLabel?: string
+): FindingDetailLayoutContext {
+  const page = pdfDoc.addPage();
+  const pageWidth = page.getWidth();
+  const pageHeight = page.getHeight();
+  const marginLeft = 54;
+  const marginRight = 54;
+  const headingSize = 18;
+  const topY = pageHeight - 72;
+  const context: FindingDetailLayoutContext = {
+    pdfDoc,
+    page,
+    detailPageNumber,
+    currentY: topY,
+    marginLeft,
+    marginRight,
+    topY,
+    bottomY: 64,
+    fieldWidth: pageWidth - marginLeft - marginRight,
+    headingSize,
+    findingHeaderSize: 13,
+    labelSize: 8.5,
+    bodySize: 8.5,
+    lineHeight: 10.5,
+    fieldGap: 4,
+    findingGap: 14,
+    font: options.font,
+    boldFont: options.boldFont,
+    sourcePdfName: options.sourcePdfName,
+    sourcePdfHash: options.sourcePdfHash,
+    buildCommit: options.buildCommit,
+  };
+
+  page.drawText("Citation Density Finding Details", {
+    x: marginLeft,
+    y: pageHeight - 54,
+    size: headingSize,
+    font: options.boldFont,
+    color: rgb(0.12, 0.14, 0.18),
+  });
+  if (continuationLabel) {
+    page.drawText(continuationLabel, {
+      x: marginLeft,
+      y: topY,
+      size: context.labelSize,
+      font: options.boldFont,
+      color: rgb(0.45, 0.1, 0.08),
+    });
+    context.currentY -= context.lineHeight + context.fieldGap;
+  }
+  drawFindingDetailFooter(context);
+  return context;
+}
+
+function drawFindingDetailFooter(context: FindingDetailLayoutContext) {
+  const hash = context.sourcePdfHash ? context.sourcePdfHash.slice(0, 10) : "unknown";
+  const commit = context.buildCommit ? context.buildCommit.slice(0, 10) : "local";
+  const source = normalizeDetailText(context.sourcePdfName || "citation-density-source.pdf");
+  const footer = `Citation Density Finding Details | page ${context.detailPageNumber} | ${source} | pdf ${hash} | build ${commit}`;
+  context.page.drawText(footer, {
+    x: context.marginLeft,
+    y: 34,
+    size: 7.5,
+    font: context.font,
+    color: rgb(0.35, 0.38, 0.43),
+  });
+}
+
+function measureFindingDetailMinimumHeight(
+  finding: CitationDensityFinding,
+  metadata: CitationDensityAnnotationMetadata,
+  context: FindingDetailLayoutContext
+) {
+  const sourceRowLines = wrapTextToWidth(metadata.sourceAnchorText, context.font, context.bodySize, context.fieldWidth);
+  const minimumFields = buildFindingDetailFields(finding, metadata).slice(0, 9);
+  const fieldHeight = minimumFields.reduce((total, field) => {
+    if (field.label === "Source row text") {
+      return total + context.lineHeight + Math.max(1, Math.min(2, sourceRowLines.length)) * context.lineHeight + context.fieldGap;
+    }
+    return total + measureWrappedTextHeight(field.value, context.font, context.bodySize, context.fieldWidth, context.lineHeight) + context.lineHeight + context.fieldGap;
+  }, 0);
+  return context.findingHeaderSize + 8 + fieldHeight;
+}
+
+function ensureDetailSpace(
+  context: FindingDetailLayoutContext,
+  requiredHeight: number,
+  continuationLabel?: string
+) {
+  if (context.currentY - requiredHeight >= context.bottomY) return context;
+  return createFindingDetailLayoutContext(context.pdfDoc, context, context.detailPageNumber + 1, continuationLabel);
+}
+
+function drawWrappedDetailField(
+  label: string,
+  value: string,
+  context: FindingDetailLayoutContext & { continuationLabel: string }
+) {
+  const lines = wrapTextToWidth(normalizeDetailText(value), context.font, context.bodySize, context.fieldWidth);
+  const fieldHeight = context.lineHeight + Math.max(1, lines.length) * context.lineHeight + context.fieldGap;
+  const usablePageHeight = context.topY - context.bottomY;
+  let nextContext = ensureDetailSpace(
+    context,
+    Math.min(fieldHeight, usablePageHeight),
+    context.continuationLabel
+  ) as FindingDetailLayoutContext & { continuationLabel: string };
+  nextContext.continuationLabel = context.continuationLabel;
+  const labelText = `${label}:`;
+  nextContext.page.drawText(labelText, {
+    x: nextContext.marginLeft,
+    y: nextContext.currentY,
+    size: nextContext.labelSize,
+    font: nextContext.boldFont,
+    color: rgb(0.12, 0.14, 0.18),
+  });
+  nextContext.currentY -= nextContext.lineHeight;
+
+  for (const line of lines.length ? lines : [""]) {
+    if (nextContext.currentY - nextContext.lineHeight < nextContext.bottomY) {
+      nextContext = createFindingDetailLayoutContext(
+        nextContext.pdfDoc,
+        nextContext,
+        nextContext.detailPageNumber + 1,
+        nextContext.continuationLabel
+      ) as FindingDetailLayoutContext & { continuationLabel: string };
+      nextContext.continuationLabel = context.continuationLabel;
+      nextContext.page.drawText(`${label} continued:`, {
+        x: nextContext.marginLeft,
+        y: nextContext.currentY,
+        size: nextContext.labelSize,
+        font: nextContext.boldFont,
+        color: rgb(0.12, 0.14, 0.18),
+      });
+      nextContext.currentY -= nextContext.lineHeight;
+    }
+    nextContext.page.drawText(line, {
+      x: nextContext.marginLeft,
+      y: nextContext.currentY,
+      size: nextContext.bodySize,
+      font: nextContext.font,
+      color: rgb(0.12, 0.14, 0.18),
+    });
+    nextContext.currentY -= nextContext.lineHeight;
+  }
+  nextContext.currentY -= nextContext.fieldGap;
+  return nextContext;
+}
+
+function normalizeDetailText(value: string | number | null | undefined) {
+  return String(value ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/[ \t]+/g, " ").trim();
+}
+
+function wrapTextToWidth(text: string, font: PDFFont, fontSize: number, maxWidth: number) {
+  const paragraphs = normalizeDetailText(text).split("\n");
+  const lines: string[] = [];
+  for (const paragraph of paragraphs) {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    if (!words.length) {
+      lines.push("");
+      continue;
+    }
+    let line = "";
+    for (const word of words) {
+      const pieces = splitWordToFitWidth(word, font, fontSize, maxWidth);
+      for (const piece of pieces) {
+        const candidate = line ? `${line} ${piece}` : piece;
+        if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidth || !line) {
+          line = candidate;
+        } else {
+          lines.push(line);
+          line = piece;
+        }
+      }
+    }
+    if (line) lines.push(line);
+  }
+  return lines;
+}
+
+function splitWordToFitWidth(word: string, font: PDFFont, fontSize: number, maxWidth: number) {
+  if (font.widthOfTextAtSize(word, fontSize) <= maxWidth) return [word];
+  const pieces: string[] = [];
+  let piece = "";
+  for (const character of word) {
+    const candidate = `${piece}${character}`;
+    if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidth || !piece) {
+      piece = candidate;
+    } else {
+      pieces.push(piece);
+      piece = character;
+    }
+  }
+  if (piece) pieces.push(piece);
+  return pieces;
+}
+
+function measureWrappedTextHeight(text: string, font: PDFFont, fontSize: number, maxWidth: number, lineHeight: number) {
+  return Math.max(1, wrapTextToWidth(text, font, fontSize, maxWidth).length) * lineHeight;
 }
 
 function addUnanchoredAppendix(

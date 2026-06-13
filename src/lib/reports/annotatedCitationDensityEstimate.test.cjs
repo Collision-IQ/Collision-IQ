@@ -67,6 +67,22 @@ async function createTwoPageSourcePdf() {
   return await doc.save();
 }
 
+async function createLongFindingDetailSourcePdf() {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([612, 792]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText("Estimate 123 long detail source", { x: 50, y: 730, size: 12, font });
+  page.drawText(
+    "Line 12 LONG SOURCE ROW SENTINEL ALPHA LONG SOURCE ROW SENTINEL OMEGA ADAS calibration calibration calibration calibration calibration calibration calibration calibration calibration calibration calibration calibration calibration 1.5 hrs $250.00",
+    { x: 50, y: 690, size: 8, font }
+  );
+  page.drawText("Line 13 Pre repair scan diagnostic row 0.5 hrs $75.00", { x: 50, y: 670, size: 11, font });
+  page.drawText("Line 14 Post repair scan diagnostic row 0.5 hrs $75.00", { x: 50, y: 650, size: 11, font });
+  page.drawText("Line 15 ADAS report referenced link row $0.00", { x: 50, y: 630, size: 11, font });
+  page.drawText("Line 16 Paint material rate difference row $180.00", { x: 50, y: 610, size: 11, font });
+  return await doc.save();
+}
+
 async function createKiaLikeEstimatePdf() {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -555,6 +571,84 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     assert.equal(result.debugTrace.anchoredFindingCount, 1);
     assert.equal(result.debugTrace.renderedPdfAnnotationCount, 1);
     assert.equal(result.debugTrace.metadataArtifactId, result.debugTrace.renderedPdfArtifactId);
+  });
+
+  await run("finding detail pages paginate long fields without omitting anchored content", async () => {
+    const sourcePdfBytes = await createLongFindingDetailSourcePdf();
+    const longWhy = [
+      "WHY SENTINEL ALPHA",
+      Array.from({ length: 160 }, (_, index) => `why-detail-${index}`).join(" "),
+      "WHY SENTINEL OMEGA",
+    ].join(" ");
+    const longNext = [
+      "NEXT SENTINEL ALPHA",
+      Array.from({ length: 190 }, (_, index) => `next-action-${index}`).join(" "),
+      "NEXT SENTINEL OMEGA",
+    ].join(" ");
+    const longSupport = [
+      "SUPPORT SENTINEL ALPHA",
+      Array.from({ length: 80 }, (_, index) => `https://support.example.com/claim/long-reference-${index}`).join("; "),
+      "SUPPORT SENTINEL OMEGA",
+    ].join("; ");
+    const detailRows = [
+      {
+        lineNumber: "12",
+        description: "LONG SOURCE ROW SENTINEL ALPHA ADAS calibration LONG SOURCE ROW SENTINEL OMEGA",
+      },
+      { lineNumber: "13", description: "Pre repair scan diagnostic row" },
+      { lineNumber: "14", description: "Post repair scan diagnostic row" },
+      { lineNumber: "15", description: "ADAS report referenced link row" },
+      { lineNumber: "16", description: "Paint material rate difference row" },
+    ];
+    const findings = detailRows.map((row, index) => baseFinding({
+      id: `long-detail-${index + 1}`,
+      operationLabel: `ADAS calibration long detail ${index + 1}`,
+      carrierEvidence: {
+        lineNumber: row.lineNumber,
+        description: row.description,
+        amount: 250,
+        laborHours: 1.5,
+        sourceLabel: "Carrier estimate",
+      },
+      currentSupportSummary: `Support summary for long detail ${index + 1}`,
+      missingProofSummary: `Missing proof for long detail ${index + 1}. ${longWhy}`,
+      recommendedNextAction: `Recommended action for long detail ${index + 1}. ${longNext}`,
+      bestAvailableAuthority: {
+        title: longSupport,
+        authorityType: "oem",
+        status: "missing",
+      },
+    }));
+
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      findings,
+      request: { includeLegend: false, includeSummaryPage: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+    const loaded = await PDFDocument.load(result.bytes);
+    const pages = await extractPdfPageTexts(result.bytes);
+    const detailText = pages.slice(result.originalPageCount).join(" ");
+
+    assert.equal(result.originalPageCount, 1);
+    assert.equal(result.annotatedFindingCount, findings.length);
+    assert.equal(result.unresolvedAnchorCount, 0);
+    assert.equal(await getOriginalPageAnnotationCount(result.bytes), result.annotatedFindingCount);
+    assert.ok(result.debugTrace.renderedPdfAnnotationCount > 0);
+    assert.equal(result.debugTrace.renderedPdfAnnotationCount, findings.length);
+    assert.ok(loaded.getPageCount() > result.originalPageCount + 1);
+    for (let index = 1; index <= findings.length; index += 1) {
+      assert.match(detailText, new RegExp(`Finding number:\\s*${index}`));
+      assert.match(detailText, new RegExp(`long-detail-${index}`));
+    }
+    assert.match(detailText, /LONG SOURCE ROW SENTINEL ALPHA/);
+    assert.match(detailText, /LONG SOURCE ROW SENTINEL OMEGA/);
+    assert.match(detailText, /WHY SENTINEL ALPHA/);
+    assert.match(detailText, /WHY SENTINEL OMEGA/);
+    assert.match(detailText, /NEXT SENTINEL ALPHA/);
+    assert.match(detailText, /NEXT SENTINEL OMEGA/);
+    assert.match(detailText, /SUPPORT SENTINEL ALPHA/);
+    assert.match(detailText, /SUPPORT SENTINEL OMEGA/);
+    assert.match(detailText, /Finding 1 continued/);
   });
 
   await run("blank annotation output hard-fails when anchors exist but no finding matches", async () => {
