@@ -80,6 +80,7 @@ System Volume Information/
 # ===============================
 uploads/
 tmp/
+.local-fixtures/
 
 # ===============================
 # Firebase / Google / Secrets

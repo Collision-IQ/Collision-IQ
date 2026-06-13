@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const Module = require("node:module");
@@ -34,6 +35,7 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 const {
   buildAnnotatedCitationDensityEstimatePdf,
   dataUrlToPdfBytes,
+  extractCitationDensityRowAnchors,
 } = require("./annotatedCitationDensityEstimate.ts");
 const {
   extractPdfRowAnchors,
@@ -335,6 +337,10 @@ async function extractOriginalPageAnnotationText(bytes, pageIndex = 0) {
     if (contents?.decodeText) chunks.push(contents.decodeText());
   }
   return chunks.join("\n");
+}
+
+function sha256(bytes) {
+  return crypto.createHash("sha256").update(Buffer.from(bytes)).digest("hex");
 }
 
 async function run(name, test) {
@@ -654,7 +660,7 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
         findings: [baseFinding()],
         request: { includeLegend: false, includeSummaryPage: false, annotationMode: "both" },
       }),
-      /Citation Density could not extract estimate row anchors from the selected estimate PDF/
+      /Citation Density could not extract selectable text from the selected estimate PDF/
     );
   });
 
@@ -1097,10 +1103,21 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     assert.equal(json.debugCounts.selectedEstimateTotal, 4097.17);
     assert.equal(json.debugCounts.actualSourcePdfName, "SOR-1 21975.pdf");
     assert.equal(json.debugCounts.actualSourcePdfByteLength, carrierPdfBytes.byteLength);
+    assert.notEqual(json.debugCounts.actualSourcePdfByteLength, 29144);
     assert.notEqual(json.debugCounts.actualSourcePdfByteLength, shopPdfBytes.byteLength);
     assert.equal(json.debugCounts.actualSourcePdfPageCount, 12);
+    assert.equal(json.debugCounts.sourcePdfStage, "original");
+    assert.equal(json.debugCounts.sourcePdfHash, sha256(carrierPdfBytes));
+    assert.equal(json.debugCounts.textExtractionMethod, "pdfjs-legacy-primary");
+    assert.equal(json.debugCounts.textExtractionError, undefined);
+    assert.deepEqual(json.debugCounts.textExtractionWarnings, []);
     assert.ok(json.debugCounts.extractedTextPageCount >= 12);
     assert.match(json.debugCounts.firstPageTextSample, /Carrier 21975 source page 1/);
+    assert.equal(json.debugCounts.firstNonEmptyTextPage, 1);
+    assert.match(json.debugCounts.firstNonEmptyTextSample, /Carrier 21975 source page 1/);
+    assert.equal(json.debugCounts.perPageTextLengths.length, 12);
+    assert.equal(json.debugCounts.perPageTextItemCounts.length, 12);
+    assert.ok(json.debugCounts.perPageTextItemCounts.some((count) => count > 0));
     assert.equal(json.debugCounts.citationDensityArtifactVersion, "citation-density-anchors-v3");
     assert.ok(json.debugCounts.buildCommit);
     assert.ok(json.debugCounts.extractedAnchorCount > 40);
@@ -1135,6 +1152,33 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
       .reduce((sum, count) => sum + count, 0);
     assert.equal(originalPageAnnotationCount, 4);
     assert.doesNotMatch(outputPages.join(" "), /No estimate rows could be extracted|Unanchored Citation Density Findings|Repair Operation|Proc Report/);
+  });
+
+  await run("optional real SOR-1 local fixture extracts selectable text and row anchors", async () => {
+    const fixturePath = path.join(process.cwd(), ".local-fixtures", "SOR-1 21975.pdf");
+    if (!fs.existsSync(fixturePath)) {
+      console.log(`skip - optional fixture missing at ${fixturePath}`);
+      return;
+    }
+    const bytes = fs.readFileSync(fixturePath);
+    const doc = await PDFDocument.load(bytes);
+    const result = await extractCitationDensityRowAnchors(new Uint8Array(bytes), {
+      sourceDocumentRole: "carrier",
+      sourceDocumentId: "carrier-21975",
+      actualSourcePdfName: "SOR-1 21975.pdf",
+      actualSourcePdfPageCount: doc.getPageCount(),
+    });
+
+    assert.equal(result.actualSourcePdfName, "SOR-1 21975.pdf");
+    assert.equal(result.actualSourcePdfByteLength, bytes.byteLength);
+    assert.equal(result.actualSourcePdfPageCount, 12);
+    assert.equal(result.sourcePdfStage, "original");
+    assert.equal(result.sourcePdfHash, sha256(bytes));
+    assert.ok(result.extractedTextPageCount > 0);
+    assert.ok(result.firstPageTextSample || result.firstNonEmptyTextSample);
+    assert.ok(result.perPageTextLengths.some((length) => length > 0));
+    assert.ok(result.perPageTextItemCounts.some((count) => count > 0));
+    assert.ok(result.anchors.length > 0);
   });
 
   await run("annotated-estimate route fails closed when selected PDF yields zero row anchors", async () => {
@@ -1185,8 +1229,18 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     assert.equal(json.debugCounts.actualSourcePdfName, "SOR-1 21975.pdf");
     assert.equal(json.debugCounts.actualSourcePdfByteLength, noRowsPdfBytes.byteLength);
     assert.equal(json.debugCounts.actualSourcePdfPageCount, 1);
+    assert.equal(json.debugCounts.sourcePdfStage, "original");
+    assert.equal(json.debugCounts.sourcePdfHash, sha256(noRowsPdfBytes));
+    assert.equal(json.debugCounts.textExtractionMethod, "pdfjs-legacy-primary");
+    assert.equal(json.debugCounts.textExtractionError, undefined);
+    assert.deepEqual(json.debugCounts.textExtractionWarnings, []);
     assert.equal(json.debugCounts.extractedTextPageCount, 1);
     assert.match(json.debugCounts.firstPageTextSample, /Selected PDF cover sheet/);
+    assert.equal(json.debugCounts.firstNonEmptyTextPage, 1);
+    assert.match(json.debugCounts.firstNonEmptyTextSample, /Selected PDF cover sheet/);
+    assert.equal(json.debugCounts.perPageTextLengths.length, 1);
+    assert.ok(json.debugCounts.perPageTextLengths[0] > 0);
+    assert.deepEqual(json.debugCounts.perPageTextItemCounts, [2]);
     assert.equal(json.debugCounts.extractedAnchorCount, 0);
     assert.equal(json.debugCounts.findingCount, 1);
     assert.equal(json.debugCounts.anchoredFindingCount, 0);

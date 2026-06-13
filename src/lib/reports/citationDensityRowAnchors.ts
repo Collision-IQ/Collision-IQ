@@ -16,6 +16,19 @@ export type PdfWord = {
   pageHeight: number;
 };
 
+export type PdfTextExtractionMethod = "pdfjs-legacy-primary" | "pdfjs-legacy-node-fallback";
+
+export type PdfTextExtractionDiagnostics = {
+  method: PdfTextExtractionMethod;
+  error?: string;
+  warnings: string[];
+  pageCount: number;
+  perPageTextLengths: number[];
+  perPageTextItemCounts: number[];
+  firstNonEmptyTextPage: number | null;
+  firstNonEmptyTextSample: string;
+};
+
 export type PdfTextLine = {
   pageNumber: number;
   text: string;
@@ -115,28 +128,107 @@ type BuildOptions = {
 };
 
 export async function extractPdfRowAnchors(bytes: Uint8Array, options: BuildOptions): Promise<EstimateRowAnchor[]> {
-  const words = await extractPdfWords(bytes);
+  const { words } = await extractPdfWordsWithDiagnostics(bytes);
   return buildEstimateRowAnchorsFromLines(buildPdfTextLines(words), options);
 }
 
 export async function extractPdfWords(bytes: Uint8Array): Promise<PdfWord[]> {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const loadingTask = pdfjs.getDocument({
+  return (await extractPdfWordsWithDiagnostics(bytes)).words;
+}
+
+export async function extractPdfWordsWithDiagnostics(bytes: Uint8Array): Promise<{
+  words: PdfWord[];
+  diagnostics: PdfTextExtractionDiagnostics;
+}> {
+  const primary = await extractPdfWordsWithPdfjs(bytes, "pdfjs-legacy-primary", {
     data: bytes.slice(),
     disableWorker: true,
     useSystemFonts: true,
-  } as unknown as Parameters<typeof pdfjs.getDocument>[0]);
+  }).catch((error) => emptyExtractionDiagnostics("pdfjs-legacy-primary", error));
+  if (primary.words.length > 0) return primary;
+
+  const fallback = await extractPdfWordsWithPdfjs(bytes, "pdfjs-legacy-node-fallback", {
+    data: Uint8Array.from(Buffer.from(bytes)),
+    disableWorker: true,
+    useSystemFonts: true,
+    disableFontFace: true,
+    isEvalSupported: false,
+    stopAtErrors: false,
+    useWorkerFetch: false,
+  }).catch((error) => emptyExtractionDiagnostics("pdfjs-legacy-node-fallback", error));
+
+  return {
+    words: fallback.words,
+    diagnostics: {
+      ...fallback.diagnostics,
+      warnings: [
+        ...primary.diagnostics.warnings,
+        primary.diagnostics.error
+          ? `Primary pdfjs extraction failed: ${primary.diagnostics.error}; retried with Node fallback options.`
+          : "Primary pdfjs extraction returned zero text items; retried with Node fallback options.",
+        ...fallback.diagnostics.warnings,
+      ],
+    },
+  };
+}
+
+function emptyExtractionDiagnostics(
+  method: PdfTextExtractionMethod,
+  error: unknown
+): {
+  words: PdfWord[];
+  diagnostics: PdfTextExtractionDiagnostics;
+} {
+  return {
+    words: [],
+    diagnostics: {
+      method,
+      error: error instanceof Error ? error.message : String(error),
+      warnings: [],
+      pageCount: 0,
+      perPageTextLengths: [],
+      perPageTextItemCounts: [],
+      firstNonEmptyTextPage: null,
+      firstNonEmptyTextSample: "",
+    },
+  };
+}
+
+async function extractPdfWordsWithPdfjs(
+  bytes: Uint8Array,
+  method: PdfTextExtractionMethod,
+  documentOptions: Record<string, unknown>
+): Promise<{
+  words: PdfWord[];
+  diagnostics: PdfTextExtractionDiagnostics;
+}> {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const warnings: string[] = [];
+  const loadingTask = pdfjs.getDocument(documentOptions as unknown as Parameters<typeof pdfjs.getDocument>[0]);
   const pdf = await loadingTask.promise;
   const words: PdfWord[] = [];
+  const perPageTextLengths: number[] = [];
+  const perPageTextItemCounts: number[] = [];
+  let firstNonEmptyTextPage: number | null = null;
+  let firstNonEmptyTextSample = "";
 
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber);
     const viewport = page.getViewport({ scale: 1 });
-    const content = await page.getTextContent();
+    const content = await page.getTextContent({
+      disableNormalization: false,
+      includeMarkedContent: false,
+    } as unknown as Parameters<typeof page.getTextContent>[0]);
+    let pageTextLength = 0;
+    let pageTextItemCount = 0;
+    const pageChunks: string[] = [];
     for (const item of content.items) {
       if (!("str" in item) || typeof item.str !== "string") continue;
       const text = item.str.replace(/\s+/g, " ").trim();
       if (!text) continue;
+      pageTextItemCount += 1;
+      pageTextLength += text.length;
+      pageChunks.push(text);
       const transform = item.transform;
       const x = Number(transform[4] ?? 0);
       const pdfJsY = Number(transform[5] ?? 0);
@@ -154,9 +246,31 @@ export async function extractPdfWords(bytes: Uint8Array): Promise<PdfWord[]> {
         pageHeight: viewport.height,
       });
     }
+    perPageTextLengths.push(pageTextLength);
+    perPageTextItemCounts.push(pageTextItemCount);
+    if (firstNonEmptyTextPage === null && pageTextLength > 0) {
+      firstNonEmptyTextPage = pageNumber;
+      firstNonEmptyTextSample = truncateExtractionSample(pageChunks.join(" "));
+    }
   }
 
-  return words;
+  return {
+    words,
+    diagnostics: {
+      method,
+      warnings,
+      pageCount: pdf.numPages,
+      perPageTextLengths,
+      perPageTextItemCounts,
+      firstNonEmptyTextPage,
+      firstNonEmptyTextSample,
+    },
+  };
+}
+
+function truncateExtractionSample(value: string, maxLength = 500) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
 }
 
 export function buildPdfTextLines(words: PdfWord[]): PdfTextLine[] {

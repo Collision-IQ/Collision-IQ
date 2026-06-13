@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   PDFDocument,
   StandardFonts,
@@ -22,8 +22,9 @@ import {
 import {
   buildEstimateRowAnchorsFromLines,
   buildPdfTextLines,
-  extractPdfWords,
+  extractPdfWordsWithDiagnostics,
   findBestEstimateRowAnchorForFinding,
+  type PdfTextExtractionMethod,
   type EstimateRowAnchor,
   type EstimateRowAnchorType,
 } from "./citationDensityRowAnchors";
@@ -64,8 +65,17 @@ export type CitationDensityDebugTrace = {
   actualSourcePdfName?: string;
   actualSourcePdfByteLength: number;
   actualSourcePdfPageCount: number;
+  sourcePdfStage: "original" | "redacted" | "converted" | "cached";
+  sourcePdfHash: string;
+  textExtractionMethod: PdfTextExtractionMethod | "not_run";
+  textExtractionError?: string;
+  textExtractionWarnings: string[];
   extractedTextPageCount: number;
   firstPageTextSample: string;
+  firstNonEmptyTextPage: number | null;
+  firstNonEmptyTextSample: string;
+  perPageTextLengths: number[];
+  perPageTextItemCounts: number[];
   extractedAnchorCount: number;
   findingCount: number;
   anchoredFindingCount: number;
@@ -240,6 +250,8 @@ const NO_SAFE_ROW_FINDINGS_WARNING =
 export const CITATION_DENSITY_ARTIFACT_VERSION = "citation-density-anchors-v3";
 export const NO_ANCHOR_EXTRACTION_ERROR =
   "Citation Density could not extract estimate row anchors from the selected estimate PDF. No annotation PDF was produced.";
+export const NO_SELECTABLE_TEXT_ERROR =
+  "Citation Density could not extract selectable text from the selected estimate PDF. Upload the original CCC estimate PDF or enable OCR/CCC structured estimate extraction.";
 
 const exportCache = new Map<string, {
   bytes: Uint8Array;
@@ -292,9 +304,10 @@ export async function extractCitationDensityRowAnchors(
     actualSourcePdfPageCount?: number;
   }
 ) {
-  const words = await extractPdfWords(bytes);
+  const { words, diagnostics } = await extractPdfWordsWithDiagnostics(bytes);
   const lines = buildPdfTextLines(words);
   return {
+    visualLines: lines,
     anchors: buildEstimateRowAnchorsFromLines(lines, {
       sourceDocumentRole: options.sourceDocumentRole,
       sourceDocumentId: options.sourceDocumentId,
@@ -302,13 +315,22 @@ export async function extractCitationDensityRowAnchors(
     actualSourcePdfName: options.actualSourcePdfName,
     actualSourcePdfByteLength: bytes.byteLength,
     actualSourcePdfPageCount: options.actualSourcePdfPageCount,
-    extractedTextPageCount: new Set(words.map((word) => word.pageNumber)).size,
+    sourcePdfStage: "original" as const,
+    sourcePdfHash: hashPdfBytes(bytes),
+    textExtractionMethod: diagnostics.method,
+    textExtractionError: diagnostics.error,
+    textExtractionWarnings: diagnostics.warnings,
+    extractedTextPageCount: diagnostics.perPageTextLengths.filter((length) => length > 0).length,
     firstPageTextSample: truncateDebugText(
       lines
         .filter((line) => line.pageNumber === 1)
         .map((line) => line.text)
         .join(" ")
     ),
+    firstNonEmptyTextPage: diagnostics.firstNonEmptyTextPage,
+    firstNonEmptyTextSample: diagnostics.firstNonEmptyTextSample,
+    perPageTextLengths: diagnostics.perPageTextLengths,
+    perPageTextItemCounts: diagnostics.perPageTextItemCounts,
   };
 }
 
@@ -350,8 +372,21 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     );
     return {
       anchors: [] as EstimateRowAnchor[],
+      actualSourcePdfName: sourcePdfName,
+      actualSourcePdfByteLength: sourcePdfBytes.byteLength,
+      actualSourcePdfPageCount: originalPageCount,
+      sourcePdfStage: "original" as const,
+      sourcePdfHash: hashPdfBytes(sourcePdfBytes),
+      textExtractionMethod: "not_run" as const,
+      textExtractionError: error instanceof Error ? error.message : String(error),
+      textExtractionWarnings: [],
+      visualLines: [],
       extractedTextPageCount: 0,
       firstPageTextSample: "",
+      firstNonEmptyTextPage: null,
+      firstNonEmptyTextSample: "",
+      perPageTextLengths: [],
+      perPageTextItemCounts: [],
     };
   });
   const anchors = extraction.anchors;
@@ -364,11 +399,20 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     selectedEstimateFileName: sourcePdfName,
     selectedEstimateTotal: params.selectedEstimateTotal ?? null,
     uploadedFileNames: params.uploadedFileNames ?? [],
-    actualSourcePdfName: sourcePdfName,
-    actualSourcePdfByteLength: sourcePdfBytes.byteLength,
-    actualSourcePdfPageCount: originalPageCount,
+    actualSourcePdfName: extraction.actualSourcePdfName,
+    actualSourcePdfByteLength: extraction.actualSourcePdfByteLength,
+    actualSourcePdfPageCount: extraction.actualSourcePdfPageCount ?? originalPageCount,
+    sourcePdfStage: extraction.sourcePdfStage,
+    sourcePdfHash: extraction.sourcePdfHash,
+    textExtractionMethod: extraction.textExtractionMethod,
+    textExtractionError: extraction.textExtractionError,
+    textExtractionWarnings: extraction.textExtractionWarnings,
     extractedTextPageCount: extraction.extractedTextPageCount,
     firstPageTextSample: extraction.firstPageTextSample,
+    firstNonEmptyTextPage: extraction.firstNonEmptyTextPage,
+    firstNonEmptyTextSample: extraction.firstNonEmptyTextSample,
+    perPageTextLengths: extraction.perPageTextLengths,
+    perPageTextItemCounts: extraction.perPageTextItemCounts,
     extractedAnchorCount: anchors.length,
     findingCount: findings.length,
     anchoredFindingCount: 0,
@@ -395,6 +439,16 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
 
   if (!anchors.length) {
     warnings.push(NO_ROWS_EXTRACTED_WARNING);
+  }
+
+  if (trace.findingCount > 0 && trace.extractedTextPageCount === 0) {
+    trace.unanchoredFindingCount = trace.findingCount;
+    trace.droppedFindings.push({
+      findingId: "*",
+      reason: "no selectable text extracted from selected source PDF",
+      anchorId: null,
+    });
+    throw new CitationDensityAnnotationError(NO_SELECTABLE_TEXT_ERROR, trace);
   }
 
   if (trace.findingCount > 0 && trace.extractedAnchorCount === 0) {
@@ -2440,6 +2494,10 @@ function getBuildCommit() {
     process.env.GIT_COMMIT_SHA ||
     process.env.COMMIT_SHA ||
     "local";
+}
+
+function hashPdfBytes(bytes: Uint8Array) {
+  return createHash("sha256").update(Buffer.from(bytes)).digest("hex");
 }
 
 function truncateDebugText(value: string, maxLength = 500) {
