@@ -14,9 +14,29 @@ export type CitationDensityAnnotationMetadata = {
   sourcePdfPageNumber?: number;
   sourcePageNumber?: number;
   sourceLineNumber?: string;
-  sourceAnchorType?: "estimate_line" | "line_note" | "supplier_row" | "totals_row" | "section_row";
+  sourceAnchorType?: EstimateRowAnchorType;
   sourceAnchorText?: string;
   sourceAnchorNormalizedText?: string;
+  sourceAnchorOperation?: string | null;
+  sourceAnchorDescription?: string | null;
+  sourceAnchorPartNumber?: string | null;
+  sourceAnchorQty?: number | null;
+  sourceAnchorPrice?: number | null;
+  sourceAnchorLabor?: number | null;
+  sourceAnchorPaint?: number | null;
+  sourceAnchorPdfBoundingBox?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  sourceAnchorPdfQuad?: [number, number, number, number, number, number, number, number];
+  sourceAnchorNormalizedUiRect?: {
+    xPct: number;
+    yPct: number;
+    wPct: number;
+    hPct: number;
+  };
   markerNumber: number;
   pageNumber: number;
   pdfPageWidth?: number;
@@ -36,7 +56,7 @@ export type CitationDensityAnnotationMetadata = {
   targetRawText?: string;
   targetNormalizedText?: string;
   matchConfidence?: "high" | "medium" | "low";
-  anchorType?: "estimate_line" | "line_note" | "supplier_row" | "totals_row" | "section_row" | "exact_line" | "description" | "note" | "amount" | "section" | "totals" | "supplier" | "page_fallback";
+  anchorType?: EstimateRowAnchorType | "exact_line" | "description" | "note" | "amount" | "section" | "totals" | "supplier" | "page_fallback";
   label: string;
   shortTitle: string;
   estimateLine: string;
@@ -48,6 +68,15 @@ export type CitationDensityAnnotationMetadata = {
   sourceRefs: string[];
   comment: string;
 };
+
+type EstimateRowAnchorType =
+  | "estimate_line"
+  | "line_note"
+  | "embedded_link_row"
+  | "supplier_row"
+  | "totals_row"
+  | "section_row"
+  | "guide_row";
 
 type RenderedPage = {
   pageNumber: number;
@@ -108,16 +137,16 @@ export default function CitationDensityAnnotationViewer({
 }) {
   const canvasRefs = useRef(new Map<number, HTMLCanvasElement>());
   const [pages, setPages] = useState<RenderedPage[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(annotations[0]?.findingId ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(annotations[0] ? getAnnotationSelectionKey(annotations[0]) : null);
   const [error, setError] = useState<string | null>(null);
   const effectiveSelectedId = useMemo(
-    () => selectedId && annotations.some((annotation) => annotation.findingId === selectedId)
+    () => selectedId && annotations.some((annotation) => getAnnotationSelectionKey(annotation) === selectedId)
       ? selectedId
-      : annotations[0]?.findingId ?? null,
+      : annotations[0] ? getAnnotationSelectionKey(annotations[0]) : null,
     [annotations, selectedId]
   );
   const selected = useMemo(
-    () => annotations.find((annotation) => annotation.findingId === effectiveSelectedId) ?? annotations[0] ?? null,
+    () => annotations.find((annotation) => getAnnotationSelectionKey(annotation) === effectiveSelectedId) ?? annotations[0] ?? null,
     [annotations, effectiveSelectedId]
   );
 
@@ -230,17 +259,18 @@ export default function CitationDensityAnnotationViewer({
                     />
                     {page ? pageAnnotations.map((annotation) => {
                       const rect = getAnnotationOverlayRect(annotation, page);
+                      const selectionKey = getAnnotationSelectionKey(annotation);
                       return (
                         <button
-                          key={annotation.findingId}
+                          key={selectionKey}
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            setSelectedId(annotation.findingId);
+                            setSelectedId(selectionKey);
                           }}
                           className={[
                             "absolute rounded-[3px] border text-left outline-none ring-offset-2 ring-offset-neutral-900 transition focus-visible:ring-2 focus-visible:ring-amber-300",
-                            effectiveSelectedId === annotation.findingId
+                            effectiveSelectedId === selectionKey
                               ? "border-red-500 bg-amber-300/45 ring-2 ring-red-500/70"
                               : "border-amber-600/80 bg-amber-300/25 hover:bg-amber-300/40",
                           ].join(" ")}
@@ -252,12 +282,14 @@ export default function CitationDensityAnnotationViewer({
                           }}
                           data-finding-id={annotation.findingId}
                           data-anchor-id={annotation.anchorId}
+                          data-annotation-key={selectionKey}
                           aria-label={`Open Citation Density finding ${annotation.markerNumber}`}
                         >
                           <span
                             className="absolute -left-2 -top-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-700 px-1 text-[10px] font-bold leading-none text-white"
                             data-finding-id={annotation.findingId}
                             data-anchor-id={annotation.anchorId}
+                            data-annotation-key={selectionKey}
                           >
                             {annotation.markerNumber}
                           </span>
@@ -325,6 +357,10 @@ function Detail({ label, value }: { label: string; value: string }) {
       <div className="mt-1 text-sm leading-6 text-white/82">{value || "Not specified"}</div>
     </div>
   );
+}
+
+function getAnnotationSelectionKey(annotation: CitationDensityAnnotationMetadata) {
+  return `${annotation.findingId}::${annotation.anchorId || annotation.sourceAnchorId || annotation.markerNumber}`;
 }
 
 function formatSourceEstimate(annotation: CitationDensityAnnotationMetadata) {

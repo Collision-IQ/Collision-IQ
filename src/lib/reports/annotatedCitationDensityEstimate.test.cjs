@@ -37,6 +37,7 @@ const {
 } = require("./annotatedCitationDensityEstimate.ts");
 const {
   extractPdfRowAnchors,
+  buildEstimateRowAnchorSelectionOptions,
 } = require("./citationDensityRowAnchors.ts");
 const {
   detectEmbeddedEstimateLinks,
@@ -288,6 +289,50 @@ async function run(name, test) {
     assert.equal(dataUrlToPdfBytes("data:text/plain;base64,SGVsbG8="), null);
   });
 
+  await run("PDF row anchors expose deterministic estimate-row fields and model-safe selection text", async () => {
+    const sourcePdfBytes = await createKiaLikeEstimatePdf();
+    const anchors = await extractPdfRowAnchors(sourcePdfBytes, {
+      sourceDocumentRole: "carrier",
+      sourceDocumentId: "carrier-source",
+    });
+    const line49 = anchors.find((anchor) => anchor.lineNumber === "49");
+    const line64 = anchors.find((anchor) => anchor.lineNumber === "64");
+    const totals = anchors.find((anchor) =>
+      anchor.anchorType === "totals_row" && /Paint supplies total/.test(anchor.rowText)
+    );
+    const options = buildEstimateRowAnchorSelectionOptions(anchors);
+
+    assert.ok(line49);
+    const option49 = options.find((option) => option.anchorId === line49.anchorId);
+    assert.equal(line49.anchorId, "carrier-source:p1:49:estimate_line");
+    assert.equal(line49.sourceDocumentRole, "carrier");
+    assert.equal(line49.section, "parts");
+    assert.match(line49.description, /A\/M bumper cover/);
+    assert.equal(line49.qty, 1);
+    assert.equal(line49.price, 312.4);
+    assert.ok(line49.pdfBoundingBox.width > 0);
+    assert.equal(line49.pdfQuad.length, 8);
+    assert.ok(line49.normalizedUiRect.xPct > 0 && line49.normalizedUiRect.xPct < 1);
+    assert.ok(line49.normalizedUiRect.yPct > 0 && line49.normalizedUiRect.yPct < 1);
+
+    assert.ok(line64);
+    assert.equal(line64.lineNumber, "64");
+    assert.match(line64.description, /Blind spot radar calibration/);
+    assert.equal(line64.labor, 1.2);
+    assert.equal(line64.price, 210);
+
+    assert.ok(totals);
+    assert.equal(totals.anchorType, "totals_row");
+    assert.match(totals.rowText, /Paint supplies total/);
+
+    assert.ok(option49);
+    assert.equal(option49.anchorId, line49.anchorId);
+    assert.match(option49.text, /Line 49/);
+    assert.match(option49.text, /Qty 1/);
+    assert.equal(Object.prototype.hasOwnProperty.call(option49, "x"), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(option49, "pdfQuad"), false);
+  });
+
   await run("Conestoga Audi line 2 OE docs link is detected", async () => {
     const links = detectEmbeddedEstimateLinks({
       text: "Line 2 OE docs https://secure.example.com/oe-docs/audi/procedure?id=2",
@@ -351,6 +396,8 @@ async function run(name, test) {
     assert.match(pageTexts.slice(1).join(" "), /Citation Density Finding Details/);
     assert.match(pageTexts.slice(1).join(" "), /NEEDS INVOICE|NEEDS OEM/);
     assert.match(result.annotationMetadata[0].comment, /Label:/);
+    assert.match(result.annotationMetadata[0].comment, /Finding id: finding-1/);
+    assert.match(result.annotationMetadata[0].comment, /Anchor id:/);
     assert.match(result.annotationMetadata[0].comment, /Citation Density:/);
     assert.match(result.annotationMetadata[0].comment, /Estimate line:/);
     assert.match(result.annotationMetadata[0].comment, /Current support:/);
@@ -740,8 +787,11 @@ async function run(name, test) {
     for (const lineNumber of ["39", "40", "41", "42", "43", "44"]) {
       assert.ok(anchorFor(3, lineNumber), `expected page 3 line ${lineNumber}`);
     }
+    assert.equal(anchorFor(3, "44").anchorType, "embedded_link_row");
     assert.ok(anchors.some((anchor) => anchor.pageNumber === 4 && anchor.anchorType === "totals_row" && /paint materials|body labor/i.test(anchor.rowText)));
+    assert.ok(anchors.some((anchor) => anchor.pageNumber === 9 && anchor.anchorType === "guide_row" && /MOTOR database/i.test(anchor.rowText)));
     assert.ok(anchorFor(12, "23"));
+    assert.equal(anchors.some((anchor) => /Repair Operation|Proc Report/i.test(anchor.rowText)), false);
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
       sourcePdfBytes,
@@ -792,6 +842,7 @@ async function run(name, test) {
     assert.ok(metadataFor(3, "40"));
     assert.ok(metadataFor(3, "42"));
     assert.ok(metadataFor(3, "44"));
+    assert.equal(metadataFor(3, "44").anchorType, "embedded_link_row");
     assert.equal(metadataFor(3, "44").label, "REFERENCED / NOT PRODUCED");
     assert.notEqual(metadataFor(3, "43").label, "NEEDS ADAS");
     assert.notEqual(metadataFor(2, "23").label, "NEEDS ADAS");
@@ -1005,7 +1056,7 @@ async function run(name, test) {
     assert.equal(line43.sourcePdfPageNumber, 3);
     assert.equal(line43.sourceLineNumber, "43");
     assert.notEqual(line43.label, "NEEDS ADAS");
-    assert.equal(line44.anchorType, "line_note");
+    assert.equal(line44.anchorType, "embedded_link_row");
     assert.equal(line44.targetLineNumber, "44");
     assert.equal(line44.pageNumber, 3);
     assert.equal(line44.sourcePdfPageNumber, 3);
@@ -1323,12 +1374,15 @@ async function run(name, test) {
     const sourcePdfBytes = await createSourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
       sourcePdfBytes,
+      sourceDocumentId: "carrier-source-pdf",
       findings: [baseFinding()],
       request: { includeLegend: false, annotationMode: "both" },
     });
     const metadata = result.annotationMetadata[0];
 
     assert.equal(metadata.coordinateSpace, "pdf-points");
+    assert.equal(metadata.sourceDocumentId, "carrier-source-pdf");
+    assert.match(metadata.sourceAnchorId, /^carrier-source-pdf:p1:12:estimate_line$/);
     assert.equal(metadata.pdfPageWidth, 612);
     assert.equal(metadata.pdfPageHeight, 792);
     assert.equal(metadata.rotation, 0);
@@ -1338,7 +1392,7 @@ async function run(name, test) {
     assert.ok(metadata.yPct > 0 && metadata.yPct < 1);
     assert.ok(metadata.wPct > 0 && metadata.wPct < 1);
     assert.ok(metadata.hPct > 0 && metadata.hPct < 1);
-    assert.ok(["estimate_line", "line_note", "supplier_row", "totals_row", "section_row"].includes(metadata.anchorType));
+    assert.ok(["estimate_line", "line_note", "embedded_link_row", "supplier_row", "totals_row", "section_row", "guide_row"].includes(metadata.anchorType));
     assert.ok(["high", "medium", "low"].includes(metadata.matchConfidence));
   });
 

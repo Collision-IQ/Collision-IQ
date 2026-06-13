@@ -214,6 +214,7 @@ export async function POST(request: Request) {
       const roleFindings = filterFindingsForEstimateRole(model.citationDensityFindings, estimateRole);
       const result = await buildAnnotatedCitationDensityEstimatePdf({
         sourcePdfBytes,
+        sourceDocumentId: selection.selectedSourceDocumentId,
         sourceText: sourceDocument.text,
         findings: roleFindings,
         request: {

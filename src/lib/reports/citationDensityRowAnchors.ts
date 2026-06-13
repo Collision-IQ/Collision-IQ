@@ -30,6 +30,36 @@ export type PdfTextLine = {
   synthetic?: boolean;
 };
 
+export type PdfQuad = [
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+];
+
+export type EstimateRowAnchorSelectionOption = {
+  anchorId: string;
+  sourceDocumentRole: SourceDocumentRole;
+  pageNumber: number;
+  lineNumber: string | null;
+  section?: string;
+  anchorType: EstimateRowAnchorType;
+  text: string;
+};
+
+export type EstimateRowAnchorType =
+  | "estimate_line"
+  | "line_note"
+  | "embedded_link_row"
+  | "supplier_row"
+  | "totals_row"
+  | "section_row"
+  | "guide_row";
+
 export type EstimateRowAnchor = {
   anchorId: string;
   sourceDocumentId: string;
@@ -46,7 +76,27 @@ export type EstimateRowAnchor = {
   normalizedNoteText?: string;
   supplierText?: string;
   normalizedSupplierText?: string;
-  anchorType: "estimate_line" | "line_note" | "supplier_row" | "totals_row" | "section_row";
+  anchorType: EstimateRowAnchorType;
+  operation?: string | null;
+  description?: string | null;
+  partNumber?: string | null;
+  qty?: number | null;
+  price?: number | null;
+  labor?: number | null;
+  paint?: number | null;
+  pdfBoundingBox: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  pdfQuad: PdfQuad;
+  normalizedUiRect: {
+    xPct: number;
+    yPct: number;
+    wPct: number;
+    hPct: number;
+  };
   x: number;
   y: number;
   width: number;
@@ -197,6 +247,39 @@ export function buildStoredTextRowAnchors(
   return buildEstimateRowAnchorsFromLines(lines, options);
 }
 
+export function buildEstimateRowAnchorSelectionOptions(
+  anchors: EstimateRowAnchor[]
+): EstimateRowAnchorSelectionOption[] {
+  return anchors
+    .filter((anchor) => !anchor.synthetic && anchor.confidence >= 0.82 && !isGenericOrMalformedAnchorText(anchor.rowText))
+    .map((anchor) => ({
+      anchorId: anchor.anchorId,
+      sourceDocumentRole: anchor.sourceDocumentRole,
+      pageNumber: anchor.pageNumber,
+      lineNumber: anchor.lineNumber,
+      section: anchor.section || undefined,
+      anchorType: anchor.anchorType,
+      text: getModelVisibleAnchorText(anchor),
+    }));
+}
+
+export function filterSelectedEstimateRowAnchors(
+  anchors: EstimateRowAnchor[],
+  selectedAnchorIds: string[]
+): EstimateRowAnchor[] {
+  const anchorIndex = new Map(anchors.map((anchor) => [anchor.anchorId, anchor]));
+  const seen = new Set<string>();
+  const selected: EstimateRowAnchor[] = [];
+  for (const anchorId of selectedAnchorIds) {
+    if (seen.has(anchorId)) continue;
+    const anchor = anchorIndex.get(anchorId);
+    if (!anchor) continue;
+    selected.push(anchor);
+    seen.add(anchorId);
+  }
+  return selected;
+}
+
 export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: BuildOptions): EstimateRowAnchor[] {
   const anchors: EstimateRowAnchor[] = [];
   let section = "";
@@ -213,21 +296,22 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       previousEstimateRow.noteText = `${previousEstimateRow.noteText ? `${previousEstimateRow.noteText} ` : ""}${line.text}`;
       previousEstimateRow.normalizedNoteText = normalizeMatchText(previousEstimateRow.noteText);
       previousEstimateRow.height = Math.max(previousEstimateRow.height, line.y + line.height - previousEstimateRow.y);
-      const normalized = buildPdfRectFromTopLeftAnchor(previousEstimateRow, {
-        pdfWidth: previousEstimateRow.pageWidth,
-        pdfHeight: previousEstimateRow.pageHeight,
-        rotation: previousEstimateRow.rotation,
-      }, 0);
-      Object.assign(previousEstimateRow, normalized, { anchorType: "line_note", confidence: Math.max(previousEstimateRow.confidence, 0.92) });
+      const normalized = buildPdfRectFromTopLeftAnchor(previousEstimateRow, getAnchorPageGeometry(previousEstimateRow), 0);
+      Object.assign(previousEstimateRow, buildAnchorGeometry(normalized), {
+        anchorType: detectEmbeddedLinkRow(line.text) ? "embedded_link_row" : "line_note",
+        confidence: Math.max(previousEstimateRow.confidence, 0.92),
+      });
       continue;
     }
 
     if (!type) continue;
+    const parsed = parseEstimateRowFields(line.text, lineNumber);
     const rect = buildPdfRectFromTopLeftAnchor(line, {
       pdfWidth: line.pageWidth,
       pdfHeight: line.pageHeight,
       rotation: 0,
     }, 2);
+    const geometry = buildAnchorGeometry(rect);
     const anchor: EstimateRowAnchor = {
       anchorId: `${options.sourceDocumentId ?? `${options.sourceDocumentRole}-estimate`}:p${line.pageNumber}:${lineNumber ?? anchors.length + 1}:${type}`,
       sourceDocumentId: options.sourceDocumentId ?? `${options.sourceDocumentRole}-estimate`,
@@ -241,6 +325,16 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       rowText: line.text,
       normalizedRowText: line.normalizedText,
       anchorType: type,
+      operation: parsed.operation,
+      description: parsed.description,
+      partNumber: parsed.partNumber,
+      qty: parsed.qty,
+      price: parsed.price,
+      labor: parsed.labor,
+      paint: parsed.paint,
+      pdfBoundingBox: geometry.pdfBoundingBox,
+      pdfQuad: geometry.pdfQuad,
+      normalizedUiRect: geometry.normalizedUiRect,
       x: rect.x,
       y: rect.y,
       width: rect.width,
@@ -249,7 +343,7 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
       yPct: rect.yPct,
       wPct: rect.wPct,
       hPct: rect.hPct,
-      confidence: type === "estimate_line" ? 0.96 : type === "line_note" ? 0.92 : 0.88,
+      confidence: type === "estimate_line" ? 0.96 : type === "line_note" || type === "embedded_link_row" ? 0.92 : 0.88,
       synthetic: line.synthetic,
     };
     if (type === "supplier_row") {
@@ -261,6 +355,154 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
   }
 
   return anchors;
+}
+
+function getModelVisibleAnchorText(anchor: EstimateRowAnchor) {
+  return [
+    anchor.lineNumber ? `Line ${anchor.lineNumber}` : null,
+    anchor.section ? `Section ${anchor.section}` : null,
+    anchor.operation,
+    anchor.description,
+    anchor.partNumber ? `Part ${anchor.partNumber}` : null,
+    typeof anchor.qty === "number" ? `Qty ${anchor.qty}` : null,
+    typeof anchor.price === "number" ? `Price ${normalizeMoney(anchor.price)}` : null,
+    typeof anchor.labor === "number" ? `Labor ${anchor.labor}` : null,
+    typeof anchor.paint === "number" ? `Paint ${anchor.paint}` : null,
+    anchor.noteText ? `Note ${anchor.noteText}` : null,
+    anchor.supplierText ? `Supplier ${anchor.supplierText}` : null,
+    anchor.anchorType === "totals_row" ? `Totals ${anchor.rowText}` : anchor.rowText,
+  ].filter(Boolean).join(" | ");
+}
+
+function getAnchorPageGeometry(anchor: EstimateRowAnchor) {
+  return {
+    pdfWidth: anchor.pageWidth,
+    pdfHeight: anchor.pageHeight,
+    rotation: anchor.rotation,
+  };
+}
+
+function buildAnchorGeometry(rect: ReturnType<typeof buildPdfRectFromTopLeftAnchor>) {
+  return {
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+    xPct: rect.xPct,
+    yPct: rect.yPct,
+    wPct: rect.wPct,
+    hPct: rect.hPct,
+    pdfBoundingBox: {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+    },
+    pdfQuad: buildTopLeftPdfQuad(rect),
+    normalizedUiRect: {
+      xPct: rect.xPct,
+      yPct: rect.yPct,
+      wPct: rect.wPct,
+      hPct: rect.hPct,
+    },
+  };
+}
+
+function buildTopLeftPdfQuad(rect: { x: number; y: number; width: number; height: number }): PdfQuad {
+  return [
+    rect.x,
+    rect.y,
+    rect.x + rect.width,
+    rect.y,
+    rect.x,
+    rect.y + rect.height,
+    rect.x + rect.width,
+    rect.y + rect.height,
+  ].map(roundCoordinate) as PdfQuad;
+}
+
+function parseEstimateRowFields(text: string, lineNumber: string | null) {
+  const withoutLineNumber = lineNumber
+    ? text.replace(new RegExp(`^\\s*(?:line\\s*)?${escapeRegex(lineNumber)}\\b\\s*`, "i"), "").trim()
+    : text.trim();
+  const price = extractLastMoney(withoutLineNumber);
+  const numericTokens = extractNumericTokens(withoutLineNumber.replace(/\$[\d,]+(?:\.\d{2})?/g, " "));
+  const labor = detectLaborValue(withoutLineNumber, numericTokens);
+  const paint = detectPaintValue(withoutLineNumber, numericTokens);
+  const qty = detectQuantityValue(withoutLineNumber, numericTokens, labor, paint);
+  const partNumber = extractPartNumber(withoutLineNumber);
+  const description = withoutLineNumber
+    .replace(/\$[\d,]+(?:\.\d{2})?/g, " ")
+    .replace(/\b(?:qty|quantity|labor|paint|refinish|hrs?|hours?)\b[:\s]*\d+(?:\.\d+)?/gi, " ")
+    .replace(/\b(?:part|part\s*no|part\s*#|pn)\b[:#\s-]*[a-z0-9-]{4,}/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim() || null;
+  return {
+    operation: description ? description.split(/\s+/).slice(0, 5).join(" ") : null,
+    description,
+    partNumber,
+    qty,
+    price,
+    labor,
+    paint,
+  };
+}
+
+function extractLastMoney(value: string): number | null {
+  const matches = [...value.matchAll(/\$([\d,]+(?:\.\d{2})?)/g)];
+  if (!matches.length) return null;
+  return Number(matches[matches.length - 1][1].replace(/,/g, ""));
+}
+
+function extractNumericTokens(value: string) {
+  return [...value.matchAll(/\b\d+(?:\.\d+)?\b/g)].map((match) => ({
+    value: Number(match[0]),
+    index: match.index ?? 0,
+  }));
+}
+
+function detectLaborValue(text: string, tokens: Array<{ value: number; index: number }>) {
+  const explicit = text.match(/\b(?:labor|body|mech|frame|structural|hrs?|hours?)\b\D{0,8}(\d+(?:\.\d+)?)/i);
+  if (explicit) return Number(explicit[1]);
+  if (!/\b(?:scan|calibration|r&i|r\s*&\s*i|repair|replace|refinish|labor|test|aim|initialize|program|mask|sand|polish)\b/i.test(text)) {
+    return null;
+  }
+  return tokens.find((token) => token.value > 0 && token.value < 40)?.value ?? null;
+}
+
+function detectPaintValue(text: string, tokens: Array<{ value: number; index: number }>) {
+  const explicit = text.match(/\b(?:paint|refinish)\b\D{0,8}(\d+(?:\.\d+)?)/i);
+  if (explicit) return Number(explicit[1]);
+  if (!/\b(?:paint|refinish|blend|clear coat|mask|jamb|color|sand|polish)\b/i.test(text)) return null;
+  return tokens.find((token) => token.value > 0 && token.value < 40)?.value ?? null;
+}
+
+function detectQuantityValue(
+  text: string,
+  tokens: Array<{ value: number; index: number }>,
+  labor: number | null,
+  paint: number | null
+) {
+  const explicit = text.match(/\b(?:qty|quantity)\b\D{0,8}(\d+(?:\.\d+)?)/i);
+  if (explicit) return Number(explicit[1]);
+  if (!/\b(?:part|cover|grille|lamp|bracket|molding|reflector|sensor|bumper|door|panel|lkq|aftermarket|a\/m)\b/i.test(text)) {
+    return null;
+  }
+  const whole = tokens.find((token) =>
+    Number.isInteger(token.value) &&
+    token.value > 0 &&
+    token.value <= 99 &&
+    token.value !== labor &&
+    token.value !== paint
+  );
+  return whole?.value ?? null;
+}
+
+function extractPartNumber(value: string) {
+  const explicit = value.match(/\b(?:part\s*no|part\s*#|pn)\b[:#\s-]*([a-z0-9-]{4,})/i)?.[1];
+  if (explicit) return explicit.toUpperCase();
+  const standalone = value.match(/\b([A-Z0-9]{2,5}-[A-Z0-9-]{3,})\b/i)?.[1];
+  return standalone ? standalone.toUpperCase() : null;
 }
 
 export function findBestEstimateRowAnchorForFinding(
@@ -308,6 +550,14 @@ export function gateVisibleCitationDensityAnnotation(
   if (anchor.anchorType === "supplier_row") {
     return /supplier|alternate|aftermarket|lkq|used|capa|part/.test(evidenceText) && /supplier|alternate|aftermarket|lkq|used|capa|part/.test(rowText);
   }
+  if (anchor.anchorType === "embedded_link_row") {
+    return /link|url|report|available|referenced|adas|oem|procedure|egnyte/.test(evidenceText) &&
+      /https?|www|link|url|report|available|referenced|egnyte|revv/.test(rowText);
+  }
+  if (anchor.anchorType === "guide_row") {
+    return /ccc|motor|guide|p page|included|not included|database|deg/.test(evidenceText) &&
+      /ccc|motor|guide|p page|included|not included|database|deg/.test(rowText);
+  }
   if (anchor.anchorType === "section_row") {
     return Boolean(getTargetSection(finding, estimateRole)) && sharedTermScore(getTargetSection(finding, estimateRole) ?? "", rowText, 10) >= 5;
   }
@@ -350,6 +600,8 @@ function scoreRowAnchor(
   score += keyTokenScore(operation, anchorText, 36);
   if (anchor.anchorType === "totals_row" && /total|rate|paint|material|labor|net cost/.test(`${operation} ${normalizeMatchText(evidence?.description ?? "")}`)) score += 42;
   if (anchor.anchorType === "supplier_row" && /supplier|alternate|aftermarket|lkq|part/.test(`${operation} ${normalizeMatchText(evidence?.description ?? "")}`)) score += 42;
+  if (anchor.anchorType === "embedded_link_row" && /link|url|report|available|referenced|egnyte|revv/.test(`${operation} ${normalizeMatchText(evidence?.description ?? "")}`)) score += 42;
+  if (anchor.anchorType === "guide_row" && /ccc|motor|guide|p page|included|not included|database|deg/.test(`${operation} ${normalizeMatchText(evidence?.description ?? "")}`)) score += 38;
   return score;
 }
 
@@ -378,19 +630,31 @@ function classifyLine(
   lineNumber: string | null,
   sectionName: string | null,
   currentSection: string
-): EstimateRowAnchor["anchorType"] | null {
+): EstimateRowAnchorType | null {
   const normalized = normalizeMatchText(text);
+  if (detectGuideRow(text)) return "guide_row";
+  if (detectEmbeddedLinkRow(text)) return "embedded_link_row";
   if (
     lineNumber &&
     (/\b(?:supplier|alternate parts supplier)\b/.test(normalizeMatchText(currentSection)) ||
       /\b(?:supplier|alternate parts supplier|alternate supplier)\b/.test(normalized))
   ) return "supplier_row";
-  if (lineNumber) return /note|available|via this link|not correct|report/.test(normalized) ? "line_note" : "estimate_line";
+  if (lineNumber) return /note|available|not correct|report/.test(normalized) ? "line_note" : "estimate_line";
   if (/\btotal|subtotal|net cost|grand total|paint supplies|paint materials|body labor|paint labor|labor rate\b/.test(normalized)) return "totals_row";
   if (/\bsupplier|alternate|aftermarket|lkq|used part|capa\b/.test(`${normalized} ${normalizeMatchText(currentSection)}`)) return "supplier_row";
   if (sectionName) return "section_row";
-  if (/\bnote|available upon request|via this link|not correct|report\b/.test(normalized)) return "line_note";
+  if (/\bnote|available upon request|not correct|report\b/.test(normalized)) return "line_note";
   return null;
+}
+
+function detectEmbeddedLinkRow(text: string) {
+  return /\b(?:https?:\/\/|www\.|via this link|link available|available upon request|referenced link|egnyte|revv\s*adas|revvadas|adas report|oe docs)\b/i.test(text);
+}
+
+function detectGuideRow(text: string) {
+  const normalized = normalizeMatchText(text);
+  return /\b(?:ccc|motor|guide|p pages?|included|not included|database|estimating guide|procedure pages?|deg)\b/.test(normalized) &&
+    /\b(?:guide|database|included|not included|p pages?|deg|motor|ccc)\b/.test(normalized);
 }
 
 function extractLineNumber(text: string) {
@@ -450,8 +714,7 @@ function isGenericOrMalformedAnchorText(value: string): boolean {
   return (
     /^\s*(?:repair operation|proc report|comparison or screenshot cues)\s*$/i.test(value) ||
     /\bproc\s+(?:pre|post)[-\s]?repair scanm\b/i.test(value) ||
-    /\b(?:citation density gap report|annotation legend|unanchored citation density|disclosure|privacy|estimate summary only|disclaimer|abbreviations?|motor guide|guide pages)\b/i.test(value) ||
-    /\bmotor\b.*\b(?:database|guide|included|not included)\b/i.test(value)
+    /\b(?:citation density gap report|annotation legend|unanchored citation density|disclosure|privacy|estimate summary only|disclaimer|abbreviations?)\b/i.test(value)
   );
 }
 
@@ -544,4 +807,12 @@ function average(values: number[]) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function roundCoordinate(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

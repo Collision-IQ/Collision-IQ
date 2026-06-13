@@ -23,6 +23,7 @@ import {
   extractPdfRowAnchors,
   findBestEstimateRowAnchorForFinding,
   type EstimateRowAnchor,
+  type EstimateRowAnchorType,
 } from "./citationDensityRowAnchors";
 
 export type AnnotationMode = "margin_callouts" | "inline_highlight" | "both";
@@ -58,9 +59,19 @@ export type CitationDensityAnnotationMetadata = {
   sourcePdfPageNumber: number;
   sourcePageNumber: number;
   sourceLineNumber?: string;
-  sourceAnchorType: "estimate_line" | "line_note" | "supplier_row" | "totals_row" | "section_row";
+  sourceAnchorType: EstimateRowAnchorType;
   sourceAnchorText: string;
   sourceAnchorNormalizedText: string;
+  sourceAnchorOperation?: string | null;
+  sourceAnchorDescription?: string | null;
+  sourceAnchorPartNumber?: string | null;
+  sourceAnchorQty?: number | null;
+  sourceAnchorPrice?: number | null;
+  sourceAnchorLabor?: number | null;
+  sourceAnchorPaint?: number | null;
+  sourceAnchorPdfBoundingBox?: EstimateRowAnchor["pdfBoundingBox"];
+  sourceAnchorPdfQuad?: EstimateRowAnchor["pdfQuad"];
+  sourceAnchorNormalizedUiRect?: EstimateRowAnchor["normalizedUiRect"];
   markerNumber: number;
   pageNumber: number;
   pdfPageWidth: number;
@@ -80,7 +91,7 @@ export type CitationDensityAnnotationMetadata = {
   targetRawText: string;
   targetNormalizedText: string;
   matchConfidence: "high" | "medium" | "low";
-  anchorType: "estimate_line" | "line_note" | "supplier_row" | "totals_row" | "section_row";
+  anchorType: EstimateRowAnchorType;
   label: string;
   shortTitle: string;
   estimateLine: string;
@@ -110,7 +121,7 @@ export type AnchoredCitationCandidate = {
   sourcePdfPageNumber: number;
   sourcePdfPageIndex: number;
   sourceLineNumber?: string;
-  sourceAnchorType: "estimate_line" | "line_note" | "supplier_row" | "totals_row" | "section_row";
+  sourceAnchorType: EstimateRowAnchorType;
   sourceAnchorText: string;
   sourceAnchorNormalizedText: string;
   label: string;
@@ -208,6 +219,7 @@ export function dataUrlToPdfBytes(dataUrl: string): Uint8Array | null {
 
 export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   sourcePdfBytes: Uint8Array;
+  sourceDocumentId?: string;
   sourceText?: string | null;
   findings: CitationDensityFinding[];
   request?: AnnotatedEstimateRequest;
@@ -228,7 +240,10 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const sourceDocumentRole = estimateRole === "shop" ? "shop" : "carrier";
-  const pdfAnchors = await extractPdfRowAnchors(sourcePdfBytes, { sourceDocumentRole }).catch((error) => {
+  const pdfAnchors = await extractPdfRowAnchors(sourcePdfBytes, {
+    sourceDocumentRole,
+    sourceDocumentId: params.sourceDocumentId,
+  }).catch((error) => {
     warnings.push(
       `Text-coordinate extraction failed; findings were placed in the appendix. ${error instanceof Error ? error.message : "Unknown PDF text extraction error."}`
     );
@@ -523,6 +538,28 @@ function classifyRowBackedCandidate(
       missingAuthorityTypes: ["parts correctness support"],
     };
   }
+  if (anchor.anchorType === "embedded_link_row") {
+    return {
+      type: "adas_report_reference",
+      topic: "diagnostic",
+      label: "REFERENCED / NOT PRODUCED",
+      category: "adas_calibration",
+      estimateGapType: "referenced_not_produced",
+      adasStatus: "referenced_not_produced",
+      missingAuthorityTypes: ["referenced link or report"],
+    };
+  }
+  if (anchor.anchorType === "guide_row") {
+    return {
+      type: "totals_delta",
+      topic: "totals",
+      label: "ESTIMATE GAP ONLY",
+      category: "not_included_operation",
+      estimateGapType: "present_but_under_documented",
+      adasStatus: "not_applicable",
+      missingAuthorityTypes: ["CCC/MOTOR guide support"],
+    };
+  }
   if (/\bnot correct style\b/.test(normalized)) {
     return {
       type: "parts_correctness",
@@ -586,7 +623,7 @@ function buildRowBackedCandidateTopics(findings: CitationDensityFinding[]) {
     ].join(" "));
     if (/\b(?:not correct style|grille|lkq|part|parts|style|oem style)\b/.test(text)) topics.add("parts");
     if (/\b(?:supplier|alternate|aftermarket|used part|lkq)\b/.test(text)) topics.add("supplier");
-    if (/\b(?:labor rate|rate|paint material|paint supplies|materials|total|net cost|body labor|paint labor|deg|p page)\b/.test(text)) topics.add("totals");
+    if (/\b(?:labor rate|rate|paint material|paint supplies|materials|total|net cost|body labor|paint labor|deg|p page|ccc|motor|guide|included|not included|database)\b/.test(text)) topics.add("totals");
     if (/\b(?:adas|scan|diagnostic|calibration|srs|seat belt|road test|revvadas|report|radar|camera|sensor|programming|initialization|aiming)\b/.test(text)) topics.add("diagnostic");
   }
   return topics;
@@ -705,6 +742,7 @@ function isClassificationAllowedForRow(label: string, anchor: EstimateRowAnchor)
   if (/NEEDS ADAS/i.test(label)) {
     return anchor.anchorType !== "totals_row" &&
       anchor.anchorType !== "supplier_row" &&
+      anchor.anchorType !== "guide_row" &&
       !/\b(?:final road test|not correct style|total|paint supplies|paint materials|body labor|paint labor|net cost|supplier|lkq)\b/i.test(getAnchorSourceText(anchor));
   }
   return true;
@@ -717,6 +755,8 @@ function isRestrictedSourcePageForCandidate(candidate: AnchoredCitationCandidate
   }
   if (anchor.anchorType === "totals_row") return !/total|rate|paint|material|labor|net cost/i.test(candidate.estimateLineDisplay);
   if (anchor.anchorType === "supplier_row") return !/supplier|alternate|aftermarket|lkq|part|grille/i.test(candidate.estimateLineDisplay);
+  if (anchor.anchorType === "embedded_link_row") return !/link|url|report|available|referenced|egnyte|revv|adas|oem/i.test(candidate.estimateLineDisplay);
+  if (anchor.anchorType === "guide_row") return !/ccc|motor|guide|p page|included|not included|database|deg|rate|material|labor/i.test(candidate.estimateLineDisplay);
   return false;
 }
 
@@ -1234,7 +1274,7 @@ function attachPdfFindingAnnotations(
     CA: 0.36,
     T: PDFHexString.fromText("Collision IQ Citation Density"),
     Contents: PDFHexString.fromText(metadata.comment),
-    NM: PDFHexString.fromText(`citation-density-${metadata.findingId}-highlight`),
+    NM: PDFHexString.fromText(`citation-density-${sanitizePdfAnnotationName(metadata.findingId)}-${sanitizePdfAnnotationName(metadata.anchorId)}-highlight`),
     M: PDFHexString.fromText(formatPdfDate(new Date())),
     F: 4,
   });
@@ -1297,6 +1337,16 @@ function buildAnnotationMetadata(
     sourceAnchorType: anchor.anchorType,
     sourceAnchorText: targetRawText,
     sourceAnchorNormalizedText: anchor.normalizedRowText,
+    sourceAnchorOperation: anchor.operation,
+    sourceAnchorDescription: anchor.description,
+    sourceAnchorPartNumber: anchor.partNumber,
+    sourceAnchorQty: anchor.qty,
+    sourceAnchorPrice: anchor.price,
+    sourceAnchorLabor: anchor.labor,
+    sourceAnchorPaint: anchor.paint,
+    sourceAnchorPdfBoundingBox: anchor.pdfBoundingBox,
+    sourceAnchorPdfQuad: anchor.pdfQuad,
+    sourceAnchorNormalizedUiRect: anchor.normalizedUiRect,
     markerNumber: number,
     pageNumber: anchor.pageNumber,
     pdfPageWidth: normalizePdfRect({ x: 0, y: 0, width: options.pageWidth, height: options.pageHeight }, { pdfWidth: options.pageWidth, pdfHeight: options.pageHeight }).width,
@@ -1358,12 +1408,12 @@ function getSourceDocumentId(
   sourceDocumentRole: CitationDensityAnnotationMetadata["sourceDocumentRole"]
 ) {
   if (sourceDocumentRole === "carrier") {
-    return finding.carrierAnchor?.sourceDocumentId || finding.embeddedEstimateLinks?.find((link) => link.estimateRole === "carrier")?.sourceDocumentId || "carrier-estimate";
+    return finding.carrierAnchor?.sourceDocumentId || finding.embeddedEstimateLinks?.find((link) => link.estimateRole === "carrier")?.sourceDocumentId;
   }
   if (sourceDocumentRole === "shop") {
-    return finding.shopAnchor?.sourceDocumentId || finding.embeddedEstimateLinks?.find((link) => link.estimateRole === "shop")?.sourceDocumentId || "shop-estimate";
+    return finding.shopAnchor?.sourceDocumentId || finding.embeddedEstimateLinks?.find((link) => link.estimateRole === "shop")?.sourceDocumentId;
   }
-  return finding.carrierAnchor?.sourceDocumentId || finding.embeddedEstimateLinks?.find((link) => link.estimateRole === "carrier")?.sourceDocumentId || "carrier-estimate";
+  return finding.carrierAnchor?.sourceDocumentId || finding.embeddedEstimateLinks?.find((link) => link.estimateRole === "carrier")?.sourceDocumentId;
 }
 
 function getMatchConfidence(anchor: EstimateRowAnchor): "high" | "medium" | "low" {
@@ -1399,9 +1449,15 @@ function buildPdfCommentBody(
   const lines = buildCalloutLines(finding, metadata.markerNumber, metadata.label, redactSensitive, estimateRole);
   return [
     `Finding #${metadata.markerNumber}: ${metadata.shortTitle}`,
+    `Finding id: ${metadata.findingId}`,
+    `Anchor id: ${metadata.anchorId}`,
     ...lines.slice(1),
     metadata.sourceRefs.length ? `Source refs: ${metadata.sourceRefs.join("; ")}` : "",
   ].filter(Boolean).join("\n");
+}
+
+function sanitizePdfAnnotationName(value: string) {
+  return value.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 120) || "anchor";
 }
 
 function formatShortIssueTitle(finding: CitationDensityFinding) {

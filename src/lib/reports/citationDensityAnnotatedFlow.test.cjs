@@ -227,9 +227,11 @@ run("Citation Density viewer configures worker and converts PDF coordinates", ()
   assert.match(source, /event\.stopPropagation\(\)/);
   assert.match(source, /data-finding-id=\{annotation\.findingId\}/);
   assert.match(source, /data-anchor-id=\{annotation\.anchorId\}/);
+  assert.match(source, /data-annotation-key=\{selectionKey\}/);
+  assert.match(source, /getAnnotationSelectionKey/);
   assert.match(source, /effectiveSelectedId/);
-  assert.match(source, /setSelectedId\(annotation\.findingId\)/);
-  assert.match(source, /effectiveSelectedId === annotation\.findingId/);
+  assert.match(source, /setSelectedId\(selectionKey\)/);
+  assert.match(source, /effectiveSelectedId === selectionKey/);
   assert.match(source, /ring-2 ring-red-500/);
 });
 
