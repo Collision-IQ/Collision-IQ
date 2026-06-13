@@ -71,6 +71,11 @@ export type CitationDensityDebugTrace = {
   textExtractionMethod: PdfTextExtractionMethod | "not_run";
   textExtractionError?: string;
   textExtractionWarnings: string[];
+  pdfWorkerResolvedPath?: string;
+  pdfWorkerExists?: boolean;
+  pdfWorkerSrc?: string;
+  pdfjsImportMode?: "externalized-node-module" | "next-bundled-chunk";
+  textExtractionInfrastructureStage?: "polyfills" | "pdfjs-import" | "worker-resolution" | "get-document" | "get-text-content";
   extractedTextPageCount: number;
   firstPageTextSample: string;
   firstNonEmptyTextPage: number | null;
@@ -255,6 +260,8 @@ export const NO_SELECTABLE_TEXT_ERROR =
   "Citation Density could not extract selectable text from the selected estimate PDF. Upload the original CCC estimate PDF or enable OCR/CCC structured estimate extraction.";
 export const PDF_TEXT_EXTRACTION_INFRASTRUCTURE_ERROR =
   "Citation Density PDF text extraction failed in production because the PDF parser polyfill is unavailable. No annotation PDF was produced.";
+export const PDF_JS_WORKER_UNAVAILABLE_ERROR =
+  "Citation Density PDF text extraction failed because the PDF.js worker asset is unavailable in production. No annotation PDF was produced.";
 
 const exportCache = new Map<string, {
   bytes: Uint8Array;
@@ -323,6 +330,11 @@ export async function extractCitationDensityRowAnchors(
     textExtractionMethod: diagnostics.method,
     textExtractionError: diagnostics.error,
     textExtractionWarnings: diagnostics.warnings,
+    pdfWorkerResolvedPath: diagnostics.pdfWorkerResolvedPath,
+    pdfWorkerExists: diagnostics.pdfWorkerExists,
+    pdfWorkerSrc: diagnostics.pdfWorkerSrc,
+    pdfjsImportMode: diagnostics.pdfjsImportMode,
+    textExtractionInfrastructureStage: diagnostics.textExtractionInfrastructureStage,
     extractedTextPageCount: diagnostics.perPageTextLengths.filter((length) => length > 0).length,
     firstPageTextSample: truncateDebugText(
       lines
@@ -383,6 +395,11 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       textExtractionMethod: "not_run" as const,
       textExtractionError: error instanceof Error ? error.message : String(error),
       textExtractionWarnings: [],
+      pdfWorkerResolvedPath: undefined,
+      pdfWorkerExists: undefined,
+      pdfWorkerSrc: undefined,
+      pdfjsImportMode: undefined,
+      textExtractionInfrastructureStage: "pdfjs-import" as const,
       visualLines: [],
       extractedTextPageCount: 0,
       firstPageTextSample: "",
@@ -410,6 +427,11 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     textExtractionMethod: extraction.textExtractionMethod,
     textExtractionError: extraction.textExtractionError,
     textExtractionWarnings: extraction.textExtractionWarnings,
+    pdfWorkerResolvedPath: extraction.pdfWorkerResolvedPath,
+    pdfWorkerExists: extraction.pdfWorkerExists,
+    pdfWorkerSrc: extraction.pdfWorkerSrc,
+    pdfjsImportMode: extraction.pdfjsImportMode,
+    textExtractionInfrastructureStage: extraction.textExtractionInfrastructureStage,
     extractedTextPageCount: extraction.extractedTextPageCount,
     firstPageTextSample: extraction.firstPageTextSample,
     firstNonEmptyTextPage: extraction.firstNonEmptyTextPage,
@@ -442,6 +464,16 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
 
   if (!anchors.length) {
     warnings.push(NO_ROWS_EXTRACTED_WARNING);
+  }
+
+  if (trace.findingCount > 0 && isPdfJsWorkerError(trace.textExtractionError)) {
+    trace.unanchoredFindingCount = trace.findingCount;
+    trace.droppedFindings.push({
+      findingId: "*",
+      reason: "pdfjs worker asset unavailable",
+      anchorId: null,
+    });
+    throw new CitationDensityAnnotationError(PDF_JS_WORKER_UNAVAILABLE_ERROR, trace);
   }
 
   if (trace.findingCount > 0 && trace.textExtractionError) {
@@ -1074,6 +1106,10 @@ function getAnchorSourceText(anchor: EstimateRowAnchor) {
     .join(" ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function isPdfJsWorkerError(error: string | undefined) {
+  return Boolean(error && /pdf\.worker\.mjs|Setting up fake worker failed/i.test(error));
 }
 
 function buildAnchorsByPage(anchors: EstimateRowAnchor[]) {

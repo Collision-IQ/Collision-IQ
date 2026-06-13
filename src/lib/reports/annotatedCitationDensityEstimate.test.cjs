@@ -1110,7 +1110,12 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     assert.equal(json.debugCounts.sourcePdfHash, sha256(carrierPdfBytes));
     assert.equal(json.debugCounts.textExtractionMethod, "pdfjs-legacy-primary");
     assert.equal(json.debugCounts.textExtractionError, undefined);
-    assert.deepEqual(json.debugCounts.textExtractionWarnings, []);
+    assert.ok(json.debugCounts.textExtractionWarnings.some((warning) => warning.includes("Configured PDF.js workerSrc")));
+    assert.match(json.debugCounts.pdfWorkerResolvedPath, /pdf\.worker\.mjs$/);
+    assert.equal(json.debugCounts.pdfWorkerExists, true);
+    assert.match(json.debugCounts.pdfWorkerSrc, /^file:\/\//);
+    assert.equal(json.debugCounts.pdfjsImportMode, "externalized-node-module");
+    assert.equal(json.debugCounts.textExtractionInfrastructureStage, "get-text-content");
     assert.ok(json.debugCounts.extractedTextPageCount >= 12);
     assert.match(json.debugCounts.firstPageTextSample, /Carrier 21975 source page 1/);
     assert.equal(json.debugCounts.firstNonEmptyTextPage, 1);
@@ -1233,7 +1238,12 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     assert.equal(json.debugCounts.sourcePdfHash, sha256(noRowsPdfBytes));
     assert.equal(json.debugCounts.textExtractionMethod, "pdfjs-legacy-primary");
     assert.equal(json.debugCounts.textExtractionError, undefined);
-    assert.deepEqual(json.debugCounts.textExtractionWarnings, []);
+    assert.ok(json.debugCounts.textExtractionWarnings.some((warning) => warning.includes("Configured PDF.js workerSrc")));
+    assert.match(json.debugCounts.pdfWorkerResolvedPath, /pdf\.worker\.mjs$/);
+    assert.equal(json.debugCounts.pdfWorkerExists, true);
+    assert.match(json.debugCounts.pdfWorkerSrc, /^file:\/\//);
+    assert.equal(json.debugCounts.pdfjsImportMode, "externalized-node-module");
+    assert.equal(json.debugCounts.textExtractionInfrastructureStage, "get-text-content");
     assert.equal(json.debugCounts.extractedTextPageCount, 1);
     assert.match(json.debugCounts.firstPageTextSample, /Selected PDF cover sheet/);
     assert.equal(json.debugCounts.firstNonEmptyTextPage, 1);
