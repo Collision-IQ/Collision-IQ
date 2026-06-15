@@ -214,6 +214,14 @@ export async function POST(request: Request) {
 
       const estimateRole = normalizeOutputEstimateRole(selection.selectedEstimateRole);
       const roleFindings = filterFindingsForEstimateRole(model.citationDensityFindings, estimateRole);
+      const comparisonEstimateTexts = sourceDocuments
+        .filter((document) => document.id !== selection.selectedSourceDocumentId && isAnnotatableEstimatePdf(document))
+        .map((document) => ({
+          sourceDocumentId: document.id,
+          fileName: document.filename || "Comparison estimate",
+          text: document.text || "",
+          estimateRole: inferComparisonEstimateRole(document.filename, estimateRole),
+        }));
       const result = await buildAnnotatedCitationDensityEstimatePdf({
         sourcePdfBytes,
         sourceDocumentId: selection.selectedSourceDocumentId,
@@ -221,6 +229,7 @@ export async function POST(request: Request) {
         selectedEstimateTotal: selection.selectedEstimateTotal,
         uploadedFileNames: sourceDocuments.map((document) => document.filename).filter(Boolean),
         sourceText: sourceDocument.text,
+        comparisonEstimateTexts,
         findings: roleFindings,
         request: {
           findingIds: coerceStringArray(body.findingIds),
@@ -356,6 +365,16 @@ function buildAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof buildA
     metadataArtifactId: debugTrace.metadataArtifactId,
     firstExtractedAnchorIds: debugTrace.firstAnchorIds,
     firstFindingAnchorIds: debugTrace.firstFindingAnchorIds,
+    partSourceRowCount: debugTrace.partSourceRowCount,
+    nonOemPartRowCount: debugTrace.nonOemPartRowCount,
+    oemPartRowCount: debugTrace.oemPartRowCount,
+    partSourceComparisonCandidateCount: debugTrace.partSourceComparisonCandidateCount,
+    partSourceFindingCount: debugTrace.partSourceFindingCount,
+    partSourceAnchoredFindingCount: debugTrace.partSourceAnchoredFindingCount,
+    partSourceUnanchoredFindingCount: debugTrace.partSourceUnanchoredFindingCount,
+    partSourceRows: debugTrace.partSourceRows,
+    partSourceDroppedReasons: debugTrace.partSourceDroppedReasons,
+    fallbackMatchedFindings: debugTrace.fallbackMatchedFindings,
     droppedFindings: debugTrace.droppedFindings,
     rendererDrops: debugTrace.rendererDrops,
   };
@@ -390,6 +409,16 @@ function normalizeOutputEstimateRole(
 ): "carrier" | "shop" | "selected" {
   if (role === "carrier" || role === "shop") return role;
   return "selected";
+}
+
+function inferComparisonEstimateRole(
+  filename: string | undefined,
+  selectedRole: "carrier" | "shop" | "selected"
+): "carrier" | "shop" {
+  const name = filename || "";
+  if (/shop|repair facility|rta|appraisal/i.test(name)) return "shop";
+  if (/carrier|insur|sor|geico|state farm|progressive|allstate|estimate/i.test(name)) return "carrier";
+  return selectedRole === "shop" ? "carrier" : "shop";
 }
 
 function filterFindingsForEstimateRole(

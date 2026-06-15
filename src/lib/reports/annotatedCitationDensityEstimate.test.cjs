@@ -34,6 +34,7 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 
 const {
   buildAnnotatedCitationDensityEstimatePdf,
+  classifyPartSource,
   dataUrlToPdfBytes,
   extractCitationDensityRowAnchors,
 } = require("./annotatedCitationDensityEstimate.ts");
@@ -439,6 +440,22 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     const dataUrl = `data:application/pdf;base64,${Buffer.from(bytes).toString("base64")}`;
     assert.ok(dataUrlToPdfBytes(dataUrl).byteLength > 0);
     assert.equal(dataUrlToPdfBytes("data:text/plain;base64,SGVsbG8="), null);
+  });
+
+  await run("classifyPartSource detects AM LKQ CAPA OEM and used variants without unrelated matches", async () => {
+    assert.deepEqual(classifyPartSource("Line 5 Repl A/M bumper cover"), ["AM"]);
+    assert.deepEqual(classifyPartSource("Line 5 Repl AM bumper cover"), ["AM"]);
+    assert.deepEqual(classifyPartSource("Line 23 LKQ grille chrome"), ["LKQ"]);
+    assert.deepEqual(classifyPartSource("Line 10 A/M CAPA lamp bracket"), ["AM", "CAPA"]);
+    assert.deepEqual(classifyPartSource("Line 5 OEM bumper chrome"), ["OEM"]);
+    assert.deepEqual(classifyPartSource("Line 5 OE bumper chrome"), ["OE"]);
+    assert.deepEqual(classifyPartSource("Line 5 Used recycled reconditioned recond reman remanufactured part"), [
+      "USED",
+      "RECYCLED",
+      "RECONDITIONED",
+      "REMAN",
+    ]);
+    assert.deepEqual(classifyPartSource("Line 5 damage repair primer labor"), []);
   });
 
   await run("PDF row anchors expose deterministic estimate-row fields and model-safe selection text", async () => {
@@ -866,13 +883,13 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     });
     const pages = await extractPdfPageTexts(result.bytes);
 
-    assert.equal(result.annotatedFindingCount, 1);
+    assert.ok(result.annotatedFindingCount >= 1);
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.match(pages[0], /49\s+A\/M bumper cover/);
-    assert.doesNotMatch(pages[0], /NEEDS ADAS|NEEDS OEM|NEEDS INVOICE|REFERENCED \/ NOT PRODUCED/);
+    assert.doesNotMatch(pages[0], /NEEDS ADAS|NEEDS INVOICE|REFERENCED \/ NOT PRODUCED/);
     assert.match(pages.slice(1).join(" "), /Citation Density Finding Details/);
     assert.match(pages[0], /A\/M bumper cover/);
-    assert.match(result.annotationMetadata[0].comment, /Estimate line:/);
+    assert.match(result.annotationMetadata.find((item) => item.findingId === "kia-line-49").comment, /Estimate line:/);
   });
 
   await run("note text produces an on-page referenced-not-produced annotation", async () => {
@@ -1121,6 +1138,85 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     assert.doesNotMatch(pages.slice(0, result.originalPageCount).join(" "), /NEEDS ADAS|REFERENCED \/ NOT PRODUCED|Missing proof|Next action/);
   });
 
+  await run("SOR-1 selected estimate generates row-backed AM/LKQ vs OEM part-source findings", async () => {
+    const sourcePdfBytes = await createRam21975SourcePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceDocumentId: "sor-1-21975",
+      sourcePdfName: "SOR-1 21975.pdf",
+      comparisonEstimateTexts: [
+        {
+          sourceDocumentId: "shop-21975",
+          fileName: "Shop 21975.pdf",
+          estimateRole: "shop",
+          text: [
+            "Line 5 Repl OEM Bumper chrome, w/prk snsr",
+            "Line 8 Repl OEM Side retainer",
+            "Line 10 Repl OEM Lamp bracket",
+            "Line 23 OEM style grille chrome horizontal bars",
+            "Line 25 OE Radiator support front end",
+          ].join("\n"),
+        },
+      ],
+      findings: [],
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+    const pages = await extractPdfPageTexts(result.bytes);
+    const detailsText = pages.slice(result.originalPageCount).join(" ");
+    const partSourceMetadata = result.annotationMetadata.filter((item) =>
+      /AM\/LKQ part usage vs OEM part usage/.test(item.shortTitle) ||
+      /^part-source-oem-variance-/i.test(item.findingId)
+    );
+
+    assert.ok(result.renderedPdfAnnotationCount > 0 || result.debugTrace.renderedPdfAnnotationCount > 0);
+    assert.ok(result.debugTrace.partSourceFindingCount > 0);
+    assert.ok(result.debugTrace.partSourceAnchoredFindingCount > 0);
+    assert.equal(result.debugTrace.partSourceUnanchoredFindingCount, 0);
+    assert.equal(result.debugTrace.droppedFindings.some((item) => /fallback matched/i.test(item.reason)), false);
+    assert.ok(Array.isArray(result.debugTrace.fallbackMatchedFindings));
+    assert.ok(partSourceMetadata.length >= 4, `expected multiple part-source markers, got ${partSourceMetadata.length}`);
+    assert.ok(partSourceMetadata.some((item) => item.sourceLineNumber === "5" && item.anchorType === "estimate_line"));
+    assert.ok(partSourceMetadata.some((item) => item.sourceLineNumber === "8" && item.anchorType === "estimate_line"));
+    assert.ok(partSourceMetadata.some((item) => item.sourceLineNumber === "10" && item.anchorType === "estimate_line"));
+    assert.ok(partSourceMetadata.some((item) => item.sourceLineNumber === "23" && item.anchorType === "estimate_line"));
+    assert.equal(partSourceMetadata.some((item) => item.anchorType === "supplier_row"), false);
+    assert.ok(result.annotationMetadata.some((item) => /A\/M CAPA Bumper chrome, w\/prk snsr/i.test(item.sourceAnchorText)));
+    assert.ok(result.annotationMetadata.some((item) => /A\/M Side retainer/i.test(item.sourceAnchorText)));
+    assert.ok(result.annotationMetadata.some((item) => /A\/M CAPA Lamp bracket/i.test(item.sourceAnchorText)));
+    assert.ok(result.annotationMetadata.some((item) => /LKQ.*Grille chrome horizontal bars/i.test(item.sourceAnchorText)));
+    assert.match(detailsText, /AM\/LKQ part usage vs OEM part usage/);
+    assert.match(detailsText, /Exact selected row text: .*A\/M CAPA Bumper chrome, w\/prk snsr/i);
+    assert.match(detailsText, /Comparison row text: (?:Line )?5 Repl OEM Bumper chrome, w\/prk snsr/i);
+    assert.match(detailsText, /Selected part source classification: AM, CAPA/i);
+    assert.match(detailsText, /Comparison part source classification: OEM/i);
+    assert.match(detailsText, /LKQ/i);
+    assert.match(detailsText, /OEM|OE/i);
+    assert.equal(
+      result.debugTrace.partSourceRows.some((row) => row.anchorId.includes(":p11:") || row.anchorId.includes(":p12:")),
+      true
+    );
+  });
+
+  await run("one selected estimate flags AM/LKQ/CAPA rows for documentation and basis review", async () => {
+    const sourcePdfBytes = await createRam21975SourcePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceDocumentId: "sor-1-21975",
+      sourcePdfName: "SOR-1 21975.pdf",
+      findings: [],
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+    const text = (await extractPdfPageTexts(result.bytes)).slice(result.originalPageCount).join(" ");
+
+    assert.ok(result.debugTrace.partSourceFindingCount > 0);
+    assert.ok(result.annotationMetadata.some((item) => item.sourceLineNumber === "5" && item.label === "NEEDS OEM"));
+    assert.match(text, /document(?:ed)? part-type authorization/i);
+    assert.match(text, /fit\/finish\/style correctness|fit\/finish validation/i);
+    assert.match(text, /warranty\/quality/i);
+    assert.match(text, /invoice\/supplier|supplier\/invoice/i);
+    assert.match(text, /OEM\/insurer basis/i);
+  });
+
   await run("annotated-estimate route selects lower estimate and returns matching PDF/viewer metadata", async () => {
     const carrierPdfBytes = await createRam21975SourcePdf();
     const shopPdfBytes = await createShop21975SourcePdf();
@@ -1252,7 +1348,7 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     assert.equal(json.debugCounts.perPageTextLengths.length, 12);
     assert.equal(json.debugCounts.perPageTextItemCounts.length, 12);
     assert.ok(json.debugCounts.perPageTextItemCounts.some((count) => count > 0));
-    assert.equal(json.debugCounts.citationDensityArtifactVersion, "citation-density-details-one-finding-pages-v1");
+    assert.equal(json.debugCounts.citationDensityArtifactVersion, "citation-density-part-source-oem-v1");
     assert.ok(json.debugCounts.buildCommit);
     assert.ok(json.debugCounts.extractedAnchorCount > 40);
     assert.equal(json.debugCounts.findingCount, 4);
@@ -1547,7 +1643,7 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     const pages = await extractPdfPageTexts(result.bytes);
 
     assert.equal(result.originalPageCount, 12);
-    assert.equal(result.annotatedFindingCount, 9);
+    assert.ok(result.annotatedFindingCount >= 9);
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.doesNotMatch(result.warnings.join(" "), /all_findings_unanchored/);
     assert.doesNotMatch(pages.slice(0, result.originalPageCount).join(" "), /NEEDS ADAS|NEEDS OEM|NEEDS INVOICE|REFERENCED \/ NOT PRODUCED|ESTIMATE GAP ONLY/);
