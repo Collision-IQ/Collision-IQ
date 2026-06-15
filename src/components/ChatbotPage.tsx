@@ -120,6 +120,7 @@ export type ReportKind =
   | "estimate_scrubber"
   | "estimator_change_request_list"
   | "policy_rights_review"
+  | "oem_citation_density"
   | "doi_complaint_packet";
 type ReportDestinationType = "customer" | "carrier" | "internal";
 type ReportSendHistoryItem = {
@@ -971,9 +972,9 @@ export function ChatbotWorkspacePage() {
         ? { label: "Citation Density PDF (Pro)", type: "locked" }
       : null,
     canUsePolicyRightsReviewExport
-      ? { label: "Policy & Rights Review", type: "pdf" }
+      ? { label: "OEM Citation Density Report", type: "pdf" }
       : hasResolvedAnalysis
-        ? { label: "Policy & Rights Review (Pro)", type: "locked" }
+        ? { label: "OEM Citation Density Report (Pro)", type: "locked" }
       : null,
     canUseDoiComplaintPacketExport
       ? { label: "DOI Complaint Packet", type: "pdf" }
@@ -1922,11 +1923,13 @@ function RailContent({
       setSnapshotStatus("Snapshot could not be generated from the current report.");
       return;
     }
-    if (reportType === "estimate_scrubber" && !canGenerateCitationDensityAnnotatedEstimate) {
-      setReportSendStatus("Upload an original estimate PDF before sending the annotated Citation Density estimate.");
+    if ((reportType === "estimate_scrubber" || reportType === "oem_citation_density") && !canGenerateCitationDensityAnnotatedEstimate) {
+      setReportSendStatus(reportType === "oem_citation_density"
+        ? "Upload an original estimate PDF before sending the OEM Citation Density Report."
+        : "Upload an original estimate PDF before sending the annotated Citation Density estimate.");
       return;
     }
-    if (reportType !== "snapshot" && reportType !== "estimate_scrubber" && !canRenderExports) {
+    if (reportType !== "snapshot" && reportType !== "estimate_scrubber" && reportType !== "oem_citation_density" && !canRenderExports) {
       setReportSendStatus("Report is not ready to send yet.");
       return;
     }
@@ -1943,6 +1946,7 @@ function RailContent({
   async function prepareExportResearch(reportType: ReportKind): Promise<ExportResearchSnapshot | null> {
     const needsResearch =
       reportType === "policy_rights_review" ||
+      reportType === "oem_citation_density" ||
       reportType === "estimate_scrubber" ||
       reportType === "doi_complaint_packet" ||
       (reportType === "repair_intelligence" && renderModel.oemContradictions.length > 0);
@@ -2055,6 +2059,22 @@ function RailContent({
       }
       return;
     }
+    if (reportType === "oem_citation_density") {
+      try {
+        const exportResult = await generateOemCitationDensityReport();
+        downloadBlob(exportResult.blob, exportResult.filename);
+        if (exportResult.annotationMetadata.length > 0) {
+          setCitationDensityViewer({
+            pdfUrl: exportResult.downloadUrl,
+            annotations: exportResult.annotationMetadata,
+          });
+        }
+        setReportSendStatus(buildAnnotatedCitationDensityStatus(exportResult));
+      } catch (error) {
+        setReportSendStatus(error instanceof Error ? error.message : "OEM Citation Density Report download failed.");
+      }
+      return;
+    }
 
     if (reportType !== "snapshot" && !canRenderExports) {
       setReportSendStatus("Report is not ready to download yet.");
@@ -2132,6 +2152,69 @@ function RailContent({
     };
   }
 
+  async function generateOemCitationDensityReport(): Promise<AnnotatedEstimateExportResult> {
+    if (!analysisReportId) {
+      throw new Error("OEM Citation Density Report needs an active case.");
+    }
+
+    if (!selectAnnotatedCitationDensitySourcePdf(attachments)) {
+      throw new Error("Upload an original estimate PDF before generating the OEM Citation Density Report.");
+    }
+
+    setReportSendStatus("Generating OEM Citation Density Report...");
+    const response = await fetch("/api/reports/oem-citation-density/annotated-estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        caseId: analysisReportId,
+        targetEstimate: "all",
+        annotationMode: "both",
+        includeLegend: true,
+        includeSummaryPage: false,
+        redactSensitive: true,
+      }),
+    });
+
+    const data = (await response.json().catch(() => null)) as {
+      downloadUrl?: unknown;
+      artifactId?: unknown;
+      exportId?: unknown;
+      annotationMetadata?: unknown;
+      annotatedFindingCount?: unknown;
+      unresolvedAnchorCount?: unknown;
+      warnings?: unknown;
+      error?: string;
+      userMessage?: string;
+    } | null;
+
+    if (!response.ok || typeof data?.downloadUrl !== "string") {
+      throw new Error(data?.userMessage || data?.error || "OEM Citation Density Report export failed.");
+    }
+
+    const blob = await fetchAnnotatedCitationDensityPdfBlob(data.downloadUrl);
+    return {
+      blob,
+      filename: "oem-citation-density-report.pdf",
+      artifactId: typeof data.artifactId === "string"
+        ? data.artifactId
+        : typeof data.exportId === "string"
+          ? data.exportId
+          : "",
+      downloadUrl: data.downloadUrl,
+      annotationMetadata: Array.isArray(data.annotationMetadata)
+        ? data.annotationMetadata.filter(isCitationDensityAnnotationMetadata)
+        : [],
+      annotatedFindingCount:
+        typeof data.annotatedFindingCount === "number" ? data.annotatedFindingCount : 0,
+      unresolvedAnchorCount:
+        typeof data.unresolvedAnchorCount === "number" ? data.unresolvedAnchorCount : 0,
+      warnings: Array.isArray(data.warnings)
+        ? data.warnings.filter((warning): warning is string => typeof warning === "string")
+        : [],
+    };
+  }
+
   async function askAboutCitationDensityFinding(annotation: CitationDensityAnnotationMetadata) {
     if (!analysisReportId) {
       setReportSendStatus("Open or continue this case before asking about a finding.");
@@ -2158,6 +2241,9 @@ function RailContent({
     }
     if (reportType === "estimate_scrubber") {
       throw new Error("Citation Density annotated export requires an original estimate PDF and must use the annotated-estimate PDF route.");
+    }
+    if (reportType === "oem_citation_density") {
+      throw new Error("OEM Citation Density Report requires an original estimate PDF and must use the OEM annotated-estimate PDF route.");
     }
 
     const resolvedAnalysis =
@@ -2247,8 +2333,10 @@ function RailContent({
     setCustomerReportError(null);
 
     try {
-      if (activeReportToSend === "estimate_scrubber") {
-        const exportResult = await generateAnnotatedCitationDensityEstimate();
+      if (activeReportToSend === "estimate_scrubber" || activeReportToSend === "oem_citation_density") {
+        const exportResult = activeReportToSend === "oem_citation_density"
+          ? await generateOemCitationDensityReport()
+          : await generateAnnotatedCitationDensityEstimate();
         const pdfBase64 = await blobToBase64(exportResult.blob);
         const response = await fetch("/api/reports/send", {
           method: "POST",
@@ -2281,7 +2369,7 @@ function RailContent({
         } | null;
 
         if (!response.ok) {
-          throw new Error(result?.error || "Annotated estimate email failed.");
+          throw new Error(result?.error || (activeReportToSend === "oem_citation_density" ? "OEM Citation Density email failed." : "Annotated estimate email failed."));
         }
 
         if (result?.deliveryMode === "manual") {
@@ -3018,39 +3106,39 @@ function RailContent({
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[#C65A2A]" aria-hidden />
-                    Policy & Rights Review
+                    OEM Citation Density Report
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                    Jurisdiction, policy rights, appraisal indicators, obligations, and escalation support.
+                    Reviews uploaded estimate(s) against OEM procedures, position statements, MOTOR guidance, safety requirements, documentation gaps, and repair-standard support.
                   </div>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <button
                     type="button"
                     onClick={() => {
-                      void downloadReportDocument("policy_rights_review");
+                      void downloadReportDocument("oem_citation_density");
                       emitSafeCrmEventFromClient({
                         event: "report_generated",
                         plan,
-                        exportType: "policy_rights_review",
+                        exportType: "oem_citation_density",
                       });
                     }}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download PDF</span>
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download OEM Citation Density PDF</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
                     type="button"
-                    onClick={() => openReportSend("policy_rights_review", "carrier")}
+                    onClick={() => openReportSend("oem_citation_density", "carrier")}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[#C65A2A] bg-[#C65A2A] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
-                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>
+                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email OEM Citation Density PDF</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </div>
                 <ReportSendStatusLine
-                  send={getLastSendFor("policy_rights_review")}
+                  send={getLastSendFor("oem_citation_density")}
                   loading={reportSendHistoryLoading}
                 />
               </div>
@@ -3059,13 +3147,13 @@ function RailContent({
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[#C65A2A]" aria-hidden />
-                    Policy & Rights Review
+                    OEM Citation Density Report
                     <span className="rounded-sm border border-[#C65A2A]/25 bg-[#C65A2A]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[#a35d26] dark:text-[#d08a4b]">
                       Pro
                     </span>
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
-                    Verified law, policy rights, appraisal indicators, DOI escalation support, and source details.
+                    OEM procedures, position statements, MOTOR guidance, safety requirements, documentation gaps, and repair-standard support.
                   </div>
                 </div>
                 <button
@@ -3172,7 +3260,7 @@ function RailContent({
                 onClick={onCustomerReportLocked}
                 className="w-full rounded-md border border-orange-400/18 bg-[#C65A2A]/10 p-3 text-xs text-foreground transition hover:bg-[#C65A2A]/16"
               >
-                Repair Intelligence, Estimate Scrubber, Policy & Rights Review, DOI Complaint Packet, and Customer Report are available on Pro.
+                Repair Intelligence, Citation Density PDF, OEM Citation Density Report, DOI Complaint Packet, and Customer Report are available on Pro.
               </button>
             ) : null}
             {academyTrigger ? (
@@ -3556,6 +3644,8 @@ function getDefaultReportSubject(reportType: ReportKind): string {
       return "[Collision IQ] Citation Density Annotated Estimate";
     case "estimator_change_request_list":
       return "[Collision IQ] Estimate Delta / Change Requests";
+    case "oem_citation_density":
+      return "[Collision IQ] OEM Citation Density Report";
     case "policy_rights_review":
       return "[Collision IQ] Policy & Rights Review";
     case "doi_complaint_packet":
@@ -3575,6 +3665,8 @@ function getDefaultReportFilename(reportType: ReportKind): string {
       return "citation-density-annotated-estimate.pdf";
     case "estimator_change_request_list":
       return "estimate-delta-change-requests.pdf";
+    case "oem_citation_density":
+      return "oem-citation-density-report.pdf";
     case "policy_rights_review":
       return "policy-rights-review.pdf";
     case "doi_complaint_packet":

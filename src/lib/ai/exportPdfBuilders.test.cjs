@@ -328,7 +328,7 @@ run("customer-report presentation cleanup avoids unsupported Pennsylvania wordin
   assert.doesNotMatch(text, /In Pennsylvania|Pennsylvania-specific/i);
 });
 
-run("Estimate scrubber export is replaced by Citation Density Gap Report", () => {
+run("Estimate scrubber standalone builder remains Citation Density Gap while rail uses annotated Citation Density PDF", () => {
   const document = buildEstimateScrubberPdf({
     report: REPORT,
     analysis: ANALYSIS,
@@ -343,11 +343,11 @@ run("Estimate scrubber export is replaced by Citation Density Gap Report", () =>
   assert.ok(document.sections.some((section) => section.title === "8. Source Boundary"));
   assert.ok(!document.sections.some((section) => section.title === "Estimate QA Findings"));
   const chatbotSource = fs.readFileSync(path.join(process.cwd(), "src", "components", "ChatbotPage.tsx"), "utf8");
-  assert.match(chatbotSource, /Citation Density Gap Report/i);
+  assert.match(chatbotSource, /Citation Density PDF/i);
   assert.match(chatbotSource, /downloadReportDocument\("estimate_scrubber"\)/i);
   assert.match(
     fs.readFileSync(path.join(process.cwd(), "src", "app", "api", "reports", "send", "route.ts"), "utf8"),
-    /case "estimate_scrubber":[\s\S]*Citation Density Gap Report/i
+    /case "estimate_scrubber":[\s\S]*Citation Density Annotated Estimate/i
   );
 });
 

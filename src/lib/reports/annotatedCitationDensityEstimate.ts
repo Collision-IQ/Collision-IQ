@@ -43,11 +43,47 @@ export type AnnotatedEstimateRequest = {
   redactSensitive?: boolean;
 };
 
+export type AnnotatedEstimateReportIdentity = {
+  reportType: "citation-density" | "oem-citation-density";
+  artifactVersion: string;
+  reportTitle: string;
+  reportShortTitle: string;
+  artifactFilename: string;
+  sourcePdfFallbackName: string;
+  pdfAnnotationTitle: string;
+  legendTitle: string;
+  detailTitle: string;
+  unanchoredTitle: string;
+  scoreLabel: string;
+  scoreCommentLabel: string;
+  noAnchorError: string;
+  noSelectableTextError: string;
+  textExtractionInfrastructureError: string;
+  pdfWorkerUnavailableError: string;
+};
+
 export type ComparisonEstimateText = {
   sourceDocumentId?: string;
   fileName: string;
   text: string;
   estimateRole?: "carrier" | "shop";
+};
+
+export type AnnotatedEstimateGeneratedFindings = {
+  findings: CitationDensityFinding[];
+  debug?: Partial<CitationDensityDebugTrace>;
+};
+
+export type AnnotatedEstimateFindingGeneratorContext = {
+  anchors: EstimateRowAnchor[];
+  visualLines: PdfTextLine[];
+  sourcePdfName: string;
+  sourceDocumentId?: string;
+  sourceDocumentRole: "carrier" | "shop";
+  sourcePdfHash: string;
+  uploadedFileNames: string[];
+  sourceText?: string | null;
+  comparisonEstimateTexts: ComparisonEstimateText[];
 };
 
 export type AnnotatedEstimateResult = {
@@ -122,6 +158,27 @@ export type CitationDensityDebugTrace = {
     rowText?: string;
     reason: string;
   }>;
+  reportType?: "citation-density" | "oem-citation-density";
+  artifactVersion?: string;
+  reviewedEstimateFileNames?: string[];
+  authoritySourceCount?: number;
+  oemProcedureSourceCount?: number;
+  oemPositionStatementSourceCount?: number;
+  motorDatabaseSourceCount?: number;
+  uploadedSupportDocumentCount?: number;
+  cccSecureShareSourceCount?: number;
+  policySourceCount?: number;
+  jurisdictionalLawSourceCount?: number;
+  internetFallbackSourceCount?: number;
+  authorityBackedFindingCount?: number;
+  estimateOnlyFindingCount?: number;
+  researchNeededFindingCount?: number;
+  findingsWithNextActionCount?: number;
+  findingsWithoutNextActionCount?: number;
+  findingsRejectedDueWeakEvidence?: number;
+  findingsRejectedDueNoAnchor?: number;
+  firstAuthoritySources?: OemCitationDensityAuthoritySource[];
+  firstOemCitationDensityFindings?: OemCitationDensityFindingDebug[];
   fallbackMatchedFindings: Array<{
     findingId: string;
     reason: string;
@@ -349,6 +406,8 @@ const NO_ROWS_EXTRACTED_WARNING = "No estimate rows could be extracted from the 
 const NO_SAFE_ROW_FINDINGS_WARNING =
   "Estimate rows were extracted, but no generated finding could be safely tied to a row. Findings are appendix-only.";
 export const CITATION_DENSITY_ARTIFACT_VERSION = "citation-density-part-source-relevance-v1";
+export const OEM_CITATION_DENSITY_ARTIFACT_VERSION = "oem-citation-density-v1";
+export const OEM_CITATION_DENSITY_REPORT_TYPE = "oem-citation-density";
 export const NO_ANCHOR_EXTRACTION_ERROR =
   "Citation Density could not extract estimate row anchors from the selected estimate PDF. No annotation PDF was produced.";
 export const NO_SELECTABLE_TEXT_ERROR =
@@ -358,19 +417,62 @@ export const PDF_TEXT_EXTRACTION_INFRASTRUCTURE_ERROR =
 export const PDF_JS_WORKER_UNAVAILABLE_ERROR =
   "Citation Density PDF text extraction failed because the PDF.js worker asset is unavailable in production. No annotation PDF was produced.";
 
+const CITATION_DENSITY_REPORT_IDENTITY: AnnotatedEstimateReportIdentity = {
+  reportType: "citation-density",
+  artifactVersion: CITATION_DENSITY_ARTIFACT_VERSION,
+  reportTitle: "Citation Density PDF",
+  reportShortTitle: "Citation Density",
+  artifactFilename: "citation-density-annotated-estimate.pdf",
+  sourcePdfFallbackName: "citation-density-source.pdf",
+  pdfAnnotationTitle: "Collision IQ Citation Density",
+  legendTitle: "Citation Density Annotation Legend",
+  detailTitle: "Citation Density Finding Details",
+  unanchoredTitle: "Unanchored Citation Density Findings",
+  scoreLabel: "Citation Density score",
+  scoreCommentLabel: "Citation Density",
+  noAnchorError: NO_ANCHOR_EXTRACTION_ERROR,
+  noSelectableTextError: NO_SELECTABLE_TEXT_ERROR,
+  textExtractionInfrastructureError: PDF_TEXT_EXTRACTION_INFRASTRUCTURE_ERROR,
+  pdfWorkerUnavailableError: PDF_JS_WORKER_UNAVAILABLE_ERROR,
+};
+
+export const OEM_CITATION_DENSITY_REPORT_IDENTITY: AnnotatedEstimateReportIdentity = {
+  reportType: "oem-citation-density",
+  artifactVersion: OEM_CITATION_DENSITY_ARTIFACT_VERSION,
+  reportTitle: "OEM Citation Density Report",
+  reportShortTitle: "OEM Citation Density",
+  artifactFilename: "oem-citation-density-report.pdf",
+  sourcePdfFallbackName: "oem-citation-density-source.pdf",
+  pdfAnnotationTitle: "Collision IQ OEM Citation Density",
+  legendTitle: "OEM Citation Density Annotation Legend",
+  detailTitle: "OEM Citation Density Finding Details",
+  unanchoredTitle: "Unanchored OEM Citation Density Findings",
+  scoreLabel: "OEM Density score",
+  scoreCommentLabel: "OEM Citation Density",
+  noAnchorError: "OEM Citation Density could not extract estimate row anchors from the selected estimate PDF. No annotation PDF was produced.",
+  noSelectableTextError: "OEM Citation Density could not extract selectable text from the selected estimate PDF. Upload the original CCC estimate PDF or enable OCR/CCC structured estimate extraction.",
+  textExtractionInfrastructureError: "OEM Citation Density PDF text extraction failed in production because the PDF parser polyfill is unavailable. No annotation PDF was produced.",
+  pdfWorkerUnavailableError: "OEM Citation Density PDF text extraction failed because the PDF.js worker asset is unavailable in production. No annotation PDF was produced.",
+};
+
 const exportCache = new Map<string, {
   bytes: Uint8Array;
   filename: string;
   createdAt: number;
   annotationMetadata: CitationDensityAnnotationMetadata[];
   citationDensityArtifactVersion: string;
+  reportType?: string;
 }>();
 const EXPORT_TTL_MS = 30 * 60 * 1000;
 
 export function putAnnotatedEstimateExport(
   bytes: Uint8Array,
   filename: string,
-  annotationMetadata: CitationDensityAnnotationMetadata[] = []
+  annotationMetadata: CitationDensityAnnotationMetadata[] = [],
+  options: {
+    artifactVersion?: string;
+    reportType?: string;
+  } = {}
 ) {
   pruneExportCache();
   const exportId = randomUUID();
@@ -379,16 +481,16 @@ export function putAnnotatedEstimateExport(
     filename,
     createdAt: Date.now(),
     annotationMetadata,
-    citationDensityArtifactVersion: CITATION_DENSITY_ARTIFACT_VERSION,
+    citationDensityArtifactVersion: options.artifactVersion ?? CITATION_DENSITY_ARTIFACT_VERSION,
+    reportType: options.reportType,
   });
   return exportId;
 }
 
-export function getAnnotatedEstimateExport(exportId: string) {
+export function getAnnotatedEstimateExport(exportId: string, expectedArtifactVersion = CITATION_DENSITY_ARTIFACT_VERSION) {
   pruneExportCache();
   const entry = exportCache.get(exportId) ?? null;
-  if (!entry || entry.citationDensityArtifactVersion !== CITATION_DENSITY_ARTIFACT_VERSION) {
-    if (entry) exportCache.delete(exportId);
+  if (!entry || entry.citationDensityArtifactVersion !== expectedArtifactVersion) {
     return null;
   }
   return entry;
@@ -454,24 +556,27 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   comparisonEstimateTexts?: ComparisonEstimateText[];
   findings: CitationDensityFinding[];
   request?: AnnotatedEstimateRequest;
+  reportIdentity?: AnnotatedEstimateReportIdentity;
+  findingGenerator?: (context: AnnotatedEstimateFindingGeneratorContext) => AnnotatedEstimateGeneratedFindings;
 }): Promise<AnnotatedEstimateResult> {
   const request = params.request ?? {};
+  const reportIdentity = params.reportIdentity ?? CITATION_DENSITY_REPORT_IDENTITY;
   const mode = request.annotationMode ?? "both";
   const estimateRole = request.estimateRole ?? "selected";
   const selectedIds = new Set(request.findingIds?.filter(Boolean) ?? []);
-  const selectedFindings = params.findings.filter((finding) => !selectedIds.size || selectedIds.has(finding.id));
-  const { findings, suppressed } = sanitizeCitationDensityFindingsForVisibleLayer(selectedFindings);
+  let selectedFindings = params.findings.filter((finding) => !selectedIds.size || selectedIds.has(finding.id));
+  let { findings, suppressed } = sanitizeCitationDensityFindingsForVisibleLayer(selectedFindings);
   const warnings: string[] = [];
   const sourcePdfBytes = params.sourcePdfBytes.slice();
   const pdfDoc = await PDFDocument.load(sourcePdfBytes);
   const originalPageCount = pdfDoc.getPageCount();
   if (originalPageCount === 0) {
-    throw new Error("Annotated Citation Density export requires an original estimate PDF with source pages.");
+    throw new Error(`Annotated ${reportIdentity.reportShortTitle} export requires an original estimate PDF with source pages.`);
   }
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const sourceDocumentRole = estimateRole === "shop" ? "shop" : "carrier";
-  const sourcePdfName = params.sourcePdfName ?? params.sourceDocumentId ?? "citation-density-source.pdf";
+  const sourcePdfName = params.sourcePdfName ?? params.sourceDocumentId ?? reportIdentity.sourcePdfFallbackName;
   const extraction = await extractCitationDensityRowAnchors(sourcePdfBytes, {
     sourceDocumentRole,
     sourceDocumentId: params.sourceDocumentId,
@@ -509,7 +614,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   const anchorIndex = new Map(anchors.map((anchor) => [anchor.anchorId, anchor]));
   const trace: CitationDensityDebugTrace = {
     buildCommit: getBuildCommit(),
-    citationDensityArtifactVersion: CITATION_DENSITY_ARTIFACT_VERSION,
+    citationDensityArtifactVersion: reportIdentity.artifactVersion,
+    reportType: reportIdentity.reportType,
+    artifactVersion: reportIdentity.artifactVersion,
     artifactId: undefined,
     sourcePdfName,
     selectedEstimateFileName: sourcePdfName,
@@ -566,6 +673,28 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     renderedPdfArtifactId: undefined,
   };
 
+  if (params.findingGenerator) {
+    const generated = params.findingGenerator({
+      anchors,
+      visualLines: extraction.visualLines,
+      sourcePdfName,
+      sourceDocumentId: params.sourceDocumentId,
+      sourceDocumentRole,
+      sourcePdfHash: extraction.sourcePdfHash,
+      uploadedFileNames: params.uploadedFileNames ?? [],
+      sourceText: params.sourceText,
+      comparisonEstimateTexts: params.comparisonEstimateTexts ?? [],
+    });
+    selectedFindings = [
+      ...selectedFindings,
+      ...generated.findings.filter((finding) => !selectedIds.size || selectedIds.has(finding.id)),
+    ];
+    const sanitizedGenerated = sanitizeCitationDensityFindingsForVisibleLayer(selectedFindings);
+    findings = sanitizedGenerated.findings;
+    suppressed = sanitizedGenerated.suppressed;
+    Object.assign(trace, generated.debug ?? {});
+  }
+
   const debugMetadata: CitationDensityAnnotationDebugMetadata = {
     extractedRowAnchorCount: anchors.length,
     visibleAnnotationCount: 0,
@@ -587,7 +716,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       reason: "pdfjs worker asset unavailable",
       anchorId: null,
     });
-    throw new CitationDensityAnnotationError(PDF_JS_WORKER_UNAVAILABLE_ERROR, trace);
+    throw new CitationDensityAnnotationError(reportIdentity.pdfWorkerUnavailableError, trace);
   }
 
   if (trace.findingCount > 0 && trace.textExtractionError) {
@@ -597,7 +726,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       reason: "pdf text extraction parser infrastructure error",
       anchorId: null,
     });
-    throw new CitationDensityAnnotationError(PDF_TEXT_EXTRACTION_INFRASTRUCTURE_ERROR, trace);
+    throw new CitationDensityAnnotationError(reportIdentity.textExtractionInfrastructureError, trace);
   }
 
   if (trace.findingCount > 0 && trace.extractedTextPageCount === 0) {
@@ -607,7 +736,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       reason: "no selectable text extracted from selected source PDF",
       anchorId: null,
     });
-    throw new CitationDensityAnnotationError(NO_SELECTABLE_TEXT_ERROR, trace);
+    throw new CitationDensityAnnotationError(reportIdentity.noSelectableTextError, trace);
   }
 
   if (trace.findingCount > 0 && trace.extractedAnchorCount === 0) {
@@ -617,18 +746,20 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       reason: "no estimate row anchors extracted from selected source PDF",
       anchorId: null,
     });
-    throw new CitationDensityAnnotationError(NO_ANCHOR_EXTRACTION_ERROR, trace);
+    throw new CitationDensityAnnotationError(reportIdentity.noAnchorError, trace);
   }
 
-  const partSourceResult = buildPartSourceFindings({
-    selectedAnchors: anchors,
-    selectedVisualLines: extraction.visualLines,
-    sourcePdfName,
-    sourceDocumentId: params.sourceDocumentId,
-    sourceDocumentRole,
-    comparisonEstimateTexts: params.comparisonEstimateTexts ?? [],
-    existingFindings: findings,
-  });
+  const partSourceResult = reportIdentity.reportType === "citation-density"
+    ? buildPartSourceFindings({
+        selectedAnchors: anchors,
+        selectedVisualLines: extraction.visualLines,
+        sourcePdfName,
+        sourceDocumentId: params.sourceDocumentId,
+        sourceDocumentRole,
+        comparisonEstimateTexts: params.comparisonEstimateTexts ?? [],
+        existingFindings: findings,
+      })
+    : emptyPartSourceFindingResult();
   trace.partSourceRowCount = partSourceResult.partSourceRows.length;
   trace.nonOemPartRowCount = partSourceResult.nonOemPartRowCount;
   trace.oemPartRowCount = partSourceResult.oemPartRowCount;
@@ -683,7 +814,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     warnings.push("all_findings_unanchored");
   }
   if (suppressed.length > 0) {
-    warnings.push(`${suppressed.length} generic or malformed Citation Density finding(s) were suppressed from the visible estimate layer.`);
+    warnings.push(`${suppressed.length} generic or malformed ${reportIdentity.reportShortTitle} finding(s) were suppressed from the visible estimate layer.`);
   }
 
   const annotationMetadata: CitationDensityAnnotationMetadata[] = [];
@@ -699,6 +830,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       estimateRole,
       redactSensitive: request.redactSensitive !== false,
       trace,
+      reportIdentity,
     });
     if (renderResult.written) {
       renderedPdfAnnotationCount += 1;
@@ -720,6 +852,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       sourcePdfName,
       sourcePdfHash: trace.sourcePdfHash,
       buildCommit: trace.buildCommit,
+      reportIdentity,
     });
   }
 
@@ -734,7 +867,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   }
 
   if (request.includeLegend !== false) {
-    addLegendPage(pdfDoc, { font, boldFont });
+    addLegendPage(pdfDoc, { font, boldFont, reportIdentity });
   }
 
   if (request.includeSummaryPage) {
@@ -753,6 +886,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       boldFont,
       estimateRole,
       redactSensitive: request.redactSensitive !== false,
+      reportIdentity,
     });
   }
 
@@ -762,8 +896,12 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   trace.viewerAnnotationCount = annotationMetadata.length;
   const exportId = putAnnotatedEstimateExport(
     bytes,
-    "citation-density-annotated-estimate.pdf",
-    annotationMetadata
+    reportIdentity.artifactFilename,
+    annotationMetadata,
+    {
+      artifactVersion: reportIdentity.artifactVersion,
+      reportType: reportIdentity.reportType,
+    }
   );
   trace.artifactId = exportId;
   trace.metadataArtifactId = exportId;
@@ -823,6 +961,552 @@ type PartSourceFindingResult = {
   comparisonMatches: PartSourceComparisonMatchDebug[];
   droppedReasons: CitationDensityDebugTrace["partSourceDroppedReasons"];
 };
+
+export type OemCitationDensityAuthoritySource = {
+  title: string;
+  sourceType:
+    | "oem_procedure"
+    | "oem_position_statement"
+    | "motor_database"
+    | "uploaded_support"
+    | "ccc_secure_share"
+    | "policy"
+    | "jurisdictional_law"
+    | "internet_fallback"
+    | "estimate_evidence";
+  evidenceTier: number;
+  verified: boolean;
+  note?: string;
+};
+
+export type OemCitationDensityFindingDebug = {
+  findingId: string;
+  title: string;
+  label: string;
+  anchorId?: string | null;
+  evidenceTier: string;
+  authoritySourceTypes: string[];
+  nextAction: string;
+  confidence: "low" | "medium" | "high";
+};
+
+function emptyPartSourceFindingResult(): PartSourceFindingResult {
+  return {
+    findings: [],
+    partSourceRows: [],
+    nonOemPartRowCount: 0,
+    oemPartRowCount: 0,
+    comparisonCandidateCount: 0,
+    candidateCount: 0,
+    acceptedCandidates: [],
+    rejectedCandidates: [],
+    rejectedLineNumberCandidates: [],
+    comparisonMatches: [],
+    droppedReasons: [],
+  };
+}
+
+export function buildOemCitationDensityFindings(
+  context: AnnotatedEstimateFindingGeneratorContext
+): AnnotatedEstimateGeneratedFindings {
+  const authoritySources = detectOemCitationDensityAuthoritySources(context);
+  const acceptedFindings: CitationDensityFinding[] = [];
+  const droppedReasons: CitationDensityDebugTrace["partSourceDroppedReasons"] = [];
+  const seenAnchorIds = new Set<string>();
+
+  for (const anchor of context.anchors) {
+    const rowText = getAnchorSourceText(anchor);
+    const normalized = normalizeMatchText(rowText);
+    if (!rowText.trim()) continue;
+    if (anchor.anchorType !== "estimate_line" && anchor.anchorType !== "line_note" && anchor.anchorType !== "embedded_link_row" && anchor.anchorType !== "totals_row" && anchor.anchorType !== "supplier_row" && anchor.anchorType !== "guide_row") {
+      continue;
+    }
+    if (isVehicleYearLineNumber(anchor.lineNumber) || containsVehicleYearIdentityText(rowText)) {
+      droppedReasons.push({ anchorId: anchor.anchorId, rowText, reason: "source line parsed as vehicle year" });
+      continue;
+    }
+    if (isBoilerplatePartSourceText(normalized) && anchor.anchorType !== "guide_row") {
+      droppedReasons.push({ anchorId: anchor.anchorId, rowText, reason: "generic boilerplate as primary row anchor" });
+      continue;
+    }
+    const family = classifyOemCitationDensityRow(rowText, anchor);
+    if (!family) continue;
+    if (seenAnchorIds.has(anchor.anchorId)) continue;
+    const finding = buildOemCitationDensityFinding({
+      context,
+      anchor,
+      rowText,
+      family,
+      authoritySources,
+    });
+    if (!finding.recommendedNextAction.trim()) {
+      droppedReasons.push({ anchorId: anchor.anchorId, rowText, reason: "findings without nextAction" });
+      continue;
+    }
+    if (isOemVerifiedLabel(finding.citationLabel) && !finding.verifiedAuthorityCount) {
+      finding.citationLabel = family.fallbackLabel;
+      finding.bestAvailableAuthority = buildEstimateEvidenceAuthority(family);
+      finding.verifiedAuthorityCount = 0;
+      finding.limitations.push("Verified label downgraded because no supporting authority source was attached.");
+    }
+    acceptedFindings.push(finding);
+    seenAnchorIds.add(anchor.anchorId);
+  }
+
+  const authorityBackedFindingCount = acceptedFindings.filter((finding) => finding.verifiedAuthorityCount > 0).length;
+  const estimateOnlyFindingCount = acceptedFindings.filter((finding) => finding.verifiedAuthorityCount === 0).length;
+  const researchNeededFindingCount = acceptedFindings.filter((finding) =>
+    finding.missingAuthorityTypes.some((item) => /OEM|MOTOR|procedure|position/i.test(item))
+  ).length;
+  const debugFindings = acceptedFindings.slice(0, 20).map((finding): OemCitationDensityFindingDebug => {
+    const evidenceTier = getOemEvidenceTier(finding);
+    return {
+      findingId: finding.id,
+      title: finding.operationLabel,
+      label: getProofBucketLabel(finding),
+      anchorId: getFindingAnchorId(finding),
+      evidenceTier,
+      authoritySourceTypes: (finding.bestAvailableAuthority?.type ? [finding.bestAvailableAuthority.type] : ["estimate_evidence"]),
+      nextAction: finding.recommendedNextAction,
+      confidence: finding.confidence,
+    };
+  });
+
+  return {
+    findings: acceptedFindings,
+    debug: {
+      reportType: "oem-citation-density",
+      artifactVersion: OEM_CITATION_DENSITY_ARTIFACT_VERSION,
+      reviewedEstimateFileNames: [context.sourcePdfName],
+      authoritySourceCount: authoritySources.filter((source) => source.sourceType !== "estimate_evidence").length,
+      oemProcedureSourceCount: authoritySources.filter((source) => source.sourceType === "oem_procedure").length,
+      oemPositionStatementSourceCount: authoritySources.filter((source) => source.sourceType === "oem_position_statement").length,
+      motorDatabaseSourceCount: authoritySources.filter((source) => source.sourceType === "motor_database").length,
+      uploadedSupportDocumentCount: authoritySources.filter((source) => source.sourceType === "uploaded_support").length,
+      cccSecureShareSourceCount: authoritySources.filter((source) => source.sourceType === "ccc_secure_share").length,
+      policySourceCount: authoritySources.filter((source) => source.sourceType === "policy").length,
+      jurisdictionalLawSourceCount: authoritySources.filter((source) => source.sourceType === "jurisdictional_law").length,
+      internetFallbackSourceCount: authoritySources.filter((source) => source.sourceType === "internet_fallback").length,
+      authorityBackedFindingCount,
+      estimateOnlyFindingCount,
+      researchNeededFindingCount,
+      findingsWithNextActionCount: acceptedFindings.filter((finding) => finding.recommendedNextAction.trim().length > 0).length,
+      findingsWithoutNextActionCount: acceptedFindings.filter((finding) => !finding.recommendedNextAction.trim()).length,
+      findingsRejectedDueWeakEvidence: 0,
+      findingsRejectedDueNoAnchor: droppedReasons.filter((item) => /anchor/i.test(item.reason)).length,
+      firstAuthoritySources: authoritySources.slice(0, 20),
+      firstOemCitationDensityFindings: debugFindings,
+      partSourceDroppedReasons: droppedReasons,
+    },
+  };
+}
+
+type OemCitationDensityFamily = {
+  findingType: string;
+  title: string;
+  category: CitationDensityFinding["category"];
+  label: string;
+  fallbackLabel: string;
+  evidenceTier: string;
+  score: number;
+  safetyImpact: "low" | "medium" | "high";
+  priority: "low" | "medium" | "high";
+  missingAuthorityTypes: string[];
+  issueSummary: string;
+  whyItMatters: string;
+  oemComplianceConcern: string;
+  nextAction: string;
+  requiredDocumentation: string[];
+};
+
+function classifyOemCitationDensityRow(rowText: string, anchor: EstimateRowAnchor): OemCitationDensityFamily | null {
+  const normalized = normalizeMatchText(rowText);
+  const sourceKinds = classifyPartSource(rowText);
+  if (/\b(?:pre[- ]?scan|post[- ]?scan|in[- ]?process scan|diagnostic|scan report|srs|health check)\b/.test(normalized)) {
+    return {
+      findingType: "diagnostics_scan",
+      title: "Diagnostics / scan documentation review",
+      category: "scan_diagnostic",
+      label: "NEEDS ADAS",
+      fallbackLabel: "NEEDS ADAS",
+      evidenceTier: "estimate_evidence",
+      score: 42,
+      safetyImpact: "high",
+      priority: "high",
+      missingAuthorityTypes: ["OEM/MOTOR scan procedure", "scan invoice/completion proof"],
+      issueSummary: `Estimate row references diagnostics or scan activity: ${rowText}`,
+      whyItMatters: "Scan and diagnostic rows affect safety-system readiness and need procedure support plus completion proof before they are treated as substantiated.",
+      oemComplianceConcern: "Estimate evidence suggests scan-related repair-standard work, but OEM/MOTOR support and completion documentation must be attached or researched.",
+      nextAction: "Attach OEM/MOTOR scan procedure support and completion proof. Confirm whether pre-repair scan, in-process scan, post-repair scan, calibration readiness, or ADAS calibration is required for this vehicle and operation.",
+      requiredDocumentation: ["OEM/MOTOR scan procedure", "scan report", "invoice or completion proof"],
+    };
+  }
+  if (/\b(?:adas|calibration|recalibration|aim(?:ing)?|initialize|initialization|reset|relearn|programming|radar|camera|sensor|dynamic function test|road test)\b/.test(normalized)) {
+    return {
+      findingType: "adas_calibration",
+      title: "ADAS / calibration repair-path review",
+      category: "adas_calibration",
+      label: "NEEDS ADAS",
+      fallbackLabel: "NEEDS ADAS",
+      evidenceTier: "estimate_evidence",
+      score: 40,
+      safetyImpact: "high",
+      priority: "high",
+      missingAuthorityTypes: ["OEM/MOTOR ADAS procedure", "calibration or completion proof"],
+      issueSummary: `Estimate row affects ADAS/calibration workflow: ${rowText}`,
+      whyItMatters: "Calibration, aiming, reset, and initialization rows can affect vehicle safety systems and must be tied to the correct procedure and completion output.",
+      oemComplianceConcern: "The row should be verified against OEM/MOTOR calibration, aiming, reset, or initialization requirements before relying on the estimate line.",
+      nextAction: "Attach OEM/MOTOR calibration, aiming, reset, or initialization procedure and completion documentation. Verify affected sensors/cameras/radar systems and document final calibration results.",
+      requiredDocumentation: ["OEM/MOTOR calibration procedure", "calibration result", "sensor/camera/radar verification"],
+    };
+  }
+  if (hasNonOemPartSource(sourceKinds) || /\b(?:incorrect style|not correct style|fit|finish|quality replacement|aftermarket)\b/.test(normalized)) {
+    return {
+      findingType: "part_source_oem_review",
+      title: "Part-source / OEM repair-path review",
+      category: "parts_downgrade",
+      label: "NEEDS OEM",
+      fallbackLabel: "NEEDS OEM",
+      evidenceTier: "estimate_evidence",
+      score: 45,
+      safetyImpact: /sensor|radar|camera|lamp|bumper|grille|support/.test(normalized) ? "high" : "medium",
+      priority: "high",
+      missingAuthorityTypes: ["OEM procedure or position statement", "part-type authorization", "supplier/invoice proof"],
+      issueSummary: `Estimate row uses or questions non-OEM part sourcing: ${rowText}`,
+      whyItMatters: "AM/LKQ/CAPA/used or fit/finish rows can affect warranty, style, fit, calibration packaging, and OEM repair-process compliance.",
+      oemComplianceConcern: "Estimate evidence supports a part-source review, but it does not by itself prove an OEM requirement.",
+      nextAction: "Review OEM repair procedure and position statements for part-type requirements. Document authorization for LKQ/non-OEM part use, verify OE-equivalent style/fit/finish, and supplement to OEM/OE part if support does not validate the selected part type.",
+      requiredDocumentation: ["OEM procedure or position statement", "part-type authorization", "supplier invoice", "fit/finish validation"],
+    };
+  }
+  if (/\b(?:section(?:ing)?|weld|bond|structural|measure|pull|setup|frame|aluminum|high strength|hss|uhss|one[- ]time|corrosion|seam sealer|foam|adhesive|nvh|panel)\b/.test(normalized)) {
+    return {
+      findingType: "repair_procedure_structural",
+      title: "Repair procedure / structural operation review",
+      category: "structural_or_fit_verification",
+      label: "NEEDS OEM",
+      fallbackLabel: "NEEDS OEM",
+      evidenceTier: "estimate_evidence",
+      score: 44,
+      safetyImpact: "high",
+      priority: "high",
+      missingAuthorityTypes: ["OEM repair procedure", "measurement or completion proof"],
+      issueSummary: `Estimate row indicates structural or procedure-sensitive work: ${rowText}`,
+      whyItMatters: "Structural, welding, bonding, one-time-use, corrosion protection, and special-material operations require repair-path verification and documentation.",
+      oemComplianceConcern: "The repair path should be checked against OEM procedure before work is accepted as complete or supplement-ready.",
+      nextAction: "Attach OEM repair procedure support and completion documentation. Verify sectioning, welded/bonded panels, structural measurements, one-time-use components, corrosion protection, seam sealer, foam, adhesive, NVH, and material-specific requirements as applicable.",
+      requiredDocumentation: ["OEM repair procedure", "measurement proof", "photo/teardown or completion proof"],
+    };
+  }
+  if (/\b(?:blend|refinish|spray[- ]?out|tint|clear coat|paint|material|color)\b/.test(normalized)) {
+    return {
+      findingType: "refinish_blend_materials",
+      title: "Refinish / blend / materials support review",
+      category: "refinish",
+      label: "NEEDS P-PAGE",
+      fallbackLabel: "NEEDS P-PAGE",
+      evidenceTier: "estimate_evidence",
+      score: 52,
+      safetyImpact: "medium",
+      priority: "medium",
+      missingAuthorityTypes: ["MOTOR/database guidance", "SCRS/refinish support", "material allowance proof"],
+      issueSummary: `Estimate row contains refinish, blend, color, or material allowance work: ${rowText}`,
+      whyItMatters: "Refinish and material rows need database, procedure, SCRS, policy, or jurisdictional support where available before the amount is treated as fully documented.",
+      oemComplianceConcern: "The estimate line should be connected to refinish and material guidance without overclaiming an OEM requirement.",
+      nextAction: "Attach procedure, estimating database, SCRS blend study, policy, or jurisdictional support as available. Document why the refinish/blend/material allowance is required and supplement missing labor/material support.",
+      requiredDocumentation: ["MOTOR/database guidance", "SCRS blend study or refinish support", "material allowance proof"],
+    };
+  }
+  if (anchor.anchorType === "totals_row" || /\b(?:labor rate|rate|subtotal|total|net cost|deductible|adjustment|paint supplies|materials)\b/.test(normalized)) {
+    return {
+      findingType: "labor_rates_totals",
+      title: "Labor / rates / totals support review",
+      category: "labor_difference",
+      label: "ESTIMATE GAP ONLY",
+      fallbackLabel: "ESTIMATE GAP ONLY",
+      evidenceTier: "estimate_evidence",
+      score: 58,
+      safetyImpact: "low",
+      priority: "medium",
+      missingAuthorityTypes: ["rate/material support", "subtotal/totals consistency support"],
+      issueSummary: `Estimate row contains labor, rate, material, deductible, adjustment, or totals information: ${rowText}`,
+      whyItMatters: "Rate, material, and total rows need documentation and consistency checks before they are used to support a supplement or dispute.",
+      oemComplianceConcern: "This is primarily estimate evidence; tie it to rate/material or estimating guidance before elevating it.",
+      nextAction: "Review labor-rate reasonableness, paint/material rate support, missing not-included operations, subtotal/totals consistency, and deductible/adjustment clarity. Attach rate, invoice, database, or agreed-estimate support as available.",
+      requiredDocumentation: ["rate support", "material support", "totals reconciliation"],
+    };
+  }
+  if (/\b(?:invoice|receipt|proof|completion|photo|teardown|documentation|attached|referenced|link|report)\b/.test(normalized)) {
+    return {
+      findingType: "documentation_invoice_proof",
+      title: "Documentation / invoice / proof review",
+      category: "other",
+      label: /referenced|link|attached/.test(normalized) ? "REFERENCED / NOT PRODUCED" : "NEEDS INVOICE",
+      fallbackLabel: /referenced|link|attached/.test(normalized) ? "REFERENCED / NOT PRODUCED" : "NEEDS INVOICE",
+      evidenceTier: "estimate_evidence",
+      score: 48,
+      safetyImpact: "medium",
+      priority: "medium",
+      missingAuthorityTypes: ["referenced support document", "invoice/completion proof"],
+      issueSummary: `Estimate row references documentation, invoice, report, or proof: ${rowText}`,
+      whyItMatters: "Referenced support must be produced before the estimate line can be treated as verified documentation.",
+      oemComplianceConcern: "The row needs the actual support document, not just an estimate reference.",
+      nextAction: "Attach the referenced OEM procedure, position statement, invoice, scan report, calibration result, photo proof, teardown proof, or completion record needed to substantiate the line item.",
+      requiredDocumentation: ["referenced support", "invoice or completion proof", "photo/teardown proof when applicable"],
+    };
+  }
+  return null;
+}
+
+function buildOemCitationDensityFinding(params: {
+  context: AnnotatedEstimateFindingGeneratorContext;
+  anchor: EstimateRowAnchor;
+  rowText: string;
+  family: OemCitationDensityFamily;
+  authoritySources: OemCitationDensityAuthoritySource[];
+}): CitationDensityFinding {
+  const { context, anchor, rowText, family } = params;
+  const bestAuthoritySource = pickBestOemAuthoritySource(params.authoritySources, family);
+  const authority = bestAuthoritySource && bestAuthoritySource.sourceType !== "estimate_evidence"
+    ? mapOemAuthoritySourceToCitationAuthority(bestAuthoritySource, family)
+    : buildEstimateEvidenceAuthority(family);
+  const verifiedAuthorityCount = authority.type !== "estimate_evidence" && authority.status === "verified" ? 1 : 0;
+  const label = resolveOemFindingLabel(family, authority, verifiedAuthorityCount);
+  const evidence = {
+    lineNumber: anchor.lineNumber,
+    description: rowText,
+    amount: anchor.price ?? null,
+    laborHours: anchor.labor ?? null,
+    sourceLabel: context.sourcePdfName,
+  };
+  const finding = {
+    id: `oem-citation-density-${family.findingType}-${anchor.anchorId.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}`,
+    operationLabel: family.title,
+    category: family.category,
+    estimateGapType: label === "REFERENCED / NOT PRODUCED" ? "referenced_not_produced" : "needs_proof",
+    carrierEvidence: anchor.sourceDocumentRole === "carrier" ? evidence : undefined,
+    shopEvidence: anchor.sourceDocumentRole === "shop" ? evidence : undefined,
+    applicableEstimateRoles: [anchor.sourceDocumentRole],
+    primaryAnnotationRole: anchor.sourceDocumentRole,
+    carrierAnchor: anchor.sourceDocumentRole === "carrier" ? buildFindingLineAnchor(anchor) : undefined,
+    shopAnchor: anchor.sourceDocumentRole === "shop" ? buildFindingLineAnchor(anchor) : undefined,
+    impact: {
+      dollarImpact: anchor.price ?? null,
+      laborHoursImpact: anchor.labor ?? null,
+      safetyImpact: family.safetyImpact,
+      supplementPriority: family.priority,
+    },
+    citationStatus: buildOemCitationStatus(family, label, verifiedAuthorityCount),
+    citationDensityScore: family.score,
+    verifiedAuthorityCount,
+    missingAuthorityTypes: verifiedAuthorityCount ? family.requiredDocumentation : family.missingAuthorityTypes,
+    missingAuthority: verifiedAuthorityCount ? family.requiredDocumentation : family.missingAuthorityTypes,
+    bestAvailableAuthority: authority,
+    citationLabel: label,
+    currentSupportSummary: [
+      `Report type: ${OEM_CITATION_DENSITY_REPORT_TYPE}.`,
+      `Finding type: ${family.findingType}.`,
+      `Estimate file: ${context.sourcePdfName}.`,
+      `Source page: ${anchor.pageNumber}.`,
+      `Source line: ${anchor.lineNumber ?? "section"}.`,
+      `Source row text: ${rowText}.`,
+      `Issue summary: ${family.issueSummary}`,
+      `OEM compliance concern: ${family.oemComplianceConcern}`,
+      `Evidence tier: ${getOemAuthorityEvidenceTierLabel(authority)}.`,
+    ].join(" "),
+    missingProofSummary: [
+      `Required documentation: ${family.requiredDocumentation.join(", ")}.`,
+      verifiedAuthorityCount
+        ? "Authority support is present, but completion/estimate proof still needs to be tied to the exact row."
+        : "Authority source not attached; use this as research/documentation needed, not verified OEM support.",
+    ].join(" "),
+    recommendedNextAction: family.nextAction,
+    confidence: anchor.confidence >= 0.92 ? "high" : "medium",
+    limitations: [
+      "OEM Citation Density finding generated from an extracted estimate row.",
+      "Do not say OEM requires unless an OEM procedure or position statement is attached.",
+      `sourcePdfHash:${context.sourcePdfHash}`,
+      `artifactVersion:${OEM_CITATION_DENSITY_ARTIFACT_VERSION}`,
+    ],
+    anchorId: anchor.anchorId,
+    reportType: OEM_CITATION_DENSITY_REPORT_TYPE,
+    findingType: family.findingType,
+    evidenceTier: getOemAuthorityEvidenceTierLabel(authority),
+    authoritySources: params.authoritySources,
+    requiredDocumentation: family.requiredDocumentation,
+  } satisfies CitationDensityFinding & {
+    anchorId: string;
+    reportType: string;
+    findingType: string;
+    evidenceTier: string;
+    authoritySources: OemCitationDensityAuthoritySource[];
+    requiredDocumentation: string[];
+  };
+  return finding;
+}
+
+function detectOemCitationDensityAuthoritySources(context: AnnotatedEstimateFindingGeneratorContext): OemCitationDensityAuthoritySource[] {
+  const textBlocks = [
+    context.sourceText ?? "",
+    ...context.comparisonEstimateTexts.map((item) => item.text),
+  ].join("\n");
+  const sources: OemCitationDensityAuthoritySource[] = [];
+  const add = (source: OemCitationDensityAuthoritySource) => {
+    if (!sources.some((item) => item.sourceType === source.sourceType && item.title === source.title)) sources.push(source);
+  };
+  if (
+    /\b(?:OEM procedure|repair manual|body repair manual|service procedure)\b/i.test(textBlocks) &&
+    !/\b(?:no|without|missing|not attached|not produced|not provided|needs|need|attach|verify|review)\s+(?:an?\s+)?(?:OEM procedure|repair manual|body repair manual|service procedure)\b/i.test(textBlocks) &&
+    !/\b(?:OEM procedure|repair manual|body repair manual|service procedure)\s+(?:not attached|not produced|not provided|missing|needed|required)\b/i.test(textBlocks)
+  ) {
+    add({ title: "Uploaded or extracted OEM procedure reference", sourceType: "oem_procedure", evidenceTier: 1, verified: true });
+  }
+  if (/\b(?:position statement|OEM position)\b/i.test(textBlocks)) {
+    add({ title: "OEM position statement reference", sourceType: "oem_position_statement", evidenceTier: 2, verified: true });
+  }
+  if (/\b(?:MOTOR|P-page|database|estimating guide|included|not included)\b/i.test(textBlocks)) {
+    add({ title: "MOTOR/database guidance reference", sourceType: "motor_database", evidenceTier: 3, verified: true });
+  }
+  if (/\b(?:CCC Secure Share|secure share)\b/i.test(textBlocks)) {
+    add({ title: "CCC Secure Share support", sourceType: "ccc_secure_share", evidenceTier: 4, verified: true });
+  }
+  if (/\b(?:policy|declarations|coverage|endorsement)\b/i.test(textBlocks)) {
+    add({ title: "Uploaded policy language", sourceType: "policy", evidenceTier: 5, verified: true });
+  }
+  if (/\b(?:statute|regulation|administrative code|DOI)\b/i.test(textBlocks)) {
+    add({ title: "Jurisdictional law/regulation reference", sourceType: "jurisdictional_law", evidenceTier: 6, verified: true });
+  }
+  if (/\b(?:http|internet|web fallback|verified web)\b/i.test(textBlocks)) {
+    add({ title: "Verified web fallback reference", sourceType: "internet_fallback", evidenceTier: 7, verified: false });
+  }
+  add({ title: "Estimate evidence row", sourceType: "estimate_evidence", evidenceTier: 8, verified: false });
+  return sources;
+}
+
+function pickBestOemAuthoritySource(
+  sources: OemCitationDensityAuthoritySource[],
+  family: OemCitationDensityFamily
+) {
+  const relevant = sources.filter((source) => {
+    if (source.sourceType === "estimate_evidence") return true;
+    if (family.findingType.includes("adas") || family.findingType.includes("diagnostics")) {
+      return source.sourceType === "oem_procedure" || source.sourceType === "motor_database" || source.sourceType === "uploaded_support" || source.sourceType === "ccc_secure_share";
+    }
+    if (family.findingType.includes("part_source")) {
+      return source.sourceType === "oem_procedure" || source.sourceType === "oem_position_statement" || source.sourceType === "uploaded_support" || source.sourceType === "ccc_secure_share";
+    }
+    if (family.findingType.includes("refinish") || family.findingType.includes("labor")) {
+      return source.sourceType === "motor_database" || source.sourceType === "policy" || source.sourceType === "jurisdictional_law" || source.sourceType === "uploaded_support";
+    }
+    return source.sourceType !== "internet_fallback";
+  });
+  return relevant.sort((a, b) => a.evidenceTier - b.evidenceTier)[0] ?? sources[sources.length - 1];
+}
+
+function mapOemAuthoritySourceToCitationAuthority(
+  source: OemCitationDensityAuthoritySource,
+  family: OemCitationDensityFamily
+): NonNullable<CitationDensityFinding["bestAvailableAuthority"]> {
+  const typeMap: Record<OemCitationDensityAuthoritySource["sourceType"], NonNullable<CitationDensityFinding["bestAvailableAuthority"]>["type"]> = {
+    oem_procedure: family.findingType.includes("adas") ? "adas_procedure" : "oem_procedure",
+    oem_position_statement: "oem_position_statement",
+    motor_database: "p_page",
+    uploaded_support: "invoice_completion",
+    ccc_secure_share: "estimate_evidence",
+    policy: "estimate_evidence",
+    jurisdictional_law: "legal",
+    internet_fallback: "online_fallback",
+    estimate_evidence: "estimate_evidence",
+  };
+  return {
+    type: typeMap[source.sourceType],
+    status: source.verified ? "verified" : "needed",
+    title: source.title,
+    confidence: source.verified ? "high" : "low",
+    note: source.note ?? `Evidence tier ${source.evidenceTier}: ${source.sourceType}`,
+  };
+}
+
+function buildEstimateEvidenceAuthority(
+  family: OemCitationDensityFamily
+): NonNullable<CitationDensityFinding["bestAvailableAuthority"]> {
+  return {
+    type: "estimate_evidence",
+    status: "needed",
+    title: "Estimate evidence only",
+    confidence: "medium",
+    note: `${family.title}: research/documentation needed. Estimate evidence alone is not verified OEM support.`,
+  };
+}
+
+function resolveOemFindingLabel(
+  family: OemCitationDensityFamily,
+  authority: NonNullable<CitationDensityFinding["bestAvailableAuthority"]>,
+  verifiedAuthorityCount: number
+) {
+  if (verifiedAuthorityCount > 0 && (authority.type === "oem_procedure" || authority.type === "adas_procedure")) return "VERIFIED OEM";
+  if (verifiedAuthorityCount > 0 && authority.type === "oem_position_statement") return "VERIFIED OEM";
+  if (verifiedAuthorityCount > 0 && authority.type === "invoice_completion") return "VERIFIED DOCUMENTATION";
+  if (verifiedAuthorityCount > 0 && authority.type === "legal") return "VERIFIED LEGAL";
+  return family.fallbackLabel;
+}
+
+function isOemVerifiedLabel(label: string | undefined) {
+  return label === "VERIFIED OEM" || label === "VERIFIED DOCUMENTATION" || label === "VERIFIED LEGAL";
+}
+
+function buildOemCitationStatus(
+  family: OemCitationDensityFamily,
+  label: string,
+  verifiedAuthorityCount: number
+): CitationDensityFinding["citationStatus"] {
+  const needsOem = family.label === "NEEDS OEM" || family.missingAuthorityTypes.some((item) => /OEM/i.test(item));
+  const needsAdas = family.label === "NEEDS ADAS" || family.category === "adas_calibration" || family.category === "scan_diagnostic";
+  const needsInvoice = family.label === "NEEDS INVOICE" || family.missingAuthorityTypes.some((item) => /invoice|proof|completion/i.test(item));
+  return {
+    oem: needsOem ? (verifiedAuthorityCount ? "verified" : "needed") : "not_applicable",
+    oemPositionStatement: needsOem ? (verifiedAuthorityCount && label === "VERIFIED OEM" ? "verified" : "needed") : "not_applicable",
+    adas: needsAdas ? (verifiedAuthorityCount ? "verified" : "needed") : "not_applicable",
+    pPages: family.label === "NEEDS P-PAGE" ? (verifiedAuthorityCount ? "verified" : "needed") : "not_applicable",
+    scrs: family.findingType.includes("refinish") ? "needed" : "not_applicable",
+    deg: family.findingType.includes("labor") || family.findingType.includes("refinish") ? "needed" : "not_applicable",
+    nhtsa: "not_applicable",
+    stateRegulation: label === "VERIFIED LEGAL" ? "verified" : "not_applicable",
+    policy: "not_applicable",
+    invoiceOrCompletionProof: needsInvoice || needsAdas ? "needed" : "not_found",
+    photoOrTeardownProof: family.findingType.includes("structural") ? "needed" : "not_found",
+  };
+}
+
+function getOemEvidenceTier(finding: CitationDensityFinding) {
+  return getOemAuthorityEvidenceTierLabel(finding.bestAvailableAuthority ?? buildEstimateEvidenceAuthority({
+    findingType: "unknown",
+    title: finding.operationLabel,
+    category: finding.category,
+    label: getProofBucketLabel(finding),
+    fallbackLabel: getProofBucketLabel(finding),
+    evidenceTier: "estimate_evidence",
+    score: finding.citationDensityScore,
+    safetyImpact: finding.impact.safetyImpact,
+    priority: finding.impact.supplementPriority,
+    missingAuthorityTypes: finding.missingAuthorityTypes,
+    issueSummary: finding.currentSupportSummary,
+    whyItMatters: finding.currentSupportSummary,
+    oemComplianceConcern: finding.missingProofSummary,
+    nextAction: finding.recommendedNextAction,
+    requiredDocumentation: finding.missingAuthorityTypes,
+  }));
+}
+
+function getOemAuthorityEvidenceTierLabel(authority: NonNullable<CitationDensityFinding["bestAvailableAuthority"]>) {
+  if (authority.type === "oem_procedure" || authority.type === "adas_procedure") return "tier_1_oem_procedure";
+  if (authority.type === "oem_position_statement") return "tier_2_oem_position_statement";
+  if (authority.type === "p_page" || authority.type === "deg" || authority.type === "scrs") return "tier_3_motor_database";
+  if (authority.type === "invoice_completion") return "tier_4_uploaded_support";
+  if (authority.type === "legal") return "tier_6_jurisdictional_law";
+  if (authority.type === "online_fallback") return "tier_7_verified_web_fallback";
+  return "tier_8_estimate_evidence";
+}
 
 export function classifyPartSource(rowText: string): PartSourceKind[] {
   const text = ` ${rowText.replace(/\s+/g, " ")} `;
@@ -2404,6 +3088,7 @@ function drawFindingAnnotation(
     estimateRole: "carrier" | "shop" | "selected";
     redactSensitive: boolean;
     trace: CitationDensityDebugTrace;
+    reportIdentity: AnnotatedEstimateReportIdentity;
   }
 ) {
   const { anchor, finding } = match;
@@ -2438,6 +3123,7 @@ function drawFindingAnnotation(
     rotation,
     estimateRole: options.estimateRole,
     redactSensitive: options.redactSensitive,
+    reportIdentity: options.reportIdentity,
   });
 
   if (options.mode === "inline_highlight" || options.mode === "both") {
@@ -2463,7 +3149,7 @@ function drawFindingAnnotation(
     });
   }
 
-  attachPdfFindingAnnotations(pdfDoc, page, metadata);
+  attachPdfFindingAnnotations(pdfDoc, page, metadata, options.reportIdentity);
   return { written: true as const, metadata };
 }
 
@@ -2503,7 +3189,8 @@ function drawCompactMarker(
 function attachPdfFindingAnnotations(
   pdfDoc: PDFDocument,
   page: PDFPage,
-  metadata: CitationDensityAnnotationMetadata
+  metadata: CitationDensityAnnotationMetadata,
+  reportIdentity: AnnotatedEstimateReportIdentity = CITATION_DENSITY_REPORT_IDENTITY
 ) {
   const annots = page.node.Annots() ?? pdfDoc.context.obj([]);
   page.node.set(PDFName.Annots, annots);
@@ -2536,7 +3223,7 @@ function attachPdfFindingAnnotations(
     QuadPoints: quadPoints,
     C: [1, 0.88, 0.22],
     CA: 0.36,
-    T: PDFHexString.fromText("Collision IQ Citation Density"),
+    T: PDFHexString.fromText(reportIdentity.pdfAnnotationTitle),
     Contents: PDFHexString.fromText(metadata.comment),
     NM: PDFHexString.fromText(`citation-density-${sanitizePdfAnnotationName(metadata.findingId)}-${sanitizePdfAnnotationName(metadata.anchorId)}-highlight`),
     M: PDFHexString.fromText(formatPdfDate(new Date())),
@@ -2577,6 +3264,7 @@ function buildAnnotationMetadata(
     rotation: 0 | 90 | 180 | 270;
     estimateRole: "carrier" | "shop" | "selected";
     redactSensitive: boolean;
+    reportIdentity?: AnnotatedEstimateReportIdentity;
   }
 ): CitationDensityAnnotationMetadata {
   const sanitize = (value: string) => {
@@ -2642,7 +3330,7 @@ function buildAnnotationMetadata(
     sourceRefs,
     comment: "",
   };
-  metadata.comment = buildPdfCommentBody(metadata, finding, options.estimateRole, options.redactSensitive);
+  metadata.comment = buildPdfCommentBody(metadata, finding, options.estimateRole, options.redactSensitive, options.reportIdentity);
   return metadata;
 }
 
@@ -2708,9 +3396,10 @@ function buildPdfCommentBody(
   metadata: CitationDensityAnnotationMetadata,
   finding: CitationDensityFinding,
   estimateRole: "carrier" | "shop" | "selected",
-  redactSensitive: boolean
+  redactSensitive: boolean,
+  reportIdentity: AnnotatedEstimateReportIdentity = CITATION_DENSITY_REPORT_IDENTITY
 ) {
-  const lines = buildCalloutLines(finding, metadata.markerNumber, metadata.label, redactSensitive, estimateRole);
+  const lines = buildCalloutLines(finding, metadata.markerNumber, metadata.label, redactSensitive, estimateRole, reportIdentity);
   return [
     `Finding #${metadata.markerNumber}: ${metadata.shortTitle}`,
     `Finding id: ${metadata.findingId}`,
@@ -2750,10 +3439,14 @@ function truncateText(value: string, maxLength: number) {
   return `${text.slice(0, Math.max(0, maxLength - 1)).trim()}...`;
 }
 
-function addLegendPage(pdfDoc: PDFDocument, options: { font: PDFFont; boldFont: PDFFont }) {
+function addLegendPage(
+  pdfDoc: PDFDocument,
+  options: { font: PDFFont; boldFont: PDFFont; reportIdentity?: AnnotatedEstimateReportIdentity }
+) {
+  const reportIdentity = options.reportIdentity ?? CITATION_DENSITY_REPORT_IDENTITY;
   const page = pdfDoc.addPage();
   const { width, height } = page.getSize();
-  page.drawText("Citation Density Annotation Legend", {
+  page.drawText(reportIdentity.legendTitle, {
     x: 48,
     y: height - 58,
     size: 18,
@@ -2869,6 +3562,7 @@ function addCitationDensityFindingDetailPages(
     sourcePdfName?: string;
     sourcePdfHash?: string;
     buildCommit?: string;
+    reportIdentity?: AnnotatedEstimateReportIdentity;
   }
 ) {
   const detailLayoutBlocks: NonNullable<CitationDensityDebugTrace["detailLayoutBlocks"]> = [];
@@ -2883,7 +3577,7 @@ function addCitationDensityFindingDetailPages(
 
     context = drawFindingDetailHeader(context, metadata);
 
-    for (const field of buildFindingDetailFields(finding, metadata)) {
+    for (const field of buildFindingDetailFields(finding, metadata, options.reportIdentity ?? CITATION_DENSITY_REPORT_IDENTITY)) {
       context = drawWrappedDetailField(field.label, field.value, context);
     }
     nextDetailPageNumber = context.detailPageNumber + 1;
@@ -2899,7 +3593,8 @@ type FindingDetailField = {
 
 function buildFindingDetailFields(
   finding: CitationDensityFinding,
-  metadata: CitationDensityAnnotationMetadata
+  metadata: CitationDensityAnnotationMetadata,
+  reportIdentity: AnnotatedEstimateReportIdentity = CITATION_DENSITY_REPORT_IDENTITY
 ): FindingDetailField[] {
   return [
     { label: "Finding number", value: String(metadata.markerNumber) },
@@ -2907,7 +3602,7 @@ function buildFindingDetailFields(
     { label: "Issue", value: finding.operationLabel },
     { label: "Anchor id", value: metadata.anchorId },
     { label: "Label", value: metadata.label },
-    { label: "Citation Density score", value: `${finding.citationDensityScore}/100` },
+    { label: reportIdentity.scoreLabel, value: `${finding.citationDensityScore}/100` },
     { label: "Source estimate", value: `${metadata.sourceDocumentRole} estimate` },
     { label: "Source page", value: String(metadata.sourcePageNumber) },
     { label: "Source line", value: metadata.sourceLineNumber ?? "section" },
@@ -2945,6 +3640,7 @@ type FindingDetailLayoutContext = {
   sourcePdfName?: string;
   sourcePdfHash?: string;
   buildCommit?: string;
+  reportIdentity: AnnotatedEstimateReportIdentity;
   detailLayoutBlocks: NonNullable<CitationDensityDebugTrace["detailLayoutBlocks"]>;
 };
 
@@ -2956,6 +3652,7 @@ function createFindingDetailLayoutContext(
     sourcePdfName?: string;
     sourcePdfHash?: string;
     buildCommit?: string;
+    reportIdentity?: AnnotatedEstimateReportIdentity;
     findingNumber: number;
     detailLayoutBlocks: NonNullable<CitationDensityDebugTrace["detailLayoutBlocks"]>;
   },
@@ -2993,10 +3690,11 @@ function createFindingDetailLayoutContext(
     sourcePdfName: options.sourcePdfName,
     sourcePdfHash: options.sourcePdfHash,
     buildCommit: options.buildCommit,
+    reportIdentity: options.reportIdentity ?? CITATION_DENSITY_REPORT_IDENTITY,
     detailLayoutBlocks: options.detailLayoutBlocks,
   };
 
-  page.drawText("Citation Density Finding Details", {
+  page.drawText(context.reportIdentity.detailTitle, {
     x: marginLeft,
     y: pageHeight - 54,
     size: headingSize,
@@ -3047,8 +3745,8 @@ function drawFindingDetailHeader(
 function drawFindingDetailFooter(context: FindingDetailLayoutContext) {
   const hash = context.sourcePdfHash ? context.sourcePdfHash.slice(0, 10) : "unknown";
   const commit = context.buildCommit ? context.buildCommit.slice(0, 10) : "local";
-  const source = normalizeDetailText(context.sourcePdfName || "citation-density-source.pdf");
-  const footer = `Citation Density Finding Details | page ${context.detailPageNumber} | ${source} | pdf ${hash} | build ${commit}`;
+  const source = normalizeDetailText(context.sourcePdfName || context.reportIdentity.sourcePdfFallbackName);
+  const footer = `${context.reportIdentity.detailTitle} | page ${context.detailPageNumber} | ${source} | pdf ${hash} | build ${commit}`;
   context.page.drawText(footer, {
     x: context.marginLeft,
     y: 34,
@@ -3171,11 +3869,18 @@ function splitWordToFitWidth(word: string, font: PDFFont, fontSize: number, maxW
 function addUnanchoredAppendix(
   pdfDoc: PDFDocument,
   findings: CitationDensityFinding[],
-  options: { font: PDFFont; boldFont: PDFFont; estimateRole: "carrier" | "shop" | "selected"; redactSensitive: boolean }
+  options: {
+    font: PDFFont;
+    boldFont: PDFFont;
+    estimateRole: "carrier" | "shop" | "selected";
+    redactSensitive: boolean;
+    reportIdentity?: AnnotatedEstimateReportIdentity;
+  }
 ) {
+  const reportIdentity = options.reportIdentity ?? CITATION_DENSITY_REPORT_IDENTITY;
   let page = pdfDoc.addPage();
   let y = page.getHeight() - 54;
-  page.drawText("Unanchored Citation Density Findings", {
+  page.drawText(reportIdentity.unanchoredTitle, {
     x: 48,
     y,
     size: 18,
@@ -3184,7 +3889,7 @@ function addUnanchoredAppendix(
   y -= 28;
 
   findings.forEach((finding, index) => {
-    const lines = buildCalloutLines(finding, index + 1, getProofBucketLabel(finding), options.redactSensitive, options.estimateRole);
+    const lines = buildCalloutLines(finding, index + 1, getProofBucketLabel(finding), options.redactSensitive, options.estimateRole, reportIdentity);
     if (y < 118) {
       page = pdfDoc.addPage();
       y = page.getHeight() - 54;
@@ -3208,7 +3913,8 @@ function buildCalloutLines(
   number: number,
   label: string,
   redactSensitive: boolean,
-  estimateRole: "carrier" | "shop" | "selected" = "selected"
+  estimateRole: "carrier" | "shop" | "selected" = "selected",
+  reportIdentity: AnnotatedEstimateReportIdentity = CITATION_DENSITY_REPORT_IDENTITY
 ) {
   const sanitize = (value: string) => {
     const text = normalizeSourceBoundaryText(value.replace(/\s+/g, " ").trim());
@@ -3218,7 +3924,7 @@ function buildCalloutLines(
   return [
     `Finding #: ${number}`,
     `Label: ${label}`,
-    `Citation Density: ${finding.citationDensityScore}/100`,
+    `${reportIdentity.scoreCommentLabel}: ${finding.citationDensityScore}/100`,
     `Estimate line: ${sanitize(formatEstimateLineForCallout(finding, estimateRole))}`,
     `Best authority: ${sanitize(formatBestAuthority(finding))}`,
     ...formatEmbeddedLinkLines(finding).map((line) => `Estimate link: ${sanitize(line)}`),
@@ -3662,10 +4368,7 @@ function escapeRegex(value: string) {
 function pruneExportCache() {
   const cutoff = Date.now() - EXPORT_TTL_MS;
   for (const [id, entry] of exportCache.entries()) {
-    if (
-      entry.createdAt < cutoff ||
-      entry.citationDensityArtifactVersion !== CITATION_DENSITY_ARTIFACT_VERSION
-    ) exportCache.delete(id);
+    if (entry.createdAt < cutoff) exportCache.delete(id);
   }
 }
 

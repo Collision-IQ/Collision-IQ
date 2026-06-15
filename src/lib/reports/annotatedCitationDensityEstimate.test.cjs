@@ -34,9 +34,12 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 
 const {
   buildAnnotatedCitationDensityEstimatePdf,
+  buildOemCitationDensityFindings,
   classifyPartSource,
   dataUrlToPdfBytes,
   extractCitationDensityRowAnchors,
+  OEM_CITATION_DENSITY_ARTIFACT_VERSION,
+  OEM_CITATION_DENSITY_REPORT_IDENTITY,
 } = require("./annotatedCitationDensityEstimate.ts");
 const {
   extractPdfRowAnchors,
@@ -422,6 +425,44 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     if (request === "@/lib/ai/builders/estimateScrubberPdfBuilder") {
       return {
         buildAnnotatedEstimateReviewModel: () => ({ citationDensityFindings: findings }),
+      };
+    }
+    return originalLoad.call(this, request, parent, isMain);
+  };
+
+  try {
+    return require(routePath);
+  } finally {
+    Module._load = originalLoad;
+  }
+}
+
+function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
+  const originalLoad = Module._load;
+  const routePath = path.join(process.cwd(), "src", "app", "api", "reports", "oem-citation-density", "annotated-estimate", "route.ts");
+  delete require.cache[require.resolve(routePath)];
+  Module._load = function loadWithRouteMocks(request, parent, isMain) {
+    if (request === "@/lib/auth/require-current-user") {
+      class UnauthorizedError extends Error {
+        constructor(message, status = 401) {
+          super(message);
+          this.status = status;
+        }
+      }
+      return {
+        UnauthorizedError,
+        requireCurrentUser: async () => ({ user: { id: "user-oem" } }),
+      };
+    }
+    if (request === "@/lib/analysisReportStore") {
+      return {
+        getAnalysisReport: async () => report,
+        getLatestActiveAnalysisReport: async () => report,
+      };
+    }
+    if (request === "@/lib/uploadedAttachmentStore") {
+      return {
+        getUploadedAttachments: async (ids) => ids.map((id) => attachments.find((attachment) => attachment.id === id)).filter(Boolean),
       };
     }
     return originalLoad.call(this, request, parent, isMain);
@@ -1235,6 +1276,42 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     assert.ok(result.debugTrace.renderedPdfAnnotationCount > 0);
   });
 
+  await run("OEM Citation Density generator creates source-page repair-standard findings without verified OEM overclaim", async () => {
+    const sourcePdfBytes = await createRam21975SourcePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceDocumentId: "oem-carrier-21975",
+      sourcePdfName: "SOR-1 21975.pdf",
+      uploadedFileNames: ["SOR-1 21975.pdf"],
+      sourceText: "Carrier estimate evidence only. No OEM procedure attached.",
+      findings: [],
+      reportIdentity: OEM_CITATION_DENSITY_REPORT_IDENTITY,
+      findingGenerator: buildOemCitationDensityFindings,
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+    const detailText = (await extractPdfPageTexts(result.bytes)).slice(result.originalPageCount).join(" ");
+
+    assert.equal(result.debugTrace.reportType, "oem-citation-density");
+    assert.equal(result.debugTrace.citationDensityArtifactVersion, OEM_CITATION_DENSITY_ARTIFACT_VERSION);
+    assert.ok(result.debugTrace.findingCount > 0);
+    assert.ok(result.debugTrace.anchoredFindingCount > 0);
+    assert.ok(result.debugTrace.renderedPdfAnnotationCount > 0);
+    assert.ok(result.debugTrace.findingsWithNextActionCount > 0);
+    assert.equal(result.debugTrace.findingsWithoutNextActionCount, 0);
+    assert.ok(result.debugTrace.estimateOnlyFindingCount > 0);
+    assert.ok(result.debugTrace.firstOemCitationDensityFindings.some((finding) =>
+      /part-source|diagnostics|ADAS|calibration/i.test(finding.title) &&
+      finding.nextAction.length > 20 &&
+      finding.evidenceTier
+    ));
+    assert.equal(result.annotationMetadata.every((item) => item.findingId && item.anchorId && item.sourceAnchorId === item.anchorId), true);
+    assert.equal(result.annotationMetadata.some((item) => item.label === "VERIFIED OEM"), false);
+    assert.ok(result.annotationMetadata.some((item) => /LKQ|A\/M|CAPA|scan|calibration/i.test(item.sourceAnchorText)));
+    assert.match(detailText, /OEM Citation Density Finding Details/);
+    assert.match(detailText, /Next action/i);
+    assert.doesNotMatch(detailText, /OEM requires/i);
+  });
+
   await run("one selected estimate flags AM/LKQ/CAPA rows for documentation and basis review", async () => {
     const sourcePdfBytes = await createRam21975SourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
@@ -1423,6 +1500,81 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
       .reduce((sum, count) => sum + count, 0);
     assert.ok(originalPageAnnotationCount >= 4);
     assert.doesNotMatch(outputPages.join(" "), /No estimate rows could be extracted|Unanchored Citation Density Findings|Repair Operation|Proc Report/);
+  });
+
+  await run("OEM Citation Density route returns annotated PDF artifact and OEM debug metadata", async () => {
+    const carrierPdfBytes = await createRam21975SourcePdf();
+    const carrierDataUrl = `data:application/pdf;base64,${Buffer.from(carrierPdfBytes).toString("base64")}`;
+    const attachments = [
+      {
+        id: "carrier-oem-21975",
+        filename: "SOR-1 21975.pdf",
+        type: "application/pdf",
+        text: "Carrier estimate with LKQ grille, A/M CAPA bumper, pre scan, calibration. No OEM procedure attached.",
+        imageDataUrl: carrierDataUrl,
+        pageCount: 12,
+      },
+    ];
+    const report = {
+      id: "report-oem-21975",
+      artifactIds: attachments.map((attachment) => attachment.id),
+      report: {
+        narrative: "OEM Citation Density fixture",
+        evidenceRegistry: [
+          {
+            id: "carrier-oem-21975",
+            sourceType: "carrier_estimate",
+            label: "SOR-1 21975.pdf",
+            ingestionState: "ingested",
+            evidenceStatus: "verified",
+            relatedIssueKeys: [],
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      },
+    };
+    const route = loadOemCitationDensityRouteWithMocks({ report, attachments });
+    const response = await route.POST(new Request("http://localhost/api/reports/oem-citation-density/annotated-estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        caseId: "report-oem-21975",
+        targetEstimate: "all",
+        annotationMode: "both",
+        includeLegend: false,
+        redactSensitive: true,
+      }),
+    }));
+    assert.equal(response.status, 200);
+    const json = await response.json();
+
+    assert.equal(json.ok, true);
+    assert.equal(json.reportType, "oem-citation-density");
+    assert.equal(json.debugCounts.artifactVersion, OEM_CITATION_DENSITY_ARTIFACT_VERSION);
+    assert.match(json.downloadUrl, /\/api\/reports\/oem-citation-density\/annotated-estimate\?artifactId=/);
+    assert.match(json.annotationMetadataUrl, /metadata=1&artifactId=/);
+    assert.ok(json.annotationMetadata.length > 0);
+    assert.equal(json.annotationMetadata.every((item) => item.findingId && item.anchorId && item.sourceAnchorId === item.anchorId), true);
+    assert.ok(json.debugCounts.findingCount > 0);
+    assert.ok(json.debugCounts.renderedPdfAnnotationCount > 0);
+    assert.ok(json.debugCounts.findingsWithNextActionCount > 0);
+    assert.equal(json.debugCounts.findingsWithoutNextActionCount, 0);
+    assert.ok(json.debugCounts.firstFindings.some((finding) => finding.evidenceTier && finding.confidence && finding.nextAction));
+    assert.equal(json.annotationMetadata.some((item) => item.label === "VERIFIED OEM"), false);
+
+    const metadataResponse = await route.GET(new Request(`http://localhost/api/reports/oem-citation-density/annotated-estimate?metadata=1&artifactId=${json.artifactId}`));
+    assert.equal(metadataResponse.status, 200);
+    const metadataJson = await metadataResponse.json();
+    assert.equal(metadataJson.artifactVersion, OEM_CITATION_DENSITY_ARTIFACT_VERSION);
+    assert.equal(metadataJson.reportType, "oem-citation-density");
+
+    const pdfResponse = await route.GET(new Request(`http://localhost/api/reports/oem-citation-density/annotated-estimate?artifactId=${json.artifactId}`));
+    assert.equal(pdfResponse.status, 200);
+    assert.equal(pdfResponse.headers.get("content-type"), "application/pdf");
+    const outputBytes = new Uint8Array(await pdfResponse.arrayBuffer());
+    const outputPages = await extractPdfPageTexts(outputBytes);
+    assert.match(outputPages.join(" "), /OEM Citation Density Finding Details/);
   });
 
   await run("optional real SOR-1 local fixture extracts selectable text and row anchors", async () => {

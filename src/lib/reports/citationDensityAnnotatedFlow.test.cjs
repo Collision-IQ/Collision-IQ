@@ -214,6 +214,24 @@ run("export card primary Citation Density action calls annotated route, not stan
   assert.ok(standaloneBuilderIndex === -1 || annotatedFetchIndex < standaloneBuilderIndex);
 });
 
+run("OEM Citation Density replaces Policy & Rights primary report card", () => {
+  const pageSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
+  const flowCopy = fs.readFileSync(path.join(process.cwd(), "src/components/StructuredAnalysisCanvas.tsx"), "utf8");
+  const oemRouteSource = fs.readFileSync(
+    path.join(process.cwd(), "src/app/api/reports/oem-citation-density/annotated-estimate/route.ts"),
+    "utf8"
+  );
+
+  assert.match(pageSource, /OEM Citation Density Report/);
+  assert.match(pageSource, /Download OEM Citation Density PDF/);
+  assert.match(pageSource, /Email OEM Citation Density PDF/);
+  assert.match(pageSource, /"\/api\/reports\/oem-citation-density\/annotated-estimate"/);
+  assert.doesNotMatch(pageSource, /<FileText[\s\S]{0,300}Policy & Rights Review/);
+  assert.doesNotMatch(flowCopy, /Policy & Rights Review/);
+  assert.match(oemRouteSource, /OEM_CITATION_DENSITY_ARTIFACT_VERSION/);
+  assert.match(oemRouteSource, /buildOemCitationDensityFindings/);
+});
+
 run("Citation Density viewer configures worker and converts PDF coordinates", () => {
   const source = fs.readFileSync(path.join(process.cwd(), "src/components/CitationDensityAnnotationViewer.tsx"), "utf8");
 
