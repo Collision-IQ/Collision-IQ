@@ -26,6 +26,7 @@ import {
   extractPdfWordsWithDiagnostics,
   findBestEstimateRowAnchorForFinding,
   type PdfTextExtractionMethod,
+  type PdfTextLine,
   type EstimateRowAnchor,
   type EstimateRowAnchorType,
 } from "./citationDensityRowAnchors";
@@ -101,10 +102,21 @@ export type CitationDensityDebugTrace = {
   nonOemPartRowCount: number;
   oemPartRowCount: number;
   partSourceComparisonCandidateCount: number;
+  partSourceCandidateCount: number;
+  partSourceAcceptedCandidateCount: number;
+  partSourceRejectedCandidateCount: number;
   partSourceFindingCount: number;
   partSourceAnchoredFindingCount: number;
   partSourceUnanchoredFindingCount: number;
   partSourceRows: PartSourceDebugRow[];
+  partSourceAcceptedCandidates: PartSourceFindingCandidate[];
+  partSourceRejectedCandidates: PartSourceFindingCandidate[];
+  rejectedLineNumberCandidates: Array<{
+    rowText: string;
+    lineNumber?: string | number | null;
+    reason: string;
+  }>;
+  partSourceComparisonMatches: PartSourceComparisonMatchDebug[];
   partSourceDroppedReasons: Array<{
     anchorId?: string | null;
     rowText?: string;
@@ -159,6 +171,32 @@ type PartSourceDebugRow = {
   anchorId: string;
   sourcePdfName?: string;
   rowText: string;
+};
+
+export type PartSourceFindingCandidate = {
+  anchorId: string;
+  rowText: string;
+  pageNumber: number;
+  lineNumber?: string | number | null;
+  rowType?: string;
+  operation?: string | null;
+  description?: string | null;
+  partNumber?: string | null;
+  partSourceKinds: PartSourceKind[];
+  comparisonRowText?: string;
+  comparisonPartSourceKinds?: PartSourceKind[];
+  score: number;
+  reasons: string[];
+  rejectionReasons: string[];
+};
+
+type PartSourceComparisonMatchDebug = {
+  selectedAnchorId: string;
+  selectedRowText: string;
+  comparisonRowText?: string;
+  matchScore: number;
+  matchReasons: string[];
+  rejectedComparisonReasons: string[];
 };
 
 export class CitationDensityAnnotationError extends Error {
@@ -310,7 +348,7 @@ const LABELS = [
 const NO_ROWS_EXTRACTED_WARNING = "No estimate rows could be extracted from the source PDF.";
 const NO_SAFE_ROW_FINDINGS_WARNING =
   "Estimate rows were extracted, but no generated finding could be safely tied to a row. Findings are appendix-only.";
-export const CITATION_DENSITY_ARTIFACT_VERSION = "citation-density-part-source-oem-v1";
+export const CITATION_DENSITY_ARTIFACT_VERSION = "citation-density-part-source-relevance-v1";
 export const NO_ANCHOR_EXTRACTION_ERROR =
   "Citation Density could not extract estimate row anchors from the selected estimate PDF. No annotation PDF was produced.";
 export const NO_SELECTABLE_TEXT_ERROR =
@@ -508,10 +546,17 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     nonOemPartRowCount: 0,
     oemPartRowCount: 0,
     partSourceComparisonCandidateCount: 0,
+    partSourceCandidateCount: 0,
+    partSourceAcceptedCandidateCount: 0,
+    partSourceRejectedCandidateCount: 0,
     partSourceFindingCount: 0,
     partSourceAnchoredFindingCount: 0,
     partSourceUnanchoredFindingCount: 0,
     partSourceRows: [],
+    partSourceAcceptedCandidates: [],
+    partSourceRejectedCandidates: [],
+    rejectedLineNumberCandidates: [],
+    partSourceComparisonMatches: [],
     partSourceDroppedReasons: [],
     fallbackMatchedFindings: [],
     droppedFindings: [],
@@ -577,6 +622,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
 
   const partSourceResult = buildPartSourceFindings({
     selectedAnchors: anchors,
+    selectedVisualLines: extraction.visualLines,
     sourcePdfName,
     sourceDocumentId: params.sourceDocumentId,
     sourceDocumentRole,
@@ -587,8 +633,15 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   trace.nonOemPartRowCount = partSourceResult.nonOemPartRowCount;
   trace.oemPartRowCount = partSourceResult.oemPartRowCount;
   trace.partSourceComparisonCandidateCount = partSourceResult.comparisonCandidateCount;
+  trace.partSourceCandidateCount = partSourceResult.candidateCount;
+  trace.partSourceAcceptedCandidateCount = partSourceResult.acceptedCandidates.length;
+  trace.partSourceRejectedCandidateCount = partSourceResult.rejectedCandidates.length;
   trace.partSourceFindingCount = partSourceResult.findings.length;
   trace.partSourceRows = partSourceResult.partSourceRows.slice(0, 20);
+  trace.partSourceAcceptedCandidates = partSourceResult.acceptedCandidates.slice(0, 20);
+  trace.partSourceRejectedCandidates = partSourceResult.rejectedCandidates.slice(0, 20);
+  trace.rejectedLineNumberCandidates = partSourceResult.rejectedLineNumberCandidates.slice(0, 20);
+  trace.partSourceComparisonMatches = partSourceResult.comparisonMatches.slice(0, 20);
   trace.partSourceDroppedReasons = partSourceResult.droppedReasons;
   const findingsWithPartSource = [...findings, ...partSourceResult.findings];
   trace.findingCount = findingsWithPartSource.length;
@@ -759,6 +812,15 @@ type PartSourceFindingResult = {
   nonOemPartRowCount: number;
   oemPartRowCount: number;
   comparisonCandidateCount: number;
+  candidateCount: number;
+  acceptedCandidates: PartSourceFindingCandidate[];
+  rejectedCandidates: PartSourceFindingCandidate[];
+  rejectedLineNumberCandidates: Array<{
+    rowText: string;
+    lineNumber?: string | number | null;
+    reason: string;
+  }>;
+  comparisonMatches: PartSourceComparisonMatchDebug[];
   droppedReasons: CitationDensityDebugTrace["partSourceDroppedReasons"];
 };
 
@@ -791,6 +853,7 @@ export function classifyPartSource(rowText: string): PartSourceKind[] {
 
 function buildPartSourceFindings(params: {
   selectedAnchors: EstimateRowAnchor[];
+  selectedVisualLines?: PdfTextLine[];
   sourcePdfName: string;
   sourceDocumentId?: string;
   sourceDocumentRole: "carrier" | "shop";
@@ -804,6 +867,11 @@ function buildPartSourceFindings(params: {
       nonOemPartRowCount: 0,
       oemPartRowCount: 0,
       comparisonCandidateCount: 0,
+      candidateCount: 0,
+      acceptedCandidates: [],
+      rejectedCandidates: [],
+      rejectedLineNumberCandidates: [],
+      comparisonMatches: [],
       droppedReasons: [],
     };
   }
@@ -813,34 +881,83 @@ function buildPartSourceFindings(params: {
   const comparisonRows = params.comparisonEstimateTexts.flatMap((source) => buildPartSourceRowsFromText(source));
   const droppedReasons: PartSourceFindingResult["droppedReasons"] = [];
   const allSelectedNonOemRows = selectedRows.filter((row) => hasNonOemPartSource(row.sourceKinds));
-  const selectedNonOemRows = filterPreferredSelectedPartSourceRows(allSelectedNonOemRows)
+  const { preferredRows, rejectedRows: supplierSupersededRows } = filterPreferredSelectedPartSourceRows(allSelectedNonOemRows);
+  const selectedNonOemRows = preferredRows
     .filter((row) => !isPartSourceRowCoveredByExistingFinding(row, params.existingFindings));
   const selectedOemRows = selectedRows.filter((row) => hasOemPartSource(row.sourceKinds));
   const comparisonOemRows = comparisonRows.filter((row) => hasOemPartSource(row.sourceKinds));
   const hasComparisonEstimate = params.comparisonEstimateTexts.some((item) => item.text.trim().length > 0);
   const findings: CitationDensityFinding[] = [];
+  const acceptedCandidates: PartSourceFindingCandidate[] = [];
+  const rejectedCandidates: PartSourceFindingCandidate[] = [];
+  const rejectedLineNumberCandidates: PartSourceFindingResult["rejectedLineNumberCandidates"] = [];
+  const comparisonMatches: PartSourceComparisonMatchDebug[] = [];
+
+  for (const candidate of buildRejectedPartSourceVisualLineCandidates({
+    visualLines: params.selectedVisualLines ?? [],
+    selectedRows,
+    sourcePdfName: params.sourcePdfName,
+    sourceDocumentId: params.sourceDocumentId,
+    sourceDocumentRole: params.sourceDocumentRole,
+  })) {
+    rejectedCandidates.push(candidate);
+    if (isVehicleYearLineNumber(candidate.lineNumber)) {
+      rejectedLineNumberCandidates.push({
+        rowText: candidate.rowText,
+        lineNumber: candidate.lineNumber,
+        reason: "vehicle year parsed as line number",
+      });
+    }
+    droppedReasons.push({
+      anchorId: candidate.anchorId || null,
+      rowText: candidate.rowText,
+      reason: candidate.rejectionReasons.join("; "),
+    });
+  }
+
+  for (const row of supplierSupersededRows) {
+    const candidate = scorePartSourceCandidate(buildPartSourceCandidate(row, null, null));
+    candidate.rejectionReasons.push("supplier row superseded by line-item row");
+    rejectedCandidates.push(candidate);
+    droppedReasons.push({
+      anchorId: row.anchorId ?? null,
+      rowText: row.rowText,
+      reason: "supplier row superseded by line-item row",
+    });
+  }
 
   for (const selectedRow of selectedNonOemRows) {
-    if (!selectedRow.anchor) {
+    const comparisonResult = findBestPartSourceComparisonRow(selectedRow, comparisonOemRows);
+    comparisonMatches.push(comparisonResult.debug);
+    const comparisonMatch = comparisonResult.match;
+    const candidate = scorePartSourceCandidate(buildPartSourceCandidate(selectedRow, comparisonMatch, comparisonResult.debug));
+    if (candidate.rejectionReasons.length > 0 || candidate.score < PART_SOURCE_CANDIDATE_MIN_SCORE) {
+      const reason = candidate.rejectionReasons.length
+        ? candidate.rejectionReasons.join("; ")
+        : `candidate score ${candidate.score} below threshold ${PART_SOURCE_CANDIDATE_MIN_SCORE}`;
+      rejectedCandidates.push(candidate);
+      if (isVehicleYearLineNumber(candidate.lineNumber)) {
+        rejectedLineNumberCandidates.push({
+          rowText: candidate.rowText,
+          lineNumber: candidate.lineNumber,
+          reason: "vehicle year parsed as line number",
+        });
+      }
       droppedReasons.push({
         anchorId: selectedRow.anchorId ?? null,
         rowText: selectedRow.rowText,
-        reason: "selected part-source row has no extracted selected estimate anchor",
+        reason,
       });
       continue;
     }
-    const comparisonMatch = findBestPartSourceComparisonRow(selectedRow, comparisonOemRows);
-    if (hasComparisonEstimate && !comparisonMatch) {
-      droppedReasons.push({
-        anchorId: selectedRow.anchorId ?? null,
-        rowText: selectedRow.rowText,
-        reason: "no comparable OEM/OE comparison estimate row found",
-      });
-      continue;
+    if (hasComparisonEstimate && comparisonRows.length > 0 && !comparisonMatch) {
+      candidate.reasons.push("no OEM/OE comparison row matched strongly enough; using one-estimate documentation review");
     }
+    acceptedCandidates.push(candidate);
     findings.push(buildPartSourceFinding({
       selectedRow,
       comparisonRow: comparisonMatch,
+      candidate,
       sourceDocumentRole: params.sourceDocumentRole,
       selectedFileName: params.sourcePdfName,
     }));
@@ -859,19 +976,73 @@ function buildPartSourceFindings(params: {
     nonOemPartRowCount: allSelectedNonOemRows.length,
     oemPartRowCount: selectedOemRows.length,
     comparisonCandidateCount: comparisonOemRows.length,
+    candidateCount: acceptedCandidates.length + rejectedCandidates.length,
+    acceptedCandidates,
+    rejectedCandidates,
+    rejectedLineNumberCandidates,
+    comparisonMatches,
     droppedReasons,
   };
 }
 
+function buildRejectedPartSourceVisualLineCandidates(params: {
+  visualLines: PdfTextLine[];
+  selectedRows: PartSourceRow[];
+  sourcePdfName: string;
+  sourceDocumentId?: string;
+  sourceDocumentRole: "carrier" | "shop";
+}): PartSourceFindingCandidate[] {
+  const anchoredLineText = new Set(params.selectedRows.map((row) => normalizeMatchText(row.rowText)));
+  const candidates: PartSourceFindingCandidate[] = [];
+  for (const line of params.visualLines) {
+    const rowText = line.text.replace(/\s+/g, " ").trim();
+    if (!rowText) continue;
+    const normalized = normalizeMatchText(rowText);
+    if (anchoredLineText.has(normalized)) continue;
+    const sourceKinds = classifyPartSource(rowText);
+    if (!hasNonOemPartSource(sourceKinds)) continue;
+    const lineNumber = rowText.match(/^\s*(?:line\s*)?(\d{1,4})\b/i)?.[1] ?? null;
+    if (
+      !isVehicleYearLineNumber(lineNumber) &&
+      !containsVehicleYearIdentityText(rowText) &&
+      !isBoilerplatePartSourceText(normalized)
+    ) {
+      continue;
+    }
+    const candidate = scorePartSourceCandidate(buildPartSourceCandidate({
+      sourceDocumentId: params.sourceDocumentId,
+      sourceDocumentRole: params.sourceDocumentRole,
+      sourcePdfName: params.sourcePdfName,
+      pageNumber: line.pageNumber,
+      lineNumber,
+      rowText,
+      normalizedRowText: normalized,
+      sourceKinds,
+      description: rowText,
+      operation: null,
+      partNumber: null,
+    }, null, null));
+    if (!candidate.rejectionReasons.length) {
+      candidate.rejectionReasons.push(`candidate score ${candidate.score} below threshold ${PART_SOURCE_CANDIDATE_MIN_SCORE}`);
+    }
+    candidates.push(candidate);
+  }
+  return candidates;
+}
+
 function filterPreferredSelectedPartSourceRows(rows: PartSourceRow[]) {
   const lineItemRows = rows.filter((row) => row.anchorType === "estimate_line");
-  return rows.filter((row) => {
-    if (row.anchorType !== "supplier_row") return true;
-    return !lineItemRows.some((lineItem) =>
+  const preferredRows: PartSourceRow[] = [];
+  const rejectedRows: PartSourceRow[] = [];
+  for (const row of rows) {
+    const superseded = row.anchorType === "supplier_row" && lineItemRows.some((lineItem) =>
       (row.lineNumber && lineItem.lineNumber === row.lineNumber) ||
       scorePartSourceRowMatch(row, lineItem) >= 22
     );
-  });
+    if (superseded) rejectedRows.push(row);
+    else preferredRows.push(row);
+  }
+  return { preferredRows, rejectedRows };
 }
 
 function isPartSourceRowCoveredByExistingFinding(row: PartSourceRow, findings: CitationDensityFinding[]) {
@@ -960,24 +1131,184 @@ function buildPartSourceRowsFromText(source: ComparisonEstimateText): PartSource
     .filter((row): row is PartSourceRow => Boolean(row));
 }
 
-function findBestPartSourceComparisonRow(selectedRow: PartSourceRow, comparisonRows: PartSourceRow[]) {
-  let best: { row: PartSourceRow; score: number } | null = null;
-  for (const row of comparisonRows) {
-    const score = scorePartSourceRowMatch(selectedRow, row);
-    if (score > (best?.score ?? 0)) best = { row, score };
+function buildPartSourceCandidate(
+  selectedRow: PartSourceRow,
+  comparisonRow: PartSourceRow | null,
+  comparisonDebug: PartSourceComparisonMatchDebug | null
+): PartSourceFindingCandidate {
+  return {
+    anchorId: selectedRow.anchorId ?? "",
+    rowText: selectedRow.rowText,
+    pageNumber: selectedRow.pageNumber ?? 0,
+    lineNumber: selectedRow.lineNumber,
+    rowType: selectedRow.anchorType,
+    operation: selectedRow.operation,
+    description: selectedRow.description,
+    partNumber: selectedRow.partNumber,
+    partSourceKinds: selectedRow.sourceKinds,
+    comparisonRowText: comparisonRow?.rowText,
+    comparisonPartSourceKinds: comparisonRow?.sourceKinds,
+    score: comparisonDebug?.matchScore ?? 0,
+    reasons: [...(comparisonDebug?.matchReasons ?? [])],
+    rejectionReasons: [],
+  };
+}
+
+export function scorePartSourceCandidate(candidate: PartSourceFindingCandidate): PartSourceFindingCandidate {
+  const scored: PartSourceFindingCandidate = {
+    ...candidate,
+    reasons: [...candidate.reasons],
+    rejectionReasons: [...candidate.rejectionReasons],
+  };
+  const normalized = normalizeMatchText(scored.rowText);
+  const hasOperation = hasPartSourceRepairOperation(scored.rowText);
+  const hasPartNoun = hasPartSourcePartNoun(scored.rowText);
+  const hasAmountContext = Boolean(
+    scored.partNumber ||
+    /\$[\d,]+(?:\.\d{2})?/.test(scored.rowText) ||
+    /\b\d+(?:\.\d+)?\s*(?:hrs?|hours?)\b/i.test(scored.rowText) ||
+    /\b(?:qty|quantity)\b/i.test(scored.rowText)
+  );
+
+  if (hasNonOemPartSource(scored.partSourceKinds)) {
+    scored.score += 35;
+    scored.reasons.push("selected row has non-OEM part-source token");
   }
-  return best && best.score >= 22 ? best.row : null;
+  if (isPreferredPartSourceAnchorType(scored.rowType)) {
+    scored.score += 18;
+    scored.reasons.push("selected row is an estimate line-item or attached line note");
+  }
+  if (hasOperation) {
+    scored.score += 14;
+    scored.reasons.push("row has repair operation context");
+  }
+  if (hasPartNoun) {
+    scored.score += 16;
+    scored.reasons.push("row has specific part noun");
+  }
+  if (hasAmountContext) {
+    scored.score += 10;
+    scored.reasons.push("row has part number, quantity, price, labor, or paint context");
+  }
+  if (scored.comparisonRowText && hasOemPartSource(scored.comparisonPartSourceKinds ?? [])) {
+    scored.score += 18;
+    scored.reasons.push("comparison estimate has OEM/OE comparable row");
+  }
+  if (/\b(?:not correct style|incorrect style|wrong style|fit|finish)\b/i.test(scored.rowText)) {
+    scored.score += 12;
+    scored.reasons.push("row has fit/style correctness note");
+  }
+  if (scored.anchorId && scored.pageNumber > 0) {
+    scored.score += 8;
+    scored.reasons.push("row has extracted selected-estimate anchor");
+  }
+
+  if (isVehicleYearLineNumber(scored.lineNumber) || containsVehicleYearIdentityText(scored.rowText)) {
+    scored.score -= 80;
+    scored.rejectionReasons.push("vehicle year parsed as line number");
+  }
+  if (isBoilerplatePartSourceText(normalized)) {
+    scored.score -= 55;
+    scored.rejectionReasons.push("boilerplate/disclaimer row");
+  }
+  if (!hasPartNoun) {
+    scored.score -= 24;
+    scored.rejectionReasons.push("no part noun");
+  }
+  if (!hasOperation && !hasAmountContext) {
+    scored.score -= 24;
+    scored.rejectionReasons.push("no repair operation context");
+  }
+  if (!scored.anchorId || scored.pageNumber <= 0) {
+    scored.score -= 30;
+    scored.rejectionReasons.push("no selected estimate anchor rects");
+  }
+  if (scored.rowType === "guide_row" || scored.rowType === "section_row" || scored.rowType === "totals_row") {
+    scored.score -= 45;
+    scored.rejectionReasons.push("row source is guide/header/footer");
+  }
+  if (scored.rowText.length > 220 && !hasOperation) {
+    scored.score -= 35;
+    scored.rejectionReasons.push("extremely long boilerplate text with no operation/part columns");
+  }
+
+  scored.reasons = [...new Set(scored.reasons)];
+  scored.rejectionReasons = [...new Set(scored.rejectionReasons)];
+  return scored;
+}
+
+function findBestPartSourceComparisonRow(
+  selectedRow: PartSourceRow,
+  comparisonRows: PartSourceRow[]
+): { match: PartSourceRow | null; debug: PartSourceComparisonMatchDebug } {
+  let best: { row: PartSourceRow; score: number; reasons: string[] } | null = null;
+  const rejectedComparisonReasons: string[] = [];
+  for (const row of comparisonRows) {
+    const result = scorePartSourceComparisonRow(selectedRow, row);
+    if (result.score > (best?.score ?? 0)) best = { row, score: result.score, reasons: result.reasons };
+    if (result.score < PART_SOURCE_COMPARISON_MIN_SCORE) {
+      rejectedComparisonReasons.push(`${truncateText(row.rowText, 72)}: ${result.reasons.length ? result.reasons.join(", ") : "comparison match too weak"}`);
+    }
+  }
+  const match = best && best.score >= PART_SOURCE_COMPARISON_MIN_SCORE ? best.row : null;
+  return {
+    match,
+    debug: {
+      selectedAnchorId: selectedRow.anchorId ?? "",
+      selectedRowText: selectedRow.rowText,
+      comparisonRowText: match?.rowText,
+      matchScore: best?.score ?? 0,
+      matchReasons: best?.reasons ?? [],
+      rejectedComparisonReasons: match ? [] : rejectedComparisonReasons.slice(0, 5),
+    },
+  };
 }
 
 function scorePartSourceRowMatch(selectedRow: PartSourceRow, comparisonRow: PartSourceRow) {
+  return scorePartSourceComparisonRow(selectedRow, comparisonRow).score;
+}
+
+function scorePartSourceComparisonRow(selectedRow: PartSourceRow, comparisonRow: PartSourceRow) {
   let score = 0;
-  if (selectedRow.lineNumber && comparisonRow.lineNumber && selectedRow.lineNumber === comparisonRow.lineNumber) score += 18;
-  if (selectedRow.partNumber && comparisonRow.partNumber && selectedRow.partNumber === comparisonRow.partNumber) score += 30;
+  const reasons: string[] = [];
+  if (selectedRow.partNumber && comparisonRow.partNumber && selectedRow.partNumber === comparisonRow.partNumber) {
+    score += 32;
+    reasons.push("part number match");
+  }
   const selectedComparable = normalizePartComparableText(selectedRow.rowText);
   const comparisonComparable = normalizePartComparableText(comparisonRow.rowText);
-  score += sharedTermScore(selectedComparable, comparisonComparable, 28);
-  score += keyTokenScore(selectedComparable, comparisonComparable, 30);
-  return score;
+  const partNouns = getSharedPartNouns(selectedRow.rowText, comparisonRow.rowText);
+  if (partNouns.length > 0) {
+    score += Math.min(28, partNouns.length * 10);
+    reasons.push(`shared part noun: ${partNouns.join(", ")}`);
+  }
+  const keyScore = keyTokenScore(selectedComparable, comparisonComparable, 26);
+  if (keyScore > 0) {
+    score += keyScore;
+    reasons.push("part description overlap");
+  }
+  const termScore = sharedTermScore(selectedComparable, comparisonComparable, 18);
+  if (termScore > 0) {
+    score += termScore;
+    reasons.push("normalized row-text similarity");
+  }
+  if (hasPartSourceRepairOperation(selectedRow.rowText) && hasPartSourceRepairOperation(comparisonRow.rowText)) {
+    score += 8;
+    reasons.push("operation similarity");
+  }
+  if (selectedRow.lineNumber && comparisonRow.lineNumber && selectedRow.lineNumber === comparisonRow.lineNumber) {
+    score += 6;
+    reasons.push("line number weak match");
+  }
+  if (isBoilerplatePartSourceText(comparisonRow.normalizedRowText)) {
+    score -= 35;
+    reasons.push("comparison row is boilerplate");
+  }
+  if (!hasPartSourcePartNoun(comparisonRow.rowText)) {
+    score -= 18;
+    reasons.push("comparison row lacks part noun");
+  }
+  return { score, reasons: [...new Set(reasons)] };
 }
 
 function normalizePartComparableText(value: string) {
@@ -990,6 +1321,7 @@ function normalizePartComparableText(value: string) {
 function buildPartSourceFinding(params: {
   selectedRow: PartSourceRow;
   comparisonRow?: PartSourceRow | null;
+  candidate: PartSourceFindingCandidate;
   sourceDocumentRole: "carrier" | "shop";
   selectedFileName: string;
 }): CitationDensityFinding {
@@ -998,6 +1330,8 @@ function buildPartSourceFinding(params: {
   const comparisonClass = comparisonRow ? formatPartSourceKinds(comparisonRow.sourceKinds) : "not available";
   const selectedLine = selectedRow.lineNumber ?? "section";
   const hasComparison = Boolean(comparisonRow);
+  const title = hasComparison ? "AM/LKQ part usage vs OEM part usage" : "Non-OEM part-source documentation review";
+  const rowIssueSummary = buildPartSourceRowIssueSummary(selectedRow, comparisonRow);
   const authorityStatus: CitationSupportStatus = hasComparison ? "needed" : "not_found";
   const evidence = {
     lineNumber: selectedRow.lineNumber,
@@ -1009,7 +1343,7 @@ function buildPartSourceFinding(params: {
 
   return {
     id: `part-source-oem-variance-${selectedRow.anchorId?.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") ?? createHash("sha1").update(selectedRow.rowText).digest("hex").slice(0, 10)}`,
-    operationLabel: "AM/LKQ part usage vs OEM part usage",
+    operationLabel: title,
     category: "parts_downgrade",
     estimateGapType: hasComparison ? "needs_proof" : "present_but_under_documented",
     carrierEvidence: params.sourceDocumentRole === "carrier" ? evidence : undefined,
@@ -1067,8 +1401,8 @@ function buildPartSourceFinding(params: {
       note: SOURCE_BOUNDARY_TEXT,
     },
     currentSupportSummary: hasComparison
-      ? `Selected estimate file: ${params.selectedFileName}. Selected estimate page: ${selectedRow.pageNumber ?? "unknown"}. Selected estimate line: ${selectedLine}. Exact selected row text: ${selectedRow.rowText}. Selected part source classification: ${selectedClass}. Comparison estimate file: ${comparisonRow?.sourcePdfName}. Comparison row text: ${comparisonRow?.rowText}. Comparison part source classification: ${comparisonClass}. The selected estimate uses AM/LKQ/non-OEM part sourcing while the comparison estimate appears to use OEM/OE sourcing for a comparable part. Verify part-type authorization, fit/finish, warranty, and applicable OEM/insurer documentation.`
-      : `Selected estimate file: ${params.selectedFileName}. Selected estimate page: ${selectedRow.pageNumber ?? "unknown"}. Selected estimate line: ${selectedLine}. Exact selected row text: ${selectedRow.rowText}. Selected part source classification: ${selectedClass}. This one-estimate review found AM/LKQ/CAPA/non-OEM part sourcing that requires documentation, authorization, fit/finish validation, warranty/quality review, supplier/invoice support, and OEM/insurer basis review.`,
+      ? `Selected estimate file: ${params.selectedFileName}. Selected estimate page: ${selectedRow.pageNumber ?? "unknown"}. Selected estimate line: ${selectedLine}. Exact selected row text: ${selectedRow.rowText}. Selected part source classification: ${selectedClass}. Comparison estimate file: ${comparisonRow?.sourcePdfName}. Comparison row text: ${comparisonRow?.rowText}. Comparison part source classification: ${comparisonClass}. ${rowIssueSummary} Candidate score: ${params.candidate.score}. Candidate reasons: ${params.candidate.reasons.join("; ")}.`
+      : `Selected estimate file: ${params.selectedFileName}. Selected estimate page: ${selectedRow.pageNumber ?? "unknown"}. Selected estimate line: ${selectedLine}. Exact selected row text: ${selectedRow.rowText}. Selected part source classification: ${selectedClass}. ${rowIssueSummary} This one-estimate review found AM/LKQ/CAPA/non-OEM part sourcing that requires documentation, authorization, fit/finish validation, warranty/quality review, supplier/invoice support, and OEM/insurer basis review. Candidate score: ${params.candidate.score}. Candidate reasons: ${params.candidate.reasons.join("; ")}.`,
     missingProofSummary: hasComparison
       ? "Support refs / required documentation basis: part-type authorization, fit/finish and style validation, warranty/quality review, supplier/invoice support, and OEM/insurer documentation basis are still needed before claiming the substitution is authorized."
       : "Support refs / required documentation basis: document part-type authorization, fit/finish/style correctness, warranty/quality implications, OEM procedure or position-statement requirements where applicable, invoice/supplier documentation, and OEM/insurer basis.",
@@ -1099,8 +1433,61 @@ function formatPartSourceKinds(kinds: PartSourceKind[]) {
 }
 
 function isPartSourceFinding(finding: CitationDensityFinding) {
-  return /^part-source-oem-variance-/i.test(finding.id) || finding.operationLabel === "AM/LKQ part usage vs OEM part usage";
+  return /^part-source-oem-variance-/i.test(finding.id) ||
+    finding.operationLabel === "AM/LKQ part usage vs OEM part usage" ||
+    finding.operationLabel === "Non-OEM part-source documentation review";
 }
+
+function buildPartSourceRowIssueSummary(selectedRow: PartSourceRow, comparisonRow?: PartSourceRow | null) {
+  const lineLabel = selectedRow.lineNumber ? `line ${selectedRow.lineNumber}` : "the selected row";
+  const sourceText = selectedRow.rowText;
+  if (comparisonRow) {
+    return `Selected estimate ${lineLabel} uses ${formatPartSourceKinds(selectedRow.sourceKinds)} sourcing for ${summarizePartDescription(sourceText)}. The comparison estimate appears to use ${formatPartSourceKinds(comparisonRow.sourceKinds)} or OEM-style sourcing for the comparable part. Verify part-type authorization, fit/finish, warranty, and applicable OEM/insurer documentation.`;
+  }
+  return `Selected estimate ${lineLabel} uses ${formatPartSourceKinds(selectedRow.sourceKinds)} sourcing for ${summarizePartDescription(sourceText)}. Review authorization, fit/finish, warranty/quality, supplier invoice support, and OEM/insurer basis before relying on the part row.`;
+}
+
+function summarizePartDescription(rowText: string) {
+  const tokens = normalizePartComparableText(rowText).split(" ").filter(Boolean);
+  return tokens.length ? tokens.slice(0, 8).join(" ") : "the extracted part row";
+}
+
+function isPreferredPartSourceAnchorType(rowType: string | undefined) {
+  return rowType === "estimate_line" || rowType === "line_note";
+}
+
+function hasPartSourceRepairOperation(rowText: string) {
+  return /\b(?:repl|replace|rpr|repair|r&i|r\s*&\s*i|subl|sublet|add|supp|remove|install|overhaul)\b/i.test(rowText);
+}
+
+function hasPartSourcePartNoun(rowText: string) {
+  return PART_SOURCE_PART_NOUNS.some((noun) => new RegExp(`\\b${escapeRegex(noun)}s?\\b`, "i").test(rowText));
+}
+
+function getSharedPartNouns(a: string, b: string) {
+  return PART_SOURCE_PART_NOUNS.filter((noun) =>
+    new RegExp(`\\b${escapeRegex(noun)}s?\\b`, "i").test(a) &&
+    new RegExp(`\\b${escapeRegex(noun)}s?\\b`, "i").test(b)
+  );
+}
+
+function isVehicleYearLineNumber(value: string | number | null | undefined) {
+  const numeric = typeof value === "number" ? value : value ? Number(String(value).trim()) : NaN;
+  return Number.isInteger(numeric) && numeric >= 1980 && numeric <= 2035;
+}
+
+function containsVehicleYearIdentityText(value: string) {
+  return /\b(?:19[8-9]\d|20[0-3]\d)\b/.test(value) &&
+    /\b(?:vehicle|vin|honda|toyota|ford|chevrolet|chevy|gmc|ram|dodge|jeep|bmw|audi|kia|hyundai|civic|accord|camry|f-?150|silverado)\b/i.test(value);
+}
+
+function isBoilerplatePartSourceText(normalized: string) {
+  return /\b(?:claim|claimant|insured|owner|vin|vehicle|license|loss|policy|deductible|appraiser|estimator|estimate id|preliminary estimate|quality replacement|warranty|disclaimer|notice|betterment|alternate parts suppliers?|motor guide|ccc motor guide|database|included|not included|footer|page)\b/.test(normalized) &&
+    !/\b(?:repl|replace|rpr|repair|r&i|subl|add|supp)\b/.test(normalized);
+}
+
+const PART_SOURCE_CANDIDATE_MIN_SCORE = 55;
+const PART_SOURCE_COMPARISON_MIN_SCORE = 28;
 
 const NON_OEM_PART_SOURCE_KINDS = new Set<PartSourceKind>([
   "AM",
@@ -1113,6 +1500,27 @@ const NON_OEM_PART_SOURCE_KINDS = new Set<PartSourceKind>([
   "NON_OEM",
   "ECONOMY",
 ]);
+
+const PART_SOURCE_PART_NOUNS = [
+  "bumper",
+  "grille",
+  "grill",
+  "bracket",
+  "retainer",
+  "lamp",
+  "fender",
+  "sensor",
+  "panel",
+  "cover",
+  "deflector",
+  "support",
+  "molding",
+  "reflector",
+  "bezel",
+  "radiator",
+  "headlamp",
+  "headlight",
+];
 
 const OEM_PART_SOURCE_KINDS = new Set<PartSourceKind>([
   "OEM",

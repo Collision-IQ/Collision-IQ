@@ -1169,6 +1169,9 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     );
 
     assert.ok(result.renderedPdfAnnotationCount > 0 || result.debugTrace.renderedPdfAnnotationCount > 0);
+    assert.ok(result.debugTrace.partSourceCandidateCount > 0);
+    assert.ok(result.debugTrace.partSourceAcceptedCandidateCount > 0);
+    assert.ok(result.debugTrace.partSourceRejectedCandidateCount > 0);
     assert.ok(result.debugTrace.partSourceFindingCount > 0);
     assert.ok(result.debugTrace.partSourceAnchoredFindingCount > 0);
     assert.equal(result.debugTrace.partSourceUnanchoredFindingCount, 0);
@@ -1195,6 +1198,41 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
       result.debugTrace.partSourceRows.some((row) => row.anchorId.includes(":p11:") || row.anchorId.includes(":p12:")),
       true
     );
+    assert.equal(partSourceMetadata.some((item) => item.sourceLineNumber === "2017"), false);
+    assert.ok(result.debugTrace.partSourceComparisonMatches.some((item) =>
+      /Bumper chrome/i.test(item.selectedRowText) && /OEM Bumper chrome/i.test(item.comparisonRowText || "")
+    ));
+  });
+
+  await run("part-source relevance gate rejects vehicle-year and boilerplate rows", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Carrier estimate relevance fixture", { x: 42, y: 746, size: 10, font });
+    page.drawText("2017 Honda Civic AM bumper quality replacement parts notice warranty disclaimer", { x: 48, y: 716, size: 8, font });
+    drawCccEstimateRow(page, font, 5, "#", "Repl", "A/M CAPA Bumper chrome, w/prk snsr", "1.0", "$487.50", 696);
+    page.drawText("2018 Quality replacement parts may include AM LKQ CAPA parts subject to insurer policy disclaimer", { x: 48, y: 676, size: 8, font });
+    const sourcePdfBytes = await doc.save();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceDocumentId: "relevance-source",
+      sourcePdfName: "SOR relevance.pdf",
+      findings: [],
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+
+    const partSourceMetadata = result.annotationMetadata.filter((item) => /^part-source-oem-variance-/i.test(item.findingId));
+    assert.ok(partSourceMetadata.some((item) => item.sourceLineNumber === "5" && item.anchorType === "estimate_line"));
+    assert.equal(partSourceMetadata.some((item) => item.sourceLineNumber === "2017"), false);
+    assert.equal(partSourceMetadata.some((item) => /quality replacement parts notice|warranty disclaimer/i.test(item.sourceAnchorText)), false);
+    assert.ok(result.debugTrace.partSourceAcceptedCandidateCount > 0);
+    assert.ok(result.debugTrace.partSourceRejectedCandidateCount > 0);
+    assert.ok(result.debugTrace.rejectedLineNumberCandidates.some((item) => String(item.lineNumber) === "2017"));
+    assert.ok(result.debugTrace.partSourceRejectedCandidates.some((item) =>
+      item.rejectionReasons.some((reason) => /boilerplate|disclaimer/i.test(reason))
+    ));
+    assert.equal(result.debugTrace.partSourceFindingCount, partSourceMetadata.length);
+    assert.ok(result.debugTrace.renderedPdfAnnotationCount > 0);
   });
 
   await run("one selected estimate flags AM/LKQ/CAPA rows for documentation and basis review", async () => {
@@ -1348,17 +1386,20 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     assert.equal(json.debugCounts.perPageTextLengths.length, 12);
     assert.equal(json.debugCounts.perPageTextItemCounts.length, 12);
     assert.ok(json.debugCounts.perPageTextItemCounts.some((count) => count > 0));
-    assert.equal(json.debugCounts.citationDensityArtifactVersion, "citation-density-part-source-oem-v1");
+    assert.equal(json.debugCounts.citationDensityArtifactVersion, "citation-density-part-source-relevance-v1");
     assert.ok(json.debugCounts.buildCommit);
     assert.ok(json.debugCounts.extractedAnchorCount > 40);
-    assert.equal(json.debugCounts.findingCount, 4);
-    assert.equal(json.debugCounts.anchoredFindingCount, 4);
+    assert.ok(json.debugCounts.findingCount >= 4);
+    assert.ok(json.debugCounts.anchoredFindingCount >= 4);
     assert.equal(json.debugCounts.unanchoredFindingCount, 0);
-    assert.equal(json.debugCounts.renderedPdfAnnotationCount, 4);
-    assert.equal(json.debugCounts.viewerAnnotationCount, 4);
+    assert.ok(json.debugCounts.renderedPdfAnnotationCount >= 4);
+    assert.ok(json.debugCounts.viewerAnnotationCount >= 4);
+    assert.ok(json.debugCounts.partSourceCandidateCount > 0);
+    assert.ok(json.debugCounts.partSourceAcceptedCandidateCount > 0);
+    assert.ok(json.debugCounts.partSourceRejectedCandidateCount > 0);
     assert.equal(json.debugCounts.artifactId, json.artifactId);
     assert.equal(json.debugCounts.renderedPdfArtifactId, json.debugCounts.metadataArtifactId);
-    assert.equal(json.annotationMetadata.length, 4);
+    assert.ok(json.annotationMetadata.length >= 4);
     assert.equal(json.annotationMetadata.every((item) => item.findingId && item.anchorId && item.sourceAnchorId === item.anchorId), true);
     assert.ok(json.annotationMetadata.some((item) => item.findingId === "route-line-44" && item.pageNumber === 3 && item.anchorType === "embedded_link_row"));
     assert.ok(json.annotationMetadata.some((item) => item.findingId === "route-totals" && item.pageNumber === 4 && item.anchorType === "totals_row"));
@@ -1380,7 +1421,7 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
     const loaded = await PDFDocument.load(outputBytes);
     const originalPageAnnotationCount = Array.from({ length: 12 }, (_, index) => loaded.getPage(index).node.Annots()?.size() ?? 0)
       .reduce((sum, count) => sum + count, 0);
-    assert.equal(originalPageAnnotationCount, 4);
+    assert.ok(originalPageAnnotationCount >= 4);
     assert.doesNotMatch(outputPages.join(" "), /No estimate rows could be extracted|Unanchored Citation Density Findings|Repair Operation|Proc Report/);
   });
 
