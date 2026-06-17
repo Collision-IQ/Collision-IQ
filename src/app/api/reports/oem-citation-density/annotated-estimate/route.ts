@@ -410,6 +410,13 @@ function buildOemAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof bui
     badAnchorRejectReasons: debugTrace.badAnchorRejectReasons,
     artifactReportType: debugTrace.artifactReportType,
     findingIdPrefixCheckPassed: debugTrace.findingIdPrefixCheckPassed,
+    toolUsageTrace: debugTrace.toolUsageTrace,
+    totalDeltaCandidates: debugTrace.totalDeltaCandidates,
+    acceptedDeltaFindings: debugTrace.acceptedDeltaFindings,
+    rejectedDeltaFindings: debugTrace.rejectedDeltaFindings,
+    annotationLimitApplied: debugTrace.annotationLimitApplied,
+    maxAnnotationLimit: debugTrace.maxAnnotationLimit,
+    unannotatedMaterialDeltas: debugTrace.unannotatedMaterialDeltas,
   };
 }
 

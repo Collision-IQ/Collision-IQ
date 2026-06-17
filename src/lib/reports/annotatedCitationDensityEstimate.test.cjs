@@ -47,6 +47,7 @@ const {
 } = require("./citationDensityRowAnchors.ts");
 const {
   detectEmbeddedEstimateLinks,
+  buildAnnotatedEstimateReviewModel,
 } = require("../ai/builders/estimateScrubberPdfBuilder.ts");
 
 async function createSourcePdf() {
@@ -257,6 +258,18 @@ async function createShop21975SourcePdf() {
   drawFragmentedEstimateRow(page, font, 50, "Finish sand and polish", "0.8", "$60.00", 520);
   page.drawText("Totals / Labor / Paint Supplies", { x: 42, y: 490, size: 10, font });
   page.drawText("Body labor rate $75.00 Paint labor rate $75.00 Paint supplies 3.7 @ $60.00", { x: 42, y: 472, size: 8, font });
+  return await doc.save();
+}
+
+async function createMultiDeltaCarrierPdf(rows) {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([612, 792]);
+  page.drawText("Carrier multi-delta estimate", { x: 42, y: 746, size: 10, font });
+  page.drawText("Operations", { x: 42, y: 716, size: 10, font });
+  rows.forEach((row, index) => {
+    drawFragmentedEstimateRow(page, font, row.line, row.description, row.labor, row.amount, 692 - index * 18);
+  });
   return await doc.save();
 }
 
@@ -791,6 +804,88 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     assert.match(detailText, /SUPPORT SENTINEL ALPHA/);
     assert.match(detailText, /SUPPORT SENTINEL OMEGA/);
     assert.match(detailText, /Finding 1 continued/);
+  });
+
+  await run("Citation Density delta report annotates more than four row-backed estimate differences", async () => {
+    const deltaRows = [
+      { line: 11, description: "Pre-repair scan", labor: "0.5", amount: "$75.00", shopLabor: "0.8", shopAmount: "$150.00" },
+      { line: 12, description: "Post-repair scan", labor: "0.5", amount: "$75.00", shopLabor: "0.8", shopAmount: "$150.00" },
+      { line: 13, description: "Camera calibration", labor: "0.6", amount: "$120.00", shopLabor: "1.2", shopAmount: "$240.00" },
+      { line: 14, description: "Four wheel alignment", labor: "0.3", amount: "$40.00", shopLabor: "0.9", shopAmount: "$135.00" },
+      { line: 15, description: "Seat belt inspection", labor: "0.2", amount: "$28.00", shopLabor: "0.7", shopAmount: "$98.00" },
+      { line: 16, description: "Hood panel repair", labor: "0.4", amount: "$60.00", shopLabor: "1.0", shopAmount: "$150.00" },
+      { line: 17, description: "Fender liner replace", labor: "0.3", amount: "$45.00", shopLabor: "0.8", shopAmount: "$120.00" },
+    ];
+    const sourcePdfBytes = await createMultiDeltaCarrierPdf(deltaRows);
+    const formatFixtureRow = (line, description, labor, amount) =>
+      `Line ${line} ${description}${labor ? ` ${labor} hrs` : ""} ${amount}`;
+    const rawEstimateText = deltaRows
+      .map((row) => formatFixtureRow(row.line, row.description, row.labor, row.amount))
+      .join("\n");
+    const estimateComparisons = {
+      rows: deltaRows.map((row) => ({
+        id: `delta-row-${row.line}`,
+        category: "Operations",
+        operation: row.description,
+        lhsSource: "Shop estimate",
+        rhsSource: "Carrier estimate",
+        lhsValue: formatFixtureRow(row.line, row.description, row.shopLabor, row.shopAmount),
+        rhsValue: formatFixtureRow(row.line, row.description, row.labor, row.amount),
+        delta: `Carrier lower than shop for line ${row.line}`,
+        deltaType: "changed",
+      })),
+    };
+    const model = buildAnnotatedEstimateReviewModel({
+      report: null,
+      analysis: {
+        mode: "comparison",
+        issues: [],
+        operations: [],
+        evidence: [],
+        findings: [],
+        summary: { confidence: "high" },
+        rawEstimateText,
+        estimateComparisons,
+      },
+      panel: null,
+      assistantAnalysis: null,
+    });
+    const deltaFindings = model.citationDensityFindings.filter((finding) => /-comparison-/i.test(finding.id));
+
+    assert.ok(deltaFindings.length > 4);
+    assert.equal(model.citationDensityDiagnostics.annotationLimitApplied, false);
+    assert.equal(model.citationDensityDiagnostics.maxAnnotationLimit, null);
+    assert.equal(model.citationDensityDiagnostics.totalDeltaCandidates, deltaRows.length);
+    assert.ok(model.citationDensityDiagnostics.acceptedDeltaFindings > 4);
+
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceDocumentId: "carrier-multi-delta",
+      sourcePdfName: "Carrier Multi Delta Estimate.pdf",
+      sourceText: rawEstimateText,
+      findings: deltaFindings,
+      deltaDiagnostics: model.citationDensityDiagnostics,
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+    const deltaAnnotations = result.annotationMetadata.filter((item) => /-comparison-/i.test(item.findingId));
+    const traceTools = result.debugTrace.toolUsageTrace.map((entry) => entry.tool);
+
+    assert.ok(result.annotatedFindingCount > 4);
+    assert.ok(deltaAnnotations.length > 4);
+    assert.equal(result.debugTrace.annotationLimitApplied, false);
+    assert.equal(result.debugTrace.maxAnnotationLimit, null);
+    assert.equal(result.debugTrace.totalDeltaCandidates, deltaRows.length);
+    assert.ok(result.debugTrace.acceptedDeltaFindings > 4);
+    assert.ok(result.debugTrace.unannotatedMaterialDeltas.length < result.debugTrace.totalDeltaCandidates);
+    assert.ok(traceTools.includes("estimate_comparison_delta_engine"));
+    assert.ok(traceTools.includes("row_anchor_matcher"));
+    assert.ok(traceTools.includes("annotation_qa"));
+    assert.ok(deltaAnnotations.every((annotation) =>
+      deltaRows.some((row) =>
+        annotation.sourceLineNumber === String(row.line) &&
+        new RegExp(row.description, "i").test(annotation.sourceAnchorText)
+      )
+    ));
   });
 
   await run("blank annotation output hard-fails when anchors exist but no finding matches", async () => {

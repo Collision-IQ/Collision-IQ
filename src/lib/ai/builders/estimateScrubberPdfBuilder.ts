@@ -94,6 +94,7 @@ export type AnnotatedEstimateReviewModel = {
   lineAnchors: EstimateLineAnchor[];
   annotations: EstimateAnnotation[];
   comparisonRows: EstimateComparisonRow[];
+  citationDensityDiagnostics: CitationDensityDeltaDiagnostics;
   scrubTarget: {
     role: "carrier" | "shop" | "unknown";
     label: string;
@@ -105,6 +106,30 @@ export type AnnotatedEstimateReviewModel = {
   vehicleIdentity: string;
   vin: string;
   insurer?: string | null;
+};
+
+export type CitationDensityToolUsageTraceEntry = {
+  tool: string;
+  ran: boolean;
+  skipReason?: string;
+  candidatesFound: number;
+  candidatesAccepted: number;
+  candidatesRejected: number;
+  droppedReasons: string[];
+};
+
+export type CitationDensityDeltaDiagnostics = {
+  toolUsageTrace: CitationDensityToolUsageTraceEntry[];
+  totalDeltaCandidates: number;
+  acceptedDeltaFindings: number;
+  rejectedDeltaFindings: number;
+  annotationLimitApplied: boolean;
+  maxAnnotationLimit: number | null;
+  unannotatedMaterialDeltas: Array<{
+    rowId?: string;
+    reason: string;
+    summary: string;
+  }>;
 };
 
 export function buildEstimateScrubberPdf(params: ExportBuilderInput): CarrierReportDocument {
@@ -207,7 +232,7 @@ export function buildAnnotatedEstimateReviewModel(params: ExportBuilderInput): A
     params.workspaceData?.estimateComparisons ?? params.analysis?.estimateComparisons ?? params.report?.analysis?.estimateComparisons
   ).rows;
   const scrubTarget = selectScrubTarget(comparisonRows);
-  const annotations = buildEstimateAnnotations({
+  const annotationResult = buildEstimateAnnotations({
     findings,
     lineItems: source.lineItems,
     lineAnchors,
@@ -215,6 +240,7 @@ export function buildAnnotatedEstimateReviewModel(params: ExportBuilderInput): A
     scrubTargetRole: scrubTarget.role,
     params,
   });
+  const annotations = annotationResult.annotations;
   const vehicleIdentity = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
   const vin = resolveCanonicalVin(exportModel) ?? "Unspecified";
   const insurer = resolveCanonicalInsurer(exportModel);
@@ -225,6 +251,7 @@ export function buildAnnotatedEstimateReviewModel(params: ExportBuilderInput): A
     lineAnchors,
     annotations,
     comparisonRows,
+    citationDensityDiagnostics: annotationResult.diagnostics,
     scrubTarget,
     generatedLabel: source.generatedLabel,
     vehicleIdentity,
@@ -546,7 +573,6 @@ function buildComparisonOnlyAnnotations(
     .map((row) => ({ row, score: scoreComparisonRowForAnnotation(row) }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, 30)
     .map((row, index) => {
       const comparisonRow = row.row;
       const lowerLine = getLowerEstimateLine(comparisonRow, scrubTargetRole);
@@ -1288,7 +1314,10 @@ function buildEstimateAnnotations(params: {
   comparisonRows: EstimateComparisonRow[];
   scrubTargetRole: AnnotatedEstimateReviewModel["scrubTarget"]["role"];
   params: ExportBuilderInput;
-}): EstimateAnnotation[] {
+}): {
+  annotations: EstimateAnnotation[];
+  diagnostics: CitationDensityDeltaDiagnostics;
+} {
   const findingAnnotations = params.findings.map((finding, index) => {
     const anchor = findEstimateAnchorForFinding(finding, params.lineItems, params.lineAnchors, params.params);
     const category = classifyAnnotationCategory(finding);
@@ -1346,12 +1375,66 @@ function buildEstimateAnnotations(params: {
     findingAnnotations.length,
     params.scrubTargetRole
   );
-  const shouldUseExpandedFallback = findingAnnotations.length < 5 && params.comparisonRows.length > 5;
-  const combined = shouldUseExpandedFallback
-    ? [...findingAnnotations, ...comparisonAnnotations]
-    : [...findingAnnotations, ...comparisonAnnotations.slice(0, 12)];
+  const combined = [...findingAnnotations, ...comparisonAnnotations];
+  const annotations = dedupeAnnotations(combined);
+  const comparisonFindingIds = new Set(comparisonAnnotations.map((annotation) => annotation.citationFinding.id));
+  const acceptedComparisonIds = new Set(
+    annotations
+      .map((annotation) => annotation.citationFinding.id)
+      .filter((id) => comparisonFindingIds.has(id))
+  );
+  const materialDeltaRows = params.comparisonRows.filter((row) => scoreComparisonRowForAnnotation(row) > 0);
+  const unannotatedMaterialDeltas = comparisonAnnotations
+    .filter((annotation) => !acceptedComparisonIds.has(annotation.citationFinding.id))
+    .map((annotation) => ({
+      rowId: annotation.citationFinding.id,
+      reason: "deduped against an existing finding for the same estimate row/topic",
+      summary: annotation.title,
+    }));
+  const rejectedDeltaFindings = Math.max(0, materialDeltaRows.length - acceptedComparisonIds.size);
+  const diagnostics: CitationDensityDeltaDiagnostics = {
+    totalDeltaCandidates: materialDeltaRows.length,
+    acceptedDeltaFindings: acceptedComparisonIds.size,
+    rejectedDeltaFindings,
+    annotationLimitApplied: false,
+    maxAnnotationLimit: null,
+    unannotatedMaterialDeltas,
+    toolUsageTrace: [
+      {
+        tool: "estimate_comparison_delta_engine",
+        ran: params.comparisonRows.length > 0,
+        skipReason: params.comparisonRows.length > 0 ? undefined : "no estimate comparison rows supplied",
+        candidatesFound: params.comparisonRows.length,
+        candidatesAccepted: materialDeltaRows.length,
+        candidatesRejected: Math.max(0, params.comparisonRows.length - materialDeltaRows.length),
+        droppedReasons: params.comparisonRows.length === materialDeltaRows.length
+          ? []
+          : ["unchanged, totals, tax, deductible, betterment, or non-material rows"],
+      },
+      {
+        tool: "finding_validator",
+        ran: true,
+        candidatesFound: combined.length,
+        candidatesAccepted: annotations.length,
+        candidatesRejected: Math.max(0, combined.length - annotations.length),
+        droppedReasons: combined.length === annotations.length
+          ? []
+          : ["deduplicated overlapping estimate-row findings"],
+      },
+      {
+        tool: "support_evidence_ledger",
+        ran: true,
+        candidatesFound: annotations.length,
+        candidatesAccepted: annotations.filter((annotation) => annotation.supportStatus !== "missing").length,
+        candidatesRejected: annotations.filter((annotation) => annotation.supportStatus === "missing").length,
+        droppedReasons: annotations.some((annotation) => annotation.supportStatus === "missing")
+          ? ["missing support recorded as an evidence gap rather than dropped"]
+          : [],
+      },
+    ],
+  };
 
-  return dedupeAnnotations(combined).slice(0, 30);
+  return { annotations, diagnostics };
 }
 
 function findEstimateAnchorForFinding(

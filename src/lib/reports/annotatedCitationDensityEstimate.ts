@@ -79,6 +79,30 @@ export type AnnotatedEstimateGeneratedFindings = {
   debug?: Partial<CitationDensityDebugTrace>;
 };
 
+export type CitationDensityToolUsageTraceEntry = {
+  tool: string;
+  ran: boolean;
+  skipReason?: string;
+  candidatesFound: number;
+  candidatesAccepted: number;
+  candidatesRejected: number;
+  droppedReasons: string[];
+};
+
+export type CitationDensityDeltaDiagnostics = {
+  toolUsageTrace: CitationDensityToolUsageTraceEntry[];
+  totalDeltaCandidates: number;
+  acceptedDeltaFindings: number;
+  rejectedDeltaFindings: number;
+  annotationLimitApplied: boolean;
+  maxAnnotationLimit: number | null;
+  unannotatedMaterialDeltas: Array<{
+    rowId?: string;
+    reason: string;
+    summary: string;
+  }>;
+};
+
 export type AnnotatedEstimateFindingGeneratorContext = {
   anchors: EstimateRowAnchor[];
   visualLines: PdfTextLine[];
@@ -203,6 +227,13 @@ export type CitationDensityDebugTrace = {
     anchorId?: string | null;
     reason: string;
   }>;
+  toolUsageTrace: CitationDensityToolUsageTraceEntry[];
+  totalDeltaCandidates: number;
+  acceptedDeltaFindings: number;
+  rejectedDeltaFindings: number;
+  annotationLimitApplied: boolean;
+  maxAnnotationLimit: number | null;
+  unannotatedMaterialDeltas: CitationDensityDeltaDiagnostics["unannotatedMaterialDeltas"];
   detailLayoutBlocks?: Array<{
     findingNumber: number;
     pageIndex: number;
@@ -296,6 +327,13 @@ export class CitationDensityAnnotationError extends Error {
     this.userMessage = message;
     this.debugTrace = debugTrace;
   }
+}
+
+function appendToolUsageTrace(trace: CitationDensityDebugTrace, entry: CitationDensityToolUsageTraceEntry) {
+  trace.toolUsageTrace.push({
+    ...entry,
+    droppedReasons: entry.droppedReasons.filter(Boolean).slice(0, 20),
+  });
 }
 
 export type CitationDensityAnnotationMetadata = {
@@ -590,6 +628,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   findings: CitationDensityFinding[];
   request?: AnnotatedEstimateRequest;
   reportIdentity?: AnnotatedEstimateReportIdentity;
+  deltaDiagnostics?: CitationDensityDeltaDiagnostics;
   findingGenerator?: (context: AnnotatedEstimateFindingGeneratorContext) => AnnotatedEstimateGeneratedFindings;
 }): Promise<AnnotatedEstimateResult> {
   const request = params.request ?? {};
@@ -716,6 +755,13 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     fallbackMatchedFindings: [],
     droppedFindings: [],
     rendererDrops: [],
+    toolUsageTrace: params.deltaDiagnostics?.toolUsageTrace ? [...params.deltaDiagnostics.toolUsageTrace] : [],
+    totalDeltaCandidates: params.deltaDiagnostics?.totalDeltaCandidates ?? 0,
+    acceptedDeltaFindings: params.deltaDiagnostics?.acceptedDeltaFindings ?? 0,
+    rejectedDeltaFindings: params.deltaDiagnostics?.rejectedDeltaFindings ?? 0,
+    annotationLimitApplied: params.deltaDiagnostics?.annotationLimitApplied ?? false,
+    maxAnnotationLimit: params.deltaDiagnostics?.maxAnnotationLimit ?? null,
+    unannotatedMaterialDeltas: params.deltaDiagnostics?.unannotatedMaterialDeltas ?? [],
     detailLayoutBlocks: [],
     metadataArtifactId: undefined,
     renderedPdfArtifactId: undefined,
@@ -726,6 +772,34 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     artifactReportType: reportIdentity.reportType,
     findingIdPrefixCheckPassed: true,
   };
+  appendToolUsageTrace(trace, {
+    tool: "document_classifier",
+    ran: true,
+    candidatesFound: 1,
+    candidatesAccepted: selectedDocumentClassification.isEstimateLike ? 1 : 0,
+    candidatesRejected: selectedDocumentClassification.isEstimateLike ? 0 : 1,
+    droppedReasons: selectedDocumentClassification.isEstimateLike
+      ? []
+      : [`selected document classified as ${selectedDocumentClassification.detectedDocumentType}`],
+  });
+  appendToolUsageTrace(trace, {
+    tool: "pdf_text_extraction",
+    ran: extraction.textExtractionMethod !== "not_run",
+    skipReason: extraction.textExtractionMethod === "not_run" ? extraction.textExtractionError ?? "pdf text extraction did not complete" : undefined,
+    candidatesFound: extraction.perPageTextItemCounts.reduce((sum, count) => sum + count, 0),
+    candidatesAccepted: extraction.extractedTextPageCount,
+    candidatesRejected: extraction.textExtractionError ? 1 : 0,
+    droppedReasons: extraction.textExtractionError ? [extraction.textExtractionError] : extraction.textExtractionWarnings,
+  });
+  appendToolUsageTrace(trace, {
+    tool: "estimate_row_parser",
+    ran: extraction.textExtractionMethod !== "not_run",
+    skipReason: extraction.textExtractionMethod === "not_run" ? "pdf text extraction unavailable" : undefined,
+    candidatesFound: extraction.visualLines.length,
+    candidatesAccepted: anchors.length,
+    candidatesRejected: Math.max(0, extraction.visualLines.length - anchors.length),
+    droppedReasons: anchors.length ? [] : ["no estimate row anchors extracted"],
+  });
 
   if (params.findingGenerator) {
     const generated = params.findingGenerator({
@@ -747,7 +821,64 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     findings = sanitizedGenerated.findings;
     suppressed = sanitizedGenerated.suppressed;
     Object.assign(trace, generated.debug ?? {});
+    appendToolUsageTrace(trace, {
+      tool: "oem_procedure_position_support",
+      ran: reportIdentity.reportType === "oem-citation-density",
+      skipReason: reportIdentity.reportType === "oem-citation-density" ? undefined : "not an OEM Citation Density report",
+      candidatesFound: trace.authoritySourceCount ?? 0,
+      candidatesAccepted: trace.authorityBackedFindingCount ?? 0,
+      candidatesRejected: trace.researchNeededFindingCount ?? 0,
+      droppedReasons: trace.findingsRejectedDueWeakEvidence ? ["weak OEM/support evidence rejected"] : [],
+    });
+    appendToolUsageTrace(trace, {
+      tool: "uploaded_support_docs",
+      ran: reportIdentity.reportType === "oem-citation-density",
+      skipReason: reportIdentity.reportType === "oem-citation-density" ? undefined : "handled by Citation Density support/evidence ledger",
+      candidatesFound: trace.uploadedSupportDocumentCount ?? 0,
+      candidatesAccepted: trace.uploadedSupportDocumentCount ?? 0,
+      candidatesRejected: 0,
+      droppedReasons: [],
+    });
+    appendToolUsageTrace(trace, {
+      tool: "google_drive_internal_docs",
+      ran: reportIdentity.reportType === "oem-citation-density",
+      skipReason: reportIdentity.reportType === "oem-citation-density" ? undefined : "not an OEM Citation Density authority lookup",
+      candidatesFound: (trace.oemProcedureSourceCount ?? 0) + (trace.oemPositionStatementSourceCount ?? 0),
+      candidatesAccepted: trace.authorityBackedFindingCount ?? 0,
+      candidatesRejected: 0,
+      droppedReasons: [],
+    });
+    appendToolUsageTrace(trace, {
+      tool: "validation_overclaim_guard",
+      ran: reportIdentity.reportType === "oem-citation-density",
+      skipReason: reportIdentity.reportType === "oem-citation-density" ? undefined : "not an OEM Citation Density report",
+      candidatesFound: (trace.authorityBackedFindingCount ?? 0) + (trace.estimateOnlyFindingCount ?? 0) + (trace.researchNeededFindingCount ?? 0),
+      candidatesAccepted: findings.length,
+      candidatesRejected: (trace.findingsRejectedDueWeakEvidence ?? 0) + (trace.findingsRejectedDueNoAnchor ?? 0),
+      droppedReasons: [
+        trace.findingsRejectedDueWeakEvidence ? "weak evidence or overclaim risk" : "",
+        trace.findingsRejectedDueNoAnchor ? "no safe estimate row anchor" : "",
+      ],
+    });
   }
+
+  appendToolUsageTrace(trace, {
+    tool: "image_photo_ocr_evidence",
+    ran: false,
+    skipReason: "no image/photo/OCR evidence was supplied to this annotated estimate export",
+    candidatesFound: 0,
+    candidatesAccepted: 0,
+    candidatesRejected: 0,
+    droppedReasons: [],
+  });
+  appendToolUsageTrace(trace, {
+    tool: "finding_validator",
+    ran: true,
+    candidatesFound: selectedFindings.length,
+    candidatesAccepted: findings.length,
+    candidatesRejected: suppressed.length,
+    droppedReasons: suppressed.length ? ["generic or malformed findings suppressed from visible estimate layer"] : [],
+  });
 
   const identityError = findReportIdentityMismatch(findings, reportIdentity.reportType);
   if (identityError) {
@@ -840,6 +971,22 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   trace.rejectedLineNumberCandidates = partSourceResult.rejectedLineNumberCandidates.slice(0, 20);
   trace.partSourceComparisonMatches = partSourceResult.comparisonMatches.slice(0, 20);
   trace.partSourceDroppedReasons = partSourceResult.droppedReasons;
+  appendToolUsageTrace(trace, {
+    tool: "support_evidence_ledger",
+    ran: true,
+    candidatesFound: reportIdentity.reportType === "citation-density"
+      ? partSourceResult.candidateCount
+      : (trace.authoritySourceCount ?? 0),
+    candidatesAccepted: reportIdentity.reportType === "citation-density"
+      ? partSourceResult.acceptedCandidates.length
+      : (trace.authorityBackedFindingCount ?? 0),
+    candidatesRejected: reportIdentity.reportType === "citation-density"
+      ? partSourceResult.rejectedCandidates.length
+      : (trace.researchNeededFindingCount ?? 0),
+    droppedReasons: reportIdentity.reportType === "citation-density"
+      ? partSourceResult.droppedReasons.map((item) => item.reason)
+      : [],
+  });
   const findingsWithPartSource = [...findings, ...partSourceResult.findings];
   trace.findingCount = findingsWithPartSource.length;
   trace.firstFindingAnchorIds = findingsWithPartSource.slice(0, 10).map((finding) => getFindingAnchorId(finding));
@@ -862,6 +1009,14 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   trace.unanchoredFindingCount = Math.max(0, findingsWithPartSource.length - candidateResult.candidates.length);
   trace.partSourceAnchoredFindingCount = candidateResult.candidates.filter((candidate) => isPartSourceFinding(candidate.finding)).length;
   trace.partSourceUnanchoredFindingCount = Math.max(0, trace.partSourceFindingCount - trace.partSourceAnchoredFindingCount);
+  appendToolUsageTrace(trace, {
+    tool: "row_anchor_matcher",
+    ran: true,
+    candidatesFound: findingsWithPartSource.length,
+    candidatesAccepted: candidateResult.candidates.length,
+    candidatesRejected: Math.max(0, findingsWithPartSource.length - candidateResult.candidates.length),
+    droppedReasons: trace.droppedFindings.map((item) => item.reason),
+  });
 
   if (trace.extractedAnchorCount > 0 && trace.findingCount > 0 && trace.anchoredFindingCount === 0) {
     throw new CitationDensityAnnotationError("Findings generated but no findings matched extracted anchors.", trace);
@@ -873,6 +1028,20 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   }));
   const matchedFindingIds = new Set(candidateResult.candidates.map((candidate) => candidate.derivedFromFindingId).filter(Boolean));
   const unmatched: CitationDensityFinding[] = findingsWithPartSource.filter((finding) => !matchedFindingIds.has(finding.id));
+  const unmatchedDeltaFindings = unmatched.filter((finding) =>
+    /^citation-density-/i.test(finding.id) &&
+    (/-comparison-/i.test(finding.id) || finding.crossEstimateIssue === true)
+  );
+  if (unmatchedDeltaFindings.length > 0) {
+    trace.unannotatedMaterialDeltas = [
+      ...trace.unannotatedMaterialDeltas,
+      ...unmatchedDeltaFindings.map((finding) => ({
+        rowId: finding.id,
+        reason: "no safe estimate-row annotation rendered for this material delta",
+        summary: finding.operationLabel,
+      })),
+    ];
+  }
 
   const lineMatchCount = matches.length;
   if (findingsWithPartSource.length > 0 && lineMatchCount === 0) {
@@ -906,6 +1075,14 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   });
 
   trace.renderedPdfAnnotationCount = renderedPdfAnnotationCount;
+  appendToolUsageTrace(trace, {
+    tool: "annotation_qa",
+    ran: true,
+    candidatesFound: matches.length,
+    candidatesAccepted: renderedPdfAnnotationCount,
+    candidatesRejected: Math.max(0, matches.length - renderedPdfAnnotationCount),
+    droppedReasons: trace.rendererDrops.map((item) => item.reason),
+  });
 
   if (trace.extractedAnchorCount > 0 && trace.findingCount > 0 && trace.renderedPdfAnnotationCount === 0) {
     throw new CitationDensityAnnotationError("Anchors extracted but no annotations rendered.", trace);
