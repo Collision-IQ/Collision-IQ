@@ -116,6 +116,9 @@ export type CitationDensityToolUsageTraceEntry = {
   candidatesAccepted: number;
   candidatesRejected: number;
   droppedReasons: string[];
+  latencyMs?: number;
+  provider?: string;
+  model?: string;
 };
 
 export type CitationDensityDeltaDiagnostics = {
@@ -125,6 +128,7 @@ export type CitationDensityDeltaDiagnostics = {
   rejectedDeltaFindings: number;
   annotationLimitApplied: boolean;
   maxAnnotationLimit: number | null;
+  droppedDeltaReasons: string[];
   unannotatedMaterialDeltas: Array<{
     rowId?: string;
     reason: string;
@@ -1392,12 +1396,14 @@ function buildEstimateAnnotations(params: {
       summary: annotation.title,
     }));
   const rejectedDeltaFindings = Math.max(0, materialDeltaRows.length - acceptedComparisonIds.size);
+  const droppedDeltaReasons = unannotatedMaterialDeltas.map((item) => item.reason);
   const diagnostics: CitationDensityDeltaDiagnostics = {
     totalDeltaCandidates: materialDeltaRows.length,
     acceptedDeltaFindings: acceptedComparisonIds.size,
     rejectedDeltaFindings,
     annotationLimitApplied: false,
     maxAnnotationLimit: null,
+    droppedDeltaReasons,
     unannotatedMaterialDeltas,
     toolUsageTrace: [
       {

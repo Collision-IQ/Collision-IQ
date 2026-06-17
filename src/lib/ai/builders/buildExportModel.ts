@@ -66,6 +66,10 @@ import {
 import { classifyOutputMode, type OutputMode } from "@/lib/ai/outputMode";
 import { normalizeReviewProgressCounts } from "@/lib/reviewCompleteness";
 import {
+  resolveEvidenceCompletenessFromLedger,
+  type EvidenceCompletenessCategory,
+} from "@/lib/fileReviewLedger";
+import {
   resolveEstimatePosture,
   type EstimatePostureDecision,
 } from "@/lib/ai/estimatePosture";
@@ -687,6 +691,15 @@ function buildConfidenceIntegrity(params: {
       excludedFromReviewCount: counts.excludedFromReviewCount,
       excludedFromReviewReasons: counts.excludedFromReviewReasons,
       excludedFromReviewFiles: counts.excludedFromReviewFiles,
+      fileReviewLedger: integrity.fileReviewLedger ?? params.report.ingestionMeta?.fileReviewLedger,
+      evidenceCompletenessLedger:
+        integrity.evidenceCompletenessLedger ??
+        params.report.ingestionMeta?.evidenceCompletenessLedger ??
+        resolveEvidenceCompletenessFromLedger({
+          ledger: integrity.fileReviewLedger ?? params.report.ingestionMeta?.fileReviewLedger ?? [],
+          evidenceRegistry: params.report.evidenceRegistry,
+          corpus: buildEvidenceCompletenessCorpus(params),
+        }),
       totalKnownFileCount: Math.max(
         integrity.totalKnownFileCount ?? 0,
         counts.uploadedCount,
@@ -735,6 +748,11 @@ function buildConfidenceIntegrity(params: {
   const uploadLimitReached = Boolean(params.report?.ingestionMeta?.uploadLimitReached);
   const userIndicatedMoreFiles = Boolean(params.report?.ingestionMeta?.userIndicatedMoreFiles);
   const missingCriticalEvidence = deriveMissingCriticalEvidence(params);
+  const evidenceCompletenessLedger = resolveEvidenceCompletenessFromLedger({
+    ledger: params.report?.ingestionMeta?.fileReviewLedger ?? [],
+    evidenceRegistry: params.report?.evidenceRegistry,
+    corpus: buildEvidenceCompletenessCorpus(params),
+  });
   const confidencePenalties = buildConfidencePenalties({
     uploadedFileCount,
     uploadLimitReached,
@@ -764,6 +782,8 @@ function buildConfidenceIntegrity(params: {
     excludedFromReviewCount: reviewProgressCounts.excludedFromReviewCount,
     excludedFromReviewReasons: reviewProgressCounts.excludedFromReviewReasons,
     excludedFromReviewFiles: reviewProgressCounts.excludedFromReviewFiles,
+    fileReviewLedger: params.report?.ingestionMeta?.fileReviewLedger,
+    evidenceCompletenessLedger,
     totalKnownFileCount,
     uploadLimitReached,
     userIndicatedMoreFiles,
@@ -800,27 +820,42 @@ function deriveMissingCriticalEvidence(params: {
   analysis: AnalysisResult | null;
   supplementItems: ExportSupplementItem[];
 }): string[] {
-  const corpus = [
-    params.report?.missingProcedures.join("\n"),
-    params.report?.recommendedActions.join("\n"),
-    params.report?.issues.map((issue) => `${issue.title} ${issue.finding} ${issue.impact} ${issue.missingOperation ?? ""}`).join("\n"),
-    params.report?.findingReasoning?.map((finding) => `${finding.issue} ${finding.next_action} ${finding.what_proves_it}`).join("\n"),
-    params.analysis?.findings.map((finding) => `${finding.title} ${finding.detail}`).join("\n"),
-    params.supplementItems.map((item) => `${item.title} ${item.rationale} ${item.evidence ?? ""}`).join("\n"),
-  ].filter(Boolean).join("\n").toLowerCase();
+  const corpus = buildEvidenceCompletenessCorpus(params).toLowerCase();
+  const evidenceCompletenessLedger = resolveEvidenceCompletenessFromLedger({
+    ledger: params.report?.ingestionMeta?.fileReviewLedger ?? params.report?.confidenceIntegrity?.fileReviewLedger ?? [],
+    evidenceRegistry: params.report?.evidenceRegistry,
+    corpus,
+  });
+  const statusByCategory = new Map(evidenceCompletenessLedger.map((item) => [item.category, item]));
   const missing = new Set<string>();
-  const addIfRelevant = (label: string, relevant: RegExp, documented: RegExp) => {
+  const addIfRelevant = (
+    label: string,
+    relevant: RegExp,
+    documented: RegExp,
+    categories: EvidenceCompletenessCategory[]
+  ) => {
     if (relevant.test(corpus) && !documented.test(corpus)) {
+      const resolution = categories
+        .map((category) => statusByCategory.get(category))
+        .find(Boolean);
+      if (resolution && resolution.status !== "not_found" && resolution.status !== "referenced_not_produced") {
+        if (resolution.status === "present_but_not_line_tied") {
+          missing.add(`${label} present but not line-tied`);
+        } else if (resolution.status === "not_reviewed") {
+          missing.add(`${label} uploaded but not reviewed`);
+        }
+        return;
+      }
       missing.add(label);
     }
   };
 
-  addIfRelevant("Scan records", /\b(scan|diagnostic|dtc|srs|module)\b/, /\b(scan report|scan record|dtc report|diagnostic report|invoice-backed scan)\b/);
-  addIfRelevant("Calibration records", /\b(calibration|adas|aim|radar|camera|sensor)\b/, /\b(calibration report|calibration record|aiming record|invoice-backed calibration)\b/);
-  addIfRelevant("Alignment printout", /\b(alignment|suspension|steering|geometry)\b/, /\b(alignment printout|alignment report|post-repair alignment)\b/);
-  addIfRelevant("Final invoice", /\b(invoice|final bill|paid|sublet|reimbursement|estimate total|cost gap)\b/, /\b(final invoice|paid invoice|closed repair order)\b/);
-  addIfRelevant("Teardown photos", /\b(teardown|hidden damage|structural|rail|apron|pillar|quarter|core support|mounting)\b/, /\b(teardown photos?|disassembly photos?|photo documented)\b/);
-  addIfRelevant("OEM procedures", /\b(oem|procedure|position statement|corrosion|cavity wax|weld|calibration|scan)\b/, /\b(oem procedure attached|retrieved oem|oem evidence found|position statement attached)\b/);
+  addIfRelevant("Scan records", /\b(scan|diagnostic|dtc|srs|module)\b/, /\b(scan report|scan record|dtc report|diagnostic report|invoice-backed scan)\b/, ["scan_pre", "scan_post", "scan_in_process", "diagnostic_report"]);
+  addIfRelevant("Calibration records", /\b(calibration|adas|aim|radar|camera|sensor)\b/, /\b(calibration report|calibration record|aiming record|invoice-backed calibration)\b/, ["calibration_record", "revvadas_record"]);
+  addIfRelevant("Alignment printout", /\b(alignment|suspension|steering|geometry)\b/, /\b(alignment printout|alignment report|post-repair alignment)\b/, ["alignment_printout"]);
+  addIfRelevant("Final invoice", /\b(invoice|final bill|paid|sublet|reimbursement|estimate total|cost gap)\b/, /\b(final invoice|paid invoice|closed repair order)\b/, ["final_invoice"]);
+  addIfRelevant("Teardown photos", /\b(teardown|hidden damage|structural|rail|apron|pillar|quarter|core support|mounting)\b/, /\b(teardown photos?|disassembly photos?|photo documented)\b/, ["teardown_photo", "progress_photo", "completion_photo"]);
+  addIfRelevant("OEM procedures", /\b(oem|procedure|position statement|corrosion|cavity wax|weld|calibration|scan)\b/, /\b(oem procedure attached|retrieved oem|oem evidence found|position statement attached)\b/, ["oem_procedure", "position_statement"]);
 
   for (const procedure of params.report?.missingProcedures ?? []) {
     if (/scan/i.test(procedure)) missing.add("Scan records");
@@ -830,6 +865,23 @@ function deriveMissingCriticalEvidence(params: {
   }
 
   return Array.from(missing).slice(0, 8);
+}
+
+function buildEvidenceCompletenessCorpus(params: {
+  report: RepairIntelligenceReport | null;
+  analysis: AnalysisResult | null;
+  supplementItems: ExportSupplementItem[];
+}): string {
+  return [
+    params.report?.missingProcedures.join("\n"),
+    params.report?.recommendedActions.join("\n"),
+    params.report?.issues.map((issue) => `${issue.title} ${issue.finding} ${issue.impact} ${issue.missingOperation ?? ""}`).join("\n"),
+    params.report?.findingReasoning?.map((finding) => `${finding.issue} ${finding.next_action} ${finding.what_proves_it}`).join("\n"),
+    params.report?.evidenceRegistry?.map((item) => `${item.label} ${item.extractedSummary ?? ""} ${item.extractedText ?? ""}`).join("\n"),
+    params.report?.ingestionMeta?.fileReviewLedger?.map((item) => `${item.filename} ${item.evidenceCategoriesDetected.join(" ")}`).join("\n"),
+    params.analysis?.findings.map((finding) => `${finding.title} ${finding.detail}`).join("\n"),
+    params.supplementItems.map((item) => `${item.title} ${item.rationale} ${item.evidence ?? ""}`).join("\n"),
+  ].filter(Boolean).join("\n");
 }
 
 function buildConfidencePenalties(params: {
@@ -905,7 +957,7 @@ function buildConfidenceDisclosure(params: {
     ? ` Not yet located in reviewed files: ${params.missingCriticalEvidence.slice(0, 4).join(", ")}.`
     : "";
   const limitText = limits.length > 0 ? ` ${limits.join("; ")}.` : "";
-  return `This is not a final file-complete conclusion. Evidence coverage is ${params.completenessStatus.toLowerCase()}, and adjusted confidence is ${params.adjustedConfidence}.${limitText}${missing}`;
+  return `Upload review completeness is ${params.completenessStatus.toLowerCase()}, and adjusted confidence is ${params.adjustedConfidence}.${limitText}${missing} Repair-package completeness depends on the listed evidence category reconciliation.`;
 }
 
 function isReportFindingReasoning(value: unknown): value is ReportFindingReasoning {

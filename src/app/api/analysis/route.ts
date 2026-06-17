@@ -90,6 +90,10 @@ import {
   type ExcludedFromReviewFileDiagnostic,
   type ExcludedFromReviewReason,
 } from "@/lib/reviewCompleteness";
+import {
+  buildFileReviewLedger,
+  resolveEvidenceCompletenessFromLedger,
+} from "@/lib/fileReviewLedger";
 import { classifyRetryableProviderError } from "@/lib/ai/providerRetryableError";
 import {
   areInternalRetrievalPathsResolved,
@@ -1532,7 +1536,20 @@ function applyLinkedEvidenceToReport(params: {
     params.previousReport?.ingestionMeta?.visionProcessedFileCount ?? 0,
     visionProcessedEvidenceCount
   );
-  const reviewabilityDiagnostics = buildUploadedReviewabilityDiagnostics(params.uploadedAttachments);
+  const fileReviewLedger = buildFileReviewLedger(params.uploadedAttachments, {
+    usedInRepairIntelligenceIds: params.uploadedAttachments.map((attachment) => attachment.id),
+  });
+  const evidenceCompletenessLedger = resolveEvidenceCompletenessFromLedger({
+    ledger: fileReviewLedger,
+    evidenceRegistry,
+    corpus: [
+      params.report.missingProcedures.join("\n"),
+      params.report.recommendedActions.join("\n"),
+      params.report.issues.map((issue) => `${issue.title} ${issue.finding} ${issue.impact}`).join("\n"),
+      params.report.findingReasoning?.map((finding) => `${finding.issue} ${finding.what_proves_it} ${finding.next_action}`).join("\n"),
+    ].filter(Boolean).join("\n"),
+  });
+  const reviewabilityDiagnostics = buildUploadedReviewabilityDiagnostics(params.uploadedAttachments, fileReviewLedger);
   const reviewedFileCount = Math.max(uploadedEvidenceCount, reviewabilityDiagnostics.reviewableFileCount);
   const reviewProgressCounts = normalizeReviewProgressCounts({
     uploadedCount: uploadedFileCount,
@@ -1585,6 +1602,8 @@ function applyLinkedEvidenceToReport(params: {
       excludedFromReviewCount: reviewProgressCounts.excludedFromReviewCount,
       excludedFromReviewReasons: reviewProgressCounts.excludedFromReviewReasons,
       excludedFromReviewFiles: reviewProgressCounts.excludedFromReviewFiles,
+      fileReviewLedger,
+      evidenceCompletenessLedger,
       totalKnownFileCount,
       uploadLimitReached: Boolean(params.uploadLimitReached),
       userIndicatedMoreFiles: userIndicatedMoreFiles(params.userIntent ?? ""),
@@ -2806,28 +2825,29 @@ function classifyUploadedEvidenceSource(attachment: StoredAttachment): CaseEvide
   return "other_supporting_document";
 }
 
-function buildUploadedReviewabilityDiagnostics(attachments: StoredAttachment[]): {
+function buildUploadedReviewabilityDiagnostics(
+  attachments: StoredAttachment[],
+  fileReviewLedger = buildFileReviewLedger(attachments)
+): {
   reviewableFileCount: number;
   excludedFiles: ExcludedFromReviewFileDiagnostic[];
   excludedReasons: ExcludedFromReviewReason[];
 } {
-  const excludedFiles: ExcludedFromReviewFileDiagnostic[] = [];
-  let reviewableFileCount = 0;
-
-  for (const attachment of attachments) {
-    const detectedType = classifyUploadedEvidenceSource(attachment);
-    const reason = getDeterminationReviewExclusionReason(attachment, detectedType);
-    if (reason) {
-      excludedFiles.push({
-        filename: attachment.filename,
-        detectedType,
-        reason,
-        indexed: Boolean(attachment.id),
-      });
-    } else {
-      reviewableFileCount++;
-    }
-  }
+  const excludedFiles = fileReviewLedger
+    .filter((entry) => entry.exclusionReason)
+    .map((entry) => ({
+      filename: entry.filename,
+      detectedType: String(entry.documentType),
+      reason: entry.exclusionReason as ExcludedFromReviewReason,
+      indexed: entry.indexedStatus === "indexed",
+      stage: entry.exclusionStage ?? "reviewability",
+      parsed: entry.textExtractionStatus === "extracted" || entry.pdfExtractionStatus === "available",
+      supportOnly: entry.usedAsSupportOnly,
+      duplicate: entry.isDuplicate,
+      duplicateOf: entry.duplicateOf,
+      reviewabilityHint: entry.reviewabilityHint,
+    } satisfies ExcludedFromReviewFileDiagnostic));
+  const reviewableFileCount = fileReviewLedger.filter((entry) => entry.isReviewable).length;
 
   return {
     reviewableFileCount,

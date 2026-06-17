@@ -301,6 +301,7 @@ function buildConfidenceIntegrityBullets(
       indexedCount: integrity.indexedFileCount ?? integrity.uploadedFileCount,
       reviewableFileCount: integrity.reviewableFileCount ?? integrity.reviewedFileCount ?? integrity.uploadedFileCount,
       excludedFromReviewCount: integrity.excludedFromReviewCount,
+      excludedFromReviewFiles: integrity.excludedFromReviewFiles,
     }) ?? undefined,
     typeof integrity.indexedFileCount === "number" ? `Indexed files: ${integrity.indexedFileCount}.` : undefined,
     typeof integrity.visionProcessedFileCount === "number" ? `Vision-processed files: ${integrity.visionProcessedFileCount}.` : undefined,

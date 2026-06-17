@@ -869,6 +869,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     });
     const deltaAnnotations = result.annotationMetadata.filter((item) => /-comparison-/i.test(item.findingId));
     const traceTools = result.debugTrace.toolUsageTrace.map((entry) => entry.tool);
+    const imageOcrTrace = result.debugTrace.toolUsageTrace.find((entry) => entry.tool === "image_photo_ocr_evidence");
 
     assert.ok(result.annotatedFindingCount > 4);
     assert.ok(deltaAnnotations.length > 4);
@@ -880,12 +881,59 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     assert.ok(traceTools.includes("estimate_comparison_delta_engine"));
     assert.ok(traceTools.includes("row_anchor_matcher"));
     assert.ok(traceTools.includes("annotation_qa"));
+    assert.ok(traceTools.includes("finding_validator"));
+    assert.ok(traceTools.includes("support_evidence_ledger"));
+    assert.ok(imageOcrTrace);
+    assert.equal(imageOcrTrace.ran, false);
+    assert.match(imageOcrTrace.skipReason, /no image\/photo\/OCR evidence/i);
     assert.ok(deltaAnnotations.every((annotation) =>
       deltaRows.some((row) =>
         annotation.sourceLineNumber === String(row.line) &&
         new RegExp(row.description, "i").test(annotation.sourceAnchorText)
       )
     ));
+  });
+
+  await run("Citation Density and OEM Citation Density reject mismatched artifact identities", async () => {
+    const sourcePdfBytes = await createSourcePdf();
+    await assert.rejects(
+      buildAnnotatedCitationDensityEstimatePdf({
+        sourcePdfBytes,
+        findings: [
+          baseFinding({
+            id: "oem-citation-density-wrong-viewer",
+            reportType: "oem-citation-density",
+          }),
+        ],
+        request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+      }),
+      (error) => {
+        assert.match(error.message, /OEM Citation Density finding/i);
+        assert.equal(error.debugTrace.artifactReportType, "oem-citation-density");
+        assert.equal(error.debugTrace.findingIdPrefixCheckPassed, false);
+        return true;
+      }
+    );
+
+    await assert.rejects(
+      buildAnnotatedCitationDensityEstimatePdf({
+        sourcePdfBytes,
+        findings: [
+          baseFinding({
+            id: "citation-density-wrong-viewer",
+            reportType: "citation-density",
+          }),
+        ],
+        reportIdentity: OEM_CITATION_DENSITY_REPORT_IDENTITY,
+        request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+      }),
+      (error) => {
+        assert.match(error.message, /Citation Density finding/i);
+        assert.equal(error.debugTrace.artifactReportType, "citation-density");
+        assert.equal(error.debugTrace.findingIdPrefixCheckPassed, false);
+        return true;
+      }
+    );
   });
 
   await run("blank annotation output hard-fails when anchors exist but no finding matches", async () => {

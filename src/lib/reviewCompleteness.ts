@@ -25,6 +25,12 @@ export type ExcludedFromReviewFileDiagnostic = {
   detectedType: string;
   reason: ExcludedFromReviewReason;
   indexed: boolean;
+  stage?: string;
+  parsed?: boolean;
+  supportOnly?: boolean;
+  duplicate?: boolean;
+  duplicateOf?: string | null;
+  reviewabilityHint?: string;
 };
 
 export type ReviewProgressCounts = {
@@ -64,7 +70,7 @@ export function buildReviewCompletenessMessage(input: ReviewCompletenessInput): 
   );
 
   if (state === "FULL_FILE_REVIEW_COMPLETE") {
-    return "All uploaded reviewable files were reviewed. This does not mean the claim file is complete. Key proof documents are still missing.";
+    return "All uploaded reviewable files were reviewed. Repair-package completeness depends on the specific proof categories, not the upload count alone.";
   }
 
   if (state === "NEAR_COMPLETE_REVIEW") {
@@ -92,13 +98,28 @@ export function buildIndexedExclusionAuditNote(input: {
   indexedCount: number;
   reviewableFileCount: number;
   excludedFromReviewCount?: number;
+  excludedFromReviewFiles?: ExcludedFromReviewFileDiagnostic[];
 }): string | null {
   const indexed = normalizeCount(input.indexedCount);
   const reviewable = normalizeCount(input.reviewableFileCount);
   const excluded = Math.max(normalizeCount(input.excludedFromReviewCount), indexed - reviewable);
   if (indexed <= reviewable || excluded <= 0) return null;
 
-  return `${excluded} indexed ${excluded === 1 ? "item was" : "items were"} excluded from determination review because ${excluded === 1 ? "it was" : "they were"} non-reviewable, duplicate, unsupported, or metadata-only.`;
+  const fileDetails = (input.excludedFromReviewFiles ?? [])
+    .slice(0, 12)
+    .map((file) => {
+      const parsed = typeof file.parsed === "boolean" ? `; parsed=${file.parsed ? "yes" : "no"}` : "";
+      const supportOnly = file.supportOnly ? "; support-only=yes" : "";
+      const duplicate = file.duplicate ? `; duplicate=${file.duplicateOf ?? "yes"}` : "";
+      const hint = file.reviewabilityHint ? `; reviewable if ${file.reviewabilityHint}` : "";
+      return `${file.filename} (${file.detectedType}; reason=${file.reason}; stage=${file.stage ?? "reviewability"}; indexed=${file.indexed ? "yes" : "no"}${parsed}${supportOnly}${duplicate}${hint})`;
+    });
+
+  if (fileDetails.length > 0) {
+    return `${excluded} indexed ${excluded === 1 ? "item was" : "items were"} excluded from determination review: ${fileDetails.join("; ")}.`;
+  }
+
+  return `${excluded} indexed ${excluded === 1 ? "item was" : "items were"} excluded from determination review. File-level diagnostics with filenames and reasons are required before treating exclusions as reviewed.`;
 }
 
 export function normalizeReviewProgressCounts(input: {
@@ -118,8 +139,7 @@ export function normalizeReviewProgressCounts(input: {
   const explicitReviewable = input.reviewableFileCount;
   const reviewableFileCount = Math.max(
     normalizeCount(explicitReviewable),
-    reviewedFileCount,
-    visionProcessedCount
+    reviewedFileCount
   );
   const inferredExcluded = Math.max(0, indexedCount - reviewableFileCount);
   const excludedFromReviewCount = Math.max(

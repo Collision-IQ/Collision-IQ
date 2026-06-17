@@ -1,7 +1,19 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const path = require("node:path");
+const Module = require("node:module");
 const ts = require("typescript");
+
+const originalResolveFilename = Module._resolveFilename;
+Module._resolveFilename = function resolveFilenameWithAlias(request, parent, isMain, options) {
+  if (request.startsWith("@/")) {
+    const absolute = path.join(process.cwd(), "src", request.slice(2));
+    return originalResolveFilename.call(this, absolute, parent, isMain, options);
+  }
+
+  return originalResolveFilename.call(this, request, parent, isMain, options);
+};
 
 require.extensions[".ts"] = function registerTypeScript(module, filename) {
   const source = fs.readFileSync(filename, "utf8");
@@ -34,6 +46,10 @@ const {
   getReviewCompletenessState,
   normalizeReviewProgressCounts,
 } = require("../reviewCompleteness.ts");
+const {
+  buildFileReviewLedger,
+  resolveEvidenceCompletenessFromLedger,
+} = require("../fileReviewLedger.ts");
 
 function run(name, fn) {
   try {
@@ -255,18 +271,110 @@ run("review completeness treats indexed non-reviewable item as excluded, not ski
   assert.equal(counts.excludedFromReviewCount, 1);
   assert.equal(
     message,
-    "All uploaded reviewable files were reviewed. This does not mean the claim file is complete. Key proof documents are still missing."
+    "All uploaded reviewable files were reviewed. Repair-package completeness depends on the specific proof categories, not the upload count alone."
   );
   assert.match(message, /uploaded reviewable files were reviewed/i);
-  assert.match(message, /does not mean the claim file is complete/i);
-  assert.match(message, /Key proof documents are still missing/i);
+  assert.match(message, /Repair-package completeness depends/i);
   assert.doesNotMatch(message, /Full reviewable-file review complete|final file-complete conclusion/i);
   assert.equal(/Only 185 of 186 files reviewed/i.test(message), false);
   assert.equal(
     note,
-    "1 indexed item was excluded from determination review because it was non-reviewable, duplicate, unsupported, or metadata-only."
+    "1 indexed item was excluded from determination review. File-level diagnostics with filenames and reasons are required before treating exclusions as reviewed."
   );
   assert.equal(/\bcmp[a-z0-9]{8,}\b/i.test(note), false);
+});
+
+run("indexed exclusion note lists filenames, reasons, stages, parsing, support-only, and duplicate status", () => {
+  const note = buildIndexedExclusionAuditNote({
+    indexedCount: 3,
+    reviewableFileCount: 1,
+    excludedFromReviewCount: 2,
+    excludedFromReviewFiles: [
+      {
+        filename: "Work Auth.pdf",
+        detectedType: "work_authorization",
+        reason: "NON_REVIEWABLE",
+        indexed: true,
+        stage: "source_selection",
+        parsed: true,
+        supportOnly: true,
+        duplicate: false,
+        reviewabilityHint: "Reviewable as support context only; not a primary estimate source.",
+      },
+      {
+        filename: "duplicate scan.pdf",
+        detectedType: "scan_report",
+        reason: "DUPLICATE",
+        indexed: true,
+        stage: "reviewability",
+        parsed: true,
+        supportOnly: false,
+        duplicate: true,
+        duplicateOf: "scan-original",
+      },
+    ],
+  });
+
+  assert.match(note, /Work Auth\.pdf/);
+  assert.match(note, /reason=NON_REVIEWABLE/);
+  assert.match(note, /stage=source_selection/);
+  assert.match(note, /parsed=yes/);
+  assert.match(note, /support-only=yes/);
+  assert.match(note, /duplicate=scan-original/);
+  assert.doesNotMatch(note, /^2 indexed items were excluded from determination review because they were/i);
+});
+
+run("file ledger records every upload and evidence reconciliation does not mark present proof as missing", () => {
+  const attachments = [
+    {
+      id: "shop",
+      filename: "Shop Estimate.pdf",
+      type: "application/pdf",
+      text: "Preliminary Estimate Line 1 Replace bumper",
+      imageDataUrl: "data:application/pdf;base64,AAA=",
+      sizeBytes: 100,
+    },
+    {
+      id: "cal",
+      filename: "Calibration Record.pdf",
+      type: "application/pdf",
+      text: "ADAS calibration radar camera aiming completed",
+      imageDataUrl: "data:application/pdf;base64,AAA=",
+      sizeBytes: 100,
+    },
+    {
+      id: "align",
+      filename: "Alignment Printout.pdf",
+      type: "application/pdf",
+      text: "Hunter alignment before after toe camber caster",
+      imageDataUrl: "data:application/pdf;base64,AAA=",
+      sizeBytes: 100,
+    },
+    {
+      id: "work-auth",
+      filename: "Work Auth Contract.pdf",
+      type: "application/pdf",
+      text: "Work Authorization Contract of Repair customer acknowledges Repairer has posted labor rates",
+      imageDataUrl: "data:application/pdf;base64,AAA=",
+      sizeBytes: 100,
+    },
+  ];
+  const ledger = buildFileReviewLedger(attachments);
+  const categories = resolveEvidenceCompletenessFromLedger({
+    ledger,
+    corpus: "The case needs calibration records, alignment printout, and a work authorization.",
+  });
+  const calibration = categories.find((item) => item.category === "calibration_record");
+  const alignment = categories.find((item) => item.category === "alignment_printout");
+  const workAuth = ledger.find((item) => item.fileId === "work-auth");
+
+  assert.equal(ledger.length, attachments.length);
+  assert.equal(calibration.status, "present_but_not_line_tied");
+  assert.equal(alignment.status, "present_but_not_line_tied");
+  assert.notEqual(calibration.status, "not_found");
+  assert.equal(workAuth.usedAsSupportOnly, true);
+  assert.equal(workAuth.usedInDetermination, false);
+  assert.match(workAuth.reviewabilityHint, /support context only/i);
 });
 
 run("review completeness still warns when a true reviewable file is skipped", () => {

@@ -6,6 +6,10 @@ import type {
   ExcludedFromReviewFileDiagnostic,
   ExcludedFromReviewReason,
 } from "@/lib/reviewCompleteness";
+import type {
+  EvidenceCategoryResolution,
+  FileReviewLedgerEntry,
+} from "@/lib/fileReviewLedger";
 
 export type FindingStatus = "included" | "missing" | "not_shown";
 export type Severity = "low" | "medium" | "high";
@@ -487,6 +491,8 @@ export type ConfidenceIntegrity = {
   excludedFromReviewCount?: number;
   excludedFromReviewReasons?: ExcludedFromReviewReason[];
   excludedFromReviewFiles?: ExcludedFromReviewFileDiagnostic[];
+  fileReviewLedger?: FileReviewLedgerEntry[];
+  evidenceCompletenessLedger?: EvidenceCategoryResolution[];
   totalKnownFileCount?: number;
   uploadLimitReached: boolean;
   userIndicatedMoreFiles: boolean;
@@ -552,6 +558,8 @@ export type RepairIntelligenceReport = {
     excludedFromReviewCount?: number;
     excludedFromReviewReasons?: ExcludedFromReviewReason[];
     excludedFromReviewFiles?: ExcludedFromReviewFileDiagnostic[];
+    fileReviewLedger?: FileReviewLedgerEntry[];
+    evidenceCompletenessLedger?: EvidenceCategoryResolution[];
     totalKnownFileCount?: number;
     uploadLimitReached?: boolean;
     userIndicatedMoreFiles?: boolean;

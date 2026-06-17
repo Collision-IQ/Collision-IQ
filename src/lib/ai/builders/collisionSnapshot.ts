@@ -45,6 +45,7 @@ export type CollisionSnapshot = {
     reviewableFileCount: number;
     excludedFromReviewCount: number;
     excludedFromReviewReasons: ExportModel["confidenceIntegrity"]["excludedFromReviewReasons"];
+    excludedFromReviewFiles: ExportModel["confidenceIntegrity"]["excludedFromReviewFiles"];
     totalKnownFileCount: number;
     uploadLimitReached: boolean;
     userIndicatedMoreFiles: boolean;
@@ -105,6 +106,7 @@ export function buildCollisionSnapshot(input: SnapshotSource): CollisionSnapshot
         snapshotSafeReport.confidenceIntegrity.uploadedFileCount,
       excludedFromReviewCount: snapshotSafeReport.confidenceIntegrity.excludedFromReviewCount ?? 0,
       excludedFromReviewReasons: snapshotSafeReport.confidenceIntegrity.excludedFromReviewReasons ?? [],
+      excludedFromReviewFiles: snapshotSafeReport.confidenceIntegrity.excludedFromReviewFiles ?? [],
       totalKnownFileCount:
         snapshotSafeReport.confidenceIntegrity.totalKnownFileCount ??
         snapshotSafeReport.confidenceIntegrity.uploadedFileCount,

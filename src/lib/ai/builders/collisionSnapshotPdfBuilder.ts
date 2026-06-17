@@ -191,6 +191,7 @@ function buildCompletenessBullets(snapshot: ReturnType<typeof buildCollisionSnap
       indexedCount: snapshot.evidenceCompleteness.indexedFileCount,
       reviewableFileCount: snapshot.evidenceCompleteness.reviewableFileCount,
       excludedFromReviewCount: snapshot.evidenceCompleteness.excludedFromReviewCount,
+      excludedFromReviewFiles: snapshot.evidenceCompleteness.excludedFromReviewFiles,
     }),
     snapshot.evidenceCompleteness.uploadLimitReached ? "The current upload limit was reached." : "More files can be added if needed.",
     snapshot.evidenceCompleteness.userIndicatedMoreFiles

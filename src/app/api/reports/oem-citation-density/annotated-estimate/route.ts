@@ -29,6 +29,10 @@ import {
   type SourceEstimatePdfSelection,
 } from "@/lib/reports/citationDensitySourcePdf";
 import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
+import {
+  buildFileReviewLedger,
+  resolveEvidenceCompletenessFromLedger,
+} from "@/lib/fileReviewLedger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -111,7 +115,7 @@ export async function POST(request: Request) {
       sourceDocumentId ? [sourceDocumentId] : report.artifactIds,
       { ownerUserId: user.id }
     );
-    const sourceDiagnostics = buildCitationDensitySourcePdfDiagnostics(sourceDocuments);
+    const sourceDiagnostics = withFileReviewDiagnostics(sourceDocuments, buildCitationDensitySourcePdfDiagnostics(sourceDocuments));
     const sourceSelections = resolveOemSourceSelections({
       sourceDocuments,
       sourceDocumentId,
@@ -416,6 +420,7 @@ function buildOemAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof bui
     rejectedDeltaFindings: debugTrace.rejectedDeltaFindings,
     annotationLimitApplied: debugTrace.annotationLimitApplied,
     maxAnnotationLimit: debugTrace.maxAnnotationLimit,
+    droppedDeltaReasons: debugTrace.droppedDeltaReasons,
     unannotatedMaterialDeltas: debugTrace.unannotatedMaterialDeltas,
   };
 }
@@ -482,6 +487,39 @@ function missingSourcePdfResponse(diagnostics: ReturnType<typeof buildCitationDe
     },
     { status: 422 }
   );
+}
+
+function withFileReviewDiagnostics(
+  sourceDocuments: Awaited<ReturnType<typeof getUploadedAttachments>>,
+  diagnostics: ReturnType<typeof buildCitationDensitySourcePdfDiagnostics>
+) {
+  const fileReviewLedger = buildFileReviewLedger(sourceDocuments, {
+    usedInOemCitationDensityIds: sourceDocuments
+      .filter((document) => /oem|procedure|position statement|repair manual/i.test(`${document.filename}\n${document.text ?? ""}`))
+      .map((document) => document.id),
+  });
+  return {
+    ...diagnostics,
+    fileReviewLedger,
+    evidenceCompletenessLedger: resolveEvidenceCompletenessFromLedger({
+      ledger: fileReviewLedger,
+      corpus: sourceDocuments.map((document) => `${document.filename}\n${document.text ?? ""}`).join("\n"),
+    }),
+    excludedSourceFiles: fileReviewLedger
+      .filter((entry) => entry.exclusionReason || entry.usedAsSupportOnly)
+      .map((entry) => ({
+        filename: entry.filename,
+        detectedType: entry.documentType,
+        reason: entry.exclusionReason ?? (entry.usedAsSupportOnly ? "support-only document" : "not selected as estimate annotation base"),
+        stage: entry.exclusionStage ?? "source_selection",
+        indexed: entry.indexedStatus === "indexed",
+        parsed: entry.textExtractionStatus === "extracted" || entry.pdfExtractionStatus === "available",
+        supportOnly: entry.usedAsSupportOnly,
+        duplicate: entry.isDuplicate,
+        duplicateOf: entry.duplicateOf,
+        reviewabilityHint: entry.reviewabilityHint,
+      })),
+  };
 }
 
 function getFindingReportType(finding: CitationDensityFinding): string | undefined {

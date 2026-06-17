@@ -87,6 +87,9 @@ export type CitationDensityToolUsageTraceEntry = {
   candidatesAccepted: number;
   candidatesRejected: number;
   droppedReasons: string[];
+  latencyMs?: number;
+  provider?: string;
+  model?: string;
 };
 
 export type CitationDensityDeltaDiagnostics = {
@@ -96,6 +99,7 @@ export type CitationDensityDeltaDiagnostics = {
   rejectedDeltaFindings: number;
   annotationLimitApplied: boolean;
   maxAnnotationLimit: number | null;
+  droppedDeltaReasons: string[];
   unannotatedMaterialDeltas: Array<{
     rowId?: string;
     reason: string;
@@ -233,6 +237,7 @@ export type CitationDensityDebugTrace = {
   rejectedDeltaFindings: number;
   annotationLimitApplied: boolean;
   maxAnnotationLimit: number | null;
+  droppedDeltaReasons: string[];
   unannotatedMaterialDeltas: CitationDensityDeltaDiagnostics["unannotatedMaterialDeltas"];
   detailLayoutBlocks?: Array<{
     findingNumber: number;
@@ -761,6 +766,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     rejectedDeltaFindings: params.deltaDiagnostics?.rejectedDeltaFindings ?? 0,
     annotationLimitApplied: params.deltaDiagnostics?.annotationLimitApplied ?? false,
     maxAnnotationLimit: params.deltaDiagnostics?.maxAnnotationLimit ?? null,
+    droppedDeltaReasons: params.deltaDiagnostics?.droppedDeltaReasons ?? [],
     unannotatedMaterialDeltas: params.deltaDiagnostics?.unannotatedMaterialDeltas ?? [],
     detailLayoutBlocks: [],
     metadataArtifactId: undefined,
@@ -1033,13 +1039,18 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     (/-comparison-/i.test(finding.id) || finding.crossEstimateIssue === true)
   );
   if (unmatchedDeltaFindings.length > 0) {
-    trace.unannotatedMaterialDeltas = [
-      ...trace.unannotatedMaterialDeltas,
-      ...unmatchedDeltaFindings.map((finding) => ({
+    const unmatchedDeltaDrops = unmatchedDeltaFindings.map((finding) => ({
         rowId: finding.id,
         reason: "no safe estimate-row annotation rendered for this material delta",
         summary: finding.operationLabel,
-      })),
+      }));
+    trace.unannotatedMaterialDeltas = [
+      ...trace.unannotatedMaterialDeltas,
+      ...unmatchedDeltaDrops,
+    ];
+    trace.droppedDeltaReasons = [
+      ...trace.droppedDeltaReasons,
+      ...unmatchedDeltaDrops.map((item) => item.reason),
     ];
   }
 

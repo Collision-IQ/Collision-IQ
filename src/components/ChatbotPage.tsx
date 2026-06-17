@@ -1771,6 +1771,7 @@ function RailContent({
     indexedCount: effectiveReviewProgress.indexed,
     reviewableFileCount: effectiveReviewProgress.reviewableFileCount,
     excludedFromReviewCount: effectiveReviewProgress.excludedFromReviewCount,
+    excludedFromReviewFiles: effectiveReviewProgress.excludedFromReviewFiles,
   });
   const excludedFileDiagnostics = effectiveReviewProgress.excludedFromReviewFiles;
   const supportSignals = dedupeRailItems([
