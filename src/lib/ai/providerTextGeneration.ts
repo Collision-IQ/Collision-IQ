@@ -5,7 +5,7 @@ import {
   collisionIqProvider,
   type CollisionIqPrimaryProvider,
 } from "@/lib/modelConfig";
-import { generateOpenClawText } from "@/lib/openclaw";
+import { generateOpenClawText, getOpenClawAvailability } from "@/lib/openclaw";
 
 type OpenAIResponseInput = Parameters<OpenAI["responses"]["create"]>[0];
 
@@ -32,17 +32,27 @@ export async function generatePrimaryText(params: {
   }
 
   if (collisionIqProvider.primary === "openclaw") {
-    logProviderSelection(params.stage, "openclaw", collisionIqModels.openclawPrimary);
-    const response = await generateOpenClawText({
-      instructions: params.instructions,
-      input: params.input,
-    });
+    const openclaw = getOpenClawAvailability();
+    if (openclaw.available) {
+      logProviderSelection(params.stage, "openclaw", collisionIqModels.openclawPrimary);
+      const response = await generateOpenClawText({
+        instructions: params.instructions,
+        input: params.input,
+      });
 
-    return {
-      output_text: response.output_text,
-      provider: "openclaw",
-      model: response.model,
-    };
+      return {
+        output_text: response.output_text,
+        provider: "openclaw",
+        model: response.model,
+      };
+    }
+
+    console.warn("[provider-routing] OpenClaw configured but unavailable; falling back to OpenAI.", {
+      stage: params.stage,
+      reason: openclaw.reason,
+      command: openclaw.command,
+      entryJs: openclaw.entryJs,
+    });
   }
 
   logProviderSelection(params.stage, "openai", collisionIqModels.primary);
@@ -76,16 +86,26 @@ export async function generateSupplementText(params: {
   }
 
   if (collisionIqProvider.primary === "openclaw") {
-    logProviderSelection(params.stage, "openclaw", collisionIqModels.openclawPrimary);
-    const response = await generateOpenClawText({
-      input: params.input,
-    });
+    const openclaw = getOpenClawAvailability();
+    if (openclaw.available) {
+      logProviderSelection(params.stage, "openclaw", collisionIqModels.openclawPrimary);
+      const response = await generateOpenClawText({
+        input: params.input,
+      });
 
-    return {
-      output_text: response.output_text,
-      provider: "openclaw",
-      model: response.model,
-    };
+      return {
+        output_text: response.output_text,
+        provider: "openclaw",
+        model: response.model,
+      };
+    }
+
+    console.warn("[provider-routing] OpenClaw configured but unavailable; falling back to OpenAI.", {
+      stage: params.stage,
+      reason: openclaw.reason,
+      command: openclaw.command,
+      entryJs: openclaw.entryJs,
+    });
   }
 
   logProviderSelection(params.stage, "openai", params.openAiModel);

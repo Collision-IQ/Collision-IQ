@@ -30,6 +30,11 @@ import {
   type EstimateRowAnchor,
   type EstimateRowAnchorType,
 } from "./citationDensityRowAnchors";
+import {
+  classifyCitationDensityAnchorRow,
+  classifyCitationDensityDocument,
+  isBadCitationDensityAnchorText,
+} from "./citationDensityDocumentClassifier";
 
 export type AnnotationMode = "margin_callouts" | "inline_highlight" | "both";
 
@@ -207,6 +212,26 @@ export type CitationDensityDebugTrace = {
   }>;
   metadataArtifactId?: string;
   renderedPdfArtifactId?: string;
+  routeName?: "citation-density" | "oem-citation-density";
+  selectedDocumentType?: string;
+  selectedDocumentConfidence?: number;
+  rejectedSourceCandidates?: Array<{
+    filename: string;
+    detectedDocumentType: string;
+    reason: string;
+  }>;
+  acceptedEstimateCandidates?: Array<{
+    filename: string;
+    detectedDocumentType: string;
+    estimateScore: number;
+    evidenceSignals: string[];
+  }>;
+  sourceAnchorDocumentType?: string;
+  sourceAnchorRowType?: string;
+  badAnchorRejectedCount?: number;
+  badAnchorRejectReasons?: string[];
+  artifactReportType?: string;
+  findingIdPrefixCheckPassed?: boolean;
 };
 
 export type PartSourceKind =
@@ -585,6 +610,10 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const sourceDocumentRole = estimateRole === "shop" ? "shop" : "carrier";
   const sourcePdfName = params.sourcePdfName ?? params.sourceDocumentId ?? reportIdentity.sourcePdfFallbackName;
+  const selectedDocumentClassification = classifyCitationDensityDocument({
+    filename: sourcePdfName,
+    text: params.sourceText,
+  });
   const extraction = await extractCitationDensityRowAnchors(sourcePdfBytes, {
     sourceDocumentRole,
     sourceDocumentId: params.sourceDocumentId,
@@ -628,11 +657,14 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     buildCommit: getBuildCommit(),
     citationDensityArtifactVersion: reportIdentity.artifactVersion,
     reportType: reportIdentity.reportType,
+    routeName: reportIdentity.reportType,
     artifactVersion: reportIdentity.artifactVersion,
     artifactId: undefined,
     sourcePdfName,
     selectedEstimateFileName: sourcePdfName,
     selectedEstimateTotal: params.selectedEstimateTotal ?? null,
+    selectedDocumentType: selectedDocumentClassification.detectedDocumentType,
+    selectedDocumentConfidence: selectedDocumentClassification.confidence,
     uploadedFileNames: params.uploadedFileNames ?? [],
     actualSourcePdfName: extraction.actualSourcePdfName,
     actualSourcePdfByteLength: extraction.actualSourcePdfByteLength,
@@ -687,6 +719,12 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     detailLayoutBlocks: [],
     metadataArtifactId: undefined,
     renderedPdfArtifactId: undefined,
+    sourceAnchorDocumentType: selectedDocumentClassification.detectedDocumentType,
+    sourceAnchorRowType: undefined,
+    badAnchorRejectedCount: 0,
+    badAnchorRejectReasons: [],
+    artifactReportType: reportIdentity.reportType,
+    findingIdPrefixCheckPassed: true,
   };
 
   if (params.findingGenerator) {
@@ -709,6 +747,18 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     findings = sanitizedGenerated.findings;
     suppressed = sanitizedGenerated.suppressed;
     Object.assign(trace, generated.debug ?? {});
+  }
+
+  const identityError = findReportIdentityMismatch(findings, reportIdentity.reportType);
+  if (identityError) {
+    trace.findingIdPrefixCheckPassed = false;
+    trace.artifactReportType = identityError.artifactReportType;
+    trace.droppedFindings.push({
+      findingId: identityError.findingId,
+      reason: identityError.reason,
+      anchorId: null,
+    });
+    throw new CitationDensityAnnotationError(identityError.message, trace);
   }
 
   const debugMetadata: CitationDensityAnnotationDebugMetadata = {
@@ -2292,6 +2342,14 @@ function buildAnchoredCitationCandidates(params: {
       params.trace.droppedFindings.push({ findingId: finding.id, reason: "anchor already used", anchorId: resolvedAnchorId });
       continue;
     }
+    const badAnchorReason = getBadAnchorRejectReason(finding, anchor);
+    if (badAnchorReason) {
+      params.trace.badAnchorRejectedCount = (params.trace.badAnchorRejectedCount ?? 0) + 1;
+      params.trace.sourceAnchorRowType = classifyCitationDensityAnchorRow(anchor.rowText);
+      params.trace.badAnchorRejectReasons = [...(params.trace.badAnchorRejectReasons ?? []), badAnchorReason].slice(0, 20);
+      params.trace.droppedFindings.push({ findingId: finding.id, reason: badAnchorReason, anchorId: resolvedAnchorId });
+      continue;
+    }
     const candidate = buildCandidateFromFinding(finding, anchor, params.estimateRole);
     const gate = gateAnchoredCitationCandidate(candidate, params.anchorIndex);
     if (gate === "allowed") {
@@ -2320,6 +2378,14 @@ function buildAnchoredCitationCandidates(params: {
       if (usedAnchorIds.has(anchor.anchorId)) continue;
       const candidate = buildCandidateFromAnchor(anchor, params.sourceDocumentRole, rowBackedTopics);
       if (!candidate) continue;
+      const badAnchorReason = getBadAnchorRejectReason(candidate.finding, anchor);
+      if (badAnchorReason) {
+        params.trace.badAnchorRejectedCount = (params.trace.badAnchorRejectedCount ?? 0) + 1;
+        params.trace.sourceAnchorRowType = classifyCitationDensityAnchorRow(anchor.rowText);
+        params.trace.badAnchorRejectReasons = [...(params.trace.badAnchorRejectReasons ?? []), badAnchorReason].slice(0, 20);
+        params.trace.droppedFindings.push({ findingId: candidate.finding.id, reason: badAnchorReason, anchorId: anchor.anchorId });
+        continue;
+      }
       const gate = gateAnchoredCitationCandidate(candidate, params.anchorIndex);
       if (gate === "allowed") {
         candidates.push(candidate);
@@ -2335,6 +2401,49 @@ function buildAnchoredCitationCandidates(params: {
     suppressedPageMismatchCount,
     findingsWithoutAnchorId: params.findings.filter((finding) => !matchedFindingIds.has(finding.id)).map((finding) => finding.id),
   };
+}
+
+function findReportIdentityMismatch(
+  findings: CitationDensityFinding[],
+  routeReportType: "citation-density" | "oem-citation-density"
+) {
+  for (const finding of findings) {
+    const reportType = (finding as CitationDensityFinding & { reportType?: string }).reportType;
+    if (routeReportType === "citation-density" && (reportType === "oem-citation-density" || /^oem-citation-density-/i.test(finding.id))) {
+      return {
+        findingId: finding.id,
+        artifactReportType: reportType ?? "oem-citation-density",
+        reason: "citation-density route received oem-citation-density finding",
+        message: "Citation Density route received an OEM Citation Density finding.",
+      };
+    }
+    if (routeReportType === "oem-citation-density" && (reportType === "citation-density" || /^citation-density-/i.test(finding.id))) {
+      return {
+        findingId: finding.id,
+        artifactReportType: reportType ?? "citation-density",
+        reason: "oem-citation-density route received citation-density finding",
+        message: "OEM Citation Density route received a Citation Density finding.",
+      };
+    }
+  }
+  return null;
+}
+
+function getBadAnchorRejectReason(finding: CitationDensityFinding, anchor: EstimateRowAnchor) {
+  const rowType = classifyCitationDensityAnchorRow(anchor.rowText);
+  const claimedEstimateAnchor = anchor.anchorType === "estimate_line" || anchor.anchorType === "totals_row";
+  const explicitSupportContext = (finding as CitationDensityFinding & { rowType?: string; contextType?: string }).rowType === "support_document_context" ||
+    (finding as CitationDensityFinding & { rowType?: string; contextType?: string }).contextType === "support_document_context";
+  if (isBadCitationDensityAnchorText(anchor.rowText) && !explicitSupportContext) {
+    return `bad anchor rejected: ${rowType} text cannot be rendered as an estimate annotation`;
+  }
+  if (
+    claimedEstimateAnchor &&
+    ["support_contract", "legal_notice", "insurer_boilerplate", "vehicle_identity_header_footer", "generic_section_text"].includes(rowType)
+  ) {
+    return `bad anchor rejected: ${rowType} cannot be labeled as ${anchor.anchorType}`;
+  }
+  return null;
 }
 
 function orderFindingsForAnchoring(findings: CitationDensityFinding[]) {

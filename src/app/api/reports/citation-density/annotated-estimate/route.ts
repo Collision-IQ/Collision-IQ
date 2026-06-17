@@ -20,6 +20,7 @@ import type { CitationDensityTargetEstimate } from "@/lib/reports/citationDensit
 import {
   NO_SOURCE_PDF_ERROR,
   NO_SOURCE_PDF_USER_MESSAGE,
+  buildCitationDensitySourcePdfDiagnostics,
   describeReviewTarget,
   isAnnotatableEstimatePdf,
   isPdfDocument,
@@ -105,6 +106,7 @@ export async function POST(request: Request) {
     const sourceDocuments = await getUploadedAttachments(candidateIds, {
       ownerUserId: user.id,
     });
+    const sourceDiagnostics = buildCitationDensitySourcePdfDiagnostics(sourceDocuments);
     const model = buildAnnotatedEstimateReviewModel({
       report: report.report,
       analysis: report.report.analysis ?? null,
@@ -121,6 +123,9 @@ export async function POST(request: Request) {
             selectedEstimateTotal: null,
             targetEstimate,
             selectionReason: "The client supplied a source document ID.",
+            selectedDocumentType: "estimate",
+            selectedDocumentConfidence: 1,
+            selectionDiagnostics: sourceDiagnostics,
           }]
         : []
       : resolveSourceEstimatePdfSelections({
@@ -148,6 +153,9 @@ export async function POST(request: Request) {
             selectedEstimateTotal: null,
             targetEstimate,
             selectionReason: "The client supplied a source document ID.",
+            selectedDocumentType: "estimate",
+            selectedDocumentConfidence: 1,
+            selectionDiagnostics: sourceDiagnostics,
           }]
         : [];
 
@@ -157,6 +165,9 @@ export async function POST(request: Request) {
           {
             error: "Selected source PDF is not an original estimate PDF.",
             userMessage: "Select the original carrier or shop estimate PDF. Citation Density annotated export will not annotate a report-only PDF.",
+            reportType: "citation-density",
+            routeName: "citation-density",
+            ...sourceDiagnostics,
           },
           { status: 400 }
         );
@@ -169,11 +180,14 @@ export async function POST(request: Request) {
             error: "Estimate source selection is ambiguous.",
             userMessage: "Please choose the carrier or shop source PDF for the annotated Citation Density estimate.",
             targetEstimate,
+            reportType: "citation-density",
+            routeName: "citation-density",
+            ...sourceDiagnostics,
           },
           { status: 400 }
         );
       }
-      return missingSourcePdfResponse();
+      return missingSourcePdfResponse(sourceDiagnostics);
     }
 
     const availablePdfCount = sourceDocuments.filter(isAnnotatableEstimatePdf).length;
@@ -202,18 +216,34 @@ export async function POST(request: Request) {
     for (const selection of resolvedSelections) {
       const sourceDocument = selection.attachment;
       if (!isPdfDocument(sourceDocument.type, sourceDocument.filename)) {
-        return missingSourcePdfResponse();
+        return missingSourcePdfResponse(sourceDiagnostics);
       }
 
       const sourcePdfBytes = sourceDocument.imageDataUrl
         ? dataUrlToPdfBytes(sourceDocument.imageDataUrl)
         : null;
       if (!sourcePdfBytes) {
-        return missingSourcePdfResponse();
+        return missingSourcePdfResponse(sourceDiagnostics);
       }
 
       const estimateRole = normalizeOutputEstimateRole(selection.selectedEstimateRole);
       const roleFindings = filterFindingsForEstimateRole(model.citationDensityFindings, estimateRole);
+      const wrongPrefixFinding = roleFindings.find((finding) => hasWrongFindingIdentity("citation-density", finding));
+      if (wrongPrefixFinding) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Citation Density route received an OEM Citation Density finding.",
+            userMessage: "Citation Density route received an OEM Citation Density artifact. Regenerate the Citation Density PDF.",
+            reportType: "citation-density",
+            routeName: "citation-density",
+            artifactReportType: getFindingReportType(wrongPrefixFinding),
+            findingIdPrefixCheckPassed: false,
+            findingId: wrongPrefixFinding.id,
+          },
+          { status: 422 }
+        );
+      }
       const comparisonEstimateTexts = sourceDocuments
         .filter((document) => document.id !== selection.selectedSourceDocumentId && isAnnotatableEstimatePdf(document))
         .map((document) => ({
@@ -262,6 +292,9 @@ export async function POST(request: Request) {
         selectedSourceLabel: selection.selectedSourceLabel,
         selectedEstimateTotal: selection.selectedEstimateTotal,
         selectionReason: selection.selectionReason,
+        selectedDocumentType: selection.selectedDocumentType,
+        selectedDocumentConfidence: selection.selectedDocumentConfidence,
+        ...selection.selectionDiagnostics,
       });
     }
 
@@ -298,6 +331,19 @@ export async function POST(request: Request) {
       selectedEstimateTotal: primaryOutput?.selectedEstimateTotal,
       targetEstimate,
       selectionReason: outputs.map((output) => output.selectionReason).join(" "),
+      reportType: "citation-density",
+      routeName: "citation-density",
+      selectedEstimateFileName: primaryOutput?.selectedSourceLabel,
+      actualSourcePdfName: outputs[0]?.debugTrace?.actualSourcePdfName,
+      selectedDocumentType: resolvedSelections[0]?.selectedDocumentType,
+      selectedDocumentConfidence: resolvedSelections[0]?.selectedDocumentConfidence,
+      sourceAnchorDocumentType: outputs[0]?.debugTrace?.sourceAnchorDocumentType,
+      sourceAnchorRowType: outputs[0]?.debugTrace?.sourceAnchorRowType,
+      badAnchorRejectedCount: outputs[0]?.debugTrace?.badAnchorRejectedCount,
+      badAnchorRejectReasons: outputs[0]?.debugTrace?.badAnchorRejectReasons,
+      artifactReportType: outputs[0]?.debugTrace?.artifactReportType,
+      findingIdPrefixCheckPassed: outputs[0]?.debugTrace?.findingIdPrefixCheckPassed,
+      ...sourceDiagnostics,
     });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
@@ -316,6 +362,7 @@ export async function POST(request: Request) {
         error: error.message,
         userMessage: error.userMessage,
         debugCounts,
+        debugTrace: error.debugTrace,
       }, { status: error.status });
     }
 
@@ -331,10 +378,14 @@ function buildAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof buildA
   if (!debugTrace) return undefined;
   return {
     buildCommit: debugTrace.buildCommit,
+    reportType: debugTrace.reportType,
+    routeName: debugTrace.routeName,
     citationDensityArtifactVersion: debugTrace.citationDensityArtifactVersion,
     uploadedFileNames: debugTrace.uploadedFileNames,
     selectedEstimateFileName: debugTrace.selectedEstimateFileName,
     selectedEstimateTotal: debugTrace.selectedEstimateTotal,
+    selectedDocumentType: debugTrace.selectedDocumentType,
+    selectedDocumentConfidence: debugTrace.selectedDocumentConfidence,
     actualSourcePdfName: debugTrace.actualSourcePdfName,
     actualSourcePdfByteLength: debugTrace.actualSourcePdfByteLength,
     actualSourcePdfPageCount: debugTrace.actualSourcePdfPageCount,
@@ -388,6 +439,12 @@ function buildAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof buildA
     fallbackMatchedFindings: debugTrace.fallbackMatchedFindings,
     droppedFindings: debugTrace.droppedFindings,
     rendererDrops: debugTrace.rendererDrops,
+    sourceAnchorDocumentType: debugTrace.sourceAnchorDocumentType,
+    sourceAnchorRowType: debugTrace.sourceAnchorRowType,
+    badAnchorRejectedCount: debugTrace.badAnchorRejectedCount,
+    badAnchorRejectReasons: debugTrace.badAnchorRejectReasons,
+    artifactReportType: debugTrace.artifactReportType,
+    findingIdPrefixCheckPassed: debugTrace.findingIdPrefixCheckPassed,
   };
 }
 
@@ -454,12 +511,28 @@ function filterFindingsForEstimateRole(
   });
 }
 
-function missingSourcePdfResponse() {
+function missingSourcePdfResponse(diagnostics: ReturnType<typeof buildCitationDensitySourcePdfDiagnostics> = {
+  acceptedEstimateCandidates: [],
+  rejectedSourceCandidates: [],
+}) {
   return NextResponse.json(
     {
       error: NO_SOURCE_PDF_ERROR,
       userMessage: NO_SOURCE_PDF_USER_MESSAGE,
+      reportType: "citation-density",
+      routeName: "citation-density",
+      ...diagnostics,
     },
-    { status: 400 }
+    { status: 422 }
   );
+}
+
+function getFindingReportType(finding: CitationDensityFinding): string | undefined {
+  const record = finding as CitationDensityFinding & { reportType?: string };
+  return record.reportType;
+}
+
+function hasWrongFindingIdentity(routeName: "citation-density", finding: CitationDensityFinding) {
+  const reportType = getFindingReportType(finding);
+  return reportType === "oem-citation-density" || /^oem-citation-density-/i.test(finding.id);
 }

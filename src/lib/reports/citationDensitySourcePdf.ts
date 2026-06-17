@@ -2,10 +2,28 @@ import type { StoredAttachment } from "@/lib/uploadedAttachmentStore";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
 import type { CitationDensityTargetEstimate } from "@/lib/reports/citationDensityIntent";
+import {
+  classifyCitationDensityAttachment,
+  type CitationDensityDocumentClassification,
+} from "./citationDensityDocumentClassifier";
 
-export const NO_SOURCE_PDF_ERROR = "No original estimate PDF was found for annotation.";
+export const NO_SOURCE_PDF_ERROR = "No estimate PDF found for Citation Density.";
 export const NO_SOURCE_PDF_USER_MESSAGE =
-  "No original estimate PDF was found for annotation. Please select or upload the estimate PDF you want annotated.";
+  "No estimate PDF found for Citation Density. Upload a shop estimate and/or carrier estimate.";
+
+export type SourcePdfCandidateDiagnostics = {
+  acceptedEstimateCandidates: Array<{
+    filename: string;
+    detectedDocumentType: string;
+    estimateScore: number;
+    evidenceSignals: string[];
+  }>;
+  rejectedSourceCandidates: Array<{
+    filename: string;
+    detectedDocumentType: string;
+    reason: string;
+  }>;
+};
 
 export type SourceEstimatePdfSelection = {
   attachment: StoredAttachment;
@@ -15,6 +33,9 @@ export type SourceEstimatePdfSelection = {
   selectedEstimateTotal: number | null;
   targetEstimate: CitationDensityTargetEstimate;
   selectionReason: string;
+  selectedDocumentType: CitationDensityDocumentClassification["detectedDocumentType"];
+  selectedDocumentConfidence: number;
+  selectionDiagnostics: SourcePdfCandidateDiagnostics;
 };
 
 export function isPdfDocument(type: string, filename: string) {
@@ -23,11 +44,43 @@ export function isPdfDocument(type: string, filename: string) {
 
 export function isAnnotatableEstimatePdf(attachment: StoredAttachment) {
   if (!isPdfDocument(attachment.type, attachment.filename) || !attachment.imageDataUrl) return false;
-  const text = normalizeRoleText(`${attachment.filename}\n${attachment.text ?? ""}`);
-  if (/\b(citation density|gap report|annotation legend|unanchored citation density|repair intelligence report|policy rights review|doi complaint|collision snapshot|customer report)\b/.test(text)) {
-    return false;
+  return classifyCitationDensityAttachment(attachment).isEstimateLike;
+}
+
+export function buildCitationDensitySourcePdfDiagnostics(
+  attachments: StoredAttachment[]
+): SourcePdfCandidateDiagnostics {
+  const acceptedEstimateCandidates: SourcePdfCandidateDiagnostics["acceptedEstimateCandidates"] = [];
+  const rejectedSourceCandidates: SourcePdfCandidateDiagnostics["rejectedSourceCandidates"] = [];
+
+  for (const attachment of attachments) {
+    if (!isPdfDocument(attachment.type, attachment.filename)) continue;
+    const classification = classifyCitationDensityAttachment(attachment);
+    if (!attachment.imageDataUrl) {
+      rejectedSourceCandidates.push({
+        filename: attachment.filename,
+        detectedDocumentType: classification.detectedDocumentType,
+        reason: "PDF has no source bytes available for annotation.",
+      });
+      continue;
+    }
+    if (classification.isEstimateLike) {
+      acceptedEstimateCandidates.push({
+        filename: attachment.filename,
+        detectedDocumentType: classification.detectedDocumentType,
+        estimateScore: classification.estimateScore,
+        evidenceSignals: classification.evidenceSignals,
+      });
+      continue;
+    }
+    rejectedSourceCandidates.push({
+      filename: attachment.filename,
+      detectedDocumentType: classification.detectedDocumentType,
+      reason: classification.rejectionReasons.join("; ") || "Document is not estimate-like.",
+    });
   }
-  return /\b(estimate|supplement|ccc|mitchell|audatex|carrier|insurer|insurance|shop|repair facility|appraisal|net total|grand total|labor|refinish)\b/.test(text);
+
+  return { acceptedEstimateCandidates, rejectedSourceCandidates };
 }
 
 export function resolveSourceEstimatePdf(params: {
@@ -50,6 +103,7 @@ export function resolveSourceEstimatePdfSelection(params: {
   }
 
   const pdfs = params.attachments.filter(isAnnotatableEstimatePdf);
+  const selectionDiagnostics = buildCitationDensitySourcePdfDiagnostics(params.attachments);
   if (pdfs.length === 0) return null;
   if (pdfs.length === 1) {
     return buildSelectionResult({
@@ -57,6 +111,7 @@ export function resolveSourceEstimatePdfSelection(params: {
       targetEstimate: params.targetEstimate,
       selectedEstimateRole: "uploaded",
       selectionReason: "Only one uploaded estimate PDF was available.",
+      selectionDiagnostics,
     });
   }
 
@@ -96,6 +151,7 @@ export function resolveSourceEstimatePdfSelection(params: {
     selectedEstimateRole: best.role === "unknown" && params.targetEstimate === "selected" ? "selected" : best.role,
     selectedEstimateTotal: best.total,
     selectionReason: buildSelectionReason(best.role, params.targetEstimate, best.score),
+    selectionDiagnostics,
   });
 }
 
@@ -106,6 +162,7 @@ export function resolveSourceEstimatePdfSelections(params: {
   findings: CitationDensityFinding[];
 }): SourceEstimatePdfSelection[] {
   const pdfs = params.attachments.filter(isAnnotatableEstimatePdf);
+  const selectionDiagnostics = buildCitationDensitySourcePdfDiagnostics(params.attachments);
   if (pdfs.length === 0) return [];
   if (pdfs.length === 1) {
     const only = buildSelectionResult({
@@ -113,6 +170,7 @@ export function resolveSourceEstimatePdfSelections(params: {
       targetEstimate: params.targetEstimate,
       selectedEstimateRole: "uploaded",
       selectionReason: "Only one uploaded estimate PDF was available.",
+      selectionDiagnostics,
     });
     return [only];
   }
@@ -162,6 +220,7 @@ function resolveLowerEstimatePdfSelection(params: {
   findings: CitationDensityFinding[];
 }): SourceEstimatePdfSelection | null {
   const pdfs = params.attachments.filter(isAnnotatableEstimatePdf);
+  const selectionDiagnostics = buildCitationDensitySourcePdfDiagnostics(params.attachments);
   if (pdfs.length < 2) return null;
 
   const evidenceTypeByLabel = new Map<string, string>();
@@ -194,6 +253,7 @@ function resolveLowerEstimatePdfSelection(params: {
     selectedEstimateRole: lowest.role === "unknown" ? "selected" : lowest.role,
     selectedEstimateTotal: lowest.total,
     selectionReason: `Auto-selected the lower estimate PDF as the Citation Density annotation base (total ${lowest.total}).`,
+    selectionDiagnostics,
   });
 }
 
@@ -204,7 +264,11 @@ export function scoreEstimatePdfCandidate(params: {
   evidenceTypeByLabel: Map<string, string>;
 }) {
   const text = normalizeRoleText(`${params.attachment.filename}\n${params.attachment.text}`);
+  const classification = classifyCitationDensityAttachment(params.attachment);
+  if (!classification.isEstimateLike) return -500;
   let score = 0;
+  score += classification.estimateScore;
+  score -= classification.supportScore * 2;
 
   if (/\bestimate\b|supplement|preliminary estimate|repair estimate/.test(text)) score += 30;
   if (/citation density|gap report|annotation legend|unanchored citation density/.test(text)) score -= 120;
@@ -243,7 +307,9 @@ function buildSelectionResult(params: {
   selectedEstimateRole: SourceEstimatePdfSelection["selectedEstimateRole"];
   selectedEstimateTotal?: number | null;
   selectionReason: string;
+  selectionDiagnostics?: SourcePdfCandidateDiagnostics;
 }): SourceEstimatePdfSelection {
+  const classification = classifyCitationDensityAttachment(params.attachment);
   return {
     attachment: params.attachment,
     selectedSourceDocumentId: params.attachment.id,
@@ -252,6 +318,9 @@ function buildSelectionResult(params: {
     selectedEstimateTotal: params.selectedEstimateTotal ?? extractEstimateTotal(params.attachment),
     targetEstimate: params.targetEstimate,
     selectionReason: params.selectionReason,
+    selectedDocumentType: classification.detectedDocumentType,
+    selectedDocumentConfidence: classification.confidence,
+    selectionDiagnostics: params.selectionDiagnostics ?? buildCitationDensitySourcePdfDiagnostics([params.attachment]),
   };
 }
 

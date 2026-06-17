@@ -1,5 +1,6 @@
 import "server-only";
 
+import fs from "node:fs";
 import { spawn } from "node:child_process";
 import { collisionIqModels, collisionIqProvider } from "@/lib/modelConfig";
 
@@ -153,6 +154,33 @@ function resolveOpenClawCommand() {
     entryJs: "openclaw",
     description: `"node openclaw" on PATH`,
   };
+}
+
+export function getOpenClawAvailability() {
+  const command = resolveOpenClawCommand();
+  const commandExists = isExecutableAvailable(command.command);
+  const entryExists = fs.existsSync(/* turbopackIgnore: true */ command.entryJs);
+  return {
+    available: commandExists && entryExists,
+    command: command.command,
+    entryJs: command.entryJs,
+    description: command.description,
+    reason: commandExists
+      ? entryExists
+        ? undefined
+        : `OpenClaw CLI script is missing at ${command.entryJs}.`
+      : `OpenClaw executable is missing or not executable at ${command.command}.`,
+  };
+}
+
+function isExecutableAvailable(command: string) {
+  if (command === "node") return true;
+  try {
+    fs.accessSync(/* turbopackIgnore: true */ command, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function logOpenClawSpawn(command: string, args: string[]) {

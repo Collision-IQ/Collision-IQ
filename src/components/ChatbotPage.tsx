@@ -2144,12 +2144,15 @@ function RailContent({
       annotatedFindingCount?: unknown;
       unresolvedAnchorCount?: unknown;
       warnings?: unknown;
+      debugCounts?: unknown;
+      rejectedSourceCandidates?: unknown;
+      acceptedEstimateCandidates?: unknown;
       error?: string;
       userMessage?: string;
     } | null;
 
     if (!response.ok || typeof data?.downloadUrl !== "string") {
-      throw new Error(data?.userMessage || data?.error || "Annotated estimate export failed.");
+      throw new Error(formatAnnotatedExportError(data, "Annotated estimate export failed."));
     }
 
     const blob = await fetchAnnotatedCitationDensityPdfBlob(data.downloadUrl);
@@ -2207,12 +2210,15 @@ function RailContent({
       annotatedFindingCount?: unknown;
       unresolvedAnchorCount?: unknown;
       warnings?: unknown;
+      debugCounts?: unknown;
+      rejectedSourceCandidates?: unknown;
+      acceptedEstimateCandidates?: unknown;
       error?: string;
       userMessage?: string;
     } | null;
 
     if (!response.ok || typeof data?.downloadUrl !== "string") {
-      throw new Error(data?.userMessage || data?.error || "OEM Citation Density Report export failed.");
+      throw new Error(formatAnnotatedExportError(data, "OEM Citation Density Report export failed."));
     }
 
     const blob = await fetchAnnotatedCitationDensityPdfBlob(data.downloadUrl);
@@ -4501,13 +4507,66 @@ function buildCustomerReportRequest(params: {
 
 function selectAnnotatedCitationDensitySourcePdf(attachments: AttachmentTrayItem[]) {
   return attachments.find((attachment) => {
-    const text = attachment.filename.toLowerCase();
+    const text = `${attachment.filename}\n${"text" in attachment && typeof attachment.text === "string" ? attachment.text : ""}`.toLowerCase();
     if (!/\.pdf$/i.test(attachment.filename)) return false;
     if (/citation density|gap report|annotation legend|annotated estimate|repair intelligence|policy rights|doi complaint|snapshot/.test(text)) {
       return false;
     }
-    return /estimate|supplement|ccc|mitchell|audatex|carrier|insurer|insurance|shop|repair facility|appraisal/.test(text);
+    if (/contract of repair|work authorization|customer acknowledges repairer has posted labor rates|assignment of proceeds|physical inspection demand|pa motor vehicle physical damage appraiser act|customer signature|\bwork auth\b|\bauth(?:orization)?\.pdf\b|\bcontract\b/.test(text)) {
+      return false;
+    }
+    return /preliminary estimate|estimate of record|supplement of record|supplement summary|estimate totals|total cost of repairs|net cost of repairs|workfile id|ccc one estimating|line\s+oper\s+description\s+part\s+number\s+qty|estimate|supplement|ccc|mitchell|audatex|carrier|insurer|insurance|shop|repair facility|appraisal/.test(text);
   }) ?? null;
+}
+
+function formatAnnotatedExportError(
+  data: {
+    userMessage?: string;
+    error?: string;
+    debugCounts?: unknown;
+    rejectedSourceCandidates?: unknown;
+    acceptedEstimateCandidates?: unknown;
+  } | null,
+  fallback: string
+) {
+  const base = data?.userMessage || data?.error || fallback;
+  const diagnostics = [
+    formatCandidateDiagnostics("Rejected", data?.rejectedSourceCandidates),
+    formatCandidateDiagnostics("Accepted", data?.acceptedEstimateCandidates),
+    formatDebugCounts(data?.debugCounts),
+  ].filter(Boolean).join(" ");
+  return diagnostics ? `${base} ${diagnostics}` : base;
+}
+
+function formatCandidateDiagnostics(label: string, value: unknown) {
+  if (!Array.isArray(value) || value.length === 0) return "";
+  const summary = value
+    .slice(0, 3)
+    .map((candidate) => {
+      if (!candidate || typeof candidate !== "object") return "";
+      const record = candidate as Record<string, unknown>;
+      return [
+        typeof record.filename === "string" ? record.filename : "unknown file",
+        typeof record.detectedDocumentType === "string" ? record.detectedDocumentType : "unknown",
+        typeof record.reason === "string" ? record.reason : undefined,
+      ].filter(Boolean).join(": ");
+    })
+    .filter(Boolean)
+    .join("; ");
+  return summary ? `${label}: ${summary}.` : "";
+}
+
+function formatDebugCounts(value: unknown) {
+  if (!value || typeof value !== "object") return "";
+  const record = value as Record<string, unknown>;
+  const fields = [
+    typeof record.selectedEstimateFileName === "string" ? `selected=${record.selectedEstimateFileName}` : "",
+    typeof record.actualSourcePdfName === "string" ? `actual=${record.actualSourcePdfName}` : "",
+    typeof record.selectedDocumentType === "string" ? `type=${record.selectedDocumentType}` : "",
+    typeof record.badAnchorRejectedCount === "number" ? `badAnchors=${record.badAnchorRejectedCount}` : "",
+    record.findingIdPrefixCheckPassed === false ? "findingPrefix=false" : "",
+  ].filter(Boolean);
+  return fields.length ? `Diagnostics: ${fields.join(", ")}.` : "";
 }
 
 function buildAnnotatedCitationDensityStatus(

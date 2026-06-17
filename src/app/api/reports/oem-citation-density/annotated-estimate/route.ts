@@ -21,12 +21,14 @@ import {
 import {
   NO_SOURCE_PDF_ERROR,
   NO_SOURCE_PDF_USER_MESSAGE,
+  buildCitationDensitySourcePdfDiagnostics,
   describeReviewTarget,
   isAnnotatableEstimatePdf,
   isPdfDocument,
   resolveSourceEstimatePdfSelections,
   type SourceEstimatePdfSelection,
 } from "@/lib/reports/citationDensitySourcePdf";
+import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -109,11 +111,13 @@ export async function POST(request: Request) {
       sourceDocumentId ? [sourceDocumentId] : report.artifactIds,
       { ownerUserId: user.id }
     );
+    const sourceDiagnostics = buildCitationDensitySourcePdfDiagnostics(sourceDocuments);
     const sourceSelections = resolveOemSourceSelections({
       sourceDocuments,
       sourceDocumentId,
       targetEstimate,
       report: report.report,
+      sourceDiagnostics,
     });
 
     if (!sourceSelections.length) {
@@ -122,11 +126,14 @@ export async function POST(request: Request) {
           {
             error: "Selected source PDF is not an original estimate PDF.",
             userMessage: "Select the original carrier or shop estimate PDF. OEM Citation Density Report annotates estimate source PDFs only.",
+            reportType: "oem-citation-density",
+            routeName: "oem-citation-density",
+            ...sourceDiagnostics,
           },
           { status: 400 }
         );
       }
-      return missingSourcePdfResponse();
+      return missingSourcePdfResponse(sourceDiagnostics);
     }
 
     const outputs = [];
@@ -137,16 +144,32 @@ export async function POST(request: Request) {
     for (const selection of sourceSelections) {
       const sourceDocument = selection.attachment;
       if (!isPdfDocument(sourceDocument.type, sourceDocument.filename)) {
-        return missingSourcePdfResponse();
+        return missingSourcePdfResponse(sourceDiagnostics);
       }
       const sourcePdfBytes = sourceDocument.imageDataUrl
         ? dataUrlToPdfBytes(sourceDocument.imageDataUrl)
         : null;
       if (!sourcePdfBytes) {
-        return missingSourcePdfResponse();
+        return missingSourcePdfResponse(sourceDiagnostics);
       }
 
       const estimateRole = normalizeOutputEstimateRole(selection.selectedEstimateRole);
+      const wrongPrefixFinding = findWrongOemFindingIdentity([]);
+      if (wrongPrefixFinding) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "OEM Citation Density route received a Citation Density finding.",
+            userMessage: "OEM Citation Density route received a Citation Density artifact. Regenerate the OEM Citation Density Report.",
+            reportType: "oem-citation-density",
+            routeName: "oem-citation-density",
+            artifactReportType: getFindingReportType(wrongPrefixFinding),
+            findingIdPrefixCheckPassed: false,
+            findingId: wrongPrefixFinding.id,
+          },
+          { status: 422 }
+        );
+      }
       const result = await buildAnnotatedCitationDensityEstimatePdf({
         sourcePdfBytes,
         sourceDocumentId: selection.selectedSourceDocumentId,
@@ -201,6 +224,9 @@ export async function POST(request: Request) {
         selectedSourceLabel: selection.selectedSourceLabel,
         selectedEstimateTotal: selection.selectedEstimateTotal,
         selectionReason: selection.selectionReason,
+        selectedDocumentType: selection.selectedDocumentType,
+        selectedDocumentConfidence: selection.selectedDocumentConfidence,
+        ...selection.selectionDiagnostics,
       });
     }
 
@@ -239,6 +265,18 @@ export async function POST(request: Request) {
       selectedEstimateTotal: primaryOutput?.selectedEstimateTotal,
       targetEstimate,
       selectionReason: outputs.map((output) => output.selectionReason).join(" "),
+      routeName: "oem-citation-density",
+      selectedEstimateFileName: primaryOutput?.selectedSourceLabel,
+      actualSourcePdfName: outputs[0]?.debugTrace?.actualSourcePdfName,
+      selectedDocumentType: sourceSelections[0]?.selectedDocumentType,
+      selectedDocumentConfidence: sourceSelections[0]?.selectedDocumentConfidence,
+      sourceAnchorDocumentType: outputs[0]?.debugTrace?.sourceAnchorDocumentType,
+      sourceAnchorRowType: outputs[0]?.debugTrace?.sourceAnchorRowType,
+      badAnchorRejectedCount: outputs[0]?.debugTrace?.badAnchorRejectedCount,
+      badAnchorRejectReasons: outputs[0]?.debugTrace?.badAnchorRejectReasons,
+      artifactReportType: outputs[0]?.debugTrace?.artifactReportType,
+      findingIdPrefixCheckPassed: outputs[0]?.debugTrace?.findingIdPrefixCheckPassed,
+      ...sourceDiagnostics,
     });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
@@ -257,6 +295,7 @@ export async function POST(request: Request) {
         error: error.message,
         userMessage: error.userMessage,
         debugCounts,
+        debugTrace: error.debugTrace,
       }, { status: error.status });
     }
 
@@ -273,6 +312,7 @@ function resolveOemSourceSelections(params: {
   sourceDocumentId: string;
   targetEstimate: OemCitationDensityTargetEstimate;
   report: Parameters<typeof resolveSourceEstimatePdfSelections>[0]["report"];
+  sourceDiagnostics: ReturnType<typeof buildCitationDensitySourcePdfDiagnostics>;
 }): SourceEstimatePdfSelection[] {
   if (params.sourceDocumentId) {
     const selected = params.sourceDocuments[0];
@@ -285,6 +325,9 @@ function resolveOemSourceSelections(params: {
           selectedEstimateTotal: null,
           targetEstimate: params.targetEstimate === "all" ? "both" : params.targetEstimate,
           selectionReason: "The client supplied a source document ID.",
+          selectedDocumentType: "estimate",
+          selectedDocumentConfidence: 1,
+          selectionDiagnostics: params.sourceDiagnostics,
         }]
       : [];
   }
@@ -300,6 +343,9 @@ function resolveOemSourceSelections(params: {
         selectedEstimateTotal: null,
         targetEstimate: "both" as const,
         selectionReason: "OEM Citation Density targetEstimate=all reviews every uploaded estimate PDF independently.",
+        selectedDocumentType: "estimate" as const,
+        selectedDocumentConfidence: 1,
+        selectionDiagnostics: params.sourceDiagnostics,
       }));
   }
 
@@ -315,12 +361,16 @@ function buildOemAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof bui
   if (!debugTrace) return undefined;
   return {
     reportType: debugTrace.reportType ?? "oem-citation-density",
+    routeName: debugTrace.routeName,
     buildCommit: debugTrace.buildCommit,
     artifactVersion: debugTrace.artifactVersion ?? debugTrace.citationDensityArtifactVersion,
     citationDensityArtifactVersion: debugTrace.citationDensityArtifactVersion,
     uploadedFileNames: debugTrace.uploadedFileNames,
     reviewedEstimateFileNames: debugTrace.reviewedEstimateFileNames ?? (debugTrace.selectedEstimateFileName ? [debugTrace.selectedEstimateFileName] : []),
     selectedEstimateFileName: debugTrace.selectedEstimateFileName,
+    selectedDocumentType: debugTrace.selectedDocumentType,
+    selectedDocumentConfidence: debugTrace.selectedDocumentConfidence,
+    actualSourcePdfName: debugTrace.actualSourcePdfName,
     workerResolutionAttempted: debugTrace.workerResolutionAttempted,
     workerResolutionSucceeded: debugTrace.workerResolutionSucceeded,
     workerResolutionError: debugTrace.workerResolutionError,
@@ -354,6 +404,12 @@ function buildOemAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof bui
     artifactId: debugTrace.artifactId,
     metadataArtifactId: debugTrace.metadataArtifactId,
     renderedPdfArtifactId: debugTrace.renderedPdfArtifactId,
+    sourceAnchorDocumentType: debugTrace.sourceAnchorDocumentType,
+    sourceAnchorRowType: debugTrace.sourceAnchorRowType,
+    badAnchorRejectedCount: debugTrace.badAnchorRejectedCount,
+    badAnchorRejectReasons: debugTrace.badAnchorRejectReasons,
+    artifactReportType: debugTrace.artifactReportType,
+    findingIdPrefixCheckPassed: debugTrace.findingIdPrefixCheckPassed,
   };
 }
 
@@ -405,12 +461,30 @@ function inferComparisonEstimateRole(
   return selectedRole === "shop" ? "carrier" : "shop";
 }
 
-function missingSourcePdfResponse() {
+function missingSourcePdfResponse(diagnostics: ReturnType<typeof buildCitationDensitySourcePdfDiagnostics> = {
+  acceptedEstimateCandidates: [],
+  rejectedSourceCandidates: [],
+}) {
   return NextResponse.json(
     {
       error: NO_SOURCE_PDF_ERROR,
       userMessage: NO_SOURCE_PDF_USER_MESSAGE,
+      reportType: "oem-citation-density",
+      routeName: "oem-citation-density",
+      ...diagnostics,
     },
-    { status: 400 }
+    { status: 422 }
   );
+}
+
+function getFindingReportType(finding: CitationDensityFinding): string | undefined {
+  const record = finding as CitationDensityFinding & { reportType?: string };
+  return record.reportType;
+}
+
+function findWrongOemFindingIdentity(findings: CitationDensityFinding[]) {
+  return findings.find((finding) => {
+    const reportType = getFindingReportType(finding);
+    return reportType === "citation-density" || /^citation-density-/i.test(finding.id);
+  });
 }

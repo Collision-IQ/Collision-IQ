@@ -133,6 +133,18 @@ async function createNoEstimateRowsPdf() {
   return await doc.save();
 }
 
+async function createWorkAuthorizationPdf() {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([612, 792]);
+  page.drawText("CONTRACT OF REPAIR", { x: 50, y: 730, size: 12, font });
+  page.drawText("Work Authorization", { x: 50, y: 710, size: 11, font });
+  page.drawText("Customer acknowledges Repairer has posted labor rates and daily protective care and custody $95.00", { x: 50, y: 690, size: 9, font });
+  page.drawText("Payment Warranty Assignment of Proceeds Physical inspection demand", { x: 50, y: 670, size: 9, font });
+  page.drawText("Customer Signature Vehicle owner / Date", { x: 50, y: 650, size: 9, font });
+  return await doc.save();
+}
+
 async function createRam21975SourcePdf() {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -481,6 +493,43 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     const dataUrl = `data:application/pdf;base64,${Buffer.from(bytes).toString("base64")}`;
     assert.ok(dataUrlToPdfBytes(dataUrl).byteLength > 0);
     assert.equal(dataUrlToPdfBytes("data:text/plain;base64,SGVsbG8="), null);
+  });
+
+  await run("Work Auth labor-rate contract text is rejected as a bad estimate anchor", async () => {
+    const sourcePdfBytes = await createWorkAuthorizationPdf();
+    await assert.rejects(
+      () => buildAnnotatedCitationDensityEstimatePdf({
+        sourcePdfBytes,
+        sourcePdfName: "Work Auth 21638.pdf",
+        sourceText: [
+          "CONTRACT OF REPAIR",
+          "Customer acknowledges Repairer has posted labor rates and daily protective care and custody",
+          "Assignment of Proceeds",
+          "Physical inspection demand",
+        ].join("\n"),
+        findings: [
+          baseFinding({
+            id: "citation-density-labor-rates",
+            operationLabel: "Customer acknowledges Repairer has posted labor rates",
+            carrierEvidence: {
+              lineNumber: null,
+              description: "Customer acknowledges Repairer has posted labor rates and daily protective care and custody $95.00",
+              amount: 95,
+              laborHours: null,
+              sourceLabel: "Carrier estimate",
+            },
+          }),
+        ],
+        request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+      }),
+      (error) => {
+        assert.match(error.message, /no findings matched extracted anchors|no annotations rendered/i);
+        assert.ok(error.debugTrace.badAnchorRejectedCount >= 1);
+        assert.equal(error.debugTrace.sourceAnchorDocumentType, "work_authorization");
+        assert.match(error.debugTrace.badAnchorRejectReasons.join(" "), /support_contract|legal_notice|bad anchor rejected/i);
+        return true;
+      }
+    );
   });
 
   await run("classifyPartSource detects AM LKQ CAPA OEM and used variants without unrelated matches", async () => {
@@ -1679,6 +1728,42 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     assert.equal(json.debugCounts.renderedPdfArtifactId, undefined);
     assert.equal(json.debugCounts.metadataArtifactId, undefined);
     assert.match(json.debugCounts.droppedFindings.map((item) => item.reason).join(" "), /no estimate row anchors extracted/);
+  });
+
+  await run("annotated-estimate route returns no-estimate 422 when only Work Auth is uploaded", async () => {
+    const workAuthPdfBytes = await createWorkAuthorizationPdf();
+    const dataUrl = `data:application/pdf;base64,${Buffer.from(workAuthPdfBytes).toString("base64")}`;
+    const route = loadAnnotatedEstimateRouteWithMocks({
+      report: {
+        id: "case-work-auth-only",
+        artifactIds: ["work-auth"],
+        createdAt: new Date().toISOString(),
+        report: { analysis: null, evidenceRegistry: [] },
+      },
+      attachments: [{
+        id: "work-auth",
+        filename: "Work Auth 21638.pdf",
+        type: "application/pdf",
+        text: "CONTRACT OF REPAIR Work Authorization Customer acknowledges Repairer has posted labor rates Assignment of Proceeds Physical inspection demand Customer Signature",
+        imageDataUrl: dataUrl,
+        pageCount: 1,
+      }],
+      findings: [baseFinding({ id: "citation-density-labor-rates" })],
+    });
+
+    const response = await route.POST(new Request("http://localhost/api/reports/citation-density/annotated-estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ caseId: "case-work-auth-only", targetEstimate: "auto", includeLegend: false }),
+    }));
+    const json = await response.json();
+
+    assert.equal(response.status, 422);
+    assert.equal(json.error, "No estimate PDF found for Citation Density.");
+    assert.match(json.userMessage, /Upload a shop estimate and\/or carrier estimate/);
+    assert.equal(json.acceptedEstimateCandidates.length, 0);
+    assert.equal(json.rejectedSourceCandidates[0].filename, "Work Auth 21638.pdf");
+    assert.ok(["work_authorization", "support_contract", "legal_support"].includes(json.rejectedSourceCandidates[0].detectedDocumentType));
   });
 
   await run("extracted PDF rows anchor Ram diagnostic lines only on their source pages", async () => {

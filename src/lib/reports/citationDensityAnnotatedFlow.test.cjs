@@ -40,12 +40,17 @@ const {
 const {
   NO_SOURCE_PDF_ERROR,
   NO_SOURCE_PDF_USER_MESSAGE,
+  buildCitationDensitySourcePdfDiagnostics,
   describeReviewTarget,
   isAnnotatableEstimatePdf,
   resolveSourceEstimatePdf,
   resolveSourceEstimatePdfSelection,
   resolveSourceEstimatePdfSelections,
 } = require("./citationDensitySourcePdf.ts");
+const {
+  classifyCitationDensityDocument,
+  classifyCitationDensityAnchorRow,
+} = require("./citationDensityDocumentClassifier.ts");
 
 function pdfAttachment(overrides = {}) {
   return {
@@ -132,6 +137,24 @@ function finding(overrides = {}) {
     limitations: [],
     ...overrides,
   };
+}
+
+function workAuthText() {
+  return [
+    "CONTRACT OF REPAIR",
+    "Work Authorization",
+    "Customer acknowledges Repairer has posted labor rates and daily protective care and custody",
+    "Payment",
+    "Warranty",
+    "Parts",
+    "Personal Items",
+    "Assignment of Proceeds",
+    "Defense and Indemnification",
+    "Physical inspection demand",
+    "PA Motor Vehicle Physical Damage Appraiser Act",
+    "Customer Signature",
+    "Vehicle owner / Date",
+  ].join("\n");
 }
 
 function run(name, test) {
@@ -232,25 +255,21 @@ run("OEM Citation Density replaces Policy & Rights primary report card", () => {
   assert.match(oemRouteSource, /buildOemCitationDensityFindings/);
 });
 
-run("Citation Density viewer configures worker and converts PDF coordinates", () => {
+run("Citation Density viewer uses server-generated PDF and converts PDF coordinates", () => {
   const source = fs.readFileSync(path.join(process.cwd(), "src/components/CitationDensityAnnotationViewer.tsx"), "utf8");
 
-  assert.match(source, /GlobalWorkerOptions\.workerSrc/);
-  assert.match(source, /pdfjs-dist\/build\/pdf\.worker\.mjs/);
+  assert.doesNotMatch(source, /GlobalWorkerOptions\.workerSrc/);
+  assert.doesNotMatch(source, /pdfjs-dist\/build\/pdf\.worker\.mjs/);
   assert.doesNotMatch(source, /disableWorker:\s*true/);
   assert.match(source, /PDF viewer failed to initialize\. Download the PDF instead\./);
-  assert.match(source, /pdfRectToViewportRect/);
-  assert.match(source, /getAnnotationOverlayRect/);
-  assert.doesNotMatch(source, /pdfHeight - source\.y - source\.height/);
-  assert.match(source, /event\.stopPropagation\(\)/);
-  assert.match(source, /data-finding-id=\{annotation\.findingId\}/);
-  assert.match(source, /data-anchor-id=\{annotation\.anchorId\}/);
-  assert.match(source, /data-annotation-key=\{selectionKey\}/);
+  assert.match(source, /PDF preview is temporarily disabled/);
+  assert.match(source, /href=\{pdfUrl\}/);
   assert.match(source, /getAnnotationSelectionKey/);
+  assert.doesNotMatch(source, /pdfHeight - source\.y - source\.height/);
   assert.match(source, /effectiveSelectedId/);
   assert.match(source, /setSelectedId\(selectionKey\)/);
   assert.match(source, /effectiveSelectedId === selectionKey/);
-  assert.match(source, /ring-2 ring-red-500/);
+  assert.match(source, /border-amber-300\/70 bg-amber-300\/15/);
 });
 
 run("shared Citation Density coordinate utility normalizes PDF and viewport rectangles", () => {
@@ -340,6 +359,81 @@ run("Citation Density annotated export cannot use generated report PDFs as sourc
   });
 
   assert.equal(selected.id, "carrier-estimate");
+});
+
+run("Work Auth contract is classified as support and cannot be an estimate source", () => {
+  const workAuth = pdfAttachment({
+    id: "work-auth",
+    filename: "Work Auth 21638.pdf",
+    text: workAuthText(),
+  });
+  const classification = classifyCitationDensityDocument({
+    filename: workAuth.filename,
+    text: workAuth.text,
+  });
+
+  assert.ok(["work_authorization", "support_contract", "legal_support"].includes(classification.detectedDocumentType));
+  assert.equal(classification.isEstimateLike, false);
+  assert.equal(isAnnotatableEstimatePdf(workAuth), false);
+  assert.notEqual(classifyCitationDensityAnchorRow("Customer acknowledges Repairer has posted labor rates and daily protective care and custody"), "estimate_row");
+  assert.equal(resolveSourceEstimatePdf({
+    attachments: [workAuth],
+    report: reportWithEvidenceRegistry(),
+    targetEstimate: "auto",
+    findings: [finding()],
+  }), null);
+  assert.equal(NO_SOURCE_PDF_ERROR, "No estimate PDF found for Citation Density.");
+  assert.match(NO_SOURCE_PDF_USER_MESSAGE, /Upload a shop estimate and\/or carrier estimate/);
+});
+
+run("Shop and carrier estimates win over Work Auth support documents", () => {
+  const workAuth = pdfAttachment({
+    id: "work-auth",
+    filename: "Allstate Auth.pdf",
+    text: workAuthText(),
+  });
+  const carrier = pdfAttachment({
+    id: "carrier",
+    filename: "Carrier Estimate.pdf",
+    text: "Estimate of Record Workfile ID 123 ESTIMATE TOTALS Total Cost of Repairs $3,200.00 Line Oper Description Part Number Qty Extended Price Labor Paint Line 12 Repl ADAS calibration 1.5 hrs $250.00",
+  });
+  const shop = pdfAttachment({
+    id: "shop",
+    filename: "Shop Estimate.pdf",
+    text: "Preliminary Estimate CCC ONE Estimating Supplement Summary Total Cost of Repairs $7,600.00 Line 12 Repl ADAS calibration 2.0 hrs $450.00",
+  });
+
+  const selected = resolveSourceEstimatePdf({
+    attachments: [workAuth, shop, carrier],
+    report: reportWithEvidenceRegistry(),
+    targetEstimate: "auto",
+    findings: [finding({ primaryAnnotationRole: "both", crossEstimateIssue: true })],
+  });
+  const diagnostics = buildCitationDensitySourcePdfDiagnostics([workAuth, shop, carrier]);
+
+  assert.equal(selected.id, "carrier");
+  assert.equal(diagnostics.acceptedEstimateCandidates.length, 2);
+  assert.equal(diagnostics.rejectedSourceCandidates.some((candidate) => candidate.filename === "Allstate Auth.pdf"), true);
+  assert.equal(diagnostics.acceptedEstimateCandidates.some((candidate) => candidate.filename === "Work Auth 21638.pdf"), false);
+});
+
+run("Citation Density and OEM routes contain artifact identity guards", () => {
+  const citationRoute = fs.readFileSync(
+    path.join(process.cwd(), "src/app/api/reports/citation-density/annotated-estimate/route.ts"),
+    "utf8"
+  );
+  const oemRoute = fs.readFileSync(
+    path.join(process.cwd(), "src/app/api/reports/oem-citation-density/annotated-estimate/route.ts"),
+    "utf8"
+  );
+  const builder = fs.readFileSync(path.join(process.cwd(), "src/lib/reports/annotatedCitationDensityEstimate.ts"), "utf8");
+
+  assert.match(citationRoute, /oem-citation-density/);
+  assert.match(citationRoute, /findingIdPrefixCheckPassed/);
+  assert.match(oemRoute, /citation-density/);
+  assert.match(oemRoute, /findingIdPrefixCheckPassed/);
+  assert.match(builder, /findReportIdentityMismatch/);
+  assert.match(builder, /bad anchor rejected/);
 });
 
 run("one uploaded estimate PDF is selected as the annotated source base", () => {
@@ -525,8 +619,8 @@ run("missing source PDF returns clear user-facing missing-source message data", 
   });
 
   assert.equal(selected, null);
-  assert.equal(NO_SOURCE_PDF_ERROR, "No original estimate PDF was found for annotation.");
-  assert.match(NO_SOURCE_PDF_USER_MESSAGE, /select or upload the estimate PDF/i);
+  assert.equal(NO_SOURCE_PDF_ERROR, "No estimate PDF found for Citation Density.");
+  assert.match(NO_SOURCE_PDF_USER_MESSAGE, /Upload a shop estimate and\/or carrier estimate/i);
 });
 
 run("authority priority model does not treat estimate parser, CCC, or internet fallback as verified authority", () => {
