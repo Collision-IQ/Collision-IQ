@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import { ArrowRight, Download, FileText, Mail } from "lucide-react";
@@ -22,9 +23,7 @@ import type { InsightKey } from "@/components/chatbot/insightSync";
 import StructuredAnalysisCanvas from "@/components/StructuredAnalysisCanvas";
 import UpgradeModal from "@/components/UpgradeModal";
 import WorkspacePanel from "@/components/WorkspacePanel";
-import CitationDensityAnnotationViewer, {
-  type CitationDensityAnnotationMetadata,
-} from "@/components/CitationDensityAnnotationViewer";
+import type { CitationDensityAnnotationMetadata } from "@/components/CitationDensityAnnotationViewer";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import { getNormalizedDetermination } from "@/lib/analysis/getNormalizedDetermination";
@@ -85,6 +84,11 @@ import type {
 } from "@/lib/ai/types/analysis";
 import type { CustomerReport } from "@/lib/ai/generateCustomerReport";
 import type { WorkspaceData } from "@/types/workspaceTypes";
+
+const CitationDensityAnnotationViewer = dynamic(
+  () => import("@/components/CitationDensityAnnotationViewer"),
+  { ssr: false }
+);
 
 function displayOperationLabel(value: string | null | undefined): string {
   return cleanOperationDisplayText(value) || value || "Repair Operation";
@@ -179,8 +183,25 @@ function resolveEffectiveReviewProgress(
         ...(integrity.excludedFromReviewReasons ?? []),
       ]),
     ],
+    excludedFromReviewFiles: mergeExcludedFromReviewFiles(
+      progress.excludedFromReviewFiles,
+      integrity.excludedFromReviewFiles ?? []
+    ),
     totalKnownFiles,
   };
+}
+
+function mergeExcludedFromReviewFiles(
+  current: ReviewProgress["excludedFromReviewFiles"],
+  next: ReviewProgress["excludedFromReviewFiles"]
+) {
+  const seen = new Set<string>();
+  return [...current, ...next].filter((item) => {
+    const key = `${item.filename}:${item.detectedType}:${item.reason}:${item.indexed}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 type LinkedEvidenceDebugItem = {
@@ -376,6 +397,7 @@ export function ChatbotWorkspacePage() {
     reviewableFileCount: 0,
     excludedFromReviewCount: 0,
     excludedFromReviewReasons: [],
+    excludedFromReviewFiles: [],
     totalKnownFiles: 0,
   });
   const [analysisText, setAnalysisText] = useState("");
@@ -1750,6 +1772,7 @@ function RailContent({
     reviewableFileCount: effectiveReviewProgress.reviewableFileCount,
     excludedFromReviewCount: effectiveReviewProgress.excludedFromReviewCount,
   });
+  const excludedFileDiagnostics = effectiveReviewProgress.excludedFromReviewFiles;
   const supportSignals = dedupeRailItems([
     ...renderModel.reportFields.presentStrengths,
     ...renderModel.disputeIntelligenceReport.positives,
@@ -2712,6 +2735,24 @@ function RailContent({
         {indexedExclusionAuditNote ? (
           <div className="mt-3 rounded-xl border border-border bg-muted px-3 py-2 text-[12px] leading-5 text-muted-foreground">
             {indexedExclusionAuditNote}
+          </div>
+        ) : null}
+
+        {excludedFileDiagnostics.length ? (
+          <div className="mt-3 rounded-xl border border-border bg-muted px-3 py-2 text-[12px] leading-5 text-muted-foreground">
+            <div className="mb-1 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+              Excluded Files
+            </div>
+            <div className="space-y-2">
+              {excludedFileDiagnostics.map((file, index) => (
+                <div key={`${file.filename}-${file.reason}-${index}`} className="border-t border-border/60 pt-2 first:border-t-0 first:pt-0">
+                  <div className="font-medium text-foreground">{file.filename}</div>
+                  <div>Detected type: {formatLabel(file.detectedType)}</div>
+                  <div>Reason: {formatLabel(file.reason)}</div>
+                  <div>Indexed: {file.indexed ? "Yes" : "No"}</div>
+                </div>
+              ))}
+            </div>
           </div>
         ) : null}
       </section>

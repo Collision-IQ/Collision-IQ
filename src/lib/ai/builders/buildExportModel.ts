@@ -676,6 +676,7 @@ function buildConfidenceIntegrity(params: {
       reviewableFileCount: integrity.reviewableFileCount,
       excludedFromReviewCount: integrity.excludedFromReviewCount,
       excludedFromReviewReasons: integrity.excludedFromReviewReasons,
+      excludedFromReviewFiles: integrity.excludedFromReviewFiles,
     });
     return {
       ...integrity,
@@ -685,6 +686,7 @@ function buildConfidenceIntegrity(params: {
       reviewableFileCount: counts.reviewableFileCount,
       excludedFromReviewCount: counts.excludedFromReviewCount,
       excludedFromReviewReasons: counts.excludedFromReviewReasons,
+      excludedFromReviewFiles: counts.excludedFromReviewFiles,
       totalKnownFileCount: Math.max(
         integrity.totalKnownFileCount ?? 0,
         counts.uploadedCount,
@@ -721,6 +723,7 @@ function buildConfidenceIntegrity(params: {
     reviewableFileCount: params.report?.ingestionMeta?.reviewableFileCount,
     excludedFromReviewCount: params.report?.ingestionMeta?.excludedFromReviewCount,
     excludedFromReviewReasons: params.report?.ingestionMeta?.excludedFromReviewReasons,
+    excludedFromReviewFiles: params.report?.ingestionMeta?.excludedFromReviewFiles,
   });
   const totalKnownFileCount = Math.max(
     params.report?.ingestionMeta?.totalKnownFileCount ?? 0,
@@ -760,6 +763,7 @@ function buildConfidenceIntegrity(params: {
     reviewableFileCount: reviewProgressCounts.reviewableFileCount,
     excludedFromReviewCount: reviewProgressCounts.excludedFromReviewCount,
     excludedFromReviewReasons: reviewProgressCounts.excludedFromReviewReasons,
+    excludedFromReviewFiles: reviewProgressCounts.excludedFromReviewFiles,
     totalKnownFileCount,
     uploadLimitReached,
     userIndicatedMoreFiles,

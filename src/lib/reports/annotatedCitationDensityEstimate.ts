@@ -119,6 +119,10 @@ export type CitationDensityDebugTrace = {
   pdfWorkerExists?: boolean;
   pdfWorkerSrc?: string;
   pdfjsImportMode?: "externalized-node-module" | "next-bundled-chunk";
+  workerResolutionAttempted: boolean;
+  workerResolutionSucceeded: boolean;
+  workerResolutionError?: string;
+  parserFallbackUsed: boolean;
   textExtractionInfrastructureStage?: "polyfills" | "pdfjs-import" | "worker-resolution" | "get-document" | "get-text-content";
   extractedTextPageCount: number;
   firstPageTextSample: string;
@@ -531,6 +535,10 @@ export async function extractCitationDensityRowAnchors(
     pdfWorkerExists: diagnostics.pdfWorkerExists,
     pdfWorkerSrc: diagnostics.pdfWorkerSrc,
     pdfjsImportMode: diagnostics.pdfjsImportMode,
+    workerResolutionAttempted: diagnostics.workerResolutionAttempted,
+    workerResolutionSucceeded: diagnostics.workerResolutionSucceeded,
+    workerResolutionError: diagnostics.workerResolutionError,
+    parserFallbackUsed: diagnostics.parserFallbackUsed,
     textExtractionInfrastructureStage: diagnostics.textExtractionInfrastructureStage,
     extractedTextPageCount: diagnostics.perPageTextLengths.filter((length) => length > 0).length,
     firstPageTextSample: truncateDebugText(
@@ -600,6 +608,10 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       pdfWorkerExists: undefined,
       pdfWorkerSrc: undefined,
       pdfjsImportMode: undefined,
+      workerResolutionAttempted: false,
+      workerResolutionSucceeded: false,
+      workerResolutionError: undefined,
+      parserFallbackUsed: false,
       textExtractionInfrastructureStage: "pdfjs-import" as const,
       visualLines: [],
       extractedTextPageCount: 0,
@@ -634,6 +646,10 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     pdfWorkerExists: extraction.pdfWorkerExists,
     pdfWorkerSrc: extraction.pdfWorkerSrc,
     pdfjsImportMode: extraction.pdfjsImportMode,
+    workerResolutionAttempted: extraction.workerResolutionAttempted,
+    workerResolutionSucceeded: extraction.workerResolutionSucceeded,
+    workerResolutionError: extraction.workerResolutionError,
+    parserFallbackUsed: extraction.parserFallbackUsed,
     textExtractionInfrastructureStage: extraction.textExtractionInfrastructureStage,
     extractedTextPageCount: extraction.extractedTextPageCount,
     firstPageTextSample: extraction.firstPageTextSample,

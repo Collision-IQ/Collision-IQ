@@ -14,7 +14,6 @@ import { isOpenAiVisionCompatibleImage } from "@/lib/ai/openAiVisionInput";
 
 type AttachmentVisionDeps = {
   summarizeImageAttachment?: (attachment: StoredAttachment) => Promise<string>;
-  summarizePdfAttachment?: (attachment: StoredAttachment) => Promise<string>;
   downloadLinkedFile?: (fileIdOrUrl: string) => Promise<ArrayBuffer>;
 };
 
@@ -67,14 +66,6 @@ async function normalizeStoredAttachment(
     };
   }
 
-  if (attachment.type === "application/pdf" && attachment.imageDataUrl) {
-    const summary = await (deps?.summarizePdfAttachment ?? summarizePdfAttachment)(attachment);
-    return {
-      ...attachment,
-      text: mergeObservationText(attachment.text, summary),
-    };
-  }
-
   return attachment;
 }
 
@@ -115,10 +106,12 @@ async function fetchDriveLinkedAttachments(params: {
           mimeType,
           filename,
         });
-        const imageDataUrl = bufferToReusableDataUrl({
-          buffer,
-          mimeType,
-        });
+        const imageDataUrl = mimeType.startsWith("image/")
+          ? bufferToReusableDataUrl({
+              buffer,
+              mimeType,
+            })
+          : undefined;
         const baseAttachment: StoredAttachment = {
           id: `drive:${index + 1}:${fileId}`,
           filename,
@@ -207,56 +200,6 @@ If visible damage raises concern for related verification, phrase it as an open 
     return response.output_text?.trim() ?? "";
   } catch (error) {
     console.warn("[analysis-attachments] image normalization failed", {
-      filename: attachment.filename,
-      mimeType: attachment.type || "unknown",
-      message: error instanceof Error ? error.message : String(error),
-    });
-    return "";
-  }
-}
-
-async function summarizePdfAttachment(attachment: StoredAttachment) {
-  if (!attachment.imageDataUrl || attachment.type !== "application/pdf") {
-    return "";
-  }
-
-  try {
-    const response = await openai.responses.create({
-      model: collisionIqModels.primary,
-      temperature: 0.1,
-      input: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: `Review this PDF as a collision-repair source document.
-
-Focus on the first page, totals page, photo/screenshot-heavy pages, and any low-text pages that still carry meaningful visual information.
-
-Return concise plain text only with these labels:
-- Document type:
-- Key visible estimate facts:
-- Visible damage/photo observations:
-- Comparison or screenshot cues:
-- Structural cues:
-- Readable totals/support:
-
-Only include grounded observations from the PDF.`,
-            },
-            {
-              type: "input_file",
-              filename: attachment.filename,
-              file_data: attachment.imageDataUrl,
-            } as unknown as { type: "input_file"; filename: string; file_data: string },
-          ],
-        },
-      ],
-    });
-
-    return response.output_text?.trim() ?? "";
-  } catch (error) {
-    console.warn("[analysis-attachments] pdf vision normalization failed", {
       filename: attachment.filename,
       mimeType: attachment.type || "unknown",
       message: error instanceof Error ? error.message : String(error),

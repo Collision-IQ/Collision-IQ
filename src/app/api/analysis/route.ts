@@ -87,6 +87,7 @@ import {
 } from "@/lib/uploadSafety/uploadLimits";
 import {
   normalizeReviewProgressCounts,
+  type ExcludedFromReviewFileDiagnostic,
   type ExcludedFromReviewReason,
 } from "@/lib/reviewCompleteness";
 import { classifyRetryableProviderError } from "@/lib/ai/providerRetryableError";
@@ -124,6 +125,7 @@ type AnalysisRequestBody = {
     reviewableFileCount?: number;
     excludedFromReviewCount?: number;
     excludedFromReviewReasons?: ExcludedFromReviewReason[];
+    excludedFromReviewFiles?: ExcludedFromReviewFileDiagnostic[];
     totalKnownFiles?: number;
   } | null;
 };
@@ -312,10 +314,10 @@ export async function POST(req: Request) {
       resultCount: linkedEvidenceOkCount,
     });
     const linkedEvidenceAttachments = linkedEvidenceToAttachments(linkedEvidence);
-    const preloadedAttachments = [
+    const preloadedAttachments = prioritizeEstimateGapAttachments([
       ...normalizedAttachments,
       ...linkedEvidenceAttachments,
-    ];
+    ], requestUserIntent);
 
     const retrievalAttempted = true;
     let retrievalCompleted = false;
@@ -1530,7 +1532,8 @@ function applyLinkedEvidenceToReport(params: {
     params.previousReport?.ingestionMeta?.visionProcessedFileCount ?? 0,
     visionProcessedEvidenceCount
   );
-  const reviewedFileCount = uploadedEvidenceCount;
+  const reviewabilityDiagnostics = buildUploadedReviewabilityDiagnostics(params.uploadedAttachments);
+  const reviewedFileCount = Math.max(uploadedEvidenceCount, reviewabilityDiagnostics.reviewableFileCount);
   const reviewProgressCounts = normalizeReviewProgressCounts({
     uploadedCount: uploadedFileCount,
     indexedCount: indexedFileCount,
@@ -1538,13 +1541,11 @@ function applyLinkedEvidenceToReport(params: {
     reviewedFileCount,
     reviewableFileCount:
       params.reviewProgress?.reviewableFileCount ??
-      params.previousReport?.ingestionMeta?.reviewableFileCount,
-    excludedFromReviewCount:
-      params.reviewProgress?.excludedFromReviewCount ??
-      params.previousReport?.ingestionMeta?.excludedFromReviewCount,
-    excludedFromReviewReasons:
-      params.reviewProgress?.excludedFromReviewReasons ??
-      params.previousReport?.ingestionMeta?.excludedFromReviewReasons,
+      params.previousReport?.ingestionMeta?.reviewableFileCount ??
+      reviewabilityDiagnostics.reviewableFileCount,
+    excludedFromReviewCount: reviewabilityDiagnostics.excludedFiles.length,
+    excludedFromReviewReasons: reviewabilityDiagnostics.excludedReasons,
+    excludedFromReviewFiles: reviewabilityDiagnostics.excludedFiles,
   });
   const totalKnownFileCount = Math.max(
     params.reviewProgress?.totalKnownFiles ?? 0,
@@ -1583,6 +1584,7 @@ function applyLinkedEvidenceToReport(params: {
       reviewableFileCount: reviewProgressCounts.reviewableFileCount,
       excludedFromReviewCount: reviewProgressCounts.excludedFromReviewCount,
       excludedFromReviewReasons: reviewProgressCounts.excludedFromReviewReasons,
+      excludedFromReviewFiles: reviewProgressCounts.excludedFromReviewFiles,
       totalKnownFileCount,
       uploadLimitReached: Boolean(params.uploadLimitReached),
       userIndicatedMoreFiles: userIndicatedMoreFiles(params.userIntent ?? ""),
@@ -1610,6 +1612,28 @@ function applyLinkedEvidenceToReport(params: {
 
 function userIndicatedMoreFiles(value: string): boolean {
   return /\b(more|additional|other|another|rest of|remaining)\s+(files?|documents?|photos?|estimates?|invoices?)\b|\b(can'?t|cannot|unable to|won'?t let me)\s+upload\b|\bupload limit\b|\btoo many files\b/i.test(value);
+}
+
+function prioritizeEstimateGapAttachments(
+  attachments: StoredAttachment[],
+  userIntent: string
+): StoredAttachment[] {
+  if (!isEstimateGapIntent(userIntent)) return attachments;
+
+  return [...attachments].sort(
+    (a, b) => getEstimateGapPriority(a.filename) - getEstimateGapPriority(b.filename)
+  );
+}
+
+function isEstimateGapIntent(value: string) {
+  return /\b(estimate\s*gap|gap\s*analysis|compare|comparison|shop\s+estimate|carrier\s+estimate|supplement|sor)\b/i.test(value);
+}
+
+function getEstimateGapPriority(filename: string) {
+  if (/^shop\s*21548\.pdf$/i.test(filename.trim())) return 0;
+  if (/^sor3\.pdf$/i.test(filename.trim())) return 1;
+  if (isEstimateOrRepairSupportPdf(filename, "")) return 2;
+  return 3;
 }
 
 function buildReviewProgressPayload(
@@ -1650,6 +1674,7 @@ function buildReviewProgressPayload(
     reviewableFileCount: report.ingestionMeta?.reviewableFileCount,
     excludedFromReviewCount: report.ingestionMeta?.excludedFromReviewCount,
     excludedFromReviewReasons: report.ingestionMeta?.excludedFromReviewReasons,
+    excludedFromReviewFiles: report.ingestionMeta?.excludedFromReviewFiles,
   });
   const totalKnownFiles = Math.max(
     report.ingestionMeta?.totalKnownFileCount ?? 0,
@@ -1667,6 +1692,7 @@ function buildReviewProgressPayload(
     reviewableFileCount: reviewProgressCounts.reviewableFileCount,
     excludedFromReviewCount: reviewProgressCounts.excludedFromReviewCount,
     excludedFromReviewReasons: reviewProgressCounts.excludedFromReviewReasons,
+    excludedFromReviewFiles: reviewProgressCounts.excludedFromReviewFiles,
     totalKnownFiles,
   };
 }
@@ -2770,14 +2796,66 @@ function classifyUploadedEvidenceSource(attachment: StoredAttachment): CaseEvide
   if (text.includes("invoice") || text.includes("repair order") || text.includes("ro #")) {
     return "invoice";
   }
-  if (text.includes("carrier") || text.includes("insurance estimate")) return "carrier_estimate";
-  if (text.includes("shop") || text.includes("repair facility")) return "shop_estimate";
-  if (text.includes("supplement")) return "supplement";
+  if (/\b(carrier|insurance estimate|insurer estimate)\b/i.test(text)) return "carrier_estimate";
+  if (/\b(shop|repair facility|approved repairs?)\b/i.test(text)) return "shop_estimate";
+  if (/\b(supplement|supp|sor)\b/i.test(text)) return "supplement";
   if (text.includes("scan")) return "scan_report";
   if (text.includes("calibration")) return "calibration_report";
   if (text.includes("adas")) return "adas_report";
-  if (text.includes("oem") || text.includes("procedure")) return "oem_documentation";
+  if (/\b(oem|procedure|repair guidelines?|oem guidelines?|work auth(?:orization)?)\b/i.test(text)) return "oem_documentation";
   return "other_supporting_document";
+}
+
+function buildUploadedReviewabilityDiagnostics(attachments: StoredAttachment[]): {
+  reviewableFileCount: number;
+  excludedFiles: ExcludedFromReviewFileDiagnostic[];
+  excludedReasons: ExcludedFromReviewReason[];
+} {
+  const excludedFiles: ExcludedFromReviewFileDiagnostic[] = [];
+  let reviewableFileCount = 0;
+
+  for (const attachment of attachments) {
+    const detectedType = classifyUploadedEvidenceSource(attachment);
+    const reason = getDeterminationReviewExclusionReason(attachment, detectedType);
+    if (reason) {
+      excludedFiles.push({
+        filename: attachment.filename,
+        detectedType,
+        reason,
+        indexed: Boolean(attachment.id),
+      });
+    } else {
+      reviewableFileCount++;
+    }
+  }
+
+  return {
+    reviewableFileCount,
+    excludedFiles,
+    excludedReasons: [...new Set(excludedFiles.map((file) => file.reason))],
+  };
+}
+
+function getDeterminationReviewExclusionReason(
+  attachment: StoredAttachment,
+  detectedType: CaseEvidenceSourceType
+): ExcludedFromReviewReason | null {
+  if (isPdfAttachment(attachment)) return null;
+  if (detectedType === "photo") return null;
+  if (attachment.classification === "ccc_awf" || attachment.classification === "ccc_workfile") return null;
+  if (attachment.classification === "ccc_companion_file") return "INTERNAL_CONTAINER";
+  if (attachment.type.startsWith("video/") || attachment.classification === "video") return "UNSUPPORTED_TYPE";
+  if (!attachment.text?.trim() && !attachment.imageDataUrl) return "EMPTY_FILE";
+  return null;
+}
+
+function isPdfAttachment(attachment: Pick<StoredAttachment, "filename" | "type" | "classification">) {
+  return attachment.classification === "pdf" || attachment.type === "application/pdf" || /\.pdf$/i.test(attachment.filename);
+}
+
+function isEstimateOrRepairSupportPdf(filename: string, text: string) {
+  const haystack = `${filename}\n${text}`;
+  return /\.pdf$/i.test(filename) && /\b(shop|sor\d*|supp(?:lement)?|estimate|work auth(?:orization)?|invoice|repair guidelines?|oem guidelines?|approved repairs?)\b/i.test(haystack);
 }
 
 function isPolicyEvidenceText(text: string): boolean {

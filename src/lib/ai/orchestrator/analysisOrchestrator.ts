@@ -137,7 +137,7 @@ function inferPhotoVisibleDamageSummary(
     imageDataUrl?: string | null;
   }>
 ): string {
-  const photoCount = documents.filter((document) => Boolean(document.imageDataUrl)).length;
+  const photoCount = documents.filter(isVisionImageDocument).length;
 
   if (photoCount === 0) {
     return "No photo set was available, so visible damage could not be independently confirmed from images.";
@@ -162,7 +162,7 @@ function inferImageValidationSignal(
   }>
 ): ImageValidationSignal {
   const imageTexts = documents
-    .filter((document) => Boolean(document.imageDataUrl))
+    .filter(isVisionImageDocument)
     .map((document) => document.text ?? "")
     .filter(Boolean);
 
@@ -439,7 +439,7 @@ export async function runRepairAnalysis({
     filename: attachment.filename,
     mime: attachment.type,
     text: attachment.text,
-    imageDataUrl: attachment.imageDataUrl,
+    imageDataUrl: isVisionImageAttachment(attachment) ? attachment.imageDataUrl : undefined,
   }));
   const intentProfile = scoreAnalysisIntent(userIntent);
 
@@ -689,6 +689,17 @@ export async function runRepairAnalysis({
   }
 
   return report;
+}
+
+function isVisionImageAttachment(attachment: StoredAttachment) {
+  return attachment.type.startsWith("image/") && Boolean(attachment.imageDataUrl);
+}
+
+function isVisionImageDocument(document: {
+  mime?: string | null;
+  imageDataUrl?: string | null;
+}) {
+  return Boolean(document.imageDataUrl) && Boolean(document.mime?.startsWith("image/"));
 }
 
 function findDocumentText(

@@ -30,6 +30,10 @@ export type PdfTextExtractionDiagnostics = {
   pdfWorkerExists?: boolean;
   pdfWorkerSrc?: string;
   pdfjsImportMode?: "externalized-node-module" | "next-bundled-chunk";
+  workerResolutionAttempted: boolean;
+  workerResolutionSucceeded: boolean;
+  workerResolutionError?: string;
+  parserFallbackUsed: boolean;
   textExtractionInfrastructureStage?: "polyfills" | "pdfjs-import" | "worker-resolution" | "get-document" | "get-text-content";
   pageCount: number;
   perPageTextLengths: number[];
@@ -159,6 +163,9 @@ export async function extractPdfWordsWithDiagnostics(bytes: Uint8Array): Promise
         method: "pdfjs-legacy-primary",
         error: polyfillError,
         warnings,
+        workerResolutionAttempted: false,
+        workerResolutionSucceeded: false,
+        parserFallbackUsed: false,
         textExtractionInfrastructureStage: infrastructureStage,
         pageCount: 0,
         perPageTextLengths: [],
@@ -182,6 +189,7 @@ export async function extractPdfWordsWithDiagnostics(bytes: Uint8Array): Promise
       words: primary.words,
       diagnostics: {
         ...primary.diagnostics,
+        parserFallbackUsed: false,
         warnings: [...warnings, ...primary.diagnostics.warnings],
       },
     };
@@ -202,6 +210,7 @@ export async function extractPdfWordsWithDiagnostics(bytes: Uint8Array): Promise
     words: fallback.words,
     diagnostics: {
       ...fallback.diagnostics,
+      parserFallbackUsed: true,
       warnings: [
         ...warnings,
         ...primary.diagnostics.warnings,
@@ -262,6 +271,9 @@ function emptyExtractionDiagnostics(
       method,
       error: error instanceof Error ? error.message : String(error),
       warnings: [],
+      workerResolutionAttempted: false,
+      workerResolutionSucceeded: false,
+      parserFallbackUsed: method === "pdfjs-legacy-node-fallback",
       textExtractionInfrastructureStage: "pdfjs-import",
       pageCount: 0,
       perPageTextLengths: [],
@@ -280,14 +292,23 @@ async function extractPdfWordsWithPdfjs(
   words: PdfWord[];
   diagnostics: PdfTextExtractionDiagnostics;
 }> {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const warnings: string[] = [];
+  let infrastructureStage: PdfTextExtractionDiagnostics["textExtractionInfrastructureStage"] = "pdfjs-import";
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   let workerDiagnostics: ReturnType<typeof resolvePdfJsNodeWorker> | undefined;
+  infrastructureStage = "worker-resolution";
+  workerDiagnostics = configurePdfJsNodeWorker(pdfjs, warnings);
+
+  const getDocumentOptions = {
+    ...documentOptions,
+    disableWorker: true,
+  };
+
+  let pdf: Awaited<ReturnType<typeof pdfjs.getDocument>["promise"]>;
   try {
-    workerDiagnostics = configurePdfJsNodeWorker(pdfjs, warnings);
-    if (!workerDiagnostics.pdfWorkerExists) {
-      throw new Error(`PDF.js worker file not found at ${workerDiagnostics.pdfWorkerResolvedPath}`);
-    }
+    infrastructureStage = "get-document";
+    const loadingTask = pdfjs.getDocument(getDocumentOptions as unknown as Parameters<typeof pdfjs.getDocument>[0]);
+    pdf = await loadingTask.promise;
   } catch (error) {
     return {
       words: [],
@@ -296,7 +317,10 @@ async function extractPdfWordsWithPdfjs(
         error: error instanceof Error ? error.message : String(error),
         warnings,
         ...(workerDiagnostics ?? {}),
-        textExtractionInfrastructureStage: "worker-resolution",
+        workerResolutionAttempted: workerDiagnostics?.workerResolutionAttempted ?? true,
+        workerResolutionSucceeded: workerDiagnostics?.workerResolutionSucceeded ?? false,
+        parserFallbackUsed: method === "pdfjs-legacy-node-fallback",
+        textExtractionInfrastructureStage: infrastructureStage,
         pageCount: 0,
         perPageTextLengths: [],
         perPageTextItemCounts: [],
@@ -305,54 +329,74 @@ async function extractPdfWordsWithPdfjs(
       },
     };
   }
-  const loadingTask = pdfjs.getDocument(documentOptions as unknown as Parameters<typeof pdfjs.getDocument>[0]);
-  const pdf = await loadingTask.promise;
   const words: PdfWord[] = [];
   const perPageTextLengths: number[] = [];
   const perPageTextItemCounts: number[] = [];
   let firstNonEmptyTextPage: number | null = null;
   let firstNonEmptyTextSample = "";
 
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const viewport = page.getViewport({ scale: 1 });
-    const content = await page.getTextContent({
-      disableNormalization: false,
-      includeMarkedContent: false,
-    } as unknown as Parameters<typeof page.getTextContent>[0]);
-    let pageTextLength = 0;
-    let pageTextItemCount = 0;
-    const pageChunks: string[] = [];
-    for (const item of content.items) {
-      if (!("str" in item) || typeof item.str !== "string") continue;
-      const text = item.str.replace(/\s+/g, " ").trim();
-      if (!text) continue;
-      pageTextItemCount += 1;
-      pageTextLength += text.length;
-      pageChunks.push(text);
-      const transform = item.transform;
-      const x = Number(transform[4] ?? 0);
-      const pdfJsY = Number(transform[5] ?? 0);
-      const height = Math.max(Number((item as { height?: number }).height ?? 8), 6);
-      const width = Math.max(Number((item as { width?: number }).width ?? 40), text.length * 4);
-      words.push({
-        pageNumber,
-        text,
-        normalizedText: normalizeMatchText(text),
-        x,
-        y: viewport.height - pdfJsY - height * 0.4,
-        width,
-        height,
-        pageWidth: viewport.width,
-        pageHeight: viewport.height,
-      });
+  try {
+    infrastructureStage = "get-text-content";
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1 });
+      const content = await page.getTextContent({
+        disableNormalization: false,
+        includeMarkedContent: false,
+      } as unknown as Parameters<typeof page.getTextContent>[0]);
+      let pageTextLength = 0;
+      let pageTextItemCount = 0;
+      const pageChunks: string[] = [];
+      for (const item of content.items) {
+        if (!("str" in item) || typeof item.str !== "string") continue;
+        const text = item.str.replace(/\s+/g, " ").trim();
+        if (!text) continue;
+        pageTextItemCount += 1;
+        pageTextLength += text.length;
+        pageChunks.push(text);
+        const transform = item.transform;
+        const x = Number(transform[4] ?? 0);
+        const pdfJsY = Number(transform[5] ?? 0);
+        const height = Math.max(Number((item as { height?: number }).height ?? 8), 6);
+        const width = Math.max(Number((item as { width?: number }).width ?? 40), text.length * 4);
+        words.push({
+          pageNumber,
+          text,
+          normalizedText: normalizeMatchText(text),
+          x,
+          y: viewport.height - pdfJsY - height * 0.4,
+          width,
+          height,
+          pageWidth: viewport.width,
+          pageHeight: viewport.height,
+        });
+      }
+      perPageTextLengths.push(pageTextLength);
+      perPageTextItemCounts.push(pageTextItemCount);
+      if (firstNonEmptyTextPage === null && pageTextLength > 0) {
+        firstNonEmptyTextPage = pageNumber;
+        firstNonEmptyTextSample = truncateExtractionSample(pageChunks.join(" "));
+      }
     }
-    perPageTextLengths.push(pageTextLength);
-    perPageTextItemCounts.push(pageTextItemCount);
-    if (firstNonEmptyTextPage === null && pageTextLength > 0) {
-      firstNonEmptyTextPage = pageNumber;
-      firstNonEmptyTextSample = truncateExtractionSample(pageChunks.join(" "));
-    }
+  } catch (error) {
+    return {
+      words: [],
+      diagnostics: {
+        method,
+        error: error instanceof Error ? error.message : String(error),
+        warnings,
+        ...workerDiagnostics,
+        workerResolutionAttempted: workerDiagnostics?.workerResolutionAttempted ?? true,
+        workerResolutionSucceeded: workerDiagnostics?.workerResolutionSucceeded ?? false,
+        parserFallbackUsed: method === "pdfjs-legacy-node-fallback",
+        textExtractionInfrastructureStage: infrastructureStage,
+        pageCount: pdf.numPages,
+        perPageTextLengths,
+        perPageTextItemCounts,
+        firstNonEmptyTextPage,
+        firstNonEmptyTextSample,
+      },
+    };
   }
 
   return {
@@ -361,6 +405,9 @@ async function extractPdfWordsWithPdfjs(
       method,
       warnings,
       ...workerDiagnostics,
+      workerResolutionAttempted: workerDiagnostics?.workerResolutionAttempted ?? true,
+      workerResolutionSucceeded: workerDiagnostics?.workerResolutionSucceeded ?? false,
+      parserFallbackUsed: method === "pdfjs-legacy-node-fallback",
       textExtractionInfrastructureStage: "get-text-content",
       pageCount: pdf.numPages,
       perPageTextLengths,
@@ -371,21 +418,37 @@ async function extractPdfWordsWithPdfjs(
   };
 }
 
-export function resolvePdfJsNodeWorker() {
-  const requireFromProject = createRequire(path.join(process.cwd(), "package.json"));
-  const workerPath = requireFromProject.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs");
-  const workerExists = fs.existsSync(workerPath);
-  const workerSrc = pathToFileURL(workerPath).href;
-  const pdfjsImportMode = workerPath.includes(`${path.sep}node_modules${path.sep}`)
-    ? "externalized-node-module" as const
-    : "next-bundled-chunk" as const;
+const requireFromThisModule = createRequire(pathToFileURL(__filename).href);
 
-  return {
-    pdfWorkerResolvedPath: workerPath,
-    pdfWorkerExists: workerExists,
-    pdfWorkerSrc: workerSrc,
-    pdfjsImportMode,
-  };
+export function resolvePdfJsNodeWorker() {
+  try {
+    const workerPath = requireFromThisModule.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs");
+    const workerExists = fs.existsSync(workerPath);
+    const workerSrc = workerExists ? pathToFileURL(workerPath).href : undefined;
+    const pdfjsImportMode = workerPath.includes(`${path.sep}node_modules${path.sep}`)
+      ? "externalized-node-module" as const
+      : "next-bundled-chunk" as const;
+
+    return {
+      pdfWorkerResolvedPath: workerPath,
+      pdfWorkerExists: workerExists,
+      pdfWorkerSrc: workerSrc,
+      pdfjsImportMode,
+      workerResolutionAttempted: true,
+      workerResolutionSucceeded: workerExists,
+      workerResolutionError: workerExists ? undefined : `PDF.js worker file not found at ${workerPath}`,
+    };
+  } catch (error) {
+    return {
+      pdfWorkerResolvedPath: undefined,
+      pdfWorkerExists: false,
+      pdfWorkerSrc: undefined,
+      pdfjsImportMode: undefined,
+      workerResolutionAttempted: true,
+      workerResolutionSucceeded: false,
+      workerResolutionError: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function configurePdfJsNodeWorker(
@@ -393,8 +456,14 @@ function configurePdfJsNodeWorker(
   warnings: string[]
 ) {
   const workerDiagnostics = resolvePdfJsNodeWorker();
-  pdfjs.GlobalWorkerOptions.workerSrc = workerDiagnostics.pdfWorkerSrc;
-  warnings.push(`Configured PDF.js workerSrc from ${workerDiagnostics.pdfWorkerResolvedPath}`);
+  if (workerDiagnostics.workerResolutionSucceeded && workerDiagnostics.pdfWorkerSrc) {
+    pdfjs.GlobalWorkerOptions.workerSrc = workerDiagnostics.pdfWorkerSrc;
+    warnings.push(`Configured PDF.js workerSrc from ${workerDiagnostics.pdfWorkerResolvedPath}`);
+  } else {
+    warnings.push(
+      `PDF.js worker resolution skipped; server extraction will use disableWorker=true. ${workerDiagnostics.workerResolutionError ?? "Worker path unavailable."}`
+    );
+  }
 
   return workerDiagnostics;
 }

@@ -13,6 +13,10 @@ export function classifyDocument(name: string, mime = ""): RepairDocumentType {
   if (
     normalizedName.includes("estimate") ||
     normalizedName.includes("supplement") ||
+    /\bsor\d*\b/.test(normalizedName) ||
+    /\bshop\b/.test(normalizedName) ||
+    normalizedName.includes("work auth") ||
+    normalizedName.includes("approved repair") ||
     normalizedName.includes("ccc") ||
     normalizedName.includes("mitchell")
   ) {
@@ -30,6 +34,8 @@ export function classifyDocument(name: string, mime = ""): RepairDocumentType {
   if (
     normalizedName.includes("procedure") ||
     normalizedName.includes("oem") ||
+    normalizedName.includes("repair guideline") ||
+    normalizedName.includes("oem guideline") ||
     normalizedName.includes("tsb")
   ) {
     return "oem_procedure";

@@ -5,6 +5,7 @@ import {
   collisionIqProvider,
   type CollisionIqPrimaryProvider,
 } from "@/lib/modelConfig";
+import { generateOpenClawText } from "@/lib/openclaw";
 
 type OpenAIResponseInput = Parameters<OpenAI["responses"]["create"]>[0];
 
@@ -28,6 +29,20 @@ export async function generatePrimaryText(params: {
       input: params.input,
       temperature: params.temperature,
     });
+  }
+
+  if (collisionIqProvider.primary === "openclaw") {
+    logProviderSelection(params.stage, "openclaw", collisionIqModels.openclawPrimary);
+    const response = await generateOpenClawText({
+      instructions: params.instructions,
+      input: params.input,
+    });
+
+    return {
+      output_text: response.output_text,
+      provider: "openclaw",
+      model: response.model,
+    };
   }
 
   logProviderSelection(params.stage, "openai", collisionIqModels.primary);
@@ -58,6 +73,19 @@ export async function generateSupplementText(params: {
       input: params.input,
       temperature: params.temperature,
     });
+  }
+
+  if (collisionIqProvider.primary === "openclaw") {
+    logProviderSelection(params.stage, "openclaw", collisionIqModels.openclawPrimary);
+    const response = await generateOpenClawText({
+      input: params.input,
+    });
+
+    return {
+      output_text: response.output_text,
+      provider: "openclaw",
+      model: response.model,
+    };
   }
 
   logProviderSelection(params.stage, "openai", params.openAiModel);

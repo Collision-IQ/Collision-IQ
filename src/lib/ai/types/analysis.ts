@@ -2,7 +2,10 @@ import type { EvidenceRecord } from "./evidence";
 import type { EstimateOperation } from "../extractors/estimateExtractor";
 import type { WorkspaceEstimateComparisons } from "@/types/workspaceTypes";
 import type { LinkedEvidence } from "@/lib/ingest/fetchLinkedEvidence";
-import type { ExcludedFromReviewReason } from "@/lib/reviewCompleteness";
+import type {
+  ExcludedFromReviewFileDiagnostic,
+  ExcludedFromReviewReason,
+} from "@/lib/reviewCompleteness";
 
 export type FindingStatus = "included" | "missing" | "not_shown";
 export type Severity = "low" | "medium" | "high";
@@ -483,6 +486,7 @@ export type ConfidenceIntegrity = {
   reviewableFileCount?: number;
   excludedFromReviewCount?: number;
   excludedFromReviewReasons?: ExcludedFromReviewReason[];
+  excludedFromReviewFiles?: ExcludedFromReviewFileDiagnostic[];
   totalKnownFileCount?: number;
   uploadLimitReached: boolean;
   userIndicatedMoreFiles: boolean;
@@ -547,6 +551,7 @@ export type RepairIntelligenceReport = {
     reviewableFileCount?: number;
     excludedFromReviewCount?: number;
     excludedFromReviewReasons?: ExcludedFromReviewReason[];
+    excludedFromReviewFiles?: ExcludedFromReviewFileDiagnostic[];
     totalKnownFileCount?: number;
     uploadLimitReached?: boolean;
     userIndicatedMoreFiles?: boolean;

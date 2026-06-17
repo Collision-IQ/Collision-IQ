@@ -20,6 +20,13 @@ export type ExcludedFromReviewReason =
   | "INTERNAL_CONTAINER"
   | "EMPTY_FILE";
 
+export type ExcludedFromReviewFileDiagnostic = {
+  filename: string;
+  detectedType: string;
+  reason: ExcludedFromReviewReason;
+  indexed: boolean;
+};
+
 export type ReviewProgressCounts = {
   uploadedCount: number;
   indexedCount: number;
@@ -28,6 +35,7 @@ export type ReviewProgressCounts = {
   reviewedFileCount: number;
   excludedFromReviewCount: number;
   excludedFromReviewReasons: ExcludedFromReviewReason[];
+  excludedFromReviewFiles: ExcludedFromReviewFileDiagnostic[];
 };
 
 const MATERIAL_UNREVIEWED_FILE_PATTERN =
@@ -101,6 +109,7 @@ export function normalizeReviewProgressCounts(input: {
   reviewedFileCount?: number | null;
   excludedFromReviewCount?: number | null;
   excludedFromReviewReasons?: ExcludedFromReviewReason[] | null;
+  excludedFromReviewFiles?: ExcludedFromReviewFileDiagnostic[] | null;
 }): ReviewProgressCounts {
   const uploadedCount = normalizeCount(input.uploadedCount);
   const indexedCount = normalizeCount(input.indexedCount);
@@ -123,6 +132,7 @@ export function normalizeReviewProgressCounts(input: {
       : excludedFromReviewCount > 0
         ? ["METADATA_ONLY" as const]
         : [];
+  const excludedFromReviewFiles = dedupeExcludedFiles(input.excludedFromReviewFiles ?? []);
 
   return {
     uploadedCount,
@@ -132,7 +142,20 @@ export function normalizeReviewProgressCounts(input: {
     reviewedFileCount,
     excludedFromReviewCount,
     excludedFromReviewReasons,
+    excludedFromReviewFiles,
   };
+}
+
+function dedupeExcludedFiles(
+  files: ExcludedFromReviewFileDiagnostic[]
+): ExcludedFromReviewFileDiagnostic[] {
+  const seen = new Set<string>();
+  return files.filter((file) => {
+    const key = `${file.filename}:${file.detectedType}:${file.reason}:${file.indexed}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function normalizeCount(value: number | null | undefined): number {

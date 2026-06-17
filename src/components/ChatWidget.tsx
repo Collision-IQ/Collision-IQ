@@ -68,6 +68,7 @@ import {
 import { VIDEO_MAX_BYTES } from "@/lib/uploadSafety/videoSafety";
 import {
   buildReviewCompletenessMessage,
+  type ExcludedFromReviewFileDiagnostic,
   type ExcludedFromReviewReason,
 } from "@/lib/reviewCompleteness";
 import {
@@ -172,6 +173,7 @@ export type ReviewProgress = {
   reviewableFileCount: number;
   excludedFromReviewCount: number;
   excludedFromReviewReasons: ExcludedFromReviewReason[];
+  excludedFromReviewFiles: ExcludedFromReviewFileDiagnostic[];
   totalKnownFiles: number;
 };
 
@@ -476,6 +478,19 @@ function buildReviewCompletionMessage(progress: ReviewProgress) {
   });
 }
 
+function mergeExcludedFromReviewFiles(
+  current: ExcludedFromReviewFileDiagnostic[],
+  next: ExcludedFromReviewFileDiagnostic[]
+) {
+  const seen = new Set<string>();
+  return [...current, ...next].filter((item) => {
+    const key = `${item.filename}:${item.detectedType}:${item.reason}:${item.indexed}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function getChatSessionStorageKey(activeCaseId: string | null | undefined) {
   const normalized = activeCaseId?.trim();
   return normalized
@@ -756,6 +771,7 @@ export default function ChatWidget({
     reviewableFileCount: 0,
     excludedFromReviewCount: 0,
     excludedFromReviewReasons: [],
+    excludedFromReviewFiles: [],
     totalKnownFiles: 0,
   });
   const firstAttachmentAtRef = useRef<number | null>(null);
@@ -1621,6 +1637,7 @@ export default function ChatWidget({
       reviewableFileCount: 0,
       excludedFromReviewCount: 0,
       excludedFromReviewReasons: [],
+      excludedFromReviewFiles: [],
       totalKnownFiles: 0,
     });
     setAttachmentsOpen(true);
@@ -1997,6 +2014,10 @@ export default function ChatWidget({
                 ...(analysisData.reviewProgress?.excludedFromReviewReasons ?? []),
               ]),
             ],
+            excludedFromReviewFiles: mergeExcludedFromReviewFiles(
+              current.excludedFromReviewFiles,
+              analysisData.reviewProgress?.excludedFromReviewFiles ?? []
+            ),
             totalKnownFiles: Math.max(
               current.totalKnownFiles,
               analysisData.reviewProgress?.totalKnownFiles ?? 0,
@@ -2267,6 +2288,10 @@ export default function ChatWidget({
                     ...(analysisData.reviewProgress?.excludedFromReviewReasons ?? []),
                   ]),
                 ],
+                excludedFromReviewFiles: mergeExcludedFromReviewFiles(
+                  current.excludedFromReviewFiles,
+                  analysisData.reviewProgress?.excludedFromReviewFiles ?? []
+                ),
                 totalKnownFiles: Math.max(
                   current.totalKnownFiles,
                   analysisData.reviewProgress?.totalKnownFiles ?? 0,
@@ -2573,6 +2598,7 @@ export default function ChatWidget({
       reviewableFileCount: current.reviewableFileCount,
       excludedFromReviewCount: current.excludedFromReviewCount,
       excludedFromReviewReasons: current.excludedFromReviewReasons,
+      excludedFromReviewFiles: current.excludedFromReviewFiles,
       totalKnownFiles: current.totalKnownFiles + knownFileCount,
     }));
 
@@ -3305,7 +3331,7 @@ export default function ChatWidget({
             </div>
           )}
 
-          {messages.map((msg) => {
+          {messages.map((msg, index) => {
             const selectedMessageVoiceId = messageVoiceSelections[msg.id] ?? serverTtsVoiceId;
             const selectedMessageVoice =
               SERVER_TTS_VOICE_OPTIONS.find((option) => option.id === selectedMessageVoiceId) ??
@@ -3313,7 +3339,7 @@ export default function ChatWidget({
 
             return (
             <div
-              key={msg.id}
+              key={`${msg.id ?? msg.role}-${index}`}
               className={`flex ${
                 msg.role === "user"
                   ? "justify-end"

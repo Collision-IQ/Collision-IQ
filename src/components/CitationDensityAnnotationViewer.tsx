@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Download, MessageSquareText, X } from "lucide-react";
-import { pdfRectToViewportRect } from "@/lib/reports/citationDensityCoordinates";
 
 export type CitationDensityAnnotationMetadata = {
   findingId: string;
@@ -78,51 +77,8 @@ type EstimateRowAnchorType =
   | "section_row"
   | "guide_row";
 
-type RenderedPage = {
-  pageNumber: number;
-  width: number;
-  height: number;
-  pdfWidth: number;
-  pdfHeight: number;
-  rotation: number;
-};
-
 export const PDF_VIEWER_INITIALIZATION_ERROR =
   "PDF viewer failed to initialize. Download the PDF instead.";
-
-export function configureCitationDensityPdfWorker(
-  pdfjs: typeof import("pdfjs-dist/legacy/build/pdf.mjs")
-) {
-  if (!pdfjs.GlobalWorkerOptions.workerSrc) {
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-      "pdfjs-dist/build/pdf.worker.mjs",
-      import.meta.url
-    ).toString();
-  }
-}
-
-export function getAnnotationOverlayRect(
-  annotation: CitationDensityAnnotationMetadata,
-  page: RenderedPage
-) {
-  return pdfRectToViewportRect(
-    annotation.coordinateSpace === "normalized"
-      ? {
-          xPct: annotation.xPct,
-          yPct: annotation.yPct,
-          wPct: annotation.wPct,
-          hPct: annotation.hPct,
-        }
-      : annotation,
-    {
-      width: page.width,
-      height: page.height,
-      pdfWidth: annotation.pdfPageWidth || page.pdfWidth,
-      pdfHeight: annotation.pdfPageHeight || page.pdfHeight,
-      rotation: annotation.rotation ?? page.rotation,
-    }
-  );
-}
 
 export default function CitationDensityAnnotationViewer({
   pdfUrl,
@@ -135,10 +91,7 @@ export default function CitationDensityAnnotationViewer({
   onClose: () => void;
   onAsk?: (annotation: CitationDensityAnnotationMetadata) => void;
 }) {
-  const canvasRefs = useRef(new Map<number, HTMLCanvasElement>());
-  const [pages, setPages] = useState<RenderedPage[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(annotations[0] ? getAnnotationSelectionKey(annotations[0]) : null);
-  const [error, setError] = useState<string | null>(null);
   const effectiveSelectedId = useMemo(
     () => selectedId && annotations.some((annotation) => getAnnotationSelectionKey(annotation) === selectedId)
       ? selectedId
@@ -149,62 +102,6 @@ export default function CitationDensityAnnotationViewer({
     () => annotations.find((annotation) => getAnnotationSelectionKey(annotation) === effectiveSelectedId) ?? annotations[0] ?? null,
     [annotations, effectiveSelectedId]
   );
-
-  useEffect(() => {
-    let cancelled = false;
-    async function renderPdf() {
-      setError(null);
-      const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-      configureCitationDensityPdfWorker(pdfjs);
-      const pdf = await pdfjs.getDocument({
-        url: pdfUrl,
-        useSystemFonts: true,
-      } as unknown as Parameters<typeof pdfjs.getDocument>[0]).promise;
-      const nextPages: RenderedPage[] = [];
-
-      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-        if (cancelled) return;
-        const page = await pdf.getPage(pageNumber);
-        const viewport = page.getViewport({ scale: 1.25 });
-        nextPages.push({
-          pageNumber,
-          width: viewport.width,
-          height: viewport.height,
-          pdfWidth: viewport.width / 1.25,
-          pdfHeight: viewport.height / 1.25,
-          rotation: viewport.rotation,
-        });
-      }
-
-      if (cancelled) return;
-      setPages(nextPages);
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-
-      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-        if (cancelled) return;
-        const page = await pdf.getPage(pageNumber);
-        const viewport = page.getViewport({ scale: 1.25 });
-        const canvas = canvasRefs.current.get(pageNumber);
-        if (!canvas) continue;
-        const context = canvas.getContext("2d");
-        if (!context) continue;
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        await page.render({ canvas, canvasContext: context, viewport }).promise;
-      }
-    }
-
-    renderPdf().catch((renderError) => {
-      if (!cancelled) {
-        console.error("[citation-density-viewer] PDF preview failed", renderError);
-        setError(PDF_VIEWER_INITIALIZATION_ERROR);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [pdfUrl]);
 
   const modal = (
     <div className="fixed inset-0 z-[80] bg-black/72 text-white">
@@ -237,66 +134,30 @@ export default function CitationDensityAnnotationViewer({
 
         <div className="grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_360px]">
           <div className="min-h-0 overflow-auto bg-neutral-900 p-3">
-            {error ? (
-              <div className="rounded-md border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-100">{error}</div>
-            ) : null}
-            <div className="mx-auto flex w-fit max-w-full flex-col gap-4">
-              {Array.from({ length: Math.max(1, pages.length || 1) }, (_, index) => {
-                const pageNumber = index + 1;
-                const page = pages.find((item) => item.pageNumber === pageNumber);
-                const pageAnnotations = annotations.filter((annotation) => annotation.pageNumber === pageNumber);
+            <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+              <div className="rounded-md border border-white/10 bg-white/5 p-4 text-sm leading-6 text-white/72">
+                PDF preview is temporarily disabled. Download the annotated PDF to view marked estimate lines.
+              </div>
+              {annotations.map((annotation) => {
+                const selectionKey = getAnnotationSelectionKey(annotation);
                 return (
-                  <div
-                    key={pageNumber}
-                    className="relative bg-white shadow-2xl"
-                    style={{ width: page?.width ?? 765, height: page?.height ?? 990 }}
+                  <button
+                    key={selectionKey}
+                    type="button"
+                    onClick={() => setSelectedId(selectionKey)}
+                    className={[
+                      "rounded-md border p-3 text-left transition",
+                      effectiveSelectedId === selectionKey
+                        ? "border-amber-300/70 bg-amber-300/15"
+                        : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]",
+                    ].join(" ")}
                   >
-                    <canvas
-                      ref={(canvas) => {
-                        if (canvas) canvasRefs.current.set(pageNumber, canvas);
-                      }}
-                      className="block h-full w-full"
-                    />
-                    {page ? pageAnnotations.map((annotation) => {
-                      const rect = getAnnotationOverlayRect(annotation, page);
-                      const selectionKey = getAnnotationSelectionKey(annotation);
-                      return (
-                        <button
-                          key={selectionKey}
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setSelectedId(selectionKey);
-                          }}
-                          className={[
-                            "absolute rounded-[3px] border text-left outline-none ring-offset-2 ring-offset-neutral-900 transition focus-visible:ring-2 focus-visible:ring-amber-300",
-                            effectiveSelectedId === selectionKey
-                              ? "border-red-500 bg-amber-300/45 ring-2 ring-red-500/70"
-                              : "border-amber-600/80 bg-amber-300/25 hover:bg-amber-300/40",
-                          ].join(" ")}
-                          style={{
-                            left: rect.left,
-                            top: rect.top,
-                            width: rect.width,
-                            height: rect.height,
-                          }}
-                          data-finding-id={annotation.findingId}
-                          data-anchor-id={annotation.anchorId}
-                          data-annotation-key={selectionKey}
-                          aria-label={`Open Citation Density finding ${annotation.markerNumber}`}
-                        >
-                          <span
-                            className="absolute -left-2 -top-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-700 px-1 text-[10px] font-bold leading-none text-white"
-                            data-finding-id={annotation.findingId}
-                            data-anchor-id={annotation.anchorId}
-                            data-annotation-key={selectionKey}
-                          >
-                            {annotation.markerNumber}
-                          </span>
-                        </button>
-                      );
-                    }) : null}
-                  </div>
+                    <div className="text-xs uppercase text-white/45">
+                      Finding {annotation.markerNumber} · Page {annotation.pageNumber}
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-white">{annotation.shortTitle}</div>
+                    <div className="mt-1 text-xs text-white/55">{annotation.label}</div>
+                  </button>
                 );
               })}
             </div>
