@@ -1036,7 +1036,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   const candidateResult = buildAnchoredCitationCandidates({
     anchors,
     findings: findingsWithPartSource,
-    topicFindings: selectedFindings,
+    topicFindings: findingsWithPartSource,
     estimateRole,
     sourceDocumentRole,
     anchorIndex,
@@ -1737,23 +1737,31 @@ function isPrimaryEstimateAnchor(anchor: EstimateRowAnchor) {
 function isRejectedPrimaryAnchorText(rowText: string, anchor: EstimateRowAnchor) {
   const normalized = normalizeMatchText(rowText);
   if (anchor.anchorType === "supplier_row" || anchor.anchorType === "guide_row" || anchor.anchorType === "section_row") return true;
-  return /\b(?:abbreviations?|legend|disclaimer|fraud notice|legal notice|work authorization|policy|declarations?|allstate parts policy|alternate parts policy|quality replacement parts|vehicle equipment|vin decoding|footer|page \d+ of \d+|ccc\/motor|motor guide|estimating guide|included operations?|not included|a\/m\s*=\s*aftermarket|lkq\s*\/?\s*rcy\s*\/?\s*used|capa\s*(?:certified|definition|definitions?))\b/i.test(rowText) ||
+  return isJunkCitationFindingText(normalized) ||
+    /\b(?:abbreviations?|legend|disclaimer|fraud notice|legal notice|work authorization|policy|declarations?|allstate parts policy|alternate parts policy|quality replacement parts|vehicle equipment|vin decoding|footer|page \d+ of \d+|ccc\/motor|motor guide|estimating guide|included operations?|not included|a\/m\s*=\s*aftermarket|lkq\s*\/?\s*rcy\s*\/?\s*used|capa\s*(?:certified|definition|definitions?))\b/i.test(rowText) ||
     /\b(?:abbreviation|legend|disclaimer|fraud|legal notice|work authorization|policy|declarations|alternate parts policy|quality replacement|vehicle equipment|footer|ccc motor|motor guide|estimating guide|included operations|not included|aftermarket definition|lkq rcy used|capa definition)\b/.test(normalized);
 }
 
 function isRejectedBoilerplateSupplierText(normalized: string) {
-  return /\b(?:aftermarket crash part|quality replacement parts?|alternate parts policy|a\/m aftermarket|a m aftermarket|capa definitions?|lkq rcy used definitions?|abbreviations?|legend|disclaimer|fraud|ccc motor|motor guide|included operations?|not included|vehicle equipment|recond|refn)\b/.test(normalized);
+  return isJunkCitationFindingText(normalized) ||
+    /\b(?:aftermarket crash part|quality replacement parts?|alternate parts policy|a\/m aftermarket|a m aftermarket|capa definitions?|lkq rcy used definitions?|abbreviations?|legend|disclaimer|fraud|ccc motor|motor guide|included operations?|not included|vehicle equipment|recond|refn)\b/.test(normalized);
 }
 
 function isWheelLaborAnchorText(normalized: string) {
   if (!/\b(?:wheel|rim|tire|alignment)\b/.test(normalized)) return false;
   if (/\b(?:wheel opening|opening molding|molding|flare|liner|vehicle equipment|tilt wheel|fm radio|skyview roof)\b/.test(normalized)) return false;
-  return /\b(?:rf|lf|rt|lt|front|rear|wheel|rim|tire|alignment|mount|balance|repair|sublet|replacement|replace|repl|r&i|access)\b/.test(normalized);
+  return /\b(?:(?:rf|lf|rt|lt|front|rear)\s+(?:wheel|rim)|(?:wheel|rim)\s+(?:repair|replacement|replace|repl|r&i|r\s*&\s*i|access)|tire\s+(?:mount|balance|mount\/balance)|(?:four[-\s]?wheel|4[-\s]?wheel)?\s*alignment|transport\s+alignment)\b/.test(normalized);
 }
 
 function isWheelComparisonBoilerplate(text: string) {
   const normalized = normalizeMatchText(text);
   return /\b(?:vehicle equipment|4 wheel drive|tilt wheel|fm radio|skyview roof|wheel opening|opening molding)\b/.test(normalized);
+}
+
+function isJunkCitationFindingText(normalized: string) {
+  return /\b(?:aftermarket crash part|quality replacement parts?|alternate parts policy|a\/m aftermarket|a m aftermarket|capa definitions?|capa certified|lkq rcy used definitions?|lkq\/rcy\/used|abbreviations?|legend|disclaimer|fraud|legal notice|ccc motor|ccc\/motor|motor guide|estimating guide|included operations?|not included|vehicle equipment|vin decoding|footer|page \d+ of \d+|recond|refn)\b/.test(normalized) ||
+    /\b(?:4 wheel drive|tilt wheel|fm radio|skyview roof)\b/.test(normalized) ||
+    (/\b(?:total|subtotal|net cost|deductible|betterment|tax)\b/.test(normalized) && /\b(?:footer|page|claim|insured|owner|license|vin)\b/.test(normalized));
 }
 
 function summarizeWheelCarrierEvidence(anchors: EstimateRowAnchor[]) {
@@ -1770,10 +1778,19 @@ function summarizeComparisonEvidence(text: string, pattern: RegExp) {
   const lines = text
     .split(/\r?\n/)
     .map((item) => item.replace(/\s+/g, " ").trim())
-    .filter((item) => pattern.test(item) && !isWheelComparisonBoilerplate(item))
+    .filter((item) => pattern.test(item) && isRelevantWheelComparisonEvidence(item))
     .sort((a, b) => scoreWheelComparisonEvidenceLine(b) - scoreWheelComparisonEvidenceLine(a));
   const summary = lines.slice(0, 2).join("; ");
   return summary ? truncateText(summary, 180) : "not located in comparison text";
+}
+
+function isRelevantWheelComparisonEvidence(line: string) {
+  if (isWheelComparisonBoilerplate(line)) return false;
+  const normalized = normalizeMatchText(line);
+  if (/\bline\s+210\b/i.test(line)) return false;
+  return /\bline\s+(?:50|51)\b/i.test(line) ||
+    /\b(?:rf|lf)\s+(?:wheel|rim)\b/.test(normalized) && /\b(?:replacement|replace|repl|r&i|r\s*&\s*i|access)\b/.test(normalized) ||
+    /\baccess\b/.test(normalized) && /\b(?:wheel|liner|flare|bumper hardware)\b/.test(normalized);
 }
 
 function scoreWheelComparisonEvidenceLine(line: string) {
@@ -3779,11 +3796,22 @@ function isVisibleCitationDensityFinding(finding: CitationDensityFinding): boole
     finding.recommendedNextAction,
   ].join(" ");
   const normalized = normalizeMatchText(text);
+  const primaryText = [
+    finding.operationLabel,
+    finding.carrierEvidence?.description,
+    finding.shopEvidence?.description,
+    finding.carrierAnchor?.description,
+    finding.shopAnchor?.description,
+    hasConcreteFindingAnchor(finding) ? "" : finding.currentSupportSummary,
+    hasConcreteFindingAnchor(finding) ? "" : finding.missingProofSummary,
+  ].join(" ");
+  const primaryNormalized = normalizeMatchText(primaryText);
 
   if (!normalized.trim()) return false;
+  if (isJunkCitationFindingText(primaryNormalized)) return false;
   if (/\brepair operation\b|\bproc report\b|\bcomparison or screenshot cues\b/i.test(text)) return false;
   if (/\bgeneric visible damage photo observations\b|\bgeneric key visible estimate facts\b/i.test(text)) return false;
-  if (/\bproc\s+(?:pre|post)[-\s]?repair scanm\b/i.test(text)) return false;
+  if (/\bproc\s+(?:pre|post)[-\s]?repair scanm\b/i.test(text) || /\bproc\s+(?:pre|post)\s+repair\s+scanm\b/.test(normalized)) return false;
   if (/\bstructural frame and measurement verification\b/i.test(text) && !hasConcreteFindingAnchor(finding)) return false;
   if (/\bside structure aperture door[-\s]?shell fit verification\b/i.test(text) && !hasConcreteFindingAnchor(finding)) return false;
   if (/^note required prior to final refinish/i.test(text) && !/test\s*fit/i.test(text)) return false;

@@ -1054,6 +1054,20 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
         baseFinding({ id: "proc-report", operationLabel: "Proc Report" }),
         baseFinding({ id: "screenshot-cue", operationLabel: "Comparison or screenshot cues" }),
         baseFinding({ id: "bad-pre-scan", operationLabel: "Proc Pre-repair scanm" }),
+        baseFinding({
+          id: "guide-legend",
+          operationLabel: "A/M=AFTERMARKET CAPA definitions LKQ/RCY/USED definitions",
+          carrierEvidence: null,
+          currentSupportSummary: "CCC/MOTOR guide paragraphs and abbreviation legend text.",
+          missingProofSummary: "Aftermarket crash part boilerplate disclaimer page.",
+        }),
+        baseFinding({
+          id: "equipment-footer",
+          operationLabel: "Vehicle equipment list",
+          carrierEvidence: null,
+          currentSupportSummary: "Vehicle equipment: 4 Wheel DriveTilt WheelFM RadioSkyview Roof",
+          missingProofSummary: "Totals footer merge claim owner VIN deductible page text.",
+        }),
       ],
       request: { includeLegend: false, includeUnanchoredAppendix: true, annotationMode: "both" },
     });
@@ -1063,7 +1077,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.equal(result.annotationMetadata.length, 0);
     assert.match(result.warnings.join(" "), /suppressed from the visible estimate layer/i);
-    assert.doesNotMatch(text, /Repair Operation|Proc Report|Comparison or screenshot cues|Proc Pre-repair scanm/i);
+    assert.doesNotMatch(text, /Repair Operation|Proc Report|Comparison or screenshot cues|Proc Pre-repair scanm|A\/M=AFTERMARKET|CCC\/MOTOR guide|Vehicle equipment|4 Wheel DriveTilt/i);
   });
 
   await run("visual page behavior uses original PDF as base with optional legend only", async () => {

@@ -220,6 +220,22 @@ run("customer-facing text replaces malformed redaction sentence with complete sc
   assert.doesNotMatch(cleaned, /It \[REDACTED_INSURER\], but/i);
 });
 
+run("customer-facing text repairs redaction and rendering grammar defects", () => {
+  const cleaned = toCustomerFacingText(
+    [
+      "The [REDACTED_INSURER], but proof remains unclear remains unclear.",
+      "Ask for for the missing support with with the shop.",
+      "This [REDACTED_CLAIM], but documentation remains unclear.",
+      "Send it from [REDACTED_INSURER] [REDACTED_CLAIM].",
+    ].join(" ")
+  );
+
+  assert.match(cleaned, /insurer's position still needs stronger file proof/i);
+  assert.match(cleaned, /ask for the missing support with the shop/i);
+  assert.match(cleaned, /This item still needs stronger file proof/i);
+  assert.doesNotMatch(cleaned, /\[REDACTED_[A-Z_]+\]|for for|with with|remains unclear remains unclear/i);
+});
+
 run("customer-facing text completes export fragments and neutralizes unsupported Pennsylvania wording", () => {
   const cleaned = toCustomerFacingText(
     [

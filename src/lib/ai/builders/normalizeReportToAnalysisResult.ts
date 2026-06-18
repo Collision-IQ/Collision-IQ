@@ -183,7 +183,7 @@ function preserveStructuredDescriptors(
 }
 
 function collectHighSignalVehicleEvidenceText(report: RepairIntelligenceReport): string {
-  return [
+  return stripSmokeDebugDiagnostics([
     report.sourceEstimateText,
     report.estimateFacts?.documentedProcedures?.join("\n"),
     report.estimateFacts?.documentedHighlights?.join("\n"),
@@ -195,7 +195,25 @@ function collectHighSignalVehicleEvidenceText(report: RepairIntelligenceReport):
     report.analysis?.vehicle?.vin,
   ]
     .filter(Boolean)
-    .join("\n\n");
+    .join("\n\n"));
+}
+
+function stripSmokeDebugDiagnostics(value: string): string {
+  if (!value.trim()) return "";
+  return value
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return true;
+      if (/^\[?(?:provider-routing|chat-openai|chat-large-case|model-config|openai|debug|diagnostics?)\]?/i.test(trimmed)) return false;
+      if (/^(?:stage|provider|model|fallbackUsed|reasoningEffort|keyPresent|requestID|status|code|debugCounts|includedInRequest|omittedForLargeCaseFallback|omittedDocumentationOnly|attachmentCount)\s*[:=]/i.test(trimmed)) return false;
+      if (/\b(?:provider-routing|debugCounts|fallbackUsed|keyPresent|requestID|omittedForLargeCaseFallback|omittedDocumentationOnly|input_image|input_text)\b/i.test(trimmed)) return false;
+      return true;
+    })
+    .join("\n")
+    .replace(/\{\s*(?:stage|provider|model|fallbackUsed|keyPresent|reasoningEffort|requestID)\b[\s\S]{0,600}?\}/gi, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function mergeEstimateFacts(

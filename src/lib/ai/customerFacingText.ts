@@ -98,6 +98,11 @@ export function toCustomerFacingText(value?: string | null, fallback = ""): stri
     /\bIt\s+\[REDACTED_INSURER\]\s*,?\s+but\b[^.?!]*(?:[.?!]|$)/gi,
     "Scan and calibration support still needs stronger file proof before it is treated as fully documented."
   );
+  output = output
+    .replace(/\b(?:The\s+)?\[REDACTED_INSURER\]\s*,?\s+but\b[^.?!]*(?:[.?!]|$)/gi, "The insurer's position still needs stronger file proof before it is treated as fully documented.")
+    .replace(/\b(?:This|That)\s+\[REDACTED_[A-Z_]+\]\s*,?\s+but\b[^.?!]*(?:[.?!]|$)/gi, "This item still needs stronger file proof before it is treated as fully documented.")
+    .replace(/\b(?:for|from|by|with)\s+\[REDACTED_[A-Z_]+\]\s+\[REDACTED_[A-Z_]+\]\b/gi, "for the reviewed claim")
+    .replace(/\s+\[REDACTED_[A-Z_]+\](?=\s*(?:[.,;:]|$))/g, "");
   output = cleanCustomerExportFragments(output);
 
   for (const pattern of INTERNAL_PATTERNS) {
@@ -139,6 +144,11 @@ function cleanCustomerExportFragments(value: string): string {
     .replace(/\bfinish documentation the repair path\b\.?/gi, "finish documenting the repair path.")
     .replace(/\bfinish documentation the structural checks\b\.?/gi, "finish documenting the structural checks.")
     .replace(/\bfinish documentation the structural measurements\b\.?/gi, "finish documenting the structural measurements.")
+    .replace(/\bthe\s+the\b/gi, "the")
+    .replace(/\b(?:proof|support|documentation)\s+remains\s+unclear\s+remains\s+unclear\b/gi, "$1 remains unclear")
+    .replace(/\bask\s+for\s+for\b/gi, "ask for")
+    .replace(/\bwith\s+with\b/gi, "with")
+    .replace(/\bto\s+to\b/gi, "to")
     .replace(/\bstrongest documentation concern is the carrier note that the LKQ grille is not the correct style\b/gi, "strongest line-specific concern is the carrier note that the LKQ grille is not the correct style")
     .replace(/\bIn Pennsylvania,\s*the file supports asking for written communication when the repair position or delay needs to be explained\./gi, "If state-specific claim-handling rules apply, you may also be able to request written communication when the repair position or delay needs to be explained.")
     .replace(/\bIn Pennsylvania,\s*the file also supports asking for written status updates[^.]*\./gi, "If state-specific claim-handling rules apply, you may also be able to request written status updates when the claim is delayed or when the repair position is not being explained clearly.")

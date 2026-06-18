@@ -290,12 +290,49 @@ run("repair intelligence export separates 21548/SOR3 comparison totals", () => {
     assistantAnalysis: null,
   });
 
-  assert.equal(carrier.summary.find((item) => item.label === "Shop Estimate Grand Total")?.value, "$9,307.40");
-  assert.equal(carrier.summary.find((item) => item.label === "Carrier Total Cost of Repairs")?.value, "$5,737.10");
-  assert.equal(carrier.summary.find((item) => item.label === "Carrier Net After Deductible")?.value, "$5,237.10");
-  assert.equal(carrier.summary.find((item) => item.label === "Gross Repair Appraisal Gap")?.value, "$3,570.30");
+  assert.equal(carrier.summary.find((item) => item.label === "Shop estimate grand total")?.value, "$9,307.40");
+  assert.equal(carrier.summary.find((item) => item.label === "Carrier total cost of repairs")?.value, "$5,737.10");
+  assert.equal(carrier.summary.find((item) => item.label === "Carrier net after deductible")?.value, "$5,237.10");
+  assert.equal(carrier.summary.find((item) => item.label === "Gross repair gap")?.value, "$3,570.30");
   assert.equal(carrier.summary.find((item) => item.label === "Estimate Total")?.value, undefined);
   assert.equal(flattenCarrierDocument(carrier).includes("$0.02"), false);
+});
+
+run("repair intelligence export strips smoke diagnostics from prose", () => {
+  const report = {
+    ...makeReport(),
+    sourceEstimateText: [
+      "Shop estimate grand total $9,307.40",
+      "Carrier estimate SOR3 total cost of repairs $5,737.10",
+      "[provider-routing] selected text generation provider",
+      "stage: chat_first-pass",
+      "provider: openai",
+      "model: gpt-5.5",
+      "fallbackUsed: true",
+      "keyPresent: true",
+      "omittedForLargeCaseFallback: []",
+    ].join("\n"),
+    evidence: [
+      {
+        id: "debug-evidence",
+        title: "[chat-openai] request attachments",
+        snippet: "attachmentCount: 146\nincludedInRequest: input_image input_text\nrequestID: req_debug",
+        source: "debugCounts",
+        authority: "inferred",
+      },
+    ],
+  };
+  const analysis = normalizeReportToAnalysisResult(report);
+  const carrier = buildCarrierReport({
+    report,
+    analysis,
+    panel: null,
+    assistantAnalysis: "[provider-routing] selected text generation provider\nprovider: openai\nmodel: gpt-5.5",
+  });
+  const text = flattenCarrierDocument(carrier);
+
+  assert.doesNotMatch(text, /provider-routing|chat-openai|debugCounts|fallbackUsed|keyPresent|requestID|input_image|input_text/i);
+  assert.doesNotMatch(text, /gpt-5\.5/i);
 });
 
 run("vehicle extraction resolves TESL header text and Tesla 5YJ VIN decoding", () => {

@@ -103,16 +103,16 @@ export function buildCarrierReport({
   const comparisonTotalSummary = comparisonTotals
     ? [
         ...(typeof comparisonTotals.shopEstimateGrandTotal === "number"
-          ? [{ label: "Shop Estimate Grand Total", value: formatMoneyPrecise(comparisonTotals.shopEstimateGrandTotal) }]
+          ? [{ label: "Shop estimate grand total", value: formatMoneyPrecise(comparisonTotals.shopEstimateGrandTotal) }]
           : []),
         ...(typeof comparisonTotals.carrierTotalCostOfRepairs === "number"
-          ? [{ label: "Carrier Total Cost of Repairs", value: formatMoneyPrecise(comparisonTotals.carrierTotalCostOfRepairs) }]
+          ? [{ label: "Carrier total cost of repairs", value: formatMoneyPrecise(comparisonTotals.carrierTotalCostOfRepairs) }]
           : []),
         ...(typeof comparisonTotals.carrierNetAfterDeductible === "number"
-          ? [{ label: "Carrier Net After Deductible", value: formatMoneyPrecise(comparisonTotals.carrierNetAfterDeductible) }]
+          ? [{ label: "Carrier net after deductible", value: formatMoneyPrecise(comparisonTotals.carrierNetAfterDeductible) }]
           : []),
         ...(typeof comparisonTotals.grossRepairAppraisalGap === "number"
-          ? [{ label: "Gross Repair Appraisal Gap", value: formatMoneyPrecise(comparisonTotals.grossRepairAppraisalGap) }]
+          ? [{ label: "Gross repair gap", value: formatMoneyPrecise(comparisonTotals.grossRepairAppraisalGap) }]
           : []),
       ]
     : [];
@@ -973,6 +973,15 @@ function cleanCarrierReportNarrative(document: CarrierReportDocument): CarrierRe
 
 function cleanUserFacingRepairProse(value: string): string {
   return value
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return true;
+      if (/^\[?(?:provider-routing|chat-openai|chat-large-case|model-config|openai|debug|diagnostics?)\]?/i.test(trimmed)) return false;
+      if (/^(?:stage|provider|model|fallbackUsed|reasoningEffort|keyPresent|requestID|status|code|debugCounts|includedInRequest|omittedForLargeCaseFallback|omittedDocumentationOnly|attachmentCount)\s*[:=]/i.test(trimmed)) return false;
+      return !/\b(?:provider-routing|debugCounts|fallbackUsed|keyPresent|requestID|omittedForLargeCaseFallback|omittedDocumentationOnly|input_image|input_text)\b/i.test(trimmed);
+    })
+    .join(" ")
     .replace(/\bEvidence references?:\s*(?:cmp[\w-]+(?:\s*,\s*)?)+\b/gi, "")
     .replace(/\bcmp[\w-]{4,}\b/gi, "")
     .replace(/\bGenerated\s+([A-Z][a-z]+)\s+(\d{1,2}),\s*(\d{4})\b/g, "Generated $1 $2, $3")
