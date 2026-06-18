@@ -1,5 +1,6 @@
 import type { RetrievedChunk } from "@/lib/types";
 import {
+  buildOpenAiResponsesRequest,
   collisionIqModels,
   logCollisionIqModelDiagnostic,
 } from "@/lib/modelConfig";
@@ -49,12 +50,22 @@ Return the numbers of the ${topK} most relevant passages in order.
     role: "helper",
     model: collisionIqModels.helper,
   });
-  const res = await openai.chat.completions.create({
+  const res = await openai.responses.create(buildOpenAiResponsesRequest({
     model: collisionIqModels.helper,
-    messages: [{ role: "user", content: prompt }],
-  });
+    input: [
+      {
+        role: "user" as const,
+        content: [
+          {
+            type: "input_text" as const,
+            text: prompt,
+          },
+        ],
+      },
+    ],
+  }));
 
-  const text = res.choices[0].message.content || "";
+  const text = res.output_text || "";
 
   const indexes = [...text.matchAll(/\d+/g)]
     .map((m) => Number(m[0]))

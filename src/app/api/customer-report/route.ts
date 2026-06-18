@@ -12,6 +12,7 @@ import { renderCustomerReportHtml } from "@/lib/ai/renderCustomerReportHtml";
 import type { EstimatePostureDecision } from "@/lib/ai/estimatePosture";
 import { finalizeExportPayload } from "@/lib/ai/policy/finalizeExportPayload";
 import {
+  buildOpenAiResponsesRequest,
   collisionIqModels,
   logCollisionIqModelDiagnostic,
 } from "@/lib/modelConfig";
@@ -88,21 +89,21 @@ export async function POST(req: Request) {
           role: "helper",
           model: collisionIqModels.helper,
         });
-        const response = await openai.responses.create({
+        const response = await openai.responses.create(buildOpenAiResponsesRequest({
           model: collisionIqModels.helper,
           temperature: 0.2,
           input: [
             {
-              role: "user",
+              role: "user" as const,
               content: [
                 {
-                  type: "input_text",
+                  type: "input_text" as const,
                   text: prompt,
                 },
               ],
             },
           ],
-        });
+        }));
 
         return response.output_text ?? "";
       },

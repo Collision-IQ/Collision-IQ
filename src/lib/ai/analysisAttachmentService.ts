@@ -1,4 +1,5 @@
 import {
+  buildOpenAiResponsesRequest,
   collisionIqModels,
   logCollisionIqModelDiagnostic,
 } from "@/lib/modelConfig";
@@ -169,15 +170,15 @@ async function summarizeImageAttachment(attachment: StoredAttachment) {
       role: "primary",
       model: collisionIqModels.primary,
     });
-    const response = await openai.responses.create({
+    const response = await openai.responses.create(buildOpenAiResponsesRequest({
       model: collisionIqModels.primary,
       temperature: 0.1,
       input: [
         {
-          role: "user",
+          role: "user" as const,
           content: [
             {
-              type: "input_text",
+              type: "input_text" as const,
               text: `Summarize this collision-related image as structured plain text.
 
 Return concise plain text only with these labels:
@@ -197,14 +198,14 @@ Treat the image as evidence of visible condition only. Do not claim hidden damag
 If visible damage raises concern for related verification, phrase it as an open verification concern, for example: visible damage may support structural verification or suspension component inspection pending teardown/documentation.`,
             },
             {
-              type: "input_image",
+              type: "input_image" as const,
               image_url: attachment.imageDataUrl,
-              detail: "auto",
+              detail: "auto" as const,
             },
           ],
         },
       ],
-    });
+    }));
 
     return response.output_text?.trim() ?? "";
   } catch (error) {

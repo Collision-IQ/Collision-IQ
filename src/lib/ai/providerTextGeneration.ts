@@ -1,6 +1,7 @@
 import "server-only";
 import type OpenAI from "openai";
 import {
+  buildOpenAiResponsesRequest,
   collisionIqModels,
   collisionIqProvider,
   logCollisionIqModelDiagnostic,
@@ -80,12 +81,12 @@ export async function generatePrimaryText(params: {
     role: "primary",
     model: collisionIqModels.primary,
   });
-  const response = await params.openai.responses.create({
+  const response = await params.openai.responses.create(buildOpenAiResponsesRequest({
     model: collisionIqModels.primary,
     instructions: params.instructions,
     temperature: params.temperature,
     input: params.input,
-  });
+  }));
 
   return {
     output_text: response.output_text ?? "",
@@ -148,11 +149,11 @@ export async function generateSupplementText(params: {
         : "primary",
     model: params.openAiModel,
   });
-  const response = await params.openai.responses.create({
+  const response = await params.openai.responses.create(buildOpenAiResponsesRequest({
     model: params.openAiModel,
     temperature: params.temperature,
     input: params.input,
-  });
+  }));
 
   return {
     output_text: response.output_text ?? "",

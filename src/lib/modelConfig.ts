@@ -22,6 +22,12 @@ export type CollisionIqModelDiagnostic = {
   envKey: string | null;
 };
 
+type OpenAiResponsesRequest = Record<string, unknown> & {
+  model?: string;
+  temperature?: unknown;
+  top_p?: unknown;
+};
+
 function normalizeModelName(value: string | undefined | null, fallback: string) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : fallback;
@@ -85,6 +91,24 @@ function resolvePrimaryProvider() {
 
 function isStaleOpenAiModel(model: string) {
   return STALE_OPENAI_MODEL_PATTERN.test(model);
+}
+
+export function supportsOpenAiResponsesSamplingParameters(model: string) {
+  return !/^gpt-5\.5(?:-|$)/i.test(model.trim());
+}
+
+export function buildOpenAiResponsesRequest<TRequest extends OpenAiResponsesRequest>(
+  request: TRequest
+): TRequest {
+  const model = typeof request.model === "string" ? request.model : "";
+  if (supportsOpenAiResponsesSamplingParameters(model)) return request;
+
+  const {
+    temperature: _temperature,
+    top_p: _topP,
+    ...safeRequest
+  } = request;
+  return safeRequest as TRequest;
 }
 
 function warnIfStaleOpenAiModel(role: string, model: string) {

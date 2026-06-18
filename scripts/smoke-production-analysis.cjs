@@ -20,7 +20,7 @@ main().catch((error) => {
 });
 
 async function main() {
-  const token = readRequiredEnv(["ANALYSIS_SMOKE_BEARER_TOKEN", "CLERK_SESSION_JWT"]);
+  const authHeaders = readAuthHeaders();
   const baseUrl = (process.env.ANALYSIS_SMOKE_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
   const payload = buildPayload();
 
@@ -28,7 +28,7 @@ async function main() {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${token}`,
+      ...authHeaders,
     },
     body: JSON.stringify(payload),
   });
@@ -39,7 +39,9 @@ async function main() {
     throw new Error("Smoke response appears to contain a secret-like value.");
   }
   if (response.status === 401 || response.status === 403) {
-    throw new Error(`Authentication failed (${response.status}). Refresh the local-only Clerk session/JWT and retry.`);
+    throw new Error(
+      `Authentication failed (${response.status}). Use a current production Clerk browser session cookie via ANALYSIS_SMOKE_COOKIE, or a Clerk session JWT accepted by this deployment via ANALYSIS_SMOKE_BEARER_TOKEN/CLERK_SESSION_JWT. Do not use Clerk API keys, OAuth access tokens, or template JWTs from a different Clerk instance.`
+    );
   }
   if (!response.ok) {
     const code = parsed && typeof parsed === "object" ? parsed.error || parsed.code || parsed.message : null;
@@ -126,6 +128,16 @@ function readRequiredEnv(names) {
     if (value) return value;
   }
   throw new Error(`Set one of: ${names.join(", ")}. Do not commit this value.`);
+}
+
+function readAuthHeaders() {
+  const cookie = process.env.ANALYSIS_SMOKE_COOKIE?.trim();
+  if (cookie) {
+    return { cookie };
+  }
+
+  const token = readRequiredEnv(["ANALYSIS_SMOKE_BEARER_TOKEN", "CLERK_SESSION_JWT"]);
+  return { authorization: `Bearer ${token}` };
 }
 
 function parseJson(value) {

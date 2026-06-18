@@ -103,6 +103,50 @@ run("OpenAI production defaults resolve primary and helper stages to gpt-5.5", (
   );
 });
 
+run("GPT-5.5 Responses payload omits unsupported sampling parameters", () => {
+  const { buildOpenAiResponsesRequest } = loadModelConfig({
+    NODE_ENV: "production",
+    VERCEL_ENV: "production",
+    OPENAI_API_KEY: "test-key",
+  });
+
+  const request = buildOpenAiResponsesRequest({
+    model: "gpt-5.5",
+    temperature: 0.7,
+    top_p: 0.9,
+    input: "Review the repair estimate.",
+    reasoning: { effort: "medium" },
+    tools: [{ type: "web_search_preview" }],
+  });
+
+  assert.equal(request.model, "gpt-5.5");
+  assert.equal(request.input, "Review the repair estimate.");
+  assert.deepEqual(request.reasoning, { effort: "medium" });
+  assert.deepEqual(request.tools, [{ type: "web_search_preview" }]);
+  assert.equal(Object.hasOwn(request, "temperature"), false);
+  assert.equal(Object.hasOwn(request, "top_p"), false);
+});
+
+run("explicit non-GPT-5.5 Responses model keeps supported temperature", () => {
+  const {
+    buildOpenAiResponsesRequest,
+    supportsOpenAiResponsesSamplingParameters,
+  } = loadModelConfig({
+    NODE_ENV: "production",
+    VERCEL_ENV: "production",
+    OPENAI_API_KEY: "test-key",
+  });
+
+  assert.equal(supportsOpenAiResponsesSamplingParameters("gpt-4.1"), true);
+  const request = buildOpenAiResponsesRequest({
+    model: "gpt-4.1",
+    temperature: 0.2,
+    input: "Summarize the file.",
+  });
+
+  assert.equal(request.temperature, 0.2);
+});
+
 run("analysis supplement candidates do not default to stale mini model", () => {
   const { collisionIqModels } = loadModelConfig({
     NODE_ENV: "production",

@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 import { openai } from "@/lib/openai";
 import { getAssignment } from "@/lib/assignmentStore";
 import {
+  buildOpenAiResponsesRequest,
   collisionIqModels,
   logCollisionIqModelDiagnostic,
 } from "@/lib/modelConfig";
@@ -51,22 +52,24 @@ export async function POST(
       role: "helper",
       model: collisionIqModels.helper,
     });
-    const completion = await client.chat.completions.create({
+    const completion = await client.responses.create(buildOpenAiResponsesRequest({
       model: collisionIqModels.helper,
-      messages: [
+      instructions:
+        "You are a helpful assistant for Collision Academy, providing policyholder and auto repair support.",
+      input: [
         {
-          role: "system",
-          content:
-            "You are a helpful assistant for Collision Academy, providing policyholder and auto repair support.",
-        },
-        {
-          role: "user",
-          content: userText,
+          role: "user" as const,
+          content: [
+            {
+              type: "input_text" as const,
+              text: userText,
+            },
+          ],
         },
       ],
-    });
+    }));
 
-    const reply = completion.choices[0]?.message?.content ?? "";
+    const reply = completion.output_text ?? "";
 
     return new Response(
       JSON.stringify({
