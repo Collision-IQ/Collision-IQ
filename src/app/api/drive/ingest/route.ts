@@ -1,7 +1,10 @@
 import { google } from "googleapis";
 import { NextResponse } from "next/server";
 import { Pool } from "pg";
-import { collisionIqModels } from "@/lib/modelConfig";
+import {
+  collisionIqModels,
+  logCollisionIqModelDiagnostic,
+} from "@/lib/modelConfig";
 import { openai } from "@/lib/openai";
 
 export const runtime = "nodejs";
@@ -50,6 +53,12 @@ export async function POST(req: Request) {
 
     const base64 = Buffer.from(file.data as ArrayBuffer).toString("base64");
 
+    logCollisionIqModelDiagnostic({
+      stage: "drive_ingest_text_extraction",
+      provider: "openai",
+      role: "primary",
+      model: collisionIqModels.primary,
+    });
     const extraction = await openai.responses.create({
       model: collisionIqModels.primary,
       input: [

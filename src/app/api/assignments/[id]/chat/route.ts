@@ -3,7 +3,10 @@
 import { NextRequest } from "next/server";
 import { openai } from "@/lib/openai";
 import { getAssignment } from "@/lib/assignmentStore";
-import { collisionIqModels } from "@/lib/modelConfig";
+import {
+  collisionIqModels,
+  logCollisionIqModelDiagnostic,
+} from "@/lib/modelConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,6 +45,12 @@ export async function POST(
 
     // ✅ OpenAI call using chat completions (non-streaming)
     const client = openai;
+    logCollisionIqModelDiagnostic({
+      stage: "assignment_chat",
+      provider: "openai",
+      role: "helper",
+      model: collisionIqModels.helper,
+    });
     const completion = await client.chat.completions.create({
       model: collisionIqModels.helper,
       messages: [

@@ -4,6 +4,10 @@ import {
   getOpenAIClient,
 } from "@/lib/openai";
 import { RETRYABLE_PROVIDER_USER_MESSAGE } from "@/lib/ai/providerRetryableError";
+import {
+  collisionIqModels,
+  logCollisionIqModelDiagnostic,
+} from "@/lib/modelConfig";
 
 const COLLISION_IQ_GPT55_PROMPT_ID =
   "pmpt_69feb16e364c8194be0fece66f6e9b710b96573b2ae95f88";
@@ -42,7 +46,14 @@ ${baseSystemPrompt}
 ${args.applicability_instruction ?? ""}
 `.trim();
 
+    logCollisionIqModelDiagnostic({
+      stage: "annotated_estimate_prompt",
+      provider: "openai",
+      role: "primary",
+      model: collisionIqModels.primary,
+    });
     const response = await getOpenAIClient().responses.create({
+      model: collisionIqModels.primary,
       prompt: {
         id: COLLISION_IQ_GPT55_PROMPT_ID,
         version: "1",

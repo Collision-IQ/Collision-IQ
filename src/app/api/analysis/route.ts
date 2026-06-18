@@ -110,10 +110,6 @@ import {
 
 export const runtime = "nodejs";
 
-const SUPPLEMENT_MODEL =
-  process.env.COLLISION_IQ_SUPPLEMENT_MODEL?.trim() ||
-  collisionIqModels.helper;
-
 type AnalysisRequestBody = {
   artifactIds?: string[];
   activeCaseId?: string | null;
@@ -3975,7 +3971,7 @@ async function generateSupplementCandidates(
   const response = await generateSupplementText({
     openai,
     stage: "analysis_supplement_candidates",
-    openAiModel: SUPPLEMENT_MODEL,
+    openAiModel: collisionIqModels.supplement,
     temperature: 0.2,
     input: [
       {

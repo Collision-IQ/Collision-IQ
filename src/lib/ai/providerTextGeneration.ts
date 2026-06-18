@@ -3,6 +3,7 @@ import type OpenAI from "openai";
 import {
   collisionIqModels,
   collisionIqProvider,
+  logCollisionIqModelDiagnostic,
   type CollisionIqPrimaryProvider,
 } from "@/lib/modelConfig";
 import { generateOpenClawText, getOpenClawAvailability } from "@/lib/openclaw";
@@ -34,7 +35,12 @@ export async function generatePrimaryText(params: {
   if (collisionIqProvider.primary === "openclaw") {
     const openclaw = getOpenClawAvailability();
     if (openclaw.available) {
-      logProviderSelection(params.stage, "openclaw", collisionIqModels.openclawPrimary);
+      logCollisionIqModelDiagnostic({
+        stage: params.stage,
+        provider: "openclaw",
+        role: "openclawPrimary",
+        model: collisionIqModels.openclawPrimary,
+      });
       const response = await generateOpenClawText({
         instructions: params.instructions,
         input: params.input,
@@ -55,7 +61,12 @@ export async function generatePrimaryText(params: {
     });
   }
 
-  logProviderSelection(params.stage, "openai", collisionIqModels.primary);
+  logCollisionIqModelDiagnostic({
+    stage: params.stage,
+    provider: "openai",
+    role: "primary",
+    model: collisionIqModels.primary,
+  });
   const response = await params.openai.responses.create({
     model: collisionIqModels.primary,
     instructions: params.instructions,
@@ -88,7 +99,12 @@ export async function generateSupplementText(params: {
   if (collisionIqProvider.primary === "openclaw") {
     const openclaw = getOpenClawAvailability();
     if (openclaw.available) {
-      logProviderSelection(params.stage, "openclaw", collisionIqModels.openclawPrimary);
+      logCollisionIqModelDiagnostic({
+        stage: params.stage,
+        provider: "openclaw",
+        role: "openclawPrimary",
+        model: collisionIqModels.openclawPrimary,
+      });
       const response = await generateOpenClawText({
         input: params.input,
       });
@@ -108,7 +124,16 @@ export async function generateSupplementText(params: {
     });
   }
 
-  logProviderSelection(params.stage, "openai", params.openAiModel);
+  logCollisionIqModelDiagnostic({
+    stage: params.stage,
+    provider: "openai",
+    role: params.openAiModel === collisionIqModels.supplement
+      ? "supplement"
+      : params.openAiModel === collisionIqModels.helper
+        ? "helper"
+        : "primary",
+    model: params.openAiModel,
+  });
   const response = await params.openai.responses.create({
     model: params.openAiModel,
     temperature: params.temperature,
@@ -134,7 +159,12 @@ async function generateAnthropicText(params: {
   }
 
   const model = collisionIqModels.anthropicPrimary;
-  logProviderSelection(params.stage, "anthropic", model);
+  logCollisionIqModelDiagnostic({
+    stage: params.stage,
+    provider: "anthropic",
+    role: "anthropicPrimary",
+    model,
+  });
   const response = await fetch(`${collisionIqProvider.anthropicBaseUrl.replace(/\/+$/, "")}/v1/messages`, {
     method: "POST",
     headers: {
@@ -203,12 +233,4 @@ function openAiContentToText(content: unknown): string {
     if ("type" in part && part.type === "input_file") return "[File input omitted from Anthropic text route.]";
     return "";
   }).filter(Boolean).join("\n");
-}
-
-function logProviderSelection(stage: string, provider: CollisionIqPrimaryProvider, model: string) {
-  console.info("[provider-routing] selected text generation provider", {
-    stage,
-    provider,
-    model,
-  });
 }

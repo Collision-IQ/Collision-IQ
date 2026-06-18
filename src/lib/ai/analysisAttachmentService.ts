@@ -1,4 +1,7 @@
-import { collisionIqModels } from "@/lib/modelConfig";
+import {
+  collisionIqModels,
+  logCollisionIqModelDiagnostic,
+} from "@/lib/modelConfig";
 import { openai } from "@/lib/openai";
 import type { StoredAttachment } from "@/lib/uploadedAttachmentStore";
 import {
@@ -160,6 +163,12 @@ async function summarizeImageAttachment(attachment: StoredAttachment) {
   }
 
   try {
+    logCollisionIqModelDiagnostic({
+      stage: "analysis_image_attachment_summary",
+      provider: "openai",
+      role: "primary",
+      model: collisionIqModels.primary,
+    });
     const response = await openai.responses.create({
       model: collisionIqModels.primary,
       temperature: 0.1,

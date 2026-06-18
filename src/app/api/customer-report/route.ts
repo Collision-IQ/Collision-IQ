@@ -11,7 +11,10 @@ import { sanitizeCustomerReportForRender } from "@/lib/ai/customerFacingText";
 import { renderCustomerReportHtml } from "@/lib/ai/renderCustomerReportHtml";
 import type { EstimatePostureDecision } from "@/lib/ai/estimatePosture";
 import { finalizeExportPayload } from "@/lib/ai/policy/finalizeExportPayload";
-import { collisionIqModels } from "@/lib/modelConfig";
+import {
+  collisionIqModels,
+  logCollisionIqModelDiagnostic,
+} from "@/lib/modelConfig";
 import { openai } from "@/lib/openai";
 import { canAccessFeature } from "@/lib/featureAccess";
 
@@ -79,6 +82,12 @@ export async function POST(req: Request) {
 
     const report = sanitizeCustomerReportForRender(await generateCustomerReport(input, {
       generateText: async (prompt) => {
+        logCollisionIqModelDiagnostic({
+          stage: "customer_report_generation",
+          provider: "openai",
+          role: "helper",
+          model: collisionIqModels.helper,
+        });
         const response = await openai.responses.create({
           model: collisionIqModels.helper,
           temperature: 0.2,

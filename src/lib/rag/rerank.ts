@@ -1,5 +1,8 @@
 import type { RetrievedChunk } from "@/lib/types";
-import { collisionIqModels } from "@/lib/modelConfig";
+import {
+  collisionIqModels,
+  logCollisionIqModelDiagnostic,
+} from "@/lib/modelConfig";
 import { openai } from "@/lib/openai";
 
 type ChunkMatch = RetrievedChunk & {
@@ -40,6 +43,12 @@ Deprioritize:
 Return the numbers of the ${topK} most relevant passages in order.
 `;
 
+  logCollisionIqModelDiagnostic({
+    stage: "rag_rerank",
+    provider: "openai",
+    role: "helper",
+    model: collisionIqModels.helper,
+  });
   const res = await openai.chat.completions.create({
     model: collisionIqModels.helper,
     messages: [{ role: "user", content: prompt }],

@@ -2,7 +2,10 @@ import { google } from "googleapis";
 import { NextResponse } from "next/server";
 import { embedTexts } from "@/lib/rag/embed";
 import { upsertChunks } from "@/lib/rag/upsert";
-import { collisionIqModels } from "@/lib/modelConfig";
+import {
+  collisionIqModels,
+  logCollisionIqModelDiagnostic,
+} from "@/lib/modelConfig";
 import { openai } from "@/lib/openai";
 
 function chunkText(text: string, size = 500) {
@@ -48,6 +51,12 @@ export async function GET() {
 
     const base64 = Buffer.from(response.data as ArrayBuffer).toString("base64");
 
+    logCollisionIqModelDiagnostic({
+      stage: "drive_test_download_text_extraction",
+      provider: "openai",
+      role: "primary",
+      model: collisionIqModels.primary,
+    });
     const result = await openai.responses.create({
       model: collisionIqModels.primary,
       input: [

@@ -1,6 +1,10 @@
 import { google } from "googleapis";
 import { prisma } from "@/lib/prisma";
 import { getDriveAuth } from "@/lib/drive/auth";
+import {
+  collisionIqProvider,
+  getCollisionIqModelStartupDiagnostics,
+} from "@/lib/modelConfig";
 
 export type VerificationStatus = "pass" | "fail" | "warn";
 
@@ -70,10 +74,12 @@ export async function buildEnvironmentVerification(): Promise<EnvironmentVerific
 async function verifyOpenAi(): Promise<VerificationResult> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   const baseMetadata = {
-    OPENAI_API_KEY: maskSecret(apiKey),
-    COLLISION_IQ_PRIMARY_PROVIDER: process.env.COLLISION_IQ_PRIMARY_PROVIDER ?? null,
-    COLLISION_IQ_MODEL_PRIMARY: process.env.COLLISION_IQ_MODEL_PRIMARY ?? null,
-    COLLISION_IQ_MODEL: process.env.COLLISION_IQ_MODEL ?? null,
+    OPENAI_API_KEY: {
+      present: Boolean(apiKey),
+      value: maskSecret(apiKey),
+    },
+    resolvedPrimaryProvider: collisionIqProvider.primary,
+    modelRouting: getCollisionIqModelStartupDiagnostics(),
   };
 
   if (!apiKey) {
