@@ -191,6 +191,20 @@ run("server chat routes block annotated estimate text/table fallback", () => {
   assert.doesNotMatch(`${chatRoute}\n${caseChatRoute}`, /annotation set|line-by-documentation map|ready-to-apply|annotation table/i);
 });
 
+run("chat route exposes only safe provider diagnostics when requested", () => {
+  const chatRoute = fs.readFileSync(path.join(process.cwd(), "src/app/api/chat/route.ts"), "utf8");
+
+  assert.match(chatRoute, /shouldExposeSafeProviderDiagnostics/);
+  assert.match(chatRoute, /Provider diagnostics:/);
+  assert.match(chatRoute, /stage:/);
+  assert.match(chatRoute, /provider:/);
+  assert.match(chatRoute, /model:/);
+  assert.match(chatRoute, /fallbackUsed:/);
+  assert.match(chatRoute, /reasoningEffort:/);
+  assert.match(chatRoute, /keyPresent:/);
+  assert.doesNotMatch(chatRoute, /envKey:\s*\$\{/);
+});
+
 run("upload success status includes visible file names", () => {
   const chatSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatWidget.tsx"), "utf8");
 

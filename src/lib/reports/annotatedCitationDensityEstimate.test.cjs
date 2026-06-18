@@ -1513,6 +1513,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     page.drawText("2023 Tesla Model Y carrier estimate", { x: 42, y: 742, size: 10, font });
     page.drawText("A/M=AFTERMARKET CAPA definitions LKQ/RCY/USED definitions", { x: 42, y: 710, size: 8, font });
     page.drawText("Fraud warning disclaimer and CCC/MOTOR guide included/not included paragraphs", { x: 42, y: 692, size: 8, font });
+    page.drawText("RECOND REFN R&I abbreviation legend aftermarket crash part boilerplate", { x: 42, y: 674, size: 8, font });
     drawCccEstimateRow(page, font, 21, "A/M", "Repl", "RT Hub assy", "0.6", "$185.00", 650);
     const sourcePdfBytes = await doc.save();
 
@@ -1531,7 +1532,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     const metadataText = result.annotationMetadata.map((item) => item.sourceAnchorText).join(" ");
     assert.ok(result.annotationMetadata.some((item) => item.sourceLineNumber === "21"));
     assert.match(metadataText, /RT Hub assy/);
-    assert.doesNotMatch(metadataText, /A\/M=AFTERMARKET|CAPA definitions|LKQ\/RCY\/USED|Fraud warning|CCC\/MOTOR guide|included\/not included/i);
+    assert.doesNotMatch(metadataText, /A\/M=AFTERMARKET|CAPA definitions|LKQ\/RCY\/USED|Fraud warning|CCC\/MOTOR guide|included\/not included|RECOND|REFN|abbreviation legend|aftermarket crash part/i);
   });
 
   await run("one selected estimate flags AM/LKQ/CAPA rows for documentation and basis review", async () => {
@@ -2523,6 +2524,8 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const page = doc.addPage([612, 792]);
     page.drawText("2023 Tesla Model Y carrier estimate", { x: 42, y: 742, size: 10, font });
+    drawCccEstimateRow(page, font, 32, "A/M", "Repl", "RF wheel opening molding", "0.2", "$35.00", 728);
+    drawCccEstimateRow(page, font, 37, "", "R&I", "LT wheel opening molding", "0.2", "$30.00", 720);
     drawCccEstimateRow(page, font, 43, "", "Subl", "RF wheel repair", "0.0", "$75.00", 710);
     drawCccEstimateRow(page, font, 44, "", "Subl", "Tire Mount and Balance", "0.0", "$25.00", 638);
     drawCccEstimateRow(page, font, 47, "", "Subl", "Four Wheel Alignment", "0.0", "$129.00", 620);
@@ -2542,6 +2545,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
         fileName: "Shop estimate.pdf",
         estimateRole: "shop",
         text: [
+          "Vehicle equipment: 4 Wheel DriveTilt WheelFM RadioSkyview Roof",
           "Line 210 Repl RT/Front Wheel 0.3 M",
           "Line 50 Repl RF wheel 0.3 M",
           "Line 51 R&I LF wheel 0.2 M",
@@ -2568,12 +2572,15 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     assert.doesNotMatch(joined, /automatically void/i);
     assert.match(joined, /does not prove an OEM-only requirement without authority/i);
     const wheelLaborMetadata = result.annotationMetadata.filter((item) => /wheel_labor_delta/.test(item.findingId));
-    assert.ok(wheelLaborMetadata.length >= 3);
-    assert.deepEqual(
-      wheelLaborMetadata.map((item) => item.targetLineNumber).sort(),
-      ["43", "44", "47"]
-    );
+    assert.ok(wheelLaborMetadata.length > 0 && wheelLaborMetadata.length <= 2);
+    assert.deepEqual(wheelLaborMetadata.map((item) => item.targetLineNumber).sort(), ["43", "47"]);
+    assert.match(joined, /line 43 .*RF wheel repair/i);
+    assert.match(joined, /line 44 .*Tire Mount and Balance/i);
+    assert.match(joined, /line 47 .*Four Wheel Alignment/i);
+    assert.match(joined, /Line 50 Repl RF wheel 0\.3 M/i);
+    assert.doesNotMatch(joined, /4 Wheel DriveTilt WheelFM RadioSkyview Roof/i);
     assert.equal(wheelLaborMetadata.some((item) => /liner unrelated access trim/i.test(item.sourceAnchorText)), false);
+    assert.equal(wheelLaborMetadata.some((item) => /wheel opening molding/i.test(item.sourceAnchorText)), false);
     assert.equal(result.annotationMetadata.some((item) => /ABBREVIATIONS|DISCLAIMER|alternate parts policy|A\/M=AFTERMARKET|CAPA definitions|LKQ\/RCY\/USED|fraud disclaimer|CCC\/MOTOR guide/i.test(item.sourceAnchorText)), false);
     assert.ok(result.debugTrace.requiredDetectorFindingCount >= 4);
     assert.ok(result.debugTrace.acceptedEstimateRowFindingCount >= 4);

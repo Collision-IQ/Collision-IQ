@@ -198,12 +198,20 @@ export type ExportReportFields = {
   mileage?: number;
   insurer?: string;
   estimateTotal?: number;
+  comparisonTotals?: EstimateComparisonTotals;
   documentedHighlights: string[];
   documentedProcedures: string[];
   presentStrengths: string[];
   likelySupplementAreas: string[];
   estimateFacts: EstimateFacts;
   vehicle?: VehicleIdentity;
+};
+
+export type EstimateComparisonTotals = {
+  shopEstimateGrandTotal?: number;
+  carrierTotalCostOfRepairs?: number;
+  carrierNetAfterDeductible?: number;
+  grossRepairAppraisalGap?: number;
 };
 
 export type ComparableListing = {
@@ -512,11 +520,62 @@ export function buildExportModel(params: {
   };
 }
 
+function parseReportMoney(value: string | undefined) {
+  if (!value) return undefined;
+  const parsed = Number(value.replace(/[$,]/g, ""));
+  return Number.isFinite(parsed) && parsed > 1 ? parsed : undefined;
+}
+
+function findEstimateMoneyLine(text: string, linePattern: RegExp, moneyPattern: RegExp) {
+  for (const line of text.split(/\r?\n/).map((item) => item.replace(/\s+/g, " ").trim()).filter(Boolean)) {
+    if (!linePattern.test(line)) continue;
+    const match = line.match(moneyPattern);
+    const amount = parseReportMoney(match?.[1]);
+    if (typeof amount === "number") return amount;
+  }
+  return undefined;
+}
+
+function extractEstimateComparisonTotals(text: string): EstimateComparisonTotals | undefined {
+  const shopEstimateGrandTotal = findEstimateMoneyLine(
+    text,
+    /\b(?:shop|repair facility)\b/i,
+    /\b(?:grand total|total cost of repairs|estimate total)\b[^\d$]{0,40}\$?\s*([\d,]+\.\d{2})/i
+  );
+  const carrierTotalCostOfRepairs = findEstimateMoneyLine(
+    text,
+    /\b(?:carrier|insurer|insurance|geico|allstate|progressive|state farm|sor[-\s]?\d*)\b/i,
+    /\b(?:total cost of repairs|total repairs|gross repair total)\b[^\d$]{0,40}\$?\s*([\d,]+\.\d{2})/i
+  );
+  const carrierNetAfterDeductible = findEstimateMoneyLine(
+    text,
+    /\b(?:carrier|insurer|insurance|geico|allstate|progressive|state farm|deductible|sor[-\s]?\d*)\b/i,
+    /\b(?:net after deductible|net cost of repairs|net total|less deductible)\b[^\d$]{0,40}\$?\s*([\d,]+\.\d{2})/i
+  );
+  const grossRepairAppraisalGap =
+    typeof shopEstimateGrandTotal === "number" && typeof carrierTotalCostOfRepairs === "number"
+      ? Number((shopEstimateGrandTotal - carrierTotalCostOfRepairs).toFixed(2))
+      : findEstimateMoneyLine(
+          text,
+          /\b(?:gap|delta|difference|appraisal)\b/i,
+          /\b(?:gross repair appraisal gap|repair appraisal gap|gross gap|delta|difference)\b[^\d$]{0,40}\$?\s*([\d,]+\.\d{2})/i
+        );
+
+  const totals: EstimateComparisonTotals = {
+    shopEstimateGrandTotal,
+    carrierTotalCostOfRepairs,
+    carrierNetAfterDeductible,
+    grossRepairAppraisalGap,
+  };
+  return Object.values(totals).some((value) => typeof value === "number") ? totals : undefined;
+}
+
 export function deriveExportReportFields(params: {
   report: RepairIntelligenceReport | null;
   analysis: AnalysisResult | null;
 }): ExportReportFields {
   const sourceText = collectVehicleDocumentText(params.report, params.analysis);
+  const comparisonTotals = extractEstimateComparisonTotals(sourceText);
   const fallbackFacts = extractEstimateFacts({
     text: sourceText,
     vehicle: mergeVehicleIdentity(
@@ -600,6 +659,7 @@ export function deriveExportReportFields(params: {
     mileage: estimateFacts.mileage,
     insurer: estimateFacts.insurer,
     estimateTotal: estimateFacts.estimateTotal,
+    comparisonTotals,
     documentedHighlights: estimateFacts.documentedHighlights,
     documentedProcedures: estimateFacts.documentedProcedures,
     presentStrengths,

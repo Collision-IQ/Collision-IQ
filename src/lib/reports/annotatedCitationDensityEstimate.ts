@@ -1313,6 +1313,8 @@ export function buildRequiredEstimatorDeltaFindings(
   let sandPolishSeen = false;
   let batteryResetSeen = false;
   let wheelDetectorSeen = false;
+  let wheelAccessDetectorSeen = false;
+  let wheelAlignmentDetectorSeen = false;
   let hubDetectorSeen = false;
 
   for (const anchor of context.anchors) {
@@ -1337,11 +1339,18 @@ export function buildRequiredEstimatorDeltaFindings(
     const hasWheel = isWheelLaborAnchorText(normalized);
     const hasAccessLabor = /\b(?:r\s*&\s*i|r&i|remove|install|disassembly|reassembly|access)\b/i.test(rowText);
 
-    if (!usedAnchorIds.has(anchor.anchorId) && hasWheel && /\b(?:repair|sublet|cover|mount|balance|alignment|replacement|repl|replace|r&i|r\s*&\s*i|access)\b/.test(normalized)) {
+    if (!usedAnchorIds.has(anchor.anchorId) && hasWheel && /\b(?:repair|sublet|mount|balance|alignment|replacement|repl|replace|r&i|r\s*&\s*i|access)\b/.test(normalized)) {
       const comparisonWheelAccess = /\b(?:wheel|rim|tire|alignment|liner|flare)\b[\s\S]{0,80}\b(?:r&i|r\s*&\s*i|remove|install|access|disassembly|reassembly|replacement|repl)\b/i.test(comparisonText) ||
         /\b(?:r&i|r\s*&\s*i|remove|install|access|disassembly|reassembly|replacement|repl)\b[\s\S]{0,80}\b(?:wheel|rim|tire|alignment|liner|flare)\b/i.test(comparisonText);
       const zeroOrMissingLabor = anchor.labor === 0 || anchor.labor === null || /\b0\.0\b/.test(rowText);
-      if (zeroOrMissingLabor || comparisonWheelAccess || hasAccessLabor) {
+      const alignmentGroup = /\balignment\b/.test(normalized);
+      const groupAlreadySeen = alignmentGroup ? wheelAlignmentDetectorSeen : wheelAccessDetectorSeen;
+      if (!groupAlreadySeen && (zeroOrMissingLabor || comparisonWheelAccess || hasAccessLabor)) {
+        if (alignmentGroup) {
+          wheelAlignmentDetectorSeen = true;
+        } else {
+          wheelAccessDetectorSeen = true;
+        }
         wheelDetectorSeen = true;
         findings.push(buildRequiredDetectorFinding({
           context,
@@ -1353,7 +1362,7 @@ export function buildRequiredEstimatorDeltaFindings(
           score: isTeslaOrEv ? 66 : 60,
           safetyImpact: isTeslaOrEv ? "high" : "medium",
           priority: "high",
-          currentSupportSummary: `Carrier/source row affected: ${rowText}. Carrier allowed labor: ${anchor.labor ?? "missing/0.0"}. Shop/comparison wheel access evidence: ${summarizeComparisonEvidence(comparisonText, /wheel|rim|tire|liner|flare|access|r&i|remove|install/i)}.`,
+          currentSupportSummary: `Carrier/source rows affected: ${summarizeWheelCarrierEvidence(context.anchors)}. Anchored row: ${rowText}. Carrier allowed labor: ${anchor.labor ?? "missing/0.0"}. Shop/comparison wheel access evidence: ${summarizeComparisonEvidence(comparisonText, /wheel|rim|tire|alignment|access|r&i|remove|install|replacement|repl/i)}.`,
           missingProofSummary: "Carrier may be missing or inadequately documenting wheel R&I/access labor. Wheel repair, wheel cover, mount/balance, wheel replacement, tire replacement, or wheel-opening access may require line-item R&I/access labor when removal is needed for liner, flare, bumper hardware, or wheel-end access.",
           recommendedNextAction: "Request line-item wheel R&I/access labor or a written included-operation basis explaining where the wheel removal/access labor is included.",
           missingAuthorityTypes: ["line-item R&I/access labor basis", "included-operation basis", "shop comparison estimate"],
@@ -1732,17 +1741,48 @@ function isRejectedPrimaryAnchorText(rowText: string, anchor: EstimateRowAnchor)
     /\b(?:abbreviation|legend|disclaimer|fraud|legal notice|work authorization|policy|declarations|alternate parts policy|quality replacement|vehicle equipment|footer|ccc motor|motor guide|estimating guide|included operations|not included|aftermarket definition|lkq rcy used|capa definition)\b/.test(normalized);
 }
 
+function isRejectedBoilerplateSupplierText(normalized: string) {
+  return /\b(?:aftermarket crash part|quality replacement parts?|alternate parts policy|a\/m aftermarket|a m aftermarket|capa definitions?|lkq rcy used definitions?|abbreviations?|legend|disclaimer|fraud|ccc motor|motor guide|included operations?|not included|vehicle equipment|recond|refn)\b/.test(normalized);
+}
+
 function isWheelLaborAnchorText(normalized: string) {
   if (!/\b(?:wheel|rim|tire|alignment)\b/.test(normalized)) return false;
+  if (/\b(?:wheel opening|opening molding|molding|flare|liner|vehicle equipment|tilt wheel|fm radio|skyview roof)\b/.test(normalized)) return false;
   return /\b(?:rf|lf|rt|lt|front|rear|wheel|rim|tire|alignment|mount|balance|repair|sublet|replacement|replace|repl|r&i|access)\b/.test(normalized);
 }
 
+function isWheelComparisonBoilerplate(text: string) {
+  const normalized = normalizeMatchText(text);
+  return /\b(?:vehicle equipment|4 wheel drive|tilt wheel|fm radio|skyview roof|wheel opening|opening molding)\b/.test(normalized);
+}
+
+function summarizeWheelCarrierEvidence(anchors: EstimateRowAnchor[]) {
+  const rows = anchors
+    .filter((anchor) => isPrimaryEstimateAnchor(anchor))
+    .map((anchor) => ({ anchor, rowText: getAnchorSourceText(anchor) }))
+    .filter((item) => isWheelLaborAnchorText(normalizeMatchText(item.rowText)))
+    .map((item) => `${item.anchor.lineNumber ? `line ${item.anchor.lineNumber} ` : ""}${item.rowText}`)
+    .slice(0, 5);
+  return rows.length ? rows.join("; ") : "wheel/tire/alignment row located in source estimate";
+}
+
 function summarizeComparisonEvidence(text: string, pattern: RegExp) {
-  const line = text
+  const lines = text
     .split(/\r?\n/)
     .map((item) => item.replace(/\s+/g, " ").trim())
-    .find((item) => pattern.test(item));
-  return line ? truncateText(line, 180) : "not located in comparison text";
+    .filter((item) => pattern.test(item) && !isWheelComparisonBoilerplate(item))
+    .sort((a, b) => scoreWheelComparisonEvidenceLine(b) - scoreWheelComparisonEvidenceLine(a));
+  const summary = lines.slice(0, 2).join("; ");
+  return summary ? truncateText(summary, 180) : "not located in comparison text";
+}
+
+function scoreWheelComparisonEvidenceLine(line: string) {
+  let score = 0;
+  if (/\bline\s+(?:50|51)\b/i.test(line)) score += 20;
+  if (/\b(?:rf|lf)\s+wheel\b/i.test(line)) score += 12;
+  if (/\br&i|r\s*&\s*i|access\b/i.test(line)) score += 10;
+  if (/\bline\s+210\b/i.test(line)) score -= 8;
+  return score;
 }
 
 function isGarbledPolicyText(text: string) {
@@ -2622,6 +2662,10 @@ export function scorePartSourceCandidate(candidate: PartSourceFindingCandidate):
     scored.score -= 55;
     scored.rejectionReasons.push("boilerplate/disclaimer row");
   }
+  if (/\b(?:wheel opening|opening molding|wheel opening molding)\b/.test(normalized)) {
+    scored.score -= 70;
+    scored.rejectionReasons.push("wheel-opening trim/molding row is not wheel-end source support");
+  }
   if (!hasPartNoun) {
     scored.score -= 24;
     scored.rejectionReasons.push("no part noun");
@@ -3242,6 +3286,7 @@ function classifyRowBackedCandidate(
     };
   }
   if (anchor.anchorType === "supplier_row") {
+    if (!anchor.lineNumber || isRejectedBoilerplateSupplierText(normalized)) return null;
     return {
       type: "supplier_parts",
       topic: "supplier",
@@ -3264,15 +3309,7 @@ function classifyRowBackedCandidate(
     };
   }
   if (anchor.anchorType === "guide_row") {
-    return {
-      type: "totals_delta",
-      topic: "totals",
-      label: "ESTIMATE GAP ONLY",
-      category: "not_included_operation",
-      estimateGapType: "present_but_under_documented",
-      adasStatus: "not_applicable",
-      missingAuthorityTypes: ["CCC/MOTOR guide support"],
-    };
+    return null;
   }
   if (/\bnot correct style\b/.test(normalized)) {
     return {
@@ -3448,6 +3485,8 @@ function gateAnchoredCitationCandidate(
   if (candidate.sourceLineNumber && anchor.lineNumber !== candidate.sourceLineNumber) return "blocked";
   if (candidate.sourceAnchorText !== getAnchorSourceText(anchor)) return "blocked";
   if (!isClassificationAllowedForRow(candidate.label, anchor)) return "blocked";
+  if (anchor.anchorType === "guide_row") return "blocked";
+  if (anchor.anchorType === "supplier_row" && isRejectedBoilerplateSupplierText(normalizeMatchText(getAnchorSourceText(anchor)))) return "blocked";
   if (isRestrictedSourcePageForCandidate(candidate, anchor)) return "blocked";
   return "allowed";
 }

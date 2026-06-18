@@ -32,6 +32,7 @@ import {
   RETRYABLE_PROVIDER_USER_MESSAGE,
 } from "@/lib/ai/providerRetryableError";
 import { generatePrimaryText } from "@/lib/ai/providerTextGeneration";
+import { getCollisionIqModelDiagnostic } from "@/lib/modelConfig";
 import {
   areInternalRetrievalPathsResolved,
   createAgentRetrievalTrace,
@@ -59,6 +60,29 @@ const LEGAL_INFO_DISCLAIMER =
 
 const PENNSYLVANIA_COUNSEL_REVIEW_FALLBACK =
   "Counsel should review applicable Pennsylvania claim-handling and bad-faith law.";
+
+function shouldExposeSafeProviderDiagnostics(userMessage: string) {
+  return /\b(?:provider|model|routing|diagnostics?|fallbackUsed|reasoningEffort|keyPresent|openai|gpt-?5\.5)\b/i.test(userMessage);
+}
+
+function appendSafeProviderDiagnostics(text: string, params: { stage: string; provider: string; model: string }) {
+  const diagnostic = getCollisionIqModelDiagnostic({
+    stage: params.stage,
+    provider: params.provider as Parameters<typeof getCollisionIqModelDiagnostic>[0]["provider"],
+    model: params.model,
+  });
+  return [
+    text.trim(),
+    "",
+    "Provider diagnostics:",
+    `- stage: ${diagnostic.stage}`,
+    `- provider: ${diagnostic.provider}`,
+    `- model: ${diagnostic.model}`,
+    `- fallbackUsed: ${diagnostic.fallbackUsed}`,
+    `- reasoningEffort: ${diagnostic.reasoningEffort ?? "null"}`,
+    `- keyPresent: ${diagnostic.keyPresent}`,
+  ].join("\n");
+}
 
 function limitText(text: string, max = 12000) {
   if (!text) return "";
@@ -1481,11 +1505,18 @@ export async function POST(req: Request) {
       durationMs: Date.now() - requestStartedAt,
     });
 
-    const finalText = sanitizeUserFacingEvidenceText(redactExternalDocumentUrls(
+    const finalTextBase = sanitizeUserFacingEvidenceText(redactExternalDocumentUrls(
       needsLegalDisclaimer
         ? `${LEGAL_INFO_DISCLAIMER}\n\n${modeShapedOutput}`
         : modeShapedOutput
       ));
+    const finalText = shouldExposeSafeProviderDiagnostics(userMessage)
+      ? appendSafeProviderDiagnostics(finalTextBase, {
+          stage: "chat_first-pass",
+          provider: firstPass.provider,
+          model: firstPass.model,
+        })
+      : finalTextBase;
 
     logAgentTraceCompleted(agentTrace);
 

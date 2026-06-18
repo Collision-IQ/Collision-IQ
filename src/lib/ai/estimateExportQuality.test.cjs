@@ -256,6 +256,48 @@ run("extractEstimateFacts ignores tiny boilerplate amount for 21548/SOR3 totals"
   assert.notEqual(carrierFacts.estimateTotal, 0.02);
 });
 
+run("repair intelligence export separates 21548/SOR3 comparison totals", () => {
+  const report = {
+    ...makeReport(),
+    sourceEstimateText: [
+      "Shop 21548 / SOR3 repair estimate",
+      "ESTIMATE TOTAL: $0.02",
+      "Shop estimate grand total $9,307.40",
+      "Carrier estimate SOR3 total cost of repairs $5,737.10",
+      "Carrier net after deductible $5,237.10",
+      "Line 50 Repl RF wheel 0.3 M",
+      "Line 51 R&I LF wheel 0.2 M access note",
+    ].join("\n"),
+    evidence: [
+      {
+        id: "evidence-21548",
+        title: "21548/SOR3 estimates",
+        snippet: [
+          "Shop estimate grand total $9,307.40",
+          "Carrier total cost of repairs $5,737.10",
+          "Carrier net after deductible $5,237.10",
+        ].join("\n"),
+        source: "Shop 21548.pdf / SOR3.pdf",
+        authority: "inferred",
+      },
+    ],
+  };
+  const analysis = normalizeReportToAnalysisResult(report);
+  const carrier = buildCarrierReport({
+    report,
+    analysis,
+    panel: null,
+    assistantAnalysis: null,
+  });
+
+  assert.equal(carrier.summary.find((item) => item.label === "Shop Estimate Grand Total")?.value, "$9,307.40");
+  assert.equal(carrier.summary.find((item) => item.label === "Carrier Total Cost of Repairs")?.value, "$5,737.10");
+  assert.equal(carrier.summary.find((item) => item.label === "Carrier Net After Deductible")?.value, "$5,237.10");
+  assert.equal(carrier.summary.find((item) => item.label === "Gross Repair Appraisal Gap")?.value, "$3,570.30");
+  assert.equal(carrier.summary.find((item) => item.label === "Estimate Total")?.value, undefined);
+  assert.equal(flattenCarrierDocument(carrier).includes("$0.02"), false);
+});
+
 run("vehicle extraction resolves TESL header text and Tesla 5YJ VIN decoding", () => {
   const extractedVehicle = extractVehicleIdentityFromText(SHOP_21733_TEXT, "attachment");
   const decodedVehicle = decodeVinVehicleIdentity("5YJSA1E21JF264319");

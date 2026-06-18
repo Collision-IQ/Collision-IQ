@@ -99,6 +99,23 @@ export function buildCarrierReport({
   const canonicalVehicle = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
   const canonicalVin = resolveCanonicalVin(exportModel) ?? "Unspecified";
   const canonicalInsurer = resolveCanonicalInsurer(exportModel);
+  const comparisonTotals = exportModel.reportFields.comparisonTotals;
+  const comparisonTotalSummary = comparisonTotals
+    ? [
+        ...(typeof comparisonTotals.shopEstimateGrandTotal === "number"
+          ? [{ label: "Shop Estimate Grand Total", value: formatMoneyPrecise(comparisonTotals.shopEstimateGrandTotal) }]
+          : []),
+        ...(typeof comparisonTotals.carrierTotalCostOfRepairs === "number"
+          ? [{ label: "Carrier Total Cost of Repairs", value: formatMoneyPrecise(comparisonTotals.carrierTotalCostOfRepairs) }]
+          : []),
+        ...(typeof comparisonTotals.carrierNetAfterDeductible === "number"
+          ? [{ label: "Carrier Net After Deductible", value: formatMoneyPrecise(comparisonTotals.carrierNetAfterDeductible) }]
+          : []),
+        ...(typeof comparisonTotals.grossRepairAppraisalGap === "number"
+          ? [{ label: "Gross Repair Appraisal Gap", value: formatMoneyPrecise(comparisonTotals.grossRepairAppraisalGap) }]
+          : []),
+      ]
+    : [];
 
   const document: CarrierReportDocument = {
     filename: "repair-intelligence-report.pdf",
@@ -132,7 +149,8 @@ export function buildCarrierReport({
       ...(typeof exportModel.reportFields.mileage === "number"
         ? [{ label: "Mileage", value: exportModel.reportFields.mileage.toLocaleString("en-US") }]
         : []),
-      ...(typeof exportModel.reportFields.estimateTotal === "number"
+      ...comparisonTotalSummary,
+      ...(comparisonTotalSummary.length === 0 && typeof exportModel.reportFields.estimateTotal === "number"
         ? [{ label: "Estimate Total", value: formatMoneyPrecise(exportModel.reportFields.estimateTotal) }]
         : []),
       {
