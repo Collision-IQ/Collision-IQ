@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Download, MessageSquareText, X } from "lucide-react";
+import { Clipboard, Download, MessageSquareText, X } from "lucide-react";
 
 export type CitationDensityAnnotationMetadata = {
   findingId: string;
@@ -83,11 +83,13 @@ export const PDF_VIEWER_INITIALIZATION_ERROR =
 export default function CitationDensityAnnotationViewer({
   pdfUrl,
   annotations,
+  diagnostics,
   onClose,
   onAsk,
 }: {
   pdfUrl: string;
   annotations: CitationDensityAnnotationMetadata[];
+  diagnostics?: Record<string, unknown> | null;
   onClose: () => void;
   onAsk?: (annotation: CitationDensityAnnotationMetadata) => void;
 }) {
@@ -182,6 +184,7 @@ export default function CitationDensityAnnotationViewer({
                 <Detail label="Missing proof" value={selected.missingProof} />
                 <Detail label="Why it matters" value={selected.whyItMatters || selected.comment} />
                 <Detail label="Next action" value={selected.nextAction} />
+                <DiagnosticsPanel diagnostics={diagnostics} annotations={annotations} />
                 {selected.sourceRefs.length ? (
                   <div>
                     <div className="text-xs uppercase text-white/45">Source refs</div>
@@ -218,6 +221,69 @@ function Detail({ label, value }: { label: string; value: string }) {
       <div className="mt-1 text-sm leading-6 text-white/82">{value || "Not specified"}</div>
     </div>
   );
+}
+
+function DiagnosticsPanel({
+  diagnostics,
+  annotations,
+}: {
+  diagnostics?: Record<string, unknown> | null;
+  annotations: CitationDensityAnnotationMetadata[];
+}) {
+  const payload = diagnostics ?? {
+    artifactVersion: "not provided",
+    reportType: "citation-density",
+    acceptedEstimateRowFindings: annotations.length,
+    rejectedAnchors: [],
+  };
+  const rows = [
+    ["Build", formatDiagnosticValue(payload.buildCommit)],
+    ["Artifact", formatDiagnosticValue(payload.artifactVersion ?? payload.citationDensityArtifactVersion)],
+    ["Report", formatDiagnosticValue(payload.reportType)],
+    ["Accepted rows", formatDiagnosticValue(payload.acceptedEstimateRowFindings ?? annotations.length)],
+    ["Rejected boilerplate", formatDiagnosticValue(payload.rejectedBoilerplateCount)],
+    ["Required detectors", formatDiagnosticValue(payload.requiredDetectorFindingCount)],
+    ["Missing detectors", formatDiagnosticValue(payload.missingRequiredDetectors)],
+    ["Policy confidence", formatDiagnosticValue(payload.policyExtractionConfidence)],
+    ["Policy mismatch", formatDiagnosticValue(payload.policyVehicleMismatch)],
+    ["Authority search", formatDiagnosticValue(payload.googleDriveInternalAuthoritySearch)],
+  ];
+
+  return (
+    <div className="rounded-md border border-white/10 bg-white/[0.03] p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs uppercase text-white/45">Diagnostics</div>
+        <button
+          type="button"
+          onClick={() => void copyDiagnostics(payload)}
+          className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-md border border-white/10 bg-white/5 p-2 text-white/70 transition hover:bg-white/10 hover:text-white"
+          aria-label="Copy diagnostics"
+          title="Copy diagnostics"
+        >
+          <Clipboard size={14} />
+        </button>
+      </div>
+      <div className="mt-3 space-y-2 text-xs text-white/70">
+        {rows.map(([label, value]) => (
+          <div key={label} className="grid grid-cols-[112px_minmax(0,1fr)] gap-2">
+            <span className="text-white/42">{label}</span>
+            <span className="break-words">{value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+async function copyDiagnostics(payload: Record<string, unknown>) {
+  await navigator.clipboard?.writeText(JSON.stringify(payload, null, 2));
+}
+
+function formatDiagnosticValue(value: unknown) {
+  if (value === null || value === undefined || value === "") return "Not reported";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.length ? value.map((item) => String(item)).join(", ") : "None";
+  return JSON.stringify(value);
 }
 
 function getAnnotationSelectionKey(annotation: CitationDensityAnnotationMetadata) {

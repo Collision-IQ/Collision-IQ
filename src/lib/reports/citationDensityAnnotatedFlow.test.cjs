@@ -270,6 +270,30 @@ run("Citation Density viewer uses server-generated PDF and converts PDF coordina
   assert.match(source, /setSelectedId\(selectionKey\)/);
   assert.match(source, /effectiveSelectedId === selectionKey/);
   assert.match(source, /border-amber-300\/70 bg-amber-300\/15/);
+  assert.match(source, /DiagnosticsPanel/);
+  assert.match(source, /copyDiagnostics/);
+});
+
+run("annotated routes expose copyable diagnostics for locked DevTools", () => {
+  const routeSource = fs.readFileSync(
+    path.join(process.cwd(), "src/app/api/reports/citation-density/annotated-estimate/route.ts"),
+    "utf8"
+  );
+  const oemRouteSource = fs.readFileSync(
+    path.join(process.cwd(), "src/app/api/reports/oem-citation-density/annotated-estimate/route.ts"),
+    "utf8"
+  );
+  const viewerSource = fs.readFileSync(path.join(process.cwd(), "src/components/CitationDensityAnnotationViewer.tsx"), "utf8");
+
+  assert.match(routeSource, /buildRequiredEstimatorDeltaFindings/);
+  assert.match(`${routeSource}\n${oemRouteSource}`, /rejectedAnchors/);
+  assert.match(`${routeSource}\n${oemRouteSource}`, /rejectedBoilerplateCount/);
+  assert.match(`${routeSource}\n${oemRouteSource}`, /acceptedEstimateRowFindings/);
+  assert.match(`${routeSource}\n${oemRouteSource}`, /missingRequiredDetectors/);
+  assert.match(`${routeSource}\n${oemRouteSource}`, /policyExtractionConfidence/);
+  assert.match(`${routeSource}\n${oemRouteSource}`, /policyVehicleMismatch/);
+  assert.match(`${routeSource}\n${oemRouteSource}`, /googleDriveInternalAuthoritySearch/);
+  assert.match(viewerSource, /copyDiagnostics/);
 });
 
 run("shared Citation Density coordinate utility normalizes PDF and viewport rectangles", () => {

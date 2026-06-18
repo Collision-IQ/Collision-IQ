@@ -196,6 +196,8 @@ type AnalysisFailureResponse = {
   statusCode?: number;
   message?: string;
   error?: string;
+  contextBudget?: Record<string, unknown> | null;
+  toolUsageTrace?: Array<Record<string, unknown>>;
 };
 
 const RETRYABLE_ANALYSIS_MESSAGE = "Analysis provider is busy. Please retry shortly.";
@@ -1958,6 +1960,9 @@ export default function ChatWidget({
           retrievalCompleted?: boolean;
           retrievalMatchCount?: number;
           refinedWithRetrieval?: boolean;
+          contextBudgetMessage?: string | null;
+          contextBudget?: Record<string, unknown> | null;
+          toolUsageTrace?: Array<Record<string, unknown>>;
           analysisCompletedAt?: string;
           caseContinuity?: {
             activeCaseId?: string;
@@ -1983,7 +1988,7 @@ export default function ChatWidget({
         }
         onLinkedEvidenceChange?.(analysisData.linkedEvidence ?? []);
         onAnalysisPanelChange?.(analysisData.panel ?? null);
-        onAnalysisStatusChange?.("complete", null);
+        onAnalysisStatusChange?.("complete", analysisData.contextBudgetMessage ?? null);
         onAnalysisLoadingChange?.(false);
         const nextReviewProgress = updateReviewProgress((current) => {
           const reviewedForDetermination =
@@ -2053,7 +2058,7 @@ export default function ChatWidget({
           skippedReset: true,
         });
         upsertSystemStatusMessage(
-          `${formatCaseUpdateStatus(
+          `${analysisData.contextBudgetMessage ? `${analysisData.contextBudgetMessage} ` : ""}${formatCaseUpdateStatus(
             analysisData.reassessmentDelta,
             analysisData.artifactRefreshPolicy
           )} ${buildReviewCompletionMessage(nextReviewProgress)} ${buildNextBatchPrompt(nextReviewProgress.reviewedForDetermination, maxUploadBatchFiles)}`
@@ -2238,6 +2243,9 @@ export default function ChatWidget({
               retrievalCompleted?: boolean;
               retrievalMatchCount?: number;
               refinedWithRetrieval?: boolean;
+              contextBudgetMessage?: string | null;
+              contextBudget?: Record<string, unknown> | null;
+              toolUsageTrace?: Array<Record<string, unknown>>;
               analysisCompletedAt?: string;
               caseContinuity?: {
                 activeCaseId?: string;
@@ -2257,7 +2265,7 @@ export default function ChatWidget({
             }
             onLinkedEvidenceChange?.(analysisData.linkedEvidence ?? []);
             onAnalysisPanelChange?.(analysisData.panel ?? null);
-            onAnalysisStatusChange?.("complete", null);
+            onAnalysisStatusChange?.("complete", analysisData.contextBudgetMessage ?? null);
             onAnalysisLoadingChange?.(false);
             const nextReviewProgress = updateReviewProgress((current) => {
               const reviewedForDetermination =
@@ -2320,7 +2328,7 @@ export default function ChatWidget({
               analysisCompletedAt: analysisData.analysisCompletedAt ?? null,
             });
             upsertSystemStatusMessage(
-              `${analysisData.caseContinuity?.mode === "active_case_update"
+              `${analysisData.contextBudgetMessage ? `${analysisData.contextBudgetMessage} ` : ""}${analysisData.caseContinuity?.mode === "active_case_update"
                 ? formatCaseUpdateStatus(
                     analysisData.reassessmentDelta,
                     analysisData.artifactRefreshPolicy

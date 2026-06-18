@@ -195,6 +195,28 @@ export type CitationDensityDebugTrace = {
     rowText?: string;
     reason: string;
   }>;
+  rejectedAnchors?: Array<{
+    anchorId?: string | null;
+    pageNumber?: number | null;
+    anchorType?: string | null;
+    rowText?: string;
+    reason: string;
+  }>;
+  rejectedBoilerplateCount?: number;
+  acceptedEstimateRowFindingCount?: number;
+  requiredDetectorFindingCount?: number;
+  missingRequiredDetectors?: string[];
+  policyExtractionConfidence?: "high" | "medium" | "low" | "failed" | "not_run";
+  policyVehicleMismatch?: {
+    policyVehicle?: string | null;
+    activeEstimateVehicle?: string | null;
+    warning: string;
+  } | null;
+  authoritySearchTrace?: {
+    googleDriveOrInternalSearchRan: boolean;
+    skippedReason?: string;
+    sandPolishSupportFound?: boolean;
+  };
   reportType?: "citation-density" | "oem-citation-density";
   artifactVersion?: string;
   reviewedEstimateFileNames?: string[];
@@ -757,6 +779,18 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     rejectedLineNumberCandidates: [],
     partSourceComparisonMatches: [],
     partSourceDroppedReasons: [],
+    rejectedAnchors: [],
+    rejectedBoilerplateCount: 0,
+    acceptedEstimateRowFindingCount: 0,
+    requiredDetectorFindingCount: 0,
+    missingRequiredDetectors: [],
+    policyExtractionConfidence: "not_run",
+    policyVehicleMismatch: null,
+    authoritySearchTrace: {
+      googleDriveOrInternalSearchRan: false,
+      skippedReason: "No connected internal authority-search context is available inside annotated PDF generation.",
+      sandPolishSupportFound: false,
+    },
     fallbackMatchedFindings: [],
     droppedFindings: [],
     rendererDrops: [],
@@ -819,9 +853,11 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       sourceText: params.sourceText,
       comparisonEstimateTexts: params.comparisonEstimateTexts ?? [],
     });
+    const generatedFindings = generated.findings
+      .filter((finding) => !isGeneratedFindingCoveredByExisting(finding, selectedFindings));
     selectedFindings = [
       ...selectedFindings,
-      ...generated.findings.filter((finding) => !selectedIds.size || selectedIds.has(finding.id)),
+      ...generatedFindings.filter((finding) => !selectedIds.size || selectedIds.has(finding.id)),
     ];
     const sanitizedGenerated = sanitizeCitationDensityFindingsForVisibleLayer(selectedFindings);
     findings = sanitizedGenerated.findings;
@@ -1013,6 +1049,11 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   ];
   trace.anchoredFindingCount = candidateResult.candidates.length;
   trace.unanchoredFindingCount = Math.max(0, findingsWithPartSource.length - candidateResult.candidates.length);
+  trace.acceptedEstimateRowFindingCount = candidateResult.candidates.filter((candidate) =>
+    candidate.anchor.anchorType === "estimate_line" ||
+    candidate.anchor.anchorType === "line_note" ||
+    candidate.anchor.anchorType === "totals_row"
+  ).length;
   trace.partSourceAnchoredFindingCount = candidateResult.candidates.filter((candidate) => isPartSourceFinding(candidate.finding)).length;
   trace.partSourceUnanchoredFindingCount = Math.max(0, trace.partSourceFindingCount - trace.partSourceAnchoredFindingCount);
   appendToolUsageTrace(trace, {
@@ -1260,6 +1301,223 @@ function emptyPartSourceFindingResult(): PartSourceFindingResult {
   };
 }
 
+export function buildRequiredEstimatorDeltaFindings(
+  context: AnnotatedEstimateFindingGeneratorContext
+): AnnotatedEstimateGeneratedFindings {
+  const findings: CitationDensityFinding[] = [];
+  const rejectedAnchors: NonNullable<CitationDensityDebugTrace["rejectedAnchors"]> = [];
+  const usedAnchorIds = new Set<string>();
+  const comparisonText = context.comparisonEstimateTexts.map((item) => item.text).join("\n");
+  const allText = [context.sourceText ?? "", comparisonText, context.sourcePdfName, ...context.uploadedFileNames].join("\n");
+  const isTeslaOrEv = /\b(?:tesla|model\s+[3sxy]|electric vehicle|bev|ev\b|high[-\s]?voltage|hv battery)\b/i.test(allText);
+  let sandPolishSeen = false;
+  let batteryResetSeen = false;
+  let wheelDetectorSeen = false;
+  let hubDetectorSeen = false;
+
+  for (const anchor of context.anchors) {
+    const rowText = getAnchorSourceText(anchor);
+    const normalized = normalizeMatchText(rowText);
+    if (!rowText.trim()) continue;
+
+    if (!isPrimaryEstimateAnchor(anchor)) {
+      if (isRejectedPrimaryAnchorText(rowText, anchor)) {
+        rejectedAnchors.push({
+          anchorId: anchor.anchorId,
+          pageNumber: anchor.pageNumber,
+          anchorType: anchor.anchorType,
+          rowText: truncateText(rowText, 220),
+          reason: "boilerplate, guide, supplier-only, policy, or legal text rejected as primary finding anchor",
+        });
+      }
+      continue;
+    }
+
+    const sourceKinds = classifyPartSource(rowText);
+    const hasWheel = /\b(?:wheel|rim|tire|mount|balance|liner|flare)\b/.test(normalized);
+    const hasAccessLabor = /\b(?:r\s*&\s*i|r&i|remove|install|disassembly|reassembly|access)\b/i.test(rowText);
+
+    if (!usedAnchorIds.has(anchor.anchorId) && hasWheel && /\b(?:repair|sublet|cover|mount|balance|replacement|repl|replace|r&i|r\s*&\s*i|liner|flare|access)\b/.test(normalized)) {
+      const comparisonWheelAccess = /\b(?:wheel|rim|tire|liner|flare)\b[\s\S]{0,80}\b(?:r&i|r\s*&\s*i|remove|install|access|disassembly|reassembly|replacement|repl)\b/i.test(comparisonText) ||
+        /\b(?:r&i|r\s*&\s*i|remove|install|access|disassembly|reassembly|replacement|repl)\b[\s\S]{0,80}\b(?:wheel|rim|tire|liner|flare)\b/i.test(comparisonText);
+      const zeroOrMissingLabor = anchor.labor === 0 || anchor.labor === null || /\b0\.0\b/.test(rowText);
+      if (zeroOrMissingLabor || comparisonWheelAccess || hasAccessLabor) {
+        wheelDetectorSeen = true;
+        findings.push(buildRequiredDetectorFinding({
+          context,
+          anchor,
+          findingType: "wheel_labor_delta",
+          title: "Wheel repair / R&I access labor review",
+          category: "r_and_i",
+          label: "ESTIMATE GAP ONLY",
+          score: isTeslaOrEv ? 66 : 60,
+          safetyImpact: isTeslaOrEv ? "high" : "medium",
+          priority: "high",
+          currentSupportSummary: `Carrier/source row affected: ${rowText}. Carrier allowed labor: ${anchor.labor ?? "missing/0.0"}. Shop/comparison wheel access evidence: ${summarizeComparisonEvidence(comparisonText, /wheel|rim|tire|liner|flare|access|r&i|remove|install/i)}.`,
+          missingProofSummary: "Wheel repair, wheel cover, mount/balance, wheel replacement, tire replacement, or wheel-opening access may require line-item R&I/access labor when removal is needed for liner, flare, bumper hardware, or wheel-end access.",
+          recommendedNextAction: "Request line-item wheel R&I/access labor or a written included-operation basis explaining where the wheel removal/access labor is included.",
+          missingAuthorityTypes: ["line-item R&I/access labor basis", "included-operation basis", "shop comparison estimate"],
+          laborHoursImpact: typeof anchor.labor === "number" ? Math.max(0.1, 0.1 - anchor.labor) : 0.1,
+          amountImpact: anchor.price ?? null,
+        }));
+        usedAnchorIds.add(anchor.anchorId);
+      }
+    }
+
+    const wheelEndPart = /\b(?:hub|bearing|knuckle|control arm|tie rod|steering|strut|spindle|suspension)\b/.test(normalized);
+    if (!usedAnchorIds.has(anchor.anchorId) && wheelEndPart && hasNonOemPartSource(sourceKinds)) {
+      hubDetectorSeen = true;
+      findings.push(buildRequiredDetectorFinding({
+        context,
+        anchor,
+        findingType: "am_wheel_end_safety",
+        title: "A/M wheel-end part-source safety review",
+        category: "parts_downgrade",
+        label: "NEEDS OEM",
+        score: isTeslaOrEv ? 72 : 62,
+        safetyImpact: "high",
+        priority: "high",
+        currentSupportSummary: `Estimate row uses ${formatPartSourceKinds(sourceKinds)} sourcing for a wheel-end, steering, bearing, hub, or suspension component: ${rowText}.`,
+        missingProofSummary: `${isTeslaOrEv ? "EV weight and ADAS sensitivity increase the need for OEM procedure verification. " : ""}Wheel-end and suspension geometry can affect steering, stability, sensor calibration, ADAS confidence, and roadworthiness. Carrier aftermarket warranty language does not prove OEM-equivalent system performance or related manufacturer warranty preservation. This supports OEM review; it does not prove an OEM requirement without authority.`,
+        recommendedNextAction: "Request OEM position/procedure support, supplier/manufacturer fit/function documentation, and the carrier's written basis for A/M/LKQ/non-OEM wheel-end use on this vehicle platform.",
+        missingAuthorityTypes: ["OEM procedure or position support", "supplier/manufacturer fit-function documentation", "written carrier part-source basis"],
+        amountImpact: anchor.price ?? null,
+        laborHoursImpact: anchor.labor ?? null,
+      }));
+      usedAnchorIds.add(anchor.anchorId);
+    }
+
+    if (!usedAnchorIds.has(anchor.anchorId) && /\b(?:finish sand|denib|de nib|color sand|sand and polish|sand polish|buff|refinish correction|post refinish correction)\b/.test(normalized)) {
+      sandPolishSeen = true;
+      findings.push(buildRequiredDetectorFinding({
+        context,
+        anchor,
+        findingType: "sand_polish_p_page_support",
+        title: "Sand/polish refinish database support review",
+        category: "refinish",
+        label: "NEEDS P-PAGE",
+        score: 58,
+        safetyImpact: "low",
+        priority: "medium",
+        currentSupportSummary: `Refinish correction row found: ${rowText}. Internal/Google Drive authority search was not available in this export path.`,
+        missingProofSummary: "Finish sand and polish, denib and polish, color sand and buff, sand and polish, or post-refinish correction is a refinish-related operation that needs CCC/MOTOR/P-page/database support when capped, limited, or disputed.",
+        recommendedNextAction: "Attach CCC/MOTOR/P-page/database support or label the item NEEDS P-PAGE / NEEDS DATABASE SUPPORT before treating it as supplement-ready.",
+        missingAuthorityTypes: ["CCC/MOTOR/P-page support", "database support"],
+        amountImpact: anchor.price ?? null,
+        laborHoursImpact: anchor.labor ?? null,
+      }));
+      usedAnchorIds.add(anchor.anchorId);
+    }
+
+    if (!usedAnchorIds.has(anchor.anchorId) && /\b(?:d\s*&\s*r battery|d&r battery|disconnect.*battery|reconnect.*battery|reset electronics|battery reset|isolate 12v|hv state of charge|state of charge)\b/i.test(rowText)) {
+      batteryResetSeen = true;
+      findings.push(buildRequiredDetectorFinding({
+        context,
+        anchor,
+        findingType: "battery_reset_electrical_rate",
+        title: "Battery D&R / reset electronics labor-category review",
+        category: "scan_diagnostic",
+        label: "NEEDS OEM",
+        score: isTeslaOrEv ? 68 : 56,
+        safetyImpact: isTeslaOrEv ? "high" : "medium",
+        priority: "high",
+        currentSupportSummary: `Electrical/mechanical procedure row found: ${rowText}. Labor/category shown: ${anchor.labor ?? "not parsed"} hours.`,
+        missingProofSummary: "Battery disconnect/reconnect, reset electronics, 12V isolation, HV state-of-charge, or battery reset should be reviewed as mechanical/electrical procedure context, not a generic miscellaneous charge.",
+        recommendedNextAction: "Request MOTOR/CCC category basis, OEM battery disconnect/reconnect/reset procedure support, and reconcile the labor category/rate if allowed at body or non-mechanical context.",
+        missingAuthorityTypes: ["MOTOR/CCC labor-category basis", "OEM battery/reset procedure", "mechanical/electrical rate support"],
+        amountImpact: anchor.price ?? null,
+        laborHoursImpact: anchor.labor ?? null,
+      }));
+      usedAnchorIds.add(anchor.anchorId);
+    }
+  }
+
+  const missingRequiredDetectors = [
+    wheelDetectorSeen ? null : "wheel_labor_delta",
+    hubDetectorSeen ? null : "am_wheel_end_safety",
+    sandPolishSeen ? null : "sand_polish_p_page_support",
+    batteryResetSeen ? null : "battery_reset_electrical_rate",
+  ].filter((item): item is string => Boolean(item));
+
+  return {
+    findings,
+    debug: {
+      requiredDetectorFindingCount: findings.length,
+      missingRequiredDetectors,
+      rejectedAnchors: rejectedAnchors.slice(0, 40),
+      rejectedBoilerplateCount: rejectedAnchors.length,
+      authoritySearchTrace: {
+        googleDriveOrInternalSearchRan: false,
+        skippedReason: "No Google Drive/internal repair-procedure connector is available to this server-side PDF export path.",
+        sandPolishSupportFound: false,
+      },
+    },
+  };
+}
+
+export type PolicyApplicabilityDiagnostics = {
+  policyNumber: string | null;
+  effectiveDates: string | null;
+  namedInsuredRedacted: string | null;
+  insuredVehicle: string | null;
+  insuredVin: string | null;
+  collisionDeductible: string | null;
+  comprehensiveDeductible: string | null;
+  policyForms: string[];
+  appraisalSectionsFound: string[];
+  actionAgainstInsurerFound: boolean;
+  governingLawOrJurisdiction: string | null;
+  endorsements: string[];
+  extractionConfidence: "high" | "medium" | "low" | "failed";
+  ocrFallbackRecommended: boolean;
+  vehicleMismatch: CitationDensityDebugTrace["policyVehicleMismatch"];
+};
+
+export function extractPolicyApplicabilityDiagnostics(params: {
+  policyText: string | null | undefined;
+  activeEstimateVehicle?: string | null;
+}): PolicyApplicabilityDiagnostics {
+  const text = params.policyText?.replace(/\r\n/g, "\n").replace(/\r/g, "\n") ?? "";
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const garbled = isGarbledPolicyText(normalized);
+  const policyVehicle = extractPolicyVehicle(normalized);
+  const activeVehicle = params.activeEstimateVehicle?.trim() || null;
+  const vehicleMismatch = policyVehicle && activeVehicle && !vehiclesAppearToMatch(policyVehicle, activeVehicle)
+    ? {
+        policyVehicle,
+        activeEstimateVehicle: activeVehicle,
+        warning: `Policy uploaded, but insured vehicle appears to be ${policyVehicle}. Active estimate vehicle appears to be ${activeVehicle}. Confirm policy applicability before relying on this language.`,
+      }
+    : null;
+  const confidence: PolicyApplicabilityDiagnostics["extractionConfidence"] = !normalized
+    ? "failed"
+    : garbled
+      ? "failed"
+      : [/\bpolicy\b/i, /\bVIN\b/i, /\bdeductible\b/i, /\bappraisal|if we cannot agree\b/i].filter((pattern) => pattern.test(normalized)).length >= 3
+        ? "high"
+        : "medium";
+
+  return {
+    policyNumber: normalized.match(/\bpolicy\s*(?:number|no\.?|#)\s*[:#]?\s*([A-Z0-9-]{4,})/i)?.[1] ?? null,
+    effectiveDates: normalized.match(/\b(?:effective|policy period)\b[^.:\n]{0,40}[: ]\s*([A-Za-z0-9 ,/-]{8,60})/i)?.[1]?.trim() ?? null,
+    namedInsuredRedacted: normalized.match(/\bnamed insured\b\s*[:#]?\s*([A-Z][A-Za-z .'-]{1,60})/i)?.[1]?.replace(/\S/g, "X") ?? null,
+    insuredVehicle: policyVehicle,
+    insuredVin: normalized.match(/\bVIN\b\s*[:#]?\s*([A-HJ-NPR-Z0-9*]{11,17})/i)?.[1] ?? null,
+    collisionDeductible: normalized.match(/\bcollision\b[^$]{0,80}(\$[\d,]+)/i)?.[1] ?? null,
+    comprehensiveDeductible: normalized.match(/\bcomprehensive\b[^$]{0,80}(\$[\d,]+)/i)?.[1] ?? null,
+    policyForms: [...normalized.matchAll(/\b(form|endorsement)\s+([A-Z0-9-]{3,})/gi)].map((match) => match[2]).slice(0, 20),
+    appraisalSectionsFound: ["appraisal", "right to appraisal", "if we cannot agree", "payment of loss"].filter((label) =>
+      new RegExp(label.replace(/\s+/g, "\\s+"), "i").test(normalized)
+    ),
+    actionAgainstInsurerFound: /\baction against (?:us|insurer|company)\b/i.test(normalized),
+    governingLawOrJurisdiction: normalized.match(/\b(?:governing law|jurisdiction|laws of)\b[^.]{0,80}/i)?.[0] ?? null,
+    endorsements: [...normalized.matchAll(/\bendorsement\s+([A-Z0-9-]{3,})/gi)].map((match) => match[1]).slice(0, 20),
+    extractionConfidence: confidence,
+    ocrFallbackRecommended: garbled || confidence === "failed",
+    vehicleMismatch,
+  };
+}
+
 export function buildOemCitationDensityFindings(
   context: AnnotatedEstimateFindingGeneratorContext
 ): AnnotatedEstimateGeneratedFindings {
@@ -1355,6 +1613,154 @@ export function buildOemCitationDensityFindings(
   };
 }
 
+function buildRequiredDetectorFinding(params: {
+  context: AnnotatedEstimateFindingGeneratorContext;
+  anchor: EstimateRowAnchor;
+  findingType: string;
+  title: string;
+  category: CitationDensityFinding["category"];
+  label: string;
+  score: number;
+  safetyImpact: "low" | "medium" | "high";
+  priority: "low" | "medium" | "high";
+  currentSupportSummary: string;
+  missingProofSummary: string;
+  recommendedNextAction: string;
+  missingAuthorityTypes: string[];
+  amountImpact?: number | null;
+  laborHoursImpact?: number | null;
+}): CitationDensityFinding {
+  const evidence = {
+    lineNumber: params.anchor.lineNumber,
+    description: getAnchorSourceText(params.anchor),
+    amount: params.anchor.price ?? null,
+    laborHours: params.anchor.labor ?? null,
+    sourceLabel: params.context.sourcePdfName,
+  };
+  const needsOem = /OEM|procedure|position/i.test(params.missingAuthorityTypes.join(" "));
+  const needsPPage = /p-?page|database|CCC|MOTOR/i.test(params.missingAuthorityTypes.join(" "));
+  const needsAdas = /ADAS|sensor|calibration|reset|electrical|battery|scan|Tesla|EV/i.test(`${params.title} ${params.missingProofSummary}`);
+  return {
+    id: `required-detector-${params.findingType}-${params.anchor.anchorId.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}`,
+    operationLabel: params.title,
+    category: params.category,
+    estimateGapType: params.findingType === "wheel_labor_delta" ? "reduced_by_carrier" : "needs_proof",
+    carrierEvidence: params.anchor.sourceDocumentRole === "carrier" ? evidence : undefined,
+    shopEvidence: params.anchor.sourceDocumentRole === "shop" ? evidence : undefined,
+    applicableEstimateRoles: [params.anchor.sourceDocumentRole],
+    primaryAnnotationRole: params.anchor.sourceDocumentRole,
+    carrierAnchor: params.anchor.sourceDocumentRole === "carrier" ? buildFindingLineAnchor(params.anchor) : undefined,
+    shopAnchor: params.anchor.sourceDocumentRole === "shop" ? buildFindingLineAnchor(params.anchor) : undefined,
+    impact: {
+      dollarImpact: params.amountImpact ?? null,
+      laborHoursImpact: params.laborHoursImpact ?? null,
+      safetyImpact: params.safetyImpact,
+      supplementPriority: params.priority,
+    },
+    citationStatus: {
+      oem: needsOem ? "needed" : "not_applicable",
+      oemPositionStatement: needsOem ? "needed" : "not_applicable",
+      adas: needsAdas ? "needed" : "not_applicable",
+      pPages: needsPPage ? "needed" : "not_applicable",
+      scrs: needsPPage && params.category === "refinish" ? "needed" : "not_applicable",
+      deg: needsPPage ? "needed" : "not_applicable",
+      nhtsa: "not_applicable",
+      stateRegulation: "not_applicable",
+      policy: "not_applicable",
+      invoiceOrCompletionProof: "needed",
+      photoOrTeardownProof: "not_found",
+    },
+    citationDensityScore: params.score,
+    verifiedAuthorityCount: 0,
+    missingAuthorityTypes: params.missingAuthorityTypes,
+    missingAuthority: params.missingAuthorityTypes,
+    bestAvailableAuthority: {
+      type: needsPPage ? "p_page" : "estimate_evidence",
+      status: "needed",
+      title: needsPPage ? "CCC/MOTOR/P-page support needed" : "Estimate evidence only",
+      confidence: "medium",
+      note: "Required estimator detector generated this finding from a concrete estimate row; authority still needs to be attached.",
+    },
+    citationLabel: params.label,
+    currentSupportSummary: params.currentSupportSummary,
+    missingProofSummary: params.missingProofSummary,
+    recommendedNextAction: params.recommendedNextAction,
+    confidence: params.anchor.confidence >= 0.9 ? "high" : "medium",
+    limitations: [
+      "Required estimator detector generated from an extracted estimate row.",
+      "Do not assert OEM requires, NHTSA crash-test equivalency, or warranty voiding unless verified authority is attached.",
+      `sourcePdfHash:${params.context.sourcePdfHash}`,
+      `artifactVersion:${CITATION_DENSITY_ARTIFACT_VERSION}`,
+    ],
+  };
+}
+
+function isGeneratedFindingCoveredByExisting(generated: CitationDensityFinding, existing: CitationDensityFinding[]) {
+  const generatedLine = generated.carrierEvidence?.lineNumber ?? generated.shopEvidence?.lineNumber ?? null;
+  const generatedText = normalizeMatchText([
+    generated.operationLabel,
+    generated.carrierEvidence?.description,
+    generated.shopEvidence?.description,
+    generated.currentSupportSummary,
+  ].filter(Boolean).join(" "));
+  return existing.some((finding) => {
+    const existingLine = finding.carrierEvidence?.lineNumber ?? finding.shopEvidence?.lineNumber ?? null;
+    if (generatedLine && existingLine && String(generatedLine) === String(existingLine)) return true;
+    const existingText = normalizeMatchText([
+      finding.operationLabel,
+      finding.carrierEvidence?.description,
+      finding.shopEvidence?.description,
+      finding.currentSupportSummary,
+    ].filter(Boolean).join(" "));
+    return keyTokenScore(generatedText, existingText, 20) >= 12 || sharedTermScore(generatedText, existingText, 20) >= 12;
+  });
+}
+
+
+function isPrimaryEstimateAnchor(anchor: EstimateRowAnchor) {
+  return anchor.anchorType === "estimate_line" || anchor.anchorType === "line_note" || anchor.anchorType === "totals_row";
+}
+
+function isRejectedPrimaryAnchorText(rowText: string, anchor: EstimateRowAnchor) {
+  const normalized = normalizeMatchText(rowText);
+  if (anchor.anchorType === "supplier_row" || anchor.anchorType === "guide_row" || anchor.anchorType === "section_row") return true;
+  return /\b(?:abbreviations?|legend|disclaimer|fraud notice|legal notice|work authorization|policy|declarations?|allstate parts policy|alternate parts policy|quality replacement parts|vehicle equipment|vin decoding|footer|page \d+ of \d+)\b/i.test(rowText) ||
+    /\b(?:abbreviation|legend|disclaimer|fraud|legal notice|work authorization|policy|declarations|alternate parts policy|quality replacement|vehicle equipment|footer)\b/.test(normalized);
+}
+
+function summarizeComparisonEvidence(text: string, pattern: RegExp) {
+  const line = text
+    .split(/\r?\n/)
+    .map((item) => item.replace(/\s+/g, " ").trim())
+    .find((item) => pattern.test(item));
+  return line ? truncateText(line, 180) : "not located in comparison text";
+}
+
+function isGarbledPolicyText(text: string) {
+  if (!text.trim()) return true;
+  const replacementCount = (text.match(/\uFFFD|�/g) ?? []).length;
+  const mojibakeCount = (text.match(/(?:Ã|Â|â€|â€™|â€œ|â€|ï¿½)/g) ?? []).length;
+  return replacementCount + mojibakeCount >= 3 || (text.length > 80 && /[A-Za-z]/.test(text) && text.replace(/[A-Za-z0-9\s.,;:$#/-]/g, "").length / text.length > 0.18);
+}
+
+function extractPolicyVehicle(text: string) {
+  const explicit = text.match(/\b(?:insured|covered|described)\s+vehicle\b[^.:\n]{0,40}[: ]\s*((?:19|20)\d{2}\s+[A-Z][A-Za-z-]+(?:\s+[A-Za-z0-9-]+){0,4})/i)?.[1];
+  if (explicit) return explicit.trim();
+  return text.match(/\b((?:19|20)\d{2}\s+(?:Tesla|Ford|Chevrolet|Chevy|GMC|Honda|Toyota|Nissan|Hyundai|Kia|BMW|Mercedes|Audi|Volkswagen|Jeep|Ram|Dodge|Subaru|Mazda|Lexus|Acura|Rivian|Lucid)\s+[A-Za-z0-9-]+(?:\s+[A-Za-z0-9-]+){0,3})\b/i)?.[1]?.trim() ?? null;
+}
+
+function vehiclesAppearToMatch(a: string, b: string) {
+  const normalize = (value: string) => normalizeMatchText(value)
+    .split(" ")
+    .filter((token) => token.length > 1)
+    .slice(0, 5);
+  const left = normalize(a);
+  const right = new Set(normalize(b));
+  if (!left.length || !right.size) return false;
+  const matches = left.filter((token) => right.has(token)).length;
+  return matches >= Math.min(3, left.length);
+}
+
 type OemCitationDensityFamily = {
   findingType: string;
   title: string;
@@ -1376,6 +1782,45 @@ type OemCitationDensityFamily = {
 function classifyOemCitationDensityRow(rowText: string, anchor: EstimateRowAnchor): OemCitationDensityFamily | null {
   const normalized = normalizeMatchText(rowText);
   const sourceKinds = classifyPartSource(rowText);
+  const isTeslaOrEv = /\b(?:tesla|model\s+[3sxy]|ev\b|electric|high voltage|hv battery)\b/.test(normalized);
+  if (/\b(?:d\s*&\s*r battery|d&r battery|disconnect.*battery|reconnect.*battery|battery reset|reset electronics|isolate 12v|hv state of charge|state of charge)\b/i.test(rowText)) {
+    return {
+      findingType: "battery_reset_electrical_rate",
+      title: "Battery D&R / reset electronics procedure review",
+      category: "scan_diagnostic",
+      label: "NEEDS OEM",
+      fallbackLabel: "NEEDS OEM",
+      evidenceTier: "estimate_evidence",
+      score: isTeslaOrEv ? 68 : 56,
+      safetyImpact: isTeslaOrEv ? "high" : "medium",
+      priority: "high",
+      missingAuthorityTypes: ["MOTOR/CCC labor-category basis", "OEM battery disconnect/reconnect/reset procedure", "mechanical/electrical labor-rate support"],
+      issueSummary: `Estimate row references battery disconnect/reconnect or reset electronics work: ${rowText}`,
+      whyItMatters: "Battery D&R, reset electronics, 12V isolation, and HV state-of-charge work are mechanical/electrical procedure context, not generic miscellaneous charges.",
+      oemComplianceConcern: "The row needs OEM procedure support and labor-category/rate reconciliation before it is treated as correctly classified.",
+      nextAction: "Request MOTOR/CCC category basis, OEM battery disconnect/reconnect/reset procedure support, and reconcile mechanical/electrical labor category and rate.",
+      requiredDocumentation: ["MOTOR/CCC category basis", "OEM battery/reset procedure", "mechanical/electrical rate support"],
+    };
+  }
+  if (/\b(?:finish sand|denib|de nib|color sand|sand and polish|sand polish|buff|refinish correction|post refinish correction)\b/.test(normalized)) {
+    return {
+      findingType: "sand_polish_p_page_support",
+      title: "Sand/polish refinish database support review",
+      category: "refinish",
+      label: "NEEDS P-PAGE",
+      fallbackLabel: "NEEDS P-PAGE",
+      evidenceTier: "estimate_evidence",
+      score: 58,
+      safetyImpact: "low",
+      priority: "medium",
+      missingAuthorityTypes: ["CCC/MOTOR/P-page support", "database support", "refinish correction basis"],
+      issueSummary: `Estimate row contains finish sand/polish or refinish correction work: ${rowText}`,
+      whyItMatters: "Finish sand and polish, denib and polish, color sand and buff, and post-refinish correction are refinish-related operations that may be capped or limited by estimating guidance.",
+      oemComplianceConcern: "Treat as NEEDS P-PAGE / NEEDS DATABASE SUPPORT unless CCC/MOTOR/P-page guidance is attached.",
+      nextAction: "Attach CCC/MOTOR/P-page/database guidance for the sand/polish operation or keep it labeled NEEDS P-PAGE / NEEDS DATABASE SUPPORT.",
+      requiredDocumentation: ["CCC/MOTOR/P-page guidance", "database support", "refinish correction documentation"],
+    };
+  }
   if (/\b(?:pre[- ]?scan|post[- ]?scan|in[- ]?process scan|diagnostic|scan report|srs|health check)\b/.test(normalized)) {
     return {
       findingType: "diagnostics_scan",
@@ -1414,6 +1859,25 @@ function classifyOemCitationDensityRow(rowText: string, anchor: EstimateRowAncho
       requiredDocumentation: ["OEM/MOTOR calibration procedure", "calibration result", "sensor/camera/radar verification"],
     };
   }
+  if ((/\b(?:hub|bearing|knuckle|control arm|tie rod|steering|strut|spindle|suspension|wheel end|wheel)\b/.test(normalized) && hasNonOemPartSource(sourceKinds))) {
+    return {
+      findingType: "am_wheel_end_safety",
+      title: "A/M wheel-end part-source safety review",
+      category: "parts_downgrade",
+      label: "NEEDS OEM",
+      fallbackLabel: "NEEDS OEM",
+      evidenceTier: "estimate_evidence",
+      score: isTeslaOrEv ? 72 : 62,
+      safetyImpact: "high",
+      priority: "high",
+      missingAuthorityTypes: ["OEM procedure or position support", "supplier/manufacturer fit-function documentation", "written carrier part-source basis"],
+      issueSummary: `Estimate row uses non-OEM wheel-end, steering, bearing, hub, or suspension sourcing: ${rowText}`,
+      whyItMatters: `${isTeslaOrEv ? "EV weight and ADAS sensitivity increase the need for OEM procedure verification. " : ""}Wheel hub, bearing, steering, and suspension components are safety-critical and can affect steering, stability, sensor calibration, ADAS confidence, and roadworthiness.`,
+      oemComplianceConcern: "This supports OEM review / requires OEM procedure or position support; do not state OEM requires unless authority exists.",
+      nextAction: "Request OEM position/procedure support, supplier/manufacturer fit/function documentation, and the carrier's written basis for A/M/LKQ/non-OEM wheel-end use on this platform.",
+      requiredDocumentation: ["OEM procedure or position support", "supplier/manufacturer fit-function documentation", "carrier written basis"],
+    };
+  }
   if (hasNonOemPartSource(sourceKinds) || /\b(?:incorrect style|not correct style|fit|finish|quality replacement|aftermarket)\b/.test(normalized)) {
     return {
       findingType: "part_source_oem_review",
@@ -1422,14 +1886,14 @@ function classifyOemCitationDensityRow(rowText: string, anchor: EstimateRowAncho
       label: "NEEDS OEM",
       fallbackLabel: "NEEDS OEM",
       evidenceTier: "estimate_evidence",
-      score: 45,
-      safetyImpact: /sensor|radar|camera|lamp|bumper|grille|support/.test(normalized) ? "high" : "medium",
+      score: isTeslaOrEv ? 58 : 45,
+      safetyImpact: /sensor|radar|camera|lamp|bumper|grille|support|hub|bearing|suspension|steering|wheel/.test(normalized) ? "high" : "medium",
       priority: "high",
       missingAuthorityTypes: ["OEM procedure or position statement", "part-type authorization", "supplier/invoice proof"],
       issueSummary: `Estimate row uses or questions non-OEM part sourcing: ${rowText}`,
-      whyItMatters: "AM/LKQ/CAPA/used or fit/finish rows can affect warranty, style, fit, calibration packaging, and OEM repair-process compliance.",
-      oemComplianceConcern: "Estimate evidence supports a part-source review, but it does not by itself prove an OEM requirement.",
-      nextAction: "Review OEM repair procedure and position statements for part-type requirements. Document authorization for LKQ/non-OEM part use, verify OE-equivalent style/fit/finish, and supplement to OEM/OE part if support does not validate the selected part type.",
+      whyItMatters: `${isTeslaOrEv ? "EV weight and ADAS sensitivity increase the need for OEM procedure verification. " : ""}Carrier aftermarket warranty language does not prove OEM-equivalent system performance or related manufacturer warranty preservation. Fit/corrosion guarantees are not the same as ADAS compatibility, sensor alignment, crash-tested equivalency, or OEM manufacturer warranty confidence.`,
+      oemComplianceConcern: "Estimate evidence supports a part-source review, but it does not by itself prove an OEM requirement, NHTSA crash-test equivalency, or an absolute warranty voiding claim.",
+      nextAction: "Review OEM repair procedure and position statements for part-type requirements. Document authorization for LKQ/non-OEM part use, supplier fit/function support, and the written carrier basis before making legal or OEM-required claims.",
       requiredDocumentation: ["OEM procedure or position statement", "part-type authorization", "supplier invoice", "fit/finish validation"],
     };
   }
@@ -2339,11 +2803,11 @@ function buildPartSourceFinding(params: {
       note: SOURCE_BOUNDARY_TEXT,
     },
     currentSupportSummary: hasComparison
-      ? `Selected estimate file: ${params.selectedFileName}. Selected estimate page: ${selectedRow.pageNumber ?? "unknown"}. Selected estimate line: ${selectedLine}. Exact selected row text: ${selectedRow.rowText}. Selected part source classification: ${selectedClass}. Comparison estimate file: ${comparisonRow?.sourcePdfName}. Comparison row text: ${comparisonRow?.rowText}. Comparison part source classification: ${comparisonClass}. ${rowIssueSummary} Candidate score: ${params.candidate.score}. Candidate reasons: ${params.candidate.reasons.join("; ")}.`
-      : `Selected estimate file: ${params.selectedFileName}. Selected estimate page: ${selectedRow.pageNumber ?? "unknown"}. Selected estimate line: ${selectedLine}. Exact selected row text: ${selectedRow.rowText}. Selected part source classification: ${selectedClass}. ${rowIssueSummary} This one-estimate review found AM/LKQ/CAPA/non-OEM part sourcing that requires documentation, authorization, fit/finish validation, warranty/quality review, supplier/invoice support, and OEM/insurer basis review. Candidate score: ${params.candidate.score}. Candidate reasons: ${params.candidate.reasons.join("; ")}.`,
+      ? `Selected estimate file: ${params.selectedFileName}. Selected estimate page: ${selectedRow.pageNumber ?? "unknown"}. Selected estimate line: ${selectedLine}. Exact selected row text: ${selectedRow.rowText}. Selected part source classification: ${selectedClass}. Comparison estimate file: ${comparisonRow?.sourcePdfName}. Comparison row text: ${comparisonRow?.rowText}. Comparison part source classification: ${comparisonClass}. ${rowIssueSummary} Carrier aftermarket warranty language does not prove OEM-equivalent system performance or related manufacturer warranty preservation. Candidate score: ${params.candidate.score}. Candidate reasons: ${params.candidate.reasons.join("; ")}.`
+      : `Selected estimate file: ${params.selectedFileName}. Selected estimate page: ${selectedRow.pageNumber ?? "unknown"}. Selected estimate line: ${selectedLine}. Exact selected row text: ${selectedRow.rowText}. Selected part source classification: ${selectedClass}. ${rowIssueSummary} This one-estimate review found AM/LKQ/CAPA/non-OEM part sourcing that requires documentation, authorization, fit/finish validation, supplier/invoice support, and OEM/insurer basis review. Carrier aftermarket warranty language does not prove OEM-equivalent system performance or related manufacturer warranty preservation. Candidate score: ${params.candidate.score}. Candidate reasons: ${params.candidate.reasons.join("; ")}.`,
     missingProofSummary: hasComparison
-      ? "Support refs / required documentation basis: part-type authorization, fit/finish and style validation, warranty/quality review, supplier/invoice support, and OEM/insurer documentation basis are still needed before claiming the substitution is authorized."
-      : "Support refs / required documentation basis: document part-type authorization, fit/finish/style correctness, warranty/quality implications, OEM procedure or position-statement requirements where applicable, invoice/supplier documentation, and OEM/insurer basis.",
+      ? "Support refs / required documentation basis: part-type authorization, fit/finish and style validation, supplier/invoice support, OEM/insurer documentation basis, and manufacturer-warranty/system-performance support are still needed before claiming the substitution is authorized. A fit/corrosion guarantee is not ADAS compatibility, sensor alignment, crash-tested equivalency, or OEM warranty preservation proof."
+      : "Support refs / required documentation basis: document part-type authorization, fit/finish/style correctness, OEM procedure or position-statement requirements where applicable, invoice/supplier documentation, OEM/insurer basis, and whether the part may affect related manufacturer warranty or OEM repair-path confidence unless supported.",
     recommendedNextAction: hasComparison
       ? "Next action: reconcile the selected non-OEM part row against the comparison OEM/OE row and obtain authorization, supplier invoice, fit/finish validation, warranty/quality review, and OEM/insurer basis documentation."
       : "Next action: obtain part-type authorization, supplier invoice, fit/finish validation, warranty/quality review, and OEM/insurer basis documentation before relying on the non-OEM part row.",
@@ -2352,6 +2816,7 @@ function buildPartSourceFinding(params: {
       hasComparison
         ? "Generated from selected estimate row text and comparison estimate row text; this does not independently prove an OEM requirement."
         : "Generated from selected estimate row text only; comparison estimate evidence was not available.",
+      "Do not say the part voids all warranty or proves/violates crash-test equivalency unless a reviewed authority source supports that statement.",
     ],
     groupId: "part-source-oem-variance",
     anchorId: selectedRow.anchorId,

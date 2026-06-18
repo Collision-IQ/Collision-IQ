@@ -1089,7 +1089,7 @@ function isGenericOrMalformedAnchorText(value: string): boolean {
   return (
     /^\s*(?:repair operation|proc report|comparison or screenshot cues)\s*$/i.test(value) ||
     /\bproc\s+(?:pre|post)[-\s]?repair scanm\b/i.test(value) ||
-    /\b(?:citation density gap report|annotation legend|unanchored citation density|disclosure|privacy|estimate summary only|disclaimer|abbreviations?)\b/i.test(value)
+    /\b(?:citation density gap report|annotation legend|unanchored citation density|disclosure|privacy|estimate summary only|disclaimer|abbreviations?|fraud notice|generic estimate disclaimers?|legal notices?|work authorization|allstate parts policy|alternate parts policy|quality replacement parts|vehicle equipment list|policy declarations?|headers?|footers?)\b/i.test(value)
   );
 }
 

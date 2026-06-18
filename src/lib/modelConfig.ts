@@ -1,5 +1,5 @@
-const PRIMARY_MODEL_FALLBACK = "gpt-5.4";
-const HELPER_MODEL_FALLBACK = "gpt-5.4-mini";
+const PRIMARY_MODEL_FALLBACK = "gpt-5.5";
+const HELPER_MODEL_FALLBACK = "gpt-5.5";
 const TTS_MODEL_FALLBACK = "gpt-4o-mini-tts";
 const ANTHROPIC_MODEL_FALLBACK = "claude-fable-5";
 const ANTHROPIC_BASE_URL_FALLBACK = "https://api.anthropic.com";

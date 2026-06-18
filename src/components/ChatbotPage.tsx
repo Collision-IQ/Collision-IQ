@@ -109,11 +109,13 @@ type AnnotatedEstimateExportResult = {
   annotatedFindingCount: number;
   unresolvedAnchorCount: number;
   warnings: string[];
+  debugCounts?: Record<string, unknown> | null;
 };
 
 type CitationDensityViewerState = {
   pdfUrl: string;
   annotations: CitationDensityAnnotationMetadata[];
+  diagnostics?: Record<string, unknown> | null;
 } | null;
 
 type LeftPaneMode = "chat" | "review";
@@ -2075,6 +2077,7 @@ function RailContent({
           setCitationDensityViewer({
             pdfUrl: exportResult.downloadUrl,
             annotations: exportResult.annotationMetadata,
+            diagnostics: exportResult.debugCounts,
           });
         }
         setReportSendStatus(buildAnnotatedCitationDensityStatus(exportResult));
@@ -2091,6 +2094,7 @@ function RailContent({
           setCitationDensityViewer({
             pdfUrl: exportResult.downloadUrl,
             annotations: exportResult.annotationMetadata,
+            diagnostics: exportResult.debugCounts,
           });
         }
         setReportSendStatus(buildAnnotatedCitationDensityStatus(exportResult));
@@ -2176,6 +2180,9 @@ function RailContent({
       warnings: Array.isArray(data.warnings)
         ? data.warnings.filter((warning): warning is string => typeof warning === "string")
         : [],
+      debugCounts: data.debugCounts && typeof data.debugCounts === "object"
+        ? data.debugCounts as Record<string, unknown>
+        : null,
     };
   }
 
@@ -2242,6 +2249,9 @@ function RailContent({
       warnings: Array.isArray(data.warnings)
         ? data.warnings.filter((warning): warning is string => typeof warning === "string")
         : [],
+      debugCounts: data.debugCounts && typeof data.debugCounts === "object"
+        ? data.debugCounts as Record<string, unknown>
+        : null,
     };
   }
 
@@ -3415,6 +3425,7 @@ function RailContent({
         <CitationDensityAnnotationViewer
           pdfUrl={citationDensityViewer.pdfUrl}
           annotations={citationDensityViewer.annotations}
+          diagnostics={citationDensityViewer.diagnostics}
           onClose={() => setCitationDensityViewer(null)}
           onAsk={(annotation) => {
             void askAboutCitationDensityFinding(annotation);

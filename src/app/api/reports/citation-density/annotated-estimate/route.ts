@@ -11,6 +11,7 @@ import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
 import { buildAnnotatedEstimateReviewModel } from "@/lib/ai/builders/estimateScrubberPdfBuilder";
 import {
   buildAnnotatedCitationDensityEstimatePdf,
+  buildRequiredEstimatorDeltaFindings,
   CitationDensityAnnotationError,
   dataUrlToPdfBytes,
   getAnnotatedEstimateExport,
@@ -266,6 +267,7 @@ export async function POST(request: Request) {
         comparisonEstimateTexts,
         findings: roleFindings,
         deltaDiagnostics: model.citationDensityDiagnostics,
+        findingGenerator: buildRequiredEstimatorDeltaFindings,
         request: {
           findingIds: coerceStringArray(body.findingIds),
           annotationMode: coerceAnnotationMode(body.annotationMode),
@@ -441,6 +443,14 @@ function buildAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof buildA
     rejectedLineNumberCandidates: debugTrace.rejectedLineNumberCandidates,
     partSourceComparisonMatches: debugTrace.partSourceComparisonMatches,
     partSourceDroppedReasons: debugTrace.partSourceDroppedReasons,
+    rejectedAnchors: debugTrace.rejectedAnchors ?? [],
+    rejectedBoilerplateCount: debugTrace.rejectedBoilerplateCount ?? 0,
+    acceptedEstimateRowFindings: debugTrace.acceptedEstimateRowFindingCount ?? 0,
+    missingRequiredDetectors: debugTrace.missingRequiredDetectors ?? [],
+    requiredDetectorFindingCount: debugTrace.requiredDetectorFindingCount ?? 0,
+    policyExtractionConfidence: debugTrace.policyExtractionConfidence ?? "not_run",
+    policyVehicleMismatch: debugTrace.policyVehicleMismatch ?? null,
+    googleDriveInternalAuthoritySearch: debugTrace.authoritySearchTrace ?? null,
     fallbackMatchedFindings: debugTrace.fallbackMatchedFindings,
     droppedFindings: debugTrace.droppedFindings,
     rendererDrops: debugTrace.rendererDrops,

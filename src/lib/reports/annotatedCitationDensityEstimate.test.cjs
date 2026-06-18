@@ -34,9 +34,11 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 
 const {
   buildAnnotatedCitationDensityEstimatePdf,
+  buildRequiredEstimatorDeltaFindings,
   buildOemCitationDensityFindings,
   classifyPartSource,
   dataUrlToPdfBytes,
+  extractPolicyApplicabilityDiagnostics,
   extractCitationDensityRowAnchors,
   OEM_CITATION_DENSITY_ARTIFACT_VERSION,
   OEM_CITATION_DENSITY_REPORT_IDENTITY,
@@ -2486,5 +2488,69 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     assert.doesNotMatch(text, /Label:\s*NEEDS ADAS/);
     assert.doesNotMatch(text, /Label:\s*NEEDS OEM/);
     assert.match(text, /NEEDS P-PAGE/);
+  });
+
+  await run("required detectors reject boilerplate and create wheel hub battery and sand-polish findings", async () => {
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const page = doc.addPage([612, 792]);
+    page.drawText("2023 Tesla Model Y carrier estimate", { x: 42, y: 742, size: 10, font });
+    drawCccEstimateRow(page, font, 10, "", "Rpr", "RT front wheel repair sublet", "0.0", "$75.00", 710);
+    drawCccEstimateRow(page, font, 11, "A/M", "Repl", "RT Hub assy", "0.6", "$185.00", 692);
+    drawCccEstimateRow(page, font, 12, "", "Rpr", "Finish sand and polish", "0.5", "$40.00", 674);
+    drawCccEstimateRow(page, font, 13, "", "R&I", "D&R battery/Reset Electronics", "0.3", "$24.00", 656);
+    page.drawText("ABBREVIATIONS AND DISCLAIMER alternate parts policy paragraphs are for reference only", { x: 42, y: 620, size: 8, font });
+    const sourcePdfBytes = await doc.save();
+
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourcePdfName: "Tesla carrier estimate.pdf",
+      sourceText: "2023 Tesla Model Y",
+      comparisonEstimateTexts: [{
+        fileName: "Shop estimate.pdf",
+        estimateRole: "shop",
+        text: "Line 210 Repl wheel replacement\nLine 211 R&I wheel for liner and flare hardware access 0.2",
+      }],
+      findings: [],
+      findingGenerator: buildRequiredEstimatorDeltaFindings,
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+
+    const joined = result.annotationMetadata.map((item) => `${item.findingId} ${item.shortTitle} ${item.comment}`).join(" ");
+    assert.match(joined, /wheel_labor_delta/);
+    assert.match(joined, /am_wheel_end_safety/);
+    assert.match(joined, /sand_polish_p_page_support/);
+    assert.match(joined, /battery_reset_electrical_rate/);
+    assert.match(joined, /Carrier aftermarket warranty language does not prove OEM-equivalent system performance/);
+    assert.match(joined, /EV weight and ADAS sensitivity increase the need for OEM procedure verification/);
+    assert.equal(result.annotationMetadata.some((item) => /ABBREVIATIONS|DISCLAIMER|alternate parts policy/i.test(item.sourceAnchorText)), false);
+    assert.ok(result.debugTrace.requiredDetectorFindingCount >= 4);
+    assert.ok(result.debugTrace.acceptedEstimateRowFindingCount >= 4);
+    assert.ok(result.debugTrace.rejectedBoilerplateCount >= 0);
+    assert.equal(result.debugTrace.authoritySearchTrace.googleDriveOrInternalSearchRan, false);
+  });
+
+  await run("policy diagnostics detect vehicle mismatch and garbled extraction fallback", async () => {
+    const mismatch = extractPolicyApplicabilityDiagnostics({
+      activeEstimateVehicle: "2023 Tesla Model Y",
+      policyText: [
+        "Policy Number PA-123456",
+        "Named Insured Jane Example",
+        "Insured Vehicle: 2020 Honda Accord VIN 1HGCM82633A004352",
+        "Collision deductible $500 Comprehensive deductible $250",
+        "If We Cannot Agree appraisal Payment of Loss",
+        "Form PA01 Endorsement UM123 Governing law Pennsylvania",
+      ].join("\n"),
+    });
+    assert.equal(mismatch.policyNumber, "PA-123456");
+    assert.match(mismatch.vehicleMismatch.warning, /Policy uploaded, but insured vehicle appears to be 2020 Honda Accord/);
+    assert.equal(mismatch.ocrFallbackRecommended, false);
+
+    const garbled = extractPolicyApplicabilityDiagnostics({
+      activeEstimateVehicle: "2023 Tesla Model Y",
+      policyText: "ÃÂâ€ ï¿½ ÃÂâ€™ unreadable policy bytes ÃÂâ€œ",
+    });
+    assert.equal(garbled.extractionConfidence, "failed");
+    assert.equal(garbled.ocrFallbackRecommended, true);
   });
 })();

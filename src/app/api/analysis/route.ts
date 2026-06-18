@@ -11,6 +11,10 @@ import {
 } from "@/lib/uploadedAttachmentStore";
 import { buildEvidenceCorpus } from "@/lib/analysis/buildEvidenceCorpus";
 import {
+  applyAnalysisContextBudget,
+  type AnalysisContextBudgetDiagnostics,
+} from "@/lib/analysis/analysisContextBudget";
+import {
   buildDriveRefinementContext,
   detectChatTaskType,
   retrieveDriveSupport,
@@ -182,6 +186,7 @@ function assertAnalysisAllowedForEntitlements(
 
 export async function POST(req: Request) {
   let agentTrace: AgentRetrievalTrace | null = null;
+  let contextBudgetDiagnostics: AnalysisContextBudgetDiagnostics | null = null;
 
   try {
     const { user, verifiedEmails, isPlatformAdmin } = await requireCurrentUser();
@@ -275,6 +280,16 @@ export async function POST(req: Request) {
       attachments: storedAttachments,
       userIntent: requestUserIntent || null,
     });
+    const budgetedContext = applyAnalysisContextBudget({
+      attachments: normalizedAttachments,
+      userIntent: requestUserIntent || null,
+      provider: "openai",
+      model: collisionIqModels.primary,
+    });
+    contextBudgetDiagnostics = budgetedContext.diagnostics;
+    if (contextBudgetDiagnostics.contextReductionApplied) {
+      console.info("[analysis-context-budget] reduction applied", contextBudgetDiagnostics);
+    }
     const attachmentFilesForLinks = normalizedAttachments.map((attachment) => ({
       name: attachment.filename,
       text: attachment.text,
@@ -318,21 +333,49 @@ export async function POST(req: Request) {
       resultCount: linkedEvidenceOkCount,
     });
     const linkedEvidenceAttachments = linkedEvidenceToAttachments(linkedEvidence);
-    const preloadedAttachments = prioritizeEstimateGapAttachments([
-      ...normalizedAttachments,
+    let preloadedAttachments = prioritizeEstimateGapAttachments([
+      ...budgetedContext.attachments,
       ...linkedEvidenceAttachments,
     ], requestUserIntent);
 
-    const retrievalAttempted = true;
+    let retrievalAttempted = false;
     let retrievalCompleted = false;
     let retrievalMatchCount = 0;
     let refinedWithRetrieval = false;
-    let report = await runRepairAnalysis({
-      artifactIds,
-      preloadedAttachments,
-      sessionContext: body.sessionContext ?? null,
-      userIntent: requestUserIntent || null,
-    });
+    let report: RepairIntelligenceReport;
+    try {
+      report = await runRepairAnalysis({
+        artifactIds,
+        preloadedAttachments,
+        sessionContext: body.sessionContext ?? null,
+        userIntent: requestUserIntent || null,
+      });
+    } catch (error) {
+      if (!isContextLengthExceededError(error)) throw error;
+      const retryBudget = applyAnalysisContextBudget({
+        attachments: normalizedAttachments,
+        userIntent: requestUserIntent || null,
+        provider: "openai",
+        model: collisionIqModels.primary,
+        contextBudgetLimit: Math.floor((contextBudgetDiagnostics?.contextBudgetLimit ?? 60000) * 0.55),
+        forceAggressive: true,
+      });
+      contextBudgetDiagnostics = retryBudget.diagnostics;
+      preloadedAttachments = prioritizeEstimateGapAttachments([
+        ...retryBudget.attachments,
+        ...linkedEvidenceAttachments.map((attachment) => ({
+          ...attachment,
+          text: attachment.text.slice(0, 2400),
+        })),
+      ], requestUserIntent);
+      console.warn("[analysis-context-budget] retrying after provider context error", contextBudgetDiagnostics);
+      report = await runRepairAnalysis({
+        artifactIds,
+        preloadedAttachments,
+        sessionContext: body.sessionContext ?? null,
+        userIntent: requestUserIntent || null,
+      });
+    }
     report = applyLinkedEvidenceToReport({
       report,
       uploadedAttachments: normalizedAttachments,
@@ -351,35 +394,44 @@ export async function POST(req: Request) {
       analysis,
       hasDocuments: artifactIds.length > 0,
     });
-    logAgentTraceEvent("google drive search started", agentTrace, {
-      retrievalMode: retrievalSnapshot.taskType,
-    });
-    const retrieval = await retrieveDriveSupport({
-      taskType: retrievalSnapshot.taskType,
-      userQuery: requestUserIntent || "repair analysis",
-      estimateText: analysis.rawEstimateText ?? "",
-      firstPassAnswer: retrievalSnapshot.summary.overview,
-      analysis: retrievalSnapshot,
-      maxResults: 5,
-      maxExcerptChars: 500,
-    })
-      .then((result) => {
-        retrievalCompleted = true;
-        retrievalMatchCount = result?.results.length ?? 0;
-        return result;
-      })
-      .catch((error) => {
-        console.error("Analysis Drive retrieval skipped:", error);
-        recordAgentRetrievalStep(agentTrace!, {
-          order: 2,
-          tool: "google_drive_search",
-          action: "search_internal_sources",
-          resultCount: 0,
-          status: "error",
-          reason: "Internal retrieval failed.",
-        });
-        return null;
+    const shouldRunDriveRetrieval = (contextBudgetDiagnostics?.authoritySearchQueries.length ?? 0) > 0;
+    let retrieval: DriveRetrievalResponse | null = null;
+    if (shouldRunDriveRetrieval) {
+      retrievalAttempted = true;
+      logAgentTraceEvent("google drive search started", agentTrace, {
+        retrievalMode: retrievalSnapshot.taskType,
+        generatedQueries: contextBudgetDiagnostics?.authoritySearchQueries ?? [],
       });
+      retrieval = await retrieveDriveSupport({
+        taskType: retrievalSnapshot.taskType,
+        userQuery: [
+          requestUserIntent || "repair analysis",
+          ...(contextBudgetDiagnostics?.authoritySearchQueries ?? []),
+        ].join("\n"),
+        estimateText: analysis.rawEstimateText ?? "",
+        firstPassAnswer: retrievalSnapshot.summary.overview,
+        analysis: retrievalSnapshot,
+        maxResults: 5,
+        maxExcerptChars: 500,
+      })
+        .then((result) => {
+          retrievalCompleted = true;
+          retrievalMatchCount = result?.results.length ?? 0;
+          return result;
+        })
+        .catch((error) => {
+          console.error("Analysis Drive retrieval skipped:", error);
+          recordAgentRetrievalStep(agentTrace!, {
+            order: 2,
+            tool: "google_drive_search",
+            action: "search_internal_sources",
+            resultCount: 0,
+            status: "error",
+            reason: "Internal retrieval failed.",
+          });
+          return null;
+        });
+    }
     if (!agentTrace.steps.some((step) => step.order === 2)) {
       recordAgentRetrievalStep(agentTrace, {
         order: 2,
@@ -389,7 +441,9 @@ export async function POST(req: Request) {
         status: retrieval ? "success" : "skipped",
         reason: retrieval
           ? undefined
-          : "Google Drive/internal retrieval unavailable or no retrieval request generated.",
+          : shouldRunDriveRetrieval
+            ? "Google Drive/internal retrieval returned no usable result."
+            : "Google Drive/internal retrieval skipped because no retrieval query was generated.",
       });
     }
     logAgentTraceEvent("google drive search completed", agentTrace, {
@@ -512,6 +566,19 @@ export async function POST(req: Request) {
       retrievalCompleted,
       retrievalMatchCount,
       refinedWithRetrieval,
+      contextBudget: contextBudgetDiagnostics,
+      toolUsageTrace: [
+        ...(contextBudgetDiagnostics?.toolUsageTrace ?? []),
+        ...agentTrace.steps.map((step) => ({
+          tool: step.tool,
+          status: step.status,
+          reason: step.reason,
+          resultCount: step.resultCount,
+        })),
+      ],
+      contextBudgetMessage: contextBudgetDiagnostics?.contextReductionApplied
+        ? "Analysis context was too large. I reduced the file set to the most relevant policy/estimate sections and retried."
+        : null,
       analysisCompletedAt: new Date().toISOString(),
       caseContinuity: {
         activeCaseId: stored.id,
@@ -546,6 +613,23 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { error: error.message, code: error.code },
         { status: error.status }
+      );
+    }
+
+    if (isContextLengthExceededError(error)) {
+      console.error("ANALYSIS CONTEXT BUDGET ERROR:", {
+        diagnostics: contextBudgetDiagnostics,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "CONTEXT_BUDGET_EXCEEDED",
+          message: "Analysis blocked because context could not be reduced safely. Open diagnostics.",
+          contextBudget: contextBudgetDiagnostics,
+          toolUsageTrace: contextBudgetDiagnostics?.toolUsageTrace ?? [],
+        },
+        { status: 413 }
       );
     }
 
@@ -1631,6 +1715,16 @@ function applyLinkedEvidenceToReport(params: {
 
 function userIndicatedMoreFiles(value: string): boolean {
   return /\b(more|additional|other|another|rest of|remaining)\s+(files?|documents?|photos?|estimates?|invoices?)\b|\b(can'?t|cannot|unable to|won'?t let me)\s+upload\b|\bupload limit\b|\btoo many files\b/i.test(value);
+}
+
+function isContextLengthExceededError(error: unknown) {
+  const top = error && typeof error === "object" ? error as Record<string, unknown> : null;
+  const nested = top?.error && typeof top.error === "object" ? top.error as Record<string, unknown> : null;
+  const code = String(top?.code ?? nested?.code ?? top?.type ?? nested?.type ?? "").toLowerCase();
+  const message = String(top?.message ?? nested?.message ?? (error instanceof Error ? error.message : "")).toLowerCase();
+  return code.includes("context_length_exceeded") ||
+    code.includes("context_length") ||
+    /context (?:window|length)|input exceeds|too many tokens|max(?:imum)? context/.test(message);
 }
 
 function prioritizeEstimateGapAttachments(
