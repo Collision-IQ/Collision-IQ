@@ -127,6 +127,38 @@ run("GPT-5.5 Responses payload omits unsupported sampling parameters", () => {
   assert.equal(Object.hasOwn(request, "top_p"), false);
 });
 
+run("GPT-5.5 Responses payload normalizes assistant history to output_text", () => {
+  const { buildOpenAiResponsesRequest } = loadModelConfig({
+    NODE_ENV: "production",
+    VERCEL_ENV: "production",
+    OPENAI_API_KEY: "test-key",
+  });
+
+  const request = buildOpenAiResponsesRequest({
+    model: "gpt-5.5",
+    temperature: 0.2,
+    input: [
+      {
+        role: "user",
+        content: [{ type: "input_text", text: "What changed?" }],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "input_text", text: "The estimate gap changed." }],
+      },
+    ],
+    reasoning: { effort: "medium" },
+    tools: [{ type: "web_search_preview" }],
+  });
+
+  assert.equal(Object.hasOwn(request, "temperature"), false);
+  assert.equal(request.model, "gpt-5.5");
+  assert.deepEqual(request.reasoning, { effort: "medium" });
+  assert.deepEqual(request.tools, [{ type: "web_search_preview" }]);
+  assert.equal(request.input[0].content[0].type, "input_text");
+  assert.equal(request.input[1].content[0].type, "output_text");
+});
+
 run("explicit non-GPT-5.5 Responses model keeps supported temperature", () => {
   const {
     buildOpenAiResponsesRequest,

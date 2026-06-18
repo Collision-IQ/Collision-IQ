@@ -26,6 +26,7 @@ type OpenAiResponsesRequest = Record<string, unknown> & {
   model?: string;
   temperature?: unknown;
   top_p?: unknown;
+  input?: unknown;
 };
 
 function normalizeModelName(value: string | undefined | null, fallback: string) {
@@ -100,15 +101,51 @@ export function supportsOpenAiResponsesSamplingParameters(model: string) {
 export function buildOpenAiResponsesRequest<TRequest extends OpenAiResponsesRequest>(
   request: TRequest
 ): TRequest {
+  const requestWithSafeInput = normalizeOpenAiResponsesRequestInput(request);
   const model = typeof request.model === "string" ? request.model : "";
-  if (supportsOpenAiResponsesSamplingParameters(model)) return request;
+  if (supportsOpenAiResponsesSamplingParameters(model)) return requestWithSafeInput;
 
   const {
     temperature: _temperature,
     top_p: _topP,
     ...safeRequest
-  } = request;
+  } = requestWithSafeInput;
   return safeRequest as TRequest;
+}
+
+export function normalizeOpenAiResponsesInput(input: unknown): unknown {
+  if (!Array.isArray(input)) return input;
+
+  return input.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+    const message = item as Record<string, unknown>;
+    if (message.role !== "assistant" || !Array.isArray(message.content)) return item;
+
+    return {
+      ...message,
+      content: message.content.map((part) => {
+        if (!part || typeof part !== "object" || Array.isArray(part)) return part;
+        const contentPart = part as Record<string, unknown>;
+        if (contentPart.type !== "input_text") return part;
+        return {
+          ...contentPart,
+          type: "output_text",
+        };
+      }),
+    };
+  });
+}
+
+function normalizeOpenAiResponsesRequestInput<TRequest extends OpenAiResponsesRequest>(
+  request: TRequest
+): TRequest {
+  if (!Object.hasOwn(request, "input")) return request;
+  const input = normalizeOpenAiResponsesInput(request.input);
+  if (input === request.input) return request;
+  return {
+    ...request,
+    input,
+  };
 }
 
 function warnIfStaleOpenAiModel(role: string, model: string) {

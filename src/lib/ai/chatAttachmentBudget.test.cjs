@@ -27,7 +27,7 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
   module._compile(compiled.outputText, filename);
 };
 
-const { budgetChatAttachments } = require("./chatAttachmentBudget.ts");
+const { budgetChatAttachments, buildChatAttachmentOmissionNotice } = require("./chatAttachmentBudget.ts");
 
 function run(name, fn) {
   try {
@@ -127,4 +127,20 @@ run("explicit photo review raises but still caps representative images", () => {
 
   assert.equal(decision.includedImageCount, 24);
   assert.equal(decision.omitted.length, 16);
+});
+
+run("large-case omission notice does not claim omitted photos were reviewed", () => {
+  const decision = budgetChatAttachments({
+    documents: Array.from({ length: 20 }, (_, index) => image(index + 1)),
+    userMessage: "Review the estimates.",
+    isImageDocument,
+    isVideoDocument,
+  });
+
+  const notice = buildChatAttachmentOmissionNotice(decision.omitted);
+
+  assert.match(notice, /not reviewed in this first-pass model request/i);
+  assert.match(notice, /Do not claim these omitted photos were reviewed/i);
+  assert.doesNotMatch(notice, /\b(?:I|we)\s+reviewed\b/i);
+  assert.match(notice, /Photo \d+\.jpg/);
 });

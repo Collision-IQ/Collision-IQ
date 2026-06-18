@@ -233,20 +233,43 @@ function extractEstimateTotal(
   text: string,
   parsedTotal?: number
 ): number | undefined {
-  if (typeof parsedTotal === "number" && parsedTotal > 0) {
+  if (typeof parsedTotal === "number" && parsedTotal >= 100) {
     return parsedTotal;
   }
 
-  const candidates = [
-    text.match(/\bgrand total\b[^\d$]{0,20}\$?\s*([\d,]+\.\d{2})/i)?.[1],
-    text.match(/\bestimate total\b[^\d$]{0,20}\$?\s*([\d,]+\.\d{2})/i)?.[1],
-    text.match(/\btotal(?: loss)?\b[^\d$]{0,20}\$?\s*([\d,]+\.\d{2})/i)?.[1],
-  ]
-    .filter(Boolean)
-    .map((value) => Number(String(value).replace(/,/g, "")))
-    .filter((value) => Number.isFinite(value) && value > 0);
+  const candidates = collectEstimateTotalCandidates(text);
+  if (typeof parsedTotal === "number" && parsedTotal > 0) {
+    candidates.push({ value: parsedTotal, score: parsedTotal >= 100 ? 900 : 10 });
+  }
 
-  return candidates[0];
+  candidates.sort((left, right) => right.score - left.score || right.value - left.value);
+  const substantial = candidates.find((candidate) => candidate.value >= 100);
+  return substantial?.value ?? candidates[0]?.value;
+}
+
+function collectEstimateTotalCandidates(text: string) {
+  const candidates: Array<{ value: number; score: number }> = [];
+  const patterns: Array<{ pattern: RegExp; score: number }> = [
+    { pattern: /\btotal cost of repairs?\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 1000 },
+    { pattern: /\bnet cost of repairs?\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 980 },
+    { pattern: /\bgrand total\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 940 },
+    { pattern: /\bestimate total\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 920 },
+    { pattern: /\b(?:carrier|shop)\s+total(?:\s+(?:cost|repairs?))?\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 900 },
+    { pattern: /\btotal(?:\s+(?:repairs?|amount|cost))?\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 700 },
+  ];
+
+  for (const { pattern, score } of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const value = Number(String(match[1]).replace(/,/g, ""));
+      if (!Number.isFinite(value) || value <= 0) continue;
+      candidates.push({
+        value,
+        score: value < 100 ? score - 800 : score,
+      });
+    }
+  }
+
+  return candidates;
 }
 
 function escapeRegExp(value: string): string {

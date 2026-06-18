@@ -1506,6 +1506,34 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     assert.doesNotMatch(detailText, /OEM requires/i);
   });
 
+  await run("OEM Citation Density excludes abbreviation legend and disclaimer pages as primary anchors", async () => {
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const page = doc.addPage([612, 792]);
+    page.drawText("2023 Tesla Model Y carrier estimate", { x: 42, y: 742, size: 10, font });
+    page.drawText("A/M=AFTERMARKET CAPA definitions LKQ/RCY/USED definitions", { x: 42, y: 710, size: 8, font });
+    page.drawText("Fraud warning disclaimer and CCC/MOTOR guide included/not included paragraphs", { x: 42, y: 692, size: 8, font });
+    drawCccEstimateRow(page, font, 21, "A/M", "Repl", "RT Hub assy", "0.6", "$185.00", 650);
+    const sourcePdfBytes = await doc.save();
+
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceDocumentId: "oem-carrier-21548",
+      sourcePdfName: "SOR3 carrier estimate.pdf",
+      uploadedFileNames: ["SOR3 carrier estimate.pdf"],
+      sourceText: "Carrier estimate evidence only. No OEM procedure attached.",
+      findings: [],
+      reportIdentity: OEM_CITATION_DENSITY_REPORT_IDENTITY,
+      findingGenerator: buildOemCitationDensityFindings,
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+
+    const metadataText = result.annotationMetadata.map((item) => item.sourceAnchorText).join(" ");
+    assert.ok(result.annotationMetadata.some((item) => item.sourceLineNumber === "21"));
+    assert.match(metadataText, /RT Hub assy/);
+    assert.doesNotMatch(metadataText, /A\/M=AFTERMARKET|CAPA definitions|LKQ\/RCY\/USED|Fraud warning|CCC\/MOTOR guide|included\/not included/i);
+  });
+
   await run("one selected estimate flags AM/LKQ/CAPA rows for documentation and basis review", async () => {
     const sourcePdfBytes = await createRam21975SourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
@@ -2495,13 +2523,15 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const page = doc.addPage([612, 792]);
     page.drawText("2023 Tesla Model Y carrier estimate", { x: 42, y: 742, size: 10, font });
-    drawCccEstimateRow(page, font, 10, "", "Subl", "RT/Front Wheel alloy 19 sonic silver", "0.0", "$75.00", 710);
-    drawCccEstimateRow(page, font, 14, "", "Subl", "Tire Mount and Balance", "0.0", "$25.00", 638);
-    drawCccEstimateRow(page, font, 15, "", "Subl", "Four Wheel Alignment", "0.0", "$129.00", 620);
+    drawCccEstimateRow(page, font, 43, "", "Subl", "RF wheel repair", "0.0", "$75.00", 710);
+    drawCccEstimateRow(page, font, 44, "", "Subl", "Tire Mount and Balance", "0.0", "$25.00", 638);
+    drawCccEstimateRow(page, font, 47, "", "Subl", "Four Wheel Alignment", "0.0", "$129.00", 620);
+    drawCccEstimateRow(page, font, 48, "", "R&I", "Fender liner unrelated access trim", "0.2", "$12.00", 602);
     drawCccEstimateRow(page, font, 11, "A/M", "Repl", "RT Hub assy", "0.6", "$185.00", 692);
     drawCccEstimateRow(page, font, 12, "", "Rpr", "Finish sand and polish", "0.5", "$40.00", 674);
     drawCccEstimateRow(page, font, 13, "", "R&I", "D&R battery/Reset Electronics", "0.3", "$24.00", 656);
-    page.drawText("ABBREVIATIONS AND DISCLAIMER alternate parts policy paragraphs are for reference only", { x: 42, y: 620, size: 8, font });
+    page.drawText("ABBREVIATIONS AND DISCLAIMER alternate parts policy paragraphs are for reference only", { x: 42, y: 584, size: 8, font });
+    page.drawText("A/M=AFTERMARKET CAPA definitions LKQ/RCY/USED definitions fraud disclaimer CCC/MOTOR guide paragraphs", { x: 42, y: 566, size: 8, font });
     const sourcePdfBytes = await doc.save();
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
@@ -2513,7 +2543,8 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
         estimateRole: "shop",
         text: [
           "Line 210 Repl RT/Front Wheel 0.3 M",
-          "Line 211 R&I LT/Front R&I wheel 0.2 M",
+          "Line 50 Repl RF wheel 0.3 M",
+          "Line 51 R&I LF wheel 0.2 M",
           "Note: removed for access to left liner, wheel flare and bumper hardware; time adjusted 0.1 x 2",
         ].join("\n"),
       }],
@@ -2536,7 +2567,14 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     assert.match(joined, /CCC\/MOTOR\/P-page\/database support/);
     assert.doesNotMatch(joined, /automatically void/i);
     assert.match(joined, /does not prove an OEM-only requirement without authority/i);
-    assert.equal(result.annotationMetadata.some((item) => /ABBREVIATIONS|DISCLAIMER|alternate parts policy/i.test(item.sourceAnchorText)), false);
+    const wheelLaborMetadata = result.annotationMetadata.filter((item) => /wheel_labor_delta/.test(item.findingId));
+    assert.ok(wheelLaborMetadata.length >= 3);
+    assert.deepEqual(
+      wheelLaborMetadata.map((item) => item.targetLineNumber).sort(),
+      ["43", "44", "47"]
+    );
+    assert.equal(wheelLaborMetadata.some((item) => /liner unrelated access trim/i.test(item.sourceAnchorText)), false);
+    assert.equal(result.annotationMetadata.some((item) => /ABBREVIATIONS|DISCLAIMER|alternate parts policy|A\/M=AFTERMARKET|CAPA definitions|LKQ\/RCY\/USED|fraud disclaimer|CCC\/MOTOR guide/i.test(item.sourceAnchorText)), false);
     assert.ok(result.debugTrace.requiredDetectorFindingCount >= 4);
     assert.ok(result.debugTrace.acceptedEstimateRowFindingCount >= 4);
     assert.ok(result.debugTrace.rejectedBoilerplateCount >= 0);

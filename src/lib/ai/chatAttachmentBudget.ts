@@ -117,6 +117,28 @@ export function budgetChatAttachments<TDocument extends ChatBudgetDocument>(para
   };
 }
 
+export function buildChatAttachmentOmissionNotice(
+  omitted: ChatAttachmentBudgetOmission[],
+  maxItems = 20
+): string {
+  const imageOmissions = omitted.filter((item) => item.mimeType.startsWith("image/") || item.hasImageDataUrl);
+  if (imageOmissions.length === 0) return "";
+
+  const listed = imageOmissions
+    .slice(0, maxItems)
+    .map((item) => `- ${item.filename}: ${item.reason}`)
+    .join("\n");
+  const remaining = imageOmissions.length > maxItems
+    ? `\n- ${imageOmissions.length - maxItems} additional image/photo attachment(s) omitted from the first-pass model request.`
+    : "";
+
+  return [
+    "First-pass image/photo budgeting:",
+    "The files listed below remain in the file ledger, but their image contents were not reviewed in this first-pass model request. Do not claim these omitted photos were reviewed; refer to them only as omitted/ledger-only unless a targeted photo review is run.",
+    listed + remaining,
+  ].join("\n");
+}
+
 function rankTextDocuments<TDocument extends ChatBudgetDocument>(documents: TDocument[]) {
   return [...documents].sort((a, b) => scoreTextDocument(b) - scoreTextDocument(a));
 }

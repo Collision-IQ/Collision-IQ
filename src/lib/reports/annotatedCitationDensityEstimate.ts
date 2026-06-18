@@ -1334,12 +1334,12 @@ export function buildRequiredEstimatorDeltaFindings(
     }
 
     const sourceKinds = classifyPartSource(rowText);
-    const hasWheel = /\b(?:wheel|rim|tire|mount|balance|liner|flare)\b/.test(normalized);
+    const hasWheel = isWheelLaborAnchorText(normalized);
     const hasAccessLabor = /\b(?:r\s*&\s*i|r&i|remove|install|disassembly|reassembly|access)\b/i.test(rowText);
 
-    if (!usedAnchorIds.has(anchor.anchorId) && hasWheel && /\b(?:repair|sublet|cover|mount|balance|replacement|repl|replace|r&i|r\s*&\s*i|liner|flare|access)\b/.test(normalized)) {
-      const comparisonWheelAccess = /\b(?:wheel|rim|tire|liner|flare)\b[\s\S]{0,80}\b(?:r&i|r\s*&\s*i|remove|install|access|disassembly|reassembly|replacement|repl)\b/i.test(comparisonText) ||
-        /\b(?:r&i|r\s*&\s*i|remove|install|access|disassembly|reassembly|replacement|repl)\b[\s\S]{0,80}\b(?:wheel|rim|tire|liner|flare)\b/i.test(comparisonText);
+    if (!usedAnchorIds.has(anchor.anchorId) && hasWheel && /\b(?:repair|sublet|cover|mount|balance|alignment|replacement|repl|replace|r&i|r\s*&\s*i|access)\b/.test(normalized)) {
+      const comparisonWheelAccess = /\b(?:wheel|rim|tire|alignment|liner|flare)\b[\s\S]{0,80}\b(?:r&i|r\s*&\s*i|remove|install|access|disassembly|reassembly|replacement|repl)\b/i.test(comparisonText) ||
+        /\b(?:r&i|r\s*&\s*i|remove|install|access|disassembly|reassembly|replacement|repl)\b[\s\S]{0,80}\b(?:wheel|rim|tire|alignment|liner|flare)\b/i.test(comparisonText);
       const zeroOrMissingLabor = anchor.labor === 0 || anchor.labor === null || /\b0\.0\b/.test(rowText);
       if (zeroOrMissingLabor || comparisonWheelAccess || hasAccessLabor) {
         wheelDetectorSeen = true;
@@ -1533,6 +1533,10 @@ export function buildOemCitationDensityFindings(
     if (anchor.anchorType !== "estimate_line" && anchor.anchorType !== "line_note" && anchor.anchorType !== "embedded_link_row" && anchor.anchorType !== "totals_row" && anchor.anchorType !== "supplier_row" && anchor.anchorType !== "guide_row") {
       continue;
     }
+    if (isRejectedPrimaryAnchorText(rowText, anchor)) {
+      droppedReasons.push({ anchorId: anchor.anchorId, rowText, reason: "legend, abbreviation, disclaimer, guide, or legal boilerplate rejected as primary row anchor" });
+      continue;
+    }
     if (isVehicleYearLineNumber(anchor.lineNumber) || containsVehicleYearIdentityText(rowText)) {
       droppedReasons.push({ anchorId: anchor.anchorId, rowText, reason: "source line parsed as vehicle year" });
       continue;
@@ -1724,8 +1728,13 @@ function isPrimaryEstimateAnchor(anchor: EstimateRowAnchor) {
 function isRejectedPrimaryAnchorText(rowText: string, anchor: EstimateRowAnchor) {
   const normalized = normalizeMatchText(rowText);
   if (anchor.anchorType === "supplier_row" || anchor.anchorType === "guide_row" || anchor.anchorType === "section_row") return true;
-  return /\b(?:abbreviations?|legend|disclaimer|fraud notice|legal notice|work authorization|policy|declarations?|allstate parts policy|alternate parts policy|quality replacement parts|vehicle equipment|vin decoding|footer|page \d+ of \d+)\b/i.test(rowText) ||
-    /\b(?:abbreviation|legend|disclaimer|fraud|legal notice|work authorization|policy|declarations|alternate parts policy|quality replacement|vehicle equipment|footer)\b/.test(normalized);
+  return /\b(?:abbreviations?|legend|disclaimer|fraud notice|legal notice|work authorization|policy|declarations?|allstate parts policy|alternate parts policy|quality replacement parts|vehicle equipment|vin decoding|footer|page \d+ of \d+|ccc\/motor|motor guide|estimating guide|included operations?|not included|a\/m\s*=\s*aftermarket|lkq\s*\/?\s*rcy\s*\/?\s*used|capa\s*(?:certified|definition|definitions?))\b/i.test(rowText) ||
+    /\b(?:abbreviation|legend|disclaimer|fraud|legal notice|work authorization|policy|declarations|alternate parts policy|quality replacement|vehicle equipment|footer|ccc motor|motor guide|estimating guide|included operations|not included|aftermarket definition|lkq rcy used|capa definition)\b/.test(normalized);
+}
+
+function isWheelLaborAnchorText(normalized: string) {
+  if (!/\b(?:wheel|rim|tire|alignment)\b/.test(normalized)) return false;
+  return /\b(?:rf|lf|rt|lt|front|rear|wheel|rim|tire|alignment|mount|balance|repair|sublet|replacement|replace|repl|r&i|access)\b/.test(normalized);
 }
 
 function summarizeComparisonEvidence(text: string, pattern: RegExp) {
@@ -2885,7 +2894,7 @@ function containsVehicleYearIdentityText(value: string) {
 }
 
 function isBoilerplatePartSourceText(normalized: string) {
-  return /\b(?:claim|claimant|insured|owner|vin|vehicle|license|loss|policy|deductible|appraiser|estimator|estimate id|preliminary estimate|quality replacement|warranty|disclaimer|notice|betterment|alternate parts suppliers?|motor guide|ccc motor guide|database|included|not included|footer|page)\b/.test(normalized) &&
+  return /\b(?:claim|claimant|insured|owner|vin|vehicle|license|loss|policy|deductible|appraiser|estimator|estimate id|preliminary estimate|quality replacement|warranty|disclaimer|notice|betterment|alternate parts suppliers?|motor guide|ccc motor guide|database|included|not included|footer|page|abbreviation|legend|fraud|aftermarket definition|capa definition|lkq rcy used)\b/.test(normalized) &&
     !/\b(?:repl|replace|rpr|repair|r&i|subl|add|supp)\b/.test(normalized);
 }
 

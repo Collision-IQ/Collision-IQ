@@ -227,6 +227,35 @@ run("extractEstimateFacts captures Shop 21733 hard facts and documented positive
   assert.equal(facts.documentedHighlights.includes("HV battery state-of-charge maintenance"), true);
 });
 
+run("extractEstimateFacts ignores tiny boilerplate amount for 21548/SOR3 totals", () => {
+  const shopFacts = extractEstimateFacts({
+    text: [
+      "Shop 21548 / SOR3 repair estimate",
+      "ESTIMATE TOTAL: $0.02",
+      "Total Cost of Repairs $9,307.40",
+      "Line 50 Repl RF wheel 0.3 M",
+      "Line 51 R&I LF wheel 0.2 M access note",
+    ].join("\n"),
+  });
+  const carrierFacts = extractEstimateFacts({
+    text: [
+      "Carrier estimate SOR3",
+      "ESTIMATE TOTAL: $0.02",
+      "Total Cost of Repairs $5,737.10",
+      "Line 43 RF wheel repair sublet 0.0",
+      "Line 44 Tire mount and balance 0.0",
+      "Line 47 Four wheel alignment",
+    ].join("\n"),
+  });
+  const grossGap = Number((shopFacts.estimateTotal - carrierFacts.estimateTotal).toFixed(2));
+
+  assert.equal(shopFacts.estimateTotal, 9307.40);
+  assert.equal(carrierFacts.estimateTotal, 5737.10);
+  assert.equal(grossGap, 3570.30);
+  assert.notEqual(shopFacts.estimateTotal, 0.02);
+  assert.notEqual(carrierFacts.estimateTotal, 0.02);
+});
+
 run("vehicle extraction resolves TESL header text and Tesla 5YJ VIN decoding", () => {
   const extractedVehicle = extractVehicleIdentityFromText(SHOP_21733_TEXT, "attachment");
   const decodedVehicle = decodeVinVehicleIdentity("5YJSA1E21JF264319");

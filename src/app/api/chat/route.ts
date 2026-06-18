@@ -45,7 +45,7 @@ import {
   countLargeCaseSummaryArtifacts,
   resolveLargeCaseChatFallback,
 } from "@/lib/ai/chatLargeCaseContext";
-import { budgetChatAttachments } from "@/lib/ai/chatAttachmentBudget";
+import { budgetChatAttachments, buildChatAttachmentOmissionNotice } from "@/lib/ai/chatAttachmentBudget";
 import { shouldGenerateAnnotatedCitationDensityEstimate } from "@/lib/reports/citationDensityIntent";
 import {
   getUploadBatchLimitMessage,
@@ -456,6 +456,7 @@ function buildTextContext(params: {
   conversationContext: string;
   documents: UploadedDocument[];
   activeCaseContext?: string;
+  omittedAttachmentNotice?: string;
 }): string {
   const sections: string[] = [];
 
@@ -469,6 +470,10 @@ function buildTextContext(params: {
 
   if (params.conversationContext) {
     sections.push(`Recent conversation:\n${params.conversationContext}`);
+  }
+
+  if (params.omittedAttachmentNotice?.trim()) {
+    sections.push(params.omittedAttachmentNotice.trim());
   }
 
   if (params.documents.length > 0) {
@@ -498,6 +503,7 @@ function buildOpenAIInput(params: {
   conversationContext: string;
   documents: UploadedDocument[];
   activeCaseContext?: string;
+  omittedAttachmentNotice?: string;
 }) {
   const textContext = buildTextContext(params);
   const content: Array<
@@ -1155,6 +1161,7 @@ export async function POST(req: Request) {
       conversationContext,
       documents: providerDocuments,
       activeCaseContext,
+      omittedAttachmentNotice: buildChatAttachmentOmissionNotice(attachmentBudget.omitted),
     });
     const reducedRetryInput = attachmentBudget.largeMultimodalRequest
       ? buildOpenAIInput({
@@ -1162,6 +1169,7 @@ export async function POST(req: Request) {
           conversationContext,
           documents: attachmentBudget.retryIncluded,
           activeCaseContext,
+          omittedAttachmentNotice: buildChatAttachmentOmissionNotice(attachmentBudget.omitted),
         })
       : undefined;
     const turnEstimateText = providerDocuments
