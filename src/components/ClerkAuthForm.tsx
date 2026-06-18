@@ -5,7 +5,7 @@ import { Capacitor } from "@capacitor/core";
 import { useEffect, useState } from "react";
 import { isNative } from "@/lib/native";
 
-const AUTH_REDIRECT_PATH = "/chatbot";
+const AUTH_REDIRECT_PATH = "/";
 const GOOGLE_SSO_CALLBACK_PATH = "/sign-in/sso-callback";
 
 type Props = {

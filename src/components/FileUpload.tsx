@@ -158,7 +158,7 @@ export default function FileUpload({
 
     if (uploadDisabled) {
       if (!isSignedIn) {
-        router.push("/sign-in?next=/chatbot");
+        router.push("/sign-in?next=/");
         setError("Please sign in before uploading.");
       } else {
         setError("Upload limits are still loading. Try again in a moment.");
@@ -244,7 +244,7 @@ export default function FileUpload({
           | null;
 
         if (res.status === 401) {
-          router.push("/sign-in?next=/chatbot");
+          router.push("/sign-in?next=/");
           throw new Error("Please sign in before uploading.");
         }
 
@@ -327,7 +327,7 @@ export default function FileUpload({
 
     if (uploadDisabled) {
       if (!isSignedIn) {
-        router.push("/sign-in?next=/chatbot");
+        router.push("/sign-in?next=/");
         setError("Please sign in before uploading.");
       } else {
         setError("Upload limits are still loading. Try again in a moment.");
@@ -370,7 +370,7 @@ export default function FileUpload({
         onClick={() => {
           if (uploadDisabled) {
             if (!isSignedIn) {
-              router.push("/sign-in?next=/chatbot");
+              router.push("/sign-in?next=/");
               setError("Please sign in before uploading.");
             } else {
               setError("Upload limits are still loading. Try again in a moment.");

@@ -2482,7 +2482,7 @@ export default function ChatWidget({
   ): Promise<{ attachmentIds: string[]; filenames: string[] }> {
     if (disabled) return { attachmentIds: [], filenames: [] };
     if (!isUserLoaded || !isSignedIn) {
-      router.push("/sign-in?next=/chatbot");
+      router.push("/sign-in?next=/");
       throw new Error("Please sign in before uploading.");
     }
 
@@ -2502,7 +2502,7 @@ export default function ChatWidget({
       body: formData,
     });
     if (res.status === 401) {
-      router.push("/sign-in?next=/chatbot");
+      router.push("/sign-in?next=/");
       throw new Error("Please sign in before uploading.");
     }
     const data = (await res.json().catch(() => null)) as UploadResponse | null;

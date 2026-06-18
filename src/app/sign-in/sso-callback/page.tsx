@@ -17,10 +17,10 @@ export default function SignInSsoCallbackPage() {
     <AuthenticateWithRedirectCallback
       signInUrl="/sign-in"
       signUpUrl="/sign-up"
-      signInFallbackRedirectUrl="/chatbot"
-      signInForceRedirectUrl="/chatbot"
-      signUpFallbackRedirectUrl="/chatbot"
-      signUpForceRedirectUrl="/chatbot"
+      signInFallbackRedirectUrl="/"
+      signInForceRedirectUrl="/"
+      signUpFallbackRedirectUrl="/"
+      signUpForceRedirectUrl="/"
     />
   );
 }

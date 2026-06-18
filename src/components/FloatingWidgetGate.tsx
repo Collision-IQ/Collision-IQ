@@ -51,7 +51,7 @@ export default function FloatingWidgetGate({
             {/* Body (iframe or chat mount) */}
             <div className="h-[500px] w-full overflow-hidden rounded-b-3xl">
               <iframe
-                src="/chatbot"
+                src="/"
                 title="Collision IQ"
                 className="h-full w-full border-none"
               />

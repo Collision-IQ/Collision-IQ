@@ -90,19 +90,21 @@ export default function NativeAuthBridge() {
   return null;
 }
 
+const DEFAULT_AUTH_DESTINATION = "/";
+
 function resolveNativeAuthDestination(url: string) {
   try {
     const parsed = new URL(url);
 
     if (parsed.protocol === "com.collisionacademy.collisioniq:") {
-      return parsed.searchParams.get("redirect") || "/chatbot";
+      return parsed.searchParams.get("redirect") || DEFAULT_AUTH_DESTINATION;
     }
 
     if (
       parsed.hostname === "www.collision-iq.ai" ||
       parsed.hostname === "collision-iq.ai"
     ) {
-      return `${parsed.pathname || "/chatbot"}${parsed.search}${parsed.hash}`;
+      return `${parsed.pathname || DEFAULT_AUTH_DESTINATION}${parsed.search}${parsed.hash}`;
     }
   } catch (error) {
     console.warn("[native-auth] invalid appUrlOpen url", {
@@ -111,5 +113,5 @@ function resolveNativeAuthDestination(url: string) {
     });
   }
 
-  return "/chatbot";
+  return DEFAULT_AUTH_DESTINATION;
 }

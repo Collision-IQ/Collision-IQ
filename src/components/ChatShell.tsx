@@ -30,8 +30,8 @@ function HeaderAuth() {
       ) : isLoaded ? (
         <SignInButton
           mode={isNativeClient ? "redirect" : "modal"}
-          forceRedirectUrl="/chatbot"
-          fallbackRedirectUrl="/chatbot"
+          forceRedirectUrl="/"
+          fallbackRedirectUrl="/"
           oauthFlow={isNativeClient ? "redirect" : "auto"}
         >
           <button
