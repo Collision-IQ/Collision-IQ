@@ -6,9 +6,21 @@ import {
   logCollisionIqModelDiagnostic,
   type CollisionIqPrimaryProvider,
 } from "@/lib/modelConfig";
-import { generateOpenClawText, getOpenClawAvailability } from "@/lib/openclaw";
 
 type OpenAIResponseInput = Parameters<OpenAI["responses"]["create"]>[0];
+type OpenClawModule = {
+  generateOpenClawText(params: {
+    instructions?: string;
+    input: unknown;
+  }): Promise<{ output_text: string; model: string }>;
+  getOpenClawAvailability(): {
+    available: boolean;
+    command: string;
+    entryJs: string;
+    description: string;
+    reason?: string;
+  };
+};
 
 export type ProviderTextGenerationResult = {
   output_text: string;
@@ -33,6 +45,7 @@ export async function generatePrimaryText(params: {
   }
 
   if (collisionIqProvider.primary === "openclaw") {
+    const { generateOpenClawText, getOpenClawAvailability } = await loadOpenClawModule();
     const openclaw = getOpenClawAvailability();
     if (openclaw.available) {
       logCollisionIqModelDiagnostic({
@@ -97,6 +110,7 @@ export async function generateSupplementText(params: {
   }
 
   if (collisionIqProvider.primary === "openclaw") {
+    const { generateOpenClawText, getOpenClawAvailability } = await loadOpenClawModule();
     const openclaw = getOpenClawAvailability();
     if (openclaw.available) {
       logCollisionIqModelDiagnostic({
@@ -145,6 +159,10 @@ export async function generateSupplementText(params: {
     provider: "openai",
     model: params.openAiModel,
   };
+}
+
+async function loadOpenClawModule(): Promise<OpenClawModule> {
+  return await import(/* webpackIgnore: true */ "../openclaw") as OpenClawModule;
 }
 
 async function generateAnthropicText(params: {
