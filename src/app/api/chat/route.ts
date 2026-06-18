@@ -45,6 +45,7 @@ import {
   countLargeCaseSummaryArtifacts,
   resolveLargeCaseChatFallback,
 } from "@/lib/ai/chatLargeCaseContext";
+import { budgetChatAttachments } from "@/lib/ai/chatAttachmentBudget";
 import { shouldGenerateAnnotatedCitationDensityEstimate } from "@/lib/reports/citationDensityIntent";
 import {
   getUploadBatchLimitMessage,
@@ -726,7 +727,11 @@ async function delay(ms: number) {
 async function createOpenAIResponseWithRetry(
   deps: Pick<ChatRouteDeps, "openai">,
   phase: "first-pass" | "second-pass",
-  input: Parameters<ChatRouteDeps["openai"]["responses"]["create"]>[0]
+  input: Parameters<ChatRouteDeps["openai"]["responses"]["create"]>[0],
+  options: {
+    retryInput?: Parameters<ChatRouteDeps["openai"]["responses"]["create"]>[0];
+    retryReason?: string;
+  } = {}
 ) {
   const generationInput = input as {
     instructions?: string;
@@ -747,23 +752,51 @@ async function createOpenAIResponseWithRetry(
       provider: "openai",
       stage: `chat_${phase}`,
     });
-    if (!providerError.retryable) {
+    const serverError =
+      (providerError.status !== null && providerError.status >= 500) ||
+      (providerError.statusCode !== null && providerError.statusCode >= 500) ||
+      /server_error/i.test(providerError.code ?? "");
+    if (!providerError.retryable && !(serverError && options.retryInput)) {
       throw error;
     }
   }
 
   await delay(OPENAI_RETRY_DELAY_MS);
 
+  const retryGenerationInput = (options.retryInput ?? input) as {
+    instructions?: string;
+    input: Parameters<typeof generatePrimaryText>[0]["input"];
+    temperature?: number;
+  };
+  if (options.retryInput) {
+    console.warn("[chat-openai] retrying with reduced context", {
+      phase,
+      reason: options.retryReason ?? "reduced_context",
+    });
+  }
+
   try {
     return await generatePrimaryText({
       openai: deps.openai,
       stage: `chat_${phase}`,
-      instructions: generationInput.instructions,
-      input: generationInput.input,
-      temperature: generationInput.temperature,
+      instructions: retryGenerationInput.instructions,
+      input: retryGenerationInput.input,
+      temperature: retryGenerationInput.temperature,
     });
   } catch (error) {
     logOpenAIPhaseFailure(phase, 2, error);
+    if (options.retryInput) {
+      throw Object.assign(
+        new Error("Large chat attachment review could not be completed after reducing image context. Please retry with fewer photos or ask for a targeted photo review."),
+        {
+          provider: "openai",
+          stage: `chat_${phase}`,
+          status: 503,
+          statusCode: 503,
+          code: "temporarily_unavailable_large_chat_context_retry_failed",
+        }
+      );
+    }
     throw error;
   }
 }
@@ -1110,13 +1143,27 @@ export async function POST(req: Request) {
       .join("\n\n");
 
     const modelEligibleDocuments = documents.filter((document) => !isVideoDocument(document));
-    const providerDocuments = largeCaseFallback.useFallback ? [] : modelEligibleDocuments;
+    const attachmentBudget = budgetChatAttachments({
+      documents,
+      userMessage,
+      isImageDocument,
+      isVideoDocument,
+    });
+    const providerDocuments = attachmentBudget.included;
     const input = buildOpenAIInput({
       userMessage,
       conversationContext,
       documents: providerDocuments,
       activeCaseContext,
     });
+    const reducedRetryInput = attachmentBudget.largeMultimodalRequest
+      ? buildOpenAIInput({
+          userMessage,
+          conversationContext,
+          documents: attachmentBudget.retryIncluded,
+          activeCaseContext,
+        })
+      : undefined;
     const turnEstimateText = providerDocuments
       .map((document) => document.text?.trim())
       .filter(Boolean)
@@ -1209,6 +1256,21 @@ export async function POST(req: Request) {
         hasText: Boolean(document.text?.trim()),
         hasImageDataUrl: Boolean(document.imageDataUrl),
       })),
+      attachmentBudget: {
+        largeMultimodalRequest: attachmentBudget.largeMultimodalRequest,
+        imageCount: attachmentBudget.imageCount,
+        includedImageCount: attachmentBudget.includedImageCount,
+        retryIncludedCount: attachmentBudget.retryIncluded.length,
+        reasons: attachmentBudget.reasons,
+        omitted: attachmentBudget.omitted.map((item) => ({
+          attachmentId: item.id,
+          filename: item.filename,
+          mimeType: item.mimeType,
+          reason: item.reason,
+          textLength: item.textLength,
+          hasImageDataUrl: item.hasImageDataUrl,
+        })),
+      },
       omittedForLargeCaseFallback: largeCaseFallback.useFallback
         ? documents.map((document) => ({
             attachmentId: document.id ?? null,
@@ -1232,7 +1294,15 @@ export async function POST(req: Request) {
       instructions: systemInstructions,
       temperature: 0.7,
       input,
-    });
+    }, reducedRetryInput ? {
+      retryInput: {
+        model: deps.collisionIqModels.primary,
+        instructions: systemInstructions,
+        temperature: 0.7,
+        input: reducedRetryInput,
+      },
+      retryReason: "large_multimodal_attachment_budget",
+    } : undefined);
 
     const firstPassOutputText = getOpenAIOutputText(firstPass);
     const firstPassText =
