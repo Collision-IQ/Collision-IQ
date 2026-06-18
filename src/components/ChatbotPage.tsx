@@ -991,9 +991,9 @@ export function ChatbotWorkspacePage() {
         ? { label: "Repair Intelligence Report (Pro)", type: "locked" }
       : null,
     canUseEstimateScrubberExport
-      ? { label: "Citation Density PDF", type: "pdf" }
+      ? { label: "Delta Citation Density Report", type: "pdf" }
       : hasResolvedAnalysis
-        ? { label: "Citation Density PDF (Pro)", type: "locked" }
+        ? { label: "Delta Citation Density Report (Pro)", type: "locked" }
       : null,
     canUsePolicyRightsReviewExport
       ? { label: "OEM Citation Density Report", type: "pdf" }
@@ -2163,7 +2163,7 @@ function RailContent({
     const blob = await fetchAnnotatedCitationDensityPdfBlob(data.downloadUrl);
     return {
       blob,
-      filename: "citation-density-annotated-estimate.pdf",
+      filename: "delta-citation-density-report.pdf",
       artifactId: typeof data.artifactId === "string"
         ? data.artifactId
         : typeof data.exportId === "string"
@@ -3122,7 +3122,7 @@ function RailContent({
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[#C65A2A]" aria-hidden />
-                    Citation Density PDF
+                    Delta Citation Density Report
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
                     Annotates the actual estimate PDF with supported missed, reduced, or under-documented operations.
@@ -3141,7 +3141,7 @@ function RailContent({
                     }}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download Citation Density PDF</span>
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download Delta Citation Density Report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
@@ -3149,7 +3149,7 @@ function RailContent({
                     onClick={() => openReportSend("estimate_scrubber", "carrier")}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[#C65A2A] bg-[#C65A2A] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
-                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email Citation Density PDF</span>
+                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email Delta Citation Density Report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </div>
@@ -3183,7 +3183,7 @@ function RailContent({
                     }}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download OEM Citation Density PDF</span>
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download OEM Citation Density Report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
@@ -3191,7 +3191,7 @@ function RailContent({
                     onClick={() => openReportSend("oem_citation_density", "carrier")}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[#C65A2A] bg-[#C65A2A] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
-                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email OEM Citation Density PDF</span>
+                    <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email OEM Citation Density Report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                 </div>
@@ -3318,7 +3318,7 @@ function RailContent({
                 onClick={onCustomerReportLocked}
                 className="w-full rounded-md border border-orange-400/18 bg-[#C65A2A]/10 p-3 text-xs text-foreground transition hover:bg-[#C65A2A]/16"
               >
-                Repair Intelligence, Citation Density PDF, OEM Citation Density Report, DOI Complaint Packet, and Customer Report are available on Pro.
+                Repair Intelligence, Delta Citation Density Report, OEM Citation Density Report, DOI Complaint Packet, and Customer Report are available on Pro.
               </button>
             ) : null}
             {academyTrigger ? (
@@ -3700,7 +3700,7 @@ function getDefaultReportSubject(reportType: ReportKind): string {
     case "repair_intelligence":
       return "[Collision IQ] Repair Intelligence Report";
     case "estimate_scrubber":
-      return "[Collision IQ] Citation Density Annotated Estimate";
+      return "[Collision IQ] Delta Citation Density Report";
     case "estimator_change_request_list":
       return "[Collision IQ] Estimate Delta / Change Requests";
     case "oem_citation_density":
@@ -3721,7 +3721,7 @@ function getDefaultReportFilename(reportType: ReportKind): string {
     case "repair_intelligence":
       return "repair-intelligence-report.pdf";
     case "estimate_scrubber":
-      return "citation-density-annotated-estimate.pdf";
+      return "delta-citation-density-report.pdf";
     case "estimator_change_request_list":
       return "estimate-delta-change-requests.pdf";
     case "oem_citation_density":

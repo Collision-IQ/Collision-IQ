@@ -403,12 +403,12 @@ export default function StructuredAnalysisCanvas({
             summary={
               canUseFullReportExports
                 ? "Carrier-ready reports remain available in the right rail when you're ready to export."
-                : "Your 1-Page Snapshot is available in the right rail. Repair Intelligence, Citation Density PDF, and OEM Citation Density reports are available on Pro."
+                : "Your 1-Page Snapshot is available in the right rail. Repair Intelligence, Delta Citation Density Report, and OEM Citation Density Report are available on Pro."
             }
             preview={
               canUseFullReportExports
-                ? "Repair Intelligence Report, Citation Density PDF, and OEM Citation Density Report remain available in the rail."
-                : "Use the 1-Page Snapshot for the shareable export. Repair Intelligence, Citation Density PDF, and OEM Citation Density Report are Pro-only upgrades."
+                ? "Repair Intelligence Report, Delta Citation Density Report, and OEM Citation Density Report remain available in the rail."
+                : "Use the 1-Page Snapshot for the shareable export. Repair Intelligence, Delta Citation Density Report, and OEM Citation Density Report are Pro-only upgrades."
             }
             expanded={activeInsightKey === "exports"}
             collapsible={false}
@@ -420,8 +420,8 @@ export default function StructuredAnalysisCanvas({
           >
             <div className="border border-border bg-muted px-3 py-2.5 text-[13px] leading-5 text-muted-foreground">
               {canUseFullReportExports
-                ? "Use the rail to generate the Repair Intelligence Report, Citation Density PDF, or OEM Citation Density Report."
-                : "Use the rail to download the 1-Page Snapshot. Repair Intelligence, Citation Density PDF, OEM Citation Density Report, and Customer Report are available on Pro."}
+                ? "Use the rail to generate the Repair Intelligence Report, Delta Citation Density Report, or OEM Citation Density Report."
+                : "Use the rail to download the 1-Page Snapshot. Repair Intelligence, Delta Citation Density Report, OEM Citation Density Report, and Customer Report are available on Pro."}
             </div>
           </AnalysisSectionCard>
         </div>

@@ -63,7 +63,7 @@ export async function GET(request: Request) {
   const entry = getAnnotatedEstimateExport(artifactId);
   if (!entry) {
     return NextResponse.json({
-      error: "This export is no longer available. Regenerate Citation Density PDF.",
+      error: "This export is no longer available. Regenerate Delta Citation Density Report.",
     }, { status: 404 });
   }
 
@@ -238,8 +238,8 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             ok: false,
-            error: "Citation Density route received an OEM Citation Density finding.",
-            userMessage: "Citation Density route received an OEM Citation Density artifact. Regenerate the Citation Density PDF.",
+            error: "Delta Citation Density Report route received an OEM Citation Density Report finding.",
+            userMessage: "Delta Citation Density Report route received an OEM Citation Density Report artifact. Regenerate the Delta Citation Density Report.",
             reportType: "citation-density",
             routeName: "citation-density",
             artifactReportType: getFindingReportType(wrongPrefixFinding),

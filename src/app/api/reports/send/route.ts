@@ -72,15 +72,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Report email request is incomplete." }, { status: 400 });
   }
 
-  if (reportType === "estimate_scrubber" && !/^citation-density-annotated-estimate\.pdf$/i.test(filename)) {
+  if (reportType === "estimate_scrubber" && !/^delta-citation-density-report\.pdf$/i.test(filename)) {
     return NextResponse.json(
-      { error: "Citation Density annotated estimate email requires the annotated original-estimate PDF artifact." },
+      { error: "Delta Citation Density Report email requires the annotated original-estimate PDF artifact." },
       { status: 400 }
     );
   }
   if (reportType === "oem_citation_density" && !/^oem-citation-density-report\.pdf$/i.test(filename)) {
     return NextResponse.json(
-      { error: "OEM Citation Density email requires the annotated OEM Citation Density PDF artifact." },
+      { error: "OEM Citation Density Report email requires the annotated OEM Citation Density Report PDF artifact." },
       { status: 400 }
     );
   }
@@ -237,7 +237,7 @@ function safeReportLabel(reportType: ReportKind): string {
     case "repair_intelligence":
       return "Repair Intelligence Report";
     case "estimate_scrubber":
-      return "Citation Density Annotated Estimate";
+      return "Delta Citation Density Report";
     case "oem_citation_density":
       return "OEM Citation Density Report";
     case "policy_rights_review":

@@ -57,7 +57,7 @@ function run(name, test) {
 run("generated Collision IQ report PDFs are classified as generated_report_artifact", () => {
   assert.equal(classifyAnalysisAttachment(attachment({
     id: "report",
-    filename: "citation-density-annotated-estimate.pdf",
+    filename: "delta-citation-density-report.pdf",
     text: "Collision IQ Citation Density Finding Details Annotation Legend Unanchored Citation Density Findings",
   })), "generated_report_artifact");
 });
@@ -84,7 +84,7 @@ run("analysis context budget reduces huge policy and generated report before mod
   const result = applyAnalysisContextBudget({
     attachments: [
       attachment({ id: "policy", filename: "Allstate Policy_Redacted.pdf", text: policyText, pageCount: 56 }),
-      attachment({ id: "report", filename: "citation-density-annotated-estimate.pdf", text: reportText, pageCount: 28 }),
+      attachment({ id: "report", filename: "delta-citation-density-report.pdf", text: reportText, pageCount: 28 }),
       attachment({ id: "estimate", filename: "Carrier SOR3 Tesla Estimate.pdf", text: estimateText, pageCount: 8 }),
       attachment({ id: "support", filename: "linked-support.pdf", text: supportText, pageCount: 12 }),
     ],

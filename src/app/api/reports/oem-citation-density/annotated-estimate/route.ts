@@ -163,8 +163,8 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             ok: false,
-            error: "OEM Citation Density route received a Citation Density finding.",
-            userMessage: "OEM Citation Density route received a Citation Density artifact. Regenerate the OEM Citation Density Report.",
+            error: "OEM Citation Density Report route received a Delta Citation Density Report finding.",
+            userMessage: "OEM Citation Density Report route received a Delta Citation Density Report artifact. Regenerate the OEM Citation Density Report.",
             reportType: "oem-citation-density",
             routeName: "oem-citation-density",
             artifactReportType: getFindingReportType(wrongPrefixFinding),

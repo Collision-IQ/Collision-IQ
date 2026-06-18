@@ -503,27 +503,27 @@ export const CITATION_DENSITY_ARTIFACT_VERSION = "citation-density-part-source-r
 export const OEM_CITATION_DENSITY_ARTIFACT_VERSION = "oem-citation-density-v1";
 export const OEM_CITATION_DENSITY_REPORT_TYPE = "oem-citation-density";
 export const NO_ANCHOR_EXTRACTION_ERROR =
-  "Citation Density could not extract estimate row anchors from the selected estimate PDF. No annotation PDF was produced.";
+  "Delta Citation Density Report could not extract estimate row anchors from the selected estimate PDF. No annotation PDF was produced.";
 export const NO_SELECTABLE_TEXT_ERROR =
-  "Citation Density could not extract selectable text from the selected estimate PDF. Upload the original CCC estimate PDF or enable OCR/CCC structured estimate extraction.";
+  "Delta Citation Density Report could not extract selectable text from the selected estimate PDF. Upload the original CCC estimate PDF or enable OCR/CCC structured estimate extraction.";
 export const PDF_TEXT_EXTRACTION_INFRASTRUCTURE_ERROR =
-  "Citation Density PDF text extraction failed in production because the PDF parser polyfill is unavailable. No annotation PDF was produced.";
+  "Delta Citation Density Report text extraction failed in production because the PDF parser polyfill is unavailable. No annotation PDF was produced.";
 export const PDF_JS_WORKER_UNAVAILABLE_ERROR =
-  "Citation Density PDF text extraction failed because the PDF.js worker asset is unavailable in production. No annotation PDF was produced.";
+  "Delta Citation Density Report text extraction failed because the PDF.js worker asset is unavailable in production. No annotation PDF was produced.";
 
 const CITATION_DENSITY_REPORT_IDENTITY: AnnotatedEstimateReportIdentity = {
   reportType: "citation-density",
   artifactVersion: CITATION_DENSITY_ARTIFACT_VERSION,
-  reportTitle: "Citation Density PDF",
-  reportShortTitle: "Citation Density",
-  artifactFilename: "citation-density-annotated-estimate.pdf",
-  sourcePdfFallbackName: "citation-density-source.pdf",
-  pdfAnnotationTitle: "Collision IQ Citation Density",
-  legendTitle: "Citation Density Annotation Legend",
-  detailTitle: "Citation Density Finding Details",
-  unanchoredTitle: "Unanchored Citation Density Findings",
-  scoreLabel: "Citation Density score",
-  scoreCommentLabel: "Citation Density",
+  reportTitle: "Delta Citation Density Report",
+  reportShortTitle: "Delta Citation Density",
+  artifactFilename: "delta-citation-density-report.pdf",
+  sourcePdfFallbackName: "delta-citation-density-source.pdf",
+  pdfAnnotationTitle: "Collision IQ Delta Citation Density",
+  legendTitle: "Delta Citation Density Annotation Legend",
+  detailTitle: "Delta Citation Density Finding Details",
+  unanchoredTitle: "Unanchored Delta Citation Density Findings",
+  scoreLabel: "Delta Citation Density score",
+  scoreCommentLabel: "Delta Citation Density",
   noAnchorError: NO_ANCHOR_EXTRACTION_ERROR,
   noSelectableTextError: NO_SELECTABLE_TEXT_ERROR,
   textExtractionInfrastructureError: PDF_TEXT_EXTRACTION_INFRASTRUCTURE_ERROR,
@@ -545,8 +545,8 @@ export const OEM_CITATION_DENSITY_REPORT_IDENTITY: AnnotatedEstimateReportIdenti
   scoreCommentLabel: "OEM Citation Density",
   noAnchorError: "OEM Citation Density could not extract estimate row anchors from the selected estimate PDF. No annotation PDF was produced.",
   noSelectableTextError: "OEM Citation Density could not extract selectable text from the selected estimate PDF. Upload the original CCC estimate PDF or enable OCR/CCC structured estimate extraction.",
-  textExtractionInfrastructureError: "OEM Citation Density PDF text extraction failed in production because the PDF parser polyfill is unavailable. No annotation PDF was produced.",
-  pdfWorkerUnavailableError: "OEM Citation Density PDF text extraction failed because the PDF.js worker asset is unavailable in production. No annotation PDF was produced.",
+  textExtractionInfrastructureError: "OEM Citation Density Report text extraction failed in production because the PDF parser polyfill is unavailable. No annotation PDF was produced.",
+  pdfWorkerUnavailableError: "OEM Citation Density Report text extraction failed because the PDF.js worker asset is unavailable in production. No annotation PDF was produced.",
 };
 
 const exportCache = new Map<string, {
@@ -3120,7 +3120,7 @@ function findReportIdentityMismatch(
         findingId: finding.id,
         artifactReportType: reportType ?? "oem-citation-density",
         reason: "citation-density route received oem-citation-density finding",
-        message: "Citation Density route received an OEM Citation Density finding.",
+        message: "Delta Citation Density Report route received an OEM Citation Density Report finding.",
       };
     }
     if (routeReportType === "oem-citation-density" && (reportType === "citation-density" || /^citation-density-/i.test(finding.id))) {
@@ -3128,7 +3128,7 @@ function findReportIdentityMismatch(
         findingId: finding.id,
         artifactReportType: reportType ?? "citation-density",
         reason: "oem-citation-density route received citation-density finding",
-        message: "OEM Citation Density route received a Citation Density finding.",
+        message: "OEM Citation Density Report route received a Delta Citation Density Report finding.",
       };
     }
   }

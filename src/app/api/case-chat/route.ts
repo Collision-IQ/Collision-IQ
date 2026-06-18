@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: "Annotated Citation Density estimate PDFs must be generated through the annotated-estimate export. Select the original carrier or shop estimate PDF and run the Citation Density annotated estimate export so original estimate pages are copied and visibly marked up.",
+          error: "Delta Citation Density Report PDFs must be generated through the annotated-estimate export. Select the original carrier or shop estimate PDF and run the Delta Citation Density Report export so original estimate pages are copied and visibly marked up.",
         },
         { status: 409 }
       );

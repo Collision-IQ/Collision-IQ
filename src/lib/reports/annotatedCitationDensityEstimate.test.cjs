@@ -910,7 +910,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
         request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
       }),
       (error) => {
-        assert.match(error.message, /OEM Citation Density finding/i);
+        assert.match(error.message, /OEM Citation Density Report finding/i);
         assert.equal(error.debugTrace.artifactReportType, "oem-citation-density");
         assert.equal(error.debugTrace.findingIdPrefixCheckPassed, false);
         return true;
@@ -930,7 +930,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
         request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
       }),
       (error) => {
-        assert.match(error.message, /Citation Density finding/i);
+      assert.match(error.message, /Delta Citation Density Report finding/i);
         assert.equal(error.debugTrace.artifactReportType, "citation-density");
         assert.equal(error.debugTrace.findingIdPrefixCheckPassed, false);
         return true;
@@ -1041,7 +1041,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
         findings: [baseFinding()],
         request: { includeLegend: false, includeSummaryPage: false, annotationMode: "both" },
       }),
-      /Citation Density could not extract selectable text from the selected estimate PDF/
+      /Delta Citation Density Report could not extract selectable text from the selected estimate PDF/
     );
   });
 
@@ -1867,7 +1867,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     const json = await response.json();
 
     assert.equal(json.ok, false);
-    assert.equal(json.error, "Citation Density could not extract estimate row anchors from the selected estimate PDF. No annotation PDF was produced.");
+    assert.equal(json.error, "Delta Citation Density Report could not extract estimate row anchors from the selected estimate PDF. No annotation PDF was produced.");
     assert.equal(json.userMessage, json.error);
     assert.equal(json.artifactId, undefined);
     assert.deepEqual(json.debugCounts.uploadedFileNames, ["SOR-1 21975.pdf"]);
