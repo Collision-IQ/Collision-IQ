@@ -2495,7 +2495,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const page = doc.addPage([612, 792]);
     page.drawText("2023 Tesla Model Y carrier estimate", { x: 42, y: 742, size: 10, font });
-    drawCccEstimateRow(page, font, 10, "", "Rpr", "RT front wheel repair sublet", "0.0", "$75.00", 710);
+    drawCccEstimateRow(page, font, 10, "", "Subl", "RT/Front Wheel alloy 19 sonic silver", "0.0", "$75.00", 710);
+    drawCccEstimateRow(page, font, 14, "", "Subl", "Tire Mount and Balance", "0.0", "$25.00", 638);
+    drawCccEstimateRow(page, font, 15, "", "Subl", "Four Wheel Alignment", "0.0", "$129.00", 620);
     drawCccEstimateRow(page, font, 11, "A/M", "Repl", "RT Hub assy", "0.6", "$185.00", 692);
     drawCccEstimateRow(page, font, 12, "", "Rpr", "Finish sand and polish", "0.5", "$40.00", 674);
     drawCccEstimateRow(page, font, 13, "", "R&I", "D&R battery/Reset Electronics", "0.3", "$24.00", 656);
@@ -2509,7 +2511,11 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
       comparisonEstimateTexts: [{
         fileName: "Shop estimate.pdf",
         estimateRole: "shop",
-        text: "Line 210 Repl wheel replacement\nLine 211 R&I wheel for liner and flare hardware access 0.2",
+        text: [
+          "Line 210 Repl RT/Front Wheel 0.3 M",
+          "Line 211 R&I LT/Front R&I wheel 0.2 M",
+          "Note: removed for access to left liner, wheel flare and bumper hardware; time adjusted 0.1 x 2",
+        ].join("\n"),
       }],
       findings: [],
       findingGenerator: buildRequiredEstimatorDeltaFindings,
@@ -2521,8 +2527,15 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     assert.match(joined, /am_wheel_end_safety/);
     assert.match(joined, /sand_polish_p_page_support/);
     assert.match(joined, /battery_reset_electrical_rate/);
-    assert.match(joined, /Carrier aftermarket warranty language does not prove OEM-equivalent system performance/);
+    assert.match(joined, /Carrier may be missing or inadequately documenting wheel R&I\/access labor/);
+    assert.match(joined, /safety-critical wheel-end component/);
+    assert.match(joined, /Carrier aftermarket warranty language may address fit, corrosion, or part replacement/);
+    assert.match(joined, /ADAS compatibility, crash-test equivalency, or related manufacturer warranty preservation/);
     assert.match(joined, /EV weight and ADAS sensitivity increase the need for OEM procedure verification/);
+    assert.match(joined, /mechanical\/electrical procedure context, not a generic miscellaneous charge/);
+    assert.match(joined, /CCC\/MOTOR\/P-page\/database support/);
+    assert.doesNotMatch(joined, /automatically void/i);
+    assert.match(joined, /does not prove an OEM-only requirement without authority/i);
     assert.equal(result.annotationMetadata.some((item) => /ABBREVIATIONS|DISCLAIMER|alternate parts policy/i.test(item.sourceAnchorText)), false);
     assert.ok(result.debugTrace.requiredDetectorFindingCount >= 4);
     assert.ok(result.debugTrace.acceptedEstimateRowFindingCount >= 4);

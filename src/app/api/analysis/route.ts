@@ -58,7 +58,10 @@ import {
   isSideImpactZone,
 } from "@/lib/ai/impactZone";
 import type { EvidenceRecord } from "@/lib/ai/types/evidence";
-import { collisionIqModels } from "@/lib/modelConfig";
+import {
+  collisionIqModels,
+  getCollisionIqModelDiagnostic,
+} from "@/lib/modelConfig";
 import { openai } from "@/lib/openai";
 import {
   generatePrimaryText,
@@ -563,6 +566,20 @@ export async function POST(req: Request) {
       retrievalMatchCount,
       refinedWithRetrieval,
       contextBudget: contextBudgetDiagnostics,
+      modelDiagnostics: [
+        getCollisionIqModelDiagnostic({
+          stage: "analysis_primary",
+          provider: "openai",
+          role: "primary",
+          model: collisionIqModels.primary,
+        }),
+        getCollisionIqModelDiagnostic({
+          stage: "analysis_supplement_candidates",
+          provider: "openai",
+          role: collisionIqModels.supplement === collisionIqModels.helper ? "helper" : "supplement",
+          model: collisionIqModels.supplement,
+        }),
+      ],
       toolUsageTrace: [
         ...(contextBudgetDiagnostics?.toolUsageTrace ?? []),
         ...agentTrace.steps.map((step) => ({

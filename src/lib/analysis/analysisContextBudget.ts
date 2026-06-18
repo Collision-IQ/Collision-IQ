@@ -381,6 +381,9 @@ function extractPolicyBudgetDiagnostic(policyText: string, activeEstimateVehicle
 }
 
 function extractPolicyStructuredFacts(text: string) {
+  if (isGarbled(text)) {
+    return "- Policy document exists, but structured facts were not confidently extracted. OCR/image extraction fallback or encoding repair is needed before relying on policy language.";
+  }
   const clean = text.replace(/\s+/g, " ");
   const fields = [
     ["Policy number", clean.match(/\bpolicy\s*(?:number|no\.?|#)\s*[:#]?\s*([A-Z0-9-]{4,})/i)?.[1]],

@@ -358,6 +358,14 @@ run("file ledger records every upload and evidence reconciliation does not mark 
       imageDataUrl: "data:application/pdf;base64,AAA=",
       sizeBytes: 100,
     },
+    {
+      id: "video",
+      filename: "Walkaround video.mov",
+      type: "video/quicktime",
+      text: "",
+      sizeBytes: 1000,
+      classification: "video",
+    },
   ];
   const ledger = buildFileReviewLedger(attachments);
   const categories = resolveEvidenceCompletenessFromLedger({
@@ -367,6 +375,7 @@ run("file ledger records every upload and evidence reconciliation does not mark 
   const calibration = categories.find((item) => item.category === "calibration_record");
   const alignment = categories.find((item) => item.category === "alignment_printout");
   const workAuth = ledger.find((item) => item.fileId === "work-auth");
+  const unsupported = ledger.find((item) => item.fileId === "video");
 
   assert.equal(ledger.length, attachments.length);
   assert.equal(calibration.status, "present_but_not_line_tied");
@@ -375,6 +384,11 @@ run("file ledger records every upload and evidence reconciliation does not mark 
   assert.equal(workAuth.usedAsSupportOnly, true);
   assert.equal(workAuth.usedInDetermination, false);
   assert.match(workAuth.reviewabilityHint, /support context only/i);
+  assert.equal(unsupported.isSupported, false);
+  assert.equal(unsupported.exclusionReason, "UNSUPPORTED_TYPE");
+  assert.equal(unsupported.indexedStatus, "indexed");
+  assert.equal(unsupported.textExtractionStatus, "not_applicable");
+  assert.equal(unsupported.reviewabilityHint, "Upload a PDF, supported image, or extracted text version.");
 });
 
 run("review completeness still warns when a true reviewable file is skipped", () => {

@@ -100,9 +100,35 @@ run("analysis context budget reduces huge policy and generated report before mod
   assert.equal(result.diagnostics.generatedReportArtifactExcluded, true);
   assert.match(result.diagnostics.policyVehicleMismatch, /2024 Jeep Gladiator/);
   assert.match(result.diagnostics.policyVehicleMismatch, /2023 Tesla Model Y/);
+  assert.match(result.diagnostics.policyVehicleMismatch, /Confirm applicability before relying on policy language/);
   assert.equal(result.diagnostics.policyExtractionConfidence, "high");
   assert.ok(result.diagnostics.authoritySearchQueries.some((query) => /CCC MOTOR P-page/i.test(query)));
   assert.ok(result.diagnostics.authoritySearchQueries.some((query) => /AM LKQ CAPA aftermarket warranty/i.test(query)));
   assert.ok(result.diagnostics.toolUsageTrace.some((step) => step.tool === "google_drive_internal_query_generation" && step.status === "success"));
   assert.doesNotMatch(result.attachments.find((item) => item.id === "report").text, /Finding Details Collision IQ Citation Density Finding Details Collision IQ Citation Density/);
+});
+
+run("garbled policy extraction recommends fallback and still avoids whole-policy context", () => {
+  const garbledPolicy = [
+    "Allstate Policy Number PA-123456",
+    "ÃƒÃ‚Ã¢â‚¬Â Ã¯Â¿Â½ ÃƒÃ‚Ã¢â‚¬â„¢ unreadable policy bytes ÃƒÃ‚Ã¢â‚¬Å“",
+    "policy coverage appraisal deductible ".repeat(1200),
+  ].join("\n");
+  const estimateText = "Carrier estimate Vehicle: 2023 Tesla Model Y Line 12 Repl A/M RT Hub assy 1.6 M";
+
+  const result = applyAnalysisContextBudget({
+    attachments: [
+      attachment({ id: "estimate", filename: "Carrier Tesla estimate.pdf", text: estimateText }),
+      attachment({ id: "policy", filename: "Allstate policy corrupted extraction.pdf", text: garbledPolicy, pageCount: 44 }),
+    ],
+    userIntent: "Review policy and Tesla estimate applicability.",
+    provider: "openai",
+    model: "gpt-5.5",
+    contextBudgetLimit: 7000,
+  });
+
+  const policy = result.diagnostics.attachmentClassifications.find((item) => item.id === "policy");
+  assert.equal(result.diagnostics.policyExtractionConfidence, "failed");
+  assert.ok(policy.selectedTextChars < policy.rawTextChars);
+  assert.match(result.attachments.find((item) => item.id === "policy").text, /Policy document exists, but structured facts were not confidently extracted/);
 });
