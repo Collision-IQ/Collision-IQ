@@ -5,6 +5,7 @@ import {
   collisionIqProvider,
   getCollisionIqModelStartupDiagnostics,
 } from "@/lib/modelConfig";
+import { getDatabaseEnvironmentDiagnostics } from "@/lib/database/health";
 
 export type VerificationStatus = "pass" | "fail" | "warn";
 
@@ -152,7 +153,7 @@ async function verifyClerk(): Promise<VerificationResult> {
 }
 
 async function verifyDatabase(): Promise<VerificationResult> {
-  const metadata = { DATABASE_URL: maskDatabaseUrl(process.env.DATABASE_URL) };
+  const metadata = getDatabaseEnvironmentDiagnostics();
   if (!process.env.DATABASE_URL?.trim()) {
     return fail("database", "Database connectivity", "DATABASE_URL is not configured.", metadata);
   }

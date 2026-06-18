@@ -43,6 +43,10 @@ import {
   VIDEO_MAX_BYTES,
 } from "@/lib/uploadSafety/videoSafety";
 import {
+  isDatabaseUnavailableError,
+  sanitizeDatabaseErrorForLog,
+} from "@/lib/database/health";
+import {
   getZipMaxBytes,
   getUploadExtension,
   isZipUpload,
@@ -810,14 +814,26 @@ export async function POST(req: Request) {
       );
     }
 
+    if (isDatabaseUnavailableError(error)) {
+      console.error("[upload] database unavailable", {
+        step: _debugStep,
+        error: sanitizeDatabaseErrorForLog(error),
+      });
+      return NextResponse.json(
+        {
+          error: "Database temporarily unavailable. Please retry shortly.",
+          code: "DATABASE_UNAVAILABLE",
+        },
+        { status: 503 }
+      );
+    }
+
     const _errName = error instanceof Error ? error.name : typeof error;
     const _errMsg = error instanceof Error ? error.message : String(error);
     const _errStack = error instanceof Error ? (error.stack ?? "").slice(0, 800) : "";
     console.error("[upload] fatal", { step: _debugStep, errorName: _errName, errorMessage: _errMsg, stack: _errStack });
     return NextResponse.json({
       error: "SERVER_ERROR",
-      _debug: `[${_debugStep}] ${_errName}: ${_errMsg}`,
-      _stack: _errStack,
     }, { status: 500 });
   }
 }
