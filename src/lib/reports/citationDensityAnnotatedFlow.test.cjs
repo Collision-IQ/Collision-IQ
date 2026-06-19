@@ -530,7 +530,29 @@ run("auto target defaults to the lower estimate PDF in a two-estimate dispute", 
   assert.equal(selections.length, 1);
   assert.equal(selections[0].attachment.id, "carrier");
   assert.equal(selections[0].selectedEstimateTotal, 3200);
+  assert.equal(selections[0].comparisonEstimateTotal, 7600);
   assert.match(selections[0].selectionReason, /lower estimate PDF/i);
+});
+
+run("auto target selects the only estimate PDF independently when no comparison exists", () => {
+  const only = pdfAttachment({
+    id: "only-estimate",
+    filename: "Only Shop Estimate.pdf",
+    text: "Repair facility estimate total $7,600.00 ADAS calibration",
+  });
+
+  const selections = resolveSourceEstimatePdfSelections({
+    attachments: [only],
+    report: reportWithEvidenceRegistry(),
+    targetEstimate: "auto",
+    findings: [finding()],
+  });
+
+  assert.equal(selections.length, 1);
+  assert.equal(selections[0].attachment.id, "only-estimate");
+  assert.equal(selections[0].selectedEstimateTotal, 7600);
+  assert.equal(selections[0].comparisonEstimateTotal, undefined);
+  assert.match(selections[0].selectionReason, /Only one uploaded estimate PDF/i);
 });
 
 run("carrier target avoids appraisal, academy, and higher-cost preliminary PDFs", () => {

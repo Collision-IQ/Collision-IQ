@@ -17,6 +17,9 @@ import {
   OEM_CITATION_DENSITY_ARTIFACT_VERSION,
   OEM_CITATION_DENSITY_REPORT_IDENTITY,
   type AnnotationMode,
+  type ComparisonEstimateText,
+  type OemCitationDensityAuthoritySource,
+  type OemCitationDensityAuthorityTrace,
 } from "@/lib/reports/annotatedCitationDensityEstimate";
 import {
   NO_SOURCE_PDF_ERROR,
@@ -33,6 +36,9 @@ import {
   buildFileReviewLedger,
   resolveEvidenceCompletenessFromLedger,
 } from "@/lib/fileReviewLedger";
+import { retrieveDriveSupport } from "@/lib/ai/driveRetrievalService";
+import { isDriveEnabled } from "@/lib/drive/download";
+import type { DriveRetrievalResult } from "@/lib/ai/contracts/driveRetrievalContract";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -158,6 +164,20 @@ export async function POST(request: Request) {
       }
 
       const estimateRole = normalizeOutputEstimateRole(selection.selectedEstimateRole);
+      const comparisonEstimateTexts = sourceDocuments
+        .filter((document) => document.id !== selection.selectedSourceDocumentId && isAnnotatableEstimatePdf(document))
+        .map((document): ComparisonEstimateText => ({
+          sourceDocumentId: document.id,
+          fileName: document.filename || "Comparison estimate",
+          text: document.text || "",
+          estimateRole: inferComparisonEstimateRole(document.filename, estimateRole),
+        }));
+      const authorityTrace = await buildOemAuthorityTrace({
+        selection,
+        sourceDocument,
+        sourceDocuments,
+        comparisonEstimateTexts,
+      });
       const wrongPrefixFinding = findWrongOemFindingIdentity([]);
       if (wrongPrefixFinding) {
         return NextResponse.json(
@@ -186,15 +206,9 @@ export async function POST(request: Request) {
             .filter((document) => document.id !== selection.selectedSourceDocumentId)
             .map((document) => document.text),
         ].filter(Boolean).join("\n"),
-        comparisonEstimateTexts: sourceDocuments
-          .filter((document) => document.id !== selection.selectedSourceDocumentId && isAnnotatableEstimatePdf(document))
-          .map((document) => ({
-            sourceDocumentId: document.id,
-            fileName: document.filename || "Comparison estimate",
-            text: document.text || "",
-            estimateRole: inferComparisonEstimateRole(document.filename, estimateRole),
-          })),
+        comparisonEstimateTexts,
         findings: [],
+        authorityTrace,
         reportIdentity: OEM_CITATION_DENSITY_REPORT_IDENTITY,
         findingGenerator: buildOemCitationDensityFindings,
         request: {
@@ -222,11 +236,14 @@ export async function POST(request: Request) {
         unresolvedAnchorCount: result.unresolvedAnchorCount,
         warnings: result.warnings,
         annotationMetadata: result.annotationMetadata,
-        debugTrace: result.debugTrace,
+        debugTrace: withOemSelectionDebug(result.debugTrace, selection),
         debugCounts: buildOemAnnotationDebugCounts(result.debugTrace),
         annotationMetadataUrl: `/api/reports/oem-citation-density/annotated-estimate?metadata=1&artifactId=${encodeURIComponent(artifactId)}`,
         selectedSourceLabel: selection.selectedSourceLabel,
         selectedEstimateTotal: selection.selectedEstimateTotal,
+        comparisonEstimateTotal: selection.comparisonEstimateTotal,
+        selectedEstimateForOemDensity: selection.selectedSourceLabel,
+        selectedEstimateReason: selection.selectionReason,
         selectionReason: selection.selectionReason,
         selectedDocumentType: selection.selectedDocumentType,
         selectedDocumentConfidence: selection.selectedDocumentConfidence,
@@ -267,6 +284,9 @@ export async function POST(request: Request) {
       selectedSourceLabel: primaryOutput?.selectedSourceLabel,
       selectedEstimateRole: primaryOutput?.estimateRole,
       selectedEstimateTotal: primaryOutput?.selectedEstimateTotal,
+      comparisonEstimateTotal: primaryOutput?.comparisonEstimateTotal,
+      selectedEstimateForOemDensity: primaryOutput?.selectedEstimateForOemDensity,
+      selectedEstimateReason: primaryOutput?.selectedEstimateReason,
       targetEstimate,
       selectionReason: outputs.map((output) => output.selectionReason).join(" "),
       routeName: "oem-citation-density",
@@ -327,6 +347,7 @@ function resolveOemSourceSelections(params: {
           selectedSourceLabel: selected.filename || "Selected estimate",
           selectedEstimateRole: params.targetEstimate === "carrier" || params.targetEstimate === "shop" ? params.targetEstimate : "selected",
           selectedEstimateTotal: null,
+          comparisonEstimateTotal: null,
           targetEstimate: params.targetEstimate === "all" ? "both" : params.targetEstimate,
           selectionReason: "The client supplied a source document ID.",
           selectedDocumentType: "estimate",
@@ -345,6 +366,7 @@ function resolveOemSourceSelections(params: {
         selectedSourceLabel: document.filename || "Uploaded estimate",
         selectedEstimateRole: inferEstimateRole(document.filename),
         selectedEstimateTotal: null,
+        comparisonEstimateTotal: null,
         targetEstimate: "both" as const,
         selectionReason: "OEM Citation Density targetEstimate=all reviews every uploaded estimate PDF independently.",
         selectedDocumentType: "estimate" as const,
@@ -361,6 +383,189 @@ function resolveOemSourceSelections(params: {
   });
 }
 
+async function buildOemAuthorityTrace(params: {
+  selection: SourceEstimatePdfSelection;
+  sourceDocument: Awaited<ReturnType<typeof getUploadedAttachments>>[number];
+  sourceDocuments: Awaited<ReturnType<typeof getUploadedAttachments>>;
+  comparisonEstimateTexts: ComparisonEstimateText[];
+}): Promise<OemCitationDensityAuthorityTrace> {
+  const driveSearchAvailable = isDriveEnabled();
+  const estimateText = [
+    params.sourceDocument.text ?? "",
+    ...params.comparisonEstimateTexts.map((item) => item.text),
+  ].join("\n\n");
+  const vehicle = extractVehicleSummary([
+    params.sourceDocument.filename ?? "",
+    params.sourceDocument.text ?? "",
+    ...params.sourceDocuments.map((document) => `${document.filename ?? ""}\n${document.text ?? ""}`),
+  ].join("\n"));
+  const base = buildBaseOemAuthorityTrace({
+    driveSearchAvailable,
+    vehicle,
+    blockedReason: driveSearchAvailable
+      ? null
+      : "Google Drive/internal authority retrieval is disabled or not configured for this server.",
+  });
+
+  if (!driveSearchAvailable) {
+    return base;
+  }
+
+  try {
+    const response = await retrieveDriveSupport({
+      taskType: "oem_procedure_insight",
+      userQuery: [
+        "OEM Citation Density authority retrieval for an estimate PDF.",
+        vehicle ? `Vehicle: ${vehicle}.` : "",
+        `Selected estimate: ${params.selection.selectedSourceLabel}.`,
+        "Find OEM procedures, OEM position statements, ADAS procedures, MOTOR/P-page support, SCRS/DEG-style estimating support, policy, and legal support relevant to the estimate rows.",
+      ].filter(Boolean).join(" "),
+      estimateText,
+      firstPassAnswer: "OEM Citation Density export must retrieve authority before labeling findings citation-ready.",
+      maxResults: 8,
+      maxExcerptChars: 700,
+    });
+
+    if (!response || response.results.length === 0) {
+      return {
+        ...base,
+        googleDriveOrInternalSearchRan: true,
+        driveSearchAttempted: true,
+        authorityTraceBlockedReason: "Google Drive/internal authority retrieval returned no matching authority documents.",
+        skippedReason: "Google Drive/internal authority retrieval returned no matching authority documents.",
+      };
+    }
+
+    const authoritySources = response.results.map(mapDriveResultToAuthoritySource);
+    const reviewedDocuments = uniqueStrings(response.results.map((result) => result.filename).filter(Boolean));
+    const folders = uniqueStrings(response.results.map((result) => result.metadata.source).filter(Boolean));
+    const contextText = buildAuthorityContextText(response.results);
+
+    return {
+      ...base,
+      authorityTraceCompleted: true,
+      authorityTraceBlockedReason: null,
+      authorityCoverageStatus: "partial",
+      googleDriveOrInternalSearchRan: true,
+      skippedReason: undefined,
+      driveSearchAttempted: true,
+      driveSearchAvailable: true,
+      driveMakeModelFolderMatched: response.results.some((result) =>
+        result.metadata.vehicleMatchLevel === "exact_vehicle_match" ||
+        result.metadata.vehicleMatchLevel === "manufacturer_match"
+      ),
+      driveMatchedFolders: folders,
+      driveDocumentsReviewed: reviewedDocuments,
+      oemSourcesReviewed: uniqueStrings(response.results
+        .filter((result) => result.sourceBucket === "oem_procedures" || result.sourceBucket === "oem_position_statements")
+        .map((result) => result.filename)),
+      adasSourcesReviewed: uniqueStrings(response.results
+        .filter((result) => result.documentClass === "adas_document" || /adas|calibration|scan/i.test(`${result.filename} ${result.excerpt.excerpt}`))
+        .map((result) => result.filename)),
+      motorPPageSourcesReviewed: uniqueStrings(response.results
+        .filter((result) => /motor|p-?page|database|estimating/i.test(`${result.filename} ${result.excerpt.excerpt}`))
+        .map((result) => result.filename)),
+      policyLegalSourcesReviewed: uniqueStrings(response.results
+        .filter((result) => result.sourceBucket === "pa_law" || result.sourceBucket === "insurer_guidelines")
+        .map((result) => result.filename)),
+      jurisdictionSourcesReviewed: uniqueStrings(response.results
+        .filter((result) => result.sourceBucket === "pa_law")
+        .map((result) => result.filename)),
+      authoritySources,
+      authorityContextText: contextText,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ...base,
+      googleDriveOrInternalSearchRan: true,
+      driveSearchAttempted: true,
+      authorityTraceBlockedReason: `Google Drive/internal authority retrieval failed: ${message}`,
+      skippedReason: `Google Drive/internal authority retrieval failed: ${message}`,
+    };
+  }
+}
+
+function buildBaseOemAuthorityTrace(params: {
+  driveSearchAvailable: boolean;
+  vehicle: string | null;
+  blockedReason: string | null;
+}): OemCitationDensityAuthorityTrace {
+  return {
+    authorityTraceStarted: true,
+    authorityTraceCompleted: false,
+    authorityTraceBlockedReason: params.blockedReason,
+    authorityCoverageStatus: "incomplete",
+    googleDriveOrInternalSearchRan: false,
+    skippedReason: params.blockedReason ?? undefined,
+    sandPolishSupportFound: false,
+    driveSearchAttempted: params.driveSearchAvailable,
+    driveSearchAvailable: params.driveSearchAvailable,
+    driveMakeModelFolderMatched: false,
+    driveMatchedFolders: [],
+    driveDocumentsReviewed: [],
+    onlineSearchAttempted: false,
+    onlineSourcesReviewed: [],
+    jurisdictionResolved: inferJurisdiction(params.vehicle),
+    jurisdictionSourcesReviewed: [],
+    oemSourcesReviewed: [],
+    adasSourcesReviewed: [],
+    motorPPageSourcesReviewed: [],
+    scrsSourcesReviewed: [],
+    policyLegalSourcesReviewed: [],
+    authoritySources: [],
+  };
+}
+
+function mapDriveResultToAuthoritySource(result: DriveRetrievalResult): OemCitationDensityAuthoritySource {
+  const sourceType = (() => {
+    if (result.documentClass === "oem_procedure" || result.sourceBucket === "oem_procedures") return "oem_procedure";
+    if (result.documentClass === "oem_position_statement" || result.sourceBucket === "oem_position_statements") return "oem_position_statement";
+    if (result.sourceBucket === "pa_law") return "jurisdictional_law";
+    if (result.sourceBucket === "insurer_guidelines") return "policy";
+    if (result.documentClass === "adas_document") return "oem_procedure";
+    if (/motor|p-?page|database|estimating/i.test(`${result.filename} ${result.excerpt.excerpt}`)) return "motor_database";
+    return "uploaded_support";
+  })();
+  const isOemAuthority = sourceType === "oem_procedure" || sourceType === "oem_position_statement";
+  return {
+    title: result.filename,
+    sourceType,
+    evidenceTier: sourceType === "oem_procedure" ? 1 : sourceType === "oem_position_statement" ? 2 : sourceType === "motor_database" ? 3 : 4,
+    verified: false,
+    note: [
+      isOemAuthority ? "Retrieved authority source reviewed; exact row-level applicability still needs human or matcher verification." : "",
+      result.matchReason,
+      result.metadata.pageHint ? `Page: ${result.metadata.pageHint}.` : "",
+      result.metadata.vehicleApplicabilityReason ?? "",
+    ].filter(Boolean).join(" "),
+  };
+}
+
+function buildAuthorityContextText(results: DriveRetrievalResult[]) {
+  return results
+    .map((result) => [
+      `Authority document: ${result.filename}`,
+      `Class: ${result.documentClass}`,
+      `Bucket: ${result.sourceBucket}`,
+      result.metadata.pageHint ? `Page: ${result.metadata.pageHint}` : "",
+      result.excerpt.excerpt,
+    ].filter(Boolean).join("\n"))
+    .join("\n\n");
+}
+
+function extractVehicleSummary(text: string) {
+  return text.match(/\b((?:19|20)\d{2}\s+(?:Acura|Audi|BMW|Buick|Cadillac|Chevrolet|Chevy|Chrysler|Dodge|Ford|Genesis|GMC|Honda|Hyundai|Infiniti|Jeep|Kia|Lexus|Lincoln|Mazda|Mercedes|Mini|Nissan|Ram|Subaru|Tesla|Toyota|Volkswagen|Volvo)\s+[A-Z0-9][A-Za-z0-9-]*(?:\s+[A-Z0-9][A-Za-z0-9-]*){0,3})\b/i)?.[1]?.trim() ?? null;
+}
+
+function inferJurisdiction(vehicle: string | null) {
+  return vehicle ? null : null;
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))];
+}
+
 function buildOemAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof buildAnnotatedCitationDensityEstimatePdf>>["debugTrace"] | undefined) {
   if (!debugTrace) return undefined;
   return {
@@ -371,7 +576,11 @@ function buildOemAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof bui
     citationDensityArtifactVersion: debugTrace.citationDensityArtifactVersion,
     uploadedFileNames: debugTrace.uploadedFileNames,
     reviewedEstimateFileNames: debugTrace.reviewedEstimateFileNames ?? (debugTrace.selectedEstimateFileName ? [debugTrace.selectedEstimateFileName] : []),
+    selectedEstimateForOemDensity: debugTrace.selectedEstimateForOemDensity,
+    selectedEstimateReason: debugTrace.selectedEstimateReason,
     selectedEstimateFileName: debugTrace.selectedEstimateFileName,
+    selectedEstimateTotal: debugTrace.selectedEstimateTotal,
+    comparisonEstimateTotal: debugTrace.comparisonEstimateTotal,
     selectedDocumentType: debugTrace.selectedDocumentType,
     selectedDocumentConfidence: debugTrace.selectedDocumentConfidence,
     actualSourcePdfName: debugTrace.actualSourcePdfName,
@@ -443,7 +652,18 @@ function coerceString(value: unknown): string {
 
 function coerceTargetEstimate(value: unknown): OemCitationDensityTargetEstimate {
   const target = coerceString(value);
-  return VALID_TARGET_ESTIMATES.has(target) ? target as OemCitationDensityTargetEstimate : "all";
+  return VALID_TARGET_ESTIMATES.has(target) ? target as OemCitationDensityTargetEstimate : "auto";
+}
+
+function withOemSelectionDebug(
+  debugTrace: Awaited<ReturnType<typeof buildAnnotatedCitationDensityEstimatePdf>>["debugTrace"] | undefined,
+  selection: SourceEstimatePdfSelection
+) {
+  if (!debugTrace) return debugTrace;
+  debugTrace.selectedEstimateForOemDensity = selection.selectedSourceLabel;
+  debugTrace.selectedEstimateReason = selection.selectionReason;
+  debugTrace.comparisonEstimateTotal = selection.comparisonEstimateTotal ?? null;
+  return debugTrace;
 }
 
 function coerceStringArray(value: unknown): string[] | undefined {

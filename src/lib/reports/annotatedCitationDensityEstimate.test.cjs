@@ -464,7 +464,7 @@ function loadAnnotatedEstimateRouteWithMocks({ report, attachments, findings }) 
   }
 }
 
-function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
+function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnabled = false, driveRetrievalResponse = null, driveRetrievalCalls }) {
   const originalLoad = Module._load;
   const routePath = path.join(process.cwd(), "src", "app", "api", "reports", "oem-citation-density", "annotated-estimate", "route.ts");
   delete require.cache[require.resolve(routePath)];
@@ -490,6 +490,19 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     if (request === "@/lib/uploadedAttachmentStore") {
       return {
         getUploadedAttachments: async (ids) => ids.map((id) => attachments.find((attachment) => attachment.id === id)).filter(Boolean),
+      };
+    }
+    if (request === "@/lib/drive/download") {
+      return {
+        isDriveEnabled: () => driveEnabled,
+      };
+    }
+    if (request === "@/lib/ai/driveRetrievalService") {
+      return {
+        retrieveDriveSupport: async (params) => {
+          if (driveRetrievalCalls) driveRetrievalCalls.push(params);
+          return driveRetrievalResponse;
+        },
       };
     }
     return originalLoad.call(this, request, parent, isMain);
@@ -1520,6 +1533,80 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     assert.doesNotMatch(detailText, /OEM requires/i);
   });
 
+  await run("OEM Citation Density marks findings authority-trace incomplete when retrieval is unavailable", async () => {
+    const sourcePdfBytes = await createRam21975SourcePdf();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceDocumentId: "oem-carrier-no-authority",
+      sourcePdfName: "SOR-1 21975.pdf",
+      uploadedFileNames: ["SOR-1 21975.pdf"],
+      sourceText: "Carrier estimate evidence only. No OEM procedure attached.",
+      findings: [],
+      reportIdentity: OEM_CITATION_DENSITY_REPORT_IDENTITY,
+      findingGenerator: buildOemCitationDensityFindings,
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+
+    assert.ok(result.annotationMetadata.some((item) => item.label === "AUTHORITY TRACE INCOMPLETE"));
+    assert.equal(result.annotationMetadata.some((item) => item.label === "VERIFIED OEM"), false);
+    assert.equal(result.debugTrace.authoritySearchTrace.authorityCoverageStatus, "incomplete");
+    assert.equal(result.debugTrace.authorityBackedFindingCount, 0);
+  });
+
+  await run("OEM Citation Density labels broad position support without marking every line VERIFIED OEM", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Carrier estimate with broad OEM position support", { x: 42, y: 742, size: 10, font });
+    drawCccEstimateRow(page, font, 5, "#", "Repl", "A/M CAPA Bumper chrome, w/prk snsr", "1.0", "$487.50", 712);
+    const sourcePdfBytes = await doc.save();
+
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceDocumentId: "carrier-position-only",
+      sourcePdfName: "Carrier position-only estimate.pdf",
+      sourceText: "Uploaded OEM position statement: use OEM repair procedures and position statements when required.",
+      findings: [],
+      reportIdentity: OEM_CITATION_DENSITY_REPORT_IDENTITY,
+      authorityTrace: {
+        authorityTraceStarted: true,
+        authorityTraceCompleted: true,
+        authorityTraceBlockedReason: null,
+        authorityCoverageStatus: "partial",
+        googleDriveOrInternalSearchRan: true,
+        sandPolishSupportFound: false,
+        driveSearchAttempted: true,
+        driveSearchAvailable: true,
+        driveMakeModelFolderMatched: true,
+        driveMatchedFolders: ["OEM position statements"],
+        driveDocumentsReviewed: ["OEM position statement.pdf"],
+        onlineSearchAttempted: false,
+        onlineSourcesReviewed: [],
+        jurisdictionResolved: null,
+        jurisdictionSourcesReviewed: [],
+        oemSourcesReviewed: ["OEM position statement.pdf"],
+        adasSourcesReviewed: [],
+        motorPPageSourcesReviewed: [],
+        scrsSourcesReviewed: [],
+        policyLegalSourcesReviewed: [],
+        authoritySources: [{
+          title: "OEM position statement.pdf",
+          sourceType: "oem_position_statement",
+          evidenceTier: 2,
+          verified: true,
+        }],
+      },
+      findingGenerator: buildOemCitationDensityFindings,
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+
+    const labels = result.annotationMetadata.map((item) => item.label);
+    assert.ok(labels.includes("OEM POSITION REFERENCED"));
+    assert.equal(labels.includes("VERIFIED OEM"), false);
+    assert.ok(result.debugTrace.oemPositionStatementSourceCount >= 1);
+    assert.equal(result.debugTrace.oemProcedureSourceCount, 0);
+  });
+
   await run("OEM Citation Density excludes abbreviation legend and disclaimer pages as primary anchors", async () => {
     const doc = await PDFDocument.create();
     const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -1812,6 +1899,141 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments }) {
     const outputBytes = new Uint8Array(await pdfResponse.arrayBuffer());
     const outputPages = await extractPdfPageTexts(outputBytes);
     assert.match(outputPages.join(" "), /OEM Citation Density Finding Details/);
+  });
+
+  await run("OEM Citation Density defaults to the lower estimate and exposes OEM selection diagnostics", async () => {
+    const carrierPdfBytes = await createRam21975SourcePdf();
+    const shopPdfBytes = await createShop21975SourcePdf();
+    const carrierDataUrl = `data:application/pdf;base64,${Buffer.from(carrierPdfBytes).toString("base64")}`;
+    const shopDataUrl = `data:application/pdf;base64,${Buffer.from(shopPdfBytes).toString("base64")}`;
+    const attachments = [
+      {
+        id: "shop-oem-21975",
+        filename: "Shop 21975.pdf",
+        type: "application/pdf",
+        text: "Shop estimate repair facility grand total $9,875.00 OEM-style repair plan",
+        imageDataUrl: shopDataUrl,
+        pageCount: 1,
+      },
+      {
+        id: "carrier-oem-21975",
+        filename: "SOR-1 21975.pdf",
+        type: "application/pdf",
+        text: "Carrier estimate GEICO estimate total $4,097.17 net total $4,097.17 A/M CAPA LKQ",
+        imageDataUrl: carrierDataUrl,
+        pageCount: 12,
+      },
+    ];
+    const report = {
+      id: "report-oem-lower-selection",
+      artifactIds: attachments.map((attachment) => attachment.id),
+      report: {
+        narrative: "OEM Citation Density lower-estimate fixture",
+        evidenceRegistry: [],
+      },
+    };
+    const route = loadOemCitationDensityRouteWithMocks({ report, attachments });
+    const response = await route.POST(new Request("http://localhost/api/reports/oem-citation-density/annotated-estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        caseId: "report-oem-lower-selection",
+        annotationMode: "both",
+        includeLegend: false,
+        redactSensitive: true,
+      }),
+    }));
+    assert.equal(response.status, 200);
+    const json = await response.json();
+
+    assert.equal(json.ok, true);
+    assert.equal(json.targetEstimate, "auto");
+    assert.equal(json.outputs.length, 1);
+    assert.equal(json.selectedSourceDocumentId, "carrier-oem-21975");
+    assert.equal(json.selectedSourceLabel, "SOR-1 21975.pdf");
+    assert.equal(json.selectedEstimateForOemDensity, "SOR-1 21975.pdf");
+    assert.match(json.selectedEstimateReason, /lower estimate PDF/i);
+    assert.equal(json.selectedEstimateTotal, 4097.17);
+    assert.equal(json.comparisonEstimateTotal, 9875);
+    assert.equal(json.debugCounts.selectedEstimateForOemDensity, "SOR-1 21975.pdf");
+    assert.match(json.debugCounts.selectedEstimateReason, /lower estimate PDF/i);
+    assert.equal(json.debugCounts.selectedEstimateTotal, 4097.17);
+    assert.equal(json.debugCounts.comparisonEstimateTotal, 9875);
+    assert.equal(json.debugCounts.actualSourcePdfName, "SOR-1 21975.pdf");
+    assert.notEqual(json.debugCounts.actualSourcePdfByteLength, shopPdfBytes.byteLength);
+    assert.equal(json.annotationMetadata.every((item) => item.sourceDocumentId === "carrier-oem-21975"), true);
+  });
+
+  await run("OEM Citation Density route attempts Drive authority retrieval and exposes reviewed sources", async () => {
+    const carrierPdfBytes = await createRam21975SourcePdf();
+    const carrierDataUrl = `data:application/pdf;base64,${Buffer.from(carrierPdfBytes).toString("base64")}`;
+    const attachments = [{
+      id: "carrier-oem-drive",
+      filename: "2023 Ram SOR-1.pdf",
+      type: "application/pdf",
+      text: "2023 Ram 1500 carrier estimate A/M CAPA bumper blind spot radar calibration total $4,097.17",
+      imageDataUrl: carrierDataUrl,
+      pageCount: 12,
+    }];
+    const report = {
+      id: "report-oem-drive",
+      artifactIds: attachments.map((attachment) => attachment.id),
+      report: {
+        narrative: "OEM Citation Density Drive fixture",
+        evidenceRegistry: [],
+      },
+    };
+    const driveRetrievalCalls = [];
+    const route = loadOemCitationDensityRouteWithMocks({
+      report,
+      attachments,
+      driveEnabled: true,
+      driveRetrievalCalls,
+      driveRetrievalResponse: {
+        request: {},
+        usage: { topMatchesOnly: true, excerptsOnly: true, fullDocumentDumpAllowed: false },
+        results: [{
+          id: "drive-result-1",
+          filename: "Ram Blind Spot Calibration Procedure.pdf",
+          documentClass: "oem_procedure",
+          sourceBucket: "oem_procedures",
+          relevanceScore: 0.91,
+          confidence: "high",
+          matchReason: "Matched blind spot radar calibration query.",
+          excerpt: { excerpt: "OEM procedure excerpt for blind spot radar calibration.", charCount: 58, pageLabel: "12" },
+          metadata: {
+            fileId: "drive-file-1",
+            documentClass: "oem_procedure",
+            sourceBucket: "oem_procedures",
+            sourceLane: "oem_lane",
+            source: "OEM Procedures/Ram",
+            pageHint: "12",
+            vehicleMatchLevel: "manufacturer_match",
+          },
+          relevanceReasons: [],
+        }],
+      },
+    });
+    const response = await route.POST(new Request("http://localhost/api/reports/oem-citation-density/annotated-estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        caseId: "report-oem-drive",
+        sourceDocumentId: "carrier-oem-drive",
+        annotationMode: "both",
+        includeLegend: false,
+        redactSensitive: true,
+      }),
+    }));
+    assert.equal(response.status, 200);
+    const json = await response.json();
+
+    assert.equal(driveRetrievalCalls.length, 1);
+    assert.equal(json.debugTrace.authoritySearchTrace.googleDriveOrInternalSearchRan, true);
+    assert.equal(json.debugTrace.authoritySearchTrace.authorityCoverageStatus, "partial");
+    assert.deepEqual(json.debugTrace.authoritySearchTrace.driveDocumentsReviewed, ["Ram Blind Spot Calibration Procedure.pdf"]);
+    assert.deepEqual(json.debugTrace.authoritySearchTrace.driveMatchedFolders, ["OEM Procedures/Ram"]);
+    assert.equal(json.debugCounts.googleDriveInternalAuthoritySearch.driveSearchAttempted, true);
   });
 
   await run("optional real SOR-1 local fixture extracts selectable text and row anchors", async () => {

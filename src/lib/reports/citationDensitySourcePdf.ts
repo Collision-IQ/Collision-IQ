@@ -31,6 +31,7 @@ export type SourceEstimatePdfSelection = {
   selectedSourceLabel: string;
   selectedEstimateRole: "carrier" | "shop" | "uploaded" | "selected" | "unknown";
   selectedEstimateTotal: number | null;
+  comparisonEstimateTotal?: number | null;
   targetEstimate: CitationDensityTargetEstimate;
   selectionReason: string;
   selectedDocumentType: CitationDensityDocumentClassification["detectedDocumentType"];
@@ -246,12 +247,14 @@ function resolveLowerEstimatePdfSelection(params: {
 
   const lowest = candidates[0];
   if (!lowest) return null;
+  const comparison = candidates.find((candidate) => candidate.attachment.id !== lowest.attachment.id);
 
   return buildSelectionResult({
     attachment: lowest.attachment,
     targetEstimate: "auto",
     selectedEstimateRole: lowest.role === "unknown" ? "selected" : lowest.role,
     selectedEstimateTotal: lowest.total,
+    comparisonEstimateTotal: comparison?.total ?? null,
     selectionReason: `Auto-selected the lower estimate PDF as the Citation Density annotation base (total ${lowest.total}).`,
     selectionDiagnostics,
   });
@@ -306,6 +309,7 @@ function buildSelectionResult(params: {
   targetEstimate: CitationDensityTargetEstimate;
   selectedEstimateRole: SourceEstimatePdfSelection["selectedEstimateRole"];
   selectedEstimateTotal?: number | null;
+  comparisonEstimateTotal?: number | null;
   selectionReason: string;
   selectionDiagnostics?: SourcePdfCandidateDiagnostics;
 }): SourceEstimatePdfSelection {
@@ -316,6 +320,7 @@ function buildSelectionResult(params: {
     selectedSourceLabel: params.attachment.filename || "Uploaded estimate",
     selectedEstimateRole: params.selectedEstimateRole,
     selectedEstimateTotal: params.selectedEstimateTotal ?? extractEstimateTotal(params.attachment),
+    comparisonEstimateTotal: params.comparisonEstimateTotal,
     targetEstimate: params.targetEstimate,
     selectionReason: params.selectionReason,
     selectedDocumentType: classification.detectedDocumentType,

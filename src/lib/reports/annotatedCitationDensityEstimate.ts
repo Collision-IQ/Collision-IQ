@@ -117,6 +117,7 @@ export type AnnotatedEstimateFindingGeneratorContext = {
   uploadedFileNames: string[];
   sourceText?: string | null;
   comparisonEstimateTexts: ComparisonEstimateText[];
+  authorityTrace?: OemCitationDensityAuthorityTrace;
 };
 
 export type AnnotatedEstimateResult = {
@@ -138,7 +139,10 @@ export type CitationDensityDebugTrace = {
   artifactId?: string;
   sourcePdfName?: string;
   selectedEstimateFileName?: string;
+  selectedEstimateForOemDensity?: string;
+  selectedEstimateReason?: string;
   selectedEstimateTotal?: number | null;
+  comparisonEstimateTotal?: number | null;
   uploadedFileNames?: string[];
   actualSourcePdfName?: string;
   actualSourcePdfByteLength: number;
@@ -212,11 +216,7 @@ export type CitationDensityDebugTrace = {
     activeEstimateVehicle?: string | null;
     warning: string;
   } | null;
-  authoritySearchTrace?: {
-    googleDriveOrInternalSearchRan: boolean;
-    skippedReason?: string;
-    sandPolishSupportFound?: boolean;
-  };
+  authoritySearchTrace?: OemCitationDensityAuthorityTrace;
   reportType?: "citation-density" | "oem-citation-density";
   artifactVersion?: string;
   reviewedEstimateFileNames?: string[];
@@ -656,6 +656,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   request?: AnnotatedEstimateRequest;
   reportIdentity?: AnnotatedEstimateReportIdentity;
   deltaDiagnostics?: CitationDensityDeltaDiagnostics;
+  authorityTrace?: OemCitationDensityAuthorityTrace;
   findingGenerator?: (context: AnnotatedEstimateFindingGeneratorContext) => AnnotatedEstimateGeneratedFindings;
 }): Promise<AnnotatedEstimateResult> {
   const request = params.request ?? {};
@@ -786,11 +787,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     missingRequiredDetectors: [],
     policyExtractionConfidence: "not_run",
     policyVehicleMismatch: null,
-    authoritySearchTrace: {
-      googleDriveOrInternalSearchRan: false,
-      skippedReason: "No connected internal authority-search context is available inside annotated PDF generation.",
-      sandPolishSupportFound: false,
-    },
+    authoritySearchTrace: params.authorityTrace ?? buildDefaultOemAuthorityTrace(),
     fallbackMatchedFindings: [],
     droppedFindings: [],
     rendererDrops: [],
@@ -852,6 +849,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       uploadedFileNames: params.uploadedFileNames ?? [],
       sourceText: params.sourceText,
       comparisonEstimateTexts: params.comparisonEstimateTexts ?? [],
+      authorityTrace: params.authorityTrace,
     });
     const generatedFindings = generated.findings
       .filter((finding) => !isGeneratedFindingCoveredByExisting(finding, selectedFindings));
@@ -1274,6 +1272,32 @@ export type OemCitationDensityAuthoritySource = {
   note?: string;
 };
 
+export type OemCitationDensityAuthorityTrace = {
+  authorityTraceStarted: boolean;
+  authorityTraceCompleted: boolean;
+  authorityTraceBlockedReason?: string | null;
+  authorityCoverageStatus: "complete" | "partial" | "incomplete";
+  googleDriveOrInternalSearchRan: boolean;
+  skippedReason?: string;
+  sandPolishSupportFound?: boolean;
+  driveSearchAttempted: boolean;
+  driveSearchAvailable: boolean;
+  driveMakeModelFolderMatched: boolean;
+  driveMatchedFolders: string[];
+  driveDocumentsReviewed: string[];
+  onlineSearchAttempted: boolean;
+  onlineSourcesReviewed: string[];
+  jurisdictionResolved: string | null;
+  jurisdictionSourcesReviewed: string[];
+  oemSourcesReviewed: string[];
+  adasSourcesReviewed: string[];
+  motorPPageSourcesReviewed: string[];
+  scrsSourcesReviewed: string[];
+  policyLegalSourcesReviewed: string[];
+  authoritySources: OemCitationDensityAuthoritySource[];
+  authorityContextText?: string;
+};
+
 export type OemCitationDensityFindingDebug = {
   findingId: string;
   title: string;
@@ -1284,6 +1308,34 @@ export type OemCitationDensityFindingDebug = {
   nextAction: string;
   confidence: "low" | "medium" | "high";
 };
+
+function buildDefaultOemAuthorityTrace(): OemCitationDensityAuthorityTrace {
+  const skippedReason = "No connected internal authority-search context was provided to annotated PDF generation.";
+  return {
+    authorityTraceStarted: false,
+    authorityTraceCompleted: false,
+    authorityTraceBlockedReason: skippedReason,
+    authorityCoverageStatus: "incomplete",
+    googleDriveOrInternalSearchRan: false,
+    skippedReason,
+    sandPolishSupportFound: false,
+    driveSearchAttempted: false,
+    driveSearchAvailable: false,
+    driveMakeModelFolderMatched: false,
+    driveMatchedFolders: [],
+    driveDocumentsReviewed: [],
+    onlineSearchAttempted: false,
+    onlineSourcesReviewed: [],
+    jurisdictionResolved: null,
+    jurisdictionSourcesReviewed: [],
+    oemSourcesReviewed: [],
+    adasSourcesReviewed: [],
+    motorPPageSourcesReviewed: [],
+    scrsSourcesReviewed: [],
+    policyLegalSourcesReviewed: [],
+    authoritySources: [],
+  };
+}
 
 function emptyPartSourceFindingResult(): PartSourceFindingResult {
   return {
@@ -1456,7 +1508,8 @@ export function buildRequiredEstimatorDeltaFindings(
       rejectedAnchors: rejectedAnchors.slice(0, 40),
       rejectedBoilerplateCount: rejectedAnchors.length,
       authoritySearchTrace: {
-        googleDriveOrInternalSearchRan: false,
+        ...buildDefaultOemAuthorityTrace(),
+        authorityTraceBlockedReason: "No Google Drive/internal repair-procedure connector is available to this server-side PDF export path.",
         skippedReason: "No Google Drive/internal repair-procedure connector is available to this server-side PDF export path.",
         sandPolishSupportFound: false,
       },
@@ -1531,6 +1584,7 @@ export function buildOemCitationDensityFindings(
   context: AnnotatedEstimateFindingGeneratorContext
 ): AnnotatedEstimateGeneratedFindings {
   const authoritySources = detectOemCitationDensityAuthoritySources(context);
+  const authorityTrace = context.authorityTrace ?? buildDefaultOemAuthorityTrace();
   const acceptedFindings: CitationDensityFinding[] = [];
   const droppedReasons: CitationDensityDebugTrace["partSourceDroppedReasons"] = [];
   const seenAnchorIds = new Set<string>();
@@ -1603,6 +1657,7 @@ export function buildOemCitationDensityFindings(
       reportType: "oem-citation-density",
       artifactVersion: OEM_CITATION_DENSITY_ARTIFACT_VERSION,
       reviewedEstimateFileNames: [context.sourcePdfName],
+      authoritySearchTrace: authorityTrace,
       authoritySourceCount: authoritySources.filter((source) => source.sourceType !== "estimate_evidence").length,
       oemProcedureSourceCount: authoritySources.filter((source) => source.sourceType === "oem_procedure").length,
       oemPositionStatementSourceCount: authoritySources.filter((source) => source.sourceType === "oem_position_statement").length,
@@ -2050,12 +2105,18 @@ function buildOemCitationDensityFinding(params: {
   authoritySources: OemCitationDensityAuthoritySource[];
 }): CitationDensityFinding {
   const { context, anchor, rowText, family } = params;
-  const bestAuthoritySource = pickBestOemAuthoritySource(params.authoritySources, family);
-  const authority = bestAuthoritySource && bestAuthoritySource.sourceType !== "estimate_evidence"
+  const authorityTrace = context.authorityTrace ?? buildDefaultOemAuthorityTrace();
+  const authorityTraceIncomplete = authorityTrace.authorityCoverageStatus === "incomplete" || !authorityTrace.authorityTraceCompleted;
+  const bestAuthoritySource = authorityTraceIncomplete
+    ? undefined
+    : pickBestOemAuthoritySource(params.authoritySources, family);
+  const authority = authorityTraceIncomplete
+    ? buildAuthorityTraceIncompleteAuthority(family, authorityTrace)
+    : bestAuthoritySource && bestAuthoritySource.sourceType !== "estimate_evidence"
     ? mapOemAuthoritySourceToCitationAuthority(bestAuthoritySource, family)
     : buildEstimateEvidenceAuthority(family);
-  const verifiedAuthorityCount = authority.type !== "estimate_evidence" && authority.status === "verified" ? 1 : 0;
-  const label = resolveOemFindingLabel(family, authority, verifiedAuthorityCount);
+  const verifiedAuthorityCount = !authorityTraceIncomplete && authority.type !== "estimate_evidence" && authority.status === "verified" ? 1 : 0;
+  const label = authorityTraceIncomplete ? "AUTHORITY TRACE INCOMPLETE" : resolveOemFindingLabel(family, authority, verifiedAuthorityCount);
   const evidence = {
     lineNumber: anchor.lineNumber,
     description: rowText,
@@ -2097,9 +2158,15 @@ function buildOemCitationDensityFinding(params: {
       `Issue summary: ${family.issueSummary}`,
       `OEM compliance concern: ${family.oemComplianceConcern}`,
       `Evidence tier: ${getOemAuthorityEvidenceTierLabel(authority)}.`,
+      authorityTraceIncomplete
+        ? `Authority trace incomplete: ${authorityTrace.authorityTraceBlockedReason ?? authorityTrace.skippedReason ?? "required OEM authority retrieval did not complete"}.`
+        : "",
     ].join(" "),
     missingProofSummary: [
       `Required documentation: ${family.requiredDocumentation.join(", ")}.`,
+      authorityTraceIncomplete
+        ? "Authority retrieval did not complete, so this finding is not citation-ready and no OEM support was verified."
+        : "",
       verifiedAuthorityCount
         ? "Authority support is present, but completion/estimate proof still needs to be tied to the exact row."
         : "Authority source not attached; use this as research/documentation needed, not verified OEM support.",
@@ -2109,9 +2176,12 @@ function buildOemCitationDensityFinding(params: {
     limitations: [
       "OEM Citation Density finding generated from an extracted estimate row.",
       "Do not say OEM requires unless an OEM procedure or position statement is attached.",
+      authorityTraceIncomplete
+        ? `Authority trace incomplete: ${authorityTrace.authorityTraceBlockedReason ?? authorityTrace.skippedReason ?? "retrieval not completed"}`
+        : "",
       `sourcePdfHash:${context.sourcePdfHash}`,
       `artifactVersion:${OEM_CITATION_DENSITY_ARTIFACT_VERSION}`,
-    ],
+    ].filter(Boolean),
     anchorId: anchor.anchorId,
     reportType: OEM_CITATION_DENSITY_REPORT_TYPE,
     findingType: family.findingType,
@@ -2138,6 +2208,9 @@ function detectOemCitationDensityAuthoritySources(context: AnnotatedEstimateFind
   const add = (source: OemCitationDensityAuthoritySource) => {
     if (!sources.some((item) => item.sourceType === source.sourceType && item.title === source.title)) sources.push(source);
   };
+  for (const source of context.authorityTrace?.authoritySources ?? []) {
+    add(source);
+  }
   if (
     /\b(?:OEM procedure|repair manual|body repair manual|service procedure)\b/i.test(textBlocks) &&
     !/\b(?:no|without|missing|not attached|not produced|not provided|needs|need|attach|verify|review)\s+(?:an?\s+)?(?:OEM procedure|repair manual|body repair manual|service procedure)\b/i.test(textBlocks) &&
@@ -2223,13 +2296,30 @@ function buildEstimateEvidenceAuthority(
   };
 }
 
+function buildAuthorityTraceIncompleteAuthority(
+  family: OemCitationDensityFamily,
+  authorityTrace: OemCitationDensityAuthorityTrace
+): NonNullable<CitationDensityFinding["bestAvailableAuthority"]> {
+  return {
+    type: "estimate_evidence",
+    status: "needed",
+    title: "Authority trace incomplete",
+    confidence: "low",
+    note: [
+      `${family.title}: OEM/internal authority retrieval did not complete.`,
+      authorityTrace.authorityTraceBlockedReason ?? authorityTrace.skippedReason ?? "",
+      "Treat as not citation-ready until the relevant OEM, ADAS, estimating, policy, or legal sources are retrieved and attached.",
+    ].filter(Boolean).join(" "),
+  };
+}
+
 function resolveOemFindingLabel(
   family: OemCitationDensityFamily,
   authority: NonNullable<CitationDensityFinding["bestAvailableAuthority"]>,
   verifiedAuthorityCount: number
 ) {
   if (verifiedAuthorityCount > 0 && (authority.type === "oem_procedure" || authority.type === "adas_procedure")) return "VERIFIED OEM";
-  if (verifiedAuthorityCount > 0 && authority.type === "oem_position_statement") return "VERIFIED OEM";
+  if (verifiedAuthorityCount > 0 && authority.type === "oem_position_statement") return "OEM POSITION REFERENCED";
   if (verifiedAuthorityCount > 0 && authority.type === "invoice_completion") return "VERIFIED DOCUMENTATION";
   if (verifiedAuthorityCount > 0 && authority.type === "legal") return "VERIFIED LEGAL";
   return family.fallbackLabel;
