@@ -88,6 +88,10 @@ import {
   recordCompletedAnalysisUsage,
 } from "@/lib/billing/usage";
 import {
+  FREE_PAID_FEATURE_MESSAGE,
+  TRIAL_EXPIRED_MESSAGE,
+} from "@/lib/billing/userEntitlementResolver";
+import {
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
   validateUploadBatchFileCount,
@@ -158,13 +162,13 @@ function assertAnalysisAllowedForEntitlements(
     if (entitlements.usageStatus === "trial_expired") {
       throw new UsageAccessError(
         "trial_expired",
-        "Your 30-day trial has ended. Upgrade to continue running full analysis."
+        TRIAL_EXPIRED_MESSAGE
       );
     }
 
     throw new UsageAccessError(
       "upgrade_required",
-      "Your current access does not include document-backed analysis. Upgrade to continue."
+      FREE_PAID_FEATURE_MESSAGE
     );
   }
 
@@ -172,7 +176,7 @@ function assertAnalysisAllowedForEntitlements(
     if (entitlements.usageStatus === "trial_expired") {
       throw new UsageAccessError(
         "trial_expired",
-        "Your 30-day trial has ended. Upgrade to continue running full analysis."
+        TRIAL_EXPIRED_MESSAGE
       );
     }
 

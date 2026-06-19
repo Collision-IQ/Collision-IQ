@@ -6,6 +6,12 @@ import {
 } from "@/lib/entitlements";
 import { getUsageCount as getMeteredUsageCount } from "@/lib/usage";
 import { isPlatformAdminEmailList, maskEmail, normalizeEmail } from "@/lib/auth/platform-admin";
+import {
+  MEMBERSHIP_UPGRADE_URL,
+  getEntitlementUpgradeMessage,
+  resolveUserEntitlement,
+  type ResolvedUserEntitlement,
+} from "@/lib/billing/userEntitlementResolver";
 
 const TRIAL_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -53,6 +59,11 @@ export type AccountEntitlements = Omit<ViewerAccess, "plan"> & {
   maxUploadsPerReview: number | null;
   usageStatus: "ok" | "usage_limit_reached" | "trial_expired" | "upgrade_required";
   entitlementSource: "free_access_admin" | "paid_subscription" | "trial" | "starter_subscription" | "free" | "locked";
+  resolvedEntitlement: ResolvedUserEntitlement;
+  effectiveTier: ResolvedUserEntitlement["effectiveTier"];
+  trialExpired: boolean;
+  upgradeUrl: typeof MEMBERSHIP_UPGRADE_URL;
+  upgradeMessage: string | null;
 };
 
 export async function getCurrentEntitlements(
@@ -139,6 +150,22 @@ export function toAccountEntitlements(
   const trialActive = resolveEffectiveTrialActive(access, params?.trialActive);
   const contextAdmin = Boolean(params?.isPlatformAdmin);
   const trialWindow = resolveTrialWindow(access);
+  const resolvedEntitlement = resolveUserEntitlement(
+    {
+      id: access.userId,
+      createdAt: access.createdAt,
+      isPlatformAdmin: access.isPlatformAdmin || contextAdmin || isEnvAdmin,
+    },
+    {
+      createdAt: access.createdAt,
+      isPlatformAdmin: access.isPlatformAdmin || contextAdmin || isEnvAdmin,
+    },
+    {
+      plan: params?.subscriptionTier && params.subscriptionTier !== "admin" ? params.subscriptionTier : access.plan,
+      status: params?.trialActive && !access.activeSubscriptionStatus ? "TRIALING" : access.activeSubscriptionStatus,
+    },
+    null
+  );
 
   if (access.isPlatformAdmin || contextAdmin || isEnvAdmin) {
     return {
@@ -180,6 +207,11 @@ export function toAccountEntitlements(
       maxUploadsPerReview: getPlanUploadBatchLimit("admin"),
       usageStatus: "ok",
       entitlementSource: "free_access_admin",
+      resolvedEntitlement,
+      effectiveTier: "admin",
+      trialExpired: false,
+      upgradeUrl: MEMBERSHIP_UPGRADE_URL,
+      upgradeMessage: null,
     };
   }
 
@@ -205,6 +237,14 @@ export function toAccountEntitlements(
       : !resolvedCanRunAnalysis
         ? "usage_limit_reached"
         : "ok";
+  const trialExpired = resolvedEntitlement.trialExpired && billingPlan === "free";
+  const upgradeMessage = usageStatus === "trial_expired" || trialExpired
+    ? getEntitlementUpgradeMessage({ plan: resolvedEntitlement.plan, trialExpired: true })
+    : billingPlan === "starter"
+      ? getEntitlementUpgradeMessage({ plan: "starter", requiresPro: true })
+      : billingPlan === "free" || billingPlan === "none"
+        ? getEntitlementUpgradeMessage({ plan: "free" })
+        : null;
 
   const subscriptionStatus =
     access.activeSubscriptionStatus === "ACTIVE" || access.activeSubscriptionStatus === "TRIALING"
@@ -261,6 +301,11 @@ export function toAccountEntitlements(
     maxUploadsPerReview: getPlanUploadBatchLimit(billingPlan),
     usageStatus,
     entitlementSource: resolveEntitlementSource(billingPlan, params?.subscriptionTier),
+    resolvedEntitlement,
+    effectiveTier: resolvedEntitlement.effectiveTier,
+    trialExpired,
+    upgradeUrl: MEMBERSHIP_UPGRADE_URL,
+    upgradeMessage,
   };
 }
 

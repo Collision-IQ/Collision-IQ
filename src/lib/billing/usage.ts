@@ -9,6 +9,7 @@ import type {
 import { prisma } from "@/lib/prisma";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import { getPlanAnalysisCap, type BillingPlan } from "@/lib/billing/plans";
+import { TRIAL_EXPIRED_MESSAGE } from "@/lib/billing/userEntitlementResolver";
 
 export class UsageAccessError extends Error {
   status: number;
@@ -198,7 +199,7 @@ export async function assertAnalysisAllowed(params: {
   if (trialExpired) {
     throw new UsageAccessError(
       "trial_expired",
-      "Your trial has expired. Upgrade to continue running analyses."
+      TRIAL_EXPIRED_MESSAGE
     );
   }
 
@@ -248,7 +249,7 @@ export function assertAnalysisAllowedForEntitlements(entitlements: AccountEntitl
     if (entitlements.usageStatus === "trial_expired") {
       throw new UsageAccessError(
         "trial_expired",
-        "Your trial has expired. Upgrade to continue running analyses."
+        TRIAL_EXPIRED_MESSAGE
       );
     }
 
