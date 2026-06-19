@@ -38,7 +38,14 @@ import {
 } from "@/lib/fileReviewLedger";
 import { retrieveDriveSupport } from "@/lib/ai/driveRetrievalService";
 import { isDriveEnabled } from "@/lib/drive/download";
-import type { DriveRetrievalResult } from "@/lib/ai/contracts/driveRetrievalContract";
+import type {
+  DriveRetrievalRequest,
+  DriveRetrievalResult,
+} from "@/lib/ai/contracts/driveRetrievalContract";
+import {
+  buildVehicleLabel,
+  extractVehicleIdentityFromText,
+} from "@/lib/ai/vehicleContext";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -117,10 +124,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const sourceDocuments = await getUploadedAttachments(
-      sourceDocumentId ? [sourceDocumentId] : report.artifactIds,
-      { ownerUserId: user.id }
-    );
+    const sourceDocuments = await getUploadedAttachments(report.artifactIds, { ownerUserId: user.id });
     const sourceDiagnostics = withFileReviewDiagnostics(sourceDocuments, buildCitationDensitySourcePdfDiagnostics(sourceDocuments));
     const sourceSelections = resolveOemSourceSelections({
       sourceDocuments,
@@ -338,8 +342,29 @@ function resolveOemSourceSelections(params: {
   report: Parameters<typeof resolveSourceEstimatePdfSelections>[0]["report"];
   sourceDiagnostics: ReturnType<typeof buildCitationDensitySourcePdfDiagnostics>;
 }): SourceEstimatePdfSelection[] {
+  const shouldAutoSelectLower =
+    (params.targetEstimate === "auto" || params.targetEstimate === "selected") &&
+    params.sourceDocuments.filter(isAnnotatableEstimatePdf).length >= 2;
+
+  if (shouldAutoSelectLower) {
+    const lowerSelections = resolveSourceEstimatePdfSelections({
+      attachments: params.sourceDocuments,
+      report: params.report,
+      targetEstimate: "auto",
+      findings: [],
+    });
+    if (lowerSelections.length > 0) {
+      return lowerSelections.map((selection) => ({
+        ...selection,
+        selectionReason: params.sourceDocumentId
+          ? `${selection.selectionReason} Ignored the supplied source document for OEM Citation Density because multiple estimate PDFs were present and OEM review defaults to the lower estimate.`
+          : selection.selectionReason,
+      }));
+    }
+  }
+
   if (params.sourceDocumentId) {
-    const selected = params.sourceDocuments[0];
+    const selected = params.sourceDocuments.find((document) => document.id === params.sourceDocumentId);
     return selected && isAnnotatableEstimatePdf(selected)
       ? [{
           attachment: selected,
@@ -429,10 +454,16 @@ async function buildOemAuthorityTrace(params: {
     if (!response || response.results.length === 0) {
       return {
         ...base,
+        authorityTraceCompleted: Boolean(response),
+        authorityCoverageStatus: response ? "complete" : "incomplete",
         googleDriveOrInternalSearchRan: true,
         driveSearchAttempted: true,
-        authorityTraceBlockedReason: "Google Drive/internal authority retrieval returned no matching authority documents.",
-        skippedReason: "Google Drive/internal authority retrieval returned no matching authority documents.",
+        authorityTraceBlockedReason: response ? null : "Google Drive/internal authority retrieval did not return a response.",
+        skippedReason: response ? undefined : "Google Drive/internal authority retrieval did not return a response.",
+        driveSearchCompleted: Boolean(response),
+        driveMatchedFoldersCount: 0,
+        driveDocumentsReviewedCount: 0,
+        driveSearchTerms: extractDriveSearchTerms(response?.request),
       };
     }
 
@@ -450,6 +481,10 @@ async function buildOemAuthorityTrace(params: {
       skippedReason: undefined,
       driveSearchAttempted: true,
       driveSearchAvailable: true,
+      driveSearchCompleted: true,
+      driveMatchedFoldersCount: folders.length,
+      driveDocumentsReviewedCount: reviewedDocuments.length,
+      driveSearchTerms: extractDriveSearchTerms(response.request),
       driveMakeModelFolderMatched: response.results.some((result) =>
         result.metadata.vehicleMatchLevel === "exact_vehicle_match" ||
         result.metadata.vehicleMatchLevel === "manufacturer_match"
@@ -501,6 +536,10 @@ function buildBaseOemAuthorityTrace(params: {
     sandPolishSupportFound: false,
     driveSearchAttempted: params.driveSearchAvailable,
     driveSearchAvailable: params.driveSearchAvailable,
+    driveSearchCompleted: false,
+    driveMatchedFoldersCount: 0,
+    driveDocumentsReviewedCount: 0,
+    driveSearchTerms: [],
     driveMakeModelFolderMatched: false,
     driveMatchedFolders: [],
     driveDocumentsReviewed: [],
@@ -555,7 +594,10 @@ function buildAuthorityContextText(results: DriveRetrievalResult[]) {
 }
 
 function extractVehicleSummary(text: string) {
-  return text.match(/\b((?:19|20)\d{2}\s+(?:Acura|Audi|BMW|Buick|Cadillac|Chevrolet|Chevy|Chrysler|Dodge|Ford|Genesis|GMC|Honda|Hyundai|Infiniti|Jeep|Kia|Lexus|Lincoln|Mazda|Mercedes|Mini|Nissan|Ram|Subaru|Tesla|Toyota|Volkswagen|Volvo)\s+[A-Z0-9][A-Za-z0-9-]*(?:\s+[A-Z0-9][A-Za-z0-9-]*){0,3})\b/i)?.[1]?.trim() ?? null;
+  const identity = extractVehicleIdentityFromText(text, "attachment");
+  const label = buildVehicleLabel(identity, { includeTrim: true });
+  if (label) return label;
+  return text.match(/\b((?:19|20)\d{2}\s+(?:Acura|Audi|BMW|Buick|Cadillac|Chevrolet|Chevy|Chrysler|Dodge|Ford|Genesis|GMC|Honda|Hyundai|Infiniti|Jeep|Kia|Lexus|Lincoln|Mazda|Mercedes|Mini|Nissan|Ram|Subaru|Tesla|TESL|Toyota|Volkswagen|Volvo)\s+[A-Z0-9][A-Za-z0-9-]*(?:\s+[A-Z0-9][A-Za-z0-9-]*){0,3})\b/i)?.[1]?.replace(/\bTESL\b/i, "Tesla").trim() ?? null;
 }
 
 function inferJurisdiction(vehicle: string | null) {
@@ -564,6 +606,17 @@ function inferJurisdiction(vehicle: string | null) {
 
 function uniqueStrings(values: Array<string | null | undefined>) {
   return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))];
+}
+
+function extractDriveSearchTerms(request: DriveRetrievalRequest | undefined) {
+  if (!request) return [];
+  return uniqueStrings([
+    request.vehicle?.year ? String(request.vehicle.year) : undefined,
+    request.vehicle?.make,
+    request.vehicle?.model,
+    request.vehicle?.trim,
+    ...(request.topics ?? []).map((topic) => topic.topic.replace(/_/g, " ")),
+  ]).slice(0, 12);
 }
 
 function buildOemAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof buildAnnotatedCitationDensityEstimatePdf>>["debugTrace"] | undefined) {

@@ -345,7 +345,7 @@ function inferEstimateRole(
 
 function extractEstimateTotal(attachment: StoredAttachment): number | null {
   const text = `${attachment.filename}\n${attachment.text ?? ""}`;
-  const matches = [...text.matchAll(/(?:estimate|net|grand|repair)?\s*total\s*[:#-]?\s*\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.\d{2})?|[0-9]+(?:\.\d{2})?)/gi)];
+  const matches = [...text.matchAll(/(?:(?:estimate|repair|grand)\s+total|total|gross|net)\s*[:#=/-]?\s*\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.\d{2})?|[0-9]+(?:\.\d{2})?)/gi)];
   const raw = matches.at(-1)?.[1];
   if (!raw) return null;
   const value = Number(raw.replace(/,/g, ""));

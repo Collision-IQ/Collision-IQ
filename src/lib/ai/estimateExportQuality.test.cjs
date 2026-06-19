@@ -1303,7 +1303,7 @@ run("21975-style estimate export prioritizes line-specific dispute precision", (
   const snapshotText = flattenSnapshot(buildCollisionSnapshot(exportModel));
 
   assert.match(driverText, /LKQ Grille Style Contradiction/i);
-  assert.match(driverText, /A[\/ ]M CAPA LKQ Substitutions/i);
+  assert.match(driverText, /Non-OEM CAPA LKQ Or Alternate Parts Compared With The Shop's OEM-Style Repair Plan/i);
   assert.match(driverText, /Labor Rate and Paint-Material Delta/i);
   assert.match(findingText, /LKQ grille style contradiction/i);
   assert.doesNotMatch(findingText, /Documents Describe Repair Process Differently/i);

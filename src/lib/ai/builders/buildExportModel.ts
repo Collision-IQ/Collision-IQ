@@ -3312,7 +3312,7 @@ function buildConcreteEstimateDisputeItems(sourceText: string): ExportSupplement
 
   if (/\b(?:a\/m|aftermarket|capa|lkq)\b/i.test(sourceText) && /\b(?:oem|radiator support|bumper|grille|front[- ]end)\b/i.test(sourceText)) {
     push({
-      title: "A/M CAPA LKQ Substitutions vs OEM-Style Front-End Parts",
+      title: "Non-OEM, CAPA, LKQ, or alternate parts compared with the shop's OEM-style repair plan",
       category: "parts",
       kind: "disputed_repair_path",
       rationale: "The estimate evidence shows carrier A/M, CAPA, or LKQ substitutions against shop OEM-style front-end part scope; group each part family by line, part type, amount, and substitution basis.",

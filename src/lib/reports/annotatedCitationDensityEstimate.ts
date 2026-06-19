@@ -1282,6 +1282,10 @@ export type OemCitationDensityAuthorityTrace = {
   sandPolishSupportFound?: boolean;
   driveSearchAttempted: boolean;
   driveSearchAvailable: boolean;
+  driveSearchCompleted?: boolean;
+  driveMatchedFoldersCount?: number;
+  driveDocumentsReviewedCount?: number;
+  driveSearchTerms?: string[];
   driveMakeModelFolderMatched: boolean;
   driveMatchedFolders: string[];
   driveDocumentsReviewed: string[];
@@ -1593,7 +1597,7 @@ export function buildOemCitationDensityFindings(
     const rowText = getAnchorSourceText(anchor);
     const normalized = normalizeMatchText(rowText);
     if (!rowText.trim()) continue;
-    if (anchor.anchorType !== "estimate_line" && anchor.anchorType !== "line_note" && anchor.anchorType !== "embedded_link_row" && anchor.anchorType !== "totals_row" && anchor.anchorType !== "supplier_row" && anchor.anchorType !== "guide_row") {
+    if (anchor.anchorType !== "estimate_line" && anchor.anchorType !== "line_note" && anchor.anchorType !== "embedded_link_row") {
       continue;
     }
     if (isRejectedPrimaryAnchorText(rowText, anchor)) {
@@ -1604,7 +1608,7 @@ export function buildOemCitationDensityFindings(
       droppedReasons.push({ anchorId: anchor.anchorId, rowText, reason: "source line parsed as vehicle year" });
       continue;
     }
-    if (isBoilerplatePartSourceText(normalized) && anchor.anchorType !== "guide_row") {
+    if (isBoilerplatePartSourceText(normalized)) {
       droppedReasons.push({ anchorId: anchor.anchorId, rowText, reason: "generic boilerplate as primary row anchor" });
       continue;
     }
@@ -1791,10 +1795,10 @@ function isPrimaryEstimateAnchor(anchor: EstimateRowAnchor) {
 
 function isRejectedPrimaryAnchorText(rowText: string, anchor: EstimateRowAnchor) {
   const normalized = normalizeMatchText(rowText);
-  if (anchor.anchorType === "supplier_row" || anchor.anchorType === "guide_row" || anchor.anchorType === "section_row") return true;
+  if (anchor.anchorType === "supplier_row" || anchor.anchorType === "guide_row" || anchor.anchorType === "section_row" || anchor.anchorType === "totals_row") return true;
   return isJunkCitationFindingText(normalized) ||
-    /\b(?:abbreviations?|legend|disclaimer|fraud notice|legal notice|work authorization|policy|declarations?|allstate parts policy|alternate parts policy|quality replacement parts|vehicle equipment|vin decoding|footer|page \d+ of \d+|ccc\/motor|motor guide|estimating guide|included operations?|not included|a\/m\s*=\s*aftermarket|lkq\s*\/?\s*rcy\s*\/?\s*used|capa\s*(?:certified|definition|definitions?))\b/i.test(rowText) ||
-    /\b(?:abbreviation|legend|disclaimer|fraud|legal notice|work authorization|policy|declarations|alternate parts policy|quality replacement|vehicle equipment|footer|ccc motor|motor guide|estimating guide|included operations|not included|aftermarket definition|lkq rcy used|capa definition)\b/.test(normalized);
+    /\b(?:abbreviations?|legend|disclaimer|fraud notice|legal notice|work authorization|policy|declarations?|allstate parts policy|alternate parts policy|quality replacement parts|vehicle equipment|vin decoding|footer|page \d+ of \d+|ccc\/motor|motor guide|estimating guide|included operations?|not included|a\/m\s*=\s*aftermarket|lkq\s*\/?\s*rcy\s*\/?\s*used|capa\s*(?:certified|definition|definitions?)|estimate totals?|parts total|subtotal|grand total|sales tax|body labor totals?|paint labor totals?|paint supplies totals?|labor\s+[a-z]\s*=\s*diagnostic|qr\s*code|sunbit|payment plan|pay(?:ment)?\s+(?:link|portal|text|option))\b/i.test(rowText) ||
+    /\b(?:abbreviation|legend|disclaimer|fraud|legal notice|work authorization|policy|declarations|alternate parts policy|quality replacement|vehicle equipment|footer|ccc motor|motor guide|estimating guide|included operations|not included|aftermarket definition|lkq rcy used|capa definition|estimate totals|parts total|subtotal|grand total|sales tax|body labor total|paint labor total|paint supplies total|labor d diagnostic|qr code|sunbit|payment plan|payment link|payment portal)\b/.test(normalized);
 }
 
 function isRejectedBoilerplateSupplierText(normalized: string) {
@@ -1814,7 +1818,7 @@ function isWheelComparisonBoilerplate(text: string) {
 }
 
 function isJunkCitationFindingText(normalized: string) {
-  return /\b(?:aftermarket crash part|quality replacement parts?|alternate parts policy|a\/m aftermarket|a m aftermarket|capa definitions?|capa certified|lkq rcy used definitions?|lkq\/rcy\/used|abbreviations?|legend|disclaimer|fraud|legal notice|ccc motor|ccc\/motor|motor guide|estimating guide|included operations?|not included|vehicle equipment|vin decoding|footer|page \d+ of \d+|recond|refn)\b/.test(normalized) ||
+  return /\b(?:aftermarket crash part|quality replacement parts?|alternate parts policy|a\/m aftermarket|a m aftermarket|capa definitions?|capa certified|lkq rcy used definitions?|lkq\/rcy\/used|abbreviations?|legend|disclaimer|fraud|legal notice|ccc motor|ccc\/motor|motor guide|estimating guide|included operations?|not included|vehicle equipment|vin decoding|footer|page \d+ of \d+|recond|refn|estimate totals|parts total|subtotal|grand total|sales tax|body labor total|paint labor total|paint supplies total|labor d diagnostic|qr code|sunbit|payment plan|payment link|payment portal)\b/.test(normalized) ||
     /\b(?:4 wheel drive|tilt wheel|fm radio|skyview roof)\b/.test(normalized) ||
     (/\b(?:total|subtotal|net cost|deductible|betterment|tax)\b/.test(normalized) && /\b(?:footer|page|claim|insured|owner|license|vin)\b/.test(normalized));
 }
@@ -2106,7 +2110,8 @@ function buildOemCitationDensityFinding(params: {
 }): CitationDensityFinding {
   const { context, anchor, rowText, family } = params;
   const authorityTrace = context.authorityTrace ?? buildDefaultOemAuthorityTrace();
-  const authorityTraceIncomplete = authorityTrace.authorityCoverageStatus === "incomplete" || !authorityTrace.authorityTraceCompleted;
+  const authorityTraceIncomplete = isAuthorityTraceIncomplete(authorityTrace);
+  const completedWithoutLineAuthority = isCompletedAuthoritySearchWithoutLineMatch(authorityTrace, params.authoritySources);
   const bestAuthoritySource = authorityTraceIncomplete
     ? undefined
     : pickBestOemAuthoritySource(params.authoritySources, family);
@@ -2116,7 +2121,11 @@ function buildOemCitationDensityFinding(params: {
     ? mapOemAuthoritySourceToCitationAuthority(bestAuthoritySource, family)
     : buildEstimateEvidenceAuthority(family);
   const verifiedAuthorityCount = !authorityTraceIncomplete && authority.type !== "estimate_evidence" && authority.status === "verified" ? 1 : 0;
-  const label = authorityTraceIncomplete ? "AUTHORITY TRACE INCOMPLETE" : resolveOemFindingLabel(family, authority, verifiedAuthorityCount);
+  const label = authorityTraceIncomplete
+    ? "AUTHORITY TRACE INCOMPLETE"
+    : completedWithoutLineAuthority
+      ? "AUTHORITY SEARCH COMPLETED - NO LINE AUTHORITY MATCH"
+      : resolveOemFindingLabel(family, authority, verifiedAuthorityCount);
   const evidence = {
     lineNumber: anchor.lineNumber,
     description: rowText,
@@ -2160,12 +2169,16 @@ function buildOemCitationDensityFinding(params: {
       `Evidence tier: ${getOemAuthorityEvidenceTierLabel(authority)}.`,
       authorityTraceIncomplete
         ? `Authority trace incomplete: ${authorityTrace.authorityTraceBlockedReason ?? authorityTrace.skippedReason ?? "required OEM authority retrieval did not complete"}.`
+        : completedWithoutLineAuthority
+          ? "Authority search completed: no line-specific authority match was found."
         : "",
     ].join(" "),
     missingProofSummary: [
       `Required documentation: ${family.requiredDocumentation.join(", ")}.`,
       authorityTraceIncomplete
         ? "Authority retrieval did not complete, so this finding is not citation-ready and no OEM support was verified."
+        : completedWithoutLineAuthority
+          ? "Authority retrieval completed, but no line-specific OEM, ADAS, estimating, policy, or legal authority was matched to this row."
         : "",
       verifiedAuthorityCount
         ? "Authority support is present, but completion/estimate proof still needs to be tied to the exact row."
@@ -2178,6 +2191,8 @@ function buildOemCitationDensityFinding(params: {
       "Do not say OEM requires unless an OEM procedure or position statement is attached.",
       authorityTraceIncomplete
         ? `Authority trace incomplete: ${authorityTrace.authorityTraceBlockedReason ?? authorityTrace.skippedReason ?? "retrieval not completed"}`
+        : completedWithoutLineAuthority
+          ? "Authority search completed without a line-specific authority match."
         : "",
       `sourcePdfHash:${context.sourcePdfHash}`,
       `artifactVersion:${OEM_CITATION_DENSITY_ARTIFACT_VERSION}`,
@@ -2313,6 +2328,23 @@ function buildAuthorityTraceIncompleteAuthority(
   };
 }
 
+function isAuthorityTraceIncomplete(authorityTrace: OemCitationDensityAuthorityTrace) {
+  return (
+    authorityTrace.authorityCoverageStatus === "incomplete" ||
+    !authorityTrace.authorityTraceCompleted ||
+    Boolean(authorityTrace.authorityTraceBlockedReason)
+  );
+}
+
+function isCompletedAuthoritySearchWithoutLineMatch(
+  authorityTrace: OemCitationDensityAuthorityTrace,
+  authoritySources: OemCitationDensityAuthoritySource[]
+) {
+  if (isAuthorityTraceIncomplete(authorityTrace)) return false;
+  const nonEstimateSources = authoritySources.filter((source) => source.sourceType !== "estimate_evidence");
+  return nonEstimateSources.length === 0 && authorityTrace.googleDriveOrInternalSearchRan;
+}
+
 function resolveOemFindingLabel(
   family: OemCitationDensityFamily,
   authority: NonNullable<CitationDensityFinding["bestAvailableAuthority"]>,
@@ -2322,6 +2354,8 @@ function resolveOemFindingLabel(
   if (verifiedAuthorityCount > 0 && authority.type === "oem_position_statement") return "OEM POSITION REFERENCED";
   if (verifiedAuthorityCount > 0 && authority.type === "invoice_completion") return "VERIFIED DOCUMENTATION";
   if (verifiedAuthorityCount > 0 && authority.type === "legal") return "VERIFIED LEGAL";
+  if (authority.type === "oem_position_statement") return "OEM POSITION REFERENCED";
+  if (authority.type === "oem_procedure" || authority.type === "adas_procedure") return "NEEDS OEM PROCEDURE";
   return family.fallbackLabel;
 }
 

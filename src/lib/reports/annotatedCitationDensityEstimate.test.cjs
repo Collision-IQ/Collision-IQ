@@ -1964,6 +1964,63 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(json.annotationMetadata.every((item) => item.sourceDocumentId === "carrier-oem-21975"), true);
   });
 
+  await run("OEM Citation Density selects SOR3 lower estimate over Shop 21548", async () => {
+    const carrierPdfBytes = await createRam21975SourcePdf();
+    const shopPdfBytes = await createShop21975SourcePdf();
+    const carrierDataUrl = `data:application/pdf;base64,${Buffer.from(carrierPdfBytes).toString("base64")}`;
+    const shopDataUrl = `data:application/pdf;base64,${Buffer.from(shopPdfBytes).toString("base64")}`;
+    const attachments = [
+      {
+        id: "shop-21548",
+        filename: "Shop 21548.pdf",
+        type: "application/pdf",
+        text: "Shop estimate repair facility Grand Total $9,307.40 OEM-style repair plan",
+        imageDataUrl: shopDataUrl,
+        pageCount: 1,
+      },
+      {
+        id: "carrier-sor3",
+        filename: "SOR3.pdf",
+        type: "application/pdf",
+        text: "Carrier SOR3 estimate Vehicle: 2023 TESL Model Y AWD w/Long Range Battery gross $5,737.10 net $5,237.10 A/M RT Hub assy Four Wheel Alignment ADAS calibration",
+        imageDataUrl: carrierDataUrl,
+        pageCount: 12,
+      },
+    ];
+    const report = {
+      id: "report-oem-sor3-lower-selection",
+      artifactIds: attachments.map((attachment) => attachment.id),
+      report: {
+        narrative: "OEM Citation Density SOR3 lower-estimate fixture",
+        evidenceRegistry: [],
+      },
+    };
+    const route = loadOemCitationDensityRouteWithMocks({ report, attachments });
+    const response = await route.POST(new Request("http://localhost/api/reports/oem-citation-density/annotated-estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        caseId: "report-oem-sor3-lower-selection",
+        sourceDocumentId: "shop-21548",
+        annotationMode: "both",
+        includeLegend: false,
+        redactSensitive: true,
+      }),
+    }));
+    assert.equal(response.status, 200);
+    const json = await response.json();
+
+    assert.equal(json.selectedSourceDocumentId, "carrier-sor3");
+    assert.equal(json.selectedSourceLabel, "SOR3.pdf");
+    assert.equal(json.selectedEstimateForOemDensity, "SOR3.pdf");
+    assert.match(json.selectedEstimateReason, /lower estimate PDF/i);
+    assert.match(json.selectedEstimateReason, /supplied source document/i);
+    assert.equal(json.selectedEstimateTotal, 5237.10);
+    assert.equal(json.comparisonEstimateTotal, 9307.40);
+    assert.equal(json.debugCounts.selectedEstimateForOemDensity, "SOR3.pdf");
+    assert.equal(json.annotationMetadata.every((item) => item.sourceDocumentId === "carrier-sor3"), true);
+  });
+
   await run("OEM Citation Density route attempts Drive authority retrieval and exposes reviewed sources", async () => {
     const carrierPdfBytes = await createRam21975SourcePdf();
     const carrierDataUrl = `data:application/pdf;base64,${Buffer.from(carrierPdfBytes).toString("base64")}`;
@@ -2034,6 +2091,133 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.deepEqual(json.debugTrace.authoritySearchTrace.driveDocumentsReviewed, ["Ram Blind Spot Calibration Procedure.pdf"]);
     assert.deepEqual(json.debugTrace.authoritySearchTrace.driveMatchedFolders, ["OEM Procedures/Ram"]);
     assert.equal(json.debugCounts.googleDriveInternalAuthoritySearch.driveSearchAttempted, true);
+  });
+
+  await run("OEM Citation Density healthy Drive with zero exact matches is not authority-trace incomplete", async () => {
+    const carrierPdfBytes = await createRam21975SourcePdf();
+    const carrierDataUrl = `data:application/pdf;base64,${Buffer.from(carrierPdfBytes).toString("base64")}`;
+    const attachments = [{
+      id: "carrier-oem-drive-empty",
+      filename: "2023 Ram SOR-1.pdf",
+      type: "application/pdf",
+      text: "2023 Ram 1500 carrier estimate A/M CAPA bumper blind spot radar calibration total $4,097.17",
+      imageDataUrl: carrierDataUrl,
+      pageCount: 12,
+    }];
+    const report = {
+      id: "report-oem-drive-empty",
+      artifactIds: attachments.map((attachment) => attachment.id),
+      report: {
+        narrative: "OEM Citation Density Drive empty fixture",
+        evidenceRegistry: [],
+      },
+    };
+    const route = loadOemCitationDensityRouteWithMocks({
+      report,
+      attachments,
+      driveEnabled: true,
+      driveRetrievalResponse: {
+        request: {
+          vehicle: { year: 2023, make: "Ram", model: "1500" },
+          topics: [{ topic: "adas_calibration" }],
+        },
+        usage: { topMatchesOnly: true, excerptsOnly: true, fullDocumentDumpAllowed: false },
+        results: [],
+      },
+    });
+    const response = await route.POST(new Request("http://localhost/api/reports/oem-citation-density/annotated-estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        caseId: "report-oem-drive-empty",
+        annotationMode: "both",
+        includeLegend: false,
+        redactSensitive: true,
+      }),
+    }));
+    assert.equal(response.status, 200);
+    const json = await response.json();
+    const labels = json.annotationMetadata.map((item) => item.label);
+
+    assert.equal(json.debugTrace.authoritySearchTrace.authorityTraceCompleted, true);
+    assert.equal(json.debugTrace.authoritySearchTrace.authorityCoverageStatus, "complete");
+    assert.equal(json.debugTrace.authoritySearchTrace.driveSearchCompleted, true);
+    assert.equal(labels.includes("AUTHORITY TRACE INCOMPLETE"), false);
+    assert.ok(labels.includes("AUTHORITY SEARCH COMPLETED - NO LINE AUTHORITY MATCH"));
+  });
+
+  await run("OEM Citation Density normalizes TESL Model Y into Drive search terms", async () => {
+    const carrierPdfBytes = await createRam21975SourcePdf();
+    const carrierDataUrl = `data:application/pdf;base64,${Buffer.from(carrierPdfBytes).toString("base64")}`;
+    const attachments = [{
+      id: "carrier-tesl-model-y",
+      filename: "SOR3.pdf",
+      type: "application/pdf",
+      text: "Vehicle Description: 2023 TESL Model Y AWD w/Long Range Battery\nCarrier SOR3 estimate A/M RT Hub assy four wheel alignment ADAS calibration gross $5,737.10 net $5,237.10",
+      imageDataUrl: carrierDataUrl,
+      pageCount: 12,
+    }];
+    const report = {
+      id: "report-oem-tesl-model-y",
+      artifactIds: attachments.map((attachment) => attachment.id),
+      report: {
+        narrative: "OEM Citation Density Tesla Model Y Drive fixture",
+        evidenceRegistry: [],
+      },
+    };
+    const driveRetrievalCalls = [];
+    const route = loadOemCitationDensityRouteWithMocks({
+      report,
+      attachments,
+      driveEnabled: true,
+      driveRetrievalCalls,
+      driveRetrievalResponse: {
+        request: {
+          vehicle: { year: 2023, make: "Tesla", model: "Model Y", trim: "AWD Long Range" },
+          topics: [{ topic: "adas_calibration" }, { topic: "aftermarket_non_oem_parts_dispute" }],
+        },
+        usage: { topMatchesOnly: true, excerptsOnly: true, fullDocumentDumpAllowed: false },
+        results: [{
+          id: "drive-result-tesla-1",
+          filename: "Tesla Model Y Collision Repair Procedure.pdf",
+          documentClass: "oem_procedure",
+          sourceBucket: "oem_procedures",
+          relevanceScore: 0.91,
+          confidence: "high",
+          matchReason: "Matched Tesla Model Y query.",
+          excerpt: { excerpt: "Tesla Model Y repair procedure excerpt.", charCount: 39, pageLabel: "4" },
+          metadata: {
+            fileId: "drive-file-tesla-1",
+            documentClass: "oem_procedure",
+            sourceBucket: "oem_procedures",
+            sourceLane: "oem_lane",
+            source: "OEM Procedures/Tesla/Model Y",
+            pageHint: "4",
+            vehicleMatchLevel: "exact_vehicle_match",
+          },
+          relevanceReasons: [],
+        }],
+      },
+    });
+    const response = await route.POST(new Request("http://localhost/api/reports/oem-citation-density/annotated-estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        caseId: "report-oem-tesl-model-y",
+        annotationMode: "both",
+        includeLegend: false,
+        redactSensitive: true,
+      }),
+    }));
+    assert.equal(response.status, 200);
+    const json = await response.json();
+
+    assert.equal(driveRetrievalCalls.length, 1);
+    assert.match(driveRetrievalCalls[0].userQuery, /Vehicle: 2023 Tesla Model Y/i);
+    assert.deepEqual(json.debugTrace.authoritySearchTrace.driveMatchedFolders, ["OEM Procedures/Tesla/Model Y"]);
+    assert.deepEqual(json.debugTrace.authoritySearchTrace.driveDocumentsReviewed, ["Tesla Model Y Collision Repair Procedure.pdf"]);
+    assert.ok(json.debugTrace.authoritySearchTrace.driveSearchTerms.includes("Tesla"));
+    assert.ok(json.debugTrace.authoritySearchTrace.driveSearchTerms.includes("Model Y"));
   });
 
   await run("optional real SOR-1 local fixture extracts selectable text and row anchors", async () => {
