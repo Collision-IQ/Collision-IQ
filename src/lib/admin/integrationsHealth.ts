@@ -260,7 +260,7 @@ async function checkGoogleDrive(env: NodeJS.ProcessEnv, driveProbe?: Integration
       errorType: result.reachable ? null : "drive_unreachable",
     };
   } catch (error) {
-    return { configured, reachable: false, folderSearchAvailable: false, matchedRootAvailable: false, errorType: errorType(error) };
+    return { configured, reachable: false, folderSearchAvailable: false, matchedRootAvailable: false, errorType: driveErrorType(error) };
   }
 }
 
@@ -374,4 +374,67 @@ function errorType(error: unknown) {
   if (message.includes("missing")) return "missing_env";
   if (message.includes("network") || message.includes("fetch failed")) return "network_error";
   return "request_failed";
+}
+
+export function driveErrorType(error: unknown) {
+  const record = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const response = record.response && typeof record.response === "object"
+    ? record.response as Record<string, unknown>
+    : {};
+  const responseData = response.data && typeof response.data === "object"
+    ? response.data as Record<string, unknown>
+    : {};
+  const apiError = responseData.error && typeof responseData.error === "object"
+    ? responseData.error as Record<string, unknown>
+    : {};
+  const errors = Array.isArray(apiError.errors)
+    ? apiError.errors.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+    : [];
+  const status = Number(record.code ?? response.status ?? apiError.code ?? 0);
+  const reasonText = [
+    record.code,
+    record.status,
+    record.statusText,
+    apiError.status,
+    record.message,
+    apiError.message,
+    ...errors.flatMap((item) => [item.reason, item.message, item.domain]),
+    error instanceof Error ? error.message : String(error),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  if (reasonText.includes("accessnotconfigured") || reasonText.includes("api has not been used") || reasonText.includes("disabled")) {
+    return "drive_api_disabled";
+  }
+  if (reasonText.includes("invalid_grant") || reasonText.includes("jwt") || reasonText.includes("invalid credentials")) {
+    return "service_account_auth_failed";
+  }
+  if (reasonText.includes("unauthorized_client") || reasonText.includes("client is unauthorized") || reasonText.includes("not authorized to access this resource/api")) {
+    return "domain_delegation_failed";
+  }
+  if (reasonText.includes("delegation") || reasonText.includes("subject") || reasonText.includes("impersonat")) {
+    return "impersonation_failed";
+  }
+  if (status === 429 || reasonText.includes("rate limit") || reasonText.includes("ratelimitexceeded") || reasonText.includes("userratelimitexceeded")) {
+    return "rate_limited";
+  }
+  if (status === 404 || reasonText.includes("filenotfound") || reasonText.includes("not found")) {
+    return "folder_not_found";
+  }
+  if (reasonText.includes("invalid sharing request") || reasonText.includes("invalid folder") || reasonText.includes("invalid file id") || reasonText.includes("malformed")) {
+    return "invalid_folder_id";
+  }
+  if (status === 401) {
+    return "service_account_auth_failed";
+  }
+  if (status === 403) {
+    if (reasonText.includes("shared drive") || reasonText.includes("driveid") || reasonText.includes("teamdrive")) {
+      return "shared_drive_access_denied";
+    }
+    return "folder_access_denied";
+  }
+
+  return errorType(error);
 }

@@ -28,7 +28,7 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
   module._compile(compiled.outputText, filename);
 };
 
-const { buildIntegrationsHealth } = require("./integrationsHealth.ts");
+const { buildIntegrationsHealth, driveErrorType } = require("./integrationsHealth.ts");
 
 const tests = [];
 
@@ -161,6 +161,62 @@ run("integrations health route requires platform admin and returns safe payload"
   } finally {
     Module._load = originalLoad;
   }
+});
+
+run("drive health classifies safe Google API error categories", () => {
+  assert.equal(driveErrorType({
+    code: 403,
+    response: {
+      data: {
+        error: {
+          message: "Google Drive API has not been used in project or it is disabled.",
+          errors: [{ reason: "accessNotConfigured" }],
+        },
+      },
+    },
+  }), "drive_api_disabled");
+
+  assert.equal(driveErrorType({
+    code: 401,
+    message: "invalid_grant: Invalid JWT Signature.",
+  }), "service_account_auth_failed");
+
+  assert.equal(driveErrorType({
+    code: 403,
+    response: {
+      data: {
+        error: {
+          message: "Client is unauthorized to retrieve access tokens using this method.",
+          errors: [{ reason: "unauthorized_client" }],
+        },
+      },
+    },
+  }), "domain_delegation_failed");
+
+  assert.equal(driveErrorType({
+    code: 403,
+    message: "The user does not have access to this shared drive.",
+  }), "shared_drive_access_denied");
+
+  assert.equal(driveErrorType({
+    code: 403,
+    message: "The user does not have sufficient permissions for this file.",
+  }), "folder_access_denied");
+
+  assert.equal(driveErrorType({
+    code: 404,
+    message: "File not found.",
+  }), "folder_not_found");
+
+  assert.equal(driveErrorType({
+    code: 400,
+    message: "Invalid file id.",
+  }), "invalid_folder_id");
+
+  assert.equal(driveErrorType({
+    code: 429,
+    message: "Rate Limit Exceeded.",
+  }), "rate_limited");
 });
 
 (async () => {
