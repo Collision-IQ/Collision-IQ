@@ -286,6 +286,7 @@ export async function POST(request: Request) {
       outputs.push({
         artifactId,
         exportId: artifactId,
+        pdfBase64: Buffer.from(result.bytes).toString("base64"),
         estimateRole,
         sourceDocumentId: selection.selectedSourceDocumentId,
         downloadUrl,
@@ -319,6 +320,7 @@ export async function POST(request: Request) {
       ok: true,
       artifactId: primaryOutput?.artifactId ?? "",
       exportId: primaryOutput?.artifactId ?? "",
+      pdfBase64: primaryOutput?.pdfBase64,
       downloadUrl: primaryOutput?.downloadUrl,
       outputs,
       combinedPdfUrl: outputs.length > 1 ? undefined : primaryOutput?.downloadUrl,

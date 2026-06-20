@@ -2021,6 +2021,67 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(json.annotationMetadata.every((item) => item.sourceDocumentId === "carrier-sor3"), true);
   });
 
+  await run("OEM Citation Density ignores shop sourceDocumentId and selects lower SOR 21638 from request context", async () => {
+    const carrierPdfBytes = await createRam21975SourcePdf();
+    const shopPdfBytes = await createShop21975SourcePdf();
+    const carrierDataUrl = `data:application/pdf;base64,${Buffer.from(carrierPdfBytes).toString("base64")}`;
+    const shopDataUrl = `data:application/pdf;base64,${Buffer.from(shopPdfBytes).toString("base64")}`;
+    const attachments = [
+      {
+        id: "shop-21638",
+        filename: "Shop 21638.pdf",
+        type: "application/pdf",
+        text: "Shop estimate repair facility Grand Total $20,290.23 OEM-style repair plan",
+        imageDataUrl: shopDataUrl,
+        pageCount: 1,
+      },
+      {
+        id: "carrier-sor-21638",
+        filename: "SOR-1 21638.pdf",
+        type: "application/pdf",
+        text: "Carrier SOR-1 estimate GEICO lower estimate gross total $12,046.49 net total $12,046.49 A/M CAPA LKQ calibration",
+        imageDataUrl: carrierDataUrl,
+        pageCount: 12,
+      },
+    ];
+    const report = {
+      id: "report-oem-21638-source-doc-selected",
+      artifactIds: ["shop-21638"],
+      report: {
+        narrative: "OEM Citation Density 21638 sourceDocumentId fixture",
+        evidenceRegistry: [],
+      },
+    };
+    const route = loadOemCitationDensityRouteWithMocks({ report, attachments });
+    const response = await route.POST(new Request("http://localhost/api/reports/oem-citation-density/annotated-estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        caseId: "report-oem-21638-source-doc-selected",
+        sourceDocumentId: "shop-21638",
+        artifactIds: ["shop-21638", "carrier-sor-21638"],
+        targetEstimate: "auto",
+        annotationMode: "both",
+        includeLegend: false,
+        redactSensitive: true,
+      }),
+    }));
+    assert.equal(response.status, 200);
+    const json = await response.json();
+
+    assert.equal(json.selectedSourceDocumentId, "carrier-sor-21638");
+    assert.equal(json.selectedEstimateForOemDensity, "SOR-1 21638.pdf");
+    assert.match(json.selectedEstimateReason, /lower estimate PDF/i);
+    assert.match(json.selectedEstimateReason, /supplied source document/i);
+    assert.equal(json.selectedEstimateTotal, 12046.49);
+    assert.equal(json.comparisonEstimateTotal, 20290.23);
+    assert.equal(json.debugCounts.selectedEstimateDiagnostics.candidateAttachmentCount, 2);
+    assert.equal(json.debugCounts.selectedEstimateDiagnostics.candidateEstimateCount, 2);
+    assert.equal(json.debugCounts.selectedEstimateDiagnostics.selectedEstimateForOemDensity, "SOR-1 21638.pdf");
+    assert.equal(json.debugCounts.selectedEstimateDiagnostics.selectionBypassedReason.includes("sourceDocumentId ignored"), true);
+    assert.equal(json.annotationMetadata.every((item) => item.sourceDocumentId === "carrier-sor-21638"), true);
+  });
+
   await run("OEM Citation Density route attempts Drive authority retrieval and exposes reviewed sources", async () => {
     const carrierPdfBytes = await createRam21975SourcePdf();
     const carrierDataUrl = `data:application/pdf;base64,${Buffer.from(carrierPdfBytes).toString("base64")}`;

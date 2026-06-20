@@ -7,7 +7,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
-import { ArrowRight, Download, FileText, Mail } from "lucide-react";
+import { ArrowRight, Download, FileText, Mail, RefreshCcw, X } from "lucide-react";
 import ChatShell from "@/components/ChatShell";
 import ChatWidget from "@/components/ChatWidget";
 import type { ReviewProgress } from "@/components/ChatWidget";
@@ -105,6 +105,8 @@ type AnnotatedEstimateExportResult = {
   filename: string;
   artifactId: string;
   downloadUrl: string;
+  pdfBase64?: string;
+  artifactFallbackUsed?: boolean;
   annotationMetadata: CitationDensityAnnotationMetadata[];
   annotatedFindingCount: number;
   unresolvedAnchorCount: number;
@@ -112,11 +114,7 @@ type AnnotatedEstimateExportResult = {
   debugCounts?: Record<string, unknown> | null;
 };
 
-type CitationDensityViewerState = {
-  pdfUrl: string;
-  annotations: CitationDensityAnnotationMetadata[];
-  diagnostics?: Record<string, unknown> | null;
-} | null;
+type CitationDensityWorkspaceReportFlavor = "delta" | "oem";
 
 type LeftPaneMode = "chat" | "review";
 export type ReportKind =
@@ -128,6 +126,33 @@ export type ReportKind =
   | "policy_rights_review"
   | "oem_citation_density"
   | "doi_complaint_packet";
+type BottomReportViewerState =
+  | {
+      kind: "citation-density";
+      id: string;
+      reportFlavor: CitationDensityWorkspaceReportFlavor;
+      title: string;
+      filename: string;
+      pdfUrl: string;
+      annotations: CitationDensityAnnotationMetadata[];
+      diagnostics?: Record<string, unknown> | null;
+      artifactId?: string;
+      downloadUrl?: string;
+      artifactUnavailableMessage?: string | null;
+      onRegenerate?: () => void;
+    }
+  | {
+      kind: "report-document";
+      id: string;
+      reportType: ReportKind;
+      title: string;
+      filename: string;
+      document: CarrierReportDocument;
+      generatedAtLabel: string;
+      onRegenerate?: () => void;
+    }
+  | null;
+
 type ReportDestinationType = "customer" | "carrier" | "internal";
 type ReportSendHistoryItem = {
   id: string;
@@ -431,6 +456,8 @@ export function ChatbotWorkspacePage() {
   const [chatOnlyMode, setChatOnlyMode] = useState(false);
   const [assistanceProfile, setAssistanceProfile] = useState<AssistanceProfile | null>(null);
   const [assistanceProfileResolved, setAssistanceProfileResolved] = useState(false);
+  const [bottomReportViewer, setBottomReportViewer] = useState<BottomReportViewerState>(null);
+  const bottomReportObjectUrlRef = useRef<string | null>(null);
   const immersiveHeaderExpandedRef = useRef(true);
 
   useEffect(() => {
@@ -456,6 +483,28 @@ export function ChatbotWorkspacePage() {
       window.localStorage.setItem(ASSISTANCE_PROFILE_STORAGE_KEY, profile);
     }
   }, []);
+
+  const revokeBottomReportObjectUrl = useCallback(() => {
+    if (bottomReportObjectUrlRef.current && typeof URL !== "undefined") {
+      URL.revokeObjectURL(bottomReportObjectUrlRef.current);
+      bottomReportObjectUrlRef.current = null;
+    }
+  }, []);
+
+  const closeBottomReportViewer = useCallback(() => {
+    revokeBottomReportObjectUrl();
+    setBottomReportViewer(null);
+  }, [revokeBottomReportObjectUrl]);
+
+  useEffect(() => {
+    return () => {
+      revokeBottomReportObjectUrl();
+    };
+  }, [revokeBottomReportObjectUrl]);
+
+  useEffect(() => {
+    closeBottomReportViewer();
+  }, [analysisReportId, closeBottomReportViewer]);
 
   useEffect(() => {
     return () => {
@@ -957,6 +1006,67 @@ export function ChatbotWorkspacePage() {
     return true;
   }
 
+  function openCitationDensityReportWorkspace({
+    reportFlavor,
+    result,
+    onRegenerate,
+  }: {
+    reportFlavor: CitationDensityWorkspaceReportFlavor;
+    result: AnnotatedEstimateExportResult;
+    onRegenerate?: () => void;
+  }) {
+    revokeBottomReportObjectUrl();
+    const pdfUrl = URL.createObjectURL(result.blob);
+    bottomReportObjectUrlRef.current = pdfUrl;
+    setBottomReportViewer({
+      kind: "citation-density",
+      id: `${reportFlavor}-${Date.now()}`,
+      reportFlavor,
+      title: getCitationDensityWorkspaceTitle(reportFlavor),
+      filename: result.filename,
+      pdfUrl,
+      annotations: result.annotationMetadata,
+      diagnostics: buildCitationDensityViewerDiagnostics(result, reportFlavor),
+      artifactId: result.artifactId,
+      downloadUrl: result.downloadUrl,
+      artifactUnavailableMessage: result.artifactFallbackUsed
+        ? "The saved artifact link was unavailable, so this viewer is using fresh generated PDF bytes from the current report response."
+        : null,
+      onRegenerate,
+    });
+  }
+
+  function openReportDocumentWorkspace({
+    reportType,
+    document,
+    onRegenerate,
+  }: {
+    reportType: ReportKind;
+    document: CarrierReportDocument;
+    onRegenerate?: () => void;
+  }) {
+    revokeBottomReportObjectUrl();
+    setBottomReportViewer({
+      kind: "report-document",
+      id: `${reportType}-${Date.now()}`,
+      reportType,
+      title: getReportWorkspaceTitle(reportType, document),
+      filename: document.filename || getDefaultReportFilename(reportType),
+      document,
+      generatedAtLabel: new Date().toLocaleString(),
+      onRegenerate,
+    });
+  }
+
+  async function askAboutBottomCitationDensityFinding(annotation: CitationDensityAnnotationMetadata) {
+    closeBottomReportViewer();
+    const prompt = buildCitationDensityFindingPrompt(annotation);
+    const sent = await sendCitationDensityFindingPrompt(prompt);
+    if (!sent) {
+      console.info("Open or continue this case before asking about a finding.");
+    }
+  }
+
   const chatBlocked = !consentAccepted;
   const featureFlags = viewerAccess?.featureFlags;
   const remainingAnalyses = viewerAccess?.usage?.remaining ?? null;
@@ -1081,8 +1191,8 @@ export function ChatbotWorkspacePage() {
         title="Collision-IQ"
         planLabel={trialBadgeLabel}
         center={
-          <div className="relative h-full min-h-0 w-full">
-            <div className={`grid h-full min-h-0 w-full gap-1 pt-1 sm:gap-3 sm:pt-3 ${workspaceRowsClass}`}>
+          <div className="relative flex h-full min-h-0 w-full flex-col">
+            <div className={`grid min-h-0 w-full flex-1 gap-1 pt-1 sm:gap-3 sm:pt-3 ${workspaceRowsClass}`}>
               {hasStructuredAnalysis && (
                 <div
                   className={
@@ -1438,6 +1548,13 @@ export function ChatbotWorkspacePage() {
                 </section>
               </div>
             </div>
+            <BottomReportWorkspacePanel
+              viewer={bottomReportViewer}
+              onClose={closeBottomReportViewer}
+              onAskAboutCitationDensityFinding={(annotation) => {
+                void askAboutBottomCitationDensityFinding(annotation);
+              }}
+            />
           </div>
         }
         right={
@@ -1476,7 +1593,8 @@ export function ChatbotWorkspacePage() {
               revealImmersiveSection(insightKey);
             }}
             onEvidenceSelect={handleEvidenceSelect}
-            onAskAboutCitationDensityFinding={sendCitationDensityFindingPrompt}
+            onCitationDensityReportReady={openCitationDensityReportWorkspace}
+            onReportWorkspaceOpen={openReportDocumentWorkspace}
           />
         }
       />
@@ -1644,7 +1762,8 @@ function RailContent({
   activeEvidenceTargetId,
   onInsightSelect,
   onEvidenceSelect,
-  onAskAboutCitationDensityFinding,
+  onCitationDensityReportReady,
+  onReportWorkspaceOpen,
 }: {
   attachment: string | null;
   analysisText: string;
@@ -1678,7 +1797,16 @@ function RailContent({
   activeEvidenceTargetId: string | null;
   onInsightSelect: (insightKey: InsightKey) => void;
   onEvidenceSelect: (link: EvidenceLink) => void;
-  onAskAboutCitationDensityFinding: (prompt: string) => Promise<boolean>;
+  onCitationDensityReportReady: (params: {
+    reportFlavor: CitationDensityWorkspaceReportFlavor;
+    result: AnnotatedEstimateExportResult;
+    onRegenerate?: () => void;
+  }) => void;
+  onReportWorkspaceOpen: (params: {
+    reportType: ReportKind;
+    document: CarrierReportDocument;
+    onRegenerate?: () => void;
+  }) => void;
 }) {
   const sectionRefs = useRef<Partial<Record<InsightKey, HTMLDivElement | null>>>({});
   const [isGeneratingCustomerReport, setIsGeneratingCustomerReport] = useState(false);
@@ -1704,7 +1832,6 @@ function RailContent({
   const [reportSendHistory, setReportSendHistory] = useState<ReportSendHistoryItem[]>([]);
   const [reportSendHistoryLoading, setReportSendHistoryLoading] = useState(false);
   const [serviceCheckoutLoading, setServiceCheckoutLoading] = useState(false);
-  const [citationDensityViewer, setCitationDensityViewer] = useState<CitationDensityViewerState>(null);
   function registerSectionRef(insightKey: InsightKey, node: HTMLDivElement | null) {
     sectionRefs.current[insightKey] = node;
   }
@@ -2073,13 +2200,13 @@ function RailContent({
       try {
         const exportResult = await generateAnnotatedCitationDensityEstimate();
         downloadBlob(exportResult.blob, exportResult.filename);
-        if (exportResult.annotationMetadata.length > 0) {
-          setCitationDensityViewer({
-            pdfUrl: exportResult.downloadUrl,
-            annotations: exportResult.annotationMetadata,
-            diagnostics: exportResult.debugCounts,
-          });
-        }
+        onCitationDensityReportReady({
+          reportFlavor: "delta",
+          result: exportResult,
+          onRegenerate: () => {
+            void downloadReportDocument("estimate_scrubber");
+          },
+        });
         setReportSendStatus(buildAnnotatedCitationDensityStatus(exportResult));
       } catch (error) {
         setReportSendStatus(error instanceof Error ? error.message : "Annotated estimate download failed.");
@@ -2090,13 +2217,13 @@ function RailContent({
       try {
         const exportResult = await generateOemCitationDensityReport();
         downloadBlob(exportResult.blob, exportResult.filename);
-        if (exportResult.annotationMetadata.length > 0) {
-          setCitationDensityViewer({
-            pdfUrl: exportResult.downloadUrl,
-            annotations: exportResult.annotationMetadata,
-            diagnostics: exportResult.debugCounts,
-          });
-        }
+        onCitationDensityReportReady({
+          reportFlavor: "oem",
+          result: exportResult,
+          onRegenerate: () => {
+            void downloadReportDocument("oem_citation_density");
+          },
+        });
         setReportSendStatus(buildAnnotatedCitationDensityStatus(exportResult));
       } catch (error) {
         setReportSendStatus(error instanceof Error ? error.message : "OEM Citation Density Report download failed.");
@@ -2111,10 +2238,51 @@ function RailContent({
 
     try {
       const document = await buildReportDocument(reportType);
+      onReportWorkspaceOpen({
+        reportType,
+        document,
+        onRegenerate: () => {
+          void downloadReportDocument(reportType);
+        },
+      });
       void exportCarrierPDF(document);
     } catch (error) {
       setReportSendStatus(error instanceof Error ? error.message : "Report download failed.");
     }
+  }
+
+  function downloadCustomerReportDocument() {
+    if (isGeneratingCustomerReport) {
+      return;
+    }
+
+    void exportCustomerReport({
+      renderModel,
+      normalizedResult,
+      analysisResult,
+      panel,
+      analysisText,
+      workspaceData,
+      onStart: () => {
+        setCustomerReportError(null);
+        setIsGeneratingCustomerReport(true);
+      },
+      onComplete: () => setIsGeneratingCustomerReport(false),
+      onLocked: onCustomerReportLocked,
+      onError: setCustomerReportError,
+      onDocumentReady: (document) => {
+        onReportWorkspaceOpen({
+          reportType: "customer_report",
+          document,
+          onRegenerate: downloadCustomerReportDocument,
+        });
+      },
+    });
+    emitSafeCrmEventFromClient({
+      event: "report_generated",
+      plan,
+      exportType: "customer_report",
+    });
   }
 
   async function generateAnnotatedCitationDensityEstimate(): Promise<AnnotatedEstimateExportResult> {
@@ -2133,6 +2301,8 @@ function RailContent({
       credentials: "same-origin",
       body: JSON.stringify({
         caseId: analysisReportId,
+        activeCaseId: analysisReportId,
+        artifactIds: attachmentIds,
         targetEstimate: "auto",
         annotationMode: "both",
         includeLegend: true,
@@ -2146,6 +2316,7 @@ function RailContent({
       artifactId?: unknown;
       exportId?: unknown;
       annotationMetadata?: unknown;
+      pdfBase64?: unknown;
       annotatedFindingCount?: unknown;
       unresolvedAnchorCount?: unknown;
       warnings?: unknown;
@@ -2160,7 +2331,11 @@ function RailContent({
       throw new Error(formatAnnotatedExportError(data, "Annotated estimate export failed."));
     }
 
-    const blob = await fetchAnnotatedCitationDensityPdfBlob(data.downloadUrl);
+    const pdfBase64 = typeof data.pdfBase64 === "string" ? data.pdfBase64 : undefined;
+    let artifactFallbackUsed = false;
+    const blob = await fetchAnnotatedCitationDensityPdfBlob(data.downloadUrl, pdfBase64, () => {
+      artifactFallbackUsed = true;
+    });
     return {
       blob,
       filename: "delta-citation-density-report.pdf",
@@ -2170,6 +2345,8 @@ function RailContent({
           ? data.exportId
           : "",
       downloadUrl: data.downloadUrl,
+      pdfBase64,
+      artifactFallbackUsed,
       annotationMetadata: Array.isArray(data.annotationMetadata)
         ? data.annotationMetadata.filter(isCitationDensityAnnotationMetadata)
         : [],
@@ -2202,7 +2379,9 @@ function RailContent({
       credentials: "same-origin",
       body: JSON.stringify({
         caseId: analysisReportId,
-        targetEstimate: "all",
+        activeCaseId: analysisReportId,
+        artifactIds: attachmentIds,
+        targetEstimate: "auto",
         annotationMode: "both",
         includeLegend: true,
         includeSummaryPage: false,
@@ -2215,6 +2394,7 @@ function RailContent({
       artifactId?: unknown;
       exportId?: unknown;
       annotationMetadata?: unknown;
+      pdfBase64?: unknown;
       annotatedFindingCount?: unknown;
       unresolvedAnchorCount?: unknown;
       warnings?: unknown;
@@ -2229,7 +2409,11 @@ function RailContent({
       throw new Error(formatAnnotatedExportError(data, "OEM Citation Density Report export failed."));
     }
 
-    const blob = await fetchAnnotatedCitationDensityPdfBlob(data.downloadUrl);
+    const pdfBase64 = typeof data.pdfBase64 === "string" ? data.pdfBase64 : undefined;
+    let artifactFallbackUsed = false;
+    const blob = await fetchAnnotatedCitationDensityPdfBlob(data.downloadUrl, pdfBase64, () => {
+      artifactFallbackUsed = true;
+    });
     return {
       blob,
       filename: "oem-citation-density-report.pdf",
@@ -2239,6 +2423,8 @@ function RailContent({
           ? data.exportId
           : "",
       downloadUrl: data.downloadUrl,
+      pdfBase64,
+      artifactFallbackUsed,
       annotationMetadata: Array.isArray(data.annotationMetadata)
         ? data.annotationMetadata.filter(isCitationDensityAnnotationMetadata)
         : [],
@@ -2253,23 +2439,6 @@ function RailContent({
         ? data.debugCounts as Record<string, unknown>
         : null,
     };
-  }
-
-  async function askAboutCitationDensityFinding(annotation: CitationDensityAnnotationMetadata) {
-    if (!analysisReportId) {
-      setReportSendStatus("Open or continue this case before asking about a finding.");
-      return;
-    }
-
-    setCitationDensityViewer(null);
-    const prompt = buildCitationDensityFindingPrompt(annotation);
-    setReportSendStatus(`Asking about Citation Density finding ${annotation.markerNumber}...`);
-    const sent = await onAskAboutCitationDensityFinding(prompt);
-    if (!sent) {
-      setReportSendStatus("Open or continue this case before asking about a finding.");
-      return;
-    }
-    setReportSendStatus(null);
   }
 
   async function buildReportDocument(reportType: ReportKind): Promise<CarrierReportDocument> {
@@ -2374,9 +2543,17 @@ function RailContent({
 
     try {
       if (activeReportToSend === "estimate_scrubber" || activeReportToSend === "oem_citation_density") {
+        const reportTypeForRegenerate = activeReportToSend;
         const exportResult = activeReportToSend === "oem_citation_density"
           ? await generateOemCitationDensityReport()
           : await generateAnnotatedCitationDensityEstimate();
+        onCitationDensityReportReady({
+          reportFlavor: activeReportToSend === "oem_citation_density" ? "oem" : "delta",
+          result: exportResult,
+          onRegenerate: () => {
+            void downloadReportDocument(reportTypeForRegenerate);
+          },
+        });
         const pdfBase64 = await blobToBase64(exportResult.blob);
         const response = await fetch("/api/reports/send", {
           method: "POST",
@@ -2431,6 +2608,14 @@ function RailContent({
       }
 
       const document = await buildReportDocument(activeReportToSend);
+      const reportTypeForRegenerate = activeReportToSend;
+      onReportWorkspaceOpen({
+        reportType: activeReportToSend,
+        document,
+        onRegenerate: () => {
+          void downloadReportDocument(reportTypeForRegenerate);
+        },
+      });
       const pdfBlob = await buildCarrierPdfBlob(document);
       const pdfBase64 = await blobToBase64(pdfBlob);
       const response = await fetch("/api/reports/send", {
@@ -3265,32 +3450,7 @@ function RailContent({
                   <button
                     type="button"
                     aria-disabled={isGeneratingCustomerReport}
-                    onClick={() => {
-                      if (isGeneratingCustomerReport) {
-                        return;
-                      }
-
-                      void exportCustomerReport({
-                        renderModel,
-                        normalizedResult,
-                        analysisResult,
-                        panel,
-                        analysisText,
-                        workspaceData,
-                        onStart: () => {
-                          setCustomerReportError(null);
-                          setIsGeneratingCustomerReport(true);
-                        },
-                        onComplete: () => setIsGeneratingCustomerReport(false),
-                        onLocked: onCustomerReportLocked,
-                        onError: setCustomerReportError,
-                      });
-                      emitSafeCrmEventFromClient({
-                        event: "report_generated",
-                        plan,
-                        exportType: "customer_report",
-                      });
-                    }}
+                    onClick={downloadCustomerReportDocument}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
                   >
                     <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> {isGeneratingCustomerReport ? "Generating..." : "Download PDF"}</span>
@@ -3421,18 +3581,152 @@ function RailContent({
           }}
         />
       ) : null}
-      {citationDensityViewer ? (
-        <CitationDensityAnnotationViewer
-          pdfUrl={citationDensityViewer.pdfUrl}
-          annotations={citationDensityViewer.annotations}
-          diagnostics={citationDensityViewer.diagnostics}
-          onClose={() => setCitationDensityViewer(null)}
-          onAsk={(annotation) => {
-            void askAboutCitationDensityFinding(annotation);
-          }}
-        />
-      ) : null}
     </div>
+  );
+}
+
+function BottomReportWorkspacePanel({
+  viewer,
+  onClose,
+  onAskAboutCitationDensityFinding,
+}: {
+  viewer: BottomReportViewerState;
+  onClose: () => void;
+  onAskAboutCitationDensityFinding: (annotation: CitationDensityAnnotationMetadata) => void;
+}) {
+  if (!viewer) return null;
+
+  return (
+    <div className="shrink-0 border-t border-border bg-background/95 p-2 shadow-[0_-20px_55px_rgba(15,23,42,0.10)] backdrop-blur sm:p-3 dark:shadow-[0_-20px_55px_rgba(0,0,0,0.28)]">
+      {viewer.kind === "citation-density" ? (
+        <CitationDensityAnnotationViewer
+          key={viewer.id}
+          variant="inline"
+          title={viewer.title}
+          filename={viewer.filename}
+          pdfUrl={viewer.pdfUrl}
+          annotations={viewer.annotations}
+          diagnostics={viewer.diagnostics}
+          artifactUnavailableMessage={viewer.artifactUnavailableMessage}
+          onClose={onClose}
+          onRegenerate={viewer.onRegenerate}
+          onAsk={onAskAboutCitationDensityFinding}
+        />
+      ) : (
+        <ReportDocumentBottomViewer key={viewer.id} viewer={viewer} onClose={onClose} />
+      )}
+    </div>
+  );
+}
+
+function ReportDocumentBottomViewer({
+  viewer,
+  onClose,
+}: {
+  viewer: Extract<NonNullable<BottomReportViewerState>, { kind: "report-document" }>;
+  onClose: () => void;
+}) {
+  const [activeTab, setActiveTab] = useState<"summary" | "sections">("summary");
+  const tabClass = (active: boolean) => [
+    "rounded-md border px-3 py-1.5 text-xs font-semibold transition",
+    active
+      ? "border-[#C65A2A]/45 bg-[#C65A2A]/12 text-foreground"
+      : "border-border bg-muted text-muted-foreground hover:bg-card hover:text-foreground",
+  ].join(" ");
+
+  return (
+    <section
+      className="flex max-h-[min(44svh,520px)] min-h-[150px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-[0_20px_60px_rgba(15,23,42,0.16)] ring-1 ring-ring/10 dark:shadow-[0_20px_60px_rgba(0,0,0,0.38)]"
+      aria-label={`${viewer.title} bottom report viewer`}
+      data-report-bottom-viewer="true"
+    >
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-3 py-2.5 sm:px-4">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-card-foreground">{viewer.title}</div>
+          <div className="text-xs text-muted-foreground">
+            Interactive report review · generated {viewer.generatedAtLabel}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {viewer.onRegenerate ? (
+            <button
+              type="button"
+              onClick={viewer.onRegenerate}
+              className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-md border border-border bg-muted p-2 text-muted-foreground transition hover:bg-background hover:text-foreground"
+              aria-label={`Regenerate ${viewer.title}`}
+              title={`Regenerate ${viewer.title}`}
+            >
+              <RefreshCcw size={16} />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void exportCarrierPDF(viewer.document)}
+            className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-md border border-border bg-muted p-2 text-muted-foreground transition hover:bg-background hover:text-foreground"
+            aria-label="Download PDF"
+            title="Download PDF"
+          >
+            <Download size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-md border border-border bg-muted p-2 text-muted-foreground transition hover:bg-background hover:text-foreground"
+            aria-label="Close bottom report viewer"
+            title="Close bottom report viewer"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto bg-background p-3">
+        <div className="mb-3 flex flex-wrap gap-2" role="tablist" aria-label="Report sections">
+          <button type="button" role="tab" aria-selected={activeTab === "summary"} onClick={() => setActiveTab("summary")} className={tabClass(activeTab === "summary")}>Summary</button>
+          <button type="button" role="tab" aria-selected={activeTab === "sections"} onClick={() => setActiveTab("sections")} className={tabClass(activeTab === "sections")}>Report sections</button>
+        </div>
+
+        {activeTab === "summary" ? (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {viewer.document.summary.map((item) => (
+              <div key={`${item.label}-${item.value}`} className="rounded-md border border-border bg-card p-3">
+                <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{item.label}</div>
+                <div className="mt-1 break-words text-sm leading-6 text-card-foreground">{item.value}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {viewer.document.sections.map((section, index) => (
+              <details key={`${section.title}-${index}`} open={index === 0} className="rounded-md border border-border bg-card p-3">
+                <summary className="cursor-pointer text-sm font-semibold text-card-foreground">{section.title}</summary>
+                {section.body ? <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{section.body}</p> : null}
+                {section.bullets?.length ? (
+                  <ul className="mt-3 space-y-2 pl-4 text-sm leading-6 text-muted-foreground">
+                    {section.bullets.map((bullet) => <li key={bullet} className="list-disc">{bullet}</li>)}
+                  </ul>
+                ) : null}
+                {section.comparisonRows?.length ? (
+                  <div className="mt-3 space-y-2">
+                    {section.comparisonRows.map((row) => (
+                      <div key={`${row.label}-${row.leftValue}-${row.rightValue}`} className="rounded-md border border-border bg-muted p-3 text-xs leading-5 text-muted-foreground">
+                        <div className="font-semibold text-card-foreground">{row.label}</div>
+                        <div className="mt-1 grid gap-2 sm:grid-cols-2">
+                          <div>{row.leftLabel}: {row.leftValue}</div>
+                          <div>{row.rightLabel}: {row.rightValue}</div>
+                        </div>
+                        {row.delta ? <div className="mt-1">Delta: {row.delta}</div> : null}
+                        {row.note ? <div className="mt-1">Note: {row.note}</div> : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </details>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -3733,6 +4027,48 @@ function getDefaultReportFilename(reportType: ReportKind): string {
     case "customer_report":
       return "customer-report.pdf";
   }
+}
+
+function getCitationDensityWorkspaceTitle(reportFlavor: CitationDensityWorkspaceReportFlavor): string {
+  return reportFlavor === "oem" ? "OEM Citation Density Report" : "Delta Citation Density Report";
+}
+
+function getReportWorkspaceTitle(reportType: ReportKind, document: CarrierReportDocument): string {
+  if (document.header.title) return document.header.title;
+  switch (reportType) {
+    case "repair_intelligence":
+      return "Repair Intelligence Report";
+    case "customer_report":
+      return "Customer Report";
+    case "doi_complaint_packet":
+      return "DOI Complaint Packet";
+    case "snapshot":
+      return "Collision Snapshot";
+    case "estimator_change_request_list":
+      return "Estimator Change Request List";
+    case "policy_rights_review":
+      return "Policy & Rights Review";
+    case "estimate_scrubber":
+      return "Delta Citation Density Report";
+    case "oem_citation_density":
+      return "OEM Citation Density Report";
+  }
+}
+
+function buildCitationDensityViewerDiagnostics(
+  result: AnnotatedEstimateExportResult,
+  reportFlavor: CitationDensityWorkspaceReportFlavor
+): Record<string, unknown> {
+  return {
+    ...(result.debugCounts ?? {}),
+    reportType: reportFlavor === "oem" ? "oem-citation-density" : "citation-density",
+    artifactId: result.artifactId,
+    downloadUrl: result.downloadUrl,
+    staleArtifactFallbackUsed: result.artifactFallbackUsed === true,
+    freshPdfBytesAvailable: Boolean(result.pdfBase64),
+    annotatedFindingCount: result.annotatedFindingCount,
+    unresolvedAnchorCount: result.unresolvedAnchorCount,
+  };
 }
 
 function getDefaultReportMessage(
@@ -4361,6 +4697,7 @@ async function exportCustomerReport(params: {
   onComplete: () => void;
   onLocked: () => void;
   onError: (message: string | null) => void;
+  onDocumentReady?: (document: CarrierReportDocument) => void;
 }) {
   params.onStart();
 
@@ -4392,10 +4729,12 @@ async function exportCustomerReport(params: {
       throw new Error("Customer report response was empty.");
     }
 
-    exportCustomerReportPdf(data.report, {
+    const document = createCustomerReportDocument(data.report, {
       renderModel: params.renderModel,
       fileName: data.fileName,
     });
+    params.onDocumentReady?.(document);
+    void exportCarrierPDF(document);
   } catch (error) {
     params.onError(
       error instanceof Error
@@ -4589,15 +4928,36 @@ function buildAnnotatedCitationDensityStatus(
   return `${prefix} Annotated findings: ${result.annotatedFindingCount}. Unanchored findings: ${result.unresolvedAnchorCount}.${warnings}`;
 }
 
-async function fetchAnnotatedCitationDensityPdfBlob(downloadUrl: string): Promise<Blob> {
+async function fetchAnnotatedCitationDensityPdfBlob(
+  downloadUrl: string,
+  fallbackPdfBase64?: string,
+  onArtifactUnavailable?: () => void
+): Promise<Blob> {
   const response = await fetch(downloadUrl, {
     method: "GET",
     credentials: "same-origin",
   });
   if (!response.ok) {
-    throw new Error(`Annotated estimate download failed (${response.status}).`);
+    if (response.status === 404 && fallbackPdfBase64) {
+      onArtifactUnavailable?.();
+      return pdfBase64ToBlob(fallbackPdfBase64);
+    }
+    throw new Error(
+      response.status === 404
+        ? "This Citation Density export is no longer available. Regenerate the report to refresh the artifact."
+        : `Annotated estimate download failed (${response.status}).`
+    );
   }
   return await response.blob();
+}
+
+function pdfBase64ToBlob(value: string): Blob {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: "application/pdf" });
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -4609,13 +4969,6 @@ function downloadBlob(blob: Blob, filename: string) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
-}
-
-function exportCustomerReportPdf(report: CustomerReport, params: {
-  renderModel: ReturnType<typeof buildExportModel>;
-  fileName?: string;
-}) {
-  void exportCarrierPDF(createCustomerReportDocument(report, params));
 }
 
 function createCustomerReportDocument(report: CustomerReport, params: {

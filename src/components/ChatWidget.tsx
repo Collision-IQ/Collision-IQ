@@ -1782,9 +1782,12 @@ export default function ChatWidget({
           const exportResponse = await fetch("/api/reports/citation-density/annotated-estimate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
             signal: controller.signal,
             body: JSON.stringify({
               caseId: activeCaseId,
+              activeCaseId,
+              artifactIds: attachmentsRef.current.map((attachment) => attachment.attachmentId),
               targetEstimate: resolveAnnotatedCitationDensityTarget(messageToSend),
               annotationMode: "both",
               includeLegend: true,

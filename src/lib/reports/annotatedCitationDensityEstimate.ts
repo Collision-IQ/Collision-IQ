@@ -141,6 +141,7 @@ export type CitationDensityDebugTrace = {
   selectedEstimateFileName?: string;
   selectedEstimateForOemDensity?: string;
   selectedEstimateReason?: string;
+  selectedEstimateDiagnostics?: Record<string, unknown>;
   selectedEstimateTotal?: number | null;
   comparisonEstimateTotal?: number | null;
   uploadedFileNames?: string[];

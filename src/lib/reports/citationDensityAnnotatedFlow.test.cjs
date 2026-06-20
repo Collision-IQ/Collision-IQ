@@ -178,6 +178,8 @@ run("chat intent routes annotated citation density carrier estimate requests to 
   assert.match(chatSource, /\/api\/reports\/citation-density\/annotated-estimate/);
   assert.doesNotMatch(chatSource, /sourceDocumentId:\s*sourcePdf\.attachmentId/);
   assert.match(chatSource, /Download Delta Citation Density Report/);
+  assert.match(chatSource, /activeCaseId,/);
+  assert.match(chatSource, /artifactIds: attachmentsRef\.current\.map/);
   assert.doesNotMatch(chatSource, /I can't generate a PDF|I can only give you the annotation set|use this in Adobe|use this in Bluebeam/i);
   assert.doesNotMatch(chatSource, /annotation set|line-by-documentation map|ready-to-apply|annotation table|annotation map/i);
 });
@@ -277,6 +279,17 @@ run("Citation Density viewer uses server-generated PDF and converts PDF coordina
   assert.doesNotMatch(source, /disableWorker:\s*true/);
   assert.match(source, /PDF viewer failed to initialize\. Download the PDF instead\./);
   assert.match(source, /PDF preview is temporarily disabled/);
+  assert.match(source, /variant = "modal"/);
+  assert.match(source, /data-citation-density-bottom-viewer/);
+  assert.match(source, /ReportTabs/);
+  assert.match(source, /Selected estimate reason/);
+  assert.match(source, /Comparison estimate total/);
+  assert.match(source, /Authority trace status/);
+  assert.match(source, /Drive search status/);
+  assert.match(source, /Matched folders\/docs count/);
+  assert.match(source, /Line-item finding/);
+  assert.match(source, /Missing support/);
+  assert.match(source, /Next action/);
   assert.match(source, /href=\{pdfUrl\}/);
   assert.match(source, /getAnnotationSelectionKey/);
   assert.doesNotMatch(source, /pdfHeight - source\.y - source\.height/);
@@ -351,8 +364,27 @@ run("annotated export uses persisted artifact id for download and metadata", () 
   assert.match(routeSource, /This export is no longer available\. Regenerate Delta Citation Density Report\./);
   assert.match(fs.readFileSync(path.join(process.cwd(), "src/lib/reports/annotatedCitationDensityEstimate.ts"), "utf8"), /toSourcePdfPageIndex\(sourcePdfPageNumber\)/);
   assert.match(fs.readFileSync(path.join(process.cwd(), "src/lib/reports/annotatedCitationDensityEstimate.ts"), "utf8"), /sourcePdfPageNumber - 1/);
+  assert.match(routeSource, /pdfBase64: Buffer\.from\(result\.bytes\)\.toString\("base64"\)/);
+  assert.match(routeSource, /pdfBase64: primaryOutput\?\.pdfBase64/);
   assert.match(pageSource, /artifactId/);
-  assert.match(pageSource, /fetchAnnotatedCitationDensityPdfBlob\(data\.downloadUrl\)/);
+  assert.match(pageSource, /fetchAnnotatedCitationDensityPdfBlob\(data\.downloadUrl,\s*pdfBase64,\s*\(\) =>/);
+  assert.match(pageSource, /pdfBase64ToBlob\(fallbackPdfBase64\)/);
+  assert.match(pageSource, /artifactFallbackUsed = true/);
+});
+
+run("bottom report workspace restores interactive in-context report review", () => {
+  const pageSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
+
+  assert.match(pageSource, /BottomReportWorkspacePanel/);
+  assert.match(pageSource, /variant="inline"/);
+  assert.match(pageSource, /URL\.createObjectURL\(result\.blob\)/);
+  assert.match(pageSource, /URL\.revokeObjectURL\(bottomReportObjectUrlRef\.current\)/);
+  assert.match(pageSource, /onCitationDensityReportReady/);
+  assert.match(pageSource, /onReportWorkspaceOpen/);
+  assert.match(pageSource, /data-report-bottom-viewer/);
+  assert.match(pageSource, /artifactUnavailableMessage: result\.artifactFallbackUsed/);
+  assert.match(pageSource, /The saved artifact link was unavailable/);
+  assert.match(pageSource, /ReportDocumentBottomViewer/);
 });
 
 run("Ask about finding sends selected finding context into active chat", () => {

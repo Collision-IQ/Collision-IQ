@@ -52,8 +52,11 @@ export const dynamic = "force-dynamic";
 
 type RequestBody = {
   caseId?: unknown;
+  activeCaseId?: unknown;
+  artifactIds?: unknown;
   sourceDocumentId?: unknown;
   targetEstimate?: unknown;
+  sameCaseFollowUp?: unknown;
   findingIds?: unknown;
   annotationMode?: unknown;
   includeLegend?: unknown;
@@ -110,9 +113,10 @@ export async function POST(request: Request) {
   try {
     const { user } = await requireCurrentUser();
     const body = (await request.json().catch(() => ({}))) as RequestBody;
-    const caseId = coerceString(body.caseId);
+    const caseId = coerceString(body.caseId) || coerceString(body.activeCaseId);
     const sourceDocumentId = coerceString(body.sourceDocumentId);
     const targetEstimate = coerceTargetEstimate(body.targetEstimate);
+    const requestArtifactIds = coerceStringArray(body.artifactIds) ?? [];
 
     const report = caseId
       ? await getAnalysisReport(caseId, { ownerUserId: user.id })
@@ -124,7 +128,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const sourceDocuments = await getUploadedAttachments(report.artifactIds, { ownerUserId: user.id });
+    const candidateAttachmentIds = uniqueStrings([
+      ...report.artifactIds,
+      ...requestArtifactIds,
+      sourceDocumentId || undefined,
+    ]);
+    const sourceDocuments = await getUploadedAttachments(candidateAttachmentIds, { ownerUserId: user.id });
     const sourceDiagnostics = withFileReviewDiagnostics(sourceDocuments, buildCitationDensitySourcePdfDiagnostics(sourceDocuments));
     const sourceSelections = resolveOemSourceSelections({
       sourceDocuments,
@@ -133,15 +142,29 @@ export async function POST(request: Request) {
       report: report.report,
       sourceDiagnostics,
     });
+    const selectionDiagnostics = buildOemSelectionDiagnostics({
+      requestedSourceDocumentId: sourceDocumentId,
+      activeCaseId: report.id,
+      sameCaseFollowUp: typeof body.sameCaseFollowUp === "boolean" ? body.sameCaseFollowUp : Boolean(caseId),
+      ownerUserId: user.id,
+      sourceDocuments,
+      sourceSelections,
+    });
 
     if (!sourceSelections.length) {
       if (sourceDocumentId) {
+        logOemAnnotatedEstimateRoute({
+          ok: false,
+          error: "Selected source PDF is not an original estimate PDF.",
+          selectionDiagnostics,
+        });
         return NextResponse.json(
           {
             error: "Selected source PDF is not an original estimate PDF.",
             userMessage: "Select the original carrier or shop estimate PDF. OEM Citation Density Report annotates estimate source PDFs only.",
             reportType: "oem-citation-density",
             routeName: "oem-citation-density",
+            selectionDiagnostics,
             ...sourceDiagnostics,
           },
           { status: 400 }
@@ -233,6 +256,7 @@ export async function POST(request: Request) {
       outputs.push({
         artifactId,
         exportId: artifactId,
+        pdfBase64: Buffer.from(result.bytes).toString("base64"),
         estimateRole,
         sourceDocumentId: selection.selectedSourceDocumentId,
         downloadUrl,
@@ -240,7 +264,7 @@ export async function POST(request: Request) {
         unresolvedAnchorCount: result.unresolvedAnchorCount,
         warnings: result.warnings,
         annotationMetadata: result.annotationMetadata,
-        debugTrace: withOemSelectionDebug(result.debugTrace, selection),
+        debugTrace: withOemSelectionDebug(result.debugTrace, selection, selectionDiagnostics),
         debugCounts: buildOemAnnotationDebugCounts(result.debugTrace),
         annotationMetadataUrl: `/api/reports/oem-citation-density/annotated-estimate?metadata=1&artifactId=${encodeURIComponent(artifactId)}`,
         selectedSourceLabel: selection.selectedSourceLabel,
@@ -248,6 +272,7 @@ export async function POST(request: Request) {
         comparisonEstimateTotal: selection.comparisonEstimateTotal,
         selectedEstimateForOemDensity: selection.selectedSourceLabel,
         selectedEstimateReason: selection.selectionReason,
+        selectedEstimateDiagnostics: selectionDiagnostics,
         selectionReason: selection.selectionReason,
         selectedDocumentType: selection.selectedDocumentType,
         selectedDocumentConfidence: selection.selectedDocumentConfidence,
@@ -261,6 +286,7 @@ export async function POST(request: Request) {
       ok: true,
       targetEstimate,
       selectedSourceDocumentId: primaryOutput?.sourceDocumentId,
+      selectionDiagnostics,
       debugCounts: responseDebugCounts,
       outputCount: outputs.length,
     });
@@ -271,6 +297,7 @@ export async function POST(request: Request) {
       artifactVersion: OEM_CITATION_DENSITY_ARTIFACT_VERSION,
       artifactId: primaryOutput?.artifactId ?? "",
       exportId: primaryOutput?.artifactId ?? "",
+      pdfBase64: primaryOutput?.pdfBase64,
       downloadUrl: primaryOutput?.downloadUrl,
       outputs,
       combinedPdfUrl: outputs.length > 1 ? undefined : primaryOutput?.downloadUrl,
@@ -291,6 +318,7 @@ export async function POST(request: Request) {
       comparisonEstimateTotal: primaryOutput?.comparisonEstimateTotal,
       selectedEstimateForOemDensity: primaryOutput?.selectedEstimateForOemDensity,
       selectedEstimateReason: primaryOutput?.selectedEstimateReason,
+      selectedEstimateDiagnostics: selectionDiagnostics,
       targetEstimate,
       selectionReason: outputs.map((output) => output.selectionReason).join(" "),
       routeName: "oem-citation-density",
@@ -406,6 +434,111 @@ function resolveOemSourceSelections(params: {
     targetEstimate: params.targetEstimate,
     findings: [],
   });
+}
+
+type OemSelectionDiagnostics = {
+  route: "oem-citation-density";
+  requestedSourceDocumentId: string | null;
+  activeCaseId: string | null;
+  sameCaseFollowUp: boolean;
+  ownerUserId: string | null;
+  candidateAttachmentCount: number;
+  candidateEstimateCount: number;
+  candidateEstimates: Array<{
+    attachmentId: string;
+    filename: string;
+    estimateRole: SourceEstimatePdfSelection["selectedEstimateRole"];
+    parsedTotal: number | null;
+    grossTotal: number | null;
+    netTotal: number | null;
+    insurerOrShopHint: "carrier" | "shop" | "selected";
+    selectedCandidate: boolean;
+  }>;
+  selectedEstimateForOemDensity: string | null;
+  selectedEstimateReason: string | null;
+  selectedEstimateTotal: number | null;
+  comparisonEstimateTotal: number | null;
+  selectionBypassedReason: string | null;
+};
+
+function buildOemSelectionDiagnostics(params: {
+  requestedSourceDocumentId: string;
+  activeCaseId: string | null;
+  sameCaseFollowUp: boolean;
+  ownerUserId: string;
+  sourceDocuments: Awaited<ReturnType<typeof getUploadedAttachments>>;
+  sourceSelections: SourceEstimatePdfSelection[];
+}): OemSelectionDiagnostics {
+  const selectedIds = new Set(params.sourceSelections.map((selection) => selection.selectedSourceDocumentId));
+  const estimateCandidates = params.sourceDocuments.filter(isAnnotatableEstimatePdf);
+  const primarySelection = params.sourceSelections[0] ?? null;
+  const requestedWasBypassed =
+    Boolean(params.requestedSourceDocumentId) &&
+    Boolean(primarySelection) &&
+    primarySelection?.selectedSourceDocumentId !== params.requestedSourceDocumentId;
+
+  return {
+    route: "oem-citation-density",
+    requestedSourceDocumentId: params.requestedSourceDocumentId || null,
+    activeCaseId: params.activeCaseId,
+    sameCaseFollowUp: params.sameCaseFollowUp,
+    ownerUserId: redactLogIdentifier(params.ownerUserId),
+    candidateAttachmentCount: params.sourceDocuments.length,
+    candidateEstimateCount: estimateCandidates.length,
+    candidateEstimates: estimateCandidates.map((document) => {
+      const totals = extractSafeEstimateTotals(document);
+      const role = inferEstimateRole(document.filename);
+      return {
+        attachmentId: document.id,
+        filename: document.filename || "Uploaded estimate",
+        estimateRole: role,
+        parsedTotal: totals.parsedTotal,
+        grossTotal: totals.grossTotal,
+        netTotal: totals.netTotal,
+        insurerOrShopHint: role === "shop" ? "shop" : role === "carrier" ? "carrier" : "selected",
+        selectedCandidate: selectedIds.has(document.id),
+      };
+    }),
+    selectedEstimateForOemDensity: primarySelection?.selectedSourceLabel ?? null,
+    selectedEstimateReason: primarySelection?.selectionReason ?? null,
+    selectedEstimateTotal: primarySelection?.selectedEstimateTotal ?? null,
+    comparisonEstimateTotal: primarySelection?.comparisonEstimateTotal ?? null,
+    selectionBypassedReason: requestedWasBypassed
+      ? "requested sourceDocumentId ignored because OEM Citation Density auto/default selection uses the lower estimate when sibling estimates are available"
+      : null,
+  };
+}
+
+function extractSafeEstimateTotals(document: Awaited<ReturnType<typeof getUploadedAttachments>>[number]) {
+  const text = `${document.filename}\n${document.text ?? ""}`;
+  return {
+    parsedTotal: extractSafeMoneyAfterLabel(text, /(?:(?:estimate|repair|grand)\s+total|total|gross|net)/gi, "last"),
+    grossTotal: extractSafeMoneyAfterLabel(text, /gross(?:\s+total)?/gi, "last"),
+    netTotal: extractSafeMoneyAfterLabel(text, /net(?:\s+total)?/gi, "last"),
+  };
+}
+
+function extractSafeMoneyAfterLabel(text: string, labelPattern: RegExp, mode: "first" | "last") {
+  const pattern = new RegExp(
+    `${labelPattern.source}\\s*[:#=/-]?\\s*\\$?\\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\\.\\d{2})?|[0-9]+(?:\\.\\d{2})?)`,
+    labelPattern.flags.includes("i") ? "gi" : "g"
+  );
+  const matches = [...text.matchAll(pattern)];
+  const raw = (mode === "first" ? matches[0] : matches.at(-1))?.[1];
+  if (!raw) return null;
+  const value = Number(raw.replace(/,/g, ""));
+  return Number.isFinite(value) ? value : null;
+}
+
+function redactLogIdentifier(value: string | null | undefined) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.includes("@")) {
+    const [local, domain] = trimmed.split("@");
+    return `${local.slice(0, 2)}***@${domain ? "***" : ""}`;
+  }
+  return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`;
 }
 
 async function buildOemAuthorityTrace(params: {
@@ -634,6 +767,7 @@ function buildOemAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof bui
     selectedEstimateFileName: debugTrace.selectedEstimateFileName,
     selectedEstimateTotal: debugTrace.selectedEstimateTotal,
     comparisonEstimateTotal: debugTrace.comparisonEstimateTotal,
+    selectedEstimateDiagnostics: debugTrace.selectedEstimateDiagnostics,
     selectedDocumentType: debugTrace.selectedDocumentType,
     selectedDocumentConfidence: debugTrace.selectedDocumentConfidence,
     actualSourcePdfName: debugTrace.actualSourcePdfName,
@@ -710,12 +844,14 @@ function coerceTargetEstimate(value: unknown): OemCitationDensityTargetEstimate 
 
 function withOemSelectionDebug(
   debugTrace: Awaited<ReturnType<typeof buildAnnotatedCitationDensityEstimatePdf>>["debugTrace"] | undefined,
-  selection: SourceEstimatePdfSelection
+  selection: SourceEstimatePdfSelection,
+  selectionDiagnostics?: OemSelectionDiagnostics
 ) {
   if (!debugTrace) return debugTrace;
   debugTrace.selectedEstimateForOemDensity = selection.selectedSourceLabel;
   debugTrace.selectedEstimateReason = selection.selectionReason;
   debugTrace.comparisonEstimateTotal = selection.comparisonEstimateTotal ?? null;
+  debugTrace.selectedEstimateDiagnostics = selectionDiagnostics;
   return debugTrace;
 }
 

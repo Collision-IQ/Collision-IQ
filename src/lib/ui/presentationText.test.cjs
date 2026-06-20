@@ -167,6 +167,8 @@ run("presentation cleanup normalizes export grammar, timestamps, numbers, URLs, 
       "The calibration-related procedures. The record includes not yet clearly with printouts.",
       "Please continue documentation added findings including a, pre-repair scan.",
       "Structural cues Structural frame-related operations battery primarym0.3 four-w repai Not clearly Not clearly shown.",
+      "Repair Intelligence references bumper cover1.8 and scan +34%1201.00t m.",
+      "Post scan +34%1167.50t failure. Procedure cost open to invoice.",
       "Carrier vulnerabilities: A. Shop vulnerabilities: B. Not final-award confidence: C.",
     ].join(" "),
     { preserveMarkdown: true }
@@ -181,7 +183,9 @@ run("presentation cleanup normalizes export grammar, timestamps, numbers, URLs, 
   assert.match(cleaned, /The file supports calibration-related procedures\. The record includes not yet clearly documented with printouts\./);
   assert.match(cleaned, /continue documenting added findings including a pre-repair scan/);
   assert.match(cleaned, /Structural frame-related operations/);
-  assert.doesNotMatch(cleaned, /primarym|four-w|\brepai\b/);
+  assert.match(cleaned, /Repair Intelligence references bumper cover and scan\./);
+  assert.match(cleaned, /Post scan repair support remains open pending invoice documentation\./);
+  assert.doesNotMatch(cleaned, /primarym|four-w|\brepai\b|bumper cover1\.8|scan \+34%|Procedure cost open/);
   assert.match(cleaned, /Not clearly shown/);
   assert.match(cleaned, /\n\nCarrier vulnerabilities:/);
   assert.match(cleaned, /\n\nShop vulnerabilities:/);
