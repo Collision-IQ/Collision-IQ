@@ -40,14 +40,12 @@ import {
 } from "@/lib/uploadSafety/uploadLimits";
 import {
   isVideoExtension,
-  VIDEO_MAX_BYTES,
 } from "@/lib/uploadSafety/videoSafety";
 import {
   isDatabaseUnavailableError,
   sanitizeDatabaseErrorForLog,
 } from "@/lib/database/health";
 import {
-  getZipMaxBytes,
   getUploadExtension,
   isZipUpload,
   prepareUploadFile,
@@ -57,9 +55,9 @@ import {
 
 export const runtime = "nodejs";
 
-const RUNTIME_SAFE_MULTIPART_BODY_BYTES = 50 * 1024 * 1024;
+const MULTIPART_BODY_OVERHEAD_BYTES = 2 * 1024 * 1024;
 const RUNTIME_LIMIT_MESSAGE =
-  "This file is within your plan limit, but exceeds the current platform upload limit. Direct large-file upload support is coming soon. For now, keep uploads under 50 MB.";
+  "This upload exceeds the plan limit for this file type. Upload a smaller file or upgrade your plan.";
 
 type UploadSuccess = {
   attachmentId: string;
@@ -101,12 +99,25 @@ type UploadTelemetry = {
     maxUploadBytes: number;
     maxFilesPerReview: number;
     zipAllowed: boolean;
+    maxZipCompressedBytes: number;
     cccWorkfileAllowed: boolean;
     maxExtractedFiles: number;
     maxExtractedTotalBytes: number;
     maxZipNestingDepth: number;
+    videoAllowed: boolean;
+    maxVideoBytes: number;
+    maxVideosPerReview: number;
+    videoMaxDurationSeconds: number;
   };
 };
+
+function getRuntimeMaxBodyBytes(uploadLimits: ReturnType<typeof resolveUploadPlanLimits>) {
+  return Math.max(
+    uploadLimits.maxUploadBytes,
+    uploadLimits.zipAllowed ? uploadLimits.maxZipCompressedBytes : 0,
+    uploadLimits.videoAllowed ? uploadLimits.maxVideoBytes : 0
+  ) + MULTIPART_BODY_OVERHEAD_BYTES;
+}
 
 function getFailureStatus(failedUploads: UploadFailure[]) {
   if (failedUploads.some((failure) => failure.code === "UPLOAD_QUOTA_REACHED")) {
@@ -203,20 +214,19 @@ function buildUploadTelemetry(params: {
     planLimitUsed: {
       plan: params.uploadLimits.plan,
       targetMaxUploadBytes: params.uploadLimits.maxUploadBytes,
-      runtimeMaxUploadBytes: Math.min(
-        Math.max(params.uploadLimits.maxUploadBytes, params.uploadLimits.zipAllowed ? getZipMaxBytes() : 0),
-        RUNTIME_SAFE_MULTIPART_BODY_BYTES
-      ),
-      maxUploadBytes: Math.min(
-        Math.max(params.uploadLimits.maxUploadBytes, params.uploadLimits.zipAllowed ? getZipMaxBytes() : 0),
-        RUNTIME_SAFE_MULTIPART_BODY_BYTES
-      ),
+      runtimeMaxUploadBytes: getRuntimeMaxBodyBytes(params.uploadLimits),
+      maxUploadBytes: params.uploadLimits.maxUploadBytes,
       maxFilesPerReview: params.uploadLimits.maxFilesPerReview,
       zipAllowed: params.uploadLimits.zipAllowed,
+      maxZipCompressedBytes: params.uploadLimits.maxZipCompressedBytes,
       cccWorkfileAllowed: params.uploadLimits.cccWorkfileAllowed,
       maxExtractedFiles: params.uploadLimits.maxExtractedFiles,
       maxExtractedTotalBytes: params.uploadLimits.maxExtractedTotalBytes,
       maxZipNestingDepth: params.uploadLimits.maxZipNestingDepth,
+      videoAllowed: params.uploadLimits.videoAllowed,
+      maxVideoBytes: params.uploadLimits.maxVideoBytes,
+      maxVideosPerReview: params.uploadLimits.maxVideosPerReview,
+      videoMaxDurationSeconds: params.uploadLimits.videoMaxDurationSeconds,
     },
   };
 }
@@ -253,12 +263,8 @@ export async function POST(req: Request) {
       ...entitlements,
       isPlatformAdmin: effectiveIsAdmin,
     });
-    // TODO(direct-to-storage): replace multipart uploads with signed object-storage URLs
-    // -> object storage -> async ZIP extraction -> analysis once uploads need to exceed runtime limits.
-    const runtimeMaxUploadBytes = Math.min(
-      Math.max(uploadLimits.maxUploadBytes, uploadLimits.zipAllowed ? getZipMaxBytes() : 0),
-      RUNTIME_SAFE_MULTIPART_BODY_BYTES
-    );
+    // Multipart is parsed once here; the ZIP itself is never sent through chat JSON.
+    const runtimeMaxUploadBytes = getRuntimeMaxBodyBytes(uploadLimits);
 
     if (!canUploadFiles) {
       console.info("[upload] request rejected", {
@@ -486,16 +492,16 @@ export async function POST(req: Request) {
       const isZip = isZipUpload(file);
       const isVideo = isVideoExtension(getUploadExtension(file.name));
       const maxFileBytes = isZip
-        ? getZipMaxBytes()
+        ? uploadLimits.maxZipCompressedBytes
         : isVideo
-          ? Math.min(uploadLimits.maxUploadBytes, VIDEO_MAX_BYTES)
+          ? uploadLimits.maxVideoBytes
           : uploadLimits.maxUploadBytes;
 
       if (file.size > maxFileBytes) {
         failedUploads.push({
           filename: file.name,
           reason: isZip
-            ? `ZIP archive exceeds ${formatUploadLimitBytes(getZipMaxBytes())}.`
+            ? `ZIP archive exceeds ${formatUploadLimitBytes(uploadLimits.maxZipCompressedBytes)} plan limit.`
             : `File exceeds ${formatUploadLimitBytes(maxFileBytes)} limit (${formatUploadLimitBytes(file.size)}).`,
           code: isZip ? "ZIP_TOO_LARGE" : "FILE_TOO_LARGE",
         });
@@ -530,8 +536,17 @@ export async function POST(req: Request) {
       if (isZip && !uploadLimits.zipAllowed) {
         failedUploads.push({
           filename: file.name,
-          reason: "ZIP uploads are not included in your current plan.",
+          reason: "ZIP uploads are not included in your current plan. Upgrade to Starter, Pro, or Admin to upload ZIP archives.",
           code: "ZIP_DISALLOWED_TYPE",
+        });
+        continue;
+      }
+
+      if (isVideo && !uploadLimits.videoAllowed) {
+        failedUploads.push({
+          filename: file.name,
+          reason: "Video uploads are available on Pro and Admin plans.",
+          code: "VIDEO_PLAN_REQUIRED",
         });
         continue;
       }
@@ -717,11 +732,16 @@ export async function POST(req: Request) {
             maxFiles: uploadLimits.maxFilesPerReview,
             maxFileBytes: uploadLimits.maxUploadBytes,
             runtimeMaxFileBytes: runtimeMaxUploadBytes,
-            temporaryPlatformLimit: true,
+            temporaryPlatformLimit: false,
             zipAllowed: uploadLimits.zipAllowed,
+            maxZipCompressedBytes: uploadLimits.maxZipCompressedBytes,
             maxExtractedFiles: uploadLimits.maxExtractedFiles,
             maxExtractedTotalBytes: uploadLimits.maxExtractedTotalBytes,
             maxZipNestingDepth: uploadLimits.maxZipNestingDepth,
+            videoAllowed: uploadLimits.videoAllowed,
+            maxVideoBytes: uploadLimits.maxVideoBytes,
+            maxVideosPerReview: uploadLimits.maxVideosPerReview,
+            videoMaxDurationSeconds: uploadLimits.videoMaxDurationSeconds,
             cccWorkfileAllowed: uploadLimits.cccWorkfileAllowed,
           },
           zipSummaries,
@@ -760,12 +780,17 @@ export async function POST(req: Request) {
         maxFiles: uploadLimits.maxFilesPerReview,
         maxFileBytes: uploadLimits.maxUploadBytes,
         runtimeMaxFileBytes: runtimeMaxUploadBytes,
-        temporaryPlatformLimit: true,
+        temporaryPlatformLimit: false,
         zipAllowed: uploadLimits.zipAllowed,
+        maxZipCompressedBytes: uploadLimits.maxZipCompressedBytes,
         cccWorkfileAllowed: uploadLimits.cccWorkfileAllowed,
         maxExtractedFiles: uploadLimits.maxExtractedFiles,
         maxExtractedTotalBytes: uploadLimits.maxExtractedTotalBytes,
         maxZipNestingDepth: uploadLimits.maxZipNestingDepth,
+        videoAllowed: uploadLimits.videoAllowed,
+        maxVideoBytes: uploadLimits.maxVideoBytes,
+        maxVideosPerReview: uploadLimits.maxVideosPerReview,
+        videoMaxDurationSeconds: uploadLimits.videoMaxDurationSeconds,
       },
       zipSummaries,
       telemetry,

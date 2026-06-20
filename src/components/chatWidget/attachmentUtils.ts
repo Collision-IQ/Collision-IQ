@@ -130,15 +130,28 @@ function isVideoAttachment(attachment: AttachmentCompactSummaryItem) {
   return mime.startsWith("video/") || /\.(?:mp4|mov|webm)$/i.test(filename);
 }
 
-export async function validateSelectedVideoDurations(files: File[]) {
+export async function validateSelectedVideoDurations(
+  files: File[],
+  options: { maxVideoBytes?: number; videoAllowed?: boolean } = {}
+) {
   const failures: Array<{ filename: string; reason: string; code: string }> = [];
+  const maxVideoBytes = options.maxVideoBytes ?? VIDEO_MAX_BYTES;
 
   await Promise.all(
     files.filter(isLikelyVideoFile).map(async (file) => {
-      if (file.size > VIDEO_MAX_BYTES) {
+      if (options.videoAllowed === false) {
         failures.push({
           filename: file.name,
-          reason: `Video is ${formatBytes(file.size)}. Max size is ${formatBytes(VIDEO_MAX_BYTES)} unless your plan limit is lower.`,
+          reason: "Video uploads are available on Pro and Admin plans.",
+          code: "VIDEO_PLAN_REQUIRED",
+        });
+        return;
+      }
+
+      if (file.size > maxVideoBytes) {
+        failures.push({
+          filename: file.name,
+          reason: `Video is ${formatBytes(file.size)}. Max size is ${formatBytes(maxVideoBytes)} for your plan.`,
           code: "FILE_TOO_LARGE",
         });
         return;

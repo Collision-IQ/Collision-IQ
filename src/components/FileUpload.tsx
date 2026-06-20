@@ -42,11 +42,11 @@ function formatUploadFailure(filename: string, failure?: { reason?: string; code
   if (!failure) return `${filename}: Upload failed.`;
 
   if (failure.code === "RUNTIME_BODY_LIMIT_EXCEEDED") {
-    return `${filename}: This file is within your plan limit, but exceeds the current platform upload limit. Direct large-file upload support is coming soon. For now, split ZIPs over 20 MB into smaller uploads.`;
+    return `${filename}: ${failure.reason ?? "This upload exceeds the plan limit for this file type."}`;
   }
 
   if (failure.code === "UPLOAD_BODY_PARSE_FAILED") {
-    return `${filename}: this upload may exceed the current platform upload limit. Direct large-file upload support is coming soon. For now, split ZIPs over 20 MB into smaller uploads.`;
+    return `${filename}: ${failure.reason ?? "Upload body could not be read. It may exceed the plan limit for this file type."}`;
   }
 
   if (failure.code?.startsWith("ZIP_")) {
@@ -71,6 +71,7 @@ export default function FileUpload({
   const [uploadHint, setUploadHint] = useState(`You can upload PDFs, photos, screenshots, ZIP files, or short videos. ${VIDEO_UPLOAD_HINT}`);
   const [maxUploadBatchFiles, setMaxUploadBatchFiles] = useState<number>(0);
   const [uploadPlanName, setUploadPlanName] = useState<UploadPlanLimits["plan"] | undefined>(undefined);
+  const [resolvedUploadLimits, setResolvedUploadLimits] = useState<UploadPlanLimits | null>(null);
   const [uploadLimitsLoaded, setUploadLimitsLoaded] = useState(false);
   const [zipSummary, setZipSummary] = useState<string | null>(null);
   const [largeUploadWarning, setLargeUploadWarning] = useState<string | null>(null);
@@ -103,6 +104,7 @@ export default function FileUpload({
           if (cancelled) return;
           setMaxUploadBatchFiles(FALLBACK_UPLOAD_BATCH_FILE_LIMIT);
           setUploadPlanName("starter");
+          setResolvedUploadLimits(null);
           setUploadHint("Upload limits are unavailable; the server will validate your upload access.");
           console.log("FINAL_DERIVED_UPLOAD_CAP", undefined);
           console.log("FINAL_DERIVED_IS_ADMIN", false);
@@ -123,15 +125,16 @@ export default function FileUpload({
         console.log("FINAL_MAX_UPLOAD_BATCH_FILES", uploadLimits.maxFilesPerReview);
         setMaxUploadBatchFiles(uploadLimits.maxFilesPerReview);
         setUploadPlanName(uploadLimits.plan);
+        setResolvedUploadLimits(uploadLimits);
 
         if (uploadLimits.plan === "admin") {
-          setUploadHint(`You can upload PDFs, photos, screenshots, ZIP files, or short videos. ${getUploadBatchLimitMessage(uploadLimits)} Admin target: 50 MB per file; videos: 25 MB and 5 seconds max.`);
+          setUploadHint(`You can upload PDFs, photos, screenshots, ZIP files, or short videos. ${getUploadBatchLimitMessage(uploadLimits)} Admin ZIP max: 500 MB; videos: 100 MB and 5 seconds max.`);
         } else if (uploadLimits.plan === "pro" || uploadLimits.plan === "trial") {
-          setUploadHint(`You can upload PDFs, photos, screenshots, ZIP files, or short videos. ${getUploadBatchLimitMessage(uploadLimits)} Pro trial/Pro target: 30 MB; videos: 25 MB and 5 seconds max.`);
+          setUploadHint(`You can upload PDFs, photos, screenshots, ZIP files, or short videos. ${getUploadBatchLimitMessage(uploadLimits)} Pro ZIP max: 100 MB; videos: 50 MB and 5 seconds max.`);
         } else if (uploadLimits.plan === "free") {
-          setUploadHint(`Free accounts can upload PDFs, photos, or short videos. ${getUploadBatchLimitMessage(uploadLimits)} Monthly limit: 5 uploads.`);
+          setUploadHint(`Free accounts can upload one PDF or photo. ZIP and video uploads require an upgrade. Monthly limit: 5 uploads.`);
         } else {
-          setUploadHint(`You can upload PDFs, photos, screenshots, ZIP files, or short videos. ${getUploadBatchLimitMessage(uploadLimits)} Starter: 10 MB; ZIP files are not included.`);
+          setUploadHint(`You can upload PDFs, photos, screenshots, and ZIP files. ${getUploadBatchLimitMessage(uploadLimits)} Starter ZIP max: 25 MB; videos require Pro.`);
         }
         setUploadLimitsLoaded(true);
       } catch (error) {
@@ -139,6 +142,7 @@ export default function FileUpload({
         if (cancelled) return;
         setMaxUploadBatchFiles(FALLBACK_UPLOAD_BATCH_FILE_LIMIT);
         setUploadPlanName("starter");
+        setResolvedUploadLimits(null);
         setUploadHint("Upload limits are unavailable; the server will validate your upload access.");
         console.log("FINAL_DERIVED_UPLOAD_CAP", undefined);
         console.log("FINAL_DERIVED_IS_ADMIN", false);
@@ -182,15 +186,28 @@ export default function FileUpload({
         setUploadStage("extracting_zip");
       }
 
+      const uploadLimits = resolvedUploadLimits ?? resolveUploadPlanLimits({
+        plan: "starter",
+        billingPlan: "starter",
+        isPlatformAdmin: false,
+        entitlementSource: "starter_subscription",
+      });
       const videoFailures = await validateSelectedVideoDurations(
-        selectedFiles.slice(0, maxUploadBatchFiles)
+        selectedFiles.slice(0, maxUploadBatchFiles),
+        {
+          maxVideoBytes: uploadLimits.maxVideoBytes || VIDEO_MAX_BYTES,
+          videoAllowed: uploadLimits.videoAllowed,
+        }
       );
       const videoRejectedNames = new Set(videoFailures.map((failure) => failure.filename));
       const acceptedFiles = selectedFiles
         .slice(0, maxUploadBatchFiles)
         .filter((file) => {
+          if (isZipFile(file) && !uploadLimits.zipAllowed) return false;
+          if (isZipFile(file)) return file.size <= uploadLimits.maxZipCompressedBytes;
           const isVideo = /\.(?:mp4|mov|webm)$/i.test(file.name) || file.type.startsWith("video/");
-          const maxFileBytes = isVideo ? Math.min(MAX_UPLOAD_FILE_BYTES, VIDEO_MAX_BYTES) : MAX_UPLOAD_FILE_BYTES;
+          if (isVideo && !uploadLimits.videoAllowed) return false;
+          const maxFileBytes = isVideo ? uploadLimits.maxVideoBytes : uploadLimits.maxUploadBytes || MAX_UPLOAD_FILE_BYTES;
           return file.size <= maxFileBytes && !videoRejectedNames.has(file.name);
         });
       const failures = [
@@ -200,17 +217,29 @@ export default function FileUpload({
         ...selectedFiles
           .slice(0, maxUploadBatchFiles)
           .filter((file) => {
+            if (isZipFile(file)) return file.size > uploadLimits.maxZipCompressedBytes;
             const isVideo = /\.(?:mp4|mov|webm)$/i.test(file.name) || file.type.startsWith("video/");
-            const maxFileBytes = isVideo ? Math.min(MAX_UPLOAD_FILE_BYTES, VIDEO_MAX_BYTES) : MAX_UPLOAD_FILE_BYTES;
+            const maxFileBytes = isVideo ? uploadLimits.maxVideoBytes : uploadLimits.maxUploadBytes || MAX_UPLOAD_FILE_BYTES;
             return file.size > maxFileBytes;
           })
           .map(
             (file) => {
+              if (isZipFile(file)) {
+                return `${file.name}: ${formatBytes(file.size)} exceeds ZIP limit ${formatBytes(uploadLimits.maxZipCompressedBytes)}.`;
+              }
               const isVideo = /\.(?:mp4|mov|webm)$/i.test(file.name) || file.type.startsWith("video/");
-              const maxFileBytes = isVideo ? Math.min(MAX_UPLOAD_FILE_BYTES, VIDEO_MAX_BYTES) : MAX_UPLOAD_FILE_BYTES;
+              const maxFileBytes = isVideo ? uploadLimits.maxVideoBytes : uploadLimits.maxUploadBytes || MAX_UPLOAD_FILE_BYTES;
               return `${file.name}: ${formatBytes(file.size)} exceeds ${formatBytes(maxFileBytes)}.`;
             }
           ),
+        ...selectedFiles
+          .slice(0, maxUploadBatchFiles)
+          .filter((file) => isZipFile(file) && !uploadLimits.zipAllowed)
+          .map((file) => `${file.name}: ZIP uploads are not included in your current plan.`),
+        ...selectedFiles
+          .slice(0, maxUploadBatchFiles)
+          .filter((file) => (/\.(?:mp4|mov|webm)$/i.test(file.name) || file.type.startsWith("video/")) && !uploadLimits.videoAllowed)
+          .map((file) => `${file.name}: Video uploads are available on Pro and Admin plans.`),
         ...videoFailures.map((failure) => `${failure.filename}: ${failure.reason}`),
       ];
 

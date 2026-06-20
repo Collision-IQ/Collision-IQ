@@ -40,6 +40,9 @@ export type UploadRejectedFile = {
 
 export type ZipExtractionSummary = {
   archive: string;
+  compressedSizeBytes: number;
+  extractedSizeBytes: number;
+  totalEntries: number;
   acceptedFiles: number;
   rejectedFiles: number;
   extractedBytes: number;
@@ -50,6 +53,20 @@ export type ZipExtractionSummary = {
     reason: string;
     code: string;
   }>;
+  pdfCount: number;
+  imageCount: number;
+  videoCount: number;
+  planLimitUsed: {
+    plan: UploadPlanLimits["plan"];
+    maxZipCompressedBytes: number;
+    maxExtractedFiles: number;
+    maxExtractedTotalBytes: number;
+    videoAllowed: boolean;
+    maxVideoBytes: number;
+    maxVideosPerReview: number;
+    videoMaxDurationSeconds: number;
+  };
+  planLimitExceeded: string | null;
 };
 
 type ZipAccumulator = {
@@ -74,9 +91,6 @@ const ZIP_MIME_TYPES = new Set([
   "application/x-zip-compressed",
   "multipart/x-zip",
 ]);
-const ZIP_MAX_BYTES = 50 * 1024 * 1024;
-const ZIP_MAX_ENTRIES = 50;
-const ZIP_MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024;
 const ZIP_MAX_RATIO = 100;
 const ZIP_ALLOWED_EXTENSIONS = new Set([
   ".pdf",
@@ -85,8 +99,9 @@ const ZIP_ALLOWED_EXTENSIONS = new Set([
   ".png",
   ".heic",
   ".webp",
-  ".txt",
-  ".awf",
+  ".mp4",
+  ".mov",
+  ".webm",
 ]);
 
 class ZipUploadError extends Error {
@@ -114,7 +129,7 @@ export function getUploadExtension(filename: string) {
 }
 
 export function getZipMaxBytes() {
-  return ZIP_MAX_BYTES;
+  return 100 * 1024 * 1024;
 }
 
 export function checkZipBudget(params: {
@@ -122,16 +137,21 @@ export function checkZipBudget(params: {
   entryCount?: number;
   uncompressed?: number;
   ratio?: number;
+  limits?: Pick<UploadPlanLimits, "maxZipCompressedBytes" | "maxExtractedFiles" | "maxExtractedTotalBytes">;
 }) {
-  if (typeof params.archiveBytes === "number" && params.archiveBytes > ZIP_MAX_BYTES) {
+  const maxZipCompressedBytes = params.limits?.maxZipCompressedBytes ?? getZipMaxBytes();
+  const maxExtractedFiles = params.limits?.maxExtractedFiles ?? 200;
+  const maxExtractedTotalBytes = params.limits?.maxExtractedTotalBytes ?? 250 * 1024 * 1024;
+
+  if (typeof params.archiveBytes === "number" && params.archiveBytes > maxZipCompressedBytes) {
     return { ok: false as const, code: "ZIP_TOO_LARGE" as const };
   }
 
-  if (typeof params.entryCount === "number" && params.entryCount > ZIP_MAX_ENTRIES) {
+  if (typeof params.entryCount === "number" && params.entryCount > maxExtractedFiles) {
     return { ok: false as const, code: "ZIP_TOO_MANY_ENTRIES" as const };
   }
 
-  if (typeof params.uncompressed === "number" && params.uncompressed > ZIP_MAX_UNCOMPRESSED_BYTES) {
+  if (typeof params.uncompressed === "number" && params.uncompressed > maxExtractedTotalBytes) {
     return { ok: false as const, code: "ZIP_TOO_LARGE" as const };
   }
 
@@ -255,6 +275,34 @@ export async function prepareUploadFile(file: File, limits: UploadPlanLimits) {
   }
 
   if (isVideoExtension(getUploadExtension(file.name))) {
+    if (!limits.videoAllowed) {
+      return {
+        files: [],
+        rejectedFiles: [
+          {
+            filename: normalizeUploadFilename(file.name),
+            reason: "Video uploads are available on Pro and Admin plans.",
+            code: "VIDEO_PLAN_REQUIRED",
+          },
+        ],
+        zipSummaries: [],
+      };
+    }
+
+    if (buffer.byteLength > limits.maxVideoBytes) {
+      return {
+        files: [],
+        rejectedFiles: [
+          {
+            filename: normalizeUploadFilename(file.name),
+            reason: `Video exceeds ${formatUploadLimitBytes(limits.maxVideoBytes)} plan limit.`,
+            code: "FILE_TOO_LARGE",
+          },
+        ],
+        zipSummaries: [],
+      };
+    }
+
     const videoDuration = validateVideoDurationFromBuffer(buffer, file.type || mimeTypeForFilename(file.name));
     if (!videoDuration.valid) {
       return {
@@ -311,11 +359,14 @@ export async function prepareZipUpload(params: {
       );
     }
 
-    const archiveBudget = checkZipBudget({ archiveBytes: params.buffer.byteLength });
+    const archiveBudget = checkZipBudget({
+      archiveBytes: params.buffer.byteLength,
+      limits: params.limits,
+    });
     if (!archiveBudget.ok) {
       throw new ZipUploadError(
         archiveBudget.code,
-        `ZIP archive exceeds ${formatUploadLimitBytes(ZIP_MAX_BYTES)}.`,
+        `ZIP archive exceeds ${formatUploadLimitBytes(params.limits.maxZipCompressedBytes)} plan limit.`,
         archive
       );
     }
@@ -338,6 +389,9 @@ export async function prepareZipUpload(params: {
     zipSummaries: [
       {
         archive,
+        compressedSizeBytes: params.buffer.byteLength,
+        extractedSizeBytes: accumulator.extractedBytes,
+        totalEntries: accumulator.entryCount,
         acceptedFiles: accumulator.accepted.length,
         rejectedFiles: accumulator.rejected.length,
         extractedBytes: accumulator.extractedBytes,
@@ -348,6 +402,20 @@ export async function prepareZipUpload(params: {
           reason: entry.reason,
           code: entry.code,
         })),
+        pdfCount: accumulator.accepted.filter((entry) => entry.classification === "pdf").length,
+        imageCount: accumulator.accepted.filter((entry) => entry.classification === "image").length,
+        videoCount: accumulator.accepted.filter((entry) => entry.classification === "video").length,
+        planLimitUsed: {
+          plan: params.limits.plan,
+          maxZipCompressedBytes: params.limits.maxZipCompressedBytes,
+          maxExtractedFiles: params.limits.maxExtractedFiles,
+          maxExtractedTotalBytes: params.limits.maxExtractedTotalBytes,
+          videoAllowed: params.limits.videoAllowed,
+          maxVideoBytes: params.limits.maxVideoBytes,
+          maxVideosPerReview: params.limits.maxVideosPerReview,
+          videoMaxDurationSeconds: params.limits.videoMaxDurationSeconds,
+        },
+        planLimitExceeded: accumulator.rejected[0]?.code ?? null,
       },
     ],
   };
@@ -393,11 +461,14 @@ async function handleZipEntry(
   }
 
   params.accumulator.entryCount += 1;
-  const entryBudget = checkZipBudget({ entryCount: params.accumulator.entryCount });
+  const entryBudget = checkZipBudget({
+    entryCount: params.accumulator.entryCount,
+    limits: params.limits,
+  });
   if (!entryBudget.ok) {
     throw new ZipUploadError(
       entryBudget.code,
-      `ZIP archive contains more than ${ZIP_MAX_ENTRIES} files.`,
+      `ZIP archive contains more than ${params.limits.maxExtractedFiles} files for this plan.`,
       entry.fileName
     );
   }
@@ -430,21 +501,55 @@ async function handleZipEntry(
     );
   }
 
-  const entrySizeBudget = checkZipBudget({ uncompressed: entry.uncompressedSize });
+  if (isVideoExtension(extension)) {
+    if (!params.limits.videoAllowed) {
+      throw new ZipUploadError(
+        "ZIP_DISALLOWED_TYPE",
+        "Video uploads are available on Pro and Admin plans.",
+        entry.fileName
+      );
+    }
+
+    const nextVideoCount =
+      params.accumulator.accepted.filter((accepted) => accepted.classification === "video").length + 1;
+    if (nextVideoCount > params.limits.maxVideosPerReview) {
+      throw new ZipUploadError(
+        "ZIP_TOO_MANY_ENTRIES",
+        `ZIP archive contains more than ${params.limits.maxVideosPerReview} videos for this plan.`,
+        entry.fileName
+      );
+    }
+
+    if (entry.uncompressedSize > params.limits.maxVideoBytes) {
+      throw new ZipUploadError(
+        "ZIP_TOO_LARGE",
+        `Video exceeds ${formatUploadLimitBytes(params.limits.maxVideoBytes)} plan limit.`,
+        entry.fileName
+      );
+    }
+  }
+
+  const entrySizeBudget = checkZipBudget({
+    uncompressed: entry.uncompressedSize,
+    limits: params.limits,
+  });
   if (!entrySizeBudget.ok) {
     throw new ZipUploadError(
       entrySizeBudget.code,
-      `Extracted ZIP files exceed ${formatUploadLimitBytes(ZIP_MAX_UNCOMPRESSED_BYTES)} total.`,
+      `Extracted ZIP files exceed ${formatUploadLimitBytes(params.limits.maxExtractedTotalBytes)} total.`,
       entry.fileName
     );
   }
 
   const nextTotal = params.accumulator.extractedBytes + entry.uncompressedSize;
-  const totalBudget = checkZipBudget({ uncompressed: nextTotal });
+  const totalBudget = checkZipBudget({
+    uncompressed: nextTotal,
+    limits: params.limits,
+  });
   if (!totalBudget.ok) {
     throw new ZipUploadError(
       totalBudget.code,
-      `Extracted ZIP files exceed ${formatUploadLimitBytes(ZIP_MAX_UNCOMPRESSED_BYTES)} total.`,
+      `Extracted ZIP files exceed ${formatUploadLimitBytes(params.limits.maxExtractedTotalBytes)} total.`,
       entry.fileName
     );
   }
@@ -454,8 +559,9 @@ async function handleZipEntry(
       ? { ok: false as const, code: "ZIP_BOMB_SUSPECTED" as const }
       : checkZipBudget({
           ratio: entry.compressedSize > 0
-            ? entry.uncompressedSize / entry.compressedSize
-            : 0,
+        ? entry.uncompressedSize / entry.compressedSize
+        : 0,
+          limits: params.limits,
         });
 
   if (!ratioBudget.ok) {
@@ -466,13 +572,24 @@ async function handleZipEntry(
     );
   }
 
-  const buffer = await readEntryBuffer(zip, entry);
+  const buffer = await readEntryBuffer(zip, entry, params.limits);
   if (buffer.byteLength !== entry.uncompressedSize) {
     throw new ZipUploadError(
       "ZIP_CORRUPT",
       "ZIP archive entry size did not match its metadata.",
       entry.fileName
     );
+  }
+
+  if (isVideoExtension(extension)) {
+    const videoDuration = validateVideoDurationFromBuffer(buffer, mimeTypeForFilename(normalizedName));
+    if (!videoDuration.valid) {
+      throw new ZipUploadError(
+        "ZIP_DISALLOWED_TYPE",
+        VIDEO_DURATION_LIMIT_MESSAGE,
+        entry.fileName
+      );
+    }
   }
 
   const filename = dedupeFilename(normalizedName, params.accumulator.usedFilenames);
@@ -546,7 +663,11 @@ function openZipFromBuffer(buffer: Buffer, filename: string) {
   });
 }
 
-function readEntryBuffer(zip: ZipFile, entry: Entry) {
+function readEntryBuffer(
+  zip: ZipFile,
+  entry: Entry,
+  limits: Pick<UploadPlanLimits, "maxExtractedTotalBytes">
+) {
   return new Promise<Buffer>((resolve, reject) => {
     zip.openReadStream(entry, (error, stream) => {
       if (error || !stream) {
@@ -566,11 +687,11 @@ function readEntryBuffer(zip: ZipFile, entry: Entry) {
         .on("data", (chunk: Buffer | string) => {
           const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
           totalBytes += buffer.byteLength;
-          if (totalBytes > ZIP_MAX_UNCOMPRESSED_BYTES) {
+          if (totalBytes > limits.maxExtractedTotalBytes) {
             stream.destroy(
               new ZipUploadError(
                 "ZIP_TOO_LARGE",
-                `Extracted ZIP files exceed ${formatUploadLimitBytes(ZIP_MAX_UNCOMPRESSED_BYTES)} total.`,
+                `Extracted ZIP files exceed ${formatUploadLimitBytes(limits.maxExtractedTotalBytes)} total.`,
                 entry.fileName
               )
             );

@@ -41,12 +41,13 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 
 const {
   MB,
-  UNLIMITED_UPLOAD_BATCH_FILE_LIMIT,
+  ADMIN_UPLOAD_BATCH_FILE_LIMIT,
   getUploadBatchLimitMessage,
   resolveUploadPlanLimits,
   validateUploadBatchFileCount,
 } = require("./uploadLimits.ts");
 const {
+  checkZipBudget,
   prepareZipUpload,
   prepareUploadFile,
   validateUploadFilename,
@@ -148,9 +149,9 @@ function mp4WithDuration(seconds) {
   ]);
 }
 
-run("Starter rejects ZIP and files over 10 MB", async () => {
-  const limits = resolveUploadPlanLimits(starterEntitlements());
-  assert.equal(limits.maxUploadBytes, 10 * MB);
+run("Free rejects ZIP uploads", async () => {
+  const limits = resolveUploadPlanLimits(freeEntitlements());
+  assert.equal(limits.maxFilesPerReview, 1);
   assert.equal(limits.zipAllowed, false);
 
   const result = await prepareZipUpload({
@@ -161,23 +162,74 @@ run("Starter rejects ZIP and files over 10 MB", async () => {
 
   assert.equal(result.files.length, 0);
   assert.equal(result.rejectedFiles[0].code, "ZIP_DISALLOWED_TYPE");
-  assert.equal(10 * MB + 1 > limits.maxUploadBytes, true);
 });
 
-run("Pro accepts ZIP up to 30 MB", async () => {
-  const limits = resolveUploadPlanLimits(proEntitlements());
-  assert.equal(limits.maxUploadBytes, 30 * MB);
+run("Starter accepts 25 MB / 50-file ZIP shape and rejects larger ZIPs", async () => {
+  const limits = resolveUploadPlanLimits(starterEntitlements());
+  assert.equal(limits.maxUploadBytes, 25 * MB);
+  assert.equal(limits.maxZipCompressedBytes, 25 * MB);
+  assert.equal(limits.maxFilesPerReview, 10);
   assert.equal(limits.zipAllowed, true);
+  assert.equal(limits.maxExtractedFiles, 50);
+  assert.equal(limits.maxExtractedTotalBytes, 100 * MB);
+  assert.equal(checkZipBudget({ archiveBytes: 25 * MB, entryCount: 50, uncompressed: 100 * MB, limits }).ok, true);
+  assert.equal(checkZipBudget({ archiveBytes: 25 * MB + 1, limits }).code, "ZIP_TOO_LARGE");
 
   const result = await prepareZipUpload({
     filename: "docs.zip",
-    buffer: await zipBuffer([["estimate.pdf", "hello"]]),
+    buffer: await zipBuffer(Array.from({ length: 50 }, (_, index) => [`doc-${index}.pdf`, "pdf"])),
     limits,
   });
 
-  assert.equal(result.files.length, 1);
-  assert.equal(result.files[0].filename, "estimate.pdf");
+  assert.equal(result.files.length, 50);
+  assert.equal(result.zipSummaries[0].totalEntries, 50);
+});
+
+run("Pro accepts synthetic 128-file Work Auth ZIP shape", async () => {
+  const limits = resolveUploadPlanLimits(proEntitlements());
+  assert.equal(limits.maxUploadBytes, 100 * MB);
+  assert.equal(limits.maxZipCompressedBytes, 100 * MB);
+  assert.equal(limits.maxFilesPerReview, 150);
+  assert.equal(limits.zipAllowed, true);
+  assert.equal(limits.maxExtractedFiles, 200);
+  assert.equal(limits.maxExtractedTotalBytes, 250 * MB);
+  assert.equal(checkZipBudget({ archiveBytes: Math.ceil(40.8 * MB), entryCount: 128, uncompressed: Math.ceil(41.6 * MB), limits }).ok, true);
+
+  const result = await prepareZipUpload({
+    filename: "Work Auth 21215.zip",
+    buffer: await zipBuffer([
+      ...Array.from({ length: 18 }, (_, index) => [`pdf-${index + 1}.pdf`, "pdf"]),
+      ...Array.from({ length: 110 }, (_, index) => [`photo-${index + 1}.jpg`, "jpg"]),
+    ]),
+    limits,
+  });
+
+  assert.equal(result.files.length, 128);
+  assert.equal(result.zipSummaries[0].pdfCount, 18);
+  assert.equal(result.zipSummaries[0].imageCount, 110);
+  assert.equal(result.zipSummaries[0].videoCount, 0);
   assert.equal(result.rejectedFiles.length, 0);
+});
+
+run("Admin accepts synthetic 128-file Work Auth ZIP shape", async () => {
+  const limits = resolveUploadPlanLimits(adminEntitlements());
+  assert.equal(limits.maxZipCompressedBytes, 500 * MB);
+  assert.equal(limits.maxExtractedFiles, 1000);
+  assert.equal(limits.maxExtractedTotalBytes, 2 * 1024 * MB);
+  assert.equal(checkZipBudget({ archiveBytes: Math.ceil(40.8 * MB), entryCount: 128, uncompressed: Math.ceil(41.6 * MB), limits }).ok, true);
+
+  const result = await prepareZipUpload({
+    filename: "Work Auth 21215.zip",
+    buffer: await zipBuffer([
+      ...Array.from({ length: 18 }, (_, index) => [`pdf-${index + 1}.pdf`, "pdf"]),
+      ...Array.from({ length: 110 }, (_, index) => [`photo-${index + 1}.jpeg`, "jpg"]),
+    ]),
+    limits,
+  });
+
+  assert.equal(result.files.length, 128);
+  assert.equal(result.zipSummaries[0].totalEntries, 128);
+  assert.equal(result.zipSummaries[0].planLimitUsed.plan, "admin");
 });
 
 run("direct PNG screenshot accepted", async () => {
@@ -218,6 +270,17 @@ run("5-second MP4 video accepted", async () => {
   assert.equal(result.files[0].classification, "video");
 });
 
+run("5-second MP4 video accepted for Admin", async () => {
+  const result = await prepareUploadFile(
+    makeFile("damage.mp4", "video/mp4", mp4WithDuration(5)),
+    resolveUploadPlanLimits(adminEntitlements())
+  );
+
+  assert.equal(result.files.length, 1);
+  assert.equal(result.files[0].filename, "damage.mp4");
+  assert.equal(result.files[0].classification, "video");
+});
+
 run("video over 5 seconds rejected", async () => {
   const result = await prepareUploadFile(
     makeFile("damage.mp4", "video/mp4", mp4WithDuration(5.001)),
@@ -227,6 +290,16 @@ run("video over 5 seconds rejected", async () => {
   assert.equal(result.files.length, 0);
   assert.equal(result.rejectedFiles[0].code, "VIDEO_TOO_LONG");
   assert.equal(result.rejectedFiles[0].reason, "Videos must be 5 seconds or shorter.");
+});
+
+run("video rejected for Starter", async () => {
+  const result = await prepareUploadFile(
+    makeFile("damage.mp4", "video/mp4", mp4WithDuration(4)),
+    resolveUploadPlanLimits(starterEntitlements())
+  );
+
+  assert.equal(result.files.length, 0);
+  assert.equal(result.rejectedFiles[0].code, "VIDEO_PLAN_REQUIRED");
 });
 
 run(".mp4 accepted", async () => {
@@ -295,20 +368,20 @@ run("unsupported image type rejected", async () => {
   assert.equal(result.rejectedFiles[0].code, "UNSUPPORTED_EXTENSION");
 });
 
-run("Starter still limited to 1 screenshot/photo", () => {
+run("Starter allows 10 screenshots/photos", () => {
   const limits = resolveUploadPlanLimits(starterEntitlements());
-  assert.equal(limits.maxFilesPerReview, 1);
-  assert.equal(limits.maxUploadBytes, 10 * MB);
+  assert.equal(limits.maxFilesPerReview, 10);
+  assert.equal(limits.maxUploadBytes, 25 * MB);
 });
 
-run("Starter rejects second file", () => {
+run("Starter rejects eleventh file", () => {
   const limits = resolveUploadPlanLimits(starterEntitlements());
-  const result = validateUploadBatchFileCount(2, limits);
+  const result = validateUploadBatchFileCount(11, limits);
 
-  assert.equal(limits.maxFilesPerReview, 1);
+  assert.equal(limits.maxFilesPerReview, 10);
   assert.equal(result.valid, false);
   assert.equal(result.code, "MAX_FILES_REACHED");
-  assert.equal(result.reason, "You can upload 1 file per review.");
+  assert.equal(result.reason, "You can upload up to 10 files at a time.");
 });
 
 run("Free upload plan allows one PDF/photo per analysis", () => {
@@ -325,16 +398,16 @@ run("Free upload plan allows one PDF/photo per analysis", () => {
   );
 });
 
-run("Pro allows 6 and rejects 7 in same batch", () => {
+run("Pro allows 150 and rejects 151 in same batch", () => {
   const limits = resolveUploadPlanLimits(proEntitlements());
 
-  assert.equal(limits.maxFilesPerReview, 6);
-  assert.equal(validateUploadBatchFileCount(6, limits).valid, true);
-  assert.equal(validateUploadBatchFileCount(7, limits).valid, false);
-  assert.equal(getUploadBatchLimitMessage(limits), "You can upload up to 6 files at a time.");
+  assert.equal(limits.maxFilesPerReview, 150);
+  assert.equal(validateUploadBatchFileCount(150, limits).valid, true);
+  assert.equal(validateUploadBatchFileCount(151, limits).valid, false);
+  assert.equal(getUploadBatchLimitMessage(limits), "You can upload up to 150 files at a time.");
 });
 
-run("Trial allows 6 and rejects 7 in same batch", () => {
+run("Trial follows Pro upload limits", () => {
   const limits = resolveUploadPlanLimits({
     plan: "trial",
     billingPlan: "trial",
@@ -342,19 +415,18 @@ run("Trial allows 6 and rejects 7 in same batch", () => {
     entitlementSource: "trial",
   });
 
-  assert.equal(limits.maxFilesPerReview, 6);
-  assert.equal(validateUploadBatchFileCount(6, limits).valid, true);
-  assert.equal(validateUploadBatchFileCount(7, limits).valid, false);
+  assert.equal(limits.maxFilesPerReview, 150);
+  assert.equal(validateUploadBatchFileCount(150, limits).valid, true);
+  assert.equal(validateUploadBatchFileCount(151, limits).valid, false);
 });
 
-run("Admin/free-access allows more than 6 files", () => {
+run("Admin/free-access allows up to technical guard", () => {
   const limits = resolveUploadPlanLimits(adminEntitlements());
 
-  assert.equal(limits.maxFilesPerReview, UNLIMITED_UPLOAD_BATCH_FILE_LIMIT);
-  assert.equal(validateUploadBatchFileCount(7, limits).valid, true);
-  assert.equal(validateUploadBatchFileCount(50, limits).valid, true);
-  assert.equal(validateUploadBatchFileCount(51, limits).valid, true);
-  assert.equal(getUploadBatchLimitMessage(limits), "You can upload any number of files per review.");
+  assert.equal(limits.maxFilesPerReview, ADMIN_UPLOAD_BATCH_FILE_LIMIT);
+  assert.equal(validateUploadBatchFileCount(1000, limits).valid, true);
+  assert.equal(validateUploadBatchFileCount(1001, limits).valid, false);
+  assert.equal(getUploadBatchLimitMessage(limits), "You can upload up to 1000 files per review.");
 });
 
 run("Admin/unlimited resolves only via isPlatformAdmin", () => {
@@ -373,7 +445,7 @@ run("Admin/unlimited resolves only via isPlatformAdmin", () => {
   });
 
   assert.equal(limits1.plan, "admin");
-  assert.equal(limits1.maxFilesPerReview, UNLIMITED_UPLOAD_BATCH_FILE_LIMIT);
+  assert.equal(limits1.maxFilesPerReview, ADMIN_UPLOAD_BATCH_FILE_LIMIT);
   assert.equal(validateUploadBatchFileCount(7, limits1).valid, true);
 
   assert.equal(limits2.plan, "free");
@@ -385,8 +457,8 @@ run("Pro/Admin can upload screenshots within plan size limits", () => {
   const proLimits = resolveUploadPlanLimits(proEntitlements());
   const adminLimits = resolveUploadPlanLimits(adminEntitlements());
 
-  assert.equal(proLimits.maxUploadBytes, 30 * MB);
-  assert.equal(adminLimits.maxUploadBytes, 50 * MB);
+  assert.equal(proLimits.maxUploadBytes, 100 * MB);
+  assert.equal(adminLimits.maxUploadBytes, 500 * MB);
   assert.equal(5 * MB <= proLimits.maxUploadBytes, true);
   assert.equal(5 * MB <= adminLimits.maxUploadBytes, true);
 });
@@ -497,9 +569,20 @@ run("blocked extensions rejected inside ZIP", async () => {
   assert.equal(result.rejectedFiles[0].code, "ZIP_DISALLOWED_TYPE");
 });
 
+run("nested ZIP rejected", async () => {
+  const result = await prepareZipUpload({
+    filename: "docs.zip",
+    buffer: await zipBuffer([["nested/archive.zip", "nested"]]),
+    limits: resolveUploadPlanLimits(proEntitlements()),
+  });
+
+  assert.equal(result.files.length, 0);
+  assert.equal(result.rejectedFiles[0].code, "ZIP_DISALLOWED_TYPE");
+});
+
 run("excessive ZIP entry count rejects whole archive", async () => {
-  const entries = Array.from({ length: 51 }, (_, index) => [
-    `file-${index}.txt`,
+  const entries = Array.from({ length: 1001 }, (_, index) => [
+    `file-${index}.pdf`,
     "1",
   ]);
   const result = await prepareZipUpload({
@@ -526,7 +609,7 @@ run("zip-slip entry rejects whole archive", async () => {
 run("high compression ratio rejects whole archive", async () => {
   const result = await prepareZipUpload({
     filename: "docs.zip",
-    buffer: await compressedZipBuffer([["huge.txt", "a".repeat(1024 * 1024)]]),
+    buffer: await compressedZipBuffer([["huge.pdf", "a".repeat(1024 * 1024)]]),
     limits: resolveUploadPlanLimits(proEntitlements()),
   });
 

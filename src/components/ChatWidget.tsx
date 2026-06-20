@@ -300,7 +300,6 @@ const INITIAL_MESSAGE: Message = {
 
 const TTS_ALLOW_BROWSER_FALLBACK =
   process.env.NEXT_PUBLIC_TTS_ALLOW_BROWSER_FALLBACK === "true";
-const ZIP_MAX_BYTES = 50 * 1024 * 1024;
 const CHAT_SESSION_STORAGE_PREFIX = "collision-iq.chat-widget.session";
 const DRAFT_CHAT_SESSION_KEY = `${CHAT_SESSION_STORAGE_PREFIX}:draft`;
 const INTRO_DISMISSAL_SESSION_KEY = "collision-iq.chat-widget.introDismissed";
@@ -430,7 +429,7 @@ function buildUploadFailureStatus(failures: UploadFailureResult[]) {
 
   if (maxFileFailures.length) {
     parts.push(
-      `${maxFileFailures.length} files were skipped because you can upload up to 6 files at a time.`
+      `${maxFileFailures.length} files were skipped because ${maxFileFailures[0]?.reason ?? "this batch exceeds your plan file limit."}`
     );
   }
 
@@ -439,7 +438,7 @@ function buildUploadFailureStatus(failures: UploadFailureResult[]) {
       `Could not attach ${otherFailures
         .map((failure) => {
           if (failure.code === "RUNTIME_BODY_LIMIT_EXCEEDED") {
-            return `${failure.filename}: This file is within your plan limit, but exceeds the current platform upload limit. Direct large-file upload support is coming soon. For now, split ZIPs over 20 MB into smaller uploads.`;
+            return `${failure.filename}: ${failure.reason ?? "This upload exceeds the plan limit for this file type."}`;
           }
 
           return `${failure.filename}: ${failure.reason ?? "Upload failed."}`;
@@ -1511,18 +1510,36 @@ export default function ChatWidget({
         return false;
       }
 
-      if (isZipFile(file) && file.size > ZIP_MAX_BYTES) {
+      if (isZipFile(file) && !effectiveUploadPlanLimits.zipAllowed) {
         rejectedFiles.push({
           filename: file.name,
-          reason: `ZIP archive is ${formatBytes(file.size)}. Max size is ${formatBytes(ZIP_MAX_BYTES)}.`,
+          reason: "ZIP uploads are not included in your current plan. Upgrade to Starter, Pro, or Admin to upload ZIP archives.",
+          code: "ZIP_DISALLOWED_TYPE",
+        });
+        return false;
+      }
+
+      if (isZipFile(file) && file.size > effectiveUploadPlanLimits.maxZipCompressedBytes) {
+        rejectedFiles.push({
+          filename: file.name,
+          reason: `ZIP archive is ${formatBytes(file.size)}. Max size is ${formatBytes(effectiveUploadPlanLimits.maxZipCompressedBytes)} for your plan.`,
           code: "ZIP_TOO_LARGE",
         });
         return false;
       }
 
+      if (isLikelyVideoFile(file) && !effectiveUploadPlanLimits.videoAllowed) {
+        rejectedFiles.push({
+          filename: file.name,
+          reason: "Video uploads are available on Pro and Admin plans.",
+          code: "VIDEO_PLAN_REQUIRED",
+        });
+        return false;
+      }
+
       const maxFileBytes = isLikelyVideoFile(file)
-        ? Math.min(MAX_UPLOAD_FILE_BYTES, VIDEO_MAX_BYTES)
-        : MAX_UPLOAD_FILE_BYTES;
+        ? effectiveUploadPlanLimits.maxVideoBytes
+        : effectiveUploadPlanLimits.maxUploadBytes || MAX_UPLOAD_FILE_BYTES;
 
       if (file.size <= maxFileBytes) {
         return true;
@@ -1536,7 +1553,10 @@ export default function ChatWidget({
       return false;
     });
 
-    const videoFailures = await validateSelectedVideoDurations(acceptedFiles);
+    const videoFailures = await validateSelectedVideoDurations(acceptedFiles, {
+      maxVideoBytes: effectiveUploadPlanLimits.maxVideoBytes || VIDEO_MAX_BYTES,
+      videoAllowed: effectiveUploadPlanLimits.videoAllowed,
+    });
     if (videoFailures.length) {
       for (const failure of videoFailures) {
         rejectedFiles.push(failure);
