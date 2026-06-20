@@ -247,7 +247,12 @@ run("export card primary Citation Density action calls annotated route, not stan
   assert.doesNotMatch(source, /Estimate delta/);
   assert.doesNotMatch(source, /downloadCitationDensitySummaryReport/);
   assert.doesNotMatch(source, /sourceDocumentId:\s*sourcePdf\.attachmentId/);
-  assert.match(source, /targetEstimate:\s*"auto"/);
+  assert.match(source, /CitationDensityTargetSelector/);
+  assert.match(source, /Citation Density target/);
+  assert.match(source, /Shop estimate/);
+  assert.match(source, /Insurance\/carrier estimate/);
+  assert.match(source, /<option value="both">Both<\/option>/);
+  assert.match(source, /targetEstimate:\s*citationDensityTargetEstimate/);
   assert.match(source, /Citation Density annotated export requires an original estimate PDF/);
   assert.ok(annotatedFetchIndex > downloadIndex);
   assert.ok(standaloneBuilderIndex === -1 || annotatedFetchIndex < standaloneBuilderIndex);
@@ -304,7 +309,9 @@ run("Citation Density viewer uses server-generated PDF and converts PDF coordina
   assert.match(source, /Collapse report/);
   assert.match(source, /Expand report/);
   assert.match(source, /Open full report drawer/);
-  assert.match(source, /max-h-\[min\(70svh,820px\)\]/);
+  assert.match(source, /h-\[min\(75svh,900px\)\]/);
+  assert.match(source, /data-report-finding-list/);
+  assert.match(source, /data-report-detail-pane/);
 });
 
 run("Citation Density anchor guard rejects fake line numbers and boilerplate anchors", () => {
@@ -435,10 +442,30 @@ run("bottom report workspace restores interactive in-context report review", () 
   assert.match(pageSource, /min-h-\[100svh\] overflow-x-hidden/);
   assert.doesNotMatch(pageSource, /h-\[100svh\] overflow-hidden bg-background/);
   assert.match(pageSource, /data-report-bottom-viewer/);
-  assert.match(pageSource, /max-h-\[min\(38svh,460px\)\]/);
+  assert.match(pageSource, /h-\[min\(75svh,900px\)\]/);
+  assert.match(pageSource, /lg:min-h-\[560px\]/);
+  assert.match(pageSource, /data-collision-iq-footer/);
+  assert.match(pageSource, /CollisionIqFooter/);
   assert.match(viewerSource, /data-citation-density-bottom-viewer/);
-  assert.match(viewerSource, /max-h-\[min\(38svh,460px\)\]/);
+  assert.match(viewerSource, /h-\[min\(75svh,900px\)\]/);
+  assert.match(viewerSource, /lg:min-h-\[560px\]/);
+  assert.match(viewerSource, /data-report-finding-list/);
+  assert.match(viewerSource, /data-report-detail-pane/);
   assert.match(viewerSource, /overflow-y-auto/);
+});
+
+run("Chat workspace allows document scroll, sticky rail, and reachable footer", () => {
+  const shellSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatShell.tsx"), "utf8");
+  const pageSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
+
+  assert.match(shellSource, /min-h-\[100svh\]/);
+  assert.match(shellSource, /overflow-x-hidden/);
+  assert.doesNotMatch(shellSource, /ci-workstation flex h-\[100svh\][^"]*overflow-hidden/);
+  assert.match(shellSource, /sticky top-3 hidden max-h-\[calc\(100svh-1\.5rem\)\]/);
+  assert.match(pageSource, /data-collision-iq-footer="true"/);
+  assert.match(pageSource, /\/brand\/logos\/Logo-grey\.png/);
+  assert.match(pageSource, /\/iq\/iq_logo\.png/);
+  assert.match(pageSource, /Delete Account/);
 });
 
 run("Ask about finding sends selected finding context into active chat", () => {

@@ -148,6 +148,40 @@ async function createWorkAuthorizationPdf() {
   return await doc.save();
 }
 
+async function createProductionBadAnchorFixturePdf({ includeValidEstimateRow = false } = {}) {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  for (let index = 0; index < 11; index += 1) {
+    const page = doc.addPage([612, 792]);
+    page.drawText(`SOR2 production fixture page ${index + 1}`, { x: 42, y: 746, size: 10, font });
+  }
+
+  const page1 = doc.getPage(0);
+  page1.drawText("Claim 123 Owner Jane Driver Vehicle 2019 GM VIN=Vehicle Identification Number", { x: 42, y: 716, size: 8, font });
+  page1.drawText("44 Air Conditioning Navigation Heated Seat Bluetooth Cruise Traction Telescopic Steering Wheel Equipment Options", { x: 42, y: 700, size: 8, font });
+  page1.drawText("2019 Vehicle options package owner claim contact block", { x: 42, y: 684, size: 8, font });
+  page1.drawText("4717 Vehicle options package owner claim contact block", { x: 42, y: 668, size: 8, font });
+
+  if (includeValidEstimateRow) {
+    const page4 = doc.getPage(3);
+    drawCccEstimateRow(page4, font, 55, "", "Repl", "A/M molding", "0.2", "$66.75", 696);
+  }
+
+  const page9 = doc.getPage(8);
+  page9.drawText("77 ANY PERSON WHO KNOWINGLY presents false or fraudulent information is subject to legal penalties.", { x: 42, y: 716, size: 8, font });
+  page9.drawText("Legal notice fraud warning disclaimer alternate parts policy.", { x: 42, y: 700, size: 8, font });
+
+  const page10 = doc.getPage(9);
+  page10.drawText("Estimate based on MOTOR CRASH ESTIMATING GUIDE and CCC MOTOR database guide pages.", { x: 42, y: 716, size: 8, font });
+  page10.drawText("SYMBOLS FOLLOWING estimate lines indicate included not included database logic.", { x: 42, y: 700, size: 8, font });
+
+  const page11 = doc.getPage(10);
+  page11.drawText("88 IMPORTANT INFORMATION ABOUT THE NAMED INSURANCE COMPANY'S PARTS POLICY", { x: 42, y: 716, size: 8, font });
+  page11.drawText("Quality replacement aftermarket alternate LKQ used recycled CAPA parts policy language.", { x: 42, y: 700, size: 8, font });
+
+  return await doc.save();
+}
+
 async function createRam21975SourcePdf() {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -558,6 +592,138 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
         return true;
       }
     );
+  });
+
+  await run("Delta Citation Density rejects production boilerplate/header anchors before rendering", async () => {
+    const sourcePdfBytes = await createProductionBadAnchorFixturePdf();
+    const { anchors } = await extractCitationDensityRowAnchors(sourcePdfBytes, {
+      sourceDocumentRole: "carrier",
+      sourceDocumentId: "carrier-estimate",
+      actualSourcePdfName: "SOR2.pdf",
+    });
+    const cases = [
+      {
+        name: "page 10 MOTOR/CCC boilerplate",
+        pattern: /motor crash estimating guide/i,
+        operationLabel: "Non-OEM CAPA/LKQ issue",
+        category: "parts_downgrade",
+        expected: /motor ccc boilerplate|boilerplate/i,
+      },
+      {
+        name: "page 11 insurer aftermarket-parts policy",
+        pattern: /named insurance company'?s parts policy/i,
+        operationLabel: "Mask jambs",
+        category: "refinish",
+        expected: /insurer policy language|policy/i,
+      },
+      {
+        name: "page 9 fraud/legal disclaimer",
+        pattern: /any person who knowingly/i,
+        operationLabel: "Tint color",
+        category: "refinish",
+        expected: /legal disclaimer|legal/i,
+      },
+      {
+        name: "page 1 vehicle options/header block",
+        pattern: /air conditioning navigation heated seat/i,
+        operationLabel: "Steering angle sensor calibration",
+        category: "adas_calibration",
+        expected: /vehicle options block|header block|header/i,
+      },
+      {
+        name: "sourceLine 2019",
+        pattern: /^2019 Vehicle options/i,
+        operationLabel: "Steering column replacement",
+        category: "structural_or_fit_verification",
+        expected: /impossible estimate line number 2019|header block/i,
+      },
+      {
+        name: "sourceLine 4717",
+        pattern: /^4717 Vehicle options/i,
+        operationLabel: "Steering column replacement",
+        category: "structural_or_fit_verification",
+        expected: /impossible estimate line number 4717|header block/i,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const anchor = anchors.find((item) => testCase.pattern.test(item.rowText));
+      assert.ok(anchor, `expected fixture anchor for ${testCase.name}`);
+      try {
+        const result = await buildAnnotatedCitationDensityEstimatePdf({
+          sourcePdfBytes,
+          sourcePdfName: "SOR2.pdf",
+          sourceText: "",
+          findings: [
+            baseFinding({
+              id: `citation-density-production-${testCase.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`,
+              operationLabel: testCase.operationLabel,
+              category: testCase.category,
+              anchorId: anchor.anchorId,
+              carrierEvidence: {
+                lineNumber: anchor.lineNumber ?? "section",
+                description: anchor.rowText,
+                amount: null,
+                laborHours: null,
+                sourceLabel: "Carrier estimate",
+              },
+            }),
+          ],
+          request: { includeLegend: false, includeUnanchoredAppendix: true, annotationMode: "both", estimateRole: "carrier" },
+        });
+        assert.equal(result.annotationMetadata.length, 0, `${testCase.name} must not render a visible annotation`);
+        if ((result.debugTrace.badAnchorRejectedCount ?? 0) > 0) {
+          assert.match(result.debugTrace.badAnchorRejectReasons.join(" "), testCase.expected);
+          assert.match(result.debugTrace.droppedFindings.map((item) => item.reason).join(" "), /anchor rejected|bad anchor rejected/i);
+        }
+      } catch (error) {
+        if (!/no findings matched extracted anchors|no annotations rendered/i.test(error.message)) {
+          throw error;
+        }
+        if ((error.debugTrace.badAnchorRejectedCount ?? 0) > 0) {
+          assert.match(error.debugTrace.badAnchorRejectReasons.join(" "), testCase.expected);
+          assert.match(error.debugTrace.droppedFindings.map((item) => item.reason).join(" "), /anchor rejected|bad anchor rejected/i);
+        }
+      }
+    }
+  });
+
+  await run("Delta Citation Density preserves valid SOR2 page 4 line 55 estimate anchor", async () => {
+    const sourcePdfBytes = await createProductionBadAnchorFixturePdf({ includeValidEstimateRow: true });
+    const { anchors } = await extractCitationDensityRowAnchors(sourcePdfBytes, {
+      sourceDocumentRole: "carrier",
+      sourceDocumentId: "carrier-estimate",
+      actualSourcePdfName: "SOR2.pdf",
+    });
+    const anchor = anchors.find((item) => item.pageNumber === 4 && String(item.lineNumber) === "55" && /A\/M molding/i.test(item.rowText));
+    assert.ok(anchor, "expected page 4 line 55 A/M molding anchor");
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourcePdfName: "SOR2.pdf",
+      sourceText: "",
+      findings: [
+        baseFinding({
+          id: "citation-density-production-valid-line-55",
+          operationLabel: "A/M molding",
+          category: "parts_downgrade",
+          anchorId: anchor.anchorId,
+          carrierEvidence: {
+            lineNumber: "55",
+            description: "55 Repl A/M molding 0.2 $66.75",
+            amount: 66.75,
+            laborHours: 0.2,
+            sourceLabel: "Carrier estimate",
+          },
+        }),
+      ],
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+
+    assert.equal(result.annotationMetadata.length, 1);
+    assert.equal(result.annotationMetadata[0].sourcePageNumber, 4);
+    assert.equal(result.annotationMetadata[0].sourceLineNumber, "55");
+    assert.match(result.annotationMetadata[0].sourceAnchorText, /A\/M molding/i);
+    assert.equal(result.debugTrace.badAnchorRejectedCount, 0);
   });
 
   await run("classifyPartSource detects AM LKQ CAPA OEM and used variants without unrelated matches", async () => {

@@ -157,7 +157,7 @@ export default function ChatShell({
   const hasRight = useMemo(() => Boolean(effectiveRight), [effectiveRight]);
 
   return (
-    <div className="ci-workstation flex h-[100svh] max-w-full flex-col overflow-hidden bg-background text-foreground">
+    <div className="ci-workstation flex min-h-[100svh] max-w-full flex-col overflow-x-hidden bg-background text-foreground">
       <header className="relative z-10 min-h-[64px] shrink-0 border-b border-border bg-card">
         <div className="relative mx-auto flex min-h-[64px] max-w-none items-center justify-between gap-2 px-2 py-2 sm:px-3 md:gap-4 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
@@ -256,9 +256,9 @@ export default function ChatShell({
 
       <div className="h-px w-full shrink-0 bg-border" />
 
-      <div className="relative z-10 min-h-0 w-full max-w-none flex-1 overflow-hidden px-1.5 py-1.5 sm:px-2 sm:py-2 md:px-4 md:py-3">
-        <div className="grid h-full min-h-0 grid-cols-1 gap-2 sm:gap-3 lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_410px]">
-          <div className="flex h-full min-h-0 min-w-0 flex-col border border-border bg-card">
+      <div className="relative z-10 w-full max-w-none flex-1 px-1.5 py-1.5 sm:px-2 sm:py-2 md:px-4 md:py-3">
+        <div className="grid min-h-[calc(100svh-86px)] grid-cols-1 items-start gap-2 sm:gap-3 lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_410px]">
+          <div className="flex min-h-[calc(100svh-96px)] min-w-0 flex-col border border-border bg-card">
             <div className="hidden min-h-[45px] shrink-0 items-center justify-between gap-4 border-b border-border px-3 py-2 lg:flex">
               <div className="inline-flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#a35d26] dark:text-[#c57934]">
                 <Image
@@ -280,12 +280,12 @@ export default function ChatShell({
           </div>
 
           {hasRight && (
-            <div className="hidden h-full min-h-0 w-full flex-col border border-border bg-card lg:flex">
+            <aside className="sticky top-3 hidden max-h-[calc(100svh-1.5rem)] min-h-0 w-full flex-col border border-border bg-card lg:flex">
               <div className="min-h-[45px] shrink-0 border-b border-border px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                 Evidence / Exports / Audit
               </div>
               <div className="flex-1 min-h-0 overflow-y-auto p-3">{effectiveRight}</div>
-            </div>
+            </aside>
           )}
         </div>
       </div>

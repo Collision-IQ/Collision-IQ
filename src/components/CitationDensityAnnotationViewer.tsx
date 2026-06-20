@@ -122,7 +122,7 @@ export default function CitationDensityAnnotationViewer({
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(annotations[0] ? getAnnotationSelectionKey(annotations[0]) : null);
   const [activeTab, setActiveTab] = useState<ReportTab>("findings");
-  const [inlineExpanded, setInlineExpanded] = useState(false);
+  const [inlineExpanded, setInlineExpanded] = useState(true);
   const [fullDrawerOpen, setFullDrawerOpen] = useState(false);
   const effectiveSelectedId = useMemo(
     () => selectedId && annotations.some((annotation) => getAnnotationSelectionKey(annotation) === selectedId)
@@ -248,7 +248,7 @@ function CitationDensityReportWorkspace({
 }) {
   const inline = variant === "inline";
   const shellClass = inline
-    ? `flex ${inlineExpanded ? "max-h-[min(70svh,820px)]" : "max-h-[min(38svh,460px)]"} min-h-[150px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-[0_20px_60px_rgba(15,23,42,0.16)] ring-1 ring-ring/10 dark:shadow-[0_20px_60px_rgba(0,0,0,0.38)]`
+    ? `flex ${inlineExpanded ? "h-[min(72svh,760px)] min-h-[360px] lg:h-[min(75svh,900px)] lg:min-h-[560px]" : "h-[min(34svh,360px)] min-h-[180px]"} flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-[0_20px_60px_rgba(15,23,42,0.16)] ring-1 ring-ring/10 dark:shadow-[0_20px_60px_rgba(0,0,0,0.38)]`
     : "flex h-full min-h-0 flex-col bg-neutral-950 text-white";
   const headerClass = inline
     ? "flex shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-3 py-2.5 sm:px-4"
@@ -331,7 +331,7 @@ function CitationDensityReportWorkspace({
 
       <div className={inline ? "min-h-0 flex-1 overflow-hidden" : "min-h-0 flex-1 overflow-hidden"}>
         <div className={inline ? "grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px]" : "grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px]"}>
-          <div className={inline ? "min-h-0 overflow-y-auto bg-background p-3" : "min-h-0 overflow-y-auto bg-neutral-900 p-3"}>
+          <div className={inline ? "min-h-0 overflow-y-auto bg-background p-3" : "min-h-0 overflow-y-auto bg-neutral-900 p-3"} data-report-finding-list="true">
             <ReportTabs activeTab={activeTab} onTabChange={onTabChange} inline={inline} />
             {activeTab === "overview" ? (
               <OverviewTab annotations={annotations} diagnostics={diagnostics} inline={inline} />
@@ -347,7 +347,7 @@ function CitationDensityReportWorkspace({
             )}
           </div>
 
-          <aside className={inline ? "min-h-0 overflow-y-auto border-t border-border bg-card p-4 lg:border-l lg:border-t-0" : "min-h-0 overflow-y-auto border-t border-white/10 bg-neutral-950 p-5 lg:border-l lg:border-t-0"}>
+          <aside className={inline ? "min-h-0 overflow-y-auto border-t border-border bg-card p-4 lg:border-l lg:border-t-0" : "min-h-0 overflow-y-auto border-t border-white/10 bg-neutral-950 p-5 lg:border-l lg:border-t-0"} data-report-detail-pane="true">
             {selected ? (
               <SelectedFindingPanel selected={selected} diagnostics={diagnostics} annotations={annotations} inline={inline} onAsk={onAsk} />
             ) : (

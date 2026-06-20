@@ -3,11 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
+import Image from "next/image";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
-import { ArrowRight, Download, FileText, Mail, RefreshCcw, X } from "lucide-react";
+import { ArrowRight, Download, FileText, Mail, Maximize2, Minimize2, RefreshCcw, X } from "lucide-react";
 import ChatShell from "@/components/ChatShell";
 import ChatWidget from "@/components/ChatWidget";
 import type { ReviewProgress } from "@/components/ChatWidget";
@@ -115,6 +116,7 @@ type AnnotatedEstimateExportResult = {
 };
 
 type CitationDensityWorkspaceReportFlavor = "delta" | "oem";
+type CitationDensityTargetEstimate = "auto" | "shop" | "carrier" | "both";
 
 type LeftPaneMode = "chat" | "review";
 export type ReportKind =
@@ -471,6 +473,8 @@ export function ChatbotWorkspacePage() {
   const [assistanceProfile, setAssistanceProfile] = useState<AssistanceProfile | null>(null);
   const [assistanceProfileResolved, setAssistanceProfileResolved] = useState(false);
   const [bottomReportViewer, setBottomReportViewer] = useState<BottomReportViewerState>(null);
+  const [citationDensityTargetEstimate, setCitationDensityTargetEstimate] =
+    useState<CitationDensityTargetEstimate>("auto");
   const bottomReportObjectUrlRef = useRef<string | null>(null);
   const immersiveHeaderExpandedRef = useRef(true);
 
@@ -1599,6 +1603,8 @@ export function ChatbotWorkspacePage() {
             analysisReportId={analysisReportId}
             attachmentIds={attachmentsState.map((file) => file.attachmentId)}
             attachments={attachmentsState}
+            citationDensityTargetEstimate={citationDensityTargetEstimate}
+            onCitationDensityTargetEstimateChange={setCitationDensityTargetEstimate}
             onCustomerReportLocked={() => setUpgradeModalOpen(true)}
             activeInsightKey={activeInsightKey}
             evidenceModel={evidenceModel}
@@ -1612,6 +1618,8 @@ export function ChatbotWorkspacePage() {
           />
         }
       />
+
+      <CollisionIqFooter />
 
       {chatBlocked && (
         <div
@@ -1743,6 +1751,54 @@ export default function ChatbotPage() {
   return <ChatbotWorkspacePage />;
 }
 
+function CollisionIqFooter() {
+  const year = new Date().getFullYear();
+  const links = [
+    { href: "/", label: "Home" },
+    { href: "/dashboard", label: "Dashboard" },
+    { href: "/the-academy", label: "Collision Hub" },
+    { href: "/services", label: "Services" },
+    { href: "/technical-systems", label: "Collision IQ" },
+    { href: "/privacy", label: "Privacy" },
+    { href: "/terms", label: "Terms" },
+    { href: "/delete-account", label: "Delete Account" },
+  ];
+
+  return (
+    <footer className="border-t border-border bg-card/80 px-4 py-8 text-card-foreground" data-collision-iq-footer="true">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 sm:px-2 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <Image
+            src="/brand/logos/Logo-grey.png"
+            alt="Collision Academy"
+            width={150}
+            height={44}
+            className="h-9 w-auto object-contain"
+          />
+          <div className="h-8 w-px bg-border" aria-hidden />
+          <Image
+            src="/iq/iq_logo.png"
+            alt="Collision IQ"
+            width={128}
+            height={36}
+            className="h-8 w-auto object-contain dark:invert"
+          />
+        </div>
+
+        <nav className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground" aria-label="Footer">
+          {links.map((link) => (
+            <Link key={link.href} href={link.href} className="transition hover:text-foreground">
+              {link.label}
+            </Link>
+          ))}
+        </nav>
+
+        <div className="text-sm text-muted-foreground">&copy; {year} Collision Academy</div>
+      </div>
+    </footer>
+  );
+}
+
 function RailContent({
   attachment,
   analysisText,
@@ -1770,6 +1826,8 @@ function RailContent({
   analysisReportId,
   attachmentIds,
   attachments,
+  citationDensityTargetEstimate,
+  onCitationDensityTargetEstimateChange,
   onCustomerReportLocked,
   activeInsightKey,
   evidenceModel,
@@ -1805,6 +1863,8 @@ function RailContent({
   analysisReportId: string | null;
   attachmentIds: string[];
   attachments: AttachmentTrayItem[];
+  citationDensityTargetEstimate: CitationDensityTargetEstimate;
+  onCitationDensityTargetEstimateChange: (target: CitationDensityTargetEstimate) => void;
   onCustomerReportLocked: () => void;
   activeInsightKey: InsightKey | null;
   evidenceModel: EvidenceLinkModel | null;
@@ -2318,7 +2378,7 @@ function RailContent({
         caseId: analysisReportId,
         activeCaseId: analysisReportId,
         artifactIds: attachmentIds,
-        targetEstimate: "auto",
+        targetEstimate: citationDensityTargetEstimate,
         annotationMode: "both",
         includeLegend: true,
         includeSummaryPage: false,
@@ -2396,7 +2456,7 @@ function RailContent({
         caseId: analysisReportId,
         activeCaseId: analysisReportId,
         artifactIds: attachmentIds,
-        targetEstimate: "auto",
+        targetEstimate: citationDensityTargetEstimate,
         annotationMode: "both",
         includeLegend: true,
         includeSummaryPage: false,
@@ -3296,6 +3356,12 @@ function RailContent({
               send={getLastSendFor("snapshot")}
               loading={reportSendHistoryLoading}
             />
+            {canUseEstimateScrubberExport || canUsePolicyRightsReviewExport ? (
+              <CitationDensityTargetSelector
+                value={citationDensityTargetEstimate}
+                onChange={onCitationDensityTargetEstimateChange}
+              />
+            ) : null}
             {canUseBasicPdfExport ? (
               <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[#C65A2A]/25">
                 <div>
@@ -3663,6 +3729,7 @@ function ReportDocumentBottomViewer({
   onClose: () => void;
 }) {
   const [activeTab, setActiveTab] = useState<"summary" | "sections">("summary");
+  const [expanded, setExpanded] = useState(true);
   const tabClass = (active: boolean) => [
     "rounded-md border px-3 py-1.5 text-xs font-semibold transition",
     active
@@ -3672,7 +3739,7 @@ function ReportDocumentBottomViewer({
 
   return (
     <section
-      className="flex max-h-[min(38svh,460px)] min-h-[150px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-[0_20px_60px_rgba(15,23,42,0.16)] ring-1 ring-ring/10 dark:shadow-[0_20px_60px_rgba(0,0,0,0.38)]"
+      className={`flex ${expanded ? "h-[min(72svh,760px)] min-h-[360px] lg:h-[min(75svh,900px)] lg:min-h-[560px]" : "h-[min(34svh,360px)] min-h-[180px]"} flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-[0_20px_60px_rgba(15,23,42,0.16)] ring-1 ring-ring/10 dark:shadow-[0_20px_60px_rgba(0,0,0,0.38)]`}
       aria-label={`${viewer.title} bottom report viewer`}
       data-report-bottom-viewer="true"
     >
@@ -3684,6 +3751,15 @@ function ReportDocumentBottomViewer({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-md border border-border bg-muted p-2 text-muted-foreground transition hover:bg-background hover:text-foreground"
+            aria-label={expanded ? "Collapse report" : "Expand report"}
+            title={expanded ? "Collapse report" : "Expand report"}
+          >
+            {expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </button>
           {viewer.onRegenerate ? (
             <button
               type="button"
@@ -3763,6 +3839,31 @@ function ReportDocumentBottomViewer({
         )}
       </div>
     </section>
+  );
+}
+
+function CitationDensityTargetSelector({
+  value,
+  onChange,
+}: {
+  value: CitationDensityTargetEstimate;
+  onChange: (target: CitationDensityTargetEstimate) => void;
+}) {
+  return (
+    <label className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
+      <span className="font-semibold text-foreground">Citation Density target</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value as CitationDensityTargetEstimate)}
+        className="min-h-8 rounded-md border border-border bg-background px-2 py-1 text-xs font-semibold text-foreground outline-none transition focus:ring-2 focus:ring-ring/25"
+        aria-label="Citation Density target estimate"
+      >
+        <option value="auto">Auto</option>
+        <option value="shop">Shop estimate</option>
+        <option value="carrier">Insurance/carrier estimate</option>
+        <option value="both">Both</option>
+      </select>
+    </label>
   );
 }
 

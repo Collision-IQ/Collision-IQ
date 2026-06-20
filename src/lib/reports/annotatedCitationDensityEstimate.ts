@@ -3275,6 +3275,18 @@ function buildAnchoredCitationCandidates(params: {
   for (const finding of orderedFindings) {
     const anchorId = getFindingAnchorId(finding);
     const exactAnchor = anchorId ? params.anchorIndex.get(anchorId) : null;
+    if (anchorId && !exactAnchor) {
+      const reason = "finding anchorId not found in active source PDF; visual anchor suppressed to avoid stale artifact reanchoring";
+      addAnchorRejectLimitation(finding, reason);
+      params.trace.badAnchorRejectedCount = (params.trace.badAnchorRejectedCount ?? 0) + 1;
+      params.trace.badAnchorRejectReasons = [...(params.trace.badAnchorRejectReasons ?? []), reason].slice(0, 20);
+      params.trace.droppedFindings.push({
+        findingId: finding.id,
+        reason,
+        anchorId,
+      });
+      continue;
+    }
     const anchor = exactAnchor ?? findBestEstimateRowAnchorForFinding(finding, params.anchors, usedAnchorIds, params.estimateRole);
     if (!anchor) {
       params.trace.droppedFindings.push({
@@ -3295,6 +3307,7 @@ function buildAnchoredCitationCandidates(params: {
     }
     const badAnchorReason = getBadAnchorRejectReason(finding, anchor);
     if (badAnchorReason) {
+      addAnchorRejectLimitation(finding, badAnchorReason);
       params.trace.badAnchorRejectedCount = (params.trace.badAnchorRejectedCount ?? 0) + 1;
       params.trace.sourceAnchorRowType = classifyCitationDensityAnchorRow(anchor.rowText);
       params.trace.badAnchorRejectReasons = [...(params.trace.badAnchorRejectReasons ?? []), badAnchorReason].slice(0, 20);
@@ -3331,6 +3344,7 @@ function buildAnchoredCitationCandidates(params: {
       if (!candidate) continue;
       const badAnchorReason = getBadAnchorRejectReason(candidate.finding, anchor);
       if (badAnchorReason) {
+        addAnchorRejectLimitation(candidate.finding, badAnchorReason);
         params.trace.badAnchorRejectedCount = (params.trace.badAnchorRejectedCount ?? 0) + 1;
         params.trace.sourceAnchorRowType = classifyCitationDensityAnchorRow(anchor.rowText);
         params.trace.badAnchorRejectReasons = [...(params.trace.badAnchorRejectReasons ?? []), badAnchorReason].slice(0, 20);
@@ -3388,6 +3402,18 @@ function getBadAnchorRejectReason(finding: CitationDensityFinding, anchor: Estim
   const structuredRowSuffix = hasStructuredEstimateRowEvidence(finding)
     ? "; leave unanchored but structured row verified"
     : "";
+  const productionClass = classifyProductionCitationAnchor(anchor);
+  if (
+    isDeltaEstimateLineFinding(finding) &&
+    isHardRejectedProductionAnchorClass(productionClass) &&
+    !isAllowedDeltaEstimateAnchor(finding, anchor, productionClass) &&
+    !explicitSupportContext
+  ) {
+    return `anchor rejected: ${formatProductionAnchorClass(productionClass)} page/text is not a safe estimate row${structuredRowSuffix}`;
+  }
+  if (isDeltaEstimateLineFinding(finding) && anchor.anchorType === "guide_row" && !explicitSupportContext) {
+    return `anchor rejected: guide row page/text is not a safe estimate row${structuredRowSuffix}`;
+  }
   if (claimedEstimateAnchor && isImpossibleEstimateLineNumber(anchor.lineNumber)) {
     return `bad anchor rejected: impossible estimate line number ${anchor.lineNumber}${structuredRowSuffix}`;
   }
@@ -3404,6 +3430,140 @@ function getBadAnchorRejectReason(finding: CitationDensityFinding, anchor: Estim
     return `bad anchor rejected: ${rowType} cannot be labeled as ${anchor.anchorType}${structuredRowSuffix}`;
   }
   return null;
+}
+
+type ProductionCitationAnchorClass =
+  | "estimate_line"
+  | "supplement_summary_row"
+  | "totals_row"
+  | "supplier_row"
+  | "header_block"
+  | "vehicle_options_block"
+  | "legal_disclaimer"
+  | "motor_ccc_boilerplate"
+  | "insurer_policy_language"
+  | "footer"
+  | "unknown";
+
+function classifyProductionCitationAnchor(anchor: EstimateRowAnchor): ProductionCitationAnchorClass {
+  const text = normalizeMatchText(anchor.rowText);
+  if (isImpossibleEstimateLineNumber(anchor.lineNumber)) return "header_block";
+  if (isVehicleOptionsBlock(text)) return "vehicle_options_block";
+  if (isHeaderOrContactBlock(text, anchor.pageNumber)) return "header_block";
+  if (isMotorCccBoilerplate(text, anchor.pageNumber)) return "motor_ccc_boilerplate";
+  if (isInsurerPolicyLanguage(text, anchor.pageNumber)) return "insurer_policy_language";
+  if (isLegalDisclaimerText(text, anchor.pageNumber)) return "legal_disclaimer";
+  if (isFooterText(text)) return "footer";
+  if (anchor.anchorType === "estimate_line" || anchor.anchorType === "line_note" || anchor.anchorType === "embedded_link_row") {
+    if (!isProductionBoilerplateText(text, anchor.pageNumber)) return "estimate_line";
+  }
+  if (anchor.anchorType === "totals_row") return "totals_row";
+  if (anchor.anchorType === "supplier_row") return "supplier_row";
+  if (/\bsupplement summary\b/.test(text)) return "supplement_summary_row";
+  if (isVehicleOptionsBlock(text)) return "vehicle_options_block";
+  if (isHeaderOrContactBlock(text, anchor.pageNumber)) return "header_block";
+  if (isMotorCccBoilerplate(text, anchor.pageNumber)) return "motor_ccc_boilerplate";
+  if (isInsurerPolicyLanguage(text, anchor.pageNumber)) return "insurer_policy_language";
+  if (isLegalDisclaimerText(text, anchor.pageNumber)) return "legal_disclaimer";
+  if (isFooterText(text)) return "footer";
+  if (anchor.anchorType === "guide_row") return "motor_ccc_boilerplate";
+  if (anchor.anchorType === "section_row") return "unknown";
+  return "unknown";
+}
+
+function isHardRejectedProductionAnchorClass(anchorClass: ProductionCitationAnchorClass) {
+  return anchorClass === "header_block" ||
+    anchorClass === "vehicle_options_block" ||
+    anchorClass === "legal_disclaimer" ||
+    anchorClass === "motor_ccc_boilerplate" ||
+    anchorClass === "insurer_policy_language" ||
+    anchorClass === "footer";
+}
+
+function isAllowedDeltaEstimateAnchor(
+  finding: CitationDensityFinding,
+  anchor: EstimateRowAnchor,
+  anchorClass: ProductionCitationAnchorClass
+) {
+  if (anchorClass === "estimate_line" || anchorClass === "supplement_summary_row") return true;
+  if (anchorClass === "totals_row") return isTotalOrRateFinding(finding);
+  if (anchorClass === "supplier_row") return isSupplierSupportFinding(finding) && !isProductionBoilerplateText(normalizeMatchText(anchor.rowText), anchor.pageNumber);
+  return false;
+}
+
+function isDeltaEstimateLineFinding(finding: CitationDensityFinding) {
+  const reportType = (finding as CitationDensityFinding & { reportType?: string }).reportType;
+  if (reportType === "oem-citation-density" || /^oem-citation-density-/i.test(finding.id)) return false;
+  if (finding.category === "policy_coverage" || finding.category === "state_regulation") return false;
+  return /^citation-density-/i.test(finding.id) || finding.crossEstimateIssue === true || finding.estimateGapType !== "weak_do_not_lead";
+}
+
+function isTotalOrRateFinding(finding: CitationDensityFinding) {
+  return /\b(?:total|subtotal|net cost|rate|labor rate|grand total|estimate total)\b/i.test(
+    `${finding.operationLabel} ${finding.counterpartSummary ?? ""} ${finding.currentSupportSummary}`
+  );
+}
+
+function isSupplierSupportFinding(finding: CitationDensityFinding) {
+  return /\b(?:supplier|invoice|part-source|part source|lkq|capa|aftermarket|a\/m|recycled|used)\b/i.test(
+    `${finding.operationLabel} ${finding.category} ${finding.missingProofSummary} ${finding.recommendedNextAction}`
+  );
+}
+
+function isProductionBoilerplateText(text: string, pageNumber: number) {
+  return isMotorCccBoilerplate(text, pageNumber) ||
+    isInsurerPolicyLanguage(text, pageNumber) ||
+    isLegalDisclaimerText(text, pageNumber) ||
+    isHeaderOrContactBlock(text, pageNumber) ||
+    isVehicleOptionsBlock(text) ||
+    isFooterText(text);
+}
+
+function isMotorCccBoilerplate(text: string, pageNumber: number) {
+  return /\bestimate based on motor crash estimating guide\b/.test(text) ||
+    /\bsymbols following\b/.test(text) ||
+    /\bvin\s*=\s*vehicle identification number\b/.test(text) ||
+    ((pageNumber === 9 || pageNumber === 10 || pageNumber === 11) && /\b(?:motor|ccc|crash estimating guide|guide pages?|included|not included|database|symbols following)\b/.test(text));
+}
+
+function isInsurerPolicyLanguage(text: string, pageNumber: number) {
+  return /\bimportant information about the named insurance company'?s parts policy\b/.test(text) ||
+    /\b(?:aftermarket|alternate|quality replacement|lkq|used|recycled|capa)\b.{0,90}\b(?:parts policy|policy language|parts used|replacement parts)\b/.test(text) ||
+    ((pageNumber === 9 || pageNumber === 10 || pageNumber === 11) && /\b(?:parts policy|quality replacement|alternate parts|named insurance company)\b/.test(text));
+}
+
+function isLegalDisclaimerText(text: string, pageNumber: number) {
+  return /\bany person who knowingly\b/.test(text) ||
+    /\b(?:fraud|legal notice|disclaimer|not an authorization|terms and conditions|subject to review)\b/.test(text) ||
+    ((pageNumber === 9 || pageNumber === 10 || pageNumber === 11) && /\b(?:fraud|legal|disclaimer|authorization)\b/.test(text));
+}
+
+function isHeaderOrContactBlock(text: string, pageNumber: number) {
+  return (pageNumber === 1 && /\b(?:claim|owner|insured|address|phone|email|vehicle|vin|license|loss date|estimate id|workfile|appraiser|estimator|preliminary estimate)\b/.test(text) &&
+    !/\b(?:repl|replace|rpr|repair|r&i|subl|add|refn|calibration|scan|align)\b/.test(text)) ||
+    /^\s*(?:claim|vehicle|owner|insured|vin|license|estimate|page)\b/.test(text);
+}
+
+function isVehicleOptionsBlock(text: string) {
+  const optionHits = (text.match(/\b(?:air conditioning|navigation|heated|seat|bluetooth|cruise|traction|telescopic|steering wheel|paint code|trim|options?|equipment|vin)\b/g) ?? []).length;
+  return optionHits >= 3 && !/\b(?:repl|replace|rpr|repair|r&i|subl|add|refn|calibration|scan|align)\b/.test(text);
+}
+
+function isFooterText(text: string) {
+  return /\bpage\s+\d+\s+of\s+\d+\b/.test(text) ||
+    /\b(?:footer|estimate totals?|subtotal|grand total|deductible|tax)\b/.test(text) &&
+      /\b(?:claim|insured|owner|vin|license|page)\b/.test(text);
+}
+
+function formatProductionAnchorClass(value: ProductionCitationAnchorClass) {
+  return value.replace(/_/g, " ");
+}
+
+function addAnchorRejectLimitation(finding: CitationDensityFinding, reason: string) {
+  const text = `Structured delta finding verified, visual anchor suppressed. Anchor reject reason: ${reason}`;
+  if (!finding.limitations.includes(text)) {
+    finding.limitations = [text, ...finding.limitations].slice(0, 12);
+  }
 }
 
 function isImpossibleEstimateLineNumber(value: string | number | null | undefined) {
@@ -5085,6 +5245,10 @@ function buildCalloutLines(
     `Estimate note: ${sanitize(buildRoleCalloutNote(finding, estimateRole))}`,
     `Current support: ${sanitize(finding.currentSupportSummary)}`,
     `Missing proof: ${sanitize(finding.missingProofSummary)}`,
+    ...finding.limitations
+      .filter((line) => /anchor reject|visual anchor suppressed|unanchored/i.test(line))
+      .slice(0, 2)
+      .map((line) => `Anchor status: ${sanitize(line)}`),
     `Next action: ${sanitize(finding.recommendedNextAction)}`,
   ];
 }
