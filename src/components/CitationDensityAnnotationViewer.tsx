@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Clipboard, Download, MessageSquareText, RefreshCcw, X } from "lucide-react";
+import { Clipboard, Download, Maximize2, MessageSquareText, Minimize2, RefreshCcw, X } from "lucide-react";
 
 export type CitationDensityAnnotationMetadata = {
   findingId: string;
@@ -109,6 +109,8 @@ export default function CitationDensityAnnotationViewer({
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(annotations[0] ? getAnnotationSelectionKey(annotations[0]) : null);
   const [activeTab, setActiveTab] = useState<ReportTab>("findings");
+  const [inlineExpanded, setInlineExpanded] = useState(false);
+  const [fullDrawerOpen, setFullDrawerOpen] = useState(false);
   const effectiveSelectedId = useMemo(
     () => selectedId && annotations.some((annotation) => getAnnotationSelectionKey(annotation) === selectedId)
       ? selectedId
@@ -138,8 +140,11 @@ export default function CitationDensityAnnotationViewer({
       effectiveSelectedId={effectiveSelectedId}
       diagnostics={diagnostics}
       activeTab={activeTab}
+      inlineExpanded={inlineExpanded}
       artifactUnavailableMessage={artifactUnavailableMessage}
       onTabChange={setActiveTab}
+      onToggleInlineExpanded={variant === "inline" ? () => setInlineExpanded((expanded) => !expanded) : undefined}
+      onOpenFullDrawer={variant === "inline" ? () => setFullDrawerOpen(true) : undefined}
       onSelect={handleSelectAnnotation}
       onClose={onClose}
       onAsk={onAsk}
@@ -148,7 +153,36 @@ export default function CitationDensityAnnotationViewer({
   );
 
   if (variant === "inline") {
-    return content;
+    return (
+      <>
+        {content}
+        {fullDrawerOpen && typeof document !== "undefined"
+          ? createPortal(
+            <div className="fixed inset-0 z-[80] bg-black/72 text-white">
+              <CitationDensityReportWorkspace
+                variant="modal"
+                title={reportTitle}
+                filename={safeFilename}
+                pdfUrl={pdfUrl}
+                annotations={annotations}
+                selected={selected}
+                effectiveSelectedId={effectiveSelectedId}
+                diagnostics={diagnostics}
+                activeTab={activeTab}
+                inlineExpanded={false}
+                artifactUnavailableMessage={artifactUnavailableMessage}
+                onTabChange={setActiveTab}
+                onSelect={handleSelectAnnotation}
+                onClose={() => setFullDrawerOpen(false)}
+                onAsk={onAsk}
+                onRegenerate={onRegenerate}
+              />
+            </div>,
+            document.body
+          )
+          : null}
+      </>
+    );
   }
 
   const modal = (
@@ -170,8 +204,11 @@ function CitationDensityReportWorkspace({
   effectiveSelectedId,
   diagnostics,
   activeTab,
+  inlineExpanded = false,
   artifactUnavailableMessage,
   onTabChange,
+  onToggleInlineExpanded,
+  onOpenFullDrawer,
   onSelect,
   onClose,
   onAsk,
@@ -186,8 +223,11 @@ function CitationDensityReportWorkspace({
   effectiveSelectedId: string | null;
   diagnostics?: Record<string, unknown> | null;
   activeTab: ReportTab;
+  inlineExpanded?: boolean;
   artifactUnavailableMessage?: string | null;
   onTabChange: (tab: ReportTab) => void;
+  onToggleInlineExpanded?: () => void;
+  onOpenFullDrawer?: () => void;
   onSelect: (annotation: CitationDensityAnnotationMetadata) => void;
   onClose: () => void;
   onAsk?: (annotation: CitationDensityAnnotationMetadata) => void;
@@ -195,7 +235,7 @@ function CitationDensityReportWorkspace({
 }) {
   const inline = variant === "inline";
   const shellClass = inline
-    ? "flex max-h-[min(38svh,460px)] min-h-[150px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-[0_20px_60px_rgba(15,23,42,0.16)] ring-1 ring-ring/10 dark:shadow-[0_20px_60px_rgba(0,0,0,0.38)]"
+    ? `flex ${inlineExpanded ? "max-h-[min(70svh,820px)]" : "max-h-[min(38svh,460px)]"} min-h-[150px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-[0_20px_60px_rgba(15,23,42,0.16)] ring-1 ring-ring/10 dark:shadow-[0_20px_60px_rgba(0,0,0,0.38)]`
     : "flex h-full min-h-0 flex-col bg-neutral-950 text-white";
   const headerClass = inline
     ? "flex shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-3 py-2.5 sm:px-4"
@@ -216,6 +256,28 @@ function CitationDensityReportWorkspace({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {onToggleInlineExpanded ? (
+            <button
+              type="button"
+              onClick={onToggleInlineExpanded}
+              className={actionClass}
+              aria-label={inlineExpanded ? "Collapse report" : "Expand report"}
+              title={inlineExpanded ? "Collapse report" : "Expand report"}
+            >
+              {inlineExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </button>
+          ) : null}
+          {onOpenFullDrawer ? (
+            <button
+              type="button"
+              onClick={onOpenFullDrawer}
+              className={actionClass}
+              aria-label="Open full report drawer"
+              title="Open full report drawer"
+            >
+              <Maximize2 size={16} />
+            </button>
+          ) : null}
           {onRegenerate ? (
             <button
               type="button"
@@ -572,6 +634,15 @@ function DiagnosticsPanel({
     ["Selected reason", formatDiagnosticValue(payload.selectedEstimateReason ?? payload.selectionReason)],
     ["Selected total", formatMoneyDiagnostic(payload.selectedEstimateTotal)],
     ["Comparison total", formatMoneyDiagnostic(payload.comparisonEstimateTotal)],
+    ["CCC Secure Share configured", formatBooleanDiagnostic(payload.cccSecureShareConfigured)],
+    ["CCC Secure Share searched", formatBooleanDiagnostic(payload.cccSecureShareSearched)],
+    ["CCC Secure Share matched", formatBooleanDiagnostic(payload.cccSecureShareMatched)],
+    ["CCC Secure Share retrieved", formatBooleanDiagnostic(payload.cccSecureShareRetrieved)],
+    ["CCC Secure Share row count", formatDiagnosticValue(payload.cccSecureShareRowCount)],
+    ["CCC Secure Share estimate total", formatMoneyDiagnostic(payload.cccSecureShareEstimateTotal)],
+    ["CCC Secure Share supplement/version", formatDiagnosticValue(payload.cccSecureShareSupplementVersion)],
+    ["CCC Secure Share retrieval failed", formatBooleanDiagnostic(payload.cccSecureShareRetrievalFailed)],
+    ["CCC Secure Share unavailable", formatDiagnosticValue(payload.cccSecureShareUnavailableReason)],
     ["Accepted rows", formatDiagnosticValue(payload.acceptedEstimateRowFindings ?? annotations.length)],
     ["Rejected boilerplate", formatDiagnosticValue(payload.rejectedBoilerplateCount)],
     ["Required detectors", formatDiagnosticValue(payload.requiredDetectorFindingCount)],
@@ -622,6 +693,8 @@ function buildReportOverviewRows(diagnostics: Record<string, unknown> | null | u
     { label: "Selected estimate reason", value: formatDiagnosticValue(payload.selectedEstimateReason ?? payload.selectionReason) },
     { label: "Selected total", value: formatMoneyDiagnostic(payload.selectedEstimateTotal) },
     { label: "Comparison estimate total", value: formatMoneyDiagnostic(payload.comparisonEstimateTotal) },
+    { label: "CCC Secure Share status", value: formatCccSecureShareStatus(payload) },
+    { label: "CCC Secure Share row count", value: formatDiagnosticValue(payload.cccSecureShareRowCount) },
     { label: "Authority trace status", value: formatAuthorityTraceStatus(authorityTrace) },
     { label: "Drive search status", value: formatDriveSearchStatus(authorityTrace) },
     { label: "Matched folders/docs count", value: formatDriveMatchCounts(authorityTrace) },
@@ -636,6 +709,21 @@ function getAuthorityTrace(diagnostics: Record<string, unknown> | null | undefin
     return direct as Record<string, unknown>;
   }
   return null;
+}
+
+function formatBooleanDiagnostic(value: unknown) {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return formatDiagnosticValue(value);
+}
+
+function formatCccSecureShareStatus(payload: Record<string, unknown>) {
+  if (payload.cccSecureShareRetrieved === true) return "retrieved";
+  if (payload.cccSecureShareMatched === true) return "matched";
+  if (payload.cccSecureShareSearched === true) return "searched";
+  if (payload.cccSecureShareConfigured === false) return "unavailable/not configured";
+  if (payload.cccSecureShareRetrievalFailed === true) return "retrieval failed";
+  return "Not reported";
 }
 
 function formatAuthorityTraceStatus(trace: Record<string, unknown> | null) {

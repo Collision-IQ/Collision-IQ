@@ -227,6 +227,15 @@ export type CitationDensityDebugTrace = {
   motorDatabaseSourceCount?: number;
   uploadedSupportDocumentCount?: number;
   cccSecureShareSourceCount?: number;
+  cccSecureShareConfigured?: boolean;
+  cccSecureShareSearched?: boolean;
+  cccSecureShareMatched?: boolean;
+  cccSecureShareRetrieved?: boolean;
+  cccSecureShareRowCount?: number;
+  cccSecureShareEstimateTotal?: number | null;
+  cccSecureShareSupplementVersion?: string | null;
+  cccSecureShareRetrievalFailed?: boolean;
+  cccSecureShareUnavailableReason?: string | null;
   policySourceCount?: number;
   jurisdictionalLawSourceCount?: number;
   internetFallbackSourceCount?: number;
@@ -807,6 +816,15 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     sourceAnchorRowType: undefined,
     badAnchorRejectedCount: 0,
     badAnchorRejectReasons: [],
+    cccSecureShareConfigured: false,
+    cccSecureShareSearched: false,
+    cccSecureShareMatched: false,
+    cccSecureShareRetrieved: false,
+    cccSecureShareRowCount: 0,
+    cccSecureShareEstimateTotal: null,
+    cccSecureShareSupplementVersion: null,
+    cccSecureShareRetrievalFailed: false,
+    cccSecureShareUnavailableReason: "not configured",
     artifactReportType: reportIdentity.reportType,
     findingIdPrefixCheckPassed: true,
   };
@@ -3282,16 +3300,74 @@ function getBadAnchorRejectReason(finding: CitationDensityFinding, anchor: Estim
   const claimedEstimateAnchor = anchor.anchorType === "estimate_line" || anchor.anchorType === "totals_row";
   const explicitSupportContext = (finding as CitationDensityFinding & { rowType?: string; contextType?: string }).rowType === "support_document_context" ||
     (finding as CitationDensityFinding & { rowType?: string; contextType?: string }).contextType === "support_document_context";
+  const structuredRowSuffix = hasStructuredEstimateRowEvidence(finding)
+    ? "; leave unanchored but structured row verified"
+    : "";
+  if (claimedEstimateAnchor && isImpossibleEstimateLineNumber(anchor.lineNumber)) {
+    return `bad anchor rejected: impossible estimate line number ${anchor.lineNumber}${structuredRowSuffix}`;
+  }
+  if (claimedEstimateAnchor && isBoilerplateOrLegalEstimatePageAnchor(anchor, rowType) && !explicitSupportContext) {
+    return `bad anchor rejected: ${rowType} boilerplate/header/legal text cannot be rendered as an estimate annotation${structuredRowSuffix}`;
+  }
   if (isBadCitationDensityAnchorText(anchor.rowText) && !explicitSupportContext) {
-    return `bad anchor rejected: ${rowType} text cannot be rendered as an estimate annotation`;
+    return `bad anchor rejected: ${rowType} text cannot be rendered as an estimate annotation${structuredRowSuffix}`;
   }
   if (
     claimedEstimateAnchor &&
-    ["support_contract", "legal_notice", "insurer_boilerplate", "vehicle_identity_header_footer", "generic_section_text"].includes(rowType)
+    ["support_contract", "legal_notice", "insurer_boilerplate", "vehicle_identity_header_footer", "generic_section_text", "guide_row", "supplier_address"].includes(rowType)
   ) {
-    return `bad anchor rejected: ${rowType} cannot be labeled as ${anchor.anchorType}`;
+    return `bad anchor rejected: ${rowType} cannot be labeled as ${anchor.anchorType}${structuredRowSuffix}`;
   }
   return null;
+}
+
+function isImpossibleEstimateLineNumber(value: string | number | null | undefined) {
+  const numeric = typeof value === "number" ? value : value ? Number(String(value).trim()) : NaN;
+  return numeric === 4717 || isVehicleYearLineNumber(numeric);
+}
+
+function isBoilerplateOrLegalEstimatePageAnchor(anchor: EstimateRowAnchor, rowType: string) {
+  const text = normalizeMatchText(anchor.rowText);
+  const boilerplateRowTypes = new Set([
+    "support_contract",
+    "legal_notice",
+    "insurer_boilerplate",
+    "vehicle_identity_header_footer",
+    "generic_section_text",
+    "guide_row",
+    "supplier_address",
+  ]);
+  if (boilerplateRowTypes.has(rowType)) return true;
+  if (
+    anchor.pageNumber === 1 &&
+    /\b(?:vehicle|vin|claim|owner|insured|license|loss date|estimate id|workfile|options|equipment)\b/.test(text) &&
+    !/\b(?:repl|replace|rpr|repair|r&i|subl|add|supp)\b/.test(text)
+  ) {
+    return true;
+  }
+  if (
+    (anchor.pageNumber === 10 || anchor.pageNumber === 11) &&
+    /\b(?:disclaimer|abbreviations?|motor|ccc|guide pages?|included|not included|quality replacement|alternate parts|allstate parts policy|fraud|legal notice|supplier address)\b/.test(text)
+  ) {
+    return true;
+  }
+  return /\b(?:disclaimer|abbreviations?|motor guide|ccc motor guide|guide pages?|legal notice|fraud warning|quality replacement parts|alternate parts policy|supplier address)\b/.test(text);
+}
+
+function hasStructuredEstimateRowEvidence(finding: CitationDensityFinding) {
+  const record = finding as CitationDensityFinding & {
+    structuredRowVerified?: boolean;
+    cccSecureShareRowId?: string | null;
+    cccSecureShareLineId?: string | null;
+    sourceProvider?: string | null;
+    source?: { provider?: string | null; cccSecureShareRowId?: string | null };
+  };
+  return (
+    record.structuredRowVerified === true ||
+    Boolean(record.cccSecureShareRowId || record.cccSecureShareLineId || record.source?.cccSecureShareRowId) ||
+    record.sourceProvider === "ccc_secure_share" ||
+    record.source?.provider === "ccc_secure_share"
+  );
 }
 
 function orderFindingsForAnchoring(findings: CitationDensityFinding[]) {

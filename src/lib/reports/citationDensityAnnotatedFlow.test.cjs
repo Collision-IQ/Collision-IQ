@@ -284,6 +284,8 @@ run("Citation Density viewer uses server-generated PDF and converts PDF coordina
   assert.match(source, /ReportTabs/);
   assert.match(source, /Selected estimate reason/);
   assert.match(source, /Comparison estimate total/);
+  assert.match(source, /CCC Secure Share status/);
+  assert.match(source, /CCC Secure Share row count/);
   assert.match(source, /Authority trace status/);
   assert.match(source, /Drive search status/);
   assert.match(source, /Matched folders\/docs count/);
@@ -299,6 +301,24 @@ run("Citation Density viewer uses server-generated PDF and converts PDF coordina
   assert.match(source, /border-amber-300\/70 bg-amber-300\/15/);
   assert.match(source, /DiagnosticsPanel/);
   assert.match(source, /copyDiagnostics/);
+  assert.match(source, /Collapse report/);
+  assert.match(source, /Expand report/);
+  assert.match(source, /Open full report drawer/);
+  assert.match(source, /max-h-\[min\(70svh,820px\)\]/);
+});
+
+run("Citation Density anchor guard rejects fake line numbers and boilerplate anchors", () => {
+  const source = fs.readFileSync(path.join(process.cwd(), "src/lib/reports/annotatedCitationDensityEstimate.ts"), "utf8");
+
+  assert.match(source, /function isImpossibleEstimateLineNumber/);
+  assert.match(source, /numeric === 4717/);
+  assert.match(source, /isVehicleYearLineNumber\(numeric\)/);
+  assert.match(source, /function isBoilerplateOrLegalEstimatePageAnchor/);
+  assert.match(source, /anchor\.pageNumber === 1/);
+  assert.match(source, /anchor\.pageNumber === 10 \|\| anchor\.pageNumber === 11/);
+  assert.match(source, /unanchored but structured row verified/);
+  assert.match(source, /cccSecureShareRetrieved/);
+  assert.match(source, /cccSecureShareRowCount/);
 });
 
 run("annotated routes expose copyable diagnostics for locked DevTools", () => {
