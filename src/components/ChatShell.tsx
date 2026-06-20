@@ -157,6 +157,11 @@ export default function ChatShell({
   const hasLeft = useMemo(() => Boolean(left), [left]);
   const effectiveRight = isNativeAndroid ? null : right;
   const hasRight = useMemo(() => Boolean(effectiveRight), [effectiveRight]);
+  const reviewRowHeightClass = bottom
+    ? "lg:h-[min(760px,calc(100svh-96px))] lg:min-h-[520px]"
+    : "lg:max-h-[calc(100svh-96px)]";
+  const chatPanelHeightClass = bottom ? "lg:h-full" : "lg:h-auto";
+  const rightRailHeightClass = bottom ? "lg:h-full" : "lg:max-h-[calc(100svh-96px)]";
 
   return (
     <div className="ci-workstation flex min-h-[100svh] max-w-full flex-col overflow-x-hidden bg-background text-foreground">
@@ -270,8 +275,18 @@ export default function ChatShell({
       <div className="h-px w-full shrink-0 bg-border" />
 
       <div className="relative z-10 flex w-full max-w-none flex-1 flex-col px-1.5 py-1.5 sm:px-2 sm:py-2 md:px-4 md:py-3">
-        <div className="grid min-h-0 w-full flex-1 grid-cols-1 items-stretch gap-2 sm:gap-3 lg:h-[calc(100svh-96px)] lg:max-h-[calc(100svh-96px)] lg:min-h-[560px] lg:flex-none lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_410px]">
-          <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border border-border bg-card">
+        <div
+          className={[
+            "grid min-h-0 w-full flex-1 grid-cols-1 items-stretch gap-2 sm:gap-3 lg:flex-none lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_410px]",
+            reviewRowHeightClass,
+          ].join(" ")}
+        >
+          <div
+            className={[
+              "flex min-h-0 min-w-0 flex-col overflow-hidden border border-border bg-card",
+              chatPanelHeightClass,
+            ].join(" ")}
+          >
             <div className="hidden min-h-[45px] shrink-0 items-center justify-between gap-4 border-b border-border px-3 py-2 lg:flex">
               <div className="inline-flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#a35d26] dark:text-[#c57934]">
                 <Image
@@ -293,7 +308,12 @@ export default function ChatShell({
           </div>
 
           {hasRight && (
-            <aside className="sticky top-3 hidden h-full min-h-0 w-full flex-col overflow-hidden border border-border bg-card lg:flex">
+            <aside
+              className={[
+                "sticky top-3 hidden min-h-0 w-full flex-col overflow-hidden border border-border bg-card lg:flex",
+                rightRailHeightClass,
+              ].join(" ")}
+            >
               <div className="min-h-[45px] shrink-0 border-b border-border px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                 Evidence / Exports / Audit
               </div>

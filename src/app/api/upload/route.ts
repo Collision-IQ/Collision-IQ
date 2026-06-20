@@ -57,7 +57,7 @@ export const runtime = "nodejs";
 
 const MULTIPART_BODY_OVERHEAD_BYTES = 2 * 1024 * 1024;
 const RUNTIME_LIMIT_MESSAGE =
-  "This upload exceeds the plan limit for this file type. Upload a smaller file or upgrade your plan.";
+  "This upload is too large for the standard upload route. Large ZIP and video uploads should use the direct storage upload path for your plan.";
 
 type UploadSuccess = {
   attachmentId: string;
@@ -182,7 +182,7 @@ async function readUploadFormData(req: Request, params: {
       error: NextResponse.json(
         {
           error:
-            "Upload body could not be read. It may exceed the current platform upload limit. Direct large-file upload support is coming soon.",
+            "Upload body could not be read by the standard upload route. Retry with the direct large-file upload path, or upload a smaller file.",
           code: "UPLOAD_BODY_PARSE_FAILED",
           runtimeMaxBodyBytes: params.runtimeMaxBodyBytes,
           planMaxUploadBytes: params.planMaxUploadBytes,

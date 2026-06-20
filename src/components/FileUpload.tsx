@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { upload as uploadBlob } from "@vercel/blob/client";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
@@ -19,6 +20,10 @@ import {
 } from "@/lib/uploadSafety/uploadLimits";
 import { isNative } from "@/lib/native";
 import { VIDEO_MAX_BYTES } from "@/lib/uploadSafety/videoSafety";
+import {
+  resolveUploadTransport,
+  validateDirectUploadCandidate,
+} from "@/lib/uploadSafety/directUploadRouting";
 
 type Props = {
   onUploadComplete: (docs: UploadedDocument[]) => void;
@@ -246,17 +251,92 @@ export default function FileUpload({
       const docs: UploadedDocument[] = [];
 
       for (const file of acceptedFiles) {
-        const formData = new FormData();
-        formData.append("file", file);
-
         const token = await getToken();
-        console.log("UPLOAD_HAS_CLERK_TOKEN", !!token);
-        const res = await fetch("/api/upload", {
-          method: "POST",
-          credentials: "include",
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-          body: formData,
+        const authHeaders = token ? { Authorization: `Bearer ${token}` } : undefined;
+        const transport = resolveUploadTransport(file, uploadLimits);
+        console.info("[upload-client] selected upload route", {
+          uploadMode: transport.uploadMode,
+          reason: transport.reason,
+          filename: file.name,
+          sizeBytes: file.size,
+          plan: uploadLimits.plan,
+          zipDetected: transport.zipDetected,
+          videoDetected: transport.videoDetected,
         });
+
+        let res: Response;
+        if (transport.uploadMode === "direct-storage") {
+          const rejection = validateDirectUploadCandidate(file, uploadLimits);
+          if (rejection) {
+            failures.push(`${file.name}: ${rejection.reason}`);
+            continue;
+          }
+
+          console.info("[upload-client] directUploadStarted", {
+            uploadMode: "direct-storage",
+            filename: file.name,
+            sizeBytes: file.size,
+            plan: uploadLimits.plan,
+            zipDetected: transport.zipDetected,
+            videoDetected: transport.videoDetected,
+          });
+          const blob = await uploadBlob(`uploads/${Date.now()}-${file.name}`, file, {
+            access: "public",
+            contentType: file.type || undefined,
+            handleUploadUrl: "/api/upload/direct",
+            clientPayload: JSON.stringify({
+              filename: file.name,
+              contentType: file.type,
+              sizeBytes: file.size,
+              activeCaseId: null,
+            }),
+            headers: authHeaders,
+            multipart: file.size > 8 * 1024 * 1024,
+          });
+          console.info("[upload-client] directUploadCompleted", {
+            uploadMode: "direct-storage",
+            filename: file.name,
+            sizeBytes: file.size,
+            pathname: blob.pathname,
+          });
+          console.info("[upload-client] finalizeStarted", {
+            uploadMode: "direct-storage",
+            filename: file.name,
+            sizeBytes: file.size,
+          });
+          res = await fetch("/api/upload/finalize", {
+            method: "POST",
+            credentials: "include",
+            headers: {
+              "Content-Type": "application/json",
+              ...(authHeaders ?? {}),
+            },
+            body: JSON.stringify({
+              url: blob.url,
+              downloadUrl: blob.downloadUrl,
+              pathname: blob.pathname,
+              filename: file.name,
+              contentType: blob.contentType || file.type,
+              sizeBytes: file.size,
+              activeCaseId: null,
+            }),
+          });
+          console.info("[upload-client] finalizeCompleted", {
+            uploadMode: "direct-storage",
+            filename: file.name,
+            status: res.status,
+          });
+        } else {
+          const formData = new FormData();
+          formData.append("file", file);
+
+          res = await fetch("/api/upload", {
+            method: "POST",
+            credentials: "include",
+            headers: authHeaders,
+            body: formData,
+          });
+        }
 
         const data = (await res.json().catch(() => null)) as
           | {

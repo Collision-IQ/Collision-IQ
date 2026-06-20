@@ -454,7 +454,7 @@ run("bottom report workspace restores interactive in-context report review", () 
   assert.match(viewerSource, /overflow-y-auto/);
 });
 
-run("Chat workspace locks chat and rail height while report remains below", () => {
+run("Chat workspace stays compact without reports and expands when report remains below", () => {
   const shellSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatShell.tsx"), "utf8");
   const pageSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
   const widgetSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatWidget.tsx"), "utf8");
@@ -463,9 +463,14 @@ run("Chat workspace locks chat and rail height while report remains below", () =
   assert.match(shellSource, /overflow-x-hidden/);
   assert.doesNotMatch(shellSource, /ci-workstation flex h-\[100svh\][^"]*overflow-hidden/);
   assert.match(shellSource, /bottom\?: ReactNode/);
-  assert.match(shellSource, /lg:h-\[calc\(100svh-96px\)\]/);
+  assert.match(shellSource, /reviewRowHeightClass = bottom/);
+  assert.match(shellSource, /lg:h-\[min\(760px,calc\(100svh-96px\)\)\]/);
+  assert.match(shellSource, /lg:min-h-\[520px\]/);
   assert.match(shellSource, /lg:max-h-\[calc\(100svh-96px\)\]/);
-  assert.match(shellSource, /sticky top-3 hidden h-full min-h-0/);
+  assert.match(shellSource, /chatPanelHeightClass = bottom \? "lg:h-full" : "lg:h-auto"/);
+  assert.match(shellSource, /rightRailHeightClass = bottom \? "lg:h-full" : "lg:max-h-\[calc\(100svh-96px\)\]"/);
+  assert.doesNotMatch(shellSource, /lg:min-h-\[420px\]/);
+  assert.match(shellSource, /sticky top-3 hidden min-h-0/);
   assert.match(shellSource, /flex-1 min-h-0 overflow-y-auto p-3/);
   assert.match(pageSource, /bottom=\{/);
   assert.match(pageSource, /bottomReportViewer \? \(/);
@@ -473,6 +478,11 @@ run("Chat workspace locks chat and rail height while report remains below", () =
   assert.match(pageSource, /data-collision-iq-footer="true"/);
   assert.doesNotMatch(widgetSource, /\/brand\/logos\/Logo-grey\.png/);
   assert.match(widgetSource, /\/brand\/logos\/logo-horizontal\.png/);
+  assert.match(widgetSource, /hasActiveChatWorkspace/);
+  assert.match(widgetSource, /min-h-\[220px\] max-h-\[320px\] overflow-y-auto/);
+  assert.match(widgetSource, /max-h-\[calc\(100svh-260px\)\] overflow-y-auto/);
+  assert.doesNotMatch(widgetSource, /sm:min-h-\[360px\]/);
+  assert.doesNotMatch(widgetSource, /sm:justify-center sm:space-y-4 sm:py-10/);
   assert.match(shellSource, /\/iq\/iq-app\.png/);
   assert.match(shellSource, /\/iq\/iq_logo\.png/);
   assert.match(shellSource, /\/iq\/iq_logo-white\.png/);

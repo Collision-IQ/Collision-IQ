@@ -20,6 +20,7 @@ import {
   StopCircle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { upload as uploadBlob } from "@vercel/blob/client";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
@@ -65,6 +66,10 @@ import {
   resolveUploadPlanLimits,
   VIDEO_UPLOAD_ACCEPT,
 } from "@/lib/uploadSafety/uploadLimits";
+import {
+  resolveUploadTransport,
+  validateDirectUploadCandidate,
+} from "@/lib/uploadSafety/directUploadRouting";
 import { VIDEO_MAX_BYTES } from "@/lib/uploadSafety/videoSafety";
 import {
   buildReviewCompletenessMessage,
@@ -1015,6 +1020,19 @@ export default function ChatWidget({
   const hasUploadStatus = selectedUploadNames.length > 0 || uploadUiState !== "idle";
   const showMobileUploadStatus =
     uploadUiState === "uploading" || uploadUiState === "error";
+  const hasRealChatActivity = messages.some((message) => message.id !== INITIAL_MESSAGE.id);
+  const hasActiveChatWorkspace =
+    hasRealChatActivity ||
+    hasAnyAttachment ||
+    loading ||
+    hasUploadStatus ||
+    uploadUiState !== "idle";
+  const chatBodyFrameClass = hasActiveChatWorkspace
+    ? "flex-1 min-h-0"
+    : "shrink-0";
+  const transcriptHeightClass = hasActiveChatWorkspace
+    ? "flex-1 min-h-[220px] max-h-[calc(100svh-260px)] overflow-y-auto lg:min-h-[260px]"
+    : "min-h-[220px] max-h-[320px] overflow-y-auto lg:min-h-[240px] lg:max-h-[320px]";
   const previousAttachmentCountRef = useRef(0);
 
   useEffect(() => {
@@ -2812,20 +2830,103 @@ export default function ChatWidget({
     }
 
     onChatEngagement?.();
-    const formData = new FormData();
-    formData.append("file", file);
-    if (analysisReportIdRef.current) {
-      formData.append("activeCaseId", analysisReportIdRef.current);
+    const token = await getToken();
+    const authHeaders = token ? { Authorization: `Bearer ${token}` } : undefined;
+    const transport = resolveUploadTransport(file, effectiveUploadPlanLimits);
+    const activeCaseId = analysisReportIdRef.current;
+
+    console.info("[upload-client] selected upload route", {
+      uploadMode: transport.uploadMode,
+      reason: transport.reason,
+      filename: file.name,
+      sizeBytes: file.size,
+      plan: effectiveUploadPlanLimits.plan,
+      zipDetected: transport.zipDetected,
+      videoDetected: transport.videoDetected,
+      activeCaseId,
+    });
+
+    let res: Response;
+    if (transport.uploadMode === "direct-storage") {
+      const rejection = validateDirectUploadCandidate(file, effectiveUploadPlanLimits);
+      if (rejection) {
+        throw new Error(rejection.reason);
+      }
+
+      console.info("[upload-client] directUploadStarted", {
+        uploadMode: "direct-storage",
+        filename: file.name,
+        sizeBytes: file.size,
+        plan: effectiveUploadPlanLimits.plan,
+        zipDetected: transport.zipDetected,
+        videoDetected: transport.videoDetected,
+      });
+
+      const blob = await uploadBlob(`uploads/${Date.now()}-${file.name}`, file, {
+        access: "public",
+        contentType: file.type || undefined,
+        handleUploadUrl: "/api/upload/direct",
+        clientPayload: JSON.stringify({
+          filename: file.name,
+          contentType: file.type,
+          sizeBytes: file.size,
+          activeCaseId,
+        }),
+        headers: authHeaders,
+        multipart: file.size > 8 * 1024 * 1024,
+      });
+
+      console.info("[upload-client] directUploadCompleted", {
+        uploadMode: "direct-storage",
+        filename: file.name,
+        sizeBytes: file.size,
+        pathname: blob.pathname,
+      });
+      console.info("[upload-client] finalizeStarted", {
+        uploadMode: "direct-storage",
+        filename: file.name,
+        sizeBytes: file.size,
+        activeCaseId,
+      });
+
+      res = await fetch("/api/upload/finalize", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authHeaders ?? {}),
+        },
+        body: JSON.stringify({
+          url: blob.url,
+          downloadUrl: blob.downloadUrl,
+          pathname: blob.pathname,
+          filename: file.name,
+          contentType: blob.contentType || file.type,
+          sizeBytes: file.size,
+          activeCaseId,
+        }),
+      });
+
+      console.info("[upload-client] finalizeCompleted", {
+        uploadMode: "direct-storage",
+        filename: file.name,
+        status: res.status,
+      });
+    } else {
+      const formData = new FormData();
+      formData.append("file", file);
+      if (activeCaseId) {
+        formData.append("activeCaseId", activeCaseId);
+      }
+
+      res = await fetch("/api/upload", {
+        method: "POST",
+        credentials: "include",
+        headers: authHeaders,
+        body: formData,
+      });
     }
 
-    const token = await getToken();
-    console.log("UPLOAD_HAS_CLERK_TOKEN", !!token);
-    const res = await fetch("/api/upload", {
-      method: "POST",
-      credentials: "include",
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      body: formData,
-    });
     if (res.status === 401) {
       router.push("/sign-in?next=/");
       throw new Error("Please sign in before uploading.");
@@ -2833,7 +2934,10 @@ export default function ChatWidget({
     const data = (await res.json().catch(() => null)) as UploadResponse | null;
 
     if (!res.ok) {
-      let message = `Upload failed (${res.status})`;
+      let message =
+        res.status === 413
+          ? "This file is too large for the current upload route or plan. ZIP and video uploads may require Starter, Pro, or Admin limits."
+          : `Upload failed (${res.status})`;
 
       if (data?.failedUploads?.length) {
         message = data.failedUploads
@@ -3562,24 +3666,19 @@ export default function ChatWidget({
       />
       <div className="pointer-events-none absolute inset-0 bg-background/70 dark:bg-background/78" />
 
-      <div className="relative z-10 flex flex-col flex-1 min-h-0">
+      <div className={["relative z-10 flex flex-col min-h-0", chatBodyFrameClass].join(" ")}>
         <div
           ref={scrollRef}
-          className="
-          overflow-y-auto
-          flex-1
-          px-3 sm:px-4
-          min-h-0
-          pt-3 sm:pt-4
-          pb-4
-          space-y-4
-        "
+          className={[
+            "min-h-0 px-3 pb-4 pt-3 sm:px-4 sm:pt-4 space-y-4",
+            transcriptHeightClass,
+          ].join(" ")}
         >
           {messages.length === 1 && messages[0].role === "assistant" && !introDismissed && (
             <div
-              className="flex min-h-0 flex-col items-center justify-start space-y-0 py-2 text-center transition-[opacity,visibility] duration-200 sm:min-h-[360px] sm:justify-center sm:space-y-4 sm:py-10"
+              className="flex min-h-0 flex-col items-center justify-start space-y-2 py-2 text-center transition-[opacity,visibility] duration-200 sm:space-y-3 sm:py-3"
             >
-              <div className="min-h-[88px] w-full sm:min-h-[136px]">
+              <div className="w-full">
                 <div className="mx-auto max-w-[860px] border border-border bg-card px-3 py-2.5 text-[12px] text-muted-foreground sm:px-4 sm:py-3 sm:text-sm">
                   <div className="flex items-start justify-between gap-2 sm:gap-3">
                   <div className="leading-5 sm:leading-7">
@@ -3597,14 +3696,14 @@ export default function ChatWidget({
                   </div>
                 </div>
               </div>
-              <div className="hidden space-y-1.5 text-center sm:block sm:space-y-2">
+              <div className="hidden space-y-1.5 text-center sm:block">
                 <div className="text-sm font-semibold text-foreground sm:text-base">
                   Start a repair analysis
                 </div>
                 <div className="text-[12px] leading-4 text-muted-foreground sm:text-[13px] sm:leading-5">
                   Upload an estimate, procedure, or photo set and we&apos;ll turn it into a cleaner repair decision read.
                 </div>
-                <div className="mx-auto mt-1 max-w-[680px] text-[11px] leading-4 text-muted-foreground sm:mt-2 sm:text-xs sm:leading-5">
+                <div className="mx-auto mt-1 max-w-[680px] text-[11px] leading-4 text-muted-foreground sm:text-xs sm:leading-5">
                   {uploadBatchGuidance}
                 </div>
               </div>
