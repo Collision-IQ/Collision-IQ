@@ -102,6 +102,7 @@ import {
   type ExcludedFromReviewReason,
 } from "@/lib/reviewCompleteness";
 import {
+  buildFileReviewDiagnosticsSummary,
   buildFileReviewLedger,
   resolveEvidenceCompletenessFromLedger,
 } from "@/lib/fileReviewLedger";
@@ -1640,6 +1641,7 @@ function applyLinkedEvidenceToReport(params: {
   const fileReviewLedger = buildFileReviewLedger(params.uploadedAttachments, {
     usedInRepairIntelligenceIds: params.uploadedAttachments.map((attachment) => attachment.id),
   });
+  const fileReviewDiagnostics = buildFileReviewDiagnosticsSummary(params.uploadedAttachments, fileReviewLedger);
   const evidenceCompletenessLedger = resolveEvidenceCompletenessFromLedger({
     ledger: fileReviewLedger,
     evidenceRegistry,
@@ -1651,7 +1653,11 @@ function applyLinkedEvidenceToReport(params: {
     ].filter(Boolean).join("\n"),
   });
   const reviewabilityDiagnostics = buildUploadedReviewabilityDiagnostics(params.uploadedAttachments, fileReviewLedger);
-  const reviewedFileCount = Math.max(uploadedEvidenceCount, reviewabilityDiagnostics.reviewableFileCount);
+  const reviewedFileCount = Math.max(
+    fileReviewDiagnostics.reviewedCount,
+    params.reviewProgress?.reviewedForDetermination ?? 0,
+    params.previousReport?.ingestionMeta?.reviewedFileCount ?? 0
+  );
   const reviewProgressCounts = normalizeReviewProgressCounts({
     uploadedCount: uploadedFileCount,
     indexedCount: indexedFileCount,
@@ -1704,6 +1710,7 @@ function applyLinkedEvidenceToReport(params: {
       excludedFromReviewReasons: reviewProgressCounts.excludedFromReviewReasons,
       excludedFromReviewFiles: reviewProgressCounts.excludedFromReviewFiles,
       fileReviewLedger,
+      fileReviewDiagnostics,
       evidenceCompletenessLedger,
       totalKnownFileCount,
       uploadLimitReached: Boolean(params.uploadLimitReached),

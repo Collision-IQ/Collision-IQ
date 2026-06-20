@@ -8,6 +8,7 @@ import type {
 } from "@/lib/reviewCompleteness";
 import type {
   EvidenceCategoryResolution,
+  FileReviewDiagnosticsSummary,
   FileReviewLedgerEntry,
 } from "@/lib/fileReviewLedger";
 
@@ -492,6 +493,7 @@ export type ConfidenceIntegrity = {
   excludedFromReviewReasons?: ExcludedFromReviewReason[];
   excludedFromReviewFiles?: ExcludedFromReviewFileDiagnostic[];
   fileReviewLedger?: FileReviewLedgerEntry[];
+  fileReviewDiagnostics?: FileReviewDiagnosticsSummary;
   evidenceCompletenessLedger?: EvidenceCategoryResolution[];
   totalKnownFileCount?: number;
   uploadLimitReached: boolean;
@@ -559,6 +561,7 @@ export type RepairIntelligenceReport = {
     excludedFromReviewReasons?: ExcludedFromReviewReason[];
     excludedFromReviewFiles?: ExcludedFromReviewFileDiagnostic[];
     fileReviewLedger?: FileReviewLedgerEntry[];
+    fileReviewDiagnostics?: FileReviewDiagnosticsSummary;
     evidenceCompletenessLedger?: EvidenceCategoryResolution[];
     totalKnownFileCount?: number;
     uploadLimitReached?: boolean;

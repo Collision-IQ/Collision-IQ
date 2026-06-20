@@ -195,7 +195,7 @@ function CitationDensityReportWorkspace({
 }) {
   const inline = variant === "inline";
   const shellClass = inline
-    ? "flex max-h-[min(46svh,560px)] min-h-[150px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-[0_20px_60px_rgba(15,23,42,0.16)] ring-1 ring-ring/10 dark:shadow-[0_20px_60px_rgba(0,0,0,0.38)]"
+    ? "flex max-h-[min(38svh,460px)] min-h-[150px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-[0_20px_60px_rgba(15,23,42,0.16)] ring-1 ring-ring/10 dark:shadow-[0_20px_60px_rgba(0,0,0,0.38)]"
     : "flex h-full min-h-0 flex-col bg-neutral-950 text-white";
   const headerClass = inline
     ? "flex shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-3 py-2.5 sm:px-4"

@@ -374,6 +374,7 @@ run("annotated export uses persisted artifact id for download and metadata", () 
 
 run("bottom report workspace restores interactive in-context report review", () => {
   const pageSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
+  const viewerSource = fs.readFileSync(path.join(process.cwd(), "src/components/CitationDensityAnnotationViewer.tsx"), "utf8");
 
   assert.match(pageSource, /BottomReportWorkspacePanel/);
   assert.match(pageSource, /variant="inline"/);
@@ -385,6 +386,13 @@ run("bottom report workspace restores interactive in-context report review", () 
   assert.match(pageSource, /artifactUnavailableMessage: result\.artifactFallbackUsed/);
   assert.match(pageSource, /The saved artifact link was unavailable/);
   assert.match(pageSource, /ReportDocumentBottomViewer/);
+  assert.match(pageSource, /min-h-\[100svh\] overflow-x-hidden/);
+  assert.doesNotMatch(pageSource, /h-\[100svh\] overflow-hidden bg-background/);
+  assert.match(pageSource, /data-report-bottom-viewer/);
+  assert.match(pageSource, /max-h-\[min\(38svh,460px\)\]/);
+  assert.match(viewerSource, /data-citation-density-bottom-viewer/);
+  assert.match(viewerSource, /max-h-\[min\(38svh,460px\)\]/);
+  assert.match(viewerSource, /overflow-y-auto/);
 });
 
 run("Ask about finding sends selected finding context into active chat", () => {

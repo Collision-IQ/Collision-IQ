@@ -47,6 +47,7 @@ const {
   normalizeReviewProgressCounts,
 } = require("../reviewCompleteness.ts");
 const {
+  buildFileReviewDiagnosticsSummary,
   buildFileReviewLedger,
   resolveEvidenceCompletenessFromLedger,
 } = require("../fileReviewLedger.ts");
@@ -393,6 +394,53 @@ run("file ledger records every upload and evidence reconciliation does not mark 
   assert.equal(unsupported.indexedStatus, "indexed");
   assert.equal(unsupported.textExtractionStatus, "not_applicable");
   assert.equal(unsupported.reviewabilityHint, "Upload a PDF, supported image, or extracted text version.");
+});
+
+run("file review diagnostics account for 110 images and 18 PDFs without excluding parsed support PDFs", () => {
+  const imageAttachments = Array.from({ length: 110 }, (_, index) => ({
+    id: `photo-${index + 1}`,
+    filename: `Repair progress ${String(index + 1).padStart(3, "0")}.jpg`,
+    type: "image/jpeg",
+    text: "",
+    imageDataUrl: "data:image/jpeg;base64,AAA=",
+    sizeBytes: 2048,
+    sha256: `photo-hash-${index + 1}`,
+  }));
+  const pdfAttachments = Array.from({ length: 18 }, (_, index) => ({
+    id: `pdf-${index + 1}`,
+    filename: index === 0 ? "Work Auth Contract.pdf" : `Case document ${String(index + 1).padStart(2, "0")}.pdf`,
+    type: "application/pdf",
+    text: index === 0
+      ? "Work Authorization Contract of Repair customer acknowledges Repairer has posted labor rates"
+      : "Estimate repair procedure invoice calibration support text",
+    imageDataUrl: "data:application/pdf;base64,AAA=",
+    sizeBytes: 4096,
+    sha256: `pdf-hash-${index + 1}`,
+  }));
+  const attachments = [...imageAttachments, ...pdfAttachments];
+  const ledger = buildFileReviewLedger(attachments);
+  const diagnostics = buildFileReviewDiagnosticsSummary(attachments, ledger);
+  const workAuth = ledger.find((entry) => entry.fileId === "pdf-1");
+
+  assert.equal(ledger.length, 128);
+  assert.equal(diagnostics.totalUploaded, 128);
+  assert.equal(diagnostics.imageCount, 110);
+  assert.equal(diagnostics.pdfCount, 18);
+  assert.equal(diagnostics.imageVisionCount, 110);
+  assert.equal(diagnostics.parsedPdfCount, 18);
+  assert.equal(diagnostics.pdfBytesAvailableCount, 18);
+  assert.equal(diagnostics.scannedPdfFallbackCount, 0);
+  assert.equal(diagnostics.reviewableCount, 128);
+  assert.equal(diagnostics.reviewedCount, 128);
+  assert.equal(diagnostics.excludedCount, 0);
+  assert.equal(diagnostics.supportOnlyCount, 1);
+  assert.equal(diagnostics.determinationEligibleCount, 127);
+  assert.equal(diagnostics.determinationUsedCount, 127);
+  assert.equal(workAuth.isReviewable, true);
+  assert.equal(workAuth.reviewedForDetermination, true);
+  assert.equal(workAuth.usedAsSupportOnly, true);
+  assert.equal(workAuth.usedInDetermination, false);
+  assert.equal(workAuth.visionExtractionStatus, "not_applicable");
 });
 
 run("review completeness still warns when a true reviewable file is skipped", () => {

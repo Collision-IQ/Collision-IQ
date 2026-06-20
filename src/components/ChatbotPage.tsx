@@ -174,12 +174,22 @@ function resolveEffectiveReviewProgress(
   progress: ReviewProgress,
   integrity: ConfidenceIntegrity
 ): ReviewProgress {
+  const diagnostics = integrity.fileReviewDiagnostics;
   const reviewedForDetermination = Math.max(
     progress.reviewedForDetermination,
+    diagnostics?.reviewedCount ?? 0,
     integrity.reviewedFileCount ?? 0
   );
-  const indexed = Math.max(progress.indexed, integrity.indexedFileCount ?? integrity.uploadedFileCount);
-  const visionProcessed = Math.max(progress.visionProcessed, integrity.visionProcessedFileCount ?? 0);
+  const indexed = Math.max(
+    progress.indexed,
+    diagnostics?.indexedCount ?? 0,
+    integrity.indexedFileCount ?? integrity.uploadedFileCount
+  );
+  const visionProcessed = Math.max(
+    progress.visionProcessed,
+    diagnostics?.imageVisionCount ?? 0,
+    integrity.visionProcessedFileCount ?? 0
+  );
   const totalKnownFiles = Math.max(
     progress.totalKnownFiles,
     integrity.totalKnownFileCount ?? indexed,
@@ -187,18 +197,20 @@ function resolveEffectiveReviewProgress(
   );
   const reviewableFileCount = Math.max(
     progress.reviewableFileCount,
+    diagnostics?.reviewableCount ?? 0,
     integrity.reviewableFileCount ?? 0,
     reviewedForDetermination,
     visionProcessed
   );
   const excludedFromReviewCount = Math.max(
     progress.excludedFromReviewCount,
+    diagnostics?.excludedCount ?? 0,
     integrity.excludedFromReviewCount ?? 0,
     Math.max(0, indexed - reviewableFileCount)
   );
 
   return {
-    uploaded: Math.max(progress.uploaded, integrity.uploadedFileCount),
+    uploaded: Math.max(progress.uploaded, diagnostics?.totalUploaded ?? 0, integrity.uploadedFileCount),
     indexed,
     visionProcessed,
     reviewedForDetermination,
@@ -212,7 +224,8 @@ function resolveEffectiveReviewProgress(
     ],
     excludedFromReviewFiles: mergeExcludedFromReviewFiles(
       progress.excludedFromReviewFiles,
-      integrity.excludedFromReviewFiles ?? []
+      integrity.excludedFromReviewFiles ?? [],
+      diagnostics?.excludedFiles ?? []
     ),
     totalKnownFiles,
   };
@@ -220,10 +233,11 @@ function resolveEffectiveReviewProgress(
 
 function mergeExcludedFromReviewFiles(
   current: ReviewProgress["excludedFromReviewFiles"],
-  next: ReviewProgress["excludedFromReviewFiles"]
+  next: ReviewProgress["excludedFromReviewFiles"],
+  diagnostics: ReviewProgress["excludedFromReviewFiles"] = []
 ) {
   const seen = new Set<string>();
-  return [...current, ...next].filter((item) => {
+  return [...current, ...next, ...diagnostics].filter((item) => {
     const key = `${item.filename}:${item.detectedType}:${item.reason}:${item.indexed}`;
     if (seen.has(key)) return false;
     seen.add(key);
@@ -1186,7 +1200,7 @@ export function ChatbotWorkspacePage() {
   if (!consentResolved) return null;
 
   return (
-    <div className="h-[100svh] overflow-hidden bg-background text-foreground">
+    <div className="min-h-[100svh] overflow-x-hidden bg-background text-foreground">
       <ChatShell
         title="Collision-IQ"
         planLabel={trialBadgeLabel}
@@ -1889,6 +1903,7 @@ function RailContent({
     reviewProgress,
     renderModel.confidenceIntegrity
   );
+  const fileReviewDiagnostics = renderModel.confidenceIntegrity.fileReviewDiagnostics;
   const fileReviewWarning =
     effectiveReviewProgress.reviewableFileCount > effectiveReviewProgress.reviewedForDetermination
       ? buildReviewCompletenessMessage({
@@ -2928,6 +2943,27 @@ function RailContent({
           {effectiveReviewProgress.reviewableFileCount || effectiveReviewProgress.reviewedForDetermination} reviewable files.
         </div>
 
+        {fileReviewDiagnostics ? (
+          <div className="mt-3 grid grid-cols-2 gap-2.5">
+            <MetricCard
+              label="PDFs parsed"
+              value={`${fileReviewDiagnostics.parsedPdfCount}/${fileReviewDiagnostics.pdfCount}`}
+            />
+            <MetricCard
+              label="Images reviewed"
+              value={`${fileReviewDiagnostics.imageVisionCount}/${fileReviewDiagnostics.imageCount}`}
+            />
+            <MetricCard
+              label="PDF fallback"
+              value={String(fileReviewDiagnostics.scannedPdfFallbackCount)}
+            />
+            <MetricCard
+              label="Support only"
+              value={String(fileReviewDiagnostics.supportOnlyCount)}
+            />
+          </div>
+        ) : null}
+
         {fileReviewWarning ? (
           <div className="mt-3 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-[12px] leading-5 text-amber-800 dark:text-amber-200">
             {fileReviewWarning}
@@ -3636,7 +3672,7 @@ function ReportDocumentBottomViewer({
 
   return (
     <section
-      className="flex max-h-[min(44svh,520px)] min-h-[150px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-[0_20px_60px_rgba(15,23,42,0.16)] ring-1 ring-ring/10 dark:shadow-[0_20px_60px_rgba(0,0,0,0.38)]"
+      className="flex max-h-[min(38svh,460px)] min-h-[150px] flex-col overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-[0_20px_60px_rgba(15,23,42,0.16)] ring-1 ring-ring/10 dark:shadow-[0_20px_60px_rgba(0,0,0,0.38)]"
       aria-label={`${viewer.title} bottom report viewer`}
       data-report-bottom-viewer="true"
     >

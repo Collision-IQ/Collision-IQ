@@ -753,6 +753,8 @@ function buildConfidenceIntegrity(params: {
       excludedFromReviewReasons: counts.excludedFromReviewReasons,
       excludedFromReviewFiles: counts.excludedFromReviewFiles,
       fileReviewLedger: integrity.fileReviewLedger ?? params.report.ingestionMeta?.fileReviewLedger,
+      fileReviewDiagnostics:
+        integrity.fileReviewDiagnostics ?? params.report.ingestionMeta?.fileReviewDiagnostics,
       evidenceCompletenessLedger:
         integrity.evidenceCompletenessLedger ??
         params.report.ingestionMeta?.evidenceCompletenessLedger ??
@@ -844,6 +846,7 @@ function buildConfidenceIntegrity(params: {
     excludedFromReviewReasons: reviewProgressCounts.excludedFromReviewReasons,
     excludedFromReviewFiles: reviewProgressCounts.excludedFromReviewFiles,
     fileReviewLedger: params.report?.ingestionMeta?.fileReviewLedger,
+    fileReviewDiagnostics: params.report?.ingestionMeta?.fileReviewDiagnostics,
     evidenceCompletenessLedger,
     totalKnownFileCount,
     uploadLimitReached,

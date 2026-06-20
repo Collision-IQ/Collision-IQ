@@ -95,6 +95,35 @@ export type FileReviewLedgerEntry = {
   reviewabilityHint: string;
 };
 
+export type FileReviewDiagnosticsSummary = {
+  totalUploaded: number;
+  pdfCount: number;
+  imageCount: number;
+  parsedPdfCount: number;
+  pdfBytesAvailableCount: number;
+  scannedPdfFallbackCount: number;
+  imageVisionCount: number;
+  indexedCount: number;
+  reviewedCount: number;
+  reviewableCount: number;
+  determinationEligibleCount: number;
+  determinationUsedCount: number;
+  supportOnlyCount: number;
+  excludedCount: number;
+  excludedFiles: Array<{
+    filename: string;
+    detectedType: string;
+    reason: ExcludedFromReviewReason;
+    indexed: boolean;
+    stage: string;
+    parsed: boolean;
+    supportOnly: boolean;
+    duplicate: boolean;
+    duplicateOf: string | null;
+    reviewabilityHint: string;
+  }>;
+};
+
 export function buildFileReviewLedger(
   attachments: StoredAttachment[],
   options: {
@@ -142,7 +171,7 @@ export function buildFileReviewLedger(
       documentTypeConfidence: citationClassification.confidence,
       indexedStatus: attachment.id ? "indexed" : "not_indexed",
       textExtractionStatus: hasText ? "extracted" : isPdf ? "empty" : "not_applicable",
-      visionExtractionStatus: isImage ? "processed" : attachment.imageDataUrl ? "processed" : "not_applicable",
+      visionExtractionStatus: isImage ? "processed" : "not_applicable",
       pdfExtractionStatus: isPdf ? attachment.imageDataUrl ? "available" : "missing_bytes" : "not_pdf",
       ocrStatus: isImage || isPdf && !hasText ? "not_run" : "not_applicable",
       isDuplicate: Boolean(duplicateOf),
@@ -165,6 +194,65 @@ export function buildFileReviewLedger(
       reviewabilityHint: buildReviewabilityHint(exclusionReason, supportOnly),
     };
   });
+}
+
+export function buildFileReviewDiagnosticsSummary(
+  attachments: StoredAttachment[],
+  ledger = buildFileReviewLedger(attachments)
+): FileReviewDiagnosticsSummary {
+  const pdfAttachmentIds = new Set(
+    attachments.filter((attachment) => isPdfAttachment(attachment)).map((attachment) => attachment.id)
+  );
+  const imageAttachmentIds = new Set(
+    attachments.filter((attachment) => attachment.type.startsWith("image/")).map((attachment) => attachment.id)
+  );
+  const attachmentById = new Map(attachments.map((attachment) => [attachment.id, attachment]));
+  const excludedFiles = ledger
+    .filter((entry) => entry.exclusionReason)
+    .map((entry) => ({
+      filename: entry.filename,
+      detectedType: String(entry.documentType),
+      reason: entry.exclusionReason as ExcludedFromReviewReason,
+      indexed: entry.indexedStatus === "indexed",
+      stage: entry.exclusionStage ?? "reviewability",
+      parsed: entry.textExtractionStatus === "extracted" || entry.pdfExtractionStatus === "available",
+      supportOnly: entry.usedAsSupportOnly,
+      duplicate: entry.isDuplicate,
+      duplicateOf: entry.duplicateOf,
+      reviewabilityHint: entry.reviewabilityHint,
+    }));
+
+  return {
+    totalUploaded: attachments.length,
+    pdfCount: pdfAttachmentIds.size,
+    imageCount: imageAttachmentIds.size,
+    parsedPdfCount: ledger.filter((entry) =>
+      pdfAttachmentIds.has(entry.fileId) && entry.textExtractionStatus === "extracted"
+    ).length,
+    pdfBytesAvailableCount: ledger.filter((entry) =>
+      pdfAttachmentIds.has(entry.fileId) && entry.pdfExtractionStatus === "available"
+    ).length,
+    scannedPdfFallbackCount: ledger.filter((entry) => {
+      const attachment = attachmentById.get(entry.fileId);
+      return Boolean(
+        attachment &&
+        pdfAttachmentIds.has(entry.fileId) &&
+        entry.textExtractionStatus !== "extracted" &&
+        attachment.imageDataUrl
+      );
+    }).length,
+    imageVisionCount: ledger.filter((entry) =>
+      imageAttachmentIds.has(entry.fileId) && entry.visionExtractionStatus === "processed"
+    ).length,
+    indexedCount: ledger.filter((entry) => entry.indexedStatus === "indexed").length,
+    reviewedCount: ledger.filter((entry) => entry.reviewedForDetermination).length,
+    reviewableCount: ledger.filter((entry) => entry.isReviewable).length,
+    determinationEligibleCount: ledger.filter((entry) => entry.isReviewable && !entry.usedAsSupportOnly).length,
+    determinationUsedCount: ledger.filter((entry) => entry.usedInDetermination).length,
+    supportOnlyCount: ledger.filter((entry) => entry.usedAsSupportOnly).length,
+    excludedCount: excludedFiles.length,
+    excludedFiles,
+  };
 }
 
 export function resolveEvidenceCompletenessFromLedger(params: {
