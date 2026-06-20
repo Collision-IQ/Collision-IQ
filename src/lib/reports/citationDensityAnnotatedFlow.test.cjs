@@ -459,10 +459,12 @@ run("Chat workspace stays compact without reports and expands when report remain
   const pageSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
   const widgetSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatWidget.tsx"), "utf8");
 
-  assert.match(shellSource, /min-h-\[100svh\]/);
+  assert.doesNotMatch(shellSource, /ci-workstation flex min-h-\[100svh\]/);
+  assert.match(shellSource, /ci-workstation flex min-h-0/);
   assert.match(shellSource, /overflow-x-hidden/);
   assert.doesNotMatch(shellSource, /ci-workstation flex h-\[100svh\][^"]*overflow-hidden/);
   assert.match(shellSource, /bottom\?: ReactNode/);
+  assert.match(shellSource, /contentWrapClass = bottom \? "flex-1" : "shrink-0"/);
   assert.match(shellSource, /reviewRowHeightClass = bottom/);
   assert.match(shellSource, /lg:h-\[min\(760px,calc\(100svh-96px\)\)\]/);
   assert.match(shellSource, /lg:min-h-\[520px\]/);
@@ -475,6 +477,15 @@ run("Chat workspace stays compact without reports and expands when report remain
   assert.match(pageSource, /bottom=\{/);
   assert.match(pageSource, /bottomReportViewer \? \(/);
   assert.doesNotMatch(pageSource, /<BottomReportWorkspacePanel[\s\S]*?<\/div>\s*}\s*right=/);
+  assert.match(pageSource, /workspaceRowsClass = isReviewActive/);
+  assert.match(pageSource, /: "grid-rows-\[auto\]"/);
+  assert.match(pageSource, /workspaceShellClass = isReviewActive/);
+  assert.match(pageSource, /: "relative flex min-h-0 w-full flex-col"/);
+  assert.match(pageSource, /workspaceGridClass = isReviewActive/);
+  assert.match(pageSource, /: "grid min-h-0 w-full gap-1 pt-1 sm:gap-3 sm:pt-3"/);
+  assert.match(pageSource, /chatWidgetWrapClass = isReviewActive \? "min-h-0 flex-1" : "min-h-0"/);
+  assert.doesNotMatch(pageSource, /<div className="relative flex h-full min-h-0 w-full flex-col">/);
+  assert.doesNotMatch(pageSource, /grid h-full min-h-0 w-full flex-1 gap-1 pt-1 sm:gap-3 sm:pt-3 \$\{workspaceRowsClass\}/);
   assert.match(pageSource, /data-collision-iq-footer="true"/);
   assert.doesNotMatch(widgetSource, /\/brand\/logos\/Logo-grey\.png/);
   assert.match(widgetSource, /\/brand\/logos\/logo-horizontal\.png/);

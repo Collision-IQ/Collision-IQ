@@ -606,7 +606,28 @@ export function ChatbotWorkspacePage() {
   const isChatActive = leftPaneMode === "chat";
   const workspaceRowsClass = isReviewActive
     ? "grid-rows-[auto_minmax(0,1fr)]"
-    : "grid-rows-[minmax(0,1fr)]";
+    : "grid-rows-[auto]";
+  const workspaceShellClass = isReviewActive
+    ? "relative flex h-full min-h-0 w-full flex-col"
+    : "relative flex min-h-0 w-full flex-col";
+  const workspaceGridClass = isReviewActive
+    ? "grid h-full min-h-0 w-full flex-1 gap-1 pt-1 sm:gap-3 sm:pt-3"
+    : "grid min-h-0 w-full gap-1 pt-1 sm:gap-3 sm:pt-3";
+  const chatColumnClass = isReviewActive
+    ? "flex h-full min-h-0 flex-1 flex-col"
+    : "flex min-h-0 flex-col";
+  const chatSectionClass = isReviewActive
+    ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+    : "flex min-h-0 shrink-0 flex-col overflow-hidden";
+  const chatPaneClass = isChatActive
+    ? isReviewActive
+      ? "relative min-h-0 w-full flex-1"
+      : "relative min-h-0 w-full"
+    : "hidden";
+  const chatFrameClass = isReviewActive
+    ? "relative flex h-full min-h-0 w-full flex-col overflow-hidden border border-border bg-background"
+    : "relative flex min-h-0 w-full flex-col overflow-hidden border border-border bg-background";
+  const chatWidgetWrapClass = isReviewActive ? "min-h-0 flex-1" : "min-h-0";
 
   useEffect(() => {
     immersiveHeaderExpandedRef.current = isImmersiveHeaderExpanded;
@@ -1207,8 +1228,8 @@ export function ChatbotWorkspacePage() {
         title="Collision-IQ"
         planLabel={trialBadgeLabel}
         center={
-          <div className="relative flex h-full min-h-0 w-full flex-col">
-            <div className={`grid h-full min-h-0 w-full flex-1 gap-1 pt-1 sm:gap-3 sm:pt-3 ${workspaceRowsClass}`}>
+          <div className={workspaceShellClass}>
+            <div className={`${workspaceGridClass} ${workspaceRowsClass}`}>
               {hasStructuredAnalysis && isReviewActive && (
                 <div
                   className="flex min-h-0 flex-col px-1 max-lg:absolute max-lg:inset-0 max-lg:z-40 max-lg:bg-card max-lg:p-2"
@@ -1358,7 +1379,7 @@ export function ChatbotWorkspacePage() {
                   </div>
                 </div>
               )}
-              <div className="flex h-full min-h-0 flex-1 flex-col">
+              <div className={chatColumnClass}>
                 <div className="min-h-0 shrink-0 lg:min-h-[56px]">
                 {trialDaysRemaining !== null && trialDaysRemaining <= 7 && isWithinTrialBadgeWindow(viewerAccess) && (
                   <div
@@ -1412,7 +1433,7 @@ export function ChatbotWorkspacePage() {
                   </div>
                 )}
                 </div>
-                <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <section className={chatSectionClass}>
                 {!isChatActive && (
                   <div className="relative">
                     <div className="rounded-md border border-border bg-card px-3 py-2">
@@ -1445,8 +1466,8 @@ export function ChatbotWorkspacePage() {
                     </div>
                   </div>
                 )}
-                <div className={isChatActive ? "relative min-h-0 w-full flex-1" : "hidden"}>
-                      <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden border border-border bg-background">
+                <div className={chatPaneClass}>
+                      <div className={chatFrameClass}>
                         <div className="flex min-h-9 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-2.5 py-1 lg:min-h-[58px] lg:gap-4 lg:px-3 lg:py-2">
                           <div>
                           <div className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground lg:text-[10px]">
@@ -1505,7 +1526,7 @@ export function ChatbotWorkspacePage() {
                             </div>
                           </div>
                         ) : null}
-                        <div className="min-h-0 flex-1">
+                        <div className={chatWidgetWrapClass}>
                           <ChatWidget
                           key="chat-widget"
                           onAttachmentChange={setAttachment}
