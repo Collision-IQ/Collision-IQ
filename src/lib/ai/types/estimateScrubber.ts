@@ -63,6 +63,31 @@ export type CitationDensityAuthority = {
   note?: string;
 };
 
+export type CitationDensityAuthorityType =
+  | "OEM"
+  | "P_PAGE"
+  | "DEG"
+  | "SCRS"
+  | "DOI_LEGAL"
+  | "INVOICE"
+  | "PHOTO"
+  | "SCAN"
+  | "CALIBRATION"
+  | "POLICY";
+
+export type CitationDensityAuthorityRetrievalStatus =
+  | "matched"
+  | "retrieved"
+  | "no_match"
+  | "access_denied"
+  | "not_configured"
+  | "error";
+
+export type CitationDensityLineTieStatus =
+  | "line_tied"
+  | "document_level_only"
+  | "not_line_tied";
+
 export type CitationDensityEmbeddedEstimateLink = {
   sourceDocumentId?: string;
   pageNumber?: number | null;
@@ -150,6 +175,19 @@ export type CitationDensityFinding = {
   verifiedAuthorityCount: number;
   missingAuthorityTypes: string[];
   bestAvailableAuthority?: CitationDensityAuthority;
+  authorityNeeded?: boolean;
+  authorityType?: CitationDensityAuthorityType;
+  retrievalAttempted?: boolean;
+  retrievalSourcesSearched?: string[];
+  retrievalStatus?: CitationDensityAuthorityRetrievalStatus;
+  matchedDocumentTitle?: string | null;
+  matchedDocumentUrl?: string | null;
+  sourceExcerpt?: string | null;
+  sourcePageLine?: string | null;
+  appliesToShopEstimate?: "yes" | "no" | "unknown";
+  appliesToCarrierEstimate?: "yes" | "no" | "unknown";
+  lineTieStatus?: CitationDensityLineTieStatus;
+  nextActionOwner?: "Collision IQ" | "shop" | "carrier" | "user";
   embeddedEstimateLinks?: CitationDensityEmbeddedEstimateLink[];
   missingAuthority?: string[];
   citationLabel?: string;

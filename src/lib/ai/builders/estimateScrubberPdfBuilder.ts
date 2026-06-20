@@ -11,8 +11,11 @@ import {
   type ExportLineComparison,
 } from "./exportTemplates";
 import type {
+  CitationDensityAuthorityRetrievalStatus,
+  CitationDensityAuthorityType,
   CitationDensityEmbeddedEstimateLink,
   CitationDensityFinding,
+  CitationDensityLineTieStatus,
   CitationSupportStatus,
   EstimateScrubCitationGapBucket,
   EstimateScrubFinding,
@@ -750,6 +753,14 @@ function buildCitationDensityFindingFromScrubFinding(params: {
   const bestAvailableAuthority = resolveBestAvailableAuthority(sources, citationStatus);
   const limitations = buildCitationFindingLimitations(params.finding, citationStatus);
   const citationLabel = resolveCitationLabel(citationStatus, missingAuthorityTypes, params.finding.citationGapBucket, text);
+  const authorityRetrieval = buildAuthorityRetrievalPosture({
+    status: citationStatus,
+    sources,
+    embeddedEstimateLinks,
+    missingAuthorityTypes,
+    hasShopEstimate: Boolean(params.comparison?.shopLine),
+    hasCarrierEstimate: true,
+  });
 
   return {
     id: params.id,
@@ -786,6 +797,7 @@ function buildCitationDensityFindingFromScrubFinding(params: {
     verifiedAuthorityCount,
     missingAuthorityTypes,
     bestAvailableAuthority,
+    ...authorityRetrieval,
     embeddedEstimateLinks,
     missingAuthority: missingAuthorityTypes,
     citationLabel,
@@ -822,6 +834,14 @@ function buildCitationDensityFindingFromComparison(params: {
   const missingAuthorityTypes = buildMissingAuthorityTypes(citationStatus);
   const bestAvailableAuthority = resolveBestAvailableAuthority(sources, citationStatus);
   const citationLabel = resolveCitationLabel(citationStatus, missingAuthorityTypes, params.citationGapBucket, text);
+  const authorityRetrieval = buildAuthorityRetrievalPosture({
+    status: citationStatus,
+    sources,
+    embeddedEstimateLinks,
+    missingAuthorityTypes,
+    hasShopEstimate: true,
+    hasCarrierEstimate: true,
+  });
 
   return {
     id: params.id,
@@ -852,6 +872,7 @@ function buildCitationDensityFindingFromComparison(params: {
     verifiedAuthorityCount: 0,
     missingAuthorityTypes,
     bestAvailableAuthority,
+    ...authorityRetrieval,
     embeddedEstimateLinks,
     missingAuthority: missingAuthorityTypes,
     citationLabel,
@@ -1131,6 +1152,133 @@ function buildMissingAuthorityTypes(status: CitationDensityFinding["citationStat
   return Object.entries(status)
     .filter(([, value]) => value === "needed" || value === "not_found" || value === "referenced_not_produced")
     .map(([key]) => key);
+}
+
+function buildAuthorityRetrievalPosture(params: {
+  status: CitationDensityFinding["citationStatus"];
+  sources: SourceCitation[];
+  embeddedEstimateLinks: CitationDensityEmbeddedEstimateLink[];
+  missingAuthorityTypes: string[];
+  hasShopEstimate: boolean;
+  hasCarrierEstimate: boolean;
+}): Pick<
+  CitationDensityFinding,
+  | "authorityNeeded"
+  | "authorityType"
+  | "retrievalAttempted"
+  | "retrievalSourcesSearched"
+  | "retrievalStatus"
+  | "matchedDocumentTitle"
+  | "matchedDocumentUrl"
+  | "sourceExcerpt"
+  | "sourcePageLine"
+  | "appliesToShopEstimate"
+  | "appliesToCarrierEstimate"
+  | "lineTieStatus"
+  | "nextActionOwner"
+> {
+  const bestAuthority = resolveBestAvailableAuthority(params.sources, params.status);
+  const firstLink = params.embeddedEstimateLinks[0];
+  const source = bestAuthority
+    ? params.sources.find((candidate) => candidate.title === bestAuthority.title) ?? params.sources.find(isAuthoritySource)
+    : params.sources.find(isAuthoritySource);
+  const authorityNeeded = params.missingAuthorityTypes.length > 0 || Boolean(bestAuthority || firstLink);
+  const retrievalStatus = inferAuthorityRetrievalStatus(params.sources, params.embeddedEstimateLinks, params.missingAuthorityTypes);
+  const lineTieStatus = inferLineTieStatus(params.embeddedEstimateLinks, source);
+  const authorityType = inferAuthorityType(params.missingAuthorityTypes, bestAuthority?.type, source, firstLink);
+  return {
+    authorityNeeded,
+    authorityType,
+    retrievalAttempted: retrievalStatus !== "not_configured",
+    retrievalSourcesSearched: inferRetrievalSourcesSearched(params.sources, params.embeddedEstimateLinks),
+    retrievalStatus,
+    matchedDocumentTitle: bestAuthority?.title ?? source?.title ?? firstLink?.nearbyOperation ?? null,
+    matchedDocumentUrl: source?.url ?? firstLink?.redactedUrl ?? null,
+    sourceExcerpt: source?.note ?? firstLink?.nearbyOperation ?? null,
+    sourcePageLine: formatSourcePageLine(firstLink),
+    appliesToShopEstimate: params.hasShopEstimate ? "unknown" : "no",
+    appliesToCarrierEstimate: params.hasCarrierEstimate ? "unknown" : "no",
+    lineTieStatus,
+    nextActionOwner: inferNextActionOwner(authorityNeeded, retrievalStatus, lineTieStatus, authorityType),
+  };
+}
+
+function inferAuthorityRetrievalStatus(
+  sources: SourceCitation[],
+  links: CitationDensityEmbeddedEstimateLink[],
+  missingAuthorityTypes: string[]
+): CitationDensityAuthorityRetrievalStatus {
+  if (sources.some((source) => isReviewedAuthoritySource(source))) return "retrieved";
+  if (links.some((link) => link.retrievalStatus === "retrieved" || link.retrievalStatus === "parsed")) return "retrieved";
+  if (links.some((link) => link.retrievalStatus === "blocked" || link.retrievalStatus === "inaccessible")) return "access_denied";
+  if (sources.some(isReferencedAuthoritySource) || links.length > 0) return "matched";
+  if (missingAuthorityTypes.length > 0) return "no_match";
+  return "not_configured";
+}
+
+function inferRetrievalSourcesSearched(
+  sources: SourceCitation[],
+  links: CitationDensityEmbeddedEstimateLink[]
+) {
+  const searched = new Set<string>();
+  if (sources.some((source) => source.sourceType === "DriveOEM" || source.sourceType === "PositionStatement")) searched.add("Google Drive");
+  if (sources.some((source) => /Egnyte/i.test(`${source.title} ${source.note ?? ""} ${source.url ?? ""}`))) searched.add("Egnyte");
+  if (sources.some((source) => /CCC|Secure Share|workfile/i.test(`${source.title} ${source.note ?? ""}`))) searched.add("CCC Secure Share");
+  if (links.length) searched.add("embedded links");
+  if (sources.some((source) => source.sourceType === "InternetOEM")) searched.add("web");
+  if (sources.some((source) => source.sourceType === "SCRS" || source.sourceType === "DEG")) searched.add("internal estimating authority");
+  return Array.from(searched);
+}
+
+function inferAuthorityType(
+  missingAuthorityTypes: string[],
+  bestAuthorityType?: NonNullable<CitationDensityFinding["bestAvailableAuthority"]>["type"],
+  source?: SourceCitation,
+  link?: CitationDensityEmbeddedEstimateLink
+): CitationDensityAuthorityType | undefined {
+  const value = `${bestAuthorityType ?? ""} ${source?.sourceType ?? ""} ${source?.title ?? ""} ${source?.note ?? ""} ${link?.nearbyOperation ?? ""} ${missingAuthorityTypes.join(" ")}`;
+  if (/invoice|completion/i.test(value)) return "INVOICE";
+  if (/photo|teardown|video/i.test(value)) return "PHOTO";
+  if (/scan|diagnostic|dtc/i.test(value)) return "SCAN";
+  if (/calibration|adas|aim|radar|camera/i.test(value)) return "CALIBRATION";
+  if (/p_?page|p-?page|motor/i.test(value)) return "P_PAGE";
+  if (/\bdeg\b/i.test(value)) return "DEG";
+  if (/\bscrs\b/i.test(value)) return "SCRS";
+  if (/legal|stateRegulation|doi|statute|regulation/i.test(value)) return "DOI_LEGAL";
+  if (/policy/i.test(value)) return "POLICY";
+  if (/oem|procedure|position/i.test(value)) return "OEM";
+  return undefined;
+}
+
+function inferLineTieStatus(
+  links: CitationDensityEmbeddedEstimateLink[],
+  source?: SourceCitation
+): CitationDensityLineTieStatus {
+  if (links.some((link) => link.lineNumber || link.pageNumber)) return "line_tied";
+  if (source && /line(?:Number)?|estimate line|row|anchor/i.test(`${source.note ?? ""} ${source.title}`)) return "line_tied";
+  if (source || links.length) return "document_level_only";
+  return "not_line_tied";
+}
+
+function formatSourcePageLine(link: CitationDensityEmbeddedEstimateLink | undefined) {
+  if (!link) return null;
+  const page = link.pageNumber ? `page ${link.pageNumber}` : "";
+  const line = link.lineNumber ? `line ${link.lineNumber}` : "";
+  return [page, line].filter(Boolean).join(", ") || null;
+}
+
+function inferNextActionOwner(
+  authorityNeeded: boolean,
+  retrievalStatus: CitationDensityAuthorityRetrievalStatus,
+  lineTieStatus: CitationDensityLineTieStatus,
+  authorityType: CitationDensityAuthorityType | undefined
+): "Collision IQ" | "shop" | "carrier" | "user" {
+  if (!authorityNeeded) return "Collision IQ";
+  if (retrievalStatus === "retrieved" && lineTieStatus === "line_tied") return "Collision IQ";
+  if (retrievalStatus === "matched" || (retrievalStatus === "retrieved" && lineTieStatus !== "line_tied")) return "Collision IQ";
+  if (authorityType === "INVOICE" || authorityType === "PHOTO" || authorityType === "SCAN" || authorityType === "CALIBRATION") return "shop";
+  if (retrievalStatus === "access_denied") return "carrier";
+  return "Collision IQ";
 }
 
 function buildCitationFindingLimitations(

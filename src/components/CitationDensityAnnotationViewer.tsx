@@ -65,6 +65,19 @@ export type CitationDensityAnnotationMetadata = {
   missingProof: string;
   whyItMatters?: string;
   nextAction: string;
+  authorityNeeded?: boolean;
+  authorityType?: string;
+  retrievalAttempted?: boolean;
+  retrievalSourcesSearched?: string[];
+  retrievalStatus?: string;
+  matchedDocumentTitle?: string | null;
+  matchedDocumentUrl?: string | null;
+  sourceExcerpt?: string | null;
+  sourcePageLine?: string | null;
+  appliesToShopEstimate?: "yes" | "no" | "unknown";
+  appliesToCarrierEstimate?: "yes" | "no" | "unknown";
+  lineTieStatus?: string;
+  nextActionOwner?: string;
   sourceRefs: string[];
   comment: string;
 };
@@ -536,8 +549,20 @@ function SelectedFindingPanel({
         <Detail label="Best authority" value={selected.bestAuthority} inline={inline} />
         <Detail label="Authority trace status" value={formatAuthorityTraceStatus(getAuthorityTrace(diagnostics))} inline={inline} />
         <Detail label="Authority status" value={selected.authorityStatus} inline={inline} />
+        <Detail label="Authority needed" value={formatOptionalBoolean(selected.authorityNeeded)} inline={inline} />
+        <Detail label="Authority type" value={selected.authorityType} inline={inline} />
+        <Detail label="Retrieval attempted" value={formatOptionalBoolean(selected.retrievalAttempted)} inline={inline} />
+        <Detail label="Retrieval status" value={selected.retrievalStatus} inline={inline} />
+        <Detail label="Sources searched" value={selected.retrievalSourcesSearched?.join(", ")} inline={inline} />
+        <Detail label="Matched document" value={selected.matchedDocumentTitle} inline={inline} />
+        <Detail label="Safe source reference" value={selected.matchedDocumentUrl} inline={inline} />
+        <Detail label="Source page/line" value={selected.sourcePageLine} inline={inline} />
+        <Detail label="Line tie status" value={selected.lineTieStatus} inline={inline} />
+        <Detail label="Applies to shop" value={selected.appliesToShopEstimate} inline={inline} />
+        <Detail label="Applies to carrier" value={selected.appliesToCarrierEstimate} inline={inline} />
         <Detail label="Drive search status" value={formatDriveSearchStatus(getAuthorityTrace(diagnostics))} inline={inline} />
         <Detail label="Matched folders/docs count" value={formatDriveMatchCounts(getAuthorityTrace(diagnostics))} inline={inline} />
+        <Detail label="Source excerpt" value={selected.sourceExcerpt} inline={inline} />
         {selected.sourceRefs.length ? (
           <div>
             <div className={inline ? "text-xs uppercase text-muted-foreground" : "text-xs uppercase text-white/45"}>Source refs</div>
@@ -552,6 +577,7 @@ function SelectedFindingPanel({
         <Detail label="Missing support" value={selected.missingProof} inline={inline} />
         <Detail label="Missing proof" value={selected.missingProof} inline={inline} />
         <Detail label="Why it matters" value={selected.whyItMatters || selected.comment} inline={inline} />
+        <Detail label="Next action owner" value={selected.nextActionOwner} inline={inline} />
         <Detail label="Next action" value={selected.nextAction} inline={inline} />
       </ExpandableDetail>
 
@@ -599,7 +625,7 @@ function ExpandableDetail({
   );
 }
 
-function Detail({ label, value, inline = false }: { label: string; value: string; inline?: boolean }) {
+function Detail({ label, value, inline = false }: { label: string; value?: string | null; inline?: boolean }) {
   return (
     <div>
       <div className={inline ? "text-xs uppercase text-muted-foreground" : "text-xs uppercase text-white/45"}>{label}</div>
@@ -715,6 +741,12 @@ function formatBooleanDiagnostic(value: unknown) {
   if (value === true) return "Yes";
   if (value === false) return "No";
   return formatDiagnosticValue(value);
+}
+
+function formatOptionalBoolean(value: boolean | undefined) {
+  if (value === true) return "Yes";
+  if (value === false) return "No";
+  return undefined;
 }
 
 function formatCccSecureShareStatus(payload: Record<string, unknown>) {

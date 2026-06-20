@@ -396,6 +396,17 @@ run("file ledger records every upload and evidence reconciliation does not mark 
   assert.equal(unsupported.reviewabilityHint, "Upload a PDF, supported image, or extracted text version.");
 });
 
+run("user-facing cleanup rewrites passive OEM procedure asks into retrieval posture", () => {
+  const cleaned = sanitizeUserFacingEvidenceText(
+    "Ask the shop to provide the GM procedure before I can reason further. The item is not proven."
+  );
+
+  assert.match(cleaned, /Collision IQ identified this as an OEM-procedure-dependent issue/i);
+  assert.match(cleaned, /retrieve and apply the applicable authority/i);
+  assert.match(cleaned, /not yet supported by a named authority or proof source/i);
+  assert.doesNotMatch(cleaned, /Ask the shop to provide/i);
+});
+
 run("file review diagnostics account for 110 images and 18 PDFs without excluding parsed support PDFs", () => {
   const imageAttachments = Array.from({ length: 110 }, (_, index) => ({
     id: `photo-${index + 1}`,

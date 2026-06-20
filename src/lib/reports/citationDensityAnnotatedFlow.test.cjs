@@ -321,6 +321,32 @@ run("Citation Density anchor guard rejects fake line numbers and boilerplate anc
   assert.match(source, /cccSecureShareRowCount/);
 });
 
+run("Authority retrieval posture is active in chat and Citation Density metadata", () => {
+  const postureSource = fs.readFileSync(path.join(process.cwd(), "src/lib/ai/authorityRetrievalPosture.ts"), "utf8");
+  const chatSource = fs.readFileSync(path.join(process.cwd(), "src/app/api/chat/route.ts"), "utf8");
+  const caseChatSource = fs.readFileSync(path.join(process.cwd(), "src/app/api/case-chat/route.ts"), "utf8");
+  const customerReportSource = fs.readFileSync(path.join(process.cwd(), "src/lib/ai/generateCustomerReport.ts"), "utf8");
+  const typeSource = fs.readFileSync(path.join(process.cwd(), "src/lib/ai/types/estimateScrubber.ts"), "utf8");
+  const annotatedSource = fs.readFileSync(path.join(process.cwd(), "src/lib/reports/annotatedCitationDensityEstimate.ts"), "utf8");
+  const viewerSource = fs.readFileSync(path.join(process.cwd(), "src/components/CitationDensityAnnotationViewer.tsx"), "utf8");
+
+  assert.match(postureSource, /Collision IQ is a pitcher, not a catcher/);
+  assert.match(postureSource, /estimate line creates the authority question/);
+  assert.match(postureSource, /Do not default to "ask the shop\/appraiser for the OEM procedure"/);
+  assert.match(chatSource, /AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE/);
+  assert.match(caseChatSource, /AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE/);
+  assert.match(customerReportSource, /AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE/);
+  assert.match(typeSource, /authorityNeeded/);
+  assert.match(typeSource, /retrievalStatus/);
+  assert.match(typeSource, /lineTieStatus/);
+  assert.match(typeSource, /nextActionOwner/);
+  assert.match(annotatedSource, /retrievalSourcesSearched/);
+  assert.match(annotatedSource, /mapOemRetrievalStatus/);
+  assert.match(viewerSource, /Retrieval status/);
+  assert.match(viewerSource, /Line tie status/);
+  assert.match(viewerSource, /Next action owner/);
+});
+
 run("annotated routes expose copyable diagnostics for locked DevTools", () => {
   const routeSource = fs.readFileSync(
     path.join(process.cwd(), "src/app/api/reports/citation-density/annotated-estimate/route.ts"),

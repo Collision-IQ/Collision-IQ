@@ -5,6 +5,10 @@ import { NextResponse } from "next/server";
 import type { ChatAnalysisOutput } from "@/lib/ai/contracts/chatAnalysisSchema";
 import type { DriveRetrievalResponse } from "@/lib/ai/contracts/driveRetrievalContract";
 import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
+import {
+  AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE,
+  AUTHORITY_RETRIEVAL_STATUS_FIELDS,
+} from "@/lib/ai/authorityRetrievalPosture";
 import { JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT } from "@/lib/ai/jurisdictionalInsurancePrompt";
 import { DOCUMENT_REVIEW_TWO_PASS_PROTOCOL } from "@/lib/ai/documentReviewProtocol";
 import { buildAppraisalAwardEvaluatorInstruction } from "@/lib/ai/appraisalAwardEvaluator";
@@ -274,6 +278,10 @@ Avoid rigid templates.
 ${DOCUMENT_REVIEW_TWO_PASS_PROTOCOL}
 
 ${NON_BIAS_ACCURACY_DIRECTIVE}
+
+${AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE}
+
+${AUTHORITY_RETRIEVAL_STATUS_FIELDS}
 
 ${JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT}
 

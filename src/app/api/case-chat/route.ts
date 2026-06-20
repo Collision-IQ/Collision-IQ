@@ -4,6 +4,10 @@ import { EVIDENCE_POLICY } from "@/lib/analysis/buildEvidenceCorpus";
 import { generateChatCompletion } from "@/lib/ai/generateChatCompletion";
 import { buildAssistanceProfileInstruction } from "@/lib/ai/assistanceProfile";
 import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
+import {
+  AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE,
+  AUTHORITY_RETRIEVAL_STATUS_FIELDS,
+} from "@/lib/ai/authorityRetrievalPosture";
 import { JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT } from "@/lib/ai/jurisdictionalInsurancePrompt";
 import { DOCUMENT_REVIEW_TWO_PASS_PROTOCOL } from "@/lib/ai/documentReviewProtocol";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
@@ -500,6 +504,10 @@ RULES
 - Be precise, concise, and evidence-driven.
 
 ${DOCUMENT_REVIEW_TWO_PASS_PROTOCOL}
+
+${AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE}
+
+${AUTHORITY_RETRIEVAL_STATUS_FIELDS}
 
 ${EVIDENCE_POLICY}
 `;

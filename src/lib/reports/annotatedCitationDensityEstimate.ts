@@ -423,6 +423,19 @@ export type CitationDensityAnnotationMetadata = {
   missingProof: string;
   whyItMatters: string;
   nextAction: string;
+  authorityNeeded?: boolean;
+  authorityType?: string;
+  retrievalAttempted?: boolean;
+  retrievalSourcesSearched?: string[];
+  retrievalStatus?: string;
+  matchedDocumentTitle?: string | null;
+  matchedDocumentUrl?: string | null;
+  sourceExcerpt?: string | null;
+  sourcePageLine?: string | null;
+  appliesToShopEstimate?: "yes" | "no" | "unknown";
+  appliesToCarrierEstimate?: "yes" | "no" | "unknown";
+  lineTieStatus?: string;
+  nextActionOwner?: string;
   sourceRefs: string[];
   comment: string;
 };
@@ -2140,6 +2153,12 @@ function buildOemCitationDensityFinding(params: {
     ? mapOemAuthoritySourceToCitationAuthority(bestAuthoritySource, family)
     : buildEstimateEvidenceAuthority(family);
   const verifiedAuthorityCount = !authorityTraceIncomplete && authority.type !== "estimate_evidence" && authority.status === "verified" ? 1 : 0;
+  const retrievalStatus = mapOemRetrievalStatus(authorityTrace, authorityTraceIncomplete, completedWithoutLineAuthority, verifiedAuthorityCount);
+  const lineTieStatus = completedWithoutLineAuthority
+    ? "document_level_only"
+    : verifiedAuthorityCount
+      ? "line_tied"
+      : "not_line_tied";
   const label = authorityTraceIncomplete
     ? "AUTHORITY TRACE INCOMPLETE"
     : completedWithoutLineAuthority
@@ -2175,6 +2194,19 @@ function buildOemCitationDensityFinding(params: {
     missingAuthorityTypes: verifiedAuthorityCount ? family.requiredDocumentation : family.missingAuthorityTypes,
     missingAuthority: verifiedAuthorityCount ? family.requiredDocumentation : family.missingAuthorityTypes,
     bestAvailableAuthority: authority,
+    authorityNeeded: authority.type !== "estimate_evidence" || family.missingAuthorityTypes.length > 0,
+    authorityType: mapOemAuthorityType(family, authority),
+    retrievalAttempted: authorityTrace.authorityTraceStarted === true || authorityTrace.driveSearchAttempted === true || authorityTrace.googleDriveOrInternalSearchRan === true,
+    retrievalSourcesSearched: buildOemRetrievalSourcesSearched(authorityTrace),
+    retrievalStatus,
+    matchedDocumentTitle: bestAuthoritySource?.title ?? authority.title ?? null,
+    matchedDocumentUrl: null,
+    sourceExcerpt: bestAuthoritySource?.note ?? null,
+    sourcePageLine: null,
+    appliesToShopEstimate: anchor.sourceDocumentRole === "shop" ? "unknown" : "no",
+    appliesToCarrierEstimate: anchor.sourceDocumentRole === "carrier" ? "unknown" : "no",
+    lineTieStatus,
+    nextActionOwner: inferOemNextActionOwner(retrievalStatus, lineTieStatus, family),
     citationLabel: label,
     currentSupportSummary: [
       `Report type: ${OEM_CITATION_DENSITY_REPORT_TYPE}.`,
@@ -2231,6 +2263,59 @@ function buildOemCitationDensityFinding(params: {
     requiredDocumentation: string[];
   };
   return finding;
+}
+
+function mapOemRetrievalStatus(
+  trace: OemCitationDensityAuthorityTrace,
+  traceIncomplete: boolean,
+  completedWithoutLineAuthority: boolean,
+  verifiedAuthorityCount: number
+): NonNullable<CitationDensityFinding["retrievalStatus"]> {
+  if (verifiedAuthorityCount > 0) return "retrieved";
+  if (completedWithoutLineAuthority) return "matched";
+  if (!trace.authorityTraceStarted && !trace.driveSearchAttempted && !trace.googleDriveOrInternalSearchRan) return "not_configured";
+  if (traceIncomplete && /access|denied|forbidden|permission/i.test(`${trace.authorityTraceBlockedReason ?? ""} ${trace.skippedReason ?? ""}`)) return "access_denied";
+  if (traceIncomplete) return "error";
+  return "no_match";
+}
+
+function mapOemAuthorityType(
+  family: OemCitationDensityFamily,
+  authority: NonNullable<CitationDensityFinding["bestAvailableAuthority"]>
+): NonNullable<CitationDensityFinding["authorityType"]> | undefined {
+  const value = `${family.findingType} ${family.title} ${family.requiredDocumentation.join(" ")} ${authority.type}`;
+  if (/invoice|completion/i.test(value)) return "INVOICE";
+  if (/photo|teardown/i.test(value)) return "PHOTO";
+  if (/scan|diagnostic|dtc/i.test(value)) return "SCAN";
+  if (/adas|calibration|aim|radar|camera/i.test(value)) return "CALIBRATION";
+  if (/p_page|p-?page|motor/i.test(value)) return "P_PAGE";
+  if (/\bdeg\b/i.test(value)) return "DEG";
+  if (/\bscrs\b/i.test(value)) return "SCRS";
+  if (/legal|state|doi|statute|regulation/i.test(value)) return "DOI_LEGAL";
+  if (/policy/i.test(value)) return "POLICY";
+  if (/oem|procedure|position/i.test(value)) return "OEM";
+  return undefined;
+}
+
+function buildOemRetrievalSourcesSearched(trace: OemCitationDensityAuthorityTrace) {
+  const sources = new Set<string>();
+  if (trace.driveSearchAttempted || trace.googleDriveOrInternalSearchRan) sources.add("Google Drive");
+  if ((trace.authoritySources ?? []).some((source) => /egnyte/i.test(`${source.title} ${source.note ?? ""}`))) sources.add("Egnyte");
+  if ((trace.authoritySources ?? []).some((source) => source.sourceType === "ccc_secure_share")) sources.add("CCC Secure Share");
+  if ((trace.onlineSearchAttempted ?? false) || (trace.onlineSourcesReviewed ?? []).length > 0) sources.add("web");
+  return Array.from(sources);
+}
+
+function inferOemNextActionOwner(
+  retrievalStatus: NonNullable<CitationDensityFinding["retrievalStatus"]>,
+  lineTieStatus: NonNullable<CitationDensityFinding["lineTieStatus"]>,
+  family: OemCitationDensityFamily
+): NonNullable<CitationDensityFinding["nextActionOwner"]> {
+  if (retrievalStatus === "retrieved" && lineTieStatus === "line_tied") return "Collision IQ";
+  if (retrievalStatus === "matched" || (retrievalStatus === "retrieved" && lineTieStatus !== "line_tied")) return "Collision IQ";
+  if (family.requiredDocumentation.some((item) => /invoice|completion|photo|scan|calibration|measurement/i.test(item))) return "shop";
+  if (retrievalStatus === "access_denied") return "carrier";
+  return "Collision IQ";
 }
 
 function detectOemCitationDensityAuthoritySources(context: AnnotatedEstimateFindingGeneratorContext): OemCitationDensityAuthoritySource[] {
@@ -4382,6 +4467,19 @@ function buildAnnotationMetadata(
     missingProof: sanitize(finding.missingProofSummary),
     whyItMatters: sanitize(finding.currentSupportSummary || buildRoleCalloutNote(finding, options.estimateRole)),
     nextAction: sanitize(finding.recommendedNextAction),
+    authorityNeeded: finding.authorityNeeded,
+    authorityType: finding.authorityType,
+    retrievalAttempted: finding.retrievalAttempted,
+    retrievalSourcesSearched: finding.retrievalSourcesSearched,
+    retrievalStatus: finding.retrievalStatus,
+    matchedDocumentTitle: finding.matchedDocumentTitle ? sanitize(finding.matchedDocumentTitle) : finding.matchedDocumentTitle,
+    matchedDocumentUrl: finding.matchedDocumentUrl ? sanitize(finding.matchedDocumentUrl) : finding.matchedDocumentUrl,
+    sourceExcerpt: finding.sourceExcerpt ? sanitize(finding.sourceExcerpt) : finding.sourceExcerpt,
+    sourcePageLine: finding.sourcePageLine ? sanitize(finding.sourcePageLine) : finding.sourcePageLine,
+    appliesToShopEstimate: finding.appliesToShopEstimate,
+    appliesToCarrierEstimate: finding.appliesToCarrierEstimate,
+    lineTieStatus: finding.lineTieStatus,
+    nextActionOwner: finding.nextActionOwner,
     sourceRefs,
     comment: "",
   };

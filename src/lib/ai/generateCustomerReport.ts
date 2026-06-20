@@ -2,6 +2,7 @@ import {
   CUSTOMER_REPORT_NON_BIAS_DIRECTIVE,
   NON_BIAS_ACCURACY_DIRECTIVE,
 } from "@/lib/ai/nonBiasDirective";
+import { AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE } from "@/lib/ai/authorityRetrievalPosture";
 
 export type CustomerReport = {
   title: string;
@@ -82,6 +83,8 @@ Goals:
 ${NON_BIAS_ACCURACY_DIRECTIVE}
 
 ${CUSTOMER_REPORT_NON_BIAS_DIRECTIVE}
+
+${AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE}
 
 Report mode:
 ${input.reportMode ?? "informational"}
