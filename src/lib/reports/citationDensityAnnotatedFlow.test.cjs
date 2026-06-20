@@ -454,17 +454,30 @@ run("bottom report workspace restores interactive in-context report review", () 
   assert.match(viewerSource, /overflow-y-auto/);
 });
 
-run("Chat workspace allows document scroll, sticky rail, and reachable footer", () => {
+run("Chat workspace locks chat and rail height while report remains below", () => {
   const shellSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatShell.tsx"), "utf8");
   const pageSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
+  const widgetSource = fs.readFileSync(path.join(process.cwd(), "src/components/ChatWidget.tsx"), "utf8");
 
   assert.match(shellSource, /min-h-\[100svh\]/);
   assert.match(shellSource, /overflow-x-hidden/);
   assert.doesNotMatch(shellSource, /ci-workstation flex h-\[100svh\][^"]*overflow-hidden/);
-  assert.match(shellSource, /sticky top-3 hidden max-h-\[calc\(100svh-1\.5rem\)\]/);
+  assert.match(shellSource, /bottom\?: ReactNode/);
+  assert.match(shellSource, /lg:h-\[calc\(100svh-96px\)\]/);
+  assert.match(shellSource, /lg:max-h-\[calc\(100svh-96px\)\]/);
+  assert.match(shellSource, /sticky top-3 hidden h-full min-h-0/);
+  assert.match(shellSource, /flex-1 min-h-0 overflow-y-auto p-3/);
+  assert.match(pageSource, /bottom=\{/);
+  assert.match(pageSource, /bottomReportViewer \? \(/);
+  assert.doesNotMatch(pageSource, /<BottomReportWorkspacePanel[\s\S]*?<\/div>\s*}\s*right=/);
   assert.match(pageSource, /data-collision-iq-footer="true"/);
-  assert.match(pageSource, /\/brand\/logos\/Logo-grey\.png/);
+  assert.doesNotMatch(widgetSource, /\/brand\/logos\/Logo-grey\.png/);
+  assert.match(widgetSource, /\/brand\/logos\/logo-horizontal\.png/);
+  assert.match(shellSource, /\/iq\/iq-app\.png/);
+  assert.match(shellSource, /\/iq\/iq_logo\.png/);
+  assert.match(shellSource, /\/iq\/iq_logo-white\.png/);
   assert.match(pageSource, /\/iq\/iq_logo\.png/);
+  assert.match(pageSource, /\/iq\/iq_logo-white\.png/);
   assert.match(pageSource, /Delete Account/);
 });
 

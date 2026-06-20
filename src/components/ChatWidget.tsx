@@ -685,6 +685,167 @@ function resolveCaseTopic(message: string, previousTopic: string) {
   return previousTopic || DEFAULT_CASE_TOPIC;
 }
 
+function formatPreliminaryCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function extractEstimateTotalCandidate(text: string): number | null {
+  if (!text.trim()) return null;
+
+  const candidates: Array<{ value: number; score: number }> = [];
+  const totalPatterns = [
+    /(?:estimate|gross|repair|claim|net|grand)\s+total[^$\d]{0,32}\$?\s*([0-9][0-9,]*(?:\.\d{2})?)/gi,
+    /total[^$\d]{0,20}\$?\s*([0-9][0-9,]*(?:\.\d{2})?)/gi,
+    /\$\s*([0-9][0-9,]*(?:\.\d{2}))/g,
+  ];
+
+  totalPatterns.forEach((pattern, patternIndex) => {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      const value = Number(String(match[1] ?? "").replace(/,/g, ""));
+      if (!Number.isFinite(value) || value < 100 || value > 250000) continue;
+      candidates.push({ value, score: patternIndex === 0 ? 3 : patternIndex === 1 ? 2 : 1 });
+    }
+  });
+
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.score - a.score || b.value - a.value);
+  return candidates[0]?.value ?? null;
+}
+
+function inferEstimateRole(attachment: Pick<Attachment, "filename" | "text">): "shop" | "carrier" | "unknown" {
+  const haystack = `${attachment.filename}\n${attachment.text.slice(0, 4000)}`.toLowerCase();
+  if (/\b(?:sor|allstate|state farm|geico|progressive|carrier|insurer|insurance|claim rep|appraiser)\b/.test(haystack)) {
+    return "carrier";
+  }
+  if (/\b(?:shop|repair facility|collision center|body shop|supplement|work auth|work authorization)\b/.test(haystack)) {
+    return "shop";
+  }
+  return "unknown";
+}
+
+function buildPreliminaryCategories(attachments: Attachment[]) {
+  const text = attachments.map((attachment) => `${attachment.filename}\n${attachment.text}`).join("\n").toLowerCase();
+  const categories: string[] = [];
+
+  if (/\b(?:labor rate|body rate|paint rate|material rate|paint materials?|refinish rate)\b/.test(text)) {
+    categories.push("labor/material rate difference");
+  }
+  if (/\b(?:oem|aftermarket|a\/m|lkq|recycled|rcy|reman|used part|part source)\b/.test(text)) {
+    categories.push("OEM vs A/M/LKQ/RCY part posture");
+  }
+  if (/\b(?:adas|calibration|calibrate|pre-?scan|post-?scan|diagnostic|dtc|radar|camera|aiming)\b/.test(text)) {
+    categories.push("scan/ADAS/calibration");
+  }
+  if (/\b(?:steering column|srs|airbag|seat belt|restraint|structural|frame|measure|safety)\b/.test(text)) {
+    categories.push("steering/SRS/safety operations");
+  }
+  if (/\b(?:refinish|blend|clear coat|corrosion|seam sealer|feather|prime|block|mask|cover car)\b/.test(text)) {
+    categories.push("refinish/process/manual lines");
+  }
+
+  return categories.slice(0, 5);
+}
+
+type PreliminaryReviewDraft = {
+  message: string;
+  hasUsefulTriage: boolean;
+};
+
+function buildPreliminaryReviewDraft(attachments: Attachment[]): PreliminaryReviewDraft {
+  const pdfs = attachments.filter((attachment) =>
+    attachment.mime === "application/pdf" || /\.pdf$/i.test(attachment.filename)
+  );
+  const reviewedFiles = pdfs.length ? pdfs : attachments;
+  const estimates = reviewedFiles.map((attachment) => ({
+    filename: attachment.filename,
+    role: inferEstimateRole(attachment),
+    total: extractEstimateTotalCandidate(attachment.text),
+  }));
+  const shopEstimate = estimates.find((estimate) => estimate.role === "shop") ?? estimates.find((estimate) => estimate.total !== null);
+  const carrierEstimate =
+    estimates.find((estimate) => estimate.role === "carrier") ??
+    estimates.find((estimate) => estimate !== shopEstimate && estimate.total !== null);
+  const gap =
+    typeof shopEstimate?.total === "number" && typeof carrierEstimate?.total === "number"
+      ? Math.abs(shopEstimate.total - carrierEstimate.total)
+      : null;
+  const categories = buildPreliminaryCategories(reviewedFiles);
+  const hasDetectedTotal = estimates.some((estimate) => typeof estimate.total === "number");
+  const hasUsefulTriage = hasDetectedTotal || categories.length > 0;
+  const fileLabel = `${reviewedFiles.length} ${reviewedFiles.length === 1 ? "file" : "files"}`;
+  const pdfLabel = pdfs.length ? `${pdfs.length} PDF${pdfs.length === 1 ? "" : "s"}` : fileLabel;
+  const lines = [
+    `Preliminary review started. I found ${pdfLabel} and I am parsing the estimates now. The full line-by-line citation review is still running, but I will give you a fast triage first so you are not waiting on a blank screen.`,
+    "",
+    "Fast triage from the current upload:",
+    `- Files: ${reviewedFiles.map((attachment) => attachment.filename).join(", ")}`,
+  ];
+
+  if (shopEstimate?.filename || carrierEstimate?.filename) {
+    lines.push(`- Likely shop estimate: ${shopEstimate?.filename ?? "not clear yet"}${typeof shopEstimate?.total === "number" ? ` (${formatPreliminaryCurrency(shopEstimate.total)})` : ""}`);
+    lines.push(`- Likely carrier/SOR estimate: ${carrierEstimate?.filename ?? "not clear yet"}${typeof carrierEstimate?.total === "number" ? ` (${formatPreliminaryCurrency(carrierEstimate.total)})` : ""}`);
+  }
+
+  if (gap !== null) {
+    lines.push(`- Approximate total gap: ${formatPreliminaryCurrency(gap)}`);
+  }
+
+  if (categories.length) {
+    lines.push(`- Early issue categories: ${categories.join("; ")}`);
+  }
+
+  lines.push("", "This is preliminary. Authority and citation review is still running.");
+  return {
+    message: lines.join("\n"),
+    hasUsefulTriage,
+  };
+}
+
+const CONVERSATIONAL_WAITING_FALLBACKS = [
+  "I am still parsing the files. While I work, is your goal here to explain the gap to the vehicle owner, prepare a supplement package, or support an appraisal position?",
+  "I am still building the line-by-line review. Quick question while I work: are you mainly trying to help the vehicle owner understand the gap, or prepare a supplement/appraisal position?",
+  "I am still processing the files. While the deeper review runs, is this one mostly a repair-scope dispute, a parts dispute, or an appraisal issue?",
+  "Review is still running. I am parsing the files now, but I am still here. If there is one issue you already know matters most, tell me and I will keep it in focus.",
+  "I am still reviewing the estimate set. No freeze, just a heavy file pass. While I work, is the main concern safety, repair completeness, parts, or the final dollar gap?",
+] as const;
+
+function isCasualProcessingReply(message: string) {
+  return /\b(?:how are you|keep you company|business|shop world|shop life|doing today|what's up|whats up|hanging in|waiting)\b/i.test(message);
+}
+
+function buildLongReviewFollowUpReply(message: string, attachments: Attachment[]) {
+  if (isCasualProcessingReply(message)) {
+    return [
+      "I am here and working through it. The full citation review is still running in the background.",
+      "",
+      "Best use of the wait: tell me whether this is mainly for owner explanation, supplement prep, or appraisal support, and I will keep the response pointed that way.",
+    ].join("\n");
+  }
+
+  const preliminaryDraft = buildPreliminaryReviewDraft(attachments.filter((attachment) => !attachment.usedInAnalysis));
+  if (preliminaryDraft.hasUsefulTriage) {
+    return [
+      "The full citation review is still processing. Based on the preliminary parse:",
+      "",
+      preliminaryDraft.message.replace(/^Preliminary review started\.[^\n]*\n\n/, ""),
+      "",
+      "Authority matching, report generation, and final citation anchors may still change the result.",
+    ].join("\n");
+  }
+
+  return [
+    "The full citation review is still processing. I do not have enough parsed repair facts yet for a useful answer, but the file pass is active.",
+    "",
+    "While I work, is your goal here to explain the gap to the vehicle owner, prepare a supplement package, or support an appraisal position?",
+  ].join("\n");
+}
+
 export default function ChatWidget({
   onUserPromptSent,
   onAttachmentChange,
@@ -784,6 +945,11 @@ export default function ChatWidget({
   const handleSendRef = useRef<(promptOverride?: string) => Promise<void>>(async () => {});
   const messageCounterRef = useRef(0);
   const activeSystemStatusMessageIdRef = useRef<string | null>(null);
+  const reviewProgressTimerRefs = useRef<number[]>([]);
+  const conversationalWaitingTimerRef = useRef<number | null>(null);
+  const lastConversationalWaitingAtRef = useRef(0);
+  const conversationalWaitingIndexRef = useRef(0);
+  const longReviewActiveRef = useRef(false);
   const currentCaseTopicRef = useRef(DEFAULT_CASE_TOPIC);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -1037,6 +1203,7 @@ export default function ChatWidget({
   /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     return () => {
+      clearReviewProgressTimers();
       disposeRecordingResources(true);
       stopSpeaking();
       for (const attachment of attachmentsRef.current) {
@@ -1160,6 +1327,69 @@ export default function ChatWidget({
     });
   }
 
+  function clearReviewProgressTimers() {
+    longReviewActiveRef.current = false;
+    if (typeof window === "undefined") {
+      reviewProgressTimerRefs.current = [];
+      conversationalWaitingTimerRef.current = null;
+      return;
+    }
+
+    reviewProgressTimerRefs.current.forEach((timerId) => window.clearTimeout(timerId));
+    reviewProgressTimerRefs.current = [];
+    if (conversationalWaitingTimerRef.current !== null) {
+      window.clearTimeout(conversationalWaitingTimerRef.current);
+      conversationalWaitingTimerRef.current = null;
+    }
+  }
+
+  function scheduleReviewProgressMessages(hasActiveCase: boolean) {
+    if (typeof window === "undefined") return;
+
+    clearReviewProgressTimers();
+    longReviewActiveRef.current = true;
+    const statuses = [
+      "Parsing estimate PDFs...",
+      "Detected candidate totals; comparing shop and carrier estimate rows...",
+      hasActiveCase
+        ? "Checking current case evidence and structured estimate rows..."
+        : "Checking CCC Secure Share / structured estimate rows...",
+      "Searching OEM/P-page/Drive authority...",
+      "Generating citation reports...",
+    ];
+
+    reviewProgressTimerRefs.current = statuses.map((status, index) =>
+      window.setTimeout(() => {
+        upsertSystemStatusMessage(status);
+      }, 1800 + index * 5500)
+    );
+  }
+
+  function scheduleConversationalWaitingFallback(activeAnalysisRunId: number | null) {
+    if (typeof window === "undefined" || activeAnalysisRunId === null) return;
+
+    if (conversationalWaitingTimerRef.current !== null) {
+      window.clearTimeout(conversationalWaitingTimerRef.current);
+    }
+
+    conversationalWaitingTimerRef.current = window.setTimeout(() => {
+      conversationalWaitingTimerRef.current = null;
+      if (!longReviewActiveRef.current) return;
+      if (analysisRunRef.current !== activeAnalysisRunId) return;
+
+      const now = Date.now();
+      if (now - lastConversationalWaitingAtRef.current < 35000) return;
+
+      const fallback =
+        CONVERSATIONAL_WAITING_FALLBACKS[
+          conversationalWaitingIndexRef.current % CONVERSATIONAL_WAITING_FALLBACKS.length
+        ];
+      conversationalWaitingIndexRef.current += 1;
+      lastConversationalWaitingAtRef.current = now;
+      pushAssistantMessage(fallback);
+    }, 2600);
+  }
+
   function clearActiveSystemStatusMessage() {
     const activeMessageId = activeSystemStatusMessageIdRef.current;
     if (!activeMessageId) return;
@@ -1179,6 +1409,17 @@ export default function ChatWidget({
         ...prev,
         createMessage(messageCounterRef.current, "assistant", content, "system_status"),
       ];
+    });
+  }
+
+  function pushAssistantMessage(content: string) {
+    setMessages((prev) => {
+      if (prev[prev.length - 1]?.role === "assistant" && prev[prev.length - 1]?.content === content) {
+        return prev;
+      }
+
+      messageCounterRef.current += 1;
+      return [...prev, createMessage(messageCounterRef.current, "assistant", content)];
     });
   }
 
@@ -1718,13 +1959,30 @@ export default function ChatWidget({
 
   async function handleSend(promptOverride?: string) {
     if (disabled) return;
-    if (loading) return;
+    const promptText = (promptOverride ?? input).trim();
+    if (loading) {
+      if (!longReviewActiveRef.current) return;
+      if (!promptText) return;
+      onChatEngagement?.();
+      shouldAutoScrollRef.current = true;
+      messageCounterRef.current += 1;
+      const followUpUserMessage = createMessage(messageCounterRef.current, "user", promptText);
+      messageCounterRef.current += 1;
+      const followUpReply = createMessage(
+        messageCounterRef.current,
+        "assistant",
+        buildLongReviewFollowUpReply(promptText, attachmentsRef.current)
+      );
+      setMessages((prev) => [...prev, followUpUserMessage, followUpReply]);
+      setInput("");
+      return;
+    }
     const pendingAttachmentsForTurn = attachments.filter((attachment) => !attachment.usedInAnalysis);
     const documentationVideoAttachments = pendingAttachmentsForTurn.filter(isVideoAttachment);
     const attachmentsForTurn = pendingAttachmentsForTurn.filter(
       (attachment) => !isVideoAttachment(attachment)
     );
-    const trimmedInput = (promptOverride ?? input).trim();
+    const trimmedInput = promptText;
     if (!trimmedInput && pendingAttachmentsForTurn.length === 0) return;
 
     if (documentationVideoAttachments.length > 0) {
@@ -1768,6 +2026,27 @@ export default function ChatWidget({
     const updatedMessages: Message[] = [...messages, userMessage];
     setMessages(updatedMessages);
     setInput("");
+
+    if (hasAttachmentsInTurn) {
+      upsertSystemStatusMessage("Parsing estimate PDFs...");
+      scheduleReviewProgressMessages(Boolean(analysisReportIdRef.current));
+      const preliminaryDraft = buildPreliminaryReviewDraft(attachmentsForTurn);
+      if (preliminaryDraft.hasUsefulTriage) {
+        messageCounterRef.current += 1;
+        const preliminaryMessage = createMessage(
+          messageCounterRef.current,
+          "assistant",
+          preliminaryDraft.message
+        );
+        setMessages((prev) => [...prev, preliminaryMessage]);
+        onPrimaryAnalysisChange?.({
+          messageId: preliminaryMessage.id,
+          content: preliminaryMessage.content,
+        });
+      } else {
+        scheduleConversationalWaitingFallback(activeAnalysisRunId);
+      }
+    }
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -1964,6 +2243,7 @@ export default function ChatWidget({
             provider: analysisFailure?.provider ?? null,
           });
           if (analysisRunRef.current === activeAnalysisRunId) {
+            clearReviewProgressTimers();
             onAnalysisStatusChange?.(
               "error",
               analysisFailure?.detail ?? `Analysis failed (${analysisResponse.status})`
@@ -2080,6 +2360,7 @@ export default function ChatWidget({
           messageCountAfter: updatedMessages.length,
           skippedReset: true,
         });
+        clearReviewProgressTimers();
         upsertSystemStatusMessage(
           `${analysisData.contextBudgetMessage ? `${analysisData.contextBudgetMessage} ` : ""}${formatCaseUpdateStatus(
             analysisData.reassessmentDelta,
@@ -2137,6 +2418,14 @@ export default function ChatWidget({
             messageId: assistantMessage.id,
             content: replyWithReviewProgress,
           });
+          pushAssistantMessage(
+            [
+              "Full review is ready. I generated the analysis and updated the right rail/reports.",
+              `Reviewed file count: ${nextReviewProgress.reviewedForDetermination}.`,
+              analysisData.contextBudgetMessage ? `Review note: ${analysisData.contextBudgetMessage}` : null,
+              "Report availability: the right rail and bottom report viewer are updated when generated outputs are available.",
+            ].filter(Boolean).join("\n")
+          );
         }
 
         return;
@@ -2181,6 +2470,7 @@ export default function ChatWidget({
 
         if (sessionRef.current === mySession) {
           if (hasAttachmentsInTurn) {
+            clearReviewProgressTimers();
             upsertSystemStatusMessage(errorMessage);
           } else {
             pushSystemStatusMessage(errorMessage);
@@ -2247,6 +2537,7 @@ export default function ChatWidget({
                 provider: analysisFailure?.provider ?? null,
               });
               if (analysisRunRef.current === activeAnalysisRunId) {
+                clearReviewProgressTimers();
                 onAnalysisStatusChange?.(
                   "error",
                   analysisFailure?.detail ?? `Analysis failed (${analysisResponse.status})`
@@ -2350,6 +2641,7 @@ export default function ChatWidget({
               refinedWithRetrieval: analysisData.refinedWithRetrieval ?? false,
               analysisCompletedAt: analysisData.analysisCompletedAt ?? null,
             });
+            clearReviewProgressTimers();
             upsertSystemStatusMessage(
               `${analysisData.contextBudgetMessage ? `${analysisData.contextBudgetMessage} ` : ""}${analysisData.caseContinuity?.mode === "active_case_update"
                 ? formatCaseUpdateStatus(
@@ -2364,6 +2656,14 @@ export default function ChatWidget({
                 usedInAnalysis: true,
               }))
             );
+            pushAssistantMessage(
+              [
+                "Full review is ready. I generated the analysis and updated the right rail/reports.",
+                `Reviewed file count: ${nextReviewProgress.reviewedForDetermination}.`,
+                analysisData.contextBudgetMessage ? `Review note: ${analysisData.contextBudgetMessage}` : null,
+                "Report availability: the right rail and bottom report viewer are updated when generated outputs are available.",
+              ].filter(Boolean).join("\n")
+            );
           })
           .catch((error) => {
             console.info("[attachments] analysis failure", {
@@ -2377,6 +2677,7 @@ export default function ChatWidget({
               sessionRef.current === mySession &&
               analysisRunRef.current === activeAnalysisRunId
             ) {
+              clearReviewProgressTimers();
               onAnalysisStatusChange?.("error", "Analysis failed");
               onAnalysisLoadingChange?.(false);
             }
@@ -2396,7 +2697,6 @@ export default function ChatWidget({
           ""
         );
         setMessages((prev) => [...prev, streamingAssistantMessage]);
-        const assistantIndex = updatedMessages.length;
 
         while (true) {
           if (sessionRef.current !== mySession) break;
@@ -2412,6 +2712,7 @@ export default function ChatWidget({
             if (sessionRef.current !== mySession) return prev;
 
             const next = [...prev];
+            const assistantIndex = next.findIndex((message) => message.id === streamingAssistantMessage.id);
             if (assistantIndex >= 0 && assistantIndex < next.length) {
               next[assistantIndex] = { ...next[assistantIndex], content: assistantText };
             }
@@ -2467,6 +2768,7 @@ export default function ChatWidget({
 
       if (sessionRef.current === mySession) {
         if (hasAttachmentsInTurn) {
+          clearReviewProgressTimers();
           upsertSystemStatusMessage("The analysis service had a temporary issue. Please retry.");
         } else {
           setMessages((prev) => [
@@ -3250,7 +3552,14 @@ export default function ChatWidget({
         />
       ) : null}
 
-      <div className="absolute inset-0 pointer-events-none bg-[url('/brand/logos/Logo-grey.png')] bg-no-repeat bg-[length:430px] bg-[position:center_58%] opacity-[0.045] dark:opacity-[0.07] sm:bg-center sm:bg-[length:360px] sm:opacity-[0.018] sm:dark:opacity-[0.035] md:bg-[length:420px]" />
+      <div
+        className="pointer-events-none absolute inset-0 bg-center bg-no-repeat opacity-[0.06] dark:opacity-[0.08]"
+        style={{
+          backgroundImage: "url('/brand/logos/logo-horizontal.png')",
+          backgroundSize: "min(82%, 900px) auto",
+        }}
+        aria-hidden="true"
+      />
       <div className="pointer-events-none absolute inset-0 bg-background/70 dark:bg-background/78" />
 
       <div className="relative z-10 flex flex-col flex-1 min-h-0">
@@ -3675,13 +3984,13 @@ export default function ChatWidget({
 
               <button
                 onClick={() => void handleSend()}
-                disabled={loading || isTranscribing || disabled}
+                disabled={isTranscribing || disabled}
                 className={[
                   "order-3 rounded-md border border-[#b86a2d] bg-[#b86a2d] text-sm font-semibold text-black transition hover:bg-[#c57934] disabled:opacity-50 lg:order-none lg:flex-none",
                   shouldCompactMobileChat ? "min-h-9 flex-none px-3 py-1.5 lg:min-h-10 lg:px-4 lg:py-2" : "min-h-10 flex-1 px-4 py-2 sm:px-5",
                 ].join(" ")}
               >
-                {loading ? "..." : "Send"}
+                Send
               </button>
 
               <button

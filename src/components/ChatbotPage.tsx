@@ -604,10 +604,8 @@ export function ChatbotWorkspacePage() {
   const isReviewOpen = hasStructuredAnalysis && isImmersiveHeaderExpanded;
   const isReviewActive = isReviewOpen && leftPaneMode === "review";
   const isChatActive = leftPaneMode === "chat";
-  const workspaceRowsClass = hasStructuredAnalysis
-    ? isReviewActive
-      ? "grid-rows-[auto_minmax(0,1fr)]"
-      : "grid-rows-[auto_minmax(0,1fr)]"
+  const workspaceRowsClass = isReviewActive
+    ? "grid-rows-[auto_minmax(0,1fr)]"
     : "grid-rows-[minmax(0,1fr)]";
 
   useEffect(() => {
@@ -1210,14 +1208,10 @@ export function ChatbotWorkspacePage() {
         planLabel={trialBadgeLabel}
         center={
           <div className="relative flex h-full min-h-0 w-full flex-col">
-            <div className={`grid min-h-0 w-full flex-1 gap-1 pt-1 sm:gap-3 sm:pt-3 ${workspaceRowsClass}`}>
-              {hasStructuredAnalysis && (
+            <div className={`grid h-full min-h-0 w-full flex-1 gap-1 pt-1 sm:gap-3 sm:pt-3 ${workspaceRowsClass}`}>
+              {hasStructuredAnalysis && isReviewActive && (
                 <div
-                  className={
-                    isReviewActive
-                      ? "flex min-h-0 flex-col px-1 max-lg:absolute max-lg:inset-0 max-lg:z-40 max-lg:bg-card max-lg:p-2"
-                      : "flex min-h-0 flex-col px-1 max-lg:hidden"
-                  }
+                  className="flex min-h-0 flex-col px-1 max-lg:absolute max-lg:inset-0 max-lg:z-40 max-lg:bg-card max-lg:p-2"
                 >
                   <div
                     ref={immersiveToolbarRef}
@@ -1250,11 +1244,10 @@ export function ChatbotWorkspacePage() {
                     </div>
                   </div>
 
-                  {isReviewActive ? (
-                    <div
+                  <div
                       ref={immersiveWorkspaceRef}
                       className="min-h-0 flex-1 overflow-y-auto rounded-[16px] border border-border bg-card/80 px-1 pb-3 shadow-[0_24px_70px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 lg:max-h-[min(54svh,680px)] lg:min-h-[280px] lg:rounded-[26px] lg:pb-4 dark:shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
-                    >
+                  >
                       <div id="immersive-case-header" data-header-change-reason={lastHeaderChangeReason}>
                         <div className="mb-2 text-right text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                           {headerPinnedByUser ? "Pinned by user" : "Auto"}
@@ -1362,11 +1355,10 @@ export function ChatbotWorkspacePage() {
                     )}
 
                   </section>
-                    </div>
-                  ) : null}
+                  </div>
                 </div>
               )}
-              <div className="flex min-h-0 flex-col">
+              <div className="flex h-full min-h-0 flex-1 flex-col">
                 <div className="min-h-0 shrink-0 lg:min-h-[56px]">
                 {trialDaysRemaining !== null && trialDaysRemaining <= 7 && isWithinTrialBadgeWindow(viewerAccess) && (
                   <div
@@ -1420,7 +1412,7 @@ export function ChatbotWorkspacePage() {
                   </div>
                 )}
                 </div>
-                <section className={isReviewActive ? "flex h-full min-h-0 flex-1 flex-col overflow-hidden lg:min-h-[320px]" : "h-full min-h-0 overflow-hidden lg:min-h-[360px]"}>
+                <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 {!isChatActive && (
                   <div className="relative">
                     <div className="rounded-md border border-border bg-card px-3 py-2">
@@ -1453,7 +1445,7 @@ export function ChatbotWorkspacePage() {
                     </div>
                   </div>
                 )}
-                <div className={isChatActive ? "relative h-full min-h-0 w-full flex-1" : "hidden"}>
+                <div className={isChatActive ? "relative min-h-0 w-full flex-1" : "hidden"}>
                       <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden border border-border bg-background">
                         <div className="flex min-h-9 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-2.5 py-1 lg:min-h-[58px] lg:gap-4 lg:px-3 lg:py-2">
                           <div>
@@ -1513,7 +1505,7 @@ export function ChatbotWorkspacePage() {
                             </div>
                           </div>
                         ) : null}
-                        <div className="h-full min-h-0">
+                        <div className="min-h-0 flex-1">
                           <ChatWidget
                           key="chat-widget"
                           onAttachmentChange={setAttachment}
@@ -1566,6 +1558,10 @@ export function ChatbotWorkspacePage() {
                 </section>
               </div>
             </div>
+          </div>
+        }
+        bottom={
+          bottomReportViewer ? (
             <BottomReportWorkspacePanel
               viewer={bottomReportViewer}
               onClose={closeBottomReportViewer}
@@ -1573,7 +1569,7 @@ export function ChatbotWorkspacePage() {
                 void askAboutBottomCitationDensityFinding(annotation);
               }}
             />
-          </div>
+          ) : null
         }
         right={
           <RailContent
@@ -1768,21 +1764,22 @@ function CollisionIqFooter() {
     <footer className="border-t border-border bg-card/80 px-4 py-8 text-card-foreground" data-collision-iq-footer="true">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 sm:px-2 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 items-center gap-3">
-          <Image
-            src="/brand/logos/Logo-grey.png"
-            alt="Collision Academy"
-            width={150}
-            height={44}
-            className="h-9 w-auto object-contain"
-          />
-          <div className="h-8 w-px bg-border" aria-hidden />
-          <Image
-            src="/iq/iq_logo.png"
-            alt="Collision IQ"
-            width={128}
-            height={36}
-            className="h-8 w-auto object-contain dark:invert"
-          />
+          <span className="relative block h-9 w-[150px] shrink-0">
+            <Image
+              src="/iq/iq_logo.png"
+              alt="Collision IQ"
+              fill
+              sizes="150px"
+              className="object-contain object-left dark:hidden"
+            />
+            <Image
+              src="/iq/iq_logo-white.png"
+              alt="Collision IQ"
+              fill
+              sizes="150px"
+              className="hidden object-contain object-left dark:block"
+            />
+          </span>
         </div>
 
         <nav className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground" aria-label="Footer">

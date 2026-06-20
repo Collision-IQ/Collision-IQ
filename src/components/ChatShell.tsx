@@ -53,6 +53,7 @@ type Props = {
   left?: ReactNode;
   center: ReactNode;
   right?: ReactNode;
+  bottom?: ReactNode;
   planLabel?: string | null;
 };
 
@@ -118,6 +119,7 @@ export default function ChatShell({
   left,
   center,
   right,
+  bottom,
   planLabel = null,
 }: Props) {
   const [leftOpen, setLeftOpen] = useState(false);
@@ -161,27 +163,38 @@ export default function ChatShell({
       <header className="relative z-10 min-h-[64px] shrink-0 border-b border-border bg-card">
         <div className="relative mx-auto flex min-h-[64px] max-w-none items-center justify-between gap-2 px-2 py-2 sm:px-3 md:gap-4 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-8 min-w-[136px] items-center gap-2 sm:min-w-[166px]">
+            <div className="flex min-h-10 min-w-[176px] items-center gap-2.5 sm:min-w-[218px]">
               <Image
-                src="/iq/iq-favicon.png"
-                alt="Collision IQ icon"
-                width={28}
-                height={28}
-                className="h-6 w-6 rounded-sm object-contain"
+                src="/iq/iq-app.png"
+                alt=""
+                width={34}
+                height={34}
+                className="h-8 w-8 shrink-0 rounded-md object-contain sm:h-[34px] sm:w-[34px]"
                 priority
+                aria-hidden="true"
               />
-              <Image
-                src="/iq/iq_logo-white.png"
-                alt={title}
-                width={150}
-                height={30}
-                className="h-[22px] w-[112px] object-contain invert dark:invert-0 sm:h-[24px] sm:w-[150px]"
-                priority
-              />
+              <span className="relative block h-[30px] w-[132px] shrink-0 sm:h-[34px] sm:w-[158px]">
+                <Image
+                  src="/iq/iq_logo.png"
+                  alt={title}
+                  fill
+                  sizes="(min-width: 640px) 158px, 132px"
+                  className="object-contain object-left dark:hidden"
+                  priority
+                />
+                <Image
+                  src="/iq/iq_logo-white.png"
+                  alt={title}
+                  fill
+                  sizes="(min-width: 640px) 158px, 132px"
+                  className="hidden object-contain object-left dark:block"
+                  priority
+                />
+              </span>
             </div>
 
             <span className="hidden font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground md:inline">
-              Forensic repair intelligence
+              Forensic Repair Intelligence
             </span>
 
             <span className="hidden h-6 min-w-[112px] items-center md:inline-flex">
@@ -256,9 +269,9 @@ export default function ChatShell({
 
       <div className="h-px w-full shrink-0 bg-border" />
 
-      <div className="relative z-10 w-full max-w-none flex-1 px-1.5 py-1.5 sm:px-2 sm:py-2 md:px-4 md:py-3">
-        <div className="grid min-h-[calc(100svh-86px)] grid-cols-1 items-start gap-2 sm:gap-3 lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_410px]">
-          <div className="flex min-h-[calc(100svh-96px)] min-w-0 flex-col border border-border bg-card">
+      <div className="relative z-10 flex w-full max-w-none flex-1 flex-col px-1.5 py-1.5 sm:px-2 sm:py-2 md:px-4 md:py-3">
+        <div className="grid min-h-0 w-full flex-1 grid-cols-1 items-stretch gap-2 sm:gap-3 lg:h-[calc(100svh-96px)] lg:max-h-[calc(100svh-96px)] lg:min-h-[560px] lg:flex-none lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_410px]">
+          <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border border-border bg-card">
             <div className="hidden min-h-[45px] shrink-0 items-center justify-between gap-4 border-b border-border px-3 py-2 lg:flex">
               <div className="inline-flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#a35d26] dark:text-[#c57934]">
                 <Image
@@ -280,7 +293,7 @@ export default function ChatShell({
           </div>
 
           {hasRight && (
-            <aside className="sticky top-3 hidden max-h-[calc(100svh-1.5rem)] min-h-0 w-full flex-col border border-border bg-card lg:flex">
+            <aside className="sticky top-3 hidden h-full min-h-0 w-full flex-col overflow-hidden border border-border bg-card lg:flex">
               <div className="min-h-[45px] shrink-0 border-b border-border px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                 Evidence / Exports / Audit
               </div>
@@ -288,6 +301,7 @@ export default function ChatShell({
             </aside>
           )}
         </div>
+        {bottom ? <div className="mt-2 shrink-0 sm:mt-3">{bottom}</div> : null}
       </div>
 
       {hasLeft && (
