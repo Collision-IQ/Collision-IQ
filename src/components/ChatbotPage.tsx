@@ -1223,7 +1223,7 @@ export function ChatbotWorkspacePage() {
   if (!consentResolved) return null;
 
   return (
-    <div className="min-h-[100svh] overflow-x-hidden bg-background text-foreground">
+    <div className="flex min-h-[100svh] flex-col overflow-x-hidden bg-background text-foreground">
       <ChatShell
         title="Collision-IQ"
         planLabel={trialBadgeLabel}
@@ -1782,7 +1782,7 @@ function CollisionIqFooter() {
   ];
 
   return (
-    <footer className="border-t border-border bg-card/80 px-4 py-8 text-card-foreground" data-collision-iq-footer="true">
+    <footer className="mt-auto border-t border-border bg-card/80 px-4 py-8 text-card-foreground" data-collision-iq-footer="true">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 sm:px-2 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <span className="relative block h-9 w-[150px] shrink-0">
