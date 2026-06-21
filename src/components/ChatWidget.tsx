@@ -1027,12 +1027,10 @@ export default function ChatWidget({
     loading ||
     hasUploadStatus ||
     uploadUiState !== "idle";
-  const chatBodyFrameClass = hasActiveChatWorkspace
-    ? "flex-1 min-h-0"
-    : "shrink-0";
+  const chatBodyFrameClass = "flex-1 min-h-0";
   const transcriptHeightClass = hasActiveChatWorkspace
     ? "flex-1 min-h-[220px] max-h-[calc(100svh-260px)] overflow-y-auto lg:min-h-[260px]"
-    : "min-h-[220px] max-h-[320px] overflow-y-auto lg:min-h-[240px] lg:max-h-[320px]";
+    : "flex-1 min-h-[220px] overflow-y-auto lg:min-h-[240px]";
   const previousAttachmentCountRef = useRef(0);
 
   useEffect(() => {

@@ -606,28 +606,28 @@ export function ChatbotWorkspacePage() {
   const isChatActive = leftPaneMode === "chat";
   const workspaceRowsClass = isReviewActive
     ? "grid-rows-[auto_minmax(0,1fr)]"
-    : "grid-rows-[auto]";
+    : "grid-rows-[minmax(0,1fr)]";
   const workspaceShellClass = isReviewActive
     ? "relative flex h-full min-h-0 w-full flex-col"
-    : "relative flex min-h-0 w-full flex-col";
+    : "relative flex h-full min-h-0 w-full flex-col";
   const workspaceGridClass = isReviewActive
     ? "grid h-full min-h-0 w-full flex-1 gap-1 pt-1 sm:gap-3 sm:pt-3"
-    : "grid min-h-0 w-full gap-1 pt-1 sm:gap-3 sm:pt-3";
+    : "grid h-full min-h-0 w-full flex-1 gap-1 pt-1 sm:gap-3 sm:pt-3";
   const chatColumnClass = isReviewActive
     ? "flex h-full min-h-0 flex-1 flex-col"
-    : "flex min-h-0 flex-col";
+    : "flex h-full min-h-0 flex-1 flex-col";
   const chatSectionClass = isReviewActive
     ? "flex min-h-0 flex-1 flex-col overflow-hidden"
-    : "flex min-h-0 shrink-0 flex-col overflow-hidden";
+    : "flex min-h-0 flex-1 flex-col overflow-hidden";
   const chatPaneClass = isChatActive
     ? isReviewActive
       ? "relative min-h-0 w-full flex-1"
-      : "relative min-h-0 w-full"
+      : "relative min-h-0 w-full flex-1"
     : "hidden";
   const chatFrameClass = isReviewActive
     ? "relative flex h-full min-h-0 w-full flex-col overflow-hidden border border-border bg-background"
-    : "relative flex min-h-0 w-full flex-col overflow-hidden border border-border bg-background";
-  const chatWidgetWrapClass = isReviewActive ? "min-h-0 flex-1" : "min-h-0";
+    : "relative flex h-full min-h-0 w-full flex-col overflow-hidden border border-border bg-background";
+  const chatWidgetWrapClass = "min-h-0 flex-1";
 
   useEffect(() => {
     immersiveHeaderExpandedRef.current = isImmersiveHeaderExpanded;
