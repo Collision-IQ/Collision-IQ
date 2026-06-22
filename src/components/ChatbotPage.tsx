@@ -1223,7 +1223,7 @@ export function ChatbotWorkspacePage() {
   if (!consentResolved) return null;
 
   return (
-    <div className="flex min-h-[100svh] flex-col overflow-x-hidden bg-background text-foreground">
+    <div className="flex h-[100svh] flex-col overflow-hidden bg-background text-foreground">
       <ChatShell
         title="Collision-IQ"
         planLabel={trialBadgeLabel}
