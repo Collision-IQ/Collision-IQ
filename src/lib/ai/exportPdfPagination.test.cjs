@@ -123,7 +123,7 @@ run("duplicate page-add guard avoids accidental empty intermediate pages", () =>
 run("section keep-together estimate includes heading and first content block", () => {
   const doc = makeFakeDoc();
   const height = __testables.estimateSectionKeepTogetherHeight(doc, 120, {
-    title: "Top Dispute Drivers",
+    title: "Supported Findings",
     bullets: ["A short first bullet that should stay with the heading."],
   });
 

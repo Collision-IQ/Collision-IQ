@@ -17,6 +17,7 @@ import {
   normalizeEstimateOperationLabel,
 } from "@/lib/ui/presentationText";
 import {
+  buildFileReviewDiagnosticRows,
   buildIndexedExclusionAuditNote,
   buildReviewCompletenessMessage,
 } from "@/lib/reviewCompleteness";
@@ -190,7 +191,11 @@ export function buildCarrierReport({
         bullets: buildConfidenceIntegrityBullets(exportModel.confidenceIntegrity),
       },
       {
-        title: "Repair Strategy Comparison",
+        title: "File Review Diagnostics",
+        bullets: buildFileReviewDiagnosticsBullets(exportModel),
+      },
+      {
+        title: "Estimate Comparison",
         bullets: buildRepairStrategyComparisonBullets({
           exportModel,
           credibilityConclusion,
@@ -217,7 +222,7 @@ export function buildCarrierReport({
           }]
         : []),
       {
-        title: "Top Dispute Drivers",
+        title: "Supported Findings",
         bullets: buildTopDisputeDriverBullets(exportModel, topItems),
       },
       ...(exportModel.findingReasoning.length > 0
@@ -237,7 +242,7 @@ export function buildCarrierReport({
         bullets: buildOemProcedureSupportBullets(exportModel, documentedStrengths),
       },
       {
-        title: "Open Verification Evidence",
+        title: "Open Verification Items",
         bullets: buildMissingVerificationBullets(exportModel),
       },
       {
@@ -245,12 +250,19 @@ export function buildCarrierReport({
         bullets: buildRecommendedNextActionBullets(report, exportModel),
       },
       {
-        title: "Negotiation Leverage Areas",
+        title: "Negotiation/Appraisal Posture",
         bullets: buildNegotiationLeverageBullets(exportModel),
       },
       {
-        title: "Source & Citation Summary",
+        title: "Evidence Reviewed",
         bullets: buildSourceCitationSummary(report, analysis, exportModel),
+      },
+      {
+        title: "Limits / Disclaimer",
+        bullets: [
+          "This report is a repair-position and documentation-support summary based on the current material.",
+          "It does not make legal, coverage, or final repair-completion conclusions beyond the reviewed evidence.",
+        ],
       },
     ],
     footer: [
@@ -326,7 +338,7 @@ function buildConfidenceIntegrityBullets(
     integrity.uploadLimitReached ? "Upload cap reached for this review." : "Upload cap not reached.",
     integrity.userIndicatedMoreFiles ? "User indicated more files exist outside the current upload set." : undefined,
     integrity.missingCriticalEvidence.length > 0
-      ? `Not yet located in reviewed files: ${integrity.missingCriticalEvidence.join("; ")}.`
+      ? `Open verification items: ${integrity.missingCriticalEvidence.join("; ")}.`
       : undefined,
     ...integrity.confidencePenalties.map((penalty) =>
       `${penalty.reason}: -${penalty.impact}. ${penalty.explanation}`
@@ -386,16 +398,52 @@ function buildAppraisalRecommendationBullets(
       ? `Safety/OEM/completion support: ${award.safetyCriticalSupport.slice(0, 4).join("; ")}.`
       : "Safety/OEM/completion support: Support not yet located in reviewed files.",
     award.carrierVulnerabilities.length > 0
-      ? `Carrier vulnerabilities: ${award.carrierVulnerabilities.slice(0, 4).join("; ")}.`
-      : "Carrier vulnerabilities: no major repair-path vulnerability isolated.",
+      ? `Carrier estimate pressure points: ${award.carrierVulnerabilities.slice(0, 4).join("; ")}.`
+      : "Carrier estimate pressure points: no major repair-path vulnerability isolated.",
     award.shopVulnerabilities.length > 0
-      ? `Shop vulnerabilities: ${award.shopVulnerabilities.slice(0, 4).join("; ")}.`
-      : "Shop vulnerabilities: no major unsupported broader-scope item isolated.",
+      ? `Shop estimate verification risks: ${award.shopVulnerabilities.slice(0, 4).join("; ")}.`
+      : "Shop estimate verification risks: no major unsupported broader-scope item isolated.",
     exportModel.confidenceIntegrity.missingCriticalEvidence.length > 0
       ? `Not final-award confidence: ${exportModel.confidenceIntegrity.missingCriticalEvidence.join("; ")}.`
       : "Final-award confidence: no critical support item remains not yet located in reviewed files.",
     "Partial awards are not treated as the default appraisal outcome; use a reconciled supported amount or line-adjusted award recommendation when the full estimate is not cleanly awardable.",
   ]);
+}
+
+function buildFileReviewDiagnosticsBullets(exportModel: ExportModel): string[] {
+  const rows = buildFileReviewDiagnosticRows({
+    fileReviewLedger: exportModel.confidenceIntegrity.fileReviewLedger,
+    excludedFromReviewFiles: exportModel.confidenceIntegrity.excludedFromReviewFiles,
+  });
+
+  if (rows.length === 0) {
+    const hasUnexplainedExclusions = (exportModel.confidenceIntegrity.excludedFromReviewCount ?? 0) > 0;
+    return [
+      hasUnexplainedExclusions
+        ? "File review diagnostics are still being prepared."
+        : "No support-only or excluded file diagnostics were isolated from the current review ledger.",
+    ];
+  }
+
+  return rows.slice(0, 20).map((row) => {
+    const flags = compact([
+      row.supportOnly ? "support-only" : undefined,
+      row.duplicate ? "duplicate" : undefined,
+      row.imageOnly ? "image-only" : undefined,
+      row.nonEstimate ? "non-estimate" : undefined,
+      row.boilerplate ? "boilerplate" : undefined,
+      row.failedParse ? "failed parse" : undefined,
+      row.outsideDeterminationScope ? "outside determination scope" : undefined,
+    ]);
+    return [
+      `${row.filename}`,
+      `type: ${row.fileType}`,
+      `indexed/reviewable: ${row.indexedStatus}; ${row.reviewableStatus}`,
+      `reviewed: ${row.reviewedStatus}`,
+      `reason: ${row.exclusionReason}`,
+      `flags: ${flags.length ? flags.join(", ") : "none"}`,
+    ].join(" | ");
+  });
 }
 
 function buildDisputeStrategyBullets(
@@ -996,6 +1044,12 @@ function cleanUserFacingRepairProse(value: string): string {
     .replace(/\buploaded document\b(?:\s*,\s*\buploaded document\b)+/gi, "documentation")
     .replace(/\buploaded document\b/gi, "documentation")
     .replace(/\b(Repair Intelligence Report|Estimate Delta \/ Change Requests|Annotated Estimate Scrubber|Citation Density Gap Report)\s*:\s*\1\b/gi, "$1")
+    .replace(/\bCarrier\.\s+vulnerabilities\b/gi, "Carrier estimate pressure points")
+    .replace(/\bShop\.\s+vulnerabilities\b/gi, "Shop estimate verification risks")
+    .replace(/\bCarrier vulnerabilities\b/gi, "Carrier estimate pressure points")
+    .replace(/\bShop vulnerabilities\b/gi, "Shop estimate verification risks")
+    .replace(/\bMISSING_CRITICAL_EVIDENCE\s*:\s*-\d+\b/gi, "Open verification items")
+    .replace(/\bMISSING_CRITICAL_EVIDENCE\b/gi, "Open verification items")
     .replace(/\b(?:[A-Z]*\d[A-Z0-9-]{5,}|\d{6,}[A-Za-z]{0,3})\b/g, "")
     .replace(/\s{2,}/g, " ")
     .replace(/\s+([,.;:])/g, "$1")

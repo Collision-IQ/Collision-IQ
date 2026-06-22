@@ -179,9 +179,15 @@ run("legacy dispute PDF builder renders unified Repair Intelligence report", () 
 
   assert.equal(document.header.title, "Repair Intelligence Report");
   assert.ok(document.sections.some((section) => section.title === "Executive Repair Position"));
+  assert.ok(document.sections.some((section) => section.title === "Evidence Reviewed"));
+  assert.ok(document.sections.some((section) => section.title === "Estimate Comparison"));
+  assert.ok(document.sections.some((section) => section.title === "Open Verification Items"));
+  assert.ok(document.sections.some((section) => section.title === "Negotiation/Appraisal Posture"));
+  assert.ok(document.sections.some((section) => section.title === "File Review Diagnostics"));
+  assert.ok(document.sections.some((section) => section.title === "Limits / Disclaimer"));
   assert.ok(
     document.sections.some((section) =>
-      section.title === "Top Dispute Drivers"
+      section.title === "Supported Findings"
     )
   );
   assert.ok(
@@ -189,7 +195,10 @@ run("legacy dispute PDF builder renders unified Repair Intelligence report", () 
       (section.bullets ?? []).some((bullet) => /Recommended next action|current gap|support posture/i.test(bullet))
     )
   );
-  assert.doesNotMatch(JSON.stringify(document), /\| status |\| evidence |\| Support:/i);
+  const exportedText = JSON.stringify(document);
+  assert.doesNotMatch(exportedText, /\| status |\| evidence |\| Support:/i);
+  assert.doesNotMatch(exportedText, /MISSING_CRITICAL_EVIDENCE|Carrier\. vulnerabilities|Shop\. vulnerabilities/);
+  assert.doesNotMatch(exportedText, /\d+ indexed items? (?:was|were) excluded/i);
 });
 
 run("Repair Intelligence research sections suppress placeholder source-link references", () => {

@@ -53,7 +53,7 @@ const MAJOR_NUMBERED_SECTION_PATTERN =
   /([^\n])\s+((?:[1-9]|1[0-9])\.\s+(?=[A-Z][A-Za-z][^\n]{4,}))/g;
 const MARKDOWN_HEADING_JOIN_PATTERN = /([^\n])\s+(#{1,4}\s+)/g;
 const INLINE_LABEL_JOIN_PATTERN =
-  /([.!?])\s+((?:Carrier vulnerabilities|Shop vulnerabilities|Not final-award confidence|Final award|Bottom line|Support posture|Estimate position|What still needs support|What looks reasonable|What looks aggressive|Documented positives|Likely remaining gaps|Next action|Recommended action)\s*:)/gi;
+  /([.!?])\s+((?:Carrier vulnerabilities|Shop vulnerabilities|Carrier estimate pressure points|Shop estimate verification risks|Not final-award confidence|Final award|Bottom line|Support posture|Estimate position|What still needs support|What looks reasonable|What looks aggressive|Documented positives|Likely remaining gaps|Next action|Recommended action)\s*:)/gi;
 const SENTENCE_COMPRESSION_PATTERN = /([a-z0-9),\]])\.\s+(?=(?:[A-Z][a-z]+(?:\s+[A-Z]?[a-z]+){0,5}:|[1-9]\.\s+))/g;
 const MALFORMED_RETRIEVED_PATTERN = /\bRetrieved:\s*(?::\s*)?(?:(\d{4}-\d{2}-\d{2}T)?\s*)?(\d{1,2})\s*:\s*(\d{2})\s*:\s*(\d{2}(?:\.\d+)?Z?)\b/gi;
 const MALFORMED_RETRIEVED_SHORT_PATTERN = /\bRetrieved:\s*:\s*(\d{1,2})\s*:\s*(\d{2}(?:\.\d+)?Z?)\b/gi;
@@ -215,6 +215,13 @@ export function cleanUserFacingPresentationText(
     .replace(/\b(?:Not clearly\s+){2,}shown\b/gi, "Not clearly shown")
     .replace(/\bnot clearly\s+not clearly\s+shown\b/gi, "Not clearly shown")
     .replace(/\b(Shop estimate|Carrier estimate)\.:\s*/gi, "$1: ")
+    .replace(/\bCarrier\.\s+vulnerabilities\b/gi, "Carrier estimate pressure points")
+    .replace(/\bShop\.\s+vulnerabilities\b/gi, "Shop estimate verification risks")
+    .replace(/\bCarrier vulnerabilities\b/gi, "Carrier estimate pressure points")
+    .replace(/\bShop vulnerabilities\b/gi, "Shop estimate verification risks")
+    .replace(/\bMISSING_CRITICAL_EVIDENCE\s*:\s*-\d+\b/gi, "Open verification items")
+    .replace(/\bMISSING_CRITICAL_EVIDENCE\b/gi, "Open verification items")
+    .replace(/\bexcluded from determination review\b/gi, "used as supporting context instead of direct estimate-determination evidence")
     .replace(/\b([A-Za-z][A-Za-z0-9/&() -]{2,80}?)\s+\1\s+vs\s+not shown\s+Present only in shop estimate\)?\.?/gi, "$1: present only in shop estimate.")
     .replace(/\bpolicy packet with\s+(?:Georgia|GA|[A-Z][a-z]+)\s*(?:\([A-Z]{2}\))?\s+policy indicators\b/gi, "uploaded policy packet / appraisal-language support; jurisdiction metadata redacted or ambiguous")
     .replace(/\bJurisdiction:\s*Georgia\s*\(GA\)\b/gi, "Jurisdiction metadata: redacted or ambiguous")
@@ -605,6 +612,13 @@ export function sanitizeUserFacingEvidenceText(
     .replace(/\bBase Coatdocumentation\b/gi, "Base Coat support")
     .replace(/\b(OEM|P-page|DEG|legal)documentation\b/gi, "$1 support")
     .replace(/\bRepair Operation\b/gi, "Estimate item")
+    .replace(/\bCarrier\.\s+vulnerabilities\b/gi, "Carrier estimate pressure points")
+    .replace(/\bShop\.\s+vulnerabilities\b/gi, "Shop estimate verification risks")
+    .replace(/\bCarrier vulnerabilities\b/gi, "Carrier estimate pressure points")
+    .replace(/\bShop vulnerabilities\b/gi, "Shop estimate verification risks")
+    .replace(/\bMISSING_CRITICAL_EVIDENCE\s*:\s*-\d+\b/gi, "Open verification items")
+    .replace(/\bMISSING_CRITICAL_EVIDENCE\b/gi, "Open verification items")
+    .replace(/\bexcluded from determination review\b/gi, "used as supporting context instead of direct estimate-determination evidence")
     .replace(/\bParser review needed\b/gi, "Estimate item")
     .replace(/\bgeneric operation labels?\b/gi, "estimate items")
     .replace(/\bOperation:\s*/gi, "Item: ")

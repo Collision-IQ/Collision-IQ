@@ -646,7 +646,7 @@ function buildDocumentationGaps(
   report: RepairIntelligenceReport | null | undefined
 ): string[] {
   const gaps = [
-    ...exportModel.confidenceIntegrity.missingCriticalEvidence.map((gap) => `Not yet located in reviewed files: ${cleanPacketText(gap)}.`),
+    ...exportModel.confidenceIntegrity.missingCriticalEvidence.map((gap) => `Open verification item: ${cleanPacketText(gap)}.`),
     ...exportModel.confidenceIntegrity.confidencePenalties.map(
       (penalty) => `Completeness impact: ${cleanPacketText(penalty.reason)} - ${cleanPacketText(penalty.explanation)}.`
     ),

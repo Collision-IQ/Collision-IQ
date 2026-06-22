@@ -254,7 +254,7 @@ run("legacy dispute intelligence fixture renders unified Repair Intelligence rep
     workspaceData: null,
   });
   const { total, layout } = estimateDocumentSectionsHeight(document);
-  const topDrivers = document.sections.find((section) => section.title === "Top Dispute Drivers");
+  const topDrivers = document.sections.find((section) => section.title === "Supported Findings");
 
   assert.equal(document.header.title, "Repair Intelligence Report");
   assert.ok(document.sections.length >= 4);

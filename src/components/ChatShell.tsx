@@ -157,14 +157,12 @@ export default function ChatShell({
   const hasLeft = useMemo(() => Boolean(left), [left]);
   const effectiveRight = isNativeAndroid ? null : right;
   const hasRight = useMemo(() => Boolean(effectiveRight), [effectiveRight]);
-  const reviewRowHeightClass = bottom
-    ? "lg:h-[min(760px,calc(100svh-96px))] lg:min-h-[520px]"
-    : "lg:h-full lg:min-h-[520px]";
-  const chatPanelHeightClass = "lg:h-full";
-  const rightRailHeightClass = "lg:h-full";
+  const reviewRowHeightClass = "lg:h-full lg:min-h-[520px]";
+  const chatPanelHeightClass = "h-full min-h-0";
+  const rightRailHeightClass = "h-full min-h-0";
 
   return (
-    <div className="ci-workstation flex min-h-0 flex-1 max-w-full flex-col overflow-x-hidden bg-background text-foreground">
+    <div className="ci-workstation flex min-h-0 flex-1 ci-workstation flex-1 min-h-0 flex flex-col max-w-full overflow-x-hidden bg-background text-foreground">
       <header className="relative z-10 min-h-[64px] shrink-0 border-b border-border bg-card">
         <div className="relative mx-auto flex min-h-[64px] max-w-none items-center justify-between gap-2 px-2 py-2 sm:px-3 md:gap-4 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
@@ -276,12 +274,12 @@ export default function ChatShell({
 
       <div
         className={[
-          "relative z-10 flex min-h-0 w-full max-w-none flex-1 flex-col px-1.5 py-1.5 sm:px-2 sm:py-2 md:px-4 md:py-3",
+          "relative z-10 flex flex-1 min-h-0 w-full max-w-none flex-col px-1.5 py-1.5 sm:px-2 sm:py-2 md:px-4 md:py-3",
         ].join(" ")}
       >
         <div
           className={[
-            "grid min-h-0 w-full flex-1 grid-cols-1 items-stretch gap-2 sm:gap-3 lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_410px]",
+            "grid flex-1 min-h-0 w-full grid-cols-1 items-stretch gap-2 overflow-hidden sm:gap-3 lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_410px]",
             reviewRowHeightClass,
           ].join(" ")}
         >
@@ -314,7 +312,7 @@ export default function ChatShell({
           {hasRight && (
             <aside
               className={[
-                "sticky top-3 hidden min-h-0 w-full flex-col overflow-hidden border border-border bg-card lg:flex",
+                "hidden h-full min-h-0 w-full flex-col overflow-hidden border border-border bg-card lg:flex",
                 rightRailHeightClass,
               ].join(" ")}
             >

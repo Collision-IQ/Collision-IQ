@@ -41,6 +41,7 @@ const {
   sanitizeEstimateLine,
 } = require("./presentationText.ts");
 const {
+  buildFileReviewDiagnosticRows,
   buildIndexedExclusionAuditNote,
   buildReviewCompletenessMessage,
   getReviewCompletenessState,
@@ -170,7 +171,7 @@ run("presentation cleanup normalizes export grammar, timestamps, numbers, URLs, 
       "Structural cues Structural frame-related operations battery primarym0.3 four-w repai Not clearly Not clearly shown.",
       "Repair Intelligence references bumper cover1.8 and scan +34%1201.00t m.",
       "Post scan +34%1167.50t failure. Procedure cost open to invoice.",
-      "Carrier vulnerabilities: A. Shop vulnerabilities: B. Not final-award confidence: C.",
+      "Carrier vulnerabilities: A. Shop vulnerabilities: B. MISSING_CRITICAL_EVIDENCE: -8. Not final-award confidence: C.",
     ].join(" "),
     { preserveMarkdown: true }
   );
@@ -188,8 +189,9 @@ run("presentation cleanup normalizes export grammar, timestamps, numbers, URLs, 
   assert.match(cleaned, /Post scan repair support remains open pending invoice documentation\./);
   assert.doesNotMatch(cleaned, /primarym|four-w|\brepai\b|bumper cover1\.8|scan \+34%|Procedure cost open/);
   assert.match(cleaned, /Not clearly shown/);
-  assert.match(cleaned, /\n\nCarrier vulnerabilities:/);
-  assert.match(cleaned, /\n\nShop vulnerabilities:/);
+  assert.match(cleaned, /\n\nCarrier estimate pressure points:/);
+  assert.match(cleaned, /\n\nShop estimate verification risks:/);
+  assert.doesNotMatch(cleaned, /MISSING_CRITICAL_EVIDENCE|Carrier\. vulnerabilities|Shop\. vulnerabilities/);
   assert.match(cleaned, /\n\nNot final-award confidence:/);
 });
 
@@ -282,10 +284,8 @@ run("review completeness treats indexed non-reviewable item as excluded, not ski
   assert.match(message, /Repair-package completeness depends/i);
   assert.doesNotMatch(message, /Full reviewable-file review complete|final file-complete conclusion/i);
   assert.equal(/Only 185 of 186 files reviewed/i.test(message), false);
-  assert.equal(
-    note,
-    "1 indexed item was excluded from determination review. File-level diagnostics with filenames and reasons are required before treating exclusions as reviewed."
-  );
+  assert.equal(note, "File review diagnostics are still being prepared.");
+  assert.doesNotMatch(note, /\d+ indexed items? (?:was|were) excluded/);
   assert.equal(/\bcmp[a-z0-9]{8,}\b/i.test(note), false);
 });
 
@@ -321,12 +321,61 @@ run("indexed exclusion note lists filenames, reasons, stages, parsing, support-o
   });
 
   assert.match(note, /Work Auth\.pdf/);
+  assert.match(note, /Some files were used as supporting context instead of direct estimate-determination evidence/);
+  assert.match(note, /File Review Diagnostics/);
   assert.match(note, /reason=NON_REVIEWABLE/);
   assert.match(note, /stage=source_selection/);
   assert.match(note, /parsed=yes/);
   assert.match(note, /support-only=yes/);
   assert.match(note, /duplicate=scan-original/);
   assert.doesNotMatch(note, /^2 indexed items were excluded from determination review because they were/i);
+});
+
+run("file review diagnostic rows expose file-level status and flags", () => {
+  const rows = buildFileReviewDiagnosticRows({
+    fileReviewLedger: [
+      {
+        filename: "Work Auth.pdf",
+        mimeType: "application/pdf",
+        documentType: "work_authorization",
+        indexedStatus: "indexed",
+        isReviewable: true,
+        reviewedForDetermination: true,
+        usedAsSupportOnly: true,
+        usedInDetermination: false,
+        isDuplicate: false,
+        exclusionReason: null,
+        reviewabilityHint: "Reviewable as support context only; not a primary estimate source.",
+        textExtractionStatus: "extracted",
+        visionExtractionStatus: "not_applicable",
+      },
+      {
+        filename: "duplicate.pdf",
+        mimeType: "application/pdf",
+        documentType: "other_supporting_document",
+        indexedStatus: "indexed",
+        isReviewable: false,
+        reviewedForDetermination: false,
+        usedAsSupportOnly: false,
+        usedInDetermination: false,
+        isDuplicate: true,
+        exclusionReason: "DUPLICATE",
+        reviewabilityHint: "Use the retained duplicate listed in duplicateOf.",
+        textExtractionStatus: "extracted",
+        visionExtractionStatus: "not_applicable",
+      },
+    ],
+  });
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].filename, "Work Auth.pdf");
+  assert.equal(rows[0].indexedStatus, "indexed");
+  assert.equal(rows[0].reviewableStatus, "reviewable");
+  assert.equal(rows[0].reviewedStatus, "reviewed");
+  assert.equal(rows[0].supportOnly, true);
+  assert.equal(rows[0].outsideDeterminationScope, true);
+  assert.equal(rows[1].duplicate, true);
+  assert.equal(rows[1].exclusionReason, "DUPLICATE");
 });
 
 run("file ledger records every upload and evidence reconciliation does not mark present proof as missing", () => {
@@ -467,4 +516,15 @@ run("review completeness still warns when a true reviewable file is skipped", ()
 
   assert.equal(counts.excludedFromReviewCount, 0);
   assert.match(message, /^Near-complete review: 185 of 186 reviewable files reviewed\./);
+});
+
+run("right rail layout is bounded to chat row with internal scroll", () => {
+  const source = fs.readFileSync(path.join(process.cwd(), "src/components/ChatShell.tsx"), "utf8");
+
+  assert.match(source, /ci-workstation flex-1 min-h-0 flex flex-col/);
+  assert.match(source, /grid flex-1 min-h-0[\s\S]{0,120}overflow-hidden/);
+  assert.match(source, /hidden h-full min-h-0 w-full flex-col overflow-hidden/);
+  assert.match(source, /flex-1 min-h-0 overflow-y-auto p-3/);
+  assert.match(source, /\{bottom \? <div className="mt-2 shrink-0 sm:mt-3">\{bottom\}<\/div> : null\}/);
+  assert.doesNotMatch(source, /sticky top-3 hidden min-h-0 w-full flex-col/);
 });

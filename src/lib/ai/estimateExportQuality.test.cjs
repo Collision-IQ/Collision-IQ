@@ -1069,7 +1069,7 @@ run("carrier and estimate-review exports show Shop 21733 facts without unsupport
   assert.equal(disputeIntelligence.header.title, "Repair Intelligence Report");
   assert.equal(
     disputeIntelligence.sections.some((section) =>
-      section.title === "Top Dispute Drivers"
+      section.title === "Supported Findings"
     ),
     true
   );
@@ -1129,7 +1129,7 @@ run("dispute intelligence text template stays decision-ready outside compare mod
 
   assert.equal(disputeIntelligence.includes("shop-side repair path"), false);
   assert.equal(disputeIntelligence.includes("Carrier position:"), false);
-  assert.equal(disputeIntelligence.includes("## Top Dispute Drivers"), true);
+  assert.equal(disputeIntelligence.includes("## Supported Findings"), true);
   assert.equal(disputeIntelligence.includes("Recommended next action:"), true);
 });
 

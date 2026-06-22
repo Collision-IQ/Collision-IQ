@@ -5499,7 +5499,7 @@ function TopDisputeDriversCard({
   return (
     <section className="mt-5 space-y-3 rounded-[24px] border border-orange-500/18 bg-gradient-to-br from-[#C65A2A]/10 via-card to-muted p-4 shadow-[0_18px_44px_rgba(198,90,42,0.12)]">
       <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
-        Top Dispute Drivers
+        Supported Findings
       </div>
       <div className="space-y-3">
         {drivers.map((driver, index) => (

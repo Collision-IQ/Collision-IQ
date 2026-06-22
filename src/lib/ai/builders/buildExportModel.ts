@@ -980,9 +980,9 @@ function buildConfidencePenalties(params: {
   }
   if (params.missingCriticalEvidence.length > 0) {
     penalties.push({
-      reason: "MISSING_CRITICAL_EVIDENCE",
+      reason: "Open verification items",
       impact: Math.min(30, params.missingCriticalEvidence.length * 8),
-      explanation: `Not yet located in reviewed files: ${params.missingCriticalEvidence.join(", ")}.`,
+      explanation: `The current file still needs verification support for ${params.missingCriticalEvidence.join(", ")}.`,
     });
   }
   if (params.evidenceQuality === "weak") {
@@ -1018,7 +1018,7 @@ function buildConfidenceDisclosure(params: {
     params.userIndicatedMoreFiles ? "additional files were indicated but not included" : "",
   ].filter(Boolean);
   const missing = params.missingCriticalEvidence.length > 0
-    ? ` Not yet located in reviewed files: ${params.missingCriticalEvidence.slice(0, 4).join(", ")}.`
+    ? ` Open verification items: ${params.missingCriticalEvidence.slice(0, 4).join(", ")}.`
     : "";
   const limitText = limits.length > 0 ? ` ${limits.join("; ")}.` : "";
   return `Upload review completeness is ${params.completenessStatus.toLowerCase()}, and adjusted confidence is ${params.adjustedConfidence}.${limitText}${missing} Repair-package completeness depends on the listed evidence category reconciliation.`;
