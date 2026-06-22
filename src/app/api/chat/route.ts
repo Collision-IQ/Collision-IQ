@@ -157,6 +157,8 @@ type ChatRouteDeps = {
   buildDriveRefinementContext: typeof import("@/lib/ai/driveRetrievalService").buildDriveRefinementContext;
   detectChatTaskType: typeof import("@/lib/ai/driveRetrievalService").detectChatTaskType;
   retrieveDriveSupport: typeof import("@/lib/ai/driveRetrievalService").retrieveDriveSupport;
+  retrieveWebSupport: typeof import("@/lib/ai/webRetrievalService").retrieveWebSupport;
+  buildWebRefinementContext: typeof import("@/lib/ai/webRetrievalService").buildWebRefinementContext;
   inferDriveRetrievalTopics: typeof import("@/lib/ai/contracts/driveRetrievalContract").inferDriveRetrievalTopics;
   inferDriveVehicleContext: typeof import("@/lib/ai/contracts/driveRetrievalContract").inferDriveVehicleContext;
   cleanDisplayText: typeof import("@/lib/ai/displayText").cleanDisplayText;
@@ -180,6 +182,7 @@ function loadChatRouteDeps(): Promise<ChatRouteDeps> {
     chatRouteDepsPromise = Promise.all([
       import("@/lib/uploadedAttachmentStore"),
       import("@/lib/ai/driveRetrievalService"),
+      import("@/lib/ai/webRetrievalService"),
       import("@/lib/ai/contracts/driveRetrievalContract"),
       import("@/lib/ai/displayText"),
       import("@/lib/ai/vehicleApplicability"),
@@ -193,6 +196,7 @@ function loadChatRouteDeps(): Promise<ChatRouteDeps> {
       ([
         uploadedAttachmentStore,
         driveRetrievalService,
+        webRetrievalService,
         driveRetrievalContract,
         displayText,
         vehicleApplicability,
@@ -208,6 +212,8 @@ function loadChatRouteDeps(): Promise<ChatRouteDeps> {
         buildDriveRefinementContext: driveRetrievalService.buildDriveRefinementContext,
         detectChatTaskType: driveRetrievalService.detectChatTaskType,
         retrieveDriveSupport: driveRetrievalService.retrieveDriveSupport,
+        retrieveWebSupport: webRetrievalService.retrieveWebSupport,
+        buildWebRefinementContext: webRetrievalService.buildWebRefinementContext,
         inferDriveRetrievalTopics: driveRetrievalContract.inferDriveRetrievalTopics,
         inferDriveVehicleContext: driveRetrievalContract.inferDriveVehicleContext,
         cleanDisplayText: displayText.cleanDisplayText,
@@ -971,6 +977,8 @@ export async function POST(req: Request) {
       buildDriveRefinementContext,
       detectChatTaskType,
       retrieveDriveSupport,
+      retrieveWebSupport,
+      buildWebRefinementContext,
       inferDriveVehicleContext,
       extractEstimateLinksFromDocuments,
       isFetchableEstimateLink,
@@ -1474,31 +1482,58 @@ export async function POST(req: Request) {
       resultCount: retrieval?.results.length ?? 0,
       status: agentTrace.steps.find((step) => step.order === 2)?.status ?? "skipped",
     });
-    if (areInternalRetrievalPathsResolved(agentTrace)) {
-      logAgentTraceEvent("web search allowed", agentTrace, {
-        reason: "Internal sources attempted first",
-      });
-      recordAgentRetrievalStep(agentTrace, {
-        order: 3,
-        tool: "web_search",
-        action: "internet_search",
-        resultCount: 0,
-        status: "skipped",
-        reason: "No chat internet search configured; internal sources attempted first.",
-      });
-    }
-
     const applicableRetrieval = retrieval
       ? filterDriveRetrievalByVehicleApplicability(deps, retrieval)
       : null;
+
+    let webRetrieval: Awaited<ReturnType<typeof retrieveWebSupport>> | null = null;
+    if (areInternalRetrievalPathsResolved(agentTrace)) {
+      const driveCoverageInsufficient = (applicableRetrieval?.results.length ?? 0) === 0;
+      if (retrieval?.request && driveCoverageInsufficient) {
+        logAgentTraceEvent("web search allowed", agentTrace, {
+          reason: "Internal sources attempted first; Drive coverage was insufficient.",
+        });
+        webRetrieval = await retrieveWebSupport(retrieval.request, { maxResults: 5, maxQueries: 3 }).catch(
+          (error) => {
+            console.error("Web retrieval refinement skipped:", error);
+            return { status: "error" as const, queries: [], results: [] };
+          }
+        );
+        recordAgentRetrievalStep(agentTrace, {
+          order: 3,
+          tool: "web_search",
+          action: "internet_search",
+          resultCount: webRetrieval.results.length,
+          status: webRetrieval.status === "success" ? "success" : webRetrieval.status === "error" ? "error" : "skipped",
+          reason:
+            webRetrieval.status === "not_configured"
+              ? "Web search provider is not configured."
+              : webRetrieval.status === "no_results"
+                ? "Web search ran but returned no usable results."
+                : undefined,
+        });
+      } else {
+        recordAgentRetrievalStep(agentTrace, {
+          order: 3,
+          tool: "web_search",
+          action: "internet_search",
+          resultCount: 0,
+          status: "skipped",
+          reason: "Internal Drive sources already provided sufficient coverage.",
+        });
+      }
+    }
+
     const linkedProcedureContext =
       linkedProcedureDocs.keptDocs.length > 0
         ? buildLinkedProcedureRefinementContext(linkedProcedureDocs.keptDocs, resolvedVehicleLabel)
         : "";
-    const retrievalContext =
+    const driveContext =
       applicableRetrieval && applicableRetrieval.results.length > 0
         ? buildDriveRefinementContext(applicableRetrieval)
         : "";
+    const webContext = webRetrieval ? buildWebRefinementContext(webRetrieval) : "";
+    const retrievalContext = [driveContext, webContext].filter(Boolean).join("\n\n");
     const refinementMode =
       linkedProcedureContext && retrievalContext
         ? "linked_docs_and_drive"
