@@ -9,6 +9,7 @@ import {
 import type { WorkspaceEstimateComparisons } from "@/types/workspaceTypes";
 import { buildWorkspaceEstimateComparisonSummary } from "@/lib/workspace/estimateComparisons";
 import { normalizeEstimateOperationLabel } from "@/lib/ui/presentationText";
+import { guardDamageZoneNarrative } from "@/lib/ai/narrativeGuard";
 
 type ComparisonEngineParams = {
   shopEstimateText: string;
@@ -77,6 +78,7 @@ export function buildComparisonAnalysis(
       shopStory,
       insurerStory,
       findings,
+      estimateText: `${params.shopEstimateText}\n${params.insurerEstimateText}`,
     }),
   };
 }
@@ -85,15 +87,11 @@ function buildNarrative(params: {
   shopStory: RepairStory;
   insurerStory: RepairStory;
   findings: AnalysisFinding[];
+  estimateText: string;
 }): string {
-  const shopZones = params.shopStory.zones.length > 0
-    ? params.shopStory.zones.join(", ")
-    : "an unclear repair zone";
-  const insurerZones = params.insurerStory.zones.length > 0
-    ? params.insurerStory.zones.join(", ")
-    : "a flatter carrier scope";
-
-  let narrative = `Looking at both estimates as a whole, the shop estimate reads like a ${params.shopStory.complexity} involving ${shopZones}, while the carrier estimate reads more like ${insurerZones}. `;
+  // Lead with what the documents actually carry, not an inferred damage zone.
+  let narrative =
+    "This comparison is based on the line items each estimate documents, reviewed side by side. ";
 
   const keyDifferences = params.findings
     .filter((finding) => finding.status !== "present")
@@ -120,7 +118,7 @@ function buildNarrative(params: {
   narrative +=
     "Only after that structural comparison should scans, calibrations, or procedure references be used as supporting context.";
 
-  return narrative.trim();
+  return guardDamageZoneNarrative(narrative.trim(), { estimateText: params.estimateText });
 }
 
 function buildComparisonFindings(params: {

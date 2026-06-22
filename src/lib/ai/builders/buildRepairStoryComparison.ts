@@ -1,6 +1,7 @@
 import { buildRepairStory } from "./buildRepairStory";
 import type { AnalysisResult } from "../types/analysis";
 import type { EstimateOperation } from "../extractors/estimateExtractor";
+import { guardDamageZoneNarrative } from "@/lib/ai/narrativeGuard";
 
 export function buildRepairStoryComparison(params: {
   shopEstimateText: string;
@@ -23,6 +24,7 @@ export function buildRepairStoryComparison(params: {
     insurerStory,
     shopOperations: params.shopOperations,
     insurerOperations: params.insurerOperations,
+    estimateText: `${params.shopEstimateText}\n${params.insurerEstimateText}`,
   });
 
   return {
@@ -51,15 +53,11 @@ function buildComparisonNarrative(params: {
   insurerStory: ReturnType<typeof buildRepairStory>;
   shopOperations: EstimateOperation[];
   insurerOperations: EstimateOperation[];
+  estimateText: string;
 }): string {
-  const shopZones = params.shopStory.zones.length > 0
-    ? params.shopStory.zones.join(", ")
-    : "unclear repair zones";
-  const insurerZones = params.insurerStory.zones.length > 0
-    ? params.insurerStory.zones.join(", ")
-    : "a less clearly defined scope";
-
-  let narrative = `Looking at both estimates as a whole, the shop estimate reads like a ${params.shopStory.complexity} involving ${shopZones}, while the carrier estimate reads more like ${insurerZones}. `;
+  // Lead with documented structure, not an inferred damage zone.
+  let narrative =
+    "This comparison is based on the repair structure each estimate documents, reviewed side by side. ";
 
   if (
     params.shopStory.structural &&
@@ -76,7 +74,7 @@ function buildComparisonNarrative(params: {
 
   narrative += "That is where the real difference sits: repair structure, not just item count.";
 
-  return narrative.trim();
+  return guardDamageZoneNarrative(narrative.trim(), { estimateText: params.estimateText });
 }
 
 function buildStructuralFindings(params: {

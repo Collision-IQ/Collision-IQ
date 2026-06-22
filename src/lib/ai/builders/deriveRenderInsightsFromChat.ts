@@ -698,7 +698,7 @@ function inferItemReason(title: string, line: string): string {
     return "The fender posture still needs a documented replace-versus-repair rationale, especially where mounting alignment, wheel-opening shape, or adjacent support damage could affect final fit.";
   }
   if (title === "OEM Fit-Sensitive Part Posture") {
-    return "This front-end repair path appears fit-sensitive, so OEM-versus-aftermarket posture should be documented clearly to address gap, finish, and stack-up risk.";
+    return "This part posture appears fit-sensitive, so OEM-versus-aftermarket posture should be documented clearly to address gap, finish, and stack-up risk.";
   }
   if (title === "Front Structure Scope / Tie Bar / Upper Rail Reconciliation") {
     return "Front structure scope, tie bar or upper-rail-related reconciliation, and nearby support-area logic still appear underwritten relative to the likely repair path.";

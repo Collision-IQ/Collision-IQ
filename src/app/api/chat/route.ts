@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import type { ChatAnalysisOutput } from "@/lib/ai/contracts/chatAnalysisSchema";
 import type { DriveRetrievalResponse } from "@/lib/ai/contracts/driveRetrievalContract";
 import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
+import { DAMAGE_ZONE_AND_DETERMINATION_DIRECTIVE } from "@/lib/ai/narrativeGuard";
 import {
   AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE,
   AUTHORITY_RETRIEVAL_STATUS_FIELDS,
@@ -288,6 +289,8 @@ Avoid rigid templates.
 ${DOCUMENT_REVIEW_TWO_PASS_PROTOCOL}
 
 ${NON_BIAS_ACCURACY_DIRECTIVE}
+
+${DAMAGE_ZONE_AND_DETERMINATION_DIRECTIVE}
 
 ${AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE}
 
