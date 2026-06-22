@@ -494,6 +494,12 @@ run("Chat workspace stays compact without reports and expands when report remain
   assert.match(widgetSource, /chatBodyFrameClass = "flex-1 min-h-0"/);
   assert.match(widgetSource, /"flex-1 min-h-\[220px\] overflow-y-auto lg:min-h-\[240px\]"/);
   assert.match(widgetSource, /max-h-\[calc\(100svh-260px\)\] overflow-y-auto/);
+  assert.match(widgetSource, /ZIP_UPLOAD_PROGRESS_MESSAGE/);
+  assert.match(widgetSource, /isUploadBlockingAnalysis\(uploadLifecycleItemsRef\.current\)/);
+  assert.match(widgetSource, /queueReviewPrompt\(promptText\)/);
+  assert.match(widgetSource, /flushQueuedReviewPromptIfReady/);
+  assert.match(widgetSource, /handleUploadUrl: "\/api\/upload\/direct"/);
+  assert.match(widgetSource, /fetch\("\/api\/upload\/finalize"/);
   assert.doesNotMatch(widgetSource, /sm:min-h-\[360px\]/);
   assert.doesNotMatch(widgetSource, /sm:justify-center sm:space-y-4 sm:py-10/);
   assert.match(shellSource, /\/iq\/iq-app\.png/);

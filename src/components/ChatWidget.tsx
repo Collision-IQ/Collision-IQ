@@ -70,6 +70,15 @@ import {
   resolveUploadTransport,
   validateDirectUploadCandidate,
 } from "@/lib/uploadSafety/directUploadRouting";
+import {
+  ZIP_UPLOAD_PROGRESS_MESSAGE,
+  buildZipExtractedReviewStartMessage,
+  isUploadBlockingAnalysis,
+  shouldFlushQueuedReviewPrompt,
+  type QueuedReviewPrompt,
+  type UploadLifecycleItem,
+  type UploadLifecyclePhase,
+} from "@/lib/uploadSafety/queuedReviewPrompt";
 import { VIDEO_MAX_BYTES } from "@/lib/uploadSafety/videoSafety";
 import {
   buildReviewCompletenessMessage,
@@ -572,6 +581,10 @@ function isZipFile(file: Pick<File, "name" | "type">) {
   );
 }
 
+function getUploadLifecycleId(file: Pick<File, "name" | "size"> & { lastModified?: number }) {
+  return `${file.name}:${file.size}:${file.lastModified ?? 0}`;
+}
+
 function buildLargeUploadWarning(files: File[]) {
   const largeFiles = files.filter((file) => file.size >= LARGE_UPLOAD_WARNING_BYTES);
   if (!largeFiles.length) return null;
@@ -916,6 +929,7 @@ export default function ChatWidget({
   const [uploadUiState, setUploadUiState] = useState<UploadUiState>("idle");
   const [selectedUploadNames, setSelectedUploadNames] = useState<string[]>([]);
   const [uploadUiMessage, setUploadUiMessage] = useState<string | null>(null);
+  const [, setUploadLifecycleItems] = useState<UploadLifecycleItem[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -930,6 +944,9 @@ export default function ChatWidget({
   const analysisTextRef = useRef("");
   const workspaceDataRef = useRef<WorkspaceData | null>(null);
   const attachmentsRef = useRef<Attachment[]>([]);
+  const uploadLifecycleItemsRef = useRef<UploadLifecycleItem[]>([]);
+  const queuedReviewPromptRef = useRef<QueuedReviewPrompt | null>(null);
+  const queuedReviewPromptIdRef = useRef(0);
   const reviewProgressRef = useRef<ReviewProgress>({
     uploaded: 0,
     indexed: 0,
@@ -975,6 +992,75 @@ export default function ChatWidget({
     },
     [onReviewProgressChange]
   );
+
+  function setUploadLifecycle(next: UploadLifecycleItem[]) {
+    uploadLifecycleItemsRef.current = next;
+    setUploadLifecycleItems(next);
+  }
+
+  function upsertUploadLifecycleItem(item: UploadLifecycleItem) {
+    setUploadLifecycle([
+      ...uploadLifecycleItemsRef.current.filter((current) => current.id !== item.id),
+      item,
+    ]);
+  }
+
+  function updateUploadLifecyclePhase(id: string, phase: UploadLifecyclePhase) {
+    setUploadLifecycle(
+      uploadLifecycleItemsRef.current.map((item) =>
+        item.id === id ? { ...item, phase } : item
+      )
+    );
+  }
+
+  function clearCompletedUploadLifecycleItems() {
+    setUploadLifecycle(
+      uploadLifecycleItemsRef.current.filter((item) =>
+        item.phase !== "complete" && item.phase !== "failed" && item.phase !== "canceled"
+      )
+    );
+  }
+
+  function queueReviewPrompt(prompt: string) {
+    queuedReviewPromptIdRef.current += 1;
+    queuedReviewPromptRef.current = {
+      id: queuedReviewPromptIdRef.current,
+      prompt,
+      status: "queued",
+    };
+  }
+
+  function clearQueuedReviewPrompt() {
+    queuedReviewPromptRef.current = null;
+  }
+
+  function flushQueuedReviewPromptIfReady(summary?: { totalFiles: number; pdfCount: number; imageCount: number }) {
+    const queuedPrompt = queuedReviewPromptRef.current;
+    if (
+      !shouldFlushQueuedReviewPrompt({
+        queuedPrompt,
+        lifecycleItems: uploadLifecycleItemsRef.current,
+        reviewableFileCount: reviewProgressRef.current.indexed || reviewProgressRef.current.reviewableFileCount,
+      })
+    ) {
+      return;
+    }
+
+    queuedReviewPromptRef.current = {
+      ...queuedPrompt!,
+      status: "flushing",
+    };
+    if (summary) {
+      pushAssistantMessage(buildZipExtractedReviewStartMessage(summary));
+    }
+
+    const prompt = queuedPrompt!.prompt;
+    clearQueuedReviewPrompt();
+    clearCompletedUploadLifecycleItems();
+    window.setTimeout(() => {
+      void handleSendRef.current(prompt);
+    }, 0);
+  }
 
   const hasAnyAttachment = useMemo(() => attachments.length > 0, [attachments]);
   const hasAssistantResponse = useMemo(
@@ -1925,6 +2011,8 @@ export default function ChatWidget({
     setUploadUiState("idle");
     setSelectedUploadNames([]);
     setUploadUiMessage(null);
+    setUploadLifecycle([]);
+    clearQueuedReviewPrompt();
     setIsDragActive(false);
     firstAttachmentAtRef.current = null;
     currentCaseTopicRef.current = DEFAULT_CASE_TOPIC;
@@ -1976,6 +2064,20 @@ export default function ChatWidget({
   async function handleSend(promptOverride?: string) {
     if (disabled) return;
     const promptText = (promptOverride ?? input).trim();
+    if (promptText && isUploadBlockingAnalysis(uploadLifecycleItemsRef.current)) {
+      onUserPromptSent?.();
+      onChatEngagement?.();
+      stopSpeaking();
+      shouldAutoScrollRef.current = true;
+      messageCounterRef.current += 1;
+      const queuedUserMessage = createMessage(messageCounterRef.current, "user", promptText);
+      setMessages((prev) => [...prev, queuedUserMessage]);
+      setInput("");
+      queueReviewPrompt(promptText);
+      pushAssistantMessage(ZIP_UPLOAD_PROGRESS_MESSAGE);
+      return;
+    }
+
     if (loading) {
       if (!longReviewActiveRef.current) return;
       if (!promptText) return;
@@ -2832,6 +2934,7 @@ export default function ChatWidget({
     const authHeaders = token ? { Authorization: `Bearer ${token}` } : undefined;
     const transport = resolveUploadTransport(file, effectiveUploadPlanLimits);
     const activeCaseId = analysisReportIdRef.current;
+    const lifecycleId = getUploadLifecycleId(file);
 
     console.info("[upload-client] selected upload route", {
       uploadMode: transport.uploadMode,
@@ -2846,11 +2949,20 @@ export default function ChatWidget({
 
     let res: Response;
     if (transport.uploadMode === "direct-storage") {
+      upsertUploadLifecycleItem({
+        id: lifecycleId,
+        name: file.name,
+        mimeType: file.type,
+        phase: "requesting-direct-upload",
+        directUpload: true,
+      });
       const rejection = validateDirectUploadCandidate(file, effectiveUploadPlanLimits);
       if (rejection) {
+        updateUploadLifecyclePhase(lifecycleId, "failed");
         throw new Error(rejection.reason);
       }
 
+      updateUploadLifecyclePhase(lifecycleId, "uploading");
       console.info("[upload-client] directUploadStarted", {
         uploadMode: "direct-storage",
         filename: file.name,
@@ -2887,6 +2999,7 @@ export default function ChatWidget({
         activeCaseId,
       });
 
+      updateUploadLifecyclePhase(lifecycleId, "finalizing");
       res = await fetch("/api/upload/finalize", {
         method: "POST",
         credentials: "include",
@@ -2910,6 +3023,7 @@ export default function ChatWidget({
         filename: file.name,
         status: res.status,
       });
+      updateUploadLifecyclePhase(lifecycleId, "extracting");
     } else {
       const formData = new FormData();
       formData.append("file", file);
@@ -2932,6 +3046,9 @@ export default function ChatWidget({
     const data = (await res.json().catch(() => null)) as UploadResponse | null;
 
     if (!res.ok) {
+      if (transport.uploadMode === "direct-storage") {
+        updateUploadLifecyclePhase(lifecycleId, "failed");
+      }
       let message =
         res.status === 413
           ? "This file is too large for the current upload route or plan. ZIP and video uploads may require Starter, Pro, or Admin limits."
@@ -2962,6 +3079,9 @@ export default function ChatWidget({
     }
     const attachmentId = upload?.attachmentId;
     if (!attachmentId) {
+      if (transport.uploadMode === "direct-storage") {
+        updateUploadLifecyclePhase(lifecycleId, "failed");
+      }
       throw new Error(
         data?.failedUploads?.length
           ? data.failedUploads.map((failure) => failure.reason ?? "Upload failed.").join("; ")
@@ -2977,6 +3097,9 @@ export default function ChatWidget({
       analysisReportIdRef.current = returnedActiveCaseId;
     }
     const returnedUploads = data?.successfulUploads?.length ? data.successfulUploads : [upload];
+    if (transport.uploadMode === "direct-storage") {
+      updateUploadLifecyclePhase(lifecycleId, "indexing");
+    }
     const returnedAttachmentIds = returnedUploads
       .map((item) => item?.attachmentId)
       .filter((id): id is string => typeof id === "string");
@@ -3036,6 +3159,9 @@ export default function ChatWidget({
       excludedFromReviewFiles: current.excludedFromReviewFiles,
       totalKnownFiles: current.totalKnownFiles + knownFileCount,
     }));
+    if (transport.uploadMode === "direct-storage") {
+      updateUploadLifecyclePhase(lifecycleId, "complete");
+    }
 
     setAttachments((prev) => {
       const nextAttachments = returnedUploads
@@ -3072,11 +3198,13 @@ export default function ChatWidget({
       }
 
       if (!replaceId) {
-        return [...prev, ...nextAttachments];
+        const next = [...prev, ...nextAttachments];
+        attachmentsRef.current = next;
+        return next;
       }
 
       const [replacement, ...additional] = nextAttachments;
-      return prev.map((attachment) => {
+      const next = prev.map((attachment) => {
         if (attachment.attachmentId !== replaceId) {
           return attachment;
         }
@@ -3087,6 +3215,8 @@ export default function ChatWidget({
 
         return replacement;
       }).concat(additional);
+      attachmentsRef.current = next;
+      return next;
     });
 
     onAttachmentChange?.(filename);
@@ -3153,6 +3283,18 @@ export default function ChatWidget({
       setUploadUiMessage(
         `Uploading ${files.length} ${files.length === 1 ? "file" : "files"}...`
       );
+      files.forEach((file) => {
+        const transport = resolveUploadTransport(file, effectiveUploadPlanLimits);
+        if (transport.uploadMode === "direct-storage" || transport.zipDetected) {
+          upsertUploadLifecycleItem({
+            id: getUploadLifecycleId(file),
+            name: file.name,
+            mimeType: file.type,
+            phase: "requesting-direct-upload",
+            directUpload: transport.uploadMode === "direct-storage",
+          });
+        }
+      });
       console.info("[attachments] upload batch selected", {
         source: "file",
         fileCount: files.length,
@@ -3186,6 +3328,11 @@ export default function ChatWidget({
           }
         } catch (error) {
           console.error(error);
+          updateUploadLifecyclePhase(getUploadLifecycleId(file), "failed");
+          clearQueuedReviewPrompt();
+          pushAssistantMessage(
+            "The ZIP upload did not finish, so I did not start the review. Please retry the ZIP upload or upload the key estimates directly."
+          );
           uploadFailures.push({
             filename: file.name,
             reason: error instanceof Error ? error.message : "Upload failed.",
@@ -3217,6 +3364,15 @@ export default function ChatWidget({
         setSelectedUploadNames([]);
         setAttachmentsOpen(false);
         setMobileAttachmentsOpen(false);
+        flushQueuedReviewPromptIfReady(
+          files.some(isZipFile)
+            ? {
+                totalFiles: successfulUploadCount,
+                pdfCount: uploadedDisplayNames.filter((name) => /\.pdf$/i.test(name)).length,
+                imageCount: uploadedDisplayNames.filter((name) => /\.(?:jpe?g|png|webp|heic)$/i.test(name)).length,
+              }
+            : undefined
+        );
       }
     } catch (err) {
       console.error(err);
@@ -3255,6 +3411,18 @@ export default function ChatWidget({
       setUploadUiMessage(
         `Uploading ${files.length} ${files.length === 1 ? "photo" : "photos"}...`
       );
+      files.forEach((file) => {
+        const transport = resolveUploadTransport(file, effectiveUploadPlanLimits);
+        if (transport.uploadMode === "direct-storage" || transport.zipDetected) {
+          upsertUploadLifecycleItem({
+            id: getUploadLifecycleId(file),
+            name: file.name,
+            mimeType: file.type,
+            phase: "requesting-direct-upload",
+            directUpload: transport.uploadMode === "direct-storage",
+          });
+        }
+      });
       console.info("[attachments] upload batch selected", {
         source: "camera",
         fileCount: files.length,
@@ -3288,6 +3456,11 @@ export default function ChatWidget({
           }
         } catch (error) {
           console.error(error);
+          updateUploadLifecyclePhase(getUploadLifecycleId(file), "failed");
+          clearQueuedReviewPrompt();
+          pushAssistantMessage(
+            "The upload did not finish, so I did not start the review. Please retry the upload or attach the key estimates directly."
+          );
           uploadFailures.push({
             filename: file.name,
             reason: error instanceof Error ? error.message : "Upload failed.",
@@ -3319,6 +3492,7 @@ export default function ChatWidget({
         setSelectedUploadNames([]);
         setAttachmentsOpen(false);
         setMobileAttachmentsOpen(false);
+        flushQueuedReviewPromptIfReady();
       }
     } catch (err) {
       console.error(err);

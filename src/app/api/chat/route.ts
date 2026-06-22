@@ -128,6 +128,10 @@ type ChatRequestBody = {
   messages?: IncomingMessage[];
   attachmentIds?: string[];
   attachments?: IncomingAttachment[];
+  uploadState?: {
+    pending?: boolean;
+    phase?: string | null;
+  } | null;
   activeCaseId?: string | null;
   jurisdiction?: IncomingJurisdiction;
   productAccess?: {
@@ -377,6 +381,12 @@ function isFollowupTurn(messages: IncomingMessage[] = []): boolean {
   const userMessages = conversationalMessages.filter((message) => message.role === "user");
 
   return conversationalMessages.length > 2 && userMessages.length > 1;
+}
+
+function isReviewOrEstimateAnalysisIntent(message: string) {
+  return /\b(?:review|analy[sz]e|triage|estimate|supplement|appraisal|repair|claim|carrier|shop|invoice|photo|zip|work auth|citation density)\b/i.test(
+    message
+  );
 }
 
 function resolveJurisdictionFromBody(
@@ -977,6 +987,27 @@ export async function POST(req: Request) {
       : Array.isArray(body.attachments)
         ? body.attachments.length
         : 0;
+    const userMessage = extractLatestUserMessage(body.messages || []);
+
+    if (body.uploadState?.pending) {
+      return NextResponse.json({
+        reply: "I'm receiving and extracting the ZIP now. I'll start review as soon as files are available.",
+        uploadPending: true,
+        phase: body.uploadState.phase ?? null,
+      });
+    }
+
+    if (
+      incomingAttachmentCount === 0 &&
+      !body.activeCaseId &&
+      isReviewOrEstimateAnalysisIntent(userMessage)
+    ) {
+      return NextResponse.json({
+        reply:
+          "I'm ready to review this, but I do not have extracted estimate files available yet. I'll start as soon as the upload finishes.",
+        needsFiles: true,
+      });
+    }
 
     const normalizedEmail = normalizeEmail(user.email);
     let effectiveIsAdmin = isPlatformAdmin;
@@ -1033,7 +1064,6 @@ export async function POST(req: Request) {
       timeToAnalysisStartMs: Date.now() - requestStartedAt,
     });
 
-    const userMessage = extractLatestUserMessage(body.messages || []);
     if (shouldGenerateAnnotatedCitationDensityEstimate(userMessage)) {
       return new Response(
         "Delta Citation Density Report PDFs must be generated through the annotated-estimate export. Select the original carrier or shop estimate PDF and run the Delta Citation Density Report export so original estimate pages are copied and visibly marked up.",
