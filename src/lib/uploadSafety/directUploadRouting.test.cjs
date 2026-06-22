@@ -99,4 +99,32 @@ const workAuthZip = file("Work Auth 21215.zip", Math.round(40.8 * MB), "applicat
   assert.equal(resolveUploadTransport(video, pro).uploadMode, "direct-storage");
 }
 
+{
+  const directRouteSource = fs.readFileSync(
+    path.join(process.cwd(), "src/app/api/upload/direct/route.ts"),
+    "utf8"
+  );
+  const chatWidgetSource = fs.readFileSync(
+    path.join(process.cwd(), "src/components/ChatWidget.tsx"),
+    "utf8"
+  );
+  const fileUploadSource = fs.readFileSync(
+    path.join(process.cwd(), "src/components/FileUpload.tsx"),
+    "utf8"
+  );
+  const uploadPageSource = fs.readFileSync(
+    path.join(process.cwd(), "src/app/upload/page.tsx"),
+    "utf8"
+  );
+  const browserUploadSources = [chatWidgetSource, fileUploadSource, uploadPageSource].join("\n");
+
+  assert.match(directRouteSource, /import \{ handleUpload, type HandleUploadBody \} from "@vercel\/blob\/client"/);
+  assert.match(directRouteSource, /await handleUpload\(/);
+  assert.match(browserUploadSources, /import \{ upload as uploadBlob \} from "@vercel\/blob\/client"/);
+  assert.match(browserUploadSources, /handleUploadUrl: "\/api\/upload\/direct"/);
+  assert.doesNotMatch(browserUploadSources, /https:\/\/vercel\.com\/api\/blob/);
+  assert.doesNotMatch(browserUploadSources, /api\/blob\/mpu/);
+  assert.doesNotMatch(browserUploadSources, /multipart:\s*file\.size > 8 \* 1024 \* 1024/);
+}
+
 console.log("directUploadRouting tests passed");

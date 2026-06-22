@@ -50,7 +50,6 @@ export default function UploadPage() {
             activeCaseId: null,
           }),
           headers: authHeaders,
-          multipart: file.size > 8 * 1024 * 1024,
         });
         console.info("[upload-client] directUploadCompleted", {
           uploadMode: "direct-storage",

@@ -2983,7 +2983,6 @@ export default function ChatWidget({
           activeCaseId,
         }),
         headers: authHeaders,
-        multipart: file.size > 8 * 1024 * 1024,
       });
 
       console.info("[upload-client] directUploadCompleted", {
