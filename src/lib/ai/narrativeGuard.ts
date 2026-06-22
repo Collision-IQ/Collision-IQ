@@ -8,10 +8,9 @@
  * explicitly establishes the zone (via a documented Point of Impact), and exposes
  * the system-prompt directives that force evidence-anchored, structured output.
  *
- * It is intentionally TARGETED: it only neutralizes the speculative damage-zone
- * constructions. It must not strip evidence-anchored references such as
- * "OEM-style front-end parts" (literal part scope) or "fit-sensitive repair path"
- * (established by an OEM position statement).
+ * It is intentionally TARGETED: it neutralizes speculative damage-zone
+ * constructions and front/rear scope labels that are not explicitly established
+ * by the selected estimate lines.
  */
 
 const NEUTRAL_SCOPE = "the documented repair scope";
@@ -27,6 +26,12 @@ const BANNED_ZONE_PHRASES: Array<{ pattern: RegExp; replacement: string }> = [
   { pattern: /\brear-end\s+repair\s+path\b/gi, replacement: NEUTRAL_SCOPE },
   { pattern: /\blocalized\s+repair\s+zone\b/gi, replacement: NEUTRAL_SCOPE },
   { pattern: /\b(?:front-end|rear-end)\s+repair\s+zone\b/gi, replacement: NEUTRAL_SCOPE },
+  { pattern: /\bOEM-style\s+front-end\s+parts?\b/gi, replacement: "OEM-style documented part scope" },
+  { pattern: /\bfront-end\s+part\s+scope\b/gi, replacement: "documented part scope" },
+  { pattern: /\bfront-end\s+parts?\b/gi, replacement: "documented parts" },
+  { pattern: /\bfront-end\s+disassembly\b/gi, replacement: "repair-area disassembly" },
+  { pattern: /\bfront\s+support\s+area\b/gi, replacement: "repair-area mounting/fit verification area" },
+  { pattern: /\b(?:right-front|left-front)\s+area\b/gi, replacement: "repair-area" },
 ];
 
 /**
@@ -37,6 +42,8 @@ const BANNED_ZONE_PHRASES: Array<{ pattern: RegExp; replacement: string }> = [
 export function estimateEstablishesDamageZone(estimateText: string | null | undefined): boolean {
   if (!estimateText) return false;
   return /point\s+of\s+impact\b[^\n]{0,40}\b(?:front|rear|side|left|right|driver|passenger)\b/i.test(
+    estimateText
+  ) || /\b(?:front bumper|front cover|front lamp|front headlamp|front fender|radiator support|core support|front end|front-end)\b/i.test(
     estimateText
   );
 }
@@ -90,7 +97,7 @@ export const DAMAGE_ZONE_AND_DETERMINATION_DIRECTIVE = `
 Damage-zone honesty and determination-structure directive:
 - Do not generate speculative damage-zone narratives. Do not say a "front-end repair path", "rear-end repair path", or "localized repair zone", and do not say an estimate "reads like front-end", "reads like rear-end", or "reads more like" a particular zone, unless the estimate itself explicitly establishes that conclusion (for example a documented Point of Impact, or an explicit front/rear/side scope stated in the estimate).
 - Describe what each estimate actually documents line by line. Do not infer or assume a damage zone, repair character, or repair "story" that the estimate does not state.
-- Referencing literal part scope ("OEM-style front-end parts") or an OEM-established posture ("fit-sensitive repair path supported by an OEM position statement") is allowed because it is anchored to documented evidence; inventing a damage-zone narrative is not.
+- Do not use "front-end parts", "front-end part scope", "front support area", "right-front area", "left-front area", or "front-end disassembly" unless selected estimate lines explicitly establish that front scope. Prefer "OEM-style documented part scope", "fit-sensitive part scope", "repair-area mounting/fit verification", or "repair-area disassembly".
 - For every major determination, use this exact structure with these labels:
   Evidence Reviewed: the specific uploaded files, estimate lines, photos, or documents the determination relies on.
   Finding: the concrete, evidence-anchored conclusion.

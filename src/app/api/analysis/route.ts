@@ -2069,7 +2069,7 @@ function normalizeIssueForEstimateOperations(
   const lower = text.toLowerCase();
   const impactZone = deriveImpactZone({ text: estimateText });
   const normalizedImpact = impactZone.primary === "rear"
-    ? issue.impact.replace(/\bfront-end damage\b/gi, "rear-area damage")
+    ? issue.impact.replace(/\bfront-end damage\b/gi, "repair-area damage")
     : issue.impact;
   const sideImpactWithoutFrontSupport =
     isSideImpactZone(impactZone) &&
@@ -2093,7 +2093,7 @@ function normalizeIssueForEstimateOperations(
           "The stored estimate and supplement indicate a side-impact repair pattern."
         ),
         impact:
-          "The open verification concern should track the documented side structure, aperture, door-shell, quarter, roof-rail, closure, and sealing repair path rather than a generic front-end mounting-geometry assumption.",
+          "The open verification concern should track the documented side structure, aperture, door-shell, quarter, roof-rail, closure, and sealing repair path rather than a generic mounting-geometry assumption.",
         missingOperation: undefined,
         evidenceStatus:
           issue.evidenceStatus === "DOCUMENTED"
@@ -2299,11 +2299,11 @@ function getEvidenceDerivedIssueDefinition(
       return {
         id: key,
         category: "parts",
-        title: "Front Support Area Verification",
+        title: "Repair-Area Mounting / Fit Verification",
         finding: summaries.photo,
         impact:
-          "Visible front-end damage supports keeping hidden support, absorber, bracket, and mounting-area verification open pending teardown or repair documentation.",
-        missingOperation: "Front support verification",
+          "Visible repair-area disturbance supports keeping hidden support, absorber, bracket, and mounting/fit verification open pending teardown or repair documentation; photos alone do not establish a damage zone.",
+        missingOperation: "Repair-area mounting and fit verification",
         evidenceStatus: "VISIBLE_IN_IMAGES",
         severity: "high",
         evidenceIds: [],
@@ -2329,7 +2329,7 @@ function getEvidenceDerivedIssueDefinition(
         title: "Calibration Verification Open",
         finding: isInvoice ? summaries.invoice : summaries.photo,
         impact:
-          "Disturbed electrical, front-end, lamp, bumper, or sensor-adjacent areas may affect system verification needs; calibration status remains open unless records directly document it.",
+          "Disturbed electrical, lamp, bumper, or sensor-adjacent repair areas may affect system verification needs; calibration status remains open unless records directly document it.",
         missingOperation: "Calibration verification",
         evidenceStatus: "OPEN_PENDING_FURTHER_DOCUMENTATION",
         severity: "high",
@@ -2589,10 +2589,10 @@ function summarizeVisibleDamageEvidence(item: CaseEvidenceRegistryItem): string 
   const side = inferImpactSide(sourceText);
   const observed = [
     side === "right_front"
-      ? "right-front area"
+      ? "repair-area"
       : "",
     side === "left_front"
-      ? "left-front area"
+      ? "repair-area"
       : "",
     lower.includes("bumper") ? "bumper" : "",
     lower.includes("headlamp") || lower.includes("headlight") ? "headlamp" : "",

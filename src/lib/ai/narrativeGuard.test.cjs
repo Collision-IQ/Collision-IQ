@@ -62,12 +62,20 @@ run("replaces banned damage-zone path/zone phrases with neutral scope", () => {
   assert.match(out, /the documented repair scope/i);
 });
 
-run("leaves evidence-anchored phrases untouched (front-end parts, fit-sensitive repair path)", () => {
+run("neutralizes front-end part scope without explicit estimate support", () => {
   const input =
     "The shop estimate is broader on OEM-style front-end parts. OEM support indicates a fit-sensitive repair path.";
   const out = guardDamageZoneNarrative(input, { estimateText: "" });
-  assert.match(out, /OEM-style front-end parts/i);
+  assert.doesNotMatch(out, /OEM-style front-end parts/i);
+  assert.match(out, /OEM-style documented part scope/i);
   assert.match(out, /fit-sensitive repair path/i);
+});
+
+run("keeps front part scope when selected estimate lines explicitly support it", () => {
+  const input = "The shop estimate is broader on OEM-style front-end parts.";
+  const estimateText = "Line 1 Repl front bumper cover. Line 2 Repl radiator support.";
+  const out = guardDamageZoneNarrative(input, { estimateText });
+  assert.match(out, /OEM-style front-end parts/i);
 });
 
 run("does not strip when the estimate documents Point of Impact", () => {
@@ -90,6 +98,7 @@ run("directive names the five required determination fields and the bans", () =>
     assert.ok(DAMAGE_ZONE_AND_DETERMINATION_DIRECTIVE.includes(field), `directive missing: ${field}`);
   }
   assert.match(DAMAGE_ZONE_AND_DETERMINATION_DIRECTIVE, /front-end repair path/i);
+  assert.match(DAMAGE_ZONE_AND_DETERMINATION_DIRECTIVE, /front-end parts/i);
   assert.match(DAMAGE_ZONE_AND_DETERMINATION_DIRECTIVE, /Point of Impact/i);
 });
 

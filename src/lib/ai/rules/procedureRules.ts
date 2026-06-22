@@ -52,7 +52,7 @@ export const procedureRules: ProcedureRule[] = [
         aliases: ["acc calibration", "radar calibration", "adaptive cruise calibration"],
         severity: "high",
         category: "adas",
-        rationale: "Front bumper service can disturb radar mounting and aiming.",
+        rationale: "Bumper or sensor-area service can disturb radar mounting and aiming.",
         evidenceBasis: "OEM Procedure / ADAS Report / Professional Standard of Care",
       },
       {
@@ -60,7 +60,7 @@ export const procedureRules: ProcedureRule[] = [
         aliases: ["camera calibration", "forward camera calibration", "adas camera calibration"],
         severity: "high",
         category: "adas",
-        rationale: "Front-end disassembly can affect camera alignment and targeting.",
+        rationale: "Repair-area disassembly can affect camera alignment and targeting when the camera or mounting references are involved.",
         evidenceBasis: "OEM Procedure / ADAS Report / Professional Standard of Care",
       },
     ],
@@ -75,7 +75,7 @@ export const procedureRules: ProcedureRule[] = [
         aliases: ["headlamp aim", "headlight aim"],
         severity: "medium",
         category: "safety",
-        rationale: "Headlamp removal or front support movement requires aim verification.",
+        rationale: "Headlamp removal or support-area movement requires aim verification.",
         evidenceBasis: "OEM Procedure / Professional Standard of Care",
       },
       {

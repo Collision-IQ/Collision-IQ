@@ -44,7 +44,7 @@ const SCAN_EVIDENCE_PATTERNS = [
 export const procedureRules: ProcedureRule[] = [
   {
     id: "front-bumper-adas",
-    trigger: "front bumper service",
+    trigger: "bumper or sensor-area service",
     triggerKeywords: ["front bumper", "bumper cover", "bumper assy", "grille", "radar bracket"],
     procedures: [
       {
@@ -53,7 +53,7 @@ export const procedureRules: ProcedureRule[] = [
         severity: "high",
         category: "adas",
         evidenceBasis: "OEM Procedure / Professional Standard of Care",
-        rationale: "Front bumper work can disturb forward radar mounting and aiming.",
+        rationale: "Bumper or sensor-area work can disturb radar mounting and aiming.",
       },
       {
         name: "KAFAS camera calibration",
@@ -61,13 +61,13 @@ export const procedureRules: ProcedureRule[] = [
         severity: "high",
         category: "adas",
         evidenceBasis: "OEM Procedure / Professional Standard of Care",
-        rationale: "Front-end repairs can affect camera aiming and ADAS alignment.",
+        rationale: "Sensor-adjacent repairs can affect camera aiming and ADAS alignment.",
       },
     ],
   },
   {
     id: "headlamp-front-end",
-    trigger: "headlamp or front-end component service",
+    trigger: "headlamp or support component service",
     triggerKeywords: ["headlamp", "headlight", "lamp assy", "radiator support", "core support"],
     procedures: [
       {
@@ -76,7 +76,7 @@ export const procedureRules: ProcedureRule[] = [
         severity: "medium",
         category: "safety",
         evidenceBasis: "OEM Procedure / Professional Standard of Care",
-        rationale: "Lamp removal or front-end movement requires beam aim verification.",
+        rationale: "Lamp removal or support-area movement requires beam aim verification.",
       },
       {
         name: "KAFAS camera calibration",

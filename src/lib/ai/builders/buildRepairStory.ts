@@ -140,8 +140,9 @@ function collectPanelsByOperation(
 function normalizePanelName(component: string): string {
   const lower = component.toLowerCase();
   const dictionary: Array<[RegExp, string]> = [
-    [/\bfront bumper\b|\bbumper cover\b/, "front bumper"],
+    [/\bfront bumper\b/, "front bumper"],
     [/\brear bumper\b/, "rear bumper"],
+    [/\bbumper cover\b/, "bumper cover"],
     [/\bgrille\b/, "grille"],
     [/\bhood\b/, "hood"],
     [/\bfender\b/, "fender"],

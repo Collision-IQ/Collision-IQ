@@ -190,7 +190,7 @@ function buildEstimatePrecisionNote(report: CustomerReport, findingReasoning: Re
     return "";
   }
 
-  return "The shop estimate is broader on OEM-style front-end parts, labor and material rates, and scan sublet pricing; the carrier estimate is lower and more explicit on the in-process scan, seat belt dynamic function test, and REVVAdas line, while the strongest line-specific concern is the carrier note that the LKQ grille is not the correct style.";
+  return "The shop estimate is broader on OEM-style liftgate, rear bumper, rear lamp, and related parts, labor and material rates, and scan sublet pricing; the carrier estimate is lower and more explicit on the in-process scan, seat belt dynamic function test, and REVVAdas line, while any part-style concern should stay tied to the specific estimate line that documents it.";
 }
 
 function buildVerificationItems(params: {

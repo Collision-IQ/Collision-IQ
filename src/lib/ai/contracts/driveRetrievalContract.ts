@@ -265,7 +265,7 @@ const DRIVE_TOPIC_RULES: Array<{
   {
     topic: "upper_tie_bar_lock_support_radiator_support",
     keywords: ["upper tie bar", "tie bar", "lock support", "radiator support", "core support", "upper rail", "support area"],
-    rationale: "The repair path suggests front support-structure scope or reconciliation needs.",
+    rationale: "The repair path suggests support-structure scope or reconciliation needs.",
   },
   {
     topic: "corrosion_protection_cavity_wax_seam_sealer",

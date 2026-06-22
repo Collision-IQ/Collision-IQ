@@ -28,13 +28,13 @@ export async function runADASAgent(
   if (bumperRemoved) {
     findings.push({
       system: "ADAS",
-      signal: "Front-end work detected",
+      signal: "Bumper or sensor-adjacent work detected",
       implication:
         "ADAS calibration may be relevant depending on system involvement.",
       enhanced: {
-        issue: "ADAS calibration triggered by front-end work",
+        issue: "ADAS calibration triggered by bumper or sensor-adjacent work",
         finding:
-          "Bumper removal is present on the estimate. For vehicles equipped with front-facing radar, camera, or ultrasonic systems, OEM procedures require dynamic or static recalibration after bumper R&I.",
+          "Bumper removal is present on the estimate. For vehicles equipped with radar, camera, blind-spot, parking-aid, or ultrasonic systems in the repair area, OEM procedures may require dynamic or static recalibration after bumper R&I.",
         evidenceLevel: "referenced",
         supportSources: ["upload"],
         risk: "high",
@@ -84,7 +84,7 @@ export async function runADASAgent(
         risk: "medium",
         confidence: 0.65,
         secondLevelReasoning:
-          "Even if the radar unit itself is not replaced, displacement of the mounting bracket or surrounding panel can shift sensor aim. OEM position statements for many makes require scan and alignment verification after any front-end structural or cosmetic work.",
+          "Even if the radar unit itself is not replaced, displacement of the mounting bracket or surrounding panel can shift sensor aim. OEM position statements for many makes require scan and alignment verification after sensor-adjacent structural or cosmetic work.",
         thirdLevelAction:
           "Confirm sensor mounting location for this vehicle's radar unit. Pull OEM position statement on sensor re-aim requirements after fascia or grille work. Document and add as a supplement if not already included.",
       },

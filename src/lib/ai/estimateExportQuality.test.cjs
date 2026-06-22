@@ -55,6 +55,7 @@ const {
 } = require("./vehicleApplicability.ts");
 const { extractEstimateLinksFromDocuments } = require("./estimateLinkExtractor.ts");
 const { deriveRenderInsightsFromChat } = require("./builders/deriveRenderInsightsFromChat.ts");
+const { buildRepairStory } = require("./builders/buildRepairStory.ts");
 const { cleanVehicleSummaryLabel, cleanVehicleTrimLabel } = require("../ui/presentationText.ts");
 
 const SHOP_21733_TEXT = `
@@ -78,7 +79,7 @@ HV battery state of charge maintained
 
 const SHOP_21975_COMPARISON_TEXT = `
 Shop 21975 estimate total $7,838.99. Body labor 13.5 @ $75. Paint labor 3.7 @ $75. Paint supplies 3.7 @ $60.
-Shop estimate includes OEM-style bumper, grille, radiator support, front-end parts, test fit bumper, final road test, alignment line with no amount/result, and pre/post scan $201 sublet +34%.
+Shop estimate includes OEM-style liftgate, rear bumper, rear lamps, related parts, test fit bumper, final road test, alignment line with no amount/result, and pre/post scan $201 sublet +34%.
 SOR-1 21975 carrier total repairs $4,597.17 net $4,097.17. Body labor 13.2 @ $60. Paint labor 3.2 @ $60. Paint supplies 3.2 @ $40.
 Carrier uses A/M CAPA LKQ substitutions. Line 23 LKQ grille note: LKQ grille is not correct style.
 Carrier references pre-repair scan, in-process scan, seat belt dynamic function test, post-repair scan, final road test, and REVVAdas Egnyte link. The Egnyte support link is referenced but not produced.
@@ -1316,7 +1317,7 @@ run("customer report keeps 21975 estimate framing nuanced and grammatically clea
   const document = buildCustomerReportPdf({
     report: {
       title: "Customer Report",
-      openingSummary: "Both carrier area of damage is front end, but the the estimates use different pricing.",
+      openingSummary: "Both estimates use different pricing for the documented rear/liftgate repair scope, but the the estimates use different pricing.",
       whichRepairPlanLooksStronger:
         "The shop is always more complete and the carrier is missing everything. Continue documentation any added findings.",
       safetyFirst: "Review LKQ grille not correct style, A/M CAPA parts, paint supplies, REVVAdas, and seat belt dynamic function test.",
@@ -1340,8 +1341,22 @@ run("customer report keeps 21975 estimate framing nuanced and grammatically clea
   });
   const text = flattenCarrierDocument(document);
 
-  assert.match(text, /shop estimate is broader on OEM-style front-end parts/i);
-  assert.match(text, /strongest line-specific concern is the carrier note that the LKQ grille is not the correct style/i);
-  assert.doesNotMatch(text, /but the the|Both carrier area of damage|continue documentation any added findings/i);
+  assert.match(text, /shop estimate is broader on OEM-style liftgate, rear bumper, rear lamp, and related parts/i);
+  assert.match(text, /part-style concern should stay tied to the specific estimate line/i);
+  assert.doesNotMatch(text, /front-end|front end|shop estimate is broader on OEM-style front-end parts|but the the|Both carrier area of damage|continue documentation any added findings/i);
   assert.match(text, /continue documenting any added findings/i);
+});
+
+run("repair story does not infer front scope from generic bumper cover wording", () => {
+  const story = buildRepairStory(`
+    Repl Bumper cover
+    Repl Liftgate
+    Repl Rear lamp assy
+    Repl Rear bumper reinforcement
+    Dynamic systems scan
+  `);
+
+  assert.doesNotMatch(story.impact, /front/i);
+  assert.deepEqual(story.zones.includes("front-end"), false);
+  assert.ok(story.zones.includes("rear body"));
 });

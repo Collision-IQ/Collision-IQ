@@ -214,7 +214,7 @@ export function buildEvidenceMap(input: ClaimFingerprintInput): EvidenceMap {
     issueSupport: {
       adas: supportFromSignals(adasSignals, "ADAS/scan/calibration evidence is not present in estimate text, retrieved sources, or sensor-zone impact signals.", sourceSupportForSignals(adasSignals, retrievedDocuments, "estimate")),
       structural: supportFromSignals(structuralSignals, "Structural measurement requires frame, measuring, structural component, exposure, or dueling-estimate geometry evidence.", sourceSupportForSignals(structuralSignals, retrievedDocuments, "estimate")),
-      cooling: supportFromSignals(coolingSignals, "Cooling fill or bleed requires cooling-system text or a clear front-end cooling-system repair path.", sourceSupportForSignals(coolingSignals, retrievedDocuments, "estimate")),
+      cooling: supportFromSignals(coolingSignals, "Cooling fill or bleed requires cooling-system text or a clear cooling-system repair path in the estimate.", sourceSupportForSignals(coolingSignals, retrievedDocuments, "estimate")),
       corrosion: supportFromSignals(corrosionSignals, "Corrosion protection requires corrosion/weld/panel-replacement text and repair-type procedure support.", sourceSupportForSignals(corrosionSignals, retrievedDocuments, "estimate")),
       testFit: supportFromSignals(testFitSignals, "Test fit requires test-fit language, adjacent fit-sensitive panel replacement, or a fit/access delta.", ["estimate"]),
       oemFit: supportFromSignals(oemFitSignals, "OEM fit posture requires alternate-part text on a fit-sensitive or ADAS-bearing component.", ["estimate"]),

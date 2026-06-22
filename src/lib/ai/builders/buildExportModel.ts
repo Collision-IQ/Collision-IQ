@@ -1095,12 +1095,12 @@ function buildConcreteEstimateFindingReasoning(sourceText: string): ReportFindin
     );
   }
 
-  if (/\b(?:a\/m|aftermarket|capa|lkq)\b/i.test(sourceText) && /\b(?:oem|radiator support|bumper|grille|front[- ]end)\b/i.test(sourceText)) {
+  if (/\b(?:a\/m|aftermarket|capa|lkq)\b/i.test(sourceText) && /\b(?:oem|radiator support|bumper|grille|liftgate|rear lamp|tail lamp|rear[- ]bumper|front[- ]end)\b/i.test(sourceText)) {
     push(
-      "A/M CAPA LKQ substitutions vs shop OEM-style front-end parts",
-      "The carrier estimate uses A/M, CAPA, or LKQ substitutions while the shop estimate carries OEM-style bumper, grille, radiator-support, or front-end part scope.",
+      "A/M CAPA LKQ substitutions vs shop OEM-style documented part scope",
+      "The carrier estimate uses A/M, CAPA, or LKQ substitutions while the shop estimate carries OEM-style liftgate, rear bumper, rear lamp, and related part scope where those lines are documented.",
       "Part-type differences can affect fit, finish, and pricing; the estimate evidence shows a dispute, not that every non-OEM part is automatically wrong.",
-      "Group each front-end part family and ask for the carrier line number, part type, quote/source, and fit/style rationale.",
+      "Group each disputed part family and ask for the carrier line number, part type, quote/source, and fit/style rationale.",
       930
     );
   }
@@ -2756,23 +2756,19 @@ function summarizeVisibleScope(
   }
 
   if (leftFrontSignal && !rightFrontSignal) {
-    const frontLikeZones = normalizedZones.filter(
-      (zone) => zone === "front-end" || zone === "side structure"
-    );
-    if (frontLikeZones.length > 0) {
-      return `${joinHumanList(frontLikeZones)} around the left-front / left-side repair area`;
+    const frontLikeZones = normalizedZones.filter((zone) => zone === "front-end");
+    if (frontLikeZones.length > 0 && hasExplicitFrontEstimateScope(sourceEstimateText)) {
+      return `${joinHumanList(frontLikeZones)} around the repair area`;
     }
-    return "left-front / left-side areas";
+    return "mounting/fit verification area";
   }
 
   if (rightFrontSignal && !leftFrontSignal && !leftRearSignal) {
-    const frontLikeZones = normalizedZones.filter(
-      (zone) => zone === "front-end" || zone === "side structure"
-    );
-    if (frontLikeZones.length > 0) {
-      return `${joinHumanList(frontLikeZones)} around the right-front repair area`;
+    const frontLikeZones = normalizedZones.filter((zone) => zone === "front-end");
+    if (frontLikeZones.length > 0 && hasExplicitFrontEstimateScope(sourceEstimateText)) {
+      return `${joinHumanList(frontLikeZones)} around the repair area`;
     }
-    return "right-front areas";
+    return "mounting/fit verification area";
   }
 
   if (zoneSet.has("front-end") && (zoneSet.has("side structure") || zoneSet.has("rear body"))) {
@@ -2791,6 +2787,12 @@ function summarizeVisibleScope(
   }
 
   return undefined;
+}
+
+function hasExplicitFrontEstimateScope(sourceEstimateText: string): boolean {
+  return /\b(?:point\s+of\s+impact\b[^\n]{0,40}\bfront|front bumper|front cover|front lamp|front headlamp|front fender|radiator support|core support|front end|front-end)\b/i.test(
+    sourceEstimateText
+  );
 }
 
 function extractVinFromText(text: string): string | undefined {
@@ -3313,12 +3315,12 @@ function buildConcreteEstimateDisputeItems(sourceText: string): ExportSupplement
     });
   }
 
-  if (/\b(?:a\/m|aftermarket|capa|lkq)\b/i.test(sourceText) && /\b(?:oem|radiator support|bumper|grille|front[- ]end)\b/i.test(sourceText)) {
+  if (/\b(?:a\/m|aftermarket|capa|lkq)\b/i.test(sourceText) && /\b(?:oem|radiator support|bumper|grille|liftgate|rear lamp|tail lamp|rear[- ]bumper|front[- ]end)\b/i.test(sourceText)) {
     push({
       title: "Non-OEM, CAPA, LKQ, or alternate parts compared with the shop's OEM-style repair plan",
       category: "parts",
       kind: "disputed_repair_path",
-      rationale: "The estimate evidence shows carrier A/M, CAPA, or LKQ substitutions against shop OEM-style front-end part scope; group each part family by line, part type, amount, and substitution basis.",
+      rationale: "The estimate evidence shows carrier A/M, CAPA, or LKQ substitutions against shop OEM-style liftgate, rear bumper, rear lamp, and related part scope where those lines are documented; group each disputed part family by line, part type, amount, and substitution basis.",
       evidence: "Estimate-only evidence supports a part-type and pricing dispute; it does not automatically prove every alternative part is improper.",
       source: "Current upload estimate evidence",
       priority: "high",
