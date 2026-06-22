@@ -281,7 +281,7 @@ export default function ChatShell({
       >
         <div
           className={[
-            "grid min-h-0 w-full flex-1 grid-cols-1 items-stretch gap-2 sm:gap-3 lg:flex-none lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_410px]",
+            "grid min-h-0 w-full flex-1 grid-cols-1 items-stretch gap-2 sm:gap-3 lg:grid-cols-[minmax(0,1fr)_390px] xl:grid-cols-[minmax(0,1fr)_410px]",
             reviewRowHeightClass,
           ].join(" ")}
         >
