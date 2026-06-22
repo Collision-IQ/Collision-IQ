@@ -232,7 +232,12 @@ export async function POST(request: Request) {
       }
 
       const estimateRole = normalizeOutputEstimateRole(selection.selectedEstimateRole);
-      const roleFindings = filterFindingsForEstimateRole(model.citationDensityFindings, estimateRole);
+      const roleFindings = filterFindingsForEstimateRole(model.citationDensityFindings, estimateRole)
+        // The legacy fuzzy-text comparison detector is replaced by the structured
+        // line-item delta detector (buildRequiredEstimatorDeltaFindings). Drop the
+        // legacy comparison findings so the report shows accurate, row-anchored
+        // deltas instead of boilerplate-matched ones.
+        .filter((finding) => !isLegacyComparisonFinding(finding));
       const wrongPrefixFinding = roleFindings.find((finding) => hasWrongFindingIdentity("citation-density", finding));
       if (wrongPrefixFinding) {
         return NextResponse.json(
@@ -583,6 +588,10 @@ function withFileReviewDiagnostics(
         reviewabilityHint: entry.reviewabilityHint,
       })),
   };
+}
+
+function isLegacyComparisonFinding(finding: CitationDensityFinding): boolean {
+  return /-comparison-/.test(finding.id);
 }
 
 function getFindingReportType(finding: CitationDensityFinding): string | undefined {

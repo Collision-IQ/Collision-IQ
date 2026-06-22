@@ -439,8 +439,8 @@ run("bottom report workspace restores interactive in-context report review", () 
   assert.match(pageSource, /artifactUnavailableMessage: result\.artifactFallbackUsed/);
   assert.match(pageSource, /The saved artifact link was unavailable/);
   assert.match(pageSource, /ReportDocumentBottomViewer/);
-  assert.match(pageSource, /flex min-h-\[100svh\] flex-col overflow-x-hidden/);
-  assert.doesNotMatch(pageSource, /h-\[100svh\] overflow-hidden bg-background/);
+  assert.match(pageSource, /flex h-\[100svh\] flex-col overflow-hidden/);
+  assert.doesNotMatch(pageSource, /flex min-h-\[100svh\] flex-col overflow-x-hidden/);
   assert.match(pageSource, /data-report-bottom-viewer/);
   assert.match(pageSource, /h-\[min\(75svh,900px\)\]/);
   assert.match(pageSource, /lg:min-h-\[560px\]/);
@@ -481,7 +481,7 @@ run("Chat workspace stays compact without reports and expands when report remain
   assert.match(pageSource, /bottom=\{/);
   assert.match(pageSource, /bottomReportViewer \? \(/);
   assert.doesNotMatch(pageSource, /<BottomReportWorkspacePanel[\s\S]*?<\/div>\s*}\s*right=/);
-  assert.match(pageSource, /<div className="flex min-h-\[100svh\] flex-col overflow-x-hidden bg-background text-foreground">/);
+  assert.match(pageSource, /<div className="flex h-\[100svh\] flex-col overflow-hidden bg-background text-foreground">/);
   assert.match(pageSource, /workspaceRowsClass = isReviewActive/);
   assert.match(pageSource, /: "grid-rows-\[minmax\(0,1fr\)\]"/);
   assert.match(pageSource, /workspaceShellClass = isReviewActive/);
