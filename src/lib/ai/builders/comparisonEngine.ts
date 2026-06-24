@@ -541,7 +541,7 @@ function buildOperationComparisonRow(
     rhsSource: labels.insurerEstimateLabel,
     lhsValue,
     rhsValue,
-    delta: buildOperationDelta(shop, insurer, deltaType),
+    delta: buildOperationDelta(shop, insurer, deltaType, labels),
     deltaType,
     confidence: shop && insurer ? 0.92 : 0.82,
     notes,
@@ -596,10 +596,13 @@ function formatOperationValue(operation: EstimateOperation): string {
 function buildOperationDelta(
   shop: EstimateOperation | undefined,
   insurer: EstimateOperation | undefined,
-  deltaType: WorkspaceEstimateComparisons["rows"][number]["deltaType"]
+  deltaType: WorkspaceEstimateComparisons["rows"][number]["deltaType"],
+  labels: { shopEstimateLabel: string; insurerEstimateLabel: string }
 ) {
-  if (deltaType === "added") return "Present only in shop estimate";
-  if (deltaType === "removed") return "Present only in carrier estimate";
+  // Use the resolved estimate labels (neutral source/comparison wording for a shop-to-shop
+  // comparison) rather than hardcoding "carrier estimate" (DEFECT A).
+  if (deltaType === "added") return `Present only in ${labels.shopEstimateLabel}`;
+  if (deltaType === "removed") return `Present only in ${labels.insurerEstimateLabel}`;
   if (deltaType === "same") return "Aligned";
   if (shop && insurer && shop.operation !== insurer.operation) {
     return `${shop.operation} → ${insurer.operation}`;

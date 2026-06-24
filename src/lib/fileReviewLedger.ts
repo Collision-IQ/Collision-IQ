@@ -152,7 +152,14 @@ export function buildFileReviewLedger(
     const isPdf = isPdfAttachment(attachment);
     const hasText = Boolean(attachment.text?.trim());
     const isImage = attachment.type.startsWith("image/");
-    const supportOnly = isSupportOnlyDocumentType(documentType, categories);
+    // An estimate document (detected type "estimate" or an estimate-like citation
+    // density source) is a primary determination source, never support-only. Guard so
+    // estimate PDFs can never be flagged support-only / non-estimate / outside-scope,
+    // even if a generic category (e.g. work_authorization) also matched the text.
+    const isEstimateDocument = documentType === "estimate" || citationClassification.isEstimateLike;
+    const supportOnly = isEstimateDocument
+      ? false
+      : isSupportOnlyDocumentType(documentType, categories);
     const usedInCitationDensity = usedInCitationDensityIds.has(attachment.id) || citationClassification.isEstimateLike;
     const usedInOemCitationDensity = usedInOemCitationDensityIds.has(attachment.id) || categories.some((category) =>
       category === "oem_procedure" || category === "position_statement"

@@ -282,3 +282,36 @@ run("customer-facing text completes export fragments and neutralizes unsupported
   assert.match(cleaned, /If state-specific claim-handling rules apply/);
   assert.doesNotMatch(`${cleaned}\n${html}`, /If you are in Pennsylvania|In Pennsylvania|Pennsylvania-specific|state-specific claim \[REDACTED_CLAIM\]|finish documentation the structural/i);
 });
+
+run("insurer resolves to USAA from Insurance Company field and never the owner name OLIVARES", () => {
+  const {
+    extractEstimateFacts,
+    resolveCanonicalInsurerCandidate,
+  } = require("./extractors/extractEstimateFacts.ts");
+
+  const estimateText = [
+    "CCC ONE Estimating",
+    "Insurance Company: USAA",
+    "Owner/Insured: OLIVARES, ESMON",
+    "Claim Number: 12345",
+    "2021 Honda CR-V",
+    "Line 1 Repl Front bumper cover 2.0 $450.00",
+    "Total Cost of Repairs $11,892.26",
+  ].join("\n");
+
+  // Ground truth: insurer comes from the Insurance Company field, never the owner name.
+  const facts = extractEstimateFacts({ text: estimateText });
+  assert.equal(facts.insurer, "USAA");
+  assert.notEqual(facts.insurer, "OLIVARES");
+
+  // Even if an owner name leaks in as a prior/extracted candidate, a known carrier wins.
+  const resolved = resolveCanonicalInsurerCandidate(
+    { value: "OLIVARES, ESMON", source: "prior" },
+    { value: "USAA", source: "known_carrier" }
+  );
+  assert.equal(resolved, "USAA");
+
+  // An owner name ("LAST, FIRST") on its own can never become the insurer.
+  const ownerOnly = resolveCanonicalInsurerCandidate({ value: "OLIVARES, ESMON", source: "prior" });
+  assert.equal(ownerOnly, undefined);
+});

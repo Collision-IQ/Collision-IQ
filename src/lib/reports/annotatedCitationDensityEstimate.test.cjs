@@ -1687,6 +1687,43 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.ok(result.debugTrace.renderedPdfAnnotationCount > 0);
   });
 
+  await run("totals-only and glossary/legend rows are never lead Delta findings (DEFECT B)", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Shop 21896 estimate", { x: 42, y: 752, size: 10, font });
+    drawCccEstimateRow(page, font, 14, "", "Subl", "RF wheel repair", "0.0", "$75.00", 720);
+    page.drawText("Equipment Manufacturer aftermarket parts are described as A/M = aftermarket; LKQ/RCY/used", { x: 42, y: 690, size: 8, font });
+    page.drawText("Estimate Totals Grand Total $11,892.26 Net Cost of Repairs $11,392.26 Sales Tax $612.00", { x: 42, y: 668, size: 8, font });
+    const sourcePdfBytes = await doc.save();
+
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceDocumentId: "defect-b-21896",
+      sourcePdfName: "Shop 21896.pdf",
+      findings: [],
+      findingGenerator: buildRequiredEstimatorDeltaFindings,
+      comparisonEstimateTexts: [
+        {
+          sourceDocumentId: "shop-final-21896",
+          fileName: "Shop Final 21896.pdf",
+          estimateRole: "shop",
+          text: ["Line 81 Repl Suspension crossmember $1,070.00 1.0", "Line 10 Repl TPMS sensor $60.00 0.2"].join("\n"),
+        },
+      ],
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "shop" },
+    });
+
+    // The page-7 style legend and the estimate-totals row must never be lead Delta findings.
+    assert.equal(
+      result.annotationMetadata.some((item) =>
+        /aftermarket parts are described|estimate totals|grand total|net cost of repairs|sales tax/i.test(item.sourceAnchorText || "")
+      ),
+      false,
+      "glossary/legend or totals row must not be a lead annotation"
+    );
+  });
+
   await run("OEM Citation Density generator creates source-page repair-standard findings without verified OEM overclaim", async () => {
     const sourcePdfBytes = await createRam21975SourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({

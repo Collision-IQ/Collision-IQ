@@ -1449,6 +1449,21 @@ export function buildRequiredEstimatorDeltaFindings(
       continue;
     }
 
+    // Even an anchor classed as "primary" must not become a LEAD finding when its row is a
+    // totals-only line or a glossary/abbreviation/disclaimer/legend section (e.g. the page-7
+    // "Equipment Manufacturer aftermarket parts are described as..." legend). Structured
+    // line-pair deltas are the authoritative lead findings; these sections are not (DEFECT B).
+    if (isNonLeadablePrimaryAnchorText(rowText, anchor)) {
+      rejectedAnchors.push({
+        anchorId: anchor.anchorId,
+        pageNumber: anchor.pageNumber,
+        anchorType: anchor.anchorType,
+        rowText: truncateText(rowText, 220),
+        reason: "totals-only or glossary/legend/disclaimer section rejected as lead finding anchor",
+      });
+      continue;
+    }
+
     const sourceKinds = classifyPartSource(rowText);
     const hasWheel = isWheelLaborAnchorText(normalized);
     const hasAccessLabor = /\b(?:r\s*&\s*i|r&i|remove|install|disassembly|reassembly|access)\b/i.test(rowText);
@@ -2093,6 +2108,17 @@ function isRejectedPrimaryAnchorText(rowText: string, anchor: EstimateRowAnchor)
   return isJunkCitationFindingText(normalized) ||
     /\b(?:abbreviations?|legend|disclaimer|fraud notice|legal notice|work authorization|policy|declarations?|allstate parts policy|alternate parts policy|quality replacement parts|vehicle equipment|vin decoding|footer|page \d+ of \d+|ccc\/motor|motor guide|estimating guide|included operations?|not included|a\/m\s*=\s*aftermarket|lkq\s*\/?\s*rcy\s*\/?\s*used|capa\s*(?:certified|definition|definitions?)|estimate totals?|parts total|subtotal|grand total|sales tax|body labor totals?|paint labor totals?|paint supplies totals?|labor\s+[a-z]\s*=\s*diagnostic|qr\s*code|sunbit|payment plan|pay(?:ment)?\s+(?:link|portal|text|option))\b/i.test(rowText) ||
     /\b(?:abbreviation|legend|disclaimer|fraud|legal notice|work authorization|policy|declarations|alternate parts policy|quality replacement|vehicle equipment|footer|ccc motor|motor guide|estimating guide|included operations|not included|aftermarket definition|lkq rcy used|capa definition|estimate totals|parts total|subtotal|grand total|sales tax|body labor total|paint labor total|paint supplies total|labor d diagnostic|qr code|sunbit|payment plan|payment link|payment portal)\b/.test(normalized);
+}
+
+// A narrower check than isRejectedPrimaryAnchorText, safe to apply to PRIMARY anchors: it
+// targets totals-only rows and glossary/legend/disclaimer sections only, and deliberately
+// omits operation-code patterns (refn/recond/included-operations) that legitimately appear
+// on real estimate lines. Used to stop such sections from becoming lead findings (DEFECT B).
+function isNonLeadablePrimaryAnchorText(rowText: string, anchor: EstimateRowAnchor): boolean {
+  if (anchor.anchorType === "totals_row") return true;
+  const normalized = normalizeMatchText(rowText);
+  return /\b(?:abbreviations?|legend|disclaimer|fraud notice|legal notice|declarations?|alternate parts policy|allstate parts policy|quality replacement parts|aftermarket parts are described|a\/m\s*=\s*aftermarket|capa\s*(?:certified|definitions?)|lkq\s*\/?\s*rcy\s*\/?\s*used|vin decoding|estimate totals?|parts total|subtotal|grand total|sales tax|net cost of repairs|body labor totals?|paint labor totals?|paint supplies totals?)\b/i.test(rowText) ||
+    /\b(?:abbreviation|legend|disclaimer|aftermarket parts are described|estimate totals|grand total|subtotal|sales tax|net cost of repairs)\b/.test(normalized);
 }
 
 function isRejectedBoilerplateSupplierText(normalized: string) {
