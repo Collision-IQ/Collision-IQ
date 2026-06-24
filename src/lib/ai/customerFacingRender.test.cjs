@@ -227,12 +227,18 @@ run("customer-facing text repairs redaction and rendering grammar defects", () =
       "Ask for for the missing support with with the shop.",
       "This [REDACTED_CLAIM], but documentation remains unclear.",
       "Send it from [REDACTED_INSURER] [REDACTED_CLAIM].",
+      "The estimate [REDACTED_INSURER] repair areas total $20,290. 23 vs $12,046. 49.",
+      "Use line-by-documentation to explain it.",
     ].join(" ")
   );
 
   assert.match(cleaned, /insurer's position still needs stronger file proof/i);
   assert.match(cleaned, /ask for the missing support with the shop/i);
   assert.match(cleaned, /This item still needs stronger file proof/i);
+  assert.match(cleaned, /\$20,290\.23/);
+  assert.match(cleaned, /\$12,046\.49/);
+  assert.match(cleaned, /estimate repair areas/);
+  assert.match(cleaned, /line-by-line documentation/);
   assert.doesNotMatch(cleaned, /\[REDACTED_[A-Z_]+\]|for for|with with|remains unclear remains unclear/i);
 });
 

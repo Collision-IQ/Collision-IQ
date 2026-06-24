@@ -1773,6 +1773,84 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(result.debugTrace.oemProcedureSourceCount, 0);
   });
 
+  await run("OEM Citation Density labels verified ADAS authority as ADAS, not OEM", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Carrier estimate with ADAS authority", { x: 42, y: 742, size: 10, font });
+    drawCccEstimateRow(page, font, 15, "", "Proc", "Camera calibration", "1.0", "$250.00", 712);
+    const sourcePdfBytes = await doc.save();
+
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceDocumentId: "carrier-adas-authority",
+      sourcePdfName: "Carrier ADAS estimate.pdf",
+      sourceText: "Carrier estimate evidence.",
+      findings: [],
+      reportIdentity: OEM_CITATION_DENSITY_REPORT_IDENTITY,
+      authorityTrace: {
+        authorityTraceStarted: true,
+        authorityTraceCompleted: true,
+        authorityTraceBlockedReason: null,
+        authorityCoverageStatus: "partial",
+        googleDriveOrInternalSearchRan: true,
+        sandPolishSupportFound: false,
+        driveSearchAttempted: true,
+        driveSearchAvailable: true,
+        driveMakeModelFolderMatched: true,
+        driveMatchedFolders: ["OEM procedures"],
+        driveDocumentsReviewed: ["Camera calibration procedure.pdf"],
+        onlineSearchAttempted: false,
+        onlineSourcesReviewed: [],
+        jurisdictionResolved: null,
+        jurisdictionSourcesReviewed: [],
+        oemSourcesReviewed: ["Camera calibration procedure.pdf"],
+        adasSourcesReviewed: ["Camera calibration procedure.pdf"],
+        motorPPageSourcesReviewed: [],
+        scrsSourcesReviewed: [],
+        policyLegalSourcesReviewed: [],
+        authoritySources: [{
+          title: "Camera calibration procedure.pdf",
+          sourceType: "oem_procedure",
+          evidenceTier: 1,
+          verified: true,
+        }],
+      },
+      findingGenerator: buildOemCitationDensityFindings,
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+
+    const labels = result.annotationMetadata.map((item) => item.label);
+    assert.ok(labels.includes("VERIFIED ADAS"));
+    assert.equal(labels.includes("VERIFIED OEM"), false);
+  });
+
+  await run("OEM Citation Density does not treat glass w/o tint as refinish P-page support", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Carrier estimate with glass descriptor", { x: 42, y: 742, size: 10, font });
+    drawCccEstimateRow(page, font, 12, "", "Repl", "Quarter glass w/o tint", "", "$412.00", 712);
+    drawCccEstimateRow(page, font, 13, "A/M", "Repl", "Bumper cover", "0.6", "$250.00", 692);
+    const sourcePdfBytes = await doc.save();
+
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceDocumentId: "carrier-glass-no-tint",
+      sourcePdfName: "Carrier glass estimate.pdf",
+      sourceText: "Carrier estimate evidence only. No OEM procedure attached.",
+      findings: [],
+      reportIdentity: OEM_CITATION_DENSITY_REPORT_IDENTITY,
+      findingGenerator: buildOemCitationDensityFindings,
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+
+    assert.equal(result.annotationMetadata.some((item) =>
+      item.targetLineNumber === "12" && /NEEDS P-PAGE|refinish/i.test(`${item.label} ${item.shortTitle}`)
+    ), false);
+    assert.ok(result.annotationMetadata.some((item) => item.targetLineNumber === "13"));
+  });
+
   await run("OEM Citation Density excludes abbreviation legend and disclaimer pages as primary anchors", async () => {
     const doc = await PDFDocument.create();
     const font = await doc.embedFont(StandardFonts.Helvetica);

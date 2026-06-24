@@ -2325,7 +2325,10 @@ function classifyOemCitationDensityRow(rowText: string, anchor: EstimateRowAncho
       requiredDocumentation: ["OEM repair procedure", "measurement proof", "photo/teardown or completion proof"],
     };
   }
-  if (/\b(?:blend|refinish|spray[- ]?out|tint|clear coat|paint|material|color)\b/.test(normalized)) {
+  const isGlassTintDescriptor = /\b(?:glass|wndshld|windshield|quarter glass|back glass|door glass)\b/.test(normalized) &&
+    /\b(?:w\/o|without|no|dark|privacy)\s+tint\b/.test(normalized) &&
+    !/\b(?:blend|refinish|spray[- ]?out|clear coat|paint|material|color match|tint color|let[- ]?down|polish|sand)\b/.test(normalized);
+  if (!isGlassTintDescriptor && /\b(?:blend|refinish|spray[- ]?out|tint|clear coat|paint|material|color)\b/.test(normalized)) {
     return {
       findingType: "refinish_blend_materials",
       title: "Refinish / blend / materials support review",
@@ -2404,7 +2407,8 @@ function buildOemCitationDensityFinding(params: {
     : bestAuthoritySource && bestAuthoritySource.sourceType !== "estimate_evidence"
     ? mapOemAuthoritySourceToCitationAuthority(bestAuthoritySource, family)
     : buildEstimateEvidenceAuthority(family);
-  const verifiedAuthorityCount = !authorityTraceIncomplete && authority.type !== "estimate_evidence" && authority.status === "verified" ? 1 : 0;
+  const authorityVerification = resolveOemAuthorityVerification(family, authorityTraceIncomplete, authority);
+  const verifiedAuthorityCount = authorityVerification.any ? 1 : 0;
   const retrievalStatus = mapOemRetrievalStatus(authorityTrace, authorityTraceIncomplete, completedWithoutLineAuthority, verifiedAuthorityCount);
   const lineTieStatus = completedWithoutLineAuthority
     ? "document_level_only"
@@ -2415,7 +2419,7 @@ function buildOemCitationDensityFinding(params: {
     ? "AUTHORITY TRACE INCOMPLETE"
     : completedWithoutLineAuthority
       ? "AUTHORITY SEARCH COMPLETED - NO LINE AUTHORITY MATCH"
-      : resolveOemFindingLabel(family, authority, verifiedAuthorityCount);
+      : resolveOemFindingLabel(family, authority, authorityVerification);
   const evidence = {
     lineNumber: anchor.lineNumber,
     description: rowText,
@@ -2440,7 +2444,7 @@ function buildOemCitationDensityFinding(params: {
       safetyImpact: family.safetyImpact,
       supplementPriority: family.priority,
     },
-    citationStatus: buildOemCitationStatus(family, label, verifiedAuthorityCount),
+    citationStatus: buildOemCitationStatus(family, label, authorityVerification),
     citationDensityScore: family.score,
     verifiedAuthorityCount,
     missingAuthorityTypes: verifiedAuthorityCount ? family.requiredDocumentation : family.missingAuthorityTypes,
@@ -2571,41 +2575,12 @@ function inferOemNextActionOwner(
 }
 
 function detectOemCitationDensityAuthoritySources(context: AnnotatedEstimateFindingGeneratorContext): OemCitationDensityAuthoritySource[] {
-  const textBlocks = [
-    context.sourceText ?? "",
-    ...context.comparisonEstimateTexts.map((item) => item.text),
-  ].join("\n");
   const sources: OemCitationDensityAuthoritySource[] = [];
   const add = (source: OemCitationDensityAuthoritySource) => {
     if (!sources.some((item) => item.sourceType === source.sourceType && item.title === source.title)) sources.push(source);
   };
   for (const source of context.authorityTrace?.authoritySources ?? []) {
     add(source);
-  }
-  if (
-    /\b(?:OEM procedure|repair manual|body repair manual|service procedure)\b/i.test(textBlocks) &&
-    !/\b(?:no|without|missing|not attached|not produced|not provided|needs|need|attach|verify|review)\s+(?:an?\s+)?(?:OEM procedure|repair manual|body repair manual|service procedure)\b/i.test(textBlocks) &&
-    !/\b(?:OEM procedure|repair manual|body repair manual|service procedure)\s+(?:not attached|not produced|not provided|missing|needed|required)\b/i.test(textBlocks)
-  ) {
-    add({ title: "Uploaded or extracted OEM procedure reference", sourceType: "oem_procedure", evidenceTier: 1, verified: true });
-  }
-  if (/\b(?:position statement|OEM position)\b/i.test(textBlocks)) {
-    add({ title: "OEM position statement reference", sourceType: "oem_position_statement", evidenceTier: 2, verified: true });
-  }
-  if (/\b(?:MOTOR|P-page|database|estimating guide|included|not included)\b/i.test(textBlocks)) {
-    add({ title: "MOTOR/database guidance reference", sourceType: "motor_database", evidenceTier: 3, verified: true });
-  }
-  if (/\b(?:CCC Secure Share|secure share)\b/i.test(textBlocks)) {
-    add({ title: "CCC Secure Share support", sourceType: "ccc_secure_share", evidenceTier: 4, verified: true });
-  }
-  if (/\b(?:policy|declarations|coverage|endorsement)\b/i.test(textBlocks)) {
-    add({ title: "Uploaded policy language", sourceType: "policy", evidenceTier: 5, verified: true });
-  }
-  if (/\b(?:statute|regulation|administrative code|DOI)\b/i.test(textBlocks)) {
-    add({ title: "Jurisdictional law/regulation reference", sourceType: "jurisdictional_law", evidenceTier: 6, verified: true });
-  }
-  if (/\b(?:http|internet|web fallback|verified web)\b/i.test(textBlocks)) {
-    add({ title: "Verified web fallback reference", sourceType: "internet_fallback", evidenceTier: 7, verified: false });
   }
   add({ title: "Estimate evidence row", sourceType: "estimate_evidence", evidenceTier: 8, verified: false });
   return sources;
@@ -2701,43 +2676,77 @@ function isCompletedAuthoritySearchWithoutLineMatch(
   return nonEstimateSources.length === 0 && authorityTrace.googleDriveOrInternalSearchRan;
 }
 
+type OemAuthorityVerification = {
+  any: boolean;
+  oem: boolean;
+  adas: boolean;
+  documentation: boolean;
+  legal: boolean;
+  pPage: boolean;
+};
+
+function resolveOemAuthorityVerification(
+  family: OemCitationDensityFamily,
+  authorityTraceIncomplete: boolean,
+  authority: NonNullable<CitationDensityFinding["bestAvailableAuthority"]>
+): OemAuthorityVerification {
+  const verified = !authorityTraceIncomplete && authority.status === "verified";
+  const familyText = `${family.findingType} ${family.category} ${family.label} ${family.requiredDocumentation.join(" ")}`;
+  const isAdasFamily = /\b(?:adas|calibration|scan|diagnostic|aim|radar|camera)\b/i.test(familyText);
+  const isPPageFamily = /\b(?:p-?page|motor|database|scrs|deg|refinish|labor)\b/i.test(familyText);
+  const oem = verified && authority.type === "oem_procedure" && !isPPageFamily && !isAdasFamily;
+  const adas = verified && authority.type === "adas_procedure" && isAdasFamily;
+  const pPage = verified && authority.type === "p_page" && isPPageFamily;
+  const documentation = verified && (authority.type === "invoice_completion" || pPage);
+  const legal = verified && authority.type === "legal";
+  return {
+    any: oem || adas || documentation || legal,
+    oem,
+    adas,
+    documentation,
+    legal,
+    pPage,
+  };
+}
+
 function resolveOemFindingLabel(
   family: OemCitationDensityFamily,
   authority: NonNullable<CitationDensityFinding["bestAvailableAuthority"]>,
-  verifiedAuthorityCount: number
+  verification: OemAuthorityVerification
 ) {
-  if (verifiedAuthorityCount > 0 && (authority.type === "oem_procedure" || authority.type === "adas_procedure")) return "VERIFIED OEM";
-  if (verifiedAuthorityCount > 0 && authority.type === "oem_position_statement") return "OEM POSITION REFERENCED";
-  if (verifiedAuthorityCount > 0 && authority.type === "invoice_completion") return "VERIFIED DOCUMENTATION";
-  if (verifiedAuthorityCount > 0 && authority.type === "legal") return "VERIFIED LEGAL";
+  if (verification.adas) return "VERIFIED ADAS";
+  if (verification.oem) return "VERIFIED OEM";
+  if (authority.status === "verified" && authority.type === "oem_position_statement") return "OEM POSITION REFERENCED";
+  if (verification.documentation) return "VERIFIED DOCUMENTATION";
+  if (verification.legal) return "VERIFIED LEGAL";
   if (authority.type === "oem_position_statement") return "OEM POSITION REFERENCED";
   if (authority.type === "oem_procedure" || authority.type === "adas_procedure") return "NEEDS OEM PROCEDURE";
   return family.fallbackLabel;
 }
 
 function isOemVerifiedLabel(label: string | undefined) {
-  return label === "VERIFIED OEM" || label === "VERIFIED DOCUMENTATION" || label === "VERIFIED LEGAL";
+  return label === "VERIFIED OEM" || label === "VERIFIED ADAS" || label === "VERIFIED DOCUMENTATION" || label === "VERIFIED LEGAL";
 }
 
 function buildOemCitationStatus(
   family: OemCitationDensityFamily,
   label: string,
-  verifiedAuthorityCount: number
+  verification: OemAuthorityVerification
 ): CitationDensityFinding["citationStatus"] {
   const needsOem = family.label === "NEEDS OEM" || family.missingAuthorityTypes.some((item) => /OEM/i.test(item));
   const needsAdas = family.label === "NEEDS ADAS" || family.category === "adas_calibration" || family.category === "scan_diagnostic";
   const needsInvoice = family.label === "NEEDS INVOICE" || family.missingAuthorityTypes.some((item) => /invoice|proof|completion/i.test(item));
   return {
-    oem: needsOem ? (verifiedAuthorityCount ? "verified" : "needed") : "not_applicable",
-    oemPositionStatement: needsOem ? (verifiedAuthorityCount && label === "VERIFIED OEM" ? "verified" : "needed") : "not_applicable",
-    adas: needsAdas ? (verifiedAuthorityCount ? "verified" : "needed") : "not_applicable",
-    pPages: family.label === "NEEDS P-PAGE" ? (verifiedAuthorityCount ? "verified" : "needed") : "not_applicable",
+    oem: needsOem ? (verification.oem ? "verified" : "needed") : "not_applicable",
+    oemPositionStatement: needsOem ? (label === "OEM POSITION REFERENCED" || verification.oem ? "verified" : "needed") : "not_applicable",
+    adas: needsAdas ? (verification.adas ? "verified" : "needed") : "not_applicable",
+    pPages: family.label === "NEEDS P-PAGE" ? (verification.pPage ? "verified" : "needed") : "not_applicable",
     scrs: family.findingType.includes("refinish") ? "needed" : "not_applicable",
     deg: family.findingType.includes("labor") || family.findingType.includes("refinish") ? "needed" : "not_applicable",
     nhtsa: "not_applicable",
-    stateRegulation: label === "VERIFIED LEGAL" ? "verified" : "not_applicable",
+    stateRegulation: verification.legal ? "verified" : "not_applicable",
     policy: "not_applicable",
-    invoiceOrCompletionProof: needsInvoice || needsAdas ? "needed" : "not_found",
+    invoiceOrCompletionProof: verification.documentation ? "verified" : needsInvoice || needsAdas ? "needed" : "not_found",
     photoOrTeardownProof: family.findingType.includes("structural") ? "needed" : "not_found",
   };
 }
