@@ -60,6 +60,7 @@ const {
 const {
   ANALYSIS_TIMEOUT_MESSAGE,
   createAnalysisLifecycleLogger,
+  getUniqueReviewableDocuments,
   isStaleProcessing,
   resolveHydrationReviewProgress,
 } = require("../../components/chatWidget/analysisLifecycle.ts");
@@ -191,7 +192,7 @@ run("chat intent routes annotated citation density carrier estimate requests to 
   assert.doesNotMatch(chatSource, /sourceDocumentId:\s*sourcePdf\.attachmentId/);
   assert.match(chatSource, /Download Delta Citation Density Report/);
   assert.match(chatSource, /activeCaseId,/);
-  assert.match(chatSource, /artifactIds: attachmentsRef\.current\.map/);
+  assert.match(chatSource, /artifactIds: getUniqueReviewableDocuments\(attachmentsRef\.current\)\.map/);
   assert.doesNotMatch(chatSource, /I can't generate a PDF|I can only give you the annotation set|use this in Adobe|use this in Bluebeam/i);
   assert.doesNotMatch(chatSource, /annotation set|line-by-documentation map|ready-to-apply|annotation table|annotation map/i);
 });
@@ -851,10 +852,28 @@ run("right rail hydration progress uses indexed PDFs as reviewable denominator",
     uploaded: 1,
     indexed: 1,
     attachmentCount: 1,
+    uniqueDocumentCount: 2,
   });
   assert.equal(cumulative.uploaded, 2);
   assert.equal(cumulative.indexed, 2);
   assert.equal(cumulative.reviewableFileCount, 2);
+});
+
+run("unique reviewable documents dedupe retries by stable ids and filenames", () => {
+  const unique = getUniqueReviewableDocuments([
+    { attachmentId: "shop-21896", filename: "Shop 21896.pdf", sizeBytes: 1000 },
+    { attachmentId: "shop-21896", filename: "Shop 21896.pdf", sizeBytes: 1000 },
+    { attachmentId: "shop-final-21896", filename: "Shop Final 21896.pdf", sizeBytes: 2000 },
+    { filename: "Shop Final 21896.pdf", sizeBytes: 2000, uploadBatchId: "batch-a" },
+    { filename: "Shop Final 21896.pdf", sizeBytes: 2000, uploadBatchId: "batch-a" },
+  ]);
+
+  assert.equal(unique.length, 3);
+  assert.deepEqual(unique.map((item) => item.filename), [
+    "Shop 21896.pdf",
+    "Shop Final 21896.pdf",
+    "Shop Final 21896.pdf",
+  ]);
 });
 
 run("processing watchdog marks stale analysis after timeout threshold", () => {

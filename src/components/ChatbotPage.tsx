@@ -80,6 +80,8 @@ import {
   ANALYSIS_STALE_AFTER_MS,
   ANALYSIS_STILL_RUNNING_MESSAGE,
   ANALYSIS_TIMEOUT_MESSAGE,
+  createAnalysisRequestId,
+  getUniqueReviewableDocuments,
   isStaleProcessing,
 } from "@/components/chatWidget/analysisLifecycle";
 import { isNative } from "@/lib/native";
@@ -1075,25 +1077,83 @@ export function ChatbotWorkspacePage() {
   }
 
   function retryAnalysis() {
+    const requestId = createAnalysisRequestId("retry");
+    console.info("[analysis-lifecycle]", {
+      stage: "retry_started",
+      requestId,
+      caseId: analysisReportId,
+      fileCount: uniqueAttachmentsState.length,
+      durationMs: 0,
+      status: "analysis",
+    });
     setAnalysisStatus("processing");
     setAnalysisStatusDetail(null);
     setAnalysisLoading(true);
     setAnalysisProcessingStartedAt(Date.now());
     setLeftPaneMode("chat");
-    void chatSessionControlsRef.current?.sendPrompt(
+    const retry = chatSessionControlsRef.current?.sendPrompt(
       "Retry analysis and report generation for the current uploaded files."
     );
+    void retry?.then(() => {
+      console.info("[analysis-lifecycle]", {
+        stage: "retry_complete",
+        requestId,
+        caseId: analysisReportId,
+        fileCount: uniqueAttachmentsState.length,
+        durationMs: 0,
+        status: "analysis",
+      });
+    }).catch((error) => {
+      console.info("[analysis-lifecycle]", {
+        stage: "retry_failed",
+        requestId,
+        caseId: analysisReportId,
+        fileCount: uniqueAttachmentsState.length,
+        durationMs: 0,
+        status: "analysis",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   function retryReportGeneration() {
+    const requestId = createAnalysisRequestId("retry-report");
+    console.info("[analysis-lifecycle]", {
+      stage: "retry_started",
+      requestId,
+      caseId: analysisReportId,
+      fileCount: uniqueAttachmentsState.length,
+      durationMs: 0,
+      status: "report_generation",
+    });
     setAnalysisStatus("processing");
     setAnalysisStatusDetail(null);
     setAnalysisLoading(true);
     setAnalysisProcessingStartedAt(Date.now());
     setLeftPaneMode("chat");
-    void chatSessionControlsRef.current?.sendPrompt(
+    const retry = chatSessionControlsRef.current?.sendPrompt(
       "Retry report generation for the current case. If Delta Citation Density PDF generation fails, show a retryable Delta PDF error and keep the other reports available."
     );
+    void retry?.then(() => {
+      console.info("[analysis-lifecycle]", {
+        stage: "retry_complete",
+        requestId,
+        caseId: analysisReportId,
+        fileCount: uniqueAttachmentsState.length,
+        durationMs: 0,
+        status: "report_generation",
+      });
+    }).catch((error) => {
+      console.info("[analysis-lifecycle]", {
+        stage: "retry_failed",
+        requestId,
+        caseId: analysisReportId,
+        fileCount: uniqueAttachmentsState.length,
+        durationMs: 0,
+        status: "report_generation",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   function handleEvidenceSelect(link: EvidenceLink) {
@@ -1255,6 +1315,10 @@ export function ChatbotWorkspacePage() {
         ? { label: "Customer Report (Pro)", type: "locked" }
       : null,
   ].filter(Boolean) as Array<{ label: string; type?: string; url?: string }>;
+  const uniqueAttachmentsState = useMemo(
+    () => getUniqueReviewableDocuments(attachmentsState),
+    [attachmentsState]
+  );
   const canonicalWorkspaceCounts = useMemo(
     () => ({
       supportSignals: dedupeRailItems([
@@ -1388,7 +1452,7 @@ export function ChatbotWorkspacePage() {
 
                   <StructuredAnalysisCanvas
                     renderModel={renderModel}
-                    attachments={attachmentsState}
+                    attachments={uniqueAttachmentsState}
                     hasResolvedAnalysis={hasResolvedAnalysis}
                     activeInsightKey={activeInsightKey}
                     onActiveInsightChange={setActiveInsightKey}
@@ -1435,7 +1499,7 @@ export function ChatbotWorkspacePage() {
                       <CaseContextSummary
                         intent={caseIntent || "Continue with this case"}
                         vehicleLabel={renderModel.vehicle.label || renderModel.reportFields.vehicleLabel}
-                        fileCount={attachmentsState.length}
+                        fileCount={uniqueAttachmentsState.length}
                         determinationAnswer={renderModel.determination?.answer}
                         determinationPayload={structuredDeterminationView}
                         supportGaps={renderModel.disputeIntelligenceReport.supportGaps}
@@ -1657,7 +1721,7 @@ export function ChatbotWorkspacePage() {
                           assistanceProfile={assistanceProfile}
                           transcriptSummary={primaryAnalysis?.content ?? analysisText}
                           exportModel={hasResolvedAnalysis ? renderModel : null}
-                          followUpFiles={attachmentsState.map((file) => ({
+                          followUpFiles={uniqueAttachmentsState.map((file) => ({
                             id: file.attachmentId,
                             name: file.filename,
                             type: file.hasVision ? "image" : undefined,
@@ -1716,8 +1780,8 @@ export function ChatbotWorkspacePage() {
                           canUseDoiComplaintPacketExport={canUseDoiComplaintPacketExport}
             canUseCustomerReport={canUseCustomerReport}
             analysisReportId={analysisReportId}
-            attachmentIds={attachmentsState.map((file) => file.attachmentId)}
-            attachments={attachmentsState}
+            attachmentIds={uniqueAttachmentsState.map((file) => file.attachmentId)}
+            attachments={uniqueAttachmentsState}
             citationDensityTargetEstimate={citationDensityTargetEstimate}
             onCitationDensityTargetEstimateChange={setCitationDensityTargetEstimate}
             citationDensitySelectedSourceDocumentId={citationDensitySelectedSourceDocumentId}
@@ -2531,6 +2595,16 @@ function RailContent({
     }
 
     setReportSendStatus("Generating annotated Citation Density estimate PDF...");
+    const requestId = createAnalysisRequestId("delta-report");
+    const startedAt = Date.now();
+    console.info("[analysis-lifecycle]", {
+      stage: "delta_report_generation_started",
+      requestId,
+      caseId: analysisReportId,
+      fileCount: attachmentIds.length,
+      durationMs: 0,
+      status: "delta",
+    });
     const selectionPayload = buildCitationDensitySelectionPayload(resolvedCitationDensitySelection);
     const response = await fetch("/api/reports/citation-density/annotated-estimate", {
       method: "POST",
@@ -2574,7 +2648,7 @@ function RailContent({
     const blob = await fetchAnnotatedCitationDensityPdfBlob(data.downloadUrl, pdfBase64, () => {
       artifactFallbackUsed = true;
     });
-    return {
+    const result = {
       blob,
       filename: "delta-citation-density-report.pdf",
       artifactId: typeof data.artifactId === "string"
@@ -2599,6 +2673,15 @@ function RailContent({
         ? data.debugCounts as Record<string, unknown>
         : null,
     };
+    console.info("[analysis-lifecycle]", {
+      stage: "delta_report_generation_complete",
+      requestId,
+      caseId: analysisReportId,
+      fileCount: attachmentIds.length,
+      durationMs: Date.now() - startedAt,
+      status: "delta",
+    });
+    return result;
   }
 
   async function generateOemCitationDensityReport(): Promise<AnnotatedEstimateExportResult> {

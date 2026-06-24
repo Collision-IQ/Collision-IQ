@@ -51,6 +51,7 @@ import {
   createAnalysisLifecycleLogger,
   createAnalysisRequestId,
   fetchWithTimeout,
+  getUniqueReviewableDocuments,
   resolveHydrationReviewProgress,
 } from "@/components/chatWidget/analysisLifecycle";
 import {
@@ -2007,6 +2008,7 @@ export default function ChatWidget({
     const attachmentsForTurn = pendingAttachmentsForTurn.filter(
       (attachment) => !isVideoAttachment(attachment)
     );
+    const uniqueAttachmentsForTurn = getUniqueReviewableDocuments(attachmentsForTurn);
     const trimmedInput = promptText;
     if (!trimmedInput && pendingAttachmentsForTurn.length === 0) return;
 
@@ -2021,7 +2023,7 @@ export default function ChatWidget({
       );
     }
 
-    if (!trimmedInput && attachmentsForTurn.length === 0) {
+    if (!trimmedInput && uniqueAttachmentsForTurn.length === 0) {
       return;
     }
 
@@ -2036,19 +2038,19 @@ export default function ChatWidget({
     shouldAutoScrollRef.current = true;
 
     const mySession = sessionRef.current;
-    const messageToSend = trimmedInput || buildAttachmentSummary(attachmentsForTurn);
+    const messageToSend = trimmedInput || buildAttachmentSummary(uniqueAttachmentsForTurn);
     const activeCaseTopic = updateCaseTopic(messageToSend);
-    const hasAttachmentsInTurn = attachmentsForTurn.length > 0;
+    const hasAttachmentsInTurn = uniqueAttachmentsForTurn.length > 0;
     const activeAnalysisRunId = hasAttachmentsInTurn ? beginStructuredAnalysisRun() : null;
     const analysisRequestId = createAnalysisRequestId();
     const lifecycle = createAnalysisLifecycleLogger({
       requestId: analysisRequestId,
       caseId: analysisReportIdRef.current,
-      fileCount: attachmentsForTurn.length,
+      fileCount: uniqueAttachmentsForTurn.length,
     });
     const attachmentStats = {
-      ...summarizeAttachmentStats(attachmentsForTurn),
-      totalPdfPages: attachmentsForTurn.reduce((sum, attachment) => sum + (attachment.pageCount ?? 0), 0),
+      ...summarizeAttachmentStats(uniqueAttachmentsForTurn),
+      totalPdfPages: uniqueAttachmentsForTurn.reduce((sum, attachment) => sum + (attachment.pageCount ?? 0), 0),
     };
     const analysisStartMs = Date.now();
     messageCounterRef.current += 1;
@@ -2059,14 +2061,28 @@ export default function ChatWidget({
     setInput("");
 
     if (hasAttachmentsInTurn) {
+      lifecycle.stage("analysis_job_started");
+      lifecycle.stage("unique_documents_resolved");
+      if (attachmentsForTurn.length > uniqueAttachmentsForTurn.length) {
+        lifecycle.stage("duplicate_documents_skipped", {
+          fileCount: attachmentsForTurn.length - uniqueAttachmentsForTurn.length,
+        });
+      }
       lifecycle.stage("preliminary_review_started");
+      lifecycle.stage("structured_estimate_parse_started");
       upsertSystemStatusMessage("Parsing estimate PDFs...");
       scheduleReviewProgressMessages(Boolean(analysisReportIdRef.current));
       scheduleAnalysisStillRunningMessage(activeAnalysisRunId);
-      const preliminaryDraft = buildPreliminaryReviewDraft(attachmentsForTurn);
+      const preliminaryDraft = buildPreliminaryReviewDraft(uniqueAttachmentsForTurn);
+      lifecycle.stage("structured_estimate_parse_complete", {
+        status: preliminaryDraft.hasUsefulTriage ? "resolved" : "not_resolved",
+      });
       lifecycle.stage("estimate_pair_resolved", {
         status: preliminaryDraft.hasUsefulTriage ? "resolved" : "not_resolved",
       });
+      if (preliminaryDraft.hasUsefulTriage) {
+        lifecycle.stage("structured_deltas_ready");
+      }
       if (preliminaryDraft.hasUsefulTriage) {
         messageCounterRef.current += 1;
         const preliminaryMessage = createMessage(
@@ -2115,6 +2131,7 @@ export default function ChatWidget({
 
         if (activeCaseId) {
           upsertSystemStatusMessage("Generating annotated citation density estimate PDF...");
+          lifecycle.stage("delta_report_generation_started", { caseId: activeCaseId });
           const exportResponse = await fetch("/api/reports/citation-density/annotated-estimate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2123,7 +2140,7 @@ export default function ChatWidget({
             body: JSON.stringify({
               caseId: activeCaseId,
               activeCaseId,
-              artifactIds: attachmentsRef.current.map((attachment) => attachment.attachmentId),
+              artifactIds: getUniqueReviewableDocuments(attachmentsRef.current).map((attachment) => attachment.attachmentId),
               targetEstimate: resolveAnnotatedCitationDensityTarget(messageToSend),
               annotationMode: "both",
               includeLegend: true,
@@ -2159,6 +2176,7 @@ export default function ChatWidget({
                 .join("\n")
             : `[Download Delta Citation Density Report](${data.downloadUrl ?? "#"})`;
           const allUnanchored = data.warnings?.includes("all_findings_unanchored") ?? false;
+          lifecycle.stage("delta_report_generation_complete", { caseId: activeCaseId });
           const reply = allUnanchored
             ? `The annotated Citation Density estimate PDF was generated with a warning: no line-level or page-level anchors were placed. Do not treat this as a fully successful markup.${unanchoredText}\n\n${downloadLinks}${warningText}`
             : `Done — I generated the annotated citation-density estimate PDF. It preserves the original estimate layout and overlays citation/proof callouts.${unanchoredText}\n\n${downloadLinks}${warningText}`;
@@ -2239,7 +2257,7 @@ export default function ChatWidget({
       if (hasAttachmentsInTurn) {
         upsertSystemStatusMessage(
           buildAttachmentBatchStatus(
-            attachmentsForTurn.map((attachment) => ({ type: attachment.mime })),
+            uniqueAttachmentsForTurn.map((attachment) => ({ type: attachment.mime })),
             "analysis_starting"
           )
         );
@@ -2248,7 +2266,7 @@ export default function ChatWidget({
       if (hasAttachmentsInTurn && analysisReportIdRef.current) {
         const activeCaseId = analysisReportIdRef.current;
         lifecycle.stage("full_analysis_started", { caseId: activeCaseId });
-        lifecycle.stage("structured_deltas_started", { caseId: activeCaseId });
+        lifecycle.stage("structured_estimate_parse_started", { caseId: activeCaseId });
         lifecycle.stage("repair_intelligence_started", { caseId: activeCaseId });
         lifecycle.stage("snapshot_started", { caseId: activeCaseId });
         lifecycle.stage("report_exports_started", { caseId: activeCaseId });
@@ -2256,7 +2274,7 @@ export default function ChatWidget({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            artifactIds: attachmentsForTurn.map((attachment) => attachment.attachmentId),
+            artifactIds: uniqueAttachmentsForTurn.map((attachment) => attachment.attachmentId),
             activeCaseId,
             requestId: analysisRequestId,
             userIntent: messageToSend,
@@ -2266,6 +2284,7 @@ export default function ChatWidget({
         }, {
           parentSignal: controller.signal,
           timeoutMessage: ANALYSIS_TIMEOUT_MESSAGE,
+          abortOnTimeout: false,
         });
         const analysisDurationMs = Date.now() - analysisStartMs;
 
@@ -2326,7 +2345,8 @@ export default function ChatWidget({
           artifactRefreshPolicy?: RepairIntelligenceReport["artifactRefreshPolicy"];
           reviewProgress?: ReviewProgress;
         };
-        lifecycle.stage("structured_deltas_complete", { caseId: activeCaseId });
+        lifecycle.stage("structured_estimate_parse_complete", { caseId: activeCaseId });
+        lifecycle.stage("structured_deltas_ready", { caseId: activeCaseId });
         lifecycle.stage("repair_intelligence_complete", { caseId: activeCaseId });
         lifecycle.stage("snapshot_complete", { caseId: activeCaseId });
         lifecycle.stage("report_exports_complete", { caseId: activeCaseId });
@@ -2401,7 +2421,7 @@ export default function ChatWidget({
           activeCaseId,
           activeCaseIdAfter: nextActiveCaseId,
           reportId: nextActiveCaseId,
-          attachmentIds: attachmentsForTurn.map((attachment) => attachment.attachmentId),
+          attachmentIds: uniqueAttachmentsForTurn.map((attachment) => attachment.attachmentId),
           caseContinuityActiveCaseId: analysisData.caseContinuity?.activeCaseId ?? null,
           messageCountBefore: messages.length,
           messageCountAfter: updatedMessages.length,
@@ -2494,8 +2514,8 @@ export default function ChatWidget({
         body: JSON.stringify({
           messages: updatedMessages,
           activeCaseId: analysisReportIdRef.current,
-          attachmentIds: attachmentsForTurn.map((attachment) => attachment.attachmentId),
-          attachments: attachmentsForTurn.map((attachment) => ({
+          attachmentIds: uniqueAttachmentsForTurn.map((attachment) => attachment.attachmentId),
+          attachments: uniqueAttachmentsForTurn.map((attachment) => ({
             filename: attachment.filename,
             type: attachment.mime,
             text: attachment.text,
@@ -2550,9 +2570,9 @@ export default function ChatWidget({
       const contentType = response.headers.get("content-type") || "";
       if (hasAttachmentsInTurn) {
         console.info("[attachments] analysis request assembled", {
-          attachmentCount: attachmentsForTurn.length,
-          visionAttachmentCount: attachmentsForTurn.filter((attachment) => attachment.hasVision).length,
-          attachments: attachmentsForTurn.map((attachment) => ({
+          attachmentCount: uniqueAttachmentsForTurn.length,
+          visionAttachmentCount: uniqueAttachmentsForTurn.filter((attachment) => attachment.hasVision).length,
+          attachments: uniqueAttachmentsForTurn.map((attachment) => ({
             filename: attachment.filename,
             mimeType: attachment.mime || "unknown",
             hasVision: attachment.hasVision,
@@ -2561,7 +2581,7 @@ export default function ChatWidget({
           })),
         });
         lifecycle.stage("full_analysis_started", { caseId: analysisReportIdRef.current });
-        lifecycle.stage("structured_deltas_started", { caseId: analysisReportIdRef.current });
+        lifecycle.stage("structured_estimate_parse_started", { caseId: analysisReportIdRef.current });
         lifecycle.stage("repair_intelligence_started", { caseId: analysisReportIdRef.current });
         lifecycle.stage("snapshot_started", { caseId: analysisReportIdRef.current });
         lifecycle.stage("report_exports_started", { caseId: analysisReportIdRef.current });
@@ -2569,7 +2589,7 @@ export default function ChatWidget({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            artifactIds: attachmentsForTurn.map((attachment) => attachment.attachmentId),
+            artifactIds: uniqueAttachmentsForTurn.map((attachment) => attachment.attachmentId),
             activeCaseId: analysisReportIdRef.current,
             requestId: analysisRequestId,
             userIntent: messageToSend,
@@ -2579,6 +2599,7 @@ export default function ChatWidget({
         }, {
           parentSignal: controller.signal,
           timeoutMessage: ANALYSIS_TIMEOUT_MESSAGE,
+          abortOnTimeout: false,
         })
           .then(async (analysisResponse) => {
             const analysisDurationMs = Date.now() - analysisStartMs;
@@ -2638,7 +2659,8 @@ export default function ChatWidget({
               artifactRefreshPolicy?: RepairIntelligenceReport["artifactRefreshPolicy"];
               reviewProgress?: ReviewProgress;
             };
-            lifecycle.stage("structured_deltas_complete", { caseId: analysisData.reportId ?? analysisReportIdRef.current });
+            lifecycle.stage("structured_estimate_parse_complete", { caseId: analysisData.reportId ?? analysisReportIdRef.current });
+            lifecycle.stage("structured_deltas_ready", { caseId: analysisData.reportId ?? analysisReportIdRef.current });
             lifecycle.stage("repair_intelligence_complete", { caseId: analysisData.reportId ?? analysisReportIdRef.current });
             lifecycle.stage("snapshot_complete", { caseId: analysisData.reportId ?? analysisReportIdRef.current });
             lifecycle.stage("report_exports_complete", { caseId: analysisData.reportId ?? analysisReportIdRef.current });
@@ -2700,7 +2722,7 @@ export default function ChatWidget({
             console.info("[attachments] upload completion case state", {
               activeCaseId: analysisReportIdRef.current,
               reportId: analysisData.reportId ?? null,
-              attachmentIds: attachmentsForTurn.map((attachment) => attachment.attachmentId),
+              attachmentIds: uniqueAttachmentsForTurn.map((attachment) => attachment.attachmentId),
               caseContinuityActiveCaseId: analysisData.caseContinuity?.activeCaseId ?? null,
             });
             console.info("[attachments] analysis complete", {
@@ -3088,9 +3110,26 @@ export default function ChatWidget({
     const returnedFilenames = returnedUploads
       .map((item) => item?.filename)
       .filter((name): name is string => typeof name === "string" && name.length > 0);
-    const indexedCount = returnedUploads.filter((item) => typeof item.attachmentId === "string").length;
-    const visionProcessedCount = returnedUploads.filter((item) => Boolean(item.hasVision)).length;
-    const knownFileCount = countKnownFilesFromUploadResponse(data, returnedUploads);
+    const indexedUploads = getUniqueReviewableDocuments(
+      returnedUploads.filter((item): item is UploadSuccessResult & { attachmentId: string } =>
+        typeof item.attachmentId === "string"
+      )
+    );
+    const indexedCount = indexedUploads.length;
+    const visionProcessedCount = indexedUploads.filter((item) => Boolean(item.hasVision)).length;
+    const knownFileCount = countKnownFilesFromUploadResponse(data, indexedUploads);
+    const uniqueDocumentCount = getUniqueReviewableDocuments([
+      ...attachmentsRef.current.map((attachment) => ({
+        attachmentId: attachment.attachmentId,
+        filename: attachment.filename,
+        sizeBytes: attachment.sizeBytes,
+      })),
+      ...indexedUploads.map((item) => ({
+        attachmentId: item.attachmentId,
+        filename: item.filename,
+        sizeBytes: item.sizeBytes,
+      })),
+    ]).length;
     const uploadRequestId = createAnalysisRequestId("upload");
     console.info("[analysis-lifecycle]", {
       stage: "upload_complete",
@@ -3105,6 +3144,7 @@ export default function ChatWidget({
       uploaded: knownFileCount || returnedUploads.length,
       indexed: indexedCount,
       attachmentCount: returnedUploads.length,
+      uniqueDocumentCount,
     });
     updateReviewProgress((current) => ({
       ...current,
@@ -3122,6 +3162,24 @@ export default function ChatWidget({
       durationMs: 0,
       status: "indexed",
     });
+    console.info("[analysis-lifecycle]", {
+      stage: "unique_documents_resolved",
+      requestId: uploadRequestId,
+      caseId: activeCaseId,
+      fileCount: uniqueDocumentCount,
+      durationMs: 0,
+      status: "resolved",
+    });
+    if (returnedUploads.length > indexedUploads.length) {
+      console.info("[analysis-lifecycle]", {
+        stage: "duplicate_documents_skipped",
+        requestId: uploadRequestId,
+        caseId: activeCaseId,
+        fileCount: returnedUploads.length - indexedUploads.length,
+        durationMs: 0,
+        status: "skipped",
+      });
+    }
     const filename: string = upload?.filename || file.name;
     const mime: string = upload?.type || file.type;
     const imageDataUrl: string | undefined =
@@ -3161,17 +3219,6 @@ export default function ChatWidget({
       });
     }
 
-    updateReviewProgress((current) => ({
-      uploaded: current.uploaded + 1,
-      indexed: current.indexed + indexedCount,
-      visionProcessed: current.visionProcessed + visionProcessedCount,
-      reviewedForDetermination: current.reviewedForDetermination,
-      reviewableFileCount: current.reviewableFileCount,
-      excludedFromReviewCount: current.excludedFromReviewCount,
-      excludedFromReviewReasons: current.excludedFromReviewReasons,
-      excludedFromReviewFiles: current.excludedFromReviewFiles,
-      totalKnownFiles: current.totalKnownFiles + knownFileCount,
-    }));
     if (transport.uploadMode === "direct-storage") {
       updateUploadLifecyclePhase(lifecycleId, "complete");
     }
@@ -3211,13 +3258,13 @@ export default function ChatWidget({
       }
 
       if (!replaceId) {
-        const next = [...prev, ...nextAttachments];
+        const next = getUniqueReviewableDocuments([...prev, ...nextAttachments]);
         attachmentsRef.current = next;
         return next;
       }
 
       const [replacement, ...additional] = nextAttachments;
-      const next = prev.map((attachment) => {
+      const next = getUniqueReviewableDocuments(prev.map((attachment) => {
         if (attachment.attachmentId !== replaceId) {
           return attachment;
         }
@@ -3227,7 +3274,7 @@ export default function ChatWidget({
         }
 
         return replacement;
-      }).concat(additional);
+      }).concat(additional));
       attachmentsRef.current = next;
       return next;
     });
@@ -3249,13 +3296,13 @@ export default function ChatWidget({
       }
 
       if (!replaceId) {
-        return [...prev, ...nextItems];
+        return getUniqueReviewableDocuments([...prev, ...nextItems]);
       }
 
       const [replacement, ...additional] = nextItems;
-      return prev.map((attachment) =>
+      return getUniqueReviewableDocuments(prev.map((attachment) =>
         attachment.attachmentId === replaceId ? replacement : attachment
-      ).concat(additional);
+      ).concat(additional));
     });
     invalidateStructuredAnalysis();
     if (options?.openPreview ?? true) {
