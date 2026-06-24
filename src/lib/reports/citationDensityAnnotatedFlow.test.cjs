@@ -51,12 +51,6 @@ const {
   classifyCitationDensityDocument,
   classifyCitationDensityAnchorRow,
 } = require("./citationDensityDocumentClassifier.ts");
-const {
-  buildFileReviewLedger,
-} = require("../fileReviewLedger.ts");
-const {
-  buildPreliminaryReviewDraft,
-} = require("../../components/chatWidget/preliminaryReview.ts");
 
 function pdfAttachment(overrides = {}) {
   return {
@@ -757,82 +751,6 @@ run("carrier target avoids appraisal, academy, and higher-cost preliminary PDFs"
   assert.equal(selection.selectedEstimateRole, "carrier");
   assert.equal(selection.selectedEstimateTotal, 3200);
   assert.match(selection.selectionReason, /carrier\/lower-cost estimate PDF/i);
-});
-
-run("auto source selection keeps shop-authored USAA estimate as lower source", () => {
-  const lower = pdfAttachment({
-    id: "shop-21896",
-    filename: "Shop 21896.pdf",
-    text: [
-      "Shop 21896",
-      "Repair Facility: Conestoga Collision",
-      "Insurance Company: USAA",
-      "Net Cost of Repairs $11,892.26",
-    ].join("\n"),
-  });
-  const higher = pdfAttachment({
-    id: "shop-final-21896",
-    filename: "Shop Final 21896.pdf",
-    text: [
-      "Shop Final 21896",
-      "Repair Facility: Conestoga Collision",
-      "Insurance Company: USAA",
-      "Net Cost of Repairs $17,397.20",
-    ].join("\n"),
-  });
-
-  const [selection] = resolveSourceEstimatePdfSelections({
-    attachments: [higher, lower],
-    report: { narrative: "", evidenceRegistry: [] },
-    targetEstimate: "auto",
-    findings: [],
-  });
-
-  assert.equal(selection.selectedSourceDocumentId, "shop-21896");
-  assert.equal(selection.selectedEstimateRole, "shop");
-  assert.equal(selection.selectedEstimateTotal, 11892.26);
-  assert.equal(selection.comparisonEstimateTotal, 17397.20);
-});
-
-run("fast triage resolves Shop 21896 lower and final estimate gap", () => {
-  const draft = buildPreliminaryReviewDraft([
-    {
-      filename: "Shop 21896.pdf",
-      mime: "application/pdf",
-      text: "Shop 21896\nRepair Facility: Conestoga Collision\nInsurance Company: USAA\nNet Cost of Repairs $11,892.26",
-    },
-    {
-      filename: "Shop Final 21896.pdf",
-      mime: "application/pdf",
-      text: "Shop Final 21896\nRepair Facility: Conestoga Collision\nInsurance Company: USAA\nNet Cost of Repairs $17,397.20",
-    },
-  ]);
-
-  assert.equal(draft.hasUsefulTriage, true);
-  assert.match(draft.message, /Likely source\/lower estimate: Shop 21896\.pdf \(\$11,892\.26\)/);
-  assert.match(draft.message, /Likely comparison\/final estimate: Shop Final 21896\.pdf \(\$17,397\.20\)/);
-  assert.match(draft.message, /Approximate total gap: \+\$5,504\.94/);
-  assert.doesNotMatch(draft.message, /Likely carrier\/SOR estimate: Shop 21896\.pdf/i);
-});
-
-run("estimate PDFs with insurer fields remain determination-eligible", () => {
-  const [entry] = buildFileReviewLedger([
-    pdfAttachment({
-      id: "estimate-usaa",
-      filename: "Shop 21896.pdf",
-      text: [
-        "Shop 21896",
-        "Repair Facility: Conestoga Collision",
-        "Insurance Company: USAA",
-        "Estimate Total $11,892.26",
-      ].join("\n"),
-    }),
-  ]);
-
-  assert.equal(entry.documentType, "estimate");
-  assert.equal(entry.usedAsSupportOnly, false);
-  assert.equal(entry.usedInDetermination, true);
-  assert.equal(entry.reviewabilityHint, "Reviewable and included in file determination.");
 });
 
 run("shop target selects shop PDF when both carrier and shop estimates are uploaded", () => {

@@ -367,8 +367,8 @@ function classifyLedgerSourceType(
   if (categories.includes("scan_pre") || categories.includes("scan_post") || categories.includes("scan_in_process") || categories.includes("diagnostic_report")) return "scan_report";
   if (categories.includes("calibration_record") || categories.includes("revvadas_record")) return "calibration_report";
   if (categories.includes("oem_procedure") || categories.includes("position_statement")) return "oem_documentation";
+  if (/\b(carrier|insurance estimate|insurer estimate)\b/i.test(text)) return "carrier_estimate";
   if (/\b(shop|repair facility|approved repairs?)\b/i.test(text)) return "shop_estimate";
-  if (/\b(carrier estimate|insurance estimate|insurer estimate|staff estimate|sor)\b/i.test(text)) return "carrier_estimate";
   if (/\b(supplement|supp|sor)\b/i.test(text)) return "supplement";
   return "other_supporting_document";
 }
@@ -392,17 +392,6 @@ function isSupportOnlyDocumentType(
   documentType: FileReviewLedgerEntry["documentType"],
   categories: EvidenceCompletenessCategory[]
 ) {
-  if (
-    documentType === "estimate" ||
-    documentType === "carrier_estimate" ||
-    documentType === "shop_estimate" ||
-    documentType === "supplement" ||
-    categories.includes("shop_estimate") ||
-    categories.includes("carrier_estimate") ||
-    categories.includes("supplement")
-  ) {
-    return false;
-  }
   return documentType === "work_authorization" ||
     documentType === "support_contract" ||
     categories.includes("work_authorization") ||

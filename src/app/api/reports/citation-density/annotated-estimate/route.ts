@@ -131,7 +131,7 @@ export async function POST(request: Request) {
             attachment: explicitSourceDocument,
             selectedSourceDocumentId: explicitSourceDocument.id,
             selectedSourceLabel: explicitSourceDocument.filename || "Selected estimate",
-            selectedEstimateRole: resolveExplicitSourceEstimateRole(explicitSourceDocument, selectedEstimateRole, targetEstimate),
+            selectedEstimateRole: normalizeRequestedEstimateRole(selectedEstimateRole, targetEstimate),
             selectedEstimateTotal: null,
             targetEstimate,
             selectionReason: `The client supplied a source document ID${body.sourceFilename ? ` for ${coerceString(body.sourceFilename)}` : ""}.`,
@@ -161,7 +161,7 @@ export async function POST(request: Request) {
             attachment: legacySourceDocument,
             selectedSourceDocumentId: legacySourceDocument.id,
             selectedSourceLabel: legacySourceDocument.filename || "Selected estimate",
-            selectedEstimateRole: resolveExplicitSourceEstimateRole(legacySourceDocument, selectedEstimateRole, targetEstimate),
+            selectedEstimateRole: normalizeRequestedEstimateRole(selectedEstimateRole, targetEstimate),
             selectedEstimateTotal: null,
             targetEstimate,
             selectionReason: "The client supplied a source document ID.",
@@ -502,7 +502,7 @@ function coerceTargetEstimate(value: unknown): CitationDensityTargetEstimate {
 }
 
 function normalizeRequestedEstimateRole(
-  selectedEstimateRole: string | undefined,
+  selectedEstimateRole: string,
   targetEstimate: CitationDensityTargetEstimate
 ): SourceEstimatePdfSelection["selectedEstimateRole"] {
   if (selectedEstimateRole === "carrier" || selectedEstimateRole === "shop") return selectedEstimateRole;
@@ -537,27 +537,9 @@ function inferComparisonEstimateRole(
   selectedRole: "carrier" | "shop" | "selected"
 ): "carrier" | "shop" {
   const name = filename || "";
-  if (/shop|repair facility|body shop|rta|appraisal|final|revised/i.test(name)) return "shop";
-  if (/carrier|insurer estimate|insurance estimate|sor|geico|state farm|progressive|allstate/i.test(name)) return "carrier";
+  if (/shop|repair facility|rta|appraisal/i.test(name)) return "shop";
+  if (/carrier|insur|sor|geico|state farm|progressive|allstate|estimate/i.test(name)) return "carrier";
   return selectedRole === "shop" ? "carrier" : "shop";
-}
-
-function resolveExplicitSourceEstimateRole(
-  document: { filename?: string | null; text?: string | null },
-  requestedRole: string | undefined,
-  targetEstimate: CitationDensityTargetEstimate
-): SourceEstimatePdfSelection["selectedEstimateRole"] {
-  const normalized = normalizeRequestedEstimateRole(requestedRole, targetEstimate);
-  if (normalized === "carrier" || normalized === "shop") return normalized;
-
-  const text = `${document.filename ?? ""}\n${document.text ?? ""}`.toLowerCase();
-  if (/\b(?:shop|repair facility|body shop|repairer|conestoga|final estimate|revised estimate|approved repairs?)\b/i.test(text)) {
-    return "shop";
-  }
-  if (/\b(?:carrier estimate|insurer estimate|insurance estimate|sor|staff estimate|adjuster|appraiser)\b/i.test(text)) {
-    return "carrier";
-  }
-  return normalized;
 }
 
 function filterFindingsForEstimateRole(
@@ -632,14 +614,7 @@ function withFileReviewDiagnostics(
 }
 
 function isLegacyComparisonFinding(finding: CitationDensityFinding): boolean {
-  if (!/-comparison-/i.test(finding.id)) return false;
-  const text = [
-    finding.currentSupportSummary,
-    finding.missingProofSummary,
-    finding.recommendedNextAction,
-    ...(finding.limitations ?? []),
-  ].join(" ");
-  return !/estimate comparison evidence|comparison rows support|structured estimate comparison|source\/lower estimate|comparison\/final estimate/i.test(text);
+  return /-comparison-/.test(finding.id);
 }
 
 function getFindingReportType(finding: CitationDensityFinding): string | undefined {
