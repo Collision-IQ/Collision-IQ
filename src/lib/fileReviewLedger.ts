@@ -152,8 +152,8 @@ export function buildFileReviewLedger(
     const isPdf = isPdfAttachment(attachment);
     const hasText = Boolean(attachment.text?.trim());
     const isImage = attachment.type.startsWith("image/");
-    const supportOnly = isSupportOnlyDocumentType(documentType, categories);
     const usedInCitationDensity = usedInCitationDensityIds.has(attachment.id) || citationClassification.isEstimateLike;
+    const supportOnly = !usedInCitationDensity && isSupportOnlyDocumentType(documentType, categories);
     const usedInOemCitationDensity = usedInOemCitationDensityIds.has(attachment.id) || categories.some((category) =>
       category === "oem_procedure" || category === "position_statement"
     );

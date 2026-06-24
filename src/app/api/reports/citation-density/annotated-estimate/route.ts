@@ -39,6 +39,7 @@ export const dynamic = "force-dynamic";
 
 type RequestBody = {
   caseId?: unknown;
+  artifactIds?: unknown;
   sourceDocumentId?: unknown;
   selectedSourceDocumentId?: unknown;
   selectedEstimateRole?: unknown;
@@ -97,6 +98,7 @@ export async function POST(request: Request) {
     const { user } = await requireCurrentUser();
     const body = (await request.json().catch(() => ({}))) as RequestBody;
     const caseId = coerceString(body.caseId);
+    const requestArtifactIds = coerceStringArray(body.artifactIds) ?? [];
     const sourceDocumentId = coerceString(body.selectedSourceDocumentId) || coerceString(body.sourceDocumentId);
     const selectedEstimateRole = coerceString(body.selectedEstimateRole);
     const targetEstimate = coerceTargetEstimate(body.targetEstimate);
@@ -104,24 +106,31 @@ export async function POST(request: Request) {
     const report = caseId
       ? await getAnalysisReport(caseId, { ownerUserId: user.id })
       : await getLatestActiveAnalysisReport({ ownerUserId: user.id });
-    if (!report) {
+    if (!report && requestArtifactIds.length === 0) {
       return NextResponse.json(
         { error: caseId ? "Case was not found." : NO_ACTIVE_CASE_ERROR },
         { status: caseId ? 404 : 400 }
       );
     }
 
-    const candidateIds = uniqueStrings([...report.artifactIds, sourceDocumentId || undefined]);
+    const candidateIds = uniqueStrings([
+      ...(report?.artifactIds ?? []),
+      ...requestArtifactIds,
+      sourceDocumentId || undefined,
+    ]);
     const sourceDocuments = await getUploadedAttachments(candidateIds, {
       ownerUserId: user.id,
     });
+    if (sourceDocuments.length === 0) {
+      return missingSourcePdfResponse();
+    }
     const sourceDiagnostics = withFileReviewDiagnostics(sourceDocuments, buildCitationDensitySourcePdfDiagnostics(sourceDocuments));
     const explicitSourceDocument = sourceDocumentId
       ? sourceDocuments.find((document) => document.id === sourceDocumentId) ?? null
       : null;
     const model = buildAnnotatedEstimateReviewModel({
-      report: report.report,
-      analysis: report.report.analysis ?? null,
+      report: report?.report ?? null,
+      analysis: report?.report.analysis ?? null,
       panel: null,
       renderModel: undefined,
     });
@@ -142,7 +151,7 @@ export async function POST(request: Request) {
         : []
       : resolveSourceEstimatePdfSelections({
           attachments: sourceDocuments,
-          report: report.report,
+          report: report?.report ?? null,
           targetEstimate,
           findings: model.citationDensityFindings,
         });

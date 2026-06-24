@@ -2145,8 +2145,9 @@ function RailContent({
     ]
   );
   const annotatedEstimateSourcePdf = resolvedCitationDensitySelection.primaryCandidate;
+  const structuredComparisonReady = citationDensityEstimateCandidates.length >= 2;
   const canGenerateCitationDensityAnnotatedEstimate =
-    hasResolvedAnalysis && Boolean(analysisReportId && annotatedEstimateSourcePdf);
+    Boolean(annotatedEstimateSourcePdf && (analysisReportId || structuredComparisonReady));
   const railRisk = hasResolvedAnalysis
     ? renderModel.supplementItems.length > 0
       ? "Review"
@@ -2159,12 +2160,16 @@ function RailContent({
     analysisStatus === "error" && isRetryableProviderMessage(analysisStatusDetail ?? "");
   const railStatus =
     analysisStatus === "error"
-      ? hasRetryableAnalysisFailure
-        ? "Retry available"
-        : "Blocked"
+      ? structuredComparisonReady
+        ? "Delta ready"
+        : hasRetryableAnalysisFailure
+          ? "Retry available"
+          : "Blocked"
       : analysisLoading || analysisStatus === "processing"
-        ? "Processing"
-        : hasResolvedAnalysis || analysisStatus === "complete"
+        ? structuredComparisonReady
+          ? "Delta ready"
+          : "Processing"
+        : hasResolvedAnalysis || analysisStatus === "complete" || structuredComparisonReady
           ? "Ready"
           : attachment
             ? "Files attached"
@@ -2586,8 +2591,8 @@ function RailContent({
   }
 
   async function generateAnnotatedCitationDensityEstimate(): Promise<AnnotatedEstimateExportResult> {
-    if (!analysisReportId) {
-      throw new Error("Citation Density annotated export needs an active case.");
+    if (!analysisReportId && attachmentIds.length === 0) {
+      throw new Error("Citation Density annotated export needs an active case or uploaded estimate PDFs.");
     }
 
     if (!annotatedEstimateSourcePdf) {
@@ -2611,8 +2616,8 @@ function RailContent({
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       body: JSON.stringify({
-        caseId: analysisReportId,
-        activeCaseId: analysisReportId,
+        caseId: analysisReportId ?? undefined,
+        activeCaseId: analysisReportId ?? undefined,
         artifactIds: attachmentIds,
         ...selectionPayload,
         targetEstimate: citationDensityTargetEstimate,
@@ -3306,10 +3311,12 @@ function RailContent({
       {analysisLoading && !hasResolvedAnalysis && (
         <section className="mt-5 space-y-2 rounded-2xl border border-orange-500/12 bg-gradient-to-br from-[#C65A2A]/10 via-[#C65A2A]/[0.04] to-white/[0.02] p-3.5">
           <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/68">
-            Analysis in progress
+            {structuredComparisonReady ? "Delta ready" : "Analysis in progress"}
           </div>
           <div className="text-[13px] leading-5 text-muted-foreground">
-            {analysisElapsedSeconds >= Math.floor(ANALYSIS_STALE_AFTER_MS / 1000)
+            {structuredComparisonReady
+              ? "Structured estimate comparison is ready. Full report suite is still running. You can generate Delta Citation Density now."
+              : analysisElapsedSeconds >= Math.floor(ANALYSIS_STALE_AFTER_MS / 1000)
               ? ANALYSIS_TIMEOUT_MESSAGE
               : analysisElapsedSeconds >= 18
                 ? ANALYSIS_STILL_RUNNING_MESSAGE
@@ -3331,10 +3338,16 @@ function RailContent({
               </button>
               <button
                 type="button"
-                onClick={onRetryReportGeneration}
+                onClick={() => {
+                  if (structuredComparisonReady) {
+                    void downloadReportDocument("estimate_scrubber");
+                    return;
+                  }
+                  onRetryReportGeneration();
+                }}
                 className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
               >
-                Retry report generation
+                {structuredComparisonReady ? "Generate Delta Citation Density" : "Retry report generation"}
               </button>
             </div>
           ) : null}
@@ -3344,10 +3357,12 @@ function RailContent({
       {analysisStatus === "error" && !hasResolvedAnalysis && (
         <section className="mt-5 space-y-2 rounded-2xl border border-red-500/16 bg-red-500/[0.05] p-3.5">
           <div className="text-[10px] uppercase tracking-[0.22em] text-red-200/72">
-            {hasRetryableAnalysisFailure ? "Analysis delayed" : "Analysis blocked"}
+            {structuredComparisonReady ? "Full suite delayed" : hasRetryableAnalysisFailure ? "Analysis delayed" : "Analysis blocked"}
           </div>
           <div className="text-[13px] leading-5 text-muted-foreground">
-            {analysisStatusDetail ||
+            {structuredComparisonReady
+              ? "Full analysis is still running. Structured estimate comparison is ready."
+              : analysisStatusDetail ||
               (hasRetryableAnalysisFailure
                 ? "Analysis provider is busy. Please retry shortly."
                 : "The current file set could not be analyzed. Review access status or retry.")}
@@ -3362,10 +3377,16 @@ function RailContent({
             </button>
             <button
               type="button"
-              onClick={onRetryReportGeneration}
+              onClick={() => {
+                if (structuredComparisonReady) {
+                  void downloadReportDocument("estimate_scrubber");
+                  return;
+                }
+                onRetryReportGeneration();
+              }}
               className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
             >
-              Retry report generation
+              {structuredComparisonReady ? "Generate Delta Citation Density" : "Retry report generation"}
             </button>
           </div>
         </section>

@@ -550,6 +550,11 @@ export type RepairIntelligenceReport = {
     linkedEvidenceCount?: number;
     linkedEvidenceFetchedAt?: string;
     activeCaseId?: string;
+    structuredComparisonStatus?: "idle" | "running" | "ready" | "failed" | "timed_out";
+    deltaReportStatus?: "idle" | "ready" | "failed";
+    fullAnalysisStatus?: "idle" | "running" | "complete" | "failed" | "timed_out";
+    reportSuiteStatus?: "idle" | "running" | "complete" | "failed" | "timed_out";
+    structuredComparisonReadyAt?: string;
     reassessedAt?: string;
     reassessmentMode?: "new_case" | "active_case_update";
     uploadedFileCount?: number;

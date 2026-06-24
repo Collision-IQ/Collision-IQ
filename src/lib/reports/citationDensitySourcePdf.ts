@@ -86,7 +86,7 @@ export function buildCitationDensitySourcePdfDiagnostics(
 
 export function resolveSourceEstimatePdf(params: {
   attachments: StoredAttachment[];
-  report: RepairIntelligenceReport;
+  report: RepairIntelligenceReport | null;
   targetEstimate: CitationDensityTargetEstimate;
   findings: CitationDensityFinding[];
 }) {
@@ -95,7 +95,7 @@ export function resolveSourceEstimatePdf(params: {
 
 export function resolveSourceEstimatePdfSelection(params: {
   attachments: StoredAttachment[];
-  report: RepairIntelligenceReport;
+  report: RepairIntelligenceReport | null;
   targetEstimate: CitationDensityTargetEstimate;
   findings: CitationDensityFinding[];
 }): SourceEstimatePdfSelection | null {
@@ -117,7 +117,7 @@ export function resolveSourceEstimatePdfSelection(params: {
   }
 
   const evidenceTypeByLabel = new Map<string, string>();
-  for (const item of params.report.evidenceRegistry ?? []) {
+  for (const item of params.report?.evidenceRegistry ?? []) {
     const label = normalizeRoleText(item.label);
     if (label) evidenceTypeByLabel.set(label, item.sourceType);
   }
@@ -158,7 +158,7 @@ export function resolveSourceEstimatePdfSelection(params: {
 
 export function resolveSourceEstimatePdfSelections(params: {
   attachments: StoredAttachment[];
-  report: RepairIntelligenceReport;
+  report: RepairIntelligenceReport | null;
   targetEstimate: CitationDensityTargetEstimate;
   findings: CitationDensityFinding[];
 }): SourceEstimatePdfSelection[] {
@@ -216,7 +216,7 @@ export function resolveSourceEstimatePdfSelections(params: {
 
 function resolveLowerEstimatePdfSelection(params: {
   attachments: StoredAttachment[];
-  report: RepairIntelligenceReport;
+  report: RepairIntelligenceReport | null;
   targetEstimate: CitationDensityTargetEstimate;
   findings: CitationDensityFinding[];
 }): SourceEstimatePdfSelection | null {
@@ -225,7 +225,7 @@ function resolveLowerEstimatePdfSelection(params: {
   if (pdfs.length < 2) return null;
 
   const evidenceTypeByLabel = new Map<string, string>();
-  for (const item of params.report.evidenceRegistry ?? []) {
+  for (const item of params.report?.evidenceRegistry ?? []) {
     const label = normalizeRoleText(item.label);
     if (label) evidenceTypeByLabel.set(label, item.sourceType);
   }
