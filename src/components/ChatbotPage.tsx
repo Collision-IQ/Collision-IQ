@@ -133,6 +133,16 @@ type AnnotatedEstimateExportResult = {
 
 type CitationDensityWorkspaceReportFlavor = "delta" | "oem";
 type CitationDensityTargetEstimate = "auto" | "shop" | "carrier" | "both";
+type DeltaReportStatus = "idle" | "generating" | "ready" | "failed";
+type DeltaReportGenerationTrigger = "auto" | "manual" | "retry";
+type PersistedDeltaReportState = {
+  status: DeltaReportStatus;
+  artifactId?: string;
+  downloadUrl?: string;
+  filename?: string;
+  error?: string;
+  updatedAt: string;
+};
 
 type LeftPaneMode = "chat" | "review";
 export type ReportKind =
@@ -2101,6 +2111,12 @@ function RailContent({
   const [reportSendHistoryLoading, setReportSendHistoryLoading] = useState(false);
   const [serviceCheckoutLoading, setServiceCheckoutLoading] = useState(false);
   const [deltaReportGenerationError, setDeltaReportGenerationError] = useState<string | null>(null);
+  const [deltaReportStatus, setDeltaReportStatus] = useState<DeltaReportStatus>("idle");
+  const [deltaReportDownloadUrl, setDeltaReportDownloadUrl] = useState<string | null>(null);
+  const [deltaReportArtifactId, setDeltaReportArtifactId] = useState<string | null>(null);
+  const [deltaReportStateHydrated, setDeltaReportStateHydrated] = useState(false);
+  const deltaReportGenerationInFlightRef = useRef(false);
+  const deltaAutoGenerationKeyRef = useRef<string | null>(null);
   function registerSectionRef(insightKey: InsightKey, node: HTMLDivElement | null) {
     sectionRefs.current[insightKey] = node;
   }
@@ -2147,20 +2163,59 @@ function RailContent({
   );
   const annotatedEstimateSourcePdf = resolvedCitationDensitySelection.primaryCandidate;
   const structuredComparisonReady = citationDensityEstimateCandidates.length >= 2;
+  const deltaSourceFilename = annotatedEstimateSourcePdf?.filename ?? citationDensityEstimateCandidates[0]?.filename ?? "";
+  const deltaComparisonFilename =
+    citationDensityEstimateCandidates.find((candidate) => candidate.documentId !== annotatedEstimateSourcePdf?.documentId)?.filename ??
+    citationDensityEstimateCandidates[1]?.filename ??
+    "";
+  const deltaReportPersistenceKey = useMemo(
+    () => {
+      const scope = analysisReportId ?? attachmentIds.join(".");
+      return scope ? `collision-iq:delta-report:${scope}` : "";
+    },
+    [analysisReportId, attachmentIds]
+  );
+  const deltaRequestedByPrompt = useMemo(
+    () => isDeltaCitationDensityGenerationRequest(`${caseIntent}\n${primaryAnalysisContent}`),
+    [caseIntent, primaryAnalysisContent]
+  );
+  const fullAnalysisStatus: "delayed" | "running" | "complete" | "timed_out" =
+    hasResolvedAnalysis || analysisStatus === "complete"
+      ? "complete"
+      : analysisStatus === "error" && analysisStatusDetail === ANALYSIS_TIMEOUT_MESSAGE
+        ? "timed_out"
+        : analysisLoading || analysisStatus === "processing"
+          ? "running"
+          : structuredComparisonReady
+            ? "delayed"
+            : "running";
   const deltaDebugState = useMemo(
     () => ({
-      build: "0de130d",
+      build: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? "local",
       deltaMode: "structured_from_artifacts",
       structuredComparisonReady,
+      structuredComparisonStatus: structuredComparisonReady ? "ready" : "idle",
+      deltaReportStatus,
+      fullAnalysisStatus,
       route: "/api/reports/citation-density/annotated-estimate",
       artifactIds: attachmentIds,
+      sourceFilename: deltaSourceFilename,
+      comparisonFilename: deltaComparisonFilename,
       candidates: citationDensityEstimateCandidates.map((candidate) => ({
         documentId: candidate.documentId,
         filename: candidate.filename,
         estimateRole: candidate.estimateRole,
       })),
     }),
-    [attachmentIds, citationDensityEstimateCandidates, structuredComparisonReady]
+    [
+      attachmentIds,
+      citationDensityEstimateCandidates,
+      deltaComparisonFilename,
+      deltaReportStatus,
+      deltaSourceFilename,
+      fullAnalysisStatus,
+      structuredComparisonReady,
+    ]
   );
   const canGenerateCitationDensityAnnotatedEstimate =
     Boolean(annotatedEstimateSourcePdf && (analysisReportId || structuredComparisonReady));
@@ -2243,22 +2298,153 @@ function RailContent({
     console.info("[delta-report-debug]", deltaDebugState);
   }, [deltaDebugState, structuredComparisonReady]);
 
-  function retryDeltaReportGeneration() {
-    const requestId = createAnalysisRequestId("retry-delta-report");
+  useEffect(() => {
+    if (!deltaReportPersistenceKey || typeof window === "undefined") {
+      setDeltaReportStateHydrated(true);
+      return;
+    }
+    const raw = window.localStorage.getItem(deltaReportPersistenceKey);
+    if (!raw) {
+      setDeltaReportStateHydrated(true);
+      return;
+    }
+    const persisted = parsePersistedDeltaReportState(raw);
+    if (!persisted) {
+      setDeltaReportStateHydrated(true);
+      return;
+    }
+
+    setDeltaReportStatus(persisted.status);
+    setDeltaReportGenerationError(persisted.error ?? null);
+    setDeltaReportDownloadUrl(persisted.downloadUrl ?? null);
+    setDeltaReportArtifactId(persisted.artifactId ?? null);
+    setDeltaReportStateHydrated(true);
+  }, [deltaReportPersistenceKey]);
+
+  useEffect(() => {
+    if (!deltaReportPersistenceKey || typeof window === "undefined") return;
+    if (!deltaReportStateHydrated) return;
+    const state: PersistedDeltaReportState = {
+      status: deltaReportStatus,
+      artifactId: deltaReportArtifactId ?? undefined,
+      downloadUrl: deltaReportDownloadUrl ?? undefined,
+      error: deltaReportGenerationError ?? undefined,
+      filename: "delta-citation-density-report.pdf",
+      updatedAt: new Date().toISOString(),
+    };
+    window.localStorage.setItem(deltaReportPersistenceKey, JSON.stringify(state));
+  }, [
+    deltaReportArtifactId,
+    deltaReportDownloadUrl,
+    deltaReportGenerationError,
+    deltaReportPersistenceKey,
+    deltaReportStateHydrated,
+    deltaReportStatus,
+  ]);
+
+  useEffect(() => {
+    if (!structuredComparisonReady || !deltaRequestedByPrompt || !canGenerateCitationDensityAnnotatedEstimate) return;
+    if (!deltaReportStateHydrated) return;
+    if (deltaReportStatus !== "idle" && deltaReportStatus !== "generating") return;
+    if (deltaReportStatus === "generating" && deltaReportGenerationInFlightRef.current) return;
+    const autoKey = `${deltaReportPersistenceKey}:${attachmentIds.join(",")}`;
+    if (deltaAutoGenerationKeyRef.current === autoKey) return;
+    deltaAutoGenerationKeyRef.current = autoKey;
     console.info("[analysis-lifecycle]", {
-      stage: "retry_delta_report_clicked",
-      requestId,
+      stage: "delta_auto_generation_queued",
+      requestId: createAnalysisRequestId("delta-auto"),
       caseId: analysisReportId,
       fileCount: attachmentIds.length,
+      artifactIdsCount: attachmentIds.length,
       durationMs: 0,
       status: "delta",
       route: "/api/reports/citation-density/annotated-estimate",
-      build: "0de130d",
+      build: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? "local",
       deltaMode: "structured_from_artifacts",
+      sourceFilename: deltaSourceFilename,
+      comparisonFilename: deltaComparisonFilename,
       structuredComparisonReady,
     });
+    void startDeltaReportGeneration("auto");
+  }, [
+    analysisReportId,
+    attachmentIds,
+    canGenerateCitationDensityAnnotatedEstimate,
+    deltaComparisonFilename,
+    deltaReportPersistenceKey,
+    deltaReportStateHydrated,
+    deltaReportStatus,
+    deltaRequestedByPrompt,
+    deltaSourceFilename,
+    structuredComparisonReady,
+  ]);
+
+  function retryDeltaReportGeneration() {
+    console.info("[analysis-lifecycle]", {
+      stage: "retry_delta_report_clicked",
+      requestId: createAnalysisRequestId("retry-delta-report"),
+      caseId: analysisReportId,
+      fileCount: attachmentIds.length,
+      artifactIdsCount: attachmentIds.length,
+      durationMs: 0,
+      status: "delta",
+      route: "/api/reports/citation-density/annotated-estimate",
+      build: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? "local",
+      deltaMode: "structured_from_artifacts",
+      sourceFilename: deltaSourceFilename,
+      comparisonFilename: deltaComparisonFilename,
+      structuredComparisonReady,
+    });
+    void startDeltaReportGeneration(deltaReportStatus === "failed" ? "retry" : "manual");
+  }
+
+  async function startDeltaReportGeneration(trigger: DeltaReportGenerationTrigger) {
+    const requestId = createAnalysisRequestId(trigger === "auto" ? "delta-auto" : "delta-report");
+    if (deltaReportGenerationInFlightRef.current || deltaReportStatus === "generating") {
+      console.info("[analysis-lifecycle]", {
+        stage: "delta_generate_button_ignored_already_running",
+        requestId,
+        caseId: analysisReportId,
+        fileCount: attachmentIds.length,
+        artifactIdsCount: attachmentIds.length,
+        durationMs: 0,
+        status: "delta",
+        route: "/api/reports/citation-density/annotated-estimate",
+        build: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? "local",
+        deltaMode: "structured_from_artifacts",
+        sourceFilename: deltaSourceFilename,
+        comparisonFilename: deltaComparisonFilename,
+        structuredComparisonReady,
+      });
+      return;
+    }
+
+    console.info("[analysis-lifecycle]", {
+      stage: trigger === "manual" || trigger === "retry" ? "delta_generate_button_clicked" : "delta_auto_generation_started",
+      requestId,
+      caseId: analysisReportId,
+      fileCount: attachmentIds.length,
+      artifactIdsCount: attachmentIds.length,
+      durationMs: 0,
+      status: "delta",
+      route: "/api/reports/citation-density/annotated-estimate",
+      build: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? "local",
+      deltaMode: "structured_from_artifacts",
+      sourceFilename: deltaSourceFilename,
+      comparisonFilename: deltaComparisonFilename,
+      structuredComparisonReady,
+    });
+
+    deltaReportGenerationInFlightRef.current = true;
+    setDeltaReportStatus("generating");
     setDeltaReportGenerationError(null);
-    void downloadReportDocument("estimate_scrubber");
+    setDeltaReportDownloadUrl(null);
+    setReportSendStatus("Structured estimate comparison is ready. Generating Delta Citation Density now...");
+    try {
+      await downloadReportDocument("estimate_scrubber");
+    } finally {
+      deltaReportGenerationInFlightRef.current = false;
+    }
   }
   const reviewedEstimateCount = buildReportUploadedDocuments(analysisResult).filter(
     (doc) => doc.kind === "estimate"
@@ -2542,6 +2728,7 @@ function RailContent({
   async function downloadReportDocument(reportType: ReportKind) {
     if (reportType === "estimate_scrubber") {
       try {
+        setDeltaReportStatus("generating");
         setDeltaReportGenerationError(null);
         const exportResult = await generateAnnotatedCitationDensityEstimate();
         downloadBlob(exportResult.blob, exportResult.filename);
@@ -2549,9 +2736,12 @@ function RailContent({
           reportFlavor: "delta",
           result: exportResult,
           onRegenerate: () => {
-            void downloadReportDocument("estimate_scrubber");
+            retryDeltaReportGeneration();
           },
         });
+        setDeltaReportStatus("ready");
+        setDeltaReportDownloadUrl(exportResult.downloadUrl);
+        setDeltaReportArtifactId(exportResult.artifactId || null);
         setReportSendStatus(buildAnnotatedCitationDensityStatus(exportResult));
       } catch (error) {
         console.info("[analysis-lifecycle]", {
@@ -2559,16 +2749,22 @@ function RailContent({
           requestId: createAnalysisRequestId("delta-report"),
           caseId: analysisReportId,
           fileCount: attachmentIds.length,
+          artifactIdsCount: attachmentIds.length,
           durationMs: 0,
           status: "delta",
           route: "/api/reports/citation-density/annotated-estimate",
-          build: "0de130d",
+          build: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? "local",
           deltaMode: "structured_from_artifacts",
+          sourceFilename: deltaSourceFilename,
+          comparisonFilename: deltaComparisonFilename,
           structuredComparisonReady,
           detail: error instanceof Error ? error.message : String(error),
         });
         const message = "Delta Citation Density generation failed. Retry Delta report.";
+        setDeltaReportStatus("failed");
         setDeltaReportGenerationError(message);
+        setDeltaReportDownloadUrl(null);
+        setDeltaReportArtifactId(null);
         setReportSendStatus(message);
       }
       return;
@@ -2662,11 +2858,14 @@ function RailContent({
       requestId,
       caseId: analysisReportId,
       fileCount: attachmentIds.length,
+      artifactIdsCount: attachmentIds.length,
       durationMs: 0,
       status: "delta",
       route: "/api/reports/citation-density/annotated-estimate",
-      build: "0de130d",
+      build: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? "local",
       deltaMode: "structured_from_artifacts",
+      sourceFilename: deltaSourceFilename,
+      comparisonFilename: deltaComparisonFilename,
       structuredComparisonReady,
     });
     const selectionPayload = buildCitationDensitySelectionPayload(resolvedCitationDensitySelection);
@@ -2742,11 +2941,14 @@ function RailContent({
       requestId,
       caseId: analysisReportId,
       fileCount: attachmentIds.length,
+      artifactIdsCount: attachmentIds.length,
       durationMs: Date.now() - startedAt,
       status: "delta",
       route: "/api/reports/citation-density/annotated-estimate",
-      build: "0de130d",
+      build: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? "local",
       deltaMode: "structured_from_artifacts",
+      sourceFilename: deltaSourceFilename,
+      comparisonFilename: deltaComparisonFilename,
       structuredComparisonReady,
     });
     return result;
@@ -3340,6 +3542,23 @@ function RailContent({
           </div>
         ) : null}
 
+        {structuredComparisonReady ? (
+          <div className="mt-3 grid grid-cols-1 gap-2.5">
+            <MetricCard
+              label="structuredComparisonStatus"
+              value="ready"
+            />
+            <MetricCard
+              label="deltaReportStatus"
+              value={deltaReportStatus}
+            />
+            <MetricCard
+              label="fullAnalysisStatus"
+              value={fullAnalysisStatus}
+            />
+          </div>
+        ) : null}
+
         {fileReviewWarning ? (
           <div className="mt-3 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-[12px] leading-5 text-amber-800 dark:text-amber-200">
             {fileReviewWarning}
@@ -3378,7 +3597,9 @@ function RailContent({
           </div>
           <div className="text-[13px] leading-5 text-muted-foreground">
             {structuredComparisonReady
-              ? "Structured estimate comparison ready. Full report suite is still running. You can generate Delta Citation Density now."
+              ? deltaReportStatus === "generating"
+                ? "Structured estimate comparison is ready. Generating Delta Citation Density now..."
+                : "Structured estimate comparison ready. Full report suite is still running. You can generate Delta Citation Density now."
               : analysisElapsedSeconds >= Math.floor(ANALYSIS_STALE_AFTER_MS / 1000)
               ? ANALYSIS_TIMEOUT_MESSAGE
               : analysisElapsedSeconds >= 18
@@ -3413,9 +3634,14 @@ function RailContent({
                   }
                   onRetryReportGeneration();
                 }}
+                disabled={structuredComparisonReady && deltaReportStatus === "generating"}
                 className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
               >
-                {structuredComparisonReady ? "Generate Delta Citation Density" : "Retry report generation"}
+                {structuredComparisonReady
+                  ? deltaReportStatus === "generating"
+                    ? "Generating..."
+                    : "Generate Delta Citation Density"
+                  : "Retry report generation"}
               </button>
             </div>
           ) : null}
@@ -3429,7 +3655,9 @@ function RailContent({
           </div>
           <div className="text-[13px] leading-5 text-muted-foreground">
             {structuredComparisonReady
-              ? "Structured estimate comparison ready. Full analysis is delayed."
+              ? deltaReportStatus === "generating"
+                ? "Structured estimate comparison is ready. Generating Delta Citation Density now..."
+                : "Structured estimate comparison ready. Full analysis is delayed."
               : analysisStatusDetail ||
               (hasRetryableAnalysisFailure
                 ? "Analysis provider is busy. Please retry shortly."
@@ -3457,9 +3685,14 @@ function RailContent({
                 }
                 onRetryReportGeneration();
               }}
+              disabled={structuredComparisonReady && deltaReportStatus === "generating"}
               className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
             >
-              {structuredComparisonReady ? "Generate Delta Citation Density" : "Retry report generation"}
+              {structuredComparisonReady
+                ? deltaReportStatus === "generating"
+                  ? "Generating..."
+                  : "Generate Delta Citation Density"
+                : "Retry report generation"}
             </button>
           </div>
         </section>
@@ -3813,9 +4046,13 @@ function RailContent({
                         exportType: "estimate_scrubber",
                       });
                     }}
+                    disabled={deltaReportStatus === "generating"}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
-                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download Delta Citation Density Report</span>
+                    <span className="inline-flex items-center gap-2">
+                      <Download size={15} aria-hidden />
+                      {deltaReportStatus === "generating" ? "Generating..." : "Download Delta Citation Density Report"}
+                    </span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
                   </button>
                   <button
@@ -3831,6 +4068,25 @@ function RailContent({
                   send={getLastSendFor("estimate_scrubber")}
                   loading={reportSendHistoryLoading}
                 />
+                {deltaReportStatus === "generating" ? (
+                  <div className="rounded-md border border-[#C65A2A]/25 bg-[#C65A2A]/10 px-3 py-2 text-[12px] leading-5 text-muted-foreground">
+                    Structured estimate comparison is ready. Generating Delta Citation Density now...
+                  </div>
+                ) : null}
+                {deltaReportStatus === "ready" && deltaReportDownloadUrl ? (
+                  <a
+                    href={deltaReportDownloadUrl}
+                    className="flex items-center justify-between gap-2 rounded-md border border-green-500/25 bg-green-500/10 px-3 py-2 text-xs font-semibold leading-5 text-green-200 transition hover:bg-green-500/15"
+                  >
+                    <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download ready Delta PDF</span>
+                    <ArrowRight size={14} aria-hidden />
+                  </a>
+                ) : null}
+                {deltaReportStatus === "failed" && deltaReportGenerationError ? (
+                  <div className="rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-[12px] leading-5 text-red-200">
+                    {deltaReportGenerationError}
+                  </div>
+                ) : null}
               </div>
             ) : null}
             {canUsePolicyRightsReviewExport ? (
@@ -5465,6 +5721,36 @@ function buildCitationDensityEstimateCandidates(
       }
       return /estimate|supplement|sor|shop|carrier|insurer|insurance|ccc|mitchell|audatex|appraisal|rta/.test(text);
     });
+}
+
+function isDeltaCitationDensityGenerationRequest(value: string) {
+  return /\b(?:generate|create|build|download|run|produce)\b[\s\S]{0,80}\bdelta citation density(?: report)?\b/i.test(value) ||
+    /\bdelta citation density report\b/i.test(value);
+}
+
+function parsePersistedDeltaReportState(value: string): PersistedDeltaReportState | null {
+  try {
+    const parsed = JSON.parse(value) as Partial<PersistedDeltaReportState> | null;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (
+      parsed.status !== "idle" &&
+      parsed.status !== "generating" &&
+      parsed.status !== "ready" &&
+      parsed.status !== "failed"
+    ) {
+      return null;
+    }
+    return {
+      status: parsed.status,
+      artifactId: typeof parsed.artifactId === "string" ? parsed.artifactId : undefined,
+      downloadUrl: typeof parsed.downloadUrl === "string" ? parsed.downloadUrl : undefined,
+      filename: typeof parsed.filename === "string" ? parsed.filename : undefined,
+      error: typeof parsed.error === "string" ? parsed.error : undefined,
+      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function inferCitationDensityEstimateRole(filename: string): CitationDensityEstimateRole {
