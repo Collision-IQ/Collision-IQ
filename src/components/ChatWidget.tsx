@@ -45,6 +45,15 @@ import {
   buildPreliminaryReviewDraft,
 } from "@/components/chatWidget/preliminaryReview";
 import {
+  ANALYSIS_STILL_RUNNING_AFTER_MS,
+  ANALYSIS_STILL_RUNNING_MESSAGE,
+  ANALYSIS_TIMEOUT_MESSAGE,
+  createAnalysisLifecycleLogger,
+  createAnalysisRequestId,
+  fetchWithTimeout,
+  resolveHydrationReviewProgress,
+} from "@/components/chatWidget/analysisLifecycle";
+import {
   buildChatExportPayload,
   buildExportMessages,
   getDownloadFilename,
@@ -849,6 +858,7 @@ export default function ChatWidget({
   const messageCounterRef = useRef(0);
   const activeSystemStatusMessageIdRef = useRef<string | null>(null);
   const reviewProgressTimerRefs = useRef<number[]>([]);
+  const analysisStillRunningTimerRef = useRef<number | null>(null);
   const conversationalWaitingTimerRef = useRef<number | null>(null);
   const lastConversationalWaitingAtRef = useRef(0);
   const conversationalWaitingIndexRef = useRef(0);
@@ -1324,6 +1334,10 @@ export default function ChatWidget({
       window.clearTimeout(conversationalWaitingTimerRef.current);
       conversationalWaitingTimerRef.current = null;
     }
+    if (analysisStillRunningTimerRef.current !== null) {
+      window.clearTimeout(analysisStillRunningTimerRef.current);
+      analysisStillRunningTimerRef.current = null;
+    }
   }
 
   function scheduleReviewProgressMessages(hasActiveCase: boolean) {
@@ -1346,6 +1360,18 @@ export default function ChatWidget({
         upsertSystemStatusMessage(status);
       }, 1800 + index * 5500)
     );
+  }
+
+  function scheduleAnalysisStillRunningMessage(activeAnalysisRunId: number | null) {
+    if (typeof window === "undefined" || activeAnalysisRunId === null) return;
+    if (analysisStillRunningTimerRef.current !== null) {
+      window.clearTimeout(analysisStillRunningTimerRef.current);
+    }
+    analysisStillRunningTimerRef.current = window.setTimeout(() => {
+      analysisStillRunningTimerRef.current = null;
+      if (analysisRunRef.current !== activeAnalysisRunId) return;
+      upsertSystemStatusMessage(ANALYSIS_STILL_RUNNING_MESSAGE);
+    }, ANALYSIS_STILL_RUNNING_AFTER_MS);
   }
 
   function scheduleConversationalWaitingFallback(activeAnalysisRunId: number | null) {
@@ -2014,6 +2040,12 @@ export default function ChatWidget({
     const activeCaseTopic = updateCaseTopic(messageToSend);
     const hasAttachmentsInTurn = attachmentsForTurn.length > 0;
     const activeAnalysisRunId = hasAttachmentsInTurn ? beginStructuredAnalysisRun() : null;
+    const analysisRequestId = createAnalysisRequestId();
+    const lifecycle = createAnalysisLifecycleLogger({
+      requestId: analysisRequestId,
+      caseId: analysisReportIdRef.current,
+      fileCount: attachmentsForTurn.length,
+    });
     const attachmentStats = {
       ...summarizeAttachmentStats(attachmentsForTurn),
       totalPdfPages: attachmentsForTurn.reduce((sum, attachment) => sum + (attachment.pageCount ?? 0), 0),
@@ -2027,9 +2059,14 @@ export default function ChatWidget({
     setInput("");
 
     if (hasAttachmentsInTurn) {
+      lifecycle.stage("preliminary_review_started");
       upsertSystemStatusMessage("Parsing estimate PDFs...");
       scheduleReviewProgressMessages(Boolean(analysisReportIdRef.current));
+      scheduleAnalysisStillRunningMessage(activeAnalysisRunId);
       const preliminaryDraft = buildPreliminaryReviewDraft(attachmentsForTurn);
+      lifecycle.stage("estimate_pair_resolved", {
+        status: preliminaryDraft.hasUsefulTriage ? "resolved" : "not_resolved",
+      });
       if (preliminaryDraft.hasUsefulTriage) {
         messageCounterRef.current += 1;
         const preliminaryMessage = createMessage(
@@ -2045,6 +2082,7 @@ export default function ChatWidget({
       } else {
         scheduleConversationalWaitingFallback(activeAnalysisRunId);
       }
+      lifecycle.stage("preliminary_review_complete");
     }
 
     abortRef.current?.abort();
@@ -2209,17 +2247,25 @@ export default function ChatWidget({
 
       if (hasAttachmentsInTurn && analysisReportIdRef.current) {
         const activeCaseId = analysisReportIdRef.current;
-        const analysisResponse = await fetch("/api/analysis", {
+        lifecycle.stage("full_analysis_started", { caseId: activeCaseId });
+        lifecycle.stage("structured_deltas_started", { caseId: activeCaseId });
+        lifecycle.stage("repair_intelligence_started", { caseId: activeCaseId });
+        lifecycle.stage("snapshot_started", { caseId: activeCaseId });
+        lifecycle.stage("report_exports_started", { caseId: activeCaseId });
+        const analysisResponse = await fetchWithTimeout("/api/analysis", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
           body: JSON.stringify({
             artifactIds: attachmentsForTurn.map((attachment) => attachment.attachmentId),
             activeCaseId,
+            requestId: analysisRequestId,
             userIntent: messageToSend,
             assistanceProfile,
             reviewProgress: reviewProgressRef.current,
           }),
+        }, {
+          parentSignal: controller.signal,
+          timeoutMessage: ANALYSIS_TIMEOUT_MESSAGE,
         });
         const analysisDurationMs = Date.now() - analysisStartMs;
 
@@ -2240,6 +2286,11 @@ export default function ChatWidget({
             retryable: analysisFailure?.retryable ?? false,
             stage: analysisFailure?.stage ?? null,
             provider: analysisFailure?.provider ?? null,
+          });
+          lifecycle.stage("full_analysis_failed", {
+            caseId: activeCaseId,
+            status: String(analysisResponse.status),
+            detail: analysisFailure?.detail ?? null,
           });
           if (analysisRunRef.current === activeAnalysisRunId) {
             clearReviewProgressTimers();
@@ -2275,6 +2326,10 @@ export default function ChatWidget({
           artifactRefreshPolicy?: RepairIntelligenceReport["artifactRefreshPolicy"];
           reviewProgress?: ReviewProgress;
         };
+        lifecycle.stage("structured_deltas_complete", { caseId: activeCaseId });
+        lifecycle.stage("repair_intelligence_complete", { caseId: activeCaseId });
+        lifecycle.stage("snapshot_complete", { caseId: activeCaseId });
+        lifecycle.stage("report_exports_complete", { caseId: activeCaseId });
 
         const returnedActiveCaseId =
           analysisData.caseContinuity?.activeCaseId ?? analysisData.reportId ?? activeCaseId;
@@ -2292,6 +2347,7 @@ export default function ChatWidget({
         onAnalysisPanelChange?.(analysisData.panel ?? null);
         onAnalysisStatusChange?.("complete", analysisData.contextBudgetMessage ?? null);
         onAnalysisLoadingChange?.(false);
+        lifecycle.stage("right_rail_state_published", { caseId: nextActiveCaseId });
         const nextReviewProgress = updateReviewProgress((current) => {
           const reviewedForDetermination =
             analysisData.reviewProgress?.reviewedForDetermination ??
@@ -2373,6 +2429,7 @@ export default function ChatWidget({
           }))
         );
         onCaseUploadComplete?.();
+        lifecycle.stage("full_analysis_complete", { caseId: nextActiveCaseId });
 
         const latestPriorUserQuestion = resolveLatestUserQuestion();
 
@@ -2503,17 +2560,25 @@ export default function ChatWidget({
             pageCount: attachment.pageCount ?? null,
           })),
         });
-        void fetch("/api/analysis", {
+        lifecycle.stage("full_analysis_started", { caseId: analysisReportIdRef.current });
+        lifecycle.stage("structured_deltas_started", { caseId: analysisReportIdRef.current });
+        lifecycle.stage("repair_intelligence_started", { caseId: analysisReportIdRef.current });
+        lifecycle.stage("snapshot_started", { caseId: analysisReportIdRef.current });
+        lifecycle.stage("report_exports_started", { caseId: analysisReportIdRef.current });
+        void fetchWithTimeout("/api/analysis", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
           body: JSON.stringify({
             artifactIds: attachmentsForTurn.map((attachment) => attachment.attachmentId),
             activeCaseId: analysisReportIdRef.current,
+            requestId: analysisRequestId,
             userIntent: messageToSend,
             assistanceProfile,
             reviewProgress: reviewProgressRef.current,
           }),
+        }, {
+          parentSignal: controller.signal,
+          timeoutMessage: ANALYSIS_TIMEOUT_MESSAGE,
         })
           .then(async (analysisResponse) => {
             const analysisDurationMs = Date.now() - analysisStartMs;
@@ -2534,6 +2599,10 @@ export default function ChatWidget({
                 retryable: analysisFailure?.retryable ?? false,
                 stage: analysisFailure?.stage ?? null,
                 provider: analysisFailure?.provider ?? null,
+              });
+              lifecycle.stage("full_analysis_failed", {
+                status: String(analysisResponse.status),
+                detail: analysisFailure?.detail ?? null,
               });
               if (analysisRunRef.current === activeAnalysisRunId) {
                 clearReviewProgressTimers();
@@ -2569,6 +2638,10 @@ export default function ChatWidget({
               artifactRefreshPolicy?: RepairIntelligenceReport["artifactRefreshPolicy"];
               reviewProgress?: ReviewProgress;
             };
+            lifecycle.stage("structured_deltas_complete", { caseId: analysisData.reportId ?? analysisReportIdRef.current });
+            lifecycle.stage("repair_intelligence_complete", { caseId: analysisData.reportId ?? analysisReportIdRef.current });
+            lifecycle.stage("snapshot_complete", { caseId: analysisData.reportId ?? analysisReportIdRef.current });
+            lifecycle.stage("report_exports_complete", { caseId: analysisData.reportId ?? analysisReportIdRef.current });
             // Backend workspaceData is the primary source of truth for Workspace rendering.
             analysisReportIdRef.current = analysisData.reportId ?? null;
             setWorkspaceData(analysisData.workspaceData ?? workspaceDataRef.current);
@@ -2580,6 +2653,7 @@ export default function ChatWidget({
             onAnalysisPanelChange?.(analysisData.panel ?? null);
             onAnalysisStatusChange?.("complete", analysisData.contextBudgetMessage ?? null);
             onAnalysisLoadingChange?.(false);
+            lifecycle.stage("right_rail_state_published", { caseId: analysisData.reportId ?? null });
             const nextReviewProgress = updateReviewProgress((current) => {
               const reviewedForDetermination =
                 analysisData.reviewProgress?.reviewedForDetermination ??
@@ -2663,6 +2737,7 @@ export default function ChatWidget({
                 "Report availability: the right rail and bottom report viewer are updated when generated outputs are available.",
               ].filter(Boolean).join("\n")
             );
+            lifecycle.stage("full_analysis_complete", { caseId: analysisData.reportId ?? null });
           })
           .catch((error) => {
             console.info("[attachments] analysis failure", {
@@ -2672,13 +2747,24 @@ export default function ChatWidget({
               analysisDurationMs: Date.now() - analysisStartMs,
               error: error instanceof Error ? error.message : String(error),
             });
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            lifecycle.stage(
+              errorMessage === ANALYSIS_TIMEOUT_MESSAGE ? "full_analysis_timeout" : "full_analysis_failed",
+              { detail: errorMessage }
+            );
             if (
               sessionRef.current === mySession &&
               analysisRunRef.current === activeAnalysisRunId
             ) {
               clearReviewProgressTimers();
-              onAnalysisStatusChange?.("error", "Analysis failed");
+              onAnalysisStatusChange?.(
+                "error",
+                errorMessage === ANALYSIS_TIMEOUT_MESSAGE ? ANALYSIS_TIMEOUT_MESSAGE : "Analysis failed"
+              );
               onAnalysisLoadingChange?.(false);
+              upsertSystemStatusMessage(
+                errorMessage === ANALYSIS_TIMEOUT_MESSAGE ? ANALYSIS_TIMEOUT_MESSAGE : "Analysis failed. Retry analysis."
+              );
             }
           });
       }
@@ -2761,14 +2847,25 @@ export default function ChatWidget({
         return;
       }
 
+      const errorMessage = err instanceof Error ? err.message : String(err);
       console.warn("[chat] unexpected request failure", {
-        message: err instanceof Error ? err.message : String(err),
+        message: errorMessage,
       });
+      if (hasAttachmentsInTurn) {
+        lifecycle.stage(
+          errorMessage === ANALYSIS_TIMEOUT_MESSAGE ? "full_analysis_timeout" : "full_analysis_failed",
+          { detail: errorMessage }
+        );
+      }
 
       if (sessionRef.current === mySession) {
         if (hasAttachmentsInTurn) {
           clearReviewProgressTimers();
-          upsertSystemStatusMessage("The analysis service had a temporary issue. Please retry.");
+          upsertSystemStatusMessage(
+            errorMessage === ANALYSIS_TIMEOUT_MESSAGE
+              ? ANALYSIS_TIMEOUT_MESSAGE
+              : "The analysis service had a temporary issue. Please retry."
+          );
         } else {
           setMessages((prev) => [
             ...prev,
@@ -2787,7 +2884,12 @@ export default function ChatWidget({
           hasAttachmentsInTurn &&
           analysisRunRef.current === activeAnalysisRunId
         ) {
-          onAnalysisStatusChange?.("error", "The analysis service had a temporary issue. Please retry.");
+          onAnalysisStatusChange?.(
+            "error",
+            errorMessage === ANALYSIS_TIMEOUT_MESSAGE
+              ? ANALYSIS_TIMEOUT_MESSAGE
+              : "The analysis service had a temporary issue. Please retry."
+          );
           onAnalysisLoadingChange?.(false);
         }
       }
@@ -2989,6 +3091,37 @@ export default function ChatWidget({
     const indexedCount = returnedUploads.filter((item) => typeof item.attachmentId === "string").length;
     const visionProcessedCount = returnedUploads.filter((item) => Boolean(item.hasVision)).length;
     const knownFileCount = countKnownFilesFromUploadResponse(data, returnedUploads);
+    const uploadRequestId = createAnalysisRequestId("upload");
+    console.info("[analysis-lifecycle]", {
+      stage: "upload_complete",
+      requestId: uploadRequestId,
+      caseId: activeCaseId,
+      fileCount: returnedUploads.length,
+      durationMs: 0,
+      status: res.status,
+    });
+    const hydratedCounts = resolveHydrationReviewProgress({
+      current: reviewProgressRef.current,
+      uploaded: knownFileCount || returnedUploads.length,
+      indexed: indexedCount,
+      attachmentCount: returnedUploads.length,
+    });
+    updateReviewProgress((current) => ({
+      ...current,
+      uploaded: Math.max(current.uploaded, hydratedCounts.uploaded),
+      indexed: Math.max(current.indexed, hydratedCounts.indexed),
+      visionProcessed: Math.max(current.visionProcessed, visionProcessedCount),
+      reviewableFileCount: Math.max(current.reviewableFileCount, hydratedCounts.reviewableFileCount),
+      totalKnownFiles: Math.max(current.totalKnownFiles, hydratedCounts.totalKnownFiles),
+    }));
+    console.info("[analysis-lifecycle]", {
+      stage: "files_indexed",
+      requestId: uploadRequestId,
+      caseId: activeCaseId,
+      fileCount: indexedCount,
+      durationMs: 0,
+      status: "indexed",
+    });
     const filename: string = upload?.filename || file.name;
     const mime: string = upload?.type || file.type;
     const imageDataUrl: string | undefined =

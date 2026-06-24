@@ -57,6 +57,12 @@ const {
 const {
   buildPreliminaryReviewDraft,
 } = require("../../components/chatWidget/preliminaryReview.ts");
+const {
+  ANALYSIS_TIMEOUT_MESSAGE,
+  createAnalysisLifecycleLogger,
+  isStaleProcessing,
+  resolveHydrationReviewProgress,
+} = require("../../components/chatWidget/analysisLifecycle.ts");
 
 function pdfAttachment(overrides = {}) {
   return {
@@ -813,6 +819,89 @@ run("fast triage resolves Shop 21896 lower and final estimate gap", () => {
   assert.match(draft.message, /Likely comparison\/final estimate: Shop Final 21896\.pdf \(\$17,397\.20\)/);
   assert.match(draft.message, /Approximate total gap: \+\$5,504\.94/);
   assert.doesNotMatch(draft.message, /Likely carrier\/SOR estimate: Shop 21896\.pdf/i);
+});
+
+run("right rail hydration progress uses indexed PDFs as reviewable denominator", () => {
+  const progress = resolveHydrationReviewProgress({
+    current: {
+      uploaded: 0,
+      indexed: 0,
+      reviewedForDetermination: 0,
+      reviewableFileCount: 0,
+      totalKnownFiles: 0,
+    },
+    uploaded: 2,
+    indexed: 2,
+    attachmentCount: 2,
+  });
+
+  assert.equal(progress.uploaded, 2);
+  assert.equal(progress.indexed, 2);
+  assert.equal(progress.reviewableFileCount, 2);
+  assert.equal(progress.totalKnownFiles, 2);
+
+  const cumulative = resolveHydrationReviewProgress({
+    current: {
+      uploaded: 1,
+      indexed: 1,
+      reviewedForDetermination: 0,
+      reviewableFileCount: 1,
+      totalKnownFiles: 1,
+    },
+    uploaded: 1,
+    indexed: 1,
+    attachmentCount: 1,
+  });
+  assert.equal(cumulative.uploaded, 2);
+  assert.equal(cumulative.indexed, 2);
+  assert.equal(cumulative.reviewableFileCount, 2);
+});
+
+run("processing watchdog marks stale analysis after timeout threshold", () => {
+  assert.equal(
+    isStaleProcessing({
+      status: "processing",
+      loading: true,
+      startedAt: 1_000,
+      now: 92_000,
+      staleAfterMs: 90_000,
+    }),
+    true
+  );
+  assert.equal(
+    isStaleProcessing({
+      status: "complete",
+      loading: false,
+      startedAt: 1_000,
+      now: 120_000,
+      staleAfterMs: 90_000,
+    }),
+    false
+  );
+});
+
+run("analysis lifecycle logger emits shared request id and stage durations", () => {
+  const events = [];
+  const logger = createAnalysisLifecycleLogger(
+    { requestId: "req-21896", caseId: "case-21896", fileCount: 2 },
+    (event) => events.push(event)
+  );
+
+  logger.stage("full_analysis_started");
+  logger.stage("full_analysis_timeout", { detail: ANALYSIS_TIMEOUT_MESSAGE });
+
+  assert.equal(events.length, 2);
+  assert.equal(events[0].requestId, "req-21896");
+  assert.equal(events[1].requestId, "req-21896");
+  assert.equal(events[1].stage, "full_analysis_timeout");
+  assert.equal(events[1].detail, ANALYSIS_TIMEOUT_MESSAGE);
+  assert.equal(typeof events[1].durationMs, "number");
+});
+
+run("upload route avoids deprecated Buffer constructors", () => {
+  const source = fs.readFileSync(path.join(process.cwd(), "src/app/api/upload/route.ts"), "utf8");
+  assert.doesNotMatch(source, /\bnew\s+Buffer\s*\(/);
+  assert.doesNotMatch(source, /[^\w.]Buffer\s*\(/);
 });
 
 run("estimate PDFs with insurer fields remain determination-eligible", () => {
