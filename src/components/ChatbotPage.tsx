@@ -1785,7 +1785,7 @@ function CollisionIqFooter() {
   const links = [
     { href: "/", label: "Home" },
     { href: "/dashboard", label: "Dashboard" },
-    { href: "/the-academy", label: "Collision Hub" },
+    { href: "/technical-systems/shop-hub", label: "Shop Hub" },
     { href: "/services", label: "Services" },
     { href: "/technical-systems", label: "Collision IQ" },
     { href: "/privacy", label: "Privacy" },

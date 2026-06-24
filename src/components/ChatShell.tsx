@@ -9,9 +9,14 @@ import { ShoppingCart } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getPlatform, isNative } from "@/lib/native";
 
+const SIGN_IN_BUTTON_CLASS =
+  "rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-background";
+
 function HeaderAuth() {
   const { isLoaded, isSignedIn } = useUser();
   const [isNativeClient, setIsNativeClient] = useState(false);
+  const [authFallbackReady, setAuthFallbackReady] = useState(false);
+  const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -22,6 +27,31 @@ function HeaderAuth() {
       window.cancelAnimationFrame(frame);
     };
   }, []);
+
+  useEffect(() => {
+    if (isLoaded) {
+      setAuthFallbackReady(false);
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setAuthFallbackReady(true);
+    }, 1400);
+
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [isLoaded]);
+
+  if (!clerkPublishableKey || (!isLoaded && authFallbackReady)) {
+    return (
+      <div className="flex min-h-10 shrink-0 items-center gap-2">
+        <Link href="/sign-in" className={SIGN_IN_BUTTON_CLASS}>
+          Sign in
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-10 shrink-0 items-center gap-2">
@@ -36,7 +66,7 @@ function HeaderAuth() {
         >
           <button
             type="button"
-            className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-background"
+            className={SIGN_IN_BUTTON_CLASS}
           >
             Sign in
           </button>

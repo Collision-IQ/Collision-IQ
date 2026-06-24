@@ -518,6 +518,25 @@ run("review completeness still warns when a true reviewable file is skipped", ()
   assert.match(message, /^Near-complete review: 185 of 186 reviewable files reviewed\./);
 });
 
+run("Collision IQ footer uses Shop Hub link and removes Collision Hub label", () => {
+  const source = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
+
+  assert.match(source, /label:\s*"Shop Hub"/);
+  assert.match(source, /href:\s*"\/technical-systems\/shop-hub"/);
+  assert.doesNotMatch(source, /label:\s*"Collision Hub"/);
+});
+
+run("header auth has visible Sign in fallback for stalled or missing Clerk state", () => {
+  const source = fs.readFileSync(path.join(process.cwd(), "src/components/ChatShell.tsx"), "utf8");
+
+  assert.match(source, /authFallbackReady/);
+  assert.match(source, /NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY/);
+  assert.match(source, /window\.setTimeout\([\s\S]*1400/);
+  assert.match(source, /href="\/sign-in"[\s\S]*Sign in/);
+  assert.match(source, /SIGN_IN_BUTTON_CLASS/);
+  assert.doesNotMatch(source, /<div className="h-8 w-\[62px\] shrink-0" aria-hidden \/>\s*\}\s*<\/div>\s*\);/);
+});
+
 run("right rail layout is bounded to chat row with internal scroll", () => {
   const source = fs.readFileSync(path.join(process.cwd(), "src/components/ChatShell.tsx"), "utf8");
 
