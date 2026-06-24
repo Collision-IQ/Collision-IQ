@@ -299,40 +299,11 @@ run("right rail exposes Delta Citation Density while full analysis is delayed", 
   assert.match(source, /retryDeltaReportGeneration\(\);/);
   assert.match(source, /route:\s*"\/api\/reports\/citation-density\/annotated-estimate"/);
   assert.match(source, /Generate Delta Citation Density/);
-  assert.match(source, /Structured estimate comparison is ready\. Generating Delta Citation Density now\.\.\./);
   assert.match(source, /Structured estimate comparison ready\. Full analysis is delayed\./);
   assert.match(source, /Delta Citation Density generation failed\. Retry Delta report\./);
-  assert.match(source, /process\.env\.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA \?\? "local"/);
+  assert.match(source, /build:\s*"0de130d"/);
   assert.match(source, /deltaMode:\s*"structured_from_artifacts"/);
-  assert.match(source, /structuredComparisonStatus/);
-  assert.match(source, /deltaReportStatus/);
-  assert.match(source, /fullAnalysisStatus/);
-  assert.match(source, /collision-iq:delta-report/);
-  assert.match(source, /Download ready Delta PDF/);
   assert.doesNotMatch(source, /hasResolvedAnalysis && Boolean\(analysisReportId && annotatedEstimateSourcePdf\)/);
-});
-
-run("Delta Citation Density auto-generates when requested and structured comparison is ready", () => {
-  const source = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
-  const routeSource = fs.readFileSync(
-    path.join(process.cwd(), "src/app/api/reports/citation-density/annotated-estimate/route.ts"),
-    "utf8"
-  );
-
-  assert.match(source, /isDeltaCitationDensityGenerationRequest/);
-  assert.match(source, /deltaRequestedByPrompt/);
-  assert.match(source, /stage:\s*"delta_auto_generation_queued"/);
-  assert.match(source, /void startDeltaReportGeneration\("auto"\)/);
-  assert.match(source, /"delta_generate_button_clicked"/);
-  assert.match(source, /stage:\s*"delta_generate_button_ignored_already_running"/);
-  assert.match(source, /disabled=\{deltaReportStatus === "generating"\}/);
-  assert.match(source, /fetch\("\/api\/reports\/citation-density\/annotated-estimate"/);
-  assert.doesNotMatch(source, /Generate Delta Citation Density[\s\S]{0,500}sendPrompt/);
-  assert.match(routeSource, /delta_report_generation_started/);
-  assert.match(routeSource, /delta_report_generation_complete/);
-  assert.match(routeSource, /delta_report_generation_failed/);
-  assert.match(routeSource, /DELTA_REPORT_ROUTE = "\/api\/reports\/citation-density\/annotated-estimate"/);
-  assert.match(routeSource, /deltaMode: "structured_from_artifacts"/);
 });
 
 run("OEM Citation Density replaces Policy & Rights primary report card", () => {

@@ -26,10 +26,6 @@ export type AnalysisLifecycleStage =
   | "retry_failed"
   | "retry_complete"
   | "retry_delta_report_clicked"
-  | "delta_auto_generation_queued"
-  | "delta_auto_generation_started"
-  | "delta_generate_button_clicked"
-  | "delta_generate_button_ignored_already_running"
   | "delta_report_generation_started"
   | "delta_report_generation_complete"
   | "delta_report_generation_failed";

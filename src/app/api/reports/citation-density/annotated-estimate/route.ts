@@ -56,8 +56,6 @@ type RequestBody = {
 const VALID_TARGET_ESTIMATES = new Set(["carrier", "shop", "selected", "both", "auto"]);
 const VALID_ANNOTATION_MODES = new Set(["margin_callouts", "inline_highlight", "both"]);
 const NO_ACTIVE_CASE_ERROR = "No active review was found. Open the case or run analysis before requesting an annotated estimate PDF.";
-const DELTA_REPORT_ROUTE = "/api/reports/citation-density/annotated-estimate";
-const DELTA_REPORT_BUILD_MARKER = process.env.VERCEL_GIT_COMMIT_SHA ?? "local";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -96,12 +94,6 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  let serverLogContext: Record<string, unknown> = {
-    route: DELTA_REPORT_ROUTE,
-    build: DELTA_REPORT_BUILD_MARKER,
-    deltaMode: "structured_from_artifacts",
-    structuredComparisonReady: false,
-  };
   try {
     const { user } = await requireCurrentUser();
     const body = (await request.json().catch(() => ({}))) as RequestBody;
@@ -110,15 +102,6 @@ export async function POST(request: Request) {
     const sourceDocumentId = coerceString(body.selectedSourceDocumentId) || coerceString(body.sourceDocumentId);
     const selectedEstimateRole = coerceString(body.selectedEstimateRole);
     const targetEstimate = coerceTargetEstimate(body.targetEstimate);
-    serverLogContext = {
-      ...serverLogContext,
-      caseId: caseId || null,
-      artifactIdsCount: requestArtifactIds.length,
-      sourceFilename: coerceString(body.sourceFilename),
-      comparisonFilename: "",
-      targetEstimate,
-      structuredComparisonReady: requestArtifactIds.length >= 2,
-    };
 
     const report = caseId
       ? await getAnalysisReport(caseId, { ownerUserId: user.id })
@@ -138,13 +121,6 @@ export async function POST(request: Request) {
     const sourceDocuments = await getUploadedAttachments(candidateIds, {
       ownerUserId: user.id,
     });
-    serverLogContext = {
-      ...serverLogContext,
-      artifactIdsCount: candidateIds.length,
-      comparisonFilename: sourceDocuments.find((document) => document.id !== sourceDocumentId)?.filename ?? "",
-      structuredComparisonReady: sourceDocuments.filter(isAnnotatableEstimatePdf).length >= 2,
-    };
-    logDeltaReportGenerationEvent("delta_report_generation_started", serverLogContext);
     if (sourceDocuments.length === 0) {
       return missingSourcePdfResponse();
     }
@@ -356,14 +332,6 @@ export async function POST(request: Request) {
 
     const primaryOutput = outputs[0];
     const responseDebugCounts = buildAnnotationDebugCounts(outputs[0]?.debugTrace);
-    logDeltaReportGenerationEvent("delta_report_generation_complete", {
-      ...serverLogContext,
-      sourceFilename: primaryOutput?.selectedSourceLabel ?? serverLogContext.sourceFilename,
-      artifactId: primaryOutput?.artifactId,
-      outputCount: outputs.length,
-      annotatedFindingCount,
-      unresolvedAnchorCount,
-    });
     logAnnotatedEstimateRoute({
       ok: true,
       targetEstimate,
@@ -417,11 +385,6 @@ export async function POST(request: Request) {
 
     if (error instanceof CitationDensityAnnotationError) {
       const debugCounts = buildAnnotationDebugCounts(error.debugTrace);
-      logDeltaReportGenerationEvent("delta_report_generation_failed", {
-        ...serverLogContext,
-        error: error.message,
-        status: error.status,
-      });
       logAnnotatedEstimateRoute({
         ok: false,
         error: error.message,
@@ -436,11 +399,6 @@ export async function POST(request: Request) {
       }, { status: error.status });
     }
 
-    logDeltaReportGenerationEvent("delta_report_generation_failed", {
-      ...serverLogContext,
-      error: error instanceof Error ? error.message : String(error),
-      status: 500,
-    });
     logAnnotatedEstimateRoute({
       ok: false,
       error: error instanceof Error ? error.message : String(error),
@@ -541,16 +499,6 @@ function buildAnnotationDebugCounts(debugTrace: Awaited<ReturnType<typeof buildA
 
 function logAnnotatedEstimateRoute(payload: Record<string, unknown>) {
   console.log(`[citation-density.annotated-estimate] ${JSON.stringify(payload)}`);
-}
-
-function logDeltaReportGenerationEvent(stage: "delta_report_generation_started" | "delta_report_generation_complete" | "delta_report_generation_failed", payload: Record<string, unknown>) {
-  console.log(`[analysis-lifecycle] ${JSON.stringify({
-    stage,
-    route: DELTA_REPORT_ROUTE,
-    build: DELTA_REPORT_BUILD_MARKER,
-    deltaMode: "structured_from_artifacts",
-    ...payload,
-  })}`);
 }
 
 function coerceString(value: unknown): string {
