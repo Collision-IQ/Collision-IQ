@@ -309,6 +309,30 @@ async function createMultiDeltaCarrierPdf(rows) {
   return await doc.save();
 }
 
+async function createShop21896LowerEstimatePdf() {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([612, 792]);
+  const rows = [
+    "Shop 21896 lower estimate",
+    "Net Cost of Repairs $11,892.26",
+    "REAR SUSPENSION",
+    "60 Repl LT Hub assy $250.00 1.0",
+    "61 R&I Rear suspension access $85.00 0.5",
+    "ENGINE COMPARTMENT",
+    "90 Rpr Engine compartment setup $45.00 0.2",
+    "VEHICLE DIAGNOSTICS",
+    "130 Subl Pre-repair scan $75.00 0.0",
+    "REFINISH",
+    "150 Rpr Finish sand and polish $80.00 0.8",
+    "CCC/MOTOR guide and abbreviation boilerplate only",
+  ];
+  rows.forEach((row, index) => {
+    page.drawText(row, { x: 42, y: 744 - index * 18, size: 8, font });
+  });
+  return await doc.save();
+}
+
 function drawFragmentedEstimateRow(page, font, line, description, labor, amount, y) {
   page.drawText(String(line), { x: 48, y, size: 8, font });
   page.drawText(description, { x: 82, y, size: 8, font });
@@ -3442,6 +3466,85 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.ok(result.debugTrace.acceptedEstimateRowFindingCount >= 4);
     assert.ok(result.debugTrace.rejectedBoilerplateCount >= 0);
     assert.equal(result.debugTrace.authoritySearchTrace.googleDriveOrInternalSearchRan, false);
+  });
+
+  await run("delta citation density leads with structured shop-to-shop line-pair deltas", async () => {
+    const sourcePdfBytes = await createShop21896LowerEstimatePdf();
+    const comparisonText = [
+      "Shop Final 21896 final estimate",
+      "Net Cost of Repairs $17,397.20",
+      "REAR SUSPENSION",
+      "60 Repl LT Hub assy $275.00 1.0",
+      "64 O/H Rear suspension $150.00 3.0",
+      "65 Repl LT Control arm $310.00 0.5",
+      "66 Repl Crossmember $620.00 1.5",
+      "67 Repl Link arm $135.00 0.4",
+      "68 Repl Lateral arm $145.00 0.4",
+      "69 Repl TPMS sensor $85.00 0.0",
+      "125 Repl LT side bracket $95.00 0.3",
+      "ENGINE COMPARTMENT",
+      "91 Rpr Coolant purge $65.00 0.4",
+      "92 Repl Coolant $42.00 0.0",
+      "96 Repl Compartment panel $480.00 1.2",
+      "VEHICLE DIAGNOSTICS",
+      "133 Subl Service mode setup $95.00 0.0",
+      "134 Subl Firmware update $120.00 0.0",
+      "135 Subl In-process scan $85.00 0.0",
+      "136 Subl Camera calibration $220.00 0.0",
+      "137 Subl DTC research $75.00 0.0",
+      "REFINISH",
+      "150 Rpr Finish sand and polish $80.00 0.8",
+    ].join("\n");
+
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourcePdfName: "Shop 21896.pdf",
+      sourceDocumentId: "shop-21896",
+      sourceText: "Shop 21896 lower estimate\nNet Cost of Repairs $11,892.26",
+      comparisonEstimateTexts: [{
+        fileName: "Shop Final 21896.pdf",
+        sourceDocumentId: "shop-final-21896",
+        estimateRole: "shop",
+        text: comparisonText,
+      }],
+      findings: [],
+      findingGenerator: buildRequiredEstimatorDeltaFindings,
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "shop" },
+    });
+
+    const joined = result.annotationMetadata
+      .map((item) => `${item.findingId} ${item.shortTitle} ${item.comment} ${item.sourceAnchorText}`)
+      .join(" ");
+    const firstTitles = result.annotationMetadata.slice(0, 8).map((item) => item.shortTitle).join(" ");
+
+    assert.ok(result.debugTrace.lineItemDeltaFindingCount >= 10);
+    assert.match(joined, /Source\/lower estimate: Shop 21896\.pdf/i);
+    assert.match(joined, /Comparison\/final estimate: Shop Final 21896\.pdf/i);
+    assert.match(joined, /Amount delta: \$5?|\$620\.00|\$480\.00/i);
+    assert.match(joined, /Labor delta: (?:3\.0|2\.5|1\.5) hours/i);
+    assert.match(joined, /Delta category: missing_operation/i);
+    assert.match(joined, /Added in the comparison\/final estimate/i);
+    assert.match(joined, /TPMS sensor/i);
+    assert.match(joined, /Rear suspension/i);
+    assert.match(joined, /Crossmember/i);
+    assert.match(joined, /Control arm/i);
+    assert.match(joined, /Link arm/i);
+    assert.match(joined, /Lateral arm/i);
+    assert.match(joined, /Coolant purge/i);
+    assert.match(joined, /Coolant/i);
+    assert.match(joined, /Compartment panel/i);
+    assert.match(joined, /LT side bracket/i);
+    assert.match(joined, /Service mode setup/i);
+    assert.match(joined, /Firmware update/i);
+    assert.match(joined, /In-process scan/i);
+    assert.match(joined, /Camera calibration/i);
+    assert.match(joined, /DTC research/i);
+    assert.match(joined, /Label:\s*NEEDS ADAS/i);
+    assert.doesNotMatch(joined, /Operation present in higher estimate/i);
+    assert.doesNotMatch(joined, /higher estimate/i);
+    assert.doesNotMatch(joined, /carrier estimate/i);
+    assert.doesNotMatch(joined, /CCC\/MOTOR guide and abbreviation boilerplate only/i);
+    assert.doesNotMatch(firstTitles, /Finish sand and polish/i);
   });
 
   await run("policy diagnostics detect vehicle mismatch and garbled extraction fallback", async () => {

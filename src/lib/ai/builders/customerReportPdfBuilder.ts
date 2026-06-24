@@ -190,7 +190,7 @@ function buildEstimatePrecisionNote(report: CustomerReport, findingReasoning: Re
     return "";
   }
 
-  return "The shop estimate is broader on OEM-style liftgate, rear bumper, rear lamp, and related parts, labor and material rates, and scan sublet pricing; the carrier estimate is lower and more explicit on the in-process scan, seat belt dynamic function test, and REVVAdas line, while any part-style concern should stay tied to the specific estimate line that documents it.";
+  return "The estimate rows show specific differences in part type, labor or material rates, and scan or calibration support where those rows are present. Any part-style concern should stay tied to the exact estimate line that documents it rather than being generalized across unrelated vehicle areas.";
 }
 
 function buildVerificationItems(params: {

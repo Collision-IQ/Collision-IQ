@@ -1097,8 +1097,8 @@ function buildConcreteEstimateFindingReasoning(sourceText: string): ReportFindin
 
   if (/\b(?:a\/m|aftermarket|capa|lkq)\b/i.test(sourceText) && /\b(?:oem|radiator support|bumper|grille|liftgate|rear lamp|tail lamp|rear[- ]bumper|front[- ]end)\b/i.test(sourceText)) {
     push(
-      "A/M CAPA LKQ substitutions vs shop OEM-style documented part scope",
-      "The carrier estimate uses A/M, CAPA, or LKQ substitutions while the shop estimate carries OEM-style liftgate, rear bumper, rear lamp, and related part scope where those lines are documented.",
+      "A/M CAPA LKQ substitutions vs documented part scope",
+      "The estimate evidence uses A/M, CAPA, or LKQ language while other documented rows carry OEM or alternate part-scope language for the specific affected parts.",
       "Part-type differences can affect fit, finish, and pricing; the estimate evidence shows a dispute, not that every non-OEM part is automatically wrong.",
       "Group each disputed part family and ask for the carrier line number, part type, quote/source, and fit/style rationale.",
       930
@@ -3317,10 +3317,10 @@ function buildConcreteEstimateDisputeItems(sourceText: string): ExportSupplement
 
   if (/\b(?:a\/m|aftermarket|capa|lkq)\b/i.test(sourceText) && /\b(?:oem|radiator support|bumper|grille|liftgate|rear lamp|tail lamp|rear[- ]bumper|front[- ]end)\b/i.test(sourceText)) {
     push({
-      title: "Non-OEM, CAPA, LKQ, or alternate parts compared with the shop's OEM-style repair plan",
+      title: "Non-OEM, CAPA, LKQ, or alternate parts compared with documented repair scope",
       category: "parts",
       kind: "disputed_repair_path",
-      rationale: "The estimate evidence shows carrier A/M, CAPA, or LKQ substitutions against shop OEM-style liftgate, rear bumper, rear lamp, and related part scope where those lines are documented; group each disputed part family by line, part type, amount, and substitution basis.",
+      rationale: "The estimate evidence shows A/M, CAPA, LKQ, OEM, or alternate part-scope language on specific documented rows; group each disputed part family by line, part type, amount, and substitution basis.",
       evidence: "Estimate-only evidence supports a part-type and pricing dispute; it does not automatically prove every alternative part is improper.",
       source: "Current upload estimate evidence",
       priority: "high",

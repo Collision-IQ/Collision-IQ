@@ -1304,7 +1304,7 @@ run("21975-style estimate export prioritizes line-specific dispute precision", (
   const snapshotText = flattenSnapshot(buildCollisionSnapshot(exportModel));
 
   assert.match(driverText, /LKQ Grille Style Contradiction/i);
-  assert.match(driverText, /Non-OEM CAPA LKQ Or Alternate Parts Compared With The Shop's OEM-Style Repair Plan/i);
+  assert.match(driverText, /Non-OEM CAPA LKQ Or Alternate Parts Compared With Documented Repair Scope/i);
   assert.match(driverText, /Labor Rate and Paint-Material Delta/i);
   assert.match(findingText, /LKQ grille style contradiction/i);
   assert.doesNotMatch(findingText, /Documents Describe Repair Process Differently/i);
@@ -1341,9 +1341,9 @@ run("customer report keeps 21975 estimate framing nuanced and grammatically clea
   });
   const text = flattenCarrierDocument(document);
 
-  assert.match(text, /shop estimate is broader on OEM-style liftgate, rear bumper, rear lamp, and related parts/i);
-  assert.match(text, /part-style concern should stay tied to the specific estimate line/i);
-  assert.doesNotMatch(text, /front-end|front end|shop estimate is broader on OEM-style front-end parts|but the the|Both carrier area of damage|continue documentation any added findings/i);
+  assert.match(text, /estimate rows show specific differences in part type, labor or material rates, and scan or calibration support/i);
+  assert.match(text, /part-style concern should stay tied to the exact estimate line/i);
+  assert.doesNotMatch(text, /front-end|front end|shop estimate is broader on OEM-style front-end parts|shop estimate is broader on OEM-style liftgate|rear bumper, rear lamp|but the the|Both carrier area of damage|continue documentation any added findings/i);
   assert.match(text, /continue documenting any added findings/i);
 });
 

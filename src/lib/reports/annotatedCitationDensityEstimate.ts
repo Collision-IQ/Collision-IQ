@@ -1409,6 +1409,21 @@ export function buildRequiredEstimatorDeltaFindings(
   const comparisonText = context.comparisonEstimateTexts.map((item) => item.text).join("\n");
   const allText = [context.sourceText ?? "", comparisonText, context.sourcePdfName, ...context.uploadedFileNames].join("\n");
   const isTeslaOrEv = /\b(?:tesla|model\s+[3sxy]|electric vehicle|bev|ev\b|high[-\s]?voltage|hv battery)\b/i.test(allText);
+  let lineItemDeltaFindingCount = 0;
+  let lineItemDeltaMatchedPairCount = 0;
+  let lineItemDeltaMissingCount = 0;
+  try {
+    const deltaFindings = buildStructuredLineItemDeltaFindings(context, usedAnchorIds);
+    lineItemDeltaFindingCount = deltaFindings.findings.length;
+    lineItemDeltaMatchedPairCount = deltaFindings.matchedPairCount;
+    lineItemDeltaMissingCount = deltaFindings.missingOperationCount;
+    findings.push(...deltaFindings.findings);
+  } catch (error) {
+    console.error("[citation-density] structured line-item delta detector failed (non-fatal)", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+  const hasStructuredDeltas = lineItemDeltaFindingCount > 0;
   let sandPolishSeen = false;
   let batteryResetSeen = false;
   let wheelDetectorSeen = false;
@@ -1495,7 +1510,7 @@ export function buildRequiredEstimatorDeltaFindings(
       usedAnchorIds.add(anchor.anchorId);
     }
 
-    if (!usedAnchorIds.has(anchor.anchorId) && /\b(?:finish sand|denib|de nib|color sand|sand and polish|sand polish|buff|refinish correction|post refinish correction)\b/.test(normalized)) {
+    if (!hasStructuredDeltas && !usedAnchorIds.has(anchor.anchorId) && /\b(?:finish sand|denib|de nib|color sand|sand and polish|sand polish|buff|refinish correction|post refinish correction)\b/.test(normalized)) {
       sandPolishSeen = true;
       findings.push(buildRequiredDetectorFinding({
         context,
@@ -1547,25 +1562,6 @@ export function buildRequiredEstimatorDeltaFindings(
     batteryResetSeen ? null : "battery_reset_electrical_rate",
   ].filter((item): item is string => Boolean(item));
 
-  // Structured line-item delta detector: pair rows across the lower (source)
-  // and higher (comparison) estimates and surface what the lower estimate is
-  // missing or under-documenting relative to the higher one. Wrapped so a parse
-  // failure can never break PDF generation.
-  let lineItemDeltaFindingCount = 0;
-  let lineItemDeltaMatchedPairCount = 0;
-  let lineItemDeltaMissingCount = 0;
-  try {
-    const deltaFindings = buildStructuredLineItemDeltaFindings(context, usedAnchorIds);
-    lineItemDeltaFindingCount = deltaFindings.findings.length;
-    lineItemDeltaMatchedPairCount = deltaFindings.matchedPairCount;
-    lineItemDeltaMissingCount = deltaFindings.missingOperationCount;
-    findings.push(...deltaFindings.findings);
-  } catch (error) {
-    console.error("[citation-density] structured line-item delta detector failed (non-fatal)", {
-      message: error instanceof Error ? error.message : String(error),
-    });
-  }
-
   return {
     findings,
     debug: {
@@ -1604,34 +1600,35 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   priority: "low" | "medium" | "high";
 } {
   const label = delta.higherRow.description;
+  const profile = classifyLineItemDeltaProfile(delta);
   if (delta.kind === "missing_operation") {
     return {
       findingType: "delta-missing-operation",
-      title: `Operation present in higher estimate, missing here: ${label}`,
-      label: "ESTIMATE GAP ONLY",
-      category: "not_included_operation",
+      title: `Added in comparison estimate: ${label}`,
+      label: profile.label,
+      category: profile.category,
       estimateGapType: "missing_from_carrier",
       missingProof:
-        "Estimate-to-estimate comparison shows this operation is documented in the higher estimate but is not present on this estimate. This is estimate-difference evidence; it does not by itself prove the operation is required.",
+        "Structured estimate comparison shows this operation is documented in the comparison/final estimate but is not present on the selected source/lower estimate. This is estimate-difference evidence; it does not by itself prove the operation is required.",
       nextAction:
-        "Add the operation as a supplement line if it was or should be performed, or document why it is not required on this estimate.",
-      missingAuthorityTypes: ["supplement line", "invoice or completion proof"],
-      score: 50,
-      safetyImpact: "medium",
-      priority: "medium",
+        profile.nextAction,
+      missingAuthorityTypes: profile.missingAuthorityTypes,
+      score: profile.score,
+      safetyImpact: profile.safetyImpact,
+      priority: profile.priority,
     };
   }
   if (delta.kind === "reduced_paint") {
     return {
       findingType: "delta-reduced-paint",
-      title: `Reduced paint/refinish vs higher estimate: ${label}`,
+      title: `Reduced paint/refinish vs comparison estimate: ${label}`,
       label: "ESTIMATE GAP ONLY",
       category: "refinish",
       estimateGapType: "reduced_by_carrier",
       missingProof:
-        "The higher estimate allows more paint/refinish time for this operation. Reconcile the difference against CCC/MOTOR/P-page refinish basis or document the lower allowance.",
+        "The comparison/final estimate allows more paint/refinish time for this operation. Reconcile the difference against CCC/MOTOR/P-page refinish basis or document the lower allowance.",
       nextAction:
-        "Reconcile the paint/refinish hours with the higher estimate, or document the included-operation basis for the lower allowance.",
+        "Reconcile the paint/refinish hours with the comparison/final estimate, or document the included-operation basis for the source/lower allowance.",
       missingAuthorityTypes: ["CCC/MOTOR/P-page refinish basis", "included-operation basis"],
       score: 48,
       safetyImpact: "low",
@@ -1641,7 +1638,7 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   if (delta.kind === "part_or_price_difference") {
     return {
       findingType: "delta-part-price",
-      title: `Part/price difference vs higher estimate: ${label}`,
+      title: `Part/price difference vs comparison estimate: ${label}`,
       label: "NEEDS INVOICE",
       category: "other",
       estimateGapType: "present_but_under_documented",
@@ -1658,14 +1655,14 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   // reduced_labor
   return {
     findingType: "delta-reduced-labor",
-    title: `Reduced body labor vs higher estimate: ${label}`,
+    title: `Reduced body labor vs comparison estimate: ${label}`,
     label: "ESTIMATE GAP ONLY",
     category: "labor_difference",
     estimateGapType: "reduced_by_carrier",
     missingProof:
-      "The higher estimate allows more body labor for this operation. Reconcile the labor difference against MOTOR/CCC time basis or document the lower allowance.",
+      "The comparison/final estimate allows more body labor for this operation. Reconcile the labor difference against MOTOR/CCC time basis or document the lower allowance.",
     nextAction:
-      "Reconcile the body labor hours with the higher estimate, or document the included-operation basis for the lower allowance.",
+      "Reconcile the body labor hours with the comparison/final estimate, or document the included-operation basis for the source/lower allowance.",
     missingAuthorityTypes: ["MOTOR/CCC labor-time basis", "included-operation basis"],
     score: 52,
     safetyImpact: "low",
@@ -1720,7 +1717,7 @@ function buildStructuredLineItemDeltaFindings(
   }
 
   const match = matchEstimateLineItems({ lowerRows, higherRows });
-  const comparisonName = comparison[0]?.fileName || "the higher estimate";
+  const comparisonName = comparison[0]?.fileName || "the comparison estimate";
 
   // Map each section to the last lower-estimate row anchor in that section, for
   // anchoring "missing operation" callouts to the relevant section.
@@ -1734,9 +1731,13 @@ function buildStructuredLineItemDeltaFindings(
   const emittedSlugs = new Set<string>();
   const missingPerSection = new Map<string, number>();
   const MAX_DELTA_FINDINGS = 60;
-  const MAX_MISSING_PER_SECTION = 4;
+  const MAX_MISSING_PER_SECTION = 12;
 
-  for (const delta of match.deltas) {
+  const orderedDeltas = [...match.deltas].sort(
+    (a, b) => scoreLineItemDeltaForPriority(b) - scoreLineItemDeltaForPriority(a)
+  );
+
+  for (const delta of orderedDeltas) {
     if (findings.length >= MAX_DELTA_FINDINGS) break;
 
     let anchor: EstimateRowAnchor | undefined;
@@ -1747,10 +1748,14 @@ function buildStructuredLineItemDeltaFindings(
     } else if (delta.kind === "missing_operation") {
       const sectionKey = normalizeSectionKey(delta.higherRow.section);
       anchor = sectionKey ? sectionToLastAnchor.get(sectionKey) : undefined;
+      if (!anchor) {
+        anchor = findFallbackAnchorForMissingDelta(delta, primaryAnchors);
+      }
       if (anchor) {
-        const count = missingPerSection.get(sectionKey) ?? 0;
+        const countKey = sectionKey || `fallback:${anchor.anchorId}`;
+        const count = missingPerSection.get(countKey) ?? 0;
         if (count >= MAX_MISSING_PER_SECTION) continue;
-        missingPerSection.set(sectionKey, count + 1);
+        missingPerSection.set(countKey, count + 1);
       }
     }
     if (!anchor) continue; // never emit an unanchored delta finding
@@ -1785,7 +1790,12 @@ function buildStructuredLineItemDeltaFindings(
         score: meta.score,
         safetyImpact: meta.safetyImpact,
         priority: meta.priority,
-        currentSupportSummary: `${delta.summary} (Comparison estimate: ${comparisonName}.)`,
+        currentSupportSummary: buildLineItemDeltaSupportSummary({
+          delta,
+          anchor,
+          sourceName: context.sourcePdfName,
+          comparisonName,
+        }),
         missingProofSummary: meta.missingProof,
         recommendedNextAction: meta.nextAction,
         missingAuthorityTypes: meta.missingAuthorityTypes,
@@ -2709,6 +2719,141 @@ function resolveOemAuthorityVerification(
   };
 }
 
+function classifyLineItemDeltaProfile(delta: EstimateLineItemDelta): {
+  label: string;
+  category: CitationDensityFinding["category"];
+  missingAuthorityTypes: string[];
+  nextAction: string;
+  score: number;
+  safetyImpact: "low" | "medium" | "high";
+  priority: "low" | "medium" | "high";
+} {
+  const text = normalizeMatchText(`${delta.higherRow.section ?? ""} ${delta.higherRow.opCode ?? ""} ${delta.higherRow.description} ${delta.higherRow.rawText}`);
+  const amount = delta.priceDelta ?? 0;
+  const labor = delta.laborDelta ?? 0;
+  if (/\b(?:calibration|camera|radar|scan|diagnostic|dtc|firmware|service mode|redeploy|adas)\b/.test(text)) {
+    return {
+      label: "NEEDS ADAS",
+      category: "scan_diagnostic",
+      missingAuthorityTypes: ["ADAS/calibration procedure", "scan or calibration result", "completion proof"],
+      nextAction: "Attach the scan, calibration, service-mode, firmware, DTC research, and completion support for this comparison/final estimate operation, or document why it is not required on the source/lower estimate.",
+      score: 82,
+      safetyImpact: "high",
+      priority: "high",
+    };
+  }
+  if (/\b(?:suspension|control arm|crossmember|link arm|lateral arm|hub|tpms|sensor|bracket|coolant|purge|compartment|structural|o\/h)\b/.test(text)) {
+    return {
+      label: "ESTIMATE GAP ONLY",
+      category: /\btpms|sensor\b/.test(text) ? "parts_downgrade" : "structural_or_fit_verification",
+      missingAuthorityTypes: ["supplement line", "invoice or completion proof", "repair-path support when applicable"],
+      nextAction: "Review the comparison/final estimate addition against the selected source/lower estimate, then attach supplement, invoice, completion, or repair-path support for the added operation.",
+      score: Math.min(86, 68 + Math.round(Math.min(amount, 500) / 50) + Math.round(Math.min(labor, 4) * 2)),
+      safetyImpact: "high",
+      priority: "high",
+    };
+  }
+  return {
+    label: "ESTIMATE GAP ONLY",
+    category: "not_included_operation",
+    missingAuthorityTypes: ["supplement line", "invoice or completion proof"],
+    nextAction: "Add the operation as a supplement line if it was or should be performed, or document why it is not required on the selected source/lower estimate.",
+    score: Math.min(76, 52 + Math.round(Math.min(amount, 500) / 50) + Math.round(Math.min(labor, 4) * 2)),
+    safetyImpact: amount >= 250 || labor >= 1 ? "medium" : "low",
+    priority: amount >= 250 || labor >= 1 ? "high" : "medium",
+  };
+}
+
+function formatDeltaMoney(value: number | null) {
+  return typeof value === "number" ? `$${value.toFixed(2)}` : "not quantified";
+}
+
+function formatDeltaHours(value: number | null) {
+  if (typeof value !== "number") return "not quantified";
+  return Number.isInteger(value) ? `${value}.0` : `${value}`;
+}
+
+function describeDeltaRowLocation(row: EstimateDeltaRow | null, fileName: string) {
+  if (!row) return `${fileName}: source row missing`;
+  const page = row.pageNumber ? ` page ${row.pageNumber}` : "";
+  const line = row.lineNumber !== null ? ` line ${row.lineNumber}` : "";
+  return `${fileName}${page}${line}: ${row.rawText}`;
+}
+
+function describeAnchorLocation(anchor: EstimateRowAnchor, fileName: string) {
+  const page = anchor.pageNumber ? ` page ${anchor.pageNumber}` : "";
+  const line = anchor.lineNumber ? ` line ${anchor.lineNumber}` : "";
+  return `${fileName}${page}${line}: ${getAnchorSourceText(anchor)}`;
+}
+
+function buildLineItemDeltaSupportSummary(params: {
+  delta: EstimateLineItemDelta;
+  anchor: EstimateRowAnchor;
+  sourceName: string;
+  comparisonName: string;
+}) {
+  const comparisonLocation = describeDeltaRowLocation(params.delta.higherRow, params.comparisonName);
+  const sourceLocation = params.delta.lowerRow
+    ? describeDeltaRowLocation(params.delta.lowerRow, params.sourceName)
+    : describeAnchorLocation(params.anchor, params.sourceName);
+  return [
+    `Delta category: ${params.delta.kind}.`,
+    `Source/lower estimate: ${sourceLocation}.`,
+    `Comparison/final estimate: ${comparisonLocation}.`,
+    `Amount delta: ${formatDeltaMoney(params.delta.priceDelta)}.`,
+    `Labor delta: ${formatDeltaHours(params.delta.laborDelta)} hours.`,
+    `Paint delta: ${formatDeltaHours(params.delta.paintDelta)} hours.`,
+    `Pairing basis: ${params.delta.matchBasis}.`,
+    params.delta.summary.replace(/\bhigher estimate\b/gi, "comparison/final estimate").replace(/\blower estimate\b/gi, "source/lower estimate"),
+  ].join(" ");
+}
+
+function scoreLineItemDeltaForPriority(delta: EstimateLineItemDelta) {
+  const profile = classifyLineItemDeltaProfile(delta);
+  const kindBoost =
+    delta.kind === "missing_operation" ? 18 :
+      delta.kind === "reduced_labor" ? 10 :
+        delta.kind === "reduced_paint" ? 6 : 4;
+  const amount = delta.priceDelta ?? 0;
+  const labor = delta.laborDelta ?? 0;
+  const paint = delta.paintDelta ?? 0;
+  return profile.score + kindBoost + Math.min(30, amount / 25) + Math.min(20, labor * 6) + Math.min(10, paint * 4);
+}
+
+function findFallbackAnchorForMissingDelta(
+  delta: EstimateLineItemDelta,
+  anchors: EstimateRowAnchor[]
+): EstimateRowAnchor | undefined {
+  const sectionTokens = new Set(
+    normalizeMatchText(delta.higherRow.section ?? "")
+      .split(/\s+/)
+      .filter((token) => token.length >= 4)
+  );
+  const rowTokens = new Set(delta.higherRow.descriptionTokens.filter((token) => token.length >= 4));
+  let best: { anchor: EstimateRowAnchor; score: number } | null = null;
+  for (const anchor of anchors) {
+    const text = normalizeMatchText(`${anchor.section ?? ""} ${getAnchorSourceText(anchor)}`);
+    if (!text || isRejectedPrimaryAnchorText(text, anchor)) continue;
+    let score = 0;
+    for (const token of sectionTokens) {
+      if (text.includes(token)) score += 4;
+    }
+    for (const token of rowTokens) {
+      if (text.includes(token)) score += 2;
+    }
+    if (/\bengine compartment\b/.test(normalizeMatchText(delta.higherRow.section ?? "")) && /\b(?:underhood|engine|compartment|coolant)\b/.test(text)) {
+      score += 5;
+    }
+    if (/\brear suspension\b/.test(normalizeMatchText(delta.higherRow.section ?? "")) && /\b(?:rear|suspension|hub|control arm|crossmember|link|lateral|tpms|bracket)\b/.test(text)) {
+      score += 5;
+    }
+    if (score > (best?.score ?? 0)) {
+      best = { anchor, score };
+    }
+  }
+  return best && best.score >= 4 ? best.anchor : undefined;
+}
+
 function resolveOemFindingLabel(
   family: OemCitationDensityFamily,
   authority: NonNullable<CitationDensityFinding["bestAvailableAuthority"]>,
@@ -3562,7 +3707,8 @@ function buildAnchoredCitationCandidates(params: {
       params.trace.droppedFindings.push({ findingId: finding.id, reason: "matched anchor has no rects", anchorId: resolvedAnchorId });
       continue;
     }
-    if (usedAnchorIds.has(anchor.anchorId)) {
+    const allowSharedAnchor = allowsSharedCitationDensityAnchor(finding);
+    if (!allowSharedAnchor && usedAnchorIds.has(anchor.anchorId)) {
       params.trace.droppedFindings.push({ findingId: finding.id, reason: "anchor already used", anchorId: resolvedAnchorId });
       continue;
     }
@@ -3579,7 +3725,9 @@ function buildAnchoredCitationCandidates(params: {
     const gate = gateAnchoredCitationCandidate(candidate, params.anchorIndex);
     if (gate === "allowed") {
       candidates.push(candidate);
-      usedAnchorIds.add(anchor.anchorId);
+      if (!allowSharedAnchor) {
+        usedAnchorIds.add(anchor.anchorId);
+      }
       matchedFindingIds.add(finding.id);
       if (!exactAnchor) {
         params.trace.fallbackMatchedFindings.push({
@@ -3627,6 +3775,10 @@ function buildAnchoredCitationCandidates(params: {
     suppressedPageMismatchCount,
     findingsWithoutAnchorId: params.findings.filter((finding) => !matchedFindingIds.has(finding.id)).map((finding) => finding.id),
   };
+}
+
+function allowsSharedCitationDensityAnchor(finding: CitationDensityFinding) {
+  return /^required-detector-delta-missing-operation-/i.test(finding.id);
 }
 
 function findReportIdentityMismatch(
@@ -3897,12 +4049,16 @@ function getFindingAnchorId(finding: CitationDensityFinding) {
     sourceAnchorId?: string | null;
     estimateAnchorId?: string | null;
     source?: { anchorId?: string | null };
+    carrierAnchor?: { anchorId?: string | null };
+    shopAnchor?: { anchorId?: string | null };
   };
   return (
     record.anchorId ??
     record.sourceAnchorId ??
     record.estimateAnchorId ??
     record.source?.anchorId ??
+    record.carrierAnchor?.anchorId ??
+    record.shopAnchor?.anchorId ??
     null
   );
 }
@@ -4161,6 +4317,7 @@ function buildRowBackedFinding(
 
 function buildFindingLineAnchor(anchor: EstimateRowAnchor) {
   return {
+    anchorId: anchor.anchorId,
     sourceDocumentId: anchor.sourceDocumentId,
     estimateRole: anchor.sourceDocumentRole,
     lineNumber: anchor.lineNumber,
@@ -5535,7 +5692,7 @@ function formatEmbeddedLinkLines(finding: CitationDensityFinding) {
 
 function getProofBucketLabel(finding: CitationDensityFinding): string {
   if (finding.citationLabel) {
-    if (/^NEEDS ADAS$/i.test(finding.citationLabel) && !isAdasRelatedFinding(finding)) return fallbackNonAdasOemLabel(finding);
+    if (/^NEEDS ADAS$/i.test(finding.citationLabel) && !isAdasRelatedFinding(finding) && !hasExplicitAdasAuthorityNeed(finding)) return fallbackNonAdasOemLabel(finding);
     if (/^NEEDS OEM$/i.test(finding.citationLabel) && !isOemHvRelatedFinding(finding)) return fallbackNonAdasOemLabel(finding);
     return finding.citationLabel;
   }
@@ -5561,6 +5718,12 @@ function getProofBucketLabel(finding: CitationDensityFinding): string {
   ) return "NEEDS OEM";
   if (finding.citationStatus.pPages === "needed" || finding.missingAuthorityTypes.some((item) => /p-?page/i.test(item))) return "NEEDS P-PAGE";
   return "ESTIMATE GAP ONLY";
+}
+
+function hasExplicitAdasAuthorityNeed(finding: CitationDensityFinding) {
+  return finding.missingAuthorityTypes.some((item) =>
+    /\b(?:adas|calibration|scan|diagnostic|dtc|firmware|service mode|camera|radar)\b/i.test(item)
+  );
 }
 
 function fallbackNonAdasOemLabel(finding: CitationDensityFinding) {
@@ -5635,6 +5798,9 @@ function buildRoleCalloutNote(
   estimateRole: "carrier" | "shop" | "selected"
 ) {
   const delta = buildEstimateDeltaText(finding);
+  if (estimateRole !== "carrier" && (finding.crossEstimateIssue || finding.primaryAnnotationRole === "both" || finding.estimateGapType === "reduced_by_carrier")) {
+    return `Cross-estimate conflict. Source/lower and comparison/final estimates carry different labor/amount/scope. Reconcile with procedure support and completion proof.${delta}`;
+  }
   if (finding.crossEstimateIssue || finding.primaryAnnotationRole === "both" || finding.estimateGapType === "reduced_by_carrier") {
     return `Cross-estimate conflict. Carrier and shop estimates carry different labor/amount/scope. Reconcile with procedure support and completion proof.${delta}`;
   }
@@ -5646,9 +5812,12 @@ function buildRoleCalloutNote(
   }
   if (estimateRole === "shop") {
     if (finding.estimateGapType === "missing_from_carrier") {
-      return "Not clearly carried on carrier estimate. Do not lead with this line until the missing OEM/P-page/invoice support is attached.";
+      return "Added in the comparison/final estimate and not clearly carried on the source/lower estimate. Do not lead with this line until the missing OEM/P-page/invoice support is attached.";
     }
-    return "Shop-added item. Do not lead with this line until the missing OEM/P-page/invoice support is attached.";
+    return "Source/comparison estimate difference. Do not lead with this line until the missing OEM/P-page/invoice support is attached.";
+  }
+  if (finding.estimateGapType === "missing_from_carrier") {
+    return "Added in the comparison/final estimate and not clearly carried on the source/lower estimate. Verify authority and completion proof before leading with this item.";
   }
   return "Estimate evidence shows a Citation Density issue. Verify authority and completion proof before leading with this item.";
 }
