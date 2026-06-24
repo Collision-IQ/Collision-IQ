@@ -391,7 +391,6 @@ export async function POST(req: Request) {
       totalUploadedFileCount: mergeArtifactIds(existingCase?.artifactIds ?? [], artifactIds).length,
       reviewProgress: body.reviewProgress ?? null,
     });
-    report = applyStructuredComparisonLifecycleState(report, normalizedAttachments);
     let analysis = normalizeReportToAnalysisResult(report);
     const retrievalSnapshot = buildAnalysisRetrievalSnapshot({
       userMessage: requestUserIntent,
@@ -2942,33 +2941,6 @@ function classifyUploadedEvidenceSource(attachment: StoredAttachment): CaseEvide
   if (text.includes("adas")) return "adas_report";
   if (/\b(oem|procedure|repair guidelines?|oem guidelines?|work auth(?:orization)?)\b/i.test(text)) return "oem_documentation";
   return "other_supporting_document";
-}
-
-function applyStructuredComparisonLifecycleState(
-  report: RepairIntelligenceReport,
-  attachments: StoredAttachment[]
-): RepairIntelligenceReport {
-  const estimatePdfCount = attachments.filter((attachment) => {
-    const text = `${attachment.filename}\n${attachment.text ?? ""}`.toLowerCase();
-    return /\.pdf$/i.test(attachment.filename) &&
-      /estimate|supplement|total cost of repairs|net cost of repairs|ccc one|mitchell|audatex|line\s+oper\s+description/i.test(text) &&
-      !/citation density|repair intelligence report|customer report|doi complaint|policy rights|collision snapshot|work authorization|contract of repair/.test(text);
-  }).length;
-  const structuredComparisonReady = estimatePdfCount >= 2;
-
-  return {
-    ...report,
-    ingestionMeta: {
-      ...report.ingestionMeta,
-      structuredComparisonStatus: structuredComparisonReady ? "ready" : report.ingestionMeta?.structuredComparisonStatus ?? "idle",
-      deltaReportStatus: structuredComparisonReady ? "ready" : report.ingestionMeta?.deltaReportStatus ?? "idle",
-      fullAnalysisStatus: "complete",
-      reportSuiteStatus: "complete",
-      structuredComparisonReadyAt: structuredComparisonReady
-        ? report.ingestionMeta?.structuredComparisonReadyAt ?? new Date().toISOString()
-        : report.ingestionMeta?.structuredComparisonReadyAt,
-    },
-  };
 }
 
 function buildUploadedReviewabilityDiagnostics(

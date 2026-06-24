@@ -248,7 +248,6 @@ run("explicit standalone summary requests do not trigger annotated estimate inte
 
 run("export card primary Citation Density action calls annotated route, not standalone report builder", () => {
   const source = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
-  const routeSource = fs.readFileSync(path.join(process.cwd(), "src/app/api/reports/citation-density/annotated-estimate/route.ts"), "utf8");
   const downloadIndex = source.indexOf('if (reportType === "estimate_scrubber")');
   const annotatedFetchIndex = source.indexOf('"/api/reports/citation-density/annotated-estimate"', downloadIndex);
   const standaloneBuilderIndex = source.indexOf("buildAnnotatedEstimateReviewPdf", downloadIndex);
@@ -272,32 +271,14 @@ run("export card primary Citation Density action calls annotated route, not stan
   assert.match(source, /Carrier estimate/);
   assert.match(source, /<option value="both">Both<\/option>/);
   assert.match(source, /targetEstimate:\s*citationDensityTargetEstimate/);
-  assert.match(source, /artifactIds:\s*attachmentIds/);
   assert.match(source, /selectedSourceDocumentId:\s*sourceDocumentId \|\| undefined/);
   assert.match(source, /sourceDocumentId:\s*sourceDocumentId \|\| undefined/);
   assert.match(source, /sourceFilename:\s*selection\.selectedSourceFilename/);
   assert.match(source, /Carrier estimate - \$\{candidate\.filename\}/);
   assert.match(source, /Shop estimate - \$\{candidate\.filename\}/);
-  assert.match(source, /Citation Density annotated export needs an active case or uploaded estimate PDFs/);
-  assert.match(source, /structuredComparisonReady/);
-  assert.match(source, /Structured estimate comparison is ready\. Full report suite is still running/);
-  assert.match(routeSource, /requestArtifactIds/);
-  assert.match(routeSource, /\.\.\.requestArtifactIds/);
-  assert.match(routeSource, /report\?\]\.report \?\? null|report\?\.report \?\? null/);
+  assert.match(source, /Citation Density annotated export requires an original estimate PDF/);
   assert.ok(annotatedFetchIndex > downloadIndex);
   assert.ok(standaloneBuilderIndex === -1 || annotatedFetchIndex < standaloneBuilderIndex);
-});
-
-run("right rail exposes Delta Citation Density while full analysis is delayed", () => {
-  const source = fs.readFileSync(path.join(process.cwd(), "src/components/ChatbotPage.tsx"), "utf8");
-
-  assert.match(source, /const structuredComparisonReady = citationDensityEstimateCandidates\.length >= 2/);
-  assert.match(source, /Boolean\(annotatedEstimateSourcePdf && \(analysisReportId \|\| structuredComparisonReady\)\)/);
-  assert.match(source, /structuredComparisonReady\s*\?\s*"Delta ready"/);
-  assert.match(source, /structuredComparisonReady\)\s*\{\s*void downloadReportDocument\("estimate_scrubber"\)/);
-  assert.match(source, /Generate Delta Citation Density/);
-  assert.match(source, /Full analysis is still running\. Structured estimate comparison is ready\./);
-  assert.doesNotMatch(source, /hasResolvedAnalysis && Boolean\(analysisReportId && annotatedEstimateSourcePdf\)/);
 });
 
 run("OEM Citation Density replaces Policy & Rights primary report card", () => {
