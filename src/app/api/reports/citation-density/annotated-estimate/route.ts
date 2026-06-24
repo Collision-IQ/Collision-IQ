@@ -40,6 +40,9 @@ export const dynamic = "force-dynamic";
 type RequestBody = {
   caseId?: unknown;
   sourceDocumentId?: unknown;
+  selectedSourceDocumentId?: unknown;
+  selectedEstimateRole?: unknown;
+  sourceFilename?: unknown;
   targetEstimate?: unknown;
   findingIds?: unknown;
   annotationMode?: unknown;
@@ -94,7 +97,8 @@ export async function POST(request: Request) {
     const { user } = await requireCurrentUser();
     const body = (await request.json().catch(() => ({}))) as RequestBody;
     const caseId = coerceString(body.caseId);
-    const sourceDocumentId = coerceString(body.sourceDocumentId);
+    const sourceDocumentId = coerceString(body.selectedSourceDocumentId) || coerceString(body.sourceDocumentId);
+    const selectedEstimateRole = coerceString(body.selectedEstimateRole);
     const targetEstimate = coerceTargetEstimate(body.targetEstimate);
 
     const report = caseId
@@ -107,11 +111,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const candidateIds = sourceDocumentId ? [sourceDocumentId] : report.artifactIds;
+    const candidateIds = uniqueStrings([...report.artifactIds, sourceDocumentId || undefined]);
     const sourceDocuments = await getUploadedAttachments(candidateIds, {
       ownerUserId: user.id,
     });
     const sourceDiagnostics = withFileReviewDiagnostics(sourceDocuments, buildCitationDensitySourcePdfDiagnostics(sourceDocuments));
+    const explicitSourceDocument = sourceDocumentId
+      ? sourceDocuments.find((document) => document.id === sourceDocumentId) ?? null
+      : null;
     const model = buildAnnotatedEstimateReviewModel({
       report: report.report,
       analysis: report.report.analysis ?? null,
@@ -119,15 +126,15 @@ export async function POST(request: Request) {
       renderModel: undefined,
     });
     const sourceSelections: SourceEstimatePdfSelection[] = sourceDocumentId
-      ? sourceDocuments[0] && isAnnotatableEstimatePdf(sourceDocuments[0])
+      ? explicitSourceDocument && isAnnotatableEstimatePdf(explicitSourceDocument)
         ? [{
-            attachment: sourceDocuments[0],
-            selectedSourceDocumentId: sourceDocuments[0].id,
-            selectedSourceLabel: sourceDocuments[0].filename || "Selected estimate",
-            selectedEstimateRole: targetEstimate === "carrier" || targetEstimate === "shop" ? targetEstimate : "selected",
+            attachment: explicitSourceDocument,
+            selectedSourceDocumentId: explicitSourceDocument.id,
+            selectedSourceLabel: explicitSourceDocument.filename || "Selected estimate",
+            selectedEstimateRole: normalizeRequestedEstimateRole(selectedEstimateRole, targetEstimate),
             selectedEstimateTotal: null,
             targetEstimate,
-            selectionReason: "The client supplied a source document ID.",
+            selectionReason: `The client supplied a source document ID${body.sourceFilename ? ` for ${coerceString(body.sourceFilename)}` : ""}.`,
             selectedDocumentType: "estimate",
             selectedDocumentConfidence: 1,
             selectionDiagnostics: sourceDiagnostics,
@@ -145,7 +152,7 @@ export async function POST(request: Request) {
      * New chat/export flows should send it after the user selects an original estimate PDF.
      */
     const legacySourceDocument = sourceDocumentId
-      ? sourceDocuments[0] && isAnnotatableEstimatePdf(sourceDocuments[0]) ? sourceDocuments[0] : null
+      ? explicitSourceDocument && isAnnotatableEstimatePdf(explicitSourceDocument) ? explicitSourceDocument : null
       : null;
     const resolvedSelections = sourceSelections.length
       ? sourceSelections
@@ -154,7 +161,7 @@ export async function POST(request: Request) {
             attachment: legacySourceDocument,
             selectedSourceDocumentId: legacySourceDocument.id,
             selectedSourceLabel: legacySourceDocument.filename || "Selected estimate",
-            selectedEstimateRole: targetEstimate === "carrier" || targetEstimate === "shop" ? targetEstimate : "selected" as const,
+            selectedEstimateRole: normalizeRequestedEstimateRole(selectedEstimateRole, targetEstimate),
             selectedEstimateTotal: null,
             targetEstimate,
             selectionReason: "The client supplied a source document ID.",
@@ -166,10 +173,13 @@ export async function POST(request: Request) {
 
     if (!resolvedSelections.length) {
       if (sourceDocumentId) {
+        const availableEstimateCandidates = sourceDiagnostics.acceptedEstimateCandidates.map((candidate) => candidate.filename);
         return NextResponse.json(
           {
-            error: "Selected source PDF is not an original estimate PDF.",
-            userMessage: "Select the original carrier or shop estimate PDF. Citation Density annotated export will not annotate a report-only PDF.",
+            error: "The selected estimate could not be found.",
+            userMessage: availableEstimateCandidates.length
+              ? `The selected estimate could not be found. Available estimate candidates: ${availableEstimateCandidates.join(", ")}.`
+              : "No estimate PDFs were found for Citation Density.",
             reportType: "citation-density",
             routeName: "citation-density",
             ...sourceDiagnostics,
@@ -183,7 +193,7 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error: "Estimate source selection is ambiguous.",
-            userMessage: "Please choose the carrier or shop source PDF for the annotated Citation Density estimate.",
+            userMessage: "Choose a carrier or shop estimate before generating Citation Density.",
             targetEstimate,
             reportType: "citation-density",
             routeName: "citation-density",
@@ -489,6 +499,19 @@ function coerceString(value: unknown): string {
 function coerceTargetEstimate(value: unknown): CitationDensityTargetEstimate {
   const target = coerceString(value);
   return VALID_TARGET_ESTIMATES.has(target) ? target as CitationDensityTargetEstimate : "auto";
+}
+
+function normalizeRequestedEstimateRole(
+  selectedEstimateRole: string,
+  targetEstimate: CitationDensityTargetEstimate
+): SourceEstimatePdfSelection["selectedEstimateRole"] {
+  if (selectedEstimateRole === "carrier" || selectedEstimateRole === "shop") return selectedEstimateRole;
+  if (targetEstimate === "carrier" || targetEstimate === "shop") return targetEstimate;
+  return "selected";
+}
+
+function uniqueStrings(values: Array<string | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value?.trim())))];
 }
 
 function coerceStringArray(value: unknown): string[] | undefined {

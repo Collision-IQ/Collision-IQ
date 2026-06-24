@@ -7,9 +7,9 @@ import {
   type CitationDensityDocumentClassification,
 } from "./citationDensityDocumentClassifier";
 
-export const NO_SOURCE_PDF_ERROR = "No estimate PDF found for Citation Density.";
+export const NO_SOURCE_PDF_ERROR = "No estimate PDFs were found for Citation Density.";
 export const NO_SOURCE_PDF_USER_MESSAGE =
-  "No estimate PDF found for Citation Density. Upload a shop estimate and/or carrier estimate.";
+  "No estimate PDFs were found for Citation Density.";
 
 export type SourcePdfCandidateDiagnostics = {
   acceptedEstimateCandidates: Array<{

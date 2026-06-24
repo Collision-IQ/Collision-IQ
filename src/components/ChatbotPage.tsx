@@ -101,6 +101,14 @@ type AttachmentTrayItem = {
   filename: string;
   hasVision?: boolean;
 };
+type CitationDensityEstimateRole = "carrier" | "shop" | "unknown";
+type CitationDensityEstimateCandidate = {
+  documentId: string;
+  filename: string;
+  estimateRole: CitationDensityEstimateRole;
+  classification: "estimate";
+  sourcePdfAvailable: boolean;
+};
 type AnnotatedEstimateExportResult = {
   blob: Blob;
   filename: string;
@@ -475,6 +483,8 @@ export function ChatbotWorkspacePage() {
   const [bottomReportViewer, setBottomReportViewer] = useState<BottomReportViewerState>(null);
   const [citationDensityTargetEstimate, setCitationDensityTargetEstimate] =
     useState<CitationDensityTargetEstimate>("auto");
+  const [citationDensitySelectedSourceDocumentId, setCitationDensitySelectedSourceDocumentId] =
+    useState<string>("");
   const bottomReportObjectUrlRef = useRef<string | null>(null);
   const immersiveHeaderExpandedRef = useRef(true);
 
@@ -1622,6 +1632,8 @@ export function ChatbotWorkspacePage() {
             attachments={attachmentsState}
             citationDensityTargetEstimate={citationDensityTargetEstimate}
             onCitationDensityTargetEstimateChange={setCitationDensityTargetEstimate}
+            citationDensitySelectedSourceDocumentId={citationDensitySelectedSourceDocumentId}
+            onCitationDensitySelectedSourceDocumentIdChange={setCitationDensitySelectedSourceDocumentId}
             onCustomerReportLocked={() => setUpgradeModalOpen(true)}
             activeInsightKey={activeInsightKey}
             evidenceModel={evidenceModel}
@@ -1846,6 +1858,8 @@ function RailContent({
   attachments,
   citationDensityTargetEstimate,
   onCitationDensityTargetEstimateChange,
+  citationDensitySelectedSourceDocumentId,
+  onCitationDensitySelectedSourceDocumentIdChange,
   onCustomerReportLocked,
   activeInsightKey,
   evidenceModel,
@@ -1883,6 +1897,8 @@ function RailContent({
   attachments: AttachmentTrayItem[];
   citationDensityTargetEstimate: CitationDensityTargetEstimate;
   onCitationDensityTargetEstimateChange: (target: CitationDensityTargetEstimate) => void;
+  citationDensitySelectedSourceDocumentId: string;
+  onCitationDensitySelectedSourceDocumentIdChange: (documentId: string) => void;
   onCustomerReportLocked: () => void;
   activeInsightKey: InsightKey | null;
   evidenceModel: EvidenceLinkModel | null;
@@ -1951,7 +1967,24 @@ function RailContent({
       ? formatCurrency(renderModel.reportFields.estimateTotal, true)
       : null;
   const canRenderExports = hasResolvedAnalysis && Boolean(analysisText || panel.narrative);
-  const annotatedEstimateSourcePdf = selectAnnotatedCitationDensitySourcePdf(attachments);
+  const citationDensityEstimateCandidates = useMemo(
+    () => buildCitationDensityEstimateCandidates(attachments),
+    [attachments]
+  );
+  const resolvedCitationDensitySelection = useMemo(
+    () =>
+      resolveCitationDensityEstimateSelection({
+        candidates: citationDensityEstimateCandidates,
+        targetEstimate: citationDensityTargetEstimate,
+        selectedSourceDocumentId: citationDensitySelectedSourceDocumentId,
+      }),
+    [
+      citationDensityEstimateCandidates,
+      citationDensitySelectedSourceDocumentId,
+      citationDensityTargetEstimate,
+    ]
+  );
+  const annotatedEstimateSourcePdf = resolvedCitationDensitySelection.primaryCandidate;
   const canGenerateCitationDensityAnnotatedEstimate =
     hasResolvedAnalysis && Boolean(analysisReportId && annotatedEstimateSourcePdf);
   const railRisk = hasResolvedAnalysis
@@ -2170,9 +2203,7 @@ function RailContent({
       return;
     }
     if ((reportType === "estimate_scrubber" || reportType === "oem_citation_density") && !canGenerateCitationDensityAnnotatedEstimate) {
-      setReportSendStatus(reportType === "oem_citation_density"
-        ? "Upload an original estimate PDF before sending the OEM Citation Density Report."
-        : "Upload an original estimate PDF before sending the annotated Citation Density estimate.");
+      setReportSendStatus(buildCitationDensitySelectionError(citationDensityEstimateCandidates, citationDensitySelectedSourceDocumentId));
       return;
     }
     if (reportType !== "snapshot" && reportType !== "estimate_scrubber" && reportType !== "oem_citation_density" && !canRenderExports) {
@@ -2383,11 +2414,12 @@ function RailContent({
       throw new Error("Citation Density annotated export needs an active case.");
     }
 
-    if (!selectAnnotatedCitationDensitySourcePdf(attachments)) {
-      throw new Error("Upload an original estimate PDF before generating the annotated Citation Density estimate.");
+    if (!annotatedEstimateSourcePdf) {
+      throw new Error(buildCitationDensitySelectionError(citationDensityEstimateCandidates, citationDensitySelectedSourceDocumentId));
     }
 
     setReportSendStatus("Generating annotated Citation Density estimate PDF...");
+    const selectionPayload = buildCitationDensitySelectionPayload(resolvedCitationDensitySelection);
     const response = await fetch("/api/reports/citation-density/annotated-estimate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2396,6 +2428,7 @@ function RailContent({
         caseId: analysisReportId,
         activeCaseId: analysisReportId,
         artifactIds: attachmentIds,
+        ...selectionPayload,
         targetEstimate: citationDensityTargetEstimate,
         annotationMode: "both",
         includeLegend: true,
@@ -2461,11 +2494,12 @@ function RailContent({
       throw new Error("OEM Citation Density Report needs an active case.");
     }
 
-    if (!selectAnnotatedCitationDensitySourcePdf(attachments)) {
-      throw new Error("Upload an original estimate PDF before generating the OEM Citation Density Report.");
+    if (!annotatedEstimateSourcePdf) {
+      throw new Error(buildCitationDensitySelectionError(citationDensityEstimateCandidates, citationDensitySelectedSourceDocumentId));
     }
 
     setReportSendStatus("Generating OEM Citation Density Report...");
+    const selectionPayload = buildCitationDensitySelectionPayload(resolvedCitationDensitySelection);
     const response = await fetch("/api/reports/oem-citation-density/annotated-estimate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2474,6 +2508,7 @@ function RailContent({
         caseId: analysisReportId,
         activeCaseId: analysisReportId,
         artifactIds: attachmentIds,
+        ...selectionPayload,
         targetEstimate: citationDensityTargetEstimate,
         annotationMode: "both",
         includeLegend: true,
@@ -3374,12 +3409,6 @@ function RailContent({
               send={getLastSendFor("snapshot")}
               loading={reportSendHistoryLoading}
             />
-            {canUseEstimateScrubberExport || canUsePolicyRightsReviewExport ? (
-              <CitationDensityTargetSelector
-                value={citationDensityTargetEstimate}
-                onChange={onCitationDensityTargetEstimateChange}
-              />
-            ) : null}
             {canUseBasicPdfExport ? (
               <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[#C65A2A]/25">
                 <div>
@@ -3421,6 +3450,15 @@ function RailContent({
                   loading={reportSendHistoryLoading}
                 />
               </div>
+            ) : null}
+            {canUseEstimateScrubberExport || canUsePolicyRightsReviewExport ? (
+              <CitationDensityTargetSelector
+                value={citationDensityTargetEstimate}
+                onChange={onCitationDensityTargetEstimateChange}
+                selectedSourceDocumentId={citationDensitySelectedSourceDocumentId}
+                onSelectedSourceDocumentIdChange={onCitationDensitySelectedSourceDocumentIdChange}
+                candidates={citationDensityEstimateCandidates}
+              />
             ) : null}
             {canUseEstimateScrubberExport ? (
               <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[#C65A2A]/25">
@@ -3863,22 +3901,68 @@ function ReportDocumentBottomViewer({
 function CitationDensityTargetSelector({
   value,
   onChange,
+  selectedSourceDocumentId,
+  onSelectedSourceDocumentIdChange,
+  candidates,
 }: {
   value: CitationDensityTargetEstimate;
   onChange: (target: CitationDensityTargetEstimate) => void;
+  selectedSourceDocumentId: string;
+  onSelectedSourceDocumentIdChange: (documentId: string) => void;
+  candidates: CitationDensityEstimateCandidate[];
 }) {
+  const selectedCandidate = selectedSourceDocumentId
+    ? candidates.find((candidate) => candidate.documentId === selectedSourceDocumentId)
+    : null;
+  const selectedValue = selectedCandidate ? `candidate:${selectedCandidate.documentId}` : value;
+
   return (
-    <label className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
-      <span className="font-semibold text-foreground">Citation Density target</span>
+    <label className="grid gap-2 rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
+      <span>
+        <span className="font-semibold text-foreground">Citation Density target</span>
+        <span className="mt-0.5 block leading-5">
+          Used for Delta Citation Density and OEM Citation Density exports.
+        </span>
+      </span>
       <select
-        value={value}
-        onChange={(event) => onChange(event.target.value as CitationDensityTargetEstimate)}
-        className="min-h-8 rounded-md border border-border bg-background px-2 py-1 text-xs font-semibold text-foreground outline-none transition focus:ring-2 focus:ring-ring/25"
+        value={selectedValue}
+        onChange={(event) => {
+          const nextValue = event.target.value;
+          if (nextValue.startsWith("candidate:")) {
+            const documentId = nextValue.slice("candidate:".length);
+            const candidate = candidates.find((item) => item.documentId === documentId);
+            onSelectedSourceDocumentIdChange(documentId);
+            onChange(candidate?.estimateRole === "shop" ? "shop" : "carrier");
+            return;
+          }
+          onSelectedSourceDocumentIdChange("");
+          onChange(nextValue as CitationDensityTargetEstimate);
+        }}
+        className="min-h-8 w-full rounded-md border border-border bg-background px-2 py-1 text-xs font-semibold text-foreground outline-none transition focus:ring-2 focus:ring-ring/25"
         aria-label="Citation Density target estimate"
       >
         <option value="auto">Auto</option>
-        <option value="shop">Shop estimate</option>
-        <option value="carrier">Insurance/carrier estimate</option>
+        {candidates
+          .filter((candidate) => candidate.estimateRole === "carrier")
+          .map((candidate) => (
+            <option key={candidate.documentId} value={`candidate:${candidate.documentId}`}>
+              {`Carrier estimate - ${candidate.filename}`}
+            </option>
+          ))}
+        {candidates
+          .filter((candidate) => candidate.estimateRole === "shop")
+          .map((candidate) => (
+            <option key={candidate.documentId} value={`candidate:${candidate.documentId}`}>
+              {`Shop estimate - ${candidate.filename}`}
+            </option>
+          ))}
+        {candidates
+          .filter((candidate) => candidate.estimateRole === "unknown")
+          .map((candidate) => (
+            <option key={candidate.documentId} value={`candidate:${candidate.documentId}`}>
+              {`Selected estimate - ${candidate.filename}`}
+            </option>
+          ))}
         <option value="both">Both</option>
       </select>
     </label>
@@ -5023,6 +5107,93 @@ function selectAnnotatedCitationDensitySourcePdf(attachments: AttachmentTrayItem
     }
     return /preliminary estimate|estimate of record|supplement of record|supplement summary|estimate totals|total cost of repairs|net cost of repairs|workfile id|ccc one estimating|line\s+oper\s+description\s+part\s+number\s+qty|estimate|supplement|ccc|mitchell|audatex|carrier|insurer|insurance|shop|repair facility|appraisal/.test(text);
   }) ?? null;
+}
+
+function buildCitationDensityEstimateCandidates(
+  attachments: AttachmentTrayItem[]
+): CitationDensityEstimateCandidate[] {
+  return attachments
+    .filter((attachment) => /\.pdf$/i.test(attachment.filename))
+    .map((attachment) => {
+      const estimateRole = inferCitationDensityEstimateRole(attachment.filename);
+      return {
+        documentId: attachment.attachmentId,
+        filename: attachment.filename,
+        estimateRole,
+        classification: "estimate" as const,
+        sourcePdfAvailable: true,
+      };
+    })
+    .filter((candidate) => {
+      const text = candidate.filename.toLowerCase();
+      if (/citation density|gap report|annotation legend|annotated estimate|repair intelligence|policy rights|doi complaint|snapshot/.test(text)) {
+        return false;
+      }
+      if (/contract of repair|work authorization|\bwork auth\b|\bauth(?:orization)?\.pdf\b|\bcontract\b/.test(text)) {
+        return false;
+      }
+      return /estimate|supplement|sor|shop|carrier|insurer|insurance|ccc|mitchell|audatex|appraisal|rta/.test(text);
+    });
+}
+
+function inferCitationDensityEstimateRole(filename: string): CitationDensityEstimateRole {
+  const text = filename.toLowerCase();
+  if (/shop|repair facility|body shop|repairer|rta|right to apprais|appraisal|appraiser/.test(text)) return "shop";
+  if (/carrier|insur|insurance|sor|supplement of record|estimate of record|geico|state farm|progressive|allstate/.test(text)) return "carrier";
+  return "unknown";
+}
+
+function resolveCitationDensityEstimateSelection(params: {
+  candidates: CitationDensityEstimateCandidate[];
+  targetEstimate: CitationDensityTargetEstimate;
+  selectedSourceDocumentId: string;
+}) {
+  const selectedCandidate = params.selectedSourceDocumentId
+    ? params.candidates.find((candidate) => candidate.documentId === params.selectedSourceDocumentId) ?? null
+    : null;
+  const roleCandidate = params.targetEstimate === "carrier" || params.targetEstimate === "shop"
+    ? params.candidates.find((candidate) => candidate.estimateRole === params.targetEstimate) ?? null
+    : null;
+  const fallbackCandidate = params.targetEstimate === "auto" || params.targetEstimate === "both"
+    ? params.candidates[0] ?? null
+    : null;
+  const primaryCandidate = selectedCandidate ?? roleCandidate ?? fallbackCandidate;
+
+  return {
+    selectedCandidate,
+    primaryCandidate,
+    selectedSourceDocumentId: selectedCandidate?.documentId ?? roleCandidate?.documentId ?? "",
+    selectedEstimateRole: selectedCandidate?.estimateRole ?? roleCandidate?.estimateRole ?? params.targetEstimate,
+    selectedSourceFilename: selectedCandidate?.filename ?? roleCandidate?.filename ?? "",
+  };
+}
+
+function buildCitationDensitySelectionPayload(selection: ReturnType<typeof resolveCitationDensityEstimateSelection>) {
+  const sourceDocumentId = selection.selectedSourceDocumentId;
+  const selectedEstimateRole =
+    selection.selectedEstimateRole === "carrier" || selection.selectedEstimateRole === "shop"
+      ? selection.selectedEstimateRole
+      : undefined;
+
+  return {
+    sourceDocumentId: sourceDocumentId || undefined,
+    selectedSourceDocumentId: sourceDocumentId || undefined,
+    selectedEstimateRole,
+    sourceFilename: selection.selectedSourceFilename || undefined,
+  };
+}
+
+function buildCitationDensitySelectionError(
+  candidates: CitationDensityEstimateCandidate[],
+  selectedSourceDocumentId: string
+) {
+  if (candidates.length === 0) {
+    return "No estimate PDFs were found for Citation Density.";
+  }
+  if (selectedSourceDocumentId && !candidates.some((candidate) => candidate.documentId === selectedSourceDocumentId)) {
+    return `The selected estimate could not be found. Available estimate candidates: ${candidates.map((candidate) => candidate.filename).join(", ")}.`;
+  }
+  return "Choose a carrier or shop estimate before generating Citation Density.";
 }
 
 function formatAnnotatedExportError(

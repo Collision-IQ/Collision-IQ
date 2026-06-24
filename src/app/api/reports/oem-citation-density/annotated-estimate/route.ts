@@ -55,6 +55,9 @@ type RequestBody = {
   activeCaseId?: unknown;
   artifactIds?: unknown;
   sourceDocumentId?: unknown;
+  selectedSourceDocumentId?: unknown;
+  selectedEstimateRole?: unknown;
+  sourceFilename?: unknown;
   targetEstimate?: unknown;
   sameCaseFollowUp?: unknown;
   findingIds?: unknown;
@@ -114,7 +117,8 @@ export async function POST(request: Request) {
     const { user } = await requireCurrentUser();
     const body = (await request.json().catch(() => ({}))) as RequestBody;
     const caseId = coerceString(body.caseId) || coerceString(body.activeCaseId);
-    const sourceDocumentId = coerceString(body.sourceDocumentId);
+    const sourceDocumentId = coerceString(body.selectedSourceDocumentId) || coerceString(body.sourceDocumentId);
+    const selectedEstimateRole = coerceString(body.selectedEstimateRole);
     const targetEstimate = coerceTargetEstimate(body.targetEstimate);
     const requestArtifactIds = coerceStringArray(body.artifactIds) ?? [];
 
@@ -138,6 +142,7 @@ export async function POST(request: Request) {
     const sourceSelections = resolveOemSourceSelections({
       sourceDocuments,
       sourceDocumentId,
+      selectedEstimateRole,
       targetEstimate,
       report: report.report,
       sourceDiagnostics,
@@ -153,15 +158,18 @@ export async function POST(request: Request) {
 
     if (!sourceSelections.length) {
       if (sourceDocumentId) {
+        const availableEstimateCandidates = sourceDiagnostics.acceptedEstimateCandidates.map((candidate) => candidate.filename);
         logOemAnnotatedEstimateRoute({
           ok: false,
-          error: "Selected source PDF is not an original estimate PDF.",
+          error: "The selected estimate could not be found.",
           selectionDiagnostics,
         });
         return NextResponse.json(
           {
-            error: "Selected source PDF is not an original estimate PDF.",
-            userMessage: "Select the original carrier or shop estimate PDF. OEM Citation Density Report annotates estimate source PDFs only.",
+            error: "The selected estimate could not be found.",
+            userMessage: availableEstimateCandidates.length
+              ? `The selected estimate could not be found. Available estimate candidates: ${availableEstimateCandidates.join(", ")}.`
+              : "No estimate PDFs were found for Citation Density.",
             reportType: "oem-citation-density",
             routeName: "oem-citation-density",
             selectionDiagnostics,
@@ -366,6 +374,7 @@ export async function POST(request: Request) {
 function resolveOemSourceSelections(params: {
   sourceDocuments: Awaited<ReturnType<typeof getUploadedAttachments>>;
   sourceDocumentId: string;
+  selectedEstimateRole: string;
   targetEstimate: OemCitationDensityTargetEstimate;
   report: Parameters<typeof resolveSourceEstimatePdfSelections>[0]["report"];
   sourceDiagnostics: ReturnType<typeof buildCitationDensitySourcePdfDiagnostics>;
@@ -398,7 +407,7 @@ function resolveOemSourceSelections(params: {
           attachment: selected,
           selectedSourceDocumentId: selected.id,
           selectedSourceLabel: selected.filename || "Selected estimate",
-          selectedEstimateRole: params.targetEstimate === "carrier" || params.targetEstimate === "shop" ? params.targetEstimate : "selected",
+          selectedEstimateRole: normalizeRequestedEstimateRole(params.selectedEstimateRole, params.targetEstimate),
           selectedEstimateTotal: null,
           comparisonEstimateTotal: null,
           targetEstimate: params.targetEstimate === "all" ? "both" : params.targetEstimate,
@@ -840,6 +849,15 @@ function coerceString(value: unknown): string {
 function coerceTargetEstimate(value: unknown): OemCitationDensityTargetEstimate {
   const target = coerceString(value);
   return VALID_TARGET_ESTIMATES.has(target) ? target as OemCitationDensityTargetEstimate : "auto";
+}
+
+function normalizeRequestedEstimateRole(
+  selectedEstimateRole: string,
+  targetEstimate: OemCitationDensityTargetEstimate
+): SourceEstimatePdfSelection["selectedEstimateRole"] {
+  if (selectedEstimateRole === "carrier" || selectedEstimateRole === "shop") return selectedEstimateRole;
+  if (targetEstimate === "carrier" || targetEstimate === "shop") return targetEstimate;
+  return "selected";
 }
 
 function withOemSelectionDebug(

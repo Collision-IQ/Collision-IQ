@@ -238,6 +238,9 @@ run("export card primary Citation Density action calls annotated route, not stan
   const downloadIndex = source.indexOf('if (reportType === "estimate_scrubber")');
   const annotatedFetchIndex = source.indexOf('"/api/reports/citation-density/annotated-estimate"', downloadIndex);
   const standaloneBuilderIndex = source.indexOf("buildAnnotatedEstimateReviewPdf", downloadIndex);
+  const selectorIndex = source.indexOf("<CitationDensityTargetSelector");
+  const deltaCardIndex = source.indexOf("Delta Citation Density Report", selectorIndex);
+  const snapshotCardIndex = source.indexOf("1-Page Snapshot");
 
   assert.match(source, /Download Delta Citation Density Report/);
   assert.match(source, /Email Delta Citation Density Report/);
@@ -249,10 +252,17 @@ run("export card primary Citation Density action calls annotated route, not stan
   assert.doesNotMatch(source, /sourceDocumentId:\s*sourcePdf\.attachmentId/);
   assert.match(source, /CitationDensityTargetSelector/);
   assert.match(source, /Citation Density target/);
+  assert.ok(selectorIndex > snapshotCardIndex);
+  assert.ok(deltaCardIndex > selectorIndex);
   assert.match(source, /Shop estimate/);
-  assert.match(source, /Insurance\/carrier estimate/);
+  assert.match(source, /Carrier estimate/);
   assert.match(source, /<option value="both">Both<\/option>/);
   assert.match(source, /targetEstimate:\s*citationDensityTargetEstimate/);
+  assert.match(source, /selectedSourceDocumentId:\s*sourceDocumentId \|\| undefined/);
+  assert.match(source, /sourceDocumentId:\s*sourceDocumentId \|\| undefined/);
+  assert.match(source, /sourceFilename:\s*selection\.selectedSourceFilename/);
+  assert.match(source, /Carrier estimate - \$\{candidate\.filename\}/);
+  assert.match(source, /Shop estimate - \$\{candidate\.filename\}/);
   assert.match(source, /Citation Density annotated export requires an original estimate PDF/);
   assert.ok(annotatedFetchIndex > downloadIndex);
   assert.ok(standaloneBuilderIndex === -1 || annotatedFetchIndex < standaloneBuilderIndex);
@@ -578,8 +588,8 @@ run("Work Auth contract is classified as support and cannot be an estimate sourc
     targetEstimate: "auto",
     findings: [finding()],
   }), null);
-  assert.equal(NO_SOURCE_PDF_ERROR, "No estimate PDF found for Citation Density.");
-  assert.match(NO_SOURCE_PDF_USER_MESSAGE, /Upload a shop estimate and\/or carrier estimate/);
+  assert.equal(NO_SOURCE_PDF_ERROR, "No estimate PDFs were found for Citation Density.");
+  assert.match(NO_SOURCE_PDF_USER_MESSAGE, /No estimate PDFs were found for Citation Density/);
 });
 
 run("Shop and carrier estimates win over Work Auth support documents", () => {
@@ -837,8 +847,8 @@ run("missing source PDF returns clear user-facing missing-source message data", 
   });
 
   assert.equal(selected, null);
-  assert.equal(NO_SOURCE_PDF_ERROR, "No estimate PDF found for Citation Density.");
-  assert.match(NO_SOURCE_PDF_USER_MESSAGE, /Upload a shop estimate and\/or carrier estimate/i);
+  assert.equal(NO_SOURCE_PDF_ERROR, "No estimate PDFs were found for Citation Density.");
+  assert.match(NO_SOURCE_PDF_USER_MESSAGE, /No estimate PDFs were found for Citation Density/i);
 });
 
 run("authority priority model does not treat estimate parser, CCC, or internet fallback as verified authority", () => {
