@@ -76,12 +76,6 @@ import { normalizeReportToAnalysisResult } from "@/lib/ai/builders/normalizeRepo
 import { cleanOperationDisplayText } from "@/lib/ui/presentationText";
 import { toCustomerFacingText } from "@/lib/ai/customerFacingText";
 import { isRetryableProviderMessage } from "@/lib/ai/providerRetryableError";
-import {
-  ANALYSIS_STALE_AFTER_MS,
-  ANALYSIS_STILL_RUNNING_MESSAGE,
-  ANALYSIS_TIMEOUT_MESSAGE,
-  isStaleProcessing,
-} from "@/components/chatWidget/analysisLifecycle";
 import { isNative } from "@/lib/native";
 import type {
   AnalysisResult,
@@ -215,8 +209,6 @@ function resolveEffectiveReviewProgress(
     progress.reviewableFileCount,
     diagnostics?.reviewableCount ?? 0,
     integrity.reviewableFileCount ?? 0,
-    indexed,
-    progress.uploaded,
     reviewedForDetermination,
     visionProcessed
   );
@@ -475,8 +467,6 @@ export function ChatbotWorkspacePage() {
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState<"idle" | "processing" | "complete" | "error">("idle");
   const [analysisStatusDetail, setAnalysisStatusDetail] = useState<string | null>(null);
-  const [analysisProcessingStartedAt, setAnalysisProcessingStartedAt] = useState<number | null>(null);
-  const [analysisElapsedNow, setAnalysisElapsedNow] = useState<number>(() => Date.now());
   const [endAnalysisConfirming, setEndAnalysisConfirming] = useState(false);
   const [consentResolved, setConsentResolved] = useState(false);
   const [consentAccepted, setConsentAccepted] = useState(false);
@@ -1029,7 +1019,6 @@ export function ChatbotWorkspacePage() {
     setAnalysisLoading(false);
     setAnalysisStatus("idle");
     setAnalysisStatusDetail(null);
-    setAnalysisProcessingStartedAt(null);
     setActiveInsightKey(null);
     setActiveEvidenceTargetId(null);
     setEndAnalysisConfirming(false);
@@ -1041,59 +1030,8 @@ export function ChatbotWorkspacePage() {
     if (next) {
       setAnalysisStatus("complete");
       setAnalysisStatusDetail(null);
-      setAnalysisLoading(false);
-      setAnalysisProcessingStartedAt(null);
       setActiveInsightKey((current) => current ?? "executive_summary");
     }
-  }
-
-  function handleAnalysisLoadingChange(loading: boolean) {
-    setAnalysisLoading(loading);
-    if (loading) {
-      setAnalysisProcessingStartedAt((current) => current ?? Date.now());
-      return;
-    }
-    if (analysisStatus !== "processing") {
-      setAnalysisProcessingStartedAt(null);
-    }
-  }
-
-  function handleAnalysisStatusChange(
-    status: "idle" | "processing" | "complete" | "error",
-    detail?: string | null
-  ) {
-    setAnalysisStatus(status);
-    setAnalysisStatusDetail(detail ?? null);
-    if (status === "processing") {
-      setAnalysisProcessingStartedAt((current) => current ?? Date.now());
-    } else {
-      setAnalysisProcessingStartedAt(null);
-    }
-    if (status !== "processing") {
-      setAnalysisLoading(false);
-    }
-  }
-
-  function retryAnalysis() {
-    setAnalysisStatus("processing");
-    setAnalysisStatusDetail(null);
-    setAnalysisLoading(true);
-    setAnalysisProcessingStartedAt(Date.now());
-    setLeftPaneMode("chat");
-    void chatSessionControlsRef.current?.sendPrompt(
-      "Retry analysis and report generation for the current uploaded files."
-    );
-  }
-
-  function retryReportGeneration() {
-    setAnalysisStatus("processing");
-    setAnalysisStatusDetail(null);
-    setAnalysisLoading(true);
-    setAnalysisProcessingStartedAt(Date.now());
-    setLeftPaneMode("chat");
-    void chatSessionControlsRef.current?.sendPrompt(
-      "Retry report generation for the current case. If Delta Citation Density PDF generation fails, show a retryable Delta PDF error and keep the other reports available."
-    );
   }
 
   function handleEvidenceSelect(link: EvidenceLink) {
@@ -1175,31 +1113,6 @@ export function ChatbotWorkspacePage() {
       console.info("Open or continue this case before asking about a finding.");
     }
   }
-
-  useEffect(() => {
-    if (!analysisProcessingStartedAt || (analysisStatus !== "processing" && !analysisLoading)) {
-      return;
-    }
-    const timerId = window.setInterval(() => {
-      setAnalysisElapsedNow(Date.now());
-    }, 1000);
-    return () => window.clearInterval(timerId);
-  }, [analysisLoading, analysisProcessingStartedAt, analysisStatus]);
-
-  useEffect(() => {
-    if (!isStaleProcessing({
-      status: analysisStatus,
-      loading: analysisLoading,
-      startedAt: analysisProcessingStartedAt,
-      now: analysisElapsedNow,
-      staleAfterMs: ANALYSIS_STALE_AFTER_MS,
-    })) {
-      return;
-    }
-    setAnalysisLoading(false);
-    setAnalysisStatus("error");
-    setAnalysisStatusDetail(ANALYSIS_TIMEOUT_MESSAGE);
-  }, [analysisElapsedNow, analysisLoading, analysisProcessingStartedAt, analysisStatus]);
 
   const chatBlocked = !consentAccepted;
   const featureFlags = viewerAccess?.featureFlags;
@@ -1638,8 +1551,11 @@ export function ChatbotWorkspacePage() {
                           onAnalysisResultChange={handleAnalysisResultChange}
                           onLinkedEvidenceChange={setLinkedEvidenceDebug}
                           onAnalysisPanelChange={setAnalysisPanel}
-                          onAnalysisLoadingChange={handleAnalysisLoadingChange}
-                          onAnalysisStatusChange={handleAnalysisStatusChange}
+                          onAnalysisLoadingChange={setAnalysisLoading}
+                          onAnalysisStatusChange={(status, detail) => {
+                            setAnalysisStatus(status);
+                            setAnalysisStatusDetail(detail ?? null);
+                          }}
                           onWorkspaceDataChange={setWorkspaceData}
                           onSessionReset={handleSessionReset}
                           onChatEngagement={collapsePreChatHero}
@@ -1695,10 +1611,6 @@ export function ChatbotWorkspacePage() {
             analysisLoading={analysisLoading}
             analysisStatus={analysisStatus}
             analysisStatusDetail={analysisStatusDetail}
-            analysisProcessingStartedAt={analysisProcessingStartedAt}
-            analysisElapsedNow={analysisElapsedNow}
-            onRetryAnalysis={retryAnalysis}
-            onRetryReportGeneration={retryReportGeneration}
             hasResolvedAnalysis={hasResolvedAnalysis}
             panel={panel}
             renderModel={renderModel}
@@ -1925,10 +1837,6 @@ function RailContent({
   analysisLoading,
   analysisStatus,
   analysisStatusDetail,
-  analysisProcessingStartedAt,
-  analysisElapsedNow,
-  onRetryAnalysis,
-  onRetryReportGeneration,
   hasResolvedAnalysis,
   panel,
   renderModel,
@@ -1968,10 +1876,6 @@ function RailContent({
   analysisLoading: boolean;
   analysisStatus: "idle" | "processing" | "complete" | "error";
   analysisStatusDetail: string | null;
-  analysisProcessingStartedAt: number | null;
-  analysisElapsedNow: number;
-  onRetryAnalysis: () => void;
-  onRetryReportGeneration: () => void;
   hasResolvedAnalysis: boolean;
   panel: DecisionPanel;
   renderModel: ReturnType<typeof buildExportModel>;
@@ -2109,22 +2013,6 @@ function RailContent({
   const effectiveReviewProgress = resolveEffectiveReviewProgress(
     reviewProgress,
     renderModel.confidenceIntegrity
-  );
-  const analysisElapsedSeconds = analysisProcessingStartedAt
-    ? Math.max(0, Math.floor((analysisElapsedNow - analysisProcessingStartedAt) / 1000))
-    : 0;
-  const analysisStaleProcessing = isStaleProcessing({
-    status: analysisStatus,
-    loading: analysisLoading,
-    startedAt: analysisProcessingStartedAt,
-    now: analysisElapsedNow,
-    staleAfterMs: ANALYSIS_STALE_AFTER_MS,
-  });
-  const reviewableDisplayCount = Math.max(
-    effectiveReviewProgress.reviewableFileCount,
-    effectiveReviewProgress.indexed,
-    effectiveReviewProgress.uploaded,
-    effectiveReviewProgress.reviewedForDetermination
   );
   const fileReviewDiagnostics = renderModel.confidenceIntegrity.fileReviewDiagnostics;
   const fileReviewWarning =
@@ -3159,13 +3047,13 @@ function RailContent({
           <MetricCard label="Vision Processed" value={String(effectiveReviewProgress.visionProcessed)} />
           <MetricCard
             label="Reviewed"
-            value={`${effectiveReviewProgress.reviewedForDetermination}/${reviewableDisplayCount}`}
+            value={`${effectiveReviewProgress.reviewedForDetermination}/${effectiveReviewProgress.reviewableFileCount || effectiveReviewProgress.reviewedForDetermination}`}
           />
         </div>
 
         <div className="mt-2 text-[12px] leading-5 text-muted-foreground">
           Reviewed {effectiveReviewProgress.reviewedForDetermination} of{" "}
-          {reviewableDisplayCount} reviewable files.
+          {effectiveReviewProgress.reviewableFileCount || effectiveReviewProgress.reviewedForDetermination} reviewable files.
         </div>
 
         {fileReviewDiagnostics ? (
@@ -3226,35 +3114,9 @@ function RailContent({
             Analysis in progress
           </div>
           <div className="text-[13px] leading-5 text-muted-foreground">
-            {analysisElapsedSeconds >= Math.floor(ANALYSIS_STALE_AFTER_MS / 1000)
-              ? ANALYSIS_TIMEOUT_MESSAGE
-              : analysisElapsedSeconds >= 18
-                ? ANALYSIS_STILL_RUNNING_MESSAGE
-                : "Structured review is still hydrating for the current file set. Reports will appear when ready, and chat remains available."}
+            Structured review is still hydrating for the current file set. We&apos;ll populate the
+            rail, valuation, supplement lines, and exports when the analysis route finishes.
           </div>
-          {analysisElapsedSeconds > 0 ? (
-            <div className="text-[11px] leading-5 text-muted-foreground">
-              Elapsed: {analysisElapsedSeconds}s.
-            </div>
-          ) : null}
-          {analysisStaleProcessing ? (
-            <div className="flex flex-wrap gap-2 pt-1">
-              <button
-                type="button"
-                onClick={onRetryAnalysis}
-                className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
-              >
-                Retry analysis
-              </button>
-              <button
-                type="button"
-                onClick={onRetryReportGeneration}
-                className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
-              >
-                Retry report generation
-              </button>
-            </div>
-          ) : null}
         </section>
       )}
 
@@ -3268,22 +3130,6 @@ function RailContent({
               (hasRetryableAnalysisFailure
                 ? "Analysis provider is busy. Please retry shortly."
                 : "The current file set could not be analyzed. Review access status or retry.")}
-          </div>
-          <div className="flex flex-wrap gap-2 pt-1">
-            <button
-              type="button"
-              onClick={onRetryAnalysis}
-              className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            >
-              Retry analysis
-            </button>
-            <button
-              type="button"
-              onClick={onRetryReportGeneration}
-              className="rounded-md border border-border bg-background px-2.5 py-1 text-xs text-muted-foreground transition hover:bg-muted hover:text-foreground"
-            >
-              Retry report generation
-            </button>
           </div>
         </section>
       )}
