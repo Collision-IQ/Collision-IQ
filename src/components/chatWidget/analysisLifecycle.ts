@@ -2,16 +2,12 @@ export type AnalysisLifecycleStage =
   | "upload_received"
   | "upload_complete"
   | "files_indexed"
-  | "analysis_job_started"
-  | "unique_documents_resolved"
-  | "duplicate_documents_skipped"
   | "preliminary_review_started"
   | "preliminary_review_complete"
-  | "structured_estimate_parse_started"
-  | "structured_estimate_parse_complete"
-  | "structured_deltas_ready"
   | "full_analysis_started"
   | "estimate_pair_resolved"
+  | "structured_deltas_started"
+  | "structured_deltas_complete"
   | "repair_intelligence_started"
   | "repair_intelligence_complete"
   | "snapshot_started"
@@ -21,18 +17,13 @@ export type AnalysisLifecycleStage =
   | "right_rail_state_published"
   | "full_analysis_complete"
   | "full_analysis_failed"
-  | "full_analysis_timeout"
-  | "retry_started"
-  | "retry_failed"
-  | "retry_complete"
-  | "delta_report_generation_started"
-  | "delta_report_generation_complete";
+  | "full_analysis_timeout";
 
 export const ANALYSIS_STILL_RUNNING_MESSAGE =
   "Analysis is still running. Reports will appear when ready. You can keep using chat.";
 
 export const ANALYSIS_TIMEOUT_MESSAGE =
-  "Full analysis timed out, but structured estimate comparison may be available. You can retry full analysis or generate Delta Citation Density.";
+  "Analysis timed out while preparing reports. Retry report generation.";
 
 export const ANALYSIS_STALE_AFTER_MS = 90_000;
 export const ANALYSIS_FETCH_TIMEOUT_MS = 90_000;
@@ -49,20 +40,6 @@ export type AnalysisLifecycleEvent = AnalysisLifecycleContext & {
   durationMs: number;
   status?: string;
   detail?: string | null;
-};
-
-export type ReviewableDocumentInput = {
-  documentId?: string | null;
-  uploadId?: string | null;
-  attachmentId?: string | null;
-  id?: string | null;
-  sha256?: string | null;
-  fileHash?: string | null;
-  filename?: string | null;
-  name?: string | null;
-  sizeBytes?: number | null;
-  size?: number | null;
-  uploadBatchId?: string | null;
 };
 
 export function createAnalysisRequestId(prefix = "analysis") {
@@ -105,16 +82,14 @@ export function resolveHydrationReviewProgress(input: {
   uploaded?: number;
   indexed?: number;
   attachmentCount?: number;
-  uniqueDocumentCount?: number;
 }) {
-  const uniqueCount = normalizeCount(input.uniqueDocumentCount);
   const uploaded = Math.max(
-    uniqueCount,
+    input.current.uploaded + normalizeCount(input.attachmentCount),
     normalizeCount(input.uploaded),
     input.current.uploaded
   );
   const indexed = Math.max(
-    uniqueCount,
+    input.current.indexed + normalizeCount(input.indexed),
     normalizeCount(input.indexed),
     normalizeCount(input.attachmentCount),
     input.current.indexed
@@ -132,44 +107,6 @@ export function resolveHydrationReviewProgress(input: {
     reviewableFileCount,
     totalKnownFiles: Math.max(input.current.totalKnownFiles, uploaded, indexed, reviewableFileCount),
   };
-}
-
-export function getUniqueReviewableDocuments<T extends ReviewableDocumentInput>(documents: T[]): T[] {
-  const seen = new Set<string>();
-  const unique: T[] = [];
-
-  documents.forEach((document, index) => {
-    const key = getReviewableDocumentKey(document, index);
-    if (seen.has(key)) return;
-    seen.add(key);
-    unique.push(document);
-  });
-
-  return unique;
-}
-
-export function getReviewableDocumentKey(document: ReviewableDocumentInput, index = 0) {
-  const id = firstNonEmpty([
-    document.documentId,
-    document.uploadId,
-    document.attachmentId,
-    document.id,
-  ]);
-  if (id) return `id:${id}`;
-
-  const hash = firstNonEmpty([document.sha256, document.fileHash]);
-  if (hash) return `hash:${hash}`;
-
-  const filename = normalizeFilename(document.filename ?? document.name);
-  const size = typeof document.sizeBytes === "number"
-    ? document.sizeBytes
-    : typeof document.size === "number"
-      ? document.size
-      : null;
-  const batch = firstNonEmpty([document.uploadBatchId]) ?? "batchless";
-  if (filename && size !== null) return `file:${filename}:${size}:${batch}`;
-  if (filename) return `file:${filename}:${batch}`;
-  return `unknown:${index}`;
 }
 
 export function isStaleProcessing(input: {
@@ -192,13 +129,11 @@ export async function fetchWithTimeout(
     timeoutMs?: number;
     timeoutMessage?: string;
     parentSignal?: AbortSignal | null;
-    abortOnTimeout?: boolean;
   } = {}
 ) {
   const timeoutMs = options.timeoutMs ?? ANALYSIS_FETCH_TIMEOUT_MS;
   const controller = new AbortController();
-  let timedOut = false;
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutId = setTimeout(() => controller.abort(new Error(options.timeoutMessage ?? ANALYSIS_TIMEOUT_MESSAGE)), timeoutMs);
 
   const onAbort = () => controller.abort(options.parentSignal?.reason);
   if (options.parentSignal) {
@@ -209,45 +144,24 @@ export async function fetchWithTimeout(
     }
   }
 
-  const fetchPromise = fetch(input, {
+  try {
+    return await fetch(input, {
       ...init,
       signal: controller.signal,
     });
-  fetchPromise.catch(() => undefined);
-
-  const timeoutPromise = new Promise<Response>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      timedOut = true;
-      if (options.abortOnTimeout !== false) {
-        controller.abort(new Error(options.timeoutMessage ?? ANALYSIS_TIMEOUT_MESSAGE));
-      }
-      reject(new Error(options.timeoutMessage ?? ANALYSIS_TIMEOUT_MESSAGE));
-    }, timeoutMs);
-  });
-
-  try {
-    return await Promise.race([fetchPromise, timeoutPromise]);
   } catch (error) {
-    if ((timedOut || controller.signal.aborted) && !options.parentSignal?.aborted) {
+    if (controller.signal.aborted && !options.parentSignal?.aborted) {
       throw new Error(options.timeoutMessage ?? ANALYSIS_TIMEOUT_MESSAGE);
     }
     throw error;
   } finally {
-    if (timeoutId !== null) clearTimeout(timeoutId);
+    clearTimeout(timeoutId);
     options.parentSignal?.removeEventListener("abort", onAbort);
   }
 }
 
 function normalizeCount(value: number | undefined) {
   return Number.isFinite(value) && typeof value === "number" ? Math.max(0, value) : 0;
-}
-
-function firstNonEmpty(values: Array<string | null | undefined>) {
-  return values.find((value): value is string => typeof value === "string" && value.trim().length > 0)?.trim() ?? null;
-}
-
-function normalizeFilename(value: string | null | undefined) {
-  return typeof value === "string" ? value.trim().toLowerCase().replace(/\s+/g, " ") : "";
 }
 
 function defaultAnalysisLifecycleEmit(event: AnalysisLifecycleEvent) {
