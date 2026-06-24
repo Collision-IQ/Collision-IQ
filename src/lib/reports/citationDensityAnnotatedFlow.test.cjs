@@ -280,7 +280,7 @@ run("export card primary Citation Density action calls annotated route, not stan
   assert.match(source, /Shop estimate - \$\{candidate\.filename\}/);
   assert.match(source, /Citation Density annotated export needs an active case or uploaded estimate PDFs/);
   assert.match(source, /structuredComparisonReady/);
-  assert.match(source, /Structured estimate comparison is ready\. Full report suite is still running/);
+  assert.match(source, /Structured estimate comparison ready\. Full report suite is still running/);
   assert.match(routeSource, /requestArtifactIds/);
   assert.match(routeSource, /\.\.\.requestArtifactIds/);
   assert.match(routeSource, /report\?\]\.report \?\? null|report\?\.report \?\? null/);
@@ -294,9 +294,15 @@ run("right rail exposes Delta Citation Density while full analysis is delayed", 
   assert.match(source, /const structuredComparisonReady = citationDensityEstimateCandidates\.length >= 2/);
   assert.match(source, /Boolean\(annotatedEstimateSourcePdf && \(analysisReportId \|\| structuredComparisonReady\)\)/);
   assert.match(source, /structuredComparisonReady\s*\?\s*"Delta ready"/);
-  assert.match(source, /structuredComparisonReady\)\s*\{\s*void downloadReportDocument\("estimate_scrubber"\)/);
+  assert.match(source, /function retryDeltaReportGeneration\(\)/);
+  assert.match(source, /stage:\s*"retry_delta_report_clicked"/);
+  assert.match(source, /retryDeltaReportGeneration\(\);/);
+  assert.match(source, /route:\s*"\/api\/reports\/citation-density\/annotated-estimate"/);
   assert.match(source, /Generate Delta Citation Density/);
-  assert.match(source, /Full analysis is still running\. Structured estimate comparison is ready\./);
+  assert.match(source, /Structured estimate comparison ready\. Full analysis is delayed\./);
+  assert.match(source, /Delta Citation Density generation failed\. Retry Delta report\./);
+  assert.match(source, /build:\s*"0de130d"/);
+  assert.match(source, /deltaMode:\s*"structured_from_artifacts"/);
   assert.doesNotMatch(source, /hasResolvedAnalysis && Boolean\(analysisReportId && annotatedEstimateSourcePdf\)/);
 });
 

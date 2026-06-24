@@ -25,8 +25,10 @@ export type AnalysisLifecycleStage =
   | "retry_started"
   | "retry_failed"
   | "retry_complete"
+  | "retry_delta_report_clicked"
   | "delta_report_generation_started"
-  | "delta_report_generation_complete";
+  | "delta_report_generation_complete"
+  | "delta_report_generation_failed";
 
 export const ANALYSIS_STILL_RUNNING_MESSAGE =
   "Analysis is still running. Reports will appear when ready. You can keep using chat.";

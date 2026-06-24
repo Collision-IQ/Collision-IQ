@@ -2100,6 +2100,7 @@ function RailContent({
   const [reportSendHistory, setReportSendHistory] = useState<ReportSendHistoryItem[]>([]);
   const [reportSendHistoryLoading, setReportSendHistoryLoading] = useState(false);
   const [serviceCheckoutLoading, setServiceCheckoutLoading] = useState(false);
+  const [deltaReportGenerationError, setDeltaReportGenerationError] = useState<string | null>(null);
   function registerSectionRef(insightKey: InsightKey, node: HTMLDivElement | null) {
     sectionRefs.current[insightKey] = node;
   }
@@ -2146,6 +2147,21 @@ function RailContent({
   );
   const annotatedEstimateSourcePdf = resolvedCitationDensitySelection.primaryCandidate;
   const structuredComparisonReady = citationDensityEstimateCandidates.length >= 2;
+  const deltaDebugState = useMemo(
+    () => ({
+      build: "0de130d",
+      deltaMode: "structured_from_artifacts",
+      structuredComparisonReady,
+      route: "/api/reports/citation-density/annotated-estimate",
+      artifactIds: attachmentIds,
+      candidates: citationDensityEstimateCandidates.map((candidate) => ({
+        documentId: candidate.documentId,
+        filename: candidate.filename,
+        estimateRole: candidate.estimateRole,
+      })),
+    }),
+    [attachmentIds, citationDensityEstimateCandidates, structuredComparisonReady]
+  );
   const canGenerateCitationDensityAnnotatedEstimate =
     Boolean(annotatedEstimateSourcePdf && (analysisReportId || structuredComparisonReady));
   const railRisk = hasResolvedAnalysis
@@ -2221,6 +2237,29 @@ function RailContent({
     ...renderModel.negotiationPlaybook.suggestedSequence,
     ...renderModel.negotiationPlaybook.documentationNeeded,
   ]).slice(0, 5);
+
+  useEffect(() => {
+    if (!structuredComparisonReady) return;
+    console.info("[delta-report-debug]", deltaDebugState);
+  }, [deltaDebugState, structuredComparisonReady]);
+
+  function retryDeltaReportGeneration() {
+    const requestId = createAnalysisRequestId("retry-delta-report");
+    console.info("[analysis-lifecycle]", {
+      stage: "retry_delta_report_clicked",
+      requestId,
+      caseId: analysisReportId,
+      fileCount: attachmentIds.length,
+      durationMs: 0,
+      status: "delta",
+      route: "/api/reports/citation-density/annotated-estimate",
+      build: "0de130d",
+      deltaMode: "structured_from_artifacts",
+      structuredComparisonReady,
+    });
+    setDeltaReportGenerationError(null);
+    void downloadReportDocument("estimate_scrubber");
+  }
   const reviewedEstimateCount = buildReportUploadedDocuments(analysisResult).filter(
     (doc) => doc.kind === "estimate"
   ).length;
@@ -2503,6 +2542,7 @@ function RailContent({
   async function downloadReportDocument(reportType: ReportKind) {
     if (reportType === "estimate_scrubber") {
       try {
+        setDeltaReportGenerationError(null);
         const exportResult = await generateAnnotatedCitationDensityEstimate();
         downloadBlob(exportResult.blob, exportResult.filename);
         onCitationDensityReportReady({
@@ -2514,7 +2554,22 @@ function RailContent({
         });
         setReportSendStatus(buildAnnotatedCitationDensityStatus(exportResult));
       } catch (error) {
-        setReportSendStatus(error instanceof Error ? error.message : "Annotated estimate download failed.");
+        console.info("[analysis-lifecycle]", {
+          stage: "delta_report_generation_failed",
+          requestId: createAnalysisRequestId("delta-report"),
+          caseId: analysisReportId,
+          fileCount: attachmentIds.length,
+          durationMs: 0,
+          status: "delta",
+          route: "/api/reports/citation-density/annotated-estimate",
+          build: "0de130d",
+          deltaMode: "structured_from_artifacts",
+          structuredComparisonReady,
+          detail: error instanceof Error ? error.message : String(error),
+        });
+        const message = "Delta Citation Density generation failed. Retry Delta report.";
+        setDeltaReportGenerationError(message);
+        setReportSendStatus(message);
       }
       return;
     }
@@ -2609,6 +2664,10 @@ function RailContent({
       fileCount: attachmentIds.length,
       durationMs: 0,
       status: "delta",
+      route: "/api/reports/citation-density/annotated-estimate",
+      build: "0de130d",
+      deltaMode: "structured_from_artifacts",
+      structuredComparisonReady,
     });
     const selectionPayload = buildCitationDensitySelectionPayload(resolvedCitationDensitySelection);
     const response = await fetch("/api/reports/citation-density/annotated-estimate", {
@@ -2685,6 +2744,10 @@ function RailContent({
       fileCount: attachmentIds.length,
       durationMs: Date.now() - startedAt,
       status: "delta",
+      route: "/api/reports/citation-density/annotated-estimate",
+      build: "0de130d",
+      deltaMode: "structured_from_artifacts",
+      structuredComparisonReady,
     });
     return result;
   }
@@ -3315,13 +3378,18 @@ function RailContent({
           </div>
           <div className="text-[13px] leading-5 text-muted-foreground">
             {structuredComparisonReady
-              ? "Structured estimate comparison is ready. Full report suite is still running. You can generate Delta Citation Density now."
+              ? "Structured estimate comparison ready. Full report suite is still running. You can generate Delta Citation Density now."
               : analysisElapsedSeconds >= Math.floor(ANALYSIS_STALE_AFTER_MS / 1000)
               ? ANALYSIS_TIMEOUT_MESSAGE
               : analysisElapsedSeconds >= 18
                 ? ANALYSIS_STILL_RUNNING_MESSAGE
                 : "Structured review is still hydrating for the current file set. Reports will appear when ready, and chat remains available."}
           </div>
+          {structuredComparisonReady && deltaReportGenerationError ? (
+            <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-[12px] leading-5 text-red-200">
+              {deltaReportGenerationError}
+            </div>
+          ) : null}
           {analysisElapsedSeconds > 0 ? (
             <div className="text-[11px] leading-5 text-muted-foreground">
               Elapsed: {analysisElapsedSeconds}s.
@@ -3340,7 +3408,7 @@ function RailContent({
                 type="button"
                 onClick={() => {
                   if (structuredComparisonReady) {
-                    void downloadReportDocument("estimate_scrubber");
+                    retryDeltaReportGeneration();
                     return;
                   }
                   onRetryReportGeneration();
@@ -3361,12 +3429,17 @@ function RailContent({
           </div>
           <div className="text-[13px] leading-5 text-muted-foreground">
             {structuredComparisonReady
-              ? "Full analysis is still running. Structured estimate comparison is ready."
+              ? "Structured estimate comparison ready. Full analysis is delayed."
               : analysisStatusDetail ||
               (hasRetryableAnalysisFailure
                 ? "Analysis provider is busy. Please retry shortly."
                 : "The current file set could not be analyzed. Review access status or retry.")}
           </div>
+          {structuredComparisonReady && deltaReportGenerationError ? (
+            <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 text-[12px] leading-5 text-red-200">
+              {deltaReportGenerationError}
+            </div>
+          ) : null}
           <div className="flex flex-wrap gap-2 pt-1">
             <button
               type="button"
@@ -3379,7 +3452,7 @@ function RailContent({
               type="button"
               onClick={() => {
                 if (structuredComparisonReady) {
-                  void downloadReportDocument("estimate_scrubber");
+                  retryDeltaReportGeneration();
                   return;
                 }
                 onRetryReportGeneration();
@@ -3733,7 +3806,7 @@ function RailContent({
                   <button
                     type="button"
                     onClick={() => {
-                      void downloadReportDocument("estimate_scrubber");
+                      retryDeltaReportGeneration();
                       emitSafeCrmEventFromClient({
                         event: "report_generated",
                         plan,
