@@ -242,6 +242,31 @@ run("customer-facing text repairs redaction and rendering grammar defects", () =
   assert.doesNotMatch(cleaned, /\[REDACTED_[A-Z_]+\]|for for|with with|remains unclear remains unclear/i);
 });
 
+run("customer report PDF keeps source insurer and neutral estimate labels", () => {
+  const document = buildCustomerReportPdf({
+    report: {
+      title: "Customer Report",
+      openingSummary: "The source/lower estimate lists Insurance Company: USAA and the comparison/final estimate is higher.",
+      whichRepairPlanLooksStronger: "The comparison/final estimate looks more complete than the source/lower estimate.",
+      safetyFirst: "Diagnostics and calibration proof should be verified.",
+      whatStillNeedsProof: ["Final invoice and scan proof."],
+      yourOptions: ["Ask for the final estimate reconciliation."],
+      bottomLine: "Use the source/lower and comparison/final estimates to explain the gap.",
+    },
+    vehicle: "2024 Jeep Grand Wagoneer",
+    vin: null,
+    insurer: "USAA",
+    mileage: null,
+    estimateTotal: "$11,892.26",
+  });
+
+  const text = flattenDocument(document);
+  assert.equal(document.summary.find((item) => item.label === "Insurer")?.value, "USAA");
+  assert.match(text, /source\/lower estimate/i);
+  assert.match(text, /comparison\/final estimate/i);
+  assert.doesNotMatch(text, /\[REDACTED_INSURER\]/);
+});
+
 run("customer-facing text completes export fragments and neutralizes unsupported Pennsylvania wording", () => {
   const cleaned = toCustomerFacingText(
     [

@@ -338,14 +338,14 @@ function inferEstimateRole(
     .find(([label]) => label && text.includes(label))?.[1];
   if (matchingEvidenceType === "carrier_estimate") return "carrier";
   if (matchingEvidenceType === "shop_estimate") return "shop";
-  if (/carrier estimate|insurer estimate|carrier|insurer|insurance|lower cost/.test(text)) return "carrier";
   if (/shop estimate|repair facility|body shop|repairer|higher cost|rta|right to apprais|appraisal|appraiser report/.test(text)) return "shop";
+  if (/carrier estimate|insurer estimate|insurance estimate|carrier|insurer|lower cost|sor/.test(text)) return "carrier";
   return "unknown";
 }
 
 function extractEstimateTotal(attachment: StoredAttachment): number | null {
   const text = `${attachment.filename}\n${attachment.text ?? ""}`;
-  const matches = [...text.matchAll(/(?:(?:estimate|repair|grand)\s+total|total|gross|net)\s*[:#=/-]?\s*\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.\d{2})?|[0-9]+(?:\.\d{2})?)/gi)];
+  const matches = [...text.matchAll(/(?:net\s+cost\s+of\s+repairs|(?:estimate|repair|grand)\s+total|total|gross|net)[^\n$0-9]{0,40}\$?\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.\d{2})?|[0-9]+(?:\.\d{2})?)/gi)];
   const raw = matches.at(-1)?.[1];
   if (!raw) return null;
   const value = Number(raw.replace(/,/g, ""));

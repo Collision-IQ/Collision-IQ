@@ -2933,8 +2933,8 @@ function classifyUploadedEvidenceSource(attachment: StoredAttachment): CaseEvide
   if (text.includes("invoice") || text.includes("repair order") || text.includes("ro #")) {
     return "invoice";
   }
-  if (/\b(carrier|insurance estimate|insurer estimate)\b/i.test(text)) return "carrier_estimate";
   if (/\b(shop|repair facility|approved repairs?)\b/i.test(text)) return "shop_estimate";
+  if (/\b(carrier estimate|insurance estimate|insurer estimate|staff estimate|sor)\b/i.test(text)) return "carrier_estimate";
   if (/\b(supplement|supp|sor)\b/i.test(text)) return "supplement";
   if (text.includes("scan")) return "scan_report";
   if (text.includes("calibration")) return "calibration_report";

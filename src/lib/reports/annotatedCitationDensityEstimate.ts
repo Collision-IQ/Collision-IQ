@@ -1029,7 +1029,8 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     throw new CitationDensityAnnotationError(reportIdentity.noAnchorError, trace);
   }
 
-  const partSourceResult = reportIdentity.reportType === "citation-density"
+  const hasStructuredLineItemDeltas = reportIdentity.reportType === "citation-density" && (trace.lineItemDeltaFindingCount ?? 0) >= 5;
+  const partSourceResult = reportIdentity.reportType === "citation-density" && !hasStructuredLineItemDeltas
     ? buildPartSourceFindings({
         selectedAnchors: anchors,
         selectedVisualLines: extraction.visualLines,
@@ -1708,9 +1709,9 @@ function buildStructuredLineItemDeltaFindings(
   // Only annotate in the intended direction (lower estimate vs a higher one).
   // If totals are known and the comparison is actually the lower-cost estimate,
   // skip so we never claim this estimate is "missing" scope it actually has.
-  const lowerTotal = parseEstimateNetTotal(context.sourceText ?? "");
+  const lowerTotal = parseEstimateNetTotal(context.sourceText ?? "") ?? parseEstimateTotalForDelta(context.sourceText ?? "");
   const higherTotal = comparison
-    .map((item) => parseEstimateNetTotal(item.text))
+    .map((item) => parseEstimateNetTotal(item.text) ?? parseEstimateTotalForDelta(item.text))
     .find((value): value is number => value !== null) ?? null;
   if (lowerTotal !== null && higherTotal !== null && higherTotal < lowerTotal) {
     return { findings: [], matchedPairCount: 0, missingOperationCount: 0 };
@@ -1803,6 +1804,17 @@ function buildStructuredLineItemDeltaFindings(
         laborHoursImpact: delta.laborDelta ?? null,
       })
     );
+  }
+
+  const totalsFinding = buildStructuredTotalsDeltaFinding({
+    context,
+    lowerTotal,
+    higherTotal,
+    comparisonName,
+    usedAnchorIds,
+  });
+  if (totalsFinding) {
+    findings.push(totalsFinding);
   }
 
   return {
@@ -2062,6 +2074,7 @@ function buildRequiredDetectorFinding(params: {
 }
 
 function isGeneratedFindingCoveredByExisting(generated: CitationDensityFinding, existing: CitationDensityFinding[]) {
+  const generatedIsStructuredLineDelta = /^required-detector-delta-/i.test(generated.id);
   const generatedLine = generated.carrierEvidence?.lineNumber ?? generated.shopEvidence?.lineNumber ?? null;
   const generatedText = normalizeMatchText([
     generated.operationLabel,
@@ -2070,6 +2083,7 @@ function isGeneratedFindingCoveredByExisting(generated: CitationDensityFinding, 
     generated.currentSupportSummary,
   ].filter(Boolean).join(" "));
   return existing.some((finding) => {
+    if (generatedIsStructuredLineDelta && /-comparison-/i.test(finding.id)) return false;
     const existingLine = finding.carrierEvidence?.lineNumber ?? finding.shopEvidence?.lineNumber ?? null;
     if (generatedLine && existingLine && String(generatedLine) === String(existingLine)) return true;
     const existingText = normalizeMatchText([
@@ -2719,6 +2733,114 @@ function resolveOemAuthorityVerification(
   };
 }
 
+function buildStructuredTotalsDeltaFinding(params: {
+  context: AnnotatedEstimateFindingGeneratorContext;
+  lowerTotal: number | null;
+  higherTotal: number | null;
+  comparisonName: string;
+  usedAnchorIds: Set<string>;
+}): CitationDensityFinding | null {
+  if (params.lowerTotal === null || params.higherTotal === null) return null;
+  const delta = params.higherTotal - params.lowerTotal;
+  if (Math.abs(delta) < 0.01) return null;
+  const anchor = params.context.anchors.find((candidate) =>
+    candidate.anchorType === "totals_row" && /net cost|grand total|total/i.test(candidate.rowText)
+  ) ?? params.context.anchors.find((candidate) => candidate.anchorType === "totals_row")
+    ?? params.context.anchors.find((candidate) => candidate.anchorType === "estimate_line");
+  if (!anchor) return null;
+
+  const sourceMetrics = parseEstimateAggregateMetrics(params.context.sourceText ?? "");
+  const comparisonMetrics = parseEstimateAggregateMetrics(
+    params.context.comparisonEstimateTexts.map((item) => item.text).join("\n")
+  );
+  const laborDelta = nullableDelta(comparisonMetrics.laborHours, sourceMetrics.laborHours);
+  const paintDelta = nullableDelta(comparisonMetrics.paintHours, sourceMetrics.paintHours);
+  const taxDelta = nullableDelta(comparisonMetrics.tax, sourceMetrics.tax);
+  const preTaxDelta = nullableDelta(comparisonMetrics.preTax, sourceMetrics.preTax);
+  params.usedAnchorIds.add(anchor.anchorId);
+
+  return buildRequiredDetectorFinding({
+    context: params.context,
+    anchor,
+    findingType: "delta-totals-reconciliation",
+    title: "Totals reconciliation vs comparison/final estimate",
+    category: "labor_difference",
+    label: "ESTIMATE GAP ONLY",
+    estimateGapType: "present_but_under_documented",
+    score: 64,
+    safetyImpact: "medium",
+    priority: "high",
+    currentSupportSummary: [
+      `Source/lower estimate: ${params.context.sourcePdfName}. Source/lower total: ${formatDeltaMoney(params.lowerTotal)}.`,
+      `Comparison/final estimate: ${params.comparisonName}. Comparison/final total: ${formatDeltaMoney(params.higherTotal)}.`,
+      `Amount delta: +${formatDeltaMoney(Math.abs(delta))}.`,
+      preTaxDelta !== null ? `Pre-tax delta: ${formatSignedDeltaMoney(preTaxDelta)}.` : "",
+      taxDelta !== null ? `Tax delta: ${formatSignedDeltaMoney(taxDelta)}.` : "",
+      laborDelta !== null ? `Labor delta: ${formatSignedNumber(laborDelta)} hours.` : "",
+      paintDelta !== null ? `Paint delta: ${formatSignedNumber(paintDelta)} hours.` : "",
+      "Delta category: totals_reconciliation.",
+      "Pairing basis: parsed estimate totals from the source/lower and comparison/final estimate text.",
+    ].filter(Boolean).join(" "),
+    missingProofSummary:
+      "The structured totals comparison shows the comparison/final estimate is higher than the source/lower estimate. Reconcile the gross, pre-tax, tax, labor, and paint totals against the accepted final estimate, invoices, and agreed rate/material basis.",
+    recommendedNextAction:
+      "Use the line-pair deltas above to explain the total gap, then reconcile the final gross, pre-tax, tax, labor, and paint totals before presenting the estimate delta.",
+    missingAuthorityTypes: ["final estimate totals reconciliation", "invoice or completion proof", "rate/material basis"],
+    amountImpact: delta,
+    laborHoursImpact: laborDelta,
+  });
+}
+
+function parseEstimateAggregateMetrics(text: string) {
+  return {
+    preTax: parseLastMoneyMetric(text, /\b(?:pre[-\s]?tax|subtotal|total before tax)\b[^$\d]{0,40}\$?\s*([0-9][0-9,]*(?:\.\d{2})?)/gi),
+    tax: parseLastMoneyMetric(text, /\b(?:sales tax|tax)\b[^$\d]{0,40}\$?\s*([0-9][0-9,]*(?:\.\d{2})?)/gi),
+    laborHours: parseLastNumberMetric(text, /\b(?:body labor|labor total|total labor|labor hours?)\b[^0-9]{0,40}([0-9]+(?:\.[0-9]+)?)/gi),
+    paintHours: parseLastNumberMetric(text, /\b(?:paint labor|paint hours?|refinish labor)\b[^0-9]{0,40}([0-9]+(?:\.[0-9]+)?)/gi),
+  };
+}
+
+function parseEstimateTotalForDelta(text: string): number | null {
+  const matches = [...text.matchAll(
+    /(?:net\s+cost\s+of\s+repairs|grand\s+total|estimate\s+total|repair\s+total|gross\s+total|net\s+total|total)[^\n$0-9]{0,40}\$?\s*([0-9][0-9,]*(?:\.\d{2})?)/gi
+  )];
+  const raw = matches.at(-1)?.[1];
+  if (!raw) return null;
+  const value = Number(raw.replace(/,/g, ""));
+  return Number.isFinite(value) ? value : null;
+}
+
+function parseLastMoneyMetric(text: string, pattern: RegExp): number | null {
+  const matches = [...text.matchAll(pattern)];
+  const raw = matches.at(-1)?.[1];
+  if (!raw) return null;
+  const value = Number(raw.replace(/,/g, ""));
+  return Number.isFinite(value) ? value : null;
+}
+
+function parseLastNumberMetric(text: string, pattern: RegExp): number | null {
+  const matches = [...text.matchAll(pattern)];
+  const raw = matches.at(-1)?.[1];
+  if (!raw) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+function nullableDelta(higher: number | null, lower: number | null): number | null {
+  return higher !== null && lower !== null ? higher - lower : null;
+}
+
+function formatSignedDeltaMoney(value: number) {
+  const prefix = value > 0 ? "+" : value < 0 ? "-" : "";
+  return `${prefix}${formatDeltaMoney(Math.abs(value))}`;
+}
+
+function formatSignedNumber(value: number) {
+  const rounded = Math.round(value * 10) / 10;
+  const prefix = rounded > 0 ? "+" : "";
+  return `${prefix}${rounded.toFixed(1)}`;
+}
+
 function classifyLineItemDeltaProfile(delta: EstimateLineItemDelta): {
   label: string;
   category: CitationDensityFinding["category"];
@@ -2765,7 +2887,10 @@ function classifyLineItemDeltaProfile(delta: EstimateLineItemDelta): {
 }
 
 function formatDeltaMoney(value: number | null) {
-  return typeof value === "number" ? `$${value.toFixed(2)}` : "not quantified";
+  if (typeof value !== "number") return "not quantified";
+  const fixed = value.toFixed(2);
+  const [whole, cents] = fixed.split(".");
+  return `$${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${cents}`;
 }
 
 function formatDeltaHours(value: number | null) {
@@ -3778,7 +3903,7 @@ function buildAnchoredCitationCandidates(params: {
 }
 
 function allowsSharedCitationDensityAnchor(finding: CitationDensityFinding) {
-  return /^required-detector-delta-missing-operation-/i.test(finding.id);
+  return /^required-detector-delta-(?:missing-operation-|totals-reconciliation)/i.test(finding.id);
 }
 
 function findReportIdentityMismatch(
@@ -5334,7 +5459,7 @@ function buildFindingDetailFields(
     { label: "Anchor id", value: metadata.anchorId },
     { label: "Label", value: metadata.label },
     { label: reportIdentity.scoreLabel, value: `${finding.citationDensityScore}/100` },
-    { label: "Source estimate", value: `${metadata.sourceDocumentRole} estimate` },
+    { label: "Source estimate", value: formatFindingDetailSourceEstimateLabel(finding, metadata) },
     { label: "Source page", value: String(metadata.sourcePageNumber) },
     { label: "Source line", value: metadata.sourceLineNumber ?? "section" },
     { label: "Source row text", value: metadata.sourceAnchorText },
@@ -5345,6 +5470,17 @@ function buildFindingDetailFields(
     { label: "Support refs", value: metadata.sourceRefs.length ? metadata.sourceRefs.join("; ") : "none listed" },
     { label: "Source", value: `page ${metadata.sourcePageNumber}, line ${metadata.sourceLineNumber ?? "section"}` },
   ];
+}
+
+function formatFindingDetailSourceEstimateLabel(
+  finding: CitationDensityFinding,
+  metadata: CitationDensityAnnotationMetadata
+) {
+  const text = `${finding.id} ${finding.currentSupportSummary ?? ""} ${finding.missingProofSummary ?? ""}`;
+  if (/source\/lower estimate|comparison\/final estimate|not present in source\/lower estimate/i.test(text)) {
+    return "source/lower estimate";
+  }
+  return `${metadata.sourceDocumentRole} estimate`;
 }
 
 type FindingDetailLayoutContext = {
@@ -5825,17 +5961,17 @@ function buildRoleCalloutNote(
 function buildEstimateDeltaText(finding: CitationDensityFinding) {
   const amountDelta =
     typeof finding.shopEvidence?.amount === "number" && typeof finding.carrierEvidence?.amount === "number"
-      ? ` Amount delta: ${formatSignedNumber(finding.shopEvidence.amount - finding.carrierEvidence.amount)}.`
+      ? ` Amount delta: ${formatSignedEstimateNumber(finding.shopEvidence.amount - finding.carrierEvidence.amount)}.`
       : "";
   const laborDelta =
     typeof finding.shopEvidence?.laborHours === "number" && typeof finding.carrierEvidence?.laborHours === "number"
-      ? ` Labor delta: ${formatSignedNumber(finding.shopEvidence.laborHours - finding.carrierEvidence.laborHours)} hrs.`
+      ? ` Labor delta: ${formatSignedEstimateNumber(finding.shopEvidence.laborHours - finding.carrierEvidence.laborHours)} hrs.`
       : "";
   const counterpart = finding.counterpartSummary ? ` ${finding.counterpartSummary}` : "";
   return `${amountDelta}${laborDelta}${counterpart}`;
 }
 
-function formatSignedNumber(value: number) {
+function formatSignedEstimateNumber(value: number) {
   const rounded = Math.round(value * 100) / 100;
   return rounded > 0 ? `+${rounded}` : String(rounded);
 }

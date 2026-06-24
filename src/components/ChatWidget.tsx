@@ -42,6 +42,9 @@ import {
   toSpeechText,
 } from "@/components/chatWidget/speechUtils";
 import {
+  buildPreliminaryReviewDraft,
+} from "@/components/chatWidget/preliminaryReview";
+import {
   buildChatExportPayload,
   buildExportMessages,
   getDownloadFilename,
@@ -701,128 +704,6 @@ function resolveCaseTopic(message: string, previousTopic: string) {
   }
 
   return previousTopic || DEFAULT_CASE_TOPIC;
-}
-
-function formatPreliminaryCurrency(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
-}
-
-function extractEstimateTotalCandidate(text: string): number | null {
-  if (!text.trim()) return null;
-
-  const candidates: Array<{ value: number; score: number }> = [];
-  const totalPatterns = [
-    /(?:estimate|gross|repair|claim|net|grand)\s+total[^$\d]{0,32}\$?\s*([0-9][0-9,]*(?:\.\d{2})?)/gi,
-    /total[^$\d]{0,20}\$?\s*([0-9][0-9,]*(?:\.\d{2})?)/gi,
-    /\$\s*([0-9][0-9,]*(?:\.\d{2}))/g,
-  ];
-
-  totalPatterns.forEach((pattern, patternIndex) => {
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(text)) !== null) {
-      const value = Number(String(match[1] ?? "").replace(/,/g, ""));
-      if (!Number.isFinite(value) || value < 100 || value > 250000) continue;
-      candidates.push({ value, score: patternIndex === 0 ? 3 : patternIndex === 1 ? 2 : 1 });
-    }
-  });
-
-  if (!candidates.length) return null;
-  candidates.sort((a, b) => b.score - a.score || b.value - a.value);
-  return candidates[0]?.value ?? null;
-}
-
-function inferEstimateRole(attachment: Pick<Attachment, "filename" | "text">): "shop" | "carrier" | "unknown" {
-  const haystack = `${attachment.filename}\n${attachment.text.slice(0, 4000)}`.toLowerCase();
-  if (/\b(?:sor|allstate|state farm|geico|progressive|carrier|insurer|insurance|claim rep|appraiser)\b/.test(haystack)) {
-    return "carrier";
-  }
-  if (/\b(?:shop|repair facility|collision center|body shop|supplement|work auth|work authorization)\b/.test(haystack)) {
-    return "shop";
-  }
-  return "unknown";
-}
-
-function buildPreliminaryCategories(attachments: Attachment[]) {
-  const text = attachments.map((attachment) => `${attachment.filename}\n${attachment.text}`).join("\n").toLowerCase();
-  const categories: string[] = [];
-
-  if (/\b(?:labor rate|body rate|paint rate|material rate|paint materials?|refinish rate)\b/.test(text)) {
-    categories.push("labor/material rate difference");
-  }
-  if (/\b(?:oem|aftermarket|a\/m|lkq|recycled|rcy|reman|used part|part source)\b/.test(text)) {
-    categories.push("OEM vs A/M/LKQ/RCY part posture");
-  }
-  if (/\b(?:adas|calibration|calibrate|pre-?scan|post-?scan|diagnostic|dtc|radar|camera|aiming)\b/.test(text)) {
-    categories.push("scan/ADAS/calibration");
-  }
-  if (/\b(?:steering column|srs|airbag|seat belt|restraint|structural|frame|measure|safety)\b/.test(text)) {
-    categories.push("steering/SRS/safety operations");
-  }
-  if (/\b(?:refinish|blend|clear coat|corrosion|seam sealer|feather|prime|block|mask|cover car)\b/.test(text)) {
-    categories.push("refinish/process/manual lines");
-  }
-
-  return categories.slice(0, 5);
-}
-
-type PreliminaryReviewDraft = {
-  message: string;
-  hasUsefulTriage: boolean;
-};
-
-function buildPreliminaryReviewDraft(attachments: Attachment[]): PreliminaryReviewDraft {
-  const pdfs = attachments.filter((attachment) =>
-    attachment.mime === "application/pdf" || /\.pdf$/i.test(attachment.filename)
-  );
-  const reviewedFiles = pdfs.length ? pdfs : attachments;
-  const estimates = reviewedFiles.map((attachment) => ({
-    filename: attachment.filename,
-    role: inferEstimateRole(attachment),
-    total: extractEstimateTotalCandidate(attachment.text),
-  }));
-  const shopEstimate = estimates.find((estimate) => estimate.role === "shop") ?? estimates.find((estimate) => estimate.total !== null);
-  const carrierEstimate =
-    estimates.find((estimate) => estimate.role === "carrier") ??
-    estimates.find((estimate) => estimate !== shopEstimate && estimate.total !== null);
-  const gap =
-    typeof shopEstimate?.total === "number" && typeof carrierEstimate?.total === "number"
-      ? Math.abs(shopEstimate.total - carrierEstimate.total)
-      : null;
-  const categories = buildPreliminaryCategories(reviewedFiles);
-  const hasDetectedTotal = estimates.some((estimate) => typeof estimate.total === "number");
-  const hasUsefulTriage = hasDetectedTotal || categories.length > 0;
-  const fileLabel = `${reviewedFiles.length} ${reviewedFiles.length === 1 ? "file" : "files"}`;
-  const pdfLabel = pdfs.length ? `${pdfs.length} PDF${pdfs.length === 1 ? "" : "s"}` : fileLabel;
-  const lines = [
-    `Preliminary review started. I found ${pdfLabel} and I am parsing the estimates now. The full line-by-line citation review is still running, but I will give you a fast triage first so you are not waiting on a blank screen.`,
-    "",
-    "Fast triage from the current upload:",
-    `- Files: ${reviewedFiles.map((attachment) => attachment.filename).join(", ")}`,
-  ];
-
-  if (shopEstimate?.filename || carrierEstimate?.filename) {
-    lines.push(`- Likely shop estimate: ${shopEstimate?.filename ?? "not clear yet"}${typeof shopEstimate?.total === "number" ? ` (${formatPreliminaryCurrency(shopEstimate.total)})` : ""}`);
-    lines.push(`- Likely carrier/SOR estimate: ${carrierEstimate?.filename ?? "not clear yet"}${typeof carrierEstimate?.total === "number" ? ` (${formatPreliminaryCurrency(carrierEstimate.total)})` : ""}`);
-  }
-
-  if (gap !== null) {
-    lines.push(`- Approximate total gap: ${formatPreliminaryCurrency(gap)}`);
-  }
-
-  if (categories.length) {
-    lines.push(`- Early issue categories: ${categories.join("; ")}`);
-  }
-
-  lines.push("", "This is preliminary. Authority and citation review is still running.");
-  return {
-    message: lines.join("\n"),
-    hasUsefulTriage,
-  };
 }
 
 const CONVERSATIONAL_WAITING_FALLBACKS = [
