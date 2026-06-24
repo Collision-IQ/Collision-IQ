@@ -20,6 +20,7 @@ import { openai } from "@/lib/openai";
 import { canAccessFeature } from "@/lib/featureAccess";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 type CustomerReportRequestBody = {

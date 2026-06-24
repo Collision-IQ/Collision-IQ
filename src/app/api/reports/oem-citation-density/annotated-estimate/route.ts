@@ -48,6 +48,7 @@ import {
 } from "@/lib/ai/vehicleContext";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 type RequestBody = {

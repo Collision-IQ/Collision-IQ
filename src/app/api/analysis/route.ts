@@ -117,6 +117,7 @@ import {
 } from "@/lib/ai/agentRetrievalTrace";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 type AnalysisRequestBody = {
   artifactIds?: string[];

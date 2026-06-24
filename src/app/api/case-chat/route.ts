@@ -30,6 +30,7 @@ import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 import { shouldGenerateAnnotatedCitationDensityEstimate } from "@/lib/reports/citationDensityIntent";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 function limitText(text: string, max = 12000) {
   if (!text) return "";

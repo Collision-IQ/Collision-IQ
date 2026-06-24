@@ -3,6 +3,7 @@ import { setAssignment } from "@/lib/assignmentStore";
 import { getOpenAIClient } from "@/lib/openai";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 export async function POST() {
