@@ -392,10 +392,101 @@ function isFollowupTurn(messages: IncomingMessage[] = []): boolean {
   return conversationalMessages.length > 2 && userMessages.length > 1;
 }
 
-function isReviewOrEstimateAnalysisIntent(message: string) {
-  return /\b(?:review|analy[sz]e|triage|estimate|supplement|appraisal|repair|claim|carrier|shop|invoice|photo|zip|work auth|citation density)\b/i.test(
+type ChatIntent =
+  | "pasted_text_policy_review"
+  | "general_chat"
+  | "estimate_file_review"
+  | "citation_density_request"
+  | "report_export_request"
+  | "mixed_policy_and_estimate_file_review";
+
+function hasSubstantivePastedText(message: string) {
+  const normalized = message.trim();
+  if (normalized.length >= 280) return true;
+  if ((normalized.match(/\n/g) ?? []).length >= 2 && normalized.length >= 120) return true;
+  return /(?:^|\s)["“][\s\S]{80,}["”](?:\s|$)/.test(normalized);
+}
+
+function isPastedTextPolicyReviewIntent(message: string) {
+  const normalized = message.toLowerCase();
+  const policyOrClaimPrompt =
+    /\b(?:policy|clause|language|appraisal|rta|right to appraisal|amount of loss|loss|claim process|instructions?|explain|summary|summarize|rewrite|plain language)\b/i.test(
+      message
+    );
+  const policyClauseSignal =
+    /\b(?:if we and you do not agree|amount of loss|competent appraiser|select an umpire|written decision|binding|each party pays|does not waive|policy rights)\b/i.test(
+      message
+    );
+
+  return (
+    policyOrClaimPrompt &&
+    (hasSubstantivePastedText(message) ||
+      policyClauseSignal ||
+      /\b(?:review|explain|summari[sz]e|rewrite|instructions?)\b/.test(normalized) &&
+        /\b(?:policy|clause|language|appraisal|rta)\b/.test(normalized))
+  );
+}
+
+function isCitationDensityRequest(message: string) {
+  return /\b(?:citation density|annotated estimate|gap report|annotation legend)\b/i.test(
     message
   );
+}
+
+function isReportExportRequest(message: string) {
+  return (
+    /\b(?:download|email|export|generate|create|send)\b/i.test(message) &&
+    /\b(?:report|pdf|packet|snapshot|repair intelligence|doi complaint|customer report)\b/i.test(
+      message
+    )
+  );
+}
+
+function isEstimateFileReviewIntent(message: string) {
+  // Fire only for an actionable request to act on files/an upload - never on a
+  // bare topical mention. Requires an action verb co-occurring with either a
+  // file/upload reference or a deictic pointer to an upload, so general
+  // auto-claims questions ("explain this appraisal clause") reach the model.
+  const actionVerb = /\b(?:review|analy[sz]e|triage|check|run|go\s+over|look\s+at)\b/i;
+  const fileReference =
+    /\b(?:files?|estimates?|zip|upload(?:s|ed)?|attachments?|documents?|pdf|photos?)\b/i;
+  const uploadDeictic =
+    /\b(?:these|this\s+file|attached|my\s+files|the\s+estimate)\b|what\s+i\s+(?:just\s+)?sent/i;
+  return (
+    actionVerb.test(message) &&
+    (fileReference.test(message) || uploadDeictic.test(message))
+  );
+}
+
+function classifyChatIntent(message: string): ChatIntent {
+  const hasPolicyText = isPastedTextPolicyReviewIntent(message);
+  const hasEstimateFileRequest = isEstimateFileReviewIntent(message);
+
+  if (hasPolicyText && hasEstimateFileRequest) {
+    return "mixed_policy_and_estimate_file_review";
+  }
+
+  if (hasPolicyText) {
+    return "pasted_text_policy_review";
+  }
+
+  if (isCitationDensityRequest(message)) {
+    return "citation_density_request";
+  }
+
+  if (isReportExportRequest(message)) {
+    return "report_export_request";
+  }
+
+  if (hasEstimateFileRequest) {
+    return "estimate_file_review";
+  }
+
+  return "general_chat";
+}
+
+function isReviewOrEstimateAnalysisIntent(message: string) {
+  return classifyChatIntent(message) === "estimate_file_review";
 }
 
 function resolveJurisdictionFromBody(
@@ -999,8 +1090,14 @@ export async function POST(req: Request) {
         ? body.attachments.length
         : 0;
     const userMessage = extractLatestUserMessage(body.messages || []);
+    const chatIntent = classifyChatIntent(userMessage);
 
-    if (body.uploadState?.pending) {
+    if (
+      body.uploadState?.pending &&
+      (chatIntent === "estimate_file_review" ||
+        chatIntent === "citation_density_request" ||
+        chatIntent === "report_export_request")
+    ) {
       return NextResponse.json({
         reply: "I'm receiving and extracting the ZIP now. I'll start review as soon as files are available.",
         uploadPending: true,
@@ -1011,7 +1108,7 @@ export async function POST(req: Request) {
     if (
       incomingAttachmentCount === 0 &&
       !body.activeCaseId &&
-      isReviewOrEstimateAnalysisIntent(userMessage)
+      chatIntent === "estimate_file_review"
     ) {
       return NextResponse.json({
         reply:
