@@ -7,6 +7,8 @@ export type ResolvedJurisdiction = {
   source:
     | "explicit_user"
     | "policy_governing_law"
+    | "shop_zip"
+    | "shop_address"
     | "owner_zip"
     | "owner_address"
     | "insured_zip"
@@ -180,6 +182,34 @@ export function resolveJurisdiction(input: JurisdictionResolverInput): ResolvedJ
   const ownerStopLabels = [...insuredLabels, ...nonOwnerAddressLabels];
   const insuredStopLabels = [...ownerLabels, ...nonOwnerAddressLabels];
 
+  const inspectionStopLabels = [...ownerLabels, ...insuredLabels, ...shopLabels];
+  const shopStopLabels = [...ownerLabels, ...insuredLabels, ...inspectionLabels];
+
+  // Fix 4: the repair-shop ZIP on the estimate is the GOVERNING-state control. Inspection-
+  // site (IP proxy) and owner/insured ZIP are fallbacks only; PA is never a global default.
+  // Resolution order: shop ZIP -> inspection (IP) -> owner ZIP -> insured ZIP.
+  const shopZip = findAddressBlockZip(allText, shopLabels, shopStopLabels) ?? findLabeledZip(allText, shopLabels);
+  if (shopZip) {
+    const state = stateFromZip(shopZip);
+    if (state) return buildResult(state, "high", "shop_zip", "Repair shop ZIP from uploaded estimate (governing-state control).");
+  }
+
+  const shopAddress = findAddressBlockState(allText, shopLabels, shopStopLabels) ?? findLabeledState(allText, shopLabels);
+  if (shopAddress) {
+    return buildResult(shopAddress, "high", "shop_address", "Repair shop address from uploaded estimate (governing-state control).");
+  }
+
+  const inspectionZip = findAddressBlockZip(allText, inspectionLabels, inspectionStopLabels) ?? findLabeledZip(allText, inspectionLabels);
+  if (inspectionZip) {
+    const state = stateFromZip(inspectionZip);
+    if (state) return buildResult(state, "medium", "inspection_site_zip_fallback", "Inspection Site ZIP from uploaded estimate.");
+  }
+
+  const inspectionAddress = findAddressBlockState(allText, inspectionLabels, inspectionStopLabels) ?? findLabeledState(allText, inspectionLabels);
+  if (inspectionAddress) {
+    return buildResult(inspectionAddress, "medium", "inspection_site_address_fallback", "Inspection Site address from uploaded estimate.");
+  }
+
   const ownerZip = findVerifiedPartyAddressBlockZip(allText, ownerLabels, ownerStopLabels);
   if (ownerZip) return buildZipResult(ownerZip, "owner_zip", "Owner ZIP from uploaded claim documents.");
 
@@ -194,30 +224,6 @@ export function resolveJurisdiction(input: JurisdictionResolverInput): ResolvedJ
   const insuredAddress = findVerifiedPartyAddressBlockState(allText, insuredLabels, insuredStopLabels);
   if (insuredAddress) {
     return buildResult(insuredAddress, "high", "insured_address", "Insured address state from uploaded claim documents.");
-  }
-
-  const inspectionStopLabels = [...ownerLabels, ...insuredLabels, ...shopLabels];
-  const shopStopLabels = [...ownerLabels, ...insuredLabels, ...inspectionLabels];
-  const inspectionZip = findAddressBlockZip(allText, inspectionLabels, inspectionStopLabels) ?? findLabeledZip(allText, inspectionLabels);
-  if (inspectionZip) {
-    const state = stateFromZip(inspectionZip);
-    if (state) return buildResult(state, "medium", "inspection_site_zip_fallback", "Inspection Site ZIP from uploaded estimate.");
-  }
-
-  const inspectionAddress = findAddressBlockState(allText, inspectionLabels, inspectionStopLabels) ?? findLabeledState(allText, inspectionLabels);
-  if (inspectionAddress) {
-    return buildResult(inspectionAddress, "medium", "inspection_site_address_fallback", "Inspection Site address from uploaded estimate.");
-  }
-
-  const shopZip = findAddressBlockZip(allText, shopLabels, shopStopLabels) ?? findLabeledZip(allText, shopLabels);
-  if (shopZip) {
-    const state = stateFromZip(shopZip);
-    if (state) return buildResult(state, "medium", "shop_zip_fallback", "Repair shop ZIP from uploaded estimate.");
-  }
-
-  const shopAddress = findAddressBlockState(allText, shopLabels, shopStopLabels) ?? findLabeledState(allText, shopLabels);
-  if (shopAddress) {
-    return buildResult(shopAddress, "medium", "shop_address_fallback", "Repair shop address from uploaded estimate.");
   }
 
   return {
