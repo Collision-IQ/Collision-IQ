@@ -32,6 +32,7 @@ export type CitationSupportStatus =
 export type CitationDensityEstimateRole = "carrier" | "shop";
 
 export type CitationDensityEstimateLineAnchor = {
+  anchorId?: string;
   sourceDocumentId?: string;
   estimateRole: CitationDensityEstimateRole;
   lineNumber?: string | null;
@@ -200,6 +201,14 @@ export type CitationDensityFinding = {
   limitations: string[];
   /** Stable ID of the CanonicalDeltaSet this finding was derived from. Present on findings produced via the canonical delta path (not the legacy local-diff path). Used by G5 to verify all four report consumers trace to one object. */
   canonicalDeltaObjectId?: string;
+  /** Stable ID of the individual canonical delta entry, when this finding was rendered from canonical deltas. */
+  canonicalDeltaId?: string;
+  /** Relationship between the compared estimates for canonical delta findings. */
+  estimatePairKind?: string;
+  /** Hash of the initial/source estimate used for canonical delta findings. */
+  initialFileHash?: string;
+  /** Hash of the supplement/final estimate used for canonical delta findings. */
+  supplementFileHash?: string;
 };
 
 export interface EstimateScrubFinding {

@@ -636,6 +636,18 @@ export function dataUrlToPdfBytes(dataUrl: string): Uint8Array | null {
   return Uint8Array.from(Buffer.from(match[1], "base64"));
 }
 
+function isShopAuthoredEstimateDocument(input: {
+  filename?: string | null;
+  text?: string | null;
+}) {
+  const filename = input.filename ?? "";
+  const text = input.text ?? "";
+  if (/\bshop\b/i.test(filename) && !/\b(?:carrier|insurer|adjuster|appraiser|sor\d*)\b/i.test(filename)) {
+    return true;
+  }
+  return /\b(?:shop estimate|repair facility|body shop|collision center|conestoga)\b/i.test(text);
+}
+
 export async function extractCitationDensityRowAnchors(
   bytes: Uint8Array,
   options: {
@@ -697,6 +709,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   reportIdentity?: AnnotatedEstimateReportIdentity;
   deltaDiagnostics?: CitationDensityDeltaDiagnostics;
   authorityTrace?: OemCitationDensityAuthorityTrace;
+  canonicalDeltaSet?: CanonicalDeltaSet;
   findingGenerator?: (context: AnnotatedEstimateFindingGeneratorContext) => AnnotatedEstimateGeneratedFindings;
 }): Promise<AnnotatedEstimateResult> {
   const request = params.request ?? {};
@@ -704,7 +717,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   const mode = request.annotationMode ?? "both";
   const estimateRole = request.estimateRole ?? "selected";
   const selectedIds = new Set(request.findingIds?.filter(Boolean) ?? []);
-  let selectedFindings = params.findings.filter((finding) => !selectedIds.size || selectedIds.has(finding.id));
+  let selectedFindings = params.canonicalDeltaSet
+    ? []
+    : params.findings.filter((finding) => !selectedIds.size || selectedIds.has(finding.id));
   let { findings, suppressed } = sanitizeCitationDensityFindingsForVisibleLayer(selectedFindings);
   const warnings: string[] = [];
   const sourcePdfBytes = params.sourcePdfBytes.slice();
@@ -719,29 +734,22 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   // Fix 2: derive the source_estimate role from the actual parsed file's provenance instead of
   // defaulting an ambiguous role to "carrier". Only an explicit shop/carrier request, or a
   // genuinely carrier-authored file, may yield a "carrier" label.
-  const sourceIsCarrierAuthored = isCarrierAuthoredEstimateDocument({
+  let sourceIsCarrierAuthored = isCarrierAuthoredEstimateDocument({
     filename: sourcePdfName,
     text: params.sourceText,
   });
-  const sourceDocumentRole: "carrier" | "shop" =
+  const sourceLooksShopAuthored = isShopAuthoredEstimateDocument({
+    filename: sourcePdfName,
+    text: params.sourceText,
+  });
+  let sourceDocumentRole: "carrier" | "shop" =
     estimateRole === "shop"
       ? "shop"
       : estimateRole === "carrier"
-        ? "carrier"
+        ? (sourceLooksShopAuthored ? "shop" : "carrier")
         : sourceIsCarrierAuthored
           ? "carrier"
           : "shop";
-  // Loud-fail: a "carrier" request the parsed file's provenance does not support.
-  if (estimateRole === "carrier" && !sourceIsCarrierAuthored) {
-    console.warn("[citation-density] requested source_estimate role 'carrier' is not supported by parsed file provenance", {
-      sourcePdfName,
-      sourcePdfHash: hashPdfBytes(sourcePdfBytes),
-      sourceDocumentId: params.sourceDocumentId ?? null,
-    });
-    warnings.push(
-      "Source estimate could not be confirmed as carrier-authored from the parsed file; it is labeled by file provenance instead of an assumed carrier role."
-    );
-  }
   // Fix 2: when only one estimate was parsed (no comparison estimate), say so rather than
   // implying a two-estimate delta.
   const parsedComparisonCount = (params.comparisonEstimateTexts ?? []).filter((item) => item.text?.trim()).length;
@@ -754,7 +762,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     filename: sourcePdfName,
     text: params.sourceText,
   });
-  const extraction = await extractCitationDensityRowAnchors(sourcePdfBytes, {
+  let extraction = await extractCitationDensityRowAnchors(sourcePdfBytes, {
     sourceDocumentRole,
     sourceDocumentId: params.sourceDocumentId,
     actualSourcePdfName: sourcePdfName,
@@ -791,6 +799,46 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       perPageTextItemCounts: [],
     };
   });
+  const extractedSourceText = extraction.visualLines.map((line) => line.text).join("\n");
+  const parsedSourceIsCarrierAuthored = isCarrierAuthoredEstimateDocument({
+    filename: sourcePdfName,
+    text: params.sourceText ? `${params.sourceText}\n${extractedSourceText}` : extractedSourceText,
+  });
+  const parsedSourceLooksShopAuthored = isShopAuthoredEstimateDocument({
+    filename: sourcePdfName,
+    text: params.sourceText ? `${params.sourceText}\n${extractedSourceText}` : extractedSourceText,
+  });
+  if (estimateRole === "carrier" && parsedSourceLooksShopAuthored && !parsedSourceIsCarrierAuthored && sourceDocumentRole !== "shop") {
+    sourceDocumentRole = "shop";
+    extraction = {
+      ...extraction,
+      anchors: buildEstimateRowAnchorsFromLines(extraction.visualLines, {
+        sourceDocumentRole,
+        sourceDocumentId: params.sourceDocumentId,
+      }),
+    };
+  } else if (parsedSourceIsCarrierAuthored && sourceDocumentRole !== "carrier" && estimateRole !== "shop") {
+    sourceIsCarrierAuthored = true;
+    sourceDocumentRole = "carrier";
+    extraction = {
+      ...extraction,
+      anchors: buildEstimateRowAnchorsFromLines(extraction.visualLines, {
+        sourceDocumentRole,
+        sourceDocumentId: params.sourceDocumentId,
+      }),
+    };
+  }
+  // Loud-fail: a "carrier" request the parsed file's provenance does not support.
+  if (estimateRole === "carrier" && sourceDocumentRole !== "carrier") {
+    console.warn("[citation-density] requested source_estimate role 'carrier' is not supported by parsed file provenance", {
+      sourcePdfName,
+      sourcePdfHash: hashPdfBytes(sourcePdfBytes),
+      sourceDocumentId: params.sourceDocumentId ?? null,
+    });
+    warnings.push(
+      "Source estimate could not be confirmed as carrier-authored from the parsed file; it is labeled by file provenance instead of an assumed carrier role."
+    );
+  }
   const anchors = extraction.anchors;
   const anchorIndex = new Map(anchors.map((anchor) => [anchor.anchorId, anchor]));
   const trace: CitationDensityDebugTrace = {
@@ -932,6 +980,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       sourceText: params.sourceText,
       comparisonEstimateTexts: params.comparisonEstimateTexts ?? [],
       authorityTrace: params.authorityTrace,
+      canonicalDeltaSet: params.canonicalDeltaSet,
     });
     const generatedFindings = generated.findings
       .filter((finding) => !isGeneratedFindingCoveredByExisting(finding, selectedFindings));
@@ -1461,7 +1510,8 @@ function canonicalDeltaFindingCategory(delta: CanonicalDeltaEntry): CitationDens
 
 function canonicalDeltaToFinding(
   delta: CanonicalDeltaEntry,
-  deltaSet: CanonicalDeltaSet
+  deltaSet: CanonicalDeltaSet,
+  sourceDocumentId?: string
 ): CitationDensityFinding {
   const label = getDeltaLabel(delta, deltaSet.estimatePairKind);
   assertNoCarrierWording(deltaSet.estimatePairKind, label, `canonical finding ${delta.id}`);
@@ -1481,11 +1531,18 @@ function canonicalDeltaToFinding(
     ? String(Array.isArray(delta.anchorInitial.line) ? delta.anchorInitial.line[0] : delta.anchorInitial.line)
     : null;
 
-  const shopAnchor: CitationDensityEstimateLineAnchor | undefined = delta.anchorFinal
+  const sourceAnchor = delta.anchorInitial ?? delta.anchorFinal;
+  const sourceAnchorLine = sourceAnchor
+    ? String(Array.isArray(sourceAnchor.line) ? sourceAnchor.line[0] : sourceAnchor.line)
+    : null;
+  const canonicalSourceDocumentId = sourceDocumentId ?? "shop-estimate";
+  const shopAnchor: CitationDensityEstimateLineAnchor | undefined = sourceAnchor
     ? {
+        anchorId: `${canonicalSourceDocumentId}:p${sourceAnchor.page}:${sourceAnchorLine}:estimate_line`,
+        sourceDocumentId: canonicalSourceDocumentId,
         estimateRole: "shop",
-        pageNumber: delta.anchorFinal.page,
-        lineNumber: supplementAnchorLine,
+        pageNumber: sourceAnchor.page,
+        lineNumber: sourceAnchorLine,
         description: delta.operation,
         amount: delta.magnitudeDollar ?? null,
         laborHours: delta.magnitudeLaborHrs ?? null,
@@ -1507,7 +1564,8 @@ function canonicalDeltaToFinding(
     (delta.anchorInitial
       ? ` Initial line: ${initialAnchorLine} (${initialFilename}).`
       : " Not present in initial estimate.") +
-    ` Canonical delta ID: ${delta.id}; set: ${deltaSet.id}.`;
+    ` Canonical delta ID: ${delta.id}; set: ${deltaSet.id}.` +
+    ` Grand total delta: ${formatCanonicalMoney(deltaSet.reconciliation.grandTotalDelta)}.`;
 
   const missingProofSummary = isSuspension
     ? `${delta.operation}: structural/suspension scope change. Verify OEM repair procedure and that the initial estimate scope was complete for this vehicle.`
@@ -1587,14 +1645,27 @@ function canonicalDeltaToFinding(
       "Canonical delta finding: derived from the authoritative delta object, not a single-estimate scan.",
       "Do not assert OEM requires, NHTSA crash-test equivalency, or warranty voiding without verified authority.",
       `canonicalDeltaObjectId:${deltaSet.id}`,
+      `canonicalDeltaId:${delta.id}`,
+      `estimatePairKind:${deltaSet.estimatePairKind}`,
+      `initialFileHash:${deltaSet.initialFileHash}`,
+      `supplementFileHash:${deltaSet.supplementFileHash}`,
+      `grandTotalDelta:${formatCanonicalMoney(deltaSet.reconciliation.grandTotalDelta)}`,
       `canonicalDeltaClass:${delta.class}`,
       `artifactVersion:${CITATION_DENSITY_ARTIFACT_VERSION}`,
     ],
     canonicalDeltaObjectId: deltaSet.id,
+    canonicalDeltaId: delta.id,
+    estimatePairKind: deltaSet.estimatePairKind,
+    initialFileHash: deltaSet.initialFileHash,
+    supplementFileHash: deltaSet.supplementFileHash,
   };
 }
 
-function buildCanonicalDeltaFindings(deltaSet: CanonicalDeltaSet): {
+function formatCanonicalMoney(value: number) {
+  return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function buildCanonicalDeltaFindings(deltaSet: CanonicalDeltaSet, sourceDocumentId?: string): {
   findings: CitationDensityFinding[];
   matchedPairCount: number;
   missingOperationCount: number;
@@ -1620,7 +1691,7 @@ function buildCanonicalDeltaFindings(deltaSet: CanonicalDeltaSet): {
     return b.score - a.score;
   });
 
-  const findings = scored.map(({ delta }) => canonicalDeltaToFinding(delta, deltaSet));
+  const findings = scored.map(({ delta }) => canonicalDeltaToFinding(delta, deltaSet, sourceDocumentId));
 
   return {
     findings,
@@ -1646,11 +1717,29 @@ export function buildRequiredEstimatorDeltaFindings(
   if (context.canonicalDeltaSet) {
     // Canonical path: the structured delta object is the authoritative source.
     // The legacy local-diff path must not run when a canonical set is present.
-    const deltaFindings = buildCanonicalDeltaFindings(context.canonicalDeltaSet);
+    const deltaFindings = buildCanonicalDeltaFindings(context.canonicalDeltaSet, context.sourceDocumentId);
     lineItemDeltaFindingCount = deltaFindings.findings.length;
     lineItemDeltaMatchedPairCount = deltaFindings.matchedPairCount;
     lineItemDeltaMissingCount = deltaFindings.missingOperationCount;
     findings.push(...deltaFindings.findings);
+    return {
+      findings,
+      debug: {
+        requiredDetectorFindingCount: 0,
+        missingRequiredDetectors: [],
+        lineItemDeltaFindingCount,
+        lineItemDeltaMatchedPairCount,
+        lineItemDeltaMissingCount,
+        rejectedAnchors,
+        rejectedBoilerplateCount: 0,
+        authoritySearchTrace: {
+          ...buildDefaultOemAuthorityTrace(),
+          authorityTraceBlockedReason: "Canonical Delta Citation Density path does not run legacy required detectors.",
+          skippedReason: "Canonical Delta Citation Density path does not run legacy required detectors.",
+          sandPolishSupportFound: false,
+        },
+      },
+    };
   } else {
     try {
       const deltaFindings = buildStructuredLineItemDeltaFindings(context, usedAnchorIds);
@@ -5404,6 +5493,11 @@ function buildPdfCommentBody(
     `Finding #${metadata.markerNumber}: ${metadata.shortTitle}`,
     `Finding id: ${metadata.findingId}`,
     `Anchor id: ${metadata.anchorId}`,
+    finding.canonicalDeltaObjectId ? `Canonical delta object: ${finding.canonicalDeltaObjectId}` : "",
+    finding.canonicalDeltaId ? `Canonical delta id: ${finding.canonicalDeltaId}` : "",
+    finding.estimatePairKind ? `Estimate pair kind: ${finding.estimatePairKind}` : "",
+    finding.initialFileHash ? `Initial file hash: ${finding.initialFileHash}` : "",
+    finding.supplementFileHash ? `Supplement file hash: ${finding.supplementFileHash}` : "",
     ...lines.slice(1),
     metadata.sourceRefs.length ? `Source refs: ${metadata.sourceRefs.join("; ")}` : "",
   ].filter(Boolean).join("\n");
@@ -5603,7 +5697,16 @@ function buildFindingDetailFields(
     { label: "Anchor id", value: metadata.anchorId },
     { label: "Label", value: metadata.label },
     { label: reportIdentity.scoreLabel, value: `${finding.citationDensityScore}/100` },
-    { label: "Source estimate", value: `${metadata.sourceDocumentRole} estimate` },
+    { label: "Source estimate", value: formatDetailSourceEstimateLabel(finding, metadata) },
+    ...(finding.canonicalDeltaObjectId
+      ? [
+          { label: "Canonical delta object", value: finding.canonicalDeltaObjectId },
+          { label: "Canonical delta id", value: finding.canonicalDeltaId ?? "unknown" },
+          { label: "Estimate pair kind", value: finding.estimatePairKind ?? "unknown" },
+          { label: "Initial file hash", value: finding.initialFileHash ?? "unknown" },
+          { label: "Supplement file hash", value: finding.supplementFileHash ?? "unknown" },
+        ]
+      : []),
     { label: "Source page", value: String(metadata.sourcePageNumber) },
     { label: "Source line", value: metadata.sourceLineNumber ?? "section" },
     { label: "Source row text", value: metadata.sourceAnchorText },
@@ -5614,6 +5717,16 @@ function buildFindingDetailFields(
     { label: "Support refs", value: metadata.sourceRefs.length ? metadata.sourceRefs.join("; ") : "none listed" },
     { label: "Source", value: `page ${metadata.sourcePageNumber}, line ${metadata.sourceLineNumber ?? "section"}` },
   ];
+}
+
+function formatDetailSourceEstimateLabel(
+  finding: CitationDensityFinding,
+  metadata: CitationDensityAnnotationMetadata
+) {
+  if (finding.estimatePairKind === "shop_to_shop") {
+    return "initial shop estimate";
+  }
+  return `${metadata.sourceDocumentRole} estimate`;
 }
 
 type FindingDetailLayoutContext = {
@@ -5924,6 +6037,15 @@ function buildCalloutLines(
   return [
     `Finding #: ${number}`,
     `Label: ${label}`,
+    ...(finding.canonicalDeltaObjectId
+      ? [
+          `Canonical delta object: ${finding.canonicalDeltaObjectId}`,
+          `Canonical delta id: ${finding.canonicalDeltaId ?? "unknown"}`,
+          `Estimate pair kind: ${finding.estimatePairKind ?? "unknown"}`,
+          `Initial file hash: ${finding.initialFileHash ?? "unknown"}`,
+          `Supplement file hash: ${finding.supplementFileHash ?? "unknown"}`,
+        ]
+      : []),
     `${reportIdentity.scoreCommentLabel}: ${finding.citationDensityScore}/100`,
     `Estimate line: ${sanitize(formatEstimateLineForCallout(finding, estimateRole))}`,
     `Best authority: ${sanitize(formatBestAuthority(finding))}`,

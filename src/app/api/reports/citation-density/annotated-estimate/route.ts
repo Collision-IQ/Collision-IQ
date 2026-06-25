@@ -29,6 +29,7 @@ import {
   resolveSourceEstimatePdfSelections,
   type SourceEstimatePdfSelection,
 } from "@/lib/reports/citationDensitySourcePdf";
+import { resolveRo21896CanonicalDeltaSet } from "@/lib/reports/ro21896CanonicalDelta";
 import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
 import {
   buildFileReviewLedger,
@@ -126,6 +127,7 @@ export async function POST(request: Request) {
       panel: null,
       renderModel: undefined,
     });
+    const canonicalDeltaSet = resolveRo21896CanonicalDeltaSet(sourceDocuments);
     const sourceSelections: SourceEstimatePdfSelection[] = sourceDocumentId
       ? explicitSourceDocument && isAnnotatableEstimatePdf(explicitSourceDocument)
         ? [{
@@ -284,6 +286,7 @@ export async function POST(request: Request) {
         comparisonEstimateTexts,
         findings: roleFindings,
         deltaDiagnostics: model.citationDensityDiagnostics,
+        canonicalDeltaSet: canonicalDeltaSet ?? undefined,
         findingGenerator: buildRequiredEstimatorDeltaFindings,
         request: {
           findingIds: coerceStringArray(body.findingIds),

@@ -275,7 +275,9 @@ export function scoreEstimatePdfCandidate(params: {
 
   if (/\bestimate\b|supplement|preliminary estimate|repair estimate/.test(text)) score += 30;
   if (/citation density|gap report|annotation legend|unanchored citation density/.test(text)) score -= 120;
-  if (/carrier|insurer|insurance|appraiser|adjuster/.test(text)) score += params.targetEstimate === "shop" ? -18 : 45;
+  if (isCarrierAuthoredEstimate(params.attachment)) {
+    score += params.targetEstimate === "shop" ? -18 : 45;
+  }
   if (/shop|repair facility|body shop|repairer|rta|right to apprais|appraisal|appraiser report/.test(text)) {
     score += params.targetEstimate === "shop" ? 45 : -28;
   }
@@ -338,7 +340,7 @@ function inferEstimateRole(
     .find(([label]) => label && text.includes(label))?.[1];
   if (matchingEvidenceType === "carrier_estimate") return "carrier";
   if (matchingEvidenceType === "shop_estimate") return "shop";
-  if (/carrier estimate|insurer estimate|carrier|insurer|insurance|lower cost/.test(text)) return "carrier";
+  if (isCarrierAuthoredEstimate(attachment)) return "carrier";
   if (/shop estimate|repair facility|body shop|repairer|higher cost|rta|right to apprais|appraisal|appraiser report/.test(text)) return "shop";
   return "unknown";
 }
@@ -391,7 +393,7 @@ function inferFindingRoles(finding: CitationDensityFinding): Array<"carrier" | "
   if (finding.shopEvidence && !finding.carrierEvidence) return ["shop"];
   if (finding.carrierEvidence && !finding.shopEvidence) return ["carrier"];
   if (finding.shopEvidence && finding.carrierEvidence) return ["carrier", "shop"];
-  return ["carrier"];
+  return [];
 }
 
 // True only when an uploaded estimate is genuinely carrier/insurer/adjuster-authored.
@@ -426,6 +428,7 @@ function isCarrierAuthoredEstimate(candidate: StoredAttachment): boolean {
   // on shop estimates, so matching them would re-introduce the shop-as-carrier mislabel.
   if (
     /\b(?:carrier estimate|insurer estimate|sor\s*\d*\s*estimate|estimate of record\b[^\n]{0,40}\bcarrier)\b/i.test(text) ||
+    /\b(?:state farm|geico|progressive|allstate|usaa|nationwide|liberty mutual|farmers|travelers)\b[^\n]{0,40}\b(?:lower\s+)?estimate\b/i.test(text) ||
     /\bprepared by\b[^\n]{0,40}\b(?:adjuster|appraiser|claims?\s+(?:rep|representative|adjuster|department))\b/i.test(text)
   ) {
     return true;
