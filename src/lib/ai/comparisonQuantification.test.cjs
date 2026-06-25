@@ -82,6 +82,25 @@ run("comparison analysis emits currency total row and hour-based labor rows", ()
   assert.equal(operationHoursRow.delta, 2);
 });
 
+run("Rpr Battery (12V D&R) is never a one-sided panel-scope difference (Fix 3)", () => {
+  const analysis = buildComparisonAnalysis({
+    shopEstimateText: [
+      "Grand Total 17397.20",
+      "Repl Hood 3.0",
+      "Repl Left Fender 2.0",
+      "Rpr Battery 0.3",
+    ].join("\n"),
+    insurerEstimateText: ["Grand Total 11892.26", "Repl Hood 3.0"].join("\n"),
+  });
+
+  const scopeFinding = analysis.findings.find((finding) => finding.id === "comparison-scope-reduction");
+  assert.ok(scopeFinding, "expected a scope-reduction finding for the genuine one-sided fender panel");
+  // A real Repl body panel only on one side is a legitimate one-sided panel.
+  assert.match(scopeFinding.detail, /fender/i);
+  // "Rpr Battery" (12V D&R operation, not a Repl body panel) must never appear as a panel.
+  assert.doesNotMatch(scopeFinding.detail, /battery/i);
+});
+
 run("comparison parser normalizes glued procedure hours without turning 1.0 into 11", () => {
   const analysis = buildComparisonAnalysis({
     shopEstimateText: [

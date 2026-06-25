@@ -23,6 +23,7 @@ import {
   NO_SOURCE_PDF_USER_MESSAGE,
   buildCitationDensitySourcePdfDiagnostics,
   describeReviewTarget,
+  hasCarrierAuthoredEstimate,
   isAnnotatableEstimatePdf,
   isPdfDocument,
   resolveSourceEstimatePdfSelections,
@@ -264,13 +265,14 @@ export async function POST(request: Request) {
           { status: 422 }
         );
       }
+      const carrierAuthored = hasCarrierAuthoredEstimate(sourceDocuments);
       const comparisonEstimateTexts = sourceDocuments
         .filter((document) => document.id !== selection.selectedSourceDocumentId && isAnnotatableEstimatePdf(document))
         .map((document) => ({
           sourceDocumentId: document.id,
           fileName: document.filename || "Comparison estimate",
           text: document.text || "",
-          estimateRole: inferComparisonEstimateRole(document.filename, estimateRole),
+          estimateRole: inferComparisonEstimateRole(document.filename, estimateRole, carrierAuthored),
         }));
       const result = await buildAnnotatedCitationDensityEstimatePdf({
         sourcePdfBytes,
@@ -534,11 +536,18 @@ function normalizeOutputEstimateRole(
 
 function inferComparisonEstimateRole(
   filename: string | undefined,
-  selectedRole: "carrier" | "shop" | "selected"
+  selectedRole: "carrier" | "shop" | "selected",
+  hasCarrierAuthored: boolean
 ): "carrier" | "shop" {
   const name = filename || "";
   if (/shop|repair facility|rta|appraisal/i.test(name)) return "shop";
-  if (/carrier|insur|sor|geico|state farm|progressive|allstate|estimate/i.test(name)) return "carrier";
+  // Only resolve the comparison to a "carrier" role when a carrier-authored estimate
+  // actually exists. On a shop-to-shop comparison, filename tokens like "insurance"/
+  // "estimate" must not force a "carrier" role/label (DEFECT A).
+  if (hasCarrierAuthored && /carrier|insur|sor|geico|state farm|progressive|allstate/i.test(name)) {
+    return "carrier";
+  }
+  if (!hasCarrierAuthored) return "shop";
   return selectedRole === "shop" ? "carrier" : "shop";
 }
 

@@ -21,6 +21,10 @@ const COMMON_INSURERS = [
 ];
 
 const LIKELY_PERSON_NAME_PATTERN = /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}$/;
+// Owner / insured names on CCC estimate headers are frequently rendered "LAST, FIRST"
+// and often ALL-CAPS (e.g. "OLIVARES, ESMON"). The Titlecase person pattern above does
+// not catch these, so an owner name could otherwise be scored into the insurer slot.
+const OWNER_LASTNAME_FIRSTNAME_PATTERN = /^[A-Za-z][A-Za-z'.-]+\s*,\s*[A-Za-z][A-Za-z'.\s-]+$/;
 
 type HighlightRule = {
   label: string;
@@ -158,9 +162,16 @@ function extractInsurer(text: string): string | undefined {
   const knownFromText = COMMON_INSURERS.find((carrier) =>
     new RegExp(`\\b${escapeRegExp(carrier)}\\b`, "i").test(text)
   );
+  // Only the Insurance Company / Insurer / Carrier field may populate the insurer slot.
+  // Owner/Insured/Claimant/Policyholder labels are deliberately excluded from this regex.
   const labeled =
     text.match(/\b(?:insurer|insurance company|carrier|insurance co(?:mpany)?)\b\s*[:#-]\s*([A-Za-z][A-Za-z .&'-]{1,40})/i)?.[1]?.trim();
-  return resolveCanonicalInsurerCandidate(
+  // Capture the owner/insured/claimant name (if labeled) so it can never be selected as
+  // the insurer, even when it appears as a prior/extracted candidate.
+  const ownerName = text
+    .match(/\b(?:owner\/insured|owner|insured|claimant|policyholder)\b\s*[:#-]\s*([A-Za-z][A-Za-z ,.&'-]{1,40})/i)?.[1]
+    ?.trim();
+  return resolveCanonicalInsurerCandidate({ excludeNames: ownerName ? [ownerName] : [] },
     { value: labeled, source: "labeled" },
     { value: knownFromText, source: "known_carrier" }
   );
@@ -172,17 +183,31 @@ export function normalizeInsurer(value: string): string {
   return known ?? compact;
 }
 
+type InsurerCandidateInput =
+  | string
+  | null
+  | undefined
+  | {
+      value?: string | null;
+      source?: "known_carrier" | "labeled" | "prior";
+    };
+
 export function resolveCanonicalInsurerCandidate(
-  ...candidates: Array<
-    | string
-    | null
-    | undefined
-    | {
-        value?: string | null;
-        source?: "known_carrier" | "labeled" | "prior";
-      }
-  >
+  ...args: Array<InsurerCandidateInput | { excludeNames: string[] }>
 ): string | undefined {
+  const excluded = new Set<string>();
+  const candidates: InsurerCandidateInput[] = [];
+  for (const arg of args) {
+    if (arg && typeof arg === "object" && "excludeNames" in arg) {
+      for (const name of arg.excludeNames) {
+        const normalized = normalizeInsurer(name);
+        if (normalized) excluded.add(normalized.toLowerCase());
+      }
+      continue;
+    }
+    candidates.push(arg);
+  }
+
   const scored = candidates
     .map((candidate) => {
       if (typeof candidate === "string" || candidate == null) {
@@ -191,7 +216,8 @@ export function resolveCanonicalInsurerCandidate(
 
       return buildInsurerCandidateScore(candidate.value, candidate.source ?? "prior");
     })
-    .filter((candidate): candidate is ReturnType<typeof buildInsurerCandidateScore> & { normalized: string } => Boolean(candidate));
+    .filter((candidate): candidate is ReturnType<typeof buildInsurerCandidateScore> & { normalized: string } => Boolean(candidate))
+    .filter((candidate) => !excluded.has(candidate.normalized.toLowerCase()));
 
   if (scored.length === 0) {
     return undefined;
@@ -209,6 +235,12 @@ function buildInsurerCandidateScore(
 
   const normalized = normalizeInsurer(value);
   if (!normalized) return null;
+
+  // Owner / insured names (e.g. "OLIVARES, ESMON") can never be the insurer. Known
+  // carriers always pass; anything in "LAST, FIRST" owner format is dropped outright.
+  if (!isKnownCarrier(normalized) && OWNER_LASTNAME_FIRSTNAME_PATTERN.test(normalized)) {
+    return null;
+  }
 
   let score = source === "known_carrier" ? 300 : source === "labeled" ? 220 : 100;
   if (isKnownCarrier(normalized)) score += 400;

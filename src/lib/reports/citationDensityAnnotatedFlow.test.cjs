@@ -42,6 +42,7 @@ const {
   NO_SOURCE_PDF_USER_MESSAGE,
   buildCitationDensitySourcePdfDiagnostics,
   describeReviewTarget,
+  hasCarrierAuthoredEstimate,
   isAnnotatableEstimatePdf,
   resolveSourceEstimatePdf,
   resolveSourceEstimatePdfSelection,
@@ -652,6 +653,35 @@ run("one uploaded estimate PDF is selected as the annotated source base", () => 
 
   assert.equal(selected.id, "only-estimate");
   assert.equal(describeReviewTarget(selected, "selected", [selected]), "Uploaded estimate");
+});
+
+run("shop-to-shop comparison uses neutral source wording, never carrier estimate (DEFECT A)", () => {
+  const shopLower = pdfAttachment({
+    id: "shop-lower",
+    filename: "Shop 21896.pdf",
+    text: "Conestoga shop estimate prepared by Vincent Menichetti Insurance Company: USAA Owner/Insured: OLIVARES, ESMON Grand Total $11,892.26",
+  });
+  const shopFinal = pdfAttachment({
+    id: "shop-final",
+    filename: "Shop Final 21896.pdf",
+    text: "Conestoga shop estimate prepared by Vincent Menichetti Insurance Company: USAA Owner/Insured: OLIVARES, ESMON Grand Total $17,397.20",
+  });
+
+  // Neither file is carrier-authored; "Insurance Company: USAA" is a header field, not authorship.
+  assert.equal(hasCarrierAuthoredEstimate([shopLower, shopFinal]), false);
+
+  const label = describeReviewTarget(shopLower, "carrier", [shopLower, shopFinal]);
+  assert.equal(label, "Source/lower estimate");
+  assert.doesNotMatch(label, /carrier estimate/i);
+
+  // A genuinely carrier-authored estimate still resolves to carrier wording.
+  const carrier = pdfAttachment({
+    id: "carrier",
+    filename: "SOR3 Carrier Estimate.pdf",
+    text: "Carrier estimate prepared by State Farm adjuster Grand Total $9,000.00",
+  });
+  assert.equal(hasCarrierAuthoredEstimate([carrier, shopLower]), true);
+  assert.equal(describeReviewTarget(carrier, "carrier", [carrier, shopLower]), "Carrier estimate");
 });
 
 run("carrier target selects carrier or lower-cost PDF over shop PDF", () => {

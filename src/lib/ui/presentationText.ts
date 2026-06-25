@@ -221,6 +221,9 @@ export function cleanUserFacingPresentationText(
     .replace(/\bShop vulnerabilities\b/gi, "Shop estimate verification risks")
     .replace(/\bMISSING_CRITICAL_EVIDENCE\s*:\s*-\d+\b/gi, "Open verification items")
     .replace(/\bMISSING_CRITICAL_EVIDENCE\b/gi, "Open verification items")
+    // A verification/open-items count can never be negative (Fix 5). Strip a leaked negative
+    // count so the user never sees "Open verification items: -24".
+    .replace(/\b(Open verification items|verification items?)\s*:\s*-\d+\b/gi, "$1")
     .replace(/\bexcluded from determination review\b/gi, "used as supporting context instead of direct estimate-determination evidence")
     .replace(/\b([A-Za-z][A-Za-z0-9/&() -]{2,80}?)\s+\1\s+vs\s+not shown\s+Present only in shop estimate\)?\.?/gi, "$1: present only in shop estimate.")
     .replace(/\bpolicy packet with\s+(?:Georgia|GA|[A-Z][a-z]+)\s*(?:\([A-Z]{2}\))?\s+policy indicators\b/gi, "uploaded policy packet / appraisal-language support; jurisdiction metadata redacted or ambiguous")
@@ -618,6 +621,9 @@ export function sanitizeUserFacingEvidenceText(
     .replace(/\bShop vulnerabilities\b/gi, "Shop estimate verification risks")
     .replace(/\bMISSING_CRITICAL_EVIDENCE\s*:\s*-\d+\b/gi, "Open verification items")
     .replace(/\bMISSING_CRITICAL_EVIDENCE\b/gi, "Open verification items")
+    // A verification/open-items count can never be negative (Fix 5). Strip a leaked negative
+    // count so the user never sees "Open verification items: -24".
+    .replace(/\b(Open verification items|verification items?)\s*:\s*-\d+\b/gi, "$1")
     .replace(/\bexcluded from determination review\b/gi, "used as supporting context instead of direct estimate-determination evidence")
     .replace(/\bParser review needed\b/gi, "Estimate item")
     .replace(/\bgeneric operation labels?\b/gi, "estimate items")

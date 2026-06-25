@@ -121,6 +121,15 @@ function buildNarrative(params: {
   return guardDamageZoneNarrative(narrative.trim(), { estimateText: params.estimateText });
 }
 
+// Non-panel components that can appear as a "Repl" line but are parts/operations, not body
+// panels. They must never count as a one-sided panel-scope difference (Fix 3).
+const NON_PANEL_COMPONENT_PATTERN =
+  /\b(?:battery|sensor|module|control unit|camera|radar|tpms|bulb|wiring|harness|connector|clip|fastener|bracket|emblem|nameplate|decal|fluid|refrigerant|coolant|filter|valve|hose|belt|absorber|isolator)\b/i;
+
+function replacedBodyPanels(story: RepairStory): string[] {
+  return story.replacedPanels.filter((panel) => panel && !NON_PANEL_COMPONENT_PATTERN.test(panel));
+}
+
 function buildComparisonFindings(params: {
   shopStory: RepairStory;
   insurerStory: RepairStory;
@@ -128,7 +137,13 @@ function buildComparisonFindings(params: {
   insurerOperations: EstimateOperation[];
 }): AnalysisFinding[] {
   const findings: AnalysisFinding[] = [];
-  const scopeReduction = difference(params.shopStory.panels, params.insurerStory.panels);
+  // Fix 3: a one-sided "panel only in estimate X" finding may only come from an actual
+  // REPLACED body panel. Operation lines (Rpr/R&I/D&R) — e.g. "Rpr Battery" (12V D&R) — and
+  // non-panel part replacements (sensors, modules, brackets) must not be promoted to panels.
+  const scopeReduction = difference(
+    replacedBodyPanels(params.shopStory),
+    replacedBodyPanels(params.insurerStory)
+  );
 
   if (scopeReduction.length > 0) {
     findings.push({
@@ -541,7 +556,7 @@ function buildOperationComparisonRow(
     rhsSource: labels.insurerEstimateLabel,
     lhsValue,
     rhsValue,
-    delta: buildOperationDelta(shop, insurer, deltaType),
+    delta: buildOperationDelta(shop, insurer, deltaType, labels),
     deltaType,
     confidence: shop && insurer ? 0.92 : 0.82,
     notes,
@@ -596,10 +611,13 @@ function formatOperationValue(operation: EstimateOperation): string {
 function buildOperationDelta(
   shop: EstimateOperation | undefined,
   insurer: EstimateOperation | undefined,
-  deltaType: WorkspaceEstimateComparisons["rows"][number]["deltaType"]
+  deltaType: WorkspaceEstimateComparisons["rows"][number]["deltaType"],
+  labels: { shopEstimateLabel: string; insurerEstimateLabel: string }
 ) {
-  if (deltaType === "added") return "Present only in shop estimate";
-  if (deltaType === "removed") return "Present only in carrier estimate";
+  // Use the resolved estimate labels (neutral source/comparison wording for a shop-to-shop
+  // comparison) rather than hardcoding "carrier estimate" (DEFECT A).
+  if (deltaType === "added") return `Present only in ${labels.shopEstimateLabel}`;
+  if (deltaType === "removed") return `Present only in ${labels.insurerEstimateLabel}`;
   if (deltaType === "same") return "Aligned";
   if (shop && insurer && shop.operation !== insurer.operation) {
     return `${shop.operation} → ${insurer.operation}`;

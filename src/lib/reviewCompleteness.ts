@@ -298,3 +298,55 @@ function normalizeCount(value: number | null | undefined): number {
     ? Math.max(0, Math.floor(value))
     : 0;
 }
+
+// Fix 5: a verification / open-items count can never be negative. Clamp to >= 0 and log the
+// underflow so the root cause (e.g. a context-overflow retry that reduced the file set
+// mid-run) is visible instead of silently surfacing "-24".
+export function clampVerificationItemCount(value: number | null | undefined, context?: string): number {
+  if (typeof value === "number" && Number.isFinite(value) && value < 0) {
+    console.warn("[review-completeness] verification item count underflow clamped to 0", {
+      rawCount: value,
+      context: context ?? "unknown",
+    });
+    return 0;
+  }
+  return normalizeCount(value);
+}
+
+export type ReportCompletionState = "final" | "partial";
+
+export type ReportCompletionResult = {
+  state: ReportCompletionState;
+  reasons: string[];
+};
+
+// Fix 5: a report may only render as "final" when (a) file-review diagnostics finished,
+// (b) the verification-item count is >= 0, and (c) the file set used to render matches the
+// file set that was indexed. Otherwise it must render an explicit "partial — regenerate"
+// state rather than implying a complete result from a partial pipeline run.
+export function resolveReportCompletionState(input: {
+  diagnosticsReady: boolean;
+  verificationItemCount: number | null | undefined;
+  renderedFileIds: string[];
+  indexedFileIds: string[];
+}): ReportCompletionResult {
+  const reasons: string[] = [];
+
+  if (!input.diagnosticsReady) {
+    reasons.push("File review diagnostics are still being prepared.");
+  }
+
+  if (typeof input.verificationItemCount === "number" && input.verificationItemCount < 0) {
+    reasons.push("Verification item count underflowed (negative); the pipeline did not complete cleanly.");
+  }
+
+  const rendered = new Set(input.renderedFileIds.filter(Boolean));
+  const indexed = new Set(input.indexedFileIds.filter(Boolean));
+  const fileSetsMatch =
+    rendered.size === indexed.size && [...indexed].every((id) => rendered.has(id));
+  if (!fileSetsMatch) {
+    reasons.push("The file set used to render does not match the indexed file set.");
+  }
+
+  return { state: reasons.length === 0 ? "final" : "partial", reasons };
+}

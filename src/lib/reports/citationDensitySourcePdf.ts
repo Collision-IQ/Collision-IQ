@@ -394,6 +394,45 @@ function inferFindingRoles(finding: CitationDensityFinding): Array<"carrier" | "
   return ["carrier"];
 }
 
+// True only when an uploaded estimate is genuinely carrier/insurer/adjuster-authored.
+// A shop estimate that merely prints an "Insurance Company: USAA" field is NOT carrier
+// authored — that is a header field, not authorship. Without this distinction a shop-to-shop
+// comparison gets mislabeled "carrier estimate" / inverted roles (DEFECT A).
+export function hasCarrierAuthoredEstimate(candidates: StoredAttachment[]): boolean {
+  return candidates.some((candidate) => isCarrierAuthoredEstimate(candidate));
+}
+
+// Provenance check for a single parsed file (filename + text), used to derive/verify the
+// source_estimate role of an annotated report instead of defaulting it to "carrier" (Fix 2).
+export function isCarrierAuthoredEstimateDocument(input: {
+  filename?: string | null;
+  text?: string | null;
+}): boolean {
+  return isCarrierAuthoredEstimate({
+    filename: input.filename ?? "",
+    text: input.text ?? "",
+  } as StoredAttachment);
+}
+
+function isCarrierAuthoredEstimate(candidate: StoredAttachment): boolean {
+  const filename = (candidate.filename ?? "").toLowerCase();
+  if (/\b(?:carrier|insurer|adjuster|appraiser|sor\d*)\b/.test(filename)) return true;
+  if (/\b(?:state farm|geico|progressive|allstate|usaa|nationwide|liberty mutual|farmers|travelers)\b[^\n]{0,20}\bestimate\b/i.test(filename)) {
+    return true;
+  }
+  const text = candidate.text ?? "";
+  // Explicit carrier/SOR authorship in the body. Deliberately NOT matched: a plain
+  // "Insurance Company: <name>" field or a shop "prepared by <estimator>" line — both appear
+  // on shop estimates, so matching them would re-introduce the shop-as-carrier mislabel.
+  if (
+    /\b(?:carrier estimate|insurer estimate|sor\s*\d*\s*estimate|estimate of record\b[^\n]{0,40}\bcarrier)\b/i.test(text) ||
+    /\bprepared by\b[^\n]{0,40}\b(?:adjuster|appraiser|claims?\s+(?:rep|representative|adjuster|department))\b/i.test(text)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function describeReviewTarget(
   attachment: StoredAttachment,
   targetEstimate: CitationDensityTargetEstimate,
@@ -401,6 +440,11 @@ export function describeReviewTarget(
 ) {
   if (candidates.filter((candidate) => isPdfDocument(candidate.type, candidate.filename)).length === 1) {
     return "Uploaded estimate";
+  }
+  // When no uploaded estimate is carrier-authored, this is a shop-to-shop (or version-to-
+  // version) comparison. Use neutral source wording, never "carrier estimate".
+  if (!hasCarrierAuthoredEstimate(candidates)) {
+    return "Source/lower estimate";
   }
   if (targetEstimate === "carrier") return "Carrier estimate";
   if (targetEstimate === "shop") return "Shop estimate";

@@ -100,11 +100,21 @@ const ANALYSIS = {
   narrative: "Claim file review.",
 };
 
-run("owner ZIP beats shop ZIP", () => {
+run("shop ZIP governs over owner ZIP when they disagree (Fix 4)", () => {
   const report = buildReport([
     "Owner address: 123 Market Street, Philadelphia, PA 19103",
     "Repair facility address: 10 Main Street, Austin, TX 78701",
   ].join("\n"));
+  const resolved = resolveJurisdiction({ report });
+
+  // The repair-shop ZIP on the estimate is the governing-state control, not owner ZIP.
+  assert.equal(resolved.state, "TX");
+  assert.equal(resolved.source, "shop_zip");
+  assert.equal(resolved.confidence, "high");
+});
+
+run("owner ZIP governs only when no shop ZIP is present", () => {
+  const report = buildReport("Owner address: 123 Market Street, Philadelphia, PA 19103");
   const resolved = resolveJurisdiction({ report });
 
   assert.equal(resolved.state, "PA");
@@ -112,13 +122,13 @@ run("owner ZIP beats shop ZIP", () => {
   assert.equal(resolved.confidence, "high");
 });
 
-run("shop ZIP resolves only as medium-confidence fallback", () => {
+run("shop ZIP resolves as the governing control", () => {
   const report = buildReport("Repair facility address: 100 Garage Road, Lancaster, PA 17602");
   const resolved = resolveJurisdiction({ report });
 
   assert.equal(resolved.state, "PA");
-  assert.equal(resolved.source, "shop_zip_fallback");
-  assert.equal(resolved.confidence, "medium");
+  assert.equal(resolved.source, "shop_zip");
+  assert.equal(resolved.confidence, "high");
 });
 
 run("policy governing law beats shop ZIP", () => {
@@ -229,14 +239,10 @@ run("Policy Rights and DOI do not rewrite owner zip without real owner address b
   assert.doesNotMatch(JSON.stringify({ policy, doi }), /owner_zip|Owner ZIP from uploaded claim documents|Detection confidence: High/i);
 });
 
-run("real owner address block may still resolve owner_zip", () => {
+run("real owner address block resolves owner_zip when no shop/inspection ZIP is present", () => {
   const report = buildReport([
     "Owner address: 123 Market Street",
     "Philadelphia, PA 19103",
-    "Inspection Site",
-    "Conestoga Autobody",
-    "961 Lancaster Ave",
-    "Berwyn, PA 19312",
   ].join("\n"));
   const resolved = resolveJurisdiction({ report });
 
@@ -247,7 +253,7 @@ run("real owner address block may still resolve owner_zip", () => {
 run("Repair Intelligence, Policy Rights, and DOI use same resolved jurisdiction", () => {
   const report = buildReport([
     "Owner address: 123 Market Street, Philadelphia, PA 19103",
-    "Repair facility address: 10 Main Street, Austin, TX 78701",
+    "Repair facility address: 10 Main Street, Lancaster, PA 17602",
   ].join("\n"));
   const params = { report, analysis: ANALYSIS, panel: null, assistantAnalysis: null };
   const repair = buildDisputeIntelligencePdf(params);
@@ -256,6 +262,7 @@ run("Repair Intelligence, Policy Rights, and DOI use same resolved jurisdiction"
   const policyJurisdiction = policy.summary.find((item) => item.label === "Jurisdiction")?.value;
   const doiJurisdiction = doi.summary.find((item) => item.label === "Jurisdiction")?.value;
 
+  // Shop ZIP governs (Lancaster PA); all three artifacts resolve the same PA jurisdiction.
   assert.equal(policyJurisdiction, "Pennsylvania (PA)");
   assert.equal(doiJurisdiction, "Pennsylvania (PA)");
   assert.doesNotMatch(JSON.stringify({ repair, policy, doi }), /Texas \(TX\)|Jurisdiction: TX|Detected jurisdiction: Texas/i);
