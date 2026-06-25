@@ -35,6 +35,7 @@ import {
   classifyCitationDensityDocument,
   isBadCitationDensityAnchorText,
 } from "./citationDensityDocumentClassifier";
+import { isCarrierAuthoredEstimateDocument } from "./citationDensitySourcePdf";
 import {
   deltaRowFromRawText,
   matchEstimateLineItems,
@@ -709,8 +710,41 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   }
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const sourceDocumentRole = estimateRole === "shop" ? "shop" : "carrier";
   const sourcePdfName = params.sourcePdfName ?? params.sourceDocumentId ?? reportIdentity.sourcePdfFallbackName;
+  // Fix 2: derive the source_estimate role from the actual parsed file's provenance instead of
+  // defaulting an ambiguous role to "carrier". Only an explicit shop/carrier request, or a
+  // genuinely carrier-authored file, may yield a "carrier" label.
+  const sourceIsCarrierAuthored = isCarrierAuthoredEstimateDocument({
+    filename: sourcePdfName,
+    text: params.sourceText,
+  });
+  const sourceDocumentRole: "carrier" | "shop" =
+    estimateRole === "shop"
+      ? "shop"
+      : estimateRole === "carrier"
+        ? "carrier"
+        : sourceIsCarrierAuthored
+          ? "carrier"
+          : "shop";
+  // Loud-fail: a "carrier" request the parsed file's provenance does not support.
+  if (estimateRole === "carrier" && !sourceIsCarrierAuthored) {
+    console.warn("[citation-density] requested source_estimate role 'carrier' is not supported by parsed file provenance", {
+      sourcePdfName,
+      sourcePdfHash: hashPdfBytes(sourcePdfBytes),
+      sourceDocumentId: params.sourceDocumentId ?? null,
+    });
+    warnings.push(
+      "Source estimate could not be confirmed as carrier-authored from the parsed file; it is labeled by file provenance instead of an assumed carrier role."
+    );
+  }
+  // Fix 2: when only one estimate was parsed (no comparison estimate), say so rather than
+  // implying a two-estimate delta.
+  const parsedComparisonCount = (params.comparisonEstimateTexts ?? []).filter((item) => item.text?.trim()).length;
+  if (parsedComparisonCount === 0) {
+    warnings.push(
+      "Only one estimate was parsed for this report, so it reflects a single estimate rather than a two-estimate delta."
+    );
+  }
   const selectedDocumentClassification = classifyCitationDensityDocument({
     filename: sourcePdfName,
     text: params.sourceText,

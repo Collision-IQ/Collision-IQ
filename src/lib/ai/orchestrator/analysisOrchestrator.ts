@@ -4,6 +4,7 @@ import {
 } from "@/lib/uploadedAttachmentStore";
 import { orchestrateRetrieval } from "../retrievalOrchestrator";
 import { buildComparisonAnalysis } from "../builders/comparisonEngine";
+import { resolveEstimateVersionLabels } from "../estimateProvenance";
 import { extractEstimateFacts } from "../extractors/extractEstimateFacts";
 import { runRepairPipeline } from "../pipeline/repairPipeline";
 import { computeConfidenceScore } from "../scoring/confidenceScore";
@@ -751,22 +752,25 @@ function findEstimateVersionPair(
 
     return left.index - right.index;
   });
-  const older = sorted[0];
-  const newer = sorted[1];
+  const first = sorted[0];
+  const second = sorted[1];
 
-  if (!older || !newer) {
+  if (!first || !second) {
     return null;
   }
 
+  // Fix 1: classify same-source estimates (shared RO number / workfile ID / "Written By") as an
+  // original + supplement pair ordered by estimate date, instead of assuming a shop/carrier
+  // split. Two same-RO Conestoga estimates are versions of one job, not two parties.
+  const versioned = resolveEstimateVersionLabels(
+    { text: first.text, filename: first.filename },
+    { text: second.text, filename: second.filename },
+    (input, fallback) => buildEstimateVersionLabel(input.filename, fallback)
+  );
+
   return {
-    older: {
-      text: older.text,
-      label: buildEstimateVersionLabel(older.filename, "Estimate 1"),
-    },
-    newer: {
-      text: newer.text,
-      label: buildEstimateVersionLabel(newer.filename, "Estimate 2"),
-    },
+    older: { text: versioned.older.text, label: versioned.older.label },
+    newer: { text: versioned.newer.text, label: versioned.newer.label },
   };
 }
 

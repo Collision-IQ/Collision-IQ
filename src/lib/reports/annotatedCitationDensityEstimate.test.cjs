@@ -1724,6 +1724,31 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     );
   });
 
+  await run("source_estimate role is verified against parsed-file provenance and single-file is flagged (Fix 2)", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Conestoga shop estimate", { x: 42, y: 752, size: 10, font });
+    drawCccEstimateRow(page, font, 14, "", "Subl", "RF wheel repair", "0.0", "$75.00", 720);
+    const sourcePdfBytes = await doc.save();
+
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceDocumentId: "shop-only-1",
+      sourcePdfName: "Shop 21896.pdf",
+      sourceText: "Conestoga shop estimate prepared by Vincent Menichetti Insurance Company: USAA",
+      findings: [],
+      findingGenerator: buildRequiredEstimatorDeltaFindings,
+      // No comparisonEstimateTexts -> only one estimate was parsed.
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
+    });
+
+    // The requested "carrier" role is not supported by the shop file's provenance -> loud flag.
+    assert.ok(result.warnings.some((w) => /not be confirmed as carrier-authored/i.test(w)));
+    // Only one estimate parsed -> the report must not imply a two-estimate delta.
+    assert.ok(result.warnings.some((w) => /single estimate rather than a two-estimate delta/i.test(w)));
+  });
+
   await run("OEM Citation Density generator creates source-page repair-standard findings without verified OEM overclaim", async () => {
     const sourcePdfBytes = await createRam21975SourcePdf();
     const result = await buildAnnotatedCitationDensityEstimatePdf({
