@@ -8,6 +8,7 @@ import {
 import { openai } from "@/lib/openai";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,

@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { getOpenAIClient } from "@/lib/openai";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,

@@ -6,6 +6,7 @@ import {
 } from "@/lib/auth/require-current-user";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 const DEFAULT_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe";
 
