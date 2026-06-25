@@ -12,7 +12,9 @@ import {
   type PDFRef,
 } from "pdf-lib/cjs/core";
 import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
-import type { CitationDensityFinding, CitationSupportStatus } from "@/lib/ai/types/estimateScrubber";
+import type { CitationDensityFinding, CitationDensityEstimateLineAnchor, CitationSupportStatus } from "@/lib/ai/types/estimateScrubber";
+import type { CanonicalDeltaSet, CanonicalDeltaEntry } from "./canonicalDelta";
+import { getDeltaLabel, applyDisplayThreshold, assertNoCarrierWording } from "./canonicalDelta";
 import {
   buildPdfRectFromTopLeftAnchor,
   normalizePdfRect,
@@ -127,6 +129,9 @@ export type AnnotatedEstimateFindingGeneratorContext = {
   sourceText?: string | null;
   comparisonEstimateTexts: ComparisonEstimateText[];
   authorityTrace?: OemCitationDensityAuthorityTrace;
+  /** When present, the canonical delta set is the authoritative source for all delta findings.
+   *  The legacy local-diff path is suppressed; all emitted findings carry canonicalDeltaObjectId. */
+  canonicalDeltaSet?: CanonicalDeltaSet;
 };
 
 export type AnnotatedEstimateResult = {
@@ -1434,6 +1439,198 @@ function emptyPartSourceFindingResult(): PartSourceFindingResult {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Canonical delta path for Delta Citation Density PDF
+// ---------------------------------------------------------------------------
+
+function canonicalDeltaPriorityScore(delta: CanonicalDeltaEntry): number {
+  const dollar = delta.magnitudeDollar !== undefined ? Math.abs(delta.magnitudeDollar) : 0;
+  const labor = delta.magnitudeLaborHrs !== undefined ? Math.abs(delta.magnitudeLaborHrs) * 60 : 0;
+  return dollar + labor;
+}
+
+function canonicalDeltaFindingCategory(delta: CanonicalDeltaEntry): CitationDensityFinding["category"] {
+  const op = delta.operation.toLowerCase();
+  if (/calibrat|camera\s+calib|adas|radar|lidar/.test(op)) return "adas_calibration";
+  if (/\bscan\b|dtc|diagnostic|firmware|service\s+mode|deploy/.test(op)) return "scan_diagnostic";
+  if (/crossmember|control\s+arm|link\s+arm|lateral\s+arm|susp(?:ension)?|o\/h\s+rr\s+susp|strut|knuckle|spindle/.test(op)) return "structural_or_fit_verification";
+  if (delta.class === "PART_SWAP" || delta.class === "PART_SWAP_WITH_PRICE_CHANGE") return "parts_downgrade";
+  if (delta.class === "VALUE_CHANGE") return "parts_downgrade";
+  return "parts_downgrade";
+}
+
+function canonicalDeltaToFinding(
+  delta: CanonicalDeltaEntry,
+  deltaSet: CanonicalDeltaSet
+): CitationDensityFinding {
+  const label = getDeltaLabel(delta, deltaSet.estimatePairKind);
+  assertNoCarrierWording(deltaSet.estimatePairKind, label, `canonical finding ${delta.id}`);
+
+  const category = canonicalDeltaFindingCategory(delta);
+  const isSuspension = category === "structural_or_fit_verification";
+  const isCalibration = category === "adas_calibration" || category === "scan_diagnostic";
+  const priorityScore = canonicalDeltaPriorityScore(delta);
+
+  const supplementFilename = deltaSet.estimateFiles.supplement.filename;
+  const initialFilename = deltaSet.estimateFiles.initial.filename;
+
+  const supplementAnchorLine = delta.anchorFinal
+    ? String(Array.isArray(delta.anchorFinal.line) ? delta.anchorFinal.line[0] : delta.anchorFinal.line)
+    : null;
+  const initialAnchorLine = delta.anchorInitial
+    ? String(Array.isArray(delta.anchorInitial.line) ? delta.anchorInitial.line[0] : delta.anchorInitial.line)
+    : null;
+
+  const shopAnchor: CitationDensityEstimateLineAnchor | undefined = delta.anchorFinal
+    ? {
+        estimateRole: "shop",
+        pageNumber: delta.anchorFinal.page,
+        lineNumber: supplementAnchorLine,
+        description: delta.operation,
+        amount: delta.magnitudeDollar ?? null,
+        laborHours: delta.magnitudeLaborHrs ?? null,
+      }
+    : undefined;
+
+  const deltaDisplay =
+    delta.magnitudeDollar !== undefined
+      ? `${delta.magnitudeDollar >= 0 ? "+" : ""}$${delta.magnitudeDollar.toFixed(2)}`
+      : delta.magnitudeLaborHrs !== undefined
+        ? `${delta.magnitudeLaborHrs >= 0 ? "+" : ""}${delta.magnitudeLaborHrs.toFixed(1)} hrs`
+        : "";
+
+  const currentSupportSummary =
+    `[${label}] ${delta.operation}` +
+    (deltaDisplay ? ` (${deltaDisplay})` : "") +
+    `. Category: ${delta.category}.` +
+    ` Supplement line: ${supplementAnchorLine ?? "added in supplement"} (${supplementFilename}).` +
+    (delta.anchorInitial
+      ? ` Initial line: ${initialAnchorLine} (${initialFilename}).`
+      : " Not present in initial estimate.") +
+    ` Canonical delta ID: ${delta.id}; set: ${deltaSet.id}.`;
+
+  const missingProofSummary = isSuspension
+    ? `${delta.operation}: structural/suspension scope change. Verify OEM repair procedure and that the initial estimate scope was complete for this vehicle.`
+    : isCalibration
+      ? `${delta.operation}: ADAS/diagnostic procedure added in supplement. Verify scan/calibration requirement against OEM procedure for this vehicle platform.`
+      : `${delta.operation}: added or changed in supplement estimate. Verify basis and completion documentation.`;
+
+  const recommendedNextAction = isSuspension
+    ? "Attach OEM procedure support and verify that supplement scope is consistent with documented vehicle damage."
+    : isCalibration
+      ? "Verify OEM scan/calibration requirement; attach procedure documentation and post-repair scan report."
+      : "Verify supplement line item against initial estimate scope and attach completion proof.";
+
+  const missingAuthorityTypes: string[] = isSuspension
+    ? ["OEM procedure support", "supplement line-item basis", "completion proof"]
+    : isCalibration
+      ? ["OEM scan/calibration requirement", "post-repair scan report", "completion proof"]
+      : ["supplement line-item basis", "completion proof"];
+
+  return {
+    id: `canonical-delta-${delta.id}-${deltaSet.id.slice(0, 8)}`,
+    operationLabel: delta.operation,
+    category,
+    estimateGapType: "present_but_under_documented",
+    shopEvidence: {
+      lineNumber: supplementAnchorLine,
+      description: delta.operation,
+      amount: delta.magnitudeDollar ?? null,
+      laborHours: delta.magnitudeLaborHrs ?? null,
+      sourceLabel: supplementFilename,
+    },
+    carrierEvidence: delta.anchorInitial
+      ? {
+          lineNumber: initialAnchorLine,
+          description: delta.operation,
+          amount:
+            delta.oldValue && typeof delta.oldValue.price === "number"
+              ? delta.oldValue.price
+              : null,
+          laborHours: null,
+          sourceLabel: initialFilename,
+        }
+      : undefined,
+    shopAnchor,
+    applicableEstimateRoles: ["shop"],
+    primaryAnnotationRole: "shop",
+    crossEstimateIssue: delta.anchorInitial !== null && delta.anchorFinal !== null,
+    impact: {
+      dollarImpact: delta.magnitudeDollar ?? null,
+      laborHoursImpact: delta.magnitudeLaborHrs ?? null,
+      safetyImpact: isSuspension || isCalibration ? "high" : "medium",
+      supplementPriority: priorityScore > 500 ? "high" : priorityScore > 100 ? "medium" : "low",
+    },
+    citationStatus: {
+      oem: isSuspension || isCalibration ? "needed" : "not_applicable",
+      oemPositionStatement: isSuspension || isCalibration ? "needed" : "not_applicable",
+      adas: isCalibration ? "needed" : "not_applicable",
+      pPages: "not_applicable",
+      scrs: "not_applicable",
+      deg: "not_applicable",
+      nhtsa: "not_applicable",
+      stateRegulation: "not_applicable",
+      policy: "not_applicable",
+      invoiceOrCompletionProof: "needed",
+      photoOrTeardownProof: "not_found",
+    },
+    citationDensityScore: Math.min(90, 50 + Math.min(40, Math.floor(priorityScore / 40))),
+    verifiedAuthorityCount: 0,
+    missingAuthorityTypes,
+    missingAuthority: missingAuthorityTypes,
+    citationLabel: label,
+    currentSupportSummary,
+    missingProofSummary,
+    recommendedNextAction,
+    confidence: "high",
+    limitations: [
+      "Canonical delta finding: derived from the authoritative delta object, not a single-estimate scan.",
+      "Do not assert OEM requires, NHTSA crash-test equivalency, or warranty voiding without verified authority.",
+      `canonicalDeltaObjectId:${deltaSet.id}`,
+      `canonicalDeltaClass:${delta.class}`,
+      `artifactVersion:${CITATION_DENSITY_ARTIFACT_VERSION}`,
+    ],
+    canonicalDeltaObjectId: deltaSet.id,
+  };
+}
+
+function buildCanonicalDeltaFindings(deltaSet: CanonicalDeltaSet): {
+  findings: CitationDensityFinding[];
+  matchedPairCount: number;
+  missingOperationCount: number;
+} {
+  const withThreshold = applyDisplayThreshold(deltaSet);
+  const renderableDeltas = withThreshold.deltas.filter((d) => d.render);
+
+  const scored = renderableDeltas.map((d) => ({
+    delta: d,
+    score: canonicalDeltaPriorityScore(d),
+  }));
+
+  // PRESENCE first (largest supplement additions), then VALUE_CHANGE, then PART_SWAP*.
+  // Within each class, sort by combined dollar+labor magnitude descending.
+  scored.sort((a, b) => {
+    const classRank = (entry: typeof a) => {
+      if (entry.delta.class === "PRESENCE") return 0;
+      if (entry.delta.class === "VALUE_CHANGE") return 1;
+      return 2;
+    };
+    const rankDiff = classRank(a) - classRank(b);
+    if (rankDiff !== 0) return rankDiff;
+    return b.score - a.score;
+  });
+
+  const findings = scored.map(({ delta }) => canonicalDeltaToFinding(delta, deltaSet));
+
+  return {
+    findings,
+    matchedPairCount: renderableDeltas.filter(
+      (d) => d.anchorInitial !== null && d.anchorFinal !== null
+    ).length,
+    missingOperationCount: renderableDeltas.filter((d) => d.class === "PRESENCE").length,
+  };
+}
+
 export function buildRequiredEstimatorDeltaFindings(
   context: AnnotatedEstimateFindingGeneratorContext
 ): AnnotatedEstimateGeneratedFindings {
@@ -1446,21 +1643,33 @@ export function buildRequiredEstimatorDeltaFindings(
   let lineItemDeltaFindingCount = 0;
   let lineItemDeltaMatchedPairCount = 0;
   let lineItemDeltaMissingCount = 0;
-  try {
-    const deltaFindings = buildStructuredLineItemDeltaFindings(context, usedAnchorIds);
+  if (context.canonicalDeltaSet) {
+    // Canonical path: the structured delta object is the authoritative source.
+    // The legacy local-diff path must not run when a canonical set is present.
+    const deltaFindings = buildCanonicalDeltaFindings(context.canonicalDeltaSet);
     lineItemDeltaFindingCount = deltaFindings.findings.length;
     lineItemDeltaMatchedPairCount = deltaFindings.matchedPairCount;
     lineItemDeltaMissingCount = deltaFindings.missingOperationCount;
     findings.push(...deltaFindings.findings);
-  } catch (error) {
-    console.error("[citation-density] structured line-item delta detector failed (non-fatal)", {
-      message: error instanceof Error ? error.message : String(error),
-    });
+  } else {
+    try {
+      const deltaFindings = buildStructuredLineItemDeltaFindings(context, usedAnchorIds);
+      lineItemDeltaFindingCount = deltaFindings.findings.length;
+      lineItemDeltaMatchedPairCount = deltaFindings.matchedPairCount;
+      lineItemDeltaMissingCount = deltaFindings.missingOperationCount;
+      findings.push(...deltaFindings.findings);
+    } catch (error) {
+      console.error("[citation-density] structured line-item delta detector failed (non-fatal)", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
   const hasStructuredDeltas = lineItemDeltaFindingCount > 0;
   let sandPolishSeen = false;
   let batteryResetSeen = false;
-  let wheelDetectorSeen = false;
+  // Suppress wheel_labor_delta when the canonical delta set is present — canonical findings
+  // are the authoritative lead; wheel R&I access lines must not appear as top findings.
+  let wheelDetectorSeen = !!context.canonicalDeltaSet;
   let wheelAccessDetectorSeen = false;
   let wheelAlignmentDetectorSeen = false;
   let hubDetectorSeen = false;

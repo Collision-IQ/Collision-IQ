@@ -12,6 +12,8 @@ export type EstimateComparisonRow = {
   deltaType?: "added" | "removed" | "changed" | "same" | "unknown";
   confidence?: number | null;
   notes?: string[];
+  /** Stable ID of the CanonicalDeltaSet this row was derived from. Present when the row was produced by canonicalDeltaSetToEstimateComparisons. */
+  canonicalDeltaObjectId?: string;
 };
 
 export type WorkspaceEstimateComparisons = {
@@ -23,6 +25,8 @@ export type WorkspaceEstimateComparisons = {
     removedRows: number;
     sameRows: number;
   };
+  /** Stable ID of the CanonicalDeltaSet that produced these rows, when applicable. Repair Intelligence, Snapshot, and Customer Report consumers use this to trace rendered deltas back to the canonical object. */
+  canonicalDeltaObjectId?: string;
 };
 
 export type WorkspaceData = {

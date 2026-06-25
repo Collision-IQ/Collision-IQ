@@ -13,6 +13,7 @@
     "cap:sync:prod": "cross-env CAP_SERVER_URL= npx cap sync android",
     "cap:sync:debug": "cross-env CAP_SERVER_URL=http://10.0.2.2:3000 npx cap sync android",
     "android:debug": "npm run cap:sync:debug && cd android && gradlew.bat assembleDebug",
+    "test": "npm run test:zip-fixtures && node scripts/run-cjs-tests.cjs && npm run test:vehicle-identity && npm run test:claim-specific-reports && vitest run \"upload.zip.test\" \"ro21896Delta.contract.test\" \"ro21896CanonicalDelta.contract.test\"",
     "test:zip-fixtures": "node tests/fixtures/zip/generate-fixtures.mjs",
     "test:vehicle-identity": "node scripts/run-vehicle-identity-tests.cjs",
     "test:claim-specific-reports": "node src/lib/ai/claimSpecificReportRegression.test.cjs"

@@ -165,11 +165,11 @@ function extractInsurer(text: string): string | undefined {
   // Only the Insurance Company / Insurer / Carrier field may populate the insurer slot.
   // Owner/Insured/Claimant/Policyholder labels are deliberately excluded from this regex.
   const labeled =
-    text.match(/\b(?:insurer|insurance company|carrier|insurance co(?:mpany)?)\b\s*[:#-]\s*([A-Za-z][A-Za-z .&'-]{1,40})/i)?.[1]?.trim();
+    text.match(/\b(?:insurer|insurance company|insurance co(?:mpany)?)\b\s*[:#-]\s*([A-Za-z][A-Za-z .&'-]{1,40})/i)?.[1]?.trim();
   // Capture the owner/insured/claimant name (if labeled) so it can never be selected as
   // the insurer, even when it appears as a prior/extracted candidate.
   const ownerName = text
-    .match(/\b(?:owner\/insured|owner|insured|claimant|policyholder)\b\s*[:#-]\s*([A-Za-z][A-Za-z ,.&'-]{1,40})/i)?.[1]
+    .match(/\b(?:owner\/insured|owner|insured|claimant|policyholder|customer)\b\s*[:#-]\s*([A-Za-z][A-Za-z ,.&'-]{1,40})/i)?.[1]
     ?.trim();
   return resolveCanonicalInsurerCandidate({ excludeNames: ownerName ? [ownerName] : [] },
     { value: labeled, source: "labeled" },

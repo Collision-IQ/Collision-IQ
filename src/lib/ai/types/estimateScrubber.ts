@@ -73,7 +73,8 @@ export type CitationDensityAuthorityType =
   | "PHOTO"
   | "SCAN"
   | "CALIBRATION"
-  | "POLICY";
+  | "POLICY"
+  | "VENDOR_ACCESSORY";
 
 export type CitationDensityAuthorityRetrievalStatus =
   | "matched"
@@ -197,6 +198,8 @@ export type CitationDensityFinding = {
   supplementReadyLanguage?: string;
   confidence: "low" | "medium" | "high";
   limitations: string[];
+  /** Stable ID of the CanonicalDeltaSet this finding was derived from. Present on findings produced via the canonical delta path (not the legacy local-diff path). Used by G5 to verify all four report consumers trace to one object. */
+  canonicalDeltaObjectId?: string;
 };
 
 export interface EstimateScrubFinding {
