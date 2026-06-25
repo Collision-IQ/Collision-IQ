@@ -47,6 +47,11 @@ import {
   type CanonicalDeltaEstimateFiles,
   type EstimatePairKind,
 } from "../canonicalDelta";
+import { extractEstimateFacts } from "@/lib/ai/extractors/extractEstimateFacts";
+import {
+  buildRequiredEstimatorDeltaFindings,
+  type AnnotatedEstimateFindingGeneratorContext,
+} from "../annotatedCitationDensityEstimate";
 
 // ---------------------------------------------------------------------------
 // Helpers: build a canonical delta set directly from fixture data
@@ -923,5 +928,173 @@ describe("G6 — owner sign-off (manual gate)", () => {
     //   7. Confirm insurer is shown as USAA, not OLIVARES.
     // Only after manual validation may this branch be promoted past preview.
     expect(true).toBe(true); // placeholder — this gate is enforced by the PR process
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PROMPT 1 — Role classification + insurer mapping (Bugs 1a + 1b)
+// ---------------------------------------------------------------------------
+
+describe("PROMPT1(a) — no shop-sourced canonical finding carries role carrier", () => {
+  it("all canonical findings for shop_to_shop have shopAnchor.estimateRole = shop", () => {
+    const set = buildTestDeltaSet();
+    const context: AnnotatedEstimateFindingGeneratorContext = {
+      anchors: [],
+      visualLines: [],
+      sourcePdfName: "Shop_21896.pdf",
+      sourceDocumentRole: "shop",
+      sourcePdfHash: fixture.files.initial.hash,
+      uploadedFileNames: ["Shop_21896.pdf", "Shop_Final_21896.pdf"],
+      comparisonEstimateTexts: [],
+      canonicalDeltaSet: set,
+    };
+    const { findings } = buildRequiredEstimatorDeltaFindings(context);
+    expect(findings.length).toBeGreaterThan(0);
+    for (const finding of findings) {
+      if (finding.shopAnchor) {
+        expect(finding.shopAnchor.estimateRole, `finding ${finding.id} shopAnchor.estimateRole`).toBe("shop");
+        expect(finding.shopAnchor.estimateRole, `finding ${finding.id} must not be carrier`).not.toBe("carrier");
+      }
+      if (finding.carrierAnchor) {
+        expect(finding.carrierAnchor.estimateRole, `finding ${finding.id} has unexpected carrierAnchor`).not.toBe("carrier");
+      }
+    }
+  });
+
+  it("no canonical finding for shop_to_shop has estimateGapType that implies a carrier comparison", () => {
+    const set = buildTestDeltaSet();
+    const context: AnnotatedEstimateFindingGeneratorContext = {
+      anchors: [],
+      visualLines: [],
+      sourcePdfName: "Shop_21896.pdf",
+      sourceDocumentRole: "shop",
+      sourcePdfHash: fixture.files.initial.hash,
+      uploadedFileNames: ["Shop_21896.pdf", "Shop_Final_21896.pdf"],
+      comparisonEstimateTexts: [],
+      canonicalDeltaSet: set,
+    };
+    const { findings } = buildRequiredEstimatorDeltaFindings(context);
+    for (const finding of findings) {
+      expect(finding.estimateGapType, `finding ${finding.id} must not be missing_from_carrier`).not.toBe("missing_from_carrier");
+      expect(finding.estimateGapType, `finding ${finding.id} must not be reduced_by_carrier`).not.toBe("reduced_by_carrier");
+    }
+  });
+});
+
+describe("PROMPT1(b) — insurer extraction: USAA wins over owner name OLIVARES", () => {
+  it("extractEstimateFacts on CCC shop header text returns insurer = USAA", () => {
+    const shopText = [
+      "CONESTOGA COLLISION CENTER",
+      "Customer: OLIVARES, ESMON",
+      "Insurance Company: USAA",
+      "Adjuster: MAPLES, SHELLY",
+      "Claim No: 12345678-001",
+    ].join("\n");
+    const facts = extractEstimateFacts({ text: shopText });
+    expect(facts.insurer).toBe("USAA");
+  });
+
+  it("extractEstimateFacts does not return OLIVARES as insurer when Carrier label has owner name", () => {
+    // Regression: CCC workfiles sometimes write owner name into the Carrier field.
+    // After removing 'carrier' from the labeled regex, OLIVARES must not win.
+    const shopText = [
+      "CONESTOGA COLLISION CENTER",
+      "Customer: OLIVARES, ESMON",
+      "Carrier: OLIVARES, ESMON",
+      "Insurance Company: USAA",
+      "Adjuster: MAPLES, SHELLY",
+    ].join("\n");
+    const facts = extractEstimateFacts({ text: shopText });
+    expect(facts.insurer).toBe("USAA");
+    expect(facts.insurer).not.toContain("OLIVARES");
+  });
+
+  it("extractEstimateFacts with only Carrier: OLIVARES (no Insurance Company line) returns no insurer", () => {
+    // If source text is sparse and USAA never appears, we must not emit OLIVARES as insurer.
+    const shopText = [
+      "CONESTOGA COLLISION CENTER",
+      "Customer: OLIVARES, ESMON",
+      "Carrier: OLIVARES, ESMON",
+    ].join("\n");
+    const facts = extractEstimateFacts({ text: shopText });
+    expect(facts.insurer).not.toBe("OLIVARES");
+    expect(facts.insurer).toBeUndefined();
+  });
+
+  it("fixture insurer is USAA on both files and does not equal insured name", () => {
+    expect(fixture.files.initial.insurer).toBe("USAA");
+    expect(fixture.files.final.insurer).toBe("USAA");
+    expect(fixture.insured_name).toBe("OLIVARES, ESMON");
+    expect(fixture.files.initial.insurer).not.toContain(fixture.insured_name.split(",")[0]);
+    expect(fixture.files.final.insurer).not.toContain(fixture.insured_name.split(",")[0]);
+  });
+
+  it("assertInsurerNotInsured passes for USAA / OLIVARES, ESMON (fixture values)", () => {
+    expect(() =>
+      assertInsurerNotInsured(
+        fixture.files.initial.insurer,
+        fixture.insured_name
+      )
+    ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PROMPT 2 (GATE for Step 4) — crossmember leads, wheel R&I never leads
+// ---------------------------------------------------------------------------
+
+describe("PROMPT2(gate) — crossmember D17 is first canonical finding; wheel R&I does not lead", () => {
+  function buildRendererContext(set: ReturnType<typeof buildTestDeltaSet>): AnnotatedEstimateFindingGeneratorContext {
+    return {
+      anchors: [],
+      visualLines: [],
+      sourcePdfName: "Shop_21896.pdf",
+      sourceDocumentRole: "shop",
+      sourcePdfHash: fixture.files.initial.hash,
+      uploadedFileNames: ["Shop_21896.pdf", "Shop_Final_21896.pdf"],
+      comparisonEstimateTexts: [],
+      canonicalDeltaSet: set,
+    };
+  }
+
+  it("first finding from the actual renderer path is the crossmember (D17, highest-magnitude PRESENCE)", () => {
+    const set = buildTestDeltaSet();
+    const { findings } = buildRequiredEstimatorDeltaFindings(buildRendererContext(set));
+    expect(findings.length).toBeGreaterThan(0);
+    const first = findings[0];
+    expect(first.operationLabel.toLowerCase()).toMatch(/crossmember/i);
+    expect(first.limitations.some((l) => l.includes("canonicalDeltaClass:PRESENCE"))).toBe(true);
+  });
+
+  it("first finding ID embeds D17", () => {
+    const set = buildTestDeltaSet();
+    const { findings } = buildRequiredEstimatorDeltaFindings(buildRendererContext(set));
+    expect(findings[0].id).toMatch(/canonical-delta-D17/);
+  });
+
+  it("first finding is NOT a wheel R&I labor line", () => {
+    const set = buildTestDeltaSet();
+    const { findings } = buildRequiredEstimatorDeltaFindings(buildRendererContext(set));
+    const first = findings[0];
+    expect(first.operationLabel.toLowerCase()).not.toMatch(/\bwheel\b.*\br&i\b|\br&i\b.*\bwheel\b|wheel.*labor|remove.*install.*wheel/i);
+  });
+
+  it("all findings carry canonicalDeltaObjectId from the test delta set", () => {
+    const set = buildTestDeltaSet("gate-test-id");
+    const { findings } = buildRequiredEstimatorDeltaFindings(buildRendererContext(set));
+    for (const finding of findings) {
+      expect(finding.canonicalDeltaObjectId, `finding ${finding.id} missing canonicalDeltaObjectId`).toBe("gate-test-id");
+    }
+  });
+
+  it("D17 crossmember has higher priority score than any wheelhouse delta", () => {
+    const set = buildTestDeltaSet();
+    const d17 = set.deltas.find((d) => d.id === "D17")!;
+    const wheelHousingDeltas = set.deltas.filter((d) => /wheelhouse|wheel\s+op/i.test(d.operation));
+    const d17Score = (d17.magnitudeDollar ?? 0) + Math.abs(d17.magnitudeLaborHrs ?? 0) * 60;
+    for (const wd of wheelHousingDeltas) {
+      const wScore = (wd.magnitudeDollar ?? 0) + Math.abs(wd.magnitudeLaborHrs ?? 0) * 60;
+      expect(d17Score, `D17 score must exceed ${wd.id} score`).toBeGreaterThan(wScore);
+    }
   });
 });
