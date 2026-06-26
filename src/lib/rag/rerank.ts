@@ -1,10 +1,9 @@
 import type { RetrievedChunk } from "@/lib/types";
 import {
-  buildOpenAiResponsesRequest,
   collisionIqModels,
   logCollisionIqModelDiagnostic,
 } from "@/lib/modelConfig";
-import { openai } from "@/lib/openai";
+import { generateClaudeMessage } from "@/lib/anthropic";
 
 type ChunkMatch = RetrievedChunk & {
   system?: string | null;
@@ -46,26 +45,18 @@ Return the numbers of the ${topK} most relevant passages in order.
 
   logCollisionIqModelDiagnostic({
     stage: "rag_rerank",
-    provider: "openai",
-    role: "helper",
-    model: collisionIqModels.helper,
+    provider: "anthropic",
+    role: "anthropicPrimary",
+    model: collisionIqModels.anthropicPrimary,
   });
-  const res = await openai.responses.create(buildOpenAiResponsesRequest({
-    model: collisionIqModels.helper,
-    input: [
-      {
-        role: "user" as const,
-        content: [
-          {
-            type: "input_text" as const,
-            text: prompt,
-          },
-        ],
-      },
-    ],
-  }));
+  const res = await generateClaudeMessage({
+    effort: "low",
+    thinking: false,
+    maxTokens: 256,
+    messages: [{ role: "user", content: prompt }],
+  });
 
-  const text = res.output_text || "";
+  const text = res.text || "";
 
   const indexes = [...text.matchAll(/\d+/g)]
     .map((m) => Number(m[0]))

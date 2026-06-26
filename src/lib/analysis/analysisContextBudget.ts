@@ -45,6 +45,11 @@ export type AnalysisContextBudgetDiagnostics = {
 };
 
 const DEFAULT_OPENAI_ANALYSIS_CONTEXT_CHAR_LIMIT = 60000;
+// Claude opus-4-8 ships a 1M-token context window, so the analysis pipeline can
+// keep far more evidence in context than the legacy OpenAI budget allowed. This
+// directly improves report completeness (fewer "falsely missing" evidence items
+// and broader citation-density coverage).
+const DEFAULT_ANTHROPIC_ANALYSIS_CONTEXT_CHAR_LIMIT = 220000;
 const GENERATED_REPORT_NOTE_LIMIT = 900;
 const LONG_DOC_CHUNK_SIZE = 2400;
 const LONG_DOC_CHUNK_OVERLAP = 180;
@@ -53,11 +58,12 @@ export function resolveAnalysisContextBudgetLimit(params: {
   provider?: string | null;
   model?: string | null;
 }) {
-  const provider = params.provider?.toLowerCase() || "openai";
+  const provider = params.provider?.toLowerCase() || "anthropic";
   const model = params.model?.toLowerCase() || "";
   if (provider === "openai" && /mini/.test(model)) return DEFAULT_OPENAI_ANALYSIS_CONTEXT_CHAR_LIMIT;
   if (provider === "openai") return 80000;
-  return DEFAULT_OPENAI_ANALYSIS_CONTEXT_CHAR_LIMIT;
+  if (provider === "anthropic") return DEFAULT_ANTHROPIC_ANALYSIS_CONTEXT_CHAR_LIMIT;
+  return DEFAULT_ANTHROPIC_ANALYSIS_CONTEXT_CHAR_LIMIT;
 }
 
 export function applyAnalysisContextBudget(params: {

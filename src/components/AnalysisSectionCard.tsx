@@ -55,7 +55,7 @@ export default function AnalysisSectionCard({
       ref={cardRef}
       className={`rounded-md border transition-[opacity,border-color,background-color] duration-200 ease-out ${
         active
-          ? "border-[#b86a2d]/45 bg-[#C65A2A]/10 p-3.5"
+          ? "border-[var(--accent)]/45 bg-[var(--accent)]/10 p-3.5"
           : dimmed
             ? "border-border bg-card p-3 opacity-[0.86]"
             : "border-border bg-card p-3"
@@ -70,7 +70,7 @@ export default function AnalysisSectionCard({
       >
         <div className="min-w-0 flex-1">
           {eyebrow ? (
-            <div className={`text-[10px] uppercase tracking-[0.08em] ${active ? "text-[#b86a2d]" : "text-muted-foreground"}`}>
+            <div className={`text-[10px] uppercase tracking-[0.08em] ${active ? "text-[var(--accent)]" : "text-muted-foreground"}`}>
               {eyebrow}
             </div>
           ) : null}
@@ -123,7 +123,7 @@ export default function AnalysisSectionCard({
           <span
             className={`inline-flex items-center rounded-md border p-1.5 transition-[color,background-color,border-color,transform] duration-200 ${
               active
-                ? "border-[#b86a2d]/35 bg-[#C65A2A]/14 text-[#b86a2d]"
+                ? "border-[var(--accent)]/35 bg-[var(--accent)]/14 text-[var(--accent)]"
                 : "border-border bg-muted text-muted-foreground"
             }`}
           >

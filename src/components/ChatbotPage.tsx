@@ -121,6 +121,11 @@ type AnnotatedEstimateExportResult = {
   unresolvedAnchorCount: number;
   warnings: string[];
   debugCounts?: Record<string, unknown> | null;
+  // Standalone findings report (cover + one card per finding), delivered as a
+  // separate PDF so the findings aren't buried inside the annotated estimate.
+  findingsReportUrl?: string;
+  findingsReportPdfBase64?: string;
+  findingsReportFilename?: string;
 };
 
 type CitationDensityWorkspaceReportFlavor = "delta" | "oem";
@@ -1396,7 +1401,7 @@ export function ChatbotWorkspacePage() {
                     className={`mb-3 rounded-xl px-4 py-3 text-sm ${
                       trialDaysRemaining <= 2
                         ? "border border-red-500/30 bg-red-500/10 text-red-200"
-                        : "border border-orange-500/20 bg-[#C65A2A]/10 text-orange-100"
+                        : "border border-orange-500/20 bg-[var(--accent)]/10 text-orange-100"
                     }`}
                   >
                     {trialDaysRemaining > 0 ? (
@@ -1408,7 +1413,7 @@ export function ChatbotWorkspacePage() {
                         </span>
                         <Link
                           href="/billing"
-                          className="ml-3 inline-block rounded-md bg-[#C65A2A] px-3 py-1 text-xs font-semibold text-black"
+                          className="ml-3 inline-block rounded-md bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-black"
                         >
                           Upgrade
                         </Link>
@@ -1421,7 +1426,7 @@ export function ChatbotWorkspacePage() {
                         </span>
                         <Link
                           href="/billing"
-                          className="ml-3 inline-block rounded-md bg-[#C65A2A] px-3 py-1 text-xs font-semibold text-black"
+                          className="ml-3 inline-block rounded-md bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-black"
                         >
                           Upgrade
                         </Link>
@@ -1435,7 +1440,7 @@ export function ChatbotWorkspacePage() {
                   </div>
                 )}
                 {showLowUsageWarning && (
-                  <div className="mb-3 rounded-xl border border-orange-500/20 bg-[#C65A2A]/10 px-4 py-3 text-sm text-orange-100">
+                  <div className="mb-3 rounded-xl border border-orange-500/20 bg-[var(--accent)]/10 px-4 py-3 text-sm text-orange-100">
                     You have {remainingAnalyses} analysis{remainingAnalyses === 1 ? "" : "es"} remaining.
                     <span className="ml-2 text-foreground/80">
                       Upgrade to avoid interruption.
@@ -1502,7 +1507,7 @@ export function ChatbotWorkspacePage() {
                               onClick={() => setChatOnlyMode((value) => !value)}
                               className={`hidden rounded-md border px-3 py-1.5 text-xs font-medium transition lg:inline-flex ${
                                 chatOnlyMode
-                                  ? "border-[#C65A2A]/40 bg-[#C65A2A]/15 text-[#C65A2A]"
+                                  ? "border-[var(--accent)]/40 bg-[var(--accent)]/15 text-[var(--accent)]"
                                   : "border-border bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground"
                               }`}
                               aria-pressed={chatOnlyMode}
@@ -1755,7 +1760,7 @@ export function ChatbotWorkspacePage() {
                     type="button"
                     onClick={handleConsentAccept}
                     disabled={!consentChecked}
-                    className="rounded-2xl bg-[#C65A2A] px-5 py-2 text-sm font-semibold text-black transition hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-45"
+                    className="rounded-2xl bg-[var(--accent)] px-5 py-2 text-sm font-semibold text-black transition hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-45"
                   >
                     Continue
                   </button>
@@ -2319,11 +2324,29 @@ function RailContent({
     return promptText.trim() || null;
   }
 
+  async function downloadCitationDensityFindingsReport(exportResult: AnnotatedEstimateExportResult) {
+    try {
+      let blob: Blob | null = null;
+      if (exportResult.findingsReportPdfBase64) {
+        blob = pdfBase64ToBlob(exportResult.findingsReportPdfBase64);
+      } else if (exportResult.findingsReportUrl) {
+        const res = await fetch(exportResult.findingsReportUrl, { credentials: "same-origin" });
+        if (res.ok) blob = await res.blob();
+      }
+      if (blob) {
+        downloadBlob(blob, exportResult.findingsReportFilename ?? "citation-density-findings.pdf");
+      }
+    } catch {
+      // Non-blocking: the annotated estimate already downloaded successfully.
+    }
+  }
+
   async function downloadReportDocument(reportType: ReportKind) {
     if (reportType === "estimate_scrubber") {
       try {
         const exportResult = await generateAnnotatedCitationDensityEstimate();
         downloadBlob(exportResult.blob, exportResult.filename);
+        await downloadCitationDensityFindingsReport(exportResult);
         onCitationDensityReportReady({
           reportFlavor: "delta",
           result: exportResult,
@@ -2341,6 +2364,7 @@ function RailContent({
       try {
         const exportResult = await generateOemCitationDensityReport();
         downloadBlob(exportResult.blob, exportResult.filename);
+        await downloadCitationDensityFindingsReport(exportResult);
         onCitationDensityReportReady({
           reportFlavor: "oem",
           result: exportResult,
@@ -2443,6 +2467,8 @@ function RailContent({
       exportId?: unknown;
       annotationMetadata?: unknown;
       pdfBase64?: unknown;
+      findingsReportUrl?: unknown;
+      findingsReportPdfBase64?: unknown;
       annotatedFindingCount?: unknown;
       unresolvedAnchorCount?: unknown;
       warnings?: unknown;
@@ -2465,6 +2491,10 @@ function RailContent({
     return {
       blob,
       filename: "delta-citation-density-report.pdf",
+      findingsReportUrl: typeof data.findingsReportUrl === "string" ? data.findingsReportUrl : undefined,
+      findingsReportPdfBase64:
+        typeof data.findingsReportPdfBase64 === "string" ? data.findingsReportPdfBase64 : undefined,
+      findingsReportFilename: "delta-citation-density-findings.pdf",
       artifactId: typeof data.artifactId === "string"
         ? data.artifactId
         : typeof data.exportId === "string"
@@ -2523,6 +2553,8 @@ function RailContent({
       exportId?: unknown;
       annotationMetadata?: unknown;
       pdfBase64?: unknown;
+      findingsReportUrl?: unknown;
+      findingsReportPdfBase64?: unknown;
       annotatedFindingCount?: unknown;
       unresolvedAnchorCount?: unknown;
       warnings?: unknown;
@@ -2545,6 +2577,10 @@ function RailContent({
     return {
       blob,
       filename: "oem-citation-density-report.pdf",
+      findingsReportUrl: typeof data.findingsReportUrl === "string" ? data.findingsReportUrl : undefined,
+      findingsReportPdfBase64:
+        typeof data.findingsReportPdfBase64 === "string" ? data.findingsReportPdfBase64 : undefined,
+      findingsReportFilename: "oem-citation-density-findings.pdf",
       artifactId: typeof data.artifactId === "string"
         ? data.artifactId
         : typeof data.exportId === "string"
@@ -3109,7 +3145,7 @@ function RailContent({
       </section>
 
       {analysisLoading && !hasResolvedAnalysis && (
-        <section className="mt-5 space-y-2 rounded-2xl border border-orange-500/12 bg-gradient-to-br from-[#C65A2A]/10 via-[#C65A2A]/[0.04] to-white/[0.02] p-3.5">
+        <section className="mt-5 space-y-2 rounded-2xl border border-orange-500/12 bg-gradient-to-br from-[var(--accent)]/10 via-[var(--accent)]/[0.04] to-white/[0.02] p-3.5">
           <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/68">
             Analysis in progress
           </div>
@@ -3392,10 +3428,10 @@ function RailContent({
               type="button"
               onClick={openSnapshotPreview}
               disabled={!canUseSnapshotExport}
-              className="group flex w-full cursor-pointer items-center justify-between gap-3 rounded-md border border-border bg-muted p-3 text-left transition hover:border-[#C65A2A]/35 hover:bg-card focus:outline-none focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-40"
+              className="group flex w-full cursor-pointer items-center justify-between gap-3 rounded-md border border-border bg-muted p-3 text-left transition hover:border-[var(--accent)]/35 hover:bg-card focus:outline-none focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <span className="flex min-w-0 items-center gap-3">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#C65A2A]/20 bg-[#C65A2A]/10 text-[#C65A2A]">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[var(--accent)]/20 bg-[var(--accent)]/10 text-[var(--accent)]">
                   <FileText size={17} aria-hidden />
                 </span>
                 <span className="min-w-0">
@@ -3403,17 +3439,17 @@ function RailContent({
                   <span className="block text-[12px] leading-5 text-muted-foreground">Preview, download, or send a redacted snapshot.</span>
                 </span>
               </span>
-              <ArrowRight size={16} className="shrink-0 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-[#C65A2A]" aria-hidden />
+              <ArrowRight size={16} className="shrink-0 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-[var(--accent)]" aria-hidden />
             </button>
             <ReportSendStatusLine
               send={getLastSendFor("snapshot")}
               loading={reportSendHistoryLoading}
             />
             {canUseBasicPdfExport ? (
-              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[#C65A2A]/25">
+              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <FileText size={15} className="text-[#C65A2A]" aria-hidden />
+                    <FileText size={15} className="text-[var(--accent)]" aria-hidden />
                     Repair Intelligence Report
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
@@ -3431,7 +3467,7 @@ function RailContent({
                         exportType: "repair_intelligence",
                       });
                     }}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
                     <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download PDF</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -3439,7 +3475,7 @@ function RailContent({
                   <button
                     type="button"
                     onClick={() => openReportSend("repair_intelligence")}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[#C65A2A] bg-[#C65A2A] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[var(--accent)]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
                     <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -3461,10 +3497,10 @@ function RailContent({
               />
             ) : null}
             {canUseEstimateScrubberExport ? (
-              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[#C65A2A]/25">
+              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <FileText size={15} className="text-[#C65A2A]" aria-hidden />
+                    <FileText size={15} className="text-[var(--accent)]" aria-hidden />
                     Delta Citation Density Report
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
@@ -3482,7 +3518,7 @@ function RailContent({
                         exportType: "estimate_scrubber",
                       });
                     }}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
                     <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download Delta Citation Density Report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -3490,7 +3526,7 @@ function RailContent({
                   <button
                     type="button"
                     onClick={() => openReportSend("estimate_scrubber", "carrier")}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[#C65A2A] bg-[#C65A2A] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[var(--accent)]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
                     <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email Delta Citation Density Report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -3503,10 +3539,10 @@ function RailContent({
               </div>
             ) : null}
             {canUsePolicyRightsReviewExport ? (
-              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[#C65A2A]/25">
+              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <FileText size={15} className="text-[#C65A2A]" aria-hidden />
+                    <FileText size={15} className="text-[var(--accent)]" aria-hidden />
                     OEM Citation Density Report
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
@@ -3524,7 +3560,7 @@ function RailContent({
                         exportType: "oem_citation_density",
                       });
                     }}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
                     <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download OEM Citation Density Report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -3532,7 +3568,7 @@ function RailContent({
                   <button
                     type="button"
                     onClick={() => openReportSend("oem_citation_density", "carrier")}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[#C65A2A] bg-[#C65A2A] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[var(--accent)]/90 focus:outline-none focus:ring-2 focus:ring-ring/25"
                   >
                     <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email OEM Citation Density Report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -3544,12 +3580,12 @@ function RailContent({
                 />
               </div>
             ) : hasResolvedAnalysis ? (
-              <div className="space-y-2 rounded-md border border-border bg-card p-3 opacity-95 transition hover:border-[#C65A2A]/25 dark:bg-card">
+              <div className="space-y-2 rounded-md border border-border bg-card p-3 opacity-95 transition hover:border-[var(--accent)]/25 dark:bg-card">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <FileText size={15} className="text-[#C65A2A]" aria-hidden />
+                    <FileText size={15} className="text-[var(--accent)]" aria-hidden />
                     OEM Citation Density Report
-                    <span className="rounded-sm border border-[#C65A2A]/25 bg-[#C65A2A]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[#a35d26] dark:text-[#d08a4b]">
+                    <span className="rounded-sm border border-[var(--accent)]/25 bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[#a35d26] dark:text-[#d08a4b]">
                       Pro
                     </span>
                   </div>
@@ -3560,7 +3596,7 @@ function RailContent({
                 <button
                   type="button"
                   onClick={onCustomerReportLocked}
-                  className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
+                  className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                 >
                   <span className="inline-flex items-center gap-2"><ArrowRight size={15} aria-hidden /> Unlock report</span>
                   <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -3568,10 +3604,10 @@ function RailContent({
               </div>
             ) : null}
             {canUseDoiComplaintPacketExport ? (
-              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[#C65A2A]/25">
+              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <FileText size={15} className="text-[#C65A2A]" aria-hidden />
+                    <FileText size={15} className="text-[var(--accent)]" aria-hidden />
                     DOI Complaint Packet
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">
@@ -3588,7 +3624,7 @@ function RailContent({
                       exportType: "doi_complaint_packet",
                     });
                   }}
-                  className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
+                  className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
                 >
                   <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download PDF</span>
                   <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -3596,10 +3632,10 @@ function RailContent({
               </div>
             ) : null}
             {canUseCustomerReport ? (
-              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[#C65A2A]/25">
+              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                    <FileText size={15} className="text-[#C65A2A]" aria-hidden />
+                    <FileText size={15} className="text-[var(--accent)]" aria-hidden />
                     Customer Report
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-muted-foreground">Plain-language customer-facing summary.</div>
@@ -3609,7 +3645,7 @@ function RailContent({
                     type="button"
                     aria-disabled={isGeneratingCustomerReport}
                     onClick={downloadCustomerReportDocument}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
                   >
                     <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> {isGeneratingCustomerReport ? "Generating..." : "Download PDF"}</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -3618,7 +3654,7 @@ function RailContent({
                     type="button"
                     disabled={isGeneratingCustomerReport}
                     onClick={() => openReportSend("customer_report", "customer")}
-                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[#C65A2A] bg-[#C65A2A] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[#C65A2A]/90 focus:outline-none focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-left text-xs font-semibold leading-5 text-black transition hover:bg-[var(--accent)]/90 focus:outline-none focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <span className="inline-flex items-center gap-2"><Mail size={15} aria-hidden /> Email report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -3634,7 +3670,7 @@ function RailContent({
               <button
                 type="button"
                 onClick={onCustomerReportLocked}
-                className="w-full rounded-md border border-orange-400/18 bg-[#C65A2A]/10 p-3 text-xs text-foreground transition hover:bg-[#C65A2A]/16"
+                className="w-full rounded-md border border-orange-400/18 bg-[var(--accent)]/10 p-3 text-xs text-foreground transition hover:bg-[var(--accent)]/16"
               >
                 Repair Intelligence, Delta Citation Density Report, OEM Citation Density Report, DOI Complaint Packet, and Customer Report are available on Pro.
               </button>
@@ -3644,7 +3680,7 @@ function RailContent({
                 type="button"
                 onClick={() => void startAcademyServiceCheckout()}
                 disabled={serviceCheckoutLoading}
-                className="w-full rounded-md border border-[#C65A2A]/30 bg-card p-3 text-left transition hover:border-[#C65A2A]/50 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                className="w-full rounded-md border border-[var(--accent)]/30 bg-card p-3 text-left transition hover:border-[var(--accent)]/50 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Services</div>
                 <div className="mt-1 text-sm font-semibold text-foreground">
@@ -3660,7 +3696,7 @@ function RailContent({
                     ))}
                   </div>
                 ) : null}
-                <div className="mt-3 inline-flex rounded-md bg-[#C65A2A] px-3 py-2 text-xs font-semibold text-black">
+                <div className="mt-3 inline-flex rounded-md bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-black">
                   {serviceCheckoutLoading ? "Opening checkout..." : academyTrigger.button}
                 </div>
               </button>
@@ -3789,7 +3825,7 @@ function ReportDocumentBottomViewer({
   const tabClass = (active: boolean) => [
     "rounded-md border px-3 py-1.5 text-xs font-semibold transition",
     active
-      ? "border-[#C65A2A]/45 bg-[#C65A2A]/12 text-foreground"
+      ? "border-[var(--accent)]/45 bg-[var(--accent)]/12 text-foreground"
       : "border-border bg-muted text-muted-foreground hover:bg-card hover:text-foreground",
   ].join(" ");
 
@@ -4502,7 +4538,7 @@ function ReportSendModal({
       >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border/60 px-5 py-4">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.22em] text-[#C65A2A]">
+            <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--accent)]">
               Collision IQ
             </div>
             <h2 id="send-report-title" className="mt-2 text-2xl font-semibold text-foreground">Send report</h2>
@@ -4553,7 +4589,7 @@ function ReportSendModal({
           <button type="button" onClick={onCancel} className="rounded-xl bg-muted px-4 py-2 text-sm text-muted-foreground hover:bg-muted/80 hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring/25">
             Cancel
           </button>
-          <button type="button" onClick={onSend} disabled={!sendReady} className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-45">
+          <button type="button" onClick={onSend} disabled={!sendReady} className="rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-black hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-45">
             {sending ? "Sending..." : sent ? "Resend" : "Send"}
           </button>
         </div>
@@ -4658,7 +4694,7 @@ function SnapshotPreviewModal({
       >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border/60 px-5 py-4">
           <div>
-            <div className="text-[10px] uppercase tracking-[0.22em] text-[#C65A2A]">
+            <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--accent)]">
               {safeSnapshot.redactionNotice}
             </div>
             <h2 id="snapshot-preview-title" className="mt-2 text-2xl font-semibold text-foreground">{safeSnapshot.title}</h2>
@@ -4718,7 +4754,7 @@ function SnapshotPreviewModal({
           } />
         </div>
 
-        <div className="mt-5 rounded-2xl border border-[#C65A2A]/24 bg-gradient-to-br from-[#C65A2A]/14 via-[#C65A2A]/08 to-white/[0.02] p-4">
+        <div className="mt-5 rounded-2xl border border-[var(--accent)]/24 bg-gradient-to-br from-[var(--accent)]/14 via-[var(--accent)]/08 to-white/[0.02] p-4">
             {(() => {
               const trigger = resolveAcademyServiceTrigger({
                 snapshot: safeSnapshot,
@@ -4740,7 +4776,7 @@ function SnapshotPreviewModal({
                     type="button"
                     onClick={() => onStartServiceCase(trigger.serviceKey)}
                     disabled={serviceCheckoutLoading}
-                    className="mt-3 rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="mt-3 rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-black hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {serviceCheckoutLoading ? "Opening checkout..." : trigger.button}
                   </button>
@@ -4776,7 +4812,7 @@ function SnapshotPreviewModal({
                 <span>I reviewed this redacted snapshot</span>
               </label>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={onSend} disabled={!sendReady} className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-45">
+                <button type="button" onClick={onSend} disabled={!sendReady} className="rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-black hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-45">
                   {sending ? "Sending..." : sent ? "Resend" : "Send"}
                 </button>
                 <button type="button" onClick={onCancelSend} className="rounded-xl bg-muted/80 px-4 py-2 text-sm text-muted-foreground hover:bg-background hover:text-foreground">
@@ -4790,7 +4826,7 @@ function SnapshotPreviewModal({
         {status ? <div className="mt-4 rounded-xl bg-muted px-3 py-2 text-sm text-muted-foreground">{status}</div> : null}
         </div>
         <div className="sticky bottom-0 flex shrink-0 flex-wrap gap-2 border-t border-[var(--border)] bg-[var(--background)] px-5 py-4">
-          <button type="button" onClick={onDownload} className="rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black hover:bg-[#C65A2A]/90">
+          <button type="button" onClick={onDownload} className="rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-black hover:bg-[var(--accent)]/90">
             Download PDF
           </button>
           <button type="button" onClick={onCopy} className="rounded-xl bg-muted px-4 py-2 text-sm text-muted-foreground hover:bg-muted/80 hover:text-foreground">
@@ -5367,7 +5403,7 @@ function AtAGlanceCard({
     <section
       className={`shrink-0 rounded-[20px] border px-4 py-3 shadow-[0_16px_40px_rgba(198,90,42,0.1)] transition-colors ${
         active
-          ? "border-orange-500/25 bg-gradient-to-br from-[#C65A2A]/12 via-[#C65A2A]/[0.05] to-card"
+          ? "border-orange-500/25 bg-gradient-to-br from-[var(--accent)]/12 via-[var(--accent)]/[0.05] to-card"
           : "border-border bg-card"
       }`}
     >
@@ -5422,7 +5458,7 @@ function MetricCard({
     <div
       className={`min-w-0 rounded-2xl px-3 py-2.5 shadow-sm ring-1 ring-border/50 ${
         prominent
-          ? "bg-gradient-to-br from-[#C65A2A]/18 via-[#C65A2A]/[0.07] to-card"
+          ? "bg-gradient-to-br from-[var(--accent)]/18 via-[var(--accent)]/[0.07] to-card"
           : "bg-muted/72"
       }`}
     >
@@ -5454,7 +5490,7 @@ function RailInsightSection({
       }}
       onClick={() => onActivate(insightKey)}
       className={`cursor-pointer rounded-[26px] transition-all hover:bg-muted/50 ${
-        active ? "bg-[#C65A2A]/[0.06] ring-1 ring-inset ring-orange-400/18" : ""
+        active ? "bg-[var(--accent)]/[0.06] ring-1 ring-inset ring-orange-400/18" : ""
       }`}
     >
       {children}
@@ -5668,7 +5704,7 @@ function TopDisputeDriversCard({
   }
 
   return (
-    <section className="mt-5 space-y-3 rounded-[24px] border border-orange-500/18 bg-gradient-to-br from-[#C65A2A]/10 via-card to-muted p-4 shadow-[0_18px_44px_rgba(198,90,42,0.12)]">
+    <section className="mt-5 space-y-3 rounded-[24px] border border-orange-500/18 bg-gradient-to-br from-[var(--accent)]/10 via-card to-muted p-4 shadow-[0_18px_44px_rgba(198,90,42,0.12)]">
       <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
         Supported Findings
       </div>
@@ -5880,7 +5916,7 @@ function DisputeStrategyCard({
         <div className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
           Dispute Strategy
         </div>
-        <div className="rounded-full border border-orange-400/18 bg-[#C65A2A]/10 px-3 py-1 text-[11px] font-semibold text-orange-100/82">
+        <div className="rounded-full border border-orange-400/18 bg-[var(--accent)]/10 px-3 py-1 text-[11px] font-semibold text-orange-100/82">
           Leverage {strategy.leverageScore}/100
         </div>
       </div>
@@ -5940,7 +5976,7 @@ function DisputeDriverCard({
   const nextStep = cleanWorkspaceDisplayText(driver.action, driver.title);
   const className = `rounded-2xl px-3.5 py-3 transition-[border-color,background-color,box-shadow] duration-300 ${
     active
-      ? "border border-orange-300/28 bg-[#C65A2A]/12 shadow-[0_0_0_1px_rgba(210,122,81,0.12)]"
+      ? "border border-orange-300/28 bg-[var(--accent)]/12 shadow-[0_0_0_1px_rgba(210,122,81,0.12)]"
       : "border border-border bg-muted"
   }`;
 
@@ -6028,7 +6064,7 @@ function LineStatusCard() {
   const lineStatus = buildLineStatus();
 
   return (
-    <section className="mt-5 space-y-3 rounded-[24px] border border-red-500/18 bg-gradient-to-br from-red-500/[0.08] via-[#C65A2A]/[0.05] to-muted p-4 shadow-[0_18px_40px_rgba(0,0,0,0.10)] dark:shadow-[0_18px_40px_rgba(0,0,0,0.18)]">
+    <section className="mt-5 space-y-3 rounded-[24px] border border-red-500/18 bg-gradient-to-br from-red-500/[0.08] via-[var(--accent)]/[0.05] to-muted p-4 shadow-[0_18px_40px_rgba(0,0,0,0.10)] dark:shadow-[0_18px_40px_rgba(0,0,0,0.18)]">
       <div className="text-[10px] uppercase tracking-[0.22em] text-red-200/72">Decision Card</div>
       <div className="min-w-0 rounded-2xl bg-card/70 px-3.5 py-3">
         <div className="text-sm font-semibold leading-5 text-foreground">
@@ -6081,7 +6117,7 @@ function GapSummaryCard({
   const cleanFinancialSignals = financialSignals.map((item) => sanitizeUserFacingEvidenceText(item)).filter(Boolean);
 
   return (
-    <section className="mt-5 space-y-3 rounded-[24px] border border-orange-500/18 bg-gradient-to-br from-[#C65A2A]/10 via-[#C65A2A]/[0.04] to-muted p-4 shadow-[0_18px_44px_rgba(198,90,42,0.12)]">
+    <section className="mt-5 space-y-3 rounded-[24px] border border-orange-500/18 bg-gradient-to-br from-[var(--accent)]/10 via-[var(--accent)]/[0.04] to-muted p-4 shadow-[0_18px_44px_rgba(198,90,42,0.12)]">
       <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">
         Financial View
       </div>
@@ -6195,7 +6231,7 @@ function FeaturedRecommendationCard({
   const evidence = cleanWorkspaceDisplayText(item.evidence, item.title, "Evidence");
 
   return (
-    <section className="rounded-[24px] border border-orange-500/20 bg-gradient-to-br from-[#C65A2A]/12 via-[#C65A2A]/[0.045] to-muted p-4 shadow-[0_18px_44px_rgba(198,90,42,0.14)]">
+    <section className="rounded-[24px] border border-orange-500/20 bg-gradient-to-br from-[var(--accent)]/12 via-[var(--accent)]/[0.045] to-muted p-4 shadow-[0_18px_44px_rgba(198,90,42,0.14)]">
       <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/72">Top recommendation</div>
       <div className="mt-2 text-[1.08rem] font-semibold leading-6 text-foreground">{displayOperationLabel(item.title)}</div>
       <div className="mt-2 text-xs text-muted-foreground">
@@ -6229,12 +6265,12 @@ function LockedFeatureCard({
   const cleanBody = sanitizeUserFacingEvidenceText(body) || body;
 
   return (
-    <section className="space-y-2.5 rounded-2xl border border-orange-500/16 bg-gradient-to-br from-[#C65A2A]/9 via-muted to-card p-3.5">
+    <section className="space-y-2.5 rounded-2xl border border-orange-500/16 bg-gradient-to-br from-[var(--accent)]/9 via-muted to-card p-3.5">
         <div className="flex items-center justify-between gap-3">
           <div className="text-[10px] uppercase tracking-[0.22em] text-orange-200/68">{title}</div>
           <Link
             href="/billing"
-            className="rounded-full border border-orange-500/24 bg-orange-500/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-[#C65A2A] transition hover:bg-orange-500/18 dark:text-orange-100"
+            className="rounded-full border border-orange-500/24 bg-orange-500/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--accent)] transition hover:bg-orange-500/18 dark:text-orange-100"
           >
             Upgrade Access
           </Link>
@@ -6509,7 +6545,7 @@ function ValuationSection({
             type="button"
             onClick={onStartAcvCheckout}
             disabled={checkoutLoading}
-            className="inline-flex items-center justify-center rounded-xl bg-[#C65A2A] px-3 py-2 text-[11px] font-semibold text-black transition hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+            className="inline-flex items-center justify-center rounded-xl bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-black transition hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
           >
             {checkoutLoading ? "Opening checkout..." : "Start Market Preview Checkout"}
           </button>
@@ -6519,7 +6555,7 @@ function ValuationSection({
             href="/the-academy"
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center justify-center rounded-xl border border-border bg-background px-3 py-2 text-[11px] font-semibold text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted sm:w-auto"
+            className="inline-flex items-center justify-center rounded-xl border border-border bg-background px-3 py-2 text-[11px] font-semibold text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted sm:w-auto"
           >
             View Diminished Value Services
           </Link>
@@ -6529,7 +6565,7 @@ function ValuationSection({
             href="/the-academy"
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center justify-center rounded-xl border border-border bg-background px-3 py-2 text-[11px] font-semibold text-foreground transition hover:border-[#C65A2A]/35 hover:bg-muted sm:w-auto"
+            className="inline-flex items-center justify-center rounded-xl border border-border bg-background px-3 py-2 text-[11px] font-semibold text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted sm:w-auto"
           >
             View Academy Services
           </Link>

@@ -19,7 +19,7 @@ export default function FloatingWidgetGate({
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed bottom-6 left-6 z-50 h-14 w-14 rounded-full bg-[#C65A2A] text-black font-bold shadow-2xl hover:scale-105 transition-all"
+          className="fixed bottom-6 left-6 z-50 h-14 w-14 rounded-full bg-[var(--accent)] text-black font-bold shadow-2xl hover:scale-105 transition-all"
         >
           IQ
         </button>

@@ -391,7 +391,7 @@ function ReportTabs({
               "rounded-md border px-3 py-1.5 text-xs font-semibold transition",
               inline
                 ? active
-                  ? "border-[#C65A2A]/45 bg-[#C65A2A]/12 text-foreground"
+                  ? "border-[var(--accent)]/45 bg-[var(--accent)]/12 text-foreground"
                   : "border-border bg-muted text-muted-foreground hover:bg-card hover:text-foreground"
                 : active
                   ? "border-amber-300/60 bg-amber-300/15 text-amber-50"
@@ -466,7 +466,7 @@ function FindingsTab({
               "rounded-md border p-3 text-left transition",
               inline
                 ? effectiveSelectedId === selectionKey
-                  ? "border-[#C65A2A]/60 bg-[#C65A2A]/12"
+                  ? "border-[var(--accent)]/60 bg-[var(--accent)]/12"
                   : "border-border bg-card hover:bg-muted"
                 : effectiveSelectedId === selectionKey
                   ? "border-amber-300/70 bg-amber-300/15"
@@ -531,7 +531,7 @@ function SelectedFindingPanel({
       <div>
         <div className={inline ? "text-xs uppercase text-muted-foreground" : "text-xs uppercase text-white/45"}>Finding {selected.markerNumber}</div>
         <h2 className={inline ? "mt-1 text-base font-semibold text-card-foreground" : "mt-1 text-base font-semibold text-white"}>{selected.shortTitle}</h2>
-        <div className={inline ? "mt-2 inline-flex rounded-md bg-[#C65A2A]/12 px-2 py-1 text-xs font-semibold text-[#9b4f24] dark:text-amber-100" : "mt-2 inline-flex rounded-md bg-amber-300/15 px-2 py-1 text-xs font-semibold text-amber-100"}>
+        <div className={inline ? "mt-2 inline-flex rounded-md bg-[var(--accent)]/12 px-2 py-1 text-xs font-semibold text-[#9b4f24] dark:text-amber-100" : "mt-2 inline-flex rounded-md bg-amber-300/15 px-2 py-1 text-xs font-semibold text-amber-100"}>
           {selected.label}
         </div>
       </div>

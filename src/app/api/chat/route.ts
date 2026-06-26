@@ -37,6 +37,14 @@ import {
   RETRYABLE_PROVIDER_USER_MESSAGE,
 } from "@/lib/ai/providerRetryableError";
 import { generatePrimaryText } from "@/lib/ai/providerTextGeneration";
+import type { ResponsesInput } from "@/lib/anthropic";
+
+type ChatGenerationRequest = {
+  model?: string;
+  instructions?: string;
+  input: ResponsesInput;
+  temperature?: number;
+};
 import { getCollisionIqModelDiagnostic } from "@/lib/modelConfig";
 import {
   areInternalRetrievalPathsResolved,
@@ -171,7 +179,6 @@ type ChatRouteDeps = {
   buildLinkedProcedureRefinementContext: typeof import("@/lib/ai/linkedProcedureRetriever").buildLinkedProcedureRefinementContext;
   retrieveEstimateLinkedProcedureDocs: typeof import("@/lib/ai/linkedProcedureRetriever").retrieveEstimateLinkedProcedureDocs;
   collisionIqModels: typeof import("@/lib/modelConfig").collisionIqModels;
-  openai: typeof import("@/lib/openai").openai;
   ADAS_POLICY: typeof import("@/lib/analysis/adasDecision").ADAS_POLICY;
   EVIDENCE_POLICY: typeof import("@/lib/analysis/buildEvidenceCorpus").EVIDENCE_POLICY;
 };
@@ -190,7 +197,6 @@ function loadChatRouteDeps(): Promise<ChatRouteDeps> {
       import("@/lib/ai/estimateLinkExtractor"),
       import("@/lib/ai/linkedProcedureRetriever"),
       import("@/lib/modelConfig"),
-      import("@/lib/openai"),
       import("@/lib/analysis/adasDecision"),
       import("@/lib/analysis/buildEvidenceCorpus"),
     ]).then(
@@ -204,7 +210,6 @@ function loadChatRouteDeps(): Promise<ChatRouteDeps> {
         estimateLinkExtractor,
         linkedProcedureRetriever,
         modelConfig,
-        openaiModule,
         adasDecision,
         evidenceCorpus,
       ]) => ({
@@ -231,7 +236,6 @@ function loadChatRouteDeps(): Promise<ChatRouteDeps> {
         retrieveEstimateLinkedProcedureDocs:
           linkedProcedureRetriever.retrieveEstimateLinkedProcedureDocs,
         collisionIqModels: modelConfig.collisionIqModels,
-        openai: openaiModule.openai,
         ADAS_POLICY: adasDecision.ADAS_POLICY,
         EVIDENCE_POLICY: evidenceCorpus.EVIDENCE_POLICY,
       })
@@ -873,22 +877,17 @@ async function delay(ms: number) {
 }
 
 async function createOpenAIResponseWithRetry(
-  deps: Pick<ChatRouteDeps, "openai">,
+  _deps: unknown,
   phase: "first-pass" | "second-pass",
-  input: Parameters<ChatRouteDeps["openai"]["responses"]["create"]>[0],
+  input: ChatGenerationRequest,
   options: {
-    retryInput?: Parameters<ChatRouteDeps["openai"]["responses"]["create"]>[0];
+    retryInput?: ChatGenerationRequest;
     retryReason?: string;
   } = {}
 ) {
-  const generationInput = input as {
-    instructions?: string;
-    input: Parameters<typeof generatePrimaryText>[0]["input"];
-    temperature?: number;
-  };
+  const generationInput = input;
   try {
     return await generatePrimaryText({
-      openai: deps.openai,
       stage: `chat_${phase}`,
       instructions: generationInput.instructions,
       input: generationInput.input,
@@ -911,13 +910,9 @@ async function createOpenAIResponseWithRetry(
 
   await delay(OPENAI_RETRY_DELAY_MS);
 
-  const retryGenerationInput = (options.retryInput ?? input) as {
-    instructions?: string;
-    input: Parameters<typeof generatePrimaryText>[0]["input"];
-    temperature?: number;
-  };
+  const retryGenerationInput = options.retryInput ?? input;
   if (options.retryInput) {
-    console.warn("[chat-openai] retrying with reduced context", {
+    console.warn("[chat-claude] retrying with reduced context", {
       phase,
       reason: options.retryReason ?? "reduced_context",
     });
@@ -925,7 +920,6 @@ async function createOpenAIResponseWithRetry(
 
   try {
     return await generatePrimaryText({
-      openai: deps.openai,
       stage: `chat_${phase}`,
       instructions: retryGenerationInput.instructions,
       input: retryGenerationInput.input,
@@ -1826,7 +1820,7 @@ function buildRetrievalAnalysisSnapshot(params: {
 }
 
 async function refineAnswerWithDriveSupport(params: {
-  deps: Pick<ChatRouteDeps, "collisionIqModels" | "openai">;
+  deps: Pick<ChatRouteDeps, "collisionIqModels">;
   systemInstructions: string;
   userMessage: string;
   conversationContext: string;

@@ -12,11 +12,10 @@ import { renderCustomerReportHtml } from "@/lib/ai/renderCustomerReportHtml";
 import type { EstimatePostureDecision } from "@/lib/ai/estimatePosture";
 import { finalizeExportPayload } from "@/lib/ai/policy/finalizeExportPayload";
 import {
-  buildOpenAiResponsesRequest,
   collisionIqModels,
   logCollisionIqModelDiagnostic,
 } from "@/lib/modelConfig";
-import { openai } from "@/lib/openai";
+import { generateClaudeMessage } from "@/lib/anthropic";
 import { canAccessFeature } from "@/lib/featureAccess";
 
 export const runtime = "nodejs";
@@ -85,27 +84,16 @@ export async function POST(req: Request) {
       generateText: async (prompt) => {
         logCollisionIqModelDiagnostic({
           stage: "customer_report_generation",
-          provider: "openai",
-          role: "helper",
-          model: collisionIqModels.helper,
+          provider: "anthropic",
+          role: "anthropicPrimary",
+          model: collisionIqModels.anthropicPrimary,
         });
-        const response = await openai.responses.create(buildOpenAiResponsesRequest({
-          model: collisionIqModels.helper,
-          temperature: 0.2,
-          input: [
-            {
-              role: "user" as const,
-              content: [
-                {
-                  type: "input_text" as const,
-                  text: prompt,
-                },
-              ],
-            },
-          ],
-        }));
+        const response = await generateClaudeMessage({
+          effort: "medium",
+          messages: [{ role: "user", content: prompt }],
+        });
 
-        return response.output_text ?? "";
+        return response.text;
       },
     }));
     const generatedAt = new Date().toLocaleString();

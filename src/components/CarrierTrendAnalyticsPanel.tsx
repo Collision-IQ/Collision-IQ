@@ -104,7 +104,7 @@ export default function CarrierTrendAnalyticsPanel() {
             type="button"
             onClick={() => void loadAnalytics()}
             disabled={loading}
-            className="rounded-2xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-2xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-black transition hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? "Loading..." : "Refresh"}
           </button>

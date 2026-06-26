@@ -81,7 +81,7 @@ export default function EnvironmentVerificationPanel() {
           type="button"
           onClick={() => void runVerification()}
           disabled={loading}
-          className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-2xl bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? "Running..." : "Run verification"}
         </button>

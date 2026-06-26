@@ -49,7 +49,7 @@ function TopDifferencesSummary({ items }: { items: string[] }) {
       <div className="space-y-2 rounded-xl border border-border bg-muted p-3">
         {items.map((item) => (
           <div key={item} className="flex gap-2 text-[12px] leading-5 text-foreground">
-            <span className="pt-[2px] text-[#C65A2A]">&bull;</span>
+            <span className="pt-[2px] text-[var(--accent)]">&bull;</span>
             <span>{sanitizeUserFacingEvidenceText(item)}</span>
           </div>
         ))}
@@ -160,7 +160,7 @@ export default function WorkspacePanel({
                       URL.revokeObjectURL(url);
                     }
                   }}
-                  className="mt-5 w-full rounded-xl bg-[#C65A2A]/18 p-3 text-xs text-foreground transition hover:bg-[#C65A2A]/26"
+                  className="mt-5 w-full rounded-xl bg-[var(--accent)]/18 p-3 text-xs text-foreground transition hover:bg-[var(--accent)]/26"
                 >
                   Generate Supplement Letter
                 </button>

@@ -13,8 +13,6 @@ import {
   Eye,
   RefreshCcw,
   Volume2,
-  Square,
-  Mic,
   LoaderCircle,
   Pause,
   StopCircle,
@@ -920,9 +918,6 @@ export default function ChatWidget({
   const [messageVoiceSelections, setMessageVoiceSelections] = useState<Record<string, ServerTtsVoiceOptionId>>({});
   const [ttsPlaybackProvider, setTtsPlaybackProvider] = useState<TtsProvider | null>(null);
   const [totalFilesReviewed, setTotalFilesReviewed] = useState(0);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const [recordingError, setRecordingError] = useState<string | null>(null);
   const [introDismissed, setIntroDismissed] = useState(false);
   const [fetchedViewerAccess, setFetchedViewerAccess] = useState<AccountEntitlements | null>(null);
   const [entitlementLoadAttempted, setEntitlementLoadAttempted] = useState(false);
@@ -973,10 +968,6 @@ export default function ChatWidget({
   const conversationalWaitingIndexRef = useRef(0);
   const longReviewActiveRef = useRef(false);
   const currentCaseTopicRef = useRef(DEFAULT_CASE_TOPIC);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-  const audioChunksRef = useRef<BlobPart[]>([]);
-  const recordingMimeTypeRef = useRef("audio/webm");
   const chatSessionStorageKeyRef = useRef(chatSessionStorageKey);
   const mobileAttachmentsUserToggledRef = useRef(false);
 
@@ -1306,7 +1297,6 @@ export default function ChatWidget({
   useEffect(() => {
     return () => {
       clearReviewProgressTimers();
-      disposeRecordingResources(true);
       stopSpeaking();
       for (const attachment of attachmentsRef.current) {
         if (attachment.previewUrl) {
@@ -1321,22 +1311,15 @@ export default function ChatWidget({
   useEffect(() => {
     if (!disabled) return;
 
-    if (isRecording) {
-      disposeRecordingResources(true);
-    }
-
     stopSpeaking();
 
     const resetTimer = window.setTimeout(() => {
-      setIsRecording(false);
-      setIsTranscribing(false);
-      setRecordingError(null);
       setPreviewAttachmentId(null);
       setReplaceAttachmentId(null);
     }, 0);
 
     return () => window.clearTimeout(resetTimer);
-  }, [disabled, isRecording]);
+  }, [disabled]);
   /* eslint-enable react-hooks/exhaustive-deps */
 
   useEffect(() => {
@@ -1652,178 +1635,6 @@ export default function ChatWidget({
     onAnalysisLoadingChange?.(true);
     onAnalysisStatusChange?.("processing", null);
     return runId;
-  }
-
-  function browserSupportsRecording() {
-    return (
-      typeof window !== "undefined" &&
-      typeof navigator !== "undefined" &&
-      Boolean(navigator.mediaDevices?.getUserMedia) &&
-      typeof MediaRecorder !== "undefined"
-    );
-  }
-
-  function resolveRecordingMimeType() {
-    if (typeof MediaRecorder === "undefined") {
-      return "audio/webm";
-    }
-
-    const preferredTypes = [
-      "audio/webm;codecs=opus",
-      "audio/webm",
-      "audio/mp4",
-      "audio/mpeg",
-    ];
-
-    return preferredTypes.find((value) => MediaRecorder.isTypeSupported(value)) ?? "audio/webm";
-  }
-
-  function disposeRecordingResources(stopRecorder = false) {
-    const recorder = mediaRecorderRef.current;
-    if (recorder) {
-      recorder.ondataavailable = null;
-      recorder.onstop = null;
-      recorder.onerror = null;
-      if (stopRecorder && recorder.state !== "inactive") {
-        try {
-          recorder.stop();
-        } catch {
-          // Ignore stop errors during cleanup.
-        }
-      }
-    }
-
-    const stream = mediaStreamRef.current;
-    if (stream) {
-      for (const track of stream.getTracks()) {
-        track.stop();
-      }
-    }
-
-    mediaRecorderRef.current = null;
-    mediaStreamRef.current = null;
-    audioChunksRef.current = [];
-  }
-
-  async function startRecording() {
-    if (!browserSupportsRecording()) {
-      setRecordingError("Voice input is not available in this browser.");
-      return;
-    }
-
-    try {
-      setRecordingError(null);
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = resolveRecordingMimeType();
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-
-      audioChunksRef.current = [];
-      mediaStreamRef.current = stream;
-      mediaRecorderRef.current = recorder;
-      recordingMimeTypeRef.current = recorder.mimeType || mimeType;
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-      recorder.onerror = () => {
-        setRecordingError("Recording stopped unexpectedly. Please try again.");
-        setIsRecording(false);
-        disposeRecordingResources();
-      };
-      recorder.start();
-      setIsRecording(true);
-    } catch (error) {
-      const message =
-        error instanceof DOMException && error.name === "NotAllowedError"
-          ? "Microphone permission was denied."
-          : "Unable to access the microphone.";
-      setRecordingError(message);
-      disposeRecordingResources();
-      setIsRecording(false);
-    }
-  }
-
-  async function stopRecordingAndTranscribe() {
-    const recorder = mediaRecorderRef.current;
-    if (!recorder) return;
-
-    try {
-      setRecordingError(null);
-      setIsRecording(false);
-      setIsTranscribing(true);
-
-      const audioBlob = await new Promise<Blob>((resolve, reject) => {
-        recorder.onstop = () => {
-          const blob = new Blob(audioChunksRef.current, {
-            type: recorder.mimeType || recordingMimeTypeRef.current || "audio/webm",
-          });
-          disposeRecordingResources();
-          resolve(blob);
-        };
-        recorder.onerror = () => {
-          disposeRecordingResources();
-          reject(new Error("Recording stopped unexpectedly."));
-        };
-
-        try {
-          recorder.stop();
-        } catch (error) {
-          disposeRecordingResources();
-          reject(error);
-        }
-      });
-
-      if (!audioBlob.size) {
-        setRecordingError("The recording was empty. Please try again.");
-        return;
-      }
-
-      const extension = audioBlob.type.includes("mp4")
-        ? "m4a"
-        : audioBlob.type.includes("mpeg")
-          ? "mp3"
-          : "webm";
-      const audioFile = new File([audioBlob], `collision-iq-recording.${extension}`, {
-        type: audioBlob.type || "audio/webm",
-      });
-      const formData = new FormData();
-      formData.append("file", audioFile);
-
-      const response = await fetch("/api/transcribe", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const data = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(data?.error || "Transcription failed.");
-      }
-
-      const data = (await response.json()) as { text?: string };
-      const transcript = data.text?.trim();
-      if (!transcript) {
-        setRecordingError("No speech was detected in the recording.");
-        return;
-      }
-
-      setInput((current) => (current.trim() ? `${current.trim()} ${transcript}` : transcript));
-    } catch (error) {
-      setRecordingError(error instanceof Error ? error.message : "Transcription failed.");
-    } finally {
-      setIsTranscribing(false);
-    }
-  }
-
-  function handleMicClick() {
-    if (disabled || isTranscribing) return;
-    if (isRecording) {
-      void stopRecordingAndTranscribe();
-      return;
-    }
-
-    void startRecording();
   }
 
   async function prepareFilesForUpload(fileList: FileList | File[] | null, source: "file" | "camera") {
@@ -3803,7 +3614,7 @@ export default function ChatWidget({
 
   const canReadAloud = true;
 
-  const userBubble = "border border-[#b86a2d]/35 bg-card text-foreground";
+  const userBubble = "border border-[var(--accent)]/35 bg-card text-foreground";
 
   return (
     <div
@@ -3868,6 +3679,9 @@ export default function ChatWidget({
                 </div>
               </div>
               <div className="hidden space-y-1.5 text-center sm:block">
+                <div className="flex justify-center">
+                  <span className="ci-claude-badge">Powered by Claude</span>
+                </div>
                 <div className="text-sm font-semibold text-foreground sm:text-base">
                   Start a repair analysis
                 </div>
@@ -3887,7 +3701,7 @@ export default function ChatWidget({
                 className={[
                   "hidden w-full max-w-[760px] border border-dashed p-2.5 transition sm:block sm:p-3",
                   isDragActive
-                    ? "border-[#b86a2d] bg-[#b86a2d]/10"
+                    ? "border-[var(--accent)] bg-[var(--accent)]/10"
                     : "border-border bg-muted/40",
                 ].join(" ")}
               >
@@ -3895,7 +3709,7 @@ export default function ChatWidget({
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={disabled || uploadLimitsLoading}
-                  className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
+                  className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[var(--accent)]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
                 >
                   Upload Estimate
                 </button>
@@ -3903,7 +3717,7 @@ export default function ChatWidget({
                 <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={disabled || uploadLimitsLoading}
-                  className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
+                  className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[var(--accent)]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
                 >
                   Upload OEM Procedure
                 </button>
@@ -3911,7 +3725,7 @@ export default function ChatWidget({
                 <button
                   onClick={() => cameraInputRef.current?.click()}
                   disabled={disabled || uploadLimitsLoading}
-                  className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[#b86a2d]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
+                  className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[var(--accent)]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
                 >
                   Upload Photos
                 </button>
@@ -4054,12 +3868,12 @@ export default function ChatWidget({
                     <ReactMarkdown
                       components={{
                         h2: ({ children }) => (
-                          <div className="mb-2 mt-5 border-b border-border pb-1 text-[13px] font-semibold uppercase tracking-[0.08em] text-[#b86a2d]">
+                          <div className="mb-2 mt-5 border-b border-border pb-1 text-[13px] font-semibold uppercase tracking-[0.08em] text-[var(--accent)]">
                             {children}
                           </div>
                         ),
                         h3: ({ children }) => (
-                          <div className="mb-1 mt-4 text-[13px] font-semibold text-[#b86a2d]">
+                          <div className="mb-1 mt-4 text-[13px] font-semibold text-[var(--accent)]">
                             {children}
                           </div>
                         ),
@@ -4116,7 +3930,7 @@ export default function ChatWidget({
                 "border transition",
                 shouldCompactMobileChat ? "px-1.5 py-1.5 lg:px-2 lg:py-2" : "px-2 py-2",
                 isDragActive
-                  ? "border-[#b86a2d] bg-[#b86a2d]/10"
+                  ? "border-[var(--accent)] bg-[var(--accent)]/10"
                   : "border-border bg-muted",
               ].join(" ")}
             >
@@ -4152,7 +3966,7 @@ export default function ChatWidget({
                 onClick={() => fileInputRef.current?.click()}
                 disabled={disabled || uploadLimitsLoading}
                 className={[
-                  "order-2 min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none",
+                  "order-2 min-h-10 min-w-10 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none",
                   shouldCompactMobileChat ? "hidden lg:inline-flex lg:items-center lg:justify-center" : "",
                 ].join(" ")}
                 aria-label="Attach PDF, image, short video, or ZIP archive"
@@ -4165,7 +3979,7 @@ export default function ChatWidget({
                 onClick={() => cameraInputRef.current?.click()}
                 disabled={disabled || uploadLimitsLoading}
                 className={[
-                  "order-2 rounded-md text-muted-foreground transition hover:bg-card hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none",
+                  "order-2 rounded-md text-muted-foreground transition hover:bg-card hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none",
                   shouldCompactMobileChat ? "min-h-9 min-w-9 p-1.5 lg:min-h-10 lg:min-w-10 lg:p-2" : "min-h-10 min-w-10 p-2",
                 ].join(" ")}
                 aria-label="Take or choose photo"
@@ -4173,40 +3987,6 @@ export default function ChatWidget({
                 <Camera size={shouldCompactMobileChat ? 18 : 20} />
               </button>
 
-              <button
-                type="button"
-                onClick={handleMicClick}
-                disabled={isTranscribing || disabled}
-                className={`order-2 rounded-md transition lg:order-none ${
-                  shouldCompactMobileChat ? "min-h-9 min-w-9 p-1.5 lg:min-h-10 lg:min-w-10 lg:p-2" : "min-h-10 min-w-10 p-2"
-                } ${
-                  isRecording
-                    ? "text-red-400 hover:text-red-300"
-                    : "text-muted-foreground hover:bg-card hover:text-[#C65A2A]"
-                } disabled:cursor-not-allowed disabled:opacity-50`}
-                aria-label={
-                  isRecording
-                    ? "Stop recording"
-                    : isTranscribing
-                      ? "Transcribing audio"
-                      : "Start voice recording"
-                }
-                title={
-                  isRecording
-                    ? "Stop recording"
-                    : isTranscribing
-                      ? "Transcribing audio"
-                      : "Start voice recording"
-                }
-              >
-                {isTranscribing ? (
-                  <LoaderCircle size={shouldCompactMobileChat ? 18 : 20} className="animate-spin" />
-                ) : isRecording ? (
-                  <Square size={shouldCompactMobileChat ? 18 : 20} />
-                ) : (
-                  <Mic size={shouldCompactMobileChat ? 18 : 20} />
-                )}
-              </button>
 
               <textarea
                 ref={textareaRef}
@@ -4230,7 +4010,7 @@ export default function ChatWidget({
                     : "Enter a repair analysis command or upload documentation..."
                 }
                 className={[
-                  "chat-composer-textarea min-w-0 resize-none overflow-y-auto border border-input bg-background text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[#b86a2d] focus:ring-1 focus:ring-[#b86a2d]/30 disabled:cursor-not-allowed disabled:opacity-50 lg:order-none lg:min-w-[280px] lg:flex-[1_1_420px]",
+                  "chat-composer-textarea min-w-0 resize-none overflow-y-auto border border-input bg-background text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]/30 disabled:cursor-not-allowed disabled:opacity-50 lg:order-none lg:min-w-[280px] lg:flex-[1_1_420px]",
                   shouldCompactMobileChat
                     ? "order-2 min-h-9 max-h-16 flex-1 px-2.5 py-1.5 leading-5 lg:min-h-11 lg:max-h-[88px] lg:px-3 lg:py-2"
                     : "order-1 min-h-11 max-h-[88px] flex-[1_1_100%] px-3 py-2 leading-5",
@@ -4246,7 +4026,7 @@ export default function ChatWidget({
               <button
                 type="button"
                 onClick={handleDownloadRedactedChat}
-                disabled={disabled || loading || isTranscribing || isExportingChat}
+                disabled={disabled || loading || isExportingChat}
                 className="hidden min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 lg:inline-flex"
               >
                 {isExportingChat ? "Preparing..." : "Download Chat"}
@@ -4254,9 +4034,9 @@ export default function ChatWidget({
 
               <button
                 onClick={() => void handleSend()}
-                disabled={isTranscribing || disabled}
+                disabled={disabled}
                 className={[
-                  "order-3 rounded-md border border-[#b86a2d] bg-[#b86a2d] text-sm font-semibold text-black transition hover:bg-[#c57934] disabled:opacity-50 lg:order-none lg:flex-none",
+                  "order-3 rounded-md border border-[var(--accent)] bg-[var(--accent)] text-sm font-semibold text-black transition hover:bg-[var(--accent)] disabled:opacity-50 lg:order-none lg:flex-none",
                   shouldCompactMobileChat ? "min-h-9 flex-none px-3 py-1.5 lg:min-h-10 lg:px-4 lg:py-2" : "min-h-10 flex-1 px-4 py-2 sm:px-5",
                 ].join(" ")}
               >
@@ -4280,7 +4060,7 @@ export default function ChatWidget({
                     <button
                       type="button"
                       onClick={handleDownloadRedactedChat}
-                      disabled={disabled || loading || isTranscribing || isExportingChat}
+                      disabled={disabled || loading || isExportingChat}
                       className="min-h-9 rounded-md border border-border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {isExportingChat ? "Preparing..." : "Download"}
@@ -4298,19 +4078,6 @@ export default function ChatWidget({
                   </div>
                 )}
 
-                {(isRecording || isTranscribing || recordingError) && (
-                  <div
-                    className={`mt-3 px-1 text-xs ${
-                      recordingError ? "text-red-500" : "text-muted-foreground"
-                    }`}
-                  >
-                    {recordingError
-                      ? recordingError
-                      : isTranscribing
-                        ? "Transcribing your recording..."
-                        : "Recording... click the mic again to stop."}
-                  </div>
-                )}
                 {showMobileUploadStatus && (
                   <div
                     className={`mt-2 px-1 text-xs lg:hidden ${
@@ -4511,7 +4278,7 @@ export default function ChatWidget({
                       type="button"
                       onClick={clearAllAttachments}
                       disabled={disabled}
-                      className="text-xs text-muted-foreground transition hover:text-[#C65A2A] disabled:cursor-not-allowed disabled:opacity-40"
+                      className="text-xs text-muted-foreground transition hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       Clear all
                     </button>

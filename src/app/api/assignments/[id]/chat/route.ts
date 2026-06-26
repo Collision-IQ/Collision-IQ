@@ -1,10 +1,9 @@
 // src/app/api/assignments/[id]/chat/route.ts
 
 import { NextRequest } from "next/server";
-import { openai } from "@/lib/openai";
+import { generateClaudeMessage } from "@/lib/anthropic";
 import { getAssignment } from "@/lib/assignmentStore";
 import {
-  buildOpenAiResponsesRequest,
   collisionIqModels,
   logCollisionIqModelDiagnostic,
 } from "@/lib/modelConfig";
@@ -19,9 +18,9 @@ export async function POST(
   try {
     const { id } = await context.params;
 
-    if (!process.env.OPENAI_API_KEY) {
+    if (!process.env.ANTHROPIC_API_KEY) {
       return new Response(
-        JSON.stringify({ error: "Missing OPENAI_API_KEY" }),
+        JSON.stringify({ error: "Missing ANTHROPIC_API_KEY" }),
         { status: 500 }
       );
     }
@@ -44,32 +43,20 @@ export async function POST(
       );
     }
 
-    // ✅ OpenAI call using chat completions (non-streaming)
-    const client = openai;
     logCollisionIqModelDiagnostic({
       stage: "assignment_chat",
-      provider: "openai",
-      role: "helper",
-      model: collisionIqModels.helper,
+      provider: "anthropic",
+      role: "anthropicPrimary",
+      model: collisionIqModels.anthropicPrimary,
     });
-    const completion = await client.responses.create(buildOpenAiResponsesRequest({
-      model: collisionIqModels.helper,
-      instructions:
+    const completion = await generateClaudeMessage({
+      effort: "medium",
+      system:
         "You are a helpful assistant for Collision Academy, providing policyholder and auto repair support.",
-      input: [
-        {
-          role: "user" as const,
-          content: [
-            {
-              type: "input_text" as const,
-              text: userText,
-            },
-          ],
-        },
-      ],
-    }));
+      messages: [{ role: "user", content: userText }],
+    });
 
-    const reply = completion.output_text ?? "";
+    const reply = completion.text;
 
     return new Response(
       JSON.stringify({

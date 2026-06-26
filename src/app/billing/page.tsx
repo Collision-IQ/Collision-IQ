@@ -60,7 +60,7 @@ export default async function BillingPage() {
             <input type="hidden" name="plan" value="pro" />
             <button
               type="submit"
-              className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[#C65A2A]/90"
+              className="rounded-2xl bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[var(--accent)]/90"
             >
               Subscribe to Pro ($200/month)
             </button>
@@ -101,7 +101,7 @@ function PlanCard({
   return (
     <div
       className={`rounded-2xl border ${
-        featured ? "border-[#C65A2A]/40" : "border-white/10"
+        featured ? "border-[var(--accent)]/40" : "border-white/10"
       } bg-white/5 p-5`}
     >
       <div className="text-xs uppercase tracking-[0.2em] text-white/45">{name}</div>

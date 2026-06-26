@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { Pool } from "pg";
-import { getOpenAIClient } from "@/lib/openai";
+import { embedText } from "@/lib/rag/embed";
 
 export const runtime = "nodejs";
 
@@ -12,12 +12,7 @@ export async function POST(req: Request) {
   try {
     const { query } = await req.json();
 
-    const embedding = await getOpenAIClient().embeddings.create({
-      model: "text-embedding-3-small",
-      input: query,
-    });
-
-    const queryVector = embedding.data[0].embedding;
+    const queryVector = await embedText(String(query ?? ""));
     const client = await pool.connect();
 
     const result = await client.query(

@@ -34,7 +34,7 @@ export function EstimateComparisonTable({ rows }: Props) {
           <div className="space-y-1 text-[12px] leading-5 text-white/85">
             {topDifferences.map((difference) => (
               <div key={difference} className="flex gap-2">
-                <span className="pt-[2px] text-[#C65A2A]">&bull;</span>
+                <span className="pt-[2px] text-[var(--accent)]">&bull;</span>
                 <span>{sanitizeUserFacingEvidenceText(difference)}</span>
               </div>
             ))}

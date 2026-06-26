@@ -149,6 +149,13 @@ export type AnnotatedEstimateResult = {
   annotationMetadata: CitationDensityAnnotationMetadata[];
   debugMetadata?: CitationDensityAnnotationDebugMetadata;
   debugTrace?: CitationDensityDebugTrace;
+  // The finding-details + unanchored findings are rendered into a SEPARATE,
+  // standalone "Findings Report" PDF (cover page + one card per finding) so the
+  // annotated estimate body stays clean and the findings are not buried deep in
+  // the same document. These are populated whenever there is finding content.
+  findingsReportExportId?: string;
+  findingsReportBytes?: Uint8Array;
+  findingsReportPageCount?: number;
 };
 
 export type CitationDensityDebugTrace = {
@@ -1263,17 +1270,10 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     throw new CitationDensityAnnotationError("Anchors extracted but no annotations rendered.", trace);
   }
 
-  if (findingDetails.length > 0) {
-    trace.detailLayoutBlocks = addCitationDensityFindingDetailPages(pdfDoc, findingDetails, {
-      font,
-      boldFont,
-      sourcePdfName,
-      sourcePdfHash: trace.sourcePdfHash,
-      buildCommit: trace.buildCommit,
-      reportIdentity,
-    });
-  }
-
+  // The annotated estimate keeps only the on-page annotations plus the legend
+  // that explains them. The finding-detail cards and the unanchored appendix now
+  // live in a SEPARATE standalone Findings Report (built below) so they are not
+  // buried deep in the estimate document where most readers never reach them.
   if (findingsWithPartSource.length > 0 && lineMatchCount === 0) {
     addNoLineAnchorWarningPage(pdfDoc, {
       font,
@@ -1286,26 +1286,6 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
 
   if (request.includeLegend !== false) {
     addLegendPage(pdfDoc, { font, boldFont, reportIdentity });
-  }
-
-  if (request.includeSummaryPage) {
-    addSummaryPage(pdfDoc, {
-      font,
-      boldFont,
-      annotatedCount: matches.length,
-      unresolvedCount: unmatched.length,
-      warnings,
-    });
-  }
-
-  if (unmatched.length > 0 && request.includeUnanchoredAppendix !== false) {
-    addUnanchoredAppendix(pdfDoc, unmatched, {
-      font,
-      boldFont,
-      estimateRole,
-      redactSensitive: request.redactSensitive !== false,
-      reportIdentity,
-    });
   }
 
   const bytes = await pdfDoc.save();
@@ -1327,6 +1307,68 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   if (trace.metadataArtifactId !== trace.renderedPdfArtifactId) {
     throw new CitationDensityAnnotationError("Rendered PDF and annotation metadata artifact mismatch.", trace);
   }
+
+  // Standalone Findings Report: cover page + one detail card per finding +
+  // the unanchored/supplement-only appendix. Stored as its own retrievable
+  // artifact under the same artifact version so the GET route can serve it.
+  let findingsReportExportId: string | undefined;
+  let findingsReportBytes: Uint8Array | undefined;
+  let findingsReportPageCount = 0;
+  const includeUnanchored = unmatched.length > 0 && request.includeUnanchoredAppendix !== false;
+  if (findingDetails.length > 0 || includeUnanchored) {
+    const findingsDoc = await PDFDocument.create();
+    const findingsFont = await findingsDoc.embedFont(StandardFonts.Helvetica);
+    const findingsBoldFont = await findingsDoc.embedFont(StandardFonts.HelveticaBold);
+    addFindingsReportCoverPage(findingsDoc, {
+      font: findingsFont,
+      boldFont: findingsBoldFont,
+      reportIdentity,
+      sourcePdfName,
+      annotatedCount: matches.length,
+      unanchoredCount: unmatched.length,
+      generatedAt: new Date().toISOString(),
+    });
+    if (findingDetails.length > 0) {
+      trace.detailLayoutBlocks = addCitationDensityFindingDetailPages(findingsDoc, findingDetails, {
+        font: findingsFont,
+        boldFont: findingsBoldFont,
+        sourcePdfName,
+        sourcePdfHash: trace.sourcePdfHash,
+        buildCommit: trace.buildCommit,
+        reportIdentity,
+      });
+    }
+    if (request.includeSummaryPage) {
+      addSummaryPage(findingsDoc, {
+        font: findingsFont,
+        boldFont: findingsBoldFont,
+        annotatedCount: matches.length,
+        unresolvedCount: unmatched.length,
+        warnings,
+      });
+    }
+    if (includeUnanchored) {
+      addUnanchoredAppendix(findingsDoc, unmatched, {
+        font: findingsFont,
+        boldFont: findingsBoldFont,
+        estimateRole,
+        redactSensitive: request.redactSensitive !== false,
+        reportIdentity,
+      });
+    }
+    findingsReportBytes = await findingsDoc.save();
+    findingsReportPageCount = findingsDoc.getPageCount();
+    findingsReportExportId = putAnnotatedEstimateExport(
+      findingsReportBytes,
+      `${reportIdentity.artifactFilename.replace(/\.pdf$/i, "")}-findings.pdf`,
+      [],
+      {
+        artifactVersion: reportIdentity.artifactVersion,
+        reportType: reportIdentity.reportType,
+      }
+    );
+  }
+
   return {
     exportId,
     bytes,
@@ -1338,6 +1380,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     annotationMetadata,
     debugMetadata,
     debugTrace: trace,
+    findingsReportExportId,
+    findingsReportBytes,
+    findingsReportPageCount,
   };
 }
 
@@ -1547,21 +1592,34 @@ function canonicalDeltaToFinding(
     ? String(Array.isArray(delta.anchorInitial.line) ? delta.anchorInitial.line[0] : delta.anchorInitial.line)
     : null;
 
-  const sourceAnchor = delta.anchorInitial ?? delta.anchorFinal;
-  const sourceAnchorLine = sourceAnchor
-    ? String(Array.isArray(sourceAnchor.line) ? sourceAnchor.line[0] : sourceAnchor.line)
-    : null;
   const canonicalSourceDocumentId = sourceDocumentId ?? "shop-estimate";
   const comparisonDocumentId = deltaSet.estimateFiles.supplement.sourceDocumentId ?? "shop-supplement";
   const sourceEstimateRole = deltaSet.estimateFiles.initial.estimateRole ?? "unknown";
   const comparisonEstimateRole = deltaSet.estimateFiles.supplement.estimateRole ?? "unknown";
-  const shopAnchor: CitationDensityEstimateLineAnchor | undefined = sourceAnchor
+
+  // Anchor ONLY to the document actually being rendered. A delta's anchorInitial
+  // is a row in the initial estimate; anchorFinal is a row in the supplement.
+  // Previously this fell back to anchorFinal when anchorInitial was null, but
+  // still stamped the anchorId with the rendered (initial) document id — so a
+  // "PRESENT ONLY IN SUPPLEMENT" delta was pinned to whatever unrelated row
+  // happened to share the supplement's line number in the initial estimate.
+  // Supplement-only deltas have no row in the rendered estimate, so they must
+  // stay UNANCHORED (still listed in the findings report, just no false
+  // highlight) rather than mis-anchored.
+  const renderingSupplement =
+    sourceDocumentId != null &&
+    deltaSet.estimateFiles.supplement.sourceDocumentId === sourceDocumentId;
+  const renderedAnchor = renderingSupplement ? delta.anchorFinal : delta.anchorInitial;
+  const renderedAnchorLine = renderedAnchor
+    ? String(Array.isArray(renderedAnchor.line) ? renderedAnchor.line[0] : renderedAnchor.line)
+    : null;
+  const shopAnchor: CitationDensityEstimateLineAnchor | undefined = renderedAnchor
     ? {
-        anchorId: `${canonicalSourceDocumentId}:p${sourceAnchor.page}:${sourceAnchorLine}:estimate_line`,
+        anchorId: `${canonicalSourceDocumentId}:p${renderedAnchor.page}:${renderedAnchorLine}:estimate_line`,
         sourceDocumentId: canonicalSourceDocumentId,
         estimateRole: "shop",
-        pageNumber: sourceAnchor.page,
-        lineNumber: sourceAnchorLine,
+        pageNumber: renderedAnchor.page,
+        lineNumber: renderedAnchorLine,
         description: delta.operation,
         amount: delta.magnitudeDollar ?? null,
         laborHours: delta.magnitudeLaborHrs ?? null,
@@ -5648,6 +5706,54 @@ function addNoLineAnchorWarningPage(
     lineHeight: 14,
     maxLines: 16,
   });
+}
+
+function addFindingsReportCoverPage(
+  pdfDoc: PDFDocument,
+  options: {
+    font: PDFFont;
+    boldFont: PDFFont;
+    reportIdentity: AnnotatedEstimateReportIdentity;
+    sourcePdfName?: string;
+    annotatedCount: number;
+    unanchoredCount: number;
+    generatedAt: string;
+  }
+) {
+  const page = pdfDoc.addPage();
+  const { height } = page.getSize();
+  page.drawText(`${options.reportIdentity.reportShortTitle} Findings Report`, {
+    x: 48,
+    y: height - 64,
+    size: 20,
+    font: options.boldFont,
+  });
+  drawWrappedLines(
+    page,
+    [
+      options.reportIdentity.reportTitle,
+      "",
+      `Companion to the annotated estimate: ${options.sourcePdfName ?? "estimate"}.`,
+      "The annotated estimate PDF shows the on-page highlights. This separate report",
+      "explains every finding in detail and the documentation needed to support it.",
+      "",
+      `Highlighted on the estimate (anchored): ${options.annotatedCount}`,
+      `Supplement-only / unanchored (listed here only): ${options.unanchoredCount}`,
+      `Total findings: ${options.annotatedCount + options.unanchoredCount}`,
+      "",
+      `Generated: ${options.generatedAt}`,
+    ],
+    {
+      x: 48,
+      y: height - 104,
+      width: 500,
+      font: options.font,
+      boldFont: options.boldFont,
+      size: 11,
+      lineHeight: 16,
+      maxLines: 40,
+    }
+  );
 }
 
 function addSummaryPage(

@@ -41,7 +41,7 @@ export default function CollisionAcademyPage() {
 
             <div className="hidden items-center gap-3 text-xs text-white/60 md:flex">
               <span className="inline-flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-[#C65A2A]" />
+                <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
                 Online
               </span>
               <span className="opacity-40">|</span>
@@ -52,7 +52,7 @@ export default function CollisionAcademyPage() {
           <div className="flex items-center gap-3">
             <Link
               href="/the-academy"
-              className="rounded-2xl border border-[#C65A2A]/50 bg-[#C65A2A]/10 px-4 py-2 text-sm font-semibold text-[#C65A2A] transition hover:bg-[#C65A2A]/20"
+              className="rounded-2xl border border-[var(--accent)]/50 bg-[var(--accent)]/10 px-4 py-2 text-sm font-semibold text-[var(--accent)] transition hover:bg-[var(--accent)]/20"
             >
               The Academy
             </Link>
@@ -98,7 +98,7 @@ export default function CollisionAcademyPage() {
           <div className="mt-8 flex flex-wrap gap-3">
             <Link
               href="/"
-              className="rounded-2xl bg-[#C65A2A] px-6 py-3 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(198,90,42,0.25)] transition hover:opacity-90"
+              className="rounded-2xl bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(198,90,42,0.25)] transition hover:opacity-90"
             >
               Open Collision IQ
             </Link>
@@ -129,7 +129,7 @@ export default function CollisionAcademyPage() {
             <p className="mt-2 text-sm text-white/70">
               AI-powered repair analysis and decision support.
             </p>
-            <div className="mt-5 text-sm text-[#C65A2A]">Open -&gt;</div>
+            <div className="mt-5 text-sm text-[var(--accent)]">Open -&gt;</div>
           </Link>
 
           <Link
@@ -140,19 +140,19 @@ export default function CollisionAcademyPage() {
             <p className="mt-2 text-sm text-white/70">
               Appraisals, diminished value, ACV support, and dispute help.
             </p>
-            <div className="mt-5 text-sm text-[#C65A2A]">View -&gt;</div>
+            <div className="mt-5 text-sm text-[var(--accent)]">View -&gt;</div>
           </Link>
 
           <Link
             href="/technical-systems"
-            className="rounded-3xl border border-[#C65A2A]/40 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl transition hover:bg-black/40"
+            className="rounded-3xl border border-[var(--accent)]/40 bg-black/30 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl transition hover:bg-black/40"
           >
             <div className="text-lg font-semibold">Technical Systems</div>
             <p className="mt-2 text-sm text-white/70">
               Custom-built applications for collision repair centers — workflows,
               automation, onboarding, and operational intelligence.
             </p>
-            <div className="mt-5 text-sm text-[#C65A2A]">View Systems -&gt;</div>
+            <div className="mt-5 text-sm text-[var(--accent)]">View Systems -&gt;</div>
           </Link>
         </div>
       </section>
@@ -165,7 +165,7 @@ export default function CollisionAcademyPage() {
             dispute-ready documentation using AI built for collision repair.
           </p>
 
-          <Link href="/" className="mt-6 inline-block text-sm font-medium text-[#C65A2A]">
+          <Link href="/" className="mt-6 inline-block text-sm font-medium text-[var(--accent)]">
             Launch -&gt;
           </Link>
         </div>
@@ -188,7 +188,7 @@ export default function CollisionAcademyPage() {
                 <div className="mt-2 text-sm text-white/70">
                   {link.description}
                 </div>
-                <div className="mt-4 text-sm text-[#C65A2A]">{link.label} -&gt;</div>
+                <div className="mt-4 text-sm text-[var(--accent)]">{link.label} -&gt;</div>
               </a>
             ))}
           </div>

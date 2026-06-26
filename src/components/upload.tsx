@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { IncomingForm, Files, type Fields, type File } from 'formidable';
 import { extractTextFromFile } from '@/lib/extract-text';
-import { OpenAIEmbeddings } from '@langchain/openai';
+import { embedTexts } from '@/lib/rag/embed';
 import path from 'path';
 
 export const config = {
@@ -55,8 +55,7 @@ function splitIntoChunks(text: string, maxTokens = 1000): string[] {
 }
 
 async function embedChunks(chunks: string[]) {
-  const embedder = new OpenAIEmbeddings();
-  return await embedder.embedDocuments(chunks);
+  return await embedTexts(chunks);
 }
 
 export async function POST(req: NextRequest) {

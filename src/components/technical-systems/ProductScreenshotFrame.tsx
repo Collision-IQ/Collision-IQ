@@ -51,11 +51,11 @@ export function ProductScreenshotFrame({
         <button
           type="button"
           onClick={() => setIsOpen(true)}
-          className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C65A2A] focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           aria-label={`Enlarge ${asset.title}`}
         >
           <div className="flex items-center gap-1.5 border-b border-border bg-muted px-3 py-2">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#C65A2A]" />
+            <span className="h-2.5 w-2.5 rounded-full bg-[var(--accent)]" />
             <span className="h-2.5 w-2.5 rounded-full bg-border" />
             <span className="h-2.5 w-2.5 rounded-full bg-border" />
             <span className="ml-auto text-xs font-medium text-muted-foreground">
@@ -105,7 +105,7 @@ export function ProductScreenshotFrame({
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
-                className="shrink-0 rounded-full border border-border bg-background px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C65A2A]"
+                className="shrink-0 rounded-full border border-border bg-background px-3 py-1.5 text-sm font-semibold text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               >
                 Close
               </button>

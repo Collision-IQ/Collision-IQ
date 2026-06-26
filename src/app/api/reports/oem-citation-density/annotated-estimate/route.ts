@@ -258,6 +258,10 @@ export async function POST(request: Request) {
       });
       const artifactId = result.exportId;
       const downloadUrl = `/api/reports/oem-citation-density/annotated-estimate?artifactId=${encodeURIComponent(artifactId)}`;
+      const findingsReportArtifactId = result.findingsReportExportId;
+      const findingsReportUrl = findingsReportArtifactId
+        ? `/api/reports/oem-citation-density/annotated-estimate?artifactId=${encodeURIComponent(findingsReportArtifactId)}`
+        : undefined;
       result.warnings.forEach((warning) => aggregateWarnings.add(warning));
       annotatedFindingCount += result.annotatedFindingCount;
       unresolvedAnchorCount += result.unresolvedAnchorCount;
@@ -268,6 +272,12 @@ export async function POST(request: Request) {
         estimateRole,
         sourceDocumentId: selection.selectedSourceDocumentId,
         downloadUrl,
+        findingsReportArtifactId,
+        findingsReportUrl,
+        findingsReportPdfBase64: result.findingsReportBytes
+          ? Buffer.from(result.findingsReportBytes).toString("base64")
+          : undefined,
+        findingsReportPageCount: result.findingsReportPageCount,
         annotatedFindingCount: result.annotatedFindingCount,
         unresolvedAnchorCount: result.unresolvedAnchorCount,
         warnings: result.warnings,

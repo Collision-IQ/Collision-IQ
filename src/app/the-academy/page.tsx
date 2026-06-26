@@ -145,7 +145,7 @@ export default function TheAcademyPage() {
             </Link>
             <Link
               href="/technical-systems"
-              className="rounded-2xl border border-[#C65A2A]/40 bg-[#C65A2A]/10 px-4 py-2 text-sm font-semibold text-[#C65A2A] transition hover:bg-[#C65A2A]/20"
+              className="rounded-2xl border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-4 py-2 text-sm font-semibold text-[var(--accent)] transition hover:bg-[var(--accent)]/20"
             >
               Explore Technical Systems
             </Link>
@@ -155,7 +155,7 @@ export default function TheAcademyPage() {
 
       <section className="border-b border-border bg-background">
         <div className="mx-auto max-w-6xl px-5 py-16 md:py-24">
-          <div className="inline-flex items-center gap-2 rounded-full border border-[#C65A2A]/30 bg-[#C65A2A]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#C65A2A]">
+          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent)]">
             Collision Academy Services
           </div>
 
@@ -176,7 +176,7 @@ export default function TheAcademyPage() {
               href="https://www.collision.academy/s/shop"
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-2xl bg-[#C65A2A] px-6 py-3 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(198,90,42,0.25)] transition hover:opacity-90"
+              className="rounded-2xl bg-[var(--accent)] px-6 py-3 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(198,90,42,0.25)] transition hover:opacity-90"
             >
               View Professional Services
             </a>
@@ -198,7 +198,7 @@ export default function TheAcademyPage() {
 
       <section className="mx-auto max-w-6xl px-5 py-12">
         <div className="grid gap-5 md:grid-cols-3">
-          <div className="rounded-3xl border border-[#C65A2A]/35 bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
+          <div className="rounded-3xl border border-[var(--accent)]/35 bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)]">
             <div className="text-lg font-semibold">Professional Services</div>
             <p className="mt-2 text-sm leading-7 text-muted-foreground">
               Collision Academy handles the expert-service layer when files
@@ -237,7 +237,7 @@ export default function TheAcademyPage() {
               key={service.title}
               className="flex flex-col rounded-3xl border border-border bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)]"
             >
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#C65A2A]">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent)]">
                 {service.price}
               </div>
               <h3 className="mt-3 text-xl font-semibold">{service.title}</h3>
@@ -257,7 +257,7 @@ export default function TheAcademyPage() {
                 <input type="hidden" name="sourcePage" value="the-academy" />
                 <button
                   type="submit"
-                  className="rounded-2xl border border-[#C65A2A]/40 bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black transition hover:bg-[#C65A2A]/90"
+                  className="rounded-2xl border border-[var(--accent)]/40 bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-black transition hover:bg-[var(--accent)]/90"
                 >
                   Request this service →
                 </button>
@@ -272,8 +272,8 @@ export default function TheAcademyPage() {
       </Suspense>
 
       <section className="mx-auto max-w-6xl px-5 pb-12">
-        <div className="rounded-3xl border border-[#C65A2A]/25 bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)] md:p-8">
-          <div className="text-sm font-semibold uppercase tracking-[0.16em] text-[#C65A2A]">
+        <div className="rounded-3xl border border-[var(--accent)]/25 bg-card p-6 shadow-[0_18px_44px_rgba(15,23,42,0.08)] dark:shadow-[0_18px_44px_rgba(0,0,0,0.22)] md:p-8">
+          <div className="text-sm font-semibold uppercase tracking-[0.16em] text-[var(--accent)]">
             How the surfaces connect
           </div>
           <h2 className="mt-3 text-2xl font-semibold">
@@ -316,7 +316,7 @@ export default function TheAcademyPage() {
                 <div className="mt-2 text-sm text-muted-foreground">
                   {link.description}
                 </div>
-                <div className="mt-4 text-sm text-[#C65A2A]">{link.label} -&gt;</div>
+                <div className="mt-4 text-sm text-[var(--accent)]">{link.label} -&gt;</div>
               </a>
             ))}
           </div>

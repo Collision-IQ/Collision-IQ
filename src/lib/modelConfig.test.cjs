@@ -77,10 +77,22 @@ function run(name, test) {
   }
 }
 
-run("OpenAI production defaults resolve primary and helper stages to gpt-5.5", () => {
+run("Anthropic/Claude is the default primary provider after migration", () => {
+  const { collisionIqProvider, collisionIqModels } = loadModelConfig({
+    NODE_ENV: "production",
+    VERCEL_ENV: "production",
+    ANTHROPIC_API_KEY: "test-key",
+  });
+
+  assert.equal(collisionIqProvider.primary, "anthropic");
+  assert.equal(collisionIqModels.anthropicPrimary, "claude-opus-4-8");
+});
+
+run("OpenAI remains available as an explicit opt-in provider (gpt-5.5)", () => {
   const { collisionIqModels, collisionIqProvider, getCollisionIqModelStartupDiagnostics } = loadModelConfig({
     NODE_ENV: "production",
     VERCEL_ENV: "production",
+    COLLISION_IQ_PRIMARY_PROVIDER: "openai",
     OPENAI_API_KEY: "test-key",
   });
 
@@ -235,7 +247,7 @@ run("production OpenClaw requires explicit non-local service URL", () => {
   assert.equal(collisionIqProvider.primary, "openclaw");
 });
 
-run("Citation Density OpenAI prompt path uses configured shared model routing", () => {
+run("Citation Density prompt path uses configured Claude model routing", () => {
   const files = [
     "src/app/api/reports/citation-density/annotated-estimate/route.ts",
     "src/app/api/reports/oem-citation-density/annotated-estimate/route.ts",
@@ -245,6 +257,6 @@ run("Citation Density OpenAI prompt path uses configured shared model routing", 
 
   const stalePattern = new RegExp(`\\bgpt-${"5\\.4"}(?:-(?:mini|nano))?\\b`, "i");
   assert.doesNotMatch(combined, stalePattern);
-  assert.match(combined, /collisionIqModels\.primary/);
+  assert.match(combined, /collisionIqModels\.anthropicPrimary/);
   assert.match(combined, /logCollisionIqModelDiagnostic/);
 });

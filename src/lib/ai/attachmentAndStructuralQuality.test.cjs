@@ -26,6 +26,9 @@ function requireTs(modulePath) {
   const module = { exports: {} };
   const dirname = path.dirname(fullPath);
   const localRequire = (specifier) => {
+    if (specifier === "server-only") {
+      return {};
+    }
     if (specifier.startsWith("@/")) {
       const resolvedBase = path.resolve("src", specifier.slice(2));
       const candidates = [

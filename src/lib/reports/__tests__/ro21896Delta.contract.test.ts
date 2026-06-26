@@ -125,7 +125,8 @@ describe("RO21896 rendered Delta Citation Density contract", () => {
       .map((item) => `${item.findingId} ${item.shortTitle} ${item.comment} ${item.sourceAnchorText}`)
       .join(" ");
     const pdfText = await extractPdfText(result.bytes);
-    const renderedText = `${metadataText} ${pdfText}`;
+    const findingsText = result.findingsReportBytes ? await extractPdfText(result.findingsReportBytes) : "";
+    const renderedText = `${metadataText} ${pdfText} ${findingsText}`;
     const firstRendered = result.annotationMetadata.slice(0, 6)
       .map((item) => `${item.findingId} ${item.shortTitle} ${item.sourceAnchorText}`)
       .join(" ");
@@ -238,7 +239,9 @@ describe("RO21896 rendered Delta Citation Density contract", () => {
       },
     });
 
-    const text = await extractPdfText(result.bytes);
+    const estimateText = await extractPdfText(result.bytes);
+    const findingsText = result.findingsReportBytes ? await extractPdfText(result.findingsReportBytes) : "";
+    const text = `${estimateText} ${findingsText}`;
     expect(text).toMatch(/Source estimate:\s*carrier estimate/i);
     expect(text).toMatch(/Comparison estimate:\s*shop supplement/i);
     expect(text).toMatch(/Evidence status:\s*ESTIMATE_GAP_ONLY/i);

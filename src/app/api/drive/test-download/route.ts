@@ -6,7 +6,7 @@ import {
   collisionIqModels,
   logCollisionIqModelDiagnostic,
 } from "@/lib/modelConfig";
-import { openai } from "@/lib/openai";
+import { generatePrimaryText } from "@/lib/ai/providerTextGeneration";
 
 function chunkText(text: string, size = 500) {
   const chunks: string[] = [];
@@ -53,19 +53,20 @@ export async function GET() {
 
     logCollisionIqModelDiagnostic({
       stage: "drive_test_download_text_extraction",
-      provider: "openai",
-      role: "primary",
-      model: collisionIqModels.primary,
+      provider: "anthropic",
+      role: "anthropicPrimary",
+      model: collisionIqModels.anthropicPrimary,
     });
-    const result = await openai.responses.create({
-      model: collisionIqModels.primary,
+    const result = await generatePrimaryText({
+      stage: "drive_test_download_text_extraction",
+      effort: "low",
       input: [
         {
           role: "user",
           content: [
             {
               type: "input_text",
-              text: "Extract all readable text from this PDF document.",
+              text: "Extract all readable text from this PDF document. Return only the extracted text.",
             },
             {
               type: "input_file",

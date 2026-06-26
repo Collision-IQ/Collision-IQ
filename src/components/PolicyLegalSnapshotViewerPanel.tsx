@@ -68,7 +68,7 @@ export default function PolicyLegalSnapshotViewerPanel() {
           type="button"
           onClick={() => void loadSnapshots()}
           disabled={loading}
-          className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[#C65A2A]/90 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-2xl bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {loading ? "Loading..." : "Load snapshots"}
         </button>
@@ -132,7 +132,7 @@ function SnapshotInput({
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-[#C65A2A]/70"
+        className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-[var(--accent)]/70"
         placeholder={`Enter ${label.toLowerCase()}`}
       />
     </label>

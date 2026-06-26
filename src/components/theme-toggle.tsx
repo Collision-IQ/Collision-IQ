@@ -43,7 +43,7 @@ export function ThemeToggle() {
             aria-pressed={active}
             title={`${label} theme`}
           >
-            <Icon className={`h-3.5 w-3.5 ${active && value === "dark" ? "text-[#C65A2A]" : ""}`} aria-hidden />
+            <Icon className={`h-3.5 w-3.5 ${active && value === "dark" ? "text-[var(--accent)]" : ""}`} aria-hidden />
             <span className="hidden xl:inline">{label}</span>
           </button>
         );

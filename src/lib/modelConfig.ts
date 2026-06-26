@@ -1,7 +1,7 @@
 const PRIMARY_MODEL_FALLBACK = "gpt-5.5";
 const HELPER_MODEL_FALLBACK = "gpt-5.5";
 const TTS_MODEL_FALLBACK = "gpt-4o-mini-tts";
-const ANTHROPIC_MODEL_FALLBACK = "claude-fable-5";
+const ANTHROPIC_MODEL_FALLBACK = "claude-opus-4-8";
 const ANTHROPIC_BASE_URL_FALLBACK = "https://api.anthropic.com";
 const OPENCLAW_GATEWAY_URL_FALLBACK = "http://127.0.0.1:18789";
 const OPENCLAW_MODEL_FALLBACK = "openclaw/default";
@@ -36,9 +36,12 @@ function normalizeModelName(value: string | undefined | null, fallback: string) 
 
 function normalizePrimaryProvider(value: string | undefined | null): CollisionIqPrimaryProvider {
   const normalized = value?.trim().toLowerCase();
-  if (normalized === "anthropic") return "anthropic";
+  if (normalized === "openai") return "openai";
   if (normalized === "openclaw") return "openclaw";
-  return "openai";
+  // Default provider is Anthropic/Claude. The OpenAI path is retained only for
+  // explicit opt-in (COLLISION_IQ_PRIMARY_PROVIDER=openai) and is not used in
+  // production after the Claude migration.
+  return "anthropic";
 }
 
 function isAnthropicModelName(value: string) {

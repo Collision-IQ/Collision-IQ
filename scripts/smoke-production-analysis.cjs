@@ -167,11 +167,11 @@ function assertModelDiagnostics(value) {
     throw new Error("Response missing modelDiagnostics.");
   }
   for (const entry of value) {
-    if (entry.provider !== "openai") {
-      throw new Error(`Expected OpenAI provider, saw ${entry.provider}.`);
+    if (entry.provider !== "anthropic") {
+      throw new Error(`Expected anthropic provider, saw ${entry.provider}.`);
     }
-    if (entry.model !== "gpt-5.5") {
-      throw new Error(`Expected gpt-5.5 model, saw ${entry.model}.`);
+    if (!/^claude/.test(entry.model || "")) {
+      throw new Error(`Expected a claude-* model, saw ${entry.model}.`);
     }
     for (const key of ["stage", "reasoningEffort", "fallbackUsed", "keyPresent"]) {
       if (!(key in entry)) throw new Error(`Model diagnostic missing ${key}.`);

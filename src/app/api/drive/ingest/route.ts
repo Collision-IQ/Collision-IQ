@@ -5,7 +5,8 @@ import {
   collisionIqModels,
   logCollisionIqModelDiagnostic,
 } from "@/lib/modelConfig";
-import { openai } from "@/lib/openai";
+import { generatePrimaryText } from "@/lib/ai/providerTextGeneration";
+import { embedTexts } from "@/lib/rag/embed";
 
 export const runtime = "nodejs";
 
@@ -55,19 +56,20 @@ export async function POST(req: Request) {
 
     logCollisionIqModelDiagnostic({
       stage: "drive_ingest_text_extraction",
-      provider: "openai",
-      role: "primary",
-      model: collisionIqModels.primary,
+      provider: "anthropic",
+      role: "anthropicPrimary",
+      model: collisionIqModels.anthropicPrimary,
     });
-    const extraction = await openai.responses.create({
-      model: collisionIqModels.primary,
+    const extraction = await generatePrimaryText({
+      stage: "drive_ingest_text_extraction",
+      effort: "low",
       input: [
         {
           role: "user",
           content: [
             {
               type: "input_text",
-              text: "Extract all readable text from this document.",
+              text: "Extract all readable text from this document. Return only the extracted text.",
             },
             {
               type: "input_file",
@@ -83,10 +85,7 @@ export async function POST(req: Request) {
     const cleaned = cleanText(rawText);
     const chunks = chunkText(cleaned);
 
-    const embeddingResponse = await openai.embeddings.create({
-      model: "text-embedding-3-small",
-      input: chunks,
-    });
+    const embeddings = await embedTexts(chunks);
 
     const client = await pool.connect();
 
@@ -97,7 +96,7 @@ export async function POST(req: Request) {
           INSERT INTO document_chunks (content, embedding, file_id)
           VALUES ($1, $2, $3)
         `,
-          [chunks[i], JSON.stringify(embeddingResponse.data[i].embedding), fileId],
+          [chunks[i], JSON.stringify(embeddings[i]), fileId],
         );
       }
     } finally {

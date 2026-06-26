@@ -62,7 +62,6 @@ import {
   collisionIqModels,
   getCollisionIqModelDiagnostic,
 } from "@/lib/modelConfig";
-import { openai } from "@/lib/openai";
 import {
   generatePrimaryText,
   generateSupplementText,
@@ -287,8 +286,8 @@ export async function POST(req: Request) {
     const budgetedContext = applyAnalysisContextBudget({
       attachments: normalizedAttachments,
       userIntent: requestUserIntent || null,
-      provider: "openai",
-      model: collisionIqModels.primary,
+      provider: "anthropic",
+      model: collisionIqModels.anthropicPrimary,
     });
     contextBudgetDiagnostics = budgetedContext.diagnostics;
     if (contextBudgetDiagnostics.contextReductionApplied) {
@@ -359,8 +358,8 @@ export async function POST(req: Request) {
       const retryBudget = applyAnalysisContextBudget({
         attachments: normalizedAttachments,
         userIntent: requestUserIntent || null,
-        provider: "openai",
-        model: collisionIqModels.primary,
+        provider: "anthropic",
+        model: collisionIqModels.anthropicPrimary,
         contextBudgetLimit: Math.floor((contextBudgetDiagnostics?.contextBudgetLimit ?? 60000) * 0.55),
         forceAggressive: true,
       });
@@ -574,15 +573,15 @@ export async function POST(req: Request) {
       modelDiagnostics: [
         getCollisionIqModelDiagnostic({
           stage: "analysis_primary",
-          provider: "openai",
-          role: "primary",
-          model: collisionIqModels.primary,
+          provider: "anthropic",
+          role: "anthropicPrimary",
+          model: collisionIqModels.anthropicPrimary,
         }),
         getCollisionIqModelDiagnostic({
           stage: "analysis_supplement_candidates",
-          provider: "openai",
-          role: collisionIqModels.supplement === collisionIqModels.helper ? "helper" : "supplement",
-          model: collisionIqModels.supplement,
+          provider: "anthropic",
+          role: "anthropicPrimary",
+          model: collisionIqModels.anthropicPrimary,
         }),
       ],
       toolUsageTrace: [
@@ -652,7 +651,7 @@ export async function POST(req: Request) {
     }
 
     const providerError = classifyRetryableProviderError(error, {
-      provider: "openai",
+      provider: "anthropic",
       stage: "analysis",
     });
 
@@ -3432,9 +3431,7 @@ async function generateDriveRefinedAnalysis(params: {
   userMessage: string;
 }): Promise<{ narrative: string; recommendedActions: string[] }> {
   const response = await generatePrimaryText({
-    openai,
     stage: "analysis_drive_refinement",
-    temperature: 0.2,
     instructions: `You are a collision repair decision engine.
 
 ${NON_BIAS_ACCURACY_DIRECTIVE}
@@ -3997,10 +3994,8 @@ async function generateSupplementCandidates(
   const linkedProcedureSupport = summarizeReferencedProcedureSupport(linkedEvidence);
 
   const response = await generateSupplementText({
-    openai,
     stage: "analysis_supplement_candidates",
     openAiModel: collisionIqModels.supplement,
-    temperature: 0.2,
     input: [
       {
         role: "system",

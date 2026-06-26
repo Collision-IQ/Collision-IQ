@@ -43,7 +43,7 @@ export default async function ServiceCasesPage({
             </p>
             <Link
               href="/sign-in"
-              className="mt-5 inline-flex rounded-xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black"
+              className="mt-5 inline-flex rounded-xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-black"
             >
               Sign in
             </Link>

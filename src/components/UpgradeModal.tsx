@@ -31,7 +31,7 @@ export default function UpgradeModal({
         <div className="mt-6 flex gap-3">
           <Link
             href="/billing"
-            className="flex-1 rounded-xl bg-[#C65A2A] px-4 py-3 text-center text-sm font-semibold text-black"
+            className="flex-1 rounded-xl bg-[var(--accent)] px-4 py-3 text-center text-sm font-semibold text-black"
           >
             Upgrade Access
           </Link>

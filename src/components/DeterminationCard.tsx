@@ -23,10 +23,10 @@ function getStatusLabel(value: Props["determination"]["status"]): string {
 
 export default function DeterminationCard({ determination }: Props) {
   return (
-    <section className="rounded-md border border-[#b86a2d]/28 bg-[#C65A2A]/10 p-3">
+    <section className="rounded-md border border-[var(--accent)]/28 bg-[var(--accent)]/10 p-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-[10px] uppercase tracking-[0.08em] text-[#b86a2d]">
+          <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--accent)]">
             Determination
           </div>
           <div className="mt-1.5 text-base font-semibold text-card-foreground">

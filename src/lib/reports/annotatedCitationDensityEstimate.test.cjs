@@ -425,6 +425,26 @@ async function extractPdfPageTexts(bytes) {
   return pages;
 }
 
+async function extractFindingsReportPageTexts(result) {
+  if (!result || !result.findingsReportBytes) return [];
+  return extractPdfPageTexts(result.findingsReportBytes);
+}
+
+// Finding detail cards + the unanchored appendix now live in a SEPARATE
+// "Findings Report" PDF (result.findingsReportBytes). Most tests that asserted
+// those appeared "after the estimate page" should look across both documents.
+async function combinedReportPageTexts(result) {
+  const estimatePages = await extractPdfPageTexts(result.bytes);
+  const findingsPages = await extractFindingsReportPageTexts(result);
+  return [...estimatePages, ...findingsPages];
+}
+
+async function combinedReportText(result) {
+  const estimateText = await extractPdfText(result.bytes);
+  const findingsText = result.findingsReportBytes ? await extractPdfText(result.findingsReportBytes) : "";
+  return `${estimateText}\n${findingsText}`;
+}
+
 async function getOriginalPageAnnotationCount(bytes, pageIndex = 0) {
   const doc = await PDFDocument.load(bytes);
   return doc.getPage(pageIndex).node.Annots()?.size() ?? 0;
@@ -864,12 +884,15 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(result.annotatedFindingCount, 1);
     assert.equal(result.unresolvedAnchorCount, 0);
     assert.equal(result.originalPageCount, 1);
-    assert.equal(loaded.getPageCount(), 3);
+    // Estimate PDF now carries only the source page + legend; finding details
+    // live in the standalone findings report (result.findingsReportBytes).
+    assert.equal(loaded.getPageCount(), 2);
     assert.equal(result.annotationMetadata.length, 1);
     assert.equal(await getOriginalPageAnnotationCount(result.bytes), 1);
     const comments = await extractOriginalPageAnnotationText(result.bytes);
-    const pageTexts = await extractPdfPageTexts(result.bytes);
-    assert.doesNotMatch(pageTexts[0], /NEEDS INVOICE|NEEDS OEM|Estimate line:|Current support:|Missing proof:|Next action:/);
+    const estimatePages = await extractPdfPageTexts(result.bytes);
+    const pageTexts = await combinedReportPageTexts(result);
+    assert.doesNotMatch(estimatePages[0], /NEEDS INVOICE|NEEDS OEM|Estimate line:|Current support:|Missing proof:|Next action:/);
     assert.match(pageTexts.slice(1).join(" "), /Citation Density Finding Details/);
     assert.match(pageTexts.slice(1).join(" "), /NEEDS INVOICE|NEEDS OEM/);
     assert.match(result.annotationMetadata[0].comment, /Label:/);
@@ -895,7 +918,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       findings: [baseFinding()],
       request: { includeLegend: false, includeSummaryPage: false, annotationMode: "both", estimateRole: "carrier" },
     });
-    const pages = await extractPdfPageTexts(result.bytes);
+    const pages = await combinedReportPageTexts(result);
 
     assert.equal(result.originalPageCount, 1);
     assert.equal(result.annotatedFindingCount, 1);
@@ -970,9 +993,10 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       findings,
       request: { includeLegend: false, includeSummaryPage: false, annotationMode: "both", estimateRole: "carrier" },
     });
-    const loaded = await PDFDocument.load(result.bytes);
-    const pages = await extractPdfPageTexts(result.bytes);
-    const detailText = pages.slice(result.originalPageCount).join(" ");
+    const findingsDoc = await PDFDocument.load(result.findingsReportBytes);
+    const findingsPages = await extractFindingsReportPageTexts(result);
+    // Skip the findings-report cover page; detail cards follow it.
+    const detailText = findingsPages.slice(1).join(" ");
 
     assert.equal(result.originalPageCount, 1);
     assert.equal(result.annotatedFindingCount, findings.length);
@@ -980,7 +1004,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(await getOriginalPageAnnotationCount(result.bytes), result.annotatedFindingCount);
     assert.ok(result.debugTrace.renderedPdfAnnotationCount > 0);
     assert.equal(result.debugTrace.renderedPdfAnnotationCount, findings.length);
-    assert.ok(loaded.getPageCount() >= result.originalPageCount + findings.length + 1);
+    assert.ok(findingsDoc.getPageCount() >= findings.length + 1);
     for (let index = 1; index <= findings.length; index += 1) {
       assert.match(detailText, new RegExp(`Finding number:\\s*${index}`));
       assert.match(detailText, new RegExp(`long-detail-${index}`));
@@ -1295,7 +1319,8 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
 
     assert.equal(result.originalPageCount, 2);
     assert.equal(result.unresolvedAnchorCount, 0);
-    assert.equal(loaded.getPageCount(), 4);
+    // Two source pages + legend page (details moved to the findings report).
+    assert.equal(loaded.getPageCount(), 3);
     assert.match(text, /Original estimate page one sentinel/);
     assert.match(text, /Original estimate page two sentinel/);
     assert.doesNotMatch(text, /Citation Density Gap Report|Report Summary|Executive Summary/i);
@@ -1333,12 +1358,13 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       ],
       request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
     });
-    const pages = await extractPdfPageTexts(result.bytes);
+    const estimatePages = await extractPdfPageTexts(result.bytes);
+    const pages = await combinedReportPageTexts(result);
 
     assert.ok(result.annotatedFindingCount >= 1);
     assert.equal(result.unresolvedAnchorCount, 0);
-    assert.match(pages[0], /49\s+A\/M bumper cover/);
-    assert.doesNotMatch(pages[0], /NEEDS ADAS|NEEDS INVOICE|REFERENCED \/ NOT PRODUCED/);
+    assert.match(estimatePages[0], /49\s+A\/M bumper cover/);
+    assert.doesNotMatch(estimatePages[0], /NEEDS ADAS|NEEDS INVOICE|REFERENCED \/ NOT PRODUCED/);
     assert.match(pages.slice(1).join(" "), /Citation Density Finding Details/);
     assert.match(pages[0], /A\/M bumper cover/);
     assert.match(result.annotationMetadata.find((item) => item.findingId === "kia-line-49").comment, /Estimate line:/);
@@ -1374,7 +1400,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       ],
       request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
     });
-    const pages = await extractPdfPageTexts(result.bytes);
+    const pages = await combinedReportPageTexts(result);
 
     assert.equal(result.annotatedFindingCount, 1);
     assert.equal(result.unresolvedAnchorCount, 0);
@@ -1413,7 +1439,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       ],
       request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
     });
-    const pages = await extractPdfPageTexts(result.bytes);
+    const pages = await combinedReportPageTexts(result);
 
     assert.equal(result.annotatedFindingCount, 1);
     assert.equal(result.unresolvedAnchorCount, 0);
@@ -1614,7 +1640,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
     });
     const pages = await extractPdfPageTexts(result.bytes);
-    const detailsText = pages.slice(result.originalPageCount).join(" ");
+    const detailsText = (await extractFindingsReportPageTexts(result)).join(" ");
     const partSourceMetadata = result.annotationMetadata.filter((item) =>
       /AM\/LKQ part usage vs OEM part usage/.test(item.shortTitle) ||
       /^part-source-oem-variance-/i.test(item.findingId)
@@ -1762,7 +1788,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       findingGenerator: buildOemCitationDensityFindings,
       request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
     });
-    const detailText = (await extractPdfPageTexts(result.bytes)).slice(result.originalPageCount).join(" ");
+    const detailText = (await extractFindingsReportPageTexts(result)).join(" ");
 
     assert.equal(result.debugTrace.reportType, "oem-citation-density");
     assert.equal(result.debugTrace.citationDensityArtifactVersion, OEM_CITATION_DENSITY_ARTIFACT_VERSION);
@@ -1975,7 +2001,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       findings: [],
       request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
     });
-    const text = (await extractPdfPageTexts(result.bytes)).slice(result.originalPageCount).join(" ");
+    const text = (await extractFindingsReportPageTexts(result)).join(" ");
 
     assert.ok(result.debugTrace.partSourceFindingCount > 0);
     assert.ok(result.annotationMetadata.some((item) => item.sourceLineNumber === "5" && item.label === "NEEDS OEM"));
@@ -2299,9 +2325,15 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const pdfResponse = await route.GET(new Request(`http://localhost/api/reports/oem-citation-density/annotated-estimate?artifactId=${json.artifactId}`));
     assert.equal(pdfResponse.status, 200);
     assert.equal(pdfResponse.headers.get("content-type"), "application/pdf");
-    const outputBytes = new Uint8Array(await pdfResponse.arrayBuffer());
-    const outputPages = await extractPdfPageTexts(outputBytes);
-    assert.match(outputPages.join(" "), /OEM Citation Density Finding Details/);
+
+    // Finding details now live in a separate findings-report artifact.
+    const findingsArtifactId = json.outputs?.[0]?.findingsReportArtifactId ?? json.findingsReportArtifactId;
+    assert.ok(findingsArtifactId, "expected a separate findings report artifact id");
+    const findingsResponse = await route.GET(new Request(`http://localhost/api/reports/oem-citation-density/annotated-estimate?artifactId=${findingsArtifactId}`));
+    assert.equal(findingsResponse.status, 200);
+    const findingsBytes = new Uint8Array(await findingsResponse.arrayBuffer());
+    const findingsPages = await extractPdfPageTexts(findingsBytes);
+    assert.match(findingsPages.join(" "), /OEM Citation Density Finding Details/);
   });
 
   await run("OEM Citation Density defaults to the lower estimate and exposes OEM selection diagnostics", async () => {
@@ -3034,7 +3066,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       ],
       request: { includeLegend: false, annotationMode: "both", estimateRole: "carrier" },
     });
-    const pages = await extractPdfPageTexts(result.bytes);
+    const pages = await combinedReportPageTexts(result);
 
     assert.equal(result.originalPageCount, 12);
     assert.ok(result.annotatedFindingCount >= 9);
@@ -3382,7 +3414,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       ],
       request: { includeLegend: false, annotationMode: "both" },
     });
-    const text = await extractPdfText(result.bytes);
+    const text = await combinedReportText(result);
 
     assert.doesNotMatch(text, /Label:\s*NEEDS ADAS/);
     assert.match(text, /NEEDS INVOICE/);
@@ -3454,7 +3486,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       ],
       request: { includeLegend: false, annotationMode: "both" },
     });
-    const text = await extractPdfText(result.bytes);
+    const text = await combinedReportText(result);
 
     assert.doesNotMatch(text, /Label:\s*NEEDS ADAS/);
     assert.doesNotMatch(text, /Label:\s*NEEDS OEM/);

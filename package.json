@@ -19,7 +19,7 @@
     "test:claim-specific-reports": "node src/lib/ai/claimSpecificReportRegression.test.cjs"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^3.0.19",
+    "@anthropic-ai/sdk": "^0.106.0",
     "@capacitor/android": "^8.1.0",
     "@capacitor/app": "^8.0.0",
     "@capacitor/browser": "^8.0.3",
@@ -32,7 +32,6 @@
     "@fontsource/inter": "^5.2.8",
     "@google-cloud/vision": "^5.3.4",
     "@langchain/core": "^1.1.17",
-    "@langchain/openai": "^1.2.3",
     "@modelcontextprotocol/sdk": "^1.25.2",
     "@napi-rs/canvas": "^1.0.0",
     "@prisma/client": "^6.19.0",
@@ -51,7 +50,6 @@
     "mammoth": "^1.11.0",
     "next": "^16.2.6",
     "next-themes": "^0.4.6",
-    "openai": "^6.16.0",
     "papaparse": "^5.5.3",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^1.1.4",
@@ -64,6 +62,7 @@
     "remark-gfm": "^4.0.1",
     "stripe": "^21.0.1",
     "tesseract.js": "^7.0.0",
+    "voyageai": "^0.4.0",
     "yauzl": "^3.3.1",
     "zod": "^3.25.76",
     "zustand": "^5.0.11"

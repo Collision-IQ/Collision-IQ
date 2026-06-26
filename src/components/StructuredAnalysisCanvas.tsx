@@ -259,7 +259,7 @@ export default function StructuredAnalysisCanvas({
       <section className="border border-border bg-card p-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-[#a35d26] dark:text-[#c57934]">
+            <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-[#a35d26] dark:text-[var(--accent)]">
               Active Case
             </div>
             <div className="mt-1 break-words text-[1rem] font-semibold text-card-foreground">
@@ -306,7 +306,7 @@ export default function StructuredAnalysisCanvas({
                 <button
                   type="button"
                   onClick={onConfirmEndAnalysis}
-                  className="rounded-md border border-[#b86a2d]/30 bg-[#b86a2d]/12 px-3 py-1.5 text-xs font-medium text-[#b86a2d] transition hover:bg-[#b86a2d]/18 dark:text-[#c57934]"
+                  className="rounded-md border border-[var(--accent)]/30 bg-[var(--accent)]/12 px-3 py-1.5 text-xs font-medium text-[var(--accent)] transition hover:bg-[var(--accent)]/18 dark:text-[var(--accent)]"
                 >
                   Confirm End Analysis
                 </button>
@@ -464,7 +464,7 @@ function LinkedInsightBullet({
   if (!evidenceLink) {
     return (
       <div className="flex min-w-0 gap-2 border border-border bg-muted px-3 py-2.5 text-[13px] leading-5 text-muted-foreground">
-        <span className="pt-[1px] text-[#b86a2d]">&bull;</span>
+        <span className="pt-[1px] text-[var(--accent)]">&bull;</span>
         <span className="min-w-0 break-words">{sanitizeUserFacingEvidenceText(bullet) || "Evidence supported."}</span>
       </div>
     );
@@ -476,12 +476,12 @@ function LinkedInsightBullet({
       onClick={() => onEvidenceSelect?.(evidenceLink)}
       className={`w-full rounded-md border px-3 py-2.5 text-left transition-[border-color,background-color] duration-200 ${
         active
-          ? "border-[#b86a2d]/40 bg-[#C65A2A]/10"
+          ? "border-[var(--accent)]/40 bg-[var(--accent)]/10"
           : "border-border bg-muted hover:border-ring/30 hover:bg-muted/70"
       }`}
     >
       <div className="flex min-w-0 gap-2 text-[13px] leading-5 text-foreground">
-        <span className="pt-[1px] text-[#b86a2d]">&bull;</span>
+        <span className="pt-[1px] text-[var(--accent)]">&bull;</span>
         <span className="min-w-0 break-words">{sanitizeUserFacingEvidenceText(bullet) || "Evidence supported."}</span>
       </div>
       <div className="mt-2 inline-flex rounded-sm border border-border bg-card px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
@@ -497,9 +497,9 @@ function EvidenceSupportBlock({
   target: NonNullable<ReturnType<typeof getEvidenceTargetById>>;
 }) {
   return (
-    <div className="rounded-md border border-[#b86a2d]/28 bg-[#C65A2A]/10 px-3 py-2.5">
+    <div className="rounded-md border border-[var(--accent)]/28 bg-[var(--accent)]/10 px-3 py-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-[10px] uppercase tracking-[0.08em] text-[#b86a2d]">
+        <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--accent)]">
           Supporting Evidence
         </div>
         <div className="rounded-sm border border-border bg-muted px-2 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">

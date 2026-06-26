@@ -84,7 +84,14 @@ async function verifyOpenAi(): Promise<VerificationResult> {
   };
 
   if (!apiKey) {
-    return fail("openai", "OpenAI API key", "OPENAI_API_KEY is not configured.", baseMetadata);
+    // OpenAI is now an optional legacy fallback (Claude is primary). A missing
+    // key is expected and must not fail overall environment verification.
+    return pass(
+      "openai",
+      "OpenAI API key (optional)",
+      "OPENAI_API_KEY is not configured. This is expected — Claude is the primary provider.",
+      baseMetadata
+    );
   }
 
   const response = await probeFetch("https://api.openai.com/v1/models", {

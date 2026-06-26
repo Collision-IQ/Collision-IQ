@@ -214,7 +214,7 @@ export default async function TechnicalSystemDetailPage({ params }: PageProps) {
           </Link>
           <TechnicalSystemCheckoutButton
             plan={page.checkoutPlan}
-            className="rounded-2xl bg-[#C65A2A] px-4 py-2 text-sm font-semibold text-black transition hover:opacity-90 disabled:opacity-60"
+            className="rounded-2xl bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-black transition hover:opacity-90 disabled:opacity-60"
           >
             Start trial
           </TechnicalSystemCheckoutButton>
@@ -223,7 +223,7 @@ export default async function TechnicalSystemDetailPage({ params }: PageProps) {
 
       <section className="mx-auto max-w-6xl px-5 py-12">
         <div className="max-w-3xl">
-          <div className="text-sm font-semibold uppercase tracking-[0.16em] text-[#C65A2A]">
+          <div className="text-sm font-semibold uppercase tracking-[0.16em] text-[var(--accent)]">
             {page.kicker}
           </div>
           <h1 className="mt-4 text-4xl font-bold tracking-tight md:text-6xl">{page.title}</h1>
@@ -234,7 +234,7 @@ export default async function TechnicalSystemDetailPage({ params }: PageProps) {
             </Link>
             <TechnicalSystemCheckoutButton
               plan={page.checkoutPlan}
-              className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:opacity-90 disabled:opacity-60"
+              className="rounded-2xl bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-black transition hover:opacity-90 disabled:opacity-60"
             >
               Contact / start trial
             </TechnicalSystemCheckoutButton>

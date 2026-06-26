@@ -1,9 +1,8 @@
 import {
-  buildOpenAiResponsesRequest,
   collisionIqModels,
   logCollisionIqModelDiagnostic,
 } from "@/lib/modelConfig";
-import { openai } from "@/lib/openai";
+import { generatePrimaryText } from "@/lib/ai/providerTextGeneration";
 import type { StoredAttachment } from "@/lib/uploadedAttachmentStore";
 import {
   bufferToReusableDataUrl,
@@ -166,13 +165,13 @@ async function summarizeImageAttachment(attachment: StoredAttachment) {
   try {
     logCollisionIqModelDiagnostic({
       stage: "analysis_image_attachment_summary",
-      provider: "openai",
-      role: "primary",
-      model: collisionIqModels.primary,
+      provider: "anthropic",
+      role: "anthropicPrimary",
+      model: collisionIqModels.anthropicPrimary,
     });
-    const response = await openai.responses.create(buildOpenAiResponsesRequest({
-      model: collisionIqModels.primary,
-      temperature: 0.1,
+    const response = await generatePrimaryText({
+      stage: "analysis_image_attachment_summary",
+      effort: "medium",
       input: [
         {
           role: "user" as const,
@@ -205,7 +204,7 @@ If visible damage raises concern for related verification, phrase it as an open 
           ],
         },
       ],
-    }));
+    });
 
     return response.output_text?.trim() ?? "";
   } catch (error) {

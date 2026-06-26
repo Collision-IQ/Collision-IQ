@@ -57,7 +57,7 @@ export default function PricingPage() {
         <div className="mt-10 flex flex-wrap gap-3">
           <Link
             href="/sign-up"
-            className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[#C65A2A]/90"
+            className="rounded-2xl bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[var(--accent)]/90"
           >
             Create account
           </Link>
@@ -96,7 +96,7 @@ function PricingCard({
     <section
       className={`rounded-[1.75rem] border p-6 ${
         featured
-          ? "border-orange-500/30 bg-gradient-to-br from-[#C65A2A]/16 via-black/70 to-black/50"
+          ? "border-orange-500/30 bg-gradient-to-br from-[var(--accent)]/16 via-black/70 to-black/50"
           : "border-white/10 bg-white/5"
       }`}
     >

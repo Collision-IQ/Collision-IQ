@@ -136,7 +136,7 @@ function Drawer({
 function getPlanTone(planLabel: string) {
   const value = planLabel.toLowerCase();
   if (value.includes("pro")) {
-    return "border-[#C65A2A]/40 bg-[#C65A2A]/12 text-[#F3A37F]";
+    return "border-[var(--accent)]/40 bg-[var(--accent)]/12 text-[#F3A37F]";
   }
   if (value.includes("starter")) {
     return "border-border bg-muted text-muted-foreground";
@@ -249,7 +249,7 @@ export default function ChatShell({
               <>
                 <Link
                   href="/technical-systems"
-                  className="hidden min-h-10 items-center rounded-md border border-[#b86a2d] bg-[#b86a2d] px-3 py-2 text-xs font-semibold text-black transition hover:bg-[#c57934] sm:inline-flex"
+                  className="hidden min-h-10 items-center rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-black transition hover:bg-[var(--accent)] sm:inline-flex"
                 >
                   Technical Systems
                 </Link>
@@ -320,7 +320,7 @@ export default function ChatShell({
             ].join(" ")}
           >
             <div className="hidden min-h-[45px] shrink-0 items-center justify-between gap-4 border-b border-border px-3 py-2 lg:flex">
-              <div className="inline-flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#a35d26] dark:text-[#c57934]">
+              <div className="inline-flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#a35d26] dark:text-[var(--accent)]">
                 <Image
                   src="/iq/iq-favicon.png"
                   alt="Collision IQ"

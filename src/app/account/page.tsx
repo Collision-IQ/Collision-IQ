@@ -57,7 +57,7 @@ export default async function AccountPage() {
         <div className="mt-8 flex flex-wrap gap-3">
           <Link
             href="/billing"
-            className="rounded-2xl bg-[#C65A2A] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[#C65A2A]/90"
+            className="rounded-2xl bg-[var(--accent)] px-5 py-3 text-sm font-semibold text-black transition hover:bg-[var(--accent)]/90"
           >
             Manage billing
           </Link>
