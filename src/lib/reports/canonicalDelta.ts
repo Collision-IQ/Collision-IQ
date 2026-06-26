@@ -72,6 +72,7 @@ export type EstimatePairKind =
   | "shop_to_shop"
   | "carrier_to_shop"
   | "shop_to_carrier"
+  | "carrier_to_carrier"
   | "unknown";
 
 // ---------------------------------------------------------------------------
@@ -85,6 +86,9 @@ export type CanonicalEstimateFileMeta = {
   total: number;
   /** Insurance company name (e.g. "USAA"). Must not equal the insured's name. */
   insurer: string | null;
+  /** Header/provenance-derived document role. Claim metadata alone must not set this to carrier. */
+  estimateRole?: "carrier_estimate" | "shop_initial" | "shop_supplement" | "shop_final" | "independent_appraiser" | "unknown";
+  sourceDocumentId?: string;
 };
 
 export type CanonicalDeltaEstimateFiles = {

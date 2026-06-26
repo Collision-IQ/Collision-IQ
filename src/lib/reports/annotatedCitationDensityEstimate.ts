@@ -37,7 +37,11 @@ import {
   classifyCitationDensityDocument,
   isBadCitationDensityAnchorText,
 } from "./citationDensityDocumentClassifier";
-import { isCarrierAuthoredEstimateDocument } from "./citationDensitySourcePdf";
+import {
+  classifyEstimateRoleFromHeader,
+  isCarrierAuthoredEstimateDocument,
+  type HeaderEstimateRole,
+} from "./citationDensitySourcePdf";
 import {
   deltaRowFromRawText,
   matchEstimateLineItems,
@@ -636,18 +640,6 @@ export function dataUrlToPdfBytes(dataUrl: string): Uint8Array | null {
   return Uint8Array.from(Buffer.from(match[1], "base64"));
 }
 
-function isShopAuthoredEstimateDocument(input: {
-  filename?: string | null;
-  text?: string | null;
-}) {
-  const filename = input.filename ?? "";
-  const text = input.text ?? "";
-  if (/\bshop\b/i.test(filename) && !/\b(?:carrier|insurer|adjuster|appraiser|sor\d*)\b/i.test(filename)) {
-    return true;
-  }
-  return /\b(?:shop estimate|repair facility|body shop|collision center|conestoga)\b/i.test(text);
-}
-
 export async function extractCitationDensityRowAnchors(
   bytes: Uint8Array,
   options: {
@@ -738,15 +730,16 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     filename: sourcePdfName,
     text: params.sourceText,
   });
-  const sourceLooksShopAuthored = isShopAuthoredEstimateDocument({
+  const headerRole = classifyEstimateRoleFromHeader({
     filename: sourcePdfName,
     text: params.sourceText,
-  });
+  }).estimateRole;
+  const headerRoleFamily = estimateRoleFamily(headerRole);
   let sourceDocumentRole: "carrier" | "shop" =
     estimateRole === "shop"
       ? "shop"
       : estimateRole === "carrier"
-        ? (sourceLooksShopAuthored ? "shop" : "carrier")
+        ? (headerRoleFamily === "shop" ? "shop" : "carrier")
         : sourceIsCarrierAuthored
           ? "carrier"
           : "shop";
@@ -804,11 +797,12 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     filename: sourcePdfName,
     text: params.sourceText ? `${params.sourceText}\n${extractedSourceText}` : extractedSourceText,
   });
-  const parsedSourceLooksShopAuthored = isShopAuthoredEstimateDocument({
+  const parsedHeaderRole = classifyEstimateRoleFromHeader({
     filename: sourcePdfName,
     text: params.sourceText ? `${params.sourceText}\n${extractedSourceText}` : extractedSourceText,
-  });
-  if (estimateRole === "carrier" && parsedSourceLooksShopAuthored && !parsedSourceIsCarrierAuthored && sourceDocumentRole !== "shop") {
+  }).estimateRole;
+  const parsedHeaderRoleFamily = estimateRoleFamily(parsedHeaderRole);
+  if (estimateRole === "carrier" && parsedHeaderRoleFamily === "shop" && !parsedSourceIsCarrierAuthored && sourceDocumentRole !== "shop") {
     sourceDocumentRole = "shop";
     extraction = {
       ...extraction,
@@ -1494,8 +1488,16 @@ function emptyPartSourceFindingResult(): PartSourceFindingResult {
 
 function canonicalDeltaPriorityScore(delta: CanonicalDeltaEntry): number {
   const dollar = delta.magnitudeDollar !== undefined ? Math.abs(delta.magnitudeDollar) : 0;
-  const labor = delta.magnitudeLaborHrs !== undefined ? Math.abs(delta.magnitudeLaborHrs) * 60 : 0;
-  return dollar + labor;
+  const labor = delta.magnitudeLaborHrs !== undefined ? Math.abs(delta.magnitudeLaborHrs) * 75 : 0;
+  const op = delta.operation.toLowerCase();
+  const safetyStructuralBonus = /crossmember|control\s+arm|link\s+arm|lateral\s+arm|susp(?:ension)?|hub|axle|caliper|structural|frame/.test(op)
+    ? 250
+    : 0;
+  const mechanicalBonus = /\b(?:mech|mechanical|coolant|purge|scan|calibration|firmware|service mode)\b/.test(op) ? 75 : 0;
+  const presenceBonus = delta.class === "PRESENCE" ? 200 : 0;
+  const pairingConfidenceBonus = delta.anchorInitial && delta.anchorFinal ? 50 : 0;
+  const smallValuePenalty = delta.class === "VALUE_CHANGE" && dollar < 25 && Math.abs(delta.magnitudeLaborHrs ?? 0) < 0.5 ? -100 : 0;
+  return dollar + labor + safetyStructuralBonus + mechanicalBonus + presenceBonus + pairingConfidenceBonus + smallValuePenalty;
 }
 
 function canonicalDeltaFindingCategory(delta: CanonicalDeltaEntry): CitationDensityFinding["category"] {
@@ -1508,6 +1510,18 @@ function canonicalDeltaFindingCategory(delta: CanonicalDeltaEntry): CitationDens
   return "parts_downgrade";
 }
 
+function canonicalDeltaClassForFinding(delta: CanonicalDeltaEntry): NonNullable<CitationDensityFinding["deltaClass"]> {
+  if (delta.class === "PART_SWAP" || delta.class === "PART_SWAP_WITH_PRICE_CHANGE") return "PART_SWAPPED";
+  if (delta.class === "VALUE_CHANGE") {
+    const dollar = Math.abs(delta.magnitudeDollar ?? 0);
+    const labor = Math.abs(delta.magnitudeLaborHrs ?? 0);
+    return labor > 0 && dollar === 0 ? "LABOR_CHANGED" : "VALUE_CHANGED";
+  }
+  if (delta.anchorInitial === null) return "PRESENT_ONLY_IN_COMPARISON";
+  if (delta.anchorFinal === null) return "PRESENT_ONLY_IN_SOURCE";
+  return "PRESENT_ONLY_IN_COMPARISON";
+}
+
 function canonicalDeltaToFinding(
   delta: CanonicalDeltaEntry,
   deltaSet: CanonicalDeltaSet,
@@ -1517,6 +1531,8 @@ function canonicalDeltaToFinding(
   assertNoCarrierWording(deltaSet.estimatePairKind, label, `canonical finding ${delta.id}`);
 
   const category = canonicalDeltaFindingCategory(delta);
+  const deltaClass = canonicalDeltaClassForFinding(delta);
+  const evidenceStatus = "ESTIMATE_GAP_ONLY" as const;
   const isSuspension = category === "structural_or_fit_verification";
   const isCalibration = category === "adas_calibration" || category === "scan_diagnostic";
   const priorityScore = canonicalDeltaPriorityScore(delta);
@@ -1536,6 +1552,9 @@ function canonicalDeltaToFinding(
     ? String(Array.isArray(sourceAnchor.line) ? sourceAnchor.line[0] : sourceAnchor.line)
     : null;
   const canonicalSourceDocumentId = sourceDocumentId ?? "shop-estimate";
+  const comparisonDocumentId = deltaSet.estimateFiles.supplement.sourceDocumentId ?? "shop-supplement";
+  const sourceEstimateRole = deltaSet.estimateFiles.initial.estimateRole ?? "unknown";
+  const comparisonEstimateRole = deltaSet.estimateFiles.supplement.estimateRole ?? "unknown";
   const shopAnchor: CitationDensityEstimateLineAnchor | undefined = sourceAnchor
     ? {
         anchorId: `${canonicalSourceDocumentId}:p${sourceAnchor.page}:${sourceAnchorLine}:estimate_line`,
@@ -1557,7 +1576,7 @@ function canonicalDeltaToFinding(
         : "";
 
   const currentSupportSummary =
-    `[${label}] ${delta.operation}` +
+    `Delta class: ${label}. Evidence status: ${evidenceStatus}. ${delta.operation}` +
     (deltaDisplay ? ` (${deltaDisplay})` : "") +
     `. Category: ${delta.category}.` +
     ` Supplement line: ${supplementAnchorLine ?? "added in supplement"} (${supplementFilename}).` +
@@ -1647,6 +1666,8 @@ function canonicalDeltaToFinding(
       `canonicalDeltaObjectId:${deltaSet.id}`,
       `canonicalDeltaId:${delta.id}`,
       `estimatePairKind:${deltaSet.estimatePairKind}`,
+      `deltaClass:${deltaClass}`,
+      `evidenceStatus:${evidenceStatus}`,
       `initialFileHash:${deltaSet.initialFileHash}`,
       `supplementFileHash:${deltaSet.supplementFileHash}`,
       `grandTotalDelta:${formatCanonicalMoney(deltaSet.reconciliation.grandTotalDelta)}`,
@@ -1655,7 +1676,15 @@ function canonicalDeltaToFinding(
     ],
     canonicalDeltaObjectId: deltaSet.id,
     canonicalDeltaId: delta.id,
+    sourceDocumentId: canonicalSourceDocumentId,
+    comparisonDocumentId,
+    sourceComparisonPosition: "source",
+    comparisonComparisonPosition: "comparison",
+    sourceEstimateRole,
+    comparisonEstimateRole,
     estimatePairKind: deltaSet.estimatePairKind,
+    deltaClass,
+    evidenceStatus,
     initialFileHash: deltaSet.initialFileHash,
     supplementFileHash: deltaSet.supplementFileHash,
   };
@@ -1663,6 +1692,12 @@ function canonicalDeltaToFinding(
 
 function formatCanonicalMoney(value: number) {
   return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function estimateRoleFamily(role: HeaderEstimateRole) {
+  if (role === "carrier_estimate") return "carrier";
+  if (role === "shop_initial" || role === "shop_supplement" || role === "shop_final") return "shop";
+  return "unknown";
 }
 
 function buildCanonicalDeltaFindings(deltaSet: CanonicalDeltaSet, sourceDocumentId?: string): {
@@ -5496,6 +5531,8 @@ function buildPdfCommentBody(
     finding.canonicalDeltaObjectId ? `Canonical delta object: ${finding.canonicalDeltaObjectId}` : "",
     finding.canonicalDeltaId ? `Canonical delta id: ${finding.canonicalDeltaId}` : "",
     finding.estimatePairKind ? `Estimate pair kind: ${finding.estimatePairKind}` : "",
+    finding.deltaClass ? `Delta class: ${formatSemanticDeltaClass(finding)}` : "",
+    finding.evidenceStatus ? `Evidence status: ${finding.evidenceStatus}` : "",
     finding.initialFileHash ? `Initial file hash: ${finding.initialFileHash}` : "",
     finding.supplementFileHash ? `Supplement file hash: ${finding.supplementFileHash}` : "",
     ...lines.slice(1),
@@ -5703,6 +5740,9 @@ function buildFindingDetailFields(
           { label: "Canonical delta object", value: finding.canonicalDeltaObjectId },
           { label: "Canonical delta id", value: finding.canonicalDeltaId ?? "unknown" },
           { label: "Estimate pair kind", value: finding.estimatePairKind ?? "unknown" },
+          { label: "Delta class", value: formatSemanticDeltaClass(finding) },
+          { label: "Evidence status", value: finding.evidenceStatus ?? "unknown" },
+          { label: "Comparison estimate", value: formatDetailComparisonEstimateLabel(finding) },
           { label: "Initial file hash", value: finding.initialFileHash ?? "unknown" },
           { label: "Supplement file hash", value: finding.supplementFileHash ?? "unknown" },
         ]
@@ -5723,10 +5763,41 @@ function formatDetailSourceEstimateLabel(
   finding: CitationDensityFinding,
   metadata: CitationDensityAnnotationMetadata
 ) {
-  if (finding.estimatePairKind === "shop_to_shop") {
-    return "initial shop estimate";
+  if (finding.sourceEstimateRole) {
+    return formatEstimateRoleForDisplay(finding.sourceEstimateRole, `${metadata.sourceDocumentRole} estimate`);
   }
   return `${metadata.sourceDocumentRole} estimate`;
+}
+
+function formatDetailComparisonEstimateLabel(finding: CitationDensityFinding) {
+  return formatEstimateRoleForDisplay(finding.comparisonEstimateRole, "comparison estimate");
+}
+
+function formatEstimateRoleForDisplay(
+  role: CitationDensityFinding["sourceEstimateRole"] | undefined,
+  fallback: string
+) {
+  if (role === "carrier_estimate") return "carrier estimate";
+  if (role === "shop_initial") return "initial shop estimate";
+  if (role === "shop_supplement") return "shop supplement";
+  if (role === "shop_final") return "shop supplement/final estimate";
+  if (role === "independent_appraiser") return "independent appraiser estimate";
+  return fallback;
+}
+
+function formatSemanticDeltaClass(finding: CitationDensityFinding) {
+  if (finding.deltaClass === "PRESENT_ONLY_IN_COMPARISON") {
+    if (finding.comparisonEstimateRole === "shop_supplement" || finding.comparisonEstimateRole === "shop_final") {
+      return "PRESENT ONLY IN SUPPLEMENT";
+    }
+    return "PRESENT ONLY IN COMPARISON";
+  }
+  if (finding.deltaClass === "PRESENT_ONLY_IN_SOURCE") return "PRESENT ONLY IN SOURCE";
+  if (finding.deltaClass === "VALUE_CHANGED") return "VALUE CHANGED";
+  if (finding.deltaClass === "PART_SWAPPED") return "PART SWAPPED";
+  if (finding.deltaClass === "LABOR_CHANGED") return "LABOR CHANGED";
+  if (finding.deltaClass === "ABSORBED_INTO_PARENT_OPERATION") return "ABSORBED INTO PARENT OPERATION";
+  return finding.deltaClass ?? "unknown";
 }
 
 type FindingDetailLayoutContext = {
@@ -6042,6 +6113,8 @@ function buildCalloutLines(
           `Canonical delta object: ${finding.canonicalDeltaObjectId}`,
           `Canonical delta id: ${finding.canonicalDeltaId ?? "unknown"}`,
           `Estimate pair kind: ${finding.estimatePairKind ?? "unknown"}`,
+          `Delta class: ${formatSemanticDeltaClass(finding)}`,
+          `Evidence status: ${finding.evidenceStatus ?? "unknown"}`,
           `Initial file hash: ${finding.initialFileHash ?? "unknown"}`,
           `Supplement file hash: ${finding.supplementFileHash ?? "unknown"}`,
         ]

@@ -4,6 +4,7 @@ import {
   buildAnnotatedCitationDensityEstimatePdf,
   buildRequiredEstimatorDeltaFindings,
 } from "../annotatedCitationDensityEstimate";
+import { buildCanonicalDeltaSet } from "../canonicalDelta";
 import { buildRo21896CanonicalDeltaSet } from "../ro21896CanonicalDelta";
 
 async function createRo21896SourcePdf() {
@@ -13,9 +14,12 @@ async function createRo21896SourcePdf() {
     [
       "Shop 21896.pdf",
       "CONESTOGA COLLISION CENTER",
+      "Written By: Vincent Menichetti",
       "Customer: OLIVARES, ESMON",
       "Insurance Company: USAA",
       "Net Cost of Repairs $11,892.26",
+      "14 Repl LT/Rear wheel 938.27",
+      "15 Four-wheel alignment 268.00",
     ],
     [
       "24 Repl LT Wheelhouse liner retainer nut 111071300D 0.32",
@@ -82,9 +86,13 @@ describe("RO21896 rendered Delta Citation Density contract", () => {
         estimateRole: "shop",
         text: [
           "Shop Final 21896.pdf",
+          "CONESTOGA COLLISION CENTER",
+          "Written By: Vincent Menichetti",
           "Customer: OLIVARES, ESMON",
           "Insurance Company: USAA",
           "Net Cost of Repairs $17,397.20",
+          "15 Repl LT/Rear wheel 938.27",
+          "16 Four-wheel alignment 268.00",
           "10 Repl TPMS sensor sensor & nut black 149070101D 60.00 Incl.",
           "64 O/H rr susp lt 3.3 M",
           "65 Repl LT Hub assy 104412300B 320.00 Incl. M",
@@ -128,9 +136,12 @@ describe("RO21896 rendered Delta Citation Density contract", () => {
     expect(renderedText).toMatch(/Estimate pair kind:\s*shop_to_shop|estimatePairKind:shop_to_shop/i);
     expect(renderedText).toMatch(/Initial file hash:\s*sha256:initial-shop-21896-distinct|initialFileHash:sha256:initial-shop-21896-distinct/i);
     expect(renderedText).toMatch(/Supplement file hash:\s*sha256:final-shop-21896-distinct|supplementFileHash:sha256:final-shop-21896-distinct/i);
-    expect(renderedText).not.toMatch(/ESTIMATE GAP ONLY/i);
+    expect(renderedText).toMatch(/Delta class:\s*PRESENT ONLY IN SUPPLEMENT/i);
+    expect(renderedText).toMatch(/Evidence status:\s*ESTIMATE_GAP_ONLY/i);
     expect(renderedText).not.toMatch(/carrier estimate/i);
     expect(renderedText).not.toMatch(/required-detector-wheel_labor_delta/i);
+    expect(renderedText).not.toMatch(/canonical-delta-[^\s]*wheel/i);
+    expect(renderedText).not.toMatch(/canonical-delta-[^\s]*alignment/i);
     expect(firstRendered).not.toMatch(/wheel_labor_delta|CCC\/MOTOR|boilerplate/i);
     expect(renderedText).toMatch(/D17|crossmember/i);
     expect(renderedText).toMatch(/D09|rear suspension|rr susp/i);
@@ -145,5 +156,91 @@ describe("RO21896 rendered Delta Citation Density contract", () => {
     expect(renderedText).toMatch(/D24|scan/i);
     expect(renderedText).toMatch(/D25|camera calibration/i);
     expect(renderedText).toMatch(/\$5,?504\.94|5504\.94/i);
+  });
+
+  it("renders carrier estimate wording when a carrier-authored header supports it", async () => {
+    const pdf = await PDFDocument.create();
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const page = pdf.addPage([612, 792]);
+    [
+      "GEICO insurance estimate",
+      "Prepared by Claims Adjuster Jane Smith",
+      "Line 12 ADAS calibration 1.0 hrs $200.00",
+    ].forEach((line, index) => page.drawText(line, { x: 42, y: 752 - index * 18, size: 10, font }));
+
+    const canonicalDeltaSet = buildCanonicalDeltaSet({
+      id: "carrier-shop-render-test",
+      initialFileHash: "sha256:carrier-source",
+      supplementFileHash: "sha256:shop-comparison",
+      estimatePairKind: "carrier_to_shop",
+      estimateFiles: {
+        initial: {
+          fileHash: "sha256:carrier-source",
+          filename: "GEICO Estimate.pdf",
+          total: 1000,
+          insurer: "GEICO",
+          estimateRole: "carrier_estimate",
+          sourceDocumentId: "carrier-source",
+        },
+        supplement: {
+          fileHash: "sha256:shop-comparison",
+          filename: "Shop Supplement.pdf",
+          total: 1300,
+          insurer: "GEICO",
+          estimateRole: "shop_supplement",
+          sourceDocumentId: "shop-comparison",
+        },
+        insuredName: "TEST, USER",
+        ownerName: "TEST, USER",
+      },
+      deltas: [{
+        id: "C01",
+        class: "VALUE_CHANGE",
+        operation: "ADAS calibration",
+        partNumber: null,
+        anchorInitial: { page: 1, line: 12, desc: "ADAS calibration" },
+        anchorFinal: { page: 1, line: 12, desc: "ADAS calibration" },
+        oldValue: { price: 200 },
+        newValue: { price: 350 },
+        magnitudeDollar: 150,
+        magnitudeLaborHrs: 0.5,
+        category: "ADAS",
+        render: true,
+      }],
+      reconciliation: {
+        method: "category_subtotal",
+        categoryDeltas: { ADAS: 300 },
+        subtotalDelta: 300,
+        taxDelta: 18,
+        grandTotalDelta: 318,
+      },
+    });
+
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes: await pdf.save(),
+      sourcePdfName: "GEICO Estimate.pdf",
+      sourceDocumentId: "carrier-source",
+      uploadedFileNames: ["GEICO Estimate.pdf", "Shop Supplement.pdf"],
+      sourceText: "GEICO insurance estimate\nPrepared by Claims Adjuster Jane Smith",
+      comparisonEstimateTexts: [{
+        fileName: "Shop Supplement.pdf",
+        sourceDocumentId: "shop-comparison",
+        estimateRole: "shop",
+        text: "Conestoga Collision Center\nRepair Facility\nWritten By: Shop Writer\nSupplement",
+      }],
+      findings: [],
+      canonicalDeltaSet,
+      findingGenerator: buildRequiredEstimatorDeltaFindings,
+      request: {
+        annotationMode: "both",
+        estimateRole: "carrier",
+        includeLegend: false,
+      },
+    });
+
+    const text = await extractPdfText(result.bytes);
+    expect(text).toMatch(/Source estimate:\s*carrier estimate/i);
+    expect(text).toMatch(/Comparison estimate:\s*shop supplement/i);
+    expect(text).toMatch(/Evidence status:\s*ESTIMATE_GAP_ONLY/i);
   });
 });

@@ -31,6 +31,35 @@ export type CitationSupportStatus =
 
 export type CitationDensityEstimateRole = "carrier" | "shop";
 
+export type CitationDensityDeltaClass =
+  | "PRESENT_ONLY_IN_COMPARISON"
+  | "PRESENT_ONLY_IN_SOURCE"
+  | "VALUE_CHANGED"
+  | "PART_SWAPPED"
+  | "LABOR_CHANGED"
+  | "ABSORBED_INTO_PARENT_OPERATION";
+
+export type CitationDensityEvidenceStatus =
+  | "ESTIMATE_GAP_ONLY"
+  | "DOCUMENTATION_PRODUCED"
+  | "AUTHORITY_SUPPORTED"
+  | "COMPLETION_VERIFIED";
+
+export type CitationDensityDocumentEstimateRole =
+  | "carrier_estimate"
+  | "shop_initial"
+  | "shop_supplement"
+  | "shop_final"
+  | "independent_appraiser"
+  | "unknown";
+
+export type CitationDensityEstimatePairKind =
+  | "carrier_to_shop"
+  | "shop_to_carrier"
+  | "shop_to_shop"
+  | "carrier_to_carrier"
+  | "unknown";
+
 export type CitationDensityEstimateLineAnchor = {
   anchorId?: string;
   sourceDocumentId?: string;
@@ -203,8 +232,16 @@ export type CitationDensityFinding = {
   canonicalDeltaObjectId?: string;
   /** Stable ID of the individual canonical delta entry, when this finding was rendered from canonical deltas. */
   canonicalDeltaId?: string;
+  sourceDocumentId?: string;
+  comparisonDocumentId?: string;
+  sourceComparisonPosition?: "source";
+  comparisonComparisonPosition?: "comparison";
+  sourceEstimateRole?: CitationDensityDocumentEstimateRole;
+  comparisonEstimateRole?: CitationDensityDocumentEstimateRole;
   /** Relationship between the compared estimates for canonical delta findings. */
-  estimatePairKind?: string;
+  estimatePairKind?: CitationDensityEstimatePairKind | string;
+  deltaClass?: CitationDensityDeltaClass;
+  evidenceStatus?: CitationDensityEvidenceStatus;
   /** Hash of the initial/source estimate used for canonical delta findings. */
   initialFileHash?: string;
   /** Hash of the supplement/final estimate used for canonical delta findings. */

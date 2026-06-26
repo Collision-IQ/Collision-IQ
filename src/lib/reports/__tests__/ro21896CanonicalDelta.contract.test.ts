@@ -5,7 +5,7 @@
  *   G1  distinct hashes
  *   G2  set match (by id, class, anchors, magnitude)
  *   G3  reconciliation invariant
- *   G4  clean labels (zero "ESTIMATE GAP ONLY")
+ *   G4  delta-class labels are separate from "ESTIMATE_GAP_ONLY" evidence status
  *   G5  all four report consumers carry the same canonicalDeltaObjectId
  *   G6  owner sign-off (manual gate)
  *
@@ -17,7 +17,7 @@
  *   I5   assertDistinctTotals + assertInsurerNotInsured hard stops
  *   I6   isVendorAccessoryUrl classifies TesLaunch-like URLs
  *   I7   assertVendorNotOemAuthority blocks mislabeled vendor sources
- *   I8   zero ESTIMATE GAP ONLY (already G4)
+ *   I8   ESTIMATE_GAP_ONLY is valid evidence status, never delta class
  *   I9   wheel_labor_delta must not lead when canonical present (documented; enforced in annotation pipeline)
  *   I10  first rendered findings include TPMS, suspension, crossmember, control arms, etc.
  */
@@ -52,6 +52,10 @@ import {
   buildRequiredEstimatorDeltaFindings,
   type AnnotatedEstimateFindingGeneratorContext,
 } from "../annotatedCitationDensityEstimate";
+import {
+  classifyEstimateRoleFromHeader,
+  estimatePairKindFromRoles,
+} from "../citationDensitySourcePdf";
 
 // ---------------------------------------------------------------------------
 // Helpers: build a canonical delta set directly from fixture data
@@ -82,12 +86,16 @@ const FIXTURE_ESTIMATE_FILES: CanonicalDeltaEstimateFiles = {
     filename: fixture.files.initial.filename,
     total: fixture.files.initial.grand_total,
     insurer: fixture.files.initial.insurer,
+    estimateRole: "shop_initial",
+    sourceDocumentId: "shop-21896",
   },
   supplement: {
     fileHash: fixture.files.final.hash,
     filename: fixture.files.final.filename,
     total: fixture.files.final.grand_total,
     insurer: fixture.files.final.insurer,
+    estimateRole: "shop_final",
+    sourceDocumentId: "shop-final-21896",
   },
   insuredName: fixture.insured_name,
   ownerName: fixture.owner_name,
@@ -370,11 +378,10 @@ describe("display threshold — VALUE_CHANGE suppression", () => {
 });
 
 // ---------------------------------------------------------------------------
-// G4 — Label vocabulary (Prompt 3 hard stop)
+// G4 — Delta class labels and evidence status remain separate
 // ---------------------------------------------------------------------------
 
-describe("G4 — label vocabulary, zero ESTIMATE GAP ONLY", () => {
-  const FORBIDDEN = "ESTIMATE GAP ONLY";
+describe("G4 — label vocabulary and separate evidence status", () => {
   const ALLOWED = new Set([
     "PRESENT ONLY IN SUPPLEMENT",
     "PRESENT ONLY IN INITIAL",
@@ -384,10 +391,32 @@ describe("G4 — label vocabulary, zero ESTIMATE GAP ONLY", () => {
     "POSITION ONLY",
   ]);
 
-  it("getDeltaLabel never returns ESTIMATE GAP ONLY for any fixture delta", () => {
+  it("getDeltaLabel returns a delta-class label, not an evidence-status label", () => {
     const set = buildTestDeltaSet();
     for (const delta of set.deltas) {
-      expect(getDeltaLabel(delta)).not.toBe(FORBIDDEN);
+      expect(getDeltaLabel(delta)).not.toBe("ESTIMATE GAP ONLY");
+      expect(getDeltaLabel(delta)).not.toBe("ESTIMATE_GAP_ONLY");
+    }
+  });
+
+  it("canonical rendered findings may carry ESTIMATE_GAP_ONLY as evidenceStatus", () => {
+    const set = buildTestDeltaSet();
+    const context: AnnotatedEstimateFindingGeneratorContext = {
+      anchors: [],
+      visualLines: [],
+      sourcePdfName: "Shop_21896.pdf",
+      sourceDocumentRole: "shop",
+      sourcePdfHash: fixture.files.initial.hash,
+      uploadedFileNames: ["Shop_21896.pdf", "Shop_Final_21896.pdf"],
+      comparisonEstimateTexts: [],
+      canonicalDeltaSet: set,
+    };
+    const { findings } = buildRequiredEstimatorDeltaFindings(context);
+    expect(findings.length).toBeGreaterThan(0);
+    for (const finding of findings) {
+      expect(finding.deltaClass, `finding ${finding.id} missing deltaClass`).toBeTruthy();
+      expect(finding.evidenceStatus).toBe("ESTIMATE_GAP_ONLY");
+      expect(finding.deltaClass).not.toBe("ESTIMATE_GAP_ONLY");
     }
   });
 
@@ -922,7 +951,7 @@ describe("G6 — owner sign-off (manual gate)", () => {
     //   2. Verify that the crossmember (D17), control arms (D13-D16), scan/calibration
     //      block (D24-D28), and rear compartment (D20) all surface as top findings.
     //   3. Verify that wheel R&I access labor lines 14/15 are NOT the top findings.
-    //   4. Confirm no "ESTIMATE GAP ONLY" labels appear in any rendered output.
+    //   4. Confirm "ESTIMATE_GAP_ONLY" appears only as evidence status, never as delta class.
     //   5. Confirm the grand-total delta shown is $5,504.94.
     //   6. Confirm no carrier wording appears in any rendered section for this shop_to_shop pair.
     //   7. Confirm insurer is shown as USAA, not OLIVARES.
@@ -1039,6 +1068,85 @@ describe("PROMPT1(b) — insurer extraction: USAA wins over owner name OLIVARES"
   });
 });
 
+describe("dynamic header-based estimate-role classification", () => {
+  it("RO21896 initial and final classify as shop-authored and pair as shop_to_shop", () => {
+    const initial = classifyEstimateRoleFromHeader({
+      filename: "Shop 21896.pdf",
+      text: [
+        "CONESTOGA COLLISION CENTER",
+        "Repair Facility: Conestoga Collision",
+        "Written By: Vincent Menichetti",
+        "Inspection Location: Repair Facility",
+        "Insurance Company: USAA",
+        "Adjuster: MAPLES, SHELLY",
+      ].join("\n"),
+    });
+    const final = classifyEstimateRoleFromHeader({
+      filename: "Shop Final 21896.pdf",
+      text: [
+        "CONESTOGA COLLISION CENTER",
+        "Repair Facility: Conestoga Collision",
+        "Written By: Vincent Menichetti",
+        "Supplement of Record",
+        "Insurance Company: USAA",
+        "Adjuster: MAPLES, SHELLY",
+      ].join("\n"),
+    });
+
+    expect(initial.estimateRole).toBe("shop_initial");
+    expect(["shop_supplement", "shop_final"]).toContain(final.estimateRole);
+    expect(estimatePairKindFromRoles(initial.estimateRole, final.estimateRole)).toBe("shop_to_shop");
+  });
+
+  it("Insurance Company and Adjuster fields alone do not prove carrier authorship", () => {
+    const result = classifyEstimateRoleFromHeader({
+      filename: "Estimate 123.pdf",
+      text: [
+        "Customer: OLIVARES, ESMON",
+        "Insurance Company: USAA",
+        "Adjuster: MAPLES, SHELLY",
+        "Claim No: 12345678-001",
+        "Policy No: ABC123",
+      ].join("\n"),
+    });
+    expect(result.estimateRole).toBe("unknown");
+  });
+
+  it("explicit carrier-authored header classifies carrier_estimate", () => {
+    const result = classifyEstimateRoleFromHeader({
+      filename: "USAA Estimate.pdf",
+      text: [
+        "USAA Claims Estimate",
+        "Insurance estimate",
+        "Prepared by Claims Adjuster Jane Smith",
+        "Estimate of Record",
+      ].join("\n"),
+    });
+    expect(result.estimateRole).toBe("carrier_estimate");
+  });
+
+  it("carrier and repair-facility headers classify carrier_to_shop", () => {
+    const carrier = classifyEstimateRoleFromHeader({
+      filename: "Carrier estimate.pdf",
+      text: "GEICO insurance estimate\nPrepared by Claims Adjuster Jane Smith",
+    });
+    const shop = classifyEstimateRoleFromHeader({
+      filename: "Shop Supplement.pdf",
+      text: "Conestoga Collision Center\nRepair Facility\nWritten By: Vincent Menichetti\nSupplement",
+    });
+    expect(estimatePairKindFromRoles(carrier.estimateRole, shop.estimateRole)).toBe("carrier_to_shop");
+  });
+
+  it("ambiguous documents default to unknown and never carrier", () => {
+    const result = classifyEstimateRoleFromHeader({
+      filename: "estimate.pdf",
+      text: "Estimate total $1,234.56\nVehicle: 2023 Tesla Model Y",
+    });
+    expect(result.estimateRole).toBe("unknown");
+    expect(result.estimateRole).not.toBe("carrier_estimate");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // PROMPT 2 (GATE for Step 4) — crossmember leads, wheel R&I never leads
 // ---------------------------------------------------------------------------
@@ -1070,6 +1178,15 @@ describe("PROMPT2(gate) — crossmember D17 is first canonical finding; wheel R&
     const set = buildTestDeltaSet();
     const { findings } = buildRequiredEstimatorDeltaFindings(buildRendererContext(set));
     expect(findings[0].id).toMatch(/canonical-delta-D17/);
+  });
+
+  it("D17 carries PRESENT_ONLY_IN_COMPARISON and ESTIMATE_GAP_ONLY", () => {
+    const set = buildTestDeltaSet();
+    const { findings } = buildRequiredEstimatorDeltaFindings(buildRendererContext(set));
+    const first = findings[0];
+    expect(first.id).toMatch(/canonical-delta-D17/);
+    expect(first.deltaClass).toBe("PRESENT_ONLY_IN_COMPARISON");
+    expect(first.evidenceStatus).toBe("ESTIMATE_GAP_ONLY");
   });
 
   it("first finding is NOT a wheel R&I labor line", () => {

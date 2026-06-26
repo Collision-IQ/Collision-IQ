@@ -39,8 +39,86 @@ export type SourceEstimatePdfSelection = {
   selectionDiagnostics: SourcePdfCandidateDiagnostics;
 };
 
+export type HeaderEstimateRole =
+  | "carrier_estimate"
+  | "shop_initial"
+  | "shop_supplement"
+  | "shop_final"
+  | "independent_appraiser"
+  | "unknown";
+
+export type HeaderEstimateRoleClassification = {
+  estimateRole: HeaderEstimateRole;
+  confidence: "high" | "medium" | "low";
+  signals: string[];
+};
+
 export function isPdfDocument(type: string, filename: string) {
   return type === "application/pdf" || /\.pdf$/i.test(filename);
+}
+
+export function classifyEstimateRoleFromHeader(input: {
+  filename?: string | null;
+  text?: string | null;
+}): HeaderEstimateRoleClassification {
+  const filename = input.filename ?? "";
+  const text = input.text ?? "";
+  const normalized = normalizeRoleText(`${filename}\n${text}`);
+  const signals: string[] = [];
+
+  const hasShopAuthor =
+    /\b(?:shop estimate|repair facility|body shop|collision center|conestoga collision|written by|estimator|inspection location repair facility|repair order|workfile)\b/i.test(text) ||
+    /\b(?:shop estimate|repair facility|body shop|collision center|conestoga collision|written by|inspection location repair facility)\b/.test(normalized);
+  if (hasShopAuthor) signals.push("repair-facility header/provenance");
+
+  const hasSupplement =
+    /\b(?:supplement|supplemental|final estimate|shop final)\b/i.test(text) ||
+    /\b(?:supplement|supplemental|final estimate|shop final)\b/i.test(filename);
+  const hasFinal = /\b(?:final estimate|shop final|final)\b/i.test(text) || /\bshop[_\s-]*final\b/i.test(filename);
+  const hasInitial = /\b(?:initial estimate|preliminary estimate|shop estimate)\b/i.test(text) || /\bshop[_\s-]*\d+/i.test(filename);
+
+  if (hasShopAuthor) {
+    if (hasFinal) return { estimateRole: "shop_final", confidence: "high", signals: [...signals, "final/supplement designation"] };
+    if (hasSupplement) return { estimateRole: "shop_supplement", confidence: "high", signals: [...signals, "supplement designation"] };
+    if (hasInitial) return { estimateRole: "shop_initial", confidence: "high", signals: [...signals, "shop estimate designation"] };
+    return { estimateRole: "shop_initial", confidence: "medium", signals };
+  }
+
+  const hasIndependentAppraiser =
+    /\b(?:independent appraiser|appraisal report|right to appraisal|rta appraiser)\b/i.test(text) ||
+    /\b(?:independent appraiser|appraisal report|right to appraisal|rta appraiser)\b/.test(normalized);
+  if (hasIndependentAppraiser) {
+    return { estimateRole: "independent_appraiser", confidence: "high", signals: ["independent appraiser header/provenance"] };
+  }
+
+  const hasCarrierAuthor =
+    /\b(?:carrier estimate|insurer estimate|insurance estimate|carrier-authored estimate|insurer-authored estimate|claims estimate|estimate of record)\b/i.test(text) ||
+    /\b(?:state farm|geico|progressive|allstate|usaa|nationwide|liberty mutual|farmers|travelers)\b[^\n]{0,80}\b(?:estimate|appraisal|claim estimate)\b/i.test(text) ||
+    /\bprepared by\b[^\n]{0,60}\b(?:adjuster|appraiser|claims?\s+(?:rep|representative|adjuster|department))\b/i.test(text);
+  if (hasCarrierAuthor) {
+    return { estimateRole: "carrier_estimate", confidence: "high", signals: ["carrier/insurer author header"] };
+  }
+
+  return { estimateRole: "unknown", confidence: "low", signals };
+}
+
+export function estimatePairKindFromRoles(
+  sourceRole: HeaderEstimateRole,
+  comparisonRole: HeaderEstimateRole
+): "carrier_to_shop" | "shop_to_carrier" | "shop_to_shop" | "carrier_to_carrier" | "unknown" {
+  const sourceFamily = estimateRoleFamily(sourceRole);
+  const comparisonFamily = estimateRoleFamily(comparisonRole);
+  if (sourceFamily === "carrier" && comparisonFamily === "shop") return "carrier_to_shop";
+  if (sourceFamily === "shop" && comparisonFamily === "carrier") return "shop_to_carrier";
+  if (sourceFamily === "shop" && comparisonFamily === "shop") return "shop_to_shop";
+  if (sourceFamily === "carrier" && comparisonFamily === "carrier") return "carrier_to_carrier";
+  return "unknown";
+}
+
+function estimateRoleFamily(role: HeaderEstimateRole) {
+  if (role === "carrier_estimate") return "carrier";
+  if (role === "shop_initial" || role === "shop_supplement" || role === "shop_final") return "shop";
+  return "unknown";
 }
 
 export function isAnnotatableEstimatePdf(attachment: StoredAttachment) {
