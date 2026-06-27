@@ -15,16 +15,13 @@ const VOYAGE_MODEL = (process.env.VOYAGE_EMBED_MODEL || "voyage-3-large").trim()
 const MAX_INPUT_CHARS = 20000;
 const MAX_BATCH = 128; // Voyage hard limit per request.
 
-if (!process.env.VOYAGE_API_KEY) {
-  console.error("❌ Missing VOYAGE_API_KEY (rag/embed.ts)");
-}
-
 let voyageClient: VoyageAIClient | null = null;
 
-function getVoyageClient(): VoyageAIClient {
+function getVoyageClient(): VoyageAIClient | null {
   const apiKey = process.env.VOYAGE_API_KEY?.trim();
   if (!apiKey) {
-    throw new Error("VOYAGE_API_KEY is not configured.");
+    console.warn("[rag/embed] VOYAGE_API_KEY not configured — vector embeddings disabled");
+    return null;
   }
   if (!voyageClient) {
     voyageClient = new VoyageAIClient({ apiKey });
@@ -37,7 +34,9 @@ async function embedBatch(
   inputType: "query" | "document"
 ): Promise<number[][]> {
   if (!inputs.length) return [];
-  const res = await getVoyageClient().embed({
+  const client = getVoyageClient();
+  if (!client) return inputs.map(() => []);
+  const res = await client.embed({
     input: inputs,
     model: VOYAGE_MODEL,
     inputType,

@@ -28,6 +28,7 @@ import {
   describeReviewTarget,
   isAnnotatableEstimatePdf,
   isPdfDocument,
+  resolveHigherEstimatePdfSelection,
   resolveSourceEstimatePdfSelections,
   type SourceEstimatePdfSelection,
 } from "@/lib/reports/citationDensitySourcePdf";
@@ -37,10 +38,12 @@ import {
   resolveEvidenceCompletenessFromLedger,
 } from "@/lib/fileReviewLedger";
 import { retrieveDriveSupport } from "@/lib/ai/driveRetrievalService";
+import { retrieveWebSupport, type WebRetrievalResult } from "@/lib/ai/webRetrievalService";
 import { isDriveEnabled } from "@/lib/drive/download";
-import type {
-  DriveRetrievalRequest,
-  DriveRetrievalResult,
+import {
+  buildDriveRetrievalRequest,
+  type DriveRetrievalRequest,
+  type DriveRetrievalResult,
 } from "@/lib/ai/contracts/driveRetrievalContract";
 import {
   buildVehicleLabel,
@@ -389,24 +392,34 @@ function resolveOemSourceSelections(params: {
   report: Parameters<typeof resolveSourceEstimatePdfSelections>[0]["report"];
   sourceDiagnostics: ReturnType<typeof buildCitationDensitySourcePdfDiagnostics>;
 }): SourceEstimatePdfSelection[] {
-  const shouldAutoSelectLower =
+  const shouldAutoSelectHigher =
     (params.targetEstimate === "auto" || params.targetEstimate === "selected") &&
     params.sourceDocuments.filter(isAnnotatableEstimatePdf).length >= 2;
 
-  if (shouldAutoSelectLower) {
-    const lowerSelections = resolveSourceEstimatePdfSelections({
+  if (shouldAutoSelectHigher) {
+    // OEM Citation Density enhances the estimate under review with OEM/authority support. With
+    // multiple estimates, default to the higher/final estimate — it is the most complete repair
+    // plan, so OEM review covers every operation (initial scope + supplement additions).
+    const higherSelection = resolveHigherEstimatePdfSelection({
       attachments: params.sourceDocuments,
       report: params.report,
       targetEstimate: "auto",
       findings: [],
     });
-    if (lowerSelections.length > 0) {
-      return lowerSelections.map((selection) => ({
-        ...selection,
-        selectionReason: params.sourceDocumentId
-          ? `${selection.selectionReason} Ignored the supplied source document for OEM Citation Density because multiple estimate PDFs were present and OEM review defaults to the lower estimate.`
-          : selection.selectionReason,
-      }));
+    if (higherSelection) {
+      const totalText = typeof higherSelection.selectedEstimateTotal === "number"
+        ? `total ${higherSelection.selectedEstimateTotal}`
+        : "the higher total";
+      const ignoredSupplied =
+        Boolean(params.sourceDocumentId) && params.sourceDocumentId !== higherSelection.selectedSourceDocumentId;
+      return [{
+        ...higherSelection,
+        selectionReason:
+          `Auto-selected the higher-cost estimate PDF (${totalText}) as the OEM Citation Density review base — the higher/final estimate is the most complete repair plan, so OEM review covers every operation.` +
+          (ignoredSupplied
+            ? " Ignored the supplied source document because the higher/final estimate is the OEM review base."
+            : ""),
+      }];
     }
   }
 
@@ -523,7 +536,7 @@ function buildOemSelectionDiagnostics(params: {
     selectedEstimateTotal: primarySelection?.selectedEstimateTotal ?? null,
     comparisonEstimateTotal: primarySelection?.comparisonEstimateTotal ?? null,
     selectionBypassedReason: requestedWasBypassed
-      ? "requested sourceDocumentId ignored because OEM Citation Density auto/default selection uses the lower estimate when sibling estimates are available"
+      ? "requested sourceDocumentId ignored because OEM Citation Density auto/default selection uses the higher/final estimate when sibling estimates are available"
       : null,
   };
 }
@@ -576,6 +589,24 @@ async function buildOemAuthorityTrace(params: {
     params.sourceDocument.text ?? "",
     ...params.sourceDocuments.map((document) => `${document.filename ?? ""}\n${document.text ?? ""}`),
   ].join("\n"));
+  const userQuery = [
+    "OEM Citation Density authority retrieval for an estimate PDF.",
+    vehicle ? `Vehicle: ${vehicle}.` : "",
+    `Selected estimate: ${params.selection.selectedSourceLabel}.`,
+    "Find OEM procedures, OEM position statements, ADAS procedures, MOTOR/P-page support, SCRS/DEG-style estimating support, policy, and legal support relevant to the estimate rows.",
+  ].filter(Boolean).join(" ");
+
+  // Built once and reused for the internet (Serper) lane so the web fallback runs against the
+  // same vehicle/topics/jurisdiction the Drive lane would have used.
+  const retrievalRequest = buildDriveRetrievalRequest({
+    taskType: "oem_procedure_insight",
+    userQuery,
+    estimateText,
+    analysis: null,
+    maxResults: 8,
+    maxExcerptChars: 700,
+  });
+
   const base = buildBaseOemAuthorityTrace({
     driveSearchAvailable,
     vehicle,
@@ -584,19 +615,16 @@ async function buildOemAuthorityTrace(params: {
       : "Google Drive/internal authority retrieval is disabled or not configured for this server.",
   });
 
+  // Drive disabled → go straight to the internet (Serper) lane so the OEM report still retrieves
+  // OEM/jurisdictional/industry authority instead of returning an empty "trace incomplete".
   if (!driveSearchAvailable) {
-    return base;
+    return attemptOemWebFallback(base, retrievalRequest);
   }
 
   try {
     const response = await retrieveDriveSupport({
       taskType: "oem_procedure_insight",
-      userQuery: [
-        "OEM Citation Density authority retrieval for an estimate PDF.",
-        vehicle ? `Vehicle: ${vehicle}.` : "",
-        `Selected estimate: ${params.selection.selectedSourceLabel}.`,
-        "Find OEM procedures, OEM position statements, ADAS procedures, MOTOR/P-page support, SCRS/DEG-style estimating support, policy, and legal support relevant to the estimate rows.",
-      ].filter(Boolean).join(" "),
+      userQuery,
       estimateText,
       firstPassAnswer: "OEM Citation Density export must retrieve authority before labeling findings citation-ready.",
       maxResults: 8,
@@ -604,19 +632,25 @@ async function buildOemAuthorityTrace(params: {
     });
 
     if (!response || response.results.length === 0) {
-      return {
-        ...base,
-        authorityTraceCompleted: Boolean(response),
-        authorityCoverageStatus: response ? "complete" : "incomplete",
-        googleDriveOrInternalSearchRan: true,
-        driveSearchAttempted: true,
-        authorityTraceBlockedReason: response ? null : "Google Drive/internal authority retrieval did not return a response.",
-        skippedReason: response ? undefined : "Google Drive/internal authority retrieval did not return a response.",
-        driveSearchCompleted: Boolean(response),
-        driveMatchedFoldersCount: 0,
-        driveDocumentsReviewedCount: 0,
-        driveSearchTerms: extractDriveSearchTerms(response?.request),
-      };
+      // Internal retrieval produced nothing usable. A healthy Drive that simply found zero
+      // matches is a COMPLETE search (no line authority) — keep that completion state; only a
+      // missing response is incomplete. Either way, also try the internet lane to add sources.
+      return attemptOemWebFallback(
+        {
+          ...base,
+          authorityTraceCompleted: Boolean(response),
+          authorityCoverageStatus: response ? "complete" : "incomplete",
+          googleDriveOrInternalSearchRan: true,
+          driveSearchAttempted: true,
+          driveSearchCompleted: Boolean(response),
+          driveMatchedFoldersCount: 0,
+          driveDocumentsReviewedCount: 0,
+          driveSearchTerms: extractDriveSearchTerms(response?.request),
+          authorityTraceBlockedReason: response ? null : "Google Drive/internal authority retrieval did not return a response.",
+          skippedReason: response ? undefined : "Google Drive/internal authority retrieval did not return a response.",
+        },
+        retrievalRequest
+      );
     }
 
     const authoritySources = response.results.map(mapDriveResultToAuthoritySource);
@@ -663,14 +697,109 @@ async function buildOemAuthorityTrace(params: {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // Internal retrieval errored — still attempt the internet lane before giving up.
+    return attemptOemWebFallback(
+      {
+        ...base,
+        googleDriveOrInternalSearchRan: true,
+        driveSearchAttempted: true,
+        authorityTraceBlockedReason: `Google Drive/internal authority retrieval failed: ${message}`,
+        skippedReason: `Google Drive/internal authority retrieval failed: ${message}`,
+      },
+      retrievalRequest
+    );
+  }
+}
+
+// Internet (Serper) authority lane. Runs when Google Drive/internal retrieval is unavailable or
+// returns nothing, so the OEM report still ties findings to retrieved OEM/jurisdictional/industry
+// references (labeled ONLINE FALLBACK, unverified) instead of "Authority Trace Incomplete".
+async function attemptOemWebFallback(
+  trace: OemCitationDensityAuthorityTrace,
+  retrievalRequest: DriveRetrievalRequest | null
+): Promise<OemCitationDensityAuthorityTrace> {
+  if (!retrievalRequest) {
     return {
-      ...base,
-      googleDriveOrInternalSearchRan: true,
-      driveSearchAttempted: true,
-      authorityTraceBlockedReason: `Google Drive/internal authority retrieval failed: ${message}`,
-      skippedReason: `Google Drive/internal authority retrieval failed: ${message}`,
+      ...trace,
+      onlineSearchAttempted: false,
+      authorityTraceBlockedReason:
+        trace.authorityTraceBlockedReason ??
+        "Could not build an authority retrieval request from the estimate (no actionable repair topics inferred).",
     };
   }
+
+  const web = await retrieveWebSupport(retrievalRequest, { maxResults: 6, maxQueries: 3 }).catch(() => null);
+
+  // The web lane only ENHANCES — it must never flip an already-complete trace (e.g. a healthy
+  // Drive search that found zero matches) back to incomplete. Only attach a blocked reason when
+  // the incoming trace was not already completed.
+  const blockedReasonOnWebMiss = (reason: string) =>
+    trace.authorityTraceCompleted ? trace.authorityTraceBlockedReason ?? null : trace.authorityTraceBlockedReason ?? reason;
+
+  if (!web || web.status === "not_configured") {
+    return {
+      ...trace,
+      onlineSearchAttempted: false,
+      authorityTraceBlockedReason: blockedReasonOnWebMiss(
+        web?.status === "not_configured"
+          ? "Internet (Serper) authority retrieval is not configured (missing SERPER_API_KEY)."
+          : "Internet (Serper) authority retrieval did not return a response."
+      ),
+    };
+  }
+
+  if (web.status !== "success" || web.results.length === 0) {
+    return {
+      ...trace,
+      onlineSearchAttempted: true,
+      onlineSourcesReviewed: [],
+      authorityTraceBlockedReason: blockedReasonOnWebMiss("Internet (Serper) authority retrieval returned no results."),
+    };
+  }
+
+  const webSources = web.results.map(mapWebResultToOemAuthoritySource);
+  const contextText = web.results
+    .map((result) => [`Online source: ${result.title}`, `URL: ${result.url}`, result.snippet].filter(Boolean).join("\n"))
+    .join("\n\n");
+
+  return {
+    ...trace,
+    authorityTraceCompleted: true,
+    authorityTraceBlockedReason: null,
+    skippedReason: undefined,
+    authorityCoverageStatus: "partial",
+    onlineSearchAttempted: true,
+    onlineSourcesReviewed: uniqueStrings(web.results.map((result) => result.title || result.url)),
+    oemSourcesReviewed: uniqueStrings([
+      ...trace.oemSourcesReviewed,
+      ...web.results.filter((result) => result.sourceType === "oem").map((result) => result.title),
+    ]),
+    jurisdictionSourcesReviewed: uniqueStrings([
+      ...trace.jurisdictionSourcesReviewed,
+      ...web.results.filter((result) => result.sourceType === "law").map((result) => result.title),
+    ]),
+    policyLegalSourcesReviewed: uniqueStrings([
+      ...trace.policyLegalSourcesReviewed,
+      ...web.results.filter((result) => result.sourceType === "law").map((result) => result.title),
+    ]),
+    authoritySources: [...trace.authoritySources, ...webSources],
+    authorityContextText: [trace.authorityContextText, contextText].filter(Boolean).join("\n\n"),
+  };
+}
+
+function mapWebResultToOemAuthoritySource(result: WebRetrievalResult): OemCitationDensityAuthoritySource {
+  const label = result.sourceType === "law" ? "jurisdictional/legal" : result.sourceType === "oem" ? "OEM" : "industry";
+  return {
+    title: result.title,
+    sourceType: "internet_fallback",
+    evidenceTier: 7,
+    verified: false,
+    note: [
+      `Online ${label} reference (unverified internet fallback — confirm against primary OEM/jurisdictional source before relying on it).`,
+      result.url,
+      result.snippet,
+    ].filter(Boolean).join(" "),
+  };
 }
 
 function buildBaseOemAuthorityTrace(params: {

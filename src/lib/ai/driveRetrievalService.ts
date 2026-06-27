@@ -437,22 +437,38 @@ async function searchDriveChunks(params: {
   const sourceFilter = sourceColumn ? `AND ${sourceColumn} = 'google'` : "";
   const vectorLimit = Math.max(4, Math.min(params.limit * 3, 18));
   const keywordLimit = Math.max(3, Math.min(params.limit * 2, 12));
-  const queryVector = JSON.stringify(await embedText(params.query));
 
-  const vectorRows = await prisma.$queryRawUnsafe<DriveChunkRow[]>(
-    `
-      SELECT id, content, file_id, (embedding <-> $1::vector) AS distance
-      FROM document_chunks
-      WHERE embedding IS NOT NULL
-        AND file_id = ANY($2::text[])
-        ${sourceFilter}
-      ORDER BY distance ASC
-      LIMIT $3
-    `,
-    queryVector,
-    params.fileIds,
-    vectorLimit
-  );
+  // Vector search is best-effort. If embeddings are not configured (VOYAGE_API_KEY missing →
+  // empty vector) or the stored vectors were produced by a different model/dimension (e.g. legacy
+  // OpenAI rows not yet re-ingested for Voyage), the `::vector` cast/`<->` op throws. Skip or
+  // degrade to keyword-only search instead of failing the entire Drive retrieval.
+  const embedding = await embedText(params.query);
+  let vectorRows: DriveChunkRow[] = [];
+  if (embedding.length > 0) {
+    try {
+      vectorRows = await prisma.$queryRawUnsafe<DriveChunkRow[]>(
+        `
+          SELECT id, content, file_id, (embedding <-> $1::vector) AS distance
+          FROM document_chunks
+          WHERE embedding IS NOT NULL
+            AND file_id = ANY($2::text[])
+            ${sourceFilter}
+          ORDER BY distance ASC
+          LIMIT $3
+        `,
+        JSON.stringify(embedding),
+        params.fileIds,
+        vectorLimit
+      );
+    } catch (error) {
+      console.warn("[drive] vector search failed, falling back to keyword-only", {
+        message: error instanceof Error ? error.message : String(error),
+        hint: "Check VOYAGE_API_KEY and that document_chunks were re-ingested with the current embedding model/dimension.",
+      });
+    }
+  } else {
+    console.warn("[drive] query embedding unavailable (VOYAGE_API_KEY missing?) — keyword-only Drive search");
+  }
 
   const keywordRows = await prisma.$queryRawUnsafe<DriveChunkRow[]>(
     `

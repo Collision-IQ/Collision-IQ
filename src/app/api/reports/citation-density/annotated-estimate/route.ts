@@ -26,6 +26,7 @@ import {
   hasCarrierAuthoredEstimate,
   isAnnotatableEstimatePdf,
   isPdfDocument,
+  resolveHigherEstimatePdfSelection,
   resolveSourceEstimatePdfSelections,
   type SourceEstimatePdfSelection,
 } from "@/lib/reports/citationDensitySourcePdf";
@@ -112,6 +113,9 @@ export async function POST(request: Request) {
         { status: caseId ? 404 : 400 }
       );
     }
+    // Capture the non-null report so the nested resolveDeltaSourceSelections closure keeps the
+    // narrowing (TS does not carry the early-return narrowing into a nested function).
+    const activeReport = report;
 
     const candidateIds = uniqueStrings([...report.artifactIds, sourceDocumentId || undefined]);
     const sourceDocuments = await getUploadedAttachments(candidateIds, {
@@ -128,27 +132,77 @@ export async function POST(request: Request) {
       renderModel: undefined,
     });
     const canonicalDeltaSet = resolveRo21896CanonicalDeltaSet(sourceDocuments);
-    const sourceSelections: SourceEstimatePdfSelection[] = sourceDocumentId
-      ? explicitSourceDocument && isAnnotatableEstimatePdf(explicitSourceDocument)
-        ? [{
-            attachment: explicitSourceDocument,
-            selectedSourceDocumentId: explicitSourceDocument.id,
-            selectedSourceLabel: explicitSourceDocument.filename || "Selected estimate",
-            selectedEstimateRole: normalizeRequestedEstimateRole(selectedEstimateRole, targetEstimate),
-            selectedEstimateTotal: null,
-            targetEstimate,
-            selectionReason: `The client supplied a source document ID${body.sourceFilename ? ` for ${coerceString(body.sourceFilename)}` : ""}.`,
-            selectedDocumentType: "estimate",
-            selectedDocumentConfidence: 1,
-            selectionDiagnostics: sourceDiagnostics,
-          }]
-        : []
-      : resolveSourceEstimatePdfSelections({
-          attachments: sourceDocuments,
-          report: report.report,
+    // When a canonical delta set is present, the Delta Citation Density report must annotate
+    // the supplement/final estimate, not the lower one. The supplement-added lines (PRESENCE
+    // deltas with anchor_initial === null) only exist in the final PDF, and the renderer only
+    // emits anchor_final when the rendered document id matches estimateFiles.supplement.
+    // Annotating the lower estimate leaves every added line unanchored.
+    const canonicalSupplementId = canonicalDeltaSet?.estimateFiles.supplement.sourceDocumentId;
+    const canonicalSupplementDocument = canonicalSupplementId
+      ? sourceDocuments.find(
+          (document) => document.id === canonicalSupplementId && isAnnotatableEstimatePdf(document)
+        ) ?? null
+      : null;
+    const sourceSelections: SourceEstimatePdfSelection[] = resolveDeltaSourceSelections();
+
+    function resolveDeltaSourceSelections(): SourceEstimatePdfSelection[] {
+      // An explicit client-supplied source document always wins.
+      if (sourceDocumentId) {
+        return explicitSourceDocument && isAnnotatableEstimatePdf(explicitSourceDocument)
+          ? [{
+              attachment: explicitSourceDocument,
+              selectedSourceDocumentId: explicitSourceDocument.id,
+              selectedSourceLabel: explicitSourceDocument.filename || "Selected estimate",
+              selectedEstimateRole: normalizeRequestedEstimateRole(selectedEstimateRole, targetEstimate),
+              selectedEstimateTotal: null,
+              targetEstimate,
+              selectionReason: `The client supplied a source document ID${body.sourceFilename ? ` for ${coerceString(body.sourceFilename)}` : ""}.`,
+              selectedDocumentType: "estimate",
+              selectedDocumentConfidence: 1,
+              selectionDiagnostics: sourceDiagnostics,
+            }]
+          : [];
+      }
+
+      // Canonical delta present: annotate the bound supplement/final estimate so the renderer
+      // emits anchor_final for supplement-added lines (which only exist on that PDF).
+      if (canonicalSupplementDocument) {
+        return [{
+          attachment: canonicalSupplementDocument,
+          selectedSourceDocumentId: canonicalSupplementDocument.id,
+          selectedSourceLabel: canonicalSupplementDocument.filename || "Supplement estimate",
+          selectedEstimateRole: "shop",
+          selectedEstimateTotal: canonicalDeltaSet?.estimateFiles.supplement.total ?? null,
+          comparisonEstimateTotal: canonicalDeltaSet?.estimateFiles.initial.total ?? null,
           targetEstimate,
-          findings: model.citationDensityFindings,
-        });
+          selectionReason: `Delta Citation Density annotates the supplement/final estimate (${canonicalDeltaSet?.estimateFiles.supplement.filename ?? canonicalSupplementDocument.filename}) so supplement-added lines anchor to anchor_final.`,
+          selectedDocumentType: "estimate",
+          selectedDocumentConfidence: 1,
+          selectionDiagnostics: sourceDiagnostics,
+        }];
+      }
+
+      // Generic (non-canonical) delta: annotate the HIGHER-cost estimate so the lines the
+      // lower-cost estimate is missing/reduced anchor precisely where they exist. Pair-agnostic
+      // (shop-vs-insurance, shop-vs-shop, …). Falls back to the standard resolver for the
+      // single-estimate case or an explicit carrier/shop target.
+      const higher = targetEstimate === "auto"
+        ? resolveHigherEstimatePdfSelection({
+            attachments: sourceDocuments,
+            report: activeReport.report,
+            targetEstimate,
+            findings: model.citationDensityFindings,
+          })
+        : null;
+      if (higher) return [higher];
+
+      return resolveSourceEstimatePdfSelections({
+        attachments: sourceDocuments,
+        report: activeReport.report,
+        targetEstimate,
+        findings: model.citationDensityFindings,
+      });
+    }
 
     /*
      * Backward compatibility: if a caller still sends sourceDocumentId, honor it.

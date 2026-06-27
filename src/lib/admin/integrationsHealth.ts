@@ -41,6 +41,8 @@ export type IntegrationsHealthPayload = {
       canSearchByMakeModel: boolean;
       canReturnDocumentMetadata: boolean;
       canReturnDocumentContentOrSnippet: boolean;
+      embeddingsConfigured: boolean;
+      vectorSearchAvailable: boolean;
       errorType: string | null;
     };
   };
@@ -100,12 +102,19 @@ export async function buildIntegrationsHealth(options: IntegrationsHealthOptions
     checkDatabase(env, options.databasePing),
     checkAgents(env),
   ]);
+  // Drive vector (semantic) search depends on Voyage embeddings. Without VOYAGE_API_KEY, Drive
+  // retrieval still works but degrades to keyword-only — surface that explicitly so the symptom
+  // (sparse/empty authority results) is diagnosable without reading logs.
+  const embeddingsConfigured = Boolean(env.VOYAGE_API_KEY?.trim());
+  const googleDriveAvailable = googleDrive.configured && googleDrive.reachable === true;
   const authorityRetrieval = {
-    googleDriveAvailable: googleDrive.configured && googleDrive.reachable === true,
+    googleDriveAvailable,
     makeModelFolderSearchAvailable: googleDrive.folderSearchAvailable === true,
     canSearchByMakeModel: googleDrive.folderSearchAvailable === true,
     canReturnDocumentMetadata: googleDrive.matchedRootAvailable === true,
     canReturnDocumentContentOrSnippet: googleDrive.folderSearchAvailable === true,
+    embeddingsConfigured,
+    vectorSearchAvailable: googleDriveAvailable && embeddingsConfigured,
     errorType: googleDrive.errorType,
   };
   const services = {

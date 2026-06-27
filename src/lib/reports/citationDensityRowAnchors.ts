@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import type { PDFDocument } from "pdf-lib";
 import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
@@ -418,11 +417,57 @@ async function extractPdfWordsWithPdfjs(
   };
 }
 
-const requireFromThisModule = createRequire(pathToFileURL(__filename).href);
+const PDFJS_WORKER_SUBPATH = path.join("pdfjs-dist", "legacy", "build", "pdf.worker.mjs");
+
+// Resolve the PDF.js Node worker by locating it under node_modules directly, rather than via
+// createRequire(__filename). webpack cannot statically analyze createRequire's dynamic argument,
+// so it warned ("module.createRequire failed parsing argument") and stubbed node:module — leaving
+// the resolver undefined at runtime. Walking up from cwd (and this module) matches the path that
+// next.config `outputFileTracingIncludes` already traces into the deployment, with no bundler
+// static-analysis hazard.
+function findPdfJsWorkerPath(): string | null {
+  const roots = [
+    process.cwd(),
+    // Walk up from this module's directory to cover monorepo / hoisted layouts.
+    ...moduleAncestorDirectories(),
+  ];
+  for (const root of roots) {
+    const candidate = path.join(root, "node_modules", PDFJS_WORKER_SUBPATH);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function moduleAncestorDirectories(): string[] {
+  const dirs: string[] = [];
+  try {
+    let current = typeof __dirname === "string" ? __dirname : process.cwd();
+    for (let depth = 0; depth < 8; depth += 1) {
+      dirs.push(current);
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  } catch {
+    // __dirname unavailable — cwd already covers the common case.
+  }
+  return dirs;
+}
 
 export function resolvePdfJsNodeWorker() {
   try {
-    const workerPath = requireFromThisModule.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs");
+    const workerPath = findPdfJsWorkerPath();
+    if (!workerPath) {
+      return {
+        pdfWorkerResolvedPath: undefined,
+        pdfWorkerExists: false,
+        pdfWorkerSrc: undefined,
+        pdfjsImportMode: undefined,
+        workerResolutionAttempted: true,
+        workerResolutionSucceeded: false,
+        workerResolutionError: `PDF.js worker file not found under any node_modules root for ${PDFJS_WORKER_SUBPATH}`,
+      };
+    }
     const workerExists = fs.existsSync(workerPath);
     const workerSrc = workerExists ? pathToFileURL(workerPath).href : undefined;
     const pdfjsImportMode = workerPath.includes(`${path.sep}node_modules${path.sep}`)

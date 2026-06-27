@@ -1,6 +1,7 @@
 export type EstimateLinkClassification =
   | "oem_procedure"
   | "generic_reference"
+  | "internal_repository"
   | "unsupported";
 
 export type EstimateLinkCandidate = {
@@ -103,6 +104,13 @@ export function isFetchableEstimateLink(link: EstimateLinkCandidate): boolean {
   return link.classification !== "unsupported";
 }
 
+// Hosts that belong to Collision IQ's own document management system. Egnyte is the org DMS;
+// any *.egnyte.com host is treated as an internal repository source.
+export function isInternalRepositoryHost(host: string): boolean {
+  const lower = host.toLowerCase();
+  return lower === "egnyte.com" || lower.endsWith(".egnyte.com");
+}
+
 function classifyEstimateLink(urlValue: string): EstimateLinkClassification {
   try {
     const url = new URL(urlValue);
@@ -112,6 +120,14 @@ function classifyEstimateLink(urlValue: string): EstimateLinkClassification {
 
     if (UNSUPPORTED_DOMAIN_HINTS.some((hint) => lowerHost.includes(hint))) {
       return "unsupported";
+    }
+
+    // Collision IQ's own document repository (Egnyte DMS). Shop estimates frequently embed
+    // Egnyte share links (e.g. https://<org>.egnyte.com/fl/<id>) pointing at OEM procedures,
+    // scans, and supporting docs. These are our own source — recognize them and attempt
+    // retrieval via the Egnyte integration instead of discarding them as "unsupported".
+    if (isInternalRepositoryHost(lowerHost)) {
+      return "internal_repository";
     }
 
     const directPdf = /\.pdf(?:$|[?#])/i.test(urlValue);

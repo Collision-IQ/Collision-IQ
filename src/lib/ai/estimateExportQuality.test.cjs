@@ -53,7 +53,7 @@ const {
   assessRetrievedDocumentApplicability,
   resolveVehicleApplicabilityContext,
 } = require("./vehicleApplicability.ts");
-const { extractEstimateLinksFromDocuments } = require("./estimateLinkExtractor.ts");
+const { extractEstimateLinksFromDocuments, isFetchableEstimateLink } = require("./estimateLinkExtractor.ts");
 const { deriveRenderInsightsFromChat } = require("./builders/deriveRenderInsightsFromChat.ts");
 const { buildRepairStory } = require("./builders/buildRepairStory.ts");
 const { cleanVehicleSummaryLabel, cleanVehicleTrimLabel } = require("../ui/presentationText.ts");
@@ -958,6 +958,29 @@ Ignore this marketing page: https://www.instagram.com/collision_academy
     links.some((link) => /instagram/i.test(link.domain) && link.classification === "unsupported"),
     true
   );
+});
+
+run("estimate link extractor recognizes the Egnyte repository as fetchable, vendor sites stay unsupported", () => {
+  const links = extractEstimateLinksFromDocuments([
+    {
+      filename: "shop-21896.txt",
+      text: `
+Supporting docs: https://collisionacademy.egnyte.com/fl/djvpdTXmB3gy
+Accessory: https://teslaunch.net/products/no-drill-front-rear-fender-mud-flaps
+      `,
+    },
+  ]);
+
+  const egnyte = links.find((link) => /egnyte\.com$/i.test(link.domain));
+  const vendor = links.find((link) => /teslaunch\.net$/i.test(link.domain));
+  assert.ok(egnyte, "Egnyte link should be extracted");
+  // Our own repository must be recognized and fetchable, never "unsupported".
+  assert.equal(egnyte.classification, "internal_repository");
+  assert.equal(isFetchableEstimateLink(egnyte), true);
+  // A vendor/accessory site is correctly left unsupported.
+  assert.ok(vendor, "Vendor link should be extracted");
+  assert.equal(vendor.classification, "unsupported");
+  assert.equal(isFetchableEstimateLink(vendor), false);
 });
 
 run("retrieved document applicability rejects mismatched OEM systems and keeps generic docs", () => {

@@ -45,7 +45,7 @@ type ChatGenerationRequest = {
   input: ResponsesInput;
   temperature?: number;
 };
-import { getCollisionIqModelDiagnostic } from "@/lib/modelConfig";
+import { getCollisionIqModelDiagnostic, collisionIqProvider } from "@/lib/modelConfig";
 import {
   areInternalRetrievalPathsResolved,
   createAgentRetrievalTrace,
@@ -1049,7 +1049,10 @@ export async function POST(req: Request) {
   let agentTrace: AgentRetrievalTrace | null = null;
 
   try {
-    if (!process.env.OPENAI_API_KEY?.trim()) {
+    // Chat text generation runs on Anthropic (post-migration); OpenAI is only a legacy fallback.
+    // Gate on either provider key being present so a Claude-only production env isn't falsely
+    // reported as "not configured" (was previously OPENAI_API_KEY-only → 503 on Anthropic-only).
+    if (!process.env.ANTHROPIC_API_KEY?.trim() && !process.env.OPENAI_API_KEY?.trim()) {
       return NextResponse.json(
         { error: "Chat service is not configured." },
         { status: 503 }
@@ -1706,7 +1709,7 @@ export async function POST(req: Request) {
     }
 
     const providerError = classifyRetryableProviderError(error, {
-      provider: "openai",
+      provider: collisionIqProvider.primary,
       stage: "chat",
     });
 

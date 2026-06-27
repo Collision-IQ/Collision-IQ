@@ -338,6 +338,59 @@ function resolveLowerEstimatePdfSelection(params: {
   });
 }
 
+// The Delta Citation Density report annotates the HIGHER-cost estimate and highlights the
+// lines the lower-cost estimate is missing or reduced. The missing/added lines only exist on
+// the higher estimate, so it must be the annotation base for them to anchor precisely. This is
+// the generic counterpart to resolveLowerEstimatePdfSelection and is pair-agnostic (works for
+// shop-vs-insurance, shop-vs-shop, etc.) — it ranks purely on parsed estimate total.
+export function resolveHigherEstimatePdfSelection(params: {
+  attachments: StoredAttachment[];
+  report: RepairIntelligenceReport;
+  targetEstimate: CitationDensityTargetEstimate;
+  findings: CitationDensityFinding[];
+}): SourceEstimatePdfSelection | null {
+  const pdfs = params.attachments.filter(isAnnotatableEstimatePdf);
+  const selectionDiagnostics = buildCitationDensitySourcePdfDiagnostics(params.attachments);
+  if (pdfs.length < 2) return null;
+
+  const evidenceTypeByLabel = new Map<string, string>();
+  for (const item of params.report.evidenceRegistry ?? []) {
+    const label = normalizeRoleText(item.label);
+    if (label) evidenceTypeByLabel.set(label, item.sourceType);
+  }
+
+  const candidates = pdfs
+    .map((attachment, index) => ({
+      attachment,
+      index,
+      role: inferEstimateRole(attachment, evidenceTypeByLabel),
+      total: extractEstimateTotal(attachment),
+    }))
+    .filter((candidate): candidate is {
+      attachment: StoredAttachment;
+      index: number;
+      role: SourceEstimatePdfSelection["selectedEstimateRole"];
+      total: number;
+    } => typeof candidate.total === "number" && Number.isFinite(candidate.total))
+    .sort((a, b) => b.total - a.total || a.index - b.index);
+
+  const highest = candidates[0];
+  if (!highest) return null;
+  const comparison = candidates.find((candidate) => candidate.attachment.id !== highest.attachment.id);
+  // Both totals identical → no meaningful delta direction; let the caller fall back.
+  if (comparison && comparison.total === highest.total) return null;
+
+  return buildSelectionResult({
+    attachment: highest.attachment,
+    targetEstimate: "auto",
+    selectedEstimateRole: highest.role === "unknown" ? "selected" : highest.role,
+    selectedEstimateTotal: highest.total,
+    comparisonEstimateTotal: comparison?.total ?? null,
+    selectionReason: `Auto-selected the higher-cost estimate PDF as the Delta annotation base (total ${highest.total}); the lower-cost estimate is the comparison.`,
+    selectionDiagnostics,
+  });
+}
+
 export function scoreEstimatePdfCandidate(params: {
   attachment: StoredAttachment;
   targetEstimate: CitationDensityTargetEstimate;

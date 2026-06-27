@@ -307,7 +307,7 @@ const INITIAL_MESSAGE: Message = {
   role: "assistant",
   kind: "analysis",
   content:
-    "Hi there - upload an estimate, OEM procedure, or photo and I'll produce a structured repair analysis.",
+    "Hi there — upload an estimate, OEM procedure, or photo, and I'll produce a structured repair analysis.",
 };
 
 const TTS_ALLOW_BROWSER_FALLBACK =
@@ -2349,10 +2349,10 @@ export default function ChatWidget({
           });
           pushAssistantMessage(
             [
-              "Full review is ready. I generated the analysis and updated the right rail/reports.",
-              `Reviewed file count: ${nextReviewProgress.reviewedForDetermination}.`,
-              analysisData.contextBudgetMessage ? `Review note: ${analysisData.contextBudgetMessage}` : null,
-              "Report availability: the right rail and bottom report viewer are updated when generated outputs are available.",
+              "Your review is ready — I've analyzed your files and updated the reports on the right.",
+              `Reviewed ${nextReviewProgress.reviewedForDetermination} file${nextReviewProgress.reviewedForDetermination === 1 ? "" : "s"}.`,
+              analysisData.contextBudgetMessage ? `Note: ${analysisData.contextBudgetMessage}` : null,
+              "You'll find the generated reports in the right panel, and in the report viewer below.",
             ].filter(Boolean).join("\n")
           );
         }
@@ -2587,10 +2587,10 @@ export default function ChatWidget({
             );
             pushAssistantMessage(
               [
-                "Full review is ready. I generated the analysis and updated the right rail/reports.",
-                `Reviewed file count: ${nextReviewProgress.reviewedForDetermination}.`,
-                analysisData.contextBudgetMessage ? `Review note: ${analysisData.contextBudgetMessage}` : null,
-                "Report availability: the right rail and bottom report viewer are updated when generated outputs are available.",
+                "Your review is ready — I've analyzed your files and updated the reports on the right.",
+                `Reviewed ${nextReviewProgress.reviewedForDetermination} file${nextReviewProgress.reviewedForDetermination === 1 ? "" : "s"}.`,
+                analysisData.contextBudgetMessage ? `Note: ${analysisData.contextBudgetMessage}` : null,
+                "You'll find the generated reports in the right panel, and in the report viewer below.",
               ].filter(Boolean).join("\n")
             );
           })
@@ -3652,7 +3652,7 @@ export default function ChatWidget({
         <div
           ref={scrollRef}
           className={[
-            "min-h-0 px-3 pb-4 pt-3 sm:px-4 sm:pt-4 space-y-4",
+            "mx-auto w-full max-w-[1080px] min-h-0 px-3 pb-4 pt-3 sm:px-4 sm:pt-4 space-y-4",
             transcriptHeightClass,
           ].join(" ")}
         >
@@ -3782,7 +3782,7 @@ export default function ChatWidget({
                     ? `${userBubble} max-w-[88%] overflow-hidden break-words sm:max-w-[min(72%,820px)]`
                     : msg.kind === "system_status"
                       ? ""
-                      : "min-w-0 max-w-full overflow-hidden break-words border border-border bg-card sm:max-w-[860px]"
+                      : "min-w-0 max-w-full overflow-hidden break-words border border-border bg-card sm:max-w-[980px]"
                 }`}
               >
                 {msg.role === "assistant" && msg.kind !== "system_status" ? (
@@ -3920,7 +3920,7 @@ export default function ChatWidget({
             shouldCompactMobileChat ? "min-h-[56px] py-1.5 lg:min-h-[74px] lg:py-2" : "min-h-[74px] py-2",
           ].join(" ")}
         >
-          <div className="mx-auto w-full max-w-none">
+          <div className="mx-auto w-full max-w-[1080px]">
             <div
               onDragEnter={handleUploadDragEnter}
               onDragOver={handleUploadDragOver}

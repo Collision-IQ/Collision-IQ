@@ -28,6 +28,29 @@ Use this before a production release.
   - Optional `NEXT_PUBLIC_COLLISION_IQ_TTS_VOICE` such as `nova`.
   - Browser/system TTS is disabled by default; enable only for fallback testing with `NEXT_PUBLIC_COLLISION_IQ_ENABLE_BROWSER_TTS=true`.
 
+## 1A. Report Intelligence Retrieval Lanes (env → feature → symptom)
+
+The chat + Citation Density reports are correct in code but several lanes are **gated on
+environment keys**. If a key is absent the feature degrades gracefully (honest "not configured" /
+keyword-only), it does not crash. Verify each lane below, then confirm via
+`GET /api/admin/integrations-health` (see `services.authorityRetrieval`, `services.googleDrive`,
+and `inventory[].envPresent`).
+
+| Lane / feature | Required env | Optional env | Symptom when missing |
+| --- | --- | --- | --- |
+| **LLM (chat, analysis, all reports)** | `ANTHROPIC_API_KEY` | `ANTHROPIC_MODEL_PRIMARY` (default `claude-opus-4-8`), `ANTHROPIC_BASE_URL` | Chat/analysis/report generation fails. |
+| **Embeddings / Drive semantic search** | `VOYAGE_API_KEY` | `VOYAGE_EMBED_MODEL` (default `voyage-3-large`) | Drive search falls back to **keyword-only** (`[drive] query embedding unavailable…`). `authorityRetrieval.vectorSearchAvailable=false`. |
+| **Internet authority (OEM Citation Density) + market comps + deep research** | `SERPER_API_KEY` *(or `GOOGLE_SERPER_API_KEY`)* | — | OEM findings stay **AUTHORITY TRACE INCOMPLETE**; market preview `provider_not_configured`. A 4xx now logs the Serper body (`[web-retrieval] Serper query failed`, market-preview `failureReason`) → check key/credits. |
+| **Internal OEM authority (Google Drive DMS)** | `GOOGLE_DRIVE_ENABLED=true`, `GOOGLE_SHARED_DRIVE_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON_BASE64` *(or `GOOGLE_SA_JSON`)*, `GOOGLE_IMPERSONATION_USER` *(or `GOOGLE_IMPERSONATE_SUBJECT`)*, `GOOGLE_OEM_PROCEDURES_FOLDER_ID`, `GOOGLE_OEM_POSITION_STATEMENTS_FOLDER_ID` | `GOOGLE_PA_LAW_FOLDER_ID`, `GOOGLE_PA_INSURANCE_POLICIES_FOLDER_ID` | Drive search "disabled or not configured"; OEM falls back to the internet lane only. **Also requires `VOYAGE_API_KEY` + `document_chunks` re-ingested with the current Voyage model** (legacy OpenAI-dim vectors auto-fall back to keyword). |
+| **Estimate embedded links (Egnyte, own DMS)** | `EGNYTE_BASE_URL`, `EGNYTE_API_TOKEN` | `EGNYTE_CLIENT_ID`, `EGNYTE_CLIENT_SECRET` (OAuth) | `*.egnyte.com` estimate links are recognized as fetchable but report "Egnyte repository link recognized, but the Egnyte integration is not configured." Vendor sites (e.g. `teslaunch.net`) correctly stay unsupported. |
+
+Expected report behavior once configured (verified this cycle):
+- **Delta Citation Density** annotates the **higher-cost** estimate and highlights what the
+  lower-cost estimate is missing/reduced (pair-agnostic; mostly shop-vs-insurance).
+- **OEM Citation Density** annotates the **higher/final** estimate and enhances each line with
+  OEM / jurisdictional / policy / internet authority; unverified internet hits are labeled
+  **ONLINE FALLBACK**, never VERIFIED OEM.
+
 ## 2. Static Checks
 
 Run:

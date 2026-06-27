@@ -55,7 +55,18 @@ export async function retrieveWebSupport(
         body: JSON.stringify({ q: query, num: 6 }),
       }).catch(() => null);
 
-      if (!response?.ok) continue;
+      if (!response?.ok) {
+        // Surface the Serper failure reason (e.g. credits/auth/bad-request) instead of silently
+        // swallowing it — otherwise the OEM authority + deep-research lanes look like "no results"
+        // when the real cause is an account/key/credits issue (mirrors the market-preview fix).
+        const body = response ? (await response.text().catch(() => "")).trim().slice(0, 200) : "";
+        console.warn("[web-retrieval] Serper query failed", {
+          status: response?.status ?? "no_response",
+          query,
+          detail: body || undefined,
+        });
+        continue;
+      }
       const payload = (await response.json().catch(() => null)) as SerperPayload | null;
 
       for (const item of payload?.organic ?? []) {

@@ -594,7 +594,7 @@ export async function POST(req: Request) {
         })),
       ],
       contextBudgetMessage: contextBudgetDiagnostics?.contextReductionApplied
-        ? "Analysis context was too large. I reduced the file set to the most relevant policy/estimate sections and retried."
+        ? "There was a lot to read, so I focused on the most relevant policy and estimate sections for this review."
         : null,
       analysisCompletedAt: new Date().toISOString(),
       caseContinuity: {
@@ -849,7 +849,7 @@ async function attachMarketPreviewComparables(params: {
     } as MarketPreviewReport;
   }
 
-  const apiKey = process.env.SERPER_API_KEY?.trim();
+  const apiKey = (process.env.SERPER_API_KEY || process.env.GOOGLE_SERPER_API_KEY)?.trim();
   if (!apiKey) {
     recordMarketPreviewTraceSkipped(
       params.agentTrace,
@@ -1267,7 +1267,12 @@ async function runMarketPreviewSearch(
   }).finally(() => clearTimeout(timeout));
 
   if (!response.ok) {
-    throw new Error(`Market comparable search failed with status ${response.status}.`);
+    // Surface Serper's own error body — a well-formed request that returns 4xx is almost always
+    // an account/key/credits issue (e.g. {"message":"Not enough credits"} / "Unauthorized."),
+    // and that detail is otherwise lost behind an opaque status code.
+    const errorBody = (await response.text().catch(() => "")).trim();
+    const detail = errorBody ? ` ${errorBody.slice(0, 300)}` : "";
+    throw new Error(`Market comparable search failed with status ${response.status}.${detail}`);
   }
 
   const payload = await response.json();

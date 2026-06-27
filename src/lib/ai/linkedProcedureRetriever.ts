@@ -9,6 +9,11 @@ import {
   type VehicleApplicabilityContext,
 } from "./vehicleApplicability";
 import type { EstimateLinkCandidate } from "./estimateLinkExtractor";
+import {
+  downloadEgnyteSharedLink,
+  extractEgnyteShareLinkId,
+  isEgnyteConfigured,
+} from "@/lib/egnyte/sharedLink";
 
 export type LinkedProcedureDoc = {
   url: string;
@@ -135,6 +140,29 @@ async function fetchLinkedProcedureDoc(
   link: EstimateLinkCandidate,
   timeoutMs: number
 ): Promise<{ title?: string; text: string } | null> {
+  // Egnyte share link (Collision IQ's own DMS). Resolve it through the Egnyte API and parse the
+  // underlying file. When Egnyte is not configured we surface a clear, retrieval-was-attempted
+  // failure (caller records it) rather than falling through to a generic GET of the HTML viewer.
+  const egnyteLinkId = extractEgnyteShareLinkId(link.url);
+  if (egnyteLinkId) {
+    if (!isEgnyteConfigured()) {
+      throw new Error("Egnyte repository link recognized, but the Egnyte integration is not configured for this environment (EGNYTE_BASE_URL / EGNYTE_API_TOKEN).");
+    }
+    const downloaded = await downloadEgnyteSharedLink(link.url);
+    if (!downloaded) return null;
+    const mimeType = downloaded.mimeType?.toLowerCase() ?? "";
+    if (mimeType.includes("application/pdf") || /\.pdf$/i.test(downloaded.name)) {
+      const parsed = await pdfParse(downloaded.buffer);
+      const text = parsed.text?.replace(/\s+/g, " ").trim();
+      return text ? { title: downloaded.name, text } : null;
+    }
+    if (mimeType.includes("text") || mimeType.includes("csv") || mimeType.includes("json")) {
+      const text = downloaded.buffer.toString("utf-8").replace(/\s+/g, " ").trim();
+      return text ? { title: downloaded.name, text } : null;
+    }
+    return null;
+  }
+
   const driveFileId = extractDriveFileIdFromUrl(link.url);
   if (driveFileId) {
     if (!isDriveEnabled()) {

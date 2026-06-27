@@ -333,6 +333,43 @@ async function createShop21896LowerEstimatePdf() {
   return await doc.save();
 }
 
+// Higher-cost estimate: the Delta report annotates THIS document and highlights the lines the
+// lower-cost estimate is missing/reduced, anchored where they exist.
+async function createShop21896HigherEstimatePdf() {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([612, 792]);
+  const rows = [
+    "Shop Final 21896 final estimate",
+    "Net Cost of Repairs $17,397.20",
+    "REAR SUSPENSION",
+    "60 Repl LT Hub assy $275.00 1.0",
+    "64 O/H Rear suspension $150.00 3.0",
+    "65 Repl LT Control arm $310.00 0.5",
+    "66 Repl Crossmember $620.00 1.5",
+    "67 Repl Link arm $135.00 0.4",
+    "68 Repl Lateral arm $145.00 0.4",
+    "69 Repl TPMS sensor $85.00 0.0",
+    "125 Repl LT side bracket $95.00 0.3",
+    "ENGINE COMPARTMENT",
+    "91 Rpr Coolant purge $65.00 0.4",
+    "92 Repl Coolant $42.00 0.0",
+    "96 Repl Compartment panel $480.00 1.2",
+    "VEHICLE DIAGNOSTICS",
+    "133 Subl Service mode setup $95.00 0.0",
+    "134 Subl Firmware update $120.00 0.0",
+    "135 Subl In-process scan $85.00 0.0",
+    "136 Subl Camera calibration $220.00 0.0",
+    "137 Subl DTC research $75.00 0.0",
+    "REFINISH",
+    "150 Rpr Finish sand and polish $80.00 0.8",
+  ];
+  rows.forEach((row, index) => {
+    page.drawText(row, { x: 42, y: 760 - index * 18, size: 8, font });
+  });
+  return await doc.save();
+}
+
 function drawFragmentedEstimateRow(page, font, line, description, labor, amount, y) {
   page.drawText(String(line), { x: 48, y, size: 8, font });
   page.drawText(description, { x: 82, y, size: 8, font });
@@ -1885,6 +1922,64 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(result.debugTrace.oemProcedureSourceCount, 0);
   });
 
+  await run("OEM Citation Density uses internet (Serper) fallback sources instead of trace-incomplete", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Carrier estimate with online-only authority support", { x: 42, y: 742, size: 10, font });
+    drawCccEstimateRow(page, font, 5, "#", "Repl", "A/M CAPA Bumper chrome, w/prk snsr", "1.0", "$487.50", 712);
+    const sourcePdfBytes = await doc.save();
+
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourceDocumentId: "carrier-online-fallback",
+      sourcePdfName: "Carrier online-fallback estimate.pdf",
+      sourceText: "Carrier estimate evidence.",
+      findings: [],
+      reportIdentity: OEM_CITATION_DENSITY_REPORT_IDENTITY,
+      authorityTrace: {
+        authorityTraceStarted: true,
+        authorityTraceCompleted: true,
+        authorityTraceBlockedReason: null,
+        authorityCoverageStatus: "partial",
+        googleDriveOrInternalSearchRan: false,
+        sandPolishSupportFound: false,
+        driveSearchAttempted: false,
+        driveSearchAvailable: false,
+        driveMakeModelFolderMatched: false,
+        driveMatchedFolders: [],
+        driveDocumentsReviewed: [],
+        onlineSearchAttempted: true,
+        onlineSourcesReviewed: ["Front bumper OEM repair procedure (manufacturer site)"],
+        jurisdictionResolved: null,
+        jurisdictionSourcesReviewed: [],
+        oemSourcesReviewed: [],
+        adasSourcesReviewed: [],
+        motorPPageSourcesReviewed: [],
+        scrsSourcesReviewed: [],
+        policyLegalSourcesReviewed: [],
+        authoritySources: [{
+          title: "Front bumper OEM repair procedure (manufacturer site)",
+          sourceType: "internet_fallback",
+          evidenceTier: 7,
+          verified: false,
+          note: "Online OEM reference (unverified internet fallback).",
+        }],
+      },
+      findingGenerator: buildOemCitationDensityFindings,
+      request: { includeLegend: true, annotationMode: "both", estimateRole: "carrier" },
+    });
+
+    const text = await extractPdfText(result.bytes);
+    // Trace completed with an online source → findings must NOT be trace-incomplete, and the
+    // internet source backs the finding (ONLINE FALLBACK proof bucket), never VERIFIED OEM.
+    assert.equal(result.annotationMetadata.some((item) => item.label === "AUTHORITY TRACE INCOMPLETE"), false);
+    assert.ok(result.debugTrace.internetFallbackSourceCount >= 1);
+    assert.equal(result.debugTrace.authoritySearchTrace.authorityCoverageStatus, "partial");
+    assert.match(text, /ONLINE FALLBACK/);
+    assert.doesNotMatch(text, /Label:\s*VERIFIED OEM/);
+  });
+
   await run("OEM Citation Density labels verified ADAS authority as ADAS, not OEM", async () => {
     const doc = await PDFDocument.create();
     const page = doc.addPage([612, 792]);
@@ -2012,7 +2107,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.match(text, /OEM\/insurer basis/i);
   });
 
-  await run("annotated-estimate route selects lower estimate and returns matching PDF/viewer metadata", async () => {
+  await run("annotated-estimate route selects higher estimate and returns matching PDF/viewer metadata", async () => {
     const carrierPdfBytes = await createRam21975SourcePdf();
     const shopPdfBytes = await createShop21975SourcePdf();
     const carrierDataUrl = `data:application/pdf;base64,${Buffer.from(carrierPdfBytes).toString("base64")}`;
@@ -2030,7 +2125,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
         id: "carrier-21975",
         filename: "SOR-1 21975.pdf",
         type: "application/pdf",
-        text: "Carrier estimate GEICO estimate total $4,097.17 net total $4,097.17",
+        text: "Carrier estimate GEICO estimate total $12,400.00 net total $12,400.00",
         imageDataUrl: carrierDataUrl,
         pageCount: 12,
       },
@@ -2120,7 +2215,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(json.selectedSourceLabel, "SOR-1 21975.pdf");
     assert.deepEqual(json.debugCounts.uploadedFileNames, ["Shop 21975.pdf", "SOR-1 21975.pdf"]);
     assert.equal(json.debugCounts.selectedEstimateFileName, "SOR-1 21975.pdf");
-    assert.equal(json.debugCounts.selectedEstimateTotal, 4097.17);
+    assert.equal(json.debugCounts.selectedEstimateTotal, 12400);
     assert.equal(json.debugCounts.actualSourcePdfName, "SOR-1 21975.pdf");
     assert.equal(json.debugCounts.actualSourcePdfByteLength, carrierPdfBytes.byteLength);
     assert.notEqual(json.debugCounts.actualSourcePdfByteLength, 29144);
@@ -2336,7 +2431,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.match(findingsPages.join(" "), /OEM Citation Density Finding Details/);
   });
 
-  await run("OEM Citation Density defaults to the lower estimate and exposes OEM selection diagnostics", async () => {
+  await run("OEM Citation Density defaults to the higher/final estimate and exposes OEM selection diagnostics", async () => {
     const carrierPdfBytes = await createRam21975SourcePdf();
     const shopPdfBytes = await createShop21975SourcePdf();
     const carrierDataUrl = `data:application/pdf;base64,${Buffer.from(carrierPdfBytes).toString("base64")}`;
@@ -2384,22 +2479,22 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(json.ok, true);
     assert.equal(json.targetEstimate, "auto");
     assert.equal(json.outputs.length, 1);
-    assert.equal(json.selectedSourceDocumentId, "carrier-oem-21975");
-    assert.equal(json.selectedSourceLabel, "SOR-1 21975.pdf");
-    assert.equal(json.selectedEstimateForOemDensity, "SOR-1 21975.pdf");
-    assert.match(json.selectedEstimateReason, /lower estimate PDF/i);
-    assert.equal(json.selectedEstimateTotal, 4097.17);
-    assert.equal(json.comparisonEstimateTotal, 9875);
-    assert.equal(json.debugCounts.selectedEstimateForOemDensity, "SOR-1 21975.pdf");
-    assert.match(json.debugCounts.selectedEstimateReason, /lower estimate PDF/i);
-    assert.equal(json.debugCounts.selectedEstimateTotal, 4097.17);
-    assert.equal(json.debugCounts.comparisonEstimateTotal, 9875);
-    assert.equal(json.debugCounts.actualSourcePdfName, "SOR-1 21975.pdf");
-    assert.notEqual(json.debugCounts.actualSourcePdfByteLength, shopPdfBytes.byteLength);
-    assert.equal(json.annotationMetadata.every((item) => item.sourceDocumentId === "carrier-oem-21975"), true);
+    assert.equal(json.selectedSourceDocumentId, "shop-oem-21975");
+    assert.equal(json.selectedSourceLabel, "Shop 21975.pdf");
+    assert.equal(json.selectedEstimateForOemDensity, "Shop 21975.pdf");
+    assert.match(json.selectedEstimateReason, /higher-cost estimate PDF/i);
+    assert.equal(json.selectedEstimateTotal, 9875);
+    assert.equal(json.comparisonEstimateTotal, 4097.17);
+    assert.equal(json.debugCounts.selectedEstimateForOemDensity, "Shop 21975.pdf");
+    assert.match(json.debugCounts.selectedEstimateReason, /higher-cost estimate PDF/i);
+    assert.equal(json.debugCounts.selectedEstimateTotal, 9875);
+    assert.equal(json.debugCounts.comparisonEstimateTotal, 4097.17);
+    assert.equal(json.debugCounts.actualSourcePdfName, "Shop 21975.pdf");
+    assert.notEqual(json.debugCounts.actualSourcePdfByteLength, carrierPdfBytes.byteLength);
+    assert.equal(json.annotationMetadata.every((item) => item.sourceDocumentId === "shop-oem-21975"), true);
   });
 
-  await run("OEM Citation Density selects SOR3 lower estimate over Shop 21548", async () => {
+  await run("OEM Citation Density selects Shop 21548 higher estimate over SOR3", async () => {
     const carrierPdfBytes = await createRam21975SourcePdf();
     const shopPdfBytes = await createShop21975SourcePdf();
     const carrierDataUrl = `data:application/pdf;base64,${Buffer.from(carrierPdfBytes).toString("base64")}`;
@@ -2436,7 +2531,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         caseId: "report-oem-sor3-lower-selection",
-        sourceDocumentId: "shop-21548",
+        sourceDocumentId: "carrier-sor3",
         annotationMode: "both",
         includeLegend: false,
         redactSensitive: true,
@@ -2445,18 +2540,19 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(response.status, 200);
     const json = await response.json();
 
-    assert.equal(json.selectedSourceDocumentId, "carrier-sor3");
-    assert.equal(json.selectedSourceLabel, "SOR3.pdf");
-    assert.equal(json.selectedEstimateForOemDensity, "SOR3.pdf");
-    assert.match(json.selectedEstimateReason, /lower estimate PDF/i);
+    // Supplied the lower carrier estimate, but OEM review defaults to the higher/final shop plan.
+    assert.equal(json.selectedSourceDocumentId, "shop-21548");
+    assert.equal(json.selectedSourceLabel, "Shop 21548.pdf");
+    assert.equal(json.selectedEstimateForOemDensity, "Shop 21548.pdf");
+    assert.match(json.selectedEstimateReason, /higher-cost estimate PDF/i);
     assert.match(json.selectedEstimateReason, /supplied source document/i);
-    assert.equal(json.selectedEstimateTotal, 5237.10);
-    assert.equal(json.comparisonEstimateTotal, 9307.40);
-    assert.equal(json.debugCounts.selectedEstimateForOemDensity, "SOR3.pdf");
-    assert.equal(json.annotationMetadata.every((item) => item.sourceDocumentId === "carrier-sor3"), true);
+    assert.equal(json.selectedEstimateTotal, 9307.40);
+    assert.equal(json.comparisonEstimateTotal, 5237.10);
+    assert.equal(json.debugCounts.selectedEstimateForOemDensity, "Shop 21548.pdf");
+    assert.equal(json.annotationMetadata.every((item) => item.sourceDocumentId === "shop-21548"), true);
   });
 
-  await run("OEM Citation Density ignores shop sourceDocumentId and selects lower SOR 21638 from request context", async () => {
+  await run("OEM Citation Density ignores carrier sourceDocumentId and selects higher Shop 21638 from request context", async () => {
     const carrierPdfBytes = await createRam21975SourcePdf();
     const shopPdfBytes = await createShop21975SourcePdf();
     const carrierDataUrl = `data:application/pdf;base64,${Buffer.from(carrierPdfBytes).toString("base64")}`;
@@ -2493,7 +2589,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         caseId: "report-oem-21638-source-doc-selected",
-        sourceDocumentId: "shop-21638",
+        sourceDocumentId: "carrier-sor-21638",
         artifactIds: ["shop-21638", "carrier-sor-21638"],
         targetEstimate: "auto",
         annotationMode: "both",
@@ -2504,17 +2600,18 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(response.status, 200);
     const json = await response.json();
 
-    assert.equal(json.selectedSourceDocumentId, "carrier-sor-21638");
-    assert.equal(json.selectedEstimateForOemDensity, "SOR-1 21638.pdf");
-    assert.match(json.selectedEstimateReason, /lower estimate PDF/i);
+    // Supplied the lower carrier estimate, but OEM review defaults to the higher/final shop plan.
+    assert.equal(json.selectedSourceDocumentId, "shop-21638");
+    assert.equal(json.selectedEstimateForOemDensity, "Shop 21638.pdf");
+    assert.match(json.selectedEstimateReason, /higher-cost estimate PDF/i);
     assert.match(json.selectedEstimateReason, /supplied source document/i);
-    assert.equal(json.selectedEstimateTotal, 12046.49);
-    assert.equal(json.comparisonEstimateTotal, 20290.23);
+    assert.equal(json.selectedEstimateTotal, 20290.23);
+    assert.equal(json.comparisonEstimateTotal, 12046.49);
     assert.equal(json.debugCounts.selectedEstimateDiagnostics.candidateAttachmentCount, 2);
     assert.equal(json.debugCounts.selectedEstimateDiagnostics.candidateEstimateCount, 2);
-    assert.equal(json.debugCounts.selectedEstimateDiagnostics.selectedEstimateForOemDensity, "SOR-1 21638.pdf");
+    assert.equal(json.debugCounts.selectedEstimateDiagnostics.selectedEstimateForOemDensity, "Shop 21638.pdf");
     assert.equal(json.debugCounts.selectedEstimateDiagnostics.selectionBypassedReason.includes("sourceDocumentId ignored"), true);
-    assert.equal(json.annotationMetadata.every((item) => item.sourceDocumentId === "carrier-sor-21638"), true);
+    assert.equal(json.annotationMetadata.every((item) => item.sourceDocumentId === "shop-21638"), true);
   });
 
   await run("OEM Citation Density respects explicit Shop 21638 selectedSourceDocumentId when target is shop", async () => {
@@ -3562,42 +3659,28 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(result.debugTrace.authoritySearchTrace.googleDriveOrInternalSearchRan, false);
   });
 
-  await run("delta citation density leads with structured shop-to-shop line-pair deltas", async () => {
-    const sourcePdfBytes = await createShop21896LowerEstimatePdf();
+  await run("delta citation density annotates the higher-cost estimate and lists lower-cost gaps", async () => {
+    // The Delta report annotates the HIGHER-cost estimate and highlights the lines the
+    // lower-cost estimate is missing/reduced, anchored where they exist on the higher estimate.
+    const sourcePdfBytes = await createShop21896HigherEstimatePdf();
     const comparisonText = [
-      "Shop Final 21896 final estimate",
-      "Net Cost of Repairs $17,397.20",
+      "Shop 21896 lower estimate",
+      "Net Cost of Repairs $11,892.26",
       "REAR SUSPENSION",
-      "60 Repl LT Hub assy $275.00 1.0",
-      "64 O/H Rear suspension $150.00 3.0",
-      "65 Repl LT Control arm $310.00 0.5",
-      "66 Repl Crossmember $620.00 1.5",
-      "67 Repl Link arm $135.00 0.4",
-      "68 Repl Lateral arm $145.00 0.4",
-      "69 Repl TPMS sensor $85.00 0.0",
-      "125 Repl LT side bracket $95.00 0.3",
-      "ENGINE COMPARTMENT",
-      "91 Rpr Coolant purge $65.00 0.4",
-      "92 Repl Coolant $42.00 0.0",
-      "96 Repl Compartment panel $480.00 1.2",
-      "VEHICLE DIAGNOSTICS",
-      "133 Subl Service mode setup $95.00 0.0",
-      "134 Subl Firmware update $120.00 0.0",
-      "135 Subl In-process scan $85.00 0.0",
-      "136 Subl Camera calibration $220.00 0.0",
-      "137 Subl DTC research $75.00 0.0",
+      "60 Repl LT Hub assy $250.00 1.0",
+      "61 R&I Rear suspension access $85.00 0.5",
       "REFINISH",
       "150 Rpr Finish sand and polish $80.00 0.8",
     ].join("\n");
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
       sourcePdfBytes,
-      sourcePdfName: "Shop 21896.pdf",
-      sourceDocumentId: "shop-21896",
-      sourceText: "Shop 21896 lower estimate\nNet Cost of Repairs $11,892.26",
+      sourcePdfName: "Shop Final 21896.pdf",
+      sourceDocumentId: "shop-final-21896",
+      sourceText: "Shop Final 21896 final estimate\nNet Cost of Repairs $17,397.20",
       comparisonEstimateTexts: [{
-        fileName: "Shop Final 21896.pdf",
-        sourceDocumentId: "shop-final-21896",
+        fileName: "Shop 21896.pdf",
+        sourceDocumentId: "shop-21896",
         estimateRole: "shop",
         text: comparisonText,
       }],
@@ -3612,12 +3695,13 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     const firstTitles = result.annotationMetadata.slice(0, 8).map((item) => item.shortTitle).join(" ");
 
     assert.ok(result.debugTrace.lineItemDeltaFindingCount >= 10);
-    assert.match(joined, /Source\/lower estimate: Shop 21896\.pdf/i);
-    assert.match(joined, /Comparison\/final estimate: Shop Final 21896\.pdf/i);
+    assert.match(joined, /Annotated estimate \(higher-cost\): Shop Final 21896\.pdf/i);
+    assert.match(joined, /Comparison estimate \(lower-cost\): (?:Shop 21896\.pdf|not present on Shop 21896\.pdf)/i);
     assert.match(joined, /Amount delta: \$5?|\$620\.00|\$480\.00/i);
     assert.match(joined, /Labor delta: (?:3\.0|2\.5|1\.5) hours/i);
     assert.match(joined, /Delta category: missing_operation/i);
-    assert.match(joined, /Added in the comparison\/final estimate/i);
+    assert.match(joined, /not present on the lower-cost estimate/i);
+    assert.match(joined, /documented on this \(higher-cost\) estimate but is not present on the lower-cost estimate/i);
     assert.match(joined, /TPMS sensor/i);
     assert.match(joined, /Rear suspension/i);
     assert.match(joined, /Crossmember/i);
@@ -3634,10 +3718,9 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.match(joined, /Camera calibration/i);
     assert.match(joined, /DTC research/i);
     assert.match(joined, /Label:\s*NEEDS ADAS/i);
-    assert.doesNotMatch(joined, /Operation present in higher estimate/i);
-    assert.doesNotMatch(joined, /higher estimate/i);
+    // Direction must read as gaps in the lower-cost estimate, never raw "higher estimate" wording.
+    assert.doesNotMatch(joined, /\bhigher estimate\b/i);
     assert.doesNotMatch(joined, /carrier estimate/i);
-    assert.doesNotMatch(joined, /CCC\/MOTOR guide and abbreviation boilerplate only/i);
     assert.doesNotMatch(firstTitles, /Finish sand and polish/i);
   });
 

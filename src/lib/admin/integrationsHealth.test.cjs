@@ -75,6 +75,10 @@ run("integrations health returns safe service statuses and inventory booleans", 
   assert.equal(payload.services.openai.reachable, true);
   assert.equal(payload.services.googleDrive.folderSearchAvailable, true);
   assert.equal(payload.services.authorityRetrieval.googleDriveAvailable, true);
+  // Drive is configured but VOYAGE_API_KEY is absent in baseEnv → semantic/vector search is
+  // unavailable (retrieval would be keyword-only). This must be visible in the health payload.
+  assert.equal(payload.services.authorityRetrieval.embeddingsConfigured, false);
+  assert.equal(payload.services.authorityRetrieval.vectorSearchAvailable, false);
   assert.equal(payload.services.stripe.webhookConfigured, true);
   const driveInventory = payload.inventory.find((item) => item.integration === "Google Drive authority retrieval");
   assert.ok(driveInventory);

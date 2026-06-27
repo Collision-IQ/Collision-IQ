@@ -193,8 +193,8 @@ export default function ChatShell({
 
   return (
     <div className="ci-workstation flex min-h-0 flex-1 ci-workstation flex-1 min-h-0 flex flex-col max-w-full overflow-x-hidden bg-background text-foreground">
-      <header className="relative z-10 min-h-[64px] shrink-0 border-b border-border bg-card">
-        <div className="relative mx-auto flex min-h-[64px] max-w-none items-center justify-between gap-2 px-2 py-2 sm:px-3 md:gap-4 md:px-5">
+      <header className="relative z-10 min-h-[52px] shrink-0 border-b border-border bg-card sm:min-h-[64px]">
+        <div className="relative mx-auto flex min-h-[52px] max-w-none items-center justify-between gap-2 px-2 py-1.5 sm:min-h-[64px] sm:px-3 sm:py-2 md:gap-4 md:px-5">
           <div className="flex min-w-0 items-center gap-3">
             <div className="flex min-h-10 min-w-[176px] items-center gap-2.5 sm:min-w-[218px]">
               <Image
@@ -202,11 +202,11 @@ export default function ChatShell({
                 alt=""
                 width={34}
                 height={34}
-                className="h-8 w-8 shrink-0 rounded-md object-contain sm:h-[34px] sm:w-[34px]"
+                className="h-7 w-7 shrink-0 rounded-md object-contain sm:h-[34px] sm:w-[34px]"
                 priority
                 aria-hidden="true"
               />
-              <span className="relative block h-[30px] w-[132px] shrink-0 sm:h-[34px] sm:w-[158px]">
+              <span className="relative block h-[26px] w-[116px] shrink-0 sm:h-[34px] sm:w-[158px]">
                 <Image
                   src="/iq/iq_logo.png"
                   alt={title}

@@ -10,6 +10,7 @@ import {
 } from "./canonicalDelta";
 
 type Ro21896Document = {
+  id?: string | null;
   filename?: string | null;
   text?: string | null;
 };
@@ -86,8 +87,47 @@ export function resolveRo21896CanonicalDeltaSet(documents: Ro21896Document[]): C
     /17,?397\.20/.test(haystack);
 
   if (hasInitial && hasFinal && (hasRo || hasTotals)) {
-    return buildRo21896CanonicalDeltaSet();
+    return bindRealSourceDocumentIds(buildRo21896CanonicalDeltaSet(), documents);
   }
 
   return null;
+}
+
+// The canonical delta set ships with placeholder sourceDocumentIds ("shop-21896",
+// "shop-final-21896"). The renderer decides which anchor side to use by comparing the
+// rendered document id against estimateFiles.supplement.sourceDocumentId, so those
+// placeholders must be reconciled with the real uploaded attachment ids. Without this
+// binding, renderingSupplement is always false and every supplement-only "added" delta
+// (anchor_initial === null) falls back to a null anchor and renders unanchored.
+function bindRealSourceDocumentIds(
+  set: CanonicalDeltaSet,
+  documents: Ro21896Document[]
+): CanonicalDeltaSet {
+  const finalDoc = documents.find(
+    (document) => document.id && /\bshop[_\s-]*final[_\s-]*21896\b/i.test(document.filename ?? "")
+  );
+  const initialDoc = documents.find(
+    (document) =>
+      document.id &&
+      document.id !== finalDoc?.id &&
+      /\bshop[_\s-]*21896\b/i.test(document.filename ?? "") &&
+      !/\bfinal\b/i.test(document.filename ?? "")
+  );
+
+  if (!finalDoc?.id && !initialDoc?.id) return set;
+
+  return {
+    ...set,
+    estimateFiles: {
+      ...set.estimateFiles,
+      initial: {
+        ...set.estimateFiles.initial,
+        sourceDocumentId: initialDoc?.id ?? set.estimateFiles.initial.sourceDocumentId,
+      },
+      supplement: {
+        ...set.estimateFiles.supplement,
+        sourceDocumentId: finalDoc?.id ?? set.estimateFiles.supplement.sourceDocumentId,
+      },
+    },
+  };
 }

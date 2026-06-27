@@ -947,7 +947,9 @@ describe("I9-I10 — first rendered findings from canonical delta set", () => {
 describe("G6 — owner sign-off (manual gate)", () => {
   it("documents that G6 requires manual validation before promotion", () => {
     // G6 is NOT automated. The owner must:
-    //   1. Generate the annotated PDF for Shop_21896.pdf with canonical delta set loaded.
+    //   1. Generate the annotated PDF for Shop_Final_21896.pdf (the supplement is the
+    //      annotation base so supplement-added lines anchor via anchor_final) with the
+    //      canonical delta set loaded.
     //   2. Verify that the crossmember (D17), control arms (D13-D16), scan/calibration
     //      block (D24-D28), and rear compartment (D20) all surface as top findings.
     //   3. Verify that wheel R&I access labor lines 14/15 are NOT the top findings.

@@ -1833,20 +1833,19 @@ export function buildRequiredEstimatorDeltaFindings(
         },
       },
     };
-  } else {
-    try {
-      const deltaFindings = buildStructuredLineItemDeltaFindings(context, usedAnchorIds);
-      lineItemDeltaFindingCount = deltaFindings.findings.length;
-      lineItemDeltaMatchedPairCount = deltaFindings.matchedPairCount;
-      lineItemDeltaMissingCount = deltaFindings.missingOperationCount;
-      findings.push(...deltaFindings.findings);
-    } catch (error) {
-      console.error("[citation-density] structured line-item delta detector failed (non-fatal)", {
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
   }
-  const hasStructuredDeltas = lineItemDeltaFindingCount > 0;
+
+  // Phase 1: pair rows for the structured delta path WITHOUT emitting or consuming anchors yet,
+  // so the required safety detectors below claim their rows first (keeping NEEDS OEM / ADAS /
+  // P-page classification). Structured deltas are emitted afterward (phase 2) on what remains.
+  let deltaMatch: StructuredLineItemDeltaMatch | null = null;
+  try {
+    deltaMatch = matchStructuredLineItemDeltas(context);
+  } catch (error) {
+    console.error("[citation-density] structured line-item delta matcher failed (non-fatal)", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
   let sandPolishSeen = false;
   let batteryResetSeen = false;
   // Suppress wheel_labor_delta when the canonical delta set is present — canonical findings
@@ -1950,7 +1949,7 @@ export function buildRequiredEstimatorDeltaFindings(
       usedAnchorIds.add(anchor.anchorId);
     }
 
-    if (!hasStructuredDeltas && !usedAnchorIds.has(anchor.anchorId) && /\b(?:finish sand|denib|de nib|color sand|sand and polish|sand polish|buff|refinish correction|post refinish correction)\b/.test(normalized)) {
+    if (!usedAnchorIds.has(anchor.anchorId) && /\b(?:finish sand|denib|de nib|color sand|sand and polish|sand polish|buff|refinish correction|post refinish correction)\b/.test(normalized)) {
       sandPolishSeen = true;
       findings.push(buildRequiredDetectorFinding({
         context,
@@ -1995,6 +1994,17 @@ export function buildRequiredEstimatorDeltaFindings(
     }
   }
 
+  // Phase 2: now that the required safety detectors have claimed their rows, fill every
+  // remaining gap with structured deltas anchored on the higher-cost source. Structured deltas
+  // lead the report, so they are prepended ahead of the detector findings.
+  if (deltaMatch) {
+    const structuredFindings = emitStructuredLineItemDeltaFindings(deltaMatch, context, usedAnchorIds);
+    lineItemDeltaFindingCount = structuredFindings.length;
+    lineItemDeltaMatchedPairCount = deltaMatch.matchedPairCount;
+    lineItemDeltaMissingCount = deltaMatch.missingOperationCount;
+    findings.unshift(...structuredFindings);
+  }
+
   const missingRequiredDetectors = [
     wheelDetectorSeen ? null : "wheel_labor_delta",
     hubDetectorSeen ? null : "am_wheel_end_safety",
@@ -2022,10 +2032,6 @@ export function buildRequiredEstimatorDeltaFindings(
   };
 }
 
-function normalizeSectionKey(section: string | null | undefined): string {
-  return (section ?? "").replace(/[^a-z0-9]+/gi, " ").trim().toUpperCase();
-}
-
 function describeLineItemDelta(delta: EstimateLineItemDelta): {
   findingType: string;
   title: string;
@@ -2044,12 +2050,12 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   if (delta.kind === "missing_operation") {
     return {
       findingType: "delta-missing-operation",
-      title: `Added in comparison estimate: ${label}`,
+      title: `Missing from lower-cost estimate: ${label}`,
       label: profile.label,
       category: profile.category,
       estimateGapType: "missing_from_carrier",
       missingProof:
-        "Structured estimate comparison shows this operation is documented in the comparison/final estimate but is not present on the selected source/lower estimate. This is estimate-difference evidence; it does not by itself prove the operation is required.",
+        "Structured estimate comparison shows this operation is documented on this (higher-cost) estimate but is not present on the lower-cost estimate. This is estimate-difference evidence; it does not by itself prove the operation is required.",
       nextAction:
         profile.nextAction,
       missingAuthorityTypes: profile.missingAuthorityTypes,
@@ -2061,14 +2067,14 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   if (delta.kind === "reduced_paint") {
     return {
       findingType: "delta-reduced-paint",
-      title: `Reduced paint/refinish vs comparison estimate: ${label}`,
+      title: `Lower-cost estimate allows less paint/refinish: ${label}`,
       label: "ESTIMATE GAP ONLY",
       category: "refinish",
       estimateGapType: "reduced_by_carrier",
       missingProof:
-        "The comparison/final estimate allows more paint/refinish time for this operation. Reconcile the difference against CCC/MOTOR/P-page refinish basis or document the lower allowance.",
+        "This estimate allows more paint/refinish time for this operation than the lower-cost estimate. Reconcile the difference against CCC/MOTOR/P-page refinish basis or document the lower allowance.",
       nextAction:
-        "Reconcile the paint/refinish hours with the comparison/final estimate, or document the included-operation basis for the source/lower allowance.",
+        "Reconcile the paint/refinish hours with the lower-cost estimate, or document the included-operation basis for the lower allowance.",
       missingAuthorityTypes: ["CCC/MOTOR/P-page refinish basis", "included-operation basis"],
       score: 48,
       safetyImpact: "low",
@@ -2078,7 +2084,7 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   if (delta.kind === "part_or_price_difference") {
     return {
       findingType: "delta-part-price",
-      title: `Part/price difference vs comparison estimate: ${label}`,
+      title: `Priced differently on lower-cost estimate: ${label}`,
       label: "NEEDS INVOICE",
       category: "other",
       estimateGapType: "present_but_under_documented",
@@ -2095,14 +2101,14 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   // reduced_labor
   return {
     findingType: "delta-reduced-labor",
-    title: `Reduced body labor vs comparison estimate: ${label}`,
+    title: `Lower-cost estimate allows less body labor: ${label}`,
     label: "ESTIMATE GAP ONLY",
     category: "labor_difference",
     estimateGapType: "reduced_by_carrier",
     missingProof:
-      "The comparison/final estimate allows more body labor for this operation. Reconcile the labor difference against MOTOR/CCC time basis or document the lower allowance.",
+      "This estimate allows more body labor for this operation than the lower-cost estimate. Reconcile the labor difference against MOTOR/CCC time basis or document the lower allowance.",
     nextAction:
-      "Reconcile the body labor hours with the comparison/final estimate, or document the included-operation basis for the source/lower allowance.",
+      "Reconcile the body labor hours with the lower-cost estimate, or document the included-operation basis for the lower allowance.",
     missingAuthorityTypes: ["MOTOR/CCC labor-time basis", "included-operation basis"],
     score: 52,
     safetyImpact: "low",
@@ -2110,26 +2116,36 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   };
 }
 
-function buildStructuredLineItemDeltaFindings(
-  context: AnnotatedEstimateFindingGeneratorContext,
-  usedAnchorIds: Set<string>
-): {
-  findings: CitationDensityFinding[];
+type StructuredLineItemDeltaMatch = {
+  orderedDeltas: EstimateLineItemDelta[];
+  anchorById: Map<string, EstimateRowAnchor>;
+  primaryAnchors: EstimateRowAnchor[];
+  comparisonName: string;
   matchedPairCount: number;
   missingOperationCount: number;
-} {
+};
+
+// Phase 1 of the structured delta path: parse and pair rows WITHOUT emitting findings or
+// consuming anchors. Kept separate from emission so the required safety detectors can run first
+// and claim their rows (keeping NEEDS OEM / ADAS / P-page classification); the structured
+// deltas then fill every remaining gap.
+function matchStructuredLineItemDeltas(
+  context: AnnotatedEstimateFindingGeneratorContext
+): StructuredLineItemDeltaMatch | null {
   const comparison = (context.comparisonEstimateTexts ?? []).filter(
     (item) => item.text && item.text.trim().length > 0
   );
-  if (comparison.length === 0) {
-    return { findings: [], matchedPairCount: 0, missingOperationCount: 0 };
-  }
+  if (comparison.length === 0) return null;
 
   const primaryAnchors = context.anchors.filter(
     (anchor) => anchor.anchorType === "estimate_line" || anchor.anchorType === "embedded_link_row"
   );
   const anchorById = new Map(primaryAnchors.map((anchor) => [anchor.anchorId, anchor]));
-  const lowerRows: EstimateDeltaRow[] = [];
+  // The annotated source PDF is the HIGHER-cost estimate, so its rows are the "higher" side and
+  // carry the real anchors. The comparison estimate(s) are the LOWER-cost side. Each
+  // "missing"/"reduced" delta then anchors precisely to the source row that documents it, which
+  // is where the lower-cost estimate's gap is visible.
+  const higherRows: EstimateDeltaRow[] = [];
   for (const anchor of primaryAnchors) {
     const row = deltaRowFromRawText({
       rawText: anchor.rowText,
@@ -2137,69 +2153,63 @@ function buildStructuredLineItemDeltaFindings(
       anchorId: anchor.anchorId,
       pageNumber: anchor.pageNumber,
     });
-    if (row) lowerRows.push(row);
+    if (row) higherRows.push(row);
   }
 
-  const higherRows = comparison.flatMap((item) => parseCccEstimateRows(item.text));
-  if (lowerRows.length === 0 || higherRows.length === 0) {
-    return { findings: [], matchedPairCount: 0, missingOperationCount: 0 };
-  }
+  const lowerRows = comparison.flatMap((item) => parseCccEstimateRows(item.text));
+  if (lowerRows.length === 0 || higherRows.length === 0) return null;
 
-  // Only annotate in the intended direction (lower estimate vs a higher one).
-  // If totals are known and the comparison is actually the lower-cost estimate,
-  // skip so we never claim this estimate is "missing" scope it actually has.
-  const lowerTotal = parseEstimateNetTotal(context.sourceText ?? "");
-  const higherTotal = comparison
+  // Only annotate in the intended direction (the annotated source must be the higher-cost
+  // estimate). If totals are known and the comparison is actually the higher one, skip so we
+  // never claim the source estimate is "missing" scope the comparison merely adds.
+  const sourceTotal = parseEstimateNetTotal(context.sourceText ?? "");
+  const comparisonTotal = comparison
     .map((item) => parseEstimateNetTotal(item.text))
     .find((value): value is number => value !== null) ?? null;
-  if (lowerTotal !== null && higherTotal !== null && higherTotal < lowerTotal) {
-    return { findings: [], matchedPairCount: 0, missingOperationCount: 0 };
+  if (sourceTotal !== null && comparisonTotal !== null && sourceTotal < comparisonTotal) {
+    return null;
   }
 
   const match = matchEstimateLineItems({ lowerRows, higherRows });
-  const comparisonName = comparison[0]?.fileName || "the comparison estimate";
-
-  // Map each section to the last lower-estimate row anchor in that section, for
-  // anchoring "missing operation" callouts to the relevant section.
-  const sectionToLastAnchor = new Map<string, EstimateRowAnchor>();
-  for (const anchor of primaryAnchors) {
-    const key = normalizeSectionKey(anchor.section);
-    if (key) sectionToLastAnchor.set(key, anchor);
-  }
-
-  const findings: CitationDensityFinding[] = [];
-  const emittedSlugs = new Set<string>();
-  const missingPerSection = new Map<string, number>();
-  const MAX_DELTA_FINDINGS = 60;
-  const MAX_MISSING_PER_SECTION = 12;
-
   const orderedDeltas = [...match.deltas].sort(
     (a, b) => scoreLineItemDeltaForPriority(b) - scoreLineItemDeltaForPriority(a)
   );
 
-  for (const delta of orderedDeltas) {
+  return {
+    orderedDeltas,
+    anchorById,
+    primaryAnchors,
+    comparisonName: comparison[0]?.fileName || "the comparison estimate",
+    matchedPairCount: match.matchedPairCount,
+    missingOperationCount: match.missingOperationCount,
+  };
+}
+
+// Phase 2: emit findings for the matched deltas, skipping any anchor already claimed (e.g. by a
+// required safety detector that ran first). Mutates usedAnchorIds.
+function emitStructuredLineItemDeltaFindings(
+  deltaMatch: StructuredLineItemDeltaMatch,
+  context: AnnotatedEstimateFindingGeneratorContext,
+  usedAnchorIds: Set<string>
+): CitationDensityFinding[] {
+  const findings: CitationDensityFinding[] = [];
+  const emittedSlugs = new Set<string>();
+  const MAX_DELTA_FINDINGS = 60;
+
+  for (const delta of deltaMatch.orderedDeltas) {
     if (findings.length >= MAX_DELTA_FINDINGS) break;
 
-    let anchor: EstimateRowAnchor | undefined;
-    let consumeAnchor = false;
-    if (delta.lowerRow?.anchorId) {
-      anchor = anchorById.get(delta.lowerRow.anchorId);
-      consumeAnchor = true; // matched-row callouts own their row
-    } else if (delta.kind === "missing_operation") {
-      const sectionKey = normalizeSectionKey(delta.higherRow.section);
-      anchor = sectionKey ? sectionToLastAnchor.get(sectionKey) : undefined;
-      if (!anchor) {
-        anchor = findFallbackAnchorForMissingDelta(delta, primaryAnchors);
-      }
-      if (anchor) {
-        const countKey = sectionKey || `fallback:${anchor.anchorId}`;
-        const count = missingPerSection.get(countKey) ?? 0;
-        if (count >= MAX_MISSING_PER_SECTION) continue;
-        missingPerSection.set(countKey, count + 1);
-      }
+    // Every delta's higherRow is a source (annotated, higher-cost) row, so it carries the
+    // anchor for the line where the lower-cost estimate's gap is visible. Fall back to a
+    // section/description match only if the source anchor was filtered out upstream.
+    let anchor: EstimateRowAnchor | undefined = delta.higherRow.anchorId
+      ? deltaMatch.anchorById.get(delta.higherRow.anchorId)
+      : undefined;
+    if (!anchor) {
+      anchor = findFallbackAnchorForMissingDelta(delta, deltaMatch.primaryAnchors);
     }
     if (!anchor) continue; // never emit an unanchored delta finding
-    if (consumeAnchor && (usedAnchorIds.has(anchor.anchorId) || emittedSlugs.has(`anchor:${anchor.anchorId}`))) {
+    if (usedAnchorIds.has(anchor.anchorId) || emittedSlugs.has(`anchor:${anchor.anchorId}`)) {
       continue;
     }
 
@@ -2213,10 +2223,8 @@ function buildStructuredLineItemDeltaFindings(
     const slugKey = `${meta.findingType}:${slug}`;
     if (emittedSlugs.has(slugKey)) continue;
     emittedSlugs.add(slugKey);
-    if (consumeAnchor) {
-      usedAnchorIds.add(anchor.anchorId);
-      emittedSlugs.add(`anchor:${anchor.anchorId}`);
-    }
+    usedAnchorIds.add(anchor.anchorId);
+    emittedSlugs.add(`anchor:${anchor.anchorId}`);
 
     findings.push(
       buildRequiredDetectorFinding({
@@ -2234,7 +2242,7 @@ function buildStructuredLineItemDeltaFindings(
           delta,
           anchor,
           sourceName: context.sourcePdfName,
-          comparisonName,
+          comparisonName: deltaMatch.comparisonName,
         }),
         missingProofSummary: meta.missingProof,
         recommendedNextAction: meta.nextAction,
@@ -2245,11 +2253,7 @@ function buildStructuredLineItemDeltaFindings(
     );
   }
 
-  return {
-    findings,
-    matchedPairCount: match.matchedPairCount,
-    missingOperationCount: match.missingOperationCount,
-  };
+  return findings;
 }
 
 export type PolicyApplicabilityDiagnostics = {
@@ -3053,6 +3057,11 @@ function pickBestOemAuthoritySource(
 ) {
   const relevant = sources.filter((source) => {
     if (source.sourceType === "estimate_evidence") return true;
+    // Internet (Serper) fallback is a universal last resort for every family. Its high
+    // evidenceTier (7) keeps it below any verified OEM/ADAS/MOTOR/uploaded/legal source, so it
+    // only backs a finding when nothing stronger was retrieved — but it still ties the finding to
+    // a real retrieved reference (labeled ONLINE FALLBACK) instead of estimate-evidence only.
+    if (source.sourceType === "internet_fallback") return true;
     if (family.findingType.includes("adas") || family.findingType.includes("diagnostics")) {
       return source.sourceType === "oem_procedure" || source.sourceType === "motor_database" || source.sourceType === "uploaded_support" || source.sourceType === "ccc_secure_share";
     }
@@ -3062,7 +3071,7 @@ function pickBestOemAuthoritySource(
     if (family.findingType.includes("refinish") || family.findingType.includes("labor")) {
       return source.sourceType === "motor_database" || source.sourceType === "policy" || source.sourceType === "jurisdictional_law" || source.sourceType === "uploaded_support";
     }
-    return source.sourceType !== "internet_fallback";
+    return true;
   });
   return relevant.sort((a, b) => a.evidenceTier - b.evidenceTier)[0] ?? sources[sources.length - 1];
 }
@@ -3187,7 +3196,7 @@ function classifyLineItemDeltaProfile(delta: EstimateLineItemDelta): {
       label: "NEEDS ADAS",
       category: "scan_diagnostic",
       missingAuthorityTypes: ["ADAS/calibration procedure", "scan or calibration result", "completion proof"],
-      nextAction: "Attach the scan, calibration, service-mode, firmware, DTC research, and completion support for this comparison/final estimate operation, or document why it is not required on the source/lower estimate.",
+      nextAction: "Attach the scan, calibration, service-mode, firmware, DTC research, and completion support for this operation, or document why it is not required — it is documented on this estimate but missing from the lower-cost estimate.",
       score: 82,
       safetyImpact: "high",
       priority: "high",
@@ -3198,7 +3207,7 @@ function classifyLineItemDeltaProfile(delta: EstimateLineItemDelta): {
       label: "ESTIMATE GAP ONLY",
       category: /\btpms|sensor\b/.test(text) ? "parts_downgrade" : "structural_or_fit_verification",
       missingAuthorityTypes: ["supplement line", "invoice or completion proof", "repair-path support when applicable"],
-      nextAction: "Review the comparison/final estimate addition against the selected source/lower estimate, then attach supplement, invoice, completion, or repair-path support for the added operation.",
+      nextAction: "Review this operation (documented on this estimate, missing from the lower-cost estimate), then attach supplement, invoice, completion, or repair-path support for it.",
       score: Math.min(86, 68 + Math.round(Math.min(amount, 500) / 50) + Math.round(Math.min(labor, 4) * 2)),
       safetyImpact: "high",
       priority: "high",
@@ -3208,7 +3217,7 @@ function classifyLineItemDeltaProfile(delta: EstimateLineItemDelta): {
     label: "ESTIMATE GAP ONLY",
     category: "not_included_operation",
     missingAuthorityTypes: ["supplement line", "invoice or completion proof"],
-    nextAction: "Add the operation as a supplement line if it was or should be performed, or document why it is not required on the selected source/lower estimate.",
+    nextAction: "Confirm whether this operation should also be on the lower-cost estimate, or document why it is not required there — it is present on this estimate but missing from the lower-cost estimate.",
     score: Math.min(76, 52 + Math.round(Math.min(amount, 500) / 50) + Math.round(Math.min(labor, 4) * 2)),
     safetyImpact: amount >= 250 || labor >= 1 ? "medium" : "low",
     priority: amount >= 250 || labor >= 1 ? "high" : "medium",
@@ -3243,19 +3252,22 @@ function buildLineItemDeltaSupportSummary(params: {
   sourceName: string;
   comparisonName: string;
 }) {
-  const comparisonLocation = describeDeltaRowLocation(params.delta.higherRow, params.comparisonName);
-  const sourceLocation = params.delta.lowerRow
-    ? describeDeltaRowLocation(params.delta.lowerRow, params.sourceName)
-    : describeAnchorLocation(params.anchor, params.sourceName);
+  // The annotated source is the higher-cost estimate (delta.higherRow); the comparison is the
+  // lower-cost estimate (delta.lowerRow, or absent when the operation is missing there).
+  const annotatedLocation = describeDeltaRowLocation(params.delta.higherRow, params.sourceName)
+    || describeAnchorLocation(params.anchor, params.sourceName);
+  const comparisonLocation = params.delta.lowerRow
+    ? describeDeltaRowLocation(params.delta.lowerRow, params.comparisonName)
+    : `not present on ${params.comparisonName}`;
   return [
     `Delta category: ${params.delta.kind}.`,
-    `Source/lower estimate: ${sourceLocation}.`,
-    `Comparison/final estimate: ${comparisonLocation}.`,
+    `Annotated estimate (higher-cost): ${annotatedLocation}.`,
+    `Comparison estimate (lower-cost): ${comparisonLocation}.`,
     `Amount delta: ${formatDeltaMoney(params.delta.priceDelta)}.`,
     `Labor delta: ${formatDeltaHours(params.delta.laborDelta)} hours.`,
     `Paint delta: ${formatDeltaHours(params.delta.paintDelta)} hours.`,
     `Pairing basis: ${params.delta.matchBasis}.`,
-    params.delta.summary.replace(/\bhigher estimate\b/gi, "comparison/final estimate").replace(/\blower estimate\b/gi, "source/lower estimate"),
+    params.delta.summary.replace(/\bhigher estimate\b/gi, "this estimate").replace(/\blower estimate\b/gi, "the lower-cost estimate"),
   ].join(" ");
 }
 

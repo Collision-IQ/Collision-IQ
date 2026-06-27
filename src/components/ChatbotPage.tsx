@@ -1799,10 +1799,10 @@ function CollisionIqFooter() {
   ];
 
   return (
-    <footer className="mt-auto border-t border-border bg-card/80 px-4 py-8 text-card-foreground" data-collision-iq-footer="true">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 sm:px-2 lg:flex-row lg:items-center lg:justify-between">
+    <footer className="mt-auto border-t border-border bg-card/80 px-4 py-4 text-card-foreground sm:py-8" data-collision-iq-footer="true">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 sm:gap-6 sm:px-2 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="relative block h-9 w-[150px] shrink-0">
+          <span className="relative block h-7 w-[120px] shrink-0 sm:h-9 sm:w-[150px]">
             <Image
               src="/iq/iq_logo.png"
               alt="Collision IQ"
