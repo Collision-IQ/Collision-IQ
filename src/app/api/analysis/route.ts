@@ -116,6 +116,9 @@ import {
 } from "@/lib/ai/agentRetrievalTrace";
 
 export const runtime = "nodejs";
+// Heavy LLM analysis + retrieval; raise above the short Vercel default so production doesn't
+// time out (was the cause of the deployed chatbot "failing to respond"). 300s = Pro cap.
+export const maxDuration = 300;
 
 type AnalysisRequestBody = {
   artifactIds?: string[];

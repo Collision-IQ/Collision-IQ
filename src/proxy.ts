@@ -7,7 +7,9 @@ const hasClerkPublishableKey = Boolean(
 
 const isProtectedRoute = createRouteMatcher([
   "/account(.*)",
-  "/api/chat(.*)",
+  // /api/chat is intentionally NOT protected: anonymous (signed-out) users may have a
+  // text-only conversation. The route resolves a guest identity, blocks uploads for
+  // anonymous users, and rate-limits anonymous traffic. Uploads/analysis remain auth-gated.
   "/billing(.*)",
   "/chatbot(.*)",
   "/dashboard(.*)",

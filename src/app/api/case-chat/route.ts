@@ -30,6 +30,8 @@ import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 import { shouldGenerateAnnotatedCitationDensityEstimate } from "@/lib/reports/citationDensityIntent";
 
 export const runtime = "nodejs";
+// LLM follow-up review; raise above the short Vercel default to avoid production timeouts.
+export const maxDuration = 300;
 
 function limitText(text: string, max = 12000) {
   if (!text) return "";

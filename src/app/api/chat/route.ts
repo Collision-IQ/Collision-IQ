@@ -1,5 +1,9 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// LLM review + retrieval can run well past the short Vercel default (chat-with-files was ~113s
+// locally). Without this the function is killed in production and the chat "fails to respond"
+// even though it works locally. 300s is the Pro plan cap.
+export const maxDuration = 300;
 
 import { NextResponse } from "next/server";
 import type { ChatAnalysisOutput } from "@/lib/ai/contracts/chatAnalysisSchema";
@@ -18,6 +22,7 @@ import {
   UnauthorizedError,
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
+import { getOrCreateUser } from "@/lib/getOrCreateUser";
 import { normalizeEmail } from "@/lib/auth/platform-admin";
 import {
   getCurrentProductEntitlements,
@@ -1045,6 +1050,62 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// --- Anonymous (signed-out) text chat support (Phase 1) -------------------------------------
+// Signed-out users share a single guest identity for entitlements (free tier). They cannot
+// upload — uploads stay auth-gated — and the client carries the transcript, so no per-user
+// server state is needed. A best-effort in-memory IP rate limit caps cost/abuse on this now-
+// public endpoint (per serverless instance; not a global limiter).
+const ANON_GUEST_CLERK_ID = "anonymous-guest";
+const ANON_RATE_LIMIT_MAX = 12;
+const ANON_RATE_LIMIT_WINDOW_MS = 60_000;
+const anonRequestHits = new Map<string, number[]>();
+
+function getRequestIp(req: Request): string {
+  const forwarded = req.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0]!.trim();
+  return req.headers.get("x-real-ip")?.trim() || "unknown";
+}
+
+function allowAnonymousChatRequest(req: Request): boolean {
+  const ip = getRequestIp(req);
+  const now = Date.now();
+  const recent = (anonRequestHits.get(ip) ?? []).filter((ts) => now - ts < ANON_RATE_LIMIT_WINDOW_MS);
+  if (recent.length >= ANON_RATE_LIMIT_MAX) {
+    anonRequestHits.set(ip, recent);
+    return false;
+  }
+  recent.push(now);
+  anonRequestHits.set(ip, recent);
+  return true;
+}
+
+async function resolveChatActor(req: Request): Promise<{
+  user: Awaited<ReturnType<typeof requireCurrentUser>>["user"];
+  verifiedEmails: string[];
+  isPlatformAdmin: boolean;
+  isAnonymous: boolean;
+}> {
+  try {
+    const resolved = await requireCurrentUser();
+    return {
+      user: resolved.user,
+      verifiedEmails: resolved.verifiedEmails,
+      isPlatformAdmin: resolved.isPlatformAdmin,
+      isAnonymous: false,
+    };
+  } catch (error) {
+    if (!(error instanceof UnauthorizedError)) throw error;
+    const guest = await getOrCreateUser({
+      clerkUserId: ANON_GUEST_CLERK_ID,
+      email: null,
+      firstName: "Guest",
+      lastName: null,
+      imageUrl: null,
+    });
+    return { user: guest, verifiedEmails: [], isPlatformAdmin: false, isAnonymous: true };
+  }
+}
+
 export async function POST(req: Request) {
   let agentTrace: AgentRetrievalTrace | null = null;
 
@@ -1077,7 +1138,13 @@ export async function POST(req: Request) {
       retrieveEstimateLinkedProcedureDocs,
       cleanDisplayText,
     } = deps;
-    const { user, verifiedEmails, isPlatformAdmin } = await requireCurrentUser();
+    const { user, verifiedEmails, isPlatformAdmin, isAnonymous } = await resolveChatActor(req);
+    if (isAnonymous && !allowAnonymousChatRequest(req)) {
+      return NextResponse.json(
+        { error: "You've sent a lot of messages quickly. Please wait a moment, or sign in for full access." },
+        { status: 429 }
+      );
+    }
     const requestStartedAt = Date.now();
     const body = (await req.json()) as ChatRequestBody;
     const explicitJurisdiction = resolveJurisdictionFromBody(body);
@@ -1088,6 +1155,23 @@ export async function POST(req: Request) {
         : 0;
     const userMessage = extractLatestUserMessage(body.messages || []);
     const chatIntent = classifyChatIntent(userMessage);
+
+    // Anonymous (signed-out) users get text chat only. Uploads, file review, citation density,
+    // and report generation stay auth-gated — surface a clear sign-in prompt instead of failing.
+    if (
+      isAnonymous &&
+      (incomingAttachmentCount > 0 ||
+        body.uploadState?.pending ||
+        chatIntent === "estimate_file_review" ||
+        chatIntent === "citation_density_request" ||
+        chatIntent === "report_export_request")
+    ) {
+      return NextResponse.json({
+        reply:
+          "To upload and review estimates, OEM procedures, or photos — and to generate reports — please sign in. That keeps your files and reports private to your account. You can keep asking general repair questions here without signing in.",
+        requiresSignIn: true,
+      });
+    }
 
     if (
       body.uploadState?.pending &&

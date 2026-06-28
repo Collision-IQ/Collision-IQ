@@ -52,6 +52,8 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// PDF extraction + authority retrieval can be slow; raise above the short Vercel default.
+export const maxDuration = 300;
 
 type RequestBody = {
   caseId?: unknown;
