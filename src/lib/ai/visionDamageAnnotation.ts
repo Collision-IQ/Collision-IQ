@@ -1,0 +1,332 @@
+import { fal } from "@fal-ai/client";
+import {
+  FalConfigurationError,
+  FalUpstreamError,
+} from "@/lib/ai/falOpenrouterVision";
+
+// Re-exported so consumers (the annotate route) can map provider errors without
+// reaching into the queue-based vision module directly.
+export { FalConfigurationError, FalUpstreamError } from "@/lib/ai/falOpenrouterVision";
+
+const FAL_VISION_QUEUE = "openrouter/router/vision";
+const DEFAULT_VISION_MODEL_FALLBACK = "google/gemini-2.5-flash";
+const MAX_IMAGES = 10;
+
+/**
+ * Single label rendered onto every annotated artifact and surfaced to the
+ * client. The annotation pipeline is an aid, not a measurement of record.
+ */
+export const VISION_AID_DISCLAIMER =
+  "AI-generated visual aid. Not a forensic reconstruction. Not a substitute for inspection, measurement, scan, calibration, OEM procedure, or repair documentation.";
+
+export type DamageZoneConfidence = "high" | "medium" | "low";
+export type DamageZoneSeverity = "high" | "medium" | "low";
+
+/** Normalized 0-1 box, origin at the image top-left. */
+export type DamageZoneBoundingBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type DamageZone = {
+  label: string;
+  description: string;
+  confidence: DamageZoneConfidence;
+  severity: DamageZoneSeverity;
+  approximateLocation: string;
+  evidenceLimits: string;
+  boundingBox?: DamageZoneBoundingBox;
+};
+
+export type DamageAnnotationResult = {
+  summary: string;
+  zones: DamageZone[];
+  notEstablished: string[];
+  recommendedNextPhotos: string[];
+};
+
+export type AnalyzeDamagePhotoInput = {
+  imageUrls: string[];
+  userPrompt?: string;
+  vehicleContext?: string;
+  estimateContext?: string;
+  model?: string;
+};
+
+export class VisionAnnotationValidationError extends Error {
+  code: string;
+  constructor(message: string, code: string) {
+    super(message);
+    this.name = "VisionAnnotationValidationError";
+    this.code = code;
+  }
+}
+
+export class VisionAnnotationParseError extends Error {
+  details?: unknown;
+  constructor(message: string, details?: unknown) {
+    super(message);
+    this.name = "VisionAnnotationParseError";
+    this.details = details;
+  }
+}
+
+let configuredKey: string | null = null;
+
+function configureFalClient(): void {
+  const key = process.env.FAL_KEY?.trim();
+  if (!key) {
+    throw new FalConfigurationError("FAL_KEY is not configured.");
+  }
+  if (key !== configuredKey) {
+    fal.config({ credentials: key });
+    configuredKey = key;
+  }
+}
+
+function normalizeModel(value: string | undefined): string {
+  return (
+    value?.trim() ||
+    process.env.FAL_OPENROUTER_VISION_MODEL?.trim() ||
+    DEFAULT_VISION_MODEL_FALLBACK
+  );
+}
+
+function buildSystemPrompt(): string {
+  return [
+    "You are a collision damage analyst examining photographs of a damaged vehicle.",
+    "Return ONLY a single JSON object and nothing else — no prose, no markdown fences.",
+    "The JSON must match this exact schema:",
+    "{",
+    '  "summary": string,',
+    '  "zones": [',
+    "    {",
+    '      "label": string,',
+    '      "description": string,',
+    '      "confidence": "high" | "medium" | "low",',
+    '      "severity": "high" | "medium" | "low",',
+    '      "approximateLocation": string,',
+    '      "evidenceLimits": string,',
+    '      "boundingBox": { "x": number, "y": number, "width": number, "height": number }',
+    "    }",
+    "  ],",
+    '  "notEstablished": string[],',
+    '  "recommendedNextPhotos": string[]',
+    "}",
+    "Rules:",
+    "- boundingBox is OPTIONAL. Include it only when you can localize the damage in the frame. Use normalized coordinates in [0,1] with the origin at the top-left; width and height are fractions of the image.",
+    "- confidence reflects how clearly the photo supports the finding; severity reflects how severe the apparent damage is.",
+    "- Be conservative. Do not invent damage that is not visible. Put anything you cannot determine from the photo in notEstablished.",
+    "- recommendedNextPhotos lists additional angles/photos that would resolve uncertainty.",
+  ].join("\n");
+}
+
+function buildUserPrompt(input: AnalyzeDamagePhotoInput): string {
+  const parts: string[] = [
+    "Analyze the attached vehicle photo(s) for visible damage and return the JSON object described in the system instructions.",
+  ];
+  if (input.vehicleContext?.trim()) {
+    parts.push(`Vehicle context: ${input.vehicleContext.trim()}`);
+  }
+  if (input.estimateContext?.trim()) {
+    parts.push(`Estimate context: ${input.estimateContext.trim()}`);
+  }
+  if (input.userPrompt?.trim()) {
+    parts.push(`Additional instructions from the user: ${input.userPrompt.trim()}`);
+  }
+  return parts.join("\n\n");
+}
+
+function validateInput(input: AnalyzeDamagePhotoInput): string[] {
+  const urls = (input.imageUrls ?? []).filter(
+    (u): u is string => typeof u === "string" && u.trim().length > 0
+  );
+  if (urls.length === 0) {
+    throw new VisionAnnotationValidationError(
+      "imageUrls must contain at least one non-empty string",
+      "IMAGE_URLS_REQUIRED"
+    );
+  }
+  if (urls.length > MAX_IMAGES) {
+    throw new VisionAnnotationValidationError(
+      `imageUrls may contain at most ${MAX_IMAGES} items`,
+      "TOO_MANY_IMAGES"
+    );
+  }
+  return urls.map((u) => u.trim());
+}
+
+/** Pull the first balanced JSON object out of a model response. */
+function extractJsonObject(raw: string): string {
+  const withoutFences = raw
+    .replace(/```json\s*/gi, "")
+    .replace(/```/g, "")
+    .trim();
+  const start = withoutFences.indexOf("{");
+  const end = withoutFences.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) {
+    throw new VisionAnnotationParseError(
+      "Model response did not contain a JSON object",
+      raw.slice(0, 500)
+    );
+  }
+  return withoutFences.slice(start, end + 1);
+}
+
+function coerceEnum<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  fallback: T
+): T {
+  if (typeof value === "string") {
+    const lowered = value.trim().toLowerCase();
+    const match = allowed.find((a) => a === lowered);
+    if (match) return match;
+  }
+  return fallback;
+}
+
+function coerceString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function coerceStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => coerceString(item))
+    .filter((item) => item.length > 0);
+}
+
+function clamp01(value: number): number {
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
+function coerceBoundingBox(value: unknown): DamageZoneBoundingBox | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const box = value as Record<string, unknown>;
+  const nums = ["x", "y", "width", "height"].map((key) => box[key]);
+  if (!nums.every((n) => typeof n === "number" && Number.isFinite(n))) {
+    return undefined;
+  }
+  const [x, y, width, height] = nums as number[];
+  const clampedWidth = clamp01(width);
+  const clampedHeight = clamp01(height);
+  if (clampedWidth <= 0 || clampedHeight <= 0) return undefined;
+  return {
+    x: clamp01(x),
+    y: clamp01(y),
+    width: clampedWidth,
+    height: clampedHeight,
+  };
+}
+
+function coerceZone(value: unknown): DamageZone | null {
+  if (!value || typeof value !== "object") return null;
+  const zone = value as Record<string, unknown>;
+  const label = coerceString(zone.label) || coerceString(zone.name);
+  const description = coerceString(zone.description);
+  if (!label && !description) return null;
+  return {
+    label: label || "Unlabeled zone",
+    description,
+    confidence: coerceEnum(zone.confidence, ["high", "medium", "low"] as const, "low"),
+    severity: coerceEnum(zone.severity, ["high", "medium", "low"] as const, "low"),
+    approximateLocation: coerceString(zone.approximateLocation),
+    evidenceLimits: coerceString(zone.evidenceLimits),
+    boundingBox: coerceBoundingBox(zone.boundingBox),
+  };
+}
+
+export function parseDamageAnnotationResponse(raw: string): DamageAnnotationResult {
+  const json = extractJsonObject(raw);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch (error) {
+    throw new VisionAnnotationParseError(
+      "Model response was not valid JSON",
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+  if (!parsed || typeof parsed !== "object") {
+    throw new VisionAnnotationParseError("Model response was not a JSON object", json.slice(0, 500));
+  }
+  const obj = parsed as Record<string, unknown>;
+  const summary = coerceString(obj.summary);
+  const zones = Array.isArray(obj.zones)
+    ? obj.zones.map(coerceZone).filter((z): z is DamageZone => z !== null)
+    : [];
+  if (!summary && zones.length === 0) {
+    throw new VisionAnnotationParseError(
+      "Model response contained no usable summary or zones",
+      json.slice(0, 500)
+    );
+  }
+  return {
+    summary,
+    zones,
+    notEstablished: coerceStringArray(obj.notEstablished),
+    recommendedNextPhotos: coerceStringArray(obj.recommendedNextPhotos),
+  };
+}
+
+function wrapUpstreamError(error: unknown, context: string): never {
+  const rec = error && typeof error === "object" ? (error as Record<string, unknown>) : null;
+  const statusCode = typeof rec?.status === "number" ? rec.status : undefined;
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : `fal upstream error (${context})`;
+  throw new FalUpstreamError(message, { statusCode, details: error });
+}
+
+/**
+ * Synchronously run the vision model and parse a structured damage annotation.
+ * Throws FalConfigurationError (missing key), VisionAnnotationValidationError
+ * (bad input), VisionAnnotationParseError (unusable output) or FalUpstreamError.
+ */
+export async function analyzeDamagePhoto(
+  input: AnalyzeDamagePhotoInput
+): Promise<DamageAnnotationResult> {
+  const imageUrls = validateInput(input);
+  configureFalClient();
+
+  let output: string;
+  try {
+    const response = await fal.subscribe(FAL_VISION_QUEUE, {
+      input: {
+        image_urls: imageUrls,
+        prompt: buildUserPrompt(input),
+        system_prompt: buildSystemPrompt(),
+        model: normalizeModel(input.model),
+        temperature: 0.1,
+      } as never,
+      logs: false,
+    });
+    const data = response.data as Record<string, unknown>;
+    if (typeof data?.output !== "string") {
+      throw new VisionAnnotationParseError(
+        "Vision result did not include a string output",
+        response.data
+      );
+    }
+    output = data.output;
+  } catch (error) {
+    if (
+      error instanceof FalConfigurationError ||
+      error instanceof VisionAnnotationParseError ||
+      error instanceof VisionAnnotationValidationError
+    ) {
+      throw error;
+    }
+    wrapUpstreamError(error, "subscribe");
+  }
+
+  return parseDamageAnnotationResponse(output);
+}
