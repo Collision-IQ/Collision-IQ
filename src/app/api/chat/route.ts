@@ -1056,6 +1056,9 @@ function escapeRegExp(value: string): string {
 // server state is needed. A best-effort in-memory IP rate limit caps cost/abuse on this now-
 // public endpoint (per serverless instance; not a global limiter).
 const ANON_GUEST_CLERK_ID = "anonymous-guest";
+// getOrCreateUser requires a non-null email; use a stable, non-deliverable synthetic address for
+// the shared guest so the row provisions cleanly (User.email is unique, so this is one guest row).
+const ANON_GUEST_EMAIL = "anonymous-guest@guest.collision-iq.local";
 const ANON_RATE_LIMIT_MAX = 12;
 const ANON_RATE_LIMIT_WINDOW_MS = 60_000;
 const anonRequestHits = new Map<string, number[]>();
@@ -1097,7 +1100,7 @@ async function resolveChatActor(req: Request): Promise<{
     if (!(error instanceof UnauthorizedError)) throw error;
     const guest = await getOrCreateUser({
       clerkUserId: ANON_GUEST_CLERK_ID,
-      email: null,
+      email: ANON_GUEST_EMAIL,
       firstName: "Guest",
       lastName: null,
       imageUrl: null,
