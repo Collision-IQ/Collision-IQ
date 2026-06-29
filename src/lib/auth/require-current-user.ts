@@ -122,7 +122,7 @@ export async function requireCurrentUser() {
   const primaryEmail =
     clerkUser?.primaryEmailAddress?.emailAddress ??
     clerkUser?.emailAddresses[0]?.emailAddress;
-  const normalizedEmail = normalizeEmail(primaryEmail) || null;
+  const normalizedEmail = normalizeEmail(primaryEmail)?.trim() || null;
   if (!state.userId || !normalizedEmail) {
     console.warn("[auth] missing Clerk identity for user bootstrap", {
       clerkUserIdPresent: Boolean(state.userId),

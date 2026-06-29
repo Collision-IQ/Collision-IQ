@@ -1791,6 +1791,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
 
+    if (error instanceof Error && error.message === "Missing authenticated user identity") {
+      console.warn("[chat] auth identity guard — returning 401");
+      return NextResponse.json(
+        { ok: false, error: "AUTH_REQUIRED", message: "Please sign in or accept consent before using chat." },
+        { status: 401 }
+      );
+    }
+
     if (error instanceof AttachmentAccessError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
