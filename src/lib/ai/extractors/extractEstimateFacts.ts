@@ -283,11 +283,13 @@ function collectEstimateTotalCandidates(text: string) {
   const candidates: Array<{ value: number; score: number }> = [];
   const patterns: Array<{ pattern: RegExp; score: number }> = [
     { pattern: /\btotal cost of repairs?\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 1000 },
-    { pattern: /\bnet cost of repairs?\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 980 },
     { pattern: /\bgrand total\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 940 },
     { pattern: /\bestimate total\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 920 },
     { pattern: /\b(?:carrier|shop)\s+total(?:\s+(?:cost|repairs?))?\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 900 },
     { pattern: /\btotal(?:\s+(?:repairs?|amount|cost))?\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 700 },
+    // Net cost of repairs is AFTER deductible — never the comparison/display
+    // basis. Kept only as a last resort when no gross repair total is present.
+    { pattern: /\bnet cost of repairs?\b[^\d$]{0,30}\$?\s*([\d,]+\.\d{2})/gi, score: 300 },
   ];
 
   for (const { pattern, score } of patterns) {
