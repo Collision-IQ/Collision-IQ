@@ -501,7 +501,7 @@ run("Chat workspace stays compact without reports and expands when report remain
   assert.match(pageSource, /: "grid h-full min-h-0 w-full flex-1 gap-1 pt-1 sm:gap-3 sm:pt-3"/);
   assert.match(pageSource, /chatWidgetWrapClass = "min-h-0 flex-1"/);
   assert.match(pageSource, /data-collision-iq-footer="true"/);
-  assert.match(pageSource, /<footer className="mt-auto border-t border-border bg-card\/80 px-4 py-4 text-card-foreground sm:py-8"/);
+  assert.match(pageSource, /<footer className="mt-auto border-t border-border bg-card\/80 px-4 py-3 text-card-foreground sm:py-8"/);
   assert.doesNotMatch(widgetSource, /\/brand\/logos\/Logo-grey\.png/);
   assert.match(widgetSource, /\/brand\/logos\/logo-horizontal\.png/);
   assert.match(widgetSource, /hasActiveChatWorkspace/);

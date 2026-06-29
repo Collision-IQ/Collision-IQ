@@ -1799,9 +1799,10 @@ function CollisionIqFooter() {
   ];
 
   return (
-    <footer className="mt-auto border-t border-border bg-card/80 px-4 py-4 text-card-foreground sm:py-8" data-collision-iq-footer="true">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 sm:gap-6 sm:px-2 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex min-w-0 items-center gap-3">
+    <footer className="mt-auto border-t border-border bg-card/80 px-4 py-3 text-card-foreground sm:py-8" data-collision-iq-footer="true">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 sm:gap-6 sm:px-2 lg:flex-row lg:items-center lg:justify-between">
+        {/* Logo is redundant with the header on small screens — hide it on mobile to keep the footer compact. */}
+        <div className="hidden min-w-0 items-center gap-3 sm:flex">
           <span className="relative block h-7 w-[120px] shrink-0 sm:h-9 sm:w-[150px]">
             <Image
               src="/iq/iq_logo.png"
@@ -1820,7 +1821,7 @@ function CollisionIqFooter() {
           </span>
         </div>
 
-        <nav className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground" aria-label="Footer">
+        <nav className="flex flex-wrap gap-x-3 gap-y-1.5 text-xs text-muted-foreground sm:gap-x-4 sm:gap-y-2 sm:text-sm" aria-label="Footer">
           {links.map((link) => (
             <Link key={link.href} href={link.href} className="transition hover:text-foreground">
               {link.label}
@@ -1828,7 +1829,7 @@ function CollisionIqFooter() {
           ))}
         </nav>
 
-        <div className="text-sm text-muted-foreground">&copy; {year} Collision Academy</div>
+        <div className="text-xs text-muted-foreground sm:text-sm">&copy; {year} Collision Academy</div>
       </div>
     </footer>
   );
