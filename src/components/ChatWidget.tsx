@@ -91,6 +91,11 @@ import {
   resolveAnnotatedCitationDensityTarget,
   shouldGenerateAnnotatedCitationDensityEstimate,
 } from "@/lib/reports/citationDensityIntent";
+import {
+  extractEstimateTotalCandidate,
+  resolveTriageRoles,
+  scoreEstimateRoleSignals,
+} from "@/lib/reports/estimateTriageClassifier";
 import { speak, TtsClientError, type SpeakResult, type TtsProvider, type TtsVoiceSymbol } from "@/lib/tts";
 
 interface Attachment {
@@ -710,40 +715,6 @@ function formatPreliminaryCurrency(value: number) {
   }).format(value);
 }
 
-function extractEstimateTotalCandidate(text: string): number | null {
-  if (!text.trim()) return null;
-
-  const candidates: Array<{ value: number; score: number }> = [];
-  const totalPatterns = [
-    /(?:estimate|gross|repair|claim|net|grand)\s+total[^$\d]{0,32}\$?\s*([0-9][0-9,]*(?:\.\d{2})?)/gi,
-    /total[^$\d]{0,20}\$?\s*([0-9][0-9,]*(?:\.\d{2})?)/gi,
-    /\$\s*([0-9][0-9,]*(?:\.\d{2}))/g,
-  ];
-
-  totalPatterns.forEach((pattern, patternIndex) => {
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(text)) !== null) {
-      const value = Number(String(match[1] ?? "").replace(/,/g, ""));
-      if (!Number.isFinite(value) || value < 100 || value > 250000) continue;
-      candidates.push({ value, score: patternIndex === 0 ? 3 : patternIndex === 1 ? 2 : 1 });
-    }
-  });
-
-  if (!candidates.length) return null;
-  candidates.sort((a, b) => b.score - a.score || b.value - a.value);
-  return candidates[0]?.value ?? null;
-}
-
-function inferEstimateRole(attachment: Pick<Attachment, "filename" | "text">): "shop" | "carrier" | "unknown" {
-  const haystack = `${attachment.filename}\n${attachment.text.slice(0, 4000)}`.toLowerCase();
-  if (/\b(?:sor|allstate|state farm|geico|progressive|carrier|insurer|insurance|claim rep|appraiser)\b/.test(haystack)) {
-    return "carrier";
-  }
-  if (/\b(?:shop|repair facility|collision center|body shop|supplement|work auth|work authorization)\b/.test(haystack)) {
-    return "shop";
-  }
-  return "unknown";
-}
 
 function buildPreliminaryCategories(attachments: Attachment[]) {
   const text = attachments.map((attachment) => `${attachment.filename}\n${attachment.text}`).join("\n").toLowerCase();
@@ -780,13 +751,12 @@ function buildPreliminaryReviewDraft(attachments: Attachment[]): PreliminaryRevi
   const reviewedFiles = pdfs.length ? pdfs : attachments;
   const estimates = reviewedFiles.map((attachment) => ({
     filename: attachment.filename,
-    role: inferEstimateRole(attachment),
+    scores: scoreEstimateRoleSignals(attachment.filename, attachment.text),
     total: extractEstimateTotalCandidate(attachment.text),
   }));
-  const shopEstimate = estimates.find((estimate) => estimate.role === "shop") ?? estimates.find((estimate) => estimate.total !== null);
-  const carrierEstimate =
-    estimates.find((estimate) => estimate.role === "carrier") ??
-    estimates.find((estimate) => estimate !== shopEstimate && estimate.total !== null);
+  // Resolve carrier vs shop to DISTINCT documents so the same file is never
+  // reported as both roles (which previously produced a $0.00 gap).
+  const { carrier: carrierEstimate, shop: shopEstimate } = resolveTriageRoles(estimates);
   const gap =
     typeof shopEstimate?.total === "number" && typeof carrierEstimate?.total === "number"
       ? Math.abs(shopEstimate.total - carrierEstimate.total)
