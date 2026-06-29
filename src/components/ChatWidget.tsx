@@ -1157,12 +1157,6 @@ export default function ChatWidget({
     async function loadViewerAccess() {
       try {
         const token = await getToken();
-        const API_BASE_URL =
-          process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-          (typeof window !== "undefined" ? window.location.origin : "");
-        console.log("API_BASE_URL", API_BASE_URL);
-        console.log("isNative", isNative());
-        console.log("HAS_CLERK_TOKEN", !!token);
 
         const response = await fetch("/api/account/entitlements", {
           credentials: "same-origin",
@@ -1174,9 +1168,6 @@ export default function ChatWidget({
         }
 
         const entitlements = (await response.json()) as AccountEntitlements;
-        console.log("ENTITLEMENTS_RESPONSE", entitlements);
-        console.log("DERIVED_UPLOAD_CAP", entitlements.uploadCap);
-        console.log("DERIVED_IS_ADMIN", entitlements.isPlatformAdmin === true);
         if (!cancelled) {
           setFetchedViewerAccess(entitlements);
           setEntitlementLoadAttempted(true);
@@ -3723,11 +3714,14 @@ export default function ChatWidget({
                 </button>
 
                 <button
-                  onClick={() => cameraInputRef.current?.click()}
+                  onClick={() => {
+                    setInput("Analyze the uploaded photo(s) for visible damage zones. Describe each zone, its approximate location on the vehicle, and estimated severity.");
+                    cameraInputRef.current?.click();
+                  }}
                   disabled={disabled || uploadLimitsLoading}
                   className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[var(--accent)]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
                 >
-                  Upload Photos
+                  Analyze photo for visible damage
                 </button>
               </div>
 

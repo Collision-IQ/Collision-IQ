@@ -93,12 +93,6 @@ export default function FileUpload({
     async function loadEntitlements() {
       try {
         const token = await getToken();
-        const API_BASE_URL =
-          process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-          (typeof window !== "undefined" ? window.location.origin : "");
-        console.log("API_BASE_URL", API_BASE_URL);
-        console.log("isNative", isNative());
-        console.log("HAS_CLERK_TOKEN", !!token);
 
         const response = await fetch("/api/account/entitlements", {
           credentials: "same-origin",
@@ -111,23 +105,14 @@ export default function FileUpload({
           setUploadPlanName("starter");
           setResolvedUploadLimits(null);
           setUploadHint("Upload limits are unavailable; the server will validate your upload access.");
-          console.log("FINAL_DERIVED_UPLOAD_CAP", undefined);
-          console.log("FINAL_DERIVED_IS_ADMIN", false);
-          console.log("FINAL_MAX_UPLOAD_BATCH_FILES", FALLBACK_UPLOAD_BATCH_FILE_LIMIT);
           setUploadLimitsLoaded(true);
           return;
         }
 
         const entitlements = (await response.json()) as AccountEntitlements;
-        console.log("ENTITLEMENTS_RESPONSE", entitlements);
         if (cancelled) return;
 
         const uploadLimits = resolveUploadPlanLimits(entitlements);
-        console.log("DERIVED_UPLOAD_CAP", entitlements.uploadCap);
-        console.log("DERIVED_IS_ADMIN", entitlements.isPlatformAdmin === true);
-        console.log("FINAL_DERIVED_UPLOAD_CAP", entitlements.uploadCap);
-        console.log("FINAL_DERIVED_IS_ADMIN", entitlements.isPlatformAdmin === true);
-        console.log("FINAL_MAX_UPLOAD_BATCH_FILES", uploadLimits.maxFilesPerReview);
         setMaxUploadBatchFiles(uploadLimits.maxFilesPerReview);
         setUploadPlanName(uploadLimits.plan);
         setResolvedUploadLimits(uploadLimits);

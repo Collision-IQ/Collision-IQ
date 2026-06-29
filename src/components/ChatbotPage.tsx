@@ -674,12 +674,6 @@ export function ChatbotWorkspacePage() {
     async function loadViewerAccess() {
       try {
         const token = await getToken();
-        const API_BASE_URL =
-          process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-          (typeof window !== "undefined" ? window.location.origin : "");
-        console.log("API_BASE_URL", API_BASE_URL);
-        console.log("isNative", isNative());
-        console.log("HAS_CLERK_TOKEN", !!token);
 
         const response = await fetch("/api/account/entitlements", {
           credentials: "same-origin",
@@ -688,11 +682,6 @@ export function ChatbotWorkspacePage() {
         if (!response.ok) return;
 
         const data = (await response.json()) as AccountEntitlements;
-        console.log("ENTITLEMENTS_RESPONSE", data);
-        console.log("DERIVED_UPLOAD_CAP", data.uploadCap);
-        console.log("DERIVED_IS_ADMIN", data.isPlatformAdmin === true);
-        console.log("FINAL_DERIVED_UPLOAD_CAP", data.uploadCap);
-        console.log("FINAL_DERIVED_IS_ADMIN", data.isPlatformAdmin === true);
         if (!cancelled) {
           setViewerAccess(data);
         }
