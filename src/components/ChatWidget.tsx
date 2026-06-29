@@ -926,6 +926,7 @@ export default function ChatWidget({
   const [uploadUiMessage, setUploadUiMessage] = useState<string | null>(null);
   const [, setUploadLifecycleItems] = useState<UploadLifecycleItem[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
+  const [isAnnotatingPhoto, setIsAnnotatingPhoto] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -954,6 +955,11 @@ export default function ChatWidget({
     totalKnownFiles: 0,
   });
   const firstAttachmentAtRef = useRef<number | null>(null);
+  // Set when the user taps "Analyze photo for visible damage" without an image
+  // already attached; the upload-completion handler runs annotation once a fresh
+  // image lands so the action is a single tap.
+  const pendingPhotoAnnotateRef = useRef(false);
+  const isAnnotatingPhotoRef = useRef(false);
   const speechPlaybackTokenRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
@@ -1497,6 +1503,115 @@ export default function ChatWidget({
       messageCounterRef.current += 1;
       return [...prev, createMessage(messageCounterRef.current, "assistant", content)];
     });
+  }
+
+  type DamageAnnotationZone = {
+    label?: string;
+    description?: string;
+    confidence?: string;
+    severity?: string;
+    approximateLocation?: string;
+    evidenceLimits?: string;
+  };
+  type DamageAnnotationResponse = {
+    ok?: boolean;
+    error?: string;
+    summary?: string;
+    zones?: DamageAnnotationZone[];
+    notEstablished?: string[];
+    recommendedNextPhotos?: string[];
+    annotatedImageUrl?: string | null;
+    disclaimer?: string;
+    warnings?: string[];
+  };
+
+  function buildDamageAnnotationMarkdown(result: DamageAnnotationResponse): string {
+    const lines: string[] = ["## Visible damage analysis"];
+    if (result.annotatedImageUrl) {
+      lines.push("", `![Annotated damage photo](${result.annotatedImageUrl})`);
+    }
+    if (result.summary) {
+      lines.push("", result.summary);
+    }
+    if (result.zones?.length) {
+      lines.push("", "### Damage zones");
+      result.zones.forEach((zone, index) => {
+        const loc = zone.approximateLocation ? ` (${zone.approximateLocation})` : "";
+        const sev = zone.severity ? ` — severity: ${zone.severity}` : "";
+        const conf = zone.confidence ? `, confidence: ${zone.confidence}` : "";
+        lines.push(`${index + 1}. **${zone.label ?? "Zone"}**${loc}${sev}${conf}`);
+        if (zone.description) lines.push(`   - ${zone.description}`);
+        if (zone.evidenceLimits) lines.push(`   - Evidence limits: ${zone.evidenceLimits}`);
+      });
+    }
+    if (result.notEstablished?.length) {
+      lines.push("", "### Not established from this photo");
+      result.notEstablished.forEach((item) => lines.push(`- ${item}`));
+    }
+    if (result.recommendedNextPhotos?.length) {
+      lines.push("", "### Recommended next photos");
+      result.recommendedNextPhotos.forEach((item) => lines.push(`- ${item}`));
+    }
+    if (result.disclaimer) {
+      lines.push("", `_${result.disclaimer}_`);
+    }
+    return lines.join("\n");
+  }
+
+  async function handleAnnotatePhoto(attachmentId: string) {
+    if (isAnnotatingPhotoRef.current) return;
+    isAnnotatingPhotoRef.current = true;
+    setIsAnnotatingPhoto(true);
+    upsertSystemStatusMessage("Analyzing photo for visible damage…");
+    try {
+      const token = await getToken();
+      const response = await fetch("/api/vision/annotate", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ attachmentId }),
+      });
+      const payload = (await response.json().catch(() => null)) as DamageAnnotationResponse | null;
+      if (!response.ok || !payload?.ok) {
+        const code = payload?.error;
+        const message =
+          code === "FAL_NOT_CONFIGURED"
+            ? "Photo annotation isn't available right now — the vision service isn't configured."
+            : code === "ATTACHMENT_NOT_IMAGE"
+              ? "That attachment isn't an image I can annotate. Please attach a photo of the damage."
+              : "I couldn't analyze that photo. Please try again with a clear, well-lit image.";
+        pushAssistantMessage(message);
+        return;
+      }
+      pushAssistantMessage(buildDamageAnnotationMarkdown(payload));
+    } catch {
+      pushAssistantMessage("I couldn't reach the photo analysis service. Please try again shortly.");
+    } finally {
+      isAnnotatingPhotoRef.current = false;
+      setIsAnnotatingPhoto(false);
+    }
+  }
+
+  function handleAnnotatePhotoAction() {
+    if (disabled || isAnnotatingPhotoRef.current) return;
+    const latestImage = [...attachmentsRef.current]
+      .reverse()
+      .find(
+        (attachment) =>
+          attachment.hasVision &&
+          typeof attachment.attachmentId === "string" &&
+          attachment.attachmentId.length > 0
+      );
+    if (latestImage) {
+      void handleAnnotatePhoto(latestImage.attachmentId);
+      return;
+    }
+    // No image attached yet — capture one, then annotate on upload completion.
+    pendingPhotoAnnotateRef.current = true;
+    cameraInputRef.current?.click();
   }
 
   const clearStructuredAnalysisState = useCallback(() => {
@@ -3051,6 +3166,19 @@ export default function ChatWidget({
     }
     setReplaceAttachmentId(null);
     firstAttachmentAtRef.current ??= Date.now();
+
+    // If the user tapped "Analyze photo for visible damage" before attaching an
+    // image, run annotation now that a fresh image has landed.
+    if (pendingPhotoAnnotateRef.current) {
+      const freshImage = returnedUploads.find(
+        (item) => Boolean(item?.hasVision) && typeof item?.attachmentId === "string"
+      );
+      if (freshImage?.attachmentId) {
+        pendingPhotoAnnotateRef.current = false;
+        void handleAnnotatePhoto(freshImage.attachmentId);
+      }
+    }
+
     return {
       attachmentIds: returnedAttachmentIds.length ? returnedAttachmentIds : [attachmentId],
       filenames: returnedFilenames.length ? returnedFilenames : [filename],
@@ -3714,14 +3842,11 @@ export default function ChatWidget({
                 </button>
 
                 <button
-                  onClick={() => {
-                    setInput("Analyze the uploaded photo(s) for visible damage zones. Describe each zone, its approximate location on the vehicle, and estimated severity.");
-                    cameraInputRef.current?.click();
-                  }}
-                  disabled={disabled || uploadLimitsLoading}
+                  onClick={handleAnnotatePhotoAction}
+                  disabled={disabled || uploadLimitsLoading || isAnnotatingPhoto}
                   className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[var(--accent)]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
                 >
-                  Analyze photo for visible damage
+                  {isAnnotatingPhoto ? "Analyzing photo…" : "Analyze photo for visible damage"}
                 </button>
               </div>
 
