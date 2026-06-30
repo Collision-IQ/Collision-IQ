@@ -5344,6 +5344,7 @@ function createCustomerReportDocument(report: CustomerReport, params: {
       typeof params.renderModel.reportFields.estimateTotal === "number"
         ? formatCurrency(params.renderModel.reportFields.estimateTotal, true)
         : null,
+    comparisonTotals: params.renderModel.reportFields.comparisonTotals ?? null,
     filename: params.fileName || "customer-report.pdf",
     confidenceIntegrity: params.renderModel.confidenceIntegrity,
     findingReasoning: params.renderModel.findingReasoning,

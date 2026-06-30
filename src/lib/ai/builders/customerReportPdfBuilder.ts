@@ -1,5 +1,6 @@
 import type { CustomerReport } from "@/lib/ai/generateCustomerReport";
 import type { CarrierReportDocument } from "./carrierPdfBuilder";
+import type { EstimateComparisonTotals } from "./buildExportModel";
 import type { ConfidenceIntegrity, OEMContradiction, ReportFindingReasoning } from "@/lib/ai/types/analysis";
 import {
   alignCustomerEstimatePostureText,
@@ -21,6 +22,7 @@ type BuildCustomerReportPdfParams = {
   insurer?: string | null;
   mileage?: string | null;
   estimateTotal?: string | null;
+  comparisonTotals?: EstimateComparisonTotals | null;
   generatedAt?: string;
   filename?: string;
   confidenceIntegrity?: ConfidenceIntegrity;
@@ -29,6 +31,53 @@ type BuildCustomerReportPdfParams = {
   selectedEstimatePosture?: EstimatePostureDecision;
 };
 
+function formatCustomerMoney(value: number): string {
+  return value.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/**
+ * Show both estimate totals (shop and carrier) plus the difference when a
+ * comparison is available, with any net-after-deductible figure listed
+ * separately from the repair total. Falls back to a single "Estimate Total"
+ * only when no comparison totals were extracted. Never presents the carrier
+ * total alone as the headline figure.
+ */
+export function buildCustomerTotalsSummary(
+  comparisonTotals: EstimateComparisonTotals | null | undefined,
+  estimateTotal: string | null | undefined
+): Array<{ label: string; value: string }> {
+  const rows: Array<{ label: string; value: string }> = [];
+  const shop = comparisonTotals?.shopEstimateGrandTotal;
+  const carrier = comparisonTotals?.carrierTotalCostOfRepairs;
+  const net = comparisonTotals?.carrierNetAfterDeductible;
+  const gap = comparisonTotals?.grossRepairAppraisalGap;
+
+  if (typeof shop === "number") {
+    rows.push({ label: "Shop estimate total", value: formatCustomerMoney(shop) });
+  }
+  if (typeof carrier === "number") {
+    rows.push({ label: "Carrier total cost of repairs", value: formatCustomerMoney(carrier) });
+  }
+  if (typeof shop === "number" && typeof carrier === "number") {
+    const difference = typeof gap === "number" ? Math.abs(gap) : Math.abs(shop - carrier);
+    rows.push({ label: "Difference", value: formatCustomerMoney(difference) });
+  }
+  // Net/payable is shown separately from the repair total, never as the basis.
+  if (typeof net === "number") {
+    rows.push({ label: "Carrier net after deductible", value: formatCustomerMoney(net) });
+  }
+
+  if (rows.length === 0) {
+    rows.push({ label: "Estimate Total", value: estimateTotal || "Not provided" });
+  }
+  return rows;
+}
+
 export function buildCustomerReportPdf({
   report,
   vehicle,
@@ -36,6 +85,7 @@ export function buildCustomerReportPdf({
   insurer,
   mileage,
   estimateTotal,
+  comparisonTotals,
   generatedAt,
   filename,
   confidenceIntegrity,
@@ -89,7 +139,7 @@ export function buildCustomerReportPdf({
       { label: "VIN", value: vin || "Not provided" },
       { label: "Insurer", value: insurer || "Not provided" },
       { label: "Mileage", value: mileage || "Not provided" },
-      { label: "Estimate Total", value: estimateTotal || "Not provided" },
+      ...buildCustomerTotalsSummary(comparisonTotals, estimateTotal),
     ],
     sections: [
       {
