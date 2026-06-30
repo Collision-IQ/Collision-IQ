@@ -96,6 +96,19 @@ import {
   resolveTriageRoles,
   scoreEstimateRoleSignals,
 } from "@/lib/reports/estimateTriageClassifier";
+import {
+  FalVisionClientError,
+  getFalVisionResult,
+  getFalVisionStatus,
+  submitFalVision,
+} from "@/lib/falVision";
+import {
+  FalImageGenerationClientError,
+  firstImageUrl,
+  getFalImageGenerationResult,
+  getFalImageGenerationStatus,
+  submitFalImageGeneration,
+} from "@/lib/falImageGenerationClient";
 import { speak, TtsClientError, type SpeakResult, type TtsProvider, type TtsVoiceSymbol } from "@/lib/tts";
 
 interface Attachment {
@@ -218,6 +231,54 @@ type AnalysisFailureResponse = {
 };
 
 const RETRYABLE_ANALYSIS_MESSAGE = "Analysis provider is busy. Please retry shortly.";
+
+// ── FAL queue polling helpers (shared by vision + image generation) ──────────
+const FAL_QUEUE_POLL_ATTEMPTS = 20;
+const FAL_QUEUE_POLL_INTERVAL_MS = 1500;
+const FAL_IMAGE_COMMAND_PREFIXES = ["/image", "/generate-image", "/design-car"];
+const FAL_IMAGE_VISUAL_AID_DISCLAIMER =
+  "AI-generated visual aid. Not a forensic reconstruction. Not a substitute for inspection, measurement, scan, calibration, OEM procedure, or repair documentation.";
+
+function falQueueDelay(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window !== "undefined") {
+      window.setTimeout(resolve, FAL_QUEUE_POLL_INTERVAL_MS);
+    } else {
+      resolve();
+    }
+  });
+}
+
+function readFalQueueStatusValue(status: unknown): string {
+  if (!status || typeof status !== "object") return "";
+  const candidate = status as { status?: unknown; state?: unknown };
+  if (typeof candidate.status === "string") return candidate.status;
+  if (typeof candidate.state === "string") return candidate.state;
+  return "";
+}
+
+function isFalQueueCompleted(status: unknown): boolean {
+  return /^(completed|complete|success|succeeded|ok)$/i.test(readFalQueueStatusValue(status));
+}
+
+function isFalQueueFailed(status: unknown): boolean {
+  return /^(failed|error|cancelled|canceled)$/i.test(readFalQueueStatusValue(status));
+}
+
+/** Strip a recognized /image-style command prefix; returns null if none match. */
+function parseFalImageCommand(message: string): string | null {
+  const trimmed = message.trimStart();
+  for (const prefix of FAL_IMAGE_COMMAND_PREFIXES) {
+    if (trimmed.toLowerCase().startsWith(prefix)) {
+      const rest = trimmed.slice(prefix.length);
+      // Require a separator so "/images" or "/imagex" do not match.
+      if (rest.length === 0 || /^[\s:]/.test(rest)) {
+        return rest.replace(/^[\s:]+/, "").trim();
+      }
+    }
+  }
+  return null;
+}
 
 async function resolveAnalysisFailure(response: Response) {
   let payload: AnalysisFailureResponse | null = null;
@@ -896,7 +957,7 @@ export default function ChatWidget({
   const [uploadUiMessage, setUploadUiMessage] = useState<string | null>(null);
   const [, setUploadLifecycleItems] = useState<UploadLifecycleItem[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
-  const [isAnnotatingPhoto, setIsAnnotatingPhoto] = useState(false);
+  const [isAnalyzingPhoto, setIsAnalyzingPhoto] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -926,10 +987,10 @@ export default function ChatWidget({
   });
   const firstAttachmentAtRef = useRef<number | null>(null);
   // Set when the user taps "Analyze photo for visible damage" without an image
-  // already attached; the upload-completion handler runs annotation once a fresh
-  // image lands so the action is a single tap.
-  const pendingPhotoAnnotateRef = useRef(false);
-  const isAnnotatingPhotoRef = useRef(false);
+  // already attached; the upload-completion handler runs FAL vision analysis once
+  // a fresh image lands so the action is a single tap.
+  const pendingFalVisionPhotoAnalysisRef = useRef(false);
+  const isAnalyzingPhotoRef = useRef(false);
   const speechPlaybackTokenRef = useRef(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
@@ -1475,113 +1536,149 @@ export default function ChatWidget({
     });
   }
 
-  type DamageAnnotationZone = {
-    label?: string;
-    description?: string;
-    confidence?: string;
-    severity?: string;
-    approximateLocation?: string;
-    evidenceLimits?: string;
-  };
-  type DamageAnnotationResponse = {
-    ok?: boolean;
-    error?: string;
-    summary?: string;
-    zones?: DamageAnnotationZone[];
-    notEstablished?: string[];
-    recommendedNextPhotos?: string[];
-    annotatedImageUrl?: string | null;
-    disclaimer?: string;
-    warnings?: string[];
-  };
+  // ── FAL vision photo analysis (Task 2) ──────────────────────────────────────
+  // "Analyze photo for visible damage" runs a text-only visual analysis through
+  // the FAL vision queue (/api/fal/vision). This is a visual AID, not a forensic
+  // measurement, and is never claim evidence.
+  //
+  // TODO(future): deterministic photo annotation lives at POST /api/vision/annotate
+  // (already scaffolded). That path should call FAL/OpenRouter vision for
+  // structured zones, produce normalized bounding boxes when available, render
+  // deterministic overlays on the ORIGINAL photo, save the annotated artifact,
+  // and label it "AI visual aid — not a forensic measurement." It stays a
+  // separate, later feature and is intentionally NOT wired to this button yet.
+  // Generative image replacement must never be used as claim evidence.
+  const FAL_VISION_DAMAGE_PROMPT =
+    "Analyze this vehicle damage photo for visible damage only. Return a concise repair/claim-support explanation for a policyholder. Identify visible damage zones, likely parts involved, safety-relevant observations, limits of what cannot be proven from the photo, and recommended next photos/documents. Do not claim hidden damage is proven. Do not provide legal conclusions.";
 
-  function buildDamageAnnotationMarkdown(result: DamageAnnotationResponse): string {
-    const lines: string[] = ["## Visible damage analysis"];
-    if (result.annotatedImageUrl) {
-      lines.push("", `![Annotated damage photo](${result.annotatedImageUrl})`);
-    }
-    if (result.summary) {
-      lines.push("", result.summary);
-    }
-    if (result.zones?.length) {
-      lines.push("", "### Damage zones");
-      result.zones.forEach((zone, index) => {
-        const loc = zone.approximateLocation ? ` (${zone.approximateLocation})` : "";
-        const sev = zone.severity ? ` — severity: ${zone.severity}` : "";
-        const conf = zone.confidence ? `, confidence: ${zone.confidence}` : "";
-        lines.push(`${index + 1}. **${zone.label ?? "Zone"}**${loc}${sev}${conf}`);
-        if (zone.description) lines.push(`   - ${zone.description}`);
-        if (zone.evidenceLimits) lines.push(`   - Evidence limits: ${zone.evidenceLimits}`);
-      });
-    }
-    if (result.notEstablished?.length) {
-      lines.push("", "### Not established from this photo");
-      result.notEstablished.forEach((item) => lines.push(`- ${item}`));
-    }
-    if (result.recommendedNextPhotos?.length) {
-      lines.push("", "### Recommended next photos");
-      result.recommendedNextPhotos.forEach((item) => lines.push(`- ${item}`));
-    }
-    if (result.disclaimer) {
-      lines.push("", `_${result.disclaimer}_`);
-    }
-    return lines.join("\n");
-  }
-
-  async function handleAnnotatePhoto(attachmentId: string) {
-    if (isAnnotatingPhotoRef.current) return;
-    isAnnotatingPhotoRef.current = true;
-    setIsAnnotatingPhoto(true);
+  async function runFalVisionPhotoAnalysis(imageDataUrl: string) {
+    if (isAnalyzingPhotoRef.current) return;
+    isAnalyzingPhotoRef.current = true;
+    setIsAnalyzingPhoto(true);
     upsertSystemStatusMessage("Analyzing photo for visible damage…");
     try {
-      const token = await getToken();
-      const response = await fetch("/api/vision/annotate", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ attachmentId }),
+      const submit = await submitFalVision({
+        imageUrls: [imageDataUrl],
+        prompt: FAL_VISION_DAMAGE_PROMPT,
       });
-      const payload = (await response.json().catch(() => null)) as DamageAnnotationResponse | null;
-      if (!response.ok || !payload?.ok) {
-        const code = payload?.error;
-        const message =
-          code === "FAL_NOT_CONFIGURED"
-            ? "Photo annotation isn't available right now — the vision service isn't configured."
-            : code === "ATTACHMENT_NOT_IMAGE"
-              ? "That attachment isn't an image I can annotate. Please attach a photo of the damage."
-              : "I couldn't analyze that photo. Please try again with a clear, well-lit image.";
-        pushAssistantMessage(message);
+
+      let completed = false;
+      for (let attempt = 0; attempt < FAL_QUEUE_POLL_ATTEMPTS; attempt += 1) {
+        const status = await getFalVisionStatus(submit.requestId, { logs: false });
+        if (isFalQueueCompleted(status)) {
+          completed = true;
+          break;
+        }
+        if (isFalQueueFailed(status)) break;
+        await falQueueDelay();
+      }
+
+      if (!completed) {
+        pushAssistantMessage(
+          "Image analysis is taking longer than expected. You can still ask me to review the uploaded photo through the normal chat workflow."
+        );
         return;
       }
-      pushAssistantMessage(buildDamageAnnotationMarkdown(payload));
-    } catch {
-      pushAssistantMessage("I couldn't reach the photo analysis service. Please try again shortly.");
+
+      const result = await getFalVisionResult(submit.requestId);
+      const output = result.data?.output?.trim();
+      if (!output) {
+        pushAssistantMessage(
+          "I couldn't get a visual analysis back for that photo. You can still ask me to review it through the normal chat workflow."
+        );
+        return;
+      }
+
+      pushAssistantMessage(`**AI visual analysis — not a forensic measurement.**\n\n${output}`);
+    } catch (error) {
+      const code = error instanceof FalVisionClientError ? error.code : "";
+      const status = error instanceof FalVisionClientError ? error.status : undefined;
+      if (code === "FAL_NOT_CONFIGURED" || status === 503) {
+        pushAssistantMessage(
+          "Image analysis is not configured right now. I can still review the image through the normal chat workflow."
+        );
+      } else {
+        console.warn("[chat] FAL vision photo analysis failed", error);
+        pushAssistantMessage(
+          "I couldn't complete the image analysis. You can still ask me to review the uploaded photo through the normal chat workflow."
+        );
+      }
     } finally {
-      isAnnotatingPhotoRef.current = false;
-      setIsAnnotatingPhoto(false);
+      isAnalyzingPhotoRef.current = false;
+      setIsAnalyzingPhoto(false);
     }
   }
 
-  function handleAnnotatePhotoAction() {
-    if (disabled || isAnnotatingPhotoRef.current) return;
-    const latestImage = [...attachmentsRef.current]
+  function findLatestImageDataUrl(): string | undefined {
+    return [...attachmentsRef.current]
       .reverse()
       .find(
         (attachment) =>
           attachment.hasVision &&
-          typeof attachment.attachmentId === "string" &&
-          attachment.attachmentId.length > 0
-      );
-    if (latestImage) {
-      void handleAnnotatePhoto(latestImage.attachmentId);
+          typeof attachment.imageDataUrl === "string" &&
+          attachment.imageDataUrl.trim().length > 0
+      )?.imageDataUrl;
+  }
+
+  function handleAnalyzePhotoAction() {
+    if (disabled || isAnalyzingPhotoRef.current) return;
+    const latestImageDataUrl = findLatestImageDataUrl();
+    if (latestImageDataUrl) {
+      void runFalVisionPhotoAnalysis(latestImageDataUrl);
       return;
     }
-    // No image attached yet — capture one, then annotate on upload completion.
-    pendingPhotoAnnotateRef.current = true;
+    // No image attached yet — capture one, then analyze on upload completion.
+    pendingFalVisionPhotoAnalysisRef.current = true;
     cameraInputRef.current?.click();
+  }
+
+  // ── FAL image generation (Task 3) ───────────────────────────────────────────
+  // Explicit command only (/image, /generate-image, /design-car). Never runs
+  // automatically during estimate review. Output is an AI-generated visual aid,
+  // never claim evidence or a forensic reconstruction.
+  async function runFalImageGeneration(prompt: string) {
+    upsertSystemStatusMessage("Generating an AI visual aid…");
+    try {
+      const submit = await submitFalImageGeneration({ prompt });
+
+      let completed = false;
+      for (let attempt = 0; attempt < FAL_QUEUE_POLL_ATTEMPTS; attempt += 1) {
+        const status = await getFalImageGenerationStatus(submit.requestId, { logs: false });
+        if (isFalQueueCompleted(status)) {
+          completed = true;
+          break;
+        }
+        if (isFalQueueFailed(status)) break;
+        await falQueueDelay();
+      }
+
+      if (!completed) {
+        pushAssistantMessage("Image generation is taking longer than expected. Please try again shortly.");
+        return;
+      }
+
+      const result = await getFalImageGenerationResult(submit.requestId);
+      const url = firstImageUrl(result);
+      if (!url) {
+        pushAssistantMessage("Image generation finished but returned no image. Please try again.");
+        return;
+      }
+
+      pushAssistantMessage(
+        `![AI-generated visual aid](${url})\n\n${url}\n\n_${FAL_IMAGE_VISUAL_AID_DISCLAIMER}_`
+      );
+    } catch (error) {
+      const code = error instanceof FalImageGenerationClientError ? error.code : "";
+      const status = error instanceof FalImageGenerationClientError ? error.status : undefined;
+      if (code === "FAL_NOT_CONFIGURED" || status === 503) {
+        pushAssistantMessage(
+          "Image generation is not configured right now. This feature is an optional AI visual aid and does not affect estimate review."
+        );
+      } else {
+        console.warn("[chat] FAL image generation failed", error);
+        pushAssistantMessage("I couldn't generate that image right now. Please try again shortly.");
+      }
+    }
   }
 
   const clearStructuredAnalysisState = useCallback(() => {
@@ -1951,6 +2048,26 @@ export default function ChatWidget({
   async function handleSend(promptOverride?: string) {
     if (disabled) return;
     const promptText = (promptOverride ?? input).trim();
+
+    // Explicit image-generation command (Task 3). Routes to FAL image generation
+    // instead of /api/chat. Never triggers during normal estimate review.
+    const imagePrompt = promptText ? parseFalImageCommand(promptText) : null;
+    if (imagePrompt !== null) {
+      onChatEngagement?.();
+      shouldAutoScrollRef.current = true;
+      messageCounterRef.current += 1;
+      setMessages((prev) => [...prev, createMessage(messageCounterRef.current, "user", promptText)]);
+      setInput("");
+      if (!imagePrompt) {
+        pushAssistantMessage(
+          "Add a description after the command, e.g. `/image matte black 2020 Honda Civic coupe, bronze wheels, studio lighting`."
+        );
+        return;
+      }
+      void runFalImageGeneration(imagePrompt);
+      return;
+    }
+
     if (promptText && isUploadBlockingAnalysis(uploadLifecycleItemsRef.current)) {
       onUserPromptSent?.();
       onChatEngagement?.();
@@ -3138,14 +3255,14 @@ export default function ChatWidget({
     firstAttachmentAtRef.current ??= Date.now();
 
     // If the user tapped "Analyze photo for visible damage" before attaching an
-    // image, run annotation now that a fresh image has landed.
-    if (pendingPhotoAnnotateRef.current) {
-      const freshImage = returnedUploads.find(
-        (item) => Boolean(item?.hasVision) && typeof item?.attachmentId === "string"
-      );
-      if (freshImage?.attachmentId) {
-        pendingPhotoAnnotateRef.current = false;
-        void handleAnnotatePhoto(freshImage.attachmentId);
+    // image, run FAL vision analysis now that a fresh image has landed.
+    if (pendingFalVisionPhotoAnalysisRef.current) {
+      const freshImageDataUrl = returnedUploads.find(
+        (item) => Boolean(item?.hasVision) && typeof item?.imageDataUrl === "string" && item.imageDataUrl.trim()
+      )?.imageDataUrl;
+      if (freshImageDataUrl) {
+        pendingFalVisionPhotoAnalysisRef.current = false;
+        void runFalVisionPhotoAnalysis(freshImageDataUrl);
       }
     }
 
@@ -3812,11 +3929,11 @@ export default function ChatWidget({
                 </button>
 
                 <button
-                  onClick={handleAnnotatePhotoAction}
-                  disabled={disabled || uploadLimitsLoading || isAnnotatingPhoto}
+                  onClick={handleAnalyzePhotoAction}
+                  disabled={disabled || uploadLimitsLoading || isAnalyzingPhoto}
                   className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[var(--accent)]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
                 >
-                  {isAnnotatingPhoto ? "Analyzing photo…" : "Analyze photo for visible damage"}
+                  {isAnalyzingPhoto ? "Analyzing photo…" : "Analyze photo for visible damage"}
                 </button>
               </div>
 
