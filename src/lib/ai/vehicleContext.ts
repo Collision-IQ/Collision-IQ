@@ -40,9 +40,33 @@ const KNOWN_MAKES = [
   "Volvo",
 ];
 
+// CCC / Audatex truncate the make to a short token in the VEHICLE header
+// (e.g. "2020 HOND Civic Coupe EX"). Map those abbreviations back to the full
+// make so vehicle identity resolves instead of showing "Vehicle not specified".
 const MAKE_ABBREVIATIONS: Record<string, string> = {
   JAGU: "Jaguar",
   TESL: "Tesla",
+  HOND: "Honda",
+  TOYO: "Toyota",
+  NISS: "Nissan",
+  CHEV: "Chevrolet",
+  VOLK: "Volkswagen",
+  HYUN: "Hyundai",
+  SUBA: "Subaru",
+  MAZD: "Mazda",
+  CHRY: "Chrysler",
+  DODG: "Dodge",
+  MITS: "Mitsubishi",
+  PORS: "Porsche",
+  INFI: "Infiniti",
+  LEXS: "Lexus",
+  ACUR: "Acura",
+  CADI: "Cadillac",
+  BUIC: "Buick",
+  LINC: "Lincoln",
+  VOLV: "Volvo",
+  MERZ: "Mercedes-Benz",
+  GENS: "Genesis",
 };
 
 const SOURCE_RANK: Record<NonNullable<VehicleIdentity["source"]>, number> = {

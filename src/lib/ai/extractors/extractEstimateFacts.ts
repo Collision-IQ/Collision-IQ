@@ -147,8 +147,12 @@ function collectDocumentedHighlights(text: string) {
 
 function extractMileage(text: string): number | undefined {
   const candidates = [
-    text.match(/\bmileage\b\s*[:#-]?\s*([\d,]{2,})/i)?.[1],
-    text.match(/\bodometer(?: reading)?\b\s*[:#-]?\s*([\d,]{2,})/i)?.[1],
+    // CCC/Audatex headers label this "Mileage In:" / "Mileage Out:" (the
+    // "In"/"Out" qualifier sits between the word and the value). The label is
+    // often concatenated to the previous field with no delimiter
+    // (e.g. "...BLACKMileage In:106,732"), so no leading word boundary is used.
+    text.match(/mileage(?:\s*(?:in|out))?\b\s*[:#-]?\s*([\d,]{2,})/i)?.[1],
+    text.match(/odometer(?:\s*(?:reading|in|out))?\b\s*[:#-]?\s*([\d,]{2,})/i)?.[1],
     text.match(/\b([\d,]{2,})\s*(?:mi|miles)\b/i)?.[1],
   ]
     .filter(Boolean)

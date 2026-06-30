@@ -77,6 +77,25 @@ test("falls back to net only when no gross total exists", () => {
   assert.equal(facts.estimateTotal, 7250.0);
 });
 
+console.log("\nextractEstimateFacts — mileage (RO22006 real header formats)");
+
+test("reads shop 'Mileage In:' label (CCC concatenated header)", () => {
+  // Real Shop Final 22006 header text.
+  const text = "VIN:2HGFC3B36LH352317Interior Color:BLACKMileage In:106,732Vehicle Out:";
+  assert.equal(extractEstimateFacts({ text }).mileage, 106732);
+});
+
+test("reads carrier 'Odometer:' label", () => {
+  // Real SOR-2 22006 header text.
+  const text = "License: MWE8833Odometer: 106073Exterior Color: BLACK";
+  assert.equal(extractEstimateFacts({ text }).mileage, 106073);
+});
+
+test("ignores empty 'Mileage Out:' and still finds the in value", () => {
+  const text = "Mileage In:106,732Vehicle Out:\nMileage Out:";
+  assert.equal(extractEstimateFacts({ text }).mileage, 106732);
+});
+
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
 if (failed > 0) {
   for (const { name, err } of failures) console.error(`\nFAILED: ${name}\n${err.stack || err.message}`);
