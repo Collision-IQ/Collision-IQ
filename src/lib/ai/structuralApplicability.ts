@@ -56,7 +56,14 @@ export function deriveStructuralApplicability(
   const explicitSetup = hasAffirmativeSignal(rawText, [
     "frame setup",
     "bench setup",
+    "frame bench",
     "setup and measure",
+    "set up and measure",
+    "setup & measure",
+    "set up & measure",
+    "set up vehicle",
+    "measure - rack",
+    "measure rack",
     "fixture setup",
   ]);
   const explicitPull = hasAffirmativeSignal(rawText, [
@@ -96,12 +103,17 @@ export function deriveStructuralApplicability(
     "measurement",
     "measure",
     "dimensional verification",
+    "dimensional accuracy",
+    "dimensional",
     "structural measurement",
   ]);
   const oemSetupSupport = hasAnyList(source.requiredProcedures, [
     "frame setup",
     "bench setup",
+    "frame bench",
     "setup and measure",
+    "set up and measure",
+    "setup & measure",
   ]);
   const oemPullSupport = hasAnyList(source.requiredProcedures, [
     "pull",
