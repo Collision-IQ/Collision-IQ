@@ -84,12 +84,13 @@ export function buildCollisionSnapshot(input: SnapshotSource): CollisionSnapshot
   const renderModel = "renderModel" in input ? input.renderModel : input;
   const snapshotSafeReport = buildSnapshotSafeReport(renderModel);
   const estimateComparisons = "renderModel" in input ? input.estimateComparisons : undefined;
+  const repairPlanVerdict = buildRepairPlanVerdict(snapshotSafeReport);
 
   const snapshot: CollisionSnapshot = {
     title: "Collision Snapshot",
     vehicleLabel: buildSnapshotVehicleLabel(snapshotSafeReport),
     damageSummary: buildDamageSummary(snapshotSafeReport),
-    repairPlanVerdict: buildRepairPlanVerdict(snapshotSafeReport),
+    repairPlanVerdict,
     estimateComparison: buildEstimateComparison(snapshotSafeReport, estimateComparisons),
     topDisputeItems: buildTopDisputeItems(snapshotSafeReport),
     evidenceCompleteness: {
@@ -116,7 +117,7 @@ export function buildCollisionSnapshot(input: SnapshotSource): CollisionSnapshot
       userFacingDisclosure: snapshotSafeReport.confidenceIntegrity.userFacingDisclosure,
     },
     nextActions: buildNextActions(snapshotSafeReport),
-    verdictLine: buildVerdictLine(snapshotSafeReport, estimateComparisons),
+    verdictLine: buildVerdictLine(snapshotSafeReport, repairPlanVerdict, estimateComparisons),
     valuationSnapshot: buildValuationSnapshot(snapshotSafeReport),
     disclosure: buildSnapshotDisclosure(snapshotSafeReport),
     redactionNotice: "Sensitive details removed for sharing.",
@@ -276,6 +277,7 @@ function buildEstimateComparison(
 
 function buildVerdictLine(
   renderModel: SnapshotRenderModel,
+  repairPlanVerdict: CollisionSnapshot["repairPlanVerdict"],
   estimateComparisons?: WorkspaceEstimateComparisons | null
 ): string | undefined {
   const hasLaborDelta =
@@ -291,9 +293,23 @@ function buildVerdictLine(
     renderModel.supplementItems.some((item) => item.kind === "missing_verification") ||
     renderModel.confidenceIntegrity.missingCriticalEvidence.length > 0;
 
-  if (hasLaborDelta && hasMissingVerification) {
+  // Only call the carrier estimate "likely incomplete" when the shop plan is the
+  // established more-complete plan AND concrete missing-item evidence exists.
+  // Never assert deficiency off an inconclusive comparison.
+  if (
+    repairPlanVerdict.moreCompletePlan === "SHOP" &&
+    hasLaborDelta &&
+    hasMissingVerification
+  ) {
     return "Carrier estimate likely incomplete based on current evidence.";
   }
+
+  // When neither plan is established as more complete, report alignment with
+  // open line-level differences rather than implying one side is deficient.
+  if (repairPlanVerdict.moreCompletePlan === "INCONCLUSIVE") {
+    return "Both estimates are broadly aligned, with unresolved line-specific differences.";
+  }
+
   return undefined;
 }
 
