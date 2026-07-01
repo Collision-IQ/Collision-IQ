@@ -34,6 +34,7 @@ const {
   cleanEstimateLineForCustomer,
   cleanEstimateLineForTechnicalExport,
   cleanOperationDisplayText,
+  cleanPresentationMarkdown,
   cleanUserFacingPresentationText,
   isMalformedEstimateLine,
   normalizeEstimateOperationLabel,
@@ -546,4 +547,19 @@ run("right rail layout is bounded to chat row with internal scroll", () => {
   assert.match(source, /flex-1 min-h-0 overflow-y-auto p-3/);
   assert.match(source, /\{bottom \? <div className="mt-2 shrink-0 sm:mt-3">\{bottom\}<\/div> : null\}/);
   assert.doesNotMatch(source, /sticky top-3 hidden min-h-0 w-full flex-col/);
+});
+
+run("preserves markdown image/link URLs in markdown mode (AI visual aid)", () => {
+  const md = "![AI-generated visual aid](https://fal.media/files/abc/img.png)\n\n[Open full image](https://fal.media/files/abc/img.png)\n\n_disclaimer_";
+  const out = cleanPresentationMarkdown(md);
+  // The image and link URLs must survive so the image can render.
+  assert.match(out, /!\[AI-generated visual aid\]\(https:\/\/fal\.media\/files\/abc\/img\.png\)/);
+  assert.match(out, /\[Open full image\]\(https:\/\/fal\.media\/files\/abc\/img\.png\)/);
+  assert.doesNotMatch(out, /source link/);
+});
+
+run("still scrubs bare prose URLs in markdown mode", () => {
+  const out = cleanPresentationMarkdown("See https://example.com/raw for details");
+  assert.match(out, /source link/);
+  assert.doesNotMatch(out, /https:\/\/example\.com\/raw/);
 });

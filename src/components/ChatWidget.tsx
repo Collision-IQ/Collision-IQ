@@ -1665,7 +1665,7 @@ export default function ChatWidget({
       }
 
       pushAssistantMessage(
-        `![AI-generated visual aid](${url})\n\n${url}\n\n_${FAL_IMAGE_VISUAL_AID_DISCLAIMER}_`
+        `![AI-generated visual aid](${url})\n\n[Open full image](${url})\n\n_${FAL_IMAGE_VISUAL_AID_DISCLAIMER}_`
       );
     } catch (error) {
       const code = error instanceof FalImageGenerationClientError ? error.code : "";
