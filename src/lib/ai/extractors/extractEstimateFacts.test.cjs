@@ -32,7 +32,7 @@ require.extensions[".ts"] = function compileTsModule(module, filename) {
   module._compile(compiled.outputText, filename);
 };
 
-const { extractEstimateFacts } = require(path.join(cwd, "src/lib/ai/extractors/extractEstimateFacts.ts"));
+const { extractEstimateFacts, extractMileageReadings } = require(path.join(cwd, "src/lib/ai/extractors/extractEstimateFacts.ts"));
 
 let passed = 0;
 let failed = 0;
@@ -94,6 +94,19 @@ test("reads carrier 'Odometer:' label", () => {
 test("ignores empty 'Mileage Out:' and still finds the in value", () => {
   const text = "Mileage In:106,732Vehicle Out:\nMileage Out:";
   assert.equal(extractEstimateFacts({ text }).mileage, 106732);
+});
+
+test("extractMileageReadings returns both distinct readings ascending", () => {
+  const combined = [
+    "VIN:2HGFC3B36LH352317Mileage In:106,732Vehicle Out:",
+    "License: MWE8833Odometer: 106073Exterior Color: BLACK",
+  ].join("\n");
+  assert.deepEqual(extractMileageReadings(combined), [106073, 106732]);
+});
+
+test("extractMileageReadings dedupes when both estimates agree", () => {
+  const combined = "Mileage In:106,732\nOdometer: 106732";
+  assert.deepEqual(extractMileageReadings(combined), [106732]);
 });
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);

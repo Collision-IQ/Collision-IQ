@@ -42,7 +42,7 @@ import {
   buildCollisionSnapshotPdfFromSnapshot,
   sanitizeSnapshotForFinalRender,
 } from "@/lib/ai/builders/collisionSnapshotPdfBuilder";
-import { buildCustomerReportPdf } from "@/lib/ai/builders/customerReportPdfBuilder";
+import { buildCustomerReportPdf, formatMileageDisplay } from "@/lib/ai/builders/customerReportPdfBuilder";
 import { buildDoiComplaintPacketPdf } from "@/lib/ai/builders/doiComplaintPacketPdfBuilder";
 import {
   buildAnnotatedEstimateReviewModel,
@@ -5336,10 +5336,12 @@ function createCustomerReportDocument(report: CustomerReport, params: {
     vehicle,
     vin: resolveCanonicalVin(params.renderModel),
     insurer: resolveCanonicalInsurer(params.renderModel),
-    mileage:
+    mileage: formatMileageDisplay(
       typeof params.renderModel.reportFields.mileage === "number"
-        ? params.renderModel.reportFields.mileage.toLocaleString("en-US")
+        ? params.renderModel.reportFields.mileage
         : null,
+      params.renderModel.reportFields.mileageReadings
+    ),
     estimateTotal:
       typeof params.renderModel.reportFields.estimateTotal === "number"
         ? formatCurrency(params.renderModel.reportFields.estimateTotal, true)

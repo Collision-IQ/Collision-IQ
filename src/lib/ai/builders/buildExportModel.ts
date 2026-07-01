@@ -5,6 +5,7 @@ import { deriveRenderInsightsFromChat, type DerivedValuation } from "./deriveRen
 import { buildRepairStory } from "./buildRepairStory";
 import {
   extractEstimateFacts,
+  extractMileageReadings,
   resolveCanonicalInsurerCandidate,
 } from "../extractors/extractEstimateFacts";
 import type {
@@ -196,6 +197,7 @@ export type ExportReportFields = {
   vehicleLabel?: string;
   vin?: string;
   mileage?: number;
+  mileageReadings?: number[];
   insurer?: string;
   estimateTotal?: number;
   comparisonTotals?: EstimateComparisonTotals;
@@ -658,6 +660,7 @@ export function deriveExportReportFields(params: {
     vehicleLabel,
     vin,
     mileage: estimateFacts.mileage,
+    mileageReadings: extractMileageReadings(sourceText),
     insurer: estimateFacts.insurer,
     estimateTotal: estimateFacts.estimateTotal,
     comparisonTotals,

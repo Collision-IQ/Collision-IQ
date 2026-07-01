@@ -162,6 +162,30 @@ function extractMileage(text: string): number | undefined {
   return candidates[0];
 }
 
+/**
+ * All distinct mileage/odometer readings found across the (combined) estimate
+ * text, ascending. Two estimates commonly disagree slightly on odometer (a
+ * "Mileage In" vs an "Odometer" reading), which is a minor discrepancy worth
+ * surfacing rather than hiding behind a single value.
+ */
+export function extractMileageReadings(text: string): number[] {
+  const readings = new Set<number>();
+  const patterns = [
+    /mileage(?:\s*(?:in|out))?\b\s*[:#-]?\s*([\d,]{2,})/gi,
+    /odometer(?:\s*(?:reading|in|out))?\b\s*[:#-]?\s*([\d,]{2,})/gi,
+  ];
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      const value = Number(String(match[1]).replace(/,/g, ""));
+      if (Number.isFinite(value) && value > 0 && value < 1000000) {
+        readings.add(value);
+      }
+    }
+  }
+  return [...readings].sort((a, b) => a - b);
+}
+
 function extractInsurer(text: string): string | undefined {
   const knownFromText = COMMON_INSURERS.find((carrier) =>
     new RegExp(`\\b${escapeRegExp(carrier)}\\b`, "i").test(text)

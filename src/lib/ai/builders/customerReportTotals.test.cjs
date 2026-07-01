@@ -32,7 +32,7 @@ require.extensions[".ts"] = function compileTsModule(module, filename) {
   module._compile(compiled.outputText, filename);
 };
 
-const { buildCustomerTotalsSummary } = require(
+const { buildCustomerTotalsSummary, formatMileageDisplay } = require(
   path.join(cwd, "src/lib/ai/builders/customerReportPdfBuilder.ts")
 );
 
@@ -116,6 +116,33 @@ test("falls back to single Estimate Total when no comparison totals exist", () =
 test("fallback shows Not provided when nothing is available", () => {
   const rows = buildCustomerTotalsSummary(null, null);
   assert.deepEqual(rows, [{ label: "Estimate Total", value: "Not provided" }]);
+});
+
+console.log("\nformatMileageDisplay");
+
+test("shows both mileages with a minor-discrepancy note (RO22006)", () => {
+  const out = formatMileageDisplay(106732, [106732, 106073]);
+  assert.match(out, /106,073/);
+  assert.match(out, /106,732/);
+  assert.match(out, /minor discrepancy/);
+  assert.match(out, /659 mi/);
+});
+
+test("labels a large gap as a plain discrepancy", () => {
+  const out = formatMileageDisplay(120000, [90000, 120000]);
+  assert.match(out, /\(discrepancy of 30,000 mi/);
+});
+
+test("shows a single value when readings agree", () => {
+  assert.equal(formatMileageDisplay(106732, [106732]), "106,732");
+});
+
+test("falls back to the single mileage when no readings", () => {
+  assert.equal(formatMileageDisplay(106732, undefined), "106,732");
+});
+
+test("returns null when nothing is available", () => {
+  assert.equal(formatMileageDisplay(null, []), null);
 });
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);

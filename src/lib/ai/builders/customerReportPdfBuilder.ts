@@ -78,6 +78,32 @@ export function buildCustomerTotalsSummary(
   return rows;
 }
 
+/**
+ * Format the mileage line. When the estimates disagree on odometer, show both
+ * readings and label the gap (minor when within ~1,000 mi) rather than hiding
+ * it behind a single value. Falls back to the single mileage otherwise.
+ */
+export function formatMileageDisplay(
+  mileage: number | null | undefined,
+  readings?: number[] | null
+): string | null {
+  const distinct = [...new Set((readings ?? []).filter((v) => Number.isFinite(v) && v > 0))].sort(
+    (a, b) => a - b
+  );
+  if (distinct.length >= 2) {
+    const lo = distinct[0];
+    const hi = distinct[distinct.length - 1];
+    const diff = hi - lo;
+    const magnitude = diff <= 1000 ? "minor discrepancy" : "discrepancy";
+    return `${distinct
+      .map((v) => v.toLocaleString("en-US"))
+      .join(" / ")} (${magnitude} of ${diff.toLocaleString("en-US")} mi across estimates)`;
+  }
+  if (typeof mileage === "number" && mileage > 0) return mileage.toLocaleString("en-US");
+  if (distinct.length === 1) return distinct[0].toLocaleString("en-US");
+  return null;
+}
+
 export function buildCustomerReportPdf({
   report,
   vehicle,
