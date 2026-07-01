@@ -73,6 +73,30 @@
   --shadow-soft: 0 2px 12px -4px rgba(0, 0, 0, 0.55);
 }
 
+/* ---------------- Modern surfaces (rounded cards + soft shadow) ---------------- */
+
+.ci-panel {
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background: var(--card);
+  box-shadow: var(--shadow-soft);
+}
+
+.ci-card {
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 66%, transparent);
+  background: var(--card);
+  box-shadow: var(--shadow-soft);
+}
+
+/* Calm section label: replaces the shouty mono ALL-CAPS terminal headers. */
+.ci-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--muted-foreground);
+}
+
 /* ---------------- Base layout ---------------- */
 
 html,

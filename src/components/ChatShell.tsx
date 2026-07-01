@@ -315,12 +315,12 @@ export default function ChatShell({
         >
           <div
             className={[
-              "flex min-h-0 min-w-0 flex-col overflow-hidden border border-border bg-card",
+              "ci-panel flex min-h-0 min-w-0 flex-col overflow-hidden",
               chatPanelHeightClass,
             ].join(" ")}
           >
-            <div className="hidden min-h-[45px] shrink-0 items-center justify-between gap-4 border-b border-border px-3 py-2 lg:flex">
-              <div className="inline-flex items-center gap-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#a35d26] dark:text-[var(--accent)]">
+            <div className="hidden min-h-[45px] shrink-0 items-center justify-between gap-4 border-b border-border/60 px-4 py-2.5 lg:flex">
+              <div className="inline-flex items-center gap-2 text-[13px] font-semibold text-[#a35d26] dark:text-[var(--accent)]">
                 <Image
                   src="/iq/iq-favicon.png"
                   alt="Collision IQ"
@@ -331,7 +331,7 @@ export default function ChatShell({
                 Collision IQ
               </div>
 
-              <div className="hidden font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground sm:block">
+              <div className="ci-eyebrow hidden sm:block">
                 Analysis workspace
               </div>
             </div>
@@ -342,11 +342,11 @@ export default function ChatShell({
           {hasRight && (
             <aside
               className={[
-                "hidden h-full min-h-0 w-full flex-col overflow-hidden border border-border bg-card lg:flex",
+                "ci-panel hidden h-full min-h-0 w-full flex-col overflow-hidden lg:flex",
                 rightRailHeightClass,
               ].join(" ")}
             >
-              <div className="min-h-[45px] shrink-0 border-b border-border px-3 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+              <div className="ci-eyebrow min-h-[45px] shrink-0 border-b border-border/60 px-4 py-3">
                 Evidence / Exports / Audit
               </div>
               <div className="flex-1 min-h-0 overflow-y-auto p-3">{effectiveRight}</div>

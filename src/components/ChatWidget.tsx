@@ -3832,7 +3832,8 @@ export default function ChatWidget({
 
   const canReadAloud = true;
 
-  const userBubble = "border border-[var(--accent)]/35 bg-card text-foreground";
+  const userBubble =
+    "rounded-2xl rounded-br-md border border-[var(--accent)]/25 bg-[var(--accent-soft)] text-foreground shadow-[var(--shadow-soft)]";
 
   return (
     <div
@@ -3993,14 +3994,14 @@ export default function ChatWidget({
               <div
                 className={`${
                   msg.kind === "system_status"
-                    ? "max-w-[560px] border border-border bg-muted px-3 py-1.5 text-xs text-muted-foreground"
-                    : "px-3.5 py-3"
+                    ? "max-w-[560px] rounded-full border border-border/50 bg-muted px-3.5 py-1.5 text-xs text-muted-foreground"
+                    : "px-4 py-3"
                 } ${
                   msg.role === "user"
                     ? `${userBubble} max-w-[88%] overflow-hidden break-words sm:max-w-[min(72%,820px)]`
                     : msg.kind === "system_status"
                       ? ""
-                      : "min-w-0 max-w-full overflow-hidden break-words border border-border bg-card sm:max-w-[980px]"
+                      : "min-w-0 max-w-full overflow-hidden break-words rounded-2xl rounded-bl-md border border-border/55 bg-card shadow-[var(--shadow-soft)] sm:max-w-[980px]"
                 }`}
               >
                 {msg.role === "assistant" && msg.kind !== "system_status" ? (
