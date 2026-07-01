@@ -276,8 +276,15 @@ function collectText(input: JurisdictionResolverInput, options: { policyOnly: bo
   const registry = (report?.evidenceRegistry ?? [])
     .filter((item) => {
       if (!options.policyOnly) return true;
-      return /policy|declaration|declarations|insurance|identification card|id card|financial responsibility|governing law/i.test(
-        `${item.label} ${item.sourceType} ${item.extractedText ?? ""} ${item.extractedSummary ?? ""}`
+      // Only admit text from an ACTUAL policy document. A bare mention of
+      // "insurance" or "Policy #:" appears on estimates too, so require genuine
+      // policy-document structure (declarations page, coverage form, governing-
+      // law clause, insurance ID card, financial responsibility). Otherwise the
+      // estimate header leaks in and mislabels the jurisdiction source as
+      // policy_governing_law when no policy was uploaded.
+      const haystack = `${item.label} ${item.sourceType} ${item.extractedText ?? ""} ${item.extractedSummary ?? ""}`;
+      return /\b(?:declarations?\s+page|policy\s+declarations?|coverage\s+(?:form|part|selections?)|certificate\s+of\s+insurance|insurance\s+id(?:entification)?\s+card\b|financial\s+responsibility|governed\s+by\s+the\s+laws|governing\s+law|policy\s+form\s+state|form\s+state|rated\s+state|risk\s+state)\b/i.test(
+        haystack
       );
     })
     .map((item) =>

@@ -96,6 +96,7 @@ import {
   resolveTriageRoles,
   scoreEstimateRoleSignals,
 } from "@/lib/reports/estimateTriageClassifier";
+import { classifyCitationDensityDocument } from "@/lib/reports/citationDensityDocumentClassifier";
 import {
   FalVisionClientError,
   getFalVisionResult,
@@ -810,7 +811,18 @@ function buildPreliminaryReviewDraft(attachments: Attachment[]): PreliminaryRevi
     attachment.mime === "application/pdf" || /\.pdf$/i.test(attachment.filename)
   );
   const reviewedFiles = pdfs.length ? pdfs : attachments;
-  const estimates = reviewedFiles.map((attachment) => ({
+  // Only true estimate / SOR / repair-estimate documents are eligible for the
+  // shop-vs-carrier pair. Invoices, ADAS/scan reports, material/parts invoices,
+  // work authorizations, photos, and procedure/support docs support findings
+  // but must never be selected as an estimate. Fall back to all reviewed files
+  // only when no estimate-like document is present (low confidence).
+  const estimateLikeFiles = reviewedFiles.filter(
+    (attachment) =>
+      classifyCitationDensityDocument({ filename: attachment.filename, text: attachment.text })
+        .isEstimateLike
+  );
+  const pairPool = estimateLikeFiles.length ? estimateLikeFiles : reviewedFiles;
+  const estimates = pairPool.map((attachment) => ({
     filename: attachment.filename,
     scores: scoreEstimateRoleSignals(attachment.filename, attachment.text),
     total: extractEstimateTotalCandidate(attachment.text),

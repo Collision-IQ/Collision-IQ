@@ -503,9 +503,16 @@ function parseVehicleLine(line: string): {
   let trim: string | undefined;
   if (makeMatch) {
     const regex = new RegExp(`${escapeRegExp(makeMatch.matchedToken)}\\s+(.+)$`, "i");
-    const makeTail = line.match(regex)?.[1]?.split(/[.;|\n]/)[0]?.trim();
-    if (makeTail) {
-      const tokens = makeTail.split(/\s+/).filter(Boolean);
+    const rawTail = line.match(regex)?.[1]?.split(/[.;|\n]/)[0]?.trim();
+    if (rawTail) {
+      // Cut drivetrain / engine / fuel descriptors from the DISPLAY model+trim so
+      // "Civic Coupe EX w/Continuously Variable Transmission 2D CPE 4-1.5L
+      // Turbocharged Gasoline BLACK" displays as "Civic Coupe EX". The full raw
+      // phrase is preserved on the caller's raw vehicle text.
+      const displayTail = rawTail
+        .split(/\s+(?:w\/|w\s|\d(?:[\d.]*)?\s*l\b|turbo(?:charged)?|gasoline|diesel|hybrid|electric|\d[dr]\b|cpe|sdn|awd|fwd|rwd|4wd)/i)[0]
+        .trim();
+      const tokens = (displayTail || rawTail).split(/\s+/).filter(Boolean);
       model = tokens.slice(0, 2).join(" ").trim() || undefined;
       trim = tokens.length > 2 ? tokens.slice(2, 5).join(" ").trim() : undefined;
     }
