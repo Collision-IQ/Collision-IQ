@@ -43,6 +43,7 @@ const { extractEstimateFacts } = require(path.join(cwd, "src/lib/ai/extractors/e
 const { extractVehicleIdentityFromText } = require(path.join(cwd, "src/lib/ai/vehicleContext.ts"));
 const { buildCustomerTotalsSummary } = require(path.join(cwd, "src/lib/ai/builders/customerReportPdfBuilder.ts"));
 const { parseCccEstimateRows, matchEstimateLineItems } = require(path.join(cwd, "src/lib/reports/estimateDeltaMatcher.ts"));
+const { extractEstimateComparisonTotals } = require(path.join(cwd, "src/lib/ai/builders/buildExportModel.ts"));
 
 // ── Real header text (verbatim from the source PDFs) ────────────────────────
 const SHOP_HEADER = [
@@ -129,6 +130,16 @@ test("#2 customer report shows both totals + difference", () => {
   assert.ok(labels.includes("Carrier total cost of repairs"));
   assert.ok(labels.includes("Difference"));
   assert.ok(!labels.includes("Estimate Total"));
+});
+
+// #4 — comparison report header gets BOTH totals from concatenated CCC labels
+test("#4 comparison totals extract from concatenated Grand Total / Cost of Repairs", () => {
+  const combined = [SHOP_HEADER, "Grand Total4,959.35", CARRIER_HEADER, "Total Cost of Repairs3,652.71", "Net Cost of Repairs3,652.71"].join("\n");
+  const totals = extractEstimateComparisonTotals(combined);
+  assert.ok(totals, "comparison totals should be extracted");
+  assert.equal(totals.shopEstimateGrandTotal, 4959.35);
+  assert.equal(totals.carrierTotalCostOfRepairs, 3652.71);
+  assert.equal(totals.grossRepairAppraisalGap, 1306.64);
 });
 
 // #3 — mileage discrepancy captured

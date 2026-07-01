@@ -539,29 +539,46 @@ function findEstimateMoneyLine(text: string, linePattern: RegExp, moneyPattern: 
   return undefined;
 }
 
-function extractEstimateComparisonTotals(text: string): EstimateComparisonTotals | undefined {
-  const shopEstimateGrandTotal = findEstimateMoneyLine(
-    text,
-    /\b(?:shop|repair facility)\b/i,
-    /\b(?:grand total|total cost of repairs|estimate total)\b[^\d$]{0,40}\$?\s*([\d,]+\.\d{2})/i
-  );
-  const carrierTotalCostOfRepairs = findEstimateMoneyLine(
-    text,
-    /\b(?:carrier|insurer|insurance|geico|allstate|progressive|state farm|sor[-\s]?\d*)\b/i,
-    /\b(?:total cost of repairs|total repairs|gross repair total)\b[^\d$]{0,40}\$?\s*([\d,]+\.\d{2})/i
-  );
-  const carrierNetAfterDeductible = findEstimateMoneyLine(
-    text,
-    /\b(?:carrier|insurer|insurance|geico|allstate|progressive|state farm|deductible|sor[-\s]?\d*)\b/i,
-    /\b(?:net after deductible|net cost of repairs|net total|less deductible)\b[^\d$]{0,40}\$?\s*([\d,]+\.\d{2})/i
-  );
+// Find a labeled money amount anywhere in the text. CCC/Audatex put the total
+// on its own line ("Grand Total4,959.35", "Total Cost of Repairs3,652.71") with
+// no shop/carrier keyword on the line, so we key off the LABEL, not proximity.
+function findLabeledMoney(text: string, moneyPattern: RegExp): number | undefined {
+  for (const line of text.split(/\r?\n/).map((item) => item.replace(/\s+/g, " ").trim()).filter(Boolean)) {
+    const match = line.match(moneyPattern);
+    const amount = parseReportMoney(match?.[1]);
+    if (typeof amount === "number") return amount;
+  }
+  return undefined;
+}
+
+export function extractEstimateComparisonTotals(text: string): EstimateComparisonTotals | undefined {
+  // Shop estimates (CCC) label the total "Grand Total"; carrier SORs
+  // (Audatex/CCC carrier) use "Total Cost of Repairs" / "Net Cost of Repairs".
+  // No trailing word boundary after the label — CCC glues the amount to it
+  // ("Grand Total4,959.35", "Total Cost of Repairs3,652.71").
+  const shopEstimateGrandTotal =
+    findLabeledMoney(text, /grand total[^\d$]{0,40}\$?\s*([\d,]+\.\d{2})/i) ??
+    findEstimateMoneyLine(
+      text,
+      /\b(?:shop|repair facility)\b/i,
+      /(?:grand total|estimate total|total cost of repairs)[^\d$]{0,40}\$?\s*([\d,]+\.\d{2})/i
+    );
+  const carrierTotalCostOfRepairs =
+    findLabeledMoney(text, /total cost of repairs[^\d$]{0,40}\$?\s*([\d,]+\.\d{2})/i) ??
+    findEstimateMoneyLine(
+      text,
+      /\b(?:carrier|insurer|insurance|geico|allstate|progressive|state farm|sor[-\s]?\d*)\b/i,
+      /(?:total repairs|gross repair total)[^\d$]{0,40}\$?\s*([\d,]+\.\d{2})/i
+    );
+  const carrierNetAfterDeductible =
+    findLabeledMoney(text, /net cost of repairs[^\d$]{0,40}\$?\s*([\d,]+\.\d{2})/i) ??
+    findLabeledMoney(text, /(?:net after deductible|net total|less deductible)[^\d$]{0,40}\$?\s*([\d,]+\.\d{2})/i);
   const grossRepairAppraisalGap =
     typeof shopEstimateGrandTotal === "number" && typeof carrierTotalCostOfRepairs === "number"
       ? Number((shopEstimateGrandTotal - carrierTotalCostOfRepairs).toFixed(2))
-      : findEstimateMoneyLine(
+      : findLabeledMoney(
           text,
-          /\b(?:gap|delta|difference|appraisal)\b/i,
-          /\b(?:gross repair appraisal gap|repair appraisal gap|gross gap|delta|difference)\b[^\d$]{0,40}\$?\s*([\d,]+\.\d{2})/i
+          /\b(?:gross repair appraisal gap|repair appraisal gap|gross gap|repair-total delta)\b[^\d$]{0,40}\$?\s*([\d,]+\.\d{2})/i
         );
 
   const totals: EstimateComparisonTotals = {
