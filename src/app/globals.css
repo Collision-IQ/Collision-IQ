@@ -76,17 +76,30 @@
 /* ---------------- Modern surfaces (rounded cards + soft shadow) ---------------- */
 
 .ci-panel {
-  border-radius: 18px;
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  background: var(--card);
-  box-shadow: var(--shadow-soft);
+  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--card) 100%, transparent), color-mix(in srgb, var(--muted) 22%, var(--card)));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 1px 2px rgba(20, 25, 31, 0.05),
+    0 22px 48px -30px rgba(20, 25, 31, 0.40);
+}
+
+.dark .ci-panel {
+  background: linear-gradient(180deg, var(--card), color-mix(in srgb, var(--muted) 40%, var(--card)));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 22px 52px -30px rgba(0, 0, 0, 0.8);
 }
 
 .ci-card {
-  border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--border) 66%, transparent);
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
   background: var(--card);
-  box-shadow: var(--shadow-soft);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 14px 30px -22px rgba(20, 25, 31, 0.34);
 }
 
 /* Calm section label: replaces the shouty mono ALL-CAPS terminal headers. */
@@ -97,13 +110,48 @@
   color: var(--muted-foreground);
 }
 
+/* Bold gradient CTA — the confident signal-orange moment. */
+.ci-btn-primary {
+  background-image: linear-gradient(180deg, var(--accent-strong), var(--accent));
+  color: #fff;
+  border: 1px solid color-mix(in srgb, var(--accent-strong) 80%, #000 4%);
+  box-shadow: 0 10px 22px -10px color-mix(in srgb, var(--accent) 75%, transparent);
+  transition: transform 0.12s ease, filter 0.12s ease, box-shadow 0.12s ease;
+}
+.ci-btn-primary:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 14px 26px -10px color-mix(in srgb, var(--accent) 78%, transparent);
+}
+.ci-btn-primary:active {
+  transform: translateY(1px);
+}
+
+/* Sparkle/AI accent chip for the image generator entry point. */
+.ci-ai-btn {
+  background-image: linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, var(--card)), var(--card));
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+}
+.ci-ai-btn:hover:not(:disabled) {
+  filter: brightness(1.03);
+  box-shadow: 0 8px 18px -8px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.ci-ai-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
 /* ---------------- Base layout ---------------- */
 
 html,
 body {
   height: 100%;
   margin: 0;
-  background: var(--bg-primary);
+  background:
+    radial-gradient(1200px 620px at 78% -8%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 60%),
+    radial-gradient(900px 520px at 12% 0%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 55%),
+    var(--bg-primary);
+  background-attachment: fixed;
   color: var(--text-primary);
   font-family: 'Inter', system-ui, sans-serif;
   overflow-x: hidden;

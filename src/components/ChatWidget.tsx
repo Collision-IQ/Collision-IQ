@@ -8,6 +8,7 @@ import {
   Paperclip,
   X,
   Camera,
+  Sparkles,
   ChevronDown,
   ChevronUp,
   Eye,
@@ -4206,6 +4207,29 @@ export default function ChatWidget({
                 <Camera size={shouldCompactMobileChat ? 18 : 20} />
               </button>
 
+              <button
+                type="button"
+                onClick={() => {
+                  setInput((prev) => {
+                    const trimmed = prev.trimStart();
+                    if (/^\/(image|generate-image|design-car)\b/i.test(trimmed)) return prev;
+                    return trimmed ? `/image ${trimmed}` : "/image ";
+                  });
+                  dismissIntroForComposerEngagement();
+                  onChatEngagement?.();
+                  textareaRef.current?.focus();
+                }}
+                disabled={disabled}
+                className={[
+                  "ci-ai-btn order-2 inline-flex items-center justify-center rounded-xl disabled:cursor-not-allowed disabled:opacity-40 lg:order-none",
+                  shouldCompactMobileChat ? "min-h-9 min-w-9 p-1.5 lg:min-h-10 lg:min-w-10 lg:p-2" : "min-h-10 min-w-10 p-2",
+                ].join(" ")}
+                aria-label="Generate an AI visual aid image"
+                title="Generate an AI visual aid (image)"
+              >
+                <Sparkles size={shouldCompactMobileChat ? 18 : 20} />
+              </button>
+
 
               <textarea
                 ref={textareaRef}
@@ -4255,7 +4279,7 @@ export default function ChatWidget({
                 onClick={() => void handleSend()}
                 disabled={disabled}
                 className={[
-                  "order-3 rounded-md border border-[var(--accent)] bg-[var(--accent)] text-sm font-semibold text-black transition hover:bg-[var(--accent)] disabled:opacity-50 lg:order-none lg:flex-none",
+                  "ci-btn-primary order-3 rounded-xl text-sm font-semibold disabled:opacity-50 lg:order-none lg:flex-none",
                   shouldCompactMobileChat ? "min-h-9 flex-none px-3 py-1.5 lg:min-h-10 lg:px-4 lg:py-2" : "min-h-10 flex-1 px-4 py-2 sm:px-5",
                 ].join(" ")}
               >
