@@ -181,6 +181,7 @@ type ChatRouteDeps = {
   resolveVehicleApplicabilityContext: typeof import("@/lib/ai/vehicleApplicability").resolveVehicleApplicabilityContext;
   extractEstimateLinksFromDocuments: typeof import("@/lib/ai/estimateLinkExtractor").extractEstimateLinksFromDocuments;
   isFetchableEstimateLink: typeof import("@/lib/ai/estimateLinkExtractor").isFetchableEstimateLink;
+  prioritizeEstimateLinks: typeof import("@/lib/ai/estimateLinkExtractor").prioritizeEstimateLinks;
   buildLinkedProcedureRefinementContext: typeof import("@/lib/ai/linkedProcedureRetriever").buildLinkedProcedureRefinementContext;
   retrieveEstimateLinkedProcedureDocs: typeof import("@/lib/ai/linkedProcedureRetriever").retrieveEstimateLinkedProcedureDocs;
   collisionIqModels: typeof import("@/lib/modelConfig").collisionIqModels;
@@ -236,6 +237,7 @@ function loadChatRouteDeps(): Promise<ChatRouteDeps> {
         extractEstimateLinksFromDocuments:
           estimateLinkExtractor.extractEstimateLinksFromDocuments,
         isFetchableEstimateLink: estimateLinkExtractor.isFetchableEstimateLink,
+        prioritizeEstimateLinks: estimateLinkExtractor.prioritizeEstimateLinks,
         buildLinkedProcedureRefinementContext:
           linkedProcedureRetriever.buildLinkedProcedureRefinementContext,
         retrieveEstimateLinkedProcedureDocs:
@@ -1137,6 +1139,7 @@ export async function POST(req: Request) {
       inferDriveVehicleContext,
       extractEstimateLinksFromDocuments,
       isFetchableEstimateLink,
+      prioritizeEstimateLinks,
       buildLinkedProcedureRefinementContext,
       retrieveEstimateLinkedProcedureDocs,
       cleanDisplayText,
@@ -1481,7 +1484,11 @@ export async function POST(req: Request) {
     const documentsForEvidence =
       modelEligibleDocuments.length > 0 ? modelEligibleDocuments : activeCaseModelEligibleDocuments;
     const estimateLinks = extractEstimateLinksFromDocuments(documentsForEvidence);
-    const fetchableEstimateLinks = estimateLinks.filter(isFetchableEstimateLink);
+    // Fetch high-value links (OEM procedure, Egnyte DMS, ADAS/REVV reports)
+    // first — the retriever caps at maxLinks, so ordering decides what is read.
+    const fetchableEstimateLinks = prioritizeEstimateLinks(
+      estimateLinks.filter(isFetchableEstimateLink)
+    );
     const rejectedEstimateLinks = estimateLinks.filter((link) => !isFetchableEstimateLink(link));
     logAgentTraceEvent("estimate links detected", agentTrace, {
       found: estimateLinks.length,

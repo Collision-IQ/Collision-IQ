@@ -104,6 +104,38 @@ export function isFetchableEstimateLink(link: EstimateLinkCandidate): boolean {
   return link.classification !== "unsupported";
 }
 
+const HIGH_VALUE_LINK_HINTS =
+  /oem|procedure|position statement|repair manual|bulletin|calibration|adas|revv|pre-?scan|post-?scan|scan/i;
+
+/**
+ * Retrieval-priority score for a link. Higher = fetch first. OEM procedure and
+ * internal-repository (Egnyte DMS) links outrank generic references, and links
+ * whose surrounding text/URL signals OEM/ADAS/procedure content are boosted so
+ * the shop's OEM procedure link and the REVV/ADAS report link are attempted
+ * ahead of lower-value links within the fetch budget.
+ */
+export function estimateLinkPriority(link: EstimateLinkCandidate): number {
+  if (link.classification === "unsupported") return 0;
+  const base =
+    link.classification === "oem_procedure"
+      ? 100
+      : link.classification === "internal_repository"
+        ? 80
+        : 40; // generic_reference
+  const signal = `${link.context ?? ""} ${link.url}`;
+  return base + (HIGH_VALUE_LINK_HINTS.test(signal) ? 15 : 0);
+}
+
+/** Order links by retrieval value (highest first); stable for equal scores. */
+export function prioritizeEstimateLinks(
+  links: EstimateLinkCandidate[]
+): EstimateLinkCandidate[] {
+  return links
+    .map((link, index) => ({ link, index, score: estimateLinkPriority(link) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((entry) => entry.link);
+}
+
 // Hosts that belong to Collision IQ's own document management system. Egnyte is the org DMS;
 // any *.egnyte.com host is treated as an internal repository source.
 export function isInternalRepositoryHost(host: string): boolean {
