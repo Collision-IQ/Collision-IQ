@@ -314,7 +314,7 @@ function buildVerdictLine(
   // When neither plan is established as more complete, report alignment with
   // open line-level differences rather than implying one side is deficient.
   if (repairPlanVerdict.moreCompletePlan === "INCONCLUSIVE") {
-    return "Both estimates are broadly aligned, with unresolved line-specific differences.";
+    return "Broadly aligned repair plans with line-specific pricing, part-type, refinish, and documentation disputes.";
   }
 
   return undefined;
