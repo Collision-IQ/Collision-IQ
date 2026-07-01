@@ -1817,8 +1817,11 @@ function buildWhyThisWins(
   if (evidenceLevel === "documented") parts.push("fully documented in file");
   else if (evidenceLevel === "referenced") parts.push("OEM or procedure reference available");
   else if (evidenceLevel === "missing") parts.push("creates clear gap for supplement");
-  if (retrievalSupport.includes("web:oem")) parts.push("OEM source found");
-  if (retrievalSupport.includes("drive:procedure")) parts.push("procedure document in Drive");
+  // A web/internet hit is a research lead, not attached OEM authority. Only a
+  // retrieved-and-attached procedure document (e.g. Drive) is described as a
+  // produced source; estimate text and referenced links never are.
+  if (retrievalSupport.includes("web:oem")) parts.push("online OEM/procedure lead (unverified — verify against OEM source)");
+  if (retrievalSupport.includes("drive:procedure")) parts.push("procedure document retrieved from Drive");
   return parts.length > 0 ? parts.join(" + ") : "Repair-path relevance established from file evidence";
 }
 

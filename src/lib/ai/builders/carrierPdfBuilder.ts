@@ -616,7 +616,9 @@ function buildEvidenceBasisLabel(
   if (/invoice|receipt|paid|vendor/.test(normalized)) labels.push("invoice");
   if (/photo|image|visible/.test(normalized)) labels.push("photo");
   if (/scan|dtc|diagnostic/.test(normalized)) labels.push("scan");
-  if (/oem|procedure|position statement|repair manual/.test(normalized)) labels.push("OEM procedure");
+  // Derived from prose mentioning OEM/procedure — this indicates a REFERENCE,
+  // not an attached/produced OEM source, so it is labeled as a reference.
+  if (/oem|procedure|position statement|repair manual/.test(normalized)) labels.push("OEM procedure reference");
   if (/comparison|shop estimate|carrier estimate|estimate/.test(normalized)) labels.push("estimate comparison");
   if (/policy|coverage|endorsement/.test(normalized)) labels.push("policy record");
 
