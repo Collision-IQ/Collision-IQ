@@ -214,5 +214,33 @@ run("produces no deltas when there is no comparison estimate", () => {
   assert.equal(result.deltas.length, 0);
 });
 
+// --- Concatenated CCC prefixes (RO22006) -----------------------------------
+
+run("parses a concatenated CCC prefix (line*S01Op) without leaking markers", () => {
+  const row = parseCccEstimateRow("13*S01RprWindshield Honda EX 1 250.00 0.5");
+  assert.equal(row.lineNumber, 13);
+  // The S01 labor code and * symbol must not survive into the description.
+  assert.doesNotMatch(row.description, /s01/i);
+  assert.doesNotMatch(row.description, /\*/);
+  assert.match(row.description, /windshield/i);
+});
+
+run("does not mark a shared operation missing when only the CCC prefix/markup differs", () => {
+  // Shop writes "*Rpr", carrier writes "*S01Rpr" + markup for the same op.
+  const shop = "14*RprWindshield Honda EX 1 250.00 0.5";
+  const carrier = "13*S01RprWindshield Honda EX +25% 1 250.00 0.5";
+  const shopRows = parseCccEstimateRows(shop);
+  const carrierRows = parseCccEstimateRows(carrier);
+  const result = matchEstimateLineItems({ lowerRows: carrierRows, higherRows: shopRows });
+  const windshieldMissing = result.deltas.find(
+    (delta) => /windshield/i.test(delta.summary) && delta.kind === "missing_operation"
+  );
+  assert.equal(
+    windshieldMissing,
+    undefined,
+    "windshield present in both estimates must not be reported as a missing operation"
+  );
+});
+
 console.log(`\nestimateDeltaMatcher: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

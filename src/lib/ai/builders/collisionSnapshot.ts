@@ -223,14 +223,21 @@ function buildRepairPlanVerdict(renderModel: SnapshotRenderModel): CollisionSnap
       : isCarrierSelectedPosture(posture)
         ? "CARRIER"
         : "INCONCLUSIVE";
+  // The carrier plan is only labeled lighter (LIGHT/PARTIAL) when the shop plan
+  // is the established more-complete plan AND concrete missing repair operations
+  // exist. Broadly-aligned plans with only line-specific disputes are never
+  // globally called "light".
+  const hasEstablishedMissingScope =
+    renderModel.confidenceIntegrity.missingCriticalEvidence.length > 0 ||
+    renderModel.supplementItems.some((item) => item.kind === "missing_verification");
   const carrierPlanStatus =
-    moreCompletePlan !== "CARRIER" && renderModel.confidenceIntegrity.adjustedConfidence === "High"
-      ? "PARTIAL"
-      : moreCompletePlan !== "CARRIER" && moreCompletePlan !== "INCONCLUSIVE"
-        ? "LIGHT"
-        : incomplete
-          ? "INCONCLUSIVE"
-          : "COMPLETE";
+    moreCompletePlan === "SHOP" && hasEstablishedMissingScope
+      ? renderModel.confidenceIntegrity.adjustedConfidence === "High"
+        ? "PARTIAL"
+        : "LIGHT"
+      : incomplete
+        ? "INCONCLUSIVE"
+        : "COMPLETE";
   const reasonBase = posture.selectedEstimateReason;
   const reason = incomplete
     ? `${reasonBase} Because the file set is not complete, this snapshot is not a final repair conclusion.`

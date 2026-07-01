@@ -183,16 +183,28 @@ function stripLeadingMetadata(rawText: string): { body: string; lineNumber: numb
   }
 
   // Strip symbol tokens (#, *, **, <>) and labor-category tokens (S01/S02)
-  // that sit between the line number and the operation/description.
+  // that sit between the line number and the operation/description. CCC/Audatex
+  // frequently CONCATENATE these with each other and with the operation
+  // ("13*S01RprWindshield"), so markers are stripped even without a trailing
+  // space — otherwise equivalent shop/carrier lines tokenize differently and an
+  // operation present in both is wrongly reported as present-only.
   let changed = true;
   while (changed) {
     changed = false;
-    const symbolMatch = body.match(/^(?:#|\*{1,2}|<>)\s+/);
-    if (symbolMatch) {
+    const symbolMatch = body.match(/^(?:#|\*{1,2}|<>)\s*/);
+    if (symbolMatch && symbolMatch[0].length > 0) {
       body = body.slice(symbolMatch[0].length);
       changed = true;
       continue;
     }
+    // Concatenated labor-category code (e.g. "S01RprWindshield").
+    const concatLaborMatch = body.match(/^S\d{2}/i);
+    if (concatLaborMatch) {
+      body = body.slice(concatLaborMatch[0].length);
+      changed = true;
+      continue;
+    }
+    // Space-separated labor-category token.
     const firstToken = body.split(" ")[0] ?? "";
     if (LABOR_CATEGORY_PATTERN.test(firstToken)) {
       body = body.slice(firstToken.length).trim();
