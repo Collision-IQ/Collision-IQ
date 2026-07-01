@@ -17,7 +17,7 @@ import {
 import { JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT } from "@/lib/ai/jurisdictionalInsurancePrompt";
 import { DOCUMENT_REVIEW_TWO_PASS_PROTOCOL } from "@/lib/ai/documentReviewProtocol";
 import { buildAppraisalAwardEvaluatorInstruction } from "@/lib/ai/appraisalAwardEvaluator";
-import { buildAssistanceProfileInstruction } from "@/lib/ai/assistanceProfile";
+import { buildConversationBehaviorDirective } from "@/lib/ai/assistanceProfile";
 import {
   UnauthorizedError,
   requireCurrentUser,
@@ -459,8 +459,11 @@ function isEstimateFileReviewIntent(message: string) {
   // file/upload reference or a deictic pointer to an upload, so general
   // auto-claims questions ("explain this appraisal clause") reach the model.
   const actionVerb = /\b(?:review|analy[sz]e|triage|check|run|go\s+over|look\s+at)\b/i;
+  // NOTE: "photos" is deliberately excluded — a photo/visible-damage request is a
+  // vision task (handled by the photo-analysis flow), not an ESTIMATE file review.
+  // An explicit deictic ("review these photos") still routes via uploadDeictic.
   const fileReference =
-    /\b(?:files?|estimates?|zip|upload(?:s|ed)?|attachments?|documents?|pdf|photos?)\b/i;
+    /\b(?:files?|estimates?|zip|upload(?:s|ed)?|attachments?|documents?|pdf)\b/i;
   const uploadDeictic =
     /\b(?:these|this\s+file|attached|my\s+files|the\s+estimate)\b|what\s+i\s+(?:just\s+)?sent/i;
   return (
@@ -1160,7 +1163,7 @@ export async function POST(req: Request) {
         ? body.attachments.length
         : 0;
     const userMessage = extractLatestUserMessage(body.messages || []);
-    const chatIntent = classifyChatIntent(userMessage);
+    let chatIntent = classifyChatIntent(userMessage);
 
     // Anonymous (signed-out) users get text chat only. Uploads, file review, citation density,
     // and report generation stay auth-gated — surface a clear sign-in prompt instead of failing.
@@ -1192,16 +1195,18 @@ export async function POST(req: Request) {
       });
     }
 
+    // Chatbot-first: a file-review-flavored message with no attached files and
+    // no active case should NOT be met with a canned "I don't have files" refusal.
+    // Treat it as a normal conversational turn — the model answers what it can
+    // and offers to review a file as an optional next step (see the conversation
+    // behavior directive). This also covers photo/general questions that the
+    // intent classifier over-routed to estimate_file_review.
     if (
       incomingAttachmentCount === 0 &&
       !body.activeCaseId &&
       chatIntent === "estimate_file_review"
     ) {
-      return NextResponse.json({
-        reply:
-          "I'm ready to review this, but I do not have extracted estimate files available yet. I'll start as soon as the upload finishes.",
-        needsFiles: true,
-      });
+      chatIntent = "general_chat";
     }
 
     const normalizedEmail = normalizeEmail(user.email);
@@ -1389,9 +1394,11 @@ export async function POST(req: Request) {
     }
 
     const systemInstructions = [
+      // Chatbot-first behavior + answer-length + audience directive leads, so it
+      // frames every response (it explicitly outranks the rest).
+      buildConversationBehaviorDirective(body.assistanceProfile),
       baseSystemInstructions,
       buildProductAccessGuard(body.productAccess),
-      buildAssistanceProfileInstruction(body.assistanceProfile),
       outputMode.instruction,
       buildResponseModeInstruction(responseMode),
       responseShapeInstruction,

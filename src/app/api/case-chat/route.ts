@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildAdasNarrative } from "@/lib/analysis/adasDecision";
 import { EVIDENCE_POLICY } from "@/lib/analysis/buildEvidenceCorpus";
 import { generateChatCompletion } from "@/lib/ai/generateChatCompletion";
-import { buildAssistanceProfileInstruction } from "@/lib/ai/assistanceProfile";
+import { buildConversationBehaviorDirective } from "@/lib/ai/assistanceProfile";
 import { NON_BIAS_ACCURACY_DIRECTIVE } from "@/lib/ai/nonBiasDirective";
 import { DAMAGE_ZONE_AND_DETERMINATION_DIRECTIVE } from "@/lib/ai/narrativeGuard";
 import {
@@ -369,7 +369,7 @@ ${DAMAGE_ZONE_AND_DETERMINATION_DIRECTIVE}
 
 ${JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT}
 
-${buildAssistanceProfileInstruction(assistanceProfile)}
+${buildConversationBehaviorDirective(assistanceProfile)}
 
 ${outputMode.instruction}
 
