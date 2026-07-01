@@ -4147,11 +4147,11 @@ export default function ChatWidget({
               onDragLeave={handleUploadDragLeave}
               onDrop={handleUploadDrop}
               className={[
-                "border transition",
-                shouldCompactMobileChat ? "px-1.5 py-1.5 lg:px-2 lg:py-2" : "px-2 py-2",
+                "rounded-2xl border shadow-[var(--shadow-soft)] transition",
+                shouldCompactMobileChat ? "px-2 py-2 lg:px-2.5 lg:py-2.5" : "px-2.5 py-2.5",
                 isDragActive
                   ? "border-[var(--accent)] bg-[var(--accent)]/10"
-                  : "border-border bg-muted",
+                  : "border-border/60 bg-card",
               ].join(" ")}
             >
                 <div
@@ -4253,7 +4253,7 @@ export default function ChatWidget({
                     : "Enter a repair analysis command or upload documentation..."
                 }
                 className={[
-                  "chat-composer-textarea min-w-0 resize-none overflow-y-auto border border-input bg-background text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)]/30 disabled:cursor-not-allowed disabled:opacity-50 lg:order-none lg:min-w-[280px] lg:flex-[1_1_420px]",
+                  "chat-composer-textarea min-w-0 resize-none overflow-y-auto rounded-xl border border-input/70 bg-background px-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/25 disabled:cursor-not-allowed disabled:opacity-50 lg:order-none lg:min-w-[280px] lg:flex-[1_1_420px]",
                   shouldCompactMobileChat
                     ? "order-2 min-h-9 max-h-16 flex-1 px-2.5 py-1.5 leading-5 lg:min-h-11 lg:max-h-[88px] lg:px-3 lg:py-2"
                     : "order-1 min-h-11 max-h-[88px] flex-[1_1_100%] px-3 py-2 leading-5",
