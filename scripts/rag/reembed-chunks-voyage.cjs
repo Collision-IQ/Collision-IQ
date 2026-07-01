@@ -73,6 +73,26 @@ function toVectorLiteral(embedding) {
   return `[${embedding.map((n) => (Number.isFinite(n) ? n : 0)).join(",")}]`;
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Embed with retry/backoff so a provider rate limit (e.g. Voyage free tier
+// 3 RPM / 429) pauses and retries instead of aborting the whole run.
+async function embedTextsWithRetry(texts, attempt = 0) {
+  try {
+    return await embedTexts(texts);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const isRateLimited = /429|rate limit|too many requests|TPM|RPM/i.test(message);
+    if (isRateLimited && attempt < 8) {
+      const waitMs = Math.min(25000 * (attempt + 1), 90000);
+      console.warn(`rate limited — waiting ${Math.round(waitMs / 1000)}s then retrying (attempt ${attempt + 1})`);
+      await sleep(waitMs);
+      return embedTextsWithRetry(texts, attempt + 1);
+    }
+    throw error;
+  }
+}
+
 async function readColumnDimension() {
   try {
     const rows = await prisma.$queryRawUnsafe(
@@ -102,7 +122,7 @@ async function main() {
     await prisma.$disconnect();
     return;
   }
-  const [probeEmbedding] = await embedTexts([probe[0].content]);
+  const [probeEmbedding] = await embedTextsWithRetry([probe[0].content]);
   if (!probeEmbedding || !probeEmbedding.length) {
     console.error("Voyage returned an empty embedding. Check VOYAGE_API_KEY / VOYAGE_EMBED_MODEL. Aborting.");
     process.exit(1);
@@ -129,13 +149,13 @@ async function main() {
     );
     if (!rows.length) break;
 
-    const embeddings = await embedTexts(rows.map((r) => r.content));
+    const embeddings = await embedTextsWithRetry(rows.map((r) => r.content));
     let updated = 0;
     for (let i = 0; i < rows.length; i += 1) {
       const embedding = embeddings[i];
       if (!embedding || !embedding.length) continue;
       await prisma.$executeRawUnsafe(
-        `UPDATE document_chunks SET embedding = $1 WHERE id = $2`,
+        `UPDATE document_chunks SET embedding = $1::vector WHERE id = $2`,
         toVectorLiteral(embedding),
         rows[i].id
       );
