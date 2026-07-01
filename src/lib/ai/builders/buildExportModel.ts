@@ -2020,7 +2020,7 @@ function buildDisputeNextMoves(supplementItems: ExportSupplementItem[]): string[
   const values = [
     "Lead with OEM procedures and the strongest documented repair-path support.",
     titles.some((title) => /(measure|frame|structural|setup|realign|rail)/.test(title))
-      ? "Close the structural measurement or frame-verification gap first, because it drives safety and geometry credibility."
+      ? "If teardown or OEM procedure shows structural or geometry involvement, request measurement or alignment documentation; current estimate evidence may not establish this as a primary dispute."
       : undefined,
     titles.some((title) => /(scan|calibration|sensor|camera|radar|adas)/.test(title))
       ? "Anchor scan and calibration items on OEM procedures plus invoice-backed proof before debating pricing."

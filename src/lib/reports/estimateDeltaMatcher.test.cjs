@@ -242,5 +242,22 @@ run("does not mark a shared operation missing when only the CCC prefix/markup di
   );
 });
 
+run("treats an OEM-vs-A/M part swap as a part difference, not a missing op (#5)", () => {
+  // Shop OEM part vs carrier aftermarket part for the same operation.
+  const shop = "45 Repl LT Side support 71598TBGA00 1 29.83 0.5";
+  const carrier = "42*S01Repl LT Side support 553756G 1 22.25 0.5";
+  const shopRows = parseCccEstimateRows(shop);
+  const carrierRows = parseCccEstimateRows(carrier);
+  const result = matchEstimateLineItems({ lowerRows: carrierRows, higherRows: shopRows });
+  const sideSupport = result.deltas.find((delta) => /side support/i.test(delta.summary));
+  if (sideSupport) {
+    assert.notEqual(
+      sideSupport.kind,
+      "missing_operation",
+      "an OEM-vs-A/M part swap must not be reported as a missing operation"
+    );
+  }
+});
+
 console.log(`\nestimateDeltaMatcher: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
