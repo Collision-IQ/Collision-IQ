@@ -19,8 +19,19 @@ const MAX_IMAGES = 10;
 export const VISION_AID_DISCLAIMER =
   "AI-generated visual aid. Not a forensic reconstruction. Not a substitute for inspection, measurement, scan, calibration, OEM procedure, or repair documentation.";
 
+/** The overlay styles the annotator can render on top of the original photo. */
+export type AnnotationStyle = "callout" | "heatmap" | "combined";
+
+/** Short, style-specific disclaimer stamped on the artifact and returned to chat. */
+export function disclaimerForAnnotationStyle(style: AnnotationStyle): string {
+  return style === "heatmap"
+    ? "AI visual aid — visible damage heat map only. Not a forensic measurement."
+    : "AI visual aid — visible damage annotation only. Not a forensic measurement.";
+}
+
 export type DamageZoneConfidence = "high" | "medium" | "low";
 export type DamageZoneSeverity = "high" | "medium" | "low";
+export type DamageZoneColorHint = "red" | "orange" | "yellow" | "blue";
 
 /** Normalized 0-1 box, origin at the image top-left. */
 export type DamageZoneBoundingBox = {
@@ -28,6 +39,16 @@ export type DamageZoneBoundingBox = {
   y: number;
   width: number;
   height: number;
+};
+
+/** Normalized 0-1 polygon point, origin at the image top-left. */
+export type DamageZonePolygonPoint = { x: number; y: number };
+
+/** Heat-map hint for a zone. intensity is a visual-only 0-1 concentration value. */
+export type DamageZoneHeatmap = {
+  intensity: number;
+  radius?: number;
+  colorHint?: DamageZoneColorHint;
 };
 
 export type DamageZone = {
@@ -38,6 +59,8 @@ export type DamageZone = {
   approximateLocation: string;
   evidenceLimits: string;
   boundingBox?: DamageZoneBoundingBox;
+  polygon?: DamageZonePolygonPoint[];
+  heatmap?: DamageZoneHeatmap;
 };
 
 export type DamageAnnotationResult = {
@@ -53,6 +76,8 @@ export type AnalyzeDamagePhotoInput = {
   vehicleContext?: string;
   estimateContext?: string;
   model?: string;
+  /** Influences the vision prompt (heat-map modes request intensity hints). */
+  annotationStyle?: AnnotationStyle;
 };
 
 export class VisionAnnotationValidationError extends Error {
@@ -94,7 +119,8 @@ function normalizeModel(value: string | undefined): string {
   );
 }
 
-function buildSystemPrompt(): string {
+function buildSystemPrompt(annotationStyle: AnnotationStyle): string {
+  const wantsHeatmap = annotationStyle === "heatmap" || annotationStyle === "combined";
   return [
     "You are a collision damage analyst examining photographs of a damaged vehicle.",
     "Return ONLY a single JSON object and nothing else — no prose, no markdown fences.",
@@ -109,7 +135,11 @@ function buildSystemPrompt(): string {
     '      "severity": "high" | "medium" | "low",',
     '      "approximateLocation": string,',
     '      "evidenceLimits": string,',
-    '      "boundingBox": { "x": number, "y": number, "width": number, "height": number }',
+    '      "boundingBox": { "x": number, "y": number, "width": number, "height": number }' +
+      (wantsHeatmap ? "," : ""),
+    ...(wantsHeatmap
+      ? ['      "heatmap": { "intensity": number, "colorHint": "red" | "orange" | "yellow" | "blue" }']
+      : []),
     "    }",
     "  ],",
     '  "notEstablished": string[],',
@@ -117,9 +147,16 @@ function buildSystemPrompt(): string {
     "}",
     "Rules:",
     "- boundingBox is OPTIONAL. Include it only when you can localize the damage in the frame. Use normalized coordinates in [0,1] with the origin at the top-left; width and height are fractions of the image.",
+    "- Keep each label short enough for an image callout (a few words).",
     "- confidence reflects how clearly the photo supports the finding; severity reflects how severe the apparent damage is.",
-    "- Be conservative. Do not invent damage that is not visible. Put anything you cannot determine from the photo in notEstablished.",
+    "- Be conservative. Do not invent damage that is not visible. Do not infer hidden, structural, sensor, suspension, or mechanical damage unless it is visibly apparent. Do not make legal conclusions. Put anything you cannot determine from the photo in notEstablished.",
     "- recommendedNextPhotos lists additional angles/photos that would resolve uncertainty.",
+    ...(wantsHeatmap
+      ? [
+          "- heatmap.intensity is a VISUAL-ONLY 0-1 concentration hint, not a measurement. Use higher intensity only for visibly stronger dents, creases, buckling, or deformation; use lower intensity for scratches, scuffs, possible adjacent-panel involvement, or verify-only areas.",
+          "- Intensity guidance: high visible deformation 0.85-1.0; medium denting/creasing 0.60-0.84; light scratches/scuffs or possible adjacent involvement 0.30-0.59; uncertain/verify-only 0.15-0.29.",
+        ]
+      : []),
   ].join("\n");
 }
 
@@ -224,6 +261,45 @@ function coerceBoundingBox(value: unknown): DamageZoneBoundingBox | undefined {
   };
 }
 
+function coercePolygon(value: unknown): DamageZonePolygonPoint[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const points = value
+    .map((point) => {
+      if (!point || typeof point !== "object") return null;
+      const p = point as Record<string, unknown>;
+      if (typeof p.x !== "number" || typeof p.y !== "number") return null;
+      if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+      return { x: clamp01(p.x), y: clamp01(p.y) };
+    })
+    .filter((p): p is DamageZonePolygonPoint => p !== null);
+  return points.length >= 3 ? points : undefined;
+}
+
+function coerceHeatmap(value: unknown): DamageZoneHeatmap | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const hm = value as Record<string, unknown>;
+  const intensity =
+    typeof hm.intensity === "number" && Number.isFinite(hm.intensity)
+      ? clamp01(hm.intensity)
+      : undefined;
+  const radius =
+    typeof hm.radius === "number" && Number.isFinite(hm.radius) && hm.radius > 0
+      ? hm.radius
+      : undefined;
+  const colorHint = coerceEnum(
+    hm.colorHint,
+    ["red", "orange", "yellow", "blue"] as const,
+    "red"
+  );
+  const hasColorHint = typeof hm.colorHint === "string";
+  if (intensity === undefined && radius === undefined && !hasColorHint) return undefined;
+  return {
+    intensity: intensity ?? 0.5,
+    ...(radius !== undefined ? { radius } : {}),
+    ...(hasColorHint ? { colorHint } : {}),
+  };
+}
+
 function coerceZone(value: unknown): DamageZone | null {
   if (!value || typeof value !== "object") return null;
   const zone = value as Record<string, unknown>;
@@ -238,6 +314,8 @@ function coerceZone(value: unknown): DamageZone | null {
     approximateLocation: coerceString(zone.approximateLocation),
     evidenceLimits: coerceString(zone.evidenceLimits),
     boundingBox: coerceBoundingBox(zone.boundingBox),
+    polygon: coercePolygon(zone.polygon),
+    heatmap: coerceHeatmap(zone.heatmap),
   };
 }
 
@@ -303,7 +381,7 @@ export async function analyzeDamagePhoto(
       input: {
         image_urls: imageUrls,
         prompt: buildUserPrompt(input),
-        system_prompt: buildSystemPrompt(),
+        system_prompt: buildSystemPrompt(input.annotationStyle ?? "callout"),
         model: normalizeModel(input.model),
         temperature: 0.1,
       } as never,

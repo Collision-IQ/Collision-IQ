@@ -8,10 +8,13 @@ import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
 import {
   FalConfigurationError,
   VisionAnnotationValidationError,
-  VISION_AID_DISCLAIMER,
-  analyzeDamagePhoto,
 } from "@/lib/ai/visionDamageAnnotation";
-import { renderDamageOverlay } from "@/lib/ai/renderDamageOverlay";
+import { runDamageAnnotation, coerceAnnotationStyle } from "@/lib/ai/runDamageAnnotation";
+import {
+  dataUrlToBuffer,
+  normalizeNonEmptyString,
+  stringifyVehicleContext,
+} from "@/lib/ai/annotateHelpers";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -19,35 +22,20 @@ export const maxDuration = 120;
 type AnnotateBody = {
   attachmentId?: unknown;
   imageUrl?: unknown;
+  imageDataUrl?: unknown;
   prompt?: unknown;
   vehicleContext?: unknown;
   estimateContext?: unknown;
+  annotationStyle?: unknown;
 };
 
 function jsonError(error: string, status: number, extra?: Record<string, unknown>) {
   return NextResponse.json({ ok: false, error, ...extra }, { status });
 }
 
-function normalizeNonEmptyString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
 async function parseBody(req: Request): Promise<AnnotateBody | null> {
   try {
     return (await req.json()) as AnnotateBody;
-  } catch {
-    return null;
-  }
-}
-
-/** Decode a data URL into raw bytes for the renderer. */
-function dataUrlToBuffer(dataUrl: string): Buffer | null {
-  const match = /^data:[^;,]+;base64,(.*)$/s.exec(dataUrl);
-  if (!match) return null;
-  try {
-    return Buffer.from(match[1], "base64");
   } catch {
     return null;
   }
@@ -63,9 +51,11 @@ export async function POST(req: Request) {
     }
 
     const attachmentId = normalizeNonEmptyString(body.attachmentId);
+    const directImageDataUrl = normalizeNonEmptyString(body.imageDataUrl);
     const directImageUrl = normalizeNonEmptyString(body.imageUrl);
+    const annotationStyle = coerceAnnotationStyle(body.annotationStyle);
 
-    // Resolve the image: an owned attachment id, or a directly supplied URL.
+    // Resolve the image: an owned attachment id, a data URL, or a remote URL.
     let visionImageUrl: string; // what the vision model fetches
     let renderSource: string | Buffer; // what the renderer draws on
 
@@ -83,26 +73,25 @@ export async function POST(req: Request) {
       }
       visionImageUrl = attachment.imageDataUrl;
       renderSource = dataUrlToBuffer(attachment.imageDataUrl) ?? attachment.imageDataUrl;
+    } else if (directImageDataUrl) {
+      visionImageUrl = directImageDataUrl;
+      renderSource = dataUrlToBuffer(directImageDataUrl) ?? directImageDataUrl;
     } else if (directImageUrl) {
       visionImageUrl = directImageUrl;
       renderSource = directImageUrl;
     } else {
       return jsonError("IMAGE_REQUIRED", 400, {
-        message: "Provide either an attachmentId or an imageUrl.",
+        message: "Provide an attachmentId, an imageDataUrl, or an imageUrl.",
       });
     }
 
-    const analysis = await analyzeDamagePhoto({
-      imageUrls: [visionImageUrl],
-      userPrompt: normalizeNonEmptyString(body.prompt) ?? undefined,
-      vehicleContext: normalizeNonEmptyString(body.vehicleContext) ?? undefined,
+    const result = await runDamageAnnotation({
+      visionImageUrl,
+      renderSource,
+      prompt: normalizeNonEmptyString(body.prompt) ?? undefined,
+      vehicleContext: stringifyVehicleContext(body.vehicleContext),
       estimateContext: normalizeNonEmptyString(body.estimateContext) ?? undefined,
-    });
-
-    const overlayPng = await renderDamageOverlay({
-      imageSource: renderSource,
-      zones: analysis.zones,
-      disclaimer: VISION_AID_DISCLAIMER,
+      annotationStyle,
     });
 
     // Persist the artifact so it can be inserted into customer reports.
@@ -110,7 +99,7 @@ export async function POST(req: Request) {
     const warnings: string[] = [];
     try {
       const pathname = `vision-annotations/${user.id}/${Date.now()}.png`;
-      const stored = await put(pathname, overlayPng, {
+      const stored = await put(pathname, result.pngBuffer, {
         access: "public",
         contentType: "image/png",
       });
@@ -126,19 +115,22 @@ export async function POST(req: Request) {
     console.info("[vision-annotate] completed", {
       ownerUserId: user.id,
       isPlatformAdmin,
-      zoneCount: analysis.zones.length,
+      annotationStyle,
+      zoneCount: result.zones.length,
       artifactSaved: annotatedImageUrl !== null,
     });
 
     return NextResponse.json(
       {
         ok: true,
-        summary: analysis.summary,
-        zones: analysis.zones,
-        notEstablished: analysis.notEstablished,
-        recommendedNextPhotos: analysis.recommendedNextPhotos,
+        summary: result.summary,
+        annotationStyle: result.annotationStyle,
+        zones: result.zones,
+        notEstablished: result.notEstablished,
+        recommendedNextPhotos: result.recommendedNextPhotos,
+        annotatedImageDataUrl: result.annotatedImageDataUrl,
         annotatedImageUrl,
-        disclaimer: VISION_AID_DISCLAIMER,
+        disclaimer: result.disclaimer,
         ...(warnings.length ? { warnings } : {}),
       },
       { status: 200 }

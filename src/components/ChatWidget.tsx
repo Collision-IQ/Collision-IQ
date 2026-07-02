@@ -18,7 +18,7 @@ import {
   Pause,
   StopCircle,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import { upload as uploadBlob } from "@vercel/blob/client";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
@@ -284,18 +284,46 @@ function parseFalImageCommand(message: string): string | null {
 
 // Detects a natural-language request to mark up / annotate an uploaded photo
 // (e.g. "annotate the attached image to highlight damage", "circle the dents",
-// "mark up the photo"). Only acted on when a ready image attachment exists, so
-// a loose noun match is safe. Routes to the deterministic overlay annotator
-// (/api/vision/annotate) instead of the estimate-review chat flow.
+// "mark up the photo", "create a heat map"). Only acted on when a ready image
+// attachment exists, so a loose noun match is safe. Routes to the deterministic
+// overlay annotator (/api/vision/annotate) instead of the estimate-review flow.
+type AnnotationStyle = "callout" | "heatmap" | "combined";
+
 const ANNOTATE_ACTION_PATTERN =
-  /\b(annotate|mark[\s-]?ups?|marking|circle|outline|highlight|label|draw\s+on|point\s+out)\b/i;
+  /\b(annotate|mark[\s-]?ups?|marking|circle|outline|highlight|label|draw\s+on|point\s+out|damage\s+map|report\s+visual|negotiation)\b/i;
 const ANNOTATE_TARGET_PATTERN =
-  /\b(damage|dents?|dinged?|scratch(?:es)?|scrapes?|creases?|image|photo|picture|pic|panel)\b/i;
+  /\b(damage|dents?|dinged?|scratch(?:es)?|scrapes?|creases?|image|photo|picture|pic|panel|map|negotiations?)\b/i;
+const HEATMAP_PATTERN =
+  /\b(heat\s?map|heat-map|damage\s+intensity|intensity\s+map|worst\s+damage|where\s+the\s+damage\s+is\s+concentrated|damage\s+concentrat)/i;
+const CALLOUT_ONLY_PATTERN = /\b(callouts?|call\s?outs?|labels?\s+only|outlines?\s+only)\b/i;
+const ANNOTATE_BATCH_PATTERN =
+  /\b(all\s+(?:the\s+)?photos|all\s+images|same\s+photos|these\s+photos|each\s+photo|every\s+photo|already\s+uploaded|batch)\b/i;
 
 function isPhotoAnnotationRequest(message: string): boolean {
   const trimmed = message.trim();
   if (!trimmed) return false;
+  if (HEATMAP_PATTERN.test(trimmed)) return true;
   return ANNOTATE_ACTION_PATTERN.test(trimmed) && ANNOTATE_TARGET_PATTERN.test(trimmed);
+}
+
+// "annotate" defaults to combined (heat map + callouts); explicit heat-map or
+// callout requests pick their style.
+function resolveAnnotationStyle(message: string): AnnotationStyle {
+  if (HEATMAP_PATTERN.test(message)) return "heatmap";
+  if (CALLOUT_ONLY_PATTERN.test(message)) return "callout";
+  return "combined";
+}
+
+function isBatchAnnotationRequest(message: string): boolean {
+  return ANNOTATE_BATCH_PATTERN.test(message);
+}
+
+// react-markdown strips data: URLs by default. Allow inline base64 image data
+// URLs (the annotated-photo artifacts) while keeping every other URL on the
+// safe default transform.
+function annotationSafeUrlTransform(url: string): string {
+  if (/^data:image\/(?:png|jpe?g|webp);base64,/i.test(url)) return url;
+  return defaultUrlTransform(url);
 }
 
 async function resolveAnalysisFailure(response: Response) {
@@ -1654,15 +1682,90 @@ export default function ChatWidget({
       );
   }
 
+  type DamageAnnotationZone = {
+    label?: string;
+    description?: string;
+    severity?: string;
+    approximateLocation?: string;
+  };
+  type DamageAnnotationResponse = {
+    ok?: boolean;
+    summary?: string;
+    annotationStyle?: AnnotationStyle;
+    zones?: DamageAnnotationZone[];
+    notEstablished?: string[];
+    recommendedNextPhotos?: string[];
+    annotatedImageDataUrl?: string | null;
+    annotatedImageUrl?: string | null;
+    disclaimer?: string;
+  };
+
+  function buildAnnotationMessage(
+    data: DamageAnnotationResponse,
+    style: AnnotationStyle,
+    imageAlt: string
+  ): string {
+    const parts: string[] = [];
+    // Prefer the hosted (blob) URL for a light chat payload; fall back to the
+    // self-contained data URL so the artifact still renders if blob is off.
+    const imageSrc = data.annotatedImageUrl || data.annotatedImageDataUrl;
+    if (imageSrc) {
+      parts.push(`![${imageAlt}](${imageSrc})`);
+      if (data.annotatedImageUrl) parts.push(`[Open full image](${data.annotatedImageUrl})`);
+    }
+    const lead =
+      style === "heatmap"
+        ? "I created a visible-damage **heat map** from the uploaded photo. Red/orange areas show the strongest visible exterior deformation. This is an AI visual aid only, not a forensic measurement or proof of hidden damage."
+        : style === "combined"
+          ? "I created a visible-damage annotation (heat map + labeled callouts) from the uploaded photo. This is an AI visual aid, not a forensic measurement."
+          : "I created a visible-damage annotation for the uploaded photo. This is an AI visual aid, not a forensic measurement.";
+    parts.push(lead);
+    if (data.summary) parts.push(data.summary.trim());
+    const zoneLines = (data.zones ?? [])
+      .map((zone) => {
+        const label = (zone.label ?? "").trim();
+        const description = (zone.description ?? "").trim();
+        if (!label && !description) return "";
+        return `- **${label || "Damage zone"}**${description ? ` — ${description}` : ""}`;
+      })
+      .filter(Boolean);
+    if (zoneLines.length > 0) parts.push(`**Marked zones:**\n${zoneLines.join("\n")}`);
+    if ((data.notEstablished ?? []).length > 0) {
+      parts.push(
+        `**Not established from this photo:**\n${data.notEstablished!.map((i) => `- ${i}`).join("\n")}`
+      );
+    }
+    if ((data.recommendedNextPhotos ?? []).length > 0) {
+      parts.push(
+        `**Helpful next photos:**\n${data.recommendedNextPhotos!.map((i) => `- ${i}`).join("\n")}`
+      );
+    }
+    if (!imageSrc) {
+      parts.push(
+        "_(I mapped the damage by location above; the marked-up image couldn't be saved this time, but the zones are accurate to the photo.)_"
+      );
+    }
+    parts.push(`_${data.disclaimer || FAL_IMAGE_VISUAL_AID_DISCLAIMER}_`);
+    return parts.join("\n\n");
+  }
+
   // Deterministic photo annotation: FAL/OpenRouter vision → structured damage
   // zones → overlay drawn on the ORIGINAL photo (/api/vision/annotate). Returns
-  // a real marked-up image, unlike the text-only FAL vision analysis. Always
-  // labeled an AI visual aid — never claim evidence.
-  async function runPhotoAnnotation(attachment: Attachment, userPrompt: string) {
+  // a real marked-up image (callout / heatmap / combined), unlike the text-only
+  // FAL vision analysis. Always labeled an AI visual aid — never claim evidence.
+  async function runPhotoAnnotation(
+    attachment: Attachment,
+    userPrompt: string,
+    annotationStyle: AnnotationStyle
+  ) {
     if (isAnalyzingPhotoRef.current) return;
     isAnalyzingPhotoRef.current = true;
     setIsAnalyzingPhoto(true);
-    upsertSystemStatusMessage("Marking up the photo — locating and labeling visible damage…");
+    upsertSystemStatusMessage(
+      annotationStyle === "heatmap"
+        ? "Creating a visible-damage heat map from the uploaded photo…"
+        : "Creating a visible-damage annotation from the uploaded photo…"
+    );
     try {
       const response = await fetch("/api/vision/annotate", {
         method: "POST",
@@ -1670,6 +1773,7 @@ export default function ChatWidget({
         body: JSON.stringify({
           attachmentId: attachment.attachmentId,
           prompt: userPrompt || undefined,
+          annotationStyle,
         }),
       });
 
@@ -1688,72 +1792,108 @@ export default function ChatWidget({
         }
         console.warn("[chat] photo annotation failed", response.status);
         pushAssistantMessage(
-          "I couldn't mark up that photo just now. I can still walk you through the visible damage by location — want me to do that instead?"
+          "I couldn't create the annotated image right now. I can still describe the visible damage zones in text — want me to do that instead?"
+        );
+        return;
+      }
+
+      const data = (await response.json()) as DamageAnnotationResponse;
+      pushAssistantMessage(
+        buildAnnotationMessage(data, data.annotationStyle ?? annotationStyle, "Annotated damage photo")
+      );
+    } catch (error) {
+      console.warn("[chat] photo annotation error", error);
+      pushAssistantMessage(
+        "I couldn't create the annotated image right now. I can still describe the visible damage zones in text — want me to do that instead?"
+      );
+    } finally {
+      isAnalyzingPhotoRef.current = false;
+      setIsAnalyzingPhoto(false);
+    }
+  }
+
+  // Batch annotation: reuse already-uploaded image attachments and post one
+  // annotated artifact per photo (/api/vision/annotate/batch).
+  async function runPhotoAnnotationBatch(
+    attachments: Attachment[],
+    userPrompt: string,
+    annotationStyle: AnnotationStyle
+  ) {
+    if (isAnalyzingPhotoRef.current || attachments.length === 0) return;
+    isAnalyzingPhotoRef.current = true;
+    setIsAnalyzingPhoto(true);
+    upsertSystemStatusMessage(
+      `Creating visible-damage ${annotationStyle === "heatmap" ? "heat maps" : "annotations"} for ${attachments.length} photo${attachments.length === 1 ? "" : "s"}…`
+    );
+    try {
+      const response = await fetch("/api/vision/annotate/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          attachmentIds: attachments.map((a) => a.attachmentId),
+          prompt: userPrompt || undefined,
+          annotationStyle,
+        }),
+      });
+
+      if (!response.ok) {
+        if (response.status === 503) {
+          pushAssistantMessage(
+            "Photo annotation isn't configured right now. I can still describe the visible damage by location — just ask me to analyze the photos."
+          );
+          return;
+        }
+        pushAssistantMessage(
+          "I couldn't create the annotated images right now. I can still describe the visible damage zones in text — want me to do that instead?"
         );
         return;
       }
 
       const data = (await response.json()) as {
         ok?: boolean;
-        summary?: string;
-        zones?: Array<{ label?: string; note?: string }>;
-        notEstablished?: string[];
-        recommendedNextPhotos?: string[];
-        annotatedImageUrl?: string | null;
-        disclaimer?: string;
+        error?: string;
+        message?: string;
+        annotationStyle?: AnnotationStyle;
+        results?: Array<DamageAnnotationResponse & { attachmentId?: string; ok?: boolean }>;
       };
 
-      const parts: string[] = [];
-      if (data.annotatedImageUrl) {
-        parts.push(
-          `![Annotated damage photo](${data.annotatedImageUrl})\n\n[Open full image](${data.annotatedImageUrl})`
-        );
+      if (data.error === "TOO_MANY_IMAGES" && data.message) {
+        pushAssistantMessage(data.message);
+        return;
       }
-      if (data.summary) {
-        parts.push(data.summary.trim());
-      }
-      const zoneLines = (data.zones ?? [])
-        .map((zone) => {
-          const label = (zone.label ?? "").trim();
-          const note = (zone.note ?? "").trim();
-          if (!label && !note) return "";
-          return `- **${label || "Damage zone"}**${note ? ` — ${note}` : ""}`;
-        })
-        .filter(Boolean);
-      if (zoneLines.length > 0) {
-        parts.push(`**Marked zones:**\n${zoneLines.join("\n")}`);
-      }
-      if ((data.notEstablished ?? []).length > 0) {
-        parts.push(
-          `**Not established from this photo:**\n${data.notEstablished!
-            .map((item) => `- ${item}`)
-            .join("\n")}`
-        );
-      }
-      if ((data.recommendedNextPhotos ?? []).length > 0) {
-        parts.push(
-          `**Helpful next photos:**\n${data.recommendedNextPhotos!
-            .map((item) => `- ${item}`)
-            .join("\n")}`
-        );
-      }
-      if (!data.annotatedImageUrl) {
-        parts.push(
-          "_(I mapped the damage by location above; the marked-up image couldn't be saved this time, but the zones are accurate to the photo.)_"
-        );
-      }
-      parts.push(`_${data.disclaimer || FAL_IMAGE_VISUAL_AID_DISCLAIMER}_`);
 
-      pushAssistantMessage(parts.join("\n\n"));
+      const style = data.annotationStyle ?? annotationStyle;
+      const results = (data.results ?? []).filter((r) => r.ok);
+      if (results.length === 0) {
+        pushAssistantMessage(
+          "I couldn't create annotated images for those photos. I can still describe the visible damage in text — want me to do that instead?"
+        );
+        return;
+      }
+      results.forEach((result, index) => {
+        const filename =
+          attachments.find((a) => a.attachmentId === result.attachmentId)?.filename ??
+          `Photo ${index + 1}`;
+        pushAssistantMessage(buildAnnotationMessage(result, style, `Annotated: ${filename}`));
+      });
     } catch (error) {
-      console.warn("[chat] photo annotation error", error);
+      console.warn("[chat] batch photo annotation error", error);
       pushAssistantMessage(
-        "I couldn't mark up that photo just now. I can still walk you through the visible damage by location — want me to do that instead?"
+        "I couldn't create the annotated images right now. I can still describe the visible damage zones in text — want me to do that instead?"
       );
     } finally {
       isAnalyzingPhotoRef.current = false;
       setIsAnalyzingPhoto(false);
     }
+  }
+
+  function findReadyImageAttachments(): Attachment[] {
+    return attachmentsRef.current.filter(
+      (attachment) =>
+        attachment.hasVision &&
+        typeof attachment.imageDataUrl === "string" &&
+        attachment.imageDataUrl.trim().length > 0
+    );
   }
 
   function handleAnalyzePhotoAction() {
@@ -2204,29 +2344,51 @@ export default function ChatWidget({
       return;
     }
 
-    // Natural-language "annotate / mark up / highlight the damage" on an uploaded
-    // photo. Routes to the deterministic overlay annotator instead of the
-    // estimate-review chat flow (which used to reply "I can't draw on the image").
+    // Natural-language "annotate / mark up / highlight / heat map the damage" on
+    // uploaded photo(s). Routes to the deterministic overlay annotator instead of
+    // the estimate-review chat flow. "annotate" => combined (heat map + callouts);
+    // "heat map" => heatmap; "show callouts" => callout. Batch phrasing ("all/same
+    // photos") annotates every ready image.
     if (promptText && isPhotoAnnotationRequest(promptText) && !isAnalyzingPhotoRef.current) {
-      const imageAttachment = findLatestImageAttachment();
-      if (imageAttachment) {
+      const readyImages = findReadyImageAttachments();
+      const annotationStyle = resolveAnnotationStyle(promptText);
+      const wantsBatch = isBatchAnnotationRequest(promptText) && readyImages.length > 1;
+      const targets = wantsBatch ? readyImages : findLatestImageAttachment() ? [findLatestImageAttachment()!] : [];
+
+      if (targets.length === 0) {
         onUserPromptSent?.();
         onChatEngagement?.();
-        stopSpeaking();
         shouldAutoScrollRef.current = true;
         messageCounterRef.current += 1;
         setMessages((prev) => [...prev, createMessage(messageCounterRef.current, "user", promptText)]);
         setInput("");
-        setAttachments((prev) =>
-          prev.map((attachment) =>
-            attachment.attachmentId === imageAttachment.attachmentId
-              ? { ...attachment, usedInAnalysis: true }
-              : attachment
-          )
+        pushAssistantMessage(
+          "Please upload a vehicle damage photo first, and I'll create a visible-damage annotation."
         );
-        void runPhotoAnnotation(imageAttachment, promptText);
         return;
       }
+
+      onUserPromptSent?.();
+      onChatEngagement?.();
+      stopSpeaking();
+      shouldAutoScrollRef.current = true;
+      messageCounterRef.current += 1;
+      setMessages((prev) => [...prev, createMessage(messageCounterRef.current, "user", promptText)]);
+      setInput("");
+      const targetIds = new Set(targets.map((t) => t.attachmentId));
+      setAttachments((prev) =>
+        prev.map((attachment) =>
+          targetIds.has(attachment.attachmentId)
+            ? { ...attachment, usedInAnalysis: true }
+            : attachment
+        )
+      );
+      if (wantsBatch) {
+        void runPhotoAnnotationBatch(targets, promptText, annotationStyle);
+      } else {
+        void runPhotoAnnotation(targets[0], promptText, annotationStyle);
+      }
+      return;
     }
 
     if (promptText && isUploadBlockingAnalysis(uploadLifecycleItemsRef.current)) {
@@ -4234,6 +4396,7 @@ export default function ChatWidget({
                     </div>
                     <div className="analysis-report min-w-0 overflow-hidden break-words text-[14px] leading-6 text-card-foreground">
                     <ReactMarkdown
+                      urlTransform={annotationSafeUrlTransform}
                       components={{
                         h2: ({ children }) => (
                           <div className="mb-2 mt-5 border-b border-border pb-1 text-[13px] font-semibold uppercase tracking-[0.08em] text-[var(--accent)]">

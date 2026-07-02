@@ -71,6 +71,13 @@ class MockVisionAnnotationParseError extends Error {
 
 const DISCLAIMER =
   "AI-generated visual aid. Not a forensic reconstruction. Not a substitute for inspection, measurement, scan, calibration, OEM procedure, or repair documentation.";
+const CALLOUT_DISCLAIMER =
+  "AI visual aid — visible damage annotation only. Not a forensic measurement.";
+const HEATMAP_DISCLAIMER =
+  "AI visual aid — visible damage heat map only. Not a forensic measurement.";
+function mockDisclaimerForStyle(style) {
+  return style === "heatmap" ? HEATMAP_DISCLAIMER : CALLOUT_DISCLAIMER;
+}
 
 // ─── Controllable mock implementations ────────────────────────────────────────
 
@@ -137,6 +144,7 @@ Module._load = function interceptLoad(request, parent, isMain) {
   if (request === "@/lib/ai/visionDamageAnnotation") {
     return {
       analyzeDamagePhoto: async (...args) => mockAnalyzeImpl(...args),
+      disclaimerForAnnotationStyle: mockDisclaimerForStyle,
       VISION_AID_DISCLAIMER: DISCLAIMER,
       FalConfigurationError: MockFalConfigurationError,
       VisionAnnotationValidationError: MockVisionAnnotationValidationError,
@@ -274,11 +282,63 @@ await test("success with imageUrl → 200 with artifact + zones + disclaimer", a
   assert.equal(res._body.ok, true);
   assert.equal(res._body.summary, sampleAnalysis.summary);
   assert.equal(res._body.zones.length, 2);
-  assert.equal(res._body.disclaimer, DISCLAIMER);
+  // Default style is callout; disclaimer is the style-specific label.
+  assert.equal(res._body.annotationStyle, "callout");
+  assert.equal(res._body.disclaimer, CALLOUT_DISCLAIMER);
   assert.ok(res._body.annotatedImageUrl.startsWith("https://blob.example/"));
+  assert.ok(res._body.annotatedImageDataUrl.startsWith("data:image/png;base64,"));
   assert.deepEqual(res._body.notEstablished, sampleAnalysis.notEstablished);
   assert.deepEqual(res._body.recommendedNextPhotos, sampleAnalysis.recommendedNextPhotos);
   assert.equal(res._body.warnings, undefined);
+});
+
+await test("annotationStyle heatmap → passed to analyze + heatmap disclaimer", async () => {
+  let analyzedWith = null;
+  let renderedWith = null;
+  mockAnalyzeImpl = async (arg) => { analyzedWith = arg; return sampleAnalysis; };
+  mockRenderImpl = async (arg) => { renderedWith = arg; return Buffer.from("png"); };
+  const res = await silentRun(() =>
+    POST(makePostRequest({ imageUrl: "https://x/y.jpg", annotationStyle: "heatmap" }))
+  );
+  assert.equal(res._status, 200);
+  assert.equal(res._body.annotationStyle, "heatmap");
+  assert.equal(res._body.disclaimer, HEATMAP_DISCLAIMER);
+  assert.equal(analyzedWith.annotationStyle, "heatmap");
+  assert.equal(renderedWith.annotationStyle, "heatmap");
+});
+
+await test("unknown annotationStyle falls back to callout", async () => {
+  const res = await silentRun(() =>
+    POST(makePostRequest({ imageUrl: "https://x/y.jpg", annotationStyle: "bogus" }))
+  );
+  assert.equal(res._status, 200);
+  assert.equal(res._body.annotationStyle, "callout");
+});
+
+await test("imageDataUrl input is decoded to a Buffer for the renderer", async () => {
+  let renderedWith = null;
+  mockRenderImpl = async (arg) => { renderedWith = arg; return Buffer.from("png"); };
+  const res = await silentRun(() =>
+    POST(makePostRequest({ imageDataUrl: "data:image/png;base64,AAAA" }))
+  );
+  assert.equal(res._status, 200);
+  assert.ok(Buffer.isBuffer(renderedWith.imageSource));
+});
+
+await test("object vehicleContext is flattened into the vision prompt", async () => {
+  let analyzedWith = null;
+  mockAnalyzeImpl = async (arg) => { analyzedWith = arg; return sampleAnalysis; };
+  await silentRun(() =>
+    POST(
+      makePostRequest({
+        imageUrl: "https://x/y.jpg",
+        vehicleContext: { year: "2015", make: "Jeep", model: "Cherokee", side: "left" },
+      })
+    )
+  );
+  assert.match(analyzedWith.vehicleContext, /2015/);
+  assert.match(analyzedWith.vehicleContext, /Jeep/);
+  assert.match(analyzedWith.vehicleContext, /Cherokee/);
 });
 
 await test("success with attachmentId → 200", async () => {
