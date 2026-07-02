@@ -94,10 +94,15 @@ export function formatMileageDisplay(
     const lo = distinct[0];
     const hi = distinct[distinct.length - 1];
     const diff = hi - lo;
-    const magnitude = diff <= 1000 ? "minor discrepancy" : "discrepancy";
-    return `${distinct
-      .map((v) => v.toLocaleString("en-US"))
-      .join(" / ")} (${magnitude} of ${diff.toLocaleString("en-US")} mi across estimates)`;
+    // Label an odometer difference across documents as a paperwork mismatch to
+    // verify, not a repair defect. Small gaps read as minor; larger gaps flag a
+    // document mismatch requiring verification (e.g. a possible different reading
+    // date or record error), not necessarily a repair issue.
+    const note =
+      diff <= 1000
+        ? `minor discrepancy of ${diff.toLocaleString("en-US")} mi across estimates`
+        : `${diff.toLocaleString("en-US")} mi document mismatch across estimates — verify before relying on it; not necessarily a repair issue`;
+    return `${distinct.map((v) => v.toLocaleString("en-US")).join(" / ")} (${note})`;
   }
   if (typeof mileage === "number" && mileage > 0) return mileage.toLocaleString("en-US");
   if (distinct.length === 1) return distinct[0].toLocaleString("en-US");

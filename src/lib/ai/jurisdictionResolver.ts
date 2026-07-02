@@ -185,18 +185,38 @@ export function resolveJurisdiction(input: JurisdictionResolverInput): ResolvedJ
   const inspectionStopLabels = [...ownerLabels, ...insuredLabels, ...shopLabels];
   const shopStopLabels = [...ownerLabels, ...insuredLabels, ...inspectionLabels];
 
-  // Fix 4: the repair-shop ZIP on the estimate is the GOVERNING-state control. Inspection-
-  // site (IP proxy) and owner/insured ZIP are fallbacks only; PA is never a global default.
-  // Resolution order: shop ZIP -> inspection (IP) -> owner ZIP -> insured ZIP.
+  // #7: for a policyholder/DOI jurisdiction the governing state is the owner/
+  // claimant's (or named insured's) state — the estimate/claim header address —
+  // not where the repair shop happens to sit. The claim_state field is already
+  // consumed above via `explicit`. Resolution order: owner/claimant address ->
+  // insured address -> then the repair-shop / inspection-site ZIP as FALLBACK
+  // only. PA (or any state) is never a global default.
+  const ownerZip = findVerifiedPartyAddressBlockZip(allText, ownerLabels, ownerStopLabels);
+  if (ownerZip) return buildZipResult(ownerZip, "owner_zip", "Owner/claimant ZIP from the estimate/claim header.");
+
+  const ownerAddress = findVerifiedPartyAddressBlockState(allText, ownerLabels, ownerStopLabels);
+  if (ownerAddress) {
+    return buildResult(ownerAddress, "high", "owner_address", "Owner/claimant address state from the estimate/claim header.");
+  }
+
+  const insuredZip = findVerifiedPartyAddressBlockZip(allText, insuredLabels, insuredStopLabels);
+  if (insuredZip) return buildZipResult(insuredZip, "insured_zip", "Named-insured ZIP from the estimate/claim header.");
+
+  const insuredAddress = findVerifiedPartyAddressBlockState(allText, insuredLabels, insuredStopLabels);
+  if (insuredAddress) {
+    return buildResult(insuredAddress, "high", "insured_address", "Named-insured address state from the estimate/claim header.");
+  }
+
+  // Fallbacks only: shop / inspection-site location is a weak jurisdiction proxy.
   const shopZip = findAddressBlockZip(allText, shopLabels, shopStopLabels) ?? findLabeledZip(allText, shopLabels);
   if (shopZip) {
     const state = stateFromZip(shopZip);
-    if (state) return buildResult(state, "high", "shop_zip", "Repair shop ZIP from uploaded estimate (governing-state control).");
+    if (state) return buildResult(state, "medium", "shop_zip_fallback", "Repair-shop ZIP from the estimate (fallback — verify against owner/claimant state).");
   }
 
   const shopAddress = findAddressBlockState(allText, shopLabels, shopStopLabels) ?? findLabeledState(allText, shopLabels);
   if (shopAddress) {
-    return buildResult(shopAddress, "high", "shop_address", "Repair shop address from uploaded estimate (governing-state control).");
+    return buildResult(shopAddress, "medium", "shop_address_fallback", "Repair-shop address from the estimate (fallback — verify against owner/claimant state).");
   }
 
   const inspectionZip = findAddressBlockZip(allText, inspectionLabels, inspectionStopLabels) ?? findLabeledZip(allText, inspectionLabels);
@@ -208,22 +228,6 @@ export function resolveJurisdiction(input: JurisdictionResolverInput): ResolvedJ
   const inspectionAddress = findAddressBlockState(allText, inspectionLabels, inspectionStopLabels) ?? findLabeledState(allText, inspectionLabels);
   if (inspectionAddress) {
     return buildResult(inspectionAddress, "medium", "inspection_site_address_fallback", "Inspection Site address from uploaded estimate.");
-  }
-
-  const ownerZip = findVerifiedPartyAddressBlockZip(allText, ownerLabels, ownerStopLabels);
-  if (ownerZip) return buildZipResult(ownerZip, "owner_zip", "Owner ZIP from uploaded claim documents.");
-
-  const ownerAddress = findVerifiedPartyAddressBlockState(allText, ownerLabels, ownerStopLabels);
-  if (ownerAddress) {
-    return buildResult(ownerAddress, "high", "owner_address", "Owner address state from uploaded claim documents.");
-  }
-
-  const insuredZip = findVerifiedPartyAddressBlockZip(allText, insuredLabels, insuredStopLabels);
-  if (insuredZip) return buildZipResult(insuredZip, "insured_zip", "Insured ZIP from uploaded claim documents.");
-
-  const insuredAddress = findVerifiedPartyAddressBlockState(allText, insuredLabels, insuredStopLabels);
-  if (insuredAddress) {
-    return buildResult(insuredAddress, "high", "insured_address", "Insured address state from uploaded claim documents.");
   }
 
   return {

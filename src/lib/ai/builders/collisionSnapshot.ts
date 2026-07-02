@@ -17,6 +17,8 @@ export type CollisionSnapshot = {
   repairPlanVerdict: {
     moreCompletePlan: "SHOP" | "CARRIER" | "INCONCLUSIVE";
     carrierPlanStatus: "COMPLETE" | "PARTIAL" | "LIGHT" | "INCONCLUSIVE";
+    /** Human-readable carrier-plan phrasing for display (avoids bare "LIGHT"). */
+    carrierPlanDescriptor: string;
     reason: string;
   };
   estimateComparison: {
@@ -243,7 +245,60 @@ function buildRepairPlanVerdict(renderModel: SnapshotRenderModel): CollisionSnap
     ? `${reasonBase} Because the file set is not complete, this snapshot is not a final repair conclusion.`
     : reasonBase;
 
-  return { moreCompletePlan, carrierPlanStatus, reason };
+  const carrierPlanDescriptor = buildCarrierPlanDescriptor(
+    renderModel,
+    carrierPlanStatus,
+    moreCompletePlan
+  );
+
+  return { moreCompletePlan, carrierPlanStatus, carrierPlanDescriptor, reason };
+}
+
+// Human-readable carrier-plan phrasing so the snapshot never surfaces a bare
+// enum like "LIGHT". Stays pair-agnostic: it derives the narrowing signal
+// (recycled/aftermarket part focus, dominant repaired area) from the current
+// render model rather than hard-coding any specific claim.
+function buildCarrierPlanDescriptor(
+  renderModel: SnapshotRenderModel,
+  carrierPlanStatus: CollisionSnapshot["repairPlanVerdict"]["carrierPlanStatus"],
+  moreCompletePlan: CollisionSnapshot["repairPlanVerdict"]["moreCompletePlan"]
+): string {
+  if (carrierPlanStatus === "COMPLETE") {
+    return "Appears complete relative to the shop plan";
+  }
+  if (carrierPlanStatus === "INCONCLUSIVE" || moreCompletePlan === "INCONCLUSIVE") {
+    return "Not conclusively established from the current file";
+  }
+
+  const scopeText = [
+    ...renderModel.supplementItems.map(
+      (item) => `${item.category} ${item.title} ${item.rationale ?? ""} ${item.evidence ?? ""}`
+    ),
+    ...renderModel.findingReasoning.map(
+      (finding) => `${finding.issue} ${finding.what_proves_it}`
+    ),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  const recycledFocus = /\b(lkq|recycled|used part|salvage|aftermarket|a\/m)\b/.test(scopeText);
+  const dominantArea = /\bdoor\b/.test(scopeText)
+    ? "door"
+    : /\bquarter\b/.test(scopeText)
+      ? "quarter panel"
+      : /\bbumper\b/.test(scopeText)
+        ? "bumper"
+        : null;
+
+  const basis = recycledFocus
+    ? dominantArea
+      ? `narrow recycled-part-based ${dominantArea} repair position`
+      : "narrow recycled-part-based repair position"
+    : dominantArea
+      ? `narrow ${dominantArea}-based repair position`
+      : "narrow initial/desk-level repair position";
+
+  return `${basis.charAt(0).toUpperCase()}${basis.slice(1)} — appears to cover fewer operations than the shop plan; verify scope`;
 }
 
 function buildEstimateComparison(

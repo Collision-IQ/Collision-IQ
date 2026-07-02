@@ -49,7 +49,7 @@ export function buildCollisionSnapshotPdfFromSnapshot(snapshot: CollisionSnapsho
     summary: [
       { label: "Vehicle", value: cleanSnapshot.vehicleLabel },
       { label: "More Complete Plan", value: cleanSnapshot.repairPlanVerdict.moreCompletePlan },
-      { label: "Carrier Plan", value: cleanSnapshot.repairPlanVerdict.carrierPlanStatus },
+      { label: "Carrier Plan", value: cleanSnapshot.repairPlanVerdict.carrierPlanDescriptor },
       { label: "Approach", value: cleanSnapshot.pressureMode.charAt(0).toUpperCase() + cleanSnapshot.pressureMode.slice(1) },
     ],
     sections: [
@@ -106,6 +106,10 @@ export function sanitizeSnapshotForFinalRender(snapshot: CollisionSnapshot): Col
     repairPlanVerdict: {
       moreCompletePlan: snapshot.repairPlanVerdict.moreCompletePlan,
       carrierPlanStatus: snapshot.repairPlanVerdict.carrierPlanStatus,
+      carrierPlanDescriptor: toCustomerFacingText(
+        snapshot.repairPlanVerdict.carrierPlanDescriptor,
+        "Not conclusively established from the current file"
+      ),
       reason: toCustomerFacingText(snapshot.repairPlanVerdict.reason),
     },
     estimateComparison: {

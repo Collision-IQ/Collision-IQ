@@ -100,16 +100,17 @@ const ANALYSIS = {
   narrative: "Claim file review.",
 };
 
-run("shop ZIP governs over owner ZIP when they disagree (Fix 4)", () => {
+run("owner/claimant ZIP governs over shop ZIP when they disagree (#7)", () => {
   const report = buildReport([
     "Owner address: 123 Market Street, Philadelphia, PA 19103",
     "Repair facility address: 10 Main Street, Austin, TX 78701",
   ].join("\n"));
   const resolved = resolveJurisdiction({ report });
 
-  // The repair-shop ZIP on the estimate is the governing-state control, not owner ZIP.
-  assert.equal(resolved.state, "TX");
-  assert.equal(resolved.source, "shop_zip");
+  // #7: the owner/claimant state is the governing control for a policyholder/DOI
+  // jurisdiction; the repair-shop location is a fallback only.
+  assert.equal(resolved.state, "PA");
+  assert.equal(resolved.source, "owner_zip");
   assert.equal(resolved.confidence, "high");
 });
 
@@ -122,13 +123,13 @@ run("owner ZIP governs only when no shop ZIP is present", () => {
   assert.equal(resolved.confidence, "high");
 });
 
-run("shop ZIP resolves as the governing control", () => {
+run("shop ZIP resolves as a medium-confidence fallback (#7)", () => {
   const report = buildReport("Repair facility address: 100 Garage Road, Lancaster, PA 17602");
   const resolved = resolveJurisdiction({ report });
 
   assert.equal(resolved.state, "PA");
-  assert.equal(resolved.source, "shop_zip");
-  assert.equal(resolved.confidence, "high");
+  assert.equal(resolved.source, "shop_zip_fallback");
+  assert.equal(resolved.confidence, "medium");
 });
 
 run("policy governing law beats shop ZIP", () => {

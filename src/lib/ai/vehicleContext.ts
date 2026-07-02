@@ -99,7 +99,12 @@ const VEHICLE_FIELDS = [
   "series",
 ] as const;
 
-const WMI_MAP: Record<string, { make: string; manufacturer: string }> = {
+// Some WMIs are shared across multiple consumer brands within one manufacturer
+// group (e.g. FCA's "1C4" covers Jeep, Chrysler, and Dodge). For those the WMI
+// pins the MANUFACTURER reliably but not the customer-facing make/model, so we
+// mark them `ambiguousMake` and let the estimate text supply the make (Jeep)
+// while still recording FCA as manufacturer metadata.
+const WMI_MAP: Record<string, { make?: string; manufacturer: string; ambiguousMake?: boolean }> = {
   "19U": { make: "Acura", manufacturer: "Honda of America Mfg., Inc." },
   "1HG": { make: "Honda", manufacturer: "Honda of America Mfg., Inc." },
   "1HM": { make: "Honda", manufacturer: "Honda Manufacturing of Alabama, LLC" },
@@ -112,15 +117,18 @@ const WMI_MAP: Record<string, { make: string; manufacturer: string }> = {
   "1G1": { make: "Chevrolet", manufacturer: "General Motors LLC" },
   "1GK": { make: "GMC", manufacturer: "General Motors LLC" },
   "1GY": { make: "Cadillac", manufacturer: "General Motors LLC" },
-  "1C4": { make: "Chrysler", manufacturer: "FCA US LLC" },
+  "1C4": { manufacturer: "FCA US LLC", ambiguousMake: true }, // Jeep / Chrysler / Dodge
   "1C6": { make: "Ram", manufacturer: "FCA US LLC" },
-  "1D4": { make: "Dodge", manufacturer: "FCA US LLC" },
+  "1D4": { manufacturer: "FCA US LLC", ambiguousMake: true }, // Dodge / Jeep
+  "1J4": { make: "Jeep", manufacturer: "FCA US LLC" },
+  "1J8": { make: "Jeep", manufacturer: "FCA US LLC" },
   "2HG": { make: "Honda", manufacturer: "Honda of Canada Mfg., Inc." },
   "2HK": { make: "Honda", manufacturer: "Honda of Canada Mfg., Inc." },
   "2HJ": { make: "Honda", manufacturer: "Honda of Canada Mfg., Inc." },
   "2HNYD": { make: "Acura", manufacturer: "Honda of Canada Mfg., Inc." },
   "2T3": { make: "Toyota", manufacturer: "Toyota Motor Manufacturing Canada" },
   "2C3": { make: "Chrysler", manufacturer: "FCA Canada Inc." },
+  "2C4": { manufacturer: "FCA Canada Inc.", ambiguousMake: true }, // Chrysler / Dodge minivans
   "3FA": { make: "Ford", manufacturer: "Ford Motor Company Mexico" },
   "3GN": { make: "Chevrolet", manufacturer: "General Motors de Mexico" },
   "3VW": { make: "Volkswagen", manufacturer: "Volkswagen de Mexico" },
@@ -563,13 +571,16 @@ export function decodeVinVehicleIdentity(vin: string): VehicleIdentity | undefin
   if (!normalizedVin) return undefined;
 
   const wmi = resolveVinManufacturer(normalizedVin);
+  // For shared-brand WMIs, keep manufacturer metadata but do not assert a make;
+  // the estimate text is the authority for customer-facing make/model.
+  const decodedMake = wmi?.ambiguousMake ? undefined : wmi?.make;
   const year = decodeVinYear(normalizedVin);
   const checksumValid = validateVinChecksum(normalizedVin);
 
   const decoded: VehicleIdentity = {
     vin: normalizedVin,
     year,
-    make: wmi?.make,
+    make: decodedMake,
     manufacturer: wmi?.manufacturer,
     confidence: Number(
       Math.max(
@@ -579,7 +590,7 @@ export function decodeVinVehicleIdentity(vin: string): VehicleIdentity | undefin
           inferVehicleConfidence({
             vin: normalizedVin,
             year,
-            make: wmi?.make,
+            make: decodedMake,
             manufacturer: wmi?.manufacturer,
           }) + (checksumValid ? 0.02 : 0)
         )
@@ -590,7 +601,7 @@ export function decodeVinVehicleIdentity(vin: string): VehicleIdentity | undefin
       {
         vin: normalizedVin,
         year,
-        make: wmi?.make,
+        make: decodedMake,
         manufacturer: wmi?.manufacturer,
       },
       "vin_decoded"
@@ -877,7 +888,9 @@ function stringifyVehicleField(value: unknown): string {
   return "";
 }
 
-function resolveVinManufacturer(vin: string): { make?: string; manufacturer?: string } | undefined {
+function resolveVinManufacturer(
+  vin: string
+): { make?: string; manufacturer: string; ambiguousMake?: boolean } | undefined {
   const prefixes = [vin.slice(0, 5), vin.slice(0, 3)];
 
   for (const prefix of prefixes) {

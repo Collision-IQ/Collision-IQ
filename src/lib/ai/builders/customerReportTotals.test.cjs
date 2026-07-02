@@ -128,9 +128,10 @@ test("shows both mileages with a minor-discrepancy note (RO22006)", () => {
   assert.match(out, /659 mi/);
 });
 
-test("labels a large gap as a plain discrepancy", () => {
+test("labels a large gap as a document mismatch to verify (not a repair issue)", () => {
   const out = formatMileageDisplay(120000, [90000, 120000]);
-  assert.match(out, /\(discrepancy of 30,000 mi/);
+  assert.match(out, /30,000 mi document mismatch/);
+  assert.match(out, /not necessarily a repair issue/);
 });
 
 test("shows a single value when readings agree", () => {

@@ -5,6 +5,7 @@ import { deriveRenderInsightsFromChat, type DerivedValuation } from "./deriveRen
 import { buildRepairStory } from "./buildRepairStory";
 import {
   extractEstimateFacts,
+  extractInsurerMentions,
   extractMileageReadings,
   resolveCanonicalInsurerCandidate,
 } from "../extractors/extractEstimateFacts";
@@ -199,6 +200,8 @@ export type ExportReportFields = {
   mileage?: number;
   mileageReadings?: number[];
   insurer?: string;
+  /** Distinct insurer identities seen across the uploaded estimates (>=2 => conflict). */
+  insurerMentions?: string[];
   estimateTotal?: number;
   comparisonTotals?: EstimateComparisonTotals;
   documentedHighlights: string[];
@@ -679,6 +682,7 @@ export function deriveExportReportFields(params: {
     mileage: estimateFacts.mileage,
     mileageReadings: extractMileageReadings(sourceText),
     insurer: estimateFacts.insurer,
+    insurerMentions: extractInsurerMentions(sourceText),
     estimateTotal: estimateFacts.estimateTotal,
     comparisonTotals,
     documentedHighlights: estimateFacts.documentedHighlights,

@@ -18,7 +18,15 @@ const COMMON_INSURERS = [
   "Farmers",
   "Erie",
   "AAA",
+  "Root Insurance",
+  "Root",
 ];
+
+// "Root" is a real carrier but also an English word; only accept it when the
+// insurer sense is present (company suffix or an insurance-context label).
+const AMBIGUOUS_INSURER_CONTEXT: Record<string, RegExp> = {
+  Root: /\broot\s+insurance\b|\binsurance\s*(?:company|co\.?|:)?\s*root\b|\b(?:carrier|insurer|insurance company)\b[^\n]{0,20}\broot\b/i,
+};
 
 const LIKELY_PERSON_NAME_PATTERN = /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}$/;
 // Owner / insured names on CCC estimate headers are frequently rendered "LAST, FIRST"
@@ -203,6 +211,31 @@ function extractInsurer(text: string): string | undefined {
     { value: labeled, source: "labeled" },
     { value: knownFromText, source: "known_carrier" }
   );
+}
+
+/**
+ * Return the distinct known insurer identities that appear in the combined text.
+ * Used to surface an insurer metadata conflict (e.g. carrier Estimate of Record
+ * from one insurer, shop estimate insurance field naming another) instead of
+ * silently collapsing to a single insurer. Pair-agnostic: it names whatever
+ * distinct carriers are present, not a hard-coded pair.
+ */
+export function extractInsurerMentions(text: string): string[] {
+  if (!text) return [];
+  const found = new Set<string>();
+  for (const carrier of COMMON_INSURERS) {
+    const contextGuard = AMBIGUOUS_INSURER_CONTEXT[carrier];
+    if (contextGuard) {
+      if (contextGuard.test(text)) found.add(normalizeInsurer(carrier));
+      continue;
+    }
+    if (new RegExp(`\\b${escapeRegExp(carrier)}\\b`, "i").test(text)) {
+      found.add(normalizeInsurer(carrier));
+    }
+  }
+  // Collapse "Root" into "Root Insurance" when both matched.
+  if (found.has("Root Insurance")) found.delete("Root");
+  return [...found];
 }
 
 export function normalizeInsurer(value: string): string {

@@ -19,7 +19,7 @@ export function buildSnapshotPlainText(snapshot: CollisionSnapshot): string {
     snapshot.title,
     snapshot.redactionNotice,
     "",
-    `Repair verdict: ${snapshot.repairPlanVerdict.moreCompletePlan} more complete / carrier ${snapshot.repairPlanVerdict.carrierPlanStatus}. ${snapshot.repairPlanVerdict.reason}`,
+    `Repair verdict: ${snapshot.repairPlanVerdict.moreCompletePlan} more complete / carrier plan: ${snapshot.repairPlanVerdict.carrierPlanDescriptor}. ${snapshot.repairPlanVerdict.reason}`,
     `Estimate gap: ${
       snapshot.estimateComparison.available
         ? [
