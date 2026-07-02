@@ -147,6 +147,8 @@ function buildSystemPrompt(annotationStyle: AnnotationStyle): string {
     "}",
     "Rules:",
     "- boundingBox is OPTIONAL. Include it only when you can localize the damage in the frame. Use normalized coordinates in [0,1] with the origin at the top-left; width and height are fractions of the image.",
+    "- Draw a TIGHT boundingBox around ONLY the visibly damaged area (the specific dent, crease, scrape, scuff, or crush) — not the whole panel or the whole side of the vehicle. Prefer several small, localized zones over one large box. A box wider than ~0.35 or taller than ~0.35 of the image is almost always too large; shrink it to the actual damage.",
+    "- Do NOT mark undamaged areas: glossy/reflective paint, reflections of other cars/trees/sky, shadows, wheels, tires, glass, badges, or background. Only mark real deformation or surface damage on this vehicle.",
     "- Keep each label short enough for an image callout (a few words).",
     "- confidence reflects how clearly the photo supports the finding; severity reflects how severe the apparent damage is.",
     "- Be conservative. Do not invent damage that is not visible. Do not infer hidden, structural, sensor, suspension, or mechanical damage unless it is visibly apparent. Do not make legal conclusions. Put anything you cannot determine from the photo in notEstablished.",

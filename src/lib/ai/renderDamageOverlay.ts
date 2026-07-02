@@ -99,20 +99,30 @@ function heatColorForHint(hint: "blue"): HeatColor {
   };
 }
 
+// Blob half-axes stay close to the reported zone so heat concentrates on the
+// damage instead of washing over undamaged panel/wheel/background. A little over
+// half the box gives a soft feathered edge; a hard cap prevents a single
+// over-sized model box from tinting the whole image.
+const HEAT_RADIUS_FACTOR = 0.55;
+const HEAT_RADIUS_CAP = 0.24; // fraction of the image dimension
+
 /** Resolve a zone's center + radius in pixels from bbox or polygon. */
 function resolveZoneGeometry(
   zone: DamageZone,
   imgWidth: number,
   imgHeight: number
 ): { cx: number; cy: number; rx: number; ry: number } | null {
+  const radius = (span: number, imageDim: number) =>
+    Math.max(Math.min(span * HEAT_RADIUS_FACTOR, imageDim * HEAT_RADIUS_CAP), 12);
+
   if (zone.boundingBox) {
     const bw = zone.boundingBox.width * imgWidth;
     const bh = zone.boundingBox.height * imgHeight;
     return {
       cx: zone.boundingBox.x * imgWidth + bw / 2,
       cy: zone.boundingBox.y * imgHeight + bh / 2,
-      rx: Math.max(bw * 0.75, 12),
-      ry: Math.max(bh * 0.75, 12),
+      rx: radius(bw, imgWidth),
+      ry: radius(bh, imgHeight),
     };
   }
   if (zone.polygon && zone.polygon.length >= 3) {
@@ -125,8 +135,8 @@ function resolveZoneGeometry(
     return {
       cx: (minX + maxX) / 2,
       cy: (minY + maxY) / 2,
-      rx: Math.max((maxX - minX) * 0.75, 12),
-      ry: Math.max((maxY - minY) * 0.75, 12),
+      rx: radius(maxX - minX, imgWidth),
+      ry: radius(maxY - minY, imgHeight),
     };
   }
   return null;
