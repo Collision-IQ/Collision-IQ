@@ -207,21 +207,11 @@ function drawCalloutZone(
   let anchorY: number;
 
   if (zone.boundingBox) {
-    const bx = zone.boundingBox.x * imgWidth;
-    const by = zone.boundingBox.y * imgHeight;
-    const bw = zone.boundingBox.width * imgWidth;
-    const bh = zone.boundingBox.height * imgHeight;
-
-    // Dashed outline around the visible damage zone.
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = lineWidth;
-    ctx.setLineDash([lineWidth * 4, lineWidth * 3]);
-    ctx.strokeRect(bx, by, bw, bh);
-    ctx.restore();
-
-    anchorX = bx;
-    anchorY = by;
+    // Anchor the numbered label at the zone's top-left. The dashed outline was
+    // removed by request — numbered labels (and the heat map, in combined mode)
+    // carry the callout without boxing the damage.
+    anchorX = zone.boundingBox.x * imgWidth;
+    anchorY = zone.boundingBox.y * imgHeight;
   } else {
     // No geometry: stack label chips down the left margin so every zone shows.
     anchorX = lineWidth + 4;
