@@ -282,6 +282,22 @@ function parseFalImageCommand(message: string): string | null {
   return null;
 }
 
+// Detects a natural-language request to mark up / annotate an uploaded photo
+// (e.g. "annotate the attached image to highlight damage", "circle the dents",
+// "mark up the photo"). Only acted on when a ready image attachment exists, so
+// a loose noun match is safe. Routes to the deterministic overlay annotator
+// (/api/vision/annotate) instead of the estimate-review chat flow.
+const ANNOTATE_ACTION_PATTERN =
+  /\b(annotate|mark[\s-]?ups?|marking|circle|outline|highlight|label|draw\s+on|point\s+out)\b/i;
+const ANNOTATE_TARGET_PATTERN =
+  /\b(damage|dents?|dinged?|scratch(?:es)?|scrapes?|creases?|image|photo|picture|pic|panel)\b/i;
+
+function isPhotoAnnotationRequest(message: string): boolean {
+  const trimmed = message.trim();
+  if (!trimmed) return false;
+  return ANNOTATE_ACTION_PATTERN.test(trimmed) && ANNOTATE_TARGET_PATTERN.test(trimmed);
+}
+
 async function resolveAnalysisFailure(response: Response) {
   let payload: AnalysisFailureResponse | null = null;
 
@@ -1554,12 +1570,13 @@ export default function ChatWidget({
   // the FAL vision queue (/api/fal/vision). This is a visual AID, not a forensic
   // measurement, and is never claim evidence.
   //
-  // TODO(future): deterministic photo annotation lives at POST /api/vision/annotate
-  // (already scaffolded). That path should call FAL/OpenRouter vision for
-  // structured zones, produce normalized bounding boxes when available, render
-  // deterministic overlays on the ORIGINAL photo, save the annotated artifact,
-  // and label it "AI visual aid — not a forensic measurement." It stays a
-  // separate, later feature and is intentionally NOT wired to this button yet.
+  // Deterministic photo annotation lives at POST /api/vision/annotate and is
+  // wired via runPhotoAnnotation() below: it is triggered by natural-language
+  // "annotate / mark up / highlight the damage" requests (isPhotoAnnotationRequest)
+  // when a ready image attachment exists. That path calls FAL/OpenRouter vision
+  // for structured zones, renders a deterministic overlay on the ORIGINAL photo,
+  // saves the annotated artifact, and labels it an AI visual aid. This "Analyze
+  // photo" button stays text-only on purpose (a lighter, no-artifact summary).
   // Generative image replacement must never be used as claim evidence.
   const FAL_VISION_DAMAGE_PROMPT =
     "Analyze this vehicle damage photo for visible damage only. Return a concise repair/claim-support explanation for a policyholder. Identify visible damage zones, likely parts involved, safety-relevant observations, limits of what cannot be proven from the photo, and recommended next photos/documents. Do not claim hidden damage is proven. Do not provide legal conclusions.";
@@ -1623,6 +1640,10 @@ export default function ChatWidget({
   }
 
   function findLatestImageDataUrl(): string | undefined {
+    return findLatestImageAttachment()?.imageDataUrl;
+  }
+
+  function findLatestImageAttachment(): Attachment | undefined {
     return [...attachmentsRef.current]
       .reverse()
       .find(
@@ -1630,7 +1651,109 @@ export default function ChatWidget({
           attachment.hasVision &&
           typeof attachment.imageDataUrl === "string" &&
           attachment.imageDataUrl.trim().length > 0
-      )?.imageDataUrl;
+      );
+  }
+
+  // Deterministic photo annotation: FAL/OpenRouter vision → structured damage
+  // zones → overlay drawn on the ORIGINAL photo (/api/vision/annotate). Returns
+  // a real marked-up image, unlike the text-only FAL vision analysis. Always
+  // labeled an AI visual aid — never claim evidence.
+  async function runPhotoAnnotation(attachment: Attachment, userPrompt: string) {
+    if (isAnalyzingPhotoRef.current) return;
+    isAnalyzingPhotoRef.current = true;
+    setIsAnalyzingPhoto(true);
+    upsertSystemStatusMessage("Marking up the photo — locating and labeling visible damage…");
+    try {
+      const response = await fetch("/api/vision/annotate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          attachmentId: attachment.attachmentId,
+          prompt: userPrompt || undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        if (response.status === 503) {
+          pushAssistantMessage(
+            "Photo annotation isn't configured right now. I can still describe the visible damage by location — just ask me to analyze the photo."
+          );
+          return;
+        }
+        if (response.status === 401) {
+          pushAssistantMessage(
+            "You'll need to be signed in for me to mark up a photo. Once you sign in, upload the photo again and ask me to annotate it."
+          );
+          return;
+        }
+        console.warn("[chat] photo annotation failed", response.status);
+        pushAssistantMessage(
+          "I couldn't mark up that photo just now. I can still walk you through the visible damage by location — want me to do that instead?"
+        );
+        return;
+      }
+
+      const data = (await response.json()) as {
+        ok?: boolean;
+        summary?: string;
+        zones?: Array<{ label?: string; note?: string }>;
+        notEstablished?: string[];
+        recommendedNextPhotos?: string[];
+        annotatedImageUrl?: string | null;
+        disclaimer?: string;
+      };
+
+      const parts: string[] = [];
+      if (data.annotatedImageUrl) {
+        parts.push(
+          `![Annotated damage photo](${data.annotatedImageUrl})\n\n[Open full image](${data.annotatedImageUrl})`
+        );
+      }
+      if (data.summary) {
+        parts.push(data.summary.trim());
+      }
+      const zoneLines = (data.zones ?? [])
+        .map((zone) => {
+          const label = (zone.label ?? "").trim();
+          const note = (zone.note ?? "").trim();
+          if (!label && !note) return "";
+          return `- **${label || "Damage zone"}**${note ? ` — ${note}` : ""}`;
+        })
+        .filter(Boolean);
+      if (zoneLines.length > 0) {
+        parts.push(`**Marked zones:**\n${zoneLines.join("\n")}`);
+      }
+      if ((data.notEstablished ?? []).length > 0) {
+        parts.push(
+          `**Not established from this photo:**\n${data.notEstablished!
+            .map((item) => `- ${item}`)
+            .join("\n")}`
+        );
+      }
+      if ((data.recommendedNextPhotos ?? []).length > 0) {
+        parts.push(
+          `**Helpful next photos:**\n${data.recommendedNextPhotos!
+            .map((item) => `- ${item}`)
+            .join("\n")}`
+        );
+      }
+      if (!data.annotatedImageUrl) {
+        parts.push(
+          "_(I mapped the damage by location above; the marked-up image couldn't be saved this time, but the zones are accurate to the photo.)_"
+        );
+      }
+      parts.push(`_${data.disclaimer || FAL_IMAGE_VISUAL_AID_DISCLAIMER}_`);
+
+      pushAssistantMessage(parts.join("\n\n"));
+    } catch (error) {
+      console.warn("[chat] photo annotation error", error);
+      pushAssistantMessage(
+        "I couldn't mark up that photo just now. I can still walk you through the visible damage by location — want me to do that instead?"
+      );
+    } finally {
+      isAnalyzingPhotoRef.current = false;
+      setIsAnalyzingPhoto(false);
+    }
   }
 
   function handleAnalyzePhotoAction() {
@@ -2079,6 +2202,31 @@ export default function ChatWidget({
       }
       void runFalImageGeneration(imagePrompt);
       return;
+    }
+
+    // Natural-language "annotate / mark up / highlight the damage" on an uploaded
+    // photo. Routes to the deterministic overlay annotator instead of the
+    // estimate-review chat flow (which used to reply "I can't draw on the image").
+    if (promptText && isPhotoAnnotationRequest(promptText) && !isAnalyzingPhotoRef.current) {
+      const imageAttachment = findLatestImageAttachment();
+      if (imageAttachment) {
+        onUserPromptSent?.();
+        onChatEngagement?.();
+        stopSpeaking();
+        shouldAutoScrollRef.current = true;
+        messageCounterRef.current += 1;
+        setMessages((prev) => [...prev, createMessage(messageCounterRef.current, "user", promptText)]);
+        setInput("");
+        setAttachments((prev) =>
+          prev.map((attachment) =>
+            attachment.attachmentId === imageAttachment.attachmentId
+              ? { ...attachment, usedInAnalysis: true }
+              : attachment
+          )
+        );
+        void runPhotoAnnotation(imageAttachment, promptText);
+        return;
+      }
     }
 
     if (promptText && isUploadBlockingAnalysis(uploadLifecycleItemsRef.current)) {
