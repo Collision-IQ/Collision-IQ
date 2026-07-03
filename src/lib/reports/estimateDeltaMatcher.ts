@@ -46,9 +46,21 @@ export interface EstimateDeltaRow {
 
 export type EstimateDeltaKind =
   | "missing_operation"
+  | "expanded_scope"
   | "reduced_labor"
   | "reduced_paint"
   | "part_or_price_difference";
+
+/**
+ * Status labels for an OCR-driven confidence downgrade. When the lower estimate
+ * is machine-read from an image-only PDF, an unmatched line cannot be a
+ * *confirmed* omission — OCR may have dropped or garbled it.
+ */
+export const OCR_UNCERTAIN_STATUS_LABELS = [
+  "OCR_UNCERTAIN",
+  "LOWER_ESTIMATE_OCR_LIMITATION",
+  "VERIFY_AGAINST_SOURCE",
+] as const;
 
 export interface EstimateLineItemDelta {
   kind: EstimateDeltaKind;
@@ -63,6 +75,13 @@ export interface EstimateLineItemDelta {
   priceDelta: number | null;
   /** Plain-language summary of the difference. */
   summary: string;
+  /**
+   * True when the lower estimate is OCR-derived and this line's presence there
+   * could not be confirmed — treat as unverified, NOT a confirmed omission.
+   */
+  ocrUncertain?: boolean;
+  /** Status labels to surface (e.g. OCR_UNCERTAIN, VERIFY_AGAINST_SOURCE). */
+  statusLabels?: string[];
 }
 
 export interface EstimateDeltaMatchResult {
@@ -71,6 +90,42 @@ export interface EstimateDeltaMatchResult {
   higherRowCount: number;
   matchedPairCount: number;
   missingOperationCount: number;
+  /** Higher-estimate lines whose category is already present in the lower estimate. */
+  expandedScopeCount: number;
+}
+
+/**
+ * Category keywords used to decide whether an unmatched higher-estimate line is
+ * a brand-new operation vs an expansion within a category the lower estimate
+ * already covers. Keyword-based so it survives OCR noise and line splits.
+ */
+const CATEGORY_KEYWORDS = [
+  "bumper", "grille", "grill", "fascia", "lamp", "headlamp", "headlight", "taillamp",
+  "tail lamp", "light", "signal", "reflector", "hood", "fender", "quarter", "door",
+  "roof", "rail", "pillar", "rocker", "windshield", "glass", "cowl", "wheel", "tire",
+  "suspension", "steering", "panel", "liner", "molding", "applique", "mirror",
+  "spoiler", "deck", "tailgate", "liftgate", "radiator", "support", "apron", "seat",
+  "instrument", "battery", "sensor", "calibration", "scan", "frame", "trim", "emblem",
+  "nameplate", "handle", "weatherstrip", "grommet", "bracket",
+];
+
+function extractCategoryKeywords(row: EstimateDeltaRow): string[] {
+  const haystack = `${row.section ?? ""} ${(row.descriptionTokens ?? []).join(" ")} ${row.description ?? ""}`.toLowerCase();
+  return CATEGORY_KEYWORDS.filter((kw) => haystack.includes(kw));
+}
+
+function extractCategoryKeywordsFromText(text: string): string[] {
+  const haystack = (text ?? "").toLowerCase();
+  return CATEGORY_KEYWORDS.filter((kw) => haystack.includes(kw));
+}
+
+/** Uppercase, strip punctuation, collapse spaces — for section-header presence. */
+function normalizeCategoryText(value: string): string {
+  return (value ?? "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 const OP_CODES = [
@@ -564,29 +619,91 @@ function findBestLowerMatch(
 export function matchEstimateLineItems(params: {
   lowerRows: EstimateDeltaRow[];
   higherRows: EstimateDeltaRow[];
+  /**
+   * True when the lower estimate text was recovered via OCR (image-only PDF).
+   * Softens "absent" language because OCR may have dropped or garbled lines.
+   */
+  lowerIsOcr?: boolean;
+  /**
+   * Raw lower-estimate text (e.g. the full OCR dump). Used to seed category
+   * presence when OCR flattens the table so row parsing yields few rows — the
+   * category headers ("FRONT BUMPER & GRILLE", "RADIATOR SUPPORT") still appear
+   * in the text, so an added line in that category reads as expanded scope
+   * rather than a false missing operation.
+   */
+  lowerCategoryText?: string;
 }): EstimateDeltaMatchResult {
-  const { lowerRows, higherRows } = params;
+  const { lowerRows, higherRows, lowerIsOcr = false, lowerCategoryText } = params;
   const used = new Set<number>();
   const deltas: EstimateLineItemDelta[] = [];
   let matchedPairCount = 0;
   let missingOperationCount = 0;
+  let expandedScopeCount = 0;
+
+  // Categories the lower estimate already covers (keyword-based so OCR noise and
+  // line splits don't hide a present category). Seed from parsed rows AND the raw
+  // lower text, because OCR can flatten the table so few rows parse while the
+  // category headers still appear in the text.
+  const lowerCategoryKeywords = new Set<string>();
+  for (const row of lowerRows) {
+    for (const kw of extractCategoryKeywords(row)) lowerCategoryKeywords.add(kw);
+  }
+  if (lowerCategoryText) {
+    for (const kw of extractCategoryKeywordsFromText(lowerCategoryText)) {
+      lowerCategoryKeywords.add(kw);
+    }
+  }
+
+  // Also confirm a category by matching the higher row's own section header text
+  // against the lower text — so headers like ELECTRICAL, VEHICLE DIAGNOSTICS, or
+  // MISCELLANEOUS OPERATIONS confirm even when no fixed keyword applies.
+  const normalizedLowerText = normalizeCategoryText(lowerCategoryText ?? "");
+  const sectionPresentInLower = (section: string | null): boolean => {
+    const s = normalizeCategoryText(section ?? "");
+    return s.length >= 3 && normalizedLowerText.includes(s);
+  };
 
   for (const higherRow of higherRows) {
     const match = findBestLowerMatch(higherRow, lowerRows, used);
 
     if (!match) {
-      // Present in the higher estimate, absent from the lower estimate.
-      missingOperationCount += 1;
-      deltas.push({
-        kind: "missing_operation",
-        lowerRow: null,
-        higherRow,
-        matchBasis: "none",
-        laborDelta: higherRow.labor,
-        paintDelta: higherRow.paint,
-        priceDelta: higherRow.price,
-        summary: buildMissingSummary(higherRow),
-      });
+      // No line-level match. Distinguish a brand-new operation from an expansion
+      // within a category the lower estimate already has (e.g. more front-bumper
+      // lines added at teardown). Only the former is truly "missing".
+      const categoryPresent =
+        extractCategoryKeywords(higherRow).some((kw) => lowerCategoryKeywords.has(kw)) ||
+        sectionPresentInLower(higherRow.section);
+      if (categoryPresent) {
+        expandedScopeCount += 1;
+        deltas.push({
+          kind: "expanded_scope",
+          lowerRow: null,
+          higherRow,
+          matchBasis: "section_only",
+          laborDelta: higherRow.labor,
+          paintDelta: higherRow.paint,
+          priceDelta: higherRow.price,
+          summary: buildExpandedScopeSummary(higherRow, lowerIsOcr),
+          ...(lowerIsOcr ? { statusLabels: ["LOWER_ESTIMATE_OCR_LIMITATION", "VERIFY_AGAINST_SOURCE"] } : {}),
+        });
+      } else {
+        missingOperationCount += 1;
+        deltas.push({
+          kind: "missing_operation",
+          lowerRow: null,
+          higherRow,
+          matchBasis: "none",
+          laborDelta: higherRow.labor,
+          paintDelta: higherRow.paint,
+          priceDelta: higherRow.price,
+          summary: buildMissingSummary(higherRow, lowerIsOcr),
+          // OCR confidence drives Delta confidence: an unmatched line against an
+          // OCR-derived lower estimate is unverified, not a confirmed omission.
+          ...(lowerIsOcr
+            ? { ocrUncertain: true, statusLabels: [...OCR_UNCERTAIN_STATUS_LABELS] }
+            : {}),
+        });
+      }
       continue;
     }
 
@@ -644,6 +761,7 @@ export function matchEstimateLineItems(params: {
     higherRowCount: higherRows.length,
     matchedPairCount,
     missingOperationCount,
+    expandedScopeCount,
   };
 }
 
@@ -658,14 +776,29 @@ function formatHours(value: number | null): string {
   return Number.isInteger(value) ? `${value}.0` : `${value}`;
 }
 
-function buildMissingSummary(higherRow: EstimateDeltaRow): string {
-  const label = describeRow(higherRow);
+function costFragment(row: EstimateDeltaRow): string {
   const cost: string[] = [];
-  if (higherRow.labor !== null && higherRow.labor > 0) cost.push(`${formatHours(higherRow.labor)} body labor hr`);
-  if (higherRow.paint !== null && higherRow.paint > 0) cost.push(`${formatHours(higherRow.paint)} paint hr`);
-  if (higherRow.price !== null && higherRow.price > 0) cost.push(`$${higherRow.price.toFixed(2)} parts`);
-  const costText = cost.length ? ` (${cost.join(", ")})` : "";
-  return `Higher estimate documents "${label}"${costText} in the ${higherRow.section ?? "estimate"}; this operation is not present on the lower estimate.`;
+  if (row.labor !== null && row.labor > 0) cost.push(`${formatHours(row.labor)} body labor hr`);
+  if (row.paint !== null && row.paint > 0) cost.push(`${formatHours(row.paint)} paint hr`);
+  if (row.price !== null && row.price > 0) cost.push(`$${row.price.toFixed(2)} parts`);
+  return cost.length ? ` (${cost.join(", ")})` : "";
+}
+
+function buildMissingSummary(higherRow: EstimateDeltaRow, lowerIsOcr = false): string {
+  const label = describeRow(higherRow);
+  const tail = lowerIsOcr
+    ? "this line is not located on the lower estimate as read. The lower estimate was machine-read from an image-only PDF (OCR_UNCERTAIN / LOWER_ESTIMATE_OCR_LIMITATION), so OCR may have dropped or garbled it — treat this as unverified, NOT a confirmed omission, and VERIFY_AGAINST_SOURCE before relying on it."
+    : "this operation is not present on the lower estimate.";
+  return `Higher estimate documents "${label}"${costFragment(higherRow)} in the ${higherRow.section ?? "estimate"}; ${tail}`;
+}
+
+function buildExpandedScopeSummary(higherRow: EstimateDeltaRow, lowerIsOcr = false): string {
+  const label = describeRow(higherRow);
+  const section = higherRow.section ?? "this category";
+  const ocrNote = lowerIsOcr
+    ? " (lower estimate is OCR-extracted, so exact line matching is limited)"
+    : "";
+  return `"${label}"${costFragment(higherRow)}: the ${section} category is already present on the lower estimate, so this reads as expanded/added scope within an existing category${ocrNote} — not a brand-new operation. Verify whether it is a teardown addition, a changed part/labor line, or supporting material against the lower estimate's ${section} lines.`;
 }
 
 function buildReducedSummary(

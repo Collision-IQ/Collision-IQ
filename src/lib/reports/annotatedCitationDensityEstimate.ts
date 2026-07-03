@@ -44,6 +44,7 @@ import {
 } from "./citationDensitySourcePdf";
 import {
   deltaRowFromRawText,
+  isSectionHeader,
   matchEstimateLineItems,
   parseCccEstimateRows,
   parseEstimateNetTotal,
@@ -2047,7 +2048,44 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
 } {
   const label = delta.higherRow.description;
   const profile = classifyLineItemDeltaProfile(delta);
+  if (delta.kind === "expanded_scope") {
+    return {
+      findingType: "delta-expanded-scope",
+      title: `Expanded scope within a present category: ${label}`,
+      label: profile.label,
+      category: profile.category,
+      estimateGapType: "present_but_under_documented",
+      missingProof:
+        "Structured estimate comparison shows this line sits in a category the lower-cost estimate already covers. It reads as expanded or added scope within an existing category — a teardown addition, a changed part/labor line, or supporting material — not a brand-new operation. This is estimate-difference evidence only.",
+      nextAction:
+        "Compare this line to the lower-cost estimate's lines in the same category to confirm whether it is an added operation, a changed part/labor allowance, or supporting material.",
+      missingAuthorityTypes: profile.missingAuthorityTypes,
+      score: Math.max(0, profile.score - 12),
+      safetyImpact: profile.safetyImpact,
+      priority: profile.priority === "high" ? "medium" : profile.priority,
+    };
+  }
   if (delta.kind === "missing_operation") {
+    if (delta.ocrUncertain) {
+      // OCR confidence drives Delta confidence: the lower estimate is machine-read
+      // from an image-only PDF, so a non-match is unverified, not a confirmed
+      // omission. Downgrade to a verify item and never assert "missing".
+      return {
+        findingType: "delta-missing-operation-ocr-uncertain",
+        title: `Possibly missing (OCR-uncertain — verify against source): ${label}`,
+        label: "VERIFY (OCR)",
+        category: profile.category,
+        estimateGapType: "present_but_under_documented",
+        missingProof:
+          "This line is documented on the higher-cost estimate but was not located on the lower-cost estimate. The lower-cost estimate was machine-read from an image-only PDF (OCR_UNCERTAIN / LOWER_ESTIMATE_OCR_LIMITATION), so OCR may have dropped or garbled it. Treat this as unverified — not a confirmed omission — and VERIFY_AGAINST_SOURCE before relying on it.",
+        nextAction:
+          "Compare this line against the legible source of the lower-cost estimate (or a re-OCR/text version) to confirm whether it is genuinely absent before treating it as a gap.",
+        missingAuthorityTypes: ["legible lower-estimate source", ...profile.missingAuthorityTypes],
+        score: Math.max(0, profile.score - 24),
+        safetyImpact: profile.safetyImpact,
+        priority: profile.priority === "high" ? "medium" : "low",
+      };
+    }
     return {
       findingType: "delta-missing-operation",
       title: `Missing from lower-cost estimate: ${label}`,
@@ -2146,10 +2184,23 @@ function matchStructuredLineItemDeltas(
   // "missing"/"reduced" delta then anchors precisely to the source row that documents it, which
   // is where the lower-cost estimate's gap is visible.
   const higherRows: EstimateDeltaRow[] = [];
+  // Track the running section header (e.g. "FRONT BUMPER & GRILLE", "RADIATOR
+  // SUPPORT") in document order so each line inherits its category. This lets
+  // category-presence classification see that e.g. a "Repl Absorber" line sits
+  // under the bumper category even when the line text itself carries no keyword.
+  let currentSection: string | null = null;
   for (const anchor of primaryAnchors) {
+    if (isSectionHeader(anchor.rowText)) {
+      currentSection =
+        anchor.rowText.replace(/^\s*\d{1,4}\s+/, "").replace(/\s+/g, " ").trim() || currentSection;
+    }
+    // The anchor's own section can be blank; fall back to the running header
+    // (a bare `?? currentSection` would keep an empty string).
+    const anchorSection =
+      typeof anchor.section === "string" && anchor.section.trim() ? anchor.section : currentSection;
     const row = deltaRowFromRawText({
       rawText: anchor.rowText,
-      section: anchor.section ?? null,
+      section: anchorSection,
       anchorId: anchor.anchorId,
       pageNumber: anchor.pageNumber,
     });
@@ -2170,7 +2221,15 @@ function matchStructuredLineItemDeltas(
     return null;
   }
 
-  const match = matchEstimateLineItems({ lowerRows, higherRows });
+  // The lower-cost estimate is OCR-derived when its text carries the OCR recovery
+  // marker (image-only/scanned PDF). Soften "absent" language in that case.
+  const lowerIsOcr = comparison.some((item) =>
+    /OCR text recovered from a scanned/i.test(item.text)
+  );
+  // Seed category presence from the full comparison text so an OCR-flattened
+  // lower estimate (few parseable rows) still recognizes its own categories.
+  const lowerCategoryText = comparison.map((item) => item.text).join("\n");
+  const match = matchEstimateLineItems({ lowerRows, higherRows, lowerIsOcr, lowerCategoryText });
   const orderedDeltas = [...match.deltas].sort(
     (a, b) => scoreLineItemDeltaForPriority(b) - scoreLineItemDeltaForPriority(a)
   );
@@ -3280,7 +3339,10 @@ function scoreLineItemDeltaForPriority(delta: EstimateLineItemDelta) {
   const amount = delta.priceDelta ?? 0;
   const labor = delta.laborDelta ?? 0;
   const paint = delta.paintDelta ?? 0;
-  return profile.score + kindBoost + Math.min(30, amount / 25) + Math.min(20, labor * 6) + Math.min(10, paint * 4);
+  // An OCR-uncertain "missing" line is unverified, so it must not outrank
+  // confirmed gaps in the priority ordering.
+  const ocrPenalty = delta.ocrUncertain ? 24 : 0;
+  return profile.score + kindBoost - ocrPenalty + Math.min(30, amount / 25) + Math.min(20, labor * 6) + Math.min(10, paint * 4);
 }
 
 function findFallbackAnchorForMissingDelta(

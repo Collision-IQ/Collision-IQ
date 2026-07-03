@@ -259,5 +259,66 @@ run("treats an OEM-vs-A/M part swap as a part difference, not a missing op (#5)"
   }
 });
 
+run("expanded scope: an added line in a category the lower estimate already has is not 'missing'", () => {
+  // Pre-teardown (lower) already has front-bumper work; post-teardown (higher)
+  // adds another bumper line plus a genuinely new quarter-panel operation.
+  const lower = parseCccEstimateRows("10 Rpr O/H front bumper 4.6");
+  const higher = parseCccEstimateRows(
+    ["15 Repl Bumper cover 1 1203.00 2.1", "50 Repl LT Quarter panel 1 800.00 5.0"].join("\n")
+  );
+  const result = matchEstimateLineItems({ lowerRows: lower, higherRows: higher });
+  const bumper = result.deltas.find((d) => /bumper cover/i.test(d.higherRow.description));
+  const quarter = result.deltas.find((d) => /quarter/i.test(d.higherRow.description));
+  assert.ok(bumper, "bumper delta present");
+  assert.equal(bumper.kind, "expanded_scope", "bumper category already present => expanded scope");
+  assert.match(bumper.summary, /expanded\/added scope/i);
+  assert.ok(quarter, "quarter delta present");
+  assert.equal(quarter.kind, "missing_operation", "quarter is a new category => missing operation");
+  assert.equal(result.expandedScopeCount, 1);
+  assert.equal(result.missingOperationCount, 1);
+});
+
+run("OCR-derived lower estimate downgrades an unmatched line to unverified, not a confirmed omission", () => {
+  const lower = parseCccEstimateRows("10 Rpr O/H front bumper 4.6");
+  const higher = parseCccEstimateRows("50 Repl LT Quarter panel 1 800.00 5.0");
+  const result = matchEstimateLineItems({ lowerRows: lower, higherRows: higher, lowerIsOcr: true });
+  const quarter = result.deltas.find((d) => /quarter/i.test(d.higherRow.description));
+  assert.ok(quarter);
+  assert.equal(quarter.kind, "missing_operation");
+  assert.equal(quarter.ocrUncertain, true, "OCR-derived lower estimate => ocrUncertain flag");
+  assert.deepEqual(quarter.statusLabels, ["OCR_UNCERTAIN", "LOWER_ESTIMATE_OCR_LIMITATION", "VERIFY_AGAINST_SOURCE"]);
+  assert.match(quarter.summary, /not a confirmed omission/i);
+  assert.match(quarter.summary, /VERIFY_AGAINST_SOURCE/);
+});
+
+run("non-OCR lower estimate keeps a confirmed omission (no OCR labels)", () => {
+  const lower = parseCccEstimateRows("10 Rpr O/H front bumper 4.6");
+  const higher = parseCccEstimateRows("50 Repl LT Quarter panel 1 800.00 5.0");
+  const result = matchEstimateLineItems({ lowerRows: lower, higherRows: higher });
+  const quarter = result.deltas.find((d) => /quarter/i.test(d.higherRow.description));
+  assert.ok(quarter);
+  assert.equal(quarter.kind, "missing_operation");
+  assert.equal(quarter.ocrUncertain, undefined);
+  assert.equal(quarter.statusLabels, undefined);
+});
+
+run("category is confirmed via the section header appearing in the lower text (keyword-independent)", () => {
+  // "ELECTRICAL" is not a fixed keyword, but the header is present in the lower
+  // (OCR) text, so a module line under ELECTRICAL is expanded scope, not missing.
+  const higher = [
+    { ...parseCccEstimateRows("69 R&I Module 0.2")[0], section: "ELECTRICAL" },
+  ];
+  const lowerCategoryText = "... ELECTRICAL Battery Reset electrical components ...";
+  const result = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("10 Rpr O/H front bumper 4.6"),
+    higherRows: higher,
+    lowerIsOcr: true,
+    lowerCategoryText,
+  });
+  const module = result.deltas.find((d) => /module/i.test(d.higherRow.description));
+  assert.ok(module);
+  assert.equal(module.kind, "expanded_scope", "ELECTRICAL header present in lower text => expanded scope");
+});
+
 console.log(`\nestimateDeltaMatcher: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
