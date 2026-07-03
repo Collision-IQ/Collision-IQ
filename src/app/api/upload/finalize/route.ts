@@ -42,6 +42,8 @@ import { validateDirectUploadCandidate } from "@/lib/uploadSafety/directUploadRo
 import { isVideoExtension } from "@/lib/uploadSafety/videoSafety";
 
 export const runtime = "nodejs";
+// Allow time for OCR of image-only ("scanned") PDFs during extraction.
+export const maxDuration = 300;
 
 type FinalizeRequest = {
   url?: string;

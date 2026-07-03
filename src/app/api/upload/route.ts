@@ -54,6 +54,8 @@ import {
 } from "@/lib/uploadSafety/zipSafety";
 
 export const runtime = "nodejs";
+// Allow time for OCR of image-only ("scanned") PDFs during extraction.
+export const maxDuration = 300;
 
 const MULTIPART_BODY_OVERHEAD_BYTES = 2 * 1024 * 1024;
 const RUNTIME_LIMIT_MESSAGE =

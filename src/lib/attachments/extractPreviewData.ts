@@ -1,4 +1,5 @@
 import pdfParse from "pdf-parse";
+import { ocrPdfBuffer, shouldOcrPdf } from "@/lib/attachments/ocrPdfFallback";
 
 const MAX_REUSABLE_DATA_URL_BYTES = 4 * 1024 * 1024;
 
@@ -30,10 +31,22 @@ export async function extractPreviewDataFromBuffer(params: {
 
   if (mimeType === "application/pdf") {
     const result = await pdfParse(params.buffer);
-    return {
-      text: result.text || "",
-      pageCount: typeof result.numpages === "number" ? result.numpages : undefined,
-    };
+    const text = result.text || "";
+    const pageCount = typeof result.numpages === "number" ? result.numpages : undefined;
+
+    // Image-only ("scanned") PDF: no text layer. Fall back to server-side OCR so
+    // the estimate text still reaches the reviewed set and the line extractors.
+    if (shouldOcrPdf(text, pageCount)) {
+      const ocr = await ocrPdfBuffer(params.buffer);
+      if (ocr && ocr.text.replace(/\s+/g, " ").trim().length > text.replace(/\s+/g, " ").trim().length) {
+        return {
+          text: `[[OCR text recovered from a scanned/image-only PDF. Machine-read; verify figures against the source.]]\n\n${ocr.text}`,
+          pageCount,
+        };
+      }
+    }
+
+    return { text, pageCount };
   }
 
   if (
