@@ -5,7 +5,7 @@
 // This is the single choke point for all Claude text generation. It replaces
 // the previous OpenAI Responses API integration. Key design points:
 //   - Uses the official @anthropic-ai/sdk.
-//   - Defaults to claude-opus-4-8 (see modelConfig.ANTHROPIC_MODEL_FALLBACK).
+//   - Defaults to claude-fable-5 (see modelConfig.ANTHROPIC_MODEL_FALLBACK).
 //   - Streams every request and uses .finalMessage() so large reports never
 //     hit HTTP idle timeouts (max_tokens can be well above 16k).
 //   - Adaptive thinking is on by default with high effort for the dense,

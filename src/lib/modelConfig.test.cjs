@@ -85,7 +85,7 @@ run("Anthropic/Claude is the default primary provider after migration", () => {
   });
 
   assert.equal(collisionIqProvider.primary, "anthropic");
-  assert.equal(collisionIqModels.anthropicPrimary, "claude-opus-4-8");
+  assert.equal(collisionIqModels.anthropicPrimary, "claude-fable-5");
 });
 
 run("OpenAI remains available as an explicit opt-in provider (gpt-5.5)", () => {
