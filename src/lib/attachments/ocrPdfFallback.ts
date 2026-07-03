@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { ensurePdfJsNodePolyfills } from "@/lib/reports/citationDensityRowAnchors";
 
 // Server-side OCR fallback for image-only ("scanned") PDFs. When pdf-parse
@@ -14,6 +17,40 @@ const OCR_CONTRAST = 1.5; // boost separation of text from background before OCR
 function envInt(name: string, fallback: number): number {
   const parsed = Number.parseInt(process.env[name]?.trim() ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/**
+ * Point tesseract.js at the bundled language data + wasm core so a cold
+ * serverless instance never has to fetch ~10MB from a CDN on the first scanned
+ * upload. Everything is optional and existence-checked: if an asset isn't found
+ * (e.g. a stripped deploy), the field is omitted and tesseract.js falls back to
+ * its default CDN behavior — so this can only speed things up, never break them.
+ */
+function resolveTesseractWorkerOptions(): Record<string, unknown> {
+  const options: Record<string, unknown> = {
+    // Cache to a writable temp dir instead of the CWD (which polluted the repo).
+    cachePath: path.join(os.tmpdir(), "collision-iq-tesseract"),
+  };
+  try {
+    fs.mkdirSync(options.cachePath as string, { recursive: true });
+  } catch {
+    // ignore — tesseract will surface its own error if the dir is unusable
+  }
+
+  // Bundled English traineddata (gzipped) vendored under assets/tessdata.
+  const langDir = path.join(process.cwd(), "assets", "tessdata");
+  if (fs.existsSync(path.join(langDir, "eng.traineddata.gz"))) {
+    options.langPath = langDir;
+    options.gzip = true;
+  }
+
+  // WASM core shipped with the tesseract.js-core dependency.
+  const coreDir = path.join(process.cwd(), "node_modules", "tesseract.js-core");
+  if (fs.existsSync(coreDir)) {
+    options.corePath = coreDir;
+  }
+
+  return options;
 }
 
 /** OCR is disabled only when explicitly turned off. */
@@ -107,7 +144,7 @@ export async function ocrPdfBuffer(
     if (pageImages.length === 0) return null;
 
     const { createWorker } = await import("tesseract.js");
-    worker = await createWorker("eng");
+    worker = await createWorker("eng", undefined, resolveTesseractWorkerOptions() as never);
     // Tune for tabular estimates: treat the page as a single column of
     // variable-size text and keep column spacing so the layout is preserved.
     try {
