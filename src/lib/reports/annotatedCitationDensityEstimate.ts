@@ -2102,6 +2102,24 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
       priority: profile.priority,
     };
   }
+  if (delta.kind === "operation_change") {
+    const fields = (delta.changedFields ?? []).join(", ");
+    return {
+      findingType: "delta-operation-change",
+      title: `Changed on the higher estimate (${fields || "operation"}): ${label}`,
+      label: profile.label,
+      category: profile.category,
+      estimateGapType: "present_but_under_documented",
+      missingProof:
+        "This line is present on both estimates but changed — the operation code and/or part differs (e.g. a repair escalated to replace, or a part was added). This is estimate-difference evidence; verify the change against OEM procedure and repair records.",
+      nextAction:
+        "Confirm the operation/part change against OEM repair procedure, teardown findings, and repair documentation.",
+      missingAuthorityTypes: ["OEM procedure", "teardown/repair records", ...profile.missingAuthorityTypes],
+      score: profile.score,
+      safetyImpact: profile.safetyImpact,
+      priority: profile.priority,
+    };
+  }
   if (delta.kind === "reduced_paint") {
     return {
       findingType: "delta-reduced-paint",
@@ -2257,6 +2275,12 @@ function emitStructuredLineItemDeltaFindings(
 
   for (const delta of deltaMatch.orderedDeltas) {
     if (findings.length >= MAX_DELTA_FINDINGS) break;
+
+    // Ledger gate: only draw deltas the comparison confirmed as real changes.
+    // annotate === false marks an OCR-uncertain, present-but-poorly-parsed line
+    // (its part#/description is already in the OCR'd lower estimate), so it must
+    // not be highlighted as a change just because fuzzy matching failed.
+    if (delta.annotate === false) continue;
 
     // Every delta's higherRow is a source (annotated, higher-cost) row, so it carries the
     // anchor for the line where the lower-cost estimate's gap is visible. Fall back to a
@@ -3334,8 +3358,9 @@ function scoreLineItemDeltaForPriority(delta: EstimateLineItemDelta) {
   const profile = classifyLineItemDeltaProfile(delta);
   const kindBoost =
     delta.kind === "missing_operation" ? 18 :
-      delta.kind === "reduced_labor" ? 10 :
-        delta.kind === "reduced_paint" ? 6 : 4;
+      delta.kind === "operation_change" ? 14 :
+        delta.kind === "reduced_labor" ? 10 :
+          delta.kind === "reduced_paint" ? 6 : 4;
   const amount = delta.priceDelta ?? 0;
   const labor = delta.laborDelta ?? 0;
   const paint = delta.paintDelta ?? 0;

@@ -320,5 +320,70 @@ run("category is confirmed via the section header appearing in the lower text (k
   assert.equal(module.kind, "expanded_scope", "ELECTRICAL header present in lower text => expanded scope");
 });
 
+// ── Delta ledger discriminators (RO22059 patterns) ─────────────────────────
+// The lower estimate is OCR-derived. The ledger must highlight genuine adds and
+// operation changes but NOT unchanged rows that merely failed to match OCR.
+
+// A representative OCR'd lower estimate (present lines carry description + part).
+const OCR_LOWER =
+  "FRONT BUMPER & GRILLE O/H front bumper Repl Bumper cover paint to match 175010150C Add for park sensor " +
+  "FRONT LAMPS Repl LT Headlamp assy 156371300G R&I RT Repeater lamp R&I LT Repeater lamp " +
+  "INSTRUMENT PANEL Rpr Instrument panel Note: Clean & inspect for damage";
+
+run("ledger: a genuinely-added part (absent from OCR) is highlighted", () => {
+  const higher = parseCccEstimateRows("19 Repl Absorber 163520300C 1 78.00 0.2").map((r) => ({ ...r, section: "FRONT BUMPER & GRILLE" }));
+  const result = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows(OCR_LOWER),
+    higherRows: higher,
+    lowerIsOcr: true,
+    lowerCategoryText: OCR_LOWER,
+  });
+  const d = result.deltas.find((x) => /absorber/i.test(x.higherRow.description));
+  assert.ok(d, "absorber delta present");
+  assert.equal(d.annotate, true, "genuine add (part 163520300C absent from OCR) must be highlighted");
+});
+
+run("ledger: a routine line already in the OCR text is suppressed (annotate=false)", () => {
+  const higher = parseCccEstimateRows("33 R&I RT Repeater lamp 0.3").map((r) => ({ ...r, section: "FRONT LAMPS" }));
+  const result = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("XX header only"),
+    higherRows: higher,
+    lowerIsOcr: true,
+    lowerCategoryText: OCR_LOWER,
+  });
+  const d = result.deltas.find((x) => /repeater/i.test(x.higherRow.description));
+  assert.ok(d, "repeater delta recorded");
+  assert.equal(d.annotate, false, "present-in-OCR routine line must not be highlighted");
+  assert.equal(d.ocrUncertain, true);
+});
+
+run("ledger: OCR part-number garble (S<->5) does not create a false change", () => {
+  // Same bumper cover; OCR read the part number 1750101S0C as 175010150C.
+  const higher = parseCccEstimateRows("12 Repl Bumper cover paint to match 1750101S0C 1 1203.00 3.0");
+  const result = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("Repl Bumper cover paint to match 175010150C 1 1203.00 3.0"),
+    higherRows: higher,
+    lowerIsOcr: true,
+    lowerCategoryText: OCR_LOWER,
+  });
+  const d = result.deltas.find((x) => /bumper cover/i.test(x.higherRow.description) && x.annotate !== false);
+  assert.equal(d, undefined, "garbled part number must not surface as a highlighted change");
+});
+
+run("ledger: an operation change on a matched line is highlighted (R&I/Rpr -> Repl)", () => {
+  const higher = parseCccEstimateRows("89 Repl Instrument panel 156298700J 1 535.00 6.9").map((r) => ({ ...r, section: "INSTRUMENT PANEL" }));
+  const result = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("Rpr Instrument panel"),
+    higherRows: higher,
+    lowerIsOcr: true,
+    lowerCategoryText: OCR_LOWER,
+  });
+  const d = result.deltas.find((x) => /instrument panel/i.test(x.higherRow.description));
+  assert.ok(d, "instrument panel delta present");
+  assert.equal(d.annotate, true, "operation/labor escalation must be highlighted");
+  // A changed matched line surfaces as operation_change or a labor/paint/part delta.
+  assert.ok(["operation_change", "reduced_labor", "reduced_paint", "part_or_price_difference"].includes(d.kind));
+});
+
 console.log(`\nestimateDeltaMatcher: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -47,6 +47,7 @@ export interface EstimateDeltaRow {
 export type EstimateDeltaKind =
   | "missing_operation"
   | "expanded_scope"
+  | "operation_change"
   | "reduced_labor"
   | "reduced_paint"
   | "part_or_price_difference";
@@ -82,6 +83,15 @@ export interface EstimateLineItemDelta {
   ocrUncertain?: boolean;
   /** Status labels to surface (e.g. OCR_UNCERTAIN, VERIFY_AGAINST_SOURCE). */
   statusLabels?: string[];
+  /** Fields that differ on a matched line (operation, part, labor, paint, price, qty). */
+  changedFields?: string[];
+  /**
+   * Whether this delta should be drawn in the PRIMARY highlight layer. False for
+   * OCR-uncertain lines whose description is already present in the OCR'd lower
+   * estimate (present-but-poorly-parsed) — these are recorded for a verify tier
+   * but must not be highlighted as confirmed changes.
+   */
+  annotate: boolean;
 }
 
 export interface EstimateDeltaMatchResult {
@@ -92,6 +102,8 @@ export interface EstimateDeltaMatchResult {
   missingOperationCount: number;
   /** Higher-estimate lines whose category is already present in the lower estimate. */
   expandedScopeCount: number;
+  /** Unmatched lines suppressed as OCR-uncertain (present-but-poorly-parsed). */
+  ocrUncertainSuppressedCount: number;
 }
 
 /**
@@ -639,6 +651,7 @@ export function matchEstimateLineItems(params: {
   let matchedPairCount = 0;
   let missingOperationCount = 0;
   let expandedScopeCount = 0;
+  let ocrUncertainSuppressedCount = 0;
 
   // Categories the lower estimate already covers (keyword-based so OCR noise and
   // line splits don't hide a present category). Seed from parsed rows AND the raw
@@ -658,18 +671,69 @@ export function matchEstimateLineItems(params: {
   // against the lower text — so headers like ELECTRICAL, VEHICLE DIAGNOSTICS, or
   // MISCELLANEOUS OPERATIONS confirm even when no fixed keyword applies.
   const normalizedLowerText = normalizeCategoryText(lowerCategoryText ?? "");
+  // Canonicalize part numbers for OCR-tolerant comparison: OCR routinely confuses
+  // S<->5, O/Q<->0, I/L<->1, B<->8, Z<->2, G<->6, so a part present in the lower
+  // estimate can read slightly differently. Collapsing both sides to one canonical
+  // form stops those misreads from looking like added/changed parts.
+  const normalizedLowerParts = ocrCanonicalizePart(lowerCategoryText ?? "");
   const sectionPresentInLower = (section: string | null): boolean => {
     const s = normalizeCategoryText(section ?? "");
     return s.length >= 3 && normalizedLowerText.includes(s);
+  };
+  // OCR discriminator: is this higher line genuinely absent from the lower
+  // estimate, or merely present-but-poorly-parsed by OCR? A part number missing
+  // from the OCR text is a strong "genuinely added" signal; a distinctive
+  // description phrase already in the OCR text means the line is present (so an
+  // unmatched row is an OCR parse gap, not a real add).
+  const partPresentInLower = (partNumber: string | null): boolean => {
+    const p = ocrCanonicalizePart(partNumber ?? "");
+    return p.length >= 4 && normalizedLowerParts.includes(p);
+  };
+  const descriptionPresentInLower = (row: EstimateDeltaRow): boolean => {
+    // Match on the alphabetic core of the description (drop stray number/labor
+    // tokens that OCR or column bleed can append) so a present line is still
+    // recognized as present.
+    const phrase = normalizeCategoryText(row.description)
+      .split(" ")
+      .filter((w) => w.length >= 2 && !/\d/.test(w))
+      .join(" ");
+    return phrase.length >= 5 && normalizedLowerText.includes(phrase);
+  };
+  const isGenuinelyAddedVsOcr = (row: EstimateDeltaRow): boolean => {
+    const hasPart = (row.partNumber ?? "").replace(/[^A-Z0-9]/gi, "").length >= 4;
+    if (hasPart && !partPresentInLower(row.partNumber)) return true; // part# not in OCR => added
+    return !descriptionPresentInLower(row); // description phrase not in OCR => added
   };
 
   for (const higherRow of higherRows) {
     const match = findBestLowerMatch(higherRow, lowerRows, used);
 
     if (!match) {
-      // No line-level match. Distinguish a brand-new operation from an expansion
-      // within a category the lower estimate already has (e.g. more front-bumper
-      // lines added at teardown). Only the former is truly "missing".
+      // OCR-present-but-poorly-parsed: the line's part number / description is
+      // already in the OCR'd lower text, so a non-match is an OCR parse gap, not
+      // a real change. Record it as OCR-uncertain and DO NOT highlight it — this
+      // is what stops unchanged rows (repeaters, scans, latches) being flagged
+      // just because fuzzy matching failed against the OCR estimate.
+      if (lowerIsOcr && !isGenuinelyAddedVsOcr(higherRow)) {
+        ocrUncertainSuppressedCount += 1;
+        deltas.push({
+          kind: "missing_operation",
+          lowerRow: null,
+          higherRow,
+          matchBasis: "none",
+          laborDelta: higherRow.labor,
+          paintDelta: higherRow.paint,
+          priceDelta: higherRow.price,
+          summary: buildMissingSummary(higherRow, true),
+          ocrUncertain: true,
+          statusLabels: [...OCR_UNCERTAIN_STATUS_LABELS],
+          annotate: false,
+        });
+        continue;
+      }
+
+      // Genuinely absent from the lower estimate. Distinguish a brand-new
+      // operation from an expansion within a category the lower estimate has.
       const categoryPresent =
         extractCategoryKeywords(higherRow).some((kw) => lowerCategoryKeywords.has(kw)) ||
         sectionPresentInLower(higherRow.section);
@@ -684,6 +748,7 @@ export function matchEstimateLineItems(params: {
           paintDelta: higherRow.paint,
           priceDelta: higherRow.price,
           summary: buildExpandedScopeSummary(higherRow, lowerIsOcr),
+          annotate: true,
           ...(lowerIsOcr ? { statusLabels: ["LOWER_ESTIMATE_OCR_LIMITATION", "VERIFY_AGAINST_SOURCE"] } : {}),
         });
       } else {
@@ -697,8 +762,9 @@ export function matchEstimateLineItems(params: {
           paintDelta: higherRow.paint,
           priceDelta: higherRow.price,
           summary: buildMissingSummary(higherRow, lowerIsOcr),
-          // OCR confidence drives Delta confidence: an unmatched line against an
-          // OCR-derived lower estimate is unverified, not a confirmed omission.
+          annotate: true,
+          // OCR confidence: even a genuinely-added line (part# absent) stays a
+          // verify item against an OCR-derived lower estimate.
           ...(lowerIsOcr
             ? { ocrUncertain: true, statusLabels: [...OCR_UNCERTAIN_STATUS_LABELS] }
             : {}),
@@ -725,6 +791,8 @@ export function matchEstimateLineItems(params: {
         paintDelta,
         priceDelta,
         summary: buildReducedSummary(higherRow, lowerRow, "labor", laborDelta),
+        changedFields: ["labor"],
+        annotate: true,
       });
     } else if (paintDelta !== null && paintDelta >= MATERIAL_PAINT_DELTA) {
       deltas.push({
@@ -736,6 +804,8 @@ export function matchEstimateLineItems(params: {
         paintDelta,
         priceDelta,
         summary: buildReducedSummary(higherRow, lowerRow, "paint", paintDelta),
+        changedFields: ["paint"],
+        annotate: true,
       });
     } else if (
       priceDelta !== null &&
@@ -751,7 +821,29 @@ export function matchEstimateLineItems(params: {
         paintDelta,
         priceDelta,
         summary: buildPriceSummary(higherRow, lowerRow, priceDelta),
+        changedFields: ["part_number", "price"],
+        annotate: true,
       });
+    } else {
+      // Matched line with no material labor/paint/price delta — still a real
+      // change if the OPERATION or PART TYPE changed (e.g. Blnd->Rpr on a fender,
+      // R&I->Repl on an instrument panel). These are the escalations a value-only
+      // diff misses.
+      const changedFields = matchedFieldChanges(higherRow, lowerRow);
+      if (changedFields.length > 0) {
+        deltas.push({
+          kind: "operation_change",
+          lowerRow,
+          higherRow,
+          matchBasis: match.basis,
+          laborDelta,
+          paintDelta,
+          priceDelta,
+          summary: buildOperationChangeSummary(higherRow, lowerRow, changedFields),
+          changedFields,
+          annotate: true,
+        });
+      }
     }
   }
 
@@ -762,7 +854,42 @@ export function matchEstimateLineItems(params: {
     matchedPairCount,
     missingOperationCount,
     expandedScopeCount,
+    ocrUncertainSuppressedCount,
   };
+}
+
+/** Fields that differ between two matched rows (operation code / part number). */
+function matchedFieldChanges(higher: EstimateDeltaRow, lower: EstimateDeltaRow): string[] {
+  const changed: string[] = [];
+  if (
+    higher.opCode &&
+    lower.opCode &&
+    normalizeOpCode(higher.opCode) !== normalizeOpCode(lower.opCode)
+  ) {
+    changed.push("operation");
+  }
+  const higherPart = ocrCanonicalizePart(higher.partNumber ?? "");
+  const lowerPart = ocrCanonicalizePart(lower.partNumber ?? "");
+  if (higherPart && lowerPart && higherPart !== lowerPart) {
+    changed.push("part_number");
+  } else if (higherPart && !lowerPart) {
+    changed.push("part_added");
+  }
+  return changed;
+}
+
+/**
+ * Canonical part-number form for OCR-tolerant comparison. Strips non-alphanumerics
+ * and folds the character pairs OCR most often confuses (S/5, O·Q/0, I·L/1, B/8,
+ * Z/2, G/6) so a slightly misread part still matches its counterpart.
+ */
+function ocrCanonicalizePart(value: string): string {
+  return (value ?? "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .replace(/[SOQILBZG]/g, (c) =>
+      c === "S" ? "5" : c === "O" || c === "Q" ? "0" : c === "I" || c === "L" ? "1" : c === "B" ? "8" : c === "Z" ? "2" : "6"
+    );
 }
 
 function numericDelta(higher: number | null, lower: number | null): number | null {
@@ -790,6 +917,25 @@ function buildMissingSummary(higherRow: EstimateDeltaRow, lowerIsOcr = false): s
     ? "this line is not located on the lower estimate as read. The lower estimate was machine-read from an image-only PDF (OCR_UNCERTAIN / LOWER_ESTIMATE_OCR_LIMITATION), so OCR may have dropped or garbled it — treat this as unverified, NOT a confirmed omission, and VERIFY_AGAINST_SOURCE before relying on it."
     : "this operation is not present on the lower estimate.";
   return `Higher estimate documents "${label}"${costFragment(higherRow)} in the ${higherRow.section ?? "estimate"}; ${tail}`;
+}
+
+function buildOperationChangeSummary(
+  higherRow: EstimateDeltaRow,
+  lowerRow: EstimateDeltaRow,
+  changedFields: string[]
+): string {
+  const label = describeRow(higherRow);
+  const parts: string[] = [];
+  if (changedFields.includes("operation")) {
+    parts.push(`operation ${lowerRow.opCode ?? "?"} -> ${higherRow.opCode ?? "?"}`);
+  }
+  if (changedFields.includes("part_number")) {
+    parts.push(`part ${lowerRow.partNumber ?? "?"} -> ${higherRow.partNumber ?? "?"}`);
+  }
+  if (changedFields.includes("part_added")) {
+    parts.push(`part added (${higherRow.partNumber})`);
+  }
+  return `"${label}": same line is present on both estimates but changed — ${parts.join("; ")}. Verify the operation/part change against OEM procedure and repair records.`;
 }
 
 function buildExpandedScopeSummary(higherRow: EstimateDeltaRow, lowerIsOcr = false): string {
