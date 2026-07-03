@@ -19,6 +19,67 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+// ── OCR row reconstruction from word bounding boxes ──────────────────────────
+type OcrBbox = { x0: number; y0: number; x1: number; y1: number };
+type OcrWord = { text?: string; bbox?: OcrBbox };
+type OcrLine = { words?: OcrWord[] };
+type OcrParagraph = { lines?: OcrLine[] };
+type OcrBlock = { paragraphs?: OcrParagraph[] };
+
+function collectOcrWords(blocks: OcrBlock[] | null | undefined): Array<{ text: string; xc: number; yc: number; h: number }> {
+  const words: Array<{ text: string; xc: number; yc: number; h: number }> = [];
+  for (const block of blocks ?? []) {
+    for (const para of block.paragraphs ?? []) {
+      for (const line of para.lines ?? []) {
+        for (const word of line.words ?? []) {
+          const text = (word.text ?? "").trim();
+          const b = word.bbox;
+          if (!text || !b) continue;
+          words.push({ text, xc: (b.x0 + b.x1) / 2, yc: (b.y0 + b.y1) / 2, h: Math.max(1, b.y1 - b.y0) });
+        }
+      }
+    }
+  }
+  return words;
+}
+
+/**
+ * Rebuild horizontal rows from OCR word boxes: group words whose vertical
+ * centers are close (a table row), then order each row left-to-right. This
+ * restores row-major estimate lines even when tesseract read the columns
+ * top-to-bottom. Returns "" when there are too few positioned words to trust,
+ * so the caller falls back to tesseract's linear text.
+ */
+function reconstructRowsFromBlocks(blocks: OcrBlock[] | null | undefined): string {
+  const words = collectOcrWords(blocks);
+  if (words.length < 10) return "";
+
+  const heights = words.map((w) => w.h).sort((a, b) => a - b);
+  const medianHeight = heights[Math.floor(heights.length / 2)] || 12;
+  const rowTolerance = Math.max(6, medianHeight * 0.6);
+
+  const sorted = [...words].sort((a, b) => a.yc - b.yc || a.xc - b.xc);
+  const rows: Array<{ anchorY: number; words: Array<{ text: string; xc: number }> }> = [];
+  for (const word of sorted) {
+    const row = rows[rows.length - 1];
+    if (row && Math.abs(word.yc - row.anchorY) <= rowTolerance) {
+      row.words.push({ text: word.text, xc: word.xc });
+    } else {
+      rows.push({ anchorY: word.yc, words: [{ text: word.text, xc: word.xc }] });
+    }
+  }
+
+  return rows
+    .map((row) =>
+      row.words
+        .sort((a, b) => a.xc - b.xc)
+        .map((w) => w.text)
+        .join(" ")
+    )
+    .join("\n")
+    .trim();
+}
+
 /**
  * Point tesseract.js at the bundled language data + wasm core so a cold
  * serverless instance never has to fetch ~10MB from a CDN on the first scanned
@@ -158,8 +219,16 @@ export async function ocrPdfBuffer(
 
     const pageTexts: string[] = [];
     for (let i = 0; i < pageImages.length; i += 1) {
-      const { data } = await worker.recognize(pageImages[i]);
-      const pageText = (data.text || "").trim();
+      const { data } = await worker.recognize(pageImages[i], {}, { blocks: true } as never);
+      // Reconstruct rows from word positions. A CCC estimate is a multi-column
+      // table; tesseract's linear text output often reads it column-major (all
+      // line numbers, then all descriptions, then all prices), which destroys
+      // the row structure the delta matcher needs. Regrouping words by vertical
+      // position rebuilds true rows ("19 Repl Absorber 163520300C 1 78.00 0.2").
+      const rowText = reconstructRowsFromBlocks(
+        (data as unknown as { blocks?: OcrBlock[] | null }).blocks
+      );
+      const pageText = (rowText || data.text || "").trim();
       if (pageText) pageTexts.push(`===== Page ${i + 1} =====\n${pageText}`);
     }
 
