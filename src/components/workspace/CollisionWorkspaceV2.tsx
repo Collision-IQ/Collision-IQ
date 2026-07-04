@@ -44,6 +44,8 @@ type Props = {
   analysisReady?: boolean;
   evidenceLinks?: WorkspaceEvidenceLink[];
   calibrationItems?: WorkspaceCalibrationItem[];
+  /** Stored analysis report id — used for on-demand fresh OEM/jurisdiction retrieval. */
+  caseId?: string | null;
   headerAuth?: ReactNode;
   /** Reused ChatbotPage slots — unchanged logic. */
   center: ReactNode;
@@ -87,6 +89,7 @@ export default function CollisionWorkspaceV2({
   analysisReady = false,
   evidenceLinks = [],
   calibrationItems = [],
+  caseId,
   headerAuth,
   center,
   right,
@@ -205,7 +208,7 @@ export default function CollisionWorkspaceV2({
             {activeView === "reports" ? (
               <ReportsHistoryPanel />
             ) : activeView === "evidence" ? (
-              <WorkspaceEvidencePanel links={evidenceLinks} />
+              <WorkspaceEvidencePanel links={evidenceLinks} caseId={caseId} />
             ) : activeView === "calibration" ? (
               <WorkspaceCalibrationPanel items={calibrationItems} />
             ) : (

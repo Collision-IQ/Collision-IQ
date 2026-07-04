@@ -1,4 +1,11 @@
 import { fal } from "@fal-ai/client";
+export {
+  FAL_POLL_ATTEMPTS,
+  FAL_POLL_INTERVAL_MS,
+  isFalCompleted,
+  isFalFailed,
+  pollFalStatus,
+} from "./falPolling";
 
 const FAL_OPENROUTER_VISION_MODEL_FALLBACK = "google/gemini-2.5-flash";
 const FAL_OPENROUTER_VISION_QUEUE = "openrouter/router/vision";

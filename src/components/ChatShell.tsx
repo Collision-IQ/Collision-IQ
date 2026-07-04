@@ -101,6 +101,8 @@ type Props = {
     analysisReady?: boolean;
     evidenceLinks?: import("@/components/workspace/WorkspaceEvidenceCalibration").WorkspaceEvidenceLink[];
     calibrationItems?: import("@/components/workspace/WorkspaceEvidenceCalibration").WorkspaceCalibrationItem[];
+    /** Stored analysis report id for on-demand fresh OEM/jurisdiction retrieval. */
+    caseId?: string | null;
   };
 };
 
@@ -233,6 +235,7 @@ export default function ChatShell({
         analysisReady={workspace.analysisReady}
         evidenceLinks={workspace.evidenceLinks}
         calibrationItems={workspace.calibrationItems}
+        caseId={workspace.caseId}
         headerAuth={<HeaderAuth />}
         center={center}
         right={effectiveRight}

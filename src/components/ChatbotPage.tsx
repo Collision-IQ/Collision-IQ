@@ -1293,6 +1293,7 @@ export function ChatbotWorkspacePage({
           analysisReady: hasResolvedAnalysis,
           evidenceLinks: workspaceEvidenceLinks,
           calibrationItems: workspaceCalibrationItems,
+          caseId: analysisReportId,
         }}
         center={
           <div className={workspaceShellClass}>

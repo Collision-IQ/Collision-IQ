@@ -1,4 +1,11 @@
 import { fal } from "@fal-ai/client";
+export {
+  FAL_POLL_ATTEMPTS,
+  FAL_POLL_INTERVAL_MS,
+  isFalCompleted,
+  isFalFailed,
+  pollFalStatus,
+} from "./falPolling";
 
 const FAL_KREA_MODEL = "fal-ai/krea-2/turbo";
 
