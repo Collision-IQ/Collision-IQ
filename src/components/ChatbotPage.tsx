@@ -1262,15 +1262,7 @@ export function ChatbotWorkspacePage({
     : [];
 
   return (
-    <div
-      className={
-        shellVariant === "v2"
-          ? // Phones: flow to content height so the footer sits under the content
-            // (no empty band). md+ keeps the fixed app-frame with internal scroll.
-            "flex flex-col bg-background text-foreground md:h-[100svh] md:overflow-hidden"
-          : "flex h-[100svh] flex-col overflow-hidden bg-background text-foreground"
-      }
-    >
+    <div className="flex h-[100svh] flex-col overflow-hidden bg-background text-foreground">
       <ChatShell
         title="Collision-IQ"
         planLabel={trialBadgeLabel}
