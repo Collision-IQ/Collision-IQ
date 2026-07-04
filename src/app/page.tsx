@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { isWorkspaceV2Enabled } from "@/lib/workspaceV2";
+import { isWorkspaceV1Forced } from "@/lib/workspaceV2";
 
 const ChatbotPage = dynamic(() => import("@/components/ChatbotPage"), {
   ssr: false,
@@ -9,7 +9,7 @@ const ChatbotPage = dynamic(() => import("@/components/ChatbotPage"), {
 });
 
 export default function HomePage() {
-  // Production stays on the V1 shell; the V2 workspace is opt-in via
-  // NEXT_PUBLIC_WORKSPACE_V2=true (or the /collision-iq-v2 route).
-  return <ChatbotPage shellVariant={isWorkspaceV2Enabled() ? "v2" : "v1"} />;
+  // V2 "Analysis Workspace" is the default home. Instant rollback without a code
+  // change: set NEXT_PUBLIC_WORKSPACE_V2=false to force the V1 shell.
+  return <ChatbotPage shellVariant={isWorkspaceV1Forced() ? "v1" : "v2"} />;
 }
