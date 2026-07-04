@@ -206,7 +206,10 @@ export default function CollisionWorkspaceV2({
             </h1>
           </div>
 
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
+          {/* Phones: cap the command surface to a defined chat-card height so it
+              doesn't stretch into a tall, sparse box on large/foldable screens;
+              it keeps its own internal scroll. md+ fills as before. */}
+          <div className="grid grid-cols-1 gap-3 max-md:h-[64svh] md:min-h-0 md:flex-1 lg:grid-cols-[minmax(0,1fr)_360px]">
             {activeView === "reports" ? (
               <ReportsHistoryPanel />
             ) : activeView === "evidence" ? (
