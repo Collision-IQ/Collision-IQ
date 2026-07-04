@@ -24,6 +24,12 @@ import DamagePreviewPanel, {
   type DamagePreviewImage,
 } from "@/components/workspace/DamagePreviewPanel";
 import ReportsHistoryPanel from "@/components/workspace/ReportsHistoryPanel";
+import {
+  WorkspaceCalibrationPanel,
+  WorkspaceEvidencePanel,
+  type WorkspaceCalibrationItem,
+  type WorkspaceEvidenceLink,
+} from "@/components/workspace/WorkspaceEvidenceCalibration";
 
 type Props = {
   planLabel?: string | null;
@@ -36,6 +42,8 @@ type Props = {
   damageImages?: DamagePreviewImage[];
   /** True once an estimate review / comparison has been generated. */
   analysisReady?: boolean;
+  evidenceLinks?: WorkspaceEvidenceLink[];
+  calibrationItems?: WorkspaceCalibrationItem[];
   headerAuth?: ReactNode;
   /** Reused ChatbotPage slots — unchanged logic. */
   center: ReactNode;
@@ -65,39 +73,6 @@ const NAV_ITEMS: ReadonlyArray<{
   { id: "settings", label: "Settings", icon: SettingsIcon, href: "/account" },
 ];
 
-// First-pass gated view for Evidence / Calibration. Only reachable once an
-// analysis exists; the specific ADAS / OE-procedure / jurisdiction data is wired
-// in a follow-up. For now it frames what each tab will surface from the review.
-function GatedSectionPanel({
-  title,
-  subtitle,
-  lines,
-}: {
-  title: string;
-  subtitle: string;
-  lines: string[];
-}) {
-  return (
-    <div className="ci-panel flex min-h-0 min-w-0 flex-col overflow-y-auto p-5">
-      <h2 className="text-lg font-semibold text-foreground">{title}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
-      <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
-        {lines.map((line) => (
-          <li key={line} className="flex items-start gap-2">
-            <span className="mt-1.5 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent)]/70" />
-            {line}
-          </li>
-        ))}
-      </ul>
-      <p className="mt-4 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-        These items populate from the generated review. Full ADAS and OE / jurisdiction
-        source linking is being wired next — for now, exports and evidence remain
-        available in the Command Center rail.
-      </p>
-    </div>
-  );
-}
-
 /**
  * V2 "Analysis Workspace" shell. Purely presentational chrome (top bar, sidebar,
  * command-center rail, bottom insight panels) wrapped around the existing
@@ -110,6 +85,8 @@ export default function CollisionWorkspaceV2({
   confidence,
   damageImages = [],
   analysisReady = false,
+  evidenceLinks = [],
+  calibrationItems = [],
   headerAuth,
   center,
   right,
@@ -228,25 +205,9 @@ export default function CollisionWorkspaceV2({
             {activeView === "reports" ? (
               <ReportsHistoryPanel />
             ) : activeView === "evidence" ? (
-              <GatedSectionPanel
-                title="Evidence"
-                subtitle="OE procedures and jurisdictional-law links & documents supporting this review."
-                lines={[
-                  "OEM repair procedures and position statements cited in the review.",
-                  "Jurisdiction / DOI authority and policy-language references.",
-                  "Uploaded supporting documents tied to specific findings.",
-                ]}
-              />
+              <WorkspaceEvidencePanel links={evidenceLinks} />
             ) : activeView === "calibration" ? (
-              <GatedSectionPanel
-                title="Calibration"
-                subtitle="ADAS calibration requirements identified from this review."
-                lines={[
-                  "ADAS / calibration operations flagged as required or open in the review.",
-                  "Pre- and post-repair scan and calibration support.",
-                  "OEM aiming / initialization procedure references.",
-                ]}
-              />
+              <WorkspaceCalibrationPanel items={calibrationItems} />
             ) : (
               <div className="ci-panel flex min-h-0 min-w-0 flex-col overflow-hidden">{center}</div>
             )}

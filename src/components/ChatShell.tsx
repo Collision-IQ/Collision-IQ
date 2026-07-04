@@ -99,6 +99,8 @@ type Props = {
     confidence?: string | null;
     damageImages?: import("@/components/workspace/DamagePreviewPanel").DamagePreviewImage[];
     analysisReady?: boolean;
+    evidenceLinks?: import("@/components/workspace/WorkspaceEvidenceCalibration").WorkspaceEvidenceLink[];
+    calibrationItems?: import("@/components/workspace/WorkspaceEvidenceCalibration").WorkspaceCalibrationItem[];
   };
 };
 
@@ -229,6 +231,8 @@ export default function ChatShell({
         confidence={workspace.confidence}
         damageImages={workspace.damageImages}
         analysisReady={workspace.analysisReady}
+        evidenceLinks={workspace.evidenceLinks}
+        calibrationItems={workspace.calibrationItems}
         headerAuth={<HeaderAuth />}
         center={center}
         right={effectiveRight}

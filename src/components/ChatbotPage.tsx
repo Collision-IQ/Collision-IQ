@@ -1231,6 +1231,36 @@ export function ChatbotWorkspacePage({
 
   if (!consentResolved) return null;
 
+  // V2 Evidence / Calibration tab data, surfaced from the resolved review.
+  const CALIBRATION_RE =
+    /\b(adas|calibrat|scan|aim|initializ|blind\s?spot|radar|camera|lane|sensor|service mode|diagnostic|dtc)\b/i;
+  const workspaceCalibrationItems = hasResolvedAnalysis
+    ? [
+        ...renderModel.supplementItems
+          .filter((item) => CALIBRATION_RE.test(`${item.category} ${item.title} ${item.rationale}`))
+          .map((item) => ({ label: item.title, detail: item.rationale, status: item.kind })),
+        ...renderModel.findingReasoning
+          .filter((finding) => CALIBRATION_RE.test(`${finding.issue} ${finding.what_proves_it}`))
+          .map((finding) => ({ label: finding.issue, detail: finding.next_action, status: finding.evidenceLevel })),
+      ]
+        .filter((item, index, arr) => arr.findIndex((other) => other.label === item.label) === index)
+        .slice(0, 15)
+    : [];
+  const workspaceEvidenceLinks = hasResolvedAnalysis
+    ? ((analysisResult?.linkedEvidence ?? []) as Array<{
+        title?: string;
+        url?: string;
+        source?: string;
+        sourceType?: string;
+      }>)
+        .map((entry) => ({
+          title: entry.title || entry.source || "Supporting evidence",
+          url: entry.url ?? null,
+          sourceType: entry.sourceType ?? null,
+        }))
+        .slice(0, 25)
+    : [];
+
   return (
     <div className="flex h-[100svh] flex-col overflow-hidden bg-background text-foreground">
       <ChatShell
@@ -1261,6 +1291,8 @@ export function ChatbotWorkspacePage({
             .filter((file) => file.hasVision)
             .map((file) => ({ attachmentId: file.attachmentId, filename: file.filename })),
           analysisReady: hasResolvedAnalysis,
+          evidenceLinks: workspaceEvidenceLinks,
+          calibrationItems: workspaceCalibrationItems,
         }}
         center={
           <div className={workspaceShellClass}>
