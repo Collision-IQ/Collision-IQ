@@ -94,9 +94,10 @@ type Props = {
     reviewProgress: WorkspaceV2CommandData["reviewProgress"];
     analysisStatus: WorkspaceV2CommandData["analysisStatus"];
     latestFileName?: string | null;
-    damagePreviewImage?: string | null;
     caseEvents?: string[];
-    onUploadPhotos?: () => void;
+    riskScore?: import("@/components/workspace/WorkspaceInsightPanels").RiskScore;
+    confidence?: string | null;
+    damageImages?: import("@/components/workspace/DamagePreviewPanel").DamagePreviewImage[];
   };
 };
 
@@ -222,9 +223,10 @@ export default function ChatShell({
         reviewProgress={workspace.reviewProgress}
         analysisStatus={workspace.analysisStatus}
         latestFileName={workspace.latestFileName}
-        damagePreviewImage={workspace.damagePreviewImage}
         caseEvents={workspace.caseEvents ?? []}
-        onUploadPhotos={workspace.onUploadPhotos}
+        riskScore={workspace.riskScore}
+        confidence={workspace.confidence}
+        damageImages={workspace.damageImages}
         headerAuth={<HeaderAuth />}
         center={center}
         right={effectiveRight}

@@ -20,17 +20,21 @@ import CommandCenterPanel, {
 import {
   AnalysisInsightsPanel,
   CaseActivityPanel,
-  DamagePreviewPanel,
+  type RiskScore,
 } from "@/components/workspace/WorkspaceInsightPanels";
+import DamagePreviewPanel, {
+  type DamagePreviewImage,
+} from "@/components/workspace/DamagePreviewPanel";
 
 type Props = {
   planLabel?: string | null;
   reviewProgress: ReviewProgress;
   analysisStatus: WorkspaceAnalysisStatus;
   latestFileName?: string | null;
-  damagePreviewImage?: string | null;
   caseEvents: string[];
-  onUploadPhotos?: () => void;
+  riskScore?: RiskScore;
+  confidence?: string | null;
+  damageImages?: DamagePreviewImage[];
   headerAuth?: ReactNode;
   /** Reused ChatbotPage slots — unchanged logic. */
   center: ReactNode;
@@ -58,9 +62,10 @@ export default function CollisionWorkspaceV2({
   reviewProgress,
   analysisStatus,
   latestFileName,
-  damagePreviewImage,
   caseEvents,
-  onUploadPhotos,
+  riskScore = "unknown",
+  confidence,
+  damageImages = [],
   headerAuth,
   center,
   right,
@@ -152,8 +157,8 @@ export default function CollisionWorkspaceV2({
 
           <div className="grid shrink-0 grid-cols-1 gap-3 md:grid-cols-3">
             <CaseActivityPanel events={caseEvents} />
-            <AnalysisInsightsPanel status={analysisStatus} />
-            <DamagePreviewPanel imageSrc={damagePreviewImage} onUploadPhotos={onUploadPhotos} />
+            <AnalysisInsightsPanel riskScore={riskScore} confidence={confidence} />
+            <DamagePreviewPanel images={damageImages} />
           </div>
 
           {bottom ? <div className="shrink-0">{bottom}</div> : null}

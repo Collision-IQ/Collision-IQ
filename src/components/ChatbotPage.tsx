@@ -1241,7 +1241,25 @@ export function ChatbotWorkspacePage({
           reviewProgress,
           analysisStatus,
           latestFileName: attachmentsState[attachmentsState.length - 1]?.filename ?? null,
-          caseEvents: [],
+          caseEvents: [
+            reviewProgress.uploaded > 0
+              ? `${reviewProgress.uploaded} file${reviewProgress.uploaded === 1 ? "" : "s"} uploaded`
+              : null,
+            reviewProgress.indexed > 0 ? `${reviewProgress.indexed} indexed` : null,
+            reviewProgress.visionProcessed > 0
+              ? `${reviewProgress.visionProcessed} photo${reviewProgress.visionProcessed === 1 ? "" : "s"} vision-processed`
+              : null,
+            reviewProgress.reviewedForDetermination > 0
+              ? `${reviewProgress.reviewedForDetermination} of ${reviewProgress.reviewableFileCount || reviewProgress.reviewedForDetermination} reviewed`
+              : null,
+            analysisStatus === "processing" ? "Analysis in progress…" : null,
+            analysisStatus === "complete" ? "Analysis complete — reports ready in the rail" : null,
+          ].filter((event): event is string => Boolean(event)),
+          riskScore: analysisResult?.summary?.riskScore,
+          confidence: analysisResult?.summary?.confidence ?? null,
+          damageImages: attachmentsState
+            .filter((file) => file.hasVision)
+            .map((file) => ({ attachmentId: file.attachmentId, filename: file.filename })),
         }}
         center={
           <div className={workspaceShellClass}>
