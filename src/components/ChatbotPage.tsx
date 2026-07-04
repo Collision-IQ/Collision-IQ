@@ -1260,6 +1260,7 @@ export function ChatbotWorkspacePage({
           damageImages: attachmentsState
             .filter((file) => file.hasVision)
             .map((file) => ({ attachmentId: file.attachmentId, filename: file.filename })),
+          analysisReady: hasResolvedAnalysis,
         }}
         center={
           <div className={workspaceShellClass}>

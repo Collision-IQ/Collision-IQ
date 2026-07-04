@@ -98,6 +98,7 @@ type Props = {
     riskScore?: import("@/components/workspace/WorkspaceInsightPanels").RiskScore;
     confidence?: string | null;
     damageImages?: import("@/components/workspace/DamagePreviewPanel").DamagePreviewImage[];
+    analysisReady?: boolean;
   };
 };
 
@@ -227,6 +228,7 @@ export default function ChatShell({
         riskScore={workspace.riskScore}
         confidence={workspace.confidence}
         damageImages={workspace.damageImages}
+        analysisReady={workspace.analysisReady}
         headerAuth={<HeaderAuth />}
         center={center}
         right={effectiveRight}
