@@ -6,6 +6,8 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import {
   BookOpen,
+  Camera,
+  ChevronDown,
   FolderCheck,
   Gauge,
   LayoutDashboard,
@@ -220,16 +222,57 @@ export default function CollisionWorkspaceV2({
           </div>
 
           {activeView === "workspace" ? (
-            <div className="grid shrink-0 grid-cols-1 gap-3 md:grid-cols-3">
-              <CaseActivityPanel events={caseEvents} />
-              <AnalysisInsightsPanel riskScore={riskScore} confidence={confidence} />
-              <DamagePreviewPanel images={damageImages} />
-            </div>
+            <>
+              {/* Tablet / desktop: full insight rail. */}
+              <div className="hidden shrink-0 grid-cols-3 gap-3 md:grid">
+                <CaseActivityPanel events={caseEvents} />
+                <AnalysisInsightsPanel riskScore={riskScore} confidence={confidence} />
+                <DamagePreviewPanel images={damageImages} />
+              </div>
+              {/* Mobile: chat is the focus. Drop Case Activity + Analysis Insights;
+                  Damage Preview stays collapsed and only generates when opened. */}
+              <div className="shrink-0 md:hidden">
+                <MobileDamagePreview images={damageImages} />
+              </div>
+            </>
           ) : null}
 
           {bottom ? <div className="shrink-0">{bottom}</div> : null}
         </main>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Mobile-only collapsed Damage Preview. The panel auto-generates a heat map on
+ * mount, so we lazy-mount it only after the user opens the accordion — nothing
+ * runs (or calls the vision API) until it's prompted.
+ */
+function MobileDamagePreview({ images }: { images: DamagePreviewImage[] }) {
+  const [open, setOpen] = useState(false);
+  const count = images.length;
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="ci-panel flex w-full items-center justify-between gap-3 p-3 text-left"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <Camera size={15} className="shrink-0 text-[var(--accent)]" />
+          <span className="truncate text-sm font-medium text-foreground">Damage Preview</span>
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            {count === 0 ? "no photos yet" : open ? "tap to hide" : "tap to generate heat map"}
+          </span>
+        </span>
+        <ChevronDown
+          size={16}
+          className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {open ? <DamagePreviewPanel images={images} /> : null}
     </div>
   );
 }

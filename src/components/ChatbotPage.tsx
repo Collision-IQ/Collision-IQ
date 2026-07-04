@@ -1856,8 +1856,8 @@ function CollisionIqFooter() {
   ];
 
   return (
-    <footer className="mt-auto border-t border-border bg-card/80 px-4 py-3 text-card-foreground sm:py-8" data-collision-iq-footer="true">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 sm:gap-6 sm:px-2 lg:flex-row lg:items-center lg:justify-between">
+    <footer className="mt-auto border-t border-border bg-card/80 px-4 py-2 text-card-foreground sm:py-8" data-collision-iq-footer="true">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-1.5 sm:gap-6 sm:px-2 lg:flex-row lg:items-center lg:justify-between">
         {/* Logo is redundant with the header on small screens — hide it on mobile to keep the footer compact. */}
         <div className="hidden min-w-0 items-center gap-3 sm:flex">
           <span className="relative block h-7 w-[120px] shrink-0 sm:h-9 sm:w-[150px]">
@@ -1878,15 +1878,20 @@ function CollisionIqFooter() {
           </span>
         </div>
 
-        <nav className="flex flex-wrap gap-x-3 gap-y-1.5 text-xs text-muted-foreground sm:gap-x-4 sm:gap-y-2 sm:text-sm" aria-label="Footer">
+        {/* Mobile: compact single-row bottom-menu strip (horizontal scroll, hidden
+            scrollbar). sm+: wraps as before. */}
+        <nav
+          className="flex flex-nowrap items-center gap-x-4 overflow-x-auto whitespace-nowrap text-[11px] text-muted-foreground [-ms-overflow-style:none] [scrollbar-width:none] sm:flex-wrap sm:gap-x-4 sm:gap-y-2 sm:overflow-visible sm:text-sm [&::-webkit-scrollbar]:hidden"
+          aria-label="Footer"
+        >
           {links.map((link) => (
-            <Link key={link.href} href={link.href} className="transition hover:text-foreground">
+            <Link key={link.href} href={link.href} className="shrink-0 py-0.5 transition hover:text-foreground">
               {link.label}
             </Link>
           ))}
         </nav>
 
-        <div className="text-xs text-muted-foreground sm:text-sm">&copy; {year} Collision Academy</div>
+        <div className="text-[10px] text-muted-foreground sm:text-sm">&copy; {year} Collision Academy</div>
       </div>
     </footer>
   );
