@@ -25,6 +25,7 @@ import {
 import DamagePreviewPanel, {
   type DamagePreviewImage,
 } from "@/components/workspace/DamagePreviewPanel";
+import ReportsHistoryPanel from "@/components/workspace/ReportsHistoryPanel";
 
 type Props = {
   planLabel?: string | null;
@@ -42,15 +43,25 @@ type Props = {
   bottom?: ReactNode;
 };
 
-const NAV_ITEMS = [
-  { key: "command", label: "Command Center", icon: LayoutDashboard },
-  { key: "workspace", label: "Analysis Workspace", icon: Workflow, active: true },
-  { key: "evidence", label: "Evidence", icon: FolderCheck },
-  { key: "reports", label: "Reports", icon: BookOpen },
-  { key: "knowledge", label: "Knowledge Base", icon: BookOpen },
-  { key: "calibration", label: "Calibration", icon: Gauge },
-  { key: "settings", label: "Settings", icon: SettingsIcon },
-] as const;
+type WorkspaceView = "workspace" | "reports";
+
+// In-workspace items switch the main content (`view`); items with `href`
+// navigate to an existing route so every sidebar entry does something.
+const NAV_ITEMS: ReadonlyArray<{
+  id: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  view?: WorkspaceView;
+  href?: string;
+}> = [
+  { id: "command", label: "Command Center", icon: LayoutDashboard, view: "workspace" },
+  { id: "workspace", label: "Analysis Workspace", icon: Workflow, view: "workspace" },
+  { id: "evidence", label: "Evidence", icon: FolderCheck, view: "workspace" },
+  { id: "reports", label: "Reports", icon: BookOpen, view: "reports" },
+  { id: "knowledge", label: "Knowledge Base", icon: BookOpen, href: "/technical-systems" },
+  { id: "calibration", label: "Calibration", icon: Gauge, href: "/technical-systems" },
+  { id: "settings", label: "Settings", icon: SettingsIcon, href: "/account" },
+];
 
 /**
  * V2 "Analysis Workspace" shell. Purely presentational chrome (top bar, sidebar,
@@ -72,6 +83,8 @@ export default function CollisionWorkspaceV2({
   bottom,
 }: Props) {
   const [activeNav, setActiveNav] = useState<string>("workspace");
+  const activeView: WorkspaceView =
+    NAV_ITEMS.find((item) => item.id === activeNav)?.view ?? "workspace";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
@@ -115,21 +128,31 @@ export default function CollisionWorkspaceV2({
         <nav className="hidden w-52 shrink-0 flex-col gap-1 border-r border-border bg-card/60 p-2 lg:flex">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
-            const active = activeNav === item.key;
-            return (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => setActiveNav(item.key)}
-                className={`inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition ${
-                  active
-                    ? "bg-[var(--accent)]/12 text-foreground ring-1 ring-[var(--accent)]/30"
-                    : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                }`}
-                aria-current={active ? "page" : undefined}
-              >
+            const active = activeNav === item.id;
+            const classes = `inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition ${
+              active
+                ? "bg-[var(--accent)]/12 text-foreground ring-1 ring-[var(--accent)]/30"
+                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+            }`;
+            const inner = (
+              <>
                 <Icon size={16} className={active ? "text-[var(--accent)]" : ""} />
                 {item.label}
+              </>
+            );
+            return item.href ? (
+              <Link key={item.id} href={item.href} className={classes}>
+                {inner}
+              </Link>
+            ) : (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveNav(item.id)}
+                className={classes}
+                aria-current={active ? "page" : undefined}
+              >
+                {inner}
               </button>
             );
           })}
@@ -139,11 +162,17 @@ export default function CollisionWorkspaceV2({
         <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2 sm:p-3">
           <div className="flex items-center gap-2 px-1">
             <Workflow size={16} className="text-[var(--accent)]" />
-            <h1 className="text-[15px] font-semibold text-foreground">Analysis Workspace</h1>
+            <h1 className="text-[15px] font-semibold text-foreground">
+              {activeView === "reports" ? "Reports" : "Analysis Workspace"}
+            </h1>
           </div>
 
           <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
-            <div className="ci-panel flex min-h-0 min-w-0 flex-col overflow-hidden">{center}</div>
+            {activeView === "reports" ? (
+              <ReportsHistoryPanel />
+            ) : (
+              <div className="ci-panel flex min-h-0 min-w-0 flex-col overflow-hidden">{center}</div>
+            )}
             <aside className="hidden min-h-0 flex-col lg:flex">
               <CommandCenterPanel
                 reviewProgress={reviewProgress}
@@ -155,11 +184,13 @@ export default function CollisionWorkspaceV2({
             </aside>
           </div>
 
-          <div className="grid shrink-0 grid-cols-1 gap-3 md:grid-cols-3">
-            <CaseActivityPanel events={caseEvents} />
-            <AnalysisInsightsPanel riskScore={riskScore} confidence={confidence} />
-            <DamagePreviewPanel images={damageImages} />
-          </div>
+          {activeView === "workspace" ? (
+            <div className="grid shrink-0 grid-cols-1 gap-3 md:grid-cols-3">
+              <CaseActivityPanel events={caseEvents} />
+              <AnalysisInsightsPanel riskScore={riskScore} confidence={confidence} />
+              <DamagePreviewPanel images={damageImages} />
+            </div>
+          ) : null}
 
           {bottom ? <div className="shrink-0">{bottom}</div> : null}
         </main>

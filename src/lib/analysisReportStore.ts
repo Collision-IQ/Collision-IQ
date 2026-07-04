@@ -227,3 +227,52 @@ export async function getLatestActiveAnalysisReport(
 
   return activeRecord ? toStoredAnalysisReport(activeRecord) : null;
 }
+
+export type AnalysisReportSummary = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  title: string;
+  vehicleLabel: string | null;
+  insurer: string | null;
+  riskScore: "low" | "moderate" | "high" | null;
+  active: boolean;
+  fileCount: number;
+};
+
+/**
+ * List the owner's analysis reports as lightweight summaries for a history view.
+ * Strictly scoped through resolveOwner(scope), so a caller that passes a signed-in
+ * user's id only ever sees that user's own reports — never another user's.
+ */
+export async function listAnalysisReportSummaries(
+  scope: ReportOwnerScope,
+  options?: { limit?: number }
+): Promise<AnalysisReportSummary[]> {
+  const owner = resolveOwner(scope);
+  const records = await prisma.analysisReport.findMany({
+    where: { ownerType: owner.ownerType, ownerId: owner.ownerId },
+    orderBy: { updatedAt: "desc" },
+    take: Math.max(1, Math.min(options?.limit ?? 30, 100)),
+    include: { _count: { select: { artifacts: true } } },
+  });
+
+  return records.map((record) => {
+    const report = record.report as RepairIntelligenceReport | null | undefined;
+    const vehicle = report?.vehicle;
+    const vehicleLabel =
+      [vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(" ").trim() || null;
+    const riskScore = report?.summary?.riskScore ?? null;
+    return {
+      id: record.id,
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+      title: vehicleLabel || "Repair analysis",
+      vehicleLabel,
+      insurer: (report as { insurer?: string } | null | undefined)?.insurer ?? null,
+      riskScore: riskScore === "low" || riskScore === "moderate" || riskScore === "high" ? riskScore : null,
+      active: report?.ingestionMeta?.active !== false,
+      fileCount: record._count.artifacts,
+    };
+  });
+}
