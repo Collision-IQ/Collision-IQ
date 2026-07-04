@@ -1856,10 +1856,11 @@ function CollisionIqFooter() {
   ];
 
   return (
-    <footer className="mt-auto border-t border-border bg-card/80 px-4 py-2 text-card-foreground sm:py-8" data-collision-iq-footer="true">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-1.5 sm:gap-6 sm:px-2 lg:flex-row lg:items-center lg:justify-between">
-        {/* Logo is redundant with the header on small screens — hide it on mobile to keep the footer compact. */}
-        <div className="hidden min-w-0 items-center gap-3 sm:flex">
+    <footer className="mt-auto border-t border-border bg-card/80 px-4 py-2 text-card-foreground md:py-8" data-collision-iq-footer="true">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-1.5 md:gap-6 md:px-2 lg:flex-row lg:items-center lg:justify-between">
+        {/* Logo is redundant with the header on small screens — hide it on phones AND
+            foldables (both < md) to keep the footer a compact strip. */}
+        <div className="hidden min-w-0 items-center gap-3 md:flex">
           <span className="relative block h-7 w-[120px] shrink-0 sm:h-9 sm:w-[150px]">
             <Image
               src="/iq/iq_logo.png"
@@ -1878,10 +1879,10 @@ function CollisionIqFooter() {
           </span>
         </div>
 
-        {/* Mobile: compact single-row bottom-menu strip (horizontal scroll, hidden
-            scrollbar). sm+: wraps as before. */}
+        {/* Phones + foldables (< md): compact single-row bottom-menu strip
+            (horizontal scroll, hidden scrollbar). md+: wraps as before. */}
         <nav
-          className="flex flex-nowrap items-center gap-x-4 overflow-x-auto whitespace-nowrap text-[11px] text-muted-foreground [-ms-overflow-style:none] [scrollbar-width:none] sm:flex-wrap sm:gap-x-4 sm:gap-y-2 sm:overflow-visible sm:text-sm [&::-webkit-scrollbar]:hidden"
+          className="flex flex-nowrap items-center gap-x-4 overflow-x-auto whitespace-nowrap text-[11px] text-muted-foreground [-ms-overflow-style:none] [scrollbar-width:none] md:flex-wrap md:gap-x-4 md:gap-y-2 md:overflow-visible md:text-sm [&::-webkit-scrollbar]:hidden"
           aria-label="Footer"
         >
           {links.map((link) => (
@@ -1891,7 +1892,7 @@ function CollisionIqFooter() {
           ))}
         </nav>
 
-        <div className="text-[10px] text-muted-foreground sm:text-sm">&copy; {year} Collision Academy</div>
+        <div className="text-[10px] text-muted-foreground md:text-sm">&copy; {year} Collision Academy</div>
       </div>
     </footer>
   );
