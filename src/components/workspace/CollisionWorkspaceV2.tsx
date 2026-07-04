@@ -14,9 +14,7 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { ReviewProgress } from "@/components/ChatWidget";
-import CommandCenterPanel, {
-  type WorkspaceAnalysisStatus,
-} from "@/components/workspace/CommandCenterPanel";
+import type { WorkspaceAnalysisStatus } from "@/components/workspace/CommandCenterPanel";
 import {
   AnalysisInsightsPanel,
   CaseActivityPanel,
@@ -70,9 +68,6 @@ const NAV_ITEMS: ReadonlyArray<{
  */
 export default function CollisionWorkspaceV2({
   planLabel,
-  reviewProgress,
-  analysisStatus,
-  latestFileName,
   caseEvents,
   riskScore = "unknown",
   confidence,
@@ -173,14 +168,8 @@ export default function CollisionWorkspaceV2({
             ) : (
               <div className="ci-panel flex min-h-0 min-w-0 flex-col overflow-hidden">{center}</div>
             )}
-            <aside className="hidden min-h-0 flex-col lg:flex">
-              <CommandCenterPanel
-                reviewProgress={reviewProgress}
-                analysisStatus={analysisStatus}
-                latestFileName={latestFileName}
-              >
-                {right}
-              </CommandCenterPanel>
+            <aside className="ci-panel hidden min-h-0 flex-col overflow-y-auto p-3 lg:flex">
+              {right}
             </aside>
           </div>
 
