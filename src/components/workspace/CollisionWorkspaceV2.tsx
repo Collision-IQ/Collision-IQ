@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import {
   BookOpen,
   Camera,
+  Car,
   ChevronDown,
   FolderCheck,
   Gauge,
@@ -26,6 +27,7 @@ import DamagePreviewPanel, {
   type DamagePreviewImage,
 } from "@/components/workspace/DamagePreviewPanel";
 import ReportsHistoryPanel from "@/components/workspace/ReportsHistoryPanel";
+import MyVehiclePanel from "@/components/workspace/MyVehiclePanel";
 import {
   WorkspaceCalibrationPanel,
   WorkspaceEvidencePanel,
@@ -55,7 +57,7 @@ type Props = {
   bottom?: ReactNode;
 };
 
-type WorkspaceView = "workspace" | "reports" | "evidence" | "calibration";
+type WorkspaceView = "workspace" | "reports" | "evidence" | "calibration" | "vehicle";
 
 // In-workspace items switch the main content (`view`); items with `href`
 // navigate to an existing route. `requiresAnalysis` items stay disabled until an
@@ -71,6 +73,7 @@ const NAV_ITEMS: ReadonlyArray<{
   { id: "command", label: "Command Center", icon: LayoutDashboard, view: "workspace" },
   { id: "workspace", label: "Analysis Workspace", icon: Workflow, view: "workspace" },
   { id: "evidence", label: "Evidence", icon: FolderCheck, view: "evidence", requiresAnalysis: true },
+  { id: "vehicle", label: "My Vehicle", icon: Car, view: "vehicle" },
   { id: "reports", label: "Reports", icon: BookOpen, view: "reports" },
   { id: "knowledge", label: "Knowledge Base", icon: BookOpen, href: "/how-it-works" },
   { id: "calibration", label: "Calibration", icon: Gauge, view: "calibration", requiresAnalysis: true },
@@ -198,11 +201,13 @@ export default function CollisionWorkspaceV2({
             <h1 className="text-[15px] font-semibold text-foreground">
               {activeView === "reports"
                 ? "Reports"
-                : activeView === "evidence"
-                  ? "Evidence"
-                  : activeView === "calibration"
-                    ? "Calibration"
-                    : "Analysis Workspace"}
+                : activeView === "vehicle"
+                  ? "My Vehicle"
+                  : activeView === "evidence"
+                    ? "Evidence"
+                    : activeView === "calibration"
+                      ? "Calibration"
+                      : "Analysis Workspace"}
             </h1>
           </div>
 
@@ -211,6 +216,8 @@ export default function CollisionWorkspaceV2({
           <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
             {activeView === "reports" ? (
               <ReportsHistoryPanel />
+            ) : activeView === "vehicle" ? (
+              <MyVehiclePanel />
             ) : activeView === "evidence" ? (
               <WorkspaceEvidencePanel links={evidenceLinks} caseId={caseId} />
             ) : activeView === "calibration" ? (
