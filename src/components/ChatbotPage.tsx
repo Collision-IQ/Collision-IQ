@@ -11,6 +11,7 @@ import { useAuth } from "@clerk/nextjs";
 import { ArrowRight, Download, FileText, Mail, Maximize2, Minimize2, RefreshCcw, X } from "lucide-react";
 import ChatShell from "@/components/ChatShell";
 import ChatWidget from "@/components/ChatWidget";
+import type { WorkspaceShellVariant } from "@/lib/workspaceV2";
 import type { ReviewProgress } from "@/components/ChatWidget";
 import CaseContextSummary from "@/components/CaseContextSummary";
 import {
@@ -430,7 +431,11 @@ function isWithinTrialBadgeWindow(access: AccountEntitlements | null) {
   return ageMs >= 0 && ageMs < TRIAL_BADGE_WINDOW_MS;
 }
 
-export function ChatbotWorkspacePage() {
+export function ChatbotWorkspacePage({
+  shellVariant = "v1",
+}: {
+  shellVariant?: WorkspaceShellVariant;
+} = {}) {
   const router = useRouter();
   const { getToken } = useAuth();
   const centerScrollRequestRef = useRef<((key: InsightKey) => void) | null>(null);
@@ -1231,6 +1236,13 @@ export function ChatbotWorkspacePage() {
       <ChatShell
         title="Collision-IQ"
         planLabel={trialBadgeLabel}
+        variant={shellVariant}
+        workspace={{
+          reviewProgress,
+          analysisStatus,
+          latestFileName: attachmentsState[attachmentsState.length - 1]?.filename ?? null,
+          caseEvents: [],
+        }}
         center={
           <div className={workspaceShellClass}>
             <div className={`${workspaceGridClass} ${workspaceRowsClass}`}>
@@ -1770,8 +1782,12 @@ export function ChatbotWorkspacePage() {
   );
 }
 
-export default function ChatbotPage() {
-  return <ChatbotWorkspacePage />;
+export default function ChatbotPage({
+  shellVariant,
+}: {
+  shellVariant?: WorkspaceShellVariant;
+} = {}) {
+  return <ChatbotWorkspacePage shellVariant={shellVariant} />;
 }
 
 function CollisionIqFooter() {

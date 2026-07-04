@@ -8,6 +8,8 @@ import { SignInButton, UserButton, useUser } from "@clerk/nextjs";
 import { ShoppingCart } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getPlatform, isNative } from "@/lib/native";
+import CollisionWorkspaceV2 from "@/components/workspace/CollisionWorkspaceV2";
+import type { WorkspaceShellVariant } from "@/lib/workspaceV2";
 
 const SIGN_IN_BUTTON_CLASS =
   "rounded-md border border-border bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition hover:bg-background";
@@ -85,6 +87,22 @@ type Props = {
   right?: ReactNode;
   bottom?: ReactNode;
   planLabel?: string | null;
+  /** Presentational shell variant. "v2" delegates to the Analysis Workspace shell. */
+  variant?: WorkspaceShellVariant;
+  /** Command-center inputs for the V2 shell (existing state; no new logic). */
+  workspace?: {
+    reviewProgress: WorkspaceV2CommandData["reviewProgress"];
+    analysisStatus: WorkspaceV2CommandData["analysisStatus"];
+    latestFileName?: string | null;
+    damagePreviewImage?: string | null;
+    caseEvents?: string[];
+    onUploadPhotos?: () => void;
+  };
+};
+
+type WorkspaceV2CommandData = {
+  reviewProgress: import("@/components/ChatWidget").ReviewProgress;
+  analysisStatus: import("@/components/workspace/CommandCenterPanel").WorkspaceAnalysisStatus;
 };
 
 function Drawer({
@@ -151,6 +169,8 @@ export default function ChatShell({
   right,
   bottom,
   planLabel = null,
+  variant = "v1",
+  workspace,
 }: Props) {
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
@@ -190,6 +210,28 @@ export default function ChatShell({
   const reviewRowHeightClass = "lg:h-full lg:min-h-[520px]";
   const chatPanelHeightClass = "h-full min-h-0";
   const rightRailHeightClass = "h-full min-h-0";
+
+  // V2 "Analysis Workspace" shell — presentational chrome around the same
+  // center/right/bottom slots, reusing this component's HeaderAuth so auth is
+  // unchanged. Placed after all hooks to satisfy the rules of hooks; falls back
+  // to V1 when the command-center inputs are absent.
+  if (variant === "v2" && workspace) {
+    return (
+      <CollisionWorkspaceV2
+        planLabel={planLabel}
+        reviewProgress={workspace.reviewProgress}
+        analysisStatus={workspace.analysisStatus}
+        latestFileName={workspace.latestFileName}
+        damagePreviewImage={workspace.damagePreviewImage}
+        caseEvents={workspace.caseEvents ?? []}
+        onUploadPhotos={workspace.onUploadPhotos}
+        headerAuth={<HeaderAuth />}
+        center={center}
+        right={effectiveRight}
+        bottom={bottom}
+      />
+    );
+  }
 
   return (
     <div className="ci-workstation flex min-h-0 flex-1 ci-workstation flex-1 min-h-0 flex flex-col max-w-full overflow-x-hidden bg-background text-foreground">
