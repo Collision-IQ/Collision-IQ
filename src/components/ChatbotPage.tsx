@@ -8,7 +8,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
-import { ArrowRight, Download, FileText, Mail, Maximize2, Minimize2, RefreshCcw, X } from "lucide-react";
+import { ArrowRight, ChevronDown, Download, FileText, Mail, Maximize2, Minimize2, RefreshCcw, X } from "lucide-react";
 import ChatShell from "@/components/ChatShell";
 import ChatWidget from "@/components/ChatWidget";
 import type { WorkspaceShellVariant } from "@/lib/workspaceV2";
@@ -1844,6 +1844,7 @@ export default function ChatbotPage({
 
 function CollisionIqFooter() {
   const year = new Date().getFullYear();
+  const [footerOpen, setFooterOpen] = useState(false);
   const links = [
     { href: "/", label: "Home" },
     { href: "/dashboard", label: "Dashboard" },
@@ -1856,43 +1857,54 @@ function CollisionIqFooter() {
   ];
 
   return (
-    <footer className="mt-auto border-t border-border bg-card/80 px-4 py-2 text-card-foreground md:py-8" data-collision-iq-footer="true">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-1.5 md:gap-6 md:px-2 lg:flex-row lg:items-center lg:justify-between">
-        {/* Logo is redundant with the header on small screens — hide it on phones AND
-            foldables (both < md) to keep the footer a compact strip. */}
-        <div className="hidden min-w-0 items-center gap-3 md:flex">
-          <span className="relative block h-7 w-[120px] shrink-0 sm:h-9 sm:w-[150px]">
-            <Image
-              src="/iq/iq_logo.png"
-              alt="Collision IQ"
-              fill
-              sizes="150px"
-              className="object-contain object-left dark:hidden"
-            />
-            <Image
-              src="/iq/iq_logo-white.png"
-              alt="Collision IQ"
-              fill
-              sizes="150px"
-              className="hidden object-contain object-left dark:block"
-            />
-          </span>
-        </div>
-
-        {/* Phones + foldables (< md): compact single-row bottom-menu strip
-            (horizontal scroll, hidden scrollbar). md+: wraps as before. */}
-        <nav
-          className="flex flex-nowrap items-center gap-x-4 overflow-x-auto whitespace-nowrap text-[11px] text-muted-foreground [-ms-overflow-style:none] [scrollbar-width:none] md:flex-wrap md:gap-x-4 md:gap-y-2 md:overflow-visible md:text-sm [&::-webkit-scrollbar]:hidden"
-          aria-label="Footer"
+    <footer
+      className="mt-auto shrink-0 border-t border-border bg-card/80 text-card-foreground"
+      data-collision-iq-footer="true"
+    >
+      {/* Phones + foldables (< md): collapsible. Collapsed to a thin bar so the chat
+          stays maximized regardless of the exact screen width; tap to reveal links. */}
+      <div className="md:hidden">
+        <button
+          type="button"
+          onClick={() => setFooterOpen((v) => !v)}
+          aria-expanded={footerOpen}
+          className="flex w-full items-center justify-between gap-3 px-4 py-1.5 text-[11px] text-muted-foreground"
         >
-          {links.map((link) => (
-            <Link key={link.href} href={link.href} className="shrink-0 py-0.5 transition hover:text-foreground">
-              {link.label}
-            </Link>
-          ))}
-        </nav>
+          <span>&copy; {year} Collision Academy</span>
+          <span className="flex items-center gap-1 font-medium">
+            {footerOpen ? "Hide" : "Menu"}
+            <ChevronDown size={13} className={`transition-transform ${footerOpen ? "rotate-180" : ""}`} />
+          </span>
+        </button>
+        {footerOpen ? (
+          <nav className="flex flex-wrap gap-x-4 gap-y-1.5 px-4 pb-3 text-xs text-muted-foreground" aria-label="Footer">
+            {links.map((link) => (
+              <Link key={link.href} href={link.href} className="py-0.5 transition hover:text-foreground">
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+        ) : null}
+      </div>
 
-        <div className="text-[10px] text-muted-foreground md:text-sm">&copy; {year} Collision Academy</div>
+      {/* Tablet / desktop (md+): full footer. */}
+      <div className="hidden px-4 py-8 md:block">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-2 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="relative block h-9 w-[150px] shrink-0">
+              <Image src="/iq/iq_logo.png" alt="Collision IQ" fill sizes="150px" className="object-contain object-left dark:hidden" />
+              <Image src="/iq/iq_logo-white.png" alt="Collision IQ" fill sizes="150px" className="hidden object-contain object-left dark:block" />
+            </span>
+          </div>
+          <nav className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground" aria-label="Footer">
+            {links.map((link) => (
+              <Link key={link.href} href={link.href} className="transition hover:text-foreground">
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+          <div className="text-sm text-muted-foreground">&copy; {year} Collision Academy</div>
+        </div>
       </div>
     </footer>
   );
