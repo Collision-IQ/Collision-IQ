@@ -4174,7 +4174,10 @@ export default function ChatWidget({
       {endChatConfirmOpen
         ? createPortal(
             <div
-              className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+              // Inline position/zIndex override globals.css `body > *`
+              // (position: relative; z-index: 1), which clamps portaled overlays.
+              style={{ position: "fixed", zIndex: 10050 }}
+              className="inset-0 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
               role="dialog"
               aria-modal="true"
               onClick={() => setEndChatConfirmOpen(false)}

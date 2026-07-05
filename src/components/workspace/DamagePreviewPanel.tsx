@@ -163,20 +163,7 @@ export default function DamagePreviewPanel({ images }: Props) {
                 <div className="mt-1.5 flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      setFullscreen(true);
-                      // Temporary diagnostic: confirms the handler fires and whether
-                      // the lightbox actually mounts / where it lands in the stack.
-                      console.log("[damage-preview] Full preview clicked; previewSrc?", Boolean(previewSrc));
-                      setTimeout(() => {
-                        const dlg = document.querySelector("[data-damage-lightbox]");
-                        console.log(
-                          "[damage-preview] lightbox mounted?",
-                          Boolean(dlg),
-                          dlg ? "z=" + getComputedStyle(dlg).zIndex : ""
-                        );
-                      }, 150);
-                    }}
+                    onClick={() => setFullscreen(true)}
                     className="inline-flex cursor-pointer items-center rounded-md border border-border bg-muted px-2 py-1 text-[11px] hover:bg-background"
                   >
                     Full preview
@@ -200,8 +187,11 @@ export default function DamagePreviewPanel({ images }: Props) {
       {fullscreen
         ? createPortal(
             <div
-              data-damage-lightbox
-              className="fixed inset-0 z-[10050] flex flex-col items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
+              // Inline position/zIndex override the unlayered `body > *` rule in
+              // globals.css (position: relative; z-index: 1), which otherwise
+              // clamps this portaled overlay out of view.
+              style={{ position: "fixed", zIndex: 10050 }}
+              className="inset-0 flex flex-col items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
               role="dialog"
               aria-modal="true"
               onClick={() => setFullscreen(false)}
