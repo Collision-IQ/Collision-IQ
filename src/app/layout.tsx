@@ -108,7 +108,11 @@ export default function RootLayout({
       signInFallbackRedirectUrl="/"
       signUpFallbackRedirectUrl="/"
     >
-      <html lang="en" className="h-full" suppressHydrationWarning>
+      {/* Render the default (dark) theme class server-side so the first paint is
+          already dark — prevents the light→dark flash on load. next-themes still
+          reconciles from storage on the client (suppressHydrationWarning covers
+          the swap for users who chose light). */}
+      <html lang="en" className="dark h-full" suppressHydrationWarning>
         <head>
           {/* Safe-area support for mobile */}
           <meta
