@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Dispatch, SetStateAction } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
@@ -997,6 +998,7 @@ export default function ChatWidget({
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [previewAttachmentId, setPreviewAttachmentId] = useState<string | null>(null);
   const [replaceAttachmentId, setReplaceAttachmentId] = useState<string | null>(null);
+  const [endChatConfirmOpen, setEndChatConfirmOpen] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isSpeechPaused, setIsSpeechPaused] = useState(false);
@@ -2300,14 +2302,15 @@ export default function ChatWidget({
     updateReviewProgress,
   ]);
 
+  // Open a non-blocking in-app confirm instead of window.confirm(), which
+  // synchronously blocks the main thread for as long as the native dialog is
+  // open (a large INP / "blocked UI updates" hit).
   const handleEndChatRequest = useCallback(() => {
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm("End this chat? This will clear the current conversation.")
-    ) {
-      return;
-    }
+    setEndChatConfirmOpen(true);
+  }, []);
 
+  const confirmEndChat = useCallback(() => {
+    setEndChatConfirmOpen(false);
     handleEndChat();
   }, [handleEndChat]);
 
@@ -4167,6 +4170,44 @@ export default function ChatWidget({
           onReplace={(attachmentId) => handleReplaceAttachment(attachmentId)}
         />
       ) : null}
+
+      {endChatConfirmOpen
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+              role="dialog"
+              aria-modal="true"
+              onClick={() => setEndChatConfirmOpen(false)}
+            >
+              <div
+                className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 className="text-base font-semibold text-foreground">End this chat?</h3>
+                <p className="mt-1.5 text-sm text-muted-foreground">
+                  This will clear the current conversation. This can&apos;t be undone.
+                </p>
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEndChatConfirmOpen(false)}
+                    className="min-h-9 rounded-md border border-border bg-card px-3.5 py-1.5 text-sm font-medium text-foreground transition hover:bg-muted"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmEndChat}
+                    className="min-h-9 rounded-md bg-red-500 px-3.5 py-1.5 text-sm font-semibold text-white transition hover:bg-red-600"
+                  >
+                    End chat
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
 
       <div
         className="pointer-events-none absolute inset-0 bg-center bg-no-repeat opacity-[0.06] dark:opacity-[0.08]"
