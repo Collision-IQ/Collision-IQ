@@ -119,8 +119,9 @@ export default function DamagePreviewPanel({ images }: Props) {
         <button
           type="button"
           onClick={() => previewSrc && setFullscreen(true)}
-          className="relative h-[104px] w-[168px] shrink-0 overflow-hidden rounded-lg border border-border bg-muted"
+          className="relative h-[104px] w-[168px] shrink-0 cursor-pointer overflow-hidden rounded-lg border border-border bg-muted disabled:cursor-default"
           aria-label="Open full damage preview"
+          disabled={!previewSrc}
         >
           {loading ? (
             <span className="flex h-full w-full items-center justify-center text-muted-foreground">
@@ -163,7 +164,7 @@ export default function DamagePreviewPanel({ images }: Props) {
                   <button
                     type="button"
                     onClick={() => setFullscreen(true)}
-                    className="inline-flex items-center rounded-md border border-border bg-muted px-2 py-1 text-[11px] hover:bg-background"
+                    className="inline-flex cursor-pointer items-center rounded-md border border-border bg-muted px-2 py-1 text-[11px] hover:bg-background"
                   >
                     Full preview
                   </button>
