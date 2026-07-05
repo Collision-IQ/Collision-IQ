@@ -1,6 +1,13 @@
 @import "tailwindcss";
 @import "shepherd.js/dist/css/shepherd.css";
 
+/* Tailwind v4 ignores the JS config's `darkMode: "class"` unless declared here.
+   Tie every `dark:` utility to the `.dark` class (set by next-themes) instead of
+   the OS `prefers-color-scheme`, so they match the class-based CSS variables and
+   the in-app theme toggle. Without this, `dark:` utilities followed the OS, which
+   showed light `dark:`-gradient backgrounds behind dark (class-based) panels. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* =================================================================
    Collision IQ — design system (Claude rebuild)
    Refreshed "forensic intelligence" palette: warm-paper light mode,
