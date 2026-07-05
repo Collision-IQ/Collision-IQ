@@ -12,8 +12,10 @@ import {
   FolderCheck,
   Gauge,
   LayoutDashboard,
+  Menu,
   Settings as SettingsIcon,
   Workflow,
+  X,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { ReviewProgress } from "@/components/ChatWidget";
@@ -101,16 +103,77 @@ export default function CollisionWorkspaceV2({
   bottom,
 }: Props) {
   const [activeNav, setActiveNav] = useState<string>("workspace");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const activeItem = NAV_ITEMS.find((item) => item.id === activeNav);
   // Guard: never stay on a gated view if analysis is no longer available.
   const activeView: WorkspaceView =
     activeItem?.requiresAnalysis && !analysisReady ? "workspace" : activeItem?.view ?? "workspace";
 
+  // Shared nav-item renderer used by both the desktop sidebar and the mobile
+  // drawer. `onNavigate` lets the drawer close itself after a selection.
+  const renderNavItem = (item: (typeof NAV_ITEMS)[number], onNavigate?: () => void) => {
+    const Icon = item.icon;
+    const active = activeNav === item.id;
+    const locked = Boolean(item.requiresAnalysis && !analysisReady);
+    const classes = `inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition ${
+      locked
+        ? "cursor-not-allowed text-muted-foreground/40"
+        : active
+          ? "bg-[var(--accent)]/12 text-foreground ring-1 ring-[var(--accent)]/30"
+          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+    }`;
+    const inner = (
+      <>
+        <Icon size={16} className={active && !locked ? "text-[var(--accent)]" : ""} />
+        {item.label}
+      </>
+    );
+    if (locked) {
+      return (
+        <button
+          key={item.id}
+          type="button"
+          disabled
+          className={classes}
+          title="Available after an estimate review or comparison is generated"
+        >
+          {inner}
+        </button>
+      );
+    }
+    return item.href ? (
+      <Link key={item.id} href={item.href} className={classes} onClick={onNavigate}>
+        {inner}
+      </Link>
+    ) : (
+      <button
+        key={item.id}
+        type="button"
+        onClick={() => {
+          setActiveNav(item.id);
+          onNavigate?.();
+        }}
+        className={classes}
+        aria-current={active ? "page" : undefined}
+      >
+        {inner}
+      </button>
+    );
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
       {/* Top bar */}
       <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-3 sm:px-5">
-        <div className="flex min-w-0 items-center gap-3">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(true)}
+            className="-ml-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-foreground transition hover:bg-muted lg:hidden"
+            aria-label="Open menu"
+          >
+            <Menu size={20} />
+          </button>
           <Image src="/iq/iq-app.png" alt="" width={30} height={30} className="h-7 w-7 shrink-0 rounded-md object-contain" aria-hidden />
           <span className="relative block h-6 w-[112px] shrink-0">
             <Image src="/iq/iq_logo.png" alt="Collision IQ" fill sizes="112px" className="object-contain object-left dark:hidden" />
@@ -143,55 +206,35 @@ export default function CollisionWorkspaceV2({
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1">
-        {/* Sidebar */}
-        <nav className="hidden w-52 shrink-0 flex-col gap-1 border-r border-border bg-card/60 p-2 lg:flex">
-          {NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            const active = activeNav === item.id;
-            const locked = Boolean(item.requiresAnalysis && !analysisReady);
-            const classes = `inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition ${
-              locked
-                ? "cursor-not-allowed text-muted-foreground/40"
-                : active
-                  ? "bg-[var(--accent)]/12 text-foreground ring-1 ring-[var(--accent)]/30"
-                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-            }`;
-            const inner = (
-              <>
-                <Icon size={16} className={active && !locked ? "text-[var(--accent)]" : ""} />
-                {item.label}
-              </>
-            );
-            if (locked) {
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  disabled
-                  className={classes}
-                  title="Available after an estimate review or comparison is generated"
-                >
-                  {inner}
-                </button>
-              );
-            }
-            return item.href ? (
-              <Link key={item.id} href={item.href} className={classes}>
-                {inner}
-              </Link>
-            ) : (
+      {/* Mobile / foldable nav drawer (< lg) */}
+      {mobileNavOpen ? (
+        <div className="fixed inset-0 z-[70] lg:hidden" role="dialog" aria-modal="true">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setMobileNavOpen(false)}
+            aria-hidden
+          />
+          <nav className="absolute left-0 top-0 flex h-full w-64 max-w-[82%] flex-col gap-1 border-r border-border bg-card p-3 shadow-2xl">
+            <div className="mb-2 flex items-center justify-between px-1">
+              <span className="ci-eyebrow">Menu</span>
               <button
-                key={item.id}
                 type="button"
-                onClick={() => setActiveNav(item.id)}
-                className={classes}
-                aria-current={active ? "page" : undefined}
+                onClick={() => setMobileNavOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                aria-label="Close menu"
               >
-                {inner}
+                <X size={18} />
               </button>
-            );
-          })}
+            </div>
+            {NAV_ITEMS.map((item) => renderNavItem(item, () => setMobileNavOpen(false)))}
+          </nav>
+        </div>
+      ) : null}
+
+      <div className="flex min-h-0 flex-1">
+        {/* Sidebar (lg+) */}
+        <nav className="hidden w-52 shrink-0 flex-col gap-1 border-r border-border bg-card/60 p-2 lg:flex">
+          {NAV_ITEMS.map((item) => renderNavItem(item))}
         </nav>
 
         {/* Main + rail + bottom panels */}
