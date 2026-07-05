@@ -163,7 +163,20 @@ export default function DamagePreviewPanel({ images }: Props) {
                 <div className="mt-1.5 flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setFullscreen(true)}
+                    onClick={() => {
+                      setFullscreen(true);
+                      // Temporary diagnostic: confirms the handler fires and whether
+                      // the lightbox actually mounts / where it lands in the stack.
+                      console.log("[damage-preview] Full preview clicked; previewSrc?", Boolean(previewSrc));
+                      setTimeout(() => {
+                        const dlg = document.querySelector("[data-damage-lightbox]");
+                        console.log(
+                          "[damage-preview] lightbox mounted?",
+                          Boolean(dlg),
+                          dlg ? "z=" + getComputedStyle(dlg).zIndex : ""
+                        );
+                      }, 150);
+                    }}
                     className="inline-flex cursor-pointer items-center rounded-md border border-border bg-muted px-2 py-1 text-[11px] hover:bg-background"
                   >
                     Full preview
@@ -184,9 +197,10 @@ export default function DamagePreviewPanel({ images }: Props) {
         </div>
       </div>
 
-      {fullscreen && previewSrc
+      {fullscreen
         ? createPortal(
             <div
+              data-damage-lightbox
               className="fixed inset-0 z-[10050] flex flex-col items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
               role="dialog"
               aria-modal="true"
@@ -215,8 +229,12 @@ export default function DamagePreviewPanel({ images }: Props) {
                     </button>
                   </div>
                 </div>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={previewSrc} alt="Damage heat map — full preview" className="max-h-[80vh] rounded-lg object-contain" />
+                {previewSrc ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={previewSrc} alt="Damage heat map — full preview" className="max-h-[80vh] rounded-lg object-contain" />
+                ) : (
+                  <p className="px-8 py-16 text-center text-sm text-white/80">Preparing the heat map…</p>
+                )}
                 <p className="text-center text-[11px] text-white/70">{result?.disclaimer}</p>
               </div>
             </div>,
