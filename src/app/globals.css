@@ -201,11 +201,18 @@ main {
   animation: none;
 }
 
-/* ---------------- Ensure app is above overlays ---------------- */
+/* ---------------- Ensure app is above overlays ----------------
+   Kept in @layer base so Tailwind's `fixed` / `z-[...]` utilities (in the
+   later utilities layer) win for overlays portaled to <body> — otherwise
+   this unlayered rule clamped every portaled modal to position:relative /
+   z-index:1 and buried it. The app root has no position/z utility, so it
+   still gets raised above background layers. */
 
-body > * {
-  position: relative;
-  z-index: 1;
+@layer base {
+  body > * {
+    position: relative;
+    z-index: 1;
+  }
 }
 
 /* ---------------- Markdown analysis styling ---------------- */
