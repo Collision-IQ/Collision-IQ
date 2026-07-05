@@ -61,6 +61,7 @@
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "shepherd.js": "^15.2.2",
     "stripe": "^21.0.1",
     "tesseract.js": "^7.0.0",
     "voyageai": "^0.4.0",

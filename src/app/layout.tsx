@@ -5,6 +5,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import NativeAuthBridge from "@/components/NativeAuthBridge";
 import { ThemeProvider } from "@/components/theme-provider";
+import CollisionIqShepherdTour from "@/components/onboarding/CollisionIqShepherdTour";
 
 function getSiteUrl() {
   const rawUrl =
@@ -128,6 +129,7 @@ export default function RootLayout({
           <ThemeProvider>
             {content}
           </ThemeProvider>
+          <CollisionIqShepherdTour />
           <NativeAuthBridge />
           <SpeedInsights />
           <Analytics />

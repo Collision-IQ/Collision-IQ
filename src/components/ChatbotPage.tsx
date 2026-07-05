@@ -1336,6 +1336,7 @@ export function ChatbotWorkspacePage({
                   <div
                       ref={immersiveWorkspaceRef}
                       className="min-h-0 flex-1 overflow-y-auto rounded-[16px] border border-border bg-card/80 px-1 pb-3 shadow-[0_24px_70px_rgba(15,23,42,0.10)] ring-1 ring-ring/10 lg:max-h-[min(54svh,680px)] lg:min-h-[280px] lg:rounded-[26px] lg:pb-4 dark:shadow-[0_24px_70px_rgba(0,0,0,0.22)]"
+                      data-tour="report-workspace"
                   >
                       <div id="immersive-case-header" data-header-change-reason={lastHeaderChangeReason}>
                         <div className="mb-2 text-right text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
@@ -1848,9 +1849,9 @@ function CollisionIqFooter() {
   const links = [
     { href: "/", label: "Home" },
     { href: "/dashboard", label: "Dashboard" },
-    { href: "/technical-systems/shop-hub", label: "Shop Hub" },
-    { href: "/services", label: "Services" },
-    { href: "/technical-systems", label: "Collision IQ" },
+    { href: "/technical-systems/shop-hub", label: "Shop Hub", tour: "shop-hub-link" },
+    { href: "/services", label: "Services", tour: "services-link" },
+    { href: "/technical-systems", label: "Collision IQ", tour: "collision-iq-link" },
     { href: "/privacy", label: "Privacy" },
     { href: "/terms", label: "Terms" },
     { href: "/delete-account", label: "Delete Account" },
@@ -1860,6 +1861,7 @@ function CollisionIqFooter() {
     <footer
       className="mt-auto shrink-0 border-t border-border bg-card/80 text-card-foreground"
       data-collision-iq-footer="true"
+      data-tour="service-links"
     >
       {/* Phones + foldables (< md): collapsible. Collapsed to a thin bar so the chat
           stays maximized regardless of the exact screen width; tap to reveal links. */}
@@ -1879,7 +1881,12 @@ function CollisionIqFooter() {
         {footerOpen ? (
           <nav className="flex flex-wrap gap-x-4 gap-y-1.5 px-4 pb-3 text-xs text-muted-foreground" aria-label="Footer">
             {links.map((link) => (
-              <Link key={link.href} href={link.href} className="py-0.5 transition hover:text-foreground">
+              <Link
+                key={link.href}
+                href={link.href}
+                className="py-0.5 transition hover:text-foreground"
+                data-tour={link.tour}
+              >
                 {link.label}
               </Link>
             ))}
@@ -1898,7 +1905,12 @@ function CollisionIqFooter() {
           </div>
           <nav className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground" aria-label="Footer">
             {links.map((link) => (
-              <Link key={link.href} href={link.href} className="transition hover:text-foreground">
+              <Link
+                key={link.href}
+                href={link.href}
+                className="transition hover:text-foreground"
+                data-tour={link.tour}
+              >
                 {link.label}
               </Link>
             ))}
@@ -3544,6 +3556,7 @@ function RailContent({
                       });
                     }}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
+                    data-tour="download-button"
                   >
                     <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download PDF</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -3595,6 +3608,7 @@ function RailContent({
                       });
                     }}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
+                    data-tour="download-button"
                   >
                     <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download Delta Citation Density Report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -3637,6 +3651,7 @@ function RailContent({
                       });
                     }}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
+                    data-tour="download-button"
                   >
                     <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download OEM Citation Density Report</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -3701,6 +3716,7 @@ function RailContent({
                     });
                   }}
                   className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25"
+                  data-tour="download-button"
                 >
                   <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> Download PDF</span>
                   <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -3722,6 +3738,7 @@ function RailContent({
                     aria-disabled={isGeneratingCustomerReport}
                     onClick={downloadCustomerReportDocument}
                     className="group flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-2 text-left text-xs font-semibold leading-5 text-foreground transition hover:border-[var(--accent)]/35 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                    data-tour="download-button"
                   >
                     <span className="inline-flex items-center gap-2"><Download size={15} aria-hidden /> {isGeneratingCustomerReport ? "Generating..." : "Download PDF"}</span>
                     <ArrowRight size={14} className="transition group-hover:translate-x-0.5" aria-hidden />
@@ -3945,6 +3962,7 @@ function ReportDocumentBottomViewer({
             className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-md border border-border bg-muted p-2 text-muted-foreground transition hover:bg-background hover:text-foreground"
             aria-label="Download PDF"
             title="Download PDF"
+            data-tour="download-button"
           >
             <Download size={16} />
           </button>
@@ -3960,8 +3978,8 @@ function ReportDocumentBottomViewer({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto bg-background p-3">
-        <div className="mb-3 flex flex-wrap gap-2" role="tablist" aria-label="Report sections">
+        <div className="min-h-0 flex-1 overflow-y-auto bg-background p-3">
+        <div className="mb-3 flex flex-wrap gap-2" role="tablist" aria-label="Report sections" data-tour="report-tabs">
           <button type="button" role="tab" aria-selected={activeTab === "summary"} onClick={() => setActiveTab("summary")} className={tabClass(activeTab === "summary")}>Summary</button>
           <button type="button" role="tab" aria-selected={activeTab === "sections"} onClick={() => setActiveTab("sections")} className={tabClass(activeTab === "sections")}>Report sections</button>
         </div>

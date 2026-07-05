@@ -4240,6 +4240,7 @@ export default function ChatWidget({
                   onClick={() => fileInputRef.current?.click()}
                   disabled={disabled || uploadLimitsLoading}
                   className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[var(--accent)]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
+                  data-tour="upload-button"
                 >
                   Upload Estimate
                 </button>
@@ -4248,6 +4249,7 @@ export default function ChatWidget({
                   onClick={() => fileInputRef.current?.click()}
                   disabled={disabled || uploadLimitsLoading}
                   className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[var(--accent)]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
+                  data-tour="upload-button"
                 >
                   Upload OEM Procedure
                 </button>
@@ -4256,6 +4258,7 @@ export default function ChatWidget({
                   onClick={handleAnalyzePhotoAction}
                   disabled={disabled || uploadLimitsLoading || isAnalyzingPhoto}
                   className="min-h-10 border border-border bg-card px-3 py-2 text-left text-xs font-medium text-foreground transition hover:border-[var(--accent)]/45 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40 sm:min-h-11 sm:py-2.5"
+                  data-tour="camera-button"
                 >
                   {isAnalyzingPhoto ? "Analyzing photo…" : "Analyze photo for visible damage"}
                 </button>
@@ -4501,6 +4504,7 @@ export default function ChatWidget({
                   shouldCompactMobileChat ? "hidden lg:inline-flex lg:items-center lg:justify-center" : "",
                 ].join(" ")}
                 aria-label="Attach PDF, image, short video, or ZIP archive"
+                data-tour="upload-button"
               >
                 <Paperclip size={20} />
               </button>
@@ -4514,6 +4518,7 @@ export default function ChatWidget({
                   shouldCompactMobileChat ? "min-h-9 min-w-9 p-1.5 lg:min-h-10 lg:min-w-10 lg:p-2" : "min-h-10 min-w-10 p-2",
                 ].join(" ")}
                 aria-label="Take or choose photo"
+                data-tour="camera-button"
               >
                 <Camera size={shouldCompactMobileChat ? 18 : 20} />
               </button>
@@ -4537,6 +4542,7 @@ export default function ChatWidget({
                 ].join(" ")}
                 aria-label="Generate an AI visual aid image"
                 title="Generate an AI visual aid (image)"
+                data-tour="photo-generator-button"
               >
                 <Sparkles size={shouldCompactMobileChat ? 18 : 20} />
               </button>
@@ -4569,6 +4575,7 @@ export default function ChatWidget({
                     ? "order-2 min-h-9 max-h-16 flex-1 px-2.5 py-1.5 leading-5 lg:min-h-11 lg:max-h-[88px] lg:px-3 lg:py-2"
                     : "order-1 min-h-11 max-h-[88px] flex-[1_1_100%] px-3 py-2 leading-5",
                 ].join(" ")}
+                data-tour="chat-input"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -4582,6 +4589,7 @@ export default function ChatWidget({
                 onClick={handleDownloadRedactedChat}
                 disabled={disabled || loading || isExportingChat}
                 className="hidden min-h-10 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 lg:inline-flex"
+                data-tour="download-button"
               >
                 {isExportingChat ? "Preparing..." : "Download Chat"}
               </button>
@@ -4593,6 +4601,7 @@ export default function ChatWidget({
                   "ci-btn-primary order-3 rounded-xl text-sm font-semibold disabled:opacity-50 lg:order-none lg:flex-none",
                   shouldCompactMobileChat ? "min-h-9 flex-none px-3 py-1.5 lg:min-h-10 lg:px-4 lg:py-2" : "min-h-10 flex-1 px-4 py-2 sm:px-5",
                 ].join(" ")}
+                data-tour="send-button"
               >
                 Send
               </button>
@@ -4604,6 +4613,7 @@ export default function ChatWidget({
                 disabled={disabled || (loading && messages.length <= 1)}
                 aria-label="End chat"
                 title="End chat"
+                data-tour="end-button"
               >
                 End
               </button>
@@ -4616,6 +4626,7 @@ export default function ChatWidget({
                       onClick={handleDownloadRedactedChat}
                       disabled={disabled || loading || isExportingChat}
                       className="min-h-9 rounded-md border border-border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground transition hover:bg-background hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                      data-tour="download-button"
                     >
                       {isExportingChat ? "Preparing..." : "Download"}
                     </button>
@@ -4626,6 +4637,7 @@ export default function ChatWidget({
                       className="min-h-9 rounded-md border border-red-500/30 bg-card px-3 py-1.5 text-[11px] font-medium text-red-500/80 transition hover:bg-red-500/8 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40 dark:text-red-300/75 dark:hover:text-red-200"
                       aria-label="End chat"
                       title="End chat"
+                      data-tour="end-button"
                     >
                       End
                     </button>

@@ -11,6 +11,7 @@ import {
   ChevronDown,
   FolderCheck,
   Gauge,
+  HelpCircle,
   LayoutDashboard,
   Menu,
   Settings as SettingsIcon,
@@ -36,6 +37,10 @@ import {
   type WorkspaceCalibrationItem,
   type WorkspaceEvidenceLink,
 } from "@/components/workspace/WorkspaceEvidenceCalibration";
+
+function restartOnboardingTour() {
+  window.dispatchEvent(new Event("collisioniq:tutorial:start"));
+}
 
 type Props = {
   planLabel?: string | null;
@@ -81,6 +86,16 @@ const NAV_ITEMS: ReadonlyArray<{
   { id: "calibration", label: "Calibration", icon: Gauge, view: "calibration", requiresAnalysis: true },
   { id: "settings", label: "Settings", icon: SettingsIcon, href: "/account" },
 ];
+
+const NAV_TOUR_TARGETS: Record<string, string> = {
+  workspace: "nav-analysis-workspace",
+  evidence: "nav-evidence",
+  vehicle: "nav-my-vehicle",
+  reports: "nav-reports",
+  knowledge: "nav-knowledge-base",
+  calibration: "nav-calibration",
+  settings: "nav-settings",
+};
 
 /**
  * V2 "Analysis Workspace" shell. Purely presentational chrome (top bar, sidebar,
@@ -136,13 +151,20 @@ export default function CollisionWorkspaceV2({
           disabled
           className={classes}
           title="Available after an estimate review or comparison is generated"
+          data-tour={NAV_TOUR_TARGETS[item.id]}
         >
           {inner}
         </button>
       );
     }
     return item.href ? (
-      <Link key={item.id} href={item.href} className={classes} onClick={onNavigate}>
+      <Link
+        key={item.id}
+        href={item.href}
+        className={classes}
+        onClick={onNavigate}
+        data-tour={NAV_TOUR_TARGETS[item.id]}
+      >
         {inner}
       </Link>
     ) : (
@@ -155,6 +177,7 @@ export default function CollisionWorkspaceV2({
         }}
         className={classes}
         aria-current={active ? "page" : undefined}
+        data-tour={NAV_TOUR_TARGETS[item.id]}
       >
         {inner}
       </button>
@@ -164,7 +187,7 @@ export default function CollisionWorkspaceV2({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
       {/* Top bar */}
-      <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-3 sm:px-5">
+      <header data-tour="app-header" className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-3 sm:px-5">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <button
             type="button"
@@ -214,7 +237,10 @@ export default function CollisionWorkspaceV2({
             onClick={() => setMobileNavOpen(false)}
             aria-hidden
           />
-          <nav className="absolute left-0 top-0 flex h-full w-64 max-w-[82%] flex-col gap-1 border-r border-border bg-card p-3 shadow-2xl">
+          <nav
+            className="absolute left-0 top-0 flex h-full w-64 max-w-[82%] flex-col gap-1 border-r border-border bg-card p-3 shadow-2xl"
+            data-tour="command-center-sidebar"
+          >
             <div className="mb-2 flex items-center justify-between px-1">
               <span className="ci-eyebrow">Menu</span>
               <button
@@ -227,18 +253,40 @@ export default function CollisionWorkspaceV2({
               </button>
             </div>
             {NAV_ITEMS.map((item) => renderNavItem(item, () => setMobileNavOpen(false)))}
+            <button
+              type="button"
+              onClick={() => {
+                setMobileNavOpen(false);
+                restartOnboardingTour();
+              }}
+              className="mt-auto inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+            >
+              <HelpCircle size={16} />
+              Tutorial
+            </button>
           </nav>
         </div>
       ) : null}
 
       <div className="flex min-h-0 flex-1">
         {/* Sidebar (lg+) */}
-        <nav className="hidden w-52 shrink-0 flex-col gap-1 border-r border-border bg-card/60 p-2 lg:flex">
+        <nav
+          className="hidden w-52 shrink-0 flex-col gap-1 border-r border-border bg-card/60 p-2 lg:flex"
+          data-tour="command-center-sidebar"
+        >
           {NAV_ITEMS.map((item) => renderNavItem(item))}
+          <button
+            type="button"
+            onClick={restartOnboardingTour}
+            className="mt-auto inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+          >
+            <HelpCircle size={16} />
+            Tutorial
+          </button>
         </nav>
 
         {/* Main + rail + bottom panels */}
-        <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2 sm:p-3">
+        <main data-tour="report-workspace" className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2 sm:p-3">
           <div className="flex items-center gap-2 px-1">
             <Workflow size={16} className="text-[var(--accent)]" />
             <h1 className="text-[15px] font-semibold text-foreground">
@@ -258,7 +306,9 @@ export default function CollisionWorkspaceV2({
               Preview accordion + footer sit below it at the bottom. */}
           <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
             {activeView === "reports" ? (
-              <ReportsHistoryPanel />
+              <div data-tour="past-reports">
+                <ReportsHistoryPanel />
+              </div>
             ) : activeView === "vehicle" ? (
               <MyVehiclePanel />
             ) : activeView === "evidence" ? (
@@ -279,11 +329,13 @@ export default function CollisionWorkspaceV2({
               <div className="hidden shrink-0 grid-cols-3 gap-3 md:grid">
                 <CaseActivityPanel events={caseEvents} />
                 <AnalysisInsightsPanel riskScore={riskScore} confidence={confidence} />
-                <DamagePreviewPanel images={damageImages} />
+                <div data-tour="damage-preview">
+                  <DamagePreviewPanel images={damageImages} />
+                </div>
               </div>
               {/* Mobile: chat is the focus. Drop Case Activity + Analysis Insights;
                   Damage Preview stays collapsed and only generates when opened. */}
-              <div className="shrink-0 md:hidden">
+              <div className="shrink-0 md:hidden" data-tour="damage-preview">
                 <MobileDamagePreview images={damageImages} />
               </div>
             </>
