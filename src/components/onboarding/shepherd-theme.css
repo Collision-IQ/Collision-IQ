@@ -18,28 +18,29 @@
 
 .collision-iq-shepherd .shepherd-header {
   align-items: flex-start;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(226, 117, 56, 0.24);
   border-radius: 18px 18px 0 0;
-  background: rgba(255, 255, 255, 0.02);
+  background: linear-gradient(180deg, #fff7f1, #f4e7dc);
   padding: 18px 18px 12px;
 }
 
 .collision-iq-shepherd .shepherd-title {
-  color: #ffffff;
+  color: #c45a24;
   font-size: 0.98rem;
   font-weight: 700;
   letter-spacing: 0;
+  text-shadow: none;
 }
 
 .collision-iq-shepherd .shepherd-cancel-icon {
-  color: rgba(255, 255, 255, 0.62);
+  color: rgba(21, 25, 31, 0.58);
   font-size: 1.8rem;
   line-height: 1;
   transition: color 140ms ease;
 }
 
 .collision-iq-shepherd .shepherd-cancel-icon:hover {
-  color: #ffffff;
+  color: #15191f;
 }
 
 .collision-iq-shepherd .shepherd-text {
