@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import {
+  Activity,
   BookOpen,
   Camera,
   Car,
@@ -31,6 +32,7 @@ import DamagePreviewPanel, {
 } from "@/components/workspace/DamagePreviewPanel";
 import ReportsHistoryPanel from "@/components/workspace/ReportsHistoryPanel";
 import MyVehiclePanel from "@/components/workspace/MyVehiclePanel";
+import ScanIqPanel from "@/components/workspace/ScanIqPanel";
 import {
   WorkspaceCalibrationPanel,
   WorkspaceEvidencePanel,
@@ -64,7 +66,7 @@ type Props = {
   bottom?: ReactNode;
 };
 
-type WorkspaceView = "workspace" | "reports" | "evidence" | "calibration" | "vehicle";
+type WorkspaceView = "workspace" | "reports" | "evidence" | "calibration" | "vehicle" | "scaniq";
 
 // In-workspace items switch the main content (`view`); items with `href`
 // navigate to an existing route. `requiresAnalysis` items stay disabled until an
@@ -81,6 +83,7 @@ const NAV_ITEMS: ReadonlyArray<{
   { id: "workspace", label: "Analysis Workspace", icon: Workflow, view: "workspace" },
   { id: "evidence", label: "Evidence", icon: FolderCheck, view: "evidence", requiresAnalysis: true },
   { id: "vehicle", label: "My Vehicle", icon: Car, view: "vehicle" },
+  { id: "scaniq", label: "Scan IQ", icon: Activity, view: "scaniq" },
   { id: "reports", label: "Reports", icon: BookOpen, view: "reports" },
   { id: "knowledge", label: "Knowledge Base", icon: BookOpen, href: "/how-it-works" },
   { id: "calibration", label: "Calibration", icon: Gauge, view: "calibration", requiresAnalysis: true },
@@ -294,6 +297,8 @@ export default function CollisionWorkspaceV2({
                 ? "Reports"
                 : activeView === "vehicle"
                   ? "My Vehicle"
+                  : activeView === "scaniq"
+                    ? "Scan IQ"
                   : activeView === "evidence"
                     ? "Evidence"
                     : activeView === "calibration"
@@ -311,6 +316,8 @@ export default function CollisionWorkspaceV2({
               </div>
             ) : activeView === "vehicle" ? (
               <MyVehiclePanel />
+            ) : activeView === "scaniq" ? (
+              <ScanIqPanel />
             ) : activeView === "evidence" ? (
               <WorkspaceEvidencePanel links={evidenceLinks} caseId={caseId} />
             ) : activeView === "calibration" ? (
