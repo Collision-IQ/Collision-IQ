@@ -14,11 +14,14 @@ import {
   ChevronUp,
   Eye,
   RefreshCcw,
+  SpellCheck,
+  Undo2,
   Volume2,
   LoaderCircle,
   Pause,
   StopCircle,
 } from "lucide-react";
+import { requestTypoFix } from "@/lib/ai/typeHelper";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import { upload as uploadBlob } from "@vercel/blob/client";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
@@ -999,6 +1002,11 @@ export default function ChatWidget({
   const [previewAttachmentId, setPreviewAttachmentId] = useState<string | null>(null);
   const [replaceAttachmentId, setReplaceAttachmentId] = useState<string | null>(null);
   const [endChatConfirmOpen, setEndChatConfirmOpen] = useState(false);
+  // Type Helper ("Fix typos"): runs only on click, never on keystrokes. The
+  // pre-fix draft is kept so the user can undo; nothing is ever auto-sent.
+  const [typeHelperChecking, setTypeHelperChecking] = useState(false);
+  const [typeHelperUndoDraft, setTypeHelperUndoDraft] = useState<string | null>(null);
+  const [typeHelperError, setTypeHelperError] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isSpeechPaused, setIsSpeechPaused] = useState(false);
@@ -2313,6 +2321,35 @@ export default function ChatWidget({
     setEndChatConfirmOpen(false);
     handleEndChat();
   }, [handleEndChat]);
+
+  // Type Helper: fix the unsent draft on click, or undo back to the saved
+  // pre-fix draft. Never auto-sends; failures leave the draft untouched.
+  const handleFixTypos = useCallback(async () => {
+    if (typeHelperChecking) return;
+
+    if (typeHelperUndoDraft !== null) {
+      setInput(typeHelperUndoDraft);
+      setTypeHelperUndoDraft(null);
+      return;
+    }
+
+    setTypeHelperError(false);
+    const draft = input;
+    if (!draft.trim()) return;
+
+    setTypeHelperChecking(true);
+    try {
+      const result = await requestTypoFix(draft);
+      if (result.status === "fixed") {
+        setTypeHelperUndoDraft(draft);
+        setInput(result.correctedText);
+      } else if (result.status === "error") {
+        setTypeHelperError(true);
+      }
+    } finally {
+      setTypeHelperChecking(false);
+    }
+  }, [input, typeHelperChecking, typeHelperUndoDraft]);
 
   handleSendRef.current = handleSend;
 
@@ -4595,6 +4632,9 @@ export default function ChatWidget({
               <textarea
                 ref={textareaRef}
                 value={input}
+                spellCheck
+                autoCorrect="on"
+                autoCapitalize="sentences"
                 onFocus={() => {
                   dismissIntroForComposerEngagement();
                   onChatEngagement?.();
@@ -4603,6 +4643,9 @@ export default function ChatWidget({
                   dismissIntroForComposerEngagement();
                   onChatEngagement?.();
                   setInput(e.target.value);
+                  // Manual edits invalidate the pending typo-fix undo state.
+                  setTypeHelperUndoDraft(null);
+                  setTypeHelperError(false);
                 }}
                 disabled={disabled}
                 rows={1}
@@ -4639,6 +4682,27 @@ export default function ChatWidget({
               </button>
 
               <button
+                type="button"
+                onClick={() => void handleFixTypos()}
+                disabled={disabled || typeHelperChecking || (!input.trim() && typeHelperUndoDraft === null)}
+                className="order-2 inline-flex min-h-10 min-w-10 items-center justify-center gap-1.5 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none lg:rounded-md lg:border lg:border-border lg:bg-card lg:px-3 lg:py-2 lg:text-xs lg:font-medium"
+                aria-label={typeHelperUndoDraft !== null ? "Undo fix" : "Fix typos"}
+                title={typeHelperUndoDraft !== null ? "Undo fix" : "Fix typos"}
+                data-type-helper-button
+              >
+                {typeHelperChecking ? (
+                  <LoaderCircle size={16} className="animate-spin" />
+                ) : typeHelperUndoDraft !== null ? (
+                  <Undo2 size={16} />
+                ) : (
+                  <SpellCheck size={16} />
+                )}
+                <span className="hidden lg:inline">
+                  {typeHelperChecking ? "Checking…" : typeHelperUndoDraft !== null ? "Undo fix" : "Fix typos"}
+                </span>
+              </button>
+
+              <button
                 onClick={() => void handleSend()}
                 disabled={disabled}
                 className={[
@@ -4662,6 +4726,12 @@ export default function ChatWidget({
                 End
               </button>
                 </div>
+
+                {typeHelperError && (
+                  <div className="mt-1.5 px-1 text-[11px] text-amber-600 dark:text-amber-400">
+                    Couldn&apos;t check that right now.
+                  </div>
+                )}
 
                 {(messages.length > 1 || hasAnyAttachment) && (
                   <div className="mt-2 flex justify-end gap-2 lg:hidden">
