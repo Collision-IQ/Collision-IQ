@@ -24,3 +24,21 @@ export function canUseProIntegrations(entitlements: ProFeatureEntitlements): boo
 
 export const PRO_FEATURE_REQUIRED_MESSAGE =
   "This feature is available on Pro and Team plans.";
+
+/**
+ * Report Memory (recall old reports): Starter, Pro, Team, active Pro trial,
+ * and Admin. Free/basic/none have no report-memory access.
+ */
+export function canUseReportMemory(entitlements: ProFeatureEntitlements): boolean {
+  if (entitlements.isPlatformAdmin) return true;
+  return (
+    entitlements.plan === "admin" ||
+    entitlements.plan === "starter" ||
+    entitlements.plan === "pro" ||
+    entitlements.plan === "team" ||
+    entitlements.plan === "trial"
+  );
+}
+
+export const REPORT_MEMORY_REQUIRED_MESSAGE =
+  "Report memory is available on Starter, Pro, and Team plans.";

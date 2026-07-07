@@ -3,18 +3,31 @@ import {
   UnauthorizedError,
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
+import { getCurrentEntitlements } from "@/lib/billing/entitlements";
+import {
+  canUseReportMemory,
+  REPORT_MEMORY_REQUIRED_MESSAGE,
+} from "@/lib/billing/proFeatures";
 import { listAnalysisReportSummaries } from "@/lib/analysisReportStore";
 
 export const runtime = "nodejs";
 
 /**
- * Per-user report history. Scoped strictly to the signed-in user's own reports
- * (ownerUserId = user.id, no shop scope), so one user can never read another
- * user's analyses. Requires authentication — no guest access.
+ * Per-user report history (Report Memory). Scoped strictly to the signed-in
+ * user's own reports (ownerUserId = user.id, no shop scope), so one user can
+ * never read another user's analyses. Requires authentication, and report
+ * memory is a Starter/Pro/Team/Admin capability — free plans get 403.
  */
 export async function GET() {
   try {
-    const { user } = await requireCurrentUser();
+    const { user, isPlatformAdmin } = await requireCurrentUser();
+    const entitlements = await getCurrentEntitlements({ isPlatformAdmin });
+    if (!canUseReportMemory(entitlements)) {
+      return NextResponse.json(
+        { ok: false, error: REPORT_MEMORY_REQUIRED_MESSAGE },
+        { status: 403 }
+      );
+    }
     const reports = await listAnalysisReportSummaries(
       { ownerUserId: user.id },
       { limit: 50 }
