@@ -1,6 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { retrieveDriveSupport } from "@/lib/ai/driveRetrievalService";
+import {
+  buildGteResearchStatusFindings,
+  buildGteSerperQuery,
+  isGteUrl,
+  labelGteWebResult,
+} from "@/lib/ai/gteResearch";
 import { resolveJurisdiction, type ResolvedJurisdiction } from "@/lib/ai/jurisdictionResolver";
 import {
   assessRetrievedDocumentApplicability,
@@ -55,7 +61,12 @@ export async function buildExportResearchSnapshot(params: {
   const reviewed = [...driveSources, ...internetSources];
   const verified = verifyResearchSources(reviewed, resolvedJurisdiction.state ?? undefined, vehicleContext);
   const citationMap = buildCitationMap(verified.accepted);
-  const unsupportedFindings = buildUnsupportedFindings(citationMap, verified.rejected, params.reportType);
+  const unsupportedFindings = [
+    // GTE query ran but nothing was retrieved → say so instead of implying
+    // CCC/MOTOR support (no CCC/MOTOR claims without a retrieved source).
+    ...buildGteResearchStatusFindings(queries, verified.accepted),
+    ...buildUnsupportedFindings(citationMap, verified.rejected, params.reportType),
+  ];
   const snapshotBase = {
     id: randomUUID(),
     reportType: params.reportType,
@@ -140,6 +151,16 @@ function buildResearchQueries(
       agent: "OEM Procedure Agent",
       sourceTarget: "internet",
       query: `${vehicle || "manufacturer"} OEM position statement collision repair scan calibration structural repair`,
+    },
+    // CCC/MOTOR Guide to Estimating (GTE / P-Pages): preferred estimating-guide
+    // web source — targeted site: query only, ranked ahead of DEG/SCRS and the
+    // general web fallback (after case docs / MOTOR DaaS / internal Drive).
+    {
+      agent: "Estimate Scrubber Agent",
+      sourceTarget: "internet",
+      query: buildGteSerperQuery(
+        operationText || "included not included operations refinish overlap headnotes estimating premise"
+      ),
     },
     {
       agent: "Estimate Scrubber Agent",
@@ -257,6 +278,13 @@ async function runInternetResearch(
         continue;
       }
 
+      // CCC/MOTOR GTE hit: always labeled as general estimating-guide guidance
+      // (industry evidence) — never OEM / vehicle-specific / sandbox evidence.
+      if (isGteUrl(item.link)) {
+        results.push(buildGteWebSource({ title: item.title, link: item.link, snippet: item.snippet }, query.agent));
+        continue;
+      }
+
       const sourceType = mapWebSourceType(item.title, item.link);
       results.push({
         id: stableSourceId(`web:${item.link}:${query.agent}`),
@@ -264,6 +292,7 @@ async function runInternetResearch(
         sourceTitle: item.title,
         locator: item.link,
         url: item.link,
+        snippet: (item.snippet ?? "").slice(0, 400) || undefined,
         retrievalTimestamp: new Date().toISOString(),
         jurisdiction: undefined,
         confidenceScore: sourceType === "law" ? 0.72 : sourceType === "oem" ? 0.68 : 0.55,
@@ -291,6 +320,32 @@ type SerperPayload = {
     date?: string;
   }>;
 };
+
+/**
+ * Map a CCC/MOTOR GTE search hit to an export research source. Metadata only
+ * (URL, title, short snippet, retrievedAt); labeled as general estimating-guide
+ * guidance — never OEM / vehicle-specific / MOTOR DaaS sandbox evidence.
+ */
+function buildGteWebSource(
+  item: { title: string; link: string; snippet?: string },
+  agent: ExportResearchAgentName
+): ExportResearchSource {
+  const gte = labelGteWebResult(item.title);
+  return {
+    id: stableSourceId(`web:${item.link}:${agent}`),
+    sourceType: gte.sourceType,
+    sourceTitle: gte.sourceTitle,
+    locator: item.link,
+    url: item.link,
+    snippet: (item.snippet ?? "").slice(0, 400) || undefined,
+    retrievalTimestamp: new Date().toISOString(),
+    jurisdiction: undefined,
+    confidenceScore: gte.confidenceScore,
+    agent,
+    supportCategory: "Internet-Sourced Industry Support",
+    accepted: true,
+  };
+}
 
 function verifyResearchSources(
   sources: ExportResearchSource[],
@@ -592,6 +647,8 @@ export const __exportResearchTestHooks = {
   classifyOemSourceRelevance,
   mapSupportCategory,
   verifyResearchSources,
+  buildResearchQueries,
+  buildGteWebSource,
 };
 
 function stableStringify(value: unknown): string {

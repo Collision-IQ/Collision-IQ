@@ -8,6 +8,7 @@ import {
   getLatestActiveAnalysisReport,
 } from "@/lib/analysisReportStore";
 import { getUploadedAttachments } from "@/lib/uploadedAttachmentStore";
+import { GTE_GENERAL_GUIDANCE_LABEL, GTE_SOURCE_LABEL, isGteUrl } from "@/lib/ai/gteResearch";
 import {
   buildAnnotatedCitationDensityEstimatePdf,
   buildOemCitationDensityFindings,
@@ -776,6 +777,10 @@ async function attemptOemWebFallback(
       ...trace.oemSourcesReviewed,
       ...web.results.filter((result) => result.sourceType === "oem").map((result) => result.title),
     ]),
+    motorPPageSourcesReviewed: uniqueStrings([
+      ...trace.motorPPageSourcesReviewed,
+      ...web.results.filter((result) => isGteUrl(result.url)).map((result) => `${GTE_SOURCE_LABEL}: ${result.title}`),
+    ]),
     jurisdictionSourcesReviewed: uniqueStrings([
       ...trace.jurisdictionSourcesReviewed,
       ...web.results.filter((result) => result.sourceType === "law").map((result) => result.title),
@@ -790,6 +795,22 @@ async function attemptOemWebFallback(
 }
 
 function mapWebResultToOemAuthoritySource(result: WebRetrievalResult): OemCitationDensityAuthoritySource {
+  // CCC/MOTOR GTE hits are general estimating-guide guidance — labeled as such,
+  // never as vehicle-specific MOTOR DaaS sandbox evidence.
+  if (isGteUrl(result.url)) {
+    return {
+      title: `${GTE_SOURCE_LABEL}: ${result.title}`,
+      sourceType: "internet_fallback",
+      evidenceTier: 6,
+      verified: false,
+      note: [
+        `${GTE_GENERAL_GUIDANCE_LABEL} — general CCC/MOTOR P-page/estimating-guide support, not vehicle-specific evidence.`,
+        result.url,
+        result.snippet,
+      ].filter(Boolean).join(" "),
+    };
+  }
+
   const label = result.sourceType === "law" ? "jurisdictional/legal" : result.sourceType === "oem" ? "OEM" : "industry";
   return {
     title: result.title,

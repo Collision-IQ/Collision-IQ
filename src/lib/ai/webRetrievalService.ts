@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
 import type { DriveRetrievalRequest } from "@/lib/ai/contracts/driveRetrievalContract";
+import {
+  buildGteSerperQuery,
+  GTE_GENERAL_GUIDANCE_LABEL,
+  isGteUrl,
+  needsGteEstimatingGuideSupport,
+} from "@/lib/ai/gteResearch";
 
 export type WebRetrievalSourceType = "oem" | "law" | "industry";
 
@@ -71,7 +77,10 @@ export async function retrieveWebSupport(
 
       for (const item of payload?.organic ?? []) {
         if (!item.title || !item.link) continue;
-        const sourceType = classifyWebSourceType(item.title, item.link);
+        // GTE pages are general estimating-guide (industry) evidence — never OEM —
+        // but rank above generic industry results as the preferred estimating guide.
+        const isGte = isGteUrl(item.link);
+        const sourceType = isGte ? "industry" : classifyWebSourceType(item.title, item.link);
         results.push({
           id: stableId(`web:${item.link}:${query}`),
           title: item.title,
@@ -79,7 +88,7 @@ export async function retrieveWebSupport(
           snippet: item.snippet ?? "",
           sourceType,
           query,
-          relevanceScore: sourceType === "law" || sourceType === "oem" ? 0.7 : 0.5,
+          relevanceScore: isGte ? 0.75 : sourceType === "law" || sourceType === "oem" ? 0.7 : 0.5,
         });
       }
     }
@@ -102,7 +111,9 @@ export function buildWebRefinementContext(response: WebRetrievalResponse): strin
   }
 
   const lines = response.results.map((result) => {
-    const label = result.sourceType === "law" ? "State Law / Regulation" : result.sourceType === "oem" ? "OEM Support" : "Industry Reference";
+    const label = isGteUrl(result.url)
+      ? GTE_GENERAL_GUIDANCE_LABEL
+      : result.sourceType === "law" ? "State Law / Regulation" : result.sourceType === "oem" ? "OEM Support" : "Industry Reference";
     return `- [${label}] ${result.title} (${result.url})\n  snippet: "${result.snippet}"`;
   });
 
@@ -137,6 +148,18 @@ function buildWebQueries(request: DriveRetrievalRequest): string[] {
 
   if (queries.length === 0 && vehicleCore) {
     queries.push([vehicleCore, "OEM repair procedure"].filter(Boolean).join(" ").trim());
+  }
+
+  // CCC/MOTOR Guide to Estimating: when this fallback lane is asked about
+  // estimating-guide topics (included/not-included, refinish, overlap, labor
+  // procedure, headnotes/P-pages), add ONE targeted site: query. This lane only
+  // runs after local/Drive sources did not resolve the issue.
+  const laneTopics = request.lanePlans
+    .flatMap((plan) => plan.topics.map((topic) => topic.topic?.replace(/_/g, " ") ?? ""))
+    .filter(Boolean);
+  const gteTopic = laneTopics.find((topic) => needsGteEstimatingGuideSupport(topic));
+  if (gteTopic) {
+    queries.push(buildGteSerperQuery(gteTopic));
   }
 
   return Array.from(new Set(queries)).filter(Boolean);

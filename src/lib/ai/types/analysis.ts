@@ -408,6 +408,8 @@ export type ExportResearchSource = {
   sourceTitle: string;
   locator: string;
   url?: string;
+  /** Short search-result excerpt (metadata only — never large copied sections). */
+  snippet?: string;
   driveFileId?: string;
   retrievalTimestamp: string;
   jurisdiction?: string;
