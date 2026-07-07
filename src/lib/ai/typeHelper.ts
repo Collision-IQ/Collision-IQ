@@ -69,6 +69,75 @@ export function normalizeCorrectedText(raw: string): string {
   return text;
 }
 
+// ---------------------------------------------------------------------------
+// Inline typo underlining: word-level diff between the draft and the corrected
+// text. Only clean 1:1 word substitutions become spans (typos); insertions,
+// deletions, and large rewrites are ignored so we never underline half the box.
+// ---------------------------------------------------------------------------
+
+export type TypoSpan = {
+  /** Character offsets into the ORIGINAL draft. */
+  start: number;
+  end: number;
+  original: string;
+  suggestion: string;
+};
+
+type DiffToken = { text: string; start: number; end: number };
+
+function tokenizeWithOffsets(text: string): DiffToken[] {
+  return Array.from(text.matchAll(/\S+/g), (match) => ({
+    text: match[0],
+    start: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length,
+  }));
+}
+
+export function diffTypoSpans(original: string, corrected: string, maxSpans = 24): TypoSpan[] {
+  if (!original || !corrected || original === corrected) return [];
+  const a = tokenizeWithOffsets(original);
+  const b = tokenizeWithOffsets(corrected);
+  if (a.length === 0 || b.length === 0 || a.length > 600 || b.length > 600) return [];
+
+  // LCS table over exact token text.
+  const n = a.length;
+  const m = b.length;
+  const dp: Uint16Array[] = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] =
+        a[i].text === b[j].text
+          ? dp[i + 1][j + 1] + 1
+          : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+
+  const spans: TypoSpan[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i].text === b[j].text) {
+      i += 1;
+      j += 1;
+      continue;
+    }
+    if (dp[i + 1][j + 1] === dp[i][j]) {
+      // Pairing both mismatched tokens is optimal → 1:1 substitution (a typo).
+      spans.push({ start: a[i].start, end: a[i].end, original: a[i].text, suggestion: b[j].text });
+      i += 1;
+      j += 1;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      i += 1; // deletion — not underlined
+    } else {
+      j += 1; // insertion — not underlined
+    }
+  }
+
+  // A flood of substitutions means a rewrite, not typo fixes — show nothing.
+  if (spans.length > maxSpans) return [];
+  return spans;
+}
+
 export type TypeHelperClientResult =
   | { status: "empty" }
   | { status: "unchanged" }

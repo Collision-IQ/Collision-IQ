@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  diffTypoSpans,
   extractProtectedTokens,
   normalizeCorrectedText,
   protectedTokensPreserved,
@@ -100,40 +101,63 @@ describe("requestTypoFix client behavior", () => {
   });
 });
 
+describe("diffTypoSpans (inline underline diff)", () => {
+  it("maps 1:1 word substitutions to spans with offsets and suggestions", () => {
+    const original = "the bumperr needs repar on the left side";
+    const corrected = "the bumper needs repair on the left side";
+    const spans = diffTypoSpans(original, corrected);
+    expect(spans).toHaveLength(2);
+    expect(spans[0]).toMatchObject({ original: "bumperr", suggestion: "bumper" });
+    expect(original.slice(spans[0].start, spans[0].end)).toBe("bumperr");
+    expect(spans[1]).toMatchObject({ original: "repar", suggestion: "repair" });
+  });
+
+  it("returns nothing for identical text or insertions/deletions-only changes", () => {
+    expect(diffTypoSpans("same text", "same text")).toHaveLength(0);
+    // Pure insertion — nothing in the original to underline.
+    expect(diffTypoSpans("the bumper", "the front bumper")).toHaveLength(0);
+  });
+
+  it("flags capitalization fixes but bails out on full rewrites", () => {
+    expect(diffTypoSpans("honda civic runs", "Honda civic runs")).toHaveLength(1);
+    const original = Array.from({ length: 30 }, (_, i) => `worda${i}`).join(" ");
+    const corrected = Array.from({ length: 30 }, (_, i) => `wordb${i}`).join(" ");
+    expect(diffTypoSpans(original, corrected)).toHaveLength(0);
+  });
+});
+
 describe("composer wiring (source-level)", () => {
   const source = readFileSync(join(process.cwd(), "src", "components", "ChatWidget.tsx"), "utf8");
+  const overlaySource = readFileSync(
+    join(process.cwd(), "src", "components", "ComposerTypoUnderline.tsx"),
+    "utf8"
+  );
 
-  it("chat composer textarea has native spellcheck + mobile typing helpers", () => {
-    const textareaBlock = source.slice(source.indexOf("chat-composer-textarea") - 2000, source.indexOf("chat-composer-textarea"));
-    expect(textareaBlock).toContain("spellCheck");
-    expect(textareaBlock).toContain('autoCorrect="on"');
-    expect(textareaBlock).toContain('autoCapitalize="sentences"');
+  it("composer uses the inline typo underline overlay (no Fix-typos button)", () => {
+    expect(source).toContain("ComposerTypoUnderline");
+    expect(source).not.toContain("data-type-helper-button");
+    // Native squiggles are replaced by the overlay; mobile helpers remain.
+    expect(source).toContain("spellCheck={false}");
+    expect(source).toContain('autoCorrect="on"');
+    expect(source).toContain('autoCapitalize="sentences"');
   });
 
-  // Exact slice of the handleFixTypos useCallback (start → its dependency array).
-  function fixTyposHandlerBlock(): string {
-    const start = source.indexOf("const handleFixTypos");
-    const end = source.indexOf("[input, typeHelperChecking, typeHelperUndoDraft]", start);
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    return source.slice(start, end);
-  }
+  it("typo checking is debounced-idle and applying a suggestion never sends", () => {
+    const effectStart = source.indexOf("const timer = setTimeout");
+    expect(effectStart).toBeGreaterThan(-1);
 
-  it("Fix typos button calls the helper, never handleSend (no auto-send)", () => {
-    const attrIndex = source.indexOf("data-type-helper-button");
-    expect(attrIndex).toBeGreaterThan(-1);
-    // Slice just the Fix-typos button's opening tag (its own <button ...>).
-    const buttonOpen = source.lastIndexOf("<button", attrIndex);
-    const buttonBlock = source.slice(buttonOpen, attrIndex);
-    expect(buttonBlock).toContain("handleFixTypos");
-    expect(buttonBlock).not.toContain("handleSend");
-
-    expect(fixTyposHandlerBlock()).not.toContain("handleSend");
+    const applyStart = source.indexOf("const applyTypoFix");
+    const applyEnd = source.indexOf("lastTypoCheckRef.current = null", applyStart);
+    expect(applyStart).toBeGreaterThan(-1);
+    const applyBlock = source.slice(applyStart, applyEnd);
+    expect(applyBlock).toContain("setInput");
+    expect(applyBlock).not.toContain("handleSend");
+    // The overlay itself never touches send either.
+    expect(overlaySource).not.toContain("handleSend");
+    expect(overlaySource).not.toContain("fetch(");
   });
 
-  it("undo restores the saved pre-fix draft", () => {
-    const handlerBlock = fixTyposHandlerBlock();
-    expect(handlerBlock).toContain("setInput(typeHelperUndoDraft)");
-    expect(handlerBlock).toContain("setTypeHelperUndoDraft(draft)");
+  it("manual edits clear stale underlines until the next idle re-check", () => {
+    expect(source).toContain("setTypoSpans((prev) => (prev.length ? [] : prev))");
   });
 });

@@ -14,14 +14,13 @@ import {
   ChevronUp,
   Eye,
   RefreshCcw,
-  SpellCheck,
-  Undo2,
   Volume2,
   LoaderCircle,
   Pause,
   StopCircle,
 } from "lucide-react";
-import { requestTypoFix } from "@/lib/ai/typeHelper";
+import { diffTypoSpans, requestTypoFix, type TypoSpan } from "@/lib/ai/typeHelper";
+import ComposerTypoUnderline from "@/components/ComposerTypoUnderline";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import { upload as uploadBlob } from "@vercel/blob/client";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
@@ -1002,11 +1001,11 @@ export default function ChatWidget({
   const [previewAttachmentId, setPreviewAttachmentId] = useState<string | null>(null);
   const [replaceAttachmentId, setReplaceAttachmentId] = useState<string | null>(null);
   const [endChatConfirmOpen, setEndChatConfirmOpen] = useState(false);
-  // Type Helper ("Fix typos"): runs only on click, never on keystrokes. The
-  // pre-fix draft is kept so the user can undo; nothing is ever auto-sent.
-  const [typeHelperChecking, setTypeHelperChecking] = useState(false);
-  const [typeHelperUndoDraft, setTypeHelperUndoDraft] = useState<string | null>(null);
-  const [typeHelperError, setTypeHelperError] = useState(false);
+  // Type Helper: inline typo underlining. A debounced idle check (never per
+  // keystroke) diffs the draft against the AI correction; typo words get a
+  // wavy underline and a click-to-apply suggestion. Nothing is ever auto-sent.
+  const [typoSpans, setTypoSpans] = useState<TypoSpan[]>([]);
+  const lastTypoCheckRef = useRef<string | null>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isSpeechPaused, setIsSpeechPaused] = useState(false);
@@ -2322,34 +2321,43 @@ export default function ChatWidget({
     handleEndChat();
   }, [handleEndChat]);
 
-  // Type Helper: fix the unsent draft on click, or undo back to the saved
-  // pre-fix draft. Never auto-sends; failures leave the draft untouched.
-  const handleFixTypos = useCallback(async () => {
-    if (typeHelperChecking) return;
-
-    if (typeHelperUndoDraft !== null) {
-      setInput(typeHelperUndoDraft);
-      setTypeHelperUndoDraft(null);
-      return;
-    }
-
-    setTypeHelperError(false);
+  // Type Helper: debounced idle check of the unsent draft (never per
+  // keystroke, empty drafts never hit the network). Failures are silent — the
+  // underlines simply don't appear and the draft is untouched.
+  useEffect(() => {
+    if (disabled) return;
     const draft = input;
-    if (!draft.trim()) return;
+    if (!draft.trim() || draft.length > 6000) return;
+    if (lastTypoCheckRef.current === draft) return;
 
-    setTypeHelperChecking(true);
-    try {
+    const timer = setTimeout(async () => {
+      lastTypoCheckRef.current = draft;
       const result = await requestTypoFix(draft);
-      if (result.status === "fixed") {
-        setTypeHelperUndoDraft(draft);
-        setInput(result.correctedText);
-      } else if (result.status === "error") {
-        setTypeHelperError(true);
-      }
-    } finally {
-      setTypeHelperChecking(false);
-    }
-  }, [input, typeHelperChecking, typeHelperUndoDraft]);
+      // The user kept typing while we were checking — results are stale.
+      if (textareaRef.current && textareaRef.current.value !== draft) return;
+      setTypoSpans(result.status === "fixed" ? diffTypoSpans(draft, result.correctedText) : []);
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [input, disabled]);
+
+  // Apply one clicked suggestion into the draft. Never sends the message.
+  const applyTypoFix = useCallback((span: TypoSpan) => {
+    const delta = span.suggestion.length - (span.end - span.start);
+    setInput((value) =>
+      value.slice(0, span.start) + span.suggestion + value.slice(span.end)
+    );
+    setTypoSpans((prev) =>
+      prev
+        .filter((existing) => existing !== span)
+        .map((existing) =>
+          existing.start > span.start
+            ? { ...existing, start: existing.start + delta, end: existing.end + delta }
+            : existing
+        )
+    );
+    lastTypoCheckRef.current = null;
+  }, []);
 
   handleSendRef.current = handleSend;
 
@@ -4629,10 +4637,17 @@ export default function ChatWidget({
               </button>
 
 
+              <div
+                className={[
+                  "relative min-w-0 lg:order-none lg:min-w-[280px] lg:flex-[1_1_420px]",
+                  shouldCompactMobileChat ? "order-2 flex-1" : "order-1 flex-[1_1_100%]",
+                ].join(" ")}
+              >
               <textarea
                 ref={textareaRef}
                 value={input}
-                spellCheck
+                // Native squiggles are replaced by the AI typo underline overlay.
+                spellCheck={false}
                 autoCorrect="on"
                 autoCapitalize="sentences"
                 onFocus={() => {
@@ -4643,9 +4658,9 @@ export default function ChatWidget({
                   dismissIntroForComposerEngagement();
                   onChatEngagement?.();
                   setInput(e.target.value);
-                  // Manual edits invalidate the pending typo-fix undo state.
-                  setTypeHelperUndoDraft(null);
-                  setTypeHelperError(false);
+                  // Manual edits invalidate the current typo underlines until
+                  // the next idle re-check.
+                  setTypoSpans((prev) => (prev.length ? [] : prev));
                 }}
                 disabled={disabled}
                 rows={1}
@@ -4657,10 +4672,10 @@ export default function ChatWidget({
                     : "Enter a repair analysis command or upload documentation..."
                 }
                 className={[
-                  "chat-composer-textarea min-w-0 resize-none overflow-y-auto rounded-xl border border-input/70 bg-background px-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/25 disabled:cursor-not-allowed disabled:opacity-50 lg:order-none lg:min-w-[280px] lg:flex-[1_1_420px]",
+                  "chat-composer-textarea w-full min-w-0 resize-none overflow-y-auto rounded-xl border border-input/70 bg-background px-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/25 disabled:cursor-not-allowed disabled:opacity-50",
                   shouldCompactMobileChat
-                    ? "order-2 min-h-9 max-h-16 flex-1 px-2.5 py-1.5 leading-5 lg:min-h-11 lg:max-h-[88px] lg:px-3 lg:py-2"
-                    : "order-1 min-h-11 max-h-[88px] flex-[1_1_100%] px-3 py-2 leading-5",
+                    ? "min-h-9 max-h-16 px-2.5 py-1.5 leading-5 lg:min-h-11 lg:max-h-[88px] lg:px-3 lg:py-2"
+                    : "min-h-11 max-h-[88px] px-3 py-2 leading-5",
                 ].join(" ")}
                 data-tour="chat-input"
                 onKeyDown={(e) => {
@@ -4670,6 +4685,20 @@ export default function ChatWidget({
                   }
                 }}
               />
+              <ComposerTypoUnderline
+                textareaRef={textareaRef}
+                value={input}
+                spans={typoSpans}
+                onApply={applyTypoFix}
+                // Mirror the textarea's metrics exactly (border + padding + type).
+                mirrorClassName={[
+                  "rounded-xl border border-transparent px-3 text-sm",
+                  shouldCompactMobileChat
+                    ? "px-2.5 py-1.5 leading-5 lg:px-3 lg:py-2"
+                    : "px-3 py-2 leading-5",
+                ].join(" ")}
+              />
+              </div>
 
               <button
                 type="button"
@@ -4679,27 +4708,6 @@ export default function ChatWidget({
                 data-tour="download-button"
               >
                 {isExportingChat ? "Preparing..." : "Download Chat"}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => void handleFixTypos()}
-                disabled={disabled || typeHelperChecking || (!input.trim() && typeHelperUndoDraft === null)}
-                className="order-2 inline-flex min-h-10 min-w-10 items-center justify-center gap-1.5 rounded-md p-2 text-muted-foreground transition hover:bg-card hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40 lg:order-none lg:rounded-md lg:border lg:border-border lg:bg-card lg:px-3 lg:py-2 lg:text-xs lg:font-medium"
-                aria-label={typeHelperUndoDraft !== null ? "Undo fix" : "Fix typos"}
-                title={typeHelperUndoDraft !== null ? "Undo fix" : "Fix typos"}
-                data-type-helper-button
-              >
-                {typeHelperChecking ? (
-                  <LoaderCircle size={16} className="animate-spin" />
-                ) : typeHelperUndoDraft !== null ? (
-                  <Undo2 size={16} />
-                ) : (
-                  <SpellCheck size={16} />
-                )}
-                <span className="hidden lg:inline">
-                  {typeHelperChecking ? "Checking…" : typeHelperUndoDraft !== null ? "Undo fix" : "Fix typos"}
-                </span>
               </button>
 
               <button
@@ -4726,12 +4734,6 @@ export default function ChatWidget({
                 End
               </button>
                 </div>
-
-                {typeHelperError && (
-                  <div className="mt-1.5 px-1 text-[11px] text-amber-600 dark:text-amber-400">
-                    Couldn&apos;t check that right now.
-                  </div>
-                )}
 
                 {(messages.length > 1 || hasAnyAttachment) && (
                   <div className="mt-2 flex justify-end gap-2 lg:hidden">
