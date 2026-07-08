@@ -40,7 +40,7 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // PDF extraction + annotation can be slow; raise above the short Vercel default to avoid timeouts.
-export const maxDuration = 300;
+export const maxDuration = 800;
 
 type RequestBody = {
   caseId?: unknown;

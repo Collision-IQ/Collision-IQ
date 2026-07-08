@@ -31,7 +31,7 @@ import { shouldGenerateAnnotatedCitationDensityEstimate } from "@/lib/reports/ci
 
 export const runtime = "nodejs";
 // LLM follow-up review; raise above the short Vercel default to avoid production timeouts.
-export const maxDuration = 300;
+export const maxDuration = 800;
 
 function limitText(text: string, max = 12000) {
   if (!text) return "";

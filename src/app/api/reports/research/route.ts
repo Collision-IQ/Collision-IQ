@@ -11,7 +11,7 @@ import { getAnalysisReport } from "@/lib/analysisReportStore";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // Authority research + retrieval; raise above the short Vercel default to avoid timeouts.
-export const maxDuration = 300;
+export const maxDuration = 800;
 
 const RESEARCHABLE_TYPES: ResearchableExportType[] = [
   "policy_rights_review",

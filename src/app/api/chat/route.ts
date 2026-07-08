@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 // LLM review + retrieval can run well past the short Vercel default (chat-with-files was ~113s
 // locally). Without this the function is killed in production and the chat "fails to respond"
 // even though it works locally. 300s is the Pro plan cap.
-export const maxDuration = 300;
+export const maxDuration = 800;
 
 import { NextResponse } from "next/server";
 import type { ChatAnalysisOutput } from "@/lib/ai/contracts/chatAnalysisSchema";

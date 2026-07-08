@@ -21,7 +21,7 @@ import { canAccessFeature } from "@/lib/featureAccess";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 // LLM-generated customer report (~40s); raise above the short Vercel default to avoid timeouts.
-export const maxDuration = 300;
+export const maxDuration = 800;
 
 type CustomerReportRequestBody = {
   vehicle?: unknown;
