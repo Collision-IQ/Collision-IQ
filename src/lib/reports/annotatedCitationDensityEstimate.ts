@@ -43,13 +43,17 @@ import {
   type HeaderEstimateRole,
 } from "./citationDensitySourcePdf";
 import {
+  compareEstimateTotals,
   deltaRowFromRawText,
+  groupWrappedEstimateLines,
   isSectionHeader,
   matchEstimateLineItems,
   parseCccEstimateRows,
+  parseCccEstimateTotals,
   parseEstimateNetTotal,
   type EstimateDeltaRow,
   type EstimateLineItemDelta,
+  type EstimateTotalsDelta,
 } from "./estimateDeltaMatcher";
 
 export type AnnotationMode = "margin_callouts" | "inline_highlight" | "both";
@@ -1999,11 +2003,14 @@ export function buildRequiredEstimatorDeltaFindings(
   // remaining gap with structured deltas anchored on the higher-cost source. Structured deltas
   // lead the report, so they are prepended ahead of the detector findings.
   if (deltaMatch) {
+    // Rate/totals findings lead the report — rates and hour subtotals are
+    // typically the largest cost-gap drivers.
+    const totalsFindings = emitTotalsDeltaFindings(deltaMatch, context, usedAnchorIds);
     const structuredFindings = emitStructuredLineItemDeltaFindings(deltaMatch, context, usedAnchorIds);
-    lineItemDeltaFindingCount = structuredFindings.length;
+    lineItemDeltaFindingCount = totalsFindings.length + structuredFindings.length;
     lineItemDeltaMatchedPairCount = deltaMatch.matchedPairCount;
     lineItemDeltaMissingCount = deltaMatch.missingOperationCount;
-    findings.unshift(...structuredFindings);
+    findings.unshift(...totalsFindings, ...structuredFindings);
   }
 
   const missingRequiredDetectors = [
@@ -2179,6 +2186,12 @@ type StructuredLineItemDeltaMatch = {
   comparisonName: string;
   matchedPairCount: number;
   missingOperationCount: number;
+  /** Headline rate / hour-subtotal / category-amount differences from the ESTIMATE TOTALS blocks. */
+  totalsDeltas: EstimateTotalsDelta[];
+  /** totals_row anchors on the annotated source, for anchoring rate findings. */
+  totalsAnchors: EstimateRowAnchor[];
+  /** Lower-estimate lines with no counterpart on the annotated (higher) estimate. */
+  lowerOnlyRows: EstimateDeltaRow[];
 };
 
 // Phase 1 of the structured delta path: parse and pair rows WITHOUT emitting findings or
@@ -2207,17 +2220,23 @@ function matchStructuredLineItemDeltas(
   // category-presence classification see that e.g. a "Repl Absorber" line sits
   // under the bumper category even when the line text itself carries no keyword.
   let currentSection: string | null = null;
-  for (const anchor of primaryAnchors) {
-    if (isSectionHeader(anchor.rowText)) {
+  // Rebuild print-wrapped rows before parsing: a wrapped description or value
+  // continuation is its own anchor line ("textured standard" / "167-880-43-09
+  // 1 240.00"), and parsed alone it becomes a junk fragment row. Each rebuilt
+  // row anchors to its FIRST source line — where the row visibly starts.
+  const anchorGroups = groupWrappedEstimateLines(primaryAnchors.map((anchor) => anchor.rowText));
+  for (const group of anchorGroups) {
+    const anchor = primaryAnchors[group.sourceIndexes[0]];
+    if (isSectionHeader(group.text)) {
       currentSection =
-        anchor.rowText.replace(/^\s*\d{1,4}\s+/, "").replace(/\s+/g, " ").trim() || currentSection;
+        group.text.replace(/^\s*\d{1,4}\s+/, "").replace(/\s+/g, " ").trim() || currentSection;
     }
     // The anchor's own section can be blank; fall back to the running header
     // (a bare `?? currentSection` would keep an empty string).
     const anchorSection =
       typeof anchor.section === "string" && anchor.section.trim() ? anchor.section : currentSection;
     const row = deltaRowFromRawText({
-      rawText: anchor.rowText,
+      rawText: group.text,
       section: anchorSection,
       anchorId: anchor.anchorId,
       pageNumber: anchor.pageNumber,
@@ -2252,6 +2271,16 @@ function matchStructuredLineItemDeltas(
     (a, b) => scoreLineItemDeltaForPriority(b) - scoreLineItemDeltaForPriority(a)
   );
 
+  // Rate / totals lane: rates, hour subtotals, and category amounts from the
+  // two ESTIMATE TOTALS blocks — typically the largest cost-gap drivers.
+  const higherTotals = parseCccEstimateTotals(context.sourceText ?? "");
+  const lowerTotals =
+    comparison
+      .map((item) => parseCccEstimateTotals(item.text))
+      .find((totals) => totals !== null) ?? null;
+  const totalsDeltas = compareEstimateTotals({ higher: higherTotals, lower: lowerTotals });
+  const totalsAnchors = context.anchors.filter((anchor) => anchor.anchorType === "totals_row");
+
   return {
     orderedDeltas,
     anchorById,
@@ -2259,6 +2288,9 @@ function matchStructuredLineItemDeltas(
     comparisonName: comparison[0]?.fileName || "the comparison estimate",
     matchedPairCount: match.matchedPairCount,
     missingOperationCount: match.missingOperationCount,
+    totalsDeltas,
+    totalsAnchors,
+    lowerOnlyRows: match.lowerOnlyRows,
   };
 }
 
@@ -2334,6 +2366,140 @@ function emitStructuredLineItemDeltaFindings(
         laborHoursImpact: delta.laborDelta ?? null,
       })
     );
+  }
+
+  return findings;
+}
+
+// Rate / totals lane: headline rate, hour-subtotal, and category-amount
+// differences from the two ESTIMATE TOTALS blocks, plus the lower-only-lines
+// section. These anchor to totals_row anchors — the block on the annotated
+// estimate where the difference is actually visible. Mutates usedAnchorIds.
+function emitTotalsDeltaFindings(
+  deltaMatch: StructuredLineItemDeltaMatch,
+  context: AnnotatedEstimateFindingGeneratorContext,
+  usedAnchorIds: Set<string>
+): CitationDensityFinding[] {
+  const findings: CitationDensityFinding[] = [];
+  if (deltaMatch.totalsAnchors.length === 0) return findings;
+
+  // Search from the END: supplement prints repeat earlier cumulative totals
+  // blocks, and the FINAL block is the operative one.
+  const claimAnchor = (matches: (rowText: string) => boolean): EstimateRowAnchor | undefined => {
+    for (let index = deltaMatch.totalsAnchors.length - 1; index >= 0; index -= 1) {
+      const anchor = deltaMatch.totalsAnchors[index];
+      if (usedAnchorIds.has(anchor.anchorId)) continue;
+      if (matches(anchor.rowText.replace(/\s+/g, " ").toLowerCase())) return anchor;
+    }
+    return undefined;
+  };
+
+  const MAX_TOTALS_FINDINGS = 8;
+  for (const delta of deltaMatch.totalsDeltas) {
+    if (findings.length >= MAX_TOTALS_FINDINGS) break;
+    const categoryNeedle = delta.category.toLowerCase();
+    const anchor =
+      delta.kind === "total_difference"
+        ? claimAnchor((text) => /grand total|total cost of repair|workfile total|net cost/.test(text))
+        : delta.kind === "category_only_on_lower"
+          ? claimAnchor((text) => /grand total|total cost of repair|subtotal/.test(text))
+          : claimAnchor((text) => text.includes(categoryNeedle));
+    if (!anchor) continue; // never emit an unanchored finding
+
+    usedAnchorIds.add(anchor.anchorId);
+    const isRateKind = delta.kind === "rate_difference" || delta.kind === "hours_difference";
+    const slug = delta.category.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    findings.push(
+      buildRequiredDetectorFinding({
+        context,
+        anchor,
+        findingType: `totals-${delta.kind.replace(/_/g, "-")}-${slug || "category"}`,
+        title:
+          delta.kind === "rate_difference"
+            ? `Rate difference: ${delta.category}`
+            : delta.kind === "hours_difference"
+              ? `Hour subtotal difference: ${delta.category}`
+              : delta.kind === "total_difference"
+                ? "Estimate total difference"
+                : delta.kind === "category_only_on_lower"
+                  ? `Category only on the lower estimate: ${delta.category}`
+                  : `Category amount difference: ${delta.category}`,
+        category: isRateKind ? "labor_difference" : "other",
+        label:
+          delta.kind === "rate_difference"
+            ? "RATE DELTA"
+            : delta.kind === "hours_difference"
+              ? "HOURS DELTA"
+              : delta.kind === "total_difference"
+                ? "TOTAL GAP"
+                : "AMOUNT DELTA",
+        estimateGapType: isRateKind ? "reduced_by_carrier" : "needs_proof",
+        score: isRateKind ? 78 : 62,
+        safetyImpact: "low",
+        priority: isRateKind || delta.kind === "total_difference" ? "high" : "medium",
+        currentSupportSummary: `${delta.summary} (compared against ${deltaMatch.comparisonName}).`,
+        missingProofSummary:
+          "This difference comes from the two estimates' ESTIMATE TOTALS blocks — it is estimate-difference evidence, not proof of the correct rate or hours. Rates and category subtotals are typically the largest drivers of the total cost gap.",
+        recommendedNextAction:
+          isRateKind
+            ? "Verify the posted/agreed labor rates for this market and the hour subtotal roll-up on both estimates; a rate difference applies across every hour in the category."
+            : "Reconcile this category line-by-line across both estimates (parts invoices, sublet invoices, and miscellaneous charges) to confirm which document supports its amount.",
+        missingAuthorityTypes: isRateKind
+          ? ["posted/agreed labor rate documentation"]
+          : ["invoices/receipts supporting the category amount"],
+        amountImpact:
+          delta.higher && delta.lower && delta.higher.cost !== null && delta.lower.cost !== null
+            ? Math.round((delta.higher.cost - delta.lower.cost) * 100) / 100
+            : null,
+      })
+    );
+  }
+
+  // Lower-only section: lines the LOWER estimate carries with no counterpart
+  // here — the mirror view that exposes lower-side duplicated pay items and
+  // scope this estimate omitted. One summary finding, never per-line markers
+  // (those lines do not exist on the annotated PDF).
+  if (deltaMatch.lowerOnlyRows.length > 0) {
+    const anchor = claimAnchor((text) =>
+      /grand total|total cost of repair|subtotal|parts|miscellaneous/.test(text)
+    );
+    if (anchor) {
+      usedAnchorIds.add(anchor.anchorId);
+      const listed = deltaMatch.lowerOnlyRows.slice(0, 12).map((row) => {
+        const amount =
+          row.price !== null
+            ? ` ($${row.price.toFixed(2)})`
+            : row.labor !== null
+              ? ` (${row.labor} hr)`
+              : "";
+        return `L${row.lineNumber} ${row.opCode ? `${row.opCode} ` : ""}${row.description}${amount}`;
+      });
+      const extra =
+        deltaMatch.lowerOnlyRows.length > listed.length
+          ? ` …and ${deltaMatch.lowerOnlyRows.length - listed.length} more`
+          : "";
+      findings.push(
+        buildRequiredDetectorFinding({
+          context,
+          anchor,
+          findingType: "totals-lower-only-lines",
+          title: `Lines only on the lower estimate (${deltaMatch.lowerOnlyRows.length})`,
+          category: "other",
+          label: "LOWER-ONLY LINES",
+          estimateGapType: "needs_proof",
+          score: 58,
+          safetyImpact: "low",
+          priority: "medium",
+          currentSupportSummary: `${deltaMatch.comparisonName} carries ${deltaMatch.lowerOnlyRows.length} line(s) with no counterpart on this estimate: ${listed.join("; ")}${extra}.`,
+          missingProofSummary:
+            "Lower-only lines can be scope this estimate omitted, differently-worded equivalents, or duplicated pay items on the lower estimate (the same repair billed under two lines). They are part of the cost difference in BOTH directions.",
+          recommendedNextAction:
+            "Review each lower-only line against this estimate: confirm whether it is missing scope here, a wording mismatch, or a duplicate/overlapping charge on the lower estimate.",
+          missingAuthorityTypes: ["line-by-line reconciliation of lower-only items"],
+          amountImpact: null,
+        })
+      );
+    }
   }
 
   return findings;

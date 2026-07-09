@@ -104,6 +104,13 @@ export interface EstimateDeltaMatchResult {
   expandedScopeCount: number;
   /** Unmatched lines suppressed as OCR-uncertain (present-but-poorly-parsed). */
   ocrUncertainSuppressedCount: number;
+  /**
+   * Lower-estimate lines with no counterpart on the higher estimate — scope the
+   * lower document carries that the higher one does not (including duplicated
+   * pay items on the lower side). These have no anchor on the annotated PDF, so
+   * they surface as a report section, not per-line highlights.
+   */
+  lowerOnlyRows: EstimateDeltaRow[];
 }
 
 /**
@@ -155,10 +162,17 @@ const OP_CODES = [
   "Overlap",
 ] as const;
 
-const OP_CODE_PATTERN = new RegExp(
-  `^(${OP_CODES.map((code) => code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s*")).join("|")})\\b`,
-  "i"
-);
+// Op code may be GLUED to the description with no space ("RprHood",
+// "ReplBumper cover") in no-delimiter CCC text, so a plain \b never fires
+// between "Repl" and "Bumper". The primary pattern is case-sensitive and
+// matches when followed by end, non-letter, or an UPPERCASE letter — but never
+// a lowercase continuation ("Replace", "Additional"). The fallback keeps the
+// old case-insensitive word-boundary behavior for spaced text.
+const ESCAPED_OP_CODES = OP_CODES.map((code) =>
+  code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s*")
+).join("|");
+const OP_CODE_PATTERN = new RegExp(`^(${ESCAPED_OP_CODES})(?=$|[^a-z&])`);
+const OP_CODE_PATTERN_CI = new RegExp(`^(${ESCAPED_OP_CODES})\\b`, "i");
 
 // Labor-category markers (S01/S02) and component markers (m, M, T, X, s, etc.).
 const LABOR_CATEGORY_PATTERN = /^S\d{2}$/i;
@@ -190,14 +204,42 @@ const DESCRIPTION_STOPWORDS = new Set([
   "am",
 ]);
 
+/**
+ * True for non-estimate content that must never become a row OR an annotation
+ * anchor: rate/totals table lines, page footers with timestamps, carwise/legal
+ * boilerplate, and column-header lines.
+ */
+export function isNonEstimateContentRow(rawText: string): boolean {
+  const text = (rawText ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return true;
+  return (
+    // NOTE: totals lines glue words to digits ("SUBTOTALS23,918.00"), and \b
+    // does not fire between a letter and a digit — use bare substrings.
+    /hrs?\s*@|@\s*\$|\/hr\b/i.test(text) ||
+    /(subtotal|estimate totals|grand total|sales tax|total cost of repair|net cost of|workfile total|total adjustments|totals summary|cumulative effects|total supplement|supplement adjustments)/i.test(text) ||
+    /^(parts|miscellaneous|deductible)\s*\$?[\d,]/i.test(text) || // totals-table rows
+    // Cumulative-supplement summary lines ("Estimate5,477.96 JOHN RUSSO",
+    // "Supplement S014,131.58", "Additional Supplement Taxes0.01").
+    /^estimate\s*\$?[\d,]+\.\d{2}/i.test(text) ||
+    /^supplement s\d/i.test(text) ||
+    /^additional supplement/i.test(text) ||
+    /\d{1,2}\/\d{1,2}\/\d{2,4},?\s+\d{1,2}:\d{2}/.test(text) || // page footer timestamps
+    /page\s+\d+\s*$/i.test(text) ||
+    /^line\s*oper|^line\s+description/i.test(text) || // column headers
+    /get live updates|carwise\.com/i.test(text) ||
+    /^(any person who knowingly|the following is a list|estimate based on motor|the attached estimate)/i.test(text)
+  );
+}
+
 /** True for ALL-CAPS CCC section headers like "REAR BUMPER", "VEHICLE DIAGNOSTICS". */
 export function isSectionHeader(rawText: string): boolean {
   const text = rawText.replace(/\s+/g, " ").trim();
   if (!text) return false;
   // Section headers carry no decimal labor/paint columns and no op code.
   if (/\d+\.\d/.test(text)) return false;
-  // Strip a leading line number used by some CCC layouts.
-  const body = text.replace(/^\d{1,4}\s+/, "").trim();
+  // Strip a leading line number used by some CCC layouts — including glued
+  // no-delimiter forms ("43FENDER").
+  const body = text.replace(/^\d{1,4}\s*(?=[A-Z])/, "").trim();
   if (body.length < 3 || body.length > 48) return false;
   if (/[a-z]/.test(body)) return false; // must be upper-case only
   return /^[A-Z][A-Z0-9 &/.'-]+$/.test(body);
@@ -229,10 +271,218 @@ function tokenizeDescription(description: string): string[] {
   return description
     .toLowerCase()
     .replace(/\+\d+%/g, " ")
+    // Canonicalize alpha↔digit transitions ("gle350" ≡ "gle 350") so glued and
+    // spaced extractions of the same row produce identical token sets.
+    .replace(/([a-z])(?=\d)/g, "$1 ")
+    .replace(/(\d)(?=[a-z])/g, "$1 ")
     .replace(/[^a-z0-9 ]+/g, " ")
     .split(/\s+/)
     .map((token) => token.trim())
     .filter((token) => token.length >= 2 && !DESCRIPTION_STOPWORDS.has(token));
+}
+
+// ---------------------------------------------------------------------------
+// No-delimiter CCC text: some extractions glue EVERY column together
+// ("7*ReplBumper cover1678806106999911,308.00Incl.2.6"). Without splitting,
+// prices/hours parse as null, descriptions carry digit debris, matching fails,
+// and every line gets falsely flagged. explodeGluedRow() restores column
+// boundaries; it is idempotent on already-spaced text.
+// ---------------------------------------------------------------------------
+
+// A trailing "column blob": digits, money, hours, qty, markers (m/M/s/T/X),
+// "Incl.", commas, minus signs. Never ordinary words.
+function isColumnBlob(value: string): boolean {
+  if (!value || !/\d/.test(value)) return false;
+  return /^(?:Incl\.|[\d,.\-\s]|[mMsSTXbBpP](?![a-z]))+$/.test(value);
+}
+
+/**
+ * Split a glued digit run into [partNumber?, qty?, money]. CCC prints
+ * part+qty+price contiguously ("16788507081598.00" = 1678850708 / 1 / 598.00).
+ * Preference order mirrors real estimates: a qty of "1" wins, then any other
+ * single-digit qty with the longest remaining part, then 2-digit qty, then a
+ * bare money value.
+ */
+interface GluedMoneyCandidate {
+  part: string;
+  qty: string;
+  money: string;
+  value: number;
+}
+
+function enumerateGluedMoneyCandidates(run: string): GluedMoneyCandidate[] {
+  const candidates: GluedMoneyCandidate[] = [];
+  const moneyRe = /(\d{1,3}(?:,\d{3})+\.\d{2}|\d{1,6}\.\d{2})$/;
+  // Enumerate money suffixes by shrinking the run from the left.
+  for (let start = 0; start < run.length; start += 1) {
+    const suffix = run.slice(start);
+    const match = suffix.match(moneyRe);
+    if (!match || match[1] !== suffix) continue;
+    // CCC never prints leading-zero prices ("09.60") and always comma-groups
+    // $1,000+ — a bare "96539.60" is a mis-split, not a real amount.
+    if (/^0\d/.test(suffix)) continue;
+    const value = Number(suffix.replace(/,/g, ""));
+    if (!Number.isFinite(value) || value > 99999.99) continue;
+    if (value >= 1000 && !suffix.includes(",")) continue;
+    const head = run.slice(0, start);
+    for (const qtyLen of [1, 2, 0]) {
+      if (head.length < qtyLen) continue;
+      const qty = qtyLen ? head.slice(-qtyLen) : "";
+      if (qty && !/^[1-9]\d?$/.test(qty)) continue;
+      const part = head.slice(0, head.length - qtyLen);
+      // Short leftovers ("450" from "GLE4501890.00") are description tails,
+      // not part numbers — still valid splits, scored without a part bonus.
+      if (part && !/^[A-Za-z0-9-]+$/.test(part)) continue;
+      candidates.push({ part, qty, money: suffix, value });
+    }
+  }
+  return candidates;
+}
+
+function splitGluedMoneyRun(run: string): string[] | null {
+  const candidates = enumerateGluedMoneyCandidates(run);
+  if (candidates.length === 0) return null;
+  // Preference order (validated against real CCC part+qty+price runs):
+  // 1. qty "1" (dominant in CCC), then any single-digit qty, then 2-digit;
+  // 2. a plausible part: empty (description-glued) or >= 10 chars (OEM), then
+  //    5-9 chars, penalizing runt fragments;
+  // 3. more digits kept in the money value ("…41"+"1"+"125.00" beats
+  //    "…411"+"1"+"25.00");
+  // 4. longer part as the final tiebreaker.
+  const score = (c: { part: string; qty: string; money: string }) =>
+    (c.qty === "1" ? 4000 : c.qty.length === 1 ? 2000 : c.qty.length === 2 ? 1000 : 0) +
+    (c.part === "" || c.part.length >= 10 ? 600 : c.part.length >= 5 ? 300 : 0) +
+    c.money.replace(/\D/g, "").length * 20 +
+    c.part.length;
+  candidates.sort((a, b) => score(b) - score(a));
+  const best = candidates[0];
+  return [best.part, best.qty, best.money].filter(Boolean);
+}
+
+/**
+ * All prices a row's glued part/qty/price run could plausibly have split into.
+ * Only rows whose columns came from a no-delimiter run are ambiguous: a long
+ * numeric part number, or a part-less qty+price pair. When the counterpart
+ * row's price appears in this set, the "difference" is a split artifact, not a
+ * real price change.
+ */
+function priceSplitAlternates(row: EstimateDeltaRow): Set<number> {
+  const alternates = new Set<number>();
+  if (row.price === null) return alternates;
+  const part = (row.partNumber ?? "").replace(/-/g, "");
+  const ambiguous = /^\d{6,}$/.test(part) || (part === "" && row.qty !== null);
+  if (!ambiguous) return alternates;
+  const money = row.price.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const run = `${part}${row.qty ?? ""}${money}`;
+  for (const candidate of enumerateGluedMoneyCandidates(run)) {
+    alternates.add(candidate.value);
+  }
+  return alternates;
+}
+
+/** Restore spaces between glued estimate-row columns (idempotent). */
+export function explodeGluedRow(rawText: string): string {
+  let text = rawText.replace(/\s+/g, " ").trim();
+  if (!text) return text;
+
+  // "Incl." glued straight onto the description ("fender linerIncl.") — no
+  // digits involved, so the blob scan below never sees it.
+  text = text.replace(/([a-z)])(Incl\.)/g, "$1 $2");
+
+  // 1. Find the earliest description→column-blob boundary (a letter/'%'/')'
+  //    followed by digits, a minus-number, or a marker+digit) where everything
+  //    after is column content only. Interior alphanumerics (GLE350, 50R19)
+  //    never qualify because the remainder contains ordinary words.
+  for (let i = 1; i < text.length; i += 1) {
+    const prev = text[i - 1];
+    const cur = text[i];
+    const nxt = text[i + 1] ?? "";
+    // prev-class deliberately EXCLUDES "." (it would split inside decimals)
+    // and the marker set excludes s/S (it would split plural words).
+    const boundary =
+      /[A-Za-z)%'"&]/.test(prev) &&
+      (/\d/.test(cur) ||
+        (cur === "-" && /\d/.test(nxt)) ||
+        (/[mMTX]/.test(cur) && /\d/.test(nxt)));
+    if (!boundary) continue;
+    const remainder = text.slice(i);
+    // Never split INSIDE an alphanumeric part number ("GM1144143", "C25J75"):
+    // the rest of that token must itself look like glued column data — a
+    // decimal value or a 9+ digit run — before the boundary is real.
+    const tokenEnd = text.indexOf(" ", i);
+    const withinToken = tokenEnd === -1 ? text.slice(i) : text.slice(i, tokenEnd);
+    const splittable =
+      /\.\d/.test(withinToken) || withinToken.replace(/\D/g, "").length >= 9;
+    if (!splittable) continue;
+    if (isColumnBlob(remainder)) {
+      const head = text.slice(0, i);
+      // 2. Explode the blob itself.
+      let blob = remainder
+        .replace(/(Incl\.)/gi, " $1 ")
+        // A comma before 4+ digits is a description tail ("350,") glued to a
+        // part/qty/price run — money grouping is always exactly 3 digits.
+        .replace(/,(?=\d{4,})/g, ", ")
+        // money → whatever follows; but NOT when a bare ".d" follows — that
+        // means the "2 decimals" were really two glued 1-decimal hour values
+        // ("Hood1.03.2" = 1.0 labor + 3.2 paint, not $1.03), handled below.
+        .replace(/(\.\d{2})(?=[^.\s])/g, "$1 ")
+        .replace(/([mMsTX])(?=-?[\d.])/g, "$1 ") // marker → number
+        .replace(/(\d)([mMsTXbBpP])(?=\s|$)/g, "$1 $2"); // number → trailing marker
+      // Hour columns glue to each other ("2.41.8" → "2.4 1.8"). Hours carry
+      // exactly ONE decimal, so only split when a FULL hour number follows —
+      // never inside a 2-decimal money value ("11,308.00" stays intact).
+      let previous = "";
+      while (previous !== blob) {
+        previous = blob;
+        blob = blob.replace(/(\d\.\d)(?=-?\d+\.\d)/g, "$1 ");
+      }
+      // Part/qty/price runs ("16788507081598.00" → "1678850708 1 598.00").
+      // When a separate qty token already precedes the money ("1 125.00"),
+      // leave the money alone; a glued run carries its own qty prefix
+      // ("125.00" → "1 25.00"), matching how CCC prints qty before price.
+      const blobTokens = blob.split(" ").filter(Boolean);
+      const blobHasMoney = blobTokens.some((token) => /\.\d{2}(?:$|\D)/.test(token));
+      blob = blobTokens
+        .map((token, index) => {
+          // Qty glued to a lone HOURS value ("10.5" = qty 1 + 0.5 hr, "31.5" =
+          // qty 3 + 1.5 hr) — only in money-less manual rows, where the qty
+          // column prints right against the hours.
+          const qtyHours = !blobHasMoney && token.match(/^([1-9])(\d{1,2}\.\d)$/);
+          if (qtyHours) {
+            return `${qtyHours[1]} ${qtyHours[2]}`;
+          }
+          if (!/^[A-Za-z0-9,-]*\d[,\d]*\.\d{2}$/.test(token)) return token;
+          const previousToken = blobTokens[index - 1] ?? "";
+          if (/^[1-9]\d?$/.test(previousToken)) return token; // qty already separate
+          const split = splitGluedMoneyRun(token);
+          return split ? split.join(" ") : token;
+        })
+        .join(" ");
+      text = `${head} ${blob}`.replace(/\s+/g, " ").trim();
+      break;
+    }
+  }
+
+  // Space-separated long money runs (from wrapped-row rejoins) still need the
+  // part/qty/price split: a "price" with 7+ integer digits is a glued run,
+  // never a real dollar amount.
+  const finalTokens = text.split(" ").filter(Boolean);
+  text = finalTokens
+    .map((token, index) => {
+      if (!/^[A-Za-z0-9,-]*\d[,\d]*\.\d{2}$/.test(token)) return token;
+      const integerDigits = token.split(".")[0].replace(/\D/g, "").length;
+      if (integerDigits < 7 && !/[A-Za-z]/.test(token)) return token;
+      const previousToken = finalTokens[index - 1] ?? "";
+      if (/^[1-9]\d?$/.test(previousToken)) return token;
+      const split = splitGluedMoneyRun(token);
+      return split ? split.join(" ") : token;
+    })
+    .join(" ");
+
+  return text;
 }
 
 function stripLeadingMetadata(rawText: string): { body: string; lineNumber: number | null } {
@@ -242,8 +492,9 @@ function stripLeadingMetadata(rawText: string): { body: string; lineNumber: numb
   // Leading optional "Line" keyword.
   body = body.replace(/^line\s+/i, "");
 
-  // Leading line number.
-  const lineMatch = body.match(/^(\d{1,4})\b\s*/);
+  // Leading line number — including glued no-delimiter forms ("6Repl…",
+  // "8S02 Repl…") where no \b exists between the digit and the letter.
+  const lineMatch = body.match(/^(\d{1,4})(?=\D|$)\s*/);
   if (lineMatch) {
     lineNumber = Number(lineMatch[1]);
     body = body.slice(lineMatch[0].length);
@@ -305,7 +556,53 @@ function extractTrailingColumns(body: string): {
   }
 
   if (priceIndex === -1) {
-    // No money column → treat the whole body as description (note rows, etc.).
+    // No money column (R&I / Rpr / Add-for rows). Still pull trailing hour
+    // columns and Incl. markers so labor/paint deltas compare correctly.
+    let end = tokens.length;
+    const trailing: string[] = [];
+    while (end > 0) {
+      const token = tokens[end - 1];
+      if (COLUMN_MARKER_PATTERN.test(token)) {
+        end -= 1;
+        continue;
+      }
+      if (/^incl\.?$/i.test(token) || /^-?\d{1,2}\.\d$/.test(token)) {
+        trailing.unshift(token);
+        end -= 1;
+        continue;
+      }
+      break;
+    }
+    let labor: number | null = null;
+    let laborIncluded = false;
+    let paint: number | null = null;
+    let paintIncluded = false;
+    if (trailing.length > 0 && end > 0) {
+      // The qty column prints just before the hours ("Tint color 1 0.5") —
+      // consume it so it never leaks into the description.
+      let qty: number | null = null;
+      if (end > 1 && /^[1-9]\d?$/.test(tokens[end - 1])) {
+        qty = Number(tokens[end - 1]);
+        end -= 1;
+      }
+      const [first, second] = trailing;
+      if (/^incl\.?$/i.test(first)) laborIncluded = true;
+      else labor = Number(first);
+      if (second !== undefined) {
+        if (/^incl\.?$/i.test(second)) paintIncluded = true;
+        else paint = Number(second);
+      }
+      return {
+        descriptionBody: tokens.slice(0, end).join(" ").trim(),
+        partNumber: null,
+        qty,
+        price: null,
+        labor,
+        laborIncluded,
+        paint,
+        paintIncluded,
+      };
+    }
     return {
       descriptionBody: body,
       partNumber: null,
@@ -401,8 +698,10 @@ function isPartNumberToken(token: string): boolean {
   const hasLetter = /[A-Za-z]/.test(value);
   const hasDigit = /\d/.test(value);
   if (hasLetter && hasDigit && /^[A-Za-z0-9-]+$/.test(value)) return true;
-  // Pure numeric part numbers are usually >= 6 digits (e.g. 84394021, 9132667).
+  // Pure numeric part numbers are usually >= 6 digits (e.g. 84394021, 9132667),
+  // optionally dash-grouped ("167-880-44-09").
   if (!hasLetter && /^\d{6,}$/.test(value)) return true;
+  if (!hasLetter && /^\d[\d-]{5,}\d$/.test(value) && value.replace(/-/g, "").length >= 6) return true;
   return false;
 }
 
@@ -415,17 +714,22 @@ export function parseCccEstimateRow(
   rawText: string,
   context?: { section?: string | null; anchorId?: string; pageNumber?: number | null }
 ): EstimateDeltaRow | null {
-  const text = (rawText ?? "").replace(/\s+/g, " ").trim();
+  if (isNonEstimateContentRow(rawText ?? "")) return null;
+  // Estimate notes are prose attached to a row, never a row themselves.
+  if (/^note\b/i.test((rawText ?? "").trim())) return null;
+  // Restore column boundaries first — no-delimiter CCC extractions glue the
+  // description, part number, qty, price, and hours into one run.
+  const text = explodeGluedRow(rawText ?? "");
   if (!text) return null;
   if (isSectionHeader(text)) return null;
 
   const { body, lineNumber } = stripLeadingMetadata(text);
   if (!body) return null;
 
-  // Operation code is optional; capture it when present.
+  // Operation code is optional; capture it when present (glued or spaced).
   let opCode: string | null = null;
   let descriptionSource = body;
-  const opMatch = body.match(OP_CODE_PATTERN);
+  const opMatch = body.match(OP_CODE_PATTERN) ?? body.match(OP_CODE_PATTERN_CI);
   if (opMatch) {
     opCode = normalizeOpCode(opMatch[1]);
     descriptionSource = body.slice(opMatch[0].length).trim();
@@ -434,6 +738,9 @@ export function parseCccEstimateRow(
   const columns = extractTrailingColumns(descriptionSource);
   const description = cleanDescription(columns.descriptionBody || descriptionSource);
   if (!description) return null;
+  // A "description" that is pure column content (".50T", "0.3") is a stray
+  // value-continuation fragment, never a real operation line.
+  if (isColumnBlob(description)) return null;
 
   const descriptionTokens = tokenizeDescription(description);
   // Require a usable description: at least one meaningful token, OR a part number.
@@ -475,6 +782,59 @@ export function parseCccEstimateRow(
  * Parse a full estimate's plain text into structured rows, tracking the active
  * CCC section header so each row knows which section it belongs to.
  */
+export interface WrappedEstimateLineGroup {
+  /** The rebuilt logical row text (wrapped lines re-joined). */
+  text: string;
+  /** Indexes into the input array of the lines this group merged. */
+  sourceIndexes: number[];
+}
+
+/**
+ * Rebuild logical estimate rows from print-wrapped lines. Every CCC estimate
+ * row STARTS with its line number; wrapped descriptions and value columns
+ * continue on following lines ("100*ReplGear assy GLE350, GLE450," /
+ * "GLE580, GLE450e w/o activ bdy" / "cntrl14,994.00m1.3"). Continuations are
+ * appended to the last numbered line; "Note:" lines end the row (their wraps
+ * never merge). Shared by raw-text parsing and PDF anchor-row grouping.
+ */
+export function groupWrappedEstimateLines(lines: string[]): WrappedEstimateLineGroup[] {
+  const groups: WrappedEstimateLineGroup[] = [];
+  let open: WrappedEstimateLineGroup | null = null;
+  // A row start is a line number NOT followed by more digits or a decimal
+  // point — "12.50T0.3" and "0.3 Paint Hours)" are continuations, not rows.
+  const startsRow = (line: string) => /^\d{1,4}(?=$|[^.\d])/.test(line);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = (lines[index] ?? "").replace(/\s+/g, " ").trim();
+    if (!line) continue;
+    if (isSectionHeader(line) || /^note\b/i.test(line)) {
+      groups.push({ text: line, sourceIndexes: [index] });
+      open = null;
+      continue;
+    }
+    // Pure value continuations glue directly (they were glued in print) —
+    // checked BEFORE row-start detection because they can begin with digits.
+    if (open && isColumnBlob(line) && !isNonEstimateContentRow(line)) {
+      open.text = `${open.text}${line}`;
+      open.sourceIndexes.push(index);
+      continue;
+    }
+    if (startsRow(line)) {
+      open = { text: line, sourceIndexes: [index] };
+      groups.push(open);
+      continue;
+    }
+    if (open && !isNonEstimateContentRow(line)) {
+      // Description continuations join with a space.
+      open.text = `${open.text} ${line}`;
+      open.sourceIndexes.push(index);
+      continue;
+    }
+    groups.push({ text: line, sourceIndexes: [index] });
+    open = null;
+  }
+  return groups;
+}
+
 export function parseCccEstimateRows(text: string): EstimateDeltaRow[] {
   if (!text) return [];
   const lines = text
@@ -486,15 +846,25 @@ export function parseCccEstimateRows(text: string): EstimateDeltaRow[] {
 
   const rows: EstimateDeltaRow[] = [];
   let section: string | null = null;
-  for (const line of lines) {
+  for (const group of groupWrappedEstimateLines(lines)) {
+    const line = group.text;
     if (isSectionHeader(line)) {
-      section = line.replace(/^\d{1,4}\s+/, "").trim();
+      section = line.replace(/^\d{1,4}\s*(?=[A-Z])/, "").trim();
       continue;
     }
     const row = parseCccEstimateRow(line, { section });
     if (row) rows.push(row);
   }
-  return rows;
+
+  // CCC line numbers are unique per estimate, but multi-page prints repeat
+  // supplement summary pages — keep the first (usually fullest) copy.
+  const seenLineNumbers = new Set<number>();
+  return rows.filter((row) => {
+    if (row.lineNumber === null) return true;
+    if (seenLineNumbers.has(row.lineNumber)) return false;
+    seenLineNumbers.add(row.lineNumber);
+    return true;
+  });
 }
 
 /** Build a delta row from already-extracted source PDF row text + metadata. */
@@ -556,9 +926,15 @@ function tokenOverlap(
  */
 function isDescriptionMatch(overlap: ReturnType<typeof tokenOverlap>): boolean {
   if (overlap.shared >= DESCRIPTION_MATCH_MIN_SHARED && overlap.ratio >= DESCRIPTION_MATCH_MIN_RATIO) {
+    // Exactly 2 shared tokens at a sub-0.75 ratio is weak evidence — "LT Lower
+    // absorber" vs "LT Lower cntrl arm" shares only the generic {lt, lower}.
+    if (overlap.shared === 2 && overlap.ratio < 0.75) return false;
     return true;
   }
-  return overlap.shared >= 1 && overlap.ratio >= 0.85 && overlap.maxSharedLen >= 5;
+  if (overlap.shared >= 1 && overlap.ratio >= 0.85 && overlap.maxSharedLen >= 5) return true;
+  // Single-word operations ("Rpr Hood" vs "Rpr Hood") — full overlap of one
+  // 4-letter panel name is still an exact description.
+  return overlap.shared >= 1 && overlap.ratio >= 1 && overlap.maxSharedLen >= 4;
 }
 
 const DESCRIPTION_MATCH_MIN_RATIO = 0.6;
@@ -574,10 +950,32 @@ type ScoredMatch = {
   score: number;
 };
 
+const DIRECTIONAL_TOKENS = new Set([
+  "lt",
+  "rt",
+  "ft",
+  "rr",
+  "front",
+  "rear",
+  "upper",
+  "lower",
+  "inner",
+  "outer",
+]);
+
+function directionalTokens(tokens: string[]): Set<string> {
+  const found = new Set<string>();
+  for (const token of tokens) {
+    if (DIRECTIONAL_TOKENS.has(token)) found.add(token);
+  }
+  return found;
+}
+
 function findBestLowerMatch(
   higherRow: EstimateDeltaRow,
   lowerRows: EstimateDeltaRow[],
-  used: Set<number>
+  used: Set<number>,
+  options?: { exactOnly?: boolean }
 ): ScoredMatch | null {
   let best: ScoredMatch | null = null;
   for (let index = 0; index < lowerRows.length; index += 1) {
@@ -585,6 +983,7 @@ function findBestLowerMatch(
     const lowerRow = lowerRows[index];
     let score = 0;
     let basis: EstimateLineItemDelta["matchBasis"] = "none";
+    let exact = false;
 
     if (
       higherRow.partNumber &&
@@ -593,11 +992,45 @@ function findBestLowerMatch(
     ) {
       score = 100;
       basis = "part_number";
+      exact = true;
     } else {
+      // Side/position tokens are hard discriminators: "LT Rr fender liner"
+      // is never the same line as "LT Ft fender liner", however many other
+      // tokens they share. Only enforced when BOTH rows carry them.
+      const dirHigher = directionalTokens(higherRow.descriptionTokens);
+      const dirLower = directionalTokens(lowerRow.descriptionTokens);
+      if (
+        dirHigher.size > 0 &&
+        dirLower.size > 0 &&
+        (dirHigher.size !== dirLower.size ||
+          [...dirHigher].some((token) => !dirLower.has(token)))
+      ) {
+        continue;
+      }
       const overlap = tokenOverlap(higherRow.descriptionTokens, lowerRow.descriptionTokens);
       if (isDescriptionMatch(overlap)) {
         score = 40 + overlap.shared * 10 + Math.round(overlap.ratio * 20);
         basis = "description";
+        // Exact token-set matches beat superset rows: "LT Hub assy" must pair
+        // with "LT Hub assy", never "LT Hub assy mount bolt".
+        const higherSize = new Set(higherRow.descriptionTokens).size;
+        const lowerSize = new Set(lowerRow.descriptionTokens).size;
+        if (overlap.ratio >= 1 && higherSize === lowerSize) {
+          score += 25;
+          exact = true;
+        } else {
+          // Penalize size mismatch so sibling rows (nut/bolt variants) lose to
+          // the true counterpart when both share all of the smaller side.
+          score -= Math.min(10, Math.abs(higherSize - lowerSize) * 3);
+        }
+        // Same-section pairs beat cross-section pairs — generic rows ("Add for
+        // Clear Coat", "Mask for primer") repeat in many sections and must pair
+        // within their own panel, not the first unused twin elsewhere.
+        const higherSection = normalizeCategoryText(higherRow.section ?? "");
+        const lowerSection = normalizeCategoryText(lowerRow.section ?? "");
+        if (higherSection && lowerSection) {
+          score += higherSection === lowerSection ? 10 : -5;
+        }
         // Same line number is a useful tiebreaker but never the sole basis.
         if (
           higherRow.lineNumber !== null &&
@@ -617,6 +1050,7 @@ function findBestLowerMatch(
       }
     }
 
+    if (options?.exactOnly && !exact) continue;
     if (score > 0 && (!best || score > best.score)) {
       best = { row: lowerRow, index, basis, score };
     }
@@ -648,6 +1082,13 @@ export function matchEstimateLineItems(params: {
   const { lowerRows, higherRows, lowerIsOcr = false, lowerCategoryText } = params;
   const used = new Set<number>();
   const deltas: EstimateLineItemDelta[] = [];
+  // Some carrier layouts print no part-number column at all; that layout
+  // difference must never read as per-line "part added" changes.
+  // "Has a part column" means the column actually prints — a handful of stray
+  // part-shaped tokens in a part-less layout must not flip this on.
+  const lowerPartCount = lowerRows.filter((row) => Boolean(row.partNumber)).length;
+  const lowerHasPartColumn =
+    lowerPartCount >= Math.max(3, Math.ceil(lowerRows.length * 0.1));
   let matchedPairCount = 0;
   let missingOperationCount = 0;
   let expandedScopeCount = 0;
@@ -705,8 +1146,22 @@ export function matchEstimateLineItems(params: {
     return !descriptionPresentInLower(row); // description phrase not in OCR => added
   };
 
-  for (const higherRow of higherRows) {
-    const match = findBestLowerMatch(higherRow, lowerRows, used);
+  // Pass 1: exact matches (part number, or identical token set) claim their
+  // lower rows FIRST, so a fuzzy sibling earlier in the estimate ("RT Lower
+  // ball joint nut upper") cannot steal the row an exact twin needs ("LT Lower
+  // ball joint nut upper").
+  const preclaimed = new Map<number, ScoredMatch>();
+  higherRows.forEach((higherRow, higherIndex) => {
+    const exactMatch = findBestLowerMatch(higherRow, lowerRows, used, { exactOnly: true });
+    if (exactMatch) {
+      preclaimed.set(higherIndex, exactMatch);
+      used.add(exactMatch.index);
+    }
+  });
+
+  for (let higherIndex = 0; higherIndex < higherRows.length; higherIndex += 1) {
+    const higherRow = higherRows[higherIndex];
+    const match = preclaimed.get(higherIndex) ?? findBestLowerMatch(higherRow, lowerRows, used);
 
     if (!match) {
       // OCR-present-but-poorly-parsed: the line's part number / description is
@@ -810,7 +1265,12 @@ export function matchEstimateLineItems(params: {
     } else if (
       priceDelta !== null &&
       priceDelta >= MATERIAL_PRICE_DELTA &&
-      (higherRow.partNumber ?? null) !== (lowerRow.partNumber ?? null)
+      (higherRow.partNumber ?? null) !== (lowerRow.partNumber ?? null) &&
+      // Glued part/qty/price runs split ambiguously; when the counterpart's
+      // price is a plausible alternate split of this row's run (or vice
+      // versa), the "difference" is a split artifact, not a price change.
+      !(lowerRow.price !== null && priceSplitAlternates(higherRow).has(lowerRow.price)) &&
+      !(higherRow.price !== null && priceSplitAlternates(lowerRow).has(higherRow.price))
     ) {
       deltas.push({
         kind: "part_or_price_difference",
@@ -829,7 +1289,7 @@ export function matchEstimateLineItems(params: {
       // change if the OPERATION or PART TYPE changed (e.g. Blnd->Rpr on a fender,
       // R&I->Repl on an instrument panel). These are the escalations a value-only
       // diff misses.
-      const changedFields = matchedFieldChanges(higherRow, lowerRow);
+      const changedFields = matchedFieldChanges(higherRow, lowerRow, { lowerHasPartColumn });
       if (changedFields.length > 0) {
         deltas.push({
           kind: "operation_change",
@@ -847,6 +1307,18 @@ export function matchEstimateLineItems(params: {
     }
   }
 
+  // Lines only the LOWER estimate carries (never matched by any higher row).
+  // This is the mirror view that catches lower-side-only scope — including a
+  // duplicated pay item the higher estimate billed once.
+  // Real estimate rows always carry a line number — number-less strays are
+  // adjustment/betterment or summary spillover, not operations.
+  const lowerOnlyRows = lowerRows.filter(
+    (row, index) =>
+      !used.has(index) &&
+      row.lineNumber !== null &&
+      (row.price !== null || row.labor !== null || row.paint !== null || row.opCode !== null)
+  );
+
   return {
     deltas,
     lowerRowCount: lowerRows.length,
@@ -855,11 +1327,233 @@ export function matchEstimateLineItems(params: {
     missingOperationCount,
     expandedScopeCount,
     ocrUncertainSuppressedCount,
+    lowerOnlyRows,
   };
 }
 
+// ---------------------------------------------------------------------------
+// Rate / totals lane: the ESTIMATE TOTALS block is where rate and hour-subtotal
+// differences live — the single largest driver of cost gaps between two
+// estimates, invisible to line-item matching.
+// ---------------------------------------------------------------------------
+
+export interface EstimateTotalsCategory {
+  /** As printed: "Body Labor", "Paint Supplies", "Parts", "Miscellaneous". */
+  category: string;
+  hours: number | null;
+  rate: number | null;
+  cost: number | null;
+}
+
+export interface EstimateTotalsSummary {
+  categories: EstimateTotalsCategory[];
+  subtotal: number | null;
+  salesTax: number | null;
+  grandTotal: number | null;
+}
+
+/**
+ * Parse the ESTIMATE TOTALS block ("Body Labor40.5 hrs@$ 75.00 /hr3,037.50",
+ * "Parts16,930.28", "Grand Total30,673.27"). Uses the LAST totals block in the
+ * document — supplement prints repeat earlier cumulative blocks.
+ */
+export function parseCccEstimateTotals(text: string): EstimateTotalsSummary | null {
+  if (!text) return null;
+  const lines = text
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim());
+  let start = -1;
+  for (let index = 0; index < lines.length; index += 1) {
+    if (/^estimate totals\b/i.test(lines[index])) start = index;
+  }
+  if (start === -1) return null;
+
+  const summary: EstimateTotalsSummary = {
+    categories: [],
+    subtotal: null,
+    salesTax: null,
+    grandTotal: null,
+  };
+  const money = (value: string) => Number(value.replace(/[$,]/g, ""));
+  for (let index = start + 1; index < Math.min(lines.length, start + 25); index += 1) {
+    const line = lines[index];
+    if (!line) continue;
+    const labor = line.match(
+      /^([A-Za-z][A-Za-z ]*?)\s*(\d{1,3}(?:\.\d)?)\s*hrs?\s*@\s*\$\s*([\d,]+\.\d{2})\s*\/\s*hr\s*([\d,]+\.\d{2})$/i
+    );
+    if (labor) {
+      summary.categories.push({
+        category: labor[1].trim(),
+        hours: Number(labor[2]),
+        rate: money(labor[3]),
+        cost: money(labor[4]),
+      });
+      continue;
+    }
+    const tax = line.match(/^sales tax\b.*?([\d,]+\.\d{2})$/i);
+    if (tax) {
+      summary.salesTax = money(tax[1]);
+      continue;
+    }
+    const grand = line.match(/^(grand total|total cost of repairs?|workfile total:?)\s*\$?\s*([\d,]+\.\d{2})$/i);
+    if (grand) {
+      summary.grandTotal = money(grand[2]);
+      continue;
+    }
+    const sub = line.match(/^subtotal\s*\$?\s*([\d,]+\.\d{2})$/i);
+    if (sub) {
+      summary.subtotal = money(sub[1]);
+      continue;
+    }
+    const amountOnly = line.match(/^(parts|miscellaneous|other charges)\s*\$?\s*([\d,]+\.\d{2})$/i);
+    if (amountOnly) {
+      summary.categories.push({
+        category: amountOnly[1].replace(/\b[a-z]/g, (c) => c.toUpperCase()),
+        hours: null,
+        rate: null,
+        cost: money(amountOnly[2]),
+      });
+      continue;
+    }
+    if (/^(deductible|total adjustments|net cost)/i.test(line)) break;
+  }
+  return summary.categories.length > 0 || summary.grandTotal !== null ? summary : null;
+}
+
+export type EstimateTotalsDeltaKind =
+  | "rate_difference"
+  | "hours_difference"
+  | "category_amount_difference"
+  | "category_missing_on_lower"
+  | "category_only_on_lower"
+  | "total_difference";
+
+export interface EstimateTotalsDelta {
+  kind: EstimateTotalsDeltaKind;
+  category: string;
+  higher: EstimateTotalsCategory | null;
+  lower: EstimateTotalsCategory | null;
+  summary: string;
+}
+
+const fmtMoney = (value: number) =>
+  `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const fmtHours = (value: number) => `${Math.round(value * 10) / 10} hr`;
+
+/**
+ * Compare the two ESTIMATE TOTALS blocks and emit headline differences: rate
+ * gaps, hour-subtotal gaps, category amount gaps, and categories one estimate
+ * carries that the other does not. Pair-agnostic — works for any higher/lower
+ * estimate pairing.
+ */
+export function compareEstimateTotals(params: {
+  higher: EstimateTotalsSummary | null;
+  lower: EstimateTotalsSummary | null;
+}): EstimateTotalsDelta[] {
+  const { higher, lower } = params;
+  if (!higher || !lower) return [];
+  const deltas: EstimateTotalsDelta[] = [];
+  const lowerByName = new Map(lower.categories.map((c) => [c.category.toLowerCase(), c]));
+  const higherNames = new Set(higher.categories.map((c) => c.category.toLowerCase()));
+
+  for (const higherCategory of higher.categories) {
+    const lowerCategory = lowerByName.get(higherCategory.category.toLowerCase()) ?? null;
+    if (!lowerCategory) {
+      deltas.push({
+        kind: "category_missing_on_lower",
+        category: higherCategory.category,
+        higher: higherCategory,
+        lower: null,
+        summary: `${higherCategory.category} (${higherCategory.cost !== null ? fmtMoney(higherCategory.cost) : "amount unknown"}) is billed on the higher estimate but has no category on the lower estimate's totals.`,
+      });
+      continue;
+    }
+    const rateDiff =
+      higherCategory.rate !== null && lowerCategory.rate !== null
+        ? Math.round((higherCategory.rate - lowerCategory.rate) * 100) / 100
+        : null;
+    const hoursDiff =
+      higherCategory.hours !== null && lowerCategory.hours !== null
+        ? Math.round((higherCategory.hours - lowerCategory.hours) * 10) / 10
+        : null;
+    if (rateDiff !== null && Math.abs(rateDiff) >= 0.5) {
+      const hourPart =
+        hoursDiff !== null && Math.abs(hoursDiff) >= 0.1
+          ? ` and ${fmtHours(higherCategory.hours ?? 0)} vs ${fmtHours(lowerCategory.hours ?? 0)} (${hoursDiff > 0 ? "+" : ""}${fmtHours(hoursDiff)})`
+          : "";
+      deltas.push({
+        kind: "rate_difference",
+        category: higherCategory.category,
+        higher: higherCategory,
+        lower: lowerCategory,
+        summary: `${higherCategory.category} rate is ${fmtMoney(higherCategory.rate ?? 0)}/hr on the higher estimate vs ${fmtMoney(lowerCategory.rate ?? 0)}/hr on the lower estimate (${rateDiff > 0 ? "+" : ""}${fmtMoney(rateDiff)}/hr)${hourPart} — category total ${fmtMoney(higherCategory.cost ?? 0)} vs ${fmtMoney(lowerCategory.cost ?? 0)}.`,
+      });
+      continue;
+    }
+    if (hoursDiff !== null && Math.abs(hoursDiff) >= 0.5) {
+      deltas.push({
+        kind: "hours_difference",
+        category: higherCategory.category,
+        higher: higherCategory,
+        lower: lowerCategory,
+        summary: `${higherCategory.category} subtotal is ${fmtHours(higherCategory.hours ?? 0)} on the higher estimate vs ${fmtHours(lowerCategory.hours ?? 0)} on the lower estimate (${hoursDiff > 0 ? "+" : ""}${fmtHours(hoursDiff)}) at the same ${fmtMoney(lowerCategory.rate ?? 0)}/hr rate.`,
+      });
+      continue;
+    }
+    const costDiff =
+      higherCategory.cost !== null && lowerCategory.cost !== null
+        ? Math.round((higherCategory.cost - lowerCategory.cost) * 100) / 100
+        : null;
+    if (
+      costDiff !== null &&
+      Math.abs(costDiff) >= 100 &&
+      higherCategory.rate === null // rate categories already covered above
+    ) {
+      deltas.push({
+        kind: "category_amount_difference",
+        category: higherCategory.category,
+        higher: higherCategory,
+        lower: lowerCategory,
+        summary: `${higherCategory.category} totals ${fmtMoney(higherCategory.cost ?? 0)} on the higher estimate vs ${fmtMoney(lowerCategory.cost ?? 0)} on the lower estimate (${costDiff > 0 ? "+" : ""}${fmtMoney(costDiff)}).`,
+      });
+    }
+  }
+
+  for (const lowerCategory of lower.categories) {
+    if (!higherNames.has(lowerCategory.category.toLowerCase())) {
+      deltas.push({
+        kind: "category_only_on_lower",
+        category: lowerCategory.category,
+        higher: null,
+        lower: lowerCategory,
+        summary: `${lowerCategory.category} (${lowerCategory.cost !== null ? fmtMoney(lowerCategory.cost) : "amount unknown"}${lowerCategory.hours !== null ? `, ${fmtHours(lowerCategory.hours)} @ ${fmtMoney(lowerCategory.rate ?? 0)}/hr` : ""}) appears only on the lower estimate's totals.`,
+      });
+    }
+  }
+
+  if (higher.grandTotal !== null && lower.grandTotal !== null) {
+    const totalDiff = Math.round((higher.grandTotal - lower.grandTotal) * 100) / 100;
+    if (Math.abs(totalDiff) >= 1) {
+      deltas.push({
+        kind: "total_difference",
+        category: "Grand Total",
+        higher: null,
+        lower: null,
+        summary: `Grand total ${fmtMoney(higher.grandTotal)} vs ${fmtMoney(lower.grandTotal)} — a ${fmtMoney(Math.abs(totalDiff))} difference.`,
+      });
+    }
+  }
+
+  return deltas;
+}
+
 /** Fields that differ between two matched rows (operation code / part number). */
-function matchedFieldChanges(higher: EstimateDeltaRow, lower: EstimateDeltaRow): string[] {
+function matchedFieldChanges(
+  higher: EstimateDeltaRow,
+  lower: EstimateDeltaRow,
+  options?: { lowerHasPartColumn?: boolean }
+): string[] {
   const changed: string[] = [];
   if (
     higher.opCode &&
@@ -872,7 +1566,10 @@ function matchedFieldChanges(higher: EstimateDeltaRow, lower: EstimateDeltaRow):
   const lowerPart = ocrCanonicalizePart(lower.partNumber ?? "");
   if (higherPart && lowerPart && higherPart !== lowerPart) {
     changed.push("part_number");
-  } else if (higherPart && !lowerPart) {
+  } else if (higherPart && !lowerPart && options?.lowerHasPartColumn !== false) {
+    // Only meaningful when the lower estimate PRINTS part numbers at all —
+    // some carrier layouts (e.g. supplement-of-record summaries) omit the part
+    // column entirely, and that layout difference is not a line change.
     changed.push("part_added");
   }
   return changed;
