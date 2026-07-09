@@ -408,6 +408,12 @@ export async function POST(request: Request) {
       exportId: primaryOutput?.artifactId ?? "",
       pdfBase64: primaryOutput?.pdfBase64,
       downloadUrl: primaryOutput?.downloadUrl,
+      // The standalone Findings Report rides at the top level too — the client
+      // reads it from here (outputs[] carries the per-estimate copies).
+      findingsReportArtifactId: primaryOutput?.findingsReportArtifactId,
+      findingsReportUrl: primaryOutput?.findingsReportUrl,
+      findingsReportPdfBase64: primaryOutput?.findingsReportPdfBase64,
+      findingsReportPageCount: primaryOutput?.findingsReportPageCount,
       outputs,
       combinedPdfUrl: outputs.length > 1 ? undefined : primaryOutput?.downloadUrl,
       annotatedFindingCount,

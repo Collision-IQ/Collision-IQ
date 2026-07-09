@@ -2275,6 +2275,21 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       .reduce((sum, count) => sum + count, 0);
     assert.ok(originalPageAnnotationCount >= 4);
     assert.doesNotMatch(outputPages.join(" "), /No estimate rows could be extracted|Unanchored Citation Density Findings|Repair Operation|Proc Report/);
+
+    // The standalone Findings Report must be exposed at the TOP LEVEL of the
+    // response — that is where the client downloads it from.
+    assert.ok(json.findingsReportArtifactId, "expected a top-level findings report artifact id");
+    assert.ok(
+      typeof json.findingsReportUrl === "string" && json.findingsReportUrl.includes(json.findingsReportArtifactId),
+      "expected a top-level findings report url"
+    );
+    assert.ok(
+      typeof json.findingsReportPdfBase64 === "string" && json.findingsReportPdfBase64.length > 0,
+      "expected top-level findings report pdf bytes"
+    );
+    const findingsReportResponse = await route.GET(new Request(`http://localhost/api/reports/citation-density/annotated-estimate?artifactId=${json.findingsReportArtifactId}`));
+    assert.equal(findingsReportResponse.status, 200);
+    assert.equal(findingsReportResponse.headers.get("content-type"), "application/pdf");
   });
 
   await run("annotated-estimate route accepts explicit selectedSourceDocumentId for Shop 21638 estimate", async () => {
@@ -2421,9 +2436,13 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(pdfResponse.status, 200);
     assert.equal(pdfResponse.headers.get("content-type"), "application/pdf");
 
-    // Finding details now live in a separate findings-report artifact.
-    const findingsArtifactId = json.outputs?.[0]?.findingsReportArtifactId ?? json.findingsReportArtifactId;
-    assert.ok(findingsArtifactId, "expected a separate findings report artifact id");
+    // Finding details now live in a separate findings-report artifact. The
+    // client reads these fields from the TOP LEVEL of the response (not
+    // outputs[]), so they must be present there.
+    const findingsArtifactId = json.findingsReportArtifactId;
+    assert.ok(findingsArtifactId, "expected a top-level findings report artifact id");
+    assert.ok(typeof json.findingsReportUrl === "string" && json.findingsReportUrl.includes(findingsArtifactId), "expected a top-level findings report url");
+    assert.ok(typeof json.findingsReportPdfBase64 === "string" && json.findingsReportPdfBase64.length > 0, "expected top-level findings report pdf bytes");
     const findingsResponse = await route.GET(new Request(`http://localhost/api/reports/oem-citation-density/annotated-estimate?artifactId=${findingsArtifactId}`));
     assert.equal(findingsResponse.status, 200);
     const findingsBytes = new Uint8Array(await findingsResponse.arrayBuffer());
