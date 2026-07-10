@@ -789,8 +789,9 @@ run("customer report PDF strips internal audit language and parser fragments", (
   });
 
   const text = flattenCarrierDocument(document);
+  // Approved customer-facing section order.
   assert.equal(document.sections.map((section) => section.title.replace(/\.$/, "")).join("|"),
-    "What We Found|Why The Shop Estimate Looks More Complete|Why The Insurance Estimate May Be Missing Items|What Still Needs To Be Verified|Why This Matters For Safety And Repair Quality|What You Can Ask For|What Happens Next|Bottom Line"
+    "Plain-English Summary|What This Means for You|Key Findings|Why These Items Matter|Questions to Ask|Supporting Documentation|Technical Appendix"
   );
   assert.equal(
     text.includes("Hidden mounting or structural damage is not verified from the reviewed file"),

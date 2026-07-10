@@ -6,7 +6,7 @@ import {
 } from "./customerFacingText";
 import {
   alignCustomerEstimatePostureText,
-  buildCustomerEstimatePostureHeading,
+  stripEstimateComparisonLanguage,
   type EstimatePostureDecision,
 } from "./estimatePosture";
 
@@ -40,17 +40,21 @@ function escapeHtml(value: string): string {
 
 export function renderCustomerReportHtml(input: RenderCustomerReportHtmlInput): string {
   const report = sanitizeCustomerReportForRender(input.report);
-  const openingSummary = toCustomerFacingText(report.openingSummary);
-  const estimatePostureHeading = input.selectedEstimatePosture
-    ? buildCustomerEstimatePostureHeading(input.selectedEstimatePosture)
-    : "Why The Shop Estimate Looks More Complete";
+  const comparisonAvailable = input.selectedEstimatePosture
+    ? input.selectedEstimatePosture.comparisonAvailable !== false
+    : true;
+  const scrub = (text: string) =>
+    comparisonAvailable ? text : stripEstimateComparisonLanguage(text);
+  const openingSummary = toCustomerFacingText(scrub(report.openingSummary));
   const strongerPlan = toCustomerFacingText(
     input.selectedEstimatePosture
       ? alignCustomerEstimatePostureText(report.whichRepairPlanLooksStronger, input.selectedEstimatePosture)
-      : report.whichRepairPlanLooksStronger
+      : scrub(report.whichRepairPlanLooksStronger)
   );
-  const safetyFirst = toCustomerFacingText(report.safetyFirst);
-  const bottomLine = toCustomerFacingText(report.bottomLine);
+  const safetyFirst = toCustomerFacingText(scrub(report.safetyFirst));
+  const bottomLine = toCustomerFacingText(scrub(report.bottomLine));
+  const keyFindings = report.whatStillNeedsProof.map(scrub);
+  const questionsToAsk = report.yourOptions.map(scrub);
 
   return `
 <!DOCTYPE html>
@@ -179,49 +183,48 @@ export function renderCustomerReportHtml(input: RenderCustomerReportHtmlInput): 
     </div>
 
     <div class="section">
-      <h2>What This Means For You</h2>
+      <h2>Plain-English Summary</h2>
       <p>${escapeHtml(openingSummary)}</p>
     </div>
 
     <div class="section">
-      <h2>${escapeHtml(estimatePostureHeading)}</h2>
-      <p>${escapeHtml(strongerPlan)}</p>
+      <h2>What This Means for You</h2>
+      <p>${escapeHtml([strongerPlan, bottomLine].filter(Boolean).join(" "))}</p>
     </div>
 
     <div class="section">
-      <h2>Why The Insurance Estimate May Be Missing Items</h2>
-      <ul>${renderList(report.whatStillNeedsProof)}</ul>
+      <h2>Key Findings</h2>
+      <ul>${renderList(keyFindings)}</ul>
     </div>
 
     <div class="section">
-      <h2>What Still Needs To Be Verified</h2>
-      <ul>${renderList(report.whatStillNeedsProof)}</ul>
-    </div>
-
-    <div class="section">
-      <h2>Why This Matters For Safety And Repair Quality</h2>
+      <h2>Why These Items Matter</h2>
       <p>${escapeHtml(safetyFirst)}</p>
     </div>
 
     <div class="section">
-      <h2>What You Can Ask For</h2>
-      <ul>${renderList(report.yourOptions)}</ul>
+      <h2>Questions to Ask</h2>
+      <ul>${renderList(questionsToAsk)}</ul>
     </div>
 
     <div class="section">
-      <h2>What Happens Next</h2>
+      <h2>Supporting Documentation</h2>
       <ul>${renderList([
-        "Repair completion status is not established from the reviewed file.",
-        "If repairs are ongoing, this should remain open for supplement review.",
+        ...keyFindings.slice(0, 4),
         "If repairs are complete, request the final invoice, scan, calibration, alignment, and delivery documentation.",
-        "The insurer or repair shop should explain whether each concern is already included.",
-        "If something is not included, ask why and whether it will be reviewed as a supplement.",
       ])}</ul>
     </div>
 
     <div class="section">
-      <h2>Bottom Line</h2>
-      <p>${escapeHtml(bottomLine)}</p>
+      <h2>Technical Appendix</h2>
+      <ul>${renderList([
+        "Repair completion status is not established from the reviewed file.",
+        "If repairs are ongoing, open items should remain available for supplement review.",
+        comparisonAvailable
+          ? "The insurer or repair shop should explain whether each concern is already included."
+          : "The repair shop should explain whether each concern is already included.",
+        "If something is not included, ask why and whether it will be reviewed as a supplement.",
+      ])}</ul>
     </div>
 
     <div class="footer">

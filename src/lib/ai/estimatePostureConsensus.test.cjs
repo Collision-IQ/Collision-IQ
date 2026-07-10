@@ -33,7 +33,12 @@ require.extensions[".ts"] = function registerTypeScript(module, filename) {
 const {
   alignCustomerEstimatePostureText,
   resolveEstimatePosture,
+  stripEstimateComparisonLanguage,
 } = require("./estimatePosture.ts");
+const {
+  enforceCustomerReportGuards,
+  APPRAISAL_CONDITIONAL_SENTENCE,
+} = require("./generateCustomerReport.ts");
 const { buildCustomerReportPdf } = require("./builders/customerReportPdfBuilder.ts");
 const { buildCollisionSnapshot } = require("./builders/collisionSnapshot.ts");
 const { renderCustomerReportHtml } = require("./renderCustomerReportHtml.ts");
@@ -119,9 +124,9 @@ run("customer report heading aligns with carrier-selected posture", () => {
     vehicle: "2020 Tesla Model 3",
     selectedEstimatePosture: posture,
   });
-  const section = document.sections.find((item) => /estimate looks more complete/i.test(item.title));
+  const section = document.sections.find((item) => /what this means for you/i.test(item.title));
 
-  assert.match(section?.title ?? "", /Why The Insurance Estimate Looks More Complete\.?/);
+  assert.match(section?.title ?? "", /What This Means for You/);
   assert.doesNotMatch(JSON.stringify(section), /shop estimate appears materially more complete/i);
   assert.match(JSON.stringify(section), /insurance estimate appears more complete/i);
 });
@@ -140,7 +145,7 @@ run("customer HTML heading aligns with shop-selected posture", () => {
     selectedEstimatePosture: posture,
   });
 
-  assert.match(html, /Why The Shop Estimate Looks More Complete/);
+  assert.match(html, /What This Means for You/);
   assert.doesNotMatch(html, /carrier estimate appears materially more complete/i);
   assert.match(html, /shop estimate appears more complete/i);
 });
@@ -170,9 +175,9 @@ run("customer report uses neutral heading for undetermined posture", () => {
     vehicle: "2020 Tesla Model 3",
     selectedEstimatePosture: posture,
   });
-  const section = document.sections.find((item) => /estimates differ/i.test(item.title));
+  const section = document.sections.find((item) => /what this means for you/i.test(item.title));
 
-  assert.match(section?.title ?? "", /Where The Estimates Differ/i);
+  assert.match(section?.title ?? "", /What This Means for You/i);
   assert.doesNotMatch(JSON.stringify(section), /shop estimate appears materially more complete/i);
   assert.match(JSON.stringify(section), /estimate posture is not yet clear/i);
 });
@@ -203,4 +208,103 @@ run("shared posture resolver selects shop when shop-only gaps dominate", () => {
   assert.equal(posture.selectedEstimateLabel, "shop");
   assert.match(chatSafeText, /shop estimate appears more complete/i);
   assert.doesNotMatch(chatSafeText, /carrier estimate appears materially more complete/i);
+});
+
+run("single-estimate file never yields comparison posture, even with support gaps", () => {
+  const posture = resolveEstimatePosture({
+    estimateComparisons: { rows: [] },
+    report: {
+      supplementOpportunities: [{ title: "Seam sealer" }],
+      missingProcedures: ["OEM rear body panel procedure"],
+      findingReasoning: [],
+    },
+  });
+
+  assert.equal(posture.selectedEstimateLabel, "undetermined");
+  assert.equal(posture.comparisonAvailable, false);
+  assert.doesNotMatch(posture.selectedEstimateReason, /carrier|insurer|shop estimate/i);
+});
+
+run("single-estimate customer report drops carrier-comparison wording and headings", () => {
+  const posture = {
+    selectedEstimateLabel: "undetermined",
+    selectedEstimateReason: "Only one estimate is present in the reviewed file, so no estimate comparison was made.",
+    confidence: "low",
+    limitations: [],
+    comparisonAvailable: false,
+  };
+  const document = buildCustomerReportPdf({
+    report: {
+      ...customerReport("The insurance estimate may be missing items compared to the shop estimate."),
+      whatStillNeedsProof: ["The [REDACTED_INSURER] estimate may be missing items for the rear body panel."],
+    },
+    vehicle: "2010 Nissan Altima",
+    selectedEstimatePosture: posture,
+  });
+  const flattened = JSON.stringify(document.sections);
+  const titles = document.sections.map((section) => section.title).join("|");
+
+  assert.equal(
+    titles,
+    "Plain-English Summary|What This Means for You|Key Findings|Why These Items Matter|Questions to Ask|Supporting Documentation|Technical Appendix"
+  );
+  assert.doesNotMatch(flattened, /insurance estimate|insurer|carrier estimate|\[REDACTED_INSURER\]/i);
+  assert.doesNotMatch(titles, /estimates differ|insurance estimate/i);
+});
+
+run("appraisal claims are downgraded to the approved conditional sentence without policy language", () => {
+  const guarded = enforceCustomerReportGuards(
+    {
+      title: "Customer Report",
+      openingSummary: "The file was reviewed.",
+      whichRepairPlanLooksStronger: "The estimate covers the core repairs.",
+      safetyFirst: "Verification matters.",
+      whatStillNeedsProof: ["Scan reports."],
+      yourOptions: [
+        "Your policy includes an appraisal option that lets you dispute the amount.",
+        "The policy provides an appraisal clause you can invoke.",
+        "Ask for a written explanation.",
+      ],
+      bottomLine: "Your policy includes an appraisal option if you disagree.",
+    },
+    { policySignals: {}, comparisonAvailable: true }
+  );
+
+  assert.equal(guarded.yourOptions[0], APPRAISAL_CONDITIONAL_SENTENCE);
+  assert.equal(guarded.yourOptions.length, 2, "duplicate appraisal assertions collapse to one conditional");
+  assert.equal(guarded.yourOptions[1], "Ask for a written explanation.");
+  assert.match(guarded.bottomLine, /If your policy includes an appraisal or dispute-resolution provision/);
+  assert.doesNotMatch(guarded.bottomLine, /policy includes an appraisal option/i);
+});
+
+run("appraisal statements survive when actual policy language was reviewed", () => {
+  const guarded = enforceCustomerReportGuards(
+    {
+      title: "Customer Report",
+      openingSummary: "",
+      whichRepairPlanLooksStronger: "",
+      safetyFirst: "",
+      whatStillNeedsProof: [],
+      yourOptions: ["Your policy includes an appraisal option that applies to amount disputes."],
+      bottomLine: "",
+    },
+    { policySignals: { hasAppraisalClause: true }, comparisonAvailable: true }
+  );
+
+  assert.match(guarded.yourOptions[0], /policy includes an appraisal option/i);
+});
+
+run("stripEstimateComparisonLanguage rewrites carrier framing to single-estimate framing", () => {
+  assert.equal(
+    stripEstimateComparisonLanguage("The [REDACTED_INSURER] estimate may be missing items."),
+    "Some items on the estimate still need supporting documentation."
+  );
+  assert.equal(
+    stripEstimateComparisonLanguage("The insurance estimate leaves out scans."),
+    "The estimate leaves out scans."
+  );
+  assert.doesNotMatch(
+    stripEstimateComparisonLanguage("Where the estimates differ, the carrier estimate leaves out scans."),
+    /estimates differ|carrier estimate/i
+  );
 });

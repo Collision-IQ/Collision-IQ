@@ -3,6 +3,7 @@ import {
   NON_BIAS_ACCURACY_DIRECTIVE,
 } from "@/lib/ai/nonBiasDirective";
 import { AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE } from "@/lib/ai/authorityRetrievalPosture";
+import { stripEstimateComparisonLanguage } from "@/lib/ai/estimatePosture";
 
 export type CustomerReport = {
   title: string;
@@ -25,6 +26,11 @@ export type GenerateCustomerReportInput = {
   imageSummary?: string | null;
   policyholderOptionsContext?: string | null;
   reportMode?: "informational" | "action_guided";
+  /**
+   * False when the file contains only ONE estimate. The report must then avoid
+   * every carrier/insurer-comparison framing.
+   */
+  comparisonAvailable?: boolean;
   policySignals?: {
     hasAppraisalClause?: boolean;
     appraisalAppliesToAmountDisputes?: boolean;
@@ -86,6 +92,21 @@ ${CUSTOMER_REPORT_NON_BIAS_DIRECTIVE}
 
 ${AUTHORITY_RETRIEVAL_POSTURE_DIRECTIVE}
 
+Report structure:
+The rendered report is organized in this exact customer-facing order — write each field for its section:
+1. Plain-English Summary (openingSummary)
+2. What This Means for You (whichRepairPlanLooksStronger + bottomLine)
+3. Key Findings (whatStillNeedsProof)
+4. Why These Items Matter (safetyFirst)
+5. Questions to Ask (yourOptions)
+6. Supporting Documentation
+7. Technical Appendix
+
+Estimate comparison context:
+${input.comparisonAvailable === false
+  ? "Only ONE estimate is in the reviewed file. NEVER mention an insurer/carrier estimate, never compare estimates, never say any estimate 'may be missing items' relative to another, and never imply a shop-vs-carrier disagreement. Frame every open item as a documentation or proof need for THE estimate that was reviewed."
+  : "The file contains an estimate comparison; comparison framing is allowed where the documents support it."}
+
 Report mode:
 ${input.reportMode ?? "informational"}
 
@@ -114,6 +135,7 @@ Important rules:
 - If the file supports shop-choice rights, you may include a plain-English option explaining that the owner does not have to move the vehicle to a different shop just because the insurer's estimate is lower.
 - If the file supports supplement handling based on additional repair findings, you may explain in plain language that the repair shop can document added findings and submit them for review.
 - Do not present legal advice or say the customer definitely has a right unless the file clearly supports it.
+- NEVER state or imply that the policy includes an appraisal option unless policySignals.hasAppraisalClause is true (meaning actual policy language was uploaded and reviewed). When it is NOT true and appraisal is worth mentioning, use exactly this sentence and nothing stronger: "If your policy includes an appraisal or dispute-resolution provision, ask the insurer to identify the exact policy language and explain how it applies to the repair-amount dispute."
 - Use soft, accurate framing such as "your policy may allow", "the file supports", or "you may be able to".
 - Do not say "may" if the policy clearly supports the option.
 - Do not mention statutes or code sections in a lawyerly way inside the body unless they are translated into plain language.
@@ -136,6 +158,10 @@ Ranking rules for "yourOptions":
 - Distinguish what is clearly shown, what is likely, and what still needs confirmation.
 - If the file supports one estimate or repair path more strongly, say so plainly and explain why.
 - Safety, fit, function, and proper verification matter more than keeping the estimate artificially low.
+
+Bottom line style (model the tone and framing of this example, adapted to the actual vehicle and findings — documents-reviewed based, completeness-of-proof framing, never alarmist):
+"Based on the documents reviewed, your vehicle appears repairable, and the estimate includes several important repair-planning items such as pre- and post-repair scans, structural measuring, corrosion protection, and test fitting. That is a positive sign. The main issue is not that the estimate is clearly wrong. The issue is that several important items still need supporting proof, including the manufacturer repair procedure, scan reports, measurement results, and confirmation of any required post-collision inspections. This matters because a complete repair file should show not only what is written on the estimate, but also the procedure, inspection, and completion records that confirm the work is being performed correctly."
+
 - Return JSON only.
 
 Return exactly this shape:
@@ -183,7 +209,7 @@ ${JSON.stringify(input.policySignals ?? {}, null, 2)}
   const raw = await deps.generateText(prompt);
   const parsed = JSON.parse(extractJsonObject(raw)) as Partial<CustomerReport>;
 
-  return normalizeCustomerReport(parsed);
+  return enforceCustomerReportGuards(normalizeCustomerReport(parsed), input);
 }
 
 function normalizeCustomerReport(parsed: Partial<CustomerReport>): CustomerReport {
@@ -204,4 +230,68 @@ function normalizeCustomerReport(parsed: Partial<CustomerReport>): CustomerRepor
     yourOptions: asStringArray(parsed.yourOptions),
     bottomLine: typeof parsed.bottomLine === "string" ? parsed.bottomLine.trim() : "",
   };
+}
+
+/** Approved conditional wording when policy language was NOT uploaded/reviewed. */
+export const APPRAISAL_CONDITIONAL_SENTENCE =
+  "If your policy includes an appraisal or dispute-resolution provision, ask the insurer to identify the exact policy language and explain how it applies to the repair-amount dispute.";
+
+const APPRAISAL_ASSERTION_PATTERN =
+  /\b(?:your|the)\s+policy\s+(?:includes|provides|has|contains|gives you|offers|allows(?:\s+you)?(?:\s+to\s+use)?)\b[^.?!]*\bapprais/i;
+
+/**
+ * Deterministic output guards (prompt rules alone are not enough):
+ * - Never assert the policy includes an appraisal option unless actual policy
+ *   language was reviewed (policySignals.hasAppraisalClause). Offending
+ *   sentences are replaced with the approved conditional wording.
+ * - When only one estimate is in the file, strip any carrier/insurer estimate
+ *   comparison framing the model produced anyway.
+ */
+export function enforceCustomerReportGuards(
+  report: CustomerReport,
+  input: Pick<GenerateCustomerReportInput, "policySignals" | "comparisonAvailable">
+): CustomerReport {
+  let result = report;
+
+  if (!input.policySignals?.hasAppraisalClause) {
+    const replaceSentence = (text: string) =>
+      text.replace(
+        new RegExp(`[^.?!]*${APPRAISAL_ASSERTION_PATTERN.source}[^.?!]*[.?!]?`, "gi"),
+        ` ${APPRAISAL_CONDITIONAL_SENTENCE}`
+      ).replace(/\s{2,}/g, " ").trim();
+    let conditionalUsed = false;
+    const guardOption = (option: string) => {
+      if (!APPRAISAL_ASSERTION_PATTERN.test(option)) return option;
+      if (conditionalUsed) return null;
+      conditionalUsed = true;
+      return APPRAISAL_CONDITIONAL_SENTENCE;
+    };
+    result = {
+      ...result,
+      openingSummary: replaceSentence(result.openingSummary),
+      whichRepairPlanLooksStronger: replaceSentence(result.whichRepairPlanLooksStronger),
+      safetyFirst: replaceSentence(result.safetyFirst),
+      bottomLine: replaceSentence(result.bottomLine),
+      whatStillNeedsProof: result.whatStillNeedsProof
+        .map(guardOption)
+        .filter((item): item is string => Boolean(item)),
+      yourOptions: result.yourOptions
+        .map(guardOption)
+        .filter((item): item is string => Boolean(item)),
+    };
+  }
+
+  if (input.comparisonAvailable === false) {
+    result = {
+      ...result,
+      openingSummary: stripEstimateComparisonLanguage(result.openingSummary),
+      whichRepairPlanLooksStronger: stripEstimateComparisonLanguage(result.whichRepairPlanLooksStronger),
+      safetyFirst: stripEstimateComparisonLanguage(result.safetyFirst),
+      bottomLine: stripEstimateComparisonLanguage(result.bottomLine),
+      whatStillNeedsProof: result.whatStillNeedsProof.map(stripEstimateComparisonLanguage),
+      yourOptions: result.yourOptions.map(stripEstimateComparisonLanguage),
+    };
+  }
+
+  return result;
 }

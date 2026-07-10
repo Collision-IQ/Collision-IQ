@@ -4,7 +4,7 @@ import type { EstimateComparisonTotals } from "./buildExportModel";
 import type { ConfidenceIntegrity, OEMContradiction, ReportFindingReasoning } from "@/lib/ai/types/analysis";
 import {
   alignCustomerEstimatePostureText,
-  buildCustomerEstimatePostureHeading,
+  stripEstimateComparisonLanguage,
   type EstimatePostureDecision,
 } from "@/lib/ai/estimatePosture";
 import {
@@ -125,28 +125,47 @@ export function buildCustomerReportPdf({
   selectedEstimatePosture,
 }: BuildCustomerReportPdfParams): CarrierReportDocument {
   const sanitizedReport = sanitizeCustomerReportForRender(report);
-  const estimatePostureHeading = selectedEstimatePosture
-    ? buildCustomerEstimatePostureHeading(selectedEstimatePosture)
-    : "Why The Shop Estimate Looks More Complete";
+  const comparisonAvailable = selectedEstimatePosture
+    ? selectedEstimatePosture.comparisonAvailable !== false
+    : typeof comparisonTotals?.shopEstimateGrandTotal === "number" &&
+      typeof comparisonTotals?.carrierTotalCostOfRepairs === "number";
+  const singleEstimateScrub = (text: string) =>
+    comparisonAvailable ? text : stripEstimateComparisonLanguage(text);
   const estimatePostureBody = selectedEstimatePosture
     ? alignCustomerEstimatePostureText(sanitizedReport.whichRepairPlanLooksStronger, selectedEstimatePosture)
-    : sanitizedReport.whichRepairPlanLooksStronger;
+    : singleEstimateScrub(sanitizedReport.whichRepairPlanLooksStronger);
   const estimatePrecisionNote = buildEstimatePrecisionNote(sanitizedReport, findingReasoning);
   const cccDisclosure = buildCccDisclosure(report, findingReasoning, oemContradictions);
+  // Scrub BEFORE the customer-facing list sanitizer runs — it collapses
+  // redaction tokens into forms the scrubber no longer recognizes.
   const possibleMissingItems = buildPossibleMissingItems({
     report: sanitizedReport,
     confidenceIntegrity,
     findingReasoning,
     oemContradictions,
-  });
+    transform: singleEstimateScrub,
+  }).map(singleEstimateScrub);
   const verificationItems = buildVerificationItems({
     report: sanitizedReport,
     confidenceIntegrity,
     findingReasoning,
-  });
-  const askForItems = buildAskForItems(sanitizedReport);
+    transform: singleEstimateScrub,
+  }).map(singleEstimateScrub);
+  const askForItems = buildAskForItems(sanitizedReport, singleEstimateScrub).map(singleEstimateScrub);
 
-  return sanitizeCustomerFacingDocument({
+  // Approved customer-facing section order — these exact headings are the
+  // contract; the prose sanitizer must not re-case them.
+  const APPROVED_SECTION_TITLES = [
+    "Plain-English Summary",
+    "What This Means for You",
+    "Key Findings",
+    "Why These Items Matter",
+    "Questions to Ask",
+    "Supporting Documentation",
+    "Technical Appendix",
+  ];
+
+  const sanitizedDocument = sanitizeCustomerFacingDocument({
     filename: filename || "customer-report.pdf",
     brand: {
       companyName: "Collision Academy",
@@ -156,7 +175,7 @@ export function buildCustomerReportPdf({
     header: {
       title: sanitizedReport.title || "Customer Report",
       subtitle:
-        "Straight explanation for the vehicle owner about which repair path looks more accurate, what matters for safety, and the practical options from here.",
+        "A plain-language explanation of the repair plan, what is supported, what still needs proof, and the practical next steps.",
       generatedLabel:
         generatedAt ||
         `Generated ${new Date().toLocaleDateString("en-US", {
@@ -172,65 +191,73 @@ export function buildCustomerReportPdf({
       { label: "Mileage", value: mileage || "Not provided" },
       ...buildCustomerTotalsSummary(comparisonTotals, estimateTotal),
     ],
+    // Approved customer-facing section order — keep these headings stable.
     sections: [
       {
-        title: "What We Found",
+        title: "Plain-English Summary",
         body: [
           toCustomerFacingText(
-            sanitizedReport.openingSummary,
+            singleEstimateScrub(sanitizedReport.openingSummary),
             "The current file gives us enough information to explain the repair concerns in plain language."
           ),
-          cccDisclosure,
         ].filter(Boolean).join(" "),
       },
       {
-        title: estimatePostureHeading,
+        title: "What This Means for You",
         body: toCustomerFacingText(
-          [estimatePrecisionNote, estimatePostureBody].filter(Boolean).join(" "),
-          "The shop estimate appears to account for more of the inspection, repair, and verification steps that may be needed."
+          [estimatePrecisionNote, estimatePostureBody, singleEstimateScrub(sanitizedReport.bottomLine)]
+            .filter(Boolean)
+            .join(" "),
+          "The safest next step is to have the estimate reviewed against the actual repair needs before treating it as complete."
         ),
       },
       {
-        title: "Why The Insurance Estimate May Be Missing Items",
+        title: "Key Findings",
         bullets: possibleMissingItems,
       },
       {
-        title: "What Still Needs To Be Verified",
-        bullets: verificationItems,
-      },
-      {
-        title: "Why This Matters For Safety And Repair Quality",
+        title: "Why These Items Matter",
         body: toCustomerFacingText(
-          sanitizedReport.safetyFirst,
+          singleEstimateScrub(sanitizedReport.safetyFirst),
           "These checks matter because the vehicle should be repaired, fitted, scanned, and verified before it is returned to normal use."
         ),
       },
       {
-        title: "What You Can Ask For",
+        title: "Questions to Ask",
         bullets: askForItems,
       },
       {
-        title: "What Happens Next",
+        title: "Supporting Documentation",
         bullets: [
-          "Repair completion status is not established from the reviewed file.",
-          "If repairs are ongoing, this should remain open for supplement review.",
+          ...verificationItems,
           "If repairs are complete, request the final invoice, scan, calibration, alignment, and delivery documentation.",
-          "The insurer or repair shop should be able to explain whether each concern is already included in the estimate.",
-          "If something is not included, ask why it was left out and whether it will be reviewed as a supplement.",
-        ],
+        ].slice(0, 7),
       },
       {
-        title: "Bottom Line",
-        body: toCustomerFacingText(
-          sanitizedReport.bottomLine,
-          "The safest next step is to have the estimate reviewed against the actual repair needs before treating it as complete."
-        ),
+        title: "Technical Appendix",
+        bullets: [
+          cccDisclosure,
+          "Repair completion status is not established from the reviewed file.",
+          "If repairs are ongoing, open items should remain available for supplement review.",
+          comparisonAvailable
+            ? "The insurer or repair shop should be able to explain whether each concern is already included in the estimate."
+            : "The repair shop should be able to explain whether each concern is already included in the estimate.",
+          "If something is not included, ask why it was left out and whether it will be reviewed as a supplement.",
+        ].filter(Boolean),
       },
     ],
     footer: [
       "This report is intended to explain the repair situation in plain language for the vehicle owner. Final repair decisions should still be confirmed by the repair facility after inspection, teardown, measurement, scan, calibration, and post-repair verification as required.",
     ],
   });
+
+  return {
+    ...sanitizedDocument,
+    sections: sanitizedDocument.sections.map((section, index) => ({
+      ...section,
+      title: APPROVED_SECTION_TITLES[index] ?? section.title,
+    })),
+  };
 }
 
 function buildPossibleMissingItems(params: {
@@ -238,7 +265,9 @@ function buildPossibleMissingItems(params: {
   confidenceIntegrity?: ConfidenceIntegrity;
   findingReasoning: ReportFindingReasoning[];
   oemContradictions: OEMContradiction[];
+  transform?: (text: string) => string;
 }) {
+  const transform = params.transform ?? ((text: string) => text);
   return toCustomerFacingList(
     [
       ...params.findingReasoning.slice(0, 5).map((finding) =>
@@ -249,7 +278,7 @@ function buildPossibleMissingItems(params: {
       ),
       ...params.report.whatStillNeedsProof,
       ...(params.confidenceIntegrity?.missingCriticalEvidence ?? []),
-    ],
+    ].map(transform),
     [
       "The reviewed file does not include completion proof for every inspection, fit, scan, calibration, or repair step.",
     ]
@@ -278,28 +307,33 @@ function buildVerificationItems(params: {
   report: CustomerReport;
   confidenceIntegrity?: ConfidenceIntegrity;
   findingReasoning: ReportFindingReasoning[];
+  transform?: (text: string) => string;
 }) {
+  const transform = params.transform ?? ((text: string) => text);
   return toCustomerFacingList(
     [
       ...params.report.whatStillNeedsProof,
       ...(params.confidenceIntegrity?.missingCriticalEvidence ?? []),
       ...params.findingReasoning.slice(0, 5).map((finding) => finding.next_action),
-    ],
+    ].map(transform),
     [
       "Not verified from the reviewed file. Request final invoice, scan, calibration, alignment, and delivery documentation if repairs are complete.",
     ]
   ).slice(0, 6);
 }
 
-function buildAskForItems(report: CustomerReport) {
+function buildAskForItems(
+  report: CustomerReport,
+  transform: (text: string) => string = (text) => text
+) {
   return toCustomerFacingList(
     [
       ...report.yourOptions,
       "Ask the insurer or repair shop to explain whether this item is included, and if not, why.",
       "Ask what documentation is not produced in the reviewed file and what would be handled as a supplement if repairs are ongoing.",
-    ],
+    ].map(transform),
     [
-      "Ask the insurer or repair shop to explain whether each item is included, and if not, why.",
+      transform("Ask the insurer or repair shop to explain whether each item is included, and if not, why."),
     ]
   ).slice(0, 6);
 }

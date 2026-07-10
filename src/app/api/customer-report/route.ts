@@ -35,7 +35,34 @@ type CustomerReportRequestBody = {
   estimateSummary?: unknown;
   imageSummary?: unknown;
   selectedEstimatePosture?: unknown;
+  policySignals?: unknown;
 };
+
+/**
+ * Policy signals default to FALSE: a signal is only true when the caller
+ * derived it from actual uploaded policy language, never assumed.
+ */
+function coercePolicySignals(value: unknown): {
+  hasAppraisalClause: boolean;
+  appraisalAppliesToAmountDisputes: boolean;
+  appraisalDoesNotApplyToCoverage: boolean;
+  hasShopChoice: boolean;
+  hasSupplementProcess: boolean;
+  hasPAConsumerRights: boolean;
+  estimateGapDetected: boolean;
+} {
+  const record = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const flag = (key: string) => record[key] === true;
+  return {
+    hasAppraisalClause: flag("hasAppraisalClause"),
+    appraisalAppliesToAmountDisputes: flag("appraisalAppliesToAmountDisputes"),
+    appraisalDoesNotApplyToCoverage: flag("appraisalDoesNotApplyToCoverage"),
+    hasShopChoice: flag("hasShopChoice"),
+    hasSupplementProcess: flag("hasSupplementProcess"),
+    hasPAConsumerRights: flag("hasPAConsumerRights"),
+    estimateGapDetected: flag("estimateGapDetected"),
+  };
+}
 
 export async function POST(req: Request) {
   try {
@@ -47,6 +74,7 @@ export async function POST(req: Request) {
     }
 
     const body = (await req.json().catch(() => ({}))) as CustomerReportRequestBody;
+    const selectedEstimatePosture = coerceEstimatePosture(body.selectedEstimatePosture);
     const input = {
       vehicle: coerceInputText(body.vehicle),
       insurer: coerceNullableText(body.insurer),
@@ -57,6 +85,7 @@ export async function POST(req: Request) {
       estimateSummary: coerceInputText(body.estimateSummary),
       imageSummary: coerceNullableText(body.imageSummary),
       reportMode: "action_guided" as const,
+      comparisonAvailable: selectedEstimatePosture?.comparisonAvailable,
       policyholderOptionsContext: [
         "Owner may have shop-choice options if supported by the estimate or carrier file.",
         "Owner may have supplement-review options if additional teardown findings are documented.",
@@ -64,15 +93,10 @@ export async function POST(req: Request) {
         "Owner may have an appraisal-related option if supported by the policy text provided to the system.",
         "Any Pennsylvania-specific consumer or claims-handling guidance should only be included when supported by provided policy or law material.",
       ].join("\n"),
-      policySignals: {
-        hasAppraisalClause: true,
-        appraisalAppliesToAmountDisputes: true,
-        appraisalDoesNotApplyToCoverage: true,
-        hasShopChoice: true,
-        hasSupplementProcess: true,
-        hasPAConsumerRights: true,
-        estimateGapDetected: true,
-      },
+      // Policy signals must reflect what was ACTUALLY uploaded and reviewed —
+      // never hardcoded. Without reviewed policy language, every signal stays
+      // false and the report uses conditional wording only.
+      policySignals: coercePolicySignals(body.policySignals),
     };
 
     if (!input.determination && !input.estimateSummary && input.supportGaps.length === 0) {
@@ -107,7 +131,7 @@ export async function POST(req: Request) {
       mileage: coerceNullableText(body.mileage),
       estimateTotal: input.estimateTotal,
       generatedAt,
-      selectedEstimatePosture: coerceEstimatePosture(body.selectedEstimatePosture),
+      selectedEstimatePosture,
     });
 
     if (!isPlatformAdmin) {
@@ -169,6 +193,9 @@ function coerceEstimatePosture(value: unknown): EstimatePostureDecision | undefi
     limitations: Array.isArray(limitations)
       ? limitations.filter((item): item is string => typeof item === "string")
       : [],
+    // Missing flag from older clients defaults to true (comparison framing
+    // allowed); an explicit false must survive the round-trip.
+    comparisonAvailable: record.comparisonAvailable !== false,
   };
 }
 

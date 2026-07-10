@@ -6,6 +6,13 @@ export type EstimatePostureDecision = {
   selectedEstimateReason: string;
   confidence: "high" | "medium" | "low";
   limitations: string[];
+  /**
+   * True only when the file actually contains an estimate COMPARISON (two or
+   * more estimates). When false, customer-facing output must never use
+   * carrier/insurer-comparison framing ("where the estimates differ", "the
+   * insurance estimate may be missing items").
+   */
+  comparisonAvailable: boolean;
 };
 
 type EstimatePostureInput = {
@@ -18,6 +25,25 @@ type EstimatePostureInput = {
 export function resolveEstimatePosture(input: EstimatePostureInput): EstimatePostureDecision {
   const comparisons = input.estimateComparisons ?? input.analysis?.estimateComparisons ?? null;
   const rows = comparisons?.rows ?? [];
+  const comparisonAvailable = rows.length > 0;
+
+  // Only ONE estimate in the file: there is nothing to compare. Support gaps
+  // and missing procedures are completeness-of-proof items for THAT estimate,
+  // never grounds for shop-vs-carrier posture language.
+  if (!comparisonAvailable) {
+    return {
+      selectedEstimateLabel: "undetermined",
+      selectedEstimateReason:
+        "Only one estimate is present in the reviewed file, so no estimate comparison was made. Open items are documentation and proof needs for that estimate.",
+      confidence: "low",
+      limitations: [
+        "No second estimate was uploaded; comparison-based conclusions are not available.",
+        "This can change if another estimate (carrier or shop) is added to the file.",
+      ],
+      comparisonAvailable: false,
+    };
+  }
+
   const onlyShopCount = rows.filter((row) =>
     /shop/i.test(`${row.lhsSource ?? ""}`) &&
     isOnlyOnLeft(row)
@@ -42,6 +68,7 @@ export function resolveEstimatePosture(input: EstimatePostureInput): EstimatePos
         "This is a repair-scope completeness posture, not a legal conclusion or final appraisal award.",
         "The selected posture can change if additional teardown, scan, calibration, invoice, or OEM procedure proof is uploaded.",
       ],
+      comparisonAvailable: true,
     };
   }
 
@@ -55,6 +82,7 @@ export function resolveEstimatePosture(input: EstimatePostureInput): EstimatePos
         "This is a repair-scope completeness posture, not a legal conclusion or final appraisal award.",
         "The selected posture can change if additional claim-file proof is uploaded.",
       ],
+      comparisonAvailable: true,
     };
   }
 
@@ -66,6 +94,7 @@ export function resolveEstimatePosture(input: EstimatePostureInput): EstimatePos
     limitations: [
       "The file still needs clearer line-item, teardown, repair procedure, and verification support before selecting an estimate posture.",
     ],
+    comparisonAvailable: true,
   };
 }
 
@@ -77,9 +106,47 @@ export function formatEstimatePostureLabel(posture: EstimatePostureDecision): st
 }
 
 export function buildCustomerEstimatePostureHeading(posture: EstimatePostureDecision): string {
+  // Never use comparison headings when the file has only one estimate.
+  if (posture.comparisonAvailable === false) return "What This Means for You";
   if (posture.selectedEstimateLabel === "shop") return "Why The Shop Estimate Looks More Complete";
   if (isCarrierSelectedPosture(posture)) return "Why The Insurance Estimate Looks More Complete";
   return "Where The Estimates Differ";
+}
+
+/**
+ * Remove carrier/insurer-comparison framing from customer-facing text when the
+ * file contains only ONE estimate. "The insurance estimate may be missing
+ * items" reads as a comparison against a carrier estimate that was never
+ * uploaded — reframe as proof needs for the single reviewed estimate.
+ */
+export function stripEstimateComparisonLanguage(text: string): string {
+  const INSURER_ESTIMATE =
+    /(?:\[REDACTED_INSURER\]('s)?|insurance|insurer'?s?|carrier)\s+estimate/;
+  const stripped = text
+    // "…estimate may be missing items" is a comparison claim — reframe first.
+    .replace(
+      new RegExp(`(?:the|your|any)?\\s*${INSURER_ESTIMATE.source}\\s+may\\s+be\\s+missing\\s+items?`, "gi"),
+      "some items on the estimate still need supporting documentation"
+    )
+    .replace(/\bthe estimate may be missing items\b/gi, "some items on the estimate still need supporting documentation")
+    // Keep the leading article when replacing the insurer-estimate reference.
+    .replace(new RegExp(`\\b(the|your|any)\\s+${INSURER_ESTIMATE.source}`, "gi"), "$1 estimate")
+    .replace(new RegExp(INSURER_ESTIMATE.source, "gi"), "the estimate")
+    .replace(/\bwhere the estimates differ\b/gi, "what still needs supporting proof")
+    .replace(/\b(?:both|the two|either)\s+estimates\b/gi, "the estimate")
+    // Comparison residue against the (only) estimate, however it is named.
+    .replace(/\bcompared (?:to|with|against) the (?:shop |insurance |insurer'?s? |carrier )?estimate\b/gi, "in the reviewed file")
+    .replace(/\b(the|your|any)\s+shop\s+estimate\b/gi, "$1 estimate")
+    // Redaction tokens already collapsed by an earlier sanitizer pass.
+    .replace(/\[\s*\]\s+estimate\s+may\s+be\s+missing\s+items?/gi, "some items on the estimate still need supporting documentation")
+    .replace(/(?:the|your|any)?\s*\[\s*\]\s+estimate/gi, " the estimate")
+    // No carrier estimate in the file: route questions to the repair shop.
+    .replace(/\bthe insurer or repair shop\b/gi, "the repair shop")
+    .replace(/\binsurer or repair shop\b/gi, "repair shop")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  // Repair sentence capitalization broken by leading-phrase removal.
+  return stripped.replace(/(^|[.!?]\s+)([a-z])/g, (whole, lead, first) => `${lead}${first.toUpperCase()}`);
 }
 
 export function alignCustomerEstimatePostureText(
@@ -88,6 +155,9 @@ export function alignCustomerEstimatePostureText(
 ): string {
   const fallback = posture.selectedEstimateReason;
   const value = text.trim() || fallback;
+  if (posture.comparisonAvailable === false) {
+    return stripEstimateComparisonLanguage(value);
+  }
   if (isCarrierSelectedPosture(posture)) {
     return value
       .replace(/\bthe shop estimate (?:appears|looks|is) (?:materially )?more complete\b/gi, "the insurance estimate appears more complete")
