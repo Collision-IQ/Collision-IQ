@@ -2085,8 +2085,11 @@ function RailContent({
     ]
   );
   const annotatedEstimateSourcePdf = resolvedCitationDensitySelection.primaryCandidate;
+  // Client-side candidates only exist for files uploaded THIS session. A
+  // restored case has an empty tray, but the server resolves the case's
+  // stored attachments itself — so an active case is enough to generate.
   const canGenerateCitationDensityAnnotatedEstimate =
-    hasResolvedAnalysis && Boolean(analysisReportId && annotatedEstimateSourcePdf);
+    hasResolvedAnalysis && Boolean(analysisReportId);
   const railRisk = hasResolvedAnalysis
     ? renderModel.supplementItems.length > 0
       ? "Review"
@@ -2533,7 +2536,11 @@ function RailContent({
       throw new Error("Citation Density annotated export needs an active case.");
     }
 
-    if (!annotatedEstimateSourcePdf) {
+    // Do NOT block on client-side candidates: a restored case has an empty
+    // attachment tray, and the server resolves the case's stored attachments
+    // itself. If nothing is truly available the route returns a specific 422
+    // whose userMessage is surfaced below.
+    if (!annotatedEstimateSourcePdf && citationDensitySelectedSourceDocumentId) {
       throw new Error(buildCitationDensitySelectionError(citationDensityEstimateCandidates, citationDensitySelectedSourceDocumentId));
     }
 
@@ -2619,7 +2626,11 @@ function RailContent({
       throw new Error("OEM Citation Density Report needs an active case.");
     }
 
-    if (!annotatedEstimateSourcePdf) {
+    // Do NOT block on client-side candidates: a restored case has an empty
+    // attachment tray, and the server resolves the case's stored attachments
+    // itself. If nothing is truly available the route returns a specific 422
+    // whose userMessage is surfaced below.
+    if (!annotatedEstimateSourcePdf && citationDensitySelectedSourceDocumentId) {
       throw new Error(buildCitationDensitySelectionError(citationDensityEstimateCandidates, citationDensitySelectedSourceDocumentId));
     }
 
