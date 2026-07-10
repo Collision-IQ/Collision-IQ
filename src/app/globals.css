@@ -223,30 +223,28 @@ main {
 }
 
 /* ---------------- Clerk auth overlays ----------------
-   Two stacking traps bury Clerk's UI:
-   1. The UserButton popover (Sign out) renders INLINE in the header with no
-      explicit z-index, so any later panel that forms a stacking context
-      (backdrop-blur, ring/z utilities) paints over it. On the v1 shell the
-      header itself is `relative z-10` while the main column is a LATER
-      sibling also at z-10 — later wins, burying anything inside the header.
-   2. The sign-in modal portals to <body>, where the base-layer `body > *`
-      clamp (position: relative; z-index: 1) applies to its wrapper.
-   These rules are intentionally UNLAYERED so they beat both Tailwind's
-   layered utilities and Clerk's own styles. App modals top out at
-   z-[10050]; Clerk overlays sit just above them. */
+   Clerk portals (UserButton popover, sign-in modal) mount as bare <div>
+   children of <body>. The base-layer `body > *` clamp above pins those
+   wrappers to z-index 1 while the app root carries `relative z-10` — so the
+   ENTIRE app painted over every Clerk overlay (Sign out unreachable, sign-in
+   modal hidden). z-index on the Clerk elements themselves cannot help: it is
+   trapped inside the wrapper's z-1 stacking context (and
+   .cl-userButtonPopoverRootBox is position: static anyway).
+   Fix: raise any body-level wrapper whose DIRECT child is a Clerk component.
+   Unlayered so it beats Tailwind's layers; app modals top out at z-[10050]. */
 
-.ci-workstation > header {
-  z-index: 30; /* above sibling content columns (z-10) */
-}
-
-.cl-userButtonPopoverRootBox,
-.cl-userButtonPopoverCard {
+body > div:has(> [class^="cl-"]),
+body > div:has(> [class*=" cl-"]) {
   z-index: 10060 !important;
 }
 
 .cl-modalBackdrop {
   position: fixed !important;
   z-index: 10060 !important;
+}
+
+.ci-workstation > header {
+  z-index: 30; /* above sibling content columns (z-10) */
 }
 
 /* ---------------- Markdown analysis styling ---------------- */
