@@ -633,13 +633,18 @@ export function formatRepairIntelligenceSourceStatus(value: string): string {
   if (/referenced but not produced|not produced|referenced[-\s]?only|not attached|not supplied|not provided/i.test(value)) {
     return "Referenced but not produced";
   }
-  if (/general|non[-\s]?make[-\s]?specific|research lead|internet lead|not vehicle specific|broad/i.test(value)) {
+  if (/general|non[-\s]?make[-\s]?specific|research lead|internet lead|online|fallback|not vehicle specific|broad/i.test(value)) {
     return "General/non-make-specific research lead";
   }
   if (/missing|unsupported|not established|needs review|unverified|not verified/i.test(value)) {
     return "Unsupported / needs review";
   }
-  if (/verified|documented/i.test(value)) {
+  // "Documented" = present on the estimate. Estimate presence is not verified
+  // authority support and must never render as "Verified support".
+  if (/documented/i.test(value) && !/verified/i.test(value)) {
+    return "Documented on the estimate — supporting proof still open";
+  }
+  if (/verified/i.test(value)) {
     return /oem|procedure|repair manual|position statement/i.test(value)
       ? "Verified OEM/procedure support"
       : "Verified support";

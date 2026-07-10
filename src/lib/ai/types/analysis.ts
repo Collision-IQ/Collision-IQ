@@ -363,7 +363,12 @@ export type ReportFindingReasoning = {
   rationaleSummary?: string;
   evidenceChainSummary?: string;
   riskIfOmitted?: string;
-  supportConfidenceIndicator?: "verified" | "referenced" | "inferred" | "missing" | "unsupported";
+  /**
+   * "verified" is reserved for retrieved authority or uploaded documentation.
+   * "documented" means the item is documented ON THE ESTIMATE (or visible in
+   * images) — estimate presence is never verified authority support.
+   */
+  supportConfidenceIndicator?: "verified" | "documented" | "referenced" | "inferred" | "missing" | "unsupported";
   evidenceLevel: "documented" | "referenced" | "inferred" | "missing" | "unsupported";
   confidence: number;
   claimSpecificity: "high" | "medium" | "low";

@@ -1453,8 +1453,19 @@ function buildFallbackFindingReasoning(
 function enrichFindingExplainability(
   finding: ReportFindingReasoning
 ): ReportFindingReasoning {
-  const supportConfidenceIndicator =
+  let supportConfidenceIndicator =
     finding.supportConfidenceIndicator ?? mapEvidenceLevelToSupportConfidence(finding.evidenceLevel);
+  // "Verified" claims whose own evidence text signals online-fallback /
+  // research-lead / not-retrieved support are downgraded: verified is reserved
+  // for retrieved authority or uploaded documentation.
+  if (
+    supportConfidenceIndicator === "verified" &&
+    /online|internet|research lead|fallback|general guidance|unverified|not (?:yet )?(?:retrieved|produced|verified)|referenced but not produced/i.test(
+      `${finding.what_proves_it ?? ""} ${finding.evidenceChainSummary ?? ""} ${finding.finding ?? ""}`
+    )
+  ) {
+    supportConfidenceIndicator = "referenced";
+  }
   return {
     ...finding,
     rationaleSummary: finding.rationaleSummary ?? buildRationaleSummary(finding),
@@ -1497,7 +1508,8 @@ function mapIssueEvidenceStatusToEvidenceLevel(
 function mapEvidenceLevelToSupportConfidence(
   evidenceLevel: ReportFindingReasoning["evidenceLevel"]
 ): NonNullable<ReportFindingReasoning["supportConfidenceIndicator"]> {
-  if (evidenceLevel === "documented") return "verified";
+  // "documented" = present on the estimate/images. That is estimate evidence,
+  // NEVER verified authority support — do not promote it to "verified".
   return evidenceLevel;
 }
 
@@ -1524,7 +1536,7 @@ function buildRiskIfOmitted(finding: ReportFindingReasoning): string {
 function formatExplainabilitySupport(evidenceLevel: ReportFindingReasoning["evidenceLevel"]): string {
   switch (evidenceLevel) {
     case "documented":
-      return "Support verified from reviewed file evidence.";
+      return "Documented in the reviewed estimate; supporting completion proof still open.";
     case "referenced":
       return "Referenced support present; completion record not fully isolated.";
     case "inferred":

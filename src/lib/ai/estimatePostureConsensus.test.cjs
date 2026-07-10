@@ -40,6 +40,7 @@ const {
   APPRAISAL_CONDITIONAL_SENTENCE,
 } = require("./generateCustomerReport.ts");
 const { buildCustomerReportPdf } = require("./builders/customerReportPdfBuilder.ts");
+const { formatRepairIntelligenceSourceStatus } = require("./builders/carrierPdfBuilder.ts");
 const { buildCollisionSnapshot } = require("./builders/collisionSnapshot.ts");
 const { renderCustomerReportHtml } = require("./renderCustomerReportHtml.ts");
 
@@ -292,6 +293,22 @@ run("appraisal statements survive when actual policy language was reviewed", () 
   );
 
   assert.match(guarded.yourOptions[0], /policy includes an appraisal option/i);
+});
+
+run("estimate documentation and research leads never render as Verified support", () => {
+  assert.equal(
+    formatRepairIntelligenceSourceStatus("documented"),
+    "Documented on the estimate — supporting proof still open"
+  );
+  assert.equal(
+    formatRepairIntelligenceSourceStatus("online fallback research lead"),
+    "General/non-make-specific research lead"
+  );
+  assert.equal(
+    formatRepairIntelligenceSourceStatus("verified OEM procedure retrieved"),
+    "Verified OEM/procedure support"
+  );
+  assert.doesNotMatch(formatRepairIntelligenceSourceStatus("inferred"), /verified/i);
 });
 
 run("stripEstimateComparisonLanguage rewrites carrier framing to single-estimate framing", () => {
