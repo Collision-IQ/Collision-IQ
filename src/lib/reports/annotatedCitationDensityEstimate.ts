@@ -2620,12 +2620,18 @@ export function buildOemCitationDensityFindings(
     seenAnchorIds.add(anchor.anchorId);
   }
 
-  const authorityBackedFindingCount = acceptedFindings.filter((finding) => finding.verifiedAuthorityCount > 0).length;
-  const estimateOnlyFindingCount = acceptedFindings.filter((finding) => finding.verifiedAuthorityCount === 0).length;
-  const researchNeededFindingCount = acceptedFindings.filter((finding) =>
+  // Group per support category so the report stays readable: keep the
+  // strongest anchored findings per category and roll the remainder into ONE
+  // grouped finding per category. Dozens of near-identical low-confidence
+  // markers are noise for customer or MOTOR demonstration use.
+  const groupedFindings = groupOemFindingsForReadability(acceptedFindings);
+
+  const authorityBackedFindingCount = groupedFindings.filter((finding) => finding.verifiedAuthorityCount > 0).length;
+  const estimateOnlyFindingCount = groupedFindings.filter((finding) => finding.verifiedAuthorityCount === 0).length;
+  const researchNeededFindingCount = groupedFindings.filter((finding) =>
     finding.missingAuthorityTypes.some((item) => /OEM|MOTOR|procedure|position/i.test(item))
   ).length;
-  const debugFindings = acceptedFindings.slice(0, 20).map((finding): OemCitationDensityFindingDebug => {
+  const debugFindings = groupedFindings.slice(0, 20).map((finding): OemCitationDensityFindingDebug => {
     const evidenceTier = getOemEvidenceTier(finding);
     return {
       findingId: finding.id,
@@ -2640,7 +2646,7 @@ export function buildOemCitationDensityFindings(
   });
 
   return {
-    findings: acceptedFindings,
+    findings: groupedFindings,
     debug: {
       reportType: "oem-citation-density",
       artifactVersion: OEM_CITATION_DENSITY_ARTIFACT_VERSION,
@@ -2658,8 +2664,8 @@ export function buildOemCitationDensityFindings(
       authorityBackedFindingCount,
       estimateOnlyFindingCount,
       researchNeededFindingCount,
-      findingsWithNextActionCount: acceptedFindings.filter((finding) => finding.recommendedNextAction.trim().length > 0).length,
-      findingsWithoutNextActionCount: acceptedFindings.filter((finding) => !finding.recommendedNextAction.trim()).length,
+      findingsWithNextActionCount: groupedFindings.filter((finding) => finding.recommendedNextAction.trim().length > 0).length,
+      findingsWithoutNextActionCount: groupedFindings.filter((finding) => !finding.recommendedNextAction.trim()).length,
       findingsRejectedDueWeakEvidence: 0,
       findingsRejectedDueNoAnchor: droppedReasons.filter((item) => /anchor/i.test(item.reason)).length,
       firstAuthoritySources: authoritySources.slice(0, 20),
@@ -2667,6 +2673,88 @@ export function buildOemCitationDensityFindings(
       partSourceDroppedReasons: droppedReasons,
     },
   };
+}
+
+/** User-facing OEM support groups; each caps its per-line markers. */
+const OEM_FINDING_GROUPS: Array<{ key: string; title: string; categories: string[] }> = [
+  { key: "structural", title: "Structural procedure support", categories: ["structural_or_fit_verification"] },
+  { key: "refinish", title: "Refinish / P-page support", categories: ["refinish"] },
+  { key: "part-source", title: "Non-OEM / LKQ part support", categories: ["parts_downgrade"] },
+  { key: "scan-diagnostic", title: "Scan / diagnostic support", categories: ["scan_diagnostic", "adas_calibration"] },
+  { key: "completion-proof", title: "Completion proof", categories: [] }, // catch-all
+];
+
+const OEM_GROUP_KEEP_LIMIT = 4;
+
+function resolveOemFindingGroup(finding: CitationDensityFinding) {
+  return (
+    OEM_FINDING_GROUPS.find((group) => group.categories.includes(finding.category)) ??
+    OEM_FINDING_GROUPS[OEM_FINDING_GROUPS.length - 1]
+  );
+}
+
+/**
+ * Keep the strongest few anchored findings per support group and roll the
+ * remainder into ONE grouped finding per group (anchored to its first line).
+ * Preserves the original relative order of kept findings. Dozens of
+ * near-identical per-line markers are noise for customer or MOTOR
+ * demonstration use; the grouped finding still names every affected line.
+ */
+export function groupOemFindingsForReadability(
+  findings: CitationDensityFinding[]
+): CitationDensityFinding[] {
+  const byGroup = new Map<string, Array<{ finding: CitationDensityFinding; index: number }>>();
+  findings.forEach((finding, index) => {
+    const group = resolveOemFindingGroup(finding);
+    const bucket = byGroup.get(group.key) ?? [];
+    bucket.push({ finding, index });
+    byGroup.set(group.key, bucket);
+  });
+
+  const keptIndexes = new Set<number>();
+  const rollups: Array<{ finding: CitationDensityFinding; index: number }> = [];
+
+  for (const group of OEM_FINDING_GROUPS) {
+    const bucket = byGroup.get(group.key) ?? [];
+    if (bucket.length === 0) continue;
+    if (bucket.length <= OEM_GROUP_KEEP_LIMIT + 1) {
+      // A roll-up that replaces a single finding saves nothing.
+      bucket.forEach((entry) => keptIndexes.add(entry.index));
+      continue;
+    }
+    const ranked = [...bucket].sort(
+      (a, b) => (b.finding.citationDensityScore ?? 0) - (a.finding.citationDensityScore ?? 0)
+    );
+    const kept = ranked.slice(0, OEM_GROUP_KEEP_LIMIT);
+    const rest = ranked
+      .slice(OEM_GROUP_KEEP_LIMIT)
+      .sort((a, b) => a.index - b.index);
+    kept.forEach((entry) => keptIndexes.add(entry.index));
+
+    const lineList = rest
+      .map((entry) => entry.finding.shopEvidence?.lineNumber)
+      .filter((line): line is string => Boolean(line))
+      .slice(0, 14)
+      .map((line) => `L${line}`)
+      .join(", ");
+    const template = rest[0].finding;
+    rollups.push({
+      index: rest[0].index,
+      finding: {
+        ...template,
+        id: `${template.id}-grouped-${group.key}`,
+        operationLabel: `${group.title} — ${rest.length} additional estimate lines`,
+        currentSupportSummary: `${rest.length} more estimate line(s) need the same ${group.title.toLowerCase()}${lineList ? ` (${lineList}${rest.length > 14 ? ", …" : ""})` : ""}. They are grouped into one finding to keep the report readable; each line carries the same support requirement as the individually listed findings in this category.`,
+      },
+    });
+  }
+
+  const result: Array<{ finding: CitationDensityFinding; index: number }> = [];
+  findings.forEach((finding, index) => {
+    if (keptIndexes.has(index)) result.push({ finding, index });
+  });
+  result.push(...rollups);
+  return result.sort((a, b) => a.index - b.index).map((entry) => entry.finding);
 }
 
 function buildRequiredDetectorFinding(params: {

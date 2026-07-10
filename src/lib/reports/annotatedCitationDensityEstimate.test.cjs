@@ -3766,4 +3766,38 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(garbled.extractionConfidence, "failed");
     assert.equal(garbled.ocrFallbackRecommended, true);
   });
+
+  await run("OEM findings are grouped per support category with a roll-up naming remaining lines", async () => {
+    const { groupOemFindingsForReadability } = require(path.join(process.cwd(), "src/lib/reports/annotatedCitationDensityEstimate.ts"));
+    const makeFinding = (id, category, score, lineNumber) => ({
+      id,
+      operationLabel: `Finding ${id}`,
+      category,
+      estimateGapType: "needs_proof",
+      citationDensityScore: score,
+      verifiedAuthorityCount: 0,
+      missingAuthorityTypes: ["OEM procedure"],
+      recommendedNextAction: "Attach support.",
+      currentSupportSummary: "Row evidence.",
+      limitations: [],
+      confidence: "medium",
+      shopEvidence: { lineNumber: String(lineNumber) },
+    });
+    const findings = [
+      ...Array.from({ length: 9 }, (_, i) => makeFinding(`p${i}`, "parts_downgrade", 50 - i, i + 10)),
+      ...Array.from({ length: 3 }, (_, i) => makeFinding(`s${i}`, "scan_diagnostic", 40, i + 30)),
+      makeFinding("r0", "refinish", 52, 40),
+    ];
+    const grouped = groupOemFindingsForReadability(findings);
+
+    const parts = grouped.filter((f) => f.category === "parts_downgrade");
+    assert.equal(parts.length, 5, "4 strongest kept + 1 roll-up");
+    const rollup = parts.find((f) => /additional estimate lines/.test(f.operationLabel));
+    assert.ok(rollup, "roll-up finding present");
+    assert.match(rollup.operationLabel, /Non-OEM \/ LKQ part support — 5 additional estimate lines/);
+    assert.match(rollup.currentSupportSummary, /L14, L15, L16, L17, L18/);
+    // Small categories stay untouched (roll-up saves nothing at <= limit+1).
+    assert.equal(grouped.filter((f) => f.category === "scan_diagnostic").length, 3);
+    assert.equal(grouped.filter((f) => f.category === "refinish").length, 1);
+  });
 })();
