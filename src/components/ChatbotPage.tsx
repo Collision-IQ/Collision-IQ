@@ -624,8 +624,15 @@ export function ChatbotWorkspacePage({
   const isReviewOpen = hasStructuredAnalysis && isImmersiveHeaderExpanded;
   const isReviewActive = isReviewOpen && leftPaneMode === "review";
   const isChatActive = leftPaneMode === "chat";
+  // With the review row at `auto`, its content (toolbar + 54svh-capped
+  // scroller) can consume the entire grid height and squeeze the chat row to
+  // a sliver. When chat is COLLAPSED the chat row only holds the "Open chat"
+  // bar — make THAT row auto and let the review row flex (it scrolls
+  // internally), so the bar is always visible and chat can be reopened.
   const workspaceRowsClass = isReviewActive
-    ? "grid-rows-[auto_minmax(0,1fr)]"
+    ? isChatActive
+      ? "grid-rows-[auto_minmax(0,1fr)]"
+      : "grid-rows-[minmax(0,1fr)_auto]"
     : "grid-rows-[minmax(0,1fr)]";
   const workspaceShellClass = isReviewActive
     ? "relative flex h-full min-h-0 w-full flex-col"
