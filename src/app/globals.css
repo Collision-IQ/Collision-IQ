@@ -222,6 +222,33 @@ main {
   }
 }
 
+/* ---------------- Clerk auth overlays ----------------
+   Two stacking traps bury Clerk's UI:
+   1. The UserButton popover (Sign out) renders INLINE in the header with no
+      explicit z-index, so any later panel that forms a stacking context
+      (backdrop-blur, ring/z utilities) paints over it. On the v1 shell the
+      header itself is `relative z-10` while the main column is a LATER
+      sibling also at z-10 — later wins, burying anything inside the header.
+   2. The sign-in modal portals to <body>, where the base-layer `body > *`
+      clamp (position: relative; z-index: 1) applies to its wrapper.
+   These rules are intentionally UNLAYERED so they beat both Tailwind's
+   layered utilities and Clerk's own styles. App modals top out at
+   z-[10050]; Clerk overlays sit just above them. */
+
+.ci-workstation > header {
+  z-index: 30; /* above sibling content columns (z-10) */
+}
+
+.cl-userButtonPopoverRootBox,
+.cl-userButtonPopoverCard {
+  z-index: 10060 !important;
+}
+
+.cl-modalBackdrop {
+  position: fixed !important;
+  z-index: 10060 !important;
+}
+
 /* ---------------- Markdown analysis styling ---------------- */
 
 .analysis-report ul {
