@@ -1,4 +1,4 @@
-import { del, list, put } from "@vercel/blob";
+import { del, get, list, put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { UnauthorizedError } from "@/lib/auth/require-current-user";
 import { resolveUploadLimitsForCurrentUser } from "@/lib/uploadSafety/uploadEntitlements";
@@ -100,8 +100,9 @@ export async function POST(request: Request) {
       if (!bytes.byteLength || bytes.byteLength > CHUNK_BYTES + 1024) {
         return jsonError("Chunk size out of range.", "CHUNKED_CHUNK_SIZE");
       }
+      // The store is configured PRIVATE — public access is rejected outright.
       await put(`${chunkPrefix(context.user.id, sessionId)}${String(index).padStart(4, "0")}`, bytes, {
-        access: "public",
+        access: "private",
         addRandomSuffix: false,
         allowOverwrite: true,
         contentType: "application/octet-stream",
@@ -150,16 +151,19 @@ export async function POST(request: Request) {
       }
 
       // Stream chunk blobs back through the function into the final blob.
+      // Chunks are PRIVATE (the store rejects public access), so read them
+      // via the authenticated get() rather than raw URL fetches.
       const chunkUrls = chunks.map((blob) => blob.url);
+      const chunkPathnames = chunks.map((blob) => blob.pathname);
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
           try {
-            for (const chunkUrl of chunkUrls) {
-              const response = await fetch(chunkUrl);
-              if (!response.ok || !response.body) {
-                throw new Error(`Chunk fetch failed (${response.status}) for ${chunkUrl}`);
+            for (const pathname of chunkPathnames) {
+              const response = await get(pathname, { access: "private" });
+              if (!response || response.statusCode !== 200 || !response.stream) {
+                throw new Error(`Chunk read failed (${response?.statusCode ?? "null"}) for ${pathname}`);
               }
-              const reader = response.body.getReader();
+              const reader = response.stream.getReader();
               for (;;) {
                 const { done, value } = await reader.read();
                 if (done) break;
@@ -174,7 +178,7 @@ export async function POST(request: Request) {
       });
 
       const blob = await put(`uploads/${Date.now()}-${filename}`, stream, {
-        access: "public",
+        access: "private",
         addRandomSuffix: true,
         contentType,
         multipart: true,
