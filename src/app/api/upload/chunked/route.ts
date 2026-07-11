@@ -1,4 +1,4 @@
-import { del, get, list, put } from "@vercel/blob";
+import { del, get, issueSignedToken, list, presignUrl, put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { UnauthorizedError } from "@/lib/auth/require-current-user";
 import { resolveUploadLimitsForCurrentUser } from "@/lib/uploadSafety/uploadEntitlements";
@@ -192,6 +192,20 @@ export async function POST(request: Request) {
         });
       });
 
+      // The store is private, so blob.downloadUrl is not raw-fetchable — but
+      // the finalize step downloads via a plain fetch(downloadUrl). Hand it a
+      // presigned GET URL instead (valid for one hour).
+      const signedToken = await issueSignedToken({
+        pathname: blob.pathname,
+        operations: ["get"],
+        validUntil: Date.now() + 60 * 60 * 1000,
+      });
+      const { presignedUrl } = await presignUrl(signedToken, {
+        operation: "get",
+        pathname: blob.pathname,
+        access: "private",
+      });
+
       console.info("[upload-chunked] assembled", {
         uploadMode: "chunked-relay",
         filename,
@@ -201,7 +215,7 @@ export async function POST(request: Request) {
       });
       return NextResponse.json({
         url: blob.url,
-        downloadUrl: blob.downloadUrl,
+        downloadUrl: presignedUrl,
         pathname: blob.pathname,
         contentType: blob.contentType,
       });
