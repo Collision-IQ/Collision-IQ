@@ -3,6 +3,7 @@
 import { upload as uploadBlob } from "@vercel/blob/client";
 import { SignInButton, useAuth } from "@clerk/nextjs";
 import { useState } from "react";
+import { uploadFileViaChunkedRelay } from "@/lib/chunkedBlobUpload";
 
 export default function UploadPage() {
   const { getToken, isLoaded, userId } = useAuth();
@@ -39,18 +40,29 @@ export default function UploadPage() {
           filename: file.name,
           sizeBytes: file.size,
         });
-        const blob = await uploadBlob(`uploads/${Date.now()}-${file.name}`, file, {
-          access: "public",
-          contentType: file.type || undefined,
-          handleUploadUrl: "/api/upload/direct",
-          clientPayload: JSON.stringify({
+        let blob: { url: string; downloadUrl: string; pathname: string; contentType?: string | null };
+        try {
+          blob = await uploadBlob(`uploads/${Date.now()}-${file.name}`, file, {
+            access: "public",
+            contentType: file.type || undefined,
+            handleUploadUrl: "/api/upload/direct",
+            clientPayload: JSON.stringify({
+              filename: file.name,
+              contentType: file.type,
+              sizeBytes: file.size,
+              activeCaseId: null,
+            }),
+            headers: authHeaders,
+          });
+        } catch (directError) {
+          // Some environments cannot read the blob API's responses (CORS) —
+          // fall back to the chunked server-relay.
+          console.warn("[upload-client] directUploadFailed — falling back to chunked relay", {
             filename: file.name,
-            contentType: file.type,
-            sizeBytes: file.size,
-            activeCaseId: null,
-          }),
-          headers: authHeaders,
-        });
+            message: directError instanceof Error ? directError.message : String(directError),
+          });
+          blob = await uploadFileViaChunkedRelay(file, { headers: authHeaders });
+        }
         console.info("[upload-client] directUploadCompleted", {
           uploadMode: "direct-storage",
           filename: file.name,

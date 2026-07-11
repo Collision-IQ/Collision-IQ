@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { upload as uploadBlob } from "@vercel/blob/client";
+import { uploadFileViaChunkedRelay } from "@/lib/chunkedBlobUpload";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
@@ -265,18 +266,38 @@ export default function FileUpload({
             zipDetected: transport.zipDetected,
             videoDetected: transport.videoDetected,
           });
-          const blob = await uploadBlob(`uploads/${Date.now()}-${file.name}`, file, {
-            access: "public",
-            contentType: file.type || undefined,
-            handleUploadUrl: "/api/upload/direct",
-            clientPayload: JSON.stringify({
+          let blob: { url: string; downloadUrl: string; pathname: string; contentType?: string | null };
+          try {
+            blob = await uploadBlob(`uploads/${Date.now()}-${file.name}`, file, {
+              access: "public",
+              contentType: file.type || undefined,
+              handleUploadUrl: "/api/upload/direct",
+              clientPayload: JSON.stringify({
+                filename: file.name,
+                contentType: file.type,
+                sizeBytes: file.size,
+                activeCaseId: null,
+              }),
+              headers: authHeaders,
+            });
+          } catch (directError) {
+            // Some environments cannot read the blob API's responses (CORS) —
+            // every direct PUT reports as failed. Fall back to the chunked
+            // server-relay, which never talks to the blob API from the browser.
+            console.warn("[upload-client] directUploadFailed — falling back to chunked relay", {
+              uploadMode: "direct-storage",
               filename: file.name,
-              contentType: file.type,
               sizeBytes: file.size,
-              activeCaseId: null,
-            }),
-            headers: authHeaders,
-          });
+              message: directError instanceof Error ? directError.message : String(directError),
+            });
+            blob = await uploadFileViaChunkedRelay(file, { headers: authHeaders });
+            console.info("[upload-client] chunkedRelayCompleted", {
+              uploadMode: "chunked-relay",
+              filename: file.name,
+              sizeBytes: file.size,
+              pathname: blob.pathname,
+            });
+          }
           console.info("[upload-client] directUploadCompleted", {
             uploadMode: "direct-storage",
             filename: file.name,
