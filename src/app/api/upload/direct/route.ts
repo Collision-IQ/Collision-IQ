@@ -1,17 +1,7 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server";
-import {
-  UnauthorizedError,
-  requireCurrentUser,
-} from "@/lib/auth/require-current-user";
-import { isPlatformAdminEmail, normalizeEmail } from "@/lib/auth/platform-admin";
-import {
-  canUploadFiles as resolveCanUploadFiles,
-  getCurrentProductEntitlements,
-  getCurrentSubscriptionTierForUser,
-  resolveProductTrialActive,
-} from "@/lib/billing/productEntitlements";
-import { resolveUploadPlanLimits } from "@/lib/uploadSafety/uploadLimits";
+import { UnauthorizedError } from "@/lib/auth/require-current-user";
+import { resolveUploadLimitsForCurrentUser } from "@/lib/uploadSafety/uploadEntitlements";
 import { validateDirectUploadCandidate } from "@/lib/uploadSafety/directUploadRouting";
 import { getUploadExtension, isZipUpload } from "@/lib/uploadSafety/zipSafety";
 import { isVideoExtension } from "@/lib/uploadSafety/videoSafety";
@@ -33,34 +23,6 @@ function parseClientPayload(value: string | null): DirectUploadClientPayload {
   } catch {
     return {};
   }
-}
-
-async function resolveUploadLimitsForCurrentUser() {
-  const { user, verifiedEmails, isPlatformAdmin } = await requireCurrentUser();
-  const normalizedEmail = normalizeEmail(user.email);
-  const effectiveIsAdmin = isPlatformAdmin || isPlatformAdminEmail(normalizedEmail);
-  const subscriptionTier = await getCurrentSubscriptionTierForUser(user.id);
-  const trialActive = resolveProductTrialActive({
-    activeSubscriptionId: subscriptionTier ? "active-subscription" : null,
-    activeSubscriptionStatus:
-      subscriptionTier === "trial" ? "TRIALING" : subscriptionTier ? "ACTIVE" : null,
-    createdAt: user.createdAt,
-    plan: subscriptionTier ?? "pro",
-  });
-  const entitlements = await getCurrentProductEntitlements({
-    userEmail: normalizedEmail,
-    userEmails: verifiedEmails,
-    trialActive,
-    subscriptionTier,
-    isPlatformAdmin: effectiveIsAdmin,
-  });
-
-  return {
-    user,
-    entitlements,
-    canUploadFiles: resolveCanUploadFiles(entitlements),
-    uploadLimits: resolveUploadPlanLimits(entitlements),
-  };
 }
 
 function jsonError(error: string, code: string, status = 400) {
