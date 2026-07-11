@@ -108,6 +108,11 @@ import {
   submitFalVision,
 } from "@/lib/falVision";
 import {
+  buildPartImageSearchQuery,
+  extractPartNumberFromImagePrompt,
+  type PartImageSearchResponse,
+} from "@/lib/ai/partImageReference";
+import {
   FalImageGenerationClientError,
   firstImageUrl,
   getFalImageGenerationResult,
@@ -1917,6 +1922,47 @@ export default function ChatWidget({
     cameraInputRef.current?.click();
   }
 
+  // ── Part-number reference image search ──────────────────────────────────────
+  // A generative model cannot know the geometry of a specific OEM part number —
+  // it will fabricate a visual. When the image request references a part
+  // number, retrieve REAL internet images (Serper) and present them as sourced
+  // references instead of generating.
+  async function runPartImageReferenceSearch(prompt: string, partNumber: string) {
+    upsertSystemStatusMessage(`Searching for reference images of part ${partNumber}…`);
+    try {
+      const response = await fetch("/api/parts/image-search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ query: buildPartImageSearchQuery(prompt, partNumber) }),
+      });
+      const data = (await response.json().catch(() => null)) as PartImageSearchResponse | null;
+
+      if (data?.status === "success" && data.results.length > 0) {
+        const imageBlocks = data.results
+          .map((item) => `[![${item.title}](${item.imageUrl})](${item.sourceUrl})\n_${item.title} — ${item.source}_`)
+          .join("\n\n");
+        pushAssistantMessage(
+          `Here are internet-sourced reference images for part **${partNumber}**:\n\n${imageBlocks}\n\n_Internet-sourced reference images (research leads). These are not verified OEM diagrams — confirm fitment against the OEM or CCC parts catalog before relying on them._`
+        );
+        return;
+      }
+
+      // Never fall back to AI generation for an identifiable part: a fabricated
+      // "diagram" is worse than no image.
+      pushAssistantMessage(
+        data?.status === "not_configured"
+          ? `Internet image search is not configured on this server, and I won't generate an AI image for a specific part number — it would be a fabricated visual, not the real part. Check the OEM or CCC parts catalog for part ${partNumber}.`
+          : `I couldn't find internet reference images for part ${partNumber} right now, and I won't generate an AI image for a specific part number — it would be a fabricated visual, not the real part. Check the OEM or CCC parts catalog diagram for this part.`
+      );
+    } catch (error) {
+      console.warn("[chat] part image reference search failed", error);
+      pushAssistantMessage(
+        `I couldn't search for reference images of part ${partNumber} right now. Please try again shortly.`
+      );
+    }
+  }
+
   // ── FAL image generation (Task 3) ───────────────────────────────────────────
   // Explicit command only (/image, /generate-image, /design-car). Never runs
   // automatically during estimate review. Output is an AI-generated visual aid,
@@ -2386,6 +2432,13 @@ export default function ChatWidget({
         pushAssistantMessage(
           "Add a description after the command, e.g. `/image matte black 2020 Honda Civic coupe, bronze wheels, studio lighting`."
         );
+        return;
+      }
+      // Specific part numbers divert to internet reference-image search — a
+      // generated image of an identifiable part is always a fabrication.
+      const partNumber = extractPartNumberFromImagePrompt(imagePrompt);
+      if (partNumber) {
+        void runPartImageReferenceSearch(imagePrompt, partNumber);
         return;
       }
       void runFalImageGeneration(imagePrompt);
