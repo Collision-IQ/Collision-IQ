@@ -226,6 +226,9 @@ export function isNonEstimateContentRow(rawText: string): boolean {
     /\d{1,2}\/\d{1,2}\/\d{2,4},?\s+\d{1,2}:\d{2}/.test(text) || // page footer timestamps
     /page\s+\d+\s*$/i.test(text) ||
     /^line\s*oper|^line\s+description/i.test(text) || // column headers
+    // Abbreviation-legend footer lines ("BLND=BLEND CAPA=CERTIFIED …",
+    // "Rpr=Repair. RT=Right."). Real operation rows never carry "=" pairs.
+    (text.match(/=/g) ?? []).length >= 2 ||
     /get live updates|carwise\.com/i.test(text) ||
     /^(any person who knowingly|the following is a list|estimate based on motor|the attached estimate)/i.test(text)
   );
@@ -345,13 +348,25 @@ function splitGluedMoneyRun(run: string): string[] | null {
   // Preference order (validated against real CCC part+qty+price runs):
   // 1. qty "1" (dominant in CCC), then any single-digit qty, then 2-digit;
   // 2. a plausible part: empty (description-glued) or >= 10 chars (OEM), then
-  //    5-9 chars, penalizing runt fragments;
+  //    full-length 7-9 char parts (Mopar/GM print 7-8), then 5-6 chars,
+  //    penalizing runt fragments ("Valve stem207335529.80" = 2073355 / 2 /
+  //    9.80, not 20733 / 5 / 529.80);
   // 3. more digits kept in the money value ("…41"+"1"+"125.00" beats
   //    "…411"+"1"+"25.00");
   // 4. longer part as the final tiebreaker.
+  // A 1-2 digit pure-numeric leftover "part" is never a real description tail
+  // (those are words or model codes like "450") — a qty-1 read that strands
+  // one ("214.16" → "2"+1+4.16) loses its qty-1 dominance so "2"+14.16 wins.
+  const strandsDigitRunt = (part: string) => /^\d{1,2}$/.test(part);
   const score = (c: { part: string; qty: string; money: string }) =>
-    (c.qty === "1" ? 4000 : c.qty.length === 1 ? 2000 : c.qty.length === 2 ? 1000 : 0) +
-    (c.part === "" || c.part.length >= 10 ? 600 : c.part.length >= 5 ? 300 : 0) +
+    (c.qty === "1" && !strandsDigitRunt(c.part)
+      ? 4000
+      : c.qty.length === 1
+        ? 2000
+        : c.qty.length === 2
+          ? 1000
+          : 0) +
+    (c.part === "" || c.part.length >= 10 ? 600 : c.part.length >= 7 ? 450 : c.part.length >= 5 ? 300 : 0) +
     c.money.replace(/\D/g, "").length * 20 +
     c.part.length;
   candidates.sort((a, b) => score(b) - score(a));
@@ -388,9 +403,24 @@ export function explodeGluedRow(rawText: string): string {
   let text = rawText.replace(/\s+/g, " ").trim();
   if (!text) return text;
 
-  // "Incl." glued straight onto the description ("fender linerIncl.") — no
-  // digits involved, so the blob scan below never sees it.
-  text = text.replace(/([a-z)])(Incl\.)/g, "$1 $2");
+  // "~" is MOTOR's not-included-operation marker; glued into a row it welds
+  // the description to the part/qty/price run ("+25%~41035906311,223.75…").
+  text = text.replace(/~/g, " ");
+
+  // Description words glue onto part numbers with no delimiter
+  // ("BLACK68534268AH", "Striker68294124AA", "swb7BC10TZZAC"). Split an
+  // alpha word (3+ letters) from a digit-led 7+ alphanumeric tail — short
+  // model tails like "GLE350" or "R19" never qualify.
+  text = text.replace(/([A-Za-z]{3,})(?=\d[A-Za-z0-9]{6,})/g, "$1 ");
+
+  // "Incl." glued straight onto the description, a part number, or a price
+  // ("fender linerIncl.", "6VF90DX8ABIncl.", "29.80Incl.").
+  text = text.replace(/([A-Za-z0-9)])(Incl\.)/g, "$1 $2");
+
+  // Aftermarket catalog part numbers print with an interior dot
+  // ("3012.0113") and glue straight onto the qty/price run — split the
+  // catalog number off the digits that follow.
+  text = text.replace(/(\d{4}\.\d{4})(?=\d)/g, "$1 ");
 
   // 1. Find the earliest description→column-blob boundary (a letter/'%'/')'
   //    followed by digits, a minus-number, or a marker+digit) where everything
@@ -415,7 +445,12 @@ export function explodeGluedRow(rawText: string): string {
     const tokenEnd = text.indexOf(" ", i);
     const withinToken = tokenEnd === -1 ? text.slice(i) : text.slice(i, tokenEnd);
     const splittable =
-      /\.\d/.test(withinToken) || withinToken.replace(/\D/g, "").length >= 9;
+      /\.\d/.test(withinToken) ||
+      withinToken.replace(/\D/g, "").length >= 9 ||
+      // Tiny glued tails ("scan1m", "flare2") are qty/marker columns — but
+      // only after a WORD (2+ letters). After a mixed alnum fragment the
+      // digits are a part-number interior ("C25J75" must not split at "J7").
+      (withinToken.length <= 3 && /[A-Za-z]{2}$/.test(text.slice(0, i)));
     if (!splittable) continue;
     if (isColumnBlob(remainder)) {
       const head = text.slice(0, i);
@@ -425,10 +460,12 @@ export function explodeGluedRow(rawText: string): string {
         // A comma before 4+ digits is a description tail ("350,") glued to a
         // part/qty/price run — money grouping is always exactly 3 digits.
         .replace(/,(?=\d{4,})/g, ", ")
-        // money → whatever follows; but NOT when a bare ".d" follows — that
-        // means the "2 decimals" were really two glued 1-decimal hour values
-        // ("Hood1.03.2" = 1.0 labor + 3.2 paint, not $1.03), handled below.
-        .replace(/(\.\d{2})(?=[^.\s])/g, "$1 ")
+        // money → the NEXT VALUE ("166.500.6" → "166.50 0.6"); the follower
+        // must itself look like a decimal value so the split never fires
+        // inside a dotted A/M catalog part ("3012.0113" stays intact). A bare
+        // ".d" follower means the "2 decimals" were really two glued
+        // 1-decimal hour values ("Hood1.03.2"), handled below.
+        .replace(/(\.\d{2})(?=-?\d{1,4}[.,]\d)/g, "$1 ")
         .replace(/([mMsTX])(?=-?[\d.])/g, "$1 ") // marker → number
         .replace(/(\d)([mMsTXbBpP])(?=\s|$)/g, "$1 $2"); // number → trailing marker
       // Hour columns glue to each other ("2.41.8" → "2.4 1.8"). Hours carry
@@ -448,9 +485,15 @@ export function explodeGluedRow(rawText: string): string {
       blob = blobTokens
         .map((token, index) => {
           // Qty glued to a lone HOURS value ("10.5" = qty 1 + 0.5 hr, "31.5" =
-          // qty 3 + 1.5 hr) — only in money-less manual rows, where the qty
-          // column prints right against the hours.
-          const qtyHours = !blobHasMoney && token.match(/^([1-9])(\d{1,2}\.\d)$/);
+          // qty 3 + 1.5 hr) — only on rows that PRINT a qty column: manual
+          // "#" entries and Repl rows. Rpr/R&I/Blnd/etc. carry no qty, so
+          // "22.0" there is 22.0 hours, never qty 2 + 2.0.
+          // NOTE: no \b before "Repl" — it never fires between a digit and a
+          // letter ("18Repl…"), the usual glued-CCC shape.
+          const qtyHours =
+            !blobHasMoney &&
+            /#|Repl/i.test(rawText) &&
+            token.match(/^([1-9])(\d{1,2}\.\d)$/);
           if (qtyHours) {
             return `${qtyHours[1]} ${qtyHours[2]}`;
           }
@@ -468,13 +511,33 @@ export function explodeGluedRow(rawText: string): string {
 
   // Space-separated long money runs (from wrapped-row rejoins) still need the
   // part/qty/price split: a "price" with 7+ integer digits is a glued run,
-  // never a real dollar amount.
-  const finalTokens = text.split(" ").filter(Boolean);
+  // never a real dollar amount. Runs that glue money to trailing HOURS
+  // ("41035906311,223.751.73.1") never end in ".dd", so pre-split pure-numeric
+  // tokens at money→value and hour→hour seams first (dotted A/M catalog parts
+  // excluded — their interior ".dddd" is not a money seam).
+  const finalTokens: string[] = [];
+  for (const token of text.split(" ").filter(Boolean)) {
+    if (/^[\d,.]+\d$/.test(token) && !/^\d{4}\.\d{4}$/.test(token)) {
+      let expanded = token.replace(/(\.\d{2})(?=-?\d{1,4}[.,]\d)/g, "$1 ");
+      let previousPass = "";
+      while (previousPass !== expanded) {
+        previousPass = expanded;
+        expanded = expanded.replace(/(\d\.\d)(?=-?\d+\.\d)/g, "$1 ");
+      }
+      finalTokens.push(...expanded.split(" "));
+      continue;
+    }
+    finalTokens.push(token);
+  }
   text = finalTokens
     .map((token, index) => {
       if (!/^[A-Za-z0-9,-]*\d[,\d]*\.\d{2}$/.test(token)) return token;
       const integerDigits = token.split(".")[0].replace(/\D/g, "").length;
-      if (integerDigits < 7 && !/[A-Za-z]/.test(token)) return token;
+      // A no-comma "price" of $1,000+ is impossible in CCC output ($1,000+ is
+      // always comma-grouped) — such a token is a glued qty+price ("1163.08").
+      const value = Number(token.replace(/,/g, ""));
+      const commaMissingGlue = !token.includes(",") && value >= 1000 && value <= 9999999;
+      if (integerDigits < 7 && !/[A-Za-z]/.test(token) && !commaMissingGlue) return token;
       const previousToken = finalTokens[index - 1] ?? "";
       if (/^[1-9]\d?$/.test(previousToken)) return token;
       const split = splitGluedMoneyRun(token);
@@ -577,24 +640,36 @@ function extractTrailingColumns(body: string): {
     let laborIncluded = false;
     let paint: number | null = null;
     let paintIncluded = false;
-    if (trailing.length > 0 && end > 0) {
-      // The qty column prints just before the hours ("Tint color 1 0.5") —
-      // consume it so it never leaks into the description.
-      let qty: number | null = null;
-      if (end > 1 && /^[1-9]\d?$/.test(tokens[end - 1])) {
-        qty = Number(tokens[end - 1]);
-        end -= 1;
-      }
+    // The qty column prints just before the hours ("Tint color 1 0.5") —
+    // consume it so it never leaks into the description. Some carrier rows
+    // are qty-ONLY ("Pre-repair scan 1 m": present but unpriced) — the bare
+    // qty is still real operation data and must not vanish.
+    let qty: number | null = null;
+    if (end > 1 && /^[1-9]\d?$/.test(tokens[end - 1])) {
+      qty = Number(tokens[end - 1]);
+      end -= 1;
+    }
+    // Some layouts print the part number even on price-less rows
+    // ("R&I RT Striker 68294124AA 0.2"). Pull it out so the description
+    // matches its counterpart on documents that omit the part column.
+    let noPricePartNumber: string | null = null;
+    if (end > 1 && isPartNumberToken(tokens[end - 1])) {
+      noPricePartNumber = tokens[end - 1];
+      end -= 1;
+    }
+    if ((trailing.length > 0 || qty !== null) && end > 0) {
       const [first, second] = trailing;
-      if (/^incl\.?$/i.test(first)) laborIncluded = true;
-      else labor = Number(first);
+      if (first !== undefined) {
+        if (/^incl\.?$/i.test(first)) laborIncluded = true;
+        else labor = Number(first);
+      }
       if (second !== undefined) {
         if (/^incl\.?$/i.test(second)) paintIncluded = true;
         else paint = Number(second);
       }
       return {
         descriptionBody: tokens.slice(0, end).join(" ").trim(),
-        partNumber: null,
+        partNumber: noPricePartNumber,
         qty,
         price: null,
         labor,
@@ -699,8 +774,10 @@ function isPartNumberToken(token: string): boolean {
   const hasDigit = /\d/.test(value);
   if (hasLetter && hasDigit && /^[A-Za-z0-9-]+$/.test(value)) return true;
   // Pure numeric part numbers are usually >= 6 digits (e.g. 84394021, 9132667),
-  // optionally dash-grouped ("167-880-44-09").
+  // optionally dash-grouped ("167-880-44-09"). Aftermarket catalog numbers
+  // print with an interior dot ("3012.0113").
   if (!hasLetter && /^\d{6,}$/.test(value)) return true;
+  if (!hasLetter && /^\d{4}\.\d{4}$/.test(value)) return true;
   if (!hasLetter && /^\d[\d-]{5,}\d$/.test(value) && value.replace(/-/g, "").length >= 6) return true;
   return false;
 }
@@ -756,7 +833,11 @@ export function parseCccEstimateRow(
     columns.labor !== null ||
     columns.paint !== null ||
     columns.laborIncluded ||
-    columns.paintIncluded;
+    columns.paintIncluded ||
+    // A bare qty is real operation data: carrier layouts print unpriced
+    // rows as "<desc> 1 m" (present but left open for invoice review).
+    // Dropping them turned shared operations into false "missing" findings.
+    (columns.qty !== null && lineNumber !== null);
   if (!hasOperationData) return null;
 
   return {
@@ -806,7 +887,12 @@ export function groupWrappedEstimateLines(lines: string[]): WrappedEstimateLineG
   for (let index = 0; index < lines.length; index += 1) {
     const line = (lines[index] ?? "").replace(/\s+/g, " ").trim();
     if (!line) continue;
-    if (isSectionHeader(line) || /^note\b/i.test(line)) {
+    // Short unnumbered ALL-CAPS lines inside an open row are wrapped option
+    // codes ("WSD", "PX8"), not section headers — real headers carry a line
+    // number or a full section name.
+    const shortCapsContinuation =
+      open !== null && line.length <= 5 && !/^\d/.test(line) && !/[a-z]/.test(line);
+    if ((isSectionHeader(line) && !shortCapsContinuation) || /^note\b/i.test(line)) {
       groups.push({ text: line, sourceIndexes: [index] });
       open = null;
       continue;
@@ -815,6 +901,14 @@ export function groupWrappedEstimateLines(lines: string[]): WrappedEstimateLineG
     // checked BEFORE row-start detection because they can begin with digits.
     if (open && isColumnBlob(line) && !isNonEstimateContentRow(line)) {
       open.text = `${open.text}${line}`;
+      open.sourceIndexes.push(index);
+      continue;
+    }
+    // A description ending in "Per" wraps its measurement to the next line
+    // ("Trim Masking Tape-3M 06347-Per" / "3 Ft") — the leading digits there
+    // are the measurement, never a new row's line number.
+    if (open && /\bper$/i.test(open.text) && !isNonEstimateContentRow(line)) {
+      open.text = `${open.text} ${line}`;
       open.sourceIndexes.push(index);
       continue;
     }
@@ -848,6 +942,12 @@ export function parseCccEstimateRows(text: string): EstimateDeltaRow[] {
   let section: string | null = null;
   for (const group of groupWrappedEstimateLines(lines)) {
     const line = group.text;
+    // "Supplement of Record with Summary" prints a SUPPLEMENT SUMMARY recap
+    // after the line items: Changed/Deleted items carry ORIGINAL-estimate line
+    // numbers with NEGATIVE hours, and Added items repeat rows already parsed.
+    // Treating recap rows as line items creates false deltas (an R&I at -0.5
+    // paired against the counterpart's +0.5).
+    if (rows.length > 0 && /^supplement summary$/i.test(line)) break;
     if (isSectionHeader(line)) {
       section = line.replace(/^\d{1,4}\s*(?=[A-Z])/, "").trim();
       continue;
@@ -990,7 +1090,10 @@ function findBestLowerMatch(
       lowerRow.partNumber &&
       higherRow.partNumber === lowerRow.partNumber
     ) {
-      score = 100;
+      // Must outrank any description-based score: sibling rows with identical
+      // descriptions but different parts ("RT W'strip on body" 68498156AD /
+      // 68498157AD) otherwise cross-pair and report two false part changes.
+      score = 200;
       basis = "part_number";
       exact = true;
     } else {
