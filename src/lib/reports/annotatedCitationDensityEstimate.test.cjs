@@ -3800,4 +3800,105 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(grouped.filter((f) => f.category === "scan_diagnostic").length, 3);
     assert.equal(grouped.filter((f) => f.category === "refinish").length, 1);
   });
+
+  await run("phone redaction requires separators — bare part numbers survive", async () => {
+    const { redactAnnotationText } = require(path.join(process.cwd(), "src/lib/reports/annotatedCitationDensityEstimate.ts"));
+    // OEM part numbers are bare 10-digit runs and must NEVER redact as phones.
+    assert.equal(redactAnnotationText("Lower panel 1678850708"), "Lower panel 1678850708");
+    assert.equal(
+      redactAnnotationText("LT Lower cntrl arm GLE350, 1673302905 1 594.00"),
+      "LT Lower cntrl arm GLE350, 1673302905 1 594.00"
+    );
+    // Real phone formats keep redacting.
+    assert.match(redactAnnotationText("Call (215) 866-8390 today"), /\[REDACTED_PHONE\]/);
+    assert.match(redactAnnotationText("Call 215-866-8390 today"), /\[REDACTED_PHONE\]/);
+    assert.match(redactAnnotationText("Call 215.866.8390 today"), /\[REDACTED_PHONE\]/);
+  });
+
+  await run("all differing ESTIMATE TOTALS labor categories emit rate-delta findings (RO21888)", async () => {
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const page = doc.addPage([612, 792]);
+    page.drawText("FRONT BUMPER & GRILLE", { x: 42, y: 746, size: 10, font });
+    page.drawText("7*ReplBumper cover5550001101999911,308.00Incl.2.6", { x: 42, y: 726, size: 8, font });
+    const page2 = doc.addPage([612, 792]);
+    const totals = [
+      "ESTIMATE TOTALS",
+      "CategoryBasisRateCost $",
+      "Parts16,930.28",
+      "Body Labor 40.5 hrs@$ 75.00 /hr3,037.50",
+      "Paint Labor 15.3 hrs@$ 75.00 /hr1,147.50",
+      "Paint Supplies 15.3 hrs@$ 60.00 /hr918.00",
+      "Subtotal29,021.00",
+      "Grand Total30,673.27",
+    ];
+    totals.forEach((t, i) => page2.drawText(t, { x: 42, y: 716 - i * 16, size: 8, font }));
+    const sourcePdfBytes = await doc.save();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourcePdfName: "Shop Final 21888.pdf",
+      sourceDocumentId: "shop-final-21888",
+      sourceText: ["FRONT BUMPER & GRILLE", "7*ReplBumper cover5550001101999911,308.00Incl.2.6", ...totals].join("\n"),
+      comparisonEstimateTexts: [{
+        fileName: "SOR-3 21888.pdf",
+        sourceDocumentId: "sor3-21888",
+        estimateRole: "carrier",
+        text: [
+          "FRONT BUMPER & GRILLE",
+          "4S01  Repl Bumper cover11,308.00Incl.2.6",
+          "ESTIMATE TOTALS",
+          "Body Labor 29.5 hrs@$ 60.00 /hr1,770.00",
+          "Paint Labor 11.8 hrs@$ 60.00 /hr708.00",
+          "Paint Supplies 11.8 hrs@$ 39.00 /hr460.20",
+          "Total Cost of Repairs27,232.13",
+        ].join("\n"),
+      }],
+      findings: [],
+      findingGenerator: buildRequiredEstimatorDeltaFindings,
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "shop" },
+    });
+    const rateFindings = result.annotationMetadata.filter((item) =>
+      /Rate difference/i.test(`${item.shortTitle} ${item.comment}`)
+    );
+    const rateText = rateFindings.map((item) => `${item.shortTitle} ${item.comment}`).join(" ");
+    assert.ok(rateFindings.length >= 3, `expected 3+ rate-delta findings, got ${rateFindings.length}`);
+    assert.match(rateText, /Body Labor/i);
+    assert.match(rateText, /Paint Labor/i);
+    assert.match(rateText, /Paint Supplies/i);
+  });
+
+  await run("repeated print pages do not double-report the same line (tire dedupe)", async () => {
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const page = doc.addPage([612, 792]);
+    page.drawText("WHEELS", { x: 42, y: 746, size: 10, font });
+    page.drawText("75ReplCooper 255/50R19 tire1425.001.0", { x: 42, y: 726, size: 8, font });
+    // Supplement print repeats the SAME line on a later page.
+    const page2 = doc.addPage([612, 792]);
+    page2.drawText("WHEELS", { x: 42, y: 746, size: 10, font });
+    page2.drawText("75ReplCooper 255/50R19 tire1425.001.0", { x: 42, y: 726, size: 8, font });
+    const sourcePdfBytes = await doc.save();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourcePdfName: "Shop.pdf",
+      sourceDocumentId: "shop-dup",
+      sourceText: "WHEELS\n75ReplCooper 255/50R19 tire1425.001.0",
+      comparisonEstimateTexts: [{
+        fileName: "SOR.pdf",
+        sourceDocumentId: "sor-dup",
+        estimateRole: "carrier",
+        text: "WHEELS\n70S01ReplCooper 255/50R19 tire1425.000.5",
+      }],
+      findings: [],
+      findingGenerator: buildRequiredEstimatorDeltaFindings,
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "shop" },
+    });
+    const tireFindings = result.annotationMetadata.filter((item) =>
+      /255\/50R19|Cooper/i.test(`${item.shortTitle} ${item.comment} ${item.sourceAnchorText}`)
+    );
+    assert.ok(
+      tireFindings.length <= 1,
+      `expected at most one tire finding, got ${tireFindings.length}: ${tireFindings.map((f) => f.shortTitle).join(" | ")}`
+    );
+  });
 })();

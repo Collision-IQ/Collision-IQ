@@ -20,13 +20,35 @@ const COMMON_INSURERS = [
   "AAA",
   "Root Insurance",
   "Root",
+  "American Family",
+  "The Hartford",
+  "Economy Preferred",
+  "Economy Premier",
+  "Foremost",
+  "Safeco",
+  "Chubb",
+  "Amica",
+  "MetLife",
+  "Auto-Owners",
+  "National General",
 ];
 
-// "Root" is a real carrier but also an English word; only accept it when the
-// insurer sense is present (company suffix or an insurance-context label).
+// Carriers whose names are also ordinary words or vendor brands; only accept
+// them when the insurer sense is present (company suffix or an
+// insurance-context label). "AAA" must never be picked up from a tire/service
+// vendor line like "AAA Car Care Center".
+// NOTE: no leading \b on the phrase alternatives — CCC headers glue fields
+// together ("…collision.comFOREMOST INSURANCE COMPANY"), and \b never fires
+// between two letters.
 const AMBIGUOUS_INSURER_CONTEXT: Record<string, RegExp> = {
   Root: /\broot\s+insurance\b|\binsurance\s*(?:company|co\.?|:)?\s*root\b|\b(?:carrier|insurer|insurance company)\b[^\n]{0,20}\broot\b/i,
+  AAA: /aaa\s+(?:insurance|casualty|club|mutual)\b|(?:carrier|insurer|insurance company)[^\n]{0,30}\baaa\b/i,
+  Foremost: /foremost\s+(?:insurance|signature|county mutual)\b|(?:carrier|insurer|insurance company)[^\n]{0,30}foremost\b/i,
 };
+
+// Repair/parts vendors that must never land in the insurer slot even when a
+// labeled field or fuzzy match surfaces them.
+const INSURER_VENDOR_EXCLUSION = /\b(?:car care|tire|tires|glass|towing|rental|salvage|recycl|goodyear|mavis|discount)\b/i;
 
 const LIKELY_PERSON_NAME_PATTERN = /^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}$/;
 // Owner / insured names on CCC estimate headers are frequently rendered "LAST, FIRST"
@@ -194,14 +216,33 @@ export function extractMileageReadings(text: string): number[] {
   return [...readings].sort((a, b) => a - b);
 }
 
+/**
+ * True when the carrier name appears in the text. Ambiguous names go through
+ * their context guard; multi-word names match WITHOUT a leading \b because
+ * CCC headers glue fields together ("…collision.comFOREMOST INSURANCE").
+ */
+function carrierAppearsInText(carrier: string, text: string): boolean {
+  const contextGuard = AMBIGUOUS_INSURER_CONTEXT[carrier];
+  if (contextGuard) return contextGuard.test(text);
+  const words = carrier.split(/\s+/).map(escapeRegExp);
+  if (words.length > 1) {
+    return new RegExp(`${words.join("\\s+")}\\b`, "i").test(text);
+  }
+  return new RegExp(`\\b${words[0]}\\b`, "i").test(text);
+}
+
 function extractInsurer(text: string): string | undefined {
-  const knownFromText = COMMON_INSURERS.find((carrier) =>
-    new RegExp(`\\b${escapeRegExp(carrier)}\\b`, "i").test(text)
-  );
+  // Ambiguous carrier names require insurance context ("AAA" from a vendor
+  // line such as "AAA Car Care Center" must not populate the insurer).
+  const knownFromText = COMMON_INSURERS.find((carrier) => carrierAppearsInText(carrier, text));
   // Only the Insurance Company / Insurer / Carrier field may populate the insurer slot.
-  // Owner/Insured/Claimant/Policyholder labels are deliberately excluded from this regex.
-  const labeled =
-    text.match(/\b(?:insurer|insurance company|insurance co(?:mpany)?)\b\s*[:#-]\s*([A-Za-z][A-Za-z .&'-]{1,40})/i)?.[1]?.trim();
+  // Owner/Insured/Claimant/Policyholder labels are deliberately excluded from this
+  // regex, and the value must sit on the SAME line — CCC's three-column headers
+  // put the labels on one line and the glued values on the next, so crossing
+  // the newline captures the owner name instead of the carrier.
+  const labeledRaw =
+    text.match(/\b(?:insurer|insurance company|insurance co(?:mpany)?)\b[ \t]*[:#-][ \t]*([A-Za-z][A-Za-z .&'-]{1,40})/i)?.[1]?.trim();
+  const labeled = labeledRaw && INSURER_VENDOR_EXCLUSION.test(labeledRaw) ? undefined : labeledRaw;
   // Capture the owner/insured/claimant name (if labeled) so it can never be selected as
   // the insurer, even when it appears as a prior/extracted candidate.
   const ownerName = text
@@ -224,12 +265,7 @@ export function extractInsurerMentions(text: string): string[] {
   if (!text) return [];
   const found = new Set<string>();
   for (const carrier of COMMON_INSURERS) {
-    const contextGuard = AMBIGUOUS_INSURER_CONTEXT[carrier];
-    if (contextGuard) {
-      if (contextGuard.test(text)) found.add(normalizeInsurer(carrier));
-      continue;
-    }
-    if (new RegExp(`\\b${escapeRegExp(carrier)}\\b`, "i").test(text)) {
+    if (carrierAppearsInText(carrier, text)) {
       found.add(normalizeInsurer(carrier));
     }
   }

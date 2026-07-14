@@ -4681,6 +4681,10 @@ function ReportSendModal({
             <textarea
               value={message}
               onChange={(event) => onMessageChange(event.target.value)}
+              spellCheck={true}
+              autoCorrect="on"
+              autoCapitalize="sentences"
+              autoComplete="on"
               rows={7}
               className="rounded-xl border border-[var(--border)] bg-[var(--input)] px-3 py-2 text-sm leading-6 text-[var(--foreground)] outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/15"
             />
@@ -4910,6 +4914,10 @@ function SnapshotPreviewModal({
                 <textarea
                   value={message}
                   onChange={(event) => onMessageChange(event.target.value)}
+                  spellCheck={true}
+                  autoCorrect="on"
+                  autoCapitalize="sentences"
+                  autoComplete="on"
                   rows={6}
                   className="rounded-xl border border-[var(--border)] bg-[var(--input)] px-3 py-2 text-sm leading-6 text-[var(--foreground)] outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/15"
                 />

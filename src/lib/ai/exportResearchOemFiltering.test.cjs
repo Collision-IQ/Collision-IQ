@@ -136,6 +136,82 @@ run("Chrysler report does not allow Hyundai/GM/Honda under verified OEM", () => 
   }
 });
 
+run("Mercedes report rejects Nissan/GM position statements outright (RO21888)", () => {
+  const mercedes = resolveVehicleApplicabilityContext({ year: 2025, make: "Mercedes-Benz", model: "GLE 350" });
+  const verified = __exportResearchTestHooks.verifyResearchSources(
+    [
+      buildSource("nissan-oem", "Nissan/INFINITI Position Statements"),
+      buildSource("gm-oem", "GM Parts collision position statements", "General Research Leads - Not Make-Specific"),
+      buildSource("mb-oem", "Mercedes-Benz GLE structural repair position statement"),
+    ],
+    undefined,
+    mercedes
+  );
+  assert.ok(
+    verified.accepted.some(
+      (source) =>
+        /Mercedes/.test(source.sourceTitle) &&
+        source.supportCategory === "Verified OEM / Position Statement Support"
+    )
+  );
+  assert.ok(!verified.accepted.some((source) => /Nissan|GM Parts/.test(source.sourceTitle)));
+  assert.equal(verified.summary.wrongMakeOemLeadsRejected, 2);
+});
+
+run("off-topic federal law leads are rejected (FAR class deviation, EPA lead-and-copper)", () => {
+  const lawSource = (id, title) => ({
+    ...buildSource(id, title),
+    sourceType: "law",
+    supportCategory: "Verified Law",
+    jurisdiction: "Pennsylvania",
+    confidenceScore: 0.9,
+  });
+  const verified = __exportResearchTestHooks.verifyResearchSources(
+    [
+      lawSource("far-law", "Class Deviation RFO-: FAR federal acquisition regulation update"),
+      lawSource("epa-law", "Lead and Copper Rule | Department of Environmental Protection drinking water"),
+      lawSource("doi-law", "Pennsylvania DOI motor vehicle physical damage appraisal regulation"),
+    ],
+    "PA"
+  );
+  const rejectedTitles = verified.rejected.map((source) => source.sourceTitle).join(" ");
+  assert.match(rejectedTitles, /FAR federal acquisition/);
+  assert.match(rejectedTitles, /Lead and Copper/);
+  assert.equal(verified.summary.offTopicLawLeadsRejected, 2);
+  assert.ok(verified.accepted.some((source) => /Pennsylvania DOI/.test(source.sourceTitle)));
+});
+
+run("no accepted OEM source renders an honest none-found line, never a wrong make", () => {
+  const sections = buildExportResearchSections(
+    buildSnapshot([], {
+      uncitedLegalClaimsRejected: 0,
+      fabricatedStatutesRejected: 0,
+      staleOrSupersededRegulationsRejected: 0,
+      unsupportedOemRequirementsRejected: 0,
+      inferredPolicyRightsDowngraded: 0,
+    })
+  );
+  const oemSection = sections.find((section) => section.title === "Verified OEM / Position Statement Support");
+  assert.ok(oemSection);
+  assert.match(JSON.stringify(oemSection), /No verified make-specific OEM position statement/);
+});
+
+run("rejected sources never render outside the internal audit view", () => {
+  const rejectedSource = {
+    ...buildSource("rejected-oem", "GM Parts position statements", "Unsupported / Needs Review"),
+    accepted: false,
+  };
+  const snapshot = buildSnapshot([rejectedSource], {
+    uncitedLegalClaimsRejected: 0,
+    fabricatedStatutesRejected: 0,
+    staleOrSupersededRegulationsRejected: 0,
+    unsupportedOemRequirementsRejected: 0,
+    inferredPolicyRightsDowngraded: 0,
+  });
+  const customerSections = buildExportResearchSections(snapshot);
+  assert.ok(!customerSections.some((section) => section.title === "Unsupported / Needs Review"));
+});
+
 run("generic estimating or industry sources render only under research leads", () => {
   const sections = buildExportResearchSections(buildSnapshot([
     buildSource(

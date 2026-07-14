@@ -359,6 +359,8 @@ function verifyResearchSources(
   let staleOrSupersededRegulationsRejected = 0;
   let unsupportedOemRequirementsRejected = 0;
   let inferredPolicyRightsDowngraded = 0;
+  let offTopicLawLeadsRejected = 0;
+  let wrongMakeOemLeadsRejected = 0;
 
   for (const source of sources) {
     let rejectionReason: string | null = null;
@@ -370,6 +372,26 @@ function verifyResearchSources(
         confidenceScore: source.confidenceScore,
       });
 
+    // Legal sources must be collision/insurance-repair law. Procurement,
+    // environmental, and other-domain regulations (FAR class deviations, the
+    // EPA Lead and Copper Rule, …) match repair keywords by accident and must
+    // never surface as leads, verified or not.
+    if (
+      source.sourceType === "law" &&
+      isOffTopicLawSource(`${source.sourceTitle} ${source.locator} ${source.url ?? ""} ${source.snippet ?? ""}`)
+    ) {
+      offTopicLawLeadsRejected += 1;
+      rejected.push({
+        ...source,
+        accepted: false,
+        supportCategory: "Unsupported / Needs Review",
+        confidenceScore: 0,
+        rejectionReason:
+          "Legal source is outside automotive/insurance repair law (procurement, environmental, or other-domain regulation).",
+      });
+      continue;
+    }
+
     if (source.sourceType === "law" && !lawJurisdictionVerified) {
       accepted.push({
         ...source,
@@ -379,26 +401,32 @@ function verifyResearchSources(
       continue;
     }
 
-    if (
-      source.sourceType === "oem" &&
-      source.supportCategory === "Verified OEM / Position Statement Support"
-    ) {
+    if (source.sourceType === "oem") {
       const oemRelevance = classifyOemSourceRelevance(
         `${source.sourceTitle} ${source.locator} ${source.url ?? ""}`,
         vehicleContext
       );
-      if (oemRelevance !== "make_specific") {
+      // A wrong-make position statement is never a lead for this vehicle —
+      // reject it outright (it previously stayed "accepted" and rendered).
+      if (oemRelevance === "mismatched") {
+        wrongMakeOemLeadsRejected += 1;
+        rejected.push({
+          ...source,
+          accepted: false,
+          supportCategory: "Unsupported / Needs Review",
+          confidenceScore: 0,
+          rejectionReason: "OEM source names a different manufacturer family than the estimate vehicle.",
+        });
+        continue;
+      }
+      if (
+        source.supportCategory === "Verified OEM / Position Statement Support" &&
+        oemRelevance !== "make_specific"
+      ) {
         accepted.push({
           ...source,
-          supportCategory:
-            oemRelevance === "mismatched"
-              ? "Unsupported / Needs Review"
-              : "General Research Leads - Not Make-Specific",
+          supportCategory: "General Research Leads - Not Make-Specific",
           confidenceScore: Math.min(source.confidenceScore, 0.55),
-          rejectionReason:
-            oemRelevance === "mismatched"
-              ? "OEM source names a different manufacturer family than the estimate vehicle."
-              : undefined,
         });
         continue;
       }
@@ -452,8 +480,25 @@ function verifyResearchSources(
       staleOrSupersededRegulationsRejected,
       unsupportedOemRequirementsRejected,
       inferredPolicyRightsDowngraded,
+      offTopicLawLeadsRejected,
+      wrongMakeOemLeadsRejected,
     },
   };
+}
+
+/**
+ * Legal sources that pattern-match repair keywords but belong to unrelated
+ * regulatory domains: federal procurement (FAR), environmental rules, OSHA,
+ * healthcare, etc. Collision reports only cite DOI/state-insurance,
+ * auto-repair, and appraisal law.
+ */
+function isOffTopicLawSource(text: string): boolean {
+  return (
+    /\bFAR\b/.test(text) ||
+    /federal acquisition|class deviation|procurement|lead and copper|drinking water|clean water act|clean air act|\bEPA\b|environmental protection agency|\bOSHA\b|\bHIPAA\b|securities and exchange|\bFCC\b|zoning|building code/i.test(
+      text
+    )
+  );
 }
 
 function buildCitationMap(sources: ExportResearchSource[]): ExportResearchSnapshot["citationMap"] {

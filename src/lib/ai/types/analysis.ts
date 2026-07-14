@@ -457,6 +457,8 @@ export type ExportResearchSnapshot = {
     staleOrSupersededRegulationsRejected: number;
     unsupportedOemRequirementsRejected: number;
     inferredPolicyRightsDowngraded: number;
+    offTopicLawLeadsRejected?: number;
+    wrongMakeOemLeadsRejected?: number;
   };
   unsupportedFindings: string[];
   immutableSnapshotHash: string;

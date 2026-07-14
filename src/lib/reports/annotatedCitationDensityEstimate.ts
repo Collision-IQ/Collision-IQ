@@ -2243,6 +2243,18 @@ function matchStructuredLineItemDeltas(
     });
     if (row) higherRows.push(row);
   }
+  // Multi-page prints repeat rows on supplement/recap pages (the same tire
+  // line on p4 and p10). CCC line numbers are unique per estimate, so keep the
+  // FIRST copy — matching parseCccEstimateRows. Without this, the duplicate
+  // double-reports: one copy pairs (e.g. reduced_labor) and the other copy,
+  // now unmatched, becomes a false expanded_scope finding for the same line.
+  const seenHigherLineNumbers = new Set<number>();
+  const dedupedHigherRows = higherRows.filter((row) => {
+    if (row.lineNumber === null) return true;
+    if (seenHigherLineNumbers.has(row.lineNumber)) return false;
+    seenHigherLineNumbers.add(row.lineNumber);
+    return true;
+  });
 
   const lowerRows = comparison.flatMap((item) => parseCccEstimateRows(item.text));
   if (lowerRows.length === 0 || higherRows.length === 0) return null;
@@ -2266,7 +2278,7 @@ function matchStructuredLineItemDeltas(
   // Seed category presence from the full comparison text so an OCR-flattened
   // lower estimate (few parseable rows) still recognizes its own categories.
   const lowerCategoryText = comparison.map((item) => item.text).join("\n");
-  const match = matchEstimateLineItems({ lowerRows, higherRows, lowerIsOcr, lowerCategoryText });
+  const match = matchEstimateLineItems({ lowerRows, higherRows: dedupedHigherRows, lowerIsOcr, lowerCategoryText });
   const orderedDeltas = [...match.deltas].sort(
     (a, b) => scoreLineItemDeltaForPriority(b) - scoreLineItemDeltaForPriority(a)
   );
@@ -2385,14 +2397,26 @@ function emitTotalsDeltaFindings(
 
   // Search from the END: supplement prints repeat earlier cumulative totals
   // blocks, and the FINAL block is the operative one.
-  const claimAnchor = (matches: (rowText: string) => boolean): EstimateRowAnchor | undefined => {
+  const findAnchor = (
+    matches: (rowText: string) => boolean,
+    allowUsed: boolean
+  ): EstimateRowAnchor | undefined => {
     for (let index = deltaMatch.totalsAnchors.length - 1; index >= 0; index -= 1) {
       const anchor = deltaMatch.totalsAnchors[index];
-      if (usedAnchorIds.has(anchor.anchorId)) continue;
+      if (!allowUsed && usedAnchorIds.has(anchor.anchorId)) continue;
       if (matches(anchor.rowText.replace(/\s+/g, " ").toLowerCase())) return anchor;
     }
     return undefined;
   };
+  // A rate/category delta must never be silently dropped because its totals
+  // row was already claimed (categories can share rate text) or because the
+  // category row fragmented in extraction — prefer an unused matching row,
+  // then REUSE a claimed matching row, then fall back to the totals block
+  // itself (Grand Total/Subtotal) so the finding still renders on that page.
+  const claimAnchor = (matches: (rowText: string) => boolean): EstimateRowAnchor | undefined =>
+    findAnchor(matches, false) ?? findAnchor(matches, true);
+  const blockFallbackAnchor = (): EstimateRowAnchor | undefined =>
+    claimAnchor((text) => /estimate totals|grand total|total cost of repair|subtotal/.test(text));
 
   const MAX_TOTALS_FINDINGS = 8;
   for (const delta of deltaMatch.totalsDeltas) {
@@ -2403,7 +2427,7 @@ function emitTotalsDeltaFindings(
         ? claimAnchor((text) => /grand total|total cost of repair|workfile total|net cost/.test(text))
         : delta.kind === "category_only_on_lower"
           ? claimAnchor((text) => /grand total|total cost of repair|subtotal/.test(text))
-          : claimAnchor((text) => text.includes(categoryNeedle));
+          : (claimAnchor((text) => text.includes(categoryNeedle)) ?? blockFallbackAnchor());
     if (!anchor) continue; // never emit an unanchored finding
 
     usedAnchorIds.add(anchor.anchorId);
@@ -2889,7 +2913,7 @@ function isNonLeadablePrimaryAnchorText(rowText: string, anchor: EstimateRowAnch
 
 function isRejectedBoilerplateSupplierText(normalized: string) {
   return isJunkCitationFindingText(normalized) ||
-    /\b(?:aftermarket crash part|quality replacement parts?|alternate parts policy|a\/m aftermarket|a m aftermarket|capa definitions?|lkq rcy used definitions?|abbreviations?|legend|disclaimer|fraud|ccc motor|motor guide|included operations?|not included|vehicle equipment|recond|refn)\b/.test(normalized);
+    /\b(?:aftermarket crash part|quality replacement parts?|alternate parts policy|a\/m aftermarket|a m aftermarket|capa definitions?|lkq rcy used definitions?|abbreviations?|legend|disclaimer|fraud|ccc motor|motor guide|included operations?|not included|vehicle equipment|recond|refn|parts are oem parts|oem parts that may be)\b/.test(normalized);
 }
 
 function isWheelLaborAnchorText(normalized: string) {
@@ -2904,7 +2928,7 @@ function isWheelComparisonBoilerplate(text: string) {
 }
 
 function isJunkCitationFindingText(normalized: string) {
-  return /\b(?:aftermarket crash part|quality replacement parts?|alternate parts policy|a\/m aftermarket|a m aftermarket|capa definitions?|capa certified|lkq rcy used definitions?|lkq\/rcy\/used|abbreviations?|legend|disclaimer|fraud|legal notice|ccc motor|ccc\/motor|motor guide|estimating guide|included operations?|not included|vehicle equipment|vin decoding|footer|page \d+ of \d+|recond|refn|estimate totals|parts total|subtotal|grand total|sales tax|body labor total|paint labor total|paint supplies total|labor d diagnostic|qr code|sunbit|payment plan|payment link|payment portal)\b/.test(normalized) ||
+  return /\b(?:aftermarket crash part|quality replacement parts?|alternate parts policy|a\/m aftermarket|a m aftermarket|capa definitions?|capa certified|lkq rcy used definitions?|lkq\/rcy\/used|abbreviations?|legend|disclaimer|fraud|legal notice|ccc motor|ccc\/motor|motor guide|estimating guide|included operations?|not included|vehicle equipment|vin decoding|footer|page \d+ of \d+|recond|refn|estimate totals|parts total|subtotal|grand total|sales tax|body labor total|paint labor total|paint supplies total|labor d diagnostic|qr code|sunbit|payment plan|payment link|payment portal|parts are oem parts|oem parts that may be|list of abbreviations)\b/.test(normalized) ||
     /\b(?:4 wheel drive|tilt wheel|fm radio|skyview roof)\b/.test(normalized) ||
     (/\b(?:total|subtotal|net cost|deductible|betterment|tax)\b/.test(normalized) && /\b(?:footer|page|claim|insured|owner|license|vin)\b/.test(normalized));
 }
@@ -5476,6 +5500,9 @@ function isVisibleCitationDensityFinding(finding: CitationDensityFinding): boole
   const primaryNormalized = normalizeMatchText(primaryText);
 
   if (!normalized.trim()) return false;
+  // A 0/100 Citation Density score means no scoring signal survived — such a
+  // "finding" is always an artifact (legend/boilerplate anchor), never a lead.
+  if (typeof finding.citationDensityScore === "number" && finding.citationDensityScore <= 0) return false;
   if (isJunkCitationFindingText(primaryNormalized)) return false;
   if (/\brepair operation\b|\bproc report\b|\bcomparison or screenshot cues\b/i.test(text)) return false;
   if (/\bgeneric visible damage photo observations\b|\bgeneric key visible estimate facts\b/i.test(text)) return false;
@@ -5952,7 +5979,22 @@ function buildPdfCommentBody(
 }
 
 function sanitizePdfAnnotationName(value: string) {
-  return value.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 120) || "anchor";
+  // PDF name tokens are capped at 127 bytes by the spec, and some strict
+  // renderers (pdftoppm) warn on long tokens anywhere in the file. Finding and
+  // anchor ids can exceed that — keep a readable prefix plus a short stable
+  // hash so the annotation name stays unique without the full raw id.
+  const cleaned = value.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "") || "anchor";
+  if (cleaned.length <= 40) return cleaned;
+  return `${cleaned.slice(0, 40)}-${shortStableHash(cleaned)}`;
+}
+
+function shortStableHash(value: string) {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
 }
 
 function formatShortIssueTitle(finding: CitationDensityFinding) {
@@ -6763,12 +6805,15 @@ function formatSignedNumber(value: number) {
   return rounded > 0 ? `+${rounded}` : String(rounded);
 }
 
-function redactAnnotationText(value: string): string {
+export function redactAnnotationText(value: string): string {
   return normalizeSourceBoundaryText(redactDownloadContent(value))
     .replace(/\b[A-HJ-NPR-Z0-9]{11}\*{6}\b/g, "[REDACTED_VIN]")
     .replace(/\b[A-HJ-NPR-Z0-9]{17}\b/g, "[REDACTED_VIN]")
     .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, "[REDACTED_EMAIL]")
-    .replace(/\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g, "[REDACTED_PHONE]")
+    // Phone redaction REQUIRES formatting (parens or separators): a bare
+    // 10-digit run is an OEM part number ("1678850708"), not a phone. No
+    // leading \b — it never fires before "(" after a space.
+    .replace(/(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)\s?\d{3}[-.\s]?\d{4}|\d{3}[-.\s]\d{3}[-.\s]\d{4})\b/g, "[REDACTED_PHONE]")
     .replace(/\b\d{1,6}\s+[A-Za-z0-9 .'-]+\s+(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Ln|Lane|Blvd|Boulevard|Ct|Court)\b\.?/gi, "[REDACTED_ADDRESS]");
 }
 

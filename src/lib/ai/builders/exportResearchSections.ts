@@ -9,8 +9,11 @@ const SUPPORT_CATEGORIES: ExportResearchSupportCategory[] = [
   "General Research Leads - Not Make-Specific",
   "Internet-Sourced Industry Support",
   "Inferred Repair Intelligence",
-  "Unsupported / Needs Review",
 ];
+
+// Rejected/unsupported candidates are audit material, never customer/adjuster
+// report content — they render only when includeInternalAudit is set.
+const INTERNAL_ONLY_CATEGORIES: ExportResearchSupportCategory[] = ["Unsupported / Needs Review"];
 
 export function buildExportResearchSections(
   snapshot: ExportResearchSnapshot | null | undefined,
@@ -33,10 +36,22 @@ export function buildExportResearchSections(
           ],
         }]
       : []),
-    ...SUPPORT_CATEGORIES.flatMap((category) => {
-      const bullets = formatCategoryBullets(snapshot, category).filter(isMeaningfulReportText);
-      return bullets.length > 0 ? [{ title: resolveCategoryTitle(snapshot, category), bullets }] : [];
-    }),
+    ...[...SUPPORT_CATEGORIES, ...(options.includeInternalAudit ? INTERNAL_ONLY_CATEGORIES : [])].flatMap(
+      (category) => {
+        const bullets = formatCategoryBullets(snapshot, category).filter(isMeaningfulReportText);
+        return bullets.length > 0 ? [{ title: resolveCategoryTitle(snapshot, category), bullets }] : [];
+      }
+    ),
+    // Wrong-make position statements are rejected upstream — when that leaves
+    // no OEM sources at all, say so honestly instead of rendering nothing.
+    ...(hasNoOemSources(snapshot)
+      ? [{
+          title: "Verified OEM / Position Statement Support",
+          bullets: [
+            "No verified make-specific OEM position statement was found for this vehicle. Do not substitute another manufacturer's statement; request the OEM's own repair procedures or position statements.",
+          ],
+        }]
+      : []),
     ...(options.includeInternalAudit
       ? [{
           title: "Citation Verification Results",
@@ -46,6 +61,8 @@ export function buildExportResearchSections(
             `Stale or superseded regulation candidates rejected: ${snapshot.verificationSummary.staleOrSupersededRegulationsRejected}.`,
             `Unsupported OEM requirement candidates rejected: ${snapshot.verificationSummary.unsupportedOemRequirementsRejected}.`,
             `Inferred policy rights downgraded: ${snapshot.verificationSummary.inferredPolicyRightsDowngraded}.`,
+            `Off-topic legal leads rejected: ${snapshot.verificationSummary.offTopicLawLeadsRejected ?? 0}.`,
+            `Wrong-make OEM leads rejected: ${snapshot.verificationSummary.wrongMakeOemLeadsRejected ?? 0}.`,
             ...snapshot.unsupportedFindings.slice(0, 8),
           ].filter(isMeaningfulReportText),
         }]
@@ -111,6 +128,14 @@ function formatCategoryBullets(
       .filter(Boolean)
       .join(" ");
   });
+}
+
+function hasNoOemSources(snapshot: ExportResearchSnapshot): boolean {
+  return !snapshot.sourcesAccepted.some(
+    (source) =>
+      source.supportCategory === "Verified OEM / Position Statement Support" ||
+      (source.sourceType === "oem" && source.supportCategory === "General Research Leads - Not Make-Specific")
+  );
 }
 
 function hasVerifiedLawJurisdiction(value: string | null | undefined) {

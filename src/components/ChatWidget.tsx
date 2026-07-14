@@ -4723,10 +4723,15 @@ export default function ChatWidget({
               <textarea
                 ref={textareaRef}
                 value={input}
-                // Native squiggles are replaced by the AI typo underline overlay.
-                spellCheck={false}
+                // Native spell check is ON: desktop gets red-squiggle
+                // misspellings with right-click suggestions, and the default
+                // (non-none) inputMode keeps mobile predictive keyboards and
+                // autocorrect active. The AI typo underline overlay remains as
+                // a supplement for idle-time rechecks.
+                spellCheck={true}
                 autoCorrect="on"
                 autoCapitalize="sentences"
+                autoComplete="on"
                 onFocus={() => {
                   dismissIntroForComposerEngagement();
                   onChatEngagement?.();

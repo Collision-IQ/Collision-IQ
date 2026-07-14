@@ -133,6 +133,56 @@ const VEHICLE_TERM_GROUPS: VehicleTermGroup[] = [
     manufacturerTerms: ["cadillac", "buick"],
     modelTerms: ["escalade", "xt4", "xt5", "enclave", "envision"],
   },
+  {
+    family: "mercedes_benz",
+    canonicalMake: "Mercedes-Benz",
+    manufacturerTerms: ["mercedes", "mercedes benz", "daimler", "amg", "mbusa"],
+    modelTerms: [
+      "gla",
+      "glb",
+      "glc",
+      "gle",
+      "gls",
+      "gle 350",
+      "gle 450",
+      "c class",
+      "e class",
+      "s class",
+      "cla",
+      "sprinter",
+      "metris",
+    ],
+  },
+  {
+    family: "toyota",
+    canonicalMake: "Toyota",
+    manufacturerTerms: ["toyota", "lexus", "scion", "toyota motor"],
+    modelTerms: ["camry", "corolla", "rav4", "highlander", "tacoma", "tundra", "4runner", "sienna", "prius", "rx 350", "es 350", "nx 300"],
+  },
+  {
+    family: "ford",
+    canonicalMake: "Ford",
+    manufacturerTerms: ["ford", "lincoln", "motorcraft", "ford motor"],
+    modelTerms: ["f 150", "f 250", "escape", "explorer", "mustang", "edge", "bronco", "ranger", "fusion", "navigator", "aviator", "maverick"],
+  },
+  {
+    family: "volkswagen_group",
+    canonicalMake: "Volkswagen",
+    manufacturerTerms: ["volkswagen", "vw", "audi", "porsche"],
+    modelTerms: ["jetta", "passat", "tiguan", "atlas", "golf", "gti", "q5", "q7", "a4", "a6", "macan", "cayenne", "taos"],
+  },
+  {
+    family: "jaguar_land_rover",
+    canonicalMake: "Land Rover",
+    manufacturerTerms: ["jaguar", "land rover", "range rover", "jlr"],
+    modelTerms: ["defender", "discovery", "evoque", "velar", "f pace", "e pace"],
+  },
+  {
+    family: "mazda",
+    canonicalMake: "Mazda",
+    manufacturerTerms: ["mazda", "mazda north american"],
+    modelTerms: ["cx 5", "cx 9", "cx 30", "cx 50", "cx 90", "mazda3", "mazda 3", "mazda6", "mazda 6", "mx 5", "miata"],
+  },
 ];
 
 const GENERIC_REPAIR_TERMS = [

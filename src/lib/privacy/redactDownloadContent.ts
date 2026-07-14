@@ -1,8 +1,5 @@
 const VIN_PATTERN = /\b[A-HJ-NPR-Z0-9]{17}\b/g;
 
-const INSURANCE_COMPANY_PATTERN =
-	/\b(?:State\s*Farm|Allstate|GEICO|Progressive|Liberty\s*Mutual|USAA|Farmers|Nationwide|Travelers|The\s*Hartford|American\s*Family|Erie|[A-Z][A-Za-z&.'-]*(?:\s+[A-Z][A-Za-z&.'-]*){0,4}\s+(?:Insurance|Assurance|Indemnity|Mutual|Casualty|County\s+Mutual|Underwriters|National|General))\b(?!-)/gi;
-
 const STREET_ADDRESS_PATTERN =
 	/\b\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,5}\s(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl)\b\.?/gi;
 
@@ -33,10 +30,10 @@ const LABEL_RULES: LabelRule[] = [
 		labels: ["address", "street", "street address", "mailing address", "location"],
 		replacementToken: "ADDRESS",
 	},
-	{
-		labels: ["insurance company", "insurer"],
-		replacementToken: "INSURER",
-	},
+	// NOTE: the insurer/carrier name is deliberately NOT redacted — it is a
+	// corporation, not personal data, and the claim reports are about an
+	// insurance dispute. Redacting it produced "[REDACTED_INSURER]" in the
+	// repair-intelligence PDF while the customer report showed the carrier.
 	{
 		labels: ["claim", "claim number", "claim no", "claim #", "claim id"],
 		replacementToken: "CLAIM",
@@ -78,7 +75,6 @@ export function redactDownloadContent(text: string): string {
 	redacted = redactCapturedValues(redacted, capturedValues);
 
 	// Generic fallback patterns second.
-	redacted = redacted.replace(INSURANCE_COMPANY_PATTERN, "[REDACTED_INSURER]");
 	redacted = redacted.replace(STREET_ADDRESS_PATTERN, "[REDACTED_ADDRESS]");
 	redacted = redacted.replace(STATE_ZIP_PATTERN, (_match, prefix: string) => `${prefix}[REDACTED_ZIP]`);
 	redacted = redacted.replace(PLATE_FALLBACK_PATTERN, (_match, prefix: string) => {
