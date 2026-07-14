@@ -12,11 +12,14 @@ where possible, cite a source the shop can attach.
 2. When a trigger fires, add a `note` annotation in the **OEM color**
    (`"color":"blue","hl":"cyan"`) near the offending line, e.g.
    `OEM: MB requires new OEM structural parts — see position stmt`.
-3. Sourcing (per user config — "bundled now, Egnyte later"):
+3. Sourcing (per user config — "bundled now, Google Drive later"):
    - **Bundled**: cite the position summarized here + its public source.
-   - **Egnyte (when authorized)**: search the user's `collisionacademy.egnyte.com`
-     OE docs for the make + topic and attach/link the actual PDF. If the Egnyte
-     connector is available, prefer the user's own document over the summary here.
+   - **Google Drive**: search the OE-docs library (`search_files`,
+     `fullText contains '...'`) and attach/link the matching PDF; prefer the
+     user's own document over the summary here.
+   - **Serper / web**: `scripts/oem_search.py "<make> <topic> position statement"`
+     (needs `SERPER_API_KEY`), or the built-in web search, to find the public
+     statement or statute; cite the source URL.
 4. Never assert a position statement exists for a make/topic you can't support.
    If unsure, flag the item as "verify OEM position" rather than inventing a cite.
 
@@ -88,7 +91,7 @@ Examples:
 Beyond OEM position statements, applicable **state law** can support requiring OEM
 parts/procedures or disclosure. Use the vehicle owner's / repair facility's state
 (from the estimate header). Laws change — when law is material to a dispute, verify
-the **current** statute via web search or the user's Egnyte legal library before
+the **current** statute via web search or the user's Google Drive legal folder before
 citing; don't rely on a remembered section number.
 
 General principles most states share (verify specifics per state):

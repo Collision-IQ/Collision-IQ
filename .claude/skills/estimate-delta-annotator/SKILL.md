@@ -89,18 +89,19 @@ in the **OEM color** (`"color":"blue","hl":"cyan"`) citing the position. To avoi
   each to its line number, e.g. `OEM (Ln 23): MB requires new OEM part (MBUSA
   parts stmt)`; optionally add a blue `underline` on that line's price to tie it.
 
-Sourcing is "bundled now, Egnyte later": cite the summarized statement + public
-source from the reference file. If an **Egnyte** connector is authorized, first
-search the user's `collisionacademy.egnyte.com` OE docs for the make + topic and
-attach/link the actual statement, preferring it over the summary. Never invent a
+Sourcing order: (1) search the user's **Google Drive** OE-docs library
+(`search_files`, e.g. `fullText contains 'Mercedes position statement bumper'`)
+and attach/link the matching statement; (2) if not found, run **Serper**
+(`scripts/oem_search.py "<make> <topic> position statement"`, needs
+`SERPER_API_KEY`) — or the built-in web search if the key is unset — and cite the
+source URL; (3) fall back to the bundled reference summary. Never invent a
 citation — if unsupported, flag `OEM: verify position statement` instead.
 
 Also consider **jurisdictional law** (see the reference file's jurisdictional
 section) using the owner's/shop's state from the estimate header — e.g.
 aftermarket-parts disclosure/consent or OEM-procedure requirements. Law changes,
-so verify the current statute (web search or the Egnyte legal library) before
-quoting it in a dispute. This OEM pass is the input to an **OEM citation density
-report**: aim to attach the strongest citation (OEM procedure/position statement,
+so verify the current statute (Serper / web search, or a legal doc in Google
+Drive) before quoting it in a dispute. This OEM pass is the input to an **OEM citation density report**: aim to attach the strongest citation (OEM procedure/position statement,
 then ADAS requirement, then applicable law) to as many flagged items as possible.
 
 ### 6. Build instructions & render
@@ -125,5 +126,5 @@ flags — and hand over the PDF.
 - **Scanned/flattened PDFs**: extractor needs real text; if it returns no priced
   lines, tell the user to supply a text-based estimate (or OCR first).
 - **Don't invent values or citations.** Every stamped number comes from extracted
-  data; every OEM cite comes from the reference file or the user's Egnyte library.
+  data; every OEM cite comes from the reference file, Google Drive, or Serper/web.
   When unsure, leave it unmarked and mention it.

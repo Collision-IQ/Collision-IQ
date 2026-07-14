@@ -30,8 +30,7 @@ re-scans skills.
    ESTIMATE TOTALS.
 4. OEM pass — flags aftermarket/used parts, missing scans/calibrations, and
    one-time-use reuse in the page bottom margin, citing the position statement
-   (bundled reference; pulls from the Collision Academy Egnyte library once that
-   connector is authorized).
+   (bundled reference, then Google Drive OE-docs library, then Serper/web).
 
 ## Contents
 
@@ -48,6 +47,10 @@ Python 3 with `pdfplumber`, `reportlab`, and `pypdf`. If missing, install once:
 ```bash
 pip install pdfplumber reportlab pypdf
 ```
+
+**OEM sourcing:** the Google Drive connector (OE-docs library) and a `SERPER_API_KEY`
+env var (for `scripts/oem_search.py`). If the key is unset, the pass falls back to
+the built-in web search.
 
 ## Input notes
 
