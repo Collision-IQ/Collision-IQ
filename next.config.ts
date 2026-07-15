@@ -21,6 +21,10 @@ const nextConfig: NextConfig = {
     ],
     "/api/upload": OCR_TRACE_INCLUDES,
     "/api/upload/finalize": OCR_TRACE_INCLUDES,
+    // Scan IQ extracts uploaded scan PDFs with the same OCR fallback — without
+    // these assets a deployed instance silently fails OCR and reports every
+    // image-only scan PDF as "no readable scan text".
+    "/api/scan-iq": OCR_TRACE_INCLUDES,
   },
 };
 

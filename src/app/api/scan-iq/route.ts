@@ -101,7 +101,17 @@ async function resolveScanSide(params: {
   }
 
   const extracted = await extractPreviewDataFromBuffer({ buffer, mimeType, filename }).catch(
-    () => ({ text: "", pageCount: undefined as number | undefined })
+    (error: unknown) => {
+      // Never fail the request over extraction, but never hide the reason
+      // either — a silent catch here masked missing OCR assets in production
+      // (every image-only scan PDF reported as "no readable scan text").
+      console.error("[scan-iq] extraction failed", {
+        side: params.side,
+        mimeType,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return { text: "", pageCount: undefined as number | undefined };
+    }
   );
 
   // Preserve the uploaded file as a regular attachment regardless of parse
