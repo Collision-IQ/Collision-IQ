@@ -402,40 +402,40 @@ model CarrierTrendEvent {
 }
 
 model CccSecureShareWebhookEvent {
-  id                String   @id @default(cuid())
-  environment       String
-  environmentSource String   @map("environment_source")
-  requestKind       String   @map("request_kind")
-  appId             String?  @map("app_id")
-  trigger           String?
-  rqUid             String?  @map("rq_uid")
-  rawXmlSha256      String?  @map("raw_xml_sha256")
-  bodyLength        Int      @default(0) @map("body_length")
-  contentType       String?  @map("content_type")
-  sourceIp          String?  @map("source_ip")
-  headerNamesJson   Json     @default("[]") @map("header_names_json")
-  secretPresent     Boolean  @default(false) @map("secret_present")
-  signaturePresent  Boolean  @default(false) @map("signature_present")
-  secretMatched     Boolean  @default(false) @map("secret_matched")
-  duplicate         Boolean  @default(false)
-  receivedAt        DateTime @default(now()) @map("received_at")
-  processingStatus  String   @default("received") @map("processing_status")
-  parseError        String?  @map("parse_error")
-  normalizedHeaderJson           Json?    @map("normalized_header_json")
-  normalizedLineItemsPreviewJson Json?    @map("normalized_line_items_preview_json")
-  normalizedLineItemCount        Int?     @map("normalized_line_item_count")
-  normalizationStatus            String?  @map("normalization_status")
-  normalizationWarningsJson      Json?    @map("normalization_warnings_json")
-  jurisdictionStateCode          String?  @map("jurisdiction_state_code")
-  jurisdictionSource             String?  @map("jurisdiction_source")
-  jurisdictionConfidence         String?  @map("jurisdiction_confidence")
-  vehicleYear                    Int?     @map("vehicle_year")
-  vehicleMake                    String?  @map("vehicle_make")
-  vehicleModel                   String?  @map("vehicle_model")
-  vehicleVinTail                 String?  @map("vehicle_vin_tail")
-  vehicleVinHash                 String?  @map("vehicle_vin_hash")
+  id                             String    @id @default(cuid())
+  environment                    String
+  environmentSource              String    @map("environment_source")
+  requestKind                    String    @map("request_kind")
+  appId                          String?   @map("app_id")
+  trigger                        String?
+  rqUid                          String?   @map("rq_uid")
+  rawXmlSha256                   String?   @map("raw_xml_sha256")
+  bodyLength                     Int       @default(0) @map("body_length")
+  contentType                    String?   @map("content_type")
+  sourceIp                       String?   @map("source_ip")
+  headerNamesJson                Json      @default("[]") @map("header_names_json")
+  secretPresent                  Boolean   @default(false) @map("secret_present")
+  signaturePresent               Boolean   @default(false) @map("signature_present")
+  secretMatched                  Boolean   @default(false) @map("secret_matched")
+  duplicate                      Boolean   @default(false)
+  receivedAt                     DateTime  @default(now()) @map("received_at")
+  processingStatus               String    @default("received") @map("processing_status")
+  parseError                     String?   @map("parse_error")
+  normalizedHeaderJson           Json?     @map("normalized_header_json")
+  normalizedLineItemsPreviewJson Json?     @map("normalized_line_items_preview_json")
+  normalizedLineItemCount        Int?      @map("normalized_line_item_count")
+  normalizationStatus            String?   @map("normalization_status")
+  normalizationWarningsJson      Json?     @map("normalization_warnings_json")
+  jurisdictionStateCode          String?   @map("jurisdiction_state_code")
+  jurisdictionSource             String?   @map("jurisdiction_source")
+  jurisdictionConfidence         String?   @map("jurisdiction_confidence")
+  vehicleYear                    Int?      @map("vehicle_year")
+  vehicleMake                    String?   @map("vehicle_make")
+  vehicleModel                   String?   @map("vehicle_model")
+  vehicleVinTail                 String?   @map("vehicle_vin_tail")
+  vehicleVinHash                 String?   @map("vehicle_vin_hash")
   normalizedAt                   DateTime? @map("normalized_at")
-  createdAt         DateTime @default(now()) @map("created_at")
+  createdAt                      DateTime  @default(now()) @map("created_at")
 
   @@index([environment, rqUid])
   @@index([environment, receivedAt])
@@ -530,4 +530,154 @@ enum AcademyServiceCaseStatus {
   AWAITING_INFO
   COMPLETE
   CANCELLED
+}
+
+// ─── Collision Learning Engine (admin-only; separate from user report memory) ──
+
+enum LearningItemStatus {
+  DRAFT
+  VERIFIED
+  PROMOTED
+  RETIRED
+  INVALIDATED
+}
+
+enum LearningMode {
+  ACTIVE_RECALL
+  FEYNMAN
+  CONTRAST
+  INTERLEAVED_CASE
+  FULL_REPORT
+  HOLDOUT
+}
+
+enum BenchmarkRunKind {
+  BASELINE
+  WEEKLY
+  HOLDOUT
+  CAPSTONE
+}
+
+model CollisionLearningItem {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  domain    String
+  subdomain String?
+  objective String
+  skillTags String[]
+
+  prompt            String
+  goldAnswer        Json
+  sourceRefs        Json
+  sourceFingerprint String
+  authorityTier     Int
+
+  oem            String?
+  jurisdiction   String?
+  vehicleScope   Json?
+  safetyCritical Boolean @default(false)
+  // Holdout items are benchmark-only: excluded from daily sprints and their
+  // gold answers must never reach the response-generating model.
+  holdout        Boolean @default(false)
+
+  status       LearningItemStatus @default(DRAFT)
+  dueAt        DateTime           @default(now())
+  intervalDays Int                @default(0)
+  ease         Float              @default(2.3)
+  repetitions  Int                @default(0)
+  lapses       Int                @default(0)
+
+  attempts CollisionLearningAttempt[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, dueAt])
+  @@index([domain, dueAt])
+  @@index([oem, jurisdiction])
+  @@index([holdout, status])
+}
+
+model CollisionLearningAttempt {
+  id     String                @id @default(cuid())
+  itemId String
+  item   CollisionLearningItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  mode      LearningMode
+  modelName String
+  response  Json
+
+  grade                Int
+  factualAccuracy      Float
+  evidenceCoverage     Float
+  citationFidelity     Float
+  safetyRecall         Float
+  calibrationScore     Float
+  unsupportedClaimRate Float
+
+  evaluatorVersion String
+  errorCodes       String[]
+  benchmarkRunId   String?
+  createdAt        DateTime @default(now())
+
+  @@index([itemId, createdAt])
+  @@index([mode, createdAt])
+  @@index([benchmarkRunId])
+}
+
+model CollisionLearningPromotion {
+  id                String   @id @default(cuid())
+  itemId            String
+  sourceFingerprint String
+  benchmarkRunId    String
+  approvedBy        String
+  approvedAt        DateTime @default(now())
+  notes             String?
+
+  @@index([itemId, approvedAt])
+}
+
+model CollisionLearningError {
+  id              String    @id @default(cuid())
+  itemId          String?
+  domain          String
+  errorCode       String
+  severity        String
+  description     String
+  occurrenceCount Int       @default(1)
+  lastSeenAt      DateTime  @default(now())
+  resolvedAt      DateTime?
+
+  @@index([severity, lastSeenAt])
+  @@index([domain, errorCode])
+}
+
+model CollisionBenchmarkRun {
+  id          String                     @id @default(cuid())
+  kind        BenchmarkRunKind
+  label       String
+  startedAt   DateTime                   @default(now())
+  completedAt DateTime?
+  // Frozen runs are immutable comparison points (baseline / capstone).
+  frozen      Boolean                    @default(false)
+  metrics     Json?
+  notes       String?
+  results     CollisionBenchmarkResult[]
+
+  @@index([kind, startedAt])
+}
+
+model CollisionBenchmarkResult {
+  id         String                @id @default(cuid())
+  runId      String
+  run        CollisionBenchmarkRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  itemId     String
+  mode       LearningMode
+  grade      Int
+  metrics    Json
+  regression Boolean               @default(false)
+  createdAt  DateTime              @default(now())
+
+  @@index([runId, itemId])
+  @@index([itemId, createdAt])
 }
