@@ -9,6 +9,10 @@ const OCR_TRACE_INCLUDES = [
   "./node_modules/tesseract.js-core/**",
   "./node_modules/tesseract.js/**",
   "./node_modules/pdfjs-dist/legacy/build/pdf.mjs",
+  // pdf.js imports the worker module at runtime even with disableWorker
+  // ("fake worker") — without it OCR fails on Vercel with "Cannot find module
+  // '...pdf.worker.mjs' imported from '...pdf.mjs'".
+  "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
 ];
 
 const nextConfig: NextConfig = {
