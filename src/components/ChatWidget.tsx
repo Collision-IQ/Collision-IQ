@@ -3313,10 +3313,19 @@ export default function ChatWidget({
         message: err instanceof Error ? err.message : String(err),
       });
 
+      // Keep the friendly headline, but carry the actual failure reason (the
+      // resolveProviderFailure detail or the network error) so failures are
+      // reportable instead of a dead-end generic toast.
+      const failureReason =
+        err instanceof Error && err.message && err.message.trim().length <= 240
+          ? ` (${err.message.trim()})`
+          : "";
+      const failureText = `The analysis service had a temporary issue. Please retry.${failureReason}`;
+
       if (sessionRef.current === mySession) {
         if (hasAttachmentsInTurn) {
           clearReviewProgressTimers();
-          upsertSystemStatusMessage("The analysis service had a temporary issue. Please retry.");
+          upsertSystemStatusMessage(failureText);
         } else {
           setMessages((prev) => [
             ...prev,
@@ -3325,7 +3334,7 @@ export default function ChatWidget({
               return createMessage(
                 messageCounterRef.current,
                 "assistant",
-                "The analysis service had a temporary issue. Please retry.",
+                failureText,
                 "system_status"
               );
             })(),
@@ -3335,7 +3344,7 @@ export default function ChatWidget({
           hasAttachmentsInTurn &&
           analysisRunRef.current === activeAnalysisRunId
         ) {
-          onAnalysisStatusChange?.("error", "The analysis service had a temporary issue. Please retry.");
+          onAnalysisStatusChange?.("error", failureText);
           onAnalysisLoadingChange?.(false);
         }
       }

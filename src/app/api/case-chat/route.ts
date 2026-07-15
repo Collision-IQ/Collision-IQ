@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
     const {
       caseId,
       message,
-      history = [],
+      history: rawHistory = [],
       assistanceProfile,
     }: {
       caseId: string;
@@ -124,6 +124,22 @@ export async function POST(req: NextRequest) {
       history?: Array<{ role: "user" | "assistant"; content: string }>;
       assistanceProfile?: string | null;
     } = body;
+
+    // Large cases (100+ attachments) produce very long analysis replies; an
+    // uncapped history of those replies can push the assembled prompt past the
+    // provider's context limit and fail the whole request. Keep the last 8
+    // turns and cap each entry — recent-turn continuity survives, the token
+    // budget stays bounded.
+    const history = (Array.isArray(rawHistory) ? rawHistory : [])
+      .filter(
+        (entry): entry is { role: "user" | "assistant"; content: string } =>
+          Boolean(entry) &&
+          (entry.role === "user" || entry.role === "assistant") &&
+          typeof entry.content === "string" &&
+          entry.content.trim().length > 0
+      )
+      .slice(-8)
+      .map((entry) => ({ role: entry.role, content: limitText(entry.content, 6000) }));
 
     if (!caseId || !message) {
       return NextResponse.json(
@@ -428,7 +444,7 @@ CURRENT CONVERSATIONAL TOPIC
 ${currentTopic}
 
 TRANSCRIPT SUMMARY
-${transcriptSummary || "None"}
+${limitText(transcriptSummary || "", 4000) || "None"}
 
 SUPPORT GAPS
 ${Array.isArray(supportGaps) ? supportGaps.join("\n") : "None"}
@@ -517,9 +533,20 @@ ${AUTHORITY_RETRIEVAL_STATUS_FIELDS}
 ${EVIDENCE_POLICY}
 `;
 
+    // Prompt-size telemetry: when a large case fails at the provider, this is
+    // the line that says whether the assembled context was the reason.
+    console.info("[case-chat] prompt assembled", {
+      activeCaseId: caseId,
+      systemChars: system.length,
+      historyEntries: history.length,
+      historyChars: history.reduce((total, entry) => total + entry.content.length, 0),
+      messageChars: message.length,
+      attachmentCount: files.length,
+    });
+
     const rawReply = await generateChatCompletion({
       system,
-      messages: [...history, { role: "user", content: message }],
+      messages: [...history, { role: "user", content: limitText(message, 12000) }],
     });
     const reply = sanitizeUserFacingEvidenceText(
       redactExternalDocumentUrls(
@@ -573,6 +600,20 @@ ${EVIDENCE_POLICY}
           message: RETRYABLE_PROVIDER_USER_MESSAGE,
         },
         { status: retryableStatus }
+      );
+    }
+
+    // Context-overflow failures get a specific, actionable message instead of
+    // a generic 500 — this is the failure mode of very large (100+ file) cases.
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (/prompt is too long|request_too_large|exceeds? .*context|too many tokens|maximum context length/i.test(errorMessage)) {
+      console.error("case-chat context overflow", { message: errorMessage.slice(0, 300) });
+      return NextResponse.json(
+        {
+          error:
+            "This case's accumulated context is too large for a single reply. Ask a narrower question, or download the reports for the full detail.",
+        },
+        { status: 413 }
       );
     }
 
