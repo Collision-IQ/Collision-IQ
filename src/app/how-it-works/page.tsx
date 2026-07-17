@@ -110,6 +110,9 @@ export default function HowItWorksPage() {
         <nav className="hidden lg:block">
           <div className="sticky top-20 space-y-1 text-sm">
             <div className="ci-eyebrow mb-2">How Collision IQ Works</div>
+            <Link href="/how-it-works/guide" className="block rounded-md px-2 py-1.5 font-medium text-[var(--accent)] hover:bg-muted">
+              Quick-Start Guide →
+            </Link>
             <a href="#overview" className="block rounded-md px-2 py-1.5 text-foreground hover:bg-muted">Overview</a>
             <a href="#responds" className="block rounded-md px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">Chat &amp; Analysis</a>
             {SECTIONS.map((s) => (

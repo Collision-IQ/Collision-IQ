@@ -18,6 +18,8 @@ import {
   LoaderCircle,
   Pause,
   StopCircle,
+  FileText,
+  Image as ImageIcon,
 } from "lucide-react";
 import { diffTypoSpans, requestTypoFix, type TypoSpan } from "@/lib/ai/typeHelper";
 import ComposerTypoUnderline from "@/components/ComposerTypoUnderline";
@@ -1218,6 +1220,31 @@ export default function ChatWidget({
       ? `${selectedUploadNames.length} files selected`
       : selectedUploadNames.join(", ");
   const hasUploadStatus = selectedUploadNames.length > 0 || uploadUiState !== "idle";
+  // Attachment chips + suggested-action prompts (Claude-style): uploads render
+  // as compact cards above the composer, with tappable next-step prompts so a
+  // fresh upload never faces a blank input box.
+  const pendingChipAttachments = useMemo(
+    () => attachments.filter((attachment) => !attachment.usedInAnalysis && !isVideoAttachment(attachment)),
+    [attachments]
+  );
+  const suggestedActionPrompts = useMemo(() => {
+    if (pendingChipAttachments.length === 0) return [] as string[];
+    const hasImage = pendingChipAttachments.some(
+      (attachment) => attachment.classification === "image" || attachment.hasVision
+    );
+    const pdfCount = pendingChipAttachments.filter(
+      (attachment) => attachment.classification === "pdf" || /pdf/i.test(attachment.mime)
+    ).length;
+    const prompts: string[] = [];
+    if (hasImage) prompts.push("Assess the damage", "Repairable or a total loss?");
+    if (pdfCount >= 2) prompts.push("Compare these estimates");
+    else if (pdfCount === 1) prompts.push("What's missing from this estimate?");
+    if (prompts.length === 0) prompts.push("Summarize what I uploaded");
+    return prompts.slice(0, 4);
+  }, [pendingChipAttachments]);
+  // The transient green "UPLOADED" line is redundant once chips render.
+  const showUploadStatusLine =
+    hasUploadStatus && !(uploadUiState === "uploaded" && pendingChipAttachments.length > 0);
   const showMobileUploadStatus =
     uploadUiState === "uploading" || uploadUiState === "error";
   const hasRealChatActivity = messages.some((message) => message.id !== INITIAL_MESSAGE.id);
@@ -4999,7 +5026,7 @@ export default function ChatWidget({
                     {uploadUiMessage ? ` - ${uploadUiMessage}` : ""}
                   </div>
                 )}
-                {hasUploadStatus && (
+                {showUploadStatusLine && (
                   <div
                     className={`mt-3 hidden px-1 text-xs lg:block ${
                       uploadUiState === "error"
@@ -5017,6 +5044,53 @@ export default function ChatWidget({
                       <span className="ml-2 text-muted-foreground">
                         {selectedUploadStatusText}
                       </span>
+                    ) : null}
+                  </div>
+                )}
+
+                {pendingChipAttachments.length > 0 && (
+                  <div className="mt-2 space-y-2 px-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {pendingChipAttachments.slice(0, 6).map((attachment) => (
+                        <span
+                          key={attachment.attachmentId}
+                          className="inline-flex max-w-[190px] items-center gap-1.5 rounded-lg border border-border bg-card px-2 py-1 text-[11px] text-muted-foreground"
+                          title={attachment.filename}
+                        >
+                          {attachment.classification === "image" ? (
+                            <ImageIcon size={12} className="shrink-0" />
+                          ) : (
+                            <FileText size={12} className="shrink-0" />
+                          )}
+                          <span className="truncate">{attachment.filename}</span>
+                          {attachment.hasVision ? (
+                            <span
+                              className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500"
+                              title="Vision-ready"
+                            />
+                          ) : null}
+                        </span>
+                      ))}
+                      {pendingChipAttachments.length > 6 ? (
+                        <span className="text-[11px] text-muted-foreground">
+                          +{pendingChipAttachments.length - 6} more
+                        </span>
+                      ) : null}
+                    </div>
+                    {!loading && suggestedActionPrompts.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5" data-tour="suggested-actions">
+                        {suggestedActionPrompts.map((prompt) => (
+                          <button
+                            key={prompt}
+                            type="button"
+                            onClick={() => void handleSendRef.current(prompt)}
+                            disabled={disabled}
+                            className="rounded-full border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-3 py-1.5 text-xs font-medium text-[var(--accent)] transition hover:bg-[var(--accent)]/20 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {prompt}
+                          </button>
+                        ))}
+                      </div>
                     ) : null}
                   </div>
                 )}
