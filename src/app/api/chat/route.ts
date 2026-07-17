@@ -32,7 +32,8 @@ import {
 import { getCaseById } from "@/lib/cases/getCaseById";
 import type { StoredCaseData } from "@/lib/cases/getCaseById";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
-import { buildProductAccessGuard } from "@/lib/featureAccess";
+import { buildProductAccessGuard, canAccessFeature } from "@/lib/featureAccess";
+import { buildQuickChatSystemPrompt, NO_INTERNAL_TOKENS_RULE } from "@/lib/ai/chatVoice";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
 import {
   buildResponseModeInstruction,
@@ -165,6 +166,9 @@ type ChatRequestBody = {
   /** True when the client is NOT running the full case pipeline alongside
    * this turn — a chat-first upload turn that can be depth-matched. */
   conversationalUploadTurn?: boolean;
+  /** Researched Answer toggle. Enforced server-side against entitlements —
+   * free accounts always get Quick answers regardless of this flag. */
+  researchMode?: boolean;
 };
 
 class AttachmentAccessError extends Error {
@@ -1244,6 +1248,13 @@ export async function POST(req: Request) {
     effectiveIsAdmin = entitlements.isPlatformAdmin;
     const uploadLimits = resolveUploadPlanLimits(entitlements);
 
+    // Researched Answers are entitlement-gated SERVER-SIDE: the client flag is
+    // honored only for plans that carry the feature. Free accounts always get
+    // Quick answers no matter what the request body claims.
+    const researchAllowed =
+      effectiveIsAdmin || canAccessFeature(entitlements.plan, "researched_answers");
+    const researchMode = body.researchMode === true && researchAllowed;
+
     if (incomingAttachmentCount > uploadLimits.maxFilesPerReview) {
       console.info("[chat-attachments] rejected oversized batch", {
         fileCount: incomingAttachmentCount,
@@ -1408,24 +1419,39 @@ export async function POST(req: Request) {
       });
     }
 
-    const systemInstructions = [
-      // Chatbot-first behavior + answer-length + audience directive leads, so it
-      // frames every response (it explicitly outranks the rest).
-      buildConversationBehaviorDirective(body.assistanceProfile),
-      baseSystemInstructions,
-      buildProductAccessGuard(body.productAccess),
-      outputMode.instruction,
-      buildResponseModeInstruction(responseMode),
-      responseShapeInstruction,
-      buildActiveCaseSystemGuard({
-        hasStoredEvidence: activeCaseHasStoredEvidence,
-        hasVehicleContext: activeCaseHasVehicleContext,
-        hasEstimateText: activeCaseHasEstimateText,
-        hasFactualCore: activeCaseHasFactualCore,
-      }),
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+    // Quick mode (the default) swaps the formal instruction stack for the
+    // conversational voice: short, natural replies with no section
+    // scaffolding, no internal tokens, and no mentor tone. The full formal
+    // register is reserved for Researched Answers and the report exports.
+    const systemInstructions = researchMode
+      ? [
+          // Chatbot-first behavior + answer-length + audience directive leads, so it
+          // frames every response (it explicitly outranks the rest).
+          buildConversationBehaviorDirective(body.assistanceProfile),
+          baseSystemInstructions,
+          buildProductAccessGuard(body.productAccess),
+          outputMode.instruction,
+          buildResponseModeInstruction(responseMode),
+          responseShapeInstruction,
+          NO_INTERNAL_TOKENS_RULE,
+          buildActiveCaseSystemGuard({
+            hasStoredEvidence: activeCaseHasStoredEvidence,
+            hasVehicleContext: activeCaseHasVehicleContext,
+            hasEstimateText: activeCaseHasEstimateText,
+            hasFactualCore: activeCaseHasFactualCore,
+          }),
+        ]
+          .filter(Boolean)
+          .join("\n\n")
+      : buildQuickChatSystemPrompt({
+          productAccessGuard: buildProductAccessGuard(body.productAccess),
+          activeCaseGuard: buildActiveCaseSystemGuard({
+            hasStoredEvidence: activeCaseHasStoredEvidence,
+            hasVehicleContext: activeCaseHasVehicleContext,
+            hasEstimateText: activeCaseHasEstimateText,
+            hasFactualCore: activeCaseHasFactualCore,
+          }),
+        });
 
     const modelEligibleDocuments = documents.filter((document) => !isVideoDocument(document));
     const attachmentBudget = budgetChatAttachments({
@@ -1580,13 +1606,15 @@ export async function POST(req: Request) {
         })),
     });
 
-    // Conversational turns run depth-matched: a quick question gets low
-    // effort + a small output budget and answers fast. Upload turns that are
-    // chat-first (no full pipeline running alongside) get medium effort for
-    // solid vision reads without max-effort latency; explicit "in detail" /
-    // analysis asks and pipeline-backed turns keep full effort.
-    const conversationalGeneration =
-      documents.length === 0
+    // Depth-matched generation. Quick mode is aggressively fast: low effort
+    // and a short output budget (medium effort for turns with fresh images so
+    // vision reads stay solid). Researched mode keeps the depth classifier
+    // for text turns and full effort for document/pipeline turns.
+    const conversationalGeneration = !researchMode
+      ? documents.length === 0
+        ? { effort: "low" as const, maxTokens: 900 }
+        : { effort: "medium" as const, maxTokens: 1400 }
+      : documents.length === 0
         ? resolveResponseModeGeneration(responseMode)
         : body.conversationalUploadTurn === true && responseMode !== "analysis"
           ? { effort: "medium" as const, maxTokens: 4000 }
@@ -1614,12 +1642,19 @@ export async function POST(req: Request) {
       typeof firstPassOutputText === "string" && firstPassOutputText.trim()
       ? firstPassOutputText.trim()
         : "I reviewed the material, but I couldn't generate a usable response.";
-    const linkedProcedureDocs = await retrieveEstimateLinkedProcedureDocs({
-      links: fetchableEstimateLinks,
-      vehicle: deps.resolveVehicleApplicabilityContext(resolvedVehicle),
-      maxLinks: 4,
-      timeoutMs: 5000,
-    });
+    // The retrieval chain (estimate links → Drive → web → refinement pass) is
+    // the researched-answer machinery — Quick mode skips it entirely, which is
+    // most of the latency difference between the two modes.
+    const linkedProcedureDocs = researchMode
+      ? await retrieveEstimateLinkedProcedureDocs({
+          links: fetchableEstimateLinks,
+          vehicle: deps.resolveVehicleApplicabilityContext(resolvedVehicle),
+          maxLinks: 4,
+          timeoutMs: 5000,
+        })
+      : ({ keptDocs: [], fetchedCount: 0, discardedDocs: [] } as Awaited<
+          ReturnType<typeof retrieveEstimateLinkedProcedureDocs>
+        >);
     recordAgentRetrievalStep(agentTrace, {
       order: 1,
       tool: "estimate_link_reader",
@@ -1672,7 +1707,8 @@ export async function POST(req: Request) {
     logAgentTraceEvent("google drive search started", agentTrace, {
       retrievalMode: retrievalAnalysis.taskType,
     });
-    const retrieval = await retrieveDriveSupport({
+    const retrieval = researchMode
+      ? await retrieveDriveSupport({
       taskType: retrievalAnalysis.taskType,
       userQuery: userMessage,
       estimateText,
@@ -1692,7 +1728,8 @@ export async function POST(req: Request) {
         reason: "Internal retrieval failed.",
       });
       return null;
-    });
+    })
+      : null;
     if (!agentTrace.steps.some((step) => step.order === 2)) {
       recordAgentRetrievalStep(agentTrace, {
         order: 2,
@@ -1714,7 +1751,7 @@ export async function POST(req: Request) {
       : null;
 
     let webRetrieval: Awaited<ReturnType<typeof retrieveWebSupport>> | null = null;
-    if (areInternalRetrievalPathsResolved(agentTrace)) {
+    if (researchMode && areInternalRetrievalPathsResolved(agentTrace)) {
       const driveCoverageInsufficient = (applicableRetrieval?.results.length ?? 0) === 0;
       if (retrieval?.request && driveCoverageInsufficient) {
         logAgentTraceEvent("web search allowed", agentTrace, {

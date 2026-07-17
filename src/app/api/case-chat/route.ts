@@ -28,6 +28,9 @@ import {
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
 import { getCaseById } from "@/lib/cases/getCaseById";
+import { getCurrentEntitlements } from "@/lib/billing/entitlements";
+import { canAccessFeature } from "@/lib/featureAccess";
+import { buildQuickChatSystemPrompt, NO_INTERNAL_TOKENS_RULE } from "@/lib/ai/chatVoice";
 import { cleanResponse } from "@/lib/vehicle/oemGuardrails";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
@@ -114,7 +117,7 @@ function enforceModeResponseShape(text: string, mode: OutputMode): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const { user } = await requireCurrentUser();
+    const { user, isPlatformAdmin } = await requireCurrentUser();
     const body = await req.json();
 
     const {
@@ -127,7 +130,15 @@ export async function POST(req: NextRequest) {
       message: string;
       history?: Array<{ role: "user" | "assistant"; content: string }>;
       assistanceProfile?: string | null;
+      researchMode?: boolean;
     } = body;
+
+    // Researched Answers are entitlement-gated server-side; free accounts get
+    // Quick answers regardless of the client flag.
+    const entitlements = await getCurrentEntitlements({ isPlatformAdmin });
+    const researchAllowed =
+      entitlements.isPlatformAdmin || canAccessFeature(entitlements.plan, "researched_answers");
+    const researchMode = body.researchMode === true && researchAllowed;
 
     // Large cases (100+ attachments) produce very long analysis replies; an
     // uncapped history of those replies can push the assembled prompt past the
@@ -378,7 +389,7 @@ CHAT/UI ONLY: ${artifactRefreshPolicy.chatSummaryOnly.shouldRefresh ? "yes" : "n
       });
     }
 
-    const system = `
+    const formalSystem = `
 You are Collision IQ, an expert collision analysis assistant.
 
 You are continuing an active case. Use the accumulated case evidence below before answering.
@@ -527,6 +538,7 @@ RULES
 - Disconnect/reconnect or module/system disturbance can trigger calibration.
 - Never leak OEM-specific systems across brands (e.g., BMW KAFAS on Chevrolet).
 - If a document was blocked, explicitly state that it was not accessible.
+- ${NO_INTERNAL_TOKENS_RULE}
 - Be precise, concise, and evidence-driven.
 
 ${DOCUMENT_REVIEW_TWO_PASS_PROTOCOL}
@@ -538,10 +550,34 @@ ${AUTHORITY_RETRIEVAL_STATUS_FIELDS}
 ${EVIDENCE_POLICY}
 `;
 
+    // Quick mode (the default): a compact conversational prompt over the
+    // case's distilled facts — short, natural replies with no section
+    // scaffolding. Researched mode keeps the full formal instruction stack.
+    const quickCaseContext = [
+      `Vehicle: ${[vehicle?.year, vehicle?.make, vehicle?.model, vehicle?.trim].filter(Boolean).join(" ") || "not established yet"}`,
+      determinationPayload
+        ? `Determination headline: ${determinationPayload.headline} (confidence: ${determinationPayload.confidence})`
+        : null,
+      factualCore?.currentCaseSummary ? `Case summary: ${factualCore.currentCaseSummary}` : null,
+      factualCore?.openIssues?.length
+        ? `Open items: ${factualCore.openIssues.slice(0, 5).join("; ")}`
+        : null,
+      `Current topic: ${currentTopic}`,
+      estimateText.trim()
+        ? `Estimate excerpt:\n${limitText(redactExternalDocumentUrls(estimateText), 3000)}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const system = researchMode
+      ? formalSystem
+      : buildQuickChatSystemPrompt({ caseContext: quickCaseContext });
+
     // Prompt-size telemetry: when a large case fails at the provider, this is
     // the line that says whether the assembled context was the reason.
     console.info("[case-chat] prompt assembled", {
       activeCaseId: caseId,
+      researchMode,
       systemChars: system.length,
       historyEntries: history.length,
       historyChars: history.reduce((total, entry) => total + entry.content.length, 0),
@@ -549,10 +585,12 @@ ${EVIDENCE_POLICY}
       attachmentCount: files.length,
     });
 
-    // Depth-matched generation: quick follow-ups run at low effort with a
-    // small output budget so they answer in seconds instead of paying for
-    // extended reasoning and a long structured essay.
-    const generation = resolveResponseModeGeneration(responseMode);
+    // Depth-matched generation: Quick mode runs at low effort with a short
+    // output budget so replies land in seconds; Researched mode keeps the
+    // depth classifier.
+    const generation = researchMode
+      ? resolveResponseModeGeneration(responseMode)
+      : { effort: "low" as const, maxTokens: 900 };
     const rawReply = await generateChatCompletion({
       system,
       messages: [...history, { role: "user", content: limitText(message, 12000) }],

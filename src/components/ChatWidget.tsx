@@ -143,11 +143,9 @@ interface Attachment {
 }
 
 // Chat is conversational by default. The full case pipeline (case creation,
-// vision batch, detectors, research lanes, report preparation) runs only when
-// the user explicitly asks for it — or taps the Run Full Case Analysis button,
-// which sends this prompt.
-export const FULL_ANALYSIS_PROMPT = "Run the full case analysis on the uploaded files.";
-
+// vision batch, detectors, research lanes, report preparation) runs only with
+// the Researched Answer toggle on. Explicit analysis phrases while on Quick
+// get a pointer to the toggle instead of a silent depth upgrade.
 function isExplicitFullAnalysisIntent(message: string): boolean {
   if (!message.trim()) return false;
   return /\b(?:full (?:case |file )?(?:analysis|review)|run (?:the )?(?:full )?(?:case )?analysis|analy[sz]e (?:the |this |my )?(?:case|claim|estimates?|files?|uploads?)|review (?:this |the |my )?(?:estimates?|case|claim|supplement)|estimate (?:review|analysis|dispute|comparison)|compare (?:the |these )?estimates?|citation density|delta report|open (?:a )?case|start (?:the )?(?:case |file )?review|generate (?:the )?(?:case )?reports?)\b/i.test(
@@ -1215,16 +1213,6 @@ export default function ChatWidget({
     ].filter(Boolean);
     return parts.join(" · ");
   }, [attachments.length, totalFilesReviewed, visionAttachmentCount]);
-  // Uploads that have not been through the full case pipeline yet — the
-  // explicit trigger for the (deliberately no-longer-automatic) deep analysis.
-  const hasPendingFullAnalysis = useMemo(
-    () =>
-      attachments.some(
-        (attachment) =>
-          !attachment.usedInAnalysis && !isVideoAttachment(attachment) && Boolean(attachment.attachmentId)
-      ),
-    [attachments]
-  );
   const selectedUploadStatusText =
     selectedUploadNames.length > 20
       ? `${selectedUploadNames.length} files selected`
@@ -1326,6 +1314,36 @@ export default function ChatWidget({
   const resolvedViewerAccess = isSignedIn ? viewerAccess ?? fetchedViewerAccess : null;
   const productPlan = resolvedViewerAccess?.plan ?? "none";
   const hasProChatRecommendations = canAccessFeature(productPlan, "chat_report_recommendations");
+  // Researched Answer toggle: default OFF (Quick), sticky per user, and
+  // entitlement-gated — free accounts see it locked. The server re-checks the
+  // entitlement on every request, so the client flag is UX only.
+  const researchAllowed = canAccessFeature(productPlan, "researched_answers");
+  const [researchMode, setResearchMode] = useState(false);
+  useEffect(() => {
+    try {
+      setResearchMode(window.localStorage.getItem("ciq_researched_answers") === "1");
+    } catch {
+      // localStorage unavailable (private mode) — stay on Quick.
+    }
+  }, []);
+  const researchModeEffective = researchMode && researchAllowed;
+  const toggleResearchMode = () => {
+    if (!researchAllowed) {
+      pushSystemStatusMessage(
+        "Researched Answers are part of the paid plans — upgrade to unlock verified-source research and full case analysis. Quick answers stay free."
+      );
+      return;
+    }
+    setResearchMode((previous) => {
+      const next = !previous;
+      try {
+        window.localStorage.setItem("ciq_researched_answers", next ? "1" : "0");
+      } catch {
+        // non-persistent environments still get the in-session toggle
+      }
+      return next;
+    });
+  };
   const uploadPlanLimits = useMemo(
     () => resolveUploadPlanLimits(resolvedViewerAccess ?? DEFAULT_UPLOAD_LIMIT_ENTITLEMENTS),
     [resolvedViewerAccess]
@@ -2556,13 +2574,25 @@ export default function ChatWidget({
       (attachment) => !isVideoAttachment(attachment)
     );
     const trimmedInput = promptText;
-    // Chat-first gating: the full case pipeline auto-runs only when merging
-    // into an already-open case or when the user explicitly asks for it.
-    // Otherwise the upload gets a fast conversational review and the pipeline
-    // stays one tap away (Run Full Case Analysis).
+    // Chat-first gating: the full case pipeline runs only when the Researched
+    // Answer toggle is on (paid plans) or when merging evidence into an
+    // already-open case. Quick mode uploads get a fast conversational review.
     const runFullAnalysisThisTurn =
       fullAnalysisEligibleAttachments.length > 0 &&
-      (Boolean(analysisReportIdRef.current) || isExplicitFullAnalysisIntent(trimmedInput));
+      (Boolean(analysisReportIdRef.current) || researchModeEffective);
+    // Asking for a full analysis while on Quick gets a pointer to the toggle
+    // instead of a silent depth upgrade (and an upgrade note on free plans).
+    if (
+      !runFullAnalysisThisTurn &&
+      fullAnalysisEligibleAttachments.length > 0 &&
+      isExplicitFullAnalysisIntent(trimmedInput)
+    ) {
+      pushSystemStatusMessage(
+        researchAllowed
+          ? "Researched Answer is off — flip the toggle on and resend to run the full case analysis with verified-source research."
+          : "Full case analysis and researched answers are part of the paid plans. Quick answers stay free — upgrade to unlock the deep review."
+      );
+    }
     // Conversationally reviewed uploads are not re-sent on every text turn —
     // they rejoin only when a full analysis actually runs.
     const attachmentsForTurn = runFullAnalysisThisTurn
@@ -2614,9 +2644,11 @@ export default function ChatWidget({
 
     if (hasAttachmentsInTurn && !runFullAnalysisThisTurn) {
       // Conversational upload turn: quick answer, no case pipeline, no
-      // review-progress theater. The full pipeline stays one tap away.
+      // review-progress theater. The deep path lives behind the toggle.
       upsertSystemStatusMessage(
-        "Quick review — answering conversationally. Tap Run Full Case Analysis for the complete case pipeline and reports."
+        researchAllowed
+          ? "Quick answer mode — flip on Researched Answer for the full case analysis and reports."
+          : "Quick answer mode. Researched answers and full case analysis are available on paid plans."
       );
     }
     if (runFullAnalysisThisTurn) {
@@ -2751,6 +2783,7 @@ export default function ChatWidget({
               buildPlanRecommendationGuard(hasProChatRecommendations),
             history: resolveCaseHistory(),
             assistanceProfile,
+            researchMode: researchModeEffective,
           }),
         });
 
@@ -2982,6 +3015,7 @@ export default function ChatWidget({
               "Answer as a continuation. Directly answer the active topic first, use the new upload only where it affects that topic, then mention only the most relevant open items. If the active topic is a general case summary, use a compact current-case posture. Otherwise, do not provide a broad case recap. Separate visible photo evidence, document/invoice-supported repairs, and verification items that remain open only when relevant to the active topic. Do not restart the review or ask for vehicle identity already present in the case. " +
               buildPlanRecommendationGuard(hasProChatRecommendations),
             history: resolveCaseHistory(),
+            researchMode: researchModeEffective,
           }),
         });
 
@@ -3048,6 +3082,7 @@ export default function ChatWidget({
           // Conversational upload turn: no full pipeline is running alongside,
           // so the server can depth-match generation instead of max effort.
           conversationalUploadTurn: hasAttachmentsInTurn && !runFullAnalysisThisTurn,
+          researchMode: researchModeEffective,
         }),
       });
 
@@ -4781,6 +4816,46 @@ export default function ChatWidget({
                 <Sparkles size={shouldCompactMobileChat ? 18 : 20} />
               </button>
 
+              <button
+                type="button"
+                onClick={toggleResearchMode}
+                aria-pressed={researchModeEffective}
+                title={
+                  researchAllowed
+                    ? "Researched Answer: verified-source research, full effort, and full case analysis on uploads. Off = fast conversational answers."
+                    : "Researched Answers are part of the paid plans — Quick answers stay free."
+                }
+                className={[
+                  "order-2 inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-2.5 text-[11px] font-semibold transition lg:order-none",
+                  shouldCompactMobileChat ? "min-h-9 py-1.5 lg:min-h-10" : "min-h-10 py-2",
+                  researchModeEffective
+                    ? "border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent)]"
+                    : "border-border bg-muted text-muted-foreground hover:bg-muted/70",
+                  !researchAllowed ? "opacity-70" : "",
+                ].join(" ")}
+                data-tour="researched-answer-toggle"
+              >
+                <span
+                  aria-hidden
+                  className={[
+                    "relative inline-flex h-3.5 w-6 items-center rounded-full transition",
+                    researchModeEffective ? "bg-[var(--accent)]" : "bg-border",
+                  ].join(" ")}
+                >
+                  <span
+                    className={[
+                      "absolute h-2.5 w-2.5 rounded-full bg-background transition-all",
+                      researchModeEffective ? "left-3" : "left-0.5",
+                    ].join(" ")}
+                  />
+                </span>
+                Researched
+                {!researchAllowed ? (
+                  <span className="rounded bg-[var(--accent)]/20 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[var(--accent)]">
+                    Paid
+                  </span>
+                ) : null}
+              </button>
 
               <div
                 className={[
@@ -4954,17 +5029,6 @@ export default function ChatWidget({
                     shouldCompactMobileChat ? "mt-1" : "mt-2",
                   ].join(" ")}
                 >
-                  {hasPendingFullAnalysis && !loading ? (
-                    <button
-                      type="button"
-                      onClick={() => void handleSendRef.current(FULL_ANALYSIS_PROMPT)}
-                      disabled={disabled}
-                      className="mb-1.5 flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--accent)] px-2.5 py-2 text-xs font-semibold text-black transition hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-40"
-                      data-tour="run-full-analysis"
-                    >
-                      Run Full Case Analysis
-                    </button>
-                  ) : null}
                   <button
                     type="button"
                     onClick={() => {
@@ -5041,17 +5105,6 @@ export default function ChatWidget({
                     effectiveAttachmentsOpen ? "p-2" : "p-1",
                   ].join(" ")}
                 >
-                {hasPendingFullAnalysis && !loading ? (
-                  <button
-                    type="button"
-                    onClick={() => void handleSendRef.current(FULL_ANALYSIS_PROMPT)}
-                    disabled={disabled}
-                    className="mb-1.5 flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-black transition hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-40"
-                    data-tour="run-full-analysis"
-                  >
-                    Run Full Case Analysis
-                  </button>
-                ) : null}
                 <button
                   type="button"
                   className="flex w-full items-center justify-between gap-3 bg-muted px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-muted/70"

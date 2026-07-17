@@ -12,7 +12,10 @@ export type ProductFeature =
   | "doi_complaint_packet_export"
   | "customer_report_export"
   | "chat_report_recommendations"
-  | "crm_sync";
+  | "crm_sync"
+  /** Researched Answer chat mode: retrieval lanes + full-effort reasoning.
+   * Free/anonymous accounts get Quick answers only. */
+  | "researched_answers";
 
 export function normalizeProductPlan(plan: ProductPlan | string | null | undefined) {
   const normalized = `${plan ?? "none"}`.toLowerCase();
@@ -36,6 +39,12 @@ export function canAccessFeature(
   }
 
   if (feature === "snapshot_export") {
+    return normalized === "starter" || normalized === "pro";
+  }
+
+  if (feature === "researched_answers") {
+    // Every paid tier (and trial, which normalizes to pro); free/none stay on
+    // Quick answers.
     return normalized === "starter" || normalized === "pro";
   }
 
