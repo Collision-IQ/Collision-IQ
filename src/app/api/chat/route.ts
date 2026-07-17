@@ -34,7 +34,11 @@ import type { StoredCaseData } from "@/lib/cases/getCaseById";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { buildProductAccessGuard } from "@/lib/featureAccess";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
-import { buildResponseModeInstruction, determineResponseMode } from "@/lib/ai/responseMode";
+import {
+  buildResponseModeInstruction,
+  determineResponseMode,
+  resolveResponseModeGeneration,
+} from "@/lib/ai/responseMode";
 import { buildReviewResponseShapeInstruction } from "@/lib/ai/reviewResponseShape";
 import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
 import {
@@ -49,6 +53,10 @@ type ChatGenerationRequest = {
   instructions?: string;
   input: ResponsesInput;
   temperature?: number;
+  /** Depth-matched generation: simple conversational turns run at lower
+   * effort with a bounded output budget so they answer fast. */
+  effort?: "low" | "medium" | "high";
+  maxTokens?: number;
 };
 import { getCollisionIqModelDiagnostic, collisionIqProvider } from "@/lib/modelConfig";
 import {
@@ -902,6 +910,8 @@ async function createOpenAIResponseWithRetry(
       instructions: generationInput.instructions,
       input: generationInput.input,
       temperature: generationInput.temperature,
+      effort: generationInput.effort,
+      maxTokens: generationInput.maxTokens,
     });
   } catch (error) {
     logOpenAIPhaseFailure(phase, 1, error);
@@ -934,6 +944,8 @@ async function createOpenAIResponseWithRetry(
       instructions: retryGenerationInput.instructions,
       input: retryGenerationInput.input,
       temperature: retryGenerationInput.temperature,
+      effort: retryGenerationInput.effort,
+      maxTokens: retryGenerationInput.maxTokens,
     });
   } catch (error) {
     logOpenAIPhaseFailure(phase, 2, error);
@@ -1565,11 +1577,19 @@ export async function POST(req: Request) {
         })),
     });
 
+    // Conversational turns (no fresh documents) run depth-matched: a quick
+    // question gets low effort + a small output budget and answers fast.
+    // Attachment-analysis turns keep full effort.
+    const conversationalGeneration =
+      documents.length === 0 ? resolveResponseModeGeneration(responseMode) : null;
+
     const firstPass = await createOpenAIResponseWithRetry(deps, "first-pass", {
       model: deps.collisionIqModels.primary,
       instructions: systemInstructions,
       temperature: 0.7,
       input,
+      effort: conversationalGeneration?.effort,
+      maxTokens: conversationalGeneration?.maxTokens,
     }, reducedRetryInput ? {
       retryInput: {
         model: deps.collisionIqModels.primary,

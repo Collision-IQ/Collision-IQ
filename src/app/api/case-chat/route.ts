@@ -12,7 +12,11 @@ import {
 import { JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT } from "@/lib/ai/jurisdictionalInsurancePrompt";
 import { DOCUMENT_REVIEW_TWO_PASS_PROTOCOL } from "@/lib/ai/documentReviewProtocol";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
-import { buildResponseModeInstruction, determineResponseMode } from "@/lib/ai/responseMode";
+import {
+  buildResponseModeInstruction,
+  determineResponseMode,
+  resolveResponseModeGeneration,
+} from "@/lib/ai/responseMode";
 import { buildReviewResponseShapeInstruction } from "@/lib/ai/reviewResponseShape";
 import { buildAppraisalAwardEvaluatorInstruction } from "@/lib/ai/appraisalAwardEvaluator";
 import {
@@ -472,7 +476,8 @@ RULES
 - Default active-case answers should include: a direct answer, the top 1-3 relevant supporting points, only the most relevant open item(s), and an optional brief change note.
 - Suppress unrelated or low-signal support gaps unless the user asks for the full picture.
 - Do not repeat the same unresolved issue in every answer unless it is the most relevant topic item, the user asks about it, or it materially changed.
-- Use this compact answer shape for most active-case answers:
+- RESPONSE DEPTH OVERRIDES SHAPE: when RESPONSE DEPTH is CONCISE, answer conversationally in 2-5 sentences (or up to 4 short bullets) with NO section headers and no scaffolding — the compact shape below applies only to substantive questions at STANDARD/ANALYSIS depth.
+- Use this compact answer shape for substantive active-case answers:
   1. Direct Answer
   2. Why
   3. What Remains Open (only if relevant)
@@ -544,9 +549,15 @@ ${EVIDENCE_POLICY}
       attachmentCount: files.length,
     });
 
+    // Depth-matched generation: quick follow-ups run at low effort with a
+    // small output budget so they answer in seconds instead of paying for
+    // extended reasoning and a long structured essay.
+    const generation = resolveResponseModeGeneration(responseMode);
     const rawReply = await generateChatCompletion({
       system,
       messages: [...history, { role: "user", content: limitText(message, 12000) }],
+      effort: generation.effort,
+      maxTokens: generation.maxTokens,
     });
     const reply = sanitizeUserFacingEvidenceText(
       redactExternalDocumentUrls(
