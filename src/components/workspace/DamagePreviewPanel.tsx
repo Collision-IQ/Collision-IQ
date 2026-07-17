@@ -23,7 +23,7 @@ function pickPreTeardownDamagePhotos(images: DamagePreviewImage[]): DamagePrevie
   return [...pool].sort((a, b) => (PREFER.test(b.filename) ? 1 : 0) - (PREFER.test(a.filename) ? 1 : 0));
 }
 
-type HeatResult = { dataUrl: string | null; url: string | null; summary: string; disclaimer: string };
+type HeatResult = { dataUrl: string | null; originalDataUrl: string | null; url: string | null; summary: string; disclaimer: string; overlayAvailable: boolean; overlayMessage: string | null };
 
 export default function DamagePreviewPanel({ images }: Props) {
   const candidates = useMemo(() => pickPreTeardownDamagePhotos(images), [images]);
@@ -62,14 +62,20 @@ export default function DamagePreviewPanel({ images }: Props) {
       const data = (await res.json()) as {
         annotatedImageDataUrl?: string | null;
         annotatedImageUrl?: string | null;
+        originalImageDataUrl?: string | null;
         summary?: string;
         disclaimer?: string;
+        overlayAvailable?: boolean;
+        overlayMessage?: string;
       };
       setResult({
         dataUrl: data.annotatedImageDataUrl ?? null,
+        originalDataUrl: data.originalImageDataUrl ?? null,
         url: data.annotatedImageUrl ?? null,
         summary: data.summary ?? "",
         disclaimer: data.disclaimer ?? "AI visual aid — visible damage heat map only. Not a forensic measurement.",
+        overlayAvailable: data.overlayAvailable !== false,
+        overlayMessage: data.overlayMessage ?? null,
       });
     } catch {
       setError("Couldn't generate the damage heat map.");
@@ -86,7 +92,7 @@ export default function DamagePreviewPanel({ images }: Props) {
     void generate(current.attachmentId);
   }, [current, generate]);
 
-  const previewSrc = result?.url || result?.dataUrl || null;
+  const previewSrc = result?.overlayAvailable ? (result.url || result.dataUrl) : result?.originalDataUrl || null;
   const downloadSrc = result?.dataUrl || result?.url || null;
 
   const cyclePhoto = () => {
@@ -159,6 +165,7 @@ export default function DamagePreviewPanel({ images }: Props) {
                 {current?.filename}
               </p>
               <p className="mt-0.5">Auto heat map of the strongest visible exterior damage. AI visual aid.</p>
+              {result && !result.overlayAvailable ? <p className="mt-1 text-amber-600 dark:text-amber-400">{result.overlayMessage || "Visual overlay unavailable."}</p> : null}
               {previewSrc ? (
                 <div className="mt-1.5 flex items-center gap-2">
                   <button

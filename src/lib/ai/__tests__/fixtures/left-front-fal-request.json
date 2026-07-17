@@ -1,0 +1,11 @@
+{
+  "endpoint": "fal-ai/sam-3-1/image-rle",
+  "sourceHash": "d812fe76b7dde479afeb8a5dce9020a392564190e568a4bd1f8c983c7a333820",
+  "width": 2048,
+  "height": 1536,
+  "requests": [
+    { "regionId": "left-headlamp-opening", "prompt": "broken left front headlamp opening and displaced surrounding trim", "box": { "x_min": 215, "y_min": 606, "x_max": 533, "y_max": 891, "object_id": 0 }, "points": [{ "x": 368, "y": 775, "label": 1, "object_id": 0 }, { "x": 614, "y": 599, "label": 0, "object_id": 0 }, { "x": 880, "y": 821, "label": 0, "object_id": 0 }] },
+    { "regionId": "left-grille-opening", "prompt": "displaced left front grille material and broken emblem support", "box": { "x_min": 337, "y_min": 698, "x_max": 861, "y_max": 953, "object_id": 1 }, "points": [{ "x": 532, "y": 821, "label": 1, "object_id": 1 }, { "x": 911, "y": 821, "label": 0, "object_id": 1 }, { "x": 645, "y": 599, "label": 0, "object_id": 1 }] },
+    { "regionId": "left-bumper-cover", "prompt": "torn and displaced left front bumper cover", "box": { "x_min": 225, "y_min": 829, "x_max": 1004, "y_max": 1122, "object_id": 2 }, "points": [{ "x": 573, "y": 983, "label": 1, "object_id": 2 }, { "x": 1259, "y": 1075, "label": 0, "object_id": 2 }, { "x": 931, "y": 821, "label": 0, "object_id": 2 }] }
+  ]
+}

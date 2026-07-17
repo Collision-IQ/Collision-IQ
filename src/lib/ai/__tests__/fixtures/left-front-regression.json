@@ -1,0 +1,74 @@
+{
+  "fixtureVersion": "left-front-v1",
+  "sourceFilename": "left-front-original.jpg",
+  "sourceSha256": "e638521832c7180eaaaf4c35143bcbf25944e092ad8d8210ec5d12e0fed1c782",
+  "normalizedSha256": "d812fe76b7dde479afeb8a5dce9020a392564190e568a4bd1f8c983c7a333820",
+  "naturalWidth": 2048,
+  "naturalHeight": 1536,
+  "thresholds": {
+    "minimumPrimaryApprovedOverlap": 0.60,
+    "maximumWindshieldCabinOverlap": 0.08,
+    "maximumCenterHoodOverlap": 0.12,
+    "maximumIntactPassengerHeadlampOverlap": 0.08,
+    "maximumDoorsRoofOverlap": 0.08,
+    "maximumImageCoverage": 0.22
+  },
+  "zones": {
+    "approvedPrimary": [
+      { "x": 0.105, "y": 0.395, "width": 0.155, "height": 0.185 },
+      { "x": 0.165, "y": 0.455, "width": 0.255, "height": 0.155 },
+      { "x": 0.105, "y": 0.525, "width": 0.385, "height": 0.205 },
+      { "x": 0.185, "y": 0.405, "width": 0.205, "height": 0.105 }
+    ],
+    "optionalSecondary": [
+      { "x": 0.455, "y": 0.595, "width": 0.155, "height": 0.235 }
+    ],
+    "prohibitedWindshieldCabin": [
+      { "x": 0.405, "y": 0.195, "width": 0.385, "height": 0.205 }
+    ],
+    "prohibitedCenterHood": [
+      { "x": 0.385, "y": 0.325, "width": 0.255, "height": 0.165 }
+    ],
+    "prohibitedIntactPassengerHeadlamp": [
+      { "x": 0.345, "y": 0.485, "width": 0.245, "height": 0.135 }
+    ],
+    "prohibitedDoorsRoof": [
+      { "x": 0.625, "y": 0.185, "width": 0.325, "height": 0.505 }
+    ]
+  },
+  "representativeFalResponse": {
+    "score": 0.93,
+    "boxCxCyWh": [0.265, 0.565, 0.33, 0.34],
+    "maskRectangles": [
+      { "x": 0.115, "y": 0.415, "width": 0.13, "height": 0.15 },
+      { "x": 0.175, "y": 0.475, "width": 0.165, "height": 0.115 },
+      { "x": 0.12, "y": 0.595, "width": 0.345, "height": 0.115 }
+    ]
+  },
+  "localizationRegions": [
+    {
+      "id": "left-headlamp-opening", "componentName": "left front headlamp opening", "damageType": "missing", "confidence": 0.96,
+      "visibleEvidence": "Headlamp is absent and the mounting opening and broken surrounding edges are directly visible.",
+      "box": { "xMin": 0.105, "yMin": 0.395, "xMax": 0.260, "yMax": 0.580 },
+      "positivePoints": [{ "x": 0.180, "y": 0.505 }],
+      "negativePoints": [{ "x": 0.300, "y": 0.390 }, { "x": 0.430, "y": 0.535 }],
+      "segmentationPrompt": "broken left front headlamp opening and displaced surrounding trim", "severity": "high"
+    },
+    {
+      "id": "left-grille-opening", "componentName": "left upper grille opening", "damageType": "displaced", "confidence": 0.94,
+      "visibleEvidence": "Grille material and emblem support are visibly displaced at the viewer-left front opening.",
+      "box": { "xMin": 0.165, "yMin": 0.455, "xMax": 0.420, "yMax": 0.620 },
+      "positivePoints": [{ "x": 0.260, "y": 0.535 }],
+      "negativePoints": [{ "x": 0.445, "y": 0.535 }, { "x": 0.315, "y": 0.390 }],
+      "segmentationPrompt": "displaced left front grille material and broken emblem support", "severity": "high"
+    },
+    {
+      "id": "left-bumper-cover", "componentName": "left front bumper cover", "damageType": "torn", "confidence": 0.93,
+      "visibleEvidence": "The bumper cover is visibly torn, displaced, and separated below the missing headlamp and grille.",
+      "box": { "xMin": 0.110, "yMin": 0.540, "xMax": 0.490, "yMax": 0.730 },
+      "positivePoints": [{ "x": 0.280, "y": 0.640 }],
+      "negativePoints": [{ "x": 0.615, "y": 0.700 }, { "x": 0.455, "y": 0.535 }],
+      "segmentationPrompt": "torn and displaced left front bumper cover", "severity": "high"
+    }
+  ]
+}

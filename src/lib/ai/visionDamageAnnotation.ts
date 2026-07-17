@@ -29,7 +29,7 @@ export function disclaimerForAnnotationStyle(style: AnnotationStyle): string {
     : "AI visual aid — visible damage annotation only. Not a forensic measurement.";
 }
 
-export type DamageZoneConfidence = "high" | "medium" | "low";
+export type DamageZoneConfidence = number;
 export type DamageZoneSeverity = "high" | "medium" | "low";
 export type DamageZoneColorHint = "red" | "orange" | "yellow" | "blue";
 
@@ -52,7 +52,15 @@ export type DamageZoneHeatmap = {
 };
 
 export type DamageZone = {
+  id?: string;
   label: string;
+  partName?: string;
+  componentName?: string;
+  damageType?: "missing" | "displaced" | "deformed" | "cracked" | "torn" | "scuffed" | "broken" | "unknown";
+  visibleEvidence?: string;
+  positivePoints?: DamageZonePolygonPoint[];
+  negativePoints?: DamageZonePolygonPoint[];
+  segmentationPrompt?: string;
   description: string;
   confidence: DamageZoneConfidence;
   severity: DamageZoneSeverity;
@@ -130,12 +138,19 @@ function buildSystemPrompt(annotationStyle: AnnotationStyle): string {
     '  "zones": [',
     "    {",
     '      "label": string,',
+    '      "id": string,',
+    '      "componentName": string,',
+    '      "damageType": "missing" | "displaced" | "deformed" | "cracked" | "torn" | "scuffed" | "broken" | "unknown",',
+    '      "visibleEvidence": string,',
+    '      "positivePoints": [{ "x": number, "y": number }],',
+    '      "negativePoints": [{ "x": number, "y": number }],',
+    '      "segmentationPrompt": string,',
     '      "description": string,',
-    '      "confidence": "high" | "medium" | "low",',
+    '      "confidence": number,',
     '      "severity": "high" | "medium" | "low",',
     '      "approximateLocation": string,',
     '      "evidenceLimits": string,',
-    '      "boundingBox": { "x": number, "y": number, "width": number, "height": number }' +
+    '      "boundingBox": { "xMin": number, "yMin": number, "xMax": number, "yMax": number }' +
       (wantsHeatmap ? "," : ""),
     ...(wantsHeatmap
       ? ['      "heatmap": { "intensity": number, "colorHint": "red" | "orange" | "yellow" | "blue" }']
@@ -146,12 +161,13 @@ function buildSystemPrompt(annotationStyle: AnnotationStyle): string {
     '  "recommendedNextPhotos": string[]',
     "}",
     "Rules:",
-    "- boundingBox is OPTIONAL. Include it only when you can localize the damage in the frame. Use normalized coordinates in [0,1] with the origin at the top-left; width and height are fractions of the image.",
+    "- confidence is a number from 0 through 1. boundingBox is OPTIONAL. Use normalized xMin/yMin/xMax/yMax coordinates in [0,1], origin top-left, with each minimum strictly less than its maximum.",
     "- Draw a TIGHT boundingBox around ONLY the visibly damaged area (the specific dent, crease, scrape, scuff, or crush) — not the whole panel or the whole side of the vehicle. Prefer several small, localized zones over one large box. A box wider than ~0.35 or taller than ~0.35 of the image is almost always too large; shrink it to the actual damage.",
-    "- ESTIMATOR MARKUP IS THE PRIMARY SIGNAL. These photos are frequently marked up by a human estimator/appraiser with grease pencil, chalk, paint pen, wax crayon, or tape — usually in teal/green, yellow, white, or orange. Marks such as an 'X', a circle, an arrow, a line tracing a scratch/dent, or hand-written notes like 'REPLACE', 'R&I', 'REPAIR', 'BLEND', or 'PDR' are DELIBERATE damage indicators placed by a professional. Treat EVERY marked location as a real, confirmed damage zone with high confidence and draw a tight boundingBox around it — even when the underlying dent or scratch is faint, subtle, or hard to see against dark, black, or highly reflective paint. Missing an estimator-marked area is a failure.",
-    "- Do not mistake the estimator's own marks for dirt, water spots, or reflections — colored grease-pencil / chalk lines and hand-written letters are intentional and must be captured as damage zones. Read any adjacent word: 'REPLACE' or a bold 'X' means a more severe operation (high severity) than a light single scuff line (low/medium).",
-    "- PANEL-LEVEL CONDEMNATION: a 'REPLACE' note or an 'X' condemns the ENTIRE panel it sits on (door, quarter panel, fender, rocker) — treat that whole panel as HIGH severity, not just the exact pen stroke, and place the zone over the panel's damaged body area rather than only on the letters. A quarter panel, door, or fender carrying REPLACE/X is a heavy-damage zone even when the surface scratches look faint.",
-    "- MARK DENSITY ESCALATES SEVERITY: several marks, traced lines, or X's clustered on one panel indicate concentrated, heavier damage — raise that panel's severity and intensity above what a single isolated scuff would get. Do not flatten a densely-marked panel into scattered 'light scuff' zones.",
+    "- Identify only exterior damage directly visible in the photograph. Do not highlight an entire panel merely because a neighboring component is damaged. Do not infer hidden structural, mechanical, restraint, or ADAS damage. Return tight boxes around visible deformation, displacement, breakage, missing components, cracks, tears, or impact scuffs.",
+    "- For every boundingBox, provide at least one positivePoint on directly visible damaged material, a broken edge, missing-component opening, torn/displaced component, or impact scuff. Do not blindly use the box center.",
+    "- Add negativePoints on nearby intact hood, glass, headlamp, wheel, cabin, or background when needed to keep segmentation from expanding. All points use normalized coordinates in [0,1].",
+    "- segmentationPrompt must specifically name the visible component and damage inside this region. Never use generic prompts such as vehicle, collision, car damage, damaged car, or wheel.",
+    "- Estimator markup may help locate an area, but markup alone does not establish that every pixel or the entire panel is visibly damaged.",
     "- Do NOT mark clearly undamaged, unmarked areas: glossy/reflective paint with no mark, reflections of other cars/trees/sky, shadows, wheels, tires, glass, badges, or background. Away from estimator markings, only mark genuine visible deformation or surface damage on this vehicle.",
     "- Keep each label short enough for an image callout (a few words).",
     "- confidence reflects how clearly the photo supports the finding; severity reflects how severe the apparent damage is.",
@@ -252,19 +268,17 @@ function clamp01(value: number): number {
 function coerceBoundingBox(value: unknown): DamageZoneBoundingBox | undefined {
   if (!value || typeof value !== "object") return undefined;
   const box = value as Record<string, unknown>;
-  const nums = ["x", "y", "width", "height"].map((key) => box[key]);
+  const hasCorners = ["xMin", "yMin", "xMax", "yMax"].every((key) => typeof box[key] === "number");
+  const nums = hasCorners
+    ? [box.xMin, box.yMin, (box.xMax as number) - (box.xMin as number), (box.yMax as number) - (box.yMin as number)]
+    : ["x", "y", "width", "height"].map((key) => box[key]);
   if (!nums.every((n) => typeof n === "number" && Number.isFinite(n))) {
     return undefined;
   }
   const [x, y, width, height] = nums as number[];
-  const clampedWidth = clamp01(width);
-  const clampedHeight = clamp01(height);
-  if (clampedWidth <= 0 || clampedHeight <= 0) return undefined;
+  if (x < 0 || y < 0 || width <= 0 || height <= 0 || x > 1 || y > 1 || x + width > 1 || y + height > 1) return undefined;
   return {
-    x: clamp01(x),
-    y: clamp01(y),
-    width: clampedWidth,
-    height: clampedHeight,
+    x, y, width, height,
   };
 }
 
@@ -280,6 +294,17 @@ function coercePolygon(value: unknown): DamageZonePolygonPoint[] | undefined {
     })
     .filter((p): p is DamageZonePolygonPoint => p !== null);
   return points.length >= 3 ? points : undefined;
+}
+
+function coercePoints(value: unknown): DamageZonePolygonPoint[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const points = value.map((point) => {
+    if (!point || typeof point !== "object") return null;
+    const p = point as Record<string, unknown>;
+    if (typeof p.x !== "number" || typeof p.y !== "number" || !Number.isFinite(p.x) || !Number.isFinite(p.y) || p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) return null;
+    return { x: p.x, y: p.y };
+  }).filter((point): point is DamageZonePolygonPoint => point !== null);
+  return points.length ? points : undefined;
 }
 
 function coerceHeatmap(value: unknown): DamageZoneHeatmap | undefined {
@@ -314,9 +339,20 @@ function coerceZone(value: unknown): DamageZone | null {
   const description = coerceString(zone.description);
   if (!label && !description) return null;
   return {
+    id: coerceString(zone.id) || undefined,
     label: label || "Unlabeled zone",
+    partName: coerceString(zone.partName) || label || undefined,
+    componentName: coerceString(zone.componentName) || coerceString(zone.partName) || label || undefined,
+    damageType: coerceEnum(zone.damageType, ["missing", "displaced", "deformed", "cracked", "torn", "scuffed", "broken", "unknown"] as const, "unknown"),
+    visibleEvidence: coerceString(zone.visibleEvidence) || description || undefined,
+    positivePoints: coercePoints(zone.positivePoints),
+    negativePoints: coercePoints(zone.negativePoints),
+    segmentationPrompt: coerceString(zone.segmentationPrompt) || undefined,
     description,
-    confidence: coerceEnum(zone.confidence, ["high", "medium", "low"] as const, "low"),
+    confidence: typeof zone.confidence === "number" && Number.isFinite(zone.confidence)
+      ? clamp01(zone.confidence)
+      : coerceEnum(zone.confidence, ["high", "medium", "low"] as const, "low") === "high" ? 0.9
+        : coerceEnum(zone.confidence, ["high", "medium", "low"] as const, "low") === "medium" ? 0.65 : 0.4,
     severity: coerceEnum(zone.severity, ["high", "medium", "low"] as const, "low"),
     approximateLocation: coerceString(zone.approximateLocation),
     evidenceLimits: coerceString(zone.evidenceLimits),

@@ -4,6 +4,7 @@ import type {
   DamageZone,
   DamageZoneSeverity,
 } from "@/lib/ai/visionDamageAnnotation";
+import type { AcceptedDamageMask } from "@/lib/ai/damageSegmentation";
 
 type Ctx = ReturnType<ReturnType<typeof createCanvas>["getContext"]>;
 
@@ -28,12 +29,33 @@ export type RenderDamageOverlayInput = {
   /** Data URL, http(s) URL, or raw image bytes. */
   imageSource: string | Buffer | Uint8Array;
   zones: DamageZone[];
+  /** Validated source-resolution masks. Heat-map styles never invent a fallback shape. */
+  masks?: AcceptedDamageMask[];
   disclaimer: string;
-  /** callout = boxes+labels, heatmap = translucent blobs, combined = both. */
+  /** callout = labels, heatmap = validated translucent masks, combined = both. */
   annotationStyle?: AnnotationStyle;
   /** Draw a small legend in a corner. Defaults on for heat-map styles. */
   showLegend?: boolean;
 };
+
+function drawDamageMasks(ctx: Ctx, masks: AcceptedDamageMask[], imgWidth: number, imgHeight: number): void {
+  for (const mask of masks) {
+    if (mask.width !== imgWidth || mask.height !== imgHeight) continue;
+    const layer = createCanvas(imgWidth, imgHeight);
+    const layerCtx = layer.getContext("2d");
+    const imageData = layerCtx.createImageData(imgWidth, imgHeight);
+    const rgb = mask.severity === "high" ? [220, 38, 38] : mask.severity === "medium" ? [234, 88, 12] : [202, 138, 4];
+    const alpha = mask.severity === "high" ? 94 : mask.severity === "medium" ? 82 : 66;
+    for (let i = 0; i < mask.pixels.length; i++) {
+      if (!mask.pixels[i]) continue;
+      const p = i * 4;
+      imageData.data[p] = rgb[0]; imageData.data[p + 1] = rgb[1];
+      imageData.data[p + 2] = rgb[2]; imageData.data[p + 3] = alpha;
+    }
+    layerCtx.putImageData(imageData, 0, 0);
+    ctx.drawImage(layer, 0, 0);
+  }
+}
 
 function wrapText(ctx: Ctx, text: string, maxWidth: number): string[] {
   const words = text.split(/\s+/);
@@ -57,126 +79,6 @@ function calloutColorForZone(zone: DamageZone): string {
   const hint = zone.heatmap?.colorHint;
   if (hint && COLOR_HINT_HEX[hint]) return COLOR_HINT_HEX[hint];
   return SEVERITY_COLORS[zone.severity] ?? SEVERITY_COLORS.low;
-}
-
-function severityToIntensity(severity: DamageZoneSeverity): number {
-  if (severity === "high") return 0.9;
-  if (severity === "medium") return 0.65;
-  return 0.4;
-}
-
-type HeatColor = { center: string; mid: string; edge: string };
-
-function heatColorForIntensity(intensity: number): HeatColor {
-  if (intensity >= 0.8) {
-    return {
-      center: "rgba(255, 0, 0, 0.42)",
-      mid: "rgba(255, 90, 0, 0.25)",
-      edge: "rgba(255, 0, 0, 0.0)",
-    };
-  }
-  if (intensity >= 0.55) {
-    return {
-      center: "rgba(255, 140, 0, 0.35)",
-      mid: "rgba(255, 190, 0, 0.22)",
-      edge: "rgba(255, 140, 0, 0.0)",
-    };
-  }
-  return {
-    center: "rgba(255, 230, 0, 0.30)",
-    mid: "rgba(255, 230, 0, 0.16)",
-    edge: "rgba(255, 230, 0, 0.0)",
-  };
-}
-
-function heatColorForHint(hint: "blue"): HeatColor {
-  // Only "blue" (verify-only) needs a distinct scale; red/orange/yellow follow intensity.
-  void hint;
-  return {
-    center: "rgba(0, 120, 255, 0.22)",
-    mid: "rgba(0, 120, 255, 0.12)",
-    edge: "rgba(0, 120, 255, 0.0)",
-  };
-}
-
-// Blob half-axes stay close to the reported zone so heat concentrates on the
-// damage instead of washing over undamaged panel/wheel/background. A little over
-// half the box gives a soft feathered edge; a hard cap prevents a single
-// over-sized model box from tinting the whole image.
-const HEAT_RADIUS_FACTOR = 0.55;
-const HEAT_RADIUS_CAP = 0.24; // fraction of the image dimension
-
-/** Resolve a zone's center + radius in pixels from bbox or polygon. */
-function resolveZoneGeometry(
-  zone: DamageZone,
-  imgWidth: number,
-  imgHeight: number
-): { cx: number; cy: number; rx: number; ry: number } | null {
-  const radius = (span: number, imageDim: number) =>
-    Math.max(Math.min(span * HEAT_RADIUS_FACTOR, imageDim * HEAT_RADIUS_CAP), 12);
-
-  if (zone.boundingBox) {
-    const bw = zone.boundingBox.width * imgWidth;
-    const bh = zone.boundingBox.height * imgHeight;
-    return {
-      cx: zone.boundingBox.x * imgWidth + bw / 2,
-      cy: zone.boundingBox.y * imgHeight + bh / 2,
-      rx: radius(bw, imgWidth),
-      ry: radius(bh, imgHeight),
-    };
-  }
-  if (zone.polygon && zone.polygon.length >= 3) {
-    const xs = zone.polygon.map((p) => p.x * imgWidth);
-    const ys = zone.polygon.map((p) => p.y * imgHeight);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minY = Math.min(...ys);
-    const maxY = Math.max(...ys);
-    return {
-      cx: (minX + maxX) / 2,
-      cy: (minY + maxY) / 2,
-      rx: radius(maxX - minX, imgWidth),
-      ry: radius(maxY - minY, imgHeight),
-    };
-  }
-  return null;
-}
-
-function drawHeatZone(
-  ctx: Ctx,
-  zone: DamageZone,
-  imgWidth: number,
-  imgHeight: number
-): void {
-  const geo = resolveZoneGeometry(zone, imgWidth, imgHeight);
-  if (!geo) return;
-
-  const intensity = zone.heatmap?.intensity ?? severityToIntensity(zone.severity);
-  const color =
-    zone.heatmap?.colorHint === "blue"
-      ? heatColorForHint("blue")
-      : heatColorForIntensity(intensity);
-
-  const radius = Math.max(geo.rx, geo.ry);
-  const gradient = ctx.createRadialGradient(
-    geo.cx,
-    geo.cy,
-    radius * 0.1,
-    geo.cx,
-    geo.cy,
-    radius
-  );
-  gradient.addColorStop(0, color.center);
-  gradient.addColorStop(0.55, color.mid);
-  gradient.addColorStop(1, color.edge);
-
-  ctx.save();
-  ctx.globalCompositeOperation = "source-over";
-  ctx.fillStyle = gradient;
-  ctx.beginPath();
-  ctx.ellipse(geo.cx, geo.cy, geo.rx, geo.ry, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
 }
 
 /** Rounded-rectangle path helper. */
@@ -295,9 +197,8 @@ function drawLegend(ctx: Ctx, imgWidth: number, imgHeight: number, baseFont: num
 
 /**
  * Draw deterministic damage-zone overlays onto the source image. Depending on
- * annotationStyle it renders labeled callout chips (dashed outlines + numbered
- * labels), a translucent heat map (feathered radial blobs colored by visible
- * intensity), or both. A fixed disclaimer banner runs along the bottom. Returns
+ * annotationStyle it renders labeled callout chips, validated contour masks, or
+ * both. A fixed disclaimer banner runs along the bottom. Returns
  * a PNG buffer. This never fabricates a replacement image — it only annotates
  * pixels that already exist.
  */
@@ -330,9 +231,7 @@ export async function renderDamageOverlay(
 
   // Heat map first (so callouts land on top and stay legible).
   if (drawHeat) {
-    for (const zone of input.zones) {
-      drawHeatZone(ctx, zone, imgWidth, imgHeight);
-    }
+    drawDamageMasks(ctx, input.masks ?? [], imgWidth, imgHeight);
   }
 
   if (drawCallouts) {

@@ -6,6 +6,8 @@ import {
   type DamageZone,
 } from "@/lib/ai/visionDamageAnnotation";
 import { renderDamageOverlay } from "@/lib/ai/renderDamageOverlay";
+import { normalizeDamageImage } from "@/lib/ai/damageImageNormalization";
+import { DAMAGE_SEGMENTATION_MODEL, segmentVisibleDamage, type MaskRejection } from "@/lib/ai/damageSegmentation";
 
 export const ANNOTATION_STYLES: readonly AnnotationStyle[] = ["callout", "heatmap", "combined"];
 
@@ -39,6 +41,15 @@ export type RunDamageAnnotationResult = {
   disclaimer: string;
   pngBuffer: Buffer;
   annotatedImageDataUrl: string;
+  originalImageDataUrl: string;
+  overlayAvailable: boolean;
+  overlayMessage?: string;
+  maskRejections: MaskRejection[];
+  processingMetadata: {
+    sourceHash: string; naturalWidth: number; naturalHeight: number;
+    originalOrientation: number; normalizedOrientation: 1; falModel: string;
+    promptVersion: string; requestId?: string; generatedAt: string;
+  };
 };
 
 /**
@@ -51,8 +62,9 @@ export type RunDamageAnnotationResult = {
 export async function runDamageAnnotation(
   input: RunDamageAnnotationInput
 ): Promise<RunDamageAnnotationResult> {
+  const normalized = await normalizeDamageImage(input.renderSource);
   const analysis = await analyzeDamagePhoto({
-    imageUrls: [input.visionImageUrl],
+    imageUrls: [normalized.dataUrl],
     userPrompt: input.prompt,
     vehicleContext: input.vehicleContext,
     estimateContext: input.estimateContext,
@@ -61,9 +73,22 @@ export async function runDamageAnnotation(
   });
 
   const overlayDisclaimer = disclaimerForAnnotationStyle(input.annotationStyle);
+  let masks = [] as Awaited<ReturnType<typeof segmentVisibleDamage>>["masks"];
+  let maskRejections: MaskRejection[] = [];
+  let requestId: string | undefined;
+  if (input.annotationStyle === "heatmap" || input.annotationStyle === "combined") {
+    try {
+      const segmented = await segmentVisibleDamage({ imageDataUrl: normalized.dataUrl, sourceHash: normalized.sourceHash, width: normalized.naturalWidth, height: normalized.naturalHeight, zones: analysis.zones });
+      masks = segmented.masks; maskRejections = segmented.rejected; requestId = segmented.requestId;
+    } catch (error) {
+      maskRejections = [{ index: -1, reason: error instanceof Error ? error.message : "segmentation-failed" }];
+      console.warn("[damage-segmentation] visual overlay unavailable", { model: DAMAGE_SEGMENTATION_MODEL, message: maskRejections[0].reason });
+    }
+  }
   const pngBuffer = await renderDamageOverlay({
-    imageSource: input.renderSource,
+    imageSource: normalized.buffer,
     zones: analysis.zones,
+    masks,
     disclaimer: overlayDisclaimer,
     annotationStyle: input.annotationStyle,
   });
@@ -79,5 +104,14 @@ export async function runDamageAnnotation(
     disclaimer: overlayDisclaimer || VISION_AID_DISCLAIMER,
     pngBuffer,
     annotatedImageDataUrl: `data:image/png;base64,${pngBuffer.toString("base64")}`,
+    originalImageDataUrl: normalized.dataUrl,
+    overlayAvailable: input.annotationStyle === "callout" || masks.length > 0,
+    ...(input.annotationStyle !== "callout" && masks.length === 0 ? { overlayMessage: "Visible damage area could not be localized with sufficient confidence." } : {}),
+    maskRejections,
+    processingMetadata: {
+      sourceHash: normalized.sourceHash, naturalWidth: normalized.naturalWidth, naturalHeight: normalized.naturalHeight,
+      originalOrientation: normalized.originalOrientation, normalizedOrientation: 1,
+      falModel: DAMAGE_SEGMENTATION_MODEL, promptVersion: "visible-damage-v2", requestId, generatedAt: new Date().toISOString(),
+    },
   };
 }

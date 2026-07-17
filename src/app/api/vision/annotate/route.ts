@@ -129,8 +129,12 @@ export async function POST(req: Request) {
         notEstablished: result.notEstablished,
         recommendedNextPhotos: result.recommendedNextPhotos,
         annotatedImageDataUrl: result.annotatedImageDataUrl,
+        originalImageDataUrl: result.originalImageDataUrl,
         annotatedImageUrl,
         disclaimer: result.disclaimer,
+        overlayAvailable: result.overlayAvailable,
+        overlayMessage: result.overlayMessage,
+        processingMetadata: result.processingMetadata,
         ...(warnings.length ? { warnings } : {}),
       },
       { status: 200 }
