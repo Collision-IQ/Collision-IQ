@@ -162,6 +162,9 @@ type ChatRequestBody = {
     snapshotExport?: boolean;
   };
   assistanceProfile?: string | null;
+  /** True when the client is NOT running the full case pipeline alongside
+   * this turn — a chat-first upload turn that can be depth-matched. */
+  conversationalUploadTurn?: boolean;
 };
 
 class AttachmentAccessError extends Error {
@@ -1577,11 +1580,17 @@ export async function POST(req: Request) {
         })),
     });
 
-    // Conversational turns (no fresh documents) run depth-matched: a quick
-    // question gets low effort + a small output budget and answers fast.
-    // Attachment-analysis turns keep full effort.
+    // Conversational turns run depth-matched: a quick question gets low
+    // effort + a small output budget and answers fast. Upload turns that are
+    // chat-first (no full pipeline running alongside) get medium effort for
+    // solid vision reads without max-effort latency; explicit "in detail" /
+    // analysis asks and pipeline-backed turns keep full effort.
     const conversationalGeneration =
-      documents.length === 0 ? resolveResponseModeGeneration(responseMode) : null;
+      documents.length === 0
+        ? resolveResponseModeGeneration(responseMode)
+        : body.conversationalUploadTurn === true && responseMode !== "analysis"
+          ? { effort: "medium" as const, maxTokens: 4000 }
+          : null;
 
     const firstPass = await createOpenAIResponseWithRetry(deps, "first-pass", {
       model: deps.collisionIqModels.primary,

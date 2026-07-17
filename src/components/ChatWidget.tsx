@@ -137,6 +137,22 @@ interface Attachment {
   classification?: "image" | "video" | "pdf" | "text" | "docx";
   hasVision: boolean;
   usedInAnalysis?: boolean;
+  /** The chat model already discussed this upload conversationally; it stays
+   * available for a full case analysis but is not re-sent on every turn. */
+  conversationallyReviewed?: boolean;
+}
+
+// Chat is conversational by default. The full case pipeline (case creation,
+// vision batch, detectors, research lanes, report preparation) runs only when
+// the user explicitly asks for it — or taps the Run Full Case Analysis button,
+// which sends this prompt.
+export const FULL_ANALYSIS_PROMPT = "Run the full case analysis on the uploaded files.";
+
+function isExplicitFullAnalysisIntent(message: string): boolean {
+  if (!message.trim()) return false;
+  return /\b(?:full (?:case |file )?(?:analysis|review)|run (?:the )?(?:full )?(?:case )?analysis|analy[sz]e (?:the |this |my )?(?:case|claim|estimates?|files?|uploads?)|review (?:this |the |my )?(?:estimates?|case|claim|supplement)|estimate (?:review|analysis|dispute|comparison)|compare (?:the |these )?estimates?|citation density|delta report|open (?:a )?case|start (?:the )?(?:case |file )?review|generate (?:the )?(?:case )?reports?)\b/i.test(
+    message
+  );
 }
 
 type AttachmentTrayItem = {
@@ -1199,6 +1215,16 @@ export default function ChatWidget({
     ].filter(Boolean);
     return parts.join(" · ");
   }, [attachments.length, totalFilesReviewed, visionAttachmentCount]);
+  // Uploads that have not been through the full case pipeline yet — the
+  // explicit trigger for the (deliberately no-longer-automatic) deep analysis.
+  const hasPendingFullAnalysis = useMemo(
+    () =>
+      attachments.some(
+        (attachment) =>
+          !attachment.usedInAnalysis && !isVideoAttachment(attachment) && Boolean(attachment.attachmentId)
+      ),
+    [attachments]
+  );
   const selectedUploadStatusText =
     selectedUploadNames.length > 20
       ? `${selectedUploadNames.length} files selected`
@@ -2526,10 +2552,22 @@ export default function ChatWidget({
     }
     const pendingAttachmentsForTurn = attachments.filter((attachment) => !attachment.usedInAnalysis);
     const documentationVideoAttachments = pendingAttachmentsForTurn.filter(isVideoAttachment);
-    const attachmentsForTurn = pendingAttachmentsForTurn.filter(
+    const fullAnalysisEligibleAttachments = pendingAttachmentsForTurn.filter(
       (attachment) => !isVideoAttachment(attachment)
     );
     const trimmedInput = promptText;
+    // Chat-first gating: the full case pipeline auto-runs only when merging
+    // into an already-open case or when the user explicitly asks for it.
+    // Otherwise the upload gets a fast conversational review and the pipeline
+    // stays one tap away (Run Full Case Analysis).
+    const runFullAnalysisThisTurn =
+      fullAnalysisEligibleAttachments.length > 0 &&
+      (Boolean(analysisReportIdRef.current) || isExplicitFullAnalysisIntent(trimmedInput));
+    // Conversationally reviewed uploads are not re-sent on every text turn —
+    // they rejoin only when a full analysis actually runs.
+    const attachmentsForTurn = runFullAnalysisThisTurn
+      ? fullAnalysisEligibleAttachments
+      : fullAnalysisEligibleAttachments.filter((attachment) => !attachment.conversationallyReviewed);
     if (!trimmedInput && pendingAttachmentsForTurn.length === 0) return;
 
     if (documentationVideoAttachments.length > 0) {
@@ -2561,7 +2599,7 @@ export default function ChatWidget({
     const messageToSend = trimmedInput || buildAttachmentSummary(attachmentsForTurn);
     const activeCaseTopic = updateCaseTopic(messageToSend);
     const hasAttachmentsInTurn = attachmentsForTurn.length > 0;
-    const activeAnalysisRunId = hasAttachmentsInTurn ? beginStructuredAnalysisRun() : null;
+    const activeAnalysisRunId = runFullAnalysisThisTurn ? beginStructuredAnalysisRun() : null;
     const attachmentStats = {
       ...summarizeAttachmentStats(attachmentsForTurn),
       totalPdfPages: attachmentsForTurn.reduce((sum, attachment) => sum + (attachment.pageCount ?? 0), 0),
@@ -2574,7 +2612,14 @@ export default function ChatWidget({
     setMessages(updatedMessages);
     setInput("");
 
-    if (hasAttachmentsInTurn) {
+    if (hasAttachmentsInTurn && !runFullAnalysisThisTurn) {
+      // Conversational upload turn: quick answer, no case pipeline, no
+      // review-progress theater. The full pipeline stays one tap away.
+      upsertSystemStatusMessage(
+        "Quick review — answering conversationally. Tap Run Full Case Analysis for the complete case pipeline and reports."
+      );
+    }
+    if (runFullAnalysisThisTurn) {
       upsertSystemStatusMessage("Parsing estimate PDFs...");
       scheduleReviewProgressMessages(Boolean(analysisReportIdRef.current));
       const preliminaryDraft = buildPreliminaryReviewDraft(attachmentsForTurn);
@@ -2746,7 +2791,7 @@ export default function ChatWidget({
           ? analysisStartMs - firstAttachmentAtRef.current
           : 0,
       });
-      if (hasAttachmentsInTurn) {
+      if (runFullAnalysisThisTurn) {
         upsertSystemStatusMessage(
           buildAttachmentBatchStatus(
             attachmentsForTurn.map((attachment) => ({ type: attachment.mime })),
@@ -2755,7 +2800,7 @@ export default function ChatWidget({
         );
       }
 
-      if (hasAttachmentsInTurn && analysisReportIdRef.current) {
+      if (runFullAnalysisThisTurn && analysisReportIdRef.current) {
         const activeCaseId = analysisReportIdRef.current;
         const analysisResponse = await fetch("/api/analysis", {
           method: "POST",
@@ -3000,6 +3045,9 @@ export default function ChatWidget({
             snapshotExport: canAccessFeature(productPlan, "snapshot_export"),
           },
           assistanceProfile,
+          // Conversational upload turn: no full pipeline is running alongside,
+          // so the server can depth-match generation instead of max effort.
+          conversationalUploadTurn: hasAttachmentsInTurn && !runFullAnalysisThisTurn,
         }),
       });
 
@@ -3039,7 +3087,18 @@ export default function ChatWidget({
       }
 
       const contentType = response.headers.get("content-type") || "";
-      if (hasAttachmentsInTurn) {
+      if (hasAttachmentsInTurn && !runFullAnalysisThisTurn) {
+        // Remember these uploads were discussed conversationally so text
+        // follow-ups stay fast; they rejoin when a full analysis is requested.
+        setAttachments((prev) =>
+          prev.map((attachment) =>
+            attachmentsForTurn.some((turn) => turn.attachmentId === attachment.attachmentId)
+              ? { ...attachment, conversationallyReviewed: true }
+              : attachment
+          )
+        );
+      }
+      if (runFullAnalysisThisTurn) {
         console.info("[attachments] analysis request assembled", {
           attachmentCount: attachmentsForTurn.length,
           visionAttachmentCount: attachmentsForTurn.filter((attachment) => attachment.hasVision).length,
@@ -4895,6 +4954,17 @@ export default function ChatWidget({
                     shouldCompactMobileChat ? "mt-1" : "mt-2",
                   ].join(" ")}
                 >
+                  {hasPendingFullAnalysis && !loading ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleSendRef.current(FULL_ANALYSIS_PROMPT)}
+                      disabled={disabled}
+                      className="mb-1.5 flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--accent)] px-2.5 py-2 text-xs font-semibold text-black transition hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-40"
+                      data-tour="run-full-analysis"
+                    >
+                      Run Full Case Analysis
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => {
@@ -4971,6 +5041,17 @@ export default function ChatWidget({
                     effectiveAttachmentsOpen ? "p-2" : "p-1",
                   ].join(" ")}
                 >
+                {hasPendingFullAnalysis && !loading ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleSendRef.current(FULL_ANALYSIS_PROMPT)}
+                    disabled={disabled}
+                    className="mb-1.5 flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-black transition hover:bg-[var(--accent)]/90 disabled:cursor-not-allowed disabled:opacity-40"
+                    data-tour="run-full-analysis"
+                  >
+                    Run Full Case Analysis
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="flex w-full items-center justify-between gap-3 bg-muted px-3 py-2 text-xs font-medium text-muted-foreground transition hover:bg-muted/70"
