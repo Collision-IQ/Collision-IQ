@@ -11,12 +11,15 @@ import {
   type NavUpdateSection,
 } from "@/lib/ui/navUpdates";
 import { CHAT_REOPEN_EVENT } from "@/lib/ui/chatReopen";
+import { WORKSPACE_NAV_EVENT, type WorkspaceNavDetail } from "@/lib/ui/workspaceNav";
+import { useWorkspaceExtraSlots } from "@/components/workspace/WorkspaceExtraSlots";
 import {
   Activity,
   BookOpen,
   Camera,
   Car,
   ChevronDown,
+  FileText,
   FolderCheck,
 
   HelpCircle,
@@ -71,9 +74,18 @@ type Props = {
   center: ReactNode;
   right: ReactNode;
   bottom?: ReactNode;
+  /** Dedicated Reports tab content (the live report cards, full width). */
+  reportsPanel?: ReactNode;
 };
 
-type WorkspaceView = "workspace" | "reports" | "evidence" | "calibration" | "vehicle" | "scaniq";
+type WorkspaceView =
+  | "workspace"
+  | "reportcenter"
+  | "reports"
+  | "evidence"
+  | "calibration"
+  | "vehicle"
+  | "scaniq";
 
 // In-workspace items switch the main content (`view`); items with `href`
 // navigate to an existing route. `requiresAnalysis` items stay disabled until an
@@ -88,21 +100,26 @@ const NAV_ITEMS: ReadonlyArray<{
 }> = [
   // "Command Center" and "Calibration" were removed deliberately: Command
   // Center duplicated the Analysis Workspace view, and Calibration guidance
-  // lives inside the analysis itself. "History" holds generated reports.
+  // lives inside the analysis itself. "Reports" hosts the live report cards
+  // (Snapshot, Repair Intelligence, Delta/OEM Citation Density, DOI,
+  // Customer) so chat and the review workspace stay open while inspecting
+  // them; "History" holds the saved archive + past chats.
   { id: "workspace", label: "Analysis Workspace", icon: Workflow, view: "workspace" },
+  { id: "reports", label: "Reports", icon: FileText, view: "reportcenter", requiresAnalysis: true },
   { id: "evidence", label: "Evidence", icon: FolderCheck, view: "evidence", requiresAnalysis: true },
   { id: "vehicle", label: "My Vehicle", icon: Car, view: "vehicle" },
   { id: "scaniq", label: "Scan IQ", icon: Activity, view: "scaniq" },
-  { id: "reports", label: "History", icon: BookOpen, view: "reports" },
+  { id: "history", label: "History", icon: BookOpen, view: "reports" },
   { id: "knowledge", label: "Knowledge Base", icon: BookOpen, href: "/how-it-works" },
   { id: "settings", label: "Settings", icon: SettingsIcon, href: "/account" },
 ];
 
 const NAV_TOUR_TARGETS: Record<string, string> = {
   workspace: "nav-analysis-workspace",
+  reports: "nav-reports",
   evidence: "nav-evidence",
   vehicle: "nav-my-vehicle",
-  reports: "nav-reports",
+  history: "nav-history",
   knowledge: "nav-knowledge-base",
   settings: "nav-settings",
 };
@@ -126,7 +143,11 @@ export default function CollisionWorkspaceV2({
   center,
   right,
   bottom,
+  reportsPanel,
 }: Props) {
+  // ChatShell doesn't thread this slot; the context provider around it does.
+  const extraSlots = useWorkspaceExtraSlots();
+  const effectiveReportsPanel = reportsPanel ?? extraSlots.reportsPanel;
   const [activeNav, setActiveNav] = useState<string>("workspace");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // "Recent reports" strip in the Analysis Workspace + deep link into History.
@@ -151,6 +172,22 @@ export default function CollisionWorkspaceV2({
     };
     window.addEventListener(CHAT_REOPEN_EVENT, handleReopen);
     return () => window.removeEventListener(CHAT_REOPEN_EVENT, handleReopen);
+  }, []);
+
+  // External nav requests (e.g. the "Reports ready" toast opening the
+  // Reports tab). Only known, in-shell sections are honored.
+  useEffect(() => {
+    const handleNavRequest = (event: Event) => {
+      const section = (event as CustomEvent<WorkspaceNavDetail>).detail?.section;
+      const item = NAV_ITEMS.find((candidate) => candidate.id === section);
+      if (!item || !item.view) return;
+      clearNavUpdate(item.id as NavUpdateSection);
+      setPendingReportId(null);
+      setActiveNav(item.id);
+      setMobileNavOpen(false);
+    };
+    window.addEventListener(WORKSPACE_NAV_EVENT, handleNavRequest);
+    return () => window.removeEventListener(WORKSPACE_NAV_EVENT, handleNavRequest);
   }, []);
   // My Vehicle red dot: check the maintenance picture once per mount and flag
   // the nav item when something newly came due (fingerprinted so the same due
@@ -389,6 +426,8 @@ export default function CollisionWorkspaceV2({
             <h1 className="text-[15px] font-semibold text-foreground">
               {activeView === "reports"
                 ? "History"
+                : activeView === "reportcenter"
+                  ? "Reports"
                 : activeView === "vehicle"
                   ? "My Vehicle"
                   : activeView === "scaniq"
@@ -417,9 +456,9 @@ export default function CollisionWorkspaceV2({
                   key={report.id}
                   type="button"
                   onClick={() => {
-                    clearNavUpdate("reports");
+                    clearNavUpdate("history");
                     setPendingReportId(report.id);
-                    setActiveNav("reports");
+                    setActiveNav("history");
                   }}
                   className="max-w-[240px] truncate rounded-lg border border-border bg-muted px-2.5 py-1.5 text-[12px] font-medium text-foreground transition hover:border-[var(--accent)]/45 hover:bg-background"
                   title={`Open report: ${report.title}`}
@@ -430,9 +469,9 @@ export default function CollisionWorkspaceV2({
               <button
                 type="button"
                 onClick={() => {
-                  clearNavUpdate("reports");
+                  clearNavUpdate("history");
                   setPendingReportId(null);
-                  setActiveNav("reports");
+                  setActiveNav("history");
                 }}
                 className="text-[12px] font-medium text-[var(--accent)] underline-offset-2 hover:underline"
               >
@@ -443,10 +482,18 @@ export default function CollisionWorkspaceV2({
 
           {/* Chat fills all available height (maximized); the mobile Damage
               Preview accordion + footer sit below it at the bottom. */}
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div
+            className={`grid min-h-0 flex-1 grid-cols-1 gap-3 ${
+              activeView === "reportcenter" ? "" : "lg:grid-cols-[minmax(0,1fr)_360px]"
+            }`}
+          >
             {activeView === "reports" ? (
               <div data-tour="past-reports">
                 <ReportsHistoryPanel initialReportId={pendingReportId} />
+              </div>
+            ) : activeView === "reportcenter" ? (
+              <div className="flex min-h-0 flex-col" data-tour="reports-tab">
+                {effectiveReportsPanel}
               </div>
             ) : activeView === "vehicle" ? (
               <MyVehiclePanel />
@@ -459,9 +506,13 @@ export default function CollisionWorkspaceV2({
             ) : (
               <div className="ci-panel flex min-h-0 min-w-0 flex-col overflow-hidden">{center}</div>
             )}
-            <aside className="ci-panel hidden min-h-0 flex-col overflow-y-auto p-3 lg:flex">
-              {right}
-            </aside>
+            {activeView === "reportcenter" ? null : (
+              // The Reports tab IS the rail's report section at full width —
+              // hiding the rail there avoids duplicate report cards.
+              <aside className="ci-panel hidden min-h-0 flex-col overflow-y-auto p-3 lg:flex">
+                {right}
+              </aside>
+            )}
           </div>
 
           {activeView === "workspace" ? (

@@ -8,7 +8,13 @@ import { useSyncExternalStore } from "react";
  * Flags persist in localStorage and clear when the user opens the section.
  */
 
-export type NavUpdateSection = "workspace" | "evidence" | "vehicle" | "scaniq" | "reports";
+export type NavUpdateSection =
+  | "workspace"
+  | "evidence"
+  | "vehicle"
+  | "scaniq"
+  | "reports"
+  | "history";
 
 const STORAGE_KEY = "ciq_nav_updates_v1";
 const CHANGE_EVENT = "ciq-nav-updates-changed";

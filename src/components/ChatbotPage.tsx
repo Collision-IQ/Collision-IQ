@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import { ArrowRight, ChevronDown, Download, FileText, Mail, Maximize2, Minimize2, RefreshCcw, X } from "lucide-react";
 import ChatShell from "@/components/ChatShell";
+import { WorkspaceExtraSlotsProvider } from "@/components/workspace/WorkspaceExtraSlots";
 import ChatWidget from "@/components/ChatWidget";
 import type { WorkspaceShellVariant } from "@/lib/workspaceV2";
 import type { ReviewProgress } from "@/components/ChatWidget";
@@ -28,6 +29,7 @@ import WorkspacePanel from "@/components/WorkspacePanel";
 import type { CitationDensityAnnotationMetadata } from "@/components/CitationDensityAnnotationViewer";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import { markNavUpdate } from "@/lib/ui/navUpdates";
+import { requestWorkspaceNav } from "@/lib/ui/workspaceNav";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import { getNormalizedDetermination } from "@/lib/analysis/getNormalizedDetermination";
 import { canAccessFeature } from "@/lib/featureAccess";
@@ -484,6 +486,13 @@ export function ChatbotWorkspacePage({
   const [consentChecked, setConsentChecked] = useState(false);
   const [viewerAccess, setViewerAccess] = useState<AccountEntitlements | null>(null);
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  // "Reports are ready" pop-up shown when an analysis resolves; auto-dismisses.
+  const [reportsReadyToastVisible, setReportsReadyToastVisible] = useState(false);
+  useEffect(() => {
+    if (!reportsReadyToastVisible) return;
+    const timer = window.setTimeout(() => setReportsReadyToastVisible(false), 20_000);
+    return () => window.clearTimeout(timer);
+  }, [reportsReadyToastVisible]);
   const [isImmersiveHeaderExpanded, setIsImmersiveHeaderExpanded] = useState(true);
   const [headerPinnedByUser, setHeaderPinnedByUser] = useState(false);
   const [lastHeaderChangeReason, setLastHeaderChangeReason] =
@@ -1038,11 +1047,13 @@ export function ChatbotWorkspacePage({
       setAnalysisStatus("complete");
       setAnalysisStatusDetail(null);
       setActiveInsightKey((current) => current ?? "executive_summary");
-      // New reports just landed — light both destinations: the Analysis
-      // Workspace (where the reports surface) and History (the archive). A
-      // section the user is currently viewing auto-clears its dot.
+      // New reports just landed — light the Reports tab (where the cards
+      // open) and the Analysis Workspace, and pop the ready toast so the
+      // reports are never missed. A section the user is currently viewing
+      // auto-clears its dot.
       markNavUpdate("workspace");
       markNavUpdate("reports");
+      setReportsReadyToastVisible(true);
     }
   }
 
@@ -1276,6 +1287,53 @@ export function ChatbotWorkspacePage({
 
   return (
     <div className="flex h-[100svh] flex-col overflow-hidden bg-background text-foreground">
+      <WorkspaceExtraSlotsProvider
+        reportsPanel={
+          <RailContent
+            variant="reports-tab"
+            attachment={attachment}
+            analysisText={redactExternalDocumentUrls(analysisText)}
+            caseIntent={caseIntent}
+            primaryAnalysisContent={primaryAnalysis?.content ?? ""}
+            analysisLoading={analysisLoading}
+            analysisStatus={analysisStatus}
+            analysisStatusDetail={analysisStatusDetail}
+            hasResolvedAnalysis={hasResolvedAnalysis}
+            panel={panel}
+            renderModel={renderModel}
+            normalizedResult={normalizedResult}
+            analysisResult={analysisResult}
+            reviewProgress={reviewProgress}
+            workspaceData={workspaceData}
+            canViewSupplementLines={canViewSupplementLines}
+            canViewNegotiationDraft={canViewNegotiationDraft}
+            plan={plan}
+            canUseSnapshotExport={canUseSnapshotExport}
+            canUseBasicPdfExport={canUseBasicPdfExport}
+            canUseEstimateScrubberExport={canUseEstimateScrubberExport}
+            canUsePolicyRightsReviewExport={canUsePolicyRightsReviewExport}
+            canUseDoiComplaintPacketExport={canUseDoiComplaintPacketExport}
+            canUseCustomerReport={canUseCustomerReport}
+            analysisReportId={analysisReportId}
+            attachmentIds={attachmentsState.map((file) => file.attachmentId)}
+            attachments={attachmentsState}
+            citationDensityTargetEstimate={citationDensityTargetEstimate}
+            onCitationDensityTargetEstimateChange={setCitationDensityTargetEstimate}
+            citationDensitySelectedSourceDocumentId={citationDensitySelectedSourceDocumentId}
+            onCitationDensitySelectedSourceDocumentIdChange={setCitationDensitySelectedSourceDocumentId}
+            onCustomerReportLocked={() => setUpgradeModalOpen(true)}
+            activeInsightKey={activeInsightKey}
+            evidenceModel={evidenceModel}
+            activeEvidenceTargetId={activeEvidenceTargetId}
+            onInsightSelect={(insightKey) => {
+              revealImmersiveSection(insightKey);
+            }}
+            onEvidenceSelect={handleEvidenceSelect}
+            onCitationDensityReportReady={openCitationDensityReportWorkspace}
+            onReportWorkspaceOpen={openReportDocumentWorkspace}
+          />
+        }
+      >
       <ChatShell
         title="Collision-IQ"
         planLabel={trialBadgeLabel}
@@ -1719,6 +1777,45 @@ export function ChatbotWorkspacePage({
           />
         }
       />
+      </WorkspaceExtraSlotsProvider>
+
+      {reportsReadyToastVisible ? (
+        <div
+          className="fixed bottom-5 right-5 z-[70] w-[min(92vw,340px)] rounded-xl border border-[var(--accent)]/40 bg-card p-3.5 shadow-[0_18px_50px_rgba(15,23,42,0.25)] dark:shadow-[0_18px_50px_rgba(0,0,0,0.5)]"
+          role="status"
+          aria-live="polite"
+          data-tour="reports-ready-toast"
+        >
+          <div className="flex items-start gap-2.5">
+            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold text-foreground">Reports are ready</div>
+              <div className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                Snapshot, Repair Intelligence, Delta &amp; OEM Citation Density, DOI, and
+                Customer Report are ready to inspect.
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setReportsReadyToastVisible(false);
+                  requestWorkspaceNav("reports");
+                }}
+                className="mt-2 inline-flex items-center rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-black transition hover:bg-[var(--accent)]/90"
+              >
+                Open Reports
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReportsReadyToastVisible(false)}
+              className="shrink-0 rounded-md p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              aria-label="Dismiss reports notification"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <CollisionIqFooter />
 
@@ -1936,6 +2033,7 @@ function CollisionIqFooter() {
 }
 
 function RailContent({
+  variant = "rail",
   attachment,
   analysisText,
   caseIntent,
@@ -1975,6 +2073,12 @@ function RailContent({
   onCitationDensityReportReady,
   onReportWorkspaceOpen,
 }: {
+  /**
+   * "rail" = full right-rail (status, insights, and report cards).
+   * "reports-tab" = the dedicated left-nav Reports view: only the report
+   * cards (and their modals), full-width, with chat left untouched.
+   */
+  variant?: "rail" | "reports-tab";
   attachment: string | null;
   analysisText: string;
   caseIntent: string;
@@ -3159,7 +3263,30 @@ function RailContent({
   }, [activeInsightKey]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col px-4 py-5 md:px-5 md:py-6">
+    <div
+      className={
+        variant === "reports-tab"
+          ? "ci-panel flex min-h-0 flex-1 flex-col overflow-y-auto p-4"
+          : "flex h-full min-h-0 flex-col px-4 py-5 md:px-5 md:py-6"
+      }
+    >
+      {variant === "reports-tab" ? (
+        <div className="mb-1">
+          <h2 className="text-[15px] font-semibold text-foreground">Reports</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Generated for the current analysis. Your chat and review workspace stay
+            open in the Analysis Workspace while you inspect, download, or send these.
+          </p>
+          {!(canRenderExports || canGenerateCitationDensityAnnotatedEstimate) ? (
+            <div className="mt-3 rounded-lg border border-dashed border-border p-5 text-center text-sm text-muted-foreground">
+              No reports yet. Run an estimate review or comparison and your reports
+              will appear here the moment they are ready.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {variant === "rail" ? (
+        <>
       {hasResolvedAnalysis ? (
         <section
           className="mb-3 rounded-[20px] border border-[var(--accent)]/35 bg-card p-3 shadow-[0_10px_30px_rgba(15,23,42,0.07)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.2)]"
@@ -3567,6 +3694,8 @@ function RailContent({
       ) : null}
 
       <RailGroup label="Output" compact />
+        </>
+      ) : null}
 
       {canRenderExports || canGenerateCitationDensityAnnotatedEstimate ? (
         <RailInsightSection
