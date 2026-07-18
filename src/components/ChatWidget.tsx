@@ -62,6 +62,7 @@ import AttachmentPreviewModal, {
   type PreviewAttachment,
 } from "@/components/AttachmentPreviewModal";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
+import { CHAT_REOPEN_EVENT, type ChatReopenDetail } from "@/lib/ui/chatReopen";
 import { isNative, saveAndShareBlob } from "@/lib/native";
 import { buildPlanRecommendationGuard, canAccessFeature } from "@/lib/featureAccess";
 import { emitSafeCrmEventFromClient } from "@/lib/crm/events";
@@ -1054,6 +1055,9 @@ export default function ChatWidget({
   const shouldAutoScrollRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
   const sessionRef = useRef<number>(0);
+  // Saved-chat thread the current transcript autosaves onto (null = new).
+  const chatThreadIdRef = useRef<string | null>(null);
+  const chatThreadSaveDisabledRef = useRef(false);
   const analysisRunRef = useRef<number>(0);
   const analysisReportIdRef = useRef<string | null>(null);
   const analysisTextRef = useRef("");
@@ -1416,6 +1420,73 @@ export default function ChatWidget({
     chatSessionStorageKeyRef.current = chatSessionStorageKey;
     writeStoredChatMessages(chatSessionStorageKey, messages);
   }, [chatSessionStorageKey, messages]);
+
+  // ── Saved chat threads (reopenable history) ──────────────────────────────
+  // Debounced autosave of the live transcript for every signed-in user; the
+  // plan limit gates REOPENING (History list), not saving, so an upgrade
+  // unlocks already-saved chats. 401/403 disables further attempts silently.
+  useEffect(() => {
+    if (!isSignedIn || disabled || chatThreadSaveDisabledRef.current) return;
+    if (isInitialOnlyMessages(messages)) return;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await fetch("/api/chat-threads", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({
+              id: chatThreadIdRef.current,
+              caseId: analysisReportIdRef.current,
+              messages,
+            }),
+          });
+          if (response.status === 401 || response.status === 403) {
+            chatThreadSaveDisabledRef.current = true;
+            return;
+          }
+          const data = (await response.json().catch(() => null)) as {
+            id?: string | null;
+          } | null;
+          if (response.ok && data?.id) chatThreadIdRef.current = data.id;
+        } catch {
+          // Autosave is best-effort; sessionStorage still guards remounts.
+        }
+      })();
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [messages, isSignedIn, disabled]);
+
+  // Reopen a saved chat when History asks for it: load the stored transcript
+  // and continue the same thread (further messages autosave onto it).
+  useEffect(() => {
+    const handleReopen = (event: Event) => {
+      const threadId = (event as CustomEvent<ChatReopenDetail>).detail?.threadId;
+      if (!threadId) return;
+      void (async () => {
+        try {
+          const response = await fetch(
+            `/api/chat-threads/${encodeURIComponent(threadId)}`,
+            { cache: "no-store", credentials: "same-origin" }
+          );
+          const data = (await response.json().catch(() => null)) as {
+            thread?: { id: string; messages: Message[] };
+          } | null;
+          if (!response.ok || !data?.thread?.messages?.length) return;
+          chatThreadIdRef.current = data.thread.id;
+          setMessages(data.thread.messages);
+          shouldAutoScrollRef.current = true;
+          window.setTimeout(() => {
+            bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+          }, 80);
+        } catch {
+          // Reopen is user-triggered; a failure just leaves the current chat.
+        }
+      })();
+    };
+    window.addEventListener(CHAT_REOPEN_EVENT, handleReopen);
+    return () => window.removeEventListener(CHAT_REOPEN_EVENT, handleReopen);
+  }, []);
 
   useEffect(() => {
     if (!introDismissed || !isInitialOnlyMessages(messages)) return;
@@ -2332,6 +2403,9 @@ export default function ChatWidget({
   }
 
   const handleEndChat = useCallback(() => {
+    // The ended chat stays saved in history; the next conversation starts a
+    // fresh saved thread.
+    chatThreadIdRef.current = null;
     removeStoredChatMessages(chatSessionStorageKeyRef.current);
     if (analysisReportIdRef.current) {
       removeStoredChatMessages(getChatSessionStorageKey(analysisReportIdRef.current));

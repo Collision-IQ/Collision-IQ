@@ -135,7 +135,7 @@ function buildTour() {
     {
       id: "reports",
       title: "History",
-      text: "History is where your generated outputs live, including estimate reviews, delta reports, citation reports, and downloadable summaries from past sessions.",
+      text: "History is where your generated outputs live, including estimate reviews, delta reports, citation reports, and downloadable summaries from past sessions. Past chats are saved here too — reopen one to pick the conversation back up in the Analysis Workspace.",
       selectors: ['[data-tour="nav-reports"]'],
       desktopPlacement: "right",
       mobilePlacement: "bottom",

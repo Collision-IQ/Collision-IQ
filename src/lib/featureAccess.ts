@@ -59,6 +59,24 @@ export function canAccessFeature(
   return false;
 }
 
+/**
+ * How many saved chats a plan may reopen from History. The limit bounds the
+ * visible list (most recent first): free/anonymous none, Starter 5, Pro 10,
+ * Team/Admin unlimited. Saving happens for every signed-in user regardless of
+ * plan so an upgrade unlocks the already-saved history.
+ */
+export function chatHistoryReopenLimit(
+  plan: ProductPlan | string | null | undefined,
+  isPlatformAdmin = false
+): number {
+  if (isPlatformAdmin) return Number.POSITIVE_INFINITY;
+  const normalized = normalizeProductPlan(plan);
+  if (normalized === "admin" || normalized === "team") return Number.POSITIVE_INFINITY;
+  if (normalized === "pro") return 10;
+  if (normalized === "starter") return 5;
+  return 0;
+}
+
 export function buildPlanRecommendationGuard(hasProChatRecommendations: boolean) {
   return hasProChatRecommendations
     ? "Repair Intelligence Report, Delta Citation Density Report, OEM Citation Density Report, DOI Complaint Packet, and rebuttal recommendations may be suggested when relevant."

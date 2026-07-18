@@ -1038,7 +1038,10 @@ export function ChatbotWorkspacePage({
       setAnalysisStatus("complete");
       setAnalysisStatusDetail(null);
       setActiveInsightKey((current) => current ?? "executive_summary");
-      // New reports just landed — light the History nav item's update dot.
+      // New reports just landed — light both destinations: the Analysis
+      // Workspace (where the reports surface) and History (the archive). A
+      // section the user is currently viewing auto-clears its dot.
+      markNavUpdate("workspace");
       markNavUpdate("reports");
     }
   }

@@ -8,9 +8,12 @@ import {
   FileWarning,
   Loader2,
   Lock,
+  MessageSquare,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 import type { ReportMemoryDetail } from "@/lib/reports/reportMemory";
+import { requestChatReopen } from "@/lib/ui/chatReopen";
 
 type ReportSummary = {
   id: string;
@@ -50,7 +53,12 @@ function formatWhen(iso: string): string {
  * GET /api/reports/[reportId]; both are auth + plan gated server-side and
  * scoped to the user's own reports only.
  */
-export default function ReportsHistoryPanel() {
+export default function ReportsHistoryPanel({
+  initialReportId,
+}: {
+  /** When set, the panel opens straight into this report's detail view. */
+  initialReportId?: string | null;
+} = {}) {
   const [reports, setReports] = useState<ReportSummary[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error" | "unauthorized" | "locked">("loading");
 
@@ -117,6 +125,11 @@ export default function ReportsHistoryPanel() {
     setDetail(null);
     setDetailState("idle");
   }, []);
+
+  // Deep link from the Analysis Workspace "Recent reports" strip.
+  useEffect(() => {
+    if (initialReportId) void openReport(initialReportId);
+  }, [initialReportId, openReport]);
 
   // ── Detail view (replaces the list; Back returns) ─────────────────────────
   if (openReportId) {
@@ -300,7 +313,7 @@ export default function ReportsHistoryPanel() {
             No reports yet. Run a repair analysis and it will appear here.
           </div>
         ) : (
-          <ul className="space-y-2">
+          <ul className="space-y-2" data-tour="past-reports-list">
             {reports.map((report) => (
               <li key={report.id}>
                 <button
@@ -339,7 +352,144 @@ export default function ReportsHistoryPanel() {
             ))}
           </ul>
         )}
+
+        {state !== "unauthorized" ? <PastChatsSection /> : null}
       </div>
+    </div>
+  );
+}
+
+type ChatThreadSummary = {
+  id: string;
+  title: string;
+  messageCount: number;
+  updatedAt: string;
+};
+
+/**
+ * Past chats — saved transcripts the user can reopen in the Analysis
+ * Workspace. The visible count is plan-limited server-side (Starter 5,
+ * Pro 10, Team/Admin unlimited); free plans see the section locked.
+ */
+function PastChatsSection() {
+  const [threads, setThreads] = useState<ChatThreadSummary[]>([]);
+  const [limit, setLimit] = useState<number | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "locked" | "error">("loading");
+
+  const fetchThreads = useCallback(async () => {
+    try {
+      const res = await fetch("/api/chat-threads", { cache: "no-store" });
+      if (!res.ok) {
+        setState("error");
+        return;
+      }
+      const data = (await res.json()) as {
+        locked?: boolean;
+        limit?: number | null;
+        threads?: ChatThreadSummary[];
+      };
+      if (data.locked) {
+        setState("locked");
+        return;
+      }
+      setThreads(data.threads ?? []);
+      setLimit(typeof data.limit === "number" ? data.limit : null);
+      setState("ready");
+    } catch {
+      setState("error");
+    }
+  }, []);
+
+  useEffect(() => {
+    // Fetch-on-mount: setState only runs after the awaited fetch resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchThreads();
+  }, [fetchThreads]);
+
+  const deleteThread = useCallback(
+    async (threadId: string) => {
+      try {
+        await fetch(`/api/chat-threads/${encodeURIComponent(threadId)}`, { method: "DELETE" });
+      } catch {
+        // The refresh below re-syncs either way.
+      }
+      void fetchThreads();
+    },
+    [fetchThreads]
+  );
+
+  return (
+    <div className="mt-5 border-t border-border pt-4" data-tour="past-chats">
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="inline-flex items-center gap-1.5 text-sm font-semibold text-foreground">
+          <MessageSquare size={14} className="text-[var(--accent)]" /> Past chats
+        </h3>
+        {state === "ready" && limit !== null ? (
+          <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+            last {limit} shown
+          </span>
+        ) : null}
+      </div>
+
+      {state === "loading" ? (
+        <div className="flex h-16 items-center justify-center text-muted-foreground">
+          <Loader2 className="animate-spin" size={16} />
+        </div>
+      ) : state === "locked" ? (
+        <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+          <Lock size={13} className="mt-0.5 shrink-0" />
+          <span>
+            Reopening past chats is available on paid plans — Starter keeps your last 5,
+            Pro your last 10.
+          </span>
+        </div>
+      ) : state === "error" ? (
+        <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+          Couldn&apos;t load your past chats.{" "}
+          <button type="button" onClick={() => { setState("loading"); void fetchThreads(); }} className="underline">
+            Retry
+          </button>
+        </div>
+      ) : threads.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
+          No saved chats yet. Conversations save automatically as you chat.
+        </div>
+      ) : (
+        <ul className="space-y-1.5">
+          {threads.map((thread) => (
+            <li key={thread.id} className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => requestChatReopen(thread.id)}
+                className="ci-card flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-2 text-left transition hover:border-[var(--accent)]/45 hover:bg-muted/40"
+                aria-label={`Reopen chat: ${thread.title}`}
+                title="Reopen this chat in the Analysis Workspace"
+              >
+                <MessageSquare size={13} className="shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium text-foreground">
+                    {thread.title}
+                  </span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    {thread.messageCount} message{thread.messageCount === 1 ? "" : "s"} ·{" "}
+                    {formatWhen(thread.updatedAt)}
+                  </span>
+                </span>
+                <ChevronRight size={14} className="shrink-0 text-muted-foreground" />
+              </button>
+              <button
+                type="button"
+                onClick={() => void deleteThread(thread.id)}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-red-500"
+                aria-label={`Delete saved chat: ${thread.title}`}
+                title="Delete this saved chat"
+              >
+                <Trash2 size={13} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

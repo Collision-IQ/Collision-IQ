@@ -227,6 +227,19 @@ model AnalysisReportArtifact {
   @@index([attachmentId])
 }
 
+model ChatThread {
+  id           String   @id @default(cuid())
+  ownerUserId  String
+  title        String
+  caseId       String?
+  messages     Json
+  messageCount Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([ownerUserId, updatedAt])
+}
+
 model UsageCounter {
   id        String    @id
   userId    String

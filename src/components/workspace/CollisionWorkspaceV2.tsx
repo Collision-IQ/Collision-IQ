@@ -10,6 +10,7 @@ import {
   useNavUpdateFlags,
   type NavUpdateSection,
 } from "@/lib/ui/navUpdates";
+import { CHAT_REOPEN_EVENT } from "@/lib/ui/chatReopen";
 import {
   Activity,
   BookOpen,
@@ -128,7 +129,29 @@ export default function CollisionWorkspaceV2({
 }: Props) {
   const [activeNav, setActiveNav] = useState<string>("workspace");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // "Recent reports" strip in the Analysis Workspace + deep link into History.
+  const [recentReports, setRecentReports] = useState<Array<{ id: string; title: string }>>([]);
+  const [pendingReportId, setPendingReportId] = useState<string | null>(null);
   const navUpdateFlags = useNavUpdateFlags();
+
+  // A section the user is currently viewing never keeps an unseen-update dot:
+  // updates that land while it's open are already seen.
+  useEffect(() => {
+    if (navUpdateFlags[activeNav as NavUpdateSection]) {
+      clearNavUpdate(activeNav as NavUpdateSection);
+    }
+  }, [navUpdateFlags, activeNav]);
+
+  // Reopening a saved chat always lands in the Analysis Workspace.
+  useEffect(() => {
+    const handleReopen = () => {
+      clearNavUpdate("workspace");
+      setActiveNav("workspace");
+      setMobileNavOpen(false);
+    };
+    window.addEventListener(CHAT_REOPEN_EVENT, handleReopen);
+    return () => window.removeEventListener(CHAT_REOPEN_EVENT, handleReopen);
+  }, []);
   // My Vehicle red dot: check the maintenance picture once per mount and flag
   // the nav item when something newly came due (fingerprinted so the same due
   // set never re-notifies).
@@ -153,6 +176,32 @@ export default function CollisionWorkspaceV2({
       cancelled = true;
     };
   }, []);
+
+  // Saved reports surface directly in the Analysis Workspace (it doubles as
+  // the command center). Refetched when a new analysis resolves so the strip
+  // always includes the report that just generated.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/reports/history", { cache: "no-store" });
+        if (!response.ok || cancelled) return;
+        const data = (await response.json()) as {
+          reports?: Array<{ id: string; title: string }>;
+        };
+        if (!cancelled) {
+          setRecentReports(
+            (data.reports ?? []).slice(0, 3).map((report) => ({ id: report.id, title: report.title }))
+          );
+        }
+      } catch {
+        // signed-out / plan-locked — no strip
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [analysisReady]);
   const activeItem = NAV_ITEMS.find((item) => item.id === activeNav);
   // Guard: never stay on a gated view if analysis is no longer available.
   const activeView: WorkspaceView =
@@ -218,6 +267,8 @@ export default function CollisionWorkspaceV2({
         type="button"
         onClick={() => {
           clearNavUpdate(item.id as NavUpdateSection);
+          // Direct nav clicks open the plain History list, not a deep link.
+          setPendingReportId(null);
           setActiveNav(item.id);
           onNavigate?.();
         }}
@@ -350,12 +401,52 @@ export default function CollisionWorkspaceV2({
             </h1>
           </div>
 
+          {/* The workspace doubles as the command center: generated reports
+              surface here immediately, with History holding the full archive. */}
+          {activeView === "workspace" && recentReports.length > 0 ? (
+            <div
+              className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--accent)]/30 bg-card px-3 py-2"
+              data-tour="recent-reports"
+            >
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
+                Recent reports
+              </span>
+              {recentReports.map((report) => (
+                <button
+                  key={report.id}
+                  type="button"
+                  onClick={() => {
+                    clearNavUpdate("reports");
+                    setPendingReportId(report.id);
+                    setActiveNav("reports");
+                  }}
+                  className="max-w-[240px] truncate rounded-lg border border-border bg-muted px-2.5 py-1.5 text-[12px] font-medium text-foreground transition hover:border-[var(--accent)]/45 hover:bg-background"
+                  title={`Open report: ${report.title}`}
+                >
+                  {report.title}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  clearNavUpdate("reports");
+                  setPendingReportId(null);
+                  setActiveNav("reports");
+                }}
+                className="text-[12px] font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+              >
+                View all
+              </button>
+            </div>
+          ) : null}
+
           {/* Chat fills all available height (maximized); the mobile Damage
               Preview accordion + footer sit below it at the bottom. */}
           <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
             {activeView === "reports" ? (
               <div data-tour="past-reports">
-                <ReportsHistoryPanel />
+                <ReportsHistoryPanel initialReportId={pendingReportId} />
               </div>
             ) : activeView === "vehicle" ? (
               <MyVehiclePanel />
