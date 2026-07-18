@@ -30,7 +30,11 @@ import {
 import { getCaseById } from "@/lib/cases/getCaseById";
 import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import { canAccessFeature } from "@/lib/featureAccess";
-import { buildQuickChatSystemPrompt, NO_INTERNAL_TOKENS_RULE } from "@/lib/ai/chatVoice";
+import {
+  buildQuickChatSystemPrompt,
+  NO_INTERNAL_TOKENS_RULE,
+  STRUCTURED_WRITING_DIRECTIVE,
+} from "@/lib/ai/chatVoice";
 import { cleanResponse } from "@/lib/vehicle/oemGuardrails";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { sanitizeUserFacingEvidenceText } from "@/lib/ui/presentationText";
@@ -539,6 +543,7 @@ RULES
 - Never leak OEM-specific systems across brands (e.g., BMW KAFAS on Chevrolet).
 - If a document was blocked, explicitly state that it was not accessible.
 - ${NO_INTERNAL_TOKENS_RULE}
+- ${STRUCTURED_WRITING_DIRECTIVE}
 - Be precise, concise, and evidence-driven.
 
 ${DOCUMENT_REVIEW_TWO_PASS_PROTOCOL}

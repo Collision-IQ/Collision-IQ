@@ -33,7 +33,11 @@ import { getCaseById } from "@/lib/cases/getCaseById";
 import type { StoredCaseData } from "@/lib/cases/getCaseById";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { buildProductAccessGuard, canAccessFeature } from "@/lib/featureAccess";
-import { buildQuickChatSystemPrompt, NO_INTERNAL_TOKENS_RULE } from "@/lib/ai/chatVoice";
+import {
+  buildQuickChatSystemPrompt,
+  NO_INTERNAL_TOKENS_RULE,
+  STRUCTURED_WRITING_DIRECTIVE,
+} from "@/lib/ai/chatVoice";
 import { buildModeContext, type OutputMode } from "@/lib/ai/outputMode";
 import {
   buildResponseModeInstruction,
@@ -1434,6 +1438,7 @@ export async function POST(req: Request) {
           buildResponseModeInstruction(responseMode),
           responseShapeInstruction,
           NO_INTERNAL_TOKENS_RULE,
+          STRUCTURED_WRITING_DIRECTIVE,
           buildActiveCaseSystemGuard({
             hasStoredEvidence: activeCaseHasStoredEvidence,
             hasVehicleContext: activeCaseHasVehicleContext,
