@@ -29,14 +29,102 @@ export type RenderDamageOverlayInput = {
   /** Data URL, http(s) URL, or raw image bytes. */
   imageSource: string | Buffer | Uint8Array;
   zones: DamageZone[];
-  /** Validated source-resolution masks. Heat-map styles never invent a fallback shape. */
+  /** Validated source-resolution masks (object-shaped damage only). */
   masks?: AcceptedDamageMask[];
   disclaimer: string;
-  /** callout = labels, heatmap = validated translucent masks, combined = both. */
+  /** callout = labels, heatmap = masks + zone-anchored gradients, combined = both. */
   annotationStyle?: AnnotationStyle;
   /** Draw a small legend in a corner. Defaults on for heat-map styles. */
   showLegend?: boolean;
 };
+
+/** Zones drawn as feathered gradient heat: any zone with a usable box that has
+ * no accepted SAM mask. This covers surface damage (scuffs, scratches, dents,
+ * missing parts) routed away from SAM, plus SAM-eligible zones whose masks
+ * failed validation — the soft, diffuse glow honestly signals "approximate
+ * area" where a crisp mask would fake pixel precision. */
+export function gradientHeatZones(
+  zones: DamageZone[],
+  masks?: AcceptedDamageMask[]
+): Array<{ zone: DamageZone; index: number }> {
+  const maskedZoneIndices = new Set((masks ?? []).map((mask) => mask.zoneIndex));
+  return zones
+    .map((zone, index) => ({ zone, index }))
+    .filter(({ zone, index }) => {
+      if (maskedZoneIndices.has(index)) return false;
+      const box = zone.boundingBox;
+      return Boolean(
+        box &&
+          [box.x, box.y, box.width, box.height].every(Number.isFinite) &&
+          box.width > 0 &&
+          box.height > 0 &&
+          box.x >= 0 &&
+          box.y >= 0 &&
+          box.x + box.width <= 1 &&
+          box.y + box.height <= 1
+      );
+    });
+}
+
+function heatRgbForZone(zone: DamageZone): [number, number, number] {
+  const hex = calloutColorForZone(zone);
+  return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+}
+
+const DEFAULT_INTENSITY: Record<DamageZoneSeverity, number> = { high: 0.9, medium: 0.6, low: 0.4 };
+
+function drawGradientHeat(ctx: Ctx, zone: DamageZone, imgWidth: number, imgHeight: number): void {
+  const box = zone.boundingBox!;
+  const bx = box.x * imgWidth;
+  const by = box.y * imgHeight;
+  const bw = box.width * imgWidth;
+  const bh = box.height * imgHeight;
+  const [r, g, b] = heatRgbForZone(zone);
+  const rawIntensity = zone.heatmap?.intensity;
+  const intensity = Math.min(1, Math.max(0.15, Number.isFinite(rawIntensity) ? (rawIntensity as number) : DEFAULT_INTENSITY[zone.severity] ?? 0.4));
+  const peakAlpha = 0.25 + 0.35 * intensity;
+
+  // Feather margin: glow may soften past the box edge but is hard-clipped just
+  // outside it, so heat can never spill onto a wheel, tire, or pavement the
+  // vision model deliberately excluded from the box.
+  const margin = Math.max(6, Math.min(bw, bh) * 0.18);
+  ctx.save();
+  roundedRect(ctx, bx - margin, by - margin, bw + margin * 2, bh + margin * 2, margin * 1.5);
+  ctx.clip();
+
+  // Anchor glow on the vision model's positive points — they sit ON the damage
+  // (tracing the scratch/scuff path), so the heat follows the damage shape
+  // instead of flooding the whole box. Box center is the no-points fallback.
+  const points = (zone.positivePoints ?? [])
+    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1)
+    .map((p) => ({ x: p.x * imgWidth, y: p.y * imgHeight }));
+  if (!points.length) points.push({ x: bx + bw / 2, y: by + bh / 2 });
+  const radius = Math.max(14, Math.min(bw, bh) * 0.65);
+
+  // Faint full-box wash so multi-point zones read as one damage field.
+  const washAlpha = peakAlpha * 0.22;
+  ctx.save();
+  ctx.translate(bx + bw / 2, by + bh / 2);
+  ctx.scale(Math.max(1, bw / 2), Math.max(1, bh / 2));
+  const wash = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+  wash.addColorStop(0, `rgba(${r},${g},${b},${washAlpha})`);
+  wash.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  ctx.fillStyle = wash;
+  ctx.fillRect(-1, -1, 2, 2);
+  ctx.restore();
+
+  for (const point of points) {
+    const glow = ctx.createRadialGradient(point.x, point.y, 0, point.x, point.y, radius);
+    glow.addColorStop(0, `rgba(${r},${g},${b},${peakAlpha})`);
+    glow.addColorStop(0.55, `rgba(${r},${g},${b},${peakAlpha * 0.45})`);
+    glow.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
 
 function drawDamageMasks(ctx: Ctx, masks: AcceptedDamageMask[], imgWidth: number, imgHeight: number): void {
   for (const mask of masks) {
@@ -197,7 +285,8 @@ function drawLegend(ctx: Ctx, imgWidth: number, imgHeight: number, baseFont: num
 
 /**
  * Draw deterministic damage-zone overlays onto the source image. Depending on
- * annotationStyle it renders labeled callout chips, validated contour masks, or
+ * annotationStyle it renders labeled callout chips, heat (zone-anchored
+ * gradients for surface damage + validated contour masks for object damage), or
  * both. A fixed disclaimer banner runs along the bottom. Returns
  * a PNG buffer. This never fabricates a replacement image — it only annotates
  * pixels that already exist.
@@ -229,8 +318,12 @@ export async function renderDamageOverlay(
   // Base photo — always preserved underneath.
   ctx.drawImage(image, 0, 0, imgWidth, imgHeight);
 
-  // Heat map first (so callouts land on top and stay legible).
+  // Heat map first (so callouts land on top and stay legible): feathered
+  // zone gradients for surface damage, crisp validated masks for object damage.
   if (drawHeat) {
+    for (const { zone } of gradientHeatZones(input.zones, input.masks)) {
+      drawGradientHeat(ctx, zone, imgWidth, imgHeight);
+    }
     drawDamageMasks(ctx, input.masks ?? [], imgWidth, imgHeight);
   }
 

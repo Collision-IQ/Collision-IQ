@@ -3,7 +3,19 @@ import type { DamageZone, DamageZoneBoundingBox } from "@/lib/ai/visionDamageAnn
 import { buildFalRegionRequest, preflightRegions, regionBox, zoneToVisibleRegion, type FalRegionRequest } from "@/lib/ai/damageLocalization";
 
 export const DAMAGE_SEGMENTATION_MODEL = "fal-ai/sam-3-1/image-rle";
-export const MASK_VALIDATION_VERSION = "mask-v2";
+export const MASK_VALIDATION_VERSION = "mask-v3";
+/** SAM segments OBJECTS. It only helps when the damaged component is a
+ * discrete, present thing with a findable boundary (hanging bumper cover,
+ * torn flare, cracked lamp). Surface damage — scratches, scuffs, dents — has
+ * no object boundary, so SAM latches onto the nearest whole component (wheel,
+ * tire, door) instead. Those zones skip SAM and render as zone-anchored
+ * gradient heat in renderDamageOverlay. "missing" is also excluded: an absent
+ * part cannot be segmented, so SAM grabs whatever shows through the opening. */
+export const SAM_ELIGIBLE_DAMAGE_TYPES: ReadonlySet<string> = new Set(["broken", "torn", "cracked", "displaced"]);
+
+export function isSamEligibleZone(zone: Pick<DamageZone, "damageType">): boolean {
+  return SAM_ELIGIBLE_DAMAGE_TYPES.has(zone.damageType ?? "unknown");
+}
 export const DEFAULT_MIN_MASK_CONFIDENCE = 0.65;
 /** A damage mask may exceed its prompt box a little (damage bleeds past a
  * tight box) but a mask much larger than the box is SAM latching onto a whole
@@ -245,12 +257,21 @@ export async function segmentVisibleDamage(params: {
   onRawResponse?: (shape: FalRleRawShape, rleStrings: string[]) => void;
   onRequestPreflight?: (request: { regionId: string; componentName: string; confidence: number; damageType: string; visibleEvidence: string; normalizedBox: DamageZoneBoundingBox; request: FalRegionRequest }) => void;
 }): Promise<SegmentationResult> {
-  const regionEntries = params.zones.map((zone, index) => ({ zone, index, region: zoneToVisibleRegion(zone, index) })).filter((entry): entry is { zone: DamageZone; index: number; region: NonNullable<ReturnType<typeof zoneToVisibleRegion>> } => entry.region !== null);
+  const allEntries = params.zones.map((zone, index) => ({ zone, index }));
+  // Diagnostics, not failures: surface-damage zones are rendered from their own
+  // zone geometry instead of a SAM mask (see SAM_ELIGIBLE_DAMAGE_TYPES).
+  const routedToGradient = allEntries
+    .filter((entry) => !isSamEligibleZone(entry.zone))
+    .map((entry) => ({ index: entry.index, reason: `routed-to-zone-gradient:${entry.zone.damageType ?? "unknown"}` }));
+  const regionEntries = allEntries
+    .filter((entry) => isSamEligibleZone(entry.zone))
+    .map((entry) => ({ ...entry, region: zoneToVisibleRegion(entry.zone, entry.index) }))
+    .filter((entry): entry is { zone: DamageZone; index: number; region: NonNullable<ReturnType<typeof zoneToVisibleRegion>> } => entry.region !== null);
   const preflight = preflightRegions(regionEntries.map((entry) => entry.region));
-  const rejectedPreflight = preflight.rejected.map((item, index) => ({ index: -1 - index, reason: `localization-preflight-failed:${item.regionId}:${item.reasons.join(",")}` }));
+  const rejectedPreflight = [...routedToGradient, ...preflight.rejected.map((item, index) => ({ index: -1 - index, reason: `localization-preflight-failed:${item.regionId}:${item.reasons.join(",")}` }))];
   const approvedEntries = regionEntries.filter((entry) => preflight.approved.includes(entry.region));
   if (!approvedEntries.length) return { masks: [], rejected: rejectedPreflight.length ? rejectedPreflight : [{ index: -1, reason: "no-valid-visible-damage-regions" }], cached: false };
-  const cacheKey = [params.cacheNamespace ?? "production", params.sourceHash, DAMAGE_SEGMENTATION_MODEL, "3.1", "visible-damage-v2", MASK_VALIDATION_VERSION,
+  const cacheKey = [params.cacheNamespace ?? "production", params.sourceHash, DAMAGE_SEGMENTATION_MODEL, "3.1", "visible-damage-v3", MASK_VALIDATION_VERSION,
     approvedEntries.map((entry) => `${entry.region.id}:${entry.region.segmentationPrompt}:${JSON.stringify(entry.region.box)}:${JSON.stringify(entry.region.positivePoints)}:${JSON.stringify(entry.region.negativePoints)}`).join(";")].join(":");
   const cached = params.bypassCache ? undefined : segmentationCache.get(cacheKey);
   if (cached) return { ...cached, cached: true };

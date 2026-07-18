@@ -118,4 +118,26 @@ assert.equal(result.rejected[0].reason, "duplicate-mask");
   assert.equal(straddleResult.accepted.length, 0);
   assert.equal(straddleResult.rejected[0].reason, "insufficient-prompt-intersection");
 }
-console.log("PASS damage segmentation contracts");
+
+// Round-2 routing: SAM only segments object-shaped damage. Surface damage
+// (scratches, scuffs, dents) and absent components have no object boundary,
+// so those zones bypass SAM and render as zone-anchored gradient heat.
+assert.equal(lib.isSamEligibleZone({ damageType: "scuffed" }), false);
+assert.equal(lib.isSamEligibleZone({ damageType: "deformed" }), false);
+assert.equal(lib.isSamEligibleZone({ damageType: "missing" }), false);
+assert.equal(lib.isSamEligibleZone({ damageType: "unknown" }), false);
+assert.equal(lib.isSamEligibleZone({}), false);
+assert.equal(lib.isSamEligibleZone({ damageType: "torn" }), true);
+assert.equal(lib.isSamEligibleZone({ damageType: "broken" }), true);
+assert.equal(lib.isSamEligibleZone({ damageType: "cracked" }), true);
+assert.equal(lib.isSamEligibleZone({ damageType: "displaced" }), true);
+
+(async () => {
+  // All-surface zones never reach FAL (the stub client has no subscribe and
+  // would throw) and come back tagged for the gradient path.
+  const scuff = { ...zone({ x: .2, y: .2, width: .2, height: .2 }), damageType: "scuffed", componentName: "rear door", visibleEvidence: "horizontal scratch field", segmentationPrompt: "scratched rear door outer panel skin", positivePoints: [{ x: .3, y: .3 }] };
+  const routed = await lib.segmentVisibleDamage({ imageDataUrl: "data:image/png;base64,x", sourceHash: "routing-test", width: 100, height: 100, zones: [scuff] });
+  assert.equal(routed.masks.length, 0);
+  assert.deepEqual(routed.rejected, [{ index: 0, reason: "routed-to-zone-gradient:scuffed" }]);
+  console.log("PASS damage segmentation contracts");
+})().catch((error) => { console.error(error); process.exitCode = 1; });

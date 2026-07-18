@@ -5,7 +5,7 @@ import {
   type AnnotationStyle,
   type DamageZone,
 } from "@/lib/ai/visionDamageAnnotation";
-import { renderDamageOverlay } from "@/lib/ai/renderDamageOverlay";
+import { gradientHeatZones, renderDamageOverlay } from "@/lib/ai/renderDamageOverlay";
 import { normalizeDamageImage } from "@/lib/ai/damageImageNormalization";
 import { DAMAGE_SEGMENTATION_MODEL, segmentVisibleDamage, type MaskRejection } from "@/lib/ai/damageSegmentation";
 
@@ -85,6 +85,7 @@ export async function runDamageAnnotation(
       console.warn("[damage-segmentation] visual overlay unavailable", { model: DAMAGE_SEGMENTATION_MODEL, message: maskRejections[0].reason });
     }
   }
+  const heatZoneCount = input.annotationStyle === "callout" ? 0 : gradientHeatZones(analysis.zones, masks).length;
   const pngBuffer = await renderDamageOverlay({
     imageSource: normalized.buffer,
     zones: analysis.zones,
@@ -105,13 +106,13 @@ export async function runDamageAnnotation(
     pngBuffer,
     annotatedImageDataUrl: `data:image/png;base64,${pngBuffer.toString("base64")}`,
     originalImageDataUrl: normalized.dataUrl,
-    overlayAvailable: input.annotationStyle === "callout" || masks.length > 0,
-    ...(input.annotationStyle !== "callout" && masks.length === 0 ? { overlayMessage: "Visible damage area could not be localized with sufficient confidence." } : {}),
+    overlayAvailable: input.annotationStyle === "callout" || masks.length > 0 || heatZoneCount > 0,
+    ...(input.annotationStyle !== "callout" && masks.length === 0 && heatZoneCount === 0 ? { overlayMessage: "Visible damage area could not be localized with sufficient confidence." } : {}),
     maskRejections,
     processingMetadata: {
       sourceHash: normalized.sourceHash, naturalWidth: normalized.naturalWidth, naturalHeight: normalized.naturalHeight,
       originalOrientation: normalized.originalOrientation, normalizedOrientation: 1,
-      falModel: DAMAGE_SEGMENTATION_MODEL, promptVersion: "visible-damage-v2", requestId, generatedAt: new Date().toISOString(),
+      falModel: DAMAGE_SEGMENTATION_MODEL, promptVersion: "visible-damage-v3", requestId, generatedAt: new Date().toISOString(),
     },
   };
 }
