@@ -3154,6 +3154,55 @@ function RailContent({
 
   return (
     <div className="flex h-full min-h-0 flex-col px-4 py-5 md:px-5 md:py-6">
+      {hasResolvedAnalysis ? (
+        <section
+          className="mb-3 rounded-[20px] border border-[var(--accent)]/35 bg-card p-3 shadow-[0_10px_30px_rgba(15,23,42,0.07)] dark:shadow-[0_10px_30px_rgba(0,0,0,0.2)]"
+          data-tour="report-quick-access"
+        >
+          <div className="flex items-center gap-2">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
+            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              Reports ready
+            </span>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-1.5">
+            {[
+              { id: "report-card-snapshot", label: "1-Page Snapshot", enabled: canUseSnapshotExport },
+              { id: "report-card-repair-intelligence", label: "Repair Intelligence", enabled: canUseBasicPdfExport },
+              { id: "report-card-delta", label: "Delta Citation Density", enabled: canUseBasicPdfExport },
+              { id: canUseBasicPdfExport ? "report-card-oem" : "report-card-oem-locked", label: "OEM Citation Density", enabled: true },
+              { id: "report-card-doi", label: "DOI Complaint Packet", enabled: canUseDoiComplaintPacketExport },
+              { id: "report-card-customer", label: "Customer Report", enabled: canUseCustomerReport },
+            ].map((link) => (
+              <button
+                key={link.label}
+                type="button"
+                onClick={() => {
+                  const target =
+                    document.getElementById(link.id) ??
+                    document.getElementById(`${link.id}-locked`);
+                  if (!target) return;
+                  target.scrollIntoView({ behavior: "smooth", block: "center" });
+                  target.classList.add("ring-2", "ring-[var(--accent)]");
+                  window.setTimeout(
+                    () => target.classList.remove("ring-2", "ring-[var(--accent)]"),
+                    1600
+                  );
+                }}
+                className={[
+                  "truncate rounded-lg border px-2.5 py-2 text-left text-[11px] font-semibold transition",
+                  link.enabled
+                    ? "border-border bg-muted text-foreground hover:border-[var(--accent)]/40 hover:bg-background"
+                    : "border-border bg-muted/60 text-muted-foreground hover:bg-muted",
+                ].join(" ")}
+                title={link.enabled ? `Jump to ${link.label}` : `${link.label} (upgrade required)`}
+              >
+                {link.label}
+              </button>
+            ))}
+          </div>
+        </section>
+      ) : null}
       <section className="rounded-[24px] bg-card/92 p-4 shadow-[0_18px_46px_rgba(15,23,42,0.09)] ring-1 ring-border/50 dark:shadow-[0_18px_46px_rgba(0,0,0,0.22)]">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -3531,6 +3580,7 @@ function RailContent({
           </div>
           <div className="grid gap-2">
             <button
+              id="report-card-snapshot"
               type="button"
               onClick={openSnapshotPreview}
               disabled={!canUseSnapshotExport}
@@ -3552,7 +3602,7 @@ function RailContent({
               loading={reportSendHistoryLoading}
             />
             {canUseBasicPdfExport ? (
-              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
+              <div id="report-card-repair-intelligence" className="scroll-mt-24 space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[var(--accent)]" aria-hidden />
@@ -3604,7 +3654,7 @@ function RailContent({
               />
             ) : null}
             {canUseEstimateScrubberExport ? (
-              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
+              <div id="report-card-delta" className="scroll-mt-24 space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[var(--accent)]" aria-hidden />
@@ -3647,7 +3697,7 @@ function RailContent({
               </div>
             ) : null}
             {canUsePolicyRightsReviewExport ? (
-              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
+              <div id="report-card-oem" className="scroll-mt-24 space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[var(--accent)]" aria-hidden />
@@ -3689,7 +3739,7 @@ function RailContent({
                 />
               </div>
             ) : hasResolvedAnalysis ? (
-              <div className="space-y-2 rounded-md border border-border bg-card p-3 opacity-95 transition hover:border-[var(--accent)]/25 dark:bg-card">
+              <div id="report-card-oem-locked" className="scroll-mt-24 space-y-2 rounded-md border border-border bg-card p-3 opacity-95 transition hover:border-[var(--accent)]/25 dark:bg-card">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[var(--accent)]" aria-hidden />
@@ -3713,7 +3763,7 @@ function RailContent({
               </div>
             ) : null}
             {canUseDoiComplaintPacketExport ? (
-              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
+              <div id="report-card-doi" className="scroll-mt-24 space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[var(--accent)]" aria-hidden />
@@ -3742,7 +3792,7 @@ function RailContent({
               </div>
             ) : null}
             {canUseCustomerReport ? (
-              <div className="space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
+              <div id="report-card-customer" className="scroll-mt-24 space-y-2 rounded-md border border-border bg-card p-3 transition hover:border-[var(--accent)]/25">
                 <div>
                   <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
                     <FileText size={15} className="text-[var(--accent)]" aria-hidden />
