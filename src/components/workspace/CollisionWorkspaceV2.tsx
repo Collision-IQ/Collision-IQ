@@ -2,8 +2,14 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import {
+  clearNavUpdate,
+  markVehicleMaintenanceIfChanged,
+  useNavUpdateFlags,
+  type NavUpdateSection,
+} from "@/lib/ui/navUpdates";
 import {
   Activity,
   BookOpen,
@@ -11,7 +17,7 @@ import {
   Car,
   ChevronDown,
   FolderCheck,
-  Gauge,
+
   HelpCircle,
   LayoutDashboard,
   Menu,
@@ -79,14 +85,15 @@ const NAV_ITEMS: ReadonlyArray<{
   href?: string;
   requiresAnalysis?: boolean;
 }> = [
-  { id: "command", label: "Command Center", icon: LayoutDashboard, view: "workspace" },
+  // "Command Center" and "Calibration" were removed deliberately: Command
+  // Center duplicated the Analysis Workspace view, and Calibration guidance
+  // lives inside the analysis itself. "History" holds generated reports.
   { id: "workspace", label: "Analysis Workspace", icon: Workflow, view: "workspace" },
   { id: "evidence", label: "Evidence", icon: FolderCheck, view: "evidence", requiresAnalysis: true },
   { id: "vehicle", label: "My Vehicle", icon: Car, view: "vehicle" },
   { id: "scaniq", label: "Scan IQ", icon: Activity, view: "scaniq" },
-  { id: "reports", label: "Reports", icon: BookOpen, view: "reports" },
+  { id: "reports", label: "History", icon: BookOpen, view: "reports" },
   { id: "knowledge", label: "Knowledge Base", icon: BookOpen, href: "/how-it-works" },
-  { id: "calibration", label: "Calibration", icon: Gauge, view: "calibration", requiresAnalysis: true },
   { id: "settings", label: "Settings", icon: SettingsIcon, href: "/account" },
 ];
 
@@ -96,7 +103,6 @@ const NAV_TOUR_TARGETS: Record<string, string> = {
   vehicle: "nav-my-vehicle",
   reports: "nav-reports",
   knowledge: "nav-knowledge-base",
-  calibration: "nav-calibration",
   settings: "nav-settings",
 };
 
@@ -122,6 +128,31 @@ export default function CollisionWorkspaceV2({
 }: Props) {
   const [activeNav, setActiveNav] = useState<string>("workspace");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const navUpdateFlags = useNavUpdateFlags();
+  // My Vehicle red dot: check the maintenance picture once per mount and flag
+  // the nav item when something newly came due (fingerprinted so the same due
+  // set never re-notifies).
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/vehicle", { cache: "no-store" });
+        if (!response.ok || cancelled) return;
+        const data = (await response.json()) as {
+          maintenance?: { items?: Array<{ key: string; status: string }> } | null;
+        };
+        const dueKeys = (data.maintenance?.items ?? [])
+          .filter((item) => item.status === "overdue" || item.status === "due-soon")
+          .map((item) => item.key);
+        if (!cancelled) markVehicleMaintenanceIfChanged(dueKeys);
+      } catch {
+        // signed-out / offline — no dot
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const activeItem = NAV_ITEMS.find((item) => item.id === activeNav);
   // Guard: never stay on a gated view if analysis is no longer available.
   const activeView: WorkspaceView =
@@ -133,6 +164,7 @@ export default function CollisionWorkspaceV2({
     const Icon = item.icon;
     const active = activeNav === item.id;
     const locked = Boolean(item.requiresAnalysis && !analysisReady);
+    const hasUpdate = !active && !locked && navUpdateFlags[item.id as NavUpdateSection] === true;
     const classes = `inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition ${
       locked
         ? "cursor-not-allowed text-muted-foreground/40"
@@ -143,7 +175,14 @@ export default function CollisionWorkspaceV2({
     const inner = (
       <>
         <Icon size={16} className={active && !locked ? "text-[var(--accent)]" : ""} />
-        {item.label}
+        <span className="flex-1">{item.label}</span>
+        {hasUpdate ? (
+          <span
+            className="h-2 w-2 shrink-0 rounded-full bg-red-500"
+            aria-label="New update"
+            title="New update in this section"
+          />
+        ) : null}
       </>
     );
     if (locked) {
@@ -165,7 +204,10 @@ export default function CollisionWorkspaceV2({
         key={item.id}
         href={item.href}
         className={classes}
-        onClick={onNavigate}
+        onClick={() => {
+          clearNavUpdate(item.id as NavUpdateSection);
+          onNavigate?.();
+        }}
         data-tour={NAV_TOUR_TARGETS[item.id]}
       >
         {inner}
@@ -175,6 +217,7 @@ export default function CollisionWorkspaceV2({
         key={item.id}
         type="button"
         onClick={() => {
+          clearNavUpdate(item.id as NavUpdateSection);
           setActiveNav(item.id);
           onNavigate?.();
         }}
@@ -294,7 +337,7 @@ export default function CollisionWorkspaceV2({
             <Workflow size={16} className="text-[var(--accent)]" />
             <h1 className="text-[15px] font-semibold text-foreground">
               {activeView === "reports"
-                ? "Reports"
+                ? "History"
                 : activeView === "vehicle"
                   ? "My Vehicle"
                   : activeView === "scaniq"

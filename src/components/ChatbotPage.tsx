@@ -27,6 +27,7 @@ import UpgradeModal from "@/components/UpgradeModal";
 import WorkspacePanel from "@/components/WorkspacePanel";
 import type { CitationDensityAnnotationMetadata } from "@/components/CitationDensityAnnotationViewer";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
+import { markNavUpdate } from "@/lib/ui/navUpdates";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
 import { getNormalizedDetermination } from "@/lib/analysis/getNormalizedDetermination";
 import { canAccessFeature } from "@/lib/featureAccess";
@@ -1037,6 +1038,8 @@ export function ChatbotWorkspacePage({
       setAnalysisStatus("complete");
       setAnalysisStatusDetail(null);
       setActiveInsightKey((current) => current ?? "executive_summary");
+      // New reports just landed — light the History nav item's update dot.
+      markNavUpdate("reports");
     }
   }
 
