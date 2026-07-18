@@ -26,6 +26,23 @@ function maskForBox(box, width = 256, height = 192) { const pixels = new Uint8Ar
   }
   assert.throws(() => localization.buildFalRegionRequest("x", 100, 100, { ...regions[0], segmentationPrompt: "wheel" }, 0), /localization-preflight-failed/);
   assert.throws(() => localization.buildFalRegionRequest("x", 100, 100, { ...regions[0], positivePoints: [] }, 0), /missing-positive-point/);
+  // BMW wheel regression: whole-object and ground prompts are rejected, and
+  // oversized boxes (which admit whole components and pavement) hard-fail.
+  for (const badPrompt of ["rear wheel", "the tire", "gravel", "pavement", "rim"]) {
+    assert.ok(
+      localization.validateVisibleDamageRegion({ ...regions[0], segmentationPrompt: badPrompt }).includes("forbidden-default-or-generic-prompt"),
+      `prompt "${badPrompt}" must be rejected`
+    );
+  }
+  assert.ok(
+    localization.validateVisibleDamageRegion({ ...regions[0], box: { xMin: .1, yMin: .2, xMax: .8, yMax: .5 } }).includes("box-too-large"),
+    "boxes wider than 0.45 are rejected"
+  );
+  assert.equal(
+    localization.validateVisibleDamageRegion({ ...regions[0], segmentationPrompt: "scuffed quarter panel above wheel arch" }).length,
+    0,
+    "surface-damage prompts naming a panel near the wheel stay valid"
+  );
   const invalidZone = { id: "invalid", label: "damage", partName: "damage", description: "visible", visibleEvidence: "visible", damageType: "broken", confidence: .9, severity: "high", approximateLocation: "", evidenceLimits: "", boundingBox: { x: .1, y: .1, width: .2, height: .2 }, positivePoints: [], segmentationPrompt: "" };
   const blocked = await segmentation.segmentVisibleDamage({ imageDataUrl: "not-sent", sourceHash: "test", width: 100, height: 100, zones: [invalidZone], bypassCache: true });
   assert.equal(falCalls, 0, "FAL is not called after failed preflight"); assert.match(blocked.rejected[0].reason, /localization-preflight-failed/);

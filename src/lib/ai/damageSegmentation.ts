@@ -3,8 +3,16 @@ import type { DamageZone, DamageZoneBoundingBox } from "@/lib/ai/visionDamageAnn
 import { buildFalRegionRequest, preflightRegions, regionBox, zoneToVisibleRegion, type FalRegionRequest } from "@/lib/ai/damageLocalization";
 
 export const DAMAGE_SEGMENTATION_MODEL = "fal-ai/sam-3-1/image-rle";
-export const MASK_VALIDATION_VERSION = "mask-v1";
+export const MASK_VALIDATION_VERSION = "mask-v2";
 export const DEFAULT_MIN_MASK_CONFIDENCE = 0.65;
+/** A damage mask may exceed its prompt box a little (damage bleeds past a
+ * tight box) but a mask much larger than the box is SAM latching onto a whole
+ * component (wheel, tire, ground patch) instead of the damaged surface.
+ * NOTE: the intersection rule below already bounds masks at
+ * 1/MIN_PROMPT_INTERSECTION_RATIO × box area, so this ratio must sit BELOW
+ * that (1.67×) to bind. */
+export const MAX_MASK_TO_BOX_AREA_RATIO = 1.4;
+export const MIN_PROMPT_INTERSECTION_RATIO = 0.6;
 export type SegmentationResult = { masks: AcceptedDamageMask[]; rejected: MaskRejection[]; requestId?: string; scores?: number[]; returnedBoxes?: Array<DamageZoneBoundingBox | null>; cached: boolean };
 const segmentationCache = new Map<string, SegmentationResult>();
 
@@ -195,8 +203,15 @@ export function validateMasks(params: {
     if (!Number.isFinite(confidence) || confidence < (params.minConfidence ?? DEFAULT_MIN_MASK_CONFIDENCE)) return void rejected.push({ index, reason: "confidence-below-threshold" });
     const measure = clipAndMeasure(mask, box);
     if (!measure.total || !measure.kept) return void rejected.push({ index, reason: "empty-mask" });
-    if (measure.insidePrompt / measure.total < 0.5) return void rejected.push({ index, reason: "insufficient-prompt-intersection" });
+    if (measure.insidePrompt / measure.total < MIN_PROMPT_INTERSECTION_RATIO) return void rejected.push({ index, reason: "insufficient-prompt-intersection" });
     if (measure.total / mask.pixels.length > 0.45) return void rejected.push({ index, reason: "implausibly-large-mask" });
+    // Whole-object bleed guard: a mask several times larger than its prompt
+    // box is SAM segmenting the component (wheel/tire/ground), not the damage.
+    const boxArea = box.width * box.height;
+    const maskAreaNormalized = measure.total / mask.pixels.length;
+    if (maskAreaNormalized > Math.max(0.02, boxArea * MAX_MASK_TO_BOX_AREA_RATIO)) {
+      return void rejected.push({ index, reason: "mask-exceeds-region-scale" });
+    }
     const positivePoints = zone.positivePoints ?? [], negativePoints = zone.negativePoints ?? [];
     const containsPoint = (point: { x: number; y: number }) => mask.pixels[Math.min(mask.height - 1, Math.floor(point.y * mask.height)) * mask.width + Math.min(mask.width - 1, Math.floor(point.x * mask.width))] === 1;
     if (positivePoints.length && !positivePoints.some(containsPoint)) return void rejected.push({ index, reason: "missing-positive-point" });

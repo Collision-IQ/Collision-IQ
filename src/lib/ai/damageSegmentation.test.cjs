@@ -97,4 +97,25 @@ const duplicate = makeMask([22, 23, 32, 33]);
 result = lib.validateMasks({ masks: [inside, duplicate], zones: [zone({ x: .2, y: .2, width: .2, height: .2 }), zone({ x: .2, y: .2, width: .2, height: .2 }, "low")], scores: [.9, .9] });
 assert.equal(result.accepted.length, 1);
 assert.equal(result.rejected[0].reason, "duplicate-mask");
+
+// BMW wheel regression: SAM latching onto a component that bleeds well past
+// the tight damage box (wheel/tire under a scuff-sized box). The mask keeps
+// enough box intersection to pass the 0.6 rule but exceeds the region-scale
+// cap (1.4 × box area) and is rejected.
+{
+  const componentBleed = makeMask([22, 23, 32, 33, 24, 34]); // 4 in-box + 2 bleeding right
+  const tightBox = zone({ x: .2, y: .2, width: .2, height: .2 }); // 4% area; cap = 5.6%
+  const bleed = lib.validateMasks({ masks: [componentBleed], zones: [tightBox], scores: [.95] });
+  assert.equal(bleed.accepted.length, 0);
+  assert.equal(bleed.rejected[0].reason, "mask-exceeds-region-scale");
+}
+
+// A mask only half-inside its prompt box no longer passes (threshold 0.6):
+{
+  const straddling = makeMask([22, 23, 26, 27]); // 2 inside the box, 2 far right
+  const box = zone({ x: .2, y: .2, width: .2, height: .2 });
+  const straddleResult = lib.validateMasks({ masks: [straddling], zones: [box], scores: [.9] });
+  assert.equal(straddleResult.accepted.length, 0);
+  assert.equal(straddleResult.rejected[0].reason, "insufficient-prompt-intersection");
+}
 console.log("PASS damage segmentation contracts");

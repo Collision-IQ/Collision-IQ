@@ -42,7 +42,15 @@ export function validateVisibleDamageRegion(region: VisibleDamageRegion): string
   const reasons: string[] = [], p = region.segmentationPrompt.trim().toLowerCase(), b = region.box;
   if (!p) reasons.push("missing-segmentation-prompt");
   else if (FORBIDDEN_PROMPTS.has(p)) reasons.push("forbidden-default-or-generic-prompt");
+  // Whole-object prompts make SAM paint the component, not the damage — the
+  // classic failure is a solid-red wheel/tire instead of the scratched panel.
+  else if (/^(?:the |a |rear |front |left |right |lt |rt )*(?:wheel|rim|tire|tyre|ground|pavement|gravel|road|asphalt|shadow)s?$/.test(p) || /\b(?:entire|whole|full) (?:wheel|tire|panel|door|side)\b/.test(p)) {
+    reasons.push("forbidden-default-or-generic-prompt");
+  }
   if (![b.xMin, b.yMin, b.xMax, b.yMax].every(Number.isFinite) || b.xMin < 0 || b.yMin < 0 || b.xMax > 1 || b.yMax > 1 || b.xMin >= b.xMax || b.yMin >= b.yMax) reasons.push("invalid-box");
+  // Hard stop above the model guidance (~0.35 per side is "almost always too
+  // large"): oversized boxes admit whole components and background/ground.
+  else if (b.xMax - b.xMin > 0.45 || b.yMax - b.yMin > 0.45) reasons.push("box-too-large");
   if (!region.positivePoints.length) reasons.push("missing-positive-point");
   if (!region.componentName.trim()) reasons.push("missing-component-name");
   if (!region.visibleEvidence.trim()) reasons.push("missing-visible-evidence");
