@@ -119,6 +119,7 @@ const NAV_TOUR_TARGETS: Record<string, string> = {
   reports: "nav-reports",
   evidence: "nav-evidence",
   vehicle: "nav-my-vehicle",
+  scaniq: "nav-scan-iq",
   history: "nav-history",
   knowledge: "nav-knowledge-base",
   settings: "nav-settings",
