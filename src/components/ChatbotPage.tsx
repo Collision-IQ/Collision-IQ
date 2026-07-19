@@ -8,7 +8,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
-import { ArrowRight, ChevronDown, Download, FileText, Mail, Maximize2, Minimize2, RefreshCcw, X } from "lucide-react";
+import { ArrowRight, ChevronDown, Download, FileDiff, FileText, Lock, Mail, Maximize2, Minimize2, RefreshCcw, Scale, ShieldCheck, Users, Wrench, X } from "lucide-react";
 import ChatShell from "@/components/ChatShell";
 import { WorkspaceExtraSlotsProvider } from "@/components/workspace/WorkspaceExtraSlots";
 import ChatWidget from "@/components/ChatWidget";
@@ -2032,6 +2032,90 @@ function CollisionIqFooter() {
   );
 }
 
+/** Reports-tab card grid styling (the right rail keeps its own compact look). */
+type ReportTabTone = "sky" | "accent" | "violet" | "emerald" | "red" | "blue";
+
+const REPORT_TAB_TONES: Record<ReportTabTone, string> = {
+  sky: "border-sky-500/25 bg-sky-500/12 text-sky-600 dark:text-sky-400",
+  accent: "border-[var(--accent)]/30 bg-[var(--accent)]/12 text-[var(--accent)]",
+  violet: "border-violet-500/25 bg-violet-500/12 text-violet-600 dark:text-violet-400",
+  emerald: "border-emerald-500/25 bg-emerald-500/12 text-emerald-600 dark:text-emerald-400",
+  red: "border-red-500/25 bg-red-500/12 text-red-600 dark:text-red-400",
+  blue: "border-blue-500/25 bg-blue-500/12 text-blue-600 dark:text-blue-400",
+};
+
+const REPORT_TAB_DOWNLOAD_BTN =
+  "inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs font-semibold text-foreground transition hover:border-[var(--accent)]/40 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50";
+const REPORT_TAB_EMAIL_BTN =
+  "inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-black transition hover:bg-[var(--accent)]/90 focus:outline-none focus:ring-2 focus:ring-ring/25 disabled:cursor-not-allowed disabled:opacity-50";
+
+function ReportTabCard({
+  id,
+  icon: Icon,
+  tone,
+  title,
+  description,
+  locked,
+  onUnlock,
+  actions,
+  status,
+}: {
+  id: string;
+  icon: typeof FileText;
+  tone: ReportTabTone;
+  title: string;
+  description: string;
+  /** Locked = plan-gated: the card shows a Pro chip + unlock CTA instead of actions. */
+  locked?: boolean;
+  onUnlock?: () => void;
+  actions?: ReactNode;
+  status?: ReactNode;
+}) {
+  return (
+    <div
+      id={id}
+      className="group flex scroll-mt-24 flex-col gap-3 rounded-2xl border border-border bg-card p-4 transition hover:-translate-y-0.5 hover:border-[var(--accent)]/40 hover:shadow-[0_14px_36px_rgba(15,23,42,0.10)] dark:hover:shadow-[0_14px_36px_rgba(0,0,0,0.35)]"
+    >
+      <div className="flex items-start gap-3">
+        <span
+          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border ${REPORT_TAB_TONES[tone]}`}
+        >
+          <Icon size={20} aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-foreground">{title}</span>
+            {locked ? (
+              <span className="rounded-full border border-[var(--accent)]/25 bg-[var(--accent)]/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-[#a35d26] dark:text-[#d08a4b]">
+                Pro
+              </span>
+            ) : (
+              <span className="rounded-full border border-border bg-muted px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-muted-foreground">
+                PDF
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-[12px] leading-5 text-muted-foreground">{description}</p>
+        </div>
+      </div>
+      <div className="mt-auto space-y-2">
+        {locked ? (
+          <button
+            type="button"
+            onClick={onUnlock}
+            className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-[var(--accent)]/35 bg-[var(--accent)]/10 px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-[var(--accent)]/18 focus:outline-none focus:ring-2 focus:ring-ring/25"
+          >
+            <Lock size={13} aria-hidden /> Unlock with Pro
+          </button>
+        ) : (
+          actions
+        )}
+        {status}
+      </div>
+    </div>
+  );
+}
+
 function RailContent({
   variant = "rail",
   attachment,
@@ -3271,14 +3355,29 @@ function RailContent({
       }
     >
       {variant === "reports-tab" ? (
-        <div className="mb-1">
-          <h2 className="text-[15px] font-semibold text-foreground">Reports</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Generated for the current analysis. Your chat and review workspace stay
-            open in the Analysis Workspace while you inspect, download, or send these.
-          </p>
+        <div className="mb-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                Reports &amp; Exports
+              </div>
+              <h2 className="mt-0.5 text-lg font-semibold tracking-[-0.02em] text-foreground">
+                Carrier-ready documents from this analysis
+              </h2>
+              <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+                Inspect, download, or send any report below — your chat and review
+                workspace stay open in the Analysis Workspace.
+              </p>
+            </div>
+            {canRenderExports || canGenerateCitationDensityAnnotatedEstimate ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-emerald-600 dark:text-emerald-400">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
+                Ready
+              </span>
+            ) : null}
+          </div>
           {!(canRenderExports || canGenerateCitationDensityAnnotatedEstimate) ? (
-            <div className="mt-3 rounded-lg border border-dashed border-border p-5 text-center text-sm text-muted-foreground">
+            <div className="mt-4 rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
               No reports yet. Run an estimate review or comparison and your reports
               will appear here the moment they are ready.
             </div>
@@ -3697,7 +3796,7 @@ function RailContent({
         </>
       ) : null}
 
-      {canRenderExports || canGenerateCitationDensityAnnotatedEstimate ? (
+      {variant === "rail" && (canRenderExports || canGenerateCitationDensityAnnotatedEstimate) ? (
         <RailInsightSection
           insightKey="exports"
           activeInsightKey={activeInsightKey}
@@ -4015,6 +4114,245 @@ function RailContent({
           </div>
         </section>
         </RailInsightSection>
+      ) : null}
+
+      {variant === "reports-tab" && (canRenderExports || canGenerateCitationDensityAnnotatedEstimate) ? (
+        <div className="flex flex-col gap-3">
+          {canUseEstimateScrubberExport || canUsePolicyRightsReviewExport ? (
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <CitationDensityTargetSelector
+                value={citationDensityTargetEstimate}
+                onChange={onCitationDensityTargetEstimateChange}
+                selectedSourceDocumentId={citationDensitySelectedSourceDocumentId}
+                onSelectedSourceDocumentIdChange={onCitationDensitySelectedSourceDocumentIdChange}
+                candidates={citationDensityEstimateCandidates}
+              />
+            </div>
+          ) : null}
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <ReportTabCard
+              id="report-card-snapshot"
+              icon={FileText}
+              tone="sky"
+              title="1-Page Snapshot"
+              description="A redacted one-page claim snapshot to preview, download, or send."
+              locked={!canUseSnapshotExport}
+              onUnlock={onCustomerReportLocked}
+              actions={
+                <button type="button" onClick={openSnapshotPreview} className={REPORT_TAB_EMAIL_BTN}>
+                  <ArrowRight size={14} aria-hidden /> Open snapshot preview
+                </button>
+              }
+              status={
+                <ReportSendStatusLine send={getLastSendFor("snapshot")} loading={reportSendHistoryLoading} />
+              }
+            />
+            <ReportTabCard
+              id="report-card-repair-intelligence"
+              icon={Wrench}
+              tone="accent"
+              title="Repair Intelligence Report"
+              description="Technical, procedural, evidentiary, and negotiation-aware repair position."
+              locked={!canUseBasicPdfExport}
+              onUnlock={onCustomerReportLocked}
+              actions={
+                <div className="grid gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void downloadReportDocument("repair_intelligence");
+                      emitSafeCrmEventFromClient({ event: "report_generated", plan, exportType: "repair_intelligence" });
+                    }}
+                    className={REPORT_TAB_DOWNLOAD_BTN}
+                    data-tour="download-button"
+                  >
+                    <Download size={14} aria-hidden /> Download PDF
+                  </button>
+                  <button type="button" onClick={() => openReportSend("repair_intelligence")} className={REPORT_TAB_EMAIL_BTN}>
+                    <Mail size={14} aria-hidden /> Email report
+                  </button>
+                </div>
+              }
+              status={
+                <ReportSendStatusLine send={getLastSendFor("repair_intelligence")} loading={reportSendHistoryLoading} />
+              }
+            />
+            <ReportTabCard
+              id="report-card-delta"
+              icon={FileDiff}
+              tone="violet"
+              title="Delta Citation Density Report"
+              description="Annotates the actual estimate PDF with supported missed, reduced, or under-documented operations."
+              locked={!canUseEstimateScrubberExport}
+              onUnlock={onCustomerReportLocked}
+              actions={
+                <div className="grid gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void downloadReportDocument("estimate_scrubber");
+                      emitSafeCrmEventFromClient({ event: "report_generated", plan, exportType: "estimate_scrubber" });
+                    }}
+                    className={REPORT_TAB_DOWNLOAD_BTN}
+                    data-tour="download-button"
+                  >
+                    <Download size={14} aria-hidden /> Download PDF
+                  </button>
+                  <button type="button" onClick={() => openReportSend("estimate_scrubber", "carrier")} className={REPORT_TAB_EMAIL_BTN}>
+                    <Mail size={14} aria-hidden /> Email report
+                  </button>
+                </div>
+              }
+              status={
+                <ReportSendStatusLine send={getLastSendFor("estimate_scrubber")} loading={reportSendHistoryLoading} />
+              }
+            />
+            <ReportTabCard
+              id={canUsePolicyRightsReviewExport ? "report-card-oem" : "report-card-oem-locked"}
+              icon={ShieldCheck}
+              tone="emerald"
+              title="OEM Citation Density Report"
+              description="Reviews uploaded estimate(s) against OEM procedures, position statements, MOTOR guidance, safety requirements, and documentation gaps."
+              locked={!canUsePolicyRightsReviewExport}
+              onUnlock={onCustomerReportLocked}
+              actions={
+                <div className="grid gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void downloadReportDocument("oem_citation_density");
+                      emitSafeCrmEventFromClient({ event: "report_generated", plan, exportType: "oem_citation_density" });
+                    }}
+                    className={REPORT_TAB_DOWNLOAD_BTN}
+                    data-tour="download-button"
+                  >
+                    <Download size={14} aria-hidden /> Download PDF
+                  </button>
+                  <button type="button" onClick={() => openReportSend("oem_citation_density", "carrier")} className={REPORT_TAB_EMAIL_BTN}>
+                    <Mail size={14} aria-hidden /> Email report
+                  </button>
+                </div>
+              }
+              status={
+                <ReportSendStatusLine send={getLastSendFor("oem_citation_density")} loading={reportSendHistoryLoading} />
+              }
+            />
+            <ReportTabCard
+              id="report-card-doi"
+              icon={Scale}
+              tone="red"
+              title="DOI Complaint Packet"
+              description="Formal documentation packet for DOI escalation support, evidence, citations, and unresolved claim items."
+              locked={!canUseDoiComplaintPacketExport}
+              onUnlock={onCustomerReportLocked}
+              actions={
+                <button
+                  type="button"
+                  onClick={() => {
+                    void downloadReportDocument("doi_complaint_packet");
+                    emitSafeCrmEventFromClient({ event: "report_generated", plan, exportType: "doi_complaint_packet" });
+                  }}
+                  className={REPORT_TAB_DOWNLOAD_BTN}
+                  data-tour="download-button"
+                >
+                  <Download size={14} aria-hidden /> Download PDF
+                </button>
+              }
+            />
+            <ReportTabCard
+              id="report-card-customer"
+              icon={Users}
+              tone="blue"
+              title="Customer Report"
+              description="Plain-language, customer-facing summary of the analysis and outcome."
+              locked={!canUseCustomerReport}
+              onUnlock={onCustomerReportLocked}
+              actions={
+                <div className="grid gap-2">
+                  <button
+                    type="button"
+                    aria-disabled={isGeneratingCustomerReport}
+                    onClick={downloadCustomerReportDocument}
+                    className={`${REPORT_TAB_DOWNLOAD_BTN} aria-disabled:cursor-not-allowed aria-disabled:opacity-50`}
+                    data-tour="download-button"
+                  >
+                    <Download size={14} aria-hidden />{" "}
+                    {isGeneratingCustomerReport ? "Generating..." : "Download PDF"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isGeneratingCustomerReport}
+                    onClick={() => openReportSend("customer_report", "customer")}
+                    className={REPORT_TAB_EMAIL_BTN}
+                  >
+                    <Mail size={14} aria-hidden /> Email report
+                  </button>
+                </div>
+              }
+              status={
+                <ReportSendStatusLine send={getLastSendFor("customer_report")} loading={reportSendHistoryLoading} />
+              }
+            />
+          </div>
+
+          {!canUseBasicPdfExport || !canUseEstimateScrubberExport || !canUsePolicyRightsReviewExport || !canUseDoiComplaintPacketExport || !canUseCustomerReport ? (
+            <button
+              type="button"
+              onClick={onCustomerReportLocked}
+              className="w-full cursor-pointer rounded-2xl border border-orange-400/18 bg-[var(--accent)]/10 p-3.5 text-xs text-foreground transition hover:bg-[var(--accent)]/16"
+            >
+              Repair Intelligence, Delta Citation Density, OEM Citation Density, DOI Complaint
+              Packet, and Customer Report are available on Pro.
+            </button>
+          ) : null}
+
+          {academyTrigger ? (
+            <button
+              type="button"
+              onClick={() => void startAcademyServiceCheckout()}
+              disabled={serviceCheckoutLoading}
+              className="w-full rounded-2xl border border-[var(--accent)]/30 bg-card p-4 text-left transition hover:border-[var(--accent)]/50 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Services</div>
+              <div className="mt-1 text-sm font-semibold text-foreground">{academyTrigger.title}</div>
+              <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                Why this is showing: {academyTrigger.reason}
+              </div>
+              {academyTrigger.chips.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {academyTrigger.chips.map((chip) => (
+                    <span
+                      key={chip}
+                      className="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted-foreground"
+                    >
+                      {chip}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              <div className="mt-3 inline-flex rounded-md bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-black">
+                {serviceCheckoutLoading ? "Opening checkout..." : academyTrigger.button}
+              </div>
+            </button>
+          ) : null}
+
+          {customerReportError ? (
+            <div className="rounded-xl border border-red-500/16 bg-red-500/[0.05] px-3 py-2 text-[12px] leading-5 text-red-500">
+              {customerReportError}
+            </div>
+          ) : null}
+          {snapshotStatus ? (
+            <div className="rounded-xl border border-border bg-muted px-3 py-2 text-[12px] leading-5 text-muted-foreground">
+              {snapshotStatus}
+            </div>
+          ) : null}
+          {reportSendStatus ? (
+            <div className="rounded-xl border border-border bg-muted px-3 py-2 text-[12px] leading-5 text-muted-foreground">
+              {reportSendStatus}
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       {snapshotPreviewOpen && snapshot ? (
