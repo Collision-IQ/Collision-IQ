@@ -1520,7 +1520,9 @@ export function ChatbotWorkspacePage({
                 </div>
               )}
               <div className={chatColumnClass}>
-                <div className="min-h-0 shrink-0 lg:min-h-[56px]">
+                {/* Trial/usage banners: no reserved height — when no banner is
+                    shown the chat container takes the full column. */}
+                <div className="min-h-0 shrink-0">
                 {trialDaysRemaining !== null && trialDaysRemaining <= 7 && isWithinTrialBadgeWindow(viewerAccess) && (
                   <div
                     className={`mb-3 rounded-xl px-4 py-3 text-sm ${
