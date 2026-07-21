@@ -35,6 +35,7 @@
       box-shadow: 0 0 12px rgba(34, 211, 238, 0.5);
     }
     .glow-card { box-shadow: 0 0 60px -20px rgba(34, 211, 238, 0.15); }
+    [x-cloak] { display: none !important; }
   </style>
 </head>
 <body class="min-h-screen bg-slate-950 text-slate-100 antialiased"
@@ -141,6 +142,10 @@
           </svg>
         </a>
         <p class="mt-3 text-xs text-slate-500">No slide deck. We run it on your own damage photos.</p>
+        <button type="button" @click="openModal()"
+                class="mt-4 text-sm font-medium text-cyan-400 hover:text-cyan-300 underline underline-offset-4 decoration-cyan-400/40 hover:decoration-cyan-300 transition-colors">
+          Send me my custom ROI breakdown &rarr;
+        </button>
       </div>
 
       <!-- Assumptions -->
@@ -155,6 +160,88 @@
         </ul>
       </details>
     </section>
+  </div>
+
+  <!-- ============ LEAD CAPTURE MODAL ============ -->
+  <div x-show="modalOpen" x-cloak
+       class="fixed inset-0 z-50 flex items-center justify-center p-4"
+       @keydown.escape.window="closeModal()">
+    <!-- Backdrop -->
+    <div class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" @click="closeModal()"></div>
+
+    <div class="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 sm:p-8 shadow-2xl shadow-cyan-500/10"
+         role="dialog" aria-modal="true" aria-labelledby="modal-title">
+
+      <button type="button" @click="closeModal()" aria-label="Close"
+              class="absolute top-4 right-4 text-slate-500 hover:text-slate-300 transition-colors">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+
+      <!-- Form state -->
+      <template x-if="!submitted">
+        <div>
+          <h3 id="modal-title" class="text-xl font-bold text-slate-100">Get your custom ROI breakdown</h3>
+          <p class="mt-1 text-sm text-slate-400">We'll send a one-page PDF built from your numbers below.</p>
+
+          <!-- Their numbers, echoed back -->
+          <div class="mt-4 grid grid-cols-2 gap-3 text-center">
+            <div class="bg-slate-800/60 rounded-xl py-3">
+              <p class="text-[10px] uppercase tracking-widest text-slate-500">ROs / month</p>
+              <p class="text-lg font-bold text-cyan-400 tabular-nums" x-text="ros"></p>
+            </div>
+            <div class="bg-slate-800/60 rounded-xl py-3">
+              <p class="text-[10px] uppercase tracking-widest text-slate-500">Monthly value</p>
+              <p class="text-lg font-bold text-cyan-400 tabular-nums" x-text="fmtMoney(monthlyValue)"></p>
+            </div>
+          </div>
+
+          <form class="mt-5 space-y-4" @submit.prevent="submitLead()">
+            <div>
+              <label for="lead-email" class="block text-sm font-medium text-slate-300 mb-1.5">Work email</label>
+              <input id="lead-email" type="email" required x-model.trim="leadEmail"
+                     placeholder="you@yourshop.com" autocomplete="email"
+                     class="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-400/60 focus:border-cyan-400">
+            </div>
+            <div>
+              <label for="lead-shop" class="block text-sm font-medium text-slate-300 mb-1.5">Shop name</label>
+              <input id="lead-shop" type="text" required x-model.trim="leadShopName"
+                     placeholder="Summit Collision Center" autocomplete="organization"
+                     class="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-400/60 focus:border-cyan-400">
+            </div>
+
+            <p x-show="submitError" x-text="submitError" class="text-sm text-amber-400"></p>
+
+            <button type="submit" :disabled="submitting"
+                    class="w-full px-6 py-3.5 rounded-xl font-bold text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 disabled:opacity-60 disabled:cursor-wait transition-all">
+              <span x-show="!submitting">Send my breakdown</span>
+              <span x-show="submitting">Sending&hellip;</span>
+            </button>
+            <p class="text-[11px] text-slate-500 text-center">
+              We'll email your breakdown and may follow up about Collision IQ. No spam, unsubscribe anytime.
+            </p>
+          </form>
+        </div>
+      </template>
+
+      <!-- Success state -->
+      <template x-if="submitted">
+        <div class="text-center py-6">
+          <div class="mx-auto w-12 h-12 rounded-full bg-cyan-400/15 flex items-center justify-center">
+            <svg class="w-6 h-6 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+            </svg>
+          </div>
+          <h3 class="mt-4 text-xl font-bold text-slate-100">Breakdown on its way</h3>
+          <p class="mt-2 text-sm text-slate-400">
+            Check <span class="text-cyan-400 font-medium" x-text="leadEmail"></span> in the next few minutes.
+          </p>
+          <button type="button" @click="closeModal()"
+                  class="mt-6 text-sm font-medium text-slate-400 hover:text-slate-200 transition-colors">Close</button>
+        </div>
+      </template>
+    </div>
   </div>
 </div>
 
@@ -184,6 +271,78 @@
         if (!this.cycleDaysValid) return 0;
         // never project below 60% of current — keeps small shops' numbers honest
         return Math.max(this.cycleDays - this.CYCLE_IMPROVEMENT_DAYS, this.cycleDays * 0.6);
+      },
+
+      // ---- HubSpot lead capture ----
+      // Submissions go to the public Forms API (no auth token in client code).
+      // HUBSPOT_FORM_GUID: create a form in HubSpot (Marketing > Forms > embedded)
+      // with these fields, then paste its GUID here:
+      //   email            (standard)
+      //   company          (standard — used for shop name)
+      //   shop_ro_volume   (custom contact property, number)
+      //   roi_monthly_savings (custom contact property, number)
+      HUBSPOT_PORTAL_ID: '245899458',
+      HUBSPOT_FORM_GUID: '629c407a-76d4-45cf-87bf-682479622650',
+      HUBSPOT_REGION: 'na2',   // portal data center; 'na1' uses the bare api.hsforms.com domain
+      modalOpen: false,
+      leadEmail: '',
+      leadShopName: '',
+      submitting: false,
+      submitted: false,
+      submitError: '',
+
+      openModal() {
+        this.modalOpen = true;
+        this.submitError = '';
+        this.$nextTick(() => document.getElementById('lead-email')?.focus());
+      },
+      closeModal() {
+        this.modalOpen = false;
+        if (this.submitted) { this.leadEmail = ''; this.leadShopName = ''; this.submitted = false; }
+      },
+      hubspotCookie() {
+        // hubspotutk ties the submission to the visitor's tracking history for attribution
+        const m = document.cookie.match(/(?:^|;\s*)hubspotutk=([^;]+)/);
+        return m ? m[1] : null;
+      },
+      async submitLead() {
+        this.submitError = '';
+        if (!this.HUBSPOT_FORM_GUID) {
+          this.submitError = 'Form isn’t configured yet — set HUBSPOT_FORM_GUID.';
+          console.error('[roi-calculator] HUBSPOT_FORM_GUID is empty; submission blocked.');
+          return;
+        }
+        this.submitting = true;
+        const payload = {
+          fields: [
+            { objectTypeId: '0-1', name: 'email', value: this.leadEmail },
+            { objectTypeId: '0-1', name: 'company', value: this.leadShopName },
+            { objectTypeId: '0-1', name: 'shop_ro_volume', value: String(this.ros) },
+            { objectTypeId: '0-1', name: 'roi_monthly_savings', value: String(Math.round(this.monthlyValue)) },
+          ],
+          context: {
+            hutk: this.hubspotCookie() || undefined,
+            pageUri: window.location.href,
+            pageName: document.title,
+          },
+        };
+        try {
+          const apiHost = this.HUBSPOT_REGION === 'na1' ? 'api.hsforms.com' : `api-${this.HUBSPOT_REGION}.hsforms.com`;
+          const res = await fetch(
+            `https://${apiHost}/submissions/v3/integration/submit/${this.HUBSPOT_PORTAL_ID}/${this.HUBSPOT_FORM_GUID}`,
+            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }
+          );
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.message || `HubSpot responded ${res.status}`);
+          }
+          this.submitted = true;
+        } catch (e) {
+          console.error('[roi-calculator] submission failed:', e);
+          this.submitError = 'Couldn’t send right now — please try again in a moment.';
+        } finally {
+          this.submitting = false;
+        }
       },
 
       // ---- Formatting / UI helpers ----

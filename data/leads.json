@@ -4,10 +4,12 @@
     "shop_name": "Summit Collision Center",
     "contact_name": "Marcus Reyes",
     "contact_role": "General Manager",
+    "contact_email": "marcus.reyes@example-summitcollision.com",
     "city": "Denver",
     "state": "CO",
     "num_locations": 3,
     "monthly_ros": 210,
+    "legacy_system": "CCC ONE",
     "certifications": [
       "Subaru Certified"
     ],
@@ -18,10 +20,12 @@
     "shop_name": "Bayline Auto Body Group",
     "contact_name": "Dana Whitfield",
     "contact_role": "Chief Operating Officer",
+    "contact_email": "dana.whitfield@example-bayline.com",
     "city": "Tampa",
     "state": "FL",
     "num_locations": 12,
     "monthly_ros": 980,
+    "legacy_system": "Mitchell",
     "certifications": [
       "Tesla Approved",
       "Rivian Certified"
@@ -33,10 +37,12 @@
     "shop_name": "Ironworks Collision",
     "contact_name": "Sam Kowalski",
     "contact_role": "Lead Estimator",
+    "contact_email": "sam@example-ironworkscollision.com",
     "city": "Columbus",
     "state": "OH",
     "num_locations": 1,
     "monthly_ros": 95,
+    "legacy_system": "CCC ONE",
     "certifications": [
       "I-CAR Gold Class"
     ],
