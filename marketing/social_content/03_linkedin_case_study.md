@@ -42,6 +42,12 @@ The compounding effect is the real story: earlier parts ordering → fewer cars 
 
 📩 Comment "MODEL" or DM me and we'll set it up.
 
+## Tracking link (post in first comment: "Run your own numbers")
+
+```
+https://www.collision-iq.ai/roi?utm_source=linkedin&utm_medium=social&utm_campaign=collision_iq_social_launch&utm_content=mso_roi_case_study
+```
+
 ## Hashtags
 
 #MSO #CollisionRepair #CycleTime #AutoBody #ShopOperations

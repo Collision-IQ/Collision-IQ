@@ -24,6 +24,14 @@
 
 - **Verbal:** "Link below."
 - **End card / caption:** "Free demo on YOUR damage photos → link in bio"
+- **Bio/description tracking links** (use the one matching the platform):
+
+```
+https://www.collision-iq.ai/roi?utm_source=instagram&utm_medium=social&utm_campaign=collision_iq_social_launch&utm_content=teardown_shorts
+```
+```
+https://www.collision-iq.ai/roi?utm_source=youtube&utm_medium=social&utm_campaign=collision_iq_social_launch&utm_content=teardown_shorts
+```
 - **Caption copy:** 4 photos. 40 seconds. A full estimate draft. Stop losing 4 hours a day to manual entry. Demo link in bio. #CollisionRepair #AutoBody #Estimating
 
 ## Production notes

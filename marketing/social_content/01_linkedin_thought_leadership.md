@@ -33,7 +33,13 @@ AI doesn't close the talent gap. It changes how much talent one person can cover
 
 **Estimators and shop owners:** what's the one part of estimate writing you'd hand off tomorrow if you could? Drop it below. 👇
 
-*See how Collision IQ turns damage photos into estimate lines in seconds → [link in comments]*
+*See how Collision IQ turns damage photos into estimate lines in seconds → link in first comment*
+
+## Tracking link (post in first comment)
+
+```
+https://www.collision-iq.ai/demo?utm_source=linkedin&utm_medium=social&utm_campaign=collision_iq_social_launch&utm_content=estimator_shortage_post
+```
 
 ## Hashtags
 

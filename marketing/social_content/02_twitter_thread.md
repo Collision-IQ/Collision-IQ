@@ -41,7 +41,13 @@ The AI writes the first draft. Your senior estimator makes the calls photos can'
 
 Draft in seconds. Judgment where it counts.
 
-See it on your own photos → [demo link]
+See it on your own photos → link below
+
+## Tracking link (append to tweet 6)
+
+```
+https://www.collision-iq.ai/demo?utm_source=twitter&utm_medium=social&utm_campaign=collision_iq_social_launch&utm_content=cv_pipeline_thread
+```
 
 ## Hashtags (tweet 6 only)
 

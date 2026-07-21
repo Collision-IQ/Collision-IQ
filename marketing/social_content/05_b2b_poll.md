@@ -38,6 +38,12 @@ Voted "other"? Tell me what I missed. And if you picked #4 — drop the operatio
 
 Comment with the rule that wasn't an option. Best (worst?) story gets featured in the results post — with credit.
 
+## Tracking link (for the results post the week after close)
+
+```
+https://www.collision-iq.ai/roi?utm_source=linkedin&utm_medium=social&utm_campaign=collision_iq_social_launch&utm_content=carrier_rules_poll
+```
+
 ## Hashtags
 
 #CollisionRepair #Estimating #AutoBody #InsuranceClaims #DRP
