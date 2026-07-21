@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Collision IQ — ROI Calculator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    /* Custom slider styling — Tailwind can't reach the range pseudo-elements */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 6px;
+      border-radius: 9999px;
+      background: linear-gradient(to right, #22d3ee var(--fill, 50%), #1e293b var(--fill, 50%));
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 9999px;
+      background: #f8fafc;
+      border: 3px solid #22d3ee;
+      cursor: pointer;
+      box-shadow: 0 0 12px rgba(34, 211, 238, 0.5);
+      transition: transform 0.15s ease;
+    }
+    input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+    input[type="range"]::-moz-range-thumb {
+      width: 20px; height: 20px; border-radius: 9999px;
+      background: #f8fafc; border: 3px solid #22d3ee; cursor: pointer;
+      box-shadow: 0 0 12px rgba(34, 211, 238, 0.5);
+    }
+    .glow-card { box-shadow: 0 0 60px -20px rgba(34, 211, 238, 0.15); }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100 antialiased"
+      style="background-image: radial-gradient(ellipse 80% 50% at 50% -10%, rgba(34, 211, 238, 0.08), transparent);">
+
+<div x-data="roiCalc()" class="max-w-5xl mx-auto px-5 py-12 sm:py-16">
+
+  <!-- Header -->
+  <header class="text-center mb-10">
+    <div class="inline-flex items-center gap-2 mb-4">
+      <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center font-black text-slate-950 text-sm">iQ</div>
+      <span class="font-bold tracking-tight text-lg">Collision <span class="text-cyan-400">IQ</span></span>
+    </div>
+    <h1 class="text-3xl sm:text-4xl font-extrabold tracking-tight">
+      What is manual estimating <span class="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">costing your shop?</span>
+    </h1>
+    <p class="mt-3 text-slate-400 max-w-xl mx-auto">
+      Drag the sliders to your shop's numbers. The math updates live.
+    </p>
+  </header>
+
+  <div class="grid lg:grid-cols-5 gap-6">
+
+    <!-- ============ INPUTS ============ -->
+    <section class="lg:col-span-2 bg-slate-900/70 border border-slate-800 rounded-2xl p-6 space-y-8 backdrop-blur">
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-slate-500">Your shop</h2>
+
+      <!-- ROs per month -->
+      <div>
+        <div class="flex justify-between items-baseline mb-3">
+          <label for="ros" class="text-sm font-medium text-slate-300">Repair orders / month</label>
+          <span class="text-xl font-bold text-cyan-400 tabular-nums" x-text="ros"></span>
+        </div>
+        <input id="ros" type="range" min="10" max="300" step="5" x-model.number="ros"
+               class="w-full" :style="fillStyle(ros, 10, 300)">
+        <div class="flex justify-between text-xs text-slate-600 mt-1"><span>10</span><span>300</span></div>
+      </div>
+
+      <!-- Hourly rate -->
+      <div>
+        <div class="flex justify-between items-baseline mb-3">
+          <label for="rate" class="text-sm font-medium text-slate-300">Estimator cost / hour</label>
+          <span class="text-xl font-bold text-cyan-400 tabular-nums" x-text="'$' + rate"></span>
+        </div>
+        <input id="rate" type="range" min="25" max="75" step="1" x-model.number="rate"
+               class="w-full" :style="fillStyle(rate, 25, 75)">
+        <div class="flex justify-between text-xs text-slate-600 mt-1"><span>$25</span><span>$75</span></div>
+      </div>
+
+      <!-- Cycle time -->
+      <div>
+        <label for="cycle" class="block text-sm font-medium text-slate-300 mb-2">Current avg. days in shop</label>
+        <div class="relative">
+          <input id="cycle" type="number" min="1" max="60" step="0.1" x-model.number="cycleDays"
+                 class="w-full bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-3 text-lg font-semibold text-slate-100 tabular-nums focus:outline-none focus:ring-2 focus:ring-cyan-400/60 focus:border-cyan-400">
+          <span class="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-slate-500">days</span>
+        </div>
+        <p class="text-xs text-slate-500 mt-2" x-show="cycleDaysValid">
+          Modeled with Collision IQ: <span class="text-cyan-400 font-semibold" x-text="projectedCycle.toFixed(1) + ' days'"></span>
+          (earlier parts ordering &amp; fewer supplements)
+        </p>
+        <p class="text-xs text-amber-400 mt-2" x-show="!cycleDaysValid">Enter a value between 1 and 60 days.</p>
+      </div>
+    </section>
+
+    <!-- ============ OUTPUTS ============ -->
+    <section class="lg:col-span-3 space-y-4">
+
+      <div class="grid sm:grid-cols-2 gap-4">
+        <!-- Hours saved -->
+        <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
+          <p class="text-xs font-semibold uppercase tracking-widest text-slate-500">Estimator hours saved / mo</p>
+          <p class="mt-2 text-4xl font-extrabold tabular-nums text-slate-100">
+            <span x-text="fmtNum(hoursSaved)"></span><span class="text-lg font-semibold text-slate-500"> hrs</span>
+          </p>
+          <p class="mt-1 text-sm text-slate-400">
+            worth <span class="text-cyan-400 font-semibold" x-text="fmtMoney(laborSavings)"></span> in writer time
+          </p>
+        </div>
+
+        <!-- Supplement recovery -->
+        <div class="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
+          <p class="text-xs font-semibold uppercase tracking-widest text-slate-500">Missed items recovered / mo</p>
+          <p class="mt-2 text-4xl font-extrabold tabular-nums text-slate-100" x-text="fmtMoney(supplementRecovery)"></p>
+          <p class="mt-1 text-sm text-slate-400">ADAS, structural &amp; one-time-use parts caught at intake</p>
+        </div>
+      </div>
+
+      <!-- Total ROI -->
+      <div class="glow-card bg-gradient-to-br from-slate-900 to-slate-900/40 border border-cyan-400/30 rounded-2xl p-6 sm:p-8 text-center">
+        <p class="text-xs font-semibold uppercase tracking-widest text-cyan-400">Total net annual ROI</p>
+        <p class="mt-2 text-5xl sm:text-6xl font-black tabular-nums text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-400"
+           x-text="fmtMoney(netAnnualRoi)"></p>
+        <p class="mt-2 text-sm text-slate-400">
+          <span x-text="fmtMoney(monthlyValue)"></span>/mo in recovered time &amp; revenue,
+          net of Collision IQ at <span x-text="fmtMoney(PLATFORM_COST_MO)"></span>/mo
+        </p>
+
+        <a href="https://www.collision-iq.ai/demo"
+           class="mt-6 inline-flex items-center justify-center gap-2 w-full sm:w-auto px-8 py-4 rounded-xl font-bold text-slate-950 bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 transition-all shadow-lg shadow-cyan-500/25 hover:shadow-cyan-400/40 hover:-translate-y-0.5">
+          Book a 10-Min Demo with Collision IQ
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5-5 5M6 12h12"/>
+          </svg>
+        </a>
+        <p class="mt-3 text-xs text-slate-500">No slide deck. We run it on your own damage photos.</p>
+      </div>
+
+      <!-- Assumptions -->
+      <details class="text-xs text-slate-500 bg-slate-900/40 border border-slate-800/60 rounded-xl px-4 py-3">
+        <summary class="cursor-pointer font-medium text-slate-400 select-none">How this is calculated</summary>
+        <ul class="mt-2 space-y-1 list-disc list-inside">
+          <li><span class="text-slate-400">Hours saved</span> = ROs/mo &times; 20 min saved per estimate &divide; 60</li>
+          <li><span class="text-slate-400">Labor value</span> = hours saved &times; your estimator cost/hour</li>
+          <li><span class="text-slate-400">Recovered revenue</span> = ROs/mo &times; $250 avg. missed supplement items per RO</li>
+          <li><span class="text-slate-400">Net annual ROI</span> = (labor value + recovered revenue &minus; $499/mo platform cost) &times; 12</li>
+          <li>Figures are modeled estimates based on averages across Collision IQ usage — your results depend on mix, carriers, and volume.</li>
+        </ul>
+      </details>
+    </section>
+  </div>
+</div>
+
+<script>
+  function roiCalc() {
+    return {
+      // ---- Inputs ----
+      ros: 120,          // repair orders per month
+      rate: 45,          // estimator cost $/hr
+      cycleDays: 12,     // current avg days in shop
+
+      // ---- Model constants ----
+      MINUTES_SAVED_PER_ESTIMATE: 20,
+      RECOVERED_PER_RO: 250,
+      PLATFORM_COST_MO: 499,
+      CYCLE_IMPROVEMENT_DAYS: 1.8, // modeled avg improvement, capped below
+
+      // ---- Derived outputs ----
+      get hoursSaved()        { return this.ros * this.MINUTES_SAVED_PER_ESTIMATE / 60; },
+      get laborSavings()      { return this.hoursSaved * this.rate; },
+      get supplementRecovery(){ return this.ros * this.RECOVERED_PER_RO; },
+      get monthlyValue()      { return this.laborSavings + this.supplementRecovery; },
+      get netAnnualRoi()      { return (this.monthlyValue - this.PLATFORM_COST_MO) * 12; },
+
+      get cycleDaysValid()    { return Number.isFinite(this.cycleDays) && this.cycleDays >= 1 && this.cycleDays <= 60; },
+      get projectedCycle() {
+        if (!this.cycleDaysValid) return 0;
+        // never project below 60% of current — keeps small shops' numbers honest
+        return Math.max(this.cycleDays - this.CYCLE_IMPROVEMENT_DAYS, this.cycleDays * 0.6);
+      },
+
+      // ---- Formatting / UI helpers ----
+      fmtMoney(v) {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v);
+      },
+      fmtNum(v) {
+        return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(v);
+      },
+      fillStyle(val, min, max) {
+        return `--fill: ${((val - min) / (max - min)) * 100}%`;
+      },
+    };
+  }
+</script>
+</body>
+</html>

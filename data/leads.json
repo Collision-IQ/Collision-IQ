@@ -1,0 +1,45 @@
+[
+  {
+    "shop_id": "summit-collision-denver",
+    "shop_name": "Summit Collision Center",
+    "contact_name": "Marcus Reyes",
+    "contact_role": "General Manager",
+    "city": "Denver",
+    "state": "CO",
+    "num_locations": 3,
+    "monthly_ros": 210,
+    "certifications": [
+      "Subaru Certified"
+    ],
+    "notes": "Heavy DRP mix; cycle time pressure from two national carriers."
+  },
+  {
+    "shop_id": "bayline-autobody-tampa",
+    "shop_name": "Bayline Auto Body Group",
+    "contact_name": "Dana Whitfield",
+    "contact_role": "Chief Operating Officer",
+    "city": "Tampa",
+    "state": "FL",
+    "num_locations": 12,
+    "monthly_ros": 980,
+    "certifications": [
+      "Tesla Approved",
+      "Rivian Certified"
+    ],
+    "notes": "Regional MSO scaling via acquisition; standardizing estimating across shops."
+  },
+  {
+    "shop_id": "ironworks-collision-columbus",
+    "shop_name": "Ironworks Collision",
+    "contact_name": "Sam Kowalski",
+    "contact_role": "Lead Estimator",
+    "city": "Columbus",
+    "state": "OH",
+    "num_locations": 1,
+    "monthly_ros": 95,
+    "certifications": [
+      "I-CAR Gold Class"
+    ],
+    "notes": "Owner-operated independent; lead estimator also handles parts ordering."
+  }
+]
