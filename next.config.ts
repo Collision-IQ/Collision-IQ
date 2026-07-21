@@ -17,6 +17,13 @@ const OCR_TRACE_INCLUDES = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  async rewrites() {
+    return [
+      // Marketing ROI calculator (standalone static page in /public); campaign
+      // UTM links point at /roi — see marketing/UTM_CONVENTIONS.md.
+      { source: "/roi", destination: "/roi_calculator.html" },
+    ];
+  },
   serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist", "tesseract.js", "tesseract.js-core"],
   outputFileTracingIncludes: {
     "/api/reports/citation-density/annotated-estimate": [
