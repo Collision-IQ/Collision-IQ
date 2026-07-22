@@ -1082,7 +1082,15 @@ function extractLineNumber(text: string) {
 }
 
 function detectSection(text: string) {
-  const normalized = normalizeMatchText(text);
+  // Section headers start with a capital (or a glued leading line number,
+  // "189MISCELLANEOUS OPERATIONS") and carry no other digits. A lowercase
+  // start is wrapped row prose ("calibration procedure" continuing a camera
+  // row) and a digit-bearing line is a totals/value row ("Parts4,473.91") —
+  // neither may become the running section: every following row inherits it,
+  // which mislabeled ordinary wash/mask lines as ADAS/calibration findings.
+  const body = (text ?? "").trim().replace(/^\d{1,4}\s*/, "");
+  if (!/^[A-Z]/.test(body) || /\d/.test(body)) return null;
+  const normalized = normalizeMatchText(body);
   const match = normalized.match(/^(front bumper|grille|radiator support|fender|electrical|windshield|vehicle diagnostics|miscellaneous operations|estimate totals?|supplement summary|alternate parts suppliers?|parts|body|paint|refinish|diagnostics?|calibration|totals?|summary|ccc|motor|p pages|included|not included)\b/);
   return match?.[1] ?? null;
 }

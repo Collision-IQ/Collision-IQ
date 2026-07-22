@@ -213,6 +213,11 @@ export function isNonEstimateContentRow(rawText: string): boolean {
   const text = (rawText ?? "").replace(/\s+/g, " ").trim();
   if (!text) return true;
   return (
+    // Single abbreviation-legend fragments ("RPR=REPAIR", "Blnd=Blend.",
+    // "R&I=Remove"): fragmented extractions split the legend footer into
+    // per-pair lines, so the >= 2 "=" rule below never fires — but a real
+    // operation row never opens with "<short token>=".
+    /^[A-Za-z&/.'"_ -]{1,20}=/.test(text) ||
     // NOTE: totals lines glue words to digits ("SUBTOTALS23,918.00"), and \b
     // does not fire between a letter and a digit — use bare substrings.
     /hrs?\s*@|@\s*\$|\/hr\b/i.test(text) ||
@@ -272,6 +277,12 @@ export function parseEstimateNetTotal(text: string): number | null {
 
 function tokenizeDescription(description: string): string[] {
   return description
+    // Fragmented/glued extractions weld words together with only the case
+    // boundary surviving ("WindshieldTesla", "BindHood", "SOISet", "RTTail").
+    // Split camel seams BEFORE lowercasing so both extractions of the same
+    // row tokenize identically.
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]{2,})([A-Z][a-z])/g, "$1 $2")
     .toLowerCase()
     .replace(/\+\d+%/g, " ")
     // Canonicalize alpha↔digit transitions ("gle350" ≡ "gle 350") so glued and
@@ -634,6 +645,19 @@ function extractTrailingColumns(body: string): {
         end -= 1;
         continue;
       }
+      // User-defined labor-category digit ("Rpr LT Fender primed 1.0 1 2.0" —
+      // the "1" is the aluminum-repair category marker, like "D" or "M").
+      // Only between two hour values: a qty prints BEFORE the hours, never
+      // between them, so this cannot swallow a real qty column.
+      if (
+        /^[1-4]$/.test(token) &&
+        trailing.length > 0 &&
+        end >= 2 &&
+        /^-?\d{1,2}\.\d$/.test(tokens[end - 2])
+      ) {
+        end -= 1;
+        continue;
+      }
       break;
     }
     let labor: number | null = null;
@@ -796,9 +820,19 @@ export function parseCccEstimateRow(
   if (/^note\b/i.test((rawText ?? "").trim())) return null;
   // Restore column boundaries first — no-delimiter CCC extractions glue the
   // description, part number, qty, price, and hours into one run.
-  const text = explodeGluedRow(rawText ?? "");
+  let text = explodeGluedRow(rawText ?? "");
   if (!text) return null;
   if (isSectionHeader(text)) return null;
+
+  // A print-wrapped description can rejoin AFTER the hour column ("Capture
+  // image to confirm 0.3 M adjustments were made correctly", "LT Door glass
+  // Tesla w/o 0.8 laminated"). Move the digit-free word tail back before the
+  // value so the trailing columns parse; rows that end in their value/marker
+  // are untouched because the tail group requires words after the value.
+  text = text.replace(
+    /^(.*?\S) (-?\d{1,2}\.\d)((?: [MDEFGS])?) ([A-Za-z][A-Za-z'"&/ -]*)$/,
+    "$1 $4 $2$3"
+  );
 
   const { body, lineNumber } = stripLeadingMetadata(text);
   if (!body) return null;
@@ -929,8 +963,159 @@ export function groupWrappedEstimateLines(lines: string[]): WrappedEstimateLineG
   return groups;
 }
 
+// ---------------------------------------------------------------------------
+// Fragmented (one-token-per-line) PDF text: pdf-parse extracts some CCC PDFs
+// with every text run on its own line ("4" / "R&IR&I" / "bumper" / "cover" /
+// "1.4"). Line-based row grouping then recovers almost nothing — on a real
+// SOR the parser yielded 26 "rows" (half of them abbreviation-legend
+// fragments) out of ~150 line items, so nearly every counterpart line looked
+// "missing" and the delta report was flooded with false findings.
+// reflowFragmentedEstimateText() rebuilds logical rows from the token stream
+// using CCC's sequential line numbers as row boundaries.
+// ---------------------------------------------------------------------------
+
+/** True when extracted text is shredded to ~one token per line. */
+export function isFragmentedEstimateText(text: string): boolean {
+  const lines = (text ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 60) return false;
+  const singleToken = lines.filter((line) => !/\s/.test(line)).length;
+  return singleToken / lines.length >= 0.7;
+}
+
+/**
+ * Rebuild logical estimate lines from a fragmented token stream.
+ *
+ * - Row detection starts at the "Line Oper Description…" column header and
+ *   splits before a 1-4 digit integer (bare or glued to a following capital,
+ *   "11AIR") that is the NEXT expected CCC line number (a small forward
+ *   window tolerates a missed boundary). Qty/hour tokens never qualify: they
+ *   are either out of window or carry a decimal point.
+ * - Page footers ("7/21/2026 8:07:43 AM … Page 5") switch to skip mode until
+ *   the next row boundary, dropping repeated page-header chrome.
+ * - The ESTIMATE TOTALS block is re-lined at category starters so
+ *   parseCccEstimateTotals() can read rates/hours; glued category names
+ *   ("MechanicalLabor") are re-spaced.
+ * - Glued keywords ("SUPPLEMENTSUMMARY", "ESTIMATETOTALS", "SUBTOTALS") are
+ *   emitted as their own spaced lines so downstream boundaries still fire.
+ */
+export function reflowFragmentedEstimateText(text: string): string {
+  const tokens = (text ?? "").split(/\s+/).filter(Boolean);
+  const out: string[] = [];
+  let current: string[] | null = null;
+  let mode: "scan" | "rows" | "totals" = "scan";
+  let skipChrome = false;
+  let lastLine = 0;
+  const WINDOW = 30;
+
+  const flush = () => {
+    if (current && current.length) out.push(current.join(" "));
+    current = null;
+  };
+  const emitKeywordLine = (line: string) => {
+    flush();
+    current = [line];
+    skipChrome = false;
+  };
+
+  const TOTALS_STARTER =
+    /^(?:Parts|Body|Paint|Mechanical(?:Labor)?|Diagnostic(?:Labor)?|Structural|Frame|Electrical|Glass|Miscellaneous|Subtotal|Sales|Deductible|Total|Net|Grand|Workfile)$/;
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const next = tokens[index + 1] ?? "";
+
+    // Page-footer chrome: a date followed by a clock time starts the footer +
+    // repeated page header; drop everything until the next structural
+    // boundary. Date alone is NOT chrome — row text can carry dates ("Seat
+    // assy white from 05/06/2021").
+    if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(token) && /^\d{1,2}:\d{2}(?::\d{2})?$/.test(next)) {
+      flush();
+      skipChrome = true;
+      continue;
+    }
+
+    // Structural keywords (also glued forms).
+    if (/^SUBTOTALS?$/i.test(token)) {
+      emitKeywordLine("SUBTOTALS");
+      continue;
+    }
+    if (/^ESTIMATETOTALS?$/i.test(token) || (/^ESTIMATE$/i.test(token) && /^TOTALS?$/i.test(next))) {
+      emitKeywordLine("ESTIMATE TOTALS");
+      if (!/^ESTIMATETOTALS?$/i.test(token)) index += 1;
+      mode = "totals";
+      continue;
+    }
+    if (/^SUPPLEMENTSUMMARY$/i.test(token) || (/^SUPPLEMENT$/i.test(token) && /^SUMMARY$/i.test(next))) {
+      emitKeywordLine("SUPPLEMENT SUMMARY");
+      if (!/^SUPPLEMENTSUMMARY$/i.test(token)) index += 1;
+      mode = "scan";
+      continue;
+    }
+    if (/^TOTALSSUMMARY$/i.test(token)) {
+      emitKeywordLine("TOTALS SUMMARY");
+      continue;
+    }
+
+    // Column header gates row mode ("Line Oper Description …").
+    if (/^Line$/i.test(token) && /^Oper/i.test(next)) {
+      flush();
+      mode = "rows";
+      skipChrome = true; // drop the header tokens until the first row number
+      lastLine = lastLine || 0;
+      continue;
+    }
+
+    if (mode === "rows") {
+      // Row boundary: the next expected line number, bare ("45") or glued to
+      // a capital/symbol ("11AIR", "52SOI", "135#").
+      const glued = token.match(/^(\d{1,4})(?=[A-Z#*&(])/);
+      const bare = /^\d{1,4}$/.test(token) ? token : null;
+      const candidate = bare ?? glued?.[1] ?? null;
+      if (candidate !== null) {
+        const value = Number(candidate);
+        if (value > lastLine && value <= lastLine + WINDOW) {
+          flush();
+          lastLine = value;
+          skipChrome = false;
+          current = [candidate];
+          const rest = glued ? token.slice(candidate.length) : "";
+          if (rest) current.push(rest);
+          continue;
+        }
+      }
+      if (skipChrome) continue;
+      if (current) current.push(token);
+      continue;
+    }
+
+    if (mode === "totals") {
+      if (skipChrome) continue;
+      // Re-space glued category names ("MechanicalLabor" -> "Mechanical Labor").
+      const respaced = token.replace(/([a-z])([A-Z])/g, "$1 $2");
+      if (TOTALS_STARTER.test(token) || TOTALS_STARTER.test(respaced.split(" ")[0] ?? "")) {
+        flush();
+        current = respaced.split(" ");
+        continue;
+      }
+      if (current) current.push(...respaced.split(" "));
+      else current = respaced.split(" ");
+      continue;
+    }
+
+    // scan mode: not inside a recognized region — drop chrome, ignore prose.
+  }
+  flush();
+  return out.join("\n");
+}
+
 export function parseCccEstimateRows(text: string): EstimateDeltaRow[] {
   if (!text) return [];
+  if (isFragmentedEstimateText(text)) {
+    text = reflowFragmentedEstimateText(text);
+  }
   const lines = text
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
@@ -947,7 +1132,7 @@ export function parseCccEstimateRows(text: string): EstimateDeltaRow[] {
     // numbers with NEGATIVE hours, and Added items repeat rows already parsed.
     // Treating recap rows as line items creates false deltas (an R&I at -0.5
     // paired against the counterpart's +0.5).
-    if (rows.length > 0 && /^supplement summary$/i.test(line)) break;
+    if (rows.length > 0 && /^supplement\s*summary$/i.test(line)) break;
     if (isSectionHeader(line)) {
       section = line.replace(/^\d{1,4}\s*(?=[A-Z])/, "").trim();
       continue;
@@ -997,25 +1182,46 @@ function cleanDescription(value: string): string {
     .trim();
 }
 
+/**
+ * Token set plus adjacent-bigram concatenations. Compound words survive glued
+ * in one extraction and split in the other ("Fenderliner" vs "Fender liner",
+ * "Wheelhouseliner" vs "Wheelhouse liner") — the bigram of the split side
+ * equals the glued side's token, so the pair still counts as shared.
+ */
+function tokenSetWithBigrams(tokens: string[]): Set<string> {
+  const set = new Set(tokens);
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    set.add(`${tokens[index]}${tokens[index + 1]}`);
+  }
+  return set;
+}
+
 function tokenOverlap(
   a: string[],
   b: string[]
 ): { ratio: number; shared: number; maxSharedLen: number } {
   if (a.length === 0 || b.length === 0) return { ratio: 0, shared: 0, maxSharedLen: 0 };
-  const setB = new Set(b);
+  const setA = new Set(a);
+  const expandedB = tokenSetWithBigrams(b);
+  const bigramsOnlyA = new Set([...tokenSetWithBigrams(a)].filter((token) => !setA.has(token)));
   let shared = 0;
   let maxSharedLen = 0;
-  const seen = new Set<string>();
-  for (const token of a) {
-    if (seen.has(token)) continue;
-    seen.add(token);
-    if (setB.has(token)) {
+  for (const token of setA) {
+    if (expandedB.has(token)) {
       shared += 1;
       maxSharedLen = Math.max(maxSharedLen, token.length);
     }
   }
-  const smaller = Math.min(new Set(a).size, new Set(b).size);
-  return { ratio: smaller === 0 ? 0 : shared / smaller, shared, maxSharedLen };
+  // Reverse direction: a glued B token that equals an A bigram represents two
+  // fused A tokens ("fenderliner" on B vs "fender"+"liner" on A).
+  for (const token of new Set(b)) {
+    if (!setA.has(token) && bigramsOnlyA.has(token)) {
+      shared += 1;
+      maxSharedLen = Math.max(maxSharedLen, token.length);
+    }
+  }
+  const smaller = Math.min(setA.size, new Set(b).size);
+  return { ratio: smaller === 0 ? 0 : Math.min(1, shared / smaller), shared, maxSharedLen };
 }
 
 /**
@@ -1462,6 +1668,9 @@ export interface EstimateTotalsSummary {
  */
 export function parseCccEstimateTotals(text: string): EstimateTotalsSummary | null {
   if (!text) return null;
+  if (isFragmentedEstimateText(text)) {
+    text = reflowFragmentedEstimateText(text);
+  }
   const lines = text
     .replace(/\r\n?/g, "\n")
     .split("\n")

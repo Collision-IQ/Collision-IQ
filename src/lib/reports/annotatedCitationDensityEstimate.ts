@@ -2278,7 +2278,21 @@ function matchStructuredLineItemDeltas(
   // Seed category presence from the full comparison text so an OCR-flattened
   // lower estimate (few parseable rows) still recognizes its own categories.
   const lowerCategoryText = comparison.map((item) => item.text).join("\n");
-  const match = matchEstimateLineItems({ lowerRows, higherRows: dedupedHigherRows, lowerIsOcr, lowerCategoryText });
+  // Parse-coverage guard: when the comparison estimate yields only a small
+  // fraction of the rows the annotated estimate has, its extraction failed in
+  // some way row parsing could not recover from — an unmatched line then means
+  // "we could not read the counterpart", NOT "the counterpart omits it".
+  // Route those through the same suppress/soften path as OCR-derived text so
+  // a parse failure can never flood the report with confident false findings.
+  const lowerParseSuspect =
+    dedupedHigherRows.length >= 40 &&
+    lowerRows.length < dedupedHigherRows.length * 0.25;
+  const match = matchEstimateLineItems({
+    lowerRows,
+    higherRows: dedupedHigherRows,
+    lowerIsOcr: lowerIsOcr || lowerParseSuspect,
+    lowerCategoryText,
+  });
   const orderedDeltas = [...match.deltas].sort(
     (a, b) => scoreLineItemDeltaForPriority(b) - scoreLineItemDeltaForPriority(a)
   );
