@@ -321,4 +321,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except HubSpotError as exc:
+        print(f"[error] {exc}")
+        sys.exit(1)
