@@ -307,6 +307,11 @@ function tokenizeDescription(description: string): string[] {
 // "Incl.", commas, minus signs. Never ordinary words.
 function isColumnBlob(value: string): boolean {
   if (!value || !/\d/.test(value)) return false;
+  // A part dimension ("8.2x12.2", "8.0x5-0.9") is description text, not
+  // column data — its "x" would otherwise read as the taxed-charge marker and
+  // the dimension digits would explode into phantom qty/hour columns
+  // (a wrapped "8.2x12.2" tail produced a false +1.0 paint-hour finding).
+  if (/\d\s*[xX]\s*\d/.test(value)) return false;
   return /^(?:Incl\.|[\d,.\-\s]|[mMsSTXbBpP](?![a-z]))+$/.test(value);
 }
 
@@ -449,6 +454,10 @@ export function explodeGluedRow(rawText: string): string {
         (cur === "-" && /\d/.test(nxt)) ||
         (/[mMTX]/.test(cur) && /\d/.test(nxt)));
     if (!boundary) continue;
+    // A digit-x-digit seam is a part DIMENSION ("8.2x12.2", "8.0x5-0.9"),
+    // not a description→column boundary — splitting there turned the
+    // dimension tail into phantom qty/hour columns.
+    if (/[xX]/.test(prev) && /\d/.test(text[i - 2] ?? "")) continue;
     const remainder = text.slice(i);
     // Never split INSIDE an alphanumeric part number ("GM1144143", "C25J75"):
     // the rest of that token must itself look like glued column data — a

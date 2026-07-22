@@ -213,6 +213,24 @@ run("user-defined labor-category digit between hours is a marker, not data", () 
   assert.equal(qtyRow.labor, 0.5);
 });
 
+run("a wrapped part-dimension tail never becomes phantom hour columns", () => {
+  // Shop anchor rejoins the wrapped dimension AFTER the columns; the "x"
+  // must not read as a taxed marker nor the digits as qty/hours (this
+  // produced a false "+1.0 paint hr" finding on a $5 grommet).
+  const shop = parseCccEstimateRow("157 Repl RT Backup lamp grommet 110492600B 1 5.00 Incl. 8.2x12.2");
+  assert.ok(shop);
+  assert.equal(shop.paint, null);
+  assert.equal(shop.labor, null);
+  assert.equal(shop.laborIncluded, true);
+  assert.equal(shop.price, 5);
+  assert.equal(shop.partNumber, "110492600B");
+  const sor = parseCccEstimateRow("117 Repl RT Backuplamp grommet 8.2x12.2 110492600B 1 5.00 Ind.");
+  assert.ok(sor);
+  const match = matchEstimateLineItems({ lowerRows: [sor], higherRows: [shop] });
+  assert.equal(match.matchedPairCount, 1);
+  assert.equal(match.deltas.length, 0, JSON.stringify(match.deltas.map((d) => d.summary)));
+});
+
 run("glued/split compound words still match (Fenderliner vs Fender liner)", () => {
   const lower = parseCccEstimateRows("21 R&I RT Fenderliner 0.4\n22 R&I LT Fenderliner 0.4");
   const higher = parseCccEstimateRows("28 R&I RT Fender liner 0.4\n29 R&I LT Fender liner 0.4");
