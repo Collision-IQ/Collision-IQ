@@ -69,8 +69,8 @@ export interface EstimateLineItemDelta {
   lowerRow: EstimateDeltaRow | null;
   /** Row from the higher estimate that documents more scope. */
   higherRow: EstimateDeltaRow;
-  /** How the two rows were paired. */
-  matchBasis: "part_number" | "description" | "section_only" | "none";
+  /** How the two rows were paired ("amount" = unique-price misc/sublet pair). */
+  matchBasis: "part_number" | "description" | "amount" | "section_only" | "none";
   laborDelta: number | null;
   paintDelta: number | null;
   priceDelta: number | null;
@@ -194,6 +194,11 @@ const DESCRIPTION_STOPWORDS = new Set([
   "add",
   "incl",
   "included",
+  // OCR misreads of "Incl." and the S01 supplement marker leak into
+  // descriptions ("RT Backuplamp Ind.", "SOI Masking Tape") and inflate the
+  // token set enough to push a same-operation pair below the match ratio.
+  "ind",
+  "soi",
   "note",
   "rcy",
   "lkq",
@@ -438,6 +443,12 @@ export function explodeGluedRow(rawText: string): string {
   // catalog number off the digits that follow.
   text = text.replace(/(\d{4}\.\d{4})(?=\d)/g, "$1 ");
 
+  // A part DIMENSION glues straight onto the part number in fragmented
+  // extractions ("grommet 8.2x12.2110492600B", "8.0x5-0.9110433500B"). The
+  // dimension stays description text; without the split the part number never
+  // parses and the whole grommet/gasket cluster cross-pairs.
+  text = text.replace(/(\dx\d{1,2}(?:\.\d)?(?:-\d{1,2}(?:\.\d)?)?)(?=\d{5,})/g, "$1 ");
+
   // 1. Find the earliest description→column-blob boundary (a letter/'%'/')'
   //    followed by digits, a minus-number, or a marker+digit) where everything
   //    after is column content only. Interior alphanumerics (GLE350, 50R19)
@@ -598,8 +609,12 @@ function stripLeadingMetadata(rawText: string): { body: string; lineNumber: numb
       changed = true;
       continue;
     }
-    // Concatenated labor-category code (e.g. "S01RprWindshield").
-    const concatLaborMatch = body.match(/^S\d{2}/i);
+    // Concatenated labor-category code (e.g. "S01RprWindshield"). OCR reads
+    // "S01" as "SOI"/"S0I"/"SOl" (0<->O, 1<->I/l); left in place the marker
+    // pollutes the description ("SOI Masking Tape") and blocks matching. The
+    // lookahead requires a space, end, glued word start ("SOISet"), or "R&I"
+    // so ALL-CAPS words like "SOLID" never lose their head.
+    const concatLaborMatch = body.match(/^S(?:\d{2}|[0Oo][1IiLl])(?=$|\s|[A-Z][a-z]|R&I)/);
     if (concatLaborMatch) {
       body = body.slice(concatLaborMatch[0].length);
       changed = true;
@@ -833,14 +848,25 @@ export function parseCccEstimateRow(
   if (!text) return null;
   if (isSectionHeader(text)) return null;
 
-  // A print-wrapped description can rejoin AFTER the hour column ("Capture
+  // A print-wrapped description can rejoin AFTER the value columns ("Capture
   // image to confirm 0.3 M adjustments were made correctly", "LT Door glass
-  // Tesla w/o 0.8 laminated"). Move the digit-free word tail back before the
-  // value so the trailing columns parse; rows that end in their value/marker
-  // are untouched because the tail group requires words after the value.
+  // Tesla w/o 0.8 laminated", "Finish sand & polish (0.5 Refinish 8 3.0 per
+  // panel)", or a merged note tail "1 1.0 1 avoid damage to newly painted
+  // components (2 techs)"). Move the word tail back before the whole trailing
+  // qty/hour/marker cluster so the columns parse; rows that end in their
+  // value/marker are untouched because the tail group requires words after it.
+  // The tail must END in a word character (letter/quote/paren/period), never a
+  // number — otherwise a marker+hours pair ("D 2.0") reads as a "tail" — and
+  // may carry digits only inside a parenthesized note ("(2 techs)"): a bare
+  // digit or money value in the tail means those are real columns ("3 Ft 1
+  // 7.08 T"), not wrapped prose, and the row must stay untouched.
   text = text.replace(
-    /^(.*?\S) (-?\d{1,2}\.\d)((?: [MDEFGS])?) ([A-Za-z][A-Za-z'"&/ -]*)$/,
-    "$1 $4 $2$3"
+    /^(.*?\S)((?: -?\d{1,2}\.\d(?: [MDEFGS])?| Incl\.| [1-9]\d?)+) ([A-Za-z][A-Za-z0-9'"&/()., -]*[A-Za-z)."'])$/,
+    (full, head, cluster, tail) => {
+      const tailOutsideParens = tail.replace(/\([^)]*\)/g, " ");
+      if (/\d/.test(tailOutsideParens)) return full;
+      return `${head} ${tail}${cluster}`;
+    }
   );
 
   const { body, lineNumber } = stripLeadingMetadata(text);
@@ -1205,32 +1231,85 @@ function tokenSetWithBigrams(tokens: string[]): Set<string> {
   return set;
 }
 
+/** Bounded Levenshtein distance (early-exits above `max`). */
+function boundedEditDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost);
+      rowMin = Math.min(rowMin, current[j]);
+    }
+    if (rowMin > max) return max + 1;
+    previous = current;
+  }
+  return previous[b.length];
+}
+
+/**
+ * OCR-tolerant token equality: one extraction reads "Upper" as "Lipper" or
+ * "moulding" for "molding". Two content tokens (>= 5 chars) within edit
+ * distance 2 that agree on the first character or the final three characters
+ * are the same word; short tokens and larger edits never qualify.
+ */
+function isFuzzyTokenMatch(a: string, b: string): boolean {
+  if (a.length < 5 || b.length < 5) return false;
+  if (a[0] !== b[0] && a.slice(-3) !== b.slice(-3)) return false;
+  return boundedEditDistance(a, b, 2) <= 2;
+}
+
 function tokenOverlap(
   a: string[],
   b: string[]
-): { ratio: number; shared: number; maxSharedLen: number } {
-  if (a.length === 0 || b.length === 0) return { ratio: 0, shared: 0, maxSharedLen: 0 };
+): { ratio: number; shared: number; maxSharedLen: number; sharedTokens: string[] } {
+  if (a.length === 0 || b.length === 0) return { ratio: 0, shared: 0, maxSharedLen: 0, sharedTokens: [] };
   const setA = new Set(a);
   const expandedB = tokenSetWithBigrams(b);
   const bigramsOnlyA = new Set([...tokenSetWithBigrams(a)].filter((token) => !setA.has(token)));
   let shared = 0;
   let maxSharedLen = 0;
+  const sharedTokens: string[] = [];
+  const unmatchedA: string[] = [];
   for (const token of setA) {
     if (expandedB.has(token)) {
       shared += 1;
       maxSharedLen = Math.max(maxSharedLen, token.length);
+      sharedTokens.push(token);
+    } else {
+      unmatchedA.push(token);
     }
   }
   // Reverse direction: a glued B token that equals an A bigram represents two
   // fused A tokens ("fenderliner" on B vs "fender"+"liner" on A).
+  const unmatchedB: string[] = [];
   for (const token of new Set(b)) {
     if (!setA.has(token) && bigramsOnlyA.has(token)) {
       shared += 1;
       maxSharedLen = Math.max(maxSharedLen, token.length);
+      sharedTokens.push(token);
+    } else if (!setA.has(token)) {
+      unmatchedB.push(token);
     }
   }
+  // OCR-tolerant pass over the leftovers ("upper" ~ "lipper").
+  for (const tokenA of unmatchedA) {
+    const fuzzyIndex = unmatchedB.findIndex((tokenB) => isFuzzyTokenMatch(tokenA, tokenB));
+    if (fuzzyIndex === -1) continue;
+    unmatchedB.splice(fuzzyIndex, 1);
+    shared += 1;
+    maxSharedLen = Math.max(maxSharedLen, tokenA.length);
+    sharedTokens.push(tokenA);
+  }
   const smaller = Math.min(setA.size, new Set(b).size);
-  return { ratio: smaller === 0 ? 0 : Math.min(1, shared / smaller), shared, maxSharedLen };
+  return {
+    ratio: smaller === 0 ? 0 : Math.min(1, shared / smaller),
+    shared,
+    maxSharedLen,
+    sharedTokens,
+  };
 }
 
 /**
@@ -1243,7 +1322,15 @@ function isDescriptionMatch(overlap: ReturnType<typeof tokenOverlap>): boolean {
   if (overlap.shared >= DESCRIPTION_MATCH_MIN_SHARED && overlap.ratio >= DESCRIPTION_MATCH_MIN_RATIO) {
     // Exactly 2 shared tokens at a sub-0.75 ratio is weak evidence — "LT Lower
     // absorber" vs "LT Lower cntrl arm" shares only the generic {lt, lower}.
-    if (overlap.shared === 2 && overlap.ratio < 0.75) return false;
+    // Two shared CONTENT words (>= 4 chars, non-directional, non-numeric) are
+    // real evidence though: "Mask jambs" ~ "Mask Openings/Jambs", "Isolate
+    // high voltage" ~ OCR'd "isolate high violate".
+    if (overlap.shared === 2 && overlap.ratio < 0.75) {
+      const contentTokens = overlap.sharedTokens.filter(
+        (token) => token.length >= 4 && !DIRECTIONAL_TOKENS.has(token) && !/^\d+$/.test(token)
+      );
+      if (contentTokens.length < 2) return false;
+    }
     return true;
   }
   if (overlap.shared >= 1 && overlap.ratio >= 0.85 && overlap.maxSharedLen >= 5) return true;
@@ -1278,24 +1365,60 @@ const DIRECTIONAL_TOKENS = new Set([
   "outer",
 ]);
 
-function directionalTokens(tokens: string[]): Set<string> {
-  const found = new Set<string>();
+// Axis + polarity per directional token. Rows conflict only when they carry
+// OPPOSING polarities on the same axis ("LT" vs "RT", "Ft" vs "rear") — a
+// token present on one side and absent on the other is not a conflict, so an
+// OCR-garbled twin ("LT Upper bracket" vs "LT Lipper bracket") can still pair.
+const DIRECTIONAL_AXIS: Record<string, [axis: string, polarity: string]> = {
+  lt: ["side", "L"],
+  rt: ["side", "R"],
+  ft: ["long", "F"],
+  front: ["long", "F"],
+  rr: ["long", "R"],
+  rear: ["long", "R"],
+  upper: ["vert", "U"],
+  lower: ["vert", "D"],
+  inner: ["depth", "I"],
+  outer: ["depth", "O"],
+};
+
+function directionalPolarities(tokens: string[]): Map<string, Set<string>> {
+  const byAxis = new Map<string, Set<string>>();
   for (const token of tokens) {
-    if (DIRECTIONAL_TOKENS.has(token)) found.add(token);
+    const entry = DIRECTIONAL_AXIS[token];
+    if (!entry) continue;
+    const [axis, polarity] = entry;
+    const set = byAxis.get(axis) ?? new Set<string>();
+    set.add(polarity);
+    byAxis.set(axis, set);
   }
-  return found;
+  return byAxis;
+}
+
+/** True when the two rows carry opposing side/position tokens on some axis. */
+function hasDirectionalConflict(a: string[], b: string[]): boolean {
+  const axesA = directionalPolarities(a);
+  const axesB = directionalPolarities(b);
+  for (const [axis, polaritiesA] of axesA) {
+    const polaritiesB = axesB.get(axis);
+    if (!polaritiesB || polaritiesB.size === 0) continue;
+    const overlapExists = [...polaritiesA].some((polarity) => polaritiesB.has(polarity));
+    if (!overlapExists) return true;
+  }
+  return false;
 }
 
 function findBestLowerMatch(
   higherRow: EstimateDeltaRow,
   lowerRows: EstimateDeltaRow[],
   used: Set<number>,
-  options?: { exactOnly?: boolean }
+  options?: { exactOnly?: boolean; candidateFilter?: (lowerRow: EstimateDeltaRow) => boolean }
 ): ScoredMatch | null {
   let best: ScoredMatch | null = null;
   for (let index = 0; index < lowerRows.length; index += 1) {
     if (used.has(index)) continue;
     const lowerRow = lowerRows[index];
+    if (options?.candidateFilter && !options.candidateFilter(lowerRow)) continue;
     let score = 0;
     let basis: EstimateLineItemDelta["matchBasis"] = "none";
     let exact = false;
@@ -1305,24 +1428,27 @@ function findBestLowerMatch(
       lowerRow.partNumber &&
       higherRow.partNumber === lowerRow.partNumber
     ) {
+      // Same part on OPPOSING sides is still a different line — "RT Tail lamp
+      // gasket" and "LT Tail lamp gasket" share one part number, and pairing
+      // across sides orphans the true counterpart and cascades mispairs
+      // through the whole grommet/gasket cluster.
+      if (hasDirectionalConflict(higherRow.descriptionTokens, lowerRow.descriptionTokens)) {
+        continue;
+      }
       // Must outrank any description-based score: sibling rows with identical
       // descriptions but different parts ("RT W'strip on body" 68498156AD /
       // 68498157AD) otherwise cross-pair and report two false part changes.
-      score = 200;
+      // Description overlap breaks ties between same-part siblings ("RT Tail
+      // lamp grommet" must pick the tail-lamp row, not the backup-lamp row).
+      const partOverlap = tokenOverlap(higherRow.descriptionTokens, lowerRow.descriptionTokens);
+      score = 200 + partOverlap.shared * 5 + Math.round(partOverlap.ratio * 10);
       basis = "part_number";
       exact = true;
     } else {
       // Side/position tokens are hard discriminators: "LT Rr fender liner"
       // is never the same line as "LT Ft fender liner", however many other
-      // tokens they share. Only enforced when BOTH rows carry them.
-      const dirHigher = directionalTokens(higherRow.descriptionTokens);
-      const dirLower = directionalTokens(lowerRow.descriptionTokens);
-      if (
-        dirHigher.size > 0 &&
-        dirLower.size > 0 &&
-        (dirHigher.size !== dirLower.size ||
-          [...dirHigher].some((token) => !dirLower.has(token)))
-      ) {
+      // tokens they share. Only OPPOSING tokens on the same axis conflict.
+      if (hasDirectionalConflict(higherRow.descriptionTokens, lowerRow.descriptionTokens)) {
         continue;
       }
       const overlap = tokenOverlap(higherRow.descriptionTokens, lowerRow.descriptionTokens);
@@ -1468,88 +1594,111 @@ export function matchEstimateLineItems(params: {
   // lower rows FIRST, so a fuzzy sibling earlier in the estimate ("RT Lower
   // ball joint nut upper") cannot steal the row an exact twin needs ("LT Lower
   // ball joint nut upper").
+  //
+  // Staged by value agreement: repeated generic rows ("Add for Clear Coat"
+  // prints once per panel) are token-identical across panels, so a purely
+  // sequential claim pairs the ROOF clear coat with the LIFT GATE row and the
+  // truly-shared rows then read as differences. Rows that agree on hours AND
+  // section claim first, then rows that agree on hours, then any exact twin.
+  const rowValuesEqual = (a: EstimateDeltaRow, b: EstimateDeltaRow) =>
+    a.labor === b.labor &&
+    a.paint === b.paint &&
+    a.laborIncluded === b.laborIncluded &&
+    a.paintIncluded === b.paintIncluded;
+  const rowSectionsEqual = (a: EstimateDeltaRow, b: EstimateDeltaRow) => {
+    const sectionA = normalizeCategoryText(a.section ?? "");
+    const sectionB = normalizeCategoryText(b.section ?? "");
+    return sectionA.length > 0 && sectionA === sectionB;
+  };
   const preclaimed = new Map<number, ScoredMatch>();
-  higherRows.forEach((higherRow, higherIndex) => {
-    const exactMatch = findBestLowerMatch(higherRow, lowerRows, used, { exactOnly: true });
-    if (exactMatch) {
-      preclaimed.set(higherIndex, exactMatch);
-      used.add(exactMatch.index);
-    }
-  });
-
-  for (let higherIndex = 0; higherIndex < higherRows.length; higherIndex += 1) {
-    const higherRow = higherRows[higherIndex];
-    const match = preclaimed.get(higherIndex) ?? findBestLowerMatch(higherRow, lowerRows, used);
-
-    if (!match) {
-      // OCR-present-but-poorly-parsed: the line's part number / description is
-      // already in the OCR'd lower text, so a non-match is an OCR parse gap, not
-      // a real change. Record it as OCR-uncertain and DO NOT highlight it — this
-      // is what stops unchanged rows (repeaters, scans, latches) being flagged
-      // just because fuzzy matching failed against the OCR estimate.
-      if (lowerIsOcr && !isGenuinelyAddedVsOcr(higherRow)) {
-        ocrUncertainSuppressedCount += 1;
-        deltas.push({
-          kind: "missing_operation",
-          lowerRow: null,
-          higherRow,
-          matchBasis: "none",
-          laborDelta: higherRow.labor,
-          paintDelta: higherRow.paint,
-          priceDelta: higherRow.price,
-          summary: buildMissingSummary(higherRow, true),
-          ocrUncertain: true,
-          statusLabels: [...OCR_UNCERTAIN_STATUS_LABELS],
-          annotate: false,
-        });
-        continue;
+  const preclaimStages: Array<(higherRow: EstimateDeltaRow, lowerRow: EstimateDeltaRow) => boolean> = [
+    (higherRow, lowerRow) => rowValuesEqual(higherRow, lowerRow) && rowSectionsEqual(higherRow, lowerRow),
+    (higherRow, lowerRow) => rowValuesEqual(higherRow, lowerRow),
+    () => true,
+  ];
+  for (const stage of preclaimStages) {
+    higherRows.forEach((higherRow, higherIndex) => {
+      if (preclaimed.has(higherIndex)) return;
+      const exactMatch = findBestLowerMatch(higherRow, lowerRows, used, {
+        exactOnly: true,
+        candidateFilter: (lowerRow) => stage(higherRow, lowerRow),
+      });
+      if (exactMatch) {
+        preclaimed.set(higherIndex, exactMatch);
+        used.add(exactMatch.index);
       }
+    });
+  }
 
-      // Genuinely absent from the lower estimate. Distinguish a brand-new
-      // operation from an expansion within a category the lower estimate has.
-      const categoryPresent =
-        extractCategoryKeywords(higherRow).some((kw) => lowerCategoryKeywords.has(kw)) ||
-        sectionPresentInLower(higherRow.section);
-      if (categoryPresent) {
-        expandedScopeCount += 1;
-        deltas.push({
-          kind: "expanded_scope",
-          lowerRow: null,
-          higherRow,
-          matchBasis: "section_only",
-          laborDelta: higherRow.labor,
-          paintDelta: higherRow.paint,
-          priceDelta: higherRow.price,
-          summary: buildExpandedScopeSummary(higherRow, lowerIsOcr),
-          annotate: true,
-          ...(lowerIsOcr ? { statusLabels: ["LOWER_ESTIMATE_OCR_LIMITATION", "VERIFY_AGAINST_SOURCE"] } : {}),
-        });
-      } else {
-        missingOperationCount += 1;
-        deltas.push({
-          kind: "missing_operation",
-          lowerRow: null,
-          higherRow,
-          matchBasis: "none",
-          laborDelta: higherRow.labor,
-          paintDelta: higherRow.paint,
-          priceDelta: higherRow.price,
-          summary: buildMissingSummary(higherRow, lowerIsOcr),
-          annotate: true,
-          // OCR confidence: even a genuinely-added line (part# absent) stays a
-          // verify item against an OCR-derived lower estimate.
-          ...(lowerIsOcr
-            ? { ocrUncertain: true, statusLabels: [...OCR_UNCERTAIN_STATUS_LABELS] }
-            : {}),
-        });
-      }
-      continue;
+  const classifyUnmatched = (higherRow: EstimateDeltaRow) => {
+    // OCR-present-but-poorly-parsed: the line's part number / description is
+    // already in the OCR'd lower text, so a non-match is an OCR parse gap, not
+    // a real change. Record it as OCR-uncertain and DO NOT highlight it — this
+    // is what stops unchanged rows (repeaters, scans, latches) being flagged
+    // just because fuzzy matching failed against the OCR estimate.
+    if (lowerIsOcr && !isGenuinelyAddedVsOcr(higherRow)) {
+      ocrUncertainSuppressedCount += 1;
+      deltas.push({
+        kind: "missing_operation",
+        lowerRow: null,
+        higherRow,
+        matchBasis: "none",
+        laborDelta: higherRow.labor,
+        paintDelta: higherRow.paint,
+        priceDelta: higherRow.price,
+        summary: buildMissingSummary(higherRow, true),
+        ocrUncertain: true,
+        statusLabels: [...OCR_UNCERTAIN_STATUS_LABELS],
+        annotate: false,
+      });
+      return;
     }
 
-    used.add(match.index);
-    matchedPairCount += 1;
-    const lowerRow = match.row;
+    // Genuinely absent from the lower estimate. Distinguish a brand-new
+    // operation from an expansion within a category the lower estimate has.
+    const categoryPresent =
+      extractCategoryKeywords(higherRow).some((kw) => lowerCategoryKeywords.has(kw)) ||
+      sectionPresentInLower(higherRow.section);
+    if (categoryPresent) {
+      expandedScopeCount += 1;
+      deltas.push({
+        kind: "expanded_scope",
+        lowerRow: null,
+        higherRow,
+        matchBasis: "section_only",
+        laborDelta: higherRow.labor,
+        paintDelta: higherRow.paint,
+        priceDelta: higherRow.price,
+        summary: buildExpandedScopeSummary(higherRow, lowerIsOcr),
+        annotate: true,
+        ...(lowerIsOcr ? { statusLabels: ["LOWER_ESTIMATE_OCR_LIMITATION", "VERIFY_AGAINST_SOURCE"] } : {}),
+      });
+    } else {
+      missingOperationCount += 1;
+      deltas.push({
+        kind: "missing_operation",
+        lowerRow: null,
+        higherRow,
+        matchBasis: "none",
+        laborDelta: higherRow.labor,
+        paintDelta: higherRow.paint,
+        priceDelta: higherRow.price,
+        summary: buildMissingSummary(higherRow, lowerIsOcr),
+        annotate: true,
+        // OCR confidence: even a genuinely-added line (part# absent) stays a
+        // verify item against an OCR-derived lower estimate.
+        ...(lowerIsOcr
+          ? { ocrUncertain: true, statusLabels: [...OCR_UNCERTAIN_STATUS_LABELS] }
+          : {}),
+      });
+    }
+  };
 
+  const classifyMatchedPair = (
+    higherRow: EstimateDeltaRow,
+    lowerRow: EstimateDeltaRow,
+    basis: EstimateLineItemDelta["matchBasis"]
+  ) => {
     const laborDelta = numericDelta(higherRow.labor, lowerRow.labor);
     const paintDelta = numericDelta(higherRow.paint, lowerRow.paint);
     const priceDelta = numericDelta(higherRow.price, lowerRow.price);
@@ -1559,7 +1708,7 @@ export function matchEstimateLineItems(params: {
         kind: "reduced_labor",
         lowerRow,
         higherRow,
-        matchBasis: match.basis,
+        matchBasis: basis,
         laborDelta,
         paintDelta,
         priceDelta,
@@ -1572,7 +1721,7 @@ export function matchEstimateLineItems(params: {
         kind: "reduced_paint",
         lowerRow,
         higherRow,
-        matchBasis: match.basis,
+        matchBasis: basis,
         laborDelta,
         paintDelta,
         priceDelta,
@@ -1594,7 +1743,7 @@ export function matchEstimateLineItems(params: {
         kind: "part_or_price_difference",
         lowerRow,
         higherRow,
-        matchBasis: match.basis,
+        matchBasis: basis,
         laborDelta,
         paintDelta,
         priceDelta,
@@ -1613,7 +1762,7 @@ export function matchEstimateLineItems(params: {
           kind: "operation_change",
           lowerRow,
           higherRow,
-          matchBasis: match.basis,
+          matchBasis: basis,
           laborDelta,
           paintDelta,
           priceDelta,
@@ -1623,6 +1772,60 @@ export function matchEstimateLineItems(params: {
         });
       }
     }
+  };
+
+  const unmatchedHigherRows: EstimateDeltaRow[] = [];
+  for (let higherIndex = 0; higherIndex < higherRows.length; higherIndex += 1) {
+    const higherRow = higherRows[higherIndex];
+    const match = preclaimed.get(higherIndex) ?? findBestLowerMatch(higherRow, lowerRows, used);
+    if (!match) {
+      unmatchedHigherRows.push(higherRow);
+      continue;
+    }
+    used.add(match.index);
+    matchedPairCount += 1;
+    classifyMatchedPair(higherRow, match.row, match.basis);
+  }
+
+  // Amount-unique fallback: a differently-worded misc/sublet counterpart
+  // ("Subl Paid out" vs "Towing", "Interior Protection kit" vs "COVER
+  // INTERIOR") shares no description tokens but carries the same extended
+  // price. When that price is UNIQUE among the still-unmatched, part-less rows
+  // on both sides, the two rows are the same pay item, not a missing one.
+  const unmatchedPriceCounts = new Map<number, number>();
+  for (const row of unmatchedHigherRows) {
+    if (row.price !== null && row.price > 0 && !row.partNumber) {
+      unmatchedPriceCounts.set(row.price, (unmatchedPriceCounts.get(row.price) ?? 0) + 1);
+    }
+  }
+  for (const higherRow of unmatchedHigherRows) {
+    let amountMatchIndex: number | null = null;
+    if (
+      higherRow.price !== null &&
+      higherRow.price > 0 &&
+      !higherRow.partNumber &&
+      unmatchedPriceCounts.get(higherRow.price) === 1
+    ) {
+      const candidates: number[] = [];
+      for (let index = 0; index < lowerRows.length; index += 1) {
+        if (used.has(index)) continue;
+        const lowerRow = lowerRows[index];
+        if (lowerRow.partNumber || lowerRow.price !== higherRow.price) continue;
+        // Price alone is not identity — the hours must agree too, or "Mask for
+        // refinishing $10.00 / 0.5 hr" amount-pairs with "Cover car/bag
+        // $10.00 / 0.3 hr" and a real omission disappears.
+        if (lowerRow.labor !== higherRow.labor || lowerRow.paint !== higherRow.paint) continue;
+        candidates.push(index);
+      }
+      if (candidates.length === 1) amountMatchIndex = candidates[0];
+    }
+    if (amountMatchIndex !== null) {
+      used.add(amountMatchIndex);
+      matchedPairCount += 1;
+      classifyMatchedPair(higherRow, lowerRows[amountMatchIndex], "amount");
+      continue;
+    }
+    classifyUnmatched(higherRow);
   }
 
   // Lines only the LOWER estimate carries (never matched by any higher row).

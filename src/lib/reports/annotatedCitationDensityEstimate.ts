@@ -2361,7 +2361,11 @@ function emitStructuredLineItemDeltaFindings(
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "")
         .slice(0, 40) || "operation";
-    const slugKey = `${meta.findingType}:${slug}`;
+    // Dedupe per ANCHOR, not per description: repeated manual-material lines
+    // ("Mask for primer" prints once per panel, "Set back, secure Protect
+    // wiring" once per lamp group) are each their own pay item, and collapsing
+    // them to one finding hid every other instance from the report (RO 22108).
+    const slugKey = `${meta.findingType}:${slug}:${anchor.anchorId}`;
     if (emittedSlugs.has(slugKey)) continue;
     emittedSlugs.add(slugKey);
     usedAnchorIds.add(anchor.anchorId);
@@ -2432,7 +2436,9 @@ function emitTotalsDeltaFindings(
   const blockFallbackAnchor = (): EstimateRowAnchor | undefined =>
     claimAnchor((text) => /estimate totals|grand total|total cost of repair|subtotal/.test(text));
 
-  const MAX_TOTALS_FINDINGS = 8;
+  // Room for every category lane plus the grand-total gap (RO 22108 produced
+  // nine legitimate totals deltas; the old cap of 8 cut the grand total).
+  const MAX_TOTALS_FINDINGS = 10;
   for (const delta of deltaMatch.totalsDeltas) {
     if (findings.length >= MAX_TOTALS_FINDINGS) break;
     const categoryNeedle = delta.category.toLowerCase();
@@ -2440,7 +2446,11 @@ function emitTotalsDeltaFindings(
       delta.kind === "total_difference"
         ? claimAnchor((text) => /grand total|total cost of repair|workfile total|net cost/.test(text))
         : delta.kind === "category_only_on_lower"
-          ? claimAnchor((text) => /grand total|total cost of repair|subtotal/.test(text))
+          ? // Prefer subtotal rows so the grand-total row stays free for the
+            // total_difference finding (both otherwise claim the same anchor
+            // and the later one is dropped as a duplicate).
+            (claimAnchor((text) => /subtotal/.test(text)) ??
+              claimAnchor((text) => /grand total|total cost of repair/.test(text)))
           : (claimAnchor((text) => text.includes(categoryNeedle)) ?? blockFallbackAnchor());
     if (!anchor) continue; // never emit an unanchored finding
 
@@ -4754,7 +4764,11 @@ function isDeltaEstimateLineFinding(finding: CitationDensityFinding) {
 }
 
 function isTotalOrRateFinding(finding: CitationDensityFinding) {
-  return /\b(?:total|subtotal|net cost|rate|labor rate|grand total|estimate total)\b/i.test(
+  // Totals-lane findings are the intended tenants of totals_row anchors even
+  // when their text says "Parts totals" or "Category amount" without a bare
+  // "total" keyword ("Parts" amount deltas were demoted to unanchored).
+  if ((finding.id ?? "").startsWith("required-detector-totals-")) return true;
+  return /\b(?:totals?|subtotal|net cost|rate|labor rate|grand total|estimate total)\b/i.test(
     `${finding.operationLabel} ${finding.counterpartSummary ?? ""} ${finding.currentSupportSummary}`
   );
 }
@@ -5229,7 +5243,7 @@ function isRestrictedSourcePageForCandidate(candidate: AnchoredCitationCandidate
   if (/\b(?:disclaimer|abbreviations?|motor guide|ccc motor guide|guide pages|asTech diagnostic terms)\b/i.test(text)) {
     return !/\b(?:disclaimer|abbreviations?|motor guide|astech)\b/i.test(candidate.estimateLineDisplay);
   }
-  if (anchor.anchorType === "totals_row") return !/total|rate|paint|material|labor|net cost/i.test(candidate.estimateLineDisplay);
+  if (anchor.anchorType === "totals_row") return !/total|rate|paint|material|labor|net cost|parts|miscellaneous|aluminum|sales tax|hrs?\b|category/i.test(candidate.estimateLineDisplay);
   if (anchor.anchorType === "supplier_row") return !/supplier|alternate|aftermarket|lkq|part|grille/i.test(candidate.estimateLineDisplay);
   if (anchor.anchorType === "embedded_link_row") return !/link|url|report|available|referenced|egnyte|revv|adas|oem/i.test(candidate.estimateLineDisplay);
   if (anchor.anchorType === "guide_row") return !/ccc|motor|guide|p page|included|not included|database|deg|rate|material|labor/i.test(candidate.estimateLineDisplay);
@@ -5517,7 +5531,11 @@ function isVisibleCitationDensityFinding(finding: CitationDensityFinding): boole
   // A 0/100 Citation Density score means no scoring signal survived — such a
   // "finding" is always an artifact (legend/boilerplate anchor), never a lead.
   if (typeof finding.citationDensityScore === "number" && finding.citationDensityScore <= 0) return false;
-  if (isJunkCitationFindingText(primaryNormalized)) return false;
+  // Totals-lane findings legitimately talk about subtotals/grand totals and
+  // anchor to totals rows — the junk gate (built to kill boilerplate-anchored
+  // artifacts) silently suppressed Body Labor/Mechanical hour-delta findings.
+  const isTotalsLaneFinding = (finding.id ?? "").startsWith("required-detector-totals-");
+  if (!isTotalsLaneFinding && isJunkCitationFindingText(primaryNormalized)) return false;
   if (/\brepair operation\b|\bproc report\b|\bcomparison or screenshot cues\b/i.test(text)) return false;
   if (/\bgeneric visible damage photo observations\b|\bgeneric key visible estimate facts\b/i.test(text)) return false;
   if (/\bproc\s+(?:pre|post)[-\s]?repair scanm\b/i.test(text) || /\bproc\s+(?:pre|post)\s+repair\s+scanm\b/.test(normalized)) return false;

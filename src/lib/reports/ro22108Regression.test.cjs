@@ -293,5 +293,189 @@ run("glued section headers with line numbers are still detected (189MISCELLANEOU
   assert.match(preWash.section ?? "", /miscellaneous operations/i);
 });
 
+// --- Manual-annotation parity fixes (RO 22108 round 2) ----------------------
+// The user's hand-annotated shop estimate + SOR exposed seven defect classes:
+// SOI marker leakage, glued dimension+part runs, RT/LT part-number cross-
+// pairing, OCR-garbled twins, consolidated misc lines, note-tail merged rows,
+// and value-blind pairing of repeated generic rows.
+
+run("OCR'd S01 marker (SOI) is stripped from descriptions", () => {
+  const row = parseCccEstimateRow("139 # SOI Masking Tape 1 14.16");
+  assert.ok(row);
+  assert.equal(row.description, "Masking Tape");
+  assert.equal(row.price, 14.16);
+  const opRow = parseCccEstimateRow("33 * SOI Rpr WindshieldTesla w/o TSA3 0.5");
+  assert.ok(opRow);
+  assert.equal(opRow.opCode, "Rpr");
+  // ALL-CAPS words starting with S-O/L must never lose their head.
+  const solid = parseCccEstimateRow("199 # Solid waste removal 1 5.00 T");
+  assert.ok(solid);
+  assert.match(solid.description, /^Solid waste removal/);
+});
+
+run("a dimension glued to the part number still yields the part (8.2x12.2110492600B)", () => {
+  const row = parseCccEstimateRow("111 Repl LT Tail lamp grommet 8.2x12.2110492600B 1 5.00 Ind.");
+  assert.ok(row);
+  assert.equal(row.partNumber, "110492600B");
+  assert.equal(row.price, 5);
+  const dashDim = parseCccEstimateRow("113 Repl LT Tail lamp grommet 8.0x5-0.9110433500B 1 5.00 Ind.");
+  assert.ok(dashDim);
+  assert.equal(dashDim.partNumber, "110433500B");
+});
+
+run("same-part RT/LT twins never cross-pair; the truly-missing gasket is flagged", () => {
+  const higherRows = parseCccEstimateRows([
+    "146 REAR LAMPS",
+    "149 Repl RT Tail lamp grommet 8.2x12.2 110492600B 1 5.00 Incl.",
+    "150 Repl LT Tail lamp grommet 8.2x12.2 110492600B 1 5.00 Incl.",
+    "153 Repl RT Tail lamp gasket 145338100A 1 9.00 Incl.",
+    "154 Repl LT Tail lamp gasket 145338100A 1 9.00 Incl.",
+    "157 Repl RT Backup lamp grommet 110492600B 1 5.00 Incl. 8.2x12.2",
+    "158 Repl LT Backup lamp grommet 110492600B 1 5.00 Incl. 8.2x12.2",
+  ].join("\n"));
+  const lowerRows = parseCccEstimateRows([
+    "107 REAR LAMPS",
+    "110 Repl RTTail lamp grommet 8.2x12.2110492600B 1 5.00 Ind.",
+    "111 Repl LT Tail lamp grommet 8.2x12.2110492600B 1 5.00 Ind.",
+    "114 Repl LT Tail lamp gasket 145338100A 1 9.00 Ind.",
+    "117 Repl RT Backuplamp grommet 8.2x12.2 110492600B 1 5.00 Ind.",
+    "118 Repl LT Backuplamp grommet 8.2x12.2 110492600B 1 5.00 Ind.",
+  ].join("\n"));
+  const match = matchEstimateLineItems({ lowerRows, higherRows });
+  assert.equal(match.matchedPairCount, 5, JSON.stringify(match.deltas.map((d) => d.summary)));
+  assert.equal(match.deltas.length, 1, JSON.stringify(match.deltas.map((d) => d.summary)));
+  assert.match(match.deltas[0].higherRow.description, /RT Tail lamp gasket/i);
+  assert.equal(match.deltas[0].lowerRow, null);
+});
+
+run("R&I Backup lamp matches its OCR-glued 'Backuplamp Ind.' twin", () => {
+  const higherRows = parseCccEstimateRows("155 R&I RT Backup lamp Incl.\n156 R&I LT Backup lamp Incl.");
+  const lowerRows = parseCccEstimateRows("115 R&I RT Backuplamp Ind.\n116 R&I LT Backuplamp Ind.");
+  const match = matchEstimateLineItems({ lowerRows, higherRows });
+  assert.equal(match.matchedPairCount, 2);
+  assert.equal(match.deltas.length, 0, JSON.stringify(match.deltas.map((d) => d.summary)));
+});
+
+run("OCR-garbled token twins still pair (Upper/Lipper, voltage/violate)", () => {
+  const bracket = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("6 R&I LT Lipper bracket 0.2"),
+    higherRows: parseCccEstimateRows("9 R&I LT Upper bracket 0.2"),
+  });
+  assert.equal(bracket.matchedPairCount, 1);
+  assert.equal(bracket.deltas.length, 0, JSON.stringify(bracket.deltas.map((d) => d.summary)));
+
+  const hv = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("153 # SOI isolate high violate 1 0.5 M"),
+    higherRows: parseCccEstimateRows("37 # Isolate high voltage 1 1.0 M"),
+  });
+  assert.equal(hv.matchedPairCount, 1, JSON.stringify(hv.deltas.map((d) => d.summary)));
+  assert.equal(hv.deltas.length, 1);
+  assert.equal(hv.deltas[0].kind, "reduced_labor");
+  assert.equal(hv.deltas[0].laborDelta, 0.5);
+});
+
+run("consolidated misc twins pair by shared content words (Mask jambs ~ Mask Openings/Jambs)", () => {
+  const match = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("147 # SOI Mask Openings/Jambs 1 21.00 1.2"),
+    higherRows: parseCccEstimateRows("193 # Mask jambs (0.3 Hours and $3.00 7 21.00 T 2.1 per panel)"),
+  });
+  assert.equal(match.matchedPairCount, 1, JSON.stringify(match.deltas.map((d) => d.summary)));
+  assert.equal(match.deltas.length, 1);
+  assert.equal(match.deltas[0].kind, "reduced_labor");
+  assert.equal(match.deltas[0].laborDelta, 0.9);
+});
+
+run("a unique-amount misc/sublet pair matches by price+hours (Paid out ~ Towing)", () => {
+  const paired = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("152 # Towing 1 797.30 X"),
+    higherRows: parseCccEstimateRows("1 # Subl Paid out 1 797.30 X"),
+  });
+  assert.equal(paired.matchedPairCount, 1, JSON.stringify(paired.deltas.map((d) => d.summary)));
+  assert.equal(paired.deltas.length, 0);
+
+  // Same price but different hours is NOT the same pay item.
+  const rejected = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("134 # SOI Repl Cover car/bag 1 10.00 0.3"),
+    higherRows: parseCccEstimateRows("192 # Mask for refinishing 1 10.00 T 0.5"),
+  });
+  assert.equal(rejected.matchedPairCount, 0);
+  assert.equal(rejected.deltas.length, 1);
+  assert.equal(rejected.deltas[0].lowerRow, null);
+});
+
+run("a merged note tail or wrapped '(… per panel)' tail still parses columns", () => {
+  const testFit = parseCccEstimateRow(
+    "175 # Test fit-Rear bumper 1 1.0 1 avoid damage to newly painted components (2 techs)"
+  );
+  assert.ok(testFit, "note-tail-merged row parses");
+  assert.equal(testFit.lineNumber, 175);
+  assert.match(testFit.description, /Test fit-Rear bumper/);
+
+  const sandPolish = parseCccEstimateRow("195 # Finish sand & polish (0.5 Refinish 8 3.0 per panel)");
+  assert.ok(sandPolish, "wrapped per-panel row parses");
+  assert.equal(sandPolish.qty, 8);
+  assert.equal(sandPolish.labor, 3);
+});
+
+run("repeated generic rows pair by matching hours, not document order (Add for Clear Coat)", () => {
+  const higherRows = parseCccEstimateRows([
+    "25 FENDER",
+    "27 Add for Clear Coat 0.8",
+    "56 ROOF",
+    "58 Add for Clear Coat 0.4",
+    "60 Add for Clear Coat 0.4",
+    "129 LIFT GATE",
+    "132 Add for Clear Coat 0.7",
+    "164 REAR BUMPER",
+    "167 Add for Clear Coat 1.1",
+  ].join("\n"));
+  const lowerRows = parseCccEstimateRows([
+    "18 FENDER",
+    "20 Add for Clear Coat 0.8",
+    "97 LIFT GATE",
+    "100 SOI Add for Clear Coat 0.7",
+    "123 REAR BUMPER",
+    "125 Add for Clear Coat 1.1",
+  ].join("\n"));
+  const match = matchEstimateLineItems({ lowerRows, higherRows });
+  assert.equal(match.matchedPairCount, 3, JSON.stringify(match.deltas.map((d) => d.summary)));
+  // Only the two 0.4-hr roof rows are unmatched; matched pairs carry no delta.
+  const unmatched = match.deltas.filter((delta) => delta.lowerRow === null);
+  assert.equal(unmatched.length, 2, JSON.stringify(match.deltas.map((d) => d.summary)));
+  assert.ok(unmatched.every((delta) => delta.higherRow.labor === 0.4));
+  assert.equal(match.deltas.length, 2, JSON.stringify(match.deltas.map((d) => d.summary)));
+});
+
+run("every ESTIMATE TOTALS category row anchors as totals_row; legend lines never do", () => {
+  const makeLine = (text, y) => ({
+    pageNumber: 7,
+    text,
+    normalizedText: text.toLowerCase(),
+    x: 40,
+    y,
+    width: 300,
+    height: 10,
+    pageWidth: 612,
+    pageHeight: 792,
+    words: [],
+  });
+  const anchors = buildEstimateRowAnchorsFromLines(
+    [
+      makeLine("ESTIMATE TOTALS", 100),
+      makeLine("Mechanical Labor 11.1 hrs @ $ 175.00 /hr 1,942.50", 112),
+      makeLine("Aluminum Or Steel Repair 2.0 hrs @ $ 135.00 /hr 270.00", 124),
+      makeLine("Miscellaneous 1,134.14", 136),
+      makeLine("LABOR D=DIAGNOSTIC E=ELECTRICAL F=FRAME G=GLASS M=MECHANICAL P=PAINT LABOR S=STRUCTURAL", 148),
+    ],
+    { sourceDocumentRole: "source_estimate" }
+  );
+  const byText = (pattern) => anchors.find((anchor) => pattern.test(anchor.rowText));
+  assert.equal(byText(/Mechanical Labor 11\.1/)?.anchorType, "totals_row");
+  assert.equal(byText(/Aluminum Or Steel Repair/)?.anchorType, "totals_row");
+  assert.equal(byText(/Miscellaneous 1,134/)?.anchorType, "totals_row");
+  const legend = byText(/D=DIAGNOSTIC/);
+  assert.notEqual(legend?.anchorType, "totals_row");
+});
+
 console.log(`\nro22108Regression: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

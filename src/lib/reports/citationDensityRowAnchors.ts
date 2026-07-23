@@ -1048,20 +1048,32 @@ function classifyLine(
       /\b(?:suppliers?|alternate parts suppliers?|alternate suppliers?)\b/.test(normalized))
   ) return "supplier_row";
   if (lineNumber) return /note|available|not correct|report/.test(normalized) ? "line_note" : "estimate_line";
-  if (isTotalsRow(normalized, currentSection)) return "totals_row";
+  if (isTotalsRow(normalized, currentSection, text)) return "totals_row";
   if (/\bsupplier|alternate|aftermarket|lkq|used part|capa\b/.test(`${normalized} ${normalizeMatchText(currentSection)}`)) return "supplier_row";
   if (sectionName) return "section_row";
   if (/\bnote|available upon request|not correct|report\b/.test(normalized)) return "line_note";
   return null;
 }
 
-function isTotalsRow(normalized: string, currentSection: string) {
+function isTotalsRow(normalized: string, currentSection: string, rawText = "") {
+  // Abbreviation-legend lines ("LABOR D=DIAGNOSTIC E=ELECTRICAL …",
+  // "M=Mechanical labor category.") carry category names but are boilerplate;
+  // anchoring a totals finding there renders it on a legal page. Real totals
+  // rows never carry "=" pairs.
+  if ((rawText.match(/=/g) ?? []).length >= 2) return false;
+  if (/\blabor category\b|\blabor categories\b/.test(normalized)) return false;
   const section = normalizeMatchText(currentSection);
   if (/\btotal|subtotal|net cost|grand total|paint supplies|paint materials|body labor|paint labor|labor rate|total cost of repairs|net cost of repairs\b/.test(normalized)) {
     return true;
   }
   if (/\bestimate totals?\b/.test(section)) {
-    return /\b(?:parts|body labor|paint labor|paint supplies|total cost of repairs|net cost of repairs|sales tax|deductible)\b/.test(normalized) &&
+    // Every rate/hours category row must anchor — the RO 22108 totals block
+    // skipped Mechanical Labor, Aluminum Or Steel Repair, and Miscellaneous,
+    // so their totals-delta findings had no row to land on.
+    return (
+      /\b(?:parts|body labor|paint labor|paint supplies|mechanical labor|diagnostic labor|electrical labor|structural labor|frame labor|glass labor|aluminum|miscellaneous|total cost of repairs|net cost of repairs|sales tax|deductible)\b/.test(normalized) ||
+      /\d(?:\.\d+)?\s*hrs?\s*@/.test(normalized)
+    ) &&
       /(?:\$?\d[\d,.]*|\d+(?:\.\d+)?\s*(?:hrs?|@))/.test(normalized);
   }
   return false;
