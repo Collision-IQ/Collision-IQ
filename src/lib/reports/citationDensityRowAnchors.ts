@@ -1040,7 +1040,7 @@ function classifyLine(
   currentSection: string
 ): EstimateRowAnchorType | null {
   const normalized = normalizeMatchText(text);
-  if (detectGuideRow(text)) return "guide_row";
+  if (detectGuideRow(text) && !isNumberedOperationRow(text)) return "guide_row";
   if (detectEmbeddedLinkRow(text)) return "embedded_link_row";
   if (
     lineNumber &&
@@ -1087,6 +1087,20 @@ function detectGuideRow(text: string) {
   const normalized = normalizeMatchText(text);
   return /\b(?:ccc|motor|guide|p pages?|included|not included|database|estimating guide|procedure pages?|deg)\b/.test(normalized) &&
     /\b(?:guide|database|included|not included|p pages?|deg|motor|ccc)\b/.test(normalized);
+}
+
+/**
+ * A numbered CCC operation row — a leading line number followed by an op code.
+ * Guide detection must never claim these: "85 R&I LT Window guide 0.3" and
+ * "135 Repl Nameplate \"DUAL MOTOR\" …" are real estimate lines whose
+ * descriptions merely contain a guide-ish word; classifying them as guide_row
+ * dropped them from the anchor set, and the Delta report then reported their
+ * lower-estimate twins as false lower-only lines (RO 22108).
+ */
+function isNumberedOperationRow(text: string) {
+  return /^\s*\d{1,4}\s*[*#]?\s*(?:S0[0-9IlLoO]\s*)?(?:R\s*&\s*I|R&R|Repl|Rpr|Blnd|Subl|Refn|Algn|Add|O\/H|Overlap)\b/i.test(
+    (text ?? "").trim()
+  );
 }
 
 function extractLineNumber(text: string) {

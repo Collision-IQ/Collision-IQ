@@ -47,6 +47,7 @@ import {
   deltaRowFromRawText,
   groupWrappedEstimateLines,
   isSectionHeader,
+  laborTypeNoun,
   matchEstimateLineItems,
   parseCccEstimateRows,
   parseCccEstimateTotals,
@@ -2055,6 +2056,27 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
 } {
   const label = delta.higherRow.description;
   const profile = classifyLineItemDeltaProfile(delta);
+  if (delta.bundledEquivalentCandidate) {
+    // Itemized shop material vs a bundled/invoice-pending carrier allowance
+    // (BetaSeal urethane vs "Glass Kit", primer/nozzles "invoice required").
+    // Never presented as missing or expanded scope — it is an accounting-style
+    // difference that reconciles through material invoices.
+    return {
+      findingType: "delta-bundled-material",
+      title: `Itemized material vs bundled allowance: ${label}`,
+      label: "OPEN TO INVOICE",
+      category: profile.category,
+      estimateGapType: "present_but_under_documented",
+      missingProof:
+        "This estimate itemizes this material line while the lower-cost estimate carries a bundled or invoice-pending allowance covering the same kind of material. This is a potential bundled-equivalent / invoice-dependent difference — not confirmed missing scope.",
+      nextAction:
+        "Reconcile the itemized material charges against the lower estimate's bundled allowance and the actual material invoices; confirm which document fully covers the materials used.",
+      missingAuthorityTypes: ["material invoices", "bundled-allowance reconciliation"],
+      score: Math.max(0, profile.score - 20),
+      safetyImpact: "low",
+      priority: "low",
+    };
+  }
   if (delta.kind === "expanded_scope") {
     return {
       findingType: "delta-expanded-scope",
@@ -2161,17 +2183,20 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
       priority: "medium",
     };
   }
-  // reduced_labor
+  // reduced_labor — name the actual labor category (mechanical/diagnostic/…):
+  // an M-marked line bills at the mechanical rate, and calling it "body labor"
+  // misstates the dollars behind the hour difference.
+  const laborNoun = laborTypeNoun(delta.higherRow.laborType ?? delta.lowerRow?.laborType);
   return {
     findingType: "delta-reduced-labor",
-    title: `Lower-cost estimate allows less body labor: ${label}`,
+    title: `Lower-cost estimate allows less ${laborNoun}: ${label}`,
     label: "ESTIMATE GAP ONLY",
     category: "labor_difference",
     estimateGapType: "reduced_by_carrier",
     missingProof:
-      "This estimate allows more body labor for this operation than the lower-cost estimate. Reconcile the labor difference against MOTOR/CCC time basis or document the lower allowance.",
+      `This estimate allows more ${laborNoun} for this operation than the lower-cost estimate. Reconcile the labor difference against MOTOR/CCC time basis or document the lower allowance.`,
     nextAction:
-      "Reconcile the body labor hours with the lower-cost estimate, or document the included-operation basis for the lower allowance.",
+      `Reconcile the ${laborNoun} hours with the lower-cost estimate, or document the included-operation basis for the lower allowance.`,
     missingAuthorityTypes: ["MOTOR/CCC labor-time basis", "included-operation basis"],
     score: 52,
     safetyImpact: "low",
@@ -2231,10 +2256,15 @@ function matchStructuredLineItemDeltas(
       currentSection =
         group.text.replace(/^\s*\d{1,4}\s+/, "").replace(/\s+/g, " ").trim() || currentSection;
     }
-    // The anchor's own section can be blank; fall back to the running header
-    // (a bare `?? currentSection` would keep an empty string).
+    // Prefer the running header tracked over THIS anchor stream: the anchor's
+    // own section comes from a small fixed header list and goes stale on
+    // unlisted headers (RO 22108 carried "windshield" through ROOF, LIFT GATE,
+    // and REAR BUMPER, cross-pairing repeated generic rows like "Overlap Major
+    // Non-Adj. Panel" across sections). The anchor section is only a fallback
+    // for rows seen before the first header.
     const anchorSection =
-      typeof anchor.section === "string" && anchor.section.trim() ? anchor.section : currentSection;
+      currentSection ??
+      (typeof anchor.section === "string" && anchor.section.trim() ? anchor.section : null);
     const row = deltaRowFromRawText({
       rawText: group.text,
       section: anchorSection,
@@ -2446,10 +2476,13 @@ function emitTotalsDeltaFindings(
       delta.kind === "total_difference"
         ? claimAnchor((text) => /grand total|total cost of repair|workfile total|net cost/.test(text))
         : delta.kind === "category_only_on_lower"
-          ? // Prefer subtotal rows so the grand-total row stays free for the
-            // total_difference finding (both otherwise claim the same anchor
-            // and the later one is dropped as a duplicate).
-            (claimAnchor((text) => /subtotal/.test(text)) ??
+          ? // This estimate has NO row for a lower-only category, so anchor to
+            // the ESTIMATE TOTALS block header — neutral placement context —
+            // rather than the Subtotal row, which reads as disputing an
+            // unrelated shop amount (RO 22108 Diagnostic Labor). Subtotal and
+            // grand-total rows remain fallbacks so the finding still renders.
+            (claimAnchor((text) => /estimate totals/.test(text)) ??
+              claimAnchor((text) => /subtotal/.test(text)) ??
               claimAnchor((text) => /grand total|total cost of repair/.test(text)))
           : (claimAnchor((text) => text.includes(categoryNeedle)) ?? blockFallbackAnchor());
     if (!anchor) continue; // never emit an unanchored finding
@@ -2485,7 +2518,10 @@ function emitTotalsDeltaFindings(
         score: isRateKind ? 78 : 62,
         safetyImpact: "low",
         priority: isRateKind || delta.kind === "total_difference" ? "high" : "medium",
-        currentSupportSummary: `${delta.summary} (compared against ${deltaMatch.comparisonName}).`,
+        currentSupportSummary:
+          delta.kind === "category_only_on_lower"
+            ? `${delta.summary} (compared against ${deltaMatch.comparisonName}). This estimate has no row for that category, so this note is anchored to the totals block for placement only — no amount on this estimate is being disputed by this finding.`
+            : `${delta.summary} (compared against ${deltaMatch.comparisonName}).`,
         missingProofSummary:
           "This difference comes from the two estimates' ESTIMATE TOTALS blocks — it is estimate-difference evidence, not proof of the correct rate or hours. Rates and category subtotals are typically the largest drivers of the total cost gap.",
         recommendedNextAction:
@@ -2520,7 +2556,10 @@ function emitTotalsDeltaFindings(
             : row.labor !== null
               ? ` (${row.labor} hr)`
               : "";
-        return `L${row.lineNumber} ${row.opCode ? `${row.opCode} ` : ""}${row.description}${amount}`;
+        // Include the section so a reviewer can locate the line ("Overlap
+        // Major Non-Adj. Panel" repeats under several panels).
+        const section = row.section ? ` [${row.section.replace(/\s+/g, " ").trim()}]` : "";
+        return `L${row.lineNumber} ${row.opCode ? `${row.opCode} ` : ""}${row.description}${amount}${section}`;
       });
       const extra =
         deltaMatch.lowerOnlyRows.length > listed.length

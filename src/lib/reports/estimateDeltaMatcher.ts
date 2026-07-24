@@ -38,6 +38,12 @@ export interface EstimateDeltaRow {
   /** Paint/refinish hours; null when the cell reads "Incl."/blank. */
   paint: number | null;
   paintIncluded: boolean;
+  /**
+   * Labor-type column letter printed beside the hours (M=mechanical,
+   * D=diagnostic, E=electrical, F=frame, G=glass, S=structural). Null/absent
+   * means the default body-labor category.
+   */
+  laborType?: string | null;
   rawText: string;
   /** Opaque identifier carried through from a source PDF row anchor. */
   anchorId?: string;
@@ -86,6 +92,13 @@ export interface EstimateLineItemDelta {
   /** Fields that differ on a matched line (operation, part, labor, paint, price, qty). */
   changedFields?: string[];
   /**
+   * True when this unmatched material/supply line has a bundled or
+   * invoice-pending counterpart on the lower estimate (itemized "BetaSeal
+   * urethane" vs a "Glass Kit" / "Primer (invoice required)" allowance) — a
+   * potential bundled-equivalent difference, NOT confirmed missing scope.
+   */
+  bundledEquivalentCandidate?: boolean;
+  /**
    * Whether this delta should be drawn in the PRIMARY highlight layer. False for
    * OCR-uncertain lines whose description is already present in the OCR'd lower
    * estimate (present-but-poorly-parsed) — these are recorded for a verify tier
@@ -111,6 +124,12 @@ export interface EstimateDeltaMatchResult {
    * they surface as a report section, not per-line highlights.
    */
   lowerOnlyRows: EstimateDeltaRow[];
+  /** Every matched (higher, lower) pair, including no-delta pairs — for tests/diagnostics. */
+  matchedPairs: Array<{
+    higherRow: EstimateDeltaRow;
+    lowerRow: EstimateDeltaRow;
+    basis: EstimateLineItemDelta["matchBasis"];
+  }>;
 }
 
 /**
@@ -280,6 +299,14 @@ export function parseEstimateNetTotal(text: string): number | null {
   return null;
 }
 
+// Industry-synonym token folding: the same operation prints under different
+// shop/CCC vocabulary ("Color Sand/Buff" ≡ "Finish sand & polish"). Both sides
+// canonicalize so the wording difference never reads as a missing operation.
+const DESCRIPTION_TOKEN_SYNONYMS: Record<string, string> = {
+  buff: "polish",
+  buffing: "polish",
+};
+
 function tokenizeDescription(description: string): string[] {
   return description
     // Fragmented/glued extractions weld words together with only the case
@@ -297,7 +324,8 @@ function tokenizeDescription(description: string): string[] {
     .replace(/[^a-z0-9 ]+/g, " ")
     .split(/\s+/)
     .map((token) => token.trim())
-    .filter((token) => token.length >= 2 && !DESCRIPTION_STOPWORDS.has(token));
+    .filter((token) => token.length >= 2 && !DESCRIPTION_STOPWORDS.has(token))
+    .map((token) => DESCRIPTION_TOKEN_SYNONYMS[token] ?? token);
 }
 
 // ---------------------------------------------------------------------------
@@ -640,8 +668,14 @@ function extractTrailingColumns(body: string): {
   laborIncluded: boolean;
   paint: number | null;
   paintIncluded: boolean;
+  laborType: string | null;
 } {
   const tokens = body.split(" ").filter(Boolean);
+  // The labor-TYPE column letter prints right after the labor hours ("isolate
+  // high voltage 1 0.5 M", "Lift gate 7.0 M 3.5"). Uppercase only: lowercase
+  // "m"/"s" are component markers that print BEFORE the hours, and T/X are
+  // taxed/non-taxed charge markers, never a labor category.
+  const LABOR_TYPE_LETTER = /^[DEFGMS]$/;
 
   // Find the extended-price token: a number with exactly two decimal places,
   // optionally with a leading $ and thousands separators.
@@ -658,9 +692,16 @@ function extractTrailingColumns(body: string): {
     // columns and Incl. markers so labor/paint deltas compare correctly.
     let end = tokens.length;
     const trailing: string[] = [];
+    let noPriceLaborType: string | null = null;
     while (end > 0) {
       const token = tokens[end - 1];
       if (COLUMN_MARKER_PATTERN.test(token)) {
+        // Scanning right-to-left: a type letter seen before the paint hours
+        // ("7.0 M 3.5") or as the trailing token ("0.5 M") sits beside the
+        // labor value.
+        if (LABOR_TYPE_LETTER.test(token) && trailing.length <= 1) {
+          noPriceLaborType = token;
+        }
         end -= 1;
         continue;
       }
@@ -724,6 +765,7 @@ function extractTrailingColumns(body: string): {
         laborIncluded,
         paint,
         paintIncluded,
+        laborType: labor !== null ? noPriceLaborType : null,
       };
     }
     return {
@@ -735,6 +777,7 @@ function extractTrailingColumns(body: string): {
       laborIncluded: false,
       paint: null,
       paintIncluded: false,
+      laborType: null,
     };
   }
 
@@ -746,9 +789,17 @@ function extractTrailingColumns(body: string): {
   let paint: number | null = null;
   let paintIncluded = false;
   let columnSlot = 0; // 0 → labor, 1 → paint
+  let laborType: string | null = null;
   for (let index = priceIndex + 1; index < tokens.length; index += 1) {
     const token = tokens[index];
-    if (COLUMN_MARKER_PATTERN.test(token)) continue;
+    if (COLUMN_MARKER_PATTERN.test(token)) {
+      // The type letter right after the labor hours ("… 15.40 T 0.2 M") names
+      // that labor's category; letters before the hours are charge markers.
+      if (LABOR_TYPE_LETTER.test(token) && columnSlot === 1 && laborType === null) {
+        laborType = token;
+      }
+      continue;
+    }
     if (/^incl\.?$/i.test(token) || /^included$/i.test(token)) {
       if (columnSlot === 0) {
         laborIncluded = true;
@@ -811,6 +862,7 @@ function extractTrailingColumns(body: string): {
     laborIncluded,
     paint,
     paintIncluded,
+    laborType: labor !== null ? laborType : null,
   };
 }
 
@@ -922,6 +974,7 @@ export function parseCccEstimateRow(
     laborIncluded: columns.laborIncluded,
     paint: columns.paint,
     paintIncluded: columns.paintIncluded,
+    laborType: columns.laborType,
     rawText: text,
     anchorId: context?.anchorId,
     pageNumber: context?.pageNumber ?? null,
@@ -1630,6 +1683,36 @@ export function matchEstimateLineItems(params: {
     });
   }
 
+  // Bundled-material equivalence: shops itemize glass/repair consumables
+  // (BetaSeal urethane, BetaPrime, nozzles, acid brushes, cavity wax, masking
+  // tape) while carriers bundle them ("Glass Kit", "Primer (invoice
+  // required)", a generic "Cavity wax" allowance). An unmatched itemized
+  // material with a bundled counterpart on the lower estimate is a potential
+  // bundled-equivalent or invoice-dependent difference — never a confirmed
+  // "not present" operation.
+  const bundledCounterpartFor = (higherRow: EstimateDeltaRow): string | null => {
+    if (higherRow.partNumber) return null;
+    const description = ` ${normalizeCategoryText(higherRow.description)} `;
+    // "Mask for primer" / "Mask jambs" are labor OPERATIONS naming a material
+    // as their target — never bundled-material lines.
+    if (/\bMASK(?!ING TAPE)/.test(description)) return null;
+    if (/(URETHANE|PRIMER|BETAPRIME|BETASEAL|NOZZLE|ACID BRUSH)/.test(description)) {
+      // "(invoice required)" may reach us glued ("INVOICEREQUIRED") or
+      // OCR-garbled ("INVOICEREUIRED") — match the stable head only.
+      if (/GLASS KIT/.test(normalizedLowerText)) return "a bundled Glass Kit allowance";
+      if (/INVOICE ?RE/.test(normalizedLowerText)) return "an invoice-pending materials line";
+    }
+    if (/CAVITY WAX/.test(description) && /CAVITY WAX/.test(normalizedLowerText)) {
+      return "a generic cavity-wax allowance";
+    }
+    if (/(MASKING|TAPE)/.test(description) && /MASKING TAPE/.test(normalizedLowerText)) {
+      return "a generic masking-tape allowance";
+    }
+    return null;
+  };
+  const buildBundledEquivalentSummary = (higherRow: EstimateDeltaRow, counterpart: string): string =>
+    `Higher estimate itemizes "${describeRow(higherRow)}"${costFragment(higherRow)}; the lower estimate carries ${counterpart} instead of this itemized line. Treat as a potential bundled-equivalent / invoice-dependent difference — reconcile against material invoices, not as confirmed missing scope.`;
+
   const classifyUnmatched = (higherRow: EstimateDeltaRow) => {
     // OCR-present-but-poorly-parsed: the line's part number / description is
     // already in the OCR'd lower text, so a non-match is an OCR parse gap, not
@@ -1650,6 +1733,27 @@ export function matchEstimateLineItems(params: {
         ocrUncertain: true,
         statusLabels: [...OCR_UNCERTAIN_STATUS_LABELS],
         annotate: false,
+      });
+      return;
+    }
+
+    // Itemized-vs-bundled materials: reconcile against invoices, never report
+    // as confirmed missing/expanded scope.
+    const bundledCounterpart = bundledCounterpartFor(higherRow);
+    if (bundledCounterpart) {
+      expandedScopeCount += 1;
+      deltas.push({
+        kind: "expanded_scope",
+        lowerRow: null,
+        higherRow,
+        matchBasis: "section_only",
+        laborDelta: higherRow.labor,
+        paintDelta: higherRow.paint,
+        priceDelta: higherRow.price,
+        summary: buildBundledEquivalentSummary(higherRow, bundledCounterpart),
+        bundledEquivalentCandidate: true,
+        statusLabels: ["POSSIBLE_BUNDLED_EQUIVALENT", "OPEN_TO_INVOICE"],
+        annotate: true,
       });
       return;
     }
@@ -1694,11 +1798,13 @@ export function matchEstimateLineItems(params: {
     }
   };
 
+  const matchedPairs: EstimateDeltaMatchResult["matchedPairs"] = [];
   const classifyMatchedPair = (
     higherRow: EstimateDeltaRow,
     lowerRow: EstimateDeltaRow,
     basis: EstimateLineItemDelta["matchBasis"]
   ) => {
+    matchedPairs.push({ higherRow, lowerRow, basis });
     const laborDelta = numericDelta(higherRow.labor, lowerRow.labor);
     const paintDelta = numericDelta(higherRow.paint, lowerRow.paint);
     const priceDelta = numericDelta(higherRow.price, lowerRow.price);
@@ -1849,6 +1955,7 @@ export function matchEstimateLineItems(params: {
     expandedScopeCount,
     ocrUncertainSuppressedCount,
     lowerOnlyRows,
+    matchedPairs,
   };
 }
 
@@ -2124,9 +2231,34 @@ function formatHours(value: number | null): string {
   return Number.isInteger(value) ? `${value}.0` : `${value}`;
 }
 
+/**
+ * The labor noun for a row, from its labor-type column letter. Estimate lines
+ * marked M bill at the mechanical rate (often ~2x body) — calling them "body
+ * labor" misstates the money at stake (RO 22108: HV isolation, calibrations,
+ * firmware, DTC research are all M @ $175 vs $90 body).
+ */
+export function laborTypeNoun(laborType: string | null | undefined): string {
+  switch ((laborType ?? "").toUpperCase()) {
+    case "M": return "mechanical labor";
+    case "D": return "diagnostic labor";
+    case "E": return "electrical labor";
+    case "F": return "frame labor";
+    case "G": return "glass labor";
+    case "S": return "structural labor";
+    default: return "body labor";
+  }
+}
+
 function costFragment(row: EstimateDeltaRow): string {
   const cost: string[] = [];
-  if (row.labor !== null && row.labor > 0) cost.push(`${formatHours(row.labor)} body labor hr`);
+  // "Add for Clear Coat" hours are refinish time by definition; a single
+  // trailing hour column parses into `labor`, but calling it body labor would
+  // misstate the category (it reconciles against the PAINT subtotal).
+  const hourNoun =
+    /\bclear coat\b/i.test(row.description) && row.paint === null
+      ? "refinish"
+      : laborTypeNoun(row.laborType);
+  if (row.labor !== null && row.labor > 0) cost.push(`${formatHours(row.labor)} ${hourNoun} hr`);
   if (row.paint !== null && row.paint > 0) cost.push(`${formatHours(row.paint)} paint hr`);
   if (row.price !== null && row.price > 0) cost.push(`$${row.price.toFixed(2)} parts`);
   return cost.length ? ` (${cost.join(", ")})` : "";
@@ -2177,7 +2309,10 @@ function buildReducedSummary(
   const label = describeRow(higherRow);
   const higherValue = field === "labor" ? higherRow.labor : higherRow.paint;
   const lowerValue = field === "labor" ? lowerRow.labor : lowerRow.paint;
-  const noun = field === "labor" ? "body labor" : "paint";
+  const noun =
+    field === "labor"
+      ? laborTypeNoun(higherRow.laborType ?? lowerRow.laborType)
+      : "paint";
   return `"${label}": higher estimate allows ${formatHours(higherValue)} ${noun} hr vs ${formatHours(lowerValue)} hr here (+${formatHours(delta)} hr difference).`;
 }
 

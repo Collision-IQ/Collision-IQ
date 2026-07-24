@@ -446,6 +446,132 @@ run("repeated generic rows pair by matching hours, not document order (Add for C
   assert.equal(match.deltas.length, 2, JSON.stringify(match.deltas.map((d) => d.summary)));
 });
 
+// --- Manual-annotation parity fixes (RO 22108 round 3) ----------------------
+// The 69-finding build still carried five defect classes: operation rows with
+// guide-ish words ("Window guide", "DUAL MOTOR") dropped as guide_row anchors,
+// cross-section pairing of repeated Overlap rows, synonym wording treated as
+// missing ops (Color Sand/Buff), M-marked mechanical hours described as body
+// labor, and itemized materials reported as missing when the SOR bundles them.
+
+run("operation rows containing guide-ish words still anchor as estimate lines", () => {
+  const makeLine = (text, y) => ({
+    pageNumber: 5,
+    text,
+    normalizedText: text.toLowerCase(),
+    x: 33,
+    y,
+    width: 300,
+    height: 8,
+    pageWidth: 612,
+    pageHeight: 792,
+    words: [],
+  });
+  const anchors = buildEstimateRowAnchorsFromLines(
+    [
+      makeLine("85 R&I LT Window guide 0.3", 100),
+      makeLine('135 Repl Nameplate "DUAL MOTOR" w/o 148484800A 1 36.00 0.2', 112),
+      makeLine("Estimate based on MOTOR CRASH ESTIMATING GUIDE and CCC MOTOR database guide pages.", 124),
+    ],
+    { sourceDocumentRole: "source_estimate" }
+  );
+  const windowGuide = anchors.find((anchor) => /window guide/i.test(anchor.rowText));
+  assert.equal(windowGuide?.anchorType, "estimate_line", "Window guide row is an estimate line");
+  const nameplate = anchors.find((anchor) => /dual motor/i.test(anchor.rowText));
+  assert.equal(nameplate?.anchorType, "estimate_line", "DUAL MOTOR nameplate row is an estimate line");
+  const boilerplate = anchors.find((anchor) => /estimating guide/i.test(anchor.rowText));
+  assert.equal(boilerplate?.anchorType ?? "guide_row", "guide_row", "guide boilerplate stays a guide row");
+});
+
+run("Color Sand/Buff pairs with Finish sand & polish (synonym fold)", () => {
+  const match = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("149 Color Sand/Buff 1 3.0"),
+    higherRows: parseCccEstimateRows("195 # Finish sand & polish (0.5 Refinish 8 3.0 per panel)"),
+  });
+  assert.equal(match.matchedPairCount, 1, JSON.stringify(match.deltas.map((d) => d.summary)));
+  assert.equal(match.lowerOnlyRows.length, 0);
+  assert.ok(!match.deltas.some((d) => d.kind === "missing_operation" || d.kind === "expanded_scope"));
+});
+
+run("repeated Overlap rows pair within their own section", () => {
+  // Shop has ONE overlap (LIFT GATE); SOR has two (ROOF + LIFT GATE). The
+  // LIFT GATE pair must match, leaving the ROOF overlap as the lower-only row.
+  const higherRows = parseCccEstimateRows(["129 LIFT GATE", "131 Overlap Major Non-Adj. Panel -0.2"].join("\n"));
+  const lowerRows = parseCccEstimateRows(
+    ["39 ROOF", "52 Overlap Major Non-Adj. Panel -0.2", "97 LIFT GATE", "99 Overlap Major Non-Adj. Panel -0.2"].join("\n")
+  );
+  const match = matchEstimateLineItems({ lowerRows, higherRows });
+  assert.equal(match.matchedPairCount, 1);
+  assert.equal(match.lowerOnlyRows.length, 1);
+  assert.equal(match.lowerOnlyRows[0].section, "ROOF", "the ROOF overlap is the lower-only one");
+});
+
+run("labor-type column letter is captured and drives the summary noun", () => {
+  const noPrice = parseCccEstimateRow("153 # SOI isolate high violate 1 0.5 M");
+  assert.ok(noPrice);
+  assert.equal(noPrice.laborType, "M");
+  const withPrice = parseCccEstimateRow("190 # Pre wash vehicle 1 5.00 T 0.5");
+  assert.ok(withPrice);
+  assert.equal(withPrice.laborType ?? null, null, "taxed-charge T is never a labor type");
+
+  const hv = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("153 # SOI isolate high violate 1 0.5 M"),
+    higherRows: parseCccEstimateRows("37 # Isolate high voltage 1 1.0 M"),
+  });
+  assert.equal(hv.deltas.length, 1);
+  assert.match(hv.deltas[0].summary, /mechanical labor/);
+  assert.doesNotMatch(hv.deltas[0].summary, /body labor/);
+});
+
+run("itemized glass materials vs a bundled Glass Kit read as invoice-dependent, not missing", () => {
+  const higherRows = parseCccEstimateRows(
+    [
+      "108 WINDSHIELD",
+      "111 # BetaSeal Express Urethane 1 37.00 T",
+      "112 # BetaPrime 5504G All-in-One 2 18.32 T",
+      "113 # Threaded Cartridge Nozzle-3M 2 6.22 T",
+      "139 # Mask for primer 1 5.00 T 0.3",
+    ].join("\n")
+  );
+  const lowerText = [
+    "100 WINDSHIELD",
+    "141 Glass Kit 3 75.00",
+    "142 Primer (invoicerequired) 1",
+    "143 Nozzles(invoicereuired) 1",
+  ].join("\n");
+  const match = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows(lowerText),
+    higherRows,
+    lowerCategoryText: lowerText,
+  });
+  const bundled = match.deltas.filter((d) => d.bundledEquivalentCandidate);
+  const bundledDescriptions = bundled.map((d) => d.higherRow.description.toLowerCase());
+  assert.ok(bundledDescriptions.some((d) => d.includes("betaseal")), "urethane is bundled-flagged");
+  assert.ok(bundledDescriptions.some((d) => d.includes("betaprime")), "primer is bundled-flagged");
+  assert.ok(
+    bundled.every((d) => (d.statusLabels ?? []).includes("POSSIBLE_BUNDLED_EQUIVALENT")),
+    "bundled candidates carry the status label"
+  );
+  assert.ok(
+    bundled.every((d) => /bundled|invoice/i.test(d.summary) && !/not present on the lower estimate/i.test(d.summary)),
+    "bundled candidates never claim the line is absent"
+  );
+  // Masking OPERATIONS are never bundled-material candidates.
+  const maskDelta = match.deltas.find((d) => /mask for primer/i.test(d.higherRow.description));
+  assert.ok(maskDelta, "mask for primer still reports");
+  assert.ok(!maskDelta.bundledEquivalentCandidate, "mask for primer is an operation, not a material");
+});
+
+run("clear-coat hours read as refinish, not body labor, in unmatched summaries", () => {
+  const match = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("39 ROOF\n42 Rpr LT Roof rail 1.0 1.6"),
+    higherRows: parseCccEstimateRows("56 ROOF\n58 Add for Clear Coat 0.4"),
+    lowerCategoryText: "ROOF",
+  });
+  assert.equal(match.deltas.length, 1);
+  assert.match(match.deltas[0].summary, /0\.4 refinish hr/);
+  assert.doesNotMatch(match.deltas[0].summary, /body labor/);
+});
+
 run("every ESTIMATE TOTALS category row anchors as totals_row; legend lines never do", () => {
   const makeLine = (text, y) => ({
     pageNumber: 7,
