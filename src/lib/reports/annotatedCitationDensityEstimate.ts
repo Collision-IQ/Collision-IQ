@@ -2131,6 +2131,26 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
       priority: profile.priority,
     };
   }
+  if (delta.kind === "operation_change" && delta.codingOnlyChange) {
+    // Identical hours/amounts, only the CCC operation token differs (R&I vs
+    // Rpr battery handling). Kept in the report — Delta captures all changes
+    // — but at low priority so a coding difference never reads as scope.
+    return {
+      findingType: "delta-coding-or-description-change",
+      title: `Operation label differs (possible coding-only change): ${label}`,
+      label: "CODING DIFFERENCE",
+      category: profile.category,
+      estimateGapType: "present_but_under_documented",
+      missingProof:
+        "The two estimates carry the same hours and amounts for this line; only the CCC operation label differs. This is likely a coding/description difference, not a scope change.",
+      nextAction:
+        "Verify whether this is only a CCC coding difference (e.g. D&R handling written as Rpr vs R&I) before treating it as a scope change.",
+      missingAuthorityTypes: ["CCC coding basis for the operation label"],
+      score: Math.max(0, profile.score - 30),
+      safetyImpact: "low",
+      priority: "low",
+    };
+  }
   if (delta.kind === "operation_change") {
     const fields = (delta.changedFields ?? []).join(", ");
     return {
@@ -2217,6 +2237,8 @@ type StructuredLineItemDeltaMatch = {
   totalsAnchors: EstimateRowAnchor[];
   /** Lower-estimate lines with no counterpart on the annotated (higher) estimate. */
   lowerOnlyRows: EstimateDeltaRow[];
+  /** Residual lower lines that duplicate an already-matched lower line (possible duplicate billing). */
+  potentialDuplicateLowerRows: EstimateDeltaRow[];
 };
 
 // Phase 1 of the structured delta path: parse and pair rows WITHOUT emitting findings or
@@ -2347,6 +2369,7 @@ function matchStructuredLineItemDeltas(
     totalsDeltas,
     totalsAnchors,
     lowerOnlyRows: match.lowerOnlyRows,
+    potentialDuplicateLowerRows: match.potentialDuplicateLowerRows,
   };
 }
 
@@ -2540,48 +2563,61 @@ function emitTotalsDeltaFindings(
   }
 
   // Lower-only section: lines the LOWER estimate carries with no counterpart
-  // here — the mirror view that exposes lower-side duplicated pay items and
-  // scope this estimate omitted. One summary finding, never per-line markers
-  // (those lines do not exist on the annotated PDF).
-  if (deltaMatch.lowerOnlyRows.length > 0) {
+  // here, plus residual lines that duplicate an already-matched lower line
+  // (possible duplicate billing / separate access operations — reported as
+  // such, never as confirmed lower-only scope). One summary finding, never
+  // per-line markers (those lines do not exist on the annotated PDF).
+  const describeLowerRow = (row: EstimateDeltaRow) => {
+    const amount =
+      row.price !== null
+        ? ` ($${row.price.toFixed(2)})`
+        : row.labor !== null
+          ? ` (${row.labor} hr)`
+          : "";
+    // Include the section so a reviewer can locate the line ("Overlap
+    // Major Non-Adj. Panel" repeats under several panels).
+    const section = row.section ? ` [${row.section.replace(/\s+/g, " ").trim()}]` : "";
+    return `L${row.lineNumber} ${row.opCode ? `${row.opCode} ` : ""}${row.description}${amount}${section}`;
+  };
+  const lowerOnlyCount = deltaMatch.lowerOnlyRows.length;
+  const duplicateCount = deltaMatch.potentialDuplicateLowerRows.length;
+  if (lowerOnlyCount > 0 || duplicateCount > 0) {
     const anchor = claimAnchor((text) =>
       /grand total|total cost of repair|subtotal|parts|miscellaneous/.test(text)
     );
     if (anchor) {
       usedAnchorIds.add(anchor.anchorId);
-      const listed = deltaMatch.lowerOnlyRows.slice(0, 12).map((row) => {
-        const amount =
-          row.price !== null
-            ? ` ($${row.price.toFixed(2)})`
-            : row.labor !== null
-              ? ` (${row.labor} hr)`
-              : "";
-        // Include the section so a reviewer can locate the line ("Overlap
-        // Major Non-Adj. Panel" repeats under several panels).
-        const section = row.section ? ` [${row.section.replace(/\s+/g, " ").trim()}]` : "";
-        return `L${row.lineNumber} ${row.opCode ? `${row.opCode} ` : ""}${row.description}${amount}${section}`;
-      });
+      const listed = deltaMatch.lowerOnlyRows.slice(0, 12).map(describeLowerRow);
       const extra =
-        deltaMatch.lowerOnlyRows.length > listed.length
-          ? ` …and ${deltaMatch.lowerOnlyRows.length - listed.length} more`
+        lowerOnlyCount > listed.length ? ` …and ${lowerOnlyCount - listed.length} more` : "";
+      const lowerOnlyPart =
+        lowerOnlyCount > 0
+          ? `${deltaMatch.comparisonName} carries ${lowerOnlyCount} line(s) with no counterpart on this estimate: ${listed.join("; ")}${extra}.`
+          : `${deltaMatch.comparisonName} carries no unreconciled lower-only lines.`;
+      const duplicatePart =
+        duplicateCount > 0
+          ? ` Additionally, ${duplicateCount} lower-estimate line(s) repeat the description of a line already matched between the two estimates — possible duplicate billing or a separate access operation, NOT confirmed missing scope: ${deltaMatch.potentialDuplicateLowerRows.slice(0, 8).map(describeLowerRow).join("; ")}.`
           : "";
       findings.push(
         buildRequiredDetectorFinding({
           context,
           anchor,
           findingType: "totals-lower-only-lines",
-          title: `Lines only on the lower estimate (${deltaMatch.lowerOnlyRows.length})`,
+          title:
+            lowerOnlyCount > 0
+              ? `Lines only on the lower estimate (${lowerOnlyCount})`
+              : `Possible duplicate lines on the lower estimate (${duplicateCount})`,
           category: "other",
-          label: "LOWER-ONLY LINES",
+          label: lowerOnlyCount > 0 ? "LOWER-ONLY LINES" : "POSSIBLE DUPLICATES",
           estimateGapType: "needs_proof",
           score: 58,
           safetyImpact: "low",
           priority: "medium",
-          currentSupportSummary: `${deltaMatch.comparisonName} carries ${deltaMatch.lowerOnlyRows.length} line(s) with no counterpart on this estimate: ${listed.join("; ")}${extra}.`,
+          currentSupportSummary: `${lowerOnlyPart}${duplicatePart}`,
           missingProofSummary:
-            "Lower-only lines can be scope this estimate omitted, differently-worded equivalents, or duplicated pay items on the lower estimate (the same repair billed under two lines). They are part of the cost difference in BOTH directions.",
+            "Lower-only lines can be scope this estimate omitted, differently-worded equivalents, or duplicated pay items on the lower estimate (the same repair billed under two lines). Repeated-description residuals are flagged separately as possible duplicates. They are part of the cost difference in BOTH directions.",
           recommendedNextAction:
-            "Review each lower-only line against this estimate: confirm whether it is missing scope here, a wording mismatch, or a duplicate/overlapping charge on the lower estimate.",
+            "Review each listed line against this estimate: confirm whether it is missing scope here, a wording mismatch, or a duplicate/overlapping charge on the lower estimate.",
           missingAuthorityTypes: ["line-by-line reconciliation of lower-only items"],
           amountImpact: null,
         })

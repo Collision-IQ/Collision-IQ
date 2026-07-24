@@ -92,6 +92,19 @@ export interface EstimateLineItemDelta {
   /** Fields that differ on a matched line (operation, part, labor, paint, price, qty). */
   changedFields?: string[];
   /**
+   * True when a matched pair differs ONLY in its CCC operation token with
+   * identical hours/amounts ("Rpr Battery 0.3 M" vs "R&I Battery 0.3 M") —
+   * likely a coding/description difference, not a scope change. Reported at
+   * low priority, never removed.
+   */
+  codingOnlyChange?: boolean;
+  /**
+   * Set when an unmatched "Add for Clear Coat" child was folded into this
+   * parent refinish delta because the parent paint-time difference equals the
+   * child's hours and the lower estimate shows no separate clear-coat line.
+   */
+  groupedClearCoatChild?: { lineNumber: number | null; hours: number };
+  /**
    * True when this unmatched material/supply line has a bundled or
    * invoice-pending counterpart on the lower estimate (itemized "BetaSeal
    * urethane" vs a "Glass Kit" / "Primer (invoice required)" allowance) — a
@@ -129,6 +142,25 @@ export interface EstimateDeltaMatchResult {
     higherRow: EstimateDeltaRow;
     lowerRow: EstimateDeltaRow;
     basis: EstimateLineItemDelta["matchBasis"];
+  }>;
+  /**
+   * Residual lower rows whose description+operation duplicate a lower row that
+   * ALREADY matched a higher row (SOR prints "Overlap Major Non-Adj. Panel" in
+   * two sections while the shop prints one; a second "R&I Storage compart").
+   * Possible duplicate billing or a separate access operation — never reported
+   * as confirmed lower-only scope.
+   */
+  potentialDuplicateLowerRows: EstimateDeltaRow[];
+  /**
+   * How each consumed lower row was reconciled: "direct" (part/description),
+   * "semantic" (equivalence alias), "group" (unique-amount pair), "bundle"
+   * (backed a bundled-material classification), "duplicate" (twin of a matched
+   * row). Rows absent from this list are genuinely lower-only.
+   */
+  lowerRowReconciliation: Array<{
+    lineNumber: number | null;
+    description: string;
+    matchedAs: "direct" | "semantic" | "group" | "bundle" | "duplicate";
   }>;
 }
 
@@ -306,6 +338,29 @@ const DESCRIPTION_TOKEN_SYNONYMS: Record<string, string> = {
   buff: "polish",
   buffing: "polish",
 };
+
+/**
+ * Narrow equivalence alias group for interior protection/covering operations:
+ * "Interior Protection kit" (shop) and "Cover car/bag" / "Cover interior"
+ * (carrier) bill the same protect-the-interior scope under different wording
+ * and different allowances (RO 22108: $3.22/0.1 vs $10.00/0.3). These pair as
+ * a CHANGED line — never as lower-only/missing scope. The group applies only
+ * to descriptions that normalize to one of these exact phrases; it never
+ * extends to other operations.
+ */
+const PROTECTION_COVER_ALIASES = new Set([
+  "INTERIOR PROTECTION KIT",
+  "INTERIOR PROTECTION",
+  "COVER INTERIOR",
+  "COVERINTERIOR", // glued extraction of "Cover interior"
+  "COVER CAR BAG",
+  "CAR BAG",
+  "VEHICLE PROTECTION KIT",
+]);
+
+function isProtectionCoverAlias(row: EstimateDeltaRow): boolean {
+  return PROTECTION_COVER_ALIASES.has(normalizeCategoryText(row.description));
+}
 
 function tokenizeDescription(description: string): string[] {
   return description
@@ -1579,6 +1634,20 @@ export function matchEstimateLineItems(params: {
   const { lowerRows, higherRows, lowerIsOcr = false, lowerCategoryText } = params;
   const used = new Set<number>();
   const deltas: EstimateLineItemDelta[] = [];
+  // Reconciliation ledger: every consumed lower row records HOW it was
+  // consumed so the lower-only detector (which runs LAST) can exclude every
+  // reconciled line — a row must never be both a bundle counterpart and a
+  // lower-only line in the same report.
+  const lowerRowReconciliation: EstimateDeltaMatchResult["lowerRowReconciliation"] = [];
+  const bundleConsumedLowerIndexes = new Set<number>();
+  const recordLowerConsumption = (
+    index: number,
+    matchedAs: EstimateDeltaMatchResult["lowerRowReconciliation"][number]["matchedAs"]
+  ) => {
+    const row = lowerRows[index];
+    if (!row) return;
+    lowerRowReconciliation.push({ lineNumber: row.lineNumber, description: row.description, matchedAs });
+  };
   // Some carrier layouts print no part-number column at all; that layout
   // difference must never read as per-line "part added" changes.
   // "Has a part column" means the column actually prints — a handful of stray
@@ -1679,6 +1748,7 @@ export function matchEstimateLineItems(params: {
       if (exactMatch) {
         preclaimed.set(higherIndex, exactMatch);
         used.add(exactMatch.index);
+        recordLowerConsumption(exactMatch.index, "direct");
       }
     });
   }
@@ -1690,6 +1760,20 @@ export function matchEstimateLineItems(params: {
   // material with a bundled counterpart on the lower estimate is a potential
   // bundled-equivalent or invoice-dependent difference — never a confirmed
   // "not present" operation.
+  // Consume the lower row that backs a bundled classification: once a line
+  // like "Glass Kit" serves as the bundle counterpart for itemized shop
+  // materials, it is reconciled — the lower-only detector must never also
+  // list it as scope the shop omitted.
+  const consumeBundleRow = (pattern: RegExp) => {
+    for (let index = 0; index < lowerRows.length; index += 1) {
+      if (used.has(index) || bundleConsumedLowerIndexes.has(index)) continue;
+      if (pattern.test(normalizeCategoryText(lowerRows[index].description))) {
+        bundleConsumedLowerIndexes.add(index);
+        recordLowerConsumption(index, "bundle");
+        return;
+      }
+    }
+  };
   const bundledCounterpartFor = (higherRow: EstimateDeltaRow): string | null => {
     if (higherRow.partNumber) return null;
     const description = ` ${normalizeCategoryText(higherRow.description)} `;
@@ -1699,13 +1783,18 @@ export function matchEstimateLineItems(params: {
     if (/(URETHANE|PRIMER|BETAPRIME|BETASEAL|NOZZLE|ACID BRUSH)/.test(description)) {
       // "(invoice required)" may reach us glued ("INVOICEREQUIRED") or
       // OCR-garbled ("INVOICEREUIRED") — match the stable head only.
-      if (/GLASS KIT/.test(normalizedLowerText)) return "a bundled Glass Kit allowance";
+      if (/GLASS KIT/.test(normalizedLowerText)) {
+        consumeBundleRow(/GLASS KIT/);
+        return "a bundled Glass Kit allowance";
+      }
       if (/INVOICE ?RE/.test(normalizedLowerText)) return "an invoice-pending materials line";
     }
     if (/CAVITY WAX/.test(description) && /CAVITY WAX/.test(normalizedLowerText)) {
+      consumeBundleRow(/CAVITY WAX/);
       return "a generic cavity-wax allowance";
     }
     if (/(MASKING|TAPE)/.test(description) && /MASKING TAPE/.test(normalizedLowerText)) {
+      consumeBundleRow(/MASKING TAPE/);
       return "a generic masking-tape allowance";
     }
     return null;
@@ -1864,6 +1953,21 @@ export function matchEstimateLineItems(params: {
       // diff misses.
       const changedFields = matchedFieldChanges(higherRow, lowerRow, { lowerHasPartColumn });
       if (changedFields.length > 0) {
+        // Coding-only change: identical hours and amounts, only the CCC
+        // operation token differs between the disconnect/handling family
+        // ("Rpr Battery 0.3 M" vs "R&I Battery 0.3 M" — the shop note reads
+        // "D&R 12 Volt and isolate terminal end"). Still reported, but as a
+        // low-priority coding/description difference, not a scope change.
+        // Repl and Blnd are excluded — those escalations are real scope.
+        const codingFamily = new Set(["R&I", "RPR"]);
+        const codingOnly =
+          changedFields.length === 1 &&
+          changedFields[0] === "operation" &&
+          higherRow.labor === lowerRow.labor &&
+          higherRow.paint === lowerRow.paint &&
+          (higherRow.price ?? null) === (lowerRow.price ?? null) &&
+          codingFamily.has((higherRow.opCode ?? "").toUpperCase()) &&
+          codingFamily.has((lowerRow.opCode ?? "").toUpperCase());
         deltas.push({
           kind: "operation_change",
           lowerRow,
@@ -1872,8 +1976,13 @@ export function matchEstimateLineItems(params: {
           laborDelta,
           paintDelta,
           priceDelta,
-          summary: buildOperationChangeSummary(higherRow, lowerRow, changedFields),
+          summary: codingOnly
+            ? `The estimates use different operation labels (${lowerRow.opCode} vs ${higherRow.opCode}) for the same${higherRow.labor !== null ? ` ${formatHours(higherRow.labor)}-hour` : ""} "${higherRow.description}" handling scope. Verify whether this is only a CCC coding difference before treating it as a scope change.`
+            : buildOperationChangeSummary(higherRow, lowerRow, changedFields),
           changedFields,
+          ...(codingOnly
+            ? { codingOnlyChange: true, statusLabels: ["CODING_OR_DESCRIPTION_CHANGE"] }
+            : {}),
           annotate: true,
         });
       }
@@ -1888,7 +1997,10 @@ export function matchEstimateLineItems(params: {
       unmatchedHigherRows.push(higherRow);
       continue;
     }
-    used.add(match.index);
+    if (!used.has(match.index)) {
+      used.add(match.index);
+      recordLowerConsumption(match.index, "direct");
+    }
     matchedPairCount += 1;
     classifyMatchedPair(higherRow, match.row, match.basis);
   }
@@ -1927,24 +2039,120 @@ export function matchEstimateLineItems(params: {
     }
     if (amountMatchIndex !== null) {
       used.add(amountMatchIndex);
+      recordLowerConsumption(amountMatchIndex, "group");
       matchedPairCount += 1;
       classifyMatchedPair(higherRow, lowerRows[amountMatchIndex], "amount");
       continue;
     }
+    // Equivalence-alias pass (protection/covering scope only): "Interior
+    // Protection kit" and "Cover car/bag" are the same pay item under
+    // different wording AND different allowances, so neither the amount
+    // fallback (values differ) nor token matching (no shared words) pairs
+    // them. Pair as a CHANGED line, never lower-only/missing.
+    if (isProtectionCoverAlias(higherRow)) {
+      let aliasIndex = -1;
+      for (let index = 0; index < lowerRows.length; index += 1) {
+        if (used.has(index)) continue;
+        if (isProtectionCoverAlias(lowerRows[index])) {
+          aliasIndex = index;
+          break;
+        }
+      }
+      if (aliasIndex !== -1) {
+        const lowerRow = lowerRows[aliasIndex];
+        used.add(aliasIndex);
+        recordLowerConsumption(aliasIndex, "semantic");
+        matchedPairCount += 1;
+        matchedPairs.push({ higherRow, lowerRow, basis: "description" });
+        const changedFields = [
+          "description",
+          ...((higherRow.price ?? null) !== (lowerRow.price ?? null) ? ["price"] : []),
+          ...((higherRow.labor ?? null) !== (lowerRow.labor ?? null) ? ["labor"] : []),
+        ];
+        const describeValues = (row: EstimateDeltaRow) =>
+          [
+            row.price !== null ? `$${row.price.toFixed(2)}` : null,
+            row.labor !== null ? `${formatHours(row.labor)} hr` : null,
+          ].filter(Boolean).join(" / ") || "no amount shown";
+        deltas.push({
+          kind: "operation_change",
+          lowerRow,
+          higherRow,
+          matchBasis: "description",
+          laborDelta: numericDelta(higherRow.labor, lowerRow.labor),
+          paintDelta: numericDelta(higherRow.paint, lowerRow.paint),
+          priceDelta: numericDelta(higherRow.price, lowerRow.price),
+          summary: `"${describeRow(higherRow)}" (${describeValues(higherRow)}) and the lower estimate's "${describeRow(lowerRow)}" (${describeValues(lowerRow)}) describe the same protection/covering scope with different wording. Treat as a changed line — description, amount, and labor differ — not as scope missing from either estimate.`,
+          changedFields,
+          statusLabels: ["EQUIVALENT_DESCRIPTION_PAIR"],
+          annotate: true,
+        });
+        continue;
+      }
+    }
     classifyUnmatched(higherRow);
   }
 
-  // Lines only the LOWER estimate carries (never matched by any higher row).
-  // This is the mirror view that catches lower-side-only scope — including a
-  // duplicated pay item the higher estimate billed once.
+  // Parent/child refinish reconciliation: fold an unmatched "Add for Clear
+  // Coat" child into its adjacent parent refinish delta (or mark both as
+  // possibly overlapping) so the same per-panel hours never read as two
+  // independent confirmed gaps.
+  const removedChildDeltas = reconcileClearCoatChildDeltas(deltas, lowerRows);
+  for (const removed of removedChildDeltas) {
+    if (removed.kind === "expanded_scope") expandedScopeCount -= 1;
+    if (removed.kind === "missing_operation") missingOperationCount -= 1;
+  }
+
+  // Lines only the LOWER estimate carries — computed LAST, after every
+  // reconciliation pass (direct, semantic alias, unique-amount group, bundle
+  // consumption), so a reconciled line can never double as lower-only.
   // Real estimate rows always carry a line number — number-less strays are
   // adjustment/betterment or summary spillover, not operations.
-  const lowerOnlyRows = lowerRows.filter(
+  const residualLowerRows = lowerRows.filter(
     (row, index) =>
       !used.has(index) &&
+      !bundleConsumedLowerIndexes.has(index) &&
       row.lineNumber !== null &&
       (row.price !== null || row.labor !== null || row.paint !== null || row.opCode !== null)
   );
+  // Partition residuals: a row whose description+operation duplicates a lower
+  // row that ALREADY matched a higher row (same op printed in two sections —
+  // "Overlap Major Non-Adj. Panel" under ROOF and LIFT GATE, a second "R&I
+  // Storage compart") is possible duplicate billing or a separate access
+  // operation, NOT confirmed lower-only scope. Opposing-side twins (RT vs LT)
+  // are different lines and stay genuinely lower-only.
+  const duplicatesMatchedRow = (row: EstimateDeltaRow): boolean => {
+    // A residual protection/covering alias duplicates the protection scope
+    // when a protection pair already matched (RO 22108: SOR bills BOTH
+    // "Cover interior" — the exact twin of the shop's Interior Protection
+    // kit — AND "Repl Cover car/bag").
+    if (
+      isProtectionCoverAlias(row) &&
+      matchedPairs.some((pair) => isProtectionCoverAlias(pair.lowerRow) || isProtectionCoverAlias(pair.higherRow))
+    ) {
+      return true;
+    }
+    return matchedPairs.some((pair) => {
+      if ((pair.lowerRow.opCode ?? "") !== (row.opCode ?? "")) return false;
+      if (hasDirectionalConflict(pair.lowerRow.descriptionTokens, row.descriptionTokens)) return false;
+      const overlap = tokenOverlap(pair.lowerRow.descriptionTokens, row.descriptionTokens);
+      return (
+        overlap.ratio >= 1 &&
+        new Set(pair.lowerRow.descriptionTokens).size === new Set(row.descriptionTokens).size
+      );
+    });
+  };
+  const lowerOnlyRows: EstimateDeltaRow[] = [];
+  const potentialDuplicateLowerRows: EstimateDeltaRow[] = [];
+  for (const row of residualLowerRows) {
+    if (duplicatesMatchedRow(row)) {
+      potentialDuplicateLowerRows.push(row);
+      const index = lowerRows.indexOf(row);
+      if (index !== -1) recordLowerConsumption(index, "duplicate");
+    } else {
+      lowerOnlyRows.push(row);
+    }
+  }
 
   return {
     deltas,
@@ -1956,7 +2164,79 @@ export function matchEstimateLineItems(params: {
     ocrUncertainSuppressedCount,
     lowerOnlyRows,
     matchedPairs,
+    potentialDuplicateLowerRows,
+    lowerRowReconciliation,
   };
+}
+
+/**
+ * "Add for Clear Coat" is a CHILD of the immediately preceding refinishable
+ * parent line (same section, within 3 line numbers). When the parent's paint
+ * time already differs by EXACTLY the child's hours and the lower estimate
+ * shows no separate clear-coat line in that section, the lower estimate's
+ * time may be a combined allowance — reporting the parent difference AND the
+ * child as independent gaps could double-count the same hours (RO 22108 roof
+ * rails: 2.0+0.4 vs 1.6 per side). Fold the child into one grouped parent
+ * finding in that exact-match case; otherwise keep both but mark them
+ * POSSIBLE_OVERLAP so they are never summed as independent confirmed hours.
+ * Returns the child deltas that were removed (for caller count bookkeeping).
+ */
+function reconcileClearCoatChildDeltas(
+  deltas: EstimateLineItemDelta[],
+  lowerRows: EstimateDeltaRow[]
+): EstimateLineItemDelta[] {
+  const removed: EstimateLineItemDelta[] = [];
+  const children = deltas.filter(
+    (delta) =>
+      delta.lowerRow === null &&
+      /\bclear coat\b/i.test(delta.higherRow.description) &&
+      delta.higherRow.labor !== null &&
+      delta.higherRow.lineNumber !== null
+  );
+  for (const child of children) {
+    const childSection = normalizeCategoryText(child.higherRow.section ?? "");
+    let parent: EstimateLineItemDelta | null = null;
+    for (const candidate of deltas) {
+      if (candidate.kind !== "reduced_paint" || candidate.lowerRow === null) continue;
+      if (candidate.groupedClearCoatChild) continue;
+      if (candidate.higherRow.lineNumber === null) continue;
+      if (normalizeCategoryText(candidate.higherRow.section ?? "") !== childSection) continue;
+      const gap = (child.higherRow.lineNumber ?? 0) - candidate.higherRow.lineNumber;
+      if (gap <= 0 || gap > 3) continue;
+      if (!parent || candidate.higherRow.lineNumber > (parent.higherRow.lineNumber ?? 0)) {
+        parent = candidate;
+      }
+    }
+    if (!parent || !parent.lowerRow) continue;
+    // If the lower estimate DOES itemize a clear-coat line in this section,
+    // its parent time is base-only and the two findings are independent.
+    const lowerSection = normalizeCategoryText(parent.lowerRow.section ?? "");
+    const lowerHasChild = lowerRows.some(
+      (row) =>
+        /\bclear coat\b/i.test(row.description) &&
+        normalizeCategoryText(row.section ?? "") === lowerSection
+    );
+    if (lowerHasChild) continue;
+    if (parent.paintDelta !== null && parent.paintDelta === child.higherRow.labor) {
+      parent.groupedClearCoatChild = {
+        lineNumber: child.higherRow.lineNumber,
+        hours: child.higherRow.labor,
+      };
+      parent.statusLabels = [...new Set([...(parent.statusLabels ?? []), "GROUPED_CLEAR_COAT"])];
+      parent.summary = `"${describeRow(parent.higherRow)}": refinish package differs by ${formatHours(parent.paintDelta)} paint hr (${formatHours(parent.higherRow.paint)} vs ${formatHours(parent.lowerRow.paint)}). The higher estimate separately itemizes ${formatHours(child.higherRow.labor)} hr "${describeRow(child.higherRow)}" (L${child.higherRow.lineNumber}); the lower estimate does not separately display it. Do not count the parent-time difference and the clear-coat line as separate financial gaps without confirming the lower estimate's time basis.`;
+      const childIndex = deltas.indexOf(child);
+      if (childIndex !== -1) {
+        deltas.splice(childIndex, 1);
+        removed.push(child);
+      }
+    } else {
+      parent.statusLabels = [...new Set([...(parent.statusLabels ?? []), "POSSIBLE_OVERLAP"])];
+      child.statusLabels = [...new Set([...(child.statusLabels ?? []), "POSSIBLE_OVERLAP"])];
+      child.summary += ` NOTE: this clear-coat line may overlap the adjacent "${describeRow(parent.higherRow)}" refinish difference — do not sum them as independent confirmed hours without confirming the lower estimate's time basis.`;
+      parent.summary += ` NOTE: the adjacent clear-coat line (L${child.higherRow.lineNumber}) may overlap this difference — do not sum them as independent confirmed hours.`;
+    }
+  }
+  return removed;
 }
 
 // ---------------------------------------------------------------------------

@@ -505,8 +505,12 @@ run("repeated Overlap rows pair within their own section", () => {
   );
   const match = matchEstimateLineItems({ lowerRows, higherRows });
   assert.equal(match.matchedPairCount, 1);
-  assert.equal(match.lowerOnlyRows.length, 1);
-  assert.equal(match.lowerOnlyRows[0].section, "ROOF", "the ROOF overlap is the lower-only one");
+  // Round 4: the residual ROOF overlap duplicates the matched LIFT GATE
+  // overlap's description, so it reports as a possible duplicate, never as
+  // confirmed lower-only scope.
+  assert.equal(match.lowerOnlyRows.length, 0);
+  assert.equal(match.potentialDuplicateLowerRows.length, 1);
+  assert.equal(match.potentialDuplicateLowerRows[0].section, "ROOF", "the ROOF overlap is the duplicate");
 });
 
 run("labor-type column letter is captured and drives the summary noun", () => {
@@ -574,6 +578,147 @@ run("clear-coat hours read as refinish, not body labor, in unmatched summaries",
   assert.equal(match.deltas.length, 1);
   assert.match(match.deltas[0].summary, /0\.4 refinish hr/);
   assert.doesNotMatch(match.deltas[0].summary, /body labor/);
+});
+
+// --- Manual-annotation parity fixes (RO 22108 round 4) ----------------------
+// Remaining matcher defects: reconciled lower rows leaking into lower-only,
+// repeated-section duplicates, protection-scope wording pairs, parent/child
+// clear-coat double counting, and coding-only operation changes overstated.
+
+run("reconciled lower rows are never lower-only; residual twins classify as duplicates", () => {
+  const higherRows = parseCccEstimateRows([
+    "1 ROOF",
+    "2 R&I LT Rocker molding type 1 1.0",
+    "5 LIFT GATE",
+    "6 Repl Lift gate 1493410E0A 1 1,599.56 7.0 3.5",
+    "7 Overlap Major Non-Adj. Panel -0.2",
+    "10 REAR BODY & FLOOR",
+    "11 R&I Storage compart 1.2",
+    "12 Repl Storage compart 149294500C 1 74.00 0.3",
+    "20 WINDSHIELD",
+    "21 # BetaSeal Express Urethane 1 37.00 T",
+    "30 MISCELLANEOUS OPERATIONS",
+    "31 # Interior Protection kit 1 3.22 0.1",
+  ].join("\n"));
+  const lowerText = [
+    "1 ROOF",
+    "2 R&I RT Rocker molding type 1 1.0",
+    "3 R&I LT Rocker molding type 1 1.0",
+    "4 Overlap Major Non-Adj. Panel -0.2",
+    "5 LIFT GATE",
+    "6 SOI Repl Lift gate 1493410E0A 1 1,599.56 7.0 3.5",
+    "7 Overlap Major Non-Adj. Panel -0.2",
+    "10 REAR BODY & FLOOR",
+    "11 R&I Storage compart 1.2",
+    "12 R&I Storage compart 0.3",
+    "13 SOI Repl Storage compart 149294500C 1 74.00 0.3",
+    "30 MISCELLANEOUSOPERATIONS",
+    "31 COVERINTERIOR 1 3.22 0.1",
+    "32 SOI Repl Cover car/bag 1 10.00 0.3",
+    "33 Glass Kit 3 75.00",
+  ].join("\n");
+  const match = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows(lowerText),
+    higherRows,
+    lowerCategoryText: lowerText,
+  });
+  const lowerOnlyDescriptions = match.lowerOnlyRows.map((row) => row.description);
+  assert.ok(
+    !lowerOnlyDescriptions.some((d) => /Overlap|Storage compart|Cover car\/bag|Glass Kit/i.test(d)),
+    `reconciled rows leaked into lower-only: ${JSON.stringify(lowerOnlyDescriptions)}`
+  );
+  // The RT rocker molding is genuinely lower-only (shop only bills LT).
+  assert.ok(
+    lowerOnlyDescriptions.some((d) => /RT Rocker molding/i.test(d)),
+    JSON.stringify(lowerOnlyDescriptions)
+  );
+  const duplicateDescriptions = match.potentialDuplicateLowerRows.map((row) => row.description);
+  assert.ok(duplicateDescriptions.some((d) => /Major Non-Adj/i.test(d)), "extra Overlap is a duplicate");
+  assert.ok(duplicateDescriptions.some((d) => /Storage compart/i.test(d)), "residual R&I storage is a duplicate");
+  assert.ok(duplicateDescriptions.some((d) => /Cover car\/bag/i.test(d)), "second protection line is a duplicate");
+  // The Glass Kit was consumed as the bundle counterpart for BetaSeal.
+  const glassKit = match.lowerRowReconciliation.find((entry) => /Glass Kit/i.test(entry.description));
+  assert.ok(glassKit, "glass kit reconciliation recorded");
+  assert.equal(glassKit.matchedAs, "bundle");
+});
+
+run("protection alias pairs as a changed line when no exact counterpart exists", () => {
+  const match = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("134 SOI Repl Cover car/bag 1 10.00 0.3"),
+    higherRows: parseCccEstimateRows("191 # Interior Protection kit 1 3.22 0.1"),
+  });
+  assert.equal(match.matchedPairCount, 1);
+  assert.equal(match.lowerOnlyRows.length, 0);
+  assert.equal(match.deltas.length, 1);
+  const delta = match.deltas[0];
+  assert.equal(delta.kind, "operation_change");
+  assert.match(delta.summary, /Interior Protection kit/i);
+  assert.match(delta.summary, /Cover car\/bag/i);
+  assert.ok((delta.changedFields ?? []).includes("description"));
+  assert.ok((delta.changedFields ?? []).includes("price"));
+  assert.ok((delta.changedFields ?? []).includes("labor"));
+});
+
+run("clear-coat child folds into the parent refinish delta when hours reconcile exactly", () => {
+  const match = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows(["39 ROOF", "42 Rpr RT Roof rail 1.0 1.6", "44 Rpr LT Roof rail 1.0 1.6"].join("\n")),
+    higherRows: parseCccEstimateRows([
+      "56 ROOF",
+      "57 Rpr RT Roof rail 1.0 2.0",
+      "58 Add for Clear Coat 0.4",
+      "59 Rpr LT Roof rail 1.0 2.0",
+      "60 Add for Clear Coat 0.4",
+    ].join("\n")),
+    lowerCategoryText: "ROOF",
+  });
+  const roofDeltas = match.deltas.filter((d) => /roof rail/i.test(d.higherRow.description));
+  assert.equal(roofDeltas.length, 2, JSON.stringify(match.deltas.map((d) => d.summary)));
+  for (const delta of roofDeltas) {
+    assert.equal(delta.kind, "reduced_paint");
+    assert.ok(delta.groupedClearCoatChild, "child grouped into parent");
+    assert.equal(delta.groupedClearCoatChild.hours, 0.4);
+    assert.match(delta.summary, /refinish package differs by 0\.4 paint hr/);
+    assert.match(delta.summary, /does not separately display it/);
+  }
+  // No standalone clear-coat findings remain.
+  assert.ok(
+    !match.deltas.some((d) => /clear coat/i.test(d.higherRow.description)),
+    JSON.stringify(match.deltas.map((d) => d.summary))
+  );
+});
+
+run("clear-coat child that does not reconcile exactly keeps both findings marked possible_overlap", () => {
+  const match = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows(["39 ROOF", "42 Rpr RT Roof rail 1.0 1.7"].join("\n")),
+    higherRows: parseCccEstimateRows(["56 ROOF", "57 Rpr RT Roof rail 1.0 2.0", "58 Add for Clear Coat 0.4"].join("\n")),
+    lowerCategoryText: "ROOF",
+  });
+  const parent = match.deltas.find((d) => /roof rail/i.test(d.higherRow.description));
+  const child = match.deltas.find((d) => /clear coat/i.test(d.higherRow.description));
+  assert.ok(parent && child, JSON.stringify(match.deltas.map((d) => d.summary)));
+  assert.ok((parent.statusLabels ?? []).includes("POSSIBLE_OVERLAP"));
+  assert.ok((child.statusLabels ?? []).includes("POSSIBLE_OVERLAP"));
+  assert.match(child.summary, /may overlap/i);
+});
+
+run("identical-value R&I/Rpr battery pair downgrades to a coding-only change", () => {
+  const match = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("26 R&I Battery 0.3 M"),
+    higherRows: parseCccEstimateRows("35 Rpr Battery 0.3 M"),
+  });
+  assert.equal(match.deltas.length, 1);
+  const delta = match.deltas[0];
+  assert.equal(delta.kind, "operation_change");
+  assert.equal(delta.codingOnlyChange, true);
+  assert.ok((delta.statusLabels ?? []).includes("CODING_OR_DESCRIPTION_CHANGE"));
+  assert.match(delta.summary, /coding difference/i);
+  // A Blnd->Rpr escalation is NOT coding-only even with equal hours.
+  const escalation = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("19 Blnd LT Fender 2.0"),
+    higherRows: parseCccEstimateRows("26 Rpr LT Fender 2.0"),
+  });
+  assert.equal(escalation.deltas.length, 1);
+  assert.ok(!escalation.deltas[0].codingOnlyChange);
 });
 
 run("every ESTIMATE TOTALS category row anchors as totals_row; legend lines never do", () => {
