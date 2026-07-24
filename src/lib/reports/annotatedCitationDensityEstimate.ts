@@ -4721,6 +4721,15 @@ function getBadAnchorRejectReason(finding: CitationDensityFinding, anchor: Estim
   if (claimedEstimateAnchor && isImpossibleEstimateLineNumber(anchor.lineNumber)) {
     return `bad anchor rejected: impossible estimate line number ${anchor.lineNumber}${structuredRowSuffix}`;
   }
+  // A totals/rate finding on a totals_row anchor is the intended pairing.
+  // The text heuristics below read the "ESTIMATE TOTALS" block header as
+  // page-header chrome (starts with "estimate", carries no digits), but that
+  // header is the only legitimate placement for a category that exists solely
+  // on the comparison estimate (RO 22108 Diagnostic Labor) — rejecting it
+  // silently dropped the finding.
+  if (anchor.anchorType === "totals_row" && isTotalOrRateFinding(finding)) {
+    return null;
+  }
   if (claimedEstimateAnchor && isBoilerplateOrLegalEstimatePageAnchor(anchor, rowType) && !explicitSupportContext) {
     return `bad anchor rejected: ${rowType} boilerplate/header/legal text cannot be rendered as an estimate annotation${structuredRowSuffix}`;
   }
@@ -4752,6 +4761,13 @@ type ProductionCitationAnchorClass =
 function classifyProductionCitationAnchor(anchor: EstimateRowAnchor): ProductionCitationAnchorClass {
   const text = normalizeMatchText(anchor.rowText);
   if (isImpossibleEstimateLineNumber(anchor.lineNumber)) return "header_block";
+  // totals_row anchors classify as totals rows BEFORE the header/contact
+  // check: the "ESTIMATE TOTALS" block header starts with "estimate", which
+  // isHeaderOrContactBlock reads as page-header chrome — and the
+  // category-only-on-lower totals finding deliberately anchored there (RO
+  // 22108 Diagnostic Labor) was hard-rejected at render and silently dropped.
+  // The delta gate still only admits totals/rate findings onto totals rows.
+  if (anchor.anchorType === "totals_row") return "totals_row";
   if (isVehicleOptionsBlock(text)) return "vehicle_options_block";
   if (isHeaderOrContactBlock(text, anchor.pageNumber)) return "header_block";
   if (isMotorCccBoilerplate(text, anchor.pageNumber)) return "motor_ccc_boilerplate";
@@ -4761,7 +4777,6 @@ function classifyProductionCitationAnchor(anchor: EstimateRowAnchor): Production
   if (anchor.anchorType === "estimate_line" || anchor.anchorType === "line_note" || anchor.anchorType === "embedded_link_row") {
     if (!isProductionBoilerplateText(text, anchor.pageNumber)) return "estimate_line";
   }
-  if (anchor.anchorType === "totals_row") return "totals_row";
   if (anchor.anchorType === "supplier_row") return "supplier_row";
   if (/\bsupplement summary\b/.test(text)) return "supplement_summary_row";
   if (isVehicleOptionsBlock(text)) return "vehicle_options_block";

@@ -45,6 +45,10 @@ const {
   isNonEstimateContentRow,
 } = require("./estimateDeltaMatcher.ts");
 const { buildEstimateRowAnchorsFromLines } = require("./citationDensityRowAnchors.ts");
+const {
+  buildAnnotatedCitationDensityEstimatePdf,
+  buildRequiredEstimatorDeltaFindings,
+} = require("./annotatedCitationDensityEstimate.ts");
 
 let passed = 0;
 let failed = 0;
@@ -603,5 +607,82 @@ run("every ESTIMATE TOTALS category row anchors as totals_row; legend lines neve
   assert.notEqual(legend?.anchorType, "totals_row");
 });
 
-console.log(`\nro22108Regression: ${passed} passed, ${failed} failed`);
-if (failed > 0) process.exit(1);
+async function runAsync(name, fn) {
+  try {
+    await fn();
+    passed += 1;
+    console.log(`  ok - ${name}`);
+  } catch (error) {
+    failed += 1;
+    console.error(`  FAIL - ${name}`);
+    console.error(error && error.stack ? error.stack : error);
+  }
+}
+
+// A category that exists ONLY on the lower estimate's totals (RO 22108
+// Diagnostic Labor) anchors to the annotated estimate's "ESTIMATE TOTALS"
+// block header. The render anchor gate read that header as page chrome
+// ("starts with 'estimate', no digits") and silently dropped the finding —
+// the report then under-reported the totals reconciliation by one category.
+async function diagnosticLaborFindingSurvivesRender() {
+  const { PDFDocument, StandardFonts } = require("pdf-lib");
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([612, 792]);
+  const rows = [
+    "1 FRONT BUMPER & GRILLE",
+    "2 R&I bumper cover 1.4",
+    "3 Repl Filter HEPA filter 165837500B 1 90.00",
+    "ESTIMATE TOTALS",
+    "Body Labor 10.0 hrs @ $ 90.00 /hr 900.00",
+    "Subtotal 990.00",
+    "Grand Total 1,090.00",
+    "Total Cost of Repairs 1,090.00",
+  ];
+  rows.forEach((text, index) => {
+    page.drawText(text, { x: 42, y: 700 - index * 24, size: 9, font });
+  });
+  const sourceBytes = await doc.save();
+  const comparisonText = [
+    "1 FRONT BUMPER & GRILLE",
+    "2 R&I bumper cover 1.4",
+    "3 Repl Filter HEPA filter 165837500B 1 70.00",
+    "ESTIMATE TOTALS",
+    "Body Labor 9.0 hrs @ $ 90.00 /hr 810.00",
+    "Diagnostic Labor 1.0 hrs @ $ 90.00 /hr 90.00",
+    "Subtotal 900.00",
+    "Grand Total 980.00",
+    "Total Cost of Repairs 980.00",
+  ].join("\n");
+  const result = await buildAnnotatedCitationDensityEstimatePdf({
+    sourcePdfBytes: new Uint8Array(sourceBytes),
+    sourceDocumentId: "ro22108-diag-synthetic",
+    sourcePdfName: "Shop synthetic.pdf",
+    uploadedFileNames: ["Shop synthetic.pdf", "SOR synthetic.pdf"],
+    sourceText: rows.join("\n"),
+    comparisonEstimateTexts: [
+      { sourceDocumentId: "sor", fileName: "SOR synthetic.pdf", text: comparisonText, estimateRole: "carrier" },
+    ],
+    findings: [],
+    findingGenerator: buildRequiredEstimatorDeltaFindings,
+    request: { estimateRole: "shop" },
+  });
+  const metadataText = JSON.stringify(result.annotationMetadata ?? []);
+  assert.match(
+    metadataText,
+    /category-only-on-lower-diagnostic-labor/i,
+    "diagnostic-labor category finding renders"
+  );
+  const dropped = (result.debugTrace?.droppedFindings ?? []).filter((item) =>
+    /category-only-on-lower/i.test(item.findingId ?? "")
+  );
+  assert.equal(dropped.length, 0, JSON.stringify(dropped));
+}
+
+runAsync(
+  "a lower-only totals category anchored to the ESTIMATE TOTALS header survives the render gate",
+  diagnosticLaborFindingSurvivesRender
+).then(() => {
+  console.log(`\nro22108Regression: ${passed} passed, ${failed} failed`);
+  if (failed > 0) process.exit(1);
+});
