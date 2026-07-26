@@ -85,6 +85,19 @@ const workAuthZip = file("Work Auth 21215.zip", Math.round(40.8 * MB), "applicat
 }
 
 {
+  // Phone-camera JPGs (4.5–8MB) must never hit the multipart route: Vercel
+  // caps serverless request bodies at ~4.5MB and 413s before the route runs
+  // (mobile-only upload failures — desktop screenshots are smaller).
+  const free = limitsFor("free");
+  const phonePhoto = file("20260726_112733.jpg", Math.round(5.8 * MB), "image/jpeg");
+  const decision = resolveUploadTransport(phonePhoto, free);
+  assert.equal(decision.uploadMode, "direct-storage");
+  assert.equal(decision.reason, "large_file");
+  // Plain images are not plan-gated on the direct route.
+  assert.equal(validateDirectUploadCandidate(phonePhoto, free), null);
+}
+
+{
   const starter = limitsFor("starter");
   assert.equal(
     validateDirectUploadCandidate(file("walkaround.mp4", 3 * MB, "video/mp4"), starter)?.code,

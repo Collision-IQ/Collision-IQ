@@ -2,7 +2,14 @@ import type { UploadPlanLimits } from "@/lib/uploadSafety/uploadLimits";
 import { formatUploadLimitBytes } from "@/lib/uploadSafety/uploadLimits";
 import { isVideoExtension } from "@/lib/uploadSafety/videoSafety";
 
-export const STANDARD_UPLOAD_ROUTE_MAX_BYTES = 8 * 1024 * 1024;
+// Ceiling for the legacy multipart /api/upload route. Vercel rejects
+// serverless request bodies over ~4.5MB at the PLATFORM level (413 before the
+// route runs), so this must sit safely below that — at the old 8MB ceiling,
+// phone-camera JPGs in the 4.5–8MB band failed on mobile with a misleading
+// "too large for the current upload route or plan" error while desktop
+// screenshots (smaller) worked. Anything above this routes to direct-storage,
+// which falls back to the chunked relay when the blob API is unreachable.
+export const STANDARD_UPLOAD_ROUTE_MAX_BYTES = 4 * 1024 * 1024;
 
 export type UploadTransport = "api-upload" | "direct-storage";
 

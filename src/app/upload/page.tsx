@@ -4,6 +4,7 @@ import { upload as uploadBlob } from "@vercel/blob/client";
 import { SignInButton, useAuth } from "@clerk/nextjs";
 import { useState } from "react";
 import { uploadFileViaChunkedRelay } from "@/lib/chunkedBlobUpload";
+import { STANDARD_UPLOAD_ROUTE_MAX_BYTES } from "@/lib/uploadSafety/directUploadRouting";
 
 export default function UploadPage() {
   const { getToken, isLoaded, userId } = useAuth();
@@ -12,7 +13,7 @@ export default function UploadPage() {
 
   function shouldUseDirectUpload(uploadFile: File) {
     return (
-      uploadFile.size > 8 * 1024 * 1024 ||
+      uploadFile.size > STANDARD_UPLOAD_ROUTE_MAX_BYTES ||
       /\.zip$/i.test(uploadFile.name) ||
       /\.(?:mp4|mov|webm)$/i.test(uploadFile.name) ||
       uploadFile.type.startsWith("video/")
