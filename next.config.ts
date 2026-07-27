@@ -8,6 +8,18 @@ const OCR_TRACE_INCLUDES = [
   "./assets/tessdata/eng.traineddata.gz",
   "./node_modules/tesseract.js-core/**",
   "./node_modules/tesseract.js/**",
+  // tesseract.js is a serverExternalPackage, so nft never walks its imports —
+  // and "tesseract.js/**" does NOT cover its HOISTED runtime dependencies in
+  // top-level node_modules. The node worker requires these at runtime
+  // (worker-script/utils/setImage.js line 3 is `require('bmp-js')`); missing
+  // ones crash /api/upload with an uncaught MODULE_NOT_FOUND on scanned PDFs.
+  "./node_modules/bmp-js/**",
+  "./node_modules/idb-keyval/**",
+  "./node_modules/is-url/**",
+  "./node_modules/node-fetch/**",
+  "./node_modules/regenerator-runtime/**",
+  "./node_modules/wasm-feature-detect/**",
+  "./node_modules/zlibjs/**",
   "./node_modules/pdfjs-dist/legacy/build/pdf.mjs",
   // pdf.js imports the worker module at runtime even with disableWorker
   // ("fake worker") — without it OCR fails on Vercel with "Cannot find module
