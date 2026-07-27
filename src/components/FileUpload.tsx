@@ -239,6 +239,12 @@ export default function FileUpload({
       for (const file of acceptedFiles) {
         const token = await getToken();
         const authHeaders = token ? { Authorization: `Bearer ${token}` } : undefined;
+        // Clerk tokens expire after ~60s and an Authorization header overrides
+        // the refreshed session cookie — long transfers must re-mint.
+        const freshAuthHeaders = async (): Promise<Record<string, string> | undefined> => {
+          const freshToken = await getToken();
+          return freshToken ? { Authorization: `Bearer ${freshToken}` } : undefined;
+        };
         const transport = resolveUploadTransport(file, uploadLimits);
         console.info("[upload-client] selected upload route", {
           uploadMode: transport.uploadMode,
@@ -297,7 +303,10 @@ export default function FileUpload({
               sizeBytes: file.size,
               message: directError instanceof Error ? directError.message : String(directError),
             });
-            blob = await uploadFileViaChunkedRelay(file, { headers: authHeaders });
+            blob = await uploadFileViaChunkedRelay(file, {
+              headers: authHeaders,
+              getHeaders: freshAuthHeaders,
+            });
             console.info("[upload-client] chunkedRelayCompleted", {
               uploadMode: "chunked-relay",
               filename: file.name,
@@ -318,12 +327,15 @@ export default function FileUpload({
             filename: file.name,
             sizeBytes: file.size,
           });
+          // Finalize runs AFTER the (possibly minutes-long) transfer — the
+          // token captured at upload start is stale by now.
+          const finalizeHeaders = (await freshAuthHeaders()) ?? authHeaders;
           res = await fetch("/api/upload/finalize", {
             method: "POST",
             credentials: "include",
             headers: {
               "Content-Type": "application/json",
-              ...(authHeaders ?? {}),
+              ...(finalizeHeaders ?? {}),
             },
             body: JSON.stringify({
               url: blob.url,

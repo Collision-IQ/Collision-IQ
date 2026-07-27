@@ -26,6 +26,12 @@ export default function UploadPage() {
     try {
       const token = await getToken();
       const authHeaders = token ? { Authorization: `Bearer ${token}` } : undefined;
+      // Clerk tokens expire after ~60s and an Authorization header overrides
+      // the refreshed session cookie — long transfers must re-mint.
+      const freshAuthHeaders = async (): Promise<Record<string, string> | undefined> => {
+        const freshToken = await getToken();
+        return freshToken ? { Authorization: `Bearer ${freshToken}` } : undefined;
+      };
       let res: Response;
 
       if (shouldUseDirectUpload(file)) {
@@ -69,7 +75,10 @@ export default function UploadPage() {
             filename: file.name,
             message: directError instanceof Error ? directError.message : String(directError),
           });
-          blob = await uploadFileViaChunkedRelay(file, { headers: authHeaders });
+          blob = await uploadFileViaChunkedRelay(file, {
+            headers: authHeaders,
+            getHeaders: freshAuthHeaders,
+          });
         } finally {
           stallGuard.finish();
         }
@@ -83,12 +92,14 @@ export default function UploadPage() {
           filename: file.name,
           sizeBytes: file.size,
         });
+        // Finalize runs after the (possibly long) transfer — refresh the token.
+        const finalizeHeaders = (await freshAuthHeaders()) ?? authHeaders;
         res = await fetch("/api/upload/finalize", {
           method: "POST",
           credentials: "include",
           headers: {
             "Content-Type": "application/json",
-            ...(authHeaders ?? {}),
+            ...(finalizeHeaders ?? {}),
           },
           body: JSON.stringify({
             url: blob.url,

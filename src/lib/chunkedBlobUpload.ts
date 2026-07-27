@@ -74,16 +74,26 @@ export async function uploadFileViaChunkedRelay(
   options: {
     activeCaseId?: string | null;
     headers?: Record<string, string>;
+    /**
+     * Mint FRESH auth headers per relay request. Clerk session tokens expire
+     * after ~60s, and when an Authorization header is present Clerk uses it
+     * and ignores the (refreshed) session cookie — so a token captured before
+     * the 30s direct-upload stall goes stale mid-relay on slow mobile
+     * connections and every later chunk 401s ("No authenticated Clerk
+     * session"). Prefer this over static `headers`.
+     */
+    getHeaders?: () => Promise<Record<string, string> | undefined>;
     onProgress?: (info: { sentChunks: number; totalChunks: number }) => void;
   } = {}
 ): Promise<ChunkedUploadResult> {
-  const baseHeaders = options.headers ?? {};
+  const freshHeaders = async (): Promise<Record<string, string>> =>
+    (options.getHeaders ? await options.getHeaders() : options.headers) ?? options.headers ?? {};
   const contentType = file.type || "application/octet-stream";
 
   const initRes = await fetch("/api/upload/chunked?action=init", {
     method: "POST",
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...baseHeaders },
+    headers: { "Content-Type": "application/json", ...(await freshHeaders()) },
     body: JSON.stringify({ filename: file.name, contentType, sizeBytes: file.size }),
   });
   const init = (await initRes.json().catch(() => null)) as
@@ -101,7 +111,9 @@ export async function uploadFileViaChunkedRelay(
       {
         method: "POST",
         credentials: "include",
-        headers: { "Content-Type": "application/octet-stream", ...baseHeaders },
+        // Re-mint auth per chunk: a multi-chunk relay on a slow connection
+        // easily outlives a single Clerk token's ~60s validity.
+        headers: { "Content-Type": "application/octet-stream", ...(await freshHeaders()) },
         body: slice,
       }
     );
@@ -115,7 +127,7 @@ export async function uploadFileViaChunkedRelay(
   const assembleRes = await fetch("/api/upload/chunked?action=assemble", {
     method: "POST",
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...baseHeaders },
+    headers: { "Content-Type": "application/json", ...(await freshHeaders()) },
     body: JSON.stringify({
       sessionId,
       filename: file.name,

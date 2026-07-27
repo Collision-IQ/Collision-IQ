@@ -3565,6 +3565,13 @@ export default function ChatWidget({
     onChatEngagement?.();
     const token = await getToken();
     const authHeaders = token ? { Authorization: `Bearer ${token}` } : undefined;
+    // Clerk tokens expire after ~60s and an Authorization header overrides the
+    // refreshed session cookie — long uploads (stall + relay chunks on mobile)
+    // must re-mint per request or later requests 401.
+    const freshAuthHeaders = async (): Promise<Record<string, string> | undefined> => {
+      const freshToken = await getToken();
+      return freshToken ? { Authorization: `Bearer ${freshToken}` } : undefined;
+    };
     const transport = resolveUploadTransport(file, effectiveUploadPlanLimits);
     const activeCaseId = analysisReportIdRef.current;
     const lifecycleId = getUploadLifecycleId(file);
@@ -3643,6 +3650,7 @@ export default function ChatWidget({
         blob = await uploadFileViaChunkedRelay(file, {
           activeCaseId,
           headers: authHeaders,
+          getHeaders: freshAuthHeaders,
         });
         console.info("[upload-client] chunkedRelayCompleted", {
           uploadMode: "chunked-relay",
@@ -3668,12 +3676,15 @@ export default function ChatWidget({
       });
 
       updateUploadLifecyclePhase(lifecycleId, "finalizing");
+      // Finalize runs AFTER the (possibly minutes-long) transfer — the token
+      // captured at upload start is stale by now.
+      const finalizeHeaders = (await freshAuthHeaders()) ?? authHeaders;
       res = await fetch("/api/upload/finalize", {
         method: "POST",
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          ...(authHeaders ?? {}),
+          ...(finalizeHeaders ?? {}),
         },
         body: JSON.stringify({
           url: blob.url,
