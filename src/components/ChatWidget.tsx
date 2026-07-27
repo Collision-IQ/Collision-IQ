@@ -25,7 +25,7 @@ import { diffTypoSpans, requestTypoFix, type TypoSpan } from "@/lib/ai/typeHelpe
 import ComposerTypoUnderline from "@/components/ComposerTypoUnderline";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import { upload as uploadBlob } from "@vercel/blob/client";
-import { uploadFileViaChunkedRelay } from "@/lib/chunkedBlobUpload";
+import { createUploadStallGuard, uploadFileViaChunkedRelay } from "@/lib/chunkedBlobUpload";
 import type { DecisionPanel } from "@/lib/ai/builders/buildDecisionPanel";
 import type { RepairIntelligenceReport } from "@/lib/ai/types/analysis";
 import type { AccountEntitlements } from "@/lib/billing/entitlements";
@@ -3606,8 +3606,13 @@ export default function ChatWidget({
       });
 
       let blob: { url: string; downloadUrl: string; pathname: string; contentType?: string | null };
+      // Stall guard: on CORS-blocked mobile environments the blob client can
+      // retry PUTs without settling, so the catch below never ran and the
+      // upload sat at UPLOADING forever. No progress for 30s → abort + throw
+      // → chunked-relay fallback.
+      const stallGuard = createUploadStallGuard();
       try {
-        blob = await uploadBlob(`uploads/${Date.now()}-${file.name}`, file, {
+        const directUploadPromise = uploadBlob(`uploads/${Date.now()}-${file.name}`, file, {
           access: "public",
           contentType: file.type || undefined,
           handleUploadUrl: "/api/upload/direct",
@@ -3618,7 +3623,13 @@ export default function ChatWidget({
             activeCaseId,
           }),
           headers: authHeaders,
+          abortSignal: stallGuard.abortSignal,
+          onUploadProgress: stallGuard.onUploadProgress,
         });
+        // The race can leave this as the losing promise; keep its eventual
+        // rejection handled so it never surfaces as an unhandled rejection.
+        directUploadPromise.catch(() => {});
+        blob = await Promise.race([directUploadPromise, stallGuard.stalled]);
       } catch (directError) {
         // Some environments cannot read the blob API's responses (CORS), so
         // every direct PUT reports as failed. Fall back to the chunked
@@ -3639,6 +3650,8 @@ export default function ChatWidget({
           sizeBytes: file.size,
           pathname: blob.pathname,
         });
+      } finally {
+        stallGuard.finish();
       }
 
       console.info("[upload-client] directUploadCompleted", {

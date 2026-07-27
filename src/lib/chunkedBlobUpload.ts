@@ -15,6 +15,60 @@ export type ChunkedUploadResult = {
   contentType: string;
 };
 
+/**
+ * Stall watchdog for the direct browser→blob upload. In the CORS-blocked
+ * mobile environment the blob client can retry PUTs without its promise ever
+ * settling — the catch-based chunked-relay fallback then never fires and the
+ * tray sits at UPLOADING forever. The guard rejects (and aborts the transfer)
+ * once NO upload progress has been observed for `stallMs`; bytes actually
+ * moving on a slow connection keep resetting the timer, so legitimate slow
+ * uploads are never cut off.
+ *
+ * Usage:
+ *   const guard = createUploadStallGuard();
+ *   try {
+ *     const uploadPromise = uploadBlob(..., {
+ *       abortSignal: guard.abortSignal,
+ *       onUploadProgress: guard.onUploadProgress,
+ *     });
+ *     uploadPromise.catch(() => {}); // the race may leave it as the loser
+ *     blob = await Promise.race([uploadPromise, guard.stalled]);
+ *   } catch { ...existing chunked-relay fallback... } finally { guard.finish(); }
+ */
+export function createUploadStallGuard(stallMs = 30_000): {
+  abortSignal: AbortSignal;
+  onUploadProgress: () => void;
+  stalled: Promise<never>;
+  finish: () => void;
+} {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let settled = false;
+  let rejectStalled: ((error: Error) => void) | undefined;
+  const stalled = new Promise<never>((_, reject) => {
+    rejectStalled = reject;
+  });
+  const bump = () => {
+    if (settled) return;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      settled = true;
+      controller.abort();
+      rejectStalled?.(
+        new Error(
+          `Direct upload made no progress for ${Math.round(stallMs / 1000)}s (blob API unreachable) — falling back to the chunked relay.`
+        )
+      );
+    }, stallMs);
+  };
+  const finish = () => {
+    settled = true;
+    if (timer) clearTimeout(timer);
+  };
+  bump();
+  return { abortSignal: controller.signal, onUploadProgress: bump, stalled, finish };
+}
+
 export async function uploadFileViaChunkedRelay(
   file: File,
   options: {

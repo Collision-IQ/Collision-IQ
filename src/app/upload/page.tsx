@@ -3,7 +3,7 @@
 import { upload as uploadBlob } from "@vercel/blob/client";
 import { SignInButton, useAuth } from "@clerk/nextjs";
 import { useState } from "react";
-import { uploadFileViaChunkedRelay } from "@/lib/chunkedBlobUpload";
+import { createUploadStallGuard, uploadFileViaChunkedRelay } from "@/lib/chunkedBlobUpload";
 import { STANDARD_UPLOAD_ROUTE_MAX_BYTES } from "@/lib/uploadSafety/directUploadRouting";
 
 export default function UploadPage() {
@@ -42,8 +42,11 @@ export default function UploadPage() {
           sizeBytes: file.size,
         });
         let blob: { url: string; downloadUrl: string; pathname: string; contentType?: string | null };
+        // Stall guard: a CORS-blocked direct upload can retry without ever
+        // settling — abort after 30s of no progress so the relay fallback runs.
+        const stallGuard = createUploadStallGuard();
         try {
-          blob = await uploadBlob(`uploads/${Date.now()}-${file.name}`, file, {
+          const directUploadPromise = uploadBlob(`uploads/${Date.now()}-${file.name}`, file, {
             access: "public",
             contentType: file.type || undefined,
             handleUploadUrl: "/api/upload/direct",
@@ -54,7 +57,11 @@ export default function UploadPage() {
               activeCaseId: null,
             }),
             headers: authHeaders,
+            abortSignal: stallGuard.abortSignal,
+            onUploadProgress: stallGuard.onUploadProgress,
           });
+          directUploadPromise.catch(() => {});
+          blob = await Promise.race([directUploadPromise, stallGuard.stalled]);
         } catch (directError) {
           // Some environments cannot read the blob API's responses (CORS) —
           // fall back to the chunked server-relay.
@@ -63,6 +70,8 @@ export default function UploadPage() {
             message: directError instanceof Error ? directError.message : String(directError),
           });
           blob = await uploadFileViaChunkedRelay(file, { headers: authHeaders });
+        } finally {
+          stallGuard.finish();
         }
         console.info("[upload-client] directUploadCompleted", {
           uploadMode: "direct-storage",
