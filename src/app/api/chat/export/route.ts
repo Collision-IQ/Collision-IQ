@@ -4,6 +4,7 @@ import {
   requireCurrentUser,
 } from "@/lib/auth/require-current-user";
 import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
+import { breakInlineSectionLabels } from "@/lib/ui/presentationText";
 import { getCurrentEntitlements } from "@/lib/billing/entitlements";
 import { UsageAccessError, recordUsage } from "@/lib/billing/usage";
 import { getUsageCount, incrementUsage } from "@/lib/usage";
@@ -92,7 +93,11 @@ function resolveExportText(body: ChatExportRequestBody): string {
     ? (body.messages as ChatExportMessage[])
         .map((message) => {
           const role = typeof message.role === "string" ? message.role.toUpperCase() : "MESSAGE";
-          const content = extractMessageText(message.content).trim();
+          const extracted = extractMessageText(message.content).trim();
+          // Assistant analyses can arrive as one dense paragraph with inline
+          // "**Finding: **" labels — give the export the same paragraph
+          // structure the live chat renders.
+          const content = role === "ASSISTANT" ? breakInlineSectionLabels(extracted).trim() : extracted;
           return content ? `${role}:\n${content}` : "";
         })
         .filter(Boolean)

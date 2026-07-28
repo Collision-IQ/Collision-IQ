@@ -1,4 +1,4 @@
-import { cleanPresentationMarkdown } from "@/lib/ui/presentationText";
+import { breakInlineSectionLabels, cleanPresentationMarkdown } from "@/lib/ui/presentationText";
 
 const VALUATION_URL_PATTERN = /For a full valuation, continue at https:\/\/www\.collision\.academy\/?/gi;
 const NUMBERED_APPRAISAL_SECTION_PATTERN =
@@ -22,7 +22,9 @@ export function formatAssistantDisplayMessage(content: string): string {
 }
 
 function enforceLiveChatLineBreaks(value: string): string {
-  return formatInlineOperationChains(value)
+  // Generic label-to-paragraph pass FIRST — the phrase-specific rules below
+  // only ever matched historical outputs (no-hardcoded-logic rule).
+  return formatInlineOperationChains(breakInlineSectionLabels(value))
     .replace(NUMBERED_APPRAISAL_SECTION_PATTERN, "\n\n$1")
     .replace(/(?:[ \t]*\n[ \t]*|[ \t]+)(#{2,3}\s+)/g, "\n\n$1")
     .replace(APPRAISAL_BLOCK_LABEL_PATTERN, "\n\n$1\n")

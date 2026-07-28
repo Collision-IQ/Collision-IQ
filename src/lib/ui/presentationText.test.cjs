@@ -34,6 +34,7 @@ const {
   cleanEstimateLineForCustomer,
   cleanEstimateLineForTechnicalExport,
   cleanOperationDisplayText,
+  breakInlineSectionLabels,
   cleanPresentationMarkdown,
   cleanUserFacingPresentationText,
   isMalformedEstimateLine,
@@ -562,4 +563,34 @@ run("still scrubs bare prose URLs in markdown mode", () => {
   const out = cleanPresentationMarkdown("See https://example.com/raw for details");
   assert.match(out, /source link/);
   assert.doesNotMatch(out, /https:\/\/example\.com\/raw/);
+});
+
+run("inline bold section labels break into paragraphs with valid bold (RO 22009 chat)", () => {
+  // Verbatim shape from the production reply: malformed bold (space before
+  // the closing **), lowercase labels, everything glued into one paragraph.
+  const wall =
+    "Bottom line: Relatedness is not established either way from the reviewed files. " +
+    "**documentation: ** asTech pre-repair scan (6/10/26, RO 22009, 18 faults/12 modules); ISTA fault lists dated 7/14/26. " +
+    "**Finding: ** The safety box fault first appears in the 7/14/26 ISTA log. " +
+    "**Why It Matters: ** This is a $6,874.77 line and it's HV-safety-critical. " +
+    "**Missing documentation: ** Date of loss (to fix the timeline).";
+  const out = breakInlineSectionLabels(wall);
+  // Each label starts its own paragraph, bold is valid, label title-cased.
+  assert.match(out, /\n\n\*\*Documentation:\*\* asTech pre-repair scan/);
+  assert.match(out, /\n\n\*\*Finding:\*\* The safety box fault/);
+  assert.match(out, /\n\n\*\*Why It Matters:\*\* This is a/);
+  assert.match(out, /\n\n\*\*Missing documentation:\*\* Date of loss/);
+  // No malformed "** " bold survives anywhere.
+  assert.doesNotMatch(out, /\*\*\s[^*]*\*\*\s/);
+  assert.doesNotMatch(out, /: \*\*/);
+});
+
+run("real emphasis without a colon is left alone; leading label gets no blank prefix", () => {
+  assert.equal(
+    breakInlineSectionLabels("This is **genuinely** important."),
+    "This is **genuinely** important."
+  );
+  const lead = breakInlineSectionLabels("**Finding:** starts the message.");
+  assert.ok(!lead.startsWith("\n"), lead);
+  assert.match(lead, /^\*\*Finding:\*\* starts the message\./);
 });
