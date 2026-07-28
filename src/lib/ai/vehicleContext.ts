@@ -517,8 +517,11 @@ function parseVehicleLine(line: string): {
       // "Civic Coupe EX w/Continuously Variable Transmission 2D CPE 4-1.5L
       // Turbocharged Gasoline BLACK" displays as "Civic Coupe EX". The full raw
       // phrase is preserved on the caller's raw vehicle text.
+      // Drivetrain tokens cut the tail only when MORE descriptors follow
+      // ("...4WD 4D SUV 8-6.4L..." → cut) — a TERMINAL drivetrain token is
+      // part of the trim ("Model S 75D AWD" keeps "75D AWD").
       const displayTail = rawTail
-        .split(/\s+(?:w\/|w\s|\d(?:[\d.]*)?\s*l\b|turbo(?:charged)?|gasoline|diesel|hybrid|electric|\d[dr]\b|cpe|sdn|awd|fwd|rwd|4wd)/i)[0]
+        .split(/\s+(?:w\/|w\s|\d(?:[\d.]*)?\s*l\b|turbo(?:charged)?|gasoline|diesel|hybrid|electric|\d[dr]\b|cpe|sdn|(?:awd|fwd|rwd|4wd)(?=\s+\S))/i)[0]
         .trim();
       const tokens = (displayTail || rawTail).split(/\s+/).filter(Boolean);
       model = tokens.slice(0, 2).join(" ").trim() || undefined;

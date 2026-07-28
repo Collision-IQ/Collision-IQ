@@ -1,5 +1,5 @@
 import type { CustomerReport } from "@/lib/ai/generateCustomerReport";
-import type { CarrierReportDocument } from "./carrierPdfBuilder";
+import { dedupeRepeatedDocumentSentences, type CarrierReportDocument } from "./carrierPdfBuilder";
 import type { EstimateComparisonTotals } from "./buildExportModel";
 import type { ConfidenceIntegrity, OEMContradiction, ReportFindingReasoning } from "@/lib/ai/types/analysis";
 import {
@@ -98,10 +98,13 @@ export function formatMileageDisplay(
     // verify, not a repair defect. Small gaps read as minor; larger gaps flag a
     // document mismatch requiring verification (e.g. a possible different reading
     // date or record error), not necessarily a repair issue.
+    // "Across the reviewed documents", never "across estimates": the readings
+    // can come from a scan report, a dealer quote, or an invoice — calling
+    // every source an estimate misstates the file (RO 22009).
     const note =
       diff <= 1000
-        ? `minor discrepancy of ${diff.toLocaleString("en-US")} mi across estimates`
-        : `${diff.toLocaleString("en-US")} mi document mismatch across estimates — verify before relying on it; not necessarily a repair issue`;
+        ? `minor discrepancy of ${diff.toLocaleString("en-US")} mi across the reviewed documents`
+        : `${diff.toLocaleString("en-US")} mi mismatch across the reviewed documents — verify before relying on it; not necessarily a repair issue`;
     return `${distinct.map((v) => v.toLocaleString("en-US")).join(" / ")} (${note})`;
   }
   if (typeof mileage === "number" && mileage > 0) return mileage.toLocaleString("en-US");
@@ -134,7 +137,9 @@ export function buildCustomerReportPdf({
   const estimatePostureBody = selectedEstimatePosture
     ? alignCustomerEstimatePostureText(sanitizedReport.whichRepairPlanLooksStronger, selectedEstimatePosture)
     : singleEstimateScrub(sanitizedReport.whichRepairPlanLooksStronger);
-  const estimatePrecisionNote = buildEstimatePrecisionNote(sanitizedReport, findingReasoning);
+  const estimatePrecisionNote = singleEstimateScrub(
+    buildEstimatePrecisionNote(sanitizedReport, findingReasoning, comparisonAvailable)
+  );
   const cccDisclosure = buildCccDisclosure(report, findingReasoning, oemContradictions);
   // Scrub BEFORE the customer-facing list sanitizer runs — it collapses
   // redaction tokens into forms the scrubber no longer recognizes.
@@ -251,13 +256,13 @@ export function buildCustomerReportPdf({
     ],
   });
 
-  return {
+  return dedupeRepeatedDocumentSentences({
     ...sanitizedDocument,
     sections: sanitizedDocument.sections.map((section, index) => ({
       ...section,
       title: APPROVED_SECTION_TITLES[index] ?? section.title,
     })),
-  };
+  });
 }
 
 function buildPossibleMissingItems(params: {
@@ -285,7 +290,11 @@ function buildPossibleMissingItems(params: {
   ).slice(0, 6);
 }
 
-function buildEstimatePrecisionNote(report: CustomerReport, findingReasoning: ReportFindingReasoning[]): string {
+export function buildEstimatePrecisionNote(
+  report: CustomerReport,
+  findingReasoning: ReportFindingReasoning[],
+  comparisonAvailable: boolean
+): string {
   const text = [
     report.openingSummary,
     report.whichRepairPlanLooksStronger,
@@ -298,6 +307,14 @@ function buildEstimatePrecisionNote(report: CustomerReport, findingReasoning: Re
 
   if (!/lkq\s+grille|not\s+correct\s+style|a\/m|capa|paint supplies|revvadas|seat belt dynamic/i.test(text)) {
     return "";
+  }
+
+  // "Rows show specific differences" is comparison language — with a single
+  // reviewed estimate there is nothing to differ FROM, so only the
+  // tie-to-the-line guidance survives (report truthfulness rule: no
+  // comparison language with one estimate).
+  if (!comparisonAvailable) {
+    return "Any part-style concern should stay tied to the exact estimate line that documents it rather than being generalized across unrelated vehicle areas.";
   }
 
   return "The estimate rows show specific differences in part type, labor or material rates, and scan or calibration support where those rows are present. Any part-style concern should stay tied to the exact estimate line that documents it rather than being generalized across unrelated vehicle areas.";

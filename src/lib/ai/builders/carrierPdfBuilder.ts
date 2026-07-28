@@ -62,6 +62,40 @@ export type CarrierReportDocument = {
   footer: string[];
 };
 
+/**
+ * Drop long sentences that repeat verbatim (normalized) anywhere earlier in
+ * the document. Narrative fields are composed from overlapping sources
+ * (opening summary, posture text, bottom line), and the same 200-character
+ * paragraph printed twice reads as broken copy (RO 22009 customer report).
+ * Only sentences >= 90 chars participate — short recurring phrases ("Ask the
+ * shop why.") are legitimate.
+ */
+export function dedupeRepeatedDocumentSentences(document: CarrierReportDocument): CarrierReportDocument {
+  const seen = new Set<string>();
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const filterText = (text: string): string =>
+    text
+      .split(/(?<=[.!?])\s+/)
+      .filter((sentence) => {
+        if (sentence.trim().length < 90) return true;
+        const key = normalize(sentence);
+        if (!key) return true;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .join(" ")
+      .trim();
+  return {
+    ...document,
+    sections: document.sections.map((section) => ({
+      ...section,
+      body: typeof section.body === "string" ? filterText(section.body) : section.body,
+      bullets: section.bullets?.map(filterText).filter((bullet) => bullet.length > 0),
+    })),
+  };
+}
+
 export function buildCarrierReport({
   report,
   analysis,
@@ -270,7 +304,7 @@ export function buildCarrierReport({
     ],
   };
 
-  return cleanCarrierReportNarrative(document);
+  return dedupeRepeatedDocumentSentences(cleanCarrierReportNarrative(document));
 }
 
 function buildCaseUpdateBullets(report: RepairIntelligenceReport): string[] {
@@ -389,25 +423,54 @@ function buildAppraisalRecommendationBullets(
     totalKnownFileCount: exportModel.confidenceIntegrity.reviewableFileCount ?? exportModel.confidenceIntegrity.totalKnownFileCount ?? exportModel.confidenceIntegrity.uploadedFileCount,
   });
 
+  // Carrier/shop attribution only exists in a two-estimate comparison; a
+  // single-document review (or a scan/quote file set) has no "carrier
+  // estimate" or "shop estimate" to attribute anything to. Also dedupe the
+  // signal lists — upstream signals repeat the same finding under multiple
+  // sources and the same sentence printed twice in one paragraph (RO 22009).
+  const pressureLabel = isComparison ? "Carrier estimate pressure points" : "Estimate pressure points";
+  const riskLabel = isComparison ? "Shop estimate verification risks" : "Estimate verification risks";
+  const carrierVulnerabilities = dedupeListFragments(award.carrierVulnerabilities);
+  const shopVulnerabilities = dedupeListFragments(award.shopVulnerabilities);
+  const safetySupport = dedupeListFragments(award.safetyCriticalSupport);
+  const missingEvidence = dedupeListFragments(exportModel.confidenceIntegrity.missingCriticalEvidence);
   return compact([
     `Award posture: ${formatAppraisalAwardPosture(award.posture)}.`,
     `Confidence: ${award.confidence}.`,
     award.recommendedLanguage,
     `Why this posture is better supported: ${award.reason}`,
-    award.safetyCriticalSupport.length > 0
-      ? `Safety/OEM/completion support: ${award.safetyCriticalSupport.slice(0, 4).join("; ")}.`
+    safetySupport.length > 0
+      ? `Safety/OEM/completion support: ${safetySupport.slice(0, 4).join("; ")}.`
       : "Safety/OEM/completion support: Support not yet located in reviewed files.",
-    award.carrierVulnerabilities.length > 0
-      ? `Carrier estimate pressure points: ${award.carrierVulnerabilities.slice(0, 4).join("; ")}.`
-      : "Carrier estimate pressure points: no major repair-path vulnerability isolated.",
-    award.shopVulnerabilities.length > 0
-      ? `Shop estimate verification risks: ${award.shopVulnerabilities.slice(0, 4).join("; ")}.`
-      : "Shop estimate verification risks: no major unsupported broader-scope item isolated.",
-    exportModel.confidenceIntegrity.missingCriticalEvidence.length > 0
-      ? `Not final-award confidence: ${exportModel.confidenceIntegrity.missingCriticalEvidence.join("; ")}.`
+    carrierVulnerabilities.length > 0
+      ? `${pressureLabel}: ${carrierVulnerabilities.slice(0, 4).join("; ")}.`
+      : `${pressureLabel}: no major repair-path vulnerability isolated.`,
+    shopVulnerabilities.length > 0
+      ? `${riskLabel}: ${shopVulnerabilities.slice(0, 4).join("; ")}.`
+      : `${riskLabel}: no major unsupported broader-scope item isolated.`,
+    missingEvidence.length > 0
+      ? `Not final-award confidence: ${missingEvidence.join("; ")}.`
       : "Final-award confidence: no critical support item remains not yet located in reviewed files.",
     "Partial awards are not treated as the default appraisal outcome; use a reconciled supported amount or line-adjusted award recommendation when the full estimate is not cleanly awardable.",
   ]);
+}
+
+/**
+ * Collapse repeated fragments in a joined signal list. Upstream feeds
+ * (supplement items, dispute drivers, OEM contradictions) frequently surface
+ * the SAME finding under different sources — printed twice in one sentence it
+ * reads as broken copy, not thoroughness.
+ */
+function dedupeListFragments(items: string[]): string[] {
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const item of items) {
+    const normalized = (item ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    kept.push(item);
+  }
+  return kept;
 }
 
 function buildFileReviewDiagnosticsBullets(exportModel: ExportModel): string[] {
@@ -470,18 +533,31 @@ function formatCompletenessStatus(status: ExportModel["confidenceIntegrity"]["co
   return status.charAt(0) + status.slice(1).toLowerCase();
 }
 
-function buildExecutiveSummary(params: {
+export function buildExecutiveSummary(params: {
   isComparison: boolean;
   credibilityConclusion: string;
   whyItWins: string;
   strongestDisputes: string;
 }): string {
+  // When the "why it wins" sentence already names the same open items ("The
+  // file most clearly leaves open X, Y, Z"), repeating them as "The unresolved
+  // review items are X, Y, Z." in the next sentence reads as broken copy —
+  // drop the redundant restatement (RO 22009).
+  const normalizeForContainment = (value: string) =>
+    (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const disputesAlreadyStated =
+    Boolean(params.strongestDisputes) &&
+    normalizeForContainment(params.whyItWins).includes(
+      normalizeForContainment(params.strongestDisputes)
+    );
   const sentences = [
     params.credibilityConclusion,
     params.whyItWins,
-    params.isComparison
-      ? `The biggest remaining differences are ${params.strongestDisputes}.`
-      : `The unresolved review items are ${params.strongestDisputes}.`,
+    disputesAlreadyStated
+      ? ""
+      : params.isComparison
+        ? `The biggest remaining differences are ${params.strongestDisputes}.`
+        : `The unresolved review items are ${params.strongestDisputes}.`,
   ].filter(Boolean);
 
   const kept: string[] = [];
