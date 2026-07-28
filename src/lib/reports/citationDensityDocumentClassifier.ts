@@ -58,6 +58,14 @@ const SUPPORT_SIGNAL_PATTERNS: Array<[RegExp, string, number, CitationDensityDoc
   [/\binvoice\b/i, "invoice", 34, "invoice"],
   [/\b(?:invoice\s*(?:#|no|number)|bill\s+to|remit\s+to|amount\s+due|astech|material\s+invoice|parts?\s+invoice|sublet\s+invoice)\b/i, "invoice document markers", 46, "invoice"],
   [/\b(?:adas\s+report|calibration\s+report|revvadas|pre-?scan\s+report|post-?scan\s+report|diagnostic\s+report|scan\s+result)\b/i, "ADAS/scan report", 46, "photo_or_scan"],
+  // Diagnostic printout vocabulary (BMW ISTA / asTech / OEM scan tools): fault
+  // lists and pre/post scans arrive with filenames like "BMW Post-scan code
+  // fault list.pdf" or "asTech pre scan.pdf" and OCR'd fault-memory content —
+  // none of which say "scan report" literally. Strong enough to outweigh the
+  // asTech invoice marker, weak enough that an estimate's own "Research DTC's"
+  // line never outweighs real estimate structure.
+  [/\b(?:pre|post)[\s-]?scan\b/i, "pre/post scan document", 44, "photo_or_scan"],
+  [/\b(?:fault\s+(?:code|codes|list|memory|entr(?:y|ies))|diagnostic\s+trouble\s+codes?|code\s+fault\s+list|ista|xentry)\b/i, "diagnostic fault-code content", 44, "photo_or_scan"],
   [/\b(?:photo|image|scan report|scan invoice|alignment printout)\b/i, "photo/scan/alignment document", 34, "photo_or_scan"],
   [/\b(?:citation density|gap report|annotation legend|repair intelligence report|policy rights review|doi complaint|collision snapshot|customer report)\b/i, "generated report", 80, "generated_report"],
 ];

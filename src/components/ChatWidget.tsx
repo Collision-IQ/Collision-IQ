@@ -138,6 +138,8 @@ interface Attachment {
   uploadSource?: "direct_upload" | "zip_extraction";
   sourceArchive?: string;
   classification?: "image" | "video" | "pdf" | "text" | "docx";
+  /** Server-detected document family — estimates are only one of many. */
+  documentType?: ChatAttachmentDocumentType;
   hasVision: boolean;
   usedInAnalysis?: boolean;
   /** The chat model already discussed this upload conversationally; it stays
@@ -168,6 +170,16 @@ type UploadFailureResult = {
   code?: string;
 };
 
+type ChatAttachmentDocumentType =
+  | "estimate"
+  | "work_authorization"
+  | "support_contract"
+  | "invoice"
+  | "photo_or_scan"
+  | "legal_support"
+  | "generated_report"
+  | "unknown";
+
 type UploadSuccessResult = {
   attachmentId?: string;
   filename?: string;
@@ -176,6 +188,7 @@ type UploadSuccessResult = {
   source?: "direct_upload" | "zip_extraction";
   sourceArchive?: string;
   classification?: "image" | "video" | "pdf" | "text" | "docx";
+  documentType?: ChatAttachmentDocumentType;
   text?: string;
   imageDataUrl?: string;
   pageCount?: number;
@@ -1233,16 +1246,42 @@ export default function ChatWidget({
   );
   const suggestedActionPrompts = useMemo(() => {
     if (pendingChipAttachments.length === 0) return [] as string[];
+    // React to what each document actually IS (server-detected type), never
+    // "any PDF = estimate": a scan report, invoice, or work authorization
+    // deserves its own next step. Untyped PDFs (older uploads) keep the
+    // estimate-leaning defaults.
     const hasImage = pendingChipAttachments.some(
       (attachment) => attachment.classification === "image" || attachment.hasVision
     );
-    const pdfCount = pendingChipAttachments.filter(
-      (attachment) => attachment.classification === "pdf" || /pdf/i.test(attachment.mime)
-    ).length;
+    const pdfLike = pendingChipAttachments.filter(
+      (attachment) =>
+        attachment.classification !== "image" &&
+        !attachment.hasVision &&
+        (attachment.classification === "pdf" || /pdf/i.test(attachment.mime) || Boolean(attachment.text))
+    );
+    const ofType = (type: ChatAttachmentDocumentType) =>
+      pdfLike.filter((attachment) => attachment.documentType === type).length;
+    const estimateCount =
+      ofType("estimate") +
+      pdfLike.filter((attachment) => !attachment.documentType || attachment.documentType === "unknown").length;
+    const scanReportCount = ofType("photo_or_scan");
+    const invoiceCount = ofType("invoice");
+    const legalOrContractCount =
+      ofType("work_authorization") + ofType("support_contract") + ofType("legal_support");
+
     const prompts: string[] = [];
     if (hasImage) prompts.push("Assess the damage", "Repairable or a total loss?");
-    if (pdfCount >= 2) prompts.push("Compare these estimates");
-    else if (pdfCount === 1) prompts.push("What's missing from this estimate?");
+    if (scanReportCount > 0) {
+      prompts.push("Summarize the fault codes and what they mean for this repair");
+    }
+    if (estimateCount >= 2) prompts.push("Compare these estimates");
+    else if (estimateCount === 1) prompts.push("What's missing from this estimate?");
+    if (invoiceCount > 0 && estimateCount > 0) {
+      prompts.push("Reconcile the invoice against the estimate");
+    }
+    if (legalOrContractCount > 0) {
+      prompts.push("What does this document mean for the claim?");
+    }
     if (prompts.length === 0) prompts.push("Summarize what I uploaded");
     return prompts.slice(0, 4);
   }, [pendingChipAttachments]);
@@ -3867,6 +3906,7 @@ export default function ChatWidget({
             uploadSource: item.source,
             sourceArchive: item.sourceArchive,
             classification: item.classification,
+            documentType: item.documentType,
             hasVision: Boolean(item.hasVision) && itemMime.startsWith("image/"),
             usedInAnalysis: false,
           };

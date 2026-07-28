@@ -16,6 +16,7 @@ import {
 } from "@/lib/ai/authorityRetrievalPosture";
 import { JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT } from "@/lib/ai/jurisdictionalInsurancePrompt";
 import { DOCUMENT_REVIEW_TWO_PASS_PROTOCOL } from "@/lib/ai/documentReviewProtocol";
+import { classifyCitationDensityDocument } from "@/lib/reports/citationDensityDocumentClassifier";
 import { buildAppraisalAwardEvaluatorInstruction } from "@/lib/ai/appraisalAwardEvaluator";
 import { buildConversationBehaviorDirective } from "@/lib/ai/assistanceProfile";
 import {
@@ -608,12 +609,32 @@ async function extractDocuments(params: {
   return [];
 }
 
+const CHAT_DOCUMENT_TYPE_LABELS: Record<string, string> = {
+  estimate: "repair estimate / supplement",
+  work_authorization: "work authorization",
+  support_contract: "repair contract / support document",
+  invoice: "invoice",
+  photo_or_scan: "diagnostic scan report, ADAS/calibration report, or photo document",
+  legal_support: "legal / claims correspondence",
+  generated_report: "previously generated Collision IQ report",
+};
+
 function formatDocuments(documents: UploadedDocument[]): string {
   return documents
     .map((document, index) => {
       const label = `Attachment ${index + 1}: ${document.filename}${
         document.mime ? ` (${document.mime})` : ""
       }`;
+      // Tell the model what each file IS before it reads a word — not every
+      // upload is an estimate, and a scan report or invoice deserves a
+      // reaction that matches the document, not estimate-shaped boilerplate.
+      const detected = classifyCitationDensityDocument({
+        filename: document.filename,
+        text: document.text,
+      }).detectedDocumentType;
+      const typeLine = CHAT_DOCUMENT_TYPE_LABELS[detected]
+        ? `Detected document type: ${CHAT_DOCUMENT_TYPE_LABELS[detected]}. Respond to what this document actually is.`
+        : "Detected document type: unclassified — infer the document's purpose from its content before responding.";
 
       const textBlock = document.text?.trim()
         ? document.text.trim()
@@ -621,7 +642,7 @@ function formatDocuments(documents: UploadedDocument[]): string {
           ? "[Image attached separately as vision input]"
           : "[No extracted text available]";
 
-      return `### ${label}\n${textBlock}`;
+      return `### ${label}\n${typeLine}\n${textBlock}`;
     })
     .join("\n\n---\n\n");
 }

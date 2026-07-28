@@ -22,6 +22,10 @@ import {
 import { UsageAccessError, recordUsage } from "@/lib/billing/usage";
 import { getUsageCount, incrementUsage } from "@/lib/usage";
 import { saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
+import {
+  classifyCitationDensityDocument,
+  type CitationDensityDocumentType,
+} from "@/lib/reports/citationDensityDocumentClassifier";
 import { getAnalysisReport } from "@/lib/analysisReportStore";
 import {
   bufferToReusableDataUrl,
@@ -75,6 +79,12 @@ type UploadSuccess = {
   imageDataUrl?: string;
   pageCount?: number;
   hasVision: boolean;
+  /**
+   * Detected document family (estimate, invoice, photo_or_scan for ADAS/scan
+   * reports, work_authorization, …) so the chat surface reacts to what the
+   * file actually IS — not everything uploaded is an estimate.
+   */
+  documentType: CitationDensityDocumentType;
   caseContinuity: {
     activeCaseId: string;
     reportId: string;
@@ -940,6 +950,13 @@ async function processPreparedUpload(params: {
     imageDataUrl: stored.imageDataUrl,
     pageCount: stored.pageCount,
     hasVision: params.file.classification === "image" && Boolean(stored.imageDataUrl),
+    documentType:
+      params.file.classification === "image"
+        ? "photo_or_scan"
+        : classifyCitationDensityDocument({
+            filename: stored.filename,
+            text: stored.text,
+          }).detectedDocumentType,
     caseContinuity,
   };
 }

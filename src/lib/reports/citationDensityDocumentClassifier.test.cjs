@@ -82,6 +82,34 @@ test("asTech scan invoice is NOT estimate-like", () => {
   assert.equal(isEstimateLike("scan-invoice.pdf", text), false);
 });
 
+console.log("\ndiagnostic scan documents classify as photo_or_scan (RO22009)");
+
+const detectedType = (filename, text) =>
+  classifyCitationDensityDocument({ filename, text }).detectedDocumentType;
+
+test("BMW post-scan fault list is a scan document, not an estimate", () => {
+  const text = "BMW Vehicle test fault memory 12 fault entries B7F8A5 Supply voltage terminal 30 control unit";
+  assert.equal(detectedType("BMW Post-scan code fault list.pdf", text), "photo_or_scan");
+});
+
+test("asTech pre scan report is a scan document, not an invoice", () => {
+  const text = "asTech report pre scan completed diagnostic trouble codes found";
+  assert.equal(detectedType("Report_ro#22009 asTech pre scan.pdf", text), "photo_or_scan");
+});
+
+test("image-only diagnostic printout classifies from filename alone once OCR text carries fault vocabulary", () => {
+  const text = "SAS Voltage supply global external undervoltage fault code stored ISTA vehicle test";
+  assert.equal(
+    detectedType("07142026_022345 SAS_ Voltage supply -global external undervoltag.pdf", text),
+    "photo_or_scan"
+  );
+});
+
+test("an estimate with its own scan/DTC operation rows stays an estimate", () => {
+  const text = "CONESTOGA COLLISION CENTER Preliminary Estimate Line Oper Description Part Number Qty Extended Price Labor Paint 131 Rpr Pre-repair scan 1.0 185 Rpr Research DTC's 0.5 ESTIMATE TOTALS Grand Total 18,080.87 Total Cost of Repairs 18,080.87";
+  assert.equal(detectedType("Shop 22108.pdf", text), "estimate");
+});
+
 console.log("\n8-file run: pair still resolves to Shop + SOR (RO22006 #8)");
 
 test("estimate pair excludes support docs and keeps Shop/SOR", () => {
