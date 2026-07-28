@@ -19,12 +19,17 @@ import {
   Camera,
   Car,
   ChevronDown,
+  ChevronUp,
   FileText,
   FolderCheck,
 
   HelpCircle,
   LayoutDashboard,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Settings as SettingsIcon,
   Workflow,
   X,
@@ -132,6 +137,8 @@ const NAV_TOUR_TARGETS: Record<string, string> = {
  */
 export default function CollisionWorkspaceV2({
   planLabel,
+  reviewProgress,
+  analysisStatus,
   caseEvents,
   riskScore = "unknown",
   confidence,
@@ -155,6 +162,63 @@ export default function CollisionWorkspaceV2({
   const [recentReports, setRecentReports] = useState<Array<{ id: string; title: string }>>([]);
   const [pendingReportId, setPendingReportId] = useState<string | null>(null);
   const navUpdateFlags = useNavUpdateFlags();
+
+  // Chat-first rails. All three rails collapse so the chat fills the space;
+  // in "auto" they follow the workflow (bottom opens once files upload, the
+  // side rails open once the document review completes) — but an explicit
+  // user toggle always takes precedence and is remembered.
+  type RailPreference = "auto" | "open" | "collapsed";
+  const RAIL_PREFS_STORAGE_KEY = "collisionIq.workspaceRails";
+  const [railPrefs, setRailPrefs] = useState<{
+    left: RailPreference;
+    right: RailPreference;
+    bottom: RailPreference;
+  }>({ left: "auto", right: "auto", bottom: "auto" });
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(RAIL_PREFS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<Record<"left" | "right" | "bottom", RailPreference>>;
+      setRailPrefs((current) => ({
+        left: parsed.left ?? current.left,
+        right: parsed.right ?? current.right,
+        bottom: parsed.bottom ?? current.bottom,
+      }));
+    } catch {
+      // Preferences are a convenience; never block the workspace on them.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const setRailPref = (rail: "left" | "right" | "bottom", pref: RailPreference) => {
+    setRailPrefs((current) => {
+      const next = { ...current, [rail]: pref };
+      try {
+        window.localStorage.setItem(RAIL_PREFS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // Ignore storage failures (private mode).
+      }
+      return next;
+    });
+  };
+  // The tutorial highlights rail targets — open them while it runs so its
+  // anchors exist (counts as a user-driven open).
+  useEffect(() => {
+    const handleTourOpen = () => {
+      setRailPrefs((current) => ({ ...current, left: "open", right: "open", bottom: "open" }));
+    };
+    window.addEventListener("collisioniq:tutorial:starting", handleTourOpen);
+    window.addEventListener("collisioniq:tutorial:start", handleTourOpen);
+    return () => {
+      window.removeEventListener("collisioniq:tutorial:starting", handleTourOpen);
+      window.removeEventListener("collisioniq:tutorial:start", handleTourOpen);
+    };
+  }, []);
+  const reviewComplete = analysisStatus === "complete";
+  const hasUploadedFiles =
+    (reviewProgress?.uploaded ?? 0) > 0 || (reviewProgress?.totalKnownFiles ?? 0) > 0;
+  const leftRailOpen = railPrefs.left === "auto" ? reviewComplete : railPrefs.left === "open";
+  const rightRailOpen = railPrefs.right === "auto" ? reviewComplete : railPrefs.right === "open";
+  const bottomRailOpen = railPrefs.bottom === "auto" ? hasUploadedFiles : railPrefs.bottom === "open";
 
   // A section the user is currently viewing never keeps an unseen-update dot:
   // updates that land while it's open are already seen.
@@ -404,21 +468,44 @@ export default function CollisionWorkspaceV2({
       ) : null}
 
       <div className="flex min-h-0 flex-1">
-        {/* Sidebar (lg+) */}
-        <nav
-          className="hidden w-52 shrink-0 flex-col gap-1 border-r border-border bg-card/60 p-2 lg:flex"
-          data-tour="command-center-sidebar"
-        >
-          {NAV_ITEMS.map((item) => renderNavItem(item))}
-          <button
-            type="button"
-            onClick={restartOnboardingTour}
-            className="mt-auto inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+        {/* Sidebar (lg+) — collapsible so the chat can take the full width. */}
+        {leftRailOpen ? (
+          <nav
+            className="hidden w-52 shrink-0 flex-col gap-1 border-r border-border bg-card/60 p-2 lg:flex"
+            data-tour="command-center-sidebar"
           >
-            <HelpCircle size={16} />
-            Tutorial
-          </button>
-        </nav>
+            <button
+              type="button"
+              onClick={() => setRailPref("left", "collapsed")}
+              className="mb-1 inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12px] font-medium text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+              aria-label="Collapse menu"
+            >
+              <PanelLeftClose size={16} />
+              Collapse
+            </button>
+            {NAV_ITEMS.map((item) => renderNavItem(item))}
+            <button
+              type="button"
+              onClick={restartOnboardingTour}
+              className="mt-auto inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+            >
+              <HelpCircle size={16} />
+              Tutorial
+            </button>
+          </nav>
+        ) : (
+          <div className="hidden shrink-0 border-r border-border bg-card/60 p-1.5 lg:flex lg:flex-col">
+            <button
+              type="button"
+              onClick={() => setRailPref("left", "open")}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+              aria-label="Open menu"
+              title="Open menu"
+            >
+              <PanelLeftOpen size={17} />
+            </button>
+          </div>
+        )}
 
         {/* Main + rail + bottom panels */}
         <main data-tour="report-workspace" className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2 sm:p-3">
@@ -485,7 +572,11 @@ export default function CollisionWorkspaceV2({
               Preview accordion + footer sit below it at the bottom. */}
           <div
             className={`grid min-h-0 flex-1 grid-cols-1 gap-3 ${
-              activeView === "reportcenter" ? "" : "lg:grid-cols-[minmax(0,1fr)_360px]"
+              activeView === "reportcenter"
+                ? ""
+                : rightRailOpen
+                  ? "lg:grid-cols-[minmax(0,1fr)_360px]"
+                  : "lg:grid-cols-[minmax(0,1fr)_auto]"
             }`}
           >
             {activeView === "reports" ? (
@@ -507,24 +598,65 @@ export default function CollisionWorkspaceV2({
             ) : (
               <div className="ci-panel flex min-h-0 min-w-0 flex-col overflow-hidden">{center}</div>
             )}
-            {activeView === "reportcenter" ? null : (
+            {activeView === "reportcenter" ? null : rightRailOpen ? (
               // The Reports tab IS the rail's report section at full width —
               // hiding the rail there avoids duplicate report cards.
-              <aside className="ci-panel hidden min-h-0 flex-col overflow-y-auto p-3 lg:flex">
+              <aside className="ci-panel relative hidden min-h-0 flex-col overflow-y-auto p-3 lg:flex">
+                <button
+                  type="button"
+                  onClick={() => setRailPref("right", "collapsed")}
+                  className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+                  aria-label="Collapse claim panel"
+                  title="Collapse claim panel"
+                >
+                  <PanelRightClose size={15} />
+                </button>
                 {right}
               </aside>
+            ) : (
+              <div className="hidden min-h-0 lg:flex lg:items-start">
+                <button
+                  type="button"
+                  onClick={() => setRailPref("right", "open")}
+                  className="ci-panel inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
+                  aria-label="Open claim panel"
+                  title="Open claim panel"
+                >
+                  <PanelRightOpen size={17} />
+                </button>
+              </div>
             )}
           </div>
 
           {activeView === "workspace" ? (
             <>
-              {/* Tablet / desktop: full insight rail. */}
-              <div className="hidden shrink-0 grid-cols-3 gap-3 md:grid">
-                <CaseActivityPanel events={caseEvents} />
-                <AnalysisInsightsPanel riskScore={riskScore} confidence={confidence} />
-                <div data-tour="damage-preview">
-                  <DamagePreviewPanel images={damageImages} />
-                </div>
+              {/* Tablet / desktop: collapsible insight rail — collapsed the
+                  chat keeps the space; it auto-opens once files upload. */}
+              <div className="hidden shrink-0 md:block">
+                <button
+                  type="button"
+                  onClick={() => setRailPref("bottom", bottomRailOpen ? "collapsed" : "open")}
+                  className="mb-2 inline-flex w-full items-center justify-between rounded-xl border border-border bg-card px-3 py-2 text-left transition hover:border-[var(--accent)]/45"
+                  aria-expanded={bottomRailOpen}
+                >
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                    Case Activity · Analysis Insights · Damage Preview
+                  </span>
+                  {bottomRailOpen ? (
+                    <ChevronDown size={15} className="text-muted-foreground" />
+                  ) : (
+                    <ChevronUp size={15} className="text-muted-foreground" />
+                  )}
+                </button>
+                {bottomRailOpen ? (
+                  <div className="grid grid-cols-3 gap-3">
+                    <CaseActivityPanel events={caseEvents} />
+                    <AnalysisInsightsPanel riskScore={riskScore} confidence={confidence} />
+                    <div data-tour="damage-preview">
+                      <DamagePreviewPanel images={damageImages} />
+                    </div>
+                  </div>
+                ) : null}
               </div>
               {/* Mobile: chat is the focus. Drop Case Activity + Analysis Insights;
                   Damage Preview stays collapsed and only generates when opened. */}

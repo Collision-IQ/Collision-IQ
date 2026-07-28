@@ -327,6 +327,11 @@ export default function CollisionIqShepherdTour() {
           return;
         }
 
+        // Let the workspace open its collapsible rails first so the tour's
+        // data-tour anchors exist before Shepherd resolves them.
+        window.dispatchEvent(new Event("collisioniq:tutorial:starting"));
+        await new Promise((resolve) => window.setTimeout(resolve, 150));
+
         const tour = buildTour();
         tourRef.current = tour;
         await tour.start();
@@ -342,14 +347,40 @@ export default function CollisionIqShepherdTour() {
       void startTour(true);
     }
 
+    // Consent gate: the tour must NEVER run over the AI-chat consent modal.
+    // Auto-start only when a valid accepted-consent record exists; otherwise
+    // wait for the consent-accepted event and start (with the same delay)
+    // right after the user agrees. Manual restarts stay gated too.
+    function hasChatConsent(): boolean {
+      try {
+        const raw = window.localStorage.getItem("collision_iq_chat_consent");
+        if (!raw) return false;
+        const parsed = JSON.parse(raw) as { consentStatus?: unknown };
+        return parsed?.consentStatus === "accepted";
+      } catch {
+        return false;
+      }
+    }
+
+    function handleConsentAccepted() {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        void startTour(false);
+      }, TOUR_START_DELAY_MS);
+    }
+
     window.addEventListener(TOUR_RESTART_EVENT, handleRestart);
-    timer = window.setTimeout(() => {
-      void startTour(false);
-    }, TOUR_START_DELAY_MS);
+    window.addEventListener("collisioniq:consent:accepted", handleConsentAccepted);
+    if (hasChatConsent()) {
+      timer = window.setTimeout(() => {
+        void startTour(false);
+      }, TOUR_START_DELAY_MS);
+    }
 
     return () => {
       disposed = true;
       window.removeEventListener(TOUR_RESTART_EVENT, handleRestart);
+      window.removeEventListener("collisioniq:consent:accepted", handleConsentAccepted);
       if (timer !== null) {
         window.clearTimeout(timer);
       }

@@ -939,6 +939,8 @@ export function ChatbotWorkspacePage({
 
     window.localStorage.setItem(CHAT_CONSENT_STORAGE_KEY, JSON.stringify(record));
     setConsentAccepted(true);
+    // The onboarding tour waits for this — it must never run over the modal.
+    window.dispatchEvent(new Event("collisioniq:consent:accepted"));
   }, [consentAccepted, viewerAccess]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -991,6 +993,8 @@ export function ChatbotWorkspacePage({
     }
 
     setConsentAccepted(true);
+    // The onboarding tour waits for this — it must never run over the modal.
+    window.dispatchEvent(new Event("collisioniq:consent:accepted"));
   }
 
   function handleConsentCancel() {
