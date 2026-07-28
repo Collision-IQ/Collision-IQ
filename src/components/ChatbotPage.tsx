@@ -1787,7 +1787,10 @@ export function ChatbotWorkspacePage({
 
       {reportsReadyToastVisible ? (
         <div
-          className="fixed bottom-5 right-5 z-[70] w-[min(92vw,340px)] rounded-xl border border-[var(--accent)]/40 bg-card p-3.5 shadow-[0_18px_50px_rgba(15,23,42,0.25)] dark:shadow-[0_18px_50px_rgba(0,0,0,0.5)]"
+          // Opaque backdrop + lifted position: with a translucent card the
+          // footer links bled through the toast text, and the bottom-right
+          // corner collides with third-party badges.
+          className="fixed bottom-20 right-5 z-[9990] w-[min(92vw,340px)] rounded-xl border-2 border-[var(--accent)]/60 bg-background p-3.5 shadow-[0_18px_50px_rgba(15,23,42,0.45)] backdrop-blur-md dark:shadow-[0_18px_50px_rgba(0,0,0,0.7)]"
           role="status"
           aria-live="polite"
           data-tour="reports-ready-toast"

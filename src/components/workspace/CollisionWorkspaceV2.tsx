@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   clearNavUpdate,
@@ -161,62 +161,80 @@ export default function CollisionWorkspaceV2({
   const [pendingReportId, setPendingReportId] = useState<string | null>(null);
   const navUpdateFlags = useNavUpdateFlags();
 
-  // Chat-first rails. All three rails collapse so the chat fills the space;
-  // in "auto" they follow the workflow (bottom opens once files upload, the
-  // side rails open once the document review completes) — but an explicit
-  // user toggle always takes precedence and is remembered.
-  type RailPreference = "auto" | "open" | "collapsed";
-  const RAIL_PREFS_STORAGE_KEY = "collisionIq.workspaceRails";
-  const [railPrefs, setRailPrefs] = useState<{
-    left: RailPreference;
-    right: RailPreference;
-    bottom: RailPreference;
-  }>({ left: "auto", right: "auto", bottom: "auto" });
+  // Chat-first rails: collapsed by default so the chat fills the space, and
+  // EDGE-TRIGGERED autos — every new upload event opens the bottom rail, and
+  // every review completion opens the side rails, even if the user closed
+  // them earlier. A manual close simply holds until the next workflow event;
+  // a manual open is immediate. Last state persists across sessions.
+  const RAIL_STATE_STORAGE_KEY = "collisionIq.workspaceRails.v2";
+  const [railsOpen, setRailsOpen] = useState<{ left: boolean; right: boolean; bottom: boolean }>({
+    left: false,
+    right: false,
+    bottom: false,
+  });
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(RAIL_PREFS_STORAGE_KEY);
+      const raw = window.localStorage.getItem(RAIL_STATE_STORAGE_KEY);
       if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<Record<"left" | "right" | "bottom", RailPreference>>;
-      setRailPrefs((current) => ({
-        left: parsed.left ?? current.left,
-        right: parsed.right ?? current.right,
-        bottom: parsed.bottom ?? current.bottom,
+      const parsed = JSON.parse(raw) as Partial<Record<"left" | "right" | "bottom", boolean>>;
+      setRailsOpen((current) => ({
+        left: typeof parsed.left === "boolean" ? parsed.left : current.left,
+        right: typeof parsed.right === "boolean" ? parsed.right : current.right,
+        bottom: typeof parsed.bottom === "boolean" ? parsed.bottom : current.bottom,
       }));
     } catch {
       // Preferences are a convenience; never block the workspace on them.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const setRailPref = (rail: "left" | "right" | "bottom", pref: RailPreference) => {
-    setRailPrefs((current) => {
-      const next = { ...current, [rail]: pref };
+  const applyRails = (updates: Partial<Record<"left" | "right" | "bottom", boolean>>) => {
+    setRailsOpen((current) => {
+      const next = { ...current, ...updates };
       try {
-        window.localStorage.setItem(RAIL_PREFS_STORAGE_KEY, JSON.stringify(next));
+        window.localStorage.setItem(RAIL_STATE_STORAGE_KEY, JSON.stringify(next));
       } catch {
         // Ignore storage failures (private mode).
       }
       return next;
     });
   };
-  // The tutorial highlights rail targets — open them while it runs so its
-  // anchors exist (counts as a user-driven open).
+  // Edge triggers: fire on the TRANSITION, not the standing condition, so a
+  // user's manual close is respected until the workflow genuinely advances.
+  const uploadedCount = reviewProgress?.uploaded ?? 0;
+  const knownFileCount = reviewProgress?.totalKnownFiles ?? 0;
+  const reviewComplete = analysisStatus === "complete";
+  const prevUploadSignalRef = useRef(0);
   useEffect(() => {
-    const handleTourOpen = () => {
-      setRailPrefs((current) => ({ ...current, left: "open", right: "open", bottom: "open" }));
-    };
+    const signal = Math.max(uploadedCount, knownFileCount);
+    if (signal > prevUploadSignalRef.current) {
+      applyRails({ bottom: true });
+    }
+    prevUploadSignalRef.current = signal;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uploadedCount, knownFileCount]);
+  const prevReviewCompleteRef = useRef(false);
+  useEffect(() => {
+    if (reviewComplete && !prevReviewCompleteRef.current) {
+      applyRails({ left: true, right: true });
+    }
+    prevReviewCompleteRef.current = reviewComplete;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewComplete]);
+  // The tutorial highlights rail targets — open them while it runs so its
+  // anchors exist.
+  useEffect(() => {
+    const handleTourOpen = () => applyRails({ left: true, right: true, bottom: true });
     window.addEventListener("collisioniq:tutorial:starting", handleTourOpen);
     window.addEventListener("collisioniq:tutorial:start", handleTourOpen);
     return () => {
       window.removeEventListener("collisioniq:tutorial:starting", handleTourOpen);
       window.removeEventListener("collisioniq:tutorial:start", handleTourOpen);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const reviewComplete = analysisStatus === "complete";
-  const hasUploadedFiles =
-    (reviewProgress?.uploaded ?? 0) > 0 || (reviewProgress?.totalKnownFiles ?? 0) > 0;
-  const leftRailOpen = railPrefs.left === "auto" ? reviewComplete : railPrefs.left === "open";
-  const rightRailOpen = railPrefs.right === "auto" ? reviewComplete : railPrefs.right === "open";
-  const bottomRailOpen = railPrefs.bottom === "auto" ? hasUploadedFiles : railPrefs.bottom === "open";
+  const leftRailOpen = railsOpen.left;
+  const rightRailOpen = railsOpen.right;
+  const bottomRailOpen = railsOpen.bottom;
 
   // A section the user is currently viewing never keeps an unseen-update dot:
   // updates that land while it's open are already seen.
@@ -474,7 +492,7 @@ export default function CollisionWorkspaceV2({
           >
             <button
               type="button"
-              onClick={() => setRailPref("left", "collapsed")}
+              onClick={() => applyRails({ left: false })}
               className="mb-1 inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12px] font-medium text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
               aria-label="Collapse menu"
             >
@@ -492,17 +510,23 @@ export default function CollisionWorkspaceV2({
             </button>
           </nav>
         ) : (
-          <div className="hidden shrink-0 border-r border-border bg-card/60 p-1.5 lg:flex lg:flex-col">
-            <button
-              type="button"
-              onClick={() => setRailPref("left", "open")}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
-              aria-label="Open menu"
-              title="Open menu"
+          // Entire collapsed strip is the click target — the chevron is the
+          // hint, not the only hot zone.
+          <button
+            type="button"
+            onClick={() => applyRails({ left: true })}
+            className="hidden w-8 shrink-0 flex-col items-center gap-2 border-r border-[var(--accent)]/30 bg-[var(--accent)]/8 py-3 text-muted-foreground transition hover:bg-[var(--accent)]/15 hover:text-foreground lg:flex"
+            aria-label="Open menu"
+            title="Open menu"
+          >
+            <ChevronsRight size={17} className="text-[var(--accent)]" />
+            <span
+              className="text-[10px] font-semibold uppercase tracking-[0.18em]"
+              style={{ writingMode: "vertical-rl" }}
             >
-              <ChevronsRight size={17} />
-            </button>
-          </div>
+              Menu
+            </span>
+          </button>
         )}
 
         {/* Main + rail + bottom panels */}
@@ -602,7 +626,7 @@ export default function CollisionWorkspaceV2({
               <aside className="ci-panel relative hidden min-h-0 flex-col overflow-y-auto p-3 lg:flex">
                 <button
                   type="button"
-                  onClick={() => setRailPref("right", "collapsed")}
+                  onClick={() => applyRails({ right: false })}
                   className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
                   aria-label="Collapse claim panel"
                   title="Collapse claim panel"
@@ -612,17 +636,23 @@ export default function CollisionWorkspaceV2({
                 {right}
               </aside>
             ) : (
-              <div className="hidden min-h-0 lg:flex lg:items-start">
-                <button
-                  type="button"
-                  onClick={() => setRailPref("right", "open")}
-                  className="ci-panel inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
-                  aria-label="Open claim panel"
-                  title="Open claim panel"
+              // Entire collapsed strip is the click target — full height so
+              // the rail is discoverable anywhere along the right edge.
+              <button
+                type="button"
+                onClick={() => applyRails({ right: true })}
+                className="hidden w-8 min-h-0 flex-col items-center gap-2 rounded-xl border border-[var(--accent)]/30 bg-[var(--accent)]/8 py-3 text-muted-foreground transition hover:bg-[var(--accent)]/15 hover:text-foreground lg:flex"
+                aria-label="Open claim panel"
+                title="Open claim panel"
+              >
+                <ChevronsLeft size={17} className="text-[var(--accent)]" />
+                <span
+                  className="text-[10px] font-semibold uppercase tracking-[0.18em]"
+                  style={{ writingMode: "vertical-rl" }}
                 >
-                  <ChevronsLeft size={17} />
-                </button>
-              </div>
+                  Claim Panel
+                </span>
+              </button>
             )}
           </div>
 
@@ -633,7 +663,7 @@ export default function CollisionWorkspaceV2({
               <div className="hidden shrink-0 md:block">
                 <button
                   type="button"
-                  onClick={() => setRailPref("bottom", bottomRailOpen ? "collapsed" : "open")}
+                  onClick={() => applyRails({ bottom: !bottomRailOpen })}
                   className="mb-2 inline-flex w-full items-center justify-between rounded-xl border border-border bg-card px-3 py-2 text-left transition hover:border-[var(--accent)]/45"
                   aria-expanded={bottomRailOpen}
                 >
