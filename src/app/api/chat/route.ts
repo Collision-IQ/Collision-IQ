@@ -94,7 +94,12 @@ const PENNSYLVANIA_COUNSEL_REVIEW_FALLBACK =
   "Counsel should review applicable Pennsylvania claim-handling and bad-faith law.";
 
 function shouldExposeSafeProviderDiagnostics(userMessage: string) {
-  return /\b(?:provider|model|routing|diagnostics?|fallbackUsed|reasoningEffort|keyPresent|openai|gpt-?5\.5)\b/i.test(userMessage);
+  // Require an explicit diagnostics ask. Bare tokens like "model" fired on
+  // ordinary questions ("can you model this repair cost?", "what's your
+  // review model?") and dumped internal provider config into the reply.
+  return /\b(?:provider diagnostics?|model diagnostics?|which (?:ai )?model (?:are|is)|what (?:ai )?model (?:are|is)|fallbackUsed|reasoningEffort|keyPresent)\b/i.test(
+    userMessage
+  );
 }
 
 function appendSafeProviderDiagnostics(text: string, params: { stage: string; provider: string; model: string }) {
@@ -274,14 +279,14 @@ function loadChatRouteDeps(): Promise<ChatRouteDeps> {
 
 function buildSystemInstructions(adasPolicy: string, evidencePolicy: string) {
   return `
-You are Collision-IQ, a senior collision estimator and repair strategist.
+You are Collision IQ, a senior collision repair and claims intelligence professional — estimator-grade on repair strategy, fluent in claim handling, coverage posture, and negotiation for repair centers, insurance carriers, and vehicle owners alike.
 
-Think like a real estimator, not a narrator.
+Think like a real practitioner, not a narrator. Match your framing to who is asking and what they sent: an estimate deserves estimator thinking; a scan report deserves diagnostic thinking; a policy question deserves claims thinking.
 
 Tone:
 - be concise, confident, direct, and human
 - sound like a sharp working professional, not a generic assistant
-- light dry humor is allowed occasionally when calling out weak estimate logic, obvious inconsistencies, or thin support
+- light dry humor is allowed occasionally for obvious inconsistencies or thin support — never aimed at either party's estimate or position
 - never aim humor at the user
 - never use humor in safety-critical, legal-adjacent, injury-related, diminished value, Market Preview, actual cash value, or other valuation-sensitive conclusions
 - if humor risks reducing clarity, skip it
@@ -1065,10 +1070,13 @@ function applyLegalCitationGate(params: {
   }
 
   const stateCode = params.jurisdiction?.stateCode?.trim().toUpperCase();
+  // Name Pennsylvania ONLY when the jurisdiction is confirmed PA. An unset
+  // jurisdiction must get the neutral line — a Texas user being told to
+  // review "Pennsylvania claim-handling law" reads as a broken product.
   const fallback =
-    stateCode === "PA" || !stateCode
+    stateCode === "PA"
       ? PENNSYLVANIA_COUNSEL_REVIEW_FALLBACK
-      : "Counsel should review applicable claim-handling and bad-faith law in the confirmed jurisdiction.";
+      : "Counsel should review applicable claim-handling and bad-faith law in the governing jurisdiction.";
   const lines = params.text.split("\n");
   let insertedFallback = false;
   const scrubbedLines = lines.map((line) => {

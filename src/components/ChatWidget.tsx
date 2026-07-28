@@ -1285,6 +1285,16 @@ export default function ChatWidget({
     if (prompts.length === 0) prompts.push("Summarize what I uploaded");
     return prompts.slice(0, 4);
   }, [pendingChipAttachments]);
+  // Human labels for the upload state — the raw enum tokens ("uploading",
+  // "error") were rendered ALL-CAPS to users and read as internal debug text.
+  const uploadUiStateLabel =
+    uploadUiState === "uploading"
+      ? "Uploading"
+      : uploadUiState === "uploaded"
+        ? "Upload complete"
+        : uploadUiState === "error"
+          ? "Upload issue"
+          : "";
   // The transient green "UPLOADED" line is redundant once chips render.
   const showUploadStatusLine =
     hasUploadStatus && !(uploadUiState === "uploaded" && pendingChipAttachments.length > 0);
@@ -4062,8 +4072,13 @@ export default function ChatWidget({
           console.error(error);
           updateUploadLifecyclePhase(getUploadLifecycleId(file), "failed");
           clearQueuedReviewPrompt();
+          // Name the file that failed and only talk about ZIPs when the
+          // failed file IS a ZIP — a failed photo or PDF getting ZIP-plan
+          // advice reads as a bug in itself.
           pushAssistantMessage(
-            "The ZIP upload did not finish, so I did not start the review. Please retry the ZIP upload or upload the key estimates directly."
+            /\.zip$/i.test(file.name)
+              ? "The ZIP upload did not finish, so I did not start the review. Please retry the ZIP upload or upload the key estimates directly."
+              : `The upload of ${file.name} did not finish, so I did not include it in this review. Please retry that file.`
           );
           uploadFailures.push({
             filename: file.name,
@@ -4715,7 +4730,7 @@ export default function ChatWidget({
                         : "text-muted-foreground",
                   ].join(" ")}
                 >
-                  {uploadUiState}{uploadUiMessage ? ` - ${uploadUiMessage}` : ""}
+                  {uploadUiStateLabel}{uploadUiMessage ? ` - ${uploadUiMessage}` : ""}
                 </div>
               </div>
               </div>
@@ -5159,7 +5174,7 @@ export default function ChatWidget({
                     }`}
                   >
                     <span className="font-mono uppercase tracking-[0.08em]">
-                      {uploadUiState}
+                      {uploadUiStateLabel}
                     </span>
                     {uploadUiMessage ? ` - ${uploadUiMessage}` : ""}
                   </div>
@@ -5175,7 +5190,7 @@ export default function ChatWidget({
                     }`}
                   >
                     <span className="font-mono uppercase tracking-[0.08em]">
-                      {uploadUiState}
+                      {uploadUiStateLabel}
                     </span>
                     {uploadUiMessage ? ` - ${uploadUiMessage}` : ""}
                     {selectedUploadNames.length > 0 ? (

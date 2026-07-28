@@ -70,9 +70,13 @@ export function buildCollisionSnapshotPdfFromSnapshot(snapshot: CollisionSnapsho
       },
       {
         title: "Top Dispute Items",
+        // Render each item's OWN evidence state — hardcoding "appears to
+        // support" affirmatively claimed file support for exactly the items
+        // whose evidenceLevel is missing/unsupported (truthfulness rule:
+        // never claim support that was not established).
         bullets: cleanSnapshot.topDisputeItems.map(
           (item, index) =>
-            `${index + 1}. ${item.issue}: ${item.whyItMatters} The current file appears to support this item. Next: ${item.nextAction}`
+            `${index + 1}. ${item.issue}: ${item.whyItMatters} ${item.evidenceState} Next: ${item.nextAction}`
         ),
       },
       {
@@ -123,7 +127,12 @@ export function sanitizeSnapshotForFinalRender(snapshot: CollisionSnapshot): Col
       ...item,
       issue: toCustomerFacingText(item.issue, "Repair item to review"),
       whyItMatters: toCustomerFacingText(item.whyItMatters, "This item may affect repair quality, safety, or final fit."),
-      evidenceState: "The current file appears to support this item.",
+      // Preserve the source builder's softened, item-specific evidence state
+      // instead of overwriting it with a blanket support claim.
+      evidenceState: toCustomerFacingText(
+        item.evidenceState,
+        "The current file points to this concern and it should be confirmed during repair review."
+      ),
       nextAction: toCustomerFacingText(
         item.nextAction,
         "Ask the insurer or repair shop to explain whether this item is included, and if not, why."

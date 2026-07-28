@@ -2581,7 +2581,11 @@ function emitTotalsDeltaFindings(
   };
   const lowerOnlyCount = deltaMatch.lowerOnlyRows.length;
   const duplicateCount = deltaMatch.potentialDuplicateLowerRows.length;
-  if (lowerOnlyCount > 0 || duplicateCount > 0) {
+  // Only place the lower-only listing on a totals row when the totals lane
+  // genuinely parsed (real rate/category context exists there). Without it,
+  // the "totals row" is often a glued one-line pseudo-block, and annotating it
+  // is exactly the junk-on-totals class DEFECT B forbids.
+  if ((lowerOnlyCount > 0 || duplicateCount > 0) && deltaMatch.totalsDeltas.length > 0) {
     const anchor = claimAnchor((text) =>
       /grand total|total cost of repair|subtotal|parts|miscellaneous/.test(text)
     );

@@ -104,7 +104,7 @@ export function formatMileageDisplay(
     const note =
       diff <= 1000
         ? `minor discrepancy of ${diff.toLocaleString("en-US")} mi across the reviewed documents`
-        : `${diff.toLocaleString("en-US")} mi mismatch across the reviewed documents — verify before relying on it; not necessarily a repair issue`;
+        : `${diff.toLocaleString("en-US")} mi document mismatch across the reviewed documents — verify before relying on it; not necessarily a repair issue`;
     return `${distinct.map((v) => v.toLocaleString("en-US")).join(" / ")} (${note})`;
   }
   if (typeof mileage === "number" && mileage > 0) return mileage.toLocaleString("en-US");
