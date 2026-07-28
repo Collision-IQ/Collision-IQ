@@ -703,11 +703,10 @@ export function detectChatTaskType(params: {
 }): ChatbotTaskType {
   const lower = params.userQuery.toLowerCase();
 
-  if (
-    lower.includes("part") ||
-    lower.includes("aftermarket") ||
-    lower.includes("oem part")
-  ) {
+  // Word boundaries: bare substring "part" classified "file a DEPARTment of
+  // insurance complaint" as a part lookup and steered retrieval to the wrong
+  // lane entirely.
+  if (/\b(?:parts?|aftermarket|oem part|part number)\b/.test(lower)) {
     return "part_lookup";
   }
 

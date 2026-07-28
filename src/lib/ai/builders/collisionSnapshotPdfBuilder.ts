@@ -48,8 +48,15 @@ export function buildCollisionSnapshotPdfFromSnapshot(snapshot: CollisionSnapsho
     },
     summary: [
       { label: "Vehicle", value: cleanSnapshot.vehicleLabel },
-      { label: "More Complete Plan", value: cleanSnapshot.repairPlanVerdict.moreCompletePlan },
-      { label: "Carrier Plan", value: cleanSnapshot.repairPlanVerdict.carrierPlanDescriptor },
+      // Comparison tiles presuppose a shop-vs-carrier pair; on a
+      // single-estimate or scan/quote-only file set they render
+      // "INCONCLUSIVE" verdicts about a comparison that does not exist.
+      ...(cleanSnapshot.estimateComparison.available !== false
+        ? [
+            { label: "More Complete Plan", value: cleanSnapshot.repairPlanVerdict.moreCompletePlan },
+            { label: "Carrier Plan", value: cleanSnapshot.repairPlanVerdict.carrierPlanDescriptor },
+          ]
+        : []),
       { label: "Approach", value: cleanSnapshot.pressureMode.charAt(0).toUpperCase() + cleanSnapshot.pressureMode.slice(1) },
     ],
     sections: [

@@ -32,7 +32,7 @@ export function buildRebuttalEmailPdf(params: ExportBuilderInput): CarrierReport
     header: buildPdfHeader({
       title: "Carrier Rebuttal Email",
       subtitle:
-        "Editable carrier-facing summary based on the current estimate review and supporting file material.",
+        "Editable carrier-facing summary based on the reviewed claim file and supporting documentation.",
       generatedLabel: `Generated ${source.generatedLabel}`,
     }),
     summary: [

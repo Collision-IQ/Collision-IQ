@@ -227,5 +227,10 @@ export function sanitizeCustomerFacingDocument(document: CarrierReportDocument):
 }
 
 export function containsCccWorkfileSignal(values: Array<string | null | undefined>) {
-  return values.some((value) => /\b(?:ccc|awf|workfile)\b/i.test(value ?? ""));
+  // Require the SECURE SHARE / workfile-artifact signal, which only the real
+  // CCC Secure Share intake produces. Bare "ccc" matched every estimate
+  // AUTHORED in CCC ONE and made customer reports assert "CCC Secure Share
+  // source confirms…" — a verification claim with no retrieved data behind it
+  // (truthfulness rule: never claim verified without the artifact).
+  return values.some((value) => /\b(?:ccc\s+secure\s+share|secure\s+share|awf\b|workfile\s+(?:id|data))\b/i.test(value ?? ""));
 }

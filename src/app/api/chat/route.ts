@@ -17,7 +17,6 @@ import {
 import { JURISDICTIONAL_INSURANCE_APPRAISAL_PROMPT } from "@/lib/ai/jurisdictionalInsurancePrompt";
 import { DOCUMENT_REVIEW_TWO_PASS_PROTOCOL } from "@/lib/ai/documentReviewProtocol";
 import { classifyCitationDensityDocument } from "@/lib/reports/citationDensityDocumentClassifier";
-import { buildAppraisalAwardEvaluatorInstruction } from "@/lib/ai/appraisalAwardEvaluator";
 import { buildConversationBehaviorDirective } from "@/lib/ai/assistanceProfile";
 import {
   UnauthorizedError,
@@ -36,6 +35,7 @@ import { redactExternalDocumentUrls } from "@/lib/externalDocuments";
 import { buildProductAccessGuard, canAccessFeature } from "@/lib/featureAccess";
 import {
   buildQuickChatSystemPrompt,
+  CHAT_CAPABILITY_BOUNDARIES,
   NO_INTERNAL_TOKENS_RULE,
   STRUCTURED_WRITING_DIRECTIVE,
 } from "@/lib/ai/chatVoice";
@@ -888,22 +888,32 @@ function buildNewUploadSummary(documents: UploadedDocument[]): string {
 function isLegalAdjacentNegotiationRequest(userMessage: string): boolean {
   const lower = userMessage.toLowerCase();
 
+  // Rights/statute/dispute phrasing only. Broad shop-talk terms ("carrier",
+  // "aftermarket", "oem part", "total loss", "appraisal") stapled the
+  // not-legal-advice preamble onto routine repair questions like "is this an
+  // aftermarket part?" — the disclaimer belongs on legal positioning, not on
+  // parts identification.
   return [
     "negotiate",
     "negotiation",
     "rebuttal",
-    "carrier",
-    "appraisal",
-    "appraiser",
     "settlement",
-    "diminished value",
-    "total loss",
-    "aftermarket",
-    "oem part",
     "consumer rights",
-    "pennsylvania",
-    "pa law",
+    "my rights",
+    "bad faith",
+    "sue ",
+    "lawsuit",
+    "attorney",
+    "lawyer",
+    "legal action",
     "statute",
+    "pa law",
+    "state law",
+    "insurance law",
+    "appraisal clause",
+    "invoke appraisal",
+    "doi complaint",
+    "department of insurance",
   ].some((term) => lower.includes(term));
 }
 
@@ -1011,19 +1021,19 @@ function getOpenAIOutputText(response: unknown): string | undefined {
   return typeof candidate.output_text === "string" ? candidate.output_text : undefined;
 }
 
-function enforceModeResponseShape(text: string, mode: OutputMode): string {
-  if (mode !== "UMPIRING" || /appraisal recommendation/i.test(text)) {
+function enforceModeResponseShape(text: string, mode: OutputMode, documentCount: number): string {
+  // Shape only a REAL appraisal review: umpiring needs competing documents.
+  // A casual "what's an appraisal?" question with no files must get a plain
+  // conversational answer. And never concatenate system directives
+  // (buildAppraisalAwardEvaluatorInstruction) into user-facing output — that
+  // leaked raw governance text ("Never expose cmp IDs…") into replies.
+  if (mode !== "UMPIRING" || documentCount < 2 || /appraisal recommendation/i.test(text)) {
     return text;
   }
 
   return [
     "**Appraisal Recommendation**",
-    "Based on the reviewed file, use the appraisal record to make a directional amount-of-loss recommendation based on safe, complete, OEM-consistent repair scope rather than lowest cost or automatic shop preference.",
-    "",
-    "**Award Posture**",
-    "Use one of these postures: award shop estimate, award carrier estimate, award reconciled supported amount, defer final award because full-file review is incomplete, or defer final award because amount-of-loss maturity is incomplete.",
-    "",
-    buildAppraisalAwardEvaluatorInstruction(),
+    "Based on the reviewed file, the recommendation below reflects safe, complete, OEM-consistent repair scope rather than lowest cost or automatic shop preference.",
     "",
     text,
   ].join("\n");
@@ -1479,6 +1489,11 @@ export async function POST(req: Request) {
           .join("\n\n")
       : buildQuickChatSystemPrompt({
           productAccessGuard: buildProductAccessGuard(body.productAccess),
+          // Audience register (policyholder plain-language vs carrier
+          // professional) applies to the DEFAULT mode too — the client always
+          // sends the profile; only research mode was consuming it.
+          audienceDirective: buildConversationBehaviorDirective(body.assistanceProfile),
+          capabilityNotes: CHAT_CAPABILITY_BOUNDARIES,
           activeCaseGuard: buildActiveCaseSystemGuard({
             hasStoredEvidence: activeCaseHasStoredEvidence,
             hasVehicleContext: activeCaseHasVehicleContext,
@@ -1863,7 +1878,7 @@ export async function POST(req: Request) {
       explicitJurisdiction ?? retrieval?.request.jurisdiction
     );
     const modeShapedOutput = applyLegalCitationGate({
-      text: enforceModeResponseShape(outputText, outputMode.mode),
+      text: enforceModeResponseShape(outputText, outputMode.mode, documents.length),
       verifiedLegalCitationCount,
       jurisdiction: explicitJurisdiction ?? retrieval?.request.jurisdiction,
       applies: needsLegalDisclaimer,

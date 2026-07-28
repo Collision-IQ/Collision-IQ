@@ -24,7 +24,15 @@ export function classifyOutputMode(text: string | null | undefined): OutputMode 
     return "CUSTOMER_SUMMARY";
   }
 
-  if (/\b(umpire|appraisal|appraiser|award|amount of loss|amount-of-loss|which amount|decide between estimates|which estimate|what amount should be awarded)\b/i.test(value)) {
+  // UMPIRING requires DECISION phrasing — "umpire this", "which estimate
+  // should be awarded", "amount of loss". Bare nouns ("appraisal",
+  // "appraiser", "award") fired on casual questions like "what's an
+  // appraisal?" and forced the award-posture wall onto a plain conversation.
+  if (
+    /\b(?:umpire|umpiring|amount of loss|amount-of-loss|which amount|decide between (?:the )?estimates|which estimate should|what amount should be awarded|appraisal award|award (?:the )?(?:shop|carrier|insurer) estimate|appraisal clause)\b/i.test(
+      value
+    )
+  ) {
     return "UMPIRING";
   }
 

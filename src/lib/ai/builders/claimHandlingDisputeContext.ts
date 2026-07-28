@@ -162,20 +162,20 @@ function buildNeutralEstimateOnlyContext(
   return {
     hasContext: false,
     summary: [
-      "Current upload evidence source: current_upload estimates only.",
+      "Current upload evidence source: estimates in the current upload only.",
       "DOI readiness is insufficient because the current file does not establish claim-handling conduct, a written carrier position, or jurisdiction-specific authority.",
       "Policy rights are insufficient because the current file does not include policy language, appraisal language, or a written carrier policy position.",
       "No verified legal or regulatory issue is identified from the two estimates alone.",
       priorHasPolicyOrClaimHandlingContext
-        ? "prior_chat_context was detected but was not promoted to a user-reported fact because the current upload does not continue or document that policy/appraisal dispute."
+        ? "Earlier chat discussion mentioned a concern, but it was not promoted to a user-reported fact because the current upload does not continue or document that policy/appraisal dispute."
         : "No active policy/appraisal context was established from the current upload.",
     ],
     userReports: [],
     documentSupport: [
-      "current_upload supports estimate-line disputes only; it does not establish insurer claim-handling conduct.",
+      "The current upload supports estimate-line disputes only; it does not establish insurer claim-handling conduct.",
     ],
     unverified: [
-      "prior_chat_context cannot be treated as verified insurer conduct without explicit continuation and current supporting documents.",
+      "Earlier chat discussion cannot be treated as verified insurer conduct without explicit continuation and current supporting documents.",
       "Policy language, written carrier correspondence, appraisal invocation, and date-stamped claim communications were not established by the current upload.",
     ],
     timingConcerns: [
@@ -191,14 +191,14 @@ function buildNeutralEstimateOnlyContext(
     nextDocumentation: [
       "If a policy/appraisal issue is intended, upload the policy language and written carrier or IA communications.",
       "If this is only an estimate comparison, keep DOI and policy-rights conclusions neutral.",
-      "Separate current_upload estimate evidence from prior_chat_context before stating any user-reported claim-handling fact.",
+      "Separate current-upload estimate evidence from earlier chat discussion before stating any user-reported claim-handling fact.",
     ],
     explicitSections: [
       {
         title: "Current Upload Provenance",
         bullets: [
-          "current_upload: estimate evidence only.",
-          "prior_chat_context: not promoted to verified or user-reported facts in this report.",
+          "Current upload: estimate evidence only.",
+          "Earlier chat discussion: not promoted to verified or user-reported facts in this report.",
         ],
       },
     ],

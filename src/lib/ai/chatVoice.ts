@@ -35,9 +35,20 @@ export function buildQuickChatSystemPrompt(params: {
   productAccessGuard?: string;
   activeCaseGuard?: string;
   caseContext?: string;
+  /**
+   * Audience/conversation directive (policyholder plain-language vs carrier
+   * professional register). The client always sends an assistance profile;
+   * leaving it out of the DEFAULT mode meant the audience modes only worked
+   * in Researched Answers.
+   */
+  audienceDirective?: string;
+  /** Honest capability boundary for questions the chat has no lane for. */
+  capabilityNotes?: string;
 }): string {
   return [
     QUICK_VOICE_RULES.join("\n"),
+    params.audienceDirective,
+    params.capabilityNotes,
     params.productAccessGuard,
     params.activeCaseGuard,
     params.caseContext ? `CASE CONTEXT (already reviewed — answer from this, never ask the user to re-upload):\n${params.caseContext}` : null,
@@ -45,3 +56,12 @@ export function buildQuickChatSystemPrompt(params: {
     .filter(Boolean)
     .join("\n\n");
 }
+
+/**
+ * Capabilities the chat genuinely does NOT have. Stating them plainly beats a
+ * confident answer invented from stale knowledge — "smartest in the room"
+ * includes knowing what you don't track.
+ */
+export const CHAT_CAPABILITY_BOUNDARIES = [
+  "You do not have a live industry-news feed. For questions about current auto repair news, recent regulation changes, or breaking industry events: answer from established knowledge when it is genuinely stable, say plainly that you don't track live news when it is not, and point to Researched Answer mode for source-backed retrieval of OEM procedures and state law.",
+].join("\n");

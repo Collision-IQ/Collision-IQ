@@ -476,10 +476,10 @@ function buildUserProvidedContextBullets(value: string | null | undefined, repor
   }
 
   return [
-    "prior_chat_context may mention an appraisal-process or claim-handling concern, but it is not promoted to a verified or user-reported fact unless the current upload continues and documents that issue.",
+    "Earlier chat discussion may mention an appraisal-process or claim-handling concern, but it is not promoted to a verified or user-reported fact unless the current upload continues and documents that issue.",
     ...(reportedIssues.length ? [`Reported issue category: ${dedupeStrings(reportedIssues).join("; ")}.`] : []),
     "Policy rights remain insufficient without policy language, written carrier or IA correspondence, appraisal invocation, inspection notes, and any current legal-team correspondence.",
-    "Do not state award timing, repair-continuation restrictions, or post-repair appraisal denial unless those facts are established by current_upload or explicit active_case_context.",
+    "Do not state award timing, repair-continuation restrictions, or post-repair appraisal denial unless those facts are established by the current upload or the active case record.",
   ];
 }
 
