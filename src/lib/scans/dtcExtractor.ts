@@ -7,7 +7,21 @@ import type { DtcRecord, DtcStatus, ScanSide } from "@/lib/scans/scanTypes";
 // optional 2-digit failure-type suffix ("U0121-00", "B1342:08", "P0301.02").
 const DTC_RE = /\b([PBCU][0-9][0-9A-F]{3})(?:\s?[-:.]\s?([0-9A-F]{2}))?\b/gi;
 
+// BMW/ISTA + asTech-on-BMW fault codes are 6 hex characters, printed either
+// with an explicit 0x prefix ("0xB7F8CB - CID: Image data invalid…", RO 22009
+// asTech pre-scan) or bare on ISTA printouts ("B7F8A5 Supply voltage…"). The
+// SAE pattern above can never match them, which read whole BMW fault lists as
+// "no diagnostic trouble codes". The 0x form is unambiguous. The bare form is
+// only accepted when it contains at least one hex LETTER (a 6-digit pure
+// number is a price/line-number risk) and sits at the start of a line or is
+// followed by a separator+description — the shape of a fault-list row.
+const BMW_HEX_DTC_RE = /\b0x([0-9A-F]{6})\b/gi;
+const BMW_BARE_HEX_DTC_RE = /(^|[\s>])((?=[0-9A-F]*[A-F])[0-9A-F]{6})(?=\s*[-–—:]\s+\S|\s+[A-Za-z]{3,})/gim;
+
 const STATUS_PATTERNS: Array<[RegExp, DtcStatus]> = [
+  // BMW/asTech "Not present" (fault stored in memory, not currently active)
+  // must outrank the bare "present" → active rule below.
+  [/\bnot\s+(?:currently\s+)?present\b/i, "stored"],
   [/\b(?:active|current|present|confirmed|set)\b/i, "active"],
   [/\bpermanent\b/i, "permanent"],
   [/\bpending\b/i, "pending"],
@@ -37,13 +51,30 @@ export function normalizeDtcCode(code: string): string {
   return code.toUpperCase().replace(/\s+/g, "");
 }
 
+function containsAnyDtc(line: string): boolean {
+  for (const re of [DTC_RE, BMW_HEX_DTC_RE, BMW_BARE_HEX_DTC_RE]) {
+    re.lastIndex = 0;
+    if (re.test(line)) return true;
+  }
+  return false;
+}
+
 function looksLikeModuleHeading(line: string): string | null {
   const trimmed = line.trim();
   if (!trimmed || trimmed.length > 80) return null;
   // Never treat a line that contains a DTC as a module heading.
-  DTC_RE.lastIndex = 0;
-  if (DTC_RE.test(trimmed)) return null;
-  if (KNOWN_MODULE_ACRONYMS.test(trimmed)) return trimmed.replace(/\s*[:\-–—]\s*$/, "");
+  if (containsAnyDtc(trimmed)) return null;
+  // The acronym must stand alone or lead a separator ("SAS", "EPS - Electric
+  // Power Steering"). A glued header key/value ("SRS DeploymentNo",
+  // "SAS Deployment: No") is report chrome, not a module heading — those
+  // leaked into the modules list as garbage (RO 22009 asTech header block).
+  if (KNOWN_MODULE_ACRONYMS.test(trimmed) && /^[A-Z0-9]{2,6}(?:\s*[-–—:(].*)?$/.test(trimmed)) {
+    return trimmed.replace(/\s*[:\-–—]\s*$/, "");
+  }
+  // asTech-on-BMW section headings are plain title-case lines ending with a
+  // colon ("Front Radar Sensor Long Range:", "Optional Extra Equipment:").
+  const colonHeading = /^([A-Z][A-Za-z0-9 /&()\-]{2,60}):$/.exec(trimmed);
+  if (colonHeading) return colonHeading[1].trim();
   const match = MODULE_LINE_RE.exec(trimmed);
   if (match) return match[1].trim();
   if (/\bmodule\b/i.test(trimmed) && !/\bno (dtc|codes?)\b/i.test(trimmed)) {
@@ -67,6 +98,16 @@ export function extractDtcs(params: {
   const modules: string[] = [];
   let currentModule: string | null = null;
 
+  // ISTA "Fault code memory list" printouts start every row with a bare
+  // 6-hex code that is often PURE DIGITS ("022345 SAS: Voltage supply -
+  // global external undervoltage") — only safe to accept when the document
+  // itself identifies as a BMW fault list (banner text, or several explicit
+  // 0x-prefixed codes elsewhere in the same document).
+  BMW_HEX_DTC_RE.lastIndex = 0;
+  const bmwFaultListDocument =
+    /fault\s+code\s+memory\s+list|\bista\b/i.test(params.text) ||
+    (params.text.match(BMW_HEX_DTC_RE) ?? []).length >= 2;
+
   lines.forEach((line, index) => {
     const moduleHeading = looksLikeModuleHeading(line);
     if (moduleHeading) {
@@ -75,16 +116,54 @@ export function extractDtcs(params: {
       return;
     }
 
+    // Collect matches from every code family, deduped per line by code.
+    const lineCodes = new Map<string, { exact: string; endIndex: number }>();
     DTC_RE.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = DTC_RE.exec(line)) !== null) {
       const exact = match[2] ? `${match[1].toUpperCase()}-${match[2].toUpperCase()}` : match[1].toUpperCase();
+      const normalized = normalizeDtcCode(match[1]);
+      if (!lineCodes.has(normalized)) {
+        lineCodes.set(normalized, { exact, endIndex: match.index + match[0].length });
+      }
+    }
+    BMW_HEX_DTC_RE.lastIndex = 0;
+    while ((match = BMW_HEX_DTC_RE.exec(line)) !== null) {
+      const normalized = normalizeDtcCode(match[1]);
+      if (!lineCodes.has(normalized)) {
+        lineCodes.set(normalized, { exact: `0x${match[1].toUpperCase()}`, endIndex: match.index + match[0].length });
+      }
+    }
+    BMW_BARE_HEX_DTC_RE.lastIndex = 0;
+    while ((match = BMW_BARE_HEX_DTC_RE.exec(line)) !== null) {
+      const normalized = normalizeDtcCode(match[2]);
+      if (!lineCodes.has(normalized)) {
+        lineCodes.set(normalized, {
+          exact: match[2].toUpperCase(),
+          endIndex: match.index + match[0].length,
+        });
+      }
+    }
+    if (bmwFaultListDocument) {
+      const lineStart = /^\s*([0-9A-F]{6})\b/i.exec(line);
+      if (lineStart) {
+        const normalized = normalizeDtcCode(lineStart[1]);
+        if (!lineCodes.has(normalized)) {
+          lineCodes.set(normalized, {
+            exact: lineStart[1].toUpperCase(),
+            endIndex: (lineStart.index ?? 0) + lineStart[0].length,
+          });
+        }
+      }
+    }
+
+    for (const [normalized, found] of lineCodes) {
       // Description: text on the line after the code (strip status words later).
-      const after = line.slice(match.index + match[0].length).replace(/^[\s\-–—:.]+/, "").trim();
+      const after = line.slice(found.endIndex).replace(/^[\s\-–—:.]+/, "").trim();
       const description = after.length > 2 ? after.slice(0, 220) : null;
       dtcs.push({
-        code: exact,
-        normalizedCode: normalizeDtcCode(match[1]),
+        code: found.exact,
+        normalizedCode: normalized,
         module: currentModule,
         originalDescription: description,
         status: detectDtcStatus(line),

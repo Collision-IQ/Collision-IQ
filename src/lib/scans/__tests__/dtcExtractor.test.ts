@@ -20,6 +20,73 @@ U0121-00 Lost Communication With ABS Module - HISTORY
 C0035 Left Front Wheel Speed Sensor
 `;
 
+// BMW formats (RO 22009): asTech-on-BMW prints 0x-prefixed 6-hex codes under
+// colon-terminated module headings with "Not present" status; ISTA "Fault
+// code memory list" printouts start each row with a BARE 6-hex code that is
+// often pure digits — only extracted when the document identifies as a BMW
+// fault list.
+const ASTECH_BMW_SCAN = `
+Pre-Repair Scan
+Vehicle2022 BMW X5
+SRS DeploymentNo
+Warning LightsNo
+Performed a full pre-repair scan Health Check with the ISTA scan tool.
+Scan Readings
+Optional Extra Equipment:
+0xD1EE23 - Signal (environmental model, object detection) invalid, transmitter FRSF - Not present
+Front Radar Sensor Long Range:
+0x482136 - ACC sensor/FRSF: Maladjustment - Not present
+0x48214A - ACC sensor/FRSF: Lack of visibility - Not present
+Electrical Machine Electronics:
+0x030EC8 - Charge management function: no voltage after charging began - Not present
+`;
+
+const ISTA_FAULT_LIST = `
+Fault code memory list VIN: 5UXTA6C04N9M51734 14.07.2026, 14:10:07 - 1/4
+022345 SAS: Voltage supply - global external undervoltage 83219 No Information
+0300B1 Power window regulator, passenger's side: Hardware fault 83219 No Battery
+0316D1 High-voltage battery unit: Category 1 fault 83219 yes Information
+`;
+
+describe("dtcExtractor BMW/asTech formats (RO 22009)", () => {
+  const astech = extractDtcs({ text: ASTECH_BMW_SCAN, sourceFile: "astech-pre.pdf", side: "pre" });
+
+  it("extracts 0x-prefixed 6-hex BMW codes with their modules", () => {
+    const codes = astech.dtcs.map((dtc) => dtc.normalizedCode);
+    expect(codes).toContain("D1EE23");
+    expect(codes).toContain("482136");
+    expect(codes).toContain("48214A");
+    expect(codes).toContain("030EC8");
+    const radar = astech.dtcs.find((dtc) => dtc.normalizedCode === "482136");
+    expect(radar?.module).toBe("Front Radar Sensor Long Range");
+  });
+
+  it("maps BMW 'Not present' to stored, never active", () => {
+    for (const dtc of astech.dtcs) {
+      expect(dtc.status).toBe("stored");
+    }
+  });
+
+  it("never treats glued header key/values as module headings", () => {
+    expect(astech.modules).not.toContain("SRS DeploymentNo");
+    expect(astech.modules.some((module) => /deployment|warning lights/i.test(module))).toBe(false);
+  });
+
+  it("extracts bare line-start codes (even pure-digit) from an ISTA fault code memory list", () => {
+    const ista = extractDtcs({ text: ISTA_FAULT_LIST, sourceFile: "sas-post.pdf", side: "post" });
+    const codes = ista.dtcs.map((dtc) => dtc.normalizedCode);
+    expect(codes).toContain("022345");
+    expect(codes).toContain("0300B1");
+    expect(codes).toContain("0316D1");
+  });
+
+  it("does NOT extract bare 6-digit numbers from documents that are not BMW fault lists", () => {
+    const estimateText = "148305 Repl Storage compart 149294500C 1 74.00 0.3\n022345 some estimate row";
+    const result = extractDtcs({ text: estimateText, sourceFile: "estimate.pdf", side: "pre" });
+    expect(result.dtcs.length).toBe(0);
+  });
+});
+
 describe("dtcExtractor", () => {
   const { dtcs, modules } = extractDtcs({ text: SAMPLE_SCAN, sourceFile: "pre.pdf", side: "pre" });
 
