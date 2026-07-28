@@ -86,6 +86,12 @@ export function dedupeRepeatedDocumentSentences(document: CarrierReportDocument)
       })
       .join(" ")
       .trim();
+  // Summary tiles are headlines — seed them as already-seen so a section body
+  // never repeats a tile verbatim (the "Repair Conclusion" tile text printed
+  // again inside Executive Position on RO 22009).
+  for (const row of document.summary) {
+    if (row.value.trim().length >= 90) seen.add(normalize(row.value));
+  }
   return {
     ...document,
     sections: document.sections.map((section) => ({
@@ -93,6 +99,7 @@ export function dedupeRepeatedDocumentSentences(document: CarrierReportDocument)
       body: typeof section.body === "string" ? filterText(section.body) : section.body,
       bullets: section.bullets?.map(filterText).filter((bullet) => bullet.length > 0),
     })),
+    footer: document.footer.map(filterText).filter((line) => line.length > 0),
   };
 }
 
@@ -674,6 +681,9 @@ function cleanExplainabilityDetail(value: string | null | undefined, title: stri
   const cleaned = sanitizeReportProse(value || "Review this item against the current file evidence.")
     .replace(new RegExp(`^${titlePattern}\\s*:?\\s*`, "i"), "")
     .replace(/\bSupport is verified from current file evidence\.\s*Support basis:\s*/gi, "")
+    // Detail text can arrive starting mid-sentence with stray leading
+    // punctuation; joined after "Finding:" it rendered as "Finding:. …".
+    .replace(/^[.:;,\s]+/, "")
     .trim();
 
   return limitToReadableParagraph(cleaned || "Review this item against the current file evidence.");

@@ -103,6 +103,22 @@ run("executive summary never restates the same open-item list twice", () => {
   assert.match(distinct, /The unresolved review items are alignment proof and teardown photos/);
 });
 
+run("summary tiles seed the dedupe — a section never repeats a tile verbatim", () => {
+  const tile =
+    "The current file identifies specific repair, verification, or documentation items that need line-item support before award.";
+  const document = dedupeRepeatedDocumentSentences({
+    brand: { companyName: "x", reportLabel: "x", logoPath: "x" },
+    header: { title: "t", subtitle: "s", generatedLabel: "g" },
+    summary: [{ label: "Repair Conclusion", value: tile }],
+    sections: [{ title: "Executive Repair Position", body: `${tile} The rest of the position follows.` }],
+    footer: [tile, "Short footer line."],
+  });
+  assert.doesNotMatch(document.sections[0].body, /identifies specific repair/);
+  assert.match(document.sections[0].body, /rest of the position follows/);
+  // The footer copy of the tile is dropped too; unrelated footer lines stay.
+  assert.deepEqual(document.footer, ["Short footer line."]);
+});
+
 run("repeated long sentences render once across the document", () => {
   const repeated =
     "Based on the documents reviewed, your BMW X5 appears repairable, and the estimate includes several important repair-planning items that we like to see in a complete file.";
