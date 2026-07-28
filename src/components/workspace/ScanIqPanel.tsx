@@ -42,8 +42,27 @@ const CCC_SETUP_INSTRUCTIONS =
 const CHANGE_STYLE: Record<string, string> = {
   new: "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-300",
   remaining: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-300",
+  stored_on_post: "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-300",
   cleared: "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300",
   unknown: "border-border bg-muted text-muted-foreground",
+};
+
+// Human labels — raw enum tokens must never render in a carrier-facing table.
+const CHANGE_LABEL: Record<string, string> = {
+  new: "new",
+  remaining: "remaining",
+  stored_on_post: "stored (memory)",
+  cleared: "cleared",
+  unknown: "unknown",
+};
+
+const MOTOR_LABEL: Record<string, string> = {
+  "vehicle-specific-sandbox": "Vehicle-specific",
+  "general-reference": "General reference",
+  skipped: "Not used",
+  error: "Unavailable",
+  unavailable: "Unavailable",
+  "not-configured": "Not configured",
 };
 
 function fileToDataUrl(file: File): Promise<string> {
@@ -170,7 +189,13 @@ export default function ScanIqPanel() {
       const data = (await res.json().catch(() => null)) as { reportId?: string; error?: string } | null;
       if (res.ok && data?.reportId) {
         setImportedReportId(data.reportId);
+      } else {
+        // Never fail silently — the spinner stopping with no message left
+        // users unsure whether the import happened.
+        setError(data?.error ?? "CCC import failed. Please try again.");
       }
+    } catch {
+      setError("CCC import failed. Please try again.");
     } finally {
       setImporting(false);
     }
@@ -262,13 +287,13 @@ export default function ScanIqPanel() {
                       <td className="px-2.5 py-1.5">{row.postStatus ?? "—"}</td>
                       <td className="px-2.5 py-1.5">
                         <span className={`rounded-full border px-1.5 py-0.5 text-[10px] uppercase ${CHANGE_STYLE[row.changeType] ?? CHANGE_STYLE.unknown}`}>
-                          {row.changeType}
+                          {CHANGE_LABEL[row.changeType] ?? row.changeType}
                         </span>
                       </td>
                       <td className="max-w-[240px] truncate px-2.5 py-1.5" title={row.normalizedDescription ?? row.originalDescription ?? ""}>
                         {row.normalizedDescription ?? row.originalDescription ?? "—"}
                       </td>
-                      <td className="px-2.5 py-1.5 text-[10px] text-muted-foreground">{row.motorLookupStatus}</td>
+                      <td className="px-2.5 py-1.5 text-[10px] text-muted-foreground">{MOTOR_LABEL[row.motorLookupStatus] ?? row.motorLookupStatus}</td>
                     </tr>
                   ))}
                 </tbody>

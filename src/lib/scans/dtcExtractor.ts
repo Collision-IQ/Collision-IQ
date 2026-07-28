@@ -161,12 +161,22 @@ export function extractDtcs(params: {
       // Description: text on the line after the code (strip status words later).
       const after = line.slice(found.endIndex).replace(/^[\s\-–—:.]+/, "").trim();
       const description = after.length > 2 ? after.slice(0, 220) : null;
+      let status = detectDtcStatus(line);
+      // ISTA fault-list rows carry a currently-present column ("… 83219 No
+      // Information" / "… 83218 yes Battery"). The LAST standalone yes/no on
+      // the row is that column (a "no" inside the description comes earlier),
+      // and it is the only current-vs-memory signal these printouts provide.
+      if (status === "unknown" && bmwFaultListDocument) {
+        const presence = [...line.matchAll(/\b(yes|no)\b/gi)].pop()?.[1]?.toLowerCase();
+        if (presence === "yes") status = "active";
+        else if (presence === "no") status = "stored";
+      }
       dtcs.push({
         code: found.exact,
         normalizedCode: normalized,
         module: currentModule,
         originalDescription: description,
-        status: detectDtcStatus(line),
+        status,
         sourceFile: params.sourceFile,
         side: params.side,
         lineReference: index + 1,

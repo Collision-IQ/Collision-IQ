@@ -18,12 +18,22 @@ export function buildScanIqReportText(comparison: ScanIqComparison): ScanIqRepor
   const { summary, rows } = comparison;
   const unresolved = summary.remainingCount + summary.newCount;
 
+  // Stored-memory codes are reported separately: they are fault-memory
+  // content, not unresolved repair problems, and folding them into
+  // "unresolved" would misstate a routine full-memory printout as ~100 open
+  // post-repair faults.
+  const storedNote =
+    summary.storedOnPostCount > 0
+      ? ` ${summary.storedOnPostCount} additional stored/history code${summary.storedOnPostCount === 1 ? "" : "s"} appear only in the post-scan fault memory — likely pre-existing memory content; clear and re-scan to confirm.`
+      : "";
   const answer =
     unresolved > 0
-      ? `Summary: The post-scan still shows ${unresolved} unresolved diagnostic code${unresolved === 1 ? "" : "s"} after repairs (${summary.remainingCount} remaining, ${summary.newCount} new).`
+      ? `Summary: The post-scan still shows ${unresolved} unresolved diagnostic code${unresolved === 1 ? "" : "s"} after repairs (${summary.remainingCount} remaining, ${summary.newCount} new).${storedNote}`
       : summary.clearedCount > 0
-        ? `Summary: All ${summary.clearedCount} diagnostic code${summary.clearedCount === 1 ? "" : "s"} from the pre-scan were cleared by the post-scan.`
-        : "Summary: No diagnostic trouble codes were identified on either scan.";
+        ? `Summary: All ${summary.clearedCount} diagnostic code${summary.clearedCount === 1 ? "" : "s"} from the pre-scan were cleared by the post-scan.${storedNote}`
+        : summary.storedOnPostCount > 0
+          ? `Summary: No active or unresolved diagnostic codes were identified.${storedNote}`
+          : "Summary: No diagnostic trouble codes were identified on either scan.";
 
   const why =
     unresolved > 0
@@ -52,7 +62,7 @@ export function buildScanIqReportText(comparison: ScanIqComparison): ScanIqRepor
       row.module ?? "—",
       row.preStatus ?? "—",
       row.postStatus ?? "—",
-      row.changeType,
+      row.changeType === "stored_on_post" ? "stored (memory)" : row.changeType,
       (row.normalizedDescription ?? row.originalDescription ?? "—").replace(/\|/g, "/"),
       row.motorLookupStatus,
     ]
@@ -66,7 +76,7 @@ export function buildScanIqReportText(comparison: ScanIqComparison): ScanIqRepor
     ? "MOTOR: vehicle-specific sandbox evidence was retrieved for this vehicle (limited 15-vehicle sandbox coverage)."
     : motorModes.has("general-reference")
       ? "MOTOR: general DTC reference was used to classify codes (not vehicle-specific evidence)."
-      : motorModes.has("error")
+      : motorModes.has("error") || motorModes.has("unavailable") || motorModes.has("not-configured")
         ? "MOTOR: lookup was attempted but unavailable — scan comparison is unaffected."
         : "MOTOR: not used for this comparison.";
 
@@ -83,6 +93,8 @@ export function buildScanIqHistoryReport(
 ): RepairIntelligenceReport {
   const { summary } = comparison;
   const unresolved = summary.remainingCount + summary.newCount;
+  // Risk keys on genuinely-new (active) and remaining faults; stored fault
+  // memory alone never drives the score above "low".
   const riskScore = summary.newCount > 0 ? "high" : summary.remainingCount > 0 ? "moderate" : "low";
   const vehicle = comparison.post.vin || comparison.pre.vin
     ? {

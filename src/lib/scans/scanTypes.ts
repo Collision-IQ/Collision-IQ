@@ -45,7 +45,11 @@ export type ParsedScanReport = {
   unreadable: boolean;
 };
 
-export type DtcChangeType = "cleared" | "remaining" | "new" | "unknown";
+// "stored_on_post": present only in the post-scan but with a stored/history
+// status — fault-memory content (a full ISTA memory list), NOT evidence that
+// the repair introduced a new fault. Counted and risk-scored separately from
+// genuinely new (active/pending/permanent) post-repair codes.
+export type DtcChangeType = "cleared" | "remaining" | "new" | "stored_on_post" | "unknown";
 
 export type MotorLookupStatus =
   | "vehicle-specific-sandbox"
@@ -92,6 +96,8 @@ export type ScanComparisonSummary = {
   clearedCount: number;
   remainingCount: number;
   newCount: number;
+  /** Post-only codes carrying a stored/history status (fault memory, not repair-induced). */
+  storedOnPostCount: number;
   unknownCount: number;
   modulesOnlyInPre: string[];
   modulesOnlyInPost: string[];
