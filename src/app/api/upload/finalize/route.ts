@@ -11,8 +11,14 @@ import {
   getCurrentSubscriptionTierForUser,
   resolveProductTrialActive,
 } from "@/lib/billing/productEntitlements";
-import { UsageAccessError, recordUsage } from "@/lib/billing/usage";
+import { UsageAccessError, getUsageCount as getPeriodUsageCount, recordUsage } from "@/lib/billing/usage";
 import { incrementUsage } from "@/lib/usage";
+import {
+  FREE_MONTHLY_UPLOAD_LIMIT,
+  FREE_UPLOAD_LIMIT_MESSAGE,
+  getFreeUploadUsageCount,
+  isFreeUploadEntitlement,
+} from "@/lib/billing/freeUploadEntitlements";
 import { getAnalysisReport } from "@/lib/analysisReportStore";
 import {
   bufferToReusableDataUrl,
@@ -84,11 +90,13 @@ type UploadFailure = {
 };
 
 function getFailureStatus(failedUploads: UploadFailure[]) {
-  if (failedUploads.some((failure) => failure.code === "FILE_TOO_LARGE" || failure.code === "ZIP_TOO_LARGE")) {
-    return 413;
-  }
+  // Quota (403) outranks size (413), matching the multipart route — a batch
+  // that hits both must report the same status on either transport.
   if (failedUploads.some((failure) => failure.code === "UPLOAD_QUOTA_REACHED")) {
     return 403;
+  }
+  if (failedUploads.some((failure) => failure.code === "FILE_TOO_LARGE" || failure.code === "ZIP_TOO_LARGE")) {
+    return 413;
   }
   return 400;
 }
@@ -257,6 +265,48 @@ export async function POST(req: Request) {
         { error: "Uploads are not included in your current plan.", code: "UNAUTHORIZED" },
         { status: 403 }
       );
+    }
+
+    // Enforce the SAME per-plan quotas as the multipart route. Every file over
+    // 4MB (all phone photos, ZIPs, videos) arrives through this direct-storage
+    // path — without this check the plan quota was trivially bypassed, and the
+    // UPLOAD_QUOTA_REACHED branch in getFailureStatus below was dead code.
+    const isFreeUploadPlan = isFreeUploadEntitlement({
+      ...context.entitlements,
+      isPlatformAdmin: context.effectiveIsAdmin,
+    });
+    if (isFreeUploadPlan) {
+      const freeUsed = await getFreeUploadUsageCount({ userId: context.user.id }).catch(() => 0);
+      if (freeUsed >= FREE_MONTHLY_UPLOAD_LIMIT) {
+        return NextResponse.json(
+          {
+            error: FREE_UPLOAD_LIMIT_MESSAGE,
+            code: "UPLOAD_QUOTA_REACHED",
+            failedUploads: [{ filename, reason: FREE_UPLOAD_LIMIT_MESSAGE, code: "UPLOAD_QUOTA_REACHED" }],
+            successfulUploads: [],
+            documents: [],
+          },
+          { status: 403 }
+        );
+      }
+    } else if (!context.effectiveIsAdmin && context.entitlements.uploadCap !== null) {
+      const uploadsUsed = await getPeriodUsageCount({
+        userId: context.user.id,
+        kind: "FILE_UPLOAD",
+      }).catch(() => 0);
+      if (uploadsUsed >= context.entitlements.uploadCap) {
+        const reason = "Upload quota reached for your plan.";
+        return NextResponse.json(
+          {
+            error: reason,
+            code: "UPLOAD_QUOTA_REACHED",
+            failedUploads: [{ filename, reason, code: "UPLOAD_QUOTA_REACHED" }],
+            successfulUploads: [],
+            documents: [],
+          },
+          { status: 403 }
+        );
+      }
     }
 
     const rejection = validateDirectUploadCandidate(

@@ -19,8 +19,8 @@ import {
   isFreeUploadEntitlement,
   recordFreeUploadUsage,
 } from "@/lib/billing/freeUploadEntitlements";
-import { UsageAccessError, recordUsage } from "@/lib/billing/usage";
-import { getUsageCount, incrementUsage } from "@/lib/usage";
+import { UsageAccessError, getUsageCount as getPeriodUsageCount, recordUsage } from "@/lib/billing/usage";
+import { incrementUsage } from "@/lib/usage";
 import { saveUploadedAttachment } from "@/lib/uploadedAttachmentStore";
 import {
   classifyCitationDensityDocument,
@@ -438,7 +438,10 @@ export async function POST(req: Request) {
 
     if (!isFreeUploadPlan && !effectiveIsAdmin && entitlements.uploadCap !== null) {
       try {
-        uploadsUsed = await getUsageCount(user.id, "FILE_UPLOAD");
+        // PERIOD-scoped count (usageRecord + current period key), matching how
+        // uploads are recorded. The old lifetime usageCounter never reset, so
+        // a Pro user hit "quota reached" permanently after 100 uploads EVER.
+        uploadsUsed = await getPeriodUsageCount({ userId: user.id, kind: "FILE_UPLOAD" });
       } catch (error) {
         console.error("[upload] usage read failed during processing (non-blocking)", {
           userId: user.id,
