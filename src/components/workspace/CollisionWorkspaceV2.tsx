@@ -26,10 +26,8 @@ import {
   HelpCircle,
   LayoutDashboard,
   Menu,
-  PanelLeftClose,
-  PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
+  ChevronsLeft,
+  ChevronsRight,
   Settings as SettingsIcon,
   Workflow,
   X,
@@ -480,7 +478,7 @@ export default function CollisionWorkspaceV2({
               className="mb-1 inline-flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12px] font-medium text-muted-foreground transition hover:bg-muted/60 hover:text-foreground"
               aria-label="Collapse menu"
             >
-              <PanelLeftClose size={16} />
+              <ChevronsLeft size={16} />
               Collapse
             </button>
             {NAV_ITEMS.map((item) => renderNavItem(item))}
@@ -502,7 +500,7 @@ export default function CollisionWorkspaceV2({
               aria-label="Open menu"
               title="Open menu"
             >
-              <PanelLeftOpen size={17} />
+              <ChevronsRight size={17} />
             </button>
           </div>
         )}
@@ -609,7 +607,7 @@ export default function CollisionWorkspaceV2({
                   aria-label="Collapse claim panel"
                   title="Collapse claim panel"
                 >
-                  <PanelRightClose size={15} />
+                  <ChevronsRight size={15} />
                 </button>
                 {right}
               </aside>
@@ -622,7 +620,7 @@ export default function CollisionWorkspaceV2({
                   aria-label="Open claim panel"
                   title="Open claim panel"
                 >
-                  <PanelRightOpen size={17} />
+                  <ChevronsLeft size={17} />
                 </button>
               </div>
             )}
