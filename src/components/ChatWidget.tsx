@@ -365,6 +365,64 @@ function annotationSafeUrlTransform(url: string): string {
   return defaultUrlTransform(url);
 }
 
+// ---------------------------------------------------------------------------
+// Finding marginalia: at very wide viewports the prose cap (88ch reading
+// measure) frees horizontal space — spend it on a finding-number gutter and
+// severity chips beside each finding heading instead of longer prose lines.
+// Detection is content-driven: only messages whose headings actually carry
+// "Finding #N" get the gutter, so ordinary replies keep a symmetric bubble.
+// ---------------------------------------------------------------------------
+
+const FINDING_HEADING_PATTERN = /finding\s*#?:?\s*(\d+)/i;
+const FINDING_SEVERITY_PATTERN = /\b(critical|high|medium|low)\b/i;
+
+function messageHasFindingHeadings(content: string | null | undefined): boolean {
+  return FINDING_HEADING_PATTERN.test(content ?? "");
+}
+
+/** Flatten a ReactMarkdown children tree to plain text for chip detection. */
+function extractNodeText(node: React.ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(extractNodeText).join("");
+  if (React.isValidElement(node)) {
+    return extractNodeText((node.props as { children?: React.ReactNode }).children);
+  }
+  return "";
+}
+
+const FINDING_SEVERITY_CHIP_CLASSES: Record<string, string> = {
+  critical: "border-red-300 bg-red-50 text-red-700",
+  high: "border-amber-300 bg-amber-50 text-amber-700",
+  medium: "border-sky-300 bg-sky-50 text-sky-700",
+  low: "border-border bg-muted text-muted-foreground",
+};
+
+/** Gutter chip for a finding heading, or null when the heading is not a finding. */
+function renderFindingGutterChip(children: React.ReactNode): React.ReactNode {
+  const text = extractNodeText(children);
+  const findingMatch = text.match(FINDING_HEADING_PATTERN);
+  if (!findingMatch) return null;
+  const severity = text.match(FINDING_SEVERITY_PATTERN)?.[1]?.toLowerCase() ?? null;
+  return (
+    <span
+      aria-hidden="true"
+      className="absolute -left-14 top-0 hidden w-12 flex-col items-end gap-1 2xl:flex"
+    >
+      <span className="inline-flex min-w-8 items-center justify-center rounded-lg border border-border bg-muted px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-muted-foreground">
+        #{findingMatch[1]}
+      </span>
+      {severity ? (
+        <span
+          className={`inline-flex items-center justify-center rounded-lg border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] ${FINDING_SEVERITY_CHIP_CLASSES[severity]}`}
+        >
+          {severity}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 async function resolveAnalysisFailure(response: Response) {
   let payload: AnalysisFailureResponse | null = null;
 
@@ -4631,7 +4689,14 @@ export default function ChatWidget({
         <div
           ref={scrollRef}
           className={[
-            "mx-auto w-full max-w-[1080px] min-h-0 px-3 pb-4 pt-3 sm:px-4 sm:pt-4 space-y-4",
+            // Transcript geometry: the container (and its right-edge scrollbar)
+            // holds ~1.5in margins from the screen edges on wide viewports —
+            // max(1080px, 100% - 240px) widens past 1080 only when the panel
+            // has room, and collapses back to the old behavior when the claim
+            // panel is expanded. Assistant rows hug the left margin, user rows
+            // the right; the centered welcome children (mx-auto) stay centered
+            // in the container at every width.
+            "mx-auto w-full max-w-[max(1080px,100%_-_240px)] min-h-0 px-3 pb-4 pt-3 sm:px-4 sm:pt-4 space-y-4",
             transcriptHeightClass,
           ].join(" ")}
         >
@@ -4742,6 +4807,13 @@ export default function ChatWidget({
             const selectedMessageVoice =
               SERVER_TTS_VOICE_OPTIONS.find((option) => option.id === selectedMessageVoiceId) ??
               SERVER_TTS_VOICE_OPTIONS[0];
+            // Finding marginalia: only messages that actually carry "Finding #N"
+            // headings reserve the 2xl gutter (bubble widens by the gutter width
+            // so the 88ch prose measure is preserved, not squeezed).
+            const hasFindingGutter =
+              msg.role === "assistant" &&
+              msg.kind !== "system_status" &&
+              messageHasFindingHeadings(msg.content);
 
             return (
             <div
@@ -4764,7 +4836,14 @@ export default function ChatWidget({
                     ? `${userBubble} max-w-[88%] overflow-hidden break-words sm:max-w-[min(72%,820px)]`
                     : msg.kind === "system_status"
                       ? ""
-                      : "min-w-0 max-w-full overflow-hidden break-words rounded-2xl rounded-bl-md border border-border/55 bg-card shadow-[var(--shadow-soft)] sm:max-w-[980px]"
+                      : // Reading measure: assistant prose renders at 14px, where the old
+                        // 980px cap ran ~140 characters per line — far past the readable
+                        // 60–90. 680px ≈ 88ch of 14px text + bubble padding. The container
+                        // stays fluid (max-w-full), so a narrow claim-panel state simply
+                        // makes the cap moot — no breakpoint logic. Messages carrying wide
+                        // data (tables) opt back out to the container width; prose inside
+                        // them stays capped via the markdown wrapper below.
+                        `min-w-0 max-w-full overflow-hidden break-words rounded-2xl rounded-bl-md border border-border/55 bg-card shadow-[var(--shadow-soft)] sm:max-w-[680px] sm:has-[table]:max-w-[980px]${hasFindingGutter ? " 2xl:max-w-[744px]" : ""}`
                 }`}
               >
                 {msg.role === "assistant" && msg.kind !== "system_status" ? (
@@ -4846,17 +4925,21 @@ export default function ChatWidget({
                         </button>
                       )}
                     </div>
-                    <div className="analysis-report min-w-0 overflow-hidden break-words text-[14px] leading-6 text-card-foreground">
+                    <div
+                      className={`analysis-report min-w-0 max-w-[88ch] overflow-hidden break-words text-[14px] leading-6 text-card-foreground${hasFindingGutter ? " 2xl:pl-14" : ""}`}
+                    >
                     <ReactMarkdown
                       urlTransform={annotationSafeUrlTransform}
                       components={{
                         h2: ({ children }) => (
-                          <div className="mb-2 mt-5 border-b border-border pb-1 text-[13px] font-semibold uppercase tracking-[0.08em] text-[var(--accent)]">
+                          <div className="relative mb-2 mt-5 border-b border-border pb-1 text-[13px] font-semibold uppercase tracking-[0.08em] text-[var(--accent)]">
+                            {renderFindingGutterChip(children)}
                             {children}
                           </div>
                         ),
                         h3: ({ children }) => (
-                          <div className="mb-1 mt-4 text-[13px] font-semibold text-[var(--accent)]">
+                          <div className="relative mb-1 mt-4 text-[13px] font-semibold text-[var(--accent)]">
+                            {renderFindingGutterChip(children)}
                             {children}
                           </div>
                         ),
