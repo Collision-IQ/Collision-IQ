@@ -2427,6 +2427,18 @@ function emitStructuredLineItemDeltaFindings(
     }
 
     const meta = describeLineItemDelta(delta);
+    // A SECTION_MISSED member must present as section-missing, not as
+    // "expanded scope within a present category" — the category-presence
+    // heuristic keys on keywords anywhere in the lower text (a vehicle-options
+    // list mentioning "WHEELS" counts), and the per-line label then
+    // contradicts the finding's own every-line-unpaid prose (RO 22140 Test 3).
+    if ((delta.statusLabels ?? []).includes("SECTION_MISSED")) {
+      meta.title = `Section missing from lower-cost estimate: ${delta.higherRow.section ?? "section"} — ${delta.higherRow.description}`;
+      // Only the GENERIC gap label upgrades to SECTION MISSING — specialized
+      // authority labels (NEEDS ADAS / NEEDS OEM / NEEDS INVOICE) drive their
+      // own classification lanes and must survive the section marking.
+      if (meta.label === "ESTIMATE GAP ONLY") meta.label = "SECTION MISSING";
+    }
     const slug =
       delta.higherRow.description
         .toLowerCase()
@@ -2520,7 +2532,19 @@ function emitTotalsDeltaFindings(
   // Room for every category lane plus the grand-total gap (RO 22108 produced
   // nine legitimate totals deltas; the old cap of 8 cut the grand total).
   const MAX_TOTALS_FINDINGS = 10;
-  for (const delta of deltaMatch.totalsDeltas) {
+  // The materials-cap category is the anchor for every PM_CAP_EVIDENCE tag in
+  // the line findings — it must never be crowded out by the findings cap, so
+  // it processes first.
+  const orderedTotalsDeltas = deltaMatch.pmCapFlag
+    ? [...deltaMatch.totalsDeltas].sort((a, b) => {
+        const capCategory = deltaMatch.pmCapFlag!.category.toLowerCase();
+        return (
+          Number(b.category.toLowerCase() === capCategory) -
+          Number(a.category.toLowerCase() === capCategory)
+        );
+      })
+    : deltaMatch.totalsDeltas;
+  for (const delta of orderedTotalsDeltas) {
     if (findings.length >= MAX_TOTALS_FINDINGS) break;
     const categoryNeedle = delta.category.toLowerCase();
     const anchor =
@@ -3802,7 +3826,11 @@ function buildLineItemDeltaSupportSummary(params: {
     `Labor delta: ${formatDeltaHours(params.delta.laborDelta)} hours.`,
     `Paint delta: ${formatDeltaHours(params.delta.paintDelta)} hours.`,
     `Pairing basis: ${params.delta.matchBasis}.`,
-    params.delta.summary.replace(/\bhigher estimate\b/gi, "this estimate").replace(/\blower estimate\b/gi, "the lower-cost estimate"),
+    // Swallow an existing leading "the" so "on the lower estimate" never
+    // doubles into "on the the lower-cost estimate" (RO 22140 Test 3 audit).
+    params.delta.summary
+      .replace(/\b(?:the\s+)?higher estimate\b/gi, "this estimate")
+      .replace(/\b(?:the\s+)?lower estimate\b/gi, "the lower-cost estimate"),
   ].join(" ");
 }
 

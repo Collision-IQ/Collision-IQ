@@ -978,6 +978,15 @@ export function parseCccEstimateRow(
   // description, part number, qty, price, and hours into one run.
   let text = explodeGluedRow(rawText ?? "");
   if (!text) return null;
+  // ADJACENCY BOUNDARY: the LAST estimate line sits directly above the
+  // ESTIMATE TOTALS block, and wrap-joining can absorb the totals-block
+  // column header into that row's text ("…1 5.00 T Category Basis Rate
+  // Cost $" on RO 22140 line 158). Totals-block text is never row content —
+  // cut everything from the boundary marker on.
+  text = text
+    .replace(/\s*(?:ESTIMATE\s+TOTALS|Category\s+Basis\s+Rate\s+Cost).*$/i, "")
+    .trim();
+  if (!text) return null;
   if (isSectionHeader(text)) return null;
 
   // A print-wrapped description can rejoin AFTER the value columns ("Capture
@@ -1775,6 +1784,14 @@ export function matchEstimateLineItems(params: {
   const preclaimStages: Array<(higherRow: EstimateDeltaRow, lowerRow: EstimateDeltaRow) => boolean> = [
     (higherRow, lowerRow) => rowValuesEqual(higherRow, lowerRow) && rowSectionsEqual(higherRow, lowerRow),
     (higherRow, lowerRow) => rowValuesEqual(higherRow, lowerRow),
+    // Same-section twins claim before ANY cross-section claim, even with
+    // different values: a generic "Add for Clear Coat" prints once per panel,
+    // and letting a front-section copy consume the lower estimate's
+    // rear-door clear coat cross-section (a) mispairs the values and (b) —
+    // when the mispaired delta is negative — suppresses the finding on a
+    // line the lower estimate genuinely does not pay (RO 22140 line 7, the
+    // one line-level miss in Test 3).
+    (higherRow, lowerRow) => rowSectionsEqual(higherRow, lowerRow),
     () => true,
   ];
   for (const stage of preclaimStages) {
@@ -2573,7 +2590,15 @@ export function compareEstimateTotals(params: {
     if (
       costDiff !== null &&
       Math.abs(costDiff) >= 100 &&
-      higherCategory.rate === null // rate categories already covered above
+      // Rate categories are covered by the rate/hours branches above — EXCEPT
+      // the computed-vs-flat shape: this estimate computes the category from
+      // hrs @ rate while the lower prints a flat figure (blank basis). That
+      // pair has null rateDiff/hoursDiff, so without this clause it emitted
+      // NOTHING and the materials-cap finding lost its carrier delta
+      // (RO 22140 Test 3: Paint Supplies $1,572 basis vs $750 flat vanished
+      // from the totals block, leaving 20+ PM_CAP_EVIDENCE tags dangling).
+      (higherCategory.rate === null ||
+        (lowerCategory.rate === null && lowerCategory.hours === null))
     ) {
       deltas.push({
         kind: "category_amount_difference",

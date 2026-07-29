@@ -387,5 +387,69 @@ run("repair-facility state resolves from the shop header, never an RO number", (
   assert.equal(detectRepairFacilityState("RO 22140 with no address"), null);
 });
 
+// ---------------------------------------------------------------------------
+// Test 3 audit follow-ups
+// ---------------------------------------------------------------------------
+
+const { compareEstimateTotals } = require("./estimateDeltaMatcher.ts");
+
+run("computed-vs-flat category emits a totals delta (cap finding's carrier)", () => {
+  // Regression: once flat Paint Supplies PARSED (blank basis), the pair had
+  // null rate/hours diffs and the cost branch required higher.rate === null —
+  // no delta at all, so the P&M cap finding lost its carrier and 20+
+  // PM_CAP_EVIDENCE tags dangled (Test 3 item 1).
+  const deltas = compareEstimateTotals({
+    higher: parseCccEstimateTotals(SHOP_TOTALS_TEXT),
+    lower: parseCccEstimateTotals(SOR_TOTALS_TEXT),
+  });
+  const supplies = deltas.find((d) => /paint supplies/i.test(d.category));
+  assert.ok(supplies, "Paint Supplies computed-vs-flat must emit a totals delta");
+  assert.equal(supplies.kind, "category_amount_difference");
+  assert.match(supplies.summary, /1,572\.00.*750\.00/);
+});
+
+run("generic clear-coat twins pair same-section first; cross-section copy goes missing", () => {
+  // Test 3 item 4: the front-section "Add for Clear Coat" (1.0) consumed the
+  // SOR's rear-door clear coat (2.5) cross-section; the negative mispaired
+  // delta then suppressed the finding on a line the SOR genuinely omits.
+  const higherRows = parseCccEstimateRows(
+    [
+      "FRONT BUMPER",
+      "7 # Add for Clear Coat 1.0",
+      "REAR DOOR",
+      "121 # Add for Clear Coat 2.5",
+    ].join("\n")
+  );
+  const lowerRows = parseCccEstimateRows(
+    ["REAR DOOR", "60 # Add for Clear Coat 2.5"].join("\n")
+  );
+  assert.equal(higherRows.length, 2);
+  assert.equal(lowerRows.length, 1);
+  const result = matchEstimateLineItems({ lowerRows, higherRows });
+  const rearMatched = result.matchedPairs.find((p) => p.higherRow.lineNumber === 121);
+  assert.ok(rearMatched, "rear-door clear coat must claim its same-section twin");
+  const frontFinding = result.deltas.find(
+    (d) => d.lowerRow === null && d.higherRow.lineNumber === 7
+  );
+  assert.ok(
+    frontFinding,
+    `front clear coat must surface as unmatched, got: ${result.deltas
+      .map((d) => `${d.kind}:${d.higherRow.lineNumber}`).join("; ")}`
+  );
+});
+
+run("totals-block header never contaminates the last estimate row (line 158)", () => {
+  const row = parseCccEstimateRow(
+    "158 # Solid waste disposal 1 5.00 T Category Basis Rate Cost $"
+  );
+  assert.ok(row, "row must parse");
+  assert.equal(row.price, 5.0);
+  assert.ok(
+    !/category|basis|rate|cost/i.test(row.description),
+    `totals header leaked into description: "${row.description}"`
+  );
+  assert.ok(!/Category Basis/i.test(row.rawText), "rawText must stop at the totals boundary");
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
