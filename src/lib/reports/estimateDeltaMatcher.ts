@@ -14,6 +14,8 @@
  * `parseCccEstimateRows`.
  */
 
+import { canonicalOperationKey } from "./operationAliases";
+
 export type EstimateDeltaRowSource = "lower" | "higher";
 
 export interface EstimateDeltaRow {
@@ -126,6 +128,12 @@ export interface EstimateDeltaMatchResult {
   higherRowCount: number;
   matchedPairCount: number;
   missingOperationCount: number;
+  /**
+   * Higher-estimate sections in which NO row matched — the whole section is
+   * absent from the lower estimate (runbook SECTION_MISSED). Member findings
+   * carry the SECTION_MISSED status label.
+   */
+  missedSections: string[];
   /** Higher-estimate lines whose category is already present in the lower estimate. */
   expandedScopeCount: number;
   /** Unmatched lines suppressed as OCR-uncertain (present-but-poorly-parsed). */
@@ -430,6 +438,12 @@ function enumerateGluedMoneyCandidates(run: string): GluedMoneyCandidate[] {
     if (/^0\d/.test(suffix)) continue;
     const value = Number(suffix.replace(/,/g, ""));
     if (!Number.isFinite(value) || value > 99999.99) continue;
+    // A split may never MANUFACTURE a $0.00 price: "20.00" is $20.00, not
+    // qty 2 + $0.00 (the qty bonus otherwise outscores the whole-money read
+    // and a real value delta reads as zero — SOR "Urethane Kit 20.00" priced
+    // $0 killed the $37-vs-$20 finding). A standalone printed "0.00"
+    // (start === 0) is still honored.
+    if (value === 0 && start > 0) continue;
     if (value >= 1000 && !suffix.includes(",")) continue;
     const head = run.slice(0, start);
     for (const qtyLen of [1, 2, 0]) {
@@ -590,6 +604,14 @@ export function explodeGluedRow(rawText: string): string {
         previous = blob;
         blob = blob.replace(/(\d\.\d)(?=-?\d+\.\d)/g, "$1 ");
       }
+      // A part number glues straight onto a SINGLE-decimal hours value
+      // ("323714303.4" = part 32371430 + 3.4 hr). Every money-oriented
+      // splitter keys on ".dd", so this seam survived them all and the row
+      // parsed with no part and no labor — the whole blob fell into the
+      // description and every matched SOR line read as 0 hours (RO 22140
+      // phantom "reduced labor" band). Money values never match: their two
+      // decimals fail the trailing \d\.\d.
+      blob = blob.replace(/(?<=^|\s)(\d{7,})(\d\.\d)(?=\s|$)/g, "$1 $2");
       // Part/qty/price runs ("16788507081598.00" → "1678850708 1 598.00").
       // When a separate qty token already precedes the money ("1 125.00"),
       // leave the money alone; a glued run carries its own qty prefix
@@ -638,6 +660,9 @@ export function explodeGluedRow(rawText: string): string {
         previousPass = expanded;
         expanded = expanded.replace(/(\d\.\d)(?=-?\d+\.\d)/g, "$1 ");
       }
+      // Part number glued to single-decimal hours ("323714303.4" →
+      // "32371430 3.4") — see the identical seam split in the blob path.
+      expanded = expanded.replace(/(?<=^|\s)(\d{7,})(\d\.\d)(?=\s|$)/g, "$1 $2");
       finalTokens.push(...expanded.split(" "));
       continue;
     }
@@ -1452,6 +1477,10 @@ const DESCRIPTION_MATCH_MIN_SHARED = 2;
 const MATERIAL_LABOR_DELTA = 0.3;
 const MATERIAL_PAINT_DELTA = 0.3;
 const MATERIAL_PRICE_DELTA = 25;
+// Floor for part-less materials/T-charge price deltas — matches the canonical
+// delta display threshold ($1.00): below it a difference is rounding noise,
+// above it it is a real disputed materials line.
+const TCHARGE_PRICE_DELTA = 1;
 
 type ScoredMatch = {
   row: EstimateDeltaRow;
@@ -1560,8 +1589,18 @@ function findBestLowerMatch(
         continue;
       }
       const overlap = tokenOverlap(higherRow.descriptionTokens, lowerRow.descriptionTokens);
-      if (isDescriptionMatch(overlap)) {
+      // Canonical operation aliases (operationAliases.ts): cross-carrier
+      // wording for the SAME operation ("BetaSeal Express Urethane" ↔
+      // "Urethane Kit") pairs even when token overlap fails — otherwise the
+      // twins report as a false missing/extra pair and their VALUE delta
+      // (the actual dispute item) never surfaces.
+      const canonEqual =
+        canonicalOperationKey(higherRow.description) !== null &&
+        canonicalOperationKey(higherRow.description) ===
+          canonicalOperationKey(lowerRow.description);
+      if (isDescriptionMatch(overlap) || canonEqual) {
         score = 40 + overlap.shared * 10 + Math.round(overlap.ratio * 20);
+        if (canonEqual) score = Math.max(score, 65);
         basis = "description";
         // Exact token-set matches beat superset rows: "LT Hub assy" must pair
         // with "LT Hub assy", never "LT Hub assy mount bolt".
@@ -1764,15 +1803,16 @@ export function matchEstimateLineItems(params: {
   // like "Glass Kit" serves as the bundle counterpart for itemized shop
   // materials, it is reconciled — the lower-only detector must never also
   // list it as scope the shop omitted.
-  const consumeBundleRow = (pattern: RegExp) => {
+  const consumeBundleRow = (pattern: RegExp): boolean => {
     for (let index = 0; index < lowerRows.length; index += 1) {
       if (used.has(index) || bundleConsumedLowerIndexes.has(index)) continue;
       if (pattern.test(normalizeCategoryText(lowerRows[index].description))) {
         bundleConsumedLowerIndexes.add(index);
         recordLowerConsumption(index, "bundle");
-        return;
+        return true;
       }
     }
+    return false;
   };
   const bundledCounterpartFor = (higherRow: EstimateDeltaRow): string | null => {
     if (higherRow.partNumber) return null;
@@ -1789,12 +1829,16 @@ export function matchEstimateLineItems(params: {
       }
       if (/INVOICE ?RE/.test(normalizedLowerText)) return "an invoice-pending materials line";
     }
-    if (/CAVITY WAX/.test(description) && /CAVITY WAX/.test(normalizedLowerText)) {
-      consumeBundleRow(/CAVITY WAX/);
+    // Same-operation "allowance" softenings are real only while an UNCONSUMED
+    // lower row backs them. Once the lower estimate's single cavity-wax line
+    // is match-consumed, the remaining shop cavity-wax occurrences are a
+    // quantity shortfall — softening them to "reconcile against invoices"
+    // because the WORDS still appear in the lower text hid every cavity-wax
+    // shortfall on RO 22140 (4 shop occurrences vs 1 paid, zero findings).
+    if (/CAVITY WAX/.test(description) && consumeBundleRow(/CAVITY WAX/)) {
       return "a generic cavity-wax allowance";
     }
-    if (/(MASKING|TAPE)/.test(description) && /MASKING TAPE/.test(normalizedLowerText)) {
-      consumeBundleRow(/MASKING TAPE/);
+    if (/(MASKING|TAPE)/.test(description) && consumeBundleRow(/MASKING TAPE/)) {
       return "a generic masking-tape allowance";
     }
     return null;
@@ -1803,6 +1847,33 @@ export function matchEstimateLineItems(params: {
     `Higher estimate itemizes "${describeRow(higherRow)}"${costFragment(higherRow)}; the lower estimate carries ${counterpart} instead of this itemized line. Treat as a potential bundled-equivalent / invoice-dependent difference — reconcile against material invoices, not as confirmed missing scope.`;
 
   const classifyUnmatched = (higherRow: EstimateDeltaRow) => {
+    // QUANTITY SHORTFALL first — before every softening gate. When this
+    // operation's group already has at least one CONSUMED lower match, the
+    // lower estimate's count is exhausted and this occurrence is beyond it:
+    // a confirmed shortfall (Cavity Wax ×4 vs ×1 → 3 shortfall findings).
+    // The OCR and bundled-allowance gates below key on the operation's WORDS
+    // being present in the lower text — which is precisely what a shortfall
+    // duplicate always satisfies, so they must never see these rows.
+    const shortfallKey = operationGroupKey(higherRow);
+    const shortfallMatched = shortfallKey ? matchedGroupCounts.get(shortfallKey) ?? 0 : 0;
+    if (shortfallKey && shortfallMatched > 0) {
+      missingOperationCount += 1;
+      const totalHere = higherGroupCounts.get(shortfallKey) ?? 0;
+      deltas.push({
+        kind: "missing_operation",
+        lowerRow: null,
+        higherRow,
+        matchBasis: "none",
+        laborDelta: higherRow.labor,
+        paintDelta: higherRow.paint,
+        priceDelta: higherRow.price,
+        summary: `"${describeRow(higherRow)}"${costFragment(higherRow)} appears ${totalHere} times on this estimate; the lower estimate pays this operation only ${shortfallMatched} time${shortfallMatched === 1 ? "" : "s"}. This occurrence is beyond the lower estimate's paid count (quantity shortfall).`,
+        statusLabels: ["QUANTITY_SHORTFALL"],
+        annotate: true,
+      });
+      return;
+    }
+
     // OCR-present-but-poorly-parsed: the line's part number / description is
     // already in the OCR'd lower text, so a non-match is an OCR parse gap, not
     // a real change. Record it as OCR-uncertain and DO NOT highlight it — this
@@ -1926,8 +1997,17 @@ export function matchEstimateLineItems(params: {
       });
     } else if (
       priceDelta !== null &&
-      priceDelta >= MATERIAL_PRICE_DELTA &&
-      (higherRow.partNumber ?? null) !== (lowerRow.partNumber ?? null) &&
+      // Part-less materials/T-charge pairs (flex additive, cavity wax,
+      // urethane kits — no part column at all) use the $1 canonical display
+      // floor: their individual deltas are small ($12 vs $6) but they are
+      // the bulk of a disputed materials gap, and the old $25 part-swap
+      // floor silently dropped every one (RO 22140 audit FIX 1c). Pairs
+      // where a part number exists on either side keep the original rule:
+      // report only when the PART changed, at the $25 floor.
+      (higherRow.partNumber === null && lowerRow.partNumber === null
+        ? priceDelta >= TCHARGE_PRICE_DELTA
+        : priceDelta >= MATERIAL_PRICE_DELTA &&
+          (higherRow.partNumber ?? null) !== (lowerRow.partNumber ?? null)) &&
       // Glued part/qty/price runs split ambiguously; when the counterpart's
       // price is a plausible alternate split of this row's run (or vice
       // versa), the "difference" is a split artifact, not a price change.
@@ -2003,6 +2083,31 @@ export function matchEstimateLineItems(params: {
     }
     matchedPairCount += 1;
     classifyMatchedPair(higherRow, match.row, match.basis);
+  }
+
+  // Quantity-shortfall grouping (consumption rule): a duplicate of an
+  // operation the lower estimate already paid — and whose lower rows were all
+  // consumed by earlier matches — is OVERFLOW, not an ambiguous absence.
+  // Grouped by canonical operation alias when one exists (cavity wax under
+  // any carrier wording), else by normalized description (repeated "Add for
+  // Clear Coat" lines). Rows with part numbers are excluded: duplicate part
+  // rows are sibling parts, not repeated operations.
+  const operationGroupKey = (row: EstimateDeltaRow): string | null => {
+    if (row.partNumber) return null;
+    const canon = canonicalOperationKey(row.description);
+    if (canon) return canon;
+    const normalized = normalizeCategoryText(row.description);
+    return normalized.length >= 8 ? normalized : null;
+  };
+  const matchedGroupCounts = new Map<string, number>();
+  for (const pair of matchedPairs) {
+    const key = operationGroupKey(pair.higherRow);
+    if (key) matchedGroupCounts.set(key, (matchedGroupCounts.get(key) ?? 0) + 1);
+  }
+  const higherGroupCounts = new Map<string, number>();
+  for (const row of higherRows) {
+    const key = operationGroupKey(row);
+    if (key) higherGroupCounts.set(key, (higherGroupCounts.get(key) ?? 0) + 1);
   }
 
   // Amount-unique fallback: a differently-worded misc/sublet counterpart
@@ -2154,6 +2259,47 @@ export function matchEstimateLineItems(params: {
     }
   }
 
+  // SECTION_MISSED (runbook Step 4): when NO row of a higher-estimate section
+  // matched anything on the lower estimate, the whole section is absent —
+  // e.g. RO 22140 WHEELS (RT/LT wheel R&I + lift & support) has no
+  // counterpart anywhere on the SOR. Every member finding is tagged so the
+  // report can render one section-level box spanning the header instead of
+  // scattered line findings, and the section list is returned for the
+  // report's section-missed block. Sections are compared on the HIGHER row's
+  // section only — a cross-section match still counts as matched.
+  const sectionRowCounts = new Map<string, number>();
+  for (const row of higherRows) {
+    const section = normalizeCategoryText(row.section ?? "");
+    if (!section) continue;
+    sectionRowCounts.set(section, (sectionRowCounts.get(section) ?? 0) + 1);
+  }
+  const matchedHigherSections = new Set<string>();
+  for (const pair of matchedPairs) {
+    const section = normalizeCategoryText(pair.higherRow.section ?? "");
+    if (section) matchedHigherSections.add(section);
+  }
+  const missedSectionKeys = new Set<string>();
+  const missedSections: string[] = [];
+  for (const [sectionKey] of sectionRowCounts) {
+    if (matchedHigherSections.has(sectionKey)) continue;
+    missedSectionKeys.add(sectionKey);
+    const displayName = higherRows.find(
+      (row) => normalizeCategoryText(row.section ?? "") === sectionKey
+    )?.section;
+    if (displayName) missedSections.push(displayName);
+  }
+  if (missedSectionKeys.size > 0) {
+    for (const delta of deltas) {
+      if (delta.lowerRow !== null) continue;
+      const section = normalizeCategoryText(delta.higherRow.section ?? "");
+      if (!section || !missedSectionKeys.has(section)) continue;
+      const labels = new Set(delta.statusLabels ?? []);
+      labels.add("SECTION_MISSED");
+      delta.statusLabels = [...labels];
+      delta.summary = `${delta.summary} Every line of the "${delta.higherRow.section}" section is unpaid on the lower estimate — the entire section is missing, not just this line.`;
+    }
+  }
+
   return {
     deltas,
     lowerRowCount: lowerRows.length,
@@ -2166,6 +2312,7 @@ export function matchEstimateLineItems(params: {
     matchedPairs,
     potentialDuplicateLowerRows,
     lowerRowReconciliation,
+    missedSections,
   };
 }
 
@@ -2317,7 +2464,14 @@ export function parseCccEstimateTotals(text: string): EstimateTotalsSummary | nu
       summary.subtotal = money(sub[1]);
       continue;
     }
-    const amountOnly = line.match(/^(parts|miscellaneous|other charges)\s*\$?\s*([\d,]+\.\d{2})$/i);
+    // Flat materials categories ("Paint Supplies 750.00" with NO hrs @ rate
+    // basis) must parse with hours/rate null — a blank basis is the arbitrary
+    // materials-cap trigger (jurisdictionRules.buildPmCapFlag), so dropping
+    // the row entirely hid the cap and $0.00-ing the basis would erase the
+    // blank-vs-zero distinction the check depends on.
+    const amountOnly = line.match(
+      /^(parts|miscellaneous|other charges|paint supplies|shop supplies|body supplies|paint materials)\s*\$?\s*([\d,]+\.\d{2})$/i
+    );
     if (amountOnly) {
       summary.categories.push({
         category: amountOnly[1].replace(/\b[a-z]/g, (c) => c.toUpperCase()),
@@ -2604,7 +2758,8 @@ function buildPriceSummary(
   const label = describeRow(higherRow);
   const higherPart = higherRow.partNumber ? ` (part ${higherRow.partNumber})` : "";
   const lowerPart = lowerRow.partNumber ? ` (part ${lowerRow.partNumber})` : "";
-  return `"${label}": higher estimate prices this part${higherPart} at $${(higherRow.price ?? 0).toFixed(2)} vs $${(lowerRow.price ?? 0).toFixed(2)}${lowerPart} here (+$${delta.toFixed(2)}).`;
+  const noun = higherRow.partNumber || lowerRow.partNumber ? "part" : "item";
+  return `"${label}": higher estimate prices this ${noun}${higherPart} at $${(higherRow.price ?? 0).toFixed(2)} vs $${(lowerRow.price ?? 0).toFixed(2)}${lowerPart} here (+$${delta.toFixed(2)}).`;
 }
 
 function describeRow(row: EstimateDeltaRow): string {

@@ -43,6 +43,12 @@ import {
   type HeaderEstimateRole,
 } from "./citationDensitySourcePdf";
 import {
+  buildPmCapFlag,
+  detectRepairFacilityState,
+  PM_CAP_MATERIAL_WORDS,
+  type PmCapFlag,
+} from "./jurisdictionRules";
+import {
   compareEstimateTotals,
   deltaRowFromRawText,
   groupWrappedEstimateLines,
@@ -2239,6 +2245,8 @@ type StructuredLineItemDeltaMatch = {
   lowerOnlyRows: EstimateDeltaRow[];
   /** Residual lower lines that duplicate an already-matched lower line (possible duplicate billing). */
   potentialDuplicateLowerRows: EstimateDeltaRow[];
+  /** Arbitrary materials cap on the lower estimate (flat figure, no hrs@rate basis), with jurisdiction citation. */
+  pmCapFlag: PmCapFlag | null;
 };
 
 // Phase 1 of the structured delta path: parse and pair rows WITHOUT emitting findings or
@@ -2359,6 +2367,16 @@ function matchStructuredLineItemDeltas(
   const totalsDeltas = compareEstimateTotals({ higher: higherTotals, lower: lowerTotals });
   const totalsAnchors = context.anchors.filter((anchor) => anchor.anchorType === "totals_row");
 
+  // Arbitrary materials cap (runbook Step 6): lower estimate pays a materials
+  // category flat with no hrs@rate basis while this estimate computes one.
+  // Jurisdiction resolves from the repair-facility state in the SOURCE header
+  // (never the comparison doc's first zip — often the insurer HQ).
+  const pmCapFlag = buildPmCapFlag({
+    higher: higherTotals,
+    lower: lowerTotals,
+    state: detectRepairFacilityState(context.sourceText, lowerCategoryText),
+  });
+
   return {
     orderedDeltas,
     anchorById,
@@ -2370,6 +2388,7 @@ function matchStructuredLineItemDeltas(
     totalsAnchors,
     lowerOnlyRows: match.lowerOnlyRows,
     potentialDuplicateLowerRows: match.potentialDuplicateLowerRows,
+    pmCapFlag,
   };
 }
 
@@ -2436,12 +2455,21 @@ function emitStructuredLineItemDeltaFindings(
         score: meta.score,
         safetyImpact: meta.safetyImpact,
         priority: meta.priority,
-        currentSupportSummary: buildLineItemDeltaSupportSummary({
-          delta,
-          anchor,
-          sourceName: context.sourcePdfName,
-          comparisonName: deltaMatch.comparisonName,
-        }),
+        currentSupportSummary:
+          buildLineItemDeltaSupportSummary({
+            delta,
+            anchor,
+            sourceName: context.sourcePdfName,
+            comparisonName: deltaMatch.comparisonName,
+          }) +
+          // Cap evidence cross-reference: a MISSED left-on-vehicle material
+          // line is itself proof the flat materials figure was not built from
+          // the required operations — the cap finding enumerates these tags.
+          (deltaMatch.pmCapFlag &&
+          delta.lowerRow === null &&
+          PM_CAP_MATERIAL_WORDS.test(delta.higherRow.description)
+            ? ` [PM_CAP_EVIDENCE: this unpaid left-on-vehicle material line is evidence the flat ${deltaMatch.pmCapFlag.category} figure of $${deltaMatch.pmCapFlag.cap.toFixed(2)} was not built from the required operations.]`
+            : ""),
         missingProofSummary: meta.missingProof,
         recommendedNextAction: meta.nextAction,
         missingAuthorityTypes: meta.missingAuthorityTypes,
@@ -2513,6 +2541,49 @@ function emitTotalsDeltaFindings(
     usedAnchorIds.add(anchor.anchorId);
     const isRateKind = delta.kind === "rate_difference" || delta.kind === "hours_difference";
     const slug = delta.category.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    // Arbitrary materials cap: this category's difference is not a generic
+    // amount gap — the lower estimate pays a FLAT figure with no hrs@rate
+    // basis. Emit the jurisdictional cap finding (detection math + per-state
+    // citation from the jurisdiction rules table) instead of the generic
+    // category-amount wording.
+    const capFlag = deltaMatch.pmCapFlag;
+    if (capFlag && delta.category.toLowerCase() === capFlag.category.toLowerCase()) {
+      findings.push(
+        buildRequiredDetectorFinding({
+          context,
+          anchor,
+          findingType: `totals-materials-cap-${slug || "materials"}`,
+          title: `Arbitrary materials cap: ${delta.category}`,
+          category: "other",
+          label: "P&M CAP",
+          estimateGapType: "reduced_by_carrier",
+          score: 80,
+          safetyImpact: "low",
+          priority: "high",
+          currentSupportSummary:
+            `The lower estimate pays ${capFlag.category} as a flat $${capFlag.cap.toFixed(2)} with no hours-and-rate basis` +
+            (capFlag.subjectBasis ? `, against this estimate's computed basis of ${capFlag.subjectBasis}` : "") +
+            (capFlag.impliedRate !== null
+              ? `. The flat figure implies $${capFlag.impliedRate.toFixed(2)}/hr against the lower estimate's own paint hours`
+              : "") +
+            `. ${capFlag.citation}` +
+            (capFlag.verified ? "" : " [JURISDICTION_UNVERIFIED]"),
+          missingProofSummary:
+            "An arbitrary cap is not a computed materials basis. The insurer must produce the calculation behind the cap, the authorizing policy language, and proof the capped amount pays the reasonable cost of required materials.",
+          recommendedNextAction:
+            "Demand the cap's calculation and authorizing policy language; cross-reference every missed left-on-vehicle material line in this report (tagged PM_CAP_EVIDENCE) as proof the flat figure was not built from the required operations.",
+          missingAuthorityTypes: [
+            "cap calculation and authorizing policy language",
+            "paint-manufacturer/OEM documentation of required materials",
+          ],
+          amountImpact:
+            delta.higher && delta.lower && delta.higher.cost !== null && delta.lower.cost !== null
+              ? Math.round((delta.higher.cost - delta.lower.cost) * 100) / 100
+              : null,
+        })
+      );
+      continue;
+    }
     findings.push(
       buildRequiredDetectorFinding({
         context,
