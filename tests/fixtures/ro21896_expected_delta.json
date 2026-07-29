@@ -25,7 +25,7 @@
       "hash": "sha256:final-shop-21896-distinct",
       "ccc_data_date": "2026-06-16",
       "written": "2026-06-23",
-      "grand_total": 17397.20,
+      "grand_total": 17397.2,
       "subtotal": 16412.45,
       "tax": 984.75,
       "insurer": "USAA"
@@ -33,10 +33,16 @@
     "hash_requirement": "The two inputs MUST resolve to distinct file hashes. Build fails if both delta anchors share one hash (the original defect emitted pdf 2214d83d37 on every finding)."
   },
   "display_threshold": {
-    "value_change_dollar_floor": 1.00,
+    "value_change_dollar_floor": 1.0,
     "value_change_labor_floor_hours": 0.1,
-    "applies_to": ["VALUE_CHANGE"],
-    "never_suppress": ["PRESENCE", "PART_SWAP", "PART_SWAP_WITH_PRICE_CHANGE"],
+    "applies_to": [
+      "VALUE_CHANGE"
+    ],
+    "never_suppress": [
+      "PRESENCE",
+      "PART_SWAP",
+      "PART_SWAP_WITH_PRICE_CHANGE"
+    ],
     "note": "Suppressed VALUE_CHANGE entries are retained in the canonical object and counted in reconciliation; they are only hidden from rendering. NON_DELTA entries never render and are excluded from reconciliation."
   },
   "reconciliation": {
@@ -44,19 +50,19 @@
     "rationale": "CCC line prices do not sum to category totals (overlap deducts, Incl. parts, labor-rate multipliers, taxed-misc). Reconcile enumerated deltas to the four changed category subtotals, which sum to the grand-total delta.",
     "category_deltas": {
       "Parts": 2089.77,
-      "Body Labor": 198.00,
-      "Mechanical Labor": 2800.00,
+      "Body Labor": 198.0,
+      "Mechanical Labor": 2800.0,
       "Miscellaneous": 105.57
     },
     "unchanged_categories": {
-      "Paint Labor": 864.00,
-      "Electrical Labor": 262.50,
-      "Aluminum Or Steel Repair": 405.00,
-      "Bonded Or Welded Panel Replace": 877.50,
-      "Paint Supplies": 576.00
+      "Paint Labor": 864.0,
+      "Electrical Labor": 262.5,
+      "Aluminum Or Steel Repair": 405.0,
+      "Bonded Or Welded Panel Replace": 877.5,
+      "Paint Supplies": 576.0
     },
     "subtotal_delta": 5193.34,
-    "tax_delta": 311.60,
+    "tax_delta": 311.6,
     "grand_total_delta": 5504.94,
     "invariant": "sum(category_deltas) == subtotal_delta AND round(subtotal_delta * 0.06, 2) == tax_delta AND subtotal_delta + tax_delta == grand_total_delta. Fail build as 'delta set incomplete' if any clause is false."
   },
@@ -68,10 +74,16 @@
       "operation": "Repl TPMS sensor sensor & nut black",
       "part_number": "149070101D",
       "anchor_initial": null,
-      "anchor_final": {"page": 2, "line": 10},
+      "anchor_final": {
+        "page": 2,
+        "line": 10
+      },
       "old_value": null,
-      "new_value": {"price": 60.00, "labor": "Incl."},
-      "magnitude_dollar": 60.00,
+      "new_value": {
+        "price": 60.0,
+        "labor": "Incl."
+      },
+      "magnitude_dollar": 60.0,
       "category": "Parts",
       "render": true
     },
@@ -79,11 +91,23 @@
       "id": "D02",
       "class": "PART_SWAP",
       "operation": "Repl LT Wheel opng mldg",
-      "anchor_initial": {"page": 2, "line": 27},
-      "anchor_final": {"page": 2, "line": 28},
-      "old_value": {"part_number": "173255300A", "price": 140.00},
-      "new_value": {"part_number": "149418798C", "price": 140.00},
-      "magnitude_dollar": 0.00,
+      "anchor_initial": {
+        "page": 2,
+        "line": 27
+      },
+      "anchor_final": {
+        "page": 2,
+        "line": 28
+      },
+      "old_value": {
+        "part_number": "173255300A",
+        "price": 140.0
+      },
+      "new_value": {
+        "part_number": "149418798C",
+        "price": 140.0
+      },
+      "magnitude_dollar": 0.0,
       "category": "Parts",
       "render": true,
       "note": "Same price, changed part number. PART_SWAP renders regardless of zero dollar magnitude."
@@ -93,10 +117,20 @@
       "class": "VALUE_CHANGE",
       "operation": "Repl LT Wheelhouse liner retainer nut",
       "part_number": "111071300D",
-      "anchor_initial": {"page": 2, "line": 24},
-      "anchor_final": {"page": 2, "line": 25},
-      "old_value": {"price": 0.32},
-      "new_value": {"price": 1.00},
+      "anchor_initial": {
+        "page": 2,
+        "line": 24
+      },
+      "anchor_final": {
+        "page": 2,
+        "line": 25
+      },
+      "old_value": {
+        "price": 0.32
+      },
+      "new_value": {
+        "price": 1.0
+      },
       "magnitude_dollar": 0.68,
       "category": "Parts",
       "render": false,
@@ -107,11 +141,21 @@
       "class": "VALUE_CHANGE",
       "operation": "Repl LT Wheelhouse high strength structural rivet 6.5mm",
       "part_number": "1454538-00-A",
-      "anchor_initial": {"page": 3, "line": 36},
-      "anchor_final": {"page": 3, "line": 37},
-      "old_value": {"price": 4.00},
-      "new_value": {"price": 0.30},
-      "magnitude_dollar": -3.70,
+      "anchor_initial": {
+        "page": 3,
+        "line": 36
+      },
+      "anchor_final": {
+        "page": 3,
+        "line": 37
+      },
+      "old_value": {
+        "price": 4.0
+      },
+      "new_value": {
+        "price": 0.3
+      },
+      "magnitude_dollar": -3.7,
       "category": "Parts",
       "render": true
     },
@@ -120,10 +164,20 @@
       "class": "VALUE_CHANGE",
       "operation": "Repl LT Wheelhouse flow form rivet S08",
       "part_number": "1069328-00-A",
-      "anchor_initial": {"page": 3, "line": 38},
-      "anchor_final": {"page": 3, "line": 39},
-      "old_value": {"price": 2.00},
-      "new_value": {"price": 0.96},
+      "anchor_initial": {
+        "page": 3,
+        "line": 38
+      },
+      "anchor_final": {
+        "page": 3,
+        "line": 39
+      },
+      "old_value": {
+        "price": 2.0
+      },
+      "new_value": {
+        "price": 0.96
+      },
       "magnitude_dollar": -1.04,
       "category": "Parts",
       "render": true
@@ -133,11 +187,23 @@
       "class": "VALUE_CHANGE",
       "operation": "Repl LT Wheelhouse flow form rivet S18 (qty + price)",
       "part_number": "1069329-00-A",
-      "anchor_initial": {"page": 3, "line": 39},
-      "anchor_final": {"page": 3, "line": 40},
-      "old_value": {"qty": 1, "price": 2.00},
-      "new_value": {"qty": 4, "price": 8.00},
-      "magnitude_dollar": 6.00,
+      "anchor_initial": {
+        "page": 3,
+        "line": 39
+      },
+      "anchor_final": {
+        "page": 3,
+        "line": 40
+      },
+      "old_value": {
+        "qty": 1,
+        "price": 2.0
+      },
+      "new_value": {
+        "qty": 4,
+        "price": 8.0
+      },
+      "magnitude_dollar": 6.0,
       "category": "Parts",
       "render": true
     },
@@ -146,10 +212,20 @@
       "class": "VALUE_CHANGE",
       "operation": "Repl LT Outer wheelhouse bolt",
       "part_number": "100883301A",
-      "anchor_initial": {"page": 3, "line": 40},
-      "anchor_final": {"page": 3, "line": 41},
-      "old_value": {"price": 4.00},
-      "new_value": {"price": 1.34},
+      "anchor_initial": {
+        "page": 3,
+        "line": 40
+      },
+      "anchor_final": {
+        "page": 3,
+        "line": 41
+      },
+      "old_value": {
+        "price": 4.0
+      },
+      "new_value": {
+        "price": 1.34
+      },
       "magnitude_dollar": -2.66,
       "category": "Parts",
       "render": true
@@ -159,11 +235,21 @@
       "class": "VALUE_CHANGE",
       "operation": "Repl LT Outer wheelhouse nut",
       "part_number": "100662801A",
-      "anchor_initial": {"page": 3, "line": 41},
-      "anchor_final": {"page": 3, "line": 42},
-      "old_value": {"price": 4.00},
-      "new_value": {"price": 0.90},
-      "magnitude_dollar": -3.10,
+      "anchor_initial": {
+        "page": 3,
+        "line": 41
+      },
+      "anchor_final": {
+        "page": 3,
+        "line": 42
+      },
+      "old_value": {
+        "price": 4.0
+      },
+      "new_value": {
+        "price": 0.9
+      },
+      "magnitude_dollar": -3.1,
       "category": "Parts",
       "render": true
     },
@@ -172,10 +258,24 @@
       "class": "PRESENCE",
       "subclass": "restructured",
       "operation": "Rear suspension: standalone hub assy replaced by O/H rr susp lt",
-      "anchor_initial": {"page": 3, "line": 63, "desc": "Repl LT Hub assy 1.5 M standalone"},
-      "anchor_final": {"page": 3, "line": 64, "desc": "O/H rr susp lt 3.3 M"},
-      "old_value": {"operation": "discrete hub replacement", "labor_hrs": 1.5},
-      "new_value": {"operation": "full rear suspension overhaul", "labor_hrs": 3.3},
+      "anchor_initial": {
+        "page": 3,
+        "line": 63,
+        "desc": "Repl LT Hub assy 1.5 M standalone"
+      },
+      "anchor_final": {
+        "page": 3,
+        "line": 64,
+        "desc": "O/H rr susp lt 3.3 M"
+      },
+      "old_value": {
+        "operation": "discrete hub replacement",
+        "labor_hrs": 1.5
+      },
+      "new_value": {
+        "operation": "full rear suspension overhaul",
+        "labor_hrs": 3.3
+      },
       "magnitude_labor_hrs": 1.8,
       "category": "Mechanical Labor",
       "render": true,
@@ -186,10 +286,20 @@
       "class": "VALUE_CHANGE",
       "operation": "Repl LT Hub assy (labor absorbed)",
       "part_number": "104412300B",
-      "anchor_initial": {"page": 3, "line": 63},
-      "anchor_final": {"page": 4, "line": 65},
-      "old_value": {"labor": "1.5 M"},
-      "new_value": {"labor": "Incl. M"},
+      "anchor_initial": {
+        "page": 3,
+        "line": 63
+      },
+      "anchor_final": {
+        "page": 4,
+        "line": 65
+      },
+      "old_value": {
+        "labor": "1.5 M"
+      },
+      "new_value": {
+        "labor": "Incl. M"
+      },
       "magnitude_labor_hrs": -1.5,
       "category": "Mechanical Labor",
       "render": true,
@@ -199,11 +309,25 @@
       "id": "D11",
       "class": "PART_SWAP",
       "operation": "Repl LT Caliper assy bolt (part number revised, same price)",
-      "anchor_initial": {"page": 4, "line": 66, "desc": "part 108896800B"},
-      "anchor_final": {"page": 4, "line": 68, "desc": "part 108896900B"},
-      "old_value": {"part_number": "108896800B", "price": 6.00},
-      "new_value": {"part_number": "108896900B", "price": 6.00},
-      "magnitude_dollar": 0.00,
+      "anchor_initial": {
+        "page": 4,
+        "line": 66,
+        "desc": "part 108896800B"
+      },
+      "anchor_final": {
+        "page": 4,
+        "line": 68,
+        "desc": "part 108896900B"
+      },
+      "old_value": {
+        "part_number": "108896800B",
+        "price": 6.0
+      },
+      "new_value": {
+        "part_number": "108896900B",
+        "price": 6.0
+      },
+      "magnitude_dollar": 0.0,
       "category": "Parts",
       "render": true,
       "note": "Caliper bolt part number changed 108896800B -> 108896900B, same price. Classified PART_SWAP."
@@ -213,10 +337,20 @@
       "class": "VALUE_CHANGE",
       "operation": "Repl LT Axle nut",
       "part_number": "111555800A",
-      "anchor_initial": {"page": 4, "line": 67},
-      "anchor_final": {"page": 4, "line": 69},
-      "old_value": {"price": 10.00},
-      "new_value": {"price": 7.13},
+      "anchor_initial": {
+        "page": 4,
+        "line": 67
+      },
+      "anchor_final": {
+        "page": 4,
+        "line": 69
+      },
+      "old_value": {
+        "price": 10.0
+      },
+      "new_value": {
+        "price": 7.13
+      },
       "magnitude_dollar": -2.87,
       "category": "Parts",
       "render": true
@@ -228,10 +362,16 @@
       "operation": "Repl LT Ft upr cntl arm + mount bolt + nut",
       "part_number": "118842700B",
       "anchor_initial": null,
-      "anchor_final": {"page": 4, "line": 70},
+      "anchor_final": {
+        "page": 4,
+        "line": 70
+      },
       "old_value": null,
-      "new_value": {"price": 41.00, "labor": "Incl. M"},
-      "magnitude_dollar": 41.00,
+      "new_value": {
+        "price": 41.0,
+        "labor": "Incl. M"
+      },
+      "magnitude_dollar": 41.0,
       "category": "Parts",
       "render": true
     },
@@ -242,10 +382,16 @@
       "operation": "Repl LT Rr upr cntl arm + front bolt",
       "part_number": "118842300A",
       "anchor_initial": null,
-      "anchor_final": {"page": 4, "line": 73},
+      "anchor_final": {
+        "page": 4,
+        "line": 73
+      },
       "old_value": null,
-      "new_value": {"price": 170.00, "labor": "Incl. M"},
-      "magnitude_dollar": 170.00,
+      "new_value": {
+        "price": 170.0,
+        "labor": "Incl. M"
+      },
+      "magnitude_dollar": 170.0,
       "category": "Parts",
       "render": true
     },
@@ -256,10 +402,16 @@
       "operation": "Repl LT Link arm + mount bolt + nut",
       "part_number": "104444100F",
       "anchor_initial": null,
-      "anchor_final": {"page": 4, "line": 75},
+      "anchor_final": {
+        "page": 4,
+        "line": 75
+      },
       "old_value": null,
-      "new_value": {"price": 170.00, "labor": "Incl. M"},
-      "magnitude_dollar": 170.00,
+      "new_value": {
+        "price": 170.0,
+        "labor": "Incl. M"
+      },
+      "magnitude_dollar": 170.0,
       "category": "Parts",
       "render": true
     },
@@ -270,10 +422,16 @@
       "operation": "Repl LT Ft lateral arm + mount bolt + nut",
       "part_number": "118843100A",
       "anchor_initial": null,
-      "anchor_final": {"page": 4, "line": 78},
+      "anchor_final": {
+        "page": 4,
+        "line": 78
+      },
       "old_value": null,
-      "new_value": {"price": 36.00, "labor": "Incl. M"},
-      "magnitude_dollar": 36.00,
+      "new_value": {
+        "price": 36.0,
+        "labor": "Incl. M"
+      },
+      "magnitude_dollar": 36.0,
       "category": "Parts",
       "render": true
     },
@@ -284,10 +442,16 @@
       "operation": "Repl Susp crossmember + mount bolts",
       "part_number": "104458000D",
       "anchor_initial": null,
-      "anchor_final": {"page": 4, "line": 81},
+      "anchor_final": {
+        "page": 4,
+        "line": 81
+      },
       "old_value": null,
-      "new_value": {"price": 1070.00, "labor": "9.8 M"},
-      "magnitude_dollar": 1070.00,
+      "new_value": {
+        "price": 1070.0,
+        "labor": "9.8 M"
+      },
+      "magnitude_dollar": 1070.0,
       "magnitude_labor_hrs": 9.8,
       "category": "Parts+Mechanical Labor",
       "render": true,
@@ -299,10 +463,17 @@
       "subclass": "added",
       "operation": "Cooling system air purge procedure + coolant",
       "anchor_initial": null,
-      "anchor_final": {"page": 4, "line": 87},
+      "anchor_final": {
+        "page": 4,
+        "line": 87
+      },
       "old_value": null,
-      "new_value": {"labor_hrs": 1.0, "coolant_price": 62.80, "coolant_qty": 2},
-      "magnitude_dollar": 62.80,
+      "new_value": {
+        "labor_hrs": 1.0,
+        "coolant_price": 62.8,
+        "coolant_qty": 2
+      },
+      "magnitude_dollar": 62.8,
       "category": "Mechanical Labor+Miscellaneous",
       "render": true
     },
@@ -310,11 +481,25 @@
       "id": "D19",
       "class": "PART_SWAP_WITH_PRICE_CHANGE",
       "operation": "Repl DOT 3 Brake fluid (part number and price revised)",
-      "anchor_initial": {"page": 4, "line": 69, "desc": "part 1060099-00-A price 14.00"},
-      "anchor_final": {"page": 4, "line": 86, "desc": "part 35-012 price 6.00"},
-      "old_value": {"part_number": "1060099-00-A", "price": 14.00},
-      "new_value": {"part_number": "35-012", "price": 6.00},
-      "magnitude_dollar": -8.00,
+      "anchor_initial": {
+        "page": 4,
+        "line": 69,
+        "desc": "part 1060099-00-A price 14.00"
+      },
+      "anchor_final": {
+        "page": 4,
+        "line": 86,
+        "desc": "part 35-012 price 6.00"
+      },
+      "old_value": {
+        "part_number": "1060099-00-A",
+        "price": 14.0
+      },
+      "new_value": {
+        "part_number": "35-012",
+        "price": 6.0
+      },
+      "magnitude_dollar": -8.0,
       "category": "Parts",
       "render": true,
       "note": "Part number changed AND price changed: PART_SWAP_WITH_PRICE_CHANGE."
@@ -326,10 +511,16 @@
       "operation": "Repl Compartment (rear body)",
       "part_number": "150865699E",
       "anchor_initial": null,
-      "anchor_final": {"page": 4, "line": 96},
+      "anchor_final": {
+        "page": 4,
+        "line": 96
+      },
       "old_value": null,
-      "new_value": {"price": 500.00, "labor": 1.0},
-      "magnitude_dollar": 500.00,
+      "new_value": {
+        "price": 500.0,
+        "labor": 1.0
+      },
+      "magnitude_dollar": 500.0,
       "category": "Parts",
       "render": true
     },
@@ -340,10 +531,16 @@
       "operation": "Repl LT Side bracket (rear bumper)",
       "part_number": "149404300A",
       "anchor_initial": null,
-      "anchor_final": {"page": 5, "line": 125},
+      "anchor_final": {
+        "page": 5,
+        "line": 125
+      },
       "old_value": null,
-      "new_value": {"price": 25.00, "labor": 0.2},
-      "magnitude_dollar": 25.00,
+      "new_value": {
+        "price": 25.0,
+        "labor": 0.2
+      },
+      "magnitude_dollar": 25.0,
       "category": "Parts",
       "render": true
     },
@@ -353,9 +550,14 @@
       "subclass": "added",
       "operation": "Rpr Place vehicle in Service Mode",
       "anchor_initial": null,
-      "anchor_final": {"page": 5, "line": 135},
+      "anchor_final": {
+        "page": 5,
+        "line": 135
+      },
       "old_value": null,
-      "new_value": {"labor_hrs": 0.1},
+      "new_value": {
+        "labor_hrs": 0.1
+      },
       "magnitude_labor_hrs": 0.1,
       "category": "Mechanical Labor",
       "render": true
@@ -366,9 +568,14 @@
       "subclass": "added",
       "operation": "Rpr Download & redeploy firmware",
       "anchor_initial": null,
-      "anchor_final": {"page": 5, "line": 136},
+      "anchor_final": {
+        "page": 5,
+        "line": 136
+      },
       "old_value": null,
-      "new_value": {"labor_hrs": 0.5},
+      "new_value": {
+        "labor_hrs": 0.5
+      },
       "magnitude_labor_hrs": 0.5,
       "category": "Mechanical Labor",
       "render": true
@@ -379,9 +586,14 @@
       "subclass": "added",
       "operation": "Rpr In-Proc repair scan",
       "anchor_initial": null,
-      "anchor_final": {"page": 5, "line": 137},
+      "anchor_final": {
+        "page": 5,
+        "line": 137
+      },
       "old_value": null,
-      "new_value": {"labor_hrs": 1.0},
+      "new_value": {
+        "labor_hrs": 1.0
+      },
       "magnitude_labor_hrs": 1.0,
       "category": "Mechanical Labor",
       "render": true,
@@ -393,9 +605,14 @@
       "subclass": "added",
       "operation": "Rpr Set up & initiate camera calibration procedure",
       "anchor_initial": null,
-      "anchor_final": {"page": 6, "line": 138},
+      "anchor_final": {
+        "page": 6,
+        "line": 138
+      },
       "old_value": null,
-      "new_value": {"labor_hrs": 1.0},
+      "new_value": {
+        "labor_hrs": 1.0
+      },
       "magnitude_labor_hrs": 1.0,
       "category": "Mechanical Labor",
       "render": true
@@ -406,9 +623,14 @@
       "subclass": "added",
       "operation": "Rpr Capture image & adjust cameras",
       "anchor_initial": null,
-      "anchor_final": {"page": 6, "line": 139},
+      "anchor_final": {
+        "page": 6,
+        "line": 139
+      },
       "old_value": null,
-      "new_value": {"labor_hrs": 0.6},
+      "new_value": {
+        "labor_hrs": 0.6
+      },
       "magnitude_labor_hrs": 0.6,
       "category": "Mechanical Labor",
       "render": true
@@ -419,9 +641,14 @@
       "subclass": "added",
       "operation": "Rpr Capture image to confirm adjustments",
       "anchor_initial": null,
-      "anchor_final": {"page": 6, "line": 140},
+      "anchor_final": {
+        "page": 6,
+        "line": 140
+      },
       "old_value": null,
-      "new_value": {"labor_hrs": 0.3},
+      "new_value": {
+        "labor_hrs": 0.3
+      },
       "magnitude_labor_hrs": 0.3,
       "category": "Mechanical Labor",
       "render": true
@@ -432,9 +659,14 @@
       "subclass": "added",
       "operation": "Rpr Drive time for camera calibration procedure",
       "anchor_initial": null,
-      "anchor_final": {"page": 6, "line": 141},
+      "anchor_final": {
+        "page": 6,
+        "line": 141
+      },
       "old_value": null,
-      "new_value": {"labor_hrs": 1.0},
+      "new_value": {
+        "labor_hrs": 1.0
+      },
       "magnitude_labor_hrs": 1.0,
       "category": "Mechanical Labor",
       "render": true
@@ -443,10 +675,20 @@
       "id": "D29",
       "class": "NON_DELTA",
       "operation": "Post-repair scan relocated within diagnostics block",
-      "anchor_initial": {"page": 5, "line": 113},
-      "anchor_final": {"page": 6, "line": 142},
-      "old_value": {"labor_hrs": 1.0},
-      "new_value": {"labor_hrs": 1.0},
+      "anchor_initial": {
+        "page": 5,
+        "line": 113
+      },
+      "anchor_final": {
+        "page": 6,
+        "line": 142
+      },
+      "old_value": {
+        "labor_hrs": 1.0
+      },
+      "new_value": {
+        "labor_hrs": 1.0
+      },
       "magnitude_labor_hrs": 0.0,
       "category": "Mechanical Labor",
       "render": false,
@@ -456,11 +698,49 @@
       "id": "D30",
       "class": "VALUE_CHANGE",
       "operation": "Misc taxed material price revisions (cavity wax, adhesives, seam sealers, nozzles)",
-      "anchor_initial": {"page": 3, "lines": [45, 49, 50, 51, 52, 53, 54]},
-      "anchor_final": {"page": 3, "lines": [46, 50, 51, 52, 53, 54, 55]},
-      "old_value": {"cavity_wax": 15.13, "adhesive_07333": 159.26, "sealer_08308": 87.78, "sealer_08329": 93.46, "sealer_08365": 49.57, "nozzle_08194": 4.74, "nozzle_08187": 9.54},
-      "new_value": {"cavity_wax": 15.40, "adhesive_07333": 176.11, "sealer_08308": 96.78, "sealer_08329": 103.30, "sealer_08365": 54.66, "nozzle_08194": 5.23, "nozzle_08187": 10.50},
-      "magnitude_dollar": 41.50,
+      "anchor_initial": {
+        "page": 3,
+        "lines": [
+          45,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54
+        ]
+      },
+      "anchor_final": {
+        "page": 3,
+        "lines": [
+          46,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55
+        ]
+      },
+      "old_value": {
+        "cavity_wax": 15.13,
+        "adhesive_07333": 159.26,
+        "sealer_08308": 87.78,
+        "sealer_08329": 93.46,
+        "sealer_08365": 49.57,
+        "nozzle_08194": 4.74,
+        "nozzle_08187": 9.54
+      },
+      "new_value": {
+        "cavity_wax": 15.4,
+        "adhesive_07333": 176.11,
+        "sealer_08308": 96.78,
+        "sealer_08329": 103.3,
+        "sealer_08365": 54.66,
+        "nozzle_08194": 5.23,
+        "nozzle_08187": 10.5
+      },
+      "magnitude_dollar": 41.5,
       "category": "Miscellaneous",
       "render": true,
       "note": "Aggregate taxed-misc material escalation, consistent with CCC Data Date refresh 05/08 -> 06/16."
@@ -486,7 +766,9 @@
     ]
   },
   "label_requirements": {
-    "forbidden_labels": ["ESTIMATE GAP ONLY"],
+    "forbidden_labels": [
+      "ESTIMATE GAP ONLY"
+    ],
     "required_label_vocabulary": [
       "PRESENT ONLY IN SUPPLEMENT",
       "PRESENT ONLY IN INITIAL",
@@ -519,5 +801,31 @@
     "G4_label_clean": "zero forbidden labels in delta-density render; getDeltaLabel never returns ESTIMATE GAP ONLY",
     "G5_consumers": "delta-density, repair-intelligence, snapshot, customer-report all carry the same canonicalDeltaObjectId",
     "G6_owner_signoff": "manual owner validation of rendered output before promotion past preview"
+  },
+  "binding": {
+    "canonical_id": "canonical-ro21896",
+    "comment": "Document-signature binding consumed by the generic canonicalDeltaFixtureRegistry. Patterns are matched case-insensitively against every uploaded document's filename+text. The set activates when ALL required_patterns match AND (ANY corroboration_any_of matches OR ALL corroboration_all_of match) - byte-for-byte the pre-migration resolveRo21896CanonicalDeltaSet predicate.",
+    "required_patterns": [
+      "\\bshop[_\\s-]*21896\\b",
+      "\\bshop[_\\s-]*final[_\\s-]*21896\\b"
+    ],
+    "corroboration_any_of": [
+      "\\b(?:ro|repair order|workfile)?\\s*21896\\b"
+    ],
+    "corroboration_all_of": [
+      "11,?892\\.26",
+      "17,?397\\.20"
+    ],
+    "initial": {
+      "placeholder_id": "shop-21896",
+      "filename_pattern": "\\bshop[_\\s-]*21896\\b",
+      "filename_exclude": "\\bfinal\\b",
+      "estimate_role": "shop_initial"
+    },
+    "supplement": {
+      "placeholder_id": "shop-final-21896",
+      "filename_pattern": "\\bshop[_\\s-]*final[_\\s-]*21896\\b",
+      "estimate_role": "shop_final"
+    }
   }
 }

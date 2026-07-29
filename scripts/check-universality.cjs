@@ -48,15 +48,6 @@ const ALLOWLIST = {
     kind: "vocabulary",
     reason: '"e.g. USAA" example text inside a validation error message',
   },
-  "src/lib/reports/ro21896CanonicalDelta.ts": {
-    kind: "grandfathered",
-    reason:
-      "RO-keyed canonical delta resolver (owner-approved pre-directive); migrate to a generic fixture-binding mechanism",
-  },
-  "src/app/api/reports/citation-density/annotated-estimate/route.ts": {
-    kind: "grandfathered",
-    reason: "imports/calls resolveRo21896CanonicalDeltaSet; migrates with the resolver",
-  },
 };
 
 function walk(dir, out = []) {

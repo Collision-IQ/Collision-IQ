@@ -30,7 +30,7 @@ import {
   resolveSourceEstimatePdfSelections,
   type SourceEstimatePdfSelection,
 } from "@/lib/reports/citationDensitySourcePdf";
-import { resolveRo21896CanonicalDeltaSet } from "@/lib/reports/ro21896CanonicalDelta";
+import { resolveCanonicalDeltaSetFromFixtures } from "@/lib/reports/canonicalDeltaFixtureRegistry";
 import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
 import {
   buildFileReviewLedger,
@@ -133,7 +133,7 @@ export async function POST(request: Request) {
       panel: null,
       renderModel: undefined,
     });
-    const canonicalDeltaSet = resolveRo21896CanonicalDeltaSet(sourceDocuments);
+    const canonicalDeltaSet = resolveCanonicalDeltaSetFromFixtures(sourceDocuments);
     // When a canonical delta set is present, the Delta Citation Density report must annotate
     // the supplement/final estimate, not the lower one. The supplement-added lines (PRESENCE
     // deltas with anchor_initial === null) only exist in the final PDF, and the renderer only

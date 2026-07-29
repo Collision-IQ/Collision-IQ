@@ -56,6 +56,7 @@ import {
   classifyEstimateRoleFromHeader,
   estimatePairKindFromRoles,
 } from "../citationDensitySourcePdf";
+import { resolveCanonicalDeltaSetFromFixtures } from "../canonicalDeltaFixtureRegistry";
 
 // ---------------------------------------------------------------------------
 // Helpers: build a canonical delta set directly from fixture data
@@ -937,6 +938,67 @@ describe("I9-I10 — first rendered findings from canonical delta set", () => {
     // Every row carries the canonical ID — the consuming report uses it to look up the reconciliation block
     expect(comparisons.canonicalDeltaObjectId).toBeDefined();
     expect(comparisons.rows.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixture-registry resolver — data-driven binding must reproduce the
+// pre-migration resolveRo21896CanonicalDeltaSet behavior exactly
+// ---------------------------------------------------------------------------
+
+describe("fixture registry resolver — RO 21896 binding contract", () => {
+  const matchingDocuments = [
+    { id: "att-1", filename: "Shop_21896.pdf", text: "RO Number: 21896\nGrand Total 11,892.26" },
+    { id: "att-2", filename: "Shop_Final_21896.pdf", text: "Grand Total 17,397.20" },
+  ];
+
+  it("resolves the canonical set when both estimates and the RO signature are present", () => {
+    const set = resolveCanonicalDeltaSetFromFixtures(matchingDocuments);
+    expect(set).not.toBeNull();
+    expect(set!.id).toBe("canonical-ro21896");
+    expect(set!.deltas).toHaveLength(30);
+    expect(set!.estimatePairKind).toBe("shop_to_shop");
+  });
+
+  it("binds real uploaded attachment ids over the placeholder sourceDocumentIds", () => {
+    const set = resolveCanonicalDeltaSetFromFixtures(matchingDocuments)!;
+    expect(set.estimateFiles.initial.sourceDocumentId).toBe("att-1");
+    expect(set.estimateFiles.supplement.sourceDocumentId).toBe("att-2");
+  });
+
+  it("resolves via totals corroboration when no RO-number signature is present", () => {
+    const set = resolveCanonicalDeltaSetFromFixtures([
+      { id: "a", filename: "shop 21896.pdf", text: "Grand Total 11,892.26" },
+      { id: "b", filename: "shop final 21896.pdf", text: "Grand Total 17,397.20" },
+    ]);
+    expect(set).not.toBeNull();
+  });
+
+  it("returns null when only one of the pair is present", () => {
+    expect(
+      resolveCanonicalDeltaSetFromFixtures([
+        { id: "a", filename: "Shop_21896.pdf", text: "RO 21896" },
+      ])
+    ).toBeNull();
+  });
+
+  it("returns null for unrelated documents", () => {
+    expect(
+      resolveCanonicalDeltaSetFromFixtures([
+        { id: "x", filename: "Some_Other_Estimate.pdf", text: "Grand Total 4,000.00" },
+      ])
+    ).toBeNull();
+  });
+
+  it("does not bind the supplement filename to the initial side (final excluded)", () => {
+    const set = resolveCanonicalDeltaSetFromFixtures([
+      { id: "only-final", filename: "Shop_Final_21896.pdf", text: "RO 21896\nShop_21896 reference" },
+    ]);
+    // haystack contains both signatures via text, so the set resolves; the
+    // initial side must NOT bind to the final PDF's id (filename_exclude).
+    expect(set).not.toBeNull();
+    expect(set!.estimateFiles.supplement.sourceDocumentId).toBe("only-final");
+    expect(set!.estimateFiles.initial.sourceDocumentId).toBe("shop-21896");
   });
 });
 

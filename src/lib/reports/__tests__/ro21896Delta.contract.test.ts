@@ -5,7 +5,14 @@ import {
   buildRequiredEstimatorDeltaFindings,
 } from "../annotatedCitationDensityEstimate";
 import { buildCanonicalDeltaSet } from "../canonicalDelta";
-import { buildRo21896CanonicalDeltaSet } from "../ro21896CanonicalDelta";
+import {
+  buildCanonicalDeltaSetFromFixture,
+  type CanonicalDeltaFixture,
+} from "../canonicalDeltaFixtureRegistry";
+import ro21896Fixture from "../../../../tests/fixtures/ro21896_expected_delta.json";
+
+const buildRo21896CanonicalDeltaSet = (id?: string) =>
+  buildCanonicalDeltaSetFromFixture(ro21896Fixture as unknown as CanonicalDeltaFixture, id);
 
 async function createRo21896SourcePdf() {
   const pdf = await PDFDocument.create();
