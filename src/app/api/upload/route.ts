@@ -917,7 +917,9 @@ async function processPreparedUpload(params: {
     pageCount: previewData.pageCount,
     classification: params.file.classification,
     sizeBytes: params.file.sizeBytes,
-    sha256: cccParsed?.metadata.sha256,
+    // CCC workfiles hash in the parser; scanned PDFs hash in the OCR fallback
+    // so a re-upload of the same bytes can reuse the stored OCR text.
+    sha256: cccParsed ? cccParsed.metadata.sha256 : previewData.sha256,
     metadata: cccParsed?.metadata,
     source: params.file.source,
     sourceArchive: params.file.sourceArchive,
@@ -948,7 +950,7 @@ async function processPreparedUpload(params: {
     sourceArchive: params.file.sourceArchive,
     classification: params.file.classification,
     metadata: cccParsed?.metadata,
-    sha256: cccParsed?.metadata.sha256,
+    sha256: cccParsed ? cccParsed.metadata.sha256 : previewData.sha256,
     text: stored.text,
     imageDataUrl: stored.imageDataUrl,
     pageCount: stored.pageCount,

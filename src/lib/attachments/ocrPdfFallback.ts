@@ -10,13 +10,21 @@ import { ensurePdfJsNodePolyfills } from "@/lib/reports/citationDensityRowAnchor
 // durable fix for "scanned doc comes through as image only": the estimate text
 // gets into the reviewed set and the line-item extractors automatically.
 
-const DEFAULT_MAX_PAGES = 10;
+// Raised from 10: an 11-page carrier Estimate of Record silently lost its last
+// page (totals + final line items) under the old cap. Pages past the cap are
+// still dropped, but now with a warning and a visible note in the OCR text.
+const DEFAULT_MAX_PAGES = 25;
 const RENDER_SCALE = 350 / 72; // ~350 DPI — sharper small CCC table text
 const OCR_CONTRAST = 1.5; // boost separation of text from background before OCR
 
 function envInt(name: string, fallback: number): number {
   const parsed = Number.parseInt(process.env[name]?.trim() ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/** Effective OCR page cap: PDF_OCR_MAX_PAGES env override, else the default. */
+export function getPdfOcrMaxPages(): number {
+  return envInt("PDF_OCR_MAX_PAGES", DEFAULT_MAX_PAGES);
 }
 
 // ── OCR row reconstruction from word bounding boxes ──────────────────────────
@@ -134,7 +142,7 @@ export function shouldOcrPdf(extractedText: string, pageCount?: number): boolean
 async function renderPdfPagesToPng(
   buffer: Buffer,
   maxPages: number
-): Promise<Buffer[]> {
+): Promise<{ pageImages: Buffer[]; pagesTotal: number }> {
   const polyfillError = await ensurePdfJsNodePolyfills([]);
   if (polyfillError) throw new Error(polyfillError);
 
@@ -186,23 +194,34 @@ async function renderPdfPagesToPng(
 
     pageImages.push(await canvas.encode("png"));
   }
-  return pageImages;
+  return { pageImages, pagesTotal: pdf.numPages };
 }
 
 /**
  * OCR an image-only PDF. Never throws — returns null on any failure so callers
- * can fall back to whatever pdf-parse produced. Returns concatenated page text.
+ * can fall back to whatever pdf-parse produced. Returns concatenated page text
+ * plus how many pages were OCR'd vs. how many the document actually has, so
+ * callers can surface (not silently swallow) a page-cap truncation.
  */
 export async function ocrPdfBuffer(
   buffer: Buffer,
   options?: { maxPages?: number }
-): Promise<{ text: string; pagesOcred: number } | null> {
-  const maxPages = options?.maxPages ?? envInt("PDF_OCR_MAX_PAGES", DEFAULT_MAX_PAGES);
+): Promise<{ text: string; pagesOcred: number; pagesTotal: number } | null> {
+  const maxPages = options?.maxPages ?? getPdfOcrMaxPages();
 
   let worker: Awaited<ReturnType<typeof import("tesseract.js")["createWorker"]>> | null = null;
   try {
-    const pageImages = await renderPdfPagesToPng(buffer, maxPages);
+    const { pageImages, pagesTotal } = await renderPdfPagesToPng(buffer, maxPages);
     if (pageImages.length === 0) return null;
+
+    if (pagesTotal > pageImages.length) {
+      console.warn("[pdf-ocr-fallback] page cap dropped pages", {
+        pagesTotal,
+        pagesOcred: pageImages.length,
+        maxPages,
+        hint: "raise PDF_OCR_MAX_PAGES to OCR the remaining pages",
+      });
+    }
 
     const { createWorker } = await import("tesseract.js");
     worker = await createWorker("eng", undefined, resolveTesseractWorkerOptions() as never);
@@ -234,7 +253,7 @@ export async function ocrPdfBuffer(
 
     const text = pageTexts.join("\n\n").trim();
     if (!text) return null;
-    return { text, pagesOcred: pageImages.length };
+    return { text, pagesOcred: pageImages.length, pagesTotal };
   } catch (error) {
     console.warn("[pdf-ocr-fallback] OCR failed (non-blocking)", {
       message: error instanceof Error ? error.message : String(error),

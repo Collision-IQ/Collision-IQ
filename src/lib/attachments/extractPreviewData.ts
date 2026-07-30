@@ -1,5 +1,10 @@
+import { createHash } from "node:crypto";
 import pdfParse from "pdf-parse";
 import { ocrPdfBuffer, shouldOcrPdf } from "@/lib/attachments/ocrPdfFallback";
+import {
+  buildOcrAttachmentText,
+  findCachedOcrText,
+} from "@/lib/attachments/ocrTextCache";
 
 const MAX_REUSABLE_DATA_URL_BYTES = 4 * 1024 * 1024;
 
@@ -10,6 +15,8 @@ export async function extractPreviewDataFromBuffer(params: {
 }): Promise<{
   text: string;
   pageCount?: number;
+  /** Set when the OCR fallback ran — callers persist it so the OCR cache can hit. */
+  sha256?: string;
 }> {
   const mimeType = (params.mimeType || "").toLowerCase();
 
@@ -37,13 +44,23 @@ export async function extractPreviewDataFromBuffer(params: {
     // Image-only ("scanned") PDF: no text layer. Fall back to server-side OCR so
     // the estimate text still reaches the reviewed set and the line extractors.
     if (shouldOcrPdf(text, pageCount)) {
+      // Keyed by content hash: a re-upload of the same bytes reuses the OCR
+      // text a prior UploadedAttachment row stored, skipping the 45-80s pass.
+      const sha256 = createHash("sha256").update(params.buffer).digest("hex");
+      const cached = await findCachedOcrText(sha256);
+      if (cached) {
+        console.info("[pdf-ocr-cache] reused OCR text from prior upload", {
+          sha256,
+          filename: params.filename ?? null,
+        });
+        return { text: cached.text, pageCount: pageCount ?? cached.pageCount, sha256 };
+      }
+
       const ocr = await ocrPdfBuffer(params.buffer);
       if (ocr && ocr.text.replace(/\s+/g, " ").trim().length > text.replace(/\s+/g, " ").trim().length) {
-        return {
-          text: `[[OCR text recovered from a scanned/image-only PDF. Machine-read; verify figures against the source.]]\n\n${ocr.text}`,
-          pageCount,
-        };
+        return { text: buildOcrAttachmentText(ocr), pageCount, sha256 };
       }
+      return { text, pageCount, sha256 };
     }
 
     return { text, pageCount };
@@ -66,6 +83,7 @@ export async function extractPreviewDataFromBuffer(params: {
 export async function extractPreviewDataFromFile(file: File): Promise<{
   text: string;
   pageCount?: number;
+  sha256?: string;
 }> {
   const buffer = Buffer.from(await file.arrayBuffer());
   return extractPreviewDataFromBuffer({
