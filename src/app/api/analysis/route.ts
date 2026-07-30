@@ -46,7 +46,7 @@ import type {
 } from "@/lib/ai/contracts/driveRetrievalContract";
 import { mergeVehicleIdentity, normalizeVehicleIdentity } from "@/lib/ai/vehicleContext";
 import { extractEstimateFacts } from "@/lib/ai/extractors/extractEstimateFacts";
-import { resolveStateFromZip } from "@/lib/policyLegal/stateFromZip";
+import { extractMarketPreviewState, selectOwnerOrInsuredZip } from "@/lib/ai/marketPreviewOwnerZip";
 import {
   analyzeEstimateOperations,
   inferImpactSide,
@@ -1469,36 +1469,6 @@ function normalizeMarketPreviewVehicle(
 function extractVinFromTextForMarketPreview(text: string): string | undefined {
   const vin = text.match(/\b[A-HJ-NPR-Z0-9]{17}\b/i)?.[0]?.toUpperCase();
   return vin;
-}
-
-function selectOwnerOrInsuredZip(text: string): string | undefined {
-  const candidates: Array<{ zip: string; score: number; index: number }> = [];
-  const regex = /\b\d{5}(?:-\d{4})?\b/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = regex.exec(text)) !== null) {
-    const zip = match[0].slice(0, 5);
-    if (!resolveStateFromZip(zip)) continue;
-    const index = match.index;
-    const context = text.slice(Math.max(0, index - 180), Math.min(text.length, index + 180)).toLowerCase();
-    let score = 10;
-    if (/\b(owner|insured|claimant|customer|vehicle owner|policyholder)\b/.test(context)) score += 100;
-    if (/\b(repair facility|repair shop|body shop|collision center|appraiser|estimator|supplement|facility)\b/.test(context)) score -= 75;
-    if (/\b(zip|postal|address|city|state)\b/.test(context)) score += 10;
-    candidates.push({ zip, score, index });
-  }
-
-  if (candidates.length === 0) return undefined;
-  candidates.sort((left, right) => right.score - left.score || left.index - right.index);
-  return candidates[0]?.zip;
-}
-
-function extractMarketPreviewState(text: string, zip?: string): string | undefined {
-  if (zip) {
-    return resolveStateFromZip(zip) ?? undefined;
-  }
-
-  return text.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?,\s*([A-Z]{2})\s+\d{5}(?:-\d{4})?\b/)?.[1];
 }
 
 function computeMarketPreviewMedian(values: number[]): number {
