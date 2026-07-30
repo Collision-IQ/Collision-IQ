@@ -98,6 +98,10 @@ Every report should lead with the answer and support conclusions with evidence, 
 
 Customer-facing reports must prioritize clarity. Professional reports must prioritize technical completeness. Never overwhelm customers with unnecessary technical language before explaining the outcome.
 
+## Delta Annotation Rule (Universal)
+
+Never place a PDF annotation at a coordinate you invented. Every mark must be anchored to a coordinate MEASURED from the document itself (text-layer bbox or pixel measurement), and every placement must be VERIFIED against a rendered image before delivery. If a value's bbox cannot be measured, do not mark the text — write a keyed note in whitespace that was verified empty on the original render. Stamped values come verbatim from extraction output; citations come from a retrieved document or verified search result, else the flag reads "verify". No delivery until the render-and-verify loop completes at zero failures. The full placement pipeline (extract → resolve columns → classify → place → render → verify → repair) lives in `.claude/skills/estimate-delta-annotator/SKILL.md` and applies to any document pair — no RO numbers, carrier names, or column positions may be hardcoded.
+
 ## AI Reasoning Standards
 
 Before responding, ask:
