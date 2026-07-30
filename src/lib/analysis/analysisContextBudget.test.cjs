@@ -231,6 +231,26 @@ run("SOR supplement with policy boilerplate classifies as supplement", () => {
   assert.equal(classifyAnalysisAttachment(supplement), "supplement");
 });
 
+run("fragmented one-token-per-line EOR (embedded OCR layer) still classifies as carrier_estimate", () => {
+  // PDFs with an embedded OCR text layer extract one token per line, so the
+  // carrier designation reads "Estimate\nof\nRecord" (observed in production
+  // on a carrier EOR re-issued with an OCR layer).
+  const fragmented = attachment({
+    id: "fragmented-eor",
+    filename: "Carrier EOR fragmented.pdf",
+    text: [
+      "SAMPLE", "MUTUAL", "AUTOMOBILE", "ASSOCIATION",
+      "Workfile", "ID:", "blfd7ff4",
+      "Estimate", "of", "Record",
+      "Written", "By:", "SAMPLE", "APPRAISER",
+      "Repair", "Facility",
+      CCC_BOILERPLATE,
+      ESTIMATE_BODY,
+    ].join("\n"),
+  });
+  assert.equal(classifyAnalysisAttachment(fragmented), "carrier_estimate");
+});
+
 run("true policy declarations still classify as policy_document", () => {
   const policyDoc = attachment({
     id: "policy-doc",

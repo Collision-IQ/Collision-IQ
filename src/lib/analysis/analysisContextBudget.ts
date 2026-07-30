@@ -222,7 +222,9 @@ export function classifyAnalysisAttachment(attachment: StoredAttachment): Analys
  */
 function resolveEstimateDocumentClass(filename: string, haystack: string): AnalysisDocumentClass {
   if (/\b(?:sor[\s_-]*\d*|supp(?:lement)?(?:al)?)\b/.test(filename)) return "supplement";
-  if (/\bestimate of record\b/.test(haystack)) return "carrier_estimate";
+  // \s+ (not literal spaces): PDFs with embedded OCR text layers extract one
+  // token per line, so the designation reads "Estimate\nof\nRecord".
+  if (/\bestimate\s+of\s+record\b/.test(haystack)) return "carrier_estimate";
   if (/\b(shop|repair facility|body shop)\b/.test(haystack) && /\bestimate\b/.test(haystack)) return "shop_estimate";
   if (/\b(carrier|insurer|insurance|allstate|geico|progressive|state farm|sor\d*)\b/.test(haystack)) {
     return /\b(?:supp(?:lement)?|sor\d*)\b/.test(haystack) ? "supplement" : "carrier_estimate";

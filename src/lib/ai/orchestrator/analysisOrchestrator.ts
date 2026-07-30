@@ -749,7 +749,8 @@ function findCarrierAuthoredEstimateDocument(
       if (shopText !== null && text === shopText) return false;
       return (
         /\beor\b/i.test(document.filename ?? "") ||
-        /\bestimate of record\b/i.test(`${document.filename ?? ""}\n${text.slice(0, 4000)}`)
+        // \s+ tolerates one-token-per-line text from embedded OCR layers.
+        /\bestimate\s+of\s+record\b/i.test(`${document.filename ?? ""}\n${text.slice(0, 4000)}`)
       );
     }) ?? null
   );

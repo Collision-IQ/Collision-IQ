@@ -105,6 +105,34 @@ const CARRIER_EOR_DOC = {
     );
   });
 
+  await run("fragmented EOR text (embedded OCR layer) is still detected as the carrier side", async () => {
+    // One token per line with no "EOR" filename token — only the fragmented
+    // "Estimate\nof\nRecord" designation identifies the carrier document.
+    const fragmentedEor = {
+      id: "fragmented-eor-doc",
+      filename: "Sample_carrier_document_scan.pdf",
+      type: "application/pdf",
+      text: [
+        "SAMPLE", "MUTUAL", "AUTOMOBILE", "ASSOCIATION",
+        "Estimate", "of", "Record",
+        "Written", "By:", "SAMPLE", "APPRAISER",
+        ESTIMATE_BODY,
+        "Total Cost of Repairs 9,218.43",
+      ].join("\n"),
+    };
+    const report = await runRepairAnalysis({
+      artifactIds: [SHOP_DOC.id, fragmentedEor.id],
+      preloadedAttachments: [SHOP_DOC, fragmentedEor],
+      sessionContext: null,
+      userIntent: null,
+    });
+    const evidenceSources = (report.evidence ?? []).map((entry) => entry.source);
+    assert.ok(
+      evidenceSources.includes("Carrier estimate"),
+      `expected fragmented EOR to pair as carrier, got: ${JSON.stringify(evidenceSources)}`
+    );
+  });
+
   await run("two shop estimate versions still take the version-pair path", async () => {
     // No carrier-authored document present: the EOR fallback must not invent
     // an insurer side, so same-job versions stay a version comparison.
