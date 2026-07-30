@@ -32,7 +32,7 @@ require.extensions[".ts"] = function compileTsModule(module, filename) {
 const stubPath = path.join(cwd, "src/lib/reports/citationDensityRowAnchors.ts");
 require.cache[stubPath] = { id: stubPath, filename: stubPath, loaded: true, exports: { ensurePdfJsNodePolyfills: async () => null } };
 
-const { shouldOcrPdf, isPdfOcrFallbackEnabled } = require(path.join(cwd, "src/lib/attachments/ocrPdfFallback.ts"));
+const { shouldOcrPdf, isPdfOcrFallbackEnabled, getPdfOcrMaxPages } = require(path.join(cwd, "src/lib/attachments/ocrPdfFallback.ts"));
 
 let passed = 0;
 let failed = 0;
@@ -84,6 +84,34 @@ test("disable flag turns the fallback off", () => {
   process.env.PDF_OCR_FALLBACK_DISABLED = "0";
   assert.equal(isPdfOcrFallbackEnabled(), true);
   assert.equal(shouldOcrPdf("", 4), true);
+});
+
+test("default OCR page cap covers an 11-page carrier EOR", () => {
+  const prev = process.env.PDF_OCR_MAX_PAGES;
+  try {
+    delete process.env.PDF_OCR_MAX_PAGES;
+    // Raised from 10 after RO 22047: the 11th page (totals) was silently dropped.
+    assert.equal(getPdfOcrMaxPages(), 25);
+    assert.equal(getPdfOcrMaxPages() >= 11, true);
+  } finally {
+    if (prev === undefined) delete process.env.PDF_OCR_MAX_PAGES;
+    else process.env.PDF_OCR_MAX_PAGES = prev;
+  }
+});
+
+test("PDF_OCR_MAX_PAGES env overrides the page cap; junk values fall back", () => {
+  const prev = process.env.PDF_OCR_MAX_PAGES;
+  try {
+    process.env.PDF_OCR_MAX_PAGES = "40";
+    assert.equal(getPdfOcrMaxPages(), 40);
+    process.env.PDF_OCR_MAX_PAGES = "0";
+    assert.equal(getPdfOcrMaxPages(), 25);
+    process.env.PDF_OCR_MAX_PAGES = "not-a-number";
+    assert.equal(getPdfOcrMaxPages(), 25);
+  } finally {
+    if (prev === undefined) delete process.env.PDF_OCR_MAX_PAGES;
+    else process.env.PDF_OCR_MAX_PAGES = prev;
+  }
 });
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
