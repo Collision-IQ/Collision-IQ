@@ -1,4 +1,5 @@
 import type { StoredAttachment } from "@/lib/uploadedAttachmentStore";
+import { classifyCitationDensityDocument } from "@/lib/reports/citationDensityDocumentClassifier";
 
 export type AnalysisDocumentClass =
   | "carrier_estimate"
@@ -181,6 +182,14 @@ export function applyAnalysisContextBudget(params: {
 export function classifyAnalysisAttachment(attachment: StoredAttachment): AnalysisDocumentClass {
   const haystack = `${attachment.filename}\n${attachment.type}\n${attachment.text}`.toLowerCase();
   if (isGeneratedCollisionIqReport(haystack)) return "generated_report_artifact";
+  // Estimates must be recognized BEFORE any keyword class below: every CCC
+  // estimate carries "Policy #:", "Deductible", "appraisal", "CCC", and "MOTOR"
+  // in its standard header/boilerplate, so keyword-first ordering silently
+  // demoted every estimate to policy_document (smaller text budget, policy
+  // structured-facts extraction, and a trimmed vehicle line).
+  if (classifyCitationDensityDocument({ filename: attachment.filename, text: attachment.text }).isEstimateLike) {
+    return resolveEstimateDocumentClass(attachment.filename.toLowerCase(), haystack);
+  }
   if (/\b(policy|declarations?|endorsement|coverage|deductible|if we cannot agree|payment of loss|appraisal)\b/.test(haystack)) {
     return "policy_document";
   }
@@ -195,12 +204,31 @@ export function classifyAnalysisAttachment(attachment: StoredAttachment): Analys
   }
   if (/\b(shop|repair facility|body shop)\b/.test(haystack) && /\bestimate\b/.test(haystack)) return "shop_estimate";
   if (/\b(carrier|insurer|insurance|allstate|geico|progressive|state farm|sor\d*)\b/.test(haystack) && /\b(estimate|supplement|sor)\b/.test(haystack)) {
-    return /\bsupp(?:lement)?|sor\d*\b/.test(haystack) ? "supplement" : "carrier_estimate";
+    return /\b(?:supp(?:lement)?|sor\d*)\b/.test(haystack) ? "supplement" : "carrier_estimate";
   }
   if (/\b(supplement|sor\d*)\b/.test(haystack)) return "supplement";
   if (/\b(invoice|sublet|receipt|bill|repair order|mount\/balance|alignment)\b/.test(haystack)) return "invoice_or_sublet";
   if (attachment.type.startsWith("image/") || /\b(scan report|calibration report|photo)\b/.test(haystack)) return "photo_or_scan";
   return "other_supporting_document";
+}
+
+/**
+ * Role resolution for a document already known to be an estimate. Order
+ * matters: a SOR/supplement token in the FILENAME is a deliberate labeling and
+ * outranks body text (every CCC estimate's boilerplate mentions
+ * "Supplements"), and "Estimate of Record" is the carrier's authored-estimate
+ * designation — carrier EORs still name the repair facility in their header,
+ * which would otherwise satisfy the shop tokens below.
+ */
+function resolveEstimateDocumentClass(filename: string, haystack: string): AnalysisDocumentClass {
+  if (/\b(?:sor[\s_-]*\d*|supp(?:lement)?(?:al)?)\b/.test(filename)) return "supplement";
+  if (/\bestimate of record\b/.test(haystack)) return "carrier_estimate";
+  if (/\b(shop|repair facility|body shop)\b/.test(haystack) && /\bestimate\b/.test(haystack)) return "shop_estimate";
+  if (/\b(carrier|insurer|insurance|allstate|geico|progressive|state farm|sor\d*)\b/.test(haystack)) {
+    return /\b(?:supp(?:lement)?|sor\d*)\b/.test(haystack) ? "supplement" : "carrier_estimate";
+  }
+  if (/\b(supplement|sor\d*)\b/.test(haystack)) return "supplement";
+  return "shop_estimate";
 }
 
 function buildBudgetedAttachmentText(params: {

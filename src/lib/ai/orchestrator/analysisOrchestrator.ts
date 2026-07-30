@@ -456,12 +456,22 @@ export async function runRepairAnalysis({
 
   const shopText =
     findDocumentText(documents, ["shop", "body shop", "repair facility"]) ?? null;
+  // Filename keywords miss carrier estimates labeled only by document type
+  // (e.g. an "EOR"/"Estimate of Record"); without the fallback the pair is
+  // analyzed as two versions of one job instead of shop-vs-carrier.
+  const carrierAuthoredDocument = findCarrierAuthoredEstimateDocument(documents, shopText);
   const insurerText =
-    findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"]) ?? null;
+    findDocumentText(documents, ["insurer", "insurance", "carrier", "sor"]) ??
+    carrierAuthoredDocument?.text ??
+    null;
   const estimateVersionPair =
     shopText && insurerText ? null : findEstimateVersionPair(documents);
   const shopVehicle = inferVehicleFromDocument(documents, ["shop", "body shop", "repair facility"]);
-  const insurerVehicle = inferVehicleFromDocument(documents, ["insurer", "insurance", "carrier", "sor"]);
+  const insurerVehicle =
+    inferVehicleFromDocument(documents, ["insurer", "insurance", "carrier", "sor"]) ??
+    (carrierAuthoredDocument?.text
+      ? extractVehicleIdentityFromText(carrierAuthoredDocument.text, "attachment")
+      : null);
   const sessionVehicle =
     sessionContext?.vehicleMake
       ? {
@@ -717,6 +727,32 @@ function findDocumentText(
   });
 
   return match?.text ?? undefined;
+}
+
+/**
+ * Carrier-authored estimates are often labeled only by document type — an
+ * "EOR" filename or an "Estimate of Record" title — with no insurer keyword.
+ * The shop-matched document is excluded so one file can never fill both roles.
+ */
+function findCarrierAuthoredEstimateDocument(
+  documents: Array<{
+    filename?: string | null;
+    mime?: string | null;
+    text?: string | null;
+  }>,
+  shopText: string | null
+): { filename?: string | null; text?: string | null } | null {
+  return (
+    documents.find((document) => {
+      const text = document.text ?? "";
+      if (!text.trim()) return false;
+      if (shopText !== null && text === shopText) return false;
+      return (
+        /\beor\b/i.test(document.filename ?? "") ||
+        /\bestimate of record\b/i.test(`${document.filename ?? ""}\n${text.slice(0, 4000)}`)
+      );
+    }) ?? null
+  );
 }
 
 function findEstimateVersionPair(

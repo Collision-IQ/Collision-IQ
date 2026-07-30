@@ -17,6 +17,20 @@ export type RemoteDocumentResult = {
   notes?: string;
 };
 
+// Hosts behind bot protection (e.g. carrier websites linked from estimate
+// boilerplate) can hold a connection open for minutes without responding, which
+// stalls the whole analysis request. Every remote fetch must give up quickly;
+// linked documents are directional support, never worth blocking the review.
+const DEFAULT_FETCH_TIMEOUT_MS = 8000;
+
+export function getRemoteDocumentFetchTimeoutMs(): number {
+  const parsed = Number.parseInt(
+    process.env.LINKED_EVIDENCE_FETCH_TIMEOUT_MS?.trim() ?? "",
+    10
+  );
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_FETCH_TIMEOUT_MS;
+}
+
 function stripHtml(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -37,6 +51,13 @@ export async function readRemoteDocument(
   rawUrl: string
 ): Promise<RemoteDocumentResult> {
   let normalized: ReturnType<typeof normalizeRemoteUrl> | null = null;
+  const timeoutMs = getRemoteDocumentFetchTimeoutMs();
+  const abortController = new AbortController();
+  let timedOut = false;
+  const timeoutTimer = setTimeout(() => {
+    timedOut = true;
+    abortController.abort();
+  }, timeoutMs);
 
   try {
     normalized = normalizeRemoteUrl(rawUrl);
@@ -99,6 +120,8 @@ export async function readRemoteDocument(
           "text/plain,text/html,application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
       },
       cache: "no-store",
+      // Covers the header wait AND the body read below — one budget per link.
+      signal: abortController.signal,
     });
 
     const finalUrl = response.url || normalized.normalizedUrl;
@@ -187,8 +210,12 @@ export async function readRemoteDocument(
       sourceType: normalized?.sourceType ?? "unknown",
       text: "",
       status: "failed",
-      notes: error instanceof Error ? error.message : "Unknown fetch error",
+      notes: timedOut
+        ? `fetch timed out after ${timeoutMs}ms`
+        : error instanceof Error ? error.message : "Unknown fetch error",
     };
+  } finally {
+    clearTimeout(timeoutTimer);
   }
 }
 

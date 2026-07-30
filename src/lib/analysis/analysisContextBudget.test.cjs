@@ -132,3 +132,144 @@ run("garbled policy extraction recommends fallback and still avoids whole-policy
   assert.ok(policy.selectedTextChars < policy.rawTextChars);
   assert.match(result.attachments.find((item) => item.id === "policy").text, /Policy document exists, but structured facts were not confidently extracted/);
 });
+
+// ── RO 22047 regression: estimates demoted to policy_document ────────────────
+// Every CCC estimate carries "Policy #:", "Deductible", and appraisal wording
+// in standard header/boilerplate. The policy-keyword check used to run before
+// estimate detection, so BOTH estimates of every review were classified
+// policy_document: 9K policy text cap instead of 14K, policy structured-facts
+// extraction run on estimates, and the vehicle header line trimmed out
+// (make/model resolved null downstream). Estimate detection must win first.
+
+const CCC_BOILERPLATE = [
+  "Insured: SAMPLE, OWNER Policy #: 00987654321 Claim #: 009876543210000",
+  "Type of Loss: Collision Date of Loss: 06/06/2026 Deductible: 1000.00",
+  "The parties agree that an appraisal clause may apply to this loss.",
+  "CCC ONE Estimating - A product of CCC Intelligent Solutions Inc.",
+  "MOTOR CRASH ESTIMATING GUIDE coverage abbreviations follow.",
+].join("\n");
+
+const ESTIMATE_BODY = [
+  "Line Oper Description Part Number Qty Extended Price $ Labor Paint",
+  "1 R&I RT Bumper cover PT00654961A 1 78.00 0.3 0.0",
+  "2 Repl LT Headlamp assy PT00983789A 1 1,130.27 0.5 0.0",
+  "3 Rpr Quarter panel 0 0.00 2.5 1.3",
+  "SUBTOTALS 3,254.43 33.9 10.9",
+  "ESTIMATE TOTALS",
+  "Grand Total 11,296.09",
+  "Total Cost of Repairs 9,218.43",
+].join("\n");
+
+const SHOP_ESTIMATE = attachment({
+  id: "shop-estimate",
+  filename: "Shop 12345.pdf",
+  text: [
+    "Sample repair facility header",
+    "Preliminary Estimate",
+    "RO Number: 12345 Written By: SAMPLE ESTIMATOR",
+    "Workfile ID: abc12345",
+    "VEHICLE 2024 SAMPLE TRUCK 4D P/U Electric GREEN",
+    CCC_BOILERPLATE,
+    ESTIMATE_BODY,
+  ].join("\n"),
+});
+
+const CARRIER_EOR = attachment({
+  id: "carrier-eor",
+  filename: "Carrier EOR 12345.pdf",
+  text: [
+    "SAMPLE MUTUAL AUTOMOBILE ASSOCIATION",
+    "Estimate of Record",
+    "Written By: SAMPLE APPRAISER, License Number: 000000",
+    "Workfile ID: def67890",
+    // Carrier EORs still name the repair facility in the header block.
+    "Inspection Location: Repair Facility: SAMPLE COLLISION CENTER",
+    "VEHICLE 2024 SAMPLE TRUCK 4D P/U Electric GREEN",
+    CCC_BOILERPLATE,
+    ESTIMATE_BODY,
+  ].join("\n"),
+});
+
+run("shop estimate with policy boilerplate classifies as shop_estimate", () => {
+  assert.equal(classifyAnalysisAttachment(SHOP_ESTIMATE), "shop_estimate");
+});
+
+run("carrier Estimate of Record classifies as carrier_estimate despite repair-facility header", () => {
+  assert.equal(classifyAnalysisAttachment(CARRIER_EOR), "carrier_estimate");
+});
+
+run("OCR-recovered scanned estimate stays an estimate", () => {
+  const scanned = attachment({
+    id: "scanned-ocr-estimate",
+    filename: "Insurer estimate scan.pdf",
+    text: [
+      "[[OCR text recovered from a scanned/image-only PDF. Machine-read; verify figures against the source.]]",
+      "",
+      "===== Page 1 =====",
+      "Estimate of Record",
+      "Workfile ID: b1fd7ff4",
+      CCC_BOILERPLATE,
+      ESTIMATE_BODY,
+    ].join("\n"),
+  });
+  assert.equal(classifyAnalysisAttachment(scanned), "carrier_estimate");
+});
+
+run("SOR supplement with policy boilerplate classifies as supplement", () => {
+  const supplement = attachment({
+    id: "supplement-sor",
+    filename: "SOR-1 12345-1.pdf",
+    text: [
+      "Preliminary Supplement 1 with Summary",
+      "Insurance carrier reviewed supplement of record.",
+      "Workfile ID: xyz00001",
+      CCC_BOILERPLATE,
+      ESTIMATE_BODY,
+      "SUPPLEMENT SUMMARY",
+    ].join("\n"),
+  });
+  assert.equal(classifyAnalysisAttachment(supplement), "supplement");
+});
+
+run("true policy declarations still classify as policy_document", () => {
+  const policyDoc = attachment({
+    id: "policy-doc",
+    filename: "Auto policy declarations.pdf",
+    text: [
+      "PERSONAL AUTO POLICY DECLARATIONS",
+      "Policy #: 00987654321 Effective 01/01/2026 to 07/01/2026",
+      "Coverage: Collision Deductible: 1000.00 Comprehensive Deductible: 500.00",
+      "Endorsement PP 03 05 attached. If we cannot agree on the amount of loss,",
+      "either party may demand an appraisal. Payment of loss terms apply.",
+    ].join("\n"),
+  });
+  assert.equal(classifyAnalysisAttachment(policyDoc), "policy_document");
+});
+
+run("estimates keep the estimate text budget instead of the policy cap", () => {
+  // Pad the estimate above the 9K policy cap but below the 14K estimate cap:
+  // under the old classification this text was policy-summarized; now it must
+  // survive intact.
+  const padded = attachment({
+    ...SHOP_ESTIMATE,
+    text: `${SHOP_ESTIMATE.text}\n${"4 Repl Sample part PT00000000A 1 10.00 0.1 0.0\n".repeat(220)}`,
+  });
+  assert.ok(padded.text.length > 9000 && padded.text.length < 14000, `pad size ${padded.text.length}`);
+  const result = applyAnalysisContextBudget({
+    attachments: [padded],
+    provider: "anthropic",
+    model: "claude-opus-4-8",
+  });
+  assert.equal(result.diagnostics.attachmentClassifications[0].documentClass, "shop_estimate");
+  assert.equal(result.attachments[0].text, padded.text);
+  assert.doesNotMatch(result.attachments[0].text, /POLICY DOCUMENT STRUCTURED FACTS/);
+});
+
+run("vehicle header line survives budgeting for an estimate", () => {
+  const result = applyAnalysisContextBudget({
+    attachments: [SHOP_ESTIMATE],
+    provider: "anthropic",
+    model: "claude-opus-4-8",
+  });
+  assert.match(result.attachments[0].text, /VEHICLE 2024 SAMPLE TRUCK/);
+});
