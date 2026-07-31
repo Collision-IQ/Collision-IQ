@@ -22,6 +22,11 @@ import {
   topLeftRectToPdfLibRect,
 } from "./citationDensityCoordinates";
 import {
+  planVerifiedKeyedNotes,
+  type KeyedNoteRequest,
+  type PlacementWord,
+} from "./annotationPlacementEngine";
+import {
   buildEstimateRowAnchorsFromLines,
   buildPdfTextLines,
   ensurePdfJsNodePolyfills,
@@ -73,6 +78,14 @@ export type AnnotatedEstimateRequest = {
   includeSummaryPage?: boolean;
   includeUnanchoredAppendix?: boolean;
   redactSensitive?: boolean;
+  /**
+   * Opt-in: place unanchored findings as keyed notes inside measured on-page
+   * whitespace (verified empty) instead of sending every one to the appendix.
+   * Placement is planned and audited by annotationPlacementEngine; notes that
+   * cannot be placed at zero audit failures still fall through to the
+   * appendix. Default false — existing report output is unchanged.
+   */
+  inPageKeyedNotes?: boolean;
 };
 
 export type AnnotatedEstimateReportIdentity = {
@@ -1280,6 +1293,118 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
 
   if (trace.extractedAnchorCount > 0 && trace.findingCount > 0 && trace.renderedPdfAnnotationCount === 0) {
     throw new CitationDensityAnnotationError("Anchors extracted but no annotations rendered.", trace);
+  }
+
+  // Opt-in in-page keyed notes for unanchored findings: place each one in
+  // whitespace measured empty on the source page it belongs to, via the
+  // plan -> audit -> repair loop in annotationPlacementEngine. Findings the
+  // engine cannot place at zero audit failures stay in `unmatched` and flow
+  // to the appendix exactly as before. Guarded so any extraction failure
+  // degrades to current behavior rather than failing the report.
+  if (request.inPageKeyedNotes === true && unmatched.length > 0) {
+    try {
+      const wordExtraction = await extractPdfWordsWithDiagnostics(sourcePdfBytes);
+      const placementWords: PlacementWord[] = wordExtraction.words.map((word) => ({
+        pageNumber: word.pageNumber,
+        x: word.x,
+        y: word.y,
+        width: word.width,
+        height: word.height,
+        text: word.text,
+      }));
+      const pageGeometries = new Map<number, { pageNumber: number; pageWidth: number; pageHeight: number }>();
+      for (const word of wordExtraction.words) {
+        if (!pageGeometries.has(word.pageNumber)) {
+          pageGeometries.set(word.pageNumber, {
+            pageNumber: word.pageNumber,
+            pageWidth: word.pageWidth,
+            pageHeight: word.pageHeight,
+          });
+        }
+      }
+      const noteRequests: KeyedNoteRequest[] = [];
+      for (const finding of unmatched) {
+        const roleAnchor =
+          estimateRole === "shop"
+            ? finding.shopAnchor
+            : estimateRole === "carrier"
+              ? finding.carrierAnchor
+              : finding.carrierAnchor ?? finding.shopAnchor;
+        const pageNumber = roleAnchor?.pageNumber ?? null;
+        if (!pageNumber || !pageGeometries.has(pageNumber)) continue;
+        if (pageNumber < 1 || pageNumber > originalPageCount) continue;
+        const keyPrefix = roleAnchor?.lineNumber ? `Ln ${roleAnchor.lineNumber}: ` : "";
+        const amount = roleAnchor?.amount;
+        const hours = roleAnchor?.laborHours;
+        const valueSuffix = [
+          typeof amount === "number" ? `$${amount.toFixed(2)}` : null,
+          typeof hours === "number" ? `${hours} hr` : null,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        const text = redactAnnotationText(
+          `${keyPrefix}${finding.operationLabel}${valueSuffix ? ` — ${valueSuffix}` : ""}`.trim()
+        );
+        if (!text) continue;
+        noteRequests.push({ id: finding.id, pageNumber, text });
+      }
+      if (noteRequests.length > 0) {
+        const plan = planVerifiedKeyedNotes({
+          requests: noteRequests,
+          words: placementWords,
+          pages: [...pageGeometries.values()],
+          measureText: (text, size) => boldFont.widthOfTextAtSize(text, size),
+        });
+        const isOemReport = reportIdentity.reportType === "oem-citation-density";
+        const noteFill = isOemReport ? rgb(0.3, 0.85, 1) : rgb(1, 0.95, 0);
+        const noteInk = isOemReport ? rgb(0, 0.15, 0.75) : rgb(0.72, 0.12, 0.1);
+        const placedIds = new Set<string>();
+        for (const note of plan.placed) {
+          const page = pdfDoc.getPage(toSourcePdfPageIndex(note.rect.pageNumber));
+          const pageWidth = page.getWidth();
+          const pageHeight = page.getHeight();
+          const rotation = normalizeRotation(page.getRotation().angle);
+          const pdfLibRect = topLeftRectToPdfLibRect(note.rect, {
+            pdfWidth: pageWidth,
+            pdfHeight: pageHeight,
+            rotation,
+          });
+          page.drawRectangle({
+            x: pdfLibRect.x,
+            y: pdfLibRect.y,
+            width: pdfLibRect.width,
+            height: pdfLibRect.height,
+            color: noteFill,
+            opacity: 0.45,
+          });
+          page.drawText(note.request.text, {
+            x: pdfLibRect.x + 1.5,
+            y: pdfLibRect.y + 2,
+            size: note.fontSize,
+            font: boldFont,
+            color: noteInk,
+          });
+          placedIds.add(note.request.id);
+        }
+        if (placedIds.size > 0) {
+          for (let index = unmatched.length - 1; index >= 0; index -= 1) {
+            if (placedIds.has(unmatched[index].id)) unmatched.splice(index, 1);
+          }
+        }
+        appendToolUsageTrace(trace, {
+          tool: "in_page_keyed_notes",
+          ran: true,
+          candidatesFound: noteRequests.length,
+          candidatesAccepted: placedIds.size,
+          candidatesRejected: Math.max(0, noteRequests.length - placedIds.size),
+          droppedReasons: plan.audits.flat().map((failure) => `${failure.kind}: ${failure.detail}`),
+        });
+      }
+    } catch (error) {
+      warnings.push(
+        `in-page keyed notes skipped: ${error instanceof Error ? error.message : "placement engine error"}`
+      );
+    }
   }
 
   // The annotated estimate keeps only the on-page annotations plus the legend
