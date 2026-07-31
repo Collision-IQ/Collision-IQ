@@ -40,7 +40,12 @@ export type PlacementRect = {
   height: number;
 };
 
-export type WhitespaceBand = PlacementRect;
+export type WhitespaceBand = PlacementRect & {
+  /** True for the band that touches the page's bottom edge (below the running
+   * footer). Note placement deprioritizes it — spilling under the footer is a
+   * last resort, not the default margin. */
+  atPageBottom?: boolean;
+};
 
 export type MeasureText = (text: string, fontSize: number) => number;
 
@@ -162,7 +167,14 @@ export function measureWhitespaceBands(
     cursor = Math.max(cursor, end);
   }
   if (page.pageHeight - cursor >= minBandHeight) {
-    bands.push({ pageNumber: page.pageNumber, x: scanX0, y: cursor, width: scanX1 - scanX0, height: page.pageHeight - cursor });
+    bands.push({
+      pageNumber: page.pageNumber,
+      x: scanX0,
+      y: cursor,
+      width: scanX1 - scanX0,
+      height: page.pageHeight - cursor,
+      atPageBottom: true,
+    });
   }
   return bands;
 }
@@ -207,7 +219,7 @@ export function planKeyedNotes(
   requests: KeyedNoteRequest[],
   bandsByPage: Map<number, WhitespaceBand[]>,
   measureText: MeasureText,
-  options?: { fontSize?: number }
+  options?: { fontSize?: number; allowPageFallback?: boolean }
 ): { placed: PlannedKeyedNote[]; unplaced: KeyedNoteRequest[] } {
   const baseFontSize = options?.fontSize ?? DEFAULT_NOTE_FONT_SIZE;
   const placed: PlannedKeyedNote[] = [];
@@ -215,23 +227,41 @@ export function planKeyedNotes(
   const cursors = new Map<WhitespaceBand, number>();
 
   for (const request of requests) {
-    const bands = [...(bandsByPage.get(request.pageNumber) ?? [])].sort((a, b) => b.y - a.y);
+    // Home page first; with fallback enabled, overflow spills to later pages'
+    // bands (then earlier ones). Notes stay unambiguous — they carry their own
+    // line-number keys — so an overflow page is better than a dropped note.
+    const candidatePages = [request.pageNumber];
+    if (options?.allowPageFallback) {
+      const others = [...bandsByPage.keys()].filter((page) => page !== request.pageNumber);
+      candidatePages.push(
+        ...others.filter((page) => page > request.pageNumber).sort((a, b) => a - b),
+        ...others.filter((page) => page < request.pageNumber).sort((a, b) => b - a)
+      );
+    }
     let planned: PlannedKeyedNote | null = null;
-    for (let fontSize = baseFontSize; fontSize >= MIN_NOTE_FONT_SIZE && !planned; fontSize -= 1) {
-      const lineHeight = fontSize + NOTE_PADDING * 2 + NOTE_LINE_GAP;
-      for (const band of bands) {
-        const width = measureText(request.text, fontSize) + NOTE_PADDING * 2;
-        if (width > band.width) continue;
-        const cursor = cursors.get(band) ?? band.y + NOTE_LINE_GAP;
-        if (cursor + lineHeight > band.y + band.height) continue;
-        planned = {
-          request,
-          fontSize,
-          rect: { pageNumber: band.pageNumber, x: band.x, y: cursor, width, height: fontSize + NOTE_PADDING * 2 },
-        };
-        cursors.set(band, cursor + lineHeight);
-        break;
+    for (const pageNumber of candidatePages) {
+      // Lowest non-bottom band first (the margin above the footer); the strip
+      // below the footer is the last resort on the page.
+      const bands = [...(bandsByPage.get(pageNumber) ?? [])].sort(
+        (a, b) => Number(a.atPageBottom ?? false) - Number(b.atPageBottom ?? false) || b.y - a.y
+      );
+      for (let fontSize = baseFontSize; fontSize >= MIN_NOTE_FONT_SIZE && !planned; fontSize -= 1) {
+        const lineHeight = fontSize + NOTE_PADDING * 2 + NOTE_LINE_GAP;
+        for (const band of bands) {
+          const width = measureText(request.text, fontSize) + NOTE_PADDING * 2;
+          if (width > band.width) continue;
+          const cursor = cursors.get(band) ?? band.y + NOTE_LINE_GAP;
+          if (cursor + lineHeight > band.y + band.height) continue;
+          planned = {
+            request,
+            fontSize,
+            rect: { pageNumber: band.pageNumber, x: band.x, y: cursor, width, height: fontSize + NOTE_PADDING * 2 },
+          };
+          cursors.set(band, cursor + lineHeight);
+          break;
+        }
       }
+      if (planned) break;
     }
     if (planned) placed.push(planned);
     else unplaced.push(request);
@@ -304,6 +334,7 @@ export function planVerifiedKeyedNotes(params: {
   pages: PlacementPageGeometry[];
   measureText: MeasureText;
   fontSize?: number;
+  allowPageFallback?: boolean;
 }): { placed: PlannedKeyedNote[]; unplaced: KeyedNoteRequest[]; audits: PlacementFailure[][] } {
   const bandsByPage = new Map<number, WhitespaceBand[]>(
     params.pages.map((page) => [
@@ -313,6 +344,7 @@ export function planVerifiedKeyedNotes(params: {
   );
   let { placed, unplaced } = planKeyedNotes(params.requests, bandsByPage, params.measureText, {
     fontSize: params.fontSize,
+    allowPageFallback: params.allowPageFallback,
   });
   const audits: PlacementFailure[][] = [];
   for (;;) {

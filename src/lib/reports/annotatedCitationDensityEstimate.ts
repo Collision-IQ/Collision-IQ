@@ -67,6 +67,15 @@ import {
   type EstimateLineItemDelta,
   type EstimateTotalsDelta,
 } from "./estimateDeltaMatcher";
+import {
+  estimateRowFromTextFields,
+  planDeltaValueAnnotations,
+} from "./deltaValueAnnotationLayer";
+import {
+  parseEstimateRows as parseDeltaEngineRows,
+  parseTotalsFromWords as parseDeltaEngineTotals,
+  type Word as DeltaEngineWord,
+} from "./deltaEngine/rowCluster";
 
 export type AnnotationMode = "margin_callouts" | "inline_highlight" | "both";
 
@@ -86,6 +95,15 @@ export type AnnotatedEstimateRequest = {
    * appendix. Default false — existing report output is unchanged.
    */
   inPageKeyedNotes?: boolean;
+  /**
+   * Delta value layer (citation-density reports only): cell-level highlights
+   * on differing values, red underlines on matched prices, competing-value
+   * stamps in the ESTIMATE TOTALS category gap, and merged keyed margin notes
+   * in verified whitespace — driven by the deltaEngine typed pairing and the
+   * annotationPlacementEngine zero-failure placement audit. DEFAULT ON; pass
+   * false to opt out and keep the marker-only presentation.
+   */
+  deltaValueLayer?: boolean;
 };
 
 export type AnnotatedEstimateReportIdentity = {
@@ -111,6 +129,13 @@ export type ComparisonEstimateText = {
   sourceDocumentId?: string;
   fileName: string;
   text: string;
+  estimateRole?: "carrier" | "shop";
+};
+
+export type ComparisonEstimatePdf = {
+  sourceDocumentId?: string;
+  fileName: string;
+  bytes: Uint8Array;
   estimateRole?: "carrier" | "shop";
 };
 
@@ -728,6 +753,14 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   uploadedFileNames?: string[];
   sourceText?: string | null;
   comparisonEstimateTexts?: ComparisonEstimateText[];
+  /**
+   * Original PDF bytes of comparison estimates. When present, the delta value
+   * layer parses the competing document from its measured word layer (same
+   * extractor as the subject) instead of from flattened text — symmetric
+   * parsing is what keeps glued/corrupted text layers from producing false
+   * deltas. Falls back to comparisonEstimateTexts when absent.
+   */
+  comparisonEstimatePdfs?: ComparisonEstimatePdf[];
   findings: CitationDensityFinding[];
   request?: AnnotatedEstimateRequest;
   reportIdentity?: AnnotatedEstimateReportIdentity;
@@ -738,7 +771,15 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
 }): Promise<AnnotatedEstimateResult> {
   const request = params.request ?? {};
   const reportIdentity = params.reportIdentity ?? CITATION_DENSITY_REPORT_IDENTITY;
-  const mode = request.annotationMode ?? "both";
+  // When the delta value layer is active it carries the visual delta story
+  // (cell highlights, underlines, stamps, keyed notes), so the legacy layer
+  // defaults to compact margin markers only — full-row highlights on top of
+  // cell-level marks read as clutter. An explicit annotationMode still wins.
+  const deltaValueLayerActive =
+    reportIdentity.reportType === "citation-density" &&
+    request.deltaValueLayer !== false &&
+    ((params.comparisonEstimateTexts?.length ?? 0) > 0 || (params.comparisonEstimatePdfs?.length ?? 0) > 0);
+  const mode = request.annotationMode ?? (deltaValueLayerActive ? "margin_callouts" : "both");
   const estimateRole = request.estimateRole ?? "selected";
   const selectedIds = new Set(request.findingIds?.filter(Boolean) ?? []);
   let selectedFindings = params.canonicalDeltaSet
@@ -1273,6 +1314,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       redactSensitive: request.redactSensitive !== false,
       trace,
       reportIdentity,
+      subtleAnnotations: deltaValueLayerActive,
     });
     if (renderResult.written) {
       renderedPdfAnnotationCount += 1;
@@ -1301,9 +1343,19 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   // engine cannot place at zero audit failures stay in `unmatched` and flow
   // to the appendix exactly as before. Guarded so any extraction failure
   // degrades to current behavior rather than failing the report.
-  if (request.inPageKeyedNotes === true && unmatched.length > 0) {
+  let cachedWordExtraction: Awaited<ReturnType<typeof extractPdfWordsWithDiagnostics>> | null = null;
+  const getWordExtraction = async () => {
+    if (!cachedWordExtraction) cachedWordExtraction = await extractPdfWordsWithDiagnostics(sourcePdfBytes);
+    return cachedWordExtraction;
+  };
+
+  // Default ON for the OEM report (its unanchored findings become blue keyed
+  // notes on the page they cite); opt-in elsewhere. Explicit false wins.
+  const inPageKeyedNotesActive =
+    request.inPageKeyedNotes ?? reportIdentity.reportType === "oem-citation-density";
+  if (inPageKeyedNotesActive && unmatched.length > 0) {
     try {
-      const wordExtraction = await extractPdfWordsWithDiagnostics(sourcePdfBytes);
+      const wordExtraction = await getWordExtraction();
       const placementWords: PlacementWord[] = wordExtraction.words.map((word) => ({
         pageNumber: word.pageNumber,
         x: word.x,
@@ -1403,6 +1455,174 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     } catch (error) {
       warnings.push(
         `in-page keyed notes skipped: ${error instanceof Error ? error.message : "placement engine error"}`
+      );
+    }
+  }
+
+  // Delta value layer: the cell-level presentation (highlights on differing
+  // values, underlines on matched prices, competing-value stamps in the
+  // ESTIMATE TOTALS gap, merged keyed margin notes) driven by the typed
+  // deltaEngine pairing. Default ON for citation-density; guarded so any
+  // extraction/pairing failure degrades to the marker-only output.
+  if (deltaValueLayerActive) {
+    try {
+      const wordExtraction = await getWordExtraction();
+      if (wordExtraction.words.length > 0) {
+        const placementWords: PlacementWord[] = wordExtraction.words.map((word) => ({
+          pageNumber: word.pageNumber,
+          x: word.x,
+          y: word.y,
+          width: word.width,
+          height: word.height,
+          text: word.text,
+        }));
+        const pageGeometries = new Map<number, { pageNumber: number; pageWidth: number; pageHeight: number }>();
+        for (const word of wordExtraction.words) {
+          if (!pageGeometries.has(word.pageNumber)) {
+            pageGeometries.set(word.pageNumber, {
+              pageNumber: word.pageNumber,
+              pageWidth: word.pageWidth,
+              pageHeight: word.pageHeight,
+            });
+          }
+        }
+        const textComparisons = params.comparisonEstimateTexts ?? [];
+        const pdfComparisons = params.comparisonEstimatePdfs ?? [];
+        const pickOtherRole = <T extends { estimateRole?: "carrier" | "shop" }>(entries: T[]) =>
+          entries.find((entry) => entry.estimateRole && entry.estimateRole !== sourceDocumentRole) ?? entries[0];
+        const comparisonPdf = pickOtherRole(pdfComparisons);
+        const comparisonText = pickOtherRole(textComparisons);
+
+        // Prefer the competing document's measured word layer: symmetric
+        // extraction on both sides is what keeps glued/corrupted text layers
+        // from producing false deltas. Text parsing is the fallback.
+        let competingRows: ReturnType<typeof parseDeltaEngineRows> = [];
+        let competingTotals: Array<{ category: string; hours: number | null; rate: number | null; amount: number }> = [];
+        if (comparisonPdf) {
+          try {
+            const competingExtraction = await extractPdfWordsWithDiagnostics(comparisonPdf.bytes.slice());
+            if (competingExtraction.words.length > 0) {
+              const byPage = new Map<number, DeltaEngineWord[]>();
+              for (const word of competingExtraction.words) {
+                const list = byPage.get(word.pageNumber) ?? [];
+                if (list.length === 0) byPage.set(word.pageNumber, list);
+                list.push({ text: word.text, x0: word.x, x1: word.x + word.width, top: word.y, bottom: word.y + word.height });
+              }
+              competingRows = parseDeltaEngineRows(byPage);
+              competingTotals = parseDeltaEngineTotals(byPage).map((row) => ({
+                category: row.category,
+                hours: row.hours,
+                rate: row.rate,
+                amount: row.amount,
+              }));
+            }
+          } catch {
+            competingRows = [];
+          }
+        }
+        if (competingRows.length === 0 && comparisonText) {
+          competingRows = parseCccEstimateRows(comparisonText.text)
+            .map((row) =>
+              estimateRowFromTextFields({
+                lineNumber: row.lineNumber,
+                description: row.description,
+                section: row.section,
+                partNumber: row.partNumber,
+                qty: row.qty,
+                price: row.price,
+                labor: row.labor,
+                paint: row.paint,
+                laborType: row.laborType ?? null,
+              })
+            )
+            .filter((row): row is NonNullable<typeof row> => row !== null);
+          if (competingTotals.length === 0) {
+            competingTotals = (parseCccEstimateTotals(comparisonText.text)?.categories ?? []).map((category) => ({
+              category: category.category,
+              hours: category.hours,
+              rate: category.rate,
+              amount: category.cost ?? 0,
+            }));
+          }
+        }
+        const competingLabel = deriveCompetingDocLabel({
+          fileName: comparisonPdf?.fileName ?? comparisonText?.fileName ?? "",
+          text: comparisonText?.text ?? "",
+          estimateRole: comparisonPdf?.estimateRole ?? comparisonText?.estimateRole,
+        });
+        if (competingRows.length > 0) {
+          const plan = planDeltaValueAnnotations({
+            subjectWords: placementWords,
+            pages: [...pageGeometries.values()],
+            competingRows,
+            competingTotals,
+            competingLabel,
+            measureText: (text, size) => boldFont.widthOfTextAtSize(text, size),
+          });
+          const costInk = rgb(0.72, 0.12, 0.1);
+          const costFill = rgb(1, 0.95, 0);
+          const toPdfLib = (rect: { pageNumber: number; x: number; y: number; width: number; height: number }) => {
+            const page = pdfDoc.getPage(toSourcePdfPageIndex(rect.pageNumber));
+            const pdfLibRect = topLeftRectToPdfLibRect(rect, {
+              pdfWidth: page.getWidth(),
+              pdfHeight: page.getHeight(),
+              rotation: normalizeRotation(page.getRotation().angle),
+            });
+            return { page, pdfLibRect };
+          };
+          for (const rect of plan.highlights) {
+            const { page, pdfLibRect } = toPdfLib(rect);
+            page.drawRectangle({ ...pdfLibRect, color: costFill, opacity: 0.45 });
+          }
+          for (const rect of plan.underlines) {
+            const { page, pdfLibRect } = toPdfLib(rect);
+            page.drawLine({
+              start: { x: pdfLibRect.x, y: pdfLibRect.y - 0.8 },
+              end: { x: pdfLibRect.x + pdfLibRect.width, y: pdfLibRect.y - 0.8 },
+              thickness: 1.0,
+              color: costInk,
+            });
+          }
+          for (const stamp of plan.stamps) {
+            const { page, pdfLibRect } = toPdfLib(stamp.rect);
+            page.drawRectangle({ ...pdfLibRect, color: costFill, opacity: 0.45 });
+            page.drawText(stamp.text, {
+              x: pdfLibRect.x + 1.5,
+              y: pdfLibRect.y + 2,
+              size: stamp.fontSize,
+              font: boldFont,
+              color: costInk,
+            });
+          }
+          for (const note of plan.notes) {
+            const { page, pdfLibRect } = toPdfLib(note.rect);
+            page.drawRectangle({ ...pdfLibRect, color: costFill, opacity: 0.45 });
+            // Note text mirrors line descriptions and values already printed in
+            // plaintext on the same page, so it is drawn as planned (running the
+            // download redactor here false-positives on operation wording like
+            // "Final road test" and would also invalidate the measured width).
+            page.drawText(note.request.text, {
+              x: pdfLibRect.x + 1.5,
+              y: pdfLibRect.y + 2,
+              size: note.fontSize,
+              font: boldFont,
+              color: costInk,
+            });
+          }
+          appendToolUsageTrace(trace, {
+            tool: "delta_value_layer",
+            ran: true,
+            candidatesFound: plan.findings.length + plan.totalsDeltas.length + plan.competingOnly.length,
+            candidatesAccepted:
+              plan.underlines.length + plan.highlights.length + plan.stamps.length + plan.notes.length,
+            candidatesRejected: plan.unplacedNotes.length,
+            droppedReasons: plan.unplacedNotes.map((note) => `unplaced note: ${note.text.slice(0, 80)}`),
+          });
+        }
+      }
+    } catch (error) {
+      warnings.push(
+        `delta value layer skipped: ${error instanceof Error ? error.message : "delta engine error"}`
       );
     }
   }
@@ -5988,6 +6208,7 @@ function drawFindingAnnotation(
     redactSensitive: boolean;
     trace: CitationDensityDebugTrace;
     reportIdentity: AnnotatedEstimateReportIdentity;
+    subtleAnnotations?: boolean;
   }
 ) {
   const { anchor, finding } = match;
@@ -6048,8 +6269,21 @@ function drawFindingAnnotation(
     });
   }
 
-  attachPdfFindingAnnotations(pdfDoc, page, metadata, options.reportIdentity);
+  attachPdfFindingAnnotations(pdfDoc, page, metadata, options.reportIdentity, options.subtleAnnotations === true);
   return { written: true as const, metadata };
+}
+
+/**
+ * Short label for the competing document, derived from document data only
+ * (file name prefix, then the insurer named in the header, then the role).
+ * Never hardcode a carrier here — this must stay fluid to any document pair.
+ */
+function deriveCompetingDocLabel(comparison: ComparisonEstimateText): string {
+  const fromFileName = /^([A-Z]{2,8})(?=[\s_\-.])/.exec(comparison.fileName?.trim() ?? "")?.[1];
+  if (fromFileName && fromFileName !== "EOR") return fromFileName;
+  const insurer = /insurance company\s*:?\s*([A-Z][A-Za-z&.]{1,24})/i.exec(comparison.text)?.[1]?.trim();
+  if (insurer) return insurer.toUpperCase();
+  return comparison.estimateRole === "shop" ? "SHOP" : "EOR";
 }
 
 function drawCompactMarker(
@@ -6089,7 +6323,8 @@ function attachPdfFindingAnnotations(
   pdfDoc: PDFDocument,
   page: PDFPage,
   metadata: CitationDensityAnnotationMetadata,
-  reportIdentity: AnnotatedEstimateReportIdentity = CITATION_DENSITY_REPORT_IDENTITY
+  reportIdentity: AnnotatedEstimateReportIdentity = CITATION_DENSITY_REPORT_IDENTITY,
+  subtleHighlight = false
 ) {
   const annots = page.node.Annots() ?? pdfDoc.context.obj([]);
   page.node.set(PDFName.Annots, annots);
@@ -6121,7 +6356,9 @@ function attachPdfFindingAnnotations(
     Rect: rect,
     QuadPoints: quadPoints,
     C: [1, 0.88, 0.22],
-    CA: 0.36,
+    // When the delta value layer carries the visible story, the hover
+    // highlight drops to a whisper so it doesn't wash whole rows/blocks.
+    CA: subtleHighlight ? 0.1 : 0.36,
     T: PDFHexString.fromText(reportIdentity.pdfAnnotationTitle),
     Contents: PDFHexString.fromText(metadata.comment),
     NM: PDFHexString.fromText(`citation-density-${sanitizePdfAnnotationName(metadata.findingId)}-${sanitizePdfAnnotationName(metadata.anchorId)}-highlight`),

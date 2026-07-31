@@ -332,6 +332,33 @@ export async function POST(request: Request) {
           text: document.text || "",
           estimateRole: inferComparisonEstimateRole(document.filename, estimateRole, carrierAuthored),
         }));
+      // Original PDF bytes of the comparison estimates so the delta value layer
+      // can parse the competing document from its measured word layer instead
+      // of flattened text (symmetric extraction avoids false deltas).
+      const comparisonEstimatePdfs = sourceDocuments
+        .filter(
+          (document) =>
+            document.id !== selection.selectedSourceDocumentId &&
+            isAnnotatableEstimatePdf(document) &&
+            isPdfDocument(document.type, document.filename) &&
+            document.imageDataUrl
+        )
+        .flatMap((document) => {
+          try {
+            const bytes = dataUrlToPdfBytes(document.imageDataUrl!);
+            if (!bytes) return [];
+            return [
+              {
+                sourceDocumentId: document.id,
+                fileName: document.filename || "Comparison estimate",
+                bytes,
+                estimateRole: inferComparisonEstimateRole(document.filename, estimateRole, carrierAuthored),
+              },
+            ];
+          } catch {
+            return [];
+          }
+        });
       const result = await buildAnnotatedCitationDensityEstimatePdf({
         sourcePdfBytes,
         sourceDocumentId: selection.selectedSourceDocumentId,
@@ -340,6 +367,7 @@ export async function POST(request: Request) {
         uploadedFileNames: sourceDocuments.map((document) => document.filename).filter(Boolean),
         sourceText: sourceDocument.text,
         comparisonEstimateTexts,
+        comparisonEstimatePdfs,
         findings: roleFindings,
         deltaDiagnostics: model.citationDensityDiagnostics,
         canonicalDeltaSet: canonicalDeltaSet ?? undefined,
