@@ -1,0 +1,248 @@
+/**
+ * deltaPair — pairing + typed comparison for the delta engine.
+ * Pass order (each pass consumes competing rows):
+ *   1. PART-NUMBER-FIRST  — identical part number is an unconditional pair.
+ *   2. AGG ROUTING        — keys where subject count > competing count skip 1:1
+ *                           and compare as sums (qty shortfall), so a 3-line tape
+ *                           group compares its total vs a single flat line.
+ *   3. CONTEXT-PREFERRED  — same canonical key; candidates ordered by
+ *                           (same section, same side). Tailgate clear-coat pairs
+ *                           with tailgate clear-coat, never the bumper's.
+ *   4. PREFIX-CONTAINMENT — truncated/verbose description variants (>=12 chars).
+ * Comparison is typed-cell-only: price<->price, labor<->labor, paint<->paint.
+ * A finding's category text derives FROM the cell type — a paint delta can never
+ * be reported as "less body labor".
+ */
+import type { EstimateRow } from "./rowCluster";
+
+export type CellField = "price" | "labor" | "paint";
+
+export interface CellDelta {
+  field: CellField | "part#";
+  subject: number | string;
+  competing: number | string;
+}
+
+export type FindingKind = "VALUE_DELTA" | "QTY_SHORTFALL" | "MISSED";
+
+export interface Finding {
+  kind: FindingKind;
+  subject: EstimateRow;
+  competing: EstimateRow | null;
+  deltas: CellDelta[];
+  /** e.g. "reduced paint", "reduced mechanical labor", "price difference", "part number change" */
+  category: string;
+  /** All subject rows in an aggregated (QTY_SHORTFALL) group; [subject] otherwise. */
+  subjects?: EstimateRow[];
+}
+
+const EPS = 0.001;
+
+function laborCategory(row: EstimateRow, field: CellField): string {
+  if (field === "paint") return "paint";
+  if (field === "price") return "price";
+  switch (row.laborClass) {
+    case "M":
+      return "mechanical labor";
+    case "1":
+    case "2":
+    case "3":
+    case "4":
+      return `user-defined labor ${row.laborClass}`;
+    default:
+      return "body labor";
+  }
+}
+
+function compareTyped(subject: EstimateRow, competing: EstimateRow): CellDelta[] {
+  const out: CellDelta[] = [];
+  for (const field of ["price", "labor", "paint"] as CellField[]) {
+    const a = subject[field] ?? 0;
+    const b = competing[field] ?? 0;
+    if (Math.abs(a - b) > EPS) out.push({ field, subject: a, competing: b });
+  }
+  if (subject.part && competing.part && subject.part !== competing.part && out.length === 0)
+    out.push({ field: "part#", subject: subject.part, competing: competing.part });
+  return out;
+}
+
+export interface PairResult {
+  findings: Finding[];
+  competingOnly: EstimateRow[];
+}
+
+export function pairAndCompare(subject: EstimateRow[], competing: EstimateRow[]): PairResult {
+  const used = new Set<number>();
+  const paired = new Map<EstimateRow, number>();
+
+  // pass 1 — part-number-first
+  const byPart = new Map<string, number[]>();
+  competing.forEach((row, index) => {
+    if (!row.part) return;
+    const list = byPart.get(row.part);
+    if (list) list.push(index);
+    else byPart.set(row.part, [index]);
+  });
+  for (const s of subject) {
+    if (!s.part) continue;
+    for (const index of byPart.get(s.part) ?? []) {
+      if (!used.has(index)) {
+        used.add(index);
+        paired.set(s, index);
+        break;
+      }
+    }
+  }
+
+  // pass 2 — route subject-surplus keys to aggregation
+  const count = (rows: { key: string }[], include: (index: number) => boolean) => {
+    const map = new Map<string, number>();
+    rows.forEach((row, index) => {
+      if (include(index)) map.set(row.key, (map.get(row.key) ?? 0) + 1);
+    });
+    return map;
+  };
+  const subjectCount = count(subject, (index) => !paired.has(subject[index]));
+  const competingCount = count(competing, (index) => !used.has(index));
+  const aggKeys = new Set(
+    [...subjectCount.keys()].filter(
+      (key) => (competingCount.get(key) ?? 0) > 0 && subjectCount.get(key)! > competingCount.get(key)!
+    )
+  );
+
+  // pass 3 — context-preferred 1:1
+  const byKey = new Map<string, number[]>();
+  competing.forEach((row, index) => {
+    const list = byKey.get(row.key);
+    if (list) list.push(index);
+    else byKey.set(row.key, [index]);
+  });
+  for (const s of subject) {
+    if (paired.has(s) || aggKeys.has(s.key)) continue;
+    const candidates = (byKey.get(s.key) ?? []).filter((index) => !used.has(index));
+    candidates.sort((a, b) => {
+      const costA = (competing[a].section !== s.section ? 2 : 0) + (competing[a].side !== s.side ? 1 : 0);
+      const costB = (competing[b].section !== s.section ? 2 : 0) + (competing[b].side !== s.side ? 1 : 0);
+      return costA - costB;
+    });
+    if (candidates.length) {
+      used.add(candidates[0]);
+      paired.set(s, candidates[0]);
+    }
+  }
+
+  // pass 4 — prefix containment for truncated/verbose variants
+  for (const s of subject) {
+    if (paired.has(s) || aggKeys.has(s.key)) continue;
+    for (let index = 0; index < competing.length; index += 1) {
+      if (used.has(index)) continue;
+      const a = s.key;
+      const b = competing[index].key;
+      if (a.length >= 12 && b.length >= 12 && (a.startsWith(b) || b.startsWith(a))) {
+        used.add(index);
+        paired.set(s, index);
+        break;
+      }
+    }
+  }
+
+  // emit — 1:1 deltas, MISSED, then aggregated qty shortfalls
+  const findings: Finding[] = [];
+  const aggSubjects = new Map<string, EstimateRow[]>();
+  for (const s of subject) {
+    if (aggKeys.has(s.key)) {
+      const list = aggSubjects.get(s.key);
+      if (list) list.push(s);
+      else aggSubjects.set(s.key, [s]);
+      continue;
+    }
+    const index = paired.get(s);
+    if (index === undefined) {
+      findings.push({ kind: "MISSED", subject: s, competing: null, deltas: [], category: "missing on competing" });
+      continue;
+    }
+    const deltas = compareTyped(s, competing[index]);
+    if (deltas.length)
+      findings.push({
+        kind: "VALUE_DELTA",
+        subject: s,
+        competing: competing[index],
+        deltas,
+        category:
+          deltas[0].field === "part#"
+            ? "part number change"
+            : `reduced ${laborCategory(s, deltas[0].field as CellField)}`,
+      });
+  }
+  for (const [key, subjects] of aggSubjects) {
+    const matched: EstimateRow[] = [];
+    competing.forEach((row, index) => {
+      if (row.key === key && !used.has(index)) {
+        used.add(index);
+        matched.push(row);
+      }
+    });
+    const sum = (rows: EstimateRow[], field: CellField) => rows.reduce((total, row) => total + (row[field] ?? 0), 0);
+    const deltas: CellDelta[] = [];
+    for (const field of ["price", "labor", "paint"] as CellField[]) {
+      const a = sum(subjects, field);
+      const b = sum(matched, field);
+      if (Math.abs(a - b) > EPS) deltas.push({ field, subject: a, competing: b });
+    }
+    if (deltas.length)
+      findings.push({
+        kind: "QTY_SHORTFALL",
+        subject: subjects[0],
+        competing: matched[0] ?? null,
+        deltas,
+        category: `quantity shortfall (${subjects.length}x vs ${matched.length}x)`,
+        subjects,
+      });
+  }
+  const competingOnly = competing.filter((_, index) => !used.has(index));
+  return { findings, competingOnly };
+}
+
+/** Totals pass: iterate the UNION of category rows; hours, rate, and amount each compared. */
+export interface TotalsRow {
+  category: string;
+  hours: number | null;
+  rate: number | null;
+  amount: number;
+}
+
+export interface TotalsDelta {
+  category: string;
+  field: "hours" | "rate" | "amount";
+  subject: number;
+  competing: number;
+}
+
+export function compareTotals(
+  subject: TotalsRow[],
+  competing: TotalsRow[],
+  canon: (name: string) => string
+): TotalsDelta[] {
+  const competingMap = new Map(competing.map((row) => [canon(row.category), row]));
+  const out: TotalsDelta[] = [];
+  const seen = new Set<string>();
+  for (const s of subject) {
+    const key = canon(s.category);
+    seen.add(key);
+    const u = competingMap.get(key);
+    if (!u) {
+      out.push({ category: s.category, field: "amount", subject: s.amount, competing: 0 });
+      continue;
+    }
+    for (const field of ["hours", "rate", "amount"] as const) {
+      const a = s[field] ?? 0;
+      const b = u[field] ?? 0;
+      if (Math.abs(a - b) > EPS) out.push({ category: s.category, field, subject: a, competing: b });
+    }
+  }
+  for (const u of competing) {
+    if (!seen.has(canon(u.category)))
+      out.push({ category: u.category, field: "amount", subject: 0, competing: u.amount });
+  }
+  return out;
+}
