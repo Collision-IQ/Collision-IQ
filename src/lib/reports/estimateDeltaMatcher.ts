@@ -2529,6 +2529,27 @@ const fmtHours = (value: number) => `${Math.round(value * 10) / 10} hr`;
  * carries that the other does not. Pair-agnostic — works for any higher/lower
  * estimate pairing.
  */
+/**
+ * Normalize a totals category label for cross-estimate lookup: casefold,
+ * squash whitespace/punctuation (glued text layers print "MechanicalLabor"),
+ * strip suffix noise, then alias-map name variants. `category_missing` may be
+ * asserted ONLY after this resolution — an exact-string lookup reads a glued
+ * label as a missing category.
+ */
+export function normalizeTotalsCategoryKey(name: string): string {
+  let key = name.toUpperCase().replace(/[^A-Z&]/g, "").replace(/&/g, "AND");
+  key = key.replace(/ORSTEELREPAIR$/, "");
+  const ALIASES: Record<string, string> = {
+    ALUMINUM: "ALUMINUM",
+    ALUMINUMREPAIR: "ALUMINUM",
+    PANDM: "PAINTSUPPLIES",
+    PM: "PAINTSUPPLIES",
+    PAINTMATERIALS: "PAINTSUPPLIES",
+    PAINTSUPPLIES: "PAINTSUPPLIES",
+  };
+  return ALIASES[key] ?? key;
+}
+
 export function compareEstimateTotals(params: {
   higher: EstimateTotalsSummary | null;
   lower: EstimateTotalsSummary | null;
@@ -2536,11 +2557,11 @@ export function compareEstimateTotals(params: {
   const { higher, lower } = params;
   if (!higher || !lower) return [];
   const deltas: EstimateTotalsDelta[] = [];
-  const lowerByName = new Map(lower.categories.map((c) => [c.category.toLowerCase(), c]));
-  const higherNames = new Set(higher.categories.map((c) => c.category.toLowerCase()));
+  const lowerByName = new Map(lower.categories.map((c) => [normalizeTotalsCategoryKey(c.category), c]));
+  const higherNames = new Set(higher.categories.map((c) => normalizeTotalsCategoryKey(c.category)));
 
   for (const higherCategory of higher.categories) {
-    const lowerCategory = lowerByName.get(higherCategory.category.toLowerCase()) ?? null;
+    const lowerCategory = lowerByName.get(normalizeTotalsCategoryKey(higherCategory.category)) ?? null;
     if (!lowerCategory) {
       deltas.push({
         kind: "category_missing_on_lower",
@@ -2574,12 +2595,14 @@ export function compareEstimateTotals(params: {
       continue;
     }
     if (hoursDiff !== null && Math.abs(hoursDiff) >= 0.5) {
+      const dollarImpact =
+        lowerCategory.rate !== null ? Math.round(hoursDiff * lowerCategory.rate * 100) / 100 : null;
       deltas.push({
         kind: "hours_difference",
         category: higherCategory.category,
         higher: higherCategory,
         lower: lowerCategory,
-        summary: `${higherCategory.category} subtotal is ${fmtHours(higherCategory.hours ?? 0)} on the higher estimate vs ${fmtHours(lowerCategory.hours ?? 0)} on the lower estimate (${hoursDiff > 0 ? "+" : ""}${fmtHours(hoursDiff)}) at the same ${fmtMoney(lowerCategory.rate ?? 0)}/hr rate.`,
+        summary: `${higherCategory.category} subtotal is ${fmtHours(higherCategory.hours ?? 0)} on the higher estimate vs ${fmtHours(lowerCategory.hours ?? 0)} on the lower estimate (${hoursDiff > 0 ? "+" : ""}${fmtHours(hoursDiff)}${dollarImpact !== null ? ` / ${dollarImpact > 0 ? "+" : ""}${fmtMoney(dollarImpact)}` : ""}) at the same ${fmtMoney(lowerCategory.rate ?? 0)}/hr rate.`,
       });
       continue;
     }
@@ -2607,11 +2630,28 @@ export function compareEstimateTotals(params: {
         lower: lowerCategory,
         summary: `${higherCategory.category} totals ${fmtMoney(higherCategory.cost ?? 0)} on the higher estimate vs ${fmtMoney(lowerCategory.cost ?? 0)} on the lower estimate (${costDiff > 0 ? "+" : ""}${fmtMoney(costDiff)}).`,
       });
+      continue;
+    }
+    // The gap runs in BOTH directions: a category where the LOWER estimate is
+    // higher (e.g. Parts) is evidence too and must not vanish from the report.
+    if (
+      costDiff !== null &&
+      costDiff <= -10 &&
+      higherCategory.rate === null &&
+      lowerCategory.rate === null
+    ) {
+      deltas.push({
+        kind: "category_amount_difference",
+        category: higherCategory.category,
+        higher: higherCategory,
+        lower: lowerCategory,
+        summary: `${higherCategory.category} totals ${fmtMoney(higherCategory.cost ?? 0)} on this estimate vs ${fmtMoney(lowerCategory.cost ?? 0)} on the lower-total estimate — the lower-total estimate is ${fmtMoney(Math.abs(costDiff))} HIGHER for this category.`,
+      });
     }
   }
 
   for (const lowerCategory of lower.categories) {
-    if (!higherNames.has(lowerCategory.category.toLowerCase())) {
+    if (!higherNames.has(normalizeTotalsCategoryKey(lowerCategory.category))) {
       deltas.push({
         kind: "category_only_on_lower",
         category: lowerCategory.category,
@@ -2632,6 +2672,36 @@ export function compareEstimateTotals(params: {
         lower: null,
         summary: `Grand total ${fmtMoney(higher.grandTotal)} vs ${fmtMoney(lower.grandTotal)} — a ${fmtMoney(Math.abs(totalDiff))} difference.`,
       });
+    }
+  }
+
+  // Reconciliation assertion: Σ per-category deltas + tax delta must land
+  // within $1.00 of the grand-total delta. A mismatch means the category
+  // pairing itself is wrong (the RC-4 failure class) — the confident
+  // category-missing claims are then withdrawn rather than published, because
+  // they are the findings an adjuster uses to discredit the whole document.
+  if (higher.grandTotal !== null && lower.grandTotal !== null) {
+    let categorySum = 0;
+    for (const category of higher.categories) {
+      const paired = lowerByName.get(normalizeTotalsCategoryKey(category.category)) ?? null;
+      categorySum += (category.cost ?? 0) - (paired?.cost ?? 0);
+    }
+    for (const category of lower.categories) {
+      if (!higherNames.has(normalizeTotalsCategoryKey(category.category))) {
+        categorySum -= category.cost ?? 0;
+      }
+    }
+    const taxDelta = (higher.salesTax ?? 0) - (lower.salesTax ?? 0);
+    const grandDelta = higher.grandTotal - lower.grandTotal;
+    if (Math.abs(categorySum + taxDelta - grandDelta) > 1) {
+      console.error("[estimate-totals] category deltas do not reconcile to the grand-total delta — withdrawing category-missing claims", {
+        categorySum: Math.round(categorySum * 100) / 100,
+        taxDelta: Math.round(taxDelta * 100) / 100,
+        grandDelta: Math.round(grandDelta * 100) / 100,
+      });
+      return deltas.filter(
+        (delta) => delta.kind !== "category_missing_on_lower" && delta.kind !== "category_only_on_lower"
+      );
     }
   }
 
