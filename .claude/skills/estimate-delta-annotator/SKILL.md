@@ -2,9 +2,9 @@
 name: estimate-delta-annotator
 description: >-
   Compares two collision-repair estimates (shop/preliminary vs. insurer
-  supplement/SOR) and produces one annotated PDF of the lower-cost estimate that
-  bridges the two appraisals. Cost pass strikes under-valued prices, labor hours,
-  and rates and stamps the higher estimate's value (red/yellow), underlines
+  supplement/SOR) and produces one annotated PDF of the higher-cost estimate that
+  bridges the two appraisals. Cost pass highlights under-valued prices, labor hours,
+  and rates and stamps the lower estimate's value (red/yellow), underlines
   matches, and notes missing items. OEM pass flags aftermarket/used parts, skipped
   scans/calibrations, one-time-use reuse, and warranty/safety language that
   contradict OEM position statements (blue/cyan), citing the statement and
@@ -20,9 +20,10 @@ description: >-
 
 Body shops and insurers rarely agree line-for-line. Given two estimates for the
 same repair — a **shop/preliminary estimate** and an **insurer supplement (SOR /
-Supplement of Record)** — this skill marks up the **lower-cost** one so a reviewer
-sees, at a glance, where it falls short and why. Output is a single annotated PDF
-carrying two categories of markup:
+Supplement of Record)** — this skill marks up the **higher-cost** one (per
+`DELTA_ANNOTATION_RULE.md`, the production convention for a policyholder-advocacy
+artifact), showing per line where the **lower** estimate falls short and why.
+Output is a single annotated PDF carrying two categories of markup:
 
 - **Cost gaps (red / yellow)** — under-valued prices, labor hours, and rates, plus
   items missing from the lower estimate.
@@ -135,11 +136,18 @@ Line records carry `price_bbox` and `row_top`; totals records carry `hrs_bbox` a
 `rate_bbox`. Pass these coordinates straight to the annotator — never guess them.
 
 ### 2. Pick the target (auto-detect by total)
-The **higher-`grand_total`** estimate is the **source** of the values you stamp; the
-**lower-`grand_total`** estimate is the **target** you annotate. This holds even
-when the lower estimate has more lines (a supplement can carry extra mechanical
-work yet still total less). Tell the user which file you chose and cite both totals.
-If totals tie or one is `null`, ask which file is the shop estimate.
+> Derived from `DELTA_ANNOTATION_RULE.md` — the production convention. This
+> section was updated to match it; if the two ever disagree, the
+> DELTA_ANNOTATION_RULE and production behavior win.
+
+Annotate the **higher-`grand_total`** estimate (normally the shop's) — the
+policyholder-advocacy artifact marks the document that carries the full scope,
+showing per line where the **lower** estimate falls short. The lower estimate is
+the **source** of the stamped comparison values (e.g. the lower carrier's hours
+stamped beside this estimate's totals cells). This holds even when the lower
+estimate has more lines (a supplement can carry extra mechanical work yet still
+total less). Tell the user which file you chose and cite both totals. If totals
+tie or one is `null`, ask which file is the shop estimate.
 
 ### 3. COST pass — line items
 For each **priced** line on the target, find its counterpart on the source. Match on
