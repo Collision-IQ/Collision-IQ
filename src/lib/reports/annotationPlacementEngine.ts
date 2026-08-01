@@ -45,6 +45,10 @@ export type WhitespaceBand = PlacementRect & {
    * footer). Note placement deprioritizes it — spilling under the footer is a
    * last resort, not the default margin. */
   atPageBottom?: boolean;
+  /** True for the band that touches the page's top edge (above the running
+   * header). Keyed notes never render there — a note band above a page
+   * header reads as content bleeding across pages. */
+  atPageTop?: boolean;
 };
 
 export type MeasureText = (text: string, fontSize: number) => number;
@@ -162,7 +166,14 @@ export function measureWhitespaceBands(
   let cursor = 0;
   for (const [start, end] of merged) {
     if (start - cursor >= minBandHeight) {
-      bands.push({ pageNumber: page.pageNumber, x: scanX0, y: cursor, width: scanX1 - scanX0, height: start - cursor });
+      bands.push({
+        pageNumber: page.pageNumber,
+        x: scanX0,
+        y: cursor,
+        width: scanX1 - scanX0,
+        height: start - cursor,
+        atPageTop: cursor === 0,
+      });
     }
     cursor = Math.max(cursor, end);
   }
@@ -241,10 +252,12 @@ export function planKeyedNotes(
     let planned: PlannedKeyedNote | null = null;
     for (const pageNumber of candidatePages) {
       // Lowest non-bottom band first (the margin above the footer); the strip
-      // below the footer is the last resort on the page.
-      const bands = [...(bandsByPage.get(pageNumber) ?? [])].sort(
-        (a, b) => Number(a.atPageBottom ?? false) - Number(b.atPageBottom ?? false) || b.y - a.y
-      );
+      // below the footer is the last resort on the page. The band above the
+      // page header is NEVER used — a note there reads as the previous page's
+      // content bleeding across.
+      const bands = [...(bandsByPage.get(pageNumber) ?? [])]
+        .filter((band) => !band.atPageTop)
+        .sort((a, b) => Number(a.atPageBottom ?? false) - Number(b.atPageBottom ?? false) || b.y - a.y);
       for (let fontSize = baseFontSize; fontSize >= MIN_NOTE_FONT_SIZE && !planned; fontSize -= 1) {
         const lineHeight = fontSize + NOTE_PADDING * 2 + NOTE_LINE_GAP;
         for (const band of bands) {
