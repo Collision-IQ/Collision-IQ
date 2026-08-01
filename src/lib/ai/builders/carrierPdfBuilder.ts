@@ -138,8 +138,10 @@ export function buildCarrierReport({
   const credibilityConclusion = buildCredibilityConclusion(exportModel);
   const whyItWins = buildWhyItWins(exportModel, report, analysis);
 
-  const canonicalVehicle = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
-  const canonicalVin = resolveCanonicalVin(exportModel) ?? "Unspecified";
+  const canonicalVehicle = resolveCanonicalVehicleLabel(exportModel) || "Unspecified";
+  // `||`, not `??`: an empty-string VIN previously rendered the field BLANK
+  // (empty string is falsy but not nullish).
+  const canonicalVin = resolveCanonicalVin(exportModel) || "Unspecified";
   const canonicalInsurer = resolveCanonicalInsurer(exportModel);
   const comparisonTotals = exportModel.reportFields.comparisonTotals;
   const comparisonTotalSummary = comparisonTotals

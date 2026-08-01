@@ -58,7 +58,15 @@ export async function buildExportResearchSnapshot(params: {
   const internetQueries = queries.filter((query) => query.sourceTarget === "internet");
   const driveSources = await runDriveResearch(driveQueries, params.report, resolvedJurisdiction, vehicleContext);
   const internetSources = await runInternetResearch(internetQueries, params.report, resolvedJurisdiction, vehicleContext);
-  const reviewed = [...driveSources, ...internetSources];
+  // A retrieval record without a usable title AND a confidence score is not a
+  // citable source — garbled OCR filenames and scoreless photo records read
+  // as junk in the report's source list (O-6).
+  const reviewed = [...driveSources, ...internetSources].filter(
+    (source) =>
+      typeof source.sourceTitle === "string" &&
+      source.sourceTitle.trim().length >= 3 &&
+      Number.isFinite(source.confidenceScore)
+  );
   const verified = verifyResearchSources(reviewed, resolvedJurisdiction.state ?? undefined, vehicleContext);
   const citationMap = buildCitationMap(verified.accepted);
   const unsupportedFindings = [
