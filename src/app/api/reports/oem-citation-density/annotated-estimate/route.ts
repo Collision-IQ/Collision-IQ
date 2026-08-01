@@ -907,7 +907,7 @@ function extractVehicleSummary(text: string) {
   const identity = extractVehicleIdentityFromText(text, "attachment");
   const label = buildVehicleLabel(identity, { includeTrim: true });
   if (label) return label;
-  return text.match(/\b((?:19|20)\d{2}\s+(?:Acura|Audi|BMW|Buick|Cadillac|Chevrolet|Chevy|Chrysler|Dodge|Ford|Genesis|GMC|Honda|Hyundai|Infiniti|Jeep|Kia|Lexus|Lincoln|Mazda|Mercedes|Mini|Nissan|Ram|Subaru|Tesla|TESL|Toyota|Volkswagen|Volvo)\s+[A-Z0-9][A-Za-z0-9-]*(?:\s+[A-Z0-9][A-Za-z0-9-]*){0,3})\b/i)?.[1]?.replace(/\bTESL\b/i, "Tesla").trim() ?? null;
+  return text.match(/\b((?:19|20)\d{2}\s+(?:Acura|Audi|BMW|Buick|Cadillac|Chevrolet|Chevy|Chrysler|Dodge|Ford|Genesis|GMC|Honda|Hyundai|Infiniti|Jeep|Kia|Lexus|Lincoln|Lucid|Mazda|Mercedes|Mini|Nissan|Polestar|Ram|Rivian|RIVI|Subaru|Tesla|TESL|Toyota|Volkswagen|Volvo)\s+[A-Z0-9][A-Za-z0-9-]*(?:\s+[A-Z0-9][A-Za-z0-9-]*){0,3})\b/i)?.[1]?.replace(/\bTESL\b/i, "Tesla").replace(/\bRIVI\b/i, "Rivian").trim() ?? null;
 }
 
 function inferJurisdiction(vehicle: string | null) {

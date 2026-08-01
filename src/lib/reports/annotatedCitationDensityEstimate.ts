@@ -34,6 +34,7 @@ import {
   findBestEstimateRowAnchorForFinding,
   type PdfTextExtractionMethod,
   type PdfTextLine,
+  type PdfWord,
   type EstimateRowAnchor,
   type EstimateRowAnchorType,
 } from "./citationDensityRowAnchors";
@@ -62,6 +63,7 @@ import {
   matchEstimateLineItems,
   parseCccEstimateRows,
   parseCccEstimateTotals,
+  normalizeTotalsCategoryKey,
   parseEstimateNetTotal,
   type EstimateDeltaRow,
   type EstimateLineItemDelta,
@@ -71,11 +73,65 @@ import {
   estimateRowFromTextFields,
   planDeltaValueAnnotations,
 } from "./deltaValueAnnotationLayer";
+import { canonKey as deltaEngineCanonKey, repairTokens } from "./deltaEngine/estimateNormalize";
 import {
+  emptyRowParseDiagnostics,
   parseEstimateRows as parseDeltaEngineRows,
+  parseSubtotalsFromWords as parseDeltaEngineSubtotals,
   parseTotalsFromWords as parseDeltaEngineTotals,
+  type EstimateRow as DeltaEngineRow,
   type Word as DeltaEngineWord,
 } from "./deltaEngine/rowCluster";
+
+/**
+ * Serialize typed delta-engine rows back through the canonical CCC row
+ * builder so the existing matcher/emission machinery consumes them
+ * unchanged. Values are re-printed from TYPED cells in column order, so a
+ * fused or mistyped cell cannot survive this path; NOTE text stays on the
+ * row payload and never enters the serialized identity.
+ */
+function engineRowsToDeltaRows(
+  rows: DeltaEngineRow[],
+  anchorByLineNumber: Map<string, EstimateRowAnchor> | null
+): EstimateDeltaRow[] {
+  const out: EstimateDeltaRow[] = [];
+  const seenLines = new Set<number>();
+  for (const row of rows) {
+    if (seenLines.has(row.line)) continue; // repeated print/recap pages
+    seenLines.add(row.line);
+    // Serialize ALL FOUR value cells, zero-filled: a text line cannot carry
+    // blank columns, and a sparse tail ("Tint color 1 0.5") re-parses its
+    // paint value as labor — the exact column-identity loss the typed engine
+    // exists to prevent. Zero-filling keeps both sides symmetric.
+    const parts: string[] = [String(row.line), row.rawDesc];
+    if (row.part) parts.push(row.part);
+    parts.push(String(row.qty ?? 0));
+    parts.push((row.price ?? 0).toFixed(2));
+    parts.push((row.labor ?? 0).toFixed(1));
+    if (/^[A-Z]$/i.test(row.laborClass)) parts.push(row.laborClass);
+    parts.push((row.paint ?? 0).toFixed(1));
+    const anchor = anchorByLineNumber?.get(String(row.line));
+    const deltaRow = deltaRowFromRawText({
+      rawText: parts.join(" "),
+      section: row.sectionLabel ?? null,
+      anchorId: anchor?.anchorId,
+      pageNumber: anchor?.pageNumber ?? row.page,
+    });
+    if (deltaRow) out.push(deltaRow);
+  }
+  return out;
+}
+
+/** Group extracted PdfWords into the delta engine's per-page Word map. */
+function pdfWordsToEnginePages(words: PdfWord[]): Map<number, DeltaEngineWord[]> {
+  const byPage = new Map<number, DeltaEngineWord[]>();
+  for (const word of words) {
+    const list = byPage.get(word.pageNumber) ?? [];
+    if (list.length === 0) byPage.set(word.pageNumber, list);
+    list.push({ text: word.text, x0: word.x, x1: word.x + word.width, top: word.y, bottom: word.y + word.height });
+  }
+  return byPage;
+}
 
 export type AnnotationMode = "margin_callouts" | "inline_highlight" | "both";
 
@@ -182,6 +238,15 @@ export type AnnotatedEstimateFindingGeneratorContext = {
   uploadedFileNames: string[];
   sourceText?: string | null;
   comparisonEstimateTexts: ComparisonEstimateText[];
+  /** Measured word layer of comparison estimate PDFs. When present, the
+   * structured delta path parses BOTH sides with the typed delta engine —
+   * symmetric extraction is what keeps glued text layers from producing
+   * false deltas. */
+  comparisonEstimateWords?: Array<{
+    fileName: string;
+    estimateRole?: "carrier" | "shop";
+    words: PdfWord[];
+  }>;
   authorityTrace?: OemCitationDensityAuthorityTrace;
   /** When present, the canonical delta set is the authoritative source for all delta findings.
    *  The legacy local-diff path is suppressed; all emitted findings carry canonicalDeltaObjectId. */
@@ -1035,6 +1100,25 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     droppedReasons: anchors.length ? [] : ["no estimate row anchors extracted"],
   });
 
+  // Measured word layers for comparison PDFs, extracted once and shared with
+  // both the structured delta matcher and the delta value layer. Failures
+  // degrade to text-based comparison, never fail the report.
+  const comparisonEstimateWords: Array<{ fileName: string; estimateRole?: "carrier" | "shop"; words: PdfWord[] }> = [];
+  for (const comparisonPdf of params.comparisonEstimatePdfs ?? []) {
+    try {
+      const extractionResult = await extractPdfWordsWithDiagnostics(comparisonPdf.bytes.slice());
+      if (extractionResult.words.length > 0) {
+        comparisonEstimateWords.push({
+          fileName: comparisonPdf.fileName,
+          estimateRole: comparisonPdf.estimateRole,
+          words: extractionResult.words,
+        });
+      }
+    } catch {
+      // text fallback covers this comparison document
+    }
+  }
+
   if (params.findingGenerator) {
     const generated = params.findingGenerator({
       anchors,
@@ -1046,6 +1130,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       uploadedFileNames: params.uploadedFileNames ?? [],
       sourceText: params.sourceText,
       comparisonEstimateTexts: params.comparisonEstimateTexts ?? [],
+      comparisonEstimateWords,
       authorityTrace: params.authorityTrace,
       canonicalDeltaSet: params.canonicalDeltaSet,
     });
@@ -1487,10 +1572,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           }
         }
         const textComparisons = params.comparisonEstimateTexts ?? [];
-        const pdfComparisons = params.comparisonEstimatePdfs ?? [];
         const pickOtherRole = <T extends { estimateRole?: "carrier" | "shop" }>(entries: T[]) =>
           entries.find((entry) => entry.estimateRole && entry.estimateRole !== sourceDocumentRole) ?? entries[0];
-        const comparisonPdf = pickOtherRole(pdfComparisons);
+        const comparisonWordSet = pickOtherRole(comparisonEstimateWords);
         const comparisonText = pickOtherRole(textComparisons);
 
         // Prefer the competing document's measured word layer: symmetric
@@ -1498,27 +1582,15 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
         // from producing false deltas. Text parsing is the fallback.
         let competingRows: ReturnType<typeof parseDeltaEngineRows> = [];
         let competingTotals: Array<{ category: string; hours: number | null; rate: number | null; amount: number }> = [];
-        if (comparisonPdf) {
-          try {
-            const competingExtraction = await extractPdfWordsWithDiagnostics(comparisonPdf.bytes.slice());
-            if (competingExtraction.words.length > 0) {
-              const byPage = new Map<number, DeltaEngineWord[]>();
-              for (const word of competingExtraction.words) {
-                const list = byPage.get(word.pageNumber) ?? [];
-                if (list.length === 0) byPage.set(word.pageNumber, list);
-                list.push({ text: word.text, x0: word.x, x1: word.x + word.width, top: word.y, bottom: word.y + word.height });
-              }
-              competingRows = parseDeltaEngineRows(byPage);
-              competingTotals = parseDeltaEngineTotals(byPage).map((row) => ({
-                category: row.category,
-                hours: row.hours,
-                rate: row.rate,
-                amount: row.amount,
-              }));
-            }
-          } catch {
-            competingRows = [];
-          }
+        if (comparisonWordSet) {
+          const byPage = pdfWordsToEnginePages(comparisonWordSet.words);
+          competingRows = parseDeltaEngineRows(byPage);
+          competingTotals = parseDeltaEngineTotals(byPage).map((row) => ({
+            category: row.category,
+            hours: row.hours,
+            rate: row.rate,
+            amount: row.amount,
+          }));
         }
         if (competingRows.length === 0 && comparisonText) {
           competingRows = parseCccEstimateRows(comparisonText.text)
@@ -1546,9 +1618,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           }
         }
         const competingLabel = deriveCompetingDocLabel({
-          fileName: comparisonPdf?.fileName ?? comparisonText?.fileName ?? "",
+          fileName: comparisonWordSet?.fileName ?? comparisonText?.fileName ?? "",
           text: comparisonText?.text ?? "",
-          estimateRole: comparisonPdf?.estimateRole ?? comparisonText?.estimateRole,
+          estimateRole: comparisonWordSet?.estimateRole ?? comparisonText?.estimateRole,
         });
         if (competingRows.length > 0) {
           const plan = planDeltaValueAnnotations({
@@ -2306,7 +2378,19 @@ export function buildRequiredEstimatorDeltaFindings(
       usedAnchorIds.add(anchor.anchorId);
     }
 
-    if (!usedAnchorIds.has(anchor.anchorId) && /\b(?:finish sand|denib|de nib|color sand|sand and polish|sand polish|buff|refinish correction|post refinish correction)\b/.test(normalized)) {
+    // Sand/polish support review — but never when the comparison estimate
+    // carries the same operation (an identically-allowed line needs no
+    // support-review flag; S-5 false positive on "Buff light bar").
+    const sandPolishComparisonHasSame = (() => {
+      const rowKey = deltaEngineCanonKey(rowText).key;
+      if (!rowKey) return false;
+      return repairTokens(comparisonText).toUpperCase().replace(/[^A-Z]/g, "").includes(rowKey);
+    })();
+    if (
+      !usedAnchorIds.has(anchor.anchorId) &&
+      !sandPolishComparisonHasSame &&
+      /\b(?:finish sand|denib|de nib|color sand|sand and polish|sand polish|buff|refinish correction|post refinish correction)\b/.test(normalized)
+    ) {
       sandPolishSeen = true;
       findings.push(buildRequiredDetectorFinding({
         context,
@@ -2318,7 +2402,7 @@ export function buildRequiredEstimatorDeltaFindings(
         score: 58,
         safetyImpact: "low",
         priority: "medium",
-        currentSupportSummary: `Refinish correction row found: ${rowText}. Internal/Google Drive authority search was not available in this export path.`,
+        currentSupportSummary: `Refinish correction row found: ${rowText}.`,
         missingProofSummary: "Finish sand and polish, denib and polish, color sand and buff, sand and polish, or post-refinish correction is a refinish-related operation that needs CCC/MOTOR/P-page/database support when capped, limited, or disputed.",
         recommendedNextAction: "Attach CCC/MOTOR/P-page/database support or label the item NEEDS P-PAGE / NEEDS DATABASE SUPPORT before treating it as supplement-ready.",
         missingAuthorityTypes: ["CCC/MOTOR/P-page support", "database support"],
@@ -2588,6 +2672,8 @@ type StructuredLineItemDeltaMatch = {
   totalsAnchors: EstimateRowAnchor[];
   /** Lower-estimate lines with no counterpart on the annotated (higher) estimate. */
   lowerOnlyRows: EstimateDeltaRow[];
+  /** Parsed lower ESTIMATE TOTALS block (rates for valuing lower-only labor). */
+  lowerTotalsSummary: ReturnType<typeof parseCccEstimateTotals>;
   /** Residual lower lines that duplicate an already-matched lower line (possible duplicate billing). */
   potentialDuplicateLowerRows: EstimateDeltaRow[];
   /** Arbitrary materials cap on the lower estimate (flat figure, no hrs@rate basis), with jurisdiction citation. */
@@ -2604,7 +2690,7 @@ function matchStructuredLineItemDeltas(
   const comparison = (context.comparisonEstimateTexts ?? []).filter(
     (item) => item.text && item.text.trim().length > 0
   );
-  if (comparison.length === 0) return null;
+  if (comparison.length === 0 && (context.comparisonEstimateWords?.length ?? 0) === 0) return null;
 
   const primaryAnchors = context.anchors.filter(
     (anchor) => anchor.anchorType === "estimate_line" || anchor.anchorType === "embedded_link_row"
@@ -2654,15 +2740,78 @@ function matchStructuredLineItemDeltas(
   // double-reports: one copy pairs (e.g. reduced_labor) and the other copy,
   // now unmatched, becomes a false expanded_scope finding for the same line.
   const seenHigherLineNumbers = new Set<number>();
-  const dedupedHigherRows = higherRows.filter((row) => {
+  let dedupedHigherRows = higherRows.filter((row) => {
     if (row.lineNumber === null) return true;
     if (seenHigherLineNumbers.has(row.lineNumber)) return false;
     seenHigherLineNumbers.add(row.lineNumber);
     return true;
   });
 
-  const lowerRows = comparison.flatMap((item) => parseCccEstimateRows(item.text));
-  if (lowerRows.length === 0 || higherRows.length === 0) return null;
+  let lowerRows = comparison.flatMap((item) => parseCccEstimateRows(repairTokens(item.text)));
+
+  // Typed-engine path: when BOTH sides can be parsed from a measured word
+  // layer, replace the text-derived rows with delta-engine rows serialized
+  // back through the canonical row builder. Symmetric typed extraction is what
+  // eliminates note-bleed splits (RC-1), duplicate-note match collisions
+  // (RC-2), and paint-read-as-labor cell fusion (RC-3) at the source. When
+  // either side is unavailable, the legacy text parse stands unchanged.
+  const subjectWordPages = pdfWordsToEnginePages(
+    context.visualLines.flatMap((line) => line.words)
+  );
+  const comparisonWordSet =
+    (context.comparisonEstimateWords ?? []).find(
+      (entry) => entry.estimateRole && entry.estimateRole !== context.sourceDocumentRole
+    ) ?? (context.comparisonEstimateWords ?? [])[0];
+  if (comparisonWordSet) {
+    const subjectDiag = emptyRowParseDiagnostics();
+    const competingDiag = emptyRowParseDiagnostics();
+    const subjectEngineRows = parseDeltaEngineRows(subjectWordPages, subjectDiag);
+    const competingEngineRows = parseDeltaEngineRows(
+      pdfWordsToEnginePages(comparisonWordSet.words),
+      competingDiag
+    );
+    if (subjectEngineRows.length >= 10 && competingEngineRows.length >= 10) {
+      // Column-identity guard (RC-3): the typed cells of each side must
+      // reconcile against that document's own SUBTOTALS row. A mismatch means
+      // the extract lost column identity — fail the extract; emit nothing
+      // rather than findings built on mistyped cells.
+      const subtotalsOk = (rows: DeltaEngineRow[], pages: Map<number, DeltaEngineWord[]>) => {
+        const printed = parseDeltaEngineSubtotals(pages);
+        if (!printed || (printed.labor === null && printed.paint === null)) return true; // nothing to reconcile against
+        const laborSum = rows.reduce((total, row) => total + (row.labor ?? 0), 0);
+        const paintSum = rows.reduce((total, row) => total + (row.paint ?? 0), 0);
+        const laborOk = printed.labor === null || Math.abs(laborSum - printed.labor) <= 0.21;
+        const paintOk = printed.paint === null || Math.abs(paintSum - printed.paint) <= 0.21;
+        return laborOk && paintOk;
+      };
+      const subjectReconciles = subtotalsOk(subjectEngineRows, subjectWordPages);
+      const competingReconciles = subtotalsOk(
+        competingEngineRows,
+        pdfWordsToEnginePages(comparisonWordSet.words)
+      );
+      if (!subjectReconciles || !competingReconciles) {
+        console.error("[citation-density] typed-cell column identity failed SUBTOTALS reconciliation — suppressing line-item deltas", {
+          subjectReconciles,
+          competingReconciles,
+        });
+        return null;
+      }
+      const anchorByLineNumber = new Map<string, EstimateRowAnchor>();
+      for (const anchor of primaryAnchors) {
+        if (anchor.lineNumber && !anchorByLineNumber.has(anchor.lineNumber)) {
+          anchorByLineNumber.set(anchor.lineNumber, anchor);
+        }
+      }
+      const engineHigher = engineRowsToDeltaRows(subjectEngineRows, anchorByLineNumber);
+      const engineLower = engineRowsToDeltaRows(competingEngineRows, null);
+      if (engineHigher.length >= 10 && engineLower.length >= 10) {
+        dedupedHigherRows = engineHigher;
+        lowerRows = engineLower;
+      }
+    }
+  }
+
+  if (lowerRows.length === 0 || dedupedHigherRows.length === 0) return null;
 
   // Only annotate in the intended direction (the annotated source must be the higher-cost
   // estimate). If totals are known and the comparison is actually the higher one, skip so we
@@ -2698,17 +2847,92 @@ function matchStructuredLineItemDeltas(
     lowerIsOcr: lowerIsOcr || lowerParseSuspect,
     lowerCategoryText,
   });
-  const orderedDeltas = [...match.deltas].sort(
+  // Aggregate-vs-member dedupe (S-3): a description group that produced
+  // several deltas ("Trim Masking Tape" x3, "Set back, secure" x2) collapses
+  // to ONE aggregated finding — summed values, occurrence counts — instead of
+  // a per-row parade that double-counts the same relationship.
+  const deltasByGroupKey = new Map<string, EstimateLineItemDelta[]>();
+  for (const delta of match.deltas) {
+    const key = deltaEngineCanonKey(delta.higherRow.description).key || delta.higherRow.description.toUpperCase();
+    const list = deltasByGroupKey.get(key) ?? [];
+    if (list.length === 0) deltasByGroupKey.set(key, list);
+    list.push(delta);
+  }
+  const mergedDeltas: EstimateLineItemDelta[] = [];
+  for (const group of deltasByGroupKey.values()) {
+    if (group.length === 1) {
+      mergedDeltas.push(group[0]);
+      continue;
+    }
+    const sum = (pick: (delta: EstimateLineItemDelta) => number | null) => {
+      const values = group.map(pick).filter((value): value is number => value !== null);
+      return values.length ? Math.round(values.reduce((total, value) => total + value, 0) * 100) / 100 : null;
+    };
+    // Prefer the member that actually paired — the group is then a value
+    // difference across occurrences, never a confirmed "missing" claim.
+    const lead = group.find((delta) => delta.lowerRow !== null) ?? group[0];
+    const lines = group.map((delta) => delta.higherRow.lineNumber).filter((line) => line !== null);
+    mergedDeltas.push({
+      ...lead,
+      laborDelta: sum((delta) => delta.laborDelta),
+      paintDelta: sum((delta) => delta.paintDelta),
+      priceDelta: sum((delta) => delta.priceDelta),
+      statusLabels: [...(lead.statusLabels ?? []), `AGGREGATED_GROUP_${group.length}X`],
+      summary: `${lead.summary} Aggregated across ${group.length} same-description lines (L${lines.join("/L")}).`,
+    });
+  }
+  const orderedDeltas = [...mergedDeltas].sort(
     (a, b) => scoreLineItemDeltaForPriority(b) - scoreLineItemDeltaForPriority(a)
   );
 
   // Rate / totals lane: rates, hour subtotals, and category amounts from the
   // two ESTIMATE TOTALS blocks — typically the largest cost-gap drivers.
-  const higherTotals = parseCccEstimateTotals(context.sourceText ?? "");
-  const lowerTotals =
+  // Categories come from the measured word layer when available: a glued text
+  // layer prints "MechanicalLabor 7.9hrs@$175.00/hr" as one run and the text
+  // parse drops the row entirely, which is what produced false
+  // "no category on the lower estimate" claims (RC-4). Subtotal/tax/grand
+  // figures still come from the text parse (they survive gluing).
+  const mergeTotalsWithWordCategories = (
+    textTotals: ReturnType<typeof parseCccEstimateTotals>,
+    wordPages: Map<number, DeltaEngineWord[]> | null
+  ): ReturnType<typeof parseCccEstimateTotals> => {
+    if (!wordPages) return textTotals;
+    const wordCategories = parseDeltaEngineTotals(wordPages);
+    // Only replace the text-parsed categories when the word layer parsed at
+    // least as completely (count AND rate coverage) — a synthetic or unusual
+    // totals layout can word-parse worse than it text-parses.
+    const textCategories = textTotals?.categories ?? [];
+    const rateCount = (rows: Array<{ rate: number | null }>) =>
+      rows.filter((row) => row.rate !== null).length;
+    if (
+      wordCategories.length < 3 ||
+      wordCategories.length < textCategories.length ||
+      rateCount(wordCategories) < rateCount(textCategories)
+    ) {
+      return textTotals;
+    }
+    return {
+      categories: wordCategories.map((row) => ({
+        category: row.category.replace(/\s+/g, " ").trim(),
+        hours: row.hours,
+        rate: row.rate,
+        cost: row.amount,
+      })),
+      subtotal: textTotals?.subtotal ?? null,
+      salesTax: textTotals?.salesTax ?? null,
+      grandTotal: textTotals?.grandTotal ?? null,
+    };
+  };
+  const higherTotals = mergeTotalsWithWordCategories(
+    parseCccEstimateTotals(context.sourceText ?? ""),
+    subjectWordPages.size > 0 ? subjectWordPages : null
+  );
+  const lowerTotals = mergeTotalsWithWordCategories(
     comparison
       .map((item) => parseCccEstimateTotals(item.text))
-      .find((totals) => totals !== null) ?? null;
+      .find((totals) => totals !== null) ?? null,
+    comparisonWordSet ? pdfWordsToEnginePages(comparisonWordSet.words) : null
+  );
   const totalsDeltas = compareEstimateTotals({ higher: higherTotals, lower: lowerTotals });
   const totalsAnchors = context.anchors.filter((anchor) => anchor.anchorType === "totals_row");
 
@@ -2732,6 +2956,7 @@ function matchStructuredLineItemDeltas(
     totalsDeltas,
     totalsAnchors,
     lowerOnlyRows: match.lowerOnlyRows,
+    lowerTotalsSummary: lowerTotals,
     potentialDuplicateLowerRows: match.potentialDuplicateLowerRows,
     pmCapFlag,
   };
@@ -3007,19 +3232,56 @@ function emitTotalsDeltaFindings(
   // (possible duplicate billing / separate access operations — reported as
   // such, never as confirmed lower-only scope). One summary finding, never
   // per-line markers (those lines do not exist on the annotated PDF).
+  // Rates from the lower estimate's own totals block, for valuing lower-only
+  // labor: an operation the shop did not write is real dollars, not "$0.00".
+  const lowerRateFor = (() => {
+    const rates = new Map<string, number>();
+    for (const category of deltaMatch.lowerTotalsSummary?.categories ?? []) {
+      if (category.rate !== null) rates.set(normalizeTotalsCategoryKey(category.category), category.rate);
+    }
+    return (row: EstimateDeltaRow) => ({
+      labor:
+        row.laborType === "M"
+          ? rates.get("MECHANICALLABOR") ?? rates.get("BODYLABOR") ?? 0
+          : rates.get("BODYLABOR") ?? 0,
+      paint: rates.get("PAINTLABOR") ?? rates.get("BODYLABOR") ?? 0,
+    });
+  })();
+  const lowerRowImpact = (row: EstimateDeltaRow) => {
+    const rate = lowerRateFor(row);
+    return (row.price ?? 0) + (row.labor ?? 0) * rate.labor + (row.paint ?? 0) * rate.paint;
+  };
+  // Boilerplate rows (banner text, contact instructions, links) carry no value
+  // cells, no operation code, and no section — they are not operations and
+  // never belong in a lower-only roll-up. Carrier-agnostic; no string list.
+  const isBoilerplateLowerRow = (row: EstimateDeltaRow) =>
+    (row.price ?? 0) === 0 &&
+    (row.labor ?? 0) === 0 &&
+    (row.paint ?? 0) === 0 &&
+    !row.opCode &&
+    !row.section;
+  const rankedLowerOnlyRows = deltaMatch.lowerOnlyRows
+    .filter((row) => !isBoilerplateLowerRow(row))
+    .sort((a, b) => lowerRowImpact(b) - lowerRowImpact(a));
   const describeLowerRow = (row: EstimateDeltaRow) => {
-    const amount =
-      row.price !== null
-        ? ` ($${row.price.toFixed(2)})`
-        : row.labor !== null
-          ? ` (${row.labor} hr)`
+    const impact = lowerRowImpact(row);
+    const hourPart =
+      (row.labor ?? 0) !== 0
+        ? `${row.labor} hr${row.laborType === "M" ? " M" : ""}`
+        : (row.paint ?? 0) !== 0
+          ? `${row.paint} hr P`
           : "";
+    const pricePart = (row.price ?? 0) !== 0 ? `$${(row.price ?? 0).toFixed(2)}` : "";
+    const valueBits = [pricePart, hourPart].filter(Boolean).join(" + ");
+    const impactPart =
+      impact > 0 && !pricePart && hourPart ? ` ~ $${impact.toFixed(2)}` : "";
+    const amount = valueBits ? ` (${valueBits}${impactPart})` : "";
     // Include the section so a reviewer can locate the line ("Overlap
     // Major Non-Adj. Panel" repeats under several panels).
     const section = row.section ? ` [${row.section.replace(/\s+/g, " ").trim()}]` : "";
     return `L${row.lineNumber} ${row.opCode ? `${row.opCode} ` : ""}${row.description}${amount}${section}`;
   };
-  const lowerOnlyCount = deltaMatch.lowerOnlyRows.length;
+  const lowerOnlyCount = rankedLowerOnlyRows.length;
   const duplicateCount = deltaMatch.potentialDuplicateLowerRows.length;
   // Only place the lower-only listing on a totals row when the totals lane
   // genuinely parsed (real rate/category context exists there). Without it,
@@ -3031,7 +3293,7 @@ function emitTotalsDeltaFindings(
     );
     if (anchor) {
       usedAnchorIds.add(anchor.anchorId);
-      const listed = deltaMatch.lowerOnlyRows.slice(0, 12).map(describeLowerRow);
+      const listed = rankedLowerOnlyRows.slice(0, 12).map(describeLowerRow);
       const extra =
         lowerOnlyCount > listed.length ? ` …and ${lowerOnlyCount - listed.length} more` : "";
       const lowerOnlyPart =
@@ -3449,6 +3711,14 @@ function isRejectedPrimaryAnchorText(rowText: string, anchor: EstimateRowAnchor)
 // on real estimate lines. Used to stop such sections from becoming lead findings (DEFECT B).
 function isNonLeadablePrimaryAnchorText(rowText: string, anchor: EstimateRowAnchor): boolean {
   if (anchor.anchorType === "totals_row") return true;
+  // Footers, print timestamps, and bare section-title rows are never
+  // anchorable (S-4): a finding badge must never render on "7/30/2026 ...
+  // Page 2" or on "30 SIDE PANEL".
+  if (/\b\d{1,2}\/\d{1,2}\/20\d{2}\b[\s\S]{0,40}\bpage\s*\d+\b/i.test(rowText)) return true;
+  if (/^\s*\d{1,2}\/\d{1,2}\/20\d{2}\s+\d{1,2}:\d{2}/.test(rowText)) return true;
+  if (/^\s*(?:\d{1,4}\s+)?[A-Z][A-Z &,'\/.-]{2,38}$/.test(rowText.trim()) && !/[a-z0-9]{2}/.test(rowText.replace(/^\s*\d{1,4}\s+/, ""))) {
+    return true;
+  }
   const normalized = normalizeMatchText(rowText);
   return /\b(?:abbreviations?|legend|disclaimer|fraud notice|legal notice|declarations?|alternate parts policy|allstate parts policy|quality replacement parts|aftermarket parts are described|a\/m\s*=\s*aftermarket|capa\s*(?:certified|definitions?)|lkq\s*\/?\s*rcy\s*\/?\s*used|vin decoding|estimate totals?|parts total|subtotal|grand total|sales tax|net cost of repairs|body labor totals?|paint labor totals?|paint supplies totals?)\b/i.test(rowText) ||
     /\b(?:abbreviation|legend|disclaimer|aftermarket parts are described|estimate totals|grand total|subtotal|sales tax|net cost of repairs)\b/.test(normalized);

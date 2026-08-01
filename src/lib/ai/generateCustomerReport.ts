@@ -144,6 +144,7 @@ Important rules:
 - You may explain that referenced procedure material tends to support operations like calibration, scan, alignment, fit-check, or structural verification when that is consistent with the damage path.
 - Do not use legal language. Translate everything into everyday speech.
 - Do not include clipped placeholders or partial policy fragments in the final prose.
+- NEVER describe any document as "scanned", "an image", or "not readable" unless the provided text for that document contains the literal marker "[[OCR text recovered". A text layer with run-together or garbled words is a machine-parsing artifact on our side, not a property of the document — never narrate parsing limitations to the customer as document defects.
 - If a CCC workfile is mentioned, say only: "CCC Secure Share source confirms this estimate line was present in the structured estimate data."
 
 Ranking rules for "yourOptions":

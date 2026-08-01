@@ -232,9 +232,17 @@ function carrierAppearsInText(carrier: string, text: string): boolean {
 }
 
 function extractInsurer(text: string): string | undefined {
+  // The whole-text carrier scan must never read line notes, evidence quotes,
+  // or rationale prose — a note like "already agreed upon with <carrier>"
+  // names a carrier that is NOT this file's insurer. Resolution order:
+  // labeled header field first, then a known carrier found in NON-note text.
+  const scanText = text
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*note\b\s*[:.-]/i.test(line.trim()) && !/^\s*NOTE\b/.test(line.trim()))
+    .join("\n");
   // Ambiguous carrier names require insurance context ("AAA" from a vendor
   // line such as "AAA Car Care Center" must not populate the insurer).
-  const knownFromText = COMMON_INSURERS.find((carrier) => carrierAppearsInText(carrier, text));
+  const knownFromText = COMMON_INSURERS.find((carrier) => carrierAppearsInText(carrier, scanText));
   // Only the Insurance Company / Insurer / Carrier field may populate the insurer slot.
   // Owner/Insured/Claimant/Policyholder labels are deliberately excluded from this
   // regex, and the value must sit on the SAME line — CCC's three-column headers
@@ -339,7 +347,10 @@ function buildInsurerCandidateScore(
     return null;
   }
 
-  let score = source === "known_carrier" ? 300 : source === "labeled" ? 220 : 100;
+  // The labeled header field ("Insurance Company: X") outranks a carrier name
+  // found anywhere in the text — free text can quote OTHER carriers (prior
+  // claims, agreed-upon notes) and must never beat the document's own header.
+  let score = source === "known_carrier" ? 300 : source === "labeled" ? 520 : 100;
   if (isKnownCarrier(normalized)) score += 400;
   if (looksLikeLikelyPersonName(normalized)) score -= 250;
   if (normalized.length <= 2) score -= 200;
