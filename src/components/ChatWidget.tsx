@@ -4693,14 +4693,17 @@ export default function ChatWidget({
         <div
           ref={scrollRef}
           className={[
-            // Transcript geometry: the container (and its right-edge scrollbar)
-            // holds ~1.5in margins from the screen edges on wide viewports —
-            // max(1080px, 100% - 240px) widens past 1080 only when the panel
-            // has room, and collapses back to the old behavior when the claim
-            // panel is expanded. Assistant rows hug the left margin, user rows
-            // the right; the centered welcome children (mx-auto) stay centered
-            // in the container at every width.
-            "mx-auto w-full max-w-[max(1080px,100%_-_240px)] min-h-0 px-3 pb-4 pt-3 sm:px-4 sm:pt-4 space-y-4",
+            // Transcript geometry: the conversation lives in the SAME centered
+            // 1080px column as the composer, at every rail state. The previous
+            // max(1080px, 100% - 240px) widening let the container grow when
+            // the claim panel closed while the 680px assistant bubbles kept
+            // hugging its left edge — all the freed width pooled on the right
+            // and read as "the chat didn't adjust to the rails closing".
+            // A fixed centered column distributes freed space evenly instead,
+            // so opening/closing rails visibly re-centers the conversation.
+            // Assistant rows hug the column's left margin, user rows its
+            // right; the centered welcome children (mx-auto) stay centered.
+            "mx-auto w-full max-w-[1080px] min-h-0 px-3 pb-4 pt-3 sm:px-4 sm:pt-4 space-y-4",
             transcriptHeightClass,
           ].join(" ")}
         >
