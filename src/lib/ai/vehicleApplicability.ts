@@ -116,6 +116,18 @@ const VEHICLE_TERM_GROUPS: VehicleTermGroup[] = [
     modelTerms: ["sentra", "altima", "maxima", "rogue", "murano", "pathfinder", "versa", "frontier"],
   },
   {
+    family: "rivian",
+    canonicalMake: "Rivian",
+    manufacturerTerms: ["rivian", "rivian automotive", "rivi"],
+    modelTerms: ["r1t", "r1s", "edv", "rct"],
+  },
+  {
+    family: "lucid",
+    canonicalMake: "Lucid",
+    manufacturerTerms: ["lucid", "lucid motors", "lucid group"],
+    modelTerms: ["air", "gravity"],
+  },
+  {
     family: "general_motors",
     canonicalMake: "Chevrolet",
     manufacturerTerms: ["chevrolet", "chevy", "general motors", "gm"],
@@ -264,8 +276,13 @@ export function assessVehicleApplicability(
     GENERIC_REPAIR_TERMS.some((term) => containsVehicleTerm(haystack, term));
 
   if (!actualFamily && !actualCanonicalMake) {
+    // FAIL CLOSED: when the estimate vehicle's make could not be resolved, a
+    // document that names a SPECIFIC manufacturer family cannot be treated as
+    // matching — that is how a Rivian file collected GM position statements.
+    // Make-specific documents rate as mismatched; only generic repair guidance
+    // stays eligible.
     return {
-      rating: mentionedFamilies.length > 0 ? "manufacturer_match" : "generic",
+      rating: mentionedFamilies.length > 0 ? "mismatched_vehicle" : "generic",
       mentionedFamilies,
       mentionedTerms,
     };

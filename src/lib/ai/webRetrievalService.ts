@@ -42,6 +42,14 @@ export async function retrieveWebSupport(
     return { status: "not_configured", queries: [], results: [] };
   }
 
+  // OEM-specific retrieval is gated on a decoded make: without one, a query
+  // like "2024 OEM position statement" returns OTHER manufacturers' documents
+  // (a Rivian file collecting GM statements). Returning empty is correct;
+  // returning another manufacturer's authority never is.
+  if (!request.vehicle.make || !request.vehicle.make.trim()) {
+    return { status: "no_results", queries: [], results: [] };
+  }
+
   const queries = buildWebQueries(request).slice(0, options?.maxQueries ?? 3);
   if (queries.length === 0) {
     return { status: "no_results", queries: [], results: [] };
@@ -167,7 +175,12 @@ function buildWebQueries(request: DriveRetrievalRequest): string[] {
 
 function classifyWebSourceType(title: string, url: string): WebRetrievalSourceType {
   const text = `${title} ${url}`;
-  if (/doi|insurance department|insurance commissioner|statute|regulation|appraisal/i.test(text)) return "law";
+  // "law" is reserved for genuinely statutory/regulatory sources. The bare
+  // substring "doi" (no word boundary) typed any URL containing it as law, and
+  // "appraisal"/news headlines ABOUT regulators were typed as statutes —
+  // presenting an article as law in an advocacy document is a credibility risk.
+  const looksLikeNews = /\b(?:news|magazine|repairerdriven|bodyshop business|article|says?|say\b|announc)/i.test(text);
+  if (!looksLikeNews && /\bdoi\b|insurance department|insurance commissioner|\bstatute\b|\bregulation\b|administrative code|\blegislature\b/i.test(text)) return "law";
   if (/oem|manufacturer|position statement|repair procedure|service information/i.test(text)) return "oem";
   return "industry";
 }

@@ -1681,6 +1681,11 @@ function buildVehicleDisplayLabel(
   const normalized = normalizeVehicleIdentity(vehicle);
   if (!normalized) return undefined;
 
+  // A year with no make AND no model is not an identity — "VEHICLE: 2024." on
+  // a customer document. Returning undefined lets the guarded identity
+  // builder (VIN-tail fallback) take over instead.
+  if (!normalized.make && !normalized.model) return undefined;
+
   return sanitizeVehicleDisplay(
     [
       normalized.year,
