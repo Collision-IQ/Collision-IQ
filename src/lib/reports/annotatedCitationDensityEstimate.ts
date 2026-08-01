@@ -74,6 +74,7 @@ import {
   planDeltaValueAnnotations,
 } from "./deltaValueAnnotationLayer";
 import { canonKey as deltaEngineCanonKey, repairTokens } from "./deltaEngine/estimateNormalize";
+import { carriersNamedIn, detectDominantKnownCarrier } from "@/lib/ai/extractors/extractEstimateFacts";
 import {
   emptyRowParseDiagnostics,
   parseEstimateRows as parseDeltaEngineRows,
@@ -2674,6 +2675,17 @@ type StructuredLineItemDeltaMatch = {
   lowerOnlyRows: EstimateDeltaRow[];
   /** Parsed lower ESTIMATE TOTALS block (rates for valuing lower-only labor). */
   lowerTotalsSummary: ReturnType<typeof parseCccEstimateTotals>;
+  /** Line notes naming a known carrier that is NOT the file's dominant
+   * carrier — a carrier-attribution defect on the document, reported as a
+   * finding rather than adopted as the insurer. */
+  carrierMismatchNotes: Array<{
+    carrier: string;
+    dominantCarrier: string;
+    noteExcerpt: string;
+    documentSide: "annotated" | "comparison";
+    line: number;
+    anchorId?: string;
+  }>;
   /** Residual lower lines that duplicate an already-matched lower line (possible duplicate billing). */
   potentialDuplicateLowerRows: EstimateDeltaRow[];
   /** Arbitrary materials cap on the lower estimate (flat figure, no hrs@rate basis), with jurisdiction citation. */
@@ -2762,6 +2774,7 @@ function matchStructuredLineItemDeltas(
     (context.comparisonEstimateWords ?? []).find(
       (entry) => entry.estimateRole && entry.estimateRole !== context.sourceDocumentRole
     ) ?? (context.comparisonEstimateWords ?? [])[0];
+  const carrierMismatchNotes: StructuredLineItemDeltaMatch["carrierMismatchNotes"] = [];
   if (comparisonWordSet) {
     const subjectDiag = emptyRowParseDiagnostics();
     const competingDiag = emptyRowParseDiagnostics();
@@ -2807,6 +2820,39 @@ function matchStructuredLineItemDeltas(
       if (engineHigher.length >= 10 && engineLower.length >= 10) {
         dedupedHigherRows = engineHigher;
         lowerRows = engineLower;
+      }
+
+      // Carrier-attribution defect scan (O-1): a line note naming a known
+      // carrier other than the file's dominant one is a defect on that
+      // document — a finding, never an insurer source.
+      const dominantCarrier = detectDominantKnownCarrier(
+        `${context.sourceText ?? ""}\n${comparison.map((item) => item.text).join("\n")}`
+      );
+      if (dominantCarrier) {
+        const subjectByKey = new Map(subjectEngineRows.map((row) => [row.key + "|" + row.side, row]));
+        const scanRows = [
+          ...subjectEngineRows.map((row) => ({ row, side: "annotated" as const })),
+          ...competingEngineRows.map((row) => ({ row, side: "comparison" as const })),
+        ];
+        for (const { row, side } of scanRows) {
+          if (!row.note) continue;
+          for (const carrier of carriersNamedIn(row.note)) {
+            if (carrier.toLowerCase() === dominantCarrier.toLowerCase()) continue;
+            // Anchor on the ANNOTATED document: the row itself when the note
+            // is there, else the paired subject row for a comparison note.
+            const subjectRow =
+              side === "annotated" ? row : subjectByKey.get(row.key + "|" + row.side) ?? null;
+            const anchor = subjectRow ? anchorByLineNumber.get(String(subjectRow.line)) : undefined;
+            carrierMismatchNotes.push({
+              carrier,
+              dominantCarrier,
+              noteExcerpt: row.note.slice(0, 160),
+              documentSide: side,
+              line: row.line,
+              anchorId: anchor?.anchorId,
+            });
+          }
+        }
       }
     }
   }
@@ -2957,6 +3003,7 @@ function matchStructuredLineItemDeltas(
     totalsAnchors,
     lowerOnlyRows: match.lowerOnlyRows,
     lowerTotalsSummary: lowerTotals,
+    carrierMismatchNotes,
     potentialDuplicateLowerRows: match.potentialDuplicateLowerRows,
     pmCapFlag,
   };
@@ -3223,6 +3270,40 @@ function emitTotalsDeltaFindings(
           delta.higher && delta.lower && delta.higher.cost !== null && delta.lower.cost !== null
             ? Math.round((delta.higher.cost - delta.lower.cost) * 100) / 100
             : null,
+      })
+    );
+  }
+
+  // Carrier-attribution defects (O-1): a note naming a foreign carrier is a
+  // documentation defect on the estimate that wrote it — reported as its own
+  // finding, keyed to the annotated row the note's operation pairs with.
+  const seenMismatchCarriers = new Set<string>();
+  for (const mismatch of deltaMatch.carrierMismatchNotes) {
+    if (seenMismatchCarriers.has(mismatch.carrier.toLowerCase())) continue;
+    seenMismatchCarriers.add(mismatch.carrier.toLowerCase());
+    const anchor = mismatch.anchorId ? deltaMatch.anchorById.get(mismatch.anchorId) : undefined;
+    if (!anchor || usedAnchorIds.has(anchor.anchorId)) continue;
+    usedAnchorIds.add(anchor.anchorId);
+    const sideLabel = mismatch.documentSide === "comparison" ? deltaMatch.comparisonName : "this estimate";
+    findings.push(
+      buildRequiredDetectorFinding({
+        context,
+        anchor,
+        findingType: "carrier-note-mismatch",
+        title: `Carrier-attribution defect: line note names ${mismatch.carrier} on a ${mismatch.dominantCarrier} file`,
+        category: "other",
+        label: "CARRIER MISMATCH",
+        estimateGapType: "needs_proof",
+        score: 55,
+        safetyImpact: "low",
+        priority: "medium",
+        currentSupportSummary: `${sideLabel} line ${mismatch.line} carries a note reading "${mismatch.noteExcerpt}" — it names ${mismatch.carrier}, but every header identity on this file (letterhead, claim number, Insurance Company field) is ${mismatch.dominantCarrier}. This is a carrier-attribution defect on the document, likely copied from another claim file.`,
+        missingProofSummary:
+          "A line note that names the wrong carrier undermines the estimate's documentation quality and can misdirect payment or authority questions. It must be corrected or explained by its author; it is never evidence about this file's insurer.",
+        recommendedNextAction: `Ask the estimate author to correct or explain the ${mismatch.carrier} reference; confirm the referenced agreement actually belongs to this ${mismatch.dominantCarrier} claim.`,
+        missingAuthorityTypes: ["author correction or written explanation of the foreign-carrier reference"],
+        amountImpact: null,
+        laborHoursImpact: null,
       })
     );
   }
