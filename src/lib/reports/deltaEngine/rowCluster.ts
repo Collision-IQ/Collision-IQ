@@ -48,6 +48,8 @@ export interface EstimateRow {
   cells: { qty?: CellBox; price?: CellBox; labor?: CellBox; paint?: CellBox };
   /** NOTE text attached to this row (payload for OEM CD — never part of identity). */
   note?: string;
+  /** Section header as printed (e.g. "REAR BUMPER"), before canonical squash. */
+  sectionLabel?: string;
 }
 
 export interface RowParseDiagnostics {
@@ -131,10 +133,14 @@ const SUFFIX = new Set(["M", "T", "X", "INCL.", "INCL"]);
 
 export interface RowParseState {
   section: string;
+  sectionLabel?: string;
   prev: EstimateRow | null;
   /** A line-numbered row whose description didn't survive parsing yet — held
    * open so the following continuation fragment can reconstitute it. */
   pendingStub?: EstimateRow | null;
+  /** True when the previous cluster was a NOTE — its wrapped continuation
+   * lines belong to the note payload, never to the row description. */
+  lastWasNote?: boolean;
 }
 
 /** Type the numeric/part/suffix tokens of a cluster into a row; returns the
@@ -199,6 +205,7 @@ function finalizeRow(row: EstimateRow, state: RowParseState): "row" | "section" 
     !/[a-z]/.test(row.rawDesc)
   ) {
     state.section = canonKey(row.rawDesc).key;
+    state.sectionLabel = row.rawDesc;
     return "section";
   }
   const ck = canonKey(row.rawDesc);
@@ -232,8 +239,11 @@ export function parsePage(
     if (/^note\b/i.test(joined)) {
       const open = state.pendingStub ?? state.prev;
       if (open) open.note = open.note ? `${open.note} ${joined}` : joined;
+      state.lastWasNote = true;
       continue;
     }
+    const wasNote = state.lastWasNote === true;
+    state.lastWasNote = false;
     if (joined.includes("SUBTOTALS") || (joined.includes("Page") && joined.includes("/20"))) {
       rejectStub(state, diag);
       state.prev = null;
@@ -243,19 +253,28 @@ export function parsePage(
     const isLine = /^\d{1,3}$/.test(first) && ws.length > 1;
     const lineNo = isLine ? parseInt(first, 10) : NaN;
     if (isLine && state.prev && !state.pendingStub && lineNo <= state.prev.line) {
-      state.prev.rawDesc += " " + joined; // wrapped text starting with a number
+      // wrapped text starting with a number — note payload if it follows a NOTE
+      if (wasNote) {
+        state.prev.note = state.prev.note ? `${state.prev.note} ${joined}` : joined;
+        state.lastWasNote = true;
+      } else {
+        state.prev.rawDesc += " " + joined;
+      }
       continue;
     }
     if (!isLine) {
       // section header: all-caps, no numeric cells (with or without a line number)
       if (joined === joined.toUpperCase() && !/\d/.test(joined) && joined.length < 40 && !state.pendingStub) {
         state.section = canonKey(joined).key;
+        state.sectionLabel = joined;
         state.prev = null;
         continue;
       }
       if (state.pendingStub) {
         // Continuation of a stub row (oper token but no description yet):
         // absorb this fragment's tokens into the held row and try to finalize.
+        // Even after an interleaved NOTE, the stub's missing description takes
+        // priority — that interleave IS the note-bleed shape being repaired.
         const stub = state.pendingStub;
         const moreDesc = absorbRowTokens(stub, ws, cols);
         stub.rawDesc = [stub.rawDesc, ...moreDesc].filter(Boolean).join(" ");
@@ -272,7 +291,16 @@ export function parsePage(
         // "empty": keep holding — the description may arrive on the next fragment.
         continue;
       }
-      if (state.prev) state.prev.rawDesc += " " + joined;
+      if (state.prev) {
+        // A wrapped line directly after a NOTE continues the NOTE payload —
+        // it must never leak into the row description (and its key).
+        if (wasNote) {
+          state.prev.note = state.prev.note ? `${state.prev.note} ${joined}` : joined;
+          state.lastWasNote = true;
+        } else {
+          state.prev.rawDesc += " " + joined;
+        }
+      }
       continue;
     }
     // A new line-numbered row begins: any unreconstituted stub is a parse
@@ -282,6 +310,7 @@ export function parsePage(
       page: pageNo,
       line: lineNo,
       section: state.section,
+      sectionLabel: state.sectionLabel,
       qty: null,
       price: null,
       labor: null,
@@ -351,7 +380,10 @@ export interface TotalsRowWithBoxes {
  */
 export function parseTotalsFromWords(wordsByPage: Map<number, Word[]>): TotalsRowWithBoxes[] {
   const out: TotalsRowWithBoxes[] = [];
-  const STOP = /^(SUBTOTAL|SALESTAX|GRANDTOTAL|TOTALCOST|DEDUCTIBLE|TOTALADJUSTMENTS|NETCOST|MISCELLANEOUS|PARTS)/;
+  // Parts and Miscellaneous are REAL categories (amount-only) — dropping them
+  // breaks the Σ(category deltas) + tax = grand-total reconciliation and hides
+  // categories where the lower estimate is the higher one.
+  const STOP = /^(SUBTOTAL|SALESTAX|GRANDTOTAL|TOTALCOST|DEDUCTIBLE|TOTALADJUSTMENTS|NETCOST)/;
   for (const [page, rawWords] of [...wordsByPage.entries()].sort((a, b) => a[0] - b[0])) {
     const words = tokenizeWords(rawWords);
     const heading = clusterRows(words).findIndex((ws) =>
@@ -421,4 +453,41 @@ export function parseTotalsFromWords(wordsByPage: Map<number, Word[]>): TotalsRo
     if (out.length > 0) break;
   }
   return out;
+}
+
+export interface SubtotalsRow {
+  page: number;
+  price: number | null;
+  labor: number | null;
+  paint: number | null;
+}
+
+/** Parse the line-items SUBTOTALS row (price, labor hours, paint hours) so the
+ * column-identity guard can reconcile typed cells against the document. */
+export function parseSubtotalsFromWords(wordsByPage: Map<number, Word[]>): SubtotalsRow | null {
+  for (const [page, rawWords] of [...wordsByPage.entries()].sort((a, b) => a[0] - b[0])) {
+    const words = tokenizeWords(rawWords);
+    for (const ws of clusterRows(words)) {
+      if (!ws.some((word) => word.text.toUpperCase().includes("SUBTOTALS"))) continue;
+      const numbers = ws
+        .map((word) => word.text)
+        .filter((text) => /^-?[\d,]+\.\d{1,2}$/.test(text))
+        .map((text) => parseFloat(text.replace(/,/g, "")));
+      if (numbers.length === 0) continue;
+      // Layout: [extended price] [labor hrs] [paint hrs] — price carries 2
+      // decimals; hour cells carry 1.
+      const decimals = ws
+        .map((word) => word.text)
+        .filter((text) => /^-?[\d,]+\.\d{1,2}$/.test(text));
+      const price = decimals.find((text) => /\.\d{2}$/.test(text)) ?? null;
+      const hours = decimals.filter((text) => /\.\d$/.test(text));
+      return {
+        page,
+        price: price !== null ? parseFloat(price.replace(/,/g, "")) : null,
+        labor: hours.length > 0 ? parseFloat(hours[0].replace(/,/g, "")) : null,
+        paint: hours.length > 1 ? parseFloat(hours[1].replace(/,/g, "")) : null,
+      };
+    }
+  }
+  return null;
 }
