@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { setAssignment } from "@/lib/assignmentStore";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 // Assignments previously provisioned an OpenAI Assistants thread + vector store.
