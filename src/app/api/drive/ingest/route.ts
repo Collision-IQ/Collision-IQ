@@ -9,6 +9,7 @@ import { generatePrimaryText } from "@/lib/ai/providerTextGeneration";
 import { embedTexts } from "@/lib/rag/embed";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,

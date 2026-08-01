@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 import { embedText } from "@/lib/rag/embed";
 import { chunkText } from "@/lib/rag/chunk";
