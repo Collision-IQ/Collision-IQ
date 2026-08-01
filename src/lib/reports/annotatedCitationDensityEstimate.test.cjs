@@ -3648,11 +3648,13 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     });
 
     const joined = result.annotationMetadata.map((item) => `${item.findingId} ${item.shortTitle} ${item.comment}`).join(" ");
-    assert.match(joined, /wheel_labor_delta/);
+    // O-6 (Work Order R2): lines the structured delta pass covers with a TYPED
+    // finding are no longer shadowed by the generic wheel-labor prose — the
+    // typed finding (measured price/labor cells) leads for those lines.
+    assert.doesNotMatch(joined, /wheel_labor_delta/);
     assert.match(joined, /am_wheel_end_safety/);
     assert.match(joined, /sand_polish_p_page_support/);
     assert.match(joined, /battery_reset_electrical_rate/);
-    assert.match(joined, /Carrier may be missing or inadequately documenting wheel R&I\/access labor/);
     assert.match(joined, /safety-critical wheel-end component/);
     assert.match(joined, /Carrier aftermarket warranty language may address fit, corrosion, or part replacement/);
     assert.match(joined, /ADAS compatibility, crash-test equivalency, or related manufacturer warranty preservation/);
@@ -3661,16 +3663,16 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.match(joined, /CCC\/MOTOR\/P-page\/database support/);
     assert.doesNotMatch(joined, /automatically void/i);
     assert.match(joined, /does not prove an OEM-only requirement without authority/i);
-    const wheelLaborMetadata = result.annotationMetadata.filter((item) => /wheel_labor_delta/.test(item.findingId));
-    assert.ok(wheelLaborMetadata.length > 0 && wheelLaborMetadata.length <= 2);
-    assert.deepEqual(wheelLaborMetadata.map((item) => item.targetLineNumber).sort(), ["43", "47"]);
-    assert.match(joined, /line 43 .*RF wheel repair/i);
-    assert.match(joined, /line 44 .*Tire Mount and Balance/i);
-    assert.match(joined, /line 47 .*Four Wheel Alignment/i);
-    assert.match(joined, /Line 50 Repl RF wheel 0\.3 M/i);
+    // The wheel/alignment lines are still covered — by structured typed
+    // findings anchored to the same rows the wheel detector used to claim.
+    const wheelLineMetadata = result.annotationMetadata.filter((item) => ["43", "44", "47"].includes(item.targetLineNumber));
+    assert.ok(wheelLineMetadata.length >= 2, "structured delta findings cover the wheel/alignment lines");
+    assert.match(joined, /line 43[:\s].*RF wheel repair/i);
+    assert.match(joined, /line 44[:\s].*Tire Mount and Balance/i);
+    assert.match(joined, /line 47[:\s].*Four Wheel Alignment/i);
     assert.doesNotMatch(joined, /4 Wheel DriveTilt WheelFM RadioSkyview Roof/i);
-    assert.equal(wheelLaborMetadata.some((item) => /liner unrelated access trim/i.test(item.sourceAnchorText)), false);
-    assert.equal(wheelLaborMetadata.some((item) => /wheel opening molding/i.test(item.sourceAnchorText)), false);
+    assert.equal(wheelLineMetadata.some((item) => /liner unrelated access trim/i.test(item.sourceAnchorText)), false);
+    assert.equal(wheelLineMetadata.some((item) => /wheel opening molding/i.test(item.sourceAnchorText)), false);
     assert.equal(result.annotationMetadata.some((item) => /ABBREVIATIONS|DISCLAIMER|alternate parts policy|A\/M=AFTERMARKET|CAPA definitions|LKQ\/RCY\/USED|fraud disclaimer|CCC\/MOTOR guide/i.test(item.sourceAnchorText)), false);
     assert.ok(result.debugTrace.requiredDetectorFindingCount >= 4);
     assert.ok(result.debugTrace.acceptedEstimateRowFindingCount >= 4);
@@ -3741,6 +3743,49 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.doesNotMatch(joined, /\bhigher estimate\b/i);
     assert.doesNotMatch(joined, /carrier estimate/i);
     assert.doesNotMatch(firstTitles, /Finish sand and polish/i);
+  });
+
+  await run("callout/findings-report parity: one detector pass feeds both renderers", async () => {
+    // O-2 (Work Order R2): every callout drawn on the annotated estimate MUST
+    // have a card in the findings report — a mark with no explaining card is an
+    // orphan. Both renderers consume the SAME finding list, so parity is the
+    // invariant, not a coincidence of matching heuristics.
+    const sourcePdfBytes = await createShop21896HigherEstimatePdf();
+    const comparisonText = [
+      "Shop 21896 lower estimate",
+      "Net Cost of Repairs $11,892.26",
+      "REAR SUSPENSION",
+      "60 Repl LT Hub assy $250.00 1.0",
+      "61 R&I Rear suspension access $85.00 0.5",
+      "REFINISH",
+      "150 Rpr Finish sand and polish $80.00 0.8",
+    ].join("\n");
+
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourcePdfName: "Shop Final 21896.pdf",
+      sourceDocumentId: "shop-final-21896",
+      sourceText: "Shop Final 21896 final estimate\nNet Cost of Repairs $17,397.20",
+      comparisonEstimateTexts: [{
+        fileName: "Shop 21896.pdf",
+        sourceDocumentId: "shop-21896",
+        estimateRole: "shop",
+        text: comparisonText,
+      }],
+      findings: [],
+      findingGenerator: buildRequiredEstimatorDeltaFindings,
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "shop" },
+    });
+
+    assert.ok(result.annotationMetadata.length > 0, "callouts were drawn");
+    assert.ok(result.findingsReportBytes, "findings report was produced");
+    const findingsReportText = (await extractFindingsReportPageTexts(result))
+      .join(" ")
+      .replace(/\s+/g, "");
+    const orphanCallouts = [...new Set(result.annotationMetadata.map((item) => item.findingId))]
+      .filter((findingId) => !findingsReportText.includes(findingId));
+    assert.deepEqual(orphanCallouts, [], "every callout finding id appears in the findings report");
+    assert.equal(result.unresolvedAnchorCount, 0, "no finding lost its anchor between the two renderers");
   });
 
   await run("policy diagnostics detect vehicle mismatch and garbled extraction fallback", async () => {
