@@ -228,36 +228,104 @@ function carrierAppearsInText(carrier: string, text: string): boolean {
   if (words.length > 1) {
     return new RegExp(`${words.join("\\s+")}\\b`, "i").test(text);
   }
-  return new RegExp(`\\b${words[0]}\\b`, "i").test(text);
+  if (new RegExp(`\\b${words[0]}\\b`, "i").test(text)) return true;
+  // Glued text layers ("withProgressive", "…comUSAA") put word characters on
+  // both sides, so \b never fires. Fall back to a case-transition boundary:
+  // the carrier's exact casing, not preceded by an uppercase letter and not
+  // followed by a lowercase letter ("progressively" stays excluded).
+  return new RegExp(`(?<![A-Z])${escapeRegExp(carrier)}(?![a-z])`).test(text);
+}
+
+/** Every known carrier named anywhere in the given text (context-guarded for
+ * ambiguous names). Used to flag notes that name a carrier other than the
+ * file's resolved insurer. */
+export function carriersNamedIn(text: string): string[] {
+  if (!text) return [];
+  return COMMON_INSURERS.filter((carrier) => carrierAppearsInText(carrier, text));
+}
+
+/** The known carrier that DOMINATES the non-note text: most occurrences,
+ * earliest occurrence breaking ties. Never list-order dependent. */
+export function detectDominantKnownCarrier(text: string): string | undefined {
+  const scanText = stripInsurerNoiseLines(text ?? "");
+  let best: string | undefined;
+  let bestCount = 0;
+  let bestFirstIndex = Number.POSITIVE_INFINITY;
+  for (const carrier of COMMON_INSURERS) {
+    if (!carrierAppearsInText(carrier, scanText)) continue;
+    const pattern = new RegExp(`\\b${carrier.split(/\s+/).map(escapeRegExp).join("\\s+")}\\b`, "gi");
+    const matches = [...scanText.matchAll(pattern)];
+    const count = matches.length;
+    const firstIndex = matches[0]?.index ?? Number.POSITIVE_INFINITY;
+    if (count > bestCount || (count === bestCount && firstIndex < bestFirstIndex)) {
+      best = carrier;
+      bestCount = count;
+      bestFirstIndex = firstIndex;
+    }
+  }
+  return best;
+}
+
+/** Lines that must NEVER feed the insurer scan: line notes and quoted note
+ * prose ("already agreed upon with <carrier>") name carriers that are not
+ * this file's insurer. */
+function stripInsurerNoiseLines(text: string): string {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => {
+      const trimmed = line.trim();
+      if (/^\s*note\b\s*[:.-]/i.test(trimmed) || /^NOTE\b/.test(trimmed)) return false;
+      // quoted/evidence prose that embeds note text without the NOTE prefix
+      if (/\bagreed upon with\b/i.test(trimmed)) return false;
+      return true;
+    })
+    .join("\n");
 }
 
 function extractInsurer(text: string): string | undefined {
-  // The whole-text carrier scan must never read line notes, evidence quotes,
-  // or rationale prose — a note like "already agreed upon with <carrier>"
-  // names a carrier that is NOT this file's insurer. Resolution order:
-  // labeled header field first, then a known carrier found in NON-note text.
-  const scanText = text
-    .split(/\r?\n/)
-    .filter((line) => !/^\s*note\b\s*[:.-]/i.test(line.trim()) && !/^\s*NOTE\b/.test(line.trim()))
-    .join("\n");
-  // Ambiguous carrier names require insurance context ("AAA" from a vendor
-  // line such as "AAA Car Care Center" must not populate the insurer).
-  const knownFromText = COMMON_INSURERS.find((carrier) => carrierAppearsInText(carrier, scanText));
-  // Only the Insurance Company / Insurer / Carrier field may populate the insurer slot.
-  // Owner/Insured/Claimant/Policyholder labels are deliberately excluded from this
-  // regex, and the value must sit on the SAME line — CCC's three-column headers
-  // put the labels on one line and the glued values on the next, so crossing
-  // the newline captures the owner name instead of the carrier.
+  const scanText = stripInsurerNoiseLines(text);
+  const lines = scanText.split(/\r?\n/);
+
+  // Source hierarchy (a document's own header identity always beats a carrier
+  // name found in free text):
+  // 1. LETTERHEAD — a known carrier named in the document's opening lines.
+  const letterheadZone = lines.slice(0, 15).join("\n");
+  const letterhead = COMMON_INSURERS.find((carrier) => carrierAppearsInText(carrier, letterheadZone));
+
+  // 2. LABELED, same line — "Insurance Company: X".
   const labeledRaw =
-    text.match(/\b(?:insurer|insurance company|insurance co(?:mpany)?)\b[ \t]*[:#-][ \t]*([A-Za-z][A-Za-z .&'-]{1,40})/i)?.[1]?.trim();
+    scanText.match(/\b(?:insurer|insurance company|insurance co(?:mpany)?)\b[ \t]*[:#-][ \t]*([A-Za-z][A-Za-z .&'-]{1,40})/i)?.[1]?.trim();
   const labeled = labeledRaw && INSURER_VENDOR_EXCLUSION.test(labeledRaw) ? undefined : labeledRaw;
+
+  // 3. LABELED, next line — CCC's three-column headers put "Insurance
+  //    Company:" on one line and the value on the next. Only a KNOWN carrier
+  //    may be read from the following line (arbitrary next-line text is the
+  //    owner column as often as the carrier column).
+  let labeledNextLine: string | undefined;
+  for (let index = 0; index < lines.length - 1 && !labeledNextLine; index += 1) {
+    if (/\b(?:insurance company|insurer)\b[ \t]*:?[ \t]*$/i.test(lines[index].trim())) {
+      // CCC's three-column headers can interleave one or two other columns'
+      // values before the carrier value — scan the next few lines.
+      const windowText = lines.slice(index + 1, index + 4).join("\n");
+      const candidate = COMMON_INSURERS.find((carrier) => carrierAppearsInText(carrier, windowText));
+      if (candidate) labeledNextLine = candidate;
+    }
+  }
+
+  // 4. DOMINANT carrier — the known carrier that appears MOST OFTEN in the
+  //    non-note text (earliest occurrence breaks ties). Never "first entry of
+  //    the hard-coded list that happens to appear once, somewhere".
+  const knownFromText = detectDominantKnownCarrier(text);
+
   // Capture the owner/insured/claimant name (if labeled) so it can never be selected as
   // the insurer, even when it appears as a prior/extracted candidate.
   const ownerName = text
     .match(/\b(?:owner\/insured|owner|insured|claimant|policyholder|customer)\b\s*[:#-]\s*([A-Za-z][A-Za-z ,.&'-]{1,40})/i)?.[1]
     ?.trim();
   return resolveCanonicalInsurerCandidate({ excludeNames: ownerName ? [ownerName] : [] },
+    { value: letterhead, source: "letterhead" },
     { value: labeled, source: "labeled" },
+    { value: labeledNextLine, source: "labeled" },
     { value: knownFromText, source: "known_carrier" }
   );
 }
@@ -294,7 +362,7 @@ type InsurerCandidateInput =
   | undefined
   | {
       value?: string | null;
-      source?: "known_carrier" | "labeled" | "prior";
+      source?: "known_carrier" | "labeled" | "letterhead" | "prior";
     };
 
 export function resolveCanonicalInsurerCandidate(
@@ -334,7 +402,7 @@ export function resolveCanonicalInsurerCandidate(
 
 function buildInsurerCandidateScore(
   value: string | null | undefined,
-  source: "known_carrier" | "labeled" | "prior"
+  source: "known_carrier" | "labeled" | "letterhead" | "prior"
 ) {
   if (!value) return null;
 
@@ -350,7 +418,8 @@ function buildInsurerCandidateScore(
   // The labeled header field ("Insurance Company: X") outranks a carrier name
   // found anywhere in the text — free text can quote OTHER carriers (prior
   // claims, agreed-upon notes) and must never beat the document's own header.
-  let score = source === "known_carrier" ? 300 : source === "labeled" ? 520 : 100;
+  let score =
+    source === "letterhead" ? 640 : source === "known_carrier" ? 300 : source === "labeled" ? 520 : 100;
   if (isKnownCarrier(normalized)) score += 400;
   if (looksLikeLikelyPersonName(normalized)) score -= 250;
   if (normalized.length <= 2) score -= 200;
