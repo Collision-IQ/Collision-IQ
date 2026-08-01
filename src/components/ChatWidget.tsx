@@ -4612,6 +4612,10 @@ export default function ChatWidget({
   const userBubble =
     "rounded-2xl rounded-br-md border border-[var(--accent)]/25 bg-[var(--accent-soft)] text-foreground shadow-[var(--shadow-soft)]";
 
+  // Mobile pre-chat: the greeting card duplicates the intake affordances on a
+  // small screen, so it stays desktop-only until the conversation starts.
+  const hideInitialGreetingOnMobile = isInitialOnlyMessages(messages);
+
   return (
     <div
       className={`relative flex h-full min-h-0 flex-col overflow-hidden border-t border-border bg-card text-card-foreground ${disabled ? "opacity-75" : ""}`}
@@ -4818,7 +4822,7 @@ export default function ChatWidget({
             return (
             <div
               key={`${msg.id ?? msg.role}-${index}`}
-              className={`flex ${
+              className={`${hideInitialGreetingOnMobile && msg.id === INITIAL_MESSAGE.id ? "hidden sm:flex" : "flex"} ${
                 msg.role === "user"
                   ? "justify-end"
                   : msg.kind === "system_status"
