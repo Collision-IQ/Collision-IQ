@@ -2898,7 +2898,19 @@ function matchStructuredLineItemDeltas(
   ): ReturnType<typeof parseCccEstimateTotals> => {
     if (!wordPages) return textTotals;
     const wordCategories = parseDeltaEngineTotals(wordPages);
-    if (wordCategories.length < 3) return textTotals;
+    // Only replace the text-parsed categories when the word layer parsed at
+    // least as completely (count AND rate coverage) — a synthetic or unusual
+    // totals layout can word-parse worse than it text-parses.
+    const textCategories = textTotals?.categories ?? [];
+    const rateCount = (rows: Array<{ rate: number | null }>) =>
+      rows.filter((row) => row.rate !== null).length;
+    if (
+      wordCategories.length < 3 ||
+      wordCategories.length < textCategories.length ||
+      rateCount(wordCategories) < rateCount(textCategories)
+    ) {
+      return textTotals;
+    }
     return {
       categories: wordCategories.map((row) => ({
         category: row.category.replace(/\s+/g, " ").trim(),
