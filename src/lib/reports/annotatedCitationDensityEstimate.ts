@@ -75,7 +75,26 @@ import {
   estimateRowFromTextFields,
   planDeltaValueAnnotations,
 } from "./deltaValueAnnotationLayer";
-import { canonKey as deltaEngineCanonKey, repairTokens } from "./deltaEngine/estimateNormalize";
+import {
+  canonKey as deltaEngineCanonKey,
+  detectSide as detectDeltaEngineSide,
+  detectPosition as detectDeltaEnginePosition,
+  repairTokens,
+} from "./deltaEngine/estimateNormalize";
+
+/** Strip side vocabulary (and optionally position vocabulary) from a display
+ * description via the SAME synonym sets the engine keys on — presentation must
+ * never re-implement side detection as an LT/RT string test (U-1). */
+function stripDeltaEngineSideTokens(desc: string, stripPosition: boolean): string {
+  let out = desc
+    .replace(/\((?:L|R)\)/gi, " ")
+    .replace(/\b(?:LT|RT|LH|RH|Left|Right|D\/S|P\/S)\.?(?=[\s/,)]|$)/gi, " ")
+    .replace(/\b(?:Drivers?|Passengers?)['’]?s?\s+Side\b/gi, " ");
+  if (stripPosition) {
+    out = out.replace(/\b(?:Front|FRT|Rear|RR|Upper|UPR|Lower|LWR|Inner|INR|Outer|OTR)\b\.?/gi, " ");
+  }
+  return out.replace(/\s*\/\s*/g, " ").replace(/\s{2,}/g, " ").trim();
+}
 import { pairAndCompare } from "./deltaEngine/deltaPair";
 import { carriersNamedIn, detectDominantKnownCarrier } from "@/lib/ai/extractors/extractEstimateFacts";
 import {
@@ -3277,11 +3296,15 @@ function matchStructuredLineItemDeltas(
   // a per-row parade that double-counts the same relationship.
   const deltasByGroupKey = new Map<string, EstimateLineItemDelta[]>();
   for (const delta of match.deltas) {
-    // Group by operation key AND kind AND section: an equal-value coding
-    // difference must never merge into a value delta that happens to share a
-    // description ("Applique" exists under pillars, glass, and rear bumper).
+    // Group by presentation BASE (side- and position-insensitive) AND kind AND
+    // section: an equal-value coding difference must never merge into a value
+    // delta that happens to share a description ("Applique" exists under
+    // pillars, glass, and rear bumper). The base — not the pairing key — is
+    // what lets a 4-way position group (LT/RT × Front/Rear) report as ONE
+    // finding (U-1); pairing itself still keys on (base, position).
+    const canon = deltaEngineCanonKey(delta.higherRow.description);
     const key = [
-      deltaEngineCanonKey(delta.higherRow.description).key || delta.higherRow.description.toUpperCase(),
+      canon.base || canon.key || delta.higherRow.description.toUpperCase(),
       delta.kind,
       delta.codingOnlyChange ? "coding" : "value",
       (delta.higherRow.section ?? "").replace(/\s+/g, " ").trim().toUpperCase(),
@@ -3308,21 +3331,32 @@ function matchStructuredLineItemDeltas(
     // by half — an adjuster reading "2.6 vs 1.3" on a two-sided pair concedes
     // 1.3 hr when the gap is 2.6. State per-side AND aggregate, and title the
     // group neutrally ("both sides"), never with one side's description.
-    const sides = new Set(
-      group.map((delta) =>
-        /\bLT\b/i.test(delta.higherRow.description) ? "LT" : /\bRT\b/i.test(delta.higherRow.description) ? "RT" : "?"
-      )
-    );
-    const isSidePair = group.length === 2 && sides.has("LT") && sides.has("RT");
+    // Side detection via the normalized enum (U-1) — never a literal LT/RT
+    // string test. A group is a SIDE GROUP when both left and right appear;
+    // its size is whatever it is (2 for a plain pair, 4 for LT/RT × Front/
+    // Rear, 3 when one counterpart is genuinely absent — say so, never drop).
+    const memberSides = group.map((delta) => detectDeltaEngineSide(delta.higherRow.description));
+    const memberPositions = group.map((delta) => detectDeltaEnginePosition(delta.higherRow.description));
+    const isSideGroup =
+      group.length >= 2 &&
+      group.length <= 4 &&
+      memberSides.includes("left") &&
+      memberSides.includes("right") &&
+      memberSides.every((side) => side !== "");
+    const distinctPositions = new Set(memberPositions.filter(Boolean));
     const mergedLabor = sum((delta) => delta.laborDelta);
     const mergedPaint = sum((delta) => delta.paintDelta);
     const mergedPrice = sum((delta) => delta.priceDelta);
     const perSideBits: string[] = [];
-    if (isSidePair) {
+    if (isSideGroup) {
+      // Per-member value only when uniform across the group — a mixed group
+      // must not present one member's number as "per side".
       const per = (pick: (d: EstimateLineItemDelta) => number | null, unit: string) => {
-        const value = pick(lead);
-        if (value === null || value === 0) return null;
-        return `${Math.abs(value)}${unit}/side`;
+        const values = group.map(pick);
+        const first = values[0];
+        if (first === null || first === 0) return null;
+        if (!values.every((value) => value === first)) return null;
+        return `${Math.abs(first)}${unit}/side`;
       };
       for (const bit of [per((d) => d.paintDelta, " paint hr"), per((d) => d.laborDelta, " labor hr"), per((d) => d.priceDelta, " $")])
         if (bit) perSideBits.push(bit);
@@ -3332,10 +3366,19 @@ function matchStructuredLineItemDeltas(
       mergedLabor ? `${mergedLabor > 0 ? "+" : ""}${mergedLabor} labor hr aggregate` : null,
       mergedPrice ? `${mergedPrice > 0 ? "+" : ""}$${Math.abs(mergedPrice).toFixed(2)} aggregate` : null,
     ].filter(Boolean);
-    const neutralRow: EstimateDeltaRow = isSidePair
+    const stripSideAndPosition = (desc: string) =>
+      stripDeltaEngineSideTokens(desc, distinctPositions.size > 1).replace(/\s{2,}/g, " ").trim();
+    const groupTag = isSideGroup
+      ? group.length === 2
+        ? `both sides, L${lines.join("/L")}`
+        : group.length === 4
+          ? `both sides × ${[...distinctPositions].join("/") || "positions"}, L${lines.join("/L")}`
+          : `${group.length} of a side group — one counterpart absent, L${lines.join("/L")}`
+      : null;
+    const neutralRow: EstimateDeltaRow = isSideGroup
       ? {
           ...lead.higherRow,
-          description: `${lead.higherRow.description.replace(/\b(?:LT|RT)\b\s*/i, "")} (both sides, L${lines.join("/L")})`.replace(/\s{2,}/g, " ").trim(),
+          description: `${stripSideAndPosition(lead.higherRow.description)} (${groupTag})`,
         }
       : lead.higherRow;
     mergedDeltas.push({

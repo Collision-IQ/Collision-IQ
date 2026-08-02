@@ -44,7 +44,7 @@ describe("RC-1 note-bleed / orphan-row split", () => {
     expect(rows.map((r) => r.line)).toEqual([42, 43]);
     const l43 = rows.find((r) => r.line === 43)!;
     expect(l43.key).toBe("OUTERBRACKET");
-    expect(l43.side).toBe("LT");
+    expect(l43.side).toBe("left");
     expect(l43.part).toBe("PT00009496K");
     expect(l43.labor).toBe(0.3);
     expect(diag.reconstitutedRows).toBe(1);

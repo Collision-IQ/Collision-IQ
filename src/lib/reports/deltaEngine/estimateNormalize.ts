@@ -42,14 +42,77 @@ export function repairTokens(value: string): string {
   return out;
 }
 
+/** Normalized side of a two-sided operation — NEVER a raw vocabulary token. */
+export type SideEnum = "left" | "right" | "";
+/** Normalized position axis (a side group can be 2-way OR 4-way: LT/RT Front + LT/RT Rear). */
+export type PositionEnum = "front" | "rear" | "upper" | "lower" | "inner" | "outer" | "";
+
+/**
+ * Side vocabulary across estimating platforms (U-1). Matched on the repaired,
+ * uppercased, pre-squash string so punctuation forms ("(L)", "D/S", "Lt.")
+ * still carry their boundaries. Bare DRIVER/PASSENGER are NOT side tokens —
+ * "Driver assistance camera" is ADAS vocabulary, not a side; only the
+ * explicit "<DRIVER|PASSENGER> SIDE" form is directional.
+ */
+const SIDE_SYNONYMS: ReadonlyArray<[RegExp, SideEnum]> = [
+  [/\bLT\.?(?=[\s/,)]|$)/, "left"],
+  [/\bLH\b/, "left"],
+  [/\bLEFT\b/, "left"],
+  [/\(L\)/, "left"],
+  [/\bD\/S\b/, "left"],
+  [/\bDRIVERS?['’]?S?\s+SIDE\b/, "left"],
+  [/\bRT\.?(?=[\s/,)]|$)/, "right"],
+  [/\bRH\b/, "right"],
+  [/\bRIGHT\b/, "right"],
+  [/\(R\)/, "right"],
+  [/\bP\/S\b/, "right"],
+  [/\bPASSENGERS?['’]?S?\s+SIDE\b/, "right"],
+];
+
+/** Position vocabulary; abbreviation forms normalize to the canonical token so
+ * "FRT Door" and "Front Door" key identically. */
+const POSITION_SYNONYMS: ReadonlyArray<[RegExp, PositionEnum, string]> = [
+  [/\bFRONT\b|\bFRT\b/, "front", "FRONT"],
+  [/\bREAR\b|\bRR\b/, "rear", "REAR"],
+  [/\bUPPER\b|\bUPR\b/, "upper", "UPPER"],
+  [/\bLOWER\b|\bLWR\b/, "lower", "LOWER"],
+  [/\bINNER\b|\bINR\b/, "inner", "INNER"],
+  [/\bOUTER\b|\bOTR\b/, "outer", "OUTER"],
+];
+
+/** Detect the normalized side of a raw description (exported for the group
+ * layer — presentation grouping must never re-test literal LT/RT strings). */
+export function detectSide(rawDesc: string): SideEnum {
+  const s = ` ${repairTokens(rawDesc).toUpperCase()} `;
+  for (const [pattern, side] of SIDE_SYNONYMS) if (pattern.test(s)) return side;
+  // Leading bare L/R (Mitchell-style "L Fender"): first standalone token only.
+  const bare = /^\s*[#*\s]*([LR])\s+[A-Z]/.exec(s.trim());
+  if (bare) return bare[1] === "L" ? "left" : "right";
+  return "";
+}
+
+/** Detect the normalized position axis of a raw description. */
+export function detectPosition(rawDesc: string): PositionEnum {
+  const s = ` ${repairTokens(rawDesc).toUpperCase()} `;
+  for (const [pattern, position] of POSITION_SYNONYMS) if (pattern.test(s)) return position;
+  return "";
+}
+
 export interface CanonKey {
+  /** Side-insensitive, position-PRESERVING pairing key: an LT Front row must
+   * pair with RT Front, never with LT Rear. */
   key: string;
-  side: "RT" | "LT" | "";
+  /** Side- AND position-insensitive presentation base: a 4-way group
+   * (LT/RT × Front/Rear) shares one base and reports as ONE finding. */
+  base: string;
+  side: SideEnum;
+  position: PositionEnum;
 }
 
 /**
  * Canonical key: whitespace-INSENSITIVE (glued tokens carry no case signal),
- * op-prefix stripped, part numbers and digits removed, stems applied last.
+ * op-prefix stripped, part numbers and digits removed, side vocabulary
+ * removed via synonym set (U-1 — never a literal LT/RT test), stems last.
  */
 export function canonKey(rawDesc: string): CanonKey {
   let s = repairTokens(rawDesc).toUpperCase();
@@ -57,6 +120,13 @@ export function canonKey(rawDesc: string): CanonKey {
   s = s.replace(/^\s*[#*]+\s*/, "");
   s = s.replace(/^(R&I|RPR|REPL|BLND|REFN|SUBL|O\/H)\b/, "").trim();
   s = s.replace(/[0-9]+(\.[0-9]+)?/g, "");
+  // Side + position enums from the synonym sets, on the pre-squash string
+  // (punctuation forms like "(L)" and "D/S" need their boundaries intact).
+  let side = detectSide(s);
+  const position = detectPosition(s);
+  for (const [pattern] of SIDE_SYNONYMS) s = s.replace(new RegExp(pattern.source, "g"), " ");
+  s = s.replace(/^\s*[LR]\s+(?=[A-Z])/, " "); // leading bare L/R
+  for (const [pattern, , canonical] of POSITION_SYNONYMS) s = s.replace(new RegExp(pattern.source, "g"), canonical);
   s = s.replace(/[^A-Z]/g, ""); // squash — drops spaces, &, punctuation
   s = s.split("INCL").join("");
   // op may still be glued at the front on corrupted docs (e.g. "RIRTBATTERY")
@@ -66,16 +136,19 @@ export function canonKey(rawDesc: string): CanonKey {
       break;
     }
   }
-  for (const [stem, canon] of STEMS) if (s.includes(stem)) return { key: canon, side: "" };
-  let side: CanonKey["side"] = "";
-  if (s.startsWith("RT")) {
-    side = "RT";
+  for (const [stem, canon] of STEMS) if (s.includes(stem)) return { key: canon, base: canon, side: "", position: "" };
+  // Glued corrupted docs ("RTBATTERY" with no boundaries) evade the synonym
+  // pass — fall back to the squashed-prefix test.
+  if (!side && s.startsWith("RT")) {
+    side = "right";
     s = s.slice(2);
-  } else if (s.startsWith("LT")) {
-    side = "LT";
+  } else if (!side && s.startsWith("LT")) {
+    side = "left";
     s = s.slice(2);
   }
-  return { key: s, side };
+  const positionToken = POSITION_SYNONYMS.find(([, p]) => p === position)?.[2] ?? "";
+  const base = positionToken ? s.split(positionToken).join("") : s;
+  return { key: s, base, side, position };
 }
 
 /** Truncate any trailing NOTE text before keying — notes must never enter keys. */
