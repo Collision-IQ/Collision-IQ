@@ -2579,6 +2579,33 @@ export function normalizeTotalsCategoryKey(name: string): string {
   return canonTotalsCategory(name);
 }
 
+/**
+ * C-10 (Work Order R4): extraction completeness of a parsed estimate — rows
+ * actually parsed vs rows IMPLIED by the document's own line-number sequence.
+ * An OCR'd comparison that yields 30 rows across a 1–190 line span is mostly
+ * unread; publishing a demand-grade delta verdict over it is the completion-
+ * gate failure. Below threshold the pack renders as an INTAKE report.
+ */
+export function assessComparisonExtraction(rows: Array<{ lineNumber: number | null }>): {
+  parsedRows: number;
+  impliedRows: number;
+  coverage: number;
+  gate: boolean;
+} {
+  const lineNumbers = rows
+    .map((row) => row.lineNumber)
+    .filter((line): line is number => line !== null && Number.isFinite(line));
+  const parsedRows = lineNumbers.length;
+  const impliedRows = parsedRows
+    ? Math.max(...lineNumbers) - Math.min(...lineNumbers) + 1
+    : 0;
+  const coverage = impliedRows > 0 ? parsedRows / impliedRows : 1;
+  // Gate only on substantive documents: a sparse synthetic or a genuinely
+  // short estimate must not read as degraded.
+  const gate = parsedRows >= 15 && impliedRows >= 40 && coverage < 0.5;
+  return { parsedRows, impliedRows, coverage: Math.round(coverage * 100) / 100, gate };
+}
+
 export function compareEstimateTotals(params: {
   higher: EstimateTotalsSummary | null;
   lower: EstimateTotalsSummary | null;

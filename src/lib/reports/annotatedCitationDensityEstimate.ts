@@ -66,6 +66,7 @@ import {
   parseCccEstimateTotals,
   normalizeTotalsCategoryKey,
   parseEstimateNetTotal,
+  assessComparisonExtraction,
   type EstimateDeltaKind,
   type EstimateDeltaRow,
   type EstimateLineItemDelta,
@@ -748,6 +749,9 @@ export type CitationDensityDebugTrace = {
   lineItemDeltaMissingCount?: number;
   /** Findings that received an RIR-resolved authority (O-5 attach pass). */
   resolvedAuthorityAttachedCount?: number;
+  /** C-10: comparison-document extraction coverage (0..1) and intake gate. */
+  comparisonExtractionCoverage?: number;
+  intakeModeActive?: boolean;
   detailLayoutBlocks?: Array<{
     findingNumber: number;
     pageIndex: number;
@@ -1005,6 +1009,7 @@ const LABEL_DEFINITIONS: Record<string, string> = {
   "RATE DELTA": "A labor or materials rate differs between the two estimates.",
   "TOTAL GAP": "The grand totals differ — the reconciled overall gap between the two estimates.",
   "RECONCILIATION GAP": "The compared category deltas do NOT sum to the grand-total gap — part of the headline is unexplained; treat itemized claims accordingly.",
+  "INTAKE": "The comparison document could not be read completely — this pack reports what was read and what to re-supply; no line-level delta verdict is rendered.",
   "LOWER-ONLY LINES": "Lines present only on the lower-cost estimate (omitted scope, wording variants, or duplicate candidates).",
   "CARRIER MISMATCH": "A line note names a carrier that is not this file's insurer — a document-attribution defect.",
   "CARRIER HIGHER": "On this matched line the LOWER-cost estimate allows more — the cost gap runs in the other direction.",
@@ -2009,7 +2014,18 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
           },
           resolvedComparisonCarrier
         );
-        if (competingRows.length > 0) {
+        // C-10: the value-mark layer honors the same completion gate as the
+        // findings lane — no delta verdict marks over a mostly-unread
+        // comparison document.
+        const valueLayerExtraction = assessComparisonExtraction(
+          competingRows.map((row) => ({ lineNumber: row.line }))
+        );
+        if (valueLayerExtraction.gate) {
+          warnings.push(
+            `Comparison estimate extraction coverage ${Math.round(valueLayerExtraction.coverage * 100)}% is below the confidence threshold — delta value marks suppressed (intake mode).`
+          );
+        }
+        if (competingRows.length > 0 && !valueLayerExtraction.gate) {
           const plan = planDeltaValueAnnotations({
             subjectWords: placementWords,
             pages: [...pageGeometries.values()],
@@ -2632,6 +2648,8 @@ export function buildRequiredEstimatorDeltaFindings(
   let lineItemDeltaFindingCount = 0;
   let lineItemDeltaMatchedPairCount = 0;
   let lineItemDeltaMissingCount = 0;
+  let comparisonExtractionCoverage: number | undefined;
+  let intakeModeActive = false;
   if (context.canonicalDeltaSet) {
     // Canonical path: the structured delta object is the authoritative source.
     // The legacy local-diff path must not run when a canonical set is present.
@@ -2846,7 +2864,44 @@ export function buildRequiredEstimatorDeltaFindings(
   // Phase 2: now that the required safety detectors have claimed their rows, fill every
   // remaining gap with structured deltas anchored on the higher-cost source. Structured deltas
   // lead the report, so they are prepended ahead of the detector findings.
-  if (deltaMatch) {
+  if (deltaMatch && deltaMatch.comparisonExtraction.gate) {
+    // C-10 completion gate: the comparison document is mostly UNREAD (rows
+    // parsed cover under half its own line-number span). A delta verdict over
+    // partial state is not publishable — the pack renders as an INTAKE
+    // report: what was read, what could not be, what to re-supply.
+    const extraction = deltaMatch.comparisonExtraction;
+    const intakeAnchor =
+      context.anchors.find((anchor) => anchor.anchorType === "totals_row") ??
+      context.anchors.find((anchor) => anchor.anchorType === "estimate_line");
+    if (intakeAnchor) {
+      findings.unshift(
+        buildRequiredDetectorFinding({
+          context,
+          anchor: intakeAnchor,
+          findingType: "delta-intake-comparison-extraction",
+          title: `Intake only — the comparison estimate could not be read completely (${Math.round(extraction.coverage * 100)}% of its lines)`,
+          category: "other",
+          label: "INTAKE",
+          estimateGapType: "needs_proof",
+          score: 90,
+          safetyImpact: "low",
+          priority: "high",
+          currentSupportSummary:
+            `What was read: ${extraction.parsedRows} line(s) of ${deltaMatch.comparisonName} across a line-number span of ${extraction.impliedRows} — ` +
+            `${Math.round(extraction.coverage * 100)}% coverage. What could not be read: approximately ${Math.max(0, extraction.impliedRows - extraction.parsedRows)} line(s) implied by the document's own numbering. ` +
+            `No line-level delta verdict is rendered over this comparison — a demand built on a mostly-unread document is not defensible.`,
+          missingProofSummary:
+            "The comparison estimate's extraction coverage is below the confidence threshold (image-only/degraded source). Delta verdicts are withheld until a readable copy is supplied.",
+          recommendedNextAction:
+            "Re-supply the comparison estimate as a text-layer PDF (original CCC/estimating-platform export) or a legible scan; then regenerate this report for the full line-level delta.",
+          missingAuthorityTypes: ["legible/text-layer copy of the comparison estimate"],
+        })
+      );
+    }
+    comparisonExtractionCoverage = extraction.coverage;
+    intakeModeActive = true;
+    lineItemDeltaFindingCount = 0;
+  } else if (deltaMatch) {
     // Rate/totals findings lead the report — rates and hour subtotals are
     // typically the largest cost-gap drivers.
     const totalsFindings = emitTotalsDeltaFindings(deltaMatch, context, usedAnchorIds);
@@ -2879,6 +2934,8 @@ export function buildRequiredEstimatorDeltaFindings(
       lineItemDeltaMatchedPairCount,
       lineItemDeltaMissingCount,
       resolvedAuthorityAttachedCount,
+      comparisonExtractionCoverage,
+      intakeModeActive,
       rejectedAnchors: rejectedAnchors.slice(0, 40),
       rejectedBoilerplateCount: rejectedAnchors.length,
       authoritySearchTrace: {
@@ -3143,6 +3200,9 @@ type StructuredLineItemDeltaMatch = {
   potentialDuplicateLowerRows: EstimateDeltaRow[];
   /** Arbitrary materials cap on the lower estimate (flat figure, no hrs@rate basis), with jurisdiction citation. */
   pmCapFlag: PmCapFlag | null;
+  /** C-10: extraction completeness of the COMPARISON document. When `gate`
+   * is true the pack renders as an INTAKE report — no delta verdicts. */
+  comparisonExtraction: ReturnType<typeof assessComparisonExtraction>;
 };
 
 // Phase 1 of the structured delta path: parse and pair rows WITHOUT emitting findings or
@@ -3607,6 +3667,7 @@ function matchStructuredLineItemDeltas(
     carrierMismatchNotes,
     potentialDuplicateLowerRows: match.potentialDuplicateLowerRows,
     pmCapFlag,
+    comparisonExtraction: assessComparisonExtraction(lowerRows),
   };
 }
 
@@ -6323,6 +6384,9 @@ function isTotalOrRateFinding(finding: CitationDensityFinding) {
   // when their text says "Parts totals" or "Category amount" without a bare
   // "total" keyword ("Parts" amount deltas were demoted to unanchored).
   if ((finding.id ?? "").startsWith("required-detector-totals-")) return true;
+  // The C-10 intake notice anchors to the totals block by design — it is a
+  // document-level statement, not a row dispute.
+  if ((finding.id ?? "").includes("intake-comparison-extraction")) return true;
   return /\b(?:totals?|subtotal|net cost|rate|labor rate|grand total|estimate total)\b/i.test(
     `${finding.operationLabel} ${finding.counterpartSummary ?? ""} ${finding.currentSupportSummary}`
   );

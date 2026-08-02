@@ -3836,6 +3836,43 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.deepEqual(perLineTitles, [], "no single-side mud flap findings alongside the group");
   });
 
+  await run("C-10: a mostly-unread comparison document produces an INTAKE report, not a delta verdict", async () => {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Shop estimate intake gate", { x: 42, y: 742, size: 10, font });
+    let y = 712;
+    for (let line = 1; line <= 20; line += 1) {
+      drawCccEstimateRow(page, font, line, "", "Rpr", `Panel operation ${line}`, "1.0", "", y);
+      y -= 14;
+    }
+    page.drawText("ESTIMATE TOTALS", { x: 42, y: y - 10, size: 9, font });
+    const sourcePdfBytes = await doc.save();
+    // Degraded comparison: 16 rows scattered across a 1-80 line span — its
+    // own numbering implies ~80 lines, so 80% of the document is unread.
+    const sparseLines = [1, 6, 11, 16, 21, 26, 31, 36, 41, 46, 51, 56, 61, 66, 71, 80];
+    const comparisonText = [
+      "Carrier estimate (image-only OCR)",
+      "Net Cost of Repairs $1,000.00",
+      ...sparseLines.map((line) => `${line} Rpr Panel operation ${line} 0.5`),
+    ].join("\n");
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourcePdfName: "Shop intake.pdf",
+      sourceText: "Shop estimate\nNet Cost of Repairs $5,000.00",
+      comparisonEstimateTexts: [{ fileName: "Carrier OCR.pdf", estimateRole: "carrier", text: comparisonText }],
+      findings: [],
+      findingGenerator: buildRequiredEstimatorDeltaFindings,
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "shop" },
+    });
+    const text = await combinedReportText(result);
+    assert.match(text, /Intake only|INTAKE/, "intake finding present");
+    assert.match(text, /re-?supply|Re-supply/i, "re-supply instruction present");
+    assert.doesNotMatch(text, /Missing from lower-cost estimate/i, "no delta verdicts in intake mode");
+    assert.equal(result.debugTrace.intakeModeActive, true);
+    assert.ok((result.debugTrace.comparisonExtractionCoverage ?? 1) < 0.5);
+  });
+
   await run("inverted pair (annotated source is the LOWER estimate) declines structured deltas", async () => {
     // Corpus item 5 (Work Order R3): the higher/lower selection is
     // total-driven; when the annotated source is the LOWER-total document the
