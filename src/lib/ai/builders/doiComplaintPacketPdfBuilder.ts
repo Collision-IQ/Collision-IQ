@@ -37,7 +37,9 @@ export function buildDoiComplaintPacketPdf(params: ExportBuilderInput): CarrierR
   const { exportModel } = source;
   const rightsReview = buildPolicyRightsReviewModel(params, exportModel);
   const vehicleIdentity = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
-  const vin = resolveCanonicalVin(exportModel) ?? "Unspecified";
+  // resolveCanonicalVin can return an EMPTY STRING, which ?? passes through
+  // and renders a blank VIN field (D-8) — || falls back on empty too.
+  const vin = resolveCanonicalVin(exportModel) || "Unspecified";
   const insurer = resolveCanonicalInsurer(exportModel);
   const verifiedRegulationSources = getVerifiedRegulationSources(rightsReview);
   const policySources = getPolicySources(rightsReview, params.report);

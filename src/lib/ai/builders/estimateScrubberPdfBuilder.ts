@@ -255,7 +255,9 @@ export function buildAnnotatedEstimateReviewModel(params: ExportBuilderInput): A
   });
   const annotations = annotationResult.annotations;
   const vehicleIdentity = resolveCanonicalVehicleLabel(exportModel) ?? "Unspecified";
-  const vin = resolveCanonicalVin(exportModel) ?? "Unspecified";
+  // resolveCanonicalVin can return an EMPTY STRING, which ?? passes through
+  // and renders a blank VIN field (D-8) — || falls back on empty too.
+  const vin = resolveCanonicalVin(exportModel) || "Unspecified";
   const insurer = resolveCanonicalInsurer(exportModel);
 
   return {
