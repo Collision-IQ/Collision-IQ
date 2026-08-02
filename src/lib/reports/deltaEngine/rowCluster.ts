@@ -14,7 +14,15 @@
  *      marks are anchored to measured coordinates — a row whose cell bbox is
  *      missing is only eligible for margin notes, never for on-text marks.
  */
-import { canonKey, stripNote, extractPart, repairTokens, type CanonKey } from "./estimateNormalize";
+import {
+  canonKey,
+  stripNote,
+  extractPart,
+  repairTokens,
+  learnConfusableRepairs,
+  withDocumentRepairs,
+  type CanonKey,
+} from "./estimateNormalize";
 
 export interface Word {
   text: string;
@@ -384,19 +392,37 @@ export function parseEstimateRows(
   wordsByPage: Map<number, Word[]>,
   diag?: RowParseDiagnostics
 ): EstimateRow[] {
-  const rows: EstimateRow[] = [];
-  const state: RowParseState = { section: "", prev: null, pendingStub: null };
-  let cols: ColRanges | null = null;
-  const pages = [...wordsByPage.keys()].sort((a, b) => a - b);
-  for (const page of pages) {
-    const words = tokenizeWords(wordsByPage.get(page)!);
-    const measured = measureColumns(words);
-    if (measured) cols = measured;
-    if (!cols) continue;
-    rows.push(...parsePage(words, page, cols, state, diag));
+  // U-4: learn this document's confusable repairs from its OWN token stream
+  // before parsing — a broken text layer mangles glyphs consistently, so a
+  // frequent unknown token IN THE OPERATION POSITION that aligns to the
+  // operation vocabulary is that operation. Position matters: only the first
+  // token after a line number (skipping #/* markers) is a candidate, so
+  // description prose ("and", "Rear", part names) can never become a rule.
+  const opPositionTokens: string[] = [];
+  for (const words of wordsByPage.values()) {
+    for (const cluster of clusterRows(tokenizeWords(words))) {
+      if (!/^\d{1,3}$/.test(cluster[0]?.text ?? "") || cluster.length < 2) continue;
+      let index = 1;
+      while (index < cluster.length && /^[#*]+$/.test(cluster[index].text)) index += 1;
+      if (index < cluster.length) opPositionTokens.push(cluster[index].text);
+    }
   }
-  rejectStub(state, diag);
-  return rows;
+  const learnedRepairs = learnConfusableRepairs(opPositionTokens);
+  return withDocumentRepairs(learnedRepairs, () => {
+    const rows: EstimateRow[] = [];
+    const state: RowParseState = { section: "", prev: null, pendingStub: null };
+    let cols: ColRanges | null = null;
+    const pages = [...wordsByPage.keys()].sort((a, b) => a - b);
+    for (const page of pages) {
+      const words = tokenizeWords(wordsByPage.get(page)!);
+      const measured = measureColumns(words);
+      if (measured) cols = measured;
+      if (!cols) continue;
+      rows.push(...parsePage(words, page, cols, state, diag));
+    }
+    rejectStub(state, diag);
+    return rows;
+  });
 }
 
 export function emptyRowParseDiagnostics(): RowParseDiagnostics {

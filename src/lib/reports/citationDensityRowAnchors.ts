@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { PDFDocument } from "pdf-lib";
+import type { PDFDocument, PDFDict as PdfLibDict } from "pdf-lib";
 import type { CitationDensityFinding } from "@/lib/ai/types/estimateScrubber";
 import { buildPdfRectFromTopLeftAnchor } from "./citationDensityCoordinates";
 
@@ -39,7 +39,75 @@ export type PdfTextExtractionDiagnostics = {
   perPageTextItemCounts: number[];
   firstNonEmptyTextPage: number | null;
   firstNonEmptyTextSample: string;
+  /** U-4: false when the document uses non-embedded fonts or fonts without a
+   * ToUnicode map — the reflowed text stream is then untrustworthy
+   * (glyph-shift artifacts like "R&I"→"R8d"). NOT the same as "scanned":
+   * the text layer is live, its encoding is broken. */
+  textLayerReliable?: boolean;
+  textLayerUnreliableReason?: string;
 };
+
+/**
+ * Inspect the document's font dictionaries (U-4): a font with no embedded
+ * FontFile and no ToUnicode map produces a reflowed text stream that cannot
+ * be trusted (the PeerNet/image-printer class of producer). Checked
+ * structurally from the PDF object graph — never inferred from text content.
+ */
+export async function assessPdfTextLayerReliability(bytes: Uint8Array): Promise<{
+  reliable: boolean;
+  reason?: string;
+}> {
+  try {
+    const { PDFDocument, PDFName, PDFDict, PDFArray } = await import("pdf-lib");
+    const doc = await PDFDocument.load(bytes.slice(), { ignoreEncryption: true, updateMetadata: false });
+    let sawFont = false;
+    const unreliableFonts: string[] = [];
+    const descriptorHasFontFile = (fontDict: PdfLibDict): boolean => {
+      const descriptor = fontDict.lookupMaybe(PDFName.of("FontDescriptor"), PDFDict);
+      return Boolean(
+        descriptor &&
+          (descriptor.has(PDFName.of("FontFile")) ||
+            descriptor.has(PDFName.of("FontFile2")) ||
+            descriptor.has(PDFName.of("FontFile3")))
+      );
+    };
+    for (const page of doc.getPages()) {
+      const resources = page.node.Resources();
+      const fonts = resources?.lookupMaybe(PDFName.of("Font"), PDFDict);
+      if (!fonts) continue;
+      for (const key of fonts.keys()) {
+        const font = fonts.lookupMaybe(key, PDFDict);
+        if (!font) continue;
+        sawFont = true;
+        const baseFont = String(font.lookupMaybe(PDFName.of("BaseFont"), PDFName) ?? "unknown");
+        if (font.has(PDFName.of("ToUnicode"))) continue; // decodable regardless of embedding
+        let embedded = descriptorHasFontFile(font);
+        if (!embedded) {
+          // Composite (Type0) fonts carry the descriptor on descendant fonts.
+          const descendants = font.lookupMaybe(PDFName.of("DescendantFonts"), PDFArray);
+          if (descendants) {
+            for (let index = 0; index < descendants.size(); index += 1) {
+              const descendant = descendants.lookupMaybe(index, PDFDict);
+              if (descendant && descriptorHasFontFile(descendant)) embedded = true;
+            }
+          }
+        }
+        if (!embedded && !unreliableFonts.includes(baseFont)) unreliableFonts.push(baseFont);
+      }
+    }
+    if (!sawFont) return { reliable: true };
+    if (unreliableFonts.length) {
+      return {
+        reliable: false,
+        reason: `non-embedded font(s) without ToUnicode map: ${unreliableFonts.slice(0, 4).join(", ")}`,
+      };
+    }
+    return { reliable: true };
+  } catch {
+    // Reliability assessment is advisory — never block extraction on it.
+    return { reliable: true };
+  }
+}
 
 export type PdfTextLine = {
   pageNumber: number;
@@ -175,6 +243,16 @@ export async function extractPdfWordsWithDiagnostics(bytes: Uint8Array): Promise
     };
   }
 
+  // U-4: structural text-layer reliability check — non-embedded fonts with no
+  // ToUnicode map mean the reflowed text stream cannot be trusted; the
+  // measured word layer (coordinates) is still extracted, the flag rides in
+  // diagnostics so downstream repair and reporting can attribute a low match
+  // rate to the broken encoding.
+  const reliability = await assessPdfTextLayerReliability(bytes);
+  if (!reliability.reliable) {
+    warnings.push(`text_layer: unreliable — ${reliability.reason ?? "broken font encoding"}`);
+  }
+
   infrastructureStage = "get-document";
   const primary = await extractPdfWordsWithPdfjs(bytes, "pdfjs-legacy-primary", {
     data: bytes.slice(),
@@ -190,6 +268,8 @@ export async function extractPdfWordsWithDiagnostics(bytes: Uint8Array): Promise
         ...primary.diagnostics,
         parserFallbackUsed: false,
         warnings: [...warnings, ...primary.diagnostics.warnings],
+        textLayerReliable: reliability.reliable,
+        textLayerUnreliableReason: reliability.reason,
       },
     };
   }
@@ -218,6 +298,8 @@ export async function extractPdfWordsWithDiagnostics(bytes: Uint8Array): Promise
           : "Primary pdfjs extraction returned zero text items; retried with Node fallback options.",
         ...fallback.diagnostics.warnings,
       ],
+      textLayerReliable: reliability.reliable,
+      textLayerUnreliableReason: reliability.reason,
     },
   };
 }

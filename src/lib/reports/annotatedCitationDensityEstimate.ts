@@ -1373,9 +1373,20 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   // both the structured delta matcher and the delta value layer. Failures
   // degrade to text-based comparison, never fail the report.
   const comparisonEstimateWords: Array<{ fileName: string; estimateRole?: "carrier" | "shop"; words: PdfWord[] }> = [];
+  // U-4: per-document text-layer reliability notes ride into the findings
+  // report cover so a low match rate on a broken-encoding producer is
+  // attributable — this is a LIVE text layer with a broken encoding, not a
+  // scanned document, and the remedy (coordinate extraction + confusable
+  // repair) is different.
+  const textLayerNotes: string[] = [];
   for (const comparisonPdf of params.comparisonEstimatePdfs ?? []) {
     try {
       const extractionResult = await extractPdfWordsWithDiagnostics(comparisonPdf.bytes.slice());
+      if (extractionResult.diagnostics.textLayerReliable === false) {
+        textLayerNotes.push(
+          `${comparisonPdf.fileName}: text layer unreliable (${extractionResult.diagnostics.textLayerUnreliableReason ?? "broken font encoding"}) — parsed from measured coordinates with vocabulary-driven glyph repair.`
+        );
+      }
       if (extractionResult.words.length > 0) {
         comparisonEstimateWords.push({
           fileName: comparisonPdf.fileName,
@@ -2032,6 +2043,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       annotatedCount: matches.length,
       unanchoredCount: unmatched.length,
       generatedAt: new Date().toISOString(),
+      textLayerNotes,
     });
     if (findingDetails.length > 0) {
       trace.detailLayoutBlocks = addCitationDensityFindingDetailPages(findingsDoc, findingDetails, {
@@ -7541,6 +7553,8 @@ function addFindingsReportCoverPage(
     annotatedCount: number;
     unanchoredCount: number;
     generatedAt: string;
+    /** U-4: per-document text-layer reliability notes (broken font encoding). */
+    textLayerNotes?: string[];
   }
 ) {
   const page = pdfDoc.addPage();
@@ -7563,6 +7577,7 @@ function addFindingsReportCoverPage(
       `Highlighted on the estimate (anchored): ${options.annotatedCount}`,
       `Supplement-only / unanchored (listed here only): ${options.unanchoredCount}`,
       `Total findings: ${options.annotatedCount + options.unanchoredCount}`,
+      ...(options.textLayerNotes?.length ? ["", ...options.textLayerNotes] : []),
       "",
       `Generated: ${options.generatedAt}`,
     ],

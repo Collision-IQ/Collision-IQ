@@ -36,9 +36,102 @@ const STEMS: ReadonlyArray<[string, string]> = [
   ["SUPPORTVEHICLE", "LIFTSUPPORTVEHICLE"],
 ];
 
+/**
+ * Repair vocabulary (U-4): the tokens a collision estimate is KNOWN to carry —
+ * operation codes and structural markers. Confusable repair aligns broken
+ * tokens against THIS list; it never grows per-carrier entries.
+ */
+const REPAIR_VOCABULARY: ReadonlyArray<string> = [
+  "R&I",
+  "R&R",
+  "Rpr",
+  "Repl",
+  "Blnd",
+  "Refn",
+  "Subl",
+  "O/H",
+  "Algn",
+  "Add",
+  "D&R",
+  "Incl.",
+  "Incl",
+  "Note",
+  "SUBTOTALS",
+];
+
+/** Document-scoped repairs learned from the file's own vocabulary (U-4).
+ * Installed by the parser for the duration of one document's parse. */
+let activeDocumentRepairs: ReadonlyArray<[string, string]> = [];
+
+export function withDocumentRepairs<T>(repairs: ReadonlyArray<[string, string]>, run: () => T): T {
+  const previous = activeDocumentRepairs;
+  activeDocumentRepairs = repairs;
+  try {
+    return run();
+  } finally {
+    activeDocumentRepairs = previous;
+  }
+}
+
+/**
+ * Learn confusable repairs from the document's own token stream (U-4): a
+ * broken text layer (non-embedded font, no ToUnicode) mangles glyphs
+ * CONSISTENTLY, so a frequent unknown token that aligns to a vocabulary word
+ * by common prefix/suffix with a short differing middle ("R8d"→"R&I" via
+ * "8d"→"&I", "D8iR"→"D&R" via "8i"→"&", "Bind"→"Blnd" via "i"→"l") is that
+ * word. Whole-token rules only, minimum 3 occurrences, minimum 3 chars —
+ * a one-off description word never becomes a rule.
+ */
+export function learnConfusableRepairs(tokens: ReadonlyArray<string>): Array<[string, string]> {
+  const counts = new Map<string, number>();
+  for (const raw of tokens) {
+    const token = raw.trim();
+    if (token.length < 3 || token.length > 6) continue;
+    if (/^[\d.,$%()-]+$/.test(token)) continue; // numeric cells are never op codes
+    if (token === token.toLowerCase()) continue; // prose words are never op codes
+    if (/^[A-Z]+$/.test(token)) continue; // ALL-CAPS letters = section header vocabulary, not a broken op code
+    counts.set(token, (counts.get(token) ?? 0) + 1);
+  }
+  const vocab = new Set(REPAIR_VOCABULARY.map((word) => word.toUpperCase()));
+  const learned: Array<[string, string]> = [];
+  for (const [token, count] of counts) {
+    if (count < 3) continue;
+    if (vocab.has(token.toUpperCase())) continue;
+    for (const word of REPAIR_VOCABULARY) {
+      if (Math.abs(word.length - token.length) > 1) continue;
+      let prefix = 0;
+      while (prefix < token.length && prefix < word.length && token[prefix].toUpperCase() === word[prefix].toUpperCase()) prefix += 1;
+      let suffix = 0;
+      while (
+        suffix < token.length - prefix &&
+        suffix < word.length - prefix &&
+        token[token.length - 1 - suffix].toUpperCase() === word[word.length - 1 - suffix].toUpperCase()
+      )
+        suffix += 1;
+      const tokenMid = token.slice(prefix, token.length - suffix);
+      const wordMid = word.slice(prefix, word.length - suffix);
+      // Aligned when the shared shell covers at least half the vocab word and
+      // the differing middle is a 1–2 glyph perturbation on both sides.
+      if (
+        prefix + suffix >= Math.ceil(word.length / 2) &&
+        tokenMid.length >= 1 &&
+        tokenMid.length <= 2 &&
+        wordMid.length >= 1 &&
+        wordMid.length <= 2 &&
+        tokenMid !== wordMid
+      ) {
+        learned.push([token, word]);
+        break;
+      }
+    }
+  }
+  return learned;
+}
+
 export function repairTokens(value: string): string {
   let out = value;
   for (const [bad, good] of ARTIFACTS) out = out.split(bad).join(good);
+  for (const [bad, good] of activeDocumentRepairs) out = out.split(bad).join(good);
   return out;
 }
 
