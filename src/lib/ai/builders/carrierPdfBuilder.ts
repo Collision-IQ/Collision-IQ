@@ -786,17 +786,33 @@ function buildOemProcedureSupportBullets(
   const retrievalSupport = exportModel.retrievalSummary?.sourcesInfluencingFindings
     .filter((source) => /oem|procedure|position/i.test(`${source.title} ${source.sourceType}`))
     .map((source) => `${source.title} (${source.sourceType}; ${formatRepairIntelligenceSourceStatus(`${source.title} ${source.sourceType}`)}).`) ?? [];
+  // C-9: documented-on-estimate items are the file's OWN lines, never
+  // retrieved authority — label the provenance so a bare topic list can no
+  // longer read as OEM support that was not actually retrieved.
   const procedureSupport = [
     ...exportModel.reportFields.documentedProcedures,
     ...exportModel.reportFields.documentedHighlights,
     ...documentedStrengths,
-  ].map((item) => ensureSentence(item));
+  ].map((item) => `Documented on the estimate (its own lines — not retrieved OEM authority): ${ensureSentence(item)}`);
   const itemSupport = exportModel.supplementItems
     .filter((item) => /oem|procedure|position|scan|calibration|corrosion|weld|bond/i.test(`${item.category} ${item.rationale} ${item.evidence ?? ""}`))
     .slice(0, 6)
     .map((item) => `${displayOperationLabel(item.title)}: ${item.evidence || item.rationale}`);
 
-  const bullets = dedupeBullets([...procedureSupport, ...itemSupport, ...retrievalSupport]);
+  // C-9: empty retrieval is acceptable; SILENT is not. When the run resolved
+  // no make-specific OEM authority, say so explicitly, by make, up front.
+  const make = exportModel.vehicle.make?.trim();
+  const makeSpecificRetrieval = make
+    ? retrievalSupport.filter((entry) => new RegExp(`\\b${make.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(entry))
+    : retrievalSupport;
+  const noAuthorityRecord =
+    make && makeSpecificRetrieval.length === 0
+      ? [
+          `No ${make}-specific OEM procedure or position statement was retrieved for this run — the retrieval gate held rather than attach generic or other-make documents. Affected findings remain NEEDS OEM until a ${make} repair procedure or position statement for the disputed operations is produced.`,
+        ]
+      : [];
+
+  const bullets = dedupeBullets([...noAuthorityRecord, ...retrievalSupport, ...itemSupport, ...procedureSupport]);
   return bullets.length > 0
     ? bullets
     : ["No specific OEM procedure or position-statement support was isolated from the current file."];
