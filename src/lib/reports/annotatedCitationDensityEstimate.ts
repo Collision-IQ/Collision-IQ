@@ -150,7 +150,16 @@ function engineRowsToDeltaRows(
         .replace(/[*\s]+$/, "")
         .replace(/^(?:R&I|R&R|Repl|Rpr|Blnd|Subl|Refn|Algn|O\/H)\s+/i, "")
         .trim();
-      if (cleanDescription) deltaRow.description = cleanDescription;
+      if (cleanDescription) {
+        deltaRow.description = cleanDescription;
+        // Realign opCode with the engine description (D-1): the legacy
+        // re-parse can claim a description's first word ("Overlap", "Add")
+        // as a pseudo-operation while the engine description keeps it —
+        // rendering then duplicates the token ("Add Add for Clear Coat").
+        // The opCode is a REAL operation token of the engine row, or null.
+        const engineOp = /^[#*\s]*((?:R&I|R&R|Repl|Rpr|Blnd|Subl|Refn|Algn|O\/H))\b/i.exec(row.rawDesc);
+        deltaRow.opCode = engineOp ? engineOp[1] : null;
+      }
       out.push(deltaRow);
     }
   }

@@ -568,10 +568,17 @@ export function explodeGluedRow(rawText: string): string {
     // dimension tail into phantom qty/hour columns.
     if (/[xX]/.test(prev) && /\d/.test(text[i - 2] ?? "")) continue;
     const remainder = text.slice(i);
+    const tokenEnd = text.indexOf(" ", i);
+    // Part numbers are ATOMIC (D-1): a short letter prefix welded to a 7+
+    // digit run ("PT00015376B001") is a part-number token — whitespace inside
+    // one makes it un-searchable and un-quotable. The 'T' in such a token is
+    // a part glyph, never a tax marker; skip every boundary inside it.
+    const tokenStart = text.lastIndexOf(" ", i - 1) + 1;
+    const fullToken = text.slice(tokenStart, tokenEnd === -1 ? text.length : tokenEnd);
+    if (/^[A-Za-z]{1,3}\d{7,}/.test(fullToken)) continue;
     // Never split INSIDE an alphanumeric part number ("GM1144143", "C25J75"):
     // the rest of that token must itself look like glued column data — a
     // decimal value or a 9+ digit run — before the boundary is real.
-    const tokenEnd = text.indexOf(" ", i);
     const withinToken = tokenEnd === -1 ? text.slice(i) : text.slice(i, tokenEnd);
     const splittable =
       /\.\d/.test(withinToken) ||
