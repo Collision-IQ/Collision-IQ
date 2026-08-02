@@ -741,7 +741,31 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
     if (!list.length) byPage.set(line.pageNumber, list);
     list.push(line);
   }
+  // Some producers print the column header ONCE (RO 22182 style) while others
+  // repeat it per page (CCC default). A header establishes the table top for
+  // its page AND carries to following pages — the table runs until the
+  // SUBTOTALS rule — so continuation pages keep their region instead of
+  // losing every anchor.
+  const FOOTER_MARGIN = 40;
+  // Footer chrome is detected GEOMETRICALLY: a line position that repeats at
+  // the same y (±4pt) on 3+ pages in the bottom fifth of the page is page
+  // chrome, never table content — no date/Page-N text test involved.
+  const bottomBandPages = new Map<number, Set<number>>();
   for (const [pageNumber, pageLines] of byPage) {
+    for (const line of pageLines) {
+      if (line.y < line.pageHeight * 0.8) continue;
+      const bucket = Math.round(line.y / 8);
+      const pages = bottomBandPages.get(bucket) ?? new Set<number>();
+      if (!pages.size) bottomBandPages.set(bucket, pages);
+      pages.add(pageNumber);
+    }
+  }
+  const footerBuckets = [...bottomBandPages.entries()].filter(([, pages]) => pages.size >= 3).map(([bucket]) => bucket);
+  const footerTopY = footerBuckets.length ? Math.min(...footerBuckets) * 8 - 4 : null;
+  let carriedTop: number | null = null;
+  for (const pageNumber of [...byPage.keys()].sort((a, b) => a - b)) {
+    const pageLines = byPage.get(pageNumber)!;
+    const pageHeight = pageLines[0]?.pageHeight ?? 792;
     const header = pageLines
       .filter(
         (line) =>
@@ -749,14 +773,24 @@ function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; b
           (/\bQty\b/.test(line.text) && /\bExtended\b/i.test(line.text))
       )
       .sort((a, b) => a.y - b.y)[0];
-    if (!header) continue;
+    if (header) carriedTop = header.y + header.height;
+    if (carriedTop === null) continue; // pages before any header: no region
+    const top = header ? header.y + header.height : carriedTop;
     const subtotals = pageLines
-      .filter((line) => /\bSUBTOTALS\b/i.test(line.text) && line.y > header.y)
+      .filter((line) => /\bSUBTOTALS\b/i.test(line.text) && line.y > top)
       .sort((a, b) => a.y - b.y)[0];
+    const chromeBottom = Math.min(
+      pageHeight - FOOTER_MARGIN,
+      footerTopY !== null && footerTopY > top ? footerTopY - 2 : pageHeight - FOOTER_MARGIN
+    );
     regions.set(pageNumber, {
-      top: header.y + header.height,
-      bottom: subtotals ? subtotals.y + subtotals.height : header.pageHeight,
+      top,
+      bottom: Math.min(subtotals ? subtotals.y + subtotals.height : chromeBottom, chromeBottom),
     });
+    // On per-page-header producers the next header re-establishes the top; on
+    // print-once producers the SUBTOTALS rule ends the table for good.
+    if (subtotals && !header) carriedTop = null;
+    if (subtotals && header) carriedTop = header.y + header.height; // per-page style continues
   }
   return regions;
 }
