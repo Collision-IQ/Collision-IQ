@@ -2948,21 +2948,27 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
     if (delta.ocrUncertain) {
       // OCR confidence drives Delta confidence: the lower estimate is machine-read
       // from an image-only PDF, so a non-match is unverified, not a confirmed
-      // omission. Downgrade to a verify item and never assert "missing".
+      // omission. C-8: OCR is a PROVENANCE qualifier, orthogonal to the
+      // finding TYPE — the finding keeps its type label and score lane
+      // (identical shapes must not land 12 points apart because one carried
+      // the qualifier), while title and proof language stay hedged and the
+      // provenance rides explicitly in the proof text.
       return {
         findingType: "delta-missing-operation-ocr-uncertain",
         title: `Possibly missing (OCR-uncertain — verify against source): ${label}`,
-        label: "VERIFY (OCR)",
+        label: profile.label,
         category: profile.category,
         estimateGapType: "present_but_under_documented",
         missingProof:
-          "This line is documented on the higher-cost estimate but was not located on the lower-cost estimate. The lower-cost estimate was machine-read from an image-only PDF (OCR_UNCERTAIN / LOWER_ESTIMATE_OCR_LIMITATION), so OCR may have dropped or garbled it. Treat this as unverified — not a confirmed omission — and VERIFY_AGAINST_SOURCE before relying on it.",
+          "This line is documented on the higher-cost estimate but was not located on the lower-cost estimate. " +
+          "Provenance: VERIFY (OCR) — the lower-cost estimate was machine-read from an image-only PDF (OCR_UNCERTAIN / LOWER_ESTIMATE_OCR_LIMITATION), so OCR may have dropped or garbled it. " +
+          "Treat this as unverified — not a confirmed omission — and VERIFY_AGAINST_SOURCE before relying on it.",
         nextAction:
           "Compare this line against the legible source of the lower-cost estimate (or a re-OCR/text version) to confirm whether it is genuinely absent before treating it as a gap.",
         missingAuthorityTypes: ["legible lower-estimate source", ...profile.missingAuthorityTypes],
-        score: Math.max(0, profile.score - 24),
+        score: profile.score,
         safetyImpact: profile.safetyImpact,
-        priority: profile.priority === "high" ? "medium" : "low",
+        priority: profile.priority,
       };
     }
     return {
@@ -3644,7 +3650,11 @@ function emitStructuredLineItemDeltaFindings(
     // heuristic keys on keywords anywhere in the lower text (a vehicle-options
     // list mentioning "WHEELS" counts), and the per-line label then
     // contradicts the finding's own every-line-unpaid prose (RO 22140 Test 3).
-    if ((delta.statusLabels ?? []).includes("SECTION_MISSED")) {
+    // C-7: title binds to the delta's OWN kind — a "Section missing" title on
+    // an expanded-scope body (the category IS present on the lower estimate)
+    // contradicts itself. Only a missing_operation member carries the tag
+    // upstream now; the kind check here is defense in depth.
+    if ((delta.statusLabels ?? []).includes("SECTION_MISSED") && delta.kind === "missing_operation") {
       meta.title = `Section missing from lower-cost estimate: ${delta.higherRow.section ?? "section"} — ${delta.higherRow.description}`;
       // Only the GENERIC gap label upgrades to SECTION MISSING — specialized
       // authority labels (NEEDS ADAS / NEEDS OEM / NEEDS INVOICE) drive their

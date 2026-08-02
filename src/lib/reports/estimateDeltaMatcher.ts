@@ -2335,6 +2335,13 @@ export function matchEstimateLineItems(params: {
       if (delta.lowerRow !== null) continue;
       const section = normalizeCategoryText(delta.higherRow.section ?? "");
       if (!section || !missedSectionKeys.has(section)) continue;
+      // C-7: title and body must derive from the SAME conclusion. A delta
+      // whose category-presence check already concluded "the category is
+      // present on the lower estimate — expanded/added scope" must never be
+      // tagged section-missing: zero LINE matches does not make a section
+      // absent when the lower estimate carries the category with different
+      // lines. Only confirmed missing_operation deltas take the tag.
+      if (delta.kind === "expanded_scope") continue;
       const labels = new Set(delta.statusLabels ?? []);
       labels.add("SECTION_MISSED");
       delta.statusLabels = [...labels];
