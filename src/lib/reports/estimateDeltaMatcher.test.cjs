@@ -437,5 +437,25 @@ run("C-1: 22182 totals vocabulary resolves to concepts (Bonded Or Welded Panel R
   assert.equal(normalizeTotalsCategoryKey("Miscellaneous"), "MISCELLANEOUS");
 });
 
+run("C-4: labor-class digit between labor and paint columns is the CLASS, never paint hours", () => {
+  const pillar = parseCccEstimateRow("99 Repl RT Front pillar (ALU) 1095028S0N 1 1234.00 3.6 2 0.7");
+  assert.equal(pillar.labor, 3.6);
+  assert.equal(pillar.paint, 0.7, "the '2' is the labor class, not 2.0 paint hours");
+  const wheelhouse = parseCccEstimateRow("107 Repl RT Outer wheelhouse (ALU) 1108148 1 500.00 2.0 1 0.7");
+  assert.equal(wheelhouse.paint, 0.7);
+  // A genuine decimal paint value still types as paint.
+  const molding = parseCccEstimateRow("12 Repl Molding 123456 1 50.00 0.5 1.0");
+  assert.equal(molding.labor, 0.5);
+  assert.equal(molding.paint, 1.0);
+});
+
+run("C-6: product identifiers with digit+letter are atomic ('-3M', '3M')", () => {
+  const { explodeGluedRow } = require("./estimateDeltaMatcher.ts");
+  assert.match(explodeGluedRow("118 Heavy-Bodied Seam Sealer -3M 08308 2 24.86"), /-3M/);
+  assert.match(explodeGluedRow("119 Controlled-Flow Seam Sealer 3M 08308 2 24.86"), / 3M /);
+  // Glued value+marker forms still split.
+  assert.match(explodeGluedRow("Hood28.32T1.0"), /28\.32 T/);
+});
+
 console.log(`\nestimateDeltaMatcher: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

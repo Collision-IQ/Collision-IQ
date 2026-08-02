@@ -603,7 +603,16 @@ export function explodeGluedRow(rawText: string): string {
         // 1-decimal hour values ("Hood1.03.2"), handled below.
         .replace(/(\.\d{2})(?=-?\d{1,4}[.,]\d)/g, "$1 ")
         .replace(/([mMsTX])(?=-?[\d.])/g, "$1 ") // marker → number
-        .replace(/(\d)([mMsTXbBpP])(?=\s|$)/g, "$1 $2"); // number → trailing marker
+        // number → trailing marker. A VALUE-shaped run (decimal or 2+ digits)
+        // always splits from a marker letter; a SINGLE digit splits only when
+        // glued to a preceding lowercase word ("scan1m" = qty+marker). After
+        // a hyphen or standalone, digit+letter is a product IDENTIFIER
+        // ("Seam Sealer -3M") and identifiers are atomic (C-6).
+        .replace(/((?:\d+\.\d+|\d{2,}))([mMsTXbBpP])(?=\s|$)/g, "$1 $2")
+        .replace(/([a-z]\d)([mMsTXbBpP])(?=\s|$)/g, "$1 $2")
+        // Standalone single digit + LOWERCASE marker is a glued qty+marker
+        // ("1m"); the uppercase form ("3M") is a brand identifier and stays.
+        .replace(/(^|\s)(\d)([msbp])(?=\s|$)/g, "$1$2 $3");
       // Hour columns glue to each other ("2.41.8" → "2.4 1.8"). Hours carry
       // exactly ONE decimal, so only split when a FULL hour number follows —
       // never inside a 2-decimal money value ("11,308.00" stays intact).
@@ -904,6 +913,14 @@ function extractTrailingColumns(body: string): {
         labor = value;
         columnSlot = 1;
       } else if (columnSlot === 1) {
+        // C-4 (RO 22182): CCC prints the user-defined labor CLASS as a bare
+        // 1–4 digit between the labor and paint columns ("… 3.6 2 0.7").
+        // Hour values always carry a decimal; a bare 1–4 integer in the
+        // class position is the labor class, never the paint hours.
+        if (/^[1-4]$/.test(token) && laborType === null && labor !== null) {
+          laborType = token;
+          continue;
+        }
         paint = value;
         columnSlot = 2;
         break;
