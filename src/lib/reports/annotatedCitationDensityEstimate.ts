@@ -167,18 +167,33 @@ function engineRowsToDeltaRows(
 }
 
 /**
- * Attach research-resolved authorities to delta findings by finding type
- * (O-5): a scan/diagnostic finding gets the retrieved scan position
- * statement, a calibration finding the calibration/ADAS document. Document
- * identifiers ("RCI-98-23-002-3") are restored from the URL/locator when an
- * upstream summarizer truncated them out of the title — the identifier IS the
- * citable reference.
+ * Attach research-resolved authorities to delta findings by
+ * FINDING TYPE × DECODED MAKE × JURISDICTION (D-4) — never by document name.
+ * A scan/diagnostic finding gets the retrieved scan position statement, a
+ * calibration finding the calibration/ADAS document, a rate finding the
+ * jurisdiction's paint-and-materials authority. Make-specific authority
+ * classes (OEM position statements, ADAS procedures) attach ONLY when the
+ * authority names the decoded make — a Rivian file must never carry a GM
+ * statement; when nothing make-specific resolved, the finding keeps its
+ * NEEDS label plus an explicit "no make-specific authority found" note.
+ * Document identifiers ("RCI-98-23-002-3") are restored from the URL/locator
+ * when an upstream summarizer truncated them out of the title — the
+ * identifier IS the citable reference.
  */
 export function attachResolvedAuthoritiesToFindings(
   findings: CitationDensityFinding[],
-  authorities: NonNullable<AnnotatedEstimateFindingGeneratorContext["resolvedAuthorities"]>
+  authorities: NonNullable<AnnotatedEstimateFindingGeneratorContext["resolvedAuthorities"]>,
+  attachContext?: { vehicleMake?: string | null; jurisdiction?: string | null }
 ): number {
   if (!authorities.length) return 0;
+  const vehicleMake = attachContext?.vehicleMake?.trim() || null;
+  const jurisdiction = attachContext?.jurisdiction?.trim() || null;
+  const authorityText = (authority: (typeof authorities)[number]) =>
+    `${authority.sourceTitle} ${authority.url ?? ""} ${authority.locator ?? ""}`;
+  const matchesMake = (authority: (typeof authorities)[number]) =>
+    !vehicleMake || new RegExp(`\\b${vehicleMake.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(authorityText(authority));
+  const matchesJurisdiction = (authority: (typeof authorities)[number]) =>
+    !jurisdiction || new RegExp(jurisdiction.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(authorityText(authority));
   const restoreIdentifier = (authority: (typeof authorities)[number]): string => {
     const title = authority.sourceTitle.trim();
     const identifierPattern = /\b([A-Z]{2,5}-[\dOIl-]{6,})\b/;
@@ -194,20 +209,36 @@ export function attachResolvedAuthoritiesToFindings(
     findingMatches: (finding: CitationDensityFinding) => boolean;
     authorityMatches: (authority: (typeof authorities)[number]) => boolean;
     type: CitationDensityAuthority["type"];
+    /** OEM/ADAS classes are make-specific; legal classes are jurisdiction-specific. */
+    gate: "make" | "jurisdiction" | "none";
   }> = [
     // Calibration first: an ADAS finding whose label also says "scan" must
     // prefer the calibration document over the generic scan statement.
     {
       findingMatches: (finding) =>
         finding.category === "adas_calibration" || /\bcalibrat|adas\b/i.test(finding.operationLabel),
-      authorityMatches: (authority) => /\bcalibrat|adas\b/i.test(`${authority.sourceTitle} ${authority.url ?? ""}`),
+      authorityMatches: (authority) => /\bcalibrat|adas\b/i.test(authorityText(authority)),
       type: "adas_procedure",
+      gate: "make",
     },
     {
       findingMatches: (finding) =>
         finding.category === "scan_diagnostic" || /\bscan\b/i.test(finding.operationLabel),
-      authorityMatches: (authority) => /\bscan(?:ning)?\b/i.test(`${authority.sourceTitle} ${authority.url ?? ""}`),
+      authorityMatches: (authority) => /\bscan(?:ning)?\b/i.test(authorityText(authority)),
       type: "oem_position_statement",
+      gate: "make",
+    },
+    // Jurisdictional paint-and-materials / labor-rate authority on rate
+    // findings (statute, DOI guidance, or accepted P&M basis).
+    {
+      findingMatches: (finding) =>
+        /\brate\b/i.test(finding.operationLabel) &&
+        (finding.id ?? "").startsWith("required-detector-totals-"),
+      authorityMatches: (authority) =>
+        (authority.sourceType === "law" || authority.sourceType === "policy" || authority.sourceType === "industry") &&
+        /\bpaint|material|p\s*&\s*m|labor rate\b/i.test(authorityText(authority)),
+      type: "legal",
+      gate: "jurisdiction",
     },
   ];
   let attached = 0;
@@ -222,8 +253,30 @@ export function attachResolvedAuthoritiesToFindings(
     ) continue;
     for (const matcher of matchers) {
       if (!matcher.findingMatches(finding)) continue;
-      const authority = authorities.find((candidate) => matcher.authorityMatches(candidate));
-      if (!authority) continue;
+      const gated = authorities.filter((candidate) =>
+        matcher.gate === "make"
+          ? matchesMake(candidate)
+          : matcher.gate === "jurisdiction"
+            ? matchesJurisdiction(candidate)
+            : true
+      );
+      const authority = gated.find((candidate) => matcher.authorityMatches(candidate));
+      if (!authority) {
+        // The retrieval gate held (D-4): a type-relevant authority may exist
+        // but not for THIS make/jurisdiction — say so explicitly instead of
+        // attaching a wrong-make document or staying silent.
+        if (
+          matcher.gate === "make" &&
+          vehicleMake &&
+          authorities.some((candidate) => matcher.authorityMatches(candidate))
+        ) {
+          const note = `No ${vehicleMake}-specific authority found for this finding type — retrieval gate held; generic or other-make documents were not attached.`;
+          if (!(finding.limitations ?? []).includes(note)) {
+            finding.limitations = [...(finding.limitations ?? []), note].slice(0, 12);
+          }
+        }
+        continue;
+      }
       const title = restoreIdentifier(authority);
       finding.bestAvailableAuthority = {
         type: matcher.type,
@@ -521,6 +574,11 @@ export type AnnotatedEstimateFindingGeneratorContext = {
     locator?: string;
     confidenceScore?: number | null;
   }>;
+  /** Decoded vehicle make (D-4): OEM/ADAS authority classes attach only when
+   * the authority names this make — never a wrong-make document. */
+  vehicleMake?: string | null;
+  /** Loss jurisdiction (D-4): legal/P&M authority classes gate on it. */
+  jurisdiction?: string | null;
   authorityTrace?: OemCitationDensityAuthorityTrace;
   /** When present, the canonical delta set is the authoritative source for all delta findings.
    *  The legacy local-diff path is suppressed; all emitted findings carry canonicalDeltaObjectId. */
@@ -1110,6 +1168,9 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   canonicalDeltaSet?: CanonicalDeltaSet;
   /** RIR-resolved research authorities, attached to matching delta findings by type (O-5). */
   resolvedAuthorities?: AnnotatedEstimateFindingGeneratorContext["resolvedAuthorities"];
+  /** Decoded make + jurisdiction gating the authority attach (D-4). */
+  vehicleMake?: string | null;
+  jurisdiction?: string | null;
   findingGenerator?: (context: AnnotatedEstimateFindingGeneratorContext) => AnnotatedEstimateGeneratedFindings;
 }): Promise<AnnotatedEstimateResult> {
   const request = params.request ?? {};
@@ -1421,6 +1482,8 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       comparisonEstimateTexts: params.comparisonEstimateTexts ?? [],
       comparisonEstimateWords,
       resolvedAuthorities: params.resolvedAuthorities,
+      vehicleMake: params.vehicleMake,
+      jurisdiction: params.jurisdiction,
       authorityTrace: params.authorityTrace,
       canonicalDeltaSet: params.canonicalDeltaSet,
     });
@@ -2767,7 +2830,8 @@ export function buildRequiredEstimatorDeltaFindings(
 
   const resolvedAuthorityAttachedCount = attachResolvedAuthoritiesToFindings(
     findings,
-    context.resolvedAuthorities ?? []
+    context.resolvedAuthorities ?? [],
+    { vehicleMake: context.vehicleMake, jurisdiction: context.jurisdiction }
   );
 
   return {

@@ -300,6 +300,11 @@ export async function POST(request: Request) {
         locator: source.locator,
         confidenceScore: source.confidenceScore,
       }));
+    // D-4 gates: authorities attach by finding type × decoded make ×
+    // jurisdiction — never by document name.
+    const vehicleMake = activeReport.report.vehicle?.make ?? null;
+    const jurisdiction =
+      (researchSnapshot?.sourcesReviewed ?? []).find((source) => source.accepted && source.jurisdiction)?.jurisdiction ?? null;
 
     const outputs = [];
     const aggregateWarnings = new Set<string>();
@@ -391,6 +396,8 @@ export async function POST(request: Request) {
         deltaDiagnostics: model.citationDensityDiagnostics,
         canonicalDeltaSet: canonicalDeltaSet ?? undefined,
         resolvedAuthorities,
+        vehicleMake,
+        jurisdiction,
         findingGenerator: buildRequiredEstimatorDeltaFindings,
         request: {
           findingIds: coerceStringArray(body.findingIds),
