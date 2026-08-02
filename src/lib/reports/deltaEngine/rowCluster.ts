@@ -216,6 +216,21 @@ function finalizeRow(row: EstimateRow, state: RowParseState): "row" | "section" 
     state.sectionLabel = row.rawDesc;
     return "section";
   }
+  // U-3 shape gate: a row is a NON-OPERATION by shape — no operation token,
+  // no part number, no value cell, no quantity — regardless of what its text
+  // says. Banner/marketing rows differ per carrier; their text is never
+  // tested. URL-only and phone-only rows are non-operations by shape alone.
+  // A documentation line WITH a printed quantity ("Work Authorization
+  // Secured", qty 1) is real work-order content and survives.
+  const trimmedDesc = row.rawDesc.replace(/^[#*\s]+/, "").trim();
+  const urlOrPhoneOnly =
+    /^(?:https?:\/\/\S+|www\.\S+[^\s]*)$/i.test(trimmedDesc) ||
+    /^(?:1[-.\s])?\(?\d{3}\)?[-.\s]\d{3}[-.\s][\dA-Z]{4,}$/i.test(trimmedDesc);
+  if (urlOrPhoneOnly) return "empty";
+  const hasOpToken = /^(?:R&I|R&R|RPR|REPL|BLND|REFN|SUBL|O\/H|ALGN|ADD)\b/i.test(trimmedDesc);
+  const hasMeasurableWork =
+    row.qty !== null || row.price !== null || row.labor !== null || row.paint !== null;
+  if (!hasOpToken && !row.part && !hasMeasurableWork) return "empty";
   const ck = canonKey(row.rawDesc);
   row.key = ck.key;
   row.side = ck.side;
