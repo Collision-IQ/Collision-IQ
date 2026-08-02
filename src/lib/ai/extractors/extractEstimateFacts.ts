@@ -244,6 +244,49 @@ export function carriersNamedIn(text: string): string[] {
   return COMMON_INSURERS.filter((carrier) => carrierAppearsInText(carrier, text));
 }
 
+/** Legitimate contexts where naming ANOTHER carrier is correct, not a defect
+ * (U-6): subrogation, prior-loss references, third-party-claim language.
+ * Better to under-fire than to accuse an adjuster of copy-paste falsely. */
+const CARRIER_MISMATCH_SUPPRESSION =
+  /\b(?:subrogat\w*|prior\s+(?:loss|claim|damage)|previous\s+(?:loss|claim)|third[-\s]?party|other\s+(?:\w+\s+)?claim|uninsured\s+motorist|underinsured|liability\s+carrier|claimant'?s?\s+carrier)\b/i;
+
+/** Organization shapes that are NOT carriers: shops, dealers, suppliers,
+ * sublet vendors, salvage/recyclers, DRP networks. */
+const NON_CARRIER_ENTITY_SHAPE =
+  /\b(?:auto\s*body|collision|body\s*shop|repair|motors?|dealer(?:ship)?|parts|supply|supplier|salvage|towing|glass|recycl\w+|vendor|sublet|network|academy)\b/i;
+
+/** Corporate-suffix shape of an insurance organization name. */
+const CARRIER_ORG_NAME_SHAPE =
+  /\b([A-Z][A-Za-z&'.]+(?:\s+[A-Z][A-Za-z&'.]+){0,3}\s+(?:Insurance(?:\s+(?:Company|Co\.?|Group))?|Ins\.?(?:\s+Co\.?)?|Mutual|Casualty|Assurance|Underwriters|Indemnity))\b/g;
+
+/**
+ * U-6 general identity check: every organization-like name in a note that is
+ * NOT the file's resolved carrier and NOT a known non-carrier entity shape.
+ * Two detection lanes: the known-carrier lexicon (exact) and the corporate
+ * insurance-suffix shape (open-world — a carrier never seen before still
+ * flags). Suppressed entirely in legitimate other-carrier contexts.
+ */
+export function findForeignOrganizationMentions(
+  noteText: string,
+  resolvedCarrier: string | undefined
+): string[] {
+  if (!noteText) return [];
+  if (CARRIER_MISMATCH_SUPPRESSION.test(noteText)) return [];
+  const resolved = (resolvedCarrier ?? "").toLowerCase();
+  const out: string[] = [];
+  const push = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const lower = trimmed.toLowerCase();
+    if (resolved && (lower === resolved || lower.includes(resolved) || resolved.includes(lower))) return;
+    if (NON_CARRIER_ENTITY_SHAPE.test(trimmed)) return;
+    if (!out.some((existing) => existing.toLowerCase() === lower)) out.push(trimmed);
+  };
+  for (const known of carriersNamedIn(noteText)) push(known);
+  for (const match of noteText.matchAll(CARRIER_ORG_NAME_SHAPE)) push(match[1]);
+  return out;
+}
+
 /** The known carrier that DOMINATES the non-note text: most occurrences,
  * earliest occurrence breaking ties. Never list-order dependent. */
 export function detectDominantKnownCarrier(text: string): string | undefined {

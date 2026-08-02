@@ -96,7 +96,7 @@ function stripDeltaEngineSideTokens(desc: string, stripPosition: boolean): strin
   return out.replace(/\s*\/\s*/g, " ").replace(/\s{2,}/g, " ").trim();
 }
 import { pairAndCompare } from "./deltaEngine/deltaPair";
-import { carriersNamedIn, detectDominantKnownCarrier } from "@/lib/ai/extractors/extractEstimateFacts";
+import { detectDominantKnownCarrier, findForeignOrganizationMentions } from "@/lib/ai/extractors/extractEstimateFacts";
 import {
   emptyRowParseDiagnostics,
   parseEstimateRows as parseDeltaEngineRows,
@@ -3249,8 +3249,12 @@ function matchStructuredLineItemDeltas(
         ];
         for (const { row, side } of scanRows) {
           if (!row.note) continue;
-          for (const carrier of carriersNamedIn(row.note)) {
-            if (carrier.toLowerCase() === dominantCarrier.toLowerCase()) continue;
+          // U-6: any organization-like name that is not the resolved carrier
+          // and not a known non-carrier entity — open-world (an unseen
+          // carrier's corporate-suffix shape still flags), bidirectional
+          // (both documents scanned), and suppressed in legitimate contexts
+          // (subrogation / prior loss / third-party claim language).
+          for (const carrier of findForeignOrganizationMentions(row.note, dominantCarrier)) {
             // Anchor on the ANNOTATED document: the row itself when the note
             // is there, else the paired subject row for a comparison note.
             const subjectRow =
