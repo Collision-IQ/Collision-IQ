@@ -721,17 +721,66 @@ export function filterSelectedEstimateRowAnchors(
   return selected;
 }
 
+/**
+ * U-5: the TABLE REGION of each page, measured geometrically — the y-range
+ * between the column-header row (Line/Oper/… or Qty/Extended headers) and
+ * the SUBTOTALS rule. Text outside the region is never an operation row,
+ * never anchorable, and never contributes row text — headers, footers,
+ * disclaimers, and cover-page prose are excluded by construction instead of
+ * by per-symptom patches.
+ */
+function measureTableRegions(lines: PdfTextLine[]): Map<number, { top: number; bottom: number }> {
+  const regions = new Map<number, { top: number; bottom: number }>();
+  const byPage = new Map<number, PdfTextLine[]>();
+  for (const line of lines) {
+    const list = byPage.get(line.pageNumber) ?? [];
+    if (!list.length) byPage.set(line.pageNumber, list);
+    list.push(line);
+  }
+  for (const [pageNumber, pageLines] of byPage) {
+    const header = pageLines
+      .filter(
+        (line) =>
+          (/\bLine\b/.test(line.text) && /\bOper\b/i.test(line.text) && /\bDescription\b/i.test(line.text)) ||
+          (/\bQty\b/.test(line.text) && /\bExtended\b/i.test(line.text))
+      )
+      .sort((a, b) => a.y - b.y)[0];
+    if (!header) continue;
+    const subtotals = pageLines
+      .filter((line) => /\bSUBTOTALS\b/i.test(line.text) && line.y > header.y)
+      .sort((a, b) => a.y - b.y)[0];
+    regions.set(pageNumber, {
+      top: header.y + header.height,
+      bottom: subtotals ? subtotals.y + subtotals.height : header.pageHeight,
+    });
+  }
+  return regions;
+}
+
 export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: BuildOptions): EstimateRowAnchor[] {
   const anchors: EstimateRowAnchor[] = [];
   let section = "";
   let previousEstimateRow: EstimateRowAnchor | null = null;
+  const tableRegions = measureTableRegions(lines);
 
   for (const line of [...lines].sort((a, b) => a.pageNumber - b.pageNumber || a.y - b.y || a.x - b.x)) {
     if (isGenericOrMalformedAnchorText(line.text)) continue;
     const lineNumber = extractLineNumber(line.text);
     const sectionName = detectSection(line.text);
-    const type = classifyLine(line.text, lineNumber, sectionName, section);
+    let type = classifyLine(line.text, lineNumber, sectionName, section);
     if (sectionName) section = sectionName;
+    // U-5 geometric gate: on documents where a table region is measurable,
+    // operation-type anchors may only exist INSIDE a region. A line-numbered
+    // string on a cover page ("4 Wheel Drive…" options prose stealing line 4)
+    // or below the SUBTOTALS rule is structurally non-anchorable.
+    if (
+      tableRegions.size > 0 &&
+      (type === "estimate_line" || type === "line_note" || type === "embedded_link_row")
+    ) {
+      const region = tableRegions.get(line.pageNumber);
+      const inRegion = region ? line.y >= region.top - 2 && line.y <= region.bottom + 2 : false;
+      if (!inRegion) type = "guide_row";
+    }
 
     if (!lineNumber && previousEstimateRow && line.pageNumber === previousEstimateRow.pageNumber && shouldAttachContinuationLine(line, type)) {
       attachContinuationLine(previousEstimateRow, line, {
@@ -1210,7 +1259,22 @@ function classifyLine(
     (/\b(?:suppliers?|alternate parts suppliers?)\b/.test(normalizeMatchText(currentSection)) ||
       /\b(?:suppliers?|alternate parts suppliers?|alternate suppliers?)\b/.test(normalized))
   ) return "supplier_row";
-  if (lineNumber) return /note|available|not correct|report/.test(normalized) ? "line_note" : "estimate_line";
+  if (lineNumber) {
+    // U-5 shape rule (shared below BOTH detectors): a line-numbered ALL-CAPS
+    // row with no lowercase and no value digits is a numbered SECTION HEADER
+    // ("30 SIDE PANEL", "73 REAR BUMPER") — never an operation row. Anchoring
+    // a finding there was the D-7 defect class.
+    const afterNumber = text.replace(/^\s*\d{1,4}\s*/, "").trim();
+    if (
+      afterNumber.length > 0 &&
+      afterNumber.length < 40 &&
+      !/[a-z0-9]/.test(afterNumber) &&
+      /[A-Z]/.test(afterNumber)
+    ) {
+      return "section_row";
+    }
+    return /note|available|not correct|report/.test(normalized) ? "line_note" : "estimate_line";
+  }
   if (isTotalsRow(normalized, currentSection, text)) return "totals_row";
   if (/\bsupplier|alternate|aftermarket|lkq|used part|capa\b/.test(`${normalized} ${normalizeMatchText(currentSection)}`)) return "supplier_row";
   if (sectionName) return "section_row";

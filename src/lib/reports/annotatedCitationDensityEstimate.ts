@@ -4520,7 +4520,11 @@ function classifyOemCitationDensityRow(rowText: string, anchor: EstimateRowAncho
       requiredDocumentation: ["OEM procedure or position statement", "part-type authorization", "supplier invoice", "fit/finish validation"],
     };
   }
-  if (/\b(?:section(?:ing)?|weld|bond|structural|measure|pull|setup|frame|aluminum|high strength|hss|uhss|one[- ]time|corrosion|seam sealer|foam|adhesive|nvh|panel)\b/.test(normalized)) {
+  // D-7: a blend/refinish operation is REFINISH, never a structural review —
+  // "Blnd RT Side panel" must not route structural off the word "panel".
+  // Structural classification keys on structural OPERATIONS, not panel nouns.
+  const isBlendOrRefinishOperation = /^[#*\s]*(?:blnd|refn)\b/i.test(rowText) || /\bblend\b/.test(normalized);
+  if (!isBlendOrRefinishOperation && /\b(?:section(?:ing)?|weld|bond|structural|measure|pull|setup|frame|aluminum|high strength|hss|uhss|one[- ]time|corrosion|seam sealer|foam|adhesive|nvh)\b/.test(normalized)) {
     return {
       findingType: "repair_procedure_structural",
       title: "Repair procedure / structural operation review",
@@ -4684,7 +4688,10 @@ function buildOemCitationDensityFinding(params: {
       `Estimate file: ${context.sourcePdfName}.`,
       `Source page: ${anchor.pageNumber}.`,
       `Source line: ${anchor.lineNumber ?? "section"}.`,
-      `Source row text: ${rowText}.`,
+      // Row text is QUOTED so a downstream extractor can never overrun into
+      // the finding's own prose (D-7: "…camera m Incl. M OEM compliance
+      // concern: The row should be…" read as row text).
+      `Source row text: "${rowText}".`,
       `Issue summary: ${family.issueSummary}`,
       `OEM compliance concern: ${family.oemComplianceConcern}`,
       `Evidence tier: ${getOemAuthorityEvidenceTierLabel(authority)}.`,
