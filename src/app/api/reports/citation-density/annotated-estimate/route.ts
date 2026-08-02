@@ -282,6 +282,25 @@ export async function POST(request: Request) {
       );
     }
 
+    // RIR-resolved research authorities (O-5): pass the report's accepted,
+    // titled, scored sources into the delta finding builder so scan/calibration
+    // findings carry the retrieved position statement instead of "verify".
+    const researchSnapshot = activeReport.report.exportResearchSnapshot;
+    const resolvedAuthorities = (researchSnapshot?.sourcesReviewed ?? [])
+      .filter(
+        (source) =>
+          source.accepted &&
+          (source.sourceTitle?.trim().length ?? 0) >= 3 &&
+          Number.isFinite(source.confidenceScore)
+      )
+      .map((source) => ({
+        sourceType: source.sourceType,
+        sourceTitle: source.sourceTitle,
+        url: source.url,
+        locator: source.locator,
+        confidenceScore: source.confidenceScore,
+      }));
+
     const outputs = [];
     const aggregateWarnings = new Set<string>();
     let annotatedFindingCount = 0;
@@ -371,6 +390,7 @@ export async function POST(request: Request) {
         findings: roleFindings,
         deltaDiagnostics: model.citationDensityDiagnostics,
         canonicalDeltaSet: canonicalDeltaSet ?? undefined,
+        resolvedAuthorities,
         findingGenerator: buildRequiredEstimatorDeltaFindings,
         request: {
           findingIds: coerceStringArray(body.findingIds),

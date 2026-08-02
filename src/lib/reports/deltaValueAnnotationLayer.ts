@@ -98,7 +98,11 @@ function fmtCell(field: CellField, value: number): string {
 
 function shortDesc(row: EstimateRow): string {
   const desc = row.rawDesc.replace(/^[#*\s]+/, "").replace(/\s+/g, " ").trim();
-  return desc.length > 28 ? `${desc.slice(0, 27)}…` : desc;
+  if (desc.length <= 34) return desc;
+  // truncate at a word boundary — never mid-word ("Cavity Wax Plus-3M 08852-Pe…")
+  const cut = desc.slice(0, 34);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${cut.slice(0, lastSpace > 12 ? lastSpace : 34)}…`;
 }
 
 function toEngineWords(words: PlacementWord[]): Map<number, Word[]> {

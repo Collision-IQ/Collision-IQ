@@ -46,6 +46,10 @@ export interface EstimateRow {
   key: string;
   side: CanonKey["side"];
   cells: { qty?: CellBox; price?: CellBox; labor?: CellBox; paint?: CellBox };
+  /** Measured union bbox of the row's clustered words (top-left origin). Rows
+   * with no value cells (documentation-only lines) still carry a measured box,
+   * so downstream anchors never have to fall back to fuzzy text geometry. */
+  box?: CellBox;
   /** NOTE text attached to this row (payload for OEM CD — never part of identity). */
   note?: string;
   /** Section header as printed (e.g. "REAR BUMPER"), before canonical squash. */
@@ -129,7 +133,11 @@ export function measureColumns(words: Word[]): ColRanges | null {
 }
 
 const NUM = /^-?[\d,]+\.?\d*$/;
-const SUFFIX = new Set(["M", "T", "X", "INCL.", "INCL"]);
+// Single-letter cell suffixes: T/X are taxed/non-taxed PRICE flags, P is the
+// paint-labor letter — none of them are description words or labor classes.
+// Real labor-class letters are M/D/E/F/G/S (plus user-defined digits 1-4).
+const SUFFIX = new Set(["M", "D", "E", "F", "G", "S", "T", "X", "P", "INCL.", "INCL"]);
+const LABOR_CLASS = /^[MDEFGS1-4]$/;
 
 export interface RowParseState {
   section: string;
@@ -180,7 +188,7 @@ function absorbRowTokens(row: EstimateRow, tokens: Word[], cols: ColRanges): str
         row.cells.paint = box;
       } else desc.push(word.text);
     } else if (SUFFIX.has(word.text.toUpperCase())) {
-      if (row.labor !== null && !row.laborClass && /^[MTX1-4]$/.test(word.text)) row.laborClass = word.text;
+      if (row.labor !== null && !row.laborClass && LABOR_CLASS.test(word.text)) row.laborClass = word.text;
     } else desc.push(repairTokens(word.text));
   }
   return desc;
@@ -212,6 +220,20 @@ function finalizeRow(row: EstimateRow, state: RowParseState): "row" | "section" 
   row.key = ck.key;
   row.side = ck.side;
   return row.key ? "row" : "empty";
+}
+
+/** Extend a row's measured union bbox with more clustered words. */
+function extendRowBox(row: EstimateRow, ws: Word[]): void {
+  for (const word of ws) {
+    if (!row.box) {
+      row.box = { x0: word.x0, x1: word.x1, top: word.top, bottom: word.bottom };
+      continue;
+    }
+    row.box.x0 = Math.min(row.box.x0, word.x0);
+    row.box.x1 = Math.max(row.box.x1, word.x1);
+    row.box.top = Math.min(row.box.top, word.top);
+    row.box.bottom = Math.max(row.box.bottom, word.bottom);
+  }
 }
 
 function rejectStub(state: RowParseState, diag: RowParseDiagnostics | undefined) {
@@ -259,6 +281,7 @@ export function parsePage(
         state.lastWasNote = true;
       } else {
         state.prev.rawDesc += " " + joined;
+        extendRowBox(state.prev, ws);
       }
       continue;
     }
@@ -277,6 +300,7 @@ export function parsePage(
         // priority — that interleave IS the note-bleed shape being repaired.
         const stub = state.pendingStub;
         const moreDesc = absorbRowTokens(stub, ws, cols);
+        extendRowBox(stub, ws);
         stub.rawDesc = [stub.rawDesc, ...moreDesc].filter(Boolean).join(" ");
         const outcome = finalizeRow(stub, state);
         if (outcome === "row") {
@@ -299,6 +323,7 @@ export function parsePage(
           state.lastWasNote = true;
         } else {
           state.prev.rawDesc += " " + joined;
+          extendRowBox(state.prev, ws);
         }
       }
       continue;
@@ -323,6 +348,7 @@ export function parsePage(
       cells: {},
     };
     row.rawDesc = absorbRowTokens(row, ws.slice(1), cols).join(" ");
+    extendRowBox(row, ws);
     const outcome = finalizeRow(row, state);
     if (outcome === "row") {
       out.push(row);

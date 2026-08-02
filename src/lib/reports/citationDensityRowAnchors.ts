@@ -712,6 +712,78 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
   return anchors;
 }
 
+/**
+ * Build an estimate-row anchor directly from the typed delta engine's MEASURED
+ * row bbox (top-left origin PDF points). Used when the visual-line layer
+ * failed to produce a text anchor for a row the engine parsed cleanly (a row
+ * split across visual lines, or its line number stolen by adjacent prose like
+ * a "4 Wheel Drive…" options paragraph). The geometry is measured, not
+ * guessed, so the anchor is NOT synthetic in the fuzzy-text sense.
+ */
+export function buildMeasuredEngineRowAnchor(params: {
+  sourceDocumentId?: string;
+  sourceDocumentRole: SourceDocumentRole;
+  pageNumber: number;
+  pageWidth: number;
+  pageHeight: number;
+  lineNumber: number;
+  rowText: string;
+  section?: string;
+  box: { x0: number; x1: number; top: number; bottom: number };
+}): EstimateRowAnchor {
+  const line = {
+    pageNumber: params.pageNumber,
+    text: params.rowText,
+    normalizedText: normalizeMatchText(params.rowText),
+    x: params.box.x0,
+    y: params.box.top,
+    width: Math.max(4, params.box.x1 - params.box.x0),
+    height: Math.max(4, params.box.bottom - params.box.top),
+    pageWidth: params.pageWidth,
+    pageHeight: params.pageHeight,
+  };
+  const rect = buildPdfRectFromTopLeftAnchor(line, {
+    pdfWidth: params.pageWidth,
+    pdfHeight: params.pageHeight,
+    rotation: 0,
+  }, 2);
+  const geometry = buildAnchorGeometry(rect);
+  const parsed = parseEstimateRowFields(params.rowText, String(params.lineNumber));
+  return {
+    anchorId: `${params.sourceDocumentId ?? `${params.sourceDocumentRole}-estimate`}:p${params.pageNumber}:${params.lineNumber}:engine_row`,
+    sourceDocumentId: params.sourceDocumentId ?? `${params.sourceDocumentRole}-estimate`,
+    sourceDocumentRole: params.sourceDocumentRole,
+    pageNumber: params.pageNumber,
+    pageWidth: params.pageWidth,
+    pageHeight: params.pageHeight,
+    rotation: 0,
+    lineNumber: String(params.lineNumber),
+    section: params.section,
+    rowText: params.rowText,
+    normalizedRowText: line.normalizedText,
+    anchorType: "estimate_line",
+    operation: parsed.operation,
+    description: parsed.description,
+    partNumber: parsed.partNumber,
+    qty: parsed.qty,
+    price: parsed.price,
+    labor: parsed.labor,
+    paint: parsed.paint,
+    pdfBoundingBox: geometry.pdfBoundingBox,
+    pdfQuad: geometry.pdfQuad,
+    normalizedUiRect: geometry.normalizedUiRect,
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+    xPct: rect.xPct,
+    yPct: rect.yPct,
+    wPct: rect.wPct,
+    hPct: rect.hPct,
+    confidence: 0.9,
+  };
+}
+
 function shouldAttachContinuationLine(line: PdfTextLine, type: EstimateRowAnchorType | null) {
   if (type === "section_row" || type === "totals_row" || type === "supplier_row" || type === "guide_row") return false;
   if (type === "line_note" || type === "embedded_link_row") return true;
@@ -720,6 +792,15 @@ function shouldAttachContinuationLine(line: PdfTextLine, type: EstimateRowAnchor
   const normalized = normalizeMatchText(line.text);
   if (!normalized) return false;
   if (/^\d{1,4}\b/.test(normalized)) return false;
+  // End-of-table boundary: the last estimate row must never absorb the totals
+  // header or the page's trailing prose ("Category Basis Rate Cost $ This
+  // estimate is based on our initial visual inspection…") — a badge anchored
+  // to that row would render inside the disclaimer paragraph.
+  if (/\bcategory\s+basis\s+rate\b/i.test(line.text)) return false;
+  if (/\bsubtotals?\b/i.test(normalized) && /\btotals?\b/.test(normalized)) return false;
+  const wordCount = line.text.trim().split(/\s+/).length;
+  if (wordCount >= 10 && /[.!?]\s*$/.test(line.text.trim())) return false; // full prose sentence
+  if (wordCount >= 14) return false; // running paragraph, not a wrapped cell fragment
   return /[a-z]/.test(normalized) && !/^(?:page|estimate|claim|vehicle)\b/.test(normalized);
 }
 

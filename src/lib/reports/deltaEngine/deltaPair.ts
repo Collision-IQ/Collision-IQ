@@ -69,6 +69,9 @@ function compareTyped(subject: EstimateRow, competing: EstimateRow): CellDelta[]
 export interface PairResult {
   findings: Finding[];
   competingOnly: EstimateRow[];
+  /** Every 1:1 pairing made (including equal-value pairs that produced no
+   * finding) — the single source both renderers derive from. */
+  pairs: Array<{ subject: EstimateRow; competing: EstimateRow }>;
 }
 
 export function pairAndCompare(subject: EstimateRow[], competing: EstimateRow[]): PairResult {
@@ -200,7 +203,11 @@ export function pairAndCompare(subject: EstimateRow[], competing: EstimateRow[])
       });
   }
   const competingOnly = competing.filter((_, index) => !used.has(index));
-  return { findings, competingOnly };
+  const pairs = [...paired.entries()].map(([subjectRow, index]) => ({
+    subject: subjectRow,
+    competing: competing[index],
+  }));
+  return { findings, competingOnly, pairs };
 }
 
 /** Totals pass: iterate the UNION of category rows; hours, rate, and amount each compared. */

@@ -12,7 +12,7 @@ import {
   type PDFRef,
 } from "pdf-lib/cjs/core";
 import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
-import type { CitationDensityFinding, CitationDensityEstimateLineAnchor, CitationSupportStatus } from "@/lib/ai/types/estimateScrubber";
+import type { CitationDensityFinding, CitationDensityEstimateLineAnchor, CitationDensityAuthority, CitationSupportStatus } from "@/lib/ai/types/estimateScrubber";
 import type { CanonicalDeltaSet, CanonicalDeltaEntry } from "./canonicalDelta";
 import { getDeltaLabel, applyDisplayThreshold, assertNoCarrierWording } from "./canonicalDelta";
 import {
@@ -28,6 +28,7 @@ import {
 } from "./annotationPlacementEngine";
 import {
   buildEstimateRowAnchorsFromLines,
+  buildMeasuredEngineRowAnchor,
   buildPdfTextLines,
   ensurePdfJsNodePolyfills,
   extractPdfWordsWithDiagnostics,
@@ -65,6 +66,7 @@ import {
   parseCccEstimateTotals,
   normalizeTotalsCategoryKey,
   parseEstimateNetTotal,
+  type EstimateDeltaKind,
   type EstimateDeltaRow,
   type EstimateLineItemDelta,
   type EstimateTotalsDelta,
@@ -74,6 +76,8 @@ import {
   planDeltaValueAnnotations,
 } from "./deltaValueAnnotationLayer";
 import { canonKey as deltaEngineCanonKey, repairTokens } from "./deltaEngine/estimateNormalize";
+import { pairAndCompare } from "./deltaEngine/deltaPair";
+import { carriersNamedIn, detectDominantKnownCarrier } from "@/lib/ai/extractors/extractEstimateFacts";
 import {
   emptyRowParseDiagnostics,
   parseEstimateRows as parseDeltaEngineRows,
@@ -117,9 +121,240 @@ function engineRowsToDeltaRows(
       anchorId: anchor?.anchorId,
       pageNumber: anchor?.pageNumber ?? row.page,
     });
-    if (deltaRow) out.push(deltaRow);
+    if (deltaRow) {
+      // The engine row is authoritative for identity: the legacy re-parse can
+      // split unusual part formats and leak fragments ("P T") into the
+      // description. Restore the typed part and the clean description.
+      if (row.part) deltaRow.partNumber = row.part;
+      const cleanDescription = row.rawDesc
+        .replace(/^[#*\s]+/, "")
+        .replace(/[*\s]+$/, "")
+        .replace(/^(?:R&I|R&R|Repl|Rpr|Blnd|Subl|Refn|Algn|O\/H)\s+/i, "")
+        .trim();
+      if (cleanDescription) deltaRow.description = cleanDescription;
+      out.push(deltaRow);
+    }
   }
   return out;
+}
+
+/**
+ * Attach research-resolved authorities to delta findings by finding type
+ * (O-5): a scan/diagnostic finding gets the retrieved scan position
+ * statement, a calibration finding the calibration/ADAS document. Document
+ * identifiers ("RCI-98-23-002-3") are restored from the URL/locator when an
+ * upstream summarizer truncated them out of the title — the identifier IS the
+ * citable reference.
+ */
+export function attachResolvedAuthoritiesToFindings(
+  findings: CitationDensityFinding[],
+  authorities: NonNullable<AnnotatedEstimateFindingGeneratorContext["resolvedAuthorities"]>
+): number {
+  if (!authorities.length) return 0;
+  const restoreIdentifier = (authority: (typeof authorities)[number]): string => {
+    const title = authority.sourceTitle.trim();
+    const identifierPattern = /\b([A-Z]{2,5}-[\dOIl-]{6,})\b/;
+    if (identifierPattern.test(title)) return title;
+    const fromUrl = identifierPattern.exec(decodeURIComponent(authority.url ?? authority.locator ?? ""));
+    if (!fromUrl) return title;
+    // "RCI-:" style truncation — splice the recovered identifier back in.
+    const truncated = /^([A-Z]{2,5}-?)\s*:/.exec(title);
+    if (truncated) return title.replace(truncated[1], fromUrl[1]);
+    return `${fromUrl[1]}: ${title}`;
+  };
+  const matchers: Array<{
+    findingMatches: (finding: CitationDensityFinding) => boolean;
+    authorityMatches: (authority: (typeof authorities)[number]) => boolean;
+    type: CitationDensityAuthority["type"];
+  }> = [
+    // Calibration first: an ADAS finding whose label also says "scan" must
+    // prefer the calibration document over the generic scan statement.
+    {
+      findingMatches: (finding) =>
+        finding.category === "adas_calibration" || /\bcalibrat|adas\b/i.test(finding.operationLabel),
+      authorityMatches: (authority) => /\bcalibrat|adas\b/i.test(`${authority.sourceTitle} ${authority.url ?? ""}`),
+      type: "adas_procedure",
+    },
+    {
+      findingMatches: (finding) =>
+        finding.category === "scan_diagnostic" || /\bscan\b/i.test(finding.operationLabel),
+      authorityMatches: (authority) => /\bscan(?:ning)?\b/i.test(`${authority.sourceTitle} ${authority.url ?? ""}`),
+      type: "oem_position_statement",
+    },
+  ];
+  let attached = 0;
+  for (const finding of findings) {
+    // A "support needed" placeholder is replaceable; only genuinely verified
+    // support (or estimate-evidence, which the resolved authority upgrades)
+    // blocks the attach.
+    if (
+      finding.bestAvailableAuthority &&
+      finding.bestAvailableAuthority.type !== "estimate_evidence" &&
+      finding.bestAvailableAuthority.status === "verified"
+    ) continue;
+    for (const matcher of matchers) {
+      if (!matcher.findingMatches(finding)) continue;
+      const authority = authorities.find((candidate) => matcher.authorityMatches(candidate));
+      if (!authority) continue;
+      const title = restoreIdentifier(authority);
+      finding.bestAvailableAuthority = {
+        type: matcher.type,
+        status: "verified",
+        title,
+        confidence: (authority.confidenceScore ?? 0) >= 0.7 ? "high" : "medium",
+      };
+      finding.matchedDocumentTitle = title;
+      finding.matchedDocumentUrl = authority.url ?? null;
+      finding.retrievalStatus = "retrieved";
+      finding.retrievalAttempted = true;
+      attached += 1;
+      break;
+    }
+  }
+  return attached;
+}
+
+/** Leading CCC operation token of an engine row's description ("R&I", "Repl"). */
+function engineRowOpCode(row: DeltaEngineRow): string | null {
+  const match = /^[#*\s]*((?:R&I|R&R|Repl|Rpr|Blnd|Subl|Refn|Algn|O\/H))\b/i.exec(row.rawDesc);
+  return match ? match[1] : null;
+}
+
+/**
+ * ONE detector pass, two renderers (O-2): adapt the typed engine's
+ * pairAndCompare output — the same objects the annotation layer draws from —
+ * into the EstimateLineItemDelta shape the findings report emits. Both
+ * directions are reported (a cell where the LOWER estimate is higher is
+ * evidence too), equal-value pairs with differing operation tokens become
+ * coding-only changes, and unconsumed competing rows split into lower-only vs
+ * possible-duplicate (repeated-description) buckets.
+ */
+function engineResultToLineItemDeltas(params: {
+  engine: import("./deltaEngine/deltaPair").PairResult;
+  anchorByLineNumber: Map<string, EstimateRowAnchor>;
+}): {
+  deltas: EstimateLineItemDelta[];
+  lowerOnlyRows: DeltaEngineRow[];
+  potentialDuplicateLowerRows: DeltaEngineRow[];
+  matchedPairCount: number;
+  missingOperationCount: number;
+} {
+  const { engine, anchorByLineNumber } = params;
+  const deltas: EstimateLineItemDelta[] = [];
+  const toDeltaRow = (row: DeltaEngineRow): EstimateDeltaRow | null =>
+    engineRowsToDeltaRows([row], anchorByLineNumber)[0] ?? null;
+
+  const findingSubjects = new Set(engine.findings.map((finding) => finding.subject));
+  let missingOperationCount = 0;
+
+  for (const finding of engine.findings) {
+    const higherRow = toDeltaRow(finding.subject);
+    if (!higherRow) continue;
+    const lowerRow = finding.competing ? engineRowsToDeltaRows([finding.competing], null)[0] ?? null : null;
+    if (finding.kind === "MISSED") {
+      missingOperationCount += 1;
+      deltas.push({
+        kind: "missing_operation",
+        lowerRow: null,
+        higherRow,
+        matchBasis: "none",
+        annotate: true,
+        laborDelta: finding.subject.labor,
+        paintDelta: finding.subject.paint,
+        priceDelta: finding.subject.price,
+        summary: `${higherRow.description} is documented on this estimate and has no counterpart on the lower-cost estimate.`,
+      });
+      continue;
+    }
+    const cell = (field: "price" | "labor" | "paint") => {
+      const delta = finding.deltas.find((entry) => entry.field === field);
+      return delta ? Math.round(((delta.subject as number) - (delta.competing as number)) * 100) / 100 : null;
+    };
+    const partDelta = finding.deltas.find((entry) => entry.field === "part#");
+    const priceDelta = cell("price");
+    const laborDelta = cell("labor");
+    const paintDelta = cell("paint");
+    const aggregated = finding.kind === "QTY_SHORTFALL";
+    const kind: EstimateDeltaKind = partDelta
+      ? "part_or_price_difference"
+      : priceDelta !== null
+        ? "part_or_price_difference"
+        : laborDelta !== null
+          ? "reduced_labor"
+          : "reduced_paint";
+    const lines = (finding.subjects ?? [finding.subject]).map((row) => row.line);
+    deltas.push({
+      kind,
+      lowerRow,
+      higherRow,
+      annotate: true,
+      matchBasis: finding.subject.part && finding.competing?.part === finding.subject.part ? "part_number" : "description",
+      laborDelta,
+      paintDelta,
+      priceDelta,
+      changedFields: [
+        ...(partDelta ? ["part_number"] : []),
+        ...(priceDelta !== null ? ["price"] : []),
+        ...(laborDelta !== null ? ["labor"] : []),
+        ...(paintDelta !== null ? ["paint"] : []),
+      ],
+      statusLabels: aggregated ? [`AGGREGATED_GROUP_${(finding.subjects ?? []).length || 1}X`] : undefined,
+      summary: aggregated
+        ? `${finding.category} across L${lines.join("/L")}.`
+        : `${higherRow.description}: ${finding.deltas
+            .map((entry) =>
+              entry.field === "part#"
+                ? `part # ${String(entry.subject)} vs ${String(entry.competing)}`
+                : `${entry.field} ${String(entry.subject)} vs ${String(entry.competing)}`
+            )
+            .join(", ")}.`,
+    });
+  }
+
+  // Equal-value pairs whose operation token differs are coding-only changes
+  // ("Rpr" vs "R&I" at identical hours) — reported at low priority, never as
+  // missing scope.
+  for (const pair of engine.pairs) {
+    if (findingSubjects.has(pair.subject)) continue;
+    const subjectOp = engineRowOpCode(pair.subject);
+    const competingOp = engineRowOpCode(pair.competing);
+    if (!subjectOp || !competingOp) continue;
+    if (subjectOp.replace(/\s/g, "").toUpperCase() === competingOp.replace(/\s/g, "").toUpperCase()) continue;
+    const higherRow = toDeltaRow(pair.subject);
+    if (!higherRow) continue;
+    deltas.push({
+      kind: "operation_change",
+      lowerRow: engineRowsToDeltaRows([pair.competing], null)[0] ?? null,
+      higherRow,
+      annotate: true,
+      matchBasis: pair.subject.part && pair.subject.part === pair.competing.part ? "part_number" : "description",
+      laborDelta: null,
+      paintDelta: null,
+      priceDelta: null,
+      changedFields: ["operation"],
+      codingOnlyChange: true,
+      summary: `${higherRow.description}: operation ${subjectOp} here vs ${competingOp} on the lower-cost estimate at identical values — likely a coding/description difference, not a scope change.`,
+    });
+  }
+
+  // Unconsumed competing rows: repeated-description residuals are possible
+  // duplicate billing, everything else is genuinely lower-only.
+  const subjectKeys = new Set(engine.pairs.map((pair) => pair.subject.key));
+  for (const finding of engine.findings) subjectKeys.add(finding.subject.key);
+  const lowerOnlyRows: DeltaEngineRow[] = [];
+  const potentialDuplicateLowerRows: DeltaEngineRow[] = [];
+  for (const row of engine.competingOnly) {
+    if (subjectKeys.has(row.key)) potentialDuplicateLowerRows.push(row);
+    else lowerOnlyRows.push(row);
+  }
+
+  return {
+    deltas,
+    lowerOnlyRows,
+    potentialDuplicateLowerRows,
+    matchedPairCount: engine.pairs.length,
+    missingOperationCount,
+  };
 }
 
 /** Group extracted PdfWords into the delta engine's per-page Word map. */
@@ -246,6 +481,17 @@ export type AnnotatedEstimateFindingGeneratorContext = {
     fileName: string;
     estimateRole?: "carrier" | "shop";
     words: PdfWord[];
+  }>;
+  /** Authorities already resolved by the report's research pass (RIR
+   * snapshot) — attached to matching delta findings by type so a scan-hour
+   * reduction carries the retrieved scan position statement instead of
+   * "support needed". */
+  resolvedAuthorities?: Array<{
+    sourceType: string;
+    sourceTitle: string;
+    url?: string;
+    locator?: string;
+    confidenceScore?: number | null;
   }>;
   authorityTrace?: OemCitationDensityAuthorityTrace;
   /** When present, the canonical delta set is the authoritative source for all delta findings.
@@ -414,6 +660,8 @@ export type CitationDensityDebugTrace = {
   lineItemDeltaFindingCount?: number;
   lineItemDeltaMatchedPairCount?: number;
   lineItemDeltaMissingCount?: number;
+  /** Findings that received an RIR-resolved authority (O-5 attach pass). */
+  resolvedAuthorityAttachedCount?: number;
   detailLayoutBlocks?: Array<{
     findingNumber: number;
     pageIndex: number;
@@ -832,6 +1080,8 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   deltaDiagnostics?: CitationDensityDeltaDiagnostics;
   authorityTrace?: OemCitationDensityAuthorityTrace;
   canonicalDeltaSet?: CanonicalDeltaSet;
+  /** RIR-resolved research authorities, attached to matching delta findings by type (O-5). */
+  resolvedAuthorities?: AnnotatedEstimateFindingGeneratorContext["resolvedAuthorities"];
   findingGenerator?: (context: AnnotatedEstimateFindingGeneratorContext) => AnnotatedEstimateGeneratedFindings;
 }): Promise<AnnotatedEstimateResult> {
   const request = params.request ?? {};
@@ -1131,9 +1381,16 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       sourceText: params.sourceText,
       comparisonEstimateTexts: params.comparisonEstimateTexts ?? [],
       comparisonEstimateWords,
+      resolvedAuthorities: params.resolvedAuthorities,
       authorityTrace: params.authorityTrace,
       canonicalDeltaSet: params.canonicalDeltaSet,
     });
+    // The structured delta path may append measured engine-row anchors for
+    // rows the visual-line layer failed to anchor; index them so the renderer
+    // resolves the findings that reference them.
+    for (const anchor of anchors) {
+      if (!anchorIndex.has(anchor.anchorId)) anchorIndex.set(anchor.anchorId, anchor);
+    }
     const generatedFindings = generated.findings
       .filter((finding) => !isGeneratedFindingCoveredByExisting(finding, selectedFindings));
     selectedFindings = [
@@ -2275,6 +2532,14 @@ export function buildRequiredEstimatorDeltaFindings(
       message: error instanceof Error ? error.message : String(error),
     });
   }
+  // Lines the structured delta pass already covers with a typed finding — the
+  // generic detectors must not shadow them with weaker prose (O-6: alignment
+  // reads "price $0.00 vs $100.00", never "Carrier allowed labor: missing").
+  const structuredDeltaLineNumbers = new Set(
+    (deltaMatch?.orderedDeltas ?? [])
+      .map((delta) => delta.higherRow.lineNumber)
+      .filter((line): line is number => line !== null)
+  );
   let sandPolishSeen = false;
   let batteryResetSeen = false;
   // Suppress wheel_labor_delta when the canonical delta set is present — canonical findings
@@ -2321,7 +2586,11 @@ export function buildRequiredEstimatorDeltaFindings(
     const hasWheel = isWheelLaborAnchorText(normalized);
     const hasAccessLabor = /\b(?:r\s*&\s*i|r&i|remove|install|disassembly|reassembly|access)\b/i.test(rowText);
 
-    if (!usedAnchorIds.has(anchor.anchorId) && hasWheel && /\b(?:repair|sublet|mount|balance|alignment|replacement|repl|replace|r&i|r\s*&\s*i|access)\b/.test(normalized)) {
+    const coveredByStructuredDelta =
+      anchor.lineNumber !== null &&
+      anchor.lineNumber !== undefined &&
+      structuredDeltaLineNumbers.has(Number(anchor.lineNumber));
+    if (!usedAnchorIds.has(anchor.anchorId) && !coveredByStructuredDelta && hasWheel && /\b(?:repair|sublet|mount|balance|alignment|replacement|repl|replace|r&i|r\s*&\s*i|access)\b/.test(normalized)) {
       const comparisonWheelAccess = /\b(?:wheel|rim|tire|alignment|liner|flare)\b[\s\S]{0,80}\b(?:r&i|r\s*&\s*i|remove|install|access|disassembly|reassembly|replacement|repl)\b/i.test(comparisonText) ||
         /\b(?:r&i|r\s*&\s*i|remove|install|access|disassembly|reassembly|replacement|repl)\b[\s\S]{0,80}\b(?:wheel|rim|tire|alignment|liner|flare)\b/i.test(comparisonText);
       const zeroOrMissingLabor = anchor.labor === 0 || anchor.labor === null || /\b0\.0\b/.test(rowText);
@@ -2456,6 +2725,11 @@ export function buildRequiredEstimatorDeltaFindings(
     batteryResetSeen ? null : "battery_reset_electrical_rate",
   ].filter((item): item is string => Boolean(item));
 
+  const resolvedAuthorityAttachedCount = attachResolvedAuthoritiesToFindings(
+    findings,
+    context.resolvedAuthorities ?? []
+  );
+
   return {
     findings,
     debug: {
@@ -2464,6 +2738,7 @@ export function buildRequiredEstimatorDeltaFindings(
       lineItemDeltaFindingCount,
       lineItemDeltaMatchedPairCount,
       lineItemDeltaMissingCount,
+      resolvedAuthorityAttachedCount,
       rejectedAnchors: rejectedAnchors.slice(0, 40),
       rejectedBoilerplateCount: rejectedAnchors.length,
       authoritySearchTrace: {
@@ -2564,6 +2839,35 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
       score: profile.score,
       safetyImpact: profile.safetyImpact,
       priority: profile.priority,
+    };
+  }
+  // Direction-aware framing: a matched cell where the LOWER estimate is
+  // HIGHER (carrier allows more paint, a sublet the shop didn't price) is
+  // evidence in the other direction — never presented as "allows less".
+  const primaryDelta = delta.priceDelta ?? delta.laborDelta ?? delta.paintDelta;
+  const carrierHigher =
+    (delta.kind === "reduced_labor" || delta.kind === "reduced_paint" || delta.kind === "part_or_price_difference") &&
+    delta.lowerRow !== null &&
+    primaryDelta !== null &&
+    primaryDelta < 0 &&
+    (delta.priceDelta ?? 0) <= 0 &&
+    (delta.laborDelta ?? 0) <= 0 &&
+    (delta.paintDelta ?? 0) <= 0;
+  if (carrierHigher) {
+    return {
+      findingType: "delta-carrier-higher",
+      title: `Lower-cost estimate allows MORE here: ${label}`,
+      label: "CARRIER HIGHER",
+      category: profile.category,
+      estimateGapType: "present_but_under_documented",
+      missingProof:
+        "On this matched line the lower-cost estimate carries the higher value (more hours or a priced sublet this estimate shows at zero). The cost gap runs in both directions — reconcile rather than assume either side is wrong.",
+      nextAction:
+        "Verify whether this estimate should adopt the lower-cost estimate's allowance for this line (added paint allowance, sublet price, or materials) or document why it is not needed.",
+      missingAuthorityTypes: ["reconciliation of the carrier-higher allowance"],
+      score: Math.max(0, profile.score - 18),
+      safetyImpact: "low",
+      priority: "medium",
     };
   }
   if (delta.kind === "operation_change" && delta.codingOnlyChange) {
@@ -2674,6 +2978,17 @@ type StructuredLineItemDeltaMatch = {
   lowerOnlyRows: EstimateDeltaRow[];
   /** Parsed lower ESTIMATE TOTALS block (rates for valuing lower-only labor). */
   lowerTotalsSummary: ReturnType<typeof parseCccEstimateTotals>;
+  /** Line notes naming a known carrier that is NOT the file's dominant
+   * carrier — a carrier-attribution defect on the document, reported as a
+   * finding rather than adopted as the insurer. */
+  carrierMismatchNotes: Array<{
+    carrier: string;
+    dominantCarrier: string;
+    noteExcerpt: string;
+    documentSide: "annotated" | "comparison";
+    line: number;
+    anchorId?: string;
+  }>;
   /** Residual lower lines that duplicate an already-matched lower line (possible duplicate billing). */
   potentialDuplicateLowerRows: EstimateDeltaRow[];
   /** Arbitrary materials cap on the lower estimate (flat figure, no hrs@rate basis), with jurisdiction citation. */
@@ -2762,6 +3077,8 @@ function matchStructuredLineItemDeltas(
     (context.comparisonEstimateWords ?? []).find(
       (entry) => entry.estimateRole && entry.estimateRole !== context.sourceDocumentRole
     ) ?? (context.comparisonEstimateWords ?? [])[0];
+  const carrierMismatchNotes: StructuredLineItemDeltaMatch["carrierMismatchNotes"] = [];
+  let engineMatch: ReturnType<typeof engineResultToLineItemDeltas> | null = null;
   if (comparisonWordSet) {
     const subjectDiag = emptyRowParseDiagnostics();
     const competingDiag = emptyRowParseDiagnostics();
@@ -2796,17 +3113,116 @@ function matchStructuredLineItemDeltas(
         });
         return null;
       }
+      // Anchor resolution for the engine path validates every line-number
+      // candidate against the ENGINE row's own text: a leading integer in
+      // prose (a "4 Wheel Drive…" options paragraph, a street number, a year)
+      // can claim a line number the typed engine parsed elsewhere. When no
+      // text-consistent anchor exists but the engine row carries a measured
+      // bbox, an anchor is built from that measurement — the engine's
+      // geometry IS the primary measurement per the Delta Annotation Rule.
+      const engineRowByLine = new Map<string, DeltaEngineRow>();
+      for (const row of subjectEngineRows) {
+        if (!engineRowByLine.has(String(row.line))) engineRowByLine.set(String(row.line), row);
+      }
+      const anchorMatchesEngineRow = (anchor: EstimateRowAnchor, row: DeltaEngineRow): boolean => {
+        const significant = row.rawDesc
+          .toLowerCase()
+          .replace(/[^a-z\s]/g, " ")
+          .split(/\s+/)
+          .filter((token) => token.length >= 4);
+        if (!significant.length) return true; // nothing to validate against
+        const anchorText = ` ${anchor.normalizedRowText ?? anchor.rowText.toLowerCase()} `;
+        return significant.some((token) => anchorText.includes(token));
+      };
       const anchorByLineNumber = new Map<string, EstimateRowAnchor>();
       for (const anchor of primaryAnchors) {
-        if (anchor.lineNumber && !anchorByLineNumber.has(anchor.lineNumber)) {
+        if (!anchor.lineNumber) continue;
+        const engineRow = engineRowByLine.get(anchor.lineNumber);
+        if (engineRow && !anchorMatchesEngineRow(anchor, engineRow)) continue;
+        if (!anchorByLineNumber.has(anchor.lineNumber)) {
           anchorByLineNumber.set(anchor.lineNumber, anchor);
         }
+      }
+      for (const [line, row] of engineRowByLine) {
+        if (anchorByLineNumber.has(line) || !row.box) continue;
+        const pageLine = context.visualLines.find((visual) => visual.pageNumber === row.page);
+        const pageTemplate = pageLine ?? context.visualLines[0];
+        if (!pageTemplate) continue;
+        const measuredAnchor = buildMeasuredEngineRowAnchor({
+          sourceDocumentId: context.sourceDocumentId,
+          sourceDocumentRole: context.sourceDocumentRole,
+          pageNumber: row.page,
+          pageWidth: pageTemplate.pageWidth,
+          pageHeight: pageTemplate.pageHeight,
+          lineNumber: row.line,
+          rowText: `${row.line} ${row.rawDesc}`.replace(/\s+/g, " ").trim(),
+          section: row.sectionLabel,
+          box: row.box,
+        });
+        anchorByLineNumber.set(line, measuredAnchor);
+        anchorById.set(measuredAnchor.anchorId, measuredAnchor);
+        primaryAnchors.push(measuredAnchor);
+        // The renderer resolves finding anchors from the generator context's
+        // anchor array — the measured anchor must live there to place.
+        context.anchors.push(measuredAnchor);
       }
       const engineHigher = engineRowsToDeltaRows(subjectEngineRows, anchorByLineNumber);
       const engineLower = engineRowsToDeltaRows(competingEngineRows, null);
       if (engineHigher.length >= 10 && engineLower.length >= 10) {
         dedupedHigherRows = engineHigher;
         lowerRows = engineLower;
+        // ONE detector pass (O-2): the SAME pairAndCompare result the
+        // annotation layer consumes becomes the findings source, adapted to
+        // the legacy emission shape. Dedupe repeated print-page lines first.
+        const seenSubjectLines = new Set<number>();
+        const dedupedSubjectEngineRows = subjectEngineRows.filter((row) => {
+          if (seenSubjectLines.has(row.line)) return false;
+          seenSubjectLines.add(row.line);
+          return true;
+        });
+        const seenCompetingLines = new Set<number>();
+        const dedupedCompetingEngineRows = competingEngineRows.filter((row) => {
+          if (seenCompetingLines.has(row.line)) return false;
+          seenCompetingLines.add(row.line);
+          return true;
+        });
+        engineMatch = engineResultToLineItemDeltas({
+          engine: pairAndCompare(dedupedSubjectEngineRows, dedupedCompetingEngineRows),
+          anchorByLineNumber,
+        });
+      }
+
+      // Carrier-attribution defect scan (O-1): a line note naming a known
+      // carrier other than the file's dominant one is a defect on that
+      // document — a finding, never an insurer source.
+      const dominantCarrier = detectDominantKnownCarrier(
+        `${context.sourceText ?? ""}\n${comparison.map((item) => item.text).join("\n")}`
+      );
+      if (dominantCarrier) {
+        const subjectByKey = new Map(subjectEngineRows.map((row) => [row.key + "|" + row.side, row]));
+        const scanRows = [
+          ...subjectEngineRows.map((row) => ({ row, side: "annotated" as const })),
+          ...competingEngineRows.map((row) => ({ row, side: "comparison" as const })),
+        ];
+        for (const { row, side } of scanRows) {
+          if (!row.note) continue;
+          for (const carrier of carriersNamedIn(row.note)) {
+            if (carrier.toLowerCase() === dominantCarrier.toLowerCase()) continue;
+            // Anchor on the ANNOTATED document: the row itself when the note
+            // is there, else the paired subject row for a comparison note.
+            const subjectRow =
+              side === "annotated" ? row : subjectByKey.get(row.key + "|" + row.side) ?? null;
+            const anchor = subjectRow ? anchorByLineNumber.get(String(subjectRow.line)) : undefined;
+            carrierMismatchNotes.push({
+              carrier,
+              dominantCarrier,
+              noteExcerpt: row.note.slice(0, 160),
+              documentSide: side,
+              line: row.line,
+              anchorId: anchor?.anchorId,
+            });
+          }
+        }
       }
     }
   }
@@ -2841,19 +3257,35 @@ function matchStructuredLineItemDeltas(
   const lowerParseSuspect =
     dedupedHigherRows.length >= 40 &&
     lowerRows.length < dedupedHigherRows.length * 0.25;
-  const match = matchEstimateLineItems({
-    lowerRows,
-    higherRows: dedupedHigherRows,
-    lowerIsOcr: lowerIsOcr || lowerParseSuspect,
-    lowerCategoryText,
-  });
+  const match = engineMatch
+    ? {
+        deltas: engineMatch.deltas,
+        matchedPairCount: engineMatch.matchedPairCount,
+        missingOperationCount: engineMatch.missingOperationCount,
+        lowerOnlyRows: engineRowsToDeltaRows(engineMatch.lowerOnlyRows, null),
+        potentialDuplicateLowerRows: engineRowsToDeltaRows(engineMatch.potentialDuplicateLowerRows, null),
+      }
+    : matchEstimateLineItems({
+        lowerRows,
+        higherRows: dedupedHigherRows,
+        lowerIsOcr: lowerIsOcr || lowerParseSuspect,
+        lowerCategoryText,
+      });
   // Aggregate-vs-member dedupe (S-3): a description group that produced
   // several deltas ("Trim Masking Tape" x3, "Set back, secure" x2) collapses
   // to ONE aggregated finding — summed values, occurrence counts — instead of
   // a per-row parade that double-counts the same relationship.
   const deltasByGroupKey = new Map<string, EstimateLineItemDelta[]>();
   for (const delta of match.deltas) {
-    const key = deltaEngineCanonKey(delta.higherRow.description).key || delta.higherRow.description.toUpperCase();
+    // Group by operation key AND kind AND section: an equal-value coding
+    // difference must never merge into a value delta that happens to share a
+    // description ("Applique" exists under pillars, glass, and rear bumper).
+    const key = [
+      deltaEngineCanonKey(delta.higherRow.description).key || delta.higherRow.description.toUpperCase(),
+      delta.kind,
+      delta.codingOnlyChange ? "coding" : "value",
+      (delta.higherRow.section ?? "").replace(/\s+/g, " ").trim().toUpperCase(),
+    ].join("::");
     const list = deltasByGroupKey.get(key) ?? [];
     if (list.length === 0) deltasByGroupKey.set(key, list);
     list.push(delta);
@@ -2872,13 +3304,50 @@ function matchStructuredLineItemDeltas(
     // difference across occurrences, never a confirmed "missing" claim.
     const lead = group.find((delta) => delta.lowerRow !== null) ?? group[0];
     const lines = group.map((delta) => delta.higherRow.lineNumber).filter((line) => line !== null);
+    // O-3: an LT/RT pair reported with one side's numbers understates the gap
+    // by half — an adjuster reading "2.6 vs 1.3" on a two-sided pair concedes
+    // 1.3 hr when the gap is 2.6. State per-side AND aggregate, and title the
+    // group neutrally ("both sides"), never with one side's description.
+    const sides = new Set(
+      group.map((delta) =>
+        /\bLT\b/i.test(delta.higherRow.description) ? "LT" : /\bRT\b/i.test(delta.higherRow.description) ? "RT" : "?"
+      )
+    );
+    const isSidePair = group.length === 2 && sides.has("LT") && sides.has("RT");
+    const mergedLabor = sum((delta) => delta.laborDelta);
+    const mergedPaint = sum((delta) => delta.paintDelta);
+    const mergedPrice = sum((delta) => delta.priceDelta);
+    const perSideBits: string[] = [];
+    if (isSidePair) {
+      const per = (pick: (d: EstimateLineItemDelta) => number | null, unit: string) => {
+        const value = pick(lead);
+        if (value === null || value === 0) return null;
+        return `${Math.abs(value)}${unit}/side`;
+      };
+      for (const bit of [per((d) => d.paintDelta, " paint hr"), per((d) => d.laborDelta, " labor hr"), per((d) => d.priceDelta, " $")])
+        if (bit) perSideBits.push(bit);
+    }
+    const aggregateBits = [
+      mergedPaint ? `${mergedPaint > 0 ? "+" : ""}${mergedPaint} paint hr aggregate` : null,
+      mergedLabor ? `${mergedLabor > 0 ? "+" : ""}${mergedLabor} labor hr aggregate` : null,
+      mergedPrice ? `${mergedPrice > 0 ? "+" : ""}$${Math.abs(mergedPrice).toFixed(2)} aggregate` : null,
+    ].filter(Boolean);
+    const neutralRow: EstimateDeltaRow = isSidePair
+      ? {
+          ...lead.higherRow,
+          description: `${lead.higherRow.description.replace(/\b(?:LT|RT)\b\s*/i, "")} (both sides, L${lines.join("/L")})`.replace(/\s{2,}/g, " ").trim(),
+        }
+      : lead.higherRow;
     mergedDeltas.push({
       ...lead,
-      laborDelta: sum((delta) => delta.laborDelta),
-      paintDelta: sum((delta) => delta.paintDelta),
-      priceDelta: sum((delta) => delta.priceDelta),
+      higherRow: neutralRow,
+      laborDelta: mergedLabor,
+      paintDelta: mergedPaint,
+      priceDelta: mergedPrice,
       statusLabels: [...(lead.statusLabels ?? []), `AGGREGATED_GROUP_${group.length}X`],
-      summary: `${lead.summary} Aggregated across ${group.length} same-description lines (L${lines.join("/L")}).`,
+      summary: `${lead.summary}${perSideBits.length ? ` Per side: ${perSideBits.join(", ")}.` : ""}${
+        aggregateBits.length ? ` Aggregate across L${lines.join("/L")}: ${aggregateBits.join(", ")}.` : ` Aggregated across ${group.length} same-description lines (L${lines.join("/L")}).`
+      }`,
     });
   }
   const orderedDeltas = [...mergedDeltas].sort(
@@ -2957,6 +3426,7 @@ function matchStructuredLineItemDeltas(
     totalsAnchors,
     lowerOnlyRows: match.lowerOnlyRows,
     lowerTotalsSummary: lowerTotals,
+    carrierMismatchNotes,
     potentialDuplicateLowerRows: match.potentialDuplicateLowerRows,
     pmCapFlag,
   };
@@ -3223,6 +3693,40 @@ function emitTotalsDeltaFindings(
           delta.higher && delta.lower && delta.higher.cost !== null && delta.lower.cost !== null
             ? Math.round((delta.higher.cost - delta.lower.cost) * 100) / 100
             : null,
+      })
+    );
+  }
+
+  // Carrier-attribution defects (O-1): a note naming a foreign carrier is a
+  // documentation defect on the estimate that wrote it — reported as its own
+  // finding, keyed to the annotated row the note's operation pairs with.
+  const seenMismatchCarriers = new Set<string>();
+  for (const mismatch of deltaMatch.carrierMismatchNotes) {
+    if (seenMismatchCarriers.has(mismatch.carrier.toLowerCase())) continue;
+    seenMismatchCarriers.add(mismatch.carrier.toLowerCase());
+    const anchor = mismatch.anchorId ? deltaMatch.anchorById.get(mismatch.anchorId) : undefined;
+    if (!anchor || usedAnchorIds.has(anchor.anchorId)) continue;
+    usedAnchorIds.add(anchor.anchorId);
+    const sideLabel = mismatch.documentSide === "comparison" ? deltaMatch.comparisonName : "this estimate";
+    findings.push(
+      buildRequiredDetectorFinding({
+        context,
+        anchor,
+        findingType: "carrier-note-mismatch",
+        title: `Carrier-attribution defect: line note names ${mismatch.carrier} on a ${mismatch.dominantCarrier} file`,
+        category: "other",
+        label: "CARRIER MISMATCH",
+        estimateGapType: "needs_proof",
+        score: 55,
+        safetyImpact: "low",
+        priority: "medium",
+        currentSupportSummary: `${sideLabel} line ${mismatch.line} carries a note reading "${mismatch.noteExcerpt}" — it names ${mismatch.carrier}, but every header identity on this file (letterhead, claim number, Insurance Company field) is ${mismatch.dominantCarrier}. This is a carrier-attribution defect on the document, likely copied from another claim file.`,
+        missingProofSummary:
+          "A line note that names the wrong carrier undermines the estimate's documentation quality and can misdirect payment or authority questions. It must be corrected or explained by its author; it is never evidence about this file's insurer.",
+        recommendedNextAction: `Ask the estimate author to correct or explain the ${mismatch.carrier} reference; confirm the referenced agreement actually belongs to this ${mismatch.dominantCarrier} claim.`,
+        missingAuthorityTypes: ["author correction or written explanation of the foreign-carrier reference"],
+        amountImpact: null,
+        laborHoursImpact: null,
       })
     );
   }
@@ -5484,14 +5988,22 @@ function getBadAnchorRejectReason(finding: CitationDensityFinding, anchor: Estim
   if (anchor.anchorType === "totals_row" && isTotalOrRateFinding(finding)) {
     return null;
   }
-  if (claimedEstimateAnchor && isBoilerplateOrLegalEstimatePageAnchor(anchor, rowType) && !explicitSupportContext) {
+  // A measured engine-row anchor comes from the typed delta engine's
+  // clustered TABLE row (line number + measured value columns) — it cannot be
+  // page prose or contract boilerplate, so the text-classification gates
+  // below do not apply. A documentation line like "**** Work Authorization
+  // Secured ****" inside the estimate table would otherwise be misread as a
+  // work-authorization contract page.
+  const isMeasuredEngineRowAnchor = anchor.anchorId.endsWith(":engine_row");
+  if (claimedEstimateAnchor && !isMeasuredEngineRowAnchor && isBoilerplateOrLegalEstimatePageAnchor(anchor, rowType) && !explicitSupportContext) {
     return `bad anchor rejected: ${rowType} boilerplate/header/legal text cannot be rendered as an estimate annotation${structuredRowSuffix}`;
   }
-  if (isBadCitationDensityAnchorText(anchor.rowText) && !explicitSupportContext) {
+  if (!isMeasuredEngineRowAnchor && isBadCitationDensityAnchorText(anchor.rowText) && !explicitSupportContext) {
     return `bad anchor rejected: ${rowType} text cannot be rendered as an estimate annotation${structuredRowSuffix}`;
   }
   if (
     claimedEstimateAnchor &&
+    !isMeasuredEngineRowAnchor &&
     ["support_contract", "legal_notice", "insurer_boilerplate", "vehicle_identity_header_footer", "generic_section_text", "guide_row", "supplier_address"].includes(rowType)
   ) {
     return `bad anchor rejected: ${rowType} cannot be labeled as ${anchor.anchorType}${structuredRowSuffix}`;
@@ -6343,7 +6855,13 @@ function isVisibleCitationDensityFinding(finding: CitationDensityFinding): boole
   // anchor to totals rows — the junk gate (built to kill boilerplate-anchored
   // artifacts) silently suppressed Body Labor/Mechanical hour-delta findings.
   const isTotalsLaneFinding = (finding.id ?? "").startsWith("required-detector-totals-");
-  if (!isTotalsLaneFinding && isJunkCitationFindingText(primaryNormalized)) return false;
+  // Structured delta findings already passed the typed engine's row validation;
+  // their anchor evidence can bleed adjacent boilerplate (a line next to the
+  // VEHICLE OPTIONS block absorbs "4 wheel drive…"), so the junk gate judges
+  // them by their own engine-derived label, not the anchor's fuzzy text.
+  const isStructuredDeltaFinding = (finding.id ?? "").startsWith("required-detector-delta-");
+  const junkGateText = isStructuredDeltaFinding ? normalizeMatchText(finding.operationLabel ?? "") : primaryNormalized;
+  if (!isTotalsLaneFinding && isJunkCitationFindingText(junkGateText)) return false;
   if (/\brepair operation\b|\bproc report\b|\bcomparison or screenshot cues\b/i.test(text)) return false;
   if (/\bgeneric visible damage photo observations\b|\bgeneric key visible estimate facts\b/i.test(text)) return false;
   if (/\bproc\s+(?:pre|post)[-\s]?repair scanm\b/i.test(text) || /\bproc\s+(?:pre|post)\s+repair\s+scanm\b/.test(normalized)) return false;
@@ -6528,11 +7046,16 @@ function drawFindingAnnotation(
   }
 
   if (options.mode === "margin_callouts" || options.mode === "both") {
+    // Badge shows the SOURCE LINE number — the same key the callout bands
+    // ("Ln 76/77 …") and the findings report ("Source line") use, so all
+    // three views map to each other with no separate legend.
+    const lineNumberBadge = Number(anchor.lineNumber);
     drawCompactMarker(page, {
-      number,
+      number: Number.isFinite(lineNumberBadge) && lineNumberBadge > 0 ? lineNumberBadge : number,
       anchorX: anchor.x,
       highlightX: pdfLibRect.x,
       highlightY: pdfLibRect.y,
+      highlightHeight: pdfLibRect.height,
       pageWidth,
       font: options.font,
       boldFont: options.boldFont,
@@ -6563,27 +7086,32 @@ function drawCompactMarker(
     anchorX: number;
     highlightX: number;
     highlightY: number;
+    highlightHeight?: number;
     pageWidth: number;
     font: PDFFont;
     boldFont: PDFFont;
   }
 ) {
-  const markerX = options.anchorX > 56
-    ? clamp(options.highlightX - 18, 8, options.pageWidth - 28)
-    : clamp(options.highlightX + 4, 8, options.pageWidth - 28);
-  const markerY = options.highlightY + 2;
+  // Badge sits in the LEFT PAGE MARGIN, clear of the estimate's own
+  // line-number column, and is vertically centered on its row (it previously
+  // rendered about half a row low and crowded the line numbers).
+  const markerX = 3;
+  const rowCenter = options.highlightY + (options.highlightHeight ?? 10) / 2;
+  const label = String(options.number);
+  const size = label.length >= 3 ? 5.4 : 7;
   page.drawEllipse({
     x: markerX + 7,
-    y: markerY + 7,
+    y: rowCenter,
     xScale: 7,
     yScale: 7,
     color: rgb(0.72, 0.12, 0.1),
     opacity: 0.95,
   });
-  page.drawText(String(options.number), {
-    x: markerX + (options.number < 10 ? 4.6 : 2.2),
-    y: markerY + 3.2,
-    size: 7,
+  const textWidth = options.boldFont.widthOfTextAtSize(label, size);
+  page.drawText(label, {
+    x: markerX + 7 - textWidth / 2,
+    y: rowCenter - size / 2 + 0.6,
+    size,
     font: options.boldFont,
     color: rgb(1, 1, 1),
   });
