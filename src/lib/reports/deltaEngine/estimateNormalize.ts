@@ -266,7 +266,7 @@ export function extractPart(token: string): { part: string | null; trailing: str
  * their stripped core and report `concept: false` so the caller can surface
  * an `unmapped_category` warning instead of silently mis-pairing.
  */
-const CATEGORY_NOISE_SUFFIXES = ["LABOR", "REPAIR", "CHARGES", "ORSTEEL", "FEES"] as const;
+const CATEGORY_NOISE_SUFFIXES = ["LABOR", "REPAIR", "CHARGES", "ORSTEEL", "FEES", "REPLACE"] as const;
 
 const CATEGORY_CONCEPTS: Record<string, string> = {
   BODY: "BODY",
@@ -279,6 +279,9 @@ const CATEGORY_CONCEPTS: Record<string, string> = {
   STRUCTURAL: "FRAME",
   STRUCTURE: "FRAME",
   ALUMINUM: "ALUMINUM",
+  BONDEDORWELDEDPANEL: "BONDEDORWELDEDPANEL",
+  BONDEDPANEL: "BONDEDORWELDEDPANEL",
+  WELDEDPANEL: "BONDEDORWELDEDPANEL",
   GLASS: "GLASS",
   DIAGNOSTIC: "DIAGNOSTIC",
   DIAG: "DIAGNOSTIC",

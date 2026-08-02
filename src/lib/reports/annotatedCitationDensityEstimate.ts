@@ -96,7 +96,7 @@ function stripDeltaEngineSideTokens(desc: string, stripPosition: boolean): strin
   return out.replace(/\s*\/\s*/g, " ").replace(/\s{2,}/g, " ").trim();
 }
 import { pairAndCompare } from "./deltaEngine/deltaPair";
-import { detectDominantKnownCarrier, findForeignOrganizationMentions } from "@/lib/ai/extractors/extractEstimateFacts";
+import { carriersNamedIn, detectDominantKnownCarrier, findForeignOrganizationMentions } from "@/lib/ai/extractors/extractEstimateFacts";
 import {
   emptyRowParseDiagnostics,
   parseEstimateRows as parseDeltaEngineRows,
@@ -1004,6 +1004,7 @@ const LABEL_DEFINITIONS: Record<string, string> = {
   "HOURS DELTA": "A labor-category hour subtotal differs between the two estimates.",
   "RATE DELTA": "A labor or materials rate differs between the two estimates.",
   "TOTAL GAP": "The grand totals differ — the reconciled overall gap between the two estimates.",
+  "RECONCILIATION GAP": "The compared category deltas do NOT sum to the grand-total gap — part of the headline is unexplained; treat itemized claims accordingly.",
   "LOWER-ONLY LINES": "Lines present only on the lower-cost estimate (omitted scope, wording variants, or duplicate candidates).",
   "CARRIER MISMATCH": "A line note names a carrier that is not this file's insurer — a document-attribution defect.",
   "CARRIER HIGHER": "On this matched line the LOWER-cost estimate allows more — the cost gap runs in the other direction.",
@@ -1990,11 +1991,24 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
             }));
           }
         }
-        const competingLabel = deriveCompetingDocLabel({
-          fileName: comparisonWordSet?.fileName ?? comparisonText?.fileName ?? "",
-          text: comparisonText?.text ?? "",
-          estimateRole: comparisonWordSet?.estimateRole ?? comparisonText?.estimateRole,
-        });
+        // C-5: ONE resolved carrier identity per run — the annotator consumes
+        // the same resolution every other renderer uses, never a token
+        // re-derived from raw text ("FOR" on every callout was an extraction
+        // fragment, not a carrier).
+        const resolvedComparisonCarrier =
+          (comparisonWordSet?.estimateRole ?? comparisonText?.estimateRole) === "shop"
+            ? undefined
+            : detectDominantKnownCarrier(
+                `${comparisonText?.text ?? ""}\n${params.sourceText ?? ""}`
+              );
+        const competingLabel = deriveCompetingDocLabel(
+          {
+            fileName: comparisonWordSet?.fileName ?? comparisonText?.fileName ?? "",
+            text: comparisonText?.text ?? "",
+            estimateRole: comparisonWordSet?.estimateRole ?? comparisonText?.estimateRole,
+          },
+          resolvedComparisonCarrier
+        );
         if (competingRows.length > 0) {
           const plan = planDeltaValueAnnotations({
             subjectWords: placementWords,
@@ -3746,8 +3760,9 @@ function emitTotalsDeltaFindings(
     if (findings.length >= MAX_TOTALS_FINDINGS) break;
     const categoryNeedle = delta.category.toLowerCase();
     const anchor =
-      delta.kind === "total_difference"
-        ? claimAnchor((text) => /grand total|total cost of repair|workfile total|net cost/.test(text))
+      delta.kind === "total_difference" || delta.kind === "reconciliation_gap"
+        ? (claimAnchor((text) => /grand total|total cost of repair|workfile total|net cost/.test(text)) ??
+            blockFallbackAnchor())
         : delta.kind === "category_only_on_lower"
           ? // This estimate has NO row for a lower-only category, so anchor to
             // the ESTIMATE TOTALS block header — neutral placement context —
@@ -3818,9 +3833,11 @@ function emitTotalsDeltaFindings(
               ? `Hour subtotal difference: ${delta.category}`
               : delta.kind === "total_difference"
                 ? "Estimate total difference"
-                : delta.kind === "category_only_on_lower"
-                  ? `Category only on the lower estimate: ${delta.category}`
-                  : `Category amount difference: ${delta.category}`,
+                : delta.kind === "reconciliation_gap"
+                  ? "Totals do NOT reconcile — part of the gap is unexplained"
+                  : delta.kind === "category_only_on_lower"
+                    ? `Category only on the lower estimate: ${delta.category}`
+                    : `Category amount difference: ${delta.category}`,
         category: isRateKind ? "labor_difference" : "other",
         label:
           delta.kind === "rate_difference"
@@ -3829,11 +3846,16 @@ function emitTotalsDeltaFindings(
               ? "HOURS DELTA"
               : delta.kind === "total_difference"
                 ? "TOTAL GAP"
-                : "AMOUNT DELTA",
+                : delta.kind === "reconciliation_gap"
+                  ? "RECONCILIATION GAP"
+                  : "AMOUNT DELTA",
         estimateGapType: isRateKind ? "reduced_by_carrier" : "needs_proof",
-        score: isRateKind ? 78 : 62,
+        score: delta.kind === "reconciliation_gap" ? 85 : isRateKind ? 78 : 62,
         safetyImpact: "low",
-        priority: isRateKind || delta.kind === "total_difference" ? "high" : "medium",
+        priority:
+          isRateKind || delta.kind === "total_difference" || delta.kind === "reconciliation_gap"
+            ? "high"
+            : "medium",
         currentSupportSummary:
           delta.kind === "category_only_on_lower"
             ? `${delta.summary} (compared against ${deltaMatch.comparisonName}). This estimate has no row for that category, so this note is anchored to the totals block for placement only — no amount on this estimate is being disputed by this finding.`
@@ -7274,10 +7296,24 @@ function drawFindingAnnotation(
  * (file name prefix, then the insurer named in the header, then the role).
  * Never hardcode a carrier here — this must stay fluid to any document pair.
  */
-function deriveCompetingDocLabel(comparison: ComparisonEstimateText): string {
-  const fromFileName = /^([A-Z]{2,8})(?=[\s_\-.])/.exec(comparison.fileName?.trim() ?? "")?.[1];
-  if (fromFileName && fromFileName !== "EOR") return fromFileName;
-  const insurer = /insurance company\s*:?\s*([A-Z][A-Za-z&.]{1,24})/i.exec(comparison.text)?.[1]?.trim();
+function deriveCompetingDocLabel(
+  comparison: ComparisonEstimateText,
+  resolvedCarrier?: string
+): string {
+  // C-5 invariant: one resolved carrier identity per run, consumed by every
+  // renderer. A label that is not a RECOGNIZED organization name is a
+  // resolution failure — fall back to the neutral role label, never print a
+  // raw token in front of an adjuster.
+  if (resolvedCarrier) return resolvedCarrier.toUpperCase();
+  const validateLabel = (candidate: string | undefined): string | undefined => {
+    const trimmed = candidate?.trim();
+    if (!trimmed) return undefined;
+    if (carriersNamedIn(trimmed).length > 0) return trimmed;
+    return undefined;
+  };
+  const fromFileName = validateLabel(/^([A-Z]{2,8})(?=[\s_\-.])/.exec(comparison.fileName?.trim() ?? "")?.[1]);
+  if (fromFileName) return fromFileName;
+  const insurer = validateLabel(/insurance company\s*:?\s*([A-Z][A-Za-z&.]{1,24})/i.exec(comparison.text)?.[1]);
   if (insurer) return insurer.toUpperCase();
   return comparison.estimateRole === "shop" ? "SHOP" : "EOR";
 }

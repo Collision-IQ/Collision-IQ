@@ -33,6 +33,8 @@ const {
   matchEstimateLineItems,
   parseEstimateNetTotal,
   isSectionHeader,
+  compareEstimateTotals,
+  normalizeTotalsCategoryKey,
 } = require("./estimateDeltaMatcher.ts");
 
 let passed = 0;
@@ -383,6 +385,56 @@ run("ledger: an operation change on a matched line is highlighted (R&I/Rpr -> Re
   assert.equal(d.annotate, true, "operation/labor escalation must be highlighted");
   // A changed matched line surfaces as operation_change or a labor/paint/part delta.
   assert.ok(["operation_change", "reduced_labor", "reduced_paint", "part_or_price_difference"].includes(d.kind));
+});
+
+run("C-2: unreconciled totals emit a LOUD reconciliation_gap delta, never silence", () => {
+  const result = compareEstimateTotals({
+    higher: {
+      categories: [
+        { category: "Body Labor", hours: 20, rate: 50, cost: 3000 },
+        { category: "Mystery Structural Lane", hours: null, rate: null, cost: 4000 },
+      ],
+      salesTax: 0,
+      grandTotal: 9000,
+    },
+    lower: {
+      categories: [{ category: "Body Labor", hours: 10, rate: 50, cost: 1000 }],
+      salesTax: 0,
+      grandTotal: 2000,
+    },
+  });
+  const gap = result.find((delta) => delta.kind === "reconciliation_gap");
+  assert.ok(gap, "reconciliation_gap delta present");
+  assert.match(gap.summary, /NOT explained/);
+  assert.match(gap.summary, /withdrawn/);
+  // The confident category-missing claim is withdrawn — it is what an
+  // adjuster uses to discredit the whole document when it is wrong.
+  assert.equal(result.some((delta) => delta.kind === "category_missing_on_lower"), false);
+});
+
+run("C-2: reconciled totals emit NO reconciliation_gap", () => {
+  const result = compareEstimateTotals({
+    higher: {
+      categories: [{ category: "Body Labor", hours: 20, rate: 50, cost: 3000 }],
+      salesTax: 0,
+      grandTotal: 3000,
+    },
+    lower: {
+      categories: [{ category: "Body Labor", hours: 10, rate: 50, cost: 1000 }],
+      salesTax: 0,
+      grandTotal: 1000,
+    },
+  });
+  assert.equal(result.some((delta) => delta.kind === "reconciliation_gap"), false);
+});
+
+run("C-1: 22182 totals vocabulary resolves to concepts (Bonded Or Welded Panel Replace)", () => {
+  assert.equal(normalizeTotalsCategoryKey("Bonded Or Welded Panel Replace"), "BONDEDORWELDEDPANEL");
+  assert.equal(normalizeTotalsCategoryKey("Bonded Panel"), "BONDEDORWELDEDPANEL");
+  assert.equal(normalizeTotalsCategoryKey("Welded Panel Replace"), "BONDEDORWELDEDPANEL");
+  assert.equal(normalizeTotalsCategoryKey("Mechanical Labor"), "MECHANICAL");
+  assert.equal(normalizeTotalsCategoryKey("Aluminum Or Steel Repair"), "ALUMINUM");
+  assert.equal(normalizeTotalsCategoryKey("Miscellaneous"), "MISCELLANEOUS");
 });
 
 console.log(`\nestimateDeltaMatcher: ${passed} passed, ${failed} failed`);

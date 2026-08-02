@@ -2517,7 +2517,11 @@ export type EstimateTotalsDeltaKind =
   | "category_amount_difference"
   | "category_missing_on_lower"
   | "category_only_on_lower"
-  | "total_difference";
+  | "total_difference"
+  /** C-2: Σ(category deltas) + tax delta failed to reconcile to the grand-total
+   * delta. The unexplained amount is stated LOUDLY — a pack whose compared
+   * categories explain only part of its own headline must say so. */
+  | "reconciliation_gap";
 
 export interface EstimateTotalsDelta {
   kind: EstimateTotalsDeltaKind;
@@ -2725,9 +2729,27 @@ export function compareEstimateTotals(params: {
         taxDelta: Math.round(taxDelta * 100) / 100,
         grandDelta: Math.round(grandDelta * 100) / 100,
       });
-      return deltas.filter(
+      // C-2: never ship the mismatch silently. The confident category-missing
+      // claims are withdrawn (they are what an adjuster uses to discredit the
+      // document), and an explicit RECONCILIATION GAP delta states how much of
+      // the headline the compared categories do NOT explain.
+      const explained = Math.round((categorySum + taxDelta) * 100) / 100;
+      const unexplained = Math.round((grandDelta - categorySum - taxDelta) * 100) / 100;
+      const kept = deltas.filter(
         (delta) => delta.kind !== "category_missing_on_lower" && delta.kind !== "category_only_on_lower"
       );
+      kept.push({
+        kind: "reconciliation_gap",
+        category: "Totals reconciliation",
+        higher: null,
+        lower: null,
+        summary:
+          `Compared category deltas plus tax explain ${fmtMoney(explained)} of the ${fmtMoney(grandDelta)} grand-total gap — ` +
+          `${fmtMoney(Math.abs(unexplained))} is NOT explained by the compared categories. One or more totals categories ` +
+          `failed to pair between the two ESTIMATE TOTALS blocks (see unmapped_category warnings). Category-missing claims ` +
+          `are withdrawn until the block reconciles; do not present the headline gap as fully itemized.`,
+      });
+      return kept;
     }
   }
 
