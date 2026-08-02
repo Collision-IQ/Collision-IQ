@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import {
   clearNavUpdate,
   markVehicleMaintenanceIfChanged,
@@ -600,6 +600,11 @@ export default function CollisionWorkspaceV2({
                   ? "lg:grid-cols-[minmax(0,1fr)_360px]"
                   : "lg:grid-cols-[minmax(0,1fr)_auto]"
             }`}
+            // The chat's centered column reads this: rails open -> condensed
+            // reading column; rails closed -> the freed width goes INTO the
+            // conversation column, so the chat visibly expands/condenses with
+            // the claim panel instead of pooling dead space on one side.
+            style={{ "--workspace-chat-col": rightRailOpen ? "1080px" : "1280px" } as CSSProperties}
           >
             {activeView === "reports" ? (
               <div data-tour="past-reports">

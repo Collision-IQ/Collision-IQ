@@ -4693,17 +4693,16 @@ export default function ChatWidget({
         <div
           ref={scrollRef}
           className={[
-            // Transcript geometry: the conversation lives in the SAME centered
-            // 1080px column as the composer, at every rail state. The previous
-            // max(1080px, 100% - 240px) widening let the container grow when
-            // the claim panel closed while the 680px assistant bubbles kept
-            // hugging its left edge — all the freed width pooled on the right
-            // and read as "the chat didn't adjust to the rails closing".
-            // A fixed centered column distributes freed space evenly instead,
-            // so opening/closing rails visibly re-centers the conversation.
+            // Transcript geometry: the conversation lives in a CENTERED column
+            // shared with the composer, whose width tracks the workspace rail
+            // state via --workspace-chat-col (1080px with the claim panel open,
+            // 1280px with it closed; 1080px anywhere the variable is unset).
+            // Closing the rails visibly EXPANDS the column and opening them
+            // condenses it, with the remaining space split evenly — never
+            // pooled on one side the way a left-hugging fluid container read.
             // Assistant rows hug the column's left margin, user rows its
             // right; the centered welcome children (mx-auto) stay centered.
-            "mx-auto w-full max-w-[1080px] min-h-0 px-3 pb-4 pt-3 sm:px-4 sm:pt-4 space-y-4",
+            "mx-auto w-full max-w-[min(var(--workspace-chat-col,1080px),100%)] min-h-0 px-3 pb-4 pt-3 sm:px-4 sm:pt-4 space-y-4",
             transcriptHeightClass,
           ].join(" ")}
         >
@@ -4850,7 +4849,7 @@ export default function ChatWidget({
                         // makes the cap moot — no breakpoint logic. Messages carrying wide
                         // data (tables) opt back out to the container width; prose inside
                         // them stays capped via the markdown wrapper below.
-                        `min-w-0 max-w-full overflow-hidden break-words rounded-2xl rounded-bl-md border border-border/55 bg-card shadow-[var(--shadow-soft)] sm:max-w-[680px] sm:has-[table]:max-w-[980px]${hasFindingGutter ? " 2xl:max-w-[744px]" : ""}`
+                        `min-w-0 max-w-full overflow-hidden break-words rounded-2xl rounded-bl-md border border-border/55 bg-card shadow-[var(--shadow-soft)] sm:max-w-[680px] sm:has-[table]:max-w-[min(100%,1180px)]${hasFindingGutter ? " 2xl:max-w-[744px]" : ""}`
                 }`}
               >
                 {msg.role === "assistant" && msg.kind !== "system_status" ? (
@@ -4993,7 +4992,9 @@ export default function ChatWidget({
             shouldCompactMobileChat ? "min-h-[56px] py-1.5 lg:min-h-[74px] lg:py-2" : "min-h-[74px] py-2",
           ].join(" ")}
         >
-          <div className="mx-auto w-full max-w-[1080px]">
+          {/* The composer shares the transcript's rail-aware centered column so
+              their edges stay aligned at every rail state. */}
+          <div className="mx-auto w-full max-w-[min(var(--workspace-chat-col,1080px),100%)]">
             <div
               onDragEnter={handleUploadDragEnter}
               onDragOver={handleUploadDragOver}
