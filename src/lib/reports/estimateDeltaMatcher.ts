@@ -2498,9 +2498,13 @@ export function parseCccEstimateTotals(text: string): EstimateTotalsSummary | nu
       });
       continue;
     }
-    const tax = line.match(/^sales tax\b.*?([\d,]+\.\d{2})$/i);
+    // EVERY tax lane counts toward the tax component — jurisdictions stack
+    // Sales + County/City/Municipal/State/Local tax as separate rows, and a
+    // missed lane breaks the Σ(categories)+tax ≈ grand-total reconciliation
+    // (RO 22182: County Tax $84.56 left an $84.56 phantom gap).
+    const tax = line.match(/^(?:sales|county|city|state|local|municipal|excise|use)\s+tax\b.*?([\d,]+\.\d{2})$/i);
     if (tax) {
-      summary.salesTax = money(tax[1]);
+      summary.salesTax = (summary.salesTax ?? 0) + (money(tax[1]) ?? 0);
       continue;
     }
     const grand = line.match(/^(grand total|total cost of repairs?|workfile total:?)\s*\$?\s*([\d,]+\.\d{2})$/i);
