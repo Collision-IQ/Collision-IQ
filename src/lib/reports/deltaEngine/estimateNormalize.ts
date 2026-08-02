@@ -165,14 +165,82 @@ export function extractPart(token: string): { part: string | null; trailing: str
   return { part, trailing: repaired.slice(match.index + match[0].length) };
 }
 
-/** Totals category aliases (name variants across estimating exports). */
-export const TOTALS_ALIASES: Record<string, string> = {
-  ALUMINUM: "ALUMINUMORSTEELREPAIR",
+/**
+ * Structural totals-category normalization (U-2): never a literal alias
+ * table. (a) casefold + squash, (b) strip noise suffixes iteratively
+ * (Labor / Repair / Charges / Or Steel / Fees), (c) MATERIALS ≡ SUPPLIES,
+ * (d) map the stripped core onto a canonical CONCEPT. Unresolved labels keep
+ * their stripped core and report `concept: false` so the caller can surface
+ * an `unmapped_category` warning instead of silently mis-pairing.
+ */
+const CATEGORY_NOISE_SUFFIXES = ["LABOR", "REPAIR", "CHARGES", "ORSTEEL", "FEES"] as const;
+
+const CATEGORY_CONCEPTS: Record<string, string> = {
+  BODY: "BODY",
+  PAINT: "PAINT",
+  REFINISH: "PAINT",
+  MECHANICAL: "MECHANICAL",
+  MECH: "MECHANICAL",
+  ELECTRICAL: "ELECTRICAL",
+  FRAME: "FRAME",
+  STRUCTURAL: "FRAME",
+  STRUCTURE: "FRAME",
+  ALUMINUM: "ALUMINUM",
+  GLASS: "GLASS",
+  DIAGNOSTIC: "DIAGNOSTIC",
+  DIAG: "DIAGNOSTIC",
+  SUBLET: "SUBLET",
+  TOWING: "TOWING",
+  TOW: "TOWING",
+  STORAGE: "STORAGE",
+  BETTERMENT: "BETTERMENT",
+  APPEARANCEALLOWANCE: "APPEARANCEALLOWANCE",
+  PAINTSUPPLIES: "PAINTSUPPLIES",
+  REFINISHSUPPLIES: "PAINTSUPPLIES",
+  PANDM: "PAINTSUPPLIES",
+  PM: "PAINTSUPPLIES",
+  SHOPSUPPLIES: "SHOPSUPPLIES",
+  BODYSUPPLIES: "SHOPSUPPLIES",
+  HAZARDOUSWASTE: "HAZARDOUSWASTE",
+  HAZMAT: "HAZARDOUSWASTE",
+  PARTS: "PARTS",
+  MISCELLANEOUS: "MISCELLANEOUS",
+  MISC: "MISCELLANEOUS",
+  NONTAXABLE: "NONTAXABLE",
 };
 
+export function canonTotalsCategoryDetailed(name: string): { key: string; concept: boolean } {
+  let key = repairTokens(name).toUpperCase().replace(/&/g, "AND").replace(/[^A-Z]/g, "");
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const suffix of CATEGORY_NOISE_SUFFIXES) {
+      if (key.length > suffix.length && key.endsWith(suffix)) {
+        key = key.slice(0, -suffix.length);
+        changed = true;
+      }
+    }
+  }
+  key = key.replace(/MATERIALS?$/, "SUPPLIES");
+  const concept = CATEGORY_CONCEPTS[key];
+  return concept ? { key: concept, concept: true } : { key, concept: false };
+}
+
 export function canonTotalsCategory(name: string): string {
-  const key = canonKey(name).key;
-  return TOTALS_ALIASES[key] ?? key;
+  return canonTotalsCategoryDetailed(name).key;
+}
+
+/**
+ * Fuzzy last-resort category match (U-2 step d): containment of one stripped
+ * core in the other, both long enough to be meaningful. Runs only after
+ * concept resolution fails on BOTH sides.
+ */
+export function totalsCategoriesFuzzyMatch(a: string, b: string): boolean {
+  const ka = canonTotalsCategoryDetailed(a);
+  const kb = canonTotalsCategoryDetailed(b);
+  if (ka.key === kb.key) return true;
+  if (ka.concept || kb.concept) return false; // concepts either matched exactly or differ
+  return ka.key.length >= 5 && kb.key.length >= 5 && (ka.key.includes(kb.key) || kb.key.includes(ka.key));
 }
 
 /** Corruption detector: rate of known artifacts per 100 words -> degraded-text tag. */

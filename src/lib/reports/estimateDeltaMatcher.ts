@@ -15,6 +15,7 @@
  */
 
 import { canonicalOperationKey } from "./operationAliases";
+import { canonTotalsCategory, totalsCategoriesFuzzyMatch } from "./deltaEngine/estimateNormalize";
 
 export type EstimateDeltaRowSource = "lower" | "higher";
 
@@ -2537,17 +2538,10 @@ const fmtHours = (value: number) => `${Math.round(value * 10) / 10} hr`;
  * label as a missing category.
  */
 export function normalizeTotalsCategoryKey(name: string): string {
-  let key = name.toUpperCase().replace(/[^A-Z&]/g, "").replace(/&/g, "AND");
-  key = key.replace(/ORSTEELREPAIR$/, "");
-  const ALIASES: Record<string, string> = {
-    ALUMINUM: "ALUMINUM",
-    ALUMINUMREPAIR: "ALUMINUM",
-    PANDM: "PAINTSUPPLIES",
-    PM: "PAINTSUPPLIES",
-    PAINTMATERIALS: "PAINTSUPPLIES",
-    PAINTSUPPLIES: "PAINTSUPPLIES",
-  };
-  return ALIASES[key] ?? key;
+  // Structural concept resolution (U-2) shared with the delta engine —
+  // casefold, iterative noise-suffix strip, MATERIALS≡SUPPLIES, concept map.
+  // Never a hand-grown alias table in two places.
+  return canonTotalsCategory(name);
 }
 
 export function compareEstimateTotals(params: {
@@ -2559,10 +2553,30 @@ export function compareEstimateTotals(params: {
   const deltas: EstimateTotalsDelta[] = [];
   const lowerByName = new Map(lower.categories.map((c) => [normalizeTotalsCategoryKey(c.category), c]));
   const higherNames = new Set(higher.categories.map((c) => normalizeTotalsCategoryKey(c.category)));
+  // Fuzzy-resolved pairings (U-2 step d): concept resolution failed on both
+  // labels but the stripped cores contain each other. Tracked so the
+  // lower-only sweep and the reconciliation sum see the SAME pairing.
+  const fuzzyPairedLower = new Set<(typeof lower.categories)[number]>();
+  const resolveLowerCategory = (categoryName: string) => {
+    const exact = lowerByName.get(normalizeTotalsCategoryKey(categoryName)) ?? null;
+    if (exact) return exact;
+    const fuzzy = lower.categories.find(
+      (candidate) => !fuzzyPairedLower.has(candidate) && totalsCategoriesFuzzyMatch(categoryName, candidate.category)
+    );
+    if (fuzzy) fuzzyPairedLower.add(fuzzy);
+    return fuzzy ?? null;
+  };
 
   for (const higherCategory of higher.categories) {
-    const lowerCategory = lowerByName.get(normalizeTotalsCategoryKey(higherCategory.category)) ?? null;
+    const lowerCategory = resolveLowerCategory(higherCategory.category);
     if (!lowerCategory) {
+      // Vocabulary gap must be VISIBLE (U-2): the claim stands, but the
+      // unmapped label is logged so the concept map can grow deliberately.
+      console.error("[estimate-totals] unmapped_category", {
+        category: higherCategory.category,
+        normalizedKey: normalizeTotalsCategoryKey(higherCategory.category),
+        presentOn: "higher",
+      });
       deltas.push({
         kind: "category_missing_on_lower",
         category: higherCategory.category,
@@ -2651,7 +2665,12 @@ export function compareEstimateTotals(params: {
   }
 
   for (const lowerCategory of lower.categories) {
-    if (!higherNames.has(normalizeTotalsCategoryKey(lowerCategory.category))) {
+    if (!higherNames.has(normalizeTotalsCategoryKey(lowerCategory.category)) && !fuzzyPairedLower.has(lowerCategory)) {
+      console.error("[estimate-totals] unmapped_category", {
+        category: lowerCategory.category,
+        normalizedKey: normalizeTotalsCategoryKey(lowerCategory.category),
+        presentOn: "lower",
+      });
       deltas.push({
         kind: "category_only_on_lower",
         category: lowerCategory.category,

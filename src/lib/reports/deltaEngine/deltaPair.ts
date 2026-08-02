@@ -228,19 +228,33 @@ export interface TotalsDelta {
 export function compareTotals(
   subject: TotalsRow[],
   competing: TotalsRow[],
-  canon: (name: string) => string
+  canon: (name: string) => string,
+  options?: {
+    /** Last-resort category match after concept resolution failed (U-2 step d). */
+    fuzzyMatch?: (a: string, b: string) => boolean;
+    /** Called for every category that resolves on one estimate only — the
+     * vocabulary gap must be VISIBLE (unmapped_category), never silent. */
+    onUnmapped?: (category: string, presentOn: "subject" | "competing") => void;
+  }
 ): TotalsDelta[] {
   const competingMap = new Map(competing.map((row) => [canon(row.category), row]));
   const out: TotalsDelta[] = [];
   const seen = new Set<string>();
+  const seenCompeting = new Set<TotalsRow>();
   for (const s of subject) {
     const key = canon(s.category);
     seen.add(key);
-    const u = competingMap.get(key);
+    let u = competingMap.get(key);
+    if (!u && options?.fuzzyMatch) {
+      u = competing.find((row) => !seenCompeting.has(row) && options.fuzzyMatch!(s.category, row.category));
+    }
     if (!u) {
+      options?.onUnmapped?.(s.category, "subject");
       out.push({ category: s.category, field: "amount", subject: s.amount, competing: 0 });
       continue;
     }
+    seenCompeting.add(u);
+    seen.add(canon(u.category));
     for (const field of ["hours", "rate", "amount"] as const) {
       const a = s[field] ?? 0;
       const b = u[field] ?? 0;
@@ -248,8 +262,10 @@ export function compareTotals(
     }
   }
   for (const u of competing) {
-    if (!seen.has(canon(u.category)))
+    if (!seen.has(canon(u.category)) && !seenCompeting.has(u)) {
+      options?.onUnmapped?.(u.category, "competing");
       out.push({ category: u.category, field: "amount", subject: 0, competing: u.amount });
+    }
   }
   return out;
 }
