@@ -3786,6 +3786,13 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
       .filter((findingId) => !findingsReportText.includes(findingId));
     assert.deepEqual(orphanCallouts, [], "every callout finding id appears in the findings report");
     assert.equal(result.unresolvedAnchorCount, 0, "no finding lost its anchor between the two renderers");
+    // D-6: callout count equals ANNOTATABLE finding count — the counts must
+    // never disagree silently.
+    assert.equal(
+      result.annotationMetadata.length,
+      result.annotatedFindingCount,
+      "callout count equals annotatable finding count"
+    );
   });
 
   await run("policy diagnostics detect vehicle mismatch and garbled extraction fallback", async () => {

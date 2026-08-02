@@ -981,20 +981,34 @@ const CCC_SOURCE_BOUNDARY_TEXT =
 const CCC_LIMITATION_TEXT =
   "The CCC estimate data supports the existence of this line-item difference. OEM/P-page/DEG/legal support has not yet been verified.";
 
-const LABELS = [
-  "VERIFIED DOCUMENTATION",
-  "VERIFIED OEM",
-  "VERIFIED ADAS",
-  "VERIFIED LEGAL",
-  "NEEDS OEM",
-  "NEEDS ADAS",
-  "NEEDS P-PAGE",
-  "NEEDS INVOICE",
-  "REFERENCED / NOT PRODUCED",
-  "ESTIMATE GAP ONLY",
-  "ONLINE FALLBACK",
-  "WEAK — DO NOT LEAD",
-] as const;
+/**
+ * One-line reader definitions for every label the report can emit (D-5).
+ * The legend page is GENERATED from the labels a run actually emitted, each
+ * with its definition — a hand-maintained list drifts every time a label is
+ * added, which is exactly what happened between builds.
+ */
+const LABEL_DEFINITIONS: Record<string, string> = {
+  "VERIFIED DOCUMENTATION": "Uploaded case documentation confirms this line's support.",
+  "VERIFIED OEM": "An OEM procedure or position statement is attached and verified.",
+  "VERIFIED ADAS": "An ADAS/calibration procedure is attached and verified.",
+  "VERIFIED LEGAL": "A statute, regulation, or DOI guidance is attached and verified.",
+  "NEEDS OEM": "Needs an OEM procedure or position statement before it is citation-ready.",
+  "NEEDS ADAS": "Needs ADAS/calibration procedure support tied to this row.",
+  "NEEDS P-PAGE": "Needs CCC/MOTOR P-page or estimating-database support for the allowance.",
+  "NEEDS INVOICE": "Needs a supplier/sublet invoice or completion proof for the price.",
+  "REFERENCED / NOT PRODUCED": "A document the estimate references was not produced into this review.",
+  "ESTIMATE GAP ONLY": "The two estimates differ here — the difference itself is the evidence; no external authority is attached yet.",
+  "ONLINE FALLBACK": "Support came from a public online source, not a licensed database.",
+  "WEAK — DO NOT LEAD": "Signal too weak to lead a negotiation; listed for completeness only.",
+  "AMOUNT DELTA": "A category dollar amount differs between the two ESTIMATE TOTALS blocks.",
+  "HOURS DELTA": "A labor-category hour subtotal differs between the two estimates.",
+  "RATE DELTA": "A labor or materials rate differs between the two estimates.",
+  "TOTAL GAP": "The grand totals differ — the reconciled overall gap between the two estimates.",
+  "LOWER-ONLY LINES": "Lines present only on the lower-cost estimate (omitted scope, wording variants, or duplicate candidates).",
+  "CARRIER MISMATCH": "A line note names a carrier that is not this file's insurer — a document-attribution defect.",
+  "CARRIER HIGHER": "On this matched line the LOWER-cost estimate allows more — the cost gap runs in the other direction.",
+  "CODING DIFFERENCE": "Same hours and amounts on both estimates; only the operation label differs — likely coding, not scope.",
+};
 
 const NO_ROWS_EXTRACTED_WARNING = "No estimate rows could be extracted from the source PDF.";
 const NO_SAFE_ROW_FINDINGS_WARNING =
@@ -2073,7 +2087,15 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   }
 
   if (request.includeLegend !== false) {
-    addLegendPage(pdfDoc, { font, boldFont, reportIdentity });
+    // D-5: the legend lists exactly the labels THIS run emitted — the visible
+    // callout labels plus every finding's proof-bucket label (the label shown
+    // on its card), anchored and appendix-only alike — each with a definition.
+    const emittedLabels = [
+      ...annotationMetadata.map((item) => item.label),
+      ...matches.map(({ finding }) => getProofBucketLabel(finding)),
+      ...unmatched.map((finding) => getProofBucketLabel(finding)),
+    ].filter(Boolean);
+    addLegendPage(pdfDoc, { font, boldFont, reportIdentity, emittedLabels });
   }
 
   const bytes = await pdfDoc.save();
@@ -2988,7 +3010,8 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
       category: profile.category,
       estimateGapType: "present_but_under_documented",
       missingProof:
-        "The two estimates carry the same hours and amounts for this line; only the CCC operation label differs. This is likely a coding/description difference, not a scope change.",
+        "The two estimates carry the same hours and amounts for this line; only the CCC operation label differs. This is likely a coding/description difference, not a scope change. " +
+        "(Below the on-text annotation threshold: this finding carries a margin badge but no value mark on the estimate body — the values are equal.)",
       nextAction:
         "Verify whether this is only a CCC coding difference (e.g. D&R handling written as Rpr vs R&I) before treating it as a scope change.",
       missingAuthorityTypes: ["CCC coding basis for the operation label"],
@@ -7590,7 +7613,14 @@ function truncateText(value: string, maxLength: number) {
 
 function addLegendPage(
   pdfDoc: PDFDocument,
-  options: { font: PDFFont; boldFont: PDFFont; reportIdentity?: AnnotatedEstimateReportIdentity }
+  options: {
+    font: PDFFont;
+    boldFont: PDFFont;
+    reportIdentity?: AnnotatedEstimateReportIdentity;
+    /** Labels this RUN actually emitted (D-5) — the legend is generated from
+     * them, never from a hand-maintained list that drifts. */
+    emittedLabels?: string[];
+  }
 ) {
   const reportIdentity = options.reportIdentity ?? CITATION_DENSITY_REPORT_IDENTITY;
   const page = pdfDoc.addPage();
@@ -7606,6 +7636,9 @@ function addLegendPage(
     SOURCE_BOUNDARY_TEXT,
     CCC_SOURCE_BOUNDARY_TEXT,
     CCC_LIMITATION_TEXT,
+    "",
+    // D-6: the badge-to-callout key. One line, so the page explains itself.
+    "Key: the numbered badge in the left margin is the FINDING number in the Findings Report; keyed notes at page bottom cite the estimate's own line numbers (Ln 16/17).",
   ], {
     x: 48,
     y: height - 84,
@@ -7614,11 +7647,13 @@ function addLegendPage(
     boldFont: options.boldFont,
     size: 10,
     lineHeight: 13,
-    maxLines: 8,
+    maxLines: 10,
   });
 
-  let y = height - 178;
-  for (const label of LABELS) {
+  const labels = [...new Set(options.emittedLabels ?? Object.keys(LABEL_DEFINITIONS))];
+  let y = height - 210;
+  for (const label of labels) {
+    if (y < 60) break;
     page.drawRectangle({
       x: 48,
       y: y - 3,
@@ -7634,7 +7669,18 @@ function addLegendPage(
       font: options.boldFont,
       color: rgb(0.12, 0.14, 0.18),
     });
-    y -= 24;
+    const definition = LABEL_DEFINITIONS[label] ?? "Label emitted by this run; see the finding card for its meaning.";
+    drawWrappedLines(page, [definition], {
+      x: 74,
+      y: y - 13,
+      width: width - 130,
+      font: options.font,
+      boldFont: options.boldFont,
+      size: 9,
+      lineHeight: 11,
+      maxLines: 2,
+    });
+    y -= 40;
   }
 }
 
@@ -8224,12 +8270,15 @@ function formatEmbeddedLinkLines(finding: CitationDensityFinding) {
 }
 
 function getProofBucketLabel(finding: CitationDensityFinding): string {
+  // An internet-fallback-backed finding is ONLINE FALLBACK regardless of the
+  // family label — the reader must see the support tier, not a bare NEEDS
+  // label that hides where the backing came from.
+  if (finding.bestAvailableAuthority?.type === "online_fallback") return "ONLINE FALLBACK";
   if (finding.citationLabel) {
     if (/^NEEDS ADAS$/i.test(finding.citationLabel) && !isAdasRelatedFinding(finding) && !hasExplicitAdasAuthorityNeed(finding)) return fallbackNonAdasOemLabel(finding);
     if (/^NEEDS OEM$/i.test(finding.citationLabel) && !isOemHvRelatedFinding(finding)) return fallbackNonAdasOemLabel(finding);
     return finding.citationLabel;
   }
-  if (finding.bestAvailableAuthority?.type === "online_fallback") return "ONLINE FALLBACK";
   if (finding.citationStatus.oem === "verified") return "VERIFIED OEM";
   if (finding.citationStatus.adas === "verified") return "VERIFIED ADAS";
   if (finding.citationStatus.stateRegulation === "verified" || finding.citationStatus.policy === "verified") return "VERIFIED LEGAL";
