@@ -2884,16 +2884,20 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   // Direction-aware framing: a matched cell where the LOWER estimate is
   // HIGHER (carrier allows more paint, a sublet the shop didn't price) is
   // evidence in the other direction — never presented as "allows less".
-  const primaryDelta = delta.priceDelta ?? delta.laborDelta ?? delta.paintDelta;
-  const carrierHigher =
-    (delta.kind === "reduced_labor" || delta.kind === "reduced_paint" || delta.kind === "part_or_price_difference") &&
-    delta.lowerRow !== null &&
-    primaryDelta !== null &&
-    primaryDelta < 0 &&
-    (delta.priceDelta ?? 0) <= 0 &&
-    (delta.laborDelta ?? 0) <= 0 &&
-    (delta.paintDelta ?? 0) <= 0;
-  if (carrierHigher) {
+  if (isLowerAllowsMoreDelta(delta)) {
+    // D-3: the next action names the delta's OWN driving cell — a sublet
+    // reconciliation must never suggest "added paint allowance".
+    const drivingCell = deltaDrivingCell(delta);
+    const isSublet =
+      /\bSubl\b/i.test(`${delta.higherRow.opCode ?? ""} ${delta.lowerRow?.opCode ?? ""} ${delta.higherRow.rawText}`) ||
+      /\balignment\b/i.test(delta.higherRow.description);
+    const nextAction = isSublet
+      ? "Verify the sublet operation the lower-cost estimate priced (obtain its sublet invoice); adopt the allowance on this estimate or document why the operation is not needed."
+      : drivingCell === "paint"
+        ? "Verify whether this estimate should adopt the lower-cost estimate's paint/refinish allowance for this line, or document the included-operation basis for showing it at zero."
+        : drivingCell === "labor"
+          ? "Verify whether this estimate should adopt the lower-cost estimate's labor allowance for this line, or document why the hours are not needed."
+          : "Verify whether this estimate should adopt the lower-cost estimate's line price/materials allowance, or document why it is not needed.";
     return {
       findingType: "delta-carrier-higher",
       title: `Lower-cost estimate allows MORE here: ${label}`,
@@ -2902,8 +2906,7 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
       estimateGapType: "present_but_under_documented",
       missingProof:
         "On this matched line the lower-cost estimate carries the higher value (more hours or a priced sublet this estimate shows at zero). The cost gap runs in both directions — reconcile rather than assume either side is wrong.",
-      nextAction:
-        "Verify whether this estimate should adopt the lower-cost estimate's allowance for this line (added paint allowance, sublet price, or materials) or document why it is not needed.",
+      nextAction,
       missingAuthorityTypes: ["reconciliation of the carrier-higher allowance"],
       score: Math.max(0, profile.score - 18),
       safetyImpact: "low",
@@ -4988,6 +4991,44 @@ function describeAnchorLocation(anchor: EstimateRowAnchor, fileName: string) {
   return `${fileName}${page}${line}: ${getAnchorSourceText(anchor)}`;
 }
 
+/**
+ * Direction predicate shared by classification AND presentation (D-2): a
+ * matched delta where every populated cell runs NEGATIVE (the LOWER estimate
+ * carries more) is "lower allows more" — its printed category must say so,
+ * never `reduced_*`, which asserts the opposite direction.
+ */
+function isLowerAllowsMoreDelta(delta: EstimateLineItemDelta): boolean {
+  const primaryDelta = delta.priceDelta ?? delta.laborDelta ?? delta.paintDelta;
+  return (
+    (delta.kind === "reduced_labor" || delta.kind === "reduced_paint" || delta.kind === "part_or_price_difference") &&
+    delta.lowerRow !== null &&
+    primaryDelta !== null &&
+    primaryDelta < 0 &&
+    (delta.priceDelta ?? 0) <= 0 &&
+    (delta.laborDelta ?? 0) <= 0 &&
+    (delta.paintDelta ?? 0) <= 0
+  );
+}
+
+/** The cell whose value drives this delta (largest populated magnitude wins). */
+function deltaDrivingCell(delta: EstimateLineItemDelta): "paint" | "labor" | "price" {
+  const paint = Math.abs(delta.paintDelta ?? 0);
+  const labor = Math.abs(delta.laborDelta ?? 0);
+  const price = Math.abs(delta.priceDelta ?? 0);
+  if (paint >= labor && paint > 0 && price === 0) return "paint";
+  if (labor > 0 && price === 0) return "labor";
+  if (price > 0) return "price";
+  return paint >= labor ? (paint > 0 ? "paint" : "labor") : "labor";
+}
+
+/** Signed, direction-explicit category text (D-2): `reduced_paint` on a
+ * lower-allows-more delta contradicts its own numbers. */
+function signedDeltaCategory(delta: EstimateLineItemDelta): string {
+  if (!isLowerAllowsMoreDelta(delta)) return delta.kind;
+  const cell = deltaDrivingCell(delta);
+  return `increased_on_lower (${cell})`;
+}
+
 function buildLineItemDeltaSupportSummary(params: {
   delta: EstimateLineItemDelta;
   anchor: EstimateRowAnchor;
@@ -5002,7 +5043,7 @@ function buildLineItemDeltaSupportSummary(params: {
     ? describeDeltaRowLocation(params.delta.lowerRow, params.comparisonName)
     : `not present on ${params.comparisonName}`;
   return [
-    `Delta category: ${params.delta.kind}.`,
+    `Delta category: ${signedDeltaCategory(params.delta)}.`,
     `Annotated estimate (higher-cost): ${annotatedLocation}.`,
     `Comparison estimate (lower-cost): ${comparisonLocation}.`,
     `Amount delta: ${formatDeltaMoney(params.delta.priceDelta)}.`,
