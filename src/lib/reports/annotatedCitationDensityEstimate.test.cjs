@@ -3795,6 +3795,81 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     );
   });
 
+  await run("four-way position group emits ONE finding naming all four lines with aggregate = member sum", async () => {
+    // Corpus item 6 (Work Order R3): LT/RT × Front/Rear is a 4-member side
+    // group — one finding, all four lines named, aggregate equals the sum.
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Shop estimate four-way group", { x: 42, y: 742, size: 10, font });
+    drawCccEstimateRow(page, font, 60, "", "Rpr", "LT Front mud flap", "0.6", "", 712);
+    drawCccEstimateRow(page, font, 61, "", "Rpr", "RT Front mud flap", "0.6", "", 694);
+    drawCccEstimateRow(page, font, 62, "", "Rpr", "LT Rear mud flap", "0.6", "", 676);
+    drawCccEstimateRow(page, font, 63, "", "Rpr", "RT Rear mud flap", "0.6", "", 658);
+    const sourcePdfBytes = await doc.save();
+    const comparisonText = [
+      "Carrier estimate",
+      "Net Cost of Repairs $1,000.00",
+      "60 Rpr LT Front mud flap 0.2",
+      "61 Rpr RT Front mud flap 0.2",
+      "62 Rpr LT Rear mud flap 0.2",
+      "63 Rpr RT Rear mud flap 0.2",
+    ].join("\n");
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourcePdfName: "Shop four-way.pdf",
+      sourceText: "Shop estimate\nNet Cost of Repairs $2,000.00",
+      comparisonEstimateTexts: [{ fileName: "Carrier.pdf", estimateRole: "carrier", text: comparisonText }],
+      findings: [],
+      findingGenerator: buildRequiredEstimatorDeltaFindings,
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "shop" },
+    });
+    const text = await combinedReportText(result);
+    const groupTitles = (text.match(/mud flap \([^)]*L6\d(?:\/L6\d)+\)/gi) ?? []);
+    assert.ok(groupTitles.length >= 1, `expected one grouped mud-flap finding, saw: ${groupTitles.join(" | ") || "none"}`);
+    assert.match(text, /L60\/L61\/L62\/L63/);
+    assert.match(text, /\+1\.6 labor hr aggregate/);
+    // Exactly ONE finding covers the four lines — no per-side parade.
+    const mudFlapFindings = (text.match(/mud flap/gi) ?? []).length;
+    assert.ok(mudFlapFindings >= 1);
+    const perLineTitles = (text.match(/allows less body labor: (?:LT|RT) (?:Front|Rear) mud flap/gi) ?? []);
+    assert.deepEqual(perLineTitles, [], "no single-side mud flap findings alongside the group");
+  });
+
+  await run("inverted pair (annotated source is the LOWER estimate) declines structured deltas", async () => {
+    // Corpus item 5 (Work Order R3): the higher/lower selection is
+    // total-driven; when the annotated source is the LOWER-total document the
+    // structured path must decline rather than claim the source is 'missing'
+    // scope the comparison merely adds.
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([612, 792]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText("Shop estimate lower total", { x: 42, y: 742, size: 10, font });
+    drawCccEstimateRow(page, font, 10, "", "Rpr", "Front bumper cover", "1.0", "$100.00", 712);
+    const sourcePdfBytes = await doc.save();
+    const result = await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourcePdfName: "Shop lower.pdf",
+      sourceText: "Shop estimate\nNet Cost of Repairs $5,000.00",
+      comparisonEstimateTexts: [{
+        fileName: "Carrier higher.pdf",
+        estimateRole: "carrier",
+        text: [
+          "Carrier estimate",
+          "Net Cost of Repairs $8,000.00",
+          "10 Rpr Front bumper cover $100.00 2.0",
+          "11 Repl Grille assembly $400.00 1.0",
+        ].join("\n"),
+      }],
+      findings: [],
+      findingGenerator: buildRequiredEstimatorDeltaFindings,
+      request: { includeLegend: false, annotationMode: "both", estimateRole: "shop" },
+    });
+    const text = await combinedReportText(result);
+    assert.doesNotMatch(text, /Missing from lower-cost estimate/i);
+    assert.equal(result.debugTrace.lineItemDeltaFindingCount ?? 0, 0);
+  });
+
   await run("policy diagnostics detect vehicle mismatch and garbled extraction fallback", async () => {
     const mismatch = extractPolicyApplicabilityDiagnostics({
       activeEstimateVehicle: "2023 Tesla Model Y",

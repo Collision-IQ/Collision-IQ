@@ -81,6 +81,10 @@ export async function assessPdfTextLayerReliability(bytes: Uint8Array): Promise<
         sawFont = true;
         const baseFont = String(font.lookupMaybe(PDFName.of("BaseFont"), PDFName) ?? "unknown");
         if (font.has(PDFName.of("ToUnicode"))) continue; // decodable regardless of embedding
+        // The standard-14 base fonts carry a WELL-KNOWN encoding by
+        // definition — no FontFile and no ToUnicode is their normal state,
+        // not a broken producer.
+        if (/^\/?(?:Helvetica|Times|Courier|Symbol|ZapfDingbats)/.test(baseFont)) continue;
         let embedded = descriptorHasFontFile(font);
         if (!embedded) {
           // Composite (Type0) fonts carry the descriptor on descendant fonts.
