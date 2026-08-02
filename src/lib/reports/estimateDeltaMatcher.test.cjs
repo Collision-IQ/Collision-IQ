@@ -453,8 +453,9 @@ run("C-6: product identifiers with digit+letter are atomic ('-3M', '3M')", () =>
   const { explodeGluedRow } = require("./estimateDeltaMatcher.ts");
   assert.match(explodeGluedRow("118 Heavy-Bodied Seam Sealer -3M 08308 2 24.86"), /-3M/);
   assert.match(explodeGluedRow("119 Controlled-Flow Seam Sealer 3M 08308 2 24.86"), / 3M /);
-  // Glued value+marker forms still split.
-  assert.match(explodeGluedRow("Hood28.32T1.0"), /28\.32 T/);
+  // Glued value+marker forms still split (marker separated from its value).
+  assert.match(explodeGluedRow("Hood28.32T1.0"), /\d T 1\.0/);
+  assert.match(explodeGluedRow("146S01Pre-repair scan1m"), /scan1 m|scan 1 m/);
 });
 
 console.log(`\nestimateDeltaMatcher: ${passed} passed, ${failed} failed`);
