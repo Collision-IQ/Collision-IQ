@@ -357,7 +357,16 @@ export function planDeltaValueAnnotations(params: DeltaValueLayerParams): DeltaV
   for (const [pageNumber, pieces] of [...notePieces.entries()].sort((a, b) => a[0] - b[0])) {
     const geometry = pageByNumber.get(pageNumber);
     const maxWidth = (geometry?.pageWidth ?? 612) - 48;
-    packNoteLines(pieces, maxWidth, params.measureText).forEach((line, index) => {
+    // Read in the order the estimate is read. Pieces arrive grouped by finding
+    // kind, so a callout band printed "184, 185, then 182, 183, then 180, 181"
+    // and the reader had to scan back and forth against the page beside it.
+    // Pieces with no line number (document-level roll-ups) sort last.
+    const firstLine = (piece: string) => {
+      const match = /^Ln\s+(\d+)/.exec(piece);
+      return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+    };
+    const ordered = [...pieces].sort((a, b) => firstLine(a) - firstLine(b));
+    packNoteLines(ordered, maxWidth, params.measureText).forEach((line, index) => {
       requests.push({ id: `delta-note-p${pageNumber}-${index}`, pageNumber, text: line });
     });
   }

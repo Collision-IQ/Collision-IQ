@@ -198,7 +198,13 @@ export function pairAndCompare(subject: EstimateRow[], competing: EstimateRow[])
         subject: subjects[0],
         competing: matched[0] ?? null,
         deltas,
-        category: `quantity shortfall (${subjects.length}x vs ${matched.length}x)`,
+        // "2x vs 0x" is a count, not a statement. When the comparison pays the
+        // operation ZERO times it is not short on quantity — it does not
+        // carry the operation at all, and the callout must say so.
+        category:
+          matched.length === 0
+            ? `not on the comparison estimate (billed ${subjects.length}x here)`
+            : `quantity shortfall (${subjects.length}x here vs ${matched.length}x paid)`,
         subjects,
       });
   }

@@ -3696,6 +3696,7 @@ function matchStructuredLineItemDeltas(
       subtotal: textTotals?.subtotal ?? null,
       salesTax: textTotals?.salesTax ?? null,
       grandTotal: textTotals?.grandTotal ?? null,
+      taxLanes: textTotals?.taxLanes ?? [],
     };
   };
   const higherTotals = mergeTotalsWithWordCategories(

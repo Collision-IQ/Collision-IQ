@@ -2701,6 +2701,11 @@ export interface EstimateTotalsSummary {
   subtotal: number | null;
   salesTax: number | null;
   grandTotal: number | null;
+  /** Every tax lane as printed, separately. Jurisdictions stack them (Sales +
+   * County + City), and a lane one document charges while the other does not
+   * is a real difference the summed `salesTax` hides — RO 22182's GEICO
+   * estimate carries a 2% County Tax of $84.56 that the shop's does not. */
+  taxLanes: Array<{ label: string; amount: number }>;
 }
 
 /**
@@ -2728,6 +2733,7 @@ export function parseCccEstimateTotals(text: string): EstimateTotalsSummary | nu
     subtotal: null,
     salesTax: null,
     grandTotal: null,
+    taxLanes: [],
   };
   const money = (value: string) => Number(value.replace(/[$,]/g, ""));
   for (let index = start + 1; index < Math.min(lines.length, start + 25); index += 1) {
@@ -2749,9 +2755,11 @@ export function parseCccEstimateTotals(text: string): EstimateTotalsSummary | nu
     // Sales + County/City/Municipal/State/Local tax as separate rows, and a
     // missed lane breaks the Σ(categories)+tax ≈ grand-total reconciliation
     // (RO 22182: County Tax $84.56 left an $84.56 phantom gap).
-    const tax = line.match(/^(?:sales|county|city|state|local|municipal|excise|use)\s+tax\b.*?([\d,]+\.\d{2})$/i);
+    const tax = line.match(/^((?:sales|county|city|state|local|municipal|excise|use)\s+tax)\b.*?([\d,]+\.\d{2})$/i);
     if (tax) {
-      summary.salesTax = (summary.salesTax ?? 0) + (money(tax[1]) ?? 0);
+      const amount = money(tax[2]) ?? 0;
+      summary.salesTax = (summary.salesTax ?? 0) + amount;
+      summary.taxLanes.push({ label: tax[1].replace(/\s+/g, " ").trim(), amount });
       continue;
     }
     const grand = line.match(/^(grand total|total cost of repairs?|workfile total:?)\s*\$?\s*([\d,]+\.\d{2})$/i);
@@ -3014,6 +3022,37 @@ export function compareEstimateTotals(params: {
   }
 
   // Reconciliation assertion: Σ per-category deltas + tax delta must land
+  // A TAX LANE one document charges and the other does not. Jurisdictions
+  // stack Sales + County + City tax as separate rows, and summing them into
+  // one figure hides the difference: RO 22182's GEICO estimate carries a 2%
+  // County Tax of $84.56 that the shop's estimate does not, and no finding
+  // ever said so.
+  const laneKey = (label: string) => label.replace(/[^a-z]/gi, "").toUpperCase();
+  const higherLanes = new Map((higher.taxLanes ?? []).map((lane) => [laneKey(lane.label), lane]));
+  const lowerLanes = new Map((lower.taxLanes ?? []).map((lane) => [laneKey(lane.label), lane]));
+  for (const [key, lane] of lowerLanes) {
+    if (higherLanes.has(key)) continue;
+    deltas.push({
+      kind: "category_only_on_lower",
+      category: lane.label,
+      higher: null,
+      lower: { category: lane.label, hours: null, rate: null, cost: lane.amount },
+      summary: `${lane.label} of ${fmtMoney(lane.amount)} is charged on the lower-cost estimate and does not appear on this one. Confirm which jurisdiction's tax lanes apply to this repair.`,
+      amount: lane.amount,
+    });
+  }
+  for (const [key, lane] of higherLanes) {
+    if (lowerLanes.has(key)) continue;
+    deltas.push({
+      kind: "category_missing_on_lower",
+      category: lane.label,
+      higher: { category: lane.label, hours: null, rate: null, cost: lane.amount },
+      lower: null,
+      summary: `${lane.label} of ${fmtMoney(lane.amount)} is charged on this estimate and does not appear on the lower-cost estimate. Confirm which jurisdiction's tax lanes apply to this repair.`,
+      amount: lane.amount,
+    });
+  }
+
   // within $1.00 of the grand-total delta. A mismatch means the category
   // pairing itself is wrong (the RC-4 failure class) — the confident
   // category-missing claims are then withdrawn rather than published, because

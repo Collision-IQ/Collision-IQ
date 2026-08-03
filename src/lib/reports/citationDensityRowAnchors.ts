@@ -799,6 +799,9 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
   const anchors: EstimateRowAnchor[] = [];
   let section = "";
   let previousEstimateRow: EstimateRowAnchor | null = null;
+  /** True when the previous line was NOTE payload — its wrapped continuation
+   * belongs to the note, never to the row description. */
+  let lastWasNoteLine: boolean = false;
   const tableRegions = measureTableRegions(lines);
 
   for (const line of [...lines].sort((a, b) => a.pageNumber - b.pageNumber || a.y - b.y || a.x - b.x)) {
@@ -835,12 +838,21 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
     }
 
     if (!lineNumber && previousEstimateRow && line.pageNumber === previousEstimateRow.pageNumber && shouldAttachContinuationLine(line, type)) {
+      // A NOTE wraps. Its second line carries no "Note:" prefix of its own
+      // ("Note: PARTS: … LABOR:" / "Time includes R&R grommets and gasket."),
+      // so testing that line in isolation reads it as row description and the
+      // note bleeds into the operation's identity — RO 22182 line 151 read
+      // "LT Tail lamp assy Time includes R&R grommets and gasket." Anything
+      // continuing a line that was itself note payload is note payload.
+      const asNote: boolean = lastWasNoteLine || type === "line_note" || isNoteContinuation(line.text);
       attachContinuationLine(previousEstimateRow, line, {
-        asNote: type === "line_note" || isNoteContinuation(line.text),
+        asNote,
         forceType: detectEmbeddedLinkRow(line.text) ? "embedded_link_row" : undefined,
       });
+      lastWasNoteLine = asNote;
       continue;
     }
+    lastWasNoteLine = type === "line_note" || isNoteContinuation(line.text);
 
     if (!type) continue;
     const parsed = parseEstimateRowFields(line.text, lineNumber);
