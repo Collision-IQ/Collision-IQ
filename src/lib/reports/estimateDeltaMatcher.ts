@@ -320,7 +320,11 @@ export function isSectionHeader(rawText: string): boolean {
   const body = text.replace(/^\d{1,4}\s*(?=[A-Z])/, "").trim();
   if (body.length < 3 || body.length > 48) return false;
   if (/[a-z]/.test(body)) return false; // must be upper-case only
-  return /^[A-Z][A-Z0-9 &/.'-]+$/.test(body);
+  // Commas and parentheses are ordinary header punctuation — "PILLARS, ROCKER
+  // & FLOOR" is one of the largest sections on the RO 22182 Tesla estimate,
+  // and excluding the comma dropped all 30 of its rows into the preceding
+  // ROOF header.
+  return /^[A-Z][A-Z0-9 &/.,'()-]+$/.test(body);
 }
 
 /** Extract the numeric "Net Cost of Repairs" / "Total Cost of Repairs" total. */
@@ -572,7 +576,7 @@ export function explodeGluedRow(rawText: string): string {
     // not a description→column boundary — splitting there turned the
     // dimension tail into phantom qty/hour columns.
     if (/[xX]/.test(prev) && /\d/.test(text[i - 2] ?? "")) continue;
-    const remainder = text.slice(i);
+    let boundaryIndex = i;
     const tokenEnd = text.indexOf(" ", i);
     // Part numbers are ATOMIC (D-1): a short letter prefix welded to a 7+
     // digit run ("PT00015376B001") is a part-number token — whitespace inside
@@ -584,8 +588,14 @@ export function explodeGluedRow(rawText: string): string {
     // IDENTIFIERS ARE ATOMIC: in "Adhesive-3M" the "-3M" is a manufacturer
     // brand group, not a minus-number opening the column blob. Splitting there
     // orphans the product number that follows into a value column — RO 22182
-    // line 118 reported 3M product 07333 as 7,333.0 body labor hours.
-    if (isManufacturerPrefixedIdentifier(fullToken)) continue;
+    // line 118 reported 3M product 07333 as 7,333.0 body labor hours. The row
+    // still needs its columns exploded, so the boundary moves to just AFTER
+    // the identifier rather than being abandoned.
+    if (isManufacturerPrefixedIdentifier(fullToken)) {
+      if (tokenEnd === -1 || !isColumnBlob(text.slice(tokenEnd))) continue;
+      boundaryIndex = tokenEnd;
+    }
+    const remainder = text.slice(boundaryIndex);
     // Never split INSIDE an alphanumeric part number ("GM1144143", "C25J75"):
     // the rest of that token must itself look like glued column data — a
     // decimal value or a 9+ digit run — before the boundary is real.
@@ -597,9 +607,9 @@ export function explodeGluedRow(rawText: string): string {
       // only after a WORD (2+ letters). After a mixed alnum fragment the
       // digits are a part-number interior ("C25J75" must not split at "J7").
       (withinToken.length <= 3 && /[A-Za-z]{2}$/.test(text.slice(0, i)));
-    if (!splittable) continue;
+    if (!splittable && boundaryIndex === i) continue;
     if (isColumnBlob(remainder)) {
-      const head = text.slice(0, i);
+      const head = text.slice(0, boundaryIndex);
       // 2. Explode the blob itself.
       let blob = remainder
         .replace(/(Incl\.)/gi, " $1 ")

@@ -1,0 +1,489 @@
+
+
+conestogacollision.com
+Workfile ID:
+Federal ID:
+d731d7b7
+27-0822500
+961 Lancaster Avenue, Berwyn, PA 19312
+Phone: (610) 644-1000
+FAX: (610) 644-1007
+Preliminary Estimate
+RO Number: 22182
+Written By: VINCENT MENICHETTI, 739698
+Insured:DORSEY, DAVIDPolicy #:Claim #:8848396030000002
+Type of Loss:CollisionDate of Loss:7/26/2026 1:06 AMDays to Repair:0
+Point of Impact:05 Right Rear
+Owner:Inspection Location:Insurance Company:
+DORSEY, DAVIDconestogacollision.comGEICO
+265 W. MOUNT PLEASANT AVE961 Lancaster Avenue
+PHILADELPHIA, PA 19119-2458Berwyn, PA 19312
+(267) 320-2236 CellRepair Facility
+(610) 644-1000 Business
+VEHICLE
+2022 TESL Model 3 RWD w/Standard Range Plus Battery 4D SED Electric- Electric WHITE
+VIN:5YJ3E1EA9NF238704Interior Color:BLACKMileage In:43,650Vehicle Out:
+License:MVE 9560Exterior Color:WHITEMileage Out:
+State:PAProduction Date:4/2022Condition:GoodJob #:
+TRANSMISSIONTELESCOPIC WHEELAM RADIOPOWER BRAKES
+AUTOMATIC TRANSMISSIONHEATED STEERING WHEELFM RADIOANTI-LOCK BRAKES (4)
+DRIVER CONVENIENCESTEERING WHEEL TOUCH
+CONTROLS
+STEREOGLASS & MIRRORS
+KEYLESS ENTRYCONSOLE/STORAGESEARCH/SEEKDUAL MIRRORS
+REMOTE STARTERINSTRUMENT PANELAUXILIARY AUDIO CONNECTIONTINTED GLASS
+MESSAGE CENTERTRACTION CONTROLROOFSEATS
+MEMORY PACKAGESTABILITY CONTROLSKYVIEW ROOFLEATHER SEATS
+POWER DRIVER SEATBLIND SPOT DETECTIONSAFETYBUCKET SEATS
+POWER WINDOWSLANE DEPARTURE WARNINGDRIVERS SIDE AIR BAGPOWER PASSENGER SEAT
+POWER LOCKSALARMPASSENGER AIR BAGHEATED SEATS
+POWER MIRRORSAIR CONDITIONINGFRONT SIDE IMPACT AIR BAGSREAR HEATED SEATS
+HEATED MIRRORSCLIMATE CONTROLHEAD/CURTAIN AIR BAGSREAR END
+POWER TRUNK/LIFTGATEREAR DEFOGGERPAINTPARKING SENSORS
+CRUISE CONTROLHANDS FREE DEVICETHREE STAGE PAINTBACKUP CAMERA
+INTELLIGENT CRUISEWOOD INTERIOR TRIMFRONT ENDWHEELS
+INTERMITTENT WIPERSNAVIGATION SYSTEMXENON OR L.E.D. HEADLAMPS4-WHEEL DISC BRAKES
+TILT WHEELRADIOPOWER STEERINGFULL WHEEL COVERS
+Get live updates atwww.carwise.com/e/5pZhkM
+8/2/2026 9:45:03 AM300060Page 1
+
+Preliminary Estimate
+RO Number: 22182
+2022 TESL Model 3 RWD w/Standard Range Plus Battery 4D SED Electric- Electric WHITE
+LineOperDescriptionPart NumberQtyExtended
+Price $
+LaborPaint
+1MODEL IDENTIFICATION
+2#** Procedure research &
+documentation **
+1
+3UPDATE NOTES
+4#****Work Authorization
+Secured****
+1
+5ELECTRICAL
+6*RprBatterym0.3M
+Note: D&R 12 Volt and isolate terminal end
+7#Test high voltage
+gloves-Disassembly
+10.4
+8#Isolate high voltage11.0M
+9#Confirm high voltage isolation10.5M
+10R&ICover type 1m1.2M
+Note: Access to HV. Time is after rear seat cushion removed
+11#Test high voltage
+gloves-Reassembly
+10.4
+12#Reset operator preferences10.3
+Note: Return vehicle settings (seat position, mirror position, volume, etc.) to owners preference for safety
+13WHEELS
+14*R&IRT/Rear R&I wheelm0.2M
+15*R&ILT/Rear R&I wheelm0.2M
+16WINDSHIELD
+17*RprWindshield TESLA0.5
+Note: Mask RT side for roof rail
+18#Trim Masking Tape-3M 06347-Per
+3 Ft
+17.08T
+19COWL
+20R&ICowl grille0.6
+Note: Access to 12v
+21INSTRUMENT PANEL
+22R&IWoofer0.2
+Note: Located on right side of rear body/trunk area. Removal required for quarter R&R
+23SEATS & TRACKS
+24R&IBolster black0.1
+25R&IBolster black0.1
+26ReplBolster clip111103300E22.38
+Note: PARTS: Part cannot be reused/reinstalled
+27*R&ICushion assy black0.3
+28R&IInner support0.2
+Note: RT side (1 of 2)
+29R&IInner support0.2
+Note: LT side (2 of 2)
+30R&IRT Outer support0.2
+8/2/2026 9:45:03 AM300060Page 2
+
+Preliminary Estimate
+RO Number: 22182
+2022 TESL Model 3 RWD w/Standard Range Plus Battery 4D SED Electric- Electric WHITE
+31R&ILT Outer support0.2
+32ROOF
+33*RprFront glass1.0
+Note: Lift weatherstrip, mask for prep, refinish and remove post-refinish
+34*RprRear glass Tesla from 10/05/20201.0
+Note: Lift weatherstrip, mask for prep, refinish and remove post-refinish
+35#Trim Masking Tape-3M 06347-Per
+3 Ft
+428.32T
+36PILLARS, ROCKER & FLOOR
+37*BlndRT Hinge pillar2.0
+38*RprRT Center pillar2.012.0
+Note: Repair is to mating flange of replacement part
+39Add for Three Stage0.8
+40R&IRT Applique0.3
+41R&IRT Applique cap0.2
+42R&IRT Rocker molding0.6
+43R&IRT W'strip on body front doorIncl.
+44R&IRT W'strip on body rear doorIncl.
+45R&IRT Upper molding black0.4
+46ReplRT Upper molding grommet110682700C1214.28
+Note: Part cannot be reused/reinstalled. 12 of these are required.
+47R&IRT W/S pillar trim w/o ultra
+suede
+0.2
+48ReplRT W/S pillar trim clip113179500D119.44
+Note: PARTS: Part cannot be reused/reinstalled.
+49R&IRT Cowl trim0.2
+50ReplRT Cowl trim clip109840800B11.19
+Note: PARTS: Part cannot be reused/reinstalled.
+51R&IRT Front sill plate0.1
+52ReplRT Scuff plate150476300C144.000.1
+53R&IRT Upr ctr plr trim from
+12/28/2017 w/o ultra suede
+0.4
+54ReplRT Upr ctr plr trim clip109840800B11.19
+Note: PARTS: Part cannot be reused/reinstalled.
+55R&IRT Lwr ctr plr trim0.4
+56ReplRT Lwr ctr plr trim clip109840800B11.19
+Note: PARTS: Part cannot be reused/reinstalled.
+57R&IRT Rear sill plateIncl.
+58ReplRT Rear sill plate clip109840800B11.19
+Note: PARTS: Part cannot be reused/reinstalled.
+59#Mask for primer15.00T0.3
+60#Cavity Wax Plus-3M 08852-Per 5
+Ounces
+115.40T0.2
+61#Clean up seam sealers &
+adhesives
+12.50T0.5
+62#Set up vehicle on frame bench
+(Unibody)
+12.0
+8/2/2026 9:45:03 AM300060Page 3
+
+Preliminary Estimate
+RO Number: 22182
+2022 TESL Model 3 RWD w/Standard Range Plus Battery 4D SED Electric- Electric WHITE
+63#Verify dimensional accuracy11.0
+64#Repair & refinish clamp damage11.01.0
+65#Mask door openings15.00T1.0
+66#Cover to protect interior during
+repair
+15.00T0.5
+67FRONT DOOR
+68R&IRT R&I door assy1.1
+69R&IRT Striker0.2
+70*AlgnRT Striker0.2
+71REAR DOOR
+72*BlndRT Door shell (ALU)2.3
+73R&IRT Belt molding black type 10.2
+74R&IRT Door glass TESLA0.5
+75R&IRT Regulator module0.5
+76R&IRT Handle, outside black0.4
+77R&IRT StrikerIncl.
+78#AlgnRT Striker0.2
+79R&IRT Upper hinge0.3
+80R&IRT Lower hinge0.3
+81R&IRT Belt w'strip0.1
+82R&IRT R&I trim panel0.5
+83#Test fit-RT Rear door11.01
+Note: Required prior to final refinish to ensure replacement panel meets OE gap tolerance and to ensure OE
+measurements are met for safety and avoid damaging newly painted components
+84QUARTER PANEL
+85ReplRT Quarter panel1073678S0B11,139.5523.524.2
+86Add for Three Stage2.9
+87Deduct for Rear Bumper R&I-1.6
+88#ReplRT Quarter structural bulb rivet
+6.5mm
+1063943-00-A1010.00
+89#ReplRT Quarter flow form rivet s181069329-00-A11
+90*RprRT Lower extn (ALU)2.010.3
+91Add for Three Stage0.1
+92ReplRT Pressure vent109875100C128.000.2
+93ReplRT Splash shield108158400D1170.00Incl.
+94R&ILT Splash shield0.3
+95ReplRT Reflector151878300B131.800.1
+96R&IRT Qtr glass TESLA black trimIncl.
+97*RprRT Inner qtr panel (ALU)s1.011.5
+Note: Repair is to mating flange of replacement part
+98Overlap Major Non-Adj. Panel-0.2
+99ReplRT Front pillar (ALU)1095028S0N1235.00s3.620.7
+100Overlap Minor Panel-0.2
+101#ReplRT Front pillar rivet 4.8mm1028719-00-A1155.00
+102#ReplRT Front pillar structural bulb
+rivet 6.5mm
+1063943-00-A11.00
+103#ReplRT Front pillar flow form rivet s081069328-00-A28.00
+8/2/2026 9:45:03 AM300060Page 4
+
+Preliminary Estimate
+RO Number: 22182
+2022 TESL Model 3 RWD w/Standard Range Plus Battery 4D SED Electric- Electric WHITE
+104#ReplRT Front pillar flow form rivet s181069329-00-A412.00
+105*RprRT Inner wheelhouse (ALU)s1.010.7
+106Overlap Minor Panel-0.2
+107*ReplRT Outer wheelhouse (ALU)1108148S0A1470.00s2.010.7
+Note: Section time applied
+108Overlap Minor Panel-0.2
+109Add for Three Stage0.2
+110ReplRT Closure panel (ALU)1082740S0A124.15s3.020.7
+111Overlap Minor Panel-0.2
+112#ReplRT Closure panel structural bulb
+rivet 6.5mm
+1063943-00-A1212.00
+113#Mask for primer15.00T0.3
+114#Cavity Wax Plus-3M 08852-Per 5
+Ounces
+115.40T0.2
+115#Clean up seam sealers &
+adhesives
+12.50T0.5
+116#BetaSeal Express Urethane137.00T
+117#BetaPrime 5504G All-in-One
+Primer
+19.16T
+118#Impact Resistant Structural
+Adhesive-3M 07333
+1156.63T
+119#Heavy-Bodied Seam Sealer-3M
+08308
+186.06T
+120#Controlled-Flow Seam Sealer-3M
+08329
+191.63T
+121#Urethane Seam Sealer BEIGE-3M
+08365
+148.60T
+122#Static Mixing Nozzle-3M 0819429.28T
+123#Threaded Cartridge Nozzle-3M
+08187
+39.33T
+124#Acid brush55.50T
+125#Mask inner structure for
+refinishing
+15.00T0.5
+126#Cover to protect from cutting,
+grinding & welding
+1Incl.T1.0
+127#Welding & spark Deflection
+Paper-3M 05916-Per 2.5 Ft
+321.24T
+128#Set back wiring11.0
+129#Set up welder10.4
+130#Set up rivet gun10.3
+131REAR BODY & FLOOR
+132R&IRear coverIncl.
+133R&IFloor coverIncl.
+134R&IRT Side trimIncl.
+135R&ILT Side trim0.1
+136R&ISill trimIncl.
+137TRUNK LID
+138*BlndTrunk lid w/power2.6
+8/2/2026 9:45:03 AM300060Page 5
+
+Preliminary Estimate
+RO Number: 22182
+2022 TESL Model 3 RWD w/Standard Range Plus Battery 4D SED Electric- Electric WHITE
+139R&IR&I trunk lid0.8
+140R&IRT Lift cylinder w/power trunk0.2
+141R&IRelease handle handle/camera0.3
+142R&IWeatherstripIncl.
+143ReplOrnament149495000A165.000.3
+144R&ILicense mount0.1
+145R&ITrim panel w/power trunk0.2
+146R&IUpper trim0.2
+147#Clean adhesive13.00T0.3
+148#Test fit-Trunk11.01
+Note: Required prior to final refinish to ensure replacement panel meets OE gap tolerance and to ensure OE
+measurements are met for safety and avoid damaging newly painted components
+149REAR LAMPS
+150R&IRT Tail lamp assyIncl.
+Note: PARTS: Part has related components that cannot be reused/reinstalled; gasket and grommets. LABOR:
+Time includes R&R grommets and gasket.
+151R&ILT Tail lamp assy0.3
+Note: PARTS: Part has related components that cannot be reused/reinstalled; gasket and grommets. LABOR:
+Time includes R&R grommets and gasket.
+152ReplRT Tail lamp assy grommet
+8.2x12.2
+110492600B15.00Incl.
+153ReplLT Tail lamp assy grommet
+8.2x12.2
+110492600B15.00Incl.
+154ReplRT Tail lamp assy grommet
+8.0x5-0.9
+110433500B15.00Incl.
+155ReplLT Tail lamp assy grommet
+8.0x5-0.9
+110433500B15.00Incl.
+156ReplRT Tail lamp assy gasket145338100A19.00Incl.
+157ReplLT Tail lamp assy gasket145338100A19.00Incl.
+158R&IRT Backup lamp assyIncl.
+Note: PARTS: Part has related component that cannot be reused/reinstalled; gasket.
+159R&ILT Backup lamp assyIncl.
+Note: PARTS: Part has related component that cannot be reused/reinstalled; gasket.
+160ReplRT Backup lamp assy gasket145338300A19.72
+161ReplLT Backup lamp assy gasket145338300A19.72
+162R&IRT License lamp0.1
+163R&ILT License lamp0.1
+164REAR BUMPER
+165O/H rear bumper2.5
+166ReplBumper cover unpainted w/park
+brackets
+1916698S0A1791.01Incl.2.8
+167Add for Three Stage2.0
+168Add for park sensorm0.6M
+169ReplRT Outer bracket108398900K125.000.2
+170ReplRT Upper bracket108399300E12.200.2
+171R&ICenter bracket0.3
+172ReplPrep unprimed bumper10.7
+8/2/2026 9:45:03 AM300060Page 6
+
+Preliminary Estimate
+RO Number: 22182
+2022 TESL Model 3 RWD w/Standard Range Plus Battery 4D SED Electric- Electric WHITE
+173#Flex additive (Per flexible panel)112.00T
+174#Raw plastic primer (Per raw
+plastic panel)
+115.00T
+175#Set back, secure Protect wiring &
+connectors
+12.50T0.3
+176#Test fit-Rear bumper11.01
+Note: Required to ensure all mounting areas are undamaged/in-line for proper fitment prior to final refinish to
+avoid damage to newly painted components (2 techs)
+177VEHICLE DIAGNOSTICS
+178#RprPre repair scan1.0M
+179#RprPlace vehicle in "Service Mode"0.1M
+180#RprResearch DTC's0.5M
+181#RprDownload & redeploy firmware0.5M
+182#RprIn-Proc repair scan1.0M
+183#RprSet up & initiate camera
+calibration procedure
+1.0M
+184#RprCapture image & adjust cameras0.6M
+185#RprCapture image to confirm
+adjustments were made correctly
+0.3M
+186#RprDrive time for camera calibration
+procedure
+1.0M
+187#RprPost-repair scan1.0M
+188#RprFinal road test for safety & quality
+check
+0.5M
+189#RprRemove vehicle from "Service
+Mode"
+0.1M
+190MISCELLANEOUS OPERATIONS
+191#Pre wash vehicle15.00T0.5
+192#Interior Protection kit13.220.1
+193#Mask for refinishing110.00T0.5
+194#Mask jambs (0.3 Hours and $3.00
+per panel)
+515.00T1.5
+195#Tint color > Three stage let down
+panel
+11.0
+196#Finish sand & polish (0.5 Refinish
+per panel)
+63.0
+197#Clean vehicle for delivery15.00T0.5
+198#Maintain HV battery state of
+charge
+15.00T0.5
+199#Hazardous waste removal15.00T
+200#Solid waste removal15.00T
+SUBTOTALS3,878.3685.631.2
+8/2/2026 9:45:03 AM300060Page 7
+
+Preliminary Estimate
+RO Number: 22182
+2022 TESL Model 3 RWD w/Standard Range Plus Battery 4D SED Electric- Electric WHITE
+ESTIMATE TOTALS
+CategoryBasisRateCost $
+Parts3,225.23
+Body Labor32.9 hrs@$ 90.00 /hr2,961.00
+Paint Labor31.2 hrs@$ 90.00 /hr2,808.00
+Mechanical Labor11.6 hrs@$ 175.00 /hr2,030.00
+Aluminum Or Steel Repair11.0 hrs@$ 135.00 /hr1,485.00
+Bonded Or Welded Panel Replace30.1 hrs@$ 135.00 /hr4,063.50
+Paint Supplies31.2 hrs@$ 60.00 /hr1,872.00
+Miscellaneous653.13
+Subtotal19,097.86
+Sales Tax$ 19,097.86@6.0000 %1,145.87
+Grand Total20,243.73
+This estimate is based on our initial visual inspection. Ocassionally, addtional worn and/or damaged parts are
+discovered upon commencement of repairs. This estimate cannot allow for such contingencies. All part prices are
+subject to invoice. All damaged parts will discarded unless we are otherwise notified prior to disposal.
+ANY PERSON WHO KNOWINGLY AND WITH INTENT TO DEFRAUD ANY INSURANCE COMPANY OR OTHER PERSON
+FILES AN APPLICATION FOR INSURANCE OR STATEMENT OF CLAIM CONTAINING ANY MATERIALLY FALSE
+INFORMATION OR CONCEALS FOR THE PURPOSE OF MISLEADING, INFORMATION CONCERNING ANY FACT
+MATERIAL THERETO COMMITS A FRAUDULENT INSURANCE ACT, WHICH IS A CRIME AND SUBJECTS SUCH PERSON
+TO CRIMINAL AND CIVIL PENALTIES.
+THE FOLLOWING IS A LIST OF ABBREVIATIONS OR SYMBOLS THAT MAY BE USED TO DESCRIBE WORK TO BE
+DONE OR PARTS TO BE REPAIRED OR REPLACED:D=DISCONTINUED PART A=APPROXIMATE PRICE B=BODY
+LABOR D=DIAGNOSTIC E=ELECTRICAL F=FRAME G=GLASS M=MECHANICAL P=PAINT LABOR S=STRUCTURAL
+T=TAXED MISCELLANEOUS X=NON TAXED MISCELLANEOUS ADJ=ADJACENT ALGN=ALIGN  A/M=AFTERMARKET
+BLND=BLEND CAPA=CERTIFIED AUTOMOTIVE PARTS ASSOCIATION  D&R=DISCONNECT AND RECONNECT
+EST=ESTIMATE EXT. PRICE=UNIT PRICE MULTIPLIED BY THE QUANTITY INCL=INCLUDED MISC=MISCELLANEOUS
+NON-ADJ=NON ADJACENT O/H=OVERHAUL OP=OPERATION NO=LINE NUMBER QTY=QUANTITY
+RECOND=RECONDITION REFN=REFINISH REPL=REPLACE R&I=REMOVE AND INSTALL R&R=REMOVE AND
+REPLACE RPR=REPAIR RT=RIGHT SECT=SECTION SUBL=SUBLET LT=LEFT W/O=WITHOUT W/_=WITH/_
+#=MANUAL LINE ENTRY *=OTHER [IE..MOTORS DATABASE INFORMATION WAS CHANGED]. **=DATABASE LINE
+WITH AFTERMARKET N=NOTES ATTACHED TO LINE NAGS=NATIONAL AUTO GLASS SPECIFICATIONS. OPT
+OEM=ORIGINAL EQUIPMENT MANUFACTURER PARTS EITHER OPTIONALLY SOURCED OR OTHERWISE PROVIDED
+WITH SOME UNIQUE PRICING OR DISCOUNT.
+THE ATTACHED ESTIMATE REPRESENTS AN APPRAISAL OF THE COST OF REPAIR FOR THE VISIBLE DAMAGE TO
+THE VEHICLE NOTED AT THE TIME OF INSPECTION NECESSARY TO RETURN THE VEHICLE TO ITS PREDAMAGED
+CONDITION.  COSTS ABOVE THE APPRAISED AMOUNT MAY BE THE RESPONSIBILITY OF THE VEHICLE OWNER.
+THERE IS NO REQUIREMENT THAT THE VEHICLE OWNER USE ANY SPECIFIED REPAIR SHOP. INFORMATION
+REGARDING REPAIR FACILITIES WHICH WILL BE ABLE TO REPAIR THE VEHICLE FOR THE APPRAISED AMOUNT IS
+AVAILABLE FROM THE INSURANCE COMPANY. IF USED PARTS ARE SPECIFIED, THEY ARE REQUIRED TO BE OF
+LIKE KIND AND QUALITY TO THOSE BEING REPLACED. INCIDENTAL CHARGES SUCH AS TOWING, PROTECTIVE
+CARE, CUSTODY, STORAGE, DEPRECIATION, BATTERY AND TIRE REPLACEMENT ARE NOTED WHEN APPLICABLE.
+8/2/2026 9:45:03 AM300060Page 8
+
+Preliminary Estimate
+RO Number: 22182
+2022 TESL Model 3 RWD w/Standard Range Plus Battery 4D SED Electric- Electric WHITE
+Estimate based on MOTOR CRASH ESTIMATING GUIDE and potentially other third party sources of data.  Unless
+otherwise noted, (a) all items are derived from the Guide DR7QA18, CCC Data Date 07/17/2026, and potentially
+other third party sources of data; and (b) the parts presented are OEM-parts.  OEM parts are manufactured by or for
+the vehicle's Original Equipment Manufacturer (OEM) according to OEM's specifications for U.S. distribution.  OEM
+parts are available at OE/Vehicle dealerships or the specified supplier.  OPT OEM (Optional OEM) or ALT OEM
+(Alternative OEM) parts are OEM parts that may be provided by or through alternate sources other than the OEM
+vehicle dealerships with discounted pricing.    Asterisk (*) or Double Asterisk (**) indicates that the parts and/or
+labor data provided by third party sources of data may have been modified or may have come from an alternate data
+source.  Tilde sign (~) items indicate MOTOR Not-Included Labor operations.  The symbol (<>) indicates the refinish
+operation WILL NOT be performed as a separate procedure from the other panels in the estimate. Non-Original
+Equipment Manufacturer aftermarket parts are described as Non OEM,  A/M or NAGS.  Used parts are described as
+LKQ, RCY, or USED.  Reconditioned parts are described as Recond.  Recored parts are described as Recore.  NAGS
+Part Numbers and Benchmark Prices are provided by National Auto Glass Specifications.  Labor operation times listed
+on the line with the NAGS information are MOTOR suggested labor operation times.  NAGS labor operation times are
+not included.  Pound sign (#) items indicate manual entries.
+Some 2024 vehicles contain minor changes from the previous year.  For those vehicles, prior to receiving updated
+data from the vehicle manufacturer, labor and parts data from the previous year may be used.  The CCC ONE
+estimator has a list of applicable vehicles.  Parts numbers and prices should be confirmed with the local dealership.
+The following is a list of additional abbreviations or symbols that may be used to describe work to be done or parts to
+be repaired or replaced:
+SYMBOLS FOLLOWING PART PRICE:
+m=MOTOR Mechanical component.  s=MOTOR Structural component.  T=Miscellaneous Taxed charge category.
+X=Miscellaneous Non-Taxed charge category.
+SYMBOLS FOLLOWING LABOR:
+D=Diagnostic labor category.  E=Electrical labor category.  F=Frame labor category.  G=Glass labor category.
+M=Mechanical labor category.  S=Structural labor category.  (numbers) 1 through 4=User Defined Labor Categories.
+OTHER SYMBOLS AND ABBREVIATIONS:
+Adj.=Adjacent.  Algn.=Align.  ALU=Aluminum.  A/M=Aftermarket part.  Blnd=Blend.  BOR=Boron steel.
+CAPA=Certified Automotive Parts Association.  CFC=Carbon Fiber.
+D&R=Disconnect and Reconnect.  HSS=High Strength Steel.  HYD=Hydroformed Steel.  Incl.=Included.  LKQ=Like
+Kind and Quality.  LT=Left.  MAG=Magnesium.   Non-Adj.=Non Adjacent.  NSF=NSF International Certified Part.
+O/H=Overhaul.  Qty=Quantity.  Refn=Refinish.  Repl=Replace.  R&I=Remove and Install.  R&R=Remove and
+Replace.  Rpr=Repair.  RT=Right.  SAS=Sandwiched Steel.  Sect=Section.  STS=Stainless Steel.  Subl=Sublet.
+UHS=Ultra High Strength Steel.  N=Note(s) associated with the estimate line.
+CCC ONE Estimating - A product of CCC Intelligent Solutions Inc.
+The following is a list of abbreviations that may be used in CCC ONE Estimating that are not part of the MOTOR
+CRASH ESTIMATING GUIDE:
+BAR=Bureau of Automotive Repair.  EPA=Environmental Protection Agency.  NHTSA= National Highway
+Transportation and Safety Administration.  PDR=Paintless Dent Repair.  VIN=Vehicle Identification Number.
+8/2/2026 9:45:03 AM300060Page 9

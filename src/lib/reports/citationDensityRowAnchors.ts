@@ -806,7 +806,21 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
     const lineNumber = extractLineNumber(line.text);
     const sectionName = detectSection(line.text);
     let type = classifyLine(line.text, lineNumber, sectionName, section);
-    if (sectionName) section = sectionName;
+    // The running section may only advance on a header that sits INSIDE the
+    // measured table region. Cover-page all-caps text ("DORSEY, DAVID",
+    // "PHILADELPHIA") has header shape but is not a header, and every row
+    // below it would inherit the wrong section. Same geometric gate the
+    // operation anchors use.
+    if (sectionName) {
+      const headerRegion = tableRegions.get(line.pageNumber);
+      const headerInTable =
+        tableRegions.size === 0
+          ? true
+          : headerRegion
+            ? line.y >= headerRegion.top - 2 && line.y <= headerRegion.bottom + 2
+            : false;
+      if (headerInTable) section = sectionName;
+    }
     // U-5 geometric gate: on documents where a table region is measurable,
     // operation-type anchors may only exist INSIDE a region. A line-numbered
     // string on a cover page ("4 Wheel Drive…" options prose stealing line 4)
@@ -1373,18 +1387,38 @@ function extractLineNumber(text: string) {
 }
 
 function detectSection(text: string) {
-  // Section headers start with a capital (or a glued leading line number,
-  // "189MISCELLANEOUS OPERATIONS") and carry no other digits. A lowercase
-  // start is wrapped row prose ("calibration procedure" continuing a camera
-  // row) and a digit-bearing line is a totals/value row ("Parts4,473.91") —
-  // neither may become the running section: every following row inherits it,
-  // which mislabeled ordinary wash/mask lines as ADAS/calibration findings.
-  const body = (text ?? "").trim().replace(/^\d{1,4}\s*/, "");
+  // A section header is recognized by SHAPE, never by name.
+  //
+  // Matching against a closed vocabulary of header names is the same class of
+  // defect as hardcoding a column position. The RO 22182 Tesla pair prints
+  // QUARTER PANEL, PILLARS ROCKER & FLOOR, REAR LAMPS, TRUNK LID and SEATS &
+  // TRACKS — none of them on any list — so every row from line 17 through
+  // line 200 inherited the one header that WAS listed, WINDSHIELD, and 54
+  // findings named a part of the vehicle nowhere near the damage.
+  //
+  // The shape: all-caps body text with no value digits, in the description
+  // column. A lowercase start is wrapped row prose ("calibration procedure"
+  // continuing a camera row) and a digit-bearing line is a totals/value row
+  // ("Parts4,473.91") — neither may become the running section, because every
+  // following row inherits it.
+  const body = (text ?? "").trim().replace(/^\d{1,4}\s*/, "").trim();
   if (!/^[A-Z]/.test(body) || /\d/.test(body)) return null;
-  const normalized = normalizeMatchText(body);
-  const match = normalized.match(/^(front bumper|grille|radiator support|fender|electrical|windshield|vehicle diagnostics|miscellaneous operations|estimate totals?|supplement summary|alternate parts suppliers?|parts|body|paint|refinish|diagnostics?|calibration|totals?|summary|ccc|motor|p pages|included|not included)\b/);
-  return match?.[1] ?? null;
+  if (body.length < 3 || body.length > 48) return null;
+  if (SECTION_DISQUALIFYING_OPERATION.test(body)) return null;
+  if (!/^[A-Za-z][A-Za-z &/,.'()-]*[A-Za-z)]$/.test(body)) return null;
+  // Every word carries a capital, as a heading does. Row descriptions and
+  // wrapped prose ("A/M bumper cover", "Restore corrosion protection",
+  // "calibration procedure") always carry lowercase-initial content words.
+  const words = body.split(/[\s/,&()-]+/).filter(Boolean);
+  if (!words.every((word) => /^[A-Z]/.test(word) || SECTION_CONNECTOR.test(word))) return null;
+  return normalizeMatchText(body) || null;
 }
+
+/** An operation token opens a row, never a heading. */
+const SECTION_DISQUALIFYING_OPERATION =
+  /^(?:R\s*&\s*[IR]|Rpr|Repl|Blnd|Refn|Subl|Algn|Add|O\/H|Overlap|Incl|Note)\b/i;
+/** Lowercase words a real heading may contain. */
+const SECTION_CONNECTOR = /^(?:of|and|or|the|for|to|in|on|per|w|wo|with|a)$/i;
 
 function mergeContinuationLines(lines: string[]) {
   const merged: string[] = [];
