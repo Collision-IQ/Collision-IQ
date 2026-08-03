@@ -75,6 +75,62 @@ export interface RowParseDiagnostics {
 const ROW_TOL = 3.5; // pt — baseline proximity, per DELTA_ANNOTATION_RULE §1
 const COL_PAD = { qty: [25, 8], price: [22, 16], labor: [24, 18], paint: [24, 18] } as const;
 
+/** Largest horizontal gap, in points, that can sit INSIDE one word. Measured
+ * against the GEICO RO 22182 producer, where intra-word gaps are under 1pt
+ * (often negative — the runs overlap) and the narrowest real column gap is
+ * tens of points. */
+const GLYPH_RUN_GAP = 1.5;
+/** A run is LETTER-SPACED when most of its whitespace-separated groups are a
+ * single character ("Q t y", "L a b o r", "Q U A R T E R P A N EL"). Those
+ * spaces are glyph-placement artifacts, not word boundaries. */
+const LETTER_SPACED_MIN_GROUPS = 3;
+const LETTER_SPACED_SINGLE_SHARE = 0.6;
+
+/**
+ * GLYPH-RUN REPAIR for producers whose text layer is live but whose glyph
+ * placement is shattered.
+ *
+ * A PDF with embedded font subsets and no ToUnicode map emits its narrow
+ * glyphs as separate runs at absolute positions, so a word arrives as
+ * "Co"+"lli"+"s"+"i"+"on" and a value as "951"+"."+"88". This is NOT a scanned
+ * document — the text is all there, correctly positioned. The RO 22182 GEICO
+ * Estimate of Record parses to ZERO rows in this state, because the column
+ * header reads "Q t y" / "L a b o r" / "P a i n t" and no column can be
+ * measured; the whole comparison then falls back to the text lane.
+ *
+ * Two repairs, both geometric and producer-agnostic:
+ *  (a) merge adjacent runs on the same baseline whose horizontal gap is below
+ *      the intra-word threshold — this rebuilds both words and value cells;
+ *  (b) close the internal spacing of a letter-spaced run.
+ *
+ * Word spaces inside prose are NOT recoverable this way: the broken font
+ * metrics make a real space ("Type of Loss:") narrower than some intra-word
+ * gaps. That costs nothing here — the delta engine's canonical keys are
+ * whitespace-insensitive by construction — but it is why this runs as a
+ * REPAIR on documents that failed to parse, never as a default pass.
+ */
+export function repairShatteredGlyphRuns(words: Word[]): Word[] {
+  const sorted = [...words].sort((a, b) => a.top - b.top || a.x0 - b.x0);
+  const merged: Word[] = [];
+  for (const word of sorted) {
+    const open = merged[merged.length - 1];
+    if (open && Math.abs(word.top - open.top) <= ROW_TOL && word.x0 - open.x1 <= GLYPH_RUN_GAP) {
+      open.text += word.text;
+      open.x1 = Math.max(open.x1, word.x1);
+      open.bottom = Math.max(open.bottom, word.bottom);
+      continue;
+    }
+    merged.push({ ...word });
+  }
+  for (const word of merged) {
+    const groups = word.text.trim().split(/\s+/).filter(Boolean);
+    if (groups.length < LETTER_SPACED_MIN_GROUPS) continue;
+    const singles = groups.filter((group) => group.length === 1).length;
+    if (singles / groups.length >= LETTER_SPACED_SINGLE_SHARE) word.text = groups.join("");
+  }
+  return merged;
+}
+
 /**
  * Some extractors (pdfjs text items) return whole runs — "23.8 hrs @ $ 90.00 /hr"
  * as ONE word. Split composite words on whitespace, apportioning the measured
