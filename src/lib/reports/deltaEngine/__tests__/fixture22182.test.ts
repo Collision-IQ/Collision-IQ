@@ -7,7 +7,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, it, expect, beforeAll } from "vitest";
-import { parseEstimateRows, parseTotalsFromWords, type EstimateRow, type Word } from "../rowCluster";
+import {
+  parseEstimateRows,
+  parseSubtotalsFromWords,
+  parseTotalsFromWords,
+  type EstimateRow,
+  type Word,
+} from "../rowCluster";
 import { canonTotalsCategoryDetailed } from "../estimateNormalize";
 
 const FIXTURE_DIR = path.join(__dirname, "../../../../../tests/fixtures/22182");
@@ -51,6 +57,35 @@ describe("totals vocabulary resolves on the holdout producer (C-1)", () => {
     expect(unmapped.map((row) => row.category)).toEqual([]);
     const bonded = totals.find((row) => /bonded/i.test(row.category));
     expect(bonded?.amount).toBeCloseTo(4063.5, 2);
+  });
+});
+
+describe("per-row values are bounded by the document's own SUBTOTALS (S-1)", () => {
+  it("Σ per-row labor and paint equals the printed SUBTOTALS rule", () => {
+    const printed = parseSubtotalsFromWords(loadWords("shop_words.json"));
+    expect(printed).not.toBeNull();
+    expect(printed!.labor).toBeCloseTo(85.6, 2);
+    expect(printed!.paint).toBeCloseTo(31.2, 2);
+    const laborSum = shop.reduce((total, row) => total + (row.labor ?? 0), 0);
+    const paintSum = shop.reduce((total, row) => total + (row.paint ?? 0), 0);
+    expect(laborSum).toBeCloseTo(printed!.labor!, 2);
+    expect(paintSum).toBeCloseTo(printed!.paint!, 2);
+  });
+
+  it("no single row exceeds the whole document's declared hours", () => {
+    const printed = parseSubtotalsFromWords(loadWords("shop_words.json"))!;
+    for (const row of shop) {
+      expect(row.labor ?? 0).toBeLessThanOrEqual(printed.labor!);
+      expect(row.paint ?? 0).toBeLessThanOrEqual(printed.paint!);
+    }
+  });
+
+  it("L118 keeps the 3M product number in its description, not in a value cell", () => {
+    const row = shop.find((candidate) => candidate.line === 118)!;
+    expect(row.rawDesc).toContain("07333");
+    expect(row.labor).toBeNull();
+    expect(row.paint).toBeNull();
+    expect(row.price).toBeCloseTo(156.63, 2);
   });
 });
 

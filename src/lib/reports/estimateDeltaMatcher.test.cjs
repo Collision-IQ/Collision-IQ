@@ -458,5 +458,62 @@ run("C-6: product identifiers with digit+letter are atomic ('-3M', '3M')", () =>
   assert.match(explodeGluedRow("146S01Pre-repair scan1m"), /scan1 m|scan 1 m/);
 });
 
+run("S-1: a manufacturer-prefixed product number never enters a value column", () => {
+  // RO 22182 line 118 — the description wraps and rejoins AFTER the columns,
+  // so the 3M product number 07333 sat where the labor cell is scanned. It was
+  // reported as 7,333.0 body labor hours ($659,970 at $90/hr) against a
+  // document declaring 85.6 hours in total.
+  const wrapped = parseCccEstimateRow(
+    "118 # Impact Resistant Structural 1 156.63 T Adhesive-3M 07333"
+  );
+  assert.equal(wrapped.labor, null, "3M product number must not read as labor hours");
+  assert.equal(wrapped.paint, null);
+  assert.equal(wrapped.price, 156.63);
+  assert.equal(wrapped.qty, 1);
+  // The identifier itself stays whole — a split token is un-searchable.
+  assert.match(wrapped.rawText, /Adhesive-3M 07333/);
+
+  // A leading-zero integer is catalog notation wherever it appears: qty,
+  // money, and hour cells are never printed with one.
+  const leadingZero = parseCccEstimateRow("120 # Static Mixing Nozzle 1 12.00 T 08194");
+  assert.equal(leadingZero.labor, null);
+
+  // Real part numbers are complete identifiers on their own, so the token
+  // that follows them is still the real qty column.
+  const recycled = parseCccEstimateRow(
+    "8 * Sect LKQ RT quarter panel + 25% 445539221 1 951.88 24.5 4.5"
+  );
+  assert.equal(recycled.qty, 1);
+  assert.equal(recycled.labor, 24.5);
+  assert.equal(recycled.paint, 4.5);
+});
+
+run("S-1: per-row hours are bounded by the document's own SUBTOTALS rule", () => {
+  const { parseCccSubtotalsRule } = require("./estimateDeltaMatcher.ts");
+  const rule = parseCccSubtotalsRule("SUBTOTALS 3,878.36 85.6 31.2");
+  assert.equal(rule.labor, 85.6);
+  assert.equal(rule.paint, 31.2);
+  assert.equal(parseCccSubtotalsRule("no rule printed here"), null);
+
+  // A row claiming more hours than the whole document declares is a
+  // column-identity failure, not a large value — the cell is dropped, the
+  // row survives with its remaining measured cells.
+  const rows = parseCccEstimateRows(
+    [
+      "REAR BUMPER",
+      "12 Repl Bumper cover 123456 1 425.00 900.0 2.0",
+      "13 Repl Bracket 123457 1 25.00 1.5 0.5",
+      "SUBTOTALS 3,878.36 85.6 31.2",
+    ].join("\n")
+  );
+  const impossible = rows.find((row) => row.lineNumber === 12);
+  assert.equal(impossible.labor, null, "900.0 hr against a declared 85.6 must be dropped");
+  assert.equal(impossible.paint, 2.0, "the paint cell is within the rule and survives");
+  assert.equal(impossible.price, 425);
+  const legitimate = rows.find((row) => row.lineNumber === 13);
+  assert.equal(legitimate.labor, 1.5);
+  assert.equal(legitimate.paint, 0.5);
+});
+
 console.log(`\nestimateDeltaMatcher: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
