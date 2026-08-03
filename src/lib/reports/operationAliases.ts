@@ -28,9 +28,12 @@
 
 import ALIAS_DATA from "./data/operationAliases.json";
 
+/** `$`-prefixed keys are file metadata, not operations. `$comment` holds an
+ *  ARRAY of prose lines, so an Array.isArray filter alone loads ten English
+ *  sentences as aliases of an operation named "$comment". */
 export const OPERATION_ALIASES: Record<string, string[]> = Object.fromEntries(
   Object.entries(ALIAS_DATA as Record<string, unknown>).filter(
-    (entry): entry is [string, string[]] => Array.isArray(entry[1])
+    (entry): entry is [string, string[]] => !entry[0].startsWith("$") && Array.isArray(entry[1])
   )
 );
 
@@ -52,12 +55,35 @@ export function normalizeOperationText(description: string): string {
     .trim();
 }
 
+/** Multi-word alias phrases, longest first so the most specific wording wins
+ *  when several could match ("URETHANE KIT" never beats a longer phrase that
+ *  contains it). Single-token aliases are excluded: one word inside a longer
+ *  description is a coincidence, not an identification. */
+const ALIAS_PHRASES: Array<[string, string]> = Object.entries(OPERATION_ALIASES)
+  .flatMap(([key, aliases]) => aliases.map((alias): [string, string] => [alias, key]))
+  .filter(([alias]) => alias.split(" ").length >= 2)
+  .sort((a, b) => b[0].length - a[0].length);
+
 /**
  * Canonical operation key for a description, or null when no alias matches.
- * Exact normalized equality only — fuzzy similarity stays the matcher's job.
+ *
+ * Exact normalized equality first, then containment of a multi-word alias
+ * phrase. Containment is NOT fuzzy similarity — that stays the matcher's job.
+ * The phrase either appears as a contiguous run of tokens or it does not, so
+ * the result is as deterministic as equality; it only tolerates the note text
+ * producers weld onto the operation wording. RO 22059's carrier wrote
+ * "Urethane Kit... BETASEAL, 3 KITS" against the shop's "BetaSeal Express
+ * Urethane" — both alias wordings are already in the table, and equality alone
+ * still reported the pair as one missing operation plus one carrier-only line.
  */
 export function canonicalOperationKey(description: string): string | null {
   const normalized = normalizeOperationText(description);
   if (!normalized) return null;
-  return ALIAS_LOOKUP.get(normalized) ?? null;
+  const exact = ALIAS_LOOKUP.get(normalized);
+  if (exact) return exact;
+  const padded = ` ${normalized} `;
+  for (const [alias, key] of ALIAS_PHRASES) {
+    if (padded.includes(` ${alias} `)) return key;
+  }
+  return null;
 }
