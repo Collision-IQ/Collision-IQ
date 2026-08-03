@@ -58,6 +58,7 @@ import {
 import {
   compareEstimateTotals,
   deltaRowFromRawText,
+  findBucketContradictions,
   detectPaintSystem,
   paintSystemAddHours,
   groupWrappedEstimateLines,
@@ -3253,6 +3254,9 @@ type StructuredLineItemDeltaMatch = {
     comparisonAddHours: number;
     anchorId?: string;
   } | null;
+  /** P0-1: operations withdrawn because the pack asserted both that the
+   * comparison omitted them and that only the comparison carried them. */
+  contradictionNotes: string[];
   /** Residual lower lines that duplicate an already-matched lower line (possible duplicate billing). */
   potentialDuplicateLowerRows: EstimateDeltaRow[];
   /** Arbitrary materials cap on the lower estimate (flat figure, no hrs@rate basis), with jurisdiction citation. */
@@ -3543,7 +3547,16 @@ function matchStructuredLineItemDeltas(
     higherRowCount: dedupedHigherRows.length,
     lowerRowCount: lowerRows.length,
   });
-  const match = engineMatch
+  /** P0-1 contradiction notices, surfaced on the pack so a withdrawn claim is
+   * visible rather than silently absent. */
+  const contradictionNotes: string[] = [];
+  const match: {
+    deltas: EstimateLineItemDelta[];
+    matchedPairCount: number;
+    missingOperationCount: number;
+    lowerOnlyRows: EstimateDeltaRow[];
+    potentialDuplicateLowerRows: EstimateDeltaRow[];
+  } = engineMatch
     ? {
         deltas: engineMatch.deltas,
         matchedPairCount: engineMatch.matchedPairCount,
@@ -3557,6 +3570,57 @@ function matchStructuredLineItemDeltas(
         lowerIsOcr: lowerIsOcr || lowerParseSuspect,
         lowerCategoryText,
       });
+  // P0-1: NEVER PUBLISH A DOCUMENT THAT CONTRADICTS ITSELF.
+  //
+  // An operation asserted BOTH as missing from the lower estimate and as
+  // present only on it is one matching failure, not two findings. RO 22185
+  // shipped four of them — the carrier wrote "Pre-Diagnostic Scan Charge"
+  // where the shop wrote "Pre-repair scan", and the same PDF claimed each
+  // side had omitted it while the annotated estimate stamped all four
+  // "MISSED on ERIE".
+  //
+  // Both halves are withdrawn, because both are false: the operation is on
+  // both estimates. The values are not lost — they are stated in a warning
+  // naming both lines, so a real price difference still reaches the reader
+  // while the unsupportable claims do not. The permanent fix is an alias in
+  // data/operationAliases.json; this guard is what catches the wording nobody
+  // has seen yet. Applied to the final match so it covers the typed-engine
+  // lane and the text lane identically.
+  const contradictions = findBucketContradictions(match.deltas, match.lowerOnlyRows);
+  if (contradictions.length > 0) {
+    // Only a CERTAIN contradiction withdraws findings. A suspected one is
+    // reported and left standing: a shared-wording heuristic must not delete
+    // a real omission, and the reader can compare two named lines themselves.
+    const certain = contradictions.filter((item) => item.confidence === "certain");
+    const withdrawnHigher = new Set(certain.map((item) => item.higherRow));
+    const withdrawnLower = new Set(certain.map((item) => item.lowerRow));
+    match.deltas = match.deltas.filter(
+      (delta) => !(delta.kind === "missing_operation" && withdrawnHigher.has(delta.higherRow))
+    );
+    match.lowerOnlyRows = match.lowerOnlyRows.filter((row) => !withdrawnLower.has(row));
+    for (const item of contradictions) {
+      const money = (row: EstimateDeltaRow) =>
+        row.price !== null && row.price > 0 ? ` ($${row.price.toFixed(2)})` : "";
+      console.error("[delta] withdrew self-contradictory claims for one operation", {
+        canonicalKey: item.canonicalKey,
+        higher: item.higherRow.description,
+        lower: item.lowerRow.description,
+      });
+      contradictionNotes.push(
+        item.confidence === "certain"
+          ? `"${item.higherRow.description}"${money(item.higherRow)} on this estimate and ` +
+            `"${item.lowerRow.description}"${money(item.lowerRow)} on ${comparison[0]?.fileName ?? "the comparison estimate"} ` +
+            `are the same operation written differently, so neither document omits it. ` +
+            `No missing-operation or comparison-only claim is made for it; compare the two amounts directly. ` +
+            `(Add the wording to the operation alias table so the pair reconciles automatically.)`
+          : `"${item.higherRow.description}"${money(item.higherRow)} on this estimate closely resembles ` +
+            `"${item.lowerRow.description}"${money(item.lowerRow)} on ${comparison[0]?.fileName ?? "the comparison estimate"}. ` +
+            `If they are the same operation, neither document omits it and the difference is one of price or method — ` +
+            `confirm before relying on the omission claim.`
+      );
+    }
+  }
+
   // Aggregate-vs-member dedupe (S-3): a description group that produced
   // several deltas ("Trim Masking Tape" x3, "Set back, secure" x2) collapses
   // to ONE aggregated finding — summed values, occurrence counts — instead of
@@ -3756,6 +3820,7 @@ function matchStructuredLineItemDeltas(
     totalsDeltas,
     totalsAnchors,
     lowerOnlyRows: match.lowerOnlyRows,
+    contradictionNotes,
     lowerTotalsSummary: lowerTotals,
     higherTotalsSummary: higherTotals,
     carrierMismatchNotes,
@@ -3917,6 +3982,13 @@ function emitStructuredLineItemDeltaFindings(
       ...(last.limitations ?? []),
       `${deltasTruncated} further line-item difference${deltasTruncated === 1 ? "" : "s"} were detected beyond this pack's per-report limit of ${MAX_DELTA_FINDINGS} and are not itemized here. They are the lowest-ranked by dollar and scope impact; request the full list if the itemized total must reconcile.`,
     ].slice(0, 12);
+  }
+
+  // P0-1: a withdrawn contradiction must be VISIBLE. Silently dropping both
+  // halves would hide a real price difference behind a matching failure.
+  if (deltaMatch.contradictionNotes.length > 0 && findings.length > 0) {
+    const last = findings[findings.length - 1];
+    last.limitations = [...(last.limitations ?? []), ...deltaMatch.contradictionNotes].slice(0, 12);
   }
 
   return findings;
@@ -8701,6 +8773,11 @@ function buildCalloutLines(
       .filter((line) => /not itemized here|beyond this pack|were detected beyond/i.test(line))
       .slice(0, 1)
       .map((line) => `Coverage limit: ${sanitize(line)}`),
+    // A withdrawn self-contradiction is reported, never silently dropped.
+    ...finding.limitations
+      .filter((line) => /are the same operation written differently|closely resembles/i.test(line))
+      .slice(0, 3)
+      .map((line) => `Reconcile directly: ${sanitize(line)}`),
     `Next action: ${sanitize(finding.recommendedNextAction)}`,
   ];
 }

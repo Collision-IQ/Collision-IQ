@@ -642,5 +642,101 @@ run("M-5: no two findings in the same section assert opposite section presence",
   assert.deepEqual([...(kindsBySection.get("MISCELLANEOUS OPERATIONS") ?? [])], ["expanded_scope"]);
 });
 
+run("P0-2/P0-1 (RO 22185): carrier wording pairs, and no operation is claimed by both buckets", () => {
+  const { findBucketContradictions } = require("./estimateDeltaMatcher.ts");
+  const { canonicalOperationKey } = require("./operationAliases.ts");
+
+  // Erie wrote its own vocabulary for four operations the shop also billed.
+  // With no alias the pair failed to match, so ONE PDF asserted both that
+  // Erie omitted them AND that only Erie carried them, and the annotated
+  // estimate stamped all four "MISSED on ERIE".
+  for (const [shopWording, carrierWording] of [
+    ["Pre-repair scan", "Pre-Diagnostic Scan Charge"],
+    ["Post-repair scan", "Post-Diagnostic Scan Charge"],
+    ["Flex additive", "Flex Agent"],
+    ["Clean vehicle for delivery", "Clean & Detail for Delivery"],
+    ["Hazardous Waste Removal", "Haz waste disposal"],
+  ]) {
+    const key = canonicalOperationKey(shopWording);
+    assert.ok(key, `no canonical key for ${shopWording}`);
+    assert.equal(canonicalOperationKey(carrierWording), key, `${shopWording} !~ ${carrierWording}`);
+  }
+
+  const shop = [
+    "VEHICLE DIAGNOSTICS",
+    "30 Rpr Pre-repair scan 1 0.00 m 1.5",
+    "31 Rpr Post-repair scan 1 0.00 m 1.0",
+    "MISCELLANEOUS OPERATIONS",
+    "40 # Flex additive 1 12.00",
+    "41 # Clean vehicle for delivery 1 5.00",
+  ].join("\n");
+  const erie = [
+    "VEHICLE DIAGNOSTICS",
+    "19 Rpr Pre-Diagnostic Scan Charge 1 0.00 m 1.0",
+    "20 Rpr Post-Diagnostic Scan Charge 1 0.00 m 0.5",
+    "MISCELLANEOUS OPERATIONS",
+    "21 # Flex Agent 1 5.00",
+    "22 # Clean & Detail for Delivery 1 5.00",
+  ].join("\n");
+  const match = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows(erie),
+    higherRows: parseCccEstimateRows(shop),
+  });
+
+  // All four pair, so neither bucket claims them.
+  assert.equal(match.matchedPairCount, 4, JSON.stringify(match.deltas.map((d) => d.summary)));
+  assert.deepEqual(
+    match.deltas.filter((d) => d.kind === "missing_operation").map((d) => d.higherRow.description),
+    []
+  );
+  assert.deepEqual(match.lowerOnlyRows.map((r) => r.description), []);
+  assert.deepEqual(match.contradictions, []);
+
+  // The pricing/method argument survives as a VALUE delta — the correct and
+  // stronger position — rather than a false omission.
+  const flex = match.deltas.find((d) => /flex/i.test(d.summary));
+  assert.ok(flex, "flex additive price difference should surface");
+  assert.notEqual(flex.kind, "missing_operation");
+  const scan = match.deltas.find((d) => /pre-repair scan/i.test(d.summary));
+  assert.ok(scan, "pre-repair scan hour difference should surface");
+  assert.equal(scan.kind, "reduced_labor");
+});
+
+run("P0-1: the invariant catches a contradiction the alias table does not cover", () => {
+  const { findBucketContradictions } = require("./estimateDeltaMatcher.ts");
+  const higherRow = parseCccEstimateRows("30 Rpr Widget alignment protocol 1 100.00")[0];
+  const missing = {
+    kind: "missing_operation", higherRow, lowerRow: null, matchBasis: "none",
+    laborDelta: null, paintDelta: null, priceDelta: null, summary: "",
+  };
+
+  // Identical wording that somehow failed to pair -> CERTAIN, withdraw both.
+  const identical = findBucketContradictions(missing ? [missing] : [], [
+    parseCccEstimateRows("19 Rpr Widget alignment protocol 1 60.00")[0],
+  ]);
+  assert.equal(identical.length, 1);
+  assert.equal(identical[0].confidence, "certain");
+
+  // Heavy wording overlap, no alias -> SUSPECTED, report but do not withdraw.
+  const similar = findBucketContradictions([missing], [
+    parseCccEstimateRows("19 Rpr Widget alignment charge 1 60.00")[0],
+  ]);
+  assert.equal(similar.length, 1);
+  assert.equal(similar[0].confidence, "suspected");
+
+  // Opposite sides are a REAL difference, never a contradiction.
+  const sided = findBucketContradictions(
+    [{ ...missing, higherRow: parseCccEstimateRows("30 R&I RT Door handle 1 100.00")[0] }],
+    [parseCccEstimateRows("19 R&I LT Door handle 1 100.00")[0]]
+  );
+  assert.deepEqual(sided, []);
+
+  // Unrelated operations never collide.
+  const unrelated = findBucketContradictions([missing], [
+    parseCccEstimateRows("19 Repl Bumper cover 1 425.00")[0],
+  ]);
+  assert.deepEqual(unrelated, []);
+});
+
 console.log(`\nestimateDeltaMatcher: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

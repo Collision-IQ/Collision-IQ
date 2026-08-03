@@ -16,49 +16,23 @@
  * Deliberately NOT aliased: "Reset operator preferences" vs "Reset electronics"
  * (distinct scopes — pairing them is a curated reviewer decision, never an
  * engine default).
+ *
+ * The table itself lives in data/operationAliases.json so estimators can extend
+ * it without a code change. Missing vocabulary is not a cosmetic gap: on RO
+ * 22185 the carrier wrote "Pre-Diagnostic Scan Charge" and "Clean & Detail for
+ * Delivery" where the shop wrote "Pre-repair scan" and "Clean vehicle for
+ * delivery", and with no alias the pair failed to match — so the same four
+ * operations were reported BOTH as missing from the carrier AND as carrier-only
+ * lines, in one PDF.
  */
 
-export const OPERATION_ALIASES: Record<string, string[]> = {
-  SET_BACK_WIRING: [
-    "SET BACK SECURE PROTECT WIRING CONNECTORS",
-    "SET BACK SECURE PROTECT WIRING",
-    "SET BACK WIRING CONNECTORS",
-  ],
-  FLEX_ADDITIVE: ["FLEX ADDITIVE PER FLEXIBLE PANEL", "FLEX ADDITIVE"],
-  CAVITY_WAX: [
-    "CAVITY WAX PLUS 3M 08852 PER 5 OUNCES",
-    "CAVITY WAX PLUS 3M 08852",
-    "CAVITY WAX",
-  ],
-  FEATHER_PRIME_BLOCK: [
-    "FEATHER PRIME BLOCK",
-    "FEATHER PRIME AND BLOCK",
-    "PRIME AND BLOCK",
-  ],
-  TINT_COLOR: ["TINT COLOR TO MATCH", "TINT COLOR", "COLOR TINT"],
-  FINISH_SAND_POLISH: [
-    "FINISH SAND POLISH",
-    "DENIB AND POLISH",
-    "DENIB AND FINESSE",
-  ],
-  MASK_JAMBS: ["MASK JAMBS"],
-  URETHANE_ADHESIVE: [
-    "BETASEAL EXPRESS URETHANE",
-    "URETHANE KIT",
-    "WINDSHIELD URETHANE",
-  ],
-  PRE_REPAIR_SCAN: [
-    "PRE REPAIR SCAN",
-    "PRE REPAIR DIAGNOSTIC SCAN REPAIR FACILITY",
-    "PRE REPAIR DIAGNOSTIC SCAN",
-  ],
-  POST_REPAIR_SCAN: [
-    "POST REPAIR SCAN",
-    "POST REPAIR DIAGNOSTIC SCAN REPAIR FACILITY",
-    "POST REPAIR DIAGNOSTIC SCAN",
-  ],
-  MAINTAIN_HV_CHARGE: ["MAINTAIN HV BATTERY STATE OF CHARGE"],
-};
+import ALIAS_DATA from "./data/operationAliases.json";
+
+export const OPERATION_ALIASES: Record<string, string[]> = Object.fromEntries(
+  Object.entries(ALIAS_DATA as Record<string, unknown>).filter(
+    (entry): entry is [string, string[]] => Array.isArray(entry[1])
+  )
+);
 
 const ALIAS_LOOKUP: Map<string, string> = new Map();
 for (const [key, aliases] of Object.entries(OPERATION_ALIASES)) {

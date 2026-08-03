@@ -228,6 +228,16 @@ export interface EstimateLineItemDelta {
   annotate: boolean;
 }
 
+/** One operation the two buckets disagree about — see findBucketContradictions. */
+export interface BucketContradiction {
+  canonicalKey: string | null;
+  /** `certain` withdraws both claims; `suspected` only reports. */
+  confidence: "certain" | "suspected";
+  higherRow: EstimateDeltaRow;
+  lowerRow: EstimateDeltaRow;
+  reason: string;
+}
+
 export interface EstimateDeltaMatchResult {
   deltas: EstimateLineItemDelta[];
   lowerRowCount: number;
@@ -251,6 +261,11 @@ export interface EstimateDeltaMatchResult {
    * they surface as a report section, not per-line highlights.
    */
   lowerOnlyRows: EstimateDeltaRow[];
+  /** P0-1: operations asserted BOTH as missing from the lower estimate and as
+   * present only on it. Always empty in a healthy run; a non-empty list is a
+   * vocabulary gap, and the caller must withdraw the affected claims rather
+   * than publish a document that contradicts itself. */
+  contradictions: BucketContradiction[];
   /** Every matched (higher, lower) pair, including no-delta pairs — for tests/diagnostics. */
   matchedPairs: Array<{
     higherRow: EstimateDeltaRow;
@@ -472,7 +487,9 @@ const PROTECTION_COVER_ALIASES = new Set([
   "COVER INTERIOR",
   "COVERINTERIOR", // glued extraction of "Cover interior"
   "COVER CAR BAG",
+  "COVER CAR",
   "CAR BAG",
+  "PROTECT VEHICLE",
   "VEHICLE PROTECTION KIT",
 ]);
 
@@ -2602,6 +2619,24 @@ export function matchEstimateLineItems(params: {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // DISJOINTNESS INVARIANT (P0-1). The buckets are derived from one pass, so
+  // they cannot overlap by construction — unless the SAME OPERATION failed to
+  // pair, in which case the higher row lands in `missing_operation` ("the
+  // carrier omitted this") and the lower row lands in `lowerOnlyRows` ("the
+  // shop omitted this") and the report asserts both about the same thing.
+  //
+  // RO 22185 shipped exactly that for four operations: the carrier wrote
+  // "Pre-Diagnostic Scan Charge" where the shop wrote "Pre-repair scan", and
+  // one PDF claimed each side had omitted it. An adjuster finds that in under
+  // a minute, and it discredits every other finding in the document.
+  //
+  // Reported rather than thrown: a contradiction must never reach a reader,
+  // but neither should a whole pack die at render time. The caller withdraws
+  // the affected claims and surfaces the vocabulary gap, which is the real
+  // defect — the fix is an alias in data/operationAliases.json.
+  const contradictions = findBucketContradictions(deltas, lowerOnlyRows);
+
   return {
     deltas,
     lowerRowCount: lowerRows.length,
@@ -2615,7 +2650,76 @@ export function matchEstimateLineItems(params: {
     potentialDuplicateLowerRows,
     lowerRowReconciliation,
     missedSections,
+    contradictions,
   };
+}
+
+/**
+ * Operations claimed as missing from the lower estimate that the lower
+ * estimate appears to carry anyway.
+ *
+ * TWO TIERS, because the confidence differs and so must the response.
+ *
+ * `certain` — the two rows share a canonical operation key, or their
+ * normalized descriptions are identical. There is no reading of the documents
+ * in which one omits the operation. Both claims are withdrawn.
+ *
+ * `suspected` — the descriptions merely overlap heavily (at least half the
+ * smaller token set) while the matcher declined to pair them. This is the tier
+ * that catches wording no alias covers yet, which is the state RO 22185 was in:
+ * "Pre-repair scan" against "Pre-Diagnostic Scan Charge" shares two of three
+ * tokens, "Flex additive" against "Flex Agent" one of two. Nothing is
+ * withdrawn on suspicion alone — a reader is told to compare the two lines
+ * directly, and the durable fix is an alias entry.
+ */
+export function findBucketContradictions(
+  deltas: EstimateLineItemDelta[],
+  lowerOnlyRows: EstimateDeltaRow[]
+): BucketContradiction[] {
+  if (lowerOnlyRows.length === 0) return [];
+  const out: BucketContradiction[] = [];
+  const claimed = new Set<EstimateDeltaRow>();
+  for (const delta of deltas) {
+    if (delta.kind !== "missing_operation") continue;
+    const higher = delta.higherRow;
+    const canon = canonicalOperationKey(higher.description);
+    const normalized = normalizeCategoryText(higher.description);
+    let best: { row: EstimateDeltaRow; confidence: BucketContradiction["confidence"]; ratio: number } | null =
+      null;
+    for (const row of lowerOnlyRows) {
+      if (claimed.has(row)) continue;
+      // A directional conflict is a REAL difference — LT and RT are not the
+      // same operation however much wording they share.
+      if (hasDirectionalConflict(higher.descriptionTokens, row.descriptionTokens)) continue;
+      const rowCanon = canonicalOperationKey(row.description);
+      const certain =
+        (canon !== null && canon === rowCanon) ||
+        (normalized.length >= 6 && normalized === normalizeCategoryText(row.description));
+      const overlap = tokenOverlap(higher.descriptionTokens, row.descriptionTokens);
+      if (certain) {
+        best = { row, confidence: "certain", ratio: 1 };
+        break;
+      }
+      if (overlap.ratio >= 0.5 && overlap.shared >= 1 && (!best || overlap.ratio > best.ratio)) {
+        best = { row, confidence: "suspected", ratio: overlap.ratio };
+      }
+    }
+    if (!best) continue;
+    claimed.add(best.row);
+    out.push({
+      canonicalKey: canon,
+      confidence: best.confidence,
+      higherRow: higher,
+      lowerRow: best.row,
+      reason:
+        best.confidence === "certain"
+          ? canon
+            ? `Both estimates carry canonical operation ${canon}; the pair failed to match.`
+            : `Both estimates carry an operation normalizing to "${normalized}"; the pair failed to match.`
+          : `"${higher.description}" and "${best.row.description}" share most of their wording; the pair failed to match.`,
+    });
+  }
+  return out;
 }
 
 /**

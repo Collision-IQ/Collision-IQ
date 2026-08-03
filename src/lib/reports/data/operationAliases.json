@@ -1,0 +1,94 @@
+{
+  "$comment": [
+    "Canonical operation keys for cross-carrier wording. Versioned DATA:",
+    "carrier- and RO-agnostic, ADDITIVE-ONLY. Every alias is wording observed",
+    "on a real estimate for the SAME physical operation. Removing or renaming",
+    "an entry silently changes classifications on every past dispute — removals",
+    "require an explicit migration note in the PR.",
+    "",
+    "Aliases are matched on the NORMALIZED form: uppercased, parentheticals",
+    "removed, punctuation collapsed to single spaces. Write them that way.",
+    "",
+    "Estimators extend this file directly; no code change is required."
+  ],
+  "SET_BACK_WIRING": [
+    "SET BACK SECURE PROTECT WIRING CONNECTORS",
+    "SET BACK SECURE PROTECT WIRING",
+    "SET BACK WIRING CONNECTORS"
+  ],
+  "FLEX_ADDITIVE": [
+    "FLEX ADDITIVE PER FLEXIBLE PANEL",
+    "FLEX ADDITIVE",
+    "FLEX AGENT",
+    "FLEXIBLE PARTS ADDITIVE",
+    "FLEX ADDITIVE FLEXIBLE PANEL"
+  ],
+  "CAVITY_WAX": [
+    "CAVITY WAX PLUS 3M 08852 PER 5 OUNCES",
+    "CAVITY WAX PLUS 3M 08852",
+    "CAVITY WAX"
+  ],
+  "FEATHER_PRIME_BLOCK": [
+    "FEATHER PRIME BLOCK",
+    "FEATHER PRIME AND BLOCK",
+    "PRIME AND BLOCK"
+  ],
+  "TINT_COLOR": ["TINT COLOR TO MATCH", "TINT COLOR", "COLOR TINT"],
+  "FINISH_SAND_POLISH": [
+    "FINISH SAND POLISH",
+    "DENIB AND POLISH",
+    "DENIB AND FINESSE"
+  ],
+  "MASK_JAMBS": ["MASK JAMBS"],
+  "URETHANE_ADHESIVE": [
+    "BETASEAL EXPRESS URETHANE",
+    "URETHANE KIT",
+    "WINDSHIELD URETHANE"
+  ],
+  "PRE_REPAIR_SCAN": [
+    "PRE REPAIR SCAN",
+    "PRE REPAIR DIAGNOSTIC SCAN REPAIR FACILITY",
+    "PRE REPAIR DIAGNOSTIC SCAN",
+    "PRE DIAGNOSTIC SCAN CHARGE",
+    "PRE DIAGNOSTIC SCAN",
+    "PRE SCAN",
+    "PRESCAN",
+    "HEALTH SCAN",
+    "INITIAL SCAN",
+    "INITIAL DIAGNOSTIC SCAN",
+    "PRE REPAIR SYSTEM SCAN",
+    "DIAGNOSTIC SCAN PRE REPAIR"
+  ],
+  "POST_REPAIR_SCAN": [
+    "POST REPAIR SCAN",
+    "POST REPAIR DIAGNOSTIC SCAN REPAIR FACILITY",
+    "POST REPAIR DIAGNOSTIC SCAN",
+    "POST DIAGNOSTIC SCAN CHARGE",
+    "POST DIAGNOSTIC SCAN",
+    "POST SCAN",
+    "POSTSCAN",
+    "FINAL SCAN",
+    "FINAL DIAGNOSTIC SCAN",
+    "POST REPAIR SYSTEM SCAN",
+    "DIAGNOSTIC SCAN POST REPAIR"
+  ],
+  "MAINTAIN_HV_CHARGE": ["MAINTAIN HV BATTERY STATE OF CHARGE"],
+  "CLEAN_FOR_DELIVERY": [
+    "CLEAN VEHICLE FOR DELIVERY",
+    "CLEAN DETAIL FOR DELIVERY",
+    "CLEAN AND DETAIL FOR DELIVERY",
+    "DETAIL FOR DELIVERY",
+    "WASH AND DETAIL",
+    "WASH DETAIL",
+    "CLEAN UP VEHICLE FOR DELIVERY",
+    "FINAL CLEAN UP"
+  ],
+  "HAZARDOUS_WASTE": [
+    "HAZARDOUS WASTE REMOVAL",
+    "HAZARDOUS WASTE",
+    "HAZ WASTE DISPOSAL",
+    "HAZARDOUS WASTE DISPOSAL",
+    "HAZMAT DISPOSAL"
+  ],
+  "SOLID_WASTE_REMOVAL": ["SOLID WASTE REMOVAL", "SOLID WASTE DISPOSAL"]
+}
