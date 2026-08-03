@@ -17,6 +17,7 @@ import {
 } from "@/lib/modelConfig";
 import { generateClaudeMessage } from "@/lib/anthropic";
 import { canAccessFeature } from "@/lib/featureAccess";
+import { findFabricatedCurrency } from "@/lib/ai/numericIntegrity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -122,6 +123,23 @@ export async function POST(req: Request) {
         return response.text;
       },
     }));
+    // P0-5: NO DOLLAR FIGURE THE FINDINGS DO NOT SUPPORT.
+    //
+    // RO 22185's Customer Report stated the carrier-only inner bracket at
+    // "$180.56", twice — the Estimate of Record says $80.56 — because the
+    // narrative layer lets a model TYPE a figure instead of interpolating a
+    // typed field. This is the only document the vehicle owner reads.
+    //
+    // Reported, not thrown: the owner is better served by a report that says
+    // which sentence is unverified than by no report at all, and a hard throw
+    // on an honest rounding the guard has not anticipated would take the whole
+    // artifact down. Honest rounding of a known figure already passes.
+    const fabricatedCurrency = findFabricatedCurrency(JSON.stringify(report), input);
+    if (fabricatedCurrency.length > 0) {
+      console.error("CUSTOMER_REPORT_UNSUPPORTED_CURRENCY", {
+        figures: fabricatedCurrency.map((item) => ({ text: item.text, nearest: item.nearest })),
+      });
+    }
     const generatedAt = new Date().toLocaleString();
     const html = renderCustomerReportHtml({
       report,
@@ -151,6 +169,18 @@ export async function POST(req: Request) {
       mimeType: "application/pdf",
       html,
       report,
+      // Visible to the caller, not buried in a server log: a figure the
+      // structured findings do not support must be reviewable before this
+      // reaches a vehicle owner.
+      ...(fabricatedCurrency.length > 0
+        ? {
+            integrityWarnings: fabricatedCurrency.map(
+              (item) =>
+                `"${item.text}" appears in the report text but is not among the figures the findings support` +
+                (item.nearest !== null ? ` — the nearest supported figure is $${item.nearest.toFixed(2)}.` : ".")
+            ),
+          }
+        : {}),
     });
 
     return NextResponse.json(exportPayload);
