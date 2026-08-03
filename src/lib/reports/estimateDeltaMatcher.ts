@@ -2340,13 +2340,18 @@ export function matchEstimateLineItems(params: {
       // urethane kits — no part column at all) use the $1 canonical display
       // floor: their individual deltas are small ($12 vs $6) but they are
       // the bulk of a disputed materials gap, and the old $25 part-swap
-      // floor silently dropped every one (RO 22140 audit FIX 1c). Pairs
-      // where a part number exists on either side keep the original rule:
-      // report only when the PART changed, at the $25 floor.
+      // floor silently dropped every one (RO 22140 audit FIX 1c).
+      //
+      // Priced part rows use the $25 floor whether or not the part CHANGED.
+      // Requiring a different part number suppressed the plainest dispute
+      // there is — the same part priced differently. RO 22185 line 61 is BMW
+      // 63217420123 at $686.05 against Erie's $619.71, and line 65 the same
+      // shape at $480.22 against $433.81; both were marked on the annotated
+      // estimate and neither reached the findings report, because an
+      // identical part number disqualified them here.
       (higherRow.partNumber === null && lowerRow.partNumber === null
         ? priceDelta >= TCHARGE_PRICE_DELTA
-        : priceDelta >= MATERIAL_PRICE_DELTA &&
-          (higherRow.partNumber ?? null) !== (lowerRow.partNumber ?? null)) &&
+        : priceDelta >= MATERIAL_PRICE_DELTA) &&
       // Glued part/qty/price runs split ambiguously; when the counterpart's
       // price is a plausible alternate split of this row's run (or vice
       // versa), the "difference" is a split artifact, not a price change.
