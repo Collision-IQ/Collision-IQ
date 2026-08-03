@@ -52,6 +52,13 @@ export function scoreEstimateRoleSignals(filename: string, text: string): Estima
   const has = (re: RegExp): number => (re.test(haystack) ? 1 : 0);
 
   let carrier = 0;
+  // DECISIVE: the document prints its own type. A document that says
+  // "Estimate of Record" on its face is a carrier document, and no heuristic
+  // may outvote it — RO 22185 inverted the roles and reported Erie's EOR as
+  // the shop estimate, because this marker was not in the vocabulary at all.
+  carrier += 6 * has(/\bestimate of record\b|\beor\b/);
+  // An adjuster/appraiser LICENSE NUMBER is printed by carriers, not shops.
+  carrier += 4 * has(/\blicen[cs]e\s*(?:number|no\.?|#)\s*[:#-]?\s*\d/);
   // Strong: the document is authored by a carrier / appraiser.
   carrier += 3 * has(/\bsupplement of record\b|\bs\.?o\.?r\.?\b/);
   carrier += 3 * has(/\bcasualty insurance company\b/);
@@ -60,9 +67,14 @@ export function scoreEstimateRoleSignals(filename: string, text: string): Estima
   carrier += 2 * has(/\bnet cost of repairs\b|\bless deductible\b|\bdeductible applied\b/);
   carrier += 1 * has(/\bclaim\s*(?:number|no\.?|#)\b/);
   // Weak: a generic insurer lexicon (signal only, not special-casing any one).
-  carrier += 1 * has(/\b(?:allstate|state farm|geico|progressive|usaa|nationwide|liberty mutual|farmers|travelers|esurance)\b/);
+  carrier += 1 * has(/\b(?:allstate|state farm|geico|progressive|usaa|nationwide|liberty mutual|farmers|travelers|esurance|erie|safeco|amica|hanover|plymouth rock|mercury|auto-owners|american family|kemper|root)\b/);
+  // Carrier letterhead: an insurance organization named as the AUTHOR.
+  carrier += 2 * has(/\b[a-z][a-z&.' -]{2,30}\s(?:insurance\s(?:group|company|co\.?)|mutual|casualty|indemnity)\b/);
 
   let shop = 0;
+  // DECISIVE, mirroring the carrier side: a document that prints
+  // "Preliminary Estimate" is the shop's own first write-up.
+  shop += 6 * has(/\bpreliminary estimate\b/);
   // Strong: the document is authored by a repair facility.
   shop += 3 * has(/\bcollision center\b|\bbody shop\b|\brepair facility\b|\bauto body\b/);
   shop += 2 * has(/\brepair order\b|\bro\s*#|\bwork\s?file\b|\bworkfile\b|\bwork authorization\b/);
@@ -83,20 +95,37 @@ export function scoreEstimateRoleSignals(filename: string, text: string): Estima
  */
 export function resolveTriageRoles<T extends { scores: EstimateRoleScore }>(
   items: T[]
-): { carrier?: T; shop?: T } {
-  if (items.length === 0) return {};
+): { carrier?: T; shop?: T; basis: "document_markers" | "assumed"; margin: number } {
+  if (items.length === 0) return { basis: "assumed", margin: 0 };
+  const carrierLean = (i: T) => i.scores.carrier - i.scores.shop;
   if (items.length === 1) {
     const only = items[0];
-    return only.scores.carrier > only.scores.shop
-      ? { carrier: only }
-      : { shop: only };
+    const margin = Math.abs(carrierLean(only));
+    return {
+      ...(only.scores.carrier > only.scores.shop ? { carrier: only } : { shop: only }),
+      basis: margin >= ROLE_MARKER_MARGIN ? "document_markers" : "assumed",
+      margin,
+    };
   }
 
-  const carrierLean = (i: T) => i.scores.carrier - i.scores.shop;
   // Most carrier-leaning becomes carrier; most shop-leaning of the rest is shop.
   const carrier = [...items].sort((a, b) => carrierLean(b) - carrierLean(a))[0];
   const shop = [...items]
     .filter((i) => i !== carrier)
     .sort((a, b) => carrierLean(a) - carrierLean(b))[0];
-  return { carrier, shop };
+  // How decisively the two documents separate. A thin margin means no document
+  // actually declared its own type, and the caller must say "assumed" rather
+  // than assert a role — RO 22185 asserted the roles backwards with no hedge.
+  const margin = carrierLean(carrier) - carrierLean(shop);
+  return {
+    carrier,
+    shop,
+    basis: margin >= ROLE_MARKER_MARGIN ? "document_markers" : "assumed",
+    margin,
+  };
 }
+
+/** Separation below which a role assignment is a guess, not a reading. Set so
+ * one decisive self-declaration ("Estimate of Record", "Preliminary Estimate")
+ * clears it on its own. */
+export const ROLE_MARKER_MARGIN = 6;

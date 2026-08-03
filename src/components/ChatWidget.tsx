@@ -971,7 +971,11 @@ function buildPreliminaryReviewDraft(attachments: Attachment[]): PreliminaryRevi
   }));
   // Resolve carrier vs shop to DISTINCT documents so the same file is never
   // reported as both roles (which previously produced a $0.00 gap).
-  const { carrier: carrierEstimate, shop: shopEstimate } = resolveTriageRoles(estimates);
+  const {
+    carrier: carrierEstimate,
+    shop: shopEstimate,
+    basis: roleBasis,
+  } = resolveTriageRoles(estimates);
   const gap =
     typeof shopEstimate?.total === "number" && typeof carrierEstimate?.total === "number"
       ? Math.abs(shopEstimate.total - carrierEstimate.total)
@@ -989,8 +993,12 @@ function buildPreliminaryReviewDraft(attachments: Attachment[]): PreliminaryRevi
   ];
 
   if (shopEstimate?.filename || carrierEstimate?.filename) {
-    lines.push(`- Likely shop estimate: ${shopEstimate?.filename ?? "not clear yet"}${typeof shopEstimate?.total === "number" ? ` (${formatPreliminaryCurrency(shopEstimate.total)})` : ""}`);
-    lines.push(`- Likely carrier/SOR estimate: ${carrierEstimate?.filename ?? "not clear yet"}${typeof carrierEstimate?.total === "number" ? ` (${formatPreliminaryCurrency(carrierEstimate.total)})` : ""}`);
+    // When no document declared its own type, the assignment is a guess and
+    // must be labelled one. RO 22185 asserted the roles backwards with no
+    // hedge at all — the Erie Estimate of Record was called the shop estimate.
+    const roleQualifier = roleBasis === "document_markers" ? "" : " (assumed — neither document states its type)";
+    lines.push(`- Shop estimate: ${shopEstimate?.filename ?? "not clear yet"}${typeof shopEstimate?.total === "number" ? ` (${formatPreliminaryCurrency(shopEstimate.total)})` : ""}${roleQualifier}`);
+    lines.push(`- Carrier/SOR estimate: ${carrierEstimate?.filename ?? "not clear yet"}${typeof carrierEstimate?.total === "number" ? ` (${formatPreliminaryCurrency(carrierEstimate.total)})` : ""}`);
   }
 
   if (gap !== null) {

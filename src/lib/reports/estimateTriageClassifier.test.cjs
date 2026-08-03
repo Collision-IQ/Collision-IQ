@@ -139,6 +139,57 @@ test("gap is computed from repair totals, not net", () => {
   assert.equal(Math.round((shopTotal - carrierTotal) * 100) / 100, 623.91);
 });
 
+console.log("\nP0-6 role precedence");
+test("P0-6 (RO 22185): a document that prints its own type wins the role", () => {
+  // Erie's Estimate of Record was reported as the SHOP estimate and the
+  // shop's Preliminary Estimate as the carrier's. Both documents state their
+  // type on their face.
+  const eorText = [
+    "Erie Insurance Group",
+    "Estimate of Record",
+    "Claim #: A00007793947-1",
+    "Adjuster: J. Smith, License Number 0527619",
+    "Deductible applied",
+  ].join("\n");
+  const shopText = [
+    "Preliminary Estimate",
+    "RO Number: 22185",
+    "Written By: estimator",
+    "Insurance Company: Erie",
+    "Claim #: A00007793947-1",
+  ].join("\n");
+
+  const estimates = [
+    { filename: "EOR 22185.pdf", scores: scoreEstimateRoleSignals("EOR 22185.pdf", eorText) },
+    { filename: "Shop 22185.pdf", scores: scoreEstimateRoleSignals("Shop 22185.pdf", shopText) },
+  ];
+  const resolved = resolveTriageRoles(estimates);
+  assert.equal(resolved.carrier.filename, "EOR 22185.pdf");
+  assert.equal(resolved.shop.filename, "Shop 22185.pdf");
+  assert.equal(resolved.basis, "document_markers");
+});
+
+test("P0-6: a thin margin is reported as assumed, never asserted", () => {
+  const vague = "Estimate\nTotal Cost of Repairs 1,000.00";
+  const estimates = [
+    { filename: "a.pdf", scores: scoreEstimateRoleSignals("a.pdf", vague) },
+    { filename: "b.pdf", scores: scoreEstimateRoleSignals("b.pdf", vague) },
+  ];
+  const resolved = resolveTriageRoles(estimates);
+  assert.equal(resolved.basis, "assumed");
+  assert.ok(resolved.margin < 6);
+});
+
+test("P0-6: cost never decides the role", () => {
+  // The carrier document is the CHEAPER one here, as it usually is. Role must
+  // follow the markers regardless.
+  const eor = scoreEstimateRoleSignals("EOR.pdf", "Estimate of Record\nGrand Total 3,642.51");
+  const shop = scoreEstimateRoleSignals("Shop.pdf", "Preliminary Estimate\nCollision Center\nGrand Total 8,745.29");
+  assert.ok(eor.carrier - eor.shop > 0, "EOR must lean carrier");
+  assert.ok(shop.shop - shop.carrier > 0, "shop estimate must lean shop");
+});
+
+
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
 if (failed > 0) {
   for (const { name, err } of failures) console.error(`\nFAILED: ${name}\n${err.stack || err.message}`);
