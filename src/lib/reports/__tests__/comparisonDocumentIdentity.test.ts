@@ -13,6 +13,7 @@
 import { describe, it, expect } from "vitest";
 import {
   comparisonExtractionIsDegraded,
+  dollarWeightedScore,
   resolveComparisonDocumentIdentity,
 } from "../annotatedCitationDensityEstimate";
 
@@ -161,5 +162,37 @@ describe("M-1 — the degraded-source hedge is driven by font evidence, not row 
         lowerRowCount: 1,
       })
     ).toBe(false);
+  });
+});
+
+describe("M-4 — a finding cannot outrank what it is worth", () => {
+  it("the four RO 22182 category-missing findings outscore every sub-$200 line finding", () => {
+    // Category-missing findings: base 80, dollars from the category itself.
+    const categories = [4063.5, 2100.0, 1650.0, 418.13].map((amount) =>
+      dollarWeightedScore(80, amount)
+    );
+    // The two line findings the R5 grading named: "Pre repair scan" at
+    // $175.00 (base 70) and "Research DTC's" at $87.50 (base 82).
+    const preRepairScan = dollarWeightedScore(70, 175);
+    const researchDtcs = dollarWeightedScore(82, 87.5);
+    for (const categoryScore of categories) {
+      expect(categoryScore).toBeGreaterThan(preRepairScan);
+      expect(categoryScore).toBeGreaterThan(researchDtcs);
+    }
+  });
+
+  it("the ceiling is monotone in dollars", () => {
+    const scores = [50, 200, 900, 2_000, 9_000].map((amount) => dollarWeightedScore(99, amount));
+    for (let index = 1; index < scores.length; index += 1) {
+      expect(scores[index]).toBeGreaterThan(scores[index - 1]);
+    }
+  });
+
+  it("a finding with no dollar figure is never capped — safety value is not monetary", () => {
+    expect(dollarWeightedScore(92, null)).toBe(92);
+  });
+
+  it("the ceiling only lowers a score, never raises one", () => {
+    expect(dollarWeightedScore(40, 50_000)).toBe(40);
   });
 });

@@ -1014,6 +1014,7 @@ const LABEL_DEFINITIONS: Record<string, string> = {
   "ONLINE FALLBACK": "Support came from a public online source, not a licensed database.",
   "WEAK — DO NOT LEAD": "Signal too weak to lead a negotiation; listed for completeness only.",
   "AMOUNT DELTA": "A category dollar amount differs between the two ESTIMATE TOTALS blocks.",
+  "CATEGORY MISSING": "An entire ESTIMATE TOTALS category on this estimate has no counterpart on the lower-cost estimate — the whole category's dollars are in dispute, not a price difference within it.",
   "HOURS DELTA": "A labor-category hour subtotal differs between the two estimates.",
   "RATE DELTA": "A labor or materials rate differs between the two estimates.",
   "TOTAL GAP": "The grand totals differ — the reconciled overall gap between the two estimates.",
@@ -3856,7 +3857,11 @@ function emitStructuredLineItemDeltaFindings(
         missingProofSummary: meta.missingProof,
         recommendedNextAction: meta.nextAction,
         missingAuthorityTypes: meta.missingAuthorityTypes,
-        amountImpact: delta.priceDelta ?? null,
+        // A line with no counterpart puts its OWN amount in dispute; there is
+        // no delta to subtract. Reporting null there left every missing
+        // operation dollar-less, so the magnitude ceiling could not order them
+        // and an $87.50 line outranked a $4,063.50 category (M-4).
+        amountImpact: delta.priceDelta ?? (delta.lowerRow === null ? delta.higherRow.price ?? null : null),
         laborHoursImpact: delta.laborDelta ?? null,
       })
     );
@@ -3996,7 +4001,9 @@ function emitTotalsDeltaFindings(
                   ? "Totals do NOT reconcile — part of the gap is unexplained"
                   : delta.kind === "category_only_on_lower"
                     ? `Category only on the lower estimate: ${delta.category}`
-                    : `Category amount difference: ${delta.category}`,
+                    : delta.kind === "category_missing_on_lower"
+                      ? `Whole category missing from the lower-cost estimate: ${delta.category}`
+                      : `Category amount difference: ${delta.category}`,
         category: isRateKind ? "labor_difference" : "other",
         label:
           delta.kind === "rate_difference"
@@ -4007,9 +4014,21 @@ function emitTotalsDeltaFindings(
                 ? "TOTAL GAP"
                 : delta.kind === "reconciliation_gap"
                   ? "RECONCILIATION GAP"
-                  : "AMOUNT DELTA",
+                  : delta.kind === "category_missing_on_lower"
+                    ? "CATEGORY MISSING"
+                    : "AMOUNT DELTA",
         estimateGapType: isRateKind ? "reduced_by_carrier" : "needs_proof",
-        score: delta.kind === "reconciliation_gap" ? 85 : isRateKind ? 78 : 62,
+        // A whole category absent from the comparison is a larger claim than a
+        // category the two documents merely price differently, and it is the
+        // shape that carried 53% of the RO 22182 gap.
+        score:
+          delta.kind === "reconciliation_gap"
+            ? 85
+            : isRateKind
+              ? 78
+              : delta.kind === "category_missing_on_lower"
+                ? 80
+                : 62,
         safetyImpact: "low",
         priority:
           isRateKind || delta.kind === "total_difference" || delta.kind === "reconciliation_gap"
@@ -4031,7 +4050,12 @@ function emitTotalsDeltaFindings(
         amountImpact:
           delta.higher && delta.lower && delta.higher.cost !== null && delta.lower.cost !== null
             ? Math.round((delta.higher.cost - delta.lower.cost) * 100) / 100
-            : null,
+            : // A category with NO counterpart puts its whole amount in
+              // dispute — reporting null left the largest findings on the
+              // pair carrying no dollar figure at all.
+              delta.kind === "category_missing_on_lower" && delta.higher?.cost != null
+              ? Math.round(delta.higher.cost * 100) / 100
+              : null,
       })
     );
   }
@@ -4467,6 +4491,28 @@ export function groupOemFindingsForReadability(
   return result.sort((a, b) => a.index - b.index).map((entry) => entry.finding);
 }
 
+/**
+ * M-4 — A FINDING CANNOT OUTRANK WHAT IT IS WORTH.
+ *
+ * The four category-missing findings on RO 22182 accounted for $8,231.63 —
+ * 53% of the entire gap, including Bonded Or Welded Panel Replace at
+ * $4,063.50 — and every one of them scored 62, beneath a $175.00 pre-repair
+ * scan at 70 and an $87.50 "Research DTC's" line at 82. A reader working the
+ * list top-down reached the largest disputes last.
+ *
+ * Type-based scores stay as they are; a magnitude CEILING is applied on top,
+ * so a small-dollar finding cannot rank above a large one no matter how
+ * confidently it is typed. Findings with no dollar figure (safety and
+ * documentation detectors) are never capped — their value is not monetary.
+ */
+export function dollarWeightedScore(score: number, amountImpact: number | null): number {
+  if (amountImpact === null || !Number.isFinite(amountImpact)) return score;
+  const amount = Math.abs(amountImpact);
+  const ceiling =
+    amount < 100 ? 60 : amount < 250 ? 68 : amount < 1_000 ? 76 : amount < 2_500 ? 84 : 99;
+  return Math.min(score, ceiling);
+}
+
 function buildRequiredDetectorFinding(params: {
   context: AnnotatedEstimateFindingGeneratorContext;
   anchor: EstimateRowAnchor;
@@ -4527,7 +4573,7 @@ function buildRequiredDetectorFinding(params: {
       invoiceOrCompletionProof: "needed",
       photoOrTeardownProof: "not_found",
     },
-    citationDensityScore: params.score,
+    citationDensityScore: dollarWeightedScore(params.score, params.amountImpact ?? null),
     verifiedAuthorityCount: 0,
     missingAuthorityTypes: params.missingAuthorityTypes,
     missingAuthority: params.missingAuthorityTypes,
