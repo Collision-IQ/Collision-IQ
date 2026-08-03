@@ -211,6 +211,13 @@ export function canonKey(rawDesc: string): CanonKey {
   let s = repairTokens(rawDesc).toUpperCase();
   s = s.replace(/PT\d{8}[A-Z](\d{3})?/g, "");
   s = s.replace(/^\s*[#*]+\s*/, "");
+  // SUPPLEMENT SEQUENCE MARKERS are not part of an operation's identity.
+  // A supplement-of-record prints "S01 Repl information labels" where the
+  // shop prints "Repl Info label VECI"; leaving the marker in place squashes
+  // to SREPLINFORMATIONLABELS, which blocks the op-code stripper below and
+  // makes the two rows unpairable. On RO 22059 this is most of why the typed
+  // engine paired 39 rows where the text lane — which strips them — paired 82.
+  s = s.replace(/^\s*S\s*0?\d{1,2}\b\s*/g, " ");
   s = s.replace(/^(R&I|RPR|REPL|BLND|REFN|SUBL|O\/H)\b/, "").trim();
   s = s.replace(/[0-9]+(\.[0-9]+)?/g, "");
   // Side + position enums from the synonym sets, on the pre-squash string
