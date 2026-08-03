@@ -1937,6 +1937,56 @@ export function matchEstimateLineItems(params: {
     const s = normalizeCategoryText(section ?? "");
     return s.length >= 3 && normalizedLowerText.includes(s);
   };
+
+  /**
+   * M-5 — ONE PRESENCE VERDICT PER SECTION, resolved before any finding in
+   * that section is typed.
+   *
+   * Presence is a property of the SECTION, not of the row. Deciding it per row
+   * let two rows under the same header reach opposite conclusions: on RO 22182
+   * findings 13-17 said vehicle diagnostics was present on the lower estimate
+   * ("expanded scope within a present category") while findings 22-25 said the
+   * same section was missing from it. GEICO's estimate has no diagnostics
+   * section, so half the report was wrong, and the reader had no way to tell
+   * which half.
+   *
+   * When the lower document labels its own sections, that list IS the answer —
+   * a per-row description keyword cannot overrule a header the document does
+   * not print. Only when the lower document carries no section labels at all
+   * does the keyword/raw-text lane decide, and then it decides once for the
+   * whole section.
+   */
+  const lowerSectionKeys = new Set<string>();
+  for (const row of lowerRows) {
+    const key = normalizeCategoryText(row.section ?? "");
+    if (key.length >= 3) lowerSectionKeys.add(key);
+  }
+  const lowerLabelsItsSections = lowerSectionKeys.size >= 2;
+  const higherRowsBySection = new Map<string, EstimateDeltaRow[]>();
+  for (const row of higherRows) {
+    const key = normalizeCategoryText(row.section ?? "");
+    if (!key) continue;
+    const bucket = higherRowsBySection.get(key);
+    if (bucket) bucket.push(row);
+    else higherRowsBySection.set(key, [row]);
+  }
+  const sectionPresenceVerdict = new Map<string, boolean>();
+  const resolveSectionPresence = (section: string | null): boolean => {
+    const key = normalizeCategoryText(section ?? "");
+    if (!key) return false;
+    const cached = sectionPresenceVerdict.get(key);
+    if (cached !== undefined) return cached;
+    const present = lowerLabelsItsSections
+      ? [...lowerSectionKeys].some(
+          (candidate) => candidate === key || candidate.includes(key) || key.includes(candidate)
+        )
+      : sectionPresentInLower(section) ||
+        (higherRowsBySection.get(key) ?? []).some((row) =>
+          extractCategoryKeywords(row).some((kw) => lowerCategoryKeywords.has(kw))
+        );
+    sectionPresenceVerdict.set(key, present);
+    return present;
+  };
   // OCR discriminator: is this higher line genuinely absent from the lower
   // estimate, or merely present-but-poorly-parsed by OCR? A part number missing
   // from the OCR text is a strong "genuinely added" signal; a distinctive
@@ -2139,9 +2189,10 @@ export function matchEstimateLineItems(params: {
 
     // Genuinely absent from the lower estimate. Distinguish a brand-new
     // operation from an expansion within a category the lower estimate has.
-    const categoryPresent =
-      extractCategoryKeywords(higherRow).some((kw) => lowerCategoryKeywords.has(kw)) ||
-      sectionPresentInLower(higherRow.section);
+    // One verdict for the whole section (M-5) — never a per-row answer.
+    const categoryPresent = higherRow.section
+      ? resolveSectionPresence(higherRow.section)
+      : extractCategoryKeywords(higherRow).some((kw) => lowerCategoryKeywords.has(kw));
     if (categoryPresent) {
       expandedScopeCount += 1;
       deltas.push({

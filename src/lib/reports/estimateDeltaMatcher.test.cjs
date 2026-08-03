@@ -180,18 +180,25 @@ run("flags windshield and headliner reduced labor with correct deltas", () => {
   assert.equal(headliner.laborDelta, 1);
 });
 
-run("flags denib/polish and color tint as missing operations", () => {
+run("flags denib/polish and color tint as expanded scope in a present category", () => {
   const lowerRows = parseCccEstimateRows(LOWER_SOR1);
   const higherRows = parseCccEstimateRows(HIGHER_SOR2);
   const result = matchEstimateLineItems({ lowerRows, higherRows });
 
+  // M-5: both lines are genuinely absent from the lower estimate, but the
+  // MISCELLANEOUS OPERATIONS header they sit under IS on the lower estimate
+  // (it carries line 77, Color Sand and Buff). Section presence is now
+  // resolved once from the lower document's own section labels, so both lines
+  // report as expansion within a present category rather than as brand-new
+  // operations — and, critically, they report the SAME way as each other.
   const denib = result.deltas.find((delta) => /denib/i.test(delta.summary));
-  assert.ok(denib, "denib and polish should be a missing operation");
-  assert.equal(denib.kind, "missing_operation");
+  assert.ok(denib, "denib and polish should be reported");
+  assert.equal(denib.kind, "expanded_scope");
 
   const colorTint = result.deltas.find((delta) => /color tint/i.test(delta.summary));
-  assert.ok(colorTint, "color tint should be a missing operation");
-  assert.equal(colorTint.kind, "missing_operation");
+  assert.ok(colorTint, "color tint should be reported");
+  assert.equal(colorTint.kind, "expanded_scope");
+  assert.equal(denib.kind, colorTint.kind, "two rows under one header never disagree on presence");
 });
 
 run("does not flag steering column, post-repair scan, or color sand (unchanged)", () => {
@@ -589,6 +596,50 @@ run("M-3: the vehicle's paint system is read from both option blocks and both ad
     paintSystemAddHours(parseCccEstimateRows("195 # Tint color > Three stage let down panel 1 1.0")),
     0
   );
+});
+
+run("M-5: no two findings in the same section assert opposite section presence", () => {
+  // RO 22182 shipped findings 13-17 saying vehicle diagnostics was PRESENT on
+  // the lower estimate and findings 22-25 saying the same section was MISSING
+  // from it. GEICO's estimate has no diagnostics section, so half the report
+  // was wrong and the reader had no way to tell which half.
+  const lower = [
+    "REAR BUMPER",
+    "20 Repl Bumper cover 3206028 1 425.00 2.0 1.0",
+    "MISCELLANEOUS OPERATIONS",
+    "30 # Cover car 1 15.00",
+  ].join("\n");
+  const higher = [
+    "REAR BUMPER",
+    "60 Repl Bumper cover 3206028 1 425.00 2.0 1.0",
+    "VEHICLE DIAGNOSTICS",
+    "70 Rpr Pre repair scan 1 175.00 1.0",
+    "71 Rpr Post repair scan 1 175.00 1.0",
+    "72 Rpr Research DTC's 1 87.50 0.5",
+    "MISCELLANEOUS OPERATIONS",
+    "80 # Cover car 1 15.00",
+    "81 # Mask for refinishing 1 10.00",
+  ].join("\n");
+  const result = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows(lower),
+    higherRows: parseCccEstimateRows(higher),
+  });
+  const kindsBySection = new Map();
+  for (const delta of result.deltas) {
+    if (delta.kind !== "missing_operation" && delta.kind !== "expanded_scope") continue;
+    const section = delta.higherRow.section ?? "";
+    const kinds = kindsBySection.get(section) ?? new Set();
+    kinds.add(delta.kind);
+    kindsBySection.set(section, kinds);
+  }
+  for (const [section, kinds] of kindsBySection) {
+    assert.equal([...kinds].length, 1, `${section} asserts both presence and absence: ${[...kinds].join(", ")}`);
+  }
+  // The lower estimate labels its own sections, so its list is the authority:
+  // it has no VEHICLE DIAGNOSTICS header, and it does have MISCELLANEOUS
+  // OPERATIONS.
+  assert.deepEqual([...(kindsBySection.get("VEHICLE DIAGNOSTICS") ?? [])], ["missing_operation"]);
+  assert.deepEqual([...(kindsBySection.get("MISCELLANEOUS OPERATIONS") ?? [])], ["expanded_scope"]);
 });
 
 console.log(`\nestimateDeltaMatcher: ${passed} passed, ${failed} failed`);
