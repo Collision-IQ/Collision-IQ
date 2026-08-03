@@ -11,7 +11,10 @@
  * that a previously-known-bad token is absent.
  */
 import { describe, it, expect } from "vitest";
-import { resolveComparisonDocumentIdentity } from "../annotatedCitationDensityEstimate";
+import {
+  comparisonExtractionIsDegraded,
+  resolveComparisonDocumentIdentity,
+} from "../annotatedCitationDensityEstimate";
 
 const GEICO_EOR_HEADER = [
   "GEICO",
@@ -114,5 +117,49 @@ describe("an unresolved identity is a failure, never a fallback", () => {
         sourceText: "",
       })
     ).toBeNull();
+  });
+});
+
+describe("M-1 — the degraded-source hedge is driven by font evidence, not row count", () => {
+  it("a readable text layer never hedges, however few rows the carrier wrote", () => {
+    // RO 22182: GEICO's 33-line Estimate of Record against the shop's 179.
+    // That gap IS the finding.
+    expect(
+      comparisonExtractionIsDegraded({
+        textLayerReliable: true,
+        higherRowCount: 179,
+        lowerRowCount: 27,
+      })
+    ).toBe(false);
+  });
+
+  it("a non-embedded-font producer with a collapsed row yield still hedges", () => {
+    expect(
+      comparisonExtractionIsDegraded({
+        textLayerReliable: false,
+        higherRowCount: 179,
+        lowerRowCount: 27,
+      })
+    ).toBe(true);
+  });
+
+  it("a degraded text layer that still parsed well does not hedge", () => {
+    expect(
+      comparisonExtractionIsDegraded({
+        textLayerReliable: false,
+        higherRowCount: 179,
+        lowerRowCount: 150,
+      })
+    ).toBe(false);
+  });
+
+  it("small documents are never hedged on row count", () => {
+    expect(
+      comparisonExtractionIsDegraded({
+        textLayerReliable: false,
+        higherRowCount: 20,
+        lowerRowCount: 1,
+      })
+    ).toBe(false);
   });
 });
