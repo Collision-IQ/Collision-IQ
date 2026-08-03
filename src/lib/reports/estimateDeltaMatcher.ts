@@ -2804,6 +2804,11 @@ export interface EstimateTotalsDelta {
   higher: EstimateTotalsCategory | null;
   lower: EstimateTotalsCategory | null;
   summary: string;
+  /** Dollar magnitude of the difference, when the delta has one. Grand-total
+   * and reconciliation deltas carry no category rows, so their amount cannot
+   * be derived from `higher`/`lower` — without it the headline gap of the
+   * whole report reached the renderer with no number attached (M-6). */
+  amount?: number | null;
 }
 
 const fmtMoney = (value: number) =>
@@ -3003,6 +3008,7 @@ export function compareEstimateTotals(params: {
         higher: null,
         lower: null,
         summary: `Grand total ${fmtMoney(higher.grandTotal)} vs ${fmtMoney(lower.grandTotal)} — a ${fmtMoney(Math.abs(totalDiff))} difference.`,
+        amount: Math.round(Math.abs(totalDiff) * 100) / 100,
       });
     }
   }

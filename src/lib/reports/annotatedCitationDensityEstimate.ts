@@ -3996,7 +3996,10 @@ function emitTotalsDeltaFindings(
             : delta.kind === "hours_difference"
               ? `Hour subtotal difference: ${delta.category}`
               : delta.kind === "total_difference"
-                ? "Estimate total difference"
+                ? // Carry both totals and the difference in the TITLE. The
+                  // headline number of the whole report must survive whatever
+                  // the card can fit (M-6).
+                  `Estimate total difference: ${delta.summary.replace(/^Grand total\s*/i, "").replace(/\.$/, "")}`
                 : delta.kind === "reconciliation_gap"
                   ? "Totals do NOT reconcile — part of the gap is unexplained"
                   : delta.kind === "category_only_on_lower"
@@ -4055,7 +4058,9 @@ function emitTotalsDeltaFindings(
               // pair carrying no dollar figure at all.
               delta.kind === "category_missing_on_lower" && delta.higher?.cost != null
               ? Math.round(delta.higher.cost * 100) / 100
-              : null,
+              : // Grand-total and reconciliation deltas carry their magnitude
+                // directly; they have no category rows to subtract.
+                delta.amount ?? null,
       })
     );
   }
@@ -8547,9 +8552,12 @@ function addUnanchoredAppendix(
       boldFont: options.boldFont,
       size: 9,
       lineHeight: 12,
-      maxLines: 8,
+      // Enough room for the headline plus the current-support sentence that
+      // carries the numbers. At 8 lines the TOTAL GAP card stopped before
+      // either total was printed.
+      maxLines: 12,
     });
-    y -= 104;
+    y -= 152;
   });
 }
 
@@ -8569,6 +8577,11 @@ function buildCalloutLines(
   return [
     `Finding #: ${number}`,
     `Label: ${label}`,
+    // The finding's own headline. Without it the card opened on the anchor's
+    // row text, so the RO 22182 TOTAL GAP card printed "Grand Total 20,243.73"
+    // and nothing else — the $15,677.62 difference and the comparison total
+    // both sat below the card's line cap and were never rendered.
+    `Finding: ${sanitize(finding.operationLabel)}`,
     ...(finding.canonicalDeltaObjectId
       ? [
           `Canonical delta object: ${finding.canonicalDeltaObjectId}`,
