@@ -19,6 +19,7 @@ import {
   canonTotalsCategory,
   continuesIdentifier,
   isManufacturerPrefixedIdentifier,
+  looksLikePartNumber,
   totalsCategoriesFuzzyMatch,
 } from "./deltaEngine/estimateNormalize";
 
@@ -1137,20 +1138,9 @@ function extractTrailingColumns(body: string): {
   };
 }
 
+/** One shape rule, shared with the typed engine — see looksLikePartNumber. */
 function isPartNumberToken(token: string): boolean {
-  const value = token.replace(/[.,]$/, "");
-  if (value.length < 5) return false;
-  if (/^\$?[\d,]+\.\d{2}$/.test(value)) return false; // money
-  const hasLetter = /[A-Za-z]/.test(value);
-  const hasDigit = /\d/.test(value);
-  if (hasLetter && hasDigit && /^[A-Za-z0-9-]+$/.test(value)) return true;
-  // Pure numeric part numbers are usually >= 6 digits (e.g. 84394021, 9132667),
-  // optionally dash-grouped ("167-880-44-09"). Aftermarket catalog numbers
-  // print with an interior dot ("3012.0113").
-  if (!hasLetter && /^\d{6,}$/.test(value)) return true;
-  if (!hasLetter && /^\d{4}\.\d{4}$/.test(value)) return true;
-  if (!hasLetter && /^\d[\d-]{5,}\d$/.test(value) && value.replace(/-/g, "").length >= 6) return true;
-  return false;
+  return looksLikePartNumber(token);
 }
 
 /**

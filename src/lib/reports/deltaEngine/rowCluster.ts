@@ -220,7 +220,17 @@ export interface RowParseState {
 function absorbRowTokens(row: EstimateRow, tokens: Word[], cols: ColRanges): string[] {
   const desc: string[] = [];
   for (const word of tokens) {
-    const { part, trailing } = extractPart(word.text);
+    // GEOMETRY WINS. The part-number test is shape-based, so a bare 6+ digit
+    // token could be a part number OR a measured value cell; the column the
+    // producer printed it in is the authority. Testing for a part first would
+    // let a broadened rule swallow a price or an hours cell.
+    const midpoint = (word.x0 + word.x1) / 2;
+    const inAnyValueColumn = ([cols.qty, cols.price, cols.labor, cols.paint] as Array<[number, number]>).some(
+      (range) => midpoint >= range[0] && midpoint <= range[1]
+    );
+    const { part, trailing } = inAnyValueColumn
+      ? { part: null, trailing: "" }
+      : extractPart(word.text);
     if (part) {
       row.part = part;
       if (NUM.test(trailing) && parseFloat(trailing) < 10 && row.qty === null)

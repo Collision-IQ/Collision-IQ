@@ -285,13 +285,58 @@ export function continuesIdentifier(previousToken: string | undefined, token: st
   return isManufacturerPrefixedIdentifier(previousToken) && /^\d[\dA-Za-z-]*$/.test(token);
 }
 
-/** Precise CCC part pattern; strips a glued qty digit (suffix must be exactly 3 digits). */
+/**
+ * A part number, recognized by SHAPE.
+ *
+ * This must never key on one producer's format. It did: the rule was
+ * `PT\d{8}[A-Z]`, the Rivian/CCC form carried by RO 22047 — the fixture the
+ * engine was tuned on. Every Tesla number (156954500F, 1073678S0B), every BMW
+ * number (63217420123, 51127420665) and every dash-grouped Mercedes number
+ * failed it, so on any other producer the engine's part-number pass found
+ * NOTHING and pairing collapsed onto description keys alone. On RO 22059 that
+ * pairs 17 of 139 rows where the text lane pairs 82.
+ *
+ * The shape has to stay narrow in the other direction too. "letters + digits"
+ * alone swallows description text: `Tape-3M`, `06347-Per` and the glued run
+ * `TrimMaskingTape-3M06347` all satisfy it, and consuming them as parts strips
+ * the operation out of the row (RO 22047 lost three USAA rows outright). Two
+ * properties separate a printed part number from prose, and both are shape:
+ * it carries no lower-case — producers print part numbers upper-case — and it
+ * is digit-dominant, a numeric core with at most a matching count of letters.
+ */
+export function looksLikePartNumber(token: string): boolean {
+  const value = token.replace(/[.,]$/, "");
+  if (value.length < 5) return false;
+  if (/^\$?[\d,]+\.\d{2}$/.test(value)) return false; // money, not a part
+  if (/[a-z]/.test(value)) return false; // prose; part numbers print upper-case
+  if (!/^[A-Z0-9.-]+$/.test(value)) return false;
+  const digits = (value.match(/\d/g) ?? []).length;
+  const letters = (value.match(/[A-Z]/g) ?? []).length;
+  if (letters > 0) {
+    // A numeric core the letters only qualify: 1562551E0A, 51127420665A,
+    // AB12-1234-AB, C25J75. Letters outnumbering digits is a word, not a
+    // number — that is what keeps `TRIMMASKINGTAPE-3M06347` out.
+    return digits >= 3 && digits >= letters;
+  }
+  // Pure-numeric part numbers run 6+ digits, optionally dash-grouped
+  // ("167-880-44-09"); aftermarket catalog numbers carry an interior dot.
+  if (/^\d{6,}$/.test(value)) return true;
+  if (/^\d{4}\.\d{4}$/.test(value)) return true;
+  return /^\d[\d-]{5,}\d$/.test(value) && value.replace(/-/g, "").length >= 6;
+}
+
+/** Part number in a token; strips a glued qty digit where the producer welds
+ * one on (the CCC "PT########X###" form). */
 export function extractPart(token: string): { part: string | null; trailing: string } {
   const repaired = repairTokens(token);
-  const match = /PT\d{8}[A-Z](\d{3})?/.exec(repaired);
-  if (!match) return { part: null, trailing: "" };
-  const part = match[1] ? match[0] : /PT\d{8}[A-Z]/.exec(match[0])![0];
-  return { part, trailing: repaired.slice(match.index + match[0].length) };
+  // Keep the CCC glued-qty behaviour exactly: "PT00015376B001" is the part
+  // PT00015376B plus a qty of 001, and splitting it wrong loses both.
+  const ccc = /PT\d{8}[A-Z](\d{3})?/.exec(repaired);
+  if (ccc) {
+    const part = ccc[1] ? ccc[0] : /PT\d{8}[A-Z]/.exec(ccc[0])![0];
+    return { part, trailing: repaired.slice(ccc.index + ccc[0].length) };
+  }
+  return looksLikePartNumber(repaired) ? { part: repaired, trailing: "" } : { part: null, trailing: "" };
 }
 
 /**
