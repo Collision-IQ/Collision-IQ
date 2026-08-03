@@ -769,6 +769,18 @@ async function runAsync(name, fn) {
 // block header. The render anchor gate read that header as page chrome
 // ("starts with 'estimate', no digits") and silently dropped the finding —
 // the report then under-reported the totals reconciliation by one category.
+//
+// The synthetic pair must ADD UP, or the C-2 reconciliation guard withdraws
+// every category-missing claim before the anchor gate is ever exercised and
+// this test measures nothing. It previously did not: the categories summed to
+// $900 against a $1,090 grand total, leaving $190 of the pair unexplained, so
+// the guard correctly refused to publish and the assertion failed for a reason
+// that had nothing to do with anchoring. Both sides now close —
+//   higher: 900 body + 90 parts = 990 subtotal = 990 grand
+//   lower:  810 body + 90 diagnostic + 70 parts = 970 subtotal = 970 grand
+//   Σ category deltas (+90 body, +20 parts, −90 diagnostic) = +20 = grand delta
+// and the $20 parts delta is the same $20 the HEPA filter line differs by, so
+// the line items and the totals block tell one story.
 async function diagnosticLaborFindingSurvivesRender() {
   const { PDFDocument, StandardFonts } = require("pdf-lib");
   const doc = await PDFDocument.create();
@@ -780,9 +792,10 @@ async function diagnosticLaborFindingSurvivesRender() {
     "3 Repl Filter HEPA filter 165837500B 1 90.00",
     "ESTIMATE TOTALS",
     "Body Labor 10.0 hrs @ $ 90.00 /hr 900.00",
+    "Parts 90.00",
     "Subtotal 990.00",
-    "Grand Total 1,090.00",
-    "Total Cost of Repairs 1,090.00",
+    "Grand Total 990.00",
+    "Total Cost of Repairs 990.00",
   ];
   rows.forEach((text, index) => {
     page.drawText(text, { x: 42, y: 700 - index * 24, size: 9, font });
@@ -795,9 +808,10 @@ async function diagnosticLaborFindingSurvivesRender() {
     "ESTIMATE TOTALS",
     "Body Labor 9.0 hrs @ $ 90.00 /hr 810.00",
     "Diagnostic Labor 1.0 hrs @ $ 90.00 /hr 90.00",
-    "Subtotal 900.00",
-    "Grand Total 980.00",
-    "Total Cost of Repairs 980.00",
+    "Parts 70.00",
+    "Subtotal 970.00",
+    "Grand Total 970.00",
+    "Total Cost of Repairs 970.00",
   ].join("\n");
   const result = await buildAnnotatedCitationDensityEstimatePdf({
     sourcePdfBytes: new Uint8Array(sourceBytes),
@@ -813,6 +827,14 @@ async function diagnosticLaborFindingSurvivesRender() {
     request: { estimateRole: "shop" },
   });
   const metadataText = JSON.stringify(result.annotationMetadata ?? []);
+  // Guard the PRECONDITION first: if the fixture stops reconciling, the C-2
+  // guard withdraws the category claims and this test silently stops testing
+  // the anchor gate. Fail on the cause, not on the symptom.
+  assert.doesNotMatch(
+    metadataText,
+    /reconciliation-gap/i,
+    "synthetic totals must reconcile, or the category claims are withdrawn before the anchor gate runs"
+  );
   assert.match(
     metadataText,
     /category-only-on-lower-diagnostic-labor/i,
