@@ -1006,6 +1006,7 @@ const LABEL_DEFINITIONS: Record<string, string> = {
   "NEEDS ADAS": "Needs ADAS/calibration procedure support tied to this row.",
   "NEEDS P-PAGE": "Needs CCC/MOTOR P-page or estimating-database support for the allowance.",
   "NEEDS INVOICE": "Needs a supplier/sublet invoice or completion proof for the price.",
+  "PART SOURCE": "The estimates specify different part sources (aftermarket, recycled/LKQ, reconditioned, sectioned, or new OEM) for the same part — a procurement dispute, and the price difference follows from it.",
   "REFERENCED / NOT PRODUCED": "A document the estimate references was not produced into this review.",
   "ESTIMATE GAP ONLY": "The two estimates differ here — the difference itself is the evidence; no external authority is attached yet.",
   "ONLINE FALLBACK": "Support came from a public online source, not a licensed database.",
@@ -3143,6 +3144,30 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
       score: 48,
       safetyImpact: "low",
       priority: "medium",
+    };
+  }
+  if (delta.kind === "part_source_difference") {
+    const higherSource = (delta.higherRow.partSource ?? []).join(" ") || "new OEM";
+    const lowerSource = (delta.lowerRow?.partSource ?? []).join(" ") || "new OEM";
+    return {
+      findingType: "delta-part-source",
+      title: `Different part source (${higherSource} vs ${lowerSource}): ${label}`,
+      label: "PART SOURCE",
+      category: "parts_downgrade",
+      estimateGapType: "present_but_under_documented",
+      missingProof:
+        `The two estimates specify different part sources for this line — ${higherSource} here, ${lowerSource} on the lower-cost estimate. ` +
+        "This is a parts-procurement dispute, not a pricing dispute: the price difference follows from the source. Document availability, the supplier quote, and whether the alternate part is permitted by the repair procedure and the vehicle owner.",
+      nextAction:
+        "Resolve the part source before the price: obtain the supplier quote for the alternate part, confirm availability and condition, and check the OEM position statement and any state statute governing non-OEM parts for this vehicle.",
+      missingAuthorityTypes: [
+        "supplier quote for the alternate part",
+        "OEM position statement on non-OEM parts",
+        "part-type authorization",
+      ],
+      score: 72,
+      safetyImpact: "medium",
+      priority: "high",
     };
   }
   if (delta.kind === "part_or_price_difference") {

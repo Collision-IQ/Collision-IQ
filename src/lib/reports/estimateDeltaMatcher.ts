@@ -52,6 +52,10 @@ export interface EstimateDeltaRow {
    * means the default body-labor category.
    */
   laborType?: string | null;
+  /** Part provenance as a TYPED field (A/M, LKQ, RCY, Recond, Sect, Opt OEM,
+   * CAPA, NSF, NAGS…). Empty means the row claims a new OEM part — CCC prints
+   * no prefix for one, so the absence is itself a claim. */
+  partSource?: string[];
   rawText: string;
   /** Opaque identifier carried through from a source PDF row anchor. */
   anchorId?: string;
@@ -64,7 +68,54 @@ export type EstimateDeltaKind =
   | "operation_change"
   | "reduced_labor"
   | "reduced_paint"
+  | "part_source_difference"
   | "part_or_price_difference";
+
+/**
+ * PART SOURCE IS A TYPED FIELD ON THE ROW, NOT DESCRIPTION TEXT.
+ *
+ * CCC prints the part's provenance as a prefix in the description column and
+ * prints NOTHING for a new OEM part. Treating those prefixes as ordinary words
+ * hid the two central disputes on RO 22182: GEICO wrote a recycled sectioned
+ * quarter panel ("* Sect LKQ RT quarter panel + 25%", $761.50 quoted from LKQ
+ * Venice) against the shop's new OEM panel at $1,139.55, and the report called
+ * it "Priced differently" with a $187.67 delta and no mention of LKQ, Sect,
+ * recycled, or the 25% markup. GEICO's aftermarket bumper cover ("** < > Repl
+ * A/M Bumper cover") against the shop's OEM cover was typed `reduced_paint`.
+ *
+ * The token list is the estimating platforms' own vocabulary, matched on word
+ * boundaries so a description word can never become a source.
+ */
+const PART_SOURCE_TOKENS: ReadonlyArray<[RegExp, string]> = [
+  [/\bopt(?:ional)?\s+oem\b/i, "Opt OEM"],
+  [/\balt(?:ernate)?\s+oem\b/i, "Alt OEM"],
+  [/\ba\s*\/\s*m\b/i, "A/M"],
+  [/\baftermarket\b/i, "A/M"],
+  [/\blkq\b/i, "LKQ"],
+  [/\brcy\b/i, "RCY"],
+  [/\brecycled\b/i, "Recycled"],
+  [/\bused\b/i, "Used"],
+  [/\brecond(?:itioned)?\b/i, "Recond"],
+  [/\brecore(?:d)?\b/i, "Recore"],
+  [/\breman(?:ufactured)?\b/i, "Reman"],
+  [/\bcapa\b/i, "CAPA"],
+  [/\bnsf\b/i, "NSF"],
+  [/\bnags\b/i, "NAGS"],
+  [/\bsect\b/i, "Sect"],
+  [/\beconomy\b/i, "Economy"],
+];
+
+/** CCC prints no prefix for a new OEM part, so an empty set IS a claim. */
+export const NEW_OEM_PART_SOURCE = "new OEM";
+
+export function extractPartSource(rowText: string): string[] {
+  const text = ` ${(rowText ?? "").replace(/\s+/g, " ")} `;
+  const found: string[] = [];
+  for (const [pattern, label] of PART_SOURCE_TOKENS) {
+    if (pattern.test(text) && !found.includes(label)) found.push(label);
+  }
+  return found;
+}
 
 /**
  * Status labels for an OCR-driven confidence downgrade. When the lower estimate
@@ -1123,6 +1174,7 @@ export function parseCccEstimateRow(
     paint: columns.paint,
     paintIncluded: columns.paintIncluded,
     laborType: columns.laborType,
+    partSource: extractPartSource(text),
     rawText: text,
     anchorId: context?.anchorId,
     pageNumber: context?.pageNumber ?? null,
@@ -2093,7 +2145,26 @@ export function matchEstimateLineItems(params: {
     const paintDelta = numericDelta(higherRow.paint, lowerRow.paint);
     const priceDelta = numericDelta(higherRow.price, lowerRow.price);
 
-    if (laborDelta !== null && laborDelta >= MATERIAL_LABOR_DELTA) {
+    // PART SOURCE FIRST. When the two estimates disagree on where the part
+    // comes from, that disagreement IS the finding and the price gap is its
+    // consequence: a recycled sectioned panel and a new OEM panel are not the
+    // same part priced differently. Reported ahead of labor/paint/price so the
+    // reader sees "LKQ recycled vs new OEM", not "priced differently".
+    const partSourceGap = partSourceDisagreement(higherRow, lowerRow);
+    if (partSourceGap) {
+      deltas.push({
+        kind: "part_source_difference",
+        lowerRow,
+        higherRow,
+        matchBasis: basis,
+        laborDelta,
+        paintDelta,
+        priceDelta,
+        summary: buildPartSourceSummary(higherRow, lowerRow, partSourceGap, priceDelta),
+        changedFields: ["part_source"],
+        annotate: true,
+      });
+    } else if (laborDelta !== null && laborDelta >= MATERIAL_LABOR_DELTA) {
       deltas.push({
         kind: "reduced_labor",
         lowerRow,
@@ -2894,6 +2965,41 @@ export function compareEstimateTotals(params: {
 }
 
 /** Fields that differ between two matched rows (operation code / part number). */
+/**
+ * The two estimates disagree on part provenance. Only meaningful on a PRICED
+ * part row where at least one side names a non-OEM source: two rows that both
+ * print no prefix are both claiming a new OEM part and agree.
+ */
+function partSourceDisagreement(
+  higher: EstimateDeltaRow,
+  lower: EstimateDeltaRow
+): { higher: string; lower: string } | null {
+  const higherSource = higher.partSource ?? [];
+  const lowerSource = lower.partSource ?? [];
+  if (higherSource.length === 0 && lowerSource.length === 0) return null;
+  const priced = (row: EstimateDeltaRow) => row.price !== null && row.price > 0;
+  if (!priced(higher) || !priced(lower)) return null;
+  const describe = (source: string[]) => (source.length ? source.join(" ") : NEW_OEM_PART_SOURCE);
+  const higherLabel = describe(higherSource);
+  const lowerLabel = describe(lowerSource);
+  return higherLabel === lowerLabel ? null : { higher: higherLabel, lower: lowerLabel };
+}
+
+function buildPartSourceSummary(
+  higherRow: EstimateDeltaRow,
+  lowerRow: EstimateDeltaRow,
+  gap: { higher: string; lower: string },
+  priceDelta: number | null
+): string {
+  const priceFragment =
+    higherRow.price !== null && lowerRow.price !== null
+      ? ` — $${higherRow.price.toFixed(2)} vs $${lowerRow.price.toFixed(2)}${
+          priceDelta !== null && priceDelta !== 0 ? ` (a $${Math.abs(priceDelta).toFixed(2)} difference)` : ""
+        }`
+      : "";
+  return `"${describeRow(higherRow)}": the estimates specify DIFFERENT PART SOURCES — this estimate calls for ${gap.higher}, the comparison estimate for ${gap.lower}${priceFragment}. The price difference follows from the part source, so resolve the source first: confirm availability, quoted price, and whether the vehicle owner and the repair procedure permit the alternate part.`;
+}
+
 function matchedFieldChanges(
   higher: EstimateDeltaRow,
   lower: EstimateDeltaRow,

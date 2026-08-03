@@ -515,5 +515,49 @@ run("S-1: per-row hours are bounded by the document's own SUBTOTALS rule", () =>
   assert.equal(legitimate.paint, 0.5);
 });
 
+run("M-2: part source is a typed field, and a disagreement is its own finding", () => {
+  const { extractPartSource } = require("./estimateDeltaMatcher.ts");
+  assert.deepEqual(extractPartSource("8 * Sect LKQ RT quarter panel + 25% 445539221 1 951.88"), [
+    "LKQ",
+    "Sect",
+  ]);
+  assert.deepEqual(
+    extractPartSource("20 ** Repl A/M Bumper cover unpainted 3206028 1 425.00"),
+    ["A/M"]
+  );
+  assert.deepEqual(extractPartSource("85 Repl RT Quarter panel 1073678S0B 1 1,139.55"), []);
+
+  // RO 22182's first central dispute: GEICO wrote a RECYCLED, SECTIONED
+  // quarter panel (quoted $761.50 from LKQ Venice, +25% markup) against the
+  // shop's new OEM panel. The report called it "Priced differently" with a
+  // $187.67 delta and never said LKQ, Sect, or recycled.
+  const quarter = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("8 * Sect LKQ RT quarter panel + 25% 445539221 1 951.88 24.5 4.5"),
+    higherRows: parseCccEstimateRows("85 Repl RT Quarter panel 1073678S0B 1 1,139.55 23.5 2 4.2"),
+  });
+  assert.equal(quarter.deltas.length, 1, JSON.stringify(quarter.deltas.map((d) => d.summary)));
+  assert.equal(quarter.deltas[0].kind, "part_source_difference");
+  assert.match(quarter.deltas[0].summary, /LKQ/);
+  assert.match(quarter.deltas[0].summary, /Sect/);
+  assert.match(quarter.deltas[0].summary, /new OEM/);
+
+  // The second: an AFTERMARKET bumper cover against the shop's OEM cover,
+  // previously typed `reduced_paint` with "A/M" unremarked.
+  const bumper = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("20 ** Repl A/M Bumper cover unpainted w/o park brackets 3206028 1 425.00 2.0 1.0"),
+    higherRows: parseCccEstimateRows("166 Repl Bumper cover unpainted w/o park brackets 1916698S0A 1 791.01 2.0 2.5"),
+  });
+  assert.equal(bumper.deltas.length, 1, JSON.stringify(bumper.deltas.map((d) => d.summary)));
+  assert.equal(bumper.deltas[0].kind, "part_source_difference");
+  assert.match(bumper.deltas[0].summary, /A\/M/);
+
+  // Two rows that both print no prefix are both claiming new OEM and agree.
+  const agree = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows("20 Repl Bumper cover 3206028 1 425.00 2.0 1.0"),
+    higherRows: parseCccEstimateRows("166 Repl Bumper cover 3206028 1 425.00 2.0 1.0"),
+  });
+  assert.equal(agree.deltas.length, 0, JSON.stringify(agree.deltas.map((d) => d.summary)));
+});
+
 console.log(`\nestimateDeltaMatcher: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
