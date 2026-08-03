@@ -105,6 +105,49 @@ const PART_SOURCE_TOKENS: ReadonlyArray<[RegExp, string]> = [
   [/\beconomy\b/i, "Economy"],
 ];
 
+/**
+ * The vehicle's PAINT SYSTEM, declared in the estimate's vehicle-options block
+ * and billed through its own "Add for …" line operations.
+ *
+ * It is a property of the VEHICLE, so the two estimates must agree. On RO
+ * 22182 they do not: the shop declares THREE STAGE PAINT and bills Add for
+ * Three Stage four times (0.8 + 2.9 + 0.2 + 2.0 = 5.8 hr), while GEICO
+ * declares CLEARCOAT PAINT and bills Add for Clear Coat twice (1.8 + 0.5 =
+ * 2.3 hr). That single disagreement drives much of the 19.5-hour paint gap,
+ * and neither the option blocks nor the line operations were ever connected.
+ *
+ * Ordered most to least coats: a three-stage finish also uses clearcoat, so
+ * the highest declared system is the vehicle's system.
+ */
+// No leading word boundary: CCC prints the vehicle-options block as one glued
+// run ("CRUISE CONTROLHANDS FREE DEVICECLEARCOAT PAINTBACKUP CAMERA"), so the
+// system name has no boundary in front of it.
+const PAINT_SYSTEMS: ReadonlyArray<[RegExp, string]> = [
+  [/four[\s-]*stage\b|quad[\s-]*coat\b/i, "FOUR STAGE"],
+  [/three[\s-]*stage\b|tri[\s-]*coat\b/i, "THREE STAGE"],
+  [/two[\s-]*stage\b|clear[\s-]*coat\b/i, "CLEARCOAT"],
+  [/single[\s-]*stage\b/i, "SINGLE STAGE"],
+];
+
+export function detectPaintSystem(text: string): string | null {
+  const haystack = (text ?? "").replace(/\s+/g, " ");
+  for (const [pattern, label] of PAINT_SYSTEMS) if (pattern.test(haystack)) return label;
+  return null;
+}
+
+/** Total hours a document bills through its paint-system "Add for" lines. */
+export function paintSystemAddHours(rows: EstimateDeltaRow[]): number {
+  let total = 0;
+  for (const row of rows) {
+    // Read the RAW row: "Add" is a CCC operation code, so the parsed
+    // description of "39 Add for Three Stage 0.8" is only "for Three Stage".
+    if (!/add\s+for\b/i.test(row.rawText)) continue;
+    if (!detectPaintSystem(row.rawText)) continue;
+    total += row.paint ?? row.labor ?? 0;
+  }
+  return Math.round(total * 10) / 10;
+}
+
 /** CCC prints no prefix for a new OEM part, so an empty set IS a claim. */
 export const NEW_OEM_PART_SOURCE = "new OEM";
 

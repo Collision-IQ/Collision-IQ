@@ -58,6 +58,8 @@ import {
 import {
   compareEstimateTotals,
   deltaRowFromRawText,
+  detectPaintSystem,
+  paintSystemAddHours,
   groupWrappedEstimateLines,
   isSectionHeader,
   laborTypeNoun,
@@ -1019,6 +1021,7 @@ const LABEL_DEFINITIONS: Record<string, string> = {
   "INTAKE": "The comparison document could not be read completely — this pack reports what was read and what to re-supply; no line-level delta verdict is rendered.",
   "LOWER-ONLY LINES": "Lines present only on the lower-cost estimate (omitted scope, wording variants, or duplicate candidates).",
   "CARRIER MISMATCH": "A line note names a carrier that is not this file's insurer — a document-attribution defect.",
+  "PAINT SYSTEM": "The two estimates declare different paint systems for the same vehicle — one disagreement that propagates into every refinish line, resolved by the vehicle's paint code rather than line by line.",
   "CARRIER HIGHER": "On this matched line the LOWER-cost estimate allows more — the cost gap runs in the other direction.",
   "CODING DIFFERENCE": "Same hours and amounts on both estimates; only the operation label differs — likely coding, not scope.",
 };
@@ -3234,6 +3237,17 @@ type StructuredLineItemDeltaMatch = {
     line: number;
     anchorId?: string;
   }>;
+  /** M-3: the two estimates declare different paint systems for the same
+   * vehicle. Carries the line evidence — the "Add for …" hours each side
+   * bills — so the option-block disagreement and the paint-hour gap are one
+   * connected finding instead of two unrelated ones. */
+  paintSystemMismatch: {
+    subject: string;
+    comparison: string;
+    subjectAddHours: number;
+    comparisonAddHours: number;
+    anchorId?: string;
+  } | null;
   /** Residual lower lines that duplicate an already-matched lower line (possible duplicate billing). */
   potentialDuplicateLowerRows: EstimateDeltaRow[];
   /** Arbitrary materials cap on the lower estimate (flat figure, no hrs@rate basis), with jurisdiction citation. */
@@ -3706,6 +3720,26 @@ function matchStructuredLineItemDeltas(
     state: detectRepairFacilityState(context.sourceText, lowerCategoryText),
   });
 
+  // M-3: the paint system is a property of the VEHICLE, so the two estimates
+  // must agree on it. When they do not, the option-block disagreement and the
+  // "Add for …" line hours are ONE finding — the shop's THREE STAGE PAINT and
+  // GEICO's CLEARCOAT PAINT on RO 22182 drove much of a 19.5-hour paint gap
+  // that the report reported as unrelated line differences.
+  const subjectPaintSystem = detectPaintSystem(context.sourceText ?? "");
+  const comparisonPaintSystem = detectPaintSystem(lowerCategoryText);
+  const paintSystemMismatch =
+    subjectPaintSystem && comparisonPaintSystem && subjectPaintSystem !== comparisonPaintSystem
+      ? {
+          subject: subjectPaintSystem,
+          comparison: comparisonPaintSystem,
+          subjectAddHours: paintSystemAddHours(dedupedHigherRows),
+          comparisonAddHours: paintSystemAddHours(lowerRows),
+          anchorId: dedupedHigherRows.find(
+            (row) => /add\s+for\b/i.test(row.rawText) && detectPaintSystem(row.rawText)
+          )?.anchorId,
+        }
+      : null;
+
   return {
     orderedDeltas,
     anchorById,
@@ -3718,6 +3752,7 @@ function matchStructuredLineItemDeltas(
     lowerOnlyRows: match.lowerOnlyRows,
     lowerTotalsSummary: lowerTotals,
     carrierMismatchNotes,
+    paintSystemMismatch,
     potentialDuplicateLowerRows: match.potentialDuplicateLowerRows,
     pmCapFlag,
     comparisonExtraction: assessComparisonExtraction(lowerRows),
@@ -3999,6 +4034,44 @@ function emitTotalsDeltaFindings(
             : null,
       })
     );
+  }
+
+  // Paint-system mismatch (M-3): ONE connected finding. The vehicle has one
+  // paint system; the two estimates named different ones and then billed
+  // different "Add for …" operations against them. Reported together, anchored
+  // to the subject's own add-for row, so the reader sees the cause of the
+  // paint-hour gap rather than a scatter of unexplained line differences.
+  const paintMismatch = deltaMatch.paintSystemMismatch;
+  if (paintMismatch) {
+    const anchor = paintMismatch.anchorId ? deltaMatch.anchorById.get(paintMismatch.anchorId) : undefined;
+    const hourGap = Math.round((paintMismatch.subjectAddHours - paintMismatch.comparisonAddHours) * 10) / 10;
+    if (anchor && !usedAnchorIds.has(anchor.anchorId)) {
+      usedAnchorIds.add(anchor.anchorId);
+      findings.push(
+        buildRequiredDetectorFinding({
+          context,
+          anchor,
+          findingType: "delta-paint-system-mismatch",
+          title: `Paint system disagreement: ${paintMismatch.subject} here vs ${paintMismatch.comparison} on ${deltaMatch.comparisonName}`,
+          category: "refinish",
+          label: "PAINT SYSTEM",
+          estimateGapType: "reduced_by_carrier",
+          score: 78,
+          safetyImpact: "low",
+          priority: "high",
+          currentSupportSummary: `The vehicle-options block on this estimate declares ${paintMismatch.subject} PAINT and bills ${paintMismatch.subjectAddHours.toFixed(1)} hours of "Add for" operations against it. ${deltaMatch.comparisonName} declares ${paintMismatch.comparison} PAINT and bills ${paintMismatch.comparisonAddHours.toFixed(1)} hours${hourGap !== 0 ? ` — a ${Math.abs(hourGap).toFixed(1)}-hour difference from this one disagreement` : ""}.`,
+          missingProofSummary:
+            "A vehicle has ONE paint system, so these two estimates cannot both be right. This single disagreement propagates into every refinish line on the vehicle, and the individual paint-hour differences downstream are its consequence rather than separate disputes. It is resolved by the vehicle's paint code, not by negotiating the lines.",
+          recommendedNextAction: `Confirm the factory paint system from the vehicle's paint code / OEM build data, then correct whichever estimate names the wrong one and reprice the refinish lines from the corrected system.`,
+          missingAuthorityTypes: [
+            "vehicle paint code / OEM build data",
+            "CCC/MOTOR refinish basis for the confirmed paint system",
+          ],
+          amountImpact: null,
+          laborHoursImpact: hourGap !== 0 ? hourGap : null,
+        })
+      );
+    }
   }
 
   // Carrier-attribution defects (O-1): a note naming a foreign carrier is a

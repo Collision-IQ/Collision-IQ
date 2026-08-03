@@ -559,5 +559,37 @@ run("M-2: part source is a typed field, and a disagreement is its own finding", 
   assert.equal(agree.deltas.length, 0, JSON.stringify(agree.deltas.map((d) => d.summary)));
 });
 
+run("M-3: the vehicle's paint system is read from both option blocks and both add-for lines", () => {
+  const { detectPaintSystem, paintSystemAddHours } = require("./estimateDeltaMatcher.ts");
+  // CCC prints the options block as one glued run, so the system name has no
+  // word boundary in front of it.
+  assert.equal(
+    detectPaintSystem("CRUISE CONTROLHANDS FREE DEVICETHREE STAGE PAINTBACKUP CAMERA"),
+    "THREE STAGE"
+  );
+  assert.equal(
+    detectPaintSystem("CRUISE CONTROLHANDS FREE DEVICECLEARCOAT PAINTBACKUP CAMERA"),
+    "CLEARCOAT"
+  );
+  // A three-stage finish also uses clearcoat, so the highest system wins.
+  assert.equal(detectPaintSystem("THREE STAGE PAINT ... Add for Clear Coat"), "THREE STAGE");
+  assert.equal(detectPaintSystem("REAR DEFOGGERBACKUP CAMERA"), null);
+
+  // "Add" is a CCC operation code, so the hours must be read from the raw row.
+  const shopRows = parseCccEstimateRows(
+    ["39Add for Three Stage 0.8", "86Add for Three Stage 2.9", "167Add for Three Stage 2.0"].join("\n")
+  );
+  assert.equal(paintSystemAddHours(shopRows), 5.7);
+  const carrierRows = parseCccEstimateRows(
+    ["9Add for Clear Coat 1.8", "22Add for Clear Coat 0.5"].join("\n")
+  );
+  assert.equal(paintSystemAddHours(carrierRows), 2.3);
+  // A tint/let-down line names the system but is not an add-for operation.
+  assert.equal(
+    paintSystemAddHours(parseCccEstimateRows("195 # Tint color > Three stage let down panel 1 1.0")),
+    0
+  );
+});
+
 console.log(`\nestimateDeltaMatcher: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
