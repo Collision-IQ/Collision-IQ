@@ -1996,24 +1996,16 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
             }));
           }
         }
-        // C-5: ONE resolved carrier identity per run — the annotator consumes
-        // the same resolution every other renderer uses, never a token
-        // re-derived from raw text ("FOR" on every callout was an extraction
-        // fragment, not a carrier).
-        const resolvedComparisonCarrier =
-          (comparisonWordSet?.estimateRole ?? comparisonText?.estimateRole) === "shop"
-            ? undefined
-            : detectDominantKnownCarrier(
-                `${comparisonText?.text ?? ""}\n${params.sourceText ?? ""}`
-              );
-        const competingLabel = deriveCompetingDocLabel(
-          {
-            fileName: comparisonWordSet?.fileName ?? comparisonText?.fileName ?? "",
-            text: comparisonText?.text ?? "",
-            estimateRole: comparisonWordSet?.estimateRole ?? comparisonText?.estimateRole,
-          },
-          resolvedComparisonCarrier
-        );
+        // S-2: ONE resolved identity per run, from DOCUMENT EVIDENCE — never
+        // the role classifier, and never a role word. A misclassified
+        // Estimate of Record previously printed "MISSED on SHOP" on every
+        // callout, naming the shop as the party that omitted the shop's own
+        // operations.
+        const competingLabel = resolveComparisonDocumentIdentity({
+          comparisonText: comparisonText?.text ?? "",
+          comparisonFileName: comparisonWordSet?.fileName ?? comparisonText?.fileName ?? "",
+          sourceText: params.sourceText ?? "",
+        });
         // C-10: the value-mark layer honors the same completion gate as the
         // findings lane — no delta verdict marks over a mostly-unread
         // comparison document.
@@ -2025,7 +2017,16 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
             `Comparison estimate extraction coverage ${Math.round(valueLayerExtraction.coverage * 100)}% is below the confidence threshold — delta value marks suppressed (intake mode).`
           );
         }
-        if (competingRows.length > 0 && !valueLayerExtraction.gate) {
+        if (competingLabel === null) {
+          // Fail loud, print nothing. Every callout in this layer names the
+          // comparison document; with no resolved identity there is no honest
+          // way to word one, and a role-word fallback is what shipped the
+          // "MISSED on SHOP" defect.
+          warnings.push(
+            "Comparison document identity did not resolve to an organization name — delta value marks suppressed rather than labelled with a role word."
+          );
+        }
+        if (competingLabel !== null && competingRows.length > 0 && !valueLayerExtraction.gate) {
           const plan = planDeltaValueAnnotations({
             subjectWords: placementWords,
             pages: [...pageGeometries.values()],
@@ -7365,31 +7366,66 @@ function drawFindingAnnotation(
   return { written: true as const, metadata };
 }
 
+/** Role words a document can be CALLED. None of them is an identity, so none
+ * may ever reach a callout: "MISSED on SHOP" tells the reader nothing, and on
+ * a shop-sourced report it names the wrong side of the dispute entirely. */
+const ROLE_TOKEN = /^(?:SHOP|EOR|CARRIER|INSURER|ESTIMATE|COMPARISON|OTHER|SOR|SUPPLEMENT)$/i;
+
+/** Repair-facility letterhead shape — a shop, dealer, or body-shop network. */
+const REPAIR_FACILITY_SHAPE =
+  /\b(?:collision|auto\s*body|body\s*shop|automotive|autobody|coachwork|car\s*star|service\s*cent(?:er|re))\b/i;
+
 /**
- * Short label for the competing document, derived from document data only
- * (file name prefix, then the insurer named in the header, then the role).
- * Never hardcode a carrier here — this must stay fluid to any document pair.
+ * ONE resolved identity for the comparison document, computed from DOCUMENT
+ * EVIDENCE and consumed by every renderer (S-2).
+ *
+ * The resolution deliberately does NOT consult the role classifier. RO 22182
+ * shipped 162 callouts reading "MISSED on SHOP" because a GEICO Estimate of
+ * Record was classified `shop`, which both suppressed the carrier scan and
+ * selected the role word as the printed label — the report then named the
+ * shop as the party that omitted the shop's own operations.
+ *
+ * Evidence order:
+ *  1. a known carrier named in the COMPARISON document's own text;
+ *  2. the carrier named on the SOURCE document (a shop estimate carries the
+ *     carrier it bills) — only when the comparison is not itself a repair
+ *     facility, so a shop-vs-shop pair can never inherit a carrier name;
+ *  3. the comparison document's own organization name from its letterhead.
+ *
+ * Returns null when nothing resolves. A null label is a resolution FAILURE,
+ * not a cue to print a fallback: the caller suppresses the layer and says so.
  */
-function deriveCompetingDocLabel(
-  comparison: ComparisonEstimateText,
-  resolvedCarrier?: string
-): string {
-  // C-5 invariant: one resolved carrier identity per run, consumed by every
-  // renderer. A label that is not a RECOGNIZED organization name is a
-  // resolution failure — fall back to the neutral role label, never print a
-  // raw token in front of an adjuster.
-  if (resolvedCarrier) return resolvedCarrier.toUpperCase();
-  const validateLabel = (candidate: string | undefined): string | undefined => {
-    const trimmed = candidate?.trim();
-    if (!trimmed) return undefined;
-    if (carriersNamedIn(trimmed).length > 0) return trimmed;
-    return undefined;
+export function resolveComparisonDocumentIdentity(params: {
+  comparisonText: string;
+  comparisonFileName?: string;
+  sourceText: string;
+}): string | null {
+  const comparisonText = params.comparisonText ?? "";
+  const letterhead = comparisonText.split(/\r?\n/).slice(0, 20).join("\n");
+  const accept = (candidate: string | null | undefined): string | null => {
+    const trimmed = candidate?.replace(/\s+/g, " ").trim();
+    if (!trimmed || ROLE_TOKEN.test(trimmed)) return null;
+    return trimmed.toUpperCase().slice(0, 32);
   };
-  const fromFileName = validateLabel(/^([A-Z]{2,8})(?=[\s_\-.])/.exec(comparison.fileName?.trim() ?? "")?.[1]);
-  if (fromFileName) return fromFileName;
-  const insurer = validateLabel(/insurance company\s*:?\s*([A-Z][A-Za-z&.]{1,24})/i.exec(comparison.text)?.[1]);
-  if (insurer) return insurer.toUpperCase();
-  return comparison.estimateRole === "shop" ? "SHOP" : "EOR";
+
+  const namedOnComparison =
+    detectDominantKnownCarrier(comparisonText) ?? carriersNamedIn(letterhead)[0];
+  if (namedOnComparison) return accept(namedOnComparison);
+
+  if (!REPAIR_FACILITY_SHAPE.test(letterhead)) {
+    const namedOnSource =
+      detectDominantKnownCarrier(params.sourceText ?? "") ??
+      carriersNamedIn(params.sourceText ?? "")[0];
+    if (namedOnSource) return accept(namedOnSource);
+  }
+
+  const facility = letterhead
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length >= 4 && line.length <= 48 && REPAIR_FACILITY_SHAPE.test(line));
+  if (facility) return accept(facility.replace(/\.(?:com|net|org)\b.*$/i, ""));
+
+  return null;
 }
 
 function drawCompactMarker(
