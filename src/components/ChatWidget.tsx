@@ -1679,21 +1679,17 @@ export default function ChatWidget({
   }, [disabled]);
   /* eslint-enable react-hooks/exhaustive-deps */
 
-  useEffect(() => {
-    if (attachments.length < 2) return;
-
-    setMessages((prev) => {
-      const feedback =
-        "You’ve uploaded multiple files. I’ll focus on the most relevant ones to keep performance fast.";
-
-      if (prev[prev.length - 1]?.role === "assistant" && prev[prev.length - 1]?.content === feedback) {
-        return prev;
-      }
-
-      messageCounterRef.current += 1;
-      return [...prev, createMessage(messageCounterRef.current, "assistant", feedback)];
-    });
-  }, [attachments.length]);
+  // P0-7: no truncation warning where nothing is truncated.
+  //
+  // This fired on EVERY upload of two or more files, telling the user "I'll
+  // focus on the most relevant ones" — which reads as a warning that content
+  // was dropped. On the RO 22185 two-file upload nothing was dropped, and the
+  // message was simply false.
+  //
+  // Actual omission is already reported, from the ledger, by
+  // buildChatAttachmentOmissionNotice: it names each omitted file and its
+  // reason, and it fires only when the budget really left something out. One
+  // mechanism, driven by what happened.
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -4138,19 +4134,33 @@ export default function ChatWidget({
           console.error(error);
           updateUploadLifecyclePhase(getUploadLifecycleId(file), "failed");
           clearQueuedReviewPrompt();
-          // Name the file that failed and only talk about ZIPs when the
-          // failed file IS a ZIP — a failed photo or PDF getting ZIP-plan
-          // advice reads as a bug in itself.
-          pushAssistantMessage(
-            /\.zip$/i.test(file.name)
-              ? "The ZIP upload did not finish, so I did not start the review. Please retry the ZIP upload or upload the key estimates directly."
-              : `The upload of ${file.name} did not finish, so I did not include it in this review. Please retry that file.`
-          );
+          // P0-7: record the failure, but do NOT announce it yet. A throw here
+          // does not prove the file is absent from the review — the attachment
+          // may already have landed before a later step failed. RO 22185 told
+          // the user "The upload of EOR 22185.pdf did not finish, so I did not
+          // include it in this review" and then reviewed it, which costs the
+          // reader's trust in everything that follows.
           uploadFailures.push({
             filename: file.name,
             reason: error instanceof Error ? error.message : "Upload failed.",
           });
         }
+      }
+      // Announce only what the ledger actually confirms is missing: a file is
+      // reported failed when it did not land under any name.
+      const landedNames = new Set(uploadedDisplayNames.map((name) => name.toLowerCase()));
+      const genuinelyMissing = uploadFailures.filter(
+        (failure) => failure.filename && !landedNames.has(failure.filename.toLowerCase())
+      );
+      for (const failure of genuinelyMissing) {
+        const failedName = failure.filename ?? "the file";
+        // Only talk about ZIPs when the failed file IS a ZIP — a failed photo
+        // or PDF getting ZIP-plan advice reads as a bug in itself.
+        pushAssistantMessage(
+          /\.zip$/i.test(failedName)
+            ? "The ZIP upload did not finish, so I did not start the review. Please retry the ZIP upload or upload the key estimates directly."
+            : `The upload of ${failedName} did not finish, so I did not include it in this review. Please retry that file.`
+        );
       }
       if (uploadedDisplayNames.length) {
         setSelectedUploadNames(uploadedDisplayNames);
