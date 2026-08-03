@@ -3227,6 +3227,10 @@ type StructuredLineItemDeltaMatch = {
   lowerOnlyRows: EstimateDeltaRow[];
   /** Parsed lower ESTIMATE TOTALS block (rates for valuing lower-only labor). */
   lowerTotalsSummary: ReturnType<typeof parseCccEstimateTotals>;
+  /** This estimate's own ESTIMATE TOTALS block. Its declared rates are what a
+   * labor-only line is WORTH — without them a 1.0-hour scan carries no dollar
+   * figure and cannot be ranked against a $4,063.50 category (M-4). */
+  higherTotalsSummary: ReturnType<typeof parseCccEstimateTotals>;
   /** Line notes naming a known carrier that is NOT the file's dominant
    * carrier — a carrier-attribution defect on the document, reported as a
    * finding rather than adopted as the insurer. */
@@ -3753,6 +3757,7 @@ function matchStructuredLineItemDeltas(
     totalsAnchors,
     lowerOnlyRows: match.lowerOnlyRows,
     lowerTotalsSummary: lowerTotals,
+    higherTotalsSummary: higherTotals,
     carrierMismatchNotes,
     paintSystemMismatch,
     potentialDuplicateLowerRows: match.potentialDuplicateLowerRows,
@@ -3772,8 +3777,44 @@ function emitStructuredLineItemDeltaFindings(
   const emittedSlugs = new Set<string>();
   const MAX_DELTA_FINDINGS = 60;
 
+  // What a line is WORTH, from this estimate's own declared rates. A scan
+  // billed as 1.0 hour with no parts price carried no dollar figure at all,
+  // so the magnitude ceiling could not rank it and an $87.50 DTC-research
+  // line outscored a $4,063.50 missing category (M-4).
+  const subjectRates = (() => {
+    const rates = new Map<string, number>();
+    for (const category of deltaMatch.higherTotalsSummary?.categories ?? []) {
+      if (category.rate !== null) rates.set(normalizeTotalsCategoryKey(category.category), category.rate);
+    }
+    return rates;
+  })();
+  const subjectRowValue = (row: EstimateDeltaRow): number | null => {
+    if (row.price !== null && row.price > 0) return row.price;
+    // Category keys normalize with the noise suffix stripped ("Mechanical
+    // Labor" -> MECHANICAL), so both spellings are looked up.
+    const rateFor = (...keys: string[]) => {
+      for (const key of keys) {
+        const rate = subjectRates.get(key);
+        if (rate !== undefined) return rate;
+      }
+      return 0;
+    };
+    const bodyRate =
+      row.laborType === "M"
+        ? rateFor("MECHANICAL", "MECHANICALLABOR", "BODY", "BODYLABOR")
+        : rateFor("BODY", "BODYLABOR");
+    const paintRate = rateFor("PAINT", "PAINTLABOR") || bodyRate;
+    const value = (row.labor ?? 0) * bodyRate + (row.paint ?? 0) * paintRate;
+    return value > 0 ? Math.round(value * 100) / 100 : row.price;
+  };
+
+  let deltasTruncated = 0;
   for (const delta of deltaMatch.orderedDeltas) {
-    if (findings.length >= MAX_DELTA_FINDINGS) break;
+    if (findings.length >= MAX_DELTA_FINDINGS) {
+      // NEVER truncate silently: a capped list reads as "this is everything".
+      deltasTruncated = deltaMatch.orderedDeltas.length - deltaMatch.orderedDeltas.indexOf(delta);
+      break;
+    }
 
     // Ledger gate: only draw deltas the comparison confirmed as real changes.
     // annotate === false marks an OCR-uncertain, present-but-poorly-parsed line
@@ -3862,10 +3903,20 @@ function emitStructuredLineItemDeltaFindings(
         // no delta to subtract. Reporting null there left every missing
         // operation dollar-less, so the magnitude ceiling could not order them
         // and an $87.50 line outranked a $4,063.50 category (M-4).
-        amountImpact: delta.priceDelta ?? (delta.lowerRow === null ? delta.higherRow.price ?? null : null),
+        amountImpact: delta.priceDelta ?? (delta.lowerRow === null ? subjectRowValue(delta.higherRow) : null),
         laborHoursImpact: delta.laborDelta ?? null,
       })
     );
+  }
+
+  // A capped list reads as "this is everything". Say what was left out, on the
+  // last finding that made the cut, so the reader knows to ask for the rest.
+  if (deltasTruncated > 0 && findings.length > 0) {
+    const last = findings[findings.length - 1];
+    last.limitations = [
+      ...(last.limitations ?? []),
+      `${deltasTruncated} further line-item difference${deltasTruncated === 1 ? "" : "s"} were detected beyond this pack's per-report limit of ${MAX_DELTA_FINDINGS} and are not itemized here. They are the lowest-ranked by dollar and scope impact; request the full list if the itemized total must reconcile.`,
+    ].slice(0, 12);
   }
 
   return findings;
@@ -3906,9 +3957,11 @@ function emitTotalsDeltaFindings(
   const blockFallbackAnchor = (): EstimateRowAnchor | undefined =>
     claimAnchor((text) => /estimate totals|grand total|total cost of repair|subtotal/.test(text));
 
-  // Room for every category lane plus the grand-total gap (RO 22108 produced
-  // nine legitimate totals deltas; the old cap of 8 cut the grand total).
-  const MAX_TOTALS_FINDINGS = 10;
+  // Room for every category lane, every TAX lane, and the grand-total gap.
+  // RO 22108 produced nine legitimate totals deltas and the old cap of 8 cut
+  // the grand total; RO 22182 adds a second tax lane (GEICO's 2% County Tax)
+  // and at 10 the cap cut that instead.
+  const MAX_TOTALS_FINDINGS = 13;
   // The materials-cap category is the anchor for every PM_CAP_EVIDENCE tag in
   // the line findings — it must never be crowded out by the findings cap, so
   // it processes first.
@@ -5305,6 +5358,27 @@ function classifyLineItemDeltaProfile(delta: EstimateLineItemDelta): {
   const text = normalizeMatchText(`${delta.higherRow.section ?? ""} ${delta.higherRow.opCode ?? ""} ${delta.higherRow.description} ${delta.higherRow.rawText}`);
   const amount = delta.priceDelta ?? 0;
   const labor = delta.laborDelta ?? 0;
+  // Part source is decided before anything the row's wording suggests: the two
+  // documents named different parts, and no keyword in the description changes
+  // what that dispute is. Classified first so the RO 22182 LKQ sectioned
+  // quarter panel could not fall to the generic profile and off the end of the
+  // ranked list.
+  if (delta.kind === "part_source_difference") {
+    return {
+      label: "PART SOURCE",
+      category: "parts_downgrade",
+      missingAuthorityTypes: [
+        "supplier quote for the alternate part",
+        "OEM position statement on non-OEM parts",
+        "part-type authorization",
+      ],
+      nextAction:
+        "Resolve the part source before the price: obtain the supplier quote for the alternate part, confirm availability and condition, and check the OEM position statement and any state statute governing non-OEM parts for this vehicle.",
+      score: 82,
+      safetyImpact: "medium",
+      priority: "high",
+    };
+  }
   if (/\b(?:calibration|camera|radar|scan|diagnostic|dtc|firmware|service mode|redeploy|adas)\b/.test(text)) {
     return {
       label: "NEEDS ADAS",
@@ -5431,16 +5505,31 @@ function scoreLineItemDeltaForPriority(delta: EstimateLineItemDelta) {
   const profile = classifyLineItemDeltaProfile(delta);
   const kindBoost =
     delta.kind === "missing_operation" ? 18 :
-      delta.kind === "operation_change" ? 14 :
-        delta.kind === "reduced_labor" ? 10 :
-          delta.kind === "reduced_paint" ? 6 : 4;
+      // A part-source disagreement is a procurement dispute with a documented
+      // alternate supplier behind it, not a price quibble — it ranks with the
+      // scope findings, or the report's central dispute falls off the end of
+      // the list (RO 22182's LKQ sectioned quarter panel).
+      delta.kind === "part_source_difference" ? 16 :
+        delta.kind === "operation_change" ? 14 :
+          delta.kind === "reduced_labor" ? 10 :
+            delta.kind === "reduced_paint" ? 6 : 4;
   const amount = delta.priceDelta ?? 0;
   const labor = delta.laborDelta ?? 0;
   const paint = delta.paintDelta ?? 0;
   // An OCR-uncertain "missing" line is unverified, so it must not outrank
   // confirmed gaps in the priority ordering.
   const ocrPenalty = delta.ocrUncertain ? 24 : 0;
-  return profile.score + kindBoost - ocrPenalty + Math.min(30, amount / 25) + Math.min(20, labor * 6) + Math.min(10, paint * 4);
+  // Clamped at zero: a line where the comparison allows MORE hours or dollars
+  // than this estimate is still a real finding, and subtracting priority for it
+  // pushed genuine disputes off the end of the ranked list.
+  return (
+    profile.score +
+    kindBoost -
+    ocrPenalty +
+    Math.max(0, Math.min(30, amount / 25)) +
+    Math.max(0, Math.min(20, labor * 6)) +
+    Math.max(0, Math.min(10, paint * 4))
+  );
 }
 
 function findFallbackAnchorForMissingDelta(
@@ -8606,6 +8695,12 @@ function buildCalloutLines(
       .filter((line) => /anchor reject|visual anchor suppressed|unanchored/i.test(line))
       .slice(0, 2)
       .map((line) => `Anchor status: ${sanitize(line)}`),
+    // Coverage limits are never silent: a capped list reads as "this is
+    // everything" unless the card says otherwise.
+    ...finding.limitations
+      .filter((line) => /not itemized here|beyond this pack|were detected beyond/i.test(line))
+      .slice(0, 1)
+      .map((line) => `Coverage limit: ${sanitize(line)}`),
     `Next action: ${sanitize(finding.recommendedNextAction)}`,
   ];
 }

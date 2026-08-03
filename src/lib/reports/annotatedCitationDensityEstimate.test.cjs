@@ -95,11 +95,11 @@ async function createKiaLikeEstimatePdf() {
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const page = doc.addPage([612, 792]);
   page.drawText("GEICO lower estimate", { x: 42, y: 746, size: 10, font });
-  page.drawText("Parts", { x: 42, y: 716, size: 10, font });
+  page.drawText("PARTS", { x: 42, y: 716, size: 10, font });
   drawFragmentedEstimateRow(page, font, 49, "A/M bumper cover", "1", "$312.40", 690);
   drawFragmentedEstimateRow(page, font, 54, "A/M LT reflector", "1", "$42.10", 672);
   drawFragmentedEstimateRow(page, font, 55, "A/M molding", "1", "$66.75", 654);
-  page.drawText("Electrical / Diagnostics", { x: 42, y: 628, size: 10, font });
+  page.drawText("ELECTRICAL / DIAGNOSTICS", { x: 42, y: 628, size: 10, font });
   drawFragmentedEstimateRow(page, font, 56, "R&I blind spot radar", "0.6", "$0.00", 604);
   drawFragmentedEstimateRow(page, font, 57, "R&I blind spot radar bracket", "0.4", "$0.00", 586);
   drawFragmentedEstimateRow(page, font, 62, "Pre-repair scan", "0.5", "$75.00", 560);
@@ -109,12 +109,12 @@ async function createKiaLikeEstimatePdf() {
   drawFragmentedEstimateRow(page, font, 66, "Post-repair scan", "0.5", "$75.00", 488);
   drawFragmentedEstimateRow(page, font, 68, "REVVDAdas Report", "", "$0.00", 462);
   page.drawText("ADAS report available upon request and via this link", { x: 86, y: 448, size: 8, font });
-  page.drawText("Refinish", { x: 42, y: 420, size: 10, font });
+  page.drawText("REFINISH", { x: 42, y: 420, size: 10, font });
   drawFragmentedEstimateRow(page, font, 70, "Restore corrosion protection", "0.7", "$63.00", 396);
   drawFragmentedEstimateRow(page, font, 76, "Mask for refinishing", "0.5", "$45.00", 378);
   drawFragmentedEstimateRow(page, font, 77, "Mask jambs", "0.4", "$36.00", 360);
   drawFragmentedEstimateRow(page, font, 79, "Color sand polish", "0.8", "$72.00", 342);
-  page.drawText("Totals / Labor Rates / Paint Supplies", { x: 42, y: 304, size: 10, font });
+  page.drawText("TOTALS / LABOR RATES / PAINT SUPPLIES", { x: 42, y: 304, size: 10, font });
   page.drawText("Paint supplies total $185.00 Labor rate body $58.00 refinish $58.00", { x: 42, y: 286, size: 8, font });
   return await doc.save();
 }
@@ -282,7 +282,7 @@ async function createShop21975SourcePdf() {
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const page = doc.addPage([612, 792]);
   page.drawText("Shop 21975 estimate", { x: 42, y: 746, size: 10, font });
-  page.drawText("Parts", { x: 42, y: 716, size: 10, font });
+  page.drawText("PARTS", { x: 42, y: 716, size: 10, font });
   drawFragmentedEstimateRow(page, font, 25, "Test fit front bumper", "0.5", "$37.50", 692);
   drawFragmentedEstimateRow(page, font, 27, "OEM style grille chrome horizontal bars", "", "$410.00", 674);
   drawFragmentedEstimateRow(page, font, 29, "Radiator support front end", "", "$520.00", 656);
@@ -290,7 +290,7 @@ async function createShop21975SourcePdf() {
   drawFragmentedEstimateRow(page, font, 43, "Pre-repair scan sublet +34%", "", "$201.00", 606);
   drawFragmentedEstimateRow(page, font, 44, "Post-repair scan sublet +34%", "", "$201.00", 588);
   drawFragmentedEstimateRow(page, font, 45, "Final road test", "0.3", "$22.50", 570);
-  page.drawText("Refinish", { x: 42, y: 544, size: 10, font });
+  page.drawText("REFINISH", { x: 42, y: 544, size: 10, font });
   drawFragmentedEstimateRow(page, font, 50, "Finish sand and polish", "0.8", "$60.00", 520);
   page.drawText("Totals / Labor / Paint Supplies", { x: 42, y: 490, size: 10, font });
   page.drawText("Body labor rate $75.00 Paint labor rate $75.00 Paint supplies 3.7 @ $60.00", { x: 42, y: 472, size: 8, font });
@@ -1480,7 +1480,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
 
     assert.equal(result.annotatedFindingCount, 1);
     assert.equal(result.unresolvedAnchorCount, 0);
-    assert.match(pages[0], /Refinish/);
+    assert.match(pages[0], /REFINISH/);
     assert.doesNotMatch(pages[0], /NEEDS ADAS|NEEDS OEM|NEEDS INVOICE|ESTIMATE GAP ONLY/);
     assert.match(pages.slice(1).join(" "), /Citation Density Finding Details/);
   });

@@ -815,14 +815,15 @@ export function buildEstimateRowAnchorsFromLines(lines: PdfTextLine[], options: 
     // below it would inherit the wrong section. Same geometric gate the
     // operation anchors use.
     if (sectionName) {
-      const headerRegion = tableRegions.get(line.pageNumber);
-      const headerInTable =
-        tableRegions.size === 0
-          ? true
-          : headerRegion
-            ? line.y >= headerRegion.top - 2 && line.y <= headerRegion.bottom + 2
-            : false;
-      if (headerInTable) section = sectionName;
+      // Gated to pages that HAVE a line-item table. A cover page carries
+      // all-caps text with header shape ("DORSEY, DAVID", "PHILADELPHIA")
+      // that is not a header, and every row below it would inherit it. The
+      // gate is per PAGE, not per region: the ESTIMATE TOTALS header sits
+      // below the SUBTOTALS rule, outside the table region but on a real
+      // line-item page, and it is a genuine section — excluding it stripped
+      // the totals rows of their anchors and pushed the grand-total gap into
+      // the unanchored appendix.
+      if (tableRegions.size === 0 || tableRegions.has(line.pageNumber)) section = sectionName;
     }
     // U-5 geometric gate: on documents where a table region is measurable,
     // operation-type anchors may only exist INSIDE a region. A line-numbered
@@ -1417,20 +1418,19 @@ function detectSection(text: string) {
   if (!/^[A-Z]/.test(body) || /\d/.test(body)) return null;
   if (body.length < 3 || body.length > 48) return null;
   if (SECTION_DISQUALIFYING_OPERATION.test(body)) return null;
-  if (!/^[A-Za-z][A-Za-z &/,.'()-]*[A-Za-z)]$/.test(body)) return null;
-  // Every word carries a capital, as a heading does. Row descriptions and
-  // wrapped prose ("A/M bumper cover", "Restore corrosion protection",
-  // "calibration procedure") always carry lowercase-initial content words.
-  const words = body.split(/[\s/,&()-]+/).filter(Boolean);
-  if (!words.every((word) => /^[A-Z]/.test(word) || SECTION_CONNECTOR.test(word))) return null;
+  // ALL CAPS. Every estimating platform prints section headers in caps, and a
+  // mixed-case rule cannot tell a heading from a wrapped description word: the
+  // RO 22182 shop estimate wraps "BetaPrime 5504G All-in-One" onto a second
+  // line reading just "Primer", which then became a section and captured
+  // every row beneath it.
+  if (/[a-z]/.test(body)) return null;
+  if (!/^[A-Z][A-Z &/,.'()-]*[A-Z)]$/.test(body)) return null;
   return normalizeMatchText(body) || null;
 }
 
 /** An operation token opens a row, never a heading. */
 const SECTION_DISQUALIFYING_OPERATION =
   /^(?:R\s*&\s*[IR]|Rpr|Repl|Blnd|Refn|Subl|Algn|Add|O\/H|Overlap|Incl|Note)\b/i;
-/** Lowercase words a real heading may contain. */
-const SECTION_CONNECTOR = /^(?:of|and|or|the|for|to|in|on|per|w|wo|with|a)$/i;
 
 function mergeContinuationLines(lines: string[]) {
   const merged: string[] = [];

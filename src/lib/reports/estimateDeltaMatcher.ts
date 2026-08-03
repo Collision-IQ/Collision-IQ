@@ -152,7 +152,13 @@ export function paintSystemAddHours(rows: EstimateDeltaRow[]): number {
 export const NEW_OEM_PART_SOURCE = "new OEM";
 
 export function extractPartSource(rowText: string): string[] {
-  const text = ` ${(rowText ?? "").replace(/\s+/g, " ")} `;
+  // The operation code welds to the source token in glued extractions
+  // ("8*SectLKQ RT quarter panel", "20**<>ReplA/M Bumper cover"), which hides
+  // the token behind a word boundary that never opens. Separate the operation
+  // from what follows it before matching.
+  const text = ` ${(rowText ?? "")
+    .replace(/\s+/g, " ")
+    .replace(/\b(R&I|R&R|Repl|Rpr|Blnd|Refn|Subl|Algn|Sect|Add|O\/H)(?=[A-Z])/g, "$1 ")} `;
   const found: string[] = [];
   for (const [pattern, label] of PART_SOURCE_TOKENS) {
     if (pattern.test(text) && !found.includes(label)) found.push(label);

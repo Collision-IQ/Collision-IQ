@@ -196,3 +196,17 @@ describe("M-4 — a finding cannot outrank what it is worth", () => {
     expect(dollarWeightedScore(40, 50_000)).toBe(40);
   });
 });
+
+describe("M-4 — a labor-only line is worth its hours at the estimate's own rate", () => {
+  // RO 22182's "Pre repair scan" (1.0 hr) and "Research DTC's" (0.5 hr) carry
+  // no parts price. Reporting them dollar-less left them uncapped at 82,
+  // above three category-missing findings at 80 — the exact inversion M-4
+  // describes. Valued at the shop's declared $175/hr diagnostic rate they
+  // land at $175.00 and $87.50, ceilings 68 and 60.
+  it("valuing hours at the declared rate restores the ordering", () => {
+    const diagnosticRate = 175;
+    expect(dollarWeightedScore(82, 1.0 * diagnosticRate)).toBe(68);
+    expect(dollarWeightedScore(82, 0.5 * diagnosticRate)).toBe(60);
+    expect(dollarWeightedScore(80, 4063.5)).toBe(80);
+  });
+});
