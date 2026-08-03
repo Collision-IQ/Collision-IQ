@@ -738,5 +738,49 @@ run("P0-1: the invariant catches a contradiction the alias table does not cover"
   assert.deepEqual(unrelated, []);
 });
 
+run("P0-3 (RO 22185): a deduction is never reported as scope the other side omitted", () => {
+  const { isDeductionRow } = require("./estimateDeltaMatcher.ts");
+
+  // "Overlap Major Non-Adj. Panel -0.2" is a credit the shop takes off its
+  // OWN estimate. RO 22185 stamped two of them "MISSED on ERIE" — asking the
+  // carrier to pay LESS, in a document whose purpose is the opposite.
+  const shop = [
+    "REAR BUMPER",
+    "75 Repl Bumper cover 1 800.00 2.0 1.5",
+    "76 Overlap Major Non-Adj. Panel -0.2",
+    "78 Repl Tail lamp 1 686.05",
+    "79 Overlap Major Non-Adj. Panel -0.2",
+  ].join("\n");
+  const erie = [
+    "REAR BUMPER",
+    "50 Repl Bumper cover 1 800.00 2.0 1.5",
+    "51 Repl Tail lamp 1 619.71",
+  ].join("\n");
+  const match = matchEstimateLineItems({
+    lowerRows: parseCccEstimateRows(erie),
+    higherRows: parseCccEstimateRows(shop),
+  });
+
+  assert.equal(
+    match.deltas.some((d) => /overlap/i.test(d.higherRow.description)),
+    false,
+    JSON.stringify(match.deltas.map((d) => d.summary))
+  );
+  assert.equal(match.lowerOnlyRows.some((r) => /overlap/i.test(r.description)), false);
+  // No finding may carry a negative hour value at all.
+  assert.equal(
+    match.deltas.filter((d) => (d.higherRow.labor ?? 0) < 0 || (d.higherRow.paint ?? 0) < 0).length,
+    0
+  );
+  // The real dispute on the same rows still surfaces.
+  const tailLamp = match.deltas.find((d) => /tail lamp/i.test(d.summary));
+  assert.ok(tailLamp, "the $686.05 vs $619.71 tail lamp delta must survive");
+  assert.equal(tailLamp.priceDelta, 66.34);
+
+  // Shape, not wording: betterment and appearance allowances qualify too.
+  assert.equal(isDeductionRow(parseCccEstimateRows("10 Betterment -150.00")[0] ?? { price: -150 }), true);
+  assert.equal(isDeductionRow(parseCccEstimateRows("11 Repl Bumper cover 1 800.00 2.0")[0]), false);
+});
+
 console.log(`\nestimateDeltaMatcher: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -493,6 +493,21 @@ const PROTECTION_COVER_ALIASES = new Set([
   "VEHICLE PROTECTION KIT",
 ]);
 
+/**
+ * A DEDUCTION line: a credit the estimate takes off its own total rather than
+ * work it bills. Overlap allowances, betterment, appearance allowances and
+ * discounts all print with a negative value.
+ *
+ * Recognized by SHAPE, not by wording — any negative labor, paint, or amount.
+ * A deduction is a modifier of the operation above it, never an independent
+ * item, so it is never reported as scope the other estimate omitted: RO 22185
+ * stamped two "Overlap Major Non-Adj. Panel −0.2" lines as "MISSED on ERIE",
+ * which asks the carrier to pay LESS.
+ */
+export function isDeductionRow(row: EstimateDeltaRow): boolean {
+  return (row.labor ?? 0) < 0 || (row.paint ?? 0) < 0 || (row.price ?? 0) < 0;
+}
+
 function isProtectionCoverAlias(row: EstimateDeltaRow): boolean {
   return PROTECTION_COVER_ALIASES.has(normalizeCategoryText(row.description));
 }
@@ -2139,6 +2154,18 @@ export function matchEstimateLineItems(params: {
     `Higher estimate itemizes "${describeRow(higherRow)}"${costFragment(higherRow)}; the lower estimate carries ${counterpart} instead of this itemized line. Treat as a potential bundled-equivalent / invoice-dependent difference — reconcile against material invoices, not as confirmed missing scope.`;
 
   const classifyUnmatched = (higherRow: EstimateDeltaRow) => {
+    // P0-3: A DEDUCTION IS NOT SCOPE THE OTHER SIDE OMITTED.
+    //
+    // "Overlap Major Non-Adj. Panel" at −0.2 paint hr is a credit the shop
+    // took OFF its own estimate. RO 22185 annotated two of them "MISSED on
+    // ERIE" — telling the carrier it had failed to deduct, which argues for a
+    // LOWER payout in a document whose entire purpose is the opposite.
+    //
+    // Deductions ride with the parent operation they modify; they are never
+    // independently reported. If the parent paired, the deduction is already
+    // inside that comparison; if it did not, the parent's own finding is the
+    // one to make.
+    if (isDeductionRow(higherRow)) return;
     // QUANTITY SHORTFALL first — before every softening gate. When this
     // operation's group already has at least one CONSUMED lower match, the
     // lower estimate's count is exhausted and this occurrence is beyond it:
@@ -2566,6 +2593,14 @@ export function matchEstimateLineItems(params: {
       potentialDuplicateLowerRows.push(row);
       const index = lowerRows.indexOf(row);
       if (index !== -1) recordLowerConsumption(index, "duplicate");
+    } else if (isDeductionRow(row)) {
+      // P0-3: a comparison-side DEDUCTION is a credit that document took off
+      // its own total, not scope this estimate omitted — listing it as
+      // "only on the comparison" reads as a gap the shop should close.
+      // It still reaches the duplicate bucket above when it repeats, because
+      // "possibly billed twice" is a real signal for a credit as much as for
+      // an operation.
+      continue;
     } else {
       lowerOnlyRows.push(row);
     }

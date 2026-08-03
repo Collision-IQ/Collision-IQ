@@ -38,6 +38,15 @@ export interface Finding {
 
 const EPS = 0.001;
 
+/**
+ * A DEDUCTION: a credit the estimate takes off its own total rather than work
+ * it bills — overlap allowances, betterment, appearance allowances, discounts.
+ * Recognized by SHAPE (any negative cell), never by wording.
+ */
+export function isDeduction(row: EstimateRow): boolean {
+  return (row.labor ?? 0) < 0 || (row.paint ?? 0) < 0 || (row.price ?? 0) < 0;
+}
+
 function laborCategory(row: EstimateRow, field: CellField): string {
   if (field === "paint") return "paint";
   if (field === "price") return "price";
@@ -161,6 +170,13 @@ export function pairAndCompare(subject: EstimateRow[], competing: EstimateRow[])
     }
     const index = paired.get(s);
     if (index === undefined) {
+      // P0-3: a DEDUCTION is a credit this estimate takes off its own total —
+      // an overlap allowance, betterment, an appearance allowance — and it
+      // modifies the operation above it. Reporting it as missing from the
+      // comparison asks the other side to pay LESS, which is the opposite of
+      // what the document is for (RO 22185 stamped two "Overlap Major
+      // Non-Adj. Panel -0.2" lines "MISSED on ERIE").
+      if (isDeduction(s)) continue;
       findings.push({ kind: "MISSED", subject: s, competing: null, deltas: [], category: "missing on competing" });
       continue;
     }
