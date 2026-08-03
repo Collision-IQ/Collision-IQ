@@ -15,7 +15,12 @@
  */
 
 import { canonicalOperationKey } from "./operationAliases";
-import { canonTotalsCategory, totalsCategoriesFuzzyMatch } from "./deltaEngine/estimateNormalize";
+import {
+  canonTotalsCategory,
+  continuesIdentifier,
+  isManufacturerPrefixedIdentifier,
+  totalsCategoriesFuzzyMatch,
+} from "./deltaEngine/estimateNormalize";
 
 export type EstimateDeltaRowSource = "lower" | "higher";
 
@@ -576,6 +581,11 @@ export function explodeGluedRow(rawText: string): string {
     const tokenStart = text.lastIndexOf(" ", i - 1) + 1;
     const fullToken = text.slice(tokenStart, tokenEnd === -1 ? text.length : tokenEnd);
     if (/^[A-Za-z]{1,3}\d{7,}/.test(fullToken)) continue;
+    // IDENTIFIERS ARE ATOMIC: in "Adhesive-3M" the "-3M" is a manufacturer
+    // brand group, not a minus-number opening the column blob. Splitting there
+    // orphans the product number that follows into a value column — RO 22182
+    // line 118 reported 3M product 07333 as 7,333.0 body labor hours.
+    if (isManufacturerPrefixedIdentifier(fullToken)) continue;
     // Never split INSIDE an alphanumeric part number ("GM1144143", "C25J75"):
     // the rest of that token must itself look like glued column data — a
     // decimal value or a 9+ digit run — before the boundary is real.
@@ -907,7 +917,21 @@ function extractTrailingColumns(body: string): {
       continue;
     }
     const numeric = token.match(/^-?\d+(?:\.\d+)?$/);
-    if (numeric) {
+    if (!numeric) {
+      // An ALPHANUMERIC token ends the column region: no value cell mixes
+      // letters with digits, so "Adhesive-3M" is wrapped description that
+      // rejoined after the columns, and the digits behind it are its product
+      // number ("… 1 156.63 T Adhesive-3M 07333" read 07333 as 7,333.0 body
+      // labor hours on RO 22182 line 118). Pure-word tokens are left alone:
+      // the wrapped-tail repair above legitimately parks a moved section
+      // header or note tail between the price and the hour cells.
+      if (/\d/.test(token)) break;
+      continue;
+    }
+    {
+      // IDENTIFIERS ARE ATOMIC: a manufacturer prefix's product number, or any
+      // leading-zero integer, is catalog notation and never a numeric column.
+      if (continuesIdentifier(tokens[index - 1], token)) break;
       const value = Number(token);
       if (columnSlot === 0) {
         labor = value;
@@ -934,7 +958,7 @@ function extractTrailingColumns(body: string): {
   for (let index = priceIndex - 1; index >= 0; index -= 1) {
     const token = tokens[index];
     if (COLUMN_MARKER_PATTERN.test(token)) continue;
-    if (/^\d{1,3}$/.test(token)) {
+    if (/^\d{1,3}$/.test(token) && !continuesIdentifier(tokens[index - 1], token)) {
       qty = Number(token);
       qtyIndex = index;
     }
@@ -1313,6 +1337,53 @@ export function reflowFragmentedEstimateText(text: string): string {
   return out.join("\n");
 }
 
+/**
+ * The line-items SUBTOTALS rule as printed by the document itself
+ * ("SUBTOTALS 3,878.36  85.6  31.2"): extended price, then body labor hours,
+ * then paint hours. The document's own declared totals are the only legitimate
+ * bound on any one of its rows.
+ *
+ * Returns null when the document prints no SUBTOTALS rule — there is then
+ * nothing to reconcile against, and no bound is applied.
+ */
+export function parseCccSubtotalsRule(text: string): { labor: number | null; paint: number | null } | null {
+  if (!text) return null;
+  for (const raw of text.replace(/\r/g, "\n").split("\n")) {
+    const line = raw.replace(/\s+/g, " ").trim();
+    if (!/SUBTOTALS/i.test(line)) continue;
+    // Hour cells print with exactly one decimal; the price cell with two.
+    const hours = (line.match(/-?[\d,]+\.\d(?!\d)/g) ?? []).map((value) =>
+      Number(value.replace(/,/g, ""))
+    );
+    if (hours.length === 0) continue;
+    return { labor: hours[0] ?? null, paint: hours[1] ?? null };
+  }
+  return null;
+}
+
+/**
+ * PER-ROW VALUES ARE BOUNDED BY THE DOCUMENT'S OWN SUBTOTALS.
+ *
+ * A single row reporting 7,333.0 body labor hours against a document declaring
+ * 85.6 in total is not a large value — it is a column-identity failure, and
+ * emitting it produces a $659,970 finding. Any per-row cell exceeding the
+ * printed rule is impossible, so it is dropped rather than reported; the row
+ * itself survives with its remaining measured cells.
+ */
+function boundRowsByPrintedSubtotals(
+  rows: EstimateDeltaRow[],
+  rule: { labor: number | null; paint: number | null } | null
+): EstimateDeltaRow[] {
+  if (!rule) return rows;
+  const exceeds = (value: number | null, total: number | null) =>
+    value !== null && total !== null && Math.abs(value) > total + 0.01;
+  for (const row of rows) {
+    if (exceeds(row.labor, rule.labor)) row.labor = null;
+    if (exceeds(row.paint, rule.paint)) row.paint = null;
+  }
+  return rows;
+}
+
 export function parseCccEstimateRows(text: string): EstimateDeltaRow[] {
   if (!text) return [];
   if (isFragmentedEstimateText(text)) {
@@ -1346,12 +1417,13 @@ export function parseCccEstimateRows(text: string): EstimateDeltaRow[] {
   // CCC line numbers are unique per estimate, but multi-page prints repeat
   // supplement summary pages — keep the first (usually fullest) copy.
   const seenLineNumbers = new Set<number>();
-  return rows.filter((row) => {
+  const deduped = rows.filter((row) => {
     if (row.lineNumber === null) return true;
     if (seenLineNumbers.has(row.lineNumber)) return false;
     seenLineNumbers.add(row.lineNumber);
     return true;
   });
+  return boundRowsByPrintedSubtotals(deduped, parseCccSubtotalsRule(text));
 }
 
 /** Build a delta row from already-extracted source PDF row text + metadata. */

@@ -249,6 +249,42 @@ export function stripNote(desc: string): string {
   return desc.split(/\bnote\b/i)[0].trim();
 }
 
+/**
+ * IDENTIFIERS ARE ATOMIC.
+ *
+ * A description token that ends in a manufacturer prefix — a word stem, a
+ * hyphen, then a short alphanumeric brand group carrying a letter
+ * ("Adhesive-3M", "Masking Tape-3M", "Seam Sealer-SEM") — begins a product
+ * identifier whose number prints as the NEXT token. That number belongs to the
+ * identifier and can never be a numeric column: RO 22182 line 118 read the 3M
+ * product number 07333 as 7,333.0 body labor hours against a document
+ * declaring 85.6 in total.
+ *
+ * The pattern deliberately excludes bare part numbers ("PT00015376B001",
+ * "445539221", "1063943-00-A"): those are complete identifiers on their own,
+ * and the token that follows them is the real qty column.
+ */
+const MANUFACTURER_PREFIXED = /^[A-Za-z][A-Za-z]*-\d*[A-Za-z][A-Za-z0-9]{0,4}$/;
+
+export function isManufacturerPrefixedIdentifier(token: string): boolean {
+  return MANUFACTURER_PREFIXED.test(token.trim());
+}
+
+/**
+ * True when `token` continues an identifier rather than opening a value cell.
+ * Two independent grounds, both document-agnostic:
+ *  (a) the preceding token ended in a manufacturer prefix, so this is its
+ *      product number ("Adhesive-3M" -> "07333");
+ *  (b) the token is a leading-zero integer. A quantity, a money amount, and an
+ *      hours cell are never printed with a leading zero before a nonzero
+ *      digit, so "07333" is catalog notation wherever it appears.
+ */
+export function continuesIdentifier(previousToken: string | undefined, token: string): boolean {
+  if (/^0\d+$/.test(token)) return true;
+  if (!previousToken) return false;
+  return isManufacturerPrefixedIdentifier(previousToken) && /^\d[\dA-Za-z-]*$/.test(token);
+}
+
 /** Precise CCC part pattern; strips a glued qty digit (suffix must be exactly 3 digits). */
 export function extractPart(token: string): { part: string | null; trailing: string } {
   const repaired = repairTokens(token);
