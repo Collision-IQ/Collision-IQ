@@ -112,3 +112,76 @@ describe("the gate is inert on a bundle that carries nothing", () => {
     expect(mayRelease(violations)).toBe(true);
   });
 });
+
+describe("R20/R21 — the RO 22116 bad pairing cannot ship quietly", () => {
+  /** Finding 61 as it actually rendered: two descriptions with no word in common. */
+  const badPairing = {
+    findings: [
+      {
+        id: "F61",
+        type: "value_delta",
+        anchors: ["t68"],
+        scope: "group",
+        pairing_basis: "description",
+        similarity: 0.19,
+        target_desc: "Cover to protect interior during repair",
+        source_desc: "Color Tint",
+        target_qty: 2,
+        source_qty: 1,
+        target_amount: 5.0,
+        source_amount: 0,
+        source_labor: 0,
+        member_ops: ["OP_COLOR_TINT", "OP_COVER_CAR"],
+      },
+    ],
+  };
+
+  const violations = runDeltaReleaseGate(badPairing);
+
+  it("four independent rules catch it, so one regression cannot hide it", () => {
+    const messages = violations.filter((v) => v.severity === "FAIL").map((v) => v.message);
+    expect(messages).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/similarity 0\.19 is below the 0\.82 floor/),
+        expect.stringMatching(/paired rows share no token/),
+        expect.stringMatching(/source_qty=1 but source_amount=0 and no labor/),
+        expect.stringMatching(/group mixes canonical ops/),
+      ])
+    );
+  });
+
+  it("blocks the release", () => {
+    expect(mayRelease(violations)).toBe(false);
+  });
+
+  it("an unscored description pairing is itself a failure — it cannot be audited", () => {
+    const unscored = runDeltaReleaseGate({
+      findings: [
+        { id: "F1", anchors: ["t1"], pairing_basis: "description", target_desc: "Mask jambs", source_desc: "Mask jambs" },
+      ],
+    });
+    expect(unscored.some((v) => /no similarity score/.test(v.message))).toBe(true);
+  });
+
+  it("a sound description pairing passes both rules", () => {
+    const good = runDeltaReleaseGate({
+      findings: [
+        {
+          id: "F1",
+          anchors: ["t1"],
+          scope: "group",
+          pairing_basis: "description",
+          similarity: 0.95,
+          target_desc: "Mask jambs 4 panel",
+          source_desc: "Mask jambs",
+          target_qty: 1,
+          source_qty: 1,
+          target_amount: 15,
+          source_amount: 15,
+          member_ops: ["OP_MASK_JAMBS", "OP_MASK_JAMBS"],
+        },
+      ],
+    });
+    expect(good.filter((v) => v.rule === "R20" || v.rule === "R21")).toEqual([]);
+  });
+});

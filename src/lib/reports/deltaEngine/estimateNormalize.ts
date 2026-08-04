@@ -207,6 +207,35 @@ export interface CanonKey {
  * op-prefix stripped, part numbers and digits removed, side vocabulary
  * removed via synonym set (U-1 — never a literal LT/RT test), stems last.
  */
+/** Substring length above which an accidental collision is implausible. The
+ *  long stems exist for GLUED documents whose word boundaries are already
+ *  gone ("LIFTANDSUPPORTVEHICLE"), so they keep the substring test; the short
+ *  ones must land on whole words. */
+const STEM_SUBSTRING_SAFE_LENGTH = 8;
+
+/**
+ * Does `stem` identify this row's operation?
+ *
+ * A stem must align to a run of WHOLE WORDS. Testing it as a bare substring of
+ * the squashed description reads operations out of the middle of unrelated
+ * words: RO 22116's "Cover to protect interior during repair" squashes to
+ * "...PROTECTINTERIOR...", which contains TINT (pro-tec-TINT-erior), so the
+ * row typed as Color Tint. It then paired against the carrier's real Color
+ * Tint line, dragged the shop's actual Tint color line into the group, and
+ * produced a $0.00 counterpart and a phantom "2x here vs 1x paid".
+ */
+function stemMatches(words: string[], squashed: string, stem: string): boolean {
+  for (let start = 0; start < words.length; start += 1) {
+    let run = "";
+    for (let end = start; end < words.length; end += 1) {
+      run += words[end];
+      if (run === stem) return true;
+      if (run.length >= stem.length) break;
+    }
+  }
+  return stem.length >= STEM_SUBSTRING_SAFE_LENGTH && squashed.includes(stem);
+}
+
 export function canonKey(rawDesc: string): CanonKey {
   let s = repairTokens(rawDesc).toUpperCase();
   s = s.replace(/PT\d{8}[A-Z](\d{3})?/g, "");
@@ -227,6 +256,9 @@ export function canonKey(rawDesc: string): CanonKey {
   for (const [pattern] of SIDE_SYNONYMS) s = s.replace(new RegExp(pattern.source, "g"), " ");
   s = s.replace(/^\s*[LR]\s+(?=[A-Z])/, " "); // leading bare L/R
   for (const [pattern, , canonical] of POSITION_SYNONYMS) s = s.replace(new RegExp(pattern.source, "g"), canonical);
+  // Keep the word boundaries the squash is about to destroy — the STEMS pass
+  // below needs them to tell an operation from a fragment of a longer word.
+  const stemWords = s.replace(/[^A-Z ]/g, " ").split(/\s+/).filter(Boolean);
   s = s.replace(/[^A-Z]/g, ""); // squash — drops spaces, &, punctuation
   s = s.split("INCL").join("");
   // op may still be glued at the front on corrupted docs (e.g. "RIRTBATTERY")
@@ -236,7 +268,9 @@ export function canonKey(rawDesc: string): CanonKey {
       break;
     }
   }
-  for (const [stem, canon] of STEMS) if (s.includes(stem)) return { key: canon, base: canon, side: "", position: "" };
+  for (const [stem, canon] of STEMS) {
+    if (stemMatches(stemWords, s, stem)) return { key: canon, base: canon, side: "", position: "" };
+  }
   // Glued corrupted docs ("RTBATTERY" with no boundaries) evade the synonym
   // pass — fall back to the squashed-prefix test.
   if (!side && s.startsWith("RT")) {

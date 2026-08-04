@@ -81,6 +81,19 @@ interface BundleFinding {
   shown?: number;
   total?: number;
   total_available?: number;
+  /** R20 — how a description-based pairing was justified, so it can be audited. */
+  pairing_basis?: string;
+  similarity?: number;
+  target_desc?: string;
+  source_desc?: string;
+  /** R21 — group coherence on both sides. */
+  target_qty?: number;
+  source_qty?: number;
+  target_amount?: number;
+  source_amount?: number;
+  target_labor?: number;
+  source_labor?: number;
+  member_ops?: string[];
   authority?: { title?: string; retrieved?: boolean; domain?: string } | null;
 }
 
@@ -416,6 +429,45 @@ export function runDeltaReleaseGate(bundle: DeltaBundle): Violation[] {
       if (shown < available && !discloses.test(finding.text ?? "")) {
         fail("R18", `finding ${finding.id} shows ${shown} of ${available} without disclosing the cap`);
       }
+    }
+  }
+
+  // R20 — a description-based pairing must be auditable and must clear the
+  // floor. RO 22116 paired "Cover to protect interior during repair" with
+  // "Color Tint": two descriptions with no word in common, joined because a
+  // canonical stem was read out of the middle of "protec-TINT-erior".
+  const floor = RULES.matching.descriptionSimilarityFloor;
+  for (const finding of findings) {
+    if ((finding.pairing_basis ?? "").toLowerCase() !== "description") continue;
+    if (typeof finding.similarity !== "number") {
+      fail("R20", `finding ${finding.id}: paired on description with no similarity score — an unscored fuzzy match cannot be audited`);
+    } else if (finding.similarity < floor) {
+      fail("R20", `finding ${finding.id}: description similarity ${finding.similarity.toFixed(2)} is below the ${floor} floor — ${JSON.stringify(finding.target_desc)} vs ${JSON.stringify(finding.source_desc)}`);
+    }
+    if (RULES.matching.requireSharedToken && finding.target_desc && finding.source_desc) {
+      const words = (text: string) => new Set(text.toLowerCase().split(/\s+/).filter(Boolean));
+      const left = words(finding.target_desc);
+      const shared = [...words(finding.source_desc)].some((token) => left.has(token));
+      if (!shared) {
+        fail("R20", `finding ${finding.id}: paired rows share no token — ${JSON.stringify(finding.target_desc)} vs ${JSON.stringify(finding.source_desc)}`);
+      }
+    }
+  }
+
+  // R21 — a group finding must be internally consistent on both sides.
+  for (const finding of findings) {
+    if (finding.scope !== "group") continue;
+    for (const side of ["target", "source"] as const) {
+      const qty = finding[`${side}_qty`];
+      const amount = finding[`${side}_amount`];
+      if (typeof qty !== "number" || typeof amount !== "number") continue;
+      if (qty > 0 && amount === 0 && (finding[`${side}_labor`] ?? 0) === 0) {
+        fail("R21", `finding ${finding.id}: ${side}_qty=${qty} but ${side}_amount=0 and no labor — a counted row cannot contribute nothing`);
+      }
+    }
+    const members = finding.member_ops;
+    if (members && new Set(members).size > 1) {
+      fail("R21", `finding ${finding.id}: group mixes canonical ops ${JSON.stringify([...new Set(members)].sort())} — a group is one operation, aggregated`);
     }
   }
 

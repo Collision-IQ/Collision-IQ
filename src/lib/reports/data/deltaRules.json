@@ -78,6 +78,11 @@
     "OP_SET_BACK_WIRING": "SET_BACK_WIRING"
   },
 
+  "matching": {
+    "descriptionSimilarityFloor": 0.82,
+    "requireSharedToken": true
+  },
+
   "wording": {
     "counterpartOnly": "On $counterpart only",
     "missingOperation": "not written on $counterpart",
