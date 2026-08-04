@@ -339,7 +339,7 @@ function resolveLowerEstimatePdfSelection(params: {
 }
 
 // The Delta Citation Density report annotates the HIGHER-cost estimate and highlights the
-// lines the lower-cost estimate is missing or reduced. The missing/added lines only exist on
+// lines the comparison estimate is missing or reduced. The missing/added lines only exist on
 // the higher estimate, so it must be the annotation base for them to anchor precisely. This is
 // the generic counterpart to resolveLowerEstimatePdfSelection and is pair-agnostic (works for
 // shop-vs-insurance, shop-vs-shop, etc.) — it ranks purely on parsed estimate total.
@@ -386,7 +386,7 @@ export function resolveHigherEstimatePdfSelection(params: {
     selectedEstimateRole: highest.role === "unknown" ? "selected" : highest.role,
     selectedEstimateTotal: highest.total,
     comparisonEstimateTotal: comparison?.total ?? null,
-    selectionReason: `Auto-selected the higher-cost estimate PDF as the Delta annotation base (total ${highest.total}); the lower-cost estimate is the comparison.`,
+    selectionReason: `Auto-selected the annotated estimate PDF as the Delta annotation base (total ${highest.total}); the comparison estimate is the comparison.`,
     selectionDiagnostics,
   });
 }
@@ -503,7 +503,7 @@ function buildSelectionReason(
   score: number
 ) {
   if (targetEstimate === "carrier") {
-    return `Selected the carrier/lower-cost estimate PDF based on document role signals (score ${score}).`;
+    return `Selected the carrier/comparison estimate PDF based on document role signals (score ${score}).`;
   }
   if (targetEstimate === "shop") {
     return `Selected the shop estimate PDF based on document role signals (score ${score}).`;

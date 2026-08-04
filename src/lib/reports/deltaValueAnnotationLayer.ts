@@ -14,6 +14,7 @@
  * positions, or page counts are encoded. The competing-document label is
  * supplied by the caller from document data.
  */
+import { formatBasis, notWrittenOn } from "./deltaWording";
 import {
   findCollidingWords,
   planVerifiedKeyedNotes,
@@ -261,7 +262,10 @@ export function planDeltaValueAnnotations(params: DeltaValueLayerParams): DeltaV
             : subject.paint && subject.paint > 0
               ? `${fmtHours(subject.paint)} hr P`
               : "";
-      addPiece(pageNumber, `Ln ${subject.line} ${shortDesc(subject)}${value ? ` (${value})` : ""}: MISSED on ${label}`);
+      addPiece(
+        pageNumber,
+        `Ln ${subject.line} ${shortDesc(subject)}${value ? ` (${value})` : ""}: ${notWrittenOn(label)}`
+      );
     }
   }
 
@@ -301,8 +305,27 @@ export function planDeltaValueAnnotations(params: DeltaValueLayerParams): DeltaV
     if (rateDelta && subjectRow.rateBox) highlights.push(cellRect(subjectRow.page, subjectRow.rateBox));
     // One combined stamp per category, anchored in the measured gap left of the
     // hours cell (the widest reliably-empty region on a totals table).
-    const stampText =
-      hoursDelta && rateDelta
+    // ABSENT IS NOT ZERO. A carrier that allows a flat amount prints no hours
+    // and no rate; rendering that as "<carrier> 0.0 @ $0.00/hr" tells the shop
+    // the carrier pays NOTHING for the category and points the negotiation at
+    // the wrong line. RO 22116 stamped exactly that against a flat $650.00
+    // paint-supplies allowance.
+    const competingRow = params.competingTotals.find(
+      (row) => canonTotalsCategory(row.category) === key
+    );
+    const competingHours = hoursDelta ? hoursDelta.competing : (competingRow?.hours ?? null);
+    const competingRate = rateDelta ? rateDelta.competing : (competingRow?.rate ?? null);
+    const basisIsAbsent = !competingHours && !competingRate;
+    const stampText = basisIsAbsent
+      ? competingRow?.amount != null
+        ? formatBasis({
+            label,
+            hours: null,
+            rate: null,
+            amount: competingRow.amount,
+          })
+        : null
+      : hoursDelta && rateDelta
         ? `${label} ${fmtHours(hoursDelta.competing)} @ ${fmtMoney(rateDelta.competing)}/hr`
         : hoursDelta
           ? `${label} ${fmtHours(hoursDelta.competing)}`

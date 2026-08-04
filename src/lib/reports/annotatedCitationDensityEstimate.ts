@@ -347,7 +347,7 @@ function engineResultToLineItemDeltas(params: {
         laborDelta: finding.subject.labor,
         paintDelta: finding.subject.paint,
         priceDelta: finding.subject.price,
-        summary: `${higherRow.description} is documented on this estimate and has no counterpart on the lower-cost estimate.`,
+        summary: `${higherRow.description} is documented on this estimate and has no counterpart on the comparison estimate.`,
       });
       continue;
     }
@@ -418,7 +418,7 @@ function engineResultToLineItemDeltas(params: {
       priceDelta: null,
       changedFields: ["operation"],
       codingOnlyChange: true,
-      summary: `${higherRow.description}: operation ${subjectOp} here vs ${competingOp} on the lower-cost estimate at identical values — likely a coding/description difference, not a scope change.`,
+      summary: `${higherRow.description}: operation ${subjectOp} here vs ${competingOp} on the comparison estimate at identical values — likely a coding/description difference, not a scope change.`,
     });
   }
 
@@ -1015,16 +1015,16 @@ const LABEL_DEFINITIONS: Record<string, string> = {
   "ONLINE FALLBACK": "Support came from a public online source, not a licensed database.",
   "WEAK — DO NOT LEAD": "Signal too weak to lead a negotiation; listed for completeness only.",
   "AMOUNT DELTA": "A category dollar amount differs between the two ESTIMATE TOTALS blocks.",
-  "CATEGORY MISSING": "An entire ESTIMATE TOTALS category on this estimate has no counterpart on the lower-cost estimate — the whole category's dollars are in dispute, not a price difference within it.",
+  "CATEGORY MISSING": "An entire ESTIMATE TOTALS category on this estimate has no counterpart on the comparison estimate — the whole category's dollars are in dispute, not a price difference within it.",
   "HOURS DELTA": "A labor-category hour subtotal differs between the two estimates.",
   "RATE DELTA": "A labor or materials rate differs between the two estimates.",
   "TOTAL GAP": "The grand totals differ — the reconciled overall gap between the two estimates.",
   "RECONCILIATION GAP": "The compared category deltas do NOT sum to the grand-total gap — part of the headline is unexplained; treat itemized claims accordingly.",
   "INTAKE": "The comparison document could not be read completely — this pack reports what was read and what to re-supply; no line-level delta verdict is rendered.",
-  "LOWER-ONLY LINES": "Lines present only on the lower-cost estimate (omitted scope, wording variants, or duplicate candidates).",
+  "LOWER-ONLY LINES": "Lines present only on the comparison estimate (omitted scope, wording variants, or duplicate candidates).",
   "CARRIER MISMATCH": "A line note names a carrier that is not this file's insurer — a document-attribution defect.",
   "PAINT SYSTEM": "The two estimates declare different paint systems for the same vehicle — one disagreement that propagates into every refinish line, resolved by the vehicle's paint code rather than line by line.",
-  "CARRIER HIGHER": "On this matched line the LOWER-cost estimate allows more — the cost gap runs in the other direction.",
+  "CARRIER HIGHER": "On this matched line the comparison estimate allows more — the cost gap runs in the other direction.",
   "CODING DIFFERENCE": "Same hours and amounts on both estimates; only the operation label differs — likely coding, not scope.",
 };
 
@@ -2994,7 +2994,7 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
       category: profile.category,
       estimateGapType: "present_but_under_documented",
       missingProof:
-        "This estimate itemizes this material line while the lower-cost estimate carries a bundled or invoice-pending allowance covering the same kind of material. This is a potential bundled-equivalent / invoice-dependent difference — not confirmed missing scope.",
+        "This estimate itemizes this material line while the comparison estimate carries a bundled or invoice-pending allowance covering the same kind of material. This is a potential bundled-equivalent / invoice-dependent difference — not confirmed missing scope.",
       nextAction:
         "Reconcile the itemized material charges against the lower estimate's bundled allowance and the actual material invoices; confirm which document fully covers the materials used.",
       missingAuthorityTypes: ["material invoices", "bundled-allowance reconciliation"],
@@ -3011,9 +3011,9 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
       category: profile.category,
       estimateGapType: "present_but_under_documented",
       missingProof:
-        "Structured estimate comparison shows this line sits in a category the lower-cost estimate already covers. It reads as expanded or added scope within an existing category — a teardown addition, a changed part/labor line, or supporting material — not a brand-new operation. This is estimate-difference evidence only.",
+        "Structured estimate comparison shows this line sits in a category the comparison estimate already covers. It reads as expanded or added scope within an existing category — a teardown addition, a changed part/labor line, or supporting material — not a brand-new operation. This is estimate-difference evidence only.",
       nextAction:
-        "Compare this line to the lower-cost estimate's lines in the same category to confirm whether it is an added operation, a changed part/labor allowance, or supporting material.",
+        "Compare this line to the comparison estimate's lines in the same category to confirm whether it is an added operation, a changed part/labor allowance, or supporting material.",
       missingAuthorityTypes: profile.missingAuthorityTypes,
       score: Math.max(0, profile.score - 12),
       safetyImpact: profile.safetyImpact,
@@ -3036,11 +3036,11 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
         category: profile.category,
         estimateGapType: "present_but_under_documented",
         missingProof:
-          "This line is documented on the higher-cost estimate but was not located on the lower-cost estimate. " +
-          "Provenance: VERIFY (OCR) — the lower-cost estimate was machine-read from an image-only PDF (OCR_UNCERTAIN / LOWER_ESTIMATE_OCR_LIMITATION), so OCR may have dropped or garbled it. " +
+          "This line is documented on the annotated estimate but was not located on the comparison estimate. " +
+          "Provenance: VERIFY (OCR) — the comparison estimate was machine-read from an image-only PDF (OCR_UNCERTAIN / LOWER_ESTIMATE_OCR_LIMITATION), so OCR may have dropped or garbled it. " +
           "Treat this as unverified — not a confirmed omission — and VERIFY_AGAINST_SOURCE before relying on it.",
         nextAction:
-          "Compare this line against the legible source of the lower-cost estimate (or a re-OCR/text version) to confirm whether it is genuinely absent before treating it as a gap.",
+          "Compare this line against the legible source of the comparison estimate (or a re-OCR/text version) to confirm whether it is genuinely absent before treating it as a gap.",
         missingAuthorityTypes: ["legible lower-estimate source", ...profile.missingAuthorityTypes],
         score: profile.score,
         safetyImpact: profile.safetyImpact,
@@ -3049,12 +3049,12 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
     }
     return {
       findingType: "delta-missing-operation",
-      title: `Missing from lower-cost estimate: ${label}`,
+      title: `Missing from comparison estimate: ${label}`,
       label: profile.label,
       category: profile.category,
       estimateGapType: "missing_from_carrier",
       missingProof:
-        "Structured estimate comparison shows this operation is documented on this (higher-cost) estimate but is not present on the lower-cost estimate. This is estimate-difference evidence; it does not by itself prove the operation is required.",
+        "Structured estimate comparison shows this operation is documented on this (higher-cost) estimate but is not present on the comparison estimate. This is estimate-difference evidence; it does not by itself prove the operation is required.",
       nextAction:
         profile.nextAction,
       missingAuthorityTypes: profile.missingAuthorityTypes,
@@ -3074,20 +3074,20 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
       /\bSubl\b/i.test(`${delta.higherRow.opCode ?? ""} ${delta.lowerRow?.opCode ?? ""} ${delta.higherRow.rawText}`) ||
       /\balignment\b/i.test(delta.higherRow.description);
     const nextAction = isSublet
-      ? "Verify the sublet operation the lower-cost estimate priced (obtain its sublet invoice); adopt the allowance on this estimate or document why the operation is not needed."
+      ? "Verify the sublet operation the comparison estimate priced (obtain its sublet invoice); adopt the allowance on this estimate or document why the operation is not needed."
       : drivingCell === "paint"
-        ? "Verify whether this estimate should adopt the lower-cost estimate's paint/refinish allowance for this line, or document the included-operation basis for showing it at zero."
+        ? "Verify whether this estimate should adopt the comparison estimate's paint/refinish allowance for this line, or document the included-operation basis for showing it at zero."
         : drivingCell === "labor"
-          ? "Verify whether this estimate should adopt the lower-cost estimate's labor allowance for this line, or document why the hours are not needed."
-          : "Verify whether this estimate should adopt the lower-cost estimate's line price/materials allowance, or document why it is not needed.";
+          ? "Verify whether this estimate should adopt the comparison estimate's labor allowance for this line, or document why the hours are not needed."
+          : "Verify whether this estimate should adopt the comparison estimate's line price/materials allowance, or document why it is not needed.";
     return {
       findingType: "delta-carrier-higher",
-      title: `Lower-cost estimate allows MORE here: ${label}`,
+      title: `Comparison estimate allows MORE here: ${label}`,
       label: "CARRIER HIGHER",
       category: profile.category,
       estimateGapType: "present_but_under_documented",
       missingProof:
-        "On this matched line the lower-cost estimate carries the higher value (more hours or a priced sublet this estimate shows at zero). The cost gap runs in both directions — reconcile rather than assume either side is wrong.",
+        "On this matched line the comparison estimate carries the higher value (more hours or a priced sublet this estimate shows at zero). The cost gap runs in both directions — reconcile rather than assume either side is wrong.",
       nextAction,
       missingAuthorityTypes: ["reconciliation of the carrier-higher allowance"],
       score: Math.max(0, profile.score - 18),
@@ -3137,14 +3137,14 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   if (delta.kind === "reduced_paint") {
     return {
       findingType: "delta-reduced-paint",
-      title: `Lower-cost estimate allows less paint/refinish: ${label}`,
+      title: `Comparison estimate allows less paint/refinish: ${label}`,
       label: "ESTIMATE GAP ONLY",
       category: "refinish",
       estimateGapType: "reduced_by_carrier",
       missingProof:
-        "This estimate allows more paint/refinish time for this operation than the lower-cost estimate. Reconcile the difference against CCC/MOTOR/P-page refinish basis or document the lower allowance.",
+        "This estimate allows more paint/refinish time for this operation than the comparison estimate. Reconcile the difference against CCC/MOTOR/P-page refinish basis or document the lower allowance.",
       nextAction:
-        "Reconcile the paint/refinish hours with the lower-cost estimate, or document the included-operation basis for the lower allowance.",
+        "Reconcile the paint/refinish hours with the comparison estimate, or document the included-operation basis for the lower allowance.",
       missingAuthorityTypes: ["CCC/MOTOR/P-page refinish basis", "included-operation basis"],
       score: 48,
       safetyImpact: "low",
@@ -3161,7 +3161,7 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
       category: "parts_downgrade",
       estimateGapType: "present_but_under_documented",
       missingProof:
-        `The two estimates specify different part sources for this line — ${higherSource} here, ${lowerSource} on the lower-cost estimate. ` +
+        `The two estimates specify different part sources for this line — ${higherSource} here, ${lowerSource} on the comparison estimate. ` +
         "This is a parts-procurement dispute, not a pricing dispute: the price difference follows from the source. Document availability, the supplier quote, and whether the alternate part is permitted by the repair procedure and the vehicle owner.",
       nextAction:
         "Resolve the part source before the price: obtain the supplier quote for the alternate part, confirm availability and condition, and check the OEM position statement and any state statute governing non-OEM parts for this vehicle.",
@@ -3178,7 +3178,7 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   if (delta.kind === "part_or_price_difference") {
     return {
       findingType: "delta-part-price",
-      title: `Priced differently on lower-cost estimate: ${label}`,
+      title: `Priced differently on comparison estimate: ${label}`,
       label: "NEEDS INVOICE",
       category: "other",
       estimateGapType: "present_but_under_documented",
@@ -3198,14 +3198,14 @@ function describeLineItemDelta(delta: EstimateLineItemDelta): {
   const laborNoun = laborTypeNoun(delta.higherRow.laborType ?? delta.lowerRow?.laborType);
   return {
     findingType: "delta-reduced-labor",
-    title: `Lower-cost estimate allows less ${laborNoun}: ${label}`,
+    title: `Comparison estimate allows less ${laborNoun}: ${label}`,
     label: "ESTIMATE GAP ONLY",
     category: "labor_difference",
     estimateGapType: "reduced_by_carrier",
     missingProof:
-      `This estimate allows more ${laborNoun} for this operation than the lower-cost estimate. Reconcile the labor difference against MOTOR/CCC time basis or document the lower allowance.`,
+      `This estimate allows more ${laborNoun} for this operation than the comparison estimate. Reconcile the labor difference against MOTOR/CCC time basis or document the lower allowance.`,
     nextAction:
-      `Reconcile the ${laborNoun} hours with the lower-cost estimate, or document the included-operation basis for the lower allowance.`,
+      `Reconcile the ${laborNoun} hours with the comparison estimate, or document the included-operation basis for the lower allowance.`,
     missingAuthorityTypes: ["MOTOR/CCC labor-time basis", "included-operation basis"],
     score: 52,
     safetyImpact: "low",
@@ -3285,7 +3285,7 @@ function matchStructuredLineItemDeltas(
   // The annotated source PDF is the HIGHER-cost estimate, so its rows are the "higher" side and
   // carry the real anchors. The comparison estimate(s) are the LOWER-cost side. Each
   // "missing"/"reduced" delta then anchors precisely to the source row that documents it, which
-  // is where the lower-cost estimate's gap is visible.
+  // is where the comparison estimate's gap is visible.
   const higherRows: EstimateDeltaRow[] = [];
   // Track the running section header (e.g. "FRONT BUMPER & GRILLE", "RADIATOR
   // SUPPORT") in document order so each line inherits its category. This lets
@@ -3515,7 +3515,7 @@ function matchStructuredLineItemDeltas(
     return null;
   }
 
-  // The lower-cost estimate is OCR-derived when its text carries the OCR recovery
+  // The comparison estimate is OCR-derived when its text carries the OCR recovery
   // marker (image-only/scanned PDF). Soften "absent" language in that case.
   const lowerIsOcr = comparison.some((item) =>
     /OCR text recovered from a scanned/i.test(item.text)
@@ -3888,7 +3888,7 @@ function emitStructuredLineItemDeltaFindings(
     if (delta.annotate === false) continue;
 
     // Every delta's higherRow is a source (annotated, higher-cost) row, so it carries the
-    // anchor for the line where the lower-cost estimate's gap is visible. Fall back to a
+    // anchor for the line where the comparison estimate's gap is visible. Fall back to a
     // section/description match only if the source anchor was filtered out upstream.
     let anchor: EstimateRowAnchor | undefined = delta.higherRow.anchorId
       ? deltaMatch.anchorById.get(delta.higherRow.anchorId)
@@ -3912,7 +3912,7 @@ function emitStructuredLineItemDeltaFindings(
     // contradicts itself. Only a missing_operation member carries the tag
     // upstream now; the kind check here is defense in depth.
     if ((delta.statusLabels ?? []).includes("SECTION_MISSED") && delta.kind === "missing_operation") {
-      meta.title = `Section missing from lower-cost estimate: ${delta.higherRow.section ?? "section"} — ${delta.higherRow.description}`;
+      meta.title = `Section missing from comparison estimate: ${delta.higherRow.section ?? "section"} — ${delta.higherRow.description}`;
       // Only the GENERIC gap label upgrades to SECTION MISSING — specialized
       // authority labels (NEEDS ADAS / NEEDS OEM / NEEDS INVOICE) drive their
       // own classification lanes and must survive the section marking.
@@ -4131,7 +4131,7 @@ function emitTotalsDeltaFindings(
                   : delta.kind === "category_only_on_lower"
                     ? `Category only on the lower estimate: ${delta.category}`
                     : delta.kind === "category_missing_on_lower"
-                      ? `Whole category missing from the lower-cost estimate: ${delta.category}`
+                      ? `Whole category missing from the comparison estimate: ${delta.category}`
                       : `Category amount difference: ${delta.category}`,
         category: isRateKind ? "labor_difference" : "other",
         label:
@@ -5456,7 +5456,7 @@ function classifyLineItemDeltaProfile(delta: EstimateLineItemDelta): {
       label: "NEEDS ADAS",
       category: "scan_diagnostic",
       missingAuthorityTypes: ["ADAS/calibration procedure", "scan or calibration result", "completion proof"],
-      nextAction: "Attach the scan, calibration, service-mode, firmware, DTC research, and completion support for this operation, or document why it is not required — it is documented on this estimate but missing from the lower-cost estimate.",
+      nextAction: "Attach the scan, calibration, service-mode, firmware, DTC research, and completion support for this operation, or document why it is not required — it is documented on this estimate but missing from the comparison estimate.",
       score: 82,
       safetyImpact: "high",
       priority: "high",
@@ -5467,7 +5467,7 @@ function classifyLineItemDeltaProfile(delta: EstimateLineItemDelta): {
       label: "ESTIMATE GAP ONLY",
       category: /\btpms|sensor\b/.test(text) ? "parts_downgrade" : "structural_or_fit_verification",
       missingAuthorityTypes: ["supplement line", "invoice or completion proof", "repair-path support when applicable"],
-      nextAction: "Review this operation (documented on this estimate, missing from the lower-cost estimate), then attach supplement, invoice, completion, or repair-path support for it.",
+      nextAction: "Review this operation (documented on this estimate, missing from the comparison estimate), then attach supplement, invoice, completion, or repair-path support for it.",
       score: Math.min(86, 68 + Math.round(Math.min(amount, 500) / 50) + Math.round(Math.min(labor, 4) * 2)),
       safetyImpact: "high",
       priority: "high",
@@ -5477,7 +5477,7 @@ function classifyLineItemDeltaProfile(delta: EstimateLineItemDelta): {
     label: "ESTIMATE GAP ONLY",
     category: "not_included_operation",
     missingAuthorityTypes: ["supplement line", "invoice or completion proof"],
-    nextAction: "Confirm whether this operation should also be on the lower-cost estimate, or document why it is not required there — it is present on this estimate but missing from the lower-cost estimate.",
+    nextAction: "Confirm whether this operation should also be on the comparison estimate, or document why it is not required there — it is present on this estimate but missing from the comparison estimate.",
     score: Math.min(76, 52 + Math.round(Math.min(amount, 500) / 50) + Math.round(Math.min(labor, 4) * 2)),
     safetyImpact: amount >= 250 || labor >= 1 ? "medium" : "low",
     priority: amount >= 250 || labor >= 1 ? "high" : "medium",
@@ -5550,8 +5550,8 @@ function buildLineItemDeltaSupportSummary(params: {
   sourceName: string;
   comparisonName: string;
 }) {
-  // The annotated source is the higher-cost estimate (delta.higherRow); the comparison is the
-  // lower-cost estimate (delta.lowerRow, or absent when the operation is missing there).
+  // The annotated source is the annotated estimate (delta.higherRow); the comparison is the
+  // comparison estimate (delta.lowerRow, or absent when the operation is missing there).
   const annotatedLocation = describeDeltaRowLocation(params.delta.higherRow, params.sourceName)
     || describeAnchorLocation(params.anchor, params.sourceName);
   const comparisonLocation = params.delta.lowerRow
@@ -5566,10 +5566,10 @@ function buildLineItemDeltaSupportSummary(params: {
     `Paint delta: ${formatDeltaHours(params.delta.paintDelta)} hours.`,
     `Pairing basis: ${params.delta.matchBasis}.`,
     // Swallow an existing leading "the" so "on the lower estimate" never
-    // doubles into "on the the lower-cost estimate" (RO 22140 Test 3 audit).
+    // doubles into "on the the comparison estimate" (RO 22140 Test 3 audit).
     params.delta.summary
       .replace(/\b(?:the\s+)?higher estimate\b/gi, "this estimate")
-      .replace(/\b(?:the\s+)?lower estimate\b/gi, "the lower-cost estimate"),
+      .replace(/\b(?:the\s+)?lower estimate\b/gi, "the comparison estimate"),
   ].join(" ");
 }
 

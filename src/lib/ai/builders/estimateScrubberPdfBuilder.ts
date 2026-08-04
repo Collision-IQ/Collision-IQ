@@ -376,7 +376,7 @@ function selectScrubTarget(comparisonRows: EstimateComparisonRow[]): AnnotatedEs
     return {
       role: carrierLower ? "carrier" : "shop",
       label: carrierLower ? "Lower-cost carrier estimate" : "Lower-cost shop estimate",
-      basis: `The available comparison data shows the carrier estimate at ${formatMoney(totals.carrier)} and the shop estimate at ${formatMoney(totals.shop)}. The lower-cost estimate is scrubbed first because it is the estimate most likely to omit, reduce, or under-document disputed work.`,
+      basis: `The available comparison data shows the carrier estimate at ${formatMoney(totals.carrier)} and the shop estimate at ${formatMoney(totals.shop)}. The comparison estimate is scrubbed first because it is the estimate most likely to omit, reduce, or under-document disputed work.`,
       lowerCostTotal: carrierLower ? totals.carrier : totals.shop,
       higherCostTotal: carrierLower ? totals.shop : totals.carrier,
     };
@@ -387,7 +387,7 @@ function selectScrubTarget(comparisonRows: EstimateComparisonRow[]): AnnotatedEs
       role: "carrier",
       label: "Lower-cost carrier estimate",
       basis:
-        "The file contains competing estimate comparison data, but exact competing totals were not isolated in structured form. The carrier estimate is treated as the scrub target by default because carrier estimates are commonly the lower-cost estimate in repair-scope disputes unless the user selects another estimate.",
+        "The file contains competing estimate comparison data, but exact competing totals were not isolated in structured form. The carrier estimate is treated as the scrub target by default because carrier estimates are commonly the comparison estimate in repair-scope disputes unless the user selects another estimate.",
     };
   }
 

@@ -758,7 +758,7 @@ run("auto target selects the only estimate PDF independently when no comparison 
 run("carrier target avoids appraisal, academy, and higher-cost preliminary PDFs", () => {
   const carrier = pdfAttachment({
     id: "carrier",
-    filename: "Insurer lower-cost estimate.pdf",
+    filename: "Insurer comparison estimate.pdf",
     text: "Insurer estimate lower cost total $3,200.00 ADAS calibration",
   });
   const appraisal = pdfAttachment({
@@ -782,7 +782,7 @@ run("carrier target avoids appraisal, academy, and higher-cost preliminary PDFs"
   assert.equal(selection.attachment.id, "carrier");
   assert.equal(selection.selectedEstimateRole, "carrier");
   assert.equal(selection.selectedEstimateTotal, 3200);
-  assert.match(selection.selectionReason, /carrier\/lower-cost estimate PDF/i);
+  assert.match(selection.selectionReason, /carrier\/comparison estimate PDF/i);
 });
 
 run("shop target selects shop PDF when both carrier and shop estimates are uploaded", () => {

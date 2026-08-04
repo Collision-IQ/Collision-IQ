@@ -3177,7 +3177,7 @@ export function compareEstimateTotals(params: {
       category: lane.label,
       higher: null,
       lower: { category: lane.label, hours: null, rate: null, cost: lane.amount },
-      summary: `${lane.label} of ${fmtMoney(lane.amount)} is charged on the lower-cost estimate and does not appear on this one. Confirm which jurisdiction's tax lanes apply to this repair.`,
+      summary: `${lane.label} of ${fmtMoney(lane.amount)} is charged on the comparison estimate and does not appear on this one. Confirm which jurisdiction's tax lanes apply to this repair.`,
       amount: lane.amount,
     });
   }
@@ -3188,7 +3188,7 @@ export function compareEstimateTotals(params: {
       category: lane.label,
       higher: { category: lane.label, hours: null, rate: null, cost: lane.amount },
       lower: null,
-      summary: `${lane.label} of ${fmtMoney(lane.amount)} is charged on this estimate and does not appear on the lower-cost estimate. Confirm which jurisdiction's tax lanes apply to this repair.`,
+      summary: `${lane.label} of ${fmtMoney(lane.amount)} is charged on this estimate and does not appear on the comparison estimate. Confirm which jurisdiction's tax lanes apply to this repair.`,
       amount: lane.amount,
     });
   }

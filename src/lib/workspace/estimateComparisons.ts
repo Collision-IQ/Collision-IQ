@@ -128,8 +128,10 @@ function deriveDelta(
   }
 
   const deltaType = deriveDeltaType(lhsValue, rhsValue);
-  if (deltaType === "added") return "Only on left";
-  if (deltaType === "removed") return "Only on right";
+  // Left/right is the table's internal geometry, not something a reader of a
+  // repair file can act on. Name the DOCUMENT, not the column it landed in.
+  if (deltaType === "added") return "Only on this estimate";
+  if (deltaType === "removed") return "Only on the comparison estimate";
   if (deltaType === "same") return "Aligned";
   if (deltaType === "changed") return "Changed";
   return null;

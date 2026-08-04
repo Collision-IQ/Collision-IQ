@@ -3680,7 +3680,7 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(result.debugTrace.authoritySearchTrace.googleDriveOrInternalSearchRan, false);
   });
 
-  await run("delta citation density annotates the higher-cost estimate and lists lower-cost gaps", async () => {
+  await run("delta citation density annotates the higher-cost estimate and lists comparison gaps", async () => {
     // The Delta report annotates the HIGHER-cost estimate and highlights the lines the
     // lower-cost estimate is missing/reduced, anchored where they exist on the higher estimate.
     const sourcePdfBytes = await createShop21896HigherEstimatePdf();
@@ -3721,8 +3721,8 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.match(joined, /Amount delta: \$5?|\$620\.00|\$480\.00/i);
     assert.match(joined, /Labor delta: (?:3\.0|2\.5|1\.5) hours/i);
     assert.match(joined, /Delta category: missing_operation/i);
-    assert.match(joined, /not present on the lower-cost estimate/i);
-    assert.match(joined, /documented on this \(higher-cost\) estimate but is not present on the lower-cost estimate/i);
+    assert.match(joined, /not present on the comparison estimate/i);
+    assert.match(joined, /documented on this \(higher-cost\) estimate but is not present on the comparison estimate/i);
     assert.match(joined, /TPMS sensor/i);
     assert.match(joined, /Rear suspension/i);
     assert.match(joined, /Crossmember/i);

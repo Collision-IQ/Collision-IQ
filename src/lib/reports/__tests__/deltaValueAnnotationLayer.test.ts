@@ -59,7 +59,11 @@ describe("planDeltaValueAnnotations on the 22047 pair", () => {
 
   it("places keyed notes for MISSED/shortfall/value findings and reports the reverse pass", () => {
     expect(plan.notes.length).toBeGreaterThanOrEqual(4);
-    expect(plan.notes.some((note) => /MISSED on EOR/.test(note.request.text))).toBe(true);
+    // Descriptive, not accusatory, and sourced from deltaRules.json — RO 22116
+    // shipped "MISSED on AMERICAN FAMILY" 44 times, including on deductions the
+    // shop itself took off and on operations the carrier bundles elsewhere.
+    expect(plan.notes.some((note) => /not written on EOR/.test(note.request.text))).toBe(true);
+    expect(plan.notes.every((note) => !/MISSED on/.test(note.request.text))).toBe(true);
     expect(plan.notes.some((note) => /On EOR only:/.test(note.request.text))).toBe(true);
     expect(plan.unplacedNotes).toEqual([]);
   });
