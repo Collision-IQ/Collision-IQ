@@ -559,6 +559,10 @@ export type AnnotatedEstimateFindingGeneratorContext = {
   uploadedFileNames: string[];
   sourceText?: string | null;
   comparisonEstimateTexts: ComparisonEstimateText[];
+  /** Mutable sink for limits the reader must be told about. Suppressing a
+   *  comparison is defensible; suppressing it invisibly is not — an empty
+   *  report reads as "no differences found". */
+  extractionWarnings?: string[];
   /** Measured word layer of comparison estimate PDFs. When present, the
    * structured delta path parses BOTH sides with the typed delta engine —
    * symmetric extraction is what keeps glued text layers from producing
@@ -1558,6 +1562,7 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
       uploadedFileNames: params.uploadedFileNames ?? [],
       sourceText: params.sourceText,
       comparisonEstimateTexts: params.comparisonEstimateTexts ?? [],
+      extractionWarnings: warnings,
       comparisonEstimateWords,
       resolvedAuthorities: params.resolvedAuthorities,
       vehicleMake: params.vehicleMake,
@@ -3406,8 +3411,17 @@ function matchStructuredLineItemDeltas(
       const subtotalsOk = (rows: DeltaEngineRow[], pages: Map<number, DeltaEngineWord[]>) => {
         const printed = parseDeltaEngineSubtotals(pages);
         if (!printed || (printed.labor === null && printed.paint === null)) return true; // nothing to reconcile against
-        const laborSum = rows.reduce((total, row) => total + (row.labor ?? 0), 0);
-        const paintSum = rows.reduce((total, row) => total + (row.paint ?? 0), 0);
+        // A SUBTOTALS rule closes the ESTIMATE BODY. What follows it on a
+        // supplement is the SUPPLEMENT SUMMARY — a changelog of Deleted and
+        // Added items, history rather than inventory — and its deleted lines
+        // carry NEGATIVE hours. Summing those against a subtotal that never
+        // included them invents a shortfall: RO 22116's SOR-2 prints 44.7
+        // labor hours, its body rows sum to exactly 44.7, and its changelog
+        // pages contribute -2.7, so the extract looked broken when it was
+        // perfect and every line-item delta was suppressed.
+        const body = printed.page ? rows.filter((row) => row.page <= printed.page) : rows;
+        const laborSum = body.reduce((total, row) => total + (row.labor ?? 0), 0);
+        const paintSum = body.reduce((total, row) => total + (row.paint ?? 0), 0);
         const laborOk = printed.labor === null || Math.abs(laborSum - printed.labor) <= 0.21;
         const paintOk = printed.paint === null || Math.abs(paintSum - printed.paint) <= 0.21;
         return laborOk && paintOk;
@@ -3422,6 +3436,17 @@ function matchStructuredLineItemDeltas(
           subjectReconciles,
           competingReconciles,
         });
+        // Silence about a parsing limit is how an empty report reads as "no
+        // differences found". Suppression is defensible; suppression the
+        // reader cannot see is not.
+        const failedSide = !subjectReconciles
+          ? !competingReconciles
+            ? "both estimates"
+            : "this estimate"
+          : "the comparison estimate";
+        context.extractionWarnings?.push(
+          `Line-item comparison was withheld: the typed columns of ${failedSide} do not reconcile to that document's own printed SUBTOTALS, so any line-level difference could be an extraction error rather than a real one. Totals-level findings are unaffected.`
+        );
         return null;
       }
       // Anchor resolution for the engine path validates every line-number
