@@ -3680,7 +3680,43 @@ function loadOemCitationDensityRouteWithMocks({ report, attachments, driveEnable
     assert.equal(result.debugTrace.authoritySearchTrace.googleDriveOrInternalSearchRan, false);
   });
 
-  await run("delta citation density annotates the higher-cost estimate and lists comparison gaps", async () => {
+  await run("identity gate blocks a comparison from another claim and emits no artifacts", async () => {
+  // A delta report comparing two different vehicles is not a degraded report,
+  // it is a fabricated one. The gate is a precondition, not a warning.
+  const sourcePdfBytes = await createSourcePdf();
+  const SHOP_TEXT =
+    "Insured:REARDON, CHRISTOPHERPolicy #:Claim #:012283486000000800001\n" +
+    "RO Number: 22059\n2022 TESL Model S Plaid AWD 4D\n" +
+    "VIN:    5YJSA1E65NF488007Interior Color:WHITE";
+  const OTHER_CLAIM_TEXT =
+    "Claim #:\nWorkfile ID:\n8848396030000002-01\ncbf21b7c\n" +
+    "Insured:David DorseyOwner Policy #:884839603\n2022 TESL Model 3 RWD\n" +
+    "VIN:5YJ3E1EA9NF238704Interior Color:BLACK";
+
+  let blocked = null;
+  try {
+    await buildAnnotatedCitationDensityEstimatePdf({
+      sourcePdfBytes,
+      sourcePdfName: "Shop 22059.pdf",
+      sourceText: SHOP_TEXT,
+      comparisonEstimateTexts: [{ fileName: "EOR 22182.pdf", text: OTHER_CLAIM_TEXT, estimateRole: "carrier" }],
+      findings: [],
+      request: { estimateRole: "shop" },
+    });
+  } catch (error) {
+    blocked = error;
+  }
+  assert.ok(blocked, "expected the identity gate to block the comparison");
+  assert.match(blocked.userMessage, /^BLOCKED — comparison not run\./);
+  assert.match(blocked.userMessage, /Mismatch: .*vin/);
+  assert.match(blocked.userMessage, /Mismatch: .*claim number/);
+  assert.equal(blocked.status, 422);
+  // Both documents are named so an operator can see which pair was refused.
+  assert.match(blocked.userMessage, /Shop 22059\.pdf/);
+  assert.match(blocked.userMessage, /EOR 22182\.pdf/);
+});
+
+await run("delta citation density annotates the higher-cost estimate and lists comparison gaps", async () => {
     // The Delta report annotates the HIGHER-cost estimate and highlights the lines the
     // lower-cost estimate is missing/reduced, anchored where they exist on the higher estimate.
     const sourcePdfBytes = await createShop21896HigherEstimatePdf();

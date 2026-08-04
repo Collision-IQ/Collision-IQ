@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { buildBlockedMessage, compareClaimIdentity, readClaimIdentity } from "./claimIdentityGate";
 import {
   PDFDocument,
   StandardFonts,
@@ -1442,6 +1443,45 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     artifactReportType: reportIdentity.reportType,
     findingIdPrefixCheckPassed: true,
   };
+
+  // ── IDENTITY GATE ───────────────────────────────────────────────────────
+  // A delta report comparing two different vehicles is not a degraded report,
+  // it is a fabricated one, so this is a precondition and not a warning. It
+  // blocks ONLY on positive disagreement of a strong key (VIN, claim number)
+  // — absent evidence never proves a mismatch, and the weak keys are the
+  // producer's formatting choice (see claimIdentityGate).
+  const gateSourceIdentity = readClaimIdentity(params.sourceText ?? "");
+  for (const comparison of params.comparisonEstimateTexts ?? []) {
+    if (!comparison.text?.trim()) continue;
+    const comparisonIdentity = readClaimIdentity(comparison.text);
+    const verdict = compareClaimIdentity(gateSourceIdentity, comparisonIdentity);
+    if (!verdict.blocked) continue;
+    appendToolUsageTrace(trace, {
+      tool: "claim_identity_gate",
+      ran: true,
+      candidatesFound: 2,
+      candidatesAccepted: 0,
+      candidatesRejected: 1,
+      droppedReasons: [`identity mismatch on ${verdict.conflicting.join(", ")}`],
+    });
+    throw new CitationDensityAnnotationError(
+      buildBlockedMessage({
+        target: { fileName: sourcePdfName, identity: gateSourceIdentity },
+        rejected: { fileName: comparison.fileName ?? "comparison estimate", identity: comparisonIdentity },
+        verdict,
+      }),
+      trace
+    );
+  }
+  appendToolUsageTrace(trace, {
+    tool: "claim_identity_gate",
+    ran: (params.comparisonEstimateTexts ?? []).some((item) => item.text?.trim()),
+    candidatesFound: (params.comparisonEstimateTexts ?? []).length,
+    candidatesAccepted: (params.comparisonEstimateTexts ?? []).length,
+    candidatesRejected: 0,
+    droppedReasons: [],
+  });
+
   appendToolUsageTrace(trace, {
     tool: "document_classifier",
     ran: true,
