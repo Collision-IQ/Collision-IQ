@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import DELTA_RULES from "./data/deltaRules.json";
+import { describePiiExposure, scanExportForPii } from "@/lib/privacy/exportPiiScanner";
 import { canonicalOperationKey } from "./operationAliases";
 import { buildBlockedMessage, compareClaimIdentity, readClaimIdentity } from "./claimIdentityGate";
 import {
@@ -2289,6 +2290,24 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
         reportType: reportIdentity.reportType,
       }
     );
+  }
+
+  // EXPORT BOUNDARY. The annotated estimate is built by COPYING the source
+  // PDF's own pages, so no text-level redaction reaches it — the identifiers
+  // sit in the original page content. Scanning the finished artifact is the
+  // only way to know, and saying so is the minimum: an export that still
+  // carries a VIN, a claim number or a carrier name must not look protected
+  // just because the generated reports around it are.
+  try {
+    const exposure = scanExportForPii(params.sourceText ?? "");
+    if (exposure.length > 0) {
+      warnings.push(
+        `${describePiiExposure("The annotated estimate", exposure)}. It reproduces the original estimate pages, which cannot be redacted by text rules — the page content itself must be redacted before this file is shared outside the system.`
+      );
+    }
+  } catch {
+    // Never let the privacy check break a report; its absence is reported by
+    // the scanner's own tests, not by a thrown error here.
   }
 
   // R03 — every annotation derives from a finding, and every anchored finding

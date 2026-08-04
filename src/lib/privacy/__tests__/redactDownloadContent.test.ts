@@ -25,20 +25,28 @@ import { redactDownloadContent } from "../redactDownloadContent";
 
 describe("prose survives — the label words are ordinary English", () => {
   it("does not eat the sentence stating the gap (Test 6)", () => {
+    // The carrier name IS now redacted on export, so the sentence is no longer
+    // byte-identical. The invariant this guards is the original defect: the
+    // dollar figures must survive whole, with no orphaned fragment.
     const prose =
       "Two repair estimates exist for this claim: the shop's estimate at $26,006.59 " +
       "and USAA's estimate at $22,886.68 — a gap of about $3,120.";
     const out = redactDownloadContent(prose);
-    expect(out).toBe(prose);
-    expect(out).not.toContain("REDACTED");
     expect(out).toContain("$26,006.59");
+    expect(out).toContain("$22,886.68");
+    expect(out).toContain("the shop's estimate at");
+    expect(out).not.toMatch(/REDACTED_CLAIM/);
+    expect(out).not.toMatch(/, \d{3}\.\d{2}/);
   });
 
   it("does not eat the same sentence at the Test 93 figures", () => {
     const prose =
       "Two repair estimates exist for this claim: the shop's estimate at $8,745.29 " +
       "and Erie's at $3,642.51.";
-    expect(redactDownloadContent(prose)).toBe(prose);
+    const out = redactDownloadContent(prose);
+    expect(out).toContain("$8,745.29");
+    expect(out).toContain("$3,642.51");
+    expect(out).not.toMatch(/REDACTED_CLAIM/);
   });
 
   it("leaves a common noun after a label alone", () => {
@@ -83,9 +91,12 @@ describe("real identifiers are still redacted — under-redaction is the worse b
 
   it("redacts street addresses and masks VINs", () => {
     expect(redactDownloadContent("Address: 120 Anderson Farm Rd")).toContain("[REDACTED_ADDRESS]");
+    // Export policy: the last 8 of the VIN never leave the system, so only the
+    // first 9 characters survive.
     const vin = redactDownloadContent("VIN: 5YJSA1E65NF488007");
     expect(vin).not.toContain("5YJSA1E65NF488007");
-    expect(vin).toContain("5YJSA1E65NF");
+    expect(vin).toContain("5YJSA1E65");
+    expect(vin).not.toContain("NF488007");
   });
 
   it("preserves the tail when a real value is followed by prose", () => {
@@ -95,9 +106,13 @@ describe("real identifiers are still redacted — under-redaction is the worse b
   });
 });
 
-describe("the insurer is deliberately not redacted", () => {
-  it("keeps the carrier name, which is a company and not personal data", () => {
+describe("the insurer IS redacted on export", () => {
+  // Reversed by explicit instruction: insurance information is protected once
+  // it leaves the system, even though a company is not personal data.
+  it("replaces the carrier name and keeps the money", () => {
     const out = redactDownloadContent("USAA's estimate at $22,886.68");
-    expect(out).toContain("USAA");
+    expect(out).not.toContain("USAA");
+    expect(out).toContain("[REDACTED_INSURER]");
+    expect(out).toContain("$22,886.68");
   });
 });

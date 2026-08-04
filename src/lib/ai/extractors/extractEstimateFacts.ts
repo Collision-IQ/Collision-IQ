@@ -6,7 +6,7 @@ import {
 } from "../vehicleContext";
 import type { EstimateFacts, VehicleIdentity } from "../types/analysis";
 
-const COMMON_INSURERS = [
+export const COMMON_INSURERS = [
   "GEICO",
   "Progressive",
   "State Farm",

@@ -1,4 +1,21 @@
-const VIN_PATTERN = /\b[A-HJ-NPR-Z0-9]{17}\b/g;
+/**
+ * EXPORT REDACTION POLICY.
+ *
+ * Inside the system the full record is intact. Everything that LEAVES the
+ * system is redacted here: personal identity, the last 8 of the VIN, and
+ * insurance information.
+ *
+ * A word boundary is useless for finding a VIN in an estimate. CCC prints
+ * "VIN:5YJ3E1EA6PF691987Interior Color:WHITE" — the VIN is welded to the next
+ * label, so /\b[A-Z0-9]{17}\b/ matches NOTHING and the VIN exports in full.
+ * Scan a sliding 17-character window instead and accept on the ISO 3779 check
+ * digit, the same rule the identity gate uses.
+ */
+import { COMMON_INSURERS } from "../ai/extractors/extractEstimateFacts";
+
+const VIN_ALPHABET = /^[A-HJ-NPR-Z0-9]{17}$/;
+/** Characters of the VIN that survive export. 17 - 8 = 9. */
+const VIN_VISIBLE_PREFIX = 9;
 
 const STREET_ADDRESS_PATTERN =
 	/\b\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,5}\s(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl)\b\.?/gi;
@@ -23,6 +40,13 @@ type ValueShape = {
 	pattern: RegExp;
 	/** Extra shape test on the matched span. */
 	accept?: (span: string) => boolean;
+};
+
+/** A carrier name: capitalised words, no digits. "Insurance"/"Company" stay in
+ *  the span so "American Family Insurance" redacts whole. */
+const INSURER_SHAPE: ValueShape = {
+	pattern: /^[A-Z][A-Za-z&'.-]*(?:\s+[A-Z][A-Za-z&'.-]*){0,4}/,
+	accept: (span) => !/\d/.test(span) && !/[$£€]/.test(span),
 };
 
 const HAS_DIGIT = /\d/;
@@ -75,10 +99,17 @@ const LABEL_RULES: LabelRule[] = [
 		replacementToken: "ADDRESS",
 		valueShape: ADDRESS_SHAPE,
 	},
-	// NOTE: the insurer/carrier name is deliberately NOT redacted — it is a
-	// corporation, not personal data, and the claim reports are about an
-	// insurance dispute. Redacting it produced "[REDACTED_INSURER]" in the
-	// repair-intelligence PDF while the customer report showed the carrier.
+	// The insurer WAS deliberately left in place — a company is not personal
+	// data, and the reports are about an insurance dispute. That is reversed by
+	// an explicit instruction: insurance information is redacted on export.
+	// Redacting it everywhere also removes the inconsistency the old note
+	// described, where one PDF showed "[REDACTED_INSURER]" and another showed
+	// the carrier.
+	{
+		labels: ["insurer", "insurance company", "insurance carrier", "carrier", "insurance"],
+		replacementToken: "INSURER",
+		valueShape: INSURER_SHAPE,
+	},
 	{
 		labels: ["claim", "claim number", "claim no", "claim #", "claim id"],
 		replacementToken: "CLAIM",
@@ -130,10 +161,28 @@ export function redactDownloadContent(text: string): string {
 		return `${prefix}[REDACTED_PLATE]`;
 	});
 
-	// VIN is masked instead of fully removed.
+	// A carrier is named in prose far more often than after an "Insurer:" label
+	// ("USAA's estimate at $22,886.68"), so sweep the known-carrier vocabulary
+	// too. It is the same list the extractors use — one vocabulary, not two.
+	redacted = redactKnownCarriers(redacted);
+
+	// VIN keeps its first 9 characters; the last 8 never leave the system.
 	redacted = maskVinInText(redacted);
 
 	return redacted;
+}
+
+/** Replace any carrier from the shared vocabulary, longest name first so
+ *  "American Family Insurance" is not left as "[REDACTED_INSURER] Insurance". */
+function redactKnownCarriers(input: string): string {
+	let output = input;
+	for (const carrier of [...COMMON_INSURERS].sort((a, b) => b.length - a.length)) {
+		output = output.replace(
+			new RegExp(`\\b${escapeRegex(carrier)}(?:'s)?(?:\\s+(?:Insurance|Mutual|Group|Company|Co\\.?))?\\b`, "gi"),
+			"[REDACTED_INSURER]"
+		);
+	}
+	return output;
 }
 
 function applyLabelRule(input: string, rule: LabelRule): { text: string; capturedValues: string[] } {
@@ -179,7 +228,45 @@ function applyLabelRule(input: string, rule: LabelRule): { text: string; capture
 }
 
 function maskVinInText(input: string): string {
-	return input.replace(VIN_PATTERN, (vin) => `${vin.slice(0, 11)}******`);
+	let output = "";
+	let index = 0;
+	while (index < input.length) {
+		const window = input.slice(index, index + 17);
+		const upper = window.toUpperCase();
+		if (window.length === 17 && VIN_ALPHABET.test(upper) && isExportVin(upper)) {
+			output += window.slice(0, VIN_VISIBLE_PREFIX) + "*".repeat(17 - VIN_VISIBLE_PREFIX);
+			index += 17;
+			continue;
+		}
+		output += input[index];
+		index += 1;
+	}
+	return output;
+}
+
+const VIN_TRANSLITERATION: Record<string, number> = {
+	A: 1, B: 2, C: 3, D: 4, E: 5, F: 6, G: 7, H: 8,
+	J: 1, K: 2, L: 3, M: 4, N: 5, P: 7, R: 9,
+	S: 2, T: 3, U: 4, V: 5, W: 6, X: 7, Y: 8, Z: 9,
+};
+const VIN_WEIGHTS = [8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2];
+
+/** ISO 3779 check digit. Without it a sliding window would mangle any 17
+ *  characters that happen to sit together — part numbers, hashes, ids. */
+function isExportVin(vin: string): boolean {
+	// A run of digits is a claim or policy number, not a VIN — about one in
+	// eleven random 17-character windows passes the check digit, and masking the
+	// middle of a claim number would corrupt it rather than protect it.
+	if ((vin.match(/[A-Z]/g) ?? []).length < 3) return false;
+	let sum = 0;
+	for (let i = 0; i < 17; i += 1) {
+		const char = vin[i];
+		const value = /\d/.test(char) ? Number(char) : VIN_TRANSLITERATION[char];
+		if (value === undefined) return false;
+		sum += value * VIN_WEIGHTS[i];
+	}
+	const remainder = sum % 11;
+	return vin[8] === (remainder === 10 ? "X" : String(remainder));
 }
 
 function redactCapturedValues(input: string, values: Set<string>): string {
