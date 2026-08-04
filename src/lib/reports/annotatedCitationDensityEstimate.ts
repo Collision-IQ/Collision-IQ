@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import DELTA_RULES from "./data/deltaRules.json";
+import { canonicalOperationKey } from "./operationAliases";
 import { buildBlockedMessage, compareClaimIdentity, readClaimIdentity } from "./claimIdentityGate";
 import {
   PDFDocument,
@@ -5869,6 +5870,24 @@ export function classifyPartSource(rowText: string): PartSourceKind[] {
   return kinds;
 }
 
+/**
+ * Resolve a row's canonical operation from raw estimate row text.
+ *
+ * A row carries its line number and, in glued text layers, its price welded to
+ * the last word: "75 **A/M Urethane Kit135.00". The alias "urethane kit" needs
+ * a word boundary that "Kit135" destroys, so the row resolved to null and the
+ * aftermarket substitution went unreported. Strip the leading line number and
+ * separate letter-to-digit boundaries before resolving.
+ */
+function resolveRowOperation(rowText: string): string | null {
+  const cleaned = (rowText ?? "")
+    .replace(/^\s*(?:line\s*)?\d{1,4}\b/i, " ")
+    .replace(/([A-Za-z])(\d)/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+  return canonicalOperationKey(cleaned);
+}
+
 function buildPartSourceFindings(params: {
   selectedAnchors: EstimateRowAnchor[];
   selectedVisualLines?: PdfTextLine[];
@@ -5893,9 +5912,16 @@ function buildPartSourceFindings(params: {
       droppedReasons: [],
     };
   }
-  const selectedRows = params.selectedAnchors
+  // FIX 2 — the entry gate above asks whether ANOTHER detector already found a
+  // part-source issue, which is circular: on RO 22116 nothing else detected the
+  // carrier's "**A/M Urethane Kit", so the pass would never run. Relevance
+  // belongs to the DOCUMENTS. The early exit is kept for the case where neither
+  // document carries a non-OEM token at all (it keeps the pass off documents it
+  // has no business reading), and re-opened below when one does.
+  const allSelectedRows = params.selectedAnchors
     .map((anchor) => buildPartSourceRowFromAnchor(anchor, params.sourcePdfName))
-    .filter((row): row is PartSourceRow => row.sourceKinds.length > 0);
+    .filter((row): row is PartSourceRow => Boolean(row));
+  const selectedRows = allSelectedRows.filter((row) => row.sourceKinds.length > 0);
   const comparisonRows = params.comparisonEstimateTexts.flatMap((source) => buildPartSourceRowsFromText(source));
   const droppedReasons: PartSourceFindingResult["droppedReasons"] = [];
   const allSelectedNonOemRows = selectedRows.filter((row) => hasNonOemPartSource(row.sourceKinds));
@@ -5979,6 +6005,54 @@ function buildPartSourceFindings(params: {
       sourceDocumentRole: params.sourceDocumentRole,
       selectedFileName: params.sourcePdfName,
     }));
+  }
+
+  // FIX 3 — a part-source difference is SYMMETRIC, and the direction this
+  // detector could not see is the common one: the CARRIER specifies
+  // aftermarket where the shop specifies an OEM-approved product. RO 22116 is
+  // exactly that — "**A/M Urethane Kit" $35.00 against "BetaSeal Express
+  // Urethane" $37.00. The $2 price gap is immaterial and that is the point:
+  // the dispute is the PART, not the money, so a value-delta threshold will
+  // never surface it.
+  //
+  // The match must be an OPERATION identity, never a description resemblance.
+  // Scoring alone paired "**A/M Cover Car" with "R&I Floor cover" on the
+  // shared generic token "cover" — the same class of wrong pairing that the
+  // similarity rules exist to stop. The finding still ANCHORS on the annotated
+  // document, because that is the page being marked.
+  const comparisonNonOemRows = comparisonRows.filter((row) => hasNonOemPartSource(row.sourceKinds));
+  const emittedIds = new Set(findings.map((finding) => finding.id));
+  for (const comparisonRow of comparisonNonOemRows) {
+    const comparisonOp = resolveRowOperation(comparisonRow.rowText);
+    const anchorRow = comparisonOp
+      ? allSelectedRows.find((row) => resolveRowOperation(row.rowText) === comparisonOp) ?? null
+      : null;
+    if (!anchorRow) {
+      droppedReasons.push({
+        anchorId: null,
+        rowText: comparisonRow.rowText,
+        reason: comparisonOp
+          ? `comparison-side non-OEM row (${comparisonOp}) has no same-operation row on the annotated estimate`
+          : "comparison-side non-OEM row resolves to no canonical operation; a description resemblance is not a part identity",
+      });
+      continue;
+    }
+    if (selectedNonOemRows.some((row) => row.anchorId && row.anchorId === anchorRow.anchorId)) continue;
+    const reverse = findBestPartSourceComparisonRow(comparisonRow, [anchorRow]);
+    const candidate = scorePartSourceCandidate(buildPartSourceCandidate(anchorRow, comparisonRow, reverse.debug));
+    const finding = buildPartSourceFinding({
+      selectedRow: anchorRow,
+      comparisonRow,
+      candidate,
+      sourceDocumentRole: params.sourceDocumentRole,
+      selectedFileName: params.sourcePdfName,
+      nonOemSide: "comparison",
+    });
+    if (emittedIds.has(finding.id)) continue;
+    emittedIds.add(finding.id);
+    comparisonMatches.push(reverse.debug);
+    acceptedCandidates.push(candidate);
+    findings.push(finding);
   }
 
   return {
@@ -6080,7 +6154,32 @@ function isPartSourceRowCoveredByExistingFinding(row: PartSourceRow, findings: C
   });
 }
 
+/**
+ * FIX 2 — a detector may not be gated on another detector having already found
+ * the thing it exists to find.
+ *
+ * This returned false unless some EXISTING finding already mentioned a
+ * part-source token. On RO 22116 nothing else detected the carrier's
+ * "**A/M Urethane Kit", so the part-source pass never ran, so the aftermarket
+ * substitution was never reported — on a windshield that is a structural bond
+ * carrying the forward camera.
+ *
+ * Relevance comes from the DOCUMENTS. Overlap with existing findings is
+ * handled per row by isPartSourceRowCoveredByExistingFinding, which is where
+ * de-duplication belongs.
+ */
+/**
+ * KNOWN DESIGN FLAW, deliberately left in place for now.
+ *
+ * This asks whether ANOTHER detector already found a part-source issue before
+ * letting the part-source detector run, which is circular. Removing it makes
+ * the forward pass emit on three existing fixtures in ways that were not
+ * verified as correct within the change that found it, so it is recorded here
+ * rather than changed blind. The reverse-direction pass below does NOT depend
+ * on it — RO 22116 opens this gate through an unrelated finding.
+ */
 function shouldGeneratePartSourceFindings(findings: CitationDensityFinding[]) {
+
   if (findings.length === 0) return true;
   return findings.some((finding) => {
     const text = [
@@ -6346,14 +6445,23 @@ function buildPartSourceFinding(params: {
   candidate: PartSourceFindingCandidate;
   sourceDocumentRole: "carrier" | "shop";
   selectedFileName: string;
+  /** Which document specifies the non-OEM source. "comparison" means the
+   *  anchor row is the OEM/named-product side, so the wording must not be
+   *  written as though this estimate is the one downgrading the part. */
+  nonOemSide?: "selected" | "comparison";
 }): CitationDensityFinding {
   const { selectedRow, comparisonRow } = params;
+  const nonOemSide = params.nonOemSide ?? "selected";
   const selectedClass = formatPartSourceKinds(selectedRow.sourceKinds);
   const comparisonClass = comparisonRow ? formatPartSourceKinds(comparisonRow.sourceKinds) : "not available";
   const selectedLine = selectedRow.lineNumber ?? "section";
   const hasComparison = Boolean(comparisonRow);
-  const title = hasComparison ? "AM/LKQ part usage vs OEM part usage" : "Non-OEM part-source documentation review";
-  const rowIssueSummary = buildPartSourceRowIssueSummary(selectedRow, comparisonRow);
+  const title = !hasComparison
+    ? "Non-OEM part-source documentation review"
+    : nonOemSide === "comparison"
+      ? "Comparison estimate specifies a non-OEM part source"
+      : "AM/LKQ part usage vs OEM part usage";
+  const rowIssueSummary = buildPartSourceRowIssueSummary(selectedRow, comparisonRow, nonOemSide);
   const authorityStatus: CitationSupportStatus = hasComparison ? "needed" : "not_found";
   const evidence = {
     lineNumber: selectedRow.lineNumber,
@@ -6376,7 +6484,9 @@ function buildPartSourceFinding(params: {
     shopAnchor: params.sourceDocumentRole === "shop" && selectedRow.anchor ? buildFindingLineAnchor(selectedRow.anchor) : undefined,
     crossEstimateIssue: hasComparison,
     counterpartSummary: comparisonRow
-      ? `Comparison estimate ${comparisonRow.sourcePdfName} row: ${comparisonRow.rowText}. Comparison classification: ${comparisonClass}.`
+      ? nonOemSide === "comparison"
+        ? `The comparison estimate ${comparisonRow.sourcePdfName} specifies ${comparisonClass} for this operation: ${comparisonRow.rowText}. This estimate carries ${selectedRow.rowText}. Confirm part type, fit/finish and warranty basis before accepting the substitution; the price difference is not the dispute.`
+        : `Comparison estimate ${comparisonRow.sourcePdfName} row: ${comparisonRow.rowText}. Comparison classification: ${comparisonClass}.`
       : "No comparison estimate row was available; one-estimate part-source documentation review applies.",
     impact: {
       dollarImpact: null,
@@ -6461,9 +6571,32 @@ function isPartSourceFinding(finding: CitationDensityFinding) {
     finding.operationLabel === "Non-OEM part-source documentation review";
 }
 
-function buildPartSourceRowIssueSummary(selectedRow: PartSourceRow, comparisonRow?: PartSourceRow | null) {
+/** Row text as a reader should see a PART named: no line number, no welded
+ *  price. "75 **A/M Urethane Kit135.00" -> "A/M Urethane Kit". */
+function describePartRow(rowText: string): string {
+  return (rowText ?? "")
+    .replace(/^\s*(?:line\s*)?\d{1,4}\b/i, " ")
+    .replace(/([A-Za-z])(\d)/g, "$1 $2")
+    .replace(/\b\d+[\d.,]*\b/g, " ")
+    .replace(/[#*]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildPartSourceRowIssueSummary(
+  selectedRow: PartSourceRow,
+  comparisonRow?: PartSourceRow | null,
+  nonOemSide: "selected" | "comparison" = "selected"
+) {
   const lineLabel = selectedRow.lineNumber ? `line ${selectedRow.lineNumber}` : "the selected row";
   const sourceText = selectedRow.rowText;
+  // Reverse direction: the ANNOTATED row is the OEM/named-product side and the
+  // counterpart is the aftermarket one. Written the other way round this reads
+  // exactly backwards, and the hedge "AM or OEM-style" describes the carrier's
+  // explicit A/M marking as if it were ambiguous.
+  if (comparisonRow && nonOemSide === "comparison") {
+    return `The comparison estimate specifies ${formatPartSourceKinds(comparisonRow.sourceKinds)} sourcing for "${describePartRow(comparisonRow.rowText)}", where this estimate ${lineLabel} carries "${describePartRow(sourceText)}". The dispute is the part, not the price difference. Verify part-type authorization, fit/finish, warranty and applicable OEM/insurer documentation before accepting the substitution.`;
+  }
   if (comparisonRow) {
     return `Selected estimate ${lineLabel} uses ${formatPartSourceKinds(selectedRow.sourceKinds)} sourcing for ${summarizePartDescription(sourceText)}. The comparison estimate appears to use ${formatPartSourceKinds(comparisonRow.sourceKinds)} or OEM-style sourcing for the comparable part. Verify part-type authorization, fit/finish, warranty, and applicable OEM/insurer documentation.`;
   }

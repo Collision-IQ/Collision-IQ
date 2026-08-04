@@ -15,6 +15,7 @@
  * supplied by the caller from document data.
  */
 import { formatBasis, notWrittenOn } from "./deltaWording";
+import { canonicalOperationKey } from "./operationAliases";
 import {
   findCollidingWords,
   planVerifiedKeyedNotes,
@@ -243,9 +244,33 @@ export function planDeltaValueAnnotations(params: DeltaValueLayerParams): DeltaV
     addPiece(finding.subject.page, `${lineLabel} ${shortDesc(finding.subject)}: ${parts.join(", ")}`);
   }
 
+  // NEVER CLAIM AN OPERATION IS ABSENT WHEN THE OTHER DOCUMENT CARRIES IT.
+  //
+  // The text lane already detects this class and withdraws the claim, but it
+  // withdraws only its OWN findings; this layer runs its own pairAndCompare and
+  // never learned. On RO 22116 that shipped a direct contradiction: the matcher
+  // logged "withdrew self-contradictory claims for one operation
+  // (URETHANE_ADHESIVE: BetaSeal Express Urethane / A/M Urethane Kit)" while the
+  // annotated PDF printed "Ln 112 BetaSeal Express Urethane ($37.00): not
+  // written on AMERICAN FAMILY" — a false omission claim on a structural
+  // windshield bond.
+  //
+  // Checking the competing rows here makes it a local invariant rather than
+  // state passed between lanes, so the two cannot drift apart again.
+  // The OPERATION identity, not the row key: canonKey squashes a description
+  // to its own letters, so "BetaSeal Express Urethane" and "A/M Urethane Kit"
+  // never collide there. canonicalOperationKey resolves both to
+  // URETHANE_ADHESIVE, which is the question being asked.
+  const competingOperations = new Set(
+    params.competingRows
+      .map((row) => canonicalOperationKey(row.rawDesc))
+      .filter((key): key is string => Boolean(key))
+  );
   const missedByPage = new Map<number, Finding[]>();
   for (const finding of findings) {
     if (finding.kind !== "MISSED") continue;
+    const subjectOperation = canonicalOperationKey(finding.subject.rawDesc);
+    if (subjectOperation && competingOperations.has(subjectOperation)) continue;
     const list = missedByPage.get(finding.subject.page) ?? [];
     if (list.length === 0) missedByPage.set(finding.subject.page, list);
     list.push(finding);
