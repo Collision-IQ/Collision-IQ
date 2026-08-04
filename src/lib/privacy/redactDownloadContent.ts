@@ -8,11 +8,53 @@ const STATE_ZIP_PATTERN = /\b([A-Z]{2}\s+)(\d{5}(?:-\d{4})?)\b/g;
 const PLATE_FALLBACK_PATTERN =
 	/(\b(?:license\s*plate|plate)\s*(?:number|no\.?|#)?\s*[:#-]?\s*)([A-Z0-9][A-Z0-9 -]{1,10})/gi;
 
+/**
+ * A labelled value is only redacted when it has the SHAPE of the datum its
+ * label claims. Without this, "…estimates exist for this claim: the shop's
+ * estimate at $26,006.59…" matched the claim rule, the value group ate
+ * "the shop's estimate at $26" up to the comma INSIDE the dollar figure, and a
+ * vehicle owner read "[REDACTED_CLAIM], 006.59" in the sentence stating the
+ * gap. The label words here — claim, owner, location, plate — are ordinary
+ * English, so "text after the label" is not a value; a shape is.
+ *
+ * Only the matched span is replaced. Whatever follows it is prose and survives.
+ */
+type ValueShape = {
+	pattern: RegExp;
+	/** Extra shape test on the matched span. */
+	accept?: (span: string) => boolean;
+};
+
+const HAS_DIGIT = /\d/;
+const HAS_CURRENCY = /[$£€]/;
+
+/** Claim, policy, plate, ZIP: one alphanumeric token carrying a numeric core.
+ *  Never a clause — no spaces, and a bare English word cannot qualify. */
+const IDENTIFIER_SHAPE: ValueShape = {
+	pattern: /^[A-Za-z0-9][A-Za-z0-9._/-]{2,}/,
+	accept: (span) => HAS_DIGIT.test(span) && !HAS_CURRENCY.test(span),
+};
+
+/** A person's name: up to four name tokens, no digits, no currency. */
+const PERSON_SHAPE: ValueShape = {
+	pattern: /^[A-Z][A-Za-z'’.-]*(?:[,]?\s+[A-Za-z][A-Za-z'’.-]*){0,3}/,
+	accept: (span) => !HAS_DIGIT.test(span) && !HAS_CURRENCY.test(span),
+};
+
+/** A street address begins with a house number. The generic
+ *  STREET_ADDRESS_PATTERN below still catches unlabelled ones. */
+const ADDRESS_SHAPE: ValueShape = {
+	pattern: /^\d{1,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,5}/,
+	accept: (span) => !HAS_CURRENCY.test(span),
+};
+
 type LabelRule = {
 	labels: string[];
 	replacementToken: string;
 	valueTransformer?: (value: string) => string;
 	captureValue?: boolean;
+	/** Omit only for rules whose value is transformed rather than replaced. */
+	valueShape?: ValueShape;
 };
 
 const LABEL_RULES: LabelRule[] = [
@@ -20,15 +62,18 @@ const LABEL_RULES: LabelRule[] = [
 		labels: ["owner", "customer", "insured", "claimant", "policyholder", "adjuster", "appraiser"],
 		replacementToken: "PERSON",
 		captureValue: true,
+		valueShape: PERSON_SHAPE,
 	},
 	{
 		labels: ["name"],
 		replacementToken: "PERSON",
 		captureValue: true,
+		valueShape: PERSON_SHAPE,
 	},
 	{
 		labels: ["address", "street", "street address", "mailing address", "location"],
 		replacementToken: "ADDRESS",
+		valueShape: ADDRESS_SHAPE,
 	},
 	// NOTE: the insurer/carrier name is deliberately NOT redacted — it is a
 	// corporation, not personal data, and the claim reports are about an
@@ -37,18 +82,22 @@ const LABEL_RULES: LabelRule[] = [
 	{
 		labels: ["claim", "claim number", "claim no", "claim #", "claim id"],
 		replacementToken: "CLAIM",
+		valueShape: IDENTIFIER_SHAPE,
 	},
 	{
 		labels: ["policy", "policy number", "policy no", "policy #", "policy id"],
 		replacementToken: "POLICY",
+		valueShape: IDENTIFIER_SHAPE,
 	},
 	{
 		labels: ["license plate", "plate", "plate number"],
 		replacementToken: "PLATE",
+		valueShape: IDENTIFIER_SHAPE,
 	},
 	{
 		labels: ["zip", "zip code", "zipcode", "postal", "postal code"],
 		replacementToken: "ZIP",
+		valueShape: IDENTIFIER_SHAPE,
 	},
 	{
 		labels: ["vin", "vehicle vin"],
@@ -88,10 +137,19 @@ export function redactDownloadContent(text: string): string {
 }
 
 function applyLabelRule(input: string, rule: LabelRule): { text: string; capturedValues: string[] } {
-	const escapedLabels = rule.labels.map(escapeRegex).join("|");
+	// Longest label first: alternation is first-match-wins, so an unsorted list
+	// lets "claim" win over "claim no" and the separator match then fails against
+	// "Claim No. 0122…" — which never redacted at all.
+	const escapedLabels = [...rule.labels]
+		.sort((a, b) => b.length - a.length)
+		.map(escapeRegex)
+		.join("|");
 	const capturedValues: string[] = [];
-	const linePattern = new RegExp(`(^|\\n)(\\s*(?:${escapedLabels})\\s*[:#-]\\s*)([^\\n]+)`, "gi");
-	const inlinePattern = new RegExp(`(\\b(?:${escapedLabels})\\s*[:#-]\\s*)([^\\n,;|]+)`, "gi");
+	// Separators come in runs and include the period of "No." — "Claim #:" is two
+	// characters, and taking only one leaves the value starting at ":".
+	const separator = "\\s*[:#.-]{1,3}\\s*";
+	const linePattern = new RegExp(`(^|\\n)(\\s*(?:${escapedLabels})${separator})([^\\n]+)`, "gi");
+	const inlinePattern = new RegExp(`(\\b(?:${escapedLabels})${separator})([^\\n,;|]+)`, "gi");
 
 	let output = input.replace(linePattern, (match, lineStart: string, prefix: string, value: string) => {
 		return replaceLabeledValue(match, lineStart, prefix, value, rule, capturedValues);
@@ -157,16 +215,37 @@ function replaceLabeledValue(
 		return match;
 	}
 
-	if (rule.captureValue && looksLikeNamedPersonValue(trimmedValue)) {
-		capturedValues.push(trimmedValue);
-	}
-
 	if (rule.valueTransformer) {
-		const transformed = rule.valueTransformer(trimmedValue);
-		return `${lineStart}${prefix}${transformed}`;
+		if (rule.captureValue && looksLikeNamedPersonValue(trimmedValue)) {
+			capturedValues.push(trimmedValue);
+		}
+		return `${lineStart}${prefix}${rule.valueTransformer(trimmedValue)}`;
 	}
 
-	return `${lineStart}${prefix}[REDACTED_${rule.replacementToken}]`;
+	// Redact only the span that HAS THE SHAPE of the datum. Anything after it is
+	// prose and must survive intact — that is the whole defect: "claim: the
+	// shop's estimate at $26,006.59" is a sentence, not a claim number.
+	const span = rule.valueShape ? sensitiveSpan(trimmedValue, rule.valueShape) : trimmedValue;
+	if (!span) {
+		return match;
+	}
+
+	if (rule.captureValue && looksLikeNamedPersonValue(span)) {
+		capturedValues.push(span);
+	}
+
+	const tail = trimmedValue.slice(span.length);
+	return `${lineStart}${prefix}[REDACTED_${rule.replacementToken}]${tail}`;
+}
+
+/** The leading portion of `value` matching `shape`, or null when the value is
+ *  not that kind of datum at all. */
+function sensitiveSpan(value: string, shape: ValueShape): string | null {
+	const matched = shape.pattern.exec(value);
+	if (!matched) return null;
+	const span = matched[0];
+	if (shape.accept && !shape.accept(span)) return null;
+	return span;
 }
 
 function escapeRegex(value: string): string {
