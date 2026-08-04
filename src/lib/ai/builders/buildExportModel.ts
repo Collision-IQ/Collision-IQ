@@ -909,6 +909,8 @@ function deriveMissingCriticalEvidence(params: {
   supplementItems: ExportSupplementItem[];
 }): string[] {
   const corpus = buildEvidenceCompletenessCorpus(params).toLowerCase();
+  // Relevance from evidence; documented-ness from everything. See R08 above.
+  const evidenceCorpus = buildEvidenceOnlyCorpus(params).toLowerCase();
   const evidenceCompletenessLedger = resolveEvidenceCompletenessFromLedger({
     ledger: params.report?.ingestionMeta?.fileReviewLedger ?? params.report?.confidenceIntegrity?.fileReviewLedger ?? [],
     evidenceRegistry: params.report?.evidenceRegistry,
@@ -922,7 +924,7 @@ function deriveMissingCriticalEvidence(params: {
     documented: RegExp,
     categories: EvidenceCompletenessCategory[]
   ) => {
-    if (relevant.test(corpus) && !documented.test(corpus)) {
+    if (relevant.test(evidenceCorpus) && !documented.test(corpus)) {
       const resolution = categories
         .map((category) => statusByCategory.get(category))
         .find(Boolean);
@@ -953,6 +955,30 @@ function deriveMissingCriticalEvidence(params: {
   }
 
   return Array.from(missing).slice(0, 8);
+}
+
+/**
+ * R08 — what the CASE contains, excluding anything this pipeline wrote.
+ *
+ * Relevance must be decided from evidence, never from our own narrative, or
+ * the reasoning is circular: RO 22116's finding title "Hidden Mounting
+ * Geometry Teardown Growth" contains "geometry", the alignment relevance test
+ * matches /alignment|suspension|steering|geometry/ against a corpus that
+ * includes finding titles, and the report demanded an alignment printout for a
+ * repair with no alignment line on either estimate.
+ *
+ * Documented-ness still reads the FULL corpus below — a document can be named
+ * anywhere — but the question "does this repair need one at all" may only be
+ * answered by the estimate and the uploaded files.
+ */
+function buildEvidenceOnlyCorpus(params: {
+  report: RepairIntelligenceReport | null;
+}): string {
+  return [
+    params.report?.missingProcedures.join("\n"),
+    params.report?.evidenceRegistry?.map((item) => `${item.label} ${item.extractedSummary ?? ""} ${item.extractedText ?? ""}`).join("\n"),
+    params.report?.ingestionMeta?.fileReviewLedger?.map((item) => `${item.filename} ${item.evidenceCategoriesDetected.join(" ")}`).join("\n"),
+  ].filter(Boolean).join("\n");
 }
 
 function buildEvidenceCompletenessCorpus(params: {

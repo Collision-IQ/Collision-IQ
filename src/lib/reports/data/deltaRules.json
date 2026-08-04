@@ -127,7 +127,25 @@
       "parts_source": ["oem_parts", "law", "carrier_note"],
       "structural": ["oem_procedure", "icar"]
     },
-    "rejectTitlesMatching": ["total loss", "diminished value", "getting fair value"]
+    "rejectTitlesMatching": ["total loss", "diminished value", "getting fair value"],
+    "$rejectMetaTitlesComment": [
+      "A source may back a finding only if it EVIDENCES the subject, not if it",
+      "discusses the subject. 'Tips on Finding OEM Position Statements' and",
+      "'How Important Are OEM Position Statements?' are advice about the",
+      "existence of position statements; neither IS one. RO 22116 cited the",
+      "first of those 11 times as the authority for OEM findings.",
+      "Matched case-insensitively against the whole title."
+    ],
+    "rejectMetaTitlesMatching": [
+      "^\\s*tips?\\b",
+      "^\\s*how (to|important|do|does)\\b",
+      "^\\s*(a |the )?(complete |ultimate |beginner'?s? )?guide to\\b",
+      "^\\s*what (is|are)\\b",
+      "^\\s*why\\b",
+      "^\\s*understanding\\b",
+      "^\\s*everything you need to know\\b",
+      "\\?\\s*$"
+    ]
   },
 
   "confidence": {

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import DELTA_RULES from "./data/deltaRules.json";
 import { buildBlockedMessage, compareClaimIdentity, readClaimIdentity } from "./claimIdentityGate";
 import {
   PDFDocument,
@@ -492,6 +493,12 @@ export type AnnotatedEstimateReportIdentity = {
   sourcePdfFallbackName: string;
   pdfAnnotationTitle: string;
   legendTitle: string;
+  /** R14: the legend preamble belongs to the PASS, not to the renderer. These
+   *  three lines are delta-pass language ("Estimate evidence supports the
+   *  existence of a difference", "CCC Secure Share source confirms…") and had
+   *  been rendered on the OEM report for eight consecutive runs, telling an
+   *  OEM reader that estimate evidence is what backs an OEM finding. */
+  legendBoundaryTexts: string[];
   detailTitle: string;
   unanchoredTitle: string;
   scoreLabel: string;
@@ -998,6 +1005,13 @@ const CCC_SOURCE_BOUNDARY_TEXT =
   "CCC Secure Share source confirms this estimate line was present in the structured estimate data.";
 const CCC_LIMITATION_TEXT =
   "The CCC estimate data supports the existence of this line-item difference. OEM/P-page/DEG/legal support has not yet been verified.";
+// The OEM pass makes a different claim from the delta pass, so it states a
+// different boundary. It never cites estimate-difference evidence, because a
+// difference between two estimates is not an OEM requirement.
+const OEM_SOURCE_BOUNDARY_TEXT =
+  "An OEM finding is supported by the manufacturer's own published procedure or position statement. Nothing here rests on a difference between the two estimates.";
+const OEM_AUTHORITY_BOUNDARY_TEXT =
+  "Where no procedure or position statement was retrieved, the finding is marked NEEDS OEM and names no authority. An unretrieved source is never cited as one.";
 
 /**
  * One-line reader definitions for every label the report can emit (D-5).
@@ -1048,7 +1062,7 @@ export const PDF_TEXT_EXTRACTION_INFRASTRUCTURE_ERROR =
 export const PDF_JS_WORKER_UNAVAILABLE_ERROR =
   "Delta Citation Density Report text extraction failed because the PDF.js worker asset is unavailable in production. No annotation PDF was produced.";
 
-const CITATION_DENSITY_REPORT_IDENTITY: AnnotatedEstimateReportIdentity = {
+export const CITATION_DENSITY_REPORT_IDENTITY: AnnotatedEstimateReportIdentity = {
   reportType: "citation-density",
   artifactVersion: CITATION_DENSITY_ARTIFACT_VERSION,
   reportTitle: "Delta Citation Density Report",
@@ -1057,6 +1071,7 @@ const CITATION_DENSITY_REPORT_IDENTITY: AnnotatedEstimateReportIdentity = {
   sourcePdfFallbackName: "delta-citation-density-source.pdf",
   pdfAnnotationTitle: "Collision IQ Delta Citation Density",
   legendTitle: "Delta Citation Density Annotation Legend",
+  legendBoundaryTexts: [SOURCE_BOUNDARY_TEXT, CCC_SOURCE_BOUNDARY_TEXT, CCC_LIMITATION_TEXT],
   detailTitle: "Delta Citation Density Finding Details",
   unanchoredTitle: "Unanchored Delta Citation Density Findings",
   scoreLabel: "Delta Citation Density score",
@@ -1076,6 +1091,7 @@ export const OEM_CITATION_DENSITY_REPORT_IDENTITY: AnnotatedEstimateReportIdenti
   sourcePdfFallbackName: "oem-citation-density-source.pdf",
   pdfAnnotationTitle: "Collision IQ OEM Citation Density",
   legendTitle: "OEM Citation Density Annotation Legend",
+  legendBoundaryTexts: [OEM_SOURCE_BOUNDARY_TEXT, OEM_AUTHORITY_BOUNDARY_TEXT],
   detailTitle: "OEM Citation Density Finding Details",
   unanchoredTitle: "Unanchored OEM Citation Density Findings",
   scoreLabel: "OEM Density score",
@@ -2272,6 +2288,26 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
         reportType: reportIdentity.reportType,
       }
     );
+  }
+
+  // R03 — every annotation derives from a finding, and every anchored finding
+  // is drawn. The two lists have disagreed on every graded run (81 vs 69, 137
+  // vs 71, 85 vs 71, 64 vs 62), always because a second path emitted marks of
+  // its own. Assert it here, where both lists exist, so drift is a visible
+  // warning on the artifact instead of a number a reviewer has to count.
+  {
+    const anchoredFindingIds = new Set(matches.map((match) => match.finding.id));
+    const orphanAnnotations = matches.filter((match) => !match.finding?.id).length;
+    if (orphanAnnotations > 0) {
+      warnings.push(
+        `${orphanAnnotations} annotation(s) were drawn without a parent finding — annotations must be emitted from the findings list, not by a parallel path.`
+      );
+    }
+    if (anchoredFindingIds.size !== matches.length) {
+      warnings.push(
+        `Annotation/finding parity: ${matches.length} annotations resolved to ${anchoredFindingIds.size} distinct findings. Every mark must key to exactly one finding.`
+      );
+    }
   }
 
   return {
@@ -5343,12 +5379,41 @@ function inferOemNextActionOwner(
   return "Collision IQ";
 }
 
+/**
+ * R15 — a source may back a finding only when it EVIDENCES the subject, not
+ * when it discusses the subject.
+ *
+ * "Tips on Finding OEM Position Statements" is advice about the existence of
+ * position statements; it is not one. RO 22116 cited it as the authority for
+ * OEM findings eleven times. A finding with no retrieved authority must say
+ * NEEDS OEM and name nothing — that is defensible; a how-to article dressed as
+ * a manufacturer requirement is what gets a supplement dismissed.
+ *
+ * Both pattern sets are DATA (deltaRules.json), so adding a rejected shape is
+ * a one-line edit that applies to every future comparison.
+ */
+export function isCitableAuthorityTitle(title: string | null | undefined): boolean {
+  const value = (title ?? "").trim();
+  if (!value) return false;
+  for (const pattern of DELTA_RULES.authority.rejectTitlesMatching) {
+    if (new RegExp(pattern, "i").test(value)) return false;
+  }
+  for (const pattern of DELTA_RULES.authority.rejectMetaTitlesMatching) {
+    if (new RegExp(pattern, "i").test(value)) return false;
+  }
+  return true;
+}
+
 function detectOemCitationDensityAuthoritySources(context: AnnotatedEstimateFindingGeneratorContext): OemCitationDensityAuthoritySource[] {
   const sources: OemCitationDensityAuthoritySource[] = [];
   const add = (source: OemCitationDensityAuthoritySource) => {
     if (!sources.some((item) => item.sourceType === source.sourceType && item.title === source.title)) sources.push(source);
   };
   for (const source of context.authorityTrace?.authoritySources ?? []) {
+    // A retrieved record whose TITLE only discusses the topic is not an
+    // authority for it. Dropping it here means the finding falls through to
+    // estimate evidence and reports NEEDS OEM, which is the honest outcome.
+    if (!isCitableAuthorityTitle(source.title)) continue;
     add(source);
   }
   add({ title: "Estimate evidence row", sourceType: "estimate_evidence", evidenceTier: 8, verified: false });
@@ -5365,7 +5430,9 @@ function pickBestOemAuthoritySource(
     // evidenceTier (7) keeps it below any verified OEM/ADAS/MOTOR/uploaded/legal source, so it
     // only backs a finding when nothing stronger was retrieved — but it still ties the finding to
     // a real retrieved reference (labeled ONLINE FALLBACK) instead of estimate-evidence only.
-    if (source.sourceType === "internet_fallback") return true;
+    // The internet fallback is the universal last resort, so it is exactly
+    // where meta-commentary reaches a reader as an authority.
+    if (source.sourceType === "internet_fallback") return isCitableAuthorityTitle(source.title);
     if (family.findingType.includes("adas") || family.findingType.includes("diagnostics")) {
       return source.sourceType === "oem_procedure" || source.sourceType === "motor_database" || source.sourceType === "uploaded_support" || source.sourceType === "ccc_secure_share";
     }
@@ -8211,9 +8278,7 @@ function addLegendPage(
     color: rgb(0.12, 0.14, 0.18),
   });
   drawWrappedLines(page, [
-    SOURCE_BOUNDARY_TEXT,
-    CCC_SOURCE_BOUNDARY_TEXT,
-    CCC_LIMITATION_TEXT,
+    ...reportIdentity.legendBoundaryTexts,
     "",
     // D-6: the badge-to-callout key. One line, so the page explains itself.
     "Key: the numbered badge in the left margin is the FINDING number in the Findings Report; keyed notes at page bottom cite the estimate's own line numbers (Ln 16/17).",
