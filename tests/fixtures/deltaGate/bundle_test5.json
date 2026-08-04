@@ -1,0 +1,218 @@
+{
+ "run_key": "test5",
+ "manifest": [
+  {
+   "id": "a",
+   "name": "Shop Final 22059.pdf",
+   "sha256": "x",
+   "identity": {
+    "vin": "5YJSA1E65NF488007",
+    "claim_no": "012283486000000800001"
+   }
+  },
+  {
+   "id": "b",
+   "name": "SOR_2 22059.pdf",
+   "sha256": "y",
+   "identity": {
+    "vin": "5YJSA1E65NF488007",
+    "claim_no": "012283486000000800001"
+   }
+  }
+ ],
+ "target": {
+  "file": "Shop Final 22059.pdf",
+  "grand_total": 26006.59,
+  "subtotal": 24571.31,
+  "insurer": "USAA",
+  "identity": {
+   "vin": "5YJSA1E65NF488007",
+   "claim_no": "012283486000000800001"
+  }
+ },
+ "source": {
+  "file": "SOR_2 22059.pdf",
+  "grand_total": 22886.68,
+  "subtotal": 21591.21,
+  "insurer": "USAA",
+  "identity": {
+   "vin": "5YJSA1E65NF488007",
+   "claim_no": "012283486000000800001"
+  }
+ },
+ "rows": [
+  {
+   "id": "t44",
+   "doc": "target",
+   "role": "deduction",
+   "canonical_op": null,
+   "side": ""
+  },
+  {
+   "id": "s123",
+   "doc": "source",
+   "role": "line",
+   "canonical_op": "OP_SERVICE_MODE",
+   "side": ""
+  },
+  {
+   "id": "t139",
+   "doc": "target",
+   "role": "line",
+   "canonical_op": "OP_PRE_SCAN",
+   "side": ""
+  },
+  {
+   "id": "t148",
+   "doc": "target",
+   "role": "line",
+   "canonical_op": "OP_POST_SCAN",
+   "side": ""
+  }
+ ],
+ "findings": [
+  {
+   "id": "F1",
+   "type": "missing_operation",
+   "label": "NOT ON OTHER DOC",
+   "canonical_op": "OP_PRE_SCAN",
+   "anchors": [
+    "t139"
+   ],
+   "text": "Missing from lower-cost estimate: Pre repair scan"
+  },
+  {
+   "id": "F2",
+   "type": "missing_operation",
+   "label": "NOT ON OTHER DOC",
+   "canonical_op": "OP_POST_SCAN",
+   "anchors": [
+    "t148"
+   ],
+   "text": "Missing from lower-cost estimate: Post-repair scan"
+  },
+  {
+   "id": "F3",
+   "type": "missing_operation",
+   "label": "Finding: Hidden Mounting Geometry Teardown Growth",
+   "anchors": [
+    "t44"
+   ],
+   "text": "Overlap Major Non-Adj. Panel: MISSED on USAA"
+  },
+  {
+   "id": "F4",
+   "type": "materials_capped",
+   "label": "P&M CAP",
+   "anchors": [],
+   "delta": -982.0,
+   "text": "Paint Supplies flat $800.00",
+   "authority": {
+    "title": "How Important Are OEM Position Statements?",
+    "retrieved": false,
+    "domain": "oem_adas"
+   },
+   "finding_class": "refinish_materials"
+  },
+  {
+   "id": "F5",
+   "type": "category_absent",
+   "label": "CATEGORY MISSING",
+   "anchors": [],
+   "delta": -607.5,
+   "text": "Aluminum Or Steel Repair has no counterpart category"
+  },
+  {
+   "id": "F6",
+   "type": "counterpart_only",
+   "label": "OTHER-DOC ONLY",
+   "anchors": [
+    "s123"
+   ],
+   "shown": 8,
+   "total_available": 38,
+   "text": "SOR_2 carries 38 lines with no counterpart"
+  },
+  {
+   "id": "F7",
+   "type": "missing_operation",
+   "label": "NOT ON OTHER DOC",
+   "anchors": [],
+   "text": "Alignment printout present but not line-tied"
+  }
+ ],
+ "annotations": [
+  {
+   "finding_id": "F1",
+   "page": 5,
+   "kind": "note",
+   "x": 36,
+   "top": 840,
+   "size": 7,
+   "badge_namespace": "line_number",
+   "text": "Ln 139 Rpr Pre repair scan (1.0 hr): MISSED on USAA"
+  },
+  {
+   "finding_id": "F5",
+   "page": 5,
+   "kind": "rate_stamp",
+   "bbox": [
+    400,
+    547,
+    470,
+    556
+   ],
+   "badge_namespace": "finding_number",
+   "text": "USAA 0.0 @ $0.00/hr"
+  },
+  {
+   "finding_id": "ORPHAN-1",
+   "page": 5,
+   "kind": "note",
+   "x": 36,
+   "top": 644,
+   "size": 7,
+   "text": "Ln 161 Solid waste removal ($5.00): MISSED on USAA"
+  }
+ ],
+ "page_boxes": [
+  {
+   "page": 5,
+   "height": 792,
+   "footer": [
+    36,
+    745,
+    576,
+    755
+   ],
+   "body": [
+    [
+     36,
+     630,
+     576,
+     660
+    ]
+   ]
+  }
+ ],
+ "prose": {
+  "repair_intelligence": "Alignment printout present but not line-tied. Delta: Only on right. The bumper bolt ($24.00) and latch bolt ($25.00) are not carried."
+ },
+ "counters": {
+  "indexed": 149,
+  "vision": 142,
+  "reviewed": 147
+ },
+ "confidence": {
+  "evidence": "high",
+  "pipeline_integrity": "high",
+  "reported": "high"
+ },
+ "legend": {
+  "report_type": "oem",
+  "entries": [
+   "note: Estimate evidence supports the existence of a difference.",
+   "note: CCC Secure Share source confirms this estimate line was present."
+  ]
+ }
+}

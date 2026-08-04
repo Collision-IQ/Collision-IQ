@@ -1,0 +1,401 @@
+{
+ "run_key": "shop22059-v1",
+ "manifest": [
+  {
+   "id": "a",
+   "name": "Shop 22059.pdf",
+   "sha256": "1",
+   "identity": {
+    "vin": "5YJSA1E65NF488007",
+    "claim_no": "012283486000000800001"
+   }
+  },
+  {
+   "id": "b",
+   "name": "SOR_2 22059.pdf",
+   "sha256": "2",
+   "identity": {
+    "vin": "5YJSA1E65NF488007",
+    "claim_no": "012283486000000800001"
+   }
+  }
+ ],
+ "target": {
+  "file": "Shop 22059.pdf",
+  "grand_total": 22230.52,
+  "subtotal": 21008.98,
+  "insurer": "USAA",
+  "identity": {
+   "vin": "5YJSA1E65NF488007",
+   "claim_no": "012283486000000800001"
+  }
+ },
+ "source": {
+  "file": "SOR_2 22059.pdf",
+  "grand_total": 22886.68,
+  "subtotal": 21591.21,
+  "insurer": "USAA",
+  "identity": {
+   "vin": "5YJSA1E65NF488007",
+   "claim_no": "012283486000000800001"
+  }
+ },
+ "rows": [
+  {
+   "id": "t12",
+   "doc": "target",
+   "role": "line",
+   "canonical_op": null,
+   "side": ""
+  },
+  {
+   "id": "t24",
+   "doc": "target",
+   "role": "line",
+   "canonical_op": "OP_FLEX_ADDITIVE",
+   "side": ""
+  },
+  {
+   "id": "t43",
+   "doc": "target",
+   "role": "deduction",
+   "canonical_op": null,
+   "side": ""
+  },
+  {
+   "id": "s36",
+   "doc": "source",
+   "role": "line",
+   "canonical_op": null,
+   "side": "R"
+  },
+  {
+   "id": "s123",
+   "doc": "source",
+   "role": "line",
+   "canonical_op": "OP_SERVICE_MODE",
+   "side": ""
+  }
+ ],
+ "findings": [
+  {
+   "id": "F1",
+   "type": "repair_vs_replace",
+   "label": "REPAIR VS REPLACE",
+   "anchors": [
+    "t12"
+   ],
+   "target_amount": 1203.0,
+   "source_amount": 0.0,
+   "delta": -1203.0,
+   "text": "Ln 12 Bumper cover 1750101S0C: $1,203.00 replace here; on SOR_2 L16 repaired, part $0.00 + 4.5 hr"
+  },
+  {
+   "id": "F2",
+   "type": "value_delta",
+   "label": "PRICE DELTA",
+   "anchors": [
+    "t24"
+   ],
+   "target_amount": 12.0,
+   "source_amount": 6.0,
+   "delta": -6.0,
+   "text": "Ln 24 Flex additive $12.00 vs SOR_2 $6.00"
+  },
+  {
+   "id": "F3",
+   "type": "counterpart_only",
+   "label": "OTHER-DOC ONLY",
+   "anchors": [
+    "s36"
+   ],
+   "amount": 2341.65,
+   "shown": 11,
+   "total_available": 11,
+   "text": "On SOR_2 only: L36 RT Headlamp assy 156371400G $2,341.65 + 0.5 hr"
+  },
+  {
+   "id": "F4",
+   "type": "rate_delta",
+   "label": "RATE DELTA",
+   "scope": "category",
+   "delta": 1391.5,
+   "anchors": [],
+   "text": "Body Labor 52.2 hr @ $90.00 vs 64.1 hr @ $95.00"
+  },
+  {
+   "id": "F5",
+   "type": "rate_delta",
+   "label": "RATE DELTA",
+   "scope": "category",
+   "delta": -602.0,
+   "anchors": [],
+   "text": "Paint Labor 29.7 hr @ $90.00 vs 21.8 hr @ $95.00"
+  },
+  {
+   "id": "F6",
+   "type": "rate_delta",
+   "label": "RATE DELTA",
+   "scope": "category",
+   "delta": -253.0,
+   "anchors": [],
+   "text": "Mechanical 4.4 hr @ $175.00 vs 4.7 hr @ $110.00"
+  },
+  {
+   "id": "F7",
+   "type": "category_absent",
+   "label": "CATEGORY MISSING",
+   "scope": "category",
+   "delta": -607.5,
+   "anchors": [],
+   "text": "Aluminum Or Steel Repair 4.5 hr @ $135.00 has no counterpart category on SOR_2"
+  },
+  {
+   "id": "F8",
+   "type": "materials_capped",
+   "label": "P&M CAP",
+   "scope": "category",
+   "delta": -982.0,
+   "anchors": [],
+   "text": "Paint Supplies 29.7 hr @ $60.00 = $1,782.00 vs SOR_2 flat $800.00, no hrs/rate shown"
+  },
+  {
+   "id": "F9",
+   "type": "value_delta",
+   "label": "PRICE DELTA",
+   "scope": "category",
+   "delta": 2435.55,
+   "anchors": [],
+   "text": "Parts $9,541.16 vs $11,976.71"
+  },
+  {
+   "id": "F10",
+   "type": "value_delta",
+   "label": "PRICE DELTA",
+   "scope": "category",
+   "delta": -800.32,
+   "anchors": [],
+   "text": "Miscellaneous $937.32 vs $137.00"
+  },
+  {
+   "id": "F11",
+   "type": "total_gap",
+   "label": "TOTAL GAP",
+   "anchors": [],
+   "delta": 656.16,
+   "text": "Grand total $22,230.52 vs $22,886.68; SOR_2 higher by $656.16"
+  }
+ ],
+ "annotations": [
+  {
+   "finding_id": "F1",
+   "page": 1,
+   "kind": "value_delta",
+   "bbox": [
+    408,
+    317,
+    439,
+    325
+   ],
+   "badge_namespace": "finding_number"
+  },
+  {
+   "finding_id": "F2",
+   "page": 1,
+   "kind": "value_delta",
+   "bbox": [
+    419,
+    479,
+    439,
+    487
+   ],
+   "badge_namespace": "finding_number"
+  },
+  {
+   "finding_id": "F3",
+   "page": 1,
+   "kind": "section_tag",
+   "x": 300,
+   "top": 578,
+   "size": 7,
+   "badge_namespace": "finding_number",
+   "text": "RT HEADLAMP $2,341.65 on SOR-2  -> p.6"
+  },
+  {
+   "finding_id": "F4",
+   "page": 5,
+   "kind": "rate_stamp",
+   "bbox": [
+    377,
+    195,
+    393,
+    204
+   ],
+   "badge_namespace": "finding_number"
+  },
+  {
+   "finding_id": "F5",
+   "page": 5,
+   "kind": "rate_stamp",
+   "bbox": [
+    377,
+    209,
+    393,
+    217
+   ],
+   "badge_namespace": "finding_number"
+  },
+  {
+   "finding_id": "F6",
+   "page": 5,
+   "kind": "rate_stamp",
+   "bbox": [
+    382,
+    223,
+    393,
+    231
+   ],
+   "badge_namespace": "finding_number"
+  },
+  {
+   "finding_id": "F7",
+   "page": 5,
+   "kind": "rate_stamp",
+   "bbox": [
+    382,
+    236,
+    393,
+    244
+   ],
+   "badge_namespace": "finding_number"
+  },
+  {
+   "finding_id": "F8",
+   "page": 5,
+   "kind": "rate_stamp",
+   "bbox": [
+    377,
+    250,
+    393,
+    258
+   ],
+   "badge_namespace": "finding_number"
+  },
+  {
+   "finding_id": "F9",
+   "page": 5,
+   "kind": "note",
+   "x": 56,
+   "top": 409,
+   "size": 6.8,
+   "badge_namespace": "finding_number",
+   "text": "Parts  $9,541.16 here vs $11,976.71 on SOR-2  +$2,435.55"
+  },
+  {
+   "finding_id": "F10",
+   "page": 5,
+   "kind": "note",
+   "x": 56,
+   "top": 418,
+   "size": 6.8,
+   "badge_namespace": "finding_number",
+   "text": "Miscellaneous  $937.32 vs $137.00  -$800.32"
+  },
+  {
+   "finding_id": "F11",
+   "page": 5,
+   "kind": "note",
+   "x": 56,
+   "top": 400,
+   "size": 7.3,
+   "badge_namespace": "finding_number",
+   "text": "DELTA SUMMARY  target $22,230.52 | source $22,886.68 | SOR-2 higher by $656.16"
+  }
+ ],
+ "page_boxes": [
+  {
+   "page": 1,
+   "height": 792,
+   "footer": [
+    36,
+    737,
+    576,
+    747
+   ],
+   "body": [
+    [
+     78,
+     570,
+     200,
+     588
+    ],
+    [
+     78,
+     590,
+     300,
+     608
+    ],
+    [
+     404,
+     590,
+     440,
+     608
+    ]
+   ]
+  },
+  {
+   "page": 5,
+   "height": 792,
+   "footer": [
+    36,
+    737,
+    576,
+    747
+   ],
+   "body": [
+    [
+     196,
+     182,
+     560,
+     196
+    ],
+    [
+     196,
+     196,
+     560,
+     310
+    ],
+    [
+     33,
+     351,
+     560,
+     388
+    ]
+   ]
+  }
+ ],
+ "prose": {
+  "customer_report": "The two documents are $656.16 apart. SOR_2 totals $22,886.68 against $22,230.52 here."
+ },
+ "counters": {
+  "ledger_total": 2,
+  "indexed": 2,
+  "vision": 0,
+  "reviewed": 2
+ },
+ "confidence": {
+  "evidence": "high",
+  "pipeline_integrity": "high",
+  "reported": "high"
+ },
+ "legend": {
+  "report_type": "delta",
+  "entries": [
+   "value_delta: red strike + yellow stamp - the other document carries a different value",
+   "section_tag: yellow tag at a section - the other document has items not written here",
+   "rate_stamp: highlighted basis cell - category rate or hours differ",
+   "note: keyed explanation",
+   "match: green tint - line matches exactly"
+  ]
+ }
+}

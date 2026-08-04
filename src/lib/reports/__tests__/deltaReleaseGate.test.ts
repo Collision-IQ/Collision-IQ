@@ -1,0 +1,114 @@
+/**
+ * The release gate, verified against the two reference bundles.
+ *
+ * The acceptance criterion is the one the spec states: the Test5 bundle (the
+ * regression case) must FAIL and block release; the corrected Shop 22059 run
+ * must PASS clean. Both bundles are checked in under tests/fixtures/deltaGate/
+ * so the gate cannot be quietly weakened — loosening any rule turns the first
+ * assertion red.
+ *
+ * Note on the two rules that were easy to get wrong, and were:
+ *   R16 — unequal counters are only a defect with NO ledger to reconcile them.
+ *         "vision: 0" beside "indexed: 2" is coherent when nothing needed OCR;
+ *         a first cut failed the PASSING bundle on it.
+ *   R18 — disclosure is the sentence the reader sees, not a boolean on the
+ *         finding. A first cut checked a flag and missed the real defect.
+ */
+import fs from "node:fs";
+import path from "node:path";
+import { describe, it, expect } from "vitest";
+import {
+  buildBlockedNotice,
+  mayRelease,
+  runDeltaReleaseGate,
+  type DeltaBundle,
+} from "../deltaReleaseGate";
+
+const FIXTURES = path.join(__dirname, "../../../../tests/fixtures/deltaGate");
+const load = (name: string): DeltaBundle =>
+  JSON.parse(fs.readFileSync(path.join(FIXTURES, name), "utf8"));
+
+const regression = runDeltaReleaseGate(load("bundle_test5.json"));
+const corrected = runDeltaReleaseGate(load("bundle_shop22059.json"));
+const failedRules = (violations: typeof regression) =>
+  new Set(violations.filter((v) => v.severity === "FAIL").map((v) => v.rule));
+
+describe("the regression bundle is blocked", () => {
+  it("blocks release", () => {
+    expect(mayRelease(regression)).toBe(false);
+    expect(regression.filter((v) => v.severity === "FAIL")).toHaveLength(24);
+  });
+
+  it("catches every recurring defect class the four graded runs kept reproducing", () => {
+    expect(failedRules(regression)).toEqual(
+      new Set([
+        "R03", // annotations != findings — 81/69, 137/71, 85/71
+        "R04", // badges mixed line numbers with finding numbers
+        "R05", // a finding TITLE leaked into the label field
+        "R06", // a deduction reported as missing scope
+        "R07", // pre/post scan called missing where the carrier substitutes Service Mode
+        "R08", // findings with no anchor — where fabrication enters
+        "R09", // "MISSED on", internal vocabulary, cost-based wording
+        "R10", // absent basis rendered as "0.0 @ $0.00"
+        "R11", // dollar figures in prose absent from the findings
+        "R13", // notes off the page and over body text
+        "R14", // the OEM report rendering the delta legend
+        "R15", // an authority named that was never retrieved
+        "R16", // 149 / 142 / 147 for one run
+        "R17", // "High" confidence on a run whose invariants failed
+        "R18", // 8 of 38 shown, undisclosed
+      ])
+    );
+  });
+
+  it("names the substitution rather than accusing the carrier of omission", () => {
+    const r07 = regression.filter((v) => v.rule === "R07");
+    expect(r07).toHaveLength(2);
+    for (const violation of r07) {
+      expect(violation.message).toMatch(/substituted by SERVICE_MODE/);
+      expect(violation.message).toMatch(/emit operation_substituted/);
+    }
+  });
+
+  it("resolves an external op vocabulary through the rename map, not a second table", () => {
+    // The bundle says OP_PRE_SCAN; this repo's single table says PRE_REPAIR_SCAN.
+    expect(regression.some((v) => v.message.includes("PRE_REPAIR_SCAN"))).toBe(true);
+    expect(regression.some((v) => v.message.includes("OP_PRE_SCAN"))).toBe(false);
+  });
+
+  it("forces confidence to low once any invariant has failed", () => {
+    expect(regression.some((v) => v.rule === "R17" && /must be "low"/.test(v.message))).toBe(true);
+  });
+
+  it("produces an operator notice that says why, instead of shipping artifacts", () => {
+    const notice = buildBlockedNotice(regression);
+    expect(notice).toMatch(/^RELEASE BLOCKED — 24 rule violation\(s\)/);
+    expect(notice).toContain("Artifacts were not produced.");
+    expect(notice).toContain("FAIL R03");
+  });
+});
+
+describe("the corrected bundle is released", () => {
+  it("passes with no failures and no warnings", () => {
+    expect(corrected.filter((v) => v.severity === "FAIL")).toEqual([]);
+    expect(corrected.filter((v) => v.severity === "WARN")).toEqual([]);
+    expect(mayRelease(corrected)).toBe(true);
+  });
+
+  it("does not fault a counter that is legitimately zero", () => {
+    // ledger_total 2, indexed 2, vision 0, reviewed 2 — no document needed OCR.
+    expect(corrected.some((v) => v.rule === "R16")).toBe(false);
+  });
+
+  it("accepts its category findings because they reconcile to the subtotal gap", () => {
+    expect(corrected.some((v) => v.rule === "R12")).toBe(false);
+  });
+});
+
+describe("the gate is inert on a bundle that carries nothing", () => {
+  it("an empty bundle is not a failure — sections are adopted incrementally", () => {
+    const violations = runDeltaReleaseGate({});
+    expect(violations.filter((v) => v.severity === "FAIL")).toEqual([]);
+    expect(mayRelease(violations)).toBe(true);
+  });
+});

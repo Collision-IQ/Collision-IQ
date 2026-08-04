@@ -1,0 +1,139 @@
+{
+  "$comment": [
+    "delta_rules.json — ALL document-independent policy for estimate comparison.",
+    "",
+    "THE GENERAL RULE THIS FILE EXISTS TO ENFORCE: nothing here may name a claim,",
+    "a carrier, a vehicle, an RO, or a file. If a fix can only be expressed by",
+    "naming one of those it is not a fix, it is a patch, and it will not survive",
+    "to the next comparison.",
+    "",
+    "Code contains mechanism; this file contains policy. To change behaviour for",
+    "every future comparison, edit this file — never the annotator.",
+    "",
+    "THREE SECTIONS OF THE SOURCE SPEC ARE DELIBERATELY ABSENT, because they",
+    "already exist elsewhere in this repo and a second copy would drift:",
+    "  canonical_ops -> data/operationAliases.json is the operation vocabulary.",
+    "                   The spec renamed every key (OP_PRE_SCAN for",
+    "                   PRE_REPAIR_SCAN); opCodeAliases below records the rename",
+    "                   so external bundles still validate.",
+    "  identity      -> claimIdentityGate.ts. The spec's 'Claim #:?\\s*(\\S+)'",
+    "                   returns 'Workfile' against a CCC stacked label block,",
+    "                   which is the defect that gate was written to fix.",
+    "  numeric prose -> ai/numericIntegrity.ts already implements R11."
+  ],
+  "version": 3,
+
+  "identity": {
+    "filenameIsEvidence": false,
+    "onMismatch": "block"
+  },
+
+  "roles": {
+    "targetSelection": "lower_grand_total",
+    "costMayInferRole": false
+  },
+
+  "findings": {
+    "types": {
+      "value_delta": { "label": "PRICE DELTA", "direction": "both" },
+      "labor_delta": { "label": "LABOR DELTA", "direction": "both" },
+      "quantity_delta": { "label": "QUANTITY DELTA", "direction": "both" },
+      "repair_vs_replace": { "label": "REPAIR VS REPLACE", "direction": "both" },
+      "repair_path_conflict": { "label": "REPAIR PATH", "direction": "both" },
+      "materials_only_delta": { "label": "MATERIALS DELTA", "direction": "both" },
+      "operation_substituted": { "label": "SUBSTITUTED", "direction": "both" },
+      "missing_operation": { "label": "NOT ON OTHER DOC", "direction": "one" },
+      "counterpart_only": { "label": "OTHER-DOC ONLY", "direction": "one" },
+      "rate_delta": { "label": "RATE DELTA", "direction": "both" },
+      "hours_delta": { "label": "HOURS DELTA", "direction": "both" },
+      "category_absent": { "label": "CATEGORY MISSING", "direction": "one" },
+      "materials_capped": { "label": "P&M CAP", "direction": "one" },
+      "tax_basis_delta": { "label": "TAX BASIS", "direction": "both" },
+      "total_gap": { "label": "TOTAL GAP", "direction": "both" }
+    },
+    "substitutionPairs": [
+      ["PRE_REPAIR_SCAN", "SERVICE_MODE"],
+      ["POST_REPAIR_SCAN", "SERVICE_MODE"],
+      ["FEATHER_PRIME_BLOCK", "MASK_JAMBS"]
+    ],
+    "neverEmitForRoles": ["noise", "section_header", "deduction"],
+    "requireSourceLineIds": true,
+    "anchorExemptTypes": ["total_gap", "tax_basis_delta"]
+  },
+
+  "opCodeAliases": {
+    "OP_PRE_SCAN": "PRE_REPAIR_SCAN",
+    "OP_POST_SCAN": "POST_REPAIR_SCAN",
+    "OP_SERVICE_MODE": "SERVICE_MODE",
+    "OP_URETHANE": "URETHANE_ADHESIVE",
+    "OP_SAND_POLISH": "FINISH_SAND_POLISH",
+    "OP_COLOR_TINT": "TINT_COLOR",
+    "OP_CLEAN_DELIVERY": "CLEAN_FOR_DELIVERY",
+    "OP_HAZ_WASTE": "HAZARDOUS_WASTE",
+    "OP_SOLID_WASTE": "SOLID_WASTE_REMOVAL",
+    "OP_FLEX_ADDITIVE": "FLEX_ADDITIVE",
+    "OP_CAVITY_WAX": "CAVITY_WAX",
+    "OP_MASK_JAMBS": "MASK_JAMBS",
+    "OP_MASK_PRIMER": "FEATHER_PRIME_BLOCK",
+    "OP_SET_BACK_WIRING": "SET_BACK_WIRING"
+  },
+
+  "wording": {
+    "counterpartOnly": "On $counterpart only",
+    "missingOperation": "not written on $counterpart",
+    "valueDelta": "$here vs $counterpart $there",
+    "bannedPhrases": ["MISSED on", "Only on left", "Only on right", "lower-cost estimate"],
+    "nullIsNotZero": true
+  },
+
+  "marks": {
+    "badgeNamespace": "finding_number",
+    "badgeEveryAnchor": true,
+    "styles": {
+      "match": {
+        "mark": "tint",
+        "color": "green",
+        "note": "CCC underlines its own *-rows; never use underline for match"
+      },
+      "value_delta": { "mark": "strike_and_stamp", "color": "red", "hl": "yellow" },
+      "counterpart_only": { "mark": "section_tag", "color": "red", "hl": "yellow" },
+      "oem": { "mark": "note", "color": "blue", "hl": "cyan" },
+      "law": { "mark": "note", "color": "blue", "hl": "cyan" }
+    },
+    "legendGeneratedFromStyles": true,
+    "legendPerReportType": true,
+    "deltaLegendPattern": "estimate (evidence|difference)|ccc secure share"
+  },
+
+  "layout": {
+    "measureBeforePlace": true,
+    "band": { "lead": 8.8, "size": 6.9, "gapAboveContent": 6.0, "gapBelowBand": 2.0 },
+    "overflow": "spill_to_appendix",
+    "detailPage": "totals_page",
+    "discloseTruncation": true
+  },
+
+  "authority": {
+    "neverInvent": true,
+    "emitNullWhenUnretrieved": true,
+    "allowedDomains": {
+      "refinish_materials": ["ppage", "oem_refinish", "deg", "law"],
+      "adas_calibration": ["oem_adas", "icar", "oem_procedure"],
+      "parts_source": ["oem_parts", "law", "carrier_note"],
+      "structural": ["oem_procedure", "icar"]
+    },
+    "rejectTitlesMatching": ["total loss", "diminished value", "getting fair value"]
+  },
+
+  "confidence": {
+    "anyFailedInvariantForces": "low"
+  },
+
+  "counters": {
+    "singleSource": "ingestion_ledger"
+  },
+
+  "totals": {
+    "reconcileEpsilon": 0.02
+  }
+}
