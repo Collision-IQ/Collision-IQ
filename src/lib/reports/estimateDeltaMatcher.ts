@@ -172,6 +172,20 @@ export function extractPartSource(rowText: string): string[] {
  * is machine-read from an image-only PDF, an unmatched line cannot be a
  * *confirmed* omission — OCR may have dropped or garbled it.
  */
+/**
+ * A section of the counterpart that produced NO parsed rows cannot support the
+ * claim that the counterpart omitted the work — but only when the document as
+ * a whole read poorly. RO 22182's carrier EOR has 11 of 17 sections with zero
+ * counterpart rows at 93% hours coverage: it is simply a smaller document, and
+ * quarantining on emptiness alone would delete 65 legitimate findings. The
+ * caller decides, via absenceAllowedForSection, using derived confidence.
+ */
+export const SECTION_UNREAD_STATUS_LABELS = [
+  "COUNTERPART_SECTION_UNREAD",
+  "ABSENCE_NOT_ESTABLISHED",
+  "VERIFY_AGAINST_SOURCE",
+] as const;
+
 export const OCR_UNCERTAIN_STATUS_LABELS = [
   "OCR_UNCERTAIN",
   "LOWER_ESTIMATE_OCR_LIMITATION",
@@ -1901,6 +1915,14 @@ export function matchEstimateLineItems(params: {
    */
   lowerIsOcr?: boolean;
   /**
+   * Section-level gate (point 2). Return false when the counterpart's matching
+   * section produced no rows AND the document did not read well enough for that
+   * emptiness to be informative — the absence claim is then downgraded to a
+   * verify item instead of blocking the whole comparison. Absent, every section
+   * is permitted, which is the pre-existing behaviour.
+   */
+  absenceAllowedForSection?: (section: string | null) => boolean;
+  /**
    * Raw lower-estimate text (e.g. the full OCR dump). Used to seed category
    * presence when OCR flattens the table so row parsing yields few rows — the
    * category headers ("FRONT BUMPER & GRILLE", "RADIATOR SUPPORT") still appear
@@ -2248,6 +2270,12 @@ export function matchEstimateLineItems(params: {
         ...(lowerIsOcr ? { statusLabels: ["LOWER_ESTIMATE_OCR_LIMITATION", "VERIFY_AGAINST_SOURCE"] } : {}),
       });
     } else {
+      // SECTION-LEVEL GATE. An absence claim about a section the counterpart
+      // never yielded is not evidence of omission; it is evidence of a
+      // section this pass could not read.
+      const sectionReadable = params.absenceAllowedForSection
+        ? params.absenceAllowedForSection(higherRow.section ?? null)
+        : true;
       missingOperationCount += 1;
       deltas.push({
         kind: "missing_operation",
@@ -2259,6 +2287,9 @@ export function matchEstimateLineItems(params: {
         priceDelta: higherRow.price,
         summary: buildMissingSummary(higherRow, lowerIsOcr),
         annotate: true,
+        ...(sectionReadable
+          ? {}
+          : { ocrUncertain: true, statusLabels: [...SECTION_UNREAD_STATUS_LABELS] }),
         // OCR confidence: even a genuinely-added line (part# absent) stays a
         // verify item against an OCR-derived lower estimate.
         ...(lowerIsOcr
@@ -3052,9 +3083,17 @@ export function assessComparisonExtraction(rows: Array<{ lineNumber: number | nu
     .map((row) => row.lineNumber)
     .filter((line): line is number => line !== null && Number.isFinite(line));
   const parsedRows = lineNumbers.length;
-  const impliedRows = parsedRows
-    ? Math.max(...lineNumbers) - Math.min(...lineNumbers) + 1
-    : 0;
+  // ROBUST SPAN. A single outlier destroys a min/max span, and estimates supply
+  // one: the vehicle's model year. RO 22059's SOR parses 116 rows across lines
+  // 3-141, but "2022" from "2022 TESL Model S Plaid" is read as a line number,
+  // making the implied span 2020 and the coverage 6% instead of 83% — low
+  // enough to trip the gate on a well-parsed document. Percentile bounds ignore
+  // the tails; min/max is kept for the short documents where they are the same.
+  const sorted = [...lineNumbers].sort((a, b) => a - b);
+  const at = (ratio: number) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(ratio * (sorted.length - 1))))];
+  const low = sorted.length >= 20 ? at(0.02) : sorted[0];
+  const high = sorted.length >= 20 ? at(0.98) : sorted[sorted.length - 1];
+  const impliedRows = parsedRows ? Math.max(1, high - low + 1) : 0;
   const coverage = impliedRows > 0 ? parsedRows / impliedRows : 1;
   // Gate only on substantive documents: a sparse synthetic or a genuinely
   // short estimate must not read as degraded.
