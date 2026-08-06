@@ -106,6 +106,10 @@ function stripDeltaEngineSideTokens(desc: string, stripPosition: boolean): strin
   return out.replace(/\s*\/\s*/g, " ").replace(/\s{2,}/g, " ").trim();
 }
 import { pairAndCompare, isDeduction } from "./deltaEngine/deltaPair";
+import {
+  deriveExtractionConfidence,
+  sectionSupportsAbsenceClaims,
+} from "./extractionConfidence";
 import { carriersNamedIn, detectDominantKnownCarrier, findForeignOrganizationMentions } from "@/lib/ai/extractors/extractEstimateFacts";
 import {
   emptyRowParseDiagnostics,
@@ -3741,9 +3745,65 @@ function matchStructuredLineItemDeltas(
     higherRowCount: dedupedHigherRows.length,
     lowerRowCount: lowerRows.length,
   });
+  /**
+   * DOCUMENT CONFIDENCE ON THE FINDINGS LANE.
+   *
+   * The hours-coverage gate above guards the VALUE-MARK layer, and that layer
+   * only runs when the comparison document supplied a word layer. A scanned
+   * estimate supplies OCR text and no word layer, so it skipped the gate
+   * entirely and the findings lane ran unguarded — exactly the document class
+   * the gate was built for.
+   *
+   * Measured on RO 22059 with the counterpart truncated to 34% of its rows:
+   * 216 absence phrases in the artifact against 98 for the fully-read control.
+   * The 66% of carrier lines this pass could not read had each become "the
+   * carrier did not write this."
+   *
+   * So confidence is derived here too, from the same observables, and the
+   * per-section gate is handed to the matcher.
+   */
+  const lowerSpanCoverage = assessComparisonExtraction(
+    lowerRows.map((row) => ({ lineNumber: row.lineNumber }))
+  );
+  const lowerHoursCoverage = assessHoursCoverage(
+    lowerRows.map((row) => ({ labor: row.labor, paint: row.paint })),
+    comparison.map((item) => item.text).join("\n")
+  );
+  const lowerSectionRowCounts = new Map<string, number>();
+  for (const row of lowerRows) {
+    const key = (row.section ?? "").trim().toUpperCase();
+    lowerSectionRowCounts.set(key, (lowerSectionRowCounts.get(key) ?? 0) + 1);
+  }
+  const higherSections = new Set(
+    dedupedHigherRows.map((row) => (row.section ?? "").trim().toUpperCase())
+  );
+  const lowerConfidence = deriveExtractionConfidence({
+    lineSpanCoverage: lowerSpanCoverage.coverage,
+    hoursCoverage: lowerHoursCoverage.coverage,
+    textLayerReliable: !(context.comparisonEstimateWords ?? []).some(
+      (entry) => entry.textLayerReliable === false
+    ),
+    ocrDerived: lowerIsOcr,
+    totalsBlockFound: lowerHoursCoverage.totalsBlockFound,
+    sectionsWithZeroCounterpartRows: [...higherSections].filter(
+      (section) => (lowerSectionRowCounts.get(section) ?? 0) === 0
+    ).length,
+    totalSections: higherSections.size,
+  });
+  const absenceAllowedForSection = (section: string | null): boolean =>
+    sectionSupportsAbsenceClaims({
+      counterpartRowsInSection:
+        lowerSectionRowCounts.get((section ?? "").trim().toUpperCase()) ?? 0,
+      documentConfidence: lowerConfidence,
+    });
   /** P0-1 contradiction notices, surfaced on the pack so a withdrawn claim is
    * visible rather than silently absent. */
   const contradictionNotes: string[] = [];
+  if (lowerConfidence.band !== "high") {
+    contradictionNotes.push(
+      `Comparison estimate ${lowerConfidence.explanation}. Absence findings for sections the counterpart produced no rows for are marked unverified: a line this pass could not read is not a line the carrier omitted.`
+    );
+  }
   const match: {
     deltas: EstimateLineItemDelta[];
     matchedPairCount: number;
@@ -3759,6 +3819,7 @@ function matchStructuredLineItemDeltas(
         potentialDuplicateLowerRows: engineRowsToDeltaRows(engineMatch.potentialDuplicateLowerRows, null),
       }
     : matchEstimateLineItems({
+        absenceAllowedForSection,
         lowerRows,
         higherRows: dedupedHigherRows,
         lowerIsOcr: lowerIsOcr || lowerParseSuspect,
@@ -4182,7 +4243,13 @@ function emitStructuredLineItemDeltaFindings(
   // halves would hide a real price difference behind a matching failure.
   if (deltaMatch.contradictionNotes.length > 0 && findings.length > 0) {
     const last = findings[findings.length - 1];
-    last.limitations = [...(last.limitations ?? []), ...deltaMatch.contradictionNotes].slice(0, 12);
+    // These notes lead, and the finding's own limitations are what the cap
+    // trims. Appending put them last, where a finding that already carried 12
+    // limitations dropped every one of them — which is how the extraction
+    // confidence note went missing from a truncated-counterpart run whose
+    // findings were correctly marked unverified. A withdrawn contradiction and
+    // a low-confidence read are the two notices that must never be the ones cut.
+    last.limitations = [...deltaMatch.contradictionNotes, ...(last.limitations ?? [])].slice(0, 12);
   }
 
   return findings;
@@ -9138,6 +9205,14 @@ function buildCalloutLines(
       .filter((line) => /are the same operation written differently|closely resembles/i.test(line))
       .slice(0, 3)
       .map((line) => `Reconcile directly: ${sanitize(line)}`),
+    // How well the comparison document was READ. This card renders only the
+    // limitations it recognises, so a note with no branch here is dropped
+    // silently — which is how a truncated-counterpart run shipped findings
+    // correctly marked unverified while the page never said why.
+    ...finding.limitations
+      .filter((line) => /extraction confidence/i.test(line))
+      .slice(0, 1)
+      .map((line) => `Read quality: ${sanitize(line)}`),
     `Next action: ${sanitize(finding.recommendedNextAction)}`,
   ];
 }

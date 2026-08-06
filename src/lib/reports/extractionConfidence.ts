@@ -32,6 +32,20 @@ export interface ExtractionObservables {
   ocrDerived: boolean;
   sectionsWithZeroCounterpartRows: number;
   totalSections: number;
+  /**
+   * Did the document print an ESTIMATE TOTALS block?
+   *
+   * The one signal that survives a TAIL TRUNCATION, which both coverage
+   * measures are blind to: cut an estimate short and the surviving rows are a
+   * contiguous run (line-span reads high) while the totals block disappears
+   * with the tail (hours coverage loses its denominator and defaults to 1.0).
+   * All eight corpus estimates print the block, so its absence means the read
+   * stopped early — not that the document is small.
+   *
+   * Optional so existing callers keep their behaviour; undefined is treated as
+   * present, since a caller that cannot tell must not manufacture doubt.
+   */
+  totalsBlockFound?: boolean;
 }
 
 export type ConfidenceBand = "high" | "medium" | "low";
@@ -75,6 +89,11 @@ export function deriveExtractionConfidence(
   const coverage = clamp01(Math.min(lineSpanCoverage, hoursCoverage));
   let score = coverage;
 
+  // A document with no totals block was not read to its end. Both coverage
+  // measures report a truncated estimate as well-read, so this is the only
+  // signal that catches it, and it caps rather than scales: the coverage
+  // numbers it overrides are not evidence of anything.
+  if (observables.totalsBlockFound === false) score = Math.min(score, 0.4);
   // A text layer that cannot be trusted caps the result regardless of coverage
   // — rows may have parsed cleanly out of mis-mapped glyphs.
   if (!textLayerReliable) score = Math.min(score, 0.45);
@@ -98,7 +117,8 @@ export function deriveExtractionConfidence(
       `line-span coverage ${Math.round(lineSpanCoverage * 100)}%, ` +
       `hours coverage ${Math.round(hoursCoverage * 100)}%, ` +
       `text layer ${textLayerReliable ? "reliable" : "UNRELIABLE"}` +
-      `${ocrDerived ? ", OCR-derived" : ""}, ` +
+      `${ocrDerived ? ", OCR-derived" : ""}` +
+      `${observables.totalsBlockFound === false ? ", NO TOTALS BLOCK (read stopped early)" : ""}, ` +
       `${sectionsWithZeroCounterpartRows} of ${totalSections} sections with no counterpart rows`,
   };
 }

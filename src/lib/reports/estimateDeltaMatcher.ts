@@ -3079,7 +3079,30 @@ export function normalizeTotalsCategoryKey(name: string): string {
 export function assessHoursCoverage(
   rows: Array<{ labor: number | null; paint: number | null }>,
   documentText: string
-): { parsedHours: number; printedHours: number; coverage: number; gate: boolean } {
+): {
+  parsedHours: number;
+  printedHours: number;
+  coverage: number;
+  gate: boolean;
+  /**
+   * Did the document print a totals block at all?
+   *
+   * A BLIND SPOT BOTH COVERAGE MEASURES SHARE. Truncate an estimate at the
+   * tail — the shape a partial OCR pass produces — and neither test can see
+   * it: the surviving rows are a contiguous 1..49 run, so the line-span test
+   * reads 94%, and the totals block went missing with the tail, so this
+   * function has no denominator and returns 1.0. RO 22059 truncated to 34% of
+   * its rows measured 94% and 100% covered while producing 216 absence
+   * phrases against the full document's 98.
+   *
+   * Absence of the block is therefore reported separately rather than folded
+   * into `coverage`. It must NOT raise `gate`: an estimate whose totals print
+   * no labor at all is a legitimate parts-only document, and every one of the
+   * eight corpus estimates prints the block, so its absence means the read is
+   * incomplete — a different claim from "coverage is low".
+   */
+  totalsBlockFound: boolean;
+} {
   const parsedHours = rows.reduce((total, row) => total + (row.labor ?? 0) + (row.paint ?? 0), 0);
   // Every "<Category> Labor N hrs" line in the totals block, whatever the
   // category is called — no per-provider list.
@@ -3106,6 +3129,16 @@ export function assessHoursCoverage(
     printedHours: Math.round(printedHours * 10) / 10,
     coverage: Math.round(coverage * 100) / 100,
     gate,
+    // ANY totals evidence, not just the CCC header. A document can close with
+    // "Net Cost of Repairs", "Grand Total", or a totals summary instead of an
+    // "ESTIMATE TOTALS" table, and testing only for the header called a
+    // complete 3-row comparison truncated. The question this answers is "did
+    // the read reach the document's end", not "which producer wrote it".
+    totalsBlockFound:
+      totalsIndex >= 0 ||
+      /(net cost of repair|grand total|total cost of repair|totals summary|workfile total)/i.test(
+        documentText
+      ),
   };
 }
 

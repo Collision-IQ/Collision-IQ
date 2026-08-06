@@ -3879,7 +3879,14 @@ await run("delta citation density annotates the higher-cost estimate and lists c
       "60 Repl LT Hub assy $250.00 1.0",
       "61 R&I Rear suspension access $85.00 0.5",
       "REFINISH",
-      "150 Rpr Finish sand and polish $80.00 0.8",
+      // Numbered 62, not 150. Three rows spanning lines 60-150 imply a 91-row
+      // document of which 3 were read — a 3% extraction by the line-span
+      // measure — and the confidence gate correctly refuses to let a read that
+      // poor support "the comparison omitted this". Nothing asserts on the
+      // number, and this fixture is meant to be a small COMPLETE estimate
+      // rather than a badly-read large one, so it is numbered like one. The
+      // gate is not relaxed to accommodate a synthetic input.
+      "62 Rpr Finish sand and polish $80.00 0.8",
     ].join("\n");
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
@@ -3949,7 +3956,14 @@ await run("delta citation density annotates the higher-cost estimate and lists c
       "60 Repl LT Hub assy $250.00 1.0",
       "61 R&I Rear suspension access $85.00 0.5",
       "REFINISH",
-      "150 Rpr Finish sand and polish $80.00 0.8",
+      // Numbered 62, not 150. Three rows spanning lines 60-150 imply a 91-row
+      // document of which 3 were read — a 3% extraction by the line-span
+      // measure — and the confidence gate correctly refuses to let a read that
+      // poor support "the comparison omitted this". Nothing asserts on the
+      // number, and this fixture is meant to be a small COMPLETE estimate
+      // rather than a badly-read large one, so it is numbered like one. The
+      // gate is not relaxed to accommodate a synthetic input.
+      "62 Rpr Finish sand and polish $80.00 0.8",
     ].join("\n");
 
     const result = await buildAnnotatedCitationDensityEstimatePdf({
