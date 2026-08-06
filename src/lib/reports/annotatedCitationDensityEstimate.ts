@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import DELTA_RULES from "./data/deltaRules.json";
 import { describePiiExposure, scanExportForPii } from "@/lib/privacy/exportPiiScanner";
+import { redactAndRasterizePdf } from "@/lib/privacy/rasterRedactPdf";
 import { canonicalOperationKey } from "./operationAliases";
 import { buildBlockedMessage, compareClaimIdentity, readClaimIdentity } from "./claimIdentityGate";
 import {
@@ -15,7 +16,7 @@ import {
   PDFName,
   type PDFRef,
 } from "pdf-lib/cjs/core";
-import { redactDownloadContent } from "@/lib/privacy/redactDownloadContent";
+import { redactDownloadContent, redactInsurersForExport } from "@/lib/privacy/redactDownloadContent";
 import type { CitationDensityFinding, CitationDensityEstimateLineAnchor, CitationDensityAuthority, CitationSupportStatus } from "@/lib/ai/types/estimateScrubber";
 import type { CanonicalDeltaSet, CanonicalDeltaEntry } from "./canonicalDelta";
 import { getDeltaLabel, applyDisplayThreshold, assertNoCarrierWording } from "./canonicalDelta";
@@ -1207,6 +1208,10 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   uploadedFileNames?: string[];
   sourceText?: string | null;
   comparisonEstimateTexts?: ComparisonEstimateText[];
+  /** Export boundary: render the source pages to images with identifiers
+   *  painted out. Defaults to ON — pass false only for in-system diagnostics
+   *  where the full record is wanted and nothing leaves. */
+  redactSourcePages?: boolean;
   /**
    * Original PDF bytes of comparison estimates. When present, the delta value
    * layer parses the competing document from its measured word layer (same
@@ -1247,7 +1252,35 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   let { findings, suppressed } = sanitizeCitationDensityFindingsForVisibleLayer(selectedFindings);
   const warnings: string[] = [];
   const sourcePdfBytes = params.sourcePdfBytes.slice();
-  const pdfDoc = await PDFDocument.load(sourcePdfBytes);
+  // EXPORT BOUNDARY — the annotated estimate reproduces the customer's own
+  // estimate pages, so the identifiers live in the page content and no text
+  // rule reaches them. Each page is rendered to pixels with the identifiers
+  // painted out, and the image replaces the page: the text layer is destroyed
+  // by construction, so there is nothing left to extract. A drawn rectangle
+  // would leave the glyphs selectable underneath — a document that looks
+  // protected and is not is worse than one that is visibly unprotected.
+  //
+  // Anchors are extracted from the ORIGINAL bytes below, because placement
+  // depends on the text layer this step removes. Page dimensions are
+  // preserved, so every annotation coordinate still lands.
+  let annotationBaseBytes: Uint8Array = sourcePdfBytes;
+  let sourcePagesRedacted = false;
+  let redactedRegionCount = 0;
+  if (params.redactSourcePages !== false) {
+    try {
+      const redacted = await redactAndRasterizePdf(sourcePdfBytes);
+      annotationBaseBytes = new Uint8Array(redacted.bytes);
+      sourcePagesRedacted = true;
+      redactedRegionCount = redacted.redactedRegionCount;
+    } catch (error) {
+      // Never ship an un-redacted export silently. If redaction cannot run the
+      // report still builds, but it says so in the reader's own warnings.
+      warnings.push(
+        `Source-page redaction did not run (${error instanceof Error ? error.message : "unknown error"}). This annotated estimate reproduces the original estimate pages and still carries the identifiers printed on them; do not share it outside the system.`
+      );
+    }
+  }
+  const pdfDoc = await PDFDocument.load(annotationBaseBytes);
   const originalPageCount = pdfDoc.getPageCount();
   if (originalPageCount === 0) {
     throw new Error(`Annotated ${reportIdentity.reportShortTitle} export requires an original estimate PDF with source pages.`);
@@ -2113,7 +2146,11 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
             pages: [...pageGeometries.values()],
             competingRows,
             competingTotals,
-            competingLabel,
+            // EXPORT BOUNDARY — the annotation text is drawn ON the exported
+            // page, so naming the carrier there puts insurance information
+            // straight back into a redacted document. The role is what the
+            // reader needs ("the comparison estimate"); the identity is not.
+            competingLabel: sourcePagesRedacted ? "the comparison estimate" : competingLabel,
             measureText: (text, size) => boldFont.widthOfTextAtSize(text, size),
           });
           const costInk = rgb(0.72, 0.12, 0.1);
@@ -2299,10 +2336,20 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
   // carries a VIN, a claim number or a carrier name must not look protected
   // just because the generated reports around it are.
   try {
-    const exposure = scanExportForPii(params.sourceText ?? "");
+    appendToolUsageTrace(trace, {
+      tool: "source_page_redaction",
+      ran: sourcePagesRedacted,
+      candidatesFound: originalPageCount,
+      candidatesAccepted: sourcePagesRedacted ? originalPageCount : 0,
+      candidatesRejected: sourcePagesRedacted ? 0 : originalPageCount,
+      droppedReasons: sourcePagesRedacted ? [] : ["source pages were not rasterized"],
+    });
+    // Only meaningful when redaction did NOT run — when it did, the text layer
+    // no longer exists, so there is nothing for a text scan to find.
+    const exposure = sourcePagesRedacted ? [] : scanExportForPii(params.sourceText ?? "");
     if (exposure.length > 0) {
       warnings.push(
-        `${describePiiExposure("The annotated estimate", exposure)}. It reproduces the original estimate pages, which cannot be redacted by text rules — the page content itself must be redacted before this file is shared outside the system.`
+        `${describePiiExposure("The annotated estimate", exposure)}. It reproduces the original estimate pages; do not share it outside the system.`
       );
     }
   } catch {
@@ -4366,7 +4413,12 @@ function emitTotalsDeltaFindings(
         context,
         anchor,
         findingType: "carrier-note-mismatch",
-        title: `Carrier-attribution defect: line note names ${mismatch.carrier} on a ${mismatch.dominantCarrier} file`,
+        // EXPORT BOUNDARY — this finding is ABOUT two carrier names, so
+        // redacting both would leave "[REDACTED_INSURER] on a
+        // [REDACTED_INSURER] file" and destroy the intelligence. State the
+        // defect instead: the reader has the line in front of them, and the
+        // fact that the note belongs to a different insurer is the finding.
+        title: "Carrier-attribution defect: this line's note names a different insurer than the file's",
         category: "other",
         label: "CARRIER MISMATCH",
         estimateGapType: "needs_proof",
@@ -9257,9 +9309,17 @@ function normalizeSourceBoundaryText(value: string) {
     .replace(/\b(OEM|P-page|DEG|legal)documentation\b/gi, "$1 support");
 }
 
+/**
+ * EXPORT BOUNDARY for drawn prose.
+ *
+ * Insurance information reaches an exported page through more routes than a
+ * finding's text: a FILENAME carries it ("USAA EOR 22047.pdf" in a diagnostic
+ * line), and so does any support ref or warning built from one. Sweeping here,
+ * where every wrapped line is drawn, closes the class rather than the instance.
+ */
 function drawWrappedLines(
   page: PDFPage,
-  lines: string[],
+  rawLines: string[],
   options: {
     x: number;
     y: number;
@@ -9271,6 +9331,7 @@ function drawWrappedLines(
     maxLines: number;
   }
 ) {
+  const lines = rawLines.map((line) => redactInsurersForExport(line));
   let y = options.y;
   let drawn = 0;
   for (const line of lines) {

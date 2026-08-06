@@ -174,6 +174,10 @@ export function redactDownloadContent(text: string): string {
 
 /** Replace any carrier from the shared vocabulary, longest name first so
  *  "American Family Insurance" is not left as "[REDACTED_INSURER] Insurance". */
+export function redactInsurersForExport(input: string): string {
+	return redactKnownCarriers(input);
+}
+
 function redactKnownCarriers(input: string): string {
 	let output = input;
 	for (const carrier of [...COMMON_INSURERS].sort((a, b) => b.length - a.length)) {
