@@ -202,3 +202,58 @@ describe("the blocked message names both documents and only the proving keys", (
     expect(message).not.toMatch(/Mismatch: .*RO number/);
   });
 });
+
+/**
+ * AN RO NUMBER IS A LABEL, NOT EVIDENCE.
+ *
+ * Raised as a fixture-naming risk: a file named for RO 22186 carrying claim
+ * 26-232003028-01 looks like a mismatch, and the worry was that the pairing
+ * could mislead the comparison. It cannot, and these lock in why.
+ *
+ * A shop's repair-order number and a carrier's file number are independent
+ * sequences assigned by different organisations for the same loss. Two
+ * documents on one claim routinely carry different ones — and one document's
+ * RO number has nothing to do with what somebody typed in a filename. Only
+ * the VIN and the claim number, read from the document's own text, are strong
+ * enough to block a comparison.
+ */
+describe("an RO number never blocks a comparison, and a filename never speaks", () => {
+  const identity = (over: Partial<ClaimIdentity>): ClaimIdentity => ({
+    vin: "5YJSA1E65NF488007",
+    claimNumber: "26-232003028-01",
+    roNumber: null,
+    ownerTokens: [],
+    vehicle: null,
+    ...over,
+  });
+
+  it("records a differing RO number without blocking", () => {
+    const verdict = compareClaimIdentity(
+      identity({ roNumber: "22186" }),
+      identity({ roNumber: "26-232003028-01" })
+    );
+    expect(verdict.conflicting).toContain("RO number");
+    expect(verdict.blocked).toBe(false);
+    // The VIN and claim number agree, so the pair is PROVEN, not merely allowed.
+    expect(verdict.unverified).toBe(false);
+  });
+
+  it("still blocks when a strong key disagrees, whatever the RO numbers say", () => {
+    const matchingRo = compareClaimIdentity(
+      identity({ roNumber: "22186", vin: "5YJSA1E65NF488007" }),
+      identity({ roNumber: "22186", vin: "5YJ3E1EA8JF006632" })
+    );
+    expect(matchingRo.blocked).toBe(true);
+    expect(matchingRo.conflicting).toContain("vin");
+  });
+
+  it("reads identity only from document text, never from a file name", () => {
+    // The same bytes named two different ways produce identical identity.
+    const text = ["Claim #:", "26-232003028-01", "VIN:5YJSA1E65NF488007Interior"].join("\n");
+    expect(readClaimIdentity(text)).toEqual(readClaimIdentity(text));
+    expect(readClaimIdentity(text).claimNumber).toBe("26-232003028-01");
+    // A filename's digits are not a claim number and are never consulted.
+    expect(readClaimIdentity("RO 22186 shop final.pdf").claimNumber).toBeNull();
+    expect(readClaimIdentity("RO 22186 shop final.pdf").vin).toBeNull();
+  });
+});
