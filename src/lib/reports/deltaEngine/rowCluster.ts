@@ -18,6 +18,7 @@ import {
   canonKey,
   stripNote,
   extractPart,
+  isContactInformationRow,
   repairTokens,
   learnConfusableRepairs,
   withDocumentRepairs,
@@ -360,6 +361,15 @@ export function parsePage(
       state.prev = null;
       continue;
     }
+    // The appraiser/vendor contact block is NUMBERED like line items, so it
+    // would otherwise open rows and — because a phone number carries decimals
+    // the column parser reads as money — bill them. Dropped before the row is
+    // opened, and it never becomes wrap payload for the row above either.
+    if (isContactInformationRow(joined)) {
+      rejectStub(state, diag);
+      state.prev = null;
+      continue;
+    }
     const first = ws[0].text;
     const isLine = /^\d{1,3}$/.test(first) && ws.length > 1;
     const lineNo = isLine ? parseInt(first, 10) : NaN;
@@ -487,8 +497,30 @@ export function parseEstimateRows(
       rows.push(...parsePage(words, page, cols, state, diag));
     }
     rejectStub(state, diag);
-    return rows;
+    return dropPreamble(rows);
   });
+}
+
+/**
+ * Rows above the first section header are not scope.
+ *
+ * CCC numbers its header block — "Estimate Share - Questions", "Non CCC Users
+ * Contact", "APPRAISER:" — in the same sequence as line items, so they parse
+ * as rows and then get reported as work one estimate carries and the other
+ * omits. Contact-shape detection removes the lines that carry a phone or an
+ * email; these are the contentless remainders of the same block.
+ *
+ * The discriminator is structural, not a word list: every genuine operation
+ * sits under a section header, including zero-value ones like an "Incl."
+ * R&I. Nothing above the first header does.
+ *
+ * Guarded on the document actually having sections. An estimate whose headers
+ * did not survive extraction has every row unsectioned, and dropping all of
+ * them would silently produce an empty comparison rather than a bad one.
+ */
+function dropPreamble(rows: EstimateRow[]): EstimateRow[] {
+  if (!rows.some((row) => (row.sectionLabel ?? "") !== "")) return rows;
+  return rows.filter((row) => (row.sectionLabel ?? "") !== "");
 }
 
 export function emptyRowParseDiagnostics(): RowParseDiagnostics {

@@ -59,6 +59,57 @@ const REPAIR_VOCABULARY: ReadonlyArray<string> = [
   "SUBTOTALS",
 ];
 
+/**
+ * CONTACT INFORMATION IS NEVER A REPAIR OPERATION.
+ *
+ * CCC numbers the appraiser/vendor contact block exactly like line items, so
+ * both lanes read it as scope. RO 22059's carrier SOR numbers five such lines
+ * (2-6), and the column parser found a decimal inside a phone number:
+ *
+ *   L4 "Call CCC 800.637.8511"  ->  description "Call CCC 800.63 7.85", price $110
+ *
+ * A FABRICATED dollar amount, then reported as a line the shop had omitted, in
+ * a report whose entire claim is evidence integrity. The same block carries an
+ * appraiser's email and direct phone.
+ *
+ * Detected by SHAPE, never by vendor name, and gated on the absence of an
+ * operation code — boilerplate carries no operation, and a real Repl/Rpr row
+ * that happens to carry a 3-3-4 identifier is therefore never discarded.
+ *
+ * Lives here because both the typed engine (rowCluster) and the text lane
+ * (estimateDeltaMatcher) must apply the identical rule, and both already
+ * depend on this module.
+ */
+const EMAIL_SHAPE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+/**
+ * 3-3-4 with separators. The SEPARATOR GROUPING is the discriminator, not the
+ * digit count: money ("1,308.00249.003.5" once glued) never yields
+ * digit-3-sep-digit-3-sep-digit-4, dates are 2-2-4, and part numbers are bare
+ * runs with no separators at all.
+ *
+ * No trailing (?!\d) boundary, deliberately. CCC glues the row's column values
+ * straight onto the number — "4#Call CCC 800.637.851110.000.00.0" — so a
+ * digit-boundary assertion is exactly the case that must still match. The
+ * leading (?<!\d) stays, so the pattern cannot start mid-run.
+ */
+const PHONE_SHAPE = /(?<!\d)(?:\(\d{3}\)\s*|\d{3}[.\s-])\d{3}[.\s-]\d{4}/;
+const CONTACT_OP_CODE =
+  /^(R\s*&\s*I|R\s*&\s*R|Repl|Rpr|Blnd|Refn|Subl|Algn|Sect|Add|O\/H|Overlap)\b/i;
+
+export function isContactInformationRow(rawText: string): boolean {
+  const text = (rawText ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return false;
+  if (EMAIL_SHAPE.test(text)) return true;
+  if (!PHONE_SHAPE.test(text)) return false;
+  // Strip the CCC line number and the #/*/<>/S01 markers that precede the
+  // operation code, then ask whether an operation is present at all.
+  const afterMarkers = text
+    .replace(/^[#*<>\s]*\d{1,4}\s*/, "")
+    .replace(/^(?:[#*]|<>|S\d{2})\s*/g, "")
+    .trim();
+  return !CONTACT_OP_CODE.test(afterMarkers);
+}
+
 /** Document-scoped repairs learned from the file's own vocabulary (U-4).
  * Installed by the parser for the duration of one document's parse. */
 let activeDocumentRepairs: ReadonlyArray<[string, string]> = [];

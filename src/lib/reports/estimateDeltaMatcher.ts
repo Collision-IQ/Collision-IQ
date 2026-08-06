@@ -18,6 +18,7 @@ import { canonicalOperationKey } from "./operationAliases";
 import {
   canonTotalsCategory,
   continuesIdentifier,
+  isContactInformationRow,
   isManufacturerPrefixedIdentifier,
   looksLikePartNumber,
   totalsCategoriesFuzzyMatch,
@@ -407,11 +408,12 @@ const DESCRIPTION_STOPWORDS = new Set([
 /**
  * True for non-estimate content that must never become a row OR an annotation
  * anchor: rate/totals table lines, page footers with timestamps, carwise/legal
- * boilerplate, and column-header lines.
+ * boilerplate, contact blocks, and column-header lines.
  */
 export function isNonEstimateContentRow(rawText: string): boolean {
   const text = (rawText ?? "").replace(/\s+/g, " ").trim();
   if (!text) return true;
+  if (isContactInformationRow(text)) return true;
   return (
     // Single abbreviation-legend fragments ("RPR=REPAIR", "Blnd=Blend.",
     // "R&I=Remove"): fragmented extractions split the legend footer into
@@ -1570,7 +1572,41 @@ export function parseCccEstimateRows(text: string): EstimateDeltaRow[] {
     seenLineNumbers.add(row.lineNumber);
     return true;
   });
-  return boundRowsByPrintedSubtotals(deduped, parseCccSubtotalsRule(text));
+  return boundRowsByPrintedSubtotals(dropPreambleRows(deduped), parseCccSubtotalsRule(text));
+}
+
+/**
+ * The CCC preamble block is numbered like line items, and it is not scope.
+ *
+ * "For Supplements Use CCC", "Estimate Share - Questions", "Non CCC Users
+ * Contact" open a carrier estimate above the first operation, numbered in the
+ * same sequence as real work, and the column parser prices them ($10 each) —
+ * so they were reported as lines this estimate omitted.
+ *
+ * TWO MEASUREMENTS SHAPED THIS RULE, and both rejected a broader one:
+ *
+ *   "Priced, no operation, no time" matches 73 rows across the corpus and MOST
+ *   ARE REAL — "BetaSeal Express Urethane" $37, "Hazardous Waste" $5,
+ *   "Additional paint and material" $928.30. Those are precisely the materials
+ *   omissions this report exists to find. Applied globally it would delete
+ *   them, so it is confined to the preamble, where the corpus has no real row
+ *   of that shape.
+ *
+ *   "Everything above the first operation-coded row" would take RO 22059's
+ *   L9 "Rpl information labels" — a genuine replace whose op code the
+ *   vocabulary spells "Repl". Requiring the absence of labor AND paint time
+ *   keeps it: boilerplate bills no hours.
+ *
+ * Six of the eight corpus documents have no preamble rows at all; this removes
+ * 8 rows across the two that do, all of them boilerplate.
+ */
+function dropPreambleRows(rows: EstimateDeltaRow[]): EstimateDeltaRow[] {
+  const firstOperation = rows.findIndex((row) => row.opCode !== null);
+  if (firstOperation <= 0) return rows;
+  return rows.filter(
+    (row, index) =>
+      index >= firstOperation || (row.labor ?? 0) !== 0 || (row.paint ?? 0) !== 0
+  );
 }
 
 /** Build a delta row from already-extracted source PDF row text + metadata. */

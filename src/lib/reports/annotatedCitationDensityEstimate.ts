@@ -105,7 +105,7 @@ function stripDeltaEngineSideTokens(desc: string, stripPosition: boolean): strin
   }
   return out.replace(/\s*\/\s*/g, " ").replace(/\s{2,}/g, " ").trim();
 }
-import { pairAndCompare } from "./deltaEngine/deltaPair";
+import { pairAndCompare, isDeduction } from "./deltaEngine/deltaPair";
 import { carriersNamedIn, detectDominantKnownCarrier, findForeignOrganizationMentions } from "@/lib/ai/extractors/extractEstimateFacts";
 import {
   emptyRowParseDiagnostics,
@@ -436,7 +436,16 @@ function engineResultToLineItemDeltas(params: {
   const potentialDuplicateLowerRows: DeltaEngineRow[] = [];
   for (const row of engine.competingOnly) {
     if (subjectKeys.has(row.key)) potentialDuplicateLowerRows.push(row);
-    else lowerOnlyRows.push(row);
+    // P0-3 SYMMETRY. pairAndCompare already refuses to call a negative subject
+    // row "missing on the competing estimate" (deltaPair isDeduction), but
+    // nothing applied the mirror rule to the competing side, so the typed lane
+    // listed the carrier's own credits as scope this estimate lacked: RO
+    // 22059's "Overlap Major Adj. Panel" at -0.4 refinish hours read as a line
+    // the shop should add, when adding it SUBTRACTS from the shop's total.
+    // The text lane has always dropped these; this is the engine lane catching
+    // up, not a new policy. Duplicates are still collected above — a credit
+    // billed twice is as real a signal as an operation billed twice.
+    else if (!isDeduction(row)) lowerOnlyRows.push(row);
   }
 
   return {
