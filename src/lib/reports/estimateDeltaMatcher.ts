@@ -2990,6 +2990,58 @@ export function normalizeTotalsCategoryKey(name: string): string {
  * unread; publishing a demand-grade delta verdict over it is the completion-
  * gate failure. Below threshold the pack renders as an INTAKE report.
  */
+/**
+ * Extraction coverage measured in HOURS against the document's own printed
+ * labor categories — the signal line-count coverage cannot see.
+ *
+ * assessComparisonExtraction below asks whether the line-number SPAN was read.
+ * A row that parsed with its hours lost still counts as covered there, and OCR
+ * that recovers 22 of 64 priced lines on a scanned estimate can clear it while
+ * 42 real carrier lines become confident absence claims. Comparing the sum of
+ * parsed hours to the printed totals block catches that, and every estimate
+ * family prints the totals needed.
+ *
+ * IMPORTANT — this works at the TOTAL level, not per category. A CCC row's
+ * labor column is hours regardless of labor TYPE (the type is a letter suffix
+ * on the row), so parsed rows cannot be split into Body / Paint / Mechanical to
+ * match the printed categories. Measured on the corpus, parsed labor + parsed
+ * paint against the printed sum of all labor categories lands at 91%, 98% and
+ * 111% on documents that are correctly read — coherent enough to gate a gross
+ * shortfall, not precise enough to police a single category.
+ */
+export function assessHoursCoverage(
+  rows: Array<{ labor: number | null; paint: number | null }>,
+  documentText: string
+): { parsedHours: number; printedHours: number; coverage: number; gate: boolean } {
+  const parsedHours = rows.reduce((total, row) => total + (row.labor ?? 0) + (row.paint ?? 0), 0);
+  // Every "<Category> Labor N hrs" line in the totals block, whatever the
+  // category is called — no per-provider list.
+  const totalsIndex = documentText.lastIndexOf("ESTIMATE TOTALS");
+  const block = totalsIndex >= 0 ? documentText.slice(totalsIndex) : documentText;
+  // Materials billed at an hourly rate are NOT labor performed. "Paint
+  // Supplies 29.7 hrs @ $60.00/hr" is a consumables charge computed from the
+  // paint hours, and counting it inflates the denominator: RO 22059's 96.2
+  // real labor hours read as 125.9, dropping a correctly-parsed document to
+  // 73% coverage and putting it within a few points of the gate.
+  const printedHours = block
+    .split(/\r?\n/)
+    .filter((line) => !/supplies|materials/i.test(line))
+    .flatMap((line) => [...line.matchAll(/([\d.]+)\s*hrs/g)])
+    .map((match) => Number(match[1]))
+    .filter((value) => Number.isFinite(value))
+    .reduce((total, value) => total + value, 0);
+  const coverage = printedHours > 0 ? parsedHours / printedHours : 1;
+  // A gross shortfall only. Correctly-read documents measure 0.9-1.1, so 0.5
+  // leaves wide margin; the floor keeps short or unpriced estimates out.
+  const gate = printedHours >= 10 && coverage < 0.5;
+  return {
+    parsedHours: Math.round(parsedHours * 10) / 10,
+    printedHours: Math.round(printedHours * 10) / 10,
+    coverage: Math.round(coverage * 100) / 100,
+    gate,
+  };
+}
+
 export function assessComparisonExtraction(rows: Array<{ lineNumber: number | null }>): {
   parsedRows: number;
   impliedRows: number;

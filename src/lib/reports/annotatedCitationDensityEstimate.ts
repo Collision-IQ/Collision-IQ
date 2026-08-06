@@ -75,6 +75,7 @@ import {
   normalizeTotalsCategoryKey,
   parseEstimateNetTotal,
   assessComparisonExtraction,
+  assessHoursCoverage,
   type EstimateDeltaKind,
   type EstimateDeltaRow,
   type EstimateLineItemDelta,
@@ -2126,9 +2127,25 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
         const valueLayerExtraction = assessComparisonExtraction(
           competingRows.map((row) => ({ lineNumber: row.line }))
         );
+        // A SECOND, independent coverage signal. The line-span test above asks
+        // whether the numbering was read; it counts a row as covered even when
+        // that row's hours were lost, so partial extraction — 22 of 64 priced
+        // lines off a scanned estimate — can clear it while the rest of the
+        // carrier's work silently becomes absence claims. Comparing parsed
+        // hours to the document's own printed labor categories catches that.
+        // Correctly-read documents in this corpus measure 84-95%.
+        const hoursCoverage = assessHoursCoverage(
+          competingRows.map((row) => ({ labor: row.labor, paint: row.paint })),
+          comparisonText?.text ?? ""
+        );
         if (valueLayerExtraction.gate) {
           warnings.push(
             `Comparison estimate extraction coverage ${Math.round(valueLayerExtraction.coverage * 100)}% is below the confidence threshold — delta value marks suppressed (intake mode).`
+          );
+        }
+        if (hoursCoverage.gate) {
+          warnings.push(
+            `Comparison estimate labor coverage is ${Math.round(hoursCoverage.coverage * 100)}% — ${hoursCoverage.parsedHours} of the ${hoursCoverage.printedHours} hours its own totals block prints were parsed. Absence findings are suppressed: a line this pass could not read is not a line the carrier omitted.`
           );
         }
         if (competingLabel === null) {
