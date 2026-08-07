@@ -277,10 +277,32 @@ export function compareTotals(
     }
     seenCompeting.add(u);
     seen.add(canon(u.category));
-    for (const field of ["hours", "rate", "amount"] as const) {
-      const a = s[field] ?? 0;
-      const b = u[field] ?? 0;
+    // AN UNREAD BASIS IS NOT A ZERO BASIS (R10), IN CLASSIFICATION AND NOT ONLY
+    // IN RENDERING.
+    //
+    // `?? 0` here was the fabrication: a category whose hours or rate could not
+    // be read became a category billed at zero, and every downstream consumer
+    // then had a real number to compare, stamp and narrate. On the first
+    // image-only comparison it produced "$0.00/hr" on every totals stamp and
+    // the sentence "at the same $0.00/hr rate" on every hours-delta finding —
+    // while the two documents in fact agreed on every rate to the cent
+    // ($61 body, $61 refinish, $100 mechanical, $70 frame, $42 materials).
+    // "There is no rate dispute" is the single most useful sentence available
+    // on that claim, and it was replaced by an invented one.
+    //
+    // Amount keeps its coalesce: parseTotalsFromWords already resolves a
+    // missing amount to 0 by construction, and the category reconciliation
+    // (Σ deltas + tax = grand total) is summed over amounts.
+    for (const field of ["hours", "rate"] as const) {
+      const a = s[field];
+      const b = u[field];
+      if (a === null || b === null) continue; // unknown — assert nothing
       if (Math.abs(a - b) > EPS) out.push({ category: s.category, field, subject: a, competing: b });
+    }
+    {
+      const a = s.amount ?? 0;
+      const b = u.amount ?? 0;
+      if (Math.abs(a - b) > EPS) out.push({ category: s.category, field: "amount", subject: a, competing: b });
     }
   }
   for (const u of competing) {

@@ -511,6 +511,47 @@ export interface TotalsRowWithBoxes {
  * bbox of every hours/rate/amount cell. Handles both spaced ("23.8 hrs") and
  * glued ("23.8hrs", "$90.00/hr") token layouts.
  */
+/**
+ * Publisher boilerplate and page furniture that sit inside the ESTIMATE TOTALS
+ * band on some platforms. The row reader accepts anything with letters and a
+ * number, which on an OCR'd Mitchell supplement turned the copyright block into
+ * two spending categories: "Mitchell Estimating Copyright Mitchell
+ * International, Inc. PA MALV ALL PART TYPES ($0.00, 26.2 hr @ $0.00/hr)" and
+ * "All Rights Reserved ($0.00, 18 hr @ $0.00/hr)" — both shipped to a customer
+ * as AMOUNT DELTA findings.
+ *
+ * Deliberately a reject list rather than a per-platform allow list: an allow
+ * list silently drops a real category the moment a platform renames one, and a
+ * dropped category breaks the Σ(category deltas) + tax = grand-total
+ * reconciliation with no visible symptom.
+ */
+const TOTALS_BOILERPLATE =
+  /copyright|all\s*rights?\s*reserved|mitchell\s*international|^\s*mitchell\s*estimating|audatex|solera|\bccc\s*information\b|part\s*types?\b|\bmalv\b|\bpage\b|\bversion\b|\bdisclaimer\b/i;
+
+/** No labour category runs to these; a match means the number is not hours/rate. */
+const MAX_PLAUSIBLE_CATEGORY_HOURS = 400;
+const MAX_PLAUSIBLE_CATEGORY_RATE = 400;
+
+/**
+ * A totals row is a spending category, not merely a line with words and a
+ * number on it. Rejects publisher boilerplate outright and rejects rows whose
+ * numbers cannot be hours or a rate — the two ways a stray figure gets read as
+ * a labour basis.
+ */
+export function isPlausibleTotalsCategory(
+  category: string,
+  hours: number | null,
+  rate: number | null
+): boolean {
+  if (TOTALS_BOILERPLATE.test(category)) return false;
+  // A category label is a short noun phrase. Boilerplate that slips the pattern
+  // is almost always a sentence.
+  if (category.split(/\s+/).length > 8) return false;
+  if (hours !== null && (hours < 0 || hours > MAX_PLAUSIBLE_CATEGORY_HOURS)) return false;
+  if (rate !== null && (rate < 0 || rate > MAX_PLAUSIBLE_CATEGORY_RATE)) return false;
+  return true;
+}
+
 export function parseTotalsFromWords(wordsByPage: Map<number, Word[]>): TotalsRowWithBoxes[] {
   const out: TotalsRowWithBoxes[] = [];
   // Parts and Miscellaneous are REAL categories (amount-only) — dropping them
@@ -581,6 +622,7 @@ export function parseTotalsFromWords(wordsByPage: Map<number, Word[]>): TotalsRo
         continue;
       }
       if (amount === null && hours === null && rate === null) continue;
+      if (!isPlausibleTotalsCategory(category, hours, rate)) continue;
       out.push({ page, category, hours, hoursBox, rate, rateBox, amount: amount ?? 0, amountBox });
     }
     if (out.length > 0) break;

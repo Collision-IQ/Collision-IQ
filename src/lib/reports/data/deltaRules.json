@@ -83,6 +83,35 @@
     "requireSharedToken": true
   },
 
+  "$extractionComment": [
+    "R19. A missing_operation finding is a claim about the OTHER document, so it",
+    "requires having read the other document. The first image-only comparison",
+    "recovered no line items; the matcher compared 250 subject lines against an",
+    "empty pool and every one came back 'not written on the comparison estimate'.",
+    "minParsedRowsForLineVerdicts mirrors the absolute floor in",
+    "assessComparisonExtraction — an absolute count, not a ratio, because every",
+    "ratio computed from the rows that parsed rises as extraction gets worse."
+  ],
+  "extraction": {
+    "minParsedRowsForLineVerdicts": 12,
+    "lineVerdictFindingTypes": ["missing_operation", "counterpart_only"]
+  },
+
+  "$totalsVocabularyComment": [
+    "R22. The totals reader accepts any row carrying letters and a number, which",
+    "on an OCR'd supplement made spending categories out of the publisher's",
+    "copyright block: 'All Rights Reserved ($0.00, 18 hr @ $0.00/hr)' shipped as",
+    "an AMOUNT DELTA finding. Reject list rather than allow list — an allow list",
+    "silently drops a real category when a platform renames one, and a dropped",
+    "category breaks the reconciliation with no visible symptom."
+  ],
+  "totalsVocabulary": {
+    "rejectCategoriesMatching": "copyright|all\\s*rights?\\s*reserved|mitchell\\s*international|audatex|solera|part\\s*types?\\b|\\bmalv\\b|\\bdisclaimer\\b",
+    "maxCategoryWords": 8,
+    "maxCategoryHours": 400,
+    "maxCategoryRate": 400
+  },
+
   "wording": {
     "counterpartOnly": "On $counterpart only",
     "missingOperation": "not written on $counterpart",

@@ -44,6 +44,8 @@ export interface DeltaBundle {
   annotations?: BundleAnnotation[];
   page_boxes?: Array<{ page: number; body?: number[][]; footer?: number[]; height?: number }>;
   prose?: Record<string, string>;
+  /** Totals categories as parsed from either document (R22). */
+  totals_categories?: Array<{ category?: string; hours?: number | null; rate?: number | null }>;
   counters?: Record<string, number>;
   confidence?: { evidence?: string; pipeline_integrity?: string; reported?: string };
   legend?: { report_type?: string; entries?: string[] };
@@ -56,6 +58,13 @@ interface BundleDocument {
   net?: number;
   insurer?: string;
   identity?: Record<string, unknown>;
+  /** What was actually recovered from this document (R19). */
+  extraction?: {
+    parsed_rows?: number;
+    implied_rows?: number;
+    coverage?: number;
+    gate_reason?: "partial_line_coverage" | "source_not_read" | null;
+  };
 }
 
 interface BundleRow {
@@ -450,6 +459,50 @@ export function runDeltaReleaseGate(bundle: DeltaBundle): Violation[] {
       const shared = [...words(finding.source_desc)].some((token) => left.has(token));
       if (!shared) {
         fail("R20", `finding ${finding.id}: paired rows share no token — ${JSON.stringify(finding.target_desc)} vs ${JSON.stringify(finding.source_desc)}`);
+      }
+    }
+  }
+
+  // R19 — a claim about the other document requires having read it.
+  //
+  // The upstream gate downgrades the run to intake mode, but the failure this
+  // rule exists for was the gate NOT firing, so the assertion belongs where it
+  // can see the finished bundle: line-verdict findings and the extraction that
+  // produced them, side by side.
+  const extraction = bundle.source?.extraction;
+  if (extraction) {
+    const lineVerdictTypes = new Set(RULES.extraction.lineVerdictFindingTypes as string[]);
+    const lineVerdicts = findings.filter((f) => f.type && lineVerdictTypes.has(f.type));
+    const floor = RULES.extraction.minParsedRowsForLineVerdicts;
+    if (typeof extraction.parsed_rows === "number" && extraction.parsed_rows < floor && lineVerdicts.length > 0) {
+      fail(
+        "R19",
+        `${lineVerdicts.length} line-verdict finding(s) emitted from a comparison document that yielded only ${extraction.parsed_rows} readable row(s) — an operation cannot be called absent from a document that was not read`
+      );
+    }
+    if (extraction.gate_reason === "source_not_read" && lineVerdicts.length > 0) {
+      fail(
+        "R19",
+        `run is gated as source_not_read but still carries ${lineVerdicts.length} line-verdict finding(s) — the gate must suppress them, not merely annotate them`
+      );
+    }
+  }
+
+  // R22 — every totals category resolves as a spending category.
+  {
+    const reject = new RegExp(RULES.totalsVocabulary.rejectCategoriesMatching, "i");
+    for (const category of bundle.totals_categories ?? []) {
+      const name = category.category ?? "";
+      if (reject.test(name)) {
+        fail("R22", `totals category ${JSON.stringify(name.slice(0, 60))} is publisher boilerplate, not a spending category`);
+      } else if (name.trim().split(/\s+/).length > RULES.totalsVocabulary.maxCategoryWords) {
+        fail("R22", `totals category ${JSON.stringify(name.slice(0, 60))} reads as a sentence, not a category label`);
+      }
+      if (typeof category.hours === "number" && category.hours > RULES.totalsVocabulary.maxCategoryHours) {
+        fail("R22", `totals category ${JSON.stringify(name.slice(0, 40))} carries ${category.hours} hours — not a labour basis`);
+      }
+      if (typeof category.rate === "number" && category.rate > RULES.totalsVocabulary.maxCategoryRate) {
+        fail("R22", `totals category ${JSON.stringify(name.slice(0, 40))} carries a $${category.rate}/hr rate — not a labour rate`);
       }
     }
   }
