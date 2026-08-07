@@ -357,11 +357,15 @@ export function planDeltaValueAnnotations(params: DeltaValueLayerParams): DeltaV
             amount: competingRow.amount,
           })
         : null
-      : competingHours !== null && competingRate !== null
+      // WHICH branch is chosen by what DIFFERS; what it PRINTS is the
+      // zero-suppressed value. Selecting on the values instead of the deltas
+      // widened the combined "h @ $r/hr" stamp from the one category where both
+      // hours and rate differ to every category carrying both numbers.
+      : hoursDelta && rateDelta && competingHours !== null && competingRate !== null
         ? `${label} ${fmtHours(competingHours)} @ ${fmtMoney(competingRate)}/hr`
-        : competingHours !== null
+        : hoursDelta && competingHours !== null
           ? `${label} ${fmtHours(competingHours)}`
-          : competingRate !== null
+          : rateDelta && competingRate !== null
             ? `${label} ${fmtMoney(competingRate)}/hr`
             : null;
     const anchorBox = subjectRow.hoursBox ?? subjectRow.rateBox;

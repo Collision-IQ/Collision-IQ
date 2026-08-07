@@ -57,6 +57,17 @@ describe("planDeltaValueAnnotations on the 22047 pair", () => {
     for (const stamp of plan.stamps) expect(stamp.text.startsWith("EOR ")).toBe(true);
   });
 
+  it("never stamps an unread basis as a zero one (R10)", () => {
+    // A category whose competing hours/rate could not be read must not be
+    // stamped "0.0 @ $0.00/hr" — a zero basis tells the shop the other side
+    // pays nothing and points the negotiation at the wrong line. The branch is
+    // still chosen by what DIFFERS; only the printed value is zero-suppressed.
+    for (const stamp of plan.stamps) {
+      expect(stamp.text).not.toMatch(/\$0\.00\/hr/);
+      expect(stamp.text).not.toMatch(/0\.0 @/);
+    }
+  });
+
   it("places keyed notes for MISSED/shortfall/value findings and reports the reverse pass", () => {
     expect(plan.notes.length).toBeGreaterThanOrEqual(4);
     // Descriptive, not accusatory, and sourced from deltaRules.json — RO 22116
