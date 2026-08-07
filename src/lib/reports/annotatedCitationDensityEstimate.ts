@@ -2308,6 +2308,27 @@ export async function buildAnnotatedCitationDensityEstimatePdf(params: {
     const findingsDoc = await PDFDocument.create();
     const findingsFont = await findingsDoc.embedFont(StandardFonts.Helvetica);
     const findingsBoldFont = await findingsDoc.embedFont(StandardFonts.HelveticaBold);
+    // HOW WELL THE COMPARISON WAS READ BELONGS ON THE COVER.
+    //
+    // The extraction-confidence note is document-level — it qualifies every
+    // absence claim in the pack, not one line — and it was reaching the reader
+    // nowhere. It rides out of the delta pass on a finding's `limitations`,
+    // and addCitationDensityFindingDetailPages does not render that field at
+    // all, so a run whose findings were correctly marked unverified printed no
+    // statement of why. (An earlier attempt patched formatCalloutLines, which
+    // serves the annotated estimate's callout cards — a different renderer
+    // from this report.)
+    //
+    // Harvested rather than recomputed: the score is derived once, in the
+    // delta pass that owns the observables, and this only surfaces it beside
+    // the text-layer notes it belongs with.
+    for (const detail of findingDetails) {
+      for (const line of detail.finding.limitations ?? []) {
+        if (/extraction confidence/i.test(line) && !textLayerNotes.includes(line)) {
+          textLayerNotes.push(line);
+        }
+      }
+    }
     addFindingsReportCoverPage(findingsDoc, {
       font: findingsFont,
       boldFont: findingsBoldFont,

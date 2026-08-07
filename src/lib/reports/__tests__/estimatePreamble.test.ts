@@ -27,8 +27,53 @@
  * keeps it — boilerplate bills no hours.
  */
 import { describe, it, expect } from "vitest";
-import { isContactInformationRow } from "../deltaEngine/estimateNormalize";
+import {
+  isContactInformationRow,
+  startsWithRepairOperation,
+} from "../deltaEngine/estimateNormalize";
 import { parseCccEstimateRows } from "../estimateDeltaMatcher";
+
+/**
+ * A DISCARD RULE MUST NOT MISS AN OPERATION.
+ *
+ * The first version of the preamble rule kept a row only if it billed time,
+ * and that deleted "Rpl Emblem Incl." — a genuine replace billing no hours
+ * because it is included in an adjacent operation, spelled "Rpl" rather than
+ * the "Repl" the strict OP_CODES list carries. Both halves read as boilerplate
+ * to a rule that only knows hours, so real scope vanished silently. Every
+ * corpus document carries such zero-value "Incl." operations (53 in total);
+ * none sat in the preamble region, so the corpus never caught it.
+ *
+ * The operation test is therefore deliberately LENIENT, and separate from the
+ * matching vocabulary: it errs toward keeping, because the cost of a miss is a
+ * deleted finding.
+ */
+describe("the operation test used by discard rules is lenient", () => {
+  it("accepts the spellings and glue this corpus actually prints", () => {
+    for (const line of [
+      "2 Rpl Emblem Incl.", // "Rpl", not "Repl"
+      "12 ReplRT Fender", // glued position marker — 54 occurrences
+      "7 R&IRT headlamp assy", // 79 occurrences
+      "3 Repl Bumper cover 1,308.00 2.6",
+      "4 REPL FENDER", // ALL-CAPS extraction
+      "18 Subl 4 Wheel Alignment",
+    ]) {
+      expect(startsWithRepairOperation(line)).toBe(true);
+    }
+  });
+
+  it("still rejects prose that merely starts like an operation", () => {
+    // A lowercase continuation is not an op code.
+    for (const line of [
+      "5 Repair shop notes follow",
+      "9 Additional charges apply",
+      "1#Non CCC Users Contact",
+      "6 Estimate Share - Questions",
+    ]) {
+      expect(startsWithRepairOperation(line)).toBe(false);
+    }
+  });
+});
 
 describe("contact information is never a repair operation", () => {
   it("recognises the shapes an estimate header actually carries", () => {
@@ -108,6 +153,22 @@ describe("the preamble never becomes scope", () => {
     );
     const described = rows.map((row) => row.description ?? "");
     expect(described.some((d) => /information labels/i.test(d))).toBe(true);
+    expect(described.some((d) => /Non CCC Users/i.test(d))).toBe(false);
+  });
+
+  it("keeps a preamble operation that bills NO time at all", () => {
+    // The shipped defect: "Rpl Emblem Incl." has no recognised op code and no
+    // hours, so the time-only rule deleted it as boilerplate.
+    const rows = parseCccEstimateRows(
+      [
+        "UPPER DMGS ONLY",
+        "1#Non CCC Users Contact10.000.00.0",
+        "2 Rpl Emblem Incl.",
+        "3 Repl Bumper cover 1,308.00 2.6",
+      ].join("\n")
+    );
+    const described = rows.map((row) => row.description ?? "");
+    expect(described.some((d) => /Emblem/i.test(d))).toBe(true);
     expect(described.some((d) => /Non CCC Users/i.test(d))).toBe(false);
   });
 

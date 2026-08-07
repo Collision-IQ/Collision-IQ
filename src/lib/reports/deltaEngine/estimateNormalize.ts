@@ -93,21 +93,74 @@ const EMAIL_SHAPE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
  * leading (?<!\d) stays, so the pattern cannot start mid-run.
  */
 const PHONE_SHAPE = /(?<!\d)(?:\(\d{3}\)\s*|\d{3}[.\s-])\d{3}[.\s-]\d{4}/;
-const CONTACT_OP_CODE =
-  /^(R\s*&\s*I|R\s*&\s*R|Repl|Rpr|Blnd|Refn|Subl|Algn|Sect|Add|O\/H|Overlap)\b/i;
+/**
+ * DOES THIS ROW OPEN WITH A REPAIR OPERATION? Deliberately LENIENT.
+ *
+ * This is the "is there an operation here at all" question, asked by rules
+ * that DISCARD rows. It is not the matching vocabulary and must not be — a
+ * discard rule that misses an operation deletes real scope, so it errs toward
+ * keeping. Two things the corpus forced:
+ *
+ *   SPELLING. CCC prints "Rpl" as well as "Repl" (RO 22059 line 9, "Rpl
+ *   information labels" — a genuine replace). The strict OP_CODES list carries
+ *   only "Repl", so a discard rule keyed to it deletes the row. "Rpl" is not
+ *   added to OP_CODES because normalizeOpCode title-cases rather than
+ *   canonicalises, so a parsed "Rpl" would compare unequal to "Repl" and break
+ *   pairing across documents that spell it differently.
+ *
+ *   GLUE. The position marker welds onto the operation with no space —
+ *   "ReplRT" 54 times in this corpus, "R&IRT" 79, plus dozens of
+ *   "Repl<Part>" / "Rpr<Part>" forms. A \b-anchored test fires on none of
+ *   them, because letter-to-letter is not a word boundary.
+ *
+ * Case-sensitive primary with an uppercase-or-non-letter lookahead, so glued
+ * forms match while lowercase continuations ("Repair", "Additional") do not;
+ * a case-insensitive fallback covers ALL-CAPS extractions.
+ */
+const LENIENT_OP_TOKENS = [
+  "R\\s*&\\s*I",
+  "R\\s*&\\s*R",
+  "D\\s*&\\s*R",
+  "Repl",
+  "Rpl",
+  "Rpr",
+  "Blnd",
+  "Refn",
+  "Subl",
+  "Algn",
+  "Sect",
+  "Add",
+  "O/H",
+  "Overlap",
+].join("|");
+/** Glued or spaced: "ReplRT Fender", "Repl Fender", "R&IRT". Rejects a
+ *  lowercase continuation so "Repair"/"Additional" never count. */
+const OPENS_WITH_OPERATION = new RegExp(`^(?:${LENIENT_OP_TOKENS})(?=$|[^a-z])`);
+/** ALL-CAPS extractions, where the uppercase lookahead cannot discriminate. */
+const OPENS_WITH_OPERATION_CI = new RegExp(`^(?:${LENIENT_OP_TOKENS})\\b`, "i");
+
+/** Strip the CCC line number and the leading marker glyphs (hash, asterisk,
+ *  angle pair, S01 supplement tag) that sit before the operation code. */
+function stripRowMarkers(text: string): string {
+  return text
+    .replace(/^[#*<>\s]*\d{1,4}\s*/, "")
+    .replace(/^(?:[#*]|<>|S\d{2})\s*/g, "")
+    .trim();
+}
+
+export function startsWithRepairOperation(rawText: string): boolean {
+  const afterMarkers = stripRowMarkers((rawText ?? "").replace(/\s+/g, " ").trim());
+  return OPENS_WITH_OPERATION.test(afterMarkers) || OPENS_WITH_OPERATION_CI.test(afterMarkers);
+}
 
 export function isContactInformationRow(rawText: string): boolean {
   const text = (rawText ?? "").replace(/\s+/g, " ").trim();
   if (!text) return false;
   if (EMAIL_SHAPE.test(text)) return true;
   if (!PHONE_SHAPE.test(text)) return false;
-  // Strip the CCC line number and the #/*/<>/S01 markers that precede the
-  // operation code, then ask whether an operation is present at all.
-  const afterMarkers = text
-    .replace(/^[#*<>\s]*\d{1,4}\s*/, "")
-    .replace(/^(?:[#*]|<>|S\d{2})\s*/g, "")
-    .trim();
-  return !CONTACT_OP_CODE.test(afterMarkers);
+  // Boilerplate carries no operation; a real Repl/Rpr row that happens to
+  // carry a 3-3-4 identifier is therefore never discarded.
+  return !startsWithRepairOperation(text);
 }
 
 /** Document-scoped repairs learned from the file's own vocabulary (U-4).

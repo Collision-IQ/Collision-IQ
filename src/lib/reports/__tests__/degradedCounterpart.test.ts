@@ -98,6 +98,48 @@ describe("a document with no totals block was not read to its end", () => {
   });
 });
 
+describe("the confidence note is worded so a reader can act on it", () => {
+  /**
+   * A GATE THE READER CANNOT SEE IS HALF A GATE. The note qualifies every
+   * absence claim in the pack, and it was reaching the page nowhere: it rides
+   * out of the delta pass on a finding's `limitations`, and the findings-report
+   * detail renderer does not render that field. It is now harvested onto the
+   * cover beside the text-layer notes. These pin the STRING the cover matches
+   * on, so a reword cannot silently unhook it again.
+   */
+  it("names its inputs, so the number can be checked rather than trusted", () => {
+    const { explanation } = deriveExtractionConfidence({
+      lineSpanCoverage: 0.94,
+      hoursCoverage: 1,
+      textLayerReliable: true,
+      ocrDerived: false,
+      totalsBlockFound: false,
+      sectionsWithZeroCounterpartRows: 14,
+      totalSections: 19,
+    });
+    // The cover harvests on this phrase; keep it and the wording together.
+    expect(explanation).toMatch(/extraction confidence/i);
+    expect(explanation).toMatch(/line-span coverage/);
+    expect(explanation).toMatch(/hours coverage/);
+    expect(explanation).toMatch(/NO TOTALS BLOCK/);
+  });
+
+  it("says nothing when the read was good", () => {
+    const good = deriveExtractionConfidence({
+      lineSpanCoverage: 0.87,
+      hoursCoverage: 0.89,
+      textLayerReliable: true,
+      ocrDerived: false,
+      totalsBlockFound: true,
+      sectionsWithZeroCounterpartRows: 5,
+      totalSections: 19,
+    });
+    // The pipeline only emits the note when the band is not "high", so a
+    // clean run must stay clean.
+    expect(good.band).toBe("high");
+  });
+});
+
 describe("the section gate reaches the findings lane", () => {
   const truncated = deriveExtractionConfidence({
     lineSpanCoverage: 0.94,

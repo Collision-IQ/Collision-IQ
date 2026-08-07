@@ -21,6 +21,7 @@ import {
   isContactInformationRow,
   isManufacturerPrefixedIdentifier,
   looksLikePartNumber,
+  startsWithRepairOperation,
   totalsCategoriesFuzzyMatch,
 } from "./deltaEngine/estimateNormalize";
 
@@ -1603,10 +1604,21 @@ export function parseCccEstimateRows(text: string): EstimateDeltaRow[] {
 function dropPreambleRows(rows: EstimateDeltaRow[]): EstimateDeltaRow[] {
   const firstOperation = rows.findIndex((row) => row.opCode !== null);
   if (firstOperation <= 0) return rows;
-  return rows.filter(
-    (row, index) =>
-      index >= firstOperation || (row.labor ?? 0) !== 0 || (row.paint ?? 0) !== 0
-  );
+  return rows.filter((row, index) => {
+    if (index >= firstOperation) return true;
+    // A row that OPENS WITH AN OPERATION is scope, whatever it bills.
+    //
+    // This clause is the fix for a defect the first version shipped with.
+    // Keying survival to billed time alone deleted "Rpl Emblem Incl." — a
+    // genuine replace that bills no hours because it is included in an
+    // adjacent operation, and whose "Rpl" spelling the strict OP_CODES list
+    // does not carry. Both halves of that row read as boilerplate to a rule
+    // that only knows hours, so real scope disappeared silently. Every corpus
+    // document contains such zero-value "Incl." operations (53 of them); none
+    // happened to sit in the preamble region, so the corpus never caught it.
+    if (startsWithRepairOperation(row.rawText ?? row.description ?? "")) return true;
+    return (row.labor ?? 0) !== 0 || (row.paint ?? 0) !== 0;
+  });
 }
 
 /** Build a delta row from already-extracted source PDF row text + metadata. */
